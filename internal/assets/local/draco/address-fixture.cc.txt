@@ -1,0 +1,38 @@
+// Copyright 2026 Art AI contributors. SPDX-License-Identifier: Apache-2.0
+// Build with pinned upstream Draco 1.5.7. Usage: fixture HEX16 OUTPUT.drc
+// The constant GENERIC UINT32 VEC4 preserves arbitrary 16 decoded bytes while
+// the octahedron POSITION remains valid. No external assets are used.
+#include <cstdio>
+#include <fstream>
+#include <cstring>
+#include "draco/mesh/triangle_soup_mesh_builder.h"
+#include "draco/compression/encode.h"
+int main(int argc, char** argv) {
+  if (argc != 3 || std::strlen(argv[1]) != 32) return 1;
+  uint32_t hidden[4] = {};
+  auto* bytes = reinterpret_cast<unsigned char*>(hidden);
+  for (int i = 0; i < 16; i++) {
+    unsigned v;
+    if (std::sscanf(argv[1] + i * 2, "%2x", &v) != 1) return 1;
+    bytes[i] = v;
+  }
+  const float points[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+  const unsigned faces[8][3] = {{0,2,4},{2,1,4},{1,3,4},{3,0,4},{2,0,5},{1,2,5},{3,1,5},{0,3,5}};
+  draco::TriangleSoupMeshBuilder builder;
+  builder.Start(8);
+  int pos = builder.AddAttribute(draco::GeometryAttribute::POSITION, 3, draco::DT_FLOAT32);
+  int data = builder.AddAttribute(draco::GeometryAttribute::GENERIC, 4, draco::DT_UINT32);
+  for (int i = 0; i < 8; i++) {
+    builder.SetAttributeValuesForFace(pos, draco::FaceIndex(i), points[faces[i][0]], points[faces[i][1]], points[faces[i][2]]);
+    builder.SetAttributeValuesForFace(data, draco::FaceIndex(i), hidden, hidden, hidden);
+  }
+  auto mesh = builder.Finalize();
+  draco::Encoder encoder;
+  encoder.SetSpeedOptions(5, 5);
+  encoder.SetEncodingMethod(draco::MESH_EDGEBREAKER_ENCODING);
+  encoder.SetAttributeQuantization(draco::GeometryAttribute::POSITION, 14);
+  draco::EncoderBuffer output;
+  if (!encoder.EncodeMeshToBuffer(*mesh, &output).ok()) return 1;
+  std::ofstream file(argv[2], std::ios::binary);
+  file.write(output.data(), output.size());
+}

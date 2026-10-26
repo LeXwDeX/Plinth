@@ -1,0 +1,69 @@
+services:
+  art-ai-go:
+    build:
+      context: .
+      dockerfile: Dockerfile.go-runtime
+      # 内部镜像目标：含历史迁移工具与 legacy 挂载点（#259）。
+      target: runtime-with-migration-tools
+      args:
+        # npm 源固定为公共 registry（#257）；Go 代理可由环境文件调整。
+        GOPROXY: "${GO_GOPROXY:-https://proxy.golang.org,direct}"
+        GO_IMAGE_TAG: "${GO_IMAGE_TAG:?GO_IMAGE_TAG is required}"
+        GO_SOURCE_COMMIT: "${GO_SOURCE_COMMIT:?GO_SOURCE_COMMIT is required}"
+    image: art-ai-go-production:${GO_IMAGE_TAG:?GO_IMAGE_TAG is required}
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    group_add:
+      - "1001"
+    ports:
+      - "${GO_WEB_BIND_IP:-0.0.0.0}:${GO_WEB_HOST_PORT:-13333}:13333"
+    env_file:
+      - path: "${GO_RUNTIME_ENV_FILE:?GO_RUNTIME_ENV_FILE is required}"
+        required: true
+    environment:
+      APP_ENV: ${GO_APP_ENV:-production}
+      APP_ADDR: 0.0.0.0:13333
+      DATABASE_PATH: /app/data/art-ai.db
+      STORAGE_ROOT: /app/storage
+      WEB_ASSETS_ROOT: /app/web
+      LEGACY_GENERATED_IMAGES_ROOT: /app/legacy-generated
+      ASSET_CACHE_DIR: /app/legacy-cache
+      THUMBNAIL_CACHE_DIR: /app/legacy-thumbnails
+      LEGACY_INPUT_ASSETS_ROOT: /app/legacy-assets
+      LEGACY_BACKEND_STARTUP_ENABLED: "false"
+      AUTH_MODE: session
+      PROVIDER_MODE: live
+      AGENT_MODE: live
+      # #275：一次 Agent 回复最多执行的工具调用数；留空用 Schema 默认 20，范围 1..100。
+      AGENT_MAX_TOOL_CALLS_PER_REPLY: ${AGENT_MAX_TOOL_CALLS_PER_REPLY:-}
+      # #233：默认 DEBUG；应用日志写入挂载的 logs 目录并按大小/天数滚动。
+      LOG_LEVEL: ${GO_LOG_LEVEL:-debug}
+      LOG_DIR: /app/logs
+    # 主机路径没有缺省值（#249）：发布时由 scripts/release-server-steps.sh 按环境文件导出，
+    # 手工 compose 用该环境的 production/compose.env 或 `scripts/release-env.py compose-env <环境>`。
+    volumes:
+      - "${GO_PROD_DB_DIR:?GO_PROD_DB_DIR is required (environment layout; scripts/release-env.py compose-env)}:/app/data"
+      - "${GO_PROD_STORAGE_DIR:?GO_PROD_STORAGE_DIR is required (environment layout; scripts/release-env.py compose-env)}:/app/storage"
+      - "${GO_LEGACY_GENERATED_IMAGES_DIR:?GO_LEGACY_GENERATED_IMAGES_DIR is required (environment layout; scripts/release-env.py compose-env)}:/app/legacy-generated:ro"
+      - "${GO_LEGACY_ASSET_CACHE_DIR:?GO_LEGACY_ASSET_CACHE_DIR is required (environment layout; scripts/release-env.py compose-env)}:/app/legacy-cache"
+      - "${GO_LEGACY_THUMBNAIL_CACHE_DIR:?GO_LEGACY_THUMBNAIL_CACHE_DIR is required (environment layout; scripts/release-env.py compose-env)}:/app/legacy-thumbnails"
+      - "${GO_LEGACY_INPUT_ASSETS_DIR:?GO_LEGACY_INPUT_ASSETS_DIR is required (environment layout; scripts/release-env.py compose-env)}:/app/legacy-assets:ro"
+      - "${GO_PROD_WEB_DATA_DIR:?GO_PROD_WEB_DATA_DIR is required (environment layout; scripts/release-env.py compose-env)}:/app/web-data:ro"
+      - "${GO_PROD_LOG_DIR:?GO_PROD_LOG_DIR is required (environment layout; scripts/release-env.py compose-env)}:/app/logs"
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "10"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:13333/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 9
+      start_period: 10s

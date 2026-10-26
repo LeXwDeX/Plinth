@@ -1,0 +1,15 @@
+{
+  "draco_version": "1.5.7",
+  "draco_commit": "8786740086a9f4d83f44aa83badfbea4dce7a1b5",
+  "source_url": "https://github.com/google/draco/archive/refs/tags/1.5.7.tar.gz",
+  "source_sha256": "bf6b105b79223eab2b86795363dfe5e5356050006a96521477973aba8f036fe1",
+  "wasi_sdk": "34.0",
+  "sdk_arm64_macos_sha256": "9c59398106b417f8f14913380fdf0097a8cc0ff4af9eb3ce0065a859e88d49e9",
+  "wasi_libc_commit": "2e6fb9d8ee0cdf9e431fbcabe8af3115de000a13",
+  "llvm_commit": "895aa2c896ada719451be2e3673c83da8ddf1141",
+  "files": {
+    "inspect.cc": "4c67160735538fa4e8c81c10871f563a78ee8e594fb062d0331be5bb181a5010",
+    "strict.patch": "0a57d52f2fb135affb16d8669442508565c55887d29ef9f62f7eda9b8113db43",
+    "inspect.wasm": "cb431384b240f828e8c4ffa2a6c9c40948ac960d3e05f60dfd716a63be412f7b"
+  }
+}

@@ -1,0 +1,270 @@
+--- a/src/draco/compression/attributes/attributes_decoder.cc
++++ b/src/draco/compression/attributes/attributes_decoder.cc
+@@ -45,6 +45,7 @@
+   }
+ 
+   // Check that decoded number of attributes is valid.
++  ArtRequire(num_attributes <= art_attributes, "attribute_budget");
+   if (num_attributes == 0) {
+     return false;
+   }
+@@ -80,6 +81,7 @@
+     }
+ 
+     // Check decoded attribute descriptor data.
++    ArtRequire(num_components <= 4 && normalized <= 1 && pc->num_attributes() < int(art_attributes), "attribute_shape_budget");
+     if (num_components == 0) {
+       return false;
+     }
+--- a/src/draco/compression/attributes/sequential_integer_attribute_decoder.cc
++++ b/src/draco/compression/attributes/sequential_integer_attribute_decoder.cc
+@@ -68,6 +68,7 @@
+         static_cast<PredictionSchemeTransformType>(prediction_transform_type));
+   }
+ 
++  ArtRequire(prediction_scheme_method == PREDICTION_NONE || bool(prediction_scheme_), "unsupported_prediction");
+   if (prediction_scheme_) {
+     if (!InitPredictionScheme(prediction_scheme_.get())) {
+       return false;
+@@ -120,6 +121,7 @@
+   if (!in_buffer->Decode(&compressed)) {
+     return false;
+   }
++  ArtRequire(compressed <= 1, "attribute_compression_flag");
+   if (compressed > 0) {
+     // Decode compressed values.
+     if (!DecodeSymbols(static_cast<uint32_t>(num_values), num_components,
+@@ -134,6 +136,7 @@
+     if (!in_buffer->Decode(&num_bytes)) {
+       return false;
+     }
++    ArtRequire(num_bytes >= 1 && num_bytes <= 4, "integer_width");
+     if (num_bytes == DataTypeLength(DT_INT32)) {
+       if (portable_attribute()->buffer()->data_size() <
+           sizeof(int32_t) * num_values) {
+--- a/src/draco/compression/bit_coders/rans_bit_decoder.cc
++++ b/src/draco/compression/bit_coders/rans_bit_decoder.cc
+@@ -56,11 +56,14 @@
+                     size_in_bytes) != 0) {
+     return false;
+   }
++  active_ = true;
++  ArtSpan("rans_bits",source_buffer->data_head(),size_in_bytes);
+   source_buffer->Advance(size_in_bytes);
+   return true;
+ }
+ 
+ bool RAnsBitDecoder::DecodeNextBit() {
++  ArtRequire(!ans_reader_has_error(&ans_decoder_), "rans_bits_overrun");
+   const uint8_t bit = rabs_read(&ans_decoder_, prob_zero_);
+   return bit > 0;
+ }
+@@ -77,6 +80,6 @@
+   *value = result;
+ }
+ 
+-void RAnsBitDecoder::Clear() { ans_read_end(&ans_decoder_); }
++void RAnsBitDecoder::Clear() { if(active_){ArtRequire(ans_read_end(&ans_decoder_),"rans_bits_end");active_=false;} }
+ 
+ }  // namespace draco
+--- a/src/draco/compression/bit_coders/rans_bit_decoder.h
++++ b/src/draco/compression/bit_coders/rans_bit_decoder.h
+@@ -41,13 +41,14 @@
+   // > 0 and <= 32.
+   void DecodeLeastSignificantBits32(int nbits, uint32_t *value);
+ 
+-  void EndDecoding() {}
++  void EndDecoding() { Clear(); }
+ 
+  private:
+   void Clear();
+ 
+   AnsDecoder ans_decoder_;
+   uint8_t prob_zero_;
++  bool active_ = false;
+ };
+ 
+ }  // namespace draco
+--- a/src/draco/compression/entropy/ans.h
++++ b/src/draco/compression/entropy/ans.h
+@@ -1,3 +1,4 @@
++#include "draco/strict_inspect.h"
+ // Copyright 2016 The Draco Authors.
+ //
+ // Licensed under the Apache License, Version 2.0 (the "License");
+@@ -330,7 +331,7 @@
+ }
+ 
+ static inline int ans_read_end(struct AnsDecoder *const ans) {
+-  return ans->state == DRACO_ANS_L_BASE;
++  return ans->state == DRACO_ANS_L_BASE && ans->buf_offset == 0;
+ }
+ 
+ static inline int ans_reader_has_error(const struct AnsDecoder *const ans) {
+@@ -441,6 +442,7 @@
+       ans_.buf_offset = offset - 3;
+       ans_.state = mem_get_le24(buf + offset - 3) & 0x3FFFFF;
+     } else if (x == 3) {
++      if (offset < 4) return 1;
+       ans_.buf_offset = offset - 4;
+       ans_.state = mem_get_le32(buf + offset - 4) & 0x3FFFFFFF;
+     } else {
+@@ -453,7 +455,7 @@
+     return 0;
+   }
+ 
+-  inline int read_end() { return ans_.state == l_rans_base; }
++  inline int read_end() { return ans_.state == l_rans_base && ans_.buf_offset == 0; }
+ 
+   inline int reader_has_error() {
+     return ans_.state < l_rans_base && ans_.buf_offset == 0;
+@@ -466,6 +468,7 @@
+     while (ans_.state < l_rans_base && ans_.buf_offset > 0) {
+       ans_.state = ans_.state * DRACO_ANS_IO_BASE + ans_.buf[--ans_.buf_offset];
+     }
++    ArtRequire(ans_.state >= l_rans_base, "rans_symbols_overrun");
+     // |rans_precision| is a power of two compile time constant, and the below
+     // division and modulo are going to be optimized by the compiler.
+     quo = ans_.state / rans_precision;
+--- a/src/draco/compression/entropy/rans_symbol_decoder.h
++++ b/src/draco/compression/entropy/rans_symbol_decoder.h
+@@ -154,6 +154,7 @@
+   const uint8_t *const data_head =
+       reinterpret_cast<const uint8_t *>(buffer->data_head());
+   // Advance the buffer past the rANS data.
++  ArtSpan("rans_symbols", buffer->data_head(),bytes_encoded);
+   buffer->Advance(bytes_encoded);
+   if (ans_.read_init(data_head, static_cast<int>(bytes_encoded)) != 0) {
+     return false;
+@@ -163,7 +164,7 @@
+ 
+ template <int unique_symbols_bit_length_t>
+ void RAnsSymbolDecoder<unique_symbols_bit_length_t>::EndDecoding() {
+-  ans_.read_end();
++  ArtRequire(ans_.read_end(),"rans_symbols_end");
+ }
+ 
+ }  // namespace draco
+--- a/src/draco/compression/mesh/mesh_edgebreaker_decoder_impl.cc
++++ b/src/draco/compression/mesh/mesh_edgebreaker_decoder_impl.cc
+@@ -293,6 +293,7 @@
+       return false;
+     }
+   }
++  ArtRequire(num_faces == art_faces && num_encoded_vertices <= art_points, "geometry_budget");
+   if (num_faces > std::numeric_limits<CornerIndex::ValueType>::max() / 3) {
+     return false;  // Draco cannot handle this many faces.
+   }
+@@ -366,6 +367,7 @@
+     }
+   }
+ 
++  ArtRequire(num_encoded_split_symbols <= art_points, "split_budget");
+   if (num_encoded_split_symbols > num_encoded_symbols) {
+     return false;  // Split symbols are a sub-set of all symbols.
+   }
+--- a/src/draco/compression/mesh/mesh_edgebreaker_traversal_valence_decoder.h
++++ b/src/draco/compression/mesh/mesh_edgebreaker_traversal_valence_decoder.h
+@@ -114,12 +114,17 @@
+       }
+       if (num_symbols > 0) {
+         context_symbols_[i].resize(num_symbols);
+-        DecodeSymbols(num_symbols, 1, out_buffer, context_symbols_[i].data());
++        if (!DecodeSymbols(num_symbols, 1, out_buffer, context_symbols_[i].data())) return false;
+         // All symbols are going to be processed from the back.
+         context_counters_[i] = num_symbols;
+       }
+     }
+     return true;
++  }
++
++  void Done() {
++    MeshEdgebreakerTraversalDecoder::Done();
++    for (int count: context_counters_) ArtRequire(count == 0,"unused_valence_symbols");
+   }
+ 
+   inline uint32_t DecodeSymbol() {
+--- a/src/draco/core/decoder_buffer.cc
++++ b/src/draco/core/decoder_buffer.cc
+@@ -52,8 +52,10 @@
+       }
+     }
+   }
++  art_bit_bytes_ = decode_size ? static_cast<int64_t>(*out_size) : -1;
++  if (decode_size && *out_size > static_cast<uint64_t>(remaining_size())) return false;
+   bit_mode_ = true;
+-  bit_decoder_.reset(data_head(), remaining_size());
++  bit_decoder_.reset(data_head(), decode_size ? *out_size : remaining_size());
+   return true;
+ }
+ 
+@@ -61,6 +63,8 @@
+   bit_mode_ = false;
+   const uint64_t bits_decoded = bit_decoder_.BitsDecoded();
+   const uint64_t bytes_decoded = (bits_decoded + 7) / 8;
++  ArtRequire(art_bit_bytes_ < 0 || bytes_decoded == static_cast<uint64_t>(art_bit_bytes_), "unread_bit_bytes");
++  bit_decoder_.ArtCheckPadding();
+   pos_ += bytes_decoded;
+ }
+ 
+--- a/src/draco/core/decoder_buffer.h
++++ b/src/draco/core/decoder_buffer.h
+@@ -1,3 +1,4 @@
++#include "draco/strict_inspect.h"
+ // Copyright 2016 The Draco Authors.
+ //
+ // Licensed under the Apache License, Version 2.0 (the "License");
+@@ -138,6 +139,7 @@
+       return static_cast<uint64_t>(bit_offset_);
+     }
+ 
++    void ArtCheckPadding() { if (bit_offset_ % 8) ArtRequire((bit_buffer_[bit_offset_ / 8] >> (bit_offset_ % 8)) == 0, "nonzero_bit_padding"); }
+     // Return number of bits available for decoding
+     inline uint64_t AvailBits() const {
+       return ((bit_buffer_end_ - bit_buffer_) * 8) - bit_offset_;
+@@ -158,6 +160,7 @@
+ 
+     // Returns |nbits| bits in |x|.
+     inline bool GetBits(uint32_t nbits, uint32_t *x) {
++      ArtRequire(nbits <= AvailBits(), "bits_overrun");
+       if (nbits > 32) {
+         return false;
+       }
+@@ -208,6 +211,7 @@
+   int64_t pos_;
+   BitDecoder bit_decoder_;
+   bool bit_mode_;
++  int64_t art_bit_bytes_ = -1;
+   uint16_t bitstream_version_;
+ };
+ 
+--- a/src/draco/core/varint_decoding.h
++++ b/src/draco/core/varint_decoding.h
+@@ -16,6 +16,7 @@
+ #define DRACO_CORE_VARINT_DECODING_H_
+ 
+ #include <type_traits>
++#include <limits>
+ 
+ #include "draco/core/bit_utils.h"
+ #include "draco/core/decoder_buffer.h"
+@@ -45,6 +46,7 @@
+       return false;
+     }
+     // Append decoded info from this byte.
++    if (*out_val > (std::numeric_limits<IntTypeT>::max() >> 7)) return false;
+     *out_val <<= 7;
+     *out_val |= in & ((1 << 7) - 1);
+   } else {
+--- /dev/null
++++ b/src/draco/strict_inspect.h
+@@ -0,0 +1,9 @@
++// Copyright 2026 Art AI contributors. SPDX-License-Identifier: Apache-2.0
++#pragma once
++#include <cstdint>
++#include <cstdlib>
++namespace draco {
++extern uint32_t art_points, art_faces, art_attributes;
++inline void ArtRequire(bool ok,const char*) { if(!ok) std::abort(); }
++inline void ArtSpan(const char*,const char*,size_t) {}
++}

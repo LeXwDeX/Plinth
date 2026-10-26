@@ -1,0 +1,10 @@
+{
+  "src/lib/chat/composer-reference.ts": {
+    "lines": 1,
+    "reason": "Input parsing, not UI copy: Chinese punctuation (，。、（) counts as a delimiter before an @handle the person typed."
+  },
+  "src/lib/chat/mentions.ts": {
+    "lines": 2,
+    "reason": "Input parsing, not UI copy: Chinese punctuation (，。、（) counts as a delimiter before an @handle the person typed."
+  }
+}

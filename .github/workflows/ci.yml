@@ -1,0 +1,88 @@
+# 公共 CI（#257）。门禁真源：dev_test.md §2「自动化门禁项」。
+# 门禁作业（frontend、go check、go test race）与 .gitlab-ci.yml 同名、同命令，执行 §2 标为 CI 的各项；
+# src/__tests__/ci-gate-parity.test.ts 校验两处 CI、本地入口与 §2 一致。作业之间没有依赖，同时开始。
+# 这里只用公共 runner、公共 npm registry（registry.npmjs.org）与 Go proxy，不访问任何内网主机。
+# CI 不构建镜像（#257）：运行镜像由发布流程从源码构建。
+# 内网 GitLab runner 继续跑 .gitlab-ci.yml 的同一组门禁。
+# Action 固定到发布标签对应的完整提交 SHA（注释为标签），升级时一并核对。
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # 与 .gitlab-ci.yml 的 node:22 与 golang:1.27 镜像一致；pnpm 版本取 package.json 的 packageManager。
+  NODE_VERSION: '22'
+  GO_VERSION: '1.27'
+
+jobs:
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm test
+      - run: pnpm build
+      # 构建产物不得含外链（脚本已随 pnpm build 执行，此处单独再验一次）
+      - run: node scripts/check-build-external-links.mjs
+
+  go-check:
+    name: go check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # 按 go.sum 缓存模块下载与构建缓存（setup-go 默认开启，这里写明）
+          cache: true
+          cache-dependency-path: go.sum
+      - run: go vet ./...
+      - run: CGO_ENABLED=0 go build -trimpath ./cmd/art-ai
+      # 公开快照扫描（#261）：已跟踪文件不得含内部标识
+      - run: bash scripts/check-public-tree.sh
+
+  # 非 race 的 go test 不在 CI：race 跑同一批测试且更严格（dev_test.md §2）。
+  go-test-race:
+    name: go test race
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # 与 .gitlab-ci.yml 同一处理：httpapi 包在 -race 下接近 go test 默认的 10m 单包超时，
+    # 用 GOFLAGS 放宽，门禁命令本身保持与 dev_test.md §2 逐字一致。
+    env:
+      GOFLAGS: -timeout=30m
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # 按 go.sum 缓存模块下载与构建缓存（setup-go 默认开启，这里写明）
+          cache: true
+          cache-dependency-path: go.sum
+      - run: CGO_ENABLED=1 go test -race -count=1 ./...

@@ -1,0 +1,814 @@
+{
+  "skills": [
+    {
+      "id": "skill-001-mappa-style-anime-action-still-jujutsu-kaisen-aesthetic",
+      "fingerprint": "f6bfddfb64978824151372def32d41c8ae44aeb845f1147ebadb28be1d45ac28",
+      "thumbnail_path": "/gpt-skills/skill-001-mappa-style-anime-action-still-jujutsu-kaisen-aesthetic.webp"
+    },
+    {
+      "id": "skill-002-shonen-battle-key-visual-naruto-shippuden-aesthetic",
+      "fingerprint": "1a58805bdc0bd2ad6f2229678a1991219b82a516fe9b6c3fda031bd86cce8154",
+      "thumbnail_path": "/gpt-skills/skill-002-shonen-battle-key-visual-naruto-shippuden-aesthetic.webp"
+    },
+    {
+      "id": "skill-003-shonen-manga-two-page-spread-basketball-slam-dunk",
+      "fingerprint": "fe9c52aaec75cdfdd893037b45a95d9ee1f4206e7b99bbda5b186a6d58e4e002",
+      "thumbnail_path": "/gpt-skills/skill-003-shonen-manga-two-page-spread-basketball-slam-dunk.webp"
+    },
+    {
+      "id": "skill-004-manga-relationship-map-a-tale-of-two-cities",
+      "fingerprint": "c9a3088b03f144590d90b011f312c6ee7935953e79fb99a733b9ff0b4b000f56",
+      "thumbnail_path": "/gpt-skills/skill-004-manga-relationship-map-a-tale-of-two-cities.webp"
+    },
+    {
+      "id": "skill-005-16-panel-anime-expression-grid",
+      "fingerprint": "feb3cfd0dab728f603e98c80d05df5623736bc75631523e543950ee9017460ec",
+      "thumbnail_path": "/gpt-skills/skill-005-16-panel-anime-expression-grid.webp"
+    },
+    {
+      "id": "skill-006-elegant-cafe-anime-fashion-portrait",
+      "fingerprint": "c17edadfb3ba4532a9325a3b609f8b5115cc5ae272fd4e4ca96888493845c1c7",
+      "thumbnail_path": "/gpt-skills/skill-006-elegant-cafe-anime-fashion-portrait.webp"
+    },
+    {
+      "id": "skill-007-neon-arcade-anime-fashion-portrait",
+      "fingerprint": "7253186abde391fb8a44c8e201cdcd9279744f9fc2619c9cb270275f38cf1272",
+      "thumbnail_path": "/gpt-skills/skill-007-neon-arcade-anime-fashion-portrait.webp"
+    },
+    {
+      "id": "skill-008-spring-cafe-anime-ensemble",
+      "fingerprint": "71c924a5be70d8174c5423a3e93ec06ebb683340d9eee4fff86824274225eef7",
+      "thumbnail_path": "/gpt-skills/skill-008-spring-cafe-anime-ensemble.webp"
+    },
+    {
+      "id": "skill-009-ten-panel-anime-character-grid",
+      "fingerprint": "ead435c04533f533e749e55e4f337ecc4614414537cb285724f0804d69293270",
+      "thumbnail_path": "/gpt-skills/skill-009-ten-panel-anime-character-grid.webp"
+    },
+    {
+      "id": "skill-010-tide-brothers-19-page-manga-proof-sheet",
+      "fingerprint": "c7cde39f98ecc504847bc9f4dd2ec427d76c1e8a814a07de872b8ea177f48994",
+      "thumbnail_path": "/gpt-skills/skill-010-tide-brothers-19-page-manga-proof-sheet.webp"
+    },
+    {
+      "id": "skill-011-roadside-mirror-anime-fashion-selfie",
+      "fingerprint": "a0a35d3b6c8a0d586597628ba22eb2471371e6f7f5fdae9443919ef54cd3ecf6",
+      "thumbnail_path": "/gpt-skills/skill-011-roadside-mirror-anime-fashion-selfie.webp"
+    },
+    {
+      "id": "skill-012-rainy-bus-stop-mirror-anime-portrait",
+      "fingerprint": "ee50104624e62c4bcbbb30b5afff1951de1d937a2ed6a4f4cd3a8995afca96d0",
+      "thumbnail_path": "/gpt-skills/skill-012-rainy-bus-stop-mirror-anime-portrait.webp"
+    },
+    {
+      "id": "skill-013-hitman-gameplay-openai-hq",
+      "fingerprint": "cff0e3f8aa5a1066cfb04848ce7cddaf8187d2cd3129a7cb4174b43388d411f4",
+      "thumbnail_path": "/gpt-skills/skill-013-hitman-gameplay-openai-hq.webp"
+    },
+    {
+      "id": "skill-014-gta-6-gameplay-vice-city-beach",
+      "fingerprint": "2d9d63e48ee5e4d6ab2c23a7e8e7b2eb4659c8f40751b81742c780eb2b2d00f8",
+      "thumbnail_path": "/gpt-skills/skill-014-gta-6-gameplay-vice-city-beach.webp"
+    },
+    {
+      "id": "skill-015-dark-fantasy-swamp-boss-hunt",
+      "fingerprint": "8f57cbeb5fd78c62b1d91ec9d30966034d95c50d72a4851391738a5c218d14b6",
+      "thumbnail_path": "/gpt-skills/skill-015-dark-fantasy-swamp-boss-hunt.webp"
+    },
+    {
+      "id": "skill-016-epic-fellowship-bridge-approach",
+      "fingerprint": "ac7307a9172d5da71d5add4480acf7659fd3c6eb002ff5ba78eea2bd89892f58",
+      "thumbnail_path": "/gpt-skills/skill-016-epic-fellowship-bridge-approach.webp"
+    },
+    {
+      "id": "skill-017-retro-japanese-town-pixel-rpg",
+      "fingerprint": "84eedcc2a92d599f441e0ce495337fada7a7e69ea7e27fabc22c5e50af5c8f58",
+      "thumbnail_path": "/gpt-skills/skill-017-retro-japanese-town-pixel-rpg.webp"
+    },
+    {
+      "id": "skill-018-cyberpunk-europe-action-hud",
+      "fingerprint": "d6a99bb7c90dea3c2498e9c258571a8b4d048c433f674fb9e16a9d3ee1827ef9",
+      "thumbnail_path": "/gpt-skills/skill-018-cyberpunk-europe-action-hud.webp"
+    },
+    {
+      "id": "skill-019-anime-open-world-adventure-hud",
+      "fingerprint": "4bd165de03e1b2406c0edde1c2da48a9c2e58424d6e983bebc6fcdc9ce70aec3",
+      "thumbnail_path": "/gpt-skills/skill-019-anime-open-world-adventure-hud.webp"
+    },
+    {
+      "id": "skill-020-mobile-moba-arena-hud",
+      "fingerprint": "bb290b29958e34bdaf434ab3462dc367237c660f43768f6df1aba30d7970b50f",
+      "thumbnail_path": "/gpt-skills/skill-020-mobile-moba-arena-hud.webp"
+    },
+    {
+      "id": "skill-021-low-poly-samurai-strategy-village",
+      "fingerprint": "fad027dd135b0dc7f579f5bfd640b9050b13ecd8f0e1507cb4c9c3b43ec589d4",
+      "thumbnail_path": "/gpt-skills/skill-021-low-poly-samurai-strategy-village.webp"
+    },
+    {
+      "id": "skill-022-nine-panel-dark-fantasy-worldbuilding-set",
+      "fingerprint": "9c419ac561f0e50a55fb712a5112359dde47545f777c6459adb8bc42db8c41c5",
+      "thumbnail_path": "/gpt-skills/skill-022-nine-panel-dark-fantasy-worldbuilding-set.webp"
+    },
+    {
+      "id": "skill-023-cyberpunk-mecha-girl-over-sea-fortress",
+      "fingerprint": "a4d32b411b19e0390e3bd31f4f7ad2311825c200d062a6fc881d78e7a68fc33c",
+      "thumbnail_path": "/gpt-skills/skill-023-cyberpunk-mecha-girl-over-sea-fortress.webp"
+    },
+    {
+      "id": "skill-024-neon-orchid-district-design-board",
+      "fingerprint": "e67519b859b67db74dbbe886891e348c78bb22bbb1d066081074e5533d372250",
+      "thumbnail_path": "/gpt-skills/skill-024-neon-orchid-district-design-board.webp"
+    },
+    {
+      "id": "skill-025-synth-moon-crew-alien-nightlife-grid",
+      "fingerprint": "dfb57c36b3474e3a270bb2a88c54366341d59b482baa160478844af2ae205c04",
+      "thumbnail_path": "/gpt-skills/skill-025-synth-moon-crew-alien-nightlife-grid.webp"
+    },
+    {
+      "id": "skill-026-pixar-style-3d-animation-still-kitten",
+      "fingerprint": "1e35efcb522332ee66976b39f4afe1380cbd088cdb153f83ba95f75d9a384271",
+      "thumbnail_path": "/gpt-skills/skill-026-pixar-style-3d-animation-still-kitten.webp"
+    },
+    {
+      "id": "skill-027-1940s-film-noir-still",
+      "fingerprint": "1bf680e9a3ef8ed2ebf9f6b12ea8579dc3ca426a1850d741e70ad86e09378711",
+      "thumbnail_path": "/gpt-skills/skill-027-1940s-film-noir-still.webp"
+    },
+    {
+      "id": "skill-028-professional-6-panel-film-storyboard",
+      "fingerprint": "d211cc1f4e86d4f0be825ca6e126ad07b90b25df3588cad2e20559b42eb17c04",
+      "thumbnail_path": "/gpt-skills/skill-028-professional-6-panel-film-storyboard.webp"
+    },
+    {
+      "id": "skill-029-studio-ghibli-style-animation-still",
+      "fingerprint": "68c4fe9fb84284e01df6433ff9d694505301d812bb130028abd45f2daf735646",
+      "thumbnail_path": "/gpt-skills/skill-029-studio-ghibli-style-animation-still.webp"
+    },
+    {
+      "id": "skill-030-vhs-grocery-store-chaos-still",
+      "fingerprint": "cfff790b3fa692937333e41b905254e6698d5a0e2a43cb31c73ab5e5bcb70c42",
+      "thumbnail_path": "/gpt-skills/skill-030-vhs-grocery-store-chaos-still.webp"
+    },
+    {
+      "id": "skill-147-symmetric-pastel-the-grand-conservatory",
+      "fingerprint": "11130c16dc89660ffdfca9a30d735c064b17ffb71434b767d9b719f58b46b1d0",
+      "thumbnail_path": "/gpt-skills/skill-147-symmetric-pastel-the-grand-conservatory.webp"
+    },
+    {
+      "id": "skill-148-monolithic-scifi-the-obsidian-gate",
+      "fingerprint": "8f8c7215d54674cfe7a63b6976710b9adfa307921247abf24654ee5428eb15d9",
+      "thumbnail_path": "/gpt-skills/skill-148-monolithic-scifi-the-obsidian-gate.webp"
+    },
+    {
+      "id": "skill-149-dreamscape-the-floating-garden",
+      "fingerprint": "50ec47e2dc4f7b8ba4ba0408ad3f5c0679753cb51acc4142802d2e98ee2af208",
+      "thumbnail_path": "/gpt-skills/skill-149-dreamscape-the-floating-garden.webp"
+    },
+    {
+      "id": "skill-150-slow-cinema-the-misty-orchard",
+      "fingerprint": "6fa32a879b4881c0f08bf366dce19c6747ca1f7feb25a09a0f0f64b543968eca",
+      "thumbnail_path": "/gpt-skills/skill-150-slow-cinema-the-misty-orchard.webp"
+    },
+    {
+      "id": "skill-151-neo-noir-the-orange-fog",
+      "fingerprint": "14f7d259be820c9cf955fea3e3344995190663ce7f360315fdd66762f711ad2b",
+      "thumbnail_path": "/gpt-skills/skill-151-neo-noir-the-orange-fog.webp"
+    },
+    {
+      "id": "skill-152-expressionist-noir-the-clockwork-alley",
+      "fingerprint": "1c7da8435eee8a6f07e30a1838200825647ec883820945b4d14f5be04c6f30f9",
+      "thumbnail_path": "/gpt-skills/skill-152-expressionist-noir-the-clockwork-alley.webp"
+    },
+    {
+      "id": "skill-031-official-character-reference-sheet",
+      "fingerprint": "6221dd8f9f41da66e53361a7a9a90bb167ded5d11d51b29674073d63e4dbac79",
+      "thumbnail_path": "/gpt-skills/skill-031-official-character-reference-sheet.webp"
+    },
+    {
+      "id": "skill-032-elven-archer-sketchbook-concept-sheet",
+      "fingerprint": "4c23af056cf958d74aa6674d40edb17ab8b5b887059824fa8f95d033ed021ff9",
+      "thumbnail_path": "/gpt-skills/skill-032-elven-archer-sketchbook-concept-sheet.webp"
+    },
+    {
+      "id": "skill-129-urban-streetwear-lookbook-shibuya-night",
+      "fingerprint": "00f5a473abab0fbdb2055b43f4cac941c64b2db967c17a29f18c491b9d69602d",
+      "thumbnail_path": "/gpt-skills/skill-129-urban-streetwear-lookbook-shibuya-night.webp"
+    },
+    {
+      "id": "skill-130-avant-garde-haute-couture-runway",
+      "fingerprint": "452346eb05a963ea38698d4a7bebd98475228836382b695c6f57e11180804aa9",
+      "thumbnail_path": "/gpt-skills/skill-130-avant-garde-haute-couture-runway.webp"
+    },
+    {
+      "id": "skill-131-y2k-revival-cyber-pop-studio-session",
+      "fingerprint": "eb2c4cfac4908d6e996785f41c1e5fb0fb4e89cff28ea5d929bef5149b440d07",
+      "thumbnail_path": "/gpt-skills/skill-131-y2k-revival-cyber-pop-studio-session.webp"
+    },
+    {
+      "id": "skill-132-old-money-aesthetic-equestrian-estate",
+      "fingerprint": "0d25c6744b771c60f792d108c3086ba4ccd5755b5b76d74e47510a8999ddc85e",
+      "thumbnail_path": "/gpt-skills/skill-132-old-money-aesthetic-equestrian-estate.webp"
+    },
+    {
+      "id": "skill-133-avant-garde-organic-surrealism",
+      "fingerprint": "baa0c1d4bfd25a0081f7ae64b27d2c6e1c8de78c35be4ff78d156d01637f815a",
+      "thumbnail_path": "/gpt-skills/skill-133-avant-garde-organic-surrealism.webp"
+    },
+    {
+      "id": "skill-134-muted-streetwear-studio-editorial-portrait",
+      "fingerprint": "b7f154353a64b6849b180bf854c9e5e8fc8b115c07628a55a69717a54f065e29",
+      "thumbnail_path": "/gpt-skills/skill-134-muted-streetwear-studio-editorial-portrait.webp"
+    },
+    {
+      "id": "skill-135-eiffel-tower-luxury-night-editorial",
+      "fingerprint": "eb0ed244a5ba8674a3c3eb3f6542a71603a671b6dab64734b81427e3be84df70",
+      "thumbnail_path": "/gpt-skills/skill-135-eiffel-tower-luxury-night-editorial.webp"
+    },
+    {
+      "id": "skill-153-quiet-luxury-skincare-morning-tray",
+      "fingerprint": "e28e97134be836835ca3864c401d7e978db53914f77d818fb84890b770f6ab26",
+      "thumbnail_path": "/gpt-skills/skill-153-quiet-luxury-skincare-morning-tray.webp"
+    },
+    {
+      "id": "skill-154-fragrance-evening-ritual-vanity",
+      "fingerprint": "06125fb36d0474fc94fa924b873e7536118428005fc2086a5257640126ebb96a",
+      "thumbnail_path": "/gpt-skills/skill-154-fragrance-evening-ritual-vanity.webp"
+    },
+    {
+      "id": "skill-157-realistic-black-and-grey-sleeve-study",
+      "fingerprint": "7621e6567d233d7acb418415c02fde58ecdcbd398651b33d044ac289b24fc918",
+      "thumbnail_path": "/gpt-skills/skill-157-realistic-black-and-grey-sleeve-study.webp"
+    },
+    {
+      "id": "skill-158-color-neo-traditional-fox-and-flora",
+      "fingerprint": "217a5124548a3395431f5f721fe1ed614d7c033af622f9ffe352b41d3caa7719",
+      "thumbnail_path": "/gpt-skills/skill-158-color-neo-traditional-fox-and-flora.webp"
+    },
+    {
+      "id": "skill-159-japanese-traditional-dragon-and-koi-back-piece",
+      "fingerprint": "d255eed19cb8de9962bee3f80d0a89a19cbcaa80501ccb8cb184471907af5e1a",
+      "thumbnail_path": "/gpt-skills/skill-159-japanese-traditional-dragon-and-koi-back-piece.webp"
+    },
+    {
+      "id": "skill-160-dark-surrealist-moth-cathedral",
+      "fingerprint": "3a30db4c847e5c2805afd9d58b4f115f44fa54d261f09a36e3f7b64464ae2629",
+      "thumbnail_path": "/gpt-skills/skill-160-dark-surrealist-moth-cathedral.webp"
+    },
+    {
+      "id": "skill-046-vintage-amalfi-coast-travel-poster",
+      "fingerprint": "e401cecedc4f436f7276617cc2f2bbc4312967920d31d0cb80f5be286a104e29",
+      "thumbnail_path": "/gpt-skills/skill-046-vintage-amalfi-coast-travel-poster.webp"
+    },
+    {
+      "id": "skill-047-paper-cut-forest-night-market",
+      "fingerprint": "d458e13cdea721a08479815c81d1913d983b4c8caacf20681eab47970cbb1356",
+      "thumbnail_path": "/gpt-skills/skill-047-paper-cut-forest-night-market.webp"
+    },
+    {
+      "id": "skill-048-dreamy-watercolor-young-woman-at-lily-pond",
+      "fingerprint": "8e36b1bced0ce2eadb3894b4108b7f94f7f3e240a1101bbea5ee0710bcefc216",
+      "thumbnail_path": "/gpt-skills/skill-048-dreamy-watercolor-young-woman-at-lily-pond.webp"
+    },
+    {
+      "id": "skill-049-rainy-botanical-greenhouse-watercolor",
+      "fingerprint": "9581439972f20ec43bc72a6dd105cef333d78897526d511d0aace8d26b4428b1",
+      "thumbnail_path": "/gpt-skills/skill-049-rainy-botanical-greenhouse-watercolor.webp"
+    },
+    {
+      "id": "skill-050-chinese-ink-wash-mountain-landscape",
+      "fingerprint": "bd3592730965d98c1ce2dd50cad8db2227cf87cbce4027a363f6d2a490d39ec6",
+      "thumbnail_path": "/gpt-skills/skill-050-chinese-ink-wash-mountain-landscape.webp"
+    },
+    {
+      "id": "skill-051-song-dynasty-night-market-handscroll",
+      "fingerprint": "be8328c6e5ae623f29f89f7430ec30cb1b07c1fba4cb192a7bbfe2b851796b1a",
+      "thumbnail_path": "/gpt-skills/skill-051-song-dynasty-night-market-handscroll.webp"
+    },
+    {
+      "id": "skill-052-pixel-art-car-sprite-sheet",
+      "fingerprint": "0da42d0328feadef8e3127d745d4231707199bd75f204b8ac10c8e3d8003aee5",
+      "thumbnail_path": "/gpt-skills/skill-052-pixel-art-car-sprite-sheet.webp"
+    },
+    {
+      "id": "skill-053-pixel-art-breakfast-still-life",
+      "fingerprint": "da445c8c8d6c4a8920851758b695ea475da75971226d6f1c745b549619ab3008",
+      "thumbnail_path": "/gpt-skills/skill-053-pixel-art-breakfast-still-life.webp"
+    },
+    {
+      "id": "skill-054-isometric-miniature-cafe-district",
+      "fingerprint": "156ffe26e244a7033fd590591f01f361778873e7842876c1aded110e17b63c93",
+      "thumbnail_path": "/gpt-skills/skill-054-isometric-miniature-cafe-district.webp"
+    },
+    {
+      "id": "skill-055-isometric-fantasy-village-map",
+      "fingerprint": "a768bddb4727c80b90eff247b3e4b2d18d6187cf5fcc7264635a7a8ffb607e32",
+      "thumbnail_path": "/gpt-skills/skill-055-isometric-fantasy-village-map.webp"
+    },
+    {
+      "id": "skill-136-vibrant-impasto-floral-rhythms",
+      "fingerprint": "abfe1d5e26f0bd53e1b120426edffb1cd4229d9c1336d77fe49c2e8703c9ebf2",
+      "thumbnail_path": "/gpt-skills/skill-136-vibrant-impasto-floral-rhythms.webp"
+    },
+    {
+      "id": "skill-137-impressionist-lineage-river-at-dusk",
+      "fingerprint": "0eb5b3c09a15c9fa7071226d825eb4a990737d6487a2c392e011f9d04a1b6883",
+      "thumbnail_path": "/gpt-skills/skill-137-impressionist-lineage-river-at-dusk.webp"
+    },
+    {
+      "id": "skill-138-mid-century-modern-the-blue-pool",
+      "fingerprint": "5ca2128422bdb77d493bc9108afdf0e042c516f64ae741667cfdef12dfd540de",
+      "thumbnail_path": "/gpt-skills/skill-138-mid-century-modern-the-blue-pool.webp"
+    },
+    {
+      "id": "skill-139-color-field-abstract-crimson-and-ochre",
+      "fingerprint": "29f29eec4ec4dce25785779836fa6a71bda74b2de9b636e059d9da951429beb4",
+      "thumbnail_path": "/gpt-skills/skill-139-color-field-abstract-crimson-and-ochre.webp"
+    },
+    {
+      "id": "skill-140-social-realism-the-great-foundry",
+      "fingerprint": "00d84e0cf7bc31ef932e4f1838e33539496ed6947b94c79f4d32e0b1d14ae112",
+      "thumbnail_path": "/gpt-skills/skill-140-social-realism-the-great-foundry.webp"
+    },
+    {
+      "id": "skill-141-flat-design-modern-wellness",
+      "fingerprint": "64e053294443eba950cb8bcc6cf73c6a66fd15b843e8f68b8cfd9c2fb1477162",
+      "thumbnail_path": "/gpt-skills/skill-141-flat-design-modern-wellness.webp"
+    },
+    {
+      "id": "skill-142-chibi-style-the-starry-bakery",
+      "fingerprint": "d8f4b8eeac5deffa3803b63ae1f0040277cae186f576df577344b3832cc7027d",
+      "thumbnail_path": "/gpt-skills/skill-142-chibi-style-the-starry-bakery.webp"
+    },
+    {
+      "id": "skill-143-low-poly-geometric-alpine-sunset",
+      "fingerprint": "d515808d2f114b2f5f4d0be41ef1ac7042080ba4acc180f1704c14b601285829",
+      "thumbnail_path": "/gpt-skills/skill-143-low-poly-geometric-alpine-sunset.webp"
+    },
+    {
+      "id": "skill-144-sticker-design-cyber-explorer-club",
+      "fingerprint": "6ec0ca2e15a13ac003b2b22a092dff760c1bfc6441dd9d5157f5b12c1a8bc300",
+      "thumbnail_path": "/gpt-skills/skill-144-sticker-design-cyber-explorer-club.webp"
+    },
+    {
+      "id": "skill-145-kawaii-sticker-pack-mexico-icons",
+      "fingerprint": "b8b1fbf8ff86f8404b1acdb1802081bcd2fb4adc4c5433cf15e5729f2a47247d",
+      "thumbnail_path": "/gpt-skills/skill-145-kawaii-sticker-pack-mexico-icons.webp"
+    },
+    {
+      "id": "skill-146-risograph-print-city-shadows",
+      "fingerprint": "fddd8969d3383f53b893d8faef53bb034f9f9f0feda65e431d0787fc0b8e1277",
+      "thumbnail_path": "/gpt-skills/skill-146-risograph-print-city-shadows.webp"
+    },
+    {
+      "id": "skill-155-zoo-visitor-wayfinding-map",
+      "fingerprint": "48162b6a202621985bf43f7dd55e635ad2ab3372cd61237a3e9b12056977cc82",
+      "thumbnail_path": "/gpt-skills/skill-155-zoo-visitor-wayfinding-map.webp"
+    },
+    {
+      "id": "skill-156-huashan-5a-scenic-wayfinding-map",
+      "fingerprint": "0b14f2f5ed283a4c678c5f43b368c0491eeb5fea4c01584bd85d1a55fc0d7d4b",
+      "thumbnail_path": "/gpt-skills/skill-156-huashan-5a-scenic-wayfinding-map.webp"
+    },
+    {
+      "id": "skill-161-music-app-webcam-preview",
+      "fingerprint": "3c8f2044f8d7beba71c160f9c379ba4bbd6e66d1dfa0eca01e0fc4d2e6fdecaa",
+      "thumbnail_path": "/gpt-skills/skill-161-music-app-webcam-preview.webp"
+    },
+    {
+      "id": "skill-162-notes-facetime-work-screen",
+      "fingerprint": "d25756ebd8858254fb63c34959f2901bc6160e6451ba1d5b7a301e8cab37d5e0",
+      "thumbnail_path": "/gpt-skills/skill-162-notes-facetime-work-screen.webp"
+    },
+    {
+      "id": "skill-033-chinese-tea-launch-poster",
+      "fingerprint": "81db5a3933c76a12179acfc9d312fcc289b9cd54d6d06711506110fc99b5e7b9",
+      "thumbnail_path": "/gpt-skills/skill-033-chinese-tea-launch-poster.webp"
+    },
+    {
+      "id": "skill-034-1980s-propaganda-poster",
+      "fingerprint": "c8bafa7018d9580b4d044c63a35703d32a736b8228f1a00e634b38143d811017",
+      "thumbnail_path": "/gpt-skills/skill-034-1980s-propaganda-poster.webp"
+    },
+    {
+      "id": "skill-035-saul-bass-style-thriller-movie-poster",
+      "fingerprint": "5ce643263d8e4fd673dcba57098d9ca3ed4fc40b4cf299b5f9126e273733e85d",
+      "thumbnail_path": "/gpt-skills/skill-035-saul-bass-style-thriller-movie-poster.webp"
+    },
+    {
+      "id": "skill-036-vogue-style-fashion-magazine-cover",
+      "fingerprint": "86457a3b261559005964d7ada932d3c8452fb365f6070738745e5cf151bacdda",
+      "thumbnail_path": "/gpt-skills/skill-036-vogue-style-fashion-magazine-cover.webp"
+    },
+    {
+      "id": "skill-037-1950s-astounding-stories-pulp-cover",
+      "fingerprint": "96f708740793345b6fb06aed0b3e41a9f5a2a8c76fdb1ca4a376a92a31329056",
+      "thumbnail_path": "/gpt-skills/skill-037-1950s-astounding-stories-pulp-cover.webp"
+    },
+    {
+      "id": "skill-038-boston-spring-2026-city-poster",
+      "fingerprint": "d18bf91dcda3f82a5ad8d8116af93df1fef4236bf6cbf20c49180c67bf100646",
+      "thumbnail_path": "/gpt-skills/skill-038-boston-spring-2026-city-poster.webp"
+    },
+    {
+      "id": "skill-039-epic-silhouette-worldbuilding-poster",
+      "fingerprint": "23adb5b60355090629fb65b9b1e65e2bce012c68309a457e7721d0ab9ab3cc22",
+      "thumbnail_path": "/gpt-skills/skill-039-epic-silhouette-worldbuilding-poster.webp"
+    },
+    {
+      "id": "skill-040-dual-exposure-narrative-poster",
+      "fingerprint": "28fdd255565ae0a73f4cc52cc56f8fd8e5bfc82a55f844d5eb503513eabbaa9c",
+      "thumbnail_path": "/gpt-skills/skill-040-dual-exposure-narrative-poster.webp"
+    },
+    {
+      "id": "skill-041-journey-to-the-west-silhouette-epic-poster",
+      "fingerprint": "216fa7690ee1aaf45adc82418214e7a71654571336ca6c6278abfc2531c3b5c4",
+      "thumbnail_path": "/gpt-skills/skill-041-journey-to-the-west-silhouette-epic-poster.webp"
+    },
+    {
+      "id": "skill-042-japanese-pachinko-rainbow-flyer",
+      "fingerprint": "5036a44304d240caaabe61903544de39ec74ffe40fe1f03822b25de5a7de5b2e",
+      "thumbnail_path": "/gpt-skills/skill-042-japanese-pachinko-rainbow-flyer.webp"
+    },
+    {
+      "id": "skill-043-spanish-fantasy-film-mobile-poster",
+      "fingerprint": "3a7714904758c5d5c2c9d6f7573919711552c85b20cb9374e93967acdf184084",
+      "thumbnail_path": "/gpt-skills/skill-043-spanish-fantasy-film-mobile-poster.webp"
+    },
+    {
+      "id": "skill-044-chongqing-rainy-night-city-promo-poster",
+      "fingerprint": "07a2a75e944537f35e49b586a8747e342e3d1be9077e87a97d596ed0a71516f7",
+      "thumbnail_path": "/gpt-skills/skill-044-chongqing-rainy-night-city-promo-poster.webp"
+    },
+    {
+      "id": "skill-045-athlete-journey-poster-aya-navarro",
+      "fingerprint": "73bb99444daa2880cf1152d47cb2f9fd9078c64e2d9aed251edacccb6583d394",
+      "thumbnail_path": "/gpt-skills/skill-045-athlete-journey-poster-aya-navarro.webp"
+    },
+    {
+      "id": "skill-060-moss-radio-brand-identity-showcase-board",
+      "fingerprint": "59b468bba3b557e97ea9a10e56ca4fced473877753a6ce4bf9e9e6d120a1db27",
+      "thumbnail_path": "/gpt-skills/skill-060-moss-radio-brand-identity-showcase-board.webp"
+    },
+    {
+      "id": "skill-061-ps1-nostalgia-reboot-brand-kit",
+      "fingerprint": "978e30d4e225757d5efd2a456f88252d60618d658db20da8489a9318a78b0f1d",
+      "thumbnail_path": "/gpt-skills/skill-061-ps1-nostalgia-reboot-brand-kit.webp"
+    },
+    {
+      "id": "skill-062-playful-brand-kit-mochi-metro",
+      "fingerprint": "8726e0a922675ff77d1f8e79aad256da100ce5aa2a39ae91ce41dfb8e4c698c7",
+      "thumbnail_path": "/gpt-skills/skill-062-playful-brand-kit-mochi-metro.webp"
+    },
+    {
+      "id": "skill-056-3d-product-box-from-dieline",
+      "fingerprint": "2619783c6987beb9a54176984893f020f5f087d42d0412eb9705656c4be7a3f9",
+      "thumbnail_path": "/gpt-skills/skill-056-3d-product-box-from-dieline.webp"
+    },
+    {
+      "id": "skill-057-chocolate-wafer-product-render-json-style",
+      "fingerprint": "b8c7d57e9bf64d93471f2b05587c986da7eea8b766666ff1de6f41e7b6e30172",
+      "thumbnail_path": "/gpt-skills/skill-057-chocolate-wafer-product-render-json-style.webp"
+    },
+    {
+      "id": "skill-058-salad-explosion-food-photography-json-style",
+      "fingerprint": "f53ddb737605bbad551ead0b04b0ffbda9ce0beec3d499a36fa221c6ddbba47a",
+      "thumbnail_path": "/gpt-skills/skill-058-salad-explosion-food-photography-json-style.webp"
+    },
+    {
+      "id": "skill-059-universal-commercial-poster-template",
+      "fingerprint": "65d29a33c48bc3ff033520062111725c7477f80c585efcf806e748f8e8b6f231",
+      "thumbnail_path": "/gpt-skills/skill-059-universal-commercial-poster-template.webp"
+    },
+    {
+      "id": "skill-063-raw-iphone-42nd-street-subway",
+      "fingerprint": "4e3bec070138fd9d5877b43b197883d120100494a604751575c207f6bd0494aa",
+      "thumbnail_path": "/gpt-skills/skill-063-raw-iphone-42nd-street-subway.webp"
+    },
+    {
+      "id": "skill-064-handwritten-notebook-flatlay",
+      "fingerprint": "fb41a04be94f6550cf86c247e1bd36b709f3900424b8ad8688860457032c9854",
+      "thumbnail_path": "/gpt-skills/skill-064-handwritten-notebook-flatlay.webp"
+    },
+    {
+      "id": "skill-065-chess-board-mid-tournament-game",
+      "fingerprint": "e4db11d0756a6f895fb576e200938e23a114b47bb1fc4e7eb2267eba74aaefdb",
+      "thumbnail_path": "/gpt-skills/skill-065-chess-board-mid-tournament-game.webp"
+    },
+    {
+      "id": "skill-066-360-equirectangular-jungle-panorama",
+      "fingerprint": "5596ec3b19531c82c92c40878983e60320150cdaf52b561b89618c946afbd4aa",
+      "thumbnail_path": "/gpt-skills/skill-066-360-equirectangular-jungle-panorama.webp"
+    },
+    {
+      "id": "skill-117-japanese-minimalist-living-room",
+      "fingerprint": "b3141800423d7de0ef80280741fc1a275204a4720c0e2f34220ea62fbf720e1b",
+      "thumbnail_path": "/gpt-skills/skill-117-japanese-minimalist-living-room.webp"
+    },
+    {
+      "id": "skill-118-brutalist-concrete-museum-atrium",
+      "fingerprint": "f26549c54315948161043f3b92dc5a1a0587e99b35cc506c4227587d0ecbfb7f",
+      "thumbnail_path": "/gpt-skills/skill-118-brutalist-concrete-museum-atrium.webp"
+    },
+    {
+      "id": "skill-119-mid-century-modern-office",
+      "fingerprint": "b856b431eb2583b8b70fd19d5bfd69c418ece0e69a5a7cfe6b57d60bc9c5a498",
+      "thumbnail_path": "/gpt-skills/skill-119-mid-century-modern-office.webp"
+    },
+    {
+      "id": "skill-120-biophilic-biotech-lab",
+      "fingerprint": "bfd5f2a35c35af70078c812bf722f12f8dc36980060d51e5e387840f7889fb2f",
+      "thumbnail_path": "/gpt-skills/skill-120-biophilic-biotech-lab.webp"
+    },
+    {
+      "id": "skill-121-gothic-cathedral-interior",
+      "fingerprint": "a49181c2db765029e6a0eb7a1a104d093c01f849d2f7fb6c0f33605153ca8236",
+      "thumbnail_path": "/gpt-skills/skill-121-gothic-cathedral-interior.webp"
+    },
+    {
+      "id": "skill-067-song-dynasty-social-media-feed",
+      "fingerprint": "24deba6898b1f46f074369c0fb124a943e9307b780a4f1f97feaeac4143e6587",
+      "thumbnail_path": "/gpt-skills/skill-067-song-dynasty-social-media-feed.webp"
+    },
+    {
+      "id": "skill-068-museum-catalog-disassembly-infographic",
+      "fingerprint": "29750d4e8cfb08da6421aa85b7d7d02f7830d798f458cd1a092d7a229aa504ca",
+      "thumbnail_path": "/gpt-skills/skill-068-museum-catalog-disassembly-infographic.webp"
+    },
+    {
+      "id": "skill-069-encyclopedia-field-guide-giant-panda",
+      "fingerprint": "1a28cd8e53c8b688ef55226acc5b04a0773c4f649206817dec0af1044a837d73",
+      "thumbnail_path": "/gpt-skills/skill-069-encyclopedia-field-guide-giant-panda.webp"
+    },
+    {
+      "id": "skill-070-weekend-seoul-travel-guide-poster",
+      "fingerprint": "e32510bce95b3a13b141c7b5963f7f4cdd2627e26e3bd8b63b6448d4344a0738",
+      "thumbnail_path": "/gpt-skills/skill-070-weekend-seoul-travel-guide-poster.webp"
+    },
+    {
+      "id": "skill-071-modular-encyclopedia-infographic-card",
+      "fingerprint": "05de1d0b78fd0d66e9e48b127aa69f2edecdf9f32fce2065693273479c8f13bf",
+      "thumbnail_path": "/gpt-skills/skill-071-modular-encyclopedia-infographic-card.webp"
+    },
+    {
+      "id": "skill-072-xiaohongshu-cooking-tutorial-card",
+      "fingerprint": "7661128b36a6a894d6c0d6f20dac984fd2860c0adc550fe160039d227d7eeace",
+      "thumbnail_path": "/gpt-skills/skill-072-xiaohongshu-cooking-tutorial-card.webp"
+    },
+    {
+      "id": "skill-073-camera-styles-reference-board-for-iphone-photographers",
+      "fingerprint": "420b9629974c23f1e656d0297b22b0711f4aeaf12b922521a02e8a24bf695789",
+      "thumbnail_path": "/gpt-skills/skill-073-camera-styles-reference-board-for-iphone-photographers.webp"
+    },
+    {
+      "id": "skill-074-chinese-endangered-animal-infographic",
+      "fingerprint": "c88db6223ebe6809dd138ea22e79033c1c80e8dc80abcb1b212d6c3b3cbaf784",
+      "thumbnail_path": "/gpt-skills/skill-074-chinese-endangered-animal-infographic.webp"
+    },
+    {
+      "id": "skill-075-patient-cohort-and-multimodal-biomarker-workflow",
+      "fingerprint": "70fb3b86e134c602a0e31e3340505c5dc21d468914c88a4008578bbda9f1e435",
+      "thumbnail_path": "/gpt-skills/skill-075-patient-cohort-and-multimodal-biomarker-workflow.webp"
+    },
+    {
+      "id": "skill-076-single-cell-immune-atlas-reveals-treatment-response-states",
+      "fingerprint": "a490facec4552c3d8ddcf6f86f3e1241293319561b28b9e536fcd7f25d1d6f99",
+      "thumbnail_path": "/gpt-skills/skill-076-single-cell-immune-atlas-reveals-treatment-response-states.webp"
+    },
+    {
+      "id": "skill-077-multimodal-medical-ai-method-figure",
+      "fingerprint": "13aa45ea7f092ad219a72df756758cee3e1776d92bd5d3183bb74463e0209850",
+      "thumbnail_path": "/gpt-skills/skill-077-multimodal-medical-ai-method-figure.webp"
+    },
+    {
+      "id": "skill-078-therapeutic-response-bar-and-forest-plot",
+      "fingerprint": "d62578f83564d6458caae70739e58008f5e2006cdf6bc620d93428cbc4dbf8ac",
+      "thumbnail_path": "/gpt-skills/skill-078-therapeutic-response-bar-and-forest-plot.webp"
+    },
+    {
+      "id": "skill-079-transformer-encoderdecoder-architecture",
+      "fingerprint": "0b48434d0446eb0edf1acbc2250166ac3985543a31a8bdfe1303cb6f70a1e138",
+      "thumbnail_path": "/gpt-skills/skill-079-transformer-encoderdecoder-architecture.webp"
+    },
+    {
+      "id": "skill-080-retrieval-augmented-generation-pipeline",
+      "fingerprint": "3c15fd67b03ab19ff53a1a1e1fccffb28dde047da029f79a02f27116ce7451bc",
+      "thumbnail_path": "/gpt-skills/skill-080-retrieval-augmented-generation-pipeline.webp"
+    },
+    {
+      "id": "skill-081-multi-agent-llm-system-architecture",
+      "fingerprint": "d6346c48ca42f3d507493a17b124c15f8a3bfc89e9d8e8fadfbde9c98a72be28",
+      "thumbnail_path": "/gpt-skills/skill-081-multi-agent-llm-system-architecture.webp"
+    },
+    {
+      "id": "skill-082-denoising-diffusion-forward-reverse-chain",
+      "fingerprint": "a1e18bea049a515f61a97fd92e59643b01fec02359207a42d48943d070c57f24",
+      "thumbnail_path": "/gpt-skills/skill-082-denoising-diffusion-forward-reverse-chain.webp"
+    },
+    {
+      "id": "skill-083-empirical-scaling-laws-plot",
+      "fingerprint": "8355d145b2909988717f75fe155994b8fc106043ff11b2c9c6574005632356c9",
+      "thumbnail_path": "/gpt-skills/skill-083-empirical-scaling-laws-plot.webp"
+    },
+    {
+      "id": "skill-084-benchmark-comparison-heatmap",
+      "fingerprint": "2f8772fdf10e85a2b630818e3d38ecce207e09b408ebff84b0c37f55bc626862",
+      "thumbnail_path": "/gpt-skills/skill-084-benchmark-comparison-heatmap.webp"
+    },
+    {
+      "id": "skill-085-ablation-bar-chart-with-error-bars",
+      "fingerprint": "81840d7d3101f37b16dddd7d45288175874fff138925576e81131b6b21f5a1de",
+      "thumbnail_path": "/gpt-skills/skill-085-ablation-bar-chart-with-error-bars.webp"
+    },
+    {
+      "id": "skill-086-llm-pretraining-data-mixture-sankey",
+      "fingerprint": "e1cc773a2ab2beb6958feb17c5b6d33b0dd2e12addd1413320ee7d1a162eaef0",
+      "thumbnail_path": "/gpt-skills/skill-086-llm-pretraining-data-mixture-sankey.webp"
+    },
+    {
+      "id": "skill-087-multi-head-attention-heatmaps",
+      "fingerprint": "cd4dadf33ef3bb96e17d83f2f9bf37682e5c632850f9e00cb3359465caee5755",
+      "thumbnail_path": "/gpt-skills/skill-087-multi-head-attention-heatmaps.webp"
+    },
+    {
+      "id": "skill-088-frontier-llm-family-tree-20182026",
+      "fingerprint": "9514321b95f16bd084b5c1d1ac9898713f029dd9e6d863bff8487a70cc9d7c40",
+      "thumbnail_path": "/gpt-skills/skill-088-frontier-llm-family-tree-20182026.webp"
+    },
+    {
+      "id": "skill-089-react-reasoning-trace",
+      "fingerprint": "42d2798e8909b9de17b73723c18e62cde65521c746ba1afe7b01d78bfaf8db1d",
+      "thumbnail_path": "/gpt-skills/skill-089-react-reasoning-trace.webp"
+    },
+    {
+      "id": "skill-090-memory-router-for-multimodal-agents",
+      "fingerprint": "802da83942603953d1f57fcc442cfff66a5ab89a84491a064c51c3ea8404892c",
+      "thumbnail_path": "/gpt-skills/skill-090-memory-router-for-multimodal-agents.webp"
+    },
+    {
+      "id": "skill-091-frontier-safety-eval-loop",
+      "fingerprint": "6b34f1de0c531b380e3198357318f4827c0f3686f05d01e76d98660c4d43eadf",
+      "thumbnail_path": "/gpt-skills/skill-091-frontier-safety-eval-loop.webp"
+    },
+    {
+      "id": "skill-092-iclr-style-method-figure",
+      "fingerprint": "1a14ad9c13abedde415747804d5ac1f1fc158dcedb4ed9ae02fbac822dcc6777",
+      "thumbnail_path": "/gpt-skills/skill-092-iclr-style-method-figure.webp"
+    },
+    {
+      "id": "skill-093-minimal-research-illustration-prompt",
+      "fingerprint": "189a194c9d22f3e1370855831f225dd1d953027bc61b1f4efee1b65ed0bc761f",
+      "thumbnail_path": "/gpt-skills/skill-093-minimal-research-illustration-prompt.webp"
+    },
+    {
+      "id": "skill-094-multimodal-agent-experiment-workflow-figure",
+      "fingerprint": "5a0fe1119a04cf82fefc8052276b10c543d76eb15acd3cc215d59de1e67a22f2",
+      "thumbnail_path": "/gpt-skills/skill-094-multimodal-agent-experiment-workflow-figure.webp"
+    },
+    {
+      "id": "skill-095-indirect-prompt-injection-attack-flow",
+      "fingerprint": "a335fa4884f41e5fbb7d82ba785278ae090f1c2e404288d9f77ddf39c54d5f0b",
+      "thumbnail_path": "/gpt-skills/skill-095-indirect-prompt-injection-attack-flow.webp"
+    },
+    {
+      "id": "skill-107-small-multiples-climate-grid",
+      "fingerprint": "9e7d954ccea3e68d5249e07856ebbde4ac88667552668a389fb578b6174bea7e",
+      "thumbnail_path": "/gpt-skills/skill-107-small-multiples-climate-grid.webp"
+    },
+    {
+      "id": "skill-108-network-graph-collaboration-map",
+      "fingerprint": "82761270a2e81628c06d0a8b3821693aa8e89f447cdf4eba89698b9c186f24d9",
+      "thumbnail_path": "/gpt-skills/skill-108-network-graph-collaboration-map.webp"
+    },
+    {
+      "id": "skill-109-chord-diagram-of-energy-flows",
+      "fingerprint": "53fb7fa6d4a2b915af00c41304acd0cfd1c779b46a15f24e6b6f52c9f744fb4b",
+      "thumbnail_path": "/gpt-skills/skill-109-chord-diagram-of-energy-flows.webp"
+    },
+    {
+      "id": "skill-110-treemap-budget-allocation",
+      "fingerprint": "204d40230a021e98254139f3de7171bd35d0476e7977c90cac1dcbbbb9a33330",
+      "thumbnail_path": "/gpt-skills/skill-110-treemap-budget-allocation.webp"
+    },
+    {
+      "id": "skill-111-geographic-choropleth-yield-map",
+      "fingerprint": "06740b72f00ff830cd5dc8103fc32a9d9704193bb6e571f91c562ef8348e5d3c",
+      "thumbnail_path": "/gpt-skills/skill-111-geographic-choropleth-yield-map.webp"
+    },
+    {
+      "id": "skill-112-mechanical-watch-exploded-view",
+      "fingerprint": "bd6c7af3dcdf0476bb9c9f596c9be2704f61f53acf580854b51945d53e2157f1",
+      "thumbnail_path": "/gpt-skills/skill-112-mechanical-watch-exploded-view.webp"
+    },
+    {
+      "id": "skill-113-rocket-cutaway-diagram",
+      "fingerprint": "4423fa59cbb0d28a13914159c39a29258583610d66cc16bf8081eed1f2150130",
+      "thumbnail_path": "/gpt-skills/skill-113-rocket-cutaway-diagram.webp"
+    },
+    {
+      "id": "skill-114-mechanical-keyboard-exploded-assembly",
+      "fingerprint": "f59b3fb22fe89acfcab0177ace843e9ec28919e84eda7836127149f1c56c3fdd",
+      "thumbnail_path": "/gpt-skills/skill-114-mechanical-keyboard-exploded-assembly.webp"
+    },
+    {
+      "id": "skill-115-car-powertrain-transparent-cutaway",
+      "fingerprint": "b5dc0bea19432f3c6770651b9a37ea0c005defd7d3b673af74dbb9ae2fdb9aaf",
+      "thumbnail_path": "/gpt-skills/skill-115-car-powertrain-transparent-cutaway.webp"
+    },
+    {
+      "id": "skill-116-smartphone-internals-layered-view",
+      "fingerprint": "2c6f93cf8a2f05dd5f80849dd0bbbd635d82e5c8446eaa903a8d445bb8d10a4a",
+      "thumbnail_path": "/gpt-skills/skill-116-smartphone-internals-layered-view.webp"
+    },
+    {
+      "id": "skill-122-anatomy-poster",
+      "fingerprint": "0113845a3d178aa480b1d7f41a312a43c2779e2500758784afdcda45fee5a111",
+      "thumbnail_path": "/gpt-skills/skill-122-anatomy-poster.webp"
+    },
+    {
+      "id": "skill-123-skeletal-system-poster",
+      "fingerprint": "1810c8cda9f41ce029dcfcd59f74dd95730d23a70495e1c52bdaccba09b02302",
+      "thumbnail_path": "/gpt-skills/skill-123-skeletal-system-poster.webp"
+    },
+    {
+      "id": "skill-124-circulatory-system-poster",
+      "fingerprint": "3cc46821ff29c38889b449ffe16908baaa3aaf5358954cce86c414818fb205af",
+      "thumbnail_path": "/gpt-skills/skill-124-circulatory-system-poster.webp"
+    },
+    {
+      "id": "skill-125-periodic-table-spectral-variant",
+      "fingerprint": "37226210c5b1dd5b82da72a45e83fdb6ac6c532e458b426cfad3581003a6e3dc",
+      "thumbnail_path": "/gpt-skills/skill-125-periodic-table-spectral-variant.webp"
+    },
+    {
+      "id": "skill-126-tree-of-life-poster",
+      "fingerprint": "fb9226d5972295ef2a841374ccdad5d459d85bbab58d64af36cb297fcc02e620",
+      "thumbnail_path": "/gpt-skills/skill-126-tree-of-life-poster.webp"
+    },
+    {
+      "id": "skill-127-weather-systems-diagram",
+      "fingerprint": "759d912ecdf2ab6788d72e8f98a56eb40bd4ac413ffb3a59e158f1d56f87201b",
+      "thumbnail_path": "/gpt-skills/skill-127-weather-systems-diagram.webp"
+    },
+    {
+      "id": "skill-128-geological-strata-cross-section",
+      "fingerprint": "d6a8bc5c56703859d786ebec84ba065897cb93898b062233aabdf58183d0ba70",
+      "thumbnail_path": "/gpt-skills/skill-128-geological-strata-cross-section.webp"
+    },
+    {
+      "id": "skill-096-automatic-coffee-machine-infographic",
+      "fingerprint": "b44cbfd62eaf1b3c8a302a53c82821c6b24a63ad884d0477c3ce9178771a3526",
+      "thumbnail_path": "/gpt-skills/skill-096-automatic-coffee-machine-infographic.webp"
+    },
+    {
+      "id": "skill-097-photorealistic-elderly-sailor",
+      "fingerprint": "76abb45d081dda31b3f478d57f01b4159839bcf32c2ec806017a7027197f8324",
+      "thumbnail_path": "/gpt-skills/skill-097-photorealistic-elderly-sailor.webp"
+    },
+    {
+      "id": "skill-098-minimalist-bakery-logo-field-flour",
+      "fingerprint": "6149e3ead28c7ab2b1381d3b585e006e493e416264e99e9949f66e63f1b42239",
+      "thumbnail_path": "/gpt-skills/skill-098-minimalist-bakery-logo-field-flour.webp"
+    },
+    {
+      "id": "skill-099-4-panel-pet-comic-strip",
+      "fingerprint": "e6fbd3901cc8c3b93149c1d1edb2f7737ba4352dc651e80ed0d66efcfe7381bf",
+      "thumbnail_path": "/gpt-skills/skill-099-4-panel-pet-comic-strip.webp"
+    },
+    {
+      "id": "skill-100-chess-board-winter-evening-edit-via-v1-images-edits",
+      "fingerprint": "2aaf10bf8dbb323f57b1612b8250e3239d056d027eac1b3cfbe7bcdae2241941",
+      "thumbnail_path": "/gpt-skills/skill-100-chess-board-winter-evening-edit-via-v1-images-edits.webp"
+    },
+    {
+      "id": "skill-101-tea-poster-metro-lightbox-mockup",
+      "fingerprint": "ef6fff492484af3d33dfa2ba6276efea13b9edee9d8b15bbe62dd5f56036d9da",
+      "thumbnail_path": "/gpt-skills/skill-101-tea-poster-metro-lightbox-mockup.webp"
+    },
+    {
+      "id": "skill-102-mobile-budgeting-app-mockup",
+      "fingerprint": "40d51587bda6e70a485cc095883a3d78d498d19279c9f256a629ac67f94b12ad",
+      "thumbnail_path": "/gpt-skills/skill-102-mobile-budgeting-app-mockup.webp"
+    },
+    {
+      "id": "skill-103-desktop-operations-dashboard",
+      "fingerprint": "2bc5b3f88f7d80c5f4e16e8d7a07963248d09d0348ca765159591f8f135a3ed9",
+      "thumbnail_path": "/gpt-skills/skill-103-desktop-operations-dashboard.webp"
+    },
+    {
+      "id": "skill-104-design-system-card-set",
+      "fingerprint": "226067a01fbe54a125492d0d1e4f5544122c3af87c1453f9ddc27036c07c441b",
+      "thumbnail_path": "/gpt-skills/skill-104-design-system-card-set.webp"
+    },
+    {
+      "id": "skill-105-web3-wallet-interface-concept",
+      "fingerprint": "ad45ddef1df06885f05d7cc4d8028069378bb6581514038c6b1a4bba64872996",
+      "thumbnail_path": "/gpt-skills/skill-105-web3-wallet-interface-concept.webp"
+    },
+    {
+      "id": "skill-106-health-tracker-app-mockup",
+      "fingerprint": "dc33ecfe12b4bbf59b8e66d5a94daf19e5a4638984dcb8c5557c990c033ed94b",
+      "thumbnail_path": "/gpt-skills/skill-106-health-tracker-app-mockup.webp"
+    }
+  ]
+}

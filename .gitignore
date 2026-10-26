@@ -1,0 +1,90 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+/art-ai
+/art-ai-etl
+/.pnpm-store/
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files
+.env*
+!.env.example
+# Local deployment folder: internal hosts, roots, ports, accounts and runbooks stay out of Git
+# (template: deploy/environments.example.json; lookup: scripts/local_environments.py)
+deploy/local/
+deploy/*.local.json
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# Prisma
+dev.db
+dev.db-journal
+
+# Docker 运行时数据（宿主机挂载目录，不入库）
+docker-data/
+
+# 运行时数据
+storage/
+# Go 运行时数据（SQLite + Blob，见 README-go.md）
+/data/
+/storage-go/
+.qoder/
+.plan/
+
+# Agent 指令文档：AGENTS.md 入库（根 + 各子树嵌套指引）；CLAUDE.md 本地维护不入库
+CLAUDE.md
+
+# Python venv
+.venv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Skill 数据 pipeline 中间产物
+tmp/
+
+# coding-tools
+.claude/
+.codex/
+.opencode/
+
+## coding-tools 运行时数据
+.memory/
+.codegraph/
+.graphify_*.*
+.graphify_*
+graphify-out/
+.worktrees

@@ -1,0 +1,539 @@
+{
+  "version": 1,
+  "updated": "2026-10-26",
+  "note": "Evidence status is maintained by hand from real captures. missing is not a pass.",
+  "offerings": [
+    {
+      "id": "meshy/nano-banana-pro/text-to-image",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/nano-banana-2/text-to-image",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/nano-banana-pro/image-to-image",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/nano-banana-2/image-to-image",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "openai/gpt-image-2/text-to-image",
+      "provider_id": "openai",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "openai/gpt-image-2/image-to-image",
+      "provider_id": "openai",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "gemini/gemini-3-pro-image/text-to-image",
+      "provider_id": "gemini",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "gemini/gemini-3-pro-image/image-to-image",
+      "provider_id": "gemini",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "jimeng/seedream-4-5/text-to-image",
+      "provider_id": "jimeng",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "jimeng/seedream-4-5/image-to-image",
+      "provider_id": "jimeng",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/meshy-7/text-to-3d",
+      "provider_id": "meshy",
+      "enabled": false,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/meshy-7.1/text-to-3d",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "real",
+      "source": "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json"
+    },
+    {
+      "id": "meshy/meshy-t2.5/text-to-3d",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/meshy-7/image-to-3d",
+      "provider_id": "meshy",
+      "enabled": false,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/meshy-7.1/image-to-3d",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/meshy-t2.5/image-to-3d",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/tripo-v3.1-full/text-to-3d",
+      "provider_id": "tripo",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/tripo-v3.1/text-to-3d",
+      "provider_id": "tripo",
+      "enabled": false,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/tripo-v3.1-full/image-to-3d",
+      "provider_id": "tripo",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/tripo-v3.1/image-to-3d",
+      "provider_id": "tripo",
+      "enabled": false,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/processing/remesh",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/processing/convert",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/processing/retexture",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/processing/rigging",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/processing/animation",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "matting/default/background-removal",
+      "provider_id": "matting",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/tripo-v3.1/format-conversion",
+      "provider_id": "tripo",
+      "enabled": false,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "hyper3d/rodin-gen-2.5/text-to-3d",
+      "provider_id": "hyper3d",
+      "enabled": true,
+      "evidence": "real",
+      "source": "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json"
+    },
+    {
+      "id": "hyper3d/rodin-gen-2.5/image-to-3d",
+      "provider_id": "hyper3d",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "local/static-glb/to-gltf",
+      "provider_id": "local",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "local/generated-glb/to-gltf",
+      "provider_id": "local",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "local/static-gltf/to-glb",
+      "provider_id": "local",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/format-conversion/uploaded-glb-to-stl",
+      "provider_id": "tripo",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/processing/uv-unwrap",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/processing/resize",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/processing/analyze-printability",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/processing/repair-printability",
+      "provider_id": "meshy",
+      "enabled": false,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/processing/multi-color-print",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/prime/text-to-motion",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/processing/rig-check",
+      "provider_id": "tripo",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/processing/texture",
+      "provider_id": "tripo",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/processing/rigging",
+      "provider_id": "tripo",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/processing/rigging-v3",
+      "provider_id": "tripo",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/processing/animation",
+      "provider_id": "tripo",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "local/existing-assets/recover",
+      "provider_id": "local",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "hyper3d/bang/rodin-task",
+      "provider_id": "hyper3d",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "hyper3d/bang/local-model",
+      "provider_id": "hyper3d",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "hyper3d/texture/local-model",
+      "provider_id": "hyper3d",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/creative-lab/keychain/prototype",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/creative-lab/keychain/build",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/creative-lab/fridge-magnet/prototype",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/creative-lab/fridge-magnet/build",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/creative-lab/lamp/prototype",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/creative-lab/lamp/build",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/creative-lab/figure/prototype",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/creative-lab/figure/build",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/creative-lab/vinyl-figure/prototype",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/creative-lab/vinyl-figure/build",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/creative-lab/brick-figure/prototype",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/creative-lab/brick-figure/build",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/creative-lab/keycap/prototype",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/creative-lab/keycap/build",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/creative-lab/fidget-pixel/prototype",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/creative-lab/fidget-pixel/build",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/creative-lab/fidget-collapsible/generate",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "meshy/meshy-7.1-multiview/image-to-3d",
+      "provider_id": "meshy",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/geometry/decimate-triangle",
+      "provider_id": "tripo",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/geometry/decimate-quad",
+      "provider_id": "tripo",
+      "enabled": false,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/geometry/segment",
+      "provider_id": "tripo",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/geometry/complete",
+      "provider_id": "tripo",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/geometry/quick-cap",
+      "provider_id": "tripo",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/geometry/smartsegment-image",
+      "provider_id": "tripo",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/geometry/smartsegment-model",
+      "provider_id": "tripo",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/image-to-splat",
+      "provider_id": "tripo",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/image-to-multiview",
+      "provider_id": "tripo",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    },
+    {
+      "id": "tripo/edit-multiview",
+      "provider_id": "tripo",
+      "enabled": true,
+      "evidence": "missing",
+      "source": "none"
+    }
+  ]
+}

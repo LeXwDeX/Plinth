@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "acceptance": {
+    "forge_project": "<GitLab project id>",
+    "forge_url": "https://<forge-host>/<group>/<project>",
+    "issue": 0
+  },
+  "environments": {
+    "dev-test": {
+      "description": "开发/测试环境：每次发布已推送的 origin/main，跑完整 L0/L1/L1 Agent 与相关验收",
+      "ssh": "root@<dev-test-host>",
+      "root": "<dev-test-release-root>",
+      "base_url": "http://<dev-test-host>:<port>",
+      "compose_project": "<dev-test-compose-project>",
+      "protect_projects": ["<candidate-compose-project>", "<legacy-formal-compose-project>"],
+      "protected_paths": ["<legacy-root>"],
+      "backup": {
+        "scope": "database",
+        "keep": 2
+      },
+      "build": {
+        "add_hosts": ["<registry-host>:<registry-address>"]
+      },
+      "layout": {
+        "GO_LEGACY_GENERATED_IMAGES_DIR": "<legacy-root>/storage/generated",
+        "GO_LEGACY_ASSET_CACHE_DIR": "<legacy-root>/storage/cache",
+        "GO_LEGACY_THUMBNAIL_CACHE_DIR": "<legacy-root>/storage/thumbnails",
+        "GO_LEGACY_INPUT_ASSETS_DIR": "<legacy-root>/storage/assets"
+      }
+    },
+    "formal-test": {
+      "description": "正式测试环境（测试版本中的稳定版）：只接收 dev-test 已稳定通过全部验收的精确 revision",
+      "ssh": "root@<formal-test-host>",
+      "root": "<formal-test-release-root>",
+      "base_url": "http://<formal-test-host>:<port>",
+      "compose_project": "<formal-test-compose-project>",
+      "protected_paths": [],
+      "promote_from": "dev-test",
+      "extra_compose_file": "<formal-test-release-root>/production/compose.network.yml",
+      "source_transfer": "scp",
+      "build": {
+        "network": "host",
+        "goproxy": "<internal Go proxy URL>",
+        "add_hosts": ["<registry-host>:<registry-address>"]
+      },
+      "single_stack": {
+        "image_keep": 1,
+        "keep_source_snapshots": 1,
+        "allow_bootstrap": true
+      },
+      "layout": {
+        "GO_WEB_BIND_IP": "<formal-test-host>",
+        "GO_WEB_HOST_PORT": "<port>",
+        "GO_PROD_DB_DIR": "<formal-test-release-root>/production/data",
+        "GO_PROD_STORAGE_DIR": "<formal-test-release-root>/production/storage-go",
+        "GO_PROD_WEB_DATA_DIR": "<formal-test-release-root>/production/web-data",
+        "GO_PROD_LOG_DIR": "<formal-test-release-root>/production/logs",
+        "GO_LEGACY_GENERATED_IMAGES_DIR": "<formal-test-release-root>/production/legacy-generated",
+        "GO_LEGACY_ASSET_CACHE_DIR": "<formal-test-release-root>/production/legacy-cache",
+        "GO_LEGACY_THUMBNAIL_CACHE_DIR": "<formal-test-release-root>/production/legacy-thumbnails",
+        "GO_LEGACY_INPUT_ASSETS_DIR": "<formal-test-release-root>/production/legacy-assets"
+      }
+    },
+    "legacy-formal": {
+      "description": "#232 隔离正式栈（与 dev-test 同机）；只由 scripts/release-go-formal.sh 晋级，release-env.py 不发布它",
+      "ssh": "root@<dev-test-host>",
+      "root": "<dev-test-release-root>",
+      "base_url": "http://<dev-test-host>:<legacy-formal-port>",
+      "compose_project": "<legacy-formal-compose-project>",
+      "managed_by": "release-go-formal.sh"
+    }
+  }
+}

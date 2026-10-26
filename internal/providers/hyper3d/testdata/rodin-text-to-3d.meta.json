@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "scenario": "rodin-text-to-3d-live",
+  "captured_at_utc": "2026-10-26",
+  "source_revision": "cceb1de644784973c43bdae71b1be88cbda6db46",
+  "schema_revision": "2026-10-26.issue363-validator-and-issue358-input-reasons.1",
+  "catalog_sha256": "c25872fa69ec00d7cb72654c4acde778efdd93f0521aaebce143ed634b8c3254",
+  "offering": "hyper3d/rodin-gen-2.5/text-to-3d",
+  "api_version": "v2",
+  "provenance": "captured",
+  "transformation": "IDs and signed URLs are deterministic placeholders; media bytes are synthetic recipes and are not the original bytes.",
+  "exchanges": 73,
+  "candidate_sha256": "6a40559768d495937d7e4418da3078a7cf4a62503eae16e366dd7f3ddf208935",
+  "media": [
+    {
+      "sequence": 72,
+      "media_type": "model/gltf-binary",
+      "recipe": "glb-triangle"
+    },
+    {
+      "sequence": 73,
+      "media_type": "image/webp",
+      "recipe": "webp-1x1"
+    }
+  ],
+  "evidence_note": "Private media evidence was retained outside the repository; this public manifest lists only lengths and SHA-256 digests.",
+  "source_state": "dirty-worktree at capture time; source_revision is the injected build label"
+}

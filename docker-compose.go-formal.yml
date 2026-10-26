@@ -1,0 +1,46 @@
+services:
+  art-ai-go:
+    image: art-ai-go-production:${FORMAL_IMAGE_TAG:?FORMAL_IMAGE_TAG is required}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    ports:
+      - "${FORMAL_BIND_IP:-0.0.0.0}:${FORMAL_PORT:-13334}:13333"
+    env_file:
+      - path: "${FORMAL_RUNTIME_ENV:?FORMAL_RUNTIME_ENV is required}"
+        required: true
+    environment:
+      APP_ENV: production
+      APP_ADDR: 0.0.0.0:13333
+      DATABASE_PATH: /app/data/art-ai.db
+      STORAGE_ROOT: /app/storage
+      WEB_ASSETS_ROOT: /app/web
+      AUTH_MODE: session
+      PROVIDER_MODE: live
+      AGENT_MODE: live
+      # #275：一次 Agent 回复最多执行的工具调用数；留空用 Schema 默认 20，范围 1..100。
+      AGENT_MAX_TOOL_CALLS_PER_REPLY: ${AGENT_MAX_TOOL_CALLS_PER_REPLY:-}
+      LEGACY_BACKEND_STARTUP_ENABLED: "false"
+      # #233：默认 DEBUG；应用日志写入挂载的 logs 目录并按大小/天数滚动。
+      LOG_LEVEL: debug
+      LOG_DIR: /app/logs
+    volumes:
+      - "${FORMAL_ROOT:?FORMAL_ROOT is required}/data:/app/data"
+      - "${FORMAL_ROOT:?FORMAL_ROOT is required}/storage-go:/app/storage"
+      - "${FORMAL_ROOT:?FORMAL_ROOT is required}/web-data:/app/web-data:ro"
+      - "${FORMAL_ROOT:?FORMAL_ROOT is required}/logs:/app/logs"
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    # stdout 与 logs/ 下的应用日志文件是同一份 JSON；这里限制 Docker 侧副本。
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "10"
+    healthcheck:
+      test: [CMD, wget, -qO-, "http://127.0.0.1:13333/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 9
+      start_period: 10s

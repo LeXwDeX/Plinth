@@ -1,0 +1,24 @@
+# Paths that never enter the public snapshot (scripts/make-public-snapshot.py, #261).
+# Syntax: one glob per line; "dir/" excludes a directory anywhere it matches;
+# a pattern without "/" also matches a file name in any directory.
+#
+# These are safety nets: all of them are untracked in normal use, so a
+# snapshot made from tracked files does not contain them anyway. Internal
+# operation files that ARE tracked (dev_ops.md, the internal Compose files,
+# the release/smoke scripts, .gitlab-ci.yml) stay in the snapshot: after the
+# switch the public repository is the primary repository and the internal
+# GitLab only mirrors it, so anything excluded here would vanish from the
+# mirror too. They must therefore be clean, which the scan enforces.
+
+# Local deployment folder and older local environment files (hosts, roots, ports).
+deploy/local/
+deploy/*.local.json
+# Local SpecGit declaration and generated agent assets.
+.specgit.yaml
+.agents/
+# Local session snapshots and worktrees.
+handoff.md
+.claude/worktrees/
+# Runtime environment files (.env.example, the published template, does not match).
+.env
+*.env

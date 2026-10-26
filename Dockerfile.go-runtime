@@ -1,0 +1,112 @@
+# 与 CI（.gitlab-ci.yml 的 node:22、GitHub Actions 的 NODE_VERSION）同一 Node 主版本。
+FROM node:22-alpine AS web-build
+
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+# npm 源固定为公共 registry（#257，不再接受构建参数覆盖）。pnpm 版本与 package.json 的
+# packageManager 一致；从 tarball 直装（不查元数据），lockfile 不写死任何源。
+ARG PNPM_VERSION=12.5.1
+RUN npm install -g "https://registry.npmjs.org/pnpm/-/pnpm-${PNPM_VERSION}.tgz" \
+ && pnpm config set registry https://registry.npmjs.org/ --global
+
+WORKDIR /src
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile --prefer-offline
+COPY . .
+RUN pnpm build:go-web
+
+# 与 CI（.gitlab-ci.yml 的 golang:1.27）同一 Go 工具链；go.mod 的 go 行是最低语言版本。
+FROM golang:1.27 AS build
+
+WORKDIR /src
+COPY go.mod go.sum ./
+ARG GOPROXY=https://proxy.golang.org,direct
+RUN GOPROXY="${GOPROXY}" go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+
+# 与运行镜像 OCI revision 标签同源：/api/version 返回链接进二进制的这个提交（#229）。
+ARG GO_SOURCE_COMMIT=unknown
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w -X github.com/LeXwDeX/Plinth/internal/app.sourceRevision=${GO_SOURCE_COMMIT}" \
+    -o /out/art-ai \
+    ./cmd/art-ai
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /out/art-ai-storage \
+    ./cmd/art-ai-storage
+
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /out/art-ai-retention \
+    ./cmd/art-ai-retention
+
+# 历史 Next→Go 迁移工具（#259）：只供内部运维镜像使用，自部署镜像不构建也不包含。
+FROM build AS migration-tools-build
+
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /out/art-ai-etl \
+    ./cmd/art-ai-etl
+
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /out/art-ai-recover-assets \
+    ./cmd/recover-existing-assets
+
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /out/art-ai-complete-conversion-delivery \
+    ./cmd/complete-conversion-delivery
+
+# 运行镜像公共部分：服务本身与通用维护命令（art-ai-storage、art-ai-retention）。
+FROM alpine:3.23 AS runtime-base
+
+ARG GO_IMAGE_TAG=local
+ARG GO_SOURCE_COMMIT=unknown
+LABEL org.opencontainers.image.version="${GO_IMAGE_TAG}" \
+      org.opencontainers.image.revision="${GO_SOURCE_COMMIT}"
+
+RUN addgroup -S artai && adduser -S -G artai artai
+WORKDIR /app
+COPY --from=build /out/art-ai /usr/local/bin/art-ai
+COPY --from=build /out/art-ai-storage /usr/local/bin/art-ai-storage
+COPY --from=build /out/art-ai-retention /usr/local/bin/art-ai-retention
+COPY --from=web-build /src/build/go-web /app/web
+RUN mkdir -p /app/data /app/storage \
+    && chown -R artai:artai /app
+
+USER artai
+ENV APP_ENV=production \
+    APP_ADDR=0.0.0.0:13333 \
+    DATABASE_PATH=/app/data/art-ai.db \
+    STORAGE_ROOT=/app/storage \
+    WEB_ASSETS_ROOT=/app/web
+
+EXPOSE 13333
+HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:13333/readyz >/dev/null || exit 1
+
+ENTRYPOINT ["/usr/local/bin/art-ai"]
+
+# 内部运维镜像（#259）：在公共运行镜像上追加历史迁移工具与 legacy 挂载点。
+# 只由内部测试/正式栈显式选用（release-server-steps.sh 的 --target、
+# docker-compose.go-production.yml / docker-compose.go-candidate.yml 的 target）。
+FROM runtime-base AS runtime-with-migration-tools
+
+USER root
+COPY --from=migration-tools-build /out/art-ai-etl /usr/local/bin/art-ai-etl
+COPY --from=migration-tools-build /out/art-ai-recover-assets /usr/local/bin/art-ai-recover-assets
+COPY --from=migration-tools-build /out/art-ai-complete-conversion-delivery /usr/local/bin/art-ai-complete-conversion-delivery
+RUN mkdir -p /app/legacy-generated /app/legacy-cache /app/legacy-thumbnails /app/legacy-assets \
+    && chown artai:artai /app/legacy-generated /app/legacy-cache /app/legacy-thumbnails /app/legacy-assets
+USER artai
+
+# 默认目标（最后一个阶段）是自部署镜像：`docker build` 与 docker-compose.yml 都得到它。
+FROM runtime-base AS runtime

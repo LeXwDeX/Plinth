@@ -1,0 +1,26 @@
+#include <fstream>
+
+#include "draco/compression/encode.h"
+#include "draco/mesh/triangle_soup_mesh_builder.h"
+int main() {
+  const float points[6][3] = {{1, 0, 0},  {-1, 0, 0}, {0, 1, 0},
+                              {0, -1, 0}, {0, 0, 1},  {0, 0, -1}};
+  const unsigned faces[8][3] = {{0, 2, 4}, {2, 1, 4}, {1, 3, 4}, {3, 0, 4},
+                                {2, 0, 5}, {1, 2, 5}, {3, 1, 5}, {0, 3, 5}};
+  draco::TriangleSoupMeshBuilder b;
+  b.Start(8);
+  int a =
+      b.AddAttribute(draco::GeometryAttribute::POSITION, 3, draco::DT_FLOAT32);
+  for (int i = 0; i < 8; i++)
+    b.SetAttributeValuesForFace(a, draco::FaceIndex(i), points[faces[i][0]],
+                                points[faces[i][1]], points[faces[i][2]]);
+  auto m = b.Finalize();
+  draco::Encoder enc;
+  enc.SetSpeedOptions(5, 5);
+  enc.SetEncodingMethod(draco::MESH_EDGEBREAKER_ENCODING);
+  enc.SetAttributeQuantization(draco::GeometryAttribute::POSITION, 14);
+  draco::EncoderBuffer out;
+  if (!enc.EncodeMeshToBuffer(*m, &out).ok()) return 1;
+  std::ofstream f("octahedron.drc", std::ios::binary);
+  f.write(out.data(), out.size());
+}

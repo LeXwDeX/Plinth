@@ -1,0 +1,28 @@
+# Manually maintained project preferences, not a generated SpecGit asset.
+# Initialize with an absolute --config-file path; .specgit.yaml remains local.
+version: 2
+remote: origin
+provider: gitlab
+target: main
+language: zh
+validation:
+  titles: false
+  labels: off
+  bodies: false
+init_policy:
+  required_checks: []
+tags: []
+templates:
+  issue:
+    source: builtin
+  pr:
+    source: builtin
+agent:
+  native_auto_merge: false
+  close_issues_after_merge: false
+observation:
+  poll_seconds: 15
+  max_wait_seconds: 1800
+  notify:
+    - attention
+    - completed

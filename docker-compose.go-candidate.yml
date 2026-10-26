@@ -1,0 +1,73 @@
+services:
+  art-ai-go:
+    build:
+      context: .
+      dockerfile: Dockerfile.go-runtime
+      # 内部镜像目标：含历史迁移工具与 legacy 挂载点（#259）。
+      target: runtime-with-migration-tools
+      args:
+        # npm 源固定为公共 registry（#257）；Go 代理可由环境文件调整。
+        GOPROXY: "${GO_GOPROXY:-https://proxy.golang.org,direct}"
+    image: art-ai-go-candidate:${GO_IMAGE_TAG:-local}
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Historical asset copies may retain the former Web container's nodejs GID.
+    # Supplemental membership lets the non-root Go process migrate those files.
+    group_add:
+      - "1001"
+    ports:
+      - "${GO_WEB_BIND_IP:-127.0.0.1}:${GO_WEB_HOST_PORT:-13335}:13333"
+    env_file:
+      - path: "${GO_PROVIDER_ENV_FILE:-../provider.env}"
+        required: false
+    environment:
+      APP_ENV: "${APP_ENV:-}"
+      APP_ADDR: 0.0.0.0:13333
+      DATABASE_PATH: /app/data/art-ai-candidate.db
+      STORAGE_ROOT: /app/storage
+      WEB_ASSETS_ROOT: /app/web
+      LEGACY_GENERATED_IMAGES_ROOT: /app/legacy-generated
+      ASSET_CACHE_DIR: /app/legacy-cache
+      THUMBNAIL_CACHE_DIR: /app/legacy-thumbnails
+      LEGACY_INPUT_ASSETS_ROOT: /app/legacy-assets
+      PROVIDER_MODE: "${GO_PROVIDER_MODE:-}"
+      AGENT_MODE: "${GO_AGENT_MODE:-}"
+      MESHY_WEBHOOK_PATH_SECRET: "${GO_WEBHOOK_PATH_SECRET:-}"
+      MESHY_WEBHOOK_KEY: "${GO_WEBHOOK_KEY:-}"
+      PUBLIC_BASE_URL: "${GO_PUBLIC_BASE_URL:-}"
+      ASSET_SIGNING_KEY: "${GO_ASSET_SIGNING_KEY:-}"
+      AUTH_MODE: "${AUTH_MODE:-}"
+      NEXT_PUBLIC_APP_URL: "http://${GO_WEB_BIND_IP:-127.0.0.1}:${GO_WEB_HOST_PORT:-13335}"
+      DEV_MOCK_AUTH: "${DEV_MOCK_AUTH:-}"
+      DEV_MOCK_USER: "${DEV_MOCK_USER:-}"
+      ADMIN_ALLOWLIST_EMAILS: "${ADMIN_ALLOWLIST_EMAILS:-}"
+      SESSION_SECRET: "${SESSION_SECRET:?SESSION_SECRET is required}"
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}"
+      ADMIN_DISPLAY_NAME: "${ADMIN_DISPLAY_NAME:-}"
+      ADMIN_EMAIL: "${ADMIN_EMAIL:-}"
+    volumes:
+      - "${GO_DB_DIR:-../storage/db}:/app/data"
+      - "${GO_BLOB_DIR:-../storage/blobs}:/app/storage"
+      - "${GO_WEB_STORAGE_DIR:-../storage/web-storage}/generated:/app/legacy-generated:ro"
+      - "${GO_LEGACY_ASSET_CACHE_DIR:-../storage/web-storage/cache}:/app/legacy-cache"
+      - "${GO_LEGACY_THUMBNAIL_CACHE_DIR:-../storage/web-storage/thumbnails}:/app/legacy-thumbnails"
+      - "${GO_WEB_STORAGE_DIR:-../storage/web-storage}/assets:/app/legacy-assets:ro"
+      - "${GO_WEB_DATA_DIR:-../storage/web-data}:/app/web-data:ro"
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:13333/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s

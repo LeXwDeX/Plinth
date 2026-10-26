@@ -1,0 +1,223 @@
+package httpapi_test
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/LeXwDeX/Plinth/internal/generation"
+)
+
+// 回归：任务历史（列表）对 tasks.read.any 持有者返回全量任务，
+// 单任务读路径（旧详情、旧下载、原生详情/资产）必须共用同一权限口径，
+// 不允许出现“列表显示已完成、详情却 404 任务不存在”的分叉。
+func TestAdminTaskReadPathsShareHistoryScope(t *testing.T) {
+	t.Parallel()
+	module, handler, _ := newHTTPHarnessWithRoles(t, []string{"admin"})
+	accepted := submitHistoryFixture(
+		t,
+		module,
+		"owner-b",
+		generation.TextToImage,
+		"cross owner detail",
+	)
+	task := reconcileFixtureTask(t, module, "owner-b", accepted.TaskID)
+	if task.State != generation.TaskSucceeded || len(task.Assets) == 0 {
+		t.Fatalf("fixture task = %#v", task)
+	}
+
+	history := serveTaskHistoryRequest(
+		handler,
+		"/api/tasks?page=1&pageSize=32",
+		"admin-user",
+	)
+	if history.Code != http.StatusOK {
+		t.Fatalf("history status = %d, body = %s", history.Code, history.Body.String())
+	}
+	var listed struct {
+		Data []struct {
+			ID           generation.TaskID `json:"id"`
+			ThumbnailURL string            `json:"thumbnailUrl"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(history.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Data) != 1 || listed.Data[0].ID != accepted.TaskID {
+		t.Fatalf("history data = %#v", listed.Data)
+	}
+
+	detail := serveScopedRequest(
+		handler,
+		"/api/meshy/text-to-image/"+string(accepted.TaskID),
+		"admin-user",
+	)
+	if detail.Code != http.StatusOK {
+		t.Fatalf(
+			"admin cross-owner detail status = %d, body = %s",
+			detail.Code,
+			detail.Body.String(),
+		)
+	}
+	var legacyTask struct {
+		ID         generation.TaskID `json:"id"`
+		OutputURLs []string          `json:"output_urls"`
+	}
+	if err := json.NewDecoder(detail.Body).Decode(&legacyTask); err != nil {
+		t.Fatal(err)
+	}
+	if legacyTask.ID != accepted.TaskID || len(legacyTask.OutputURLs) != 1 {
+		t.Fatalf("legacy detail = %#v", legacyTask)
+	}
+
+	download := serveScopedRequest(handler, legacyTask.OutputURLs[0], "admin-user")
+	if download.Code != http.StatusOK || download.Body.Len() == 0 {
+		t.Fatalf("admin cross-owner download status = %d", download.Code)
+	}
+
+	if listed.Data[0].ThumbnailURL == "" {
+		t.Fatalf("history thumbnailUrl missing: %#v", listed.Data[0])
+	}
+	thumbnail := serveScopedRequest(
+		handler,
+		listed.Data[0].ThumbnailURL,
+		"admin-user",
+	)
+	if thumbnail.Code != http.StatusOK || thumbnail.Body.Len() == 0 {
+		t.Fatalf("admin cross-owner thumbnail status = %d", thumbnail.Code)
+	}
+}
+
+// 回归：普通用户跨 owner 读取保持 404 隔离，read-any 扩展不放松边界。
+func TestRegularUserCrossOwnerTaskReadsRemainHidden(t *testing.T) {
+	t.Parallel()
+	module, handler, _ := newHTTPHarnessWithRoles(t, []string{"user"})
+	accepted := submitHistoryFixture(
+		t,
+		module,
+		"owner-b",
+		generation.TextToImage,
+		"isolated detail",
+	)
+	task := reconcileFixtureTask(t, module, "owner-b", accepted.TaskID)
+	if task.State != generation.TaskSucceeded || len(task.Assets) == 0 {
+		t.Fatalf("fixture task = %#v", task)
+	}
+
+	detail := serveScopedRequest(
+		handler,
+		"/api/meshy/text-to-image/"+string(accepted.TaskID),
+		"owner-a",
+	)
+	if detail.Code != http.StatusNotFound {
+		t.Fatalf(
+			"cross-owner detail status = %d, body = %s",
+			detail.Code,
+			detail.Body.String(),
+		)
+	}
+
+	ownHistory := serveTaskHistoryRequest(
+		handler,
+		"/api/tasks?page=1&pageSize=32",
+		"owner-b",
+	)
+	if ownHistory.Code != http.StatusOK {
+		t.Fatalf("owner history status = %d", ownHistory.Code)
+	}
+	var owned struct {
+		Data []struct {
+			ThumbnailURL string `json:"thumbnailUrl"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(ownHistory.Body).Decode(&owned); err != nil {
+		t.Fatal(err)
+	}
+	if len(owned.Data) != 1 || owned.Data[0].ThumbnailURL == "" {
+		t.Fatalf("owner history data = %#v", owned.Data)
+	}
+	asset := serveScopedRequest(
+		handler,
+		owned.Data[0].ThumbnailURL,
+		"owner-a",
+	)
+	if asset.Code != http.StatusNotFound {
+		t.Fatalf("cross-owner asset status = %d", asset.Code)
+	}
+}
+
+func reconcileFixtureTask(
+	t *testing.T,
+	module *generation.Module,
+	owner generation.OwnerID,
+	taskID generation.TaskID,
+) generation.Task {
+	t.Helper()
+	var task generation.Task
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := module.ReconcileOnce(
+			context.Background(),
+			generation.CoordinatorConfig{
+				WorkerID:  "read-scope-test",
+				LeaseFor:  time.Minute,
+				BatchSize: 10,
+			},
+		); err != nil {
+			t.Fatal(err)
+		}
+		var err error
+		task, err = module.Get(context.Background(), owner, taskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if task.State.Terminal() || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(12 * time.Millisecond)
+	}
+	return task
+}
+
+func serveScopedRequest(
+	handler http.Handler,
+	target string,
+	user string,
+) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodGet, target, nil)
+	request.Header.Set("X-User-ID", user)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+func TestTaskDetailShowsPromptToOwnerOnly(t *testing.T) {
+	t.Parallel()
+	module, handler, _ := newHTTPHarnessWithRoles(t, []string{"user"})
+	accepted := submitHistoryFixture(t, module, "owner-a", generation.TextToImage, "银色机械猫")
+	reconcileFixtureTask(t, module, "owner-a", accepted.TaskID)
+
+	own := serveScopedRequest(handler, "/api/v1/tasks/"+string(accepted.TaskID), "owner-a")
+	if own.Code != http.StatusOK {
+		t.Fatalf("owner status = %d body = %s", own.Code, own.Body.String())
+	}
+	var detail struct {
+		Input *struct {
+			Prompt string `json:"prompt"`
+		} `json:"input"`
+	}
+	if err := json.NewDecoder(own.Body).Decode(&detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.Input == nil || detail.Input.Prompt != "银色机械猫" {
+		t.Fatalf("owner input = %#v", detail.Input)
+	}
+
+	other := serveScopedRequest(handler, "/api/v1/tasks/"+string(accepted.TaskID), "owner-b")
+	if other.Code != http.StatusNotFound {
+		t.Fatalf("other owner status = %d body = %s", other.Code, other.Body.String())
+	}
+}

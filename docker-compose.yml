@@ -1,0 +1,70 @@
+# Plinth self-deploy stack (#251). From a clean machine:
+#
+#   cp .env.example .env      # fill SESSION_SECRET and ADMIN_PASSWORD
+#   ART_AI_SOURCE_COMMIT=$(git rev-parse HEAD) docker compose up -d --build --wait
+#
+# Every setting comes from .env; see README.md "Docker Compose 自部署" and
+# docs/self-deploy-security.md. Internal test/formal stacks use their own
+# docker-compose.go-*.yml files and are not part of this path.
+name: ${COMPOSE_PROJECT_NAME:-art-ai}
+
+services:
+  art-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile.go-runtime
+      # Self-deploy image: the service and its maintenance commands, without the
+      # internal Next→Go migration tools.
+      target: runtime
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+        GO_IMAGE_TAG: ${ART_AI_IMAGE_TAG:-local}
+        GO_SOURCE_COMMIT: ${ART_AI_SOURCE_COMMIT:-unknown}
+    image: art-ai:${ART_AI_IMAGE_TAG:-local}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${ART_AI_BIND_IP:-127.0.0.1}:${ART_AI_PORT:-13333}:13333"
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      # Self-deploy always runs the production profile: session login, no mock
+      # login, startup refuses missing or short secrets.
+      APP_ENV: production
+      AUTH_MODE: session
+      APP_ADDR: 0.0.0.0:13333
+      DATABASE_PATH: /app/data/art-ai.db
+      STORAGE_ROOT: /app/storage
+      WEB_ASSETS_ROOT: /app/web
+      # Tool calls one Agent reply may run; empty keeps the default 20 (1..100).
+      AGENT_MAX_TOOL_CALLS_PER_REPLY: ${AGENT_MAX_TOOL_CALLS_PER_REPLY:-}
+      # Required: compose refuses to start without them instead of running with
+      # a guessable value. Generate each with `openssl rand -base64 48`.
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required in .env; generate one with openssl rand -base64 48}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required in .env; it creates the first admin, see README.md}
+    volumes:
+      - art-ai-data:/app/data
+      - art-ai-storage:/app/storage
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:13333/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+volumes:
+  art-ai-data:
+  art-ai-storage:

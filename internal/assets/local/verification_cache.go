@@ -1,0 +1,113 @@
+package local
+
+import (
+	"os"
+	"sync"
+
+	"github.com/LeXwDeX/Plinth/internal/generation"
+)
+
+// verificationCache remembers that one stored file, at one concrete identity,
+// already passed the digest check and the delivery isolation inspection for
+// one set of asset expectations. It exists because Prepare used to re-read and
+// re-parse every file of an archive on every request, including the same OBJ
+// and MTL twice.
+//
+// A verdict is keyed by the file's device, inode, size, modification time and
+// change time, and by the digest/size/profile/role/variant/media type it was
+// verified against. Any rewrite or replacement changes the identity and the
+// file is fully verified again; a record for another digest or profile does
+// not satisfy the lookup. The cache therefore never strengthens what a caller
+// may read: it only skips repeating a check that already passed for exactly
+// these bytes.
+type verificationCache struct {
+	mu      sync.Mutex
+	entries map[verificationKey]struct{}
+	order   []verificationKey
+	limit   int
+	hits    uint64
+	misses  uint64
+}
+
+type fileIdentity struct {
+	size     int64
+	modified int64
+	changed  int64
+	device   uint64
+	inode    uint64
+}
+
+type verificationKey struct {
+	storageKey   string
+	identity     fileIdentity
+	digest       string
+	expectedSize int64
+	profile      string
+	role         string
+	variant      string
+	mediaType    string
+}
+
+func newVerificationCache(limit int) *verificationCache {
+	if limit <= 0 {
+		limit = 4096
+	}
+	return &verificationCache{entries: make(map[verificationKey]struct{}), limit: limit}
+}
+
+func verificationKeyOf(info os.FileInfo, asset generation.Asset) verificationKey {
+	return verificationKey{
+		storageKey:   asset.StorageKey,
+		identity:     fileIdentityOf(info),
+		digest:       asset.SHA256,
+		expectedSize: asset.Size,
+		profile:      asset.DeliveryProfile,
+		role:         asset.Role,
+		variant:      asset.Variant,
+		mediaType:    asset.MediaType,
+	}
+}
+
+// hit reports whether this exact file identity already passed every check for
+// these expectations. It deliberately does not refresh the entry: a file that
+// is being rewritten must not extend its own verdict.
+func (c *verificationCache) hit(info os.FileInfo, asset generation.Asset) bool {
+	key := verificationKeyOf(info, asset)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.entries[key]; ok {
+		c.hits++
+		return true
+	}
+	c.misses++
+	return false
+}
+
+func (c *verificationCache) remember(info os.FileInfo, asset generation.Asset) {
+	key := verificationKeyOf(info, asset)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.entries[key]; ok {
+		return
+	}
+	c.entries[key] = struct{}{}
+	c.order = append(c.order, key)
+	for len(c.order) > c.limit {
+		delete(c.entries, c.order[0])
+		c.order = c.order[1:]
+	}
+}
+
+func sameFileIdentity(a, b fileIdentity) bool { return a == b }
+
+// VerificationStats reports cache hits, misses and the bytes hashed by misses
+// since the store was opened. They back tests and operational evidence that a
+// repeated download no longer repeats the full-file checks.
+func (s *Store) VerificationStats() (hits, misses, verifiedBytes uint64) {
+	if s.verified == nil {
+		return 0, 0, s.verifiedBytes.Load()
+	}
+	s.verified.mu.Lock()
+	defer s.verified.mu.Unlock()
+	return s.verified.hits, s.verified.misses, s.verifiedBytes.Load()
+}
