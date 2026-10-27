@@ -261,7 +261,7 @@ scripts/release-go-formal.sh <完整SHA> \
   --credentials-file <本地0600 JSON>
 ```
 
-note 报告必须包括 `formal_promotion: 1`、完整 revision、test manifest 的 image tag 和 `L0`/`L1`/`L1_agent`/`related` 四项无失败、无 skip/soft-fail 的本仓 GitLab 证据。切换期间的失败由晋级事务自动处理：有前版时恢复其数据、运行环境与镜像；首次切换失败时停候选并保留现场。发布写出 `formal/reports/current.json` 后若正式 L0/L1 验收失败，再用 `scripts/release-go-formal.sh <当前正式完整SHA> --rollback`；有前版则恢复，有 current 但无前版（首次成功发布）则停正式服务并回执 `stopped-no-previous-version`。若首次发布失败留下 formal 根但尚无 `current.json`，当前脚本拒绝重复晋级，需要先检查半初始化报告、pins、容器及数据；不要盲目重跑。具体恢复回执与尚未验证状态记入 #232。
+note 报告必须包括 `formal_promotion: 1`、完整 revision、test manifest 的 image tag 和 `L0`/`L1`/`L1_agent`/`related` 四项无失败、无 skip/soft-fail 的本仓库证据（GitHub Issue comment）。切换期间的失败由晋级事务自动处理：有前版时恢复其数据、运行环境与镜像；首次切换失败时停候选并保留现场。发布写出 `formal/reports/current.json` 后若正式 L0/L1 验收失败，再用 `scripts/release-go-formal.sh <当前正式完整SHA> --rollback`；有前版则恢复，有 current 但无前版（首次成功发布）则停正式服务并回执 `stopped-no-previous-version`。若首次发布失败留下 formal 根但尚无 `current.json`，当前脚本拒绝重复晋级，需要先检查半初始化报告、pins、容器及数据；不要盲目重跑。具体恢复回执与尚未验证状态记入 #232。
 
 两栈默认 DEBUG，应用日志同时写 stdout（`json-file` `50m × 10`）和各栈 `logs/art-ai.log`（50 MiB 滚动、保留 30 天），响应带 `X-Request-ID` 错误 ID，日志统一脱敏（#233）。详情见 `dev_ops.md`。
 

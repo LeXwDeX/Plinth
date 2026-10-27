@@ -1,0 +1,16 @@
+{
+  "scenario": "rodin-agent-live",
+  "source_sha": "c0893df8a105abff28b310af955f0174a202e0b2",
+  "catalog_sha256": "c25872fa69ec00d7cb72654c4acde778efdd93f0521aaebce143ed634b8c3254",
+  "connections": [
+    "hyper3d",
+    "LLM"
+  ],
+  "duration_seconds": 1800,
+  "policy_name": "rodin-agent-live-2026-10-26",
+  "deferred_limits": {
+    "MaxBytes": 33554432,
+    "MaxExchanges": 256
+  },
+  "merged_main": "5ad071aba8ba1636b4a4b36aa2a1e65e1ecb95a0"
+}

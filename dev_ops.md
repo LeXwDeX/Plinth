@@ -78,7 +78,7 @@ manifest（发布历史）：`<root>/releases/manifest.txt`（`<root>` 为本地
 
 正式 Compose 不 build；通过通用容量原语检查磁盘/备份预算，先在独立临时 Compose 项目及 `127.0.0.1:13342` 做启动、healthz/readyz 和首次登录预检，再操作正式服务。正式栈空库起步，不复制测试数据、不挂载 legacy Next 目录。运行配置显式为 `APP_ENV=production`、`PROVIDER_MODE=live`、`AGENT_MODE=live`、`AUTH_MODE=session`，不启用 mock。Provider Key 留空，远程 Offering 不可用，本地 Offering 仍按自身能力可用。正式栈使用独立 `SESSION_COOKIE_NAME=art_ai_formal_session`，该字段是服务端运行配置，不投影到公开 Schema；默认 cookie 名保持兼容测试栈。BootstrapAdmin 凭据由 `--credentials-file` 生成/读取，JSON 仅允许本地普通文件且权限 `0600`，包含正式栈独立的管理员名、强随机密码和不少于 32 字节的 `SESSION_SECRET`，密码只在用户本地凭据文件交付，不写报告。首次管理员登录验证后，发布器移除运行环境中的 `ADMIN_PASSWORD`、重建容器并再次验证登录及实际容器环境；避免启动参数在后续重启时覆盖改密。正式根为 `0700`，不复制测试栈认证秘密。
 
-晋级来源 note 在 #232 的原生 Issue note 中包含且只包含一份符合下列结构的 JSON fenced block。四项 checks 均必须 PASS，不能用 SKIP/SOFT-FAIL 填补；每项证据都必须是本仓 GitLab 项目内的完整 URL。
+晋级来源报告是环境文件 `acceptance.legacy_formal_issue` 指定的 GitHub Issue 下的一条 comment（早期回执在内部存档 #232），其中包含且只包含一份符合下列结构的 JSON fenced block。四项 checks 均必须 PASS，不能用 SKIP/SOFT-FAIL 填补；每项证据都必须是本仓库内的完整 URL。
 
 ```json
 {

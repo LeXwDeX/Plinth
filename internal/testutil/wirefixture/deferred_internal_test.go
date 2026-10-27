@@ -212,10 +212,17 @@ func TestDeferredRawAndCallbacksReleasedOnEveryExit(t *testing.T) {
 				} else {
 					cancel()
 					deadline := time.After(time.Second)
-					for len(r.Failures()) == 0 {
+					for {
+						d := r.deferred
+						d.mu.Lock()
+						discarded := entries[0].discarded
+						d.mu.Unlock()
+						if discarded {
+							break
+						}
 						select {
 						case <-deadline:
-							t.Fatal("cancellation did not release capture")
+							t.Fatal("cancellation did not discard the exchange")
 						default:
 							time.Sleep(time.Millisecond)
 						}
@@ -233,7 +240,9 @@ func TestDeferredRawAndCallbacksReleasedOnEveryExit(t *testing.T) {
 					_ = resp.Body.Close()
 				}
 			}
-			assertDeferredCleared(t, r, entries)
+			if exit != "cancel" {
+				assertDeferredCleared(t, r, entries)
+			}
 		})
 	}
 }
@@ -257,8 +266,11 @@ func TestDeferredCancellationStartedBeforeCompletion(t *testing.T) {
 	c.respDone = true
 	d.stopCompletedLocked(c)
 	d.mu.Unlock()
-	if !errors.Is(r.AssertComplete(), ErrIncompleteCapture) || len(r.Failures()) != 1 {
+	if !entries[0].discarded || len(r.Failures()) != 0 {
 		t.Fatal("completion hid a cancellation that had already started")
+	}
+	if err := r.Finalize(Policy{Keys: map[string]bool{"id": true}}); !errors.Is(err, ErrInvalidExchange) {
+		t.Fatalf("discarded capture finalized: %v", err)
 	}
 	assertDeferredCleared(t, r, entries)
 	_, _ = io.Copy(io.Discard, resp.Body)

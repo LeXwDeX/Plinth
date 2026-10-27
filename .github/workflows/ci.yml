@@ -1,9 +1,8 @@
-# 公共 CI（#257）。门禁真源：dev_test.md §2「自动化门禁项」。
-# 门禁作业（frontend、go check、go test race）与 .gitlab-ci.yml 同名、同命令，执行 §2 标为 CI 的各项；
-# src/__tests__/ci-gate-parity.test.ts 校验两处 CI、本地入口与 §2 一致。作业之间没有依赖，同时开始。
+# CI（#257；本仓库唯一的 CI）。门禁真源：dev_test.md §2「自动化门禁项」。
+# 门禁作业（frontend、go check、go test race）执行 §2 标为 CI 的各项；
+# src/__tests__/ci-gate-parity.test.ts 校验 CI、本地入口与 §2 一致。作业之间没有依赖，同时开始。
 # 这里只用公共 runner、公共 npm registry（registry.npmjs.org）与 Go proxy，不访问任何内网主机。
 # CI 不构建镜像（#257）：运行镜像由发布流程从源码构建。
-# 内网 GitLab runner 继续跑 .gitlab-ci.yml 的同一组门禁。
 # Action 固定到发布标签对应的完整提交 SHA（注释为标签），升级时一并核对。
 
 name: ci
@@ -22,7 +21,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # 与 .gitlab-ci.yml 的 node:22 与 golang:1.27 镜像一致；pnpm 版本取 package.json 的 packageManager。
+  # 与 Dockerfile.go-runtime 的 node:22 与 golang:1.27 一致；pnpm 版本取 package.json 的 packageManager。
   NODE_VERSION: '22'
   GO_VERSION: '1.27'
 
@@ -71,7 +70,7 @@ jobs:
     name: go test race
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    # 与 .gitlab-ci.yml 同一处理：httpapi 包在 -race 下接近 go test 默认的 10m 单包超时，
+    # httpapi 包在 -race 下接近 go test 默认的 10m 单包超时，
     # 用 GOFLAGS 放宽，门禁命令本身保持与 dev_test.md §2 逐字一致。
     env:
       GOFLAGS: -timeout=30m

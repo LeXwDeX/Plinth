@@ -20,11 +20,11 @@
   生产凭据不在测试脚本、日志或报告中写出。模型列表 200 只能证明鉴权和
   目录可达；生成验收还须核对
   `Task` 状态、READY 资产、实际图片内容、刷新后的历史版本；
-- #232 正式栈来源验收必须先在 test 完成 L0/L1/L1 Agent 与相关检查，再以完整 revision/image tag 写入 #232 原生 note。正式晋级后仅跑正式 L0/L1；`smoke-l1-formal-keyless.py` 显式要求不同的 `BASE`/`TEST_BASE` 与完整正式管理员凭据，`--expect-empty` 仅用于首次空库。它核对正式无 Key Offering 投影、空库（首次）、登录/登出、登出后用登录时捕获的真实 formal Cookie 验证撤销，以及该 Cookie 和改名后的同 secret Cookie 对 test 的只读跨端口拒绝（匿名 session、tasks 401），不调用 Agent、Provider 或生成任务。晋级来源报告的四项检查 `L0`、`L1`、`L1_agent`、`related` 必须各为 pass、`failed=0`、`passed>0`、没有 skip/soft-fail 且附本仓 GitLab 完整 URL；正式部署状态仍以 Issue 读回为准，源码或本机 fixture 不能充当线上验收。
+- #232 正式栈来源验收必须先在 test 完成 L0/L1/L1 Agent 与相关检查，再以完整 revision/image tag 写入 #232 原生 note。正式晋级后仅跑正式 L0/L1；`smoke-l1-formal-keyless.py` 显式要求不同的 `BASE`/`TEST_BASE` 与完整正式管理员凭据，`--expect-empty` 仅用于首次空库。它核对正式无 Key Offering 投影、空库（首次）、登录/登出、登出后用登录时捕获的真实 formal Cookie 验证撤销，以及该 Cookie 和改名后的同 secret Cookie 对 test 的只读跨端口拒绝（匿名 session、tasks 401），不调用 Agent、Provider 或生成任务。晋级来源报告的四项检查 `L0`、`L1`、`L1_agent`、`related` 必须各为 pass、`failed=0`、`passed>0`、没有 skip/soft-fail 且附本仓 Issue comment 的完整 URL；正式部署状态仍以 Issue 读回为准，源码或本机 fixture 不能充当线上验收。
 - 本系统依赖的背景去除服务与 `dev-test` 同机（接线地址见 dev-test 运行环境文件 `MATTING_*`，项目目录只记在本地环境资料中，不写入仓库）；若该服务异常，先检查现有容器状态、项目配置与 `/health`，再按实际故障修复并验证；
 
 ### 自动化门禁项
-每项后面的「」是门禁名（本地入口与 CI 作业日志里的名字），（）是执行位置：**本地** 指 `scripts/verify-local.py` 的默认运行（pre-push 即此），**CI** 指内网 `.gitlab-ci.yml` 与公共 `.github/workflows/ci.yml` 两处，二者作业与命令相同。
+每项后面的「」是门禁名（本地入口与 CI 作业日志里的名字），（）是执行位置：**本地** 指 `scripts/verify-local.py` 的默认运行（pre-push 即此），**CI** 指 GitHub Actions `.github/workflows/ci.yml`。
 
 1. **TypeScript 类型检查**「frontend typecheck」（本地 + CI）：`pnpm exec tsc --noEmit` 必须零错误；
 2. **单元测试**「frontend test」（本地 + CI）：`pnpm test` 必须通过；
@@ -43,31 +43,26 @@
 
 CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check`（第 4、7、8 项；第 8 项只需 git 与 python3，放在已有作业里不多占 runner 槽位）、`go test race`（第 6 项）。三个作业放在同一 stage，同时排队、互不等待；前端几项合为一个作业，因为每个作业都要单独等一个 runner 槽位，排队时间远长于这几项本身的运行时间（2026-10-20 流水线 30897/30899：前端各作业运行 7–27 秒，却各排队 18–55 分钟，Go 各作业还要等前端阶段结束）。两处 CI 都只有这三个作业，不构建镜像（#257）。
 
-本机门禁对第 5 项（及 `--race` 时的第 6 项）额外加 `-timeout=30m`：同一工作站并行运行多个会话的门禁时，`httpapi`、`sqlite` 等包会超过 Go 默认的单包 10 分钟上限而误报失败（2026-10-19 多次出现，单独重跑均通过）。内网 GitLab 与公共 GitHub 的 race 作业都以作业级 `GOFLAGS=-timeout=30m` 做同样放宽（内网 runner 上 `httpapi` 包在 race 下约 596 秒，贴近 10 分钟上限；GitHub 标准 runner 的耗时要到发布后才能实测）。这些参数只放宽单包超时，不改变测试集合与判定，门禁命令仍按上面所列。
+本机门禁对第 5 项（及 `--race` 时的第 6 项）额外加 `-timeout=30m`：同一工作站并行运行多个会话的门禁时，`httpapi`、`sqlite` 等包会超过 Go 默认的单包 10 分钟上限而误报失败（2026-10-19 多次出现，单独重跑均通过）。CI 的 race 作业以作业级 `GOFLAGS=-timeout=30m` 做同样放宽（2026-10 在单台 runner 上 `httpapi` 包 race 约 596 秒，贴近 10 分钟上限）。这些参数只放宽单包超时，不改变测试集合与判定，门禁命令仍按上面所列。
 
 部分 Generation、Agent 工具和 HTTP 集成测试通过 `internal/adapters/sqlite/sqlitetest.Open` 创建独立数据库：该 helper 在每个测试进程内共享一个惰性构建的真实迁移模板库，关闭连接并确认没有 WAL 后缓存其字节，只为不存在的目标文件复制。每次仍调用真实 `sqlite.Open` 检查迁移版本与 checksum；已有数据库原样打开，重启、恢复和篡改场景不覆盖原文件。SQLite 迁移测试继续直接执行真实迁移，不使用该模板。此优化只减少重复 fixture 初始化，不减少测试集合、断言或 race 检测，也不改变 runner 上限。
 
-### CI 分工：公共 GitHub Actions 与内网 GitLab runner（#257）
+### CI：GitHub Actions（#257）
 
-GitLab 的 pnpm bootstrap（`npm install --global`）和项目依赖安装（`pnpm install`）都显式传 `--registry=https://registry.npmjs.org/`。公共 tarball URL 只固定 pnpm 包本身，其 optional dependencies 仍需按 registry 解析；作业变量和 `~/.npmrc` 不能阻止继承的 `npm_config_registry` / `PNPM_CONFIG_REGISTRY` 改变解析源，因此两条安装命令都以 CLI 参数固定公共源。`ci-gate-parity.test.ts` 检查两种安装步骤都存在且逐条带该参数，不改变门禁集合、版本或 CI 暂停规则。本机配置优先级与命令契约检查不替代实际 runner 安装验收。
+本仓库只有一处 CI：`.github/workflows/ci.yml`。2026-10-27 起 GitHub 是唯一仓库，内部 GitLab 与其 runner 不再使用（GitHub #60）。CI 执行上面「自动化门禁项」中标为 CI 的各项，作业分组为 `frontend`、`go check`、`go test race`，不另立清单：
 
-开源后 GitHub 是主开发仓库，内网 GitLab 是镜像（切换与镜像同步见 #261）。两处 CI 执行上面「自动化门禁项」中标为 CI 的各项，作业分组（`frontend`、`go check`、`go test race`）与命令完全相同，不另立清单：
+| | GitHub Actions |
+|---|---|
+| 触发 | 推送到 `main`、所有 Pull Request、手动 |
+| 依赖源 | 公共 npm registry（`registry.npmjs.org`）与 Go proxy；不访问任何内网主机 |
+| 工具链 | Node 22、Go 1.27、pnpm 取 `package.json` 的 `packageManager`（与 `Dockerfile.go-runtime` 一致） |
+| 作业 | 三个门禁作业；不构建镜像（#257） |
+| 用途 | 所有 PR（含维护者自己的）的必过门禁；不承担发布 |
 
-| | 公共 CI：GitHub Actions | 内测 CI：内网 GitLab runner |
-|---|---|---|
-| 定义 | `.github/workflows/ci.yml` | `.gitlab-ci.yml` |
-| 触发 | 推送到 `main`、所有 Pull Request、手动 | 仅手动：GitLab「运行流水线」、API、trigger 或 tag；推送与 MR 不自动运行（1.0 前暂停） |
-| 依赖源 | 公共 npm registry（`registry.npmjs.org`）与 Go proxy；不访问任何内网主机 | 同一公共 npm registry 与 Go proxy（#257 起不再使用内网 npm 镜像）；runner 本地缓存加速，缓存未命中时仍访问公共源 |
-| 工具链 | Node 22、Go 1.27、pnpm 取 `package.json` 的 `packageManager` | `node:22-bookworm-slim`、`golang:1.27` 镜像，pnpm 12.5.1（与 `packageManager`、Dockerfile 一致） |
-| 作业 | 三个门禁作业 | 三个门禁作业（同名、同命令）；内部环境的部署与发布后验收仍按 §3、§11 和 `scripts/smoke/README.md` 在内网执行，不进公共 CI |
-| 用途 | 外部贡献者 PR 的必过门禁；GitHub 分支保护要求这些作业通过 | 内部开发与内测；不承担发布 |
-
-- **对齐守门**：`src/__tests__/ci-gate-parity.test.ts`（随 `pnpm test` 在本地和两处 CI 运行）解析本节「自动化门禁项」、`scripts/verify-local.py`、`.gitlab-ci.yml` 与 `.github/workflows/ci.yml`，要求：标为 CI 的每项命令逐字出现在恰好一个 CI 作业里（同一项的多条命令在同一作业、按本节顺序），CI 作业里没有本节以外的命令，GitLab 与 GitHub 的作业名与命令完全相同（两处都不构建镜像，#257）；本地入口默认集合的门禁名与顺序等于标为本地的各项，`--race` 加跑的门禁名等于唯一标为仅 CI 的一项；工作流不含内网主机且每个 Action 固定到完整提交 SHA。增删、改写或改变执行位置时，同一提交里改这四处，测试才会通过。
+- **对齐守门**：`src/__tests__/ci-gate-parity.test.ts`（随 `pnpm test` 在本地和 CI 运行）解析本节「自动化门禁项」、`scripts/verify-local.py` 与 `.github/workflows/ci.yml`，要求：标为 CI 的每项命令逐字出现在恰好一个 CI 作业里（同一项的多条命令在同一作业、按本节顺序），CI 作业里没有本节以外的命令；本地入口默认集合的门禁名与顺序等于标为本地的各项，`--race` 加跑的门禁名等于唯一标为仅 CI 的一项；工作流不含内网主机且每个 Action 固定到完整提交 SHA。增删、改写或改变执行位置时，同一提交里改这三处，测试才会通过。
 - **Action 版本**：工作流中的 Action 固定到发布标签对应的完整提交 SHA，行尾注释写标签；升级时在官方仓库核对标签与 SHA 再一起改。
-- **镜像方向与失败处理**：GitHub 是唯一的写入源，代码只从 GitHub 单向同步到内网 GitLab（GitHub → GitLab），不反向推送。GitHub 托管的 runner 访问不到内网，同步由内网一侧主动拉取 GitHub 再推到 GitLab（当前内网 GitLab 为社区版，没有拉取镜像功能，具体做法在 #261 落地时确定并记在该 Issue）。GitLab 上的 `main` 只接受同步写入：内部改动也走 GitHub PR，不在 GitLab 直接提交或合并到 `main`。同步失败时 GitHub 照常开发与合并，GitLab 暂时落后；修复后下一次同步补齐，内网 runner 对补上的提交照常跑流水线。若两边历史分叉，以 GitHub 为准重置镜像，GitLab 侧多出的提交先改成 GitHub PR 再同步。
-- **内测分工**：公共 CI 只跑上面的三组门禁；CI 不构建镜像（#257），零 Key 的 Mock 自部署冒烟 `scripts/smoke/smoke-public-mock.sh` 保留为本地手动验收（自部署后运行，覆盖登录、健康、一次 Mock 图片与一次 Mock 3D 任务的全部产物下载核对、restart 与 down/up 持久化及 `down -v` 清理），不再作为公共 CI 作业。门禁不需要任何密钥，外部贡献者的 PR 也能完整运行。内部环境（`dev-test`、`formal-test`）的部署与 L0/L1/L1 Agent 冒烟仍经 `scripts/release-env.py release`/`smoke` 走 `scripts/smoke/` 的内网脚本，真实模型付费验收也只由维护者在内部测试环境执行（§3、§11），都不进公共 CI，也不是外部 PR 的合并条件。
-- **发布后才做的设置**：仓库发布到 GitHub（#261）后，由维护者在 GitHub 仓库设置里为 `main` 打开分支保护，把三个检查（`frontend`、`go check`、`go test race`）设为必过。这一步目前**尚未执行**。
-- **只能在 GitHub 上确认的事项**：工作流实际运行并通过、分支保护把这三个检查设为必过、GitHub → GitLab 镜像同步及同步失败处理。这些在 #261 发布后按 #257 验收，在此之前不能视为已验证。镜像只由发布流程在目标环境从源码构建；CI 不构建镜像，也不要求公共 CI 验证镜像构建。
+- **CI 与内部验收的分工**：CI 只跑上面的三组门禁，不需要任何密钥，外部贡献者的 PR 也能完整运行。零 Key 的 Mock 自部署冒烟 `scripts/smoke/smoke-public-mock.sh` 保留为本地手动验收（自部署后运行，覆盖登录、健康、一次 Mock 图片与一次 Mock 3D 任务的全部产物下载核对、restart 与 down/up 持久化及 `down -v` 清理）。维护者内部环境（`dev-test`、`formal-test`）的部署与 L0/L1/L1 Agent 冒烟经 `scripts/release-env.py release`/`smoke` 走 `scripts/smoke/` 的脚本，真实模型付费验收也只由维护者在内部测试环境执行（§3、§11），都不进 CI，也不是外部 PR 的合并条件。
+- **分支保护**：由维护者在 GitHub 仓库设置里为 `main` 打开分支保护，把三个检查（`frontend`、`go check`、`go test race`）设为必过。是否已打开以 GitHub 设置读回为准，本文不记录状态。
 
 ### 官方 API 契约驱动的 TDD 与 CI
 - 每个受影响的上游端点，在编写或调整该端点的测试前，先查该端点当前官方文档；记录官方 URL、核对日期、端点/API 版本、模型版本（适用时）及已知文档冲突。不要从一个端点推断其他端点使用相同版本。文档无法访问或信息冲突时，记录未知项并暂停对该项的契约推断。
@@ -81,7 +76,7 @@ GitLab 的 pnpm bootstrap（`npm install --global`）和项目依赖安装（`pn
 ### 自动化门禁说明
 - **本节是发布前门禁清单的唯一真源**：`AGENTS.md`「提交前门禁」章节及
   发布操作均以本节为准，不得另行维护平行清单；
-- 远端 CI 分两处执行同一组 CI 门禁（分工见上节「CI 分工」）：内网 GitLab runner 由 `.gitlab-ci.yml` 执行，公共 GitHub Actions 由 `.github/workflows/ci.yml` 执行。交付同时保留本地门禁证据；交付 `dev-test` 前还须核对最终待发布 `main` 精确 SHA 的完整 GitLab 流水线，所有作业 success（2026-09-08 已核实 GitLab 远端作业实际运行；GitHub 作业要到仓库发布到 GitHub（#261）后才能实际运行）；
+- 远端 CI 只有 GitHub Actions（`.github/workflows/ci.yml`，见上节「CI」）。交付同时保留本地门禁证据；交付 `dev-test` 前还须核对最终待发布 `main` 精确 SHA 的完整 CI 运行，所有作业 success；
 - `gofmt` 格式检查与 `go mod verify` 不在门禁内：两者属格式/依赖完整性守门，不影响功能正确性，本地与 CI 门禁合起来覆盖 vet/test/race/build 已足以拦截功能性回归，需要时手动执行；
 - 任一失败则中止部署，必须修复后重试；
 - 单元测试配置：`vitest.config.ts`；
@@ -106,20 +101,15 @@ GitLab 的 pnpm bootstrap（`npm install --global`）和项目依赖安装（`pn
   输出中复制；
 - 部署之后，需要覆盖验证 `MeshyAI Provider 以外` 的自定义接入功能链路。
 
-### 1.0 前的 CI 暂停与交付硬门禁（2026-10-21 更新）
+### 交付硬门禁
 
-开发期改动多为小的微调，而内网只有一台 runner，每次推送和每个 MR 都排队跑全量，大部分时间耗在 CI 上。1.0 发布前保留当前暂停：
-
-- `.gitlab-ci.yml` 的 `workflow: rules` 只允许手动触发的流水线运行：GitLab「运行流水线」、API、trigger 或 tag。推送和 MR 不自动跑 CI；需要完整流水线时由维护者用 GitLab Web 或 API 手动启动同一套作业。
-- 合并前仍以本机门禁为准：每个分支推送时照常跑 pre-push（本地七项）；合并到 `main` 前，在待合并的 head 上跑一次 `python3 scripts/verify-local.py --race`，结果写进 MR。
-- 交付任何改动到 `dev-test` 前，最终待发布的精确 `main` SHA 必须在 GitLab 上有一条完整 CI 流水线且所有作业 success。旧 SHA、其他提交的流水线、只跑本机门禁、有 skip 或未完成/取消的作业都不算通过；不能用“本机已过”替代该 SHA 的 CI 结果。
+- 合并前以本机门禁为准：每个分支推送时照常跑 pre-push（本地七项）；合并到 `main` 前，在待合并的 head 上跑一次 `python3 scripts/verify-local.py --race`，结果写进 PR。
+- 交付任何改动到 `dev-test` 前，最终待发布的精确 `main` SHA 必须在 GitHub Actions 上有一次完整的 `ci` 运行且所有作业 success。旧 SHA、其他提交的运行、只跑本机门禁、有 skip 或未完成/取消的作业都不算通过；不能用“本机已过”替代该 SHA 的 CI 结果。
 - 发布到 `dev-test` 前，还要在同一个待发布 `main` revision 上再跑一次本机 `--race` 全量；发布后照常做 L0、L1、L1 Agent 和相关验收。CI 只作门禁，不承担部署。
-- 不为了 GitHub CI 提前 push 或改动提交顺序；GitHub 侧工作流的验证按其自身发布计划处理。
-- 1.0 发布前删掉 `workflow` 段恢复自动 CI，并在发布 revision 上完整跑一次 CI。
 
 ### 本地统一入口与 pre-push 复用
 
-安装本工作树依赖后，最终源内容使用 `python3 scripts/verify-local.py` 执行上述标为本地的各项（七项，不含 race）。开发过程中可先跑受影响的测试；最终全套和 pre-push 使用同一入口。`--force` 强制完整重跑，`--check` 只检查是否有可复用结果，不执行门禁，`--race` 额外执行仅 CI 的 race 项（可与前两者组合）。CI 仍独立执行标为 CI 的各项（内网 `.gitlab-ci.yml`、公共 `.github/workflows/ci.yml`），不读取本机凭据。
+安装本工作树依赖后，最终源内容使用 `python3 scripts/verify-local.py` 执行上述标为本地的各项（七项，不含 race）。开发过程中可先跑受影响的测试；最终全套和 pre-push 使用同一入口。`--force` 强制完整重跑，`--check` 只检查是否有可复用结果，不执行门禁，`--race` 额外执行仅 CI 的 race 项（可与前两者组合）。CI 仍独立执行标为 CI 的各项（`.github/workflows/ci.yml`），不读取本机凭据。
 
 凭据记录实际通过的门禁名。默认运行的凭据不含 race，`--race`（含 `--check --race`）不会把它当作已覆盖 race，而是完整重跑；`--race` 运行的凭据覆盖默认七项，之后的 pre-push 可直接复用。输出中的复用与完整通过行列出实际覆盖的门禁，未跑 race 时注明它只在 CI 执行。
 
@@ -143,7 +133,7 @@ SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-h
 1. 本地代码修改完成；
 2. 在待合并 head 上运行本机 `python3 scripts/verify-local.py --race` 全量（清单见 §2，前端三项 + Go 门禁四条），完成独立审核；
 3. 将已验收提交合并并推送到 `main`，以 `main` 的精确提交 SHA 生成不可变
-   镜像标签；生产不得部署只存在于功能分支或未提交工作区的源码。交付 `dev-test` 前，在最终待发布 `main` 的同一精确 SHA 上运行本机 `python3 scripts/verify-local.py --race` 和完整 GitLab CI，原生读回全部作业 success 后才进入部署；旧 SHA、仅本机通过或有 skip 的结果不算；
+   镜像标签；生产不得部署只存在于功能分支或未提交工作区的源码。交付 `dev-test` 前，在最终待发布 `main` 的同一精确 SHA 上运行本机 `python3 scripts/verify-local.py --race` 和完整 GitHub Actions CI，原生读回全部作业 success 后才进入部署；旧 SHA、仅本机通过或有 skip 的结果不算；
 4. `dev-test` 测试栈的普通 Go 发布不得重跑 ETL、不得改写
    `production/migration-ready.txt`。
    构建新镜像后，先执行

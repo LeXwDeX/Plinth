@@ -135,8 +135,7 @@ def environment_literals(path):
         match = re.match(r"[a-z]+://([^/:]+)", url or "")
         return match.group(1) if match else None
 
-    acceptance = document.get("acceptance") or {}
-    add(host_of(acceptance.get("forge_url")))
+    # acceptance.forge_url is the public repository itself (#60), so its host is not a secret.
     for environment in (document.get("environments") or {}).values():
         if not isinstance(environment, dict):
             continue

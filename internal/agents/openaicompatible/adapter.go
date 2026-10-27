@@ -244,11 +244,23 @@ func (adapter *Adapter) Complete(
 	if err := adapter.requireSuccess(response, request); err != nil {
 		return agents.Completion{}, err
 	}
-	var body completionBody
-	decoder := json.NewDecoder(
-		io.LimitReader(response.Body, adapter.errorBodyMaxBytes),
+	data, err := io.ReadAll(
+		io.LimitReader(response.Body, adapter.errorBodyMaxBytes+1),
 	)
-	if err := decoder.Decode(&body); err != nil {
+	if err != nil {
+		return agents.Completion{}, fmt.Errorf(
+			"read agent completion: %w",
+			err,
+		)
+	}
+	if int64(len(data)) > adapter.errorBodyMaxBytes {
+		return agents.Completion{}, fmt.Errorf(
+			"agent completion exceeds %d bytes",
+			adapter.errorBodyMaxBytes,
+		)
+	}
+	var body completionBody
+	if err := json.Unmarshal(data, &body); err != nil {
 		return agents.Completion{}, fmt.Errorf(
 			"decode agent completion: %w",
 			err,

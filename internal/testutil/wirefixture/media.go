@@ -844,11 +844,11 @@ func parseMultipart(raw []byte, contentType string, policy Policy) (*Multipart, 
 		value := string(data)
 		if value != "" {
 			if err := checkText(value, false); err != nil {
-				return nil, nil, err
+				return nil, nil, fmt.Errorf("multipart field %q: %w", name, err)
 			}
 			clean, err := policy.resolve(value, 0)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, fmt.Errorf("multipart field %q: %w", name, err)
 			}
 			value = clean
 		}

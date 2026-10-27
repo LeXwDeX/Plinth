@@ -207,6 +207,42 @@ func TestDeferredSSELateExactToolMappings(t *testing.T) {
 	}
 }
 
+func TestDeferredProjectedToolArgumentsValidate(t *testing.T) {
+	r := deferredRecorder(t)
+	stream := "" +
+		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-\",\"function\":{\"name\":\"create_\",\"arguments\":\"{\\\"prompt\\\":\"}}]}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"model\",\"function\":{\"name\":\"model_3d\",\"arguments\":\"\\\"x\\\"}\"}}]}}]}\n\n" +
+		"data: [DONE]\n\n"
+	capture(t, r, mustRequest(t, "GET", "https://api.meshy.ai/v1/chat", ""), jsonResponse(200, "text/event-stream", stream))
+	policy := testPolicy()
+	allowPolicy(&policy, []string{"tool_calls", "index", "function", "name", "arguments"}, []string{"create_model_3d", "prompt", "deepseek"})
+	policy.Projection = map[string]string{"id": "id"}
+	if err := r.Finalize(policy); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AssertComplete(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeferredProjectedCumulativeToolArguments(t *testing.T) {
+	r := deferredRecorder(t)
+	stream := sseStream(t,
+		toolCallChunk(0, "call-1", "create_model_3d", `{"prompt":"x"}`),
+		toolCallChunk(0, "", "", `{"prompt":"x"}`),
+	)
+	capture(t, r, mustRequest(t, "GET", "https://api.meshy.ai/v1/chat", ""), jsonResponse(200, "text/event-stream", stream))
+	policy := testPolicy()
+	allowPolicy(&policy, []string{"tool_calls", "index", "function", "name", "arguments"}, []string{"create_model_3d", "prompt", "deepseek"})
+	policy.Projection = map[string]string{"id": "id"}
+	if err := r.Finalize(policy); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AssertComplete(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDeferredFinalizeSingleUseAndLateRequest(t *testing.T) {
 	r := deferredRecorder(t)
 	capture(t, r, mustRequest(t, "GET", "https://api.meshy.ai/v1/tasks", ""), jsonResponse(200, "application/json", `{}`))
@@ -572,14 +608,17 @@ func TestDeferredAlreadyCanceledRequestStillPassesThrough(t *testing.T) {
 	calls := 0
 	_, body := capture(t, r, mustRequest(t, "GET", "https://api.meshy.ai/v1/tasks", "").WithContext(ctx), roundTripFunc(func(*http.Request) (*http.Response, error) {
 		calls++
-		if len(r.Failures()) != 1 {
+		if len(r.Failures()) != 0 {
 			t.Fatal("canceled request started collecting raw evidence")
 		}
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}},
 			Body: io.NopCloser(strings.NewReader(`{}`)), ContentLength: 2}, nil
 	}))
-	if string(body) != `{}` || calls != 1 || !errors.Is(r.AssertComplete(), wirefixture.ErrIncompleteCapture) {
-		t.Fatal("cancellation changed business I/O or did not invalidate capture")
+	if string(body) != `{}` || calls != 1 {
+		t.Fatal("cancellation changed business I/O")
+	}
+	if err := r.Finalize(testPolicy()); !errors.Is(err, wirefixture.ErrInvalidExchange) {
+		t.Fatalf("canceled request produced evidence: %v", err)
 	}
 	assertNoDeferredExport(t, r, testPolicy())
 }

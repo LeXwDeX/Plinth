@@ -94,7 +94,7 @@ func validateExchange(e Exchange, p Policy) error {
 		case strings.Contains(e.Invalid, "partial SSE"):
 			return ErrPartialSSE
 		case strings.Contains(e.Invalid, "unknown JSON key"):
-			return fmt.Errorf("%w: unknown JSON key", ErrUnknownKey)
+			return fmt.Errorf("%w: %s", ErrUnknownKey, e.Invalid)
 		default:
 			return ErrInvalidExchange
 		}

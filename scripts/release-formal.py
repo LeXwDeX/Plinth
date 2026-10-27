@@ -2,13 +2,14 @@
 """Promote an accepted test image; never build, import data, or configure a Provider.
 
 Local: release-go-formal.sh FULL_SHA --acceptance-note ID --credentials-file PATH
-The native #232 note must contain one JSON fenced formal_promotion report.
+The native acceptance comment (a GitHub Issue comment on acceptance.legacy_formal_issue) must
+contain one JSON fenced formal_promotion report.
 Server mode is an internal entry point executed from that exact revision archive.
 
 The host, root and Compose project come from the "legacy-formal" entry of the untracked local
 deployment folder (scripts/local_environments.py; or ART_AI_ENVIRONMENTS_FILE), the test stack's
 Compose project from its "dev-test" entry, and the project forge from acceptance.forge_url and
-acceptance.forge_project; the repository names no host, path or environment project (#249, #261).
+acceptance.forge_repo; the repository names no host, path or environment project (#249, #261).
 """
 import argparse
 import contextlib
@@ -40,7 +41,9 @@ PROJECT = None
 CONTAINER = None
 TEST_PROJECT = None
 TEST_CONTAINER = None
-FORGE_PROJECT = None
+FORGE_REPO = None
+LEGACY_ISSUE = None
+FORGE_REPO_NAME = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+")
 COMPOSE_PROJECT = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
 REPOSITORY = "art-ai-go-production"
 COOKIE = "art_ai_formal_session"
@@ -89,20 +92,31 @@ def configure(root, host=None, forge=None, project=None, test_project=None):
 
 
 def configure_from_environments(path=None):
-    global FORGE_PROJECT
+    global FORGE_REPO, LEGACY_ISSUE
     path = load_helper("local_environments.py", "formal_local_environments").environments_file(path)
     try:
         document = json.loads(path.read_text())
         environment = document["environments"][LEGACY_ENVIRONMENT]
-        forge_project = str(document["acceptance"]["forge_project"])
-        if not re.fullmatch(r"[0-9]+", forge_project):
-            raise ValueError("forge project")
-        configure(environment["root"], environment["ssh"], document["acceptance"]["forge_url"],
+        acceptance = document["acceptance"]
+        forge_repo, issue = acceptance["forge_repo"], acceptance["legacy_formal_issue"]
+        if not isinstance(forge_repo, str) or not FORGE_REPO_NAME.fullmatch(forge_repo):
+            raise ValueError("forge repo")
+        if type(issue) is not int or issue < 1:
+            raise ValueError("legacy formal issue")
+        configure(environment["root"], environment["ssh"], acceptance["forge_url"],
                   environment["compose_project"], document["environments"][TEST_ENVIRONMENT]["compose_project"])
-        FORGE_PROJECT = forge_project
+        FORGE_REPO, LEGACY_ISSUE = forge_repo, issue
     except (OSError, ValueError, KeyError, TypeError):
-        raise ReleaseError(f"{LEGACY_ENVIRONMENT}, {TEST_ENVIRONMENT} and acceptance.forge_url/forge_project "
-                           "must be set in the environments file") from None
+        raise ReleaseError(f"{LEGACY_ENVIRONMENT}, {TEST_ENVIRONMENT} and acceptance.forge_url/forge_repo/"
+                           "legacy_formal_issue must be set in the environments file") from None
+
+
+def read_acceptance_comment(repo, issue, comment_id):
+    """Read one GitHub Issue comment; a comment that belongs to another Issue is refused."""
+    comment = json.loads(run("gh", "api", f"repos/{repo}/issues/comments/{comment_id}"))
+    if not str(comment.get("issue_url", "")).lower().endswith(f"/repos/{repo}/issues/{issue}".lower()):
+        raise ReleaseError("the acceptance comment belongs to another Issue")
+    return comment
 
 
 def require_projects():
@@ -707,7 +721,7 @@ def local(args):
         command = "python3 " + str(ROOT / "formal/code" / revision / "scripts/release-formal.py")
         remote_operation(command + " rollback-server " + revision + target)
         return
-    note = json.loads(run("glab", "api", f"projects/{FORGE_PROJECT}/issues/232/notes/{args.acceptance_note}"))
+    note = read_acceptance_comment(FORGE_REPO, LEGACY_ISSUE, args.acceptance_note)
     report = acceptance_from_note(note.get("body", ""), revision)
     credentials_path = Path(args.credentials_file).expanduser().resolve()
     if credentials_path.is_relative_to(Path(__file__).resolve().parent.parent):

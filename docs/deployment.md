@@ -34,7 +34,7 @@
 | `build` | `network`（`docker build --network`，例如构建容器须以宿主源地址访问内网镜像源时为 `host`）、`goproxy`（GOPROXY 构建参数）、`add_hosts`（`docker build --add-host` 的 `主机名:地址` 列表，用于解析内网 Go 代理等构建依赖主机；npm 固定走公共 registry）；npm 源固定为公共 `registry.npmjs.org`（#257），旧文件里的 `npm_registry` 会被拒绝，需删除 |
 | `source_transfer` | `pipe`（缺省，`git archive` 经 SSH 管道解包）或 `scp`（本地生成 tar，scp 到 `<root>/releases/` 解包后删除） |
 | `managed_by` | 只能是 `release-go-formal.sh`：该环境由其他工具发布，`release-env.py release` 拒绝它（`legacy-formal` 用此字段登记 ssh、root、`base_url` 与 `compose_project`；`release-go-formal.sh` 另读 `dev-test` 的 `compose_project` 核对测试栈未受影响） |
-| `acceptance` | 晋级验收报告所在的原生 Issue（`forge_project`、`issue`）与本仓 forge 项目地址 `forge_url`（验收证据 URL 必须以它开头） |
+| `acceptance` | 晋级验收报告所在的 GitHub 仓库 `forge_repo`（`owner/repo`）与 Issue 编号：`issue` 供 `formal-test`，`legacy_formal_issue` 供 `release-go-formal.sh`；本仓地址 `forge_url`（验收证据 URL 必须以它开头）。`--acceptance-note` 传该 Issue 下某条 comment 的数字 ID，脚本用 `gh api repos/<forge_repo>/issues/comments/<ID>` 读取，并拒绝属于其他 Issue 的 comment |
 
 查看：`python3 scripts/release-env.py list`、`python3 scripts/release-env.py show <环境>`。
 
@@ -64,7 +64,7 @@
 
 - revision 是 40 位小写完整 SHA，且是 `origin/main` 的祖先；
 - 源环境的成功发布清单（`<root>/releases/manifest.txt`）中有该 revision 与报告中的同一镜像标签；
-- `acceptance.issue` 的指定 note 中恰有一个如下 JSON fenced block，四项检查都是 `pass`、`failed: 0`、`passed > 0`、`skipped: 0`、`soft_failed: 0`，每项证据为本仓 GitLab 项目内的完整 URL（与 #232 晋级报告同一格式，校验函数复用 `scripts/release-formal.py`）：
+- `acceptance.issue` 下指定的 comment 中恰有一个如下 JSON fenced block，四项检查都是 `pass`、`failed: 0`、`passed > 0`、`skipped: 0`、`soft_failed: 0`，每项证据为本仓库内的完整 URL（与 `legacy-formal` 晋级报告同一格式，校验函数复用 `scripts/release-formal.py`）：
 
 ```json
 {
@@ -237,7 +237,7 @@ RECOVERY
 - 发布与验收：`scripts/release-*`、`scripts/retain-art-ai-images.py`、`scripts/smoke/`、
   `scripts/cutover-go-production.sh`、`scripts/finalize-go-production.sh`、
   `scripts/backup-go-production.sh`、`scripts/deploy-go-candidate.sh` 与相应
-  `scripts/test-*` 脚本、`.gitlab-ci.yml`、`dev_ops.md`。
+  `scripts/test-*` 脚本、`dev_ops.md`。
 - 历史迁移与有界维护：`cmd/art-ai-etl`、`internal/etl`、`cmd/recover-existing-assets`、`cmd/complete-conversion-delivery`、
   `scripts/run-go-etl-container.sh`、`scripts/map-go-production-env.sh`、
   `scripts/collect-production-migration-inventory.sh`、
@@ -253,11 +253,11 @@ RECOVERY
 
 ## 发布公开快照（#261）
 
-公开仓库只有一个由我们创建的根提交，内容是某个精确 revision 的已跟踪文件，不带内部开发历史。快照工具只在本地生成，不推送；推送、把公开仓库设为 public、替换公开仓库已有内容和打 Release 是单独的步骤，替换或强推前须由用户当场确认。
+公开仓库 `LeXwDeX/Plinth` 于 2026-10-26 以一个单根快照提交（源 revision `6ba59481`）发布，不带内部开发历史；2026-10-27 起它是唯一仓库，此后的提交直接在其上进行，不再生成快照。下面的步骤只在需要从内部存档重建公开起点时使用；快照工具只在本地生成，不推送，替换公开仓库已有内容或强推前须由用户当场确认。日常开发中，同一扫描以 `dev_test.md` §2「public tree」门禁在每次推送前运行：每个推送的提交都会立即公开。
 
 1. 选定源 revision：已合入 `main`、通过 `dev_test.md` §2 门禁和开源 1.0 验收（#260）的精确 SHA。
 2. 先检查：`scripts/check-public-tree.sh <SHA>`（日常开发中同一扫描以 `dev_test.md` §2 第 8 项门禁「public tree」在 pre-push 与 CI 里对工作树运行）。它用 `git archive` 取出该 revision 的已跟踪文件，扣除 `scripts/public-snapshot.exclude` 列出的路径后逐个扫描（文本与二进制都扫）：私有网段前缀、内部主机与域名、服务器路径、本机临时路径、内部 Compose 项目名前缀、组织名称、本机用户目录（公开 CI runner 的家目录除外）、私钥头，以及 GitLab、OpenAI 式、GitHub、Meshy、Tripo 的凭据前缀（只匹配凭据长度，测试里的短假值不算，#334）；本机存在 `deploy/local/environments.json` 时，其中每个主机、地址、根目录、布局路径、Compose 项目与镜像源主机也作为字面量加入；还可以用 `--pattern`、`--patterns-file` 或未纳入 Git 的 `deploy/local/public-snapshot-patterns.txt`（每行一个正则，`#` 开头为注释）补充不想提交的私有词。有任一命中即以非零退出并列出 `文件:行`。
 3. 生成：`python3 scripts/make-public-snapshot.py make --rev <SHA> --version v1.0.0 --out <仓库外的新目录> [--tag]`。工具在同级临时目录导出、排除、扫描，扫描失败时不留下任何目录；通过后 `git init -b main`，以本机 `git config user.name/user.email` 为作者和提交者生成唯一提交（提交信息写版本和源 SHA），`--tag`（可选，仅供后续版本；首次发布不创建 tag/Release）时在本地打同名附注 tag。新仓库没有 remote。
 4. 在快照目录里按 README 构建（`go build ./...`、`pnpm install --frozen-lockfile` 与 `pnpm build`）并复查 `python3 scripts/make-public-snapshot.py check --tree <快照目录>`，再进入人工确认的发布步骤。
 
-`.gitlab-ci.yml`、`dev_ops.md`、内部 Compose 文件和发布/冒烟脚本都留在快照里：切换后公开仓库是主开发仓库，内网 GitLab 只做镜像，排除它们会让镜像也失去这些文件。因此它们必须保持干净：环境细节只在本地环境文件；构建与两处 CI 都只用公共 npm `registry.npmjs.org`（#257，不再有内网镜像覆盖）。仓库里的守门测试与扫描器本身用拼接或字符类书写被拒绝的标识，不含明文，因此扫描不设白名单。截图等二进制文件也按字节扫描。
+`dev_ops.md`、内部 Compose 文件和发布/冒烟脚本都在公开仓库里，因此它们必须保持干净：环境细节只在本地环境文件；构建与 CI 都只用公共 npm `registry.npmjs.org`（#257，不再有内网镜像覆盖）。仓库里的守门测试与扫描器本身用拼接或字符类书写被拒绝的标识，不含明文，因此扫描不设白名单。截图等二进制文件也按字节扫描。

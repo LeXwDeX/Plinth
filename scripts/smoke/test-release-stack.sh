@@ -4,7 +4,7 @@
 # sequence for the host/root it is given, scripts/release-env.py resolves
 # named environments and enforces the promotion rule, and the server steps
 # honour the passed layout. No real SSH, Docker, forge or server is used:
-# ssh/scp/glab/docker/curl are PATH mocks that record calls. Hosts below are
+# ssh/scp/gh/docker/curl are PATH mocks that record calls. Hosts below are
 # placeholders; real targets live only in the untracked environments file.
 set -euo pipefail
 
@@ -14,7 +14,7 @@ trap 'rm -rf "$WORK"' EXIT
 fail() { echo "FAIL $*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
-# Part 1: local entries (mock ssh/scp/glab, real git).
+# Part 1: local entries (mock ssh/scp/gh, real git).
 # ---------------------------------------------------------------------------
 mkdir -p "$WORK/bin" "$WORK/origin.git" "$WORK/repo"
 git -C "$WORK/origin.git" init -q --bare
@@ -56,9 +56,9 @@ else
   printf 'scp %s\n' "$*" >>"$MOCK_TRACE"
 fi
 MOCK
-cat >"$WORK/bin/glab" <<'MOCK'
+cat >"$WORK/bin/gh" <<'MOCK'
 #!/usr/bin/env bash
-printf 'glab %s\n' "$*" >>"$MOCK_TRACE"
+printf 'gh %s\n' "$*" >>"$MOCK_TRACE"
 cat "$MOCK_NOTE"
 MOCK
 cat >"$WORK/bin/date" <<'MOCK'
@@ -109,10 +109,10 @@ done
 echo "PASS entry/unsafe-parameters-refused"
 
 # Environments file with placeholder hosts.
-FORGE=https://forge.example.invalid/group/project
+FORGE=https://forge.example.invalid/owner/project
 export ART_AI_ENVIRONMENTS_FILE="$WORK/environments.json"
 cat >"$ART_AI_ENVIRONMENTS_FILE" <<EOF
-{"version": 1, "acceptance": {"forge_project": "42", "forge_url": "$FORGE", "issue": 7},
+{"version": 1, "acceptance": {"forge_repo": "owner/project", "forge_url": "$FORGE", "issue": 7},
  "environments": {
   "legacy-formal": {"ssh": "$DEFAULT_HOST", "root": "$DEFAULT_ROOT", "base_url": "http://dev.example.invalid:13334",
                     "compose_project": "legacy_project", "managed_by": "release-go-formal.sh"},
@@ -134,10 +134,11 @@ note() { # $1=revision $2=image tag $3=L1_agent status
 import json, sys
 revision, tag, agent, forge = sys.argv[1:]
 check = lambda status: {"status": status, "failed": 0, "passed": 3, "skipped": 0, "soft_failed": 0,
-                        "evidence": forge + "/-/issues/7#note_1"}
+                        "evidence": forge + "/issues/7#issuecomment-1"}
 report = {"formal_promotion": 1, "revision": revision, "image_tag": tag,
           "checks": {"L0": check("pass"), "L1": check("pass"), "L1_agent": check(agent), "related": check("pass")}}
-print(json.dumps({"body": "accepted\n```json\n" + json.dumps(report) + "\n```\n"}))
+print(json.dumps({"body": "accepted\n```json\n" + json.dumps(report) + "\n```\n",
+                  "issue_url": "https://api.forge.example.invalid/repos/owner/project/issues/7"}))
 PY
 }
 TAG2="$SHORT-20261019T000000Z"
@@ -169,7 +170,7 @@ note "$SECOND" "$TAG2" pass
 (cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" release formal-test --acceptance-note 11) >"$WORK/formal.log"
 cat >"$WORK/expected" <<EOF
 ssh $DEFAULT_HOST docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' dev_project-art-ai-go-1
-glab api projects/42/issues/7/notes/11
+gh api repos/owner/project/issues/comments/11
 ssh $DEFAULT_HOST cat $DEFAULT_ROOT/releases/manifest.txt
 ssh root@formal.example.invalid mv /srv/formal/app /srv/formal/app.prev-\$(date -u +%Y%m%dT%H%M%SZ) 2>/dev/null || true; mkdir -p /srv/formal/app /srv/formal/releases
 scp -q archive:$ARCHIVE_SHA root@formal.example.invalid:/srv/formal/releases/source-$SHORT-20261020T010203Z.tar

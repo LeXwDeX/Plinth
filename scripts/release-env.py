@@ -168,11 +168,12 @@ def validate_environment(name, environment, document):
         need(source in document["environments"] and source != name, "promote_from must name another environment")
         need(document["environments"][source].get("promote_from") is None, "promotion chains are not supported")
         acceptance = document.get("acceptance")
-        need(isinstance(acceptance, dict) and re.fullmatch(r"[0-9]+", str(acceptance.get("forge_project", "")))
+        need(isinstance(acceptance, dict) and isinstance(acceptance.get("forge_repo"), str)
+             and re.fullmatch(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+", acceptance["forge_repo"])
              and type(acceptance.get("issue")) is int and acceptance["issue"] > 0
              and isinstance(acceptance.get("forge_url"), str)
              and re.fullmatch(r"https://[A-Za-z0-9.:-]+(/[A-Za-z0-9._-]+)+", acceptance["forge_url"]),
-             "promotion needs acceptance.forge_project, acceptance.forge_url and acceptance.issue")
+             "promotion needs acceptance.forge_repo, acceptance.forge_url and acceptance.issue")
 
 
 def protected_paths(environment):
@@ -213,7 +214,10 @@ def promotion_revision(document, name, revision, note_id):
     if not note_id:
         raise EnvironmentError_(f"{name} needs --acceptance-note: the {source_name} acceptance report for {revision}")
     acceptance = document["acceptance"]
-    note = json.loads(run("glab", "api", f"projects/{acceptance['forge_project']}/issues/{acceptance['issue']}/notes/{note_id}"))
+    try:
+        note = formal.read_acceptance_comment(acceptance["forge_repo"], acceptance["issue"], note_id)
+    except formal.ReleaseError as error:
+        raise EnvironmentError_(f"{source_name} acceptance refused: {error}") from None
     manifest = run("ssh", source["ssh"], f"cat {source['root']}/releases/manifest.txt")
     try:
         report = formal.acceptance_from_note(note.get("body", ""), revision, acceptance["forge_url"])

@@ -76,6 +76,7 @@ type deferredExchange struct {
 	mediaType       string
 	mediaBytes      int64
 	retryableFailed bool
+	discarded       bool
 }
 
 // Finalize is single-use after quiescence. An early call returns
@@ -100,7 +101,7 @@ func (r *Recorder) Finalize(policy Policy) error {
 	}
 	successes := 0
 	for _, c := range d.pending {
-		if c.retryableFailed {
+		if c.retryableFailed || c.discarded {
 			continue
 		}
 		if !c.tripDone || !c.reqDone || !c.respDone || c.activeIO != 0 {
@@ -125,7 +126,7 @@ func (r *Recorder) Finalize(policy Policy) error {
 	validated.evidence = append([]MediaEvidence(nil), d.evidence...)
 	defer func() { validated.Policy = Policy{} }()
 	for _, c := range d.pending {
-		if c.retryableFailed {
+		if c.retryableFailed || c.discarded {
 			continue
 		}
 		if int64(len(c.reqRaw)) > policy.limit() || int64(len(c.respRaw)) > policy.limit() {
@@ -243,7 +244,6 @@ func (d *deferredCapture) start(r *Recorder, connection string, req *http.Reques
 		return 0
 	}
 	if req.Context().Err() != nil {
-		d.failLocked(fmt.Errorf("%w: %s %s canceled before start", ErrIncompleteCapture, req.Method, req.URL.EscapedPath()))
 		return 0
 	}
 	if len(d.pending) >= d.limits.MaxExchanges {
@@ -284,8 +284,9 @@ func (d *deferredCapture) start(r *Recorder, connection string, req *http.Reques
 	c.stop = context.AfterFunc(req.Context(), func() {
 		d.mu.Lock()
 		defer d.mu.Unlock()
-		if d.entryLocked(seq) != nil {
-			d.failLocked(ErrIncompleteCapture)
+		if entry := d.entryLocked(seq); entry != nil {
+			entry.discarded = true
+			entry.tripDone, entry.reqDone, entry.respDone = true, true, true
 		}
 	})
 	return seq
@@ -295,7 +296,49 @@ func (d *deferredCapture) entryLocked(seq int) *deferredExchange {
 	if d.err != nil || seq <= 0 || seq > len(d.pending) {
 		return nil
 	}
-	return d.pending[seq-1]
+	entry := d.pending[seq-1]
+	if entry.discarded {
+		return nil
+	}
+	return entry
+}
+
+// DiscardIncomplete drops exchanges the caller never finished reading. A live
+// SSE consumer may stop after the last event without closing the body; such a
+// suffix cannot be published, but it must not invalidate completed exchanges.
+func (r *Recorder) DiscardIncomplete() error {
+	if r.deferred == nil {
+		return ErrNotDeferred
+	}
+	d := r.deferred
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.err != nil {
+		return d.err
+	}
+	for _, c := range d.pending {
+		if c.retryableFailed || c.discarded {
+			continue
+		}
+		if c.tripDone && c.reqDone && c.respDone && c.activeIO == 0 {
+			continue
+		}
+		if baseMedia(c.responseHeaders.Get("Content-Type")) != "text/event-stream" {
+			continue
+		}
+		c.discarded = true
+		c.tripDone, c.reqDone, c.respDone = true, true, true
+		c.activeIO = 0
+		if c.stop != nil {
+			c.stop()
+			c.stop = nil
+		}
+		if c.mediaSink != nil {
+			c.mediaSink.Abort()
+			c.mediaSink = nil
+		}
+	}
+	return nil
 }
 
 func (d *deferredCapture) roundTrip(r *Recorder, connection string, base http.RoundTripper, req *http.Request) (*http.Response, error) {
@@ -391,8 +434,7 @@ func (d *deferredCapture) stopCompletedLocked(c *deferredExchange) {
 		stop := c.stop
 		c.stop = nil
 		if !stop() {
-			// A canceled context's callback may still be waiting for this lock.
-			d.failLocked(ErrIncompleteCapture)
+			c.discarded = true
 		}
 	}
 }
@@ -548,6 +590,15 @@ func (d *deferredCapture) observe(seq int, response bool, data []byte, err error
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if err != nil && (closed || err != io.EOF) {
+		if c := d.entryLocked(seq); c != nil && baseMedia(c.responseHeaders.Get("Content-Type")) == "text/event-stream" {
+			c.discarded = true
+			c.tripDone, c.reqDone, c.respDone = true, true, true
+			if c.stop != nil {
+				c.stop()
+				c.stop = nil
+			}
+			return
+		}
 		side, action := "request", "read"
 		if response {
 			side = "response"
