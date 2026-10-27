@@ -307,8 +307,8 @@ func wireCapturePolicyPreflight(policy wirefixture.Policy, name string, meta wir
 		}
 		_, _ = io.Copy(io.Discard, response.Body)
 		_ = response.Body.Close()
-		if probe.AssertComplete() != nil {
-			return errors.New("wire capture: policy or metadata preflight failed")
+		if err := probe.AssertComplete(); err != nil {
+			return fmt.Errorf("wire capture: policy or metadata preflight failed: %w", err)
 		}
 		var sanitized []json.RawMessage
 		var publicValues []string
@@ -405,6 +405,9 @@ func (c *wireCapture) export(runErr error) (err error) {
 		policy, err = c.finalPolicy()
 		if err != nil {
 			return errors.New("wire capture: final policy rejected; no candidate exported")
+		}
+		if err := c.recorder.DiscardIncomplete(); err != nil {
+			return fmt.Errorf("wire capture: incomplete capture could not be discarded: %w", err)
 		}
 		if err := c.recorder.Finalize(policy); err != nil {
 			return fmt.Errorf("wire capture: finalize rejected: %w", err)

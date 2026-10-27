@@ -161,14 +161,14 @@ func sanitizeHeaders(headers http.Header, request bool, policy Policy) (map[stri
 		case "accept", "x-api-version":
 			resolved, err := policy.resolve(value, 0)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("header %q: %w", lower, err)
 			}
 			value = resolved
 		case "retry-after":
 			if _, err := strconv.Atoi(value); err != nil {
 				resolved, err := policy.resolve(value, 0)
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("header %q: %w", lower, err)
 				}
 				value = resolved
 			}
@@ -457,7 +457,7 @@ func sanitizeValue(value any, policy Policy, depth int) (any, error) {
 		for i, child := range typed {
 			clean, err := sanitizeValue(child, policy, depth+1)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("index %d: %w", i, err)
 			}
 			typed[i] = clean
 		}
@@ -467,6 +467,9 @@ func sanitizeValue(value any, policy Policy, depth int) (any, error) {
 			return policy.resolve(typed, depth)
 		}
 		if typed == "" || typed == "[redacted]" {
+			return typed, nil
+		}
+		if policy.projector != nil && typed == "ok" {
 			return typed, nil
 		}
 		if wholeURL(typed) {
@@ -480,7 +483,13 @@ func sanitizeValue(value any, policy Policy, depth int) (any, error) {
 		if credentialRE.MatchString(typed) {
 			return "[redacted]", nil
 		}
-		return policy.resolve(typed, depth)
+		if mapped, err := policy.resolve(typed, depth); err == nil {
+			return mapped, nil
+		} else if policy.projector != nil && identifierRE.MatchString(typed) {
+			return policy.projector.id(typed, policy)
+		} else {
+			return "", err
+		}
 	case json.Number:
 		raw := typed.String()
 		if mapped, ok := policy.Aliases[raw]; ok {

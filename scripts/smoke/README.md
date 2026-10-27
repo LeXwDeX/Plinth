@@ -240,7 +240,10 @@ non-sensitive JSON field names to `id`, `ids`, `url`, `timestamp`, `number` or `
 of them; `url` requires a registered `PublicHosts` host, drops query values and
 uses a fixed `fixture-N` path; `timestamp` accepts a JSON number or RFC 3339 string
 and emits one fixed public timestamp; `number` emits zero; `text` replaces a registered non-sensitive string with the fixed public value `ok`. `QueryKeys` controls
-acceptance only; values never enter `candidate.json`.
+acceptance only; values never enter `candidate.json`. Do not project `arguments`:
+tool-call arguments are JSON text and must stay valid JSON. SSE fragment fields such
+as `content` and `reasoning_content` keep empty fragments empty; `text`/`opaque`
+projection must not replace an empty string with `ok`.
 The file is not an automatic approval channel, a raw-to-Allowed extractor or
 permission to approve whole prompts/private content. The original manifest and
 connection configuration are not reloaded as runtime controls.
@@ -251,6 +254,12 @@ bounds the entire round, including in-flight entries and cancellation callbacks.
 Each body is also capped at 8 MiB. This is not a process RSS limit: business bodies,
 allocator overhead and sanitizer scratch space are outside this budget. Checks run
 during each observed Read, before retaining more bytes.
+
+A live SSE consumer may stop after the last complete event without closing the
+body. Before Finalize, call `DiscardIncomplete()` to drop only unfinished SSE
+exchanges and canceled auxiliary requests. Completed exchanges stay valid;
+non-SSE truncation, transport errors and sanitizer failures still invalidate
+export.
 
 Stop new requests and wait for all RoundTrips and body I/O to finish. Then call
 `Finalize(reviewedExactPolicy)` with independently reviewed exact mappings. Unknown

@@ -229,10 +229,12 @@ func (r *Recorder) AssertComplete() error {
 	if len(exchanges) != started {
 		return fmt.Errorf("%w: %d started, %d completed", ErrIncompleteCapture, started, len(exchanges))
 	}
-	// Stored exchanges already contain public projection tokens. Validating
-	// them again with active projection would rename those tokens.
-	policy.Projection = nil
-	policy.projector = nil
+	// Stored exchanges already contain public projection tokens. Keep the
+	// projection active so Validate accepts those tokens; the projector returns
+	// existing id-N tokens unchanged instead of renaming them.
+	if len(policy.Projection) > 0 {
+		policy.projector = newProjector()
+	}
 	if err := Validate(exchanges, policy); err != nil {
 		return err
 	}

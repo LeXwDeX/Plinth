@@ -34,6 +34,9 @@ func (p *projector) id(raw string, policy Policy) (string, error) {
 	if token, ok := p.ids[raw]; ok {
 		return token, nil
 	}
+	if strings.HasPrefix(raw, "id-") && identifierRE.MatchString(raw) {
+		return raw, nil
+	}
 	if !identifierRE.MatchString(raw) {
 		return "", fmt.Errorf("%w: projected identifier", ErrUnsafePublicValue)
 	}
@@ -47,6 +50,9 @@ func (p *projector) id(raw string, policy Policy) (string, error) {
 }
 
 func (p *projector) publicURL(raw string, policy Policy) (string, error) {
+	if canonicalExampleURL(raw) {
+		return raw, nil
+	}
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
 		return "", fmt.Errorf("%w: projected URL", ErrUnsafePublicValue)
@@ -206,10 +212,13 @@ func projectValue(kind string, value any, policy Policy, depth int) (any, error)
 			return nil, fmt.Errorf("%w: projected number type", ErrUnsafePublicValue)
 		}
 	case "text":
-		switch value.(type) {
+		switch typed := value.(type) {
 		case nil:
 			return nil, nil
 		case string:
+			if typed == "" {
+				return "", nil
+			}
 			token := "ok"
 			if policy.Allowed != nil {
 				policy.Allowed[token] = true
@@ -218,6 +227,15 @@ func projectValue(kind string, value any, policy Policy, depth int) (any, error)
 		default:
 			return nil, fmt.Errorf("%w: projected text type", ErrUnsafePublicValue)
 		}
+	case "opaque":
+		if typed, ok := value.(string); ok && typed == "" {
+			return "", nil
+		}
+		token := "ok"
+		if policy.Allowed != nil {
+			policy.Allowed[token] = true
+		}
+		return token, nil
 	default:
 		return nil, fmt.Errorf("%w: projection kind", ErrUnsafePublicValue)
 	}
@@ -343,7 +361,7 @@ func ValidatePolicy(policy Policy) error {
 	}
 	for key, kind := range policy.Projection {
 		if !policy.Keys[key] || sensitiveKey(key) || checkText(key, false) != nil ||
-			(kind != "id" && kind != "ids" && kind != "url" && kind != "timestamp" && kind != "number" && kind != "text") {
+			(kind != "id" && kind != "ids" && kind != "url" && kind != "timestamp" && kind != "number" && kind != "text" && kind != "opaque") {
 			return fmt.Errorf("%w: projection", ErrUnsafePublicValue)
 		}
 	}

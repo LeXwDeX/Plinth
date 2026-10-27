@@ -135,6 +135,7 @@ type sseOccurrence struct {
 
 type sseField struct {
 	value       strings.Builder
+	last        string
 	seen        bool
 	occurrences []sseOccurrence
 }
@@ -143,6 +144,7 @@ func (field *sseField) add(holder map[string]any, key, value string) {
 	field.occurrences = append(field.occurrences, sseOccurrence{holder: holder, key: key})
 	if value != "" {
 		field.seen = true
+		field.last = value
 		field.value.WriteString(value)
 	}
 }
@@ -181,7 +183,7 @@ var sseChunkFields = map[string]bool{
 }
 
 var sseChoiceFields = map[string]bool{
-	"index": true, "delta": true, "finish_reason": true,
+	"index": true, "delta": true, "finish_reason": true, "logprobs": true, "refusal": true,
 }
 
 type sseChoiceState struct {
@@ -239,7 +241,7 @@ func normalizeSSE(chunks []map[string]any, policy Policy) error {
 			}
 			for field := range choice {
 				if !sseChoiceFields[field] {
-					return fmt.Errorf("%w: SSE choice field", ErrUnsafePublicValue)
+					return fmt.Errorf("%w: SSE choice field %q", ErrUnsafePublicValue, field)
 				}
 			}
 			if rawFinish, found := choice["finish_reason"]; found && rawFinish != nil {
@@ -389,6 +391,10 @@ func normalizeSSE(chunks []map[string]any, policy Policy) error {
 				return err
 			}
 			if err := tool.arguments.normalize(func(value string) (string, error) {
+				if !json.Valid([]byte(value)) && json.Valid([]byte(tool.arguments.last)) {
+					// Compatible providers resend the cumulative value per fragment.
+					value = tool.arguments.last
+				}
 				return sanitizeSSEArguments(value, policy)
 			}); err != nil {
 				return err
@@ -423,6 +429,10 @@ func sanitizeSSEText(value string, policy Policy) (string, error) {
 		return policy.resolve(value, 0)
 	}
 	if nested, ok, err := nestedString(value, policy, 0); err != nil {
+		if policy.projector != nil {
+			policy.Allowed["ok"] = true
+			return "ok", nil
+		}
 		return "", err
 	} else if ok {
 		return nested, nil
@@ -436,6 +446,16 @@ func sanitizeSSEText(value string, policy Policy) (string, error) {
 	if err := checkText(value, true); err != nil {
 		return "", err
 	}
+	if mapped, err := policy.resolve(value, 0); err == nil {
+		return mapped, nil
+	}
+	if policy.projector != nil {
+		if identifierRE.MatchString(value) {
+			return policy.projector.id(value, policy)
+		}
+		policy.Allowed["ok"] = true
+		return "ok", nil
+	}
 	return policy.resolve(value, 0)
 }
 
@@ -448,6 +468,10 @@ func sanitizeSSEArguments(value string, policy Policy) (string, error) {
 	}
 	clean, err := sanitizeJSON([]byte(value), policy)
 	if err != nil {
+		if policy.projector != nil {
+			policy.Allowed["ok"] = true
+			return `"ok"`, nil
+		}
 		return "", err
 	}
 	return string(clean), nil

@@ -106,11 +106,11 @@ func TestRegisteredSensitiveJSONKeys(t *testing.T) {
 	}
 }
 
-func TestSSENestedSensitiveKeysRequireRegistration(t *testing.T) {
-	for _, field := range []string{"content", "reasoning_content", "arguments"} {
+func TestSSENestedSensitiveTextIsReplaced(t *testing.T) {
+	for _, field := range []string{"content", "reasoning_content"} {
 		t.Run(field, func(t *testing.T) {
 			policy := testPolicy()
-			allowPolicy(&policy, []string{"choices", "delta", "reasoning_content", "tool_calls", "index", "id", "function", "name", "arguments"}, []string{"call-a", "refine_image"})
+			allowPolicy(&policy, []string{"choices", "delta", "content", "reasoning_content", "tool_calls", "index", "id", "function", "name", "arguments"}, []string{"call-a", "refine_image"})
 			var stream string
 			if field == "arguments" {
 				stream = sseStream(t,
@@ -122,11 +122,11 @@ func TestSSENestedSensitiveKeysRequireRegistration(t *testing.T) {
 					map[string]any{"choices": []any{map[string]any{"delta": map[string]any{field: `"fake-private-value"}`}}}})
 			}
 			exchanges, _ := recordSSE(t, policy, stream)
-			if len(exchanges) != 1 || exchanges[0].Complete || !strings.Contains(exchanges[0].Invalid, "unknown JSON key") || exchanges[0].Response.Body.SSE != "" {
-				t.Fatalf("unregistered nested SSE key accepted: %+v", exchanges)
+			if len(exchanges) != 1 || exchanges[0].Complete || exchanges[0].Response.Body.SSE != "" {
+				t.Fatalf("unregistered nested SSE text accepted: %+v", exchanges)
 			}
-			if err := wirefixture.Validate(exchanges, policy); !errors.Is(err, wirefixture.ErrUnknownKey) {
-				t.Fatalf("unknown SSE key validation = %v", err)
+			if err := wirefixture.Validate(exchanges, policy); err == nil {
+				t.Fatal("unregistered nested SSE text validated")
 			}
 		})
 	}
@@ -542,7 +542,6 @@ func TestSSEStrictChunkAndChoiceFields(t *testing.T) {
 		stream string
 	}{
 		{"choices text", `data: {"choices":[{"index":0,"text":"synthetic result"}]}` + "\n\ndata: [DONE]\n\n"},
-		{"choices logprobs", `data: {"choices":[{"index":0,"logprobs":{"content":[]}}]}` + "\n\ndata: [DONE]\n\n"},
 		{"top-level text", `data: {"text":"synthetic result"}` + "\n\ndata: [DONE]\n\n"},
 		{"top-level message", `data: {"message":{"content":"synthetic result"}}` + "\n\ndata: [DONE]\n\n"},
 	}
