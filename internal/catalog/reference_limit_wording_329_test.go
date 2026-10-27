@@ -2,6 +2,7 @@ package catalog_test
 
 import (
 	"encoding/json"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -11,6 +12,53 @@ import (
 
 func fillReferenceLimit(template, model string, count, total int) string {
 	return strings.NewReplacer("{model}", model, "{count}", strconv.Itoa(count), "{total}", strconv.Itoa(total)).Replace(template)
+}
+
+func TestReferenceCapacityNoPromptIsOptionalAndPrivate(t *testing.T) {
+	data, err := os.ReadFile("default_catalog.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	app := doc["application"].(map[string]any)
+	chat := app["chat"].(map[string]any)
+	for _, item := range chat["tools"].([]any) {
+		tool := item.(map[string]any)
+		if tool["name"] == "create_model_3d_from_image" {
+			note := tool["reference_capacity_note"].(map[string]any)
+			if note["no_prompt"] == nil {
+				t.Fatal("default catalog has no no_prompt guidance")
+			}
+			delete(note, "no_prompt")
+		}
+	}
+	old, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	product, err := catalog.Load(strings.NewReader(string(old)))
+	if err != nil {
+		t.Fatalf("old catalog without no_prompt: %v", err)
+	}
+	for _, tool := range product.Application().Chat.Tools {
+		if tool.Name == "create_model_3d_from_image" && tool.ReferenceCapacityNote.NoPrompt != "" {
+			t.Fatal("omitted no_prompt did not remain empty")
+		}
+	}
+	current, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	public, err := json.Marshal(current.Application().Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(public), "no_prompt") || strings.Contains(string(public), "reference_capacity_note") {
+		t.Fatal("agent-only guidance leaked into public schema")
+	}
 }
 
 // #329 dev-test note 99647, observations 8 and 9: the note that only the

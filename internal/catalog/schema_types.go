@@ -2359,6 +2359,7 @@ type ChatPendingApprovalsSchema struct {
 type ChatToolReferenceCapacityNote struct {
 	Single   string `json:"single"`
 	Multiple string `json:"multiple"`
+	NoPrompt string `json:"no_prompt,omitempty"`
 }
 
 // ChatPendingApprovalMessages are the texts of a late decision's messages.

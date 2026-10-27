@@ -34,6 +34,13 @@ func TestPendingApprovalDeclarationsAreValidated(t *testing.T) {
 				}
 			}
 		}},
+		{"optional no-prompt text cannot be whitespace", func(a *catalog.ApplicationSchema) {
+			for index := range a.Chat.Tools {
+				if a.Chat.Tools[index].Name == "create_model_3d_from_image" {
+					a.Chat.Tools[index].ReferenceCapacityNote.NoPrompt = " "
+				}
+			}
+		}},
 		{"capacity note needs a tool that takes pictures", func(a *catalog.ApplicationSchema) {
 			for index := range a.Chat.Tools {
 				if a.Chat.Tools[index].Name == "create_motion_clip" {
