@@ -88,3 +88,9 @@ tmp/
 .graphify_*
 graphify-out/
 .worktrees
+
+# Local agent tooling and session handoff notes
+/.mcp.json
+/.serena/
+/.playwright-mcp/
+/handoff.md
