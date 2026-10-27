@@ -57,12 +57,12 @@ CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check
 | 依赖源 | 公共 npm registry（`registry.npmjs.org`）与 Go proxy；不访问任何内网主机 |
 | 工具链 | Node 22、Go 1.27、pnpm 取 `package.json` 的 `packageManager`（与 `Dockerfile.go-runtime` 一致） |
 | 作业 | 三个门禁作业；不构建镜像（#257） |
-| 用途 | 所有 PR（含维护者自己的）的必过门禁；不承担发布 |
+| 用途 | 所有 PR 的门禁；不承担发布。Actions 因时长或额度未完成、被取消时按下方「交付硬门禁」以本机预检放行 |
 
 - **对齐守门**：`src/__tests__/ci-gate-parity.test.ts`（随 `pnpm test` 在本地和 CI 运行）解析本节「自动化门禁项」、`scripts/verify-local.py` 与 `.github/workflows/ci.yml`，要求：标为 CI 的每项命令逐字出现在恰好一个 CI 作业里（同一项的多条命令在同一作业、按本节顺序），CI 作业里没有本节以外的命令；本地入口默认集合的门禁名与顺序等于标为本地的各项，`--race` 加跑的门禁名等于唯一标为仅 CI 的一项；工作流不含内网主机且每个 Action 固定到完整提交 SHA。增删、改写或改变执行位置时，同一提交里改这三处，测试才会通过。
 - **Action 版本**：工作流中的 Action 固定到发布标签对应的完整提交 SHA，行尾注释写标签；升级时在官方仓库核对标签与 SHA 再一起改。
 - **CI 与内部验收的分工**：CI 只跑上面的三组门禁，不需要任何密钥，外部贡献者的 PR 也能完整运行。零 Key 的 Mock 自部署冒烟 `scripts/smoke/smoke-public-mock.sh` 保留为本地手动验收（自部署后运行，覆盖登录、健康、一次 Mock 图片与一次 Mock 3D 任务的全部产物下载核对、restart 与 down/up 持久化及 `down -v` 清理）。维护者内部环境（`dev-test`、`formal-test`）的部署与 L0/L1/L1 Agent 冒烟经 `scripts/release-env.py release`/`smoke` 走 `scripts/smoke/` 的脚本，真实模型付费验收也只由维护者在内部测试环境执行（§3、§11），都不进 CI，也不是外部 PR 的合并条件。
-- **分支保护**：由维护者在 GitHub 仓库设置里为 `main` 打开分支保护，把三个检查（`frontend`、`go check`、`go test race`）设为必过。是否已打开以 GitHub 设置读回为准，本文不记录状态。
+- **分支保护**：不设置（2026-10-27 维护者决定）。仓库为私有、免费套餐不支持分支保护；合并前的门禁由本节与「交付硬门禁」的本机预检保证。
 
 ### 官方 API 契约驱动的 TDD 与 CI
 - 每个受影响的上游端点，在编写或调整该端点的测试前，先查该端点当前官方文档；记录官方 URL、核对日期、端点/API 版本、模型版本（适用时）及已知文档冲突。不要从一个端点推断其他端点使用相同版本。文档无法访问或信息冲突时，记录未知项并暂停对该项的契约推断。
@@ -104,7 +104,7 @@ CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check
 ### 交付硬门禁
 
 - 合并前以本机门禁为准：每个分支推送时照常跑 pre-push（本地七项）；合并到 `main` 前，在待合并的 head 上跑一次 `python3 scripts/verify-local.py --race`，结果写进 PR。
-- 交付任何改动到 `dev-test` 前，最终待发布的精确 `main` SHA 必须在 GitHub Actions 上有一次完整的 `ci` 运行且所有作业 success。旧 SHA、其他提交的运行、只跑本机门禁、有 skip 或未完成/取消的作业都不算通过；不能用“本机已过”替代该 SHA 的 CI 结果。
+- 交付任何改动到 `dev-test` 前，最终待发布的精确 `main` SHA 应有一次完整的 GitHub Actions `ci` 运行且所有作业 success。Actions 因运行时长或额度不足而未完成、超时或被取消时（2026-10-27 维护者决定），以同一精确 SHA 上本机 `python3 scripts/verify-local.py --race` 全部通过放行，并在 PR 或 Issue 里写明 Actions 的实际状态与本机结果；作业因代码原因失败时不得放行。旧 SHA、其他提交的结果、有 skip 的结果都不算。
 - 发布到 `dev-test` 前，还要在同一个待发布 `main` revision 上再跑一次本机 `--race` 全量；发布后照常做 L0、L1、L1 Agent 和相关验收。CI 只作门禁，不承担部署。
 
 ### 本地统一入口与 pre-push 复用
