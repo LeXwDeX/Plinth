@@ -118,7 +118,7 @@ def run(cwd, config_file=None):
         result = invoke(binary, root, [*args, "--json"])
         print(f"[specgit-worktree] setup {agent}: {setup_purposes(result, agent)}")
 
-    doctor = invoke(binary, root, ["doctor", "--provider", "gitlab", "--remote", "origin",
+    doctor = invoke(binary, root, ["doctor", "--provider", "github", "--remote", "origin",
                                    "--offline", "--json"])
     doctor_status = doctor.get("status")
     evidence = doctor.get("evidence")

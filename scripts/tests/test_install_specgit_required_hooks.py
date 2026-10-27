@@ -35,13 +35,13 @@ Read the Skill ([installation](https://example.invalid/agent-install.md)).
 <!-- specgit:project:v2:end -->
 '''
 # A stand-in CLI: logs its arguments, whether Git hook variables leaked into it and
-# whether a GitLab token reached it (never the value);
+# whether a GitHub token reached it (never the value);
 # `init` writes the declaration into --cwd, as the real CLI does.
 FAKE_SPECGIT = '''#!/bin/sh
 cwd=.
 if [ "$1" = --cwd ]; then cwd=$2; shift 2; fi
 command=$1; shift
-if [ "$command" != guard ]; then echo "specgit $command $* GIT_DIR=${GIT_DIR:-unset} GITLAB_TOKEN=${GITLAB_TOKEN:+set}" >> "$EVENTS"; fi
+if [ "$command" != guard ]; then echo "specgit $command $* GIT_DIR=${GIT_DIR:-unset} GH_TOKEN=${GH_TOKEN:+set}" >> "$EVENTS"; fi
 agent=generic
 if [ "$command" = setup ]; then
   while [ "$#" -gt 0 ]; do
@@ -84,7 +84,7 @@ class RequiredHookTests(unittest.TestCase):
                     "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
                     "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
                     "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
-        for key in ("FAIL_SPECGIT", "GITLAB_TOKEN", *required.GIT_HOOK_ENV):
+        for key in ("FAIL_SPECGIT", "GH_TOKEN", *required.GIT_HOOK_ENV):
             self.env.pop(key, None)
         self.git("init", "-q", "-b", "main", str(self.repo), cwd=self.base)
         (self.repo / "docs").mkdir()
@@ -213,7 +213,7 @@ class RequiredHookTests(unittest.TestCase):
                 self.assertIn("GIT_DIR=unset", setup)
         opencode = [line for line in calls if "--agent opencode " in line]
         self.assertTrue(all("--opencode-claude-hooks" in line for line in opencode))
-        self.assertTrue(calls[-1].startswith("specgit doctor --provider gitlab --remote origin --offline --json"))
+        self.assertTrue(calls[-1].startswith("specgit doctor --provider github --remote origin --offline --json"))
         self.assertEqual(self.commit(worktree).returncode, 0)
         # Ordinary branch switches are not new worktrees and never re-run initialization.
         self.events.unlink()
@@ -222,10 +222,10 @@ class RequiredHookTests(unittest.TestCase):
         self.git("checkout", "-q", "feature", cwd=worktree)
         self.assertEqual(self.events_log(), [])
 
-    def test_new_worktree_does_not_read_gitlab_token_from_project_env(self):
-        # Authentication comes from the existing SpecGit/glab session. A project .env is
-        # not an auth source: the helper must not read or inject its GITLAB_TOKEN.
-        (self.repo / ".env").write_text("OTHER=1\nexport GITLAB_TOKEN='secret-token-value'\n")
+    def test_new_worktree_does_not_read_github_token_from_project_env(self):
+        # Authentication comes from the existing SpecGit/gh session. A project .env is
+        # not an auth source: the helper must not read or inject its GH_TOKEN.
+        (self.repo / ".env").write_text("OTHER=1\nexport GH_TOKEN='secret-token-value'\n")
         self.apply(mode="enforce", apply=True)
         worktree = self.base / "wt-token"
         result = self.git("worktree", "add", "-q", "-b", "token", str(worktree))
@@ -234,19 +234,19 @@ class RequiredHookTests(unittest.TestCase):
         calls = self.events_log()
         self.assertTrue(calls, calls)
         self.assertEqual(len(calls), 10)
-        self.assertTrue(all(line.endswith("GITLAB_TOKEN=") for line in calls), calls)
+        self.assertTrue(all(line.endswith("GH_TOKEN=") for line in calls), calls)
         self.assertTrue(all("GIT_DIR=unset" in line for line in calls), calls)
         self.assertNotIn("secret-token-value", result.stdout + result.stderr)
         self.assertNotIn("secret-token-value", self.events.read_text())
 
         # A credential explicitly present in the process environment still passes through.
         self.events.unlink()
-        self.env["GITLAB_TOKEN"] = "from-env"
+        self.env["GH_TOKEN"] = "from-env"
         explicit = self.base / "wt-explicit"
         self.git("worktree", "add", "-q", "-b", "explicit", str(explicit))
         calls = self.events_log()
         self.assertEqual(len(calls), 10)
-        self.assertTrue(all(line.endswith("GITLAB_TOKEN=set") for line in calls))
+        self.assertTrue(all(line.endswith("GH_TOKEN=set") for line in calls))
 
     def test_failed_initialization_keeps_worktree_and_prints_fix(self):
         self.apply(mode="enforce", apply=True)

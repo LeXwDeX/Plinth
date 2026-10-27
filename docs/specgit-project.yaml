@@ -2,7 +2,7 @@
 # Initialize with an absolute --config-file path; .specgit.yaml remains local.
 version: 2
 remote: origin
-provider: gitlab
+provider: github
 target: main
 language: zh
 validation:

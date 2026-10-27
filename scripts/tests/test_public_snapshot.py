@@ -132,7 +132,7 @@ class PatternTests(unittest.TestCase):
     def test_local_environment_values_become_literals(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "environments.json"
-            path.write_text(json.dumps({"version": 1, "acceptance": {"forge_url": "https://forge.internal.test/g/p"},
+            path.write_text(json.dumps({"version": 1, "acceptance": {"forge_url": "https://github.com/owner/repo"},
                 "environments": {"dev-test": {
                     "ssh": "root@build-host.internal.test", "root": "/srv/plinth-dev",
                     "base_url": "http://10.9.8.7:13333", "compose_project": "plinth_dev",
@@ -143,7 +143,7 @@ class PatternTests(unittest.TestCase):
                     "template": {"ssh": "root@<host>", "root": "<root>", "compose_project": "x"}}}))
             literals = snapshot.environment_literals(path)
         self.assertEqual(literals, sorted({
-            "forge.internal.test", "build-host.internal.test", "/srv/plinth-dev", "10.9.8.7", "plinth_dev",
+            "build-host.internal.test", "/srv/plinth-dev", "10.9.8.7", "plinth_dev",
             "plinth_candidate", "/srv/legacy/assets", "npm.internal.test", "proxy.internal.test", "10.9.8.6"}))
         self.assertEqual(snapshot.environment_literals(Path(directory) / "missing.json"), [])
 
@@ -175,7 +175,7 @@ class ExclusionTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(snapshot.excluded(path, patterns))
         for path in (".env.example", "deploy/environments.example.json", "docs/deployment.md",
-                     ".gitlab-ci.yml", "src/components/ui/focus-handoff.ts", ".claude/settings.json"):
+                     ".github/workflows/ci.yml", "src/components/ui/focus-handoff.ts", ".claude/settings.json"):
             with self.subTest(path=path):
                 self.assertFalse(snapshot.excluded(path, patterns))
 

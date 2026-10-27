@@ -6,8 +6,7 @@ import { describe, expect, it } from 'vitest';
  * 门禁对齐守门（#257）。dev_test.md §2「自动化门禁项」是门禁的唯一真源：每项写明
  * 门禁名「…」与执行位置（本地 + CI / 仅本地 / 仅 CI）。这里要求：
  * - 标为 CI 的每项命令逐字出现在恰好一个 CI 作业里，同一项的命令在同一作业、按 §2 顺序；
- *   CI 作业里没有 §2 以外的命令；内网 GitLab（.gitlab-ci.yml）与公共 GitHub Actions
- *   （.github/workflows/ci.yml）的作业名与命令完全相同，都不构建镜像（#257）；
+ *   CI 作业里没有 §2 以外的命令；CI 只有 GitHub Actions（.github/workflows/ci.yml），不构建镜像（#257）；
  * - 本地入口（scripts/verify-local.py）默认集合 GATES 的门禁名与顺序等于标为本地的各项，
  *   --race 加跑的 RACE_GATE 等于唯一标为仅 CI 的一项。
  * 这里按文本解析，只依赖这些文件现有的固定写法；写法变了先改这里的解析。
@@ -60,29 +59,6 @@ function verifyLocal(): { gates: string[]; race: string[] } {
     gates: pythonGateNames(text.slice(start, text.indexOf('\n]', start))),
     race: pythonGateNames(race![1]),
   };
-}
-
-function gitlabJobs(): Map<string, string[]> {
-  const jobs = new Map<string, string[]>();
-  let job: string | null = null;
-  let inScript = false;
-  for (const line of read('.gitlab-ci.yml').split('\n')) {
-    const top = /^([^\s#.][^:]*):\s*$/.exec(line);
-    if (top) {
-      job = ['stages', 'default', 'variables', 'workflow'].includes(top[1]) ? null : top[1];
-      if (job) jobs.set(job, []);
-      inScript = false;
-      continue;
-    }
-    if (!job) continue;
-    if (/^ {2}\S/.test(line) && !/^ {2}#/.test(line)) {
-      inScript = line.trim() === 'script:';
-      continue;
-    }
-    const step = /^ {4}- (.+)$/.exec(line);
-    if (inScript && step) jobs.get(job)!.push(step[1].trim());
-  }
-  return jobs;
 }
 
 function githubJobs(): Map<string, string[]> {
@@ -145,16 +121,8 @@ describe('CI and local gate parity with dev_test.md §2', () => {
     expect(local.race).toEqual(gates.filter((gate) => !gate.local).map((gate) => gate.name));
   });
 
-  it('the internal GitLab runner runs every CI gate in exactly one job and nothing else', () => {
-    expectCiCovers(gitlabJobs(), gates);
-  });
-
-  it('the public GitHub workflow runs exactly the same jobs and commands as GitLab', () => {
-    const gitlab = gitlabJobs();
-    const github = githubJobs();
-    expect([...github.keys()]).toEqual([...gitlab.keys()]);
-    gitlab.forEach((steps, job) => expect(github.get(job), job).toEqual(steps));
-    expectCiCovers(github, gates);
+  it('the GitHub workflow runs every CI gate in exactly one job and nothing else', () => {
+    expectCiCovers(githubJobs(), gates);
   });
 
   it('the public GitHub workflow reaches no internal host and pins every action to a commit', () => {
@@ -165,27 +133,9 @@ describe('CI and local gate parity with dev_test.md §2', () => {
     uses.forEach((ref) => expect(ref).toMatch(/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/));
   });
 
-  it('the internal GitLab pipeline names no internal host and uses the public npm registry', () => {
-    // #257: the npm source is fixed to the public registry; CI no longer accepts a mirror override.
-    const text = read('.gitlab-ci.yml');
-    expect(text).not.toMatch(/yc[g]ame|192\.168\.|pkgs\./);
-    expect(text).not.toMatch(/NPM_REGISTRY/);
-    expect(text).toMatch(/registry\.npmjs\.org/);
-    // Project/group CI/CD variables can override job variables, and registry environment
-    // variables (npm_config_registry, PNPM_CONFIG_REGISTRY) outrank ~/.npmrc, so both
-    // install commands pass --registry explicitly.
-    const installs = [...text.matchAll(/^ {4}- ((?:npm|pnpm) install .+)$/gm)].map((match) => match[1]);
-    expect(installs.filter((step) => step.startsWith('npm install ')).length).toBeGreaterThan(0);
-    expect(installs.filter((step) => step.startsWith('pnpm install ')).length).toBeGreaterThan(0);
-    installs.forEach((step) =>
-      expect(step, step).toMatch(/(?:^|\s)--registry=https:\/\/registry\.npmjs\.org\/(?:\s|$)/),
-    );
-  });
-
-  it('pins pnpm to the packageManager version in the Dockerfile and the GitLab runner', () => {
+  it('pins pnpm to the packageManager version in the Dockerfile', () => {
     const packageManager = /"packageManager": "pnpm@([0-9.]+)"/.exec(read('package.json'))![1];
     const dockerfile = /^ARG PNPM_VERSION=([0-9.]+)$/m.exec(read('Dockerfile.go-runtime'))![1];
-    const gitlab = /pnpm-([0-9.]+)\.tgz/.exec(read('.gitlab-ci.yml'))![1];
-    expect([dockerfile, gitlab]).toEqual([packageManager, packageManager]);
+    expect(dockerfile).toEqual(packageManager);
   });
 });

@@ -5,10 +5,9 @@
 # These are safety nets: all of them are untracked in normal use, so a
 # snapshot made from tracked files does not contain them anyway. Internal
 # operation files that ARE tracked (dev_ops.md, the internal Compose files,
-# the release/smoke scripts, .gitlab-ci.yml) stay in the snapshot: after the
-# switch the public repository is the primary repository and the internal
-# GitLab only mirrors it, so anything excluded here would vanish from the
-# mirror too. They must therefore be clean, which the scan enforces.
+# the release/smoke scripts) are part of the public repository, which is the
+# only repository since 2026-10-27. They must therefore be clean, which the
+# scan enforces.
 
 # Local deployment folder and older local environment files (hosts, roots, ports).
 deploy/local/

@@ -1,9 +1,10 @@
 {
   "version": 1,
   "acceptance": {
-    "forge_project": "<GitLab project id>",
-    "forge_url": "https://<forge-host>/<group>/<project>",
-    "issue": 0
+    "forge_repo": "<owner>/<repo>",
+    "forge_url": "https://github.com/<owner>/<repo>",
+    "issue": 0,
+    "legacy_formal_issue": 0
   },
   "environments": {
     "dev-test": {

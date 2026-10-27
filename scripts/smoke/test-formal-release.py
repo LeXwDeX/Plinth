@@ -17,11 +17,13 @@ spec.loader.exec_module(release)
 
 SHA = "a" * 40
 TAG = "aaaaaaa-20261019T010000Z"
-FORGE = "https://forge.example.invalid/group/project"
-EVIDENCE = FORGE + "/-/issues/232#note_123"
+FORGE = "https://forge.example.invalid/owner/project"
+EVIDENCE = FORGE + "/issues/232#issuecomment-123"
+COMMENT_ISSUE = "https://api.forge.example.invalid/repos/owner/project/issues/232"
 release.FORGE = FORGE
 ENVIRONMENTS = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
-json.dump({"version": 1, "acceptance": {"forge_project": "42", "forge_url": FORGE, "issue": 232},
+json.dump({"version": 1, "acceptance": {"forge_repo": "owner/project", "forge_url": FORGE, "issue": 7,
+                          "legacy_formal_issue": 232},
            "environments": {"legacy-formal": {"ssh": "root@legacy.example.invalid", "root": "/srv/legacy",
                                               "base_url": "http://legacy.example.invalid:13334",
                                               "compose_project": "legacy_project",
@@ -65,11 +67,22 @@ class AuthorizationTests(unittest.TestCase):
 
     def test_non_main_revision_and_unaccepted_native_note_never_reach_ssh(self):
         args = SimpleNamespace(revision=SHA, acceptance_note=123, credentials_file="/unused", rollback=False)
-        for results in (["", release.ReleaseError("not ancestor")], ["", "", '{"body":"no accepted tests"}']):
+        for results in (["", release.ReleaseError("not ancestor")], ["", "", json.dumps({"body": "no accepted tests", "issue_url": COMMENT_ISSUE})]):
             with patch.object(release, "run", side_effect=results) as run, patch.object(release, "credential_file") as secret:
                 with self.assertRaises(release.ReleaseError): release.local(args)
                 self.assertFalse(any(call.args[0] == "ssh" for call in run.call_args_list))
                 secret.assert_not_called()
+
+    def test_acceptance_comment_is_read_from_the_configured_github_issue(self):
+        comment = {"body": "accepted", "issue_url": COMMENT_ISSUE}
+        with patch.object(release, "run", return_value=json.dumps(comment)) as run:
+            self.assertEqual(release.read_acceptance_comment("owner/project", 232, 123), comment)
+            run.assert_called_once_with("gh", "api", "repos/owner/project/issues/comments/123")
+        for issue_url in ("https://api.forge.example.invalid/repos/owner/project/issues/7",
+                          "https://api.forge.example.invalid/repos/other/project/issues/232", None):
+            with patch.object(release, "run", return_value=json.dumps({"body": "accepted", "issue_url": issue_url})):
+                with self.assertRaises(release.ReleaseError):
+                    release.read_acceptance_comment("owner/project", 232, 123)
 
     def test_exact_revision_and_native_acceptance_required(self):
         report = acceptance()
@@ -204,8 +217,8 @@ class DeploymentTargetTests(unittest.TestCase):
 
     def test_targets_are_read_from_the_environments_file(self):
         release.configure_from_environments(ENVIRONMENTS.name)
-        self.assertEqual((release.HOST, release.ROOT, release.FORGE, release.FORGE_PROJECT),
-                         ("root@legacy.example.invalid", Path("/srv/legacy"), FORGE, "42"))
+        self.assertEqual((release.HOST, release.ROOT, release.FORGE, release.FORGE_REPO, release.LEGACY_ISSUE),
+                         ("root@legacy.example.invalid", Path("/srv/legacy"), FORGE, "owner/project", 232))
         self.assertEqual((release.PROJECT, release.CONTAINER, release.TEST_PROJECT, release.TEST_CONTAINER),
                          ("legacy_project", "legacy_project-art-ai-go-1", "test_project", "test_project-art-ai-go-1"))
 
