@@ -21,8 +21,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/wirefixture"
 )
@@ -42,6 +44,10 @@ var (
 	cpEmailRE      = regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`)
 	cpUUIDRE       = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
 	cpBlobRE       = regexp.MustCompile(`[A-Za-z0-9+/_-]{200,}={0,2}`)
+	cpMixedBlobRE  = regexp.MustCompile(`[A-Za-z0-9+/_-]{80,}={0,2}`)
+	cpPercentRE    = regexp.MustCompile(`%[0-9A-Fa-f]{2}`)
+	cpHexIntIPRE   = regexp.MustCompile(`(?i)\b0x[0-9a-f]{8}\b`)
+	cpDottedIPRE   = regexp.MustCompile(`(?i)\b(?:0x[0-9a-f]{1,8}|\d{1,10})(?:\.(?:0x[0-9a-f]{1,8}|\d{1,10})){1,3}\b`)
 	cpDataURIRE    = regexp.MustCompile(`(?i)\bdata:[a-z0-9.+/-]*[;,]`)
 	cpPlaceholder  = regexp.MustCompile(`^(?:id-\d+|\[redacted\]|ok)?$`)
 	cpHex64RE      = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -139,8 +145,98 @@ func (c scanCtx) scanText(path, key, text string) {
 	if cpIdentityKeys[compact] && !cpPlaceholder.MatchString(text) {
 		c.add(path, "identity-field")
 	}
+	c.scanContent(path, text)
+	for _, decoded := range cpPercentVariants(text) {
+		c.scanContent(path, decoded)
+	}
+	if !c.strict || text == "" || cpPlaceholder.MatchString(text) || c.registered[text] {
+		return
+	}
+	if cpPromptKeys[compact] {
+		c.add(path, "unregistered-prompt")
+	} else if len(text) > corpusLongTextBytes {
+		c.add(path, "unregistered-long-text")
+	}
+}
+
+// cpPercentVariants decodes valid %XX escapes up to twice; invalid escapes stay.
+func cpPercentVariants(text string) []string {
+	var out []string
+	current := text
+	for round := 0; round < 2 && cpPercentRE.MatchString(current); round++ {
+		current = cpPercentRE.ReplaceAllStringFunc(current, func(e string) string {
+			var b byte
+			fmt.Sscanf(e[1:], "%02x", &b)
+			return string([]byte{b})
+		})
+		out = append(out, current)
+	}
+	return out
+}
+
+func cpUint32Addr(v uint64) netip.Addr {
+	return netip.AddrFrom4([4]byte{byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)})
+}
+
+// cpLegacyIP finds a non-public IPv4 written as a 32-bit hex number or with
+// hex/octal components, which netip refuses.
+func cpLegacyIP(text string) bool {
+	for _, raw := range cpHexIntIPRE.FindAllString(text, -1) {
+		var v uint64
+		if _, err := fmt.Sscanf(raw[2:], "%x", &v); err == nil && cpNonPublic(cpUint32Addr(v)) {
+			return true
+		}
+	}
+	for _, raw := range cpDottedIPRE.FindAllString(text, -1) {
+		parts := strings.Split(raw, ".")
+		legacy := false
+		for _, p := range parts {
+			legacy = legacy || (len(p) > 1 && p[0] == '0')
+		}
+		if !legacy {
+			continue
+		}
+		for _, base := range []int{0, 10} {
+			var number uint64
+			ok := true
+			for i, p := range parts {
+				v, err := strconv.ParseUint(p, base, 32)
+				if err != nil {
+					ok = false
+					break
+				}
+				if i < len(parts)-1 {
+					ok = ok && v <= 255
+					number |= v << (8 * uint(3-i))
+				} else {
+					ok = ok && v < 1<<(8*uint(4-i))
+					number |= v
+				}
+			}
+			if ok && cpNonPublic(cpUint32Addr(number)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func cpMixedBlob(text string) bool {
+	for _, run := range cpMixedBlobRE.FindAllString(text, -1) {
+		if strings.IndexFunc(run, unicode.IsUpper) >= 0 && strings.IndexFunc(run, unicode.IsLower) >= 0 && strings.IndexFunc(run, unicode.IsDigit) >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// scanContent applies the content rules to text (or to a decoded form of it).
+func (c scanCtx) scanContent(path, text string) {
 	if cpCredentialRE.MatchString(text) {
 		c.add(path, "credential-value")
+	}
+	if cpLegacyIP(text) {
+		c.add(path, "private-ip")
 	}
 	if cpHostnameRE.MatchString(text) {
 		c.add(path, "private-hostname")
@@ -181,16 +277,8 @@ func (c scanCtx) scanText(path, key, text string) {
 	if cpUUIDRE.MatchString(text) {
 		c.add(path, "raw-identifier")
 	}
-	if cpBlobRE.MatchString(text) || cpDataURIRE.MatchString(text) {
+	if cpBlobRE.MatchString(text) || cpMixedBlob(text) || cpDataURIRE.MatchString(text) {
 		c.add(path, "embedded-binary")
-	}
-	if !c.strict || text == "" || cpPlaceholder.MatchString(text) || c.registered[text] {
-		return
-	}
-	if cpPromptKeys[compact] {
-		c.add(path, "unregistered-prompt")
-	} else if len(text) > corpusLongTextBytes {
-		c.add(path, "unregistered-long-text")
 	}
 }
 
@@ -575,6 +663,69 @@ func privacyCases() []privacyCase {
 		{name: "unregistered long text", text: strings.Repeat("lorem ipsum ", 20), rule: "unregistered-long-text", unregisteredOnly: true},
 		{name: "base64 blob", text: strings.Repeat("QUJDREVGR0g", 40), rule: "embedded-binary"},
 		{name: "data URI", text: "data:image/png;base64,AAAA", rule: "embedded-binary"},
+		// Encoded forms (#90). Private literals are built from parts.
+		{name: "percent-encoded private IP", text: "host " + pctAll(privateIP()), rule: "private-ip"},
+		{name: "double percent-encoded private IP", text: "host " + pctAll(pctAll(privateIP())), rule: "private-ip"},
+		{name: "percent-encoded bearer token", text: pctAll("Bearer abcdefghijklmnop1234"), rule: "credential-value"},
+		{name: "percent-encoded email", text: pctAll("alice@corp-mail.com"), rule: "email"},
+		{name: "percent-encoded signed query", text: "a" + pctAll("?X-Amz-Signature=abc"), rule: "signed-url"},
+		{name: "hex integer IP", text: fmt.Sprintf("host 0x%08X", privateIPNumber()), rule: "private-ip"},
+		{name: "dotted hex IP", text: "host 0xC0.0xA8.0.9", rule: "private-ip"},
+		{name: "dotted octal IP", text: "host 0300.0250.0.9", rule: "private-ip"},
+		{name: "percent-encoded hex IP", text: pctAll(fmt.Sprintf("0x%08x", privateIPNumber())), rule: "private-ip"},
+		{name: "mixed-case token under 200 characters", text: strings.Repeat("aB3dE6gH9", 12), rule: "embedded-binary"},
+	}
+}
+
+// privateIP assembles a private IPv4 literal from parts (no private literal in source).
+func privateIP() string { return strings.Join([]string{"192", "168", "0", "9"}, ".") }
+
+func privateIPNumber() uint32 { return 192<<24 | 168<<16 | 9 }
+
+// pctAll percent-encodes every byte of s.
+func pctAll(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		fmt.Fprintf(&b, "%%%02X", s[i])
+	}
+	return b.String()
+}
+
+// Values that merely look like the encoded forms above must stay accepted, so
+// the new rules are attributable to the injected content and do not flag
+// ordinary identifiers, percentages, digests or public hex numbers.
+func TestPrivacyEncodedFormsDoNotFlagBenignValues(t *testing.T) {
+	for _, text := range []string{
+		"100% done", "50%% of 3 items", "discount 20%25 applied", "%20 leading space is plain text",
+		"0xdeadbeef", "build 0x1A2B", "version 1.2.3.4", "released 2026.10.28", "release 1.0.0",
+		strings.Repeat("a", 90),                 // single-class run below the 200 hard limit
+		strings.Repeat("abcdef0123456789", 4),   // 64 hex characters
+		"a-slug-" + strings.Repeat("word-", 20), // long lower-case identifier
+		strings.Repeat("Ab1", 20),               // 60 mixed characters, below the 80 floor
+		"https://example.test/v1/tasks/id-1",    // canonical public URL
+	} {
+		c := privacyCase{text: text, key: "message"}
+		policy := privacyPolicy(c, true)
+		exchanges := []wirefixture.Exchange{privacyExchange(c)}
+		if err := wirefixture.Validate(exchanges, policy); err != nil {
+			t.Errorf("Validate rejected benign %q: %v", text, err)
+		}
+		if f := scanCandidate("benign.candidate.json", exchanges, policy); len(f) != 0 {
+			t.Errorf("scan flagged benign %q: %v", text, f)
+		}
+	}
+}
+
+func TestPublicHostRejectsLegacyNumericForms(t *testing.T) {
+	for _, host := range []string{"3232235529", "0xC0A80009", "0300.0250.0.9", "0xC0.0xA8.0.9"} {
+		policy := wirefixture.Policy{MaxBodyBytes: 1 << 20, Keys: map[string]bool{}, Allowed: map[string]bool{}, PublicHosts: map[string]bool{host: true}}
+		if err := wirefixture.ValidatePolicy(policy); err == nil {
+			t.Errorf("ValidatePolicy accepted numeric host %q", host)
+		}
+	}
+	ok := wirefixture.Policy{MaxBodyBytes: 1 << 20, Keys: map[string]bool{}, Allowed: map[string]bool{}, PublicHosts: map[string]bool{"api.vendor.com": true}}
+	if err := wirefixture.ValidatePolicy(ok); err != nil {
+		t.Errorf("ValidatePolicy rejected a public host: %v", err)
 	}
 }
 

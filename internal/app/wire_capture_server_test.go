@@ -509,6 +509,13 @@ func (c *wireCapture) finalPolicy() (wirefixture.Policy, error) {
 func wireCaptureReplayPolicy(exchanges []wirefixture.Exchange, public wirefixture.Policy) (wirefixture.Policy, error) {
 	public.Keys, public.Allowed, public.Aliases = maps.Clone(public.Keys), maps.Clone(public.Allowed), nil
 	public.Projection = nil
+	// The sanitizer passes "" through untouched and ValidatePolicy rejects an
+	// empty Allowed entry, so the exporter must never register one (#90).
+	allow := func(value string) {
+		if value != "" {
+			public.Allowed[value] = true
+		}
+	}
 	var collect func(any, int)
 	decode := func(text string) any {
 		var value any
@@ -533,7 +540,7 @@ func wireCaptureReplayPolicy(exchanges []wirefixture.Exchange, public wirefixtur
 				collect(child, depth+1)
 			}
 		case string:
-			public.Allowed[value] = true
+			allow(value)
 			if nested := decode(value); nested != nil {
 				switch nested.(type) {
 				case map[string]any, []any:
@@ -541,7 +548,7 @@ func wireCaptureReplayPolicy(exchanges []wirefixture.Exchange, public wirefixtur
 				}
 			}
 		case json.Number:
-			public.Allowed[value.String()] = true
+			allow(value.String())
 		}
 	}
 	for _, exchange := range exchanges {
@@ -552,7 +559,7 @@ func wireCaptureReplayPolicy(exchanges []wirefixture.Exchange, public wirefixtur
 		}
 		for _, headers := range []map[string]string{exchange.Request.Headers, exchange.Response.Headers} {
 			for _, value := range headers {
-				public.Allowed[value] = true
+				allow(value)
 			}
 		}
 		for _, payload := range []wirefixture.Payload{exchange.Request.Body, exchange.Response.Body} {
@@ -674,4 +681,26 @@ func TestWireCaptureServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log("wire capture: complete candidate exported; privacy review still required")
+}
+
+// Regression for #90: empty strings in headers, bodies and multipart values
+// must not become empty Allowed entries in the exported replay policy.
+func TestWireCaptureReplayPolicyOmitsEmptyAllowed(t *testing.T) {
+	exchange := wirefixture.Exchange{}
+	exchange.Request.Path = "/v1//chat"
+	exchange.Request.Headers = map[string]string{"x-empty": ""}
+	exchange.Response.Headers = map[string]string{"x-empty": "", "content-type": "application/json"}
+	exchange.Request.Body.JSON = json.RawMessage(`{"a":"","b":["","kept"],"c":"{\"d\":\"\"}"}`)
+	exchange.Response.Body.SSE = "data: {\"e\":\"\"}\n\ndata: [DONE]"
+	exchange.Request.Body.Multipart = &wirefixture.Multipart{Parts: []wirefixture.MultipartPart{{Name: "p", Value: ""}}}
+	// The policy is returned even when Validate rejects the hand-built exchange.
+	policy, _ := wireCaptureReplayPolicy([]wirefixture.Exchange{exchange}, wirefixture.Policy{
+		Keys: map[string]bool{}, Allowed: map[string]bool{},
+	})
+	if policy.Allowed[""] {
+		t.Fatal("replay policy registered an empty Allowed entry")
+	}
+	if !policy.Allowed["kept"] || !policy.Allowed["application/json"] || !policy.Allowed["chat"] {
+		t.Fatalf("non-empty values must still be registered: %v", policy.Allowed)
+	}
 }
