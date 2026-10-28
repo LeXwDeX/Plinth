@@ -25,6 +25,11 @@ var pathURLRefRE = regexp.MustCompile(`(?i)(?:^|[\s"'(\[{=])(/[^\s"'<>\\]*[?#][^
 var pathUserinfoURLRE = regexp.MustCompile(`(?i)(?:^|[\s"'(\[{=])(/[^\s"'<>\\]*[^/\s"'<>\\]:[^/\s"'<>\\@]+@[^\s"'<>\\]*)`)
 var credentialRE = regexp.MustCompile(`(?i)(\bBearer\s+[A-Za-z0-9._~+/-]{8,}=*|\bBasic\s+[A-Za-z0-9+/=]{8,}|\bsk-[A-Za-z0-9_-]{12,}|\bAKIA[0-9A-Z]{16}\b|-----BEGIN [A-Z ]*PRIVATE KEY-----|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|\bgh[pousr]_[A-Za-z0-9]{20,}|\b(?:token|api[._ -]*key|api[._ -]*token|auth[._ -]*token|password|passwd|secret(?:[._ -]*access)?[._ -]*key|secret|subscription[._ -]*key|signed[._ -]*url|x[._ -]*amz[._ -]*signature|x[._ -]*amz[._ -]*credential|x[._ -]*amz[._ -]*security[._ -]*token)\s*[:=]\s*(?:\\?["'][^"'\\]{1,}\\?["']|[A-Za-z0-9._~+/-]{3,}))`)
 var privateHostRE = regexp.MustCompile(`(?i)(\blocalhost\b|\b127\.0\.0\.1\b|\b0\.0\.0\.0\b|\b169\.254\.\d{1,3}\.\d{1,3}\b|\b10\.\d{1,3}\.\d{1,3}\.\d{1,3}\b|\b192\.168\.\d{1,3}\.\d{1,3}\b|\b172\.(1[6-9]|2[0-9]|3[01])\.\d{1,3}\.\d{1,3}\b|\.internal\b|\.local\b|\.svc\b|\.corp\b|\.lan\b|\.home\b|\.home\.arpa\b|\.intranet\b|\.private\b|\.localdomain\b|\[::1\])`)
+var publicPlaceholderRE = regexp.MustCompile(`^(?:id-\d+|\[redacted\])$`)
+var emailRE = regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`)
+var signedQueryRE = regexp.MustCompile(`(?i)\b(?:signature|expires|sig)=|\bx-(?:amz|goog)-[a-z-]+=`)
+var uuidRE = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
+var embeddedBlobRE = regexp.MustCompile(`[A-Za-z0-9+/_-]{200,}={0,2}`)
 var dataURIRE = regexp.MustCompile(`(?i)\bdata:[^\s"'<>]*[,;]`)
 var quotedKeyRE = regexp.MustCompile(`"(?:[^"\\]|\\.)*"\s*:`)
 var credentialAssignmentRE = regexp.MustCompile(`(?i)\b([A-Za-z0-9][A-Za-z0-9._-]{0,63})\s*[:=]\s*(?:\\?["'][^"'\\]{1,}\\?["']|[^\s"'<>]{1,})`)
@@ -88,7 +93,7 @@ func sanitizeHost(host string, policy Policy) (string, error) {
 		}
 		return mapped, nil
 	}
-	if policy.PublicHosts[host] {
+	if policy.PublicHosts[host] && validPublicHost(host) {
 		return host, nil
 	}
 	return "", fmt.Errorf("%w: request host", ErrUnsafePublicValue)
@@ -285,6 +290,9 @@ func checkText(text string, allowWhitespace bool) error {
 		protocolRelativeURLRE.MatchString(text) || pathURLRefRE.MatchString(text) || pathUserinfoURLRE.MatchString(text) {
 		return fmt.Errorf("%w: credential, private host or data URI", ErrUnsafePublicValue)
 	}
+	if emailRE.MatchString(text) || signedQueryRE.MatchString(text) || uuidRE.MatchString(text) || embeddedBlobRE.MatchString(text) {
+		return fmt.Errorf("%w: personal identifier, signed query or embedded binary", ErrUnsafePublicValue)
+	}
 	for _, raw := range schemeURLRE.FindAllString(text, -1) {
 		parsed, err := url.Parse(raw)
 		if err != nil || parsed.Scheme != "https" || parsed.Host != "example.test" ||
@@ -359,6 +367,13 @@ func sensitiveKey(key string) bool {
 		}
 	}
 	return false
+}
+
+// identityKeys name fields that carry a person, account or device; an
+// unprojected string value is redacted like a credential.
+var identityKeys = map[string]bool{
+	"userid": true, "username": true, "email": true, "owner": true, "ownerid": true, "uid": true,
+	"accountid": true, "tenantid": true, "deviceid": true, "customerid": true, "phone": true,
 }
 
 func credentialAssignment(text string) bool {
@@ -444,6 +459,10 @@ func sanitizeValue(value any, policy Policy, depth int) (any, error) {
 					return nil, fmt.Errorf("key %q: %w", key, err)
 				}
 				typed[key] = clean
+				continue
+			}
+			if text, isText := child.(string); isText && identityKeys[compactKey(key)] && text != "" && text != "ok" && !publicPlaceholderRE.MatchString(text) {
+				typed[key] = "[redacted]"
 				continue
 			}
 			clean, err := sanitizeValue(child, policy, depth+1)
