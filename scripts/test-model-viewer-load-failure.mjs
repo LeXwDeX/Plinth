@@ -69,7 +69,7 @@ const testPlugin = {
   load(id) {
     if (id !== virtualID) return;
     return `
-      import React, { useState } from 'react';
+      import React, { useCallback, useState } from 'react';
       import { createRoot } from 'react-dom/client';
       import '${path.join(root, 'src/app/globals.css')}';
       import { ProductSchemaProvider } from '${path.join(root, 'src/components/product-schema-provider.tsx')}';
@@ -83,15 +83,18 @@ const testPlugin = {
         const [src, setSrc] = useState(null);
         const [mounted, setMounted] = useState(true);
         const [control, setControl] = useState(null);
+        // Stable references: an inline callback would change every render and re-publish the control.
+        const onControl = useCallback(value => { observations.ready.push(value?.ready ?? false); setControl(value); }, []);
+        const onCapture = useCallback(async blob => observations.captures.push({ type: blob.type, size: blob.size, signature: Array.from(new Uint8Array(await blob.slice(0, 8).arrayBuffer())) }), []);
+        const onCaptureError = useCallback(() => { observations.captureErrors++; }, []);
         window.loadFailureHarness = { setSource: setSrc, unmount: () => setMounted(false), control, observations };
         return React.createElement(ProductSchemaProvider, { initialSchema: ${JSON.stringify(catalog.application)} },
           React.createElement('main', { style: { position: 'relative', width: '420px', height: '480px', padding: '10px', background: '#20242b' } },
             mounted && src ? React.createElement(ModelViewer3D, {
               key: 'viewer', src, alt: 'Load failure test model', autoRotate: false,
-              onControl: value => { observations.ready.push(value?.ready ?? false); setControl(value); },
+              onControl,
               captureLabel: 'Capture model', captureLongEdgePixels: 512,
-              onCapture: async blob => observations.captures.push({ type: blob.type, size: blob.size, signature: Array.from(new Uint8Array(await blob.slice(0, 8).arrayBuffer())) }),
-              onCaptureError: () => { observations.captureErrors++; },
+              onCapture, onCaptureError,
             }) : null,
             React.createElement(Stage3DViews, { mode: 'texture', onChange: () => undefined, loaded: control?.ready ?? false, supported: control?.viewModes ?? false }),
           ),

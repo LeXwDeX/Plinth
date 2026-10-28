@@ -139,7 +139,7 @@ a build label, not proof that a dirty source tree matches that commit. Do not us
 check directory isolation. Keep the source worktree available while running.
 
 ```bash
-git status --short
+git status --short   # must print nothing: capture refuses a dirty worktree
 git rev-parse HEAD
 shasum -a 256 "$CAPTURE_ROOT/catalog.json"
 go test -c -ldflags "-X github.com/LeXwDeX/Plinth/internal/app.wireCaptureSourceSHA=$(git rev-parse HEAD)" -o "$CAPTURE_ROOT/wire-capture.test" ./internal/app
@@ -437,6 +437,28 @@ That continuation must preserve the same consumed intent after any uncertain
 response; it must never retry a paid click to repair capture. The main operator
 coordinates a new authorized live round serially. This preflight does not complete
 #365 or claim a Meshy asset capture.
+
+#### After a capture: review, coverage matrix and privacy scan
+
+Capture only runs from a clean worktree (`TestWireCaptureServer` stops when
+`git status --porcelain --untracked-files=all` prints anything), so a sample's
+source label always names the code that produced it. A candidate still enters the
+repository only after human privacy and provenance review. When committing one
+(`*.candidate.json` with its `.meta.json` and `.policy.json`), run both offline
+checks and commit the regenerated matrix with it:
+
+```bash
+UPDATE_WIRE_COVERAGE=1 go test ./internal/testutil/wirefixture -run Coverage -count=1
+go test ./internal/testutil/wirefixture -count=1
+```
+
+`testdata/wire-coverage.generated.json` is generated from the Catalog and the
+committed samples, never edited by hand; units without a real sample stay
+`missing`. `TestCommittedWireCorpusHasNoPrivateData` rescans every committed
+candidate, meta, policy, evidence file and the matrix, and rejects policies that
+`ValidatePolicy` refuses. The full-stack replays are in
+`internal/app/agent_flow_replay_test.go`. See `docs/architecture.md`
+"Wire 黄金样本、覆盖矩阵与全栈离线回放" for rules, limits and what is not covered.
 
 ### Recovery Fixture
 

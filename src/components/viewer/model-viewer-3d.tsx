@@ -202,6 +202,10 @@ export function ModelViewer3D({
   onTextureSizeRef.current = onTextureSize;
   const onControlRef = useRef(onControl);
   onControlRef.current = onControl;
+  // Read through a ref so an inline callback from the caller cannot re-publish the control every render.
+  const onCaptureRef = useRef(onCapture);
+  onCaptureRef.current = onCapture;
+  const hasCapture = Boolean(onCapture);
   const onElementRef = useRef(onElement);
   onElementRef.current = onElement;
   const onPartsRef = useRef(onParts);
@@ -288,7 +292,8 @@ export function ModelViewer3D({
 
   const capture = async () => {
     const element = elementRef.current;
-    if (!element || !onCapture || !captureLongEdgePixels || captureInProgress.current) return;
+    const onCaptureNow = onCaptureRef.current;
+    if (!element || !onCaptureNow || !captureLongEdgePixels || captureInProgress.current) return;
     captureInProgress.current = true;
     setCapturing(true);
     // The part highlight is a stage affordance, not the model: it stays out of the picture.
@@ -305,7 +310,7 @@ export function ModelViewer3D({
         window.devicePixelRatio || 1,
         ModelViewerElement,
       );
-      await onCapture(result.blob, result.view);
+      await onCaptureNow(result.blob, result.view);
     } catch {
       onCaptureError?.();
     } finally {
@@ -408,7 +413,7 @@ export function ModelViewer3D({
   resetViewRef.current = resetView;
   useEffect(() => {
     onControlRef.current?.({ ready, viewModes, capture: () => captureRef.current(), resetView: () => resetViewRef.current(), exportPart: (id) => exportPartRef.current(id) });
-  }, [ready, viewModes, onCapture, captureLongEdgePixels]);
+  }, [ready, viewModes, hasCapture, captureLongEdgePixels]);
   useEffect(() => () => onControlRef.current?.(null), []);
   useEffect(() => {
     if (!moduleReady) return;

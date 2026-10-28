@@ -404,6 +404,10 @@ func TestBoundAgentTaskRecoversAfterRestartWithChangedHarness(t *testing.T) {
 	if err := json.Unmarshal([]byte(result.AgentContent), &resultContent); err != nil {
 		t.Fatalf("decode recovered task success JSON: %v", err)
 	}
+	// The grant was approved by the policy in auto mode; recovery must keep saying so.
+	if key := tool.ResultFields.Approval; key == "" || resultContent[key] != "policy" {
+		t.Fatalf("recovered approval source = %v; want policy: %s", resultContent[key], result.AgentContent)
+	}
 	if key := tool.ResultFields.EstimatedCredits; key == "" || resultContent[key] != float64(0) {
 		t.Fatalf("recovered frozen metered zero estimate missing after current catalog changed: %s", result.AgentContent)
 	}

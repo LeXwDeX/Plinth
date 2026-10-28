@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "scenario": "rodin-image-to-3d-live",
+  "captured_at_utc": "2026-10-28",
+  "source_revision": "b29265603b4fbb7efc25ba967a537b161153e023",
+  "schema_revision": "2026-10-29.issue65-declared-settings.1",
+  "catalog_sha256": "0ba6f6aae92349096cf404a194de66f07e62614f86fbd6cedeec12c48e2d6dd9",
+  "offering": "hyper3d/rodin-gen-2.5/image-to-3d",
+  "api_version": "v2",
+  "provenance": "captured",
+  "transformation": "IDs and signed URLs are deterministic placeholders; the uploaded image and downloaded media bytes are synthetic recipes and are not the original bytes.",
+  "exchanges": 67,
+  "candidate_sha256": "601b1cbbbbe022f7b2dc5c67bf0227caa4b5af7c0d4ea6e10390ed1178e78927",
+  "media": [
+    {
+      "sequence": 66,
+      "media_type": "model/gltf-binary",
+      "recipe": "glb-triangle"
+    },
+    {
+      "sequence": 67,
+      "media_type": "image/webp",
+      "recipe": "webp-1x1"
+    }
+  ],
+  "evidence_note": "Private media evidence was retained outside the repository; this public manifest lists only lengths and SHA-256 digests.",
+  "source_state": "clean worktree at capture time (git status empty); the capture binary was built from this exact revision"
+}

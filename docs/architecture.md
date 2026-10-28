@@ -74,6 +74,43 @@ multipart 只接受 `multipart/form-data`，文件 MIME 限于已登记媒体类
 
 测试二进制、前端和 Catalog 摘要随完整源码 SHA 留存。合成边界故障、真实 Provider 成功调用与实际产物交付分开报告；保存原执行身份及出站记录只能证明未重复提交，不能代替 Provider 账单审计。旧 Catalog 恢复在隔离进程中验收，同版本 13333 的页面/API、正常模型链和发布门禁仍独立执行。操作契约见 `scripts/smoke/README.md`，每轮验收结果只记 GitLab Issue/MR。
 
+#### Wire 黄金样本、覆盖矩阵与全栈离线回放（#70）
+
+这一节只描述测试资料与测试代码，不改变运行时模块职责、依赖方向或任务生命周期；普通应用二进制没有对应入口。已提交的样本是 `internal/testutil/wirefixture` 导出的公开候选（`*.candidate.json`），同目录配 `.meta.json`（采集日期、API 版本、Offering、`candidate_sha256`）和 `.policy.json`（回放用的精确登记）。目前有四份：`internal/app/testdata/agent-flow`（一轮 Agent 对话加 Rodin 生成，60 条 exchange）、`internal/providers/hyper3d/testdata` 的 Rodin text-to-3d 与 Rodin image-to-3d（67 条 exchange，2026-10-28 干净工作树采集；请求里的参考图和下载媒体按 recipe 替换，故 `POST /api/v2/rodin` 为 `derived`，状态轮询与下载为 `real`）以及 `internal/providers/meshy/testdata` 的 Meshy text-to-3d。它们只证明采集当时的上游行为，不证明上游现在仍返回相同内容。
+
+**覆盖矩阵由 Catalog 与样本生成。** `TestWireCoverageMatrix`（`internal/testutil/wirefixture/coverage_test.go`）读取 `internal/catalog/default_catalog.json`（记录其 SHA-256）和所有已提交的 candidate，生成 `testdata/wire-coverage.generated.json`；文件不手写，也没有写死的基线数字。已提交文件与生成结果不一致时测试失败，并给出重新生成的命令：
+
+```
+UPDATE_WIRE_COVERAGE=1 go test ./internal/testutil/wirefixture -run Coverage
+```
+
+- **单元键** = `adapter_key | capability | 端点`。声明单元来自 Catalog：启用的远程 Offering 用 `declared:<provider_options.endpoint>`（未声明写 `(adapter-defined)`），禁用的为 `(disabled)`，本地的为 `(local)`。观察单元来自样本：端点是 `方法 + 规范化路径`，路径里的 ID、UUID、长十六进制和纯数字段写成 `{id}`，`fixture-N.ext` 写成 `{asset}.ext`。样本的 exchange 经 `metadata.connection` 对应到 Provider 的 adapter，不认识的连接记为 `connection:<名>`；capability 取 meta 里的 Offering，没有时记 `(scenario)`。以声明端点结尾的观察单元取代对应的声明单元，并带上该声明下的 Offering。
+- **证据类别。** 单元取其全部 exchange 中最高的一类：`real`（provenance 为 `captured`）> `official-example` > `derived` > `synthetic-negative`（其他 provenance）> `missing`（Catalog 声明了但没有任何样本）。另有两类不产生出站：`local-no-wire`（本地 Offering，不伪造上游交互）和 `disabled-zero-egress`（已禁用的 Offering）。Offering 再多一类 `partial`：它的各单元证据不一致。Offering 的类别由其单元推出：含本地或禁用单元的取该类，所有单元相同的取该类，单元全部缺失的为 `missing`，其余为 `partial`。
+- **缺口只列出，不填充。** `missing` 单元进入文件里的 `incomplete` 列表，不会让测试失败，也不会用合成数据补齐。缺真实样本的 Offering 因此显示为 `missing`，例如 GPT、Gemini、Jimeng 图像生成及各类处理 Offering（Rodin image-to-3d 为 `partial`）。当前数量见生成文件的 `counts`，不在本文固定。
+- `TestCaptureMetaSourceRevision` 约束 meta 的 `source_revision`/`source_sha`：只能是干净的 40 位十六进制，或 `unknown`；标明脏工作树的采集不得带修订号。
+- **采集拒绝脏工作树。** `TestWireCaptureServer` 启动时先经 `requireCleanWireCaptureWorktree` 执行 `git status --porcelain --untracked-files=all`；输出非空或命令失败即终止，因为脏树里注入的源码 SHA 标签证明不了产生样本的代码。
+
+**回放经真实应用栈。** 逐条 exchange 回放只证明 Provider wire，不证明任务、批准和聊天链路。下列测试把样本放进完整的应用装配，只替换已声明连接的 HTTP transport；样本里没有的上游请求无处可去，使回放失败，也不会落到真实网络。
+
+- `internal/app/agent_flow_replay_test.go`：`TestAgentFlowSampleRunsThroughTheWholeStack` 经公开 HTTP 路由和已登录会话，驱动聊天消息、模型的工具调用、批准卡、Generation 内核的 Task、Hyper3D 提交/观察/下载，以及结果回传到聊天；`TestAgentFlowRefusedApprovalSubmitsNothingAndAnswersInTheTurnLanguage`（拒绝批准不提交任何请求，英文回合用英文回答）；`TestAgentFlowExpiredApprovalCannotBeApprovedLate`（批准过期后不能再批准）；`TestAgentFlowUnrecordedUpstreamRequestFailsTheReplayAndNeverResubmits`（样本外的请求使回放失败，Task 按提交结果不明失败，不盲目重提）；`TestReplayStackNeverFallsBackToTheNetwork`；`TestAgentFlowCancelledTaskStopsPollingAndIsNotRetried`（取消后停止轮询且不被重试）。
+- `internal/providers/hyper3d/live_candidate_adapter_test.go`（`TestRodinLiveCandidateDrivesTheAdapterThroughStartObserveAndOpenAsset`）（另有 `TestRodinImageLiveCandidateDrivesTheAdapterThroughStartObserveAndOpenAsset`，用合成 PNG recipe 校验 multipart 参考图）和 `internal/providers/meshy/live_candidate_adapter_test.go`（`TestMeshyLiveCandidateDrivesTheAdapterThroughStartObserveAndOpenAsset`）：由真实 Adapter 经 Generation Port 走 Start（含持久派发检查点）、内核会发起的每次 Observe 和已声明文件的下载。
+- 既有的 `TestAgentFlowLiveCandidateReplaysWholeWire` 以及 Meshy、Hyper3D 包内的 `live_candidate_test.go` 仍逐条回放整条 wire。
+
+**隐私扫描与负控。** `TestCommittedWireCorpusHasNoPrivateData`（`corpus_privacy_test.go`）独立于 sanitizer 重新读取 git 跟踪的 testdata 下所有 `*.candidate.json`、`*.meta.json`、`*.policy.json`、`*.evidence.json` 以及 `wire-coverage.generated.json`，用自己的规则检查，使 sanitizer 回归、手改样本或登记了泄露值的策略都能在评审时被发现。
+
+- 候选必须有同名 policy，并通过 `wirefixture.Validate`；policy 直接经 `ValidatePolicy` 检查，不豁免任何条目；evidence 只允许类型、长度和 SHA-256；至少要扫到三份候选，防止空扫通过。
+- 规则名：`credential-field`、`credential-value`、`identity-field`、`private-ip`、`private-hostname`、`url-host`/`url-query`/`url-fragment`/`url-userinfo`/`url-malformed`、`signed-url`、`email`、`raw-identifier`（UUID）、`embedded-binary`（长 base64 或 data URI）、`unregistered-prompt`、`unregistered-long-text`（超过 128 字节且未在 policy 登记）、`header-not-allowed`（请求头只许 `content-type`、`accept`、`x-api-version`，响应头只许 `content-type`、`retry-after`）、`host-not-public-alias`、`media-not-descriptor`（媒体只能是类型、长度和合成 recipe 描述）、`evidence-shape`、`json-invalid`、`policy-invalid`。发现项只含文件、JSON 路径和规则名，不打印命中的值。
+- 这些负控暴露的缺口已补进 `checkText` 与 sanitizer：登记过的值也拒绝邮箱、签名/过期查询、原始 UUID 和内嵌 base64；`user_id`、`owner`、`uid` 等身份字段与凭据一样被替换；`PublicHosts` 登记项必须是合法公共主机。`example.test` 是保留别名，不需要也不允许登记进 `PublicHosts`，policy 里不允许空字符串的 `Allowed` 项。
+- 负控：`TestPrivacyScanDetectsInjectedContent` 逐类注入上述内容并要求扫描命中；`TestPrivacyControlBaselinePasses` 证明基线干净；`TestWirefixtureRefusesInjectedPrivateContent` 证明 `Validate` 与 `WriteCandidate` 同样拒绝；`TestPrivacyControlsForHostsHeadersPathsAndMedia` 覆盖主机、头、路径和媒体；`TestPrivacyScanRejectsPolicyThatRegistersLeaks` 与 `TestPrivacyScanRejectsBadEvidenceAndMeta` 覆盖 policy、evidence 与 meta。
+
+**已知限制。**
+
+- 样本内每条 exchange 的 `app_revision` 仍是采集时的历史构建标签，对应的是脏工作树。它们写在 candidate 内部，改动会破坏 meta 里的 `candidate_sha256`，所以没有改；meta 的 `source_revision` 因此记为 `unknown`。
+- 样本为保证公开安全而有损，全栈回放需要显式绑定，且每处都在测试中计数或断言：聊天请求的会话、工具声明和思考开关在样本里是不透明的 `ok`，实际请求先缩减成同一形状再比较；模型调用的工具名和下载文件名被脱敏成不透明 ID，分别绑定回已声明的工具和下载规则（Rodin 适配器测试里也有同类的文件名绑定）；样本采集历时约半小时，Rodin Offering 的轮询间隔在测试里缩短到一秒；标题响应的消息是不透明的 `ok`，无法解码，标题保持默认。
+- 没有覆盖正向的重试路径。样本里没有重试，测试只断言取消、过期、未记录请求之后不会重提，不能证明一次成功的重试。语言展示也只在拒绝批准的用例里核对了英文。
+- 覆盖仅限已提交样本：缺真实样本的 Offering 在矩阵里是 `missing`，不能把这套回放当作对它们的验收。采集仍须在干净工作树、按 `scripts/smoke/README.md` 的流程和付费次数规则执行，candidate 进入仓库前还要人工复核隐私与来源。
+- 这些测试未经过部署验收；它们随 `go test` 在本机和 CI 离线运行，不访问上游、不需要 Key、不产生费用。
+
 ### 正式迁移事务边界
 
 正式 Next → Go 切换由 `scripts/finalize-go-production.sh` 编排，不进入应用运行时。

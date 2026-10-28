@@ -14,7 +14,12 @@ import (
 
 func loadRodinLiveCandidate(t *testing.T) ([]wirefixture.Exchange, wirefixture.Policy) {
 	t.Helper()
-	raw, err := os.ReadFile("testdata/rodin-text-to-3d.candidate.json")
+	return loadRodinLiveSample(t, "rodin-text-to-3d")
+}
+
+func loadRodinLiveSample(t *testing.T, name string) ([]wirefixture.Exchange, wirefixture.Policy) {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/" + name + ".candidate.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +27,7 @@ func loadRodinLiveCandidate(t *testing.T) ([]wirefixture.Exchange, wirefixture.P
 	if err := json.Unmarshal(raw, &exchanges); err != nil {
 		t.Fatal(err)
 	}
-	policyRaw, err := os.ReadFile("testdata/rodin-text-to-3d.policy.json")
+	policyRaw, err := os.ReadFile("testdata/" + name + ".policy.json")
 	if err != nil {
 		t.Fatal(err)
 	}

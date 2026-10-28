@@ -2,7 +2,7 @@
   "version": 1,
   "scenario": "meshy-text-to-3d-live",
   "captured_at_utc": "2026-10-26",
-  "source_revision": "f7b41428ab8bd2fb24f8afa55b16e7066b58d3be",
+  "source_revision": "unknown",
   "offering": "meshy/meshy-7.1/text-to-3d",
   "api_version": "v2",
   "provenance": "captured",
@@ -74,5 +74,5 @@
   "evidence_note": "Private media evidence was retained outside the repository; this public manifest lists only lengths and SHA-256 digests.",
   "schema_revision": "2026-10-26.issue363-validator-and-issue358-input-reasons.1",
   "catalog_sha256": "c25872fa69ec00d7cb72654c4acde778efdd93f0521aaebce143ed634b8c3254",
-  "source_state": "dirty-worktree; source_revision is the injected build label, not a clean revision proof"
+  "source_state": "dirty-worktree at capture time; the injected build label was not a clean revision proof, so source_revision is unknown"
 }

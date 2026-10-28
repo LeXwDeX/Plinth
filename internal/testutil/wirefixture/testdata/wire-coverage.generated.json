@@ -1,0 +1,2400 @@
+{
+  "version": 2,
+  "catalog": "internal/catalog/default_catalog.json",
+  "catalog_sha256": "0ba6f6aae92349096cf404a194de66f07e62614f86fbd6cedeec12c48e2d6dd9",
+  "samples": [
+    "internal/app/testdata/agent-flow/agent-flow.candidate.json",
+    "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
+    "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json",
+    "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json"
+  ],
+  "counts": {
+    "offerings": {
+      "disabled": 7,
+      "disabled-zero-egress": 7,
+      "enabled": 69,
+      "local-no-wire": 4,
+      "missing": 61,
+      "partial": 4,
+      "total": 76
+    },
+    "units": {
+      "derived": 15,
+      "disabled-zero-egress": 7,
+      "local-no-wire": 2,
+      "missing": 55,
+      "real": 11,
+      "total": 90
+    }
+  },
+  "incomplete": [
+    "gemini-images.v1|image-to-image|declared:chat/completions",
+    "gemini-images.v1|text-to-image|declared:chat/completions",
+    "hyper3d.rodin.v1|mesh-segmentation|declared:bang",
+    "hyper3d.rodin.v1|retexture|declared:rodin_texture_only",
+    "jimeng-images.v1|image-to-image|declared:api/v3/images/generations",
+    "jimeng-images.v1|text-to-image|declared:api/v3/images/generations",
+    "matting.v1|background-removal|declared:(adapter-defined)",
+    "meshy.v2|analyze-printability|declared:print/analyze",
+    "meshy.v2|animation|declared:animations",
+    "meshy.v2|creative-lab-build|declared:brick-figure/v1/build",
+    "meshy.v2|creative-lab-build|declared:fidget-collapsible/v1",
+    "meshy.v2|creative-lab-build|declared:fidget-pixel/v1/build",
+    "meshy.v2|creative-lab-build|declared:figure/v1/build",
+    "meshy.v2|creative-lab-build|declared:fridge-magnet/v1/build",
+    "meshy.v2|creative-lab-build|declared:keycap/v1/build",
+    "meshy.v2|creative-lab-build|declared:keychain/v1/build",
+    "meshy.v2|creative-lab-build|declared:lamp/v1/build",
+    "meshy.v2|creative-lab-build|declared:vinyl-figure/v1/build",
+    "meshy.v2|creative-lab-prototype|declared:brick-figure/v1/prototype",
+    "meshy.v2|creative-lab-prototype|declared:fidget-pixel/v1/prototype",
+    "meshy.v2|creative-lab-prototype|declared:figure/v1/prototype",
+    "meshy.v2|creative-lab-prototype|declared:fridge-magnet/v1/prototype",
+    "meshy.v2|creative-lab-prototype|declared:keycap/v1/prototype",
+    "meshy.v2|creative-lab-prototype|declared:keychain/v1/prototype",
+    "meshy.v2|creative-lab-prototype|declared:lamp/v1/prototype",
+    "meshy.v2|creative-lab-prototype|declared:vinyl-figure/v1/prototype",
+    "meshy.v2|format-conversion|declared:convert",
+    "meshy.v2|image-to-3d|declared:image-to-3d",
+    "meshy.v2|image-to-3d|declared:multi-image-to-3d",
+    "meshy.v2|image-to-image|declared:image-to-image",
+    "meshy.v2|multi-color-print|declared:print/multi-color",
+    "meshy.v2|remesh|declared:remesh",
+    "meshy.v2|resize|declared:resize",
+    "meshy.v2|retexture|declared:retexture",
+    "meshy.v2|rigging|declared:rigging",
+    "meshy.v2|text-to-image|declared:text-to-image",
+    "meshy.v2|text-to-motion|declared:text-to-motion",
+    "meshy.v2|uv-unwrap|declared:uv-unwrap",
+    "openai-images.v1|image-to-image|declared:images/edits",
+    "openai-images.v1|text-to-image|declared:images/generations",
+    "tripo.v3|animation|declared:animations/retarget",
+    "tripo.v3|edit-multiview|declared:generation/edit-multiview",
+    "tripo.v3|format-conversion|declared:models/convert",
+    "tripo.v3|image-to-3d|declared:generation/image-to-model",
+    "tripo.v3|image-to-3d|declared:mesh/smartsegment",
+    "tripo.v3|image-to-multiview|declared:generation/image-to-multiview",
+    "tripo.v3|image-to-splat|declared:generation/image-to-splat",
+    "tripo.v3|mesh-completion|declared:mesh/complete",
+    "tripo.v3|mesh-segmentation|declared:mesh/segment",
+    "tripo.v3|mesh-segmentation|declared:mesh/smartsegment",
+    "tripo.v3|remesh|declared:mesh/decimate",
+    "tripo.v3|retexture|declared:models/texture",
+    "tripo.v3|rig-check|declared:animations/rig-check",
+    "tripo.v3|rigging|declared:animations/rig",
+    "tripo.v3|text-to-3d|declared:generation/text-to-model"
+  ],
+  "units": [
+    {
+      "adapter_key": "connection:LLM",
+      "capability": "(scenario)",
+      "endpoint": "POST /v1/chat/completions",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json",
+        "sse"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/app/testdata/agent-flow/agent-flow.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "gemini-images.v1",
+      "capability": "image-to-image",
+      "endpoint": "declared:chat/completions",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "gemini/gemini-3-pro-image/image-to-image",
+          "model_id": "gemini-3-pro-image",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "gemini-images.v1",
+      "capability": "text-to-image",
+      "endpoint": "declared:chat/completions",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "gemini/gemini-3-pro-image/text-to-image",
+          "model_id": "gemini-3-pro-image",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "(scenario)",
+      "endpoint": "GET /{asset}.glb",
+      "hosts": [
+        "file.hyper3d.com"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/app/testdata/agent-flow/agent-flow.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "(scenario)",
+      "endpoint": "GET /{asset}.webp",
+      "hosts": [
+        "file.hyper3d.com"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/app/testdata/agent-flow/agent-flow.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "(scenario)",
+      "endpoint": "POST /api/v2/download",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/app/testdata/agent-flow/agent-flow.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "(scenario)",
+      "endpoint": "POST /api/v2/rodin",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/app/testdata/agent-flow/agent-flow.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "(scenario)",
+      "endpoint": "POST /api/v2/status",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/app/testdata/agent-flow/agent-flow.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "image-to-3d",
+      "endpoint": "GET /{asset}.glb",
+      "hosts": [
+        "file.hyper3d.com"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/rodin-gen-2.5/image-to-3d",
+          "model_id": "rodin-gen-2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "image-to-3d",
+      "endpoint": "GET /{asset}.webp",
+      "hosts": [
+        "file.hyper3d.com"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/rodin-gen-2.5/image-to-3d",
+          "model_id": "rodin-gen-2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "image-to-3d",
+      "endpoint": "POST /api/v2/download",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/rodin-gen-2.5/image-to-3d",
+          "model_id": "rodin-gen-2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "image-to-3d",
+      "endpoint": "POST /api/v2/rodin",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/rodin-gen-2.5/image-to-3d",
+          "model_id": "rodin-gen-2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "image-to-3d",
+      "endpoint": "POST /api/v2/status",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/rodin-gen-2.5/image-to-3d",
+          "model_id": "rodin-gen-2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "mesh-segmentation",
+      "endpoint": "declared:bang",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "hyper3d/bang/local-model",
+          "model_id": "bang-local-model",
+          "enabled": true
+        },
+        {
+          "id": "hyper3d/bang/rodin-task",
+          "model_id": "bang-rodin-task",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "retexture",
+      "endpoint": "declared:rodin_texture_only",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "hyper3d/texture/local-model",
+          "model_id": "texture-local-model",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{asset}.glb",
+      "hosts": [
+        "file.hyper3d.com"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/rodin-gen-2.5/text-to-3d",
+          "model_id": "rodin-gen-2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{asset}.webp",
+      "hosts": [
+        "file.hyper3d.com"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/rodin-gen-2.5/text-to-3d",
+          "model_id": "rodin-gen-2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "text-to-3d",
+      "endpoint": "POST /api/v2/download",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/rodin-gen-2.5/text-to-3d",
+          "model_id": "rodin-gen-2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "text-to-3d",
+      "endpoint": "POST /api/v2/rodin",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/rodin-gen-2.5/text-to-3d",
+          "model_id": "rodin-gen-2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "text-to-3d",
+      "endpoint": "POST /api/v2/status",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/rodin-gen-2.5/text-to-3d",
+          "model_id": "rodin-gen-2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "jimeng-images.v1",
+      "capability": "image-to-image",
+      "endpoint": "declared:api/v3/images/generations",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "jimeng/seedream-4-5/image-to-image",
+          "model_id": "doubao-seedream-4-5-251128",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "jimeng-images.v1",
+      "capability": "text-to-image",
+      "endpoint": "declared:api/v3/images/generations",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "jimeng/seedream-4-5/text-to-image",
+          "model_id": "doubao-seedream-4-5-251128",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "local.model",
+      "capability": "format-conversion",
+      "endpoint": "(local)",
+      "evidence": "local-no-wire",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "local/generated-glb/to-gltf",
+          "model_id": "local-generated-glb-to-gltf",
+          "enabled": true
+        },
+        {
+          "id": "local/static-glb/to-gltf",
+          "model_id": "local-glb-to-gltf",
+          "enabled": true
+        },
+        {
+          "id": "local/static-gltf/to-glb",
+          "model_id": "local-gltf-to-glb",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "local.recovery",
+      "capability": "asset-recovery",
+      "endpoint": "(local)",
+      "evidence": "local-no-wire",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "local/existing-assets/recover",
+          "model_id": "local-asset-recovery",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "matting.v1",
+      "capability": "background-removal",
+      "endpoint": "declared:(adapter-defined)",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "matting/default/background-removal",
+          "model_id": "matting-default",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "analyze-printability",
+      "endpoint": "declared:print/analyze",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/processing/analyze-printability",
+          "model_id": "meshy-analyze-printability",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "animation",
+      "endpoint": "declared:animations",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/processing/animation",
+          "model_id": "meshy-processing",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "creative-lab-build",
+      "endpoint": "declared:brick-figure/v1/build",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/creative-lab/brick-figure/build",
+          "model_id": "creative-lab-brick-figure-build",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "creative-lab-build",
+      "endpoint": "declared:fidget-collapsible/v1",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/creative-lab/fidget-collapsible/generate",
+          "model_id": "creative-lab-fidget-collapsible-generate",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "creative-lab-build",
+      "endpoint": "declared:fidget-pixel/v1/build",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/creative-lab/fidget-pixel/build",
+          "model_id": "creative-lab-fidget-pixel-build",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "creative-lab-build",
+      "endpoint": "declared:figure/v1/build",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/creative-lab/figure/build",
+          "model_id": "creative-lab-figure-build",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "creative-lab-build",
+      "endpoint": "declared:fridge-magnet/v1/build",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/creative-lab/fridge-magnet/build",
+          "model_id": "creative-lab-fridge-magnet-build",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "creative-lab-build",
+      "endpoint": "declared:keycap/v1/build",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/creative-lab/keycap/build",
+          "model_id": "creative-lab-keycap-build",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "creative-lab-build",
+      "endpoint": "declared:keychain/v1/build",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/creative-lab/keychain/build",
+          "model_id": "creative-lab-keychain-build",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "creative-lab-build",
+      "endpoint": "declared:lamp/v1/build",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/creative-lab/lamp/build",
+          "model_id": "creative-lab-lamp-build",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "creative-lab-build",
+      "endpoint": "declared:vinyl-figure/v1/build",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/creative-lab/vinyl-figure/build",
+          "model_id": "creative-lab-vinyl-figure-build",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "creative-lab-prototype",
+      "endpoint": "declared:brick-figure/v1/prototype",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/creative-lab/brick-figure/prototype",
+          "model_id": "creative-lab-brick-figure-prototype",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "creative-lab-prototype",
+      "endpoint": "declared:fidget-pixel/v1/prototype",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/creative-lab/fidget-pixel/prototype",
+          "model_id": "creative-lab-fidget-pixel-prototype",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "creative-lab-prototype",
+      "endpoint": "declared:figure/v1/prototype",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/creative-lab/figure/prototype",
+          "model_id": "creative-lab-figure-prototype",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "creative-lab-prototype",
+      "endpoint": "declared:fridge-magnet/v1/prototype",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/creative-lab/fridge-magnet/prototype",
+          "model_id": "creative-lab-fridge-magnet-prototype",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "creative-lab-prototype",
+      "endpoint": "declared:keycap/v1/prototype",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/creative-lab/keycap/prototype",
+          "model_id": "creative-lab-keycap-prototype",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "creative-lab-prototype",
+      "endpoint": "declared:keychain/v1/prototype",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/creative-lab/keychain/prototype",
+          "model_id": "creative-lab-keychain-prototype",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "creative-lab-prototype",
+      "endpoint": "declared:lamp/v1/prototype",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/creative-lab/lamp/prototype",
+          "model_id": "creative-lab-lamp-prototype",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "creative-lab-prototype",
+      "endpoint": "declared:vinyl-figure/v1/prototype",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/creative-lab/vinyl-figure/prototype",
+          "model_id": "creative-lab-vinyl-figure-prototype",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "format-conversion",
+      "endpoint": "declared:convert",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/processing/convert",
+          "model_id": "meshy-convert",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "image-to-3d",
+      "endpoint": "(disabled)",
+      "evidence": "disabled-zero-egress",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7/image-to-3d",
+          "model_id": "meshy-7",
+          "enabled": false
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "image-to-3d",
+      "endpoint": "declared:image-to-3d",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/image-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/image-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "image-to-3d",
+      "endpoint": "declared:multi-image-to-3d",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1-multiview/image-to-3d",
+          "model_id": "meshy-7.1-multiview",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "image-to-image",
+      "endpoint": "declared:image-to-image",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/nano-banana-2/image-to-image",
+          "model_id": "nano-banana-2",
+          "enabled": true
+        },
+        {
+          "id": "meshy/nano-banana-pro/image-to-image",
+          "model_id": "nano-banana-pro",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "multi-color-print",
+      "endpoint": "declared:print/multi-color",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/processing/multi-color-print",
+          "model_id": "meshy-multi-color-print",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "remesh",
+      "endpoint": "declared:remesh",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/processing/remesh",
+          "model_id": "meshy-processing",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "repair-printability",
+      "endpoint": "(disabled)",
+      "evidence": "disabled-zero-egress",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/processing/repair-printability",
+          "model_id": "meshy-repair-printability",
+          "enabled": false
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "resize",
+      "endpoint": "declared:resize",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/processing/resize",
+          "model_id": "meshy-resize",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "retexture",
+      "endpoint": "declared:retexture",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/processing/retexture",
+          "model_id": "meshy-processing",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "rigging",
+      "endpoint": "declared:rigging",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/processing/rigging",
+          "model_id": "meshy-processing",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "(disabled)",
+      "evidence": "disabled-zero-egress",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7/text-to-3d",
+          "model_id": "meshy-7",
+          "enabled": false
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /openapi/v2/text-to-3d/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{asset}.3mf",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{asset}.fbx",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{asset}.glb",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{asset}.mtl",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{asset}.obj",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{asset}.png",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{asset}.stl",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{asset}.usdz",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "POST /openapi/v2/text-to-3d",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-image",
+      "endpoint": "declared:text-to-image",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/nano-banana-2/text-to-image",
+          "model_id": "nano-banana-2",
+          "enabled": true
+        },
+        {
+          "id": "meshy/nano-banana-pro/text-to-image",
+          "model_id": "nano-banana-pro",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-motion",
+      "endpoint": "declared:text-to-motion",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/prime/text-to-motion",
+          "model_id": "meshy-text-to-motion",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "uv-unwrap",
+      "endpoint": "declared:uv-unwrap",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "meshy/processing/uv-unwrap",
+          "model_id": "meshy-uv-unwrap",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "openai-images.v1",
+      "capability": "image-to-image",
+      "endpoint": "declared:images/edits",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "openai/gpt-image-2/image-to-image",
+          "model_id": "gpt-image-2.5-sunburst",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "openai-images.v1",
+      "capability": "text-to-image",
+      "endpoint": "declared:images/generations",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "openai/gpt-image-2/text-to-image",
+          "model_id": "gpt-image-2.5-sunburst",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "animation",
+      "endpoint": "declared:animations/retarget",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/processing/animation",
+          "model_id": "tripo-animation",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "edit-multiview",
+      "endpoint": "declared:generation/edit-multiview",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/edit-multiview",
+          "model_id": "tripo-edit-multiview",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "format-conversion",
+      "endpoint": "(disabled)",
+      "evidence": "disabled-zero-egress",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/tripo-v3.1/format-conversion",
+          "model_id": "tripo-v3.1-full",
+          "enabled": false
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "format-conversion",
+      "endpoint": "declared:models/convert",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/format-conversion/uploaded-glb-to-stl",
+          "model_id": "tripo-uploaded-glb-to-stl",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "image-to-3d",
+      "endpoint": "(disabled)",
+      "evidence": "disabled-zero-egress",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/tripo-v3.1/image-to-3d",
+          "model_id": "tripo-v3.1",
+          "enabled": false
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "image-to-3d",
+      "endpoint": "declared:generation/image-to-model",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/tripo-v3.1-full/image-to-3d",
+          "model_id": "tripo-v3.1-full",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "image-to-3d",
+      "endpoint": "declared:mesh/smartsegment",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/geometry/smartsegment-image",
+          "model_id": "tripo-smartsegment-image",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "image-to-multiview",
+      "endpoint": "declared:generation/image-to-multiview",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/image-to-multiview",
+          "model_id": "tripo-image-to-multiview",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "image-to-splat",
+      "endpoint": "declared:generation/image-to-splat",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/image-to-splat",
+          "model_id": "tripo-image-to-splat",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "mesh-completion",
+      "endpoint": "declared:mesh/complete",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/geometry/complete",
+          "model_id": "tripo-complete",
+          "enabled": true
+        },
+        {
+          "id": "tripo/geometry/quick-cap",
+          "model_id": "tripo-quick-cap",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "mesh-segmentation",
+      "endpoint": "declared:mesh/segment",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/geometry/segment",
+          "model_id": "tripo-segment",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "mesh-segmentation",
+      "endpoint": "declared:mesh/smartsegment",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/geometry/smartsegment-model",
+          "model_id": "tripo-smartsegment-model",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "remesh",
+      "endpoint": "(disabled)",
+      "evidence": "disabled-zero-egress",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/geometry/decimate-quad",
+          "model_id": "tripo-decimate-quad",
+          "enabled": false
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "remesh",
+      "endpoint": "declared:mesh/decimate",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/geometry/decimate-triangle",
+          "model_id": "tripo-decimate-triangle",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "retexture",
+      "endpoint": "declared:models/texture",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/processing/texture",
+          "model_id": "tripo-texture",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "rig-check",
+      "endpoint": "declared:animations/rig-check",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/processing/rig-check",
+          "model_id": "tripo-rig-check",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "rigging",
+      "endpoint": "declared:animations/rig",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/processing/rigging",
+          "model_id": "tripo-rigging",
+          "enabled": true
+        },
+        {
+          "id": "tripo/processing/rigging-v3",
+          "model_id": "tripo-rigging-v3",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "text-to-3d",
+      "endpoint": "(disabled)",
+      "evidence": "disabled-zero-egress",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/tripo-v3.1/text-to-3d",
+          "model_id": "tripo-v3.1",
+          "enabled": false
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "text-to-3d",
+      "endpoint": "declared:generation/text-to-model",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/tripo-v3.1-full/text-to-3d",
+          "model_id": "tripo-v3.1-full",
+          "enabled": true
+        }
+      ]
+    }
+  ],
+  "offerings": [
+    {
+      "id": "gemini/gemini-3-pro-image/image-to-image",
+      "model_id": "gemini-3-pro-image",
+      "adapter_key": "gemini-images.v1",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "gemini-images.v1|image-to-image|declared:chat/completions"
+      ]
+    },
+    {
+      "id": "gemini/gemini-3-pro-image/text-to-image",
+      "model_id": "gemini-3-pro-image",
+      "adapter_key": "gemini-images.v1",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "gemini-images.v1|text-to-image|declared:chat/completions"
+      ]
+    },
+    {
+      "id": "hyper3d/bang/local-model",
+      "model_id": "bang-local-model",
+      "adapter_key": "hyper3d.rodin.v1",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "hyper3d.rodin.v1|mesh-segmentation|declared:bang"
+      ]
+    },
+    {
+      "id": "hyper3d/bang/rodin-task",
+      "model_id": "bang-rodin-task",
+      "adapter_key": "hyper3d.rodin.v1",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "hyper3d.rodin.v1|mesh-segmentation|declared:bang"
+      ]
+    },
+    {
+      "id": "hyper3d/rodin-gen-2.5/image-to-3d",
+      "model_id": "rodin-gen-2.5",
+      "adapter_key": "hyper3d.rodin.v1",
+      "enabled": true,
+      "evidence": "partial",
+      "units": [
+        "hyper3d.rodin.v1|image-to-3d|GET /{asset}.glb",
+        "hyper3d.rodin.v1|image-to-3d|GET /{asset}.webp",
+        "hyper3d.rodin.v1|image-to-3d|POST /api/v2/download",
+        "hyper3d.rodin.v1|image-to-3d|POST /api/v2/rodin",
+        "hyper3d.rodin.v1|image-to-3d|POST /api/v2/status"
+      ]
+    },
+    {
+      "id": "hyper3d/rodin-gen-2.5/text-to-3d",
+      "model_id": "rodin-gen-2.5",
+      "adapter_key": "hyper3d.rodin.v1",
+      "enabled": true,
+      "evidence": "partial",
+      "units": [
+        "hyper3d.rodin.v1|text-to-3d|GET /{asset}.glb",
+        "hyper3d.rodin.v1|text-to-3d|GET /{asset}.webp",
+        "hyper3d.rodin.v1|text-to-3d|POST /api/v2/download",
+        "hyper3d.rodin.v1|text-to-3d|POST /api/v2/rodin",
+        "hyper3d.rodin.v1|text-to-3d|POST /api/v2/status"
+      ]
+    },
+    {
+      "id": "hyper3d/texture/local-model",
+      "model_id": "texture-local-model",
+      "adapter_key": "hyper3d.rodin.v1",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "hyper3d.rodin.v1|retexture|declared:rodin_texture_only"
+      ]
+    },
+    {
+      "id": "jimeng/seedream-4-5/image-to-image",
+      "model_id": "doubao-seedream-4-5-251128",
+      "adapter_key": "jimeng-images.v1",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "jimeng-images.v1|image-to-image|declared:api/v3/images/generations"
+      ]
+    },
+    {
+      "id": "jimeng/seedream-4-5/text-to-image",
+      "model_id": "doubao-seedream-4-5-251128",
+      "adapter_key": "jimeng-images.v1",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "jimeng-images.v1|text-to-image|declared:api/v3/images/generations"
+      ]
+    },
+    {
+      "id": "local/existing-assets/recover",
+      "model_id": "local-asset-recovery",
+      "adapter_key": "local.recovery",
+      "enabled": true,
+      "evidence": "local-no-wire",
+      "units": [
+        "local.recovery|asset-recovery|(local)"
+      ]
+    },
+    {
+      "id": "local/generated-glb/to-gltf",
+      "model_id": "local-generated-glb-to-gltf",
+      "adapter_key": "local.model",
+      "enabled": true,
+      "evidence": "local-no-wire",
+      "units": [
+        "local.model|format-conversion|(local)"
+      ]
+    },
+    {
+      "id": "local/static-glb/to-gltf",
+      "model_id": "local-glb-to-gltf",
+      "adapter_key": "local.model",
+      "enabled": true,
+      "evidence": "local-no-wire",
+      "units": [
+        "local.model|format-conversion|(local)"
+      ]
+    },
+    {
+      "id": "local/static-gltf/to-glb",
+      "model_id": "local-gltf-to-glb",
+      "adapter_key": "local.model",
+      "enabled": true,
+      "evidence": "local-no-wire",
+      "units": [
+        "local.model|format-conversion|(local)"
+      ]
+    },
+    {
+      "id": "matting/default/background-removal",
+      "model_id": "matting-default",
+      "adapter_key": "matting.v1",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "matting.v1|background-removal|declared:(adapter-defined)"
+      ]
+    },
+    {
+      "id": "meshy/creative-lab/brick-figure/build",
+      "model_id": "creative-lab-brick-figure-build",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|creative-lab-build|declared:brick-figure/v1/build"
+      ]
+    },
+    {
+      "id": "meshy/creative-lab/brick-figure/prototype",
+      "model_id": "creative-lab-brick-figure-prototype",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|creative-lab-prototype|declared:brick-figure/v1/prototype"
+      ]
+    },
+    {
+      "id": "meshy/creative-lab/fidget-collapsible/generate",
+      "model_id": "creative-lab-fidget-collapsible-generate",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|creative-lab-build|declared:fidget-collapsible/v1"
+      ]
+    },
+    {
+      "id": "meshy/creative-lab/fidget-pixel/build",
+      "model_id": "creative-lab-fidget-pixel-build",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|creative-lab-build|declared:fidget-pixel/v1/build"
+      ]
+    },
+    {
+      "id": "meshy/creative-lab/fidget-pixel/prototype",
+      "model_id": "creative-lab-fidget-pixel-prototype",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|creative-lab-prototype|declared:fidget-pixel/v1/prototype"
+      ]
+    },
+    {
+      "id": "meshy/creative-lab/figure/build",
+      "model_id": "creative-lab-figure-build",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|creative-lab-build|declared:figure/v1/build"
+      ]
+    },
+    {
+      "id": "meshy/creative-lab/figure/prototype",
+      "model_id": "creative-lab-figure-prototype",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|creative-lab-prototype|declared:figure/v1/prototype"
+      ]
+    },
+    {
+      "id": "meshy/creative-lab/fridge-magnet/build",
+      "model_id": "creative-lab-fridge-magnet-build",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|creative-lab-build|declared:fridge-magnet/v1/build"
+      ]
+    },
+    {
+      "id": "meshy/creative-lab/fridge-magnet/prototype",
+      "model_id": "creative-lab-fridge-magnet-prototype",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|creative-lab-prototype|declared:fridge-magnet/v1/prototype"
+      ]
+    },
+    {
+      "id": "meshy/creative-lab/keycap/build",
+      "model_id": "creative-lab-keycap-build",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|creative-lab-build|declared:keycap/v1/build"
+      ]
+    },
+    {
+      "id": "meshy/creative-lab/keycap/prototype",
+      "model_id": "creative-lab-keycap-prototype",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|creative-lab-prototype|declared:keycap/v1/prototype"
+      ]
+    },
+    {
+      "id": "meshy/creative-lab/keychain/build",
+      "model_id": "creative-lab-keychain-build",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|creative-lab-build|declared:keychain/v1/build"
+      ]
+    },
+    {
+      "id": "meshy/creative-lab/keychain/prototype",
+      "model_id": "creative-lab-keychain-prototype",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|creative-lab-prototype|declared:keychain/v1/prototype"
+      ]
+    },
+    {
+      "id": "meshy/creative-lab/lamp/build",
+      "model_id": "creative-lab-lamp-build",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|creative-lab-build|declared:lamp/v1/build"
+      ]
+    },
+    {
+      "id": "meshy/creative-lab/lamp/prototype",
+      "model_id": "creative-lab-lamp-prototype",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|creative-lab-prototype|declared:lamp/v1/prototype"
+      ]
+    },
+    {
+      "id": "meshy/creative-lab/vinyl-figure/build",
+      "model_id": "creative-lab-vinyl-figure-build",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|creative-lab-build|declared:vinyl-figure/v1/build"
+      ]
+    },
+    {
+      "id": "meshy/creative-lab/vinyl-figure/prototype",
+      "model_id": "creative-lab-vinyl-figure-prototype",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|creative-lab-prototype|declared:vinyl-figure/v1/prototype"
+      ]
+    },
+    {
+      "id": "meshy/meshy-7.1-multiview/image-to-3d",
+      "model_id": "meshy-7.1-multiview",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|image-to-3d|declared:multi-image-to-3d"
+      ]
+    },
+    {
+      "id": "meshy/meshy-7.1/image-to-3d",
+      "model_id": "meshy-7.1",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|image-to-3d|declared:image-to-3d"
+      ]
+    },
+    {
+      "id": "meshy/meshy-7.1/text-to-3d",
+      "model_id": "meshy-7.1",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "partial",
+      "units": [
+        "meshy.v2|text-to-3d|GET /openapi/v2/text-to-3d/{id}",
+        "meshy.v2|text-to-3d|GET /{asset}.3mf",
+        "meshy.v2|text-to-3d|GET /{asset}.fbx",
+        "meshy.v2|text-to-3d|GET /{asset}.glb",
+        "meshy.v2|text-to-3d|GET /{asset}.mtl",
+        "meshy.v2|text-to-3d|GET /{asset}.obj",
+        "meshy.v2|text-to-3d|GET /{asset}.png",
+        "meshy.v2|text-to-3d|GET /{asset}.stl",
+        "meshy.v2|text-to-3d|GET /{asset}.usdz",
+        "meshy.v2|text-to-3d|POST /openapi/v2/text-to-3d"
+      ]
+    },
+    {
+      "id": "meshy/meshy-7/image-to-3d",
+      "model_id": "meshy-7",
+      "adapter_key": "meshy.v2",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
+      "units": [
+        "meshy.v2|image-to-3d|(disabled)"
+      ]
+    },
+    {
+      "id": "meshy/meshy-7/text-to-3d",
+      "model_id": "meshy-7",
+      "adapter_key": "meshy.v2",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
+      "units": [
+        "meshy.v2|text-to-3d|(disabled)"
+      ]
+    },
+    {
+      "id": "meshy/meshy-t2.5/image-to-3d",
+      "model_id": "meshy-t2.5",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|image-to-3d|declared:image-to-3d"
+      ]
+    },
+    {
+      "id": "meshy/meshy-t2.5/text-to-3d",
+      "model_id": "meshy-t2.5",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "partial",
+      "units": [
+        "meshy.v2|text-to-3d|GET /openapi/v2/text-to-3d/{id}",
+        "meshy.v2|text-to-3d|GET /{asset}.3mf",
+        "meshy.v2|text-to-3d|GET /{asset}.fbx",
+        "meshy.v2|text-to-3d|GET /{asset}.glb",
+        "meshy.v2|text-to-3d|GET /{asset}.mtl",
+        "meshy.v2|text-to-3d|GET /{asset}.obj",
+        "meshy.v2|text-to-3d|GET /{asset}.png",
+        "meshy.v2|text-to-3d|GET /{asset}.stl",
+        "meshy.v2|text-to-3d|GET /{asset}.usdz",
+        "meshy.v2|text-to-3d|POST /openapi/v2/text-to-3d"
+      ]
+    },
+    {
+      "id": "meshy/nano-banana-2/image-to-image",
+      "model_id": "nano-banana-2",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|image-to-image|declared:image-to-image"
+      ]
+    },
+    {
+      "id": "meshy/nano-banana-2/text-to-image",
+      "model_id": "nano-banana-2",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|text-to-image|declared:text-to-image"
+      ]
+    },
+    {
+      "id": "meshy/nano-banana-pro/image-to-image",
+      "model_id": "nano-banana-pro",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|image-to-image|declared:image-to-image"
+      ]
+    },
+    {
+      "id": "meshy/nano-banana-pro/text-to-image",
+      "model_id": "nano-banana-pro",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|text-to-image|declared:text-to-image"
+      ]
+    },
+    {
+      "id": "meshy/prime/text-to-motion",
+      "model_id": "meshy-text-to-motion",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|text-to-motion|declared:text-to-motion"
+      ]
+    },
+    {
+      "id": "meshy/processing/analyze-printability",
+      "model_id": "meshy-analyze-printability",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|analyze-printability|declared:print/analyze"
+      ]
+    },
+    {
+      "id": "meshy/processing/animation",
+      "model_id": "meshy-processing",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|animation|declared:animations"
+      ]
+    },
+    {
+      "id": "meshy/processing/convert",
+      "model_id": "meshy-convert",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|format-conversion|declared:convert"
+      ]
+    },
+    {
+      "id": "meshy/processing/multi-color-print",
+      "model_id": "meshy-multi-color-print",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|multi-color-print|declared:print/multi-color"
+      ]
+    },
+    {
+      "id": "meshy/processing/remesh",
+      "model_id": "meshy-processing",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|remesh|declared:remesh"
+      ]
+    },
+    {
+      "id": "meshy/processing/repair-printability",
+      "model_id": "meshy-repair-printability",
+      "adapter_key": "meshy.v2",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
+      "units": [
+        "meshy.v2|repair-printability|(disabled)"
+      ]
+    },
+    {
+      "id": "meshy/processing/resize",
+      "model_id": "meshy-resize",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|resize|declared:resize"
+      ]
+    },
+    {
+      "id": "meshy/processing/retexture",
+      "model_id": "meshy-processing",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|retexture|declared:retexture"
+      ]
+    },
+    {
+      "id": "meshy/processing/rigging",
+      "model_id": "meshy-processing",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|rigging|declared:rigging"
+      ]
+    },
+    {
+      "id": "meshy/processing/uv-unwrap",
+      "model_id": "meshy-uv-unwrap",
+      "adapter_key": "meshy.v2",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "meshy.v2|uv-unwrap|declared:uv-unwrap"
+      ]
+    },
+    {
+      "id": "openai/gpt-image-2/image-to-image",
+      "model_id": "gpt-image-2.5-sunburst",
+      "adapter_key": "openai-images.v1",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "openai-images.v1|image-to-image|declared:images/edits"
+      ]
+    },
+    {
+      "id": "openai/gpt-image-2/text-to-image",
+      "model_id": "gpt-image-2.5-sunburst",
+      "adapter_key": "openai-images.v1",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "openai-images.v1|text-to-image|declared:images/generations"
+      ]
+    },
+    {
+      "id": "tripo/edit-multiview",
+      "model_id": "tripo-edit-multiview",
+      "adapter_key": "tripo.v3",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "tripo.v3|edit-multiview|declared:generation/edit-multiview"
+      ]
+    },
+    {
+      "id": "tripo/format-conversion/uploaded-glb-to-stl",
+      "model_id": "tripo-uploaded-glb-to-stl",
+      "adapter_key": "tripo.v3",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "tripo.v3|format-conversion|declared:models/convert"
+      ]
+    },
+    {
+      "id": "tripo/geometry/complete",
+      "model_id": "tripo-complete",
+      "adapter_key": "tripo.v3",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "tripo.v3|mesh-completion|declared:mesh/complete"
+      ]
+    },
+    {
+      "id": "tripo/geometry/decimate-quad",
+      "model_id": "tripo-decimate-quad",
+      "adapter_key": "tripo.v3",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
+      "units": [
+        "tripo.v3|remesh|(disabled)"
+      ]
+    },
+    {
+      "id": "tripo/geometry/decimate-triangle",
+      "model_id": "tripo-decimate-triangle",
+      "adapter_key": "tripo.v3",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "tripo.v3|remesh|declared:mesh/decimate"
+      ]
+    },
+    {
+      "id": "tripo/geometry/quick-cap",
+      "model_id": "tripo-quick-cap",
+      "adapter_key": "tripo.v3",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "tripo.v3|mesh-completion|declared:mesh/complete"
+      ]
+    },
+    {
+      "id": "tripo/geometry/segment",
+      "model_id": "tripo-segment",
+      "adapter_key": "tripo.v3",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "tripo.v3|mesh-segmentation|declared:mesh/segment"
+      ]
+    },
+    {
+      "id": "tripo/geometry/smartsegment-image",
+      "model_id": "tripo-smartsegment-image",
+      "adapter_key": "tripo.v3",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "tripo.v3|image-to-3d|declared:mesh/smartsegment"
+      ]
+    },
+    {
+      "id": "tripo/geometry/smartsegment-model",
+      "model_id": "tripo-smartsegment-model",
+      "adapter_key": "tripo.v3",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "tripo.v3|mesh-segmentation|declared:mesh/smartsegment"
+      ]
+    },
+    {
+      "id": "tripo/image-to-multiview",
+      "model_id": "tripo-image-to-multiview",
+      "adapter_key": "tripo.v3",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "tripo.v3|image-to-multiview|declared:generation/image-to-multiview"
+      ]
+    },
+    {
+      "id": "tripo/image-to-splat",
+      "model_id": "tripo-image-to-splat",
+      "adapter_key": "tripo.v3",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "tripo.v3|image-to-splat|declared:generation/image-to-splat"
+      ]
+    },
+    {
+      "id": "tripo/processing/animation",
+      "model_id": "tripo-animation",
+      "adapter_key": "tripo.v3",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "tripo.v3|animation|declared:animations/retarget"
+      ]
+    },
+    {
+      "id": "tripo/processing/rig-check",
+      "model_id": "tripo-rig-check",
+      "adapter_key": "tripo.v3",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "tripo.v3|rig-check|declared:animations/rig-check"
+      ]
+    },
+    {
+      "id": "tripo/processing/rigging",
+      "model_id": "tripo-rigging",
+      "adapter_key": "tripo.v3",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "tripo.v3|rigging|declared:animations/rig"
+      ]
+    },
+    {
+      "id": "tripo/processing/rigging-v3",
+      "model_id": "tripo-rigging-v3",
+      "adapter_key": "tripo.v3",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "tripo.v3|rigging|declared:animations/rig"
+      ]
+    },
+    {
+      "id": "tripo/processing/texture",
+      "model_id": "tripo-texture",
+      "adapter_key": "tripo.v3",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "tripo.v3|retexture|declared:models/texture"
+      ]
+    },
+    {
+      "id": "tripo/tripo-v3.1-full/image-to-3d",
+      "model_id": "tripo-v3.1-full",
+      "adapter_key": "tripo.v3",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "tripo.v3|image-to-3d|declared:generation/image-to-model"
+      ]
+    },
+    {
+      "id": "tripo/tripo-v3.1-full/text-to-3d",
+      "model_id": "tripo-v3.1-full",
+      "adapter_key": "tripo.v3",
+      "enabled": true,
+      "evidence": "missing",
+      "units": [
+        "tripo.v3|text-to-3d|declared:generation/text-to-model"
+      ]
+    },
+    {
+      "id": "tripo/tripo-v3.1/format-conversion",
+      "model_id": "tripo-v3.1-full",
+      "adapter_key": "tripo.v3",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
+      "units": [
+        "tripo.v3|format-conversion|(disabled)"
+      ]
+    },
+    {
+      "id": "tripo/tripo-v3.1/image-to-3d",
+      "model_id": "tripo-v3.1",
+      "adapter_key": "tripo.v3",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
+      "units": [
+        "tripo.v3|image-to-3d|(disabled)"
+      ]
+    },
+    {
+      "id": "tripo/tripo-v3.1/text-to-3d",
+      "model_id": "tripo-v3.1",
+      "adapter_key": "tripo.v3",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
+      "units": [
+        "tripo.v3|text-to-3d|(disabled)"
+      ]
+    }
+  ]
+}
