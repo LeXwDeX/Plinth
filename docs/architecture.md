@@ -1400,6 +1400,8 @@ SQLite migration 0041 继续保存不可覆盖的共享 Agent Configuration 版�
 
 余额摘要在工作区顶栏独立显示。已知的数值余额含 0；悬停、键盘聚焦或触控可打开账户明细。浏览器余额缓存键包含用户 ID，避免账户切换复用旧数据。
 
+Hyper3D（Rodin）账户余额（#91）：与 Meshy、Tripo 一样只由 Schema 声明——`provider_accounts.hyper3d` 走通用 `http-json` 读取器（`GET {hyper3d_base_url}/check_balance`，`Authorization: Bearer`，响应字段 `balance`，原生单位 `hyper3d.credit`），并在 `legacy_provider_balance.accounts` 登记，兼容接口、管理端汇总和前端顶栏不增加 Provider 分支。官方依据为 [Check Balance](https://docs.hyper3d.ai/en/api-specification/check-balance)（可选 `usage_page` 未使用）。该账户读取器构造需要非空 `hyper3d_base_url`（Schema 默认已给出）。本次只做了 httptest 与 mock 模式验证，未调用真实 Rodin 接口，未部署验收。
+
 MCP 协议 Adapter 面向 2026-07-28 metadata，具有 Streamable HTTP JSON/SSE 与本地 request/response JSON-RPC 的契约实现。当前 app 只开放本地预置 `workspace-read`，提供 Offering、当前会话 Task 和自己 Task 的 Asset 查询。外部 `streamable_http` 接线明确不可执行：未来必须先建立可验证的输出 DTO 与 owner/session 范围合同，再开放运行。现有私有 runtime setting/精确 origin 声明及拒绝跳转的传输检查不能代替输出隔离。`POST /api/v1/mcp?session_id=…` 验证 Principal 权限及会话归属；Chat 内也通过同一只读业务服务执行已开放工具。
 
 MCP 只注册 Schema 固定的 `READ` / `none` / `session` 工具，并按实际接线过滤声明与有效工具摘要；管理 DTO 的 `available` 区分声明启用与可执行。没有 runtime 的 handler 不宣称 MCP 能力。普通有效摘要只读工具声明，不读取/解码管理员配置历史。MCP 不支持任意工具发现后直接授予执行权限、写工具、任意 URL/命令或全部 JSONSchema 构造，不做旧协议自动降级。这些入口不能被描述为所有 MCP 服务完全兼容。后台页面存在、协议/权限单测通过，也不能替代真实对话、浏览器资源阻断、付费同意与测试栈验收；本次状态见 [系统补齐记录](system-completion-2026-10-03.md)。
