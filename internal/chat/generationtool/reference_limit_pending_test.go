@@ -455,6 +455,36 @@ func TestReferenceToolDescriptionDoesNotPromiseUnsentText(t *testing.T) {
 	}
 }
 
+func TestReferenceToolNoteKeepsActionAndEvidenceBoundaries(t *testing.T) {
+	tool, executor := toolDescriptionNoteFixture(t)
+	for _, model := range []string{"meshy-7.1", "meshy-7.1-multiview", "rodin-gen-2.5"} {
+		t.Run(model, func(t *testing.T) {
+			note := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: model, CreativeDomain: "model-3d"})
+			for _, guidance := range []string{
+				"Only the person can change the selected generation model in the workspace selector",
+				"Chat confirmation does not let you switch it",
+				"Compare costs only using actual quotes in the same currency and unit",
+				"No task submission or a refused step does not establish that the conversation was free",
+				"Recommend a later processing step only when declared input compatibility supports it",
+			} {
+				if !strings.Contains(note, guidance) {
+					t.Errorf("missing guidance %q: %s", guidance, note)
+				}
+			}
+			if model != "meshy-7.1" {
+				for _, guidance := range []string{
+					"A collage is one input picture",
+					"do not predict a definite loss or output from it",
+				} {
+					if !strings.Contains(note, guidance) {
+						t.Errorf("missing guidance %q: %s", guidance, note)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestReferenceToolDescriptionFollowsFrozenHarnessOffering(t *testing.T) {
 	c := qualifiedMultiviewCatalog(t)
 	app := c.Application()
