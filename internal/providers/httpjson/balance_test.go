@@ -95,3 +95,21 @@ func TestBalanceEvidenceDoesNotRecastOtherErrors(t *testing.T) {
 		t.Fatalf("undeclared status was classified by the mapping: %v", err)
 	}
 }
+
+// A Meshy 402 that names the API key's credit limit is a key quota refusal,
+// not an empty account (#93); every other 402 stays an insufficient balance.
+func TestMeshyKeyCreditLimitIsNotInsufficientBalance(t *testing.T) {
+	mapping := connectionMapping(t, "meshy")
+	quota := classify(t, mapping, http.StatusPaymentRequired, `{"message":"API key credit limit reached"}`)
+	if quota.Class != generation.FailureCredentialQuota || quota.Retryable {
+		t.Fatalf("key credit limit = %+v, want a non-retryable credential_quota", quota)
+	}
+	for name, body := range map[string]string{
+		"funds": `{"message":"Insufficient funds"}`,
+		"empty": `{}`,
+	} {
+		if got := classify(t, mapping, http.StatusPaymentRequired, body); got.Class != generation.FailureInsufficientBalance {
+			t.Fatalf("%s: class = %s, want insufficient_balance", name, got.Class)
+		}
+	}
+}

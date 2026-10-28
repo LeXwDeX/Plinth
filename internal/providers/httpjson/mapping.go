@@ -58,6 +58,9 @@ func matchErrorMapping(
 	if rule, ok := matchBalanceEvidence(mapping, status, payload); ok {
 		return rule, true
 	}
+	if rule, ok := matchSpecificMessage(mapping, payload, status); ok {
+		return rule, true
+	}
 	for _, rangeRule := range mapping.HTTPStatusRanges {
 		if status >= rangeRule.Min && status <= rangeRule.Max {
 			return generation.ErrorClassRule{
@@ -83,6 +86,22 @@ func matchErrorMapping(
 					Retryable: matcher.Retryable,
 				}, true
 			}
+		}
+	}
+	return generation.ErrorClassRule{}, false
+}
+
+// matchSpecificMessage returns a message matcher the connection declares as
+// more specific than the status ranges (before_status_ranges).
+func matchSpecificMessage(
+	mapping *generation.ErrorMapping,
+	payload []byte,
+	status int,
+) (generation.ErrorClassRule, bool) {
+	message := declaredErrorMessage(mapping, payload, status)
+	for _, matcher := range mapping.MessageMatchers {
+		if matcher.BeforeStatusRanges && messageMatcherHits(matcher, message) {
+			return generation.ErrorClassRule{Class: matcher.Class, Retryable: matcher.Retryable}, true
 		}
 	}
 	return generation.ErrorClassRule{}, false
