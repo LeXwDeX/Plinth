@@ -12,6 +12,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/providers/hyper3d"
+	"github.com/LeXwDeX/Plinth/internal/schema"
 	"github.com/LeXwDeX/Plinth/internal/testutil/wirefixture"
 )
 
@@ -65,8 +66,9 @@ func (n *namedDownloads) RoundTrip(request *http.Request) (*http.Response, error
 // Port: Start with its durable dispatch checkpoint, every Observe the kernel
 // would make, then the downloads of the claimed files. A request the sample
 // does not contain fails the replay.
-func TestRodinLiveCandidateDrivesTheAdapterThroughStartObserveAndOpenAsset(t *testing.T) {
-	exchanges, policy := loadRodinLiveCandidate(t)
+func driveRodinLiveCandidate(t *testing.T, sample, offeringID, raw string, assets map[string][]generation.InputAsset, inputs generation.InputAssetResolver, wantPolls int) {
+	t.Helper()
+	exchanges, policy := loadRodinLiveSample(t, sample)
 	replay, err := wirefixture.NewReplayWithMedia(exchanges, policy, wirefixture.SyntheticMediaResolver{})
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +79,7 @@ func TestRodinLiveCandidateDrivesTheAdapterThroughStartObserveAndOpenAsset(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	offering, ok := product.Get("hyper3d/rodin-gen-2.5/text-to-3d")
+	offering, ok := product.Get(schema.OfferingID(offeringID))
 	if !ok {
 		t.Fatal("missing Rodin Offering")
 	}
@@ -87,7 +89,7 @@ func TestRodinLiveCandidateDrivesTheAdapterThroughStartObserveAndOpenAsset(t *te
 			config = hyper3d.Config{
 				BaseURL: "https://api.hyper3d.com/api/v2", APIKey: "replay-credential",
 				AuthHeader: connection.AuthHeader, AuthPrefix: connection.AuthPrefix,
-				StatusMapping: connection.StatusMapping, HTTPClient: &http.Client{Transport: transport},
+				StatusMapping: connection.StatusMapping, HTTPClient: &http.Client{Transport: transport}, InputAssets: inputs,
 			}
 		}
 	}
@@ -95,15 +97,14 @@ func TestRodinLiveCandidateDrivesTheAdapterThroughStartObserveAndOpenAsset(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := json.RawMessage(`{"prompt":"A simple solid blue cube. Plain flat blue surfaces, sharp edges, no text, no patterns, no logo, minimal geometric shape.","authorize_extra_credits":true}`)
-	_, input, err := product.Normalize(generation.TextTo3D, offering.ID, raw)
+	_, input, err := product.Normalize(offering.Capability, offering.ID, json.RawMessage(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	checkpointer := &recordingCheckpointer{}
 	started, err := port.Start(generation.WithDispatchCheckpointer(context.Background(), checkpointer), generation.StartRequest{
-		OwnerID: "owner", TaskID: "task", AttemptID: "attempt", SubmissionKey: "once", Offering: offering, Input: input,
+		OwnerID: "owner", TaskID: "task", AttemptID: "attempt", SubmissionKey: "once", Offering: offering, Input: input, InputAssets: assets,
 	})
 	if err != nil || started.Job == nil || started.Dispatch == nil || checkpointer.calls.Load() != 1 {
 		t.Fatalf("start = %+v, %v (checkpoints %d)", started, err, checkpointer.calls.Load())
@@ -121,8 +122,8 @@ func TestRodinLiveCandidateDrivesTheAdapterThroughStartObserveAndOpenAsset(t *te
 			t.Fatalf("observe %d: %v", polls, err)
 		}
 	}
-	if polls != 69 {
-		t.Fatalf("observations = %d, want the 69 recorded status polls", polls)
+	if polls != wantPolls {
+		t.Fatalf("observations = %d, want the %d recorded status polls", polls, wantPolls)
 	}
 
 	// The required model and the background thumbnail are claimed, in the order
@@ -151,4 +152,36 @@ func TestRodinLiveCandidateDrivesTheAdapterThroughStartObserveAndOpenAsset(t *te
 	if err := replay.AssertConsumed(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestRodinLiveCandidateDrivesTheAdapterThroughStartObserveAndOpenAsset(t *testing.T) {
+	driveRodinLiveCandidate(t, "rodin-text-to-3d", "hyper3d/rodin-gen-2.5/text-to-3d",
+		`{"prompt":"A simple solid blue cube. Plain flat blue surfaces, sharp edges, no text, no patterns, no logo, minimal geometric shape.","authorize_extra_credits":true}`,
+		nil, nil, 69)
+}
+
+// syntheticPNGInputs serves the sample's synthetic image recipe, the bytes the
+// replayed multipart image part is checked against.
+type syntheticPNGInputs struct{}
+
+func (syntheticPNGInputs) Resolve(context.Context, generation.OwnerID, generation.Offering, json.RawMessage) (map[string][]generation.InputAsset, error) {
+	return nil, nil
+}
+
+func (syntheticPNGInputs) Open(context.Context, generation.InputAsset) (io.ReadCloser, error) {
+	_, data, err := wirefixture.SyntheticMedia("png-1x1")
+	if err != nil {
+		return nil, err
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+// The image-to-3D sample goes through the same Start, Observe and download
+// path; its multipart request carries the reference image and the verbatim
+// prompt the Agent was told to use.
+func TestRodinImageLiveCandidateDrivesTheAdapterThroughStartObserveAndOpenAsset(t *testing.T) {
+	driveRodinLiveCandidate(t, "rodin-image-to-3d", "hyper3d/rodin-gen-2.5/image-to-3d",
+		`{"reference_assets":["reference-1"],"prompt":"Create a 3D model matching the reference image(s): A small cartoon character figure.","authorize_extra_credits":true}`,
+		map[string][]generation.InputAsset{"reference_assets": {{ID: "reference-1", OwnerID: "owner", MediaType: "image/png", OriginalFilename: "reference.png"}}},
+		syntheticPNGInputs{}, 63)
 }

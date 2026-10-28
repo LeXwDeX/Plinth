@@ -4,6 +4,7 @@
   "catalog_sha256": "0ba6f6aae92349096cf404a194de66f07e62614f86fbd6cedeec12c48e2d6dd9",
   "samples": [
     "internal/app/testdata/agent-flow/agent-flow.candidate.json",
+    "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
     "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json",
     "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json"
   ],
@@ -13,23 +14,22 @@
       "disabled-zero-egress": 7,
       "enabled": 69,
       "local-no-wire": 4,
-      "missing": 62,
-      "partial": 3,
+      "missing": 61,
+      "partial": 4,
       "total": 76
     },
     "units": {
-      "derived": 12,
+      "derived": 15,
       "disabled-zero-egress": 7,
       "local-no-wire": 2,
-      "missing": 56,
-      "real": 9,
-      "total": 86
+      "missing": 55,
+      "real": 11,
+      "total": 90
     }
   },
   "incomplete": [
     "gemini-images.v1|image-to-image|declared:chat/completions",
     "gemini-images.v1|text-to-image|declared:chat/completions",
-    "hyper3d.rodin.v1|image-to-3d|declared:rodin",
     "hyper3d.rodin.v1|mesh-segmentation|declared:bang",
     "hyper3d.rodin.v1|retexture|declared:rodin_texture_only",
     "jimeng-images.v1|image-to-image|declared:api/v3/images/generations",
@@ -213,9 +213,105 @@
     {
       "adapter_key": "hyper3d.rodin.v1",
       "capability": "image-to-3d",
-      "endpoint": "declared:rodin",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /{asset}.glb",
+      "hosts": [
+        "file.hyper3d.com"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/rodin-gen-2.5/image-to-3d",
+          "model_id": "rodin-gen-2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "image-to-3d",
+      "endpoint": "GET /{asset}.webp",
+      "hosts": [
+        "file.hyper3d.com"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/rodin-gen-2.5/image-to-3d",
+          "model_id": "rodin-gen-2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "image-to-3d",
+      "endpoint": "POST /api/v2/download",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/rodin-gen-2.5/image-to-3d",
+          "model_id": "rodin-gen-2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "image-to-3d",
+      "endpoint": "POST /api/v2/rodin",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/rodin-gen-2.5/image-to-3d",
+          "model_id": "rodin-gen-2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "image-to-3d",
+      "endpoint": "POST /api/v2/status",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json"
+      ],
       "offerings": [
         {
           "id": "hyper3d/rodin-gen-2.5/image-to-3d",
@@ -1559,9 +1655,13 @@
       "model_id": "rodin-gen-2.5",
       "adapter_key": "hyper3d.rodin.v1",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "partial",
       "units": [
-        "hyper3d.rodin.v1|image-to-3d|declared:rodin"
+        "hyper3d.rodin.v1|image-to-3d|GET /{asset}.glb",
+        "hyper3d.rodin.v1|image-to-3d|GET /{asset}.webp",
+        "hyper3d.rodin.v1|image-to-3d|POST /api/v2/download",
+        "hyper3d.rodin.v1|image-to-3d|POST /api/v2/rodin",
+        "hyper3d.rodin.v1|image-to-3d|POST /api/v2/status"
       ]
     },
     {
