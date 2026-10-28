@@ -340,23 +340,7 @@ func scanCandidate(file string, exchanges []wirefixture.Exchange, policy wirefix
 func scanPolicy(file string, policy wirefixture.Policy) []finding {
 	var out []finding
 	ctx := newScanCtx(file, policy, false, &out)
-	// The capture exporter emits an empty-string Allowed entry and lists the
-	// reserved example.test among PublicHosts; ValidatePolicy rejects both
-	// harmless entries, so judge the rest.
-	checked := policy
-	checked.Allowed = map[string]bool{}
-	for value, enabled := range policy.Allowed {
-		if value != "" {
-			checked.Allowed[value] = enabled
-		}
-	}
-	checked.PublicHosts = map[string]bool{}
-	for host, enabled := range policy.PublicHosts {
-		if host != "example.test" {
-			checked.PublicHosts[host] = enabled
-		}
-	}
-	if err := wirefixture.ValidatePolicy(checked); err != nil {
+	if err := wirefixture.ValidatePolicy(policy); err != nil {
 		ctx.add("$", "policy-invalid")
 	}
 	for key := range policy.Keys {
@@ -455,7 +439,7 @@ func corpusFiles(t *testing.T, root string) []string {
 		base := filepath.Base(slash)
 		return strings.HasSuffix(base, ".candidate.json") || strings.HasSuffix(base, ".meta.json") ||
 			strings.HasSuffix(base, ".policy.json") || strings.HasSuffix(base, ".evidence.json") ||
-			base == "wire-coverage.json"
+			base == "wire-coverage.generated.json"
 	}
 	var files []string
 	cmd := exec.Command("git", "ls-files", "-z")

@@ -110,7 +110,6 @@
     "uuids": true
   },
   "Allowed": {
-    "": true,
     "*/*": true,
     "0": true,
     "1700000000000": true,
@@ -238,8 +237,7 @@
   "Aliases": null,
   "PublicHosts": {
     "api.hyper3d.com": true,
-    "file.hyper3d.com": true,
-    "example.test": true
+    "file.hyper3d.com": true
   },
   "Projection": null,
   "QueryKeys": {
