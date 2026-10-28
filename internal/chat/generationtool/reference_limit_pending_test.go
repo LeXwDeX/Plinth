@@ -276,6 +276,8 @@ func toolDescriptionNoteFixture(t *testing.T) (catalog.ChatToolSchema, *generati
 // multi-picture model.
 func TestTheToolDescriptionFollowsThePickedModelsPictureLimit(t *testing.T) {
 	tool, executor := toolDescriptionNoteFixture(t)
+	// The declared-settings sentence has its own test below.
+	tool.ReferenceCapacityNote.Settings = ""
 	notes := tool.ReferenceCapacityNote
 	if notes.Single == "" || !strings.Contains(notes.Multiple, "{count}") {
 		t.Fatalf("the image-to-3d tool declares no reference_capacity_note: %+v", notes)
@@ -616,5 +618,60 @@ func TestAutoApprovedImageTo3DFreezesTheSourceFact(t *testing.T) {
 		if note, ok := run.content[run.tool.ResultFields.ReferenceNote]; ok {
 			t.Fatalf("running receipt claimed a source: %v", note)
 		}
+	}
+}
+
+// #65: the tool's description names the settings the selected Offering
+// declares for the person (not hidden, fixed, read-only-without-advice, asset
+// or prompt parameters), so the Agent recommends from them instead of the
+// provider's other knobs. Expected lists were checked against each Offering's
+// declared parameters (meshy-7.1-multiview and Rodin Gen-2.5 declare no target
+// face count; Rodin declares no user setting at all, so it gets no sentence).
+func TestToolDescriptionListsOnlyDeclaredSettings(t *testing.T) {
+	tool, executor := toolDescriptionNoteFixture(t)
+	template := tool.ReferenceCapacityNote.Settings
+	if !strings.Contains(template, "{model}") || !strings.Contains(template, "{settings}") {
+		t.Fatalf("the image-to-3d tool declares no settings note: %q", template)
+	}
+	const common = "Pose mode, Export formats, Auto remesh, Generate texture, PBR materials, Texture resolution, Auto size, Image enhancement"
+	for model, test := range map[string]struct {
+		label    string
+		settings string
+	}{
+		"meshy-7.1":           {"Meshy 7.1", "Geometry resolution, Topology type, Target face count, " + common},
+		"meshy-7.1-multiview": {"Meshy 7.1 multi-view", "Geometry resolution, Topology type, " + common},
+		"rodin-gen-2.5":       {"Rodin Gen-2.5", ""},
+	} {
+		t.Run(model, func(t *testing.T) {
+			note := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: model, CreativeDomain: "model-3d", Locale: "en"})
+			if test.settings == "" {
+				if strings.Contains(note, "offers only these settings") {
+					t.Fatalf("a settings sentence for an Offering without user settings: %s", note)
+				}
+				return
+			}
+			sentence := strings.NewReplacer("{model}", test.label, "{settings}", test.settings).Replace(template)
+			if !strings.HasSuffix(note, " "+sentence) {
+				t.Fatalf("note does not end with the settings sentence %q:\n%s", sentence, note)
+			}
+			if strings.Contains(strings.ToLower(test.settings), "poly") {
+				t.Fatalf("settings list names polycount: %s", test.settings)
+			}
+		})
+	}
+	// An Offering that declares no target face count never lists one.
+	multiview := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: "meshy-7.1-multiview", CreativeDomain: "model-3d", Locale: "en"})
+	if strings.Contains(multiview, "Target face count") {
+		t.Fatalf("multi-view note lists an undeclared setting: %s", multiview)
+	}
+	// The default locale lists the Schema's own names.
+	if zh := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: "meshy-7.1-multiview", CreativeDomain: "model-3d"}); !strings.Contains(zh, "几何分辨率, 拓扑类型, 姿势模式") {
+		t.Fatalf("default-locale note lacks the Schema names: %s", zh)
+	}
+	// A tool without the declaration keeps the earlier note.
+	old := tool
+	old.ReferenceCapacityNote.Settings = ""
+	if got := executor.ToolDescriptionNote(old, chat.TurnOptions{AIModel: "meshy-7.1", CreativeDomain: "model-3d"}); strings.Contains(got, "offers only these settings") {
+		t.Fatalf("settings sentence without declaration: %s", got)
 	}
 }

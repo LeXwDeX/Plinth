@@ -41,6 +41,13 @@ func TestPendingApprovalDeclarationsAreValidated(t *testing.T) {
 				}
 			}
 		}},
+		{"optional settings text names the settings", func(a *catalog.ApplicationSchema) {
+			for index := range a.Chat.Tools {
+				if a.Chat.Tools[index].Name == "create_model_3d_from_image" {
+					a.Chat.Tools[index].ReferenceCapacityNote.Settings = "{model} offers some settings"
+				}
+			}
+		}},
 		{"capacity note needs a tool that takes pictures", func(a *catalog.ApplicationSchema) {
 			for index := range a.Chat.Tools {
 				if a.Chat.Tools[index].Name == "create_motion_clip" {

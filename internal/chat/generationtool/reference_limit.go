@@ -144,5 +144,37 @@ func (executor *Executor) ToolDescriptionNote(tool catalog.ChatToolSchema, optio
 		}
 		note += strings.NewReplacer("{model}", modelLabel).Replace(notes.NoPrompt)
 	}
+	// #65: name the settings the Offering declares, so the Agent recommends
+	// only from them instead of the provider's other knobs.
+	if notes.Settings != "" && note != "" {
+		if names := executor.declaredSettingNames(command, offering); names != "" {
+			note += " " + strings.NewReplacer("{model}", modelLabel, "{settings}", names).Replace(notes.Settings)
+		}
+	}
 	return note
+}
+
+// declaredSettingNames lists, in Schema order and without repeats, the labels
+// of the settings the Offering declares for the person: the parameters the
+// Agent may adjust (Offering.AgentParameterAllowed: not hidden, fixed, read-only
+// or asset parameters), without the prompt itself.
+func (executor *Executor) declaredSettingNames(command chat.ToolCommand, offering generation.Offering) string {
+	var names []string
+	seen := map[string]struct{}{}
+	for _, parameter := range offering.Parameters {
+		if !offering.AgentParameterAllowed(parameter) || parameter.Semantic == generation.SemanticPrompt {
+			continue
+		}
+		label := parameter.Label
+		if label == "" {
+			label = parameter.Name
+		}
+		label = executor.localized(command, label)
+		if _, duplicate := seen[label]; duplicate {
+			continue
+		}
+		seen[label] = struct{}{}
+		names = append(names, label)
+	}
+	return strings.Join(names, ", ")
 }

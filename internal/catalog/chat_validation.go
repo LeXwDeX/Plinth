@@ -686,8 +686,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		}
 		if note := tool.ReferenceCapacityNote; note != (ChatToolReferenceCapacityNote{}) && (!acceptReferences ||
 			strings.TrimSpace(note.Single) == "" || !strings.Contains(note.Multiple, "{count}") ||
-			(note.NoPrompt != "" && strings.TrimSpace(note.NoPrompt) == "")) {
-			return fmt.Errorf("tools[%d] reference_capacity_note 需要接受参考图，single 不能为空，multiple 须含 {count}", index)
+			(note.NoPrompt != "" && strings.TrimSpace(note.NoPrompt) == "") ||
+			(note.Settings != "" && !strings.Contains(note.Settings, "{settings}"))) {
+			return fmt.Errorf("tools[%d] reference_capacity_note 需要接受参考图，single 不能为空，multiple 须含 {count}，settings 须含 {settings}", index)
 		}
 		if err := validateChatToolExecution(tool.Name, tool.Execution, &tool.Capability, &tool.FallbackCapability, capabilityDomains, stepCapabilities); err != nil {
 			return fmt.Errorf("tools[%d] execution: %w", index, err)
