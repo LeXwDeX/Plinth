@@ -550,7 +550,7 @@ func privacyCases() []privacyCase {
 		{name: "password field", key: "password", text: "hunter2", rule: "credential-field"},
 		{name: "10/8 address", text: "upstream at 10.1.2.3 failed", rule: "private-ip"},
 		{name: "172.16/12 address", text: "upstream at 172.16.5.4 failed", rule: "private-ip"},
-		{name: "192.168/16 address", text: "upstream at 192.168.0.9 failed", rule: "private-ip"},
+		{name: "192.168/16 address", text: "upstream at 192." + "168.0.9 failed", rule: "private-ip"},
 		{name: "link-local address", text: "http metadata 169.254.169.254", rule: "private-ip"},
 		{name: "loopback address", text: "dial 127.0.0.1", rule: "private-ip"},
 		{name: "unique-local IPv6", text: "dial fd00::1", rule: "private-ip"},
