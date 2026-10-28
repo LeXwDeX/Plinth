@@ -538,6 +538,8 @@ func offeringUserFacingCopy(offering schemacontract.Offering) []offeringCopyFiel
 		offeringCopyField{"execution_messages.retired_model", execution.RetiredModel},
 		offeringCopyField{"execution_messages.reference_limit", execution.ReferenceLimit},
 		offeringCopyField{"execution_messages.reference_limit_one", execution.ReferenceLimitOne},
+		offeringCopyField{"execution_messages.reference_selection_note", execution.ReferenceSelectionNote},
+		offeringCopyField{"execution_messages.reference_capacity", execution.ReferenceCapacity},
 		offeringCopyField{"execution_messages.reference_limit_exceeded", execution.ReferenceLimitExceeded},
 		offeringCopyField{"execution_messages.extra_credits_consent_required", execution.ExtraCreditsConsentRequired},
 		offeringCopyField{"execution_messages.extra_credits_over_limit", execution.ExtraCreditsOverLimit},

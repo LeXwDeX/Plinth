@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-10-27.issue65-reference-truth.1",
+    "revision": "2026-10-27.issue65-reference-truth.2",
     "terminology": {
       "user_facing": [
         {
@@ -1387,6 +1387,8 @@
         "retired_model": "{from} 已停用，不能再用它发起生成；这一步没有提交，也没有扣积分。请改用 {to}。",
         "reference_limit": "{model} 一次最多用 {count} 张参考图：这次共 {total} 张，只用前 {count} 张。要用更多张图，请改选能用更多图的模型。",
         "reference_limit_one": "{model} 一次只用 1 张参考图：这次共 {total} 张，只用第 1 张。要用多张不同角度的图，请改选支持多图的模型。",
+        "reference_selection_note": "{model} 这次使用 {count} 张参考图；来源图经过替换或去重，不能说明只用了原顺序的前几张。",
+        "reference_capacity": "{model} 一次最多用 {count} 张参考图；这次共 {total} 张。发送后以实际冻结的来源说明为准，发送前不预测具体使用哪张。",
         "reference_limit_exceeded": "{label} 最多接受 {max} 张图片，这次提供了 {actual} 张；这一步没有提交，也没有扣积分。请减少图片数量，或改选支持更多图片的模型。",
         "extra_credits_consent_required": "这一步包含需要额外积分的项目；请先明确同意这次额外积分消耗，再重新提交。",
         "extra_credits_over_limit": "这一步的额外积分超出本次提交允许同意的上限；请减少需要额外积分的选项，或改走新的任务。",
@@ -5419,7 +5421,7 @@
           ],
           "prompt_with_reference_template": "Create a 3D model matching the reference image(s): {prompt}",
           "reference_capacity_note": {
-            "single": "The model picked for 3D ({model}) uses only one reference picture for image to 3D: when several are given, only the first is sent and the others are not used, so it does not treat them as views of one object. When several pictures are given, tell the person that only the first is used; this needs no extra confirmation. To compare another model's limit, use list_offerings and read that offering's reference_image_max before saying another model takes fewer or more pictures; do not switch the selected model on your own. Use list_offerings and reference_image_max only for your own lookup: never mention these tool or field names, or any other internal name, in a reply to the person; say another model's reference-picture limit in plain words.",
+            "single": "The model picked for 3D ({model}) uses only one reference picture for image to 3D. Do not predict which picture will be used: a three-view view may be replaced by its group's front view and repeated pictures may be dropped before the limit is applied. When several pictures are given, tell the person only that this model takes one picture; do not say that the first is used unless a successful or pending result's reference_note states which picture was used. This needs no extra confirmation. To compare another model's limit, use list_offerings and read that offering's reference_image_max before saying another model takes fewer or more pictures; do not switch the selected model on your own. Use list_offerings and reference_image_max only for your own lookup: never mention these tool or field names, or any other internal name, in a reply to the person; say another model's reference-picture limit in plain words.",
             "multiple": "The model picked for 3D ({model}) takes up to {count} reference pictures for image to 3D. This limit applies only to the selected model. Other models may have different limits; before claiming another model's limit, use list_offerings and read that offering's reference_image_max; do not infer it from this model or say that no model takes more, and do not switch the selected model on your own. If the person requires all the pictures and gives more than {count}, do not choose or drop any yourself: explain this limit and ask the person to reduce the pictures or switch the selected model. Do not claim that a collage sent as one picture is equivalent to sending each original picture separately unless the selected Offering's input contract explicitly supports it. A tool refusal is not a submission: do not describe refused pictures as submitted or truncated; only a successful or pending result's reference_note states which pictures were used. Use list_offerings, reference_image_max and reference_note only for your own lookup: never mention these tool or field names, or any other internal name, in a reply to the person; say another model's reference-picture limit and which pictures were used in plain words.",
             "no_prompt": "When this tool uses the selected model ({model}) for image-to-3D, the tool's text prompt is not sent to this service. Do not promise that the person's text will affect this image-to-3D result. Explain this in plain words without internal field names, and let the person decide on another feasible path if they need the text to influence the result; do not switch models on your own."
           },
@@ -14793,6 +14795,8 @@
             "runtime.generation_messages.retired_model": "{from} is no longer offered and can no longer start a generation; this step was not submitted and no credits were spent. Please use {to} instead.",
             "runtime.generation_messages.reference_limit": "{model} uses at most {count} reference pictures at a time: of the {total} pictures given, only the first {count} are used. To use more pictures, pick a model that takes more.",
             "runtime.generation_messages.reference_limit_one": "{model} uses only 1 reference picture at a time: of the {total} pictures given, only the first is used. To use several pictures from different angles, pick a model that takes several pictures.",
+            "runtime.generation_messages.reference_selection_note": "The {model} reference picture count for this step is {count}. A source replacement or de-duplication means the pictures used are not stated as the first ones in the original order.",
+            "runtime.generation_messages.reference_capacity": "{model} has a reference picture limit of {count} per request; {total} pictures are attached. Which pictures are used is stated only after sending, in the result's source note.",
             "runtime.generation_messages.reference_limit_exceeded": "{label} accepts at most {max} pictures; {actual} were provided. This step was not submitted and no credits were spent. Remove pictures or pick a model that takes more.",
             "runtime.generation_messages.extra_credits_consent_required": "This step includes extra credits. Explicitly approve the extra credits before submitting again.",
             "runtime.generation_messages.extra_credits_over_limit": "The extra credits for this step exceed the limit this submission may approve. Remove options that cost extra credits, or start a new task.",

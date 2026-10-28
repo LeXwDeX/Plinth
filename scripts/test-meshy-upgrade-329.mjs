@@ -14,8 +14,8 @@
  *  D. generating with Meshy 7.1 and Meshy T2.5 (public prepare → grant → submit) succeeds, and the chat with
  *     Meshy T2.5 picked runs a T2.5 task.
  * #329 follow-ups (same run):
- *  E. with Meshy 7.1 picked, two attached pictures stay attached and the composer says, in the Schema's words, that
- *     only the first is used; one picture clears it; the chat's approval card shows the uploaded picture's thumbnail
+ *  E. with Meshy 7.1 picked, two attached pictures stay attached and the composer shows the Schema capacity notice
+ *     without predicting which picture is used; one picture clears it; the chat's approval card shows the uploaded picture's thumbnail
  *     (not the placeholder) and the approved task froze one picture;
  *     (dev-test follow-up E) the Agent's reply that brings the card, the card itself and the message that reports the
  *     finished model all say, in the Schema's reference-limit text, that only the first of the two pictures is used;
@@ -28,11 +28,9 @@
  *  H. (note 100006) with Meshy 7.1 Multiview picked and five uploaded pictures attached, the mock Agent's chat turn
  *     keeps all five attached and shows the Schema refusal in the turn's frozen locale (preserve means no silent
  *     cut), with no Task, no pending approval and no internal parameter or asset ID;
- *  (dev-test note 99647) every check runs in Chinese and in English (the UI locale cookie): the composer, the task
- *     API, the approval card, the pending-approval read and the finished message all carry the one Schema text
- *     (runtime.generation_messages.reference_limit_one for a model that takes one picture), in the reader's
- *     language, worded for one picture ("第 1 张", "only the first is used", never "picture(s)"); the finished
- *     message names the model once;
+ *  (dev-test note 99647) every check runs in Chinese and English (the UI locale cookie): the composer uses the Schema
+ *     capacity text before sending; the task API, approval card, pending-approval read and finished ordinary-prefix
+ *     result use reference_limit_one for the actual source, worded for one picture; the finished message names the model once;
  *  C. a turn sent with ai_model=meshy-7 is recorded as Meshy 7.1 on the server, the session read names the retired
  *     model, and the workspace still shows the notice.
  * Optional env: ENGINES (default "chromium,webkit"), VIEWPORTS (default "1366x768,1920x1080"), LOCALES (default "zh-CN,en"),
@@ -228,8 +226,8 @@ const referenceRefusalIn = (locale, actual = 5) => fill(field('runtime.generatio
   label: nameIn(MULTIVIEW_REFERENCE.label, locale), max: MULTIVIEW_REFERENCE.max_items, actual,
 });
 const IMAGE_BASE = application.chat.context.image_index_base;
-// #329 follow-up E and note 99647: the one Schema text the composer, the task API, the card and the finished result
-// carry (the one-picture form: Meshy 7.1 image to 3D takes one picture), in the reader's language.
+// The composer states capacity before sending; the task API and ordinary-prefix results state the actual source.
+const pictureCapacityIn = (locale) => fill(field('runtime.generation_messages.reference_capacity', locale), { model: nameIn(LATEST_IMAGE.model_name, locale), count: 1, total: 2 });
 const pictureNoteIn = (locale) => fill(field('runtime.generation_messages.reference_limit_one', locale), { model: nameIn(LATEST_IMAGE.model_name, locale), count: 1, total: 2 });
 const finishedNoteIn = (locale) => fill(field('chat.pending_approvals.messages.succeeded_with_note', locale), { note: pictureNoteIn(locale) });
 // The turn's locale is frozen; the mock Agent repeats the Schema text for that locale in the reply that brings the card.
@@ -304,7 +302,7 @@ async function checks(engine, browser, [width, height], locale) {
   const LATEST_NAME = nameIn(LATEST.model_name, locale);
   const T25_NAME = nameIn(T25.model_name, locale);
   const PICTURE_NOTE = pictureNoteIn(locale);
-  const LIMIT_NOTICE = PICTURE_NOTE;
+  const LIMIT_NOTICE = pictureCapacityIn(locale);
   const MULTIVIEW_NAME = nameIn(MULTIVIEW.model_name, locale);
   const REFERENCE_REFUSAL = referenceRefusalIn(locale);
   const FINISHED_NOTE = finishedNoteIn(locale);
@@ -400,7 +398,7 @@ async function checks(engine, browser, [width, height], locale) {
     return notes.join('; ');
   });
 
-  await step('E: two pictures with Meshy 7.1 stay attached and the composer says only the first is used', async () => {
+  await step('E: two pictures stay attached and the composer shows the Meshy 7.1 capacity before sending', async () => {
     await openPicker(page);
     await page.locator('[data-testid=workspace-model-picker-model] button[role=menuitemradio]', { hasText: LATEST_NAME }).first().click();
     await closePicker(page);
@@ -409,7 +407,9 @@ async function checks(engine, browser, [width, height], locale) {
     await waitFor(async () => (await page.locator('[data-testid=composer-attachment-chip]').count()) === 2, 'two pictures are not attached');
     const limit = page.locator('[data-testid=composer-reference-limit]');
     await limit.waitFor({ timeout: 10000 });
-    assert.equal((await limit.innerText()).trim(), LIMIT_NOTICE);
+    const capacity = (await limit.innerText()).trim();
+    assert.equal(capacity, LIMIT_NOTICE);
+    assert(!/(?:只用|使用|选用|采用)\s*第\s*(?:1|一)\s*张|only the first (?:is|will be) used/i.test(capacity), `composer predicts the first picture: ${capacity}`);
     assert(!(await page.locator('[data-testid=composer-send]').isDisabled()), 'the send is off');
     await shot(page, 'E-limit');
     const removeSecond = fill(text('ui.chat.input.remove_attachment', locale), { index: IMAGE_BASE + 1 });
@@ -417,7 +417,8 @@ async function checks(engine, browser, [width, height], locale) {
     await limit.waitFor({ state: 'detached', timeout: 10000 });
     await composer.locator('input[type=file]').setInputFiles([{ name: 'view-2.png', mimeType: 'image/png', buffer: PICTURES[1] }]);
     await limit.waitFor({ timeout: 10000 });
-    return (await limit.innerText()).trim();
+    assert.equal((await limit.innerText()).trim(), LIMIT_NOTICE);
+    return LIMIT_NOTICE;
   });
 
   await step('E: the approval card shows the uploaded picture and the task froze one picture', async () => {
@@ -466,7 +467,7 @@ async function checks(engine, browser, [width, height], locale) {
       ids.push(body.id);
     }
     const prepared = await api(context, 'POST', routes.task_prepare, { session_id: session.id, capability: 'image-to-3d', offering_id: LATEST_IMAGE.id, input: { reference_assets: ids } });
-    // Note 99647: the task API answers the same Schema text as the composer and the card, in the reader's language.
+    // Note 99647: the task API and card report the actual ordinary-prefix source in the reader's language.
     assert.equal(prepared.reference_note, PICTURE_NOTE, `task API note ${prepared.reference_note}`);
     const refused = await context.request.fetch(`${BASE}${routes.task_prepare}`, { method: 'POST', headers: { Origin: BASE },
       data: { session_id: session.id, capability: 'text-to-3d', offering_id: `meshy/${RETIRED.model_id}/text-to-3d`, input: { prompt: 'castle' } } });

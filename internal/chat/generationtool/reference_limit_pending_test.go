@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
@@ -49,6 +50,7 @@ type pendingReferenceRun struct {
 	tool     catalog.ChatToolSchema
 	prepared generation.PreparedInput
 	grant    executiongrant.Grant
+	repo     *sqlite.Repository
 }
 
 // runImageTo3DWithPictures asks the Agent's image-to-3D tool, with the given
@@ -139,7 +141,7 @@ func runImageTo3DWithPicturesAndNote(t *testing.T, mode, model string, pictures 
 	if err != nil {
 		t.Fatal(err)
 	}
-	run := pendingReferenceRun{result: result, tool: tool}
+	run := pendingReferenceRun{result: result, tool: tool, repo: repo}
 	_ = json.Unmarshal([]byte(result.AgentContent), &run.content)
 	if run.op, err = repo.LoadAgentOperation(ctx, "owner", "session", "turn", "call"); err != nil {
 		t.Fatalf("operation: %v (result %+v)", err, result)
@@ -522,5 +524,58 @@ func TestReferenceToolDescriptionFollowsFrozenHarnessOffering(t *testing.T) {
 	free.Selection.OperationID = ""
 	if got := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: "meshy-7.1-multiview", CreativeDomain: "model-3d", Harness: free}); !strings.Contains(got, "Do not promise that the person's text") {
 		t.Fatalf("inactive harness did not use workspace model: %q", got)
+	}
+}
+
+// #80: the source fact is frozen with the same prepared input. A direct,
+// unfettered selection of two uploads and a one-picture model keeps the first
+// picture, so only the prefix case may use the limit text; the fact records
+// that and survives a reload from the operation store.
+func TestImageTo3DReferenceSourceFactIsFrozenWithThePreparedInput(t *testing.T) {
+	run := runImageTo3DWithPictures(t, "manual", "meshy-7.1", 2)
+	fact := run.op.ReferenceSource
+	if fact.Identity == "" || fact.Selected != 2 || fact.Resolved != 2 || fact.Frozen != 1 ||
+		!fact.Prefix || fact.AllFront || fact.Replaced || fact.Deduped {
+		t.Fatalf("source fact = %+v", fact)
+	}
+	if fact.FrontTaskID != "" || fact.FrontAssetID != "" {
+		t.Fatalf("ordinary uploads named a front source: %+v", fact)
+	}
+	note, _ := run.content[run.tool.ResultFields.ReferenceNote].(string)
+	if note == "" || !strings.Contains(note, "1") || !strings.Contains(note, "2") {
+		t.Fatalf("waiting result note = %q", note)
+	}
+	reloaded, err := run.repo.LoadAgentOperation(context.Background(), "owner", "session", "turn", "call")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameReferenceSourceForTest(reloaded.ReferenceSource, fact) {
+		t.Fatalf("reloaded fact = %+v, want %+v", reloaded.ReferenceSource, fact)
+	}
+}
+
+func sameReferenceSourceForTest(a, b generationtool.ReferenceSourceFact) bool {
+	a.Trusted, b.Trusted = false, false
+	return a == b
+}
+
+// #80: an automatically approved image-to-3D step freezes the same source
+// fact as a manual one; the sentence that reports it reads that fact on the
+// stored operation, not today's groups.
+func TestAutoApprovedImageTo3DFreezesTheSourceFact(t *testing.T) {
+	run := runImageTo3DWithPictures(t, "auto", "meshy-7.1", 2)
+	if run.result.TaskID == "" || run.op.ReferenceSource.Identity == "" {
+		t.Fatalf("auto step = %+v fact=%+v", run.result, run.op.ReferenceSource)
+	}
+	fact := run.op.ReferenceSource
+	if fact.Selected != 2 || fact.Frozen != 1 || !fact.Prefix || fact.AllFront {
+		t.Fatalf("auto source fact = %+v", fact)
+	}
+	if run.result.AwaitTask {
+		// The Task is running; this receipt is not a result and must not carry
+		// a source sentence yet.
+		if note, ok := run.content[run.tool.ResultFields.ReferenceNote]; ok {
+			t.Fatalf("running receipt claimed a source: %v", note)
+		}
 	}
 }

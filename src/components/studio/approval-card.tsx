@@ -196,7 +196,10 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
           {model.inputs.map((input, index) => {
             const role = input.kind === 'task' ? schemaText(schema, 'ui.studio.approval.card.input_target_model') : '';
             // What the session cannot name is named by the Offering's own parameter label (#324: a source model file).
-            const label = input.label || (!role && !input.handle ? approvalInputParameterLabel(offerings, model, input.parameter) : '');
+            const parameterLabel = approvalInputParameterLabel(offerings, model, input.parameter);
+            const fallback = formatSchemaText(schemaText(schema, 'ui.chat.input.attachment_alt'), { index: index + 1 });
+            const repeated = model.inputs.filter((item) => item.parameter === input.parameter).length > 1;
+            const label = input.label || (!role && !input.handle ? (parameterLabel ? `${parameterLabel}${repeated ? ` ${index + 1}` : ''}` : fallback) : '');
             // The handle goes into the next message: a picture the step sends is attached too, the model it works on is named only.
             const reference = !input.handle ? null
               : handleReferences.get(input.handle)
@@ -206,12 +209,22 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
             // A generated picture is read through its task; one uploaded in this chat has no task, so its
             // thumbnail is the chat's own authenticated address for that handle (#329 follow-up D).
             const uploadedURL = reference && reference.kind !== 'model' ? reference.url : '';
-            const src = input.taskId && input.assetId
-              ? safeAssetURL(taskAssetRoute(schema, input.taskId, input.assetId))
+            // A frozen input picture is read as that input asset, through its owner-scoped asset route. Its
+            // TaskID may name the session attachment it came from, but the copy is not an asset of that Task
+            // (#80): never combine the two IDs into a task-asset address.
+            const inputAssetURL = input.kind === 'asset' && input.assetId && input.previewable !== false
+              ? schema.runtime.http.routes.asset_item.replace('{assetID}', encodeURIComponent(input.assetId))
+              : '';
+            const taskURL = input.kind !== 'asset' && input.taskId && input.assetId
+              ? taskAssetRoute(schema, input.taskId, input.assetId)
+              : '';
+            const src = input.previewable === false ? '' : inputAssetURL
+              ? previewAssetUrl(inputAssetURL) || safePreviewURL(inputAssetURL)
+              : taskURL ? safeAssetURL(taskURL)
               : uploadedURL ? previewAssetUrl(uploadedURL) || safePreviewURL(uploadedURL) : '';
             return (
               <li key={`${input.handle}-${index}`} className="flex items-center gap-1.5 rounded-md border border-border bg-surface p-0.5 pr-1.5" data-testid="studio-approval-input" data-kind={input.kind}>
-                <InputThumbnail src={src} handle={input.handle || label} model={input.kind === 'task'} />
+                <InputThumbnail src={src} handle={input.handle || label || role} model={input.kind === 'task' || input.previewable === false} />
                 <span className="text-[11px]">
                   {role || label ? <span className="font-medium text-foreground" data-testid="studio-approval-input-label">{[role, label].filter(Boolean).join(' · ')}</span> : null}
                   {input.handle && reference

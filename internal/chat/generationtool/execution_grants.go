@@ -83,6 +83,7 @@ func agentConsentInput(offering generation.Offering, input json.RawMessage) (jso
 func (executor *Executor) prepareAgentOperation(
 	ctx context.Context, command chat.ToolCommand, capability generation.Capability,
 	offering generation.Offering, input json.RawMessage, prompt, key string, references referenceUse,
+	selection referenceSelection, finalReferences []referenceCandidate, referenceIDs []generation.AssetID,
 	observe func(chat.ToolObservation) error,
 ) (chat.ToolResult, error) {
 	if command.OwnerID == "" || command.SessionID == "" || command.AssistantMessageID == "" ||
@@ -131,6 +132,16 @@ func (executor *Executor) prepareAgentOperation(
 	if activeHarness(command) && !fixedHarnessInputMatches(command, prepared.NormalizedInput) {
 		return executor.harnessRefusal(command, ErrOperationConflict)
 	}
+	fact, err := executor.preparedReferenceFact(ctx, command, offering, selection, finalReferences, referenceIDs, prepared)
+	if err != nil {
+		return chat.ToolResult{NoSubmission: true}, err
+	}
+	requireSourceFact := capability == generation.ImageTo3D &&
+		offering.ReferenceSelectionPolicy != "preserve" && len(finalReferences) > 0
+	var sourceFact ReferenceSourceFact
+	if fact != nil {
+		sourceFact = *fact
+	}
 	// cardSettled releases the session's approval lock, if this call took it.
 	cardSettled := func() {}
 	extraSpend, priceErr := prepared.HasExtraSpend()
@@ -168,8 +179,27 @@ func (executor *Executor) prepareAgentOperation(
 		PreparedInputID: prepared.ID, PreparedInputHash: prepared.InputHash,
 		OfferingID: prepared.OfferingID, OfferingRevision: prepared.OfferingRevision, Harness: turnHarnessBinding(command),
 		RechargeTaskID: rechargeTaskID, ReferenceCount: references.Used, ReferenceTotal: references.Given,
+		ReferenceSource: sourceFact,
 	})
-	if err != nil {
+	if errors.Is(err, ErrOperationConflict) {
+		// Two attempts of one call prepared the same step at once. The stored
+		// winner is reusable only when its own frozen input and source fact are
+		// the same content; copied asset IDs may differ. Anything else is a
+		// real conflict and must not inherit the winner's grant.
+		stored, loadErr := executor.operations.LoadAgentOperation(ctx, command.OwnerID, command.SessionID,
+			command.AssistantMessageID, command.Call.ID)
+		if loadErr != nil {
+			return chat.ToolResult{NoSubmission: true}, err
+		}
+		equal, equalErr := executor.samePreparedOperation(ctx, command, prepared, fact, requireSourceFact, stored)
+		if equalErr != nil {
+			return chat.ToolResult{NoSubmission: true}, equalErr
+		}
+		if !equal {
+			return chat.ToolResult{NoSubmission: true}, err
+		}
+		op = stored
+	} else if err != nil {
 		return chat.ToolResult{NoSubmission: true}, err
 	}
 	return executor.resumeAgentOperation(ctx, command, op, observe, cardSettled)
@@ -367,8 +397,9 @@ func (executor *Executor) resumeAgentOperation(
 			return executor.awaitTask(command, task.ID, executor.taskWaitDeadline(command, task.Offering), err)
 		}
 	}
-	return executor.wait(ctx, command, task.Offering, task.ID, observe,
-		taskStep(task, approvalSource(grant)))
+	info := taskStep(task, approvalSource(grant))
+	info.ReferenceNote = executor.operationReferenceNote(command, op, prepared, task.Offering)
+	return executor.wait(ctx, command, task.Offering, task.ID, observe, info)
 }
 
 // AgentGrantMatchesOperation reports whether a grant is exactly the one the

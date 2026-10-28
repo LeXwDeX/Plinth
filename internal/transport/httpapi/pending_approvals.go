@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/pendingapproval"
@@ -21,7 +22,8 @@ type PendingApprovals interface {
 // listPendingApprovals projects the caller's own session's pending approvals.
 // A foreign or missing session is the same 404 as everywhere else.
 func (s *Server) listPendingApprovals(writer http.ResponseWriter, request *http.Request, owner generation.OwnerID) {
-	items, err := s.pendingApprovals.List(request.Context(), string(owner), request.PathValue("sessionID"))
+	locale := requestLocale(request)
+	items, err := s.pendingApprovals.List(catalog.WithLocale(request.Context(), locale), string(owner), request.PathValue("sessionID"))
 	if err != nil {
 		if errors.Is(err, pendingapproval.ErrSessionNotFound) {
 			s.writeMessageProblem(writer, http.StatusNotFound, "not_found", "error.task_not_found")
@@ -31,7 +33,6 @@ func (s *Server) listPendingApprovals(writer http.ResponseWriter, request *http.
 		return
 	}
 	writer.Header().Set("Cache-Control", s.application.Runtime.HTTP.PrivateCacheControl)
-	locale := requestLocale(request)
 	for index := range items {
 		// Model, provider, quote and extra-credit labels are offering copy;
 		// the prompt and inputs are the person's own and stay as written.

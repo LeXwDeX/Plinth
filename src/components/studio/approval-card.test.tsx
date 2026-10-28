@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import { ApprovalCard } from '@/components/studio/approval-card';
-import type { ApprovalCardModel } from '@/lib/chat/approval-card';
+import { cardFromConsent, cardFromPending, type ApprovalCardModel } from '@/lib/chat/approval-card';
+import { parsePendingApprovals } from '@/lib/chat/pending-approvals';
 import type { ProductSchema } from '@/lib/product-schema';
 
 const messages = (defaultCatalog.application as { content: { messages: Record<string, string> } }).content.messages;
@@ -222,6 +223,34 @@ it('shows frozen advised adjustments, actual values and reasons without changing
 // card, read through the same authenticated asset address as the chat itself; without a known address the
 // neutral placeholder stays.
 describe('approval card input thumbnails', () => {
+  it('names and previews unlabelled frozen inputs from both HTTP response shapes while offerings load', () => {
+    const turn = cardFromConsent({ capability: 'image-to-3d', model: 'Meshy 7.1', provider: 'Meshy AI',
+      reference_assets: [{ parameter: 'reference_assets', asset_id: 'copy-a', role: 'image', media_type: 'image/png' }, { parameter: 'reference_assets', asset_id: 'copy-b', role: 'image', media_type: 'image/png' }],
+      reference_note: 'frozen note' }, 'r1')!;
+    const [pending] = parsePendingApprovals({ items: [{ request_id: 'r2', status: 'pending', tool: 'create_model_3d_from_image', capability: 'image-to-3d', model: 'Meshy 7.1', provider: 'Meshy AI', provider_id: 'meshy',
+      inputs: [{ parameter: 'reference_assets', kind: 'asset', role: 'image', asset_id: 'copy-a' }, { parameter: 'reference_assets', kind: 'asset', role: 'image', asset_id: 'copy-b' }] }] });
+    const detached = cardFromPending(pending);
+    for (const application of [defaultCatalog.application, englishApplication()]) {
+      schemaState.application = application;
+      const template = application.content.messages['ui.chat.input.attachment_alt'];
+      for (const model of [turn, detached]) {
+        const html = render(model);
+        for (const [index, id] of ['copy-a', 'copy-b'].entries()) {
+          const label = template.replace('{index}', String(index + 1));
+          expect(html).toContain(`src="/api/v1/assets/${id}`);
+          expect(html).toContain(`alt="${label}"`);
+          expect(html).toContain(`>${label}</span>`);
+        }
+      }
+    }
+    expect(render(turn)).toContain('frozen note');
+    swr.offerings = [{ provider_id: 'meshy', provider_name: 'Meshy AI', model_id: 'meshy-7.1', model_name: 'Meshy 7.1', parameters: [{ name: 'reference_assets', label: 'Reference picture' }] }];
+    for (const model of [turn, detached]) {
+      const html = render(model);
+      expect(html).toContain('alt="Reference picture 1"');
+      expect(html).toContain('alt="Reference picture 2"');
+    }
+  });
   const upload = (): ApprovalCardModel => ({
     ...card(null), capability: 'image-to-3d',
     inputs: [{ parameter: 'reference_assets', handle: '@img1', taskId: '', assetId: 'asset-up', kind: 'asset', label: '' }],
@@ -232,8 +261,61 @@ describe('approval card input thumbnails', () => {
     expect(html).toMatch(/data-testid="studio-approval-thumb" data-state="image"/);
     expect(html).toMatch(/<img src="\/api\/v1\/assets\/asset-up[^"]*"/);
   });
-  it('keeps the placeholder when the picture is not known', () => {
-    const html = render(upload());
+  it('does not render a known model input asset as an image', () => {
+    const model = cardFromConsent({ capability: 'retexture', model: 'Meshy 7.1',
+      reference_assets: [{ parameter: 'source_asset', asset_id: 'model-copy', role: 'model', media_type: 'model/gltf-binary' }] }, 'r')!;
+    const html = render(model);
+    expect(html).toContain('data-state="placeholder"');
+    expect(html).not.toContain('src="/api/v1/assets/model-copy');
+    expect(html).toContain('附件 1');
+  });
+  it('projects detached frozen model, image, and legacy inputs without changing task thumbnails', () => {
+    const project = (input: Record<string, string>) => {
+      const [pending] = parsePendingApprovals({ items: [{ request_id: 'r', status: 'pending', capability: 'remesh', model: 'Meshy 7.1', provider: 'Meshy AI', inputs: [input] }] });
+      return cardFromPending(pending);
+    };
+    const model = project({ parameter: 'source_asset', kind: 'asset', role: 'model', asset_id: 'model-copy', media_type: 'model/gltf-binary' });
+    const html = render(model);
+    expect(model.inputs[0].previewable).toBe(false);
+    expect(html).toContain('data-state="placeholder"');
+    expect(html).not.toContain('/api/v1/assets/model-copy');
+    expect(html).toContain('>附件 1</span>');
+    const image = render(project({ parameter: 'reference_assets', kind: 'asset', role: 'image', asset_id: 'image-copy', media_type: 'image/png' }));
+    expect(image).toContain('src="/api/v1/assets/image-copy');
+    expect(image).toContain('alt="附件 1"');
+    handles.map = new Map([['@img1', { handle: '@img1', url: '/api/v1/assets/legacy-image', assetId: 'legacy-image' }]]);
+    const legacy = project({ parameter: 'reference_assets', kind: 'asset', handle: '@img1', asset_id: 'legacy-image' });
+    expect(legacy.inputs[0].previewable).toBeUndefined();
+    expect(render(legacy)).toContain('src="/api/v1/assets/legacy-image');
+    const legacyHandle = project({ parameter: 'reference_assets', kind: 'asset', handle: '@img1' });
+    expect(legacyHandle.inputs[0].previewable).toBeUndefined();
+    expect(render(legacyHandle)).toContain('src="/api/v1/assets/legacy-image');
+    const task = render(project({ parameter: 'source_task', kind: 'task', task_id: 'model-task', asset_id: 'preview-image', media_type: 'model/gltf-binary' }));
+    expect(task).toContain('/tasks/model-task/assets/preview-image');
+    // The cross-layer run supplies the real response emitted by the Go HTTP test.
+    if (process.env.DETACHED_APPROVAL_JSON) {
+      const [item] = parsePendingApprovals(JSON.parse(process.env.DETACHED_APPROVAL_JSON));
+      const actual = cardFromPending(item);
+      const assetId = actual.inputs[0].assetId;
+      const rendered = render(actual);
+      expect(actual.inputs[0]).toMatchObject({ kind: 'asset', previewable: false });
+      expect(rendered).toContain('data-state="placeholder"');
+      expect(rendered).not.toContain(`/api/v1/assets/${assetId}`);
+      expect(rendered).toContain('>附件 1</span>');
+    }
+  });
+  it('keeps the placeholder when the frozen input has no asset address', () => {
+    const html = render({ ...upload(), inputs: [{ parameter: 'reference_assets', handle: '@img1', taskId: '', assetId: '', kind: 'asset', label: '' }] });
     expect(html).toMatch(/data-testid="studio-approval-thumb" data-state="placeholder"/);
+  });
+  it('reads a frozen input copy through its own asset route, never a source task route (#80)', () => {
+    const model: ApprovalCardModel = {
+      ...card(null), capability: 'image-to-3d',
+      inputs: [{ parameter: 'reference_assets', handle: '@img1', taskId: 'source-task', assetId: 'input-copy',
+        kind: 'asset', label: '' }],
+    };
+    const html = render(model);
+    expect(html).toMatch(/<img src="\/api\/v1\/assets\/input-copy[^"]*"/);
+    expect(html).not.toContain('/tasks/source-task/assets/input-copy');
   });
 });

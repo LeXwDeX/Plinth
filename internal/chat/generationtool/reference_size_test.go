@@ -89,7 +89,7 @@ func TestOneReferenceSetsTheOutputSizeNobodyChose(t *testing.T) {
 			test.tool(&command)
 		}
 		offering := referencedPixelOffering()
-		raw, err := executor.buildInput(context.Background(), command, offering, map[string]json.RawMessage{}, "make the background white", test.references, nil)
+		raw, _, err := executor.buildInput(context.Background(), command, offering, map[string]json.RawMessage{}, "make the background white", test.references, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

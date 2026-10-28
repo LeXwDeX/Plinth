@@ -22,7 +22,7 @@ func TestConversionFoldStartsWhenTheUpgradeFirstRuns330(t *testing.T) {
 		t.Fatalf("a new database folds from its creation: %v %v", created, err)
 	}
 	// A database from before 0068, as an existing deployment has it.
-	for _, statement := range []string{`DELETE FROM go_schema_migrations WHERE version >= 68`, `DROP TABLE lineage_conversion_fold`, `DROP INDEX IF EXISTS generation_attempts_delivery_completion`, `ALTER TABLE generation_attempts DROP COLUMN delivery_completion_json`} {
+	for _, statement := range []string{`DELETE FROM go_schema_migrations WHERE version >= 68`, `DROP TABLE lineage_conversion_fold`, `DROP INDEX IF EXISTS generation_attempts_delivery_completion`, `ALTER TABLE generation_attempts DROP COLUMN delivery_completion_json`, `ALTER TABLE agent_generation_operations DROP COLUMN reference_source`} {
 		if _, err := r.db.Exec(statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)
 		}

@@ -119,6 +119,7 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 			GenerationMessages: PublicGenerationMessagesSchema{
 				ReferenceLimit:    cloned.Runtime.GenerationMessages.ReferenceLimit,
 				ReferenceLimitOne: cloned.Runtime.GenerationMessages.ReferenceLimitOne,
+				ReferenceCapacity: cloned.Runtime.GenerationMessages.ReferenceCapacity,
 			},
 		},
 		Content:     cloned.Content,

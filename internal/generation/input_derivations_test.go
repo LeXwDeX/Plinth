@@ -110,3 +110,57 @@ func TestTaskInputDerivationsAreOwnerScoped(t *testing.T) {
 		t.Fatalf("other owner views = %+v %v", views, err)
 	}
 }
+
+// #80: only the derived asset's owner can prove its source. The proof used by
+// the Agent's frozen-source check is owner-scoped and never follows a source
+// that is not that owner's readable input asset.
+func TestInputAssetDerivationSourceIsOwnerScoped(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, mock.New(), nil)
+	upload := func(owner generation.OwnerID) generation.InputAsset {
+		body := encodedImage(t, "image/png", 8, 8)
+		asset, err := h.inputs.Upload(ctx, owner, bytes.NewReader(body), "image/png", 1<<20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return asset
+	}
+	source := upload("owner-a")
+	derivedBody, err := h.inputs.Upload(ctx, "owner-a", bytes.NewReader(encodedImage(t, "image/jpeg", 8, 8)), "image/jpeg", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	derived := derivedBody
+	derived.ID = "asset_derived_80"
+	if err := h.repository.CreateDerivedInputAsset(ctx, derived, generation.InputAssetDerivation{
+		SourceAssetID: source.ID, Method: "jpeg-q95", SourceSize: source.Size,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := h.module.InputAssetDerivationSource(ctx, "owner-a", derived.ID)
+	if err != nil || !ok || got != source.ID {
+		t.Fatalf("source = %q ok=%v err=%v, want %q", got, ok, err, source.ID)
+	}
+	if got, ok, err := h.module.InputAssetDerivationSource(ctx, "owner-b", derived.ID); err != nil || ok || got != "" {
+		t.Fatalf("other owner source = %q ok=%v err=%v", got, ok, err)
+	}
+	plain := upload("owner-a")
+	if got, ok, err := h.module.InputAssetDerivationSource(ctx, "owner-a", plain.ID); err != nil || ok || got != "" {
+		t.Fatalf("plain source = %q ok=%v err=%v", got, ok, err)
+	}
+	foreign := upload("owner-b")
+	orphanBody, err := h.inputs.Upload(ctx, "owner-a", bytes.NewReader(encodedImage(t, "image/jpeg", 8, 8)), "image/jpeg", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphan := orphanBody
+	orphan.ID = "asset_derived_foreign_80"
+	if err := h.repository.CreateDerivedInputAsset(ctx, orphan, generation.InputAssetDerivation{
+		SourceAssetID: foreign.ID, Method: "jpeg-q95", SourceSize: foreign.Size,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok, err := h.module.InputAssetDerivationSource(ctx, "owner-a", orphan.ID); err != nil || ok || got != "" {
+		t.Fatalf("foreign source = %q ok=%v err=%v", got, ok, err)
+	}
+}

@@ -118,9 +118,8 @@ type Config struct {
 	// os.TempDir()；生产装配传入运行卷目录，因为容器默认 /tmp
 	// 可能是小容量 tmpfs，装不下上百 MiB 的归档。
 	ArchiveTempDir string
-	// AssetVerificationStats 返回资产校验缓存的累计命中/未命中次数与
-	// 未命中时实际读取的字节数；归档预检用它记录本次请求是否重复做了
-	// 全量校验。
+	// AssetVerificationStats 返回交付解析缓存累计命中/未命中次数和
+	// SHA 实际读取字节数（含命中及失败读取）。
 	AssetVerificationStats func() (hits, misses, verifiedBytes uint64)
 	Clock                  func() time.Time
 	Logger                 *slog.Logger

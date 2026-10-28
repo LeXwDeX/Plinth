@@ -11,9 +11,12 @@ export interface ApprovalCardInput {
   parameter: string;
   handle: string;
   taskId: string;
+  /** For kind 'asset', the frozen input asset itself; taskId may name a different source Task and is not its route. */
   assetId: string;
   /** 'task' is the earlier task (a 3D model) the step works on; 'asset' is a picture it sends. */
   kind: 'asset' | 'task' | '';
+  /** A known non-image input asset is not an image thumbnail. */
+  previewable?: boolean;
   /** What the input is in the session's own words ("正面", "2D v3"); empty when unknown. */
   label: string;
 }
@@ -74,6 +77,7 @@ export function cardFromPending(
     inputs: item.inputs.map((input) => ({
       parameter: input.parameter, handle: input.handle, taskId: input.taskId, assetId: input.assetId,
       kind: input.kind === 'task' ? 'task' : input.kind === 'asset' ? 'asset' : '',
+      ...(input.kind === 'asset' && input.mediaType ? { previewable: input.mediaType.startsWith('image/') } : {}),
       label: labelOf(input),
     })),
     sourceTaskId: '', expiresAt: item.expiresAt,
@@ -100,11 +104,13 @@ export function cardFromConsent(pending: Record<string, unknown> | null, request
       : null,
     parameterAdjustments: parseParameterAdjustments(pending.parameter_adjustments),
     prompt: str(pending.prompt),
+    ...(str(pending.reference_note) ? { referenceNote: str(pending.reference_note) } : {}),
     inputs: refs.flatMap((ref): ApprovalCardInput[] => {
       if (typeof ref === 'string') return ref ? [{ parameter: '', handle: ref, taskId: '', assetId: '', kind: '', label: '' }] : [];
       if (ref && typeof ref === 'object') {
         const entry = ref as Record<string, unknown>;
-        return [{ parameter: str(entry.parameter), handle: str(entry.handle), taskId: str(entry.task_id), assetId: str(entry.asset_id), kind: '', label: '' }];
+        const mediaType = str(entry.media_type);
+        return [{ parameter: str(entry.parameter), handle: str(entry.handle), taskId: str(entry.task_id), assetId: str(entry.asset_id), kind: str(entry.asset_id) ? 'asset' : '', label: '', ...(mediaType ? { previewable: mediaType.startsWith('image/') } : {}) }];
       }
       return [];
     }),
@@ -134,8 +140,9 @@ function matchedOffering(
   offerings: readonly OfferingWire[] | undefined,
   model: Pick<ApprovalCardModel, 'model' | 'provider'>,
 ): OfferingWire | undefined {
-  return (offerings ?? []).find((item) => item.model_id === model.model && item.provider_id === model.provider)
-    ?? (offerings ?? []).find((item) => item.model_id === model.model);
+  const matchesModel = (item: OfferingWire) => item.model_id === model.model || item.model_name === model.model;
+  return (offerings ?? []).find((item) => matchesModel(item) && (item.provider_id === model.provider || item.provider_name === model.provider))
+    ?? (offerings ?? []).find(matchesModel);
 }
 
 /**

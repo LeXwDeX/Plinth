@@ -27,6 +27,16 @@ it('builds one card shape from both sources', () => {
   expect(cardFromConsent(null, 'r3')).toBeNull();
 });
 
+it('maps the active HTTP consent frozen assets and source note', () => {
+  const card = cardFromConsent({ capability: 'image-to-3d', model: 'Meshy 7.1', provider: 'Meshy AI',
+    reference_assets: [{ parameter: 'reference_assets', asset_id: 'frozen-copy', role: 'reference' }],
+    reference_note: 'Frozen source note' }, 'request-1');
+  expect(card?.inputs[0]).toMatchObject({ parameter: 'reference_assets', assetId: 'frozen-copy', kind: 'asset' });
+  expect(card?.referenceNote).toBe('Frozen source note');
+  expect(cardFromConsent({ reference_assets: [{ parameter: 'source_asset', asset_id: 'model-copy', role: 'model', media_type: 'model/gltf-binary' }] }, 'r')?.inputs[0]).toMatchObject({ kind: 'asset', previewable: false });
+  expect(cardFromConsent({ reference_assets: ['@img2', { handle: '@img3' }] }, 'r')?.inputs.map((input) => input.kind)).toEqual(['', '']);
+});
+
 it('carries the note that only the first pictures are used to the card (#329 E)', () => {
   const base = {
     requestId: 'r1', status: 'pending' as const, tool: 'create_model_3d_from_image', capability: 'image-to-3d', model: 'Meshy 7.1', provider: 'Meshy AI', providerId: 'meshy',

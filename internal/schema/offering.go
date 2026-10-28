@@ -226,6 +226,14 @@ type ExecutionMessages struct {
 	RetiredModel      string `json:"retired_model,omitempty"`
 	ReferenceLimit    string `json:"reference_limit,omitempty"`
 	ReferenceLimitOne string `json:"reference_limit_one,omitempty"`
+	// ReferenceSelectionNote is the neutral count for a step whose pictures
+	// were replaced or de-duplicated, where "only the first N" would be false
+	// ({model}, {count}; #80). It never names a source that was not retained.
+	ReferenceSelectionNote string `json:"reference_selection_note,omitempty"`
+	// ReferenceCapacity is the composer's pre-send statement of the model's
+	// reference-picture capacity ({model}, {count}, {total}). It never predicts
+	// which pictures will be used (#80).
+	ReferenceCapacity string `json:"reference_capacity,omitempty"`
 	// ReferenceLimitExceeded is the reason a step that keeps its selected
 	// reference pictures is refused because the Offering takes fewer
 	// ({label} {max} {actual}). It is a refusal, not the cut reported by

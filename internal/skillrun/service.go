@@ -105,6 +105,14 @@ func (s *Service) Get(ctx context.Context, owner generation.OwnerID, runID strin
 	return s.store.GetSkillRun(ctx, owner, runID)
 }
 
+// GetByTask finds the run whose current step projects this Task.
+func (s *Service) GetByTask(ctx context.Context, owner generation.OwnerID, session string, taskID generation.TaskID) (Run, error) {
+	if !validID(string(owner)) || !validID(session) || !validID(string(taskID)) {
+		return Run{}, ErrInvalid
+	}
+	return s.store.GetSkillRunByTask(ctx, owner, session, taskID)
+}
+
 // GetByIdempotency reads an existing run without resolving today's recipe or
 // sources. A recovered paid call must retain its original execution identity.
 func (s *Service) GetByIdempotency(ctx context.Context, owner generation.OwnerID, key string) (Run, error) {

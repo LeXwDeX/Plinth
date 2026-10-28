@@ -1196,6 +1196,7 @@ type PublicRuntimeSchema struct {
 type PublicGenerationMessagesSchema struct {
 	ReferenceLimit    string `json:"reference_limit,omitempty"`
 	ReferenceLimitOne string `json:"reference_limit_one,omitempty"`
+	ReferenceCapacity string `json:"reference_capacity,omitempty"`
 }
 
 // Public DTOs list browser-owned fields explicitly. Adding a server setting to

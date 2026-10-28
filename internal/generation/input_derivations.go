@@ -125,3 +125,27 @@ func frozenAssetIDs(raw json.RawMessage) []AssetID {
 	}
 	return ids
 }
+
+// InputAssetDerivationSource reports the input asset an owner's compressed
+// derived asset was made from. It is a read-only proof for callers that must
+// bind a frozen input back to the asset they resolved; it returns false when
+// there is no such record or the source is not the same owner's asset.
+func (m *Module) InputAssetDerivationSource(ctx context.Context, owner OwnerID,
+	id AssetID) (AssetID, bool, error) {
+	store, ok := m.repository.(inputDerivationStore)
+	if !ok || owner == "" || id == "" {
+		return "", false, nil
+	}
+	derivation, found, err := store.InputAssetDerivation(ctx, owner, id)
+	if err != nil || !found {
+		return "", false, err
+	}
+	assets, err := store.LoadInputAssets(ctx, owner, []AssetID{derivation.SourceAssetID})
+	if err != nil {
+		return "", false, err
+	}
+	if _, exists := assets[derivation.SourceAssetID]; !exists {
+		return "", false, nil
+	}
+	return derivation.SourceAssetID, true, nil
+}

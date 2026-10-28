@@ -146,7 +146,7 @@ func (executor *Executor) awaitingApproval(ctx context.Context, command chat.Too
 				content["provider"] = executor.localized(command, offering.ProviderName)
 				content["model"] = executor.localized(command, offering.ModelName)
 				if key := tool.ResultFields.ReferenceNote; key != "" {
-					if note := ReferenceLimitNote(tool, offering, op.ReferenceCount, op.ReferenceTotal, executor.localizeText(command)); note != "" {
+					if note := executor.operationReferenceNote(command, op, prepared, offering); note != "" {
 						content[key] = note
 					}
 				}

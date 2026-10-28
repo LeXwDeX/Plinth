@@ -60,15 +60,16 @@ describe('composer while the Agent is not configured', () => {
   });
 });
 
-// #329 follow-up A: with more pictures attached than the next turn's 3D model takes, the composer says only the
-// first is used, in the Schema's words, and keeps every picture attached and the send on.
+// #329 follow-up A / #80: with more pictures attached than the next turn's 3D model takes, the composer
+// states the capacity in the Schema's words and keeps every picture attached and the send on.
 describe('composer reference limit', () => {
-  it('says which pictures the model uses and keeps them all attached', () => {
+  it('states the capacity without predicting a picture and keeps them all attached', () => {
     vi.stubGlobal('React', React);
     const images = ['data:image/png;base64,AAAA', 'data:image/png;base64,BBBB'];
     const html = renderToStaticMarkup(<Composer {...props} images={images} referenceLimit={{ model: 'Meshy 7.1', count: 1, total: 2 }} />);
-    // #329 note 99647: the same Schema text as the task API, the approval card and the finished message.
-    const text = catalog.application.runtime.generation_messages.reference_limit_one.replace('{model}', 'Meshy 7.1').replace('{total}', '2');
+    // A pre-send capacity statement; the actual used pictures are stated only after sending.
+    const text = catalog.application.runtime.generation_messages.reference_capacity
+      .replace('{model}', 'Meshy 7.1').replace('{count}', '1').replace('{total}', '2');
     expect(html).toContain('data-testid="composer-reference-limit"');
     expect(html).toContain(text);
     expect(html.match(/data-testid="composer-attachment-chip"/g)).toHaveLength(2);

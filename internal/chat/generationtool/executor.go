@@ -416,6 +416,8 @@ func (executor *Executor) Execute(
 	}
 	// references records a cut of the pictures to fewer than the turn gave.
 	var references referenceUse
+	var selection referenceSelection
+	var finalReferences []referenceCandidate
 	if offering.ReferenceSelectionPolicy == "preserve" {
 		for _, parameter := range offering.Parameters {
 			if parameter.Semantic == generation.SemanticReferenceImage && parameter.MaxItems > 0 && len(referenceURLs) > parameter.MaxItems {
@@ -436,7 +438,7 @@ func (executor *Executor) Execute(
 	} else {
 		if capability == generation.ImageTo3D {
 			var refusal string
-			referenceURLs, refusal, err = executor.modelSourceReferences(ctx, command, referenceURLs)
+			selection, refusal, err = executor.modelSourceReferences(ctx, command, referenceURLs)
 			if err != nil {
 				result := executor.executionFailure(command, "")
 				result.NoSubmission = true
@@ -447,11 +449,18 @@ func (executor *Executor) Execute(
 				result.NoSubmission = true
 				return result, nil
 			}
+			referenceURLs = selection.urls()
 		}
 		given := len(referenceURLs)
 		referenceURLs = truncateReferences(referenceURLs, offering)
 		if len(referenceURLs) < given {
 			references = referenceUse{Used: len(referenceURLs), Given: given}
+		}
+		if capability == generation.ImageTo3D {
+			if len(selection.Candidates) < len(referenceURLs) {
+				return chat.ToolResult{NoSubmission: true}, errors.New("generation tool: reference selection does not match the frozen URLs")
+			}
+			finalReferences = selection.Candidates[:len(referenceURLs)]
 		}
 	}
 
@@ -515,7 +524,7 @@ func (executor *Executor) Execute(
 		}
 		break
 	}
-	input, err := executor.buildInput(
+	input, referenceIDs, err := executor.buildInput(
 		ctx,
 		command,
 		offering,
@@ -534,7 +543,8 @@ func (executor *Executor) Execute(
 	}
 	idempotencyKey := command.IdempotencyKey()
 	if executor.UsesExecutionGrants() {
-		return executor.prepareAgentOperation(ctx, command, capability, offering, input, prompt, idempotencyKey, references, observe)
+		return executor.prepareAgentOperation(ctx, command, capability, offering, input, prompt, idempotencyKey,
+			references, selection, finalReferences, referenceIDs, observe)
 	}
 	if offering.NativePricing != nil {
 		return chat.ToolResult{NoSubmission: true}, errors.New("native pricing requires prepared authorization")
@@ -572,6 +582,10 @@ func (executor *Executor) Execute(
 			return executor.awaitTask(command, accepted.TaskID, executor.taskWaitDeadline(command, offering), err)
 		}
 	}
+	var fact *ReferenceSourceFact
+	if capability == generation.ImageTo3D && offering.ReferenceSelectionPolicy != "preserve" {
+		fact = referenceFact(selection, finalReferences)
+	}
 	return executor.wait(
 		ctx,
 		command,
@@ -579,7 +593,8 @@ func (executor *Executor) Execute(
 		accepted.TaskID,
 		observe,
 		stepInfo{Credits: offering.EstimateTotalCredits(input), CreditsMetered: offering.CreditsMetered,
-			ExtraCredits: offering.ExtraCreditDetail(input).Credits},
+			ExtraCredits:  offering.ExtraCreditDetail(input).Credits,
+			ReferenceNote: executor.referenceNoteFor(command, offering, fact, references)},
 	)
 }
 
@@ -692,7 +707,19 @@ func (executor *Executor) observeBoundTask(
 			return executor.awaitTask(command, task.ID, executor.taskWaitDeadline(command, task.Offering), err)
 		}
 	}
-	return executor.wait(ctx, command, task.Offering, task.ID, observe, taskStep(task, ""))
+	info := taskStep(task, "")
+	if executor.UsesExecutionGrants() {
+		if op, err := executor.operations.LoadAgentOperation(ctx, command.OwnerID, command.SessionID,
+			command.AssistantMessageID, command.Call.ID); err == nil && op.ToolName == command.Call.Name &&
+			op.CallID == command.Call.ID && op.AssistantMessageID == command.AssistantMessageID &&
+			op.Harness == turnHarnessBinding(command) && op.IdempotencyKey == command.IdempotencyKey() {
+			if prepared, err := executor.gateway.(preparedGateway).GetPreparedInput(ctx,
+				generation.OwnerID(op.OwnerID), op.PreparedInputID); err == nil {
+				info.ReferenceNote = executor.operationReferenceNote(command, op, prepared, task.Offering)
+			}
+		}
+	}
+	return executor.wait(ctx, command, task.Offering, task.ID, observe, info)
 }
 
 func (executor *Executor) selectOffering(
@@ -1017,7 +1044,7 @@ func (executor *Executor) buildInput(
 	prompt string,
 	referenceURLs []string,
 	skillOverrides map[generation.ParameterSemantic]json.RawMessage,
-) (json.RawMessage, error) {
+) (json.RawMessage, []generation.AssetID, error) {
 	allowed := make(
 		map[string]generation.Parameter,
 		len(offering.Parameters),
@@ -1047,7 +1074,7 @@ func (executor *Executor) buildInput(
 		}
 		var value any
 		if err := json.Unmarshal(encoded, &value); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		input[parameter] = value
 	}
@@ -1095,7 +1122,7 @@ func (executor *Executor) buildInput(
 			encoded,
 		)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		input[name] = value
 		chosen[name] = true
@@ -1108,7 +1135,7 @@ func (executor *Executor) buildInput(
 		// A scalar reference consumes exactly the selected image; never choose
 		// the first of several images or serialize an array into an asset field.
 		if allowed[referenceParameter].Type == "asset" && len(referenceURLs) != 1 {
-			return nil, &generation.Error{Code: generation.ErrInvalidInput, Operation: "tool-reference"}
+			return nil, nil, &generation.Error{Code: generation.ErrInvalidInput, Operation: "tool-reference"}
 		}
 		assets, err := executor.references.Resolve(
 			ctx,
@@ -1116,12 +1143,12 @@ func (executor *Executor) buildInput(
 			referenceURLs,
 		)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		referenceAssets = assets
 		if allowed[referenceParameter].Type == "asset" {
 			if len(assets) != 1 {
-				return nil, &generation.Error{Code: generation.ErrInvalidInput, Operation: "tool-reference"}
+				return nil, nil, &generation.Error{Code: generation.ErrInvalidInput, Operation: "tool-reference"}
 			}
 			input[referenceParameter] = assets[0]
 		} else {
@@ -1163,16 +1190,16 @@ func (executor *Executor) buildInput(
 			if err := json.Unmarshal(raw, &value); err == nil {
 				if semantic == "source-task-from-image-handle" {
 					if declared.Type != "task" || declared.Semantic != generation.SemanticSourceTask {
-						return nil, &generation.Error{Code: generation.ErrInvalidInput, Operation: "tool-source-task"}
+						return nil, nil, &generation.Error{Code: generation.ErrInvalidInput, Operation: "tool-source-task"}
 					}
 					token, isString := value.(string)
 					if !isString || strings.TrimSpace(token) == "" {
-						return nil, &generation.Error{Code: generation.ErrInvalidInput, Operation: "tool-source-task"}
+						return nil, nil, &generation.Error{Code: generation.ErrInvalidInput, Operation: "tool-source-task"}
 					}
 					if _, _, handle := executor.handlePolicy().Parse(token); handle || executor.handlePolicy().IsSelectionAlias(token) {
 						resolved, err := executor.handlePolicy().ResolveHandles(command.History, command.Options.Selection, []string{token}, chat.AttachmentKindImage)
 						if err != nil || len(resolved) != 1 || resolved[0].Attachment.TaskID == "" {
-							return nil, &generation.Error{Code: generation.ErrInvalidInput, Operation: "tool-source-task", Cause: executor.handleFailure(command, err)}
+							return nil, nil, &generation.Error{Code: generation.ErrInvalidInput, Operation: "tool-source-task", Cause: executor.handleFailure(command, err)}
 						}
 						value = resolved[0].Attachment.TaskID
 					}
@@ -1180,7 +1207,7 @@ func (executor *Executor) buildInput(
 				if declared.Type == "asset" || declared.Type == "asset-array" {
 					var reference string
 					if err := json.Unmarshal(raw, &reference); err != nil || reference == "" {
-						return nil, &generation.Error{
+						return nil, nil, &generation.Error{
 							Code:      generation.ErrInvalidInput,
 							Operation: "tool-argument",
 							Cause:     fmt.Errorf("tool argument %q 必须是资产引用", argument),
@@ -1192,7 +1219,7 @@ func (executor *Executor) buildInput(
 						[]string{reference},
 					)
 					if err != nil {
-						return nil, err
+						return nil, nil, err
 					}
 					if declared.Type == "asset" {
 						value = assets[0]
@@ -1210,7 +1237,7 @@ func (executor *Executor) buildInput(
 		// ProductSchema）；执行期同源复核一次，避免绕过装配的调用方用
 		// skill 覆盖系统注入或用户选定的值（来源/动作族）。
 		if !semantic.SkillSettable() {
-			return nil, fmt.Errorf(
+			return nil, nil, fmt.Errorf(
 				"generation tool: skill override semantic %q 不可由 skill 覆盖",
 				semantic,
 			)
@@ -1221,7 +1248,7 @@ func (executor *Executor) buildInput(
 		}
 		var value any
 		if err := json.Unmarshal(encoded, &value); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		input[parameter] = value
 		chosen[parameter] = true
@@ -1232,7 +1259,8 @@ func (executor *Executor) buildInput(
 	// #272: on a canvas turn the artboard is the output frame; it is applied
 	// last, over the turn's, the Agent's and a Skill's size settings.
 	executor.applyCanvasOutputSize(command, offering, input)
-	return json.Marshal(input)
+	encoded, err := json.Marshal(input)
+	return encoded, referenceAssets, err
 }
 
 // parameterValue 解析对话面板提交的已声明参数。资产参数只在本模块
@@ -1365,7 +1393,6 @@ func (executor *Executor) wait(
 			if command.Tool.ResultFields.ModelFormats != "" {
 				info.Formats = executor.publicModelFormats(task)
 			}
-			info.ReferenceNote = executor.referenceNote(ctx, command, task.Offering)
 			info.SizeNote = executor.canvasSizeNote(command, task.Offering, task.Input)
 			if info.SizeNote == "" {
 				info.SizeNote = executor.referenceSizeNote(ctx, command, task.Offering, task.Input)

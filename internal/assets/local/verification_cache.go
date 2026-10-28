@@ -7,19 +7,9 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
-// verificationCache remembers that one stored file, at one concrete identity,
-// already passed the digest check and the delivery isolation inspection for
-// one set of asset expectations. It exists because Prepare used to re-read and
-// re-parse every file of an archive on every request, including the same OBJ
-// and MTL twice.
-//
-// A verdict is keyed by the file's device, inode, size, modification time and
-// change time, and by the digest/size/profile/role/variant/media type it was
-// verified against. Any rewrite or replacement changes the identity and the
-// file is fully verified again; a record for another digest or profile does
-// not satisfy the lookup. The cache therefore never strengthens what a caller
-// may read: it only skips repeating a check that already passed for exactly
-// these bytes.
+// verificationCache remembers delivery inspection verdicts. Every Open with a
+// trusted digest hashes the current bytes before consulting this cache. File
+// identity is an additional change detector, not proof of unchanged bytes.
 type verificationCache struct {
 	mu      sync.Mutex
 	entries map[verificationKey]struct{}
@@ -68,7 +58,7 @@ func verificationKeyOf(info os.FileInfo, asset generation.Asset) verificationKey
 	}
 }
 
-// hit reports whether this exact file identity already passed every check for
+// hit reports whether this exact file identity already passed inspection for
 // these expectations. It deliberately does not refresh the entry: a file that
 // is being rewritten must not extend its own verdict.
 func (c *verificationCache) hit(info os.FileInfo, asset generation.Asset) bool {
@@ -81,6 +71,12 @@ func (c *verificationCache) hit(info os.FileInfo, asset generation.Asset) bool {
 	}
 	c.misses++
 	return false
+}
+
+func (c *verificationCache) miss() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.misses++
 }
 
 func (c *verificationCache) remember(info os.FileInfo, asset generation.Asset) {
@@ -100,9 +96,8 @@ func (c *verificationCache) remember(info os.FileInfo, asset generation.Asset) {
 
 func sameFileIdentity(a, b fileIdentity) bool { return a == b }
 
-// VerificationStats reports cache hits, misses and the bytes hashed by misses
-// since the store was opened. They back tests and operational evidence that a
-// repeated download no longer repeats the full-file checks.
+// VerificationStats reports inspection cache hits and misses and actual bytes
+// read for SHA-256, including failed and canceled reads, since store opening.
 func (s *Store) VerificationStats() (hits, misses, verifiedBytes uint64) {
 	if s.verified == nil {
 		return 0, 0, s.verifiedBytes.Load()

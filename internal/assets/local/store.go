@@ -75,8 +75,17 @@ func (s *Store) Put(
 	if write.Body == nil {
 		return generation.Asset{}, diagnoseWrite("input", "empty_content", errors.New("资产写入缺少内容"))
 	}
-	blob, err := s.putBlob(ctx, write.Body, write.MediaType, write.MaxBytes, func(file *os.File) error {
-		return inspectProfiledAsset(file, write.DeliveryProfile, write.Role, write.Variant, write.MediaType)
+	blob, err := s.putBlob(ctx, write.Body, write.MediaType, write.MaxBytes, func(file *os.File, finalMediaType string) error {
+		if err := inspectProfiledAsset(file, write.DeliveryProfile, write.Role, write.Variant, write.MediaType); err != nil {
+			return err
+		}
+		if finalMediaType != write.MediaType {
+			if _, err := file.Seek(0, io.SeekStart); err != nil {
+				return err
+			}
+			return inspectProfiledAsset(file, write.DeliveryProfile, write.Role, write.Variant, finalMediaType)
+		}
+		return nil
 	})
 	if err != nil {
 		return generation.Asset{}, err
@@ -117,7 +126,7 @@ func (s *Store) putBlob(
 	body io.Reader,
 	declaredMediaType string,
 	maxBytes int64,
-	inspect func(*os.File) error,
+	inspect func(*os.File, string) error,
 ) (blob Blob, resultErr error) {
 	stage, reason := "input", "empty_content"
 	defer func() { resultErr = diagnoseWrite(stage, reason, resultErr) }()
@@ -193,7 +202,7 @@ func (s *Store) putBlob(
 			return Blob{}, fmt.Errorf("检查待缓存资产: %w", err)
 		}
 		stage = "inspect"
-		inspectErr := inspect(file)
+		inspectErr := inspect(file, mediaType)
 		closeErr := file.Close()
 		if inspectErr != nil {
 			reason = "content_rejected"
@@ -326,7 +335,7 @@ func (s *Store) OpenBlob(_ context.Context, storageKey string) (io.ReadCloser, e
 	return file, nil
 }
 
-func (s *Store) Open(_ context.Context, asset generation.Asset) (io.ReadCloser, error) {
+func (s *Store) Open(ctx context.Context, asset generation.Asset) (io.ReadCloser, error) {
 	file, err := s.openStoredFile(asset.StorageKey)
 	if err != nil {
 		return nil, fmt.Errorf("打开资产: %w", err)
@@ -342,40 +351,83 @@ func (s *Store) Open(_ context.Context, asset generation.Asset) (io.ReadCloser, 
 		_ = file.Close()
 		return nil, fmt.Errorf("读取资产大小: %w", err)
 	}
-	// An unchanged file that already passed both checks for these exact
-	// expectations is served without re-reading it. A rewrite or replacement
-	// changes the identity (including the change time) and misses here.
-	if s.verified.hit(before, asset) {
+	if asset.Size > 0 && before.Size() != asset.Size {
+		_ = file.Close()
+		return nil, fmt.Errorf("资产完整性校验失败: 资产大小不符: expected=%d actual=%d", asset.Size, before.Size())
+	}
+	if err := ctx.Err(); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if asset.SHA256 != "" {
+		if err := s.verifyDigest(ctx, file, asset.SHA256, before.Size()); err != nil {
+			_ = file.Close()
+			return nil, fmt.Errorf("资产完整性校验失败: %w", err)
+		}
+	}
+	if err := checkFileIdentity(file, before); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("资产校验期间文件变化: %w", err)
+	}
+	cacheHit := false
+	if asset.SHA256 != "" {
+		cacheHit = s.verified.hit(before, asset)
+	} else {
+		s.verified.miss()
+	}
+	if !cacheHit {
 		if _, err := file.Seek(0, io.SeekStart); err != nil {
 			_ = file.Close()
 			return nil, fmt.Errorf("重置资产读取位置: %w", err)
 		}
-		return file, nil
+		if err := inspectProfiledAsset(file, asset.DeliveryProfile, asset.Role, asset.Variant, asset.MediaType); err != nil {
+			_ = file.Close()
+			return nil, fmt.Errorf("资产包含不可交付的外部依赖: %w", err)
+		}
 	}
-	// Count the bytes this miss is about to hash and inspect so operational
-	// evidence can show that a later download re-read nothing.
-	if size := before.Size(); size > 0 {
-		s.verifiedBytes.Add(uint64(size))
-	}
-	if err := verifyAssetFile(file, asset); err != nil {
+	if err := ctx.Err(); err != nil {
 		_ = file.Close()
-		return nil, fmt.Errorf("资产完整性校验失败: %w", err)
+		return nil, err
 	}
-	if err := inspectProfiledAsset(file, asset.DeliveryProfile, asset.Role, asset.Variant, asset.MediaType); err != nil {
+	if err := checkFileIdentity(file, before); err != nil {
 		_ = file.Close()
-		return nil, fmt.Errorf("资产包含不可交付的外部依赖: %w", err)
+		return nil, fmt.Errorf("资产校验期间文件变化: %w", err)
 	}
-	// Only remember the verdict when the file did not change while it was
-	// being verified; otherwise the cached identity would describe other
-	// bytes than the ones just read.
-	if after, err := file.Stat(); err == nil && sameFileIdentity(fileIdentityOf(before), fileIdentityOf(after)) {
-		s.verified.remember(after, asset)
+	if !cacheHit && asset.SHA256 != "" {
+		s.verified.remember(before, asset)
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		_ = file.Close()
 		return nil, fmt.Errorf("重置资产读取位置: %w", err)
 	}
 	return file, nil
+}
+
+func (s *Store) verifyDigest(ctx context.Context, reader io.Reader, expected string, size int64) error {
+	hasher := sha256.New()
+	read, err := io.Copy(hasher, &contextReader{ctx: ctx, reader: reader})
+	s.verifiedBytes.Add(uint64(read))
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if read != size || hex.EncodeToString(hasher.Sum(nil)) != expected {
+		return errors.New("资产摘要或大小不符")
+	}
+	return nil
+}
+
+func checkFileIdentity(file *os.File, before os.FileInfo) error {
+	after, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if !sameFileIdentity(fileIdentityOf(before), fileIdentityOf(after)) {
+		return errors.New("文件身份不一致")
+	}
+	return nil
 }
 
 // rememberInspected records that the committed bytes at an asset's storage

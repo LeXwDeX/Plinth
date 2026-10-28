@@ -112,7 +112,7 @@ func TestCanvasTurnOutputSizeFollowsTheArtboard(t *testing.T) {
 	executor := Executor{chat: schema, offeringParameters: agentSize}
 	build := func(command chat.ToolCommand, offering generation.Offering) map[string]any {
 		t.Helper()
-		raw, err := executor.buildInput(context.Background(), command, offering, map[string]json.RawMessage{}, "merge", nil, nil)
+		raw, _, err := executor.buildInput(context.Background(), command, offering, map[string]json.RawMessage{}, "merge", nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

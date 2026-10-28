@@ -49,6 +49,15 @@ func validateRuntime(schema RuntimeSchema) error {
 	}
 	// A refused over-limit list is a different answer from the cut note: it
 	// must name the public label and both counts so the person can act (#329).
+	if neutral := messages.ReferenceSelectionNote; neutral != "" &&
+		(!strings.Contains(neutral, "{model}") || !strings.Contains(neutral, "{count}")) {
+		return errors.New("generation_messages.reference_selection_note 必须包含 {model} 与 {count}")
+	}
+	if capacity := messages.ReferenceCapacity; capacity != "" &&
+		(!strings.Contains(capacity, "{model}") || !strings.Contains(capacity, "{count}") ||
+			!strings.Contains(capacity, "{total}")) {
+		return errors.New("generation_messages.reference_capacity 必须包含 {model}、{count} 与 {total}")
+	}
 	if exceeded := messages.ReferenceLimitExceeded; exceeded != "" &&
 		(!strings.Contains(exceeded, "{label}") || !strings.Contains(exceeded, "{max}") ||
 			!strings.Contains(exceeded, "{actual}")) {
