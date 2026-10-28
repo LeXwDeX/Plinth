@@ -717,6 +717,11 @@ func (executor *Executor) observeBoundTask(
 				generation.OwnerID(op.OwnerID), op.PreparedInputID); err == nil {
 				info.ReferenceNote = executor.operationReferenceNote(command, op, prepared, task.Offering)
 			}
+			// The grant that admitted the Task still says who approved it; a
+			// read failure only leaves the source unknown, as before.
+			if grant, err := executor.grants.Grants.GetExecutionGrant(ctx, op.OwnerID, op.GrantRequestID); err == nil {
+				info.Approval = approvalSource(grant)
+			}
 		}
 	}
 	return executor.wait(ctx, command, task.Offering, task.ID, observe, info)
