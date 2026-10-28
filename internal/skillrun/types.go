@@ -201,6 +201,7 @@ type Store interface {
 	CreateSkillRun(context.Context, Run) (Run, error)
 	GetSkillRun(context.Context, generation.OwnerID, string) (Run, error)
 	GetSkillRunByIdempotency(context.Context, generation.OwnerID, string) (Run, error)
+	GetSkillRunByTask(context.Context, generation.OwnerID, string, generation.TaskID) (Run, error)
 	ListSkillRuns(context.Context, generation.OwnerID, string, string, int) ([]Run, error)
 	PendingGrant(context.Context, generation.OwnerID, string) (PendingGrant, error)
 	AttachSkillPrepared(context.Context, PreparedCommand) (Run, error)

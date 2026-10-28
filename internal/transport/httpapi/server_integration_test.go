@@ -1613,7 +1613,12 @@ func newHTTPHarnessWithCatalogAndProviders(
 	executionGrants := &executiongrant.Service{Grants: grantRepository, Prepared: repository,
 		Policy: approvalPolicy, Modes: chatService,
 		PendingTTL: time.Duration(applicationSchema.Chat.PendingApprovals.TTLSeconds) * time.Second}
+	approvalTexts, err := catalog.NewTextLocalizer(applicationSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
 	pendingApprovals, err := pendingapproval.New(pendingapproval.Config{
+		Texts: approvalTexts,
 		// This fixture supplies historical calls only. Agent-source submission is
 		// exercised through the production App verifier, never this legacy stub.
 		VerifyPreparedSource: func(ctx context.Context, op generationtool.Operation, p generation.PreparedInput) error {

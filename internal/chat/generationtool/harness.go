@@ -208,7 +208,7 @@ func (executor *Executor) executeHarnessOperation(ctx context.Context, command c
 	if err != nil {
 		return chat.ToolResult{NoSubmission: true}, err
 	}
-	return executor.prepareAgentOperation(ctx, command, snapshot.Capability, offering, encoded, "", command.IdempotencyKey(), referenceUse{}, observe)
+	return executor.prepareAgentOperation(ctx, command, snapshot.Capability, offering, encoded, "", command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, observe)
 }
 
 // conversationInput resolves the image handles an Agent gave for a

@@ -21,7 +21,7 @@ func (s *Store) PutValidatedBlob(ctx context.Context, body io.Reader, mediaType 
 		return Blob{}, err
 	}
 	incoming := sha256.New()
-	return s.putBlob(ctx, io.TeeReader(body, incoming), mediaType, maxBytes, func(file *os.File) error {
+	return s.putBlob(ctx, io.TeeReader(body, incoming), mediaType, maxBytes, func(file *os.File, _ string) error {
 		before, err := file.Stat()
 		if err != nil {
 			return err

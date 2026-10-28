@@ -22,12 +22,14 @@ export function referenceLimit(offering: OfferingWire | undefined, pictures: num
 }
 
 /**
- * What the composer says about a reference limit, in the words the server uses for the task API, the approval card and
- * the finished message (#329 note 99647): the Schema's one-picture text when the model takes exactly one picture (in
- * every language: "第 1 张", "only the first is used"), otherwise the general text. Empty when the Schema has none.
+ * What the composer says before sending about a reference limit. It states the
+ * model's capacity and how many pictures are attached, never which picture will
+ * be used: a three-view view may be replaced by its group's front view and a
+ * duplicate may be dropped before the limit applies (#80). The actual source is
+ * stated only after sending, in the result's reference note. Empty when the
+ * Schema has no capacity text.
  */
 export function referenceLimitNote(schema: ProductSchema, limit: ReferenceLimit): string {
-  const messages = schema.runtime.generation_messages;
-  const template = (limit.count === 1 && messages?.reference_limit_one) || messages?.reference_limit || '';
+  const template = schema.runtime.generation_messages?.reference_capacity || '';
   return template ? formatSchemaText(template, { model: limit.model, count: limit.count, total: limit.total }) : '';
 }

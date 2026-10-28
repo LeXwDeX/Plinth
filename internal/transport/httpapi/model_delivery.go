@@ -83,8 +83,8 @@ func (s *Server) downloadModelArchive(writer http.ResponseWriter, request *http.
 		return
 	}
 	defer archive.Close()
-	// 预检是否复用已校验结论要看命中/未命中计数与未命中读取的字节数；
-	// 只记录时延无法区分 "跳过重复校验" 与 "本次没有校验工作"。
+	// 命中/未命中表示交付解析缓存；字节数是 SHA 实际读取量，命中也会读取。
+	// 这些是全局计数差值，并发请求的工作也可能计入。
 	if s.assetVerificationStats != nil && s.logger != nil {
 		hits, misses, verifiedBytes := s.assetVerificationStats()
 		s.logger.InfoContext(request.Context(), "模型归档预检完成",

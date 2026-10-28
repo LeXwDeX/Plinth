@@ -28,8 +28,8 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"":             {"revision", "runtime", "content", "chat", "canvas", "task_history", "task_stream", "administration", "agent_configuration", "llm_settings", "capabilities", "task_states", "audit_actions", "delivery_formats", "authentication", "localization"},
 		"llm_settings": {"routes", "ui"},
 		"runtime":      {"http", "input_assets", "cache", "asset_delivery", "frontend", "generation_messages"},
-		// #329 note 99647: only the reference-limit pair, which the composer shows.
-		"runtime.generation_messages":       {"reference_limit", "reference_limit_one"},
+		// #80: the composer's capacity text and the result limit pair.
+		"runtime.generation_messages":       {"reference_capacity", "reference_limit", "reference_limit_one"},
 		"chat":                              {"api", "defaults", "roles", "state", "frontend", "context", "stream", "tools", "skills", "presentation", "approval_policy", "agent_scope", "harness", "agent_status", "context_compaction"},
 		"canvas":                            {"api", "defaults", "limits", "frontend", "presentation"},
 		"task_stream":                       {"aliases"},

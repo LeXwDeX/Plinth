@@ -722,7 +722,7 @@ func (executor *Executor) executeProcessing(
 		return chat.ToolResult{NoSubmission: true}, err
 	}
 	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, "",
-		command.IdempotencyKey(), referenceUse{}, observe)
+		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, observe)
 	return executor.processingOutcome(command, result, err)
 }
 

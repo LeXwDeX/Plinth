@@ -1,7 +1,9 @@
 # CI（#257；本仓库唯一的 CI）。门禁真源：dev_test.md §2「自动化门禁项」。
 # 门禁作业（frontend、go check、go test race）执行 §2 标为 CI 的各项；
-# src/__tests__/ci-gate-parity.test.ts 校验 CI、本地入口与 §2 一致。作业之间没有依赖，同时开始。
-# 这里只用公共 runner、公共 npm registry（registry.npmjs.org）与 Go proxy，不访问任何内网主机。
+# src/__tests__/ci-gate-parity.test.ts 校验 CI、本地入口与 §2 一致。作业之间没有依赖，同时排队。
+# 自动事件和默认手动运行使用公共 runner；只有显式 workflow_dispatch 的 use_self_hosted
+# 才选择仓库级可信 runner（#79 第一阶段）。两种路径均须核验依赖源和网络访问；
+# 工作流文本与 runner 选择都不是不可信 PR 的隔离边界。
 # CI 不构建镜像（#257）：运行镜像由发布流程从源码构建。
 # Action 固定到发布标签对应的完整提交 SHA（注释为标签），升级时一并核对。
 
@@ -12,12 +14,17 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      use_self_hosted:
+        description: '仅对已审查的精确 SHA 使用可信自托管 runner'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && inputs.use_self_hosted && 'trusted-' || '' }}${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -28,7 +35,7 @@ env:
 jobs:
   frontend:
     name: frontend
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.use_self_hosted && fromJSON('["self-hosted","Linux","X64","plinth-trusted-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,7 +55,7 @@ jobs:
 
   go-check:
     name: go check
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.use_self_hosted && fromJSON('["self-hosted","Linux","X64","plinth-trusted-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -68,7 +75,7 @@ jobs:
   # 非 race 的 go test 不在 CI：race 跑同一批测试且更严格（dev_test.md §2）。
   go-test-race:
     name: go test race
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.use_self_hosted && fromJSON('["self-hosted","Linux","X64","plinth-trusted-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     # httpapi 包在 -race 下接近 go test 默认的 10m 单包超时，
     # 用 GOFLAGS 放宽，门禁命令本身保持与 dev_test.md §2 逐字一致。

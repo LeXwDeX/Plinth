@@ -122,6 +122,46 @@ func (r *Repository) GetSkillRun(ctx context.Context, owner generation.OwnerID, 
 	return loadSkillRun(ctx, r.db, owner, id)
 }
 
+const skillRunByStepTask = `SELECT sr.id FROM skill_run_steps ss
+		JOIN skill_runs sr ON sr.id=ss.run_id
+		WHERE ss.task_id=? AND sr.owner_id=? AND sr.session_id=?`
+
+const skillRunByGrantTask = `SELECT sr.id FROM execution_grants g
+			JOIN skill_run_steps ss ON ss.grant_request_id=g.request_id
+			JOIN skill_runs sr ON sr.id=ss.run_id
+			WHERE g.task_id=? AND g.owner_id=? AND (ss.task_id IS NULL OR ss.task_id=g.task_id)
+			AND g.status NOT IN ('pending','denied') AND sr.owner_id=? AND sr.session_id=?`
+
+func (r *Repository) GetSkillRunByTask(ctx context.Context, owner generation.OwnerID, session string, taskID generation.TaskID) (skillrun.Run, error) {
+	if owner == "" || session == "" || taskID == "" {
+		return skillrun.Run{}, skillrun.ErrInvalid
+	}
+	var id string
+	err := r.db.QueryRowContext(ctx, skillRunByStepTask, taskID, owner, session).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		// The step can be bound between the first lookup and this one.
+		err = r.db.QueryRowContext(ctx, skillRunByGrantTask,
+			taskID, owner, owner, session).Scan(&id)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return skillrun.Run{}, skillrun.ErrMissing
+	}
+	if err != nil {
+		return skillrun.Run{}, err
+	}
+	run, err := loadSkillRun(ctx, r.db, owner, id)
+	if errors.Is(err, skillrun.ErrMissing) {
+		return skillrun.Run{}, skillrun.ErrConflict
+	}
+	if err != nil {
+		return skillrun.Run{}, err
+	}
+	if run.SessionID != session {
+		return skillrun.Run{}, skillrun.ErrMissing
+	}
+	return run, nil
+}
+
 func (r *Repository) GetSkillRunByIdempotency(ctx context.Context, owner generation.OwnerID, key string) (skillrun.Run, error) {
 	if owner == "" || key == "" {
 		return skillrun.Run{}, skillrun.ErrInvalid

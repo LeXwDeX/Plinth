@@ -168,8 +168,13 @@ func (s *Server) agentConsentGet(writer http.ResponseWriter, request *http.Reque
 			return
 		}
 		prepared, err := s.generation.GetPreparedInput(request.Context(), owner, operation.PreparedInputID)
-		if err != nil || prepared.InputHash != operation.PreparedInputHash {
+		if err != nil {
 			s.writeChatInternalError(writer, err)
+			return
+		}
+		if prepared.OwnerID != owner || prepared.SessionID != scope || prepared.InputHash != operation.PreparedInputHash ||
+			prepared.OfferingID != operation.OfferingID || prepared.OfferingRevision != operation.OfferingRevision {
+			s.writeChatInternalError(writer, executiongrant.ErrConflict)
 			return
 		}
 		// Project the exact frozen operation through a small allowlist. Never
@@ -200,7 +205,7 @@ func (s *Server) agentConsentGet(writer http.ResponseWriter, request *http.Reque
 			for _, asset := range prepared.Assets {
 				assets = append(assets, map[string]any{
 					"parameter": asset.Parameter, "asset_id": asset.ID,
-					"role": asset.Role,
+					"role": asset.Role, "media_type": asset.MediaType,
 				})
 			}
 			pending["reference_assets"] = assets
@@ -208,6 +213,23 @@ func (s *Server) agentConsentGet(writer http.ResponseWriter, request *http.Reque
 		}
 		if offering, ok := s.generation.Offering(operation.OfferingID); ok &&
 			offering.Revision == operation.OfferingRevision {
+			var tool catalog.ChatToolSchema
+			for _, candidate := range s.application.Chat.Tools {
+				if candidate.Name == operation.ToolName {
+					tool = candidate
+					break
+				}
+			}
+			text := func(value string) string { return s.textIn(requestLocale(request), value) }
+			var note string
+			if prepared.Capability == generation.ImageTo3D {
+				note = generationtool.ReferenceSourceNote(tool, offering, s.application.Chat.ThreeView.ModelSourceNote, operation.ReferenceSource, text)
+			} else {
+				note = generationtool.ReferenceLimitNote(tool, offering, operation.ReferenceCount, operation.ReferenceTotal, text)
+			}
+			if note != "" {
+				pending["reference_note"] = note
+			}
 			pending["model"] = s.textIn(requestLocale(request), offering.ModelName)
 			pending["provider"] = s.textIn(requestLocale(request), offering.ProviderName)
 			if prepared.NativeQuote != nil {
@@ -287,7 +309,7 @@ func (s *Server) agentConsentGet(writer http.ResponseWriter, request *http.Reque
 			assets := make([]map[string]any, 0, len(prepared.Assets))
 			for _, asset := range prepared.Assets {
 				assets = append(assets, map[string]any{
-					"parameter": asset.Parameter, "asset_id": asset.ID, "role": asset.Role,
+					"parameter": asset.Parameter, "asset_id": asset.ID, "role": asset.Role, "media_type": asset.MediaType,
 				})
 			}
 			projection["reference_assets"] = assets

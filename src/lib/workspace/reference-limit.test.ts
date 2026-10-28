@@ -11,8 +11,8 @@ const offering = (id: string) => {
   return found as unknown as OfferingWire;
 };
 
-// #329 follow-up A: the composer says, before sending, that a single-picture 3D model uses only the first
-// pictures. The limit is the Offering's reference-image max_items; nothing is cut or blocked here.
+// #329 follow-up A / #80: the composer says, before sending, that a 3D model takes fewer pictures than are
+// attached. The limit is the Offering's reference-image max_items; nothing is cut or blocked here.
 describe('referenceLimit', () => {
   it('names the model and its limit when more pictures are attached than Meshy 7.1 image to 3D takes', () => {
     expect(referenceLimit(offering('meshy/meshy-7.1/image-to-3d'), 2)).toEqual({ model: 'Meshy 7.1', count: 1, total: 2 });
@@ -32,39 +32,44 @@ describe('referenceLimit', () => {
   });
 });
 
-// #329 dev-test note 99647 (observations 8, 9): the composer, the task API, the approval card and the finished
-// message say it with one Schema pair (runtime.generation_messages), worded for one picture when the model takes one.
+// #80: before sending, the composer states the model's capacity and the number
+// of attached pictures. It does not predict which picture is used: a three-view
+// view may be replaced by its group's front view before the limit applies.
 describe('referenceLimitNote', () => {
   const messages = defaultCatalog.application.runtime.generation_messages as Record<string, string>;
   const english = (defaultCatalog.application.localization.bundles as Record<string, { fields: Record<string, string> }>).en.fields;
   const schemaWith = (generation: Record<string, string>) => ({ runtime: { generation_messages: generation } }) as unknown as ProductSchema;
   const fill = (template: string, values: Record<string, string | number>) => template.replace(/\{(\w+)\}/g, (_, name) => String(values[name]));
 
-  it('uses the one-picture text for a model that takes one, and the general text otherwise', () => {
+  it('states the capacity without claiming a picture order', () => {
     const schema = schemaWith(messages);
-    expect(referenceLimitNote(schema, { model: 'Meshy 7.1', count: 1, total: 2 }))
-      .toBe(fill(messages.reference_limit_one, { model: 'Meshy 7.1', total: 2 }));
-    expect(referenceLimitNote(schema, { model: 'Meshy 7.1', count: 1, total: 2 })).toContain('第 1 张');
-    expect(referenceLimitNote(schema, { model: 'Model X', count: 2, total: 5 }))
-      .toBe(fill(messages.reference_limit, { model: 'Model X', count: 2, total: 5 }));
-  });
-
-  it('reads right in English for one picture and for several', () => {
-    const schema = schemaWith({
-      reference_limit: english['runtime.generation_messages.reference_limit'],
-      reference_limit_one: english['runtime.generation_messages.reference_limit_one'],
-    });
     const one = referenceLimitNote(schema, { model: 'Meshy 7.1', count: 1, total: 2 });
     const several = referenceLimitNote(schema, { model: 'Model X', count: 2, total: 5 });
+    expect(one).toBe(fill(messages.reference_capacity, { model: 'Meshy 7.1', count: 1, total: 2 }));
+    expect(several).toBe(fill(messages.reference_capacity, { model: 'Model X', count: 2, total: 5 }));
+    expect(one).toContain('一次最多用 1 张参考图；这次共 2 张');
+    expect(several).toContain('一次最多用 2 张参考图；这次共 5 张');
     for (const text of [one, several]) {
-      expect(text).not.toContain('(s)');
-      expect(text).not.toMatch(/first 1 /);
+      expect(text).not.toContain('第 1 张');
+      expect(text).not.toContain('只用前');
+      expect(text).toContain('一次最多用');
     }
-    expect(one).toContain('only the first is used');
-    expect(several).toContain('only the first 2 are used');
   });
 
-  it('is empty when the Schema declares no text', () => {
+  it('reads right in English for one or several pictures without claiming the first picture', () => {
+    const schema = schemaWith({ reference_capacity: english['runtime.generation_messages.reference_capacity'] });
+    const one = referenceLimitNote(schema, { model: 'Meshy 7.1', count: 1, total: 2 });
+    const several = referenceLimitNote(schema, { model: 'Model X', count: 2, total: 5 });
+    expect(one).toContain('reference picture limit of 1 per request; 2 pictures are attached');
+    expect(several).toContain('reference picture limit of 2 per request; 5 pictures are attached');
+    for (const text of [one, several]) {
+      expect(text).not.toContain('first is used');
+      expect(text).not.toContain('(s)');
+    }
+  });
+
+  it('is empty when the Schema declares no capacity text', () => {
     expect(referenceLimitNote(schemaWith({}), { model: 'Meshy 7.1', count: 1, total: 2 })).toBe('');
+    expect(referenceLimitNote({ runtime: {} } as ProductSchema, { model: 'Meshy 7.1', count: 1, total: 2 })).toBe('');
   });
 });

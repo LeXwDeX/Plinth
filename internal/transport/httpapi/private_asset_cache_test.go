@@ -1,15 +1,146 @@
 package httpapi_test
 
 import (
+	"bytes"
 	"context"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/LeXwDeX/Plinth/internal/access"
+	"github.com/LeXwDeX/Plinth/internal/authentication"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/providers/mock"
 )
+
+type requireExplicitTestIdentity struct {
+	fallback authentication.FallbackIdentity
+}
+
+func (i requireExplicitTestIdentity) Identify(request *http.Request) (access.Principal, error) {
+	if request.Header.Get("X-User-ID") == "" {
+		return access.Principal{}, authentication.ErrUnauthenticated
+	}
+	return i.fallback.Identify(request)
+}
+
+type thumbnailFixtureAdapter struct {
+	*httpMeshyFormatFixtureAdapter
+	png []byte
+}
+
+func (a *thumbnailFixtureAdapter) Observe(ctx context.Context, request generation.ObserveRequest) (generation.Observation, error) {
+	observation, err := a.httpMeshyFormatFixtureAdapter.Observe(ctx, request)
+	if err == nil && observation.Phase == generation.UpstreamCompleted && request.Offering.ID == "tripo/tripo-v3.1-full/text-to-3d" && !request.PostSuccess {
+		observation.Artifacts = append(observation.Artifacts, generation.ArtifactClaim{ID: string(request.AttemptID) + ":thumbnail", Role: "thumbnail", Variant: "rendered_image", MediaType: "image/png", Inline: a.png})
+	}
+	return observation, err
+}
+
+func TestThumbnailConditionalRejectsCorruptedCAS(t *testing.T) {
+	var root string
+	var imageBytes bytes.Buffer
+	if err := png.Encode(&imageBytes, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &thumbnailFixtureAdapter{httpMeshyFormatFixtureAdapter: &httpMeshyFormatFixtureAdapter{Adapter: mock.New()}, png: imageBytes.Bytes()}
+	module, handler, _, _ := newHTTPHarnessWithCatalogAndProviders(t, []string{"user"}, nil,
+		func(config *authentication.Config) { config.Fallback = requireExplicitTestIdentity{config.Fallback} }, nil, nil, nil,
+		map[string]generation.ProviderPort{"tripo.v3": adapter},
+		func(t *testing.T, database string) { root = filepath.Dir(database) })
+	task := createSucceededTripoModelTask(t, module, "owner-a")
+	var thumbnail generation.Asset
+	for _, asset := range task.Assets {
+		if asset.Role == "thumbnail" {
+			thumbnail = asset
+		}
+	}
+	if thumbnail.ID == "" {
+		t.Fatalf("fixture missing real thumbnail: %+v", task.Assets)
+	}
+	url := "/api/v1/tasks/" + string(task.ID) + "/assets/" + string(thumbnail.ID)
+	request := func(owner, etag string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		if owner != "" {
+			req.Header.Set("X-User-ID", owner)
+		}
+		if etag != "" {
+			req.Header.Set("If-None-Match", etag)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, req)
+		return response
+	}
+	first := request("owner-a", "")
+	etag := first.Header().Get("ETag")
+	if first.Code != http.StatusOK || etag == "" || !bytes.Equal(first.Body.Bytes(), imageBytes.Bytes()) {
+		t.Fatalf("healthy thumbnail: %d", first.Code)
+	}
+	if response := request("owner-a", etag); response.Code != http.StatusNotModified || response.Header().Get("ETag") != etag {
+		t.Fatalf("healthy conditional: %d", response.Code)
+	}
+	for _, tc := range []struct {
+		owner  string
+		status int
+	}{{"owner-b", http.StatusNotFound}, {"", http.StatusUnauthorized}} {
+		response := request(tc.owner, etag)
+		if response.Code != tc.status || response.Header().Get("ETag") != "" {
+			t.Fatalf("authorization %q: %d", tc.owner, response.Code)
+		}
+	}
+	corrupt := bytes.Repeat([]byte("x"), int(thumbnail.Size))
+	if err := os.WriteFile(filepath.Join(root, "storage", thumbnail.StorageKey), corrupt, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	response := request("owner-a", etag)
+	if response.Code != http.StatusServiceUnavailable || response.Header().Get("ETag") != "" || bytes.Contains(response.Body.Bytes(), corrupt) {
+		t.Fatalf("corrupted conditional status=%d headers=%v", response.Code, response.Header())
+	}
+}
+
+func TestTaskAssetCorruptionNeverCrossesOwnerOrAnonymousBoundary(t *testing.T) {
+	var root string
+	module, handler, _, _ := newHTTPHarnessWithServices(t, []string{"user"}, nil,
+		func(config *authentication.Config) { config.Fallback = requireExplicitTestIdentity{config.Fallback} }, nil, nil,
+		func(t *testing.T, database string) { root = filepath.Dir(database) })
+	task := createSucceededImageTask(t, module, "owner-a")
+	asset := task.Assets[0]
+	url := "/api/v1/tasks/" + string(task.ID) + "/assets/" + string(asset.ID)
+	request := func(owner string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		if owner != "" {
+			req.Header.Set("X-User-ID", owner)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, req)
+		return response
+	}
+	if response := request("owner-a"); response.Code != http.StatusOK || response.Body.Len() == 0 {
+		t.Fatalf("owner healthy: %d", response.Code)
+	}
+	corrupt := bytes.Repeat([]byte("x"), int(asset.Size))
+	if err := os.WriteFile(filepath.Join(root, "storage", asset.StorageKey), corrupt, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, owner := range []string{"owner-a", "owner-b", ""} {
+		response := request(owner)
+		if response.Code == http.StatusOK || bytes.Contains(response.Body.Bytes(), corrupt) {
+			t.Fatalf("corrupt asset delivered to %q: status %d", owner, response.Code)
+		}
+		if owner == "owner-b" && response.Code != http.StatusNotFound {
+			t.Fatalf("cross-owner status = %d", response.Code)
+		}
+		if owner == "" && response.Code != http.StatusUnauthorized {
+			t.Fatalf("anonymous status = %d", response.Code)
+		}
+	}
+}
 
 func TestPrivateTaskAssetDownloadReauthorizesConditionalRequests(t *testing.T) {
 	t.Parallel()

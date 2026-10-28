@@ -8,11 +8,13 @@ import (
 	"image/color"
 	"image/png"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
@@ -23,6 +25,8 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/harness"
+	"github.com/LeXwDeX/Plinth/internal/harness/resolve"
 	"github.com/LeXwDeX/Plinth/internal/providers"
 	"github.com/LeXwDeX/Plinth/internal/providers/mock"
 )
@@ -40,16 +44,23 @@ func (uploadedReferences) Resolve(_ context.Context, _ generation.OwnerID, urls 
 }
 
 type pendingReferenceRun struct {
-	result  chat.ToolResult
-	content map[string]any
-	op      generationtool.Operation
-	tool    catalog.ChatToolSchema
+	result   chat.ToolResult
+	content  map[string]any
+	op       generationtool.Operation
+	tool     catalog.ChatToolSchema
+	prepared generation.PreparedInput
+	grant    executiongrant.Grant
+	repo     *sqlite.Repository
 }
 
 // runImageTo3DWithPictures asks the Agent's image-to-3D tool, with the given
 // model picked, for a model from the given number of uploaded pictures, through
 // the real kernel, grant service and operation store.
 func runImageTo3DWithPictures(t *testing.T, mode, model string, pictures int) pendingReferenceRun {
+	return runImageTo3DWithPicturesAndNote(t, mode, model, pictures, false)
+}
+
+func runImageTo3DWithPicturesAndNote(t *testing.T, mode, model string, pictures int, describe bool) pendingReferenceRun {
 	t.Helper()
 	ctx := context.Background()
 	repo, err := sqlitetest.Open(filepath.Join(t.TempDir(), "agent.sqlite"))
@@ -123,14 +134,23 @@ func runImageTo3DWithPictures(t *testing.T, mode, model string, pictures int) pe
 		Call:    agents.ToolCall{ID: "call", Name: tool.Name, Arguments: json.RawMessage(`{"prompt":"a stool"}`)},
 		Options: chat.TurnOptions{AIModel: model, CreativeDomain: "model-3d"},
 		History: []chat.Message{{Role: app.Chat.Roles.User, ImageURLs: urls}}}
+	if describe {
+		_ = executor.ToolDescriptionNote(tool, command.Options)
+	}
 	result, err := executor.Execute(ctx, command, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	run := pendingReferenceRun{result: result, tool: tool}
+	run := pendingReferenceRun{result: result, tool: tool, repo: repo}
 	_ = json.Unmarshal([]byte(result.AgentContent), &run.content)
 	if run.op, err = repo.LoadAgentOperation(ctx, "owner", "session", "turn", "call"); err != nil {
 		t.Fatalf("operation: %v (result %+v)", err, result)
+	}
+	if run.prepared, err = m.GetPreparedInput(ctx, "owner", run.op.PreparedInputID); err != nil {
+		t.Fatal(err)
+	}
+	if run.grant, err = repo.GetExecutionGrant(ctx, "owner", run.op.GrantRequestID); err != nil {
+		t.Fatal(err)
 	}
 	return run
 }
@@ -281,6 +301,16 @@ func TestTheToolDescriptionFollowsThePickedModelsPictureLimit(t *testing.T) {
 		"no 3D model picked in 3D":        {chat.TurnOptions{CreativeDomain: "model-3d"}, ""},
 		"a model of another domain":       {chat.TurnOptions{AIModel: "gpt-image-2", CreativeDomain: "model-3d"}, ""},
 	} {
+		if strings.HasPrefix(name, "Meshy") {
+			model := "Meshy 7.1"
+			if strings.Contains(name, "multi-view") {
+				model = "Meshy 7.1 多视图"
+				if test.options.Locale == "en" {
+					model = "Meshy 7.1 multi-view"
+				}
+			}
+			test.want += " " + fill(notes.NoPrompt, model, 0)
+		}
 		if got := executor.ToolDescriptionNote(tool, test.options); got != test.want {
 			t.Errorf("%s: note = %q, want %q", name, got, test.want)
 		}
@@ -290,6 +320,59 @@ func TestTheToolDescriptionFollowsThePickedModelsPictureLimit(t *testing.T) {
 	plain.ReferenceCapacityNote = catalog.ChatToolReferenceCapacityNote{}
 	if got := executor.ToolDescriptionNote(plain, chat.TurnOptions{AIModel: "meshy-7.1", CreativeDomain: "model-3d"}); got != "" {
 		t.Fatalf("undeclared note = %q", got)
+	}
+	old := tool
+	old.ReferenceCapacityNote.NoPrompt = ""
+	if got, want := executor.ToolDescriptionNote(old, chat.TurnOptions{AIModel: "meshy-7.1", CreativeDomain: "model-3d"}), fill(old.ReferenceCapacityNote.Single, "Meshy 7.1", 1); got != want {
+		t.Fatalf("old note = %q, want %q", got, want)
+	}
+}
+
+func TestReferenceToolNoteDoesNotChangePreparedInputOrApproval(t *testing.T) {
+	for _, mode := range []string{"manual", "auto"} {
+		t.Run(mode, func(t *testing.T) {
+			run := runImageTo3DWithPicturesAndNote(t, mode, "meshy-7.1-multiview", 2, true)
+			baseline := runImageTo3DWithPicturesAndNote(t, mode, "meshy-7.1-multiview", 2, false)
+			var input map[string]any
+			if err := json.Unmarshal(run.prepared.NormalizedInput, &input); err != nil {
+				t.Fatal(err)
+			}
+			refs, ok := input["reference_assets"].([]any)
+			if !ok || len(refs) != 2 || strings.Contains(string(run.prepared.NormalizedInput), "a stool") {
+				t.Fatalf("prepared input = %s", run.prepared.NormalizedInput)
+			}
+			var baselineInput map[string]any
+			if err := json.Unmarshal(baseline.prepared.NormalizedInput, &baselineInput); err != nil {
+				t.Fatal(err)
+			}
+			baselineRefs, ok := baselineInput["reference_assets"].([]any)
+			if !ok || len(baselineRefs) != len(refs) {
+				t.Fatalf("baseline input = %s", baseline.prepared.NormalizedInput)
+			}
+			if len(run.prepared.Assets) != 2 || len(baseline.prepared.Assets) != 2 || run.prepared.Assets[0].SHA256 == run.prepared.Assets[1].SHA256 {
+				t.Fatalf("expected two distinct reference assets: %+v", run.prepared.Assets)
+			}
+			for index := range run.prepared.Assets {
+				actual, expected := run.prepared.Assets[index], baseline.prepared.Assets[index]
+				actual.ID, expected.ID = "", ""
+				if actual != expected {
+					t.Fatalf("reference %d changed: %+v, baseline %+v", index, actual, expected)
+				}
+			}
+			// The independent runs upload the same bytes under different asset IDs.
+			delete(input, "reference_assets")
+			delete(baselineInput, "reference_assets")
+			if !reflect.DeepEqual(input, baselineInput) || run.grant.Status != baseline.grant.Status || run.result.NoSubmission != baseline.result.NoSubmission || (run.result.TaskID == "") != (baseline.result.TaskID == "") {
+				t.Fatalf("note changed execution: input=%v baseline=%v, grant=%s baseline=%s", input, baselineInput, run.grant.Status, baseline.grant.Status)
+			}
+			if run.prepared.OfferingID != "meshy/meshy-7.1-multiview/image-to-3d" || run.grant.PreparedInputID != string(run.prepared.ID) {
+				t.Fatalf("prepared=%+v grant=%+v", run.prepared, run.grant)
+			}
+			if mode == "manual" && (!run.result.NoSubmission || run.result.TaskID != "" || run.grant.Status != executiongrant.Pending) ||
+				mode == "auto" && (run.result.NoSubmission || run.result.TaskID == "" || run.grant.Status != executiongrant.Bound) {
+				t.Fatalf("result=%+v grant=%+v", run.result, run.grant)
+			}
+		})
 	}
 }
 
@@ -329,6 +412,170 @@ func TestTheMultiPictureToolNoteScopesItsLimitToTheSelectedModel(t *testing.T) {
 			if strings.Contains(note, claim) {
 				t.Errorf("%s: note keeps an unverified same-object claim %q: %q", name, claim, note)
 			}
+		}
+	}
+}
+
+func TestReferenceToolDescriptionDoesNotPromiseUnsentText(t *testing.T) {
+	tool, executor := toolDescriptionNoteFixture(t)
+	const warning = "Do not promise that the person's text will affect this image-to-3D result"
+	for _, tc := range []struct {
+		model, locale string
+		warn          bool
+	}{
+		{"meshy-7.1", "en", true}, {"meshy-7.1", "zh-CN", true},
+		{"meshy-7.1-multiview", "en", true}, {"meshy-7.1-multiview", "zh-CN", true},
+		{"rodin-gen-2.5", "en", false}, {"rodin-gen-2.5", "zh-CN", false},
+		{"unknown", "en", false}, {"", "zh-CN", false},
+	} {
+		t.Run(tc.model+"/"+tc.locale, func(t *testing.T) {
+			note := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: tc.model, CreativeDomain: "model-3d", Locale: tc.locale})
+			if strings.Contains(note, warning) != tc.warn {
+				t.Fatalf("warning presence = %v, want %v: %q", strings.Contains(note, warning), tc.warn, note)
+			}
+			if tc.warn && (!strings.Contains(note, "When this tool uses the selected model (") || !strings.Contains(note, ") for image-to-3D, the tool's text prompt is not sent to this service.")) {
+				t.Fatalf("warning is not conditional on this tool's image-to-3D execution: %q", note)
+			}
+		})
+	}
+	for _, model := range []string{"meshy-7.1-multiview", "rodin-gen-2.5"} {
+		note := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: model, CreativeDomain: "model-3d"})
+		if !strings.Contains(note, "Do not claim that a collage sent as one picture is equivalent to sending each original picture separately unless the selected Offering's input contract explicitly supports it") {
+			t.Errorf("%s: missing collage guidance: %s", model, note)
+		}
+	}
+}
+
+func TestReferenceToolDescriptionFollowsFrozenHarnessOffering(t *testing.T) {
+	c := qualifiedMultiviewCatalog(t)
+	app := c.Application()
+	tool, _ := toolDescriptionNoteFixture(t)
+	meshy, ok := c.Get("meshy/meshy-7.1-multiview/image-to-3d")
+	if !ok {
+		t.Fatal("missing Meshy offering")
+	}
+	rodin, ok := c.Get("hyper3d/rodin-gen-2.5/image-to-3d")
+	if !ok {
+		t.Fatal("missing Rodin offering")
+	}
+	gateway := &fakeGateway{offerings: []generation.Offering{meshy, rodin}, unavailable: map[generation.OfferingID]bool{}}
+	executor, err := generationtool.New(generationtool.Config{Gateway: gateway, References: &fakeReferences{}, Chat: app.Chat, TaskStates: app.TaskStates})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := func(o generation.Offering) *resolve.Snapshot {
+		return &resolve.Snapshot{Selection: harness.Selection{OperationID: "selected", OfferingID: string(o.ID), OfferingRevision: o.Revision}, ToolName: tool.Name, Capability: tool.Capability, OfferingRevision: o.Revision}
+	}
+	// Persisted snapshots do not restore Offering; a stale pointer must not win either.
+	stalePointer := snapshot(meshy)
+	stalePointer.Offering = &rodin
+	for _, tc := range []struct {
+		name, workspace string
+		snap            *resolve.Snapshot
+		want, absent    string
+	}{
+		{"Meshy not workspace Rodin", "rodin-gen-2.5", snapshot(meshy), "Do not promise that the person's text", "Rodin Gen-2.5"},
+		{"stale offering pointer", "rodin-gen-2.5", stalePointer, "Do not promise that the person's text", "Rodin Gen-2.5"},
+		{"Rodin not workspace Meshy", "meshy-7.1-multiview", snapshot(rodin), "Rodin Gen-2.5", "Do not promise that the person's text"},
+		{"unknown", "rodin-gen-2.5", snapshot(generation.Offering{ID: "missing", Revision: "r1"}), "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: tc.workspace, CreativeDomain: "model-3d", Harness: tc.snap})
+			if tc.want == "" && got != "" || tc.want != "" && !strings.Contains(got, tc.want) || tc.absent != "" && strings.Contains(got, tc.absent) {
+				t.Fatalf("note = %q", got)
+			}
+		})
+	}
+	for name, mutate := range map[string]func(*resolve.Snapshot){
+		"different snapshot revision": func(s *resolve.Snapshot) { s.OfferingRevision = "old" },
+		"different selected revision": func(s *resolve.Snapshot) { s.OfferingRevision = "old"; s.Selection.OfferingRevision = "old" },
+		"different tool":              func(s *resolve.Snapshot) { s.ToolName = "other" },
+		"different capability":        func(s *resolve.Snapshot) { s.Capability = generation.TextTo3D },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := snapshot(meshy)
+			mutate(s)
+			if got := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: "rodin-gen-2.5", CreativeDomain: "model-3d", Harness: s}); got != "" {
+				t.Fatalf("note = %q", got)
+			}
+		})
+	}
+	gateway.unavailable[meshy.ID] = true
+	if got := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: "rodin-gen-2.5", CreativeDomain: "model-3d", Harness: snapshot(meshy)}); got != "" {
+		t.Fatalf("unavailable offering note = %q", got)
+	}
+	gateway.unavailable[meshy.ID] = false
+	gateway.offerings[0].Enabled = false
+	if got := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: "rodin-gen-2.5", CreativeDomain: "model-3d", Harness: snapshot(meshy)}); got != "" {
+		t.Fatalf("disabled offering note = %q", got)
+	}
+	gateway.offerings[0].Enabled = true
+	argumentTool := tool
+	argumentTool.OfferingArgument = "offering_id"
+	if got := executor.ToolDescriptionNote(argumentTool, chat.TurnOptions{AIModel: "meshy-7.1-multiview", CreativeDomain: "model-3d"}); got != "" {
+		t.Fatalf("argument choice note = %q", got)
+	}
+	argumentTool.OfferingArgument = ""
+	argumentTool.OfferingFromSource = "source"
+	if got := executor.ToolDescriptionNote(argumentTool, chat.TurnOptions{AIModel: "meshy-7.1-multiview", CreativeDomain: "model-3d"}); got != "" {
+		t.Fatalf("source choice note = %q", got)
+	}
+	free := snapshot(rodin)
+	free.Selection.OperationID = ""
+	if got := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: "meshy-7.1-multiview", CreativeDomain: "model-3d", Harness: free}); !strings.Contains(got, "Do not promise that the person's text") {
+		t.Fatalf("inactive harness did not use workspace model: %q", got)
+	}
+}
+
+// #80: the source fact is frozen with the same prepared input. A direct,
+// unfettered selection of two uploads and a one-picture model keeps the first
+// picture, so only the prefix case may use the limit text; the fact records
+// that and survives a reload from the operation store.
+func TestImageTo3DReferenceSourceFactIsFrozenWithThePreparedInput(t *testing.T) {
+	run := runImageTo3DWithPictures(t, "manual", "meshy-7.1", 2)
+	fact := run.op.ReferenceSource
+	if fact.Identity == "" || fact.Selected != 2 || fact.Resolved != 2 || fact.Frozen != 1 ||
+		!fact.Prefix || fact.AllFront || fact.Replaced || fact.Deduped {
+		t.Fatalf("source fact = %+v", fact)
+	}
+	if fact.FrontTaskID != "" || fact.FrontAssetID != "" {
+		t.Fatalf("ordinary uploads named a front source: %+v", fact)
+	}
+	note, _ := run.content[run.tool.ResultFields.ReferenceNote].(string)
+	if note == "" || !strings.Contains(note, "1") || !strings.Contains(note, "2") {
+		t.Fatalf("waiting result note = %q", note)
+	}
+	reloaded, err := run.repo.LoadAgentOperation(context.Background(), "owner", "session", "turn", "call")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameReferenceSourceForTest(reloaded.ReferenceSource, fact) {
+		t.Fatalf("reloaded fact = %+v, want %+v", reloaded.ReferenceSource, fact)
+	}
+}
+
+func sameReferenceSourceForTest(a, b generationtool.ReferenceSourceFact) bool {
+	a.Trusted, b.Trusted = false, false
+	return a == b
+}
+
+// #80: an automatically approved image-to-3D step freezes the same source
+// fact as a manual one; the sentence that reports it reads that fact on the
+// stored operation, not today's groups.
+func TestAutoApprovedImageTo3DFreezesTheSourceFact(t *testing.T) {
+	run := runImageTo3DWithPictures(t, "auto", "meshy-7.1", 2)
+	if run.result.TaskID == "" || run.op.ReferenceSource.Identity == "" {
+		t.Fatalf("auto step = %+v fact=%+v", run.result, run.op.ReferenceSource)
+	}
+	fact := run.op.ReferenceSource
+	if fact.Selected != 2 || fact.Frozen != 1 || !fact.Prefix || fact.AllFront {
+		t.Fatalf("auto source fact = %+v", fact)
+	}
+	if run.result.AwaitTask {
+		// The Task is running; this receipt is not a result and must not carry
+		// a source sentence yet.
+		if note, ok := run.content[run.tool.ResultFields.ReferenceNote]; ok {
+			t.Fatalf("running receipt claimed a source: %v", note)
 		}
 	}
 }

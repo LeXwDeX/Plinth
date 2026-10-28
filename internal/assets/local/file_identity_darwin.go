@@ -7,10 +7,8 @@ import (
 	"syscall"
 )
 
-// fileIdentityOf captures the attributes that change when a stored file is
-// rewritten or replaced. The change time is the part a caller cannot reset
-// through utimes, so an in-place rewrite never reuses a verified verdict even
-// when the size and the modification time were put back by hand.
+// fileIdentityOf captures attributes that can detect some file changes; equal
+// identities do not prove that the bytes were unchanged.
 func fileIdentityOf(info os.FileInfo) fileIdentity {
 	identity := fileIdentity{size: info.Size(), modified: info.ModTime().UnixNano()}
 	if stat, ok := info.Sys().(*syscall.Stat_t); ok {

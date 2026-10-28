@@ -195,7 +195,10 @@ func TestAwaitingApprovalResultFollowsTheTurnLocale(t *testing.T) {
 	command := chat.ToolCommand{Tool: tool, Options: chat.TurnOptions{Locale: "en"}}
 	op := Operation{OwnerID: "owner-a", SessionID: "session-a", PreparedInputID: prepared.ID,
 		OfferingID: offering.ID, OfferingRevision: offering.Revision,
-		RechargeTaskID: "task-old", ReferenceCount: 1, ReferenceTotal: 3}
+		RechargeTaskID: "task-old", ReferenceCount: 1, ReferenceTotal: 3,
+		// A retained prefix of the selection: the limit text states the truth.
+		ReferenceSource: ReferenceSourceFact{Version: 1, Selected: 3, Resolved: 3, Frozen: 1,
+			Prefix: true, Identity: "locale-source"}}
 
 	content := map[string]any{}
 	if err := json.Unmarshal([]byte(executor.awaitingApproval(context.Background(), command, op)), &content); err != nil {

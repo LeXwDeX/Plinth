@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -12,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
+	"github.com/LeXwDeX/Plinth/internal/assets/modelinput/modelinputtest"
 	"github.com/LeXwDeX/Plinth/internal/authentication"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/catalog/catalogtest"
@@ -31,6 +36,7 @@ type pendingApprovalWorld struct {
 	other     *http.Cookie
 	sessionID string
 	state     *fixtureExecutionState
+	inputs    *inputassets.Service
 }
 
 // pendingApprovalBrowsers logs two users in; the first owns the session.
@@ -56,7 +62,7 @@ func pendingApprovalBrowsersWithCatalog(
 		byUsername: map[string]authentication.UserRecord{first.Username: first, second.Username: second},
 		byID:       map[string]authentication.UserRecord{first.ID: first, second.ID: second},
 	}
-	module, handler, _, _ := newHTTPHarnessWithCatalogOverride(t, []string{"user"}, customize,
+	module, handler, inputs, _ := newHTTPHarnessWithCatalogOverride(t, []string{"user"}, customize,
 		func(config *authentication.Config) { config.Directory = directory }, nil, nil, taskCatalog)
 	login := func(username string) *http.Cookie {
 		response := httptest.NewRecorder()
@@ -69,7 +75,7 @@ func pendingApprovalBrowsersWithCatalog(
 		}
 		return response.Result().Cookies()[0]
 	}
-	world := pendingApprovalWorld{module: module, handler: handler, cookie: login("grant-user"), other: login("other-user")}
+	world := pendingApprovalWorld{module: module, handler: handler, inputs: inputs, cookie: login("grant-user"), other: login("other-user")}
 	created := grantTestRequest(t, handler, world.cookie, http.MethodPost, "/api/chat/sessions", `{"title":"approvals"}`, "")
 	var session struct {
 		ID string `json:"id"`
@@ -134,6 +140,10 @@ func (w pendingApprovalWorld) detach(t *testing.T, callID, prompt string, stop, 
 // a pending Agent grant that has not been detached: the agent is still waiting
 // for the person inside its running turn.
 func (w pendingApprovalWorld) inTurnApproval(t *testing.T, callID, prompt string, customize ...func(*generation.PrepareInputCommand)) (generationtool.Operation, executiongrant.Grant) {
+	return w.inTurnApprovalWithOperation(t, callID, prompt, nil, customize...)
+}
+
+func (w pendingApprovalWorld) inTurnApprovalWithOperation(t *testing.T, callID, prompt string, changeOperation func(*generationtool.Operation), customize ...func(*generation.PrepareInputCommand)) (generationtool.Operation, executiongrant.Grant) {
 	t.Helper()
 	ctx := context.Background()
 	turnResponse := grantTestRequest(t, w.handler, w.cookie, http.MethodPost,
@@ -159,13 +169,17 @@ func (w pendingApprovalWorld) inTurnApproval(t *testing.T, callID, prompt string
 		t.Fatal(err)
 	}
 	repository := w.state.repository
-	operation, err := repository.InsertAgentOperation(ctx, generationtool.Operation{
+	operationInput := generationtool.Operation{
 		OwnerID: "owner-a", SessionID: w.sessionID, AssistantMessageID: turn.AssistantID,
 		CallID: callID, ToolName: "create_model_3d", CommandHash: "hash-" + callID,
 		IdempotencyKey: "agent-key-" + callID, PreparedInputID: prepared.ID,
 		PreparedInputHash: prepared.InputHash, OfferingID: prepared.OfferingID,
 		OfferingRevision: prepared.OfferingRevision,
-	})
+	}
+	if changeOperation != nil {
+		changeOperation(&operationInput)
+	}
+	operation, err := repository.InsertAgentOperation(ctx, operationInput)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,6 +198,358 @@ func (w pendingApprovalWorld) inTurnApproval(t *testing.T, callID, prompt string
 		t.Fatal(err)
 	}
 	return operation, grant
+}
+
+func TestActiveConsentProjectsFrozenReferenceSource(t *testing.T) {
+	w := pendingApprovalBrowsers(t, nil)
+	var pngBytes bytes.Buffer
+	if err := png.Encode(&pngBytes, image.NewNRGBA(image.Rect(0, 0, 8, 8))); err != nil {
+		t.Fatal(err)
+	}
+	asset, err := w.inputs.UploadAsset(context.Background(), "owner-a", generation.InputAssetUpload{
+		Body: bytes.NewReader(pngBytes.Bytes()), OriginalFilename: "picture.png", MediaType: "image/png", AssetType: "image", MaxBytes: 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	op, _ := w.inTurnApprovalWithOperation(t, "call-reference", "chair", func(op *generationtool.Operation) {
+		op.ToolName = "create_model_3d_from_image"
+		op.ReferenceSource = generationtool.ReferenceSourceFact{Version: 1, Selected: 2, Resolved: 1, Frozen: 1, Deduped: true, Identity: "private-source-fact"}
+	}, func(cmd *generation.PrepareInputCommand) {
+		cmd.Capability = generation.ImageTo3D
+		cmd.OfferingID = "meshy/meshy-7.1/image-to-3d"
+		cmd.Input = json.RawMessage(`{"reference_assets":["` + string(asset.ID) + `"]}`)
+	})
+	prepared, err := w.module.GetPreparedInput(context.Background(), "owner-a", op.PreparedInputID)
+	if err != nil || len(prepared.Assets) != 1 {
+		t.Fatalf("prepared assets: %+v %v", prepared.Assets, err)
+	}
+	path := "/api/v1/agent/consent?scope=" + w.sessionID
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := product.Application()
+	localizer, err := catalog.NewTextLocalizer(application)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes := map[string]string{}
+	for _, locale := range []string{"", "en"} {
+		response := w.getIn(t, w.cookie, path, locale)
+		var body struct {
+			Consent struct {
+				Pending struct {
+					ReferenceNote string `json:"reference_note"`
+					Assets        []struct {
+						Parameter string `json:"parameter"`
+						AssetID   string `json:"asset_id"`
+						Role      string `json:"role"`
+						MediaType string `json:"media_type"`
+					} `json:"reference_assets"`
+				} `json:"consent_pending"`
+			} `json:"consent"`
+		}
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil || len(body.Consent.Pending.Assets) != 1 || body.Consent.Pending.Assets[0].AssetID != string(prepared.Assets[0].ID) || body.Consent.Pending.Assets[0].Parameter != "reference_assets" || body.Consent.Pending.Assets[0].Role != "image" || body.Consent.Pending.Assets[0].MediaType != "image/png" || body.Consent.Pending.ReferenceNote == "" {
+			t.Fatalf("%q active consent: %d %s", locale, response.Code, response.Body.String())
+		}
+		if strings.Contains(response.Body.String(), "private-source-fact") || strings.Contains(response.Body.String(), "front_task_id") {
+			t.Fatalf("private fact leaked: %s", response.Body.String())
+		}
+		want := strings.NewReplacer("{model}", "Meshy 7.1", "{count}", "1", "{total}", "2").Replace(localizer.Text(locale, application.Runtime.GenerationMessages.ReferenceSelectionNote))
+		if body.Consent.Pending.ReferenceNote != want {
+			t.Fatalf("%q note = %q, want %q", locale, body.Consent.Pending.ReferenceNote, want)
+		}
+		notes[locale] = want
+	}
+	foreign := w.getIn(t, w.other, path, "en")
+	if foreign.Code == http.StatusOK || strings.Contains(foreign.Body.String(), string(prepared.Assets[0].ID)) {
+		t.Fatalf("foreign consent: %d %s", foreign.Code, foreign.Body.String())
+	}
+	assetPath := "/api/v1/assets/" + string(prepared.Assets[0].ID)
+	if owned := w.getIn(t, w.cookie, assetPath, ""); owned.Code != http.StatusOK {
+		t.Fatalf("owner asset: %d", owned.Code)
+	}
+	if other := w.getIn(t, w.other, assetPath, ""); other.Code == http.StatusOK {
+		t.Fatal("foreign owner read frozen asset")
+	}
+	if preview := w.getIn(t, w.cookie, assetPath+"?size=preview", ""); preview.Code != http.StatusOK || preview.Body.Len() == 0 {
+		t.Fatalf("owner image preview: %d", preview.Code)
+	}
+	if other := w.getIn(t, w.other, assetPath+"?size=preview", ""); other.Code == http.StatusOK {
+		t.Fatal("foreign owner read frozen image preview")
+	}
+	if _, detached, err := w.state.repository.DetachAgentOperation(context.Background(), op); err != nil || !detached {
+		t.Fatalf("detach: %v %v", detached, err)
+	}
+	for _, locale := range []string{"", "en"} {
+		status, items := w.pendingListIn(t, w.cookie, w.sessionID, locale)
+		if status != http.StatusOK || len(items) != 1 || items[0]["reference_note"] != notes[locale] {
+			t.Fatalf("%q detached: %d %+v", locale, status, items)
+		}
+		assets, ok := items[0]["inputs"].([]any)
+		if !ok || len(assets) != 1 {
+			t.Fatalf("detached inputs: %+v", items)
+		}
+		input := assets[0].(map[string]any)
+		if input["asset_id"] != string(prepared.Assets[0].ID) || input["kind"] != "asset" || input["media_type"] != prepared.Assets[0].MediaType || input["handle"] != nil && input["handle"] != "" {
+			t.Fatalf("detached input: %+v", input)
+		}
+	}
+	legacyWorld := pendingApprovalBrowsers(t, nil)
+	legacyAsset, err := legacyWorld.inputs.UploadAsset(context.Background(), "owner-a", generation.InputAssetUpload{
+		Body: bytes.NewReader(pngBytes.Bytes()), OriginalFilename: "picture.png", MediaType: "image/png", AssetType: "image", MaxBytes: 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyWorld.inTurnApprovalWithOperation(t, "call-legacy-reference", "legacy", func(op *generationtool.Operation) {
+		op.ToolName = "create_model_3d_from_image"
+		op.ReferenceCount, op.ReferenceTotal = 1, 2
+	}, func(cmd *generation.PrepareInputCommand) {
+		cmd.Capability, cmd.OfferingID = generation.ImageTo3D, "meshy/meshy-7.1/image-to-3d"
+		cmd.Input = json.RawMessage(`{"reference_assets":["` + string(legacyAsset.ID) + `"]}`)
+	})
+	legacy := legacyWorld.getIn(t, legacyWorld.cookie, "/api/v1/agent/consent?scope="+legacyWorld.sessionID, "en")
+	if legacy.Code != http.StatusOK || strings.Contains(legacy.Body.String(), "reference_note") {
+		t.Fatalf("legacy consent made a source claim: %d %s", legacy.Code, legacy.Body.String())
+	}
+	if w.taskCount(t) != 0 {
+		t.Fatal("reading consent created a task")
+	}
+}
+
+func TestTextureReferenceStaysFrozenImageInBothApprovalPaths(t *testing.T) {
+	w := pendingApprovalBrowsers(t, nil)
+	ctx := context.Background()
+	var picture bytes.Buffer
+	if err := png.Encode(&picture, image.NewNRGBA(image.Rect(0, 0, 8, 8))); err != nil {
+		t.Fatal(err)
+	}
+	input, err := w.inputs.UploadAsset(ctx, "owner-a", generation.InputAssetUpload{Body: bytes.NewReader(picture.Bytes()), OriginalFilename: "texture.png", MediaType: "image/png", AssetType: "image", MaxBytes: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := submitHarnessTask(t, w.module, ctx, generation.SubmitCommand{OwnerID: "owner-a", SessionID: w.sessionID, Capability: generation.TextTo3D, OfferingID: "meshy/meshy-7.1/text-to-3d", Input: json.RawMessage(`{"prompt":"historical model"}`), IdempotencyKey: "historical-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := w.runTasksToCompletion(t, string(accepted.TaskID))
+	if task.State != generation.TaskSucceeded || task.SessionID != w.sessionID {
+		t.Fatalf("historical task: %+v", task)
+	}
+	hasModel := false
+	for _, asset := range task.Assets {
+		if asset.Role == "model" && asset.MediaType == "model/gltf-binary" {
+			hasModel = true
+		}
+	}
+	if !hasModel {
+		t.Fatalf("historical task has no model asset: %+v", task.Assets)
+	}
+	now := time.Now().UTC()
+	attempt := generation.AttemptID("historical-texture-attempt")
+	assets := []generation.Asset{
+		{ID: "historical-texture", TaskID: task.ID, AttemptID: attempt, Role: "texture", MediaType: "image/png", StorageKey: input.StorageKey, Size: input.Size, SHA256: input.SHA256, CreatedAt: now},
+		{ID: "historical-thumbnail", TaskID: task.ID, AttemptID: attempt, Role: "thumbnail", MediaType: "image/png", StorageKey: input.StorageKey, Size: input.Size, SHA256: input.SHA256, CreatedAt: now},
+	}
+	_, err = w.state.repository.ImportGenerationTasksAndAssets(ctx, []sqlite.GenerationTaskImport{{Task: task, Attempts: []sqlite.GenerationAttemptImport{{ID: attempt, Ordinal: 2, Offering: task.Offering, State: generation.AttemptUpstreamSucceeded, SubmissionKey: "historical-texture", StartedAt: now, UpdatedAt: now}}}}, assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := w.state.chat.PostAssistantMessage(ctx, "owner-a", chat.Message{ID: "historical-model-message", SessionID: w.sessionID, Content: "historical model", Attachments: []chat.Attachment{{Handle: "@model1", Kind: chat.AttachmentKindModel, TaskID: string(task.ID)}}}); err != nil {
+		t.Fatal(err)
+	}
+	op, _ := w.inTurnApprovalWithOperation(t, "texture-reference", "image", func(op *generationtool.Operation) { op.ToolName = "create_model_3d_from_image" }, func(cmd *generation.PrepareInputCommand) {
+		cmd.Capability, cmd.OfferingID = generation.ImageTo3D, "meshy/meshy-7.1/image-to-3d"
+		cmd.Input = json.RawMessage(`{"reference_assets":["` + string(input.ID) + `"]}`)
+	})
+	active := w.getIn(t, w.cookie, "/api/v1/agent/consent?scope="+w.sessionID, "")
+	var body struct {
+		Consent struct {
+			Pending struct {
+				Assets []struct {
+					AssetID   string `json:"asset_id"`
+					MediaType string `json:"media_type"`
+				} `json:"reference_assets"`
+			} `json:"consent_pending"`
+		} `json:"consent"`
+	}
+	if active.Code != http.StatusOK || json.Unmarshal(active.Body.Bytes(), &body) != nil || len(body.Consent.Pending.Assets) != 1 || body.Consent.Pending.Assets[0].AssetID != string(input.ID) || body.Consent.Pending.Assets[0].MediaType != "image/png" {
+		t.Fatalf("active: %d %s", active.Code, active.Body.String())
+	}
+	if foreign := w.getIn(t, w.other, "/api/v1/agent/consent?scope="+w.sessionID, ""); foreign.Code == http.StatusOK {
+		t.Fatal("foreign active consent")
+	}
+	if _, detached, err := w.state.repository.DetachAgentOperation(ctx, op); err != nil || !detached {
+		t.Fatalf("detach: %v %v", detached, err)
+	}
+	status, items := w.pendingList(t, w.cookie, w.sessionID)
+	if status != http.StatusOK || len(items) != 1 {
+		t.Fatalf("pending: %d %+v", status, items)
+	}
+	inputs, ok := items[0]["inputs"].([]any)
+	if !ok || len(inputs) != 1 {
+		t.Fatalf("inputs: %+v", items)
+	}
+	asset := inputs[0].(map[string]any)
+	if asset["kind"] != "asset" || asset["asset_id"] != string(input.ID) || asset["media_type"] != "image/png" || asset["task_id"] != nil || asset["handle"] != nil {
+		t.Fatalf("detached reference is not frozen image: %+v", asset)
+	}
+	if foreign, _ := w.pendingList(t, w.other, w.sessionID); foreign == http.StatusOK {
+		t.Fatal("foreign detached consent")
+	}
+	path := "/api/v1/assets/" + string(input.ID) + "?size=preview"
+	if owner := w.getIn(t, w.cookie, path, ""); owner.Code != http.StatusOK || owner.Body.Len() == 0 {
+		t.Fatalf("owner preview: %d", owner.Code)
+	}
+	if other := w.getIn(t, w.other, path, ""); other.Code == http.StatusOK {
+		t.Fatal("foreign image preview")
+	}
+}
+
+func TestDetachedApprovalProjectsFrozenUploadedModelMediaType(t *testing.T) {
+	w := pendingApprovalBrowsers(t, nil)
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := product.Application().Runtime.InputAssets.ModelProfile
+	if profile == nil {
+		t.Fatal("missing uploaded-model profile")
+	}
+	data := modelinputtest.Triangle(modelinputtest.Options{Indexed: true})
+	asset, err := w.inputs.UploadAsset(context.Background(), "owner-a", generation.InputAssetUpload{
+		Body: bytes.NewReader(data), OriginalFilename: "source.glb", MediaType: profile.UploadMediaType,
+		AssetType: profile.AssetType, MaxBytes: int64(len(data)) + 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	op, _ := w.inTurnApprovalWithOperation(t, "call-uploaded-model", "remesh", func(op *generationtool.Operation) {
+		op.ToolName = "process_model"
+	}, func(cmd *generation.PrepareInputCommand) {
+		cmd.Capability, cmd.OfferingID = generation.Remesh, "meshy/processing/remesh"
+		cmd.Input = json.RawMessage(`{"source_asset":"` + string(asset.ID) + `"}`)
+	})
+	if _, detached, err := w.state.repository.DetachAgentOperation(context.Background(), op); err != nil || !detached {
+		t.Fatalf("detach: %v %v", detached, err)
+	}
+	if err := w.state.chat.FinishTurn(context.Background(), op.AssistantMessageID, false); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := w.module.GetPreparedInput(context.Background(), "owner-a", op.PreparedInputID)
+	if err != nil || len(prepared.Assets) != 1 || prepared.Assets[0].MediaType != profile.UploadMediaType {
+		t.Fatalf("prepared model: %+v, %v", prepared.Assets, err)
+	}
+	response := w.getIn(t, w.cookie, "/api/v1/chat/sessions/"+w.sessionID+"/pending-approvals", "")
+	var body struct {
+		Items []map[string]any `json:"items"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil || len(body.Items) != 1 {
+		t.Fatalf("pending: %d %s", response.Code, response.Body.String())
+	}
+	t.Logf("DETACHED_HTTP_RESPONSE=%s", strings.TrimSpace(response.Body.String()))
+	inputs, ok := body.Items[0]["inputs"].([]any)
+	if !ok || len(inputs) != 1 {
+		t.Fatalf("inputs: %+v", body.Items)
+	}
+	input, ok := inputs[0].(map[string]any)
+	if !ok || input["kind"] != "asset" || input["parameter"] != "source_asset" || input["asset_id"] != string(prepared.Assets[0].ID) || input["media_type"] != prepared.Assets[0].MediaType || input["handle"] != nil || input["task_id"] != nil {
+		t.Fatalf("detached frozen model input: %+v", inputs[0])
+	}
+	if _, leaked := input["sha256"]; leaked {
+		t.Fatal("input digest leaked")
+	}
+	if foreign, _ := w.pendingList(t, w.other, w.sessionID); foreign == http.StatusOK {
+		t.Fatal("foreign owner read pending model")
+	}
+	if w.taskCount(t) != 0 {
+		t.Fatal("reading pending approval submitted a task")
+	}
+}
+
+func TestDetachedApprovalModelIdentityUsesFrozenAssetID(t *testing.T) {
+	for _, exact := range []bool{false, true} {
+		t.Run(fmt.Sprintf("exact_task_asset=%t", exact), func(t *testing.T) {
+			w := pendingApprovalBrowsers(t, nil)
+			ctx := context.Background()
+			product, err := catalog.LoadDefault()
+			if err != nil {
+				t.Fatal(err)
+			}
+			profile := product.Application().Runtime.InputAssets.ModelProfile
+			if profile == nil {
+				t.Fatal("missing uploaded-model profile")
+			}
+			data := modelinputtest.Triangle(modelinputtest.Options{Indexed: true})
+			upload, err := w.inputs.UploadAsset(ctx, "owner-a", generation.InputAssetUpload{Body: bytes.NewReader(data), OriginalFilename: "source.glb", MediaType: profile.UploadMediaType, AssetType: profile.AssetType, MaxBytes: int64(len(data)) + 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			accepted, err := submitHarnessTask(t, w.module, ctx, generation.SubmitCommand{OwnerID: "owner-a", SessionID: w.sessionID, Capability: generation.TextTo3D, OfferingID: "meshy/meshy-7.1/text-to-3d", Input: json.RawMessage(`{"prompt":"historical model"}`), IdempotencyKey: "identity-model"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			task := w.runTasksToCompletion(t, string(accepted.TaskID))
+			if task.State != generation.TaskSucceeded || task.SessionID != w.sessionID {
+				t.Fatalf("historical task: %+v", task)
+			}
+			now := time.Now().UTC()
+			attempt := generation.AttemptID("identity-model-attempt")
+			model := generation.Asset{ID: "identity-task-model", TaskID: task.ID, AttemptID: attempt, Role: "model", MediaType: upload.MediaType, StorageKey: upload.StorageKey, Size: upload.Size, SHA256: upload.SHA256, CreatedAt: now}
+			_, err = w.state.repository.ImportGenerationTasksAndAssets(ctx, []sqlite.GenerationTaskImport{{Task: task, Attempts: []sqlite.GenerationAttemptImport{{ID: attempt, Ordinal: 2, Offering: task.Offering, State: generation.AttemptUpstreamSucceeded, SubmissionKey: "identity-model", StartedAt: now, UpdatedAt: now}}}}, []generation.Asset{model})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := w.state.chat.PostAssistantMessage(ctx, "owner-a", chat.Message{ID: "identity-model-message", SessionID: w.sessionID, Content: "historical model", Attachments: []chat.Attachment{{Handle: "@model1", Kind: chat.AttachmentKindModel, TaskID: string(task.ID), AssetID: string(model.ID)}}}); err != nil {
+				t.Fatal(err)
+			}
+			source := upload.ID
+			if exact {
+				source = model.ID
+			}
+			op, _ := w.inTurnApprovalWithOperation(t, "identity-approval", "remesh", func(op *generationtool.Operation) { op.ToolName = "process_model" }, func(cmd *generation.PrepareInputCommand) {
+				cmd.Capability, cmd.OfferingID = generation.Remesh, "meshy/processing/remesh"
+				cmd.Input = json.RawMessage(`{"source_asset":"` + string(source) + `"}`)
+			})
+			prepared, err := w.module.GetPreparedInput(ctx, "owner-a", op.PreparedInputID)
+			if err != nil || len(prepared.Assets) != 1 || prepared.Assets[0].ID != source || prepared.Assets[0].SHA256 != model.SHA256 || upload.ID == model.ID {
+				t.Fatalf("frozen input identity: %+v err=%v", prepared.Assets, err)
+			}
+			if _, detached, err := w.state.repository.DetachAgentOperation(ctx, op); err != nil || !detached {
+				t.Fatalf("detach: %v %v", detached, err)
+			}
+			status, items := w.pendingList(t, w.cookie, w.sessionID)
+			if status != http.StatusOK || len(items) != 1 {
+				t.Fatalf("pending: %d %+v", status, items)
+			}
+			inputs, ok := items[0]["inputs"].([]any)
+			if !ok || len(inputs) != 1 {
+				t.Fatalf("inputs: %+v", items)
+			}
+			input := inputs[0].(map[string]any)
+			if exact {
+				if input["kind"] != "task" || input["task_id"] != string(task.ID) || input["handle"] != "@model1" {
+					t.Fatalf("task source: %+v", input)
+				}
+				if preview, ok := input["asset_id"].(string); ok && preview != "" {
+					valid := false
+					for _, asset := range task.Assets {
+						valid = valid || asset.Role == "thumbnail" && string(asset.ID) == preview
+					}
+					if !valid {
+						t.Fatalf("preview is not from the source task: %+v", input)
+					}
+				}
+			} else if input["kind"] != "asset" || input["asset_id"] != string(upload.ID) || input["media_type"] != upload.MediaType || input["task_id"] != nil || input["handle"] != nil {
+				t.Fatalf("independent upload: %+v", input)
+			}
+			if foreign, _ := w.pendingList(t, w.other, w.sessionID); foreign == http.StatusOK {
+				t.Fatal("foreign owner read pending model")
+			}
+		})
+	}
 }
 
 func (w pendingApprovalWorld) pendingList(t *testing.T, cookie *http.Cookie, sessionID string) (int, []map[string]any) {

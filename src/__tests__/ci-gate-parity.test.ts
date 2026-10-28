@@ -61,10 +61,66 @@ function verifyLocal(): { gates: string[]; race: string[] } {
   };
 }
 
+/**
+ * Runner routing (#79 phase 1): push, pull_request and a default manual dispatch stay on
+ * GitHub-hosted runners. Only an explicit workflow_dispatch with use_self_hosted=true
+ * selects the repository-level trusted label set. This is a routing rule, not an isolation
+ * boundary: a pull request can still edit this workflow.
+ */
+const runnerExpression = '${{ github.event_name == \'workflow_dispatch\' && inputs.use_self_hosted && fromJSON(\'["self-hosted","Linux","X64","plinth-trusted-ci"]\') || \'ubuntu-latest\' }}';
+const concurrencyGroup = "ci-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && inputs.use_self_hosted && 'trusted-' || '' }}${{ github.event.pull_request.number || github.ref }}";
+
+function hasRunnerRoute(text: string): boolean {
+  const expressions = [...text.matchAll(/^ {4}runs-on: (.+)$/gm)].map((match) => match[1].trim());
+  return expressions.length === 3 && expressions.every((expression) => expression === runnerExpression);
+}
+
+function hasConcurrencyGroup(text: string): boolean {
+  return [...text.matchAll(/^ {2}group: (.+)$/gm)].map((match) => match[1]).join('\n') === concurrencyGroup;
+}
+
+function hasSafePermissions(text: string): boolean {
+  const blocks = [...text.matchAll(/^permissions:\n((?:[ \t].*\n|\n|#.*\n)*)/gm)];
+  const jobs = /^jobs:\n((?:[ \t].*\n|\n|#.*\n)*)/m.exec(text);
+  return blocks.length === 1 && blocks[0][1].trim() === 'contents: read' && jobs !== null
+    && jobs[1].split('\n').every((line) => {
+      if (!line.trim() || /^\s*#/.test(line)) return true;
+      if (/^ {2}\S/.test(line)) return /^ {2}[a-z0-9-]+:$/.test(line);
+      if (/^ {4}\S/.test(line)) return /^ {4}(?:name|runs-on|timeout-minutes|steps|env):(?:\s|$)/.test(line);
+      return /^ {6,}\S/.test(line);
+    });
+}
+
+function triggerBlock(onBlock: string, trigger: string): string {
+  const lines = onBlock.split('\n');
+  const start = lines.indexOf(`  ${trigger}:`);
+  expect(start, `${trigger} trigger`).toBeGreaterThan(-1);
+  const body: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^ {2}\S/.test(line)) break;
+    body.push(line);
+  }
+  return body.join('\n');
+}
+
+function validManualInput(manual: string): boolean {
+  return /^ {4}inputs:\s*$/m.test(manual)
+    && (manual.match(/^ {6}use_self_hosted:\s*$/gm) || []).length === 1
+    && /^ {8}type: boolean\s*$/m.test(manual)
+    && /^ {8}default: false\s*$/m.test(manual);
+}
+
+function validEvents(onBlock: string): boolean {
+  return /^ {2}push:\n {4}branches: \[main\]$/m.test(onBlock)
+    && /^ {2}pull_request:\s*$/m.test(onBlock)
+    && /^ {2}workflow_dispatch:\s*$/m.test(onBlock);
+}
+
 function githubJobs(): Map<string, string[]> {
   const text = read('.github/workflows/ci.yml');
   const jobs = new Map<string, string[]>();
   let current: string[] | null = null;
+  let installs = 0;
   for (const line of text.slice(text.indexOf('\njobs:')).split('\n')) {
     if (/^ {2}[a-z0-9-]+:\s*$/.test(line)) {
       current = null;
@@ -76,9 +132,14 @@ function githubJobs(): Map<string, string[]> {
       jobs.set(name[1].trim(), current);
       continue;
     }
-    const run = /^ {6}- run: (.+)$/.exec(line);
-    if (current && run && !run[1].startsWith('pnpm install')) current.push(run[1].trim());
+    if (/^\s*(?:-\s*)?run:/.test(line)) {
+      const run = /^ {6}- run: (.+)$/.exec(line);
+      expect(current && run, `unsupported run step: ${line}`).toBeTruthy();
+      if (run![1] === 'pnpm install --frozen-lockfile') installs++;
+      else current!.push(run![1].trim());
+    }
   }
+  expect(installs).toBe(1);
   return jobs;
 }
 
@@ -125,12 +186,102 @@ describe('CI and local gate parity with dev_test.md §2', () => {
     expectCiCovers(githubJobs(), gates);
   });
 
-  it('the public GitHub workflow reaches no internal host and pins every action to a commit', () => {
+  it('separates only explicit self-hosted dispatch concurrency from hosted runs', () => {
+    const text = read('.github/workflows/ci.yml');
+    expect(hasConcurrencyGroup(text)).toBe(true);
+    expect(text).toContain("  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n");
+    expect(hasConcurrencyGroup(text.replace("github.event_name == 'workflow_dispatch' && inputs.use_self_hosted && 'trusted-'", "inputs.use_self_hosted && 'trusted-'"))).toBe(false);
+    expect(hasConcurrencyGroup(text.replace('github.event.pull_request.number || ', ''))).toBe(false);
+    expect(hasConcurrencyGroup(text.replace("'trusted-'", 'inputs.prefix'))).toBe(false);
+    // Model only the exact expression above, not the GitHub expression engine.
+    const cases = [
+      { event: 'push', input: undefined, number: undefined, expected: 'ci-ci-refs/heads/main' },
+      { event: 'push', input: true, number: undefined, expected: 'ci-ci-refs/heads/main' },
+      { event: 'pull_request', input: undefined, number: 79, expected: 'ci-ci-79' },
+      { event: 'pull_request', input: true, number: 79, expected: 'ci-ci-79' },
+      { event: 'workflow_dispatch', input: undefined, number: undefined, expected: 'ci-ci-refs/heads/main' },
+      { event: 'workflow_dispatch', input: false, number: undefined, expected: 'ci-ci-refs/heads/main' },
+      { event: 'workflow_dispatch', input: true, number: undefined, expected: 'ci-ci-trusted-refs/heads/main' },
+    ];
+    for (const { event, input, number, expected } of cases) {
+      const prefix = event === 'workflow_dispatch' && input === true ? 'trusted-' : '';
+      expect(`ci-ci-${prefix}${number || 'refs/heads/main'}`, event).toBe(expected);
+    }
+  });
+
+  it('does not collide across different dispatch refs', () => {
+    const dispatchGroup = (ref: string, selfHosted: boolean) => `ci-ci-${selfHosted ? 'trusted-' : ''}${ref}`;
+    expect(dispatchGroup('refs/heads/main', true)).not.toBe(dispatchGroup('refs/heads/main-self-hosted', false));
+    for (const hostedKey of ['refs/heads/trusted-main', 'refs/tags/main', '79']) {
+      expect(dispatchGroup('refs/heads/main', true)).not.toBe(dispatchGroup(hostedKey, false));
+    }
+  });
+
+  it('the workflow has no known internal host literal and pins every action to a commit', () => {
     const text = read('.github/workflows/ci.yml');
     expect(text).not.toMatch(/yc[g]ame|192\.168\.|pkgs\./);
     const uses = [...text.matchAll(/uses: (\S+)/g)].map((m) => m[1]);
     expect(uses.length).toBeGreaterThan(0);
     uses.forEach((ref) => expect(ref).toMatch(/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/));
+  });
+
+  it('statically fixes the runner expression and models the known event cases', () => {
+    const text = read('.github/workflows/ci.yml');
+    expect(hasRunnerRoute(text)).toBe(true);
+    expect(hasRunnerRoute(text.replaceAll('plinth-trusted-ci', 'another-runner'))).toBe(false);
+    expect(hasRunnerRoute(text.replaceAll("github.event_name == 'workflow_dispatch' && ", ''))).toBe(false);
+    expect(hasRunnerRoute(text.replaceAll('"X64",', ''))).toBe(false);
+    const trusted = ['self-hosted', 'Linux', 'X64', 'plinth-trusted-ci'];
+    const cases = [
+      { github: { event_name: 'push' }, inputs: { use_self_hosted: undefined }, expected: 'ubuntu-latest' },
+      { github: { event_name: 'pull_request' }, inputs: { use_self_hosted: undefined }, expected: 'ubuntu-latest' },
+      { github: { event_name: 'workflow_dispatch' }, inputs: { use_self_hosted: undefined }, expected: 'ubuntu-latest' },
+      { github: { event_name: 'workflow_dispatch' }, inputs: { use_self_hosted: false }, expected: 'ubuntu-latest' },
+      { github: { event_name: 'workflow_dispatch' }, inputs: { use_self_hosted: true }, expected: trusted },
+      { github: { event_name: 'push' }, inputs: { use_self_hosted: true }, expected: 'ubuntu-latest' },
+      { github: { event_name: 'pull_request' }, inputs: { use_self_hosted: true }, expected: 'ubuntu-latest' },
+    ];
+    for (const testCase of cases) {
+      expect(
+        testCase.github.event_name === 'workflow_dispatch' && testCase.inputs.use_self_hosted === true ? trusted : 'ubuntu-latest',
+        `${testCase.github.event_name} with use_self_hosted=${String(testCase.inputs.use_self_hosted)}`,
+      ).toEqual(testCase.expected);
+    }
+  });
+
+  it('declares the manual runner opt-in as a boolean defaulting to hosted', () => {
+    const text = read('.github/workflows/ci.yml');
+    const onBlock = text.slice(text.indexOf('\non:'), text.indexOf('\npermissions:'));
+    expect(validEvents(onBlock)).toBe(true);
+    for (const event of ['push', 'pull_request', 'workflow_dispatch']) {
+      expect(validEvents(onBlock.replace(`  ${event}:`, `  missing_${event}:`)), event).toBe(false);
+    }
+    const manual = triggerBlock(onBlock, 'workflow_dispatch');
+    expect(validManualInput(manual)).toBe(true);
+    expect(validManualInput(manual.replace('type: boolean', 'type: string'))).toBe(false);
+    expect(validManualInput(manual.replace('default: false', 'default: true'))).toBe(false);
+  });
+
+  it('keeps the CI security preconditions independent of the runner route', () => {
+    const text = read('.github/workflows/ci.yml');
+    expect(hasSafePermissions(text)).toBe(true);
+    expect(text.match(/^ {10}persist-credentials: false$/gm)).toHaveLength(3);
+    // The opt-in reaches only the three runs-on lines and the concurrency group.
+    expect(text.match(/inputs\.use_self_hosted/g)).toHaveLength(4);
+    expect(text).not.toContain('github.event.inputs');
+  });
+
+  it('rejects extra top-level permissions', () => {
+    const text = read('.github/workflows/ci.yml');
+    expect(hasSafePermissions(text.replace('  contents: read\n', '  contents: read\n  actions: write\n'))).toBe(false);
+    expect(hasSafePermissions(text.replace('  contents: read\n', '  issues: read\n  contents: read\n'))).toBe(false);
+  });
+
+  it('rejects job-level permission overrides', () => {
+    const text = read('.github/workflows/ci.yml');
+    expect(hasSafePermissions(text.replace('  frontend:\n', '  frontend:\n    permissions: write-all\n'))).toBe(false);
+    expect(hasSafePermissions(text.replace('  go-check:\n', '  go-check:\n    permissions:\n      issues: write\n'))).toBe(false);
+    expect(hasSafePermissions(text.replace('  go-test-race:\n', '  go-test-race:\n    "permissions": {}\n'))).toBe(false);
   });
 
   it('pins pnpm to the packageManager version in the Dockerfile', () => {

@@ -668,6 +668,57 @@ func TestActualResponseMediaTypeMustStillSatisfyOutputContract(t *testing.T) {
 	}
 }
 
+func TestParameterizedResponseWithInvalidImageCannotCompleteTask(t *testing.T) {
+	var writes []string
+	harness := newConfiguredHarness(t, parameterizedInvalidImageAdapter{}, nil, func(deps *generation.Dependencies) {
+		deps.Assets = captureMediaTypeStore{AssetStore: deps.Assets, writes: &writes}
+	})
+	accepted, err := harness.submitApproved(t, context.Background(), generation.SubmitCommand{
+		OwnerID: "owner-a", Capability: generation.TextToImage,
+		OfferingID: "openai/gpt-image-2/text-to-image", Input: []byte(`{"prompt":"bird"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := harness.runUntilTerminal(t, "owner-a", accepted.TaskID)
+	if task.State != generation.TaskFailed || task.Failure == nil || task.Failure.Class != generation.FailureIntegrity || len(task.Assets) != 0 {
+		t.Fatalf("invalid parameterized response completed: %+v", task)
+	}
+	if len(writes) == 0 || writes[0] != "image/png" {
+		t.Fatalf("response MIME not normalized before Put: %v", writes)
+	}
+}
+
+type captureMediaTypeStore struct {
+	generation.AssetStore
+	writes *[]string
+}
+
+func (s captureMediaTypeStore) Put(ctx context.Context, write generation.AssetWrite) (generation.Asset, error) {
+	*s.writes = append(*s.writes, write.MediaType)
+	return s.AssetStore.Put(ctx, write)
+}
+
+func (s captureMediaTypeStore) Close() error {
+	return s.AssetStore.(io.Closer).Close()
+}
+
+type parameterizedInvalidImageAdapter struct{}
+
+func (parameterizedInvalidImageAdapter) Start(_ context.Context, request generation.StartRequest) (generation.Observation, error) {
+	return generation.Observation{Phase: generation.UpstreamCompleted, Artifacts: []generation.ArtifactClaim{{
+		ID: string(request.AttemptID) + ":image", Role: "image", Locator: "fixture-image", MediaType: "image/png",
+	}}}, nil
+}
+
+func (parameterizedInvalidImageAdapter) Observe(context.Context, generation.ObserveRequest) (generation.Observation, error) {
+	return generation.Observation{}, errors.New("unexpected Observe")
+}
+
+func (parameterizedInvalidImageAdapter) OpenAsset(context.Context, generation.OpenAssetRequest) (io.ReadCloser, generation.AssetMetadata, error) {
+	return io.NopCloser(strings.NewReader("not a png")), generation.AssetMetadata{MediaType: "image/png; charset=utf-8"}, nil
+}
+
 func TestTaskReferenceResolvesOwnedSuccessfulUpstreamJob(t *testing.T) {
 	adapter := &taskDependencyAdapter{}
 	harness := newHarness(t, adapter, nil)

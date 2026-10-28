@@ -15,6 +15,7 @@ export interface PendingApprovalInput {
   kind: string;
   role: string;
   assetId: string;
+  mediaType?: string;
   taskId: string;
   handle: string;
 }
@@ -90,6 +91,7 @@ export function parsePendingApprovals(payload: unknown): PendingApproval[] {
       return {
         parameter: text(input.parameter), kind: text(input.kind), role: text(input.role), assetId: text(input.asset_id),
         taskId: text(input.task_id), handle: text(input.handle),
+        ...(text(input.media_type) ? { mediaType: text(input.media_type) } : {}),
       };
     });
     result.push({

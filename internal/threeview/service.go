@@ -177,16 +177,9 @@ func (s *Service) owns(ctx context.Context, owner, session string) error {
 	return nil
 }
 
-// groups projects the session's newest groups, at most the Schema's listing
-// limit. A lookup that must see every group of the session (SourceOf) uses
-// allGroups instead.
+// groups projects the session's newest groups, at most the Schema's listing limit.
 func (s *Service) groups(ctx context.Context, owner, session string) ([]Group, error) {
 	return s.collect(ctx, owner, session, s.schema.MaximumListed)
-}
-
-// allGroups projects every group of the session, however many there are.
-func (s *Service) allGroups(ctx context.Context, owner, session string) ([]Group, error) {
-	return s.collect(ctx, owner, session, 0)
 }
 
 // runPageSize is the repository's largest page; runs reads page after page.
@@ -504,15 +497,23 @@ func (s *Service) SourceOf(ctx context.Context, owner, session, taskID string) (
 	if strings.TrimSpace(owner) == "" || strings.TrimSpace(session) == "" || strings.TrimSpace(taskID) == "" {
 		return ModelSource{}, false, ErrInvalid
 	}
-	groups, err := s.allGroups(ctx, owner, session)
+	run, err := s.runtime.Runs.GetByTask(ctx, generation.OwnerID(owner), session, generation.TaskID(taskID))
+	if errors.Is(err, skillrun.ErrMissing) {
+		return ModelSource{}, false, nil
+	}
 	if err != nil {
 		return ModelSource{}, false, err
 	}
-	for _, group := range groups {
-		for _, slot := range group.Slots {
-			if slot.TaskID == taskID {
-				return group.ModelSource, true, nil
-			}
+	if run.OwnerID != generation.OwnerID(owner) || run.SessionID != session || run.RecipeID != s.schema.RecipeID {
+		return ModelSource{}, false, nil
+	}
+	group, err := s.project(ctx, run)
+	if err != nil {
+		return ModelSource{}, false, err
+	}
+	for _, slot := range group.Slots {
+		if slot.TaskID == taskID {
+			return group.ModelSource, true, nil
 		}
 	}
 	return ModelSource{}, false, nil

@@ -19,6 +19,7 @@ import (
 // the front), and the front is the model source.
 type fakeThreeViews struct {
 	source  generationtool.ModelSource
+	sources map[string]generationtool.ModelSource
 	members map[string]bool
 	asked   []string
 }
@@ -27,6 +28,9 @@ func (f *fakeThreeViews) ModelSource(_ context.Context, owner, session, taskID s
 	f.asked = append(f.asked, owner+"/"+session+"/"+taskID)
 	if owner != "owner-a" || session != "session-a" || !f.members[taskID] {
 		return generationtool.ModelSource{}, false, nil
+	}
+	if source, ok := f.sources[taskID]; ok {
+		return source, true, nil
 	}
 	return f.source, true, nil
 }
@@ -142,6 +146,52 @@ func TestModelFromAThreeViewGroupUsesTheFrontViewOnly(t *testing.T) {
 	}
 }
 
+func TestModelReferenceNoteMatchesSelectedImageAtSingleImageLimit(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	frontNote := product.Application().Chat.ThreeView.ModelSourceNote
+	if frontNote == "" {
+		t.Fatal("the three-view source note must not be empty")
+	}
+	ordinary := "/api/v1/tasks/task-other/assets/asset-other"
+	side := "/api/v1/tasks/task-side/assets/asset-side"
+	front := "/api/v1/tasks/task-front/assets/asset-front"
+	for _, tc := range []struct {
+		name      string
+		urls      []string
+		wantURL   string
+		wantFront bool
+	}{
+		{name: "ordinary first", urls: []string{ordinary, side}, wantURL: ordinary},
+		{name: "side first", urls: []string{side, ordinary}, wantURL: front, wantFront: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			views := &fakeThreeViews{
+				source:  generationtool.ModelSource{Available: true, TaskID: "task-front", AssetID: "asset-front"},
+				members: map[string]bool{"task-side": true},
+			}
+			run := runModelFromImagesWith(t, views, tc.urls, func(offering *generation.Offering) {
+				offering.Parameters[1].MaxItems = 1
+			})
+			if run.err != nil || run.result.NoSubmission || run.gateway.submitted.OfferingID == "" {
+				t.Fatalf("model execution: result=%+v err=%v", run.result, run.err)
+			}
+			if !reflect.DeepEqual(run.resolver.urls, []string{tc.wantURL}) {
+				t.Fatalf("resolved images = %v, want [%s]", run.resolver.urls, tc.wantURL)
+			}
+			note, _ := run.content["reference_note"].(string)
+			if tc.wantFront && note != frontNote {
+				t.Errorf("front selected but reference_note = %q, want %q", note, frontNote)
+			}
+			if !tc.wantFront && strings.Contains(note, frontNote) {
+				t.Errorf("ordinary image selected but reference_note claims the front view: %q", note)
+			}
+		})
+	}
+}
+
 func TestModelFromAThreeViewGroupWaitsForTheFrontView(t *testing.T) {
 	product, _ := catalog.LoadDefault()
 	chatSchema := product.Application().Chat
@@ -199,5 +249,116 @@ func TestMultiviewOverLimitDoesNotResolveOrSubmit(t *testing.T) {
 	}
 	if strings.Contains(run.result.Error, `parameter "image"`) || strings.Contains(run.result.Error, "at most 4 images") {
 		t.Fatalf("refusal reads as an internal validation error: %q", run.result.Error)
+	}
+}
+
+// #80: when a three-view view is replaced by its front and an ordinary picture
+// is retained beside it, the retained pictures are not the first ones of the
+// turn. The result must use the neutral count, not the front-only sentence and
+// not the "only the first N" sentence.
+func TestModelReferenceNoteUsesANeutralCountWhenASourceWasReplaced(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := product.Application()
+	neutral := application.Runtime.GenerationMessages.ReferenceSelectionNote
+	frontNote := application.Chat.ThreeView.ModelSourceNote
+	if neutral == "" || !strings.Contains(neutral, "{model}") || !strings.Contains(neutral, "{count}") {
+		t.Fatalf("no neutral reference-selection text: %q", neutral)
+	}
+	side := "/api/v1/tasks/task-side/assets/asset-side"
+	ordinary := "/api/v1/tasks/task-other/assets/asset-other"
+	views := &fakeThreeViews{
+		source:  generationtool.ModelSource{Available: true, TaskID: "task-front", AssetID: "asset-front"},
+		members: map[string]bool{"task-side": true},
+	}
+	run := runModelFromImagesWith(t, views, []string{side, ordinary}, func(offering *generation.Offering) {
+		offering.Parameters[1].MaxItems = 2
+	})
+	if run.err != nil || run.result.NoSubmission {
+		t.Fatalf("model execution: result=%+v err=%v", run.result, run.err)
+	}
+	note, _ := run.content["reference_note"].(string)
+	want := strings.NewReplacer("{model}", "configured-model", "{count}", "2").Replace(neutral)
+	if note != want {
+		t.Fatalf("reference note = %q, want neutral %q", note, want)
+	}
+	if strings.Contains(note, frontNote) {
+		t.Fatalf("neutral note claims the front-only source: %q", note)
+	}
+}
+
+// #80: two groups each bring their own front; the one-picture model keeps the
+// first retained front and says so. The other group is not renamed or merged.
+func TestTwoThreeViewGroupsKeepTheFirstFrontAndItsSource(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	frontNote := product.Application().Chat.ThreeView.ModelSourceNote
+	views := &fakeThreeViews{
+		sources: map[string]generationtool.ModelSource{
+			"task-side-a": {Available: true, TaskID: "task-front-a", AssetID: "asset-front-a"},
+			"task-side-b": {Available: true, TaskID: "task-front-b", AssetID: "asset-front-b"},
+		},
+		members: map[string]bool{"task-side-a": true, "task-side-b": true},
+	}
+	run := runModelFromImagesWith(t, views, []string{
+		"/api/v1/tasks/task-side-a/assets/asset-side-a",
+		"/api/v1/tasks/task-side-b/assets/asset-side-b",
+	}, func(offering *generation.Offering) { offering.Parameters[1].MaxItems = 1 })
+	if run.err != nil || run.result.NoSubmission {
+		t.Fatalf("model execution: result=%+v err=%v", run.result, run.err)
+	}
+	if !reflect.DeepEqual(run.resolver.urls, []string{"/api/v1/tasks/task-front-a/assets/asset-front-a"}) {
+		t.Fatalf("resolved images = %v", run.resolver.urls)
+	}
+	if note, _ := run.content["reference_note"].(string); note != frontNote {
+		t.Fatalf("reference note = %q, want %q", note, frontNote)
+	}
+}
+
+// #80: the same view repeated is one front picture; the fact may name the
+// front but must not count the duplicate as a second source.
+func TestRepeatedThreeViewViewUsesOneFront(t *testing.T) {
+	side := "/api/v1/tasks/task-side/assets/asset-side"
+	views := &fakeThreeViews{
+		source:  generationtool.ModelSource{Available: true, TaskID: "task-front", AssetID: "asset-front"},
+		members: map[string]bool{"task-side": true},
+	}
+	run := runModelFromImagesWith(t, views, []string{side, side}, func(offering *generation.Offering) {
+		offering.Parameters[1].MaxItems = 1
+	})
+	if run.err != nil || run.result.NoSubmission {
+		t.Fatalf("model execution: result=%+v err=%v", run.result, run.err)
+	}
+	if !reflect.DeepEqual(run.resolver.urls, []string{"/api/v1/tasks/task-front/assets/asset-front"}) {
+		t.Fatalf("resolved images = %v", run.resolver.urls)
+	}
+}
+
+// #80: a repeated ordinary picture is one picture, not the first of two. The
+// neutral text says how many are used without claiming the original order.
+func TestRepeatedOrdinaryPictureUsesTheNeutralCount(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	neutral := product.Application().Runtime.GenerationMessages.ReferenceSelectionNote
+	ordinary := "/api/v1/tasks/task-other/assets/asset-other"
+	views := &fakeThreeViews{members: map[string]bool{"task-side": true}}
+	run := runModelFromImagesWith(t, views, []string{ordinary, ordinary}, func(offering *generation.Offering) {
+		offering.Parameters[1].MaxItems = 2
+	})
+	if run.err != nil || run.result.NoSubmission {
+		t.Fatalf("model execution: result=%+v err=%v", run.result, run.err)
+	}
+	if !reflect.DeepEqual(run.resolver.urls, []string{ordinary}) {
+		t.Fatalf("resolved images = %v, want the one repeated picture", run.resolver.urls)
+	}
+	want := strings.NewReplacer("{model}", "configured-model", "{count}", "1").Replace(neutral)
+	if note, _ := run.content["reference_note"].(string); note != want {
+		t.Fatalf("reference note = %q, want %q", note, want)
 	}
 }

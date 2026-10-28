@@ -45,6 +45,14 @@ type Operation struct {
 	// it with the Offering's reference-limit note (runtime.generation_messages).
 	ReferenceCount int
 	ReferenceTotal int
+	// ReferenceSource freezes what the reference pictures really were when
+	// this operation was prepared: the source identities before and after a
+	// three-view replacement, de-duplication and the Offering's cut, and the
+	// exact front view the prepared input uses. It is empty for operations
+	// written before this fact was kept and for steps without reference
+	// pictures. Its Identity is never guessed from a URL, a digest or today's
+	// three-view groups.
+	ReferenceSource ReferenceSourceFact
 	// Seq orders operations by creation (the store's insertion order).
 	Seq int64
 	// Detached means the turn stopped waiting for the human decision and ended

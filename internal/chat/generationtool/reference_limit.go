@@ -89,30 +89,60 @@ func OfferingModelName(offering generation.Offering) string {
 // ToolDescriptionNote is what a turn adds to a tool's description: how many
 // reference pictures the model picked for the tool's domain uses (#329 E'),
 // from the tool's reference_capacity_note. It is "" when the tool declares
-// none, the turn has no model to run it on, or the model states no limit.
+// none or the turn has no known Offering. Capacity is stated only when known;
+// text guidance is independent of the reference-picture limit.
 func (executor *Executor) ToolDescriptionNote(tool catalog.ChatToolSchema, options chat.TurnOptions) string {
 	notes := tool.ReferenceCapacityNote
 	if notes == (catalog.ChatToolReferenceCapacityNote{}) || tool.Capability == "" {
 		return ""
 	}
 	command := chat.ToolCommand{Tool: tool, Options: options}
-	model := executor.userModel(command)
-	if model == "" && tool.RequireUserModel && !executor.fallbackModelAllowed(command) {
-		return ""
-	}
-	offering, err := executor.selectOffering(tool.Capability, tool, model)
-	if err != nil {
-		return ""
+	var offering generation.Offering
+	if activeHarness(command) {
+		snapshot := options.Harness
+		if snapshot.ToolName != tool.Name || snapshot.Capability != tool.Capability || snapshot.OfferingRevision != snapshot.Selection.OfferingRevision {
+			return ""
+		}
+		for _, candidate := range executor.gateway.Offerings(snapshot.Capability) {
+			if string(candidate.ID) == snapshot.Selection.OfferingID && candidate.Capability == snapshot.Capability &&
+				candidate.Revision == snapshot.Selection.OfferingRevision && candidate.Enabled && executor.gateway.OfferingAvailable(candidate.ID) {
+				offering = candidate
+				break
+			}
+		}
+		if offering.ID == "" {
+			return ""
+		}
+	} else {
+		if selectsOfferingByArgument(tool) {
+			return ""
+		}
+		model := executor.userModel(command)
+		if model == "" && tool.RequireUserModel && !executor.fallbackModelAllowed(command) {
+			return ""
+		}
+		var err error
+		offering, err = executor.selectOffering(tool.Capability, tool, model)
+		if err != nil {
+			return ""
+		}
 	}
 	limit := referenceImageLimit(offering)
 	// The Agent repeats this name in its reply, so use the turn's frozen
 	// locale as the reference-limit note does.
 	modelLabel := executor.localized(command, OfferingModelName(offering))
+	var note string
 	switch {
 	case limit == 1:
-		return strings.NewReplacer("{model}", modelLabel).Replace(notes.Single)
+		note = strings.NewReplacer("{model}", modelLabel).Replace(notes.Single)
 	case limit > 1:
-		return strings.NewReplacer("{model}", modelLabel, "{count}", strconv.Itoa(limit)).Replace(notes.Multiple)
+		note = strings.NewReplacer("{model}", modelLabel, "{count}", strconv.Itoa(limit)).Replace(notes.Multiple)
 	}
-	return ""
+	if _, hasPrompt := semanticParameter(offering, generation.SemanticPrompt); notes.NoPrompt != "" && !hasPrompt {
+		if note != "" {
+			note += " "
+		}
+		note += strings.NewReplacer("{model}", modelLabel).Replace(notes.NoPrompt)
+	}
+	return note
 }

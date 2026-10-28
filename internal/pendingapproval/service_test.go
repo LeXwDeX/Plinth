@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -58,6 +59,7 @@ type fakeGateway struct {
 	// drawnPicture adds the second thumbnail a text-to-3D result carries: the
 	// picture the provider drew before modelling, beside the render of the model.
 	drawnPicture bool
+	modelTasks   map[generation.TaskID]generation.Task
 }
 
 func (g *fakeGateway) Offerings(generation.Capability) []generation.Offering {
@@ -90,6 +92,9 @@ func (g *fakeGateway) SubmitPrepared(_ context.Context, cmd generation.SubmitPre
 func (g *fakeGateway) Get(_ context.Context, owner generation.OwnerID, id generation.TaskID) (generation.Task, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if task, ok := g.modelTasks[id]; ok {
+		return task, nil
+	}
 	task := generation.Task{ID: id, OwnerID: owner, SessionID: "session-a", Offering: g.offering,
 		Capability: g.offering.Capability, State: g.state, Failure: g.failure, Input: json.RawMessage(`{"prompt":"p"}`)}
 	if len(g.taskInput) > 0 {
@@ -99,8 +104,9 @@ func (g *fakeGateway) Get(_ context.Context, owner generation.OwnerID, id genera
 		task.Offering.ExecutionMessages = *g.frozenMessages
 	}
 	if id == "task-model" {
+		task.State = generation.TaskSucceeded
 		// The 3D model the session shows as @model1: its file and its rendered preview.
-		task.Assets = []generation.Asset{{ID: "model-glb", Role: "model", SHA256: "sha-model"}, {ID: "model-thumb", Role: "thumbnail", SHA256: "sha-thumb"}}
+		task.Assets = []generation.Asset{{ID: "model-glb", Role: "model", SHA256: "sha-model"}, {ID: "model-variant", Role: "model", SHA256: "sha-model"}, {ID: "model-thumb", Role: "thumbnail", SHA256: "sha-thumb"}, {ID: "model-texture", Role: "texture", SHA256: "sha-front", MediaType: "image/png"}}
 	} else if id == "task-slot" {
 		// The picture the person picked on the stage: the approval's input asset is a copy of it.
 		task.Assets = []generation.Asset{{ID: "slot-asset", Role: "image", SHA256: "sha-front"}}
@@ -148,6 +154,18 @@ type world struct {
 	// ones the turn gave (#329 E), 0 of 0 when nothing was left out.
 	tool                            string
 	referencesUsed, referencesGiven int
+	// capability is the capability frozen with the next prepared input. It is
+	// TextTo3D unless a test names another one.
+	capability generation.Capability
+	// referenceSource is the source fact frozen with the next operation; zero
+	// means an operation from before the fact was kept.
+	referenceSource generationtool.ReferenceSourceFact
+	// attachmentAsset is the session attachment's asset; the default is not
+	// the input copy, so no handle is claimed without an exact identity.
+	attachmentAsset  string
+	extraAttachments []chat.Attachment
+	modelAsset       string
+	modelAttachment  *chat.Attachment
 }
 
 func chatService(t *testing.T, repo *sqlite.Repository, schema catalog.ChatSchema) *chat.Service {
@@ -263,8 +281,12 @@ func (w *world) approval(callID string, detach bool) (generationtool.Operation, 
 	if err := w.repo.FinishStream(ctx, "session-a", turnID, "done", now.Add(time.Hour)); err != nil {
 		w.t.Fatal(err)
 	}
+	capability := w.capability
+	if capability == "" {
+		capability = generation.TextTo3D
+	}
 	prepared := generation.PreparedInput{ID: generation.PreparedInputID("prepared-" + callID), OwnerID: "owner-a",
-		SessionID: "session-a", Capability: generation.TextTo3D, OfferingID: w.gateway.offering.ID,
+		SessionID: "session-a", Capability: capability, OfferingID: w.gateway.offering.ID,
 		OfferingRevision: "rev-a", SchemaVersion: "1", NormalizedInput: w.frozenInput(),
 		ParameterAdjustments: w.adjustments, ExtraCredits: w.extra, InputHash: "hash-" + callID, CreatedAt: now,
 		Assets: w.preparedAssets()}
@@ -276,7 +298,8 @@ func (w *world) approval(callID string, detach bool) (generationtool.Operation, 
 		ToolName: w.toolName(), CommandHash: "hash-" + callID, IdempotencyKey: "key-" + callID,
 		PreparedInputID: prepared.ID, PreparedInputHash: prepared.InputHash,
 		OfferingID: prepared.OfferingID, OfferingRevision: prepared.OfferingRevision, Harness: w.binding,
-		RechargeTaskID: w.recharge, ReferenceCount: w.referencesUsed, ReferenceTotal: w.referencesGiven})
+		RechargeTaskID: w.recharge, ReferenceCount: w.referencesUsed, ReferenceTotal: w.referencesGiven,
+		ReferenceSource: w.referenceSource})
 	if err != nil {
 		w.t.Fatal(err)
 	}
@@ -309,20 +332,81 @@ func (w *world) toolName() string {
 }
 
 func (w *world) attachments() []chat.Attachment {
-	attachments := []chat.Attachment{{Handle: "@img2", Kind: chat.AttachmentKindImage, AssetID: "slot-asset", TaskID: "task-slot"}}
+	asset := w.attachmentAsset
+	if asset == "" {
+		asset = "slot-asset"
+	}
+	attachments := []chat.Attachment{{Handle: "@img2", Kind: chat.AttachmentKindImage, AssetID: asset, TaskID: "task-slot"}}
 	if w.sourceModel {
 		// The stage selection names the model file itself, as the browser sends it.
-		attachments = append(attachments, chat.Attachment{Handle: "@model1", Kind: chat.AttachmentKindModel, TaskID: "task-model", AssetID: "model-glb"})
+		model := chat.Attachment{Handle: "@model1", Kind: chat.AttachmentKindModel, TaskID: "task-model", AssetID: "model-glb"}
+		if w.modelAttachment != nil {
+			model = *w.modelAttachment
+		}
+		attachments = append(attachments, model)
 	}
+	attachments = append(attachments, w.extraAttachments...)
 	return attachments
 }
 
 func (w *world) preparedAssets() []generation.PreparedInputAsset {
-	assets := []generation.PreparedInputAsset{{Parameter: "reference_image", ID: "ref-asset", Role: "reference", SHA256: "sha-front"}}
+	assets := []generation.PreparedInputAsset{{Parameter: "reference_image", ID: "ref-asset", Role: "reference", SHA256: "sha-front", MediaType: "image/png"}}
 	if w.sourceModel {
-		assets = append(assets, generation.PreparedInputAsset{Parameter: "source_asset", ID: "source-copy", Role: "source_asset", SHA256: "sha-model"})
+		id := w.modelAsset
+		if id == "" {
+			id = "source-copy"
+		}
+		assets = append(assets, generation.PreparedInputAsset{Parameter: "source_asset", ID: generation.AssetID(id), Role: "source_asset", SHA256: "sha-model", MediaType: "model/gltf-binary"})
 	}
 	return assets
+}
+
+func TestApprovalModelRequiresExactFrozenAssetAndHandle(t *testing.T) {
+	for _, tc := range []struct {
+		name, frozen, attachment string
+		wantTask                 bool
+	}{
+		{"independent upload with same bytes", "uploaded-model", "model-glb", false},
+		{"different variant of same task", "model-glb", "model-variant", false},
+		{"legacy attachment without asset", "model-glb", "", false},
+		{"exact task asset", "model-glb", "model-glb", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := openWorld(t, filepath.Join(t.TempDir(), "approval.db"), time.Hour)
+			w.sourceModel, w.modelAsset = true, tc.frozen
+			w.modelAttachment = &chat.Attachment{Handle: "@model1", Kind: chat.AttachmentKindModel, TaskID: "task-model", AssetID: tc.attachment}
+			w.gateway.offering.Parameters = append(w.gateway.offering.Parameters, generation.Parameter{Name: "source_asset", Type: "asset", Semantic: generation.SemanticSourceAsset, MediaTypes: []string{"model/gltf-binary"}})
+			w.pending("call")
+			items, err := w.service.List(context.Background(), "owner-a", "session-a")
+			if err != nil || len(items) != 1 || len(items[0].Inputs) != 2 {
+				t.Fatalf("list=%+v err=%v", items, err)
+			}
+			input := items[0].Inputs[1]
+			if tc.wantTask {
+				if input.Kind != pendingapproval.InputTask || input.TaskID != "task-model" || input.Handle != "@model1" || input.AssetID != "model-thumb" {
+					t.Fatalf("exact model: %+v", input)
+				}
+			} else if input.Kind != pendingapproval.InputAsset || input.AssetID != tc.frozen || input.Handle != "" || input.TaskID != "" {
+				t.Fatalf("unproved model: %+v", input)
+			}
+		})
+	}
+	t.Run("another variant cannot supply missing handle", func(t *testing.T) {
+		w := openWorld(t, filepath.Join(t.TempDir(), "approval.db"), time.Hour)
+		w.sourceModel, w.modelAsset = true, "model-glb"
+		w.modelAttachment = &chat.Attachment{Kind: chat.AttachmentKindModel, TaskID: "task-model", AssetID: "model-glb"}
+		w.extraAttachments = []chat.Attachment{{Handle: "@variant", Kind: chat.AttachmentKindModel, TaskID: "task-model", AssetID: "model-variant"}}
+		w.gateway.offering.Parameters = append(w.gateway.offering.Parameters, generation.Parameter{Name: "source_asset", Type: "asset", Semantic: generation.SemanticSourceAsset, MediaTypes: []string{"model/gltf-binary"}})
+		w.pending("call")
+		items, err := w.service.List(context.Background(), "owner-a", "session-a")
+		if err != nil || len(items) != 1 || len(items[0].Inputs) != 2 {
+			t.Fatalf("list=%+v err=%v", items, err)
+		}
+		input := items[0].Inputs[1]
+		if input.Kind != pendingapproval.InputAsset || input.AssetID != "model-glb" || input.Handle != "" || input.TaskID != "" {
+			t.Fatalf("another variant supplied the handle: %+v", input)
+		}
+	})
 }
 
 func (w *world) frozenInput() json.RawMessage {
@@ -359,7 +443,9 @@ func TestFinishedTaskBecomesAResultCardWithPictureAndModelHandle(t *testing.T) {
 		item.Provider != "Fake" || item.EstimatedCredits != 25 || item.Prompt != "p" || item.MessageID != op.AssistantMessageID ||
 		len(item.Inputs) != 1 || item.Inputs[0].AssetID != "ref-asset" || item.Inputs[0].Parameter != "reference_image" ||
 		item.Inputs[0].Kind != pendingapproval.InputAsset ||
-		item.Inputs[0].Handle != "@img2" || item.Inputs[0].TaskID != "task-slot" || item.ProviderID != "fake-provider" {
+		// The input copy is the picture address; the source Task and handle are
+		// not mixed into it without an exact asset identity (#80).
+		item.Inputs[0].Handle != "" || item.Inputs[0].TaskID != "" || item.ProviderID != "fake-provider" {
 		t.Fatalf("item = %+v", item)
 	}
 	if got := item.ExpiresAt.Sub(item.CreatedAt); got != time.Hour {
@@ -988,13 +1074,12 @@ func TestRefusingAnExtraCreditCardSubmitsNothingAndProposesAnAlternative(t *test
 	}
 }
 
-// #324 (from #187 note 98966): a step on a local model file (Hyper3D texture) froze a copy of
-// the session's 3D model as its source_asset. The card showed it as an unnamed picture
-// placeholder. It is the model the step works on: the session's handle, its Task and its
-// rendered preview, the same as a step that names the source Task.
+// #324: an exact frozen Task model asset keeps its session handle and preview.
 func TestApprovalNamesTheSourceModelFileByItsSessionModel(t *testing.T) {
 	w := openWorld(t, filepath.Join(t.TempDir(), "a.db"), time.Hour)
 	w.sourceModel = true
+	w.modelAsset = "model-glb"
+	w.gateway.offering.Parameters = append(w.gateway.offering.Parameters, generation.Parameter{Name: "source_asset", Type: "asset", Semantic: generation.SemanticSourceAsset, MediaTypes: []string{"model/gltf-binary"}})
 	w.pending("call-1")
 	items, err := w.service.List(context.Background(), "owner-a", "session-a")
 	if err != nil || len(items) != 1 || len(items[0].Inputs) != 2 {
@@ -1006,10 +1091,142 @@ func TestApprovalNamesTheSourceModelFileByItsSessionModel(t *testing.T) {
 			source = input
 		}
 	}
-	if source.Kind != pendingapproval.InputTask || source.TaskID != "task-model" || source.Handle != "@model1" || source.AssetID != "model-thumb" {
+	if source.Kind != pendingapproval.InputTask || source.TaskID != "task-model" || source.Handle != "@model1" || source.AssetID != "model-thumb" || source.MediaType != "" {
 		t.Fatalf("source input = %+v; want the session model @model1 with its preview", source)
 	}
-	if reference := items[0].Inputs[0]; reference.Handle != "@img2" || reference.Kind != pendingapproval.InputAsset {
-		t.Fatalf("reference input = %+v", reference)
+	if reference := items[0].Inputs[0]; reference.Handle != "" || reference.TaskID != "" ||
+		reference.Kind != pendingapproval.InputAsset || reference.AssetID != "ref-asset" || reference.MediaType != "image/png" {
+		t.Fatalf("reference input = %+v; want the frozen input copy without a guessed source", reference)
+	}
+}
+
+// #80: the card shows the session handle only when the attachment is the exact
+// frozen input asset. Even then the source Task is not put beside that asset.
+func TestFrozenInputHandleRequiresTheExactAsset(t *testing.T) {
+	w := openWorld(t, filepath.Join(t.TempDir(), "exact.db"), time.Hour)
+	w.attachmentAsset = "ref-asset"
+	w.pending("call-1")
+	items, err := w.service.List(context.Background(), "owner-a", "session-a")
+	if err != nil || len(items) != 1 || len(items[0].Inputs) != 1 {
+		t.Fatalf("list = %+v err=%v", items, err)
+	}
+	input := items[0].Inputs[0]
+	if input.Handle != "@img2" || input.TaskID != "" || input.AssetID != "ref-asset" ||
+		input.Kind != pendingapproval.InputAsset {
+		t.Fatalf("input = %+v; want the exact handle without the source Task", input)
+	}
+}
+
+func TestApprovalModelContentRequiresAnUnambiguousModelSource(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		mode      string
+		wantModel bool
+	}{
+		{"unique model", "unique", true},
+		{"same task repeated", "repeated", true},
+		{"exactly 24 candidates with one match", "at-limit", true},
+		{"repeated task exceeds candidate limit", "repeated-too-many", false},
+		{"candidate has wrong owner", "wrong-owner", false},
+		{"candidate has wrong session", "wrong-session", false},
+		{"candidate has wrong returned task ID", "wrong-id", false},
+		{"different tasks with same model bytes", "ambiguous", true},
+		{"bounded history is not proof of uniqueness", "too-many", false},
+		{"only a texture has matching bytes", "texture", false},
+		{"missing offering", "missing", false},
+		{"parameter is not a model source", "not-source", false},
+		{"model media type is not supported", "unsupported", false},
+		{"glb extension declares the model format", "glb-extension", true},
+		{"model format is not declared", "unknown-format", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := openWorld(t, filepath.Join(t.TempDir(), "approval.db"), time.Hour)
+			w.sourceModel = true
+			w.modelAsset = "model-glb"
+			parameter := generation.Parameter{
+				Name: "source_asset", Type: "asset", Semantic: generation.SemanticSourceAsset,
+				MediaTypes: []string{"model/gltf-binary"},
+			}
+			if tc.mode == "not-source" {
+				parameter.Semantic = generation.SemanticReferenceImage
+			}
+			if tc.mode == "unsupported" {
+				parameter.MediaTypes = []string{"model/obj"}
+			}
+			if tc.mode == "glb-extension" || tc.mode == "unknown-format" {
+				parameter.MediaTypes = nil
+				if tc.mode == "glb-extension" {
+					parameter.Extensions = []string{".glb"}
+				}
+			}
+			w.gateway.offering.Parameters = append(w.gateway.offering.Parameters, parameter)
+			w.gateway.modelTasks = map[generation.TaskID]generation.Task{}
+			if tc.mode == "texture" {
+				w.gateway.modelTasks["task-model"] = generation.Task{ID: "task-model", OwnerID: "owner-a", SessionID: "session-a", State: generation.TaskSucceeded,
+					Assets: []generation.Asset{{ID: "other-model", Role: "model", SHA256: "different"}, {ID: "model-glb", Role: "texture", SHA256: "sha-model"}, {ID: "thumb", Role: "thumbnail"}}}
+			}
+			if tc.mode == "repeated" {
+				w.extraAttachments = append(w.extraAttachments, chat.Attachment{Handle: "@model1", Kind: chat.AttachmentKindModel, TaskID: "task-model"})
+			}
+			if tc.mode == "repeated-too-many" {
+				for i := 0; i < 24; i++ {
+					w.extraAttachments = append(w.extraAttachments, chat.Attachment{Kind: chat.AttachmentKindModel, TaskID: "task-model"})
+				}
+			}
+			if tc.mode == "wrong-owner" || tc.mode == "wrong-session" || tc.mode == "wrong-id" {
+				task := generation.Task{ID: "other", OwnerID: "owner-a", SessionID: "session-a", State: generation.TaskSucceeded,
+					Assets: []generation.Asset{{ID: "other-asset", Role: "model", SHA256: "different"}}}
+				switch tc.mode {
+				case "wrong-owner":
+					task.OwnerID = "owner-b"
+				case "wrong-session":
+					task.SessionID = "session-b"
+				case "wrong-id":
+					task.ID = "wrong-id"
+				}
+				w.extraAttachments = append(w.extraAttachments, chat.Attachment{Kind: chat.AttachmentKindModel, TaskID: "other"})
+				w.gateway.modelTasks["other"] = task
+			}
+			if tc.mode == "ambiguous" || tc.mode == "too-many" || tc.mode == "at-limit" {
+				w.extraAttachments = append(w.extraAttachments, chat.Attachment{Handle: "@model-copy", Kind: chat.AttachmentKindModel, AssetID: "source-copy"})
+				n := 1
+				if tc.mode == "too-many" {
+					n = 24
+				} else if tc.mode == "at-limit" {
+					n = 23
+				}
+				for i := 0; i < n; i++ {
+					id := generation.TaskID(fmt.Sprintf("other-%d", i))
+					sha := "different"
+					if tc.mode == "ambiguous" {
+						sha = "sha-model"
+					}
+					w.extraAttachments = append(w.extraAttachments, chat.Attachment{Handle: "@" + string(id), Kind: chat.AttachmentKindModel, TaskID: string(id)})
+					w.gateway.modelTasks[id] = generation.Task{ID: id, OwnerID: "owner-a", SessionID: "session-a", State: generation.TaskSucceeded, Assets: []generation.Asset{{ID: "other-asset", Role: "model", SHA256: sha}}}
+				}
+			}
+			w.pending("call")
+			if tc.mode == "missing" {
+				w.gateway.offering.ID = "unavailable"
+			}
+			items, err := w.service.List(context.Background(), "owner-a", "session-a")
+			if err != nil || len(items) != 1 || len(items[0].Inputs) != 2 {
+				t.Fatalf("list=%+v err=%v", items, err)
+			}
+			picture, model := items[0].Inputs[0], items[0].Inputs[1]
+			if picture.Kind != pendingapproval.InputAsset || picture.AssetID != "ref-asset" || picture.MediaType != "image/png" || picture.Handle != "" || picture.TaskID != "" {
+				t.Fatalf("texture-matching reference misidentified: %+v", picture)
+			}
+			if tc.wantModel {
+				if model.Kind != pendingapproval.InputTask || model.TaskID != "task-model" || model.Handle != "@model1" || model.AssetID != "model-thumb" {
+					t.Fatalf("unique model: %+v", model)
+				}
+			} else if model.Kind != pendingapproval.InputAsset || model.AssetID != "model-glb" || model.Handle != "" || model.TaskID != "" {
+				t.Fatalf("unproved model source: %+v", model)
+			}
+			if _, err := w.service.List(context.Background(), "owner-b", "session-a"); !errors.Is(err, pendingapproval.ErrSessionNotFound) {
+				t.Fatalf("foreign list: %v", err)
+			}
+		})
 	}
 }

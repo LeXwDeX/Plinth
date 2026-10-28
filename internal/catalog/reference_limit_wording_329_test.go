@@ -2,6 +2,7 @@ package catalog_test
 
 import (
 	"encoding/json"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -11,6 +12,53 @@ import (
 
 func fillReferenceLimit(template, model string, count, total int) string {
 	return strings.NewReplacer("{model}", model, "{count}", strconv.Itoa(count), "{total}", strconv.Itoa(total)).Replace(template)
+}
+
+func TestReferenceCapacityNoPromptIsOptionalAndPrivate(t *testing.T) {
+	data, err := os.ReadFile("default_catalog.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	app := doc["application"].(map[string]any)
+	chat := app["chat"].(map[string]any)
+	for _, item := range chat["tools"].([]any) {
+		tool := item.(map[string]any)
+		if tool["name"] == "create_model_3d_from_image" {
+			note := tool["reference_capacity_note"].(map[string]any)
+			if note["no_prompt"] == nil {
+				t.Fatal("default catalog has no no_prompt guidance")
+			}
+			delete(note, "no_prompt")
+		}
+	}
+	old, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	product, err := catalog.Load(strings.NewReader(string(old)))
+	if err != nil {
+		t.Fatalf("old catalog without no_prompt: %v", err)
+	}
+	for _, tool := range product.Application().Chat.Tools {
+		if tool.Name == "create_model_3d_from_image" && tool.ReferenceCapacityNote.NoPrompt != "" {
+			t.Fatal("omitted no_prompt did not remain empty")
+		}
+	}
+	current, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	public, err := json.Marshal(current.Application().Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(public), "no_prompt") || strings.Contains(string(public), "reference_capacity_note") {
+		t.Fatal("agent-only guidance leaked into public schema")
+	}
 }
 
 // #329 dev-test note 99647, observations 8 and 9: the note that only the
@@ -84,9 +132,9 @@ func TestReferenceLimitIsOneSchemaPairWithOnePictureWording(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for locale, want := range map[string][2]string{
-		"zh-CN": {messages.ReferenceLimit, messages.ReferenceLimitOne},
-		"en":    {english["runtime.generation_messages.reference_limit"], english["runtime.generation_messages.reference_limit_one"]},
+	for locale, want := range map[string][3]string{
+		"zh-CN": {messages.ReferenceLimit, messages.ReferenceLimitOne, messages.ReferenceCapacity},
+		"en":    {english["runtime.generation_messages.reference_limit"], english["runtime.generation_messages.reference_limit_one"], english["runtime.generation_messages.reference_capacity"]},
 	} {
 		var public struct {
 			Runtime struct {
@@ -97,7 +145,8 @@ func TestReferenceLimitIsOneSchemaPairWithOnePictureWording(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := public.Runtime.GenerationMessages
-		if got["reference_limit"] != want[0] || got["reference_limit_one"] != want[1] || len(got) != 2 {
+		if got["reference_limit"] != want[0] || got["reference_limit_one"] != want[1] ||
+			got["reference_capacity"] != want[2] || len(got) != 3 {
 			t.Fatalf("%s public generation_messages = %v", locale, got)
 		}
 	}

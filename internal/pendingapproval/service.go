@@ -32,6 +32,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness"
+	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 var (
@@ -204,11 +205,12 @@ type Input struct {
 	Parameter string `json:"parameter"`
 	// Kind is InputAsset for a picture or file the step sends and InputTask for
 	// the earlier task (a 3D model) the step works on.
-	Kind    string `json:"kind,omitempty"`
-	Role    string `json:"role,omitempty"`
-	AssetID string `json:"asset_id,omitempty"`
-	TaskID  string `json:"task_id,omitempty"`
-	Handle  string `json:"handle,omitempty"`
+	Kind      string `json:"kind,omitempty"`
+	Role      string `json:"role,omitempty"`
+	AssetID   string `json:"asset_id,omitempty"`
+	MediaType string `json:"media_type,omitempty"`
+	TaskID    string `json:"task_id,omitempty"`
+	Handle    string `json:"handle,omitempty"`
 }
 
 // Kinds of approval input.
@@ -348,14 +350,15 @@ func (s *Service) item(ctx context.Context, owner string, op generationtool.Oper
 		CreatedAt: grant.PendingSince(), ExpiresAt: s.grants.ExpiresAt(grant),
 		RechargeTaskID: op.RechargeTaskID, Inputs: []Input{},
 	}
-	if offering, ok := s.offering(prepared.Capability, op.OfferingID, op.OfferingRevision); ok {
+	offering, offeringKnown := s.offering(prepared.Capability, op.OfferingID, op.OfferingRevision)
+	if offeringKnown {
 		item.Model = offering.ModelName
 		if item.Model == "" {
 			item.Model = offering.ModelID
 		}
 		item.Provider = offering.ProviderName
 		item.ProviderID = offering.ProviderID
-		item.ReferenceNote = s.referenceNote(ctx, op, offering)
+		item.ReferenceNote = s.referenceNote(ctx, op, prepared.Capability, offering)
 		if prepared.NativeQuote == nil {
 			item.EstimatedCredits = offering.EstimateTotalCredits(prepared.NormalizedInput)
 		}
@@ -374,19 +377,25 @@ func (s *Service) item(ctx context.Context, owner string, op generationtool.Oper
 	}
 	for _, asset := range prepared.Assets {
 		input := Input{Parameter: asset.Parameter, Kind: InputAsset, Role: asset.Role, AssetID: string(asset.ID)}
-		if attachment, preview, ok := s.modelWithContent(ctx, owner, messages, asset.SHA256); ok {
-			// A step on a local model file freezes a copy of the session's 3D model (#324):
-			// the card names it as the model the step works on, by its handle and preview,
-			// not as a picture (the copy has no picture to show).
+		var attachment chat.Attachment
+		var preview string
+		var modelFound bool
+		if offeringKnown && modelSourceParameter(offering, asset) {
+			attachment, preview, modelFound = s.modelWithAssetID(ctx, owner, prepared.SessionID, messages, asset.ID)
+		}
+		if modelFound {
+			// The exact frozen model belongs to this Task and its session handle (#324).
 			input.Kind, input.Handle, input.TaskID, input.AssetID = InputTask, attachment.Handle, attachment.TaskID, preview
 		} else if attachment, ok := sessionAttachment(messages, func(a chat.Attachment) bool {
-			return a.AssetID == string(asset.ID)
+			// A handle is shown only for the exact asset the session already knows.
+			// The input copy stays the picture address: its TaskID is never mixed with
+			// the attachment's TaskID, and a matching SHA is not an identity (#80).
+			return !strings.HasPrefix(asset.MediaType, "model/") && a.Kind != chat.AttachmentKindModel && a.AssetID == string(asset.ID)
 		}); ok {
-			input.Handle, input.TaskID = attachment.Handle, attachment.TaskID
-		} else if attachment, ok := s.attachmentWithContent(ctx, owner, messages, asset.SHA256); ok {
-			// A picture picked on the stage is copied into an input asset when the step is
-			// prepared, so only its bytes tie it back to the object the person chose.
-			input.Handle, input.TaskID = attachment.Handle, attachment.TaskID
+			input.Handle = attachment.Handle
+		}
+		if input.Kind == InputAsset {
+			input.MediaType = asset.MediaType
 		}
 		item.Inputs = append(item.Inputs, input)
 	}
@@ -407,65 +416,79 @@ func (s *Service) item(ctx context.Context, owner string, op generationtool.Oper
 	return item
 }
 
-// referenceNote is the Offering's reference-limit note in the locale ctx
-// carries, for a step that uses fewer of the reference pictures than the turn
-// gave (#329 E); "" otherwise and for operations created before the counts
-// were kept.
-func (s *Service) referenceNote(ctx context.Context, op generationtool.Operation, offering generation.Offering) string {
-	return generationtool.ReferenceLimitNote(s.tools[op.ToolName], offering, op.ReferenceCount, op.ReferenceTotal,
-		func(text string) string { return s.text(ctx, text) })
+// referenceNote says which pictures a step uses, in the locale ctx carries.
+// An image-to-3D step reads the source fact frozen with its prepared input; an
+// operation written before that fact was kept makes no source claim. Other
+// steps keep the Offering's reference-limit note (#329 E).
+func (s *Service) referenceNote(ctx context.Context, op generationtool.Operation,
+	capability generation.Capability, offering generation.Offering) string {
+	text := func(text string) string { return s.text(ctx, text) }
+	if capability == generation.ImageTo3D {
+		return generationtool.ReferenceSourceNote(s.tools[op.ToolName], offering,
+			s.schema.ThreeView.ModelSourceNote, op.ReferenceSource, text)
+	}
+	return generationtool.ReferenceLimitNote(s.tools[op.ToolName], offering, op.ReferenceCount, op.ReferenceTotal, text)
 }
 
-// maximumContentMatches bounds how many recent task pictures one approval looks through.
-const maximumContentMatches = 24
-
-// attachmentWithContent finds the latest session attachment whose task picture has the same
-// bytes (SHA-256) as an input asset.
-func (s *Service) attachmentWithContent(ctx context.Context, owner string, messages []chat.Message, sha256 string) (chat.Attachment, bool) {
-	if sha256 == "" {
-		return chat.Attachment{}, false
+func modelSourceParameter(offering generation.Offering, asset generation.PreparedInputAsset) bool {
+	if !strings.HasPrefix(asset.MediaType, "model/") {
+		return false
 	}
-	looked := 0
-	for index := len(messages) - 1; index >= 0; index-- {
-		for _, attachment := range messages[index].Attachments {
-			if attachment.Handle == "" || attachment.TaskID == "" || attachment.AssetID == "" {
-				continue
-			}
-			if looked++; looked > maximumContentMatches {
-				return chat.Attachment{}, false
-			}
-			task, err := s.gateway.Get(ctx, generation.OwnerID(owner), generation.TaskID(attachment.TaskID))
-			if err != nil {
-				continue
-			}
-			for _, asset := range task.Assets {
-				if string(asset.ID) == attachment.AssetID && asset.SHA256 == sha256 {
-					return attachment, true
+	for _, parameter := range offering.Parameters {
+		role, source := schemacontract.SourceParameterRole(parameter)
+		if parameter.Name != asset.Parameter || !source || role != schemacontract.SemanticSourceAsset ||
+			(parameter.Type != "asset" && parameter.Type != "asset-array") {
+			continue
+		}
+		if len(parameter.MediaTypes) == 0 {
+			if asset.MediaType == "model/gltf-binary" {
+				for _, extension := range parameter.Extensions {
+					if strings.EqualFold(strings.TrimPrefix(extension, "."), "glb") {
+						return true
+					}
 				}
+			}
+			return false
+		}
+		for _, mediaType := range parameter.MediaTypes {
+			if mediaType == asset.MediaType {
+				return true
 			}
 		}
 	}
-	return chat.Attachment{}, false
+	return false
 }
 
-// modelWithContent finds the latest 3D model of the session whose model file has the same
-// bytes (SHA-256) as an input asset, with the asset ID of its rendered preview ("" when it has
-// none).
-func (s *Service) modelWithContent(ctx context.Context, owner string, messages []chat.Message, sha256 string) (chat.Attachment, string, bool) {
-	if sha256 == "" {
+// maximumContentMatches bounds how many model attachments one approval examines.
+const maximumContentMatches = 24
+
+// modelWithAssetID names a model only when the frozen asset and its handle identify one Task.
+func (s *Service) modelWithAssetID(ctx context.Context, owner, session string, messages []chat.Message, assetID generation.AssetID) (chat.Attachment, string, bool) {
+	if assetID == "" {
 		return chat.Attachment{}, "", false
 	}
 	looked := 0
+	seen := map[string]generation.Task{}
+	var match chat.Attachment
+	var matchPreview string
 	for index := len(messages) - 1; index >= 0; index-- {
 		for _, attachment := range messages[index].Attachments {
-			if attachment.Handle == "" || attachment.TaskID == "" || attachment.Kind != chat.AttachmentKindModel {
+			if attachment.TaskID == "" || attachment.Kind != chat.AttachmentKindModel {
 				continue
 			}
 			if looked++; looked > maximumContentMatches {
 				return chat.Attachment{}, "", false
 			}
-			task, err := s.gateway.Get(ctx, generation.OwnerID(owner), generation.TaskID(attachment.TaskID))
-			if err != nil {
+			task, ok := seen[attachment.TaskID]
+			if !ok {
+				var err error
+				task, err = s.gateway.Get(ctx, generation.OwnerID(owner), generation.TaskID(attachment.TaskID))
+				if err != nil || task.OwnerID != generation.OwnerID(owner) || task.SessionID != session || string(task.ID) != attachment.TaskID {
+					return chat.Attachment{}, "", false
+				}
+				seen[attachment.TaskID] = task
+			}
+			if task.State != generation.TaskSucceeded || attachment.AssetID != string(assetID) {
 				continue
 			}
 			matched, preview := false, ""
@@ -474,16 +497,21 @@ func (s *Service) modelWithContent(ctx context.Context, owner string, messages [
 					if preview == "" {
 						preview = string(asset.ID)
 					}
-				} else if asset.SHA256 == sha256 {
+				} else if asset.Role == "model" && asset.ID == assetID {
 					matched = true
 				}
 			}
 			if matched {
-				return attachment, preview, true
+				if match.TaskID != "" && match.TaskID != attachment.TaskID {
+					return chat.Attachment{}, "", false
+				}
+				if match.TaskID == "" || (match.Handle == "" && attachment.Handle != "") {
+					match, matchPreview = attachment, preview
+				}
 			}
 		}
 	}
-	return chat.Attachment{}, "", false
+	return match, matchPreview, match.TaskID != "" && match.Handle != ""
 }
 
 // sessionAttachment finds the latest attachment of the session that matches.
@@ -856,7 +884,12 @@ func (s *Service) report(ctx context.Context, op generationtool.Operation, task 
 		if current, ok := s.offering(task.Offering.Capability, op.OfferingID, op.OfferingRevision); ok {
 			noteOffering.ExecutionMessages = current.ExecutionMessages
 		}
-		if note, template := s.referenceNote(ctx, op, noteOffering), s.schema.PendingApprovals.Messages.SucceededWithNote; note != "" && template != "" {
+		capability := tool.Capability
+		if frozen, err := s.gateway.GetPreparedInput(ctx, generation.OwnerID(op.OwnerID), op.PreparedInputID); err == nil &&
+			frozen.SessionID == op.SessionID && frozen.InputHash == op.PreparedInputHash {
+			capability = frozen.Capability
+		}
+		if note, template := s.referenceNote(ctx, op, capability, noteOffering), s.schema.PendingApprovals.Messages.SucceededWithNote; note != "" && template != "" {
 			posted.Content = strings.NewReplacer("{model}", model, "{note}", note).Replace(s.text(ctx, template))
 		}
 		posted.ImageURLs = generationtool.ResultAssetURLs(s.schema, tool, task)

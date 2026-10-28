@@ -2,14 +2,17 @@ package pendingapproval_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/pendingapproval"
 )
 
 const imageTo3DTool = "create_model_3d_from_image"
@@ -150,5 +153,133 @@ func TestTheFinishedResultUsesTheCurrentReferenceLimitText(t *testing.T) {
 	want := strings.NewReplacer("{note}", note).Replace(w.schema.PendingApprovals.Messages.SucceededWithNote)
 	if !ok || result.Content != want {
 		t.Fatalf("result = %q, want %q", result.Content, want)
+	}
+}
+
+// #80: a frozen front source is the only fact that may produce the three-view
+// sentence on the card and in the finished message. An operation from before
+// the fact was kept makes no source claim at all.
+func TestImageTo3DApprovalUsesTheFrozenFrontSource(t *testing.T) {
+	w := openWorld(t, filepath.Join(t.TempDir(), "front.db"), time.Hour)
+	w.tool, w.capability = imageTo3DTool, generation.ImageTo3D
+	w.referenceSource = generationtool.ReferenceSourceFact{Version: 1, Selected: 2, Resolved: 1, Frozen: 1,
+		Replaced: true, AllFront: true, Prefix: false, FrontParameter: "reference_image", FrontIndex: 0,
+		FrontTaskID: "task-front", FrontAssetID: "asset-front", Identity: "front-source"}
+	_, grant := w.pending("call-front")
+	items, err := w.service.List(context.Background(), "owner-a", "session-a")
+	if err != nil || len(items) != 1 {
+		t.Fatalf("list = %+v err=%v", items, err)
+	}
+	frontNote := w.schema.ThreeView.ModelSourceNote
+	if items[0].ReferenceNote != frontNote {
+		t.Fatalf("card note = %q, want the front source %q", items[0].ReferenceNote, frontNote)
+	}
+
+	w.gateway.state = generation.TaskQueued
+	outcome, handled, err := w.service.Decide(context.Background(), w.operator, grant.RequestID, executiongrant.Approve)
+	if err != nil || !handled {
+		t.Fatalf("approve = %+v %v %v", outcome, handled, err)
+	}
+	w.gateway.state = generation.TaskSucceeded
+	if _, err := w.service.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	result, ok := w.message(outcome.MessageID)
+	want := strings.NewReplacer("{model}", "Fake Model", "{note}", frontNote).Replace(w.schema.PendingApprovals.Messages.SucceededWithNote)
+	if !ok || result.Content != want {
+		t.Fatalf("result = %q, want %q", result.Content, want)
+	}
+}
+
+func TestImageTo3DWithoutAFrozenSourceMakesNoClaim(t *testing.T) {
+	w := openWorld(t, filepath.Join(t.TempDir(), "legacy.db"), time.Hour)
+	w.tool, w.capability = imageTo3DTool, generation.ImageTo3D
+	w.referencesUsed, w.referencesGiven = 1, 2
+	_, grant := w.pending("call-legacy")
+	items, err := w.service.List(context.Background(), "owner-a", "session-a")
+	if err != nil || len(items) != 1 || items[0].ReferenceNote != "" {
+		t.Fatalf("legacy card = %+v err=%v", items, err)
+	}
+
+	w.gateway.state = generation.TaskQueued
+	outcome, handled, err := w.service.Decide(context.Background(), w.operator, grant.RequestID, executiongrant.Approve)
+	if err != nil || !handled {
+		t.Fatalf("approve = %+v %v %v", outcome, handled, err)
+	}
+	w.gateway.state = generation.TaskSucceeded
+	if _, err := w.service.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	result, ok := w.message(outcome.MessageID)
+	want := strings.NewReplacer("{model}", "Fake Model").Replace(w.schema.PendingApprovals.Messages.Succeeded)
+	if !ok || result.Content != want {
+		t.Fatalf("legacy result = %q, want %q", result.Content, want)
+	}
+}
+
+func TestImageTo3DSourceNoteSurvivesRestarts(t *testing.T) {
+	for _, known := range []bool{true, false} {
+		name := "legacy"
+		if known {
+			name = "frozen-front"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			path := filepath.Join(t.TempDir(), "restart.db")
+			first := openWorld(t, path, time.Hour)
+			first.tool, first.capability = imageTo3DTool, generation.ImageTo3D
+			first.referencesUsed, first.referencesGiven = 1, 2
+			if known {
+				first.referenceSource = generationtool.ReferenceSourceFact{Version: 1, Selected: 2, Resolved: 1, Frozen: 1,
+					Replaced: true, AllFront: true, FrontParameter: "reference_image", FrontIndex: 0,
+					FrontTaskID: "task-front", FrontAssetID: "asset-front", Identity: "front-source"}
+			}
+			_, grant := first.pending("call-restart")
+			if err := first.repo.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			reopened := openWorld(t, path, time.Hour)
+			note := ""
+			if known {
+				note = reopened.schema.ThreeView.ModelSourceNote
+				if note == "" {
+					t.Fatal("schema has no three-view source note")
+				}
+			}
+			items, err := reopened.service.List(ctx, "owner-a", "session-a")
+			if err != nil || len(items) != 1 || items[0].RequestID != grant.RequestID || items[0].ReferenceNote != note {
+				t.Fatalf("card after restart = %+v, want note %q, err=%v", items, note, err)
+			}
+			if _, err := reopened.service.List(ctx, "owner-b", "session-a"); !errors.Is(err, pendingapproval.ErrSessionNotFound) {
+				t.Fatalf("foreign list after restart err=%v", err)
+			}
+			if reopened.gateway.submits != 0 || reopened.gateway.distinctTasks() != 0 {
+				t.Fatal("reading pending approvals created a task")
+			}
+			outcome, handled, err := reopened.service.Decide(ctx, reopened.operator, grant.RequestID, executiongrant.Approve)
+			if err != nil || !handled || outcome.TaskID == "" {
+				t.Fatalf("approve after restart = %+v %v %v", outcome, handled, err)
+			}
+			if err := reopened.repo.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			again := openWorld(t, path, time.Hour)
+			again.gateway.state = generation.TaskSucceeded
+			again.gateway.tasks = reopened.gateway.tasks
+			if settled, err := again.service.Sweep(ctx); err != nil || settled != 1 {
+				t.Fatalf("sweep after second restart settled=%d err=%v", settled, err)
+			}
+			template := again.schema.PendingApprovals.Messages.Succeeded
+			if known {
+				template = again.schema.PendingApprovals.Messages.SucceededWithNote
+			}
+			want := strings.NewReplacer("{model}", "Fake Model", "{note}", note).Replace(template)
+			result, ok := again.message(outcome.MessageID)
+			if !ok || result.Content != want {
+				t.Fatalf("result after second restart = %q, want %q (found=%v)", result.Content, want, ok)
+			}
+		})
 	}
 }

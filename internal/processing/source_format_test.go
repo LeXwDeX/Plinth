@@ -37,13 +37,25 @@ func TestLaterPlanStepBindsThePreferredModelFormat(t *testing.T) {
 		t.Fatal(err)
 	}
 	service.WithSourcePreference(catalog.ProcessingSourcePreference(product.Application().Chat.Tools))
-	if _, err := service.Create(ctx, CreateCommand{OwnerID: "owner", SessionID: "session", SourceTaskID: "source", SourceAssetID: "model",
+	resize, ok := product.Get("meshy/processing/resize")
+	if !ok || resize.NativePricing != nil || resize.Cost != nil || resize.CostPolicy != nil || resize.EstimatedCreditsUnitParameter != "" || resize.EstimatedCredits <= 0 {
+		t.Fatal("test requires the catalog's fixed-credit resize offering")
+	}
+	plan, err := service.Create(ctx, CreateCommand{OwnerID: "owner", SessionID: "session", SourceTaskID: "source", SourceAssetID: "model",
 		IdempotencyKey: "rig-then-resize-plan-key",
 		Steps: []StepRequest{
 			{OfferingID: "meshy/processing/rigging", ExpectedOfferingRevision: revision("meshy/processing/rigging"), Input: json.RawMessage(`{}`)},
 			{OfferingID: "meshy/processing/resize", ExpectedOfferingRevision: revision("meshy/processing/resize"), Input: json.RawMessage(`{"resize_height":1}`)},
-		}}); err != nil {
+		}})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if len(plan.Steps) != 2 {
+		t.Fatalf("created plan steps = %d, want 2", len(plan.Steps))
+	}
+	quoted := plan.Steps[1]
+	if quoted.OfferingID != resize.ID || quoted.Revision != resize.Revision || quoted.EstimatedCredits != resize.EstimatedCredits || quoted.NativeQuote != nil {
+		t.Fatalf("created resize step = %+v, want offering %s revision %s, %d credits and no native quote", quoted, resize.ID, resize.Revision, resize.EstimatedCredits)
 	}
 	if err := advanceApproved(ctx, service); err != nil {
 		t.Fatal(err)
@@ -71,11 +83,32 @@ func TestLaterPlanStepBindsThePreferredModelFormat(t *testing.T) {
 		plans, _ := service.List(ctx, "owner", "session")
 		t.Fatalf("second step submits = %d; plans %+v", len(gateway.commands), plans)
 	}
+	plans, err := service.List(ctx, "owner", "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plans) != 1 || len(plans[0].Steps) != 2 {
+		t.Fatalf("submitted plans = %+v", plans)
+	}
+	step := plans[0].Steps[1]
+	if step.OfferingID != quoted.OfferingID || step.Revision != quoted.Revision || step.EstimatedCredits != quoted.EstimatedCredits || step.NativeQuote != nil {
+		t.Fatalf("submitted resize step = %+v, want created quote %+v", step, quoted)
+	}
+	prepared, ok := gateway.prepared[step.PreparedInputID]
+	if !ok || step.PreparedInputID == "" {
+		t.Fatalf("prepared input %q missing", step.PreparedInputID)
+	}
+	if prepared.OfferingID != quoted.OfferingID || prepared.NativeQuote != nil || gateway.commands[1].OfferingID != quoted.OfferingID || string(prepared.NormalizedInput) != string(gateway.commands[1].Input) {
+		t.Fatalf("prepared input %+v and submitted command %+v do not match created quote %+v", prepared, gateway.commands[1], quoted)
+	}
 	var input map[string]json.RawMessage
-	if err := json.Unmarshal(gateway.commands[1].Input, &input); err != nil {
+	if err := json.Unmarshal(prepared.NormalizedInput, &input); err != nil {
 		t.Fatal(err)
 	}
 	if got := string(input["source_asset"]); got != `"rigged-glb"` {
 		t.Fatalf("second step bound source_asset %s, want the rigged GLB; input %s", got, gateway.commands[1].Input)
+	}
+	if got := string(input["resize_height"]); got != `1` {
+		t.Fatalf("second step resize_height = %s, want 1; input %s", got, prepared.NormalizedInput)
 	}
 }
