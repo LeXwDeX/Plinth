@@ -139,7 +139,7 @@ a build label, not proof that a dirty source tree matches that commit. Do not us
 check directory isolation. Keep the source worktree available while running.
 
 ```bash
-git status --short
+git status --short   # must print nothing: capture refuses a dirty worktree
 git rev-parse HEAD
 shasum -a 256 "$CAPTURE_ROOT/catalog.json"
 go test -c -ldflags "-X github.com/LeXwDeX/Plinth/internal/app.wireCaptureSourceSHA=$(git rev-parse HEAD)" -o "$CAPTURE_ROOT/wire-capture.test" ./internal/app

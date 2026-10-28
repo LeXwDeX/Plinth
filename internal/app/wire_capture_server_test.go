@@ -17,6 +17,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"reflect"
@@ -610,6 +611,16 @@ func (c *wireCapture) writeReplayPolicy(policy wirefixture.Policy) (func(bool), 
 	return cleanup, nil
 }
 
+// requireCleanWireCaptureWorktree refuses to record from a dirty tree: the
+// injected source label would not identify the code that produced the sample.
+func requireCleanWireCaptureWorktree(worktree string) error {
+	out, err := exec.Command("git", "-C", worktree, "status", "--porcelain", "--untracked-files=all").Output()
+	if err != nil || len(bytes.TrimSpace(out)) != 0 {
+		return errors.New("wire capture: clean source worktree required; samples from a dirty tree are not recorded")
+	}
+	return nil
+}
+
 func TestWireCaptureServer(t *testing.T) {
 	ack := os.Getenv("ART_AI_WIRE_CAPTURE_ACK")
 	if ack == "" {
@@ -619,7 +630,11 @@ func TestWireCaptureServer(t *testing.T) {
 	if !ok || !filepath.IsAbs(source) {
 		t.Fatal("wire capture: untrimmed source location required")
 	}
-	capture, err := prepareWireCapture(filepath.Dir(filepath.Dir(filepath.Dir(source))), os.Getenv("ART_AI_WIRE_CAPTURE_ROOT"), ack, wireCaptureSourceSHA, os.Getenv)
+	worktree := filepath.Dir(filepath.Dir(filepath.Dir(source)))
+	if err := requireCleanWireCaptureWorktree(worktree); err != nil {
+		t.Fatal(err)
+	}
+	capture, err := prepareWireCapture(worktree, os.Getenv("ART_AI_WIRE_CAPTURE_ROOT"), ack, wireCaptureSourceSHA, os.Getenv)
 	if err != nil {
 		t.Fatal(err)
 	}
