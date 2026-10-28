@@ -656,10 +656,19 @@ func (executor *Executor) executeProcessing(
 			selectedInUI = false
 		}
 	}
-	if processing.ReferenceArgument != "" && (referenceAsked || handlesAsked || selectedInUI) {
+	// A service that requires its reference image (Hyper3D texture, Bang of a
+	// local model) takes the one image of this turn or of the selection even
+	// when the call did not name it; with none or several it asks the person
+	// instead of freezing a step the kernel would refuse (#92).
+	referenceParameter, declaresReference := semanticParameter(chosen.offering, generation.SemanticReferenceImage)
+	referenceRequired := declaresReference && referenceParameter.Required && processing.ReferenceArgument != ""
+	if processing.ReferenceArgument != "" && (referenceAsked || handlesAsked || selectedInUI || referenceRequired) {
 		urls, err := executor.selectReferencesBy(command, arguments, processing.ReferenceArgument)
 		if err != nil {
 			return executor.reject(command, err.Error())
+		}
+		if referenceRequired && (len(urls) == 0 || (len(urls) > 1 && referenceParameter.Type == "asset")) {
+			return executor.reject(command, messages.ReferenceRequired)
 		}
 		if len(urls) > 0 {
 			parameter, ok := semanticParameter(chosen.offering, generation.SemanticReferenceImage)
