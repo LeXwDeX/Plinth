@@ -382,8 +382,12 @@ func validPublicHost(host string) bool {
 	if err != nil || parsed.Hostname() == "" || parsed.User != nil {
 		return false
 	}
-	if _, err := netip.ParseAddr(parsed.Hostname()); err == nil {
+	if _, err := netip.ParseAddr(parsed.Hostname()); err == nil || legacyNumericHostRE.MatchString(parsed.Hostname()) {
 		return false
 	}
 	return true
 }
+
+// legacyNumericHostRE matches hosts that resolvers read as an IPv4 address in
+// integer, hex or octal form (3232235529, 0xC0A80009, 0300.0250.0.9).
+var legacyNumericHostRE = regexp.MustCompile(`(?i)^(?:0x[0-9a-f]+|\d+)(?:\.(?:0x[0-9a-f]+|\d+))*$`)

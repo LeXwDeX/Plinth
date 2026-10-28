@@ -285,12 +285,25 @@ func checkText(text string, allowWhitespace bool) error {
 			return fmt.Errorf("%w: control character", ErrUnsafePublicValue)
 		}
 	}
+	if err := checkTextContent(text); err != nil {
+		return err
+	}
+	// A value hidden behind %XX escapes is judged by what it decodes to.
+	for _, decoded := range percentDecodedVariants(text) {
+		if err := checkTextContent(decoded); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkTextContent(text string) error {
 	if credentialRE.MatchString(text) || credentialAssignment(text) || embeddedCredentialField(text) ||
 		privateHostRE.MatchString(text) || dataURIRE.MatchString(text) || nonPublicIPsInText(text) ||
 		protocolRelativeURLRE.MatchString(text) || pathURLRefRE.MatchString(text) || pathUserinfoURLRE.MatchString(text) {
 		return fmt.Errorf("%w: credential, private host or data URI", ErrUnsafePublicValue)
 	}
-	if emailRE.MatchString(text) || signedQueryRE.MatchString(text) || uuidRE.MatchString(text) || embeddedBlobRE.MatchString(text) {
+	if emailRE.MatchString(text) || signedQueryRE.MatchString(text) || uuidRE.MatchString(text) || embeddedBlobRE.MatchString(text) || mixedBlob(text) {
 		return fmt.Errorf("%w: personal identifier, signed query or embedded binary", ErrUnsafePublicValue)
 	}
 	for _, raw := range schemeURLRE.FindAllString(text, -1) {
@@ -304,6 +317,9 @@ func checkText(text string, allowWhitespace bool) error {
 }
 
 func nonPublicIPsInText(text string) bool {
+	if legacyIPv4NonPublic(text) {
+		return true
+	}
 	for _, raw := range ipv4RE.FindAllString(text, -1) {
 		if addr, err := netip.ParseAddr(raw); err == nil && nonPublicAddr(addr) {
 			return true
