@@ -15,6 +15,9 @@ func TestNoPromptNoteWithoutKnownReferenceLimit(t *testing.T) {
 	product := qualifiedMultiviewCatalog(t)
 	app := product.Application()
 	tool, _ := toolDescriptionNoteFixture(t)
+	// This test pins the no_prompt sentence; the settings sentence is covered
+	// by TestToolDescriptionListsOnlyDeclaredSettings.
+	tool.ReferenceCapacityNote.Settings = ""
 	scalar, ok := product.Get("tripo/geometry/smartsegment-image")
 	if !ok || !scalar.Enabled || scalar.ModelID != "tripo-smartsegment-image" {
 		t.Fatal("missing enabled scalar-reference offering")

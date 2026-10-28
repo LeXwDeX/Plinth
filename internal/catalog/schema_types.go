@@ -2356,11 +2356,14 @@ type ChatPendingApprovalsSchema struct {
 
 // ChatToolReferenceCapacityNote words what the turn's picked model does with
 // reference pictures: Single for a model that takes one ({model}), Multiple for
-// one that takes up to {count} pictures ({model}, {count}).
+// one that takes up to {count} pictures ({model}, {count}). Settings lists the
+// settings the selected Offering declares for the person ({model},
+// {settings}); the runtime fills {settings} from the Offering's parameters.
 type ChatToolReferenceCapacityNote struct {
 	Single   string `json:"single"`
 	Multiple string `json:"multiple"`
 	NoPrompt string `json:"no_prompt,omitempty"`
+	Settings string `json:"settings,omitempty"`
 }
 
 // ChatPendingApprovalMessages are the texts of a late decision's messages.
