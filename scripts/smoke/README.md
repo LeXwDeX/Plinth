@@ -438,6 +438,28 @@ response; it must never retry a paid click to repair capture. The main operator
 coordinates a new authorized live round serially. This preflight does not complete
 #365 or claim a Meshy asset capture.
 
+#### After a capture: review, coverage matrix and privacy scan
+
+Capture only runs from a clean worktree (`TestWireCaptureServer` stops when
+`git status --porcelain --untracked-files=all` prints anything), so a sample's
+source label always names the code that produced it. A candidate still enters the
+repository only after human privacy and provenance review. When committing one
+(`*.candidate.json` with its `.meta.json` and `.policy.json`), run both offline
+checks and commit the regenerated matrix with it:
+
+```bash
+UPDATE_WIRE_COVERAGE=1 go test ./internal/testutil/wirefixture -run Coverage -count=1
+go test ./internal/testutil/wirefixture -count=1
+```
+
+`testdata/wire-coverage.generated.json` is generated from the Catalog and the
+committed samples, never edited by hand; units without a real sample stay
+`missing`. `TestCommittedWireCorpusHasNoPrivateData` rescans every committed
+candidate, meta, policy, evidence file and the matrix, and rejects policies that
+`ValidatePolicy` refuses. The full-stack replays are in
+`internal/app/agent_flow_replay_test.go`. See `docs/architecture.md`
+"Wire 黄金样本、覆盖矩阵与全栈离线回放" for rules, limits and what is not covered.
+
 ### Recovery Fixture
 
 此夹具用于缺少自然失败/暂停样本时的有界验收。普通 `cmd/art-ai` 二进制不包含故障控制器；只有 `go test -c ./internal/app` 生成的测试二进制能运行 `TestAcceptanceServer`。`dev-test` 主机上的实际故障进程使用独立 loopback 端口及私有目录，不能使用 `dev-test` 主实例的入口端口，也不能复用共享数据库、资产或 Catalog 的写路径。`dev-test` 主实例的同版正常回归仍按上文 L0/L1/L2 执行。

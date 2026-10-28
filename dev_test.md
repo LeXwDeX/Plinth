@@ -91,6 +91,7 @@ CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check
 - 离线契约测试应在 HTTP 边界检查实际发出的 path、method、headers、body 类型与字段/枚举组合，以及阶段和来源；并检查响应状态、输出形状与价格/费用字段（适用时）。覆盖合法组合和有依据的边界，不因 Adapter 返回成功就省略 wire 断言。
 - 官方示例须脱敏并记录出处与版本；真实响应 fixture 须经审查、脱敏，并标记端点、API/模型版本、采集日期和适用范围。未知结果、不支持的能力及越权请求用负控覆盖；负控不得通过重放真实付费请求制造样本。Fixture 是离线测试资料，不证明当前上游仍返回相同内容。
 - 将这些离线契约测试纳入现有 `go test -count=1 ./...` 与 `CGO_ENABLED=1 go test -race -count=1 ./...`；它们随现有门禁运行（普通测试在本地，race 在 CI），不新增平行门禁清单，也不把 CI 改为联网或逐次付费调用。本文规定应覆盖的方法，不代表目前每个上游端点都已有此类测试；实际覆盖范围和缺口须以关联 Issue/MR 的源码与测试核查结果为准。
+- 已提交的真实 wire 样本（`*.candidate.json`）另有两项离线检查，同样随现有 `go test` 运行，不新增门禁项：`internal/testutil/wirefixture` 的 `TestWireCoverageMatrix` 校验由 Catalog 和样本生成的覆盖矩阵 `testdata/wire-coverage.generated.json`（样本或 Catalog 变化后用 `UPDATE_WIRE_COVERAGE=1 go test ./internal/testutil/wirefixture -run Coverage` 重新生成并随同提交，不手改），`TestCommittedWireCorpusHasNoPrivateData` 重扫样本、meta、policy 与矩阵的隐私。真实采集必须在干净工作树进行。缺真实样本的 Offering 在矩阵里列为 `missing`，不用合成数据填充；规则与限制见 `docs/architecture.md`「Wire 黄金样本、覆盖矩阵与全栈离线回放」。
 - `dev-test` 测试栈的真实付费验收仍按既有授权和 §11 流程执行，并核对实际请求体、精确 revision、必需产物及鉴权交付/UI；正式栈只运行免费 L0/L1，付费生成须用户明确决定。上游 `service_unavailable` 等失败不能据此排除本地请求错误；先独立复核该端点官方合同和实际请求证据，再定位原因。不得用盲目重试、放宽断言或修改 mock 期望来掩盖失败。
 
 ### 自动化门禁说明
