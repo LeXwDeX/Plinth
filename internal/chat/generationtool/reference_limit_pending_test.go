@@ -436,6 +436,15 @@ func TestReferenceToolDescriptionDoesNotPromiseUnsentText(t *testing.T) {
 			if tc.warn && (!strings.Contains(note, "When this tool uses the selected model (") || !strings.Contains(note, ") for image-to-3D, the tool's text prompt is not sent to this service.")) {
 				t.Fatalf("warning is not conditional on this tool's image-to-3D execution: %q", note)
 			}
+			for _, guidance := range []string{
+				"parameter controls independently of the text prompt",
+				"do not infer that changing reference pictures is the only way to influence the result",
+				"Recommend a setting only when the selected Offering's facts support it, not from general provider knowledge",
+			} {
+				if strings.Contains(note, guidance) != tc.warn {
+					t.Errorf("guidance %q presence = %v, want %v: %q", guidance, strings.Contains(note, guidance), tc.warn, note)
+				}
+			}
 		})
 	}
 	for _, model := range []string{"meshy-7.1-multiview", "rodin-gen-2.5"} {
