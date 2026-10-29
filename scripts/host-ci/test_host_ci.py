@@ -311,11 +311,12 @@ class WorkflowReplay(unittest.TestCase):
         self.assertIn('no events were replayed', host_run.workflows_verdict({'events': []}))
 
     def test_act_containers_get_the_same_limits_as_the_gate_container(self):
-        args = preflight_args(act_cache=Path('/ci/act-cache'), runner_image='img@sha256:' + '0' * 64, act_job='', run_id='r1')
+        args = preflight_args(act_cache=Path('/ci/act-cache'), runner_image='img@sha256:' + '0' * 64, runner_name='plinth-ci-act:abc', act_job='', run_id='r1')
         command = host_run.act_command(Path('/ci/tools/act'), Path('/ci/run/r1/src'), 'push', Path('/ci/run/r1/e.json'), args)
         options = command[command.index('--container-options') + 1]
         for fragment in ('--cpus 4', '--memory 12g', '--memory-swap 12g', 'no-new-privileges', host_run.LABEL):
             self.assertIn(fragment, options)
+        self.assertIn('ubuntu-latest=plinth-ci-act:abc', command)
         self.assertEqual(command[command.index('--concurrent-jobs') + 1], '1')
         self.assertEqual(command[command.index('--container-daemon-socket') + 1], '-')
         self.assertNotIn('-j', command)
@@ -334,6 +335,21 @@ class WorkflowReplay(unittest.TestCase):
             self.assertEqual(stop.exception.status, 'act_checksum_mismatch')
             self.assertFalse((Path(base) / 'tools' / 'act-v0.2.89' / 'act.tar.gz').exists())
             self.assertFalse((Path(base) / 'tools' / 'act-v0.2.89' / 'act').exists())
+
+    def test_the_derived_runner_image_is_named_after_its_recipe_and_built_once(self):
+        args = preflight_args(runner_image='img@sha256:' + '0' * 64)
+        calls = []
+        def fake_docker(*a, **k):
+            calls.append(a)
+            return subprocess.CompletedProcess(a, 1 if a[0] == 'image' else 0, stdout='', stderr='')
+        with mock.patch.object(host_run, 'docker', fake_docker), mock.patch.object(host_run, 'say'), \
+                mock.patch.object(host_run.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as build:
+            name = host_run.ensure_runner_image(args)
+        self.assertRegex(name, r'^plinth-ci-act:[0-9a-f]{12}$')
+        self.assertIn(b'sqlite3', build.call_args.kwargs['input'])
+        self.assertIn(b'FROM img@sha256:', build.call_args.kwargs['input'])
+        other = host_run.RUNNER_DOCKERFILE.format(base='other@sha256:' + '1' * 64)
+        self.assertNotEqual(name.split(':')[1], __import__('hashlib').sha256(other.encode()).hexdigest()[:12])
 
     def test_pins_are_well_formed(self):
         self.assertRegex(run.ACT_VERSION, host_run.ACT_VERSION.pattern)
