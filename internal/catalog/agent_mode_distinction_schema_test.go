@@ -25,7 +25,7 @@ func TestAgentTextsSeparateAgentScopeFromApprovalMode(t *testing.T) {
 	}
 	require("system prompt", chat.Agent.SystemPrompt,
 		"Agent 范围模式", "批准方式", "输入区右下角", "顶栏", "你不能切换",
-		"重拓扑（Remesh）、绑骨（Rigging）、动画", "不要说需要切换到手动模式")
+		"重拓扑（Remesh）、绑骨（Rigging）、动画", "不要说需要切换到手动模式", "固定的额外积分", "以工具结果里的 quote 为准")
 	require("agent scope context", chat.AgentScope.ContextTemplate,
 		"与付费步骤是否需要批准无关", "批准方式", "你都不能切换", "不要为了得到付费确认建议用户切换 Agent 范围")
 	require("agent scope rejection", chat.AgentScope.RejectionTemplate,
@@ -37,7 +37,7 @@ func TestAgentTextsSeparateAgentScopeFromApprovalMode(t *testing.T) {
 		}
 		seen++
 		require("tool "+tool.Name, tool.Description,
-			"approval mode", "remesh, rigging and animation are approved by policy in both modes",
+			"approval mode", "capabilities are approved by policy in both modes, except that a step with fixed extra credits",
 			"unrelated to the Agent scope", "Never tell the person to switch the Agent scope or the approval mode")
 	}
 	if seen != 2 {

@@ -1,7 +1,9 @@
 package app
 
 import (
+	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
@@ -38,5 +40,32 @@ func TestDefaultSchemaManualModeAutoApprovesRemeshRiggingAnimation(t *testing.T)
 		if approvalpolicy.RequiresHuman(policy, approvalpolicy.ModeAuto, capability) {
 			t.Errorf("%s needs a person in auto mode", capability)
 		}
+	}
+}
+
+// Tripo Rigging and decimation declare fixed additional export formats with extra
+// credits, so manual mode still asks a person for those steps even though the
+// capability itself is approved by policy. The Agent text states that exception.
+func TestDefaultSchemaTripoRiggingExtraCreditsNeedAPersonInManualMode(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := approvalPolicyFromSchema(product.Application())
+	// The default input carries fixed additional exports: Normalize refuses it until the extra spend is
+	// consented to, which is the extra-credit exception the Agent text names.
+	_, _, err = product.Normalize("rigging", "tripo/processing/rigging", json.RawMessage(`{"source_task":"task-1"}`))
+	if err == nil || !strings.Contains(err.Error(), "附加转换费用") {
+		t.Fatalf("tripo/processing/rigging does not declare fixed extra credits: %v", err)
+	}
+	const extra = 1
+	if approvalpolicy.RequiresHuman(policy, approvalpolicy.ModeManual, "rigging") {
+		t.Fatal("rigging itself needs a person")
+	}
+	if !approvalpolicy.RequiresHumanForExtraCredits(policy, approvalpolicy.ModeManual, extra) {
+		t.Fatal("manual mode approves Tripo rigging extra credits without a person")
+	}
+	if approvalpolicy.RequiresHumanForExtraCredits(policy, approvalpolicy.ModeAuto, extra) {
+		t.Fatal("auto mode asks a person for extra credits")
 	}
 }
