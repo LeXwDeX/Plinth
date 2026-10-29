@@ -1,3 +1,4 @@
+import { clearAccountClientStateWithoutSecureContext } from '@/lib/authentication/session-state';
 import type { ProductSchema } from '@/lib/product-schema';
 
 type Fetcher = (
@@ -86,6 +87,7 @@ export function createAuthenticationBrowserClient(
           response.status,
         );
       }
+      clearAccountClientStateWithoutSecureContext();
     },
   };
 }

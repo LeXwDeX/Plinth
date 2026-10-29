@@ -72,3 +72,40 @@ func TestAPIRateLimitCapsEachClientPerMinute(t *testing.T) {
 		t.Fatalf("next minute = %d", code)
 	}
 }
+
+// #134: Clear-Site-Data is only honoured in a secure context, so the header is sent
+// for HTTPS (directly or via a trusted proxy) and loopback hosts, never for plain HTTP
+// on an IP address, and X-Forwarded-Proto from an untrusted peer is ignored.
+func TestRequestIsSecureContext(t *testing.T) {
+	t.Parallel()
+	trusted := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+	for _, test := range []struct {
+		name, target, peer, proto string
+		want                      bool
+	}{
+		{"direct TLS", "https://203.0.113.5/api/auth/session", "203.0.113.9:5000", "", true},
+		{"plain HTTP on an IP address", "http://203.0.113.5:8080/api/auth/session", "203.0.113.9:5000", "", false},
+		{"plain HTTP on a name", "http://plinth.example.test/api/auth/session", "203.0.113.9:5000", "", false},
+		{"localhost", "http://localhost:3000/api/auth/session", "203.0.113.9:5000", "", true},
+		{"subdomain of localhost", "http://app.localhost/api/auth/session", "203.0.113.9:5000", "", true},
+		{"IPv4 loopback", "http://127.0.0.1:8080/api/auth/session", "203.0.113.9:5000", "", true},
+		{"IPv6 loopback", "http://[::1]:8080/api/auth/session", "203.0.113.9:5000", "", true},
+		{"a host that only starts with localhost", "http://localhost.evil.test/api/auth/session", "203.0.113.9:5000", "", false},
+		{"trusted proxy forwards HTTPS", "http://plinth.example.test/api/auth/session", "10.1.2.3:443", "https", true},
+		{"trusted proxy forwards HTTP", "http://plinth.example.test/api/auth/session", "10.1.2.3:443", "http", false},
+		{"trusted proxy appended HTTPS after a client-supplied value", "http://plinth.example.test/api/auth/session", "10.1.2.3:443", "http, https", true},
+		{"trusted proxy appended HTTP after a client-supplied HTTPS", "http://plinth.example.test/api/auth/session", "10.1.2.3:443", "https, http", false},
+		{"untrusted peer cannot claim HTTPS", "http://plinth.example.test/api/auth/session", "203.0.113.9:5000", "https", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodDelete, test.target, nil)
+			request.RemoteAddr = test.peer
+			if test.proto != "" {
+				request.Header.Set("X-Forwarded-Proto", test.proto)
+			}
+			if got := requestIsSecureContext(request, trusted); got != test.want {
+				t.Fatalf("secure context = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
