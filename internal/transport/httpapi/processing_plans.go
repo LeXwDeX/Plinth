@@ -118,6 +118,13 @@ func (s *Server) writeProcessingError(writer http.ResponseWriter, err error) {
 	case errors.Is(err, processing.ErrMissing):
 		s.writeMessageProblem(writer, http.StatusNotFound, "not_found", "error.task_not_found")
 	case errors.Is(err, processing.ErrInvalid):
+		// A plan refused for a reason the Schema words (a Remesh budget over a
+		// later step's source limit, #121) shows that reason; every other
+		// invalid plan keeps the generic message.
+		if reason := userFacingReason(writer, http.StatusBadRequest, err); reason != "" {
+			writeReasonProblem(writer, http.StatusBadRequest, "invalid_input", reason)
+			return
+		}
 		s.writeMessageProblem(writer, http.StatusBadRequest, "invalid_input", "error.processing_invalid")
 	case errors.Is(err, processing.ErrConflict):
 		s.writeMessageProblem(writer, http.StatusConflict, "conflict", "error.processing_conflict")

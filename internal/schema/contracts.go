@@ -215,3 +215,26 @@ func SourceParameterRole(parameter Parameter) (ParameterSemantic, bool) {
 	}
 	return "", false
 }
+
+// StepInputParameter reports whether parameter is an ordinary input the person
+// or the Agent supplies for a step: not fixed by the Schema, not one of the
+// step's source parameters and not hidden from the person. It is the one
+// filter every projection of "what this step takes" starts from (A2, #121).
+func StepInputParameter(parameter Parameter) bool {
+	if _, source := SourceParameterRole(parameter); source || parameter.Fixed {
+		return false
+	}
+	return parameter.Presentation == nil || parameter.Presentation.Surface != SurfaceHidden
+}
+
+// ConversationReferenceImage reports whether parameter takes its value from the
+// conversation: a reference image the person attaches to a message or names by
+// its handle (#187 D, #92). Such a picture belongs to one request, so the Agent
+// passes the handle and the executor resolves it to an owned input asset; the
+// saved settings never fix or fill it. A caller that also keeps the step's
+// extra-credit consent parameter out excludes Offering.ExtraConsentParameter
+// itself.
+func ConversationReferenceImage(parameter Parameter) bool {
+	return StepInputParameter(parameter) && parameter.Semantic == SemanticReferenceImage &&
+		(parameter.Type == "asset" || parameter.Type == "asset-array")
+}

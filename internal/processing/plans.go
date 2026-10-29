@@ -319,6 +319,9 @@ func (s *Service) Create(ctx context.Context, command CreateCommand) (Plan, erro
 	}
 	steps := make([]Step, 0, len(command.Steps))
 	previous := source.Offering
+	// The triangle count the chain delivers so far, when the Schema lets it be
+	// estimated (see checkSourceModelLimit). It starts from the source Task.
+	chain := chainTriangles{}.after(source.Offering, source.Input)
 	for _, requested := range command.Steps {
 		if requested.ExpectedOfferingRevision == "" {
 			return Plan{}, ErrInvalid
@@ -334,6 +337,12 @@ func (s *Service) Create(ctx context.Context, command CreateCommand) (Plan, erro
 		if len(requested.Input) == 0 || json.Unmarshal(requested.Input, &input) != nil || input == nil {
 			return Plan{}, ErrInvalid
 		}
+		// A step whose source-model limit the earlier steps would exceed makes
+		// the whole plan wrong; refuse it before any step is paid (#121).
+		if err := chain.check(offering); err != nil {
+			return Plan{}, err
+		}
+		chain = chain.after(offering, requested.Input)
 		for _, parameter := range offering.Parameters {
 			if _, source := schema.SourceParameterRole(parameter); !source {
 				continue

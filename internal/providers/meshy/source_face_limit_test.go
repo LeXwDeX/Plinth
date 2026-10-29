@@ -125,7 +125,7 @@ func TestRiggingSourceFaceLimitUnknownSourcesPass(t *testing.T) {
 }
 
 func TestSourceTriangleCountOnMinimalGLB(t *testing.T) {
-	policy := modelinput.Policy{ProfileID: modelinput.GeneratedProfileID, Revision: modelinput.GeneratedProfileRevision, Limits: sourceFaceReadLimits}
+	policy := modelinput.GeneratedPolicy()
 	for name, test := range map[string]struct {
 		raw  []byte
 		want int64
@@ -136,32 +136,106 @@ func TestSourceTriangleCountOnMinimalGLB(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			request, _ := riggingFaceRequest(t, test.raw, "asset")
 			asset := request.InputAssets["source_asset"][0]
-			got, known, err := (&Adapter{inputAssets: &profiledInputs{bodies: [][]byte{test.raw}}}).countSourceTriangles(context.Background(), request.Offering, asset, policy)
-			if err != nil || !known || got != test.want {
-				t.Fatalf("triangles=%d known=%v err=%v want %d", got, known, err, test.want)
+			got, known, err := (&Adapter{inputAssets: &profiledInputs{bodies: [][]byte{test.raw}}}).measureSourceModel(context.Background(), request.Offering, asset, policy)
+			if err != nil || !known || got.InstancedTriangles != test.want {
+				t.Fatalf("triangles=%d known=%v err=%v want %d", got.InstancedTriangles, known, err, test.want)
 			}
 		})
 	}
 }
 
-func TestSourceModelLimitDeclarationIsValidated(t *testing.T) {
-	request, _ := riggingFaceRequest(t, nil, "none")
-	if err := ValidateOffering(request.Offering); err != nil {
-		t.Fatal(err)
+// The ceiling is declared once, in the Offering's source_model_limit: changing
+// that declaration changes what the check refuses, with no second number in
+// the Adapter (A1, #121).
+func TestRiggingSourceFaceLimitFollowsTheSchemaDeclaration(t *testing.T) {
+	raw := modelinputtest.Large(modelinputtest.LargeOptions{Grid: 100}) // 19602 triangles
+	request, _ := riggingFaceRequest(t, raw, "asset")
+	adapter := &Adapter{inputAssets: &profiledInputs{bodies: [][]byte{raw}}}
+	if request.Offering.SourceModelLimit == nil || request.Offering.SourceModelLimit.MaxTriangles != 320000 {
+		t.Fatalf("declaration = %+v", request.Offering.SourceModelLimit)
 	}
-	for name, mutate := range map[string]func(*wireOptions){
-		"zero limit": func(o *wireOptions) { o.SourceModelLimit.MaxTriangles = 0 },
-		"bad basis":  func(o *wireOptions) { o.SourceModelLimit.CountBasis = "quads" },
-		"huge limit": func(o *wireOptions) { o.SourceModelLimit.MaxTriangles = 1 << 40 },
-	} {
-		t.Run(name, func(t *testing.T) {
-			bad := request
-			mutateProfileOptions(&bad, mutate)
-			if ValidateOffering(bad.Offering) == nil {
-				t.Fatal("invalid source_model_limit accepted")
-			}
-		})
+	if err := adapter.ValidateInput(context.Background(), request); err != nil {
+		t.Fatalf("within the declared limit: %v", err)
+	}
+	request.Offering.SourceModelLimit = &generation.SourceModelLimit{MaxTriangles: 19601, CountBasis: "triangles"}
+	refusal := generation.UserFacingError(adapter.ValidateInput(context.Background(), request))
+	if refusal == nil || !strings.Contains(refusal.Detail, "19601") || !strings.Contains(refusal.Detail, "19602") {
+		t.Fatalf("a lowered declaration must be what is enforced: %v", refusal)
+	}
+	request.Offering.SourceModelLimit = nil
+	if err := adapter.ValidateInput(context.Background(), request); err != nil {
+		t.Fatalf("an Offering without the declaration must not be checked: %v", err)
+	}
+}
+
+// B11: an upload larger than the file the step could take is not read into
+// memory at all; the upstream stays the authority for it. A native Task source
+// is not an inline upload: it is read up to the parser ceiling, so a 70-256 MiB
+// Task GLB over the face limit is still refused before submission.
+func TestRiggingSourceFaceLimitReadBoundsFollowTheSourceKind(t *testing.T) {
+	raw := modelinputtest.Large(modelinputtest.LargeOptions{Grid: 548}) // about 600k triangles
+	request, _ := riggingFaceRequest(t, raw, "asset")
+	var options wireOptions
+	if err := json.Unmarshal(request.Offering.ProviderOptions, &options); err != nil || options.InlineModelInput == nil {
+		t.Fatalf("rigging inline input = %+v, %v", options.InlineModelInput, err)
+	}
+	policy := modelinput.GeneratedPolicy()
+	if got := inlineSourceLimit(request.Offering, policy); got != options.InlineModelInput.MaxBytes || got >= policy.Limits.MaxBytes {
+		t.Fatalf("inline limit = %d, want the declared inline size %d below the parser ceiling %d", got, options.InlineModelInput.MaxBytes, policy.Limits.MaxBytes)
+	}
+	opened := &profiledInputs{bodies: [][]byte{raw}}
+	asset := request.InputAssets["source_asset"][0]
+	asset.Size = options.InlineModelInput.MaxBytes + 1
+	request.InputAssets["source_asset"][0] = asset
+	if err := (&Adapter{inputAssets: opened}).ValidateInput(context.Background(), request); err != nil {
+		t.Fatalf("oversized upload blocked: %v", err)
+	}
+	if opened.opens != 0 {
+		t.Fatalf("oversized upload was opened %d times", opened.opens)
+	}
+
+	// The same size as a native Task source is measured. The stored bytes are
+	// the real (smaller) GLB, so the declared size is only what routes it.
+	task, _ := riggingFaceRequest(t, raw, "task")
+	dependency := task.TaskDependencies["source_task"]
+	dependency.Assets[0].Size = options.InlineModelInput.MaxBytes + 1
+	task.TaskDependencies["source_task"] = dependency
+	assets := sourceModelAssets(task, inlineSourceLimit(task.Offering, policy), policy.Limits.MaxBytes)
+	if len(assets) != 1 {
+		t.Fatalf("a native Task source above the inline size must still be a candidate: %v", assets)
+	}
+	dependency.Assets[0].Size = policy.Limits.MaxBytes + 1
+	task.TaskDependencies["source_task"] = dependency
+	if assets := sourceModelAssets(task, inlineSourceLimit(task.Offering, policy), policy.Limits.MaxBytes); len(assets) != 0 {
+		t.Fatalf("a Task source above the parser ceiling must not be read: %v", assets)
 	}
 }
 
 func formatInt(n int64) string { return strconv.FormatInt(n, 10) }
+
+// With the Offering's inline size lowered below the stored GLB, a native Task
+// source over the face limit is still refused, while the same bytes as an
+// upload are left to the upstream (#121 review: a 70-256 MiB native Task
+// source must not slip past the pre-submission check).
+func TestRiggingSourceFaceLimitStillRefusesAnOversizedNativeTaskSource(t *testing.T) {
+	raw := modelinputtest.Large(modelinputtest.LargeOptions{Grid: 548}) // about 600k triangles
+	lowerInline := func(request *generation.InputValidationRequest) {
+		var options map[string]any
+		if err := json.Unmarshal(request.Offering.ProviderOptions, &options); err != nil {
+			t.Fatal(err)
+		}
+		options["inline_model_input"] = map[string]any{"max_bytes": len(raw) / 2}
+		request.Offering.ProviderOptions, _ = json.Marshal(options)
+	}
+	task, _ := riggingFaceRequest(t, raw, "task")
+	lowerInline(&task)
+	refusal := generation.UserFacingError((&Adapter{inputAssets: &profiledInputs{bodies: [][]byte{raw}}}).ValidateInput(context.Background(), task))
+	if refusal == nil || !strings.Contains(refusal.Detail, "320000") {
+		t.Fatalf("native Task source above the inline size passed: %v", refusal)
+	}
+	upload, _ := riggingFaceRequest(t, raw, "asset")
+	lowerInline(&upload)
+	if err := (&Adapter{inputAssets: &profiledInputs{bodies: [][]byte{raw}}}).ValidateInput(context.Background(), upload); err != nil {
+		t.Fatalf("upload above the inline size must be left to the upstream: %v", err)
+	}
+}

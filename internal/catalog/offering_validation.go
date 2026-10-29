@@ -422,6 +422,9 @@ func validateOffering(
 	if err := validateOfferingPostSuccess(offering); err != nil {
 		return err
 	}
+	if err := validateOfferingModelLimits(offering); err != nil {
+		return err
+	}
 	if err := validateOfferingCopy(offering); err != nil {
 		return err
 	}

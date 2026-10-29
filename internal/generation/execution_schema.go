@@ -13,4 +13,8 @@ type (
 	StatusRule          = schema.StatusRule
 	StatusMapping       = schema.StatusMapping
 	ResponseAlias       = schema.ResponseAlias
+	// SourceModelLimit / OutputTriangleEstimate are the 3D triangle declarations
+	// of an Offering a Processing Plan compares before anything is paid (#121).
+	SourceModelLimit       = schema.SourceModelLimit
+	OutputTriangleEstimate = schema.OutputTriangleEstimate
 )

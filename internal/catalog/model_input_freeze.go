@@ -131,5 +131,27 @@ func cloneOfferingModelProfiles(source schema.Offering) schema.Offering {
 		output.MediaTypes = append([]string(nil), output.MediaTypes...)
 	}
 	source.ProviderOptions = append(json.RawMessage(nil), source.ProviderOptions...)
+	source.SourceModelLimit = cloneSourceModelLimit(source.SourceModelLimit)
+	source.OutputTriangles = cloneOutputTriangles(source.OutputTriangles)
 	return source
+}
+
+func cloneSourceModelLimit(source *schema.SourceModelLimit) *schema.SourceModelLimit {
+	if source == nil {
+		return nil
+	}
+	copied := *source
+	return &copied
+}
+
+func cloneOutputTriangles(source *schema.OutputTriangleEstimate) *schema.OutputTriangleEstimate {
+	if source == nil {
+		return nil
+	}
+	copied := *source
+	copied.TrianglesPerFace = make(map[string]int64, len(source.TrianglesPerFace))
+	for topology, factor := range source.TrianglesPerFace {
+		copied.TrianglesPerFace[topology] = factor
+	}
+	return &copied
 }

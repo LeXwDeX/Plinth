@@ -64,6 +64,28 @@ class Unbindable(GateError):
     pass
 
 
+# Command-line tools the gates call directly (frontend tests shell out to bash and jq;
+# git backs the public tree gate). The C compiler is needed only by the race gate (CGO).
+REQUIRED_TOOLS = ['git', 'pnpm', 'node', 'go', 'bash', 'jq']
+RACE_TOOLS = [('C compiler (gcc or cc, for CGO)', ('gcc', 'cc'))]
+
+
+def missing_tools(race=False):
+    """Names of required tools absent from PATH, so a missing tool is reported up front
+    instead of failing deep inside a gate with `jq: command not found`."""
+    missing = [name for name in REQUIRED_TOOLS if shutil.which(name) is None]
+    if race:
+        missing += [label for label, names in RACE_TOOLS if not any(shutil.which(n) for n in names)]
+    return missing
+
+
+def require_tools(race=False):
+    missing = missing_tools(race)
+    if missing:
+        raise GateError('missing required tools: ' + ', '.join(missing)
+                        + '; install them first (see CONTRIBUTING.md "Development setup")')
+
+
 def selected_gates(race=False):
     if not race:
         return list(GATES)
@@ -934,6 +956,8 @@ def main():
     if args.list_gates:
         print(json.dumps(gate_manifest(), indent=2))
         return 0
+    if not args.check:
+        require_tools(args.race)
     root = Path(git(Path.cwd(), 'rev-parse', '--show-toplevel')).resolve()
     push_data = sys.stdin.read() if args.pre_push else None
     if push_data is not None and not verify_push(root, push_data):
