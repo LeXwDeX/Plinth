@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-10-29.issue104-62-trial-fixes.2",
+    "revision": "2026-10-30.issue103-rigging-face-limit.2",
     "terminology": {
       "user_facing": [
         {
@@ -1429,7 +1429,8 @@
         "input_parameter_invalid": "{label}的值无效；这一步没有提交，也没有扣积分。请检查后重试。",
         "input_parameters_invalid": "这次请求的输入参数无效；这一步没有提交，也没有扣积分。请检查后重试。",
         "input_source_task_expired": "来源任务 {label} 在服务商处的原任务已超过保留期；这一步没有提交，也没有扣积分。请先重新生成来源模型，或改用接受已保存模型文件的服务。",
-        "input_source_task_unsupported": "来源任务 {label} 不满足这一步的来源要求；这一步没有提交，也没有扣积分。请重新选择来源。"
+        "input_source_task_unsupported": "来源任务 {label} 不满足这一步的来源要求；这一步没有提交，也没有扣积分。请重新选择来源。",
+        "input_source_face_limit": "来源模型有 {faces} 个三角面，超过这一步最多 {limit} 个三角面的限制；这一步没有提交，也没有扣积分。请先把模型简化（Remesh）到上限以内再试。"
       },
       "task_cancellation": {
         "timeout_seconds": 15,
@@ -14790,6 +14791,7 @@
             "runtime.generation_messages.input_parameters_invalid": "The input parameters for this request are invalid. This step was not submitted and no credits were spent. Check them and retry.",
             "runtime.generation_messages.input_source_task_expired": "The provider no longer keeps the original task for source {label} (past its retention). This step was not submitted and no credits were spent. Generate the source again, or use a service that accepts the saved model file.",
             "runtime.generation_messages.input_source_task_unsupported": "Source {label} does not meet this step's source requirements. This step was not submitted and no credits were spent. Select another source.",
+            "runtime.generation_messages.input_source_face_limit": "The source model has {faces} triangle faces, over this step's limit of {limit}. This step was not submitted and no credits were spent. Simplify the model (Remesh) to within the limit first, then retry.",
             "runtime.task_cancellation.local_only": "Task canceled; it had not yet been submitted upstream",
             "runtime.task_cancellation.requesting": "Task canceled locally; requesting the upstream to stop. Execution and billing outcome are not yet confirmed",
             "runtime.task_cancellation.confirmed": "Task canceled; the upstream confirmed it stopped. The final cost is per the upstream bill",
@@ -15863,7 +15865,7 @@
             "附加转换选项": "Additional conversion options",
             "附加转换选项的预计额外积分超出本次提交的授权上限，请减少选项后重试": "The estimated extra credits for the additional conversion options exceed the authorized limit for this submission. Reduce the options and try again.",
             "随机种子": "Random seed",
-            "需要带贴图、面向 +Z 的人形角色。文件结构通过校验不代表满足人形或朝向条件；不符合条件时请先处理模型。": "Requires a textured humanoid character facing +Z. Passing file structure validation does not mean the humanoid or orientation requirements are met; process the model first if they aren't.",
+            "需要带贴图、面向 +Z 的人形角色。文件结构通过校验不代表满足人形或朝向条件；不符合条件时请先处理模型。模型最多 320000 个三角面（四边面按两个三角面计），超出请先 Remesh 到上限以内。": "Requires a textured humanoid character facing +Z. Passing file structure validation does not mean the humanoid or orientation requirements are met; process the model first if they aren't. The model may have at most 320000 triangle faces (a quad counts as two); if it has more, Remesh it to within the limit first.",
             "静态 GLB → glTF": "Static GLB → glTF",
             "面数上限": "Face limit",
             "面数上限（额外计费）": "Face limit (extra charge)",
@@ -23889,7 +23891,7 @@
     },
     {
       "id": "meshy/processing/rigging",
-      "revision": "2026-10-22.329.1",
+      "revision": "2026-10-29.issue103-rigging-face-limit.1",
       "provider_id": "meshy",
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
@@ -23959,7 +23961,7 @@
           "uploaded_model": {
             "profile_id": "static-glb-v1",
             "require_textures": true,
-            "requirements": "需要带贴图、面向 +Z 的人形角色。文件结构通过校验不代表满足人形或朝向条件；不符合条件时请先处理模型。"
+            "requirements": "需要带贴图、面向 +Z 的人形角色。文件结构通过校验不代表满足人形或朝向条件；不符合条件时请先处理模型。模型最多 320000 个三角面（四边面按两个三角面计），超出请先 Remesh 到上限以内。"
           }
         },
         {
@@ -24024,6 +24026,10 @@
         "api_version": "v1",
         "inline_model_input": {
           "max_bytes": 73400320
+        },
+        "source_model_limit": {
+          "max_triangles": 320000,
+          "count_basis": "triangles"
         },
         "result_assets": [
           {

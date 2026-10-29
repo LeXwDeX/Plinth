@@ -202,7 +202,7 @@ func (a *Adapter) ValidateInput(ctx context.Context, request generation.InputVal
 		return modelSourceFailure(generation.ErrUnavailable, err)
 	}
 	if !bound {
-		return nil
+		return a.validateSourceFaceLimit(ctx, request)
 	}
 	_, err = a.readProfiledModel(ctx, request, c)
 	return err
