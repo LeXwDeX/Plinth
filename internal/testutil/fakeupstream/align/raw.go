@@ -2,12 +2,15 @@ package align
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -90,8 +93,13 @@ func (t *TeeTransport) Save(path string) error {
 	return os.WriteFile(path, raw, 0o600)
 }
 
-// ReplayTransport serves saved official exchanges in order, so the same script
-// produces the same requests and the exporter can run again offline.
+// ReplayTransport serves saved official exchanges, so the same script produces
+// the same requests and the exporter can run again offline. An exchange is
+// identified by method, URL and a digest of the request body: two steps that hit
+// one endpoint with different bodies (a rejected empty create and the real one)
+// never take each other's recording. Repeats of the same request (polls) are
+// served in recorded order. Multipart bodies carry a random boundary, so they
+// are identified by method and URL alone.
 type ReplayTransport struct {
 	mu    sync.Mutex
 	queue map[string][]rawExchange
@@ -112,7 +120,7 @@ func LoadReplay(path string) (*ReplayTransport, error) {
 	}
 	replay := &ReplayTransport{queue: map[string][]rawExchange{}}
 	for _, exchange := range log {
-		key := exchange.Method + " " + exchange.URL
+		key := replayKey(exchange.Method, exchange.URL, exchange.ReqType, exchange.ReqBody)
 		replay.queue[key] = append(replay.queue[key], exchange)
 	}
 	return replay, nil
@@ -124,17 +132,18 @@ func LoadReplay(path string) (*ReplayTransport, error) {
 func (r *ReplayTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	key := request.Method + " " + request.URL.String()
+	var sent []byte
+	if request.Body != nil {
+		sent, _ = io.ReadAll(request.Body)
+		_ = request.Body.Close()
+	}
+	key := replayKey(request.Method, request.URL.String(), request.Header.Get("Content-Type"), sent)
 	pending := r.queue[key]
 	if len(pending) == 0 {
-		return nil, fmt.Errorf("align: no recorded exchange for %s", key)
+		return nil, fmt.Errorf("align: no recorded exchange for %s %s", request.Method, request.URL)
 	}
 	exchange := pending[0]
 	r.queue[key] = pending[1:]
-	if request.Body != nil {
-		_, _ = io.Copy(io.Discard, request.Body)
-		_ = request.Body.Close()
-	}
 	header := http.Header{}
 	for name, value := range exchange.RespHeaders {
 		header.Set(name, value)
@@ -144,4 +153,12 @@ func (r *ReplayTransport) RoundTrip(request *http.Request) (*http.Response, erro
 		Body: io.NopCloser(bytes.NewReader(exchange.RespBody)), ContentLength: int64(len(exchange.RespBody)),
 		Request: request, Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
 	}, nil
+}
+
+func replayKey(method, url, contentType string, body []byte) string {
+	if strings.HasPrefix(strings.ToLower(contentType), "multipart/") {
+		body = nil
+	}
+	sum := sha256.Sum256(body)
+	return method + " " + url + " " + hex.EncodeToString(sum[:8])
 }

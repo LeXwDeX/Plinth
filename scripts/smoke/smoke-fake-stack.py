@@ -128,25 +128,43 @@ class Processes:
             self.stop(child)
 
 
-def wait_http(url, seconds=30):
+def port_busy(port):
+    try:
+        socket.create_connection(("127.0.0.1", port), timeout=1).close()
+        return True
+    except OSError:
+        return False
+
+
+def require_free(port, what):
+    """Refuse a port something else already listens on: a health answer from a
+    foreign process must never be taken for our own instance."""
+    if port_busy(port):
+        raise RuntimeError(f"port {port} for the {what} is already in use; stop that process or set FAKE_STACK_FAKE_PORT / FAKE_STACK_PORT")
+
+
+def wait_http(url, child, seconds=30):
+    """Healthy only while the child we started is still alive."""
     end = time.time() + seconds
     while time.time() < end:
+        if child.poll() is not None:
+            return False
         try:
-            if urllib.request.urlopen(url, timeout=1).status == 200:
+            if urllib.request.urlopen(url, timeout=1).status == 200 and child.poll() is None:
                 return True
         except Exception:
             time.sleep(0.25)
     return False
 
 
-def wait_port(port, seconds=15):
+def wait_port(port, child, seconds=15):
     end = time.time() + seconds
     while time.time() < end:
-        try:
-            socket.create_connection(("127.0.0.1", port), timeout=1).close()
-            return True
-        except OSError:
-            time.sleep(0.2)
+        if child.poll() is not None:
+            return False
+        if port_busy(port):
+            return child.poll() is None
+        time.sleep(0.2)
     return False
 
 
@@ -204,10 +222,11 @@ def stack_env(work, name, catalog, key):
 
 def start_stack(processes, stack_binary, work, name, catalog, key):
     env, root = stack_env(work, name, catalog, key)
+    require_free(STACK_PORT, "stack")
     child = processes.start([stack_binary, "-test.run", "^TestFakeUpstreamStack$", "-test.timeout", "0"], env,
                             os.path.join(root, "stack.log"))
-    if not wait_http(f"http://127.0.0.1:{STACK_PORT}/healthz"):
-        raise RuntimeError(f"stack {name} did not become healthy; see {root}/stack.log")
+    if not wait_http(f"http://127.0.0.1:{STACK_PORT}/healthz", child):
+        raise RuntimeError(f"stack {name} did not become healthy (exited={child.poll() is not None}); see {root}/stack.log")
     api = Api(f"http://127.0.0.1:{STACK_PORT}")
     api.login()
     return child, api
@@ -392,9 +411,11 @@ def main():
     try:
         fake_binary, stack_binary = build(work)
         catalog = private_catalog(work)
-        processes.start([fake_binary, "-addr", f"127.0.0.1:{FAKE_PORT}", "-artifact-origin", f"https://{ASSET_HOST}"],
-                        {"PATH": os.environ["PATH"]}, os.path.join(work, "fake.log"))
-        if not wait_port(FAKE_PORT):
+        require_free(FAKE_PORT, "fake upstream")
+        require_free(STACK_PORT, "stack")
+        fake_child = processes.start([fake_binary, "-addr", f"127.0.0.1:{FAKE_PORT}", "-artifact-origin", f"https://{ASSET_HOST}"],
+                                     {"PATH": os.environ["PATH"]}, os.path.join(work, "fake.log"))
+        if not wait_port(FAKE_PORT, fake_child):
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 

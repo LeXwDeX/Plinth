@@ -208,3 +208,44 @@ func TestTeeAndReplayServeASubsetOfARecording(t *testing.T) {
 		t.Fatal("a third /a has no recording")
 	}
 }
+
+// Two steps hit one endpoint: a rejected empty create and the real one. A
+// replay of the real step alone must not receive the rejection's recording.
+func TestReplayOfASubsetKeepsStepsOnTheSameEndpointApart(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		if len(body) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprint(w, `{"error":"model is required"}`)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"data":{"id":"t1"}}`)
+	}))
+	defer server.Close()
+	steps := []Step{
+		{Name: "create-invalid", Method: "POST", Path: "/create", Body: map[string]any{}},
+		{Name: "create", Method: "POST", Path: "/create", Body: map[string]any{"model": "m"}, Capture: map[string]string{"id": "data.id"}},
+	}
+	tee := NewTee(nil)
+	if _, err := Run(context.Background(), "p", "v1", Target{BaseURL: server.URL, Key: "k", Client: &http.Client{Transport: tee}}, steps, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	file := t.TempDir() + "/raw.json"
+	if err := tee.Save(file); err != nil {
+		t.Fatal(err)
+	}
+	replay, err := LoadReplay(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.Close()
+	bundle, err := Run(context.Background(), "p", "v1", Target{BaseURL: server.URL, Key: "k", Client: &http.Client{Transport: replay}}, steps[1:], nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bundle.Obs[0]; got.Status != http.StatusOK || !strings.Contains(string(got.Body), `"t1"`) {
+		t.Fatalf("the real create replayed %d %s", got.Status, got.Body)
+	}
+}
