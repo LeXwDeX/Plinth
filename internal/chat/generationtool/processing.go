@@ -656,10 +656,19 @@ func (executor *Executor) executeProcessing(
 			selectedInUI = false
 		}
 	}
-	if processing.ReferenceArgument != "" && (referenceAsked || handlesAsked || selectedInUI) {
+	// A service that requires its reference image (Hyper3D texture, Bang of a
+	// local model) takes the one image of this turn or of the selection even
+	// when the call did not name it; with none or several it asks the person
+	// instead of freezing a step the kernel would refuse (#92).
+	referenceParameter, declaresReference := semanticParameter(chosen.offering, generation.SemanticReferenceImage)
+	referenceRequired := declaresReference && referenceParameter.Required && processing.ReferenceArgument != ""
+	if processing.ReferenceArgument != "" && (referenceAsked || handlesAsked || selectedInUI || referenceRequired) {
 		urls, err := executor.selectReferencesBy(command, arguments, processing.ReferenceArgument)
 		if err != nil {
 			return executor.reject(command, err.Error())
+		}
+		if referenceRequired && (len(urls) == 0 || (len(urls) > 1 && referenceParameter.Type == "asset")) {
+			return executor.reject(command, messages.ReferenceRequired)
 		}
 		if len(urls) > 0 {
 			parameter, ok := semanticParameter(chosen.offering, generation.SemanticReferenceImage)
@@ -717,13 +726,16 @@ func (executor *Executor) executeProcessing(
 		}
 		input[parameterName] = value
 	}
+	if gaps := executor.inputGaps(command, chosen.offering, input); len(gaps) > 0 {
+		return executor.reject(command, executor.fillText(command, messages.InvalidInput, "{detail}", strings.Join(gaps, "; ")))
+	}
 	encoded, err := json.Marshal(input)
 	if err != nil {
 		return chat.ToolResult{NoSubmission: true}, err
 	}
 	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, "",
 		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, observe)
-	return executor.processingOutcome(command, result, err)
+	return executor.processingOutcome(command, result, err, inputShape(input))
 }
 
 // processingOutcome reports a step the kernel or the Provider refused before
@@ -732,7 +744,7 @@ func (executor *Executor) executeProcessing(
 // stored file it cannot read) says so, so the Agent neither blames the model
 // nor invents a cause. A diagnostic-only kernel Detail is replaced by the
 // public invalid-parameters copy.
-func (executor *Executor) processingOutcome(command chat.ToolCommand, result chat.ToolResult, err error) (chat.ToolResult, error) {
+func (executor *Executor) processingOutcome(command chat.ToolCommand, result chat.ToolResult, err error, sent string) (chat.ToolResult, error) {
 	messages := command.Tool.Processing.Messages
 	var domainError *generation.Error
 	if err != nil && result.NoSubmission && errors.As(err, &domainError) {
@@ -740,8 +752,13 @@ func (executor *Executor) processingOutcome(command chat.ToolCommand, result cha
 			return executor.rejectBecause(command, message, err)
 		}
 		if softProcessingRejection(domainError.Code) {
-			return executor.rejectBecause(command, executor.fillText(command, messages.InvalidInput,
-				"{detail}", executor.refusalDetail(command, err, domainError.Detail)), err)
+			// The sent field names and types (never values) let the Agent
+			// compare them with the Offering's declared inputs (#92).
+			detail := executor.refusalDetail(command, err, domainError.Detail)
+			if sent != "" {
+				detail += " (" + sent + ")"
+			}
+			return executor.rejectBecause(command, executor.fillText(command, messages.InvalidInput, "{detail}", detail), err)
 		}
 		if domainError.Code == generation.ErrUnavailable {
 			// A temporary server condition is still Schema copy when the

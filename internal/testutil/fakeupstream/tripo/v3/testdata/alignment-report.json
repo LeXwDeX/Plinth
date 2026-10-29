@@ -1,0 +1,470 @@
+{
+  "provider": "tripo",
+  "api": "v3",
+  "official_base": "https://openapi.tripo3d.ai/v3",
+  "checked_at": "2026-10-29",
+  "official_requests": 65,
+  "official_paid_requests": 8,
+  "fake_requests": 42,
+  "steps": [
+    {
+      "step": "balance",
+      "method": "GET",
+      "path": "/account/balance",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 6,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "balance-no-auth",
+      "method": "GET",
+      "path": "/account/balance",
+      "auth": "none",
+      "official_status": 401,
+      "fake_status": 401,
+      "official_fields": 5,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "task-not-found",
+      "method": "GET",
+      "path": "/tasks/00000000-0000-0000-0000-000000000000",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 404,
+      "fake_status": 404,
+      "official_fields": 6,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "create-invalid",
+      "method": "POST",
+      "path": "/generation/text-to-model",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 400,
+      "fake_status": 400,
+      "official_fields": 6,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "upload",
+      "method": "POST",
+      "path": "/files",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 5,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "text-to-model",
+      "method": "POST",
+      "path": "/generation/text-to-model",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "text-to-model-poll",
+      "method": "GET",
+      "path": "/tasks/{gen}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 24,
+      "official_task_statuses": [
+        "running",
+        "success"
+      ],
+      "artifacts": [
+        "data.output.rendered_image_url binary/octet-stream png",
+        "data.output.generated_image_url binary/octet-stream jpeg",
+        "data.output.model_url binary/octet-stream glb"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "rig-check",
+      "method": "POST",
+      "path": "/animations/rig-check",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "rig-check-poll",
+      "method": "GET",
+      "path": "/tasks/{rigcheck}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 16,
+      "official_task_statuses": [
+        "queued",
+        "success"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "rig",
+      "method": "POST",
+      "path": "/animations/rig",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "rig-poll",
+      "method": "GET",
+      "path": "/tasks/{rig}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 19,
+      "official_task_statuses": [
+        "queued",
+        "running",
+        "success"
+      ],
+      "artifacts": [
+        "data.output.model_url binary/octet-stream glb",
+        "data.output.rendered_image_url binary/octet-stream png"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "retarget",
+      "method": "POST",
+      "path": "/animations/retarget",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "retarget-poll",
+      "method": "GET",
+      "path": "/tasks/{retarget}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 19,
+      "official_task_statuses": [
+        "running",
+        "failed"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "segment",
+      "method": "POST",
+      "path": "/mesh/segment",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "segment-poll",
+      "method": "GET",
+      "path": "/tasks/{seg}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 19,
+      "official_task_statuses": [
+        "running",
+        "success"
+      ],
+      "artifacts": [
+        "data.output.rendered_image_url binary/octet-stream png",
+        "data.output.model_url binary/octet-stream glb"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "complete",
+      "method": "POST",
+      "path": "/mesh/complete",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "complete-poll",
+      "method": "GET",
+      "path": "/tasks/{complete}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 16,
+      "official_task_statuses": [
+        "running",
+        "success"
+      ],
+      "artifacts": [
+        "data.output.model_url binary/octet-stream glb"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "rig-v3",
+      "method": "POST",
+      "path": "/animations/rig",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "rig-v3-poll",
+      "method": "GET",
+      "path": "/tasks/{rigv3}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 19,
+      "official_task_statuses": [
+        "queued",
+        "success"
+      ],
+      "artifacts": [
+        "data.output.model_url binary/octet-stream glb",
+        "data.output.rendered_image_url binary/octet-stream png"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "retarget-v3",
+      "method": "POST",
+      "path": "/animations/retarget",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "retarget-v3-poll",
+      "method": "GET",
+      "path": "/tasks/{retargetv3}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 19,
+      "official_task_statuses": [
+        "running",
+        "success"
+      ],
+      "artifacts": [
+        "data.output.model_url binary/octet-stream glb"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "segment-model",
+      "method": "GET",
+      "path": "/tasks/{seg}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 19,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "convert",
+      "method": "POST",
+      "path": "/models/convert",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "convert-poll",
+      "method": "GET",
+      "path": "/tasks/{convert}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 21,
+      "official_task_statuses": [
+        "queued",
+        "running",
+        "success"
+      ],
+      "artifacts": [
+        "data.output.model_url binary/octet-stream stl-binary"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    }
+  ],
+  "diffs": null,
+  "endpoints": [
+    {
+      "endpoint": "GET /account/balance",
+      "evidence": "real",
+      "sample": "GET /v3/account/balance",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/introduction",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /files",
+      "evidence": "real",
+      "sample": "POST /v3/files",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/files",
+      "checked_at": "2026-10-29",
+      "note": "the sample's multipart reference picture is replaced by a fixed recipe; the response is real"
+    },
+    {
+      "endpoint": "GET /tasks/{task_id}",
+      "evidence": "real",
+      "sample": "GET /v3/tasks/{id}",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/task-query",
+      "checked_at": "2026-10-29",
+      "note": "queued, running, success and failed poll bodies are real for the real kinds"
+    },
+    {
+      "endpoint": "GET /artifacts/{task_id}/{name}",
+      "evidence": "constructed-from-docs",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/task-query",
+      "checked_at": "2026-09-30",
+      "note": "the official artifact CDN host is not part of the API; this route serves the fixed files its task output URLs name (content type binary/octet-stream as observed)"
+    },
+    {
+      "endpoint": "POST /generation/text-to-model",
+      "evidence": "real",
+      "sample": "POST /v3/generation/text-to-model",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/generation-text-to-model/standard",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /animations/rig-check",
+      "evidence": "real",
+      "sample": "POST /v3/animations/rig-check",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/animations-rig-check",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /animations/rig",
+      "evidence": "real",
+      "sample": "POST /v3/animations/rig",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/animations-rig",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /animations/retarget",
+      "evidence": "real",
+      "sample": "POST /v3/animations/retarget",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/animations-retarget",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /mesh/segment",
+      "evidence": "real",
+      "sample": "POST /v3/mesh/segment",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/mesh-segment",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /mesh/complete",
+      "evidence": "real",
+      "sample": "POST /v3/mesh/complete",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/mesh-complete",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /models/convert",
+      "evidence": "real",
+      "sample": "POST /v3/models/convert",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/models-convert",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /generation/image-to-model",
+      "evidence": "constructed-from-docs",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/generation-image-to-model/standard",
+      "checked_at": "2026-09-30",
+      "note": "no real sample (not requested to save credits): the create envelope is the real one of text-to-model; task type image_to_model and the output structure of text_to_model are assumptions to verify on first real use; the documentation was researched on 2026-09-30 and could not be fetched on 2026-10-29"
+    },
+    {
+      "endpoint": "POST /generation/image-to-splat",
+      "evidence": "constructed-from-docs",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/generation-image-to-splat",
+      "checked_at": "2026-09-30",
+      "note": "no real sample (not requested to save credits): the create envelope is the real one of text-to-model; task type image_to_splat and the output structure of text_to_model are assumptions to verify on first real use; the documentation was researched on 2026-09-30 and could not be fetched on 2026-10-29"
+    },
+    {
+      "endpoint": "POST /generation/image-to-multiview",
+      "evidence": "constructed-from-docs",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/generation-image-to-multiview",
+      "checked_at": "2026-09-30",
+      "note": "no real sample (not requested to save credits): the create envelope is the real one of text-to-model; task type image_to_multiview and the output structure of text_to_model are assumptions to verify on first real use; the documentation was researched on 2026-09-30 and could not be fetched on 2026-10-29"
+    },
+    {
+      "endpoint": "POST /generation/edit-multiview",
+      "evidence": "constructed-from-docs",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/generation-edit-multiview",
+      "checked_at": "2026-09-30",
+      "note": "no real sample (not requested to save credits): the create envelope is the real one of text-to-model; task type edit_multiview and the output structure of text_to_model are assumptions to verify on first real use; the documentation was researched on 2026-09-30 and could not be fetched on 2026-10-29"
+    },
+    {
+      "endpoint": "POST /models/texture",
+      "evidence": "constructed-from-docs",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/models-texture",
+      "checked_at": "2026-09-30",
+      "note": "no real sample (not requested to save credits): the create envelope is the real one of text-to-model; task type texture_model and the output structure of text_to_model are assumptions to verify on first real use; the documentation was researched on 2026-09-30 and could not be fetched on 2026-10-29"
+    },
+    {
+      "endpoint": "POST /mesh/decimate",
+      "evidence": "constructed-from-docs",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/mesh-decimate",
+      "checked_at": "2026-09-30",
+      "note": "no real sample (not requested to save credits): the create envelope is the real one of text-to-model; task type mesh_decimation and the output structure of mesh_completion are assumptions to verify on first real use; the documentation was researched on 2026-09-30 and could not be fetched on 2026-10-29"
+    },
+    {
+      "endpoint": "POST /mesh/smartsegment",
+      "evidence": "constructed-from-docs",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/mesh-smartsegment",
+      "checked_at": "2026-09-30",
+      "note": "no real sample (not requested to save credits): the create envelope is the real one of text-to-model; task type mesh_smart_segmentation and the output structure of mesh_segmentation are assumptions to verify on first real use; the documentation was researched on 2026-09-30 and could not be fetched on 2026-10-29"
+    }
+  ]
+}

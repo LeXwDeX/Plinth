@@ -97,6 +97,7 @@ const (
 	FailureTimedOut            = schema.FailureTimedOut
 	FailureRejected            = schema.FailureRejected
 	FailureInsufficientBalance = schema.FailureInsufficientBalance
+	FailureCredentialQuota     = schema.FailureCredentialQuota
 	FailureUpstreamUnavailable = schema.FailureUpstreamUnavailable
 	FailureSubmissionUnknown   = schema.FailureSubmissionUnknown
 	FailureIntegrity           = schema.FailureIntegrity

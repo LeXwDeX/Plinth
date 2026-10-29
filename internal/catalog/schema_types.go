@@ -3194,9 +3194,14 @@ type ChatToolProcessingMessages struct {
 	StepUnknown          string `json:"step_unknown"`
 	ArgumentUnsupported  string `json:"argument_unsupported"`
 	ReferenceUnsupported string `json:"reference_unsupported"`
-	NoOffering           string `json:"no_offering"`
-	InvalidInput         string `json:"invalid_input"`
-	Unavailable          string `json:"unavailable"`
+	// ReferenceRequired refuses a step whose service requires one reference
+	// image when the call, the current turn and the workspace selection
+	// supplied none (or several), before anything is frozen (#92). Required
+	// when the tool declares reference_argument.
+	ReferenceRequired string `json:"reference_required,omitempty"`
+	NoOffering        string `json:"no_offering"`
+	InvalidInput      string `json:"invalid_input"`
+	Unavailable       string `json:"unavailable"`
 	// SourceConfirmation is the refusal of a paid step on another model than
 	// the one selected on the workspace, before the person agreed (#321 D).
 	// {selected}, {source}, {step} and {reason} are substituted; {reason} is

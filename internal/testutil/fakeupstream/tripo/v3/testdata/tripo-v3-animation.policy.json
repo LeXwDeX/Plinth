@@ -1,0 +1,53 @@
+{
+  "MaxBodyBytes": 4194304,
+  "Keys": {
+    "animate_in_place": true,
+    "animation": true,
+    "code": true,
+    "completed_at": true,
+    "created_at": true,
+    "credits_consumed": true,
+    "data": true,
+    "export_with_geometry": true,
+    "file": true,
+    "input": true,
+    "model_url": true,
+    "original_model_id": true,
+    "out_format": true,
+    "output": true,
+    "progress": true,
+    "status": true,
+    "task_id": true,
+    "type": true
+  },
+  "Allowed": {
+    "0": true,
+    "100": true,
+    "2026-01-01T00:00:00Z": true,
+    "8": true,
+    "animate_retarget": true,
+    "animations": true,
+    "application/json": true,
+    "glb": true,
+    "https://example.test/fixture-3.glb": true,
+    "id-1": true,
+    "id-2": true,
+    "preset:walk": true,
+    "queued": true,
+    "retarget": true,
+    "running": true,
+    "success": true,
+    "tasks": true,
+    "v3": true
+  },
+  "Aliases": null,
+  "PublicHosts": {
+    "openapi.tripo3d.ai": true
+  },
+  "Projection": null,
+  "QueryKeys": {
+    "Key-Pair-Id": true,
+    "Policy": true,
+    "Signature": true
+  }
+}

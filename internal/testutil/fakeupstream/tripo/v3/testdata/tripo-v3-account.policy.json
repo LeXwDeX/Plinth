@@ -1,0 +1,48 @@
+{
+  "MaxBodyBytes": 4194304,
+  "Keys": {
+    "balance": true,
+    "code": true,
+    "data": true,
+    "file": true,
+    "file_token": true,
+    "frozen": true,
+    "message": true,
+    "request_id": true,
+    "status": true,
+    "suggestion": true
+  },
+  "Allowed": {
+    "0": true,
+    "1004": true,
+    "2": true,
+    "2001": true,
+    "Authentication required": true,
+    "Check if the task is committed by you or whether the format is correct": true,
+    "Check if your credentials is valid": true,
+    "Refer to the API documentation for parameter requirements": true,
+    "The task is not found": true,
+    "[redacted]": true,
+    "account": true,
+    "application/json": true,
+    "balance": true,
+    "error": true,
+    "files": true,
+    "generation": true,
+    "id-1": true,
+    "id-2": true,
+    "id-3": true,
+    "id-4": true,
+    "model is required, allowed values: P1-20260311, P2-20260801, v2.5-20250123, v3.0-20250812, v3.1-20260211": true,
+    "success": true,
+    "tasks": true,
+    "text-to-model": true,
+    "v3": true
+  },
+  "Aliases": null,
+  "PublicHosts": {
+    "openapi.tripo3d.ai": true
+  },
+  "Projection": null,
+  "QueryKeys": {}
+}
