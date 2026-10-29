@@ -25,7 +25,7 @@ func TestProviderDiscoveryProjectsUploadedModelConstraints(t *testing.T) {
 			map[string]any{
 				"profile_id":       "static-glb-v1",
 				"require_textures": true,
-				"requirements":     "需要带贴图、面向 +Z 的人形角色。文件结构通过校验不代表满足人形或朝向条件；不符合条件时请先处理模型。",
+				"requirements":     "需要带贴图、面向 +Z 的人形角色。文件结构通过校验不代表满足人形或朝向条件；不符合条件时请先处理模型。模型最多 320000 个三角面（四边面按两个三角面计），超出请先 Remesh 到上限以内。",
 			},
 		},
 	}

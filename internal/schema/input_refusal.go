@@ -47,6 +47,9 @@ const (
 	// InputRefusalSourceUnsupported: a referenced Task source is missing or
 	// does not meet this step's source requirements.
 	InputRefusalSourceUnsupported InputRefusalReason = "input_source_task_unsupported"
+	// InputRefusalFaceLimit: the 3D source has more triangle faces than the
+	// step's declared limit; Faces is the counted value, FaceLimit the maximum.
+	InputRefusalFaceLimit InputRefusalReason = "input_source_face_limit"
 )
 
 // InputRefusalValues are the facts a refusal template fills in. Only the
@@ -63,6 +66,8 @@ type InputRefusalValues struct {
 	MinWidth  int64
 	MinHeight int64
 	MaxPixels int64
+	Faces     int64
+	FaceLimit int64
 }
 
 // InputRefusal returns the Offering's Schema refusal for a synchronous input
@@ -138,6 +143,14 @@ func (messages ExecutionMessages) InputRefusal(reason InputRefusalReason, values
 			return nil
 		}
 		pairs = []string{"{label}", values.Label}
+	case InputRefusalFaceLimit:
+		template = messages.InputSourceFaceLimit
+		if values.Faces <= 0 || values.FaceLimit <= 0 {
+			return nil
+		}
+		pairs = []string{
+			"{faces}", strconv.FormatInt(values.Faces, 10), "{limit}", strconv.FormatInt(values.FaceLimit, 10),
+		}
 	default:
 		return nil
 	}
