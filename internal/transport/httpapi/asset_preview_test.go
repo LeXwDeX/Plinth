@@ -149,7 +149,7 @@ func TestInputAssetPreviewIsSmallAndOwnerScoped(t *testing.T) {
 	if original.Code != http.StatusOK || !bytes.Equal(original.Body.Bytes(), encoded.Bytes()) || original.Header().Get("Cache-Control") != "private, no-store" {
 		t.Fatalf("input original = %d %v", original.Code, original.Header())
 	}
-	if other := get(url+"?size=preview", "owner-b"); other.Code != http.StatusForbidden || other.Header().Get("ETag") != "" {
+	if other := get(url+"?size=preview", "owner-b"); other.Code != http.StatusNotFound || other.Header().Get("ETag") != "" {
 		t.Fatalf("cross-owner input preview = %d %v", other.Code, other.Header())
 	}
 }

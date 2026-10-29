@@ -498,8 +498,8 @@ func TestLegacyAssetAccessScopePreservesAdminBehavior(t *testing.T) {
 			"/api/assets/"+string(asset.ID),
 			nil,
 		)
-		if response.Code != http.StatusForbidden ||
-			!strings.Contains(response.Body.String(), "无权限访问") {
+		if response.Code != http.StatusNotFound ||
+			!strings.Contains(response.Body.String(), "资源不存在") {
 			t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 		}
 	})

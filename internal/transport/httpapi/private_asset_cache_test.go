@@ -247,7 +247,7 @@ func TestPrivateInputAssetRoutesDoNotCacheAcrossOwners(t *testing.T) {
 					conditional.Code, conditional.Header(), conditional.Body.String())
 			}
 			otherOwner := request("owner-b", etag)
-			if otherOwner.Code != http.StatusForbidden ||
+			if otherOwner.Code != http.StatusNotFound ||
 				otherOwner.Header().Get("ETag") != "" ||
 				otherOwner.Header().Get("Cache-Control") != "private, no-store" ||
 				strings.Contains(otherOwner.Body.String(), "private input") {
