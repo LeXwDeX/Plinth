@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-10-29.issue65-declared-settings.1",
+    "revision": "2026-10-29.issue91-hyper3d-balance.1",
     "terminology": {
       "user_facing": [
         {
@@ -746,6 +746,25 @@
             "response_max_bytes": 65536,
             "error_body_max_bytes": 65536,
             "mock_value": 5000
+          }
+        },
+        "hyper3d": {
+          "provider_id": "hyper3d",
+          "base_url_setting": "hyper3d_base_url",
+          "api_key_setting": "hyper3d_api_key",
+          "balance": {
+            "adapter_key": "http-json",
+            "endpoint_path": "/check_balance",
+            "authorization_header": "Authorization",
+            "authorization_type": "Bearer",
+            "upstream_balance_field": "balance",
+            "native_unit": "hyper3d.credit",
+            "native_unit_label": "Hyper3D credits",
+            "mock_native_amount": "100",
+            "request_timeout_seconds": 30,
+            "response_max_bytes": 65536,
+            "error_body_max_bytes": 65536,
+            "mock_value": 100
           }
         }
       },
@@ -2042,6 +2061,10 @@
                   "credits": 20
                 }
               ]
+            },
+            {
+              "account_id": "hyper3d",
+              "label": "Hyper3D"
             }
           ]
         },
