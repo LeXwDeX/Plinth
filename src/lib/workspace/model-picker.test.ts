@@ -79,6 +79,45 @@ it('keeps native multiview separate from the single-image model and shows its su
  expect(table.rows[1].cells[1]).toEqual({ kind: 'native-price', price: '40' });
 });
 
+describe('model table vendor order and hidden Offerings (#100)', () => {
+  const rows = (providers: string[]) => buildModelPickerTable('model-3d', {
+    'text-to-3d': providers.map((provider, index) => offering({
+      id: `${provider}/${index}`, capability: 'text-to-3d', provider_id: provider, provider_name: provider, model_id: `${provider}-${index}`, model_name: `${provider}-${index}`,
+      provider_order: ({ meshy: 1, tripo: 2, hyper3d: 3 } as Record<string, number>)[provider],
+    })),
+  }, null).rows.map((row) => row.modelId);
+
+  it('groups the rows by the Schema vendor order and keeps the catalog order inside a vendor', () => {
+    expect(rows(['hyper3d', 'tripo', 'meshy', 'tripo', 'meshy'])).toEqual(['meshy-2', 'meshy-4', 'tripo-1', 'tripo-3', 'hyper3d-0']);
+  });
+
+  it('puts vendors without a declared order after the ranked ones, in catalog order', () => {
+    expect(rows(['zeta', 'tripo', 'alpha', 'meshy'])).toEqual(['meshy-3', 'tripo-1', 'zeta-0', 'alpha-2']);
+  });
+
+  it('lists none of the Creative Lab Offerings the shipped Schema declares disabled, vendors in Schema order', () => {
+    const rank = new Map<string, number>();
+    for (const entry of catalog.offerings as Array<{ provider_id: string; provider_order?: number }>) {
+      if (entry.provider_order) rank.set(entry.provider_id, entry.provider_order);
+    }
+    const offered = (catalog.offerings as Array<Record<string, any>>).filter((entry) => entry.enabled);
+    expect(offered.some((entry) => String(entry.id).startsWith('meshy/creative-lab/'))).toBe(false);
+    const byCapability: Record<string, OfferingWire[]> = {};
+    for (const entry of offered.filter((item) => item.domain === 'model-3d')) {
+      (byCapability[entry.capability] ??= []).push(offering({
+        id: entry.id, capability: entry.capability, provider_id: entry.provider_id, provider_name: entry.provider_name,
+        model_id: entry.model_id, model_name: entry.model_name, provider_order: rank.get(entry.provider_id),
+      }));
+    }
+    const table = buildModelPickerTable('model-3d', byCapability, null);
+    expect(table.rows.some((row) => row.modelId.startsWith('creative-lab-'))).toBe(false);
+    const vendors = table.rows.map((row) => row.providerId);
+    const firstSeen = [...new Set(vendors)];
+    expect(vendors).toEqual([...vendors].sort((left, right) => firstSeen.indexOf(left) - firstSeen.indexOf(right)));
+    expect(firstSeen.slice(0, 3)).toEqual(['meshy', 'tripo', 'hyper3d']);
+  });
+});
+
 describe('inpaint input output size (#308)', () => {
   const gptInpaint = (catalog.offerings as unknown as OfferingWire[])
     .find((entry) => entry.id === 'openai/gpt-image-2/image-to-image')!;

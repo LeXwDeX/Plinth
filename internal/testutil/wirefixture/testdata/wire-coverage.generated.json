@@ -1,7 +1,7 @@
 {
   "version": 2,
   "catalog": "internal/catalog/default_catalog.json",
-  "catalog_sha256": "e406c5ef14400612af5d86a378a7931942180bb36063eb55df4c88896a6a958f",
+  "catalog_sha256": "93c5d89a624c1c177ce367dc7f4fcd3b9ecce12251dc40a91d0d2df4a788fa9b",
   "samples": [
     "internal/app/testdata/agent-flow/agent-flow.candidate.json",
     "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
@@ -20,22 +20,22 @@
   ],
   "counts": {
     "offerings": {
-      "disabled": 7,
-      "disabled-zero-egress": 7,
-      "enabled": 69,
+      "disabled": 24,
+      "disabled-zero-egress": 24,
+      "enabled": 52,
       "local-no-wire": 4,
-      "missing": 51,
+      "missing": 34,
       "partial": 5,
       "real": 9,
       "total": 76
     },
     "units": {
       "derived": 16,
-      "disabled-zero-egress": 7,
+      "disabled-zero-egress": 9,
       "local-no-wire": 2,
-      "missing": 48,
+      "missing": 31,
       "real": 30,
-      "total": 103
+      "total": 88
     }
   },
   "incomplete": [
@@ -48,23 +48,6 @@
     "matting.v1|background-removal|declared:(adapter-defined)",
     "meshy.v2|analyze-printability|declared:print/analyze",
     "meshy.v2|animation|declared:animations",
-    "meshy.v2|creative-lab-build|declared:brick-figure/v1/build",
-    "meshy.v2|creative-lab-build|declared:fidget-collapsible/v1",
-    "meshy.v2|creative-lab-build|declared:fidget-pixel/v1/build",
-    "meshy.v2|creative-lab-build|declared:figure/v1/build",
-    "meshy.v2|creative-lab-build|declared:fridge-magnet/v1/build",
-    "meshy.v2|creative-lab-build|declared:keycap/v1/build",
-    "meshy.v2|creative-lab-build|declared:keychain/v1/build",
-    "meshy.v2|creative-lab-build|declared:lamp/v1/build",
-    "meshy.v2|creative-lab-build|declared:vinyl-figure/v1/build",
-    "meshy.v2|creative-lab-prototype|declared:brick-figure/v1/prototype",
-    "meshy.v2|creative-lab-prototype|declared:fidget-pixel/v1/prototype",
-    "meshy.v2|creative-lab-prototype|declared:figure/v1/prototype",
-    "meshy.v2|creative-lab-prototype|declared:fridge-magnet/v1/prototype",
-    "meshy.v2|creative-lab-prototype|declared:keycap/v1/prototype",
-    "meshy.v2|creative-lab-prototype|declared:keychain/v1/prototype",
-    "meshy.v2|creative-lab-prototype|declared:lamp/v1/prototype",
-    "meshy.v2|creative-lab-prototype|declared:vinyl-figure/v1/prototype",
     "meshy.v2|format-conversion|declared:convert",
     "meshy.v2|image-to-3d|declared:image-to-3d",
     "meshy.v2|image-to-3d|declared:multi-image-to-3d",
@@ -597,238 +580,103 @@
     {
       "adapter_key": "meshy.v2",
       "capability": "creative-lab-build",
-      "endpoint": "declared:brick-figure/v1/build",
-      "evidence": "missing",
+      "endpoint": "(disabled)",
+      "evidence": "disabled-zero-egress",
       "evidence_files": [],
       "offerings": [
         {
           "id": "meshy/creative-lab/brick-figure/build",
           "model_id": "creative-lab-brick-figure-build",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-build",
-      "endpoint": "declared:fidget-collapsible/v1",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/fidget-collapsible/generate",
           "model_id": "creative-lab-fidget-collapsible-generate",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-build",
-      "endpoint": "declared:fidget-pixel/v1/build",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/fidget-pixel/build",
           "model_id": "creative-lab-fidget-pixel-build",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-build",
-      "endpoint": "declared:figure/v1/build",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/figure/build",
           "model_id": "creative-lab-figure-build",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-build",
-      "endpoint": "declared:fridge-magnet/v1/build",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/fridge-magnet/build",
           "model_id": "creative-lab-fridge-magnet-build",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-build",
-      "endpoint": "declared:keycap/v1/build",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/keycap/build",
           "model_id": "creative-lab-keycap-build",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-build",
-      "endpoint": "declared:keychain/v1/build",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/keychain/build",
           "model_id": "creative-lab-keychain-build",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-build",
-      "endpoint": "declared:lamp/v1/build",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/lamp/build",
           "model_id": "creative-lab-lamp-build",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-build",
-      "endpoint": "declared:vinyl-figure/v1/build",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/vinyl-figure/build",
           "model_id": "creative-lab-vinyl-figure-build",
-          "enabled": true
+          "enabled": false
         }
       ]
     },
     {
       "adapter_key": "meshy.v2",
       "capability": "creative-lab-prototype",
-      "endpoint": "declared:brick-figure/v1/prototype",
-      "evidence": "missing",
+      "endpoint": "(disabled)",
+      "evidence": "disabled-zero-egress",
       "evidence_files": [],
       "offerings": [
         {
           "id": "meshy/creative-lab/brick-figure/prototype",
           "model_id": "creative-lab-brick-figure-prototype",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-prototype",
-      "endpoint": "declared:fidget-pixel/v1/prototype",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/fidget-pixel/prototype",
           "model_id": "creative-lab-fidget-pixel-prototype",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-prototype",
-      "endpoint": "declared:figure/v1/prototype",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/figure/prototype",
           "model_id": "creative-lab-figure-prototype",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-prototype",
-      "endpoint": "declared:fridge-magnet/v1/prototype",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/fridge-magnet/prototype",
           "model_id": "creative-lab-fridge-magnet-prototype",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-prototype",
-      "endpoint": "declared:keycap/v1/prototype",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/keycap/prototype",
           "model_id": "creative-lab-keycap-prototype",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-prototype",
-      "endpoint": "declared:keychain/v1/prototype",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/keychain/prototype",
           "model_id": "creative-lab-keychain-prototype",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-prototype",
-      "endpoint": "declared:lamp/v1/prototype",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/lamp/prototype",
           "model_id": "creative-lab-lamp-prototype",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-prototype",
-      "endpoint": "declared:vinyl-figure/v1/prototype",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/vinyl-figure/prototype",
           "model_id": "creative-lab-vinyl-figure-prototype",
-          "enabled": true
+          "enabled": false
         }
       ]
     },
@@ -2103,170 +1951,170 @@
       "id": "meshy/creative-lab/brick-figure/build",
       "model_id": "creative-lab-brick-figure-build",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-build|declared:brick-figure/v1/build"
+        "meshy.v2|creative-lab-build|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/brick-figure/prototype",
       "model_id": "creative-lab-brick-figure-prototype",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-prototype|declared:brick-figure/v1/prototype"
+        "meshy.v2|creative-lab-prototype|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/fidget-collapsible/generate",
       "model_id": "creative-lab-fidget-collapsible-generate",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-build|declared:fidget-collapsible/v1"
+        "meshy.v2|creative-lab-build|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/fidget-pixel/build",
       "model_id": "creative-lab-fidget-pixel-build",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-build|declared:fidget-pixel/v1/build"
+        "meshy.v2|creative-lab-build|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/fidget-pixel/prototype",
       "model_id": "creative-lab-fidget-pixel-prototype",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-prototype|declared:fidget-pixel/v1/prototype"
+        "meshy.v2|creative-lab-prototype|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/figure/build",
       "model_id": "creative-lab-figure-build",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-build|declared:figure/v1/build"
+        "meshy.v2|creative-lab-build|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/figure/prototype",
       "model_id": "creative-lab-figure-prototype",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-prototype|declared:figure/v1/prototype"
+        "meshy.v2|creative-lab-prototype|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/fridge-magnet/build",
       "model_id": "creative-lab-fridge-magnet-build",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-build|declared:fridge-magnet/v1/build"
+        "meshy.v2|creative-lab-build|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/fridge-magnet/prototype",
       "model_id": "creative-lab-fridge-magnet-prototype",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-prototype|declared:fridge-magnet/v1/prototype"
+        "meshy.v2|creative-lab-prototype|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/keycap/build",
       "model_id": "creative-lab-keycap-build",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-build|declared:keycap/v1/build"
+        "meshy.v2|creative-lab-build|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/keycap/prototype",
       "model_id": "creative-lab-keycap-prototype",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-prototype|declared:keycap/v1/prototype"
+        "meshy.v2|creative-lab-prototype|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/keychain/build",
       "model_id": "creative-lab-keychain-build",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-build|declared:keychain/v1/build"
+        "meshy.v2|creative-lab-build|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/keychain/prototype",
       "model_id": "creative-lab-keychain-prototype",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-prototype|declared:keychain/v1/prototype"
+        "meshy.v2|creative-lab-prototype|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/lamp/build",
       "model_id": "creative-lab-lamp-build",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-build|declared:lamp/v1/build"
+        "meshy.v2|creative-lab-build|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/lamp/prototype",
       "model_id": "creative-lab-lamp-prototype",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-prototype|declared:lamp/v1/prototype"
+        "meshy.v2|creative-lab-prototype|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/vinyl-figure/build",
       "model_id": "creative-lab-vinyl-figure-build",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-build|declared:vinyl-figure/v1/build"
+        "meshy.v2|creative-lab-build|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/vinyl-figure/prototype",
       "model_id": "creative-lab-vinyl-figure-prototype",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-prototype|declared:vinyl-figure/v1/prototype"
+        "meshy.v2|creative-lab-prototype|(disabled)"
       ]
     },
     {

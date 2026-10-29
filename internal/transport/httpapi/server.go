@@ -1845,6 +1845,7 @@ func (s *Server) listOfferings(
 			ProviderID:                    offering.ProviderID,
 			ProviderName:                  offering.ProviderName,
 			ProviderShortLabel:            offering.ProviderShortLabel,
+			ProviderOrder:                 offering.ProviderOrder,
 			ModelID:                       offering.ModelID,
 			ModelName:                     offering.ModelName,
 			Capability:                    offering.Capability,
@@ -1874,6 +1875,7 @@ type offeringResponse struct {
 	ProviderID         string                  `json:"provider_id"`
 	ProviderName       string                  `json:"provider_name"`
 	ProviderShortLabel string                  `json:"provider_short_label"`
+	ProviderOrder      int                     `json:"provider_order,omitempty"`
 	ModelID            string                  `json:"model_id"`
 	ModelName          string                  `json:"model_name"`
 	Capability         generation.Capability   `json:"capability"`
