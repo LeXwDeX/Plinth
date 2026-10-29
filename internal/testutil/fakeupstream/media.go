@@ -3,8 +3,10 @@ package fakeupstream
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"sync"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/wirefixture"
@@ -94,4 +96,21 @@ func ObjFiles() (obj, mtl File, err error) {
 		return File{}, File{}, err
 	}
 	return File{MediaType: "text/plain", Data: objData}, File{MediaType: "text/plain", Data: mtlData}, nil
+}
+
+// SplatFile returns a tiny valid Gaussian Splat in the 32-byte record profile
+// Plinth delivers (little-endian xyz and scale float32, RGBA, quantized
+// quaternion): three visible splats.
+func SplatFile() (File, error) {
+	var data []byte
+	for i := 0; i < 3; i++ {
+		record := make([]byte, 32)
+		for axis, value := range []float32{float32(i) * 0.1, 0, 0, 0.05, 0.05, 0.05} {
+			binary.LittleEndian.PutUint32(record[axis*4:], math.Float32bits(value))
+		}
+		copy(record[24:], []byte{200, 60, 60, 255})   // visible, reddish
+		copy(record[28:], []byte{128, 128, 128, 255}) // identity rotation
+		data = append(data, record...)
+	}
+	return File{MediaType: "application/vnd.art-ai.gaussian-splat", Data: data}, nil
 }

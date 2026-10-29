@@ -18,6 +18,9 @@ same HTTP API the browser uses:
   * Hyper3D texture (a local model + a reference picture), the OpenAI, Gemini and Jimeng
     image Offerings (text-to-image and image-to-image) and the matting service run to
     SUCCEEDED with the same delivery checks;
+  * the Tripo picture and model-upload endpoints (image-to-3D, splat, multiview and its
+    edit, Smart Segmentation of a picture and of a model) and the triangle decimation run
+    to SUCCEEDED too (the "tripo" group);
   * each fault scenario, selected by a fake test API key, ends the public Task of
     every provider in the expected state and error class; artifact-expired (the
     first signed URLs have expired) heals on the next read of the job, and
@@ -26,7 +29,7 @@ same HTTP API the browser uses:
     Meshy and Hyper3D delivers it.
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
-(NAME: balance, chain, meshy, hyper3d, images, agent, faults)
+(NAME: balance, chain, meshy, hyper3d, images, tripo, agent, faults)
 Needs `go`. Exit 0 = every selected check passed.
 
 The stack runs inside the internal/app test binary (TestFakeUpstreamStack, built with -tags fakestack), not
@@ -83,6 +86,13 @@ RIG_CHECK = "tripo/processing/rig-check"
 RIGGING = "tripo/processing/rigging-v3"
 ANIMATION = "tripo/processing/animation"
 TRIPO_TEXTURE = "tripo/processing/texture"
+TRIPO_IMAGE_TO_3D = "tripo/tripo-v3.1-full/image-to-3d"
+TRIPO_SPLAT = "tripo/image-to-splat"
+TRIPO_MULTIVIEW = "tripo/image-to-multiview"
+TRIPO_EDIT_MULTIVIEW = "tripo/edit-multiview"
+TRIPO_DECIMATE = "tripo/geometry/decimate-triangle"
+TRIPO_SMARTSEGMENT_IMAGE = "tripo/geometry/smartsegment-image"
+TRIPO_SMARTSEGMENT_MODEL = "tripo/geometry/smartsegment-model"
 SEGMENT = "tripo/geometry/segment"
 COMPLETE = "tripo/geometry/complete"
 
@@ -361,7 +371,8 @@ def check_delivery(api, task, offering):
     # without a variant is met by any asset of its role.
     delivered = {(a.get("role"), a.get("variant")) for a in task.get("assets") or []}
     for output in offering["outputs"]:
-        if output.get("delivery") != "required" or output.get("minimum", 1) == 0:
+        # A slot with required_when (the views of an edited multiview) is only due when its parameter is given.
+        if output.get("delivery") != "required" or output.get("minimum", 1) == 0 or output.get("required_when"):
             continue
         slot = (output["role"], output.get("variant"))
         if not any(role == slot[0] and (slot[1] is None or variant == slot[1]) for role, variant in delivered):
@@ -448,7 +459,6 @@ def scenario_chain(api, offerings):
                    {"source_task": gen["id"], "authorize_extra_credits": True}, session)
     if rig and rig.get("state") == "SUCCEEDED":
         run_step(api, offerings, "tripo animation", ANIMATION, "animation", {"source_task": rig["id"]}, session)
-    # Texture (models/texture) has no official sample yet (#89): the fake's structure is built from the docs.
     run_step(api, offerings, "tripo texture", TRIPO_TEXTURE, "retexture",
              {"source_task": gen["id"], "prompt": "plain matte grey", "authorize_extra_credits": True}, session)
     seg = run_step(api, offerings, "tripo segment", SEGMENT, "mesh-segmentation",
@@ -456,6 +466,39 @@ def scenario_chain(api, offerings):
     if seg and seg.get("state") == "SUCCEEDED":
         run_step(api, offerings, "tripo complete (after segment)", COMPLETE, "mesh-completion",
                  {"source_task": seg["id"], "authorize_extra_credits": True}, session)
+
+
+def scenario_tripo_images(api, offerings):
+    """The Tripo endpoints that take a picture or a model upload (image-to-3D, splat,
+    multiview and its edit, Smart Segmentation of a picture and of a model) and the
+    triangle decimation: every one runs to SUCCEEDED with its files delivered."""
+    session = new_session(api)
+    picture = upload_asset(api, "reference.png", make_png(), "image/png")
+    if not picture:
+        record("tripo images: upload the reference picture", False, "the library upload was refused")
+        return
+    gen = step(api, offerings, "tripo image-to-3d", TRIPO_IMAGE_TO_3D, "image-to-3d", {"reference_assets": [picture]}, session)
+    step(api, offerings, "tripo image-to-splat", TRIPO_SPLAT, "image-to-splat", {"image": picture}, session)
+    views = step(api, offerings, "tripo image-to-multiview", TRIPO_MULTIVIEW, "image-to-multiview", {"image": picture}, session)
+    if views and views.get("state") == "SUCCEEDED":
+        step(api, offerings, "tripo edit-multiview", TRIPO_EDIT_MULTIVIEW, "edit-multiview",
+             {"source_task": views["id"], "front_prompt": "make the object green"}, session)
+    step(api, offerings, "tripo smartsegment (picture)", TRIPO_SMARTSEGMENT_IMAGE, "image-to-3d", {"image": picture}, session)
+    if gen and gen.get("state") == "SUCCEEDED":
+        step(api, offerings, "tripo decimate (triangle)", TRIPO_DECIMATE, "remesh", {"source_task": gen["id"]}, session)
+        # Smart Segmentation of a model takes a library model file. Tripo's own image-to-3D delivers
+        # glTF text by default, so the binary GLB comes from a Meshy text-to-3D and is uploaded.
+        source = step(api, offerings, "tripo smartsegment (model): source GLB from meshy text-to-3d", MESHY_TEXT_TO_3D, "text-to-3d",
+                      {"prompt": "a plain cube"}, session)
+        model = next((a for a in (source or {}).get("assets") or [] if a.get("role") == "model" and a.get("variant") == "glb"), None)
+        status, raw, _headers = api.call("GET", model["url"]) if model else (0, b"", {})
+        upload_status, uploaded = api.upload("/api/v1/assets", "file", "model.glb", raw, "model/gltf-binary") if status == 200 else (0, {})
+        model_id = uploaded.get("id") if upload_status in (200, 201) else None
+        if model_id:
+            step(api, offerings, "tripo smartsegment (model)", TRIPO_SMARTSEGMENT_MODEL, "mesh-segmentation", {"source_asset": model_id}, session)
+        else:
+            record("tripo smartsegment (model)", False,
+                   f"could not prepare the model upload (download {status}, upload {upload_status} {json.dumps(uploaded, ensure_ascii=False)[:200]}, {len(raw)} bytes starting {raw[:4]!r})")
 
 
 def step(api, offerings, label, offering, capability, base, session):
@@ -657,12 +700,12 @@ def scenario_fault(api, offerings, scenario):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,images,agent,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,images,tripo,agent,faults")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "agent", "faults"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "tripo", "agent", "faults"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -678,7 +721,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "images", "agent"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "images", "tripo", "agent"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -691,6 +734,8 @@ def main():
                 scenario_hyper3d(api, offerings)
             if "images" in selected:
                 scenario_images(api, offerings)
+            if "tripo" in selected:
+                scenario_tripo_images(api, offerings)
             if "agent" in selected:
                 scenario_agent(api, offerings)
             processes.stop(child)

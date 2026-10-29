@@ -40,11 +40,22 @@
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-animation.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-complete.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-convert.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-decimate.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-edit-multiview.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-model.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-multiview.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-splat.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rig-check.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging-v3.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-segment.candidate.json",
-    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-text-to-3d.candidate.json"
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-image-failed.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-image.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-model.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-text-to-3d.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-texture.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-upload-image.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-upload-model.candidate.json"
   ],
   "counts": {
     "offerings": {
@@ -52,30 +63,19 @@
       "disabled-zero-egress": 24,
       "enabled": 52,
       "local-no-wire": 4,
-      "missing": 7,
-      "partial": 6,
-      "real": 35,
+      "partial": 5,
+      "real": 43,
       "total": 76
     },
     "units": {
       "derived": 17,
       "disabled-zero-egress": 9,
       "local-no-wire": 2,
-      "missing": 8,
-      "real": 94,
-      "total": 130
+      "real": 108,
+      "total": 136
     }
   },
-  "incomplete": [
-    "tripo.v3|edit-multiview|declared:generation/edit-multiview",
-    "tripo.v3|image-to-3d|declared:generation/image-to-model",
-    "tripo.v3|image-to-3d|declared:mesh/smartsegment",
-    "tripo.v3|image-to-multiview|declared:generation/image-to-multiview",
-    "tripo.v3|image-to-splat|declared:generation/image-to-splat",
-    "tripo.v3|mesh-segmentation|declared:mesh/smartsegment",
-    "tripo.v3|remesh|declared:mesh/decimate",
-    "tripo.v3|retexture|declared:models/texture"
-  ],
+  "incomplete": [],
   "units": [
     {
       "adapter_key": "connection:LLM",
@@ -2373,7 +2373,9 @@
       ],
       "evidence": "derived",
       "evidence_files": [
-        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json"
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json",
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-upload-image.candidate.json",
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-upload-model.candidate.json"
       ],
       "offerings": []
     },
@@ -2440,9 +2442,39 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "edit-multiview",
-      "endpoint": "declared:generation/edit-multiview",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-edit-multiview.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/edit-multiview",
+          "model_id": "tripo-edit-multiview",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "edit-multiview",
+      "endpoint": "POST /v3/generation/edit-multiview",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-edit-multiview.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/edit-multiview",
@@ -2526,9 +2558,46 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "image-to-3d",
-      "endpoint": "declared:generation/image-to-model",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-model.candidate.json",
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-image-failed.candidate.json",
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-image.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/geometry/smartsegment-image",
+          "model_id": "tripo-smartsegment-image",
+          "enabled": true
+        },
+        {
+          "id": "tripo/tripo-v3.1-full/image-to-3d",
+          "model_id": "tripo-v3.1-full",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "image-to-3d",
+      "endpoint": "POST /v3/generation/image-to-model",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-model.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/tripo-v3.1-full/image-to-3d",
@@ -2540,9 +2609,18 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "image-to-3d",
-      "endpoint": "declared:mesh/smartsegment",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "POST /v3/mesh/smartsegment",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-image-failed.candidate.json",
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-image.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/geometry/smartsegment-image",
@@ -2554,9 +2632,39 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "image-to-multiview",
-      "endpoint": "declared:generation/image-to-multiview",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-multiview.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/image-to-multiview",
+          "model_id": "tripo-image-to-multiview",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "image-to-multiview",
+      "endpoint": "POST /v3/generation/image-to-multiview",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-multiview.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/image-to-multiview",
@@ -2568,9 +2676,39 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "image-to-splat",
-      "endpoint": "declared:generation/image-to-splat",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-splat.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/image-to-splat",
+          "model_id": "tripo-image-to-splat",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "image-to-splat",
+      "endpoint": "POST /v3/generation/image-to-splat",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-splat.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/image-to-splat",
@@ -2645,7 +2783,8 @@
       ],
       "evidence": "real",
       "evidence_files": [
-        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-segment.candidate.json"
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-segment.candidate.json",
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-model.candidate.json"
       ],
       "offerings": [
         {
@@ -2685,9 +2824,17 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "mesh-segmentation",
-      "endpoint": "declared:mesh/smartsegment",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "POST /v3/mesh/smartsegment",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-model.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/geometry/smartsegment-model",
@@ -2713,9 +2860,39 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "remesh",
-      "endpoint": "declared:mesh/decimate",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-decimate.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/geometry/decimate-triangle",
+          "model_id": "tripo-decimate-triangle",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "remesh",
+      "endpoint": "POST /v3/mesh/decimate",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-decimate.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/geometry/decimate-triangle",
@@ -2727,9 +2904,39 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "retexture",
-      "endpoint": "declared:models/texture",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-texture.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/processing/texture",
+          "model_id": "tripo-texture",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "retexture",
+      "endpoint": "POST /v3/models/texture",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-texture.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/processing/texture",
@@ -3550,9 +3757,10 @@
       "model_id": "tripo-edit-multiview",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|edit-multiview|declared:generation/edit-multiview"
+        "tripo.v3|edit-multiview|GET /v3/tasks/{id}",
+        "tripo.v3|edit-multiview|POST /v3/generation/edit-multiview"
       ]
     },
     {
@@ -3592,9 +3800,10 @@
       "model_id": "tripo-decimate-triangle",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|remesh|declared:mesh/decimate"
+        "tripo.v3|remesh|GET /v3/tasks/{id}",
+        "tripo.v3|remesh|POST /v3/mesh/decimate"
       ]
     },
     {
@@ -3624,9 +3833,10 @@
       "model_id": "tripo-smartsegment-image",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|image-to-3d|declared:mesh/smartsegment"
+        "tripo.v3|image-to-3d|GET /v3/tasks/{id}",
+        "tripo.v3|image-to-3d|POST /v3/mesh/smartsegment"
       ]
     },
     {
@@ -3634,10 +3844,10 @@
       "model_id": "tripo-smartsegment-model",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "partial",
+      "evidence": "real",
       "units": [
         "tripo.v3|mesh-segmentation|GET /v3/tasks/{id}",
-        "tripo.v3|mesh-segmentation|declared:mesh/smartsegment"
+        "tripo.v3|mesh-segmentation|POST /v3/mesh/smartsegment"
       ]
     },
     {
@@ -3645,9 +3855,10 @@
       "model_id": "tripo-image-to-multiview",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|image-to-multiview|declared:generation/image-to-multiview"
+        "tripo.v3|image-to-multiview|GET /v3/tasks/{id}",
+        "tripo.v3|image-to-multiview|POST /v3/generation/image-to-multiview"
       ]
     },
     {
@@ -3655,9 +3866,10 @@
       "model_id": "tripo-image-to-splat",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|image-to-splat|declared:generation/image-to-splat"
+        "tripo.v3|image-to-splat|GET /v3/tasks/{id}",
+        "tripo.v3|image-to-splat|POST /v3/generation/image-to-splat"
       ]
     },
     {
@@ -3711,9 +3923,10 @@
       "model_id": "tripo-texture",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|retexture|declared:models/texture"
+        "tripo.v3|retexture|GET /v3/tasks/{id}",
+        "tripo.v3|retexture|POST /v3/models/texture"
       ]
     },
     {
@@ -3721,9 +3934,10 @@
       "model_id": "tripo-v3.1-full",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|image-to-3d|declared:generation/image-to-model"
+        "tripo.v3|image-to-3d|GET /v3/tasks/{id}",
+        "tripo.v3|image-to-3d|POST /v3/generation/image-to-model"
       ]
     },
     {

@@ -1,0 +1,12 @@
+{
+  "api_version": "v3",
+  "candidate_sha256": "cbf3465c8832cdd4df12c95bdb0391c7f159de42d3a20091592c12408854ab3b",
+  "captured_at_utc": "2026-10-29",
+  "exchanges": 5,
+  "offering": "tripo/image-to-splat",
+  "provenance": "captured",
+  "scenario": "tripo-v3-alignment",
+  "source_revision": "unknown",
+  "transformation": "IDs, signed URLs, timestamps and amounts are deterministic placeholders; media bytes are not stored.",
+  "version": 1
+}

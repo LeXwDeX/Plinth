@@ -1,0 +1,54 @@
+{
+  "MaxBodyBytes": 4194304,
+  "Keys": {
+    "code": true,
+    "completed_at": true,
+    "created_at": true,
+    "credits_consumed": true,
+    "data": true,
+    "file": true,
+    "front_view_url": true,
+    "generate_multiview_image": true,
+    "input": true,
+    "model_version": true,
+    "original_task_id": true,
+    "output": true,
+    "progress": true,
+    "prompt": true,
+    "prompts": true,
+    "status": true,
+    "task_id": true,
+    "type": true,
+    "view": true
+  },
+  "Allowed": {
+    "0": true,
+    "100": true,
+    "2026-01-01T00:00:00Z": true,
+    "application/json": true,
+    "default": true,
+    "edit-multiview": true,
+    "edit_multiview": true,
+    "front": true,
+    "generation": true,
+    "https://example.test/fixture-3.jpeg": true,
+    "id-1": true,
+    "id-2": true,
+    "make the object green": true,
+    "queued": true,
+    "running": true,
+    "success": true,
+    "tasks": true,
+    "v3": true
+  },
+  "Aliases": null,
+  "PublicHosts": {
+    "openapi.tripo3d.ai": true
+  },
+  "Projection": null,
+  "QueryKeys": {
+    "Key-Pair-Id": true,
+    "Policy": true,
+    "Signature": true
+  }
+}
