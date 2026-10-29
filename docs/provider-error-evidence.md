@@ -47,6 +47,7 @@ docker logs <container> 2>&1 | grep 'generation attempt finished failed'
 | `timed_out` | 第三方 | 408/504、Meshy `task_error.type=timeout` |
 | `upstream_unavailable` | 第三方 | 5xx（非提交）、Meshy `service_unavailable`/`server_error`、Tripo 1000/1001 |
 | `insufficient_balance` | 第三方账户（余额不足、欠费） | OpenAI 兼容 `error.code=insufficient_quota`、方舟/即梦 `AccountOverdueError`、Meshy 402、Tripo 2010、Rodin `API_INSUFFICIENT_FUNDS`，以及图片连接上消息含 insufficient balance / account in arrears 的错误；不可重试 |
+| `credential_quota` | 第三方 Key 额度（账户有余额，但该 API Key 达到服务商控制台设置的额度上限） | Meshy 402 且消息含 `credit limit`（连接 `message_matchers` 声明 `before_status_ranges`，先于 402 状态区间匹配；#93，待 dev-test 验收） |
 | `rejected` | 上游业务拒绝 | Meshy 404/409、Tripo 2001/2005-2008/2011/2012/2014/2018/2019、任务被取消 |
 | `submission_unknown` | 歧义保护 | 创建类 408/5xx：无法证明上游拒收，禁止自动重发 |
 | `protocol` / `integrity_failure` / `internal` | 我方代码 | 无效 JSON、资产校验失败、内部状态错误 |

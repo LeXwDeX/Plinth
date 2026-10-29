@@ -1,0 +1,42 @@
+{
+  "MaxBodyBytes": 4194304,
+  "Keys": {
+    "code": true,
+    "completed_at": true,
+    "created_at": true,
+    "credits_consumed": true,
+    "data": true,
+    "file": true,
+    "input": true,
+    "original_model_id": true,
+    "output": true,
+    "progress": true,
+    "rig_type": true,
+    "riggable": true,
+    "status": true,
+    "task_id": true,
+    "type": true
+  },
+  "Allowed": {
+    "0": true,
+    "100": true,
+    "2026-01-01T00:00:00Z": true,
+    "animate_prerigcheck": true,
+    "animations": true,
+    "application/json": true,
+    "biped": true,
+    "id-1": true,
+    "id-2": true,
+    "queued": true,
+    "rig-check": true,
+    "success": true,
+    "tasks": true,
+    "v3": true
+  },
+  "Aliases": null,
+  "PublicHosts": {
+    "openapi.tripo3d.ai": true
+  },
+  "Projection": null,
+  "QueryKeys": {}
+}

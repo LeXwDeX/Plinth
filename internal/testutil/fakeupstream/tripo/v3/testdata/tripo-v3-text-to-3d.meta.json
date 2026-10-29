@@ -1,0 +1,12 @@
+{
+  "api_version": "v3",
+  "candidate_sha256": "b270d58222fbf72af2030bf5ee5cd40c975b7a59c7e381424e232145f7c4b172",
+  "captured_at_utc": "2026-10-29",
+  "exchanges": 17,
+  "offering": "tripo/tripo-v3.1-full/text-to-3d",
+  "provenance": "captured",
+  "scenario": "tripo-v3-alignment",
+  "source_revision": "unknown",
+  "transformation": "IDs, signed URLs, timestamps and amounts are deterministic placeholders; media bytes are not stored.",
+  "version": 1
+}

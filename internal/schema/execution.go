@@ -21,6 +21,10 @@ type ErrorMessageMatcher struct {
 	ContainsAny []string `json:"contains_any,omitempty"`
 	Class       string   `json:"class"`
 	Retryable   bool     `json:"retryable,omitempty"`
+	// BeforeStatusRanges makes a hit outrank http_status_ranges, for a refusal
+	// whose message is more specific than its status (a Meshy 402 that names
+	// the key's credit limit, not the account balance, #93).
+	BeforeStatusRanges bool `json:"before_status_ranges,omitempty"`
 }
 
 // ErrorFieldPaths 声明错误证据在响应 JSON 中的取值路径（点分段）。

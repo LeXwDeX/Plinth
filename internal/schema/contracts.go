@@ -74,6 +74,11 @@ const (
 	FailureTimedOut            FailureClass = "timed_out"
 	FailureRejected            FailureClass = "rejected"
 	FailureInsufficientBalance FailureClass = "insufficient_balance"
+	// FailureCredentialQuota: the account has balance, but the API key itself
+	// reached the credit limit its owner set in the provider console (#93).
+	// Another key or a larger key limit fixes it; topping up the account does
+	// not. A definite refusal that is never retried.
+	FailureCredentialQuota     FailureClass = "credential_quota"
 	FailureUpstreamUnavailable FailureClass = "upstream_unavailable"
 	FailureSubmissionUnknown   FailureClass = "submission_unknown"
 	FailureIntegrity           FailureClass = "integrity_failure"
@@ -96,6 +101,7 @@ func (class FailureClass) Valid() bool {
 		FailureTimedOut,
 		FailureRejected,
 		FailureInsufficientBalance,
+		FailureCredentialQuota,
 		FailureUpstreamUnavailable,
 		FailureSubmissionUnknown,
 		FailureIntegrity,

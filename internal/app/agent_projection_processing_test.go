@@ -410,3 +410,28 @@ func TestAgentOfferingProjectionDoesNotInferReferenceCapacityFromOtherArrays(t *
 		})
 	}
 }
+
+// #92: list_offerings hid the file-valued inputs, so the Agent saw only a
+// prompt for Hyper3D texture and told the person the service takes no picture.
+// A processing Offering now lists the reference image it takes from the chat,
+// with its declared requirement.
+func TestAgentOfferingProjectionStatesTheRequiredChatImage(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	offerings := projectionWireOfferings(t, buildAgentOfferingsProjection(product.Application().Capabilities, product, nil))
+	var inputs []agentInputView
+	if err := json.Unmarshal(offerings["hyper3d/texture/local-model"]["inputs"], &inputs); err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range inputs {
+		if input.Name == "reference_image" {
+			if !input.Required || input.Supply != "chat_image" || input.Type != "asset" || len(input.MediaTypes) == 0 {
+				t.Fatalf("reference_image input = %+v", input)
+			}
+			return
+		}
+	}
+	t.Fatalf("Hyper3D texture inputs %+v omit the required reference image", inputs)
+}

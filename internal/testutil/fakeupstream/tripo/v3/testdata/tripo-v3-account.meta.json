@@ -1,0 +1,11 @@
+{
+  "api_version": "v3",
+  "candidate_sha256": "2c1e0f848ddd91ca41953c40f1add2cb7d3bfd94352201f30e379f6f8884736b",
+  "captured_at_utc": "2026-10-29",
+  "exchanges": 5,
+  "provenance": "captured",
+  "scenario": "tripo-v3-alignment",
+  "source_revision": "unknown",
+  "transformation": "IDs, signed URLs, timestamps and amounts are deterministic placeholders; media bytes are not stored.",
+  "version": 1
+}

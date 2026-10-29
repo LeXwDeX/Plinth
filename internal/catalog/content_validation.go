@@ -186,6 +186,7 @@ func validateContent(schema ContentSchema) error {
 		"failure.timed_out",
 		"failure.rejected",
 		"failure.insufficient_balance",
+		"failure.credential_quota",
 		"failure.upstream_unavailable",
 		"failure.submission_unknown",
 		"failure.integrity_failure",

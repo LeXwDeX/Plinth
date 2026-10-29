@@ -54,6 +54,13 @@ type agentInputView struct {
 	// (for example "4:Attack"). Chinese text and groups stay in the public
 	// Schema; this keeps every list_offerings result small for the LLM.
 	OptionsCompact string `json:"options_compact,omitempty"`
+	// Supply is set on an image the person provides in the conversation, not
+	// a value the Agent writes: "chat_image" inputs are passed as
+	// reference_handles (a handle such as @img1). Required says whether the
+	// step can run without it (#92).
+	Supply     string   `json:"supply,omitempty"`
+	MediaTypes []string `json:"media_types,omitempty"`
+	MaxBytes   int64    `json:"max_bytes,omitempty"`
 }
 
 // agentCompactOptionThreshold is the largest option list the Agent projection
@@ -159,6 +166,7 @@ func buildAgentOfferingsProjection(
 			}
 			offeringView.Inputs = agentInputViews(offering)
 			if capability.Domain == generation.DomainProcessing {
+				offeringView.Inputs = append(offeringView.Inputs, agentImageInputViews(offering)...)
 				if offering.NativePricing == nil {
 					// The quoted price includes the extras of fixed values (#324: Tripo's
 					// complete export delivery), so the Agent never quotes the bare base.
@@ -181,7 +189,6 @@ func buildAgentOfferingsProjection(
 					}
 					offeringView.Sources = append(offeringView.Sources, source)
 				}
-				offeringView.Inputs = agentInputViews(offering)
 				offeringView.DefaultQuote = agentDefaultQuote(offering)
 				// Extra credits are a choice only when some billed option is not fixed.
 				if cost := offering.Cost; cost != nil && cost.ExtraCredits > 0 && offering.MaximumEstimatedCredits() > offering.QuotedCredits() {
@@ -234,6 +241,30 @@ func agentInputViews(offering generation.Offering) []agentInputView {
 			}
 		}
 		views = append(views, view)
+	}
+	return views
+}
+
+// agentImageInputViews lists the reference images an Offering takes from the
+// conversation, so the Agent sees that a service requires (or accepts) a
+// picture instead of concluding it takes only a prompt (#92). They come from
+// the Offering's own reference-image parameters; nothing is hard-coded.
+func agentImageInputViews(offering generation.Offering) []agentInputView {
+	var views []agentInputView
+	for _, parameter := range offering.Parameters {
+		if parameter.Semantic != generation.SemanticReferenceImage || parameter.Fixed || parameter.Name == offering.ExtraConsentParameter() ||
+			(parameter.Type != "asset" && parameter.Type != "asset-array") {
+			continue
+		}
+		if _, isSource := schema.SourceParameterRole(parameter); isSource {
+			continue
+		}
+		if parameter.Presentation != nil && parameter.Presentation.Surface == schema.SurfaceHidden {
+			continue
+		}
+		views = append(views, agentInputView{Name: parameter.Name, Label: parameter.Label, Type: parameter.Type, Required: parameter.Required,
+			MinItems: parameter.MinItems, MaxItems: parameter.MaxItems, Supply: "chat_image",
+			MediaTypes: append([]string(nil), parameter.MediaTypes...), MaxBytes: parameter.MaxBytes})
 	}
 	return views
 }
