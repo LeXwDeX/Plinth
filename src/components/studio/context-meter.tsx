@@ -45,7 +45,7 @@ function contextHint(schema: ProductSchema, tokens: number | null, window: numbe
  * never estimated) and the action that compacts it now. The chat history never changes; a compaction
  * shows as a divider in the conversation. A compaction is refused while a reply runs.
  */
-export function ContextMeter({ besideChatModel = false }: { besideChatModel?: boolean } = {}) {
+export function ContextMeter() {
   const { schema } = useProductSchema();
   const activeSessionId = useChatStore((state) => state.activeSessionId);
   const { supported, canCompact, context, compacting, turnRunning, compact } = useSessionContext(activeSessionId);
@@ -70,10 +70,9 @@ export function ContextMeter({ besideChatModel = false }: { besideChatModel?: bo
   };
 
   return (
-    // Spans the tracks left of the parameters button when the row has four of them.
-    // Wide composer: the row is chat model | context | parameters when the chat model picker shows (#322
-    // Scope 5), else context (three tracks) | parameters.
-    <div className={cn('flex h-7 min-w-0 items-center justify-between gap-1', besideChatModel ? '@[40rem]:col-span-2' : '@[40rem]:col-span-3')} data-testid="composer-context">
+    // A full row of the composer's picker grid when narrow, two tracks when wide: the figure sits on the left
+    // edge and the compact action on the right edge, in the same one-picker height as the cells above.
+    <div className="col-span-full flex h-7 min-w-0 items-center justify-between gap-1 @[40rem]:col-span-2" data-testid="composer-context">
       <HintTooltip name={`${label}: ${text}`} hint={contextHint(schema, tokens, window, settings)} className="min-w-0 shrink-0">
         <span
           tabIndex={0}
