@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-10-30.issue121-source-limit-plan-precheck.1",
+    "revision": "2026-10-30.issue126-capture-textures-unavailable.2",
     "terminology": {
       "user_facing": [
         {
@@ -4025,6 +4025,7 @@
         "ui.studio.stage.action.capture_hint": "按当前视角截一张图，放到 2D 画板，并记住它来自哪个模型。",
         "ui.studio.stage.action.capture_target": "当前 3D 模型",
         "ui.studio.stage.action.capture_unavailable": "这个模型的文件还没就绪，暂时不能截图。",
+        "ui.studio.stage.action.capture_textures_incomplete": "这个模型的贴图不完整，暂时不能截图或导出部件。",
         "ui.studio.stage.action.download": "下载",
         "ui.studio.stage.action.inpaint": "局部重绘",
         "ui.studio.stage.action.inpaint_hint": "按你的描述，重画选中的区域。没有选区时先进入蒙版，让你涂出要重画的部分。",
@@ -4530,6 +4531,8 @@
         "ui.viewer.load_failed_aborted": "模型下载被中断，请重试。",
         "ui.viewer.load_failed_unknown": "模型没能显示出来，请重试。",
         "ui.viewer.retry": "重试",
+        "ui.viewer.textures_incomplete": "贴图不完整：{count} 张贴图未能加载，缺贴图的部分用默认材质显示。",
+        "ui.viewer.textures_incomplete_one": "贴图不完整：{count} 张贴图未能加载，缺贴图的部分用默认材质显示。",
         "ui.viewer.reset_view": "复位视角",
         "ui.studio.outputs.group_today": "今天",
         "ui.studio.outputs.group_yesterday": "昨天",
@@ -5587,7 +5590,8 @@
               "offering_argument": "offering_id",
               "default_argument": "use_default_offering",
               "content": "Several available services can run {step} on this model and the person has not chosen one. A choice card listing them (offering_choices) is now shown in the chat; nothing was submitted. End your reply with one short sentence asking the person to choose on the card; name services by their provider and model, never by offering_id. Do not call this tool again for this step until they answer; do not choose for them.",
-              "unknown_offering": "Nothing was submitted: the service in offering_id is not an available service for {step}. Do not choose another service yourself; ask the person which one to use (list_session_models next_steps lists the services that take each model)."
+              "unknown_offering": "Nothing was submitted: the service in offering_id is not an available service for {step}. Do not choose another service yourself; ask the person which one to use (list_session_models next_steps lists the services that take each model).",
+              "unavailable_offering": "Nothing was submitted: the service in offering_id exists, but it is currently unavailable in this deployment for {step} (its service configuration is not active). Tell the person that service is unavailable right now. Do not recommend it, do not choose another service yourself, and do not run the step on a different service unless the person asks for one; ask which one to use (list_session_models next_steps lists the services that take each model)."
             }
           },
           "result_attachment_kind": "model",
@@ -5813,7 +5817,8 @@
               "offering_argument": "offering_id",
               "default_argument": "use_default_offering",
               "content": "Several available services can run {step} on this model and the person has not chosen one. A choice card listing them (offering_choices) is now shown in the chat; nothing was submitted. End your reply with one short sentence asking the person to choose on the card; name services by their provider and model, never by offering_id. Do not call this tool again for this step until they answer; do not choose for them.",
-              "unknown_offering": "Nothing was submitted: the service in offering_id is not an available service for {step}. Do not choose another service yourself; ask the person which one to use (list_session_models next_steps lists the services that take each model)."
+              "unknown_offering": "Nothing was submitted: the service in offering_id is not an available service for {step}. Do not choose another service yourself; ask the person which one to use (list_session_models next_steps lists the services that take each model).",
+              "unavailable_offering": "Nothing was submitted: the service in offering_id exists, but it is currently unavailable in this deployment for {step} (its service configuration is not active). Tell the person that service is unavailable right now. Do not recommend it, do not choose another service yourself, and do not run the step on a different service unless the person asks for one; ask which one to use (list_session_models next_steps lists the services that take each model)."
             },
             "source_asset_argument": "source_asset_id"
           },
@@ -5918,7 +5923,8 @@
             "choice": {
               "default_argument": "use_default_offering",
               "content": "Several available services can run step {step} of this plan and the person has not chosen one. A choice card listing them (offering_choices) is now shown in the chat; no plan was created. End your reply with one short sentence asking the person to choose on the card; name services by their provider and model, never by offering_id. Do not call this tool again until they answer; do not choose for them.",
-              "unknown_offering": "Nothing was submitted: the service in a step's offering_id is not an available service for plan step {step}. Do not choose another service yourself; ask the person which one to use (list_session_models next_steps lists the services that take each model)."
+              "unknown_offering": "Nothing was submitted: the service in a step's offering_id is not an available service for plan step {step}. Do not choose another service yourself; ask the person which one to use (list_session_models next_steps lists the services that take each model).",
+              "unavailable_offering": "Nothing was submitted: the service in a step's offering_id exists, but it is currently unavailable in this deployment for plan step {step} (its service configuration is not active). Tell the person that service is unavailable right now. Do not recommend it, do not choose another service yourself, and do not run the step on a different service unless the person asks for one; ask which one to use (list_session_models next_steps lists the services that take each model)."
             }
           },
           "result_attachment_kind": "model",
@@ -13308,6 +13314,7 @@
             "ui.studio.stage.action.capture_hint": "Capture an image from the current view, place it on the 2D artboard, and remember which model it came from.",
             "ui.studio.stage.action.capture_target": "Current 3D model",
             "ui.studio.stage.action.capture_unavailable": "This model's file isn't ready yet, so it can't be captured for now.",
+            "ui.studio.stage.action.capture_textures_incomplete": "This model's textures are incomplete, so it can't be captured or have parts exported for now.",
             "ui.studio.stage.action.download": "Download",
             "ui.studio.stage.action.inpaint": "Inpaint",
             "ui.studio.stage.action.inpaint_hint": "Redraw the selected area based on your description. With no selection, it enters mask mode first so you can paint the part to redraw.",
@@ -13809,6 +13816,8 @@
             "ui.viewer.load_failed": "Model failed to load",
             "ui.viewer.load_failed_unknown": "The file can't be read, or its format isn't supported",
             "ui.viewer.retry": "Retry",
+            "ui.viewer.textures_incomplete": "Textures incomplete: {count} textures could not be loaded. Those parts show with a default material.",
+            "ui.viewer.textures_incomplete_one": "Textures incomplete: {count} texture could not be loaded. That part shows with a default material.",
             "ui.viewer.reset_view": "Reset view",
             "ui.studio.outputs.group_today": "Today",
             "ui.studio.outputs.group_yesterday": "Yesterday",

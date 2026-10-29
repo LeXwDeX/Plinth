@@ -756,14 +756,47 @@ func (executor *Executor) serviceQuestion(ctx context.Context, command chat.Tool
 // unknownService refuses an Offering ID that is no available service of the
 // step without echoing it into the text.
 func (executor *Executor) unknownService(command chat.ToolCommand, text string, requested generation.OfferingID) (chat.ToolResult, error) {
+	return executor.refuseService(command, text, requested, "unknown offering", nil)
+}
+
+// refuseRequestedService refuses an Offering ID the call named that is no
+// available service of the step. A service the Schema registers and enables
+// but whose runtime configuration is missing is told apart from an ID that
+// is not registered: the Agent then says the service is currently
+// unavailable instead of treating it as a wrong name (#128).
+func (executor *Executor) refuseRequestedService(command chat.ToolCommand, choice *catalog.ChatToolOfferingChoiceSchema,
+	capability generation.Capability, requested generation.OfferingID) (chat.ToolResult, error) {
+	if executor.offeringUnavailable(capability, requested) {
+		text := executor.fillText(command, choice.UnavailableOffering, "{step}", string(capability))
+		return executor.refuseService(command, text, requested, "offering unavailable", map[string]any{"offering_unavailable": true})
+	}
+	return executor.unknownService(command, executor.fillText(command, choice.UnknownOffering, "{step}", string(capability)), requested)
+}
+
+// offeringUnavailable reports an Offering that is registered and enabled for
+// the step while the runtime configuration it needs is not available.
+func (executor *Executor) offeringUnavailable(capability generation.Capability, id generation.OfferingID) bool {
+	for _, offering := range executor.gateway.Offerings(capability) {
+		if offering.ID == id && offering.Enabled && !executor.gateway.OfferingAvailable(offering.ID) {
+			return true
+		}
+	}
+	return false
+}
+
+func (executor *Executor) refuseService(command chat.ToolCommand, text string, requested generation.OfferingID, reason string, extra map[string]any) (chat.ToolResult, error) {
 	executor.logger.Warn("agent tool call refused", "tool", command.Tool.Name, "call_id", command.Call.ID,
-		"owner_id", command.OwnerID, "session_id", command.SessionID, "reason", "unknown offering", "offering_id", string(requested))
+		"owner_id", command.OwnerID, "session_id", command.SessionID, "reason", reason, "offering_id", string(requested))
 	text = executor.localized(command, text)
-	content, _ := json.Marshal(map[string]any{
+	fields := map[string]any{
 		command.Tool.ResultFields.Success: false,
 		command.Tool.ResultFields.Error:   text,
 		"requested_offering_id":           string(requested),
-	})
+	}
+	for key, value := range extra {
+		fields[key] = value
+	}
+	content, _ := json.Marshal(fields)
 	return chat.ToolResult{Error: text, AgentContent: string(content), NoSubmission: true}, nil
 }
 

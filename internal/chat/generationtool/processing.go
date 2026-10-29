@@ -527,7 +527,7 @@ func (executor *Executor) executeProcessing(
 			// its place without the person's answer.
 			if requested != "" {
 				if _, exists := executor.availableOffering(capability, requested); !exists {
-					return executor.unknownService(command, executor.fillText(command, choice.UnknownOffering, "{step}", string(capability)), requested)
+					return executor.refuseRequestedService(command, choice, capability, requested)
 				}
 			}
 			wanted := executor.wantedServices(capability, requested, mentions)

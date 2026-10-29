@@ -5,9 +5,9 @@ import { useEffect, useRef, useState } from 'react';
 import type { ModelViewerElement } from '@google/model-viewer';
 import { RotateCcw, RotateCw } from 'lucide-react';
 import { useProductSchema } from '@/components/product-schema-provider';
-import { formatSchemaText } from '@/lib/product-schema';
+import { formatSchemaText, schemaCountMessage } from '@/lib/product-schema';
 import { isCurrentLoad, loadProgressOf, resetModelView } from '@/lib/workspace/model-view';
-import { modelLoadFailureOf, modelLoadFailureText, recordModelLoadErrors, takeModelLoadError, type ModelLoadFailure } from '@/lib/workspace/model-load-failure';
+import { incompleteTextureCountOf, modelLoadFailureOf, modelLoadFailureText, recordModelLoadErrors, takeModelLoadError, type ModelLoadFailure } from '@/lib/workspace/model-load-failure';
 import { reportClientError } from '@/lib/client-error-report';
 import { cn } from '@/lib/utils';
 import { Action } from '@/components/ui/button';
@@ -107,6 +107,10 @@ async function recordViewerLoadErrors(): Promise<void> {
 /** What the stage needs from a loaded viewer: take a picture, and know when it can. */
 export interface ModelViewerControl {
   ready: boolean;
+  /** The model failed to load (the viewer shows the failure and 重试). */
+  failed: boolean;
+  /** How many textures of the loaded model could not be loaded; the model shows with default materials in their place. */
+  incompleteTextures: number;
   /** The loaded model's materials can be changed, so 白模 and 线框 can be shown. */
   viewModes: boolean;
   capture: () => Promise<void>;
@@ -185,7 +189,7 @@ export function ModelViewer3D({
   onElement,
 }: ModelViewer3DProps) {
   const { proxyAssetUrl } = useAssetURLRewriter();
-  const { text } = useProductSchema();
+  const { text, schema } = useProductSchema();
   const [attempt, setAttempt] = useState(0);
   const [progress, setProgress] = useState(0);
   const [failure, setFailure] = useState<ModelLoadFailure | null>(null);
@@ -193,6 +197,7 @@ export function ModelViewer3D({
   const captureInProgress = useRef(false);
   const [moduleReady, setModuleReady] = useState(false);
   const [ready, setReady] = useState(false);
+  const [incompleteTextures, setIncompleteTextures] = useState(0);
   const [capturing, setCapturing] = useState(false);
   const [viewModes, setViewModes] = useState(false);
   const materialMemory = useRef(new WeakMap() as MaterialMemory);
@@ -216,6 +221,8 @@ export function ModelViewer3D({
   selectedPartRef.current = selectedPart;
   const viewModeRef = useRef(viewMode);
   viewModeRef.current = viewMode;
+  const incompleteTexturesRef = useRef(incompleteTextures);
+  incompleteTexturesRef.current = incompleteTextures;
   const picking = onSelectPart !== undefined;
 
   useEffect(() => {
@@ -255,6 +262,7 @@ export function ModelViewer3D({
     let active = true;
     setProgress(0);
     setFailure(null);
+    setIncompleteTextures(0);
     const onProgress = (event: Event) => {
       if (!active) return;
       const value = loadProgressOf(event);
@@ -264,6 +272,10 @@ export function ModelViewer3D({
       if (!active || !isCurrentLoad(event, element)) return;
       setReady(true);
       setFailure(null);
+      // Textures that could not be loaded leave the geometry showing with default materials: a notice, not a failure.
+      const incomplete = incompleteTextureCountOf((element as unknown as { originalGltfJson?: unknown }).originalGltfJson);
+      setIncompleteTextures(incomplete);
+      if (incomplete > 0) reportClientError('model-viewer-load:textures-incomplete', `${incomplete} texture(s) could not be loaded`);
       onStatsRef.current?.(modelStatsFromGltf((element as unknown as { originalGltfJson?: unknown }).originalGltfJson));
     };
     const onError = (event: Event) => {
@@ -274,6 +286,7 @@ export function ModelViewer3D({
       // #233: the real cause goes to the server log; the viewer shows only the Schema sentence for its kind.
       reportClientError(`model-viewer-load:${found.kind}${found.status ? `:${found.status}` : ''}`, found.detail || found.kind, { requestId: found.requestId });
       setReady(false);
+      setIncompleteTextures(0);
       setFailure(found);
       onStatsRef.current?.(null);
       onTextureSizeRef.current?.(null);
@@ -293,7 +306,7 @@ export function ModelViewer3D({
   const capture = async () => {
     const element = elementRef.current;
     const onCaptureNow = onCaptureRef.current;
-    if (!element || !onCaptureNow || !captureLongEdgePixels || captureInProgress.current) return;
+    if (!element || !onCaptureNow || !captureLongEdgePixels || captureInProgress.current || incompleteTexturesRef.current > 0) return;
     captureInProgress.current = true;
     setCapturing(true);
     // The part highlight is a stage affordance, not the model: it stays out of the picture.
@@ -396,7 +409,7 @@ export function ModelViewer3D({
   const exportPartOf = async (id: string): Promise<Blob> => {
     const element = elementRef.current;
     const found = element ? await viewerSceneOf(element) : null;
-    if (!element || !found?.root) throw new Error('model is not loaded');
+    if (!element || !found?.root || incompleteTexturesRef.current > 0) throw new Error('model is not loaded');
     try {
       return await exportPart(element as unknown as PartExporter, found.root, id, materialMemory.current, viewModeRef.current);
     } finally {
@@ -412,8 +425,8 @@ export function ModelViewer3D({
   const resetViewRef = useRef(resetView);
   resetViewRef.current = resetView;
   useEffect(() => {
-    onControlRef.current?.({ ready, viewModes, capture: () => captureRef.current(), resetView: () => resetViewRef.current(), exportPart: (id) => exportPartRef.current(id) });
-  }, [ready, viewModes, hasCapture, captureLongEdgePixels]);
+    onControlRef.current?.({ ready, failed: failure !== null, incompleteTextures, viewModes, capture: () => captureRef.current(), resetView: () => resetViewRef.current(), exportPart: (id) => exportPartRef.current(id) });
+  }, [ready, failure, incompleteTextures, viewModes, hasCapture, captureLongEdgePixels]);
   useEffect(() => () => onControlRef.current?.(null), []);
   useEffect(() => {
     if (!moduleReady) return;
@@ -456,6 +469,11 @@ export function ModelViewer3D({
           </span>
         </div>
       ) : null}
+      {ready && incompleteTextures > 0 ? (
+        <p role="status" className="pointer-events-none absolute inset-x-3 top-3 mx-auto w-fit max-w-full rounded-full bg-panel-raised px-3 py-1 text-center text-xs text-muted-foreground shadow-lg" data-testid="model-viewer-textures-incomplete">
+          {schemaCountMessage(schema, 'ui.viewer.textures_incomplete', incompleteTextures, { count: incompleteTextures })}
+        </p>
+      ) : null}
       {failure !== null ? (
         <div role="alert" className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-canvas/90 p-4 text-center text-xs" data-testid="model-viewer-error">
           <p className="font-medium text-destructive">{text('ui.viewer.load_failed')}</p>
@@ -473,7 +491,7 @@ export function ModelViewer3D({
         </HintTooltip>
       ) : null}
       {onCapture && captureLabel && (
-        <Action type="button" variant="raised" size="lg" disabled={!ready} loading={capturing} onClick={() => void capture()}
+        <Action type="button" variant="raised" size="lg" disabled={!ready || incompleteTextures > 0} loading={capturing} onClick={() => void capture()}
           className="absolute right-3 bottom-3">
           {capturing ? capturingLabel || captureLabel : captureLabel}
         </Action>
