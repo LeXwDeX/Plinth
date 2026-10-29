@@ -3,7 +3,6 @@ import { schemaText, taskStatePresentation } from '@/lib/product-schema';
 import type { LineageAsset, LineageEdgeKind, LineageEvidence, LineageGraph, LineageNode } from '@/lib/workspace/lineage';
 import { groupTileStatus, type ThreeViewGroup, type ThreeViewStatus } from '@/lib/workspace/three-view';
 import { modelPreviewAsset } from '@/lib/workspace/task-projection';
-import { isBalanceFailure } from '@/lib/workspace/task-retry';
 import { mergedObjectId, type MergedVersion } from '@/lib/workspace/merge-version';
 import type { TrackedTask } from '@/store/workspace-store';
 
@@ -142,8 +141,7 @@ export function primaryParent(tile: Pick<VersionTile, 'parents'>): VersionParent
 }
 
 function failureText(schema: ProductSchema, task: TrackedTask): string {
-  // A balance failure always reads as the Schema's own message, whatever detail the server sent.
-  if (isBalanceFailure(task.failure)) return schemaText(schema, 'failure.insufficient_balance');
+  // The server's public failure projection already carries the Schema's own message for every class (failure.<class>).
   return task.failure?.detail || task.liveError || '';
 }
 
@@ -230,7 +228,7 @@ export function buildVersionTiles({ schema, graph, tracked, sessionId, threeView
           operation: node.operation, captureId: node.captureId, ...(node.conversion ? { conversion: true } : {}),
           version: node.version ?? 0,
           progress: Math.min(Math.max((node.progress ?? 0) / schema.runtime.frontend.percentage_multiplier, 0), 1),
-          failure: node.failure?.failureClass === 'insufficient_balance' ? schemaText(schema, 'failure.insufficient_balance') : node.failure?.detail ?? '',
+          failure: node.failure?.detail ?? '',
           size: node.width > 0 && node.height > 0 ? { width: node.width, height: node.height } : null,
         });
         byKey.set(key, tile);
