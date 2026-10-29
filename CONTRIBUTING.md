@@ -45,13 +45,14 @@ WEB_ASSETS_ROOT=build/go-web go run ./cmd/art-ai
 提交 PR 前在本机运行：
 
 ```bash
-python3 scripts/verify-local.py           # 七项本地门禁
+python3 scripts/verify-local.py           # 八项本地门禁
 python3 scripts/verify-local.py --race    # 再加上 race 测试（CI 必跑，较慢）
 ```
 
-七项依次是：`pnpm exec tsc --noEmit`、`pnpm test`、`pnpm build`、`go vet ./...`、
+八项依次是：`pnpm exec tsc --noEmit`、`pnpm test`、`pnpm build`、`go vet ./...`、
 `go test -count=1 ./...`、`CGO_ENABLED=0 go build -trimpath ./cmd/art-ai`、
-`bash scripts/check-public-tree.sh`（已跟踪文件不得含内部主机、地址或服务器路径）；race 项是
+`bash scripts/check-public-tree.sh`（已跟踪文件不得含内部主机、地址或服务器路径）、
+`python3 -m unittest discover -s scripts/tests -p 'test_*.py'`（发布与门禁脚本的单测）；race 项是
 `CGO_ENABLED=1 go test -race -count=1 ./...`。门禁清单的唯一真源是 `dev_test.md` §2「自动化门禁项」，
 `src/__tests__/ci-gate-parity.test.ts` 保证本地入口、GitHub Actions 与该清单一致：增删门禁时要
 同一提交里一起改。

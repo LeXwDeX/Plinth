@@ -34,16 +34,17 @@
 6. **Go race 测试**「go test race」（仅 CI）：`CGO_ENABLED=1 go test -race -count=1 ./...` 必须通过（Go race detector 要求启用 cgo）；
 7. **Go 构建**「go build」（本地 + CI）：`CGO_ENABLED=0 go build -trimpath ./cmd/art-ai` 必须成功；
 8. **公开快照扫描**「public tree」（本地 + CI）：`bash scripts/check-public-tree.sh` 必须通过（#261：已跟踪文件不得含内网地址、内部域名、服务器路径、本机临时路径、内部 Compose 项目名或组织名称；#334 起还拒绝本机用户目录、私钥头与常见凭据前缀；本地另把未纳入 Git 的 `deploy/local/environments.json` 中的全部环境值作为禁用字面量；约 2 秒，需要 git 与 python3）；
+9. **脚本单测**「scripts tests」（本地 + CI）：`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_*.py'` 必须通过（#86：发布、门禁与公开快照脚本——`verify-local.py`、`release-env.py`、`make-public-snapshot.py`、hook 安装器、割接验收等——自己的单测，项目不用 pytest；约 2 分钟，需要 git、python3 与 sqlite3 命令行；`PYTHONDONTWRITEBYTECODE` 防止在被检出的源码树里留下 `__pycache__`，让主机 CI 的“源码未变”核对不被干扰）；
 
-**为什么这样分（2026-10-20 用户确认去重）**：第 5、6 项跑的是同一批 Go 测试，第 6 项多开 race detector，因而更严格也更慢（CI 约 21 分钟，本机 8–20 分钟，几个 worktree 同时 push 时还会因负载误报）。原先本地与 CI 各跑全部七项，每个 MR 要跑两次 race，CI 还多跑一次被 race 覆盖的普通 `go test`。现在：
+**为什么这样分（2026-10-20 用户确认去重）**：第 5、6 项跑的是同一批 Go 测试，第 6 项多开 race detector，因而更严格也更慢（CI 约 21 分钟，本机 8–20 分钟，几个 worktree 同时 push 时还会因负载误报）。原先本地与 CI 各跑全部七项（当时的门禁数），每个 MR 要跑两次 race，CI 还多跑一次被 race 覆盖的普通 `go test`。现在：
 
 - **race 只在 CI 跑**：它是最慢的一项，且在 CI 上与本地不争资源；本地需要时用 `python3 scripts/verify-local.py --race` 加跑（排在 `go test` 之后，与本节顺序一致）；
 - **普通 `go test` 只在本地跑**：pre-push 用它在几分钟内拦住测试失败；CI 不再单独跑，因为 race 作业已执行同一批测试；
 - **其余各项两处都跑**：都很快；CI 端是不依赖开发机环境的独立复核。
 
-CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check`（第 4、7、8 项；第 8 项只需 git 与 python3，放在已有作业里不多占 runner 槽位）、`go test race`（第 6 项）。三个作业放在同一 stage，同时排队、互不等待；前端几项合为一个作业，因为每个作业都要单独等一个 runner 槽位，排队时间远长于这几项本身的运行时间（2026-10-20 流水线 30897/30899：前端各作业运行 7–27 秒，却各排队 18–55 分钟，Go 各作业还要等前端阶段结束）。CI 只有这三个作业，不构建镜像（#257）。
+CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check`（第 4、7、8、9 项；第 8、9 项只需 git、python3 与 sqlite3，放在已有作业里不多占 runner 槽位）、`go test race`（第 6 项）。三个作业放在同一 stage，同时排队、互不等待；前端几项合为一个作业，因为每个作业都要单独等一个 runner 槽位，排队时间远长于这几项本身的运行时间（2026-10-20 流水线 30897/30899：前端各作业运行 7–27 秒，却各排队 18–55 分钟，Go 各作业还要等前端阶段结束）。CI 只有这三个作业，不构建镜像（#257）。
 
-**`scripts/tests` 不在上述 8 项门禁内（#135）**：这是发布与门禁脚本（`verify-local.py`、`release-env.py`、公开快照检查、hook 安装器等）自己的 Python 单测，用 `python3 -m unittest discover -s scripts/tests -p 'test_*.py'` 运行（项目不用 pytest），约 2 分钟。它不进门禁清单，原因是：`test_verify_local.py` 的指纹/文件监视测试依赖 macOS FSEvents 与本机 Node，并按 `verify-local.py` 只支持 macOS 工具链的前提编写；ci-gate-parity 守门也只认 `pnpm`/`node`/`go`/`bash scripts/` 命令。改动 `scripts/*.py`、`scripts/tests/` 或 hook 安装器时须在本机全量运行并通过，PR 里记录结果。FSEvents 会丢弃监视流刚启动时的事件：`InputMonitor` 停止时每 250 ms 重建 marker 直至事件到达（最长 3 秒），监视类测试在启动监视后先等 0.3 秒再改文件，不再随机出现 `marker-missing`。
+**`scripts/tests` 是第 9 项门禁（#135 起补测，#86 纳入）**：这是发布与门禁脚本自己的 Python 单测，约 2 分钟。纳入门禁后，本机、pre-push、CI 与主机 CI（门禁模式与 `--workflows` 模式）都会跑。它在 Linux 上也要通过，所以：依赖 macOS FSEvents 的原生输入监视与指纹绑定测试类（`FingerprintTests` 及其子类、`NativeMonitorTests`、`RootEventTests`、`RealHookReuseTests`）在非 macOS 上跳过——这一部分覆盖只在 macOS 本机体现，CI 与主机 CI 不覆盖，不能据主机 CI 通过推断它们通过；其余测试不跳过。割接验收测试需要 `sqlite3` 命令行，已装进 `Dockerfile.ci`；`make-public-snapshot.py` 在 Python 3.11.4 之前（Debian bookworm 的 3.11.2 没有 `tarfile` 的 `data` 过滤器）改用等价的成员检查再解包。改动 `scripts/*.py`、`scripts/tests/` 或 hook 安装器时它随门禁运行。FSEvents 会丢弃监视流刚启动时的事件：`InputMonitor` 停止时每 250 ms 重建 marker 直至事件到达（最长 3 秒），监视类测试在启动监视后先等 0.3 秒再改文件，不再随机出现 `marker-missing`。
 
 本机门禁对第 5 项（及 `--race` 时的第 6 项）额外加 `-timeout=30m`：同一工作站并行运行多个会话的门禁时，`httpapi`、`sqlite` 等包会超过 Go 默认的单包 10 分钟上限而误报失败（2026-10-19 多次出现，单独重跑均通过）。CI 的 race 作业以作业级 `GOFLAGS=-timeout=30m` 做同样放宽（2026-10 在单台 runner 上 `httpapi` 包 race 约 596 秒，贴近 10 分钟上限）。这些参数只放宽单包超时，不改变测试集合与判定，门禁命令仍按上面所列。
 
@@ -185,15 +186,15 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
 
 ### 交付硬门禁
 
-- 合并前以本机门禁为准：每个分支推送时照常跑 pre-push（本地七项）；合并到 `main` 前，在待合并的 head 上跑一次 `python3 scripts/verify-local.py --race`，结果写进 PR。
+- 合并前以本机门禁为准：每个分支推送时照常跑 pre-push（本地八项）；合并到 `main` 前，在待合并的 head 上跑一次 `python3 scripts/verify-local.py --race`，结果写进 PR。
 - 交付任何改动到 `dev-test` 前，最终待发布的精确 `main` SHA 应有一次完整的 GitHub Actions `ci` 运行且所有作业 success。可信自托管 `workflow_dispatch` 可提供同一 SHA 的 CI 证据，但须核对实际 runner、`head_sha` 和 checkout。托管 runner 因计费墙不可用，且（没有自托管 runner 或其不可用，包括安全前提未证明）时，按上节先对同一 SHA 做本机初检，再以该 SHA 的完整隔离主机自检作为 CI 替代，并在 PR 或 Issue 记录实际结果。作业因代码原因失败时不得放行；主机自检不能冒称 Actions success。旧 SHA、其他提交的结果、缺项或 skip 都不算。
 - 发布到 `dev-test` 前，还要在同一个待发布 `main` revision 上再跑一次本机 `--race` 全量；发布后照常做 L0、L1、L1 Agent 和相关验收。CI 只作门禁，不承担部署。
 
 ### 本地统一入口与 pre-push 复用
 
-安装本工作树依赖后，最终源内容使用 `python3 scripts/verify-local.py` 执行上述标为本地的各项（七项，不含 race）。开发过程中可先跑受影响的测试；最终全套和 pre-push 使用同一入口。`--force` 强制完整重跑，`--check` 只检查是否有可复用结果，不执行门禁，`--race` 额外执行仅 CI 的 race 项（可与前两者组合）。CI 仍独立执行标为 CI 的各项（`.github/workflows/ci.yml`），不读取本机凭据。
+安装本工作树依赖后，最终源内容使用 `python3 scripts/verify-local.py` 执行上述标为本地的各项（八项，不含 race）。开发过程中可先跑受影响的测试；最终全套和 pre-push 使用同一入口。`--force` 强制完整重跑，`--check` 只检查是否有可复用结果，不执行门禁，`--race` 额外执行仅 CI 的 race 项（可与前两者组合）。CI 仍独立执行标为 CI 的各项（`.github/workflows/ci.yml`），不读取本机凭据。
 
-凭据记录实际通过的门禁名。默认运行的凭据不含 race，`--race`（含 `--check --race`）不会把它当作已覆盖 race，而是完整重跑；`--race` 运行的凭据覆盖默认七项，之后的 pre-push 可直接复用。输出中的复用与完整通过行列出实际覆盖的门禁，未跑 race 时注明它只在 CI 执行。
+凭据记录实际通过的门禁名。默认运行的凭据不含 race，`--race`（含 `--check --race`）不会把它当作已覆盖 race，而是完整重跑；`--race` 运行的凭据覆盖默认八项，之后的 pre-push 可直接复用。输出中的复用与完整通过行列出实际覆盖的门禁，未跑 race 时注明它只在 CI 执行。
 
 同一克隆的所有 worktree 共用一个门禁队列：真正执行门禁前，入口在 Git 公共目录（`git rev-parse --git-common-dir`）下的 `artai-verification-queue/` 用 `flock` 取得 N 个槽位之一，门禁结束（成功、失败或中断）即释放，进程退出时由操作系统兜底释放。N 由 `ART_AI_VERIFY_SLOTS` 指定，默认 1；`0` 关闭排队。槽位全忙时输出一行 `[verify] gate queue: ... waiting for another worktree's gates`，并列出各槽位当前持有的 worktree，取得后输出等待时长。只有执行门禁才排队：可复用凭据命中、`--check` 和仅删除分支的 push 不等待。排队期间输入监测与 stat 守卫持续生效，等待中修改了输入同样不保存凭据，push 仍按原规则校验；`ART_AI_VERIFY_SLOTS` 只影响调度，不计入凭据环境摘要。原因：多个 worktree 同时 push 时机器负载可达 40–60，Go 测试（尤其 `--race`）会因资源争用超时或出现 SQLITE_BUSY，失败后又要重跑整轮；排队不改变门禁集合、命令与 CI。
 
@@ -463,7 +464,7 @@ SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-h
 - `dev-test` 主机上的候选验收结束后必须确认旧测试端口健康且旧测试容器没有被重启。
 
 ## 12. 通过口径
-- §2 的 8 项自动化门禁全部通过；
+- §2 的 9 项自动化门禁全部通过；
 - 涉及 Go 候选时，Go 门禁与 11.4 的候选验收全部通过；
 - 发布含同意挂起改造的版本时，11.3 的挂起验收全部通过；
 - 发布含会话批准方式、Agent 3D 工具、格式补齐/ZIP、设定摘要、选定、版本链或重试的版本时，`scripts/smoke/smoke-l1-agent-mode.sh` 全部通过（零费用，设 `EXPECT_SHA`）；该脚本在已获取的有界候选集内检查最新 applicable 3D 任务的 `formats` 契约（自有会话；能力列表取自 Schema `model_delivery.capabilities`，每能力每页 100，最多检查 500 个去重候选，不保证全局最新或穷尽）：`formats` 必须是 Schema 7 种格式 ID 的精确集合、无重复、每项 `id`/`status` 为字符串；缺失、类型错误、格式清单读取失败都立即 FAIL，不静默换任务。`applicable`/`archive_available` 缺失或非布尔也 FAIL。`archive_available=false` 时 archive 必须返回 413/`too_large`（409/empty 或其他拒绝仍 FAIL，不视为可用归档），并在同一有界候选内另找 `archive_available=true` 的既有任务完成真实 ZIP 200/206、README 与字节检查（超过 `ARCHIVE_MAX_BYTES` 时按 `read-archive.sh` 契约做首项部分检查）；找不到可用归档、错误 413 code、或 `archive_available=true` 却返回 413 都 FAIL。只有完全没有自有 SUCCEEDED 3D 任务才 SKIP。离线契约：`python3 scripts/smoke/test-agent-mode-archive.py`（其中 `read-archive.sh` 为控制流 stub；真实 ZIP 解析由 `test-archive-check.py` 覆盖）；

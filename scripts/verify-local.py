@@ -34,6 +34,8 @@ GATES = [
     ('go build', ['go', 'build', '-trimpath', '-o', os.devnull, './cmd/art-ai'], {'CGO_ENABLED': '0'}),
     # #261: tracked files carry no internal identifier (about 2 seconds).
     ('public tree', ['bash', 'scripts/check-public-tree.sh'], {}),
+    # #86: the release/gate scripts' own unit tests (no bytecode: the gate must not write into the tree it fingerprints).
+    ('scripts tests', ['python3', '-m', 'unittest', 'discover', '-s', 'scripts/tests', '-p', 'test_*.py'], {'PYTHONDONTWRITEBYTECODE': '1'}),
 ]
 # CI-only in dev_test.md §2: the slow gate, running the same tests as go test.
 # --race opts in locally; it then runs right after go test, as in §2.

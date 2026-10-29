@@ -240,6 +240,28 @@ def resolve(rev):
     return git("rev-parse", "--verify", f"{rev}^{{commit}}")
 
 
+def extract_tracked(tar, destination):
+    """extractall with the `data` filter; Python before 3.11.4 (Debian bookworm's 3.11.2) has no filter, so
+    refuse members that leave the destination, devices and escaping links, then extract plainly."""
+    if hasattr(tarfile, "data_filter"):
+        tar.extractall(destination, filter="data")
+        return
+    root = Path(destination).resolve()
+    for member in tar.getmembers():
+        target = (root / member.name).resolve()
+        if member.isdev() or member.name.startswith("/") or not (target == root or root in target.parents):
+            raise ValueError(f"unsafe archive member: {member.name}")
+        if member.issym():
+            linked = (target.parent / member.linkname).resolve()
+        elif member.islnk():
+            linked = (root / member.linkname).resolve()
+        else:
+            continue
+        if not (linked == root or root in linked.parents):
+            raise ValueError(f"archive link leaves the destination: {member.name}")
+    tar.extractall(destination)
+
+
 def export(revision, destination):
     """Extract the tracked files of an exact revision (git archive) into destination."""
     archive = git("archive", "--format=tar", revision, binary=True)
@@ -247,7 +269,7 @@ def export(revision, destination):
         handle.write(archive)
         handle.seek(0)
         with tarfile.open(fileobj=handle) as tar:
-            tar.extractall(destination, filter="data")
+            extract_tracked(tar, destination)
 
 
 def remove_excluded(tree, exclusions):

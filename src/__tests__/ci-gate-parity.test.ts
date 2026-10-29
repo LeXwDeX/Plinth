@@ -20,7 +20,7 @@ import { isAlias, parseDocument, visit } from 'yaml';
  */
 const read = (path: string) => readFileSync(path, 'utf8');
 
-const GATE_COMMAND = /^(?:pnpm |node |go |CGO_ENABLED=|bash scripts\/)/;
+const GATE_COMMAND = /^(?:pnpm |node |go |python3 |[A-Z_]+=|bash scripts\/)/;
 const PLACEMENTS = { '本地 + CI': { local: true, ci: true }, 仅本地: { local: true, ci: false }, '仅 CI': { local: false, ci: true } };
 
 interface Gate {
@@ -67,7 +67,7 @@ function verifyLocal(): { gates: LocalGate[]; race: LocalGate } {
 const LOCAL_ONLY_FLAGS: string[][] = [['--incremental', 'false'], ['-timeout=30m'], ['-o', '/dev/null']];
 
 function docCommand(command: string): { env: Record<string, string>; argv: string[] } {
-  const tokens = command.split(' ');
+  const tokens = command.split(' ').map((token) => token.replace(/^'(.*)'$/, '$1'));
   const env: Record<string, string> = {};
   while (tokens.length && /^[A-Z_]+=/.test(tokens[0])) {
     const [key, value] = tokens.shift()!.split('=');

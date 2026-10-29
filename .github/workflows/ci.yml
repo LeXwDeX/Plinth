@@ -71,6 +71,8 @@ jobs:
       - run: CGO_ENABLED=0 go build -trimpath ./cmd/art-ai
       # 公开快照扫描（#261）：已跟踪文件不得含内部标识
       - run: bash scripts/check-public-tree.sh
+      # 发布与门禁脚本的单测（#86）
+      - run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 
   # 非 race 的 go test 不在 CI：race 跑同一批测试且更严格（dev_test.md §2）。
   go-test-race:
