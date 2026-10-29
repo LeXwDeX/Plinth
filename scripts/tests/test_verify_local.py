@@ -35,6 +35,24 @@ class VerificationTests(unittest.TestCase):
         self.assertNotEqual(before, v.source_identity(self.root))
 
 
+class ToolCheckTests(unittest.TestCase):
+    def test_reports_every_missing_tool(self):
+        with patch.object(v.shutil, 'which', return_value=None):
+            self.assertEqual(v.missing_tools(), v.REQUIRED_TOOLS)
+            self.assertEqual(len(v.missing_tools(race=True)), len(v.REQUIRED_TOOLS) + 1)
+            with self.assertRaisesRegex(v.GateError, 'jq'):
+                v.require_tools()
+
+    def test_race_needs_a_c_compiler_only_with_race(self):
+        only_cc = lambda name: '/bin/cc' if name == 'cc' else '/bin/x'
+        with patch.object(v.shutil, 'which', side_effect=only_cc):
+            self.assertEqual(v.missing_tools(race=True), [])
+        no_cc = lambda name: None if name in ('gcc', 'cc') else '/bin/x'
+        with patch.object(v.shutil, 'which', side_effect=no_cc):
+            self.assertEqual(v.missing_tools(), [])
+            self.assertEqual(len(v.missing_tools(race=True)), 1)
+
+
 class ReceiptTests(VerificationTests):
     def setUp(self):
         super().setUp()
