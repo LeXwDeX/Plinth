@@ -1,6 +1,6 @@
 {
   "api_version": "v3",
-  "candidate_sha256": "dafdeac21b84b8cd74f85a0b4940e380084bd1320bbcc215c665c321f8083338",
+  "candidate_sha256": "0b899dc7b9a0891ef4492f49dd08f0cf14d8fc25e0c8210ad494d9bd3817a90a",
   "captured_at_utc": "2026-10-29",
   "exchanges": 3,
   "offering": "tripo/processing/rigging-v3",

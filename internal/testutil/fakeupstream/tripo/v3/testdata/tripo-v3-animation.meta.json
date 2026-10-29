@@ -1,6 +1,6 @@
 {
   "api_version": "v3",
-  "candidate_sha256": "b52b9cc2efb9cd1280f2916424e0c6f7948e6f0b3723bf2a1264cbd1d7efe85c",
+  "candidate_sha256": "5d0ea0cc674c0d961c65ddbfa96ca6c62164943b1bee76dbd3cc1b78a6bb45b9",
   "captured_at_utc": "2026-10-29",
   "exchanges": 3,
   "offering": "tripo/processing/animation",

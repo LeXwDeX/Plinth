@@ -121,7 +121,10 @@ func Profile() align.Profile {
 		Capture: align.CaptureConfig{
 			Connection: "tripo", Scenario: "tripo-v3-alignment", APIVersion: "v3",
 			PublicHosts: []string{"openapi.tripo3d.ai"},
-			Projection:  map[string]string{"balance": "number", "frozen": "number", "create_time": "timestamp"},
+			Projection: map[string]string{
+				"balance": "number", "frozen": "number", "credits_consumed": "number",
+				"created_at": "timestamp", "completed_at": "timestamp",
+			},
 		},
 		Notes: align.Notes{},
 	}

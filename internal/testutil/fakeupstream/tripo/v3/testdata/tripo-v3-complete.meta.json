@@ -1,6 +1,6 @@
 {
   "api_version": "v3",
-  "candidate_sha256": "4194b2c4162b6aa1c5171333fa3c993fb21a466531e01f316c125d389c7b3a8c",
+  "candidate_sha256": "de3050b4e97fa5b4c1392a87478f3b1eeaf6bb4c14403102396a48e7ca19e018",
   "captured_at_utc": "2026-10-29",
   "exchanges": 12,
   "offering": "tripo/geometry/complete",

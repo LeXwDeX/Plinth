@@ -19,10 +19,8 @@
   },
   "Allowed": {
     "0": true,
-    "0.00": true,
     "100": true,
-    "2026-10-29T00:17:20.556665Z": true,
-    "2026-10-29T00:17:21.445558Z": true,
+    "2026-01-01T00:00:00Z": true,
     "animate_prerigcheck": true,
     "animations": true,
     "application/json": true,

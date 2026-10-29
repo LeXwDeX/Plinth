@@ -22,10 +22,8 @@
   },
   "Allowed": {
     "0": true,
-    "10.00": true,
     "100": true,
-    "2026-10-29T00:20:29.718730Z": true,
-    "2026-10-29T00:20:31.871178Z": true,
+    "2026-01-01T00:00:00Z": true,
     "8": true,
     "animate_retarget": true,
     "animations": true,
