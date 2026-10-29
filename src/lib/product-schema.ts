@@ -344,6 +344,8 @@ export interface ProductSchema {
   authentication: {
     api: AuthenticationAPISchema;
     public_paths: string[];
+    /** Backoff for a failed session request; Retry-After is honoured up to max_retry_after_ms. */
+    session_retry: { initial_delay_ms: number; max_backoff_ms: number; max_retry_after_ms: number };
     messages: AuthenticationMessagesSchema;
     login: LoginSchema;
   };

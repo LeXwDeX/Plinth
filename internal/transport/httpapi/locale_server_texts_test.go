@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/access"
@@ -341,4 +342,44 @@ func TestSystemSkillCatalogFollowsTheLocale(t *testing.T) {
 			t.Fatalf("default %s = %q", key, value)
 		}
 	}
+
+	// A locale switch must not be answered 304 for the other locale's copy.
+	fetch := func(locale, ifNoneMatch string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, schema.Runtime.HTTP.Routes.ChatSkills, nil)
+		request = request.WithContext(catalog.WithLocale(context.Background(), locale))
+		if ifNoneMatch != "" {
+			request.Header.Set("If-None-Match", ifNoneMatch)
+		}
+		response := httptest.NewRecorder()
+		server.mux.ServeHTTP(response, request)
+		return response
+	}
+	zh := fetch("", "")
+	tag := zh.Header().Get("ETag")
+	if tag == "" || fetch("", tag).Code != http.StatusNotModified {
+		t.Fatalf("same locale revalidation: etag %q", tag)
+	}
+	en := fetch("en", tag)
+	if en.Code != http.StatusOK || en.Header().Get("ETag") == tag || serverChineseText.MatchString(regexp.MustCompile(`"id":"[^"]*"`).ReplaceAllString(string(systemSkillBody(t, en.Body.Bytes())), "")) {
+		t.Fatalf("en after zh ETag: %d %q %s", en.Code, en.Header().Get("ETag"), en.Body.String())
+	}
+	if vary := strings.Join(en.Header().Values("Vary"), ","); !strings.Contains(vary, "Accept-Language") || !strings.Contains(vary, "Cookie") {
+		t.Fatalf("Vary = %q", vary)
+	}
+}
+
+// systemSkillBody is the system Skill's JSON object from a skills response.
+func systemSkillBody(t *testing.T, body []byte) []byte {
+	t.Helper()
+	var payload struct {
+		Skills []json.RawMessage `json:"skills"`
+	}
+	decodeTestJSON(t, body, &payload)
+	for _, raw := range payload.Skills {
+		if strings.Contains(string(raw), `"system-three-view"`) {
+			return raw
+		}
+	}
+	t.Fatalf("system Skill missing: %s", body)
+	return nil
 }

@@ -2,7 +2,7 @@
 
 import useSWR from 'swr';
 import { useProductSchema } from '@/components/product-schema-provider';
-import type { AuthenticationAPISchema } from '@/lib/product-schema';
+import type { AuthenticationAPISchema, ProductSchema } from '@/lib/product-schema';
 
 /** The session request failed; `retryAfterSeconds` is the server's Retry-After, when it sent one. */
 export class SessionRequestError extends Error {
@@ -10,8 +10,6 @@ export class SessionRequestError extends Error {
     super(`HTTP ${status}`);
   }
 }
-
-const MAX_RETRY_MILLISECONDS = 120_000;
 
 function parseRetryAfter(value: string | null): number | null {
   if (!value) return null;
@@ -27,11 +25,11 @@ const fetcher = (url: string) =>
     return r.json();
   });
 
-/** Wait before asking again: exponential backoff, never shorter than the server's Retry-After. */
-export function sessionRetryDelayMs(error: unknown, retryCount: number): number {
-  const backoff = Math.min(30_000, 1_000 * 2 ** Math.min(retryCount, 5));
+/** Wait before asking again: exponential backoff, never shorter than the server's Retry-After. All bounds come from the Schema. */
+export function sessionRetryDelayMs(error: unknown, retryCount: number, retry: ProductSchema['authentication']['session_retry']): number {
+  const backoff = Math.min(retry.max_backoff_ms, retry.initial_delay_ms * 2 ** Math.min(retryCount, 16));
   const asked = error instanceof SessionRequestError && error.retryAfterSeconds !== null ? error.retryAfterSeconds * 1000 : 0;
-  return Math.min(MAX_RETRY_MILLISECONDS, Math.max(backoff, asked));
+  return Math.min(retry.max_retry_after_ms, Math.max(backoff, asked));
 }
 
 export type SessionFailure = 'rate_limited' | 'unavailable' | null;
@@ -86,7 +84,7 @@ export function useAuth() {
     {
       onErrorRetry: (err, _key, _config, revalidate, { retryCount }) => {
         if (err instanceof SessionRequestError && err.status === 401) return;
-        setTimeout(() => { void revalidate({ retryCount: retryCount + 1 }); }, sessionRetryDelayMs(err, retryCount));
+        setTimeout(() => { void revalidate({ retryCount: retryCount + 1 }); }, sessionRetryDelayMs(err, retryCount, schema.authentication.session_retry));
       },
     },
   );

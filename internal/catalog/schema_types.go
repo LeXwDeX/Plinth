@@ -1407,10 +1407,11 @@ type PublicAdministrationUserAssetsSchema struct {
 }
 
 type PublicAuthenticationSchema struct {
-	API         PublicAuthenticationAPI `json:"api"`
-	PublicPaths []string                `json:"public_paths"`
-	Messages    AuthenticationTexts     `json:"messages"`
-	Login       LoginPresentation       `json:"login"`
+	API          PublicAuthenticationAPI `json:"api"`
+	PublicPaths  []string                `json:"public_paths"`
+	SessionRetry SessionRetrySchema      `json:"session_retry"`
+	Messages     AuthenticationTexts     `json:"messages"`
+	Login        LoginPresentation       `json:"login"`
 }
 
 type PublicAuthenticationAPI struct {
@@ -4433,6 +4434,7 @@ type AuthenticationSchema struct {
 	Cookie          SessionCookieSchema         `json:"cookie"`
 	API             AuthenticationAPI           `json:"api"`
 	PublicPaths     []string                    `json:"public_paths"`
+	SessionRetry    SessionRetrySchema          `json:"session_retry"`
 	Permissions     []PermissionSchema          `json:"permissions"`
 	Roles           []RoleSchema                `json:"roles"`
 	DefaultRole     string                      `json:"default_role"`
@@ -4440,6 +4442,16 @@ type AuthenticationSchema struct {
 	DirectoryErrors string                      `json:"directory_errors"`
 	Messages        AuthenticationTexts         `json:"messages"`
 	Login           LoginPresentation           `json:"login"`
+}
+
+// SessionRetrySchema is how the browser retries a failed session request
+// (429, 5xx, network): exponential backoff from InitialDelayMilliseconds up to
+// MaxBackoffMilliseconds, never shorter than the server's Retry-After, which is
+// itself capped at MaxRetryAfterMilliseconds.
+type SessionRetrySchema struct {
+	InitialDelayMilliseconds  int `json:"initial_delay_ms"`
+	MaxBackoffMilliseconds    int `json:"max_backoff_ms"`
+	MaxRetryAfterMilliseconds int `json:"max_retry_after_ms"`
 }
 
 type SessionCookieSchema struct {
@@ -4542,6 +4554,7 @@ type rawOffering struct {
 	ProviderID                    string                          `json:"provider_id"`
 	ProviderName                  string                          `json:"provider_name"`
 	ProviderShortLabel            string                          `json:"provider_short_label"`
+	ProviderOrder                 *int                            `json:"provider_order,omitempty"`
 	ModelID                       string                          `json:"model_id"`
 	ModelName                     string                          `json:"model_name"`
 	Capability                    schemacontract.Capability       `json:"capability"`

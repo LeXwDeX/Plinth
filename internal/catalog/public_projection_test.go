@@ -40,7 +40,7 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"administration.generations.assets": {"download_filename_template", "remote_thumbnail_url_query", "remote_thumbnail_task_id_query", "preview_image_extensions"},
 		"administration.usage":              {"api", "defaults", "messages", "presentation"},
 		"administration.user_assets":        {"api", "limits", "filters", "messages", "presentation"},
-		"authentication":                    {"api", "public_paths", "messages", "login"},
+		"authentication":                    {"api", "public_paths", "session_retry", "messages", "login"},
 		"localization":                      {"default_locale", "active_locale", "locales", "preference", "persisted_default_texts"},
 	} {
 		value := any(public)
