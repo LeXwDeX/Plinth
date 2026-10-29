@@ -177,7 +177,7 @@ func TestFBXRasterWorkIsReservedBeforeCompletePixelDecode(t *testing.T) {
 		t.Fatal("unconstrained fixture must fail raster structure, not its work budget")
 	}
 	reader := &fbxTestReadCounter{reader: bytes.NewReader(body), step: 1}
-	fbxTestRequireWorkRejection(t, inspectBinaryFBX(reader, int64(len(body)), &inspectionWorkBudget{remaining: fbxParserWindowWork + (300 << 10)}))
+	fbxTestRequireWorkRejection(t, inspectBinaryFBX(reader, int64(len(body)), &inspectionWorkBudget{remaining: fbxParserWindowWork + (32 << 10)}))
 	if reader.readBytes > 27+13+len("Texture")+5+len(partialPNG) {
 		t.Fatal("pixel-decode work must reject before reading subsequent model framing")
 	}
