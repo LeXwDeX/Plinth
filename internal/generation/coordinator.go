@@ -480,6 +480,7 @@ func (m *Module) applyObservation(
 		if obs.Failure == nil {
 			obs.Failure = &Failure{Class: FailureRejected, SafeDetail: "上游任务已取消"}
 		}
+		obs.Failure = sanitizeFailureEvidence(task, obs.Failure)
 		attempt.State = AttemptCanceled
 		attempt.Failure = obs.Failure
 		attempt.FinishedAt = &now
@@ -689,6 +690,9 @@ func (m *Module) handleAttemptFailure(
 	if failure == nil {
 		failure = &Failure{Class: FailureInternal, SafeDetail: "未知上游错误"}
 	}
+	// Upstream-controlled evidence is sanitized once, before it is stored on
+	// the Attempt, written to an event or logged (A4).
+	failure = sanitizeFailureEvidence(lease.Task, failure)
 	if failure.Ambiguous || failure.Class == FailureSubmissionUnknown {
 		normalized := *failure
 		normalized.Class = FailureSubmissionUnknown
@@ -754,6 +758,7 @@ func (m *Module) rescheduleObservation(
 ) error {
 	task := lease.Task
 	now := m.clock.Now()
+	failure = sanitizeFailureEvidence(task, failure)
 	attempt.ObservationFailures++
 	m.logger.Warn(
 		"generation observation deferred",
@@ -1359,6 +1364,7 @@ func (m *Module) finishFailed(
 	additionalEvents ...Event,
 ) error {
 	task := lease.Task
+	failure = sanitizeFailureEvidence(task, failure)
 	attributes := []any{
 		"task_id", task.ID,
 		"provider_id", task.Offering.ProviderID,

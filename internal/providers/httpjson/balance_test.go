@@ -113,3 +113,23 @@ func TestMeshyKeyCreditLimitIsNotInsufficientBalance(t *testing.T) {
 		}
 	}
 }
+
+// "credit limit" is credential_quota only under the 402 the connection
+// declares for it (B5, #121). Under another status the same words do not
+// outrank that status's own classification; an undeclared status falls through
+// to the default HTTP classification.
+func TestMeshyCreditLimitWordingOnlyAppliesUnderItsDeclaredStatus(t *testing.T) {
+	mapping := connectionMapping(t, "meshy")
+	body := `{"message":"API key credit limit reached"}`
+	if failure := classify(t, mapping, http.StatusPaymentRequired, body); failure.Class != generation.FailureCredentialQuota {
+		t.Fatalf("402 = %+v", failure)
+	}
+	response := &http.Response{StatusCode: http.StatusTooManyRequests, Header: make(http.Header)}
+	if err := ClassifyWithMapping(mapping)(response, []byte(body)); err != nil {
+		t.Fatalf("429 with the wording was classified by the declared matcher: %v", err)
+	}
+	response = &http.Response{StatusCode: http.StatusForbidden, Header: make(http.Header)}
+	if err := ClassifyWithMapping(mapping)(response, []byte(body)); err != nil {
+		t.Fatalf("403 with the wording was classified by the declared matcher: %v", err)
+	}
+}

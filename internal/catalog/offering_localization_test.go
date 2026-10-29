@@ -34,14 +34,25 @@ func englishOfferingTexts(document map[string]any) map[string]any {
 }
 
 func TestEnglishOfferingTextsCoverEveryOffering(t *testing.T) {
-	var document struct {
-		Offerings []any `json:"offerings"`
+	// The loader fills {limit} in requirement copy from source_model_limit and
+	// expands its translations the same way (#121); read the offerings as it does.
+	var parsed document
+	if err := json.Unmarshal(defaultCatalog, &parsed); err != nil {
+		t.Fatal(err)
 	}
-	if err := json.Unmarshal(defaultCatalog, &document); err != nil {
+	if err := expandSourceModelLimitTexts(&parsed); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(parsed.Offerings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var offerings []any
+	if err := json.Unmarshal(encoded, &offerings); err != nil {
 		t.Fatal(err)
 	}
 	used := map[string]bool{}
-	collectChineseTexts(document.Offerings, used)
+	collectChineseTexts(offerings, used)
 	if len(used) == 0 {
 		t.Fatal("default offerings have no Chinese copy to translate")
 	}

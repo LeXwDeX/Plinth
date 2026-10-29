@@ -162,7 +162,7 @@ func (executor *Executor) executeHarnessOperation(ctx context.Context, command c
 	}
 	for name, value := range parameters {
 		p, exists := declared[name]
-		if exists && resolve.ConversationParameter(p) && slices.Contains(snapshot.ConversationParameters, name) {
+		if exists && schema.ConversationReferenceImage(p) && slices.Contains(snapshot.ConversationParameters, name) {
 			// A picture of this chat, named by its handle (#187 D). It is
 			// resolved to an owned input asset like any reference image.
 			if _, fixed := snapshot.Selection.FixedParameters[name]; fixed {

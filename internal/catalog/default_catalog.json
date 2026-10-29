@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-10-30.issue118-audit-action-labels.1",
+    "revision": "2026-10-30.issue121-source-limit-plan-precheck.1",
     "terminology": {
       "user_facing": [
         {
@@ -965,7 +965,11 @@
                   "credit limit"
                 ],
                 "class": "credential_quota",
-                "before_status_ranges": true
+                "before_status_ranges": true,
+                "http_status": {
+                  "min": 402,
+                  "max": 402
+                }
               },
               {
                 "contains_all": [
@@ -1430,7 +1434,8 @@
         "input_parameters_invalid": "这次请求的输入参数无效；这一步没有提交，也没有扣积分。请检查后重试。",
         "input_source_task_expired": "来源任务 {label} 在服务商处的原任务已超过保留期；这一步没有提交，也没有扣积分。请先重新生成来源模型，或改用接受已保存模型文件的服务。",
         "input_source_task_unsupported": "来源任务 {label} 不满足这一步的来源要求；这一步没有提交，也没有扣积分。请重新选择来源。",
-        "input_source_face_limit": "来源模型有 {faces} 个三角面，超过这一步最多 {limit} 个三角面的限制；这一步没有提交，也没有扣积分。请先把模型简化（Remesh）到上限以内再试。"
+        "input_source_face_limit": "来源模型有 {faces} 个三角面，超过这一步最多 {limit} 个三角面的限制；这一步没有提交，也没有扣积分。请先把模型简化（Remesh）到上限以内再试。",
+        "plan_source_face_limit": "这个计划里，「{source_service}」按当前参数会交付约 {estimate} 个三角面，超过后面的步骤「{service}」最多接受的 {limit} 个三角面；整个计划没有创建，也没有扣积分。请调低「{source_service}」的目标面数后重新规划，兼容的拓扑与目标面数上限：{choices}。"
       },
       "task_cancellation": {
         "timeout_seconds": 15,
@@ -5110,7 +5115,7 @@
         {
           "name": "list_offerings",
           "execution": {"implementation_key":"catalog.list","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "List available capabilities and offerings to understand supported generation paths. reference_image_max is the read-only number of reference pictures an offering takes; it is absent when the Schema declares no positive limit, so never read an absent value as one. Query this list before comparing unselected models' limits; do not infer them from the selected model or a tool description, and never switch the selected model on your own. The human chooses the model.",
+          "description": "List available capabilities and offerings to understand supported generation paths. reference_image_max is the read-only number of reference pictures an offering takes; it is absent when the Schema declares no positive limit, so never read an absent value as one. Query this list before comparing unselected models' limits; do not infer them from the selected model or a tool description, and never switch the selected model on your own. The human chooses the model. A processing offering may declare max_source_triangles, the most triangles its source model may have; an offering whose request sets the delivered triangle count (remesh) lists chain_limits for the later steps that limit their source: compatible gives, per topology, the largest target face count that still fits. When you plan a chain such as remesh then rigging, set the earlier step's topology and target face count within chain_limits[].compatible; the default settings may exceed it, and a plan over a later step's limit is refused before any step is paid.",
           "parameters": {
             "type": "object",
             "properties": {}
@@ -5628,7 +5633,7 @@
             "cancellation": "task",
             "agent_scope": "3d"
           },
-          "description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. All steps follow session approval policy. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+          "description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
           "capability": "remesh",
           "fallback_capability": "remesh",
@@ -5844,7 +5849,7 @@
             "mesh-segmentation",
             "mesh-completion"
           ],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
-          "description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. Animation must follow rigging or start from a rigged source, and needs action_id. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+          "description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
           "capability": "remesh",
           "fallback_capability": "remesh",
@@ -6572,7 +6577,21 @@
           "tool_round_limit": "本次回复的工具调用次数已用完（上限 {limit} 次），如需继续请再发一条消息",
           "tool_round_limit_pending": "以下操作本轮未执行，确认后请再发一条消息继续：",
           "tool_round_limit_pending_item": "- {tool}：{intent}",
-          "tool_round_limit_pending_tool": "- {tool}"
+          "tool_round_limit_pending_tool": "- {tool}",
+          "input_gap_missing": "缺少必填输入「{name}」（{type}）{options}：{supply}",
+          "input_gap_reference_image": "本对话里的图片",
+          "input_gap_text_limit": "文本，最多 {max} 个字符",
+          "input_gap_labeled": "{label}，{type}",
+          "input_gap_options": "，可选值：{values}",
+          "input_gap_supply_reference": "用 {argument} 传入本对话里的一张图片（句柄，如 @img1）；用户没有提供时，请他先附上一张",
+          "input_gap_supply_argument": "用 {argument} 传入",
+          "input_gap_supply_unavailable": "这个工具不能设置它；请告诉用户这个服务需要该输入",
+          "input_shape": "已发送字段：{fields}",
+          "input_shape_text": "{name}=文本（{count} 个字符）",
+          "input_shape_list": "{name}=列表（{count} 项）",
+          "input_shape_boolean": "{name}=布尔值",
+          "input_shape_number": "{name}=数字",
+          "input_shape_value": "{name}=值"
         },
         "status": {
           "generating": "正在生成…",
@@ -14728,6 +14747,20 @@
             "chat.presentation.messages.tool_round_limit": "The tool call limit for this reply has been reached (limit: {limit}). Send another message to continue",
             "chat.presentation.messages.tool_round_limit_pending": "The following actions were not run this turn. After confirming, send another message to continue:",
             "chat.presentation.messages.tool_round_limit_pending_item": "- {tool}: {intent}",
+            "chat.presentation.messages.input_gap_missing": "missing required input \"{name}\" ({type}){options}: {supply}",
+            "chat.presentation.messages.input_gap_reference_image": "image from this chat",
+            "chat.presentation.messages.input_gap_text_limit": "text, at most {max} characters",
+            "chat.presentation.messages.input_gap_labeled": "{label}, {type}",
+            "chat.presentation.messages.input_gap_options": " allowed values: {values}",
+            "chat.presentation.messages.input_gap_supply_reference": "pass one image of this chat in {argument} (a handle such as @img1); if the person gave none, ask them to attach one",
+            "chat.presentation.messages.input_gap_supply_argument": "pass it in {argument}",
+            "chat.presentation.messages.input_gap_supply_unavailable": "this tool cannot set it; tell the person this service needs it",
+            "chat.presentation.messages.input_shape": "fields sent: {fields}",
+            "chat.presentation.messages.input_shape_text": "{name}=text({count} chars)",
+            "chat.presentation.messages.input_shape_list": "{name}=list({count})",
+            "chat.presentation.messages.input_shape_boolean": "{name}=boolean",
+            "chat.presentation.messages.input_shape_number": "{name}=number",
+            "chat.presentation.messages.input_shape_value": "{name}=value",
             "chat.presentation.status.generating": "Generating…",
             "chat.presentation.status.thinking": "Thinking…",
             "chat.presentation.status.compacting": "Compacting context…",
@@ -14855,6 +14888,7 @@
             "runtime.generation_messages.input_source_task_expired": "The provider no longer keeps the original task for source {label} (past its retention). This step was not submitted and no credits were spent. Generate the source again, or use a service that accepts the saved model file.",
             "runtime.generation_messages.input_source_task_unsupported": "Source {label} does not meet this step's source requirements. This step was not submitted and no credits were spent. Select another source.",
             "runtime.generation_messages.input_source_face_limit": "The source model has {faces} triangle faces, over this step's limit of {limit}. This step was not submitted and no credits were spent. Simplify the model (Remesh) to within the limit first, then retry.",
+            "runtime.generation_messages.plan_source_face_limit": "In this plan, {source_service} with its current settings would deliver about {estimate} triangle faces, over the {limit} that the later step {service} accepts. The plan was not created and no credits were spent. Lower the target face count of {source_service} and plan again; compatible topology and maximum target face count: {choices}.",
             "runtime.task_cancellation.local_only": "Task canceled; it had not yet been submitted upstream",
             "runtime.task_cancellation.requesting": "Task canceled locally; requesting the upstream to stop. Execution and billing outcome are not yet confirmed",
             "runtime.task_cancellation.confirmed": "Task canceled; the upstream confirmed it stopped. The final cost is per the upstream bill",
@@ -14880,8 +14914,8 @@
             "chat.agent.refetch_unavailable_content.repeated_failure": "fetching this result again already failed for exactly the same reason as the task itself ({cause}). A refetch reuses the settings the task was generated with and the same provider result, so another try would fail the same way; it is no longer offered. Tell the user plainly why the result cannot be recovered; a new generation would charge again and needs their explicit decision. Do not call recover_task_result again for this task",
             "chat.agent.refetch_unavailable_content.delivered": "the result of this task was already fetched again as task {task_id}, which succeeded; there is nothing left to fetch and nothing was started or charged. Present the result of {task_id} as the recovered result (use get_task or observe_task on it), and do not call recover_task_result again for this task",
             "chat.agent_scope.mock_refusal": "The current mode does not allow this request (it needs {tool}). Switch the mode at the bottom right of the input box (Auto mode can do both 2D and 3D), then tell me again.",
-            "chat.tools[name=process_model].description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. All steps follow session approval policy. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
-            "chat.tools[name=plan_model_processing].description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. Animation must follow rigging or start from a rigged source, and needs action_id. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+            "chat.tools[name=process_model].description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+            "chat.tools[name=plan_model_processing].description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
             "chat.tools[name=create_gaussian_splat].description": "Generate Gaussian Splat (image to Gaussian Splat) from exactly one explicitly selected owned image. This distinct representation supports preview and raw .splat download, not mesh processing or mesh export. Never substitute a mesh model or silently choose one of several images.",
             "chat.tools[name=create_model_3d].model_required_message": "Select a generation model in the workspace first.",
             "chat.tools[name=create_model_3d_from_image].model_required_message": "Select a generation model in the workspace first.",
@@ -15928,7 +15962,7 @@
             "附加转换选项": "Additional conversion options",
             "附加转换选项的预计额外积分超出本次提交的授权上限，请减少选项后重试": "The estimated extra credits for the additional conversion options exceed the authorized limit for this submission. Reduce the options and try again.",
             "随机种子": "Random seed",
-            "需要带贴图、面向 +Z 的人形角色。文件结构通过校验不代表满足人形或朝向条件；不符合条件时请先处理模型。模型最多 320000 个三角面（四边面按两个三角面计），超出请先 Remesh 到上限以内。": "Requires a textured humanoid character facing +Z. Passing file structure validation does not mean the humanoid or orientation requirements are met; process the model first if they aren't. The model may have at most 320000 triangle faces (a quad counts as two); if it has more, Remesh it to within the limit first.",
+            "需要带贴图、面向 +Z 的人形角色。文件结构通过校验不代表满足人形或朝向条件；不符合条件时请先处理模型。模型最多 {limit} 个三角面（四边面按两个三角面计），超出请先 Remesh 到上限以内。": "Requires a textured humanoid character facing +Z. Passing file structure validation does not mean the humanoid or orientation requirements are met; process the model first if they aren't. The model may have at most {limit} triangle faces (a quad counts as two); if it has more, Remesh it to within the limit first.",
             "静态 GLB → glTF": "Static GLB → glTF",
             "面数上限": "Face limit",
             "面数上限（额外计费）": "Face limit (extra charge)",
@@ -23182,7 +23216,7 @@
     },
     {
       "id": "meshy/processing/remesh",
-      "revision": "2026-10-22.330.1",
+      "revision": "2026-10-29.121.1",
       "provider_id": "meshy",
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
@@ -23415,6 +23449,14 @@
         "assets.meshy.ai",
         "cdn.meshy.ai"
       ],
+      "output_triangles": {
+        "count_parameter": "target_polycount",
+        "topology_parameter": "topology",
+        "triangles_per_face": {
+          "quad": 2,
+          "triangle": 1
+        }
+      },
       "provider_options": {
         "endpoint": "remesh",
         "api_version": "v1",
@@ -23954,7 +23996,7 @@
     },
     {
       "id": "meshy/processing/rigging",
-      "revision": "2026-10-29.issue103-rigging-face-limit.1",
+      "revision": "2026-10-29.121.1",
       "provider_id": "meshy",
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
@@ -24024,7 +24066,7 @@
           "uploaded_model": {
             "profile_id": "static-glb-v1",
             "require_textures": true,
-            "requirements": "需要带贴图、面向 +Z 的人形角色。文件结构通过校验不代表满足人形或朝向条件；不符合条件时请先处理模型。模型最多 320000 个三角面（四边面按两个三角面计），超出请先 Remesh 到上限以内。"
+            "requirements": "需要带贴图、面向 +Z 的人形角色。文件结构通过校验不代表满足人形或朝向条件；不符合条件时请先处理模型。模型最多 {limit} 个三角面（四边面按两个三角面计），超出请先 Remesh 到上限以内。"
           }
         },
         {
@@ -24084,15 +24126,15 @@
         "assets.meshy.ai",
         "cdn.meshy.ai"
       ],
+      "source_model_limit": {
+        "max_triangles": 320000,
+        "count_basis": "triangles"
+      },
       "provider_options": {
         "endpoint": "rigging",
         "api_version": "v1",
         "inline_model_input": {
           "max_bytes": 73400320
-        },
-        "source_model_limit": {
-          "max_triangles": 320000,
-          "count_basis": "triangles"
         },
         "result_assets": [
           {

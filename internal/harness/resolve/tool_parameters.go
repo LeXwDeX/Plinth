@@ -8,6 +8,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness"
+	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 // conversationHandlePattern is the shape of a chat object handle (@img2,
@@ -17,14 +18,14 @@ const conversationHandlePattern = `^@\S+$`
 // toolParameters freezes only the model-visible parameter contract. Wire names,
 // mappings, prompt-delivery policy and credentials can never enter this object.
 //
-// A conversation input (ConversationParameter) is offered as the handle of an
+// A conversation input (schema.ConversationReferenceImage) is offered as the handle of an
 // image of this chat; conversationHint, from the Schema, tells the model so.
 func toolParameters(selected harness.Selection, offering generation.Offering, conversationHint string) (json.RawMessage, error) {
 	properties := map[string]any{}
 	required := []string{}
 	values := conditionValues(offering, selected.FixedParameters)
 	for _, p := range offering.Parameters {
-		if ConversationParameter(p) {
+		if schema.ConversationReferenceImage(p) {
 			if _, locked := selected.FixedParameters[p.Name]; locked {
 				continue
 			}
