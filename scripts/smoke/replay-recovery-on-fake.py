@@ -164,10 +164,9 @@ def main():
         fs.require_free(fs.FAKE_PORT, "fake upstream")
         fs.require_free(fs.STACK_PORT, "stack")
         fs.require_free(ACCEPTANCE_PORT, "acceptance fixture")
-        fake_child = processes.start([fake_binary, "-addr", f"127.0.0.1:{fs.FAKE_PORT}", "-artifact-origin", f"https://{fs.ASSET_HOST}",
-                                      # Real tasks take minutes; a few extra polls keep the runner's before/after row counts from racing a task that
-                                      # finishes within seconds on the fake.
-                                      "-queued-polls", "2", "-running-polls", "8"],
+        # The fake keeps its default, fast polling: the lost-response check compares row identities, so a Task that
+        # settles the moment it is reconciled must pass as well as one that takes minutes (#139).
+        fake_child = processes.start([fake_binary, "-addr", f"127.0.0.1:{fs.FAKE_PORT}", "-artifact-origin", f"https://{fs.ASSET_HOST}"],
                                      {"PATH": os.environ["PATH"]}, os.path.join(work, "fake.log"))
         if not fs.wait_port(fs.FAKE_PORT, fake_child):
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
