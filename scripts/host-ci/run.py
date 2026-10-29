@@ -11,8 +11,9 @@ logs back to build/host-ci/<run id>/. Exit status: 0 pass, 1 fail, 70 host resou
 low, 75 another run is active, 2 usage or environment error.
 
 The gate logic is not in this tool: it is `scripts/verify-local.py` plus the image built
-from `scripts/host-ci/Dockerfile`. Another runner can build that image and run the same
-entry point (scripts/host-ci/entry.sh) against the same mounts. See dev_test.md section 2.
+from `Dockerfile.ci`. Azure Pipelines and other runners build that same image and run the
+same entry point (scripts/host-ci/entry.sh) against the same mounts. This tool is the local /
+test-host convenience around it. See dev_test.md section 2.
 """
 import argparse
 import hashlib
@@ -35,7 +36,7 @@ import local_environments  # noqa: E402
 DEFAULT_CI_DIR = '/var/lib/plinth-ci'
 # Files that decide the image. The first two come from the tool's own checkout (the
 # image definition), the rest from the commit under test (the dependencies it needs).
-TOOL_FILES = ('scripts/host-ci/Dockerfile', 'scripts/host-ci/entry.sh')
+TOOL_FILES = ('Dockerfile.ci', 'scripts/host-ci/entry.sh')
 MANIFEST_FILES = ('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'go.mod', 'go.sum')
 SSH_OPTIONS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=30']
 SAFE_PATH = re.compile(r'/[A-Za-z0-9_./-]+')

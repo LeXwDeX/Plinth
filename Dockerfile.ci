@@ -1,13 +1,21 @@
 # Plinth gate CI image (#97). Everything a gate run needs is baked in so the container
 # can run with --network none: the toolchain plus a prefetched pnpm store and Go module
-# cache. Nothing here is specific to one host: any runner (the dev-test host today,
-# Azure or GitHub Actions later) builds it the same way and runs the same entry point.
+# cache. Nothing here is specific to one host: a developer machine, the dev-test host and
+# the Azure Pipelines Microsoft-hosted agents all build it the same way from public
+# registries (Docker Hub, registry.npmjs.org, proxy.golang.org; nothing internal) and run
+# the same entry point.
 #
-#   docker build -f scripts/host-ci/Dockerfile -t plinth-ci:local .
+#   docker build -f Dockerfile.ci -t plinth-ci:local .
+#   docker run --network none --user 10001:10001 --tmpfs /work:rw,exec,nosuid,nodev,size=6g,uid=10001,gid=10001 \
+#     --tmpfs /tmp:rw,exec,nosuid,nodev,size=4g,mode=1777 --mount type=bind,src=<bundle>,dst=/in/source.bundle,readonly \
+#     -v <scratch>:/scratch -v <out>:/out -e CI_SHA=<sha> -e CI_TREE=<tree> plinth-ci:local
 #
-# Build context: this Dockerfile, entry.sh and the dependency manifests below. The image
-# tag is derived from exactly these files (scripts/host-ci/run.py toolchain_hash), so an
-# unchanged toolchain and lockfile set reuses the existing image.
+# <scratch> and <out> must be writable by uid 10001. The entry point's contract (mounts,
+# variables, exit codes) is in scripts/host-ci/entry.sh.
+# Build context: this file, scripts/host-ci/entry.sh and the dependency manifests below
+# (the whole repository works too). The image tag on the dev-test host is derived from
+# exactly these files (scripts/host-ci/run.py toolchain_hash), so an unchanged toolchain
+# and lockfile set reuses the existing image.
 #
 # Versions follow dev_test.md section 2 / .github/workflows/ci.yml: Node 22, Go 1.27 and
 # the pnpm version of package.json "packageManager". The two base images are pinned by

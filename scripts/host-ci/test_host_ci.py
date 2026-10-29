@@ -46,9 +46,9 @@ class ToolchainHash(unittest.TestCase):
         self.assertEqual(run.context_tar(self.FILES), run.context_tar(self.FILES))
 
     def test_image_inputs_are_the_documented_files(self):
-        self.assertEqual(run.TOOL_FILES, ('scripts/host-ci/Dockerfile', 'scripts/host-ci/entry.sh'))
+        self.assertEqual(run.TOOL_FILES, ('Dockerfile.ci', 'scripts/host-ci/entry.sh'))
         self.assertEqual(run.MANIFEST_FILES, ('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'go.mod', 'go.sum'))
-        dockerfile = (HERE / 'Dockerfile').read_text()
+        dockerfile = (HERE.parent.parent / 'Dockerfile.ci').read_text()
         for path in run.MANIFEST_FILES:
             self.assertIn(path, dockerfile, f'{path} decides the image tag but the Dockerfile does not copy it')
 

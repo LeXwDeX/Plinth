@@ -131,7 +131,7 @@ def ensure_image(run_dir, tag, args):
     started = time.monotonic()
     with open(run_dir / 'context.tar', 'rb') as context:
         build = subprocess.run(
-            ['docker', 'build', '--tag', name, '--label', LABEL, '--file', 'scripts/host-ci/Dockerfile', '-'],
+            ['docker', 'build', '--tag', name, '--label', LABEL, '--file', 'Dockerfile.ci', '-'],
             stdin=context, timeout=args.build_timeout_min * 60)
     if build.returncode:
         raise Stop('image_build_failed', 1)
