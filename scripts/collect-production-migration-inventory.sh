@@ -232,7 +232,13 @@ inventory_tmp="$(
 chmod 0700 "$inventory_tmp"
 inventory_tmp="$(inventory_canonical_directory "$inventory_tmp")"
 inventory_snapshot="${inventory_tmp}/prod.db"
+# -readonly: the source must never be written, and a read-only connection never
+# checkpoints or truncates the WAL when it closes. Without it, a connection that
+# finds itself the last one on the file (other connections' POSIX locks can be
+# lost, e.g. when any process closes another descriptor of the file) checkpoints
+# on close and rewrites the main file (#143).
 sqlite3 \
+  -readonly \
   -cmd '.timeout 10000' \
   "$inventory_database" \
   ".backup '${inventory_snapshot}'"
