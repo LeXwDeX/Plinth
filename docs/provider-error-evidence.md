@@ -58,8 +58,20 @@ docker logs <container> 2>&1 | grep 'generation attempt finished failed'
   （状态码 → class，错误体 `message/detail/error.message` → SafeDetail）。
 - 网宿网关专属：`httpjson.ClassifyGatewayError`（schemaimages 注入；
   403 按网关文档归 `invalid_input` 而非鉴权）。
-- Tripo 专属：`internal/providers/tripo/adapter.go` `classificationByCode`
-  （官方码表全量映射）。
+- Tripo 专属：连接 `error_mapping.upstream_code_map`（官方码表全量映射），由
+  `internal/providers/tripo/adapter.go` 的 `businessEnvelopeError`（非 2xx 信封的 `code`）和
+  `observation`（#142：状态为 `failed`/`banned`/`expired` 的任务对象里的 `error_code`）共用同一张表。
+  任务级读取规则：状态词自己声明了 `class` 就以它为准，否则按 `error_code` 查表，查不到仍是
+  `rejected`；`retryable` 只取状态词规则（`failed` 不可重试），不会因为码是 1000/1001 就重试一个已失败任务；
+  `error_message`（官方 Python SDK 读作 `error_msg`）经 `generation.UpstreamExcerpt`（去敏并去掉输入回显）
+  与 `error_code` 只写入内部取证字段 `UpstreamCode`/`UpstreamExcerpt`，`SafeDetail` 仍是固定的
+  “Tripo 任务状态为 failed”，公开投影只用 Schema 文案。真实样本：#89 的 smartsegment 失败任务 `error_code` 1001
+  （内部错误，`upstream_unavailable`）；#96 观测的 retarget 在 v2 绑骨结果上 1004（`invalid_input`）；余额不足 2010。
+- Tripo `unknown` 状态词（#142）：Schema 状态词表声明为 `running` 相位，带 `max_consecutive: 20` 与
+  `class: upstream_unavailable`。依据：官方 Python SDK（VAST-AI-Research/tripo-python-sdk）的 `TaskStatus`
+  列出 `unknown`，其 `wait_for_task` 只在 success/failed/cancelled/banned/expired 停止，即 `unknown` 不是终态；
+  但官方没有给出它的持续时间，所以连续出现 20 次后适配器以 `upstream_unavailable` 结束（不可重试），
+  已知状态词会重置计数。计数在适配器进程内按远端任务保存，进程重启时重新计数。
 - 余额不足（`insufficient_balance`，2026-10-08 新增，源码已实现，待 dev-test 验收）：
   各连接在 Schema `error_mapping` 里声明，不在代码里按 Provider 分支。通用算法
   `httpjson.matchErrorMapping` 先看“被声明为 insufficient_balance 的错误码或消息匹配”，

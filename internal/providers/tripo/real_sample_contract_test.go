@@ -326,7 +326,11 @@ func realSampleRequestPrompts(body map[string]json.RawMessage) (map[string]bool,
 
 // The one failed official task: the shaded-sphere Smart Segmentation of #89 ended
 // after minutes of polling with status failed, error_code 1001, no output and no
-// progress. It must end the attempt as a rejection without claiming anything.
+// progress. It must end the attempt without claiming anything. Its error_code
+// 1001 is the documented internal error, so the Schema's upstream_code_map reads
+// it as upstream_unavailable (not retryable: a failed status never retries on
+// its code alone), and the code and the sanitized message stay in the internal
+// evidence fields only.
 func TestOfficialFailedSmartSegmentationEndsTheAttemptWithoutArtifacts(t *testing.T) {
 	product, err := catalog.LoadDefault()
 	if err != nil {
@@ -361,7 +365,13 @@ func TestOfficialFailedSmartSegmentationEndsTheAttemptWithoutArtifacts(t *testin
 			t.Fatalf("poll %d: %v", i+1, err)
 		}
 	}
-	if last.Phase != generation.UpstreamFailed || last.Failure == nil || last.Failure.Class != generation.FailureRejected || len(last.Artifacts) != 0 {
+	if last.Phase != generation.UpstreamFailed || last.Failure == nil || last.Failure.Class != generation.FailureUpstreamUnavailable || last.Failure.Retryable || len(last.Artifacts) != 0 {
 		t.Fatalf("final observation = %+v", last)
+	}
+	if last.Failure.UpstreamCode != "1001" || last.Failure.UpstreamExcerpt != "code=1001 message=Segmentation pipeline failed" {
+		t.Fatalf("evidence = code %q excerpt %q", last.Failure.UpstreamCode, last.Failure.UpstreamExcerpt)
+	}
+	if last.Failure.SafeDetail != "Tripo 任务状态为 failed" {
+		t.Fatalf("the public detail must stay the Schema-side wording, got %q", last.Failure.SafeDetail)
 	}
 }

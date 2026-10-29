@@ -236,6 +236,25 @@ func TestProviderConnectionsRejectInvalidStatusPhase(t *testing.T) {
 	}
 }
 
+func TestProviderConnectionsRejectInvalidStatusBound(t *testing.T) {
+	for name, rule := range map[string]map[string]any{
+		"negative":        {"phase": "running", "class": "upstream_unavailable", "max_consecutive": -1},
+		"without a class": {"phase": "running", "max_consecutive": 5},
+		"terminal phase":  {"phase": "failed", "class": "rejected", "max_consecutive": 5},
+		"completed phase": {"phase": "completed", "class": "rejected", "max_consecutive": 5},
+	} {
+		t.Run(name, func(t *testing.T) {
+			document := defaultCatalogDocument(t)
+			connection := cloneValue(t, connectionMap(t, document, "tripo"))
+			connection["status_mapping"] = map[string]any{"upstream_status": map[string]any{"unknown": rule}}
+			replaceConnection(t, document, connection)
+			if _, err := loadDocument(t, document); err == nil || !strings.Contains(err.Error(), "max_consecutive") {
+				t.Fatalf("err = %v", err)
+			}
+		})
+	}
+}
+
 func TestProviderConnectionsRejectConditionalOverlap(t *testing.T) {
 	document := defaultCatalogDocument(t)
 	connection := cloneValue(t, connectionMap(t, document, "matting"))
