@@ -32,7 +32,7 @@ func TestProcessingOutcomeDoesNotExposeRawUnavailableDetail(t *testing.T) {
 	internal := &generation.Error{Code: generation.ErrUnavailable,
 		Operation: "validate_provider_input", Detail: "SECRET-INTERNAL-DIAGNOSTIC"}
 	result, gotErr := (&Executor{}).processingOutcome(chat.ToolCommand{Tool: tool},
-		chat.ToolResult{NoSubmission: true}, internal)
+		chat.ToolResult{NoSubmission: true}, internal, "")
 	if gotErr != internal {
 		t.Fatalf("error = %v", gotErr)
 	}
@@ -61,7 +61,7 @@ func TestProcessingOutcomeUsesModelInputMessage(t *testing.T) {
 			Operation: "validate_provider_input", Detail: "SECRET-INTERNAL-DIAGNOSTIC"}
 		result, gotErr := (&Executor{texts: texts, logger: slog.New(slog.DiscardHandler)}).processingOutcome(chat.ToolCommand{
 			Tool: candidate, Options: chat.TurnOptions{Locale: "en"},
-		}, chat.ToolResult{NoSubmission: true}, err)
+		}, chat.ToolResult{NoSubmission: true}, err, "")
 		want := texts.Message("en", "error."+string(generation.ErrModelInputLimit))
 		if gotErr != nil || !result.NoSubmission || result.Error != want || strings.Contains(result.Error, "SECRET") {
 			t.Fatalf("result=%+v error=%v want=%q", result, gotErr, want)
@@ -113,7 +113,7 @@ func TestProcessingOutcomeDoesNotExposeKernelDiagnostic(t *testing.T) {
 	var logs bytes.Buffer
 	result, gotErr := (&Executor{chat: application.Chat,
 		logger: slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))}).
-		processingOutcome(chat.ToolCommand{Tool: tool}, chat.ToolResult{NoSubmission: true}, internal)
+		processingOutcome(chat.ToolCommand{Tool: tool}, chat.ToolResult{NoSubmission: true}, internal, "")
 	if gotErr != nil || !result.NoSubmission {
 		t.Fatalf("result=%+v error=%v", result, gotErr)
 	}

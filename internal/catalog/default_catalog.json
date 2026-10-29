@@ -5455,7 +5455,7 @@
           "name": "retexture_model",
           "canvas_source": "ignore",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["retexture"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
-          "description": "Re-texture a finished 3D model of this session from an English text prompt or one style reference image (exactly one of them). The service must accept the model as its source (see list_offerings). In manual approval mode the user must approve before it runs. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+          "description": "Re-texture a finished 3D model of this session from an English text prompt, one reference image or both, as the selected service's inputs in list_offerings allow. An input with supply=chat_image is a picture from this chat, passed in reference_handles (such as @img1); when it has required=true the step cannot run without it, so ask the person to attach one image instead of trying other arguments. The service must accept the model as its source (see list_offerings). In manual approval mode the user must approve before it runs. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
           "capability": "retexture",
           "fallback_capability": "retexture",
@@ -5475,12 +5475,12 @@
               },
               "prompt": {
                 "type": "string",
-                "description": "Concise English description of the new texture. Give either prompt or reference_image_indices, not both."
+                "description": "Concise English description of the new texture. Use it only if the selected service lists a prompt input in list_offerings; some services also require a reference image beside it, others accept a prompt or an image but not both."
               },
               "reference_handles": {
                 "type": "array",
                 "items": { "type": "string" },
-                "description": "Optional handles (such as @img3, or @selected for the current selection) of images in this chat. Prefer handles over indices. Used as the style reference instead of a prompt; give at most one."
+                "description": "Handles (such as @img3, or @selected for the current selection) of the one image in this chat that the service's chat_image input takes: the style or material reference. Required when list_offerings marks that input required=true. Prefer handles over indices; give at most one."
               },
               "reference_image_indices": {
                 "type": "array",

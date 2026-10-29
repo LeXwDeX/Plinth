@@ -217,3 +217,23 @@ func TestRequiredReferenceImageComesFromTheTurnOrIsAskedFor(t *testing.T) {
 		})
 	}
 }
+
+// A required input the call did not supply is named with its declared type,
+// how this tool takes it and the allowed values, never with a bare "invalid
+// parameters" (#92). Sent fields are described by name and type only.
+func TestMissingRequiredInputIsReportedWithFieldAndHowToSupplyIt(t *testing.T) {
+	h, _ := choiceHarness(t, "auto")
+	offering, ok := h.gateway.product.Get("hyper3d/texture/local-model")
+	if !ok {
+		t.Fatal("Hyper3D texture offering missing")
+	}
+	command := chat.ToolCommand{Tool: h.tool("retexture_model")}
+	gaps := h.executor.InputGapsForTest(command, offering, map[string]any{"source_asset": "asset-1", "prompt": "mossy"})
+	if len(gaps) != 1 || !strings.Contains(gaps[0], `"reference_image"`) || !strings.Contains(gaps[0], "image from this chat") ||
+		!strings.Contains(gaps[0], "reference_handles") || strings.Contains(gaps[0], "mossy") {
+		t.Fatalf("gaps = %q", gaps)
+	}
+	if got := h.executor.InputGapsForTest(command, offering, map[string]any{"reference_image": "asset-2"}); len(got) != 0 {
+		t.Fatalf("a supplied input was reported missing: %q", got)
+	}
+}
