@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
+	"github.com/LeXwDeX/Plinth/internal/providers/mock/modelfiles"
 )
 
 func validateBytes(t *testing.T, name string, data []byte, role, variant, mediaType string) {
@@ -28,24 +29,24 @@ func validateBytes(t *testing.T, name string, data []byte, role, variant, mediaT
 func TestEveryModelFormatPassesDeliveryChecks(t *testing.T) {
 	seed := digest("seed")
 	spec := modelSpec{GeometrySeed: seed, TextureSeed: seed, Hue: 200, Subdivision: 8, TextureSize: 512, Label: "TEST"}
-	mesh := buildHumanoid(seed, spec.Subdivision)
+	mesh := modelfiles.BuildHumanoid(seed, spec.Subdivision)
 	texture, err := renderModelTexture(spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	glb, err := buildGLB(mesh, texture, "MockHumanoid")
+	glb, err := modelfiles.BuildGLB(mesh, texture, "MockHumanoid")
 	if err != nil {
 		t.Fatal(err)
 	}
-	gltf, err := buildGLTF(mesh, texture, "MockHumanoid")
+	gltf, err := modelfiles.BuildGLTF(mesh, texture, "MockHumanoid")
 	if err != nil {
 		t.Fatal(err)
 	}
-	usdz, err := buildUSDZ(texture)
+	usdz, err := modelfiles.BuildUSDZ(texture)
 	if err != nil {
 		t.Fatal(err)
 	}
-	threeMF, err := build3MF(mesh)
+	threeMF, err := modelfiles.Build3MF(mesh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,22 +56,22 @@ func TestEveryModelFormatPassesDeliveryChecks(t *testing.T) {
 	}
 	validateBytes(t, "a.glb", glb, "model", "glb", "model/gltf-binary")
 	validateBytes(t, "a.gltf", gltf, "converted_model", "converted.gltf", "model/gltf+json")
-	validateBytes(t, "a.obj", buildOBJ(mesh, "TEST", objDeliveredLibrary), "model", "obj", "text/plain")
-	validateBytes(t, "b.obj", buildOBJ(mesh, "TEST", objGeometryOnly), "model", "obj", "text/plain")
-	validateBytes(t, "c.obj", buildOBJ(mesh, "TEST", objDanglingLibrary), "model", "obj", "text/plain")
-	validateBytes(t, "a.mtl", buildMTL(), "model", "mtl", "text/plain")
-	validateBytes(t, "a.stl", buildSTL(mesh), "model", "stl", "application/octet-stream")
-	validateBytes(t, "a.fbx", buildFBX(mesh, "TEST"), "model", "fbx", "application/octet-stream")
+	validateBytes(t, "a.obj", modelfiles.BuildOBJ(mesh, "TEST", modelfiles.OBJDeliveredLibrary), "model", "obj", "text/plain")
+	validateBytes(t, "b.obj", modelfiles.BuildOBJ(mesh, "TEST", modelfiles.OBJGeometryOnly), "model", "obj", "text/plain")
+	validateBytes(t, "c.obj", modelfiles.BuildOBJ(mesh, "TEST", modelfiles.OBJDanglingLibrary), "model", "obj", "text/plain")
+	validateBytes(t, "a.mtl", modelfiles.BuildMTL(), "model", "mtl", "text/plain")
+	validateBytes(t, "a.stl", modelfiles.BuildSTL(mesh), "model", "stl", "application/octet-stream")
+	validateBytes(t, "a.fbx", modelfiles.BuildFBX(mesh, "TEST"), "model", "fbx", "application/octet-stream")
 	validateBytes(t, "a.usdz", usdz, "model", "usdz", "application/octet-stream")
 	validateBytes(t, "a.3mf", threeMF, "model", "3mf", "application/octet-stream")
-	validateBytes(t, "a.blend", buildBlend(), "model", "blend", "application/octet-stream")
+	validateBytes(t, "a.blend", modelfiles.BuildBlend(), "model", "blend", "application/octet-stream")
 	validateBytes(t, "a.png", texture, "texture", "texture.base_color", "image/png")
 	validateBytes(t, "t.png", thumb, "thumbnail", "primary", "image/png")
-	t.Logf("glb=%d bytes, tris=%d, verts=%d", len(glb), mesh.triangleCount(), mesh.vertexCount())
+	t.Logf("glb=%d bytes, tris=%d, verts=%d", len(glb), mesh.TriangleCount(), mesh.VertexCount())
 }
 
 func TestMockModelFidelityProducesDeliverableSkinAndKeyframes(t *testing.T) {
-	mesh := buildHumanoid(digest("fidelity"), 1)
+	mesh := modelfiles.BuildHumanoid(digest("fidelity"), 1)
 	texture, err := renderModelTexture(modelSpec{TextureSize: 32})
 	if err != nil {
 		t.Fatal(err)
@@ -78,13 +79,13 @@ func TestMockModelFidelityProducesDeliverableSkinAndKeyframes(t *testing.T) {
 	for _, level := range []string{"skeleton", "animation"} {
 		for _, format := range []string{"glb", "gltf", "fbx"} {
 			t.Run(level+format, func(t *testing.T) {
-				build, media := buildGLB, "model/gltf-binary"
+				build, media := modelfiles.BuildGLB, "model/gltf-binary"
 				switch format {
 				case "gltf":
-					build, media = buildGLTF, "model/gltf+json"
+					build, media = modelfiles.BuildGLTF, "model/gltf+json"
 				case "fbx":
-					build = func(mesh meshData, _ []byte, label string, fidelity ...string) ([]byte, error) {
-						return buildFBX(mesh, label, fidelity...), nil
+					build = func(mesh modelfiles.Mesh, _ []byte, label string, fidelity ...string) ([]byte, error) {
+						return modelfiles.BuildFBX(mesh, label, fidelity...), nil
 					}
 					media = "application/octet-stream"
 				}
@@ -114,7 +115,7 @@ func TestMockModelFidelityProducesDeliverableSkinAndKeyframes(t *testing.T) {
 // rigging fix above is not the checker accepting any FBX (#265).
 func TestStaticMockFBXHasNoSkeleton(t *testing.T) {
 	name := filepath.Join(t.TempDir(), "static.fbx")
-	if err := os.WriteFile(name, buildFBX(buildHumanoid(digest("static"), 1), "Static"), 0o600); err != nil {
+	if err := os.WriteFile(name, modelfiles.BuildFBX(modelfiles.BuildHumanoid(digest("static"), 1), "Static"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	file, err := os.Open(name)
@@ -136,7 +137,7 @@ func TestLargeModelMarkerGrowsAValidGLB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	glb, err := buildPaddedGLB(buildHumanoid(seed, spec.Subdivision), texture, "MockHumanoid", "", LargeModelBytes)
+	glb, err := modelfiles.BuildPaddedGLB(modelfiles.BuildHumanoid(seed, spec.Subdivision), texture, "MockHumanoid", "", LargeModelBytes)
 	if err != nil {
 		t.Fatal(err)
 	}

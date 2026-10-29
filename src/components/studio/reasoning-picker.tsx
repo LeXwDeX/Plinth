@@ -30,7 +30,7 @@ export function reasoningSection(
       cells: [{
         text: level,
         strong: true,
-        upper: true,
+        kind: 'name',
         ...(level === reasoning?.defaultLevel ? { tag: schemaText(schema, 'ui.studio.reasoning.default_tag') } : {}),
       }],
     })),

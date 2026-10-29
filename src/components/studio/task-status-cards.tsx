@@ -8,7 +8,7 @@ import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { formatSchemaText } from '@/lib/product-schema';
 import { useTaskRetry } from '@/hooks/use-task-retry';
-import { canRetryTask, isBalanceFailure } from '@/lib/workspace/task-retry';
+import { canRetryTask } from '@/lib/workspace/task-retry';
 import { resolveErrorText } from '@/lib/workspace/task-projection';
 import { chatTaskCards, elapsedClockNeeded, elapsedSeconds, formatElapsed, progressPercent } from '@/lib/workspace/task-progress';
 import { cn } from '@/lib/utils';
@@ -53,8 +53,6 @@ export function TaskStatusCards({ part }: { part: 'running' | 'failed' }) {
     return capability?.label_cn || capability?.label || task.capability;
   };
   const failureText = (task: TrackedTask) => {
-    // A balance failure reads as the Schema's own message, whatever detail came with it.
-    if (isBalanceFailure(task.failure)) return text('failure.insufficient_balance');
     return resolveErrorText(schema.content.messages, task.failure?.detail || task.liveError, text('ui.workspace.tasks.error_title'));
   };
   const suffix = schema.runtime.frontend.percentage_suffix;

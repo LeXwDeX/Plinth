@@ -1,11 +1,16 @@
-package mock
+package fakeupstream
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
 
-// SmallModelFiles feeds test tooling (the fake upstream, #96); every container
-// it hands out must pass the delivery checks and stay byte-stable.
+	"github.com/LeXwDeX/Plinth/internal/assets/local"
+)
+
+// Every container the fixture hands out must pass the delivery checks and stay byte-stable.
 func TestSmallModelFilesPassDeliveryChecksAndAreDeterministic(t *testing.T) {
-	files, err := SmallModelFiles()
+	files, err := smallModelFiles()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,13 +29,13 @@ func TestSmallModelFilesPassDeliveryChecksAndAreDeterministic(t *testing.T) {
 		"png":           {"texture", "texture.base_color", "image/png"},
 	} {
 		file, ok := files[format]
-		if !ok || len(file.Data) == 0 || file.MediaType != want.media && format != "png" {
+		if !ok || len(file.Data) == 0 || file.MediaType != want.media {
 			t.Errorf("%s: missing or wrong media type (%q)", format, file.MediaType)
 			continue
 		}
-		validateBytes(t, format, file.Data, want.role, want.variant, want.media)
+		validateDelivered(t, format, file.Data, want.role, want.variant, want.media)
 	}
-	again, err := SmallModelFiles()
+	again, err := smallModelFiles()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,5 +43,21 @@ func TestSmallModelFilesPassDeliveryChecksAndAreDeterministic(t *testing.T) {
 		if string(again[format].Data) != string(file.Data) {
 			t.Errorf("%s is not deterministic", format)
 		}
+	}
+}
+
+func validateDelivered(t *testing.T, name string, data []byte, role, variant, mediaType string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := local.ValidateDeliveredFile(file, role, variant, mediaType); err != nil {
+		t.Errorf("%s (%s/%s) rejected: %v", name, role, variant, err)
 	}
 }
