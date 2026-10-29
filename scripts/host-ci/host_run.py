@@ -289,7 +289,7 @@ def ensure_runner_image(args):
 
 def act_command(act, src, event, event_file, args):
     command = [str(act), event, '-C', str(src), '-e', str(event_file), '-P', f'ubuntu-latest={args.runner_name}',
-               '--container-architecture', 'linux/amd64', '--concurrent-jobs', '1', '--container-daemon-socket', '-', '--rm',
+               '--container-architecture', 'linux/amd64', '--concurrent-jobs', '1', '--container-daemon-socket', '-', '--rm', '--pull=false',
                '--action-cache-path', str(args.act_cache),
                '--container-options', f'--cpus {args.cpus:g} --memory {args.memory_gib}g --memory-swap {args.memory_gib}g --pids-limit 4096 '
                                       f'--security-opt no-new-privileges --label {LABEL} --label plinth.host-ci.run={args.run_id}']

@@ -317,6 +317,7 @@ class WorkflowReplay(unittest.TestCase):
         for fragment in ('--cpus 4', '--memory 12g', '--memory-swap 12g', 'no-new-privileges', host_run.LABEL):
             self.assertIn(fragment, options)
         self.assertIn('ubuntu-latest=plinth-ci-act:abc', command)
+        self.assertIn('--pull=false', command)  # the derived image exists only locally; act must not try to pull it
         self.assertEqual(command[command.index('--concurrent-jobs') + 1], '1')
         self.assertEqual(command[command.index('--container-daemon-socket') + 1], '-')
         self.assertNotIn('-j', command)
