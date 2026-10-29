@@ -2499,7 +2499,10 @@ func (s *Server) listTasks(
 		Cursor:     request.URL.Query().Get("cursor"),
 		SessionID:  request.URL.Query().Get("session_id"),
 	}
-	scope := taskReadScope(principal)
+	// 用户端公开列表对所有角色只返回本人任务（#154）：管理员查看他人任务走
+	// /api/admin/generations，那里按 Schema 写 admin_read_generations 审计。
+	// 按任务 ID 的详情、事件和资产仍用 taskReadScope。
+	scope := generation.OwnTasks(generation.OwnerID(principal.ID()))
 	if query.SessionID != "" {
 		owned, err := s.chat.OwnsSession(request.Context(), principal.ID(), query.SessionID)
 		if err != nil {
@@ -2510,7 +2513,6 @@ func (s *Server) listTasks(
 			s.writeMessageProblem(writer, http.StatusNotFound, "not_found", "error.task_not_found")
 			return
 		}
-		scope = generation.OwnTasks(generation.OwnerID(principal.ID()))
 	}
 	if limit := request.URL.Query().Get("limit"); limit != "" {
 		parsed, err := strconv.Atoi(limit)

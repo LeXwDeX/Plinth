@@ -221,3 +221,50 @@ func TestTaskDetailShowsPromptToOwnerOnly(t *testing.T) {
 		t.Fatalf("other owner status = %d body = %s", other.Code, other.Body.String())
 	}
 }
+
+// #154：用户端原生任务列表 GET /api/v1/tasks 对所有角色只返回本人任务；
+// 管理员按任务 ID 的详情仍沿 tasks.read.any，管理端生成记录走自己的接口。
+func TestNativeTaskListIsOwnTasksOnlyForEveryRole(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name  string
+		roles []string
+	}{
+		{name: "admin", roles: []string{"admin"}},
+		{name: "user", roles: []string{"user"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			module, handler, _ := newHTTPHarnessWithRoles(t, test.roles)
+			mine := submitHistoryFixture(t, module, "caller", generation.TextToImage, "mine")
+			other := submitHistoryFixture(t, module, "owner-b", generation.TextToImage, "theirs")
+			reconcileFixtureTask(t, module, "caller", mine.TaskID)
+			reconcileFixtureTask(t, module, "owner-b", other.TaskID)
+
+			response := serveScopedRequest(handler, "/api/v1/tasks", "caller")
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+			}
+			var body struct {
+				Tasks []struct {
+					ID generation.TaskID `json:"id"`
+				} `json:"tasks"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Tasks) != 1 || body.Tasks[0].ID != mine.TaskID {
+				t.Fatalf("native list = %#v, want only %s", body.Tasks, mine.TaskID)
+			}
+
+			detail := serveScopedRequest(handler, "/api/v1/tasks/"+string(other.TaskID), "caller")
+			wantDetail := http.StatusNotFound
+			if test.name == "admin" {
+				wantDetail = http.StatusOK
+			}
+			if detail.Code != wantDetail {
+				t.Fatalf("cross-owner detail status = %d, want %d", detail.Code, wantDetail)
+			}
+		})
+	}
+}
