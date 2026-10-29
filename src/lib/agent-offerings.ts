@@ -74,6 +74,8 @@ export interface OfferingWire {
   provider_name: string;
   /** The vendor's short name declared by the Product Schema (such as "GPT"), for compact controls. */
   provider_short_label?: string;
+  /** Schema `provider_order`: the vendor's rank in the model tables (ascending); absent when undeclared. */
+  provider_order?: number;
   model_id: string;
   model_name: string;
   capability: string;
