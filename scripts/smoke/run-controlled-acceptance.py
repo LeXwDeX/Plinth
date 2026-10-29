@@ -170,6 +170,19 @@ class Runner:
         with closing(self.db()) as db:
             return {table: db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in ("generation_tasks", "generation_attempts", "generation_prepared_inputs", "execution_grants", "generation_usage_ledger")}
 
+    EXECUTION_TABLES = ("generation_tasks", "generation_attempts", "generation_prepared_inputs", "execution_grants", "generation_usage_ledger")
+
+    def identities(self):
+        """Row ids of every table that holds execution identity; attempt and ledger rows also name their Task."""
+        key = {"execution_grants": "request_id"}
+        with closing(self.db()) as db:
+            found = {table: sorted(row[0] for row in db.execute(f"SELECT {key.get(table, 'id')} FROM {table}")) for table in self.EXECUTION_TABLES}
+            found["owners"] = {
+                "generation_attempts": {row[0]: row[1] for row in db.execute("SELECT id, task_id FROM generation_attempts")},
+                "generation_usage_ledger": {row[0]: row[1] for row in db.execute("SELECT id, task_id FROM generation_usage_ledger")},
+            }
+        return found
+
     def source_asset(self, source):
         assets = self.query("SELECT * FROM generation_assets WHERE task_id=? AND role='model' AND variant='glb' ORDER BY ordinal,id", (source["id"],))
         require(bool(assets), "source Task has no saved GLB")
@@ -451,7 +464,7 @@ class Runner:
             self.act("resume", paused)
         unresolved = self.get_plan(plan)
         require(unresolved["failure"] == "plan_submit_unreconciled", "Resume did not expose the unreconciled scope")
-        before = self.counts()
+        before = self.identities()
         self.other.request("POST", self.api_path("processing_plan_reconcile", planID=plan), {"expected_plan_version": unresolved["version"]}, (404,))
         if not self.browser("processing_unreconciled", source, unresolved, 200):
             self.act("reconcile", unresolved, status=(200,))
@@ -459,10 +472,25 @@ class Runner:
         require(linked["steps"][0].get("task_id") and self.frozen(linked) == frozen, "Reconcile did not bind the accepted Task's original frozen identity")
         self.act("reconcile", unresolved, status=(409,))
         self.act("reconcile", linked, status=(200,))
-        after = self.counts()
-        require(after == before, f"reconciliation allocated a Task/Attempt/Grant/ledger row: {before} -> {after}")
         self.wait_plan(plan, lambda p: p["state"] == "SUCCEEDED", "accepted Task observation")
-        self.verify_delivery(linked["steps"][0]["task_id"])
+        # Reconciliation is read-only: it binds the Task the lost submit already created and allocates nothing.
+        # The check is by identity, not by row count and not at a moment in time. The accepted Task runs on
+        # by its own lifecycle (a worker leases it, starts its one Attempt and settles it whenever the upstream
+        # finishes), so its Attempt and ledger rows may appear at any point after the first reconcile. Every
+        # other row must be the one that existed before: no other Task, Grant or prepared input, and no
+        # Attempt or ledger row of any other Task.
+        accepted_task = linked["steps"][0]["task_id"]
+        after = self.identities()
+        for table in ("generation_tasks", "generation_prepared_inputs", "execution_grants"):
+            require(after[table] == before[table], f"reconciliation allocated {table} rows: {sorted(set(after[table]) ^ set(before[table]))}")
+        for table in ("generation_attempts", "generation_usage_ledger"):
+            require(set(before[table]) <= set(after[table]), f"reconciliation removed {table} rows")
+            foreign = [row for row in set(after[table]) - set(before[table]) if after["owners"][table][row] != accepted_task]
+            require(not foreign, f"reconciliation allocated {table} rows of another Task: {sorted(foreign)}")
+        attempts = [row for row, task in after["owners"]["generation_attempts"].items() if task == accepted_task]
+        require(len(attempts) == 1, f"the accepted Task ran {len(attempts)} Attempts; reconciliation must not pay for another")
+        before = {table: len(before[table]) for table in self.EXECUTION_TABLES}
+        self.verify_delivery(accepted_task)
         source_after = self.aggregate(source["id"], True)
         require(source_after == source_before, "lost-response recovery changed its verified Remesh source")
         self.report["scenarios"]["lost_response_source"] = {

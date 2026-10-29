@@ -624,13 +624,13 @@ REFETCHABLE = THREE_D  # matting is refetchable too, but its downloads are not s
 FAULTS = {
     "insufficient-balance": {**{p: ("FAILED", "insufficient_balance") for p in THREE_D},
                              **{p: ("FAILED", "insufficient_balance") for p in ("openai", "gemini", "jimeng")}},
-    # A key credit limit is its own class for Meshy (credential_quota, #73); the OpenAI image gateway answers
-    # it like an empty balance (insufficient_quota code); the Gemini connection declares no upstream-code map,
-    # so the same answer reads as a plain rejection; Ark documents it as a 429 quota error, which Plinth reads
-    # as rate limited. None of the three image answers was observed on the real service.
+    # A key credit limit is its own class for Meshy (credential_quota, #73); the OpenAI image gateway and the
+    # Gemini connection (#139) answer it like an empty balance (insufficient_quota code); Ark documents it as a
+    # 429 QuotaExceeded, which the Jimeng connection declares credential_quota (#139: it used to read as a
+    # retryable rate limit). None of the three image answers was observed on the real service.
     "key-quota": {"tripo": ("FAILED", "insufficient_balance"), "meshy": ("FAILED", "credential_quota"),
                   "hyper3d": ("FAILED", "insufficient_balance"), "openai": ("FAILED", "insufficient_balance"),
-                  "gemini": ("FAILED", "rejected"), "jimeng": ("FAILED", "rate_limited")},
+                  "gemini": ("FAILED", "insufficient_balance"), "jimeng": ("FAILED", "credential_quota")},
     "task-failed": {"tripo": ("FAILED", "rejected"), "meshy": ("FAILED", "invalid_input"), "hyper3d": ("FAILED", "rejected"),
                     "openai": ("FAILED", "invalid_input"), "gemini": ("FAILED", "invalid_input"),
                     "jimeng": ("FAILED", "invalid_input"), "matting": ("FAILED", "rejected")},

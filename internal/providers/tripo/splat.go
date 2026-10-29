@@ -44,6 +44,9 @@ type splatState struct {
 	ConsumedCredit   json.RawMessage          `json:"consumed_credit,omitempty"`
 }
 
+// splatTaskType is the task type Tripo reports for image-to-splat; captured from the official API (#89).
+const splatTaskType = "image_to_splat"
+
 func (s splatState) encode() json.RawMessage { raw, _ := json.Marshal(s); return raw }
 func splatProtocolError() error {
 	return failure(generation.FailureProtocol, false, "Tripo Splat 声明、产物或检查点无效")
@@ -300,7 +303,7 @@ func (a *Adapter) observeSplat(ctx context.Context, request generation.ObserveRe
 	if err != nil {
 		return generation.Observation{}, err
 	}
-	if value.TaskID != state.RemoteID || value.Type != "" && value.Type != "image_to_splat" {
+	if value.TaskID != state.RemoteID || value.Type != "" && value.Type != splatTaskType {
 		return generation.Observation{}, splatProtocolError()
 	}
 	observation, err := a.observation(request, value)

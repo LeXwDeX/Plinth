@@ -560,11 +560,7 @@ func (a *Adapter) observeSmartSegment(ctx context.Context, request generation.Ob
 	if err != nil {
 		return generation.Observation{}, err
 	}
-	expectedType := "smartsegment_image"
-	if request.Offering.Capability == nativeMeshSegmentation {
-		expectedType = "smartsegment_model"
-	}
-	if value.TaskID != state.RemoteID || value.Type != expectedType {
+	if value.TaskID != state.RemoteID || value.Type != smartSegmentTaskType(request.Offering) {
 		return generation.Observation{}, smartSegmentProtocolError()
 	}
 	observation, err := a.observation(request, value)
@@ -605,4 +601,14 @@ func (a *Adapter) observeSmartSegment(ctx context.Context, request generation.Ob
 		return a.observeNativeConversions(ctx, request, options, state.conversionRun(), observation)
 	}
 	return observation, nil
+}
+
+// smartSegmentTaskType is the task type Tripo reports for a Smart Segmentation
+// job: smartsegment_image or smartsegment_model by seg_type, as captured from
+// the official API (#89).
+func smartSegmentTaskType(o generation.Offering) string {
+	if o.Capability == nativeMeshSegmentation {
+		return "smartsegment_model"
+	}
+	return "smartsegment_image"
 }
