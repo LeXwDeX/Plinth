@@ -412,6 +412,8 @@ Catalog 加载时校验：`options` 必须恰为 `"false"` 与 `"true"` 两项�
 
 App 的私有 `assemblyOverrides.httpTransport` 将连接身份传给测试装饰器，覆盖已装配的远程 Provider 与 Chat LLM；账户余额 reader 不经过该接缝。普通运行入口不启用采集，也不记录原始请求/响应载荷。Tripo 的 `Config.NativeSourceTransport` 只用于装饰独立匿名来源 transport，默认安全客户端先构造，钩子返回 nil 时构造失败，不能降级为普通联网客户端。
 
+账户余额的 `provider_accounts` 目前登记 Meshy、Tripo、Hyper3D（#91，`/check_balance`，`balance`，`hyper3d.credit`），三者共用 `http-json` 余额读取器，新增账户只改 Schema；未做真实 Rodin 调用与部署验收。
+
 测试二进制的 `TestWireCaptureServer` 将清单选定连接直接接到 `Recorder.Wrap(connection, base)`，不替换原 transport、不修改 `http.DefaultTransport`，也不改变 Provider/Generation 的批准、重试和终态规则。入口只接受 live Provider/Agent 配置，拒绝未知、重复、无凭据、非 HTTPS、带 query/userinfo/fragment 或未实际装配的选定连接；Tripo 原生来源须单独列出 `<connectionID>.native-source`。清单和 Catalog 字节在隔离目录冻结，App revision 为编译时链接的完整 SHA，Catalog revision 为实际字节 SHA-256，API/请求模型/返回模型/上游 build 无单独证据时保持 `unknown`，不从模型名或 URL 猜版本。采集时间为本轮启动时间，端点和协议由 recorder 逐交互填充。
 
 注册策略必须明确字段、允许值和终止别名，通过离线预检仍不等于隐私审查或真实端点全覆盖。未知动态字段、inline 图片、未注册的 query key、截断和其他不支持的内容使完整导出失败，不能丢弃这些交互后声称完整；已注册 query key 只保留键名，值不进入样本。支持的二进制可流式写入 `PrivateStore`，导出时须显式替换为固定合成 recipe 并标记 derived/substituted；`WriteCandidate` 仍拒绝直接依赖私有字节的公开导出。正常关闭后逐项核对完整性和选定连接覆盖，失败只影响采集资格，不改变业务结果。当前仅有离线实现验证，真实 corpus、浏览器与付费验收仍以 #365 原生记录为准。
