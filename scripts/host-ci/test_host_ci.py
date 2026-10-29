@@ -269,6 +269,101 @@ class AttemptOutcomes(unittest.TestCase):
         self.assertFalse(retry)
 
 
+ACT_LOG = (
+    "\x1b[36m[ci/frontend]\x1b[0m \U0001f3c1  Job succeeded\n"
+    "[ci/go check] \U0001f3c1  Job failed\n"
+    "[ci/go test race] \U0001f680  Start image=x\n")
+
+
+class WorkflowReplay(unittest.TestCase):
+    """The act mode (#86): output parsing, verdict, container limits, pinned download, commit status."""
+
+    def report(self, results, exit_code=0, timed_out=False, events=('pull_request', 'push')):
+        jobs = [{'name': name, 'result': result} for name, result in results.items()]
+        return {'events': [{'event': event, 'exit_code': exit_code, 'timed_out': timed_out, 'jobs': jobs} for event in events]}
+
+    def test_job_results_are_read_from_act_output(self):
+        self.assertEqual(host_run.parse_act_output(ACT_LOG), {'frontend': 'success', 'go check': 'failure'})
+
+    def test_sizes_from_docker_stats(self):
+        self.assertEqual(host_run.parse_size('1.5GiB'), int(1.5 * (1 << 30)))
+        self.assertEqual(host_run.parse_size('512MiB'), 512 << 20)
+        self.assertEqual(host_run.parse_size('garbage'), 0)
+
+    def test_verdict_needs_every_event_and_every_job_to_succeed(self):
+        ok = {'frontend': 'success', 'go check': 'success'}
+        self.assertEqual(host_run.workflows_verdict(self.report(ok)), [])
+        self.assertIn('pull_request/go check: failure', host_run.workflows_verdict(self.report({**ok, 'go check': 'failure'})))
+        self.assertIn('push/frontend: not_run', host_run.workflows_verdict(self.report({**ok, 'frontend': 'not_run'})))
+        self.assertIn('pull_request: act exit code 1', host_run.workflows_verdict(self.report(ok, exit_code=1)))
+        self.assertIn('pull_request: timeout', host_run.workflows_verdict(self.report(ok, timed_out=True)))
+        self.assertIn('not every event was replayed', host_run.workflows_verdict(self.report(ok, events=('push',))))
+        self.assertIn('no events were replayed', host_run.workflows_verdict({'events': []}))
+
+    def test_act_containers_get_the_same_limits_as_the_gate_container(self):
+        args = preflight_args(act_cache=Path('/ci/act-cache'), runner_image='img@sha256:' + '0' * 64, act_job='', run_id='r1')
+        command = host_run.act_command(Path('/ci/tools/act'), Path('/ci/run/r1/src'), 'push', Path('/ci/run/r1/e.json'), args)
+        options = command[command.index('--container-options') + 1]
+        for fragment in ('--cpus 4', '--memory 12g', '--memory-swap 12g', 'no-new-privileges', host_run.LABEL):
+            self.assertIn(fragment, options)
+        self.assertEqual(command[command.index('--concurrent-jobs') + 1], '1')
+        self.assertEqual(command[command.index('--container-daemon-socket') + 1], '-')
+        self.assertNotIn('-j', command)
+        self.assertEqual(host_run.act_command(Path('a'), Path('s'), 'push', Path('e'), argparse.Namespace(**{**vars(args), 'act_job': 'frontend'}))[-2:], ['-j', 'frontend'])
+
+    def test_a_download_that_does_not_match_the_pinned_digest_is_refused_and_removed(self):
+        with tempfile.TemporaryDirectory() as base:
+            buffer = io.BytesIO()
+            with tarfile.open(fileobj=buffer, mode='w:gz') as archive:
+                info = tarfile.TarInfo('act')
+                info.size = 3
+                archive.addfile(info, io.BytesIO(b'abc'))
+            with mock.patch.object(host_run.urllib.request, 'urlopen', return_value=io.BytesIO(buffer.getvalue())), \
+                    mock.patch.object(host_run, 'say'), self.assertRaises(host_run.Stop) as stop:
+                host_run.ensure_act(Path(base), 'v0.2.89', '0' * 64)
+            self.assertEqual(stop.exception.status, 'act_checksum_mismatch')
+            self.assertFalse((Path(base) / 'tools' / 'act-v0.2.89' / 'act.tar.gz').exists())
+            self.assertFalse((Path(base) / 'tools' / 'act-v0.2.89' / 'act').exists())
+
+    def test_pins_are_well_formed(self):
+        self.assertRegex(run.ACT_VERSION, host_run.ACT_VERSION.pattern)
+        self.assertRegex(run.ACT_SHA256, r'^[0-9a-f]{64}$')
+        self.assertRegex(run.RUNNER_IMAGE, host_run.RUNNER_IMAGE.pattern)
+
+    def test_commit_status_reflects_the_verdict_and_counts(self):
+        passing = {'mode': 'workflows', 'verdict': 'pass', 'workflows': {'act_pinned': 'v0.2.89', **self.report({'a': 'success', 'b': 'success'})}}
+        self.assertEqual(run.status_of(passing), ('success', '4/4 workflow jobs passed in 2 events, act v0.2.89'))
+        failing = {'mode': 'workflows', 'verdict': 'fail', 'reasons': ['push/a: failure'],
+                   'workflows': {'act_pinned': 'v0.2.89', 'filter_job': 'a', **self.report({'a': 'failure'})}}
+        state, text = run.status_of(failing)
+        self.assertEqual(state, 'failure')
+        self.assertIn('0/2 workflow jobs passed', text)
+        self.assertIn('only job a', text)
+        gates = [{'name': 'go vet', 'result': 'pass'}, {'name': 'go test race', 'result': 'fail'}, {'name': 'external links', 'result': 'not_run'}]
+        self.assertEqual(run.status_of({'verdict': 'fail', 'attempts': [{'entry': {'gates': gates}}], 'reasons': ['gate go test race: fail']}),
+                         ('failure', '1/2 gates passed (verify-local --race, clean container); gate go test race: fail'))
+        self.assertIsNone(run.status_of({'verdict': 'not_run'}))
+
+    def test_status_is_written_with_gh_under_the_right_context_and_never_for_not_run(self):
+        calls = []
+        def fake_run(command, **kwargs):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+        result = {'mode': 'workflows', 'verdict': 'pass', 'workflows': {'act_pinned': 'v1.2.3', **self.report({'a': 'success'})}}
+        with mock.patch.object(run, 'repo_slug', return_value='o/r'), mock.patch.object(run.subprocess, 'run', fake_run):
+            self.assertTrue(run.write_status(Path('.'), 'f' * 40, result))
+            self.assertFalse(run.write_status(Path('.'), 'f' * 40, {'verdict': 'not_run'}))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][:5], ['gh', 'api', '-X', 'POST', f"repos/o/r/statuses/{'f' * 40}"])
+        self.assertIn('context=host-ci/workflows', calls[0])
+        self.assertIn('state=success', calls[0])
+        self.assertFalse(any(part.startswith('target_url') for part in calls[0]))
+        with mock.patch.object(run, 'repo_slug', return_value='o/r'), mock.patch.object(run.subprocess, 'run', fake_run):
+            run.write_status(Path('.'), 'f' * 40, {'verdict': 'fail', 'attempts': [{'entry': {'gates': []}}]})
+        self.assertIn('context=host-ci/gates', calls[-1])
+        self.assertIn('state=failure', calls[-1])
+
+
 class Concurrency(unittest.TestCase):
     def test_a_second_run_cannot_take_the_lock_until_the_first_releases_it(self):
         with tempfile.TemporaryDirectory() as base:
