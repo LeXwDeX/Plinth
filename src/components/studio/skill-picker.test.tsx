@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SkillPicker, skillPickerRows, focusWasLost } from '@/components/studio/skill-picker';
+import { PICKER_UPPERCASE_CLASS } from '@/components/studio/table-popover';
 import type { ProductSchema } from '@/lib/product-schema';
 
 const schema = {
@@ -68,7 +69,7 @@ describe('SkillPicker selected trigger label', () => {
   ])('uses a neutral label when selection is %s', (_state, overrides) => {
     const html = render(overrides);
     expect(html).toContain('>Skills</span>');
-    expect(html).toMatch(/<button[^>]*data-testid="workspace-skill-picker"[^>]*uppercase tracking-wide/);
+    expect(html.match(/<button[^>]*data-testid="workspace-skill-picker"[^>]*>/)?.[0]).toContain(PICKER_UPPERCASE_CLASS);
     expect(html).not.toContain('SKILL：三视图');
     expect(html).not.toContain('aria-label="我的 Skill: three-view"');
   });

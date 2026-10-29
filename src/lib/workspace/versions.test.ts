@@ -324,12 +324,12 @@ describe('merged versions', () => {
 });
 
 describe('balance failures in the strip', () => {
-  it('reads as the Schema message, not whatever detail the server sent', () => {
+  it('shows the detail the server projected from the Schema (failure.<class>), with no client-side special case', () => {
     const { tiles } = buildVersionTiles({
       schema, graph: undefined, sessionId: 's1',
       tracked: [tracked({
         taskId: 'tb', capability: 'text-to-image', state: 'FAILED', terminal: true,
-        failure: { failureClass: 'insufficient_balance', detail: 'provider said 402', retryable: true, ambiguous: false },
+        failure: { failureClass: 'insufficient_balance', detail: '余额不足，换个模型', retryable: false, ambiguous: false },
       })],
     });
     expect(tiles[0]).toMatchObject({ status: 'failed', failure: '余额不足，换个模型' });

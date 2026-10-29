@@ -16,6 +16,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/providers/mock/modelfiles"
 )
 
 type deliveredFile struct {
@@ -345,10 +346,10 @@ func TestPostSuccessDeliversPNGThumbnails(t *testing.T) {
 }
 
 func TestRetopologyHasFewerFacesThanTheOriginal(t *testing.T) {
-	original := buildHumanoid(digest("g"), 8)
-	remeshed := buildHumanoid(digest("g"), 4)
-	if remeshed.triangleCount() >= original.triangleCount()/2 {
-		t.Fatalf("remesh %d tris vs original %d", remeshed.triangleCount(), original.triangleCount())
+	original := modelfiles.BuildHumanoid(digest("g"), 8)
+	remeshed := modelfiles.BuildHumanoid(digest("g"), 4)
+	if remeshed.TriangleCount() >= original.TriangleCount()/2 {
+		t.Fatalf("remesh %d tris vs original %d", remeshed.TriangleCount(), original.TriangleCount())
 	}
 }
 

@@ -113,7 +113,7 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
 - 已提交的真实 wire 样本（`*.candidate.json`）另有两项离线检查，同样随现有 `go test` 运行，不新增门禁项：`internal/testutil/wirefixture` 的 `TestWireCoverageMatrix` 校验由 Catalog 和样本生成的覆盖矩阵 `testdata/wire-coverage.generated.json`（样本或 Catalog 变化后用 `UPDATE_WIRE_COVERAGE=1 go test ./internal/testutil/wirefixture -run Coverage` 重新生成并随同提交，不手改），`TestCommittedWireCorpusHasNoPrivateData` 重扫样本、meta、policy 与矩阵的隐私。真实采集必须在干净工作树进行。缺真实样本的 Offering 在矩阵里列为 `missing`，不用合成数据填充；规则与限制见 `docs/architecture.md`「Wire 黄金样本、覆盖矩阵与全栈离线回放」。
 - `dev-test` 测试栈的真实付费验收仍按既有授权和 §11 流程执行，并核对实际请求体、精确 revision、必需产物及鉴权交付/UI；正式栈只运行免费 L0/L1，付费生成须用户明确决定。上游 `service_unavailable` 等失败不能据此排除本地请求错误；先独立复核该端点官方合同和实际请求证据，再定位原因。不得用盲目重试、放宽断言或修改 mock 期望来掩盖失败。
 
-- Fake 上游（#96）的离线检查同样随 `go test -count=1 ./...` 与 race 运行，不新增门禁项，因此已在本节的本地与 CI 门禁里：`internal/testutil/fakeupstream` 下各版本的 `TestDriftFakeResponsesMatchTheRealSamples`（fake 响应的字段集合与类型必须与该版本最新真实样本一致）、`TestEndpointTableIsCompleteAndHonest`、`TestAlignmentReportIsCommittedAndClean`（对齐报告无未说明差异）、每个故障场景的回归测试、产物字节的 Plinth 交付检查，以及 `TestProductionBinariesDoNotLinkFakeUpstream` / `TestRuntimeImageBuildsOnlyListedCommands`（fake 不进任何发布二进制和镜像）。用法见下节「Fake 上游自检」。
+- Fake 上游（#96）的离线检查同样随 `go test -count=1 ./...` 与 race 运行，不新增门禁项，因此已在本节的本地与 CI 门禁里：`internal/testutil/fakeupstream` 下各版本的 `TestDriftFakeResponsesMatchTheRealSamples`（fake 响应的字段集合与类型必须与该版本最新真实样本一致）、`TestEndpointTableIsCompleteAndHonest`、`TestAlignmentReportIsCommittedAndClean`（对齐报告无未说明差异）、每个故障场景的回归测试、产物字节的 Plinth 交付检查，以及 `TestProductionBinariesDoNotLinkAnyTestutilPackage` / `TestOnlyTestToolingImportsTestutil` / `TestRuntimeImageBuildsOnlyListedCommands`（`internal/testutil` 下任何包都不进发布二进制和镜像，也不被生产包导入）。用法见下节「Fake 上游自检」。
 
 ### 自动化门禁说明
 - **本节是发布前门禁清单的唯一真源**：`AGENTS.md`「提交前门禁」章节及
