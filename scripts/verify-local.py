@@ -169,7 +169,7 @@ const watcher = fs.watch(root, {recursive: true}, (kind, name) => {
   if (p === marker) {
     if (stopping && !finalizing) {
       finalizing = true;
-      try { fs.unlinkSync(root + '/' + marker); } catch { markDirty('marker-cleanup'); }
+      try { fs.unlinkSync(root + '/' + marker); } catch (error) { if (error.code !== 'ENOENT') markDirty('marker-cleanup'); }
       // Let all callbacks in the filesystem event batch drain before closing.
       setImmediate(() => finish(false));
     }
@@ -216,15 +216,26 @@ input.on('line', line => {
   }
   if (command.kind !== 'stop') { markDirty('protocol-input'); return; }
   stopping = true;
-  try { fs.writeFileSync(root + '/' + marker, '', {flag: 'wx'}); }
-  catch { finish(true); return; }
+  // FSEvents can drop an event for a file created right after the stream
+  // started (observed ~5% of the time when the fingerprint finishes within
+  // milliseconds), so the marker is re-created until its event arrives.
+  const deadline = Date.now() + 3000;
+  const probe = () => {
+    if (finalizing) return;
+    if (Date.now() >= deadline) {
+      try { fs.unlinkSync(root + '/' + marker); } catch {}
+      finish(true);
+      return;
+    }
+    try { fs.unlinkSync(root + '/' + marker); } catch {}
+    try { fs.writeFileSync(root + '/' + marker, '', {flag: 'wx'}); }
+    catch { finish(true); return; }
+    setTimeout(probe, 250);
+  };
   // All watches use this Node loop. The marker and setImmediate drain its
   // native event batch before every watcher closes; external parents need no
   // writable marker/config files (including system /etc).
-  setTimeout(() => {
-    try { fs.unlinkSync(root + '/' + marker); } catch {}
-    finish(true);
-  }, 3000);
+  probe();
 });
 """
     def __init__(self, root):
