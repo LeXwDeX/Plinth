@@ -100,4 +100,29 @@ describe('an Agent reply in Markdown (#333)', () => {
     expect(html).toContain('<strong class="font-semibold">完成</strong>');
     expect(html).not.toContain('https://x/y.png');
   });
+
+  it('shows a Markdown table as a table that scrolls on its own inside the bubble (#149)', () => {
+    const html = body(render(reply('对比：\n\n| 步骤 | 积分 | 说明 |\n|:--|--:|:-:|\n| **Remesh** | 10 | [文档](https://example.com/r) |\n| Rigging | 20 | `auto` |')));
+    expect(html).not.toContain('|');
+    expect(html).toMatch(/<div class="max-w-full overflow-x-auto" data-testid="chat-markdown-table"><table class="[^"]*min-w-full[^"]*">/);
+    expect(html).toMatch(/<thead><tr><th scope="col" class="[^"]*text-left">步骤<\/th><th scope="col" class="[^"]*text-right">积分<\/th><th scope="col" class="[^"]*text-center">说明<\/th><\/tr><\/thead>/);
+    expect(html).toContain('<strong class="font-semibold">Remesh</strong>');
+    expect(html).toContain('<a href="https://example.com/r" target="_blank" rel="noopener noreferrer"');
+    expect(html).toMatch(/<td class="[^"]*">10<\/td>/);
+    expect(html).toMatch(/<code class="[^"]*font-mono[^"]*">auto<\/code>/);
+  });
+
+  it('never makes HTML or an unsafe link of a table cell (#149)', () => {
+    const html = body(render(reply('| a | b |\n|---|---|\n| <script>window.x=1</script> | <img src=x onerror="window.x=2"> |\n| [点我](javascript:alert(1)) | [数据](data:text/html,<b>x</b>) &lt;i&gt; |')));
+    expect(html).not.toMatch(/<script|<img|<i>|<b>|href="javascript|href="data/i);
+    expect(html).toContain('&lt;script&gt;window.x=1&lt;/script&gt;');
+    expect(html).toContain('&lt;img src=x onerror=&quot;window.x=2&quot;&gt;');
+    expect(html).toContain('>点我</td>');
+    expect(html).toContain('&amp;lt;i&amp;gt;');
+  });
+
+  it('keeps the streaming spinner in the last cell of a table (#149)', () => {
+    const html = render(reply('| a | b |\n|---|---|\n| 1 | 2', { isStreaming: true }));
+    expect(html).toMatch(/<td[^>]*>2<span[^>]*aria-label="[^"]+"/);
+  });
 });

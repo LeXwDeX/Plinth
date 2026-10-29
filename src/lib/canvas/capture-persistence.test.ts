@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import catalog from '../../../internal/catalog/default_catalog.json';
 import type { CanvasProductSchema } from '@/lib/product-schema';
 import { useCanvasStore, type CanvasNode } from '@/store/canvas-store';
+import { CanvasBitmapLimitError } from './bitmap-limit';
 import { CanvasBrowserError, type CanvasBrowserClient, type CanvasProject } from './browser-client';
 import { persistCapturedImageToCanvas, type PersistCapturedImageOptions } from './capture-persistence';
 import { computeNodesHash, nodeToRecord } from './node-persistence';
@@ -405,6 +406,50 @@ describe('persist captured image', () => {
       const state = useCanvasStore.getState();
       expect(state.canvasSizeBySession['session-A']).toEqual({ width: 512, height: 512 });
       expect(state._canvasSizeDirtyBySession['session-A']).toBe(true);
+    });
+  });
+
+  describe('the canvas picture limit (#149)', () => {
+    const limit = schema.limits.maximum_bitmap_nodes;
+    const pictures = (count: number): CanvasNode[] => Array.from({ length: count }, (_, index) => ({
+      ...node, id: `picture-${index}`, type: 'image' as const, text: undefined, imageUrl: `/api/assets/p${index}/content`, taskId: `task-${index}`, zIndex: index + 1,
+    }));
+
+    it('refuses a capture on a canvas that already holds the limit, and sends no save', async () => {
+      const full = pictures(limit);
+      baseline(full);
+      const { client, options } = fixture(project(full));
+      const failure = await persistCapturedImageToCanvas(options).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(CanvasBitmapLimitError);
+      expect(failure).toMatchObject({ used: limit, limit });
+      expect(client.replaceNodes).not.toHaveBeenCalled();
+      expect(useCanvasStore.getState().getNodes('session-A')).toHaveLength(limit);
+    });
+
+    it('takes the last free slot, and shapes or text never count', async () => {
+      const nearlyFull = [...pictures(limit - 1), node, { ...node, id: 'second-text' }];
+      baseline(nearlyFull);
+      const { client, options } = fixture(project(nearlyFull));
+      await persistCapturedImageToCanvas(options);
+      expect(client.replaceNodes).toHaveBeenCalledTimes(1);
+      expect(useCanvasStore.getState().getNodes('session-A').filter((entry) => entry.type === 'image')).toHaveLength(limit);
+    });
+
+    it('does not refuse a capture that is already on the canvas', async () => {
+      const full = [...pictures(limit - 1), savedCapture];
+      baseline(full);
+      const { options } = fixture(project(full));
+      await expect(persistCapturedImageToCanvas(options)).resolves.toBeUndefined();
+    });
+
+    it('reads the server\'s own refusal (another window filled the canvas) as the same limit error', async () => {
+      baseline([node]);
+      const { client, options } = fixture();
+      const refusal = schema.presentation.messages.bitmap_limit_exceeded.replace('{limit}', String(limit));
+      vi.mocked(client.replaceNodes).mockRejectedValue(new CanvasBrowserError(400, refusal));
+      await expect(persistCapturedImageToCanvas(options)).rejects.toBeInstanceOf(CanvasBitmapLimitError);
+      vi.mocked(client.replaceNodes).mockRejectedValue(new CanvasBrowserError(400, 'something else'));
+      await expect(persistCapturedImageToCanvas(options)).rejects.toMatchObject({ status: 400 });
     });
   });
 });

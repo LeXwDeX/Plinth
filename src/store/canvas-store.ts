@@ -172,16 +172,23 @@ interface CanvasStore {
   autoSelect: AutoSelectMode;
   setAutoSelect: (mode: AutoSelectMode) => void;
 
+  /**
+   * #149: set each time an action that would add picture layers is refused because the canvas already holds the
+   * Schema's limit of them (`canvas.limits.maximum_bitmap_nodes`). The board turns each change into one notice.
+   */
+  bitmapLimitHit: { sessionId: string; seq: number } | null;
+
   // 节点 CRUD
-  addNode: (sessionId: string, node: Omit<CanvasNode, 'zIndex'>) => void;
+  /** Returns false, and adds nothing, when the node is a picture and the canvas is at its picture limit (#149). */
+  addNode: (sessionId: string, node: Omit<CanvasNode, 'zIndex'>) => boolean;
   /** #246: a blank canvas layer below every other layer (the brush landed where no picture is), one undo step. */
-  addCanvasLayer: (sessionId: string, node: Omit<CanvasNode, 'zIndex'>) => void;
+  addCanvasLayer: (sessionId: string, node: Omit<CanvasNode, 'zIndex'>) => boolean;
   removeNode: (sessionId: string, nodeId: string) => void;
   /**
    * Stamps the visible layers into one new top layer as a single undo step: the new node goes on top and
    * the stamped layers are hidden, not deleted, so they can be shown again.
    */
-  stampNodes: (sessionId: string, hideIds: readonly string[], node: Omit<CanvasNode, 'zIndex'>) => void;
+  stampNodes: (sessionId: string, hideIds: readonly string[], node: Omit<CanvasNode, 'zIndex'>) => boolean;
   /**
    * `recordHistory: false` when the caller already recorded its own step (a drag, a transform, a brush
    * commit); otherwise edits within the throttle window of the previous one share a single step.
@@ -358,6 +365,25 @@ interface CanvasFrontendConfiguration {
 }
 
 let canvasFrontendConfiguration: CanvasFrontendConfiguration | undefined;
+
+/** `canvas.limits.maximum_bitmap_nodes`; without a configured Schema nothing is refused here (the server still is). */
+let canvasBitmapLimit = Number.POSITIVE_INFINITY;
+
+export function configureCanvasBitmapLimit(limit: number): void {
+  canvasBitmapLimit = Number.isFinite(limit) && limit > 0 ? limit : Number.POSITIVE_INFINITY;
+}
+
+const pictureCount = (nodes: readonly Pick<CanvasNode, 'type'>[]) => nodes.filter((node) => node.type === 'image').length;
+
+/** Whether adding `adding` pictures to `existing` goes past the limit; saved canvases count every picture layer, hidden ones too. */
+function overBitmapLimit(existing: readonly Pick<CanvasNode, 'type'>[], adding: number): boolean {
+  return adding > 0 && pictureCount(existing) + adding > canvasBitmapLimit;
+}
+
+/** The state patch of a refused add: one more notice for the board to show. */
+function bitmapRefused(s: Pick<CanvasStore, 'bitmapLimitHit'>, sessionId: string): Pick<CanvasStore, 'bitmapLimitHit'> {
+  return { bitmapLimitHit: { sessionId, seq: (s.bitmapLimitHit?.seq ?? 0) + 1 } };
+}
 
 export function configureCanvasFrontend(
   configuration: CanvasFrontendConfiguration,
@@ -553,6 +579,7 @@ export const useCanvasStore = create<CanvasStore>()(
   nodesBySession: {},
   viewportBySession: {},
   selectedNodeIds: [],
+  bitmapLimitHit: null,
   _clipboard: [],
   _clipboardId: '',
   activeTool: 'select',
@@ -610,9 +637,14 @@ export const useCanvasStore = create<CanvasStore>()(
 
   // ── 节点 CRUD ──
 
-  addNode: (sessionId, node) =>
+  addNode: (sessionId, node) => {
+    let added = true;
     set((s) => {
       const existing = s.nodesBySession[sessionId] || [];
+      if (node.type === 'image' && overBitmapLimit(existing, 1)) {
+        added = false;
+        return bitmapRefused(s, sessionId);
+      }
       const zIndex = maxZIndex(existing) + 1;
       const descriptionKey = [
         'image',
@@ -639,22 +671,36 @@ export const useCanvasStore = create<CanvasStore>()(
         _undoStackBySession: { ...s._undoStackBySession, [sessionId]: undoStack },
         _redoStackBySession: { ...s._redoStackBySession, [sessionId]: [] },
       };
-    }),
+    });
+    return added;
+  },
 
-  addCanvasLayer: (sessionId, node) =>
+  addCanvasLayer: (sessionId, node) => {
+    let added = true;
     set((s) => {
       const existing = s.nodesBySession[sessionId] || [];
+      if (overBitmapLimit(existing, node.type === 'image' ? 1 : 0)) {
+        added = false;
+        return bitmapRefused(s, sessionId);
+      }
       // Below every other layer: pictures, text and shapes stay on top of the canvas (#246).
       const zIndex = existing.length > 0 ? Math.min(...existing.map((n) => n.zIndex)) - 1 : 0;
       return {
         nodesBySession: { ...s.nodesBySession, [sessionId]: [{ ...node, zIndex }, ...existing] },
         ...recordStep(s, sessionId, existing, 'history.add.image'),
       };
-    }),
+    });
+    return added;
+  },
 
-  stampNodes: (sessionId, hideIds, node) =>
+  stampNodes: (sessionId, hideIds, node) => {
+    let added = true;
     set((s) => {
       const existing = s.nodesBySession[sessionId] || [];
+      if (overBitmapLimit(existing, node.type === 'image' ? 1 : 0)) {
+        added = false;
+        return bitmapRefused(s, sessionId);
+      }
       const hidden = new Set(hideIds);
       const hiddenNodes = existing.map((item) => (hidden.has(item.id) ? { ...item, visible: false } : item));
       const undoStack = [...(s._undoStackBySession[sessionId] || [])];
@@ -666,7 +712,9 @@ export const useCanvasStore = create<CanvasStore>()(
         _undoStackBySession: { ...s._undoStackBySession, [sessionId]: undoStack },
         _redoStackBySession: { ...s._redoStackBySession, [sessionId]: [] },
       };
-    }),
+    });
+    return added;
+  },
 
   removeNode: (sessionId, nodeId) =>
     set((s) => {
@@ -1064,6 +1112,7 @@ export const useCanvasStore = create<CanvasStore>()(
       if (!existing) return s;
       const selected = new Set(s.selectedNodeIds);
       if (!existing.some((n) => selected.has(n.id))) return s;
+      if (overBitmapLimit(existing, pictureCount(existing.filter((n) => selected.has(n.id))))) return bitmapRefused(s, sessionId);
       // A duplicated group becomes a group of its own; the copies never share the original's group.
       const groups = new Map<string, string>();
       const stacked: CanvasNode[] = [];
@@ -1384,6 +1433,7 @@ export const useCanvasStore = create<CanvasStore>()(
       const clipboard = s._clipboard;
       if (clipboard.length === 0) return s;
       const existing = s.nodesBySession[sessionId] || [];
+      if (overBitmapLimit(existing, pictureCount(clipboard))) return bitmapRefused(s, sessionId);
       let currentMaxZ = maxZIndex(existing);
       let dx = offsetX;
       let dy = offsetY;

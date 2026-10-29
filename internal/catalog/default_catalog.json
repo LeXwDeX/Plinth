@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-10-30.issue142-tripo-task-error-code.1",
+    "revision": "2026-10-30.issue149-canvas-bitmap-limit-table.1",
     "terminology": {
       "user_facing": [
         {
@@ -3157,6 +3157,8 @@
         "ui.workspace.canvas.empty_image": "生成的图片会显示在这里，也可以从历史面板选择查看",
 		"ui.workspace.canvas.capturing": "正在生成高清截图…",
 		"ui.workspace.canvas.capture_failed": "高清截图未保存，请重试；若持续失败，请检查设备图形内存或上传限制",
+		"ui.workspace.canvas.bitmap_limit_reached": "画布已有 {used} 张图片，达到 {limit} 张的上限，无法再加入。请先删除不用的图片节点，或新建一个画布。",
+		"ui.workspace.canvas.bitmap_limit_near": "画布已有 {used} 张图片，上限是 {limit} 张，只剩 {remaining} 个名额。建议先删除不用的图片节点，或新建画布。",
         "ui.workspace.canvas.image_alt": "生成结果预览",
         "ui.workspace.canvas.model_alt": "3D 模型预览",
         "ui.workspace.processing.open": "处理模型",
@@ -7063,6 +7065,7 @@
       "limits": {
         "maximum_merge_nodes": 20,
         "maximum_bitmap_nodes": 50,
+        "bitmap_warning_remaining": 5,
         "maximum_dimension": 8192,
         "minimum_dimension": 64,
         "maximum_placed_results": 5000,
@@ -8005,7 +8008,7 @@
           "forbidden": "需要管理员权限",
           "project_not_found": "项目不存在",
           "nodes_must_array": "参数 nodes 必须是数组",
-          "bitmap_limit_exceeded": "画板最多保存 50 张图片，请先移除部分图片",
+          "bitmap_limit_exceeded": "画板最多保存 {limit} 张图片，请先删除不用的图片节点，或新建画布",
           "invalid_merge": "参数错误：nodes 必须是非空数组且不超过 20 个节点",
           "dimension_limit": "合并尺寸超出限制",
           "merge_failed": "图片合并失败",
@@ -12442,6 +12445,8 @@
             "ui.workspace.canvas.empty_image": "Generated images appear here; you can also pick one from the history panel to view",
             "ui.workspace.canvas.capturing": "Generating high-resolution screenshot…",
             "ui.workspace.canvas.capture_failed": "The high-resolution screenshot was not saved. Please retry; if it keeps failing, check your device's graphics memory or the upload limit",
+            "ui.workspace.canvas.bitmap_limit_reached": "The canvas already holds {used} images, the limit of {limit}, so no more can be added. Delete images you no longer need, or start a new canvas.",
+            "ui.workspace.canvas.bitmap_limit_near": "The canvas holds {used} images and the limit is {limit}, so only {remaining} slots are left. Consider deleting images you no longer need, or starting a new canvas.",
             "ui.workspace.canvas.image_alt": "Generated result preview",
             "ui.workspace.canvas.model_alt": "3D model preview",
             "ui.workspace.processing.open": "Process model",
@@ -14040,7 +14045,7 @@
             "canvas.presentation.messages.forbidden": "Administrator permission required",
             "canvas.presentation.messages.project_not_found": "Project not found",
             "canvas.presentation.messages.nodes_must_array": "Parameter nodes must be an array",
-            "canvas.presentation.messages.bitmap_limit_exceeded": "An artboard can hold at most 50 images. Remove some images first",
+            "canvas.presentation.messages.bitmap_limit_exceeded": "An artboard can hold at most {limit} images. Delete images you no longer need, or start a new canvas",
             "canvas.presentation.messages.invalid_merge": "Invalid parameters: nodes must be a non-empty array of at most 20 nodes",
             "canvas.presentation.messages.dimension_limit": "Merged size exceeds the limit",
             "canvas.presentation.messages.merge_failed": "Failed to merge images",

@@ -138,7 +138,8 @@ interface ModelViewer3DProps {
   /** Where that button sits: the top-left corner (default) or the bottom-left, clear of a tool rail floating over the top-left. */
   resetPlacement?: 'top-left' | 'bottom-left';
   onCapture?: (blob: Blob, view: ModelCaptureView) => Promise<void>;
-  onCaptureError?: () => void;
+  /** The capture (or its hand-off to `onCapture`) failed; `error` is what was thrown. */
+  onCaptureError?: (error: unknown) => void;
   /** Refresh an authenticated preview URL before retrying its load. */
   onRetry?: () => void;
   /** Public recovery copy for a caller that must not display loader diagnostics. */
@@ -324,8 +325,8 @@ export function ModelViewer3D({
         ModelViewerElement,
       );
       await onCaptureNow(result.blob, result.view);
-    } catch {
-      onCaptureError?.();
+    } catch (error) {
+      onCaptureError?.(error);
     } finally {
       if (found?.root) { setPartHighlight(found.root, selectedPartRef.current); found.render(); }
       if (autoRotate) element.setAttribute('auto-rotate', '');

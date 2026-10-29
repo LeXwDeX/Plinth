@@ -90,6 +90,7 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"canvas.defaults.bg_style",
 		"canvas.limits.maximum_dimension",
 		"canvas.limits.maximum_bitmap_nodes",
+		"canvas.limits.bitmap_warning_remaining",
 		"canvas.limits.maximum_placed_results",
 		"canvas.limits.maximum_placed_result_key_characters",
 		"canvas.api.fields.placed_results",
@@ -166,7 +167,7 @@ func TestCanvasBitmapLimitIsRequiredAndSeparateFromMergeLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{`"maximum_bitmap_nodes": 50`, `"bitmap_limit_exceeded": "画板最多保存 50 张图片，请先移除部分图片"`} {
+	for _, key := range []string{`"maximum_bitmap_nodes": 50`, `"bitmap_limit_exceeded": "画板最多保存 {limit} 张图片，请先删除不用的图片节点，或新建画布"`} {
 		mutated := bytes.Replace(document, []byte(key), []byte(strings.Replace(key, ": 50", ": 0", 1)), 1)
 		if strings.Contains(key, "bitmap_limit_exceeded") {
 			mutated = bytes.Replace(document, []byte(key), []byte(`"bitmap_limit_exceeded": ""`), 1)

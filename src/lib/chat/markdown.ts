@@ -1,7 +1,7 @@
 /**
  * The Markdown subset of an Agent reply (#333): paragraphs and line breaks, bold, italic, inline code, fenced
  * code blocks, ordered and unordered lists (nested too), headings (shown as strong lines), rules and http/https
- * links. The result is a tree of plain values that a component turns into React elements, so nothing is ever
+ * links, and GFM tables whose cells hold only text, inline code, bold and links (#149). The result is a tree of plain values that a component turns into React elements, so nothing is ever
  * parsed as HTML: raw HTML, entities and picture syntax stay text, and a link that is not http(s) keeps only its
  * words. Emphasis follows the CommonMark delimiter rules, loosened next to CJK text so that `**注意：**后面`
  * closes the way models write it.
@@ -22,7 +22,14 @@ export type MarkdownBlock =
   | { type: 'heading'; level: number; children: MarkdownInline[] }
   | { type: 'code'; language: string; text: string }
   | { type: 'list'; ordered: boolean; start: number; items: MarkdownBlock[][] }
-  | { type: 'rule' };
+  | { type: 'rule' }
+  | { type: 'table'; align: MarkdownTableAlign[]; header: MarkdownInline[][]; rows: MarkdownInline[][][] };
+
+export type MarkdownTableAlign = 'left' | 'center' | 'right' | null;
+
+/** The longest table read; further rows are dropped, so one reply cannot build an unbounded grid. */
+const MAXIMUM_TABLE_ROWS = 200;
+const MAXIMUM_TABLE_COLUMNS = 24;
 
 /** How deep lists nest; deeper markers read as paragraph text. */
 const MAXIMUM_LIST_DEPTH = 12;
@@ -51,7 +58,8 @@ type RawBlock =
   | { type: 'heading'; level: number; text: string }
   | { type: 'code'; language: string; text: string }
   | { type: 'list'; ordered: boolean; start: number; items: RawBlock[][] }
-  | { type: 'rule' };
+  | { type: 'rule' }
+  | { type: 'table'; align: MarkdownTableAlign[]; header: string[]; rows: string[][] };
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*([^`\s]*)[^`]*$/;
 const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/;
@@ -64,6 +72,51 @@ type Marker = { indent: number; ordered: boolean; start: number; contentIndent: 
 function expandIndentTabs(line: string): string {
   const indent = /^[ \t]*/.exec(line)![0];
   return indent.includes('\t') ? indent.replace(/\t/g, '    ') + line.slice(indent.length) : line;
+}
+
+/** The cells of a table row: split at every unescaped pipe (`\\|` is a pipe in the text, also inside code), outer pipes dropped. */
+function tableCells(line: string): string[] {
+  let text = line.trim();
+  if (text.startsWith('|')) text = text.slice(1);
+  const cells: string[] = [];
+  let cell = '';
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '\\' && text[index + 1] === '|') {
+      cell += '|';
+      index += 1;
+    } else if (char === '|') {
+      cells.push(cell);
+      cell = '';
+    } else {
+      cell += char;
+    }
+  }
+  // A closing pipe leaves an empty tail that is no cell.
+  if (cell.trim() !== '' || !text.endsWith('|')) cells.push(cell);
+  return cells.map((entry) => entry.trim());
+}
+
+const DELIMITER_CELL = /^:?-+:?$/;
+
+/** The alignments of a delimiter row (`| --- | :-: |`), or null if the line is no such row. */
+function delimiterRow(line: string): MarkdownTableAlign[] | null {
+  if (!line.includes('-') || !/^ {0,3}[|:\- \t]+$/.test(line)) return null;
+  const cells = tableCells(line);
+  if (cells.length === 0 || !cells.every((cell) => DELIMITER_CELL.test(cell))) return null;
+  return cells.map((cell) => {
+    const left = cell.startsWith(':');
+    const right = cell.endsWith(':');
+    return left && right ? 'center' : right ? 'right' : left ? 'left' : null;
+  });
+}
+
+/** A header row, then a delimiter row with as many cells (a pipe in the header keeps one plain line a paragraph). */
+function tableStartsAt(lines: string[], index: number): boolean {
+  const header = lines[index];
+  if (index + 1 >= lines.length || !header.includes('|') || blank(header) || indentOf(header) > 3) return false;
+  const align = delimiterRow(lines[index + 1]);
+  return align !== null && align.length === tableCells(header).length && align.length <= MAXIMUM_TABLE_COLUMNS;
 }
 
 const blank = (line: string) => line.trim() === '';
@@ -125,9 +178,26 @@ function rawBlocks(lines: string[], depth: number): RawBlock[] {
       index = readList(lines, index, marker, depth, blocks);
       continue;
     }
+    if (tableStartsAt(lines, index)) {
+      const align = delimiterRow(lines[index + 1])!;
+      const header = tableCells(line);
+      const rows: string[][] = [];
+      index += 2;
+      while (index < lines.length && !blank(lines[index]) && !startsBlock(lines[index], depth)) {
+        if (rows.length < MAXIMUM_TABLE_ROWS) {
+          // A short row is padded and a long one cut to the header's width.
+          const cells = tableCells(lines[index]).slice(0, header.length);
+          while (cells.length < header.length) cells.push('');
+          rows.push(cells);
+        }
+        index += 1;
+      }
+      blocks.push({ type: 'table', align, header, rows });
+      continue;
+    }
     const paragraph = [line.trim()];
     index += 1;
-    while (index < lines.length && !blank(lines[index]) && !startsBlock(lines[index], depth)) {
+    while (index < lines.length && !blank(lines[index]) && !startsBlock(lines[index], depth) && !tableStartsAt(lines, index)) {
       paragraph.push(lines[index].trim());
       index += 1;
     }
@@ -202,10 +272,37 @@ function inlineBlocks(blocks: RawBlock[], streaming: boolean): MarkdownBlock[] {
           type: 'list', ordered: block.ordered, start: block.start,
           items: block.items.map((item, itemIndex) => inlineBlocks(item, tail && itemIndex === block.items.length - 1)),
         };
+      case 'table': {
+        const last = block.rows.length - 1;
+        // The row still arriving has only the cells received so far; the padding after them is empty.
+        const open = last >= 0 ? block.rows[last].findLastIndex((cell) => cell !== '') : -1;
+        return {
+          type: 'table', align: block.align,
+          header: block.header.map((cell) => tableInline(cell, false)),
+          rows: block.rows.map((row, rowIndex) => row.map((cell, cellIndex) =>
+            tableInline(cell, tail && rowIndex === last && cellIndex === open))),
+        };
+      }
       default:
         return block;
     }
   });
+}
+
+/** A table cell holds text, inline code, bold and links; emphasis only shows its words. */
+function tableInline(source: string, streaming: boolean): MarkdownInline[] {
+  const plain = (nodes: MarkdownInline[]): MarkdownInline[] => nodes.flatMap((node): MarkdownInline[] => {
+    if (node.type === 'em') return plain(node.children);
+    if (node.type === 'strong' || node.type === 'link') return [{ ...node, children: plain(node.children) }];
+    return [node];
+  });
+  const merged: MarkdownInline[] = [];
+  for (const node of plain(parseInline(source, streaming))) {
+    const previous = merged[merged.length - 1];
+    if (node.type === 'text' && previous?.type === 'text') merged[merged.length - 1] = { type: 'text', text: previous.text + node.text };
+    else merged.push(node);
+  }
+  return merged;
 }
 
 // ---------------------------------------------------------------------------------------------- inlines

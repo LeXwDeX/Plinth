@@ -371,7 +371,12 @@ func (s *Server) legacyReplaceCanvasNodes(
 		s.writeCanvasError(
 			writer,
 			http.StatusBadRequest,
-			s.application.Canvas.Presentation.Messages.BitmapLimitExceeded,
+			// The Schema message names the limit with {limit}; the number is the one enforced (#149).
+			strings.ReplaceAll(
+				s.application.Canvas.Presentation.Messages.BitmapLimitExceeded,
+				"{limit}",
+				strconv.Itoa(s.application.Canvas.Limits.MaximumBitmapNodes),
+			),
 		)
 		return
 	}

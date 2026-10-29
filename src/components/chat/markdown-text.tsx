@@ -74,6 +74,39 @@ function Block({ block, references, tail }: { block: MarkdownBlock; references: 
           {tail}
         </>
       );
+    case 'table': {
+      const alignClass = (align: typeof block.align[number]) => align === 'center' ? 'text-center' : align === 'right' ? 'text-right' : 'text-left';
+      const last = block.rows.length - 1;
+      // The wrapper scrolls on its own, so a wide table never widens the message bubble.
+      return (
+        <div className="max-w-full overflow-x-auto" data-testid="chat-markdown-table">
+          <table className="min-w-full border-collapse text-[12px] leading-snug [overflow-wrap:normal]">
+            <thead>
+              <tr>
+                {block.header.map((cell, index) => (
+                  <th key={index} scope="col" className={`min-w-[6rem] border border-border bg-muted px-2 py-1 font-semibold ${alignClass(block.align[index])}`}>
+                    <Inlines nodes={cell} references={references} />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {row.map((cell, index) => (
+                    <td key={index} className={`min-w-[6rem] border border-border px-2 py-1 align-top ${alignClass(block.align[index])}`}>
+                      <Inlines nodes={cell} references={references} />
+                      {rowIndex === last && index === row.length - 1 ? tail : null}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {block.rows.length === 0 ? tail : null}
+        </div>
+      );
+    }
     case 'rule':
       return <><hr className="border-border" />{tail}</>;
     case 'list': {

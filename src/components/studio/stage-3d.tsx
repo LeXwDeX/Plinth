@@ -8,6 +8,7 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { Surface } from '@/components/ui/surface';
 import { ModelViewer3D, type ModelViewerControl } from '@/components/viewer/model-viewer-3d';
 import { useModelCapture } from '@/hooks/use-model-capture';
+import { BITMAP_LIMIT_TOAST_ID, bitmapCapacity, bitmapLimitMessage, CanvasBitmapLimitError } from '@/lib/canvas/bitmap-limit';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
 import { descriptorCaps } from '@/lib/workspace/key-dispatch';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
@@ -17,6 +18,7 @@ import { partFilename, partsKeyOf } from '@/lib/workspace/model-parts';
 import { activeLocale } from '@/lib/i18n/locale';
 import { groupedCount, type ModelStats, type TextureSize } from '@/lib/workspace/model-stats';
 import type { ViewMode } from '@/lib/workspace/view-mode';
+import { useCanvasStore } from '@/store/canvas-store';
 import { useStudioStore, type StageModelState } from '@/store/studio-store';
 import type { CurrentObject } from '@/store/workspace-store';
 
@@ -28,6 +30,9 @@ export function Stage3D({ object }: { object: CurrentObject }) {
   const [stats, setStats] = useState<ModelStats | null>(null);
   const [capturing, setCapturing] = useState(false);
   const [view, setView] = useState<{ key: string; mode: ViewMode } | null>(null);
+  // #149: before the person captures, say that the canvas is full or nearly so (the loaded canvas; the server decides in the end).
+  const canvasNodes = useCanvasStore((state) => (object.sessionId ? state.nodesBySession[object.sessionId] : undefined));
+  const capacity = bitmapCapacity(schema, canvasNodes);
   const captureRequest = useStudioStore((state) => state.captureRequest);
   const partExportRequest = useStudioStore((state) => state.partExportRequest);
   // Parts are picked by a click on the model only while the 部件 tab is the one being looked at.
@@ -126,7 +131,14 @@ export function Stage3D({ object }: { object: CurrentObject }) {
         className="aspect-auto h-full max-w-none"
         captureLongEdgePixels={schema.canvas.frontend.model_capture_long_edge_pixels}
         onCapture={object.assetId ? captureTo2D : undefined}
-        onCaptureError={() => toast.error(schemaText(schema, 'ui.workspace.canvas.capture_failed'))}
+        onCaptureError={(error) => {
+          // A full canvas is not a failed screenshot: say that, and what to do (#149).
+          if (error instanceof CanvasBitmapLimitError) {
+            toast.error(bitmapLimitMessage(schema, 'reached', { used: error.used, limit: error.limit, remaining: 0, full: true, near: false }), { id: BITMAP_LIMIT_TOAST_ID });
+          } else {
+            toast.error(schemaText(schema, 'ui.workspace.canvas.capture_failed'));
+          }
+        }}
         resetLabel={schemaText(schema, 'ui.viewer.reset_view')}
         resetShortcut={descriptorCaps(`mod+${schema.canvas.frontend.keyboard.recenter_key}`, (key) => schemaText(schema, key))}
         resetPlacement="bottom-left"
@@ -149,6 +161,15 @@ export function Stage3D({ object }: { object: CurrentObject }) {
           ))}
         </dl>
       </Surface>
+      {capacity.full || capacity.near ? (
+        <p
+          role="status"
+          data-testid="stage-canvas-capacity"
+          className={`absolute left-1/2 top-3 z-float max-w-[80%] -translate-x-1/2 rounded-md px-3 py-1 text-xs shadow-lg ${capacity.full ? 'border border-destructive/30 bg-destructive/10 text-destructive' : 'border border-warning/30 bg-warning/10 text-warning'}`}
+        >
+          {bitmapLimitMessage(schema, capacity.full ? 'reached' : 'near', capacity)}
+        </p>
+      ) : null}
       {capturing ? (
         <p role="status" className="absolute bottom-6 left-1/2 z-float -translate-x-1/2 rounded-full bg-panel-raised px-3 py-1 text-xs shadow-lg">
           {schemaText(schema, 'ui.workspace.canvas.capturing')}

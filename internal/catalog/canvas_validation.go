@@ -128,6 +128,8 @@ func validateCanvas(schema CanvasSchema, runtime RuntimeSchema, content ContentS
 	}
 	if schema.Limits.MaximumMergeNodes <= 0 ||
 		schema.Limits.MaximumBitmapNodes <= 0 ||
+		schema.Limits.BitmapWarningRemaining <= 0 ||
+		schema.Limits.BitmapWarningRemaining >= schema.Limits.MaximumBitmapNodes ||
 		schema.Limits.MaximumDimension <= 0 ||
 		schema.Limits.MaximumPlacedResults <= 0 ||
 		schema.Limits.MaximumPlacedResultKeyCharacters <= 0 ||
@@ -658,6 +660,10 @@ func validateCanvas(schema CanvasSchema, runtime RuntimeSchema, content ContentS
 		if strings.TrimSpace(message) == "" {
 			return fmt.Errorf("presentation.messages.%s 不能为空", name)
 		}
+	}
+	// 上限数字来自 limits.maximum_bitmap_nodes，文案不写死（#149）。
+	if !strings.Contains(schema.Presentation.Messages.BitmapLimitExceeded, "{limit}") {
+		return errors.New("presentation.messages.bitmap_limit_exceeded 必须用 {limit} 引用 limits.maximum_bitmap_nodes")
 	}
 	for _, key := range []string{
 		"project.list.new",

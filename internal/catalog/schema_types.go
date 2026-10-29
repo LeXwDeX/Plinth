@@ -1510,7 +1510,10 @@ type CanvasDefaultsSchema struct {
 type CanvasLimitsSchema struct {
 	MaximumMergeNodes  int `json:"maximum_merge_nodes"`
 	MaximumBitmapNodes int `json:"maximum_bitmap_nodes"`
-	MaximumDimension   int `json:"maximum_dimension"`
+	// BitmapWarningRemaining 是画板剩余图片名额降到多少张时，截图到 2D 等入口开始提前提示
+	// “接近上限”（#149）；必须小于 MaximumBitmapNodes。
+	BitmapWarningRemaining int `json:"bitmap_warning_remaining"`
+	MaximumDimension       int `json:"maximum_dimension"`
 	// MinimumDimension 是画布像素尺寸（#246）的最小边长；最大边长沿用 MaximumDimension。
 	MinimumDimension int `json:"minimum_dimension"`
 	// MaximumPlacedResults 与 MaximumPlacedResultKeyCharacters 约束已放置结果清单

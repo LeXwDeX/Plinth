@@ -740,7 +740,8 @@ export function CanvasBoard({
         } else if (artboard && brushCreatesCanvasLayer(target.state, activeTool, world, artboard, canvasSchema.frontend.initial_layer.enabled)) {
           // #246: no picture under the brush inside the canvas: a blank canvas layer below everything takes the stroke.
           const layer = canvasLayerNode(generateId(), artboard, canvasSchema, schemaText(schema, 'ui.canvas.layers.initial_name'));
-          store.getState().addCanvasLayer(sessionId, layer);
+          // At the picture limit the person was told (#149); the stroke has no layer to land on.
+          if (!store.getState().addCanvasLayer(sessionId, layer)) return;
           const local = toNodeLocal({ ...layer, zIndex: 0 }, world.x, world.y);
           setBrushStroke({ nodeId: layer.id, erase: false, points: [local.x, local.y] });
         } else {

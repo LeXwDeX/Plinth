@@ -1,10 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { toast } from 'sonner';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { useAuth } from '@/hooks/use-auth';
 import { useCanvasArtboard } from '@/hooks/use-canvas-artboard';
+import { BITMAP_LIMIT_TOAST_ID, bitmapCapacity, bitmapLimitMessage, CanvasBitmapLimitError } from '@/lib/canvas/bitmap-limit';
 import { createCanvasBrowserClient } from '@/lib/canvas/browser-client';
 import { persistCapturedImageToCanvas } from '@/lib/canvas/capture-persistence';
 import { createSettledValue } from '@/lib/canvas/settled-value';
@@ -12,6 +14,7 @@ import { uploadWorkspaceInputAssetResult } from '@/lib/workspace/input-asset-upl
 import type { ModelCaptureView } from '@/lib/workspace/model-capture';
 import { isCurrentSessionScope, selectionForSession } from '@/lib/workspace/session-scope';
 import { useChatStore } from '@/store/chat-store';
+import { useCanvasStore } from '@/store/canvas-store';
 import { useStudioStore } from '@/store/studio-store';
 import { useWorkspaceStore } from '@/store/workspace-store';
 
@@ -60,6 +63,9 @@ export function useModelCapture() {
         workspace.currentObject.taskId === selection.taskId;
     };
     if (!stillCurrent()) return;
+    // #149: a canvas already at its picture limit takes no screenshot; say so before anything is uploaded.
+    const before = bitmapCapacity(schema, useCanvasStore.getState().getNodes(sessionID));
+    if (before.full) throw new CanvasBitmapLimitError(before.used, before.limit);
     if (blob.size > schema.runtime.input_assets.upload_max_bytes) {
       throw new Error('model capture exceeds upload limit');
     }
@@ -108,5 +114,10 @@ export function useModelCapture() {
     useWorkspaceStore.getState().queueChatAttachments([{
       url: screenshot.url, assetId: screenshot.id, taskId: selection.taskId, captureId: record.id,
     }]);
+    // The screenshot is in; if it used up the room, the next one will not fit.
+    const after = bitmapCapacity(schema, useCanvasStore.getState().getNodes(sessionID));
+    if (after.full || after.near) {
+      toast.warning(bitmapLimitMessage(schema, after.full ? 'reached' : 'near', after), { id: BITMAP_LIMIT_TOAST_ID });
+    }
   }, [canvasClient, ownerID, schema, selection, sessionID, sessionRevision, setCurrentObject]);
 }
