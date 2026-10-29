@@ -847,7 +847,7 @@ const minimalApplication = `"application":{
 			"merge_filename_prefix":"canvas-merge","merge_extension":".png",
 			"merge_media_type":"image/png","merge_asset_type":"image","coordinate_version":2
 		},
-		"limits":{"maximum_merge_nodes":20,"maximum_bitmap_nodes":50,"maximum_dimension":8192,"maximum_placed_results":5000,"maximum_placed_result_key_characters":512,"minimum_dimension":64},
+		"limits":{"maximum_merge_nodes":20,"maximum_bitmap_nodes":50,"bitmap_warning_remaining":5,"maximum_dimension":8192,"maximum_placed_results":5000,"maximum_placed_result_key_characters":512,"minimum_dimension":64},
 		"audit":{
 			"create_action":"access_asset",
 			"delete_action":"access_asset",
@@ -992,7 +992,7 @@ const minimalApplication = `"application":{
 			"messages":{
 				"forbidden":"需要管理员权限","project_not_found":"项目不存在",
 				"nodes_must_array":"参数 nodes 必须是数组",
-				"bitmap_limit_exceeded":"画板图片数量超出限制",
+				"bitmap_limit_exceeded":"画板最多保存 {limit} 张图片",
 				"invalid_merge":"参数错误","dimension_limit":"尺寸超限",
 				"merge_failed":"合并失败",
 				"internal_error":"内部错误",

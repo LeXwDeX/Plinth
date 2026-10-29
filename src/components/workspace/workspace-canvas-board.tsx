@@ -18,6 +18,7 @@ import { useCanvasArtboard } from '@/hooks/use-canvas-artboard';
 import { Action } from '@/components/ui/button';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { useBitmapLimitNotice } from '@/hooks/use-bitmap-limit-notice';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { useStageViewer } from '@/hooks/use-stage-viewer';
 import { publishBoardDelivery, rasteriseSessionBoard } from '@/lib/canvas/board-delivery';
@@ -105,6 +106,8 @@ function loadImageSize(url: string): Promise<{ width: number; height: number }> 
 
 export function WorkspaceCanvasBoard() {
   const { schema } = useProductSchema();
+  // #149: the picture limit reaches the store, and every refused add tells the person.
+  useBitmapLimitNotice();
   const { proxyAssetUrl } = useAssetURLRewriter();
   const { openStageLightbox, current: stageCurrent } = useStageViewer();
   // A Space tap opens or closes the large view when there is one to open or close
@@ -542,12 +545,13 @@ export function WorkspaceCanvasBoard() {
         }
         const placement = imageNodePlacement(store.getNodes(sessionID), natural,
           schema.canvas.frontend, placementArtboard.current);
-        store.addNode(sessionID, {
+        // At the picture limit the person was told; the remaining results stay in the tray (#149).
+        if (!store.addNode(sessionID, {
           id: generateId(), type: 'image', taskId: selection.taskId, imageUrl: url,
           captureId: selection.captureId,
           x: placement.x, y: placement.y,
           width: placement.width, height: placement.height,
-        });
+        })) return;
       }
     };
     void addReadyImages();
@@ -600,10 +604,11 @@ export function WorkspaceCanvasBoard() {
         const latest = useCanvasStore.getState();
         if (!latest.getNodes(sessionID).some((node) => node.type === 'image' && node.imageUrl === url)) {
           const placement = imageNodePlacement(latest.getNodes(sessionID), natural, schema.canvas.frontend, placementArtboard.current);
-          latest.addNode(sessionID, {
+          // At the picture limit the person was told; the rest of the list is not placed (#149).
+          if (!latest.addNode(sessionID, {
             id: generateId(), type: 'image', taskId: result.taskId, imageUrl: url,
             x: placement.x, y: placement.y, width: placement.width, height: placement.height,
-          });
+          })) return;
         }
         register(result.key);
       }
@@ -662,9 +667,10 @@ export function WorkspaceCanvasBoard() {
         gap: frontend.node_gap_pixels,
         fallback: { x: frontend.initial_node_x, y: frontend.initial_node_y },
       });
-      store.addNode(sessionID, {
+      // At the picture limit the person was told, and the upload is not placed (#149).
+      if (!store.addNode(sessionID, {
         id: generateId(), type: 'image', taskId: frontend.upload_task_id, imageUrl: url, ...rect,
-      });
+      })) return null;
       return rect;
     } catch (error) {
       if (!isCurrentSessionScope(scope)) return null;
@@ -791,11 +797,12 @@ export function WorkspaceCanvasBoard() {
       const origin = base
         ? (base.captureId ? `${MERGED_FROM_CAPTURE}${base.captureId}` : base.taskId)
         : (topPicture?.taskId || `canvas:${sessionID}`);
-      store.stampNodes(sessionID, content.map((node) => node.id), {
+      // A merge adds one picture layer; at the picture limit the person was told and nothing changes (#149).
+      if (!store.stampNodes(sessionID, content.map((node) => node.id), {
         id, type: 'image', taskId: objectId, imageUrl: url,
         x: artboard.x, y: artboard.y, width: artboard.width, height: artboard.height,
         mergedFrom: origin, mergedAt: new Date().toISOString(),
-      });
+      })) return;
       if (base) useWorkspaceStore.getState().rememberMergeBase(objectId, base);
       setCurrentObject({ taskId: objectId, sessionId: sessionID, kind: 'image', url });
       // The merged picture is what the next turn continues from.
@@ -1088,7 +1095,7 @@ export function WorkspaceCanvasBoard() {
           const inpaint = maskAssetId
             ? { maskAssetId, width: job.size.width, height: job.size.height }
             : null;
-          useCanvasStore.getState().addNode(job.sessionId, {
+          const layerAdded = useCanvasStore.getState().addNode(job.sessionId, {
             id: generateId(), type: 'image', taskId: schema.canvas.frontend.upload_task_id, imageUrl: url,
             x: job.frame.x, y: job.frame.y, width: job.frame.width, height: job.frame.height,
             name: handle
@@ -1096,7 +1103,8 @@ export function WorkspaceCanvasBoard() {
               : schemaText(schema, 'ui.canvas.layers.inpaint_name'),
             ...(inpaint && isInpaintSource(inpaint) ? { inpaint } : {}),
           });
-          if (await finishInpaintJob(job, task)) toast.success(schemaText(schema, 'ui.canvas.inpaint.layer_added'));
+          // At the picture limit the layer is not added and the person was told (#149); the result stays in the tray.
+          if (await finishInpaintJob(job, task) && layerAdded) toast.success(schemaText(schema, 'ui.canvas.inpaint.layer_added'));
         } catch (error) {
           // The result itself is in the task tray; only the layer failed. The receipt keeps the raw picture
           // off the board even if this job is dropped.

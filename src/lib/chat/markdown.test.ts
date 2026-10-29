@@ -111,4 +111,71 @@ describe('the chat Markdown subset (#333)', () => {
     expect(parseMarkdown(nested).length).toBe(1);
     expect(Date.now() - started).toBeLessThan(2000);
   });
+
+  describe('GFM tables (#149)', () => {
+    const table = (align: Array<'left' | 'center' | 'right' | null>, header: MarkdownInline[][], rows: MarkdownInline[][][]): MarkdownBlock => ({ type: 'table', align, header, rows });
+    const cell = (...children: MarkdownInline[]): MarkdownInline[] => children;
+
+    it('reads a header, an alignment row and body rows, with or without the outer pipes', () => {
+      const expected = table([null, 'right'], [cell(text('模型')), cell(text('积分'))], [[cell(text('Remesh')), cell(text('10'))], [cell(text('Rigging')), cell(text('20'))]]);
+      expect(parseMarkdown('| 模型 | 积分 |\n| --- | ---: |\n| Remesh | 10 |\n| Rigging | 20 |')).toEqual([expected]);
+      expect(parseMarkdown('模型 | 积分\n--- | ---:\nRemesh | 10\nRigging | 20')).toEqual([expected]);
+      expect(parseMarkdown('|a|b|c|\n|:--|:-:|--:|\n|1|2|3|')).toEqual([
+        table(['left', 'center', 'right'], [cell(text('a')), cell(text('b')), cell(text('c'))], [[cell(text('1')), cell(text('2')), cell(text('3'))]]),
+      ]);
+    });
+
+    it('allows only text, inline code, bold and links in a cell', () => {
+      const [block] = parseMarkdown('| a | b |\n|---|---|\n| **粗** `c\\|d` *斜* [文档](https://example.com/x) | [坏](javascript:alert(1)) ![图](https://example.com/x.png) |');
+      expect(block).toEqual(table([null, null], [cell(text('a')), cell(text('b'))], [[
+        cell(strong(text('粗')), text(' '), code('c|d'), text(' 斜 '), { type: 'link', href: 'https://example.com/x', children: [text('文档')] }),
+        cell(text('坏 图')),
+      ]]));
+    });
+
+    it('splits at unescaped pipes only, pads short rows and cuts long ones', () => {
+      expect(parseMarkdown('| a | b |\n|---|---|\n| x \\| y | z |\n| only |\n| 1 | 2 | 3 |')).toEqual([
+        table([null, null], [cell(text('a')), cell(text('b'))], [
+          [cell(text('x | y')), cell(text('z'))], [cell(text('only')), []], [cell(text('1')), cell(text('2'))],
+        ]),
+      ]);
+    });
+
+    it('needs a delimiter row of the same width right below the header; anything else stays a paragraph', () => {
+      expect(parseMarkdown('a | b\nc | d')).toEqual([paragraph(text('a | b\nc | d'))]);
+      expect(parseMarkdown('| a | b |\n| --- |')).toEqual([paragraph(text('| a | b |\n| --- |'))]);
+      expect(parseMarkdown('一行字\n---')).toEqual([paragraph(text('一行字')), { type: 'rule' }]);
+    });
+
+    it('ends at a blank line or the next block, interrupts a paragraph and sits inside a list item', () => {
+      expect(parseMarkdown('前面\n| a |\n|---|\n| 1 |\n\n后面')).toEqual([
+        paragraph(text('前面')), table([null], [cell(text('a'))], [[cell(text('1'))]]), paragraph(text('后面')),
+      ]);
+      expect(parseMarkdown('| a |\n|---|\n| 1 |\n# 标题')).toEqual([
+        table([null], [cell(text('a'))], [[cell(text('1'))]]), { type: 'heading', level: 1, children: [text('标题')] },
+      ]);
+      expect(parseMarkdown('- 项\n  | a |\n  |---|\n  | 1 |')).toEqual([{
+        type: 'list', ordered: false, start: 1,
+        items: [[paragraph(text('项')), table([null], [cell(text('a'))], [[cell(text('1'))]])]],
+      }]);
+    });
+
+    it('keeps raw HTML in cells as text and bounds the grid', () => {
+      const [block] = parseMarkdown('| <b>x</b> |\n|---|\n| <img src=x onerror=alert(1)> |');
+      expect(block).toEqual(table([null], [cell(text('<b>x</b>'))], [[cell(text('<img src=x onerror=alert(1)>'))]]));
+      const many = parseMarkdown(`| a |\n|---|\n${Array.from({ length: 500 }, (_, row) => `| ${row} |`).join('\n')}`);
+      expect(many[0].type === 'table' && many[0].rows.length).toBe(200);
+      const wide = `${Array.from({ length: 30 }, () => 'a').join('|')}`;
+      expect(parseMarkdown(`${wide}\n${Array.from({ length: 30 }, () => '-').join('|')}`)[0].type).toBe('paragraph');
+    });
+
+    it('while streaming, shows the finished rows and formats the last cell\'s open tail', () => {
+      expect(parseMarkdown('| a | b |\n|---|---|\n| 1 | **重', { streaming: true })).toEqual([
+        table([null, null], [cell(text('a')), cell(text('b'))], [[cell(text('1')), cell(strong(text('重')))]]),
+      ]);
+      expect(parseMarkdown('| a | b |\n|---|---|\n| **一', { streaming: true })[0]).toEqual(
+        table([null, null], [cell(text('a')), cell(text('b'))], [[cell(strong(text('一'))), []]]),
+      );
+    });
+  });
 });

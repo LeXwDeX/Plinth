@@ -48,6 +48,7 @@ const canvasSchema: CanvasProductSchema = {
   limits: {
     maximum_merge_nodes: 20,
     maximum_bitmap_nodes: 50,
+    bitmap_warning_remaining: 5,
     maximum_dimension: 8192,
     minimum_dimension: 64,
   },
@@ -288,6 +289,7 @@ const canvasSchema: CanvasProductSchema = {
       forbidden: 'configured forbidden',
       project_not_found: 'configured missing',
       nodes_must_array: 'configured nodes',
+      bitmap_limit_exceeded: 'configured bitmap limit {limit}',
       invalid_merge: 'configured merge',
       dimension_limit: 'configured dimension',
       merge_failed: 'configured merge failure',

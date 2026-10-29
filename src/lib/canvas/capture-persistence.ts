@@ -1,6 +1,7 @@
-import type { CanvasProductSchema } from '@/lib/product-schema';
+import { formatSchemaText, type CanvasProductSchema } from '@/lib/product-schema';
 import { useCanvasStore, type CanvasNode } from '@/store/canvas-store';
 import { canvasArtboard, samePixels, type CanvasPixels } from './artboard';
+import { CanvasBitmapLimitError } from './bitmap-limit';
 import { CanvasBrowserError, type CanvasBrowserClient, type CanvasProject, type CanvasNodeInput } from './browser-client';
 import { resolveCanvasFrame } from './canvas-frame';
 import { imageNodePlacement } from './image-placement';
@@ -137,6 +138,10 @@ export function persistCapturedImageToCanvas(options: PersistCapturedImageOption
         zIndex: (baseNodes.length ? Math.max(...baseNodes.map((node) => node.zIndex)) : 0) + 1,
       };
       const writtenNodes = found ? baseNodes : [...baseNodes, captureNode];
+      // #149: the server refuses a canvas above its picture limit; say so before sending the save.
+      const limit = options.schema.limits.maximum_bitmap_nodes;
+      const pictures = writtenNodes.filter((node) => node.type === 'image').length;
+      if (!found && pictures > limit) throw new CanvasBitmapLimitError(pictures - 1, limit);
       // Clean appends retain the original record bytes and all stored node fields (a migrated canvas cannot).
       const records = dirty || server.migrated ? writtenNodes.map(nodeToRecord) : [
         ...serverRecords,
@@ -151,6 +156,11 @@ export function persistCapturedImageToCanvas(options: PersistCapturedImageOption
           if (!result.ok || result.count !== records.length) throw new Error('capture canvas save was not acknowledged');
         }
       } catch (error) {
+        // Another window filled the canvas meanwhile: the server's own refusal reads the same way (#149).
+        if (error instanceof CanvasBrowserError && error.status === 400 &&
+            error.message === formatSchemaText(options.schema.presentation.messages.bitmap_limit_exceeded, { limit })) {
+          throw new CanvasBitmapLimitError(limit, limit);
+        }
         if (!(error instanceof CanvasBrowserError) || error.status !== 409 || dirty || attempt > 0) throw error;
         // Only a clean append can rebase once. New local edits retain their old
         // baseline and must be handled by the normal canvas conflict flow.

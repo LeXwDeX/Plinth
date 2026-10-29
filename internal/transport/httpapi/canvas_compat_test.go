@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
@@ -508,11 +509,35 @@ func TestLegacyCanvasNodeReplaceUsesSchemaDefaultsAndZOrder(t *testing.T) {
 	}
 }
 
+// #149: the Schema message names the limit with {limit}; the response carries the enforced number.
+func TestLegacyCanvasBitmapLimitMessageNamesTheEnforcedLimit(t *testing.T) {
+	t.Parallel()
+	_, handler, _ := newHTTPHarnessWithApplication(t, []string{"admin"}, func(application *catalog.ApplicationSchema) {
+		application.Canvas.Limits.MaximumBitmapNodes = 2
+		application.Canvas.Limits.BitmapWarningRemaining = 1
+	})
+	create := performCanvasRequest(handler, http.MethodPost, "/api/canvas/projects", `{}`)
+	var project map[string]any
+	decodeCanvasRecorder(t, create, &project)
+	path := "/api/canvas/projects/" + project["id"].(string)
+	rejected := performCanvasRequest(handler, http.MethodPut, path+"/nodes", `{"canvasWidth":2048,"canvasHeight":2048,"coordinateVersion":2,"revision":1,"nodes":[{"id":"a","type":"image"},{"id":"b","type":"image"},{"id":"c","type":"image"}]}`)
+	if rejected.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rejected.Code, rejected.Body)
+	}
+	var failure map[string]any
+	decodeCanvasRecorder(t, rejected, &failure)
+	message, _ := failure["error"].(string)
+	if !strings.Contains(message, "2") || strings.Contains(message, "{limit}") || strings.Contains(message, "50") {
+		t.Fatalf("error message = %q, want the enforced limit 2", message)
+	}
+}
+
 func TestLegacyCanvasBitmapLimitUsesSchemaErrorAndPreservesRevision(t *testing.T) {
 	t.Parallel()
 	_, handler, _ := newHTTPHarnessWithApplication(t, []string{"admin"}, func(application *catalog.ApplicationSchema) {
 		application.Canvas.Limits.MaximumBitmapNodes = 2
-		application.Canvas.Presentation.Messages.BitmapLimitExceeded = "configured bitmap limit"
+		application.Canvas.Limits.BitmapWarningRemaining = 1
+		application.Canvas.Presentation.Messages.BitmapLimitExceeded = "configured bitmap limit {limit}"
 	})
 	create := performCanvasRequest(handler, http.MethodPost, "/api/canvas/projects", `{}`)
 	var project map[string]any
@@ -529,7 +554,7 @@ func TestLegacyCanvasBitmapLimitUsesSchemaErrorAndPreservesRevision(t *testing.T
 	}
 	var failure map[string]any
 	decodeCanvasRecorder(t, rejected, &failure)
-	if failure["error"] != "configured bitmap limit" {
+	if failure["error"] != "configured bitmap limit 2" {
 		t.Fatalf("error payload = %#v", failure)
 	}
 	get := performCanvasRequest(handler, http.MethodGet, path, "")

@@ -1037,6 +1037,8 @@ export interface CanvasProductSchema {
   limits: {
     maximum_merge_nodes: number;
     maximum_bitmap_nodes: number;
+    /** #149: how few free picture slots left count as near the limit (below maximum_bitmap_nodes). */
+    bitmap_warning_remaining: number;
     /** Also the largest canvas edge in pixels (#246). */
     maximum_dimension: number;
     /** The smallest canvas edge in pixels (#246). */
@@ -1324,6 +1326,8 @@ export interface CanvasProductSchema {
       forbidden: string;
       project_not_found: string;
       nodes_must_array: string;
+      /** The server's refusal above the picture limit; {limit} is `limits.maximum_bitmap_nodes` (#149). */
+      bitmap_limit_exceeded: string;
       invalid_merge: string;
       dimension_limit: string;
       merge_failed: string;

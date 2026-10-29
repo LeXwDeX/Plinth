@@ -243,7 +243,7 @@ export const ChatMessage = memo(function ChatMessage({
       {displayContent && (
         <div
           className={cn(
-            'max-w-[92%] text-[13px] leading-relaxed [overflow-wrap:anywhere]',
+            'min-w-0 max-w-[92%] text-[13px] leading-relaxed [overflow-wrap:anywhere]',
             isUser ? 'whitespace-pre-wrap rounded-lg bg-panel-raised px-3 py-2' : 'w-full text-foreground',
           )}
         >
