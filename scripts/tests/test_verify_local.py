@@ -49,6 +49,14 @@ class ToolCheckTests(unittest.TestCase):
             with self.assertRaisesRegex(v.GateError, 'jq'):
                 v.require_tools()
 
+    def test_missing_sqlite3_is_reported_up_front(self):
+        # scripts/tests call the sqlite3 command line (#152): fail at startup, not in gate 8.
+        no_sqlite = lambda name: None if name == 'sqlite3' else '/bin/x'
+        with patch.object(v.shutil, 'which', side_effect=no_sqlite):
+            self.assertEqual(v.missing_tools(), ['sqlite3'])
+            with self.assertRaisesRegex(v.GateError, 'sqlite3'):
+                v.require_tools()
+
     def test_race_needs_a_c_compiler_only_with_race(self):
         only_cc = lambda name: '/bin/cc' if name == 'cc' else '/bin/x'
         with patch.object(v.shutil, 'which', side_effect=only_cc):
