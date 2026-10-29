@@ -14,6 +14,13 @@ import (
 // declared an estimate the count is unknown, and nothing is refused here: the
 // Provider's own pre-submission check (#103) stays the fallback for a source
 // it can measure.
+//
+// Text-to-3D and image-to-3D sources are in that category: their
+// target_polycount only takes effect when should_remesh is set, and some
+// models declare no topology, so the Schema holds no unconditional estimate of
+// the triangles they deliver. They declare no output_triangles, and a plan
+// whose first step follows such a task is judged by the #103 check on the
+// delivered GLB instead.
 type chainTriangles struct {
 	known     bool
 	triangles int64

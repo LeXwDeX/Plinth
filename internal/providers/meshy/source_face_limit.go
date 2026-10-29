@@ -24,8 +24,9 @@ import (
 // inline model input uses (modelinput.Profile.ExceedsInstancedTriangles). It
 // reads only bytes the platform already owns (an uploaded asset or the GLB a
 // successful source Task delivered). A source that cannot be measured here (a
-// bare URL, no stored GLB, bytes larger than the Offering's inline model input
-// or that the static parser does not accept) is not blocked; the upstream
+// bare URL, no stored GLB, an upload larger than the Offering's inline model
+// input, a Task GLB over the parser ceiling, or bytes the static parser does
+// not accept) is not blocked; the upstream
 // remains the authority for it.
 func (a *Adapter) validateSourceFaceLimit(ctx context.Context, request generation.InputValidationRequest) error {
 	limit := request.Offering.SourceModelLimit
@@ -33,9 +34,9 @@ func (a *Adapter) validateSourceFaceLimit(ctx context.Context, request generatio
 		return nil
 	}
 	policy := modelinput.GeneratedPolicy()
-	readLimit := sourceReadLimit(request.Offering, policy)
+	inlineLimit := inlineSourceLimit(request.Offering, policy)
 	var worst modelinput.Profile
-	for _, source := range sourceModelAssets(request, readLimit) {
+	for _, source := range sourceModelAssets(request, inlineLimit, policy.Limits.MaxBytes) {
 		profile, known, err := a.measureSourceModel(ctx, request.Offering, source, policy)
 		if err != nil {
 			return err
@@ -52,12 +53,14 @@ func (a *Adapter) validateSourceFaceLimit(ctx context.Context, request generatio
 		generation.ErrInvalidInput, fmt.Errorf("source model has %d triangles, limit %d", worst.InstancedTriangles, limit.MaxTriangles))
 }
 
-// sourceReadLimit is the largest source file this check loads into memory
-// (B11, #121): the Offering's own inline model input size, the file size the
-// step is declared to take, so a source it could not take is never read. The
-// parser's safety ceiling still applies, and an Offering that declares no
-// inline input is bounded by it alone.
-func sourceReadLimit(offering generation.Offering, policy modelinput.Policy) int64 {
+// inlineSourceLimit is the largest uploaded (inline) source file this check
+// loads into memory (B11, #121): the Offering's own inline model input size,
+// the file size the step is declared to take from an upload. A native Task
+// source is not bound by it: it travels as an upstream-job reference, not as
+// inline bytes, so it is read up to the parser's safety ceiling instead
+// (policy.Limits.MaxBytes). An Offering that declares no inline input is
+// bounded by the ceiling alone.
+func inlineSourceLimit(offering generation.Offering, policy modelinput.Policy) int64 {
 	limit := policy.Limits.MaxBytes
 	var options wireOptions
 	if json.Unmarshal(offering.ProviderOptions, &options) == nil && options.InlineModelInput != nil &&
@@ -68,7 +71,7 @@ func sourceReadLimit(offering generation.Offering, policy modelinput.Policy) int
 }
 
 // sourceModelAssets lists the stored GLBs of the declared source parameters.
-func sourceModelAssets(request generation.InputValidationRequest, readLimit int64) []generation.InputAsset {
+func sourceModelAssets(request generation.InputValidationRequest, inlineLimit, taskLimit int64) []generation.InputAsset {
 	var assets []generation.InputAsset
 	for _, parameter := range request.Offering.Parameters {
 		role, ok := schema.SourceParameterRole(parameter)
@@ -78,7 +81,7 @@ func sourceModelAssets(request generation.InputValidationRequest, readLimit int6
 		switch role {
 		case schema.SemanticSourceAsset:
 			for _, asset := range request.InputAssets[parameter.Name] {
-				if asset.MediaType == "model/gltf-binary" {
+				if asset.MediaType == "model/gltf-binary" && asset.Size <= inlineLimit {
 					assets = append(assets, asset)
 				}
 			}
@@ -88,7 +91,7 @@ func sourceModelAssets(request generation.InputValidationRequest, readLimit int6
 				continue
 			}
 			for _, asset := range dependency.Assets {
-				if asset.Role != "model" || asset.MediaType != "model/gltf-binary" || asset.StorageKey == "" || asset.Size <= 0 {
+				if asset.Role != "model" || asset.MediaType != "model/gltf-binary" || asset.StorageKey == "" || asset.Size <= 0 || asset.Size > taskLimit {
 					continue
 				}
 				assets = append(assets, generation.InputAsset{
@@ -99,9 +102,7 @@ func sourceModelAssets(request generation.InputValidationRequest, readLimit int6
 			}
 		}
 	}
-	return slices.DeleteFunc(assets, func(asset generation.InputAsset) bool {
-		return asset.Size <= 0 || asset.Size > readLimit
-	})
+	return slices.DeleteFunc(assets, func(asset generation.InputAsset) bool { return asset.Size <= 0 })
 }
 
 // measureSourceModel returns the measured profile of one stored GLB. known is
