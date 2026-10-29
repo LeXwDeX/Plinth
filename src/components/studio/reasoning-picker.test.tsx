@@ -94,15 +94,13 @@ describe('the thinking level picker (#322)', () => {
 });
 
 describe('the composer bottom row (#322)', () => {
-  it('puts the thinking level beside the Agent mode and the context usage left of the parameters', async () => {
+  it('pairs the chat model with the thinking level and gives the context usage its own row', async () => {
     const { readFileSync } = await import('node:fs');
     const composer = readFileSync(new URL('./composer.tsx', import.meta.url), 'utf8');
     const bottom = composer.slice(composer.indexOf('data-testid="composer-pickers"'));
-    expect(bottom.indexOf('<AgentScopePicker />')).toBeLessThan(bottom.indexOf('<ReasoningPicker />'));
-    expect(bottom.indexOf('<ReasoningPicker />')).toBeLessThan(bottom.indexOf('<ContextMeter'));
-    expect(bottom.indexOf('<ContextMeter')).toBeLessThan(bottom.indexOf('<ParamsPopover {...params}'));
-    // #322 Scope 5: the chat model picker opens the second row, before the context usage.
-    expect(bottom.indexOf('<ReasoningPicker />')).toBeLessThan(bottom.indexOf('<ChatModelPicker />'));
-    expect(bottom.indexOf('<ChatModelPicker />')).toBeLessThan(bottom.indexOf('<ContextMeter'));
+    expect(bottom.indexOf('<AgentScopePicker />')).toBeLessThan(bottom.indexOf('<ParamsPopover {...params}'));
+    expect(bottom.indexOf('<ParamsPopover {...params}')).toBeLessThan(bottom.indexOf('<ChatModelPicker />'));
+    expect(bottom.indexOf('<ChatModelPicker />')).toBeLessThan(bottom.indexOf('<ReasoningPicker />'));
+    expect(bottom.indexOf('<ReasoningPicker />')).toBeLessThan(bottom.indexOf('<ContextMeter />'));
   });
 });
