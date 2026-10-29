@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { Stage3DViews } from '@/components/studio/stage-3d-views';
@@ -11,19 +11,20 @@ import { useModelCapture } from '@/hooks/use-model-capture';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
 import { descriptorCaps } from '@/lib/workspace/key-dispatch';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
+import { captureStepOf } from '@/lib/workspace/capture-request';
 import { saveArchive } from '@/lib/workspace/batch-export';
 import { partFilename, partsKeyOf } from '@/lib/workspace/model-parts';
 import { activeLocale } from '@/lib/i18n/locale';
 import { groupedCount, type ModelStats, type TextureSize } from '@/lib/workspace/model-stats';
 import type { ViewMode } from '@/lib/workspace/view-mode';
-import { useStudioStore } from '@/store/studio-store';
+import { useStudioStore, type StageModelState } from '@/store/studio-store';
 import type { CurrentObject } from '@/store/workspace-store';
 
 /** 3D 舞台：模型铺满中间区域，右下角叠着面数和贴图尺寸（读不到的写“—”，不猜）。 */
 export function Stage3D({ object }: { object: CurrentObject }) {
   const { schema } = useProductSchema();
   const captureTo2D = useModelCapture();
-  const [control, setControl] = useState<ModelViewerControl | null>(null);
+  const [held, setHeld] = useState<{ key: string; control: ModelViewerControl } | null>(null);
   const [stats, setStats] = useState<ModelStats | null>(null);
   const [capturing, setCapturing] = useState(false);
   const [view, setView] = useState<{ key: string; mode: ViewMode } | null>(null);
@@ -37,6 +38,23 @@ export function Stage3D({ object }: { object: CurrentObject }) {
   const [texture, setTexture] = useState<{ key: string; size: TextureSize | null } | null>(null);
   const modelUrl = proxyAssetUrl(object.url, object.taskId);
   const measuredKey = `${object.taskId}:${object.assetId ?? ''}:${modelUrl}`;
+  // The control of the model that is on the stage; the one of the model just switched away from does not count.
+  const viewerKey = `${object.taskId}:${object.assetId}`;
+  const control = held?.key === viewerKey ? held.control : null;
+  const setControl = useCallback((next: ModelViewerControl | null) => setHeld(next ? { key: viewerKey, control: next } : null), [viewerKey]);
+  const modelState: StageModelState = control?.failed ? 'failed' : control?.ready ? (control.incompleteTextures > 0 ? 'incomplete' : 'ready') : 'loading';
+  const modelTask = object.taskId;
+
+  // Entries that capture this model (result card, 舞台头, version bar) read its state from the store.
+  useEffect(() => {
+    useStudioStore.getState().setStageModelState({ taskId: modelTask, state: modelState });
+  }, [modelState, modelTask]);
+  useEffect(() => () => {
+    const store = useStudioStore.getState();
+    if (store.stageModelState?.taskId === modelTask) store.setStageModelState(null);
+    // A request this stage never got to run must not wait for a later load of the model (#126).
+    if (store.captureRequest?.taskId === modelTask) store.clearCaptureRequest();
+  }, [modelTask]);
 
   // Texture sizes come from the model the viewer loaded; the file is not downloaded a second time.
   // Each model opens with its textures; the choice belongs to the model that is on the stage.
@@ -52,13 +70,16 @@ export function Stage3D({ object }: { object: CurrentObject }) {
     control?.resetView();
   }, [control, resetRequest]);
 
-  // 「截图到 2D」从结果卡、舞台头或版本条发来：模型加载好之后才能截。
+  // 「截图到 2D」从结果卡、舞台头或版本条发来：只在模型加载好、贴图完整时截。加载失败或贴图不完整时请求直接丢弃，
+  // 不排队：之后重试成功也不会补发（#126）。模型还在首次加载时请求保留到加载结束。
   useEffect(() => {
-    if (!captureRequest || captureRequest.taskId !== object.taskId || !control?.ready || capturing) return;
+    const step = captureStepOf(captureRequest, object.taskId, modelState, capturing);
+    if (step === 'drop') { useStudioStore.getState().clearCaptureRequest(); return; }
+    if (step !== 'run' || !control) return;
     useStudioStore.getState().clearCaptureRequest();
     setCapturing(true);
     void control.capture().finally(() => setCapturing(false));
-  }, [capturing, captureRequest, control, object.taskId]);
+  }, [capturing, captureRequest, control, modelState, object.taskId]);
 
   // 「导出 GLB」从部件标签发来：模型加载好之后写出这一个部件。请求留到写完，面板据此显示进度。
   const handledPartExport = useRef(0);
@@ -67,6 +88,13 @@ export function Stage3D({ object }: { object: CurrentObject }) {
     const { key, id, seq } = partExportRequest;
     const clear = () => { if (useStudioStore.getState().partExportRequest?.seq === seq) useStudioStore.getState().clearPartExportRequest(); };
     if (key !== partsKey) { clear(); return; }
+    if (modelState === 'failed') { clear(); return; }
+    if (modelState === 'incomplete') {
+      toast.error(schemaText(schema, 'ui.studio.stage.action.capture_textures_incomplete'));
+      handledPartExport.current = seq;
+      clear();
+      return;
+    }
     if (!control?.ready) return;
     handledPartExport.current = seq;
     const parts = useStudioStore.getState().stageParts;
@@ -79,7 +107,7 @@ export function Stage3D({ object }: { object: CurrentObject }) {
       .then((blob) => saveArchive(blob, partFilename(base, part, fallbackName)))
       .catch(() => toast.error(schemaText(schema, 'ui.studio.panel.parts.export_failed')))
       .finally(clear);
-  }, [control, object.handle, object.taskId, partExportRequest, partsKey, schema]);
+  }, [control, modelState, object.handle, object.taskId, partExportRequest, partsKey, schema]);
 
   const unknown = schemaText(schema, 'ui.studio.stage.stats.unknown');
   const rows: Array<[string, string]> = [
@@ -90,7 +118,7 @@ export function Stage3D({ object }: { object: CurrentObject }) {
   return (
     <div className="relative min-h-0 min-w-0 flex-1 p-3" data-testid="stage-3d">
       <ModelViewer3D
-        key={`${object.taskId}:${object.assetId}`}
+        key={viewerKey}
         src={object.url}
         alt={schemaText(schema, 'ui.workspace.canvas.model_alt')}
         taskId={object.taskId}

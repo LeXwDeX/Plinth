@@ -150,7 +150,7 @@ func (executor *Executor) executeProcessingPlan(ctx context.Context, command cha
 			// service is planned in its place without the person's answer.
 			if step.OfferingID != "" {
 				if _, exists := executor.availableOffering(step.Capability, step.OfferingID); !exists {
-					return executor.unknownService(command, executor.fillText(command, choice.UnknownOffering, "{step}", string(step.Capability)), step.OfferingID)
+					return executor.refuseRequestedService(command, choice, step.Capability, step.OfferingID)
 				}
 			}
 			mentions := executor.serviceMentions(ctx, command, step.Capability)

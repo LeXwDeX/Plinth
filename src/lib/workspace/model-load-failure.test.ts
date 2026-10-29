@@ -8,6 +8,7 @@ import { GLTFInstance } from '@google/model-viewer/lib/three-components/GLTFInst
 import {
   MODEL_LOAD_FAILURE_TEXT,
   classifyModelLoadError,
+  incompleteTextureCountOf,
   modelLoadFailureOf,
   modelLoadFailureText,
   recordModelLoadErrors,
@@ -186,7 +187,7 @@ describe('recordModelLoadErrors', () => {
   });
 });
 
-describe('strict requested textures (real three 0.180 parser)', () => {
+describe('requested texture tracking (real three 0.180 parser)', () => {
   const model = (textured = true) => JSON.stringify({
     asset: { version: '2.0' }, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0 }],
     meshes: [{ primitives: [{ attributes: {}, material: 0 }] }],
@@ -196,13 +197,17 @@ describe('strict requested textures (real three 0.180 parser)', () => {
     samplers: [{ magFilter: 9728, minFilter: 9728, wrapS: 33071, wrapT: 33071 }],
   });
 
-  it('rejects the whole parse when a requested image rejection becomes null', async () => {
+  it('keeps the geometry and counts the texture when a requested image cannot be decoded (#127)', async () => {
     const loader = new GLTFLoader();
     const image = vi.fn().mockRejectedValue(new Error('private image contents'));
     loader.register(parser => { parser.loadImageSource = image; return { name: 'test-image' }; });
     recordModelLoadErrors(loader);
-    await expect(loader.parseAsync(model(), '')).rejects.toThrow('Model texture could not be decoded');
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const result = await loader.parseAsync(model(), '');
+    const material = (result.scene.children[0] as Mesh).material as MeshStandardMaterial;
+    expect(material.map).toBeNull();
     expect(image).toHaveBeenCalledTimes(1);
+    expect(incompleteTextureCountOf(result.parser.json)).toBe(1);
   });
 
   it('preserves an original texture rejection instead of replacing it', async () => {
@@ -215,14 +220,16 @@ describe('strict requested textures (real three 0.180 parser)', () => {
     await expect(loader.parseAsync(model(), '')).rejects.toBe(original);
   });
 
-  it('fails if a second requested texture is broken even when the first succeeds', async () => {
+  it('counts only the textures that failed, each once', async () => {
     const fixture = JSON.parse(model());
     fixture.materials[0].normalTexture = { index: 1 };
     const image = vi.fn().mockImplementation((index: number) => index === 0 ? Promise.resolve(new Texture()) : Promise.reject(new Error('broken normal map')));
     const loader = new GLTFLoader().register(parser => { parser.loadImageSource = image; return { name: 'test-image' }; });
     recordModelLoadErrors(loader);
-    await expect(loader.parseAsync(JSON.stringify(fixture), '')).rejects.toThrow('Model texture could not be decoded');
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const result = await loader.parseAsync(JSON.stringify(fixture), '');
     expect(image).toHaveBeenCalledTimes(2);
+    expect(incompleteTextureCountOf(result.parser.json)).toBe(1);
   });
 
   it('keeps texture identity, this, sampler handling and unused images untouched', async () => {
@@ -244,6 +251,15 @@ describe('strict requested textures (real three 0.180 parser)', () => {
     expect(image.mock.contexts[0]).toBe(result.parser);
   });
 
+  it('reports no incomplete textures for a model whose textures all load, and for no JSON at all', async () => {
+    const loader = new GLTFLoader().register(parser => { parser.loadImageSource = vi.fn().mockResolvedValue(new Texture()); return { name: 'test-image' }; });
+    recordModelLoadErrors(loader);
+    const result = await loader.parseAsync(model(), '');
+    expect(incompleteTextureCountOf(result.parser.json)).toBe(0);
+    expect(incompleteTextureCountOf(undefined)).toBe(0);
+    expect(incompleteTextureCountOf({ extras: { plinthFailedTextures: 'x' } })).toBe(0);
+  });
+
   it('accepts an untextured model without loading unused broken definitions', async () => {
     const image = vi.fn().mockRejectedValue(new Error('unused'));
     const loader = new GLTFLoader().register(parser => { parser.loadImageSource = image; return { name: 'test-image' }; });
@@ -253,7 +269,7 @@ describe('strict requested textures (real three 0.180 parser)', () => {
     await expect(loader.parseAsync('{"asset":{"version":"2.0"},"scenes":[{}]}', '')).resolves.toHaveProperty('scene');
   });
 
-  it.each(['KHR_texture_basisu', 'EXT_texture_webp', 'EXT_texture_avif'])('rejects a requested %s texture through the same seam', async extension => {
+  it.each(['KHR_texture_basisu', 'EXT_texture_webp', 'EXT_texture_avif'])('counts a requested %s texture that fails through the same seam', async extension => {
     const fixture = JSON.parse(model());
     fixture.extensionsUsed = [extension];
     fixture.textures[0].extensions = { [extension]: { source: 0 } };
@@ -264,14 +280,16 @@ describe('strict requested textures (real three 0.180 parser)', () => {
     // Select Basis' actual extension path without invoking its GPU transcoder in Node.
     if (extension === 'KHR_texture_basisu') loader.setKTX2Loader({} as Parameters<GLTFLoader['setKTX2Loader']>[0]);
     recordModelLoadErrors(loader);
-    await expect(loader.parseAsync(JSON.stringify(fixture), '')).rejects.toThrow('Model texture could not be decoded');
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const result = await loader.parseAsync(JSON.stringify(fixture), '');
+    expect(incompleteTextureCountOf(result.parser.json)).toBe(1);
   });
 
   it('evicts a failed shared cache entry so concurrent viewers fail and a same-asset retry parses again', async () => {
     const caching = new CachingGLTFLoader(GLTFInstance);
     const loader = caching[$loader];
     const image = vi.fn().mockRejectedValueOnce(new Error('decode failed')).mockResolvedValue(new Texture());
-    loader.register(parser => { parser.loadImageSource = image; return { name: 'test-image' }; });
+    loader.register(parser => { parser.loadTextureImage = image; return { name: 'test-image' }; });
     // Replace transport only: real parser, recorder, cache preparation and cloning still run.
     const transport = vi.spyOn(loader, 'load').mockImplementation(function (this: GLTFLoader, _url, onLoad, _progress, onError) {
       this.parse(model(), '', onLoad, onError);

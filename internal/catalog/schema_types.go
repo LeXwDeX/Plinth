@@ -3179,6 +3179,10 @@ type ChatToolOfferingChoiceSchema struct {
 	// UnknownOffering refuses an Offering ID that is not available or does
 	// not accept the source. {offering} and {step} are substituted.
 	UnknownOffering string `json:"unknown_offering"`
+	// UnavailableOffering refuses an Offering ID that is registered and
+	// enabled for the step but whose runtime configuration is not available
+	// (#128). {step} is substituted; {offering} is not allowed.
+	UnavailableOffering string `json:"unavailable_offering"`
 }
 
 type ChatToolProcessingPlanSchema struct {

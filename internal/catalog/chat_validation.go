@@ -1013,6 +1013,9 @@ func validateChatToolProcessing(tool ChatToolSchema, capabilityDomains map[schem
 			strings.Contains(choice.UnknownOffering, "{offering}") {
 			return nil, errors.New("choice.content 与 choice.unknown_offering 不能为空，choice.unknown_offering 不得含 {offering}")
 		}
+		if strings.TrimSpace(choice.UnavailableOffering) == "" || strings.Contains(choice.UnavailableOffering, "{offering}") {
+			return nil, errors.New("choice.unavailable_offering 不能为空且不得含 {offering}（#128）")
+		}
 		if processing.Messages.Service == nil {
 			return nil, errors.New("声明 choice 的处理工具必须声明 messages.service（#321 G）")
 		}
