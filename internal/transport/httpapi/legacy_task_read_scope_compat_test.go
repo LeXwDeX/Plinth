@@ -11,9 +11,9 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
-// 回归：任务历史（列表）对 tasks.read.any 持有者返回全量任务，
-// 单任务读路径（旧详情、旧下载、原生详情/资产）必须共用同一权限口径，
-// 不允许出现“列表显示已完成、详情却 404 任务不存在”的分叉。
+// 回归：按任务 ID 的读路径（旧详情、旧下载、原生详情/资产）对 tasks.read.any
+// 持有者跨 owner 放行；历史列表只返回本人任务（#154、#158），两者口径不同是有意的，
+// 管理员看他人任务的列表入口是 /api/admin/generations。
 func TestAdminTaskReadPathsShareHistoryScope(t *testing.T) {
 	t.Parallel()
 	module, handler, _ := newHTTPHarnessWithRoles(t, []string{"admin"})
@@ -29,11 +29,25 @@ func TestAdminTaskReadPathsShareHistoryScope(t *testing.T) {
 		t.Fatalf("fixture task = %#v", task)
 	}
 
-	history := serveTaskHistoryRequest(
-		handler,
-		"/api/tasks?page=1&pageSize=32",
-		"admin-user",
-	)
+	// 历史列表对管理员也只返回本人任务（#158）；跨 owner 的缩略图取自 owner 自己的列表，
+	// 再用管理员身份按 ID 读取，确认按 ID 的读路径仍放行。
+	adminHistory := serveTaskHistoryRequest(handler, "/api/tasks?page=1&pageSize=32", "admin-user")
+	if adminHistory.Code != http.StatusOK {
+		t.Fatalf("admin history status = %d, body = %s", adminHistory.Code, adminHistory.Body.String())
+	}
+	var adminListed struct {
+		Data []struct {
+			ID generation.TaskID `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(adminHistory.Body).Decode(&adminListed); err != nil {
+		t.Fatal(err)
+	}
+	if len(adminListed.Data) != 0 {
+		t.Fatalf("admin history leaked another owner's tasks: %#v", adminListed.Data)
+	}
+
+	history := serveTaskHistoryRequest(handler, "/api/tasks?page=1&pageSize=32", "owner-b")
 	if history.Code != http.StatusOK {
 		t.Fatalf("history status = %d, body = %s", history.Code, history.Body.String())
 	}

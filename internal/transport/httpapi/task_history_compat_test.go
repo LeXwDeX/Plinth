@@ -64,8 +64,10 @@ func TestLegacyTaskHistoryUsesPrincipalScopeAndSchemaProjection(t *testing.T) {
 func TestLegacyTaskHistoryAdminFiltersPagesAndRecentAreDataDriven(t *testing.T) {
 	t.Parallel()
 	module, adminHandler, _ := newHTTPHarnessWithRoles(t, []string{"admin"})
-	first := submitHistoryFixture(t, module, "owner-a", generation.TextToImage, "first")
-	second := submitHistoryFixture(t, module, "owner-b", generation.TextTo3D, "second")
+	first := submitHistoryFixture(t, module, "admin-user", generation.TextToImage, "first")
+	second := submitHistoryFixture(t, module, "admin-user", generation.TextTo3D, "second")
+	// 他人的任务不会出现在管理员的历史列表里（#158）。
+	submitHistoryFixture(t, module, "owner-b", generation.TextTo3D, "foreign")
 
 	response := serveTaskHistoryRequest(
 		adminHandler,
@@ -167,7 +169,7 @@ func TestLegacyTaskHistoryWireContractComesFromProductSchema(t *testing.T) {
 	accepted := submitHistoryFixture(
 		t,
 		module,
-		"owner-a",
+		"admin-user",
 		generation.TextToImage,
 		"configured history",
 	)

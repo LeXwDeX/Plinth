@@ -68,6 +68,8 @@ func (s *Server) legacyTaskStream(
 		)
 		return
 	}
+	// 长连接只在建立时记一次审计；后续轮询不重复写。
+	s.auditCrossOwnerTaskRead(request, principal, taskID)
 	payload, err := s.projectTaskStream(
 		requestLocale(request),
 		task,

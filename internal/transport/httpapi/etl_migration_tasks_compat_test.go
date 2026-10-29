@@ -188,12 +188,11 @@ func TestETLMigrated3DHistoryUsesModelThumbnailInsteadOfTexture(
 		},
 	)
 
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(
-		http.MethodGet,
+	response := serveTaskHistoryRequest(
+		handler,
 		"/api/tasks?page=1&pageSize=10",
-		nil,
-	))
+		"legacy-preview-user", // 历史列表对管理员也只返回本人任务（#158）
+	)
 	if response.Code != http.StatusOK {
 		t.Fatalf(
 			"任务历史 status=%d body=%s",
@@ -341,10 +340,9 @@ func TestETLMigratedTasksMatchHTTPContracts(t *testing.T) {
 	)
 
 	// 任务历史列表：切换前全部任务可见，状态已映射为原生终态。
-	listResponse := httptest.NewRecorder()
-	handler.ServeHTTP(listResponse, httptest.NewRequest(
-		http.MethodGet, "/api/tasks?page=1&pageSize=10", nil,
-	))
+	listResponse := serveTaskHistoryRequest(
+		handler, "/api/tasks?page=1&pageSize=10", "legacy-user", // 管理员也只列本人任务（#158）
+	)
 	if listResponse.Code != http.StatusOK {
 		t.Fatalf(
 			"任务历史 status=%d body=%s",

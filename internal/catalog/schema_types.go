@@ -4172,16 +4172,21 @@ type PublicEventProjectionSchema struct {
 }
 
 type TaskAuditRuntimeSchema struct {
-	CreateAction string                     `json:"create_action"`
-	DeleteAction string                     `json:"delete_action"`
-	ResourceType string                     `json:"resource_type"`
-	DetailFields TaskAuditDetailFieldSchema `json:"detail_fields"`
+	CreateAction string `json:"create_action"`
+	DeleteAction string `json:"delete_action"`
+	// ReadOtherAction 记录持有 tasks.read.any 的管理员按任务 ID 读取非本人任务
+	// （详情、事件、旧兼容详情/流、模型格式）。本人任务不写。
+	ReadOtherAction string                     `json:"read_other_action"`
+	ResourceType    string                     `json:"resource_type"`
+	DetailFields    TaskAuditDetailFieldSchema `json:"detail_fields"`
 }
 
 type TaskAuditDetailFieldSchema struct {
 	Capability string `json:"capability"`
 	OfferingID string `json:"offering_id"`
 	Replayed   string `json:"replayed"`
+	TaskID     string `json:"task_id"`
+	OwnerID    string `json:"owner_id"`
 }
 
 type FrontendRuntimeSchema struct {
