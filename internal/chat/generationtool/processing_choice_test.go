@@ -145,7 +145,9 @@ func TestManualModeAsksForTheServiceFirstAndTheApprovalAfterwards(t *testing.T) 
 		t.Fatalf("retexture card = %+v", cards)
 	}
 	// After the answer the paid step still waits for the person's approval.
-	result, _ = h.run("retexture_model", `{"source_task_id":"rodin-1","prompt":"mossy stone","offering_id":"hyper3d/texture/local-model"}`)
+	turn := []chat.Message{{Role: "user", ImageURLs: []string{"/api/v1/input-assets/style"}}}
+	result, _ = h.runAs("owner-a", "session-a", "retexture_model",
+		`{"source_task_id":"rodin-1","prompt":"mossy stone","offering_id":"hyper3d/texture/local-model"}`, turn)
 	if !result.NoSubmission || h.gateway.submitCount != 0 || len(h.gateway.frozen) != 1 ||
 		h.gateway.frozen[0].OfferingID != "hyper3d/texture/local-model" || strings.Contains(result.AgentContent, "choice_required") ||
 		!strings.Contains(result.AgentContent, "approval card") {
@@ -188,5 +190,50 @@ func TestPlanToolAsksForTheAmbiguousStep(t *testing.T) {
 	}
 	if cards, _ := repo.ListChoices(context.Background(), "owner-a", "session-a", 5); cards[0].State != chat.ChoiceAnswered {
 		t.Fatalf("plan card after the answer = %+v", cards[0])
+	}
+}
+
+// Hyper3D texture requires its reference image. The one image of the turn is
+// bound without the call naming it; none or several are refused before
+// anything is frozen, with the Schema text that tells the Agent to ask (#92).
+func TestRequiredReferenceImageComesFromTheTurnOrIsAskedFor(t *testing.T) {
+	const call = `{"source_task_id":"rodin-1","offering_id":"hyper3d/texture/local-model"}`
+	image := func(names ...string) []chat.Message {
+		return []chat.Message{{Role: "user", ImageURLs: names}}
+	}
+	h, _ := choiceHarness(t, "auto")
+	result, _ := h.runAs("owner-a", "session-a", "retexture_model", call, image("/api/v1/input-assets/style"))
+	if result.Error != "" || h.gateway.submitCount != 1 || h.frozenInput(0)["reference_image"] != "configured-input-asset" {
+		t.Fatalf("the turn's image was not bound as the required reference: %+v input=%v", result, h.gateway.frozen)
+	}
+	for name, history := range map[string][]chat.Message{
+		"none":    nil,
+		"several": image("/api/v1/input-assets/one", "/api/v1/input-assets/two"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, _ := choiceHarness(t, "auto")
+			result, _ := h.runAs("owner-a", "session-a", "retexture_model", call, history)
+			h.expectRejected(result, "Ask the person to attach exactly one image")
+		})
+	}
+}
+
+// A required input the call did not supply is named with its declared type,
+// how this tool takes it and the allowed values, never with a bare "invalid
+// parameters" (#92). Sent fields are described by name and type only.
+func TestMissingRequiredInputIsReportedWithFieldAndHowToSupplyIt(t *testing.T) {
+	h, _ := choiceHarness(t, "auto")
+	offering, ok := h.gateway.product.Get("hyper3d/texture/local-model")
+	if !ok {
+		t.Fatal("Hyper3D texture offering missing")
+	}
+	command := chat.ToolCommand{Tool: h.tool("retexture_model")}
+	gaps := h.executor.InputGapsForTest(command, offering, map[string]any{"source_asset": "asset-1", "prompt": "mossy"})
+	if len(gaps) != 1 || !strings.Contains(gaps[0], `"reference_image"`) || !strings.Contains(gaps[0], "image from this chat") ||
+		!strings.Contains(gaps[0], "reference_handles") || strings.Contains(gaps[0], "mossy") {
+		t.Fatalf("gaps = %q", gaps)
+	}
+	if got := h.executor.InputGapsForTest(command, offering, map[string]any{"reference_image": "asset-2"}); len(got) != 0 {
+		t.Fatalf("a supplied input was reported missing: %q", got)
 	}
 }

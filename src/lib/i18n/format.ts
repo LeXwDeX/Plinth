@@ -23,3 +23,8 @@ export function formatTime(value: string | number | Date, locale: string): strin
 export function formatNumber(value: number, locale: string, options?: Intl.NumberFormatOptions): string {
   return new Intl.NumberFormat(locale, options).format(value);
 }
+
+/** A provider balance in points: grouped by the locale, never rounded. Top bar and administration overview share it. */
+export function formatBalanceAmount(amount: number, locale: string): string {
+  return formatNumber(amount, locale, { maximumFractionDigits: 20 });
+}

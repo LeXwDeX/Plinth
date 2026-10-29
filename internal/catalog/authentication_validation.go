@@ -70,6 +70,12 @@ func validateAuthentication(schema AuthenticationSchema) error {
 			api.SessionSecretMissingPolicy,
 		)
 	}
+	retry := schema.SessionRetry
+	if retry.InitialDelayMilliseconds < 100 ||
+		retry.MaxBackoffMilliseconds < retry.InitialDelayMilliseconds ||
+		retry.MaxRetryAfterMilliseconds < retry.MaxBackoffMilliseconds {
+		return errors.New("authentication.session_retry 须满足 100 <= initial_delay_ms <= max_backoff_ms <= max_retry_after_ms")
+	}
 	if len(schema.PublicPaths) == 0 {
 		return errors.New("authentication.public_paths 不能为空")
 	}

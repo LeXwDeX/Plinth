@@ -513,6 +513,7 @@ const minimalApplication = `"application":{
 		"failure.timed_out":"上游请求超时",
 		"failure.rejected":"上游拒绝任务",
 		"failure.insufficient_balance":"上游账户余额不足",
+		"failure.credential_quota":"该 API Key 已达额度上限",
 		"failure.upstream_unavailable":"上游服务不可用",
 		"failure.submission_unknown":"无法确认任务提交",
 		"failure.integrity_failure":"资产校验失败",
@@ -1783,6 +1784,7 @@ const minimalApplication = `"application":{
 			"audit_resource_type":"user"
 		},
 		"public_paths":["/login"],
+		"session_retry":{"initial_delay_ms":1000,"max_backoff_ms":30000,"max_retry_after_ms":120000},
 		"permissions":[
 			{"key":"tasks.read.own","label":"查看本人任务"},
 			{"key":"users.manage","label":"管理用户"},
@@ -3028,6 +3030,7 @@ func TestDefaultCatalogOwnsPublicErrorAndFailureMessages(t *testing.T) {
 		"failure.timed_out",
 		"failure.rejected",
 		"failure.insufficient_balance",
+		"failure.credential_quota",
 		"failure.upstream_unavailable",
 		"failure.submission_unknown",
 		"failure.integrity_failure",

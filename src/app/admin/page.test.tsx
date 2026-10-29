@@ -4,11 +4,11 @@ import { describe, expect, it, vi } from 'vitest';
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import AdminPage from './page';
 
-const state = vi.hoisted(() => ({ overview: undefined as unknown }));
+const state = vi.hoisted(() => ({ overview: undefined as unknown, balance: 100 as number }));
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema: defaultCatalog.application }) }));
 vi.mock('swr', () => ({
   default: (key: string) => key.includes('balance')
-    ? { data: { currentBalance: 100, history: [] }, isLoading: false }
+    ? { data: { currentBalance: state.balance, history: [] }, isLoading: false }
     : { data: state.overview, isLoading: false },
 }));
 
@@ -42,5 +42,16 @@ describe('administration home usage card', () => {
     state.overview = { users: [user('b', { estimatedCredits: 15 })], total: { estimatedCredits: 15 } };
     const card = renderToStaticMarkup(<AdminPage />).split('data-testid="admin-usage-total"')[1].split('</p>')[0];
     expect(card).toContain('≈15');
+  });
+
+  // #62 I18N-06: the overview groups digits like the top bar does, in the UI locale.
+  it('formats the balance with the locale digit grouping', () => {
+    state.overview = { users: [], total: { estimatedCredits: 0 } };
+    state.balance = 10997;
+    try {
+      expect(renderToStaticMarkup(<AdminPage />)).toContain('10,997');
+    } finally {
+      state.balance = 100;
+    }
   });
 });

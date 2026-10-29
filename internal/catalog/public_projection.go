@@ -84,9 +84,10 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 			UserField:     cloned.Authentication.API.UserField,
 			IsAdminField:  cloned.Authentication.API.IsAdminField,
 		},
-		PublicPaths: cloned.Authentication.PublicPaths,
-		Messages:    cloned.Authentication.Messages,
-		Login:       cloned.Authentication.Login,
+		PublicPaths:  cloned.Authentication.PublicPaths,
+		SessionRetry: cloned.Authentication.SessionRetry,
+		Messages:     cloned.Authentication.Messages,
+		Login:        cloned.Authentication.Login,
 	}
 	deliveryFormats := make([]PublicDeliveryFormat, 0, len(cloned.ModelDelivery.Formats))
 	for _, format := range cloned.ModelDelivery.Formats {

@@ -21,4 +21,17 @@ describe('password login routing', () => {
     expect(projectBrowserAccess({ schema, requestedPath: '/account', isLoading: false, hasUser: true }))
       .toEqual({ state: 'render' });
   });
+
+  // #62: a 429 (or any non-401 failure) on the session request says nothing about the login.
+  it('does not send the visitor to the login page when the session request fails', () => {
+    const schema = structuredClone(defaultCatalog.application) as ProductSchema;
+    expect(projectBrowserAccess({ schema, requestedPath: '/', isLoading: false, hasUser: false, sessionFailure: 'rate_limited' }))
+      .toEqual({ state: 'session-failed', failure: 'rate_limited' });
+    expect(projectBrowserAccess({ schema, requestedPath: '/', isLoading: false, hasUser: false, sessionFailure: 'unavailable' }))
+      .toEqual({ state: 'session-failed', failure: 'unavailable' });
+    expect(projectBrowserAccess({ schema, requestedPath: '/', isLoading: false, hasUser: true, sessionFailure: 'rate_limited' }))
+      .toEqual({ state: 'render' });
+    expect(projectBrowserAccess({ schema, requestedPath: '/', isLoading: false, hasUser: false, sessionFailure: null }).state)
+      .toBe('redirect');
+  });
 });

@@ -954,7 +954,15 @@ func (s *Server) skillCatalogSchema(
 		writeProblem(writer, 500, "configuration_unavailable", s.application.AgentConfiguration.UI["load_failed"], err)
 		return
 	}
-	etag := `"` + skillCatalog.Revision + `"`
+	// The body follows the request locale, so the validator and the cache key
+	// do too: a locale switch must not be answered with 304 for the old copy.
+	locale := requestLocale(request)
+	etag := `"` + skillCatalog.Revision
+	if locale != "" {
+		etag += ";" + locale
+	}
+	etag += `"`
+	httplocale.MarkResponse(writer.Header(), locale)
 	writer.Header().Set("ETag", etag)
 	writer.Header().Set("Cache-Control", "private, no-store")
 	if request.Header.Get("If-None-Match") == etag {
@@ -965,6 +973,15 @@ func (s *Server) skillCatalogSchema(
 	fields := s.application.Chat.Skills.Fields
 	skills := make([]map[string]any, 0, len(skillCatalog.Skills))
 	for _, skill := range skillCatalog.Skills {
+		if skill.Tool != "" {
+			// A system Skill's copy is Schema text: the picker shows it in the
+			// reader's locale. The stored Skill and the Agent directive built
+			// from it are not changed. Personal and published Skills are
+			// person content and stay as written.
+			skill.NameZH = s.textIn(locale, skill.NameZH)
+			skill.Prompt = s.textIn(locale, skill.Prompt)
+			skill.DefaultMessage = s.textIn(locale, skill.DefaultMessage)
+		}
 		projected := map[string]any{
 			fields.ID:              skill.ID,
 			fields.Name:            skill.Name,
