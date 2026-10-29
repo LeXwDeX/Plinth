@@ -76,6 +76,7 @@ func validateRuntime(schema RuntimeSchema) error {
 		"input_parameter_invalid":       {messages.InputParameterInvalid, []string{"{label}"}},
 		"input_source_task_expired":     {messages.InputSourceTaskExpired, []string{"{label}"}},
 		"input_source_task_unsupported": {messages.InputSourceTaskUnsupported, []string{"{label}"}},
+		"input_source_face_limit":       {messages.InputSourceFaceLimit, []string{"{faces}", "{limit}"}},
 	} {
 		if check.text == "" {
 			continue

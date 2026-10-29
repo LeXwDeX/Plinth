@@ -275,6 +275,10 @@ type ExecutionMessages struct {
 	// distinct instead of returning a raw internal dependency diagnostic.
 	InputSourceTaskExpired     string `json:"input_source_task_expired,omitempty"`
 	InputSourceTaskUnsupported string `json:"input_source_task_unsupported,omitempty"`
+	// InputSourceFaceLimit is the refusal for a 3D source whose triangle-face
+	// count is over the step's declared limit (#103); {faces} is the counted
+	// value and {limit} the declared maximum.
+	InputSourceFaceLimit string `json:"input_source_face_limit,omitempty"`
 }
 
 // ReferenceLimitText is the reference-limit template for a model that takes

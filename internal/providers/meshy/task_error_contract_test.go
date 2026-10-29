@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ func TestObserveTaskErrorTypeClassification(t *testing.T) {
 		wantClass     generation.FailureClass
 		wantRetryable bool
 		wantCode      string
+		wantExcerpt   string
 	}{
 		{
 			name:          "timeout可重试",
@@ -47,6 +49,7 @@ func TestObserveTaskErrorTypeClassification(t *testing.T) {
 			wantClass:     generation.FailureInvalidInput,
 			wantRetryable: false,
 			wantCode:      "image_too_complex",
+			wantExcerpt:   "message=The uploaded image is too complex",
 		},
 		{
 			name:          "未知type兜底rejected",
@@ -54,6 +57,14 @@ func TestObserveTaskErrorTypeClassification(t *testing.T) {
 			wantClass:     generation.FailureRejected,
 			wantRetryable: false,
 			wantCode:      "moderation_blocked",
+			wantExcerpt:   "message=rejected by safety filters",
+		},
+		{
+			name:          "上游面数超限原文留存",
+			taskError:     `{"type":"invalid_input","message":"The model has too many faces: 597400 exceeds 320000. See https://assets.meshy.ai/m.glb?token=secret Authorization: Bearer abc123"}`,
+			wantClass:     generation.FailureInvalidInput,
+			wantRetryable: false,
+			wantExcerpt:   "too many faces: 597400 exceeds 320000",
 		},
 		{
 			name:          "上游错误不得回显签名URL",
@@ -111,8 +122,19 @@ func TestObserveTaskErrorTypeClassification(t *testing.T) {
 			if failure.Class != testCase.wantClass || failure.Retryable != testCase.wantRetryable {
 				t.Fatalf("class=%s retryable=%v", failure.Class, failure.Retryable)
 			}
-			if failure.UpstreamCode != "" {
-				t.Fatalf("upstream code escaped private provider evidence: %q", failure.UpstreamCode)
+			// The fixed public text never carries upstream wording; the
+			// internal evidence keeps a plain-token code and a redacted excerpt
+			// but never a URL, query token or private remote ID.
+			if failure.UpstreamCode != testCase.wantCode {
+				t.Fatalf("upstream code = %q, want %q", failure.UpstreamCode, testCase.wantCode)
+			}
+			for _, leaked := range []string{"https://", "token=secret", "abc123"} {
+				if strings.Contains(failure.UpstreamExcerpt, leaked) || strings.Contains(failure.UpstreamCode, leaked) {
+					t.Fatalf("upstream evidence leaked %q: code=%q excerpt=%q", leaked, failure.UpstreamCode, failure.UpstreamExcerpt)
+				}
+			}
+			if testCase.wantExcerpt != "" && !strings.Contains(failure.UpstreamExcerpt, testCase.wantExcerpt) {
+				t.Fatalf("upstream excerpt = %q, want it to contain %q", failure.UpstreamExcerpt, testCase.wantExcerpt)
 			}
 			if failure.SafeDetail != "Meshy 任务执行失败" {
 				t.Fatalf("unsafe detail = %q", failure.SafeDetail)
