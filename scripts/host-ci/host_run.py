@@ -253,7 +253,10 @@ def peak_container_memory(stop, label):
     """Highest summed MemUsage of labelled containers seen while `stop` is unset."""
     peak = 0
     while not stop.wait(5):
-        rows = docker('stats', '--no-stream', '--format', '{{.MemUsage}}', '--filter', f'label={label}', check=False, timeout=30).stdout.split('\n')
+        ids = [i for i in docker('ps', '-q', '--filter', f'label={label}', check=False, timeout=30).stdout.split() if re.fullmatch(r'[0-9a-f]{12}', i)]
+        if not ids:
+            continue
+        rows = docker('stats', '--no-stream', '--format', '{{.MemUsage}}', *ids, check=False, timeout=30).stdout.split('\n')
         peak = max(peak, sum(parse_size(row.split('/')[0]) for row in rows if row.strip()))
     return peak
 

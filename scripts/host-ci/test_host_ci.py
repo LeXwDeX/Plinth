@@ -345,6 +345,9 @@ class WorkflowReplay(unittest.TestCase):
         self.assertIsNone(run.status_of({'verdict': 'not_run'}))
 
     def test_status_is_written_with_gh_under_the_right_context_and_never_for_not_run(self):
+        patcher = mock.patch('builtins.print')
+        patcher.start()
+        self.addCleanup(patcher.stop)
         calls = []
         def fake_run(command, **kwargs):
             calls.append(command)
