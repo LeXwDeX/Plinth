@@ -258,6 +258,10 @@ func runExport(profile align.Profile, allSteps []align.Step, private, stem, out,
 		Name: "official-replay", BaseURL: bundle.BaseURL, Key: "replay",
 		Client:    &http.Client{Transport: capture.Transport(replay)},
 		SkipFetch: true, NoPollDelay: true,
+		Download: &http.Client{Transport: offlineTransport{}},
+		// The export runs offline: files that came from an earlier artifact are the
+		// bytes the official request carried.
+		FileHook: replay.MultipartFile,
 		FormHook: func(name, value string) string {
 			if align.DynamicString(value) {
 				return "id-form-" + name
@@ -368,4 +372,11 @@ func runCompare(profile align.Profile, private, stem string, tags []string, repo
 		return errors.New("unexplained differences")
 	}
 	return nil
+}
+
+// offlineTransport fails every request: an export never touches the network.
+type offlineTransport struct{}
+
+func (offlineTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("offline export: no network access")
 }

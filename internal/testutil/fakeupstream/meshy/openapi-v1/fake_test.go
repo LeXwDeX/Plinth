@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -348,4 +349,24 @@ func TestFaultScenarios(t *testing.T) {
 			t.Fatalf("status = %d", status)
 		}
 	})
+}
+
+// Engines share no mutable state: servers built and used at the same time (the
+// race detector is the assertion) each serve their own content types.
+func TestConcurrentServersShareNoGlobalState(t *testing.T) {
+	var wg sync.WaitGroup
+	for i := 0; i < 6; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			f := newFixture(t, fakeupstream.Config{})
+			id := f.create("/image-to-3d", map[string]any{"image_url": "x"})
+			_, body := f.finish("/image-to-3d", id, key)
+			status, contentType, _ := f.Download(testkit.Field(t, body, "model_urls", "glb").(string))
+			if status != http.StatusOK || contentType != "model/gltf-binary" {
+				t.Errorf("glb = %d %q", status, contentType)
+			}
+		}()
+	}
+	wg.Wait()
 }

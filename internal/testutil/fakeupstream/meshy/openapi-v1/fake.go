@@ -117,10 +117,9 @@ func newHandler(env *fakeupstream.Env) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	core.SetContentTypes(ContentTypes)
 	return core.New(core.Config{
 		Env: env, Samples: samples, SamplePrefix: samplePrefix, Prefix: Prefix,
-		Kinds: kinds, Balance: true, Store: core.SharedStore(env),
+		Kinds: kinds, Balance: true, Store: core.SharedStore(env), ContentTypes: ContentTypes,
 	})
 }
 

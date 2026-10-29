@@ -69,6 +69,10 @@ type Config struct {
 	Prefix  string
 	Kinds   []Kind
 	Balance bool
+	// ContentTypes are the content types the official asset CDN served in the
+	// version's alignment run, by file extension (".glb"). Each engine owns its
+	// table; there is no process-wide state.
+	ContentTypes map[string]string
 	// Store is shared by every Meshy version of one fake.
 	Store *Store
 }
@@ -653,18 +657,6 @@ func extensionOf(field string) string {
 
 // ---- artifacts ----
 
-// contentTypes are what the official CDN serves, as observed in the alignment
-// run (see the version's alignment report).
-var contentTypes = map[string]string{}
-
-// SetContentTypes registers the observed content types by extension (".glb").
-// A version package calls it once from its fixed table.
-func SetContentTypes(types map[string]string) {
-	for ext, mediaType := range types {
-		contentTypes[ext] = mediaType
-	}
-}
-
 func (e *engine) getAsset(w http.ResponseWriter, r *http.Request) {
 	t := e.cfg.Store.lookup(r.PathValue("task_id"))
 	if t == nil || t.scenario == fakeupstream.ScenarioArtifactNotFound {
@@ -681,7 +673,7 @@ func (e *engine) getAsset(w http.ResponseWriter, r *http.Request) {
 	if t.scenario == fakeupstream.ScenarioArtifactCorrupt {
 		data = fakeupstream.Corrupt(data)
 	}
-	mediaType := contentTypes[path.Ext(name)]
+	mediaType := e.cfg.ContentTypes[path.Ext(name)]
 	if mediaType == "" {
 		mediaType = file.MediaType
 	}

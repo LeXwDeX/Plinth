@@ -90,6 +90,10 @@ type Target struct {
 	// BodyHook rewrites a step's JSON body before it is sent (the fake run uses
 	// it for requests that need a fake-only marker).
 	BodyHook func(step string, body any) any
+	// FileHook supplies the bytes of a File whose FromVar names an artifact URL,
+	// instead of downloading it (an offline export takes them from the saved
+	// request). Return false to fall back to the download.
+	FileHook func(field, filename string) ([]byte, bool)
 	// FormHook rewrites a multipart text field's value before it is sent (the
 	// exporter replaces ids the sanitizer refuses to keep).
 	FormHook func(name, value string) string
@@ -361,9 +365,15 @@ func send(ctx context.Context, target Target, step Step, path string, vars map[s
 		}
 		for _, file := range files {
 			if file.FromVar != "" {
-				data, err := download(ctx, target.Download, vars[file.FromVar])
-				if err != nil {
-					return 0, nil, nil, nil, fmt.Errorf("download %s: %w", file.FromVar, err)
+				data, ok := []byte(nil), false
+				if target.FileHook != nil {
+					data, ok = target.FileHook(file.Field, file.Filename)
+				}
+				if !ok {
+					var err error
+					if data, err = download(ctx, target.Download, vars[file.FromVar]); err != nil {
+						return 0, nil, nil, nil, fmt.Errorf("download %s: %w", file.FromVar, err)
+					}
 				}
 				file.Data = data
 			}
