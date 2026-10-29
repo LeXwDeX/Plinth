@@ -27,8 +27,11 @@ export interface TableCell {
   /** 标签的语气：reminder 用橙色底提醒（如"推荐"），缺省为灰色。 */
   tagTone?: 'reminder';
   strong?: boolean;
-  /** 名称类单元格：拉丁字母用 CSS 显示为大写（#108）；模型名列不用。 */
-  upper?: boolean;
+  /**
+   * 单元格的语义。`name` 是名称类（Skill、Agent 范围、对话模型、思考档位）：拉丁字母用 CSS 显示为大写（#108），
+   * 是否大写由表格统一按这一语义决定，调用方不再各写样式；模型名列不标 `name`，保持原样。
+   */
+  kind?: 'name';
 }
 
 export interface TableRow {
@@ -246,7 +249,7 @@ function Section({ section, close, closeOnPick }: { section: TableSection; close
                 cell.tag ? (
                   <span
                     key={position}
-                    className={cn('flex min-w-0 items-center', cell.muted && 'text-muted-foreground', cell.strong && 'font-medium', cell.upper && PICKER_UPPERCASE_CLASS)}
+                    className={cn('flex min-w-0 items-center', cell.muted && 'text-muted-foreground', cell.strong && 'font-medium', cell.kind === 'name' && PICKER_UPPERCASE_CLASS)}
                   >
                     <span className="min-w-0 truncate">{cell.text}</span>
                     <span className={cn('ml-1.5 shrink-0 whitespace-nowrap rounded-sm px-1 text-[10px] leading-3.5', cell.tagTone === 'reminder' ? 'bg-reminder font-medium text-reminder-foreground' : 'bg-panel-raised text-muted-foreground')}>{cell.tag}</span>
@@ -254,7 +257,7 @@ function Section({ section, close, closeOnPick }: { section: TableSection; close
                 ) : (
                   <span
                     key={position}
-                    className={cn('truncate', cell.muted && 'text-muted-foreground', cell.strong && 'font-medium', cell.upper && PICKER_UPPERCASE_CLASS)}
+                    className={cn('truncate', cell.muted && 'text-muted-foreground', cell.strong && 'font-medium', cell.kind === 'name' && PICKER_UPPERCASE_CLASS)}
                   >
                     {cell.text}
                   </span>

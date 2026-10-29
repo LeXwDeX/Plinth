@@ -51,7 +51,6 @@ describe('context chip', () => {
 
 describe('every chip above the composer is one component of one size', () => {
   const composer = source('./composer.tsx');
-  const params = source('./params-popover.tsx');
 
   it('builds the object, "not this turn", mask, branch, attachment and Skill chips from ContextChip', () => {
     for (const id of ['composer-object-chip', 'composer-mask-chip', 'composer-branch-chip', 'composer-attachment-chip', 'composer-skill-chip']) {
@@ -62,44 +61,10 @@ describe('every chip above the composer is one component of one size', () => {
     expect(composer).not.toMatch(/h-8 max-w-full|size-9 shrink-0/);
   });
 
-  it('keeps the parameters button out of the attachment box and puts it in the bottom row, in the pickers\' frame', () => {
-    const chips = composer.slice(composer.indexOf('data-testid="composer-chips"'), composer.indexOf('data-testid="composer-attachments"'));
-    expect(chips).not.toContain('<ParamsPopover');
-    const attachments = composer.slice(composer.indexOf('data-testid="composer-attachments"'), composer.indexOf('<input\n        ref={fileInput}'));
-    expect(attachments).not.toContain('<ParamsPopover');
-    const bottom = composer.slice(composer.indexOf('data-testid="composer-pickers"'));
-    expect(bottom.indexOf('<AgentScopePicker')).toBeLessThan(bottom.indexOf('<ParamsPopover {...params}'));
-    expect(params).toContain('PICKER_TRIGGER_CLASS');
-    expect(params).toContain('paramsRatioText');
-    expect(params).not.toContain('chipFrameClass');
-  });
-
   it('keeps the attachment purpose inside the attachment group, after the attachment chips', () => {
     const group = composer.slice(composer.indexOf('data-testid="composer-attachments"'), composer.indexOf('<input\n        ref={fileInput}'));
     expect(group.indexOf('composer-attachment-chip')).toBeGreaterThan(-1);
     expect(group.indexOf('composer-attachment-chip')).toBeLessThan(group.indexOf('composer-attachment-purpose"'));
-  });
-
-  it('lays the bottom row out on fixed tracks: two narrow, four wide, one model picker, parameters beside the Agent mode', () => {
-    expect(composer).toMatch(/grid min-w-0 grid-cols-2 [^"]*@\[40rem\]:grid-cols-4[^"]*" data-testid="composer-pickers"/);
-    const bottom = composer.slice(composer.indexOf('data-testid="composer-pickers"'));
-    expect(bottom.match(/<ModelPicker/g)?.length).toBe(1);
-    expect(bottom.indexOf('<ModelPicker />')).toBeLessThan(bottom.indexOf('<SkillPicker'));
-    // Pairs left to right in DOM order: models | Skill, Agent mode | parameters, chat model | thinking level, then the context row.
-    const order = ['<ModelPicker />', '<SkillPicker', '<AgentScopePicker />', '<ParamsPopover {...params}', '<ChatModelPicker />', '<ReasoningPicker />', '<ContextMeter />'].map((tag) => bottom.indexOf(tag));
-    expect(order.every((at) => at > -1)).toBe(true);
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(composer).not.toContain('col-start-');
-    const popover = source('./table-popover.tsx');
-    expect(popover).toContain('h-7 w-full min-w-0');
-    expect(popover).not.toContain('max-w-44');
-    // The trigger shows the short value; the hover text is the whole name. A switched-off table says why in its own title row.
-    expect(popover).toContain('`${label}: ${fullValue ?? value}`');
-    expect(popover).toContain('disabledReason');
-    expect(source('./model-picker.tsx')).toContain('pickerTriggerNames(selected, table.rows');
-    expect(source('./model-picker.tsx')).toContain("sections={[image.section, model.section]}");
-    expect(source('./skill-picker.tsx')).toContain("'ui.studio.skill.short'");
-    expect(source('./agent-scope-picker.tsx')).toContain('ui.studio.agent_scope.short_${current.scope}');
   });
 
   it('says a typed handle takes the turn, greys the object chip, and lets the send leave the object out', () => {

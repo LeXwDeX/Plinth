@@ -17,7 +17,10 @@ import (
 // pixel fidget, keycap). Direct upstream success alone never qualified one.
 // #100: Plinth is a game-art production platform, so every Creative Lab product is defined but not
 // offered to users or the Agent (enabled=false). Setting a product back to true restores it.
-var creativeLabEnabledProducts = map[string]bool{"keychain": false, "fridge-magnet": false, "figure": false, "vinyl-figure": false, "brick-figure": false, "lamp": false, "keycap": false, "fidget-pixel": false, "fidget-collapsible": false}
+var creativeLabProducts = []string{"keychain", "fridge-magnet", "figure", "vinyl-figure", "brick-figure", "lamp", "keycap", "fidget-pixel", "fidget-collapsible"}
+
+// creativeLabEnabled is the Enabled value every Creative Lab Offering must carry (#100: none is offered).
+const creativeLabEnabled = false
 
 func TestCreativeLabCandidatesDeclareNineProductsAndSeventeenBoundStages(t *testing.T) {
 	c, err := LoadDefault()
@@ -39,7 +42,7 @@ func TestCreativeLabCandidatesDeclareNineProductsAndSeventeenBoundStages(t *test
 			}
 			count++
 			total += o.EstimatedCredits
-			if o.Enabled != creativeLabEnabledProducts[product] || o.Default || o.IdempotentSubmission || o.Retry.MaxAttempts != 1 || len(o.Retry.Retryable) != 0 || o.EstimatedCredits != prices[i] || !o.CreditsMetered {
+			if o.Enabled != creativeLabEnabled || o.Default || o.IdempotentSubmission || o.Retry.MaxAttempts != 1 || len(o.Retry.Retryable) != 0 || o.EstimatedCredits != prices[i] || !o.CreditsMetered {
 				t.Fatalf("unsafe candidate contract %s", id)
 			}
 			if _, _, err := c.Normalize(o.Capability, id, json.RawMessage(`{}`)); err == nil {
@@ -237,7 +240,7 @@ func TestCreativeLabOfferingsAreDefinedButNeverListed(t *testing.T) {
 			t.Fatalf("%s must list no Offering", capability)
 		}
 	}
-	for product := range creativeLabEnabledProducts {
+	for _, product := range creativeLabProducts {
 		for _, stage := range []string{"prototype", "build", "generate"} {
 			id := schema.OfferingID("meshy/creative-lab/" + product + "/" + stage)
 			o, ok := c.Get(id)

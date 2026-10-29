@@ -59,7 +59,7 @@ func TestCreativeLabReliefBuildsDefaultToPreviewableGLBAndKeepSelectableZIP(t *t
 	for _, product := range []string{"keychain", "fridge-magnet"} {
 		t.Run(product, func(t *testing.T) {
 			o, ok := c.Get(schema.OfferingID("meshy/creative-lab/" + product + "/build"))
-			if !ok || o.Enabled != creativeLabEnabledProducts[product] {
+			if !ok || o.Enabled != creativeLabEnabled {
 				t.Fatal("unexpected candidate enablement")
 			}
 			format := specialParameter(t, o, "output_format")
@@ -242,7 +242,7 @@ func TestCreativeLabReliefBuildResolutionUsesCurrentOfficialRange(t *testing.T) 
 	for _, product := range []string{"keychain", "fridge-magnet"} {
 		t.Run(product, func(t *testing.T) {
 			o, _ := c.Get(schema.OfferingID("meshy/creative-lab/" + product + "/build"))
-			if o.Enabled != creativeLabEnabledProducts[product] {
+			if o.Enabled != creativeLabEnabled {
 				t.Fatal("unexpected candidate enablement")
 			}
 			quality := specialParameter(t, o, "export_resolution")

@@ -286,11 +286,9 @@ export function TaskDrawer() {
       const detail = task.failure?.detail || task.liveError || null;
       if (!detail && !task.notFound) return null;
       if (task.notFound) return ui.notFound;
-      // A balance failure reads as the Schema's own message, whatever detail came with it.
-      if (isBalanceFailure(task.failure)) return text('failure.insufficient_balance');
       return resolveErrorText(schema.content.messages, detail, ui.errorTitle);
     },
-    [schema.content.messages, text, ui.errorTitle, ui.notFound],
+    [schema.content.messages, ui.errorTitle, ui.notFound],
   );
 
   const stateChip = useCallback(
