@@ -66,8 +66,9 @@ func (m *Module) OpenAuthorized(
 	}
 	if !readAll && asset.OwnerID != owner {
 		return generation.InputAsset{}, nil, &generation.Error{
-			Code:      generation.ErrForbidden,
-			Operation: "open_legacy_input_asset",
+			// Same answer as a missing asset: no existence oracle.
+			Code:      generation.ErrNotFound,
+			Operation: "get_legacy_input_asset",
 		}
 	}
 	body, size, err := m.open(asset.StorageKey)

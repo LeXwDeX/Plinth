@@ -228,31 +228,85 @@ func moduleRoot(t *testing.T) string {
 	return root
 }
 
-// The fake upstream is test tooling: no binary that ships may link it.
-func TestProductionBinariesDoNotLinkFakeUpstream(t *testing.T) {
+const (
+	testutilPrefix = "github.com/LeXwDeX/Plinth/internal/testutil/"
+	modulePath     = "github.com/LeXwDeX/Plinth"
+)
+
+// isTestTooling names the commands that exist for tests: they may link internal/testutil.
+func isTestTooling(command string) bool { return strings.HasPrefix(command, "fake-upstream") }
+
+// Everything under internal/testutil (the fake upstream, wirefixture and any package added later) is test
+// tooling: no binary that ships may link any of it, directly or through another package.
+func TestProductionBinariesDoNotLinkAnyTestutilPackage(t *testing.T) {
 	root := moduleRoot(t)
 	entries, err := os.ReadDir(filepath.Join(root, "cmd"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	checked := 0
+	checked, tooling := 0, 0
 	for _, entry := range entries {
-		if !entry.IsDir() || strings.HasPrefix(entry.Name(), "fake-upstream") {
+		if !entry.IsDir() {
 			continue
 		}
-		command := exec.Command("go", "list", "-deps", "./cmd/"+entry.Name())
+		command := exec.Command("go", "list", "-deps", "-f", "{{.ImportPath}}", "./cmd/"+entry.Name())
 		command.Dir = root
 		out, err := command.CombinedOutput()
 		if err != nil {
 			t.Fatalf("go list %s: %v\n%s", entry.Name(), err, out)
 		}
-		if strings.Contains(string(out), "internal/testutil/fakeupstream") {
-			t.Errorf("cmd/%s links the fake upstream", entry.Name())
+		var linked []string
+		for _, path := range strings.Fields(string(out)) {
+			if strings.HasPrefix(path, testutilPrefix) {
+				linked = append(linked, strings.TrimPrefix(path, modulePath+"/"))
+			}
+		}
+		if isTestTooling(entry.Name()) {
+			tooling++
+			if len(linked) == 0 {
+				t.Errorf("cmd/%s no longer links internal/testutil: the check below would pass vacuously", entry.Name())
+			}
+			continue
+		}
+		if len(linked) > 0 {
+			t.Errorf("cmd/%s links test tooling: %s", entry.Name(), strings.Join(linked, ", "))
 		}
 		checked++
 	}
-	if checked < 3 {
-		t.Fatalf("checked only %d commands", checked)
+	if checked < 3 || tooling < 1 {
+		t.Fatalf("checked %d shipping commands and %d tooling commands", checked, tooling)
+	}
+}
+
+// A production package never imports test tooling: only internal/testutil itself and the fake-upstream
+// commands do (test files are not part of go list's Imports).
+func TestOnlyTestToolingImportsTestutil(t *testing.T) {
+	root := moduleRoot(t)
+	command := exec.Command("go", "list", "-f", "{{.ImportPath}} {{join .Imports \" \"}}", "./...")
+	command.Dir = root
+	out, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go list ./...: %v\n%s", err, out)
+	}
+	scanned := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		owner := fields[0]
+		scanned++
+		if strings.HasPrefix(owner, testutilPrefix) || strings.HasPrefix(strings.TrimPrefix(owner, modulePath+"/"), "cmd/fake-upstream") {
+			continue
+		}
+		for _, imported := range fields[1:] {
+			if strings.HasPrefix(imported, testutilPrefix) {
+				t.Errorf("%s imports %s", owner, imported)
+			}
+		}
+	}
+	if scanned < 50 {
+		t.Fatalf("scanned only %d packages", scanned)
 	}
 }
 

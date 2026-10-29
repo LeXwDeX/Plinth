@@ -34,7 +34,7 @@ export function chatModelSection(
       cells: [{
         text: option.model,
         strong: true,
-        upper: true,
+        kind: 'name',
         ...(option.id === choice?.defaultId ? { tag: schemaText(schema, 'ui.studio.chat_model.default_tag') } : {}),
       }],
     })),

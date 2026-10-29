@@ -66,7 +66,7 @@ func TestCreativeLabDocumentedCandidateResultsKeepEveryDeclaredArtifact(t *testi
 		for _, stage := range stages {
 			t.Run(product+"/"+stage, func(t *testing.T) {
 				o, ok := c.Get(schema.OfferingID("meshy/creative-lab/" + product + "/" + stage))
-				if !ok || o.Enabled != creativeLabEnabledProducts[product] {
+				if !ok || o.Enabled != creativeLabEnabled {
 					t.Fatal("unexpected candidate enablement")
 				}
 				endpoint := product + "/v1/" + stage
@@ -196,7 +196,7 @@ func TestCreativeLabSyntheticFigureBuildNormalTextureIsPreserved(t *testing.T) {
 	for product, source := range documentedFigureBuildSources {
 		t.Run(product, func(t *testing.T) {
 			o, ok := c.Get(schema.OfferingID("meshy/creative-lab/" + product + "/build"))
-			if !ok || o.Enabled != creativeLabEnabledProducts[product] {
+			if !ok || o.Enabled != creativeLabEnabled {
 				t.Fatal("unexpected candidate enablement")
 			}
 			payload := map[string]any{
@@ -275,7 +275,7 @@ func TestCreativeLabActualCandidatesSendExactDefaultsAndBoundSource(t *testing.T
 		for _, stage := range stages {
 			t.Run(product+"/"+stage, func(t *testing.T) {
 				o, ok := c.Get(schema.OfferingID("meshy/creative-lab/" + product + "/" + stage))
-				if !ok || o.Enabled != creativeLabEnabledProducts[product] {
+				if !ok || o.Enabled != creativeLabEnabled {
 					t.Fatal("unexpected candidate enablement")
 				}
 				path := "/openapi/creative-lab/" + product + "/v1/" + stage

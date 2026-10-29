@@ -29,7 +29,7 @@ Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [
 (NAME: balance, chain, meshy, hyper3d, images, agent, faults)
 Needs `go`. Exit 0 = every selected check passed.
 
-The stack runs inside the internal/app test binary (TestFakeUpstreamStack), not
+The stack runs inside the internal/app test binary (TestFakeUpstreamStack, built with -tags fakestack), not
 cmd/art-ai: Tripo's native processing only reads source models from public HTTPS
 hosts, and the test binary maps one reserved ".test" host to the loopback fake
 instead of loosening that rule. Nothing here touches dev-test, formal-test or a
@@ -223,7 +223,7 @@ def build(work):
     fake = os.path.join(work, "fake-upstream")
     stack = os.path.join(work, "stack.test")
     subprocess.check_call(["go", "build", "-o", fake, "./cmd/fake-upstream"], cwd=REPO)
-    subprocess.check_call(["go", "test", "-c", "-o", stack, "./internal/app"], cwd=REPO)
+    subprocess.check_call(["go", "test", "-c", "-tags", "fakestack", "-o", stack, "./internal/app"], cwd=REPO)
     return fake, stack
 
 

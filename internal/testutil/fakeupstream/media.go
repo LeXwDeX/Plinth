@@ -7,7 +7,6 @@ import (
 	"io"
 	"sync"
 
-	"github.com/LeXwDeX/Plinth/internal/providers/mock"
 	"github.com/LeXwDeX/Plinth/internal/testutil/wirefixture"
 )
 
@@ -19,15 +18,16 @@ type File struct {
 
 var (
 	modelsOnce sync.Once
-	modelFiles map[string]mock.ModelFile
+	modelFiles map[string]File
 	modelsErr  error
 )
 
 // ModelFile returns the fixed bytes of a model container: "glb", "gltf",
 // "fbx", "obj" (OBJ ZIP), "stl", "usdz", "3mf" or the texture "png". They are
-// the bytes Mock generation delivers, so Plinth's delivery checks accept them.
+// written by the same format writers Mock generation uses (providers/mock/modelfiles),
+// so Plinth's delivery checks accept them.
 func ModelFile(format string) (File, error) {
-	modelsOnce.Do(func() { modelFiles, modelsErr = mock.SmallModelFiles() })
+	modelsOnce.Do(func() { modelFiles, modelsErr = smallModelFiles() })
 	if modelsErr != nil {
 		return File{}, modelsErr
 	}
@@ -35,7 +35,7 @@ func ModelFile(format string) (File, error) {
 	if !ok {
 		return File{}, fmt.Errorf("fakeupstream: no fixture for model format %q", format)
 	}
-	return File{MediaType: file.MediaType, Data: file.Data}, nil
+	return file, nil
 }
 
 // ImageFile returns a fixed picture: "png", "jpeg" or "webp".
