@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
+	"github.com/LeXwDeX/Plinth/internal/assets/splat"
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
 )
 
@@ -277,19 +278,115 @@ func TestUploadReturnsAFileToken(t *testing.T) {
 	}
 }
 
-func TestConstructedEndpointsCreateTasks(t *testing.T) {
+// Every kind answers with its own task type and delivers its output files: the
+// seven endpoints added in #89 included. Nested multiview URLs, the splat and the
+// Smart Segmentation outputs are fetched and checked by Plinth's delivery check.
+func TestEveryKindCreatesATaskOfItsTypeAndDeliversItsFiles(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
-	for _, k := range kinds {
-		if k.Real {
+	source := f.create("/generation/text-to-model", textBody(), key)
+	f.finish(source, key)
+	for _, tc := range []struct {
+		path, typ string
+		body      map[string]any
+		// fetch lists output field paths with the delivery check each must pass.
+		fetch []delivery
+	}{
+		{"/generation/image-to-model", "image_to_model", map[string]any{"model": "v3.1-20260211", "input": "file_x"},
+			[]delivery{{[]any{"model_url"}, "model", "glb", "model/gltf-binary"}, {[]any{"rendered_image_url"}, "preview", "", "image/png"}}},
+		{"/generation/image-to-splat", "image_to_splat", map[string]any{"input": "file_x", "model_seed": 42},
+			[]delivery{{[]any{"model_url"}, "gaussian-splat", "splat", "application/vnd.art-ai.gaussian-splat"}}},
+		{"/generation/image-to-multiview", "image_to_multiview", map[string]any{"input": "file_x"}, multiviewChecks("front", "left", "back", "right")},
+		{"/generation/edit-multiview", "edit_multiview", map[string]any{"input": source, "prompts": []map[string]any{{"view": "front", "prompt": "green"}}},
+			multiviewChecks("front")},
+		{"/models/texture", "texture_model", map[string]any{"input": source, "model": "v3.5-20260815"},
+			[]delivery{{[]any{"model_url"}, "model", "glb", "model/gltf-binary"}}},
+		{"/mesh/decimate", "highpoly_to_lowpoly", map[string]any{"input": source, "model": "v3.0"},
+			[]delivery{{[]any{"model_url"}, "model", "glb", "model/gltf-binary"}}},
+		{"/mesh/smartsegment", "smartsegment_image", map[string]any{"input": "file_x", "seg_type": "image"},
+			[]delivery{{[]any{"seg_model_url"}, "model", "glb", "model/gltf-binary"}, {[]any{"mask_url"}, "image", "", "image/png"}}},
+		{"/mesh/smartsegment", "smartsegment_model", map[string]any{"input": "file_x", "seg_type": "model"},
+			[]delivery{{[]any{"seg_model_url"}, "model", "glb", "model/gltf-binary"}}},
+	} {
+		id := f.create(tc.path, tc.body, key)
+		statuses, done := f.finish(id, key)
+		if statuses[len(statuses)-1] != statusSuccess || field(t, done, "data", "type") != tc.typ {
+			t.Errorf("%s: %v %v", tc.path, statuses, done)
 			continue
 		}
-		body := map[string]any{"model": "m", "input": "file_x", "prompt": "p"}
-		id := f.create(k.Path, body, key)
-		statuses, done := f.finish(id, key)
-		if statuses[len(statuses)-1] != statusSuccess || field(t, done, "data", "type") != k.Type {
-			t.Errorf("%s: %v %v", k.Path, statuses, done)
+		for _, check := range tc.fetch {
+			url, _ := field(t, done, append([]any{"data", "output"}, check.path...)...).(string)
+			status, _, data := f.download(url)
+			if status != http.StatusOK {
+				t.Errorf("%s %v: download %d", tc.path, check.path, status)
+				continue
+			}
+			if check.role == "preview" {
+				continue // the render preview is a picture; its bytes are checked by the image tests
+			}
+			var err error
+			if check.role == "gaussian-splat" {
+				err = splat.ValidateReader(bytes.NewReader(data), int64(len(data))) // the splat profile has its own validator
+			} else {
+				err = deliveryErr(t, data, check.role, check.variant, check.mediaType)
+			}
+			if err != nil {
+				t.Errorf("%s %v fails the delivery check: %v", tc.path, check.path, err)
+			}
 		}
 	}
+	// A multiview task offers exactly the views its sample shows, nested in generate_multiview_image.
+	id := f.create("/generation/image-to-multiview", map[string]any{"input": "file_x"}, key)
+	_, done := f.finish(id, key)
+	views, _ := field(t, done, "data", "output", "generate_multiview_image").(map[string]any)
+	if len(views) != 4 {
+		t.Errorf("multiview output = %v, want the four view URLs", views)
+	}
+	// Smart Segmentation refuses a seg_type it does not know.
+	if status, _, _ := f.do("POST", "/mesh/smartsegment", key, map[string]any{"input": "file_x", "seg_type": "video"}); status != http.StatusBadRequest {
+		t.Errorf("unknown seg_type = %d", status)
+	}
+}
+
+// An edit returns exactly the views it was asked to edit, whichever they are (the
+// captured sample asked for the front view only).
+func TestEditMultiviewReturnsTheRequestedViews(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	source := f.create("/generation/image-to-multiview", map[string]any{"input": "file_x"}, key)
+	f.finish(source, key)
+	for _, views := range [][]string{{"front"}, {"left"}, {"back", "right"}, {"right", "front", "left", "back"}} {
+		var prompts []map[string]any
+		for _, view := range views {
+			prompts = append(prompts, map[string]any{"view": view, "prompt": "make it green"})
+		}
+		id := f.create("/generation/edit-multiview", map[string]any{"input": source, "prompts": prompts}, key)
+		_, done := f.finish(id, key)
+		got, _ := field(t, done, "data", "output", "generate_multiview_image").(map[string]any)
+		if len(got) != len(views) {
+			t.Errorf("views %v: output = %v", views, got)
+		}
+		for _, view := range views {
+			url, _ := got[view+"_view_url"].(string)
+			if status, contentType, data := f.download(url); status != http.StatusOK || contentType != "image/jpeg" || deliveryErr(t, data, "image", view, "image/jpeg") != nil {
+				t.Errorf("view %s: download %d %s", view, status, contentType)
+			}
+		}
+	}
+	if status, _, _ := f.do("POST", "/generation/edit-multiview", key, map[string]any{"input": source, "prompts": []map[string]any{{"view": "top", "prompt": "x"}}}); status != http.StatusBadRequest {
+		t.Errorf("an unknown view = %d", status)
+	}
+}
+
+type delivery struct {
+	path                     []any
+	role, variant, mediaType string
+}
+
+func multiviewChecks(views ...string) []delivery {
+	var checks []delivery
+	for _, view := range views {
+		checks = append(checks, delivery{[]any{"generate_multiview_image", view + "_view_url"}, "image", view, "image/jpeg"})
+	}
+	return checks
 }
 
 func TestPollCountsAreConfigurable(t *testing.T) {

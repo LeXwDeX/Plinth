@@ -89,7 +89,7 @@ L0–L4 各层在 `dev-test` 主机上执行时用 `ART_AI_SERVER_ROOT=<root> ba
 
 ## Fake 上游整栈自检（#96）
 
-`python3 scripts/smoke/smoke-fake-stack.py`：先启动 `cmd/fake-upstream`，再以 live 模式启动本机隔离栈（Tripo、Meshy、Hyper3D、LLM、OpenAI/Gemini/Jimeng 图像与抠图的 base URL 指向 fake），核对三家余额面板、Tripo 生成 → rig-check → rigging → animation、segment → complete、Meshy 文生 3D → remesh → rigging → animation / retexture / convert、Hyper3D 文生 3D → Bang → texture、三家图像的文生图与图生图、抠图、Agent 对话 → 工具调用 → 批准 → 任务 → 回复，以及各故障场景的 Task 终态与错误 class。零成本、离线，只用回环地址，不读取真实 Key，**不属于**发布验收（L0/L1/L2 仍按上文），也不替代真实付费验收。说明见 `dev_test.md`「Fake 上游自检」。`python3 scripts/smoke/replay-recovery-on-fake.py` 在同一个 fake 上重放受控验收的 chain、lost-response、formats（缺格式补齐）与 image（图片本地 wire 故障）（下节 Recovery Fixture 的同一套 runner 与种子工具），不依赖真实 Meshy 余额。
+`python3 scripts/smoke/smoke-fake-stack.py`：先启动 `cmd/fake-upstream`，再以 live 模式启动本机隔离栈（Tripo、Meshy、Hyper3D、LLM、OpenAI/Gemini/Jimeng 图像与抠图的 base URL 指向 fake），核对三家余额面板、Tripo 生成 → rig-check → rigging → animation、segment → complete、Meshy 文生 3D → remesh → rigging → animation / retexture / convert、Hyper3D 文生 3D → Bang → texture、三家图像的文生图与图生图、抠图、Tripo 的图生 3D / splat / multiview 与 edit / 两种 Smart Segmentation / decimate、Agent 对话 → 工具调用 → 批准 → 任务 → 回复，以及各故障场景的 Task 终态与错误 class。零成本、离线，只用回环地址，不读取真实 Key，**不属于**发布验收（L0/L1/L2 仍按上文），也不替代真实付费验收。说明见 `dev_test.md`「Fake 上游自检」。`python3 scripts/smoke/replay-recovery-on-fake.py` 在同一个 fake 上重放受控验收的 chain、lost-response、formats（缺格式补齐）与 image（图片本地 wire 故障）（下节 Recovery Fixture 的同一套 runner 与种子工具），不依赖真实 Meshy 余额。
 
 ## 可控恢复验收夹具（隔离进程）
 

@@ -1,0 +1,546 @@
+{
+  "provider": "tripo",
+  "api": "v3",
+  "official_base": "https://openapi.tripo3d.ai/v3",
+  "checked_at": "2026-10-29",
+  "official_requests": 208,
+  "official_paid_requests": 10,
+  "fake_requests": 85,
+  "steps": [
+    {
+      "step": "image-upload",
+      "method": "POST",
+      "path": "/files",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 5,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "source-model",
+      "method": "POST",
+      "path": "/generation/text-to-model",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "source-model-poll",
+      "method": "GET",
+      "path": "/tasks/{source}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 24,
+      "official_task_statuses": [
+        "queued",
+        "running",
+        "success"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "image-to-model",
+      "method": "POST",
+      "path": "/generation/image-to-model",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "image-to-model-poll",
+      "method": "GET",
+      "path": "/tasks/{i2m}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 27,
+      "official_task_statuses": [
+        "running",
+        "success"
+      ],
+      "artifacts": [
+        "data.output.model_url binary/octet-stream glb",
+        "data.output.rendered_image_url binary/octet-stream png"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "image-to-splat",
+      "method": "POST",
+      "path": "/generation/image-to-splat",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "image-to-splat-poll",
+      "method": "GET",
+      "path": "/tasks/{splat}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 21,
+      "official_task_statuses": [
+        "running",
+        "success"
+      ],
+      "artifacts": [
+        "data.output.model_url binary/octet-stream binary"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "image-to-multiview",
+      "method": "POST",
+      "path": "/generation/image-to-multiview",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "image-to-multiview-poll",
+      "method": "GET",
+      "path": "/tasks/{mv}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 24,
+      "official_task_statuses": [
+        "queued",
+        "running",
+        "success"
+      ],
+      "artifacts": [
+        "data.output.generate_multiview_image.right_view_url binary/octet-stream jpeg",
+        "data.output.generate_multiview_image.front_view_url binary/octet-stream jpeg",
+        "data.output.generate_multiview_image.left_view_url binary/octet-stream jpeg",
+        "data.output.generate_multiview_image.back_view_url binary/octet-stream jpeg"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "edit-multiview",
+      "method": "POST",
+      "path": "/generation/edit-multiview",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "edit-multiview-poll",
+      "method": "GET",
+      "path": "/tasks/{emv}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 21,
+      "official_task_statuses": [
+        "running",
+        "success"
+      ],
+      "artifacts": [
+        "data.output.generate_multiview_image.front_view_url image/jpeg jpeg"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "texture",
+      "method": "POST",
+      "path": "/models/texture",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "texture-poll",
+      "method": "GET",
+      "path": "/tasks/{texture}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 25,
+      "official_task_statuses": [
+        "running",
+        "success"
+      ],
+      "artifacts": [
+        "data.output.rendered_image_url binary/octet-stream png",
+        "data.output.model_url binary/octet-stream glb"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "decimate",
+      "method": "POST",
+      "path": "/mesh/decimate",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "decimate-poll",
+      "method": "GET",
+      "path": "/tasks/{decimate}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 19,
+      "official_task_statuses": [
+        "running",
+        "success"
+      ],
+      "artifacts": [
+        "data.output.model_url binary/octet-stream glb",
+        "data.output.rendered_image_url binary/octet-stream png"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "smartsegment-image",
+      "method": "POST",
+      "path": "/mesh/smartsegment",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "smartsegment-image-poll",
+      "method": "GET",
+      "path": "/tasks/{sseg}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 15,
+      "official_task_statuses": [
+        "running",
+        "failed"
+      ],
+      "diffs": 10,
+      "unexplained": 0
+    },
+    {
+      "step": "figure-upload",
+      "method": "POST",
+      "path": "/files",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 5,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "smartsegment-figure",
+      "method": "POST",
+      "path": "/mesh/smartsegment",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "smartsegment-figure-poll",
+      "method": "GET",
+      "path": "/tasks/{fseg}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 20,
+      "official_task_statuses": [
+        "queued",
+        "running",
+        "success"
+      ],
+      "artifacts": [
+        "data.output.seg_model_url binary/octet-stream glb",
+        "data.output.mask_url image/png png"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "model-upload",
+      "method": "POST",
+      "path": "/files",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 5,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "smartsegment-model",
+      "method": "POST",
+      "path": "/mesh/smartsegment",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "smartsegment-model-poll",
+      "method": "GET",
+      "path": "/tasks/{mseg}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 21,
+      "official_task_statuses": [
+        "queued",
+        "running",
+        "success"
+      ],
+      "artifacts": [
+        "data.output.seg_model_url binary/octet-stream glb",
+        "data.output.mask_url image/png png"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    }
+  ],
+  "diffs": [
+    {
+      "step": "smartsegment-image-poll",
+      "aspect": "field-extra-in-fake",
+      "detail": "$.data.credits_consumed",
+      "note": "官方的第一个 smartsegment-image 请求（球体示意图）以 failed 结束（error_code 1001，未计费）；fake 对同一请求返回成功，失败由 task-failed 场景单独注入，失败体的结构取自 `tripo-v3-smartsegment-image-failed` 样本"
+    },
+    {
+      "step": "smartsegment-image-poll",
+      "aspect": "field-extra-in-fake",
+      "detail": "$.data.output.mask_url",
+      "note": "官方的第一个 smartsegment-image 请求（球体示意图）以 failed 结束（error_code 1001，未计费）；fake 对同一请求返回成功，失败由 task-failed 场景单独注入，失败体的结构取自 `tripo-v3-smartsegment-image-failed` 样本"
+    },
+    {
+      "step": "smartsegment-image-poll",
+      "aspect": "field-extra-in-fake",
+      "detail": "$.data.output.model_task_id",
+      "note": "官方的第一个 smartsegment-image 请求（球体示意图）以 failed 结束（error_code 1001，未计费）；fake 对同一请求返回成功，失败由 task-failed 场景单独注入，失败体的结构取自 `tripo-v3-smartsegment-image-failed` 样本"
+    },
+    {
+      "step": "smartsegment-image-poll",
+      "aspect": "field-extra-in-fake",
+      "detail": "$.data.output.prompt",
+      "note": "官方的第一个 smartsegment-image 请求（球体示意图）以 failed 结束（error_code 1001，未计费）；fake 对同一请求返回成功，失败由 task-failed 场景单独注入，失败体的结构取自 `tripo-v3-smartsegment-image-failed` 样本"
+    },
+    {
+      "step": "smartsegment-image-poll",
+      "aspect": "field-extra-in-fake",
+      "detail": "$.data.output.seg_model_url",
+      "note": "官方的第一个 smartsegment-image 请求（球体示意图）以 failed 结束（error_code 1001，未计费）；fake 对同一请求返回成功，失败由 task-failed 场景单独注入，失败体的结构取自 `tripo-v3-smartsegment-image-failed` 样本"
+    },
+    {
+      "step": "smartsegment-image-poll",
+      "aspect": "field-extra-in-fake",
+      "detail": "$.data.output.seg_task_id",
+      "note": "官方的第一个 smartsegment-image 请求（球体示意图）以 failed 结束（error_code 1001，未计费）；fake 对同一请求返回成功，失败由 task-failed 场景单独注入，失败体的结构取自 `tripo-v3-smartsegment-image-failed` 样本"
+    },
+    {
+      "step": "smartsegment-image-poll",
+      "aspect": "field-extra-in-fake",
+      "detail": "$.data.progress",
+      "note": "官方的第一个 smartsegment-image 请求（球体示意图）以 failed 结束（error_code 1001，未计费）；fake 对同一请求返回成功，失败由 task-failed 场景单独注入，失败体的结构取自 `tripo-v3-smartsegment-image-failed` 样本"
+    },
+    {
+      "step": "smartsegment-image-poll",
+      "aspect": "field-missing-in-fake",
+      "detail": "$.data.error_code",
+      "note": "官方的第一个 smartsegment-image 请求（球体示意图）以 failed 结束（error_code 1001，未计费）；fake 对同一请求返回成功，失败由 task-failed 场景单独注入，失败体的结构取自 `tripo-v3-smartsegment-image-failed` 样本"
+    },
+    {
+      "step": "smartsegment-image-poll",
+      "aspect": "field-missing-in-fake",
+      "detail": "$.data.error_message",
+      "note": "官方的第一个 smartsegment-image 请求（球体示意图）以 failed 结束（error_code 1001，未计费）；fake 对同一请求返回成功，失败由 task-failed 场景单独注入，失败体的结构取自 `tripo-v3-smartsegment-image-failed` 样本"
+    },
+    {
+      "step": "smartsegment-image-poll",
+      "aspect": "task-status-flow",
+      "detail": "official running\u003efailed, fake queued\u003erunning\u003esuccess",
+      "note": "官方的第一个 smartsegment-image 请求（球体示意图）以 failed 结束（error_code 1001，未计费）；fake 对同一请求返回成功，失败由 task-failed 场景单独注入，失败体的结构取自 `tripo-v3-smartsegment-image-failed` 样本"
+    }
+  ],
+  "request_notes": [
+    "第二段官方运行（#89，2026-10-29，标签 seven、seg2、mseg）补采七个原先按文档构造的端点：`image-to-model`、`image-to-splat`、`image-to-multiview`、`edit-multiview`、`models/texture`、`mesh/decimate`、`mesh/smartsegment`（image 与 model 两种 seg_type）。每个端点取最便宜且保留 Plinth 请求体字段的选项，只发一次；付费 10 次共 260 积分（余额 3010 → 2750）：text-to-model 源任务 10、image-to-model 20、image-to-splat 30、image-to-multiview 10、edit-multiview 5、texture 10、decimate 35、smartsegment-image 85、smartsegment-model 55；第一个 smartsegment-image 请求失败未计费。",
+    "七个端点的任务 type 有两处与原先的假设不同：mesh/decimate 是 `highpoly_to_lowpoly`（不是 `mesh_decimation`），mesh/smartsegment 按 seg_type 是 `smartsegment_image` 或 `smartsegment_model`（不是 `mesh_smart_segmentation`）；其余五个沿用相近类型的假设成立。输出字段与原假设也不同：image-to-model、texture 没有 `generated_image_url`，image-to-splat 只有 `model_url`，两个 multiview 的输出是嵌套对象 `generate_multiview_image`（edit 只含被编辑的视图），smartsegment 输出 `seg_model_url`、`mask_url`、`prompt`、`seg_task_id`、`model_task_id`；部分任务类型的部分状态没有 `progress`。fake 按样本改正。",
+    "第一个 smartsegment-image 请求（球体示意图）受理后约四分钟以 `failed`、error_code 1001、`Segmentation pipeline failed` 结束，未计费；换一张有头、身体、手臂和腿的图片的第二个请求成功。两次都入库为样本（`tripo-v3-smartsegment-image-failed`、`tripo-v3-smartsegment-image`）。第一次的失败是官方对该输入的观测，原因未证；报告里 `smartsegment-image-poll` 步骤的差异就是 fake 对同一请求返回成功。",
+    "产物 CDN 对不同文件返回不同的 content-type：模型、渲染图和 multiview 图片是 `binary/octet-stream`，分割遮罩 `mask.png` 是 `image/png`，edit-multiview 的视图是 `image/jpeg`；fake 照此返回。CDN 是 CloudFront 签名 URL，无效或过期都是 403 `text/xml` 的 AccessDenied。",
+    "这一段报告只含第二段官方运行的步骤：第一阶段的官方原始运行（余额、生成、绑骨、分割等）没有保留在工作树外，本次不能重新生成那份报告，它仍在 `alignment-report.md`。"
+  ],
+  "endpoints": [
+    {
+      "endpoint": "GET /account/balance",
+      "evidence": "real",
+      "sample": "GET /v3/account/balance",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/introduction",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /files",
+      "evidence": "real",
+      "sample": "POST /v3/files",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/files",
+      "checked_at": "2026-10-29",
+      "note": "the sample's multipart reference picture is replaced by a fixed recipe; the response is real"
+    },
+    {
+      "endpoint": "GET /tasks/{task_id}",
+      "evidence": "real",
+      "sample": "GET /v3/tasks/{id}",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/task-query",
+      "checked_at": "2026-10-29",
+      "note": "queued, running, success and failed poll bodies are real for the real kinds"
+    },
+    {
+      "endpoint": "GET /artifacts/{task_id}/{name}",
+      "evidence": "constructed-from-docs",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/task-query",
+      "checked_at": "2026-09-30",
+      "note": "the official artifact CDN host is not part of the API; this route serves the fixed files its task output URLs name (content type binary/octet-stream as observed)"
+    },
+    {
+      "endpoint": "POST /generation/text-to-model",
+      "evidence": "real",
+      "sample": "POST /v3/generation/text-to-model",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/generation-text-to-model/standard",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /animations/rig-check",
+      "evidence": "real",
+      "sample": "POST /v3/animations/rig-check",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/animations-rig-check",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /animations/rig",
+      "evidence": "real",
+      "sample": "POST /v3/animations/rig",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/animations-rig",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /animations/retarget",
+      "evidence": "real",
+      "sample": "POST /v3/animations/retarget",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/animations-retarget",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /mesh/segment",
+      "evidence": "real",
+      "sample": "POST /v3/mesh/segment",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/mesh-segment",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /mesh/complete",
+      "evidence": "real",
+      "sample": "POST /v3/mesh/complete",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/mesh-complete",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /models/convert",
+      "evidence": "real",
+      "sample": "POST /v3/models/convert",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/models-convert",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /generation/image-to-model",
+      "evidence": "real",
+      "sample": "POST /v3/generation/image-to-model",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/generation-image-to-model/standard",
+      "checked_at": "2026-10-29",
+      "note": "captured: task type image_to_model, 20 credits for a geometry-only v3.1 model; the output has model_url and rendered_image_url (no generated_image_url, which only a text prompt produces)"
+    },
+    {
+      "endpoint": "POST /generation/image-to-splat",
+      "evidence": "real",
+      "sample": "POST /v3/generation/image-to-splat",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/generation-image-to-splat",
+      "checked_at": "2026-10-29",
+      "note": "captured: task type image_to_splat, 30 credits; the only output is model_url (a .splat file)"
+    },
+    {
+      "endpoint": "POST /generation/image-to-multiview",
+      "evidence": "real",
+      "sample": "POST /v3/generation/image-to-multiview",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/generation-image-to-multiview",
+      "checked_at": "2026-10-29",
+      "note": "captured: task type image_to_multiview, 10 credits; the output is the object generate_multiview_image with front/left/back/right_view_url (JPEG)"
+    },
+    {
+      "endpoint": "POST /generation/edit-multiview",
+      "evidence": "real",
+      "sample": "POST /v3/generation/edit-multiview",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/generation-edit-multiview",
+      "checked_at": "2026-10-29",
+      "note": "captured: task type edit_multiview, 5 credits; input.original_task_id is the multiview task and the output carries only the edited views (one prompt, one front_view_url)"
+    },
+    {
+      "endpoint": "POST /models/texture",
+      "evidence": "real",
+      "sample": "POST /v3/models/texture",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/models-texture",
+      "checked_at": "2026-10-29",
+      "note": "captured: task type texture_model, 10 credits at texture_quality standard without PBR; the output has model_url and rendered_image_url"
+    },
+    {
+      "endpoint": "POST /mesh/decimate",
+      "evidence": "real",
+      "sample": "POST /v3/mesh/decimate",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/mesh-decimate",
+      "checked_at": "2026-10-29",
+      "note": "captured: the task type is highpoly_to_lowpoly (not mesh_decimation as assumed), 35 credits; the output has model_url and rendered_image_url"
+    },
+    {
+      "endpoint": "POST /mesh/smartsegment",
+      "evidence": "real",
+      "sample": "POST /v3/mesh/smartsegment",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/mesh-smartsegment",
+      "checked_at": "2026-10-29",
+      "note": "captured for both seg_type values: smartsegment_image (85 credits; the first request, on a shaded sphere, ended failed with error 1001 \"Segmentation pipeline failed\" and was not charged, a second picture with distinct parts succeeded) and smartsegment_model (55 credits, a 36 KB GLB uploaded to /files); the output is seg_model_url, mask_url, prompt, seg_task_id and model_task_id"
+    }
+  ]
+}

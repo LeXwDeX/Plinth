@@ -1,0 +1,24 @@
+{
+  "MaxBodyBytes": 4194304,
+  "Keys": {
+    "code": true,
+    "data": true,
+    "file": true,
+    "file_token": true,
+    "status": true
+  },
+  "Allowed": {
+    "0": true,
+    "[redacted]": true,
+    "application/json": true,
+    "files": true,
+    "success": true,
+    "v3": true
+  },
+  "Aliases": null,
+  "PublicHosts": {
+    "openapi.tripo3d.ai": true
+  },
+  "Projection": null,
+  "QueryKeys": {}
+}

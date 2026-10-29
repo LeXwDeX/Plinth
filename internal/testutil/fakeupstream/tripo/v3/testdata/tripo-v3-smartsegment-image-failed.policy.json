@@ -1,0 +1,53 @@
+{
+  "MaxBodyBytes": 4194304,
+  "Keys": {
+    "code": true,
+    "completed_at": true,
+    "created_at": true,
+    "credits_consumed": true,
+    "data": true,
+    "error_code": true,
+    "error_message": true,
+    "file": true,
+    "granularity": true,
+    "hint": true,
+    "input": true,
+    "output": true,
+    "progress": true,
+    "seg_type": true,
+    "status": true,
+    "task_id": true,
+    "type": true
+  },
+  "Allowed": {
+    "0": true,
+    "10": true,
+    "1001": true,
+    "2026-01-01T00:00:00Z": true,
+    "25": true,
+    "50": true,
+    "75": true,
+    "Segmentation pipeline failed": true,
+    "application/json": true,
+    "coarse": true,
+    "failed": true,
+    "id-1": true,
+    "id-2": true,
+    "image": true,
+    "mesh": true,
+    "queued": true,
+    "running": true,
+    "separate the sphere from the background": true,
+    "smartsegment": true,
+    "smartsegment_image": true,
+    "success": true,
+    "tasks": true,
+    "v3": true
+  },
+  "Aliases": null,
+  "PublicHosts": {
+    "openapi.tripo3d.ai": true
+  },
+  "Projection": null,
+  "QueryKeys": {}
+}

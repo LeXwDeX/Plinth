@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -81,8 +82,9 @@ type kind struct {
 	DocPage string
 }
 
-// The observed behavior behind each real kind is in testdata; constructed kinds
-// borrow the structure of their Base type and say so in the endpoint table.
+// The observed behavior behind each kind is in testdata (every kind has a real
+// sample since #89); a constructed kind would borrow the structure of its Base
+// type and say so in the endpoint table.
 var kinds = []kind{
 	{Path: "/generation/text-to-model", Type: "text_to_model", Base: "text_to_model", Required: []string{"model", "prompt"}, Real: true, DocPage: "generation-text-to-model/standard"},
 	{Path: "/animations/rig-check", Type: "animate_prerigcheck", Base: "animate_prerigcheck", Required: []string{"input"}, Real: true, DocPage: "animations-rig-check"},
@@ -91,13 +93,27 @@ var kinds = []kind{
 	{Path: "/mesh/segment", Type: "mesh_segmentation", Base: "mesh_segmentation", Required: []string{"input", "model"}, Real: true, DocPage: "mesh-segment"},
 	{Path: "/mesh/complete", Type: "mesh_completion", Base: "mesh_completion", Required: []string{"input", "model"}, Real: true, DocPage: "mesh-complete"},
 	{Path: "/models/convert", Type: "convert_model", Base: "convert_model", Required: []string{"input", "format"}, Real: true, DocPage: "models-convert"},
-	{Path: "/generation/image-to-model", Type: "image_to_model", Base: "text_to_model", Required: []string{"model", "input"}, DocPage: "generation-image-to-model/standard"},
-	{Path: "/generation/image-to-splat", Type: "image_to_splat", Base: "text_to_model", Required: []string{"input"}, DocPage: "generation-image-to-splat"},
-	{Path: "/generation/image-to-multiview", Type: "image_to_multiview", Base: "text_to_model", Required: []string{"input"}, DocPage: "generation-image-to-multiview"},
-	{Path: "/generation/edit-multiview", Type: "edit_multiview", Base: "text_to_model", Required: []string{"input"}, DocPage: "generation-edit-multiview"},
-	{Path: "/models/texture", Type: "texture_model", Base: "text_to_model", Required: []string{"input"}, DocPage: "models-texture"},
-	{Path: "/mesh/decimate", Type: "mesh_decimation", Base: "mesh_completion", Required: []string{"input", "model"}, DocPage: "mesh-decimate"},
-	{Path: "/mesh/smartsegment", Type: "mesh_smart_segmentation", Base: "mesh_segmentation", Required: []string{"input"}, DocPage: "mesh-smartsegment"},
+	{Path: "/generation/image-to-model", Type: "image_to_model", Base: "image_to_model", Required: []string{"model", "input"}, Real: true, DocPage: "generation-image-to-model/standard"},
+	{Path: "/generation/image-to-splat", Type: "image_to_splat", Base: "image_to_splat", Required: []string{"input"}, Real: true, DocPage: "generation-image-to-splat"},
+	{Path: "/generation/image-to-multiview", Type: "image_to_multiview", Base: "image_to_multiview", Required: []string{"input"}, Real: true, DocPage: "generation-image-to-multiview"},
+	{Path: "/generation/edit-multiview", Type: "edit_multiview", Base: "edit_multiview", Required: []string{"input"}, Real: true, DocPage: "generation-edit-multiview"},
+	{Path: "/models/texture", Type: "texture_model", Base: "texture_model", Required: []string{"input"}, Real: true, DocPage: "models-texture"},
+	{Path: "/mesh/decimate", Type: "highpoly_to_lowpoly", Base: "highpoly_to_lowpoly", Required: []string{"input", "model"}, Real: true, DocPage: "mesh-decimate"},
+	// Smart Segmentation reports smartsegment_image or smartsegment_model by seg_type; both were captured.
+	{Path: "/mesh/smartsegment", Type: "smartsegment_image", Base: "smartsegment_image", Required: []string{"input", "seg_type"}, Real: true, DocPage: "mesh-smartsegment"},
+}
+
+// realKindNotes says what the 2026-10-29 captures of the seven endpoints added in
+// #89 showed (each was requested once with its cheapest option; the credits are
+// what the official poll reported).
+var realKindNotes = map[string]string{
+	"/generation/image-to-model":     "captured: task type image_to_model, 20 credits for a geometry-only v3.1 model; the output has model_url and rendered_image_url (no generated_image_url, which only a text prompt produces)",
+	"/generation/image-to-splat":     "captured: task type image_to_splat, 30 credits; the only output is model_url (a .splat file)",
+	"/generation/image-to-multiview": "captured: task type image_to_multiview, 10 credits; the output is the object generate_multiview_image with front/left/back/right_view_url (JPEG)",
+	"/generation/edit-multiview":     "captured: task type edit_multiview, 5 credits; input.original_task_id is the multiview task and the output carries only the edited views (one prompt, one front_view_url)",
+	"/models/texture":                "captured: task type texture_model, 10 credits at texture_quality standard without PBR; the output has model_url and rendered_image_url",
+	"/mesh/decimate":                 "captured: the task type is highpoly_to_lowpoly (not mesh_decimation as assumed), 35 credits; the output has model_url and rendered_image_url",
+	"/mesh/smartsegment":             "captured for both seg_type values: smartsegment_image (85 credits; the first request, on a shaded sphere, ended failed with error 1001 \"Segmentation pipeline failed\" and was not charged, a second picture with distinct parts succeeded) and smartsegment_model (55 credits, a 36 KB GLB uploaded to /files); the output is seg_model_url, mask_url, prompt, seg_task_id and model_task_id",
 }
 
 var endpoints = buildEndpoints()
@@ -122,6 +138,7 @@ func buildEndpoints() []fakeupstream.Endpoint {
 			endpoint.Evidence = fakeupstream.EvidenceReal
 			endpoint.Sample = "POST " + samplePrefix + k.Path
 			endpoint.CheckedAt = captured
+			endpoint.Note = realKindNotes[k.Path]
 		} else {
 			endpoint.Evidence = fakeupstream.EvidenceConstructed
 			endpoint.CheckedAt = researched
@@ -142,8 +159,15 @@ func Version() fakeupstream.Version {
 
 // task is one fake task.
 type task struct {
-	id       string
-	kind     kind
+	id   string
+	kind kind
+	// typ is the task type the official API reports: the kind's, except that Smart
+	// Segmentation reports smartsegment_image or smartsegment_model by seg_type.
+	typ string
+	// views and prompts are what an edit_multiview request asked for: the views to
+	// edit, in request order, and the prompts as sent.
+	views    []string
+	prompts  []any
 	scenario fakeupstream.Scenario
 	// expiredIssues is how many of the first artifact URL issues expire under
 	// ScenarioArtifactExpired.
@@ -392,13 +416,41 @@ func (h *handler) create(k kind) http.HandlerFunc {
 				return
 			}
 		}
-		t := &task{id: h.newID(), kind: k, scenario: fakeupstream.ScenarioOf(r), expiredIssues: fakeupstream.ExpiredIssues(r)}
+		t := &task{id: h.newID(), kind: k, typ: k.Type, scenario: fakeupstream.ScenarioOf(r), expiredIssues: fakeupstream.ExpiredIssues(r)}
+		if k.Path == "/mesh/smartsegment" {
+			switch segType, _ := body["seg_type"].(string); segType {
+			case "image":
+			case "model":
+				t.typ = "smartsegment_model"
+			default:
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, "seg_type must be image or model", "Refer to the API documentation for parameter requirements"))
+				return
+			}
+		}
+		if k.Path == "/generation/edit-multiview" {
+			prompts, _ := body["prompts"].([]any)
+			for _, entry := range prompts {
+				if prompt, _ := entry.(map[string]any); prompt != nil {
+					view, _ := prompt["view"].(string)
+					if slices.Contains([]string{"front", "left", "back", "right"}, view) && !slices.Contains(t.views, view) {
+						t.views = append(t.views, view)
+					}
+				}
+			}
+			if len(t.views) == 0 {
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, "prompts must name at least one view", "Refer to the API documentation for parameter requirements"))
+				return
+			}
+			t.prompts = prompts
+		}
 		t.model, _ = body["model"].(string)
 		t.format, _ = body["format"].(string)
 		if source, _ := body["input"].(string); k.Path == "/models/convert" {
 			t.sourceFidelity = h.urlFidelity(source)
 		}
-		if parent, _ := body["input"].(string); parent != "" && k.Path != "/models/convert" {
+		// input is a task id, except for the kinds that take an uploaded file (image-to-*,
+		// Smart Segmentation) and Convert, which takes a URL.
+		if parent, _ := body["input"].(string); parent != "" && k.Path != "/models/convert" && !strings.HasPrefix(parent, "file_") {
 			t.parent = parent
 			if source := h.lookup(parent); source != nil {
 				if !h.acceptsSource(k, source) {
@@ -427,7 +479,7 @@ func (h *handler) create(k kind) http.HandlerFunc {
 		}
 		response := fakeupstream.Clone(h.created)
 		if data, ok := fakeupstream.DigMap(response, "data"); ok {
-			data["task_id"], data["type"] = t.id, k.Type
+			data["task_id"], data["type"] = t.id, t.typ
 		}
 		writeJSON(w, http.StatusOK, response)
 	}
@@ -494,25 +546,36 @@ func (h *handler) getTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) pollBody(r *http.Request, t *task, status string) map[string]any {
-	body := fakeupstream.Clone(h.pollTemplate(t.kind, status))
+	template := t.kind
+	template.Type, template.Base = t.typ, t.typ // the sample of the task's own type (seg_type picks one of two)
+	body := fakeupstream.Clone(h.pollTemplate(template, status))
 	data, _ := fakeupstream.DigMap(body, "data")
-	data["task_id"], data["type"], data["status"] = t.id, t.kind.Type, status
+	data["task_id"], data["type"], data["status"] = t.id, t.typ, status
 	for _, key := range []string{"created_at", "completed_at"} {
 		if _, has := data[key]; has {
 			data[key] = fixedTimestamp
 		}
 	}
-	switch status {
-	case statusQueued:
-		data["progress"] = json.Number("0")
-	case statusRunning:
-		data["progress"] = json.Number("50")
-	default:
-		data["progress"] = json.Number("100")
+	// Some task types omit progress in some states (edit_multiview while running,
+	// smartsegment_image while queued or failed): the sample decides.
+	if _, has := data["progress"]; has {
+		switch status {
+		case statusQueued:
+			data["progress"] = json.Number("0")
+		case statusRunning:
+			data["progress"] = json.Number("50")
+		default:
+			data["progress"] = json.Number("100")
+		}
 	}
 	if input, ok := fakeupstream.DigMap(data, "input"); ok {
-		if _, has := input["original_model_id"]; has {
-			input["original_model_id"] = t.parentID()
+		if _, has := input["prompts"]; has && t.prompts != nil {
+			input["prompts"] = t.prompts
+		}
+		for _, field := range []string{"original_model_id", "original_task_id"} {
+			if _, has := input[field]; has {
+				input[field] = t.parentID()
+			}
 		}
 	}
 	if status == statusFailed {
@@ -521,12 +584,35 @@ func (h *handler) pollBody(r *http.Request, t *task, status string) map[string]a
 	}
 	if output, ok := fakeupstream.DigMap(data, "output"); ok && status == statusSuccess {
 		issue := h.env.IssueArtifactURLs(t.id)
-		for key := range output {
-			if name, isURL := strings.CutSuffix(key, "_url"); isURL {
-				output[key] = h.env.SignArtifactURL(
-					h.env.ArtifactOriginFor(r)+Prefix+"/artifacts/"+t.id+"/"+t.artifactName(name), t.scenario, issue)
+		var render func(node map[string]any)
+		render = func(node map[string]any) {
+			for key, value := range node {
+				if nested, ok := value.(map[string]any); ok {
+					render(nested) // generate_multiview_image holds the four view URLs
+					continue
+				}
+				if name, isURL := strings.CutSuffix(key, "_url"); isURL {
+					node[key] = h.env.SignArtifactURL(
+						h.env.ArtifactOriginFor(r)+Prefix+"/artifacts/"+t.id+"/"+t.artifactName(name), t.scenario, issue)
+				}
 			}
 		}
+		if t.typ == "edit_multiview" {
+			// An edit returns only the views it was asked to edit (captured: one prompt, one view).
+			if views, ok := output["generate_multiview_image"].(map[string]any); ok {
+				sample := ""
+				for _, value := range views {
+					sample, _ = value.(string)
+					break
+				}
+				edited := map[string]any{}
+				for _, view := range t.views {
+					edited[view+"_view_url"] = sample
+				}
+				output["generate_multiview_image"] = edited
+			}
+		}
+		render(output)
 	}
 	return body
 }
@@ -558,6 +644,15 @@ func (t *task) artifactName(field string) string {
 		return "rendered_image.png"
 	case "generated_image":
 		return "generated_image.jpg"
+	case "front_view", "left_view", "back_view", "right_view":
+		return field + ".jpg" // the multiview pictures are JPEG
+	case "mask":
+		return "mask.png"
+	case "seg_model":
+		return "seg_model.glb"
+	}
+	if t.typ == "image_to_splat" {
+		return "model.splat"
 	}
 	if t.kind.Type == "convert_model" {
 		switch strings.ToUpper(t.format) {
@@ -601,6 +696,8 @@ func artifactFile(name, fidelity string) (fakeupstream.File, error) {
 		return fakeupstream.ModelFile("usdz")
 	case ".3mf":
 		return fakeupstream.ModelFile("3mf")
+	case ".splat":
+		return fakeupstream.SplatFile()
 	case ".png":
 		return fakeupstream.ModelFile("png")
 	case ".jpg":
@@ -612,6 +709,20 @@ func artifactFile(name, fidelity string) (fakeupstream.File, error) {
 // ArtifactContentType is the content type the official CDN serves model and
 // picture files with (observed on every artifact of the alignment run).
 const ArtifactContentType = "binary/octet-stream"
+
+// artifactContentType is the content type the CDN served an artifact with: the
+// generic binary/octet-stream for models and renders (and for the pictures of a
+// multiview task), but the real picture types for a segmentation mask and for the
+// views of an edit_multiview task (captured 2026-10-29).
+func (t *task) artifactContentType(name string) string {
+	switch {
+	case name == "mask.png":
+		return "image/png"
+	case t.typ == "edit_multiview":
+		return "image/jpeg"
+	}
+	return ArtifactContentType
+}
 
 func (h *handler) getArtifact(w http.ResponseWriter, r *http.Request) {
 	t := h.lookup(r.PathValue("task_id"))
@@ -632,7 +743,7 @@ func (h *handler) getArtifact(w http.ResponseWriter, r *http.Request) {
 	if t.scenario == fakeupstream.ScenarioArtifactCorrupt {
 		data = fakeupstream.Corrupt(data)
 	}
-	w.Header().Set("Content-Type", ArtifactContentType)
+	w.Header().Set("Content-Type", t.artifactContentType(r.PathValue("name")))
 	w.Header().Set("Content-Length", fmt.Sprint(len(data)))
 	_, _ = w.Write(data)
 }

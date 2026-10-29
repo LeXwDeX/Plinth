@@ -1,0 +1,62 @@
+{
+  "MaxBodyBytes": 4194304,
+  "Keys": {
+    "code": true,
+    "completed_at": true,
+    "created_at": true,
+    "credits_consumed": true,
+    "data": true,
+    "file": true,
+    "granularity": true,
+    "hint": true,
+    "input": true,
+    "mask_url": true,
+    "model_task_id": true,
+    "output": true,
+    "progress": true,
+    "prompt": true,
+    "seg_model_url": true,
+    "seg_task_id": true,
+    "seg_type": true,
+    "status": true,
+    "task_id": true,
+    "type": true
+  },
+  "Allowed": {
+    "0": true,
+    "100": true,
+    "2026-01-01T00:00:00Z": true,
+    "25": true,
+    "50": true,
+    "75": true,
+    "application/json": true,
+    "coarse": true,
+    "head, body, arms and legs": true,
+    "https://example.test/fixture-3.png": true,
+    "https://example.test/fixture-6.glb": true,
+    "id-1": true,
+    "id-2": true,
+    "id-4": true,
+    "id-5": true,
+    "image": true,
+    "mesh": true,
+    "queued": true,
+    "running": true,
+    "separate the head, body, arms and legs": true,
+    "smartsegment": true,
+    "smartsegment_image": true,
+    "success": true,
+    "tasks": true,
+    "v3": true
+  },
+  "Aliases": null,
+  "PublicHosts": {
+    "openapi.tripo3d.ai": true
+  },
+  "Projection": null,
+  "QueryKeys": {
+    "Key-Pair-Id": true,
+    "Policy": true,
+    "Signature": true
+  }
+}
