@@ -196,12 +196,21 @@ func TestUnknownStatusIsBoundedPolling(t *testing.T) {
 		}
 		return observation
 	}
+	lastRunningKey := ""
 	for poll := 1; poll <= rule.MaxConsecutive; poll++ {
-		if observation := observe("uuid-1"); observation.Phase != generation.UpstreamRunning || observation.Failure != nil {
+		observation := observe("uuid-1")
+		if observation.Phase != generation.UpstreamRunning || observation.Failure != nil {
 			t.Fatalf("poll %d = %+v, want running", poll, observation)
 		}
+		lastRunningKey = observation.DedupeKey
 	}
 	observation := observe("uuid-1")
+	// The coordinator discards an observation whose DedupeKey equals the last
+	// recorded one before applying its phase, so the terminal transition must
+	// not reuse the running key.
+	if observation.DedupeKey == "" || observation.DedupeKey == lastRunningKey {
+		t.Fatalf("limit-exceeded key %q must differ from the running key %q", observation.DedupeKey, lastRunningKey)
+	}
 	if observation.Phase != generation.UpstreamFailed || observation.Failure == nil ||
 		string(observation.Failure.Class) != rule.Class || observation.Failure.Retryable {
 		t.Fatalf("poll past the bound = %+v", observation)

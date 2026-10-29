@@ -625,6 +625,9 @@ func (a *Adapter) observation(
 	// the next poll ends the attempt with the declared failure class.
 	if a.exceedsConsecutiveBound(request.Job.RemoteID, rule) {
 		observation.Phase = generation.UpstreamFailed
+		// The coordinator drops an observation whose key equals the last
+		// recorded one, so the terminal transition needs a key of its own.
+		observation.DedupeKey = privateDedupeKey(request.Job.RemoteID, status, "poll-limit-exceeded")
 		observation.Failure = &generation.Failure{
 			Class:      generation.FailureClass(rule.Class),
 			Retryable:  rule.Retryable,
