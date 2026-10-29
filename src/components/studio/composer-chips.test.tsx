@@ -80,12 +80,16 @@ describe('every chip above the composer is one component of one size', () => {
     expect(group.indexOf('composer-attachment-chip')).toBeLessThan(group.indexOf('composer-attachment-purpose"'));
   });
 
-  it('lays the bottom row out on fixed tracks: two narrow, four wide, one model picker, parameters at the far right', () => {
+  it('lays the bottom row out on fixed tracks: two narrow, four wide, one model picker, parameters beside the Agent mode', () => {
     expect(composer).toMatch(/grid min-w-0 grid-cols-2 [^"]*@\[40rem\]:grid-cols-4[^"]*" data-testid="composer-pickers"/);
     const bottom = composer.slice(composer.indexOf('data-testid="composer-pickers"'));
     expect(bottom.match(/<ModelPicker/g)?.length).toBe(1);
     expect(bottom.indexOf('<ModelPicker />')).toBeLessThan(bottom.indexOf('<SkillPicker'));
-    expect(composer).toContain('col-start-2 min-w-0 @[40rem]:col-start-4');
+    // Pairs left to right in DOM order: models | Skill, Agent mode | parameters, chat model | thinking level, then the context row.
+    const order = ['<ModelPicker />', '<SkillPicker', '<AgentScopePicker />', '<ParamsPopover {...params}', '<ChatModelPicker />', '<ReasoningPicker />', '<ContextMeter />'].map((tag) => bottom.indexOf(tag));
+    expect(order.every((at) => at > -1)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(composer).not.toContain('col-start-');
     const popover = source('./table-popover.tsx');
     expect(popover).toContain('h-7 w-full min-w-0');
     expect(popover).not.toContain('max-w-44');
