@@ -8523,74 +8523,6 @@
         {
           "model_id": "tripo-image-to-splat",
           "provider_key": "tripo"
-        },
-        {
-          "model_id": "creative-lab-fridge-magnet-prototype",
-          "provider_key": "meshy-creative-lab"
-        },
-        {
-          "model_id": "creative-lab-fridge-magnet-build",
-          "provider_key": "meshy-creative-lab"
-        },
-        {
-          "model_id": "creative-lab-figure-prototype",
-          "provider_key": "meshy-creative-lab"
-        },
-        {
-          "model_id": "creative-lab-figure-build",
-          "provider_key": "meshy-creative-lab"
-        },
-        {
-          "model_id": "creative-lab-vinyl-figure-prototype",
-          "provider_key": "meshy-creative-lab"
-        },
-        {
-          "model_id": "creative-lab-vinyl-figure-build",
-          "provider_key": "meshy-creative-lab"
-        },
-        {
-          "model_id": "creative-lab-brick-figure-prototype",
-          "provider_key": "meshy-creative-lab"
-        },
-        {
-          "model_id": "creative-lab-brick-figure-build",
-          "provider_key": "meshy-creative-lab"
-        },
-        {
-          "model_id": "creative-lab-fidget-collapsible-generate",
-          "provider_key": "meshy-creative-lab"
-        },
-        {
-          "model_id": "creative-lab-keychain-prototype",
-          "provider_key": "meshy-creative-lab"
-        },
-        {
-          "model_id": "creative-lab-keychain-build",
-          "provider_key": "meshy-creative-lab"
-        },
-        {
-          "model_id": "creative-lab-lamp-prototype",
-          "provider_key": "meshy-creative-lab"
-        },
-        {
-          "model_id": "creative-lab-lamp-build",
-          "provider_key": "meshy-creative-lab"
-        },
-        {
-          "model_id": "creative-lab-fidget-pixel-prototype",
-          "provider_key": "meshy-creative-lab"
-        },
-        {
-          "model_id": "creative-lab-fidget-pixel-build",
-          "provider_key": "meshy-creative-lab"
-        },
-        {
-          "model_id": "creative-lab-keycap-prototype",
-          "provider_key": "meshy-creative-lab"
-        },
-        {
-          "model_id": "creative-lab-keycap-build",
-          "provider_key": "meshy-creative-lab"
         }
       ],
       "legacy_constraint_option_labels": {
@@ -16140,6 +16072,7 @@
       "provider_id": "meshy",
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
+      "provider_order": 1,
       "model_id": "nano-banana-pro",
       "model_name": "Nano Banana Pro (高质量)",
       "capability": "text-to-image",
@@ -16812,6 +16745,7 @@
       "provider_id": "openai",
       "provider_name": "OpenAI",
       "provider_short_label": "GPT",
+      "provider_order": 2,
       "model_id": "gpt-image-2.5-sunburst",
       "model_name": "GPT Image 2.5 Sunburst (OpenAI)",
       "capability": "text-to-image",
@@ -17472,6 +17406,7 @@
       "provider_id": "gemini",
       "provider_name": "Google Gemini",
       "provider_short_label": "GEMINI",
+      "provider_order": 3,
       "model_id": "gemini-3-pro-image",
       "model_name": "Gemini 3 Pro (高质量)",
       "capability": "text-to-image",
@@ -17826,6 +17761,7 @@
       "provider_id": "jimeng",
       "provider_name": "即梦 AI",
       "provider_short_label": "JIMENG",
+      "provider_order": 4,
       "model_id": "doubao-seedream-4-5-251128",
       "model_name": "即梦 Seedream 4.5 (高质量)",
       "capability": "text-to-image",
@@ -20521,6 +20457,7 @@
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
+      "provider_order": 5,
       "model_id": "tripo-v3.1-full",
       "model_name": "Tripo H3 v3.1 (最新)",
       "capability": "text-to-3d",
@@ -27486,6 +27423,7 @@
       "provider_id": "matting",
       "provider_name": "背景去除",
       "provider_short_label": "MATTING",
+      "provider_order": 7,
       "model_id": "matting-default",
       "model_name": "批量背景去除",
       "capability": "background-removal",
@@ -28012,6 +27950,7 @@
       "provider_id": "hyper3d",
       "provider_name": "Hyper3D",
       "provider_short_label": "HYPER3D",
+      "provider_order": 6,
       "model_id": "rodin-gen-2.5",
       "model_name": "Rodin Gen-2.5",
       "adapter_key": "hyper3d.rodin.v1",
@@ -28265,6 +28204,7 @@
       "provider_id": "local",
       "provider_name": "格式转换",
       "provider_short_label": "本地",
+      "provider_order": 8,
       "model_id": "local-glb-to-gltf",
       "model_name": "静态 GLB → glTF",
       "capability": "format-conversion",
@@ -31228,7 +31168,7 @@
       "capability": "creative-lab-prototype",
       "domain": "image",
       "adapter_key": "meshy.v2",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "priority": 100,
       "estimated_credits": 6,
@@ -31336,7 +31276,7 @@
       "capability": "creative-lab-build",
       "domain": "model-3d",
       "adapter_key": "meshy.v2",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "priority": 100,
       "estimated_credits": 30,
@@ -31735,7 +31675,7 @@
       "capability": "creative-lab-prototype",
       "domain": "image",
       "adapter_key": "meshy.v2",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "priority": 100,
       "estimated_credits": 6,
@@ -31833,7 +31773,7 @@
       "capability": "creative-lab-build",
       "domain": "model-3d",
       "adapter_key": "meshy.v2",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "priority": 100,
       "estimated_credits": 30,
@@ -32232,7 +32172,7 @@
       "capability": "creative-lab-prototype",
       "domain": "image",
       "adapter_key": "meshy.v2",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "priority": 100,
       "estimated_credits": 30,
@@ -32383,7 +32323,7 @@
       "capability": "creative-lab-build",
       "domain": "model-3d",
       "adapter_key": "meshy.v2",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "priority": 100,
       "estimated_credits": 6,
@@ -32683,7 +32623,7 @@
       "capability": "creative-lab-prototype",
       "domain": "image",
       "adapter_key": "meshy.v2",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "priority": 100,
       "estimated_credits": 6,
@@ -32781,7 +32721,7 @@
       "capability": "creative-lab-build",
       "domain": "model-3d",
       "adapter_key": "meshy.v2",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "priority": 100,
       "estimated_credits": 30,
@@ -32936,7 +32876,7 @@
       "capability": "creative-lab-prototype",
       "domain": "image",
       "adapter_key": "meshy.v2",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "priority": 100,
       "estimated_credits": 6,
@@ -33034,7 +32974,7 @@
       "capability": "creative-lab-build",
       "domain": "model-3d",
       "adapter_key": "meshy.v2",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "priority": 100,
       "estimated_credits": 30,
@@ -33189,7 +33129,7 @@
       "capability": "creative-lab-prototype",
       "domain": "image",
       "adapter_key": "meshy.v2",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "priority": 100,
       "estimated_credits": 6,
@@ -33287,7 +33227,7 @@
       "capability": "creative-lab-build",
       "domain": "model-3d",
       "adapter_key": "meshy.v2",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "priority": 100,
       "estimated_credits": 30,
@@ -33442,7 +33382,7 @@
       "capability": "creative-lab-prototype",
       "domain": "image",
       "adapter_key": "meshy.v2",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "priority": 100,
       "estimated_credits": 12,
@@ -33552,7 +33492,7 @@
       "capability": "creative-lab-build",
       "domain": "model-3d",
       "adapter_key": "meshy.v2",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "priority": 100,
       "estimated_credits": 50,
@@ -33717,7 +33657,7 @@
       "capability": "creative-lab-prototype",
       "domain": "image",
       "adapter_key": "meshy.v2",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "priority": 100,
       "estimated_credits": 6,
@@ -33826,7 +33766,7 @@
       "capability": "creative-lab-build",
       "domain": "model-3d",
       "adapter_key": "meshy.v2",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "priority": 100,
       "estimated_credits": 30,
@@ -34077,7 +34017,7 @@
       "capability": "creative-lab-build",
       "domain": "model-3d",
       "adapter_key": "meshy.v2",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "priority": 100,
       "estimated_credits": 6,

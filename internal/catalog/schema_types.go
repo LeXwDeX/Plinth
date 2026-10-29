@@ -4547,6 +4547,7 @@ type rawOffering struct {
 	ProviderID                    string                          `json:"provider_id"`
 	ProviderName                  string                          `json:"provider_name"`
 	ProviderShortLabel            string                          `json:"provider_short_label"`
+	ProviderOrder                 *int                            `json:"provider_order,omitempty"`
 	ModelID                       string                          `json:"model_id"`
 	ModelName                     string                          `json:"model_name"`
 	Capability                    schemacontract.Capability       `json:"capability"`

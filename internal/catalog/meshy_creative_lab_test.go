@@ -15,7 +15,9 @@ import (
 // per stage on the dev-test host (first batch: fridge magnet, figure, vinyl
 // figure, brick figure, collapsible fidget; second batch: keychain, lampshade,
 // pixel fidget, keycap). Direct upstream success alone never qualified one.
-var creativeLabEnabledProducts = map[string]bool{"keychain": true, "fridge-magnet": true, "figure": true, "vinyl-figure": true, "brick-figure": true, "lamp": true, "keycap": true, "fidget-pixel": true, "fidget-collapsible": true}
+// #100: Plinth is a game-art production platform, so every Creative Lab product is defined but not
+// offered to users or the Agent (enabled=false). Setting a product back to true restores it.
+var creativeLabEnabledProducts = map[string]bool{"keychain": false, "fridge-magnet": false, "figure": false, "vinyl-figure": false, "brick-figure": false, "lamp": false, "keycap": false, "fidget-pixel": false, "fidget-collapsible": false}
 
 func TestCreativeLabCandidatesDeclareNineProductsAndSeventeenBoundStages(t *testing.T) {
 	c, err := LoadDefault()
@@ -217,5 +219,43 @@ func TestCreativeSourceBindingInvalidDeclarationsFailBeforeRuntime(t *testing.T)
 				t.Fatal("unsupported source/retained identity contract accepted")
 			}
 		})
+	}
+}
+
+func TestCreativeLabOfferingsAreDefinedButNeverListed(t *testing.T) {
+	c, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := map[schema.OfferingID]bool{}
+	for _, o := range c.List("") {
+		listed[o.ID] = true
+	}
+	defined := 0
+	for _, capability := range []schema.Capability{"creative-lab-prototype", "creative-lab-build"} {
+		if len(c.List(capability)) != 0 {
+			t.Fatalf("%s must list no Offering", capability)
+		}
+	}
+	for product := range creativeLabEnabledProducts {
+		for _, stage := range []string{"prototype", "build", "generate"} {
+			id := schema.OfferingID("meshy/creative-lab/" + product + "/" + stage)
+			o, ok := c.Get(id)
+			if !ok {
+				continue
+			}
+			defined++
+			if o.Enabled || listed[id] || len(o.ProviderOptions) == 0 {
+				t.Fatalf("%s must stay defined with its wire mapping but unlisted", id)
+			}
+		}
+	}
+	if defined != 17 {
+		t.Fatalf("defined Creative Lab Offerings = %d", defined)
+	}
+	for _, model := range c.Application().ProviderDiscovery.LegacyModels {
+		if model.ProviderKey == "meshy-creative-lab" || strings.HasPrefix(model.ModelID, "creative-lab-") {
+			t.Fatalf("discovery lists hidden model %s", model.ModelID)
+		}
 	}
 }

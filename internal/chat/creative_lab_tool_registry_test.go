@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 func describedTemplates(t *testing.T, r *toolRegistry) ([]string, bool) {
@@ -56,5 +57,38 @@ func TestCreativeLabDesignToolOffersOnlyEnabledTemplates(t *testing.T) {
 	enabled = map[string]bool{}
 	if _, offered := describedTemplates(t, r); offered || r.permits(r.byName["create_creative_lab_design"], false) {
 		t.Fatal("a design tool without any enabled template is still offered")
+	}
+}
+
+// #100: the default Schema disables every Creative Lab Offering, so the Agent is offered neither Creative
+// Lab tool, and a call to one is refused as unavailable.
+func TestDefaultCatalogOffersNoCreativeLabToolToTheAgent(t *testing.T) {
+	c, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := compileToolRegistry(c.Application().Chat, func(capability, _ string) bool {
+		return len(c.List(schema.Capability(capability))) > 0
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.offeringAllowed = func(capability, model string) bool {
+		for _, offering := range c.List(schema.Capability(capability)) {
+			if offering.ModelID == model {
+				return true
+			}
+		}
+		return false
+	}
+	for _, name := range []string{"create_creative_lab_design", "build_creative_lab_item"} {
+		for _, described := range r.describe("3d") {
+			if described.Name == name {
+				t.Fatalf("%s is still offered to the Agent", name)
+			}
+		}
+		if r.permits(r.byName[name], false) {
+			t.Fatalf("%s still permitted", name)
+		}
 	}
 }

@@ -173,6 +173,7 @@ func acmeCatalogDocument(t *testing.T) map[string]any {
 	images["provider_id"] = "acme"
 	images["provider_name"] = "Acme"
 	images["provider_short_label"] = "ACME"
+	images["provider_order"] = 9
 	images["model_id"] = "acme-flux-9"
 	images["model_name"] = "Acme Flux 9 (fixture)"
 	images["adapter_key"] = acmeImagesAdapterKey
@@ -203,6 +204,7 @@ func acmeCatalogDocument(t *testing.T) map[string]any {
 	parts["provider_id"] = "acme"
 	parts["provider_name"] = "Acme"
 	parts["provider_short_label"] = "ACME"
+	parts["provider_order"] = 9
 	// Acme does not bill in credits; one value per Provider (credits_metered).
 	delete(parts, "credits_metered")
 	parts["model_id"] = "acme-parts-xl"
