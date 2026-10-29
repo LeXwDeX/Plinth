@@ -190,7 +190,7 @@ resolver 在新 turn 的验证后选择上下文中，只读冻结有界、本�
 
 ### Creative Lab 的声明式协议扩展
 
-Creative Lab 使用单独声明的 `creative-lab-prototype`（图片域）和 `creative-lab-build`（3D 域）能力。九个模板共 17 个阶段，2026-10-22 分两批经隔离公开链路资格后全部启用（第一批：冰箱贴、手办、潮玩公仔、积木人偶与折叠解压玩具；第二批：钥匙扣、灯罩、像素解压拼图、键帽）；原型与构建是两个公开 Offering，各有冻结输入、报价和 Grant。折叠解压玩具是单阶段。该实现不创建第二套任务生命周期，Provider 只做协议投影、同账户原型读取和产物声明。两项能力都在 `model_delivery.capabilities` 内，成品的格式清单按通用格式匹配项列出已交付文件；键帽的 `bundle/obj_zip` 由 OBJ 格式的匹配项认领（#189）。
+**2026-10-29（#100）起 17 个 Creative Lab Offering 一律 `enabled:false`，不对用户和 Agent 提供，定义与 wire 映射保留；下文的“全部启用”是 2026-10-22 的历史状态，现行状态见 `docs/architecture.md`「Creative Lab 不对外提供」。**Creative Lab 使用单独声明的 `creative-lab-prototype`（图片域）和 `creative-lab-build`（3D 域）能力。九个模板共 17 个阶段，2026-10-22 分两批经隔离公开链路资格后全部启用（第一批：冰箱贴、手办、潮玩公仔、积木人偶与折叠解压玩具；第二批：钥匙扣、灯罩、像素解压拼图、键帽）；原型与构建是两个公开 Offering，各有冻结输入、报价和 Grant。折叠解压玩具是单阶段。该实现不创建第二套任务生命周期，Provider 只做协议投影、同账户原型读取和产物声明。两项能力都在 `model_delivery.capabilities` 内，成品的格式清单按通用格式匹配项列出已交付文件；键帽的 `bundle/obj_zip` 由 OBJ 格式的匹配项认领（#189）。
 
 `provider_options.input_paths` 是从公开参数名到 2–8 段 JSON 路径的私有映射，不能直接用包含点号的 `wire_name` 代替。资产、任务和标量按既有规则解析后再放入嵌套对象。声明必须引用已存在参数；目标重复、前缀覆盖、扁平别名冲突与原始容器注入均拒绝。`task_type` 可选地绑定观察结果的精确类型与 remote ID，不改变旧快照解析。
 
@@ -496,6 +496,8 @@ ExecutionGrant 按会话批准模式签发（规则见 `docs/product.md`）。�
 ### 积分展示声明（`credits_metered`）
 
 每个 Offering 用 `provider_short_label` 声明供应商的紧凑简称（如 openai 为 `GPT`、tripo 为 `TRIPO`、meshy `MESHY`、gemini `GEMINI`、jimeng `JIMENG`、matting `MATTING`、hyper3d `HYPER3D`），必填、非空、不超过 8 个字符，同一 `provider_id` 下取值必须一致（加载期校验）；它经 `/api/v1/offerings` 的 `provider_short_label` 进入公开投影，输入区模型选择器只显示它，完整模型名放在悬停提示和下拉表里。前端不内置供应商简称表。
+
+**供应商排序（#100）。** 模型选择表按供应商分组，组序由 Offering 的 `provider_order`（正整数，升序）声明：同一 `provider_id` 的值必须一致，不同供应商不得共用同一个值（加载期校验）；一个供应商只要在任一 Offering 上声明一次，其余 Offering 继承该值，所以新增 Offering 不需要重复填写。当前顺序为 meshy 1、openai 2、gemini 3、jimeng 4、tripo 5、hyper3d 6、matting 7、local 8。值经 `/api/v1/offerings` 的 `provider_order` 公开；未声明的供应商排在已声明的之后。前端 `buildModelPickerTable` 先按 `provider_order` 排，组内可用模型在前、其余保持目录原有顺序，不内置供应商顺序。“推荐”标记与选中行为不变。
 
 每个 Offering 用 `credits_metered` 声明其 Provider 是否按积分计费。同一 `provider_id` 下的所有 Offering 必须取值一致，加载期不一致会报错。当前 meshy、tripo 与 hyper3d 为 `true`（hyper3d 的报价是 `native_pricing` 原生单位，不折算平台整数积分），openai、gemini、jimeng、matting 均不声明。
 

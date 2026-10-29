@@ -9,7 +9,7 @@ import type { ProductSchema } from '@/lib/product-schema';
 const schema = {
   content: { messages: {
     'ui.studio.skill.selected': 'SKILL：{name}',
-    'ui.studio.skill.short': 'SKILLS',
+    'ui.studio.skill.short': 'Skills',
     'ui.studio.skill.label': 'Skill',
     'ui.studio.skill.title': '我的 Skill',
     'ui.studio.skill.hint': '',
@@ -67,7 +67,8 @@ describe('SkillPicker selected trigger label', () => {
     ['missing from catalog', { catalog: { skills: [] } as never }],
   ])('uses a neutral label when selection is %s', (_state, overrides) => {
     const html = render(overrides);
-    expect(html).toContain('>SKILLS</span>');
+    expect(html).toContain('>Skills</span>');
+    expect(html).toMatch(/<button[^>]*data-testid="workspace-skill-picker"[^>]*uppercase tracking-wide/);
     expect(html).not.toContain('SKILL：三视图');
     expect(html).not.toContain('aria-label="我的 Skill: three-view"');
   });

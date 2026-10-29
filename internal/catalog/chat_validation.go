@@ -1031,6 +1031,9 @@ func validateChatToolProcessing(tool ChatToolSchema, capabilityDomains map[schem
 			return nil, fmt.Errorf("messages.%s 不能为空", name)
 		}
 	}
+	if processing.ReferenceArgument != "" && strings.TrimSpace(messages.ReferenceRequired) == "" {
+		return nil, errors.New("声明 reference_argument 的处理工具必须声明 messages.reference_required（#92）")
+	}
 	if confirmation := messages.SourceConfirmation; confirmation != "" &&
 		(!strings.Contains(confirmation, "{selected}") || !strings.Contains(confirmation, "{source}") ||
 			!strings.Contains(confirmation, "{reason}") || strings.TrimSpace(messages.SelectedSourceIncompatible) == "") {

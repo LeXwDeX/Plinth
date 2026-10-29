@@ -38,7 +38,7 @@ export function skillPickerRows({
       key: skill.id,
       disabled: !effective?.skills.some((item) => item.id === skill.id),
       cells: [
-        { text: skill.displayName, strong: true },
+        { text: skill.displayName, strong: true, upper: true },
         { text: skill.prompt.replace(/\s+/g, ' '), muted: true },
         { text: skill.recommendedSize || '—', muted: true },
       ],
@@ -46,7 +46,7 @@ export function skillPickerRows({
         ? { label: deleteLabel(skill.displayName), onClick: () => onDelete(skill.id), busy: deleting.has(skill.id), testId: 'skill-delete' }
         : undefined,
     })),
-    { key: NO_SKILL, cells: [{ text: noneLabel, strong: true }, { text: noneHint, muted: true }, { text: '—', muted: true }] },
+    { key: NO_SKILL, cells: [{ text: noneLabel, strong: true, upper: true }, { text: noneHint, muted: true }, { text: '—', muted: true }] },
   ];
 }
 

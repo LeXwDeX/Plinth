@@ -2,13 +2,47 @@
 
 import useSWR from 'swr';
 import { useProductSchema } from '@/components/product-schema-provider';
-import type { AuthenticationAPISchema } from '@/lib/product-schema';
+import type { AuthenticationAPISchema, ProductSchema } from '@/lib/product-schema';
+
+/** The session request failed; `retryAfterSeconds` is the server's Retry-After, when it sent one. */
+export class SessionRequestError extends Error {
+  constructor(readonly status: number, readonly retryAfterSeconds: number | null) {
+    super(`HTTP ${status}`);
+  }
+}
+
+function parseRetryAfter(value: string | null): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds;
+  const at = Date.parse(value);
+  return Number.isNaN(at) ? null : Math.max(0, (at - Date.now()) / 1000);
+}
 
 const fetcher = (url: string) =>
   fetch(url).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (!r.ok) throw new SessionRequestError(r.status, parseRetryAfter(r.headers.get('Retry-After')));
     return r.json();
   });
+
+/** Wait before asking again: exponential backoff, never shorter than the server's Retry-After. All bounds come from the Schema. */
+export function sessionRetryDelayMs(error: unknown, retryCount: number, retry: ProductSchema['authentication']['session_retry']): number {
+  const backoff = Math.min(retry.max_backoff_ms, retry.initial_delay_ms * 2 ** Math.min(retryCount, 16));
+  const asked = error instanceof SessionRequestError && error.retryAfterSeconds !== null ? error.retryAfterSeconds * 1000 : 0;
+  return Math.min(retry.max_retry_after_ms, Math.max(backoff, asked));
+}
+
+export type SessionFailure = 'rate_limited' | 'unavailable' | null;
+
+/**
+ * Why the session could not be read. A 401 means "not signed in" and is not a failure; every other error
+ * (429, 5xx, network) says nothing about the login and must not be taken for a signed-out visitor.
+ */
+export function projectSessionFailure(error: unknown, hasAnswer: boolean): SessionFailure {
+  if (!error || hasAnswer) return null;
+  if (error instanceof SessionRequestError && error.status === 401) return null;
+  return error instanceof SessionRequestError && error.status === 429 ? 'rate_limited' : 'unavailable';
+}
 
 export interface AuthenticationSessionProjection {
   user: { id: string; name: string; email: string } | null;
@@ -47,12 +81,19 @@ export function useAuth() {
   const { data, error, isLoading, mutate } = useSWR<unknown>(
     schema.runtime.http.legacy_routes.auth_session,
     fetcher,
+    {
+      onErrorRetry: (err, _key, _config, revalidate, { retryCount }) => {
+        if (err instanceof SessionRequestError && err.status === 401) return;
+        setTimeout(() => { void revalidate({ retryCount: retryCount + 1 }); }, sessionRetryDelayMs(err, retryCount, schema.authentication.session_retry));
+      },
+    },
   );
   const session = projectAuthenticationSession(data, api);
   return {
     ...session,
     isLoading,
     error,
+    sessionFailure: projectSessionFailure(error, data !== undefined),
     refresh: mutate,
   };
 }

@@ -45,6 +45,8 @@ func Load(reader io.Reader) (*Catalog, error) {
 	triples := map[string]schemacontract.OfferingID{}
 	providerCreditsMetered := map[string]creditsMeteredDeclaration{}
 	providerShortLabels := map[string]string{}
+	providerOrders := map[string]int{}
+	orderProviders := map[int]string{}
 	defaults := map[schemacontract.Capability]schemacontract.OfferingID{}
 	displayOrders := map[schemacontract.Capability]map[int]schemacontract.OfferingID{}
 	capabilityOrders := map[string]map[int]schemacontract.OfferingID{}
@@ -136,6 +138,19 @@ func Load(reader io.Reader) (*Catalog, error) {
 			return nil, fmt.Errorf("Provider %q 的 provider_short_label 不一致: %q 与 %q", offering.ProviderID, previous, offering.ProviderShortLabel)
 		}
 		providerShortLabels[offering.ProviderID] = offering.ProviderShortLabel
+		if offering.ProviderOrder < 0 {
+			return nil, fmt.Errorf("Offering %q 的 provider_order 不能为负数", offering.ID)
+		}
+		if offering.ProviderOrder > 0 {
+			if previous, exists := providerOrders[offering.ProviderID]; exists && previous != offering.ProviderOrder {
+				return nil, fmt.Errorf("Provider %q 的 provider_order 不一致: %d 与 %d", offering.ProviderID, previous, offering.ProviderOrder)
+			}
+			if owner, exists := orderProviders[offering.ProviderOrder]; exists && owner != offering.ProviderID {
+				return nil, fmt.Errorf("provider_order %d 被 Provider %q 与 %q 同时使用", offering.ProviderOrder, owner, offering.ProviderID)
+			}
+			providerOrders[offering.ProviderID] = offering.ProviderOrder
+			orderProviders[offering.ProviderOrder] = offering.ProviderID
+		}
 		triple := strings.Join(
 			[]string{offering.ProviderID, offering.ModelID, string(offering.Capability)},
 			"\x00",
@@ -193,6 +208,13 @@ func Load(reader io.Reader) (*Catalog, error) {
 	}
 	if len(result.byID) == 0 {
 		return nil, errors.New("Catalog 至少需要一个 Offering")
+	}
+	// One declaration per provider is enough: its other Offerings inherit the rank.
+	for id, offering := range result.byID {
+		if order, declared := providerOrders[offering.ProviderID]; declared && offering.ProviderOrder == 0 {
+			offering.ProviderOrder = order
+			result.byID[id] = offering
+		}
 	}
 	if err := validateTaskOfferingReferences(result.byID); err != nil {
 		return nil, err
@@ -297,6 +319,7 @@ func (raw rawOffering) toOffering() schemacontract.Offering {
 		ProviderID:                    raw.ProviderID,
 		ProviderName:                  raw.ProviderName,
 		ProviderShortLabel:            raw.ProviderShortLabel,
+		ProviderOrder:                 valueOrZero(raw.ProviderOrder),
 		ModelID:                       raw.ModelID,
 		ModelName:                     raw.ModelName,
 		Capability:                    raw.Capability,
@@ -445,4 +468,11 @@ func validateDocumentOfferingLocalization(doc document) error {
 		return fmt.Errorf("解码 offerings: %w", err)
 	}
 	return ValidateOfferingLocalization(doc.Application.Localization, offerings)
+}
+
+func valueOrZero(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
 }

@@ -2,12 +2,13 @@ import { useEffect, type ReactNode } from 'react';
 import { usePathname, useRouter } from '@/lib/browser-navigation';
 
 import { useProductSchema } from '@/components/product-schema-provider';
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth, type SessionFailure } from '@/hooks/use-auth';
 import type { ProductSchema } from '@/lib/product-schema';
 
 type BrowserAccess =
   | { state: 'render' }
   | { state: 'loading' }
+  | { state: 'session-failed'; failure: Exclude<SessionFailure, null> }
   | { state: 'redirect'; href: string };
 
 interface BrowserAccessInput {
@@ -15,6 +16,8 @@ interface BrowserAccessInput {
   requestedPath: string;
   isLoading: boolean;
   hasUser: boolean;
+  /** The session request failed with something other than 401: the login is unknown, not gone. */
+  sessionFailure?: SessionFailure;
 }
 
 export function projectBrowserAccess({
@@ -22,6 +25,7 @@ export function projectBrowserAccess({
   requestedPath,
   isLoading,
   hasUser,
+  sessionFailure = null,
 }: BrowserAccessInput): BrowserAccess {
   const pathname = requestedPath.split('?', 1)[0];
   const isPublic = schema.authentication.public_paths.some((path) =>
@@ -36,6 +40,9 @@ export function projectBrowserAccess({
   if (hasUser) {
     return { state: 'render' };
   }
+  if (sessionFailure) {
+    return { state: 'session-failed', failure: sessionFailure };
+  }
 
   const query = new URLSearchParams({
     [schema.authentication.login.redirect_query]: requestedPath,
@@ -49,14 +56,15 @@ export function projectBrowserAccess({
 export function AuthenticationGate({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { schema } = useProductSchema();
-  const { user, isLoading } = useAuth();
+  const { schema, text } = useProductSchema();
+  const { user, isLoading, sessionFailure } = useAuth();
   const requestedPath = `${pathname}${window.location.search}`;
   const access = projectBrowserAccess({
     schema,
     requestedPath,
     isLoading,
     hasUser: user !== null,
+    sessionFailure,
   });
 
   useEffect(() => {
@@ -65,6 +73,14 @@ export function AuthenticationGate({ children }: { children: ReactNode }) {
     }
   }, [access.state, access.state === 'redirect' ? access.href : '', router]);
 
+  if (access.state === 'session-failed') {
+    // The session request is retried with backoff; the login is not touched.
+    return (
+      <div role="alert" data-testid="session-failed" className="flex h-screen items-center justify-center px-4 text-center text-muted-foreground">
+        {text(access.failure === 'rate_limited' ? 'ui.connectivity.session_rate_limited' : 'ui.connectivity.session_unavailable')}
+      </div>
+    );
+  }
   if (access.state !== 'render') {
     return (
       <div className="flex h-screen items-center justify-center text-muted-foreground">

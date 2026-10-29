@@ -114,20 +114,23 @@ type Offering struct {
 	ProviderName  string         `json:"provider_name"`
 	// ProviderShortLabel is the vendor's short name for compact controls (such as "GPT");
 	// every Offering of one provider declares the same value.
-	ProviderShortLabel string           `json:"provider_short_label"`
-	ModelID            string           `json:"model_id"`
-	ModelName          string           `json:"model_name"`
-	Capability         Capability       `json:"capability"`
-	Domain             CapabilityDomain `json:"domain"`
-	AdapterKey         string           `json:"adapter_key"`
-	Enabled            bool             `json:"enabled"`
-	Features           []string         `json:"features,omitempty"`
-	Default            bool             `json:"default,omitempty"`
-	Recommended        bool             `json:"recommended,omitempty"`
-	DisplayOrder       int              `json:"display_order"`
-	CapabilityOrder    int              `json:"capability_order"`
-	Priority           int              `json:"priority,omitempty"`
-	EstimatedCredits   int              `json:"estimated_credits,omitempty"`
+	ProviderShortLabel string `json:"provider_short_label"`
+	// ProviderOrder ranks the provider in model tables (ascending, from 1); 0 means undeclared and sorts
+	// last. Every Offering of one provider carries the same value.
+	ProviderOrder    int              `json:"provider_order,omitempty"`
+	ModelID          string           `json:"model_id"`
+	ModelName        string           `json:"model_name"`
+	Capability       Capability       `json:"capability"`
+	Domain           CapabilityDomain `json:"domain"`
+	AdapterKey       string           `json:"adapter_key"`
+	Enabled          bool             `json:"enabled"`
+	Features         []string         `json:"features,omitempty"`
+	Default          bool             `json:"default,omitempty"`
+	Recommended      bool             `json:"recommended,omitempty"`
+	DisplayOrder     int              `json:"display_order"`
+	CapabilityOrder  int              `json:"capability_order"`
+	Priority         int              `json:"priority,omitempty"`
+	EstimatedCredits int              `json:"estimated_credits,omitempty"`
 	// CreditsMetered 声明该 Offering 的 Provider 按积分计费；未声明的
 	// Offering 不向用户展示积分（estimated_credits 仍用于内部审批与预估）。
 	CreditsMetered bool `json:"credits_metered,omitempty"`

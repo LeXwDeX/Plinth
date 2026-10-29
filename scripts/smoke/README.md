@@ -87,6 +87,10 @@ L0–L4 各层在 `dev-test` 主机上执行时用 `ART_AI_SERVER_ROOT=<root> ba
   满 5 张仍无问题就暂停先分析，不要继续加图）。本目录不另定标准。
 - 单元/集成/竞态门禁由本地门禁与 CI 覆盖（各项在哪里执行见 `dev_test.md` §2），不属于本目录职责。
 
+## Fake 上游整栈自检（#96）
+
+`python3 scripts/smoke/smoke-fake-stack.py`：先启动 `cmd/fake-upstream`，再以 live 模式启动本机隔离栈（Tripo 与 LLM 的 base URL 指向 fake），核对余额面板、Tripo 生成 → rig-check → rigging → animation、segment → complete、Agent 对话 → 工具调用 → 批准 → 任务 → 回复，以及各故障场景的 Task 终态与错误 class。零成本、离线，只用回环地址，不读取真实 Key，**不属于**发布验收（L0/L1/L2 仍按上文），也不替代真实付费验收。说明见 `dev_test.md`「Fake 上游自检」。
+
 ## 可控恢复验收夹具（隔离进程）
 
 ### Opt-In Wire Capture

@@ -34,6 +34,7 @@ export function chatModelSection(
       cells: [{
         text: option.model,
         strong: true,
+        upper: true,
         ...(option.id === choice?.defaultId ? { tag: schemaText(schema, 'ui.studio.chat_model.default_tag') } : {}),
       }],
     })),
@@ -41,14 +42,6 @@ export function chatModelSection(
     foot: schemaText(schema, 'ui.studio.chat_model.note'),
     onPick,
   };
-}
-
-/** Whether the composer shows the chat model picker for the active session (two or more models offered). */
-export function useChatModelPickerShown(): boolean {
-  const { schema } = useProductSchema();
-  const activeSessionId = useChatStore((state) => state.activeSessionId);
-  const count = useSessionContextStore((state) => (activeSessionId ? state.chatModel[activeSessionId]?.options.length ?? 0 : 0));
-  return Boolean(schema.runtime.http.routes.chat_session_model) && count >= 2;
 }
 
 /**

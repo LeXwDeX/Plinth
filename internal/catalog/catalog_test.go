@@ -513,6 +513,7 @@ const minimalApplication = `"application":{
 		"failure.timed_out":"上游请求超时",
 		"failure.rejected":"上游拒绝任务",
 		"failure.insufficient_balance":"上游账户余额不足",
+		"failure.credential_quota":"该 API Key 已达额度上限",
 		"failure.upstream_unavailable":"上游服务不可用",
 		"failure.submission_unknown":"无法确认任务提交",
 		"failure.integrity_failure":"资产校验失败",
@@ -1783,6 +1784,7 @@ const minimalApplication = `"application":{
 			"audit_resource_type":"user"
 		},
 		"public_paths":["/login"],
+		"session_retry":{"initial_delay_ms":1000,"max_backoff_ms":30000,"max_retry_after_ms":120000},
 		"permissions":[
 			{"key":"tasks.read.own","label":"查看本人任务"},
 			{"key":"users.manage","label":"管理用户"},
@@ -1919,7 +1921,9 @@ func TestDefaultCatalogCoversCurrentProviderInventory(t *testing.T) {
 	// passed qualification (Decimate triangle, Segment, Complete, Quick Cap,
 	// Smart Segmentation image/model); Decimate quad stays disabled. #329 adds
 	// Meshy T2.5 (Smart Topology) text and image to 3D. #330 adds Meshy Convert.
-	if len(offerings) != 69 {
+	// #100: the 17 Meshy Creative Lab Offerings stay defined but are not offered
+	// (enabled=false), so only the other 52 are listed.
+	if len(offerings) != 52 {
 		t.Fatalf("offering count = %d", len(offerings))
 	}
 	for _, id := range []generation.OfferingID{
@@ -3026,6 +3030,7 @@ func TestDefaultCatalogOwnsPublicErrorAndFailureMessages(t *testing.T) {
 		"failure.timed_out",
 		"failure.rejected",
 		"failure.insufficient_balance",
+		"failure.credential_quota",
 		"failure.upstream_unavailable",
 		"failure.submission_unknown",
 		"failure.integrity_failure",
@@ -3274,6 +3279,61 @@ func TestLoadRequiresConsistentShortProviderLabel(t *testing.T) {
 	mixed := testProductDocument("[" + offering("one", "m1", "AAA", 0) + "," + offering("two", "m2", "BBB", 1) + "]")
 	if _, err := catalog.Load(bytes.NewReader(mixed)); err == nil || !strings.Contains(err.Error(), "provider_short_label 不一致") {
 		t.Fatalf("mixed labels: load error = %v", err)
+	}
+}
+
+// #100: the model tables sort by provider; the rank is declared on the Offerings, once per provider is enough.
+func TestLoadValidatesProviderOrder(t *testing.T) {
+	offering := func(id, provider, model string, rank string, order int) string {
+		return fmt.Sprintf(`{
+			"id":%q,"revision":"1","provider_id":%q,"provider_name":"P","provider_short_label":"P",%s
+			"model_id":%q,"model_name":"M","capability":"text-to-image",
+			"domain":"image","display_order":%d,"capability_order":0,
+			"adapter_key":"a","enabled":true,
+			"timeout_seconds":1,"poll_interval_seconds":1,
+			"retry":{"max_attempts":1},"materialize_attempts":1,
+			"parameters":[],
+			"outputs":[{"role":"image","minimum":1}]
+		}`, id, provider, rank, model, order)
+	}
+	load := func(offerings ...string) error {
+		_, err := catalog.Load(bytes.NewReader(testProductDocument("[" + strings.Join(offerings, ",") + "]")))
+		return err
+	}
+	for name, tt := range map[string]struct {
+		offerings []string
+		want      string
+	}{
+		"one provider disagrees": {[]string{offering("a", "p", "m1", `"provider_order":1,`, 0), offering("b", "p", "m2", `"provider_order":2,`, 1)}, "provider_order 不一致"},
+		"two providers share":    {[]string{offering("a", "p", "m1", `"provider_order":1,`, 0), offering("b", "q", "m2", `"provider_order":1,`, 1)}, "同时使用"},
+		"negative":               {[]string{offering("a", "p", "m1", `"provider_order":-1,`, 0)}, "provider_order 不能为负数"},
+	} {
+		if err := load(tt.offerings...); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Fatalf("%s: load error = %v", name, err)
+		}
+	}
+	if err := load(offering("a", "p", "m1", `"provider_order":1,`, 0), offering("b", "p", "m2", "", 1)); err != nil && strings.Contains(err.Error(), "provider_order") {
+		t.Fatalf("a provider that declares its rank once was rejected: %v", err)
+	}
+}
+
+func TestDefaultCatalogDeclaresProviderOrderForEveryOffering(t *testing.T) {
+	c, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rank := map[string]int{}
+	for _, offering := range c.List("") {
+		if offering.ProviderOrder < 1 {
+			t.Fatalf("%s has no provider_order", offering.ID)
+		}
+		if previous, seen := rank[offering.ProviderID]; seen && previous != offering.ProviderOrder {
+			t.Fatalf("provider %s ranks %d and %d", offering.ProviderID, previous, offering.ProviderOrder)
+		}
+		rank[offering.ProviderID] = offering.ProviderOrder
+	}
+	if !(rank["meshy"] < rank["tripo"] && rank["tripo"] < rank["hyper3d"]) {
+		t.Fatalf("3D provider ranks = %v", rank)
 	}
 }
 

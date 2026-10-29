@@ -19,6 +19,9 @@
         "scope": "database",
         "keep": 2
       },
+      "host_ci": {
+        "dir": "<host-ci-directory-outside-every-release-root>"
+      },
       "build": {
         "add_hosts": ["<registry-host>:<registry-address>"]
       },

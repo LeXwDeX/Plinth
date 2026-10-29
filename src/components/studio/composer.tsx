@@ -9,7 +9,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useSessionHarness } from '@/hooks/use-session-harness';
 import { AgentScopePicker } from '@/components/studio/agent-scope-picker';
 import { ContextMeter } from '@/components/studio/context-meter';
-import { ChatModelNotice, ChatModelPicker, useChatModelPickerShown } from '@/components/studio/chat-model-picker';
+import { ChatModelNotice, ChatModelPicker } from '@/components/studio/chat-model-picker';
 import { ReasoningPicker } from '@/components/studio/reasoning-picker';
 import { AttachmentThumb } from '@/components/studio/attachment-thumb';
 import { ReferenceSizeNotice } from '@/components/canvas/canvas-size-notice';
@@ -131,7 +131,6 @@ export function Composer({
   skill, params, sendCredits: generationSendCredits, mentions, onMentionPicked, referenceLimit = null,
 }: ComposerProps) {
   const { schema } = useProductSchema();
-  const chatModelShown = useChatModelPickerShown();
   const activeSessionId = useChatStore((state) => state.activeSessionId);
   const { user } = useAuth();
   const harness = useSessionHarness(activeSessionId, user?.id ?? '');
@@ -638,22 +637,27 @@ export function Composer({
       ) : null}
       <ChatModelNotice />
       <GenerationModelNotice />
-      {/* Fixed column tracks, so a cell's width depends only on the track, never on the chosen name: four
-          tracks in one row when the column is wide (models, Skill, Agent mode, thinking level; then chat
-          model, context usage, parameters), otherwise two (models | Skill, Agent mode | thinking level, chat
-          model | context usage, then parameters). The chat model picker only shows when the administrator
-          offers two or more models. The short names carry the full name in their tooltip. */}
+      {/* Fixed column tracks, so a cell's width depends only on the track, never on the chosen name, and every
+          cell is one picker row high (h-7). The DOM order is the reading order in both widths, and pickers pair
+          up left to right: two tracks when the column is narrow, four when it is wide (>= 40rem).
+            narrow: models | Skill / Agent mode | parameters / chat model | thinking level / context usage (full row)
+            wide:   models | Skill | Agent mode | parameters / chat model | thinking level | context usage (2 tracks)
+          The chat model picker only shows when the administrator offers two or more models; without it the
+          thinking level moves up into its track (narrow: alone in the left track of that row, the context usage
+          still takes the full row below), so no row ever has a hole in front of a picker. The context usage is
+          not a picker: it spans the row so the figure and the compact action sit on the grid's left and right
+          edges. The short names carry the full name in their tooltip. */}
       <div className="@container min-w-0">
         <div className="grid min-w-0 grid-cols-2 items-center gap-1.5 @[40rem]:grid-cols-4" data-testid="composer-pickers">
           <ModelPicker />
           <SkillPicker {...skill} />
           <AgentScopePicker />
-          <ReasoningPicker />
-          <ChatModelPicker />
-          <ContextMeter besideChatModel={chatModelShown} />
-          <div className="col-start-2 min-w-0 @[40rem]:col-start-4" data-testid="composer-params-slot">
+          <div className="min-w-0" data-testid="composer-params-slot">
             <ParamsPopover {...params} disabled={disabled} />
           </div>
+          <ChatModelPicker />
+          <ReasoningPicker />
+          <ContextMeter />
         </div>
       </div>
     </div>

@@ -1,30 +1,41 @@
 {
   "version": 2,
   "catalog": "internal/catalog/default_catalog.json",
-  "catalog_sha256": "40ab9ad7eb6ab0b7c5e33d160ca590393da04e334cc95866047fd8f62d0cce03",
+  "catalog_sha256": "600497a80eea780737e6a2a0a371f5df8c4306423ca6679d2f3fb53ea57aaa26",
   "samples": [
     "internal/app/testdata/agent-flow/agent-flow.candidate.json",
     "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
     "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json",
-    "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json"
+    "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json",
+    "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-animation.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-complete.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-convert.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rig-check.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging-v3.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-segment.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-text-to-3d.candidate.json"
   ],
   "counts": {
     "offerings": {
-      "disabled": 7,
-      "disabled-zero-egress": 7,
-      "enabled": 69,
+      "disabled": 24,
+      "disabled-zero-egress": 24,
+      "enabled": 52,
       "local-no-wire": 4,
-      "missing": 61,
-      "partial": 4,
+      "missing": 34,
+      "partial": 5,
+      "real": 9,
       "total": 76
     },
     "units": {
-      "derived": 15,
-      "disabled-zero-egress": 7,
+      "derived": 16,
+      "disabled-zero-egress": 9,
       "local-no-wire": 2,
-      "missing": 55,
-      "real": 11,
-      "total": 90
+      "missing": 31,
+      "real": 30,
+      "total": 88
     }
   },
   "incomplete": [
@@ -37,23 +48,6 @@
     "matting.v1|background-removal|declared:(adapter-defined)",
     "meshy.v2|analyze-printability|declared:print/analyze",
     "meshy.v2|animation|declared:animations",
-    "meshy.v2|creative-lab-build|declared:brick-figure/v1/build",
-    "meshy.v2|creative-lab-build|declared:fidget-collapsible/v1",
-    "meshy.v2|creative-lab-build|declared:fidget-pixel/v1/build",
-    "meshy.v2|creative-lab-build|declared:figure/v1/build",
-    "meshy.v2|creative-lab-build|declared:fridge-magnet/v1/build",
-    "meshy.v2|creative-lab-build|declared:keycap/v1/build",
-    "meshy.v2|creative-lab-build|declared:keychain/v1/build",
-    "meshy.v2|creative-lab-build|declared:lamp/v1/build",
-    "meshy.v2|creative-lab-build|declared:vinyl-figure/v1/build",
-    "meshy.v2|creative-lab-prototype|declared:brick-figure/v1/prototype",
-    "meshy.v2|creative-lab-prototype|declared:fidget-pixel/v1/prototype",
-    "meshy.v2|creative-lab-prototype|declared:figure/v1/prototype",
-    "meshy.v2|creative-lab-prototype|declared:fridge-magnet/v1/prototype",
-    "meshy.v2|creative-lab-prototype|declared:keycap/v1/prototype",
-    "meshy.v2|creative-lab-prototype|declared:keychain/v1/prototype",
-    "meshy.v2|creative-lab-prototype|declared:lamp/v1/prototype",
-    "meshy.v2|creative-lab-prototype|declared:vinyl-figure/v1/prototype",
     "meshy.v2|format-conversion|declared:convert",
     "meshy.v2|image-to-3d|declared:image-to-3d",
     "meshy.v2|image-to-3d|declared:multi-image-to-3d",
@@ -68,23 +62,33 @@
     "meshy.v2|uv-unwrap|declared:uv-unwrap",
     "openai-images.v1|image-to-image|declared:images/edits",
     "openai-images.v1|text-to-image|declared:images/generations",
-    "tripo.v3|animation|declared:animations/retarget",
     "tripo.v3|edit-multiview|declared:generation/edit-multiview",
-    "tripo.v3|format-conversion|declared:models/convert",
     "tripo.v3|image-to-3d|declared:generation/image-to-model",
     "tripo.v3|image-to-3d|declared:mesh/smartsegment",
     "tripo.v3|image-to-multiview|declared:generation/image-to-multiview",
     "tripo.v3|image-to-splat|declared:generation/image-to-splat",
-    "tripo.v3|mesh-completion|declared:mesh/complete",
-    "tripo.v3|mesh-segmentation|declared:mesh/segment",
     "tripo.v3|mesh-segmentation|declared:mesh/smartsegment",
     "tripo.v3|remesh|declared:mesh/decimate",
-    "tripo.v3|retexture|declared:models/texture",
-    "tripo.v3|rig-check|declared:animations/rig-check",
-    "tripo.v3|rigging|declared:animations/rig",
-    "tripo.v3|text-to-3d|declared:generation/text-to-model"
+    "tripo.v3|retexture|declared:models/texture"
   ],
   "units": [
+    {
+      "adapter_key": "connection:LLM",
+      "capability": "(scenario)",
+      "endpoint": "GET /v1/models",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json",
+        "media"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1.candidate.json"
+      ],
+      "offerings": []
+    },
     {
       "adapter_key": "connection:LLM",
       "capability": "(scenario)",
@@ -94,11 +98,13 @@
       ],
       "protocols": [
         "json",
+        "media",
         "sse"
       ],
       "evidence": "real",
       "evidence_files": [
-        "internal/app/testdata/agent-flow/agent-flow.candidate.json"
+        "internal/app/testdata/agent-flow/agent-flow.candidate.json",
+        "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1.candidate.json"
       ],
       "offerings": []
     },
@@ -574,238 +580,103 @@
     {
       "adapter_key": "meshy.v2",
       "capability": "creative-lab-build",
-      "endpoint": "declared:brick-figure/v1/build",
-      "evidence": "missing",
+      "endpoint": "(disabled)",
+      "evidence": "disabled-zero-egress",
       "evidence_files": [],
       "offerings": [
         {
           "id": "meshy/creative-lab/brick-figure/build",
           "model_id": "creative-lab-brick-figure-build",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-build",
-      "endpoint": "declared:fidget-collapsible/v1",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/fidget-collapsible/generate",
           "model_id": "creative-lab-fidget-collapsible-generate",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-build",
-      "endpoint": "declared:fidget-pixel/v1/build",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/fidget-pixel/build",
           "model_id": "creative-lab-fidget-pixel-build",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-build",
-      "endpoint": "declared:figure/v1/build",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/figure/build",
           "model_id": "creative-lab-figure-build",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-build",
-      "endpoint": "declared:fridge-magnet/v1/build",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/fridge-magnet/build",
           "model_id": "creative-lab-fridge-magnet-build",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-build",
-      "endpoint": "declared:keycap/v1/build",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/keycap/build",
           "model_id": "creative-lab-keycap-build",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-build",
-      "endpoint": "declared:keychain/v1/build",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/keychain/build",
           "model_id": "creative-lab-keychain-build",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-build",
-      "endpoint": "declared:lamp/v1/build",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/lamp/build",
           "model_id": "creative-lab-lamp-build",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-build",
-      "endpoint": "declared:vinyl-figure/v1/build",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/vinyl-figure/build",
           "model_id": "creative-lab-vinyl-figure-build",
-          "enabled": true
+          "enabled": false
         }
       ]
     },
     {
       "adapter_key": "meshy.v2",
       "capability": "creative-lab-prototype",
-      "endpoint": "declared:brick-figure/v1/prototype",
-      "evidence": "missing",
+      "endpoint": "(disabled)",
+      "evidence": "disabled-zero-egress",
       "evidence_files": [],
       "offerings": [
         {
           "id": "meshy/creative-lab/brick-figure/prototype",
           "model_id": "creative-lab-brick-figure-prototype",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-prototype",
-      "endpoint": "declared:fidget-pixel/v1/prototype",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/fidget-pixel/prototype",
           "model_id": "creative-lab-fidget-pixel-prototype",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-prototype",
-      "endpoint": "declared:figure/v1/prototype",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/figure/prototype",
           "model_id": "creative-lab-figure-prototype",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-prototype",
-      "endpoint": "declared:fridge-magnet/v1/prototype",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/fridge-magnet/prototype",
           "model_id": "creative-lab-fridge-magnet-prototype",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-prototype",
-      "endpoint": "declared:keycap/v1/prototype",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/keycap/prototype",
           "model_id": "creative-lab-keycap-prototype",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-prototype",
-      "endpoint": "declared:keychain/v1/prototype",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/keychain/prototype",
           "model_id": "creative-lab-keychain-prototype",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-prototype",
-      "endpoint": "declared:lamp/v1/prototype",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/lamp/prototype",
           "model_id": "creative-lab-lamp-prototype",
-          "enabled": true
-        }
-      ]
-    },
-    {
-      "adapter_key": "meshy.v2",
-      "capability": "creative-lab-prototype",
-      "endpoint": "declared:vinyl-figure/v1/prototype",
-      "evidence": "missing",
-      "evidence_files": [],
-      "offerings": [
+          "enabled": false
+        },
         {
           "id": "meshy/creative-lab/vinyl-figure/prototype",
           "model_id": "creative-lab-vinyl-figure-prototype",
-          "enabled": true
+          "enabled": false
         }
       ]
     },
@@ -1334,10 +1205,104 @@
     },
     {
       "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
+      "endpoint": "GET /v3/account/balance",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
+      "endpoint": "POST /v3/files",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
+      "endpoint": "POST /v3/generation/text-to-model",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
       "capability": "animation",
-      "endpoint": "declared:animations/retarget",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-animation.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/processing/animation",
+          "model_id": "tripo-animation",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "animation",
+      "endpoint": "POST /v3/animations/retarget",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-animation.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/processing/animation",
@@ -1377,9 +1342,39 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "format-conversion",
-      "endpoint": "declared:models/convert",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-convert.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/format-conversion/uploaded-glb-to-stl",
+          "model_id": "tripo-uploaded-glb-to-stl",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "format-conversion",
+      "endpoint": "POST /v3/models/convert",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-convert.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/format-conversion/uploaded-glb-to-stl",
@@ -1461,9 +1456,44 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "mesh-completion",
-      "endpoint": "declared:mesh/complete",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-complete.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/geometry/complete",
+          "model_id": "tripo-complete",
+          "enabled": true
+        },
+        {
+          "id": "tripo/geometry/quick-cap",
+          "model_id": "tripo-quick-cap",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "mesh-completion",
+      "endpoint": "POST /v3/mesh/complete",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-complete.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/geometry/complete",
@@ -1480,9 +1510,44 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "mesh-segmentation",
-      "endpoint": "declared:mesh/segment",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-segment.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/geometry/segment",
+          "model_id": "tripo-segment",
+          "enabled": true
+        },
+        {
+          "id": "tripo/geometry/smartsegment-model",
+          "model_id": "tripo-smartsegment-model",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "mesh-segmentation",
+      "endpoint": "POST /v3/mesh/segment",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-segment.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/geometry/segment",
@@ -1550,9 +1615,39 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "rig-check",
-      "endpoint": "declared:animations/rig-check",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rig-check.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/processing/rig-check",
+          "model_id": "tripo-rig-check",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "rig-check",
+      "endpoint": "POST /v3/animations/rig-check",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rig-check.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/processing/rig-check",
@@ -1564,9 +1659,73 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "rigging",
-      "endpoint": "declared:animations/rig",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging-v3.candidate.json",
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/processing/rigging",
+          "model_id": "tripo-rigging",
+          "enabled": true
+        },
+        {
+          "id": "tripo/processing/rigging-v3",
+          "model_id": "tripo-rigging-v3",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "rigging",
+      "endpoint": "POST /v3/animations/retarget",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/processing/rigging",
+          "model_id": "tripo-rigging",
+          "enabled": true
+        },
+        {
+          "id": "tripo/processing/rigging-v3",
+          "model_id": "tripo-rigging-v3",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "rigging",
+      "endpoint": "POST /v3/animations/rig",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging-v3.candidate.json",
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/processing/rigging",
@@ -1597,9 +1756,39 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "text-to-3d",
-      "endpoint": "declared:generation/text-to-model",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-text-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/tripo-v3.1-full/text-to-3d",
+          "model_id": "tripo-v3.1-full",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "text-to-3d",
+      "endpoint": "POST /v3/generation/text-to-model",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-text-to-3d.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/tripo-v3.1-full/text-to-3d",
@@ -1762,170 +1951,170 @@
       "id": "meshy/creative-lab/brick-figure/build",
       "model_id": "creative-lab-brick-figure-build",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-build|declared:brick-figure/v1/build"
+        "meshy.v2|creative-lab-build|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/brick-figure/prototype",
       "model_id": "creative-lab-brick-figure-prototype",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-prototype|declared:brick-figure/v1/prototype"
+        "meshy.v2|creative-lab-prototype|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/fidget-collapsible/generate",
       "model_id": "creative-lab-fidget-collapsible-generate",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-build|declared:fidget-collapsible/v1"
+        "meshy.v2|creative-lab-build|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/fidget-pixel/build",
       "model_id": "creative-lab-fidget-pixel-build",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-build|declared:fidget-pixel/v1/build"
+        "meshy.v2|creative-lab-build|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/fidget-pixel/prototype",
       "model_id": "creative-lab-fidget-pixel-prototype",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-prototype|declared:fidget-pixel/v1/prototype"
+        "meshy.v2|creative-lab-prototype|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/figure/build",
       "model_id": "creative-lab-figure-build",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-build|declared:figure/v1/build"
+        "meshy.v2|creative-lab-build|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/figure/prototype",
       "model_id": "creative-lab-figure-prototype",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-prototype|declared:figure/v1/prototype"
+        "meshy.v2|creative-lab-prototype|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/fridge-magnet/build",
       "model_id": "creative-lab-fridge-magnet-build",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-build|declared:fridge-magnet/v1/build"
+        "meshy.v2|creative-lab-build|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/fridge-magnet/prototype",
       "model_id": "creative-lab-fridge-magnet-prototype",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-prototype|declared:fridge-magnet/v1/prototype"
+        "meshy.v2|creative-lab-prototype|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/keycap/build",
       "model_id": "creative-lab-keycap-build",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-build|declared:keycap/v1/build"
+        "meshy.v2|creative-lab-build|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/keycap/prototype",
       "model_id": "creative-lab-keycap-prototype",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-prototype|declared:keycap/v1/prototype"
+        "meshy.v2|creative-lab-prototype|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/keychain/build",
       "model_id": "creative-lab-keychain-build",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-build|declared:keychain/v1/build"
+        "meshy.v2|creative-lab-build|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/keychain/prototype",
       "model_id": "creative-lab-keychain-prototype",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-prototype|declared:keychain/v1/prototype"
+        "meshy.v2|creative-lab-prototype|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/lamp/build",
       "model_id": "creative-lab-lamp-build",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-build|declared:lamp/v1/build"
+        "meshy.v2|creative-lab-build|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/lamp/prototype",
       "model_id": "creative-lab-lamp-prototype",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-prototype|declared:lamp/v1/prototype"
+        "meshy.v2|creative-lab-prototype|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/vinyl-figure/build",
       "model_id": "creative-lab-vinyl-figure-build",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-build|declared:vinyl-figure/v1/build"
+        "meshy.v2|creative-lab-build|(disabled)"
       ]
     },
     {
       "id": "meshy/creative-lab/vinyl-figure/prototype",
       "model_id": "creative-lab-vinyl-figure-prototype",
       "adapter_key": "meshy.v2",
-      "enabled": true,
-      "evidence": "missing",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
       "units": [
-        "meshy.v2|creative-lab-prototype|declared:vinyl-figure/v1/prototype"
+        "meshy.v2|creative-lab-prototype|(disabled)"
       ]
     },
     {
@@ -2201,9 +2390,10 @@
       "model_id": "tripo-uploaded-glb-to-stl",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|format-conversion|declared:models/convert"
+        "tripo.v3|format-conversion|GET /v3/tasks/{id}",
+        "tripo.v3|format-conversion|POST /v3/models/convert"
       ]
     },
     {
@@ -2211,9 +2401,10 @@
       "model_id": "tripo-complete",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|mesh-completion|declared:mesh/complete"
+        "tripo.v3|mesh-completion|GET /v3/tasks/{id}",
+        "tripo.v3|mesh-completion|POST /v3/mesh/complete"
       ]
     },
     {
@@ -2241,9 +2432,10 @@
       "model_id": "tripo-quick-cap",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|mesh-completion|declared:mesh/complete"
+        "tripo.v3|mesh-completion|GET /v3/tasks/{id}",
+        "tripo.v3|mesh-completion|POST /v3/mesh/complete"
       ]
     },
     {
@@ -2251,9 +2443,10 @@
       "model_id": "tripo-segment",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|mesh-segmentation|declared:mesh/segment"
+        "tripo.v3|mesh-segmentation|GET /v3/tasks/{id}",
+        "tripo.v3|mesh-segmentation|POST /v3/mesh/segment"
       ]
     },
     {
@@ -2271,8 +2464,9 @@
       "model_id": "tripo-smartsegment-model",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "partial",
       "units": [
+        "tripo.v3|mesh-segmentation|GET /v3/tasks/{id}",
         "tripo.v3|mesh-segmentation|declared:mesh/smartsegment"
       ]
     },
@@ -2301,9 +2495,10 @@
       "model_id": "tripo-animation",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|animation|declared:animations/retarget"
+        "tripo.v3|animation|GET /v3/tasks/{id}",
+        "tripo.v3|animation|POST /v3/animations/retarget"
       ]
     },
     {
@@ -2311,9 +2506,10 @@
       "model_id": "tripo-rig-check",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|rig-check|declared:animations/rig-check"
+        "tripo.v3|rig-check|GET /v3/tasks/{id}",
+        "tripo.v3|rig-check|POST /v3/animations/rig-check"
       ]
     },
     {
@@ -2321,9 +2517,11 @@
       "model_id": "tripo-rigging",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|rigging|declared:animations/rig"
+        "tripo.v3|rigging|GET /v3/tasks/{id}",
+        "tripo.v3|rigging|POST /v3/animations/retarget",
+        "tripo.v3|rigging|POST /v3/animations/rig"
       ]
     },
     {
@@ -2331,9 +2529,11 @@
       "model_id": "tripo-rigging-v3",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|rigging|declared:animations/rig"
+        "tripo.v3|rigging|GET /v3/tasks/{id}",
+        "tripo.v3|rigging|POST /v3/animations/retarget",
+        "tripo.v3|rigging|POST /v3/animations/rig"
       ]
     },
     {
@@ -2361,9 +2561,10 @@
       "model_id": "tripo-v3.1-full",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|text-to-3d|declared:generation/text-to-model"
+        "tripo.v3|text-to-3d|GET /v3/tasks/{id}",
+        "tripo.v3|text-to-3d|POST /v3/generation/text-to-model"
       ]
     },
     {
