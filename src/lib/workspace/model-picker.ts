@@ -78,6 +78,8 @@ export interface ModelPickerRow {
   provider: string;
   /** The vendor short name from the Schema ("GPT"); empty when the Offering declares none. */
   shortLabel: string;
+  /** Schema `provider_order`: the vendor's rank in the table (0 when the Offering declares none). */
+  providerOrder: number;
   enabled: boolean;
   recommended: boolean;
   cells: PickerCellValue[];
@@ -167,12 +169,20 @@ export function buildModelPickerTable(
     return {
       modelId: first.model_id, providerId: first.provider_id, name: first.model_name, provider: first.provider_name,
       shortLabel: first.provider_short_label ?? '',
+      providerOrder: first.provider_order ?? 0,
       enabled: live.length > 0, recommended: live.some((offering) => offering.recommended === true), cells,
     };
   });
 
-  // Available models first (stable within each group), so dimmed rows sink.
-  const sorted = [...rows].sort((left, right) => Number(right.enabled) - Number(left.enabled));
+  // Grouped by vendor in the Schema's `provider_order` (undeclared vendors last, in catalog order); inside
+  // a vendor the available models come first and the catalog order is kept, so dimmed rows sink.
+  const rank = (row: ModelPickerRow) => (row.providerOrder > 0 ? row.providerOrder : Number.MAX_SAFE_INTEGER);
+  const sorted = rows
+    .map((row, index) => ({ row, index }))
+    .sort((left, right) => rank(left.row) - rank(right.row)
+      || Number(right.row.enabled) - Number(left.row.enabled)
+      || left.index - right.index)
+    .map((entry) => entry.row);
   const maskModels = domain === 'image' ? sorted.filter((row) => row.enabled && row.cells[1].kind === 'tick' && row.cells[1].on).map((row) => row.name) : [];
   const retextureNames = domain === 'model-3d'
     ? [...retextureProviders].map((id) => providerNames.get(id) ?? id)

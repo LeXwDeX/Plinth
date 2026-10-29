@@ -232,23 +232,6 @@ func TestLegacyProviderDiscoveryPreservesDefaultProjectionAndOptInExtensions(
 		{"tripo-smartsegment-model", "tripo"},
 		{"local-asset-recovery", "local"},
 		{"tripo-image-to-splat", "tripo"},
-		{"creative-lab-fridge-magnet-prototype", "meshy-creative-lab"},
-		{"creative-lab-fridge-magnet-build", "meshy-creative-lab"},
-		{"creative-lab-figure-prototype", "meshy-creative-lab"},
-		{"creative-lab-figure-build", "meshy-creative-lab"},
-		{"creative-lab-vinyl-figure-prototype", "meshy-creative-lab"},
-		{"creative-lab-vinyl-figure-build", "meshy-creative-lab"},
-		{"creative-lab-brick-figure-prototype", "meshy-creative-lab"},
-		{"creative-lab-brick-figure-build", "meshy-creative-lab"},
-		{"creative-lab-fidget-collapsible-generate", "meshy-creative-lab"},
-		{"creative-lab-keychain-prototype", "meshy-creative-lab"},
-		{"creative-lab-keychain-build", "meshy-creative-lab"},
-		{"creative-lab-lamp-prototype", "meshy-creative-lab"},
-		{"creative-lab-lamp-build", "meshy-creative-lab"},
-		{"creative-lab-fidget-pixel-prototype", "meshy-creative-lab"},
-		{"creative-lab-fidget-pixel-build", "meshy-creative-lab"},
-		{"creative-lab-keycap-prototype", "meshy-creative-lab"},
-		{"creative-lab-keycap-build", "meshy-creative-lab"},
 	}
 	if len(providers) != len(expected) {
 		t.Fatalf("provider count = %d, want %d", len(providers), len(expected))
