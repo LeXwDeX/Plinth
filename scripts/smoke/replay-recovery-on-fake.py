@@ -150,6 +150,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
+    parser.add_argument("--only", default="", help="comma-separated runs to execute: chain, lost-response, formats, image (default: all)")
     args = parser.parse_args()
     work = args.work or tempfile.mkdtemp(prefix="fake-recovery-")
     os.makedirs(work, exist_ok=True)
@@ -183,7 +184,7 @@ def main():
                  ["--only", "formats", "--source-humanoid", short_humanoid, "--source-format", short_other]),
                 ("image", stack_root, [humanoid, other, remesh], ["--only", "image", "--source-humanoid", humanoid, "--source-format", other])]
         failed = []
-        for name, root_of_stack, sources, extra in runs:
+        for name, root_of_stack, sources, extra in [run for run in runs if not args.only or run[0] in args.only.split(",")]:
             root = seed(work, "acceptance-" + name, root_of_stack, sources)
             write_manifest(root, sha, owner, catalog)
             code, outcome, tail = run_runner(acceptance_binary, root, env, extra)
