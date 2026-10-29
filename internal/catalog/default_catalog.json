@@ -1,11 +1,7 @@
 {
   "version": 1,
   "application": {
-<<<<<<< HEAD
-    "revision": "2026-10-29.issue103-rigging-face-limit.1",
-=======
-    "revision": "2026-10-29.issue104-62-trial-fixes.2",
->>>>>>> origin/main
+    "revision": "2026-10-30.issue103-rigging-face-limit.2",
     "terminology": {
       "user_facing": [
         {
