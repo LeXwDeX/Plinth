@@ -202,9 +202,21 @@ func hyper3DAvailabilityCatalog(t *testing.T, root string, removeDefault bool) (
 	}
 	if removeDefault {
 		// An absent environment value normally uses the declared default.
-		// Only this private fixture removes it; no account or Offering is changed.
+		// Only this private fixture removes it; no Offering is changed. The
+		// balance account reader needs an address to construct, so its Schema
+		// entry (and the compat list entry) are dropped with it.
 		baseURL["default"] = ""
 		delete(baseURL, "default_by_environment")
+		runtime := document["application"].(map[string]any)["runtime"].(map[string]any)
+		delete(runtime["provider_accounts"].(map[string]any), "hyper3d")
+		compat := runtime["http"].(map[string]any)["legacy_provider_balance"].(map[string]any)
+		var kept []any
+		for _, account := range compat["accounts"].([]any) {
+			if account.(map[string]any)["account_id"] != "hyper3d" {
+				kept = append(kept, account)
+			}
+		}
+		compat["accounts"] = kept
 	}
 	raw, err = json.Marshal(document)
 	if err != nil {

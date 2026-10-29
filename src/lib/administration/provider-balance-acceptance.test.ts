@@ -11,7 +11,7 @@ const balanceBlock = script.slice(
   script.indexOf('candidate_expected_mock_balance='),
   script.indexOf('candidate_skills_json='),
 );
-const response = { accounts: [{ provider: 'meshy', balance: 1000 }, { provider: 'tripo', balance: 5000 }] };
+const response = { accounts: [{ provider: 'meshy', balance: 1000 }, { provider: 'tripo', balance: 5000 }, { provider: 'hyper3d', balance: 100 }] };
 
 function check(body: unknown, schema = structuredClone(catalog.application), mock = true) {
   const directory = mkdtempSync(join(tmpdir(), 'provider-balance-acceptance-'));
@@ -41,7 +41,7 @@ function check(body: unknown, schema = structuredClone(catalog.application), moc
 }
 
 describe('HTTP acceptance balance protocol', () => {
-  it('accepts both configured provider balances in mock mode', () => {
+  it('accepts all configured provider balances in mock mode', () => {
     const result = check(response);
     expect(result.status, result.stderr).toBe(0);
   });
@@ -60,6 +60,6 @@ describe('HTTP acceptance balance protocol', () => {
     expect(check(response, schema).status).not.toBe(0);
   });
   it('accepts live balances without requiring the mock values', () => {
-    expect(check({ accounts: [{ provider: 'meshy', balance: 12 }, { provider: 'tripo', balance: 42 }] }, undefined, false).status).toBe(0);
+    expect(check({ accounts: [{ provider: 'meshy', balance: 12 }, { provider: 'tripo', balance: 42 }, { provider: 'hyper3d', balance: 7 }] }, undefined, false).status).toBe(0);
   });
 });
