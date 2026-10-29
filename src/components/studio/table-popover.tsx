@@ -8,8 +8,15 @@ import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { useAnchoredPositioner } from '@/components/ui/overlay';
 import { cn } from '@/lib/utils';
 
+/**
+ * Latin letters of the composer's pickers read in capitals through CSS only (#108): the Schema text, the data,
+ * the accessible names and the values sent stay as they are, and Chinese is unaffected. Shared by the trigger
+ * frame, the option cells that carry names and the context meter.
+ */
+export const PICKER_UPPERCASE_CLASS = 'uppercase tracking-wide';
+
 /** The trigger frame the composer's pickers share (also used by the parameters button). */
-export const PICKER_TRIGGER_CLASS = 'flex h-7 w-full min-w-0 items-center gap-1.5 rounded-md border border-input bg-secondary px-2 text-xs text-foreground transition-colors hover:bg-panel-raised focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50 data-popup-open:border-primary data-popup-open:bg-primary/15 data-popup-open:text-primary';
+export const PICKER_TRIGGER_CLASS = `flex h-7 w-full min-w-0 items-center gap-1.5 rounded-md border border-input bg-secondary px-2 text-xs text-foreground transition-colors hover:bg-panel-raised focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50 data-popup-open:border-primary data-popup-open:bg-primary/15 data-popup-open:text-primary ${PICKER_UPPERCASE_CLASS}`;
 
 export interface TableCell {
   text: string;
@@ -20,6 +27,8 @@ export interface TableCell {
   /** 标签的语气：reminder 用橙色底提醒（如"推荐"），缺省为灰色。 */
   tagTone?: 'reminder';
   strong?: boolean;
+  /** 名称类单元格：拉丁字母用 CSS 显示为大写（#108）；模型名列不用。 */
+  upper?: boolean;
 }
 
 export interface TableRow {
@@ -237,7 +246,7 @@ function Section({ section, close, closeOnPick }: { section: TableSection; close
                 cell.tag ? (
                   <span
                     key={position}
-                    className={cn('flex min-w-0 items-center', cell.muted && 'text-muted-foreground', cell.strong && 'font-medium')}
+                    className={cn('flex min-w-0 items-center', cell.muted && 'text-muted-foreground', cell.strong && 'font-medium', cell.upper && PICKER_UPPERCASE_CLASS)}
                   >
                     <span className="min-w-0 truncate">{cell.text}</span>
                     <span className={cn('ml-1.5 shrink-0 whitespace-nowrap rounded-sm px-1 text-[10px] leading-3.5', cell.tagTone === 'reminder' ? 'bg-reminder font-medium text-reminder-foreground' : 'bg-panel-raised text-muted-foreground')}>{cell.tag}</span>
@@ -245,7 +254,7 @@ function Section({ section, close, closeOnPick }: { section: TableSection; close
                 ) : (
                   <span
                     key={position}
-                    className={cn('truncate', cell.muted && 'text-muted-foreground', cell.strong && 'font-medium')}
+                    className={cn('truncate', cell.muted && 'text-muted-foreground', cell.strong && 'font-medium', cell.upper && PICKER_UPPERCASE_CLASS)}
                   >
                     {cell.text}
                   </span>
