@@ -401,4 +401,7 @@ def main():
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    status = main()
+    sys.stdout.flush()
+    # The stdin watcher thread blocks in read(); leave without interpreter shutdown so it cannot abort the exit status.
+    os._exit(status)
