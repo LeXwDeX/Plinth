@@ -1,0 +1,12 @@
+{
+  "api_version": "v3",
+  "candidate_sha256": "865016d72b8871567f6a20f81fae77851d28539eefcccbac6c253bfa78b56a67",
+  "captured_at_utc": "2026-10-29",
+  "exchanges": 62,
+  "offering": "tripo/geometry/smartsegment-image",
+  "provenance": "captured",
+  "scenario": "tripo-v3-alignment",
+  "source_revision": "unknown",
+  "transformation": "IDs, signed URLs, timestamps and amounts are deterministic placeholders; media bytes are not stored.",
+  "version": 1
+}

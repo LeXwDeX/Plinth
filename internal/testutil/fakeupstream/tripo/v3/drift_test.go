@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
+	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/testkit"
 	"github.com/LeXwDeX/Plinth/internal/testutil/wirefixture"
 )
 
@@ -103,7 +104,8 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 		}
 		parent := f.create("/generation/text-to-model", textBody(), key)
 		f.finish(parent, key)
-		body := map[string]any{"model": "v3.0-20260909", "prompt": "p", "input": parent, "animation": "preset:walk", "format": "STL"}
+		body := map[string]any{"model": "v3.0-20260909", "prompt": "p", "input": parent, "animation": "preset:walk", "format": "STL", "seg_type": "image",
+			"prompts": []map[string]any{{"view": "front", "prompt": "p"}}}
 		if k.Path == "/animations/retarget" {
 			rig := f.create("/animations/rig", map[string]any{"input": parent, "model": "v3.0-20260909"}, key)
 			f.finish(rig, key)
@@ -126,7 +128,8 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 		}
 		parent := f.create("/generation/text-to-model", textBody(), key)
 		f.finish(parent, key)
-		body := map[string]any{"model": "v3.0-20260909", "prompt": "p", "input": parent, "animation": "preset:walk", "format": "STL"}
+		body := map[string]any{"model": "v3.0-20260909", "prompt": "p", "input": parent, "animation": "preset:walk", "format": "STL", "seg_type": "image",
+			"prompts": []map[string]any{{"view": "front", "prompt": "p"}}}
 		if k.Path == "/animations/retarget" {
 			rig := f.create("/animations/rig", map[string]any{"input": parent, "model": "v3.0-20260909"}, key)
 			f.finish(rig, key)
@@ -160,6 +163,31 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 		t.Fatal("no real failed poll sample")
 	}
 	assertSameShape(t, "failed poll", sampleShape(t, *real), shapeOfBody(t, failed))
+}
+
+// Smart Segmentation reports smartsegment_model for seg_type model and failed
+// once on a plain picture (both captured): the fake keeps both structures.
+func TestSmartSegmentationTypesAndFailureMatchTheRealSamples(t *testing.T) {
+	samples := loadSamples(t)
+	f := newFixture(t, fakeupstream.Config{})
+	model := f.create("/mesh/smartsegment", map[string]any{"input": "file_x", "seg_type": "model"}, key)
+	_, done := f.finish(model, key)
+	if field(t, done, "data", "type") != "smartsegment_model" {
+		t.Fatalf("type = %v", field(t, done, "data", "type"))
+	}
+	real := realPoll(samples, "smartsegment_model", statusSuccess)
+	if real == nil {
+		t.Fatal("no real smartsegment_model success poll")
+	}
+	assertSameShape(t, "smartsegment_model success", sampleShape(t, *real), shapeOfBody(t, done))
+
+	image := f.create("/mesh/smartsegment", map[string]any{"input": "file_x", "seg_type": "image"}, "fake-task-failed")
+	_, failed := f.finish(image, "fake-task-failed")
+	real = realPoll(samples, "smartsegment_image", statusFailed)
+	if real == nil {
+		t.Fatal("no real smartsegment_image failed poll")
+	}
+	assertSameShape(t, "smartsegment_image failed", sampleShape(t, *real), shapeOfBody(t, failed))
 }
 
 func realPoll(samples *fakeupstream.Samples, typ, status string) *wirefixture.Exchange {
@@ -243,4 +271,11 @@ func TestAlignmentReportIsCommittedAndClean(t *testing.T) {
 			t.Fatalf("report holds an unexplained difference")
 		}
 	}
+}
+
+// The second official run (#89: the seven endpoints that had no real sample) has
+// its own report, because the first run's raw exchanges were not kept to merge
+// into one: it must be clean as well, with its paid requests counted.
+func TestSecondAlignmentReportIsCommittedAndClean(t *testing.T) {
+	testkit.AssertAlignmentReport(t, "testdata/alignment-report-89.json", OfficialBase, true)
 }

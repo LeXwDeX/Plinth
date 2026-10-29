@@ -328,6 +328,15 @@ func validateStatusMapping(connectionID string, mapping *schemacontract.StatusMa
 				rule.Class,
 			)
 		}
+		if rule.MaxConsecutive < 0 ||
+			(rule.MaxConsecutive > 0 &&
+				((rule.Phase != "accepted" && rule.Phase != "running") || rule.Class == "")) {
+			return fmt.Errorf(
+				"连接 %q 的 status_mapping[%q] 的 max_consecutive 只能用于带失败分类的 accepted/running 相位且不得为负",
+				connectionID,
+				status,
+			)
+		}
 	}
 	return nil
 }

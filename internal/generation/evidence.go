@@ -23,7 +23,7 @@ const echoPrefixRunes = 24
 
 var (
 	excerptURL   = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s"'<>]+`)
-	excerptToken = regexp.MustCompile(`(?i)\b(?:bearer\s+\S+|msy[-_][A-Za-z0-9_-]{8,}|(?:token|key|signature|secret)=\S+)`)
+	excerptToken = regexp.MustCompile(`(?i)\b(?:bearer\s+\S+|(?:msy|tsk|tcli)[-_][A-Za-z0-9_-]{8,}|(?:token|key|signature|secret)=\S+)`)
 	excerptEmail = regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+`)
 )
 
@@ -39,7 +39,7 @@ var (
 //   - every URL (signed query, private path, task identifier), replaced by
 //     [url];
 //   - bearer/key/token assignments and provider key shapes (logging.Redact
-//     plus the Meshy msy- shape);
+//     plus the Meshy msy- and Tripo tsk_/tcli_ shapes);
 //   - e-mail addresses;
 //
 // then drops unprintable characters, collapses whitespace and bounds the

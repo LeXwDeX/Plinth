@@ -16,6 +16,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
@@ -57,6 +58,12 @@ type Adapter struct {
 	statusMapping      *generation.StatusMapping
 	nativeSourceClient *http.Client
 	scratchDir         string
+	// unknownPolls counts consecutive polls per remote task that returned a
+	// status word with a declared max_consecutive bound (see observation).
+	// It is process-local on purpose: the bound only has to be finite, and a
+	// restart merely grants a fresh allowance.
+	unknownMu    sync.Mutex
+	unknownPolls map[string]int
 }
 
 type providerOptions struct {
@@ -578,6 +585,14 @@ type task struct {
 	Status   string         `json:"status"`
 	Progress int            `json:"progress"`
 	Output   map[string]any `json:"output"`
+	// ErrorCode / ErrorMessage describe a failed task. The official Tripo
+	// task object carries error_code (an integer) and error_message (the
+	// official Python SDK reads the same pair as error_code / error_msg).
+	// Both are upstream-controlled: they only feed the internal forensic
+	// fields and the Schema code map, never SafeDetail.
+	ErrorCode    json.RawMessage `json:"error_code,omitempty"`
+	ErrorMessage string          `json:"error_message,omitempty"`
+	ErrorMsg     string          `json:"error_msg,omitempty"`
 	// CreditsConsumed 保留上游 v3 任务响应的 credits_consumed 原始
 	// 数值（官方 Go SDK types.go：十进制最多两位，VIP 折扣可为小数），
 	// 作为转换任务的计费证据写入 Provider 私有 Opaque，不截断。
@@ -604,6 +619,21 @@ func (a *Adapter) observation(
 			false,
 			"Tripo 返回未知任务状态",
 		)
+	}
+	// A status word with a declared max_consecutive (Tripo's "unknown") keeps
+	// the task in its declared phase, but only for that many polls in a row;
+	// the next poll ends the attempt with the declared failure class.
+	if a.exceedsConsecutiveBound(request.Job.RemoteID, rule) {
+		observation.Phase = generation.UpstreamFailed
+		// The coordinator drops an observation whose key equals the last
+		// recorded one, so the terminal transition needs a key of its own.
+		observation.DedupeKey = privateDedupeKey(request.Job.RemoteID, status, "poll-limit-exceeded")
+		observation.Failure = &generation.Failure{
+			Class:      generation.FailureClass(rule.Class),
+			Retryable:  rule.Retryable,
+			SafeDetail: "Tripo 任务状态为 " + status + "，超过轮询上限",
+		}
+		return observation, nil
 	}
 	switch rule.Phase {
 	case "accepted":
@@ -634,11 +664,21 @@ func (a *Adapter) observation(
 		if rule.Class != "" {
 			class = generation.FailureClass(rule.Class)
 		}
+		code := taskErrorCode(value.ErrorCode)
+		// The task's own error_code refines the class through the
+		// connection's upstream_code_map, unless the status word itself
+		// declares one (banned, expired). Retryability stays with the status
+		// rule: a failed task is not retried because its code looks transient.
+		if mapped, known := a.mappedTaskErrorClass(code); known && rule.Class == "" {
+			class = mapped
+		}
 		observation.Failure = &generation.Failure{
 			Class:      class,
 			Retryable:  rule.Retryable,
 			SafeDetail: "Tripo 任务状态为 " + status,
 		}
+		observation.Failure.UpstreamCode = code
+		observation.Failure.UpstreamExcerpt = taskErrorExcerpt(request, code, value)
 	default:
 		return generation.Observation{}, failure(
 			generation.FailureProtocol,
@@ -653,6 +693,77 @@ func (a *Adapter) observation(
 		observation.Opaque = mergeConversionEvidence(request.Opaque, value)
 	}
 	return observation, nil
+}
+
+// exceedsConsecutiveBound counts consecutive polls of a status word whose rule
+// declares max_consecutive and reports whether the bound is now exceeded.
+// Any other status word resets the count for that remote task.
+func (a *Adapter) exceedsConsecutiveBound(remoteID string, rule generation.StatusRule) bool {
+	a.unknownMu.Lock()
+	defer a.unknownMu.Unlock()
+	if rule.MaxConsecutive <= 0 {
+		delete(a.unknownPolls, remoteID)
+		return false
+	}
+	if a.unknownPolls == nil {
+		a.unknownPolls = map[string]int{}
+	}
+	a.unknownPolls[remoteID]++
+	if a.unknownPolls[remoteID] > rule.MaxConsecutive {
+		delete(a.unknownPolls, remoteID)
+		return true
+	}
+	return false
+}
+
+// taskErrorCode returns a failed task's error_code as a plain decimal string
+// (the field is an integer upstream; a quoted number is tolerated). Anything
+// else is dropped rather than persisted.
+func taskErrorCode(raw json.RawMessage) string {
+	text := strings.Trim(strings.TrimSpace(string(raw)), `"`)
+	if text == "" || len(text) > 8 {
+		return ""
+	}
+	for _, r := range text {
+		if r < '0' || r > '9' {
+			return ""
+		}
+	}
+	return text
+}
+
+func (a *Adapter) mappedTaskErrorClass(code string) (generation.FailureClass, bool) {
+	if code == "" || a.errorMapping == nil {
+		return "", false
+	}
+	rule, ok := a.errorMapping.UpstreamCodeMap[code]
+	if !ok || rule.Class == "" {
+		return "", false
+	}
+	return generation.FailureClass(rule.Class), true
+}
+
+// taskErrorExcerpt builds the internal-only evidence for a failed task. The
+// message is upstream-controlled (it can echo the prompt, signed URLs or keys),
+// so it goes through generation.UpstreamExcerpt with the frozen input's
+// free-text values as echoes.
+func taskErrorExcerpt(request generation.ObserveRequest, code string, value task) string {
+	message := strings.TrimSpace(value.ErrorMessage)
+	if message == "" {
+		message = strings.TrimSpace(value.ErrorMsg)
+	}
+	parts := make([]string, 0, 2)
+	if code != "" {
+		parts = append(parts, "code="+code)
+	}
+	if message != "" {
+		parts = append(parts, "message="+message)
+	}
+	return generation.UpstreamExcerpt(
+		strings.Join(parts, " "),
+		generation.UpstreamExcerptRunes,
+		generation.InputEchoes(request.Offering, request.Input)...,
+	)
 }
 
 func privateDedupeKey(parts ...string) string {

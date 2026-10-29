@@ -1,0 +1,12 @@
+{
+  "api_version": "v3",
+  "candidate_sha256": "a69f16c0169bf70e155d93ad5bc8590af3137e3f34e7c4b737706c50ca887239",
+  "captured_at_utc": "2026-10-29",
+  "exchanges": 6,
+  "offering": "tripo/geometry/decimate-triangle",
+  "provenance": "captured",
+  "scenario": "tripo-v3-alignment",
+  "source_revision": "unknown",
+  "transformation": "IDs, signed URLs, timestamps and amounts are deterministic placeholders; media bytes are not stored.",
+  "version": 1
+}

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-10-30.issue126-capture-textures-unavailable.2",
+    "revision": "2026-10-30.issue142-tripo-task-error-code.1",
     "terminology": {
       "user_facing": [
         {
@@ -788,6 +788,11 @@
                 "class": "authentication"
               },
               {
+                "min": 402,
+                "max": 402,
+                "class": "insufficient_balance"
+              },
+              {
                 "min": 403,
                 "max": 403,
                 "class": "invalid_input"
@@ -830,11 +835,66 @@
                 "class": "authentication"
               },
               {
+                "min": 402,
+                "max": 402,
+                "class": "insufficient_balance"
+              },
+              {
                 "min": 403,
                 "max": 403,
                 "class": "invalid_input"
               }
             ],
+            "upstream_code_map": {
+              "insufficient_quota": {
+                "class": "insufficient_balance"
+              },
+              "payment_required": {
+                "class": "insufficient_balance"
+              },
+              "quota_exceeded": {
+                "class": "credential_quota"
+              },
+              "failed_precondition": {
+                "class": "rejected"
+              },
+              "out_of_range": {
+                "class": "invalid_input"
+              },
+              "safety": {
+                "class": "invalid_input"
+              },
+              "recitation": {
+                "class": "invalid_input"
+              },
+              "language": {
+                "class": "invalid_input"
+              },
+              "prohibited_content": {
+                "class": "invalid_input"
+              },
+              "spii": {
+                "class": "invalid_input"
+              },
+              "blocklist": {
+                "class": "invalid_input"
+              },
+              "image_safety": {
+                "class": "invalid_input"
+              },
+              "image_prohibited_content": {
+                "class": "invalid_input"
+              },
+              "image_recitation": {
+                "class": "invalid_input"
+              },
+              "image_other": {
+                "class": "invalid_input"
+              },
+              "content_blocked": {
+                "class": "invalid_input"
+              }
+            },
             "message_matchers": [
               {
                 "contains_any": [
@@ -875,6 +935,12 @@
             "upstream_code_map": {
               "AccountOverdueError": {
                 "class": "insufficient_balance"
+              },
+              "QuotaExceeded": {
+                "class": "credential_quota"
+              },
+              "SetLimitExceeded": {
+                "class": "credential_quota"
               }
             },
             "message_matchers": [
@@ -1169,6 +1235,11 @@
               },
               "expired": {
                 "phase": "failed"
+              },
+              "unknown": {
+                "phase": "running",
+                "class": "upstream_unavailable",
+                "max_consecutive": 20
               }
             }
           }

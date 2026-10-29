@@ -287,13 +287,64 @@ class LostSourceSelectionTests(unittest.TestCase):
             self.assertEqual(runner.digest(root / "acceptance.db"), before)
             self.assertEqual((root / "manifest.json").read_bytes(), snapshot)
 
+    @staticmethod
+    def identities(**changes):
+        """The execution identities of a store holding one lost-submit Task (recovered-rigging) and its older work."""
+        found = {"generation_tasks": ["older", "recovered-rigging"], "generation_attempts": ["older-attempt"],
+                 "generation_prepared_inputs": ["input"], "execution_grants": ["grant"], "generation_usage_ledger": ["older-ledger"],
+                 "owners": {"generation_attempts": {"older-attempt": "older"}, "generation_usage_ledger": {"older-ledger": "older"}}}
+        for key, value in changes.items():
+            found[key] = value
+        return found
+
+    def after_settling(self, *, attempts=("older-attempt", "recovered-attempt"), ledger=("older-ledger", "recovered-ledger"), **changes):
+        owners = {"generation_attempts": {a: ("older" if a == "older-attempt" else "recovered-rigging") for a in attempts},
+                  "generation_usage_ledger": {r: ("older" if r == "older-ledger" else "recovered-rigging") for r in ledger}}
+        return self.identities(generation_attempts=sorted(attempts), generation_usage_ledger=sorted(ledger), owners=owners, **changes)
+
+    def reconcile_with(self, after):
+        subject = self.complete_subject()
+        subject.identities = Mock(side_effect=[self.identities(), after])
+        subject.lost_response()
+
+    def test_the_accepted_tasks_own_attempt_and_ledger_row_may_appear_whenever_it_settles(self):
+        # Neither the count nor a moment in time decides: the Attempt and ledger rows of the Task the lost submit
+        # created are its own lifecycle, whether they existed before the first reconcile or appeared after it.
+        self.reconcile_with(self.after_settling())
+        before = self.identities(generation_attempts=["older-attempt", "recovered-attempt"],
+                                 owners={"generation_attempts": {"older-attempt": "older", "recovered-attempt": "recovered-rigging"},
+                                         "generation_usage_ledger": {"older-ledger": "older"}})
+        subject = self.complete_subject()
+        subject.identities = Mock(side_effect=[before, self.after_settling()])
+        subject.lost_response()
+
+    def test_reconciliation_may_not_allocate_another_task_grant_or_prepared_input(self):
+        for table in ("generation_tasks", "execution_grants", "generation_prepared_inputs"):
+            with self.subTest(table=table):
+                with self.assertRaisesRegex(runner.AcceptanceError, f"allocated {table} rows"):
+                    self.reconcile_with(self.after_settling(**{table: ["extra", *self.identities()[table]]}))
+
+    def test_reconciliation_may_not_allocate_an_attempt_or_ledger_row_of_another_task(self):
+        for table, rows in (("generation_attempts", ("older-attempt", "recovered-attempt", "foreign-attempt")),
+                            ("generation_usage_ledger", ("older-ledger", "recovered-ledger", "foreign-ledger"))):
+            with self.subTest(table=table):
+                kwargs = {"attempts": rows} if table == "generation_attempts" else {"ledger": rows}
+                after = self.after_settling(**kwargs)
+                after["owners"][table][rows[-1]] = "another-task"
+                with self.assertRaisesRegex(runner.AcceptanceError, f"{table} rows of another Task"):
+                    self.reconcile_with(after)
+
+    def test_the_accepted_task_may_not_be_paid_for_twice(self):
+        with self.assertRaisesRegex(runner.AcceptanceError, "ran 2 Attempts"):
+            self.reconcile_with(self.after_settling(attempts=("older-attempt", "recovered-attempt", "second-attempt")))
+
     def complete_subject(self):
         subject = self.subject()
         subject.wait_plan = Mock(side_effect=[{"state": "PAUSED"}, {"state": "SUCCEEDED"}])
         subject.frozen = Mock(return_value={"prepared_input_id": "original-frozen-input"})
         subject.browser = Mock(return_value=False)
         subject.act = Mock()
-        subject.counts = Mock(return_value={"generation_tasks": 4, "execution_grants": 4})
+        subject.identities = Mock(side_effect=[self.identities(), self.after_settling()])
         subject.other = Mock()
         subject.get_plan = Mock(side_effect=[{"failure": "plan_submit_unreconciled", "version": 2},
                                             {"steps": [{"task_id": "recovered-rigging"}], "version": 3}])
