@@ -963,8 +963,18 @@ func (s *Server) skillCatalogSchema(
 	}
 
 	fields := s.application.Chat.Skills.Fields
+	locale := requestLocale(request)
 	skills := make([]map[string]any, 0, len(skillCatalog.Skills))
 	for _, skill := range skillCatalog.Skills {
+		if skill.Tool != "" {
+			// A system Skill's copy is Schema text: the picker shows it in the
+			// reader's locale. The stored Skill and the Agent directive built
+			// from it are not changed. Personal and published Skills are
+			// person content and stay as written.
+			skill.NameZH = s.textIn(locale, skill.NameZH)
+			skill.Prompt = s.textIn(locale, skill.Prompt)
+			skill.DefaultMessage = s.textIn(locale, skill.DefaultMessage)
+		}
 		projected := map[string]any{
 			fields.ID:              skill.ID,
 			fields.Name:            skill.Name,

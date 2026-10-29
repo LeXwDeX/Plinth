@@ -271,3 +271,74 @@ func TestFrozenQuoteLabelRenamedSinceFollowsTheLocaleByComponentID(t *testing.T)
 		t.Fatal("default locale or frozen evidence changed")
 	}
 }
+
+// #62 I18N-03: the system Skill's name, description and default message follow
+// the request locale; the English picker must not show the Chinese copy.
+func TestSystemSkillCatalogFollowsTheLocale(t *testing.T) {
+	t.Parallel()
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := product.Application()
+	defaults, err := catalog.LoadDefaultSkillCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := OpenMigratedTestRepository(filepath.Join(t.TempDir(), "skills.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	service, err := agentconfiguration.New(repo, schema, defaults, product.List(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := access.NewPolicy(access.PolicyConfig{DefaultRole: "user", AdminRole: "admin", Roles: []access.RoleDefinition{{Key: "user"}, {Key: "admin"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	texts, err := catalog.NewTextLocalizer(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{
+		identity:    DevelopmentIdentity{DefaultClaims: access.Claims{ID: "u", Roles: []string{"user"}}, Policy: policy},
+		application: schema, agentConfiguration: service, texts: texts,
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)), mux: http.NewServeMux(),
+	}
+	server.mux.HandleFunc("GET "+schema.Runtime.HTTP.Routes.ChatSkills, server.skillCatalogSchema)
+	read := func(locale string) map[string]any {
+		request := httptest.NewRequest(http.MethodGet, schema.Runtime.HTTP.Routes.ChatSkills, nil)
+		request = request.WithContext(catalog.WithLocale(context.Background(), locale))
+		response := httptest.NewRecorder()
+		server.mux.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("skills %s: %d %s", locale, response.Code, response.Body.String())
+		}
+		var payload struct {
+			Skills []map[string]any `json:"skills"`
+		}
+		decodeTestJSON(t, response.Body.Bytes(), &payload)
+		for _, skill := range payload.Skills {
+			if skill["id"] == "system-three-view" {
+				return skill
+			}
+		}
+		t.Fatalf("system-three-view missing for %q", locale)
+		return nil
+	}
+	fields := schema.Chat.Skills.Fields
+	english, chinese := read("en"), read("")
+	for _, key := range []string{fields.NameZH, fields.Prompt, fields.DefaultMessage} {
+		value, _ := english[key].(string)
+		if value == "" || serverChineseText.MatchString(value) {
+			t.Fatalf("en %s = %q", key, value)
+		}
+	}
+	for _, key := range []string{fields.NameZH, fields.Prompt, fields.DefaultMessage} {
+		if value, _ := chinese[key].(string); !serverChineseText.MatchString(value) {
+			t.Fatalf("default %s = %q", key, value)
+		}
+	}
+}

@@ -32,6 +32,8 @@ import {
 import { priceTotalsAmountsText, sessionPriceTotalsText } from '@/lib/chat/approval-modes';
 import { schemaText } from '@/lib/product-schema';
 import { formatPriceTotal } from '@/lib/pricing';
+import { formatBalanceAmount } from '@/lib/i18n/format';
+import { activeLocale } from '@/lib/i18n/locale';
 
 interface DateRange {
   start: string;
@@ -196,7 +198,7 @@ export default function AdminPage() {
                   <p className="text-2xl font-bold tabular-nums">
                     {balance?.priceMode === 'native'
                       ? balance.nativeBalance ? formatPriceTotal(balance.nativeBalance) : schemaText(schema, 'ui.pricing.balance_unknown')
-                      : balance?.currentBalance ?? presentation.empty_placeholder}
+                      : typeof balance?.currentBalance === 'number' ? formatBalanceAmount(balance.currentBalance, activeLocale(schema)) : presentation.empty_placeholder}
                   </p>
                 )}
               </div>
