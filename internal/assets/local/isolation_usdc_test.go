@@ -598,8 +598,8 @@ func TestUSDCUnsupportedLayerPathAndEncodingFraming(t *testing.T) {
 }
 
 func TestUSDCArchiveRastersShareOneWorkBudget(t *testing.T) {
-	// Each tiny, valid PNG has at least a fixed 4MiB codec work allowance.
-	// Reusing identical bytes under distinct names must not create a fresh
+	// Each tiny, valid PNG has at least a fixed 64 KiB codec work allowance, so
+	// the 512 MiB floor holds about 8000 of them. Reusing identical bytes under distinct names must not create a fresh
 	// budget per member.
 	makeArchive := func(count int) []byte {
 		var b bytes.Buffer
@@ -626,7 +626,7 @@ func TestUSDCArchiveRastersShareOneWorkBudget(t *testing.T) {
 	}
 	t.Run("small_archive", func(t *testing.T) { usdcDelivery(t, makeArchive(2), "usdz", true) })
 	t.Run("cumulative_limit", func(t *testing.T) {
-		d := makeArchive(129)
+		d := makeArchive(8300)
 		f, e := os.CreateTemp(t.TempDir(), "fixture")
 		if e != nil {
 			t.Fatal(e)
