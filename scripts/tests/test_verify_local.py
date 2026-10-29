@@ -679,6 +679,9 @@ class MissingConfigurationMonitorTests(VerificationTests):
         snapshot = v.Snapshot()
         snapshot.monitor = monitor
         snapshot.add(target)
+        # FSEvents drops events for changes made while its stream is still starting
+        # (#135), which would make the detection tests below race the OS, not the monitor.
+        v.time.sleep(0.3)
         return monitor, snapshot
     def test_unrelated_preferences_style_churn_does_not_change_input(self):
         target = self.parent / 'pnpm/config.yaml'

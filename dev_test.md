@@ -43,6 +43,8 @@
 
 CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check`（第 4、7、8 项；第 8 项只需 git 与 python3，放在已有作业里不多占 runner 槽位）、`go test race`（第 6 项）。三个作业放在同一 stage，同时排队、互不等待；前端几项合为一个作业，因为每个作业都要单独等一个 runner 槽位，排队时间远长于这几项本身的运行时间（2026-10-20 流水线 30897/30899：前端各作业运行 7–27 秒，却各排队 18–55 分钟，Go 各作业还要等前端阶段结束）。CI 只有这三个作业，不构建镜像（#257）。
 
+**`scripts/tests` 不在上述 8 项门禁内（#135）**：这是发布与门禁脚本（`verify-local.py`、`release-env.py`、公开快照检查、hook 安装器等）自己的 Python 单测，用 `python3 -m unittest discover -s scripts/tests -p 'test_*.py'` 运行（项目不用 pytest），约 2 分钟。它不进门禁清单，原因是：`test_verify_local.py` 的指纹/文件监视测试依赖 macOS FSEvents 与本机 Node，并按 `verify-local.py` 只支持 macOS 工具链的前提编写；ci-gate-parity 守门也只认 `pnpm`/`node`/`go`/`bash scripts/` 命令。改动 `scripts/*.py`、`scripts/tests/` 或 hook 安装器时须在本机全量运行并通过，PR 里记录结果。FSEvents 会丢弃监视流刚启动时的事件：`InputMonitor` 停止时每 250 ms 重建 marker 直至事件到达（最长 3 秒），监视类测试在启动监视后先等 0.3 秒再改文件，不再随机出现 `marker-missing`。
+
 本机门禁对第 5 项（及 `--race` 时的第 6 项）额外加 `-timeout=30m`：同一工作站并行运行多个会话的门禁时，`httpapi`、`sqlite` 等包会超过 Go 默认的单包 10 分钟上限而误报失败（2026-10-19 多次出现，单独重跑均通过）。CI 的 race 作业以作业级 `GOFLAGS=-timeout=30m` 做同样放宽（2026-10 在单台 runner 上 `httpapi` 包 race 约 596 秒，贴近 10 分钟上限）。这些参数只放宽单包超时，不改变测试集合与判定，门禁命令仍按上面所列。
 
 部分 Generation、Agent 工具和 HTTP 集成测试通过 `internal/adapters/sqlite/sqlitetest.Open` 创建独立数据库：该 helper 在每个测试进程内共享一个惰性构建的真实迁移模板库，关闭连接并确认没有 WAL 后缓存其字节，只为不存在的目标文件复制。每次仍调用真实 `sqlite.Open` 检查迁移版本与 checksum；已有数据库原样打开，重启、恢复和篡改场景不覆盖原文件。SQLite 迁移测试继续直接执行真实迁移，不使用该模板。此优化只减少重复 fixture 初始化，不减少测试集合、断言或 race 检测，也不改变 runner 上限。
