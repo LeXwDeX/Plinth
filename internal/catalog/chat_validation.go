@@ -219,6 +219,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateDSMLSpellings(schema.DSML); err != nil {
 		return err
 	}
+	if err := validateInputGapTexts(schema.Presentation.Messages); err != nil {
+		return err
+	}
 	if err := validateToolRoundLimitPending(schema.Presentation.Messages); err != nil {
 		return err
 	}
@@ -1632,6 +1635,40 @@ func validateDSMLSpellings(schema ChatDSMLSchema) error {
 				return fmt.Errorf("%s 重复声明 %q", list.name, value)
 			}
 			seen[value] = struct{}{}
+		}
+	}
+	return nil
+}
+
+// validateInputGapTexts checks that the sentences of the missing-input report
+// carry the placeholders their code fills (A3, #121).
+func validateInputGapTexts(messages ChatMessageTexts) error {
+	for name, check := range map[string]struct {
+		text         string
+		placeholders []string
+	}{
+		"input_gap_missing":            {messages.InputGapMissing, []string{"{name}", "{type}", "{options}", "{supply}"}},
+		"input_gap_reference_image":    {messages.InputGapReferenceImage, nil},
+		"input_gap_text_limit":         {messages.InputGapTextLimit, []string{"{max}"}},
+		"input_gap_labeled":            {messages.InputGapLabeled, []string{"{label}", "{type}"}},
+		"input_gap_options":            {messages.InputGapOptions, []string{"{values}"}},
+		"input_gap_supply_reference":   {messages.InputGapSupplyReference, []string{"{argument}"}},
+		"input_gap_supply_argument":    {messages.InputGapSupplyArgument, []string{"{argument}"}},
+		"input_gap_supply_unavailable": {messages.InputGapSupplyUnavailable, nil},
+		"input_shape":                  {messages.InputShape, []string{"{fields}"}},
+		"input_shape_text":             {messages.InputShapeText, []string{"{name}", "{count}"}},
+		"input_shape_list":             {messages.InputShapeList, []string{"{name}", "{count}"}},
+		"input_shape_boolean":          {messages.InputShapeBoolean, []string{"{name}"}},
+		"input_shape_number":           {messages.InputShapeNumber, []string{"{name}"}},
+		"input_shape_value":            {messages.InputShapeValue, []string{"{name}"}},
+	} {
+		if strings.TrimSpace(check.text) == "" {
+			return fmt.Errorf("presentation.%s 不能为空", name)
+		}
+		for _, placeholder := range check.placeholders {
+			if !strings.Contains(check.text, placeholder) {
+				return fmt.Errorf("presentation.%s 须含 %s", name, placeholder)
+			}
 		}
 	}
 	return nil

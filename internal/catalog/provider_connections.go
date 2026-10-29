@@ -288,6 +288,13 @@ func validateErrorMapping(connectionID string, mapping *schemacontract.ErrorMapp
 				index,
 			)
 		}
+		if status := matcher.HTTPStatus; status != nil && (status.Min < 100 || status.Max > 599 || status.Min > status.Max) {
+			return fmt.Errorf(
+				"连接 %q 的 error_mapping.message_matchers[%d].http_status 必须是 100-599 内 min<=max 的区间",
+				connectionID,
+				index,
+			)
+		}
 	}
 	return nil
 }

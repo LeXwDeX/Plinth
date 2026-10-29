@@ -3,26 +3,22 @@ package meshy
 import (
 	"regexp"
 	"strings"
-	"unicode"
+
+	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
-const (
-	taskErrorMessageRunes = 300
-	taskErrorCodeRunes    = 64
-)
+const taskErrorCodeRunes = 64
 
-var (
-	taskErrorURL    = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://\S+`)
-	taskErrorSecret = regexp.MustCompile(`(?i)\b(?:bearer\s+\S+|msy[-_][A-Za-z0-9_-]{8,}|(?:token|key|signature|secret)=\S+)`)
-	taskErrorCode   = regexp.MustCompile(`^[A-Za-z0-9_.:-]+$`)
-)
+var taskErrorCode = regexp.MustCompile(`^[A-Za-z0-9_.:-]+$`)
 
 // taskErrorEvidence returns the internal forensic code and excerpt for a
 // failed Meshy task from the official task_error object (type, code, message).
-// Messages are upstream-controlled: URLs (signed asset links), bearer tokens
-// and key-like strings are replaced, control characters are dropped and the
-// text is bounded. A code that is not a plain token is dropped entirely.
-func taskErrorEvidence(response taskResponse) (code, excerpt string) {
+// Messages are upstream-controlled and may echo the submitted prompt, signed
+// URLs, tokens or e-mail addresses, so the excerpt goes through the one shared
+// sanitizer (generation.UpstreamExcerpt); echoes are the frozen task input's
+// free-text values, stripped exactly. A code that is not a plain token is
+// dropped entirely.
+func taskErrorEvidence(response taskResponse, echoes ...string) (code, excerpt string) {
 	if response.TaskError == nil {
 		return "", ""
 	}
@@ -37,25 +33,8 @@ func taskErrorEvidence(response taskResponse) (code, excerpt string) {
 	if code != "" {
 		parts = append(parts, "code="+code)
 	}
-	if message := redactTaskErrorText(response.TaskError.Message); message != "" {
+	if message := strings.TrimSpace(response.TaskError.Message); message != "" {
 		parts = append(parts, "message="+message)
 	}
-	return code, strings.Join(parts, " ")
-}
-
-func redactTaskErrorText(text string) string {
-	text = strings.ToValidUTF8(text, " ")
-	text = taskErrorURL.ReplaceAllString(text, "[url]")
-	text = taskErrorSecret.ReplaceAllString(text, "[redacted]")
-	text = strings.Map(func(r rune) rune {
-		if unicode.IsPrint(r) {
-			return r
-		}
-		return ' '
-	}, text)
-	text = strings.Join(strings.Fields(text), " ")
-	if runes := []rune(text); len(runes) > taskErrorMessageRunes {
-		text = string(runes[:taskErrorMessageRunes])
-	}
-	return text
+	return code, generation.UpstreamExcerpt(strings.Join(parts, " "), generation.UpstreamExcerptRunes, echoes...)
 }

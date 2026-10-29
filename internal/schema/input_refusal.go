@@ -166,3 +166,28 @@ func (messages ExecutionMessages) InputRefusal(reason InputRefusalReason, values
 		DetailValues:   pairs,
 	}
 }
+
+// PlanSourceFaceLimitRefusal is the Schema refusal of a whole plan whose
+// earlier step would deliver more triangles than a later step's source limit
+// accepts (#121). It is nil when the Schema declares no text. The Error is
+// UserFacing like InputRefusal; the values are service names, counts and the
+// compatible choices computed from the Schema declarations.
+func (messages ExecutionMessages) PlanSourceFaceLimitRefusal(sourceService, service string, estimate, limit int64, choices string) *Error {
+	template := messages.PlanSourceFaceLimit
+	if template == "" {
+		return nil
+	}
+	pairs := []string{
+		"{source_service}", sourceService, "{service}", service,
+		"{estimate}", strconv.FormatInt(estimate, 10), "{limit}", strconv.FormatInt(limit, 10),
+		"{choices}", choices,
+	}
+	return &Error{
+		Code:           ErrInvalidInput,
+		Operation:      "validate_plan_source_limit",
+		Detail:         strings.NewReplacer(pairs...).Replace(template),
+		UserFacing:     true,
+		DetailTemplate: template,
+		DetailValues:   pairs,
+	}
+}

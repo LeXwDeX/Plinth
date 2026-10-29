@@ -145,6 +145,18 @@ func newAgentPlanHarness(t *testing.T, mode string, requireHuman bool) *agentPla
 	return &agentPlanHarness{h, plans, gateway, grants, store}
 }
 
+// withTexts is the same executor with the turn-locale copy, as the app wires it.
+func (h *agentPlanHarness) withTexts(texts *catalog.TextLocalizer) *generationtool.Executor {
+	h.t.Helper()
+	executor, err := generationtool.New(generationtool.Config{Gateway: h.gateway, References: &fakeReferences{}, Operations: h.processingHarness.gateway.repo,
+		Grants: h.grants, Processing: h.plans, PlanCatalog: agentPlanCatalog{h.processingHarness.gateway.product}, Chat: h.app.Chat, Texts: texts,
+		StopRequested: func(context.Context, string, string, string) (bool, error) { return false, nil }})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return executor
+}
+
 const agentPlanArguments = `{"source_task_id":"model-1","steps":[{"capability":"remesh","parameters":{"target_polycount":20000}},{"capability":"rigging","parameters":{}},{"capability":"animation","parameters":{"action_id":10}}]}`
 
 func (h *agentPlanHarness) command(arguments string) chat.ToolCommand {
@@ -403,5 +415,48 @@ func TestAgentPlanObservationIsReadOnlyOwnerAndSessionScoped(t *testing.T) {
 	}
 	if len(h.gateway.commands) != 0 {
 		t.Fatal("observation submitted work")
+	}
+}
+
+// #121: a plan whose Remesh defaults would exceed Rigging's source limit is
+// refused before anything is created or paid, and the Agent is told the
+// limit and the compatible parameters in the turn's language.
+func TestAgentPlanRefusesRemeshDefaultsOverTheRiggingLimit(t *testing.T) {
+	const defaults = `{"source_task_id":"model-1","steps":[{"capability":"remesh","parameters":{}},{"capability":"rigging","parameters":{}}]}`
+	for locale, want := range map[string][]string{
+		"zh": {"600000", "320000", "quad ≤ 160000 / triangle ≤ 320000", "整个计划没有创建"},
+		"en": {"about 600000 triangle faces", "320000", "quad ≤ 160000 / triangle ≤ 320000", "The plan was not created"},
+	} {
+		t.Run(locale, func(t *testing.T) {
+			h := newAgentPlanHarness(t, "auto", false)
+			texts, err := catalog.NewTextLocalizer(h.app)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.executor = h.withTexts(texts)
+			command := h.command(defaults)
+			command.Options.Locale = locale
+			result, err := h.executor.Execute(context.Background(), command, nil)
+			if err != nil || result.Error == "" || !result.NoSubmission {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+			for _, fragment := range want {
+				if !strings.Contains(result.Error, fragment) {
+					t.Fatalf("%s refusal %q lacks %q", locale, result.Error, fragment)
+				}
+			}
+			list, err := h.plans.List(context.Background(), "owner-a", "session-a")
+			if err != nil || len(list) != 0 || len(h.gateway.commands) != 0 || h.gateway.preparedCount != 0 {
+				t.Fatalf("refused plan caused work: plans=%v err=%v", list, err)
+			}
+		})
+	}
+	// The compatible parameters the refusal names are accepted.
+	h := newAgentPlanHarness(t, "auto", false)
+	for _, parameters := range []string{`{"topology":"quad","target_polycount":160000}`, `{"topology":"triangle","target_polycount":300000}`} {
+		arguments := `{"source_task_id":"model-1","steps":[{"capability":"remesh","parameters":` + parameters + `},{"capability":"rigging","parameters":{}}]}`
+		if result, _ := h.executor.Execute(context.Background(), h.command(arguments), nil); result.Error != "" {
+			t.Fatalf("compatible plan %s refused: %s", parameters, result.Error)
+		}
 	}
 }

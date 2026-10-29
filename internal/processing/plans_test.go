@@ -348,7 +348,7 @@ func TestProductCatalogProcessingChainIsAcceptedBeforeAnyPaidSubmit(t *testing.T
 	}
 	_, err = service.Create(context.Background(), CreateCommand{OwnerID: "owner", SessionID: "session", SourceTaskID: "source", SourceAssetID: "model",
 		IdempotencyKey: "real-catalog-plan-key",
-		Steps: []StepRequest{{OfferingID: "meshy/processing/remesh", ExpectedOfferingRevision: revision("meshy/processing/remesh"), Input: json.RawMessage(`{}`)},
+		Steps: []StepRequest{{OfferingID: "meshy/processing/remesh", ExpectedOfferingRevision: revision("meshy/processing/remesh"), Input: json.RawMessage(`{"topology":"triangle","target_polycount":300000}`)},
 			{OfferingID: "meshy/processing/rigging", ExpectedOfferingRevision: revision("meshy/processing/rigging"), Input: json.RawMessage(`{}`)},
 			{OfferingID: "meshy/processing/animation", ExpectedOfferingRevision: revision("meshy/processing/animation"), Input: json.RawMessage(`{"action_id":1}`)}}})
 	if err != nil {

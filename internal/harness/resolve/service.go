@@ -13,6 +13,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness"
+	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 const (
@@ -67,7 +68,7 @@ type Snapshot struct {
 	Reason            string                     `json:"reason,omitempty"`
 	MissingParameters []string                   `json:"missing_parameters"`
 	// ConversationParameters are the reference-image inputs the Agent takes
-	// from the conversation (see ConversationParameter); they never block
+	// from the conversation (see schema.ConversationReferenceImage); they never block
 	// readiness and are not listed as missing.
 	ConversationParameters []string `json:"conversation_parameters,omitempty"`
 	// CallableWithMissing marks a needs_input turn whose only gap is a
@@ -286,7 +287,7 @@ func (s Service) ResolveSelection(ctx context.Context, selected harness.Selectio
 		}
 		// A reference image comes with the request in the conversation; the
 		// call is refused with the missing input named when it does not.
-		if ConversationParameter(parameter) {
+		if schema.ConversationReferenceImage(parameter) {
 			continue
 		}
 		if value, exists := values[parameter.Name]; exists && value != nil && value != "" {

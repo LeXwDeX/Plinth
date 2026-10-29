@@ -60,20 +60,62 @@ type Error struct {
 func (e *Error) Error() string               { return "model_input." + string(e.Kind) + "." + e.Reason }
 func failure(kind Kind, reason string) error { return &Error{Kind: kind, Reason: reason} }
 
-// Limits are explicit Product Schema inputs. The ceilings below are parser
-// safety boundaries; an out-of-range policy is rejected, never clamped.
-func (p Policy) Validate() error {
+// Ceilings are the parser safety boundaries of a profile: the largest Limits a
+// Policy may declare. They are the single source of those numbers; Validate
+// rejects anything above them and a caller that only reads a delivered GLB
+// takes them from GeneratedPolicy instead of copying them.
+func Ceilings(profileID, revision string) (Limits, bool) {
 	// Generated sources never decode pixels, so their raster ceilings bound
 	// header dimensions only; uploads keep the full-decode ceilings.
-	imagePixels, totalPixels := int64(1<<25), int64(1<<27)
+	limits := Limits{
+		MaxBytes: 256 << 20, MaxJSONBytes: 32 << 20, MaxDepth: 256, MaxElements: 1000000,
+		MaxVertices: 16000000, MaxTriangles: 16000000, MaxNodes: 100000, MaxWork: 1 << 32,
+		MaxImagePixels: 1 << 25, MaxTotalImagePixels: 1 << 27,
+	}
 	switch {
-	case p.ProfileID == ProfileID && p.Revision == ProfileRevision:
-	case p.ProfileID == GeneratedProfileID && p.Revision == GeneratedProfileRevision:
-		imagePixels, totalPixels = 1<<28, 1<<30
+	case profileID == ProfileID && revision == ProfileRevision:
+	case profileID == GeneratedProfileID && revision == GeneratedProfileRevision:
+		limits.MaxImagePixels, limits.MaxTotalImagePixels = 1<<28, 1<<30
 	default:
+		return Limits{}, false
+	}
+	return limits, true
+}
+
+// GeneratedPolicy is the policy for reading a GLB that a successful platform
+// Task or an owned upload already stored, at the profile's own ceilings. It is
+// a parser safety bound, not a product limit: a product limit such as a
+// triangle ceiling is compared with the measured Profile (see
+// Profile.ExceedsInstancedTriangles).
+func GeneratedPolicy() Policy {
+	limits, _ := Ceilings(GeneratedProfileID, GeneratedProfileRevision)
+	return Policy{ProfileID: GeneratedProfileID, Revision: GeneratedProfileRevision, Limits: limits}
+}
+
+// ExceedsInstancedTriangles reports whether the measured model has more
+// instanced triangles than limit. A limit of zero or less means undeclared.
+// The two Product Schema triangle ceilings share this comparison: the
+// endpoint limit on a profiled inline model input
+// (model_input_profile.max_instanced_triangles) and the limit on a step's
+// source model (Offering.source_model_limit).
+func (p Profile) ExceedsInstancedTriangles(limit int64) bool {
+	return limit > 0 && p.InstancedTriangles > limit
+}
+
+// Limits are explicit Product Schema inputs. The ceilings above are parser
+// safety boundaries; an out-of-range policy is rejected, never clamped.
+func (p Policy) Validate() error {
+	ceilings, known := Ceilings(p.ProfileID, p.Revision)
+	if !known {
 		return failure(InvalidPolicy, "unknown_profile")
 	}
-	limits := [][2]int64{{p.Limits.MaxBytes, 256 << 20}, {p.Limits.MaxJSONBytes, 32 << 20}, {p.Limits.MaxDepth, 256}, {p.Limits.MaxElements, 1000000}, {p.Limits.MaxVertices, 16000000}, {p.Limits.MaxTriangles, 16000000}, {p.Limits.MaxNodes, 100000}, {p.Limits.MaxWork, 1 << 32}, {p.Limits.MaxImagePixels, imagePixels}, {p.Limits.MaxTotalImagePixels, totalPixels}}
+	limits := [][2]int64{
+		{p.Limits.MaxBytes, ceilings.MaxBytes}, {p.Limits.MaxJSONBytes, ceilings.MaxJSONBytes},
+		{p.Limits.MaxDepth, ceilings.MaxDepth}, {p.Limits.MaxElements, ceilings.MaxElements},
+		{p.Limits.MaxVertices, ceilings.MaxVertices}, {p.Limits.MaxTriangles, ceilings.MaxTriangles},
+		{p.Limits.MaxNodes, ceilings.MaxNodes}, {p.Limits.MaxWork, ceilings.MaxWork},
+		{p.Limits.MaxImagePixels, ceilings.MaxImagePixels}, {p.Limits.MaxTotalImagePixels, ceilings.MaxTotalImagePixels},
+	}
 	for _, limit := range limits {
 		if limit[0] <= 0 || limit[0] > limit[1] {
 			return failure(InvalidPolicy, "invalid_limits")

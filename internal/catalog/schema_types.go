@@ -3532,6 +3532,28 @@ type ChatMessageTexts struct {
 	ToolRoundLimitPending     string `json:"tool_round_limit_pending"`
 	ToolRoundLimitPendingItem string `json:"tool_round_limit_pending_item"`
 	ToolRoundLimitPendingTool string `json:"tool_round_limit_pending_tool"`
+	// The InputGap* texts are how a processing tool names a required input its
+	// call did not supply (#92, A3 #121): Missing joins {name}, {type},
+	// {options} and {supply}. {type} is built from InputGapReferenceImage, or
+	// InputGapTextLimit ({max}), and InputGapLabeled ({label}, {type}) when the
+	// parameter has a public label; {options} from InputGapOptions ({values});
+	// {supply} from the InputGapSupply* texts ({argument}). InputShape lists the
+	// fields the call sent as {fields}, each from the InputShape* texts ({name},
+	// {count}): a field name and a type or size, never a value.
+	InputGapMissing           string `json:"input_gap_missing"`
+	InputGapReferenceImage    string `json:"input_gap_reference_image"`
+	InputGapTextLimit         string `json:"input_gap_text_limit"`
+	InputGapLabeled           string `json:"input_gap_labeled"`
+	InputGapOptions           string `json:"input_gap_options"`
+	InputGapSupplyReference   string `json:"input_gap_supply_reference"`
+	InputGapSupplyArgument    string `json:"input_gap_supply_argument"`
+	InputGapSupplyUnavailable string `json:"input_gap_supply_unavailable"`
+	InputShape                string `json:"input_shape"`
+	InputShapeText            string `json:"input_shape_text"`
+	InputShapeList            string `json:"input_shape_list"`
+	InputShapeBoolean         string `json:"input_shape_boolean"`
+	InputShapeNumber          string `json:"input_shape_number"`
+	InputShapeValue           string `json:"input_shape_value"`
 	// GenerationFailedByClass replaces GenerationFailed in the tool result
 	// when the Task failed with one of these failure classes, so the Agent and
 	// the user hear the real cause (for example an exhausted provider balance)
@@ -4589,18 +4611,20 @@ type rawOffering struct {
 	TimeoutSeconds                int                             `json:"timeout_seconds"`
 	// JobTimeoutSeconds 声明作业级总时长（attempt 从启动起的上限）；
 	// 0 = 继承 timeout_seconds（B17：request/job 超时拆分）。
-	JobTimeoutSeconds   int                               `json:"job_timeout_seconds,omitempty"`
-	PollIntervalSeconds int                               `json:"poll_interval_seconds"`
-	Retry               rawRetry                          `json:"retry"`
-	MaterializeAttempts int                               `json:"materialize_attempts"`
-	Parameters          []schemacontract.Parameter        `json:"parameters"`
-	InputRules          []schemacontract.InputRule        `json:"input_rules"`
-	Outputs             []schemacontract.AssetRequirement `json:"outputs"`
-	AssetHosts          []string                          `json:"asset_hosts"`
-	ProviderOptions     json.RawMessage                   `json:"provider_options"`
-	Cost                *schemacontract.CostDeclaration   `json:"cost"`
-	CostPolicy          *schemacontract.CostPolicy        `json:"cost_policy"`
-	PostSuccess         *schemacontract.PostSuccessPolicy `json:"post_success"`
+	JobTimeoutSeconds   int                                    `json:"job_timeout_seconds,omitempty"`
+	PollIntervalSeconds int                                    `json:"poll_interval_seconds"`
+	Retry               rawRetry                               `json:"retry"`
+	MaterializeAttempts int                                    `json:"materialize_attempts"`
+	Parameters          []schemacontract.Parameter             `json:"parameters"`
+	InputRules          []schemacontract.InputRule             `json:"input_rules"`
+	Outputs             []schemacontract.AssetRequirement      `json:"outputs"`
+	AssetHosts          []string                               `json:"asset_hosts"`
+	ProviderOptions     json.RawMessage                        `json:"provider_options"`
+	SourceModelLimit    *schemacontract.SourceModelLimit       `json:"source_model_limit"`
+	OutputTriangles     *schemacontract.OutputTriangleEstimate `json:"output_triangles"`
+	Cost                *schemacontract.CostDeclaration        `json:"cost"`
+	CostPolicy          *schemacontract.CostPolicy             `json:"cost_policy"`
+	PostSuccess         *schemacontract.PostSuccessPolicy      `json:"post_success"`
 }
 
 type rawRetry struct {

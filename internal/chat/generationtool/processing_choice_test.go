@@ -229,7 +229,7 @@ func TestMissingRequiredInputIsReportedWithFieldAndHowToSupplyIt(t *testing.T) {
 	}
 	command := chat.ToolCommand{Tool: h.tool("retexture_model")}
 	gaps := h.executor.InputGapsForTest(command, offering, map[string]any{"source_asset": "asset-1", "prompt": "mossy"})
-	if len(gaps) != 1 || !strings.Contains(gaps[0], `"reference_image"`) || !strings.Contains(gaps[0], "image from this chat") ||
+	if len(gaps) != 1 || !strings.Contains(gaps[0], "「reference_image」") || !strings.Contains(gaps[0], "本对话里的图片") ||
 		!strings.Contains(gaps[0], "reference_handles") || strings.Contains(gaps[0], "mossy") {
 		t.Fatalf("gaps = %q", gaps)
 	}

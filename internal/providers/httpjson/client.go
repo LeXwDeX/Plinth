@@ -17,7 +17,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
-	"unicode"
 
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
@@ -410,22 +409,12 @@ func errorEvidence(payload []byte) (string, string) {
 	return string(runes), code
 }
 
-// boundedExcerpt 生成去敏的错误体摘录：仅保留可打印字符，限制长度，
-// 供落库与管理侧诊断使用；不会出现在面向用户的文案里。
+// boundedExcerpt 生成去敏的错误体摘录，供落库与管理侧诊断使用；不会出现在
+// 面向用户的文案里。去敏规则只有 generation.UpstreamExcerpt 一份（URL、签名
+// query、令牌、邮箱、不可打印字符、按 rune 截断）；内核在落库前还会按冻结输入
+// 再剔除提示词回显。
 func boundedExcerpt(payload []byte) string {
-	const maximumBytes = 400
-	text := strings.ToValidUTF8(string(payload), " ")
-	text = strings.Map(func(r rune) rune {
-		if unicode.IsPrint(r) {
-			return r
-		}
-		return ' '
-	}, text)
-	text = strings.Join(strings.Fields(text), " ")
-	if len(text) > maximumBytes {
-		text = text[:maximumBytes]
-	}
-	return strings.TrimSpace(text)
+	return generation.UpstreamExcerpt(string(payload), generation.UpstreamExcerptRunes)
 }
 
 func withUpstreamEvidence(

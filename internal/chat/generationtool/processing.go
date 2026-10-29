@@ -735,7 +735,7 @@ func (executor *Executor) executeProcessing(
 	}
 	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, "",
 		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, observe)
-	return executor.processingOutcome(command, result, err, inputShape(input))
+	return executor.processingOutcome(command, result, err, executor.inputShape(command, input))
 }
 
 // processingOutcome reports a step the kernel or the Provider refused before
