@@ -234,8 +234,9 @@ RECOVERY
 - **入口**：`python3 scripts/host-ci/run.py <sha|HEAD>`，目标主机取环境 `dev-test` 的 `ssh`；CI 目录取该条目的可选字段 `"host_ci": {"dir": "<绝对路径>"}`（模板见 `deploy/environments.example.json`），缺省 `/var/lib/plinth-ci`。它必须与任何环境的 `root` 和 `protected_paths` 分开，`run.py` 会拒绝重叠。`release-env.py` 不读这个字段。
 - **目录**：`<CI 目录>/.lock`（互斥）、`run/<run id>/`（本次 bundle 与工作目录，结束即删）、`results/<run id>/`（结果 JSON、容器日志、重试证据，保留最近 10 次）。
 - **对象**：容器带标签 `plinth.host-ci=1`，名称 `plinth-ci-<run id>-aN`；镜像名 `plinth-ci:<12 位 hash>`，保留最新 2 个。与 Plinth 栈、`legacy-formal` 和同机其他业务的 Compose 项目、容器、卷、镜像互不相干；它们不在这套清理的范围内。
-- **开跑条件**：`MemAvailable` ≥ 15 GiB，CI 目录与 Docker 根目录所在磁盘各 ≥ 10 GiB 空闲。同机其他业务忙时可能不满足，此时工具以退出码 70 停下，不会强行启动；这不是故障，等资源恢复后重跑。
+- **开跑条件**：`MemAvailable` ≥ 13 GiB（容器上限 12 GiB 加 1 GiB 余量，可配置），CI 目录与 Docker 根目录所在磁盘各 ≥ 10 GiB 空闲。同机其他业务忙时可能不满足，此时工具以退出码 70 停下，不会强行启动；这不是故障，等资源恢复后重跑。
 - **手工排障**：只读查看 `docker ps -a --filter label=plinth.host-ci=1` 与 `<CI 目录>/results/`。需要清理时只删带这个标签的容器和 `<CI 目录>/run/` 下的子目录；下一次运行持锁后也会自动清理遗留。不要用 `docker system prune`、`docker image prune` 或通配符删除。
+- **工作流重放（#86）**：`python3 scripts/host-ci/run.py <sha> --workflows` 复用同一目录、同一把 `.lock` 与同一预检，用固定版本的 act（`<CI 目录>/tools/act-<版本>/act`，首次使用时下载并校验发布包摘要）和按摘要固定的运行器镜像 `catthehacker/ubuntu:act-24.04` 重放 `pull_request` 与 `push` 事件，作业容器同样带标签 `plinth.host-ci=1`、限 4 CPU / 12 GiB；`<CI 目录>/act-cache` 是 Action 缓存。这是本地模拟，不是 GitHub self-hosted runner，主机不接受平台事件。与门禁模式的差别：作业需要联网。两种运行结束后，本机用 `gh` 登录对被测 SHA 写 commit status `host-ci/gates` 与 `host-ci/workflows`（`--no-status` 可关）。排障时多出的只读检查：`docker ps -a --filter label=plinth.host-ci=1` 同样能看到 act 的作业容器；act 创建的 `act-` 前缀卷和网络在运行结束时按“本次新增”清理，不要用通配符手工删除。
 - **定位**：GitHub Actions 不可用期间，本项目的 CI 替代（沿用 #79 的裁定），同时是本地的干净复现环境；镜像定义在 `Dockerfile.ci`，入口 `scripts/host-ci/entry.sh`，见 `dev_test.md`「主机 CI」。
 
 ## 内部运维资产（自部署不需要）
