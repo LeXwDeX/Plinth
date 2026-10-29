@@ -23,13 +23,16 @@ type fakeStackTransport func(*http.Request) (*http.Response, error)
 
 func (f fakeStackTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// fakeStackHTTPTransport routes the fake artifact host of the Tripo
-// connection (and its anonymous native-source client) to the fake upstream's
-// plain-HTTP address. Everything else keeps the connection's own transport.
+// fakeStackHTTPTransport routes the fake artifact host of the Tripo, Meshy and
+// Hyper3D connections (and the anonymous native-source client of Tripo) to the
+// fake upstream's plain-HTTP address. Everything else keeps the connection's own
+// transport.
 func fakeStackHTTPTransport(fake *url.URL) func(string, http.RoundTripper) http.RoundTripper {
 	direct := &http.Transport{Proxy: nil}
 	return func(connectionID string, base http.RoundTripper) http.RoundTripper {
-		if connectionID != "tripo" && connectionID != "tripo.native-source" {
+		switch connectionID {
+		case "tripo", "tripo.native-source", "meshy", "hyper3d":
+		default:
 			return base
 		}
 		return fakeStackTransport(func(r *http.Request) (*http.Response, error) {

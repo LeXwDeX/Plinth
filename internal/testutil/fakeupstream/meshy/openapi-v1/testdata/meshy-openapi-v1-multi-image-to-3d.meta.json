@@ -1,0 +1,12 @@
+{
+  "api_version": "v1",
+  "candidate_sha256": "a90bbfd28f596011a9a82eb87e4b38d71874e43330d27588b2b5847a41e8f3f1",
+  "captured_at_utc": "2026-10-29",
+  "exchanges": 6,
+  "offering": "meshy/meshy-7.1-multiview/image-to-3d",
+  "provenance": "captured",
+  "scenario": "meshy-openapi-v1-alignment",
+  "source_revision": "unknown",
+  "transformation": "IDs, signed URLs, timestamps and amounts are deterministic placeholders; media bytes are not stored.",
+  "version": 1
+}

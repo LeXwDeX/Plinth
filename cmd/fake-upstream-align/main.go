@@ -61,6 +61,7 @@ func run(args []string) error {
 	worktree := flags.String("worktree", ".", "repository checkout")
 	seed := flags.String("vars", "", "official: seed variables, name=value,name=value (task ids of an earlier partial run)")
 	only := flags.String("steps", "", "official/export: comma-separated step names to run (default all)")
+	resume := flags.String("resume-from", "", "official: seed variables from an earlier run's bundle (its -tags value, or - for the untagged run)")
 	tags := flags.String("tags", "", "official/export: a single tag naming this partial run; compare: comma-separated tags to merge")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
@@ -85,14 +86,28 @@ func run(args []string) error {
 		return errors.New("-private must be an existing directory with mode 0700")
 	}
 	stem := strings.ReplaceAll(*version, "/", "-")
+	allSteps := profile.Steps
 	if *only != "" && command != "fake" && command != "compare" {
 		profile.Steps = filterSteps(profile.Steps, strings.Split(*only, ","))
 	}
 	switch command {
 	case "official":
-		return runOfficial(profile, *private, stem+tagSuffix(*tags), *keyEnv, *baseURL, *confirm, *seed)
+		vars := seedVars(*seed)
+		if *resume != "" {
+			earlier := strings.TrimPrefix(*resume, "-")
+			previous, err := align.LoadBundle(filepath.Join(*private, stem+tagSuffix(earlier)+".official.bundle.json"))
+			if err != nil {
+				return err
+			}
+			seeded := align.SeedFromBundle(allSteps, previous)
+			for name, value := range vars {
+				seeded[name] = value
+			}
+			vars = seeded
+		}
+		return runOfficial(profile, *private, stem+tagSuffix(*tags), *keyEnv, *baseURL, *confirm, vars)
 	case "export":
-		return runExport(profile, *private, stem+tagSuffix(*tags), *out, *name, *worktree, *seed, *offering)
+		return runExport(profile, allSteps, *private, stem+tagSuffix(*tags), *out, *name, *worktree, *seed, *offering, *resume)
 	case "fake":
 		return runFake(profile, *private, stem, *fakeURL, *fakeKey)
 	case "compare":
@@ -159,7 +174,7 @@ func captureConfig(profile align.Profile, worktree, baseURL string) (align.Captu
 	return config, nil
 }
 
-func runOfficial(profile align.Profile, private, stem, keyEnv, baseURL string, confirm bool, seed string) error {
+func runOfficial(profile align.Profile, private, stem, keyEnv, baseURL string, confirm bool, vars map[string]string) error {
 	if !confirm {
 		paid := 0
 		for _, step := range profile.Steps {
@@ -182,7 +197,7 @@ func runOfficial(profile align.Profile, private, stem, keyEnv, baseURL string, c
 		Name: "official", BaseURL: baseURL, Key: key,
 		Client:   &http.Client{Transport: tee, Timeout: 5 * time.Minute},
 		Download: &http.Client{Timeout: 5 * time.Minute},
-	}, profile.Steps, nil, seedVars(seed))
+	}, profile.Steps, nil, vars)
 	if bundle != nil {
 		if err := align.SaveBundle(filepath.Join(private, stem+".official.bundle.json"), bundle); err != nil {
 			return err
@@ -192,7 +207,7 @@ func runOfficial(profile align.Profile, private, stem, keyEnv, baseURL string, c
 	return runErr
 }
 
-func runExport(profile align.Profile, private, stem, out, name, worktree, seed, offering string) error {
+func runExport(profile align.Profile, allSteps []align.Step, private, stem, out, name, worktree, seed, offering, resumeTag string) error {
 	if out == "" || name == "" {
 		return errors.New("-out and -name are required")
 	}
@@ -220,13 +235,36 @@ func runExport(profile align.Profile, private, stem, out, name, worktree, seed, 
 		return err
 	}
 	defer capture.Close()
+	// The ids earlier steps of the official run produced seed the selected
+	// steps; -vars wins over them.
+	vars := align.SeedFromBundle(allSteps, bundle)
+	if resumeTag != "" {
+		previous, err := align.LoadBundle(filepath.Join(private, strings.Split(stem, ".")[0]+tagSuffix(strings.TrimPrefix(resumeTag, "-"))+".official.bundle.json"))
+		if err != nil {
+			return err
+		}
+		for name, value := range align.SeedFromBundle(allSteps, previous) {
+			if _, set := vars[name]; !set {
+				vars[name] = value
+			}
+		}
+	}
+	for name, value := range seedVars(seed) {
+		vars[name] = value
+	}
 	// Re-run the script offline against the saved official exchanges so the
 	// recorder sees exactly what the official run exchanged.
 	again, err := align.Run(context.Background(), profile.Provider, profile.API, align.Target{
 		Name: "official-replay", BaseURL: bundle.BaseURL, Key: "replay",
 		Client:    &http.Client{Transport: capture.Transport(replay)},
 		SkipFetch: true, NoPollDelay: true,
-	}, profile.Steps, nil, seedVars(seed))
+		FormHook: func(name, value string) string {
+			if align.DynamicString(value) {
+				return "id-form-" + name
+			}
+			return value
+		},
+	}, profile.Steps, nil, vars)
 	if err != nil {
 		return err
 	}

@@ -1,0 +1,12 @@
+{
+  "api_version": "v2",
+  "candidate_sha256": "98031a8233280c0f1b0bd43158c12579bd6a81982307e15cfebeb280fb960168",
+  "captured_at_utc": "2026-10-29",
+  "exchanges": 22,
+  "offering": "meshy/meshy-7.1/text-to-3d",
+  "provenance": "captured",
+  "scenario": "meshy-openapi-v2-alignment",
+  "source_revision": "unknown",
+  "transformation": "IDs, signed URLs, timestamps and amounts are deterministic placeholders; media bytes are not stored.",
+  "version": 1
+}

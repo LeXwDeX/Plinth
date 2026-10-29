@@ -9,8 +9,9 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
 )
 
-// Every registered version builds together, has an alignment profile, and its
-// first-phase providers are the Tripo and OpenAI-compatible fakes.
+// Every registered version builds together, has an alignment profile, and the
+// registered providers are Tripo, the OpenAI-compatible gateway, Meshy (one
+// version per route version) and Hyper3D.
 func TestVersionsAreRegisteredExplicitlyWithProfiles(t *testing.T) {
 	server, err := New(fakeupstream.Config{})
 	if err != nil {
@@ -36,8 +37,17 @@ func TestVersionsAreRegisteredExplicitlyWithProfiles(t *testing.T) {
 			t.Errorf("%s declares no endpoints", name)
 		}
 	}
-	if got["tripo/v3"] != "/tripo/v3" || got["openai/v1"] != "/openai/v1" || len(profiles) != len(got) {
+	want := map[string]string{
+		"tripo/v3": "/tripo/v3", "openai/v1": "/openai/v1", "meshy/openapi-v1": "/meshy/openapi/v1",
+		"meshy/openapi-v2": "/meshy/openapi/v2", "hyper3d/api-v2": "/hyper3d/api/v2",
+	}
+	if len(got) != len(want) || len(profiles) != len(got) {
 		t.Fatalf("versions %v, profiles %d", got, len(profiles))
+	}
+	for name, prefix := range want {
+		if got[name] != prefix {
+			t.Errorf("%s mounted at %q, want %q", name, got[name], prefix)
+		}
 	}
 }
 
@@ -51,8 +61,13 @@ func TestEveryVersionIsServedUnderItsOwnPrefixOnly(t *testing.T) {
 	for path, want := range map[string]int{
 		"/tripo/v3/account/balance": http.StatusUnauthorized, // routed: it asks for a key
 		"/openai/v1/models":         http.StatusUnauthorized,
-		"/v3/account/balance":       http.StatusNotFound, // the official prefix alone is not routed
-		"/tripo/v4/account/balance": http.StatusNotFound, // a version that is not registered
+		"/meshy/openapi/v1/balance": http.StatusUnauthorized,
+		"/meshy/openapi/v2/text-to-3d/01a18514-059e-73f7-a0ce-0f88a12c9300": http.StatusUnauthorized,
+		"/hyper3d/api/v2/check_balance":                                     http.StatusUnauthorized,
+		"/meshy/openapi/v3/balance":                                         http.StatusNotFound, // a Meshy route version that is not registered
+		"/meshy/balance":                                                    http.StatusNotFound, // the shared Meshy base alone is not a version
+		"/v3/account/balance":                                               http.StatusNotFound, // the official prefix alone is not routed
+		"/tripo/v4/account/balance":                                         http.StatusNotFound, // a version that is not registered
 	} {
 		response, err := http.Get(front.URL + path)
 		if err != nil {

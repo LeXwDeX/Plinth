@@ -1,0 +1,303 @@
+{
+  "provider": "hyper3d",
+  "api": "api-v2",
+  "official_base": "https://api.hyper3d.com/api/v2",
+  "checked_at": "2026-10-29",
+  "official_requests": 54,
+  "official_paid_requests": 6,
+  "fake_requests": 56,
+  "steps": [
+    {
+      "step": "balance",
+      "method": "GET",
+      "path": "/check_balance",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "balance-no-auth",
+      "method": "GET",
+      "path": "/check_balance",
+      "auth": "none",
+      "official_status": 401,
+      "fake_status": 401,
+      "official_fields": 3,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "status-invalid",
+      "method": "POST",
+      "path": "/status",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 400,
+      "fake_status": 400,
+      "official_fields": 5,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "download-invalid",
+      "method": "POST",
+      "path": "/download",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 400,
+      "fake_status": 400,
+      "official_fields": 5,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "rodin-invalid",
+      "method": "POST",
+      "path": "/rodin",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 201,
+      "fake_status": 201,
+      "official_fields": 3,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "rodin-no-auth",
+      "method": "POST",
+      "path": "/rodin",
+      "auth": "none",
+      "official_status": 401,
+      "fake_status": 401,
+      "official_fields": 3,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "rodin-text",
+      "method": "POST",
+      "path": "/rodin",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 201,
+      "fake_status": 201,
+      "official_fields": 10,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "rodin-text-status",
+      "method": "POST",
+      "path": "/status",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 201,
+      "fake_status": 201,
+      "official_fields": 5,
+      "official_task_statuses": [
+        "Done"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "rodin-text-download",
+      "method": "POST",
+      "path": "/download",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 201,
+      "fake_status": 201,
+      "official_fields": 5,
+      "artifacts": [
+        "list.0.url model/gltf-binary glb",
+        "list.1.url image/webp webp"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "rodin-image",
+      "method": "POST",
+      "path": "/rodin",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 201,
+      "fake_status": 201,
+      "official_fields": 10,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "rodin-image-status",
+      "method": "POST",
+      "path": "/status",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 201,
+      "fake_status": 201,
+      "official_fields": 5,
+      "official_task_statuses": [
+        "Done"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "rodin-image-download",
+      "method": "POST",
+      "path": "/download",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 201,
+      "fake_status": 201,
+      "official_fields": 5,
+      "artifacts": [
+        "list.0.url model/gltf-binary glb",
+        "list.1.url image/webp webp"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "bang",
+      "method": "POST",
+      "path": "/bang",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 201,
+      "fake_status": 201,
+      "official_fields": 9,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "bang-status",
+      "method": "POST",
+      "path": "/status",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 201,
+      "fake_status": 201,
+      "official_fields": 5,
+      "official_task_statuses": [
+        "Generating",
+        "Waiting",
+        "Generating",
+        "Done"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "bang-download",
+      "method": "POST",
+      "path": "/download",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 201,
+      "fake_status": 201,
+      "official_fields": 5,
+      "artifacts": [
+        "list.0.url model/gltf-binary glb"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "texture",
+      "method": "POST",
+      "path": "/rodin_texture_only",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 201,
+      "fake_status": 201,
+      "official_fields": 9,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "texture-status",
+      "method": "POST",
+      "path": "/status",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 201,
+      "fake_status": 201,
+      "official_fields": 5,
+      "official_task_statuses": [
+        "Generating",
+        "Done"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "texture-download",
+      "method": "POST",
+      "path": "/download",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 201,
+      "fake_status": 201,
+      "official_fields": 5,
+      "artifacts": [
+        "list.0.url model/gltf-binary glb"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    }
+  ],
+  "diffs": null,
+  "request_notes": [
+    "为每个端点取最便宜的请求：Gen-2.5-Extreme-Low、texture_mode=extreme-low，0.5 credit；Plinth 实际使用 Gen-2.5-Extreme-High，同一端点、同一响应结构。",
+    "官方运行分三段，报告把它们合并：第一段提交 rodin（文生、图生）、bang、texture，对 HTTP 201 的轮询未被工具识别为轮询（已修正），因此 status/download 留到第二段；第二段用同一批 uuid 与 subscription_key 补轮询和下载，并重发 bang；第三段重发 texture。",
+    "第一段的 bang 在 Rodin 任务尚未完成时发出，官方以 HTTP 201 + `{\"error\":\"ASSET_NOT_AVAILABLE\"}` 拒绝（未扣费）；fake 复现该拒绝，第二段在任务完成后重发并成功。",
+    "第一段的 texture 用了过小的占位 GLB，三个子作业以 Failed 结束（status 响应带顶层 message `Invalid input.`），已计费；第三段改用 bang 产出的 GLB 重发，是新的输入而非重放。该 Failed 响应未入库为样本，fake 的 Failed 状态按它的结构构造。",
+    "官方在请求缺少提示词与图片时返回 HTTP 201 + `{\"error\":\"INVALID_REQUEST\"}`（不是 4xx）；fake 复现。"
+  ],
+  "endpoints": [
+    {
+      "endpoint": "GET /check_balance",
+      "evidence": "real",
+      "sample": "GET /api/v2/check_balance",
+      "doc_url": "https://docs.hyper3d.ai/en/api-specification/check-balance",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /status",
+      "evidence": "real",
+      "sample": "POST /api/v2/status",
+      "doc_url": "https://docs.hyper3d.ai/en/api-specification/check-status",
+      "checked_at": "2026-10-29",
+      "note": "Waiting, Generating and Done polls are real; the Failed poll (a texture of an unreadable model: the jobs all Failed and a top-level message) was observed once but not committed as a sample, so it is built from the Done poll"
+    },
+    {
+      "endpoint": "POST /download",
+      "evidence": "real",
+      "sample": "POST /api/v2/download",
+      "doc_url": "https://docs.hyper3d.ai/en/api-specification/download-results",
+      "checked_at": "2026-10-29",
+      "note": "a download asked before the jobs finished answers an empty list (observed)"
+    },
+    {
+      "endpoint": "GET /files/{task_uuid}/{name}",
+      "evidence": "constructed-from-docs",
+      "doc_url": "https://docs.hyper3d.ai/en/api-specification/download-results",
+      "checked_at": "2026-10-29",
+      "note": "the official file host is not part of the API; this route serves the fixed files the download list names (content types as observed)"
+    },
+    {
+      "endpoint": "POST /rodin",
+      "evidence": "real",
+      "sample": "POST /api/v2/rodin",
+      "doc_url": "https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5",
+      "checked_at": "2026-10-29",
+      "note": "multipart request, HTTP 201 for a handled request; a rejected request is HTTP 201 with an error body (observed)"
+    },
+    {
+      "endpoint": "POST /bang",
+      "evidence": "real",
+      "sample": "POST /api/v2/bang",
+      "doc_url": "https://docs.hyper3d.ai/en/api-specification/bang",
+      "checked_at": "2026-10-29",
+      "note": "multipart request, HTTP 201 for a handled request; a rejected request is HTTP 201 with an error body (observed)"
+    },
+    {
+      "endpoint": "POST /rodin_texture_only",
+      "evidence": "real",
+      "sample": "POST /api/v2/rodin_texture_only",
+      "doc_url": "https://docs.hyper3d.ai/en/api-specification/generate-texture",
+      "checked_at": "2026-10-29",
+      "note": "multipart request, HTTP 201 for a handled request; a rejected request is HTTP 201 with an error body (observed)"
+    }
+  ]
+}

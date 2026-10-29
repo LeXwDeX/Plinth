@@ -27,6 +27,13 @@ class AcceptanceError(RuntimeError):
     pass
 
 
+# Per-step input of the recovery chain. The Remesh step names its geometry: the
+# Schema default (300000 faces, quad topology) is about 600000 triangles, over the
+# 320000-face input limit Meshy Rigging documents, so the next step would fail for
+# a reason that has nothing to do with the recovery under test (#73, #103).
+CHAIN_INPUTS = {"remesh": {"topology": "triangle", "target_polycount": 10000}, "animation": {"action_id": 10}}
+
+
 def require(condition, message):
     if not condition:
         raise AcceptanceError(message)
@@ -347,7 +354,7 @@ class Runner:
         key = "controlled-acceptance-chain-" + self.manifest["source_sha"]
         plan = plan_id(self.owner, key)
         self.register({"id": "middle-rigging", "owner_id": self.owner, "session_id": source["session_id"], "plan_id": plan, "step_index": 1, "capability": "rigging", "offering_id": "meshy/processing/rigging", "fault": "rigging_start_failed", "max_provider_starts": 3})
-        steps = [{"offering_id": "meshy/processing/" + cap, "expected_offering_revision": self.offerings["meshy/processing/" + cap]["revision"], "input": {"action_id": 10} if cap == "animation" else {}} for cap in ("remesh", "rigging", "animation")]
+        steps = [{"offering_id": "meshy/processing/" + cap, "expected_offering_revision": self.offerings["meshy/processing/" + cap]["revision"], "input": CHAIN_INPUTS.get(cap, {})} for cap in ("remesh", "rigging", "animation")]
         self.client.request("POST", self.routes["processing_plans"], {"session_id": source["session_id"], "source_task_id": source["id"], "source_asset_id": self.source_asset(source)["id"], "steps": steps}, (201,), key)
         failed = self.wait_plan(plan, lambda p: p["state"] == "FAILED", "middle step failure")
         require(failed["steps"][0]["state"] == "SUCCEEDED" and failed["steps"][1]["state"] == "FAILED" and not failed["steps"][2].get("task_id"), "failure did not isolate the middle step")

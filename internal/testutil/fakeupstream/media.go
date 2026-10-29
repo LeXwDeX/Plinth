@@ -1,7 +1,10 @@
 package fakeupstream
 
 import (
+	"archive/zip"
+	"bytes"
 	"fmt"
+	"io"
 	"sync"
 
 	"github.com/LeXwDeX/Plinth/internal/providers/mock"
@@ -56,4 +59,39 @@ func Corrupt(data []byte) []byte {
 		out[i] = 0
 	}
 	return out
+}
+
+// ObjFiles returns the fixed OBJ text and MTL text of the OBJ container, for
+// upstreams that serve them as separate files.
+func ObjFiles() (obj, mtl File, err error) {
+	zipped, err := ModelFile("obj")
+	if err != nil {
+		return File{}, File{}, err
+	}
+	reader, err := zip.NewReader(bytes.NewReader(zipped.Data), int64(len(zipped.Data)))
+	if err != nil {
+		return File{}, File{}, err
+	}
+	read := func(name string) ([]byte, error) {
+		for _, entry := range reader.File {
+			if entry.Name == name {
+				handle, err := entry.Open()
+				if err != nil {
+					return nil, err
+				}
+				defer handle.Close()
+				return io.ReadAll(handle)
+			}
+		}
+		return nil, fmt.Errorf("fakeupstream: OBJ fixture lacks %s", name)
+	}
+	objData, err := read("model.obj")
+	if err != nil {
+		return File{}, File{}, err
+	}
+	mtlData, err := read("model.mtl")
+	if err != nil {
+		return File{}, File{}, err
+	}
+	return File{MediaType: "text/plain", Data: objData}, File{MediaType: "text/plain", Data: mtlData}, nil
 }

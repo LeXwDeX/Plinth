@@ -5,6 +5,9 @@ import (
 	"net/http"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
+	hyper3dapiv2 "github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/hyper3d/api-v2"
+	meshyopenapiv1 "github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/meshy/openapi-v1"
+	meshyopenapiv2 "github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/meshy/openapi-v2"
 	openaiv1 "github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/openai/v1"
 	tripov3 "github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/tripo/v3"
 )
@@ -15,6 +18,9 @@ func Versions() []fakeupstream.Version {
 	return []fakeupstream.Version{
 		tripov3.Version(),
 		openaiv1.Version(),
+		meshyopenapiv1.Version(),
+		meshyopenapiv2.Version(),
+		hyper3dapiv2.Version(),
 	}
 }
 

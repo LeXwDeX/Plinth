@@ -1,0 +1,54 @@
+{
+  "MaxBodyBytes": 4194304,
+  "Keys": {
+    "action_id": true,
+    "animation_fbx_url": true,
+    "animation_glb_url": true,
+    "consumed_credits": true,
+    "created_at": true,
+    "expires_at": true,
+    "file": true,
+    "finished_at": true,
+    "id": true,
+    "name": true,
+    "processed_animation_fps_fbx_url": true,
+    "processed_armature_fbx_url": true,
+    "processed_usdz_url": true,
+    "progress": true,
+    "result": true,
+    "rig_task_id": true,
+    "started_at": true,
+    "status": true,
+    "task_error": true,
+    "type": true
+  },
+  "Allowed": {
+    "0": true,
+    "100": true,
+    "1700000000000": true,
+    "5": true,
+    "IN_PROGRESS": true,
+    "SUCCEEDED": true,
+    "animate": true,
+    "animations": true,
+    "application/json": true,
+    "https://example.test/fixture-3.glb": true,
+    "https://example.test/fixture-4.fbx": true,
+    "id-1": true,
+    "id-2": true,
+    "openapi": true,
+    "v1": true
+  },
+  "Aliases": null,
+  "PublicHosts": {
+    "api.meshy.ai": true,
+    "assets.meshy.ai": true,
+    "cdn.meshy.ai": true
+  },
+  "Projection": null,
+  "QueryKeys": {
+    "Expires": true,
+    "Key-Pair-Id": true,
+    "Signature": true
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "api_version": "v1",
+  "candidate_sha256": "f53b31ca650fff7b2bb8d5cfea96c2f4a8ff5f3ac3b088cdae36e96824438fee",
+  "captured_at_utc": "2026-10-29",
+  "exchanges": 16,
+  "offering": "meshy/processing/uv-unwrap",
+  "provenance": "captured",
+  "scenario": "meshy-openapi-v1-alignment",
+  "source_revision": "unknown",
+  "transformation": "IDs, signed URLs, timestamps and amounts are deterministic placeholders; media bytes are not stored.",
+  "version": 1
+}

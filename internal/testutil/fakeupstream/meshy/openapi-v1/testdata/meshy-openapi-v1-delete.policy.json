@@ -1,0 +1,43 @@
+{
+  "MaxBodyBytes": 4194304,
+  "Keys": {
+    "file": true
+  },
+  "Allowed": {
+    "analyze": true,
+    "animations": true,
+    "application/json": true,
+    "convert": true,
+    "id-1": true,
+    "id-10": true,
+    "id-11": true,
+    "id-12": true,
+    "id-2": true,
+    "id-3": true,
+    "id-4": true,
+    "id-5": true,
+    "id-6": true,
+    "id-7": true,
+    "id-8": true,
+    "id-9": true,
+    "image-to-image": true,
+    "multi-color": true,
+    "multi-image-to-3d": true,
+    "openapi": true,
+    "print": true,
+    "remesh": true,
+    "resize": true,
+    "retexture": true,
+    "rigging": true,
+    "uv-unwrap": true,
+    "v1": true
+  },
+  "Aliases": null,
+  "PublicHosts": {
+    "api.meshy.ai": true,
+    "assets.meshy.ai": true,
+    "cdn.meshy.ai": true
+  },
+  "Projection": null,
+  "QueryKeys": {}
+}

@@ -1,0 +1,63 @@
+{
+  "MaxBodyBytes": 4194304,
+  "Keys": {
+    "art_style": true,
+    "consumed_credits": true,
+    "created_at": true,
+    "expires_at": true,
+    "file": true,
+    "finished_at": true,
+    "glb": true,
+    "id": true,
+    "image_style_url": true,
+    "model_url": true,
+    "model_urls": true,
+    "name": true,
+    "negative_prompt": true,
+    "object_prompt": true,
+    "origin_at": true,
+    "progress": true,
+    "resize_height": true,
+    "result": true,
+    "started_at": true,
+    "status": true,
+    "style_prompt": true,
+    "task_error": true,
+    "text_style_prompt": true,
+    "texture_image_url": true,
+    "texture_prompt": true,
+    "texture_urls": true,
+    "thumbnail_url": true,
+    "type": true
+  },
+  "Allowed": {
+    "0": true,
+    "1": true,
+    "1.7": true,
+    "100": true,
+    "1700000000000": true,
+    "5": true,
+    "IN_PROGRESS": true,
+    "SUCCEEDED": true,
+    "application/json": true,
+    "bottom": true,
+    "https://example.test/fixture-1.glb": true,
+    "https://example.test/fixture-3.glb": true,
+    "id-2": true,
+    "openapi": true,
+    "resize": true,
+    "v1": true
+  },
+  "Aliases": null,
+  "PublicHosts": {
+    "api.meshy.ai": true,
+    "assets.meshy.ai": true,
+    "cdn.meshy.ai": true
+  },
+  "Projection": null,
+  "QueryKeys": {
+    "Expires": true,
+    "Key-Pair-Id": true,
+    "Signature": true
+  }
+}

@@ -1,0 +1,1097 @@
+{
+  "provider": "meshy",
+  "api": "openapi-v1",
+  "official_base": "https://api.meshy.ai/openapi/v1",
+  "checked_at": "2026-10-29",
+  "official_requests": 181,
+  "official_paid_requests": 16,
+  "fake_requests": 88,
+  "steps": [
+    {
+      "step": "balance",
+      "method": "GET",
+      "path": "/balance",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 5,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "balance-no-auth",
+      "method": "GET",
+      "path": "/balance",
+      "auth": "none",
+      "official_status": 401,
+      "fake_status": 401,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "task-not-found",
+      "method": "GET",
+      "path": "/image-to-3d/01a18514-059e-73f7-a0ce-0f88a12c9300",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 404,
+      "fake_status": 404,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "task-bad-id",
+      "method": "GET",
+      "path": "/image-to-3d/not-an-id",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 400,
+      "fake_status": 400,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "create-invalid",
+      "method": "POST",
+      "path": "/image-to-3d",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 400,
+      "fake_status": 400,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "create-invalid-remesh",
+      "method": "POST",
+      "path": "/remesh",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 400,
+      "fake_status": 400,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "text-to-image",
+      "method": "POST",
+      "path": "/text-to-image",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 202,
+      "fake_status": 202,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "text-to-image-poll",
+      "method": "GET",
+      "path": "/text-to-image/{t2i}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 14,
+      "official_task_statuses": [
+        "IN_PROGRESS",
+        "SUCCEEDED"
+      ],
+      "artifacts": [
+        "image_urls.0 image/png png"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "text-to-image-url",
+      "method": "GET",
+      "path": "/text-to-image/{t2i}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 14,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "image-to-image",
+      "method": "POST",
+      "path": "/image-to-image",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 202,
+      "fake_status": 202,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "image-to-image-poll",
+      "method": "GET",
+      "path": "/image-to-image/{i2i}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 14,
+      "official_task_statuses": [
+        "IN_PROGRESS",
+        "SUCCEEDED"
+      ],
+      "artifacts": [
+        "image_urls.0 image/png png"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "image-to-3d",
+      "method": "POST",
+      "path": "/image-to-3d",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 202,
+      "fake_status": 202,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "image-to-3d-poll",
+      "method": "GET",
+      "path": "/image-to-3d/{i23d}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 27,
+      "official_task_statuses": [
+        "IN_PROGRESS",
+        "SUCCEEDED"
+      ],
+      "artifacts": [
+        "model_urls.glb model/gltf-binary glb",
+        "thumbnail_url image/png png",
+        "texture_urls.0.base_color image/png png"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "image-to-3d-model",
+      "method": "GET",
+      "path": "/image-to-3d/{i23d}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 27,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "multi-image-to-3d",
+      "method": "POST",
+      "path": "/multi-image-to-3d",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 202,
+      "fake_status": 202,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "multi-image-to-3d-poll",
+      "method": "GET",
+      "path": "/multi-image-to-3d/{mi23d}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 26,
+      "official_task_statuses": [
+        "IN_PROGRESS",
+        "SUCCEEDED"
+      ],
+      "artifacts": [
+        "model_urls.glb model/gltf-binary glb",
+        "thumbnail_url image/png png"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "remesh",
+      "method": "POST",
+      "path": "/remesh",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 202,
+      "fake_status": 202,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "remesh-poll",
+      "method": "GET",
+      "path": "/remesh/{remesh}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 31,
+      "official_task_statuses": [
+        "IN_PROGRESS",
+        "SUCCEEDED"
+      ],
+      "artifacts": [
+        "model_urls.glb model/gltf-binary glb",
+        "thumbnail_url image/png png"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "convert",
+      "method": "POST",
+      "path": "/convert",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 202,
+      "fake_status": 202,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "convert-poll",
+      "method": "GET",
+      "path": "/convert/{convert}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 26,
+      "official_task_statuses": [
+        "IN_PROGRESS",
+        "SUCCEEDED"
+      ],
+      "artifacts": [
+        "model_urls.glb model/gltf-binary glb",
+        "model_urls.stl model/stl stl-binary"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "retexture",
+      "method": "POST",
+      "path": "/retexture",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 202,
+      "fake_status": 202,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "retexture-poll",
+      "method": "GET",
+      "path": "/retexture/{retexture}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 27,
+      "official_task_statuses": [
+        "IN_PROGRESS",
+        "SUCCEEDED"
+      ],
+      "artifacts": [
+        "model_urls.glb model/gltf-binary glb",
+        "thumbnail_url image/png png",
+        "texture_urls.0.base_color image/png png"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "rigging",
+      "method": "POST",
+      "path": "/rigging",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 202,
+      "fake_status": 202,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "rigging-poll",
+      "method": "GET",
+      "path": "/rigging/{rig}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 22,
+      "official_task_statuses": [
+        "IN_PROGRESS",
+        "SUCCEEDED"
+      ],
+      "artifacts": [
+        "result.basic_animations.running_fbx_url application/octet-stream fbx-binary",
+        "result.basic_animations.running_armature_glb_url model/gltf-binary glb",
+        "result.basic_animations.walking_glb_url model/gltf-binary glb",
+        "result.basic_animations.walking_fbx_url application/octet-stream fbx-binary",
+        "result.basic_animations.walking_armature_glb_url model/gltf-binary glb",
+        "result.basic_animations.running_glb_url model/gltf-binary glb",
+        "result.rigged_character_fbx_url application/octet-stream fbx-binary",
+        "result.rigged_character_glb_url model/gltf-binary glb"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "animation",
+      "method": "POST",
+      "path": "/animations",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 202,
+      "fake_status": 202,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "animation-poll",
+      "method": "GET",
+      "path": "/animations/{anim}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 18,
+      "official_task_statuses": [
+        "IN_PROGRESS",
+        "SUCCEEDED"
+      ],
+      "artifacts": [
+        "result.animation_glb_url model/gltf-binary glb",
+        "result.animation_fbx_url application/octet-stream fbx-binary"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "remesh-quad",
+      "method": "POST",
+      "path": "/remesh",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 202,
+      "fake_status": 202,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "remesh-quad-poll",
+      "method": "GET",
+      "path": "/remesh/{remeshquad}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 31,
+      "official_task_statuses": [
+        "IN_PROGRESS",
+        "SUCCEEDED"
+      ],
+      "artifacts": [
+        "model_urls.glb model/gltf-binary glb"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "rigging-oversized",
+      "method": "POST",
+      "path": "/rigging",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 202,
+      "fake_status": 202,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "rigging-oversized-poll",
+      "method": "GET",
+      "path": "/rigging/{rigbig}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 20,
+      "official_task_statuses": [
+        "IN_PROGRESS",
+        "FAILED"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "uv-unwrap",
+      "method": "POST",
+      "path": "/uv-unwrap",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 202,
+      "fake_status": 202,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "uv-unwrap-poll",
+      "method": "GET",
+      "path": "/uv-unwrap/{uv}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 25,
+      "official_task_statuses": [
+        "IN_PROGRESS",
+        "SUCCEEDED"
+      ],
+      "artifacts": [
+        "model_urls.glb model/gltf-binary glb",
+        "thumbnail_url image/png png"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "resize",
+      "method": "POST",
+      "path": "/resize",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 202,
+      "fake_status": 202,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "resize-poll",
+      "method": "GET",
+      "path": "/resize/{resize}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 25,
+      "official_task_statuses": [
+        "IN_PROGRESS",
+        "SUCCEEDED"
+      ],
+      "artifacts": [
+        "model_urls.glb model/gltf-binary glb"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "print-analyze",
+      "method": "POST",
+      "path": "/print/analyze",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 202,
+      "fake_status": 202,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "print-analyze-poll",
+      "method": "GET",
+      "path": "/print/analyze/{analyze}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 35,
+      "official_task_statuses": [
+        "IN_PROGRESS",
+        "SUCCEEDED"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "print-multi-color",
+      "method": "POST",
+      "path": "/print/multi-color",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 202,
+      "fake_status": 202,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "print-multi-color-poll",
+      "method": "GET",
+      "path": "/print/multi-color/{multicolor}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 25,
+      "official_task_statuses": [
+        "IN_PROGRESS",
+        "SUCCEEDED"
+      ],
+      "artifacts": [
+        "model_urls.3mf model/3mf zip"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "text-to-motion",
+      "method": "POST",
+      "path": "/text-to-motion",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 202,
+      "fake_status": 202,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "text-to-motion-poll",
+      "method": "GET",
+      "path": "/text-to-motion/{motion}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 17,
+      "official_task_statuses": [
+        "IN_PROGRESS",
+        "SUCCEEDED"
+      ],
+      "artifacts": [
+        "result.motion_url application/octet-stream fbx-binary"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "delete-text-to-image",
+      "method": "DELETE",
+      "path": "/text-to-image/{t2i}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "delete-image-to-3d",
+      "method": "DELETE",
+      "path": "/image-to-3d/{i23d}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "delete-remesh",
+      "method": "DELETE",
+      "path": "/remesh/{remesh}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "delete-text-to-motion",
+      "method": "DELETE",
+      "path": "/text-to-motion/{motion}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "delete-image-to-image",
+      "method": "DELETE",
+      "path": "/image-to-image/{i2i}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "delete-multi-image-to-3d",
+      "method": "DELETE",
+      "path": "/multi-image-to-3d/{mi23d}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "delete-remesh-quad",
+      "method": "DELETE",
+      "path": "/remesh/{remeshquad}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "delete-convert",
+      "method": "DELETE",
+      "path": "/convert/{convert}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "delete-retexture",
+      "method": "DELETE",
+      "path": "/retexture/{retexture}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "delete-rigging",
+      "method": "DELETE",
+      "path": "/rigging/{rig}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "delete-rigging-oversized",
+      "method": "DELETE",
+      "path": "/rigging/{rigbig}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "delete-animation",
+      "method": "DELETE",
+      "path": "/animations/{anim}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "delete-uv-unwrap",
+      "method": "DELETE",
+      "path": "/uv-unwrap/{uv}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "delete-resize",
+      "method": "DELETE",
+      "path": "/resize/{resize}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "delete-print-analyze",
+      "method": "DELETE",
+      "path": "/print/analyze/{analyze}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "delete-print-multi-color",
+      "method": "DELETE",
+      "path": "/print/multi-color/{multicolor}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    }
+  ],
+  "diffs": null,
+  "request_notes": [
+    "每个付费请求都取该端点最便宜的参数（nano-banana-2、meshy-7.1、standard 几何、2k 贴图、1 万面三角形、无 PBR），每个端点只发一次，没有重放已消费的请求。",
+    "处理类端点（remesh、convert、retexture、rigging、animations）经 `input_task_id` 引用前面步骤的任务；uv-unwrap、resize、print/analyze、print/multi-color 与 image-to-3d 的图片经 `model_url`/`image_url` 引用前面步骤产物的公开 URL。Plinth 对本地来源改发 data URI（`inline_model_input`），端点与响应结构相同，只有该字段的值不同。",
+    "官方 API 对 `rigging` 的输入面数上限（32 万）在提交时不返回 400：300000 面 quad 的 Remesh 来源（约 60 万三角面）被接受（202），任务在运行 10% 处以 FAILED、`task_error.type=invalid_input` 结束。fake 按此复现（见 `rigging-oversized` 两步）。",
+    "16 个删除步骤中，4 个随主运行发出，其余 12 个在主运行结束后用同一批任务 id 补发（两段官方请求按步骤合并到报告）；删除不收费。",
+    "官方 DELETE 任务返回 200 且无响应体；任务在 IN_PROGRESS 时删除按官方文档返回 409，实测运行只删除了已结束任务，该情形按文档构造。"
+  ],
+  "endpoints": [
+    {
+      "endpoint": "GET /balance",
+      "evidence": "real",
+      "sample": "GET /openapi/v1/balance",
+      "doc_url": "https://docs.meshy.ai/en/api/balance",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "GET /assets/{task_id}/{name}",
+      "evidence": "constructed-from-docs",
+      "doc_url": "https://docs.meshy.ai/en/api/remesh",
+      "checked_at": "2026-10-29",
+      "note": "the official CDN host is not part of the API; this route serves the fixed files a task's URLs name. Content types of glb, png, fbx, stl and 3mf are as observed; obj, mtl and usdz were not requested in the run and follow the Meshy adapter's notes"
+    },
+    {
+      "endpoint": "POST /text-to-image",
+      "evidence": "real",
+      "sample": "POST /openapi/v1/text-to-image",
+      "doc_url": "https://docs.meshy.ai/en/api/text-to-image",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "GET /text-to-image/{id}",
+      "evidence": "real",
+      "sample": "GET /openapi/v1/text-to-image/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/text-to-image",
+      "checked_at": "2026-10-29",
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+    },
+    {
+      "endpoint": "DELETE /text-to-image/{id}",
+      "evidence": "real",
+      "sample": "DELETE /openapi/v1/text-to-image/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/text-to-image",
+      "checked_at": "2026-10-29",
+      "note": "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"
+    },
+    {
+      "endpoint": "POST /image-to-image",
+      "evidence": "real",
+      "sample": "POST /openapi/v1/image-to-image",
+      "doc_url": "https://docs.meshy.ai/en/api/image-to-image",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "GET /image-to-image/{id}",
+      "evidence": "real",
+      "sample": "GET /openapi/v1/image-to-image/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/image-to-image",
+      "checked_at": "2026-10-29",
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+    },
+    {
+      "endpoint": "DELETE /image-to-image/{id}",
+      "evidence": "real",
+      "sample": "DELETE /openapi/v1/image-to-image/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/image-to-image",
+      "checked_at": "2026-10-29",
+      "note": "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"
+    },
+    {
+      "endpoint": "POST /image-to-3d",
+      "evidence": "real",
+      "sample": "POST /openapi/v1/image-to-3d",
+      "doc_url": "https://docs.meshy.ai/en/api/image-to-3d",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "GET /image-to-3d/{id}",
+      "evidence": "real",
+      "sample": "GET /openapi/v1/image-to-3d/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/image-to-3d",
+      "checked_at": "2026-10-29",
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+    },
+    {
+      "endpoint": "DELETE /image-to-3d/{id}",
+      "evidence": "real",
+      "sample": "DELETE /openapi/v1/image-to-3d/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/image-to-3d",
+      "checked_at": "2026-10-29",
+      "note": "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"
+    },
+    {
+      "endpoint": "POST /multi-image-to-3d",
+      "evidence": "real",
+      "sample": "POST /openapi/v1/multi-image-to-3d",
+      "doc_url": "https://docs.meshy.ai/en/api/multi-image-to-3d",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "GET /multi-image-to-3d/{id}",
+      "evidence": "real",
+      "sample": "GET /openapi/v1/multi-image-to-3d/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/multi-image-to-3d",
+      "checked_at": "2026-10-29",
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+    },
+    {
+      "endpoint": "DELETE /multi-image-to-3d/{id}",
+      "evidence": "real",
+      "sample": "DELETE /openapi/v1/multi-image-to-3d/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/multi-image-to-3d",
+      "checked_at": "2026-10-29",
+      "note": "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"
+    },
+    {
+      "endpoint": "POST /remesh",
+      "evidence": "real",
+      "sample": "POST /openapi/v1/remesh",
+      "doc_url": "https://docs.meshy.ai/en/api/remesh",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "GET /remesh/{id}",
+      "evidence": "real",
+      "sample": "GET /openapi/v1/remesh/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/remesh",
+      "checked_at": "2026-10-29",
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+    },
+    {
+      "endpoint": "DELETE /remesh/{id}",
+      "evidence": "real",
+      "sample": "DELETE /openapi/v1/remesh/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/remesh",
+      "checked_at": "2026-10-29",
+      "note": "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"
+    },
+    {
+      "endpoint": "POST /convert",
+      "evidence": "real",
+      "sample": "POST /openapi/v1/convert",
+      "doc_url": "https://docs.meshy.ai/en/api/convert",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "GET /convert/{id}",
+      "evidence": "real",
+      "sample": "GET /openapi/v1/convert/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/convert",
+      "checked_at": "2026-10-29",
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+    },
+    {
+      "endpoint": "DELETE /convert/{id}",
+      "evidence": "real",
+      "sample": "DELETE /openapi/v1/convert/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/convert",
+      "checked_at": "2026-10-29",
+      "note": "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"
+    },
+    {
+      "endpoint": "POST /retexture",
+      "evidence": "real",
+      "sample": "POST /openapi/v1/retexture",
+      "doc_url": "https://docs.meshy.ai/en/api/retexture",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "GET /retexture/{id}",
+      "evidence": "real",
+      "sample": "GET /openapi/v1/retexture/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/retexture",
+      "checked_at": "2026-10-29",
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+    },
+    {
+      "endpoint": "DELETE /retexture/{id}",
+      "evidence": "real",
+      "sample": "DELETE /openapi/v1/retexture/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/retexture",
+      "checked_at": "2026-10-29",
+      "note": "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"
+    },
+    {
+      "endpoint": "POST /rigging",
+      "evidence": "real",
+      "sample": "POST /openapi/v1/rigging",
+      "doc_url": "https://docs.meshy.ai/en/api/rigging-and-animation",
+      "checked_at": "2026-10-29",
+      "note": "an input over 320000 faces is accepted (202) and the task ends FAILED with an invalid_input task_error (observed with a 300000-face quad remesh); the documentation says 400, the official API did not answer it at submit"
+    },
+    {
+      "endpoint": "GET /rigging/{id}",
+      "evidence": "real",
+      "sample": "GET /openapi/v1/rigging/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/rigging-and-animation",
+      "checked_at": "2026-10-29",
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+    },
+    {
+      "endpoint": "DELETE /rigging/{id}",
+      "evidence": "real",
+      "sample": "DELETE /openapi/v1/rigging/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/rigging-and-animation",
+      "checked_at": "2026-10-29",
+      "note": "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"
+    },
+    {
+      "endpoint": "POST /animations",
+      "evidence": "real",
+      "sample": "POST /openapi/v1/animations",
+      "doc_url": "https://docs.meshy.ai/en/api/rigging-and-animation",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "GET /animations/{id}",
+      "evidence": "real",
+      "sample": "GET /openapi/v1/animations/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/rigging-and-animation",
+      "checked_at": "2026-10-29",
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+    },
+    {
+      "endpoint": "DELETE /animations/{id}",
+      "evidence": "real",
+      "sample": "DELETE /openapi/v1/animations/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/rigging-and-animation",
+      "checked_at": "2026-10-29",
+      "note": "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"
+    },
+    {
+      "endpoint": "POST /uv-unwrap",
+      "evidence": "real",
+      "sample": "POST /openapi/v1/uv-unwrap",
+      "doc_url": "https://docs.meshy.ai/en/api/uv-unwrap",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "GET /uv-unwrap/{id}",
+      "evidence": "real",
+      "sample": "GET /openapi/v1/uv-unwrap/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/uv-unwrap",
+      "checked_at": "2026-10-29",
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+    },
+    {
+      "endpoint": "DELETE /uv-unwrap/{id}",
+      "evidence": "real",
+      "sample": "DELETE /openapi/v1/uv-unwrap/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/uv-unwrap",
+      "checked_at": "2026-10-29",
+      "note": "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"
+    },
+    {
+      "endpoint": "POST /resize",
+      "evidence": "real",
+      "sample": "POST /openapi/v1/resize",
+      "doc_url": "https://docs.meshy.ai/en/api/resize",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "GET /resize/{id}",
+      "evidence": "real",
+      "sample": "GET /openapi/v1/resize/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/resize",
+      "checked_at": "2026-10-29",
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+    },
+    {
+      "endpoint": "DELETE /resize/{id}",
+      "evidence": "real",
+      "sample": "DELETE /openapi/v1/resize/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/resize",
+      "checked_at": "2026-10-29",
+      "note": "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"
+    },
+    {
+      "endpoint": "POST /print/analyze",
+      "evidence": "real",
+      "sample": "POST /openapi/v1/print/analyze",
+      "doc_url": "https://docs.meshy.ai/en/api/print",
+      "checked_at": "2026-10-29",
+      "note": "the report's printability._version key cannot be held by the sample sanitizer; the fake adds it back"
+    },
+    {
+      "endpoint": "GET /print/analyze/{id}",
+      "evidence": "real",
+      "sample": "GET /openapi/v1/print/analyze/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/print",
+      "checked_at": "2026-10-29",
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+    },
+    {
+      "endpoint": "DELETE /print/analyze/{id}",
+      "evidence": "real",
+      "sample": "DELETE /openapi/v1/print/analyze/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/print",
+      "checked_at": "2026-10-29",
+      "note": "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"
+    },
+    {
+      "endpoint": "POST /print/multi-color",
+      "evidence": "real",
+      "sample": "POST /openapi/v1/print/multi-color",
+      "doc_url": "https://docs.meshy.ai/en/api/print",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "GET /print/multi-color/{id}",
+      "evidence": "real",
+      "sample": "GET /openapi/v1/print/multi-color/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/print",
+      "checked_at": "2026-10-29",
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+    },
+    {
+      "endpoint": "DELETE /print/multi-color/{id}",
+      "evidence": "real",
+      "sample": "DELETE /openapi/v1/print/multi-color/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/print",
+      "checked_at": "2026-10-29",
+      "note": "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"
+    },
+    {
+      "endpoint": "POST /text-to-motion",
+      "evidence": "real",
+      "sample": "POST /openapi/v1/text-to-motion",
+      "doc_url": "https://docs.meshy.ai/en/api/text-to-motion",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "GET /text-to-motion/{id}",
+      "evidence": "real",
+      "sample": "GET /openapi/v1/text-to-motion/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/text-to-motion",
+      "checked_at": "2026-10-29",
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+    },
+    {
+      "endpoint": "DELETE /text-to-motion/{id}",
+      "evidence": "real",
+      "sample": "DELETE /openapi/v1/text-to-motion/{id}",
+      "doc_url": "https://docs.meshy.ai/en/api/text-to-motion",
+      "checked_at": "2026-10-29",
+      "note": "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"
+    }
+  ]
+}

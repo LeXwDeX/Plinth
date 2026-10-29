@@ -8,8 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -157,8 +160,34 @@ func (r *ReplayTransport) RoundTrip(request *http.Request) (*http.Response, erro
 
 func replayKey(method, url, contentType string, body []byte) string {
 	if strings.HasPrefix(strings.ToLower(contentType), "multipart/") {
-		body = nil
+		body = multipartDigestInput(contentType, body)
 	}
 	sum := sha256.Sum256(body)
 	return method + " " + url + " " + hex.EncodeToString(sum[:8])
+}
+
+// multipartDigestInput is the boundary-free content of a multipart body: its
+// text fields and the name, file name and length of its files, so two steps
+// posting different forms to one endpoint never take each other's recording.
+func multipartDigestInput(contentType string, body []byte) []byte {
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil || params["boundary"] == "" {
+		return nil
+	}
+	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+	var parts []string
+	for {
+		part, err := reader.NextPart()
+		if err != nil {
+			break
+		}
+		data, _ := io.ReadAll(part)
+		if part.FileName() != "" {
+			parts = append(parts, fmt.Sprintf("%s=file:%s:%d", part.FormName(), part.FileName(), len(data)))
+		} else {
+			parts = append(parts, part.FormName()) // the value may be an id the export replaces
+		}
+	}
+	sort.Strings(parts)
+	return []byte(strings.Join(parts, "\n"))
 }

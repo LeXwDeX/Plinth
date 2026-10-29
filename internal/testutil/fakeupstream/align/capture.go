@@ -42,6 +42,11 @@ type CaptureConfig struct {
 	// (for gateways whose host is not public).
 	AliasBaseHost bool
 	CapturedAt    time.Time
+	// OmitKeys are JSON keys removed from every response before it is recorded,
+	// for keys the sanitizer cannot hold (a leading underscore is not an
+	// identifier it accepts). The fake adds them back itself, and the version's
+	// drift test knows the list.
+	OmitKeys []string
 }
 
 // Capture records the official run through a deferred wirefixture recorder.
@@ -97,7 +102,56 @@ func (c *Capture) Transport(base http.RoundTripper) http.RoundTripper {
 	if base == nil {
 		base = http.DefaultTransport
 	}
+	if len(c.cfg.OmitKeys) > 0 {
+		base = omitTransport{base: base, keys: c.cfg.OmitKeys}
+	}
 	return c.Recorder.Wrap(c.cfg.Connection, base)
+}
+
+// omitTransport removes configured keys from JSON responses.
+type omitTransport struct {
+	base http.RoundTripper
+	keys []string
+}
+
+func (t omitTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	response, err := t.base.RoundTrip(request)
+	if err != nil || !strings.Contains(response.Header.Get("Content-Type"), "json") {
+		return response, err
+	}
+	raw, err := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if decoder.Decode(&value) == nil {
+		var strip func(any)
+		strip = func(node any) {
+			switch typed := node.(type) {
+			case map[string]any:
+				for _, key := range t.keys {
+					delete(typed, key)
+				}
+				for _, child := range typed {
+					strip(child)
+				}
+			case []any:
+				for _, child := range typed {
+					strip(child)
+				}
+			}
+		}
+		strip(value)
+		if cleaned, marshalErr := json.Marshal(value); marshalErr == nil {
+			raw = cleaned
+		}
+	}
+	response.Body = io.NopCloser(bytes.NewReader(raw))
+	response.ContentLength = int64(len(raw))
+	return response, nil
 }
 
 // Export finalizes the recording into out (an existing 0700 directory outside
@@ -214,6 +268,12 @@ func (c *Capture) finalPolicy(bundle *Bundle) wirefixture.Policy {
 		if key != "" {
 			policy.Keys[key] = true
 		}
+		// A credential-like field (a subscription key, a token) is redacted by the
+		// sanitizer; its value must not be registered as an allowed scalar either,
+		// or the committed policy would carry it.
+		if credentialKey(key) {
+			return
+		}
 		if _, projected := policy.Projection[key]; projected {
 			collectURLQuery(policy.QueryKeys, value)
 			return
@@ -269,7 +329,7 @@ func (c *Capture) finalPolicy(bundle *Bundle) wirefixture.Policy {
 		if obs.RetryAfter != "" {
 			policy.Allowed[obs.RetryAfter] = true
 		}
-		for _, part := range strings.Split(obs.Path, "/") {
+		for _, part := range strings.Split(obs.Path+"/"+obs.Resolved, "/") {
 			switch {
 			case part == "" || strings.HasPrefix(part, "{"):
 			case dynamicString(part):
@@ -434,4 +494,18 @@ func SortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// DynamicString reports whether a value must never be committed as it is.
+func DynamicString(value string) bool { return dynamicString(value) }
+
+// credentialKey reports field names that carry a secret or a signed token.
+func credentialKey(key string) bool {
+	compact := strings.ToLower(strings.NewReplacer("_", "", "-", "").Replace(key))
+	for _, marker := range []string{"key", "token", "secret", "password", "signature", "authorization", "credential"} {
+		if strings.Contains(compact, marker) {
+			return true
+		}
+	}
+	return false
 }
