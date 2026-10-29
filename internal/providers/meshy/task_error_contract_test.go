@@ -142,3 +142,43 @@ func TestObserveTaskErrorTypeClassification(t *testing.T) {
 		})
 	}
 }
+
+// A FAILED task whose task_error repeats the submitted prompt (A4, #121): the
+// adapter strips it using the frozen input of the observed task.
+func TestObserveTaskErrorExcerptDoesNotEchoThePrompt(t *testing.T) {
+	prompt := "a velvet castle on a cliff at sunrise"
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(writer).Encode(map[string]any{
+			"id":     "remote-7",
+			"status": "FAILED",
+			"task_error": map[string]string{
+				"type":    "invalid_input",
+				"message": `Prompt "` + prompt + `" was blocked; contact support@example.com`,
+			},
+		})
+	}))
+	defer upstream.Close()
+	parsed, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := newMeshyAdapter(t, meshy.Config{BaseURL: upstream.URL, APIKey: "meshy-key", HTTPClient: upstream.Client(), AllowHTTPAssets: true})
+	offering := generation.Offering{
+		ProviderID: "meshy", ModelID: "meshy-test", Capability: generation.TextTo3D,
+		PollInterval: 3 * time.Second, AssetHosts: []string{parsed.Hostname()},
+		Parameters:      []generation.Parameter{{Name: "prompt", Type: "text", Semantic: generation.SemanticPrompt}},
+		ProviderOptions: json.RawMessage(`{"endpoint":"text-to-3d","api_version":"v2"}`),
+	}
+	observation, err := adapter.Observe(context.Background(), generation.ObserveRequest{
+		TaskID: "task-local", AttemptID: "attempt-local", Offering: offering,
+		Job:   generation.UpstreamJob{ProviderID: "meshy", RemoteID: "remote-7"},
+		Input: json.RawMessage(`{"prompt":"` + prompt + `"}`),
+	})
+	if err != nil || observation.Failure == nil {
+		t.Fatalf("observation = %#v, %v", observation, err)
+	}
+	excerpt := observation.Failure.UpstreamExcerpt
+	if strings.Contains(excerpt, "velvet") || strings.Contains(excerpt, "support@example.com") || !strings.Contains(excerpt, "was blocked") {
+		t.Fatalf("excerpt = %q", excerpt)
+	}
+}

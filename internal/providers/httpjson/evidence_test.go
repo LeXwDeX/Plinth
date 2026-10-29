@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
@@ -194,6 +195,27 @@ func TestBoundedExcerptSanitizesAndTruncates(t *testing.T) {
 	control := boundedExcerpt([]byte("a\x00b\nc\r\td"))
 	if strings.ContainsAny(control, "\x00") {
 		t.Fatalf("control characters kept: %q", control)
+	}
+}
+
+// Every Provider that uses this client stores the same sanitized excerpt as
+// Meshy does (A4, #121): URLs with signed queries, bearer/key tokens and
+// e-mail addresses an upstream error body repeats never reach the database.
+func TestBoundedExcerptUsesTheSharedSanitizer(t *testing.T) {
+	body := `{"error":{"message":"bad input for owner@example.com; see https://api.example.test/v1/files/abc?X-Amz-Signature=beef",` +
+		`"detail":"Authorization: Bearer abcdefghijklmnop token=zzz999 key sk-secretsecretsecret"}}`
+	excerpt := boundedExcerpt([]byte(body))
+	for _, leaked := range []string{"owner@example.com", "api.example.test", "X-Amz", "beef", "abcdefghijklmnop", "zzz999", "sk-secretsecretsecret"} {
+		if strings.Contains(excerpt, leaked) {
+			t.Fatalf("excerpt leaked %q: %q", leaked, excerpt)
+		}
+	}
+	if !strings.Contains(excerpt, "bad input for") {
+		t.Fatalf("excerpt lost its forensic text: %q", excerpt)
+	}
+	multibyte := boundedExcerpt([]byte(strings.Repeat("面", 500)))
+	if utf8.RuneCountInString(multibyte) != generation.UpstreamExcerptRunes || !utf8.ValidString(multibyte) {
+		t.Fatalf("multi-byte excerpt cut mid-character or at the wrong size: %d runes", utf8.RuneCountInString(multibyte))
 	}
 }
 

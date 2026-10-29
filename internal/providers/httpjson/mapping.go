@@ -78,17 +78,7 @@ func matchErrorMapping(
 			return rule, true
 		}
 	}
-	if message := declaredErrorMessage(mapping, payload, status); message != "" {
-		for _, matcher := range mapping.MessageMatchers {
-			if messageMatcherHits(matcher, message) {
-				return generation.ErrorClassRule{
-					Class:     matcher.Class,
-					Retryable: matcher.Retryable,
-				}, true
-			}
-		}
-	}
-	return generation.ErrorClassRule{}, false
+	return matchDeclaredMessage(mapping, payload, status, func(generation.ErrorMessageMatcher) bool { return true })
 }
 
 // matchSpecificMessage returns a message matcher the connection declares as
@@ -98,13 +88,9 @@ func matchSpecificMessage(
 	payload []byte,
 	status int,
 ) (generation.ErrorClassRule, bool) {
-	message := declaredErrorMessage(mapping, payload, status)
-	for _, matcher := range mapping.MessageMatchers {
-		if matcher.BeforeStatusRanges && messageMatcherHits(matcher, message) {
-			return generation.ErrorClassRule{Class: matcher.Class, Retryable: matcher.Retryable}, true
-		}
-	}
-	return generation.ErrorClassRule{}, false
+	return matchDeclaredMessage(mapping, payload, status, func(matcher generation.ErrorMessageMatcher) bool {
+		return matcher.BeforeStatusRanges
+	})
 }
 
 func matchBalanceEvidence(
@@ -119,11 +105,27 @@ func matchBalanceEvidence(
 			return rule, true
 		}
 	}
-	if message := declaredErrorMessage(mapping, payload, status); message != "" {
-		for _, matcher := range mapping.MessageMatchers {
-			if matcher.Class == balance && messageMatcherHits(matcher, message) {
-				return generation.ErrorClassRule{Class: matcher.Class, Retryable: matcher.Retryable}, true
-			}
+	return matchDeclaredMessage(mapping, payload, status, func(matcher generation.ErrorMessageMatcher) bool {
+		return matcher.Class == balance
+	})
+}
+
+// matchDeclaredMessage is the one loop over a connection's message matchers:
+// the first matcher that selected accepts, applies to this HTTP status and
+// hits the declared error message wins.
+func matchDeclaredMessage(
+	mapping *generation.ErrorMapping,
+	payload []byte,
+	status int,
+	selected func(generation.ErrorMessageMatcher) bool,
+) (generation.ErrorClassRule, bool) {
+	message := declaredErrorMessage(mapping, payload, status)
+	for _, matcher := range mapping.MessageMatchers {
+		if !selected(matcher) || (matcher.HTTPStatus != nil && !matcher.HTTPStatus.Contains(status)) {
+			continue
+		}
+		if messageMatcherHits(matcher, message) {
+			return generation.ErrorClassRule{Class: matcher.Class, Retryable: matcher.Retryable}, true
 		}
 	}
 	return generation.ErrorClassRule{}, false

@@ -252,6 +252,13 @@ func (executor *Executor) executeProcessingPlan(ctx context.Context, command cha
 		chosenAsset = ""
 	}
 	plan, err := executor.plans.Create(ctx, create)
+	if refusal := generation.UserFacingError(err); refusal != nil && errors.Is(err, processing.ErrInvalid) {
+		// The Schema's reason for refusing the whole plan before anything is
+		// paid, for example a Remesh budget over a later step's source limit
+		// with the compatible parameters (#121).
+		return executor.rejectBecause(command, executor.fillText(command, messages.InvalidInput, "{detail}",
+			refusal.LocalizedDetail(executor.localizeText(command))), err)
+	}
 	if errors.Is(err, processing.ErrInvalid) || errors.Is(err, processing.ErrConflict) {
 		return executor.reject(command, executor.fillText(command, messages.InvalidInput, "{detail}", config.Plan.StepsArgument))
 	}

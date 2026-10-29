@@ -125,7 +125,7 @@ func TestRiggingSourceFaceLimitUnknownSourcesPass(t *testing.T) {
 }
 
 func TestSourceTriangleCountOnMinimalGLB(t *testing.T) {
-	policy := modelinput.Policy{ProfileID: modelinput.GeneratedProfileID, Revision: modelinput.GeneratedProfileRevision, Limits: sourceFaceReadLimits}
+	policy := modelinput.GeneratedPolicy()
 	for name, test := range map[string]struct {
 		raw  []byte
 		want int64
@@ -136,31 +136,59 @@ func TestSourceTriangleCountOnMinimalGLB(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			request, _ := riggingFaceRequest(t, test.raw, "asset")
 			asset := request.InputAssets["source_asset"][0]
-			got, known, err := (&Adapter{inputAssets: &profiledInputs{bodies: [][]byte{test.raw}}}).countSourceTriangles(context.Background(), request.Offering, asset, policy)
-			if err != nil || !known || got != test.want {
-				t.Fatalf("triangles=%d known=%v err=%v want %d", got, known, err, test.want)
+			got, known, err := (&Adapter{inputAssets: &profiledInputs{bodies: [][]byte{test.raw}}}).measureSourceModel(context.Background(), request.Offering, asset, policy)
+			if err != nil || !known || got.InstancedTriangles != test.want {
+				t.Fatalf("triangles=%d known=%v err=%v want %d", got.InstancedTriangles, known, err, test.want)
 			}
 		})
 	}
 }
 
-func TestSourceModelLimitDeclarationIsValidated(t *testing.T) {
-	request, _ := riggingFaceRequest(t, nil, "none")
-	if err := ValidateOffering(request.Offering); err != nil {
-		t.Fatal(err)
+// The ceiling is declared once, in the Offering's source_model_limit: changing
+// that declaration changes what the check refuses, with no second number in
+// the Adapter (A1, #121).
+func TestRiggingSourceFaceLimitFollowsTheSchemaDeclaration(t *testing.T) {
+	raw := modelinputtest.Large(modelinputtest.LargeOptions{Grid: 100}) // 19602 triangles
+	request, _ := riggingFaceRequest(t, raw, "asset")
+	adapter := &Adapter{inputAssets: &profiledInputs{bodies: [][]byte{raw}}}
+	if request.Offering.SourceModelLimit == nil || request.Offering.SourceModelLimit.MaxTriangles != 320000 {
+		t.Fatalf("declaration = %+v", request.Offering.SourceModelLimit)
 	}
-	for name, mutate := range map[string]func(*wireOptions){
-		"zero limit": func(o *wireOptions) { o.SourceModelLimit.MaxTriangles = 0 },
-		"bad basis":  func(o *wireOptions) { o.SourceModelLimit.CountBasis = "quads" },
-		"huge limit": func(o *wireOptions) { o.SourceModelLimit.MaxTriangles = 1 << 40 },
-	} {
-		t.Run(name, func(t *testing.T) {
-			bad := request
-			mutateProfileOptions(&bad, mutate)
-			if ValidateOffering(bad.Offering) == nil {
-				t.Fatal("invalid source_model_limit accepted")
-			}
-		})
+	if err := adapter.ValidateInput(context.Background(), request); err != nil {
+		t.Fatalf("within the declared limit: %v", err)
+	}
+	request.Offering.SourceModelLimit = &generation.SourceModelLimit{MaxTriangles: 19601, CountBasis: "triangles"}
+	refusal := generation.UserFacingError(adapter.ValidateInput(context.Background(), request))
+	if refusal == nil || !strings.Contains(refusal.Detail, "19601") || !strings.Contains(refusal.Detail, "19602") {
+		t.Fatalf("a lowered declaration must be what is enforced: %v", refusal)
+	}
+	request.Offering.SourceModelLimit = nil
+	if err := adapter.ValidateInput(context.Background(), request); err != nil {
+		t.Fatalf("an Offering without the declaration must not be checked: %v", err)
+	}
+}
+
+// B11: a source larger than the file the step could take is not read into
+// memory at all; the upstream stays the authority for it.
+func TestRiggingSourceFaceLimitDoesNotReadSourcesLargerThanTheInlineInput(t *testing.T) {
+	raw := modelinputtest.Large(modelinputtest.LargeOptions{Grid: 548}) // about 600k triangles
+	request, _ := riggingFaceRequest(t, raw, "asset")
+	var options wireOptions
+	if err := json.Unmarshal(request.Offering.ProviderOptions, &options); err != nil || options.InlineModelInput == nil {
+		t.Fatalf("rigging inline input = %+v, %v", options.InlineModelInput, err)
+	}
+	if got := sourceReadLimit(request.Offering, modelinput.GeneratedPolicy()); got != options.InlineModelInput.MaxBytes {
+		t.Fatalf("read limit = %d, want the declared inline size %d", got, options.InlineModelInput.MaxBytes)
+	}
+	opened := &profiledInputs{bodies: [][]byte{raw}}
+	asset := request.InputAssets["source_asset"][0]
+	asset.Size = options.InlineModelInput.MaxBytes + 1
+	request.InputAssets["source_asset"][0] = asset
+	if err := (&Adapter{inputAssets: opened}).ValidateInput(context.Background(), request); err != nil {
+		t.Fatalf("oversized source blocked: %v", err)
+	}
+	if opened.opens != 0 {
+		t.Fatalf("oversized source was opened %d times", opened.opens)
 	}
 }
 

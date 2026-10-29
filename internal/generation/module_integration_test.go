@@ -312,6 +312,51 @@ func TestSubmissionUnknownPreservesUpstreamEvidence(t *testing.T) {
 	}
 }
 
+// 上游取证摘录在落库前由内核统一去敏（A4）：提示词回显、URL、令牌、邮箱都不得
+// 进入任务失败记录。
+func TestFailureExcerptIsSanitizedBeforeItIsStored(t *testing.T) {
+	harness := newHarness(t, echoEvidenceAdapter{}, nil)
+	accepted, err := harness.submitApproved(t, context.Background(), generation.SubmitCommand{
+		OwnerID:    "owner-a",
+		Capability: generation.TextTo3D,
+		OfferingID: "meshy/meshy-7.1/text-to-3d",
+		Input:      []byte(`{"prompt":"a velvet castle on a cliff"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := harness.runUntilTerminal(t, "owner-a", accepted.TaskID)
+	if task.State != generation.TaskFailed || task.Failure == nil {
+		t.Fatalf("task = %#v", task)
+	}
+	excerpt := task.Failure.UpstreamExcerpt
+	for _, leaked := range []string{"velvet castle", "https://", "sig=", "sk-secretsecretsecret", "person@example.com"} {
+		if strings.Contains(excerpt, leaked) {
+			t.Fatalf("stored excerpt leaked %q: %q", leaked, excerpt)
+		}
+	}
+	if !strings.Contains(excerpt, "moderation") || task.Failure.UpstreamCode != "moderation" {
+		t.Fatalf("forensic value lost: %q %q", task.Failure.UpstreamCode, excerpt)
+	}
+}
+
+type echoEvidenceAdapter struct{ evidenceAdapter }
+
+func (echoEvidenceAdapter) Start(
+	context.Context,
+	generation.StartRequest,
+) (generation.Observation, error) {
+	return generation.Observation{}, &generation.ProviderError{
+		Failure: &generation.Failure{
+			Class:          generation.FailureSubmissionUnknown,
+			Ambiguous:      true,
+			SafeDetail:     "上游返回错误，无法确认是否已接受提交，已停止自动重发",
+			UpstreamStatus: 400, UpstreamCode: "moderation",
+			UpstreamExcerpt: `moderation: prompt "a velvet castle on a cliff" rejected, see https://assets.example.test/a.glb?sig=abc, key sk-secretsecretsecret, contact person@example.com`,
+		},
+	}
+}
+
 type evidenceAdapter struct{}
 
 func (evidenceAdapter) Start(

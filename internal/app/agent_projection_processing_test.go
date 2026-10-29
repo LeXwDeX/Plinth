@@ -435,3 +435,64 @@ func TestAgentOfferingProjectionStatesTheRequiredChatImage(t *testing.T) {
 	}
 	t.Fatalf("Hyper3D texture inputs %+v omit the required reference image", inputs)
 }
+
+// #121: the Agent sees, from the Schema's own declarations, the source-model
+// limit of Rigging and what it means for the Remesh step before it, so it
+// picks compatible parameters instead of the defaults.
+func TestAgentOfferingProjectionTellsTheRemeshRiggingConstraint(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projection struct {
+		Capabilities []agentCapabilityView `json:"capabilities"`
+	}
+	if err := json.Unmarshal(buildAgentOfferingsProjection(product.Application().Capabilities, product, nil), &projection); err != nil {
+		t.Fatal(err)
+	}
+	var remesh, rigging, animation *agentOfferingView
+	for _, capability := range projection.Capabilities {
+		for index := range capability.Offerings {
+			switch capability.Offerings[index].OfferingID {
+			case "meshy/processing/remesh":
+				remesh = &capability.Offerings[index]
+			case "meshy/processing/rigging":
+				rigging = &capability.Offerings[index]
+			case "meshy/processing/animation":
+				animation = &capability.Offerings[index]
+			}
+		}
+	}
+	if remesh == nil || rigging == nil || animation == nil {
+		t.Fatal("processing offerings missing from the projection")
+	}
+	if rigging.MaxSourceTriangles != 320000 || animation.MaxSourceTriangles != 0 {
+		t.Fatalf("max source triangles: rigging %d, animation %d", rigging.MaxSourceTriangles, animation.MaxSourceTriangles)
+	}
+	if len(remesh.ChainLimits) != 1 {
+		t.Fatalf("remesh chain limits = %#v", remesh.ChainLimits)
+	}
+	limit := remesh.ChainLimits[0]
+	if limit.NextCapability != "rigging" || limit.MaxTriangles != 320000 || limit.CountParameter != "target_polycount" ||
+		limit.Topology != "topology" || limit.Compatible != "quad ≤ 160000 / triangle ≤ 320000" {
+		t.Fatalf("chain limit = %#v", limit)
+	}
+	if len(rigging.ChainLimits) != 0 || len(animation.ChainLimits) != 0 {
+		t.Fatalf("only the step that sets the triangle count lists chain limits: %#v %#v", rigging.ChainLimits, animation.ChainLimits)
+	}
+	// An unavailable limited step is not advertised.
+	var hidden struct {
+		Capabilities []agentCapabilityView `json:"capabilities"`
+	}
+	available := func(id generation.OfferingID) bool { return id != "meshy/processing/rigging" }
+	if err := json.Unmarshal(buildAgentOfferingsProjection(product.Application().Capabilities, product, available), &hidden); err != nil {
+		t.Fatal(err)
+	}
+	for _, capability := range hidden.Capabilities {
+		for _, offering := range capability.Offerings {
+			if offering.OfferingID == "meshy/processing/remesh" && len(offering.ChainLimits) != 0 {
+				t.Fatalf("limit of an unavailable step advertised: %#v", offering.ChainLimits)
+			}
+		}
+	}
+}

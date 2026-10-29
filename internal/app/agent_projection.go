@@ -28,6 +28,27 @@ type agentOfferingView struct {
 	DefaultQuote *agentQuoteView   `json:"default_quote,omitempty"`
 	Sources      []agentSourceView `json:"sources,omitempty"`
 	Inputs       []agentInputView  `json:"inputs,omitempty"`
+	// MaxSourceTriangles is the most triangles the source 3D model of this
+	// step may have (Offering.SourceModelLimit); a step over it is refused.
+	MaxSourceTriangles int64 `json:"max_source_triangles,omitempty"`
+	// ChainLimits tells, for an Offering whose request sets the triangle count
+	// of the model it delivers (Offering.OutputTriangles), what a later step
+	// that limits its source accepts. A plan whose earlier step exceeds it is
+	// refused before any step is paid, so the Agent picks compatible
+	// parameters up front (#121).
+	ChainLimits []agentChainLimitView `json:"chain_limits,omitempty"`
+}
+
+// agentChainLimitView is one later step's source limit seen from the step that
+// produces its model. Compatible lists, per topology, the largest target face
+// count that still fits ("quad ≤ 160000 / triangle ≤ 320000"); it comes from
+// the Schema's declared limit and face-to-triangle factors, not from text.
+type agentChainLimitView struct {
+	NextCapability string `json:"next_capability"`
+	MaxTriangles   int64  `json:"max_triangles"`
+	CountParameter string `json:"count_parameter"`
+	Topology       string `json:"topology_parameter"`
+	Compatible     string `json:"compatible"`
 }
 
 // agentInputView is one public input the Agent may set, with the choices
@@ -190,6 +211,10 @@ func buildAgentOfferingsProjection(
 					offeringView.Sources = append(offeringView.Sources, source)
 				}
 				offeringView.DefaultQuote = agentDefaultQuote(offering)
+				if limit := offering.SourceModelLimit; limit != nil {
+					offeringView.MaxSourceTriangles = limit.MaxTriangles
+				}
+				offeringView.ChainLimits = agentChainLimits(offering, offerings, available)
 				// Extra credits are a choice only when some billed option is not fixed.
 				if cost := offering.Cost; cost != nil && cost.ExtraCredits > 0 && offering.MaximumEstimatedCredits() > offering.QuotedCredits() {
 					offeringView.ExtraCredits = cost.ExtraCredits
@@ -210,6 +235,42 @@ func buildAgentOfferingsProjection(
 		return json.RawMessage(`{"capabilities":[]}`)
 	}
 	return out
+}
+
+// agentChainLimits lists the later processing steps that limit the triangles of
+// their source model and can take a task of this Offering's capability as that
+// source. Empty unless the Offering declares how its request sets the
+// triangle count (Offering.OutputTriangles).
+func agentChainLimits(offering generation.Offering, offerings agentOfferingsSource, available func(generation.OfferingID) bool) []agentChainLimitView {
+	estimate := offering.OutputTriangles
+	if estimate == nil {
+		return nil
+	}
+	var views []agentChainLimitView
+	seen := map[string]bool{}
+	for _, next := range offerings.List("") {
+		limit := next.SourceModelLimit
+		if limit == nil || (available != nil && !available(next.ID)) {
+			continue
+		}
+		takes := false
+		for _, parameter := range next.Parameters {
+			if role, isSource := schema.SourceParameterRole(parameter); isSource && role == schema.SemanticSourceTask {
+				for _, allowed := range parameter.TaskCapabilities {
+					takes = takes || allowed == offering.Capability
+				}
+			}
+		}
+		compatible := schema.FormatTopologyBudgets(estimate.CompatibleFaceBudgets(*limit))
+		key := string(next.Capability) + "|" + compatible
+		if !takes || seen[key] {
+			continue
+		}
+		seen[key] = true
+		views = append(views, agentChainLimitView{NextCapability: string(next.Capability), MaxTriangles: limit.MaxTriangles,
+			CountParameter: estimate.CountParameter, Topology: estimate.TopologyParameter, Compatible: compatible})
+	}
+	return views
 }
 
 // agentInputViews lists the scalar inputs of a processing Offering. Source,
@@ -252,14 +313,7 @@ func agentInputViews(offering generation.Offering) []agentInputView {
 func agentImageInputViews(offering generation.Offering) []agentInputView {
 	var views []agentInputView
 	for _, parameter := range offering.Parameters {
-		if parameter.Semantic != generation.SemanticReferenceImage || parameter.Fixed || parameter.Name == offering.ExtraConsentParameter() ||
-			(parameter.Type != "asset" && parameter.Type != "asset-array") {
-			continue
-		}
-		if _, isSource := schema.SourceParameterRole(parameter); isSource {
-			continue
-		}
-		if parameter.Presentation != nil && parameter.Presentation.Surface == schema.SurfaceHidden {
+		if !schema.ConversationReferenceImage(parameter) || parameter.Name == offering.ExtraConsentParameter() {
 			continue
 		}
 		views = append(views, agentInputView{Name: parameter.Name, Label: parameter.Label, Type: parameter.Type, Required: parameter.Required,

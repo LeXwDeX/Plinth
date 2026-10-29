@@ -215,6 +215,12 @@ func TestProcessingPlanMiddleSubmissionRecoveryPersists(t *testing.T) {
 					t.Fatalf("missing %s", cap)
 				}
 				input := json.RawMessage(`{}`)
+				if cap == "remesh" {
+					// The Remesh defaults (quad, 300000) would deliver about 600000
+					// triangles, over Rigging's source limit, and the plan is refused
+					// up front (#121); this is a compatible budget.
+					input = json.RawMessage(`{"topology":"quad","target_polycount":160000}`)
+				}
 				if cap == "animation" {
 					input = json.RawMessage(`{"action_id":10}`)
 				}

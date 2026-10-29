@@ -16,80 +16,59 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
-// sourceModelLimit is the Product Schema declaration of an upstream input-face
-// ceiling (#103). Meshy's Rigging documentation states "up to 320,000 faces"
-// without defining a face; Plinth counts triangles, which is the conservative
-// reading because one quad is two triangles. count_basis therefore only
-// accepts "triangles".
-type sourceModelLimit struct {
-	MaxTriangles int64  `json:"max_triangles"`
-	CountBasis   string `json:"count_basis"`
-}
-
-// sourceFaceReadLimits are parser safety ceilings for reading a delivered or
-// owned GLB, not product limits: the product limit is max_triangles above. The
-// values are the generated-profile maxima accepted by modelinput.Policy.
-var sourceFaceReadLimits = modelinput.Limits{
-	MaxBytes: 256 << 20, MaxJSONBytes: 32 << 20, MaxDepth: 256, MaxElements: 1000000,
-	MaxVertices: 16000000, MaxTriangles: 16000000, MaxNodes: 100000, MaxWork: 1 << 32,
-	MaxImagePixels: 1 << 28, MaxTotalImagePixels: 1 << 30,
-}
-
-func validateSourceModelLimit(offering generation.Offering, options wireOptions) error {
-	limit := options.SourceModelLimit
-	if limit == nil {
-		return nil
-	}
-	if limit.MaxTriangles <= 0 || limit.MaxTriangles > sourceFaceReadLimits.MaxTriangles || limit.CountBasis != "triangles" {
-		return errors.New("source_model_limit 需要正的 max_triangles 与 count_basis=triangles")
-	}
-	for _, parameter := range offering.Parameters {
-		if role, ok := schema.SourceParameterRole(parameter); ok && (role == schema.SemanticSourceTask || role == schema.SemanticSourceAsset) {
-			return nil
-		}
-	}
-	return errors.New("source_model_limit 需要 source-task 或 source-asset 参数")
-}
-
 // validateSourceFaceLimit refuses a step before submission when the frozen 3D
-// source has more triangles than the Offering declares. It reads only bytes the
-// platform already owns (an uploaded asset or the GLB a successful source Task
-// delivered). A source that cannot be measured here (a bare URL, no stored GLB,
-// bytes the static parser does not accept) is not blocked; the upstream
+// source has more triangles than the Offering declares in source_model_limit
+// (#103). The ceiling is declared once in the Product Schema (the Catalog
+// validates the declaration at load); this reads it from the Offering and
+// compares it with the measured model through the same helper the profiled
+// inline model input uses (modelinput.Profile.ExceedsInstancedTriangles). It
+// reads only bytes the platform already owns (an uploaded asset or the GLB a
+// successful source Task delivered). A source that cannot be measured here (a
+// bare URL, no stored GLB, bytes larger than the Offering's inline model input
+// or that the static parser does not accept) is not blocked; the upstream
 // remains the authority for it.
 func (a *Adapter) validateSourceFaceLimit(ctx context.Context, request generation.InputValidationRequest) error {
-	var options wireOptions
-	if json.Unmarshal(request.Offering.ProviderOptions, &options) != nil || options.SourceModelLimit == nil {
+	limit := request.Offering.SourceModelLimit
+	if limit == nil || a.inputAssets == nil {
 		return nil
 	}
-	limit := options.SourceModelLimit
-	if validateSourceModelLimit(request.Offering, options) != nil {
-		return modelSourceFailure(generation.ErrUnavailable, errors.New("invalid source_model_limit"))
-	}
-	if a.inputAssets == nil {
-		return nil
-	}
-	policy := modelinput.Policy{ProfileID: modelinput.GeneratedProfileID, Revision: modelinput.GeneratedProfileRevision, Limits: sourceFaceReadLimits}
-	var worst int64
-	for _, source := range sourceModelAssets(request) {
-		triangles, known, err := a.countSourceTriangles(ctx, request.Offering, source, policy)
+	policy := modelinput.GeneratedPolicy()
+	readLimit := sourceReadLimit(request.Offering, policy)
+	var worst modelinput.Profile
+	for _, source := range sourceModelAssets(request, readLimit) {
+		profile, known, err := a.measureSourceModel(ctx, request.Offering, source, policy)
 		if err != nil {
 			return err
 		}
-		if known && triangles > worst {
-			worst = triangles
+		if known && profile.InstancedTriangles > worst.InstancedTriangles {
+			worst = profile
 		}
 	}
-	if worst <= limit.MaxTriangles {
+	if !worst.ExceedsInstancedTriangles(limit.MaxTriangles) {
 		return nil
 	}
 	return inputRefusal(request.Offering, schema.InputRefusalFaceLimit,
-		schema.InputRefusalValues{Faces: worst, FaceLimit: limit.MaxTriangles},
-		generation.ErrInvalidInput, fmt.Errorf("source model has %d triangles, limit %d", worst, limit.MaxTriangles))
+		schema.InputRefusalValues{Faces: worst.InstancedTriangles, FaceLimit: limit.MaxTriangles},
+		generation.ErrInvalidInput, fmt.Errorf("source model has %d triangles, limit %d", worst.InstancedTriangles, limit.MaxTriangles))
+}
+
+// sourceReadLimit is the largest source file this check loads into memory
+// (B11, #121): the Offering's own inline model input size, the file size the
+// step is declared to take, so a source it could not take is never read. The
+// parser's safety ceiling still applies, and an Offering that declares no
+// inline input is bounded by it alone.
+func sourceReadLimit(offering generation.Offering, policy modelinput.Policy) int64 {
+	limit := policy.Limits.MaxBytes
+	var options wireOptions
+	if json.Unmarshal(offering.ProviderOptions, &options) == nil && options.InlineModelInput != nil &&
+		options.InlineModelInput.MaxBytes > 0 && options.InlineModelInput.MaxBytes < limit {
+		limit = options.InlineModelInput.MaxBytes
+	}
+	return limit
 }
 
 // sourceModelAssets lists the stored GLBs of the declared source parameters.
-func sourceModelAssets(request generation.InputValidationRequest) []generation.InputAsset {
+func sourceModelAssets(request generation.InputValidationRequest, readLimit int64) []generation.InputAsset {
 	var assets []generation.InputAsset
 	for _, parameter := range request.Offering.Parameters {
 		role, ok := schema.SourceParameterRole(parameter)
@@ -121,37 +100,37 @@ func sourceModelAssets(request generation.InputValidationRequest) []generation.I
 		}
 	}
 	return slices.DeleteFunc(assets, func(asset generation.InputAsset) bool {
-		return asset.Size <= 0 || asset.Size > sourceFaceReadLimits.MaxBytes
+		return asset.Size <= 0 || asset.Size > readLimit
 	})
 }
 
-// countSourceTriangles returns the instanced triangle count of one stored GLB.
-// known is false when the bytes cannot be measured; only a canceled context or
-// an unreadable store is an error.
-func (a *Adapter) countSourceTriangles(ctx context.Context, offering generation.Offering, asset generation.InputAsset, policy modelinput.Policy) (int64, bool, error) {
+// measureSourceModel returns the measured profile of one stored GLB. known is
+// false when the bytes cannot be measured; only a canceled context or an
+// unreadable store is an error.
+func (a *Adapter) measureSourceModel(ctx context.Context, offering generation.Offering, asset generation.InputAsset, policy modelinput.Policy) (modelinput.Profile, bool, error) {
 	if err := ctx.Err(); err != nil {
-		return 0, false, err
+		return modelinput.Profile{}, false, err
 	}
 	reader, err := a.inputAssets.Open(ctx, asset)
 	if err != nil || reader == nil {
-		return 0, false, inputRefusal(offering, schema.InputRefusalUnavailable, schema.InputRefusalValues{}, generation.ErrUnavailable, err)
+		return modelinput.Profile{}, false, inputRefusal(offering, schema.InputRefusalUnavailable, schema.InputRefusalValues{}, generation.ErrUnavailable, err)
 	}
 	raw, readErr := io.ReadAll(io.LimitReader(modelContextReader{ctx, reader}, asset.Size+1))
 	_ = reader.Close()
 	if err := ctx.Err(); err != nil {
-		return 0, false, err
+		return modelinput.Profile{}, false, err
 	}
 	digest := sha256.Sum256(raw)
 	if readErr != nil || int64(len(raw)) != asset.Size || (asset.SHA256 != "" && !strings.EqualFold(hex.EncodeToString(digest[:]), asset.SHA256)) {
-		return 0, false, nil
+		return modelinput.Profile{}, false, nil
 	}
 	profile, err := modelinput.ValidateGLBBytes(ctx, raw, policy)
 	if err != nil {
 		var validation *modelinput.Error
 		if errors.As(err, &validation) && validation.Kind == modelinput.Canceled {
-			return 0, false, context.Canceled
+			return modelinput.Profile{}, false, context.Canceled
 		}
-		return 0, false, nil
+		return modelinput.Profile{}, false, nil
 	}
-	return profile.InstancedTriangles, true, nil
+	return profile, true, nil
 }

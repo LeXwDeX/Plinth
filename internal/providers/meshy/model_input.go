@@ -171,7 +171,10 @@ func (a *Adapter) readProfiledModel(ctx context.Context, request generation.Inpu
 	if !strings.EqualFold(profile.SHA256, asset.SHA256) {
 		return nil, modelSourceFailure(generation.ErrConflict, nil)
 	}
-	if c.options.MaxInstancedTriangles > 0 && profile.InstancedTriangles > c.options.MaxInstancedTriangles {
+	// The endpoint ceiling of a profiled inline model input (model_input_profile.
+	// max_instanced_triangles); a step's source-model ceiling is Offering.
+	// SourceModelLimit, compared by the same helper (source_face_limit.go).
+	if profile.ExceedsInstancedTriangles(c.options.MaxInstancedTriangles) {
 		return nil, modelSourceFailure(generation.ErrModelInputLimit, nil)
 	}
 	if err := modelsource.ValidateRoute(c.source, profile); err != nil {
