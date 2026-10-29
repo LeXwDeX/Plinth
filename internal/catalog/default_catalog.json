@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-10-30.issue115-agent-config-inactive-capabilities.1",
+    "revision": "2026-10-30.issue118-audit-action-labels.1",
     "terminology": {
       "user_facing": [
         {
@@ -10701,6 +10701,42 @@
       {
         "value": "bootstrap_admin_password_reset",
         "label": "启动时重置管理员密码"
+      },
+      {
+        "value": "set_approval_mode",
+        "label": "设置审批模式"
+      },
+      {
+        "value": "set_agent_scope",
+        "label": "设置 Agent 范围"
+      },
+      {
+        "value": "change_own_password",
+        "label": "修改自己的密码"
+      },
+      {
+        "value": "admin_read_users",
+        "label": "管理员查看用户"
+      },
+      {
+        "value": "admin_read_audit_logs",
+        "label": "管理员查看审计日志"
+      },
+      {
+        "value": "admin_read_generations",
+        "label": "管理员查看生成记录"
+      },
+      {
+        "value": "admin_read_usage",
+        "label": "管理员查看用量"
+      },
+      {
+        "value": "admin_read_user_assets",
+        "label": "管理员查看用户资产"
+      },
+      {
+        "value": "admin_trigger_backfill_status",
+        "label": "管理员触发状态回填"
       }
     ],
     "model_delivery": {
@@ -14635,6 +14671,15 @@
             "audit_actions[value=admin_delete_user].label": "Administrator deleted user",
             "audit_actions[value=bootstrap_admin_created].label": "Administrator created at startup",
             "audit_actions[value=bootstrap_admin_password_reset].label": "Administrator password reset at startup",
+            "audit_actions[value=set_approval_mode].label": "Set approval mode",
+            "audit_actions[value=set_agent_scope].label": "Set Agent scope",
+            "audit_actions[value=change_own_password].label": "Change own password",
+            "audit_actions[value=admin_read_users].label": "Administrator viewed users",
+            "audit_actions[value=admin_read_audit_logs].label": "Administrator viewed audit logs",
+            "audit_actions[value=admin_read_generations].label": "Administrator viewed generations",
+            "audit_actions[value=admin_read_usage].label": "Administrator viewed usage",
+            "audit_actions[value=admin_read_user_assets].label": "Administrator viewed user assets",
+            "audit_actions[value=admin_trigger_backfill_status].label": "Administrator triggered status backfill",
             "chat.presentation.messages.session_not_found": "Session not found",
             "chat.presentation.messages.message_not_found": "Message not found",
             "chat.presentation.messages.empty_title": "Title cannot be empty",

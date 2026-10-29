@@ -29,6 +29,10 @@ import {
   createAdministrationUsersBrowserClient,
 } from '@/lib/administration/users-browser-client';
 import {
+  auditActionLabel,
+  auditActionLabels,
+} from '@/lib/administration/audit-action-label';
+import {
   formatSchemaText,
   type AdministrationProductSchema,
 } from '@/lib/product-schema';
@@ -122,7 +126,7 @@ function AuditDetailDialog({
           variant="secondary"
           className={actionBadgeClass(log.action, presentation)}
         >
-          {actionLabels[log.action] || log.action}
+          {auditActionLabel(actionLabels, log.action)}
         </Badge>
       ),
     },
@@ -236,9 +240,7 @@ export function AuditLogPanel() {
     variables = {},
   ) => formatSchemaText(copy[key], variables);
   const actionLabels = useMemo(
-    () => Object.fromEntries(
-      schema.audit_actions.map((item) => [item.value, item.label]),
-    ),
+    () => auditActionLabels(schema.audit_actions),
     [schema.audit_actions],
   );
   const actionOptions = useMemo(
@@ -452,7 +454,7 @@ export function AuditLogPanel() {
                             presentation,
                           )}
                         >
-                          {actionLabels[log.action] || log.action}
+                          {auditActionLabel(actionLabels, log.action)}
                         </Badge>
                       </td>
                       <td className="py-3 text-muted-foreground">

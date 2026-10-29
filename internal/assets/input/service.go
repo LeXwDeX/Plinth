@@ -393,9 +393,10 @@ func (s *Service) OpenAuthorized(
 	}
 	if !readAll && asset.OwnerID != owner {
 		return generation.InputAsset{}, nil, &generation.Error{
-			Code:      generation.ErrForbidden,
-			Operation: "open_authorized_input_asset",
-			Detail:    "输入资产不属于当前用户",
+			// A foreign asset is reported exactly like a missing one so
+			// the response cannot reveal whether the ID exists (AUTH-09).
+			Code:      generation.ErrNotFound,
+			Operation: "get_input_asset",
 		}
 	}
 	content, err := s.Open(ctx, asset)
