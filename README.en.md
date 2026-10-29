@@ -147,7 +147,7 @@ check `docker compose logs art-ai`.
 | `required variable SESSION_SECRET is missing a value` or the same message for `ADMIN_PASSWORD` | The value is empty in `.env`; generate and write it as in step 1. |
 | `SESSION_SECRET` is too short | Generate a new value with `openssl rand -base64 48`. |
 | `ADMIN_PASSWORD` is too short | Use a password of at least 6 characters; this is checked when the first administrator is created or reset. |
-| `address already in use` | Another process uses the port; change `ART_AI_PORT` in `.env`. |
+| `address already in use` (a non-Docker process holds the port) or `Bind for 127.0.0.1:<port> failed: port is already allocated` (another Docker container holds it) | The port is taken; the fix is the same: change `ART_AI_PORT` in `.env`. |
 
 ### Configuration
 
@@ -277,9 +277,11 @@ Design details are in [docs/architecture.md](docs/architecture.md) and domain te
 ## Local development
 
 Prerequisites: Go (minimum 1.26, per `go.mod`; the image and CI use 1.27, which is the
-recommended version), Node 22, pnpm (the version is the `packageManager` in `package.json`;
-`corepack enable` fetches it), `git`, `python3`, `bash` and `jq` (some frontend tests call
-them); the `--race` check also needs a C compiler (`gcc` or `cc`, for CGO).
+recommended version), Node 22, pnpm (the version is the `packageManager` in `package.json`; install it with
+`npm install -g pnpm@12.5.1`: the corepack 0.34.0 bundled with Node 22.21.1 cannot fetch that
+version through `corepack enable`, and if you already enabled the corepack shims, run
+`corepack disable` first), `git`, `python3`, `bash`, `jq` and `sqlite3` (some frontend tests
+and `scripts/tests` call them); the `--race` check also needs a C compiler (`gcc` or `cc`, for CGO).
 `python3 scripts/verify-local.py` checks for these commands at startup and lists any that are
 missing. Details are in [CONTRIBUTING.md](CONTRIBUTING.md).
 

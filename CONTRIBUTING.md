@@ -21,10 +21,11 @@
 |---|---|
 | Go | 1.26+（CI 用 1.27） |
 | Node.js | 22 |
-| pnpm | `package.json` 的 `packageManager`（可用 `corepack enable` 自动取得） |
+| pnpm | `package.json` 的 `packageManager`，用 `npm install -g pnpm@12.5.1` 安装（Node 22.21.1 自带的 corepack 0.34.0 经 `corepack enable` 取不到该版本；已启用 corepack shim 时先 `corepack disable`） |
 | Python | 3（本地门禁脚本） |
 | git | 公开树检查（`public tree`）需要在 Git 仓库内运行 |
 | bash、jq | 部分前端测试会调用；缺失时 `pnpm test` 报 `jq: command not found` |
+| sqlite3 | `scripts/tests` 的割接验收测试调用 `sqlite3` 命令行；缺失时 31 个用例报 `FileNotFoundError: 'sqlite3'` |
 | C 编译器（`gcc` 或 `cc`） | 仅 `--race` 需要（CGO） |
 | Docker | 可选，用于构建运行镜像 |
 
@@ -110,10 +111,11 @@ MIT，见 [LICENSE](LICENSE)。提交贡献即表示你同意按该许可证发�
 |---|---|
 | Go | 1.26+ (CI uses 1.27) |
 | Node.js | 22 |
-| pnpm | the `packageManager` in `package.json` (`corepack enable` fetches it) |
+| pnpm | the `packageManager` in `package.json`; install with `npm install -g pnpm@12.5.1` (the corepack 0.34.0 bundled with Node 22.21.1 cannot fetch it through `corepack enable`; if the corepack shims are already enabled, run `corepack disable` first) |
 | Python | 3 (local check script) |
 | git | the `public tree` check must run inside a Git repository |
 | bash, jq | used by some frontend tests; without them `pnpm test` fails with `jq: command not found` |
+| sqlite3 | the cutover acceptance tests in `scripts/tests` call the `sqlite3` command line; without it 31 cases fail with `FileNotFoundError: 'sqlite3'` |
 | C compiler (`gcc` or `cc`) | needed only by `--race` (CGO) |
 | Docker | optional, to build the runtime image |
 

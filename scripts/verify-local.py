@@ -69,8 +69,9 @@ class Unbindable(GateError):
 
 
 # Command-line tools the gates call directly (frontend tests shell out to bash and jq;
-# git backs the public tree gate). The C compiler is needed only by the race gate (CGO).
-REQUIRED_TOOLS = ['git', 'pnpm', 'node', 'go', 'bash', 'jq']
+# git backs the public tree gate; scripts/tests call the sqlite3 command line).
+# The C compiler is needed only by the race gate (CGO).
+REQUIRED_TOOLS = ['git', 'pnpm', 'node', 'go', 'bash', 'jq', 'sqlite3']
 RACE_TOOLS = [('C compiler (gcc or cc, for CGO)', ('gcc', 'cc'))]
 
 
