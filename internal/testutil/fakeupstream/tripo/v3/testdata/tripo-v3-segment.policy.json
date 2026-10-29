@@ -1,0 +1,61 @@
+{
+  "MaxBodyBytes": 4194304,
+  "Keys": {
+    "code": true,
+    "completed_at": true,
+    "created_at": true,
+    "credits_consumed": true,
+    "data": true,
+    "file": true,
+    "input": true,
+    "model": true,
+    "model_url": true,
+    "model_version": true,
+    "original_model_id": true,
+    "output": true,
+    "progress": true,
+    "rendered_image_url": true,
+    "segmentation_granularity": true,
+    "split_by_connectivity": true,
+    "status": true,
+    "task_id": true,
+    "type": true
+  },
+  "Allowed": {
+    "0": true,
+    "1": true,
+    "100": true,
+    "18": true,
+    "2026-10-29T00:17:53.013973Z": true,
+    "2026-10-29T00:18:10.241144Z": true,
+    "35": true,
+    "40.00": true,
+    "53": true,
+    "70": true,
+    "application/json": true,
+    "https://example.test/fixture-3.webp": true,
+    "https://example.test/fixture-4.glb": true,
+    "id-1": true,
+    "id-2": true,
+    "mesh": true,
+    "mesh_segmentation": true,
+    "queued": true,
+    "running": true,
+    "segment": true,
+    "simple": true,
+    "success": true,
+    "tasks": true,
+    "v2.0-20260430": true,
+    "v3": true
+  },
+  "Aliases": null,
+  "PublicHosts": {
+    "openapi.tripo3d.ai": true
+  },
+  "Projection": null,
+  "QueryKeys": {
+    "Key-Pair-Id": true,
+    "Policy": true,
+    "Signature": true
+  }
+}

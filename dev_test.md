@@ -94,6 +94,8 @@ CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check
 - 已提交的真实 wire 样本（`*.candidate.json`）另有两项离线检查，同样随现有 `go test` 运行，不新增门禁项：`internal/testutil/wirefixture` 的 `TestWireCoverageMatrix` 校验由 Catalog 和样本生成的覆盖矩阵 `testdata/wire-coverage.generated.json`（样本或 Catalog 变化后用 `UPDATE_WIRE_COVERAGE=1 go test ./internal/testutil/wirefixture -run Coverage` 重新生成并随同提交，不手改），`TestCommittedWireCorpusHasNoPrivateData` 重扫样本、meta、policy 与矩阵的隐私。真实采集必须在干净工作树进行。缺真实样本的 Offering 在矩阵里列为 `missing`，不用合成数据填充；规则与限制见 `docs/architecture.md`「Wire 黄金样本、覆盖矩阵与全栈离线回放」。
 - `dev-test` 测试栈的真实付费验收仍按既有授权和 §11 流程执行，并核对实际请求体、精确 revision、必需产物及鉴权交付/UI；正式栈只运行免费 L0/L1，付费生成须用户明确决定。上游 `service_unavailable` 等失败不能据此排除本地请求错误；先独立复核该端点官方合同和实际请求证据，再定位原因。不得用盲目重试、放宽断言或修改 mock 期望来掩盖失败。
 
+- Fake 上游（#96）的离线检查同样随 `go test -count=1 ./...` 与 race 运行，不新增门禁项，因此已在本节的本地与 CI 门禁里：`internal/testutil/fakeupstream` 下各版本的 `TestDriftFakeResponsesMatchTheRealSamples`（fake 响应的字段集合与类型必须与该版本最新真实样本一致）、`TestEndpointTableIsCompleteAndHonest`、`TestAlignmentReportIsCommittedAndClean`（对齐报告无未说明差异）、每个故障场景的回归测试、产物字节的 Plinth 交付检查，以及 `TestProductionBinariesDoNotLinkFakeUpstream` / `TestRuntimeImageBuildsOnlyListedCommands`（fake 不进任何发布二进制和镜像）。用法见下节「Fake 上游自检」。
+
 ### 自动化门禁说明
 - **本节是发布前门禁清单的唯一真源**：`AGENTS.md`「提交前门禁」章节及
   发布操作均以本节为准，不得另行维护平行清单；
@@ -121,6 +123,15 @@ CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check
 - `dev-test` 验收账号与密码只从测试栈 `runtime.env` 读取，不在仓库文档或命令
   输出中复制；
 - 部署之后，需要覆盖验证 `MeshyAI Provider 以外` 的自定义接入功能链路。
+
+### Fake 上游自检（#96）
+
+开发阶段的零成本、离线、可重复自检：不付费调用 Tripo 或 LLM 网关，也不用 Mock 绕过 Adapter。fake 只在本机运行，不进入任何部署栈，也不替代真实付费验收（L2 与真实模型验收仍按 `scripts/smoke/README.md`）。设计与边界见 `docs/architecture.md`「Fake 上游服务」。
+
+- **整栈一条命令：** `python3 scripts/smoke/smoke-fake-stack.py`（可加 `--only balance,chain,agent,faults`、`--keep --work DIR`）。它构建并启动 `cmd/fake-upstream`，再以 live 模式启动本机隔离栈（端口 19410/19411，可用 `FAKE_STACK_FAKE_PORT`、`FAKE_STACK_PORT` 改），栈的 `TRIPO_BASE_URL`、`LLM_BASE_URL` 指向 fake，逐项核对：余额面板；Tripo 生成 → rig-check → rigging → animation、segment → complete 走到 SUCCEEDED，必需槽位、字节大小与 SHA-256、交付头都通过；Agent 对话 → 工具调用 → 批准 → Tripo 任务 → 回复；故障场景（`insufficient-balance`、`key-quota`、`task-failed`、`artifact-corrupt`、`artifact-404`）下公开 Task 的终态与错误 class。全程只用回环地址和随机临时目录，不读取任何真实 Key，不访问 dev-test 或正式环境。
+- **手工使用 fake：** `go run ./cmd/fake-upstream -addr 127.0.0.1:19000`，把 `TRIPO_BASE_URL=http://127.0.0.1:19000/tripo/v3`、`LLM_BASE_URL=http://127.0.0.1:19000/openai/v1` 交给栈，任意 Key 都被接受。Key 以 `fake-<场景>` 开头或请求头 `X-Fake-Scenario: <场景>` 触发故障（`go run ./cmd/fake-upstream -help` 列出场景）。要让 Agent 调用工具，在用户消息里写 `[[fake:tool:create_model_3d {"prompt":"a cube"}]]`。栈要走 Tripo 原生处理（rigging、segment、complete）必须由 `internal/app` 的 `TestFakeUpstreamStack` 测试二进制承载（原因见架构文档），整栈脚本已经这样做。
+- **官方对齐实测（付费，须授权）：** `cmd/fake-upstream-align` 的 `official` 子命令把脚本发给真实 API，每个付费端点只发一次最便宜的请求，没有 `-confirm-paid` 拒绝运行；原始结果只写到工作树外的 0700 目录。随后 `export` 离线导出脱敏样本、`fake` 对 fake 重跑同一脚本、`compare` 生成 `alignment-report.{md,json}`。真实请求使用 dev-test 栈已有的 Key（按 `docs/deployment.md` 定位，不输出），受 `AGENTS.md` 的付费验收次数上限约束；采集必须在干净工作树进行。官方接口变更后重新实测，新版本新增目录，旧版本不动。
+- **新增上游 API 版本：** 新建同级目录（如 `tripo/v4`），带自己的实现、样本、`Profile` 与对齐报告，在 `registry.Versions()` 与 `Profiles()` 追加一行；不改旧版本目录。
 
 ### 交付硬门禁
 

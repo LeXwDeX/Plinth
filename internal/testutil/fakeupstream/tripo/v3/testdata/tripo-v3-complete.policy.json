@@ -1,0 +1,62 @@
+{
+  "MaxBodyBytes": 4194304,
+  "Keys": {
+    "code": true,
+    "completed_at": true,
+    "completion_mode": true,
+    "created_at": true,
+    "credits_consumed": true,
+    "data": true,
+    "file": true,
+    "input": true,
+    "model": true,
+    "model_url": true,
+    "original_model_id": true,
+    "output": true,
+    "progress": true,
+    "status": true,
+    "task_id": true,
+    "type": true
+  },
+  "Allowed": {
+    "0": true,
+    "1": true,
+    "100": true,
+    "14": true,
+    "20": true,
+    "2026-10-29T00:18:15.732903Z": true,
+    "2026-10-29T00:18:54.226166Z": true,
+    "25": true,
+    "31": true,
+    "37": true,
+    "44": true,
+    "50": true,
+    "50.00": true,
+    "56": true,
+    "8": true,
+    "ai_completion": true,
+    "application/json": true,
+    "complete": true,
+    "https://example.test/fixture-3.glb": true,
+    "id-1": true,
+    "id-2": true,
+    "mesh": true,
+    "mesh_completion": true,
+    "queued": true,
+    "running": true,
+    "success": true,
+    "tasks": true,
+    "v1.0-20250506": true,
+    "v3": true
+  },
+  "Aliases": null,
+  "PublicHosts": {
+    "openapi.tripo3d.ai": true
+  },
+  "Projection": null,
+  "QueryKeys": {
+    "Key-Pair-Id": true,
+    "Policy": true,
+    "Signature": true
+  }
+}
