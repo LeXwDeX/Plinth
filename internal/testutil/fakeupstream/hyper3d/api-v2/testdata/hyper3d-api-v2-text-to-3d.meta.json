@@ -1,0 +1,12 @@
+{
+  "api_version": "v2",
+  "candidate_sha256": "b71e995a1ac79d18c449d230d25620831041d0a64f4b9ad249350b793b92408f",
+  "captured_at_utc": "2026-10-29",
+  "exchanges": 9,
+  "offering": "hyper3d/rodin-gen-2.5/text-to-3d",
+  "provenance": "captured",
+  "scenario": "hyper3d-api-v2-alignment",
+  "source_revision": "unknown",
+  "transformation": "IDs, signed URLs, timestamps and amounts are deterministic placeholders; media bytes are not stored.",
+  "version": 1
+}

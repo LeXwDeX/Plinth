@@ -1,0 +1,58 @@
+{
+  "MaxBodyBytes": 4194304,
+  "Keys": {
+    "consumed_credits": true,
+    "created_at": true,
+    "duration": true,
+    "duration_ms": true,
+    "expires_at": true,
+    "file": true,
+    "finished_at": true,
+    "id": true,
+    "mode": true,
+    "motion_format": true,
+    "motion_url": true,
+    "name": true,
+    "progress": true,
+    "prompt": true,
+    "result": true,
+    "started_at": true,
+    "status": true,
+    "task_error": true,
+    "type": true
+  },
+  "Allowed": {
+    "0": true,
+    "10": true,
+    "100": true,
+    "11": true,
+    "12": true,
+    "1700000000000": true,
+    "2": true,
+    "2000": true,
+    "5": true,
+    "IN_PROGRESS": true,
+    "SUCCEEDED": true,
+    "a person waves one hand": true,
+    "application/json": true,
+    "fbx": true,
+    "https://example.test/fixture-2.fbx": true,
+    "id-1": true,
+    "openapi": true,
+    "prime": true,
+    "text-to-motion": true,
+    "v1": true
+  },
+  "Aliases": null,
+  "PublicHosts": {
+    "api.meshy.ai": true,
+    "assets.meshy.ai": true,
+    "cdn.meshy.ai": true
+  },
+  "Projection": null,
+  "QueryKeys": {
+    "Expires": true,
+    "Key-Pair-Id": true,
+    "Signature": true
+  }
+}

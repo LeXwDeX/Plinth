@@ -8,8 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -103,6 +106,34 @@ func (t *TeeTransport) Save(path string) error {
 type ReplayTransport struct {
 	mu    sync.Mutex
 	queue map[string][]rawExchange
+	log   []rawExchange
+}
+
+// MultipartFile returns the bytes of the first file part named field with the
+// given file name among the saved requests. A step whose file came from an
+// earlier step's artifact (File.FromVar) sent exactly these bytes, so an offline
+// export needs no second download of an URL that may have expired.
+func (r *ReplayTransport) MultipartFile(field, filename string) ([]byte, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, exchange := range r.log {
+		_, params, err := mime.ParseMediaType(exchange.ReqType)
+		if err != nil || params["boundary"] == "" || !strings.HasPrefix(strings.ToLower(exchange.ReqType), "multipart/") {
+			continue
+		}
+		reader := multipart.NewReader(bytes.NewReader(exchange.ReqBody), params["boundary"])
+		for {
+			part, err := reader.NextPart()
+			if err != nil {
+				break
+			}
+			data, _ := io.ReadAll(part)
+			if part.FormName() == field && part.FileName() == filename {
+				return data, true
+			}
+		}
+	}
+	return nil, false
 }
 
 // LoadReplay reads a file written by TeeTransport.Save.
@@ -118,7 +149,7 @@ func LoadReplay(path string) (*ReplayTransport, error) {
 	if len(log) == 0 {
 		return nil, errors.New("align: replay log is empty")
 	}
-	replay := &ReplayTransport{queue: map[string][]rawExchange{}}
+	replay := &ReplayTransport{queue: map[string][]rawExchange{}, log: log}
 	for _, exchange := range log {
 		key := replayKey(exchange.Method, exchange.URL, exchange.ReqType, exchange.ReqBody)
 		replay.queue[key] = append(replay.queue[key], exchange)
@@ -157,8 +188,34 @@ func (r *ReplayTransport) RoundTrip(request *http.Request) (*http.Response, erro
 
 func replayKey(method, url, contentType string, body []byte) string {
 	if strings.HasPrefix(strings.ToLower(contentType), "multipart/") {
-		body = nil
+		body = multipartDigestInput(contentType, body)
 	}
 	sum := sha256.Sum256(body)
 	return method + " " + url + " " + hex.EncodeToString(sum[:8])
+}
+
+// multipartDigestInput is the boundary-free content of a multipart body: its
+// text fields and the name, file name and length of its files, so two steps
+// posting different forms to one endpoint never take each other's recording.
+func multipartDigestInput(contentType string, body []byte) []byte {
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil || params["boundary"] == "" {
+		return nil
+	}
+	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+	var parts []string
+	for {
+		part, err := reader.NextPart()
+		if err != nil {
+			break
+		}
+		data, _ := io.ReadAll(part)
+		if part.FileName() != "" {
+			parts = append(parts, fmt.Sprintf("%s=file:%s:%d", part.FormName(), part.FileName(), len(data)))
+		} else {
+			parts = append(parts, part.FormName()) // the value may be an id the export replaces
+		}
+	}
+	sort.Strings(parts)
+	return []byte(strings.Join(parts, "\n"))
 }

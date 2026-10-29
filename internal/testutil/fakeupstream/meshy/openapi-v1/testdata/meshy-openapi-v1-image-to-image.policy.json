@@ -1,0 +1,52 @@
+{
+  "MaxBodyBytes": 4194304,
+  "Keys": {
+    "ai_model": true,
+    "aspect_ratio": true,
+    "consumed_credits": true,
+    "created_at": true,
+    "expires_at": true,
+    "file": true,
+    "finished_at": true,
+    "id": true,
+    "image_urls": true,
+    "progress": true,
+    "prompt": true,
+    "reference_image_urls": true,
+    "result": true,
+    "started_at": true,
+    "status": true,
+    "type": true
+  },
+  "Allowed": {
+    "0": true,
+    "100": true,
+    "1700000000000": true,
+    "1:1": true,
+    "30": true,
+    "5": true,
+    "IN_PROGRESS": true,
+    "SUCCEEDED": true,
+    "application/json": true,
+    "https://example.test/fixture-1.png": true,
+    "https://example.test/fixture-3.png": true,
+    "id-2": true,
+    "image-to-image": true,
+    "nano-banana-2": true,
+    "openapi": true,
+    "the same robot in plain grey": true,
+    "v1": true
+  },
+  "Aliases": null,
+  "PublicHosts": {
+    "api.meshy.ai": true,
+    "assets.meshy.ai": true,
+    "cdn.meshy.ai": true
+  },
+  "Projection": null,
+  "QueryKeys": {
+    "Expires": true,
+    "Key-Pair-Id": true,
+    "Signature": true
+  }
+}

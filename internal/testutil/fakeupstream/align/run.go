@@ -26,6 +26,15 @@ type File struct {
 	Filename  string
 	MediaType string
 	Data      []byte
+	// FromVar, when set, downloads the file's bytes from the URL held by that
+	// variable (an artifact an earlier step produced) instead of using Data.
+	FromVar string
+}
+
+// Field is one text part of a multipart form.
+type Field struct {
+	Name  string
+	Value string
 }
 
 // Poll repeats a step until the status at StatusPath is one of Terminal.
@@ -47,6 +56,10 @@ type Step struct {
 	// Body is marshalled as JSON; string values may contain {var}.
 	Body      any
 	Multipart *File
+	// Form and Files build a multipart form from several text fields (values
+	// may contain {var}) and files; Multipart is the single-file shorthand.
+	Form  []Field
+	Files []File
 	// NoAuth omits the authorization header (negative authentication probe).
 	NoAuth bool
 	// Paid marks a step that spends credits upstream; only counted/reported.
@@ -77,6 +90,13 @@ type Target struct {
 	// BodyHook rewrites a step's JSON body before it is sent (the fake run uses
 	// it for requests that need a fake-only marker).
 	BodyHook func(step string, body any) any
+	// FileHook supplies the bytes of a File whose FromVar names an artifact URL,
+	// instead of downloading it (an offline export takes them from the saved
+	// request). Return false to fall back to the download.
+	FileHook func(field, filename string) ([]byte, bool)
+	// FormHook rewrites a multipart text field's value before it is sent (the
+	// exporter replaces ids the sanitizer refuses to keep).
+	FormHook func(name, value string) string
 	// SkipFetch leaves artifact URLs unfetched (offline export replays).
 	SkipFetch bool
 	// NoPollDelay polls without waiting (offline export replays).
@@ -100,9 +120,12 @@ type ArtifactObs struct {
 
 // Obs is the recorded outcome of one Step.
 type Obs struct {
-	Step       string          `json:"step"`
-	Method     string          `json:"method"`
-	Path       string          `json:"path"`
+	Step   string `json:"step"`
+	Method string `json:"method"`
+	Path   string `json:"path"`
+	// Resolved is Path with the captured variables filled in; the sanitizing
+	// exporter registers its ids. Never compared.
+	Resolved   string          `json:"resolved_path,omitempty"`
 	AuthHeader string          `json:"auth_header"`
 	Status     int             `json:"status"`
 	Content    string          `json:"content_type"`
@@ -177,6 +200,57 @@ func Run(ctx context.Context, provider, api string, target Target, steps []Step,
 	return bundle, nil
 }
 
+// pollState reads the task status of a poll response. A StatusPath containing
+// ".*." (for example "jobs.*.status") covers every element of an array: the
+// state is the first status that is not terminal yet, otherwise "Failed"-like
+// terminal statuses win over the rest, otherwise the common terminal status.
+func pollState(body []byte, poll *Poll) string {
+	before, after, found := strings.Cut(poll.StatusPath, ".*.")
+	if !found {
+		return lookup(body, poll.StatusPath)
+	}
+	value, ok := walk(body, before)
+	list, isList := value.([]any)
+	if !ok || !isList || len(list) == 0 {
+		return ""
+	}
+	terminal := ""
+	for _, element := range list {
+		raw, _ := json.Marshal(element)
+		status := lookup(raw, after)
+		if !contains(poll.Terminal, status) {
+			return status
+		}
+		if terminal == "" || status != poll.Terminal[0] {
+			terminal = status
+		}
+	}
+	return terminal
+}
+
+// SeedFromBundle evaluates every step's Capture against the response the
+// bundle recorded for it, so an export of a few steps knows the ids an earlier
+// step of the same official run produced.
+func SeedFromBundle(steps []Step, bundle *Bundle) map[string]string {
+	vars := map[string]string{}
+	byStep := map[string]Obs{}
+	for _, obs := range bundle.Obs {
+		byStep[obs.Step] = obs
+	}
+	for _, step := range steps {
+		obs, ok := byStep[step.Name]
+		if !ok || obs.Skipped != "" {
+			continue
+		}
+		for name, dot := range step.Capture {
+			if value := lookup(obs.Body, dot); value != "" {
+				vars[name] = value
+			}
+		}
+	}
+	return vars
+}
+
 func authLabel(target Target, step Step) string {
 	if step.NoAuth {
 		return "none"
@@ -189,6 +263,7 @@ func runStep(ctx context.Context, target Target, step Step, vars map[string]stri
 	if strings.Contains(path, "{") {
 		return fmt.Errorf("unresolved placeholder in %s", path)
 	}
+	obs.Resolved = path
 	attempts := 1
 	if step.Poll != nil {
 		attempts = step.Poll.Max
@@ -220,10 +295,10 @@ func runStep(ctx context.Context, target Target, step Step, vars map[string]stri
 		obs.Content = baseMedia(header.Get("Content-Type"))
 		obs.RetryAfter = header.Get("Retry-After")
 		final = body
-		if step.Poll == nil || status != http.StatusOK {
+		if step.Poll == nil || status/100 != 2 {
 			break
 		}
-		state := lookup(body, step.Poll.StatusPath)
+		state := pollState(body, step.Poll)
 		progress := ""
 		if step.Poll.ProgressPath != "" {
 			progress = lookup(body, step.Poll.ProgressPath)
@@ -253,7 +328,7 @@ func runStep(ctx context.Context, target Target, step Step, vars map[string]stri
 			bundle.Vars = append(bundle.Vars, name)
 		}
 	}
-	if obs.Status == http.StatusOK && len(step.Fetch) > 0 && !target.SkipFetch {
+	if obs.Status/100 == 2 && len(step.Fetch) > 0 && !target.SkipFetch {
 		for _, dot := range step.Fetch {
 			for field, url := range urlsAt(final, dot) {
 				obs.Artifacts = append(obs.Artifacts, fetch(ctx, target.Download, field, url))
@@ -268,22 +343,58 @@ func send(ctx context.Context, target Target, step Step, path string, vars map[s
 	var sent json.RawMessage
 	contentType := ""
 	switch {
-	case step.Multipart != nil:
+	case step.Multipart != nil || len(step.Form) > 0 || len(step.Files) > 0:
 		var buffer bytes.Buffer
 		writer := multipart.NewWriter(&buffer)
-		header := make(textproto.MIMEHeader)
-		header.Set("Content-Disposition", fmt.Sprintf(`form-data; name=%q; filename=%q`, step.Multipart.Field, step.Multipart.Filename))
-		header.Set("Content-Type", step.Multipart.MediaType)
-		part, err := writer.CreatePart(header)
-		if err != nil {
-			return 0, nil, nil, nil, err
+		// sent lists the text fields and the file field names, so the sanitizing
+		// exporter registers the part names and values it will meet.
+		fields := map[string]string{}
+		for _, field := range step.Form {
+			value := expand(field.Value, vars)
+			if target.FormHook != nil {
+				value = target.FormHook(field.Name, value)
+			}
+			if err := writer.WriteField(field.Name, value); err != nil {
+				return 0, nil, nil, nil, err
+			}
+			fields[field.Name] = value
 		}
-		if _, err := part.Write(step.Multipart.Data); err != nil {
-			return 0, nil, nil, nil, err
+		files := append([]File(nil), step.Files...)
+		if step.Multipart != nil {
+			files = append(files, *step.Multipart)
+		}
+		for _, file := range files {
+			if file.FromVar != "" {
+				data, ok := []byte(nil), false
+				if target.FileHook != nil {
+					data, ok = target.FileHook(file.Field, file.Filename)
+				}
+				if !ok {
+					var err error
+					if data, err = download(ctx, target.Download, vars[file.FromVar]); err != nil {
+						return 0, nil, nil, nil, fmt.Errorf("download %s: %w", file.FromVar, err)
+					}
+				}
+				file.Data = data
+			}
+			header := make(textproto.MIMEHeader)
+			header.Set("Content-Disposition", fmt.Sprintf(`form-data; name=%q; filename=%q`, file.Field, file.Filename))
+			header.Set("Content-Type", file.MediaType)
+			part, err := writer.CreatePart(header)
+			if err != nil {
+				return 0, nil, nil, nil, err
+			}
+			if _, err := part.Write(file.Data); err != nil {
+				return 0, nil, nil, nil, err
+			}
 		}
 		if err := writer.Close(); err != nil {
 			return 0, nil, nil, nil, err
 		}
+		for _, file := range files {
+			fields[file.Field] = ""
+		}
+		sent, _ = json.Marshal(fields)
 		body, contentType = &buffer, writer.FormDataContentType()
 	case step.Body != nil:
 		value := step.Body
@@ -315,6 +426,25 @@ func send(ctx context.Context, target Target, step Step, path string, vars map[s
 	defer response.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
 	return response.StatusCode, response.Header, raw, sent, err
+}
+
+func download(ctx context.Context, client *http.Client, url string) ([]byte, error) {
+	if !strings.HasPrefix(url, "http") {
+		return nil, fmt.Errorf("variable holds no URL")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %d", response.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(response.Body, 64<<20))
 }
 
 func fetch(ctx context.Context, client *http.Client, field, url string) ArtifactObs {
@@ -415,38 +545,61 @@ func walk(raw []byte, dot string) (any, bool) {
 		return nil, false
 	}
 	for _, part := range strings.Split(dot, ".") {
-		object, ok := value.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		if value, ok = object[part]; !ok {
+		switch typed := value.(type) {
+		case map[string]any:
+			next, ok := typed[part]
+			if !ok {
+				return nil, false
+			}
+			value = next
+		case []any:
+			// A numeric segment indexes an array ("image_urls.0").
+			index, err := strconv.Atoi(part)
+			if err != nil || index < 0 || index >= len(typed) {
+				return nil, false
+			}
+			value = typed[index]
+		default:
 			return nil, false
 		}
 	}
 	return value, true
 }
 
-// urlsAt returns field-name → URL for a dot path; a trailing "*" iterates the
-// object's string values.
+// urlsAt returns field-name → URL for a dot path; a trailing "*" collects every
+// URL string below the object or array at the base path, nested ones included
+// ("result.basic_animations.walking_glb_url", "image_urls.0").
 func urlsAt(raw []byte, dot string) map[string]string {
 	found := map[string]string{}
 	if base, ok := strings.CutSuffix(dot, ".*"); ok {
 		value, present := walk(raw, base)
-		object, isObject := value.(map[string]any)
-		if !present || !isObject {
+		if !present {
 			return found
 		}
-		for key, child := range object {
-			if text, ok := child.(string); ok && strings.HasPrefix(text, "http") {
-				found[base+"."+key] = text
-			}
-		}
+		collectURLs(base, value, found)
 		return found
 	}
 	if text := lookup(raw, dot); strings.HasPrefix(text, "http") {
 		found[dot] = text
 	}
 	return found
+}
+
+func collectURLs(path string, value any, found map[string]string) {
+	switch typed := value.(type) {
+	case string:
+		if strings.HasPrefix(typed, "http") {
+			found[path] = typed
+		}
+	case map[string]any:
+		for key, child := range typed {
+			collectURLs(path+"."+key, child, found)
+		}
+	case []any:
+		for index, child := range typed {
+			collectURLs(path+"."+strconv.Itoa(index), child, found)
+		}
+	}
 }
 
 // Profile is a version's alignment script together with the sanitizing hints

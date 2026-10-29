@@ -1,0 +1,12 @@
+{
+  "api_version": "v1",
+  "candidate_sha256": "bd6debce94f3ec3707bb786332772f26e6464791ed8818abf137148f72a231d0",
+  "captured_at_utc": "2026-10-29",
+  "exchanges": 7,
+  "offering": "meshy/processing/rigging",
+  "provenance": "captured",
+  "scenario": "meshy-openapi-v1-alignment",
+  "source_revision": "unknown",
+  "transformation": "IDs, signed URLs, timestamps and amounts are deterministic placeholders; media bytes are not stored.",
+  "version": 1
+}

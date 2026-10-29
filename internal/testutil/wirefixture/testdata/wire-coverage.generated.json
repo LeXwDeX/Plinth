@@ -7,6 +7,26 @@
     "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
     "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json",
     "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json",
+    "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-bang.candidate.json",
+    "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-image-to-3d.candidate.json",
+    "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-text-to-3d.candidate.json",
+    "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-texture.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-animation.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-convert.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-delete.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-image-to-3d.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-image-to-image.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-multi-image-to-3d.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-print-analyze.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-print-multi-color.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-remesh.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-resize.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-retexture.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-rigging.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-image.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-motion.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-uv-unwrap.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2.candidate.json",
     "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-animation.candidate.json",
@@ -24,42 +44,26 @@
       "disabled-zero-egress": 24,
       "enabled": 52,
       "local-no-wire": 4,
-      "missing": 34,
-      "partial": 5,
-      "real": 9,
+      "missing": 14,
+      "partial": 6,
+      "real": 28,
       "total": 76
     },
     "units": {
-      "derived": 16,
+      "derived": 17,
       "disabled-zero-egress": 9,
       "local-no-wire": 2,
-      "missing": 31,
-      "real": 30,
-      "total": 88
+      "missing": 15,
+      "real": 85,
+      "total": 128
     }
   },
   "incomplete": [
     "gemini-images.v1|image-to-image|declared:chat/completions",
     "gemini-images.v1|text-to-image|declared:chat/completions",
-    "hyper3d.rodin.v1|mesh-segmentation|declared:bang",
-    "hyper3d.rodin.v1|retexture|declared:rodin_texture_only",
     "jimeng-images.v1|image-to-image|declared:api/v3/images/generations",
     "jimeng-images.v1|text-to-image|declared:api/v3/images/generations",
     "matting.v1|background-removal|declared:(adapter-defined)",
-    "meshy.v2|analyze-printability|declared:print/analyze",
-    "meshy.v2|animation|declared:animations",
-    "meshy.v2|format-conversion|declared:convert",
-    "meshy.v2|image-to-3d|declared:image-to-3d",
-    "meshy.v2|image-to-3d|declared:multi-image-to-3d",
-    "meshy.v2|image-to-image|declared:image-to-image",
-    "meshy.v2|multi-color-print|declared:print/multi-color",
-    "meshy.v2|remesh|declared:remesh",
-    "meshy.v2|resize|declared:resize",
-    "meshy.v2|retexture|declared:retexture",
-    "meshy.v2|rigging|declared:rigging",
-    "meshy.v2|text-to-image|declared:text-to-image",
-    "meshy.v2|text-to-motion|declared:text-to-motion",
-    "meshy.v2|uv-unwrap|declared:uv-unwrap",
     "openai-images.v1|image-to-image|declared:images/edits",
     "openai-images.v1|text-to-image|declared:images/generations",
     "tripo.v3|edit-multiview|declared:generation/edit-multiview",
@@ -272,7 +276,8 @@
       ],
       "evidence": "real",
       "evidence_files": [
-        "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json"
+        "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-image-to-3d.candidate.json"
       ],
       "offerings": [
         {
@@ -294,7 +299,8 @@
       ],
       "evidence": "derived",
       "evidence_files": [
-        "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json"
+        "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-image-to-3d.candidate.json"
       ],
       "offerings": [
         {
@@ -316,7 +322,8 @@
       ],
       "evidence": "real",
       "evidence_files": [
-        "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json"
+        "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-image-to-3d.candidate.json"
       ],
       "offerings": [
         {
@@ -329,9 +336,71 @@
     {
       "adapter_key": "hyper3d.rodin.v1",
       "capability": "mesh-segmentation",
-      "endpoint": "declared:bang",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "POST /api/v2/bang",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-bang.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/bang/local-model",
+          "model_id": "bang-local-model",
+          "enabled": true
+        },
+        {
+          "id": "hyper3d/bang/rodin-task",
+          "model_id": "bang-rodin-task",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "mesh-segmentation",
+      "endpoint": "POST /api/v2/download",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-bang.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/bang/local-model",
+          "model_id": "bang-local-model",
+          "enabled": true
+        },
+        {
+          "id": "hyper3d/bang/rodin-task",
+          "model_id": "bang-rodin-task",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "mesh-segmentation",
+      "endpoint": "POST /api/v2/status",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-bang.candidate.json"
+      ],
       "offerings": [
         {
           "id": "hyper3d/bang/local-model",
@@ -348,13 +417,87 @@
     {
       "adapter_key": "hyper3d.rodin.v1",
       "capability": "retexture",
-      "endpoint": "declared:rodin_texture_only",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "POST /api/v2/download",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-texture.candidate.json"
+      ],
       "offerings": [
         {
           "id": "hyper3d/texture/local-model",
           "model_id": "texture-local-model",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "retexture",
+      "endpoint": "POST /api/v2/rodin_texture_only",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-texture.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/texture/local-model",
+          "model_id": "texture-local-model",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "retexture",
+      "endpoint": "POST /api/v2/status",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-texture.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/texture/local-model",
+          "model_id": "texture-local-model",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "text-to-3d",
+      "endpoint": "GET /api/v2/check_balance",
+      "hosts": [
+        "api.hyper3d.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-text-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "hyper3d/rodin-gen-2.5/text-to-3d",
+          "model_id": "rodin-gen-2.5",
           "enabled": true
         }
       ]
@@ -415,7 +558,8 @@
       ],
       "evidence": "real",
       "evidence_files": [
-        "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json"
+        "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json",
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-text-to-3d.candidate.json"
       ],
       "offerings": [
         {
@@ -437,7 +581,8 @@
       ],
       "evidence": "real",
       "evidence_files": [
-        "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json"
+        "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json",
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-text-to-3d.candidate.json"
       ],
       "offerings": [
         {
@@ -459,7 +604,8 @@
       ],
       "evidence": "real",
       "evidence_files": [
-        "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json"
+        "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json",
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-text-to-3d.candidate.json"
       ],
       "offerings": [
         {
@@ -551,10 +697,216 @@
     },
     {
       "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "DELETE /openapi/v1/animations/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "none"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-delete.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "DELETE /openapi/v1/convert/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "none"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-delete.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "DELETE /openapi/v1/image-to-image/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "none"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-delete.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "DELETE /openapi/v1/multi-image-to-3d/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "none"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-delete.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "DELETE /openapi/v1/print/analyze/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "none"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-delete.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "DELETE /openapi/v1/print/multi-color/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "none"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-delete.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "DELETE /openapi/v1/remesh/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "none"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-delete.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "DELETE /openapi/v1/resize/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "none"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-delete.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "DELETE /openapi/v1/retexture/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "none"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-delete.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "DELETE /openapi/v1/rigging/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "none"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-delete.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "DELETE /openapi/v1/uv-unwrap/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "none"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-delete.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
       "capability": "analyze-printability",
-      "endpoint": "declared:print/analyze",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /openapi/v1/print/analyze/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-print-analyze.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/processing/analyze-printability",
+          "model_id": "meshy-analyze-printability",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "analyze-printability",
+      "endpoint": "POST /openapi/v1/print/analyze",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-print-analyze.candidate.json"
+      ],
       "offerings": [
         {
           "id": "meshy/processing/analyze-printability",
@@ -566,9 +918,39 @@
     {
       "adapter_key": "meshy.v2",
       "capability": "animation",
-      "endpoint": "declared:animations",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /openapi/v1/animations/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-animation.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/processing/animation",
+          "model_id": "meshy-processing",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "animation",
+      "endpoint": "POST /openapi/v1/animations",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-animation.candidate.json"
+      ],
       "offerings": [
         {
           "id": "meshy/processing/animation",
@@ -683,9 +1065,39 @@
     {
       "adapter_key": "meshy.v2",
       "capability": "format-conversion",
-      "endpoint": "declared:convert",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /openapi/v1/convert/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-convert.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/processing/convert",
+          "model_id": "meshy-convert",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "format-conversion",
+      "endpoint": "POST /openapi/v1/convert",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-convert.candidate.json"
+      ],
       "offerings": [
         {
           "id": "meshy/processing/convert",
@@ -711,9 +1123,17 @@
     {
       "adapter_key": "meshy.v2",
       "capability": "image-to-3d",
-      "endpoint": "declared:image-to-3d",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "DELETE /openapi/v1/image-to-3d/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "none"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-image-to-3d.candidate.json"
+      ],
       "offerings": [
         {
           "id": "meshy/meshy-7.1/image-to-3d",
@@ -730,9 +1150,93 @@
     {
       "adapter_key": "meshy.v2",
       "capability": "image-to-3d",
-      "endpoint": "declared:multi-image-to-3d",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /openapi/v1/image-to-3d/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-image-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/image-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/image-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "image-to-3d",
+      "endpoint": "GET /openapi/v1/multi-image-to-3d/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-multi-image-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1-multiview/image-to-3d",
+          "model_id": "meshy-7.1-multiview",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "image-to-3d",
+      "endpoint": "POST /openapi/v1/image-to-3d",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-image-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/image-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/image-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "image-to-3d",
+      "endpoint": "POST /openapi/v1/multi-image-to-3d",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-multi-image-to-3d.candidate.json"
+      ],
       "offerings": [
         {
           "id": "meshy/meshy-7.1-multiview/image-to-3d",
@@ -744,9 +1248,44 @@
     {
       "adapter_key": "meshy.v2",
       "capability": "image-to-image",
-      "endpoint": "declared:image-to-image",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /openapi/v1/image-to-image/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-image-to-image.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/nano-banana-2/image-to-image",
+          "model_id": "nano-banana-2",
+          "enabled": true
+        },
+        {
+          "id": "meshy/nano-banana-pro/image-to-image",
+          "model_id": "nano-banana-pro",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "image-to-image",
+      "endpoint": "POST /openapi/v1/image-to-image",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-image-to-image.candidate.json"
+      ],
       "offerings": [
         {
           "id": "meshy/nano-banana-2/image-to-image",
@@ -763,9 +1302,39 @@
     {
       "adapter_key": "meshy.v2",
       "capability": "multi-color-print",
-      "endpoint": "declared:print/multi-color",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /openapi/v1/print/multi-color/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-print-multi-color.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/processing/multi-color-print",
+          "model_id": "meshy-multi-color-print",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "multi-color-print",
+      "endpoint": "POST /openapi/v1/print/multi-color",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-print-multi-color.candidate.json"
+      ],
       "offerings": [
         {
           "id": "meshy/processing/multi-color-print",
@@ -777,9 +1346,61 @@
     {
       "adapter_key": "meshy.v2",
       "capability": "remesh",
-      "endpoint": "declared:remesh",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "DELETE /openapi/v1/remesh/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "none"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-remesh.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/processing/remesh",
+          "model_id": "meshy-processing",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "remesh",
+      "endpoint": "GET /openapi/v1/remesh/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-remesh.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/processing/remesh",
+          "model_id": "meshy-processing",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "remesh",
+      "endpoint": "POST /openapi/v1/remesh",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-remesh.candidate.json"
+      ],
       "offerings": [
         {
           "id": "meshy/processing/remesh",
@@ -805,9 +1426,39 @@
     {
       "adapter_key": "meshy.v2",
       "capability": "resize",
-      "endpoint": "declared:resize",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /openapi/v1/resize/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-resize.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/processing/resize",
+          "model_id": "meshy-resize",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "resize",
+      "endpoint": "POST /openapi/v1/resize",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-resize.candidate.json"
+      ],
       "offerings": [
         {
           "id": "meshy/processing/resize",
@@ -819,9 +1470,39 @@
     {
       "adapter_key": "meshy.v2",
       "capability": "retexture",
-      "endpoint": "declared:retexture",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /openapi/v1/retexture/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-retexture.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/processing/retexture",
+          "model_id": "meshy-processing",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "retexture",
+      "endpoint": "POST /openapi/v1/retexture",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-retexture.candidate.json"
+      ],
       "offerings": [
         {
           "id": "meshy/processing/retexture",
@@ -833,9 +1514,39 @@
     {
       "adapter_key": "meshy.v2",
       "capability": "rigging",
-      "endpoint": "declared:rigging",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /openapi/v1/rigging/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-rigging.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/processing/rigging",
+          "model_id": "meshy-processing",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "rigging",
+      "endpoint": "POST /openapi/v1/rigging",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-rigging.candidate.json"
+      ],
       "offerings": [
         {
           "id": "meshy/processing/rigging",
@@ -861,6 +1572,33 @@
     {
       "adapter_key": "meshy.v2",
       "capability": "text-to-3d",
+      "endpoint": "DELETE /openapi/v2/text-to-3d/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "none"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
       "endpoint": "GET /openapi/v2/text-to-3d/{id}",
       "hosts": [
         "api.meshy.ai"
@@ -870,7 +1608,8 @@
       ],
       "evidence": "real",
       "evidence_files": [
-        "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json"
+        "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2.candidate.json"
       ],
       "offerings": [
         {
@@ -1113,7 +1852,8 @@
       ],
       "evidence": "real",
       "evidence_files": [
-        "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json"
+        "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2.candidate.json"
       ],
       "offerings": [
         {
@@ -1131,9 +1871,206 @@
     {
       "adapter_key": "meshy.v2",
       "capability": "text-to-image",
-      "endpoint": "declared:text-to-image",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "DELETE /openapi/v1/text-to-image/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "none"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-image.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/nano-banana-2/text-to-image",
+          "model_id": "nano-banana-2",
+          "enabled": true
+        },
+        {
+          "id": "meshy/nano-banana-pro/text-to-image",
+          "model_id": "nano-banana-pro",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-image",
+      "endpoint": "GET /openapi/v1/balance",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-image.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/nano-banana-2/text-to-image",
+          "model_id": "nano-banana-2",
+          "enabled": true
+        },
+        {
+          "id": "meshy/nano-banana-pro/text-to-image",
+          "model_id": "nano-banana-pro",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-image",
+      "endpoint": "GET /openapi/v1/image-to-3d/not-an-id",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-image.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/nano-banana-2/text-to-image",
+          "model_id": "nano-banana-2",
+          "enabled": true
+        },
+        {
+          "id": "meshy/nano-banana-pro/text-to-image",
+          "model_id": "nano-banana-pro",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-image",
+      "endpoint": "GET /openapi/v1/image-to-3d/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-image.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/nano-banana-2/text-to-image",
+          "model_id": "nano-banana-2",
+          "enabled": true
+        },
+        {
+          "id": "meshy/nano-banana-pro/text-to-image",
+          "model_id": "nano-banana-pro",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-image",
+      "endpoint": "GET /openapi/v1/text-to-image/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-image.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/nano-banana-2/text-to-image",
+          "model_id": "nano-banana-2",
+          "enabled": true
+        },
+        {
+          "id": "meshy/nano-banana-pro/text-to-image",
+          "model_id": "nano-banana-pro",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-image",
+      "endpoint": "POST /openapi/v1/image-to-3d",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-image.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/nano-banana-2/text-to-image",
+          "model_id": "nano-banana-2",
+          "enabled": true
+        },
+        {
+          "id": "meshy/nano-banana-pro/text-to-image",
+          "model_id": "nano-banana-pro",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-image",
+      "endpoint": "POST /openapi/v1/remesh",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-image.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/nano-banana-2/text-to-image",
+          "model_id": "nano-banana-2",
+          "enabled": true
+        },
+        {
+          "id": "meshy/nano-banana-pro/text-to-image",
+          "model_id": "nano-banana-pro",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-image",
+      "endpoint": "POST /openapi/v1/text-to-image",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-image.candidate.json"
+      ],
       "offerings": [
         {
           "id": "meshy/nano-banana-2/text-to-image",
@@ -1150,9 +2087,61 @@
     {
       "adapter_key": "meshy.v2",
       "capability": "text-to-motion",
-      "endpoint": "declared:text-to-motion",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "DELETE /openapi/v1/text-to-motion/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "none"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-motion.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/prime/text-to-motion",
+          "model_id": "meshy-text-to-motion",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-motion",
+      "endpoint": "GET /openapi/v1/text-to-motion/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-motion.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/prime/text-to-motion",
+          "model_id": "meshy-text-to-motion",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-motion",
+      "endpoint": "POST /openapi/v1/text-to-motion",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-motion.candidate.json"
+      ],
       "offerings": [
         {
           "id": "meshy/prime/text-to-motion",
@@ -1164,9 +2153,39 @@
     {
       "adapter_key": "meshy.v2",
       "capability": "uv-unwrap",
-      "endpoint": "declared:uv-unwrap",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /openapi/v1/uv-unwrap/{id}",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-uv-unwrap.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/processing/uv-unwrap",
+          "model_id": "meshy-uv-unwrap",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "uv-unwrap",
+      "endpoint": "POST /openapi/v1/uv-unwrap",
+      "hosts": [
+        "api.meshy.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-uv-unwrap.candidate.json"
+      ],
       "offerings": [
         {
           "id": "meshy/processing/uv-unwrap",
@@ -1824,9 +2843,11 @@
       "model_id": "bang-local-model",
       "adapter_key": "hyper3d.rodin.v1",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "hyper3d.rodin.v1|mesh-segmentation|declared:bang"
+        "hyper3d.rodin.v1|mesh-segmentation|POST /api/v2/bang",
+        "hyper3d.rodin.v1|mesh-segmentation|POST /api/v2/download",
+        "hyper3d.rodin.v1|mesh-segmentation|POST /api/v2/status"
       ]
     },
     {
@@ -1834,9 +2855,11 @@
       "model_id": "bang-rodin-task",
       "adapter_key": "hyper3d.rodin.v1",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "hyper3d.rodin.v1|mesh-segmentation|declared:bang"
+        "hyper3d.rodin.v1|mesh-segmentation|POST /api/v2/bang",
+        "hyper3d.rodin.v1|mesh-segmentation|POST /api/v2/download",
+        "hyper3d.rodin.v1|mesh-segmentation|POST /api/v2/status"
       ]
     },
     {
@@ -1860,6 +2883,7 @@
       "enabled": true,
       "evidence": "partial",
       "units": [
+        "hyper3d.rodin.v1|text-to-3d|GET /api/v2/check_balance",
         "hyper3d.rodin.v1|text-to-3d|GET /{asset}.glb",
         "hyper3d.rodin.v1|text-to-3d|GET /{asset}.webp",
         "hyper3d.rodin.v1|text-to-3d|POST /api/v2/download",
@@ -1872,9 +2896,11 @@
       "model_id": "texture-local-model",
       "adapter_key": "hyper3d.rodin.v1",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "partial",
       "units": [
-        "hyper3d.rodin.v1|retexture|declared:rodin_texture_only"
+        "hyper3d.rodin.v1|retexture|POST /api/v2/download",
+        "hyper3d.rodin.v1|retexture|POST /api/v2/rodin_texture_only",
+        "hyper3d.rodin.v1|retexture|POST /api/v2/status"
       ]
     },
     {
@@ -2122,9 +3148,10 @@
       "model_id": "meshy-7.1-multiview",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "meshy.v2|image-to-3d|declared:multi-image-to-3d"
+        "meshy.v2|image-to-3d|GET /openapi/v1/multi-image-to-3d/{id}",
+        "meshy.v2|image-to-3d|POST /openapi/v1/multi-image-to-3d"
       ]
     },
     {
@@ -2132,9 +3159,11 @@
       "model_id": "meshy-7.1",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "meshy.v2|image-to-3d|declared:image-to-3d"
+        "meshy.v2|image-to-3d|DELETE /openapi/v1/image-to-3d/{id}",
+        "meshy.v2|image-to-3d|GET /openapi/v1/image-to-3d/{id}",
+        "meshy.v2|image-to-3d|POST /openapi/v1/image-to-3d"
       ]
     },
     {
@@ -2144,6 +3173,7 @@
       "enabled": true,
       "evidence": "partial",
       "units": [
+        "meshy.v2|text-to-3d|DELETE /openapi/v2/text-to-3d/{id}",
         "meshy.v2|text-to-3d|GET /openapi/v2/text-to-3d/{id}",
         "meshy.v2|text-to-3d|GET /{asset}.3mf",
         "meshy.v2|text-to-3d|GET /{asset}.fbx",
@@ -2181,9 +3211,11 @@
       "model_id": "meshy-t2.5",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "meshy.v2|image-to-3d|declared:image-to-3d"
+        "meshy.v2|image-to-3d|DELETE /openapi/v1/image-to-3d/{id}",
+        "meshy.v2|image-to-3d|GET /openapi/v1/image-to-3d/{id}",
+        "meshy.v2|image-to-3d|POST /openapi/v1/image-to-3d"
       ]
     },
     {
@@ -2193,6 +3225,7 @@
       "enabled": true,
       "evidence": "partial",
       "units": [
+        "meshy.v2|text-to-3d|DELETE /openapi/v2/text-to-3d/{id}",
         "meshy.v2|text-to-3d|GET /openapi/v2/text-to-3d/{id}",
         "meshy.v2|text-to-3d|GET /{asset}.3mf",
         "meshy.v2|text-to-3d|GET /{asset}.fbx",
@@ -2210,9 +3243,10 @@
       "model_id": "nano-banana-2",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "meshy.v2|image-to-image|declared:image-to-image"
+        "meshy.v2|image-to-image|GET /openapi/v1/image-to-image/{id}",
+        "meshy.v2|image-to-image|POST /openapi/v1/image-to-image"
       ]
     },
     {
@@ -2220,9 +3254,16 @@
       "model_id": "nano-banana-2",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "meshy.v2|text-to-image|declared:text-to-image"
+        "meshy.v2|text-to-image|DELETE /openapi/v1/text-to-image/{id}",
+        "meshy.v2|text-to-image|GET /openapi/v1/balance",
+        "meshy.v2|text-to-image|GET /openapi/v1/image-to-3d/not-an-id",
+        "meshy.v2|text-to-image|GET /openapi/v1/image-to-3d/{id}",
+        "meshy.v2|text-to-image|GET /openapi/v1/text-to-image/{id}",
+        "meshy.v2|text-to-image|POST /openapi/v1/image-to-3d",
+        "meshy.v2|text-to-image|POST /openapi/v1/remesh",
+        "meshy.v2|text-to-image|POST /openapi/v1/text-to-image"
       ]
     },
     {
@@ -2230,9 +3271,10 @@
       "model_id": "nano-banana-pro",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "meshy.v2|image-to-image|declared:image-to-image"
+        "meshy.v2|image-to-image|GET /openapi/v1/image-to-image/{id}",
+        "meshy.v2|image-to-image|POST /openapi/v1/image-to-image"
       ]
     },
     {
@@ -2240,9 +3282,16 @@
       "model_id": "nano-banana-pro",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "meshy.v2|text-to-image|declared:text-to-image"
+        "meshy.v2|text-to-image|DELETE /openapi/v1/text-to-image/{id}",
+        "meshy.v2|text-to-image|GET /openapi/v1/balance",
+        "meshy.v2|text-to-image|GET /openapi/v1/image-to-3d/not-an-id",
+        "meshy.v2|text-to-image|GET /openapi/v1/image-to-3d/{id}",
+        "meshy.v2|text-to-image|GET /openapi/v1/text-to-image/{id}",
+        "meshy.v2|text-to-image|POST /openapi/v1/image-to-3d",
+        "meshy.v2|text-to-image|POST /openapi/v1/remesh",
+        "meshy.v2|text-to-image|POST /openapi/v1/text-to-image"
       ]
     },
     {
@@ -2250,9 +3299,11 @@
       "model_id": "meshy-text-to-motion",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "meshy.v2|text-to-motion|declared:text-to-motion"
+        "meshy.v2|text-to-motion|DELETE /openapi/v1/text-to-motion/{id}",
+        "meshy.v2|text-to-motion|GET /openapi/v1/text-to-motion/{id}",
+        "meshy.v2|text-to-motion|POST /openapi/v1/text-to-motion"
       ]
     },
     {
@@ -2260,9 +3311,10 @@
       "model_id": "meshy-analyze-printability",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "meshy.v2|analyze-printability|declared:print/analyze"
+        "meshy.v2|analyze-printability|GET /openapi/v1/print/analyze/{id}",
+        "meshy.v2|analyze-printability|POST /openapi/v1/print/analyze"
       ]
     },
     {
@@ -2270,9 +3322,10 @@
       "model_id": "meshy-processing",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "meshy.v2|animation|declared:animations"
+        "meshy.v2|animation|GET /openapi/v1/animations/{id}",
+        "meshy.v2|animation|POST /openapi/v1/animations"
       ]
     },
     {
@@ -2280,9 +3333,10 @@
       "model_id": "meshy-convert",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "meshy.v2|format-conversion|declared:convert"
+        "meshy.v2|format-conversion|GET /openapi/v1/convert/{id}",
+        "meshy.v2|format-conversion|POST /openapi/v1/convert"
       ]
     },
     {
@@ -2290,9 +3344,10 @@
       "model_id": "meshy-multi-color-print",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "meshy.v2|multi-color-print|declared:print/multi-color"
+        "meshy.v2|multi-color-print|GET /openapi/v1/print/multi-color/{id}",
+        "meshy.v2|multi-color-print|POST /openapi/v1/print/multi-color"
       ]
     },
     {
@@ -2300,9 +3355,11 @@
       "model_id": "meshy-processing",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "meshy.v2|remesh|declared:remesh"
+        "meshy.v2|remesh|DELETE /openapi/v1/remesh/{id}",
+        "meshy.v2|remesh|GET /openapi/v1/remesh/{id}",
+        "meshy.v2|remesh|POST /openapi/v1/remesh"
       ]
     },
     {
@@ -2320,9 +3377,10 @@
       "model_id": "meshy-resize",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "meshy.v2|resize|declared:resize"
+        "meshy.v2|resize|GET /openapi/v1/resize/{id}",
+        "meshy.v2|resize|POST /openapi/v1/resize"
       ]
     },
     {
@@ -2330,9 +3388,10 @@
       "model_id": "meshy-processing",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "meshy.v2|retexture|declared:retexture"
+        "meshy.v2|retexture|GET /openapi/v1/retexture/{id}",
+        "meshy.v2|retexture|POST /openapi/v1/retexture"
       ]
     },
     {
@@ -2340,9 +3399,10 @@
       "model_id": "meshy-processing",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "meshy.v2|rigging|declared:rigging"
+        "meshy.v2|rigging|GET /openapi/v1/rigging/{id}",
+        "meshy.v2|rigging|POST /openapi/v1/rigging"
       ]
     },
     {
@@ -2350,9 +3410,10 @@
       "model_id": "meshy-uv-unwrap",
       "adapter_key": "meshy.v2",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "meshy.v2|uv-unwrap|declared:uv-unwrap"
+        "meshy.v2|uv-unwrap|GET /openapi/v1/uv-unwrap/{id}",
+        "meshy.v2|uv-unwrap|POST /openapi/v1/uv-unwrap"
       ]
     },
     {

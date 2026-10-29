@@ -2,20 +2,24 @@
 """Fake-upstream stack smoke (issue #96): zero cost, loopback only, offline.
 
 One command starts the fake upstream (cmd/fake-upstream), then a Plinth stack in
-live mode whose Tripo and LLM base URLs point at it, and drives the same HTTP API
-the browser uses:
+live mode whose Tripo, Meshy, Hyper3D and LLM base URLs point at it, and drives the
+same HTTP API the browser uses:
 
-  * the Tripo balance shows up in the provider balance panel;
+  * the Tripo, Meshy and Hyper3D balances show up in the provider balance panel;
+  * Meshy text-to-3d (preview + refine) -> remesh -> rigging -> animation, and
+    text-to-3d -> retexture / convert, and Hyper3D Rodin text-to-3d -> Bang, run to
+    SUCCEEDED with the same file checks as the Tripo chains;
   * Tripo text-to-3d -> rig-check -> rigging -> animation, and
     segmentation -> part completion, run to SUCCEEDED with every required output
     slot present, every file's size and SHA-256 matching, and authenticated
     delivery (no cookie, no bytes);
-  * the Agent turn (fake OpenAI-compatible LLM -> tool call -> approval -> Tripo
+  * the Agent turn (fake OpenAI-compatible LLM -> tool call -> approval -> 3D
     task -> final reply) completes, the L1 Agent equivalent;
-  * each fault scenario, selected by a fake test API key, ends the public Task in
-    the expected state and error class.
+  * each fault scenario, selected by a fake test API key, ends the public Task of
+    every provider in the expected state and error class.
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
+(NAME: balance, chain, meshy, hyper3d, agent, faults)
 Needs `go`. Exit 0 = every selected check passed.
 
 The stack runs inside the internal/app test binary (TestFakeUpstreamStack), not
@@ -46,6 +50,15 @@ ASSET_HOST = "fake-assets.example.test"  # keep in sync with internal/app/fake_u
 GOOD_KEY = "fake-test-key"
 
 TEXT_TO_3D = "tripo/tripo-v3.1-full/text-to-3d"
+MESHY_TEXT_TO_3D = "meshy/meshy-7.1/text-to-3d"
+MESHY_REMESH = "meshy/processing/remesh"
+MESHY_RETEXTURE = "meshy/processing/retexture"
+MESHY_CONVERT = "meshy/processing/convert"
+MESHY_RIGGING = "meshy/processing/rigging"
+MESHY_ANIMATION = "meshy/processing/animation"
+HYPER3D_TEXT_TO_3D = "hyper3d/rodin-gen-2.5/text-to-3d"
+HYPER3D_BANG = "hyper3d/bang/rodin-task"
+PROVIDER_HOSTS = ("tripo", "meshy", "hyper3d")
 RIG_CHECK = "tripo/processing/rig-check"
 RIGGING = "tripo/processing/rigging-v3"
 ANIMATION = "tripo/processing/animation"
@@ -177,13 +190,14 @@ def build(work):
 
 
 def private_catalog(work):
-    """The default Catalog with three Tripo changes: the fake artifact host is an
-    allowed asset host, Tripo polls once a second, and a failing materialization
-    is retried once. The default Catalog file and its base URLs stay untouched."""
+    """The default Catalog with three changes for Tripo, Meshy and Hyper3D: the fake
+    artifact host is an allowed asset host, they poll once a second, and a failing
+    materialization is retried once. The default Catalog file and its base URLs
+    stay untouched."""
     with open(os.path.join(REPO, "internal/catalog/default_catalog.json"), encoding="utf-8") as handle:
         catalog = json.load(handle)
     for offering in catalog["offerings"]:
-        if offering.get("provider_id") == "tripo":
+        if offering.get("provider_id") in PROVIDER_HOSTS:
             offering["asset_hosts"] = sorted(set(offering.get("asset_hosts", [])) | {ASSET_HOST})
             offering["poll_interval_seconds"] = 1
             # Fault runs must end in minutes, not in the production retry budget.
@@ -214,6 +228,11 @@ def stack_env(work, name, catalog, key):
         "STORAGE_ROOT": os.path.join(root, "storage"), "LOG_DIR": os.path.join(root, "logs"),
         "WEB_ASSETS_ROOT": web, "CATALOG_FILE": catalog,
         "TRIPO_API_KEY": key, "TRIPO_BASE_URL": f"http://127.0.0.1:{FAKE_PORT}/tripo/v3",
+        # Meshy's adapter appends openapi/v1 or openapi/v2, so its base stops at /meshy.
+        "MESHY_API_KEY": key, "MESHY_BASE_URL": f"http://127.0.0.1:{FAKE_PORT}/meshy",
+        "HYPER3D_API_KEY": key, "HYPER3D_BASE_URL": f"http://127.0.0.1:{FAKE_PORT}/hyper3d/api/v2",
+        # Meshy processing needs both (the Catalog's conditional capabilities).
+        "PUBLIC_BASE_URL": f"http://127.0.0.1:{STACK_PORT}", "ASSET_SIGNING_KEY": "fake-stack-asset-signing-key-0123456789",
         "LLM_API_KEY": key, "LLM_BASE_URL": f"http://127.0.0.1:{FAKE_PORT}/openai/v1", "LLM_MODEL": "deepseek",
         "FAKE_UPSTREAM_STACK_URL": f"http://127.0.0.1:{FAKE_PORT}",
     }
@@ -278,10 +297,15 @@ def check_delivery(api, task, offering):
     so cross-user denial is not observable here; internal/transport/httpapi
     tests cover it.)"""
     problems = []
-    required = {(o["role"], o.get("variant")) for o in offering["outputs"] if o.get("delivery") == "required"}
+    # A slot with a minimum of 0 is delivered when the upstream offers it; a slot
+    # without a variant is met by any asset of its role.
     delivered = {(a.get("role"), a.get("variant")) for a in task.get("assets") or []}
-    for slot in sorted(required - delivered, key=str):
-        problems.append(f"missing required slot {slot}")
+    for output in offering["outputs"]:
+        if output.get("delivery") != "required" or output.get("minimum", 1) == 0:
+            continue
+        slot = (output["role"], output.get("variant"))
+        if not any(role == slot[0] and (slot[1] is None or variant == slot[1]) for role, variant in delivered):
+            problems.append(f"missing required slot {slot}")
     for asset in task.get("assets") or []:
         status, raw, headers = api.call("GET", asset["url"])
         label = f"{asset.get('role')}/{asset.get('variant')}"
@@ -313,11 +337,27 @@ def run_step(api, offerings, label, offering, capability, payload, session, expe
 
 # ---- scenarios ----
 
+def payload_for(offering, base):
+    """The request payload: the given fields, the extra-credit authorization when
+    the Offering declares it, and the declared default of every required
+    parameter left out (a multi-format Offering needs its formats spelled out)."""
+    declared = {p["name"]: p for p in offering.get("parameters") or []}
+    payload = dict(base)
+    if "authorize_extra_credits" in declared:
+        payload["authorize_extra_credits"] = True
+    for name, parameter in declared.items():
+        if name not in payload and parameter.get("required") and parameter.get("default") is not None:
+            payload[name] = parameter["default"]
+    return payload
+
+
 def scenario_balance(api, offerings):
     status, body = api.json("GET", "/api/meshy/balance")
-    tripo = next((a for a in body.get("accounts", []) if a.get("provider") == "tripo"), {})
-    amount = (tripo.get("native_balance") or {}).get("amount")
-    record("balance panel shows the Tripo balance", status == 200 and amount == "5000", f"status {status}, native_balance {tripo.get('native_balance')}")
+    accounts = {a.get("provider"): (a.get("native_balance") or {}).get("amount") for a in body.get("accounts", [])}
+    want = {"tripo": "5000", "meshy": "1000", "hyper3d": "100"}
+    got = {name: accounts.get(name) for name in want}
+    record("balance panel shows the Tripo, Meshy and Hyper3D balances", status == 200 and got == want,
+           f"status {status}, native balances {got} (want {want})")
 
 
 def scenario_chain(api, offerings):
@@ -338,8 +378,40 @@ def scenario_chain(api, offerings):
                  {"source_task": seg["id"], "authorize_extra_credits": True}, session)
 
 
+def step(api, offerings, label, offering, capability, base, session):
+    return run_step(api, offerings, label, offering, capability, payload_for(offerings[offering], base), session)
+
+
+def scenario_meshy(api, offerings):
+    """Meshy: text-to-3d runs preview and refine inside one Task; the processing
+    steps take it as their source (input_task_id), as the Plinth chain does."""
+    session = new_session(api)
+    gen = step(api, offerings, "meshy text-to-3d (preview + refine)", MESHY_TEXT_TO_3D, "text-to-3d",
+               {"prompt": "a plain humanoid robot"}, session)
+    if not gen or gen.get("state") != "SUCCEEDED":
+        return
+    remesh = step(api, offerings, "meshy remesh", MESHY_REMESH, "remesh",
+                  {"source_task": gen["id"], "topology": "triangle", "target_polycount": 10000}, session)
+    if remesh and remesh.get("state") == "SUCCEEDED":
+        rig = step(api, offerings, "meshy rigging", MESHY_RIGGING, "rigging", {"source_task": remesh["id"]}, session)
+        if rig and rig.get("state") == "SUCCEEDED":
+            step(api, offerings, "meshy animation", MESHY_ANIMATION, "animation",
+                 {"source_task": rig["id"], "action_id": 0}, session)
+    step(api, offerings, "meshy retexture", MESHY_RETEXTURE, "retexture",
+         {"source_task": gen["id"], "prompt": "plain matte grey"}, session)
+    step(api, offerings, "meshy convert", MESHY_CONVERT, "format-conversion", {"source_task": gen["id"]}, session)
+
+
+def scenario_hyper3d(api, offerings):
+    session = new_session(api)
+    gen = step(api, offerings, "hyper3d rodin text-to-3d", HYPER3D_TEXT_TO_3D, "text-to-3d",
+               {"prompt": "a plain cube"}, session)
+    if gen and gen.get("state") == "SUCCEEDED":
+        step(api, offerings, "hyper3d bang", HYPER3D_BANG, "mesh-segmentation", {"source_task": gen["id"]}, session)
+
+
 def scenario_agent(api, offerings):
-    """The L1 Agent equivalent: fake LLM -> tool call -> approval -> Tripo task -> reply."""
+    """The L1 Agent equivalent: fake LLM -> tool call -> approval -> 3D task -> reply."""
     session = new_session(api)
     marker = '[[fake:tool:create_model_3d {"prompt":"a plain cube"}]]'
     status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", {
@@ -368,43 +440,51 @@ def scenario_agent(api, offerings):
         messages = api.json("GET", f"/api/chat/sessions/{session}/messages")[1]
         messages = messages if isinstance(messages, list) else messages.get("messages", [])
         reply = " ".join(str(m.get("content")) for m in messages if m.get("role") == "assistant")
-    problems, count = check_delivery(api, task, offerings[TEXT_TO_3D]) if task.get("state") == "SUCCEEDED" else (["task not SUCCEEDED"], 0)
+    # The tool takes the account's default 3D model; with Meshy configured that is
+    # no longer Tripo, so the delivery is checked against the Offering the Task ran.
+    used = task.get("offering_id")
+    problems, count = check_delivery(api, task, offerings[used]) if task.get("state") == "SUCCEEDED" and used in offerings else (["task not SUCCEEDED"], 0)
     ok = task.get("state") == "SUCCEEDED" and not problems and "Fake upstream reply" in reply
-    record("agent turn: chat -> tool call -> approval -> Tripo task -> reply", ok,
-           f"task {task.get('state')}, {count} assets verified, assistant reply present={'Fake upstream reply' in reply}"
+    record("agent turn: chat -> tool call -> approval -> 3D task -> reply", ok,
+           f"{used} task {task.get('state')}, {count} assets verified, assistant reply present={'Fake upstream reply' in reply}"
            + ("" if not problems else "; " + "; ".join(problems)))
 
 
-# key suffix -> (expected state, expected failure class)
+# scenario -> provider -> (expected state, expected failure class). The fault is
+# chosen by the stack's API key, so one stack per scenario exercises every provider.
+FAULT_OFFERINGS = {"tripo": TEXT_TO_3D, "meshy": MESHY_TEXT_TO_3D, "hyper3d": HYPER3D_TEXT_TO_3D}
 FAULTS = {
-    "insufficient-balance": ("FAILED", "insufficient_balance"),
-    "key-quota": ("FAILED", "insufficient_balance"),
-    "task-failed": ("FAILED", "rejected"),
-    "artifact-corrupt": ("FAILED", "integrity_failure"),
-    "artifact-404": ("FAILED", "upstream_unavailable"),
+    "insufficient-balance": {p: ("FAILED", "insufficient_balance") for p in FAULT_OFFERINGS},
+    "key-quota": {p: ("FAILED", "insufficient_balance") for p in FAULT_OFFERINGS},
+    "task-failed": {"tripo": ("FAILED", "rejected"), "meshy": ("FAILED", "invalid_input"), "hyper3d": ("FAILED", "rejected")},
+    "artifact-corrupt": {p: ("FAILED", "integrity_failure") for p in FAULT_OFFERINGS},
+    "artifact-404": {p: ("FAILED", "upstream_unavailable") for p in FAULT_OFFERINGS},
 }
 
 
 def scenario_fault(api, offerings, scenario):
-    state, failure_class = FAULTS[scenario]
-    task_id, why = submit(api, TEXT_TO_3D, "text-to-3d", {"prompt": "a plain cube", "authorize_extra_credits": True}, new_session(api))
-    if not task_id:
-        # Refused before a Task exists (for example a creation error surfaced at submit).
-        record(f"fault {scenario}", False, why)
-        return
-    task = wait_task(api, task_id, seconds=120)
-    got = (task.get("failure") or {}).get("class")
-    ok = task.get("state") == state and (failure_class is None or got == failure_class)
-    record(f"fault {scenario}", ok, f"state {task.get('state')}, class {got} (want {state}, {failure_class or 'any'})")
+    session = new_session(api)
+    for provider, offering in FAULT_OFFERINGS.items():
+        state, failure_class = FAULTS[scenario][provider]
+        label = f"fault {scenario} ({provider})"
+        task_id, why = submit(api, offering, "text-to-3d", payload_for(offerings[offering], {"prompt": "a plain cube"}), session)
+        if not task_id:
+            # Refused before a Task exists (for example a creation error surfaced at submit).
+            record(label, False, why)
+            continue
+        task = wait_task(api, task_id, seconds=120)
+        got = (task.get("failure") or {}).get("class")
+        ok = task.get("state") == state and (failure_class is None or got == failure_class)
+        record(label, ok, f"state {task.get('state')}, class {got} (want {state}, {failure_class or 'any'})")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,agent,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,agent,faults")
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "agent", "faults"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "agent", "faults"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -419,13 +499,17 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "agent"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "agent"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
                 scenario_balance(api, offerings)
             if "chain" in selected:
                 scenario_chain(api, offerings)
+            if "meshy" in selected:
+                scenario_meshy(api, offerings)
+            if "hyper3d" in selected:
+                scenario_hyper3d(api, offerings)
             if "agent" in selected:
                 scenario_agent(api, offerings)
             processes.stop(child)

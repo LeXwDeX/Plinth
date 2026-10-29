@@ -1,0 +1,12 @@
+{
+  "api_version": "v1",
+  "candidate_sha256": "c86ba4fe9d002e30efdf6b50c64b77124d54aead77ecd5271e00176d0858340c",
+  "captured_at_utc": "2026-10-29",
+  "exchanges": 3,
+  "offering": "meshy/processing/analyze-printability",
+  "provenance": "captured",
+  "scenario": "meshy-openapi-v1-alignment",
+  "source_revision": "unknown",
+  "transformation": "IDs, signed URLs, timestamps and amounts are deterministic placeholders; media bytes are not stored.",
+  "version": 1
+}

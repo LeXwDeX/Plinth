@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -907,7 +908,22 @@ func TestAcceptanceServer(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	application, err := newWithDependencies(config, logger, assemblyOverrides{providers: func(base generation.ProviderRegistry) generation.ProviderRegistry {
+	// FAKE_UPSTREAM_STACK_URL replays the recovery scenarios against the local fake
+	// upstream (issue #96): the same loopback-only mapping the fake stack uses
+	// (see fake_upstream_stack_test.go). Unset, the connections keep their own
+	// transports and the target environment's real Provider.
+	var fakeTransport func(string, http.RoundTripper) http.RoundTripper
+	if raw := os.Getenv("FAKE_UPSTREAM_STACK_URL"); raw != "" {
+		fakeURL, parseErr := url.Parse(raw)
+		if parseErr != nil || fakeURL.Scheme != "http" {
+			t.Fatal("FAKE_UPSTREAM_STACK_URL must be the fake's http origin")
+		}
+		if host, _, splitErr := net.SplitHostPort(fakeURL.Host); splitErr != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
+			t.Fatal("the fake upstream must be on loopback")
+		}
+		fakeTransport = fakeStackHTTPTransport(fakeURL)
+	}
+	application, err := newWithDependencies(config, logger, assemblyOverrides{httpTransport: fakeTransport, providers: func(base generation.ProviderRegistry) generation.ProviderRegistry {
 		return acceptanceRegistry{base, controller}
 	}, processingGateway: func(base processing.Gateway) processing.Gateway { return &acceptanceGateway{base, controller} },
 		taskAdmissions: func(store generation.TaskAdmissionStore) { controller.admissions = store }})
