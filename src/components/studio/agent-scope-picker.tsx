@@ -37,7 +37,7 @@ export function AgentScopePicker() {
         columns: 'minmax(0,1fr) minmax(0,2.4fr)',
         rows: options.map((option) => ({
           key: option.scope,
-          cells: [{ text: option.label, strong: true }, { text: option.description, muted: true }],
+          cells: [{ text: option.label, strong: true, upper: true }, { text: option.description, muted: true }],
         })),
         selectedKey: current.scope,
         foot: schemaText(schema, 'ui.studio.agent_scope.note'),

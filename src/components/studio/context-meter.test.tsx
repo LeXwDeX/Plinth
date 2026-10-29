@@ -56,6 +56,7 @@ describe('the context meter (#322)', () => {
     const html = renderToStaticMarkup(<ContextMeter />);
     expect(html).toContain('>356K / 1M<');
     expect(tag(html, 'composer-context-meter')).toContain('tabular-nums');
+    expect(tag(html, 'composer-context-meter')).toContain('uppercase tracking-wide');
     expect(hintOf(html, 'composer-context-meter')).toContain(`data-hint="${formatSchemaText(messages['ui.studio.context.hint_window'], { used: '356K', window: '1M', threshold: 80 })}"`);
   });
 

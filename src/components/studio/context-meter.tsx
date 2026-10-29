@@ -9,6 +9,7 @@ import { useSessionContext } from '@/hooks/use-session-context';
 import { formatContextUsage, formatTokenCount } from '@/lib/chat/token-count';
 import { withErrorReference } from '@/lib/problem-reference';
 import { formatSchemaText, schemaCountMessage, schemaText, type ChatProductSchema, type ProductSchema } from '@/lib/product-schema';
+import { PICKER_UPPERCASE_CLASS } from '@/components/studio/table-popover';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/store/chat-store';
 
@@ -79,7 +80,7 @@ export function ContextMeter() {
           aria-label={`${label}: ${text}`}
           data-testid="composer-context-meter"
           data-level={level}
-          className={cn('truncate rounded-sm px-1 text-[11px] leading-7 tabular-nums focus-visible:outline-2 focus-visible:outline-ring', LEVEL_CLASS[level])}
+          className={cn('truncate rounded-sm px-1 text-[11px] leading-7 tabular-nums focus-visible:outline-2 focus-visible:outline-ring', PICKER_UPPERCASE_CLASS, LEVEL_CLASS[level])}
         >
           {text}
         </span>
@@ -99,7 +100,7 @@ export function ContextMeter() {
             disabled={!activeSessionId || turnRunning || compacting}
             onClick={run}
             data-testid="composer-context-compact"
-            className="min-w-0 shrink text-[11px] font-normal text-muted-foreground"
+            className={cn('min-w-0 shrink text-[11px] font-normal text-muted-foreground', PICKER_UPPERCASE_CLASS)}
           >
             <span className="truncate">{compactLabel}</span>
           </Action>
