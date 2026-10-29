@@ -1,0 +1,121 @@
+{
+  "provider": "openai",
+  "api": "v1",
+  "official_base": "dev-test OpenAI-compatible LLM gateway /v1",
+  "checked_at": "2026-10-29",
+  "official_requests": 8,
+  "official_paid_requests": 4,
+  "fake_requests": 8,
+  "steps": [
+    {
+      "step": "models",
+      "method": "GET",
+      "path": "/models",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 16,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "models-no-auth",
+      "method": "GET",
+      "path": "/models",
+      "auth": "none",
+      "official_status": 401,
+      "fake_status": 401,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "chat-no-auth",
+      "method": "POST",
+      "path": "/chat/completions",
+      "auth": "none",
+      "official_status": 401,
+      "fake_status": 401,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "chat-invalid",
+      "method": "POST",
+      "path": "/chat/completions",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 400,
+      "fake_status": 400,
+      "official_fields": 6,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "chat-completion",
+      "method": "POST",
+      "path": "/chat/completions",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 25,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "chat-stream",
+      "method": "POST",
+      "path": "/chat/completions",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 25,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "chat-tool-call",
+      "method": "POST",
+      "path": "/chat/completions",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 33,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "chat-tool-call-stream",
+      "method": "POST",
+      "path": "/chat/completions",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 33,
+      "diffs": 0,
+      "unexplained": 0
+    }
+  ],
+  "diffs": null,
+  "request_notes": [
+    "工具调用步骤（chat-tool-call、chat-tool-call-stream）：发给 fake 的请求在最后一条 user 消息末尾多了 fake 专用的工具标记 `[[fake:tool:lookup_note {\"topic\":\"cube\"}]]`，其余字节相同；官方模型自行决定调用工具，fake 只在标记出现时返回工具调用。",
+    "fake 的流式分片按官方 2026-10-29 实测的分片模式生成（角色、推理、正文或工具调用头与参数、结束分片）；已提交样本经 wirefixture 规范化后合并了中间分片，字段集合一致、中间分片的 null 类型不保留，所以漂移测试对 SSE 只比字段集合。"
+  ],
+  "endpoints": [
+    {
+      "endpoint": "GET /models",
+      "evidence": "real",
+      "sample": "GET /v1/models",
+      "doc_url": "https://platform.openai.com/docs/api-reference/models/list",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /chat/completions",
+      "evidence": "real",
+      "sample": "POST /v1/chat/completions",
+      "doc_url": "https://platform.openai.com/docs/api-reference/chat/create",
+      "checked_at": "2026-10-29",
+      "note": "non-streaming, SSE streaming, tool_calls, reasoning_content and the model_required error are all real samples"
+    }
+  ]
+}

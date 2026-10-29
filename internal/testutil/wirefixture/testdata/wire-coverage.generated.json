@@ -6,7 +6,17 @@
     "internal/app/testdata/agent-flow/agent-flow.candidate.json",
     "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
     "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json",
-    "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json"
+    "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json",
+    "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-animation.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-complete.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-convert.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rig-check.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging-v3.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-segment.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-text-to-3d.candidate.json"
   ],
   "counts": {
     "offerings": {
@@ -14,17 +24,18 @@
       "disabled-zero-egress": 24,
       "enabled": 52,
       "local-no-wire": 4,
-      "missing": 44,
-      "partial": 4,
+      "missing": 34,
+      "partial": 5,
+      "real": 9,
       "total": 76
     },
     "units": {
-      "derived": 15,
+      "derived": 16,
       "disabled-zero-egress": 9,
       "local-no-wire": 2,
-      "missing": 38,
-      "real": 11,
-      "total": 75
+      "missing": 31,
+      "real": 30,
+      "total": 88
     }
   },
   "incomplete": [
@@ -51,23 +62,33 @@
     "meshy.v2|uv-unwrap|declared:uv-unwrap",
     "openai-images.v1|image-to-image|declared:images/edits",
     "openai-images.v1|text-to-image|declared:images/generations",
-    "tripo.v3|animation|declared:animations/retarget",
     "tripo.v3|edit-multiview|declared:generation/edit-multiview",
-    "tripo.v3|format-conversion|declared:models/convert",
     "tripo.v3|image-to-3d|declared:generation/image-to-model",
     "tripo.v3|image-to-3d|declared:mesh/smartsegment",
     "tripo.v3|image-to-multiview|declared:generation/image-to-multiview",
     "tripo.v3|image-to-splat|declared:generation/image-to-splat",
-    "tripo.v3|mesh-completion|declared:mesh/complete",
-    "tripo.v3|mesh-segmentation|declared:mesh/segment",
     "tripo.v3|mesh-segmentation|declared:mesh/smartsegment",
     "tripo.v3|remesh|declared:mesh/decimate",
-    "tripo.v3|retexture|declared:models/texture",
-    "tripo.v3|rig-check|declared:animations/rig-check",
-    "tripo.v3|rigging|declared:animations/rig",
-    "tripo.v3|text-to-3d|declared:generation/text-to-model"
+    "tripo.v3|retexture|declared:models/texture"
   ],
   "units": [
+    {
+      "adapter_key": "connection:LLM",
+      "capability": "(scenario)",
+      "endpoint": "GET /v1/models",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json",
+        "media"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1.candidate.json"
+      ],
+      "offerings": []
+    },
     {
       "adapter_key": "connection:LLM",
       "capability": "(scenario)",
@@ -77,11 +98,13 @@
       ],
       "protocols": [
         "json",
+        "media",
         "sse"
       ],
       "evidence": "real",
       "evidence_files": [
-        "internal/app/testdata/agent-flow/agent-flow.candidate.json"
+        "internal/app/testdata/agent-flow/agent-flow.candidate.json",
+        "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1.candidate.json"
       ],
       "offerings": []
     },
@@ -1182,10 +1205,104 @@
     },
     {
       "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
+      "endpoint": "GET /v3/account/balance",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
+      "endpoint": "POST /v3/files",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
+      "endpoint": "POST /v3/generation/text-to-model",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
       "capability": "animation",
-      "endpoint": "declared:animations/retarget",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-animation.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/processing/animation",
+          "model_id": "tripo-animation",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "animation",
+      "endpoint": "POST /v3/animations/retarget",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-animation.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/processing/animation",
@@ -1225,9 +1342,39 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "format-conversion",
-      "endpoint": "declared:models/convert",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-convert.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/format-conversion/uploaded-glb-to-stl",
+          "model_id": "tripo-uploaded-glb-to-stl",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "format-conversion",
+      "endpoint": "POST /v3/models/convert",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-convert.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/format-conversion/uploaded-glb-to-stl",
@@ -1309,9 +1456,44 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "mesh-completion",
-      "endpoint": "declared:mesh/complete",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-complete.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/geometry/complete",
+          "model_id": "tripo-complete",
+          "enabled": true
+        },
+        {
+          "id": "tripo/geometry/quick-cap",
+          "model_id": "tripo-quick-cap",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "mesh-completion",
+      "endpoint": "POST /v3/mesh/complete",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-complete.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/geometry/complete",
@@ -1328,9 +1510,44 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "mesh-segmentation",
-      "endpoint": "declared:mesh/segment",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-segment.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/geometry/segment",
+          "model_id": "tripo-segment",
+          "enabled": true
+        },
+        {
+          "id": "tripo/geometry/smartsegment-model",
+          "model_id": "tripo-smartsegment-model",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "mesh-segmentation",
+      "endpoint": "POST /v3/mesh/segment",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-segment.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/geometry/segment",
@@ -1398,9 +1615,39 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "rig-check",
-      "endpoint": "declared:animations/rig-check",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rig-check.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/processing/rig-check",
+          "model_id": "tripo-rig-check",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "rig-check",
+      "endpoint": "POST /v3/animations/rig-check",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rig-check.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/processing/rig-check",
@@ -1412,9 +1659,73 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "rigging",
-      "endpoint": "declared:animations/rig",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging-v3.candidate.json",
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/processing/rigging",
+          "model_id": "tripo-rigging",
+          "enabled": true
+        },
+        {
+          "id": "tripo/processing/rigging-v3",
+          "model_id": "tripo-rigging-v3",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "rigging",
+      "endpoint": "POST /v3/animations/retarget",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/processing/rigging",
+          "model_id": "tripo-rigging",
+          "enabled": true
+        },
+        {
+          "id": "tripo/processing/rigging-v3",
+          "model_id": "tripo-rigging-v3",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "rigging",
+      "endpoint": "POST /v3/animations/rig",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging-v3.candidate.json",
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/processing/rigging",
@@ -1445,9 +1756,39 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "text-to-3d",
-      "endpoint": "declared:generation/text-to-model",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /v3/tasks/{id}",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-text-to-3d.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "tripo/tripo-v3.1-full/text-to-3d",
+          "model_id": "tripo-v3.1-full",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "text-to-3d",
+      "endpoint": "POST /v3/generation/text-to-model",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-text-to-3d.candidate.json"
+      ],
       "offerings": [
         {
           "id": "tripo/tripo-v3.1-full/text-to-3d",
@@ -2049,9 +2390,10 @@
       "model_id": "tripo-uploaded-glb-to-stl",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|format-conversion|declared:models/convert"
+        "tripo.v3|format-conversion|GET /v3/tasks/{id}",
+        "tripo.v3|format-conversion|POST /v3/models/convert"
       ]
     },
     {
@@ -2059,9 +2401,10 @@
       "model_id": "tripo-complete",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|mesh-completion|declared:mesh/complete"
+        "tripo.v3|mesh-completion|GET /v3/tasks/{id}",
+        "tripo.v3|mesh-completion|POST /v3/mesh/complete"
       ]
     },
     {
@@ -2089,9 +2432,10 @@
       "model_id": "tripo-quick-cap",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|mesh-completion|declared:mesh/complete"
+        "tripo.v3|mesh-completion|GET /v3/tasks/{id}",
+        "tripo.v3|mesh-completion|POST /v3/mesh/complete"
       ]
     },
     {
@@ -2099,9 +2443,10 @@
       "model_id": "tripo-segment",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|mesh-segmentation|declared:mesh/segment"
+        "tripo.v3|mesh-segmentation|GET /v3/tasks/{id}",
+        "tripo.v3|mesh-segmentation|POST /v3/mesh/segment"
       ]
     },
     {
@@ -2119,8 +2464,9 @@
       "model_id": "tripo-smartsegment-model",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "partial",
       "units": [
+        "tripo.v3|mesh-segmentation|GET /v3/tasks/{id}",
         "tripo.v3|mesh-segmentation|declared:mesh/smartsegment"
       ]
     },
@@ -2149,9 +2495,10 @@
       "model_id": "tripo-animation",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|animation|declared:animations/retarget"
+        "tripo.v3|animation|GET /v3/tasks/{id}",
+        "tripo.v3|animation|POST /v3/animations/retarget"
       ]
     },
     {
@@ -2159,9 +2506,10 @@
       "model_id": "tripo-rig-check",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|rig-check|declared:animations/rig-check"
+        "tripo.v3|rig-check|GET /v3/tasks/{id}",
+        "tripo.v3|rig-check|POST /v3/animations/rig-check"
       ]
     },
     {
@@ -2169,9 +2517,11 @@
       "model_id": "tripo-rigging",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|rigging|declared:animations/rig"
+        "tripo.v3|rigging|GET /v3/tasks/{id}",
+        "tripo.v3|rigging|POST /v3/animations/retarget",
+        "tripo.v3|rigging|POST /v3/animations/rig"
       ]
     },
     {
@@ -2179,9 +2529,11 @@
       "model_id": "tripo-rigging-v3",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|rigging|declared:animations/rig"
+        "tripo.v3|rigging|GET /v3/tasks/{id}",
+        "tripo.v3|rigging|POST /v3/animations/retarget",
+        "tripo.v3|rigging|POST /v3/animations/rig"
       ]
     },
     {
@@ -2209,9 +2561,10 @@
       "model_id": "tripo-v3.1-full",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "tripo.v3|text-to-3d|declared:generation/text-to-model"
+        "tripo.v3|text-to-3d|GET /v3/tasks/{id}",
+        "tripo.v3|text-to-3d|POST /v3/generation/text-to-model"
       ]
     },
     {
