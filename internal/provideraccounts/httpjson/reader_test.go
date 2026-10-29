@@ -130,3 +130,51 @@ func TestNativeBalanceRejectsUnknownOrUnrepresentableAmounts(t *testing.T) {
 		})
 	}
 }
+
+// The Hyper3D (Rodin) check_balance wire contract as declared in the Schema's
+// provider_accounts entry: GET /check_balance, Bearer auth, {"balance": n}.
+func TestReaderParsesHyper3DCheckBalance(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(
+		func(writer http.ResponseWriter, request *http.Request) {
+			if request.Method != http.MethodGet ||
+				request.URL.Path != "/api/v2/check_balance" {
+				t.Fatalf("request = %s %s", request.Method, request.URL.String())
+			}
+			if request.Header.Get("Authorization") != "Bearer rodin-test-key" {
+				t.Fatalf("authorization = %#v", request.Header)
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"balance": 10}`))
+		},
+	))
+	defer upstream.Close()
+
+	reader, err := New(Config{
+		BaseURL:              upstream.URL + "/api/v2",
+		APIKey:               "rodin-test-key",
+		EndpointPath:         "/check_balance",
+		AuthorizationHeader:  "Authorization",
+		AuthorizationType:    "Bearer",
+		ResponseBalanceField: "balance",
+		NativeUnit:           "hyper3d.credit",
+		NativeUnitLabel:      "Hyper3D credits",
+		RequestTimeout:       time.Second,
+		ResponseMaxBytes:     65536,
+		ErrorBodyMaxBytes:    65536,
+		Client:               upstream.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	balance, err := reader.Balance(context.Background())
+	if err != nil || balance != 10 {
+		t.Fatalf("balance = %v, err = %v", balance, err)
+	}
+	native, err := reader.NativeBalance(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if native.Amount != "10" || native.Unit != "hyper3d.credit" || native.UnitLabel != "Hyper3D credits" {
+		t.Fatalf("native = %+v", native)
+	}
+}

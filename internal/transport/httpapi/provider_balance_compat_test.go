@@ -50,14 +50,14 @@ func TestLegacyProviderBalanceContract(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.Accounts) != 2 {
+	if len(payload.Accounts) != 3 {
 		t.Fatalf("accounts = %#v", payload.Accounts)
 	}
 	providers := map[string]bool{}
 	for _, account := range payload.Accounts {
 		provider, _ := account["provider"].(string)
 		providers[provider] = true
-		if provider == "meshy" || provider == "tripo" {
+		if provider == "meshy" || provider == "tripo" || provider == "hyper3d" {
 			// The native mock amount is explicitly configured as a decimal string.
 			if account["price_mode"] != "native" {
 				t.Fatalf("native account mode missing: %#v", account)
@@ -65,6 +65,9 @@ func TestLegacyProviderBalanceContract(t *testing.T) {
 			wantUnit, wantAmount := "meshy.credit", "1000"
 			if provider == "tripo" {
 				wantUnit, wantAmount = "tripo.credit", "5000"
+			}
+			if provider == "hyper3d" {
+				wantUnit, wantAmount = "hyper3d.credit", "100"
 			}
 			if v, ok := account["native_balance"].(map[string]any); !ok || v["unit"] != wantUnit || v["amount"] != wantAmount {
 				t.Fatalf("native balance missing: %#v", account)
@@ -78,7 +81,7 @@ func TestLegacyProviderBalanceContract(t *testing.T) {
 			t.Fatalf("account %s 缺少 balance: %#v", provider, account)
 		}
 	}
-	if !providers["meshy"] || !providers["tripo"] {
+	if !providers["meshy"] || !providers["tripo"] || !providers["hyper3d"] {
 		t.Fatalf("accounts = %#v", payload.Accounts)
 	}
 }

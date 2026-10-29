@@ -3,7 +3,7 @@
   "scenario": "rodin-image-to-3d-live",
   "captured_at_utc": "2026-10-28",
   "source_revision": "b29265603b4fbb7efc25ba967a537b161153e023",
-  "schema_revision": "2026-10-29.issue92-93-reference-key-quota.1",
+  "schema_revision": "2026-10-29.issue92-93-reference-key-quota.2",
   "catalog_sha256": "0ba6f6aae92349096cf404a194de66f07e62614f86fbd6cedeec12c48e2d6dd9",
   "offering": "hyper3d/rodin-gen-2.5/image-to-3d",
   "api_version": "v2",
