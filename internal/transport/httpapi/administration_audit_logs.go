@@ -225,13 +225,7 @@ func (server *Server) writeAdministrationAuditLogJSON(
 		"Cache-Control",
 		server.application.Runtime.HTTP.PrivateCacheControl,
 	)
-	writer.Header().Set("Content-Type", "application/json")
-	writer.WriteHeader(status)
-	if err := json.NewEncoder(writer).Encode(payload); err != nil {
-		server.logger.Error(
-			"encode administration audit log response",
-			"error",
-			err,
-		)
-	}
+	// writeJSON is the single JSON exit: it adds the request ID to every
+	// error body (#118) and keeps the response locale marking.
+	writeJSON(writer, status, payload)
 }
