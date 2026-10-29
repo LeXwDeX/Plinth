@@ -39,7 +39,7 @@ STALE_RUN_SECONDS = 24 * 3600
 RESULTS_KEPT = 10
 # Defaults of every tunable limit (dev_test.md section 2, "Host CI"). scripts/host-ci/run.py passes
 # all of them explicitly, so these only matter for a hand run; test_host_ci.py keeps both copies equal.
-DEFAULTS = {'cpus': 4, 'memory_gib': 12, 'min_mem_gib': 15, 'min_disk_gib': 10, 'timeout_min': 100, 'build_timeout_min': 40}
+DEFAULTS = {'cpus': 4, 'memory_gib': 12, 'min_mem_gib': 13, 'min_disk_gib': 10, 'timeout_min': 100, 'build_timeout_min': 40}
 # MemAvailable must exceed the container's memory limit by at least this much (host and other
 # stacks keep running while the container may use its whole limit). Smaller thresholds are refused.
 MIN_MEMORY_MARGIN_GIB = 1

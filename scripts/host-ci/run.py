@@ -50,7 +50,7 @@ STATUS_CONTEXTS = {'gates': 'host-ci/gates', 'workflows': 'host-ci/workflows'}
 # Tunable limits. Precedence: command line, then the optional `host_ci` object of the environment
 # entry (same names), then these defaults, which host_run.DEFAULTS repeats (test_host_ci.py keeps them equal).
 # The host validates the final values again (host_run.limit_problems).
-LIMIT_DEFAULTS = {'cpus': 4, 'memory_gib': 12, 'min_mem_gib': 15, 'min_disk_gib': 10, 'timeout_min': 100, 'build_timeout_min': 40}
+LIMIT_DEFAULTS = {'cpus': 4, 'memory_gib': 12, 'min_mem_gib': 13, 'min_disk_gib': 10, 'timeout_min': 100, 'build_timeout_min': 40}
 # Files that decide the image. The first two come from the tool's own checkout (the
 # image definition), the rest from the commit under test (the dependencies it needs).
 TOOL_FILES = ('Dockerfile.ci', 'scripts/host-ci/entry.sh')

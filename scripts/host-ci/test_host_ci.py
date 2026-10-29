@@ -147,11 +147,11 @@ class Preflight(unittest.TestCase):
         self.assertEqual(self.run_preflight(fake_meminfo(16.3))['problems'], [])
 
     def test_memory_just_under_the_threshold_blocks_and_just_over_passes(self):
-        self.assertEqual(self.run_preflight(fake_meminfo(14.99))['problems'], ['available memory'])
-        self.assertEqual(self.run_preflight(fake_meminfo(15.0))['problems'], [])
+        self.assertEqual(self.run_preflight(fake_meminfo(12.99))['problems'], ['available memory'])
+        self.assertEqual(self.run_preflight(fake_meminfo(13.0))['problems'], [])
 
     def test_memory_threshold_is_configurable(self):
-        self.assertEqual(self.run_preflight(fake_meminfo(14), min_mem_gib=13.5)['problems'], [])
+        self.assertEqual(self.run_preflight(fake_meminfo(12.5), min_mem_gib=12.2)['problems'], [])
         facts = self.run_preflight(fake_meminfo(14), min_mem_gib=20)
         self.assertEqual(facts['problems'], ['available memory'])
         self.assertEqual(facts['required']['mem_available_bytes'], 20 * host_run.GIB)
