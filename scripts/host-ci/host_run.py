@@ -270,8 +270,25 @@ def peak_container_memory(stop, label):
     return peak
 
 
+# GitHub's ubuntu-latest has the sqlite3 command line; the pinned act image does not, and scripts/tests need it.
+RUNNER_DOCKERFILE = "FROM {base}\nRUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends sqlite3 \\\n && rm -rf /var/lib/apt/lists/*\n"
+
+
+def ensure_runner_image(args):
+    """The pinned act runner image plus the few packages ubuntu-latest has that it lacks; tag derives from the recipe."""
+    recipe = RUNNER_DOCKERFILE.format(base=args.runner_image)
+    name = f'plinth-ci-act:{hashlib.sha256(recipe.encode()).hexdigest()[:12]}'
+    if docker('image', 'inspect', name, check=False).returncode != 0:
+        say(f'building {name} (pinned act runner image plus sqlite3)')
+        build = subprocess.run(['docker', 'build', '--tag', name, '--label', LABEL, '-'], input=recipe.encode(),
+                               timeout=args.build_timeout_min * 60)
+        if build.returncode:
+            raise Stop('runner_image_build_failed', 1)
+    return name
+
+
 def act_command(act, src, event, event_file, args):
-    command = [str(act), event, '-C', str(src), '-e', str(event_file), '-P', f'ubuntu-latest={args.runner_image}',
+    command = [str(act), event, '-C', str(src), '-e', str(event_file), '-P', f'ubuntu-latest={args.runner_name}',
                '--container-architecture', 'linux/amd64', '--concurrent-jobs', '1', '--container-daemon-socket', '-', '--rm',
                '--action-cache-path', str(args.act_cache),
                '--container-options', f'--cpus {args.cpus:g} --memory {args.memory_gib}g --memory-swap {args.memory_gib}g --pids-limit 4096 '
@@ -286,13 +303,14 @@ def run_workflows(ctx):
     args, root, run_dir = ctx['args'], ctx['root'], ctx['run_dir']
     act = ensure_act(root, args.act_version, args.act_sha256)
     version = subprocess.run([str(act), '--version'], capture_output=True, text=True, timeout=30).stdout.strip()
-    pulled = docker('pull', '-q', args.runner_image, timeout=1800)
+    docker('pull', '-q', args.runner_image, timeout=1800)
+    args.runner_name = ensure_runner_image(args)
     src = checkout_source(run_dir, args)
     evidence = root / 'results' / args.run_id
     volumes_before = set(docker('volume', 'ls', '-q', '--filter', 'name=act-', check=False).stdout.split())
     networks_before = set(docker('network', 'ls', '-q', '--filter', 'name=act-', check=False).stdout.split())
-    report = {'act_version': version, 'act_pinned': args.act_version, 'runner_image': args.runner_image,
-              'image_id': docker('image', 'inspect', '--format', '{{.Id}}', args.runner_image).stdout.strip(),
+    report = {'act_version': version, 'act_pinned': args.act_version, 'runner_image': args.runner_image, 'runner_derived': args.runner_name,
+              'image_id': docker('image', 'inspect', '--format', '{{.Id}}', args.runner_name).stdout.strip(),
               'filter_job': args.act_job or None, 'events': [], 'peak_memory_bytes': 0}
     try:
         for event in EVENTS:
