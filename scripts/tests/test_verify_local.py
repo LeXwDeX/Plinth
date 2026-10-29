@@ -675,6 +675,7 @@ class CgoEnumerationTests(FingerprintTests):
         self.assertEqual(result.strip(), b'1')
 
 
+@requires_macos
 class MissingConfigurationMonitorTests(VerificationTests):
     def setUp(self):
         super().setUp()
