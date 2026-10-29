@@ -7,10 +7,16 @@
     "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
     "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json",
     "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json",
+    "internal/testutil/fakeupstream/gemini/images-v1/testdata/gemini-images-v1-image-to-image.candidate.json",
+    "internal/testutil/fakeupstream/gemini/images-v1/testdata/gemini-images-v1-text-to-image.candidate.json",
     "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-bang.candidate.json",
     "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-image-to-3d.candidate.json",
     "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-text-to-3d.candidate.json",
+    "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-texture-failed.candidate.json",
     "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-texture.candidate.json",
+    "internal/testutil/fakeupstream/jimeng/api-v3/testdata/jimeng-api-v3-image-to-image.candidate.json",
+    "internal/testutil/fakeupstream/jimeng/api-v3/testdata/jimeng-api-v3-text-to-image.candidate.json",
+    "internal/testutil/fakeupstream/matting/api-v1/testdata/matting-api-v1.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-animation.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-convert.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-delete.candidate.json",
@@ -27,6 +33,8 @@
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-motion.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-uv-unwrap.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2.candidate.json",
+    "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-image-to-image.candidate.json",
+    "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-text-to-image.candidate.json",
     "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-animation.candidate.json",
@@ -44,28 +52,21 @@
       "disabled-zero-egress": 24,
       "enabled": 52,
       "local-no-wire": 4,
-      "missing": 14,
+      "missing": 7,
       "partial": 6,
-      "real": 28,
+      "real": 35,
       "total": 76
     },
     "units": {
       "derived": 17,
       "disabled-zero-egress": 9,
       "local-no-wire": 2,
-      "missing": 15,
-      "real": 85,
-      "total": 128
+      "missing": 8,
+      "real": 94,
+      "total": 130
     }
   },
   "incomplete": [
-    "gemini-images.v1|image-to-image|declared:chat/completions",
-    "gemini-images.v1|text-to-image|declared:chat/completions",
-    "jimeng-images.v1|image-to-image|declared:api/v3/images/generations",
-    "jimeng-images.v1|text-to-image|declared:api/v3/images/generations",
-    "matting.v1|background-removal|declared:(adapter-defined)",
-    "openai-images.v1|image-to-image|declared:images/edits",
-    "openai-images.v1|text-to-image|declared:images/generations",
     "tripo.v3|edit-multiview|declared:generation/edit-multiview",
     "tripo.v3|image-to-3d|declared:generation/image-to-model",
     "tripo.v3|image-to-3d|declared:mesh/smartsegment",
@@ -115,9 +116,17 @@
     {
       "adapter_key": "gemini-images.v1",
       "capability": "image-to-image",
-      "endpoint": "declared:chat/completions",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "POST /v1/chat/completions",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/gemini/images-v1/testdata/gemini-images-v1-image-to-image.candidate.json"
+      ],
       "offerings": [
         {
           "id": "gemini/gemini-3-pro-image/image-to-image",
@@ -129,9 +138,18 @@
     {
       "adapter_key": "gemini-images.v1",
       "capability": "text-to-image",
-      "endpoint": "declared:chat/completions",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "POST /v1/chat/completions",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json",
+        "media"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/gemini/images-v1/testdata/gemini-images-v1-text-to-image.candidate.json"
+      ],
       "offerings": [
         {
           "id": "gemini/gemini-3-pro-image/text-to-image",
@@ -426,6 +444,7 @@
       ],
       "evidence": "real",
       "evidence_files": [
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-texture-failed.candidate.json",
         "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-texture.candidate.json"
       ],
       "offerings": [
@@ -448,6 +467,7 @@
       ],
       "evidence": "derived",
       "evidence_files": [
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-texture-failed.candidate.json",
         "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-texture.candidate.json"
       ],
       "offerings": [
@@ -470,6 +490,7 @@
       ],
       "evidence": "real",
       "evidence_files": [
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-texture-failed.candidate.json",
         "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-texture.candidate.json"
       ],
       "offerings": [
@@ -618,9 +639,17 @@
     {
       "adapter_key": "jimeng-images.v1",
       "capability": "image-to-image",
-      "endpoint": "declared:api/v3/images/generations",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "POST /api/v3/images/generations",
+      "hosts": [
+        "ark.cn-beijing.volces.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/jimeng/api-v3/testdata/jimeng-api-v3-image-to-image.candidate.json"
+      ],
       "offerings": [
         {
           "id": "jimeng/seedream-4-5/image-to-image",
@@ -632,9 +661,17 @@
     {
       "adapter_key": "jimeng-images.v1",
       "capability": "text-to-image",
-      "endpoint": "declared:api/v3/images/generations",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "POST /api/v3/images/generations",
+      "hosts": [
+        "ark.cn-beijing.volces.com"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/jimeng/api-v3/testdata/jimeng-api-v3-text-to-image.candidate.json"
+      ],
       "offerings": [
         {
           "id": "jimeng/seedream-4-5/text-to-image",
@@ -684,9 +721,62 @@
     {
       "adapter_key": "matting.v1",
       "capability": "background-removal",
-      "endpoint": "declared:(adapter-defined)",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "GET /api/v1/batches/{id}",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/matting/api-v1/testdata/matting-api-v1.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "matting/default/background-removal",
+          "model_id": "matting-default",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "matting.v1",
+      "capability": "background-removal",
+      "endpoint": "GET /api/v1/tasks/{id}/download",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json",
+        "media"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/matting/api-v1/testdata/matting-api-v1.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "matting/default/background-removal",
+          "model_id": "matting-default",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "matting.v1",
+      "capability": "background-removal",
+      "endpoint": "POST /api/v1/jobs",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/matting/api-v1/testdata/matting-api-v1.candidate.json"
+      ],
       "offerings": [
         {
           "id": "matting/default/background-removal",
@@ -2197,9 +2287,17 @@
     {
       "adapter_key": "openai-images.v1",
       "capability": "image-to-image",
-      "endpoint": "declared:images/edits",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "POST /v1/images/edits",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-image-to-image.candidate.json"
+      ],
       "offerings": [
         {
           "id": "openai/gpt-image-2/image-to-image",
@@ -2211,9 +2309,18 @@
     {
       "adapter_key": "openai-images.v1",
       "capability": "text-to-image",
-      "endpoint": "declared:images/generations",
-      "evidence": "missing",
-      "evidence_files": [],
+      "endpoint": "POST /v1/images/generations",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json",
+        "media"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-text-to-image.candidate.json"
+      ],
       "offerings": [
         {
           "id": "openai/gpt-image-2/text-to-image",
@@ -2823,9 +2930,9 @@
       "model_id": "gemini-3-pro-image",
       "adapter_key": "gemini-images.v1",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "gemini-images.v1|image-to-image|declared:chat/completions"
+        "gemini-images.v1|image-to-image|POST /v1/chat/completions"
       ]
     },
     {
@@ -2833,9 +2940,9 @@
       "model_id": "gemini-3-pro-image",
       "adapter_key": "gemini-images.v1",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "gemini-images.v1|text-to-image|declared:chat/completions"
+        "gemini-images.v1|text-to-image|POST /v1/chat/completions"
       ]
     },
     {
@@ -2908,9 +3015,9 @@
       "model_id": "doubao-seedream-4-5-251128",
       "adapter_key": "jimeng-images.v1",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "jimeng-images.v1|image-to-image|declared:api/v3/images/generations"
+        "jimeng-images.v1|image-to-image|POST /api/v3/images/generations"
       ]
     },
     {
@@ -2918,9 +3025,9 @@
       "model_id": "doubao-seedream-4-5-251128",
       "adapter_key": "jimeng-images.v1",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "jimeng-images.v1|text-to-image|declared:api/v3/images/generations"
+        "jimeng-images.v1|text-to-image|POST /api/v3/images/generations"
       ]
     },
     {
@@ -2968,9 +3075,11 @@
       "model_id": "matting-default",
       "adapter_key": "matting.v1",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "matting.v1|background-removal|declared:(adapter-defined)"
+        "matting.v1|background-removal|GET /api/v1/batches/{id}",
+        "matting.v1|background-removal|GET /api/v1/tasks/{id}/download",
+        "matting.v1|background-removal|POST /api/v1/jobs"
       ]
     },
     {
@@ -3421,9 +3530,9 @@
       "model_id": "gpt-image-2.5-sunburst",
       "adapter_key": "openai-images.v1",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "openai-images.v1|image-to-image|declared:images/edits"
+        "openai-images.v1|image-to-image|POST /v1/images/edits"
       ]
     },
     {
@@ -3431,9 +3540,9 @@
       "model_id": "gpt-image-2.5-sunburst",
       "adapter_key": "openai-images.v1",
       "enabled": true,
-      "evidence": "missing",
+      "evidence": "real",
       "units": [
-        "openai-images.v1|text-to-image|declared:images/generations"
+        "openai-images.v1|text-to-image|POST /v1/images/generations"
       ]
     },
     {

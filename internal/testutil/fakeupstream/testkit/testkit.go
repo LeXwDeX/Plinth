@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
@@ -126,4 +127,72 @@ func DeliveryErr(t *testing.T, data []byte, role, variant, mediaType string) err
 	}
 	defer file.Close()
 	return local.ValidateDeliveredFile(file, role, variant, mediaType)
+}
+
+// AssertSameShape fails the test when got (a JSON response) differs in
+// structure from sample (the committed real response): field set, nesting and
+// JSON types. Values are not compared.
+func AssertSameShape(t *testing.T, what string, sample, got []byte) {
+	t.Helper()
+	want, err := fakeupstream.ShapeOf(sample)
+	if err != nil {
+		t.Fatalf("%s: sample is not JSON: %v", what, err)
+	}
+	have, err := fakeupstream.ShapeOf(got)
+	if err != nil {
+		t.Fatalf("%s: fake response is not JSON: %v (%s)", what, err, got)
+	}
+	if diff := fakeupstream.DiffShape(want, have); !diff.Empty() {
+		t.Errorf("%s drifted from the real sample: %s", what, diff)
+	}
+}
+
+// AssertEndpointTable checks a version's endpoint table: every real endpoint
+// names a committed sample, every row carries a documentation URL and check
+// date, and every declared route answers something other than 404 or 405
+// (probe sends one request and returns the status).
+func AssertEndpointTable(t *testing.T, endpoints []fakeupstream.Endpoint, samples *fakeupstream.Samples, probe func(fakeupstream.Endpoint) int) {
+	t.Helper()
+	for _, endpoint := range endpoints {
+		if endpoint.Evidence == fakeupstream.EvidenceReal && len(samples.Find(endpoint.Sample, "")) == 0 {
+			t.Errorf("%s names no committed sample %q", endpoint.Key(), endpoint.Sample)
+		}
+		if endpoint.DocURL == "" || endpoint.CheckedAt == "" {
+			t.Errorf("%s: needs a documentation reference and a check date", endpoint.Key())
+		}
+		if status := probe(endpoint); status == http.StatusNotFound || status == http.StatusMethodNotAllowed {
+			t.Errorf("declared endpoint %s is not routed (%d)", endpoint.Key(), status)
+		}
+	}
+}
+
+// AssertAlignmentReport checks the committed alignment report: it names the
+// official upstream, was checked on a date, rests on real requests (paid ones
+// when paid is true) and holds no unexplained difference.
+func AssertAlignmentReport(t *testing.T, path, official string, paid bool) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report struct {
+		Official  string `json:"official_base"`
+		CheckedAt string `json:"checked_at"`
+		Requests  int    `json:"official_requests"`
+		Paid      int    `json:"official_paid_requests"`
+		Diffs     []struct {
+			Note string `json:"note"`
+		} `json:"diffs"`
+	}
+	if err := json.Unmarshal(raw, &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Official != official || report.CheckedAt == "" || report.Requests == 0 || paid && report.Paid == 0 {
+		t.Fatalf("report header incomplete: %+v", report)
+	}
+	for _, diff := range report.Diffs {
+		if strings.TrimSpace(diff.Note) == "" {
+			t.Fatal("report holds an unexplained difference")
+		}
+	}
 }

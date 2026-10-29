@@ -1,0 +1,12 @@
+{
+  "api_version": "v3",
+  "candidate_sha256": "16557417a04c04e2fd948bfbaa415c5794c9ebbfb6db04a94374480c23c2a6dd",
+  "captured_at_utc": "2026-10-29",
+  "exchanges": 1,
+  "offering": "jimeng/seedream-4-5/image-to-image",
+  "provenance": "captured",
+  "scenario": "jimeng-api-v3-alignment",
+  "source_revision": "unknown",
+  "transformation": "IDs, signed URLs, timestamps and amounts are deterministic placeholders; media bytes are not stored.",
+  "version": 1
+}

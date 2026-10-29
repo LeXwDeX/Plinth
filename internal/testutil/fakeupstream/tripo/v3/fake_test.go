@@ -400,6 +400,27 @@ func TestFaultScenarios(t *testing.T) {
 			t.Fatal("corrupt bytes passed the delivery check")
 		}
 	})
+	t.Run("artifact URL expired, a later read hands out working URLs", func(t *testing.T) {
+		f := newFixture(t, short)
+		id := f.create("/generation/text-to-model", textBody(), "fake-artifact-expired")
+		_, body := f.finish(id, "fake-artifact-expired")
+		status, contentType, raw := f.download(f.outputURL(body, "model_url"))
+		if status != http.StatusForbidden || !strings.Contains(contentType, "xml") || !strings.Contains(string(raw), "<Code>AccessDenied</Code>") {
+			t.Fatalf("expired URL = %d %s %s", status, contentType, raw)
+		}
+		// Reading the task again (Plinth's free result refetch) issues fresh URLs.
+		_, _, again := f.do("GET", "/tasks/"+id, "fake-artifact-expired", nil)
+		status, _, data := f.download(f.outputURL(again, "model_url"))
+		if status != http.StatusOK || deliveryErr(t, data, "model", "glb", "model/gltf-binary") != nil {
+			t.Fatalf("refetched URL = %d", status)
+		}
+		// Tasks created without the scenario never carry the issue parameter.
+		plain := f.create("/generation/text-to-model", textBody(), key)
+		_, plainBody := f.finish(plain, key)
+		if strings.Contains(f.outputURL(plainBody, "model_url"), fakeupstream.IssueParam) {
+			t.Fatal("a normal task's URL carries the expiry parameter")
+		}
+	})
 	t.Run("key prefix selects the scenario", func(t *testing.T) {
 		f := newFixture(t, short)
 		if status, _, _ := f.do("POST", "/generation/text-to-model", "fake-insufficient-balance-x", textBody()); status != http.StatusForbidden {

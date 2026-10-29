@@ -42,12 +42,28 @@ const (
 	// ScenarioArtifactCorrupt makes the finished task's artifact URLs serve
 	// bytes that no longer match the declared format.
 	ScenarioArtifactCorrupt Scenario = "artifact-corrupt"
+	// ScenarioArtifactExpired makes the signed artifact URLs of the first
+	// task reads that offer them answer "expired" (403 with the host's expiry
+	// body): by default the first read's URLs, or the first n when the
+	// creating request names n (X-Fake-Fail-Times, or the key
+	// "fake-artifact-expired-<n>"). Reading the task again hands out URLs that
+	// work, which is what Plinth's materialization retry and its free result
+	// refetch (#295) do.
+	ScenarioArtifactExpired Scenario = "artifact-expired"
+	// ScenarioPartialFormats makes a finished Meshy retexture task offer no STL
+	// and no 3MF although they were requested: the Catalog marks those two
+	// formats optional for a retexture, so the Task still succeeds, and the
+	// "complete the missing formats" recovery (D class) starts from it. Other
+	// task kinds ignore it. Constructed: the official API has not been seen to
+	// omit a requested format.
+	ScenarioPartialFormats Scenario = "partial-formats"
 )
 
 // Scenarios lists every injectable scenario.
 var Scenarios = []Scenario{
 	ScenarioInsufficientBalance, ScenarioKeyQuota, ScenarioRateLimit, ScenarioServerError,
 	ScenarioTimeout, ScenarioLostResponse, ScenarioTaskFailed, ScenarioArtifactNotFound, ScenarioArtifactCorrupt,
+	ScenarioArtifactExpired, ScenarioPartialFormats,
 }
 
 const (
@@ -125,11 +141,13 @@ type Env struct {
 
 	mu       sync.Mutex
 	failures map[string]int
+	issued   map[string]int
+	epoch    int
 }
 
 // NewEnv applies the defaults to a Config.
 func NewEnv(config Config) *Env {
-	return &Env{Config: config.withDefaults(), failures: make(map[string]int)}
+	return &Env{Config: config.withDefaults(), failures: make(map[string]int), issued: make(map[string]int)}
 }
 
 // Intercept applies a request-phase scenario. It reports true when it already
@@ -220,4 +238,88 @@ func SortedScenarioNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// IssueArtifactURLs counts how many times the artifact URLs of one task (key)
+// have been handed out and returns the new count: 1 for the first task read
+// that offers them. Reading the task again issues the next number.
+func (e *Env) IssueArtifactURLs(key string) int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.issued[key]++
+	return e.issued[key]
+}
+
+const (
+	// IssueParam carries the issue number of a signed artifact URL and EpochParam
+	// the renewal epoch it was issued in. Only tasks created under
+	// ScenarioArtifactExpired get them.
+	IssueParam = "fake-issue"
+	EpochParam = "fake-epoch"
+)
+
+// RenewArtifactURLs starts a new renewal epoch: URLs issued from now on are
+// valid even for tasks that expire a great many issues (X-Fake-Fail-Times or a
+// "fake-artifact-expired-<n>" key with a large n), while the URLs issued before
+// stay expired. It is the fake's stand-in for the time that makes an upstream
+// hand out fresh URLs, and it is what a test calls between a Task that failed on
+// expired URLs and its free result refetch (POST /fake/control/renew-artifacts).
+func (e *Env) RenewArtifactURLs() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.epoch++
+	return e.epoch
+}
+
+// SignArtifactURL appends the issue number and the renewal epoch to an artifact
+// URL when the task's scenario is ScenarioArtifactExpired; every other URL
+// stays untouched.
+func (e *Env) SignArtifactURL(rawURL string, scenario Scenario, issue int) string {
+	if scenario != ScenarioArtifactExpired {
+		return rawURL
+	}
+	e.mu.Lock()
+	epoch := e.epoch
+	e.mu.Unlock()
+	separator := "?"
+	if strings.Contains(rawURL, "?") {
+		separator = "&"
+	}
+	return rawURL + separator + IssueParam + "=" + strconv.Itoa(issue) + "&" + EpochParam + "=" + strconv.Itoa(epoch)
+}
+
+// ExpiredIssues is how many of a task's first artifact URL issues expire when
+// the creating request r asked for ScenarioArtifactExpired: n from the
+// X-Fake-Fail-Times header or from a "fake-artifact-expired-<n>" key, else 1.
+func ExpiredIssues(r *http.Request) int {
+	if value := strings.TrimSpace(r.Header.Get(FailTimesHeader)); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	if rest, ok := strings.CutPrefix(BearerKey(r), KeyPrefix+string(ScenarioArtifactExpired)); ok {
+		if digits, ok := strings.CutPrefix(rest, "-"); ok {
+			end := 0
+			for end < len(digits) && digits[end] >= '0' && digits[end] <= '9' {
+				end++
+			}
+			if parsed, err := strconv.Atoi(digits[:end]); err == nil && parsed > 0 {
+				return parsed
+			}
+		}
+	}
+	return 1
+}
+
+// ArtifactURLExpired reports whether a download of an artifact whose task was
+// created under scenario is for URLs that have expired: an issue up to the
+// task's expired count (see ExpiredIssues) of a ScenarioArtifactExpired task,
+// issued before any renewal (see Env.RenewArtifactURLs).
+func ArtifactURLExpired(r *http.Request, scenario Scenario, expiredIssues int) bool {
+	if scenario != ScenarioArtifactExpired {
+		return false
+	}
+	issue, err := strconv.Atoi(r.URL.Query().Get(IssueParam))
+	epoch, _ := strconv.Atoi(r.URL.Query().Get(EpochParam))
+	return err == nil && issue >= 1 && issue <= expiredIssues && epoch == 0
 }

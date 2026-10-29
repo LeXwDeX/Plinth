@@ -35,7 +35,12 @@ func form(fields map[string]string, files ...string) testkit.Body {
 		header.Set("Content-Disposition", `form-data; name="`+name+`"; filename="`+name+`.bin"`)
 		header.Set("Content-Type", "application/octet-stream")
 		part, _ := writer.CreatePart(header)
-		_, _ = part.Write([]byte("data"))
+		// A model the size of a real one; the tiny fixture GLB is its own test.
+		if name == "model" {
+			_, _ = part.Write(bytes.Repeat([]byte("m"), 2*tinyModelBytes))
+		} else {
+			_, _ = part.Write([]byte("data"))
+		}
 	}
 	_ = writer.Close()
 	return testkit.Body{ContentType: writer.FormDataContentType(), Data: buffer.Bytes()}
@@ -171,6 +176,34 @@ func TestBangAndTextureNeedTheirInputs(t *testing.T) {
 	}
 }
 
+// Observed twice on the official service (#96 phase 3): a texture request whose
+// model is the 400-byte one-triangle fixture GLB is accepted and then ends with
+// every job Failed and a top-level message; the paid retry fails the same way.
+func TestTinyTextureModelEndsFailed(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	var buffer bytes.Buffer
+	writer := multipart.NewWriter(&buffer)
+	_ = writer.WriteField("material", "PBR")
+	for _, name := range []string{"model", "image"} {
+		header := textproto.MIMEHeader{}
+		header.Set("Content-Disposition", `form-data; name="`+name+`"; filename="`+name+`.bin"`)
+		part, _ := writer.CreatePart(header)
+		_, _ = part.Write(bytes.Repeat([]byte("t"), 400))
+	}
+	_ = writer.Close()
+	s := submit(t, f, "/rodin_texture_only", testkit.Body{ContentType: writer.FormDataContentType(), Data: buffer.Bytes()})
+	if flow := poll(t, f, s); flow[len(flow)-1] != "Failed" {
+		t.Fatalf("status flow = %v, want to end Failed", flow)
+	}
+	_, _, body := f.Do("POST", Prefix+"/status", key, map[string]any{"subscription_key": s.key})
+	if body["message"] != "Invalid input." {
+		t.Fatalf("a Failed poll carries the message: %v", body)
+	}
+	if list := download(t, f, s); len(list) != 0 {
+		t.Fatalf("a failed task offers files: %v", list)
+	}
+}
+
 func TestRequestValidation(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	for name, tc := range map[string]struct {
@@ -268,6 +301,21 @@ func TestFaultScenarios(t *testing.T) {
 		}
 		if list := download(t, f, s); len(list) != 0 {
 			t.Fatalf("a failed task offers files: %v", list)
+		}
+	})
+	t.Run("artifact URL expired, a later download hands out working URLs", func(t *testing.T) {
+		f := newFixture(t, short)
+		s := submit(t, f, "/rodin", textForm(), "X-Fake-Scenario", "artifact-expired")
+		poll(t, f, s)
+		first := download(t, f, s)[0].(map[string]any)["url"].(string)
+		status, contentType, raw := f.Download(first)
+		if status != http.StatusForbidden || !strings.Contains(contentType, "json") || !strings.Contains(string(raw), `"Message":"Request has expired"`) {
+			t.Fatalf("expired URL = %d %s %s", status, contentType, raw)
+		}
+		second := download(t, f, s)[0].(map[string]any)["url"].(string)
+		status, _, data := f.Download(second)
+		if status != http.StatusOK || testkit.DeliveryErr(t, data, "model", "glb", "model/gltf-binary") != nil {
+			t.Fatalf("refetched URL = %d", status)
 		}
 	})
 	t.Run("artifact 404 and corrupt", func(t *testing.T) {
@@ -370,6 +418,9 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 			if _, ended := statusOf(t, decoded); ended {
 				for _, exchange := range samples.Exchanges {
 					if strings.HasSuffix(exchange.Request.Path, "/status") && exchange.Response.Status == 201 {
+						if hasFailedJob(mustBody(exchange)) {
+							continue // the Failed poll is compared in TestFailedPollMatchesTheRealSample
+						}
 						if diff := fakeupstream.DiffShape(shapeOf(exchange.Response.Body.JSON), shapeOf(polled)); !diff.Empty() && allDone(exchange) {
 							t.Errorf("%s done poll drifted: %s", route, diff)
 						}
@@ -381,6 +432,9 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 		_, _, listed := f.Raw("POST", Prefix+"/download", key, map[string]any{"task_uuid": s.uuid})
 		for _, exchange := range samples.Exchanges {
 			if strings.HasSuffix(exchange.Request.Path, "/download") && exchange.Response.Status == 201 {
+				if list, _ := mustBody(exchange)["list"].([]any); len(list) == 0 {
+					continue // an empty list (a failed task) has no element structure to compare
+				}
 				if diff := fakeupstream.DiffShape(shapeOf(exchange.Response.Body.JSON), shapeOf(listed)); !diff.Empty() {
 					t.Errorf("%s download drifted: %s", route, diff)
 				}
@@ -389,6 +443,44 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 		if compared == 0 {
 			t.Errorf("%s has no submit sample", file)
 		}
+	}
+}
+
+func mustBody(exchange wirefixture.Exchange) map[string]any {
+	body, err := fakeupstream.JSONBody(exchange)
+	if err != nil {
+		panic(err)
+	}
+	return body
+}
+
+// The Failed poll (a real sample, captured twice) keeps its structure: every job
+// Failed plus the top-level message.
+func TestFailedPollMatchesTheRealSample(t *testing.T) {
+	samples, err := fakeupstream.LoadSamples(sampleFS, sampleFiles...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newFixture(t, fakeupstream.Config{})
+	s := submit(t, f, "/rodin", textForm(), "X-Fake-Scenario", "task-failed")
+	var polled []byte
+	for i := 0; i < 60; i++ {
+		_, _, polled = f.Raw("POST", Prefix+"/status", key, map[string]any{"subscription_key": s.key})
+		var decoded map[string]any
+		_ = json.Unmarshal(polled, &decoded)
+		if state, ended := statusOf(t, decoded); ended && state == statusFailed {
+			break
+		}
+	}
+	compared := false
+	for _, exchange := range samples.Exchanges {
+		if strings.HasSuffix(exchange.Request.Path, "/status") && hasFailedJob(mustBody(exchange)) {
+			testkit.AssertSameShape(t, "Failed poll", exchange.Response.Body.JSON, polled)
+			compared = true
+		}
+	}
+	if !compared {
+		t.Fatal("no Failed status sample to compare")
 	}
 }
 

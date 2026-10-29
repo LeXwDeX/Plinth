@@ -27,6 +27,7 @@ class AcceptanceError(RuntimeError):
     pass
 
 
+FORMAT_COMPLETION_OFFERING = "meshy/processing/convert"
 # Per-step input of the recovery chain. The Remesh step names a small geometry
 # on purpose: the chain is paid, and 10000 triangles keeps it cheap and inside
 # Rigging's source-model limit. The Schema default (quad, 300000 faces, about
@@ -458,7 +459,8 @@ class Runner:
         require(linked["steps"][0].get("task_id") and self.frozen(linked) == frozen, "Reconcile did not bind the accepted Task's original frozen identity")
         self.act("reconcile", unresolved, status=(409,))
         self.act("reconcile", linked, status=(200,))
-        require(self.counts() == before, "reconciliation allocated a Task/Attempt/Grant/ledger row")
+        after = self.counts()
+        require(after == before, f"reconciliation allocated a Task/Attempt/Grant/ledger row: {before} -> {after}")
         self.wait_plan(plan, lambda p: p["state"] == "SUCCEEDED", "accepted Task observation")
         self.verify_delivery(linked["steps"][0]["task_id"])
         source_after = self.aggregate(source["id"], True)
@@ -474,12 +476,14 @@ class Runner:
 
     def format_plan(self, which, fault):
         source = self.sources[which]
-        offering = self.offerings["meshy/processing/remesh"]
+        # Meshy's own format completion is the Convert Offering since #330; the Remesh entry of the
+        # Schema's conversion list is retired (convert_format_only).
+        offering = self.offerings[FORMAT_COMPLETION_OFFERING]
         key = f"format-completion:{source['id']}:{offering['id']}:{offering['revision']}:all"
         plan = plan_id(self.owner, key)
         _,initial_coverage=self.client.request("GET",self.api_path("model_formats",taskID=source["id"]))
         missing=missing_completion_formats(initial_coverage,offering["id"])
-        require(initial_coverage["can_complete"] and missing,"genuine source lists no missing format the remesh completion can supply; pass --source-format with a genuine SUCCEEDED source that lacks one, and do not create a replacement paid plan")
+        require(initial_coverage["can_complete"] and missing,"genuine source lists no missing format the Meshy convert completion can supply; pass --source-format with a genuine SUCCEEDED source that lacks one, and do not create a replacement paid plan")
         self.register({"id": fault, "owner_id": self.owner, "session_id": source["session_id"], "plan_id": plan, "step_index": 0, "capability": offering["capability"], "offering_id": offering["id"], "fault": fault, "max_provider_starts": 1})
         self.client.request("POST", self.api_path("model_formats_complete", taskID=source["id"]), {}, (202,))
         reason = "plan_prepare_unavailable" if fault == "prepare_unavailable" else "plan_submit_unknown"
@@ -505,7 +509,7 @@ class Runner:
         require(absent["failure"] == "plan_reconciled_absent" and self.frozen(absent) == frozen and not absent["steps"][0].get("task_id"), "absence reconciliation changed the frozen Grant")
         self.stop()
         catalog_b = json.loads(self.catalog_a.read_text())
-        changed = next(o for o in catalog_b["offerings"] if o["id"] == "meshy/processing/remesh")
+        changed = next(o for o in catalog_b["offerings"] if o["id"] == FORMAT_COMPLETION_OFFERING)
         changed["revision"] += ".acceptance-b"
         changed["estimated_credits"] += 1
         catalog_b_path = self.root / "catalog-b.json"

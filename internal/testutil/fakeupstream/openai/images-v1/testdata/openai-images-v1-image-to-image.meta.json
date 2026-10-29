@@ -1,0 +1,12 @@
+{
+  "api_version": "v1",
+  "candidate_sha256": "39fa5a33b817825046b49d62803893d60e616d9ecf4314dde768b892eb2a33b1",
+  "captured_at_utc": "2026-10-29",
+  "exchanges": 2,
+  "offering": "openai/gpt-image-2/image-to-image",
+  "provenance": "captured",
+  "scenario": "openai-images-v1-alignment",
+  "source_revision": "unknown",
+  "transformation": "IDs, signed URLs, timestamps and amounts are deterministic placeholders; media bytes are not stored.",
+  "version": 1
+}

@@ -1,0 +1,12 @@
+{
+  "api_version": "v1",
+  "candidate_sha256": "27f5c6ebca7aa46632d8bde8fe57ad45d6446bcd4ac7bc167a543e8eae01cf6e",
+  "captured_at_utc": "2026-10-29",
+  "exchanges": 3,
+  "offering": "gemini/gemini-3-pro-image/text-to-image",
+  "provenance": "captured",
+  "scenario": "gemini-images-v1-alignment",
+  "source_revision": "unknown",
+  "transformation": "IDs, signed URLs, timestamps and amounts are deterministic placeholders; media bytes are not stored.",
+  "version": 1
+}
