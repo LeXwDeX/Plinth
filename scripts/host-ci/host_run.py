@@ -63,7 +63,6 @@ RUNNER_IMAGE = re.compile(r'[a-z0-9./_-]+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}')
 REPO_SLUG = re.compile(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+')
 ANSI = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
 JOB_RESULT = re.compile(r'^\[(?P<job>[^\]]+)\].*\bJob (?P<result>succeeded|failed)\b', re.M)
-JOB_LIST_ROW = re.compile(r'^\d+\s+(?P<id>[\w-]+)\s', re.M)
 
 
 def say(message):
@@ -242,11 +241,21 @@ def parse_act_output(text):
     return results
 
 
+def parse_job_list(text):
+    """[(job id, job name)] from `act -l` (columns: Stage, Job ID, Job name, Workflow name, ...)."""
+    jobs = []
+    for line in ANSI.sub('', text).splitlines():
+        parts = re.split(r'\s{2,}', line.strip())
+        if len(parts) >= 3 and parts[0].isdigit():
+            jobs.append((parts[1], parts[2]))
+    return jobs
+
+
 def act_list_jobs(act, src, event):
     outcome = subprocess.run([str(act), '-l', event, '-C', str(src)], capture_output=True, text=True, timeout=120)
     if outcome.returncode:
         raise RuntimeError(f'act -l failed: {outcome.stderr.strip()[:300]}')
-    return JOB_LIST_ROW.findall(ANSI.sub('', outcome.stdout))
+    return parse_job_list(outcome.stdout)
 
 
 def peak_container_memory(stop, label):
@@ -287,10 +296,13 @@ def run_workflows(ctx):
               'filter_job': args.act_job or None, 'events': [], 'peak_memory_bytes': 0}
     try:
         for event in EVENTS:
-            expected = [args.act_job] if args.act_job else act_list_jobs(act, src, event)
+            listed = act_list_jobs(act, src, event)
+            expected = [job for job in listed if not args.act_job or args.act_job in job]
+            if not expected:
+                raise RuntimeError(f'job {args.act_job} is not part of the {event} event')
             event_file = run_dir / f'event-{event}.json'
             event_file.write_text(json.dumps(event_payload(event, args.sha)))
-            say(f'workflows: replaying {event} ({len(expected)} jobs: {", ".join(expected)})')
+            say(f'workflows: replaying {event} ({len(expected)} jobs: {", ".join(job_id for job_id, _ in expected)})')
             stop = threading.Event()
             peak = {'value': 0}
             sampler = threading.Thread(target=lambda: peak.__setitem__('value', peak_container_memory(stop, LABEL)), daemon=True)
@@ -317,7 +329,8 @@ def run_workflows(ctx):
             report['peak_memory_bytes'] = max(report['peak_memory_bytes'], peak['value'])
             report['events'].append({
                 'event': event, 'exit_code': child.returncode, 'timed_out': timed_out, 'seconds': round(time.monotonic() - started, 1),
-                'jobs': [{'name': name, 'result': results.get(name, 'not_run')} for name in expected],
+                'jobs': [{'name': job_id, 'job_name': job_name, 'result': results.get(job_name, results.get(job_id, 'not_run'))}
+                         for job_id, job_name in expected],
                 'peak_memory_bytes': peak['value']})
             for name in docker('ps', '-aq', '--filter', f'label={LABEL}', check=False).stdout.split():
                 if re.fullmatch(r'[0-9a-f]{12}', name):
