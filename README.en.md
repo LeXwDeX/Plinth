@@ -61,14 +61,17 @@ Once the command returns successfully, open
 
 ## Self-deploy with Docker Compose
 
-Self-deploy uses the root `docker-compose.yml` and `.env.example`. You need Docker Engine,
-Docker Compose v2.24+, `git`, `openssl` and `curl`. The image builds from source, so the
-build host needs access to Docker Hub (the Node, Go and Alpine base images), the public npm
-registry (fixed to `https://registry.npmjs.org/`) and the Go module proxy (you can set
-`GOPROXY` in `.env`). You do not need to install Go, Node or pnpm on the host. The first build
-takes a few minutes.
+Self-deploy uses the root `docker-compose.yml` and `.env.example`.
 
-**1. Create `.env` and generate the two required secrets:**
+**Prerequisites:** Docker Engine and Docker Compose v2.24+ (the `required` form of
+`env_file` needs it), plus `git`, `openssl` and `curl`. You do not need to install Go, Node
+or pnpm: the image builds from source. The build host needs access to Docker Hub (base images
+`node:22-alpine`, `golang:1.27` and `alpine:3.23`), the public npm registry (fixed to
+`https://registry.npmjs.org/`) and the Go module proxy (you can set `GOPROXY` in `.env`). The
+first build takes a few minutes.
+
+**1. Prepare `.env`:** copy the template and generate the two required values into it (the
+command below works on both Linux and macOS):
 
 ```bash
 cp .env.example .env
@@ -77,28 +80,51 @@ sed -i.bak \
   -e "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=$(openssl rand -base64 24)|" \
   .env && rm .env.bak
 chmod 600 .env
-grep '^ADMIN_PASSWORD=' .env   # the first administrator's password (user admin), used to sign in
 ```
 
-This command works on Linux and macOS. Keep `.env` private and do not commit it. `SESSION_SECRET`
-must be at least 32 characters; `ADMIN_PASSWORD` must be at least 6 characters. Read `ADMIN_PASSWORD` from `.env` when you sign in as the first administrator (the default
-username is `admin`); keep it private. Other settings have working defaults, and Mock mode works without Provider keys.
+The first administrator's password (default username `admin`) is the `ADMIN_PASSWORD` in
+`.env`, and you need it to sign in. Open `.env` in an editor to read it; do not print it with
+`grep`, `cat` or similar, because the password would stay in terminal scrollback, shell history,
+screen recordings and CI logs.
+
+You can also fill the values in by hand: `SESSION_SECRET` is the output of
+`openssl rand -base64 48` (at least 32 characters), and `ADMIN_PASSWORD` is a password of at
+least 6 characters (`openssl rand -base64 24` is a good choice). Keep `.env` private and do not
+commit it. Every other setting has a working default, so you can try Plinth with zero Provider
+keys.
 
 **2. Build and start the service:**
 
 ```bash
-# Embed the full source commit so /api/version reports it instead of "unknown".
+# ART_AI_SOURCE_COMMIT embeds the source commit in the image so /api/version reports it
+# (otherwise "unknown"); --wait returns only after the health check passes and reports startup failures.
 ART_AI_SOURCE_COMMIT=$(git rev-parse HEAD) docker compose up -d --build --wait
-curl http://127.0.0.1:13333/readyz
+curl http://127.0.0.1:13333/readyz        # {"service":"art-ai-go","status":"ok"}
 curl http://127.0.0.1:13333/api/version   # {"version":"<the full SHA above>"}
 ```
 
-`--wait` returns after the health check passes and reports startup failures. A plain
-`docker compose up -d` can build and start the service, but its reported version is `unknown`
-unless you provide `ART_AI_SOURCE_COMMIT`; updates require `--build` to build the new source.
+In a source archive without `.git` (for example a downloaded zip), `git rev-parse HEAD`
+fails: replace it with the full 40-character commit SHA, or drop the
+`ART_AI_SOURCE_COMMIT=...` prefix (`/api/version` then reports `unknown`). The build uses
+Docker's default BuildKit. BuildKit does not support `docker build --network <NETWORK>`
+(it fails with `network mode ... not supported by buildkit`); when you need to isolate or
+observe the network during the build, build the image on its own with the classic builder and
+then start it with Compose (the image name and tag must match Compose, `art-ai:local` by default):
 
-**3. Sign in and try it:** open <http://127.0.0.1:13333/login> and sign in as `admin` with
-the `ADMIN_PASSWORD` saved in step 1. With the default Mock settings, tasks return built-in
+```bash
+DOCKER_BUILDKIT=0 docker build -f Dockerfile.go-runtime --target runtime \
+  --build-arg GO_SOURCE_COMMIT=$(git rev-parse HEAD) --network <NETWORK> -t art-ai:local .
+docker compose up -d --wait
+```
+
+Alternatively, use buildx's `network` driver option.
+
+A plain `docker compose up -d` also starts the service: the first run builds the image
+automatically, but `/api/version` is then `unknown`, and later runs do not rebuild after a code
+update, so always pass `--build` when upgrading.
+
+**3. Sign in and try it:** open `http://127.0.0.1:13333/login` in a browser and sign in as
+`admin` (`ADMIN_USERNAME` in `.env`) with the `ADMIN_PASSWORD` from step 1. With the default Mock settings, tasks return built-in
 sample results, without calling an upstream service or incurring a charge:
 
 - **Image:** pick a 2D model in the model picker below the message box, type a short
@@ -151,7 +177,7 @@ check `docker compose logs art-ai`.
   must support multimodal input and at least be able to read images.
 - **Gemini images:** set both `GEMINI_API_KEY` and `GEMINI_BASE_URL` to enable Gemini. It has
   no default base URL and never borrows `LLM_BASE_URL`; if all models use one gateway, set
-  each connection URL explicitly.
+  `LLM_BASE_URL`, `OPENAI_BASE_URL` and `GEMINI_BASE_URL` to the gateway address.
 - **Signed asset delivery (optional):** configure this only when an upstream Provider must
   fetch an asset from this server by URL. Set both `PUBLIC_BASE_URL` (the externally reachable
   HTTPS URL of this service) and `ASSET_SIGNING_KEY` (at least 32 bytes; generate with
@@ -162,8 +188,14 @@ check `docker compose logs art-ai`.
   proxy and set `NEXT_PUBLIC_APP_URL` and `TRUSTED_PROXY_CIDRS`; see
   [self-deploy security](docs/self-deploy-security.md) (in Chinese). Compose uses the default
   bridge network without a fixed subnet or container IP.
+- **Several stacks on one host:** the Compose project name defaults to `art-ai` and the image
+  to `art-ai:local`. When the host already runs another Plinth, set a different
+  `COMPOSE_PROJECT_NAME` and `ART_AI_IMAGE_TAG` in `.env` for the second one (see the Build
+  section of `.env.example`) and pick another `ART_AI_PORT`; otherwise it reuses the same project
+  and overwrites the same image tag. Volume and container names follow the project name.
 - **Persistent data:** SQLite data and assets live in the named volumes `art-ai-data` and
-  `art-ai-storage`. `docker compose restart`, `down` followed by `up`, and image rebuilds
+  `art-ai-storage` (in `docker volume ls` they carry the Compose project name prefix, by default
+  `art-ai_art-ai-data` and `art-ai_art-ai-storage`). `docker compose restart`, `down` followed by `up`, and image rebuilds
   retain them; `docker compose down -v` deletes them. Back up both volumes before upgrading.
   To update, pull or check out the new source and run
   `ART_AI_SOURCE_COMMIT=$(git rev-parse HEAD) docker compose up -d --build --wait`; database
@@ -176,10 +208,17 @@ check `docker compose logs art-ai`.
 ## Provider configuration
 
 Compose passes the variables in `.env` to the service. Each live Provider uses its own
-`<ID>_API_KEY` and, where required, its own `<ID>_BASE_URL`; a key or URL is never borrowed
-from another Provider or from the Agent. Configure the Providers you intend to use, then set
-`PROVIDER_MODE=live`. Real requests spend the corresponding Provider account's credits or
+`<ID>_API_KEY` and, where required, its own `<ID>_BASE_URL`, for example `MESHY_API_KEY`,
+`TRIPO_API_KEY`, `HYPER3D_API_KEY`, `JIMENG_API_KEY` and `GEMINI_API_KEY`; a key or URL is never
+borrowed from another Provider or from the Agent. Configure the Providers you intend to use, then
+set `PROVIDER_MODE=live`. Real requests spend the corresponding Provider account's credits or
 money. A configured key must be valid at the upstream service.
+
+`AGENT_MODE` still defaults to `mock` and is independent of `PROVIDER_MODE`. With
+`PROVIDER_MODE=live` and `AGENT_MODE=mock`, the Mock Agent does not understand meaning and
+submits a generation for every message based on keywords (the service logs a WARN, and paid steps
+still need your approval). To drive real generation with natural language, set both to `live`
+and configure the Agent chat model below.
 
 Gemini images require both `GEMINI_API_KEY` and an explicit `GEMINI_BASE_URL`: Gemini has no
 default URL, and it does not use `LLM_BASE_URL`. When one gateway serves several models,
@@ -237,7 +276,12 @@ Design details are in [docs/architecture.md](docs/architecture.md) and domain te
 
 ## Local development
 
-You need Go 1.26+ and Node 22; the pnpm version is the `packageManager` in `package.json`:
+Prerequisites: Go (minimum 1.26, per `go.mod`; the image and CI use 1.27, which is the
+recommended version), Node 22, pnpm (the version is the `packageManager` in `package.json`;
+`corepack enable` fetches it), `git`, `python3`, `bash` and `jq` (some frontend tests call
+them); the `--race` check also needs a C compiler (`gcc` or `cc`, for CGO).
+`python3 scripts/verify-local.py` checks for these commands at startup and lists any that are
+missing. Details are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
 pnpm install --frozen-lockfile
