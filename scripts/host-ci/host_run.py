@@ -322,6 +322,18 @@ def main():
 
     for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, interrupted)
+
+    def watch_client():
+        # run.py keeps our stdin open for the whole run: EOF means the SSH session (and so the
+        # client) is gone, and nobody is waiting for this run any more.
+        try:
+            while sys.stdin.buffer.read(65536):
+                pass
+        except (OSError, ValueError):
+            pass
+        os.kill(os.getpid(), signal.SIGHUP)
+
+    threading.Thread(target=watch_client, daemon=True).start()
     (root / 'results').mkdir(exist_ok=True)
     lock = acquire_lock(root)
     if lock is None:

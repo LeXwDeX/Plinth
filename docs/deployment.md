@@ -227,7 +227,7 @@ RECOVERY
 [dev_test.md](../dev_test.md)。Agent 不直接访问正式服务器；现场第一步运行只读盘点脚本
 `scripts/collect-production-migration-inventory.sh`。
 
-## 11. 测试主机上的干净复现（#97）
+## 11. 测试主机 CI（#97）
 
 `dev-test` 主机上另有一个专用于门禁的 CI 目录和一次性容器，用法与规则见 [`dev_test.md`](../dev_test.md)「主机 CI」。这里只记运维事实，主机与路径只在本地环境文件里：
 
@@ -236,7 +236,7 @@ RECOVERY
 - **对象**：容器带标签 `plinth.host-ci=1`，名称 `plinth-ci-<run id>-aN`；镜像名 `plinth-ci:<12 位 hash>`，保留最新 2 个。与 Plinth 栈、`legacy-formal` 和同机其他业务的 Compose 项目、容器、卷、镜像互不相干；它们不在这套清理的范围内。
 - **开跑条件**：`MemAvailable` ≥ 15 GiB，CI 目录与 Docker 根目录所在磁盘各 ≥ 10 GiB 空闲。同机其他业务忙时可能不满足，此时工具以退出码 70 停下，不会强行启动；这不是故障，等资源恢复后重跑。
 - **手工排障**：只读查看 `docker ps -a --filter label=plinth.host-ci=1` 与 `<CI 目录>/results/`。需要清理时只删带这个标签的容器和 `<CI 目录>/run/` 下的子目录；下一次运行持锁后也会自动清理遗留。不要用 `docker system prune`、`docker image prune` 或通配符删除。
-- **定位**：本地 / 测试主机上的干净复现，与 Azure 使用同一份 `Dockerfile.ci` 和入口（`scripts/host-ci/entry.sh`），见 `dev_test.md`「主机 CI」。
+- **定位**：GitHub Actions 不可用期间，本项目的 CI 替代（沿用 #79 的裁定），同时是本地的干净复现环境；镜像定义在 `Dockerfile.ci`，入口 `scripts/host-ci/entry.sh`，见 `dev_test.md`「主机 CI」。
 
 ## 内部运维资产（自部署不需要）
 

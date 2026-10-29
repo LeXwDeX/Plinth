@@ -1,7 +1,7 @@
 # Plinth gate CI image (#97). Everything a gate run needs is baked in so the container
 # can run with --network none: the toolchain plus a prefetched pnpm store and Go module
-# cache. Nothing here is specific to one host: a developer machine, the dev-test host and
-# the Azure Pipelines Microsoft-hosted agents all build it the same way from public
+# cache. Nothing here is specific to one host: a developer machine, the dev-test host or any
+# other runner can build it the same way from public
 # registries (Docker Hub, registry.npmjs.org, proxy.golang.org; nothing internal) and run
 # the same entry point.
 #

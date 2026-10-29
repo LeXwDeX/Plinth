@@ -11,9 +11,9 @@ logs back to build/host-ci/<run id>/. Exit status: 0 pass, 1 fail, 70 host resou
 low, 75 another run is active, 2 usage or environment error.
 
 The gate logic is not in this tool: it is `scripts/verify-local.py` plus the image built
-from `Dockerfile.ci`. Azure Pipelines and other runners build that same image and run the
-same entry point (scripts/host-ci/entry.sh) against the same mounts. This tool is the local /
-test-host convenience around it. See dev_test.md section 2.
+from `Dockerfile.ci`. Any other runner can build that same image and run the same entry
+point (scripts/host-ci/entry.sh) against the same mounts. This tool is the local / test-host
+wrapper around it. See dev_test.md section 2.
 """
 import argparse
 import hashlib
@@ -194,7 +194,12 @@ def main(argv=None):
             run_dir = upload(target, ci_dir, run_id, stage)
         command = (f'python3 -I {run_dir}/host_run.py --root {ci_dir} --run-id {run_id} --sha {sha} --tree {tree} '
                    f'--image-tag {tag} --timeout-min {args.timeout_min} --min-mem-gib {args.min_mem_gib:g}')
-        code = ssh_run(target, command).returncode
+        # The open stdin pipe tells host_run.py that this client is alive; it stops the run when it closes.
+        remote = subprocess.Popen(['ssh', *SSH_OPTIONS, target, command], stdin=subprocess.PIPE)
+        try:
+            code = remote.wait()
+        finally:
+            remote.stdin.close()
         if code == 255:
             print('[host-ci] the SSH connection failed or dropped; the host cleans up after itself', file=sys.stderr)
             return 1
