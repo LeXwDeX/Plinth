@@ -6,7 +6,8 @@ import type { VersionTile } from '@/lib/workspace/versions';
  * 或清了站点数据就没有，那时退回到服务端记着的"选用"，再退回到最新的完成版本。
  */
 
-const KEY_PREFIX = 'studio.last-object.';
+export const LAST_OBJECT_KEY_PREFIX = 'studio.last-object.';
+const KEY_PREFIX = LAST_OBJECT_KEY_PREFIX;
 
 export interface SavedObject {
   kind: 'image' | 'model';

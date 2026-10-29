@@ -108,9 +108,10 @@ func TestLegacyLoginAndSessionMatchNextContract(t *testing.T) {
 	if login.Code != http.StatusOK {
 		t.Fatalf("login status = %d, body = %s", login.Code, login.Body)
 	}
-	// #225: a session change tells the browser to drop cached private bytes.
-	if got := login.Header().Get("Clear-Site-Data"); got != `"cache"` {
-		t.Fatalf("login Clear-Site-Data = %q", got)
+	// #134: this request is plain HTTP on a non-loopback host, where browsers
+	// reject Clear-Site-Data; see TestSessionChangeClearSiteDataNeedsSecureContext.
+	if got := login.Header().Get("Clear-Site-Data"); got != "" {
+		t.Fatalf("login Clear-Site-Data over plain HTTP = %q", got)
 	}
 
 	assertJSONBody(t, login.Body.Bytes(), map[string]any{
@@ -171,8 +172,8 @@ func TestLegacyLoginAndSessionMatchNextContract(t *testing.T) {
 	if logout.Code != http.StatusOK {
 		t.Fatalf("logout status = %d, body = %s", logout.Code, logout.Body)
 	}
-	if got := logout.Header().Get("Clear-Site-Data"); got != `"cache"` {
-		t.Fatalf("logout Clear-Site-Data = %q", got)
+	if got := logout.Header().Get("Clear-Site-Data"); got != "" {
+		t.Fatalf("logout Clear-Site-Data over plain HTTP = %q", got)
 	}
 	assertJSONBody(t, logout.Body.Bytes(), map[string]any{"success": true})
 	cleared := logout.Result().Cookies()
@@ -268,9 +269,10 @@ func TestLegacyMockAuthMatchesNextContract(t *testing.T) {
 			"email": "body@example.test",
 		}},
 	)
-	// #225: a mock login is a session change too.
+	// #225: a mock login is a session change too (header rules: #134, see
+	// TestSessionChangeClearSiteDataNeedsSecureContext).
 	mockLogin := httptest.NewRecorder()
-	handler.ServeHTTP(mockLogin, httptest.NewRequest(http.MethodPost, "/api/auth/mock", strings.NewReader(`{"name":"Body User","email":"body@example.test"}`)))
+	handler.ServeHTTP(mockLogin, httptest.NewRequest(http.MethodPost, "https://example.com/api/auth/mock", strings.NewReader(`{"name":"Body User","email":"body@example.test"}`)))
 	if got := mockLogin.Header().Get("Clear-Site-Data"); mockLogin.Code != http.StatusOK || got != `"cache"` {
 		t.Fatalf("mock login status = %d, Clear-Site-Data = %q", mockLogin.Code, got)
 	}
@@ -432,5 +434,55 @@ func assertJSONBody(t *testing.T, body []byte, expected map[string]any) {
 	actualJSON, _ := json.Marshal(actual)
 	if !bytes.Equal(actualJSON, expectedJSON) {
 		t.Fatalf("body = %s, expected %s", actualJSON, expectedJSON)
+	}
+}
+
+// #134: browsers act on Clear-Site-Data only in a secure context and log an error
+// otherwise, so the header goes out for HTTPS and loopback hosts and not for plain
+// HTTP on an IP address (a dev-test style deployment).
+func TestSessionChangeClearSiteDataNeedsSecureContext(t *testing.T) {
+	t.Parallel()
+	_, handler, _ := newHTTPHarnessWithAuthentication(
+		t,
+		[]string{"user"},
+		nil,
+		func(config *authentication.Config) {
+			config.SessionSecret = strings.Repeat("s", 32)
+			config.MockEnabled = true
+			config.MockUserJSON =
+				`{"id":"env-user","name":"Env User","email":"env@example.test"}`
+		},
+	)
+	for _, test := range []struct {
+		name, target, want string
+	}{
+		{"HTTPS", "https://203.0.113.5/api/auth/mock", `"cache"`},
+		{"plain HTTP on an IP address", "http://203.0.113.5:8080/api/auth/mock", ""},
+		{"localhost", "http://localhost:3000/api/auth/mock", `"cache"`},
+		{"127.0.0.1", "http://127.0.0.1:8080/api/auth/mock", `"cache"`},
+		{"[::1]", "http://[::1]:8080/api/auth/mock", `"cache"`},
+	} {
+		t.Run("login "+test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, test.target, strings.NewReader(`{}`)))
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body)
+			}
+			if got := recorder.Header().Get("Clear-Site-Data"); got != test.want {
+				t.Fatalf("Clear-Site-Data = %q, want %q", got, test.want)
+			}
+		})
+		t.Run("logout "+test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodDelete, strings.Replace(test.target, "/auth/mock", "/auth/session", 1), nil)
+			request.Header.Set("Origin", request.URL.Scheme+"://"+request.Host)
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body)
+			}
+			if got := recorder.Header().Get("Clear-Site-Data"); got != test.want {
+				t.Fatalf("Clear-Site-Data = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
