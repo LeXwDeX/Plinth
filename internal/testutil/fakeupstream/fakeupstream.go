@@ -18,8 +18,9 @@
 //   - Values are fixed. The fake only promises the same structure (field set,
 //     types, nesting, status codes, status enums); it never tries to look
 //     realistic.
-//   - It is never linked into a production binary: no cmd/art-ai dependency
-//     path may import this package (TestProductionBinariesDoNotLinkFakeUpstream).
+//   - It is never linked into a production binary: no shipping command may
+//     depend on any package under internal/testutil
+//     (TestProductionBinariesDoNotLinkAnyTestutilPackage, TestOnlyTestToolingImportsTestutil).
 package fakeupstream
 
 import (

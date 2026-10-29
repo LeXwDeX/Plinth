@@ -9,13 +9,14 @@ import (
 	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/providers/mock/modelfiles"
 )
 
 // builtModel 是一个作业共用的模型：同一作业的 GLB、OBJ、FBX 等格式是同一份
 // 网格，贴图也是同一张。
 type builtModel struct {
 	spec    modelSpec
-	mesh    meshData
+	mesh    modelfiles.Mesh
 	texture []byte
 }
 
@@ -78,9 +79,9 @@ func (a *Adapter) renderPlan(stored *job, plan claimPlan) ([]byte, error) {
 		// Only the model itself is large; attachments keep their own size.
 		var body []byte
 		if stored.large && !plan.attachment {
-			body, err = buildPaddedGLB(model.mesh, embeddedTexture(stored, model), name, fidelity, LargeModelBytes)
+			body, err = modelfiles.BuildPaddedGLB(model.mesh, embeddedTexture(stored, model), name, fidelity, LargeModelBytes)
 		} else {
-			body, err = buildGLB(model.mesh, embeddedTexture(stored, model), name, fidelity)
+			body, err = modelfiles.BuildGLB(model.mesh, embeddedTexture(stored, model), name, fidelity)
 		}
 		if err == nil {
 			sum := sha256.Sum256(body)
@@ -88,21 +89,21 @@ func (a *Adapter) renderPlan(stored *job, plan claimPlan) ([]byte, error) {
 		}
 		return body, err
 	case "gltf":
-		return buildGLTF(model.mesh, model.texture, name, fidelity)
+		return modelfiles.BuildGLTF(model.mesh, model.texture, name, fidelity)
 	case "obj":
-		return buildOBJ(model.mesh, model.spec.Label, objMaterialOf(stored.request.Offering)), nil
+		return modelfiles.BuildOBJ(model.mesh, model.spec.Label, objMaterialOf(stored.request.Offering)), nil
 	case "mtl":
-		return buildMTL(), nil
+		return modelfiles.BuildMTL(), nil
 	case "stl":
-		return buildSTL(model.mesh), nil
+		return modelfiles.BuildSTL(model.mesh), nil
 	case "fbx":
-		return buildFBX(model.mesh, model.spec.Label, fidelity), nil
+		return modelfiles.BuildFBX(model.mesh, model.spec.Label, fidelity), nil
 	case "usdz":
-		return buildUSDZ(embeddedTexture(stored, model))
+		return modelfiles.BuildUSDZ(embeddedTexture(stored, model))
 	case "3mf":
-		return build3MF(model.mesh)
+		return modelfiles.Build3MF(model.mesh)
 	case "blend":
-		return buildBlend(), nil
+		return modelfiles.BuildBlend(), nil
 	}
 	return nil, fmt.Errorf("mock: 未知产物格式 %q", plan.format)
 }
@@ -175,7 +176,7 @@ func (a *Adapter) modelFor(stored *job) (*builtModel, error) {
 	if err != nil {
 		return nil, err
 	}
-	stored.model = &builtModel{spec: spec, mesh: buildHumanoid(geometrySeed, spec.Subdivision), texture: texture}
+	stored.model = &builtModel{spec: spec, mesh: modelfiles.BuildHumanoid(geometrySeed, spec.Subdivision), texture: texture}
 	return stored.model, nil
 }
 
@@ -197,12 +198,12 @@ func (a *Adapter) rememberedHue(task string) (float64, bool) {
 
 // buildSplat emits finite, visible 32-byte raw splats at the mock mesh vertices.
 // Its quaternion byte order is w,x,y,z; it is a test representation, not a mesh.
-func buildSplat(mesh meshData, seed [32]byte) []byte {
-	raw := make([]byte, mesh.vertexCount()*32)
-	for point := 0; point < mesh.vertexCount(); point++ {
+func buildSplat(mesh modelfiles.Mesh, seed [32]byte) []byte {
+	raw := make([]byte, mesh.VertexCount()*32)
+	for point := 0; point < mesh.VertexCount(); point++ {
 		record := raw[point*32:][:32]
 		for axis := 0; axis < 3; axis++ {
-			binary.LittleEndian.PutUint32(record[axis*4:], math.Float32bits(mesh.position[point*3+axis]))
+			binary.LittleEndian.PutUint32(record[axis*4:], math.Float32bits(mesh.Position[point*3+axis]))
 			binary.LittleEndian.PutUint32(record[12+axis*4:], math.Float32bits(0.015))
 		}
 		copy(record[24:28], []byte{seed[0], seed[1], seed[2], 255})
@@ -217,14 +218,14 @@ func buildSplat(mesh meshData, seed [32]byte) []byte {
 // delivers, or for a format conversion that delivers none the dangling
 // temp.mtl of the real Meshy Convert export (#330); other results without an
 // MTL slot stay geometry only.
-func objMaterialOf(offering generation.Offering) objMaterial {
+func objMaterialOf(offering generation.Offering) modelfiles.OBJMaterial {
 	switch {
 	case declaresMaterial(offering):
-		return objDeliveredLibrary
+		return modelfiles.OBJDeliveredLibrary
 	case offering.Capability == generation.FormatConversion:
-		return objDanglingLibrary
+		return modelfiles.OBJDanglingLibrary
 	}
-	return objGeometryOnly
+	return modelfiles.OBJGeometryOnly
 }
 
 func declaresMaterial(offering generation.Offering) bool {

@@ -185,7 +185,8 @@ describe('session list, batch export and balance wiring', () => {
   });
 
   it('keeps retry off a balance failure and offers no model switch, only the contact-the-admin text', () => {
-    expect(tasks).toContain("text('failure.insufficient_balance')");
+    // The failure text is the server-projected detail (failure.<class>); no balance-specific copy on the client.
+    expect(tasks).not.toContain("failure.insufficient_balance");
     expect(tasks).toContain('!isBalanceFailure(task.failure)');
     expect(tasks).not.toContain('ChangeModelAction');
     expect(tasks).not.toContain('alternativeOffering');
