@@ -25,7 +25,21 @@ type ErrorMessageMatcher struct {
 	// whose message is more specific than its status (a Meshy 402 that names
 	// the key's credit limit, not the account balance, #93).
 	BeforeStatusRanges bool `json:"before_status_ranges,omitempty"`
+	// HTTPStatus limits the matcher to responses whose HTTP status lies in the
+	// range. Absent, the matcher applies to every status. A message that is
+	// only meaningful under one status (Meshy's "credit limit" under 402)
+	// declares it here instead of classifying the same words under any status.
+	HTTPStatus *StatusRange `json:"http_status,omitempty"`
 }
+
+// StatusRange is an inclusive range of HTTP status codes.
+type StatusRange struct {
+	Min int `json:"min"`
+	Max int `json:"max"`
+}
+
+// Contains reports whether status lies in the range.
+func (r StatusRange) Contains(status int) bool { return status >= r.Min && status <= r.Max }
 
 // ErrorFieldPaths 声明错误证据在响应 JSON 中的取值路径（点分段）。
 type ErrorFieldPaths struct {

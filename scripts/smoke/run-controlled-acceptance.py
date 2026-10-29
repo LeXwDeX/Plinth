@@ -27,11 +27,13 @@ class AcceptanceError(RuntimeError):
     pass
 
 
-# Per-step input of the recovery chain. The Remesh step names its geometry: the
-# Schema default (300000 faces, quad topology) is about 600000 triangles, over the
-# 320000-face input limit Meshy Rigging documents, so the next step would fail for
-# a reason that has nothing to do with the recovery under test (#73, #103).
 FORMAT_COMPLETION_OFFERING = "meshy/processing/convert"
+# Per-step input of the recovery chain. The Remesh step names a small geometry
+# on purpose: the chain is paid, and 10000 triangles keeps it cheap and inside
+# Rigging's source-model limit. The Schema default (quad, 300000 faces, about
+# 600000 triangles) is not usable here: the Processing Plan refuses it when the
+# plan is created, before any step is paid (source_model_limit and
+# output_triangles, #121). The values stay explicit and may be overridden.
 CHAIN_INPUTS = {"remesh": {"topology": "triangle", "target_polycount": 10000}, "animation": {"action_id": 10}}
 
 

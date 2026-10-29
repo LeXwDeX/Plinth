@@ -366,9 +366,6 @@ type wireOptions struct {
 	ResultReports       []resultReportProjection         `json:"result_reports,omitempty"`
 	InlineModelInput    *inlineModelInput                `json:"inline_model_input,omitempty"`
 	ModelInputProfile   *schema.ModelInputProfileOptions `json:"model_input_profile,omitempty"`
-	// SourceModelLimit 声明来源 3D 模型的面数上限，提交前由 ValidateInput 核对
-	// （见 source_face_limit.go）。
-	SourceModelLimit *sourceModelLimit `json:"source_model_limit,omitempty"`
 	// RefineAfterPreview 让 Text to 3D 在一次公开任务内先预览再精细化，
 	// 交付带贴图的最高质量模型（见 refine.go）。精细化请求的覆盖值与
 	// 预览任务引用参数都由 Schema 声明。
@@ -461,9 +458,6 @@ func ValidateOffering(offering generation.Offering) error {
 		return errors.New("inline_model_input.media_type 不受支持")
 	}
 	if _, _, err := profiledModelContract(offering); err != nil {
-		return err
-	}
-	if err := validateSourceModelLimit(offering, options); err != nil {
 		return err
 	}
 	// 精细化声明不完整时不能静默退化成只交付预览网格：启动即拒绝。
@@ -1017,7 +1011,7 @@ func (a *Adapter) observation(
 		// public text; the redacted, bounded task_error evidence goes only to
 		// the internal forensic fields (persisted and logged, never projected).
 		failure.SafeDetail = "Meshy 任务执行失败"
-		failure.UpstreamCode, failure.UpstreamExcerpt = taskErrorEvidence(response)
+		failure.UpstreamCode, failure.UpstreamExcerpt = taskErrorEvidence(response, generation.InputEchoes(request.Offering, request.Input)...)
 		observation.Failure = failure
 	case "canceled":
 		observation.Phase = generation.UpstreamCanceled

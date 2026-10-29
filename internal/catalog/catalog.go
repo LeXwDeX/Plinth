@@ -34,6 +34,9 @@ func Load(reader io.Reader) (*Catalog, error) {
 	if doc.Application == nil {
 		return nil, errors.New("Catalog 缺少 application Product Schema")
 	}
+	if err := expandSourceModelLimitTexts(&doc); err != nil {
+		return nil, err
+	}
 	if err := validateApplication(*doc.Application); err != nil {
 		return nil, fmt.Errorf("application: %w", err)
 	}
@@ -353,6 +356,8 @@ func (raw rawOffering) toOffering() schemacontract.Offering {
 		Outputs:             append([]schemacontract.AssetRequirement(nil), raw.Outputs...),
 		AssetHosts:          append([]string(nil), raw.AssetHosts...),
 		ProviderOptions:     append(json.RawMessage(nil), raw.ProviderOptions...),
+		SourceModelLimit:    cloneSourceModelLimit(raw.SourceModelLimit),
+		OutputTriangles:     cloneOutputTriangles(raw.OutputTriangles),
 		Cost:                cloneCostDeclaration(raw.Cost),
 		CostPolicy:          cloneCostPolicy(raw.CostPolicy),
 		PostSuccess:         clonePostSuccessPolicy(raw.PostSuccess),

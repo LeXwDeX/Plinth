@@ -69,8 +69,11 @@ sed -i.bak \
   -e "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=$(openssl rand -base64 24)|" \
   .env && rm .env.bak
 chmod 600 .env
-grep '^ADMIN_PASSWORD=' .env   # 首个管理员（默认用户名 admin）的密码，登录时要用
 ```
+
+首个管理员（默认用户名 `admin`）的密码就是 `.env` 里的 `ADMIN_PASSWORD`，登录时要用。用编辑器
+打开 `.env` 查看；不要用 `grep`、`cat` 之类的命令打印它，口令会留在终端回滚、shell 历史、
+录屏和 CI 日志里。
 
 也可以手工填写：`SESSION_SECRET` 填 `openssl rand -base64 48` 的输出（至少 32 字符），
 `ADMIN_PASSWORD` 填至少 6 个字符的密码（建议 `openssl rand -base64 24`）。其余项都有
@@ -85,6 +88,20 @@ ART_AI_SOURCE_COMMIT=$(git rev-parse HEAD) docker compose up -d --build --wait
 curl http://127.0.0.1:13333/readyz        # {"service":"art-ai-go","status":"ok"}
 curl http://127.0.0.1:13333/api/version   # {"version":"<上面的完整 SHA>"}
 ```
+
+没有 `.git` 的源码包（例如下载的压缩包）里 `git rev-parse HEAD` 会失败：把它换成完整的
+40 位提交 SHA，或者去掉 `ART_AI_SOURCE_COMMIT=...` 前缀（此时 `/api/version` 为 `unknown`）。
+构建使用 Docker 默认的 BuildKit。BuildKit 不支持 `docker build --network <NETWORK>`
+（报 `network mode ... not supported by buildkit`）；需要在构建期隔离或观测网络时，改用经典
+构建器单独构建镜像，再用 Compose 启动（镜像名与标签要和 Compose 一致，默认 `art-ai:local`）：
+
+```bash
+DOCKER_BUILDKIT=0 docker build -f Dockerfile.go-runtime --target runtime \
+  --build-arg GO_SOURCE_COMMIT=$(git rev-parse HEAD) --network <NETWORK> -t art-ai:local .
+docker compose up -d --wait
+```
+
+也可以使用 buildx 的 `network` driver 选项。
 
 只写 `docker compose up -d` 也能启动：第一次会自动构建镜像，但 `/api/version` 为
 `unknown`，而且之后更新代码时它不会重新构建，所以升级一定要带 `--build`。
@@ -149,6 +166,10 @@ Mock Agent 不理解语义，每条消息都会按关键词调用一个生成工
   `docker compose down -v` 会删除。升级：更新代码后执行
   `ART_AI_SOURCE_COMMIT=$(git rev-parse HEAD) docker compose up -d --build --wait`，
   数据库迁移在启动时自动执行；升级前先备份这两个卷。
+- **同机部署多套**：Compose 项目名默认 `art-ai`，镜像默认 `art-ai:local`。同一台主机上已有
+  一套 Plinth 时，再起第二套必须在 `.env` 设置不同的 `COMPOSE_PROJECT_NAME` 与
+  `ART_AI_IMAGE_TAG`（见 `.env.example` 的 Build 段），并换一个 `ART_AI_PORT`；否则会复用同名
+  项目、覆盖同名镜像标签。命名卷、容器名随项目名变化。
 - **日志**：`docker compose logs -f art-ai`，级别由 `.env` 的 `LOG_LEVEL` 控制。
 - **Agent 工具次数**：`.env` 的 `AGENT_MAX_TOOL_CALLS_PER_REPLY` 限定一次 Agent 回复
   最多执行的工具调用数，每次新回复重新计数；留空为 20，可设 1–100，见
@@ -163,6 +184,10 @@ Mock Agent 不理解语义，每条消息都会按关键词调用一个生成工
   `JIMENG_API_KEY`、`GEMINI_API_KEY`（启用 Gemini 时同时设置 `GEMINI_BASE_URL`）。
 - 把 `PROVIDER_MODE` 改为 `live` 才会调用真实上游；只填要用的 key。真实生成会消耗对应
   账户的积分或费用。
+- `AGENT_MODE` 默认仍是 `mock`，与 `PROVIDER_MODE` 各自独立。`PROVIDER_MODE=live` 而
+  `AGENT_MODE=mock` 时，Mock Agent 不理解语义，每条消息都会按关键词提交一次生成（服务日志
+  有 WARN，付费步骤仍要你同意）。要用自然语言驱动真实生成，两者都设为 `live`，并配置
+  下面的 Agent 对话模型。
 - Agent 对话模型：`AGENT_MODE=live` 时设置 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`，
   指向任意 OpenAI chat completions 兼容的接口；模型必须是多模态的，至少能读图。
   想让用户选择更多对话模型时，用 `LLM_CONNECTIONS=QWEN,GLM` 列出连接，每个连接只读自己的
@@ -207,7 +232,11 @@ art-ai（单个 Go 进程，单容器）
 
 ## 本地开发
 
-需要 Go 1.26+ 与 Node 22，pnpm 版本以 `package.json` 的 `packageManager` 为准：
+前置工具：Go（最低 1.26，即 `go.mod`；镜像与 CI 使用 1.27，推荐 1.27）、Node 22、pnpm
+（版本以 `package.json` 的 `packageManager` 为准，`corepack enable` 可取得）、`git`、
+`python3`、`bash` 与 `jq`（部分前端测试会调用）；运行 `--race` 门禁还需要 C 编译器（`gcc`
+或 `cc`，CGO）。`python3 scripts/verify-local.py` 启动时会检查这些命令，缺失时直接列出。
+完整说明见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ```bash
 pnpm install --frozen-lockfile

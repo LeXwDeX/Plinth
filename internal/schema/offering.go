@@ -155,6 +155,11 @@ type Offering struct {
 	Outputs             []AssetRequirement `json:"outputs"`
 	AssetHosts          []string           `json:"asset_hosts,omitempty"`
 	ProviderOptions     json.RawMessage    `json:"provider_options,omitempty"`
+	// SourceModelLimit 声明该步骤接受的来源 3D 模型的三角面上限（见
+	// SourceModelLimit）；OutputTriangles 声明该步骤交付模型的三角面数如何由
+	// 请求参数推出，供处理计划在付费前核对下游上限。两者都只在 Schema 中写一次。
+	SourceModelLimit *SourceModelLimit       `json:"source_model_limit,omitempty"`
+	OutputTriangles  *OutputTriangleEstimate `json:"output_triangles,omitempty"`
 	// Cost 声明本供给项的积分成本结构（§5.2 有限原语）：金额计算只允许
 	// 存在于共享声明式评估器一处（internal/catalog.EvaluateExtraCredits），
 	// 提交期校验与 Provider 私有规划器都必须调用它。
@@ -282,6 +287,13 @@ type ExecutionMessages struct {
 	// count is over the step's declared limit (#103); {faces} is the counted
 	// value and {limit} the declared maximum.
 	InputSourceFaceLimit string `json:"input_source_face_limit,omitempty"`
+	// PlanSourceFaceLimit is the refusal of a whole Processing Plan before any
+	// step is paid (#121): an earlier step's declared output (Offering.
+	// OutputTriangles) is estimated over the SourceModelLimit of a later step.
+	// {source_service} is the earlier step's service, {service} the limited
+	// one, {estimate} the estimated triangles, {limit} the declared maximum and
+	// {choices} the compatible "topology ≤ target face count" pairs.
+	PlanSourceFaceLimit string `json:"plan_source_face_limit,omitempty"`
 }
 
 // ReferenceLimitText is the reference-limit template for a model that takes
