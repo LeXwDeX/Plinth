@@ -126,7 +126,7 @@ Mock Agent 不理解语义，每条消息都会按关键词调用一个生成工
 | `required variable SESSION_SECRET is missing a value`（`docker compose` 直接报错） | `.env` 里该项为空，按第 1 步填写；`ADMIN_PASSWORD` 同理 |
 | 日志 `SESSION_SECRET 至少需要 32 个字符` | 按第 1 步重新生成 `SESSION_SECRET` |
 | 日志 `ADMIN_PASSWORD 至少需要 6 个字符` | 首次启动创建管理员时检查；换一个更长的密码 |
-| `address already in use`（`docker compose` 直接报错） | 端口被占用，在 `.env` 改 `ART_AI_PORT` |
+| `address already in use`（被非 Docker 进程占用）或 `Bind for 127.0.0.1:<端口> failed: port is already allocated`（被另一个 Docker 容器占用） | 端口被占用，处理方法相同：在 `.env` 改 `ART_AI_PORT` |
 
 ### 配置说明
 
@@ -233,8 +233,10 @@ art-ai（单个 Go 进程，单容器）
 ## 本地开发
 
 前置工具：Go（最低 1.26，即 `go.mod`；镜像与 CI 使用 1.27，推荐 1.27）、Node 22、pnpm
-（版本以 `package.json` 的 `packageManager` 为准，`corepack enable` 可取得）、`git`、
-`python3`、`bash` 与 `jq`（部分前端测试会调用）；运行 `--race` 门禁还需要 C 编译器（`gcc`
+（版本以 `package.json` 的 `packageManager` 为准，用 `npm install -g pnpm@12.5.1` 安装；
+Node 22.21.1 自带的 corepack 0.34.0 执行 `corepack enable` 取不到该版本，若装过 corepack
+shim，先 `corepack disable`）、`git`、`python3`、`bash`、`jq` 与 `sqlite3`（部分前端测试和
+`scripts/tests` 会调用）；运行 `--race` 门禁还需要 C 编译器（`gcc`
 或 `cc`，CGO）。`python3 scripts/verify-local.py` 启动时会检查这些命令，缺失时直接列出。
 完整说明见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 

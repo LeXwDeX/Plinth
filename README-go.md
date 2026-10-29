@@ -10,7 +10,7 @@ React 静态应用、SPA 路由、静态资源与全部 HTTP API。它不是 Typ
 
 ## 当前交付
 
-- 统一 Product Schema Catalog：23 个 Provider×Model×Capability Offering、运行策略、权限和展示内容只有一个真源。
+- 统一 Product Schema Catalog：全部 Provider×Model×Capability Offering（数量以 `GET /api/v1/offerings` 为准）、运行策略、权限和展示内容只有一个真源。
 - 统一 `202 Accepted` 的 Task API；同步、异步 Provider 对调用方透明。
 - SQLite WAL 持久化、CAS 版本、持久租约、Attempt 历史和 append-only Event。
 - 输入资产上传、用户隔离、媒体类型/数量/大小校验。
@@ -56,14 +56,39 @@ curl http://127.0.0.1:13333/readyz
 
 `DEV_MOCK_AUTH=true`（不校验密码即可签发会话的 mock 登录）只用于开发；`APP_ENV=production` 时进程拒绝启动（#247），与生产禁止 `AUTH_MODE=development` 相同。它默认关闭，`.env.example` 不提供该项；自部署 Compose 固定 `APP_ENV=production`。
 
-提交一个任务：
+提交一个任务。公开 API 把「确认本次执行」放在提交之前：先 `prepare` 冻结输入，再 `grants` 申请执行授权（需要人决定时再批准），最后用授权提交。执行授权只接受浏览器登录会话（Cookie）发起，开发身份和 Bearer token 会得到 `403`。所以下面用 `AUTH_MODE=session` 启动本地 Mock 服务，再用管理员登录：
 
 ```bash
-curl -X POST http://127.0.0.1:13333/api/v1/tasks \
-  -H 'Content-Type: application/json' \
-  -H 'Idempotency-Key: local-demo-1' \
-  -d '{"capability":"text-to-image","input":{"prompt":"青铜机械鸟"}}'
+AUTH_MODE=session SESSION_SECRET='至少32字符的随机串' ADMIN_PASSWORD='本地管理员密码' \
+  go run ./cmd/art-ai
 ```
+
+```bash
+B=http://127.0.0.1:13333
+J='Content-Type: application/json'; O="Origin: $B"    # 带 Cookie 的写请求必须带同源 Origin
+# 1. 登录，Cookie 存到 cj（用户名默认 admin，密码即 ADMIN_PASSWORD）
+curl -sS -c cj -X POST $B/api/auth/login -H "$J" -H "$O" \
+  -d '{"username":"admin","password":"本地管理员密码"}'
+# 2. 创建会话，选一个可用的 Offering
+SID=$(curl -sS -b cj -X POST $B/api/chat/sessions -H "$J" -H "$O" -d '{"title":"demo"}' | jq -r .id)
+OFF=$(curl -sS -b cj "$B/api/v1/offerings?capability=text-to-image" | jq -r '[.offerings[]|select(.available)][0].id')
+# 3. prepare：冻结输入，得到 prepared_input_id
+PID=$(curl -sS -b cj -X POST $B/api/v1/tasks/prepare -H "$J" -H "$O" \
+  -d "{\"session_id\":\"$SID\",\"capability\":\"text-to-image\",\"offering_id\":\"$OFF\",\"input\":{\"prompt\":\"青铜机械鸟\"}}" | jq -r .prepared_input_id)
+# 4. grants：申请执行授权。会话批准方式为自动时 status 直接是 approved；
+#    status 为 pending 时（例如手工批准的 3D 步骤），还要由人批准：
+GRANT=$(curl -sS -b cj -X POST $B/api/v1/tasks/grants -H "$J" -H "$O" -H "Idempotency-Key: demo-$PID" \
+  -d "{\"prepared_input_id\":\"$PID\"}")
+RID=$(echo "$GRANT" | jq -r .request_id)
+[ "$(echo "$GRANT" | jq -r .status)" = pending ] && \
+  curl -sS -b cj -X PUT $B/api/v1/tasks/grants/$RID -H "$J" -H "$O" -d '{"decision":"approve"}'
+# 5. 提交：返回 task_id，再轮询任务直到 state 为 SUCCEEDED
+TID=$(curl -sS -b cj -X POST $B/api/v1/tasks -H "$J" -H "$O" -H "Idempotency-Key: demo-$PID" \
+  -d "{\"prepared_input_id\":\"$PID\",\"authorization_request_id\":\"$RID\"}" | jq -r .task_id)
+curl -sS -b cj $B/api/v1/tasks/$TID | jq '{state, assets: [.assets[]?.url]}'
+```
+
+这个流程在本机 Mock 栈上实测通过（`jq` 见 README 的前置工具）。完整的脚本化版本是 `scripts/smoke/smoke-public-mock.sh`，覆盖 3D 批准卡、每个资产的字节校验和登出撤销。
 
 核心接口：
 
@@ -101,7 +126,7 @@ go run ./cmd/art-ai
 
 至少配置一个已实现 Provider 的 key 才能使用对应远程功能；没有远程 key 时仍可启动 live 服务，本地 Offering 可继续使用，远程 Offering 应投影为不可用。外部 Catalog 可通过 `CATALOG_FILE` 覆盖，加载时会严格拒绝未知字段、重复身份和无效契约。
 
-已实现的凭据变量为 `OPENAI_API_KEY`、`GEMINI_API_KEY`、`MESHY_API_KEY`、`TRIPO_API_KEY` 和 `MATTING_API_KEY`；对应 Base URL 都可单独覆盖。
+已实现的凭据变量为 `OPENAI_API_KEY`、`GEMINI_API_KEY`、`JIMENG_API_KEY`、`MESHY_API_KEY`、`TRIPO_API_KEY`、`HYPER3D_API_KEY` 和 `MATTING_API_KEY`；对应 Base URL 都可单独覆盖。完整清单（含别名）以 [docs/provider-configuration.md](docs/provider-configuration.md) 为准。
 
 Meshy 后处理需要把本地/跨 Provider 模型交给上游。下游内网零互联网，模型输入一律以 data URI 内联提交：Offering 声明 `provider_options.inline_model_input`（上限由 `max_bytes` 声明，默认 60MB），声明后即使 `PUBLIC_BASE_URL`+`ASSET_SIGNING_KEY` 已配置也不发布签名 URL；`asset` 参数未声明内联的 Meshy Offering 在启动校验即被拒绝，因此 HMAC 签名 URL 回拉路径虽保留在 Adapter 中，但没有任何合法 Offering 会走到它。`asset-array` 参考图固定内联。能力不可用时显示 `available:false`，启动日志记录原因，页面呈现 Schema 文案而非破损表单。
 
