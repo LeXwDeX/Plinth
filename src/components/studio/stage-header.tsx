@@ -34,6 +34,7 @@ import { objectOfTile } from '@/lib/workspace/version-object';
 import { versionLabel } from '@/lib/workspace/version-label';
 import { isOlderVersion, primaryParent } from '@/lib/workspace/versions';
 import { useCanvasStore } from '@/store/canvas-store';
+import { CAPTURE_BLOCK_TEXT, useModelCaptureBlock } from '@/hooks/use-model-capture-block';
 import { useChatStore } from '@/store/chat-store';
 import { useStudioStore } from '@/store/studio-store';
 import type { CurrentObject } from '@/store/workspace-store';
@@ -73,6 +74,7 @@ export function StageHeader({ object }: { object: CurrentObject | null }) {
   const { schema } = useProductSchema();
   const { proxyAssetUrl } = useAssetURLRewriter();
   const { openOnStage, toThreeD, captureToTwoD } = useObjectActions();
+  const captureBlock = useModelCaptureBlock(object?.taskId);
   const sessionId = useChatStore((state) => state.activeSessionId);
   const messages = useChatStore((state) => state.messagesBySession[sessionId ?? ''] ?? NO_MESSAGES);
   const handleReferences = useHandleReferences();
@@ -162,7 +164,7 @@ export function StageHeader({ object }: { object: CurrentObject | null }) {
       : null,
     retexture_with_image: object ? { render: (view) => <RetextureWithImageAction object={object} view={view} /> } : null,
     capture_2d: object
-      ? { run: () => captureToTwoD(object), disabled: !object.assetId, reason: text('ui.studio.stage.action.capture_unavailable') }
+      ? { run: () => captureToTwoD(object), disabled: !object.assetId || captureBlock !== null, reason: text(captureBlock ?? CAPTURE_BLOCK_TEXT.notReady) }
       : null,
     // A picture can always be sent; with only the board, there must be something in the frame to send.
     send_chat: object || boardHasContent ? { run: () => requestImageCommand('send-board') } : null,

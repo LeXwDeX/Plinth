@@ -93,6 +93,14 @@ def selected_gates(race=False):
     return [*GATES[:position], RACE_GATE, *GATES[position:]]
 
 
+def gate_manifest():
+    """The gate set as data: names, argv and extra environment, in run order."""
+    def entry(gate):
+        name, argv, env = gate
+        return {'name': name, 'argv': argv, 'env': env}
+    return {'gates': [entry(gate) for gate in GATES], 'race': entry(RACE_GATE)}
+
+
 def gate_names(gates):
     return [name for name, _, _ in gates]
 
@@ -941,7 +949,13 @@ def main():
     parser.add_argument('--pre-push', action='store_true')
     parser.add_argument('--race', action='store_true',
                         help='also run the CI-only go test race gate (dev_test.md §2)')
+    parser.add_argument('--list-gates', action='store_true',
+                        help='print the gate manifest (default set and the race gate) as JSON and exit; '
+                             'src/__tests__/ci-gate-parity.test.ts compares it with dev_test.md §2 and ci.yml')
     args = parser.parse_args()
+    if args.list_gates:
+        print(json.dumps(gate_manifest(), indent=2))
+        return 0
     if not args.check:
         require_tools(args.race)
     root = Path(git(Path.cwd(), 'rev-parse', '--show-toplevel')).resolve()

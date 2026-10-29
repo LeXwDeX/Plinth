@@ -272,6 +272,8 @@ describe('stage toolbar structure', () => {
   });
 
   it('shows the capture button of a model with the reason it is greyed', () => {
-    expect(header).toContain("capture_2d: object\n      ? { run: () => captureToTwoD(object), disabled: !object.assetId, reason: text('ui.studio.stage.action.capture_unavailable') }");
+    expect(header).toContain("capture_2d: object\n      ? { run: () => captureToTwoD(object), disabled: !object.assetId || captureBlock !== null, reason: text(captureBlock ?? CAPTURE_BLOCK_TEXT.notReady) }");
+    // The reason comes from the state of the model on the stage (#126), not from a fixed text.
+    expect(header).toContain('const captureBlock = useModelCaptureBlock(object?.taskId);');
   });
 });
