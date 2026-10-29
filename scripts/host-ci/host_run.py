@@ -30,6 +30,15 @@ RUN_ID = re.compile(r'\d{8}T\d{6}Z-[0-9a-f]{12}-[0-9a-f]{4}')
 GIB = 1 << 30
 STALE_RUN_SECONDS = 24 * 3600
 RESULTS_KEPT = 10
+# Defaults of every tunable limit (dev_test.md section 2, "Host CI"). scripts/host-ci/run.py passes
+# all of them explicitly, so these only matter for a hand run; test_host_ci.py keeps both copies equal.
+DEFAULTS = {'cpus': 4, 'memory_gib': 12, 'min_mem_gib': 15, 'min_disk_gib': 10, 'timeout_min': 100, 'build_timeout_min': 40}
+# MemAvailable must exceed the container's memory limit by at least this much (host and other
+# stacks keep running while the container may use its whole limit). Smaller thresholds are refused.
+MIN_MEMORY_MARGIN_GIB = 1
+# Host swap with less than this fraction free is reported as a warning; it does not block the run
+# (the container has no swap, and MemAvailable does not count swap).
+SWAP_WARN_FREE_FRACTION = 0.10
 
 
 class Stop(Exception):
@@ -97,6 +106,25 @@ def sweep(root, own_id):
             remove_tree(entry, runs)
 
 
+def limit_problems(args):
+    """Reasons the requested limits are not acceptable; a threshold must never weaken the gate silently."""
+    problems = []
+    if not 1 <= args.cpus <= 64:
+        problems.append('cpus must be between 1 and 64')
+    if not 1 <= args.memory_gib <= 256:
+        problems.append('memory-gib must be between 1 and 256')
+    if args.min_mem_gib < args.memory_gib + MIN_MEMORY_MARGIN_GIB:
+        problems.append(f'min-mem-gib must be at least memory-gib + {MIN_MEMORY_MARGIN_GIB} '
+                        f'({args.memory_gib + MIN_MEMORY_MARGIN_GIB} GiB)')
+    if args.min_disk_gib < 1:
+        problems.append('min-disk-gib must be at least 1')
+    if not 1 <= args.timeout_min <= 24 * 60:
+        problems.append('timeout-min must be between 1 and 1440')
+    if not 1 <= args.build_timeout_min <= 24 * 60:
+        problems.append('build-timeout-min must be between 1 and 1440')
+    return problems
+
+
 def preflight(root, args):
     mem = meminfo()
     docker_root = Path(docker('info', '--format', '{{.DockerRootDir}}').stdout.strip())
@@ -118,6 +146,10 @@ def preflight(root, args):
         if facts[key] < facts['required']['disk_free_bytes']:
             problems.append(key.replace('_', ' '))
     facts['problems'] = problems
+    swap_total = mem['SwapTotal']
+    facts['warnings'] = (['swap nearly full'] if swap_total and mem['SwapFree'] < swap_total * SWAP_WARN_FREE_FRACTION else [])
+    for warning in facts['warnings']:
+        say(f'warning: {warning} (not a failure: the container has no swap)')
     return facts
 
 
@@ -204,13 +236,13 @@ def run_attempt(number, ctx):
         record.update(status='created_config_mismatch', problems=problems)
         return record, False
 
-    say(f'attempt {number}: starting {name} (network none, {args.cpus:g} CPU, {args.memory_gib} GiB, no swap)')
+    say(f'attempt {number}: starting {name} (network none, {args.cpus:g} CPU, {args.memory_gib} GiB, no swap, timeout {args.timeout_min:g} min)')
     started = time.monotonic()
     timed_out = False
     def stop_on_timeout():
         nonlocal timed_out
         timed_out = True
-        say(f'attempt {number}: timeout after {args.timeout_min} minutes; stopping the container')
+        say(f'attempt {number}: timeout after {args.timeout_min:g} minutes; stopping the container')
         docker('stop', '--time', '20', name, check=False, timeout=60)
 
     timer = threading.Timer(args.timeout_min * 60, stop_on_timeout)
@@ -300,12 +332,12 @@ def main():
     parser.add_argument('--sha', required=True)
     parser.add_argument('--tree', required=True)
     parser.add_argument('--image-tag', required=True)
-    parser.add_argument('--cpus', type=float, default=4)
-    parser.add_argument('--memory-gib', type=int, default=12)
-    parser.add_argument('--min-mem-gib', type=float, default=15)
-    parser.add_argument('--min-disk-gib', type=float, default=10)
-    parser.add_argument('--timeout-min', type=int, default=100)
-    parser.add_argument('--build-timeout-min', type=int, default=40)
+    parser.add_argument('--cpus', type=float, default=DEFAULTS['cpus'])
+    parser.add_argument('--memory-gib', type=int, default=DEFAULTS['memory_gib'])
+    parser.add_argument('--min-mem-gib', type=float, default=DEFAULTS['min_mem_gib'], help='preflight: required MemAvailable in GiB')
+    parser.add_argument('--min-disk-gib', type=float, default=DEFAULTS['min_disk_gib'], help='preflight: free GiB on the CI directory and Docker root disks')
+    parser.add_argument('--timeout-min', type=float, default=DEFAULTS['timeout_min'], help='the container is stopped after this many minutes')
+    parser.add_argument('--build-timeout-min', type=float, default=DEFAULTS['build_timeout_min'])
     parser.add_argument('--keep-images', type=int, default=2)
     args = parser.parse_args()
 
@@ -315,6 +347,11 @@ def main():
             and re.fullmatch(r'[0-9a-f]{40}', args.sha) and re.fullmatch(r'[0-9a-f]{40}', args.tree)
             and IMAGE_TAG.fullmatch(args.image_tag) and Path(__file__).resolve() == (run_dir / 'host_run.py').resolve()):
         print('host_run: invalid arguments or location', file=sys.stderr)
+        return 2
+    problems = limit_problems(args)
+    if problems:
+        print(f"host_run: unacceptable limits: {'; '.join(problems)}", file=sys.stderr)
+        remove_tree(run_dir, root / 'run')
         return 2
 
     def interrupted(number, frame):

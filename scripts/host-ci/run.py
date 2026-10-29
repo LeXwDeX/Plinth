@@ -8,7 +8,9 @@ the untracked environments file, runs `GOFLAGS=-p=4 python3 scripts/verify-local
 --force` plus the external-link check in a one-off container (no network, 4 CPUs, 12 GiB,
 no swap, non-root, no capabilities, input bundle read-only) and brings result.json and the
 logs back to build/host-ci/<run id>/. Exit status: 0 pass, 1 fail, 70 host resources too
-low, 75 another run is active, 2 usage or environment error.
+low, 75 another run is active, 2 usage or environment error. The resource preflight
+thresholds, the container limits and the timeouts are options (and optional `host_ci`
+fields of the environment entry); the host refuses values that would weaken the gate.
 
 The gate logic is not in this tool: it is `scripts/verify-local.py` plus the image built
 from `Dockerfile.ci`. Any other runner can build that same image and run the same entry
@@ -34,6 +36,10 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 import local_environments  # noqa: E402
 
 DEFAULT_CI_DIR = '/var/lib/plinth-ci'
+# Tunable limits. Precedence: command line, then the optional `host_ci` object of the environment
+# entry (same names), then these defaults, which host_run.DEFAULTS repeats (test_host_ci.py keeps them equal).
+# The host validates the final values again (host_run.limit_problems).
+LIMIT_DEFAULTS = {'cpus': 4, 'memory_gib': 12, 'min_mem_gib': 15, 'min_disk_gib': 10, 'timeout_min': 100, 'build_timeout_min': 40}
 # Files that decide the image. The first two come from the tool's own checkout (the
 # image definition), the rest from the commit under test (the dependencies it needs).
 TOOL_FILES = ('Dockerfile.ci', 'scripts/host-ci/entry.sh')
@@ -93,7 +99,10 @@ def load_environment(name):
     ssh = environment.get('ssh')
     if not isinstance(ssh, str) or not re.fullmatch(r'[a-z_][a-z0-9_-]*@[A-Za-z0-9.-]+', ssh):
         raise UsageError(f'environment {name}: ssh must be user@host')
-    ci_dir = (environment.get('host_ci') or {}).get('dir', DEFAULT_CI_DIR)
+    host_ci = environment.get('host_ci') or {}
+    if not isinstance(host_ci, dict):
+        raise UsageError(f'environment {name}: host_ci must be an object')
+    ci_dir = host_ci.get('dir', DEFAULT_CI_DIR)
     if not SAFE_PATH.fullmatch(ci_dir) or '..' in ci_dir or ci_dir.rstrip('/') != ci_dir:
         raise UsageError(f'environment {name}: host_ci.dir must be a plain absolute path')
     # The CI root must stay clear of every release root and protected path of every environment.
@@ -104,7 +113,20 @@ def load_environment(name):
         used = used.rstrip('/')
         if ci_dir == used or ci_dir.startswith(used + '/') or used.startswith(ci_dir + '/'):
             raise UsageError(f'host_ci.dir overlaps a release root or protected path of {name}; pick a separate directory')
-    return ssh, ci_dir
+    return ssh, ci_dir, host_ci
+
+
+def resolve_limits(args, host_ci):
+    """Final numeric limits: command line over environment file over defaults; non-numbers are refused."""
+    limits = {}
+    for key, default in LIMIT_DEFAULTS.items():
+        chosen = getattr(args, key)
+        if chosen is None:
+            chosen = host_ci.get(key, default)
+        if isinstance(chosen, bool) or not isinstance(chosen, (int, float)) or chosen != chosen:
+            raise UsageError(f'limit {key} must be a number, got {chosen!r}')
+        limits[key] = chosen
+    return limits
 
 
 def ssh_run(target, command, **kwargs):
@@ -167,8 +189,12 @@ def main(argv=None):
     parser.add_argument('--repo', default=str(TOOL_DIR.parent.parent), help='repository holding the commit (default: this checkout)')
     parser.add_argument('--env', default='dev-test', help='environment name in the untracked environments file')
     parser.add_argument('--out', default=None, help='where results are stored (default: build/host-ci)')
-    parser.add_argument('--timeout-min', type=int, default=100)
-    parser.add_argument('--min-mem-gib', type=float, default=15, help='host preflight: required MemAvailable in GiB (12 GiB container plus margin)')
+    parser.add_argument('--timeout-min', type=float, default=None, help=f"container timeout in minutes (default {LIMIT_DEFAULTS['timeout_min']})")
+    parser.add_argument('--min-mem-gib', type=float, default=None, help=f"host preflight: required MemAvailable in GiB (default {LIMIT_DEFAULTS['min_mem_gib']}: the 12 GiB container limit plus margin)")
+    parser.add_argument('--min-disk-gib', type=float, default=None, help=f"host preflight: free GiB on the CI directory and Docker root disks (default {LIMIT_DEFAULTS['min_disk_gib']})")
+    parser.add_argument('--memory-gib', type=int, default=None, help=f"container memory and swap limit in GiB (default {LIMIT_DEFAULTS['memory_gib']})")
+    parser.add_argument('--cpus', type=float, default=None, help=f"container CPU limit (default {LIMIT_DEFAULTS['cpus']})")
+    parser.add_argument('--build-timeout-min', type=float, default=None, help=f"image build timeout in minutes (default {LIMIT_DEFAULTS['build_timeout_min']})")
     parser.add_argument('--print-image-tag', action='store_true', help='print plinth-ci:<hash> for the commit and exit')
     args = parser.parse_args(argv)
     repo = Path(args.repo).resolve()
@@ -182,7 +208,8 @@ def main(argv=None):
             return 0
         if args.ref == 'HEAD' and git(repo, 'status', '--porcelain', '--untracked-files=no'):
             print('warning: uncommitted changes are not part of HEAD and are not tested', file=sys.stderr)
-        target, ci_dir = load_environment(args.env)
+        target, ci_dir, host_ci = load_environment(args.env)
+        limits = resolve_limits(args, host_ci)
         run_id = f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{sha[:12]}-{os.urandom(2).hex()}"
         out = Path(args.out) if args.out else TOOL_DIR.parent.parent / 'build' / 'host-ci'
         print(f'[host-ci] {run_id}: commit {sha}, image plinth-ci:{tag}', flush=True)
@@ -193,7 +220,9 @@ def main(argv=None):
             (stage / 'host_run.py').write_bytes((TOOL_DIR / 'host_run.py').read_bytes())
             run_dir = upload(target, ci_dir, run_id, stage)
         command = (f'python3 -I {run_dir}/host_run.py --root {ci_dir} --run-id {run_id} --sha {sha} --tree {tree} '
-                   f'--image-tag {tag} --timeout-min {args.timeout_min} --min-mem-gib {args.min_mem_gib:g}')
+                   f'--image-tag {tag} --timeout-min {limits["timeout_min"]:g} --min-mem-gib {limits["min_mem_gib"]:g} '
+                   f'--min-disk-gib {limits["min_disk_gib"]:g} --memory-gib {limits["memory_gib"]:g} '
+                   f'--cpus {limits["cpus"]:g} --build-timeout-min {limits["build_timeout_min"]:g}')
         # The open stdin pipe tells host_run.py that this client is alive; it stops the run when it closes.
         remote = subprocess.Popen(['ssh', *SSH_OPTIONS, target, command], stdin=subprocess.PIPE)
         try:
