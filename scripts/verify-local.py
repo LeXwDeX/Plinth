@@ -47,6 +47,8 @@ MAX_AGE_SECONDS = 24 * 60 * 60
 # Git injects these during hook dispatch; none selects compilation behavior.
 ENV_BOOKKEEPING = {'_', 'SHLVL', 'OLDPWD', 'PWD', 'GIT_EXEC_PATH', 'GIT_PREFIX',
                    'GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE'}
+# Repository-selecting variables Git sets for hooks; gates run with the worktree as cwd instead.
+HOOK_GIT_ENV = {'GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_PREFIX'}
 # Gate concurrency across all worktrees of this clone (shared Git common dir).
 # Only scheduling: it selects no gate, command or compilation input, so it is
 # excluded from the receipt environment digest. 0 disables queueing.
@@ -846,7 +848,9 @@ def run_gates_unqueued(root, gates=None):
     for name, command, overrides in gates:
         start = time.monotonic()
         print(f'[verify] {name}', flush=True)
-        result = subprocess.run(command, cwd=root, env={**os.environ, 'PATH': canonical_path, **overrides})
+        # Hook dispatch points Git at the pushed repository; the scripts tests create their own repositories.
+        inherited = {k: value for k, value in os.environ.items() if k not in HOOK_GIT_ENV}
+        result = subprocess.run(command, cwd=root, env={**inherited, 'PATH': canonical_path, **overrides})
         print(f'[verify] {name}: {time.monotonic() - start:.2f}s (exit {result.returncode})', flush=True)
         if result.returncode:
             raise GateError(f'{name} failed ({result.returncode}); no reusable receipt')
