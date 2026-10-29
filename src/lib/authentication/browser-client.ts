@@ -1,3 +1,4 @@
+import { clearAccountClientStateWithoutSecureContext } from '@/lib/authentication/session-state';
 import type { ProductSchema } from '@/lib/product-schema';
 
 type Fetcher = (
@@ -69,6 +70,7 @@ export function createAuthenticationBrowserClient(
           response.status,
         );
       }
+      clearAccountClientStateWithoutSecureContext();
     },
     async logout() {
       const api = schema.authentication.api;
@@ -86,6 +88,7 @@ export function createAuthenticationBrowserClient(
           response.status,
         );
       }
+      clearAccountClientStateWithoutSecureContext();
     },
   };
 }

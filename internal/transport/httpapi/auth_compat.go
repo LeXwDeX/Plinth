@@ -94,7 +94,7 @@ func (s *Server) legacyLogin(
 		ResourceType: api.AuditResourceType,
 		ResourceID:   user.ID,
 	})
-	s.clearSiteDataOnSessionChange(writer)
+	s.clearSiteDataOnSessionChange(writer, request)
 	writeJSON(writer, http.StatusOK, map[string]any{
 		api.SuccessField: true,
 		api.UserField:    s.authenticationUserWire(user),
@@ -169,17 +169,22 @@ func (s *Server) legacyLogout(
 		return
 	}
 	s.authentication.ClearSession(writer)
-	s.clearSiteDataOnSessionChange(writer)
+	s.clearSiteDataOnSessionChange(writer, request)
 	writeJSON(writer, http.StatusOK, map[string]any{
 		api.SuccessField: true,
 	})
 }
 
 // clearSiteDataOnSessionChange asks the browser to drop cached private bytes
-// (thumbnails) when the signed-in user changes (#225). Browsers that ignore the
-// header still revalidate after the Schema's short thumbnail max-age.
-func (s *Server) clearSiteDataOnSessionChange(writer http.ResponseWriter) {
-	if value := s.application.Runtime.HTTP.SessionChangeClearSiteData; value != "" {
+// (thumbnails) when the signed-in user changes (#225). Browsers only act on
+// Clear-Site-Data in a secure context and log an error elsewhere, so a plain-HTTP
+// deployment reached by IP address gets no header (#134); the front end clears its
+// own per-account state instead, and thumbnail responses carry Vary: Cookie.
+// Browsers that ignore the header still revalidate after the Schema's short
+// thumbnail max-age.
+func (s *Server) clearSiteDataOnSessionChange(writer http.ResponseWriter, request *http.Request) {
+	value := s.application.Runtime.HTTP.SessionChangeClearSiteData
+	if value != "" && requestIsSecureContext(request, s.trustedProxies) {
 		writer.Header().Set("Clear-Site-Data", value)
 	}
 }
@@ -237,7 +242,7 @@ func (s *Server) legacyMockAuth(
 		return
 	}
 	// #225: a login is a session change; drop cached private bytes.
-	s.clearSiteDataOnSessionChange(writer)
+	s.clearSiteDataOnSessionChange(writer, request)
 	writeJSON(writer, http.StatusOK, map[string]any{
 		api.UserField: s.authenticationUserWire(user),
 	})

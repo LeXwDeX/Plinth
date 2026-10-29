@@ -78,3 +78,37 @@ func apiRateLimitMiddleware(limiter *perMinuteLimiter, prefix string, perMinute 
 		next.ServeHTTP(writer, request)
 	})
 }
+
+// requestIsSecureContext reports whether the browser treats the page that made the
+// request as a secure context (#134): HTTPS, or a loopback host. HTTPS is seen as
+// TLS on this connection, or X-Forwarded-Proto from a configured trusted proxy
+// (the proxy appends its own entry last); from anyone else the header is client
+// input and ignored, the same rule as X-Forwarded-For.
+func requestIsSecureContext(request *http.Request, trusted []netip.Prefix) bool {
+	if request.TLS != nil {
+		return true
+	}
+	if hostIsLoopback(request.Host) {
+		return true
+	}
+	address, err := netip.ParseAddr(peerAddress(request))
+	if err != nil || !addressTrusted(address, trusted) {
+		return false
+	}
+	protocols := strings.Split(strings.Join(request.Header.Values("X-Forwarded-Proto"), ","), ",")
+	return strings.EqualFold(strings.TrimSpace(protocols[len(protocols)-1]), "https")
+}
+
+// hostIsLoopback accepts the hosts browsers treat as potentially trustworthy
+// without TLS: localhost (and *.localhost) and loopback addresses, with or without a port.
+func hostIsLoopback(host string) bool {
+	if name, _, err := net.SplitHostPort(host); err == nil {
+		host = name
+	}
+	host = strings.ToLower(strings.TrimSuffix(strings.Trim(host, "[]"), "."))
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	address, err := netip.ParseAddr(host)
+	return err == nil && address.Unmap().IsLoopback()
+}
