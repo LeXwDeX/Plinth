@@ -24,7 +24,7 @@
 - 把 `NEXT_PUBLIC_APP_URL` 设为对外的 `https://` 地址。Schema `cookie.secure_mode` 默认 `auto`：公开地址以 `https` 开头时会话 Cookie 带 `Secure`，否则不带（纯内网 HTTP 也能登录）。
 - 会话 Cookie 始终 `HttpOnly`、`SameSite=Lax`，可在数据库撤销。
 - 状态变更请求按 `Origin` / `Sec-Fetch-Site` 做同站校验；代理必须原样转发 `Host` 与 `Origin`。
-- 登录（密码、受运行配置约束的 Mock）与登出响应在 HTTPS（含反代传来的 `X-Forwarded-Proto: https`，前提是该代理在 `TRUSTED_PROXY_CIDRS` 内）或 localhost/回环 Host 下带 `Clear-Site-Data: "cache"`，让浏览器丢掉缓存的私有缩略图。用 IP 地址访问的纯 HTTP 部署不发送该头（浏览器会报错且不执行，#134），改由前端在登录/登出后清空会话存储和账号相关的本地草稿；缩略图响应带 `Vary: Cookie, Authorization`，登出或换账号后浏览器不会复用旧缓存。
+- 登录（密码、受运行配置约束的 Mock）与登出响应在 HTTPS（含反代传来的 `X-Forwarded-Proto: https`，前提是该代理在 `TRUSTED_PROXY_CIDRS` 内）或 localhost/回环 Host 下带 `Clear-Site-Data: "cache"`，让浏览器丢掉缓存的私有缩略图。用 IP 地址访问的纯 HTTP 部署不发送该头（浏览器会报错且不执行，#134），改由前端在主动登出后清空会话存储和账号相关的本地草稿；缩略图响应带 `Vary: Cookie, Authorization`，登出或换账号后浏览器不会复用旧缓存。
 
 ## 3. 反向代理与真实客户端地址
 

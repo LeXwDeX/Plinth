@@ -54,18 +54,19 @@ describe('clearAccountClientStateWithoutSecureContext (#134)', () => {
     expect(() => clearAccountClientStateWithoutSecureContext()).not.toThrow();
   });
 
-  it('runs after a successful logout and login but not after a failed logout', async () => {
+  it('clears after a successful logout only, and keeps drafts across re-login', async () => {
     const schema = schemaFixture();
-    const { sessionStorage } = stubBrowser(false);
+    const { sessionStorage, localStorage } = stubBrowser(false);
     const failing = createAuthenticationBrowserClient(schema, { fetcher: async () => new Response('', { status: 500 }) });
     await expect(failing.logout()).rejects.toBeDefined();
     expect(sessionStorage.length).toBe(1);
 
+    await createAuthenticationBrowserClient(schema, { fetcher: async () => Response.json({}) }).login('alice', 'pw');
+    expect(sessionStorage.length).toBe(1);
+    expect(localStorage.getItem('artai.composer.draft.s1')).not.toBeNull();
+
     await createAuthenticationBrowserClient(schema, { fetcher: async () => new Response(null, { status: 200 }) }).logout();
     expect(sessionStorage.length).toBe(0);
-
-    sessionStorage.setItem('pending-task:s2', '{}');
-    await createAuthenticationBrowserClient(schema, { fetcher: async () => Response.json({}) }).login('alice', 'pw');
-    expect(sessionStorage.length).toBe(0);
+    expect(localStorage.getItem('artai.composer.draft.s1')).toBeNull();
   });
 });

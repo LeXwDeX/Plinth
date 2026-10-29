@@ -5,9 +5,9 @@ import { LAST_OBJECT_KEY_PREFIX } from '@/lib/workspace/last-object';
 const ACCOUNT_LOCAL_KEY_PREFIXES = [DRAFT_KEY_PREFIX, LAST_OBJECT_KEY_PREFIX];
 
 /**
- * 登录/登出后清掉上一个账号留在本浏览器里的状态（#134）。服务端在 HTTPS/localhost
+ * 主动登出后清掉当前账号留在本浏览器里的状态（#134）。服务端在 HTTPS/localhost
  * 才发 `Clear-Site-Data`，浏览器在其他环境（如 IP 地址的明文 HTTP 部署）里会报错并忽略它，
- * 所以这些环境由前端显式清理，保证换账号后看不到上一个账号的草稿、待处理任务和授权记录。
+ * 所以这些环境由前端显式清理。登录不清理：会话过期后同账号重新登录必须保留草稿（docs/product.md）；草稿、上次对象与待处理任务都按会话 ID 存放，会话归属于账号，换账号登录也读不到。
  * 安全上下文里浏览器已处理缓存，这里不重复动手。存储不可用时静默跳过。
  */
 export function clearAccountClientStateWithoutSecureContext(): void {

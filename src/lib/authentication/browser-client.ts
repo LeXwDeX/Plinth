@@ -70,7 +70,6 @@ export function createAuthenticationBrowserClient(
           response.status,
         );
       }
-      clearAccountClientStateWithoutSecureContext();
     },
     async logout() {
       const api = schema.authentication.api;
