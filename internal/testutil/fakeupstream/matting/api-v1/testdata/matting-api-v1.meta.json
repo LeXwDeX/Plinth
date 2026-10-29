@@ -1,0 +1,12 @@
+{
+  "api_version": "v1",
+  "candidate_sha256": "46e5cc98be06131c10e81554712956e563a98d441b3932ad4c426da99e2d1f7f",
+  "captured_at_utc": "2026-10-29",
+  "exchanges": 33,
+  "offering": "matting/default/background-removal",
+  "provenance": "captured",
+  "scenario": "matting-api-v1-alignment",
+  "source_revision": "unknown",
+  "transformation": "IDs, signed URLs, timestamps and amounts are deterministic placeholders; media bytes are not stored.",
+  "version": 1
+}

@@ -49,6 +49,10 @@ const (
 	statusFailed     = "Failed"
 )
 
+// tinyModelBytes is the size below which an uploaded texture model is taken for
+// the unreadable one-triangle fixture (observed to end Failed).
+const tinyModelBytes = 2048
+
 // Fixed values. The fake promises structure, not realism.
 const (
 	fixedBalance   = 100.0
@@ -80,7 +84,7 @@ func buildEndpoints() []fakeupstream.Endpoint {
 			DocURL: docsRoot + "check-balance", CheckedAt: captured},
 		{Method: "POST", Path: "/status", Evidence: fakeupstream.EvidenceReal, Sample: "POST /api/v2/status",
 			DocURL: docsRoot + "check-status", CheckedAt: captured,
-			Note: "Waiting, Generating and Done polls are real; the Failed poll (a texture of an unreadable model: the jobs all Failed and a top-level message) was observed once but not committed as a sample, so it is built from the Done poll"},
+			Note: "Waiting, Generating, Done and Failed polls are real samples. The Failed poll was captured twice (2026-10-29, phase 3): a texture request whose model is the 400-byte one-triangle fixture GLB is accepted and every job is Failed on the first poll with the top-level message \"Invalid input.\" (the fake walks its normal poll cycle first, then answers that Failed body)"},
 		{Method: "POST", Path: "/download", Evidence: fakeupstream.EvidenceReal, Sample: "POST /api/v2/download",
 			DocURL: docsRoot + "download-results", CheckedAt: captured,
 			Note: "a download asked before the jobs finished answers an empty list (observed)"},
@@ -112,7 +116,10 @@ type task struct {
 	kind     kind
 	jobs     []string
 	scenario fakeupstream.Scenario
-	polls    int
+	// expiredIssues is how many of the first artifact URL issues expire under
+	// ScenarioArtifactExpired.
+	expiredIssues int
+	polls         int
 	// names are the files the download list offers.
 	names []string
 }
@@ -131,6 +138,7 @@ type handler struct {
 	submit    map[string]map[string]any // by route path
 	status    map[string]any
 	download  map[string]map[string]any // by route path
+	failed    map[string]any            // a status poll whose jobs ended Failed (real sample)
 	authError map[string]any
 	badBody   map[string]any // the 400 envelope
 	invalid   map[string]any // INVALID_REQUEST
@@ -169,8 +177,8 @@ func newFake(env *fakeupstream.Env) (*handler, error) {
 			return nil, fmt.Errorf("hyper3d/api-v2 samples lack the download list of %s", k.Path)
 		}
 	}
-	if h.balance == nil || h.authError == nil || h.badBody == nil || h.invalid == nil || h.status == nil {
-		return nil, fmt.Errorf("hyper3d/api-v2 samples lack the balance, error or status exchanges")
+	if h.balance == nil || h.authError == nil || h.badBody == nil || h.invalid == nil || h.status == nil || h.failed == nil {
+		return nil, fmt.Errorf("hyper3d/api-v2 samples lack the balance, error, status or Failed status exchanges")
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /check_balance", h.getBalance)
@@ -218,6 +226,8 @@ func (h *handler) index(exchanges []wirefixture.Exchange) error {
 			h.badBody = body
 		case body["error"] == "INVALID_REQUEST":
 			h.invalid = body
+		case apiPath == "/status" && hasFailedJob(body):
+			h.failed = body
 		case apiPath == "/status" && body["jobs"] != nil:
 			if h.status == nil {
 				h.status = body
@@ -231,6 +241,17 @@ func (h *handler) index(exchanges []wirefixture.Exchange) error {
 		}
 	}
 	return nil
+}
+
+// hasFailedJob reports whether a status body has a job that ended Failed.
+func hasFailedJob(body map[string]any) bool {
+	jobs, _ := body["jobs"].([]any)
+	for _, job := range jobs {
+		if entry, _ := job.(map[string]any); entry != nil && entry["status"] == statusFailed {
+			return true
+		}
+	}
+	return false
 }
 
 // ---- helpers ----
@@ -287,27 +308,28 @@ func (h *handler) getBalance(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, body)
 }
 
-func formFields(r *http.Request) (fields map[string]string, files map[string]int, err error) {
+func formFields(r *http.Request) (fields map[string]string, files map[string]int, sizes map[string]int, err error) {
 	mediaType, params, parseErr := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if parseErr != nil || mediaType != "multipart/form-data" || params["boundary"] == "" {
-		return nil, nil, fmt.Errorf("not multipart")
+		return nil, nil, nil, fmt.Errorf("not multipart")
 	}
 	reader, err := r.MultipartReader()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	fields, files = map[string]string{}, map[string]int{}
+	fields, files, sizes = map[string]string{}, map[string]int{}, map[string]int{}
 	for {
 		part, nextErr := reader.NextPart()
 		if nextErr == io.EOF {
-			return fields, files, nil
+			return fields, files, sizes, nil
 		}
 		if nextErr != nil {
-			return nil, nil, nextErr
+			return nil, nil, nil, nextErr
 		}
 		data, _ := io.ReadAll(io.LimitReader(part, 128<<20))
 		if part.FileName() != "" {
 			files[part.FormName()]++
+			sizes[part.FormName()] = len(data)
 		} else {
 			fields[part.FormName()] = string(data)
 		}
@@ -330,7 +352,7 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 		if !h.auth(w, r) || h.env.Intercept(w, r, fakeupstream.PhaseCreate, h.render) {
 			return
 		}
-		fields, files, err := formFields(r)
+		fields, files, sizes, err := formFields(r)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, h.badBody)
 			return
@@ -365,7 +387,13 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 		sample := h.submit[k.Path]
 		uuids, _ := fakeupstream.Dig(sample, "jobs", "uuids")
 		count := len(uuids.([]any))
-		t := &task{uuid: h.newUUID(), kind: k, scenario: fakeupstream.ScenarioOf(r)}
+		t := &task{uuid: h.newUUID(), kind: k, scenario: fakeupstream.ScenarioOf(r), expiredIssues: fakeupstream.ExpiredIssues(r)}
+		// Observed on the official service: a texture request whose model is the tiny
+		// one-triangle fixture GLB is accepted and then ends with every job Failed
+		// ("Invalid input."), twice in a row (see the alignment report).
+		if k.Need == "model-and-image" && sizes["model"] < tinyModelBytes && t.scenario == fakeupstream.ScenarioNone {
+			t.scenario = fakeupstream.ScenarioTaskFailed
+		}
 		t.key = "fake-subscription-" + t.uuid
 		for i := 0; i < count; i++ {
 			t.jobs = append(t.jobs, h.newUUID())
@@ -458,6 +486,9 @@ func (h *handler) postStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := fakeupstream.Clone(h.status)
+	if t.scenario == fakeupstream.ScenarioTaskFailed && n > h.pollsBeforeDone(t) {
+		body = fakeupstream.Clone(h.failed) // real sample: every job Failed and a top-level message
+	}
 	list := make([]any, len(t.jobs))
 	for i, id := range t.jobs {
 		list[i] = map[string]any{"uuid": id, "status": h.jobStatus(t, i, n)}
@@ -528,9 +559,11 @@ func (h *handler) postDownload(w http.ResponseWriter, r *http.Request) {
 	list := []any{}
 	// Asked before the jobs finish, the official API answers an empty list.
 	if t != nil && h.finished(t) {
+		issue := h.env.IssueArtifactURLs(t.uuid)
 		for _, name := range t.names {
 			list = append(list, map[string]any{
-				"name": name, "url": h.env.ArtifactOriginFor(r) + Prefix + "/files/" + t.uuid + "/" + name,
+				"name": name, "url": h.env.SignArtifactURL(
+					h.env.ArtifactOriginFor(r)+Prefix+"/files/"+t.uuid+"/"+name, t.scenario, issue),
 			})
 		}
 	}
@@ -544,6 +577,12 @@ func (h *handler) getFile(w http.ResponseWriter, r *http.Request) {
 	h.mu.Unlock()
 	if t == nil || t.scenario == fakeupstream.ScenarioArtifactNotFound {
 		http.NotFound(w, r)
+		return
+	}
+	if fakeupstream.ArtifactURLExpired(r, t.scenario, t.expiredIssues) {
+		w.Header().Set("Content-Type", expiredContentType)
+		w.WriteHeader(expiredStatus)
+		_, _ = w.Write([]byte(expiredBody))
 		return
 	}
 	name := r.PathValue("name")
@@ -570,3 +609,13 @@ func (h *handler) getFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", fmt.Sprint(len(data)))
 	_, _ = w.Write(data)
 }
+
+// An expired signed file URL is refused with 403 and the file host's JSON
+// error: file.hyper3d.com is a Volcengine TOS host (X-Tos-* query parameters,
+// seven days), which checks the lifetime before the signature. Observed
+// 2026-10-29 by moving X-Tos-Date into the past; the identifiers are fixed.
+const (
+	expiredStatus      = http.StatusForbidden
+	expiredContentType = "application/json"
+	expiredBody        = `{"Code":"AccessDenied","RequestId":"fake-request","HostId":"fake-host","Message":"Request has expired","EC":"0002-00000032","ExpiresSeconds":604800,"Expires":"2026-01-08T00:00:00Z","ServerTime":"2026-01-09T00:00:00Z"}`
+)

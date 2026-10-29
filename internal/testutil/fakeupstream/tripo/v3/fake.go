@@ -145,10 +145,13 @@ type task struct {
 	id       string
 	kind     kind
 	scenario fakeupstream.Scenario
-	parent   string
-	model    string
-	format   string
-	polls    int
+	// expiredIssues is how many of the first artifact URL issues expire under
+	// ScenarioArtifactExpired.
+	expiredIssues int
+	parent        string
+	model         string
+	format        string
+	polls         int
 	// failCode and failMessage are set when the task ends in "failed".
 	failCode    int
 	failMessage string
@@ -389,7 +392,7 @@ func (h *handler) create(k kind) http.HandlerFunc {
 				return
 			}
 		}
-		t := &task{id: h.newID(), kind: k, scenario: fakeupstream.ScenarioOf(r)}
+		t := &task{id: h.newID(), kind: k, scenario: fakeupstream.ScenarioOf(r), expiredIssues: fakeupstream.ExpiredIssues(r)}
 		t.model, _ = body["model"].(string)
 		t.format, _ = body["format"].(string)
 		if source, _ := body["input"].(string); k.Path == "/models/convert" {
@@ -517,9 +520,11 @@ func (h *handler) pollBody(r *http.Request, t *task, status string) map[string]a
 		return body
 	}
 	if output, ok := fakeupstream.DigMap(data, "output"); ok && status == statusSuccess {
+		issue := h.env.IssueArtifactURLs(t.id)
 		for key := range output {
 			if name, isURL := strings.CutSuffix(key, "_url"); isURL {
-				output[key] = h.env.ArtifactOriginFor(r) + Prefix + "/artifacts/" + t.id + "/" + t.artifactName(name)
+				output[key] = h.env.SignArtifactURL(
+					h.env.ArtifactOriginFor(r)+Prefix+"/artifacts/"+t.id+"/"+t.artifactName(name), t.scenario, issue)
 			}
 		}
 	}
@@ -614,6 +619,10 @@ func (h *handler) getArtifact(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if fakeupstream.ArtifactURLExpired(r, t.scenario, t.expiredIssues) {
+		writeExpired(w)
+		return
+	}
 	file, err := artifactFile(r.PathValue("name"), t.fidelity())
 	if err != nil {
 		http.NotFound(w, r)
@@ -627,3 +636,21 @@ func (h *handler) getArtifact(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", fmt.Sprint(len(data)))
 	_, _ = w.Write(data)
 }
+
+// writeExpired answers a signed artifact URL whose lifetime has passed. The
+// official artifact CDN is CloudFront with a custom-policy signed URL (Policy,
+// Signature, Key-Pair-Id): a URL it refuses, expired or not, gets 403 with the
+// XML access-denied error. Observed 2026-10-29 by setting the Policy's
+// DateLessThan into the past: CloudFront cannot tell an expired policy from a
+// bad signature, and does not try to.
+func writeExpired(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", expiredContentType)
+	w.WriteHeader(expiredStatus)
+	_, _ = w.Write([]byte(expiredBody))
+}
+
+const (
+	expiredStatus      = http.StatusForbidden
+	expiredContentType = "text/xml"
+	expiredBody        = `<?xml version="1.0" encoding="UTF-8"?><Error><Code>AccessDenied</Code><Message>Access denied</Message></Error>`
+)

@@ -17,12 +17,21 @@ same source-bound test binary, with the Meshy base URL pointing at the fake:
      second (--source-lost-task = the Remesh), PROVIDER_MODE=live, no browser
      helper (the runner falls back to the same HTTP actions the page buttons call).
 
-Zero cost, loopback only, no real Key, no dev-test. The format and image scenarios
-are not replayed: the first needs a source the real Meshy Convert left short of
-formats, the second a local wire fault that never reaches an upstream.
+  5. the format scenario (--only formats: a prepare failure, a submit that never
+     reached the upstream and its reconciliation, a changed price and the restored one)
+     needs sources the upstream left short of formats. A second stack run with the fake
+     scenario partial-formats (key "fake-partial-formats": a finished Meshy retexture
+     offers no STL and no 3MF, which the Catalog lists as optional for it) creates two
+     such sources and the runner completes them through a Meshy Convert on the fake (the format
+     completion Offering since #330);
+  6. the image scenario (--only image) injects a local wire fault (an image provider's
+     insufficient-quota answer) that never reaches an upstream: it needs the same
+     isolated fixture but no upstream at all.
+
+Zero cost, loopback only, no real Key, no dev-test.
 
 Usage: python3 scripts/smoke/replay-recovery-on-fake.py [--work DIR] [--keep]
-Needs `go`. Exit 0 = both runner reports say "passed".
+Needs `go`. Exit 0 = every runner report says "passed".
 """
 import argparse
 import importlib.util
@@ -71,6 +80,32 @@ def make_sources(processes, stack_binary, work, catalog):
     return humanoid["id"], other["id"], remesh["id"], os.path.join(work, "sources")
 
 
+def make_short_sources(processes, stack_binary, work, catalog):
+    """Two Meshy retextures that lack STL and 3MF: the sources the format-completion
+    scenario starts from. The Catalog lists those two formats as optional for a
+    retexture, so the Task succeeds without them, and a Meshy Remesh can supply them.
+    The fake scenario partial-formats (selected by the stack's API key) drops them from
+    a finished retexture; text-to-3d and the other kinds are unaffected."""
+    child, api = fs.start_stack(processes, stack_binary, work, "sources-short", catalog, "fake-partial-formats")
+    offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
+    ids, problems = [], []
+    for name, prompt in (("humanoid", "a plain humanoid robot"), ("format", "a plain cube")):
+        session = fs.new_session(api)
+        model = fs.step(api, offerings, f"short source {name}: meshy text-to-3d", fs.MESHY_TEXT_TO_3D, "text-to-3d", {"prompt": prompt}, session)
+        retexture = model and fs.step(api, offerings, f"short source {name}: meshy retexture (no STL, no 3MF)", fs.MESHY_RETEXTURE,
+                                      "retexture", {"source_task": model["id"], "prompt": "plain matte grey"}, session)
+        task_id = retexture and retexture.get("id")
+        ids.append(task_id)
+        status, coverage = api.json("GET", f"/api/v1/tasks/{task_id}/formats") if task_id else (0, {})
+        offered = [step for step in coverage.get("steps") or [] if step.get("formats")]
+        if status != 200 or not coverage.get("can_complete") or not offered:
+            problems.append(f"{task_id}: coverage {status} can_complete={coverage.get('can_complete')} steps={len(offered)}")
+    processes.stop(child)
+    if not all(ids) or problems:
+        raise RuntimeError("could not create sources short of formats: " + "; ".join(problems))
+    return ids[0], ids[1], os.path.join(work, "sources-short")
+
+
 def seed(work, name, stack_root, sources):
     destination = os.path.join(work, name)
     argv = [sys.executable, os.path.join(HERE, "seed-acceptance-fixture.py"),
@@ -115,6 +150,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
+    parser.add_argument("--only", default="", help="comma-separated runs to execute: chain, lost-response, formats, image (default: all)")
     args = parser.parse_args()
     work = args.work or tempfile.mkdtemp(prefix="fake-recovery-")
     os.makedirs(work, exist_ok=True)
@@ -128,21 +164,28 @@ def main():
         fs.require_free(fs.FAKE_PORT, "fake upstream")
         fs.require_free(fs.STACK_PORT, "stack")
         fs.require_free(ACCEPTANCE_PORT, "acceptance fixture")
-        fake_child = processes.start([fake_binary, "-addr", f"127.0.0.1:{fs.FAKE_PORT}", "-artifact-origin", f"https://{fs.ASSET_HOST}"],
+        fake_child = processes.start([fake_binary, "-addr", f"127.0.0.1:{fs.FAKE_PORT}", "-artifact-origin", f"https://{fs.ASSET_HOST}",
+                                      # Real tasks take minutes; a few extra polls keep the runner's before/after row counts from racing a task that
+                                      # finishes within seconds on the fake.
+                                      "-queued-polls", "2", "-running-polls", "8"],
                                      {"PATH": os.environ["PATH"]}, os.path.join(work, "fake.log"))
         if not fs.wait_port(fs.FAKE_PORT, fake_child):
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         humanoid, other, remesh, stack_root = make_sources(processes, stack_binary, work, catalog)
+        short_humanoid, short_other, short_root = make_short_sources(processes, stack_binary, work, catalog)
         owner = "fake_stack"  # the stack's development mock user (fs.stack_env)
         env, _ = fs.stack_env(work, "acceptance-env", catalog, fs.GOOD_KEY)
         env.update(PROVIDER_MODE="live", AGENT_MODE="mock", APP_ADDR=f"127.0.0.1:{ACCEPTANCE_PORT}")
         env.pop("DATABASE_PATH", None)
-        runs = [("chain", ["--only", "chain", "--source-humanoid", humanoid, "--source-format", other]),
-                ("lost-response", ["--only", "lost-response", "--source-humanoid", humanoid, "--source-format", other,
-                                   "--source-lost-task", remesh])]
+        runs = [("chain", stack_root, [humanoid, other, remesh], ["--only", "chain", "--source-humanoid", humanoid, "--source-format", other]),
+                ("lost-response", stack_root, [humanoid, other, remesh],
+                 ["--only", "lost-response", "--source-humanoid", humanoid, "--source-format", other, "--source-lost-task", remesh]),
+                ("formats", short_root, [short_humanoid, short_other],
+                 ["--only", "formats", "--source-humanoid", short_humanoid, "--source-format", short_other]),
+                ("image", stack_root, [humanoid, other, remesh], ["--only", "image", "--source-humanoid", humanoid, "--source-format", other])]
         failed = []
-        for name, extra in runs:
-            root = seed(work, "acceptance-" + name, stack_root, [humanoid, other, remesh])
+        for name, root_of_stack, sources, extra in [run for run in runs if not args.only or run[0] in args.only.split(",")]:
+            root = seed(work, "acceptance-" + name, root_of_stack, sources)
             write_manifest(root, sha, owner, catalog)
             code, outcome, tail = run_runner(acceptance_binary, root, env, extra)
             ok = code == 0 and outcome == "passed"

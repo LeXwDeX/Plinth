@@ -1,0 +1,12 @@
+{
+  "api_version": "v2",
+  "candidate_sha256": "92ac5b0f66280c817386547e06a382c5a2fb1de98a1d28ec5188a3d4c1aa579b",
+  "captured_at_utc": "2026-10-29",
+  "exchanges": 4,
+  "offering": "hyper3d/texture/local-model",
+  "provenance": "captured",
+  "scenario": "hyper3d-api-v2-alignment",
+  "source_revision": "unknown",
+  "transformation": "IDs, signed URLs, timestamps and amounts are deterministic placeholders; media bytes are not stored.",
+  "version": 1
+}

@@ -93,6 +93,14 @@ def selected_gates(race=False):
     return [*GATES[:position], RACE_GATE, *GATES[position:]]
 
 
+def gate_manifest():
+    """The gate set as data: names, argv and extra environment, in run order."""
+    def entry(gate):
+        name, argv, env = gate
+        return {'name': name, 'argv': argv, 'env': env}
+    return {'gates': [entry(gate) for gate in GATES], 'race': entry(RACE_GATE)}
+
+
 def gate_names(gates):
     return [name for name, _, _ in gates]
 
@@ -161,7 +169,7 @@ const watcher = fs.watch(root, {recursive: true}, (kind, name) => {
   if (p === marker) {
     if (stopping && !finalizing) {
       finalizing = true;
-      try { fs.unlinkSync(root + '/' + marker); } catch { markDirty('marker-cleanup'); }
+      try { fs.unlinkSync(root + '/' + marker); } catch (error) { if (error.code !== 'ENOENT') markDirty('marker-cleanup'); }
       // Let all callbacks in the filesystem event batch drain before closing.
       setImmediate(() => finish(false));
     }
@@ -208,15 +216,26 @@ input.on('line', line => {
   }
   if (command.kind !== 'stop') { markDirty('protocol-input'); return; }
   stopping = true;
-  try { fs.writeFileSync(root + '/' + marker, '', {flag: 'wx'}); }
-  catch { finish(true); return; }
+  // FSEvents can drop an event for a file created right after the stream
+  // started (observed ~5% of the time when the fingerprint finishes within
+  // milliseconds), so the marker is re-created until its event arrives.
+  const deadline = Date.now() + 3000;
+  const probe = () => {
+    if (finalizing) return;
+    if (Date.now() >= deadline) {
+      try { fs.unlinkSync(root + '/' + marker); } catch {}
+      finish(true);
+      return;
+    }
+    try { fs.unlinkSync(root + '/' + marker); } catch {}
+    try { fs.writeFileSync(root + '/' + marker, '', {flag: 'wx'}); }
+    catch { finish(true); return; }
+    setTimeout(probe, 250);
+  };
   // All watches use this Node loop. The marker and setImmediate drain its
   // native event batch before every watcher closes; external parents need no
   // writable marker/config files (including system /etc).
-  setTimeout(() => {
-    try { fs.unlinkSync(root + '/' + marker); } catch {}
-    finish(true);
-  }, 3000);
+  probe();
 });
 """
     def __init__(self, root):
@@ -941,7 +960,13 @@ def main():
     parser.add_argument('--pre-push', action='store_true')
     parser.add_argument('--race', action='store_true',
                         help='also run the CI-only go test race gate (dev_test.md §2)')
+    parser.add_argument('--list-gates', action='store_true',
+                        help='print the gate manifest (default set and the race gate) as JSON and exit; '
+                             'src/__tests__/ci-gate-parity.test.ts compares it with dev_test.md §2 and ci.yml')
     args = parser.parse_args()
+    if args.list_gates:
+        print(json.dumps(gate_manifest(), indent=2))
+        return 0
     if not args.check:
         require_tools(args.race)
     root = Path(git(Path.cwd(), 'rev-parse', '--show-toplevel')).resolve()

@@ -47,6 +47,11 @@ type CaptureConfig struct {
 	// identifier it accepts). The fake adds them back itself, and the version's
 	// drift test knows the list.
 	OmitKeys []string
+	// ExtraKeys are JSON keys registered even though the exporter would not
+	// reach them: it does not descend into an object whose own key looks like a
+	// credential ("input_tokens_details" contains "token"), so the keys below
+	// it must be named here. Their values are still sanitized as usual.
+	ExtraKeys []string
 }
 
 // Capture records the official run through a deferred wirefixture recorder.
@@ -237,6 +242,9 @@ func (c *Capture) finalPolicy(bundle *Bundle) wirefixture.Policy {
 	}
 	for key, kind := range c.cfg.Projection {
 		policy.Projection[key] = kind
+	}
+	for _, key := range c.cfg.ExtraKeys {
+		policy.Keys[key] = true
 	}
 	for _, host := range c.cfg.PublicHosts {
 		policy.PublicHosts[host] = true

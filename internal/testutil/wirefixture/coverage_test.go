@@ -50,6 +50,9 @@ type coverageOffering struct {
 	Enabled    bool   `json:"enabled"`
 	Options    struct {
 		Endpoint string `json:"endpoint"`
+		// CreatePath is the submit route of Offerings that declare their routes
+		// as create_path/observe_path/download_path (the matting protocol).
+		CreatePath string `json:"create_path"`
 	} `json:"provider_options"`
 }
 
@@ -232,6 +235,9 @@ func generateWireCoverage(t *testing.T) []byte {
 			unit.Evidence = evidenceLocal
 		default:
 			endpoint := o.Options.Endpoint
+			if endpoint == "" {
+				endpoint = o.Options.CreatePath
+			}
 			if endpoint == "" {
 				endpoint = "(adapter-defined)"
 			}
