@@ -285,6 +285,16 @@ class WorkflowReplay(unittest.TestCase):
     def test_job_results_are_read_from_act_output(self):
         self.assertEqual(host_run.parse_act_output(ACT_LOG), {'frontend': 'success', 'go check': 'failure'})
 
+    def test_job_ids_and_names_come_from_the_act_list_table(self):
+        table = ("Stage  Job ID        Job name       Workflow name  Workflow file  Events\n"
+                 "0      frontend      frontend       ci             ci.yml         pull_request,push\n"
+                 "0      go-check      go check       ci             ci.yml         pull_request,push\n"
+                 "0      go-test-race  go test race   ci             ci.yml         pull_request,push\n")
+        self.assertEqual(host_run.parse_job_list(table), [('frontend', 'frontend'), ('go-check', 'go check'), ('go-test-race', 'go test race')])
+        # act prefixes its log lines with the job name (padded), not the id.
+        results = host_run.parse_act_output("[ci/go test race    ] \U0001f3c1  Job succeeded\n")
+        self.assertEqual(results.get('go test race'), 'success')
+
     def test_sizes_from_docker_stats(self):
         self.assertEqual(host_run.parse_size('1.5GiB'), int(1.5 * (1 << 30)))
         self.assertEqual(host_run.parse_size('512MiB'), 512 << 20)

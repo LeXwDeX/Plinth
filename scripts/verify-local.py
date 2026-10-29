@@ -34,6 +34,8 @@ GATES = [
     ('go build', ['go', 'build', '-trimpath', '-o', os.devnull, './cmd/art-ai'], {'CGO_ENABLED': '0'}),
     # #261: tracked files carry no internal identifier (about 2 seconds).
     ('public tree', ['bash', 'scripts/check-public-tree.sh'], {}),
+    # #86: the release/gate scripts' own unit tests (no bytecode: the gate must not write into the tree it fingerprints).
+    ('scripts tests', ['python3', '-m', 'unittest', 'discover', '-s', 'scripts/tests', '-p', 'test_*.py'], {'PYTHONDONTWRITEBYTECODE': '1'}),
 ]
 # CI-only in dev_test.md §2: the slow gate, running the same tests as go test.
 # --race opts in locally; it then runs right after go test, as in §2.
@@ -45,6 +47,8 @@ MAX_AGE_SECONDS = 24 * 60 * 60
 # Git injects these during hook dispatch; none selects compilation behavior.
 ENV_BOOKKEEPING = {'_', 'SHLVL', 'OLDPWD', 'PWD', 'GIT_EXEC_PATH', 'GIT_PREFIX',
                    'GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE'}
+# Repository-selecting variables Git sets for hooks; gates run with the worktree as cwd instead.
+HOOK_GIT_ENV = {'GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_PREFIX'}
 # Gate concurrency across all worktrees of this clone (shared Git common dir).
 # Only scheduling: it selects no gate, command or compilation input, so it is
 # excluded from the receipt environment digest. 0 disables queueing.
@@ -844,7 +848,9 @@ def run_gates_unqueued(root, gates=None):
     for name, command, overrides in gates:
         start = time.monotonic()
         print(f'[verify] {name}', flush=True)
-        result = subprocess.run(command, cwd=root, env={**os.environ, 'PATH': canonical_path, **overrides})
+        # Hook dispatch points Git at the pushed repository; the scripts tests create their own repositories.
+        inherited = {k: value for k, value in os.environ.items() if k not in HOOK_GIT_ENV}
+        result = subprocess.run(command, cwd=root, env={**inherited, 'PATH': canonical_path, **overrides})
         print(f'[verify] {name}: {time.monotonic() - start:.2f}s (exit {result.returncode})', flush=True)
         if result.returncode:
             raise GateError(f'{name} failed ({result.returncode}); no reusable receipt')

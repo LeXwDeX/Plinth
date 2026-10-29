@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -8,6 +9,11 @@ from unittest.mock import patch
 SPEC = importlib.util.spec_from_file_location('verify_local', Path(__file__).parents[1] / 'verify-local.py')
 v = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(v)
+
+# The native input monitor and the fingerprint binding use macOS FSEvents (dev_test.md section 2); the
+# gate "scripts tests" also runs on Linux (CI, host CI container), where these classes are skipped.
+requires_macos = unittest.skipUnless(sys.platform == 'darwin', 'macOS FSEvents-based monitor and fingerprint tests')
+
 
 class VerificationTests(unittest.TestCase):
     def setUp(self):
@@ -88,7 +94,7 @@ class ReceiptTests(VerificationTests):
         self.assertNotIn('go test race', self.ran)
         self.verify(force=True, race=True)
         self.assertEqual(self.ran, ['frontend typecheck', 'frontend test', 'frontend build', 'go vet',
-                                    'go test', 'go test race', 'go build', 'public tree'])
+                                    'go test', 'go test race', 'go build', 'public tree', 'scripts tests'])
         self.assertEqual(v.selected_gates(True)[5], v.RACE_GATE)
         self.assertEqual(v.RACE_GATE[2], {'CGO_ENABLED': '1'})
     def test_fast_receipt_never_covers_race(self):
@@ -240,8 +246,8 @@ class CLIIntegrationTests(VerificationTests):
         self.tools = tempfile.TemporaryDirectory()
         self.bin = Path(self.tools.name)
         self.log = self.bin / 'calls'
-        # 'bash' fakes the public tree gate (bash scripts/check-public-tree.sh, #261).
-        for name in ('go', 'pnpm', 'bash'):
+        # 'bash' fakes the public tree gate (bash scripts/check-public-tree.sh, #261), 'python3' the scripts tests gate (#86).
+        for name in ('go', 'pnpm', 'bash', 'python3'):
             command = self.bin / name
             command.write_text('#!/bin/sh\nif [ "$1" = env ]; then exit 1; fi\nprintf "%s\\n" "$*" >> "$GATE_TEST_LOG"\nexit "${GATE_TEST_EXIT:-0}"\n')
             command.chmod(0o755)
@@ -336,6 +342,7 @@ class CLIIntegrationTests(VerificationTests):
         self.assertIn('gate queue: acquired slot 1/1', output)
         self.assertEqual(len(self.log.read_text().splitlines()), len(v.GATES))
 
+@requires_macos
 class FingerprintTests(VerificationTests):
     def setUp(self):
         super().setUp()
@@ -592,6 +599,7 @@ class GitReplaceTests(PushAndFilesystemTests):
             v.verify_push(self.root, self.push_line(original))
 
 
+@requires_macos
 class NativeMonitorTests(VerificationTests):
     def test_real_native_monitor_catches_transient_added_deleted_source(self):
         monitor = v.InputMonitor(self.root)
@@ -618,6 +626,7 @@ class NativeMonitorTests(VerificationTests):
         self.assertFalse(monitor.stop())
 
 
+@requires_macos
 class RootEventTests(VerificationTests):
     def test_root_basename_transient_child_is_not_directory_metadata(self):
         monitor = v.InputMonitor(self.root.resolve())
@@ -812,6 +821,7 @@ class HookPathNormalizationTests(VerificationTests):
         self.assertEqual(run.call_count, len(v.GATES))
         self.assertTrue(all(call.kwargs['env']['PATH'] == canonical for call in run.call_args_list))
 
+@requires_macos
 class RealHookReuseTests(VerificationTests):
     def test_manual_same_content_commit_real_push_reuses_once(self):
         import os

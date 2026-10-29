@@ -54,7 +54,7 @@
 | DEP-09 | M | 修改 `.env` 中端口与绑定地址后重新 `up -d` | 服务在新端口/地址监听；compose 中没有固定子网或固定 IP | #251 |
 | DEP-10 | L | 按 Provider 配置文档在 `.env` 写入一个或多个 Provider 的 key 与地址，并设真实模式，`docker compose up -d` 重建 | 配了 key 的 Provider 的 Offering 在 `GET /api/v1/offerings` 中 `available=true`；没配的明示不可用；按 PRV 组逐个验证 | #252 |
 | DEP-11 | M | `docker compose down -v` | 容器与数据卷被删除；文档写明这一步会删数据 | #251 |
-| DEP-12 | M | 源码门禁：装 README 要求的 Go 与 pnpm 版本，`pnpm install --frozen-lockfile` 后执行 `dev_test.md` §2 的全部八项（或 `python3 scripts/verify-local.py --race`；不带 `--race` 时不含仅 CI 的 race 项） | 依赖全部从公共源安装；八项全部通过 | #248、#257 |
+| DEP-12 | M | 源码门禁：装 README 要求的 Go 与 pnpm 版本，`pnpm install --frozen-lockfile` 后执行 `dev_test.md` §2 的全部九项（或 `python3 scripts/verify-local.py --race`；不带 `--race` 时不含仅 CI 的 race 项） | 依赖全部从公共源安装；九项全部通过 | #248、#257 |
 
 ## Feature Checklist（功能验收清单）
 

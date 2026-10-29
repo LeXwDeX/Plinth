@@ -331,8 +331,8 @@ def status(root, directory):
     print(f"hooks: {directory}")
     for name in REQUIRED_HOOKS:
         print(f"  {name}: {installed_block(hooks[name], REQUIRE)}")
-    print(f"  post-checkout: {installed_block(hooks['post-checkout'], {
-        'auto-init+setup': POST_CHECKOUT, 'legacy-auto-init': PREVIOUS_POST_CHECKOUT})}")
+    post_checkout_blocks = {'auto-init+setup': POST_CHECKOUT, 'legacy-auto-init': PREVIOUS_POST_CHECKOUT}
+    print(f"  post-checkout: {installed_block(hooks['post-checkout'], post_checkout_blocks)}")
     rows = survey(root)
     counts = {}
     for entry, state, reason in rows:
