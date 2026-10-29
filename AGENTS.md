@@ -44,7 +44,7 @@
 ## 实施与验收
 
 - 修改行为前写清预期、边界和验证路径。Schema/共享接口变更须检查 Catalog 校验、公开投影、扩展 discovery、兼容 API、前端消费者、fixture/快照与运行时可用性；跨 Provider 链需测成功、失败、跨用户、同/异 Provider、格式不兼容及重试/同意路径。
-- `dev_test.md` §2 是本地与 CI 自动化门禁唯一真源；按最终 diff 和影响链运行。前端构建使用 pnpm；Go 验证使用 go 命令。不要把远端 CI 当本机可复现问题的首次测试环境。前端任务状态展示只读 Product Schema `task_states`；旧 `src/lib/constants.ts` 状态枚举已随路由不可达组件一并删除，不要重建前端状态表。
+- `dev_test.md` §2 是本地与 CI 自动化门禁唯一真源；按最终 diff 和影响链运行。前端构建使用 pnpm；Go 验证使用 go 命令。不要把远端 CI 当本机可复现问题的首次测试环境。GitHub Actions 因计费不可用时，用 `python3 scripts/host-ci/run.py <sha|HEAD>` 在 `dev-test` 主机的干净容器里对精确提交跑同一套门禁（过渡方案，规则见 `dev_test.md` §2「主机 CI」）。前端任务状态展示只读 Product Schema `task_states`；旧 `src/lib/constants.ts` 状态枚举已随路由不可达组件一并删除，不要重建前端状态表。
 - **部署入口（2026-10-20 用户要求）**：部署文档入口是 [`docs/deployment.md`](docs/deployment.md)。用户只需在仓库根目录说要部署到哪个环境（例如「部署到正式测试环境」），Agent 就按该文档执行：从未纳入 Git 的 `deploy/local/environments.json`（模板 `deploy/environments.example.json`）按环境名解析目标，用 `scripts/release-env.py release <环境>` 发布，核对 revision，冒烟并汇报。环境名：`dev-test`（开发测试环境）、`formal-test`（正式测试环境，测试版本中的稳定版）；内部存档 #232 的隔离正式栈记为 `legacy-formal`。主机、地址、端口、目录与 Compose 名只写在本地环境文件，不写入仓库文档（本项目开源）。
 - **晋级规则（2026-10-20 用户确认）**：开发测试环境（包括 Agent 测试）全部稳定通过以后，才发布到正式测试环境。即 `formal-test` 只接收已在 `dev-test` 发布成功、并且 L0、L1、L1 Agent 及本次相关浏览器/Agent 验收全部 PASS（无 skip、无 soft-fail）的精确 `main` revision；验收报告以本仓库原生 Issue comment 记录，`release-env.py` 读取并核对该报告与 `dev-test` 成功发布清单，缺任一项即拒绝。
 - 产品修改只有发布到已定义测试环境并验证相关页面、API 和直接影响链后才能报告“完成”。各环境的部署事实与差异见 `docs/deployment.md`：`dev-test` 每次发布已推送的 `origin/main`；`formal-test` 只按上条晋级；`legacy-formal` 在 2026-10-20 新环境布局下去留待用户确认，确认前保持原样不操作。普通发布仅调用 `scripts/cutover-go-production.sh` 的 preflight，不调用 takeover、不重跑 ETL、不使用旧 `deploy.sh` 或 `--remove-orphans`，也不触碰同机其他业务。
@@ -72,7 +72,7 @@
 - GitHub 原生 Milestones、Issues 与 Pull requests：目标、工作范围、进度、阻塞、验收及交付记录。
 - `docs/v3-architecture/README.md`：冻结输入、执行授权、Scene、RenderManifest 和 SkillRun 的设计与源码状态；目录内“待验收”记录不能当作当前部署事实。
 - `docs/go-architecture.md`、`docs/provider-schema-architecture.md`：Go/Provider 分层及公开任务和私有子作业的历史基线；引用“当前”表述前先对照现行源码。
-- `dev_test.md`：门禁（含 GitHub Actions CI）、Safari 表单注意事项和部署后验收。
+- `dev_test.md`：门禁（含 GitHub Actions CI 与 `scripts/host-ci/run.py` 主机 CI）、Safari 表单注意事项和部署后验收。
 - `docs/acceptance-1.0.md`：开源 1.0 功能验收清单与全新机器部署验收步骤；逐项结果记在 GitHub #62，不写回该文档。
 - `README-go.md`、`dev_ops.md`：运行与发布协议、测试拓扑及运维快照；实际状态须在目标环境只读核验。
 - `internal/AGENTS.md`：Go 子树独有边界；若其指针因本文重写而过期，同步修正。
