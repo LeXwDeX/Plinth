@@ -396,8 +396,8 @@ esac
             if sys.platform == "darwin":
                 self.assertEqual(database.read_bytes(), before_database)
             # Linux (Debian SQLite 3.40.1, the gate container) changes main-file pages while the WAL connection is
-            # still open; the byte-for-byte check of the main file is only enforced where it is known to hold (#86
-            # records this as an open question), the journal mode and the WAL bytes are checked everywhere.
+            # still open; the byte-for-byte check of the main file is only enforced where it is known to hold (#143
+            # tracks the open question), the journal mode and the WAL bytes are checked everywhere.
             self.assertEqual(Path(str(database) + "-wal").read_bytes(), before_wal)
 
 
