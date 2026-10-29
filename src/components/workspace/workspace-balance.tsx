@@ -7,7 +7,7 @@ import { Popover } from '@base-ui/react/popover';
 import { useAnchoredPositioner } from '@/components/ui/overlay';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { useBalance, type ProviderBalanceAccountView } from '@/hooks/use-balance';
-import { formatNumber } from '@/lib/i18n/format';
+import { formatBalanceAmount } from '@/lib/i18n/format';
 import { activeLocale } from '@/lib/i18n/locale';
 import { formatPriceTotal } from '@/lib/pricing';
 import { formatSchemaText } from '@/lib/product-schema';
@@ -56,7 +56,7 @@ export function WorkspaceBalance() {
   const unavailable = text('ui.workspace.balance.unavailable');
   const nativeUnknown = text('ui.pricing.balance_unknown');
   const locale = activeLocale(schema);
-  const format = (amount: number) => formatNumber(amount, locale, { maximumFractionDigits: 20 });
+  const format = (amount: number) => formatBalanceAmount(amount, locale);
   const labelValue = (label: string | null, value: string) => formatSchemaText(text('ui.common.label_value'), { label: label ?? '', value });
   const summary = minimum
     ? labelValue(minimum.label, `${format(minimum.balance!)}${points}`)

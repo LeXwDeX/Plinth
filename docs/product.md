@@ -350,11 +350,11 @@ MCP 当前只开放本地 `workspace-read` 预置，读取 Offering、当前会�
 
 - 只有用户自建的个人 Skill。个人 Skill 包含名称、提示词和推荐尺寸。
 - 删除（#238）：「我的 Skill」列表里本人的个人 Skill 行右侧有垃圾桶，点一下即删除；系统 Skill 与「不使用」没有删除入口。删除当前选中的 Skill 后选择回到「不使用」，删除其他 Skill 不改变当前选择；删除失败保留该行与原选择并提示。已提交轮次冻结的 Skill 内容不受影响。
-- 没有内置 Skill。
+- 除系统三视图 Skill（`system-three-view`，由 Product Schema 声明，见三视图一节）外没有内置 Skill；不新增其他系统 Skill。系统 Skill 的名称、说明和默认消息按界面语言显示（中英）。
 - 没有 Skill 分类。
 - 不补官方预设。
 
-**现状**（2026-10-08 对 `main` 核对）：内置风格 Skill 已下线，Skill 分类已删除，用户可创建个人 Skill。新用户的 Skill 选择器为空。
+**现状**（2026-10-29 对 `main` 核对，SKL-01 裁定以产品现状为准）：内置风格 Skill 已下线，Skill 分类已删除，用户可创建个人 Skill。新用户的 Skill 选择器只有系统三视图 Skill 和“不使用”，没有其他内置 Skill 和分类。
 
 ## 8. 3D 交付
 

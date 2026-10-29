@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-10-29.issue92-93-reference-key-quota.2",
+    "revision": "2026-10-29.issue104-62-trial-fixes.2",
     "terminology": {
       "user_facing": [
         {
@@ -4170,6 +4170,8 @@
         "ui.connectivity.online": "网络已恢复，正在重新连接。",
         "ui.connectivity.session_expired": "登录已过期。未发送的内容已保留，重新登录后即可继续。",
         "ui.connectivity.relogin": "重新登录",
+        "ui.connectivity.session_rate_limited": "请求过多，请稍后再试。登录状态不受影响，正在自动重试。",
+        "ui.connectivity.session_unavailable": "暂时无法确认登录状态，正在自动重试。登录状态不受影响。",
         "ui.studio.composer.handle_tag_title": "加入附件",
         "ui.studio.composer.handle_tag_model_title": "写入输入框",
         "ui.studio.composer.stop_note": "停止只会结束这一轮对话。已经提交给上游的任务可能仍会计费，可在任务进度里查看。",
@@ -11250,6 +11252,11 @@
         "bootstrap_admin_password_reset_audit_action": "bootstrap_admin_password_reset",
         "password_minimum_characters": 6
       },
+      "session_retry": {
+        "initial_delay_ms": 1000,
+        "max_backoff_ms": 30000,
+        "max_retry_after_ms": 120000
+      },
       "public_paths": [
         "/login",
         "/api/auth/",
@@ -13378,6 +13385,8 @@
             "ui.connectivity.online": "Network restored. Reconnecting.",
             "ui.connectivity.session_expired": "Your sign-in has expired. Unsent content has been kept; sign in again to continue.",
             "ui.connectivity.relogin": "Sign in again",
+            "ui.connectivity.session_rate_limited": "Too many requests. Please try again later. Your sign-in is unaffected; retrying automatically.",
+            "ui.connectivity.session_unavailable": "Can't confirm your sign-in right now; retrying automatically. Your sign-in is unaffected.",
             "ui.studio.composer.handle_tag_title": "Add as attachment",
             "ui.studio.composer.handle_tag_model_title": "Insert into input box",
             "ui.studio.composer.stop_note": "Stop only ends this turn of the chat. Tasks already submitted upstream may still be billed; check task progress for details.",

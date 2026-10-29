@@ -1784,6 +1784,7 @@ const minimalApplication = `"application":{
 			"audit_resource_type":"user"
 		},
 		"public_paths":["/login"],
+		"session_retry":{"initial_delay_ms":1000,"max_backoff_ms":30000,"max_retry_after_ms":120000},
 		"permissions":[
 			{"key":"tasks.read.own","label":"查看本人任务"},
 			{"key":"users.manage","label":"管理用户"},

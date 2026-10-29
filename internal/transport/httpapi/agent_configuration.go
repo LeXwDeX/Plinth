@@ -188,7 +188,7 @@ func (s *Server) effectiveAgentConfiguration(w http.ResponseWriter, r *http.Requ
 			if !slices.Contains(snap.Configuration.EnabledToolNames, skill.Tool) || !s.toolServesDomain(skill.Tool, domain) {
 				continue
 			}
-			skills = append(skills, map[string]any{"id": skill.ID, "name": skill.Name, "name_zh": skill.NameZH, "category": skill.Category, "thumbnail_path": skill.ThumbnailPath, "recommended_size": skill.RecommendedSize, "tags": skill.Tags})
+			skills = append(skills, map[string]any{"id": skill.ID, "name": skill.Name, "name_zh": s.systemSkillText(r, skill, skill.NameZH), "category": skill.Category, "thumbnail_path": skill.ThumbnailPath, "recommended_size": skill.RecommendedSize, "tags": skill.Tags})
 			continue
 		}
 		if !compatible {
@@ -222,4 +222,13 @@ func (s *Server) toolServesDomain(name, domain string) bool {
 		}
 	}
 	return false
+}
+
+// systemSkillText is the request-locale copy of a system Skill's Schema text;
+// personal and published Skills are person content and stay as written.
+func (s *Server) systemSkillText(r *http.Request, skill catalog.SkillSchema, text string) string {
+	if skill.Tool == "" {
+		return text
+	}
+	return s.textIn(requestLocale(r), text)
 }

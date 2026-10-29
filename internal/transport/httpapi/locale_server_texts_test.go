@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/access"
@@ -270,4 +271,115 @@ func TestFrozenQuoteLabelRenamedSinceFollowsTheLocaleByComponentID(t *testing.T)
 	if server.quoteIn("", offering, frozen) != frozen || frozen.Components[0].Label != historical {
 		t.Fatal("default locale or frozen evidence changed")
 	}
+}
+
+// #62 I18N-03: the system Skill's name, description and default message follow
+// the request locale; the English picker must not show the Chinese copy.
+func TestSystemSkillCatalogFollowsTheLocale(t *testing.T) {
+	t.Parallel()
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := product.Application()
+	defaults, err := catalog.LoadDefaultSkillCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := OpenMigratedTestRepository(filepath.Join(t.TempDir(), "skills.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	service, err := agentconfiguration.New(repo, schema, defaults, product.List(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := access.NewPolicy(access.PolicyConfig{DefaultRole: "user", AdminRole: "admin", Roles: []access.RoleDefinition{{Key: "user"}, {Key: "admin"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	texts, err := catalog.NewTextLocalizer(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{
+		identity:    DevelopmentIdentity{DefaultClaims: access.Claims{ID: "u", Roles: []string{"user"}}, Policy: policy},
+		application: schema, agentConfiguration: service, texts: texts,
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)), mux: http.NewServeMux(),
+	}
+	server.mux.HandleFunc("GET "+schema.Runtime.HTTP.Routes.ChatSkills, server.skillCatalogSchema)
+	read := func(locale string) map[string]any {
+		request := httptest.NewRequest(http.MethodGet, schema.Runtime.HTTP.Routes.ChatSkills, nil)
+		request = request.WithContext(catalog.WithLocale(context.Background(), locale))
+		response := httptest.NewRecorder()
+		server.mux.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("skills %s: %d %s", locale, response.Code, response.Body.String())
+		}
+		var payload struct {
+			Skills []map[string]any `json:"skills"`
+		}
+		decodeTestJSON(t, response.Body.Bytes(), &payload)
+		for _, skill := range payload.Skills {
+			if skill["id"] == "system-three-view" {
+				return skill
+			}
+		}
+		t.Fatalf("system-three-view missing for %q", locale)
+		return nil
+	}
+	fields := schema.Chat.Skills.Fields
+	english, chinese := read("en"), read("")
+	for _, key := range []string{fields.NameZH, fields.Prompt, fields.DefaultMessage} {
+		value, _ := english[key].(string)
+		if value == "" || serverChineseText.MatchString(value) {
+			t.Fatalf("en %s = %q", key, value)
+		}
+	}
+	for _, key := range []string{fields.NameZH, fields.Prompt, fields.DefaultMessage} {
+		if value, _ := chinese[key].(string); !serverChineseText.MatchString(value) {
+			t.Fatalf("default %s = %q", key, value)
+		}
+	}
+
+	// A locale switch must not be answered 304 for the other locale's copy.
+	fetch := func(locale, ifNoneMatch string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, schema.Runtime.HTTP.Routes.ChatSkills, nil)
+		request = request.WithContext(catalog.WithLocale(context.Background(), locale))
+		if ifNoneMatch != "" {
+			request.Header.Set("If-None-Match", ifNoneMatch)
+		}
+		response := httptest.NewRecorder()
+		server.mux.ServeHTTP(response, request)
+		return response
+	}
+	zh := fetch("", "")
+	tag := zh.Header().Get("ETag")
+	if tag == "" || fetch("", tag).Code != http.StatusNotModified {
+		t.Fatalf("same locale revalidation: etag %q", tag)
+	}
+	en := fetch("en", tag)
+	if en.Code != http.StatusOK || en.Header().Get("ETag") == tag || serverChineseText.MatchString(regexp.MustCompile(`"id":"[^"]*"`).ReplaceAllString(string(systemSkillBody(t, en.Body.Bytes())), "")) {
+		t.Fatalf("en after zh ETag: %d %q %s", en.Code, en.Header().Get("ETag"), en.Body.String())
+	}
+	if vary := strings.Join(en.Header().Values("Vary"), ","); !strings.Contains(vary, "Accept-Language") || !strings.Contains(vary, "Cookie") {
+		t.Fatalf("Vary = %q", vary)
+	}
+}
+
+// systemSkillBody is the system Skill's JSON object from a skills response.
+func systemSkillBody(t *testing.T, body []byte) []byte {
+	t.Helper()
+	var payload struct {
+		Skills []json.RawMessage `json:"skills"`
+	}
+	decodeTestJSON(t, body, &payload)
+	for _, raw := range payload.Skills {
+		if strings.Contains(string(raw), `"system-three-view"`) {
+			return raw
+		}
+	}
+	t.Fatalf("system Skill missing: %s", body)
+	return nil
 }
