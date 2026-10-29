@@ -360,7 +360,7 @@ def wait_task(api, task_id, seconds=90):
     return task
 
 
-def check_delivery(api, task, offering):
+def check_delivery(api, task, offering, submitted=None):
     """Required slots present; every asset's bytes match its declared size and
     hash and arrive with the sandboxed delivery headers. An unknown asset id is
     a 404. (The development mock login makes every request the one mock user,
@@ -371,8 +371,12 @@ def check_delivery(api, task, offering):
     # without a variant is met by any asset of its role.
     delivered = {(a.get("role"), a.get("variant")) for a in task.get("assets") or []}
     for output in offering["outputs"]:
-        # A slot with required_when (the views of an edited multiview) is only due when its parameter is given.
-        if output.get("delivery") != "required" or output.get("minimum", 1) == 0 or output.get("required_when"):
+        if output.get("delivery") != "required" or output.get("minimum", 1) == 0:
+            continue
+        # A conditional slot (the views of an edited multiview) is due when its condition holds for the
+        # submitted input. Only the "present" operator is evaluated; any other counts as due.
+        condition = output.get("required_when")
+        if condition and condition.get("operator") == "present" and not (submitted or {}).get(condition.get("parameter")):
             continue
         slot = (output["role"], output.get("variant"))
         if not any(role == slot[0] and (slot[1] is None or variant == slot[1]) for role, variant in delivered):
@@ -401,7 +405,7 @@ def run_step(api, offerings, label, offering, capability, payload, session, expe
     if task.get("state") != expect_state:
         record(label, False, f"state {task.get('state')} failure {json.dumps(task.get('failure'), ensure_ascii=False)}")
         return task
-    problems, count = check_delivery(api, task, offerings[offering])
+    problems, count = check_delivery(api, task, offerings[offering], payload)
     record(label, not problems, f"{task['state']}, {count} assets verified (size, SHA-256, sandboxed delivery headers)" if not problems else "; ".join(problems))
     return task
 
@@ -483,6 +487,9 @@ def scenario_tripo_images(api, offerings):
     if views and views.get("state") == "SUCCEEDED":
         step(api, offerings, "tripo edit-multiview", TRIPO_EDIT_MULTIVIEW, "edit-multiview",
              {"source_task": views["id"], "front_prompt": "make the object green"}, session)
+        # Other views than the front: the result carries exactly the views asked for.
+        step(api, offerings, "tripo edit-multiview (left and back)", TRIPO_EDIT_MULTIVIEW, "edit-multiview",
+             {"source_task": views["id"], "left_prompt": "make it red", "back_prompt": "make it blue"}, session)
     step(api, offerings, "tripo smartsegment (picture)", TRIPO_SMARTSEGMENT_IMAGE, "image-to-3d", {"image": picture}, session)
     if gen and gen.get("state") == "SUCCEEDED":
         step(api, offerings, "tripo decimate (triangle)", TRIPO_DECIMATE, "remesh", {"source_task": gen["id"]}, session)

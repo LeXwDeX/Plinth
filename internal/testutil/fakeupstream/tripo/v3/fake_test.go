@@ -347,6 +347,35 @@ func TestEveryKindCreatesATaskOfItsTypeAndDeliversItsFiles(t *testing.T) {
 	}
 }
 
+// An edit returns exactly the views it was asked to edit, whichever they are (the
+// captured sample asked for the front view only).
+func TestEditMultiviewReturnsTheRequestedViews(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	source := f.create("/generation/image-to-multiview", map[string]any{"input": "file_x"}, key)
+	f.finish(source, key)
+	for _, views := range [][]string{{"front"}, {"left"}, {"back", "right"}, {"right", "front", "left", "back"}} {
+		var prompts []map[string]any
+		for _, view := range views {
+			prompts = append(prompts, map[string]any{"view": view, "prompt": "make it green"})
+		}
+		id := f.create("/generation/edit-multiview", map[string]any{"input": source, "prompts": prompts}, key)
+		_, done := f.finish(id, key)
+		got, _ := field(t, done, "data", "output", "generate_multiview_image").(map[string]any)
+		if len(got) != len(views) {
+			t.Errorf("views %v: output = %v", views, got)
+		}
+		for _, view := range views {
+			url, _ := got[view+"_view_url"].(string)
+			if status, contentType, data := f.download(url); status != http.StatusOK || contentType != "image/jpeg" || deliveryErr(t, data, "image", view, "image/jpeg") != nil {
+				t.Errorf("view %s: download %d %s", view, status, contentType)
+			}
+		}
+	}
+	if status, _, _ := f.do("POST", "/generation/edit-multiview", key, map[string]any{"input": source, "prompts": []map[string]any{{"view": "top", "prompt": "x"}}}); status != http.StatusBadRequest {
+		t.Errorf("an unknown view = %d", status)
+	}
+}
+
 type delivery struct {
 	path                     []any
 	role, variant, mediaType string

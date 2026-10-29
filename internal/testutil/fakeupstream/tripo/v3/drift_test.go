@@ -104,7 +104,8 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 		}
 		parent := f.create("/generation/text-to-model", textBody(), key)
 		f.finish(parent, key)
-		body := map[string]any{"model": "v3.0-20260909", "prompt": "p", "input": parent, "animation": "preset:walk", "format": "STL", "seg_type": "image"}
+		body := map[string]any{"model": "v3.0-20260909", "prompt": "p", "input": parent, "animation": "preset:walk", "format": "STL", "seg_type": "image",
+			"prompts": []map[string]any{{"view": "front", "prompt": "p"}}}
 		if k.Path == "/animations/retarget" {
 			rig := f.create("/animations/rig", map[string]any{"input": parent, "model": "v3.0-20260909"}, key)
 			f.finish(rig, key)
@@ -127,7 +128,8 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 		}
 		parent := f.create("/generation/text-to-model", textBody(), key)
 		f.finish(parent, key)
-		body := map[string]any{"model": "v3.0-20260909", "prompt": "p", "input": parent, "animation": "preset:walk", "format": "STL", "seg_type": "image"}
+		body := map[string]any{"model": "v3.0-20260909", "prompt": "p", "input": parent, "animation": "preset:walk", "format": "STL", "seg_type": "image",
+			"prompts": []map[string]any{{"view": "front", "prompt": "p"}}}
 		if k.Path == "/animations/retarget" {
 			rig := f.create("/animations/rig", map[string]any{"input": parent, "model": "v3.0-20260909"}, key)
 			f.finish(rig, key)

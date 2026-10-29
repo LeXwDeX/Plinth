@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -162,7 +163,11 @@ type task struct {
 	kind kind
 	// typ is the task type the official API reports: the kind's, except that Smart
 	// Segmentation reports smartsegment_image or smartsegment_model by seg_type.
-	typ      string
+	typ string
+	// views and prompts are what an edit_multiview request asked for: the views to
+	// edit, in request order, and the prompts as sent.
+	views    []string
+	prompts  []any
 	scenario fakeupstream.Scenario
 	// expiredIssues is how many of the first artifact URL issues expire under
 	// ScenarioArtifactExpired.
@@ -422,6 +427,22 @@ func (h *handler) create(k kind) http.HandlerFunc {
 				return
 			}
 		}
+		if k.Path == "/generation/edit-multiview" {
+			prompts, _ := body["prompts"].([]any)
+			for _, entry := range prompts {
+				if prompt, _ := entry.(map[string]any); prompt != nil {
+					view, _ := prompt["view"].(string)
+					if slices.Contains([]string{"front", "left", "back", "right"}, view) && !slices.Contains(t.views, view) {
+						t.views = append(t.views, view)
+					}
+				}
+			}
+			if len(t.views) == 0 {
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, "prompts must name at least one view", "Refer to the API documentation for parameter requirements"))
+				return
+			}
+			t.prompts = prompts
+		}
 		t.model, _ = body["model"].(string)
 		t.format, _ = body["format"].(string)
 		if source, _ := body["input"].(string); k.Path == "/models/convert" {
@@ -548,6 +569,9 @@ func (h *handler) pollBody(r *http.Request, t *task, status string) map[string]a
 		}
 	}
 	if input, ok := fakeupstream.DigMap(data, "input"); ok {
+		if _, has := input["prompts"]; has && t.prompts != nil {
+			input["prompts"] = t.prompts
+		}
 		for _, field := range []string{"original_model_id", "original_task_id"} {
 			if _, has := input[field]; has {
 				input[field] = t.parentID()
@@ -571,6 +595,21 @@ func (h *handler) pollBody(r *http.Request, t *task, status string) map[string]a
 					node[key] = h.env.SignArtifactURL(
 						h.env.ArtifactOriginFor(r)+Prefix+"/artifacts/"+t.id+"/"+t.artifactName(name), t.scenario, issue)
 				}
+			}
+		}
+		if t.typ == "edit_multiview" {
+			// An edit returns only the views it was asked to edit (captured: one prompt, one view).
+			if views, ok := output["generate_multiview_image"].(map[string]any); ok {
+				sample := ""
+				for _, value := range views {
+					sample, _ = value.(string)
+					break
+				}
+				edited := map[string]any{}
+				for _, view := range t.views {
+					edited[view+"_view_url"] = sample
+				}
+				output["generate_multiview_image"] = edited
 			}
 		}
 		render(output)
