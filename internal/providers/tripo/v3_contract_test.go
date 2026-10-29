@@ -39,8 +39,11 @@ func TestTaskStatusMapping(t *testing.T) {
 		{name: "banned → Failed", status: "banned", wantPhase: generation.UpstreamFailed, wantFailed: true},
 		{name: "expired → Failed", status: "expired", wantPhase: generation.UpstreamFailed, wantFailed: true},
 		{name: "cancelled → Canceled", status: "cancelled", wantPhase: generation.UpstreamCanceled, wantFailed: true},
-		// unknown 状态应返回 error（协议错误）；wantPhase 留空占位，error 路径提前 return 不被断言
-		{name: "unknown → Protocol error", status: "unknown"},
+		// unknown 是非终态（官方 Python SDK 的终态集合不含 unknown），按 running
+		// 继续轮询；上限见 TestUnknownStatusIsBoundedPolling。
+		{name: "unknown → Running", status: "unknown", wantPhase: generation.UpstreamRunning},
+		// 不在词表里的状态词仍是协议错误。
+		{name: "undeclared → Protocol error", status: "teleported"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -53,13 +56,13 @@ func TestTaskStatusMapping(t *testing.T) {
 				Job:       generation.UpstreamJob{ProviderID: "tripo", RemoteID: "uuid-1"},
 			})
 			if err != nil {
-				if tc.status != "unknown" {
+				if tc.status != "teleported" {
 					t.Fatalf("unexpected error: %v", err)
 				}
 				return
 			}
-			if tc.status == "unknown" {
-				t.Fatalf("期望 unknown 状态返回 error，实际 nil")
+			if tc.status == "teleported" {
+				t.Fatalf("期望未声明状态返回 error，实际 nil")
 			}
 			if obs.Phase != tc.wantPhase {
 				t.Errorf("phase = %q, want %q", obs.Phase, tc.wantPhase)

@@ -65,6 +65,10 @@ type StatusRule struct {
 	Phase     string `json:"phase"`
 	Class     string `json:"class,omitempty"`
 	Retryable bool   `json:"retryable,omitempty"`
+	// MaxConsecutive bounds how many polls in a row may return this status
+	// word (accepted/running phases only). The poll after the bound ends the
+	// attempt as a failure of Class. Zero means no bound.
+	MaxConsecutive int `json:"max_consecutive,omitempty"`
 }
 
 // StatusMapping 是连接级任务状态词表：键为上游状态词（小写），
