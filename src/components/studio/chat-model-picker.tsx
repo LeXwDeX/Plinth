@@ -43,14 +43,6 @@ export function chatModelSection(
   };
 }
 
-/** Whether the composer shows the chat model picker for the active session (two or more models offered). */
-export function useChatModelPickerShown(): boolean {
-  const { schema } = useProductSchema();
-  const activeSessionId = useChatStore((state) => state.activeSessionId);
-  const count = useSessionContextStore((state) => (activeSessionId ? state.chatModel[activeSessionId]?.options.length ?? 0 : 0));
-  return Boolean(schema.runtime.http.routes.chat_session_model) && count >= 2;
-}
-
 /**
  * 输入区底部的对话模型选择，与思考强度、token 数并列。管理员开放两个以上模型时才出现；选择按会话保存在
  * 服务端，切换后思考档位和上下文窗口随新模型变化，只影响之后的消息。

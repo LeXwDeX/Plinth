@@ -111,6 +111,15 @@ describe('the context meter (#322)', () => {
     expect(html).toContain(messages['ui.studio.context.compacting']);
   });
 
+  it('takes a full row of the picker grid when narrow and two tracks when wide, one picker high', () => {
+    open({ tokens: 356_000, window: 1_000_000, compactions: [] });
+    const row = tag(renderToStaticMarkup(<ContextMeter />), 'composer-context');
+    expect(row).toContain('col-span-full');
+    expect(row).toContain('@[40rem]:col-span-2');
+    expect(row).toContain('h-7');
+    expect(row).toContain('justify-between');
+  });
+
   it('hides the compaction when the deployment turned it off, and everything on an older Schema', () => {
     open({ tokens: 356_000, window: 1_000_000, compactions: [] });
     const off = structuredClone(catalog);
