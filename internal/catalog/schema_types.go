@@ -2775,8 +2775,12 @@ type ChatAgentSchema struct {
 	ErrorBodyMaxBytes           int64             `json:"error_body_max_bytes"`
 	SystemPrompt                string            `json:"system_prompt"`
 	DomainContext               map[string]string `json:"domain_context"`
-	TitlePrompt                 string            `json:"title_prompt"`
-	TitleMaxChars               int               `json:"title_max_characters"`
+	// PromptSections declares Agent-facing text that only applies while one of
+	// its capabilities has an enabled Offering (#115). See
+	// ChatAgentPromptSection.
+	PromptSections []ChatAgentPromptSection `json:"prompt_sections,omitempty"`
+	TitlePrompt    string                   `json:"title_prompt"`
+	TitleMaxChars  int                      `json:"title_max_characters"`
 	// TitleMaxCharsByLocale overrides title_max_characters for a UI locale
 	// whose words take more characters than Chinese (an English title).
 	TitleMaxCharsByLocale map[string]int `json:"title_max_characters_by_locale,omitempty"`

@@ -67,10 +67,11 @@ func (s *Server) manageAgentConfiguration(w http.ResponseWriter, r *http.Request
 			writeProblem(w, 400, "invalid_configuration", err.Error())
 			return
 		}
+		effective := s.agentConfiguration.Effective(body.Configuration)
 		prompts := map[string]string{}
 		for _, domain := range []string{"image", "model-3d"} {
-			prompts[domain] = body.Configuration.SystemPrompt
-			if text := body.Configuration.DomainContext[domain]; text != "" {
+			prompts[domain] = effective.SystemPrompt
+			if text := effective.DomainContext[domain]; text != "" {
 				prompts[domain] += "\n\n" + text
 			}
 		}
