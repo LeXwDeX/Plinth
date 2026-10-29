@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -14,6 +15,15 @@ SPEC = importlib.util.spec_from_file_location(
     "required", Path(__file__).parents[1] / "install-specgit-required-hooks.py")
 required = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(required)
+
+# SpecGit is the maintainers' internal tool (AGENTS.md); CI, Dockerfile.ci and outside contributors do not
+# have it, so the tests that drive the real CLI are skipped there and stay in the maintainer gate.
+requires_specgit = unittest.skipIf(shutil.which("specgit") is None, "needs the real specgit CLI (maintainer environments only)")
+REAL_CLI_TESTS = (
+    "test_real_git_hooks_path_and_cli_guard_are_verified",
+    "test_real_cli_setup_wires_all_supported_hosts_in_a_disposable_worktree",
+    "test_global_absolute_foreign_hooks_path_cannot_block_or_init_other_repo",
+)
 
 PRE_COMMIT = '''#!/bin/sh
 # >>> specgit-v2:pre-commit:start >>>
@@ -405,6 +415,7 @@ class RequiredHookTests(unittest.TestCase):
             with self.subTest(shebang=shebang):
                 self.assertTrue(required.proposed(shebang + "\n", "block", ()).endswith("block"))
 
+    @requires_specgit
     def test_real_git_hooks_path_and_cli_guard_are_verified(self):
         real_repo = self.base / "real-repo"
         self.git("init", "-q", str(real_repo), cwd=self.base)
@@ -444,6 +455,7 @@ class RequiredHookTests(unittest.TestCase):
             self.assertEqual(run.returncode, 2, run.stderr)
             self.assertIn("Invalid v2 declaration", run.stderr)
 
+    @requires_specgit
     def test_real_cli_setup_wires_all_supported_hosts_in_a_disposable_worktree(self):
         cli = Path(shutil.which("specgit")).resolve()
         root = self.base / "real-setup"
@@ -506,6 +518,7 @@ class RequiredHookTests(unittest.TestCase):
         self.assertEqual(linked_commit.returncode, 0, linked_commit.stderr)
         self.assertEqual(self.events_log(), ["invoked"])
 
+    @requires_specgit
     def test_global_absolute_foreign_hooks_path_cannot_block_or_init_other_repo(self):
         host = self.base / "hooks-owner"
         self.git("init", "-q", str(host), cwd=self.base)
@@ -626,6 +639,21 @@ class RequiredHookTests(unittest.TestCase):
         self.assertIn(f"[init] FAILED (1; [specgit-worktree] specgit init", output)
         self.assertIn("ownership_conflict:", output)
         self.assertTrue(output.rstrip().endswith(f"): {ready}"))
+
+
+class WithoutSpecgitTests(unittest.TestCase):
+    """The gate must pass where specgit is absent: the CLI-driven tests skip instead of raising."""
+
+    def test_cli_driven_tests_skip_when_specgit_is_not_on_path(self):
+        path = os.pathsep.join(d for d in os.environ.get("PATH", "").split(os.pathsep)
+                               if d and not os.access(os.path.join(d, "specgit"), os.X_OK))
+        names = [f"test_install_specgit_required_hooks.RequiredHookTests.{name}" for name in REAL_CLI_TESTS]
+        run = subprocess.run([sys.executable, "-m", "unittest", "-v", *names], cwd=Path(__file__).parent,
+                             env={**os.environ, "PATH": path, "PYTHONDONTWRITEBYTECODE": "1"},
+                             capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stderr.count("skipped"), len(REAL_CLI_TESTS) + 1, run.stderr)
+        self.assertIn("OK (skipped=3)", run.stderr)
 
 
 if __name__ == "__main__":
