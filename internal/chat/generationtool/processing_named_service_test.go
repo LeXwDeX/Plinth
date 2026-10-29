@@ -289,6 +289,38 @@ func TestAnUnknownServiceIsRefusedWithoutEchoingItsID(t *testing.T) {
 	}
 }
 
+// #128: an Offering the Schema registers whose runtime configuration is missing
+// is told apart from an ID that is not registered: the Agent is told the
+// service is currently unavailable, nothing is submitted and no other service
+// takes its place.
+func TestAnUnavailableServiceIsRefusedAsUnavailableNotUnknown(t *testing.T) {
+	h := namedHarness(t, "auto")
+	const id = "hyper3d/bang/rodin-task"
+	h.gateway.unavailable = map[generation.OfferingID]bool{id: true}
+	var registered bool
+	for _, offering := range h.gateway.Offerings("mesh-segmentation") {
+		registered = registered || string(offering.ID) == id
+	}
+	if !registered {
+		t.Fatalf("%s is not a registered mesh-segmentation Offering", id)
+	}
+	result, _ := h.runWith("owner-a", "session-a", "process_model",
+		`{"step":"mesh-segmentation","source_task_id":"@model2","offering_id":"`+id+`"}`, namedHistory("再分割一次"), bigBangSelected)
+	content := h.content(result)
+	message, _ := content["error"].(string)
+	if content["success"] != false || content["offering_unavailable"] != true || content["requested_offering_id"] != id ||
+		!strings.Contains(message, "currently unavailable") || strings.Contains(message, id) || !result.NoSubmission ||
+		len(h.gateway.frozen) != 0 || h.gateway.submitCount != 0 {
+		t.Fatalf("unavailable service = %v %+v", content, result)
+	}
+	// The unregistered ID keeps the unknown refusal: no unavailable marker.
+	result, _ = h.runWith("owner-a", "session-a", "process_model",
+		`{"step":"mesh-segmentation","source_task_id":"@model2","offering_id":"acme/made-up"}`, namedHistory("再分割一次"), bigBangSelected)
+	if content := h.content(result); content["offering_unavailable"] != nil || strings.Contains(content["error"].(string), "currently unavailable") {
+		t.Fatalf("unknown service reads as unavailable: %v", content)
+	}
+}
+
 // I: a step that waits on its approval card tells the Agent the frozen price
 // as it is: base, extra and what the extra pays for, and the total.
 func TestAStepOnItsApprovalCardReportsTheExactQuote(t *testing.T) {

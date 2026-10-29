@@ -16,6 +16,7 @@ import { ModelViewer3D } from '@/components/viewer/model-viewer-3d';
 import { ModelArchiveLink, ModelFormatsPanel } from '@/components/workspace/model-formats';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
+import { useModelCaptureBlock } from '@/hooks/use-model-capture-block';
 import { useObjectActions } from '@/hooks/use-object-actions';
 import { useActiveAgentScope } from '@/hooks/use-session-agent-scope';
 import { useAuth } from '@/hooks/use-auth';
@@ -59,6 +60,7 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
   const { schema, text } = useProductSchema();
   const { proxyAssetUrl } = useAssetURLRewriter();
   const { openOnStage, toThreeD, toGaussianSplat, captureToTwoD } = useObjectActions();
+  const captureBlock = useModelCaptureBlock(target.taskId);
   const scope = useActiveAgentScope();
   const activeSessionId = useChatStore((state) => state.activeSessionId);
   const tracked = useWorkspaceStore((state) => state.trackedTasks.find((task) => task.taskId === target.taskId));
@@ -336,7 +338,9 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
             </HintTooltip>
           ) : null}
           {actions.sendTo2D && object ? (
-            <Action type="button" variant="outline" size="sm" onClick={() => run(() => captureToTwoD(object))} data-testid="result-detail-to2d"><Share2 />{text('ui.result.detail.send_to_2d')}</Action>
+            <HintTooltip name={text('ui.result.detail.send_to_2d')} reason={captureBlock ? text(captureBlock) : undefined}>
+              <Action type="button" variant="outline" size="sm" disabled={captureBlock !== null} onClick={() => run(() => captureToTwoD(object))} data-testid="result-detail-to2d"><Share2 />{text('ui.result.detail.send_to_2d')}</Action>
+            </HintTooltip>
           ) : null}
           {blockedReason && conversion === 'sendTo3D' ? (
             <HintTooltip name={text('ui.studio.result.to_3d')} reason={blockedText}>

@@ -27,6 +27,9 @@ export const VERSIONS_WATCH_INTERVAL_MS = 3000;
 export const VERSIONS_WATCH_DURATION_MS = 5 * 60 * 1000;
 
 /** 2D 舞台头里要画板配合完成的动作：局部重绘（蒙版）、去背景、导出画板、画板合成发到对话。 */
+/** The model on the 3D stage: still loading, loaded, failed to load, or loaded with textures missing. Only `ready` can be captured. */
+export type StageModelState = 'loading' | 'ready' | 'failed' | 'incomplete';
+
 export type ImageCommandKind = 'inpaint' | 'remove-background' | 'export-board' | 'send-board' | 'merge-version';
 
 /** What the composer's next turn carries, published for the canvas notices (derived; never persisted). */
@@ -104,6 +107,8 @@ interface StudioState extends StudioPrefs {
   turnRequest: { text: string; seq: number; selection?: ChatAttachmentClaim[] } | null;
   /** 请 3D 舞台把某个模型当前的视角截图到 2D（对话里的结果卡也能发起）。 */
   captureRequest: { taskId: string; seq: number } | null;
+  /** Whether the model on the 3D stage can be captured or have a part exported (#126); `taskId` names the model it describes. */
+  stageModelState: { taskId: string; state: StageModelState } | null;
   /** The parts of the model on the 3D stage, reported by its viewer; `key` names the object they belong to (`taskId:assetId`). */
   stageParts: { key: string; parts: ModelPart[] } | null;
   /** The part lit on the stage, chosen in the 部件 tab or by a click in the 3D view. */
@@ -147,6 +152,7 @@ interface StudioState extends StudioPrefs {
   clearTurnRequest: () => void;
   requestCapture: (taskId: string) => void;
   clearCaptureRequest: () => void;
+  setStageModelState: (stageModelState: { taskId: string; state: StageModelState } | null) => void;
   setStageParts: (stageParts: { key: string; parts: ModelPart[] } | null) => void;
   setSelectedPart: (selectedPart: { key: string; id: string } | null) => void;
   requestPartExport: (key: string, id: string) => void;
@@ -189,6 +195,7 @@ export const useStudioStore = create<StudioState>()((set, get) => {
     composerPrefill: null,
     turnRequest: null,
     captureRequest: null,
+    stageModelState: null,
     imageCommand: null,
     continueRequest: null,
     processPreset: null,
@@ -231,6 +238,7 @@ export const useStudioStore = create<StudioState>()((set, get) => {
     clearTurnRequest: () => set({ turnRequest: null }),
     requestCapture: (taskId) => set((state) => ({ captureRequest: { taskId, seq: (state.captureRequest?.seq ?? 0) + 1 } })),
     clearCaptureRequest: () => set({ captureRequest: null }),
+    setStageModelState: (stageModelState) => set({ stageModelState }),
     setStageParts: (stageParts) => set({ stageParts }),
     setSelectedPart: (selectedPart) => set({ selectedPart }),
     requestPartExport: (key, id) => set((state) => ({ partExportRequest: { key, id, seq: (state.partExportRequest?.seq ?? 0) + 1 } })),

@@ -115,17 +115,37 @@ const RECORDING = Symbol('modelLoadErrorRecording');
 const RECORD_LIMIT = 16;
 const recordedErrors = new Map<string, unknown>();
 
-function strictTexturePlugin(parser: GLTFParser): { name: string } {
+/** Where the plugin leaves the texture indices that could not be decoded (in the glTF JSON's root `extras`). */
+const FAILED_TEXTURES_KEY = 'plinthFailedTextures';
+
+/**
+ * How many textures of a loaded model could not be decoded or fetched (#127). `json` is the glTF JSON the
+ * viewer exposes as `originalGltfJson`; the number is 0 for a model whose textures all loaded.
+ */
+export function incompleteTextureCountOf(json: unknown): number {
+  const extras = json !== null && typeof json === 'object' ? (json as { extras?: unknown }).extras : undefined;
+  const failed = extras !== null && typeof extras === 'object' ? (extras as Record<string, unknown>)[FAILED_TEXTURES_KEY] : undefined;
+  return Array.isArray(failed) ? new Set(failed.filter((index) => typeof index === 'number')).size : 0;
+}
+
+function trackTexturePlugin(parser: GLTFParser): { name: string } {
   const original = parser.loadTextureImage;
   if (typeof original !== 'function') throw new Error('Model texture validation unavailable');
-  // Three 0.180 swallows image failures as null; keep its decoding/samplers, but reject incomplete previews.
+  // Three 0.180 swallows image failures as null, which leaves the material slot empty (the default material).
+  // The geometry still shows; the indices of the textures that failed are kept on the glTF JSON so the viewer
+  // can tell the person the textures are incomplete. A rejection of the texture step itself still fails the load.
   parser.loadTextureImage = function (...args) {
     return original.apply(this, args).then(texture => {
-      if (texture === null) throw new Error('Model texture could not be decoded');
+      if (texture === null) {
+        const json = this.json as { extras?: Record<string, unknown> };
+        const extras = json.extras ?? (json.extras = {});
+        const failed = Array.isArray(extras[FAILED_TEXTURES_KEY]) ? (extras[FAILED_TEXTURES_KEY] as unknown[]) : (extras[FAILED_TEXTURES_KEY] = []);
+        if (!failed.includes(args[0])) failed.push(args[0]);
+      }
       return texture;
     });
   };
-  return { name: 'PLINTH_strict_textures' };
+  return { name: 'PLINTH_track_textures' };
 }
 
 function remember(url: string, error: unknown): void {
@@ -138,13 +158,13 @@ function remember(url: string, error: unknown): void {
 /**
  * Wraps `loader.load` once so every failed load leaves its original error under its URL, then calls
  * `onFailure(url)` (after the loader's own error handling has run). Returns false when the loader does not
- * support both loading and strict texture registration. The viewer must not mount in that case.
+ * support both loading and texture tracking registration. The viewer must not mount in that case.
  */
 export function recordModelLoadErrors(loader: unknown, onFailure?: (url: string) => void): boolean {
   if (loader === null || typeof loader !== 'object' || typeof (loader as UrlLoader).load !== 'function' || typeof (loader as UrlLoader).register !== 'function') return false;
   const target = loader as UrlLoader & { [RECORDING]?: true };
   if (target[RECORDING]) return true;
-  target.register(strictTexturePlugin);
+  target.register(trackTexturePlugin);
   const original = target.load;
   target.load = function load(this: unknown, url, onLoad, onProgress, onError) {
     return original.call(this, url, (result: unknown) => {

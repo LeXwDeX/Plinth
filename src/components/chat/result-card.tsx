@@ -10,6 +10,7 @@ import { Action, buttonVariants } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { openResultDetail } from '@/components/result/result-card-parts';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
+import { useModelCaptureBlock } from '@/hooks/use-model-capture-block';
 import { useObjectActions } from '@/hooks/use-object-actions';
 import type { ChatAttachmentClaim } from '@/lib/chat/attachments';
 import { activePicturePosition, pictureKey, type MessagePicture } from '@/lib/chat/message-pictures';
@@ -330,6 +331,7 @@ export function ModelResultCard({ taskId, result, cover, handle, sessionId }: Mo
   const { schema } = useProductSchema();
   const { proxyAssetUrl, previewAssetUrl } = useAssetURLRewriter();
   const { openOnStage, captureToTwoD } = useObjectActions();
+  const captureBlock = useModelCaptureBlock(taskId);
   const live = useInlineModelPreviewStore((state) => state.taskId === taskId);
   // A card that goes away gives its viewer back.
   useEffect(() => () => useInlineModelPreviewStore.getState().close(taskId), [taskId]);
@@ -402,9 +404,11 @@ export function ModelResultCard({ taskId, result, cover, handle, sessionId }: Mo
       {object || detail ? (
         <div className="flex flex-wrap items-center gap-1" role="group" aria-label={schemaText(schema, 'ui.studio.result.actions')}>
           {object && result?.selection.assetId ? (
-            <Action type="button" variant="outline" size="xs" onClick={() => captureToTwoD(object)} data-testid="chat-result-capture">
-              <Camera />{schemaText(schema, 'ui.studio.result.capture_2d')}
-            </Action>
+            <HintTooltip name={schemaText(schema, 'ui.studio.result.capture_2d')} reason={captureBlock ? schemaText(schema, captureBlock) : undefined}>
+              <Action type="button" variant="outline" size="xs" disabled={captureBlock !== null} onClick={() => captureToTwoD(object)} data-testid="chat-result-capture">
+                <Camera />{schemaText(schema, 'ui.studio.result.capture_2d')}
+              </Action>
+            </HintTooltip>
           ) : null}
           {modelUrl ? <ModelArchiveLink taskId={taskId} className="h-6 gap-1 px-2 text-xs" /> : null}
           {detail ? (

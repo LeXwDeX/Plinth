@@ -16,6 +16,7 @@ import { captureSessionScope, isCurrentSessionScope } from '@/lib/workspace/sess
 import { useCanvasStore } from '@/store/canvas-store';
 import { useChatStore } from '@/store/chat-store';
 import { sameObject } from '@/store/mask-store';
+import { captureBlockKeyOf } from '@/hooks/use-model-capture-block';
 import { useStudioStore } from '@/store/studio-store';
 import { useWorkspaceStore, type CurrentObject } from '@/store/workspace-store';
 import { gaussianSplatTool } from '@/lib/workspace/gaussian-splat-action';
@@ -127,6 +128,8 @@ export function useObjectActions() {
 
   const captureToTwoD = useCallback((object: CurrentObject): boolean => {
     if (object.kind !== 'model' || !object.assetId) return false;
+    // A model that is on the stage and not ready cannot be captured; the request is refused, never queued (#126).
+    if (captureBlockKeyOf(object.taskId, useStudioStore.getState().stageModelState)) return false;
     if (!openOnStage(object)) return false;
     useStudioStore.getState().requestCapture(object.taskId);
     return true;
