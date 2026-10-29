@@ -58,7 +58,16 @@ func readRasterBytes(reader io.Reader, size int64) ([]byte, error) {
 // walk has shown the image fits. Pixel expansion and metadata work are
 // reserved separately. The independent worst-case image memory guard remains
 // unchanged.
-const rasterWorkCodecBytes = 4 << 20
+//
+// The fixed part is a per-image allowance, so it bounds how many images one
+// file may carry (budget / allowance, about 8000 under the 512 MiB floor). It
+// stands for decoder setup, which measures in microseconds per image (a 4x4
+// PNG validates in about 15 us, a small JPEG in about 5 us), a small multiple
+// of the 64 KiB framing/CRC walk. The earlier 4 MiB allowance capped a file at
+// about 128 images and rejected a real Tripo Smart Segmentation GLB with 127
+// parts and 381 embedded textures (4.4 MB in total, #94). Per-byte costs,
+// decode reservations and the linear file-size budget are unchanged.
+const rasterWorkCodecBytes = 64 << 10
 
 func rasterEnvelopeWork(size int64) (int64, error) {
 	walk, err := rasterWalkWork(size)
