@@ -1,0 +1,53 @@
+# Plinth gate CI image (#97). Everything a gate run needs is baked in so the container
+# can run with --network none: the toolchain plus a prefetched pnpm store and Go module
+# cache. Nothing here is specific to one host: a developer machine, the dev-test host or any
+# other runner can build it the same way from public
+# registries (Docker Hub, registry.npmjs.org, proxy.golang.org; nothing internal) and run
+# the same entry point.
+#
+#   docker build -f Dockerfile.ci -t plinth-ci:local .
+#   docker run --network none --user 10001:10001 --tmpfs /work:rw,exec,nosuid,nodev,size=6g,uid=10001,gid=10001 \
+#     --tmpfs /tmp:rw,exec,nosuid,nodev,size=4g,mode=1777 --mount type=bind,src=<bundle>,dst=/in/source.bundle,readonly \
+#     -v <scratch>:/scratch -v <out>:/out -e CI_SHA=<sha> -e CI_TREE=<tree> plinth-ci:local
+#
+# <scratch> and <out> must be writable by uid 10001. The entry point's contract (mounts,
+# variables, exit codes) is in scripts/host-ci/entry.sh.
+# Build context: this file, scripts/host-ci/entry.sh and the dependency manifests below
+# (the whole repository works too). The image tag on the dev-test host is derived from
+# exactly these files (scripts/host-ci/run.py toolchain_hash), so an unchanged toolchain
+# and lockfile set reuses the existing image.
+#
+# Versions follow dev_test.md section 2 / .github/workflows/ci.yml: Node 22, Go 1.27 and
+# the pnpm version of package.json "packageManager". The two base images are pinned by
+# digest; entry.sh re-checks the major versions against ci.yml on every run. verify-local.py
+# needs no browser, so no Playwright browsers are installed.
+FROM node:22-bookworm@sha256:de636e50060a9908cf40a20a50d027ed74a99b2e31d2635f3b13e9e4e5e97e74 AS node
+FROM golang:1.27-bookworm@sha256:fea12ba16096adec0f699ce1c4da2154d320450e56c1f63671f95d2a3551c77b
+
+COPY --from=node /usr/local/ /usr/local/
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 jq \
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd --gid 10001 plinth-ci \
+ && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin plinth-ci
+
+WORKDIR /opt/ci/manifest
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml go.mod go.sum ./
+RUN PNPM_VERSION="$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '')")" \
+ && npm install --global --no-audit --no-fund --registry=https://registry.npmjs.org/ "pnpm@${PNPM_VERSION}" \
+ && pnpm --version
+
+# Dependency prefetch (needs network, build time only). Lifecycle scripts are not run here.
+# The metadata cache under XDG_CACHE_HOME is kept too: pnpm's supply-chain policy check reads it, also offline.
+ENV XDG_CACHE_HOME=/opt/ci/cache
+RUN pnpm fetch --ignore-pnpmfile --config.ignore-scripts=true --registry=https://registry.npmjs.org/ --store-dir /opt/ci/pnpm-store
+RUN GOMODCACHE=/opt/ci/gomod GOPROXY=https://proxy.golang.org,direct GOFLAGS=-mod=mod go mod download
+RUN chown -R 10001:10001 /opt/ci/pnpm-store /opt/ci/cache /opt/ci/gomod
+
+COPY scripts/host-ci/entry.sh /opt/ci/entry.sh
+RUN chmod 0555 /opt/ci/entry.sh
+
+ENV GOTOOLCHAIN=local GOENV=off GOPROXY=off GOSUMDB=off GOMODCACHE=/opt/ci/gomod
+WORKDIR /work
+USER 10001:10001
+ENTRYPOINT ["/opt/ci/entry.sh"]
