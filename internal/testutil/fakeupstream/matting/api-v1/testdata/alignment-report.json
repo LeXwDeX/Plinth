@@ -1,0 +1,126 @@
+{
+  "provider": "matting",
+  "api": "api-v1",
+  "official_base": "dev-test matting service /api/v1",
+  "checked_at": "2026-10-29",
+  "official_requests": 33,
+  "official_paid_requests": 0,
+  "fake_requests": 9,
+  "steps": [
+    {
+      "step": "jobs-no-auth",
+      "method": "POST",
+      "path": "/jobs",
+      "auth": "none",
+      "official_status": 401,
+      "fake_status": 401,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "jobs-invalid",
+      "method": "POST",
+      "path": "/jobs",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 422,
+      "fake_status": 422,
+      "official_fields": 8,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "jobs",
+      "method": "POST",
+      "path": "/jobs",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 16,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "batch",
+      "method": "GET",
+      "path": "/batches/{batch}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 16,
+      "official_task_statuses": [
+        "READY",
+        "RUNNING",
+        "SUCCESS"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "batch-unknown",
+      "method": "GET",
+      "path": "/batches/00000000-0000-4000-8000-000000000000",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 404,
+      "fake_status": 404,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "download",
+      "method": "GET",
+      "path": "/tasks/{task}/download",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "download-no-auth",
+      "method": "GET",
+      "path": "/tasks/{task}/download",
+      "auth": "none",
+      "official_status": 401,
+      "fake_status": 401,
+      "official_fields": 2,
+      "diffs": 0,
+      "unexplained": 0
+    }
+  ],
+  "diffs": null,
+  "request_notes": [
+    "官方服务是运营方自己的 GPU 服务，通过明文 HTTP 访问；wirefixture 只接受 https，提交的样本把请求 URL 规范为 https 并把主机别名成 example.test，响应字节不变。",
+    "服务没有按次计价，所有步骤都不计为付费；提交只发一次，轮询约 30 次直到批次 SUCCESS。",
+    "批次与任务 id（batch_xxx、task_xxx）与 download_path 在样本里是占位，fake 自行生成同形态的 id 和 `/api/v1/tasks/\u003cid\u003e/download` 路径。",
+    "没有观测到 FAILED 批次、未知任务的下载 404：fake 按已观测的字段结构构造（端点表标明）。"
+  ],
+  "endpoints": [
+    {
+      "endpoint": "POST /jobs",
+      "evidence": "real",
+      "sample": "POST /api/v1/jobs",
+      "doc_url": "internal matting service (FastAPI /docs)",
+      "checked_at": "2026-10-29",
+      "note": "multipart request (files + pipeline_params_json); 401 {detail}, 422 validation list and the READY batch envelope are real samples"
+    },
+    {
+      "endpoint": "GET /batches/{batch_id}",
+      "evidence": "real",
+      "sample": "GET /api/v1/batches/{id}",
+      "doc_url": "internal matting service (FastAPI /docs)",
+      "checked_at": "2026-10-29",
+      "note": "READY, RUNNING and SUCCESS polls and the 404 {detail} are real. The FAILED batch (task FAILED with error_message) was never observed: it is built from the SUCCESS poll with the task failed and not downloadable"
+    },
+    {
+      "endpoint": "GET /tasks/{task_id}/download",
+      "evidence": "real",
+      "sample": "GET /api/v1/tasks/{id}/download",
+      "doc_url": "internal matting service (FastAPI /docs)",
+      "checked_at": "2026-10-29",
+      "note": "authenticated download of the PNG result (image/png); 401 {detail} without a key. The service has no signed URLs, so an expired-URL scenario does not apply to it"
+    }
+  ]
+}

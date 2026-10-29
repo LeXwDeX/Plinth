@@ -106,7 +106,10 @@ type task struct {
 	typ      string
 	request  map[string]any
 	scenario fakeupstream.Scenario
-	polls    int
+	// expiredIssues is how many of the first artifact URL issues expire under
+	// ScenarioArtifactExpired.
+	expiredIssues int
+	polls         int
 	// faces is the triangle count of the model the task delivers (0: none).
 	faces int
 	// failure is set when the task ends FAILED.
@@ -357,7 +360,7 @@ func (e *engine) create(kind Kind) http.HandlerFunc {
 			}
 		}
 		store := e.cfg.Store
-		t := &task{id: store.newID(), kind: kind, typ: kind.Type, request: request, scenario: fakeupstream.ScenarioOf(r)}
+		t := &task{id: store.newID(), kind: kind, typ: kind.Type, request: request, scenario: fakeupstream.ScenarioOf(r), expiredIssues: fakeupstream.ExpiredIssues(r)}
 		if kind.TypeOf != nil {
 			t.typ = kind.TypeOf(request)
 		}
@@ -572,12 +575,13 @@ func (e *engine) anyTemplate(typ string) map[string]any {
 // fake. A model_urls object follows the formats the request asked for.
 func (e *engine) fillURLs(r *http.Request, t *task, body map[string]any) map[string]any {
 	origin := e.cfg.Env.ArtifactOriginFor(r) + e.cfg.Prefix + "/assets/" + t.id + "/"
+	issue := e.cfg.Env.IssueArtifactURLs(t.id)
 	var walk func(trail []string, value any) any
 	walk = func(trail []string, value any) any {
 		switch typed := value.(type) {
 		case string:
 			if strings.HasPrefix(typed, "http") {
-				return origin + artifactName(trail, typed)
+				return e.cfg.Env.SignArtifactURL(origin+artifactName(trail, typed), t.scenario, issue)
 			}
 			return typed
 		case map[string]any:
@@ -618,7 +622,8 @@ func (e *engine) modelURLs(t *task, template map[string]any) map[string]any {
 	out := map[string]any{}
 	for _, format := range formats {
 		name, _ := format.(string)
-		if name == "" {
+		// partial-formats: the formats a Catalog retexture lists as optional are not offered.
+		if name == "" || t.scenario == fakeupstream.ScenarioPartialFormats && t.typ == "retexture" && (name == "stl" || name == "3mf") {
 			continue
 		}
 		out[name] = sample
@@ -661,6 +666,12 @@ func (e *engine) getAsset(w http.ResponseWriter, r *http.Request) {
 	t := e.cfg.Store.lookup(r.PathValue("task_id"))
 	if t == nil || t.scenario == fakeupstream.ScenarioArtifactNotFound {
 		http.NotFound(w, r)
+		return
+	}
+	if fakeupstream.ArtifactURLExpired(r, t.scenario, t.expiredIssues) {
+		w.Header().Set("Content-Type", expiredContentType)
+		w.WriteHeader(expiredStatus)
+		_, _ = w.Write([]byte(expiredBody))
 		return
 	}
 	name := r.PathValue("name")
@@ -729,3 +740,13 @@ func Digest(raw []byte) string {
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:8])
 }
+
+// An expired signed asset URL is refused with 403 and the CDN's XML access-denied
+// body: Meshy's asset host (assets.meshy.ai) is CloudFront too, with Expires,
+// Signature and Key-Pair-Id query parameters. Observed 2026-10-29 by setting
+// Expires into the past.
+const (
+	expiredStatus      = http.StatusForbidden
+	expiredContentType = "text/xml"
+	expiredBody        = `<?xml version="1.0" encoding="UTF-8"?><Error><Code>AccessDenied</Code><Message>Access denied</Message></Error>`
+)

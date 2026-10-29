@@ -1,15 +1,18 @@
 // Command fake-upstream serves the fake upstream APIs of
 // internal/testutil/fakeupstream on loopback, so a Plinth stack in live mode
-// can run against Tripo, Meshy, Hyper3D and an OpenAI-compatible LLM gateway at
-// zero cost
+// can run against Tripo, Meshy, Hyper3D, an OpenAI-compatible LLM gateway, the
+// image providers (OpenAI images, Gemini images, Jimeng) and the matting
+// service at zero cost
 // (issue #96). Test tooling only: it is not built into any image.
 //
 //	fake-upstream -addr 127.0.0.1:19000
 //
 // Point the stack at <origin>/tripo/v3 (TRIPO_BASE_URL), <origin>/meshy
 // (MESHY_BASE_URL; the Meshy adapter appends openapi/v1 and openapi/v2),
-// <origin>/hyper3d/api/v2 (HYPER3D_BASE_URL) and <origin>/openai/v1
-// (LLM_BASE_URL). Any API key is accepted; a key or an X-Fake-Scenario header
+// <origin>/hyper3d/api/v2 (HYPER3D_BASE_URL), <origin>/openai/v1 (LLM_BASE_URL),
+// <origin>/openai/images/v1 (OPENAI_BASE_URL), <origin>/gemini/images/v1
+// (GEMINI_BASE_URL), <origin>/jimeng (JIMENG_BASE_URL; the adapter appends
+// api/v3) and <origin>/matting (MATTING_BASE_URL; it appends api/v1). Any API key is accepted; a key or an X-Fake-Scenario header
 // selects a fault (see -help).
 package main
 

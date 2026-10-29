@@ -47,8 +47,17 @@ func New(config Config, versions ...Version) (*Server, error) {
 		}
 		server.mux.Handle(version.Prefix+"/", http.StripPrefix(version.Prefix, handler))
 	}
+	server.mux.HandleFunc("POST "+RenewPath, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"epoch":%d}`+"\n", server.env.RenewArtifactURLs())
+	})
 	return server, nil
 }
+
+// RenewPath is the control route (outside every version prefix) that starts a new
+// artifact URL epoch: see Env.RenewArtifactURLs. It exists for tests and the
+// fake's own binary only, like the rest of the package.
+const RenewPath = "/fake/control/renew-artifacts"
 
 // Versions returns the registered versions.
 func (s *Server) Versions() []Version { return append([]Version(nil), s.versions...) }

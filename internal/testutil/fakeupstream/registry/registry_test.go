@@ -11,7 +11,8 @@ import (
 
 // Every registered version builds together, has an alignment profile, and the
 // registered providers are Tripo, the OpenAI-compatible gateway, Meshy (one
-// version per route version) and Hyper3D.
+// version per route version), Hyper3D, the three image providers and the
+// matting service.
 func TestVersionsAreRegisteredExplicitlyWithProfiles(t *testing.T) {
 	server, err := New(fakeupstream.Config{})
 	if err != nil {
@@ -40,6 +41,8 @@ func TestVersionsAreRegisteredExplicitlyWithProfiles(t *testing.T) {
 	want := map[string]string{
 		"tripo/v3": "/tripo/v3", "openai/v1": "/openai/v1", "meshy/openapi-v1": "/meshy/openapi/v1",
 		"meshy/openapi-v2": "/meshy/openapi/v2", "hyper3d/api-v2": "/hyper3d/api/v2",
+		"openai/images-v1": "/openai/images/v1", "gemini/images-v1": "/gemini/images/v1",
+		"jimeng/api-v3": "/jimeng/api/v3", "matting/api-v1": "/matting/api/v1",
 	}
 	if len(got) != len(want) || len(profiles) != len(got) {
 		t.Fatalf("versions %v, profiles %d", got, len(profiles))
@@ -64,6 +67,11 @@ func TestEveryVersionIsServedUnderItsOwnPrefixOnly(t *testing.T) {
 		"/meshy/openapi/v1/balance": http.StatusUnauthorized,
 		"/meshy/openapi/v2/text-to-3d/01a18514-059e-73f7-a0ce-0f88a12c9300": http.StatusUnauthorized,
 		"/hyper3d/api/v2/check_balance":                                     http.StatusUnauthorized,
+		"/openai/images/v1/images/generations":                              http.StatusMethodNotAllowed, // routed: POST only
+		"/gemini/images/v1/chat/completions":                                http.StatusMethodNotAllowed,
+		"/jimeng/api/v3/images/generations":                                 http.StatusMethodNotAllowed,
+		"/matting/api/v1/batches/batch_x":                                   http.StatusUnauthorized,
+		"/openai/images/v2/images/generations":                              http.StatusNotFound, // an image API version that is not registered
 		"/meshy/openapi/v3/balance":                                         http.StatusNotFound, // a Meshy route version that is not registered
 		"/meshy/balance":                                                    http.StatusNotFound, // the shared Meshy base alone is not a version
 		"/v3/account/balance":                                               http.StatusNotFound, // the official prefix alone is not routed

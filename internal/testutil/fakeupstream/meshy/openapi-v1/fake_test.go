@@ -148,6 +148,25 @@ func TestTargetFormatsDecideTheModelURLs(t *testing.T) {
 	}
 }
 
+// The partial-formats scenario leaves STL and 3MF out of a retexture result: the
+// starting point of the missing-format completion (D class). Other kinds keep all
+// their formats.
+func TestPartialFormatsScenarioOmitsOptionalFormatsOfARetexture(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	formats := []string{"glb", "obj", "stl", "3mf"}
+	id := f.create("/retexture", map[string]any{"input_task_id": f.source(), "target_formats": formats}, "X-Fake-Scenario", "partial-formats")
+	_, body := f.finish("/retexture", id, key)
+	models, _ := body["model_urls"].(map[string]any)
+	if models["glb"] == nil || models["obj"] == nil || models["stl"] != nil || models["3mf"] != nil {
+		t.Fatalf("retexture model_urls = %v, want no stl and no 3mf", models)
+	}
+	remesh := f.create("/remesh", map[string]any{"input_task_id": f.source(), "target_formats": formats}, "X-Fake-Scenario", "partial-formats")
+	_, body = f.finish("/remesh", remesh, key)
+	if models, _ = body["model_urls"].(map[string]any); models["stl"] == nil || models["3mf"] == nil {
+		t.Fatalf("a remesh keeps every format: %v", models)
+	}
+}
+
 // The official API accepts an oversized rigging input and fails the task when it
 // runs (observed with a 300000-face quad remesh): there is no 400 at submit.
 func TestRiggingOfAnOversizedModelFailsTheTask(t *testing.T) {
@@ -340,6 +359,20 @@ func TestFaultScenarios(t *testing.T) {
 		status, _, data := f.Download(testkit.Field(t, body, "model_urls", "glb").(string))
 		if status != http.StatusOK || testkit.DeliveryErr(t, data, "model", "glb", "model/gltf-binary") == nil {
 			t.Fatalf("corrupt artifact: %d, delivery check passed", status)
+		}
+	})
+	t.Run("artifact URL expired, a later read hands out working URLs", func(t *testing.T) {
+		f := newFixture(t, short)
+		id := f.create("/image-to-3d", map[string]any{"image_url": "x"}, "X-Fake-Scenario", "artifact-expired")
+		_, body := f.finish("/image-to-3d", id, key)
+		status, contentType, raw := f.Download(testkit.Field(t, body, "model_urls", "glb").(string))
+		if status != http.StatusForbidden || !strings.Contains(contentType, "xml") || !strings.Contains(string(raw), "<Code>AccessDenied</Code>") {
+			t.Fatalf("expired URL = %d %s %s", status, contentType, raw)
+		}
+		_, _, again := f.Do("GET", f.v1("/image-to-3d/"+id), key, nil)
+		status, _, data := f.Download(testkit.Field(t, again, "model_urls", "glb").(string))
+		if status != http.StatusOK || testkit.DeliveryErr(t, data, "model", "glb", "model/gltf-binary") != nil {
+			t.Fatalf("refetched URL = %d", status)
 		}
 	})
 	t.Run("key prefix selects the scenario", func(t *testing.T) {

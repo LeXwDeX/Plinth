@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/align"
+	"github.com/LeXwDeX/Plinth/internal/testutil/wirefixture"
 )
 
 // OfficialBase is the official base URL the Catalog's hyper3d_base_url defaults
@@ -90,6 +91,22 @@ func Profile() align.Profile {
 		{Field: "model", Filename: "model.glb", MediaType: "model/gltf-binary", FromVar: "bang_url"},
 		{Field: "image", Filename: "reference.png", MediaType: "image/png", Data: referencePNG()},
 	}, "bang_url")...)
+	// The Failed state (issue #96 phase 3): a texture request whose model is the
+	// tiny one-triangle GLB of the test fixtures. The official service accepts the
+	// request and ends every sub-job Failed ("Invalid input."), which is how the
+	// Failed status response is captured without a hand-made input. Run these three
+	// steps alone (-steps texture-failed,texture-failed-status,texture-failed-download).
+	_, tinyGLB, err := wirefixture.SyntheticMedia("glb-triangle")
+	if err != nil {
+		panic(err)
+	}
+	steps = append(steps, submitSteps("texture-failed", "rodin_texture_only", []align.Field{
+		{Name: "geometry_file_format", Value: "glb"}, {Name: "material", Value: "PBR"}, {Name: "resolution", Value: "Basic"},
+		{Name: "texture_mode", Value: "extreme-low"}, {Name: "prompt", Value: "plain matte red"},
+	}, []align.File{
+		{Field: "model", Filename: "model.glb", MediaType: "model/gltf-binary", Data: tinyGLB},
+		{Field: "image", Filename: "reference.png", MediaType: "image/png", Data: referencePNG()},
+	}, "")...)
 	return align.Profile{
 		Provider: "hyper3d", API: "api-v2", Official: OfficialBase, Steps: steps,
 		Capture: align.CaptureConfig{
@@ -106,6 +123,7 @@ func Profile() align.Profile {
 			"第一段的 bang 在 Rodin 任务尚未完成时发出，官方以 HTTP 201 + `{\"error\":\"ASSET_NOT_AVAILABLE\"}` 拒绝（未扣费）；fake 复现该拒绝，第二段在任务完成后重发并成功。",
 			"第一段的 texture 用了过小的占位 GLB，三个子作业以 Failed 结束（status 响应带顶层 message `Invalid input.`），已计费；第三段改用 bang 产出的 GLB 重发，是新的输入而非重放。该 Failed 响应未入库为样本，fake 的 Failed 状态按它的结构构造。",
 			"官方在请求缺少提示词与图片时返回 HTTP 201 + `{\"error\":\"INVALID_REQUEST\"}`（不是 4xx）；fake 复现。",
+			"第三阶段（2026-10-29）补采 Failed 状态：`texture-failed` 三步（提交、轮询、下载）单独成段运行了两次（标签 failed1、failed2）。texture 请求的模型用测试夹具里 400 字节的单三角形 GLB，官方受理（HTTP 201）后第一次轮询三个子作业全部 `Failed`，顶层 `message` 为 `Invalid input.`，`download` 返回空列表；两次结果相同，各计 1 次付费请求。这一段不在上面三段合并的报告里（原始运行已不在工作树外保留），Failed 响应作为独立样本 `hyper3d-api-v2-texture-failed` 入库，漂移测试 `TestFailedPollMatchesTheRealSample` 对它逐字段比较。",
 		},
 		Notes: align.Notes{},
 	}

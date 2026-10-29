@@ -1,0 +1,90 @@
+{
+  "provider": "openai",
+  "api": "images-v1",
+  "official_base": "dev-test OpenAI-compatible image gateway /v1",
+  "checked_at": "2026-10-29",
+  "official_requests": 5,
+  "official_paid_requests": 2,
+  "fake_requests": 5,
+  "steps": [
+    {
+      "step": "generations-no-auth",
+      "method": "POST",
+      "path": "/images/generations",
+      "auth": "none",
+      "official_status": 401,
+      "fake_status": 401,
+      "official_fields": 0,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "generations-invalid",
+      "method": "POST",
+      "path": "/images/generations",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 400,
+      "fake_status": 400,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "generations",
+      "method": "POST",
+      "path": "/images/generations",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 19,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "edits-invalid",
+      "method": "POST",
+      "path": "/images/edits",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 400,
+      "fake_status": 400,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "edits",
+      "method": "POST",
+      "path": "/images/edits",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 19,
+      "diffs": 0,
+      "unexplained": 0
+    }
+  ],
+  "diffs": null,
+  "request_notes": [
+    "网关为 gpt-image-2 的 OpenAI 兼容中转（Plinth 的 OPENAI_BASE_URL）；为压低费用每个付费端点只发一次，取 1024x1024、quality=low、n=1：Plinth 默认 2048x2048、quality=max，响应结构相同，只有 usage 的数值不同。",
+    "edits 的参考图在付费运行里用的是 `image[]` 分片名（Plinth 的真实写法，网关返回 200）；wirefixture 的键规则不接受方括号，样本把分片名写成 `image`，fake 两种写法都接受。",
+    "内容审核拒绝（400 moderation_blocked）、402、429、5xx 没有在官方网关上触发，fake 沿用真实 400 信封并换成文档里的 code 与 message。"
+  ],
+  "endpoints": [
+    {
+      "endpoint": "POST /images/generations",
+      "evidence": "real",
+      "sample": "POST /v1/images/generations",
+      "doc_url": "https://platform.openai.com/docs/api-reference/images/create",
+      "checked_at": "2026-10-29",
+      "note": "JSON request, one inline base64 picture per request; 400 missing_required_parameter and 401 text/plain are real samples. A content-policy refusal (400 moderation_blocked) and 402/429/5xx are not observed: they reuse the real 400 envelope with the documented code or message"
+    },
+    {
+      "endpoint": "POST /images/edits",
+      "evidence": "real",
+      "sample": "POST /v1/images/edits",
+      "doc_url": "https://platform.openai.com/docs/api-reference/images/createEdit",
+      "checked_at": "2026-10-29",
+      "note": "multipart request with the reference picture in the image part (Plinth sends image[], the committed sample says image because the sample key rule rejects brackets; the fake accepts both)"
+    }
+  ]
+}

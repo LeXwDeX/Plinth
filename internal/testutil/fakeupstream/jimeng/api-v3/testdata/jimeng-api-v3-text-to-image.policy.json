@@ -1,0 +1,62 @@
+{
+  "MaxBodyBytes": 4194304,
+  "Keys": {
+    "b64_json": true,
+    "code": true,
+    "created": true,
+    "data": true,
+    "error": true,
+    "file": true,
+    "generated_images": true,
+    "message": true,
+    "mode": true,
+    "model": true,
+    "optimize_prompt_options": true,
+    "output_tokens": true,
+    "param": true,
+    "prompt": true,
+    "response_format": true,
+    "sequential_image_generation": true,
+    "size": true,
+    "total_tokens": true,
+    "type": true,
+    "url": true,
+    "usage": true,
+    "watermark": true
+  },
+  "Allowed": {
+    "0": true,
+    "1700000000000": true,
+    "2048x2048": true,
+    "AuthenticationError": true,
+    "MissingParameter": true,
+    "Unauthorized": true,
+    "a plain red cube on a white background": true,
+    "api": true,
+    "application/json": true,
+    "b64_json": true,
+    "disabled": true,
+    "doubao-seedream-4-5-251128": true,
+    "generations": true,
+    "https://ark-content-generation-v2-cn-beijing.tos-cn-beijing.volces.com/fixture-1.jpeg": true,
+    "images": true,
+    "ok": true,
+    "standard": true,
+    "url": true,
+    "v3": true
+  },
+  "Aliases": null,
+  "PublicHosts": {
+    "ark-content-generation-v2-cn-beijing.tos-cn-beijing.volces.com": true,
+    "ark.cn-beijing.volces.com": true
+  },
+  "Projection": null,
+  "QueryKeys": {
+    "X-Tos-Algorithm": true,
+    "X-Tos-Credential": true,
+    "X-Tos-Date": true,
+    "X-Tos-Expires": true,
+    "X-Tos-Signature": true,
+    "X-Tos-SignedHeaders": true
+  }
+}
