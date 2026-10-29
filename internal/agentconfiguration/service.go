@@ -74,6 +74,8 @@ type Service struct {
 	schema              catalog.ApplicationSchema
 	defaults            Configuration
 	tools               []Tool
+	active              catalog.CapabilityActive
+	hiddenTools         map[string]bool
 	offerings           []schemacontract.Offering
 	retiredBuiltIns     map[string]string
 	packagedSkillImages map[string]bool
@@ -92,7 +94,7 @@ func New(store Store, schema catalog.ApplicationSchema, skills catalog.SkillCata
 	if store == nil {
 		return nil, errors.New("agent configuration: missing store")
 	}
-	s := &Service{store: store, schema: schema, offerings: offerings}
+	s := &Service{store: store, schema: schema, offerings: offerings, active: catalog.ActiveCapabilities(offerings), hiddenTools: map[string]bool{}}
 	for _, option := range options {
 		option(s)
 	}
@@ -108,14 +110,25 @@ func New(store Store, schema catalog.ApplicationSchema, skills catalog.SkillCata
 		}
 	}
 	s.defaults = Configuration{SystemPrompt: schema.Chat.Agent.SystemPrompt, DomainContext: schema.Chat.Agent.DomainContext, Skills: skills.Skills, EnabledToolNames: []string{}, EnabledMCPPresetIDs: []string{}}
+	// A tool whose capabilities have no enabled Offering is declared in the
+	// Schema but not offered: it is not listed, not enabled by default and
+	// dropped from every projection (#115). Enabling an Offering brings it
+	// back without any other change.
+	declare := func(name, description string, execution catalog.ChatToolExecutionSchema) {
+		if !catalog.AnyCapabilityActive(execution.Capabilities, s.active) {
+			s.hiddenTools[name] = true
+			return
+		}
+		s.tools = append(s.tools, Tool{name, description, execution.Domains})
+		s.defaults.EnabledToolNames = append(s.defaults.EnabledToolNames, name)
+	}
 	for _, tool := range schema.Chat.Tools {
-		s.tools = append(s.tools, Tool{tool.Name, tool.Description, tool.Execution.Domains})
-		s.defaults.EnabledToolNames = append(s.defaults.EnabledToolNames, tool.Name)
+		declare(tool.Name, tool.Description, tool.Execution)
 	}
 	for _, tool := range schema.Chat.AgentTools {
-		s.tools = append(s.tools, Tool{tool.Name, tool.Description, tool.Execution.Domains})
-		s.defaults.EnabledToolNames = append(s.defaults.EnabledToolNames, tool.Name)
+		declare(tool.Name, tool.Description, tool.Execution)
 	}
+	s.defaults = s.project(s.defaults)
 	// The legacy source URL is provenance only; management and public reads use
 	// packaged same-origin imagery rather than publishing a remote source URL.
 	s.defaults = clone(s.defaults)
@@ -130,6 +143,34 @@ func New(store Store, schema catalog.ApplicationSchema, skills catalog.SkillCata
 	}
 	return s, nil
 }
+
+// project is the one view of a configuration that is shown or sent to the
+// model: tools without an enabled Offering are dropped, and prompt sections
+// of capabilities without one are removed from the system prompt and the
+// domain contexts. A published version freezes the prompt as text and the
+// tool list, so this is applied when it is read and when a new version is
+// published; the stored version is never rewritten (#115).
+func (s *Service) project(c Configuration) Configuration {
+	result := clone(c)
+	sections := s.schema.Chat.Agent.PromptSections
+	result.SystemPrompt = catalog.StripInactivePromptSections(result.SystemPrompt, sections, s.active)
+	for key, value := range result.DomainContext {
+		result.DomainContext[key] = catalog.StripInactivePromptSections(value, sections, s.active)
+	}
+	kept := make([]string, 0, len(result.EnabledToolNames))
+	for _, name := range result.EnabledToolNames {
+		if !s.hiddenTools[name] {
+			kept = append(kept, name)
+		}
+	}
+	result.EnabledToolNames = kept
+	return result
+}
+
+// Effective returns what a configuration amounts to once tools and prompt
+// sections without an enabled Offering are left out.
+func (s *Service) Effective(c Configuration) Configuration { return s.project(c) }
+
 func clone(c Configuration) Configuration {
 	b, _ := json.Marshal(c)
 	var result Configuration
@@ -159,7 +200,7 @@ func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 	if err = s.Validate(v.Configuration); err != nil {
 		return Snapshot{}, err
 	}
-	return Snapshot{v.Revision, clone(v.Configuration)}, nil
+	return Snapshot{v.Revision, s.project(v.Configuration)}, nil
 }
 func (s *Service) Management(ctx context.Context) (Management, error) {
 	v, err := s.Snapshot(ctx)
@@ -247,6 +288,11 @@ func (s *Service) Validate(c Configuration) error {
 	for _, t := range s.tools {
 		allowed[t.Name] = true
 	}
+	// A declared tool without an enabled Offering stays acceptable, so an older
+	// client or version can still be validated; Publish drops it.
+	for name := range s.hiddenTools {
+		allowed[name] = true
+	}
 	if err := validateIDs(c.EnabledToolNames, allowed); err != nil {
 		return err
 	}
@@ -273,7 +319,7 @@ func (s *Service) Publish(ctx context.Context, expected, actor, source string, c
 	if _, err := strconv.ParseUint(expected, 10, 64); err != nil {
 		return Snapshot{}, ErrConflict
 	}
-	v, err := s.store.AppendAgentConfiguration(ctx, expected, Version{Snapshot: Snapshot{Configuration: clone(c)}, CreatedAt: time.Now().UTC(), ActorID: actor, Source: source})
+	v, err := s.store.AppendAgentConfiguration(ctx, expected, Version{Snapshot: Snapshot{Configuration: s.project(c)}, CreatedAt: time.Now().UTC(), ActorID: actor, Source: source})
 	return v.Snapshot, err
 }
 func (s *Service) Restore(ctx context.Context, expected, target, actor string) (Snapshot, error) {

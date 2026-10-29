@@ -204,6 +204,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateAgentScope(schema.AgentScope); err != nil {
 		return err
 	}
+	if err := validatePromptSections(schema, capabilityDomains); err != nil {
+		return err
+	}
 	if err := validateChatAttachments(schema.Context); err != nil {
 		return err
 	}

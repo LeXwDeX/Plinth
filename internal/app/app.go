@@ -683,7 +683,12 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		return nil, err
 	}
 	orchestratorSchema := withToolCallBudget(
-		orchestratorChatSchema(applicationSchema.Chat, llmModel),
+		// Prompt text for a capability without an enabled Offering is not sent
+		// to the model (#115).
+		orchestratorChatSchema(
+			applicationSchema.Chat.WithoutInactivePromptText(catalog.ActiveCapabilities(taskCatalog.List(""))),
+			llmModel,
+		),
 		config.AgentMaxToolCallsPerReply,
 	)
 	chatAgent, err := chat.NewOrchestrator(chat.OrchestratorConfig{
