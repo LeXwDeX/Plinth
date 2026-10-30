@@ -136,6 +136,7 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		"context.text_part_kind":                schema.Context.TextPartKind,
 		"context.image_part_kind":               schema.Context.ImagePartKind,
 		"context.image_detail":                  schema.Context.ImageDetail,
+		"context.canvas_image_detail":           schema.Context.CanvasImageDetail,
 		"context.user_image_label":              schema.Context.UserImageLabelTemplate,
 		"context.ai_image_label":                schema.Context.AIImageLabelTemplate,
 		"context.current_upload_hint":           schema.Context.CurrentUploadHint,
