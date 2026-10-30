@@ -13,7 +13,8 @@ Run (credentials injected, never written to files):
   python3 scripts/release-env.py smoke <env> -- python3 scripts/acceptance/api_free.py
 
 Environment (injected by release-env.py smoke): BASE, ADMIN_USERNAME, ADMIN_PASSWORD, EXPECT_SHA.
-Optional: ENV_NAME (environment name for the log read, default dev-test), OVERSIZE_MB (size of the oversize upload,
+Also injected: RELEASE_ENV (the environment name; LOG-02/03 read that same deployment's log and are BLOCKED when it is
+unknown or its base_url differs from BASE). Optional: OVERSIZE_MB (size of the oversize upload,
 default 64; must exceed the server upload limit).
 Exit status 1 when any check FAILs; PENDING/BLOCKED do not fail the run.
 """
@@ -27,7 +28,7 @@ for _name in ("BASE", "ADMIN_USERNAME", "ADMIN_PASSWORD"):
 
 BASE = os.environ["BASE"].rstrip("/")
 U, P = os.environ["ADMIN_USERNAME"], os.environ["ADMIN_PASSWORD"]
-ENV_NAME = os.environ.get("ENV_NAME", "dev-test")
+ENV_NAME = os.environ.get("RELEASE_ENV", "")
 res = []
 
 def rec(i, status, ev):
@@ -175,13 +176,15 @@ rec("PRV-01", "PASS" if s == 200 and offs else "FAIL", f"offerings {s}, per prov
 
 # ---- LOG-02/03 via read-only ssh
 try:
+    if not ENV_NAME: raise LookupError("RELEASE_ENV not injected")
     env = json.loads(subprocess.check_output([sys.executable, f"{REPO}/scripts/release-env.py", "show", ENV_NAME]))
+    if env.get("base_url", "").rstrip("/") != BASE: raise LookupError("environment base_url differs from BASE")
     ssh, root = env["ssh"], env["root"]
     logtxt = subprocess.run(["ssh", "-o", "BatchMode=yes", ssh, f"tail -n 40000 {root}/production/logs/art-ai.log"], capture_output=True, timeout=120).stdout.decode("utf-8", "replace")
 except Exception as e:
     logtxt = ""; print("  log read failed:", type(e).__name__)
 if not logtxt:
-    rec("LOG-02", "BLOCKED", "cannot read dev-test logs over ssh"); rec("LOG-03", "BLOCKED", "same")
+    rec("LOG-02", "BLOCKED", "cannot read the log of the environment under test (needs RELEASE_ENV matching BASE, and ssh)"); rec("LOG-03", "BLOCKED", "same")
 else:
     line = next((l for l in logtxt.splitlines() if rid_hdr and rid_hdr in l), "")
     d = js(line.encode()) if line else {}

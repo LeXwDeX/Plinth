@@ -123,7 +123,7 @@
 
 中转按来源 IP 放行。容器访问同机中转时来源是 Compose 项目网络中的容器地址，因此 `formal-test` 用 `extra_compose_file` 固定项目网络子网与容器地址，供中转放行；是否放行及放行范围由用户在中转侧决定。改变网络配置后须对本项目执行一次 `down`/`up` 让网络按新配置重建（只操作本项目）。
 
-冒烟（`smoke` 从目标环境的 `runtime.env` 读取管理员登录，并设置 `BASE`、`EXPECT_SHA`（容器 OCI revision）与 `RELEASE_CONTAINER`；不打印密码）：
+冒烟（`smoke` 从目标环境的 `runtime.env` 读取管理员登录，并设置 `BASE`、`EXPECT_SHA`（容器 OCI revision）`RELEASE_CONTAINER` 与 `RELEASE_ENV`（环境名，验收脚本据此读取同一部署的日志）；不打印密码）：
 
 ```bash
 python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l0-browser-boot.sh

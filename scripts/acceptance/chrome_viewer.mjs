@@ -26,7 +26,7 @@ const pctx = await probe.newContext(); if(await loginAdmin(pctx)!==200) throw ne
 const bigMeta = await (await pctx.request.get(`${base}/api/v1/tasks/${BIG}`)).json();
 const bigGlb = (bigMeta.assets||[]).find(a=>a.variant==='glb'); if(!bigGlb) throw new Error('CV_BIG_TASK has no glb asset');
 const BIGSHA=bigGlb.sha256, BIGSIZE=bigGlb.size; await probe.close();
-const report=[];
+const report=[]; const failures=[];
 for (const {loc,W,H} of cells) {
   const tag=`${loc}-${W}x${H}`; const dir=path.join(OUT,tag); fs.mkdirSync(dir,{recursive:true});
   const res={cell:tag,checks:{},console:[],failed:[],http:[],glb:[],posts:[]}; let phase='A-D';
@@ -107,8 +107,19 @@ for (const {loc,W,H} of cells) {
     if(name==='corrupt-texture'){ active=false; await page.locator('[data-testid=model-viewer-retry]').click().catch(()=>{}); let ok=false; for(let i=0;i<30;i++){ await page.waitForTimeout(1000); if(!(await page.locator('[data-testid=model-viewer-error]').count()) && !(await page.locator('[data-testid=model-viewer-loading]').count()) && /\d+x\d+/.test(await statsText())){ok=true;break;} } res.checks.retryRecovered=ok; await shot('E-retry-recovered'); }
     else { active=false; }
   }
+  // Every required check must hold; any failed check or download error makes the whole run exit non-zero.
+  const c=res.checks, need={
+    bigLoaded: c.bigReady===true && !c.bigErr, bigGlbRequested: c.bigGlbRequested===true,
+    rotate: c.rotateChanged===true, zoom: c.zoomChanged===true,
+    glbDownload: !!c.glbDownload && !c.glbDownload.error && !c.glbDownload.failure && c.glbDownload.sizeOk===true && c.glbDownload.shaOk===true,
+    zipDownload: !full || (!!c.zipDownload && !c.zipDownload.error && !c.zipDownload.failure && c.zipDownload.bytes>0),
+    negCorruptTexture: !!c['neg-corrupt-texture']?.errorShown, negTruncated: !!c['neg-truncated']?.errorShown, retryRecovered: c.retryRecovered===true };
+  for (const [k,v] of Object.entries(need)) if(!v) failures.push(`${tag}: ${k}`);
+  res.checks.verdict=need;
   report.push(res); await b.close();
   fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(report,null,1));
   console.log(tag,'done');
 }
 console.log(JSON.stringify(report,null,1));
+if(failures.length){ console.error('FAILED checks:\n  '+failures.join('\n  ')); process.exit(1); }
+console.log('all required checks passed');

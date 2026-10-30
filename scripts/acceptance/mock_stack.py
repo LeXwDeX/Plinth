@@ -14,7 +14,7 @@ Needs: go, and build/go-web (run `pnpm build` once). Time: about 3 minutes. Side
 
   python3 scripts/acceptance/mock_stack.py [--work DIR] [--keep] [--base-port N]
 """
-import argparse, json, os, re, signal, subprocess, sys, tempfile, time, threading, hashlib, shutil, uuid
+import argparse, atexit, json, os, re, signal, subprocess, sys, tempfile, time, threading, hashlib, shutil, uuid
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from acceptance_lib import *
 
@@ -37,6 +37,8 @@ WEB_ROOT = check_web_assets(REPO, ARGS.web_root)
 res = []
 def rec(i, st, ev): res.append((i, st)); print(f"{st}: {i} | {ev}", flush=True)
 
+PROCS = []
+
 def env_for(port, mode="mock", extra=None, sub="main"):
     d = os.path.join(WORK, sub); os.makedirs(d + "/storage", exist_ok=True); os.makedirs(d + "/logs", exist_ok=True)
     e = {"HOME": os.environ.get("HOME", WORK), "PATH": os.environ["PATH"], "APP_ENV": "development", "PROVIDER_MODE": mode, "AGENT_MODE": "mock",
@@ -47,6 +49,7 @@ def env_for(port, mode="mock", extra=None, sub="main"):
 def start(port, mode="mock", extra=None, sub="main", wait=True):
     e, d = env_for(port, mode, extra, sub)
     p = subprocess.Popen([BIN], env=e, cwd=REPO, stdout=open(d + "/stdout.log", "ab"), stderr=subprocess.STDOUT)
+    PROCS.append(p)
     if wait:
         for _ in range(80):
             if p.poll() is not None: return p, d
@@ -56,9 +59,24 @@ def start(port, mode="mock", extra=None, sub="main", wait=True):
     return p, d
 
 def stop(p):
-    if p.poll() is None: p.terminate()
-    try: p.wait(10)
-    except Exception: p.kill()
+    if p.poll() is None:
+        p.terminate()
+        try: p.wait(10)
+        except Exception:
+            p.kill()
+            try: p.wait(5)
+            except Exception: pass
+    if p in PROCS: PROCS.remove(p)
+
+# Every stack process is tracked and stopped on any exit path (normal end, exception, Ctrl-C, SIGTERM). A run that did not
+# finish cleanly keeps its work directory so the logs and databases of the failed run stay available.
+FINISHED = False
+def cleanup_all():
+    for p in list(PROCS): stop(p)
+    if not FINISHED: print(f"# run did not finish; work directory kept: {WORK}", flush=True)
+atexit.register(cleanup_all)
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+signal.signal(signal.SIGHUP, lambda *_: sys.exit(129))
 
 build_binary(REPO, BIN)
 rev = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip()
@@ -396,6 +414,7 @@ rec("CNV-01", "NOT-COVERED", "canvas auto-add + delete + reload is frontend stor
 
 p = sum(1 for _, s in res if s == "PASS"); f = sum(1 for _, s in res if s == "FAIL"); o = len(res) - p - f
 print(f"=== mock_stack PASS={p} FAIL={f} OTHER={o} ===")
+FINISHED = True
 if not ARGS.keep and not f: shutil.rmtree(WORK, ignore_errors=True)
 else: print(f"# work directory kept: {WORK}")
 sys.exit(1 if f else 0)

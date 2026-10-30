@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("release_env", ROOT / "scripts/release-env.py")
@@ -64,6 +65,29 @@ def changed(mutate):
     document = copy.deepcopy(BASE)
     mutate(document["environments"])
     return document
+
+
+class SmokeInjectionTest(unittest.TestCase):
+    def test_smoke_injects_the_environment_name_with_the_base_address(self):
+        # api_free.py reads the server log of the same deployment it sent requests to (RELEASE_ENV + BASE).
+        seen = {}
+
+        class Done:
+            returncode = 0
+
+        def fake_run(command, env):
+            seen.update(env)
+            return Done()
+
+        document = load(BASE)
+        with mock.patch.object(release_env, "admin_credentials", return_value={"ADMIN_USERNAME": "u", "ADMIN_PASSWORD": "p"}), \
+                mock.patch.object(release_env, "running_revision", return_value="0" * 40), \
+                mock.patch.object(release_env, "container", return_value="c"), \
+                mock.patch.object(release_env.subprocess, "run", fake_run):
+            name = next(iter(document["environments"]))
+            self.assertEqual(release_env.smoke(document, name, ["true"]), 0)
+        self.assertEqual(seen["RELEASE_ENV"], name)
+        self.assertEqual(seen["BASE"], document["environments"][name]["base_url"])
 
 
 class EnvironmentRulesTest(unittest.TestCase):

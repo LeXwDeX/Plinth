@@ -23,7 +23,7 @@ success unless --keep). Needs go and build/go-web; --ui also needs Playwright (s
 
   python3 scripts/acceptance/cross_user.py [--ui] [--keep] [--work DIR] [--web-root DIR]
 """
-import argparse, copy, http.server, json, os, re, secrets, shutil, subprocess, sys, tempfile, threading, time
+import argparse, atexit, copy, http.server, json, os, re, secrets, shutil, subprocess, sys, tempfile, threading, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from acceptance_lib import *
 
@@ -72,6 +72,13 @@ env = {"HOME": os.environ.get("HOME", WORK), "PATH": os.environ["PATH"], "APP_EN
        "ADMIN_PASSWORD": CRED["admin"][1], "ADMIN_EMAIL": "admin@example.test", "DATABASE_PATH": WORK + "/data/a.db",
        "STORAGE_ROOT": WORK + "/data/storage", "LOG_DIR": WORK + "/data/logs", "WEB_ASSETS_ROOT": WEB_ROOT, "LOG_LEVEL": "debug"}
 proc = subprocess.Popen([BIN], env=env, cwd=REPO, stdout=open(WORK + "/data/stdout.log", "ab"), stderr=subprocess.STDOUT)
+
+def _stop_stack():
+    if proc.poll() is None:
+        proc.terminate()
+        try: proc.wait(10)
+        except Exception: proc.kill(); proc.wait(5)
+atexit.register(_stop_stack)  # also on exceptions and Ctrl-C
 
 def finish(code):
     if proc.poll() is None:

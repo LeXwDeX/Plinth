@@ -9,7 +9,7 @@ secrets. deploy/environments.example.json is its template.
   release-env.py list
   release-env.py show <env>
   release-env.py release <env> [--revision SHA] [--acceptance-note ID]
-  release-env.py smoke <env> -- <command...>      # BASE, ADMIN_*, EXPECT_SHA set
+  release-env.py smoke <env> -- <command...>      # BASE, ADMIN_*, EXPECT_SHA, RELEASE_ENV set
   release-env.py compose-env <env>                # GO_* layout for manual compose and
                                                   # ART_AI_PROTECTED_PATHS for the migration tools
 
@@ -295,7 +295,8 @@ def smoke(document, name, command):
     if not command:
         raise EnvironmentError_("smoke needs a command after --")
     variables = {**os.environ, **admin_credentials(environment), "BASE": environment["base_url"],
-                 "EXPECT_SHA": running_revision(environment), "RELEASE_CONTAINER": container(environment)}
+                 "EXPECT_SHA": running_revision(environment), "RELEASE_CONTAINER": container(environment),
+                 "RELEASE_ENV": name}
     return subprocess.run(command, env=variables).returncode
 
 
