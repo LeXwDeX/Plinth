@@ -31,7 +31,8 @@ BASE = {
             "root": "/srv/stack-b",
             "base_url": "http://host-one:8081",
             "compose_project": "stack_b",
-            "managed_by": "release-go-formal.sh",
+            "protect_projects": ["stack_a"],
+            "protected_paths": [],
         },
         "alone": {
             "ssh": "root@host-two",
@@ -117,6 +118,7 @@ class EnvironmentRulesTest(unittest.TestCase):
         def mutate(environments):
             environments["alone"]["ssh"] = "root@host-one"
             environments["shared-a"]["protect_projects"].append("alone")
+            environments["shared-b"]["protect_projects"].append("alone")
         with self.assertRaisesRegex(release_env.EnvironmentError_, "single_stack"):
             load(changed(mutate))
 
@@ -185,12 +187,18 @@ class EnvironmentRulesTest(unittest.TestCase):
         with self.assertRaisesRegex(release_env.EnvironmentError_, "dev-test"):
             load(changed(mutate))
 
-    def test_dev_test_backup_cannot_be_managed_or_promoted(self):
-        for field, value in (("managed_by", "release-go-formal.sh"), ("promote_from", "shared-a")):
-            def mutate(environments, field=field, value=value):
-                environments["dev-test"][field] = value
-            with self.subTest(field=field), self.assertRaisesRegex(release_env.EnvironmentError_, "promote_from or managed_by"):
-                load(changed(mutate))
+    def test_dev_test_backup_cannot_be_promoted(self):
+        def mutate(environments):
+            environments["dev-test"]["promote_from"] = "shared-a"
+        with self.assertRaisesRegex(release_env.EnvironmentError_, "promote_from"):
+            load(changed(mutate))
+
+    def test_removed_managed_by_field_is_refused_with_a_fixable_message(self):
+        # #74: the legacy-formal stack that used managed_by is retired.
+        def mutate(environments):
+            environments["shared-b"]["managed_by"] = "release-go-formal.sh"
+        with self.assertRaisesRegex(release_env.EnvironmentError_, "managed_by was removed"):
+            load(changed(mutate))
 
     def test_backup_settings_are_strict(self):
         for backup in ({"scope": "full", "keep": 3}, {"scope": "database"}, {"scope": "database", "keep": 0},

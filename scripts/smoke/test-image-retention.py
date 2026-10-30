@@ -25,8 +25,8 @@ def identity(number):
 
 
 # Placeholder names: real projects live only in the untracked environments file (#261).
-TEST_PROJECT, CANDIDATE_PROJECT, FORMAL_PROJECT = "test-stack", "candidate-stack", "formal-stack"
-SHARED = ("--project", TEST_PROJECT, "--protect-project", CANDIDATE_PROJECT, "--protect-project", FORMAL_PROJECT)
+TEST_PROJECT, CANDIDATE_PROJECT, OTHER_PROJECT = "test-stack", "candidate-stack", "other-stack"
+SHARED = ("--project", TEST_PROJECT, "--protect-project", CANDIDATE_PROJECT, "--protect-project", OTHER_PROJECT)
 
 
 class RetentionTests(unittest.TestCase):
@@ -37,7 +37,7 @@ class RetentionTests(unittest.TestCase):
         saved = {name: getattr(retention, name) for name in
                  ("ROOT", "PROJECTS", "RUNNING_PROJECT", "RUNNING_CONTAINER", "KEEP")}
         self.addCleanup(lambda: [setattr(retention, k, v) for k, v in saved.items()])
-        retention.configure_stack(str(self.root), TEST_PROJECT, None, (CANDIDATE_PROJECT, FORMAL_PROJECT))
+        retention.configure_stack(str(self.root), TEST_PROJECT, None, (CANDIDATE_PROJECT, OTHER_PROJECT))
         self.calls = []
         self.rows = {
             identity(n): {"Id": identity(n), "Created": f"2026-10-{n:02d}T00:00:00.123456789Z",
@@ -47,7 +47,7 @@ class RetentionTests(unittest.TestCase):
         self.fail_remove = False
         self.running = True
         self.new_reference = False
-        self.formal_refs = {}
+        self.other_refs = {}
 
     def docker(self, *args):
         self.calls.append(args)
@@ -57,8 +57,8 @@ class RetentionTests(unittest.TestCase):
             return "\n".join(json.dumps({"ID": identity(n), "Repository": "art-ai-go-production"}) for n in ids) + \
                 "\n" + json.dumps({"ID": identity(11), "Repository": "other-service"})
         if args[0] == "ps":
-            if args[-1].endswith("=" + FORMAL_PROJECT):
-                return " ".join(self.formal_refs)
+            if args[-1].endswith("=" + OTHER_PROJECT):
+                return " ".join(self.other_refs)
             if args[-1].endswith("=" + CANDIDATE_PROJECT):
                 return "candidate"
             self.assertTrue(args[-1].endswith("=" + TEST_PROJECT), args)
@@ -67,11 +67,11 @@ class RetentionTests(unittest.TestCase):
             name = "current" if args[2] == retention.RUNNING_CONTAINER else args[2]
             project = CANDIDATE_PROJECT if name == "candidate" else TEST_PROJECT
             n = 4 if name == "new" else self.refs[name]
-            if name in self.formal_refs:
-                project, n = FORMAL_PROJECT, self.formal_refs[name]
+            if name in self.other_refs:
+                project, n = OTHER_PROJECT, self.other_refs[name]
             return json.dumps([{"Image": identity(n), "Config": {"Labels": {
                 "com.docker.compose.project": project, "com.docker.compose.service": "art-ai-go"}},
-                "State": {"Running": self.running if name == "current" else name == "formal-running"}}])
+                "State": {"Running": self.running if name == "current" else name == "other-running"}}])
         if args[:2] == ("inspect", "--type=image"):
             value = identity(3) if args[2] == "art-ai-go-production:previous" else args[2]
             return json.dumps([self.rows[value]])
@@ -91,116 +91,13 @@ class RetentionTests(unittest.TestCase):
     def removals(self):
         return [call for call in self.calls if call[0] == "rmi"]
 
-    def pins(self, **values):
-        folder = self.root / "formal" / "reports"
-        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-        path = folder / "image-pins.json"
-        path.write_text(json.dumps({"version": 1, "current": identity(2), "rollback": None, "pending": None, **values}))
-        path.chmod(0o600)
-        return path
-
-    def test_formal_running_and_stopped_containers_are_protected(self):
-        self.pins()
-        self.formal_refs = {"formal-running": 4, "formal-stopped": 5}
-        self.refs.update(self.formal_refs)
+    def test_other_project_running_and_stopped_containers_are_protected(self):
+        self.other_refs = {"other-running": 4, "other-stopped": 5}
+        self.refs.update(self.other_refs)
         _, output = self.run_retention(True)
         self.assertEqual(self.removals(), [])
         self.assertIn("KEEP " + identity(4), output)
         self.assertIn("KEEP " + identity(5), output)
-
-    def test_formal_current_rollback_pending_pins_protected_and_dry_run_readonly(self):
-        path = self.pins(current=identity(4), rollback=identity(5), pending=identity(1))
-        before = path.read_bytes()
-        _, output = self.run_retention()
-        self.assertEqual(self.removals(), [])
-        for n in (1, 4, 5):
-            line = next(line for line in output.splitlines() if line.startswith("KEEP " + identity(n)))
-            self.assertIn("formal-image-pin", line)
-        self.assertEqual(path.read_bytes(), before)
-        self.assertFalse((self.root / "releases").exists())
-
-    def test_formal_missing_or_invalid_pins_fail_before_deleting(self):
-        (self.root / "formal").mkdir()
-        with self.assertRaises((ValueError, OSError)):
-            self.run_retention(True)
-        self.assertEqual(self.removals(), [])
-        invalid = [
-            [], {"version": True, "current": identity(4), "rollback": None, "pending": None},
-            {"version": 1, "current": None, "rollback": None, "pending": None},
-            {"version": 1, "current": "art-ai-go-production:tag4", "rollback": None, "pending": None},
-            {"version": 1, "current": identity(4), "rollback": None},
-            {"version": 1, "current": identity(4), "rollback": None, "pending": None, "extra": 1},
-        ]
-        path = self.pins()
-        for value in invalid:
-            with self.subTest(value=value):
-                path.write_text(json.dumps(value))
-                with self.assertRaises(ValueError):
-                    self.run_retention(True)
-                self.assertEqual(self.removals(), [])
-        path.write_text('{"version":1,"version":1,"current":"' + identity(4) + '","rollback":null,"pending":null}')
-        with self.assertRaises(ValueError):
-            self.run_retention(True)
-        self.assertEqual(self.removals(), [])
-
-    def test_pin_unknown_to_exact_repository_inventory_fails_closed(self):
-        self.pins(pending=identity(99))
-        with self.assertRaisesRegex(ValueError, "inventory"):
-            self.run_retention(True)
-        self.assertEqual(self.removals(), [])
-
-    def test_pins_are_reloaded_immediately_before_each_removal(self):
-        path = self.pins()
-        original = self.docker
-        def change_before_second_removal(*args):
-            result = original(*args)
-            if args == ("rmi", identity(5)):
-                self.new_reference = False
-                path.write_text(json.dumps({"version": 1, "current": identity(2), "rollback": identity(4), "pending": None}))
-            return result
-        with patch.object(retention, "docker", change_before_second_removal), contextlib.redirect_stdout(io.StringIO()):
-            retention.retain("art-ai-go-production:previous", True)
-        self.assertEqual(self.removals(), [("rmi", identity(5))])
-
-    def test_pin_becoming_unreadable_stops_remaining_cleanup(self):
-        path = self.pins()
-        original = self.docker
-        def corrupt_after_first_removal(*args):
-            result = original(*args)
-            if args == ("rmi", identity(5)):
-                path.write_text("broken")
-            return result
-        with patch.object(retention, "docker", corrupt_after_first_removal), contextlib.redirect_stdout(io.StringIO()):
-            with self.assertRaises(ValueError):
-                retention.retain("art-ai-go-production:previous", True)
-        self.assertEqual(self.removals(), [("rmi", identity(5))])
-
-    def test_formal_pin_reader_rejects_symlinks_and_writable_files(self):
-        path = self.pins()
-        path.chmod(0o666)
-        with self.assertRaises(ValueError):
-            retention.formal_image_pins(self.root)
-        path.unlink()
-        outside = self.root / "outside.json"
-        outside.write_text('{"version":1,"current":null,"rollback":null,"pending":null}')
-        path.symlink_to(outside)
-        with self.assertRaises((ValueError, OSError)):
-            retention.formal_image_pins(self.root)
-
-    def test_formal_absence_is_readonly_and_pin_write_is_atomic_private(self):
-        self.assertEqual(retention.formal_image_pins(self.root), set())
-        self.assertEqual(list(self.root.iterdir()), [])
-        with retention.image_lock(self.root):
-            retention.write_formal_pins(self.root, current=None, rollback=None, pending=identity(4))
-        path = self.root / "formal/reports/image-pins.json"
-        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
-        self.assertEqual(retention.formal_image_pins(self.root), {identity(4)})
-        before = path.read_bytes()
-        with patch.object(retention.os, "replace", side_effect=OSError("write failed")):
-            with self.assertRaises(OSError):
-                retention.write_formal_pins(self.root, current=identity(5), rollback=None, pending=None)
-        self.assertEqual(path.read_bytes(), before)
-        self.assertEqual(list(path.parent.iterdir()), [path])
 
     def test_image_lock_serializes_other_file_descriptors_and_is_private(self):
         with retention.image_lock(self.root):
@@ -307,12 +204,12 @@ class SingleStackRetentionTests(unittest.TestCase):
         if args[:2] == ("image", "ls"):
             return "\n".join(json.dumps({"ID": i, "Repository": "art-ai-go-production"}) for i in self.rows)
         if args[0] == "ps":
-            self.assertEqual(args[-1], "label=com.docker.compose.project=formal-project")
-            return "formal-project-art-ai-go-1"
+            self.assertEqual(args[-1], "label=com.docker.compose.project=single-project")
+            return "single-project-art-ai-go-1"
         if args[:2] == ("inspect", "--type=container"):
-            self.assertEqual(args[2], "formal-project-art-ai-go-1")
+            self.assertEqual(args[2], "single-project-art-ai-go-1")
             return json.dumps([{"Image": identity(4), "State": {"Running": True}, "Config": {"Labels": {
-                "com.docker.compose.project": "formal-project", "com.docker.compose.service": "art-ai-go"}}}])
+                "com.docker.compose.project": "single-project", "com.docker.compose.service": "art-ai-go"}}}])
         if args[:2] == ("inspect", "--type=image"):
             value = identity(3) if args[2] == "art-ai-go-production:tag3" else args[2]
             return json.dumps([self.rows[value]])
@@ -321,22 +218,22 @@ class SingleStackRetentionTests(unittest.TestCase):
         self.fail(f"unexpected Docker call {args!r}")
 
     def test_keep_one_removes_everything_but_running_and_rollback(self):
-        retention.configure_stack(str(self.root), "formal-project", 1)
+        retention.configure_stack(str(self.root), "single-project", 1)
         with patch.object(retention, "docker", self.docker), contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(retention.retain("art-ai-go-production:tag3", True), 0)
         removed = [call[1] for call in self.calls if call[0] == "rmi"]
         self.assertEqual(sorted(removed), [identity(1), identity(2)])
         self.assertIn("newest=1", out.getvalue())
         self.assertEqual({call[-1] for call in self.calls if call[0] == "ps"},
-                         {"label=com.docker.compose.project=formal-project"})
+                         {"label=com.docker.compose.project=single-project"})
 
     def test_main_arguments_configure_stack_and_lock_under_its_root(self):
         argv = ["retention", "--rollback-image", "art-ai-go-production:tag3", "--apply",
-                "--root", str(self.root), "--project", "formal-project", "--keep", "1"]
+                "--root", str(self.root), "--project", "single-project", "--keep", "1"]
         def locked(_rollback, apply):
             self.assertTrue(apply)
             self.assertEqual((retention.ROOT, retention.PROJECTS, retention.RUNNING_CONTAINER, retention.KEEP),
-                             (self.root, ("formal-project",), "formal-project-art-ai-go-1", 1))
+                             (self.root, ("single-project",), "single-project-art-ai-go-1", 1))
             self.assertTrue((self.root / "releases/image-retention.lock").exists())
             return 0
         with patch.object(sys, "argv", argv), patch.object(retention, "retain", side_effect=locked):
@@ -351,7 +248,7 @@ class SingleStackRetentionTests(unittest.TestCase):
     def test_root_and_project_are_required_and_name_no_environment(self):
         retention.ROOT, retention.PROJECTS, retention.RUNNING_PROJECT, retention.RUNNING_CONTAINER = None, (), None, None
         with self.assertRaises(ValueError):
-            retention.configure_stack(None, "formal-project", None)
+            retention.configure_stack(None, "single-project", None)
         with self.assertRaises(ValueError):
             retention.configure_stack(str(self.root), None, None)
         with self.assertRaises(ValueError):
@@ -368,7 +265,7 @@ class SingleStackRetentionTests(unittest.TestCase):
                 "--root", str(self.root), *SHARED]
         with patch.object(sys, "argv", argv), patch.object(retention, "retain", return_value=0):
             self.assertEqual(retention.main(), 0)
-        self.assertEqual(retention.PROJECTS, (TEST_PROJECT, CANDIDATE_PROJECT, FORMAL_PROJECT))
+        self.assertEqual(retention.PROJECTS, (TEST_PROJECT, CANDIDATE_PROJECT, OTHER_PROJECT))
         with patch.object(sys, "argv", argv[:-6]), patch.object(retention, "retain", return_value=0), \
                 contextlib.redirect_stderr(io.StringIO()):
             retention.RUNNING_PROJECT = None

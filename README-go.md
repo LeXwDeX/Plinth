@@ -201,7 +201,7 @@ GO_IMAGE_TAG=替换为镜像标签 scripts/deploy-go-candidate.sh
 
 ## dev-test 测试环境全量迁移演练
 
-`dev-test` 主机由多个业务共用。本节现行发布命令只涉及 Plinth 的 `dev-test` 栈；`legacy-formal` 的目标与状态见 `dev_ops.md`。各内部环境按环境名部署，入口 `docs/deployment.md`；正式测试环境 `formal-test`（#270）只晋级 `dev-test` 已全部验收的 revision。
+`dev-test` 主机由多个业务共用。本节现行发布命令只涉及 Plinth 的 `dev-test` 栈；同机的 `legacy-formal` 已于 2026-10-30 下线（GitHub #74，见 `dev_ops.md`）。各内部环境按环境名部署，入口 `docs/deployment.md`；正式测试环境 `formal-test`（#270）只晋级 `dev-test` 已全部验收的 revision。
 Plinth 的对话和图片模型出站请求访问 llms 正式服务器
 网关的 `/v1`（地址在 dev-test 运行环境文件 `LLM_BASE_URL`；链路：测试客户端 → `dev-test` Plinth 测试栈 →
 llms 正式服务器；后者不限制客户端与模型）。测试链路上游 key 为
@@ -272,23 +272,13 @@ Nginx Webhook 均已验收。未在 live Provider 上创建计费任务；九类
 
 `Dockerfile.go-runtime` 只从公共 npm registry（`https://registry.npmjs.org/`）安装 pnpm 与前端依赖，Go 模块走 `GOPROXY`（默认 `https://proxy.golang.org,direct`）；`pnpm-lock.yaml` 只记完整性校验值、不写死任何源，因此外部网络可直接 `docker build -f Dockerfile.go-runtime .`。npm 源固定为公共 registry，构建不再接受覆盖：内部环境由 `scripts/release-env.py` 只把环境文件中的 Go 代理（`build.goproxy`）与 `--add-host`（`build.add_hosts`）传给 `scripts/release-server-steps.sh`（对应 `RELEASE_GOPROXY`、`RELEASE_BUILD_ADD_HOSTS`），仓库不写死镜像源；旧本地环境文件里的 `build.npm_registry` 会被拒绝，需删除该字段。构建阶段与 CI 同用 `golang:1.27`。
 
-镜像目标（#259）：默认目标 `runtime` 是自部署镜像，含 `art-ai`、`art-ai-storage`、`art-ai-retention`；`runtime-with-migration-tools` 在其上追加历史迁移与有界维护命令 `art-ai-etl`、`art-ai-recover-assets`、`art-ai-complete-conversion-delivery` 与 `/app/legacy-*` 挂载点，供内部环境（`dev-test`、`formal-test` 与 `legacy-formal`）使用。`scripts/release-server-steps.sh` 以 `--target runtime-with-migration-tools` 构建，`docker-compose.go-production.yml` 与 `docker-compose.go-candidate.yml` 的 `build.target` 相同，内部运维与候选构建因此使用同一目标并包含同一组维护命令。
+镜像目标（#259）：默认目标 `runtime` 是自部署镜像，含 `art-ai`、`art-ai-storage`、`art-ai-retention`；`runtime-with-migration-tools` 在其上追加历史迁移与有界维护命令 `art-ai-etl`、`art-ai-recover-assets`、`art-ai-complete-conversion-delivery` 与 `/app/legacy-*` 挂载点，供内部环境（`dev-test` 与 `formal-test`）使用。`scripts/release-server-steps.sh` 以 `--target runtime-with-migration-tools` 构建，`docker-compose.go-production.yml` 与 `docker-compose.go-candidate.yml` 的 `build.target` 相同，内部运维与候选构建因此使用同一目标并包含同一组维护命令。
 
 ### dev-test 后续普通发布（不重跑 ETL）
 
-`dev-test` 是 Plinth 测试栈（Compose 项目为环境文件的 `compose_project`，目录 `<root>/production/`），继续按本节现行命令发布。正式栈 `legacy-formal`（#232 隔离正式栈，与 `dev-test` 同机，独立 Compose 项目（环境文件 `legacy-formal` 条目），独立目录 `<root>/formal/`；只由 `scripts/release-go-formal.sh` 晋级，去留待用户确认）只从测试栈晋级已验收的精确 `main` revision。发布入口、来源验收报告格式与正式回滚见 `dev_ops.md`「dev-test 主机两栈边界与镜像保留」。源码和测试只能证明实现与本地验证；是否部署及验收通过以 #232 Issue 原生记录为准。正式栈无 Provider Key 时远程 Provider Offering 显示不可用，本地 Offering 仍按本地能力使用。授权范围为创建独立正式目录/空 Key 配置、晋级已验收 revision、正式栈内回滚、免费 L0/L1 冒烟和受支持的管理员初始路径；写入正式 Provider Key、付费生成、数据导入、nginx/域名仍需用户明确决定。测试栈常设授权不延伸至正式栈。测试日常发布入口为 `python3 scripts/release-env.py release dev-test`（它向 `scripts/release-go-testenv.sh` 传入必填的 `RELEASE_HOST`、`RELEASE_ROOT`）。
+`dev-test` 是 Plinth 测试栈（Compose 项目为环境文件的 `compose_project`，目录 `<root>/production/`），继续按本节现行命令发布。测试日常发布入口为 `python3 scripts/release-env.py release dev-test`（它向 `scripts/release-go-testenv.sh` 传入必填的 `RELEASE_HOST`、`RELEASE_ROOT`）。同机曾有隔离正式栈 `legacy-formal`（内部存档 #232），已于 2026-10-30 下线（GitHub #74），不再有对应的晋级脚本；正式测试环境 `formal-test` 的晋级入口与来源验收报告格式见 `docs/deployment.md`。
 
-正式晋级在本地准备权限为 `0600` 的管理员 JSON，并以 Issue note ID 绑定来源验收：
-
-```bash
-scripts/release-go-formal.sh <完整SHA> \
-  --acceptance-note <#232原生noteID> \
-  --credentials-file <本地0600 JSON>
-```
-
-note 报告必须包括 `formal_promotion: 1`、完整 revision、test manifest 的 image tag 和 `L0`/`L1`/`L1_agent`/`related` 四项无失败、无 skip/soft-fail 的本仓库证据（GitHub Issue comment）。切换期间的失败由晋级事务自动处理：有前版时恢复其数据、运行环境与镜像；首次切换失败时停候选并保留现场。发布写出 `formal/reports/current.json` 后若正式 L0/L1 验收失败，再用 `scripts/release-go-formal.sh <当前正式完整SHA> --rollback`；有前版则恢复，有 current 但无前版（首次成功发布）则停正式服务并回执 `stopped-no-previous-version`。若首次发布失败留下 formal 根但尚无 `current.json`，当前脚本拒绝重复晋级，需要先检查半初始化报告、pins、容器及数据；不要盲目重跑。具体恢复回执与尚未验证状态记入 #232。
-
-两栈默认 DEBUG，应用日志同时写 stdout（`json-file` `50m × 10`）和各栈 `logs/art-ai.log`（50 MiB 滚动、保留 30 天），响应带 `X-Request-ID` 错误 ID，日志统一脱敏（#233）。详情见 `dev_ops.md`。
+各栈默认 DEBUG，应用日志同时写 stdout（`json-file` `50m × 10`）和各栈 `logs/art-ai.log`（50 MiB 滚动、保留 30 天），响应带 `X-Request-ID` 错误 ID，日志统一脱敏（#233）。详情见 `dev_ops.md`。
 
 普通发布必须来自已推送且工作区干净的 `main`。镜像标签用于人类识别，
 完整提交 SHA 另写入 OCI revision 并由预检脚本校验：

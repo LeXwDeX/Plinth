@@ -97,27 +97,30 @@ def validate_environment(name, environment, document):
             isinstance(other, str) and COMPOSE_PROJECT.fullmatch(other) and other != environment["compose_project"]
             for other in protect), "protect_projects must list other Compose project names")
         need(single is None, "a single_stack environment has no other projects to protect")
-    if environment.get("managed_by") is None:
-        # #334: a stack released here must name the other Compose projects on
-        # its host, so a release never touches them. Without single_stack the
-        # host counts as shared even when this file lists nothing else on it.
-        host = environment["ssh"].split("@", 1)[1]
-        neighbours = [other.get("compose_project") for other_name, other in document["environments"].items()
-                      if other_name != name and isinstance(other, dict) and isinstance(other.get("ssh"), str)
-                      and other["ssh"].split("@", 1)[-1] == host]
-        if single is not None:
-            need(not neighbours, "single_stack cannot share its host with another environment; use protect_projects")
-        else:
-            need(protect is not None, "a shared host (no single_stack) needs protect_projects naming the other projects")
-            missing = [str(project) for project in neighbours if project not in protect]
-            need(not missing, f"protect_projects misses {', '.join(missing)} on the same host")
-        # Directories the migration tools (backup-go-production.sh,
-        # run-go-etl-container.sh) must never take as a target, besides the
-        # root itself; [] when the host has none.
-        paths = environment.get("protected_paths")
-        need(isinstance(paths, list) and all(
-            isinstance(path, str) and path.startswith("/") and WORD.fullmatch(path) and ".." not in path
-            and ":" not in path for path in paths), "protected_paths must list absolute paths (may be empty)")
+    # managed_by (stacks released by another tool) was removed with legacy-formal (#74);
+    # a stale field would silently mislead, so refuse it with a fixable message.
+    need("managed_by" not in environment,
+         "managed_by was removed (#74, the legacy-formal stack is retired); delete this field")
+    # #334: a stack released here must name the other Compose projects on
+    # its host, so a release never touches them. Without single_stack the
+    # host counts as shared even when this file lists nothing else on it.
+    host = environment["ssh"].split("@", 1)[1]
+    neighbours = [other.get("compose_project") for other_name, other in document["environments"].items()
+                  if other_name != name and isinstance(other, dict) and isinstance(other.get("ssh"), str)
+                  and other["ssh"].split("@", 1)[-1] == host]
+    if single is not None:
+        need(not neighbours, "single_stack cannot share its host with another environment; use protect_projects")
+    else:
+        need(protect is not None, "a shared host (no single_stack) needs protect_projects naming the other projects")
+        missing = [str(project) for project in neighbours if project not in protect]
+        need(not missing, f"protect_projects misses {', '.join(missing)} on the same host")
+    # Directories the migration tools (backup-go-production.sh,
+    # run-go-etl-container.sh) must never take as a target, besides the
+    # root itself; [] when the host has none.
+    paths = environment.get("protected_paths")
+    need(isinstance(paths, list) and all(
+        isinstance(path, str) and path.startswith("/") and WORD.fullmatch(path) and ".." not in path
+        and ":" not in path for path in paths), "protected_paths must list absolute paths (may be empty)")
     if single is not None:
         need(isinstance(single, dict) and set(single) <= {"image_keep", "keep_source_snapshots", "allow_bootstrap"},
              "single_stack has unknown fields")
@@ -129,8 +132,8 @@ def validate_environment(name, environment, document):
     if backup is not None:
         # Only the disposable test stack may skip the asset trees (#364).
         need(name == "dev-test", "backup retention is only supported for the dev-test environment")
-        need(environment.get("promote_from") is None and environment.get("managed_by") is None,
-             "dev-test backup retention cannot be combined with promote_from or managed_by")
+        need(environment.get("promote_from") is None,
+             "dev-test backup retention cannot be combined with promote_from")
         need(isinstance(backup, dict) and set(backup) == {"scope", "keep"}, "backup needs only scope and keep")
         need(backup.get("scope") == "database", "backup scope must be database")
         need(type(backup.get("keep")) is int and 1 <= backup["keep"] <= 2, "backup keep must be 1-2")
@@ -161,8 +164,6 @@ def validate_environment(name, environment, document):
             isinstance(entry, str) and ADD_HOST.fullmatch(entry) for entry in build["add_hosts"]),
              "build.add_hosts must list host:address entries")
     need(environment.get("source_transfer", "pipe") in ("pipe", "scp"), "source_transfer must be pipe or scp")
-    need(environment.get("managed_by") in (None, "release-go-formal.sh"),
-         "managed_by may only name scripts/release-go-formal.sh")
     source = environment.get("promote_from")
     if source is not None:
         need(source in document["environments"] and source != name, "promote_from must name another environment")
@@ -199,12 +200,12 @@ def promotion_revision(document, name, revision, note_id):
     environment = document["environments"][name]
     source_name = environment["promote_from"]
     source = document["environments"][source_name]
-    formal = load_helper("release-formal.py", "release_formal_rules")
+    promotion = load_helper("release-promotion.py", "release_promotion_rules")
     running = running_revision(source)
     revision = revision or running
     try:
-        formal.validate_revision(revision)
-    except formal.ReleaseError as error:
+        promotion.validate_revision(revision)
+    except promotion.ReleaseError as error:
         raise EnvironmentError_(str(error)) from None
     run("git", "fetch", "-q", "origin")
     try:
@@ -215,14 +216,14 @@ def promotion_revision(document, name, revision, note_id):
         raise EnvironmentError_(f"{name} needs --acceptance-note: the {source_name} acceptance report for {revision}")
     acceptance = document["acceptance"]
     try:
-        note = formal.read_acceptance_comment(acceptance["forge_repo"], acceptance["issue"], note_id)
-    except formal.ReleaseError as error:
+        note = promotion.read_acceptance_comment(acceptance["forge_repo"], acceptance["issue"], note_id)
+    except promotion.ReleaseError as error:
         raise EnvironmentError_(f"{source_name} acceptance refused: {error}") from None
     manifest = run("ssh", source["ssh"], f"cat {source['root']}/releases/manifest.txt")
     try:
-        report = formal.acceptance_from_note(note.get("body", ""), revision, acceptance["forge_url"])
-        formal.validate_manifest(manifest, revision, report["image_tag"])
-    except formal.ReleaseError as error:
+        report = promotion.acceptance_from_note(note.get("body", ""), revision, acceptance["forge_url"])
+        promotion.validate_manifest(manifest, revision, report["image_tag"])
+    except promotion.ReleaseError as error:
         raise EnvironmentError_(f"{source_name} acceptance refused: {error}") from None
     if revision != running:
         print(f"[release-env] note: {source_name} now runs {running}; promoting accepted {revision}")
@@ -267,8 +268,6 @@ def release_variables(environment, revision):
 
 def release(document, name, args):
     environment = document["environments"][name]
-    if environment.get("managed_by"):
-        raise EnvironmentError_(f"{name} is released by scripts/{environment['managed_by']}, not release-env.py")
     revision = None
     if environment.get("promote_from"):
         revision = promotion_revision(document, name, args.revision, args.acceptance_note)
