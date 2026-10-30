@@ -206,7 +206,7 @@ Plinth 的对话和图片模型出站请求访问 llms 正式服务器
 网关的 `/v1`（地址在 dev-test 运行环境文件 `LLM_BASE_URL`；链路：测试客户端 → `dev-test` Plinth 测试栈 →
 llms 正式服务器；后者不限制客户端与模型）。测试链路上游 key 为
 `<TEST_API_KEY>`（2026-09-27 用户给定，仅适用测试链路；正式生产密钥只存正式
-生产自身运行环境文件，权限 `0600`）。测试栈对话模型为字面量 `deepseek`（2026-10-19 起网关目录已无 `qwen-max`、`glm-flash`，直接请求返回 400 `model not supported by any target`；经用户确认改用 `deepseek`，网关当前路由到 `deepseek-flash`）；请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，DeepSeek 用 `thinking.type=enabled`、`reasoning_effort=low`（用户 2026-10-20 决定；官方只有 low/high/max 三档），工具循环回传 `reasoning_content`；其他中国大陆模型仍用官方最高档。部署只更新 dev-test Compose 项目（环境文件 `compose_project`）的 `art-ai-go`
+生产自身运行环境文件，权限 `0600`）。测试栈对话模型为 `qwen3.8-omni-flash`（2026-10-30 维护者决定，替代 `deepseek`，不再使用 deepseek）；请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，该模型命中 `qwen3.8-omni-flash` profile（`enable_thinking=true`、`reasoning_effort` 默认 `xhigh`，上下文窗口 1000000）；其他中国大陆模型仍用官方最高档。部署只更新 dev-test Compose 项目（环境文件 `compose_project`）的 `art-ai-go`
 服务，不操作同机其他业务或代理测试实例。接口目录可达不能替代真实
 生成、资产落盘和页面回归。
 

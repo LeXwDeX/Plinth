@@ -183,7 +183,7 @@ check `docker compose logs art-ai`.
   [Provider configuration](docs/provider-configuration.md).
 - **Agent chat model:** `LLM_BASE_URL` and `LLM_API_KEY` configure only the Agent chat model.
   They do not configure image or 3D Providers. `LLM_MODEL` defaults to the Schema value
-  `deepseek`; set it to the model name served by your endpoint when needed. The Agent model
+  `qwen3.8-omni-flash` (a strong multimodal model); set it to the model name served by your endpoint when needed. The Agent model
   must support multimodal input and at least be able to read images.
 - **Gemini images:** set both `GEMINI_API_KEY` and `GEMINI_BASE_URL` to enable Gemini. It has
   no default base URL and never borrows `LLM_BASE_URL`; if all models use one gateway, set
@@ -235,7 +235,7 @@ default URL, and it does not use `LLM_BASE_URL`. When one gateway serves several
 set every connection's base URL explicitly.
 
 For live Agent chat, set `AGENT_MODE=live`, `LLM_BASE_URL` and `LLM_API_KEY`. `LLM_MODEL`
-uses the Schema default `deepseek` when empty; set the model name served by your endpoint if
+uses the Schema default `qwen3.8-omni-flash` (a strong multimodal model) when empty; set the model name served by your endpoint if
 that default does not apply. The Agent model must support multimodal input and image reading; prefer a strong vision model, since weak ones miss canvas annotations (red circles, arrows).
 
 To let users pick more chat models, list connection IDs in `LLM_CONNECTIONS` (for example

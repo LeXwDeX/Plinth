@@ -24,20 +24,20 @@ func TestChatAgentWiringEmitsSchemaDrivenThinkingOnWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The default model is the gateway's deepseek alias (2026-10-19), sent
-	// with DeepSeek thinking at effort "low" (user 2026-10-20).
-	if config.RuntimeSettings["llm_model"] != "deepseek" {
+	// The default model is qwen3.8-omni-flash (2026-10-30, #18), sent with
+	// Qwen thinking at its highest effort.
+	if config.RuntimeSettings["llm_model"] != "qwen3.8-omni-flash" {
 		t.Fatalf("llm_model = %q", config.RuntimeSettings["llm_model"])
 	}
 	body := chatAgentWireBody(t, application, config.RuntimeSettings["llm_model"])
-	if body["model"] != "deepseek" {
+	if body["model"] != "qwen3.8-omni-flash" {
 		t.Errorf("wire model = %#v", body["model"])
 	}
-	if thinking, _ := body["thinking"].(map[string]any); thinking["type"] != "enabled" || body["reasoning_effort"] != "low" {
-		t.Errorf("wire thinking = %#v, reasoning_effort = %#v", body["thinking"], body["reasoning_effort"])
+	if body["enable_thinking"] != true || body["reasoning_effort"] != "xhigh" {
+		t.Errorf("wire enable_thinking = %#v, reasoning_effort = %#v", body["enable_thinking"], body["reasoning_effort"])
 	}
-	if _, exists := body["enable_thinking"]; exists {
-		t.Errorf("enable_thinking is Qwen's field: %#v", body)
+	if _, exists := body["thinking"]; exists {
+		t.Errorf("thinking is DeepSeek's field: %#v", body)
 	}
 	if _, exists := body["thinking_budget"]; exists {
 		t.Errorf("thinking_budget must never be sent: %#v", body)
