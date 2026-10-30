@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-10-30.issue11-mode-switch-wording.1",
+    "revision": "2026-10-30.issue13-empty-board-tabs.1",
     "terminology": {
       "user_facing": [
         {
@@ -4049,6 +4049,7 @@
         "ui.chat.context_compacted_one": "已压缩上下文：较早的 {rounds} 轮对话已整理成摘要，聊天记录保持不变",
         "ui.chat.context_compacted_auto": "已自动压缩上下文：较早的 {rounds} 轮对话已整理成摘要，聊天记录保持不变",
         "ui.chat.context_compacted_auto_one": "已自动压缩上下文：较早的 {rounds} 轮对话已整理成摘要，聊天记录保持不变",
+        "ui.studio.panel.board_empty": "画布为空，先生成或上传图片。",
         "ui.studio.panel.details.candidates": "候选",
         "ui.studio.panel.details.candidates_value": "{count} 张",
         "ui.studio.panel.details.candidates_value_one": "{count} 张",
@@ -13360,6 +13361,7 @@
             "ui.chat.context_compacted_one": "Context compacted: the earliest {rounds} round is now a summary; the chat history is unchanged",
             "ui.chat.context_compacted_auto": "Context compacted automatically: the earliest {rounds} rounds are now a summary; the chat history is unchanged",
             "ui.chat.context_compacted_auto_one": "Context compacted automatically: the earliest {rounds} round is now a summary; the chat history is unchanged",
+            "ui.studio.panel.board_empty": "The canvas is empty. Generate or upload a picture first.",
             "ui.studio.panel.details.candidates": "Candidates",
             "ui.studio.panel.details.candidates_value": "{count} images",
             "ui.studio.panel.details.candidates_value_one": "{count} image",

@@ -35,6 +35,8 @@ interface PanelTabBarProps {
   onSelect: (id: PanelTabId) => void;
   /** The accessible name of the tab list. */
   label: string;
+  /** Tabs shown but not selectable (no object or board content for them yet). */
+  disabled?: readonly PanelTabId[];
 }
 
 /**
@@ -42,10 +44,10 @@ interface PanelTabBarProps {
  * hint (name, shortcut, one line of what it is for) from the Schema. Left / Right / Home / End move between
  * the tabs the way a tab list does; the active tab is the one in the tab order.
  */
-export function PanelTabBar({ views, active, onSelect, label }: PanelTabBarProps) {
+export function PanelTabBar({ views, active, onSelect, label, disabled = [] }: PanelTabBarProps) {
   const { schema } = useProductSchema();
   const buttons = useRef(new Map<PanelTabId, HTMLButtonElement>());
-  const ids = views.map((view) => view.id);
+  const ids = views.map((view) => view.id).filter((id) => !disabled.includes(id));
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>, current: PanelTabId) => {
     const next = steppedPanelTab(ids, current, event.key);
     if (!next) return;
@@ -58,6 +60,7 @@ export function PanelTabBar({ views, active, onSelect, label }: PanelTabBarProps
       {views.map((view) => {
         const Icon = iconByName(view.icon);
         const selected = view.id === active;
+        const isDisabled = disabled.includes(view.id);
         return (
           <HintTooltip key={view.id} {...panelTabHintContent(schema, view)} className="min-w-0 flex-1">
             <button
@@ -65,6 +68,7 @@ export function PanelTabBar({ views, active, onSelect, label }: PanelTabBarProps
               role="tab"
               id={tabDomId(view.id)}
               aria-selected={selected}
+              aria-disabled={isDisabled || undefined}
               aria-controls={BODY_ID}
               tabIndex={selected ? 0 : -1}
               data-testid={tabDomId(view.id)}
@@ -72,11 +76,12 @@ export function PanelTabBar({ views, active, onSelect, label }: PanelTabBarProps
                 if (element) buttons.current.set(view.id, element);
                 else buttons.current.delete(view.id);
               }}
-              onClick={() => onSelect(view.id)}
+              onClick={() => { if (!isDisabled) onSelect(view.id); }}
               onKeyDown={(event) => onKeyDown(event, view.id)}
               className={cn(
                 'relative flex h-11 w-full min-w-0 items-center justify-center gap-1 px-1 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50',
                 selected ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+                isDisabled && 'cursor-not-allowed opacity-50 hover:text-muted-foreground',
               )}
             >
               <Icon aria-hidden className="size-4 shrink-0" />
@@ -141,11 +146,31 @@ function PanelFrame({ context, object, sessionId, availability }: PanelFrameProp
   const width = { width: panelWidth(schema) };
   const title = schemaText(schema, 'ui.studio.panel.title');
 
-  // Function settings remain available before a source object is selected.
+  // Empty board and nothing selected: the board's tabs (Schema), with only function settings usable.
   if (context === 'none') {
+    const views = panelTabViews(schema, 'board');
+    const disabled = views.map((view) => view.id).filter((id) => id !== 'operations');
     return (
-      <aside aria-label={title} data-testid="right-panel" data-kind="none" style={width} className={aside}>
-        <HarnessPanel sessionId={sessionId} object={null} />
+      <aside aria-label={title} data-testid="right-panel" data-kind="none" data-tab="operations" style={width} className={aside}>
+        <PanelTabBar
+          views={views}
+          active="operations"
+          onSelect={() => undefined}
+          label={schemaText(schema, 'ui.studio.panel.tabs')}
+          disabled={disabled}
+        />
+        <p data-testid="right-panel-board-empty" className="shrink-0 border-b border-border px-3 py-2 text-xs text-muted-foreground">
+          {schemaText(schema, 'ui.studio.panel.board_empty')}
+        </p>
+        <div
+          role="tabpanel"
+          id={BODY_ID}
+          aria-labelledby={tabDomId('operations')}
+          data-testid="right-panel-operations"
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <HarnessPanel sessionId={sessionId} object={null} />
+        </div>
       </aside>
     );
   }

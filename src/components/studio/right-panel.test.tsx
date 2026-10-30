@@ -91,13 +91,17 @@ afterEach(() => {
 });
 
 describe('nothing on the stage and an empty board', () => {
-  it('keeps function settings reachable without a source and does not invent an empty-stage tab kind', () => {
+  it('shows the board tabs with only function settings selectable, plus the empty-canvas line', () => {
     const html = render();
     expect(html).toContain('data-testid="right-panel"');
     expect(html).toContain('data-kind="none"');
     expect(html).toContain('data-testid="stub-operations" data-session="s1" data-task=""');
-    expect(html).not.toContain('role="tablist"');
-    expect(html).not.toContain('role="tab"');
+    expect(html).toContain('role="tablist"');
+    expect(html).toContain('data-tab="operations"');
+    expect(html).toMatch(/id="right-panel-tab-layers"[^>]*aria-disabled="true"/);
+    expect(html).toMatch(/id="right-panel-tab-history"[^>]*aria-disabled="true"/);
+    expect(html).not.toMatch(/id="right-panel-tab-operations"[^>]*aria-disabled/);
+    expect(html).toContain('right-panel-board-empty');
   });
 
   it('still takes its Schema width, so the stage does not jump when the panel fills', () => {

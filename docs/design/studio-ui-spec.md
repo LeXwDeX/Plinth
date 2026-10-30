@@ -224,6 +224,8 @@ board: [layers, history]            默认 layers（还不是版本，没有详�
 model: [process, formats, details]  默认 process；无可用步骤时 details
 ```
 
+画板为空且未选中对象时（`none`）不新增种类：标签栏仍显示 `board` 的标签，仅功能设置可选、其余置灰，并在标签栏下提示 `ui.studio.panel.board_empty`；出现图片后恢复 `board` / 图片行为。
+
 ### 2. 前端组件
 
 | 组件 | 做什么 | 取代 |
