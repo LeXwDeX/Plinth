@@ -154,32 +154,103 @@ func (orchestrator *Orchestrator) currentUploadHandles(message Message, images [
 
 // unpicturedLabels names the attachments of a message that show no picture.
 func (orchestrator *Orchestrator) unpicturedLabels(message Message) string {
+	return orchestrator.unpicturedLabelsExcept(message, nil)
+}
+
+// unpicturedLabelsExcept is unpicturedLabels without the attachments (by
+// position in message.Attachments) that already ride as a picture part with
+// their own label.
+func (orchestrator *Orchestrator) unpicturedLabelsExcept(message Message, shown map[int]bool) string {
 	if !orchestrator.handlePolicy().Enabled() {
 		return ""
 	}
 	var labels strings.Builder
-	for _, attachment := range message.Attachments {
-		if attachment.ImageSlot != 0 || attachment.Handle == "" {
+	for position, attachment := range message.Attachments {
+		if shown[position] {
 			continue
 		}
-		templates := orchestrator.schema.Context.UnpicturedAttachmentTemplates
-		template := templates[attachment.Kind]
-		// A role's own label (the artboard snapshot, #272) comes first.
-		if roleTemplate := templates[attachment.Kind+"."+attachment.Role]; attachment.Role != "" && roleTemplate != "" &&
-			(attachment.Role != AttachmentRoleCanvas || attachment.Canvas != nil) {
-			template = roleTemplate
-		}
-		if template == "" {
-			continue
-		}
-		labels.WriteString(strings.NewReplacer(
-			"{handle}", attachment.Handle,
-			"{task_id}", attachment.TaskID,
-			"{capture_id}", attachment.CaptureID,
-			"{layout}", canvasLayoutText(orchestrator.schema.Context, attachment.Canvas),
-		).Replace(template))
+		labels.WriteString(orchestrator.unpicturedLabel(attachment))
 	}
 	return labels.String()
+}
+
+// unpicturedLabel is the Schema label of one attachment that has no picture
+// slot, or an empty string when it has none.
+func (orchestrator *Orchestrator) unpicturedLabel(attachment Attachment) string {
+	if attachment.ImageSlot != 0 || attachment.Handle == "" {
+		return ""
+	}
+	templates := orchestrator.schema.Context.UnpicturedAttachmentTemplates
+	template := templates[attachment.Kind]
+	// A role's own label (the artboard snapshot, #272) comes first.
+	if roleTemplate := templates[attachment.Kind+"."+attachment.Role]; attachment.Role != "" && roleTemplate != "" &&
+		(attachment.Role != AttachmentRoleCanvas || attachment.Canvas != nil) {
+		template = roleTemplate
+	}
+	if template == "" {
+		return ""
+	}
+	return strings.NewReplacer(
+		"{handle}", attachment.Handle,
+		"{task_id}", attachment.TaskID,
+		"{capture_id}", attachment.CaptureID,
+		"{layout}", canvasLayoutText(orchestrator.schema.Context, attachment.Canvas),
+	).Replace(template)
+}
+
+// canvasSnapshotParts renders the artboard snapshot of the current turn as a
+// real picture followed by its canvas label (#16). The snapshot travels as a
+// selection attachment, not in message.image_urls, so the history image index
+// never sees it; without this the model only read its text label. Each
+// picture is inlined like a history picture (so a snapshot over
+// vision_inline_max_bytes takes the #292 derivative path) and shown at the
+// Schema's canvas_image_detail. A snapshot that cannot be inlined keeps its
+// text label, which unpicturedLabelsExcept still emits; the turn does not
+// fail. The result is bounded by limit, and shown holds the positions in
+// message.Attachments that now have a picture.
+func (orchestrator *Orchestrator) canvasSnapshotParts(
+	ctx context.Context,
+	ownerID string,
+	message Message,
+	limit int,
+) (parts []agents.ContentPart, shown map[int]bool) {
+	if !orchestrator.schema.Agent.Vision || !orchestrator.handlePolicy().Enabled() {
+		return nil, nil
+	}
+	for position, attachment := range message.Attachments {
+		if len(shown) >= limit {
+			break
+		}
+		if attachment.Kind != AttachmentKindImage || attachment.Role != AttachmentRoleCanvas ||
+			attachment.ImageSlot != 0 {
+			continue
+		}
+		pictureURL := AttachmentURL(message, attachment)
+		label := orchestrator.unpicturedLabel(attachment)
+		if pictureURL == "" || label == "" || !orchestrator.visionCandidate(pictureURL) {
+			continue
+		}
+		if !visionSafeImage(pictureURL) {
+			inlined, ok := orchestrator.visionInline(ctx, generation.OwnerID(ownerID), pictureURL)
+			if !ok {
+				continue
+			}
+			pictureURL = inlined
+		}
+		parts = append(parts,
+			agents.ContentPart{
+				Kind:   orchestrator.schema.Context.ImagePartKind,
+				URL:    pictureURL,
+				Detail: orchestrator.schema.Context.CanvasImageDetail,
+			},
+			agents.ContentPart{Kind: orchestrator.schema.Context.TextPartKind, Text: label},
+		)
+		if shown == nil {
+			shown = map[int]bool{}
+		}
+		shown[position] = true
+	}
+	return parts, shown
 }
 
 // notesPrompt renders the session's settings summary for the system prompt.

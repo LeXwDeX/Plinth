@@ -49,6 +49,7 @@ func TestCanvasLayoutTextsAreRequired(t *testing.T) {
 		{"canvas_output_size_template", "输出尺寸设为 {size}。", "canvas_output_size_template"},
 		{"canvas_output_size_nearest_template", "所选模型给不了画板尺寸 {canvas}。", "canvas_output_size_nearest_template"},
 		{"canvas_layers", "", "api.attachment.canvas_layers"},
+		{"canvas_image_detail", "", "context.canvas_image_detail"},
 	} {
 		t.Run(test.key, func(t *testing.T) {
 			changed := replaceStringValue(t, source, test.key, test.value)

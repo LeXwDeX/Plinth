@@ -651,6 +651,7 @@ const minimalApplication = `"application":{
 			"text_part_kind":"configured-text-part",
 			"image_part_kind":"configured-image-part",
 			"image_detail":"configured-detail",
+			"canvas_image_detail":"configured-canvas-detail",
 			"user_image_label_template":"\nconfigured-user-{index}",
 			"canvas_input_source":"canvas",
 			"ai_image_label_template":"\nconfigured-ai-{index}",
