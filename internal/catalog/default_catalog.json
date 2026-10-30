@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-10-30.issue13-empty-board-tabs.1",
+    "revision": "2026-10-30.issue13-empty-board-tabs.2",
     "terminology": {
       "user_facing": [
         {
@@ -311,7 +311,7 @@
                 "name": "LLM_MODEL"
               }
             ],
-            "default": "deepseek"
+            "default": "qwen3.8-omni-flash"
           },
           "agent_max_tool_calls_per_reply": {
             "type": "string",
@@ -4866,6 +4866,18 @@
             },
             {
               "model_prefixes": [
+                "qwen3.8-omni-flash"
+              ],
+              "request_fields": {
+                "enable_thinking": true
+              },
+              "effort_field": "reasoning_effort",
+              "effort_levels": ["low", "medium", "xhigh"],
+              "default_effort": "xhigh",
+              "context_window_tokens": 1000000
+            },
+            {
+              "model_prefixes": [
                 "qwen3.8"
               ],
               "request_fields": {
@@ -4986,6 +4998,7 @@
         "text_part_kind": "text",
         "image_part_kind": "image_url",
         "image_detail": "low",
+        "canvas_image_detail": "high",
         "user_image_label_template": "\n[历史图片 {index}：用户上传]",
         "canvas_input_source": "canvas",
         "ai_image_label_template": "\n[历史图片 {index}：AI 生成]",

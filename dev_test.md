@@ -14,7 +14,7 @@
   的 `LLM_BASE_URL`、`OPENAI_BASE_URL` 为准；均指向 llms 正式服务器
   网关的 `/v1`（地址在 dev-test 运行环境文件 `LLM_BASE_URL`），不使用同机代理测试端口或历史 llms-proxy 端口。
   链路是「测试客户端 → `dev-test` Plinth 测试栈 → llms 正式服务器」，后者
-  不限制客户端与模型；测试栈对话模型为字面量 `deepseek`（2026-10-19 起网关目录已无 `qwen-max`、`glm-flash`，直接请求返回 400 `model not supported by any target`；经用户确认改用 `deepseek`，网关当前路由到 `deepseek-flash`）；请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，DeepSeek 用 `thinking.type=enabled`、`reasoning_effort=low`（用户 2026-10-20 决定；官方只有 low/high/max 三档），工具循环回传 `reasoning_content`；其他中国大陆模型仍用官方最高档。
+  不限制客户端与模型；测试栈对话模型为 `qwen3.8-omni-flash`（2026-10-30 维护者决定，替代 `deepseek`，不再使用 deepseek）；请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，该模型命中 `qwen3.8-omni-flash` profile（`enable_thinking=true`、`reasoning_effort` 默认 `xhigh`，上下文窗口 1000000）；其他中国大陆模型仍用官方最高档。
   测试凭据仅从该测试栈已授权的运行环境读取，不用于正式栈。正式栈保持 Provider Key 为空，直至用户明确决定写入；这使远程 Provider Offering 不可用，不影响可用的本地 Offering；
 - 真实大模型流量测试从测试栈 `production/runtime.env` 读取接线；正式
   生产凭据不在测试脚本、日志或报告中写出。模型列表 200 只能证明鉴权和
@@ -241,7 +241,7 @@ SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-h
 7. 若依赖服务异常，先修复依赖服务并重新部署，再继续验收。LLM/生图依赖
    走 llms 正式服务器网关的 `/v1`（地址在 dev-test 运行环境文件 `LLM_BASE_URL`；原 `dev-test` 主机上的
    llms-proxy 已迁移至此，不得再使用历史 llms-proxy 端口），不限制客户端与
-   模型；测试栈对话模型为字面量 `deepseek`（2026-10-19 起网关目录已无 `qwen-max`、`glm-flash`，直接请求返回 400 `model not supported by any target`；经用户确认改用 `deepseek`，网关当前路由到 `deepseek-flash`）；请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，DeepSeek 用 `thinking.type=enabled`、`reasoning_effort=low`（用户 2026-10-20 决定；官方只有 low/high/max 三档），工具循环回传 `reasoning_content`；其他中国大陆模型仍用官方最高档；上游
+   模型；测试栈对话模型为 `qwen3.8-omni-flash`（2026-10-30 维护者决定，替代 `deepseek`，不再使用 deepseek）；请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，该模型命中 `qwen3.8-omni-flash` profile（`enable_thinking=true`、`reasoning_effort` 默认 `xhigh`，上下文窗口 1000000）；其他中国大陆模型仍用官方最高档；上游
    测试凭据只从 `dev-test` 测试栈已授权的运行环境读取，不写入文档；抠图依赖为背景去除（matting）服务（接线地址见 dev-test 运行环境文件 `MATTING_*`）。
 
 ### 可控恢复与读屏验收

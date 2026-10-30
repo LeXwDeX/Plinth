@@ -2866,6 +2866,9 @@ type ChatContextSchema struct {
 	TextPartKind           string `json:"text_part_kind"`
 	ImagePartKind          string `json:"image_part_kind"`
 	ImageDetail            string `json:"image_detail"`
+	// CanvasImageDetail is the detail of the artboard snapshot picture of a
+	// canvas turn (#16): a layout of many layers needs more than the default.
+	CanvasImageDetail      string `json:"canvas_image_detail"`
 	UserImageLabelTemplate string `json:"user_image_label_template"`
 	// CanvasInputSource is the input_source value of a turn whose source is
 	// the artboard snapshot sent as its selection (#266).

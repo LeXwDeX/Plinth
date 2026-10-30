@@ -150,11 +150,12 @@ Mock Agent 不理解语义，每条消息都会按关键词调用一个生成工
   只编辑 `.env` 或执行 `docker compose restart` 不会更新已有容器的环境。
   创建与重置都会写一条 INFO 日志「管理员初始化」并记入管理后台审计（不含密码）。
 - **零 Key 可体验**：默认 `PROVIDER_MODE=mock`、`AGENT_MODE=mock`，不需要任何
-  Provider key：图片与 3D 生成、对话 Agent 都返回内置示例结果，不产生费用。接真实
-  模型时改成 `live`，只填要用的 Provider key，见
+  Provider key：只能看到界面和 Mock 流程（内置示例结果，不产生费用）。真正使用必须设置
+  `AGENT_MODE=live` 与 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`，否则 Agent 不可用；
+  Mock 仅用于测试和演示。接真实模型时改成 `live`，只填要用的 Provider key，见
   [Provider 配置](docs/provider-configuration.md)。`AGENT_MODE=live` 必须设置
   `LLM_BASE_URL` 与 `LLM_API_KEY`，缺少地址或 key 时 Agent 显示“未配置”。`LLM_MODEL`
-  留空使用 Schema 默认值 `deepseek`，请按实际端点支持的模型名设置。`LLM_BASE_URL`
+  留空使用 Schema 默认值 `qwen3.8-omni-flash`（强多模态模型），请按实际端点支持的模型名设置。`LLM_BASE_URL`
   只供 Agent 对话使用，图像 Provider 各读自己的
   `<ID>_BASE_URL`：启用 Gemini 时必须设置 `GEMINI_BASE_URL`（没有默认值）；所有模型
   经同一网关时，把 `LLM_BASE_URL`、`OPENAI_BASE_URL`、`GEMINI_BASE_URL` 都设为网关地址。
@@ -190,12 +191,12 @@ Mock Agent 不理解语义，每条消息都会按关键词调用一个生成工
   `JIMENG_API_KEY`、`GEMINI_API_KEY`（启用 Gemini 时同时设置 `GEMINI_BASE_URL`）。
 - 把 `PROVIDER_MODE` 改为 `live` 才会调用真实上游；只填要用的 key。真实生成会消耗对应
   账户的积分或费用。
-- `AGENT_MODE` 默认仍是 `mock`，与 `PROVIDER_MODE` 各自独立。`PROVIDER_MODE=live` 而
+- `AGENT_MODE` 默认仍是 `mock`（仅用于测试和演示，真正使用须设为 `live`），与 `PROVIDER_MODE` 各自独立。`PROVIDER_MODE=live` 而
   `AGENT_MODE=mock` 时，Mock Agent 不理解语义，每条消息都会按关键词提交一次生成（服务日志
   有 WARN，付费步骤仍要你同意）。要用自然语言驱动真实生成，两者都设为 `live`，并配置
   下面的 Agent 对话模型。
 - Agent 对话模型：`AGENT_MODE=live` 时设置 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`，
-  指向任意 OpenAI chat completions 兼容的接口；模型必须是多模态的，至少能读图。
+  指向任意 OpenAI chat completions 兼容的接口；模型必须是多模态的，至少能读图；建议选读图能力强的模型，弱视觉模型会漏看画布标注（红圈、箭头）。
   想让用户选择更多对话模型时，用 `LLM_CONNECTIONS=QWEN,GLM` 列出连接，每个连接只读自己的
   `<ID>_BASE_URL`、`<ID>_API_KEY`、`<ID>_MODEL`（统一网关也要逐个写同一个地址），再由管理员在
   管理后台「LLM 设置」测试连接、设置默认模型与开放的思考档位。

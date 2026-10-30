@@ -1776,6 +1776,15 @@ func (orchestrator *Orchestrator) agentRequest(
 		orchestrator.schema.Context.MaximumVisionImages,
 		orchestrator.schema.Context.RecentImageLimit,
 	)
+	// The current turn's artboard snapshot is its primary input, so it takes
+	// its place in the vision limit before any history picture does (#16).
+	var canvasParts []agents.ContentPart
+	var canvasShown map[int]bool
+	if lastUserMessage > summarized && lastUserMessage >= 0 {
+		canvasParts, canvasShown = orchestrator.canvasSnapshotParts(
+			ctx, ownerID, history[lastUserMessage], visionImageLimit)
+		renderedVisionImages += len(canvasShown)
+	}
 	for messageIndex, message := range history {
 		if messageIndex <= summarized || !orchestrator.contextMessage(message) {
 			continue
@@ -1856,7 +1865,21 @@ func (orchestrator *Orchestrator) agentRequest(
 				fmt.Sprint(image.index),
 			)
 		}
-		appendText(orchestrator.unpicturedLabels(message))
+		shown := map[int]bool(nil)
+		if messageIndex == lastUserMessage && message.Role == orchestrator.schema.Roles.User {
+			shown = canvasShown
+		}
+		appendText(orchestrator.unpicturedLabelsExcept(message, shown))
+		if len(shown) > 0 {
+			if len(parts) == 0 && content != "" {
+				parts = append(parts, agents.ContentPart{
+					Kind: orchestrator.schema.Context.TextPartKind,
+					Text: content,
+				})
+				content = ""
+			}
+			parts = append(parts, canvasParts...)
+		}
 		if messageIndex == lastUserMessage && message.Role == orchestrator.schema.Roles.User {
 			// A card answered on the card: the Agent reads the exact next call (#321).
 			appendText(orchestrator.choiceAnswerText(choices, message.ID))
