@@ -859,6 +859,37 @@ func validateApprovalPolicy(policy ChatApprovalPolicySchema, capabilities []Capa
 		}
 		seen[capability] = true
 	}
+	return validateApprovalPrompt(policy.Prompt, offered)
+}
+
+// validateApprovalPrompt checks the Agent-facing texts of the approval modes
+// (#7): the template carries both placeholders, and every mode the policy
+// offers has exactly one label and description, so the Agent is never given a
+// blank or foreign mode.
+func validateApprovalPrompt(prompt ChatApprovalPromptSchema, offered map[string]bool) error {
+	if strings.TrimSpace(prompt.ContextTemplate) == "" {
+		return errors.New("approval_policy.prompt.context_template 不能为空")
+	}
+	for _, field := range []string{"{mode}", "{description}"} {
+		if !strings.Contains(prompt.ContextTemplate, field) {
+			return fmt.Errorf("approval_policy.prompt.context_template 缺少占位符 %s", field)
+		}
+	}
+	described := make(map[string]bool, len(prompt.Modes))
+	for _, mode := range prompt.Modes {
+		if !offered[mode.ID] || described[mode.ID] {
+			return fmt.Errorf("approval_policy.prompt.modes 含未声明或重复的模式 %q", mode.ID)
+		}
+		described[mode.ID] = true
+		if strings.TrimSpace(mode.Label) == "" || strings.TrimSpace(mode.Description) == "" {
+			return fmt.Errorf("approval_policy.prompt.modes[%s] 缺少 label 或 description", mode.ID)
+		}
+	}
+	for id := range offered {
+		if !described[id] {
+			return fmt.Errorf("approval_policy.prompt.modes 缺少模式 %q 的说明", id)
+		}
+	}
 	return nil
 }
 

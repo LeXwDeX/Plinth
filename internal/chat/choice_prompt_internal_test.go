@@ -14,6 +14,9 @@ type choicePromptRepository struct{ stubRepository }
 func (choicePromptRepository) OwnsSession(context.Context, string, string) (bool, error) {
 	return true, nil
 }
+func (choicePromptRepository) Session(_ context.Context, owner, id string) (Session, bool, error) {
+	return Session{ID: id, OwnerID: owner, ApprovalMode: "manual"}, true, nil
+}
 func (choicePromptRepository) SessionNotes(context.Context, string, string) (string, bool, error) {
 	return "", true, nil
 }

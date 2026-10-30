@@ -1264,7 +1264,7 @@ type PublicChatSchema struct {
 		Categories []ChatSkillCategorySchema `json:"categories"`
 	} `json:"skills"`
 	Presentation   ChatPresentationSchema   `json:"presentation"`
-	ApprovalPolicy ChatApprovalPolicySchema `json:"approval_policy"`
+	ApprovalPolicy PublicChatApprovalPolicy `json:"approval_policy"`
 	AgentScope     PublicChatAgentScope     `json:"agent_scope"`
 	Harness        PublicHarnessSchema      `json:"harness"`
 	// ContextCompaction is what the composer's context meter needs (#322);
@@ -2403,6 +2403,50 @@ type ChatApprovalPolicySchema struct {
 	DefaultMode                string                      `json:"default_mode"`
 	Modes                      []string                    `json:"modes"`
 	ManualApprovalCapabilities []schemacontract.Capability `json:"manual_approval_capabilities"`
+	// Prompt is what the Agent is told about the session's approval mode
+	// (#7). It is server-only: the browser reads the three fields above and
+	// the mode names from content messages (ui.workspace.approval.*).
+	Prompt ChatApprovalPromptSchema `json:"prompt"`
+}
+
+// PublicChatApprovalPolicy is the browser's view of
+// chat.approval_policy: the modes and the capabilities a person still decides
+// in manual mode. The Agent's texts (ChatApprovalPolicySchema.Prompt) stay on
+// the server.
+type PublicChatApprovalPolicy struct {
+	DefaultMode                string                      `json:"default_mode"`
+	Modes                      []string                    `json:"modes"`
+	ManualApprovalCapabilities []schemacontract.Capability `json:"manual_approval_capabilities"`
+}
+
+// ChatApprovalPromptSchema is application.chat.approval_policy.prompt. The
+// server appends ContextTemplate to the Agent's system context on every model
+// request, filled with the session's real (normalized) approval mode, so the
+// Agent states the mode from a fact instead of guessing it.
+type ChatApprovalPromptSchema struct {
+	// ContextTemplate fields: {mode} (the mode's label), {description}.
+	ContextTemplate string `json:"context_template"`
+	// Modes carries the label and description of every mode the policy offers.
+	Modes []ChatApprovalPromptMode `json:"modes"`
+}
+
+// ChatApprovalPromptMode is the Agent-facing text of one approval mode.
+type ChatApprovalPromptMode struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	// Description tells the Agent which paid steps wait for the person's
+	// approval card in this mode.
+	Description string `json:"description"`
+}
+
+// Mode returns the Agent-facing text of an approval mode.
+func (prompt ChatApprovalPromptSchema) Mode(id string) (ChatApprovalPromptMode, bool) {
+	for _, mode := range prompt.Modes {
+		if mode.ID == id {
+			return mode, true
+		}
+	}
+	return ChatApprovalPromptMode{}, false
 }
 
 type ChatAPISchema struct {

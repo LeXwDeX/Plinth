@@ -298,17 +298,34 @@ func TestApplicationSchemaRejectsSkillOverrideOfSourceSemantics(t *testing.T) {
 	}
 }
 
-const defaultApprovalPolicyJSON = `"approval_policy": {
-        "default_mode": "manual",
-        "modes": ["auto", "manual"],
-        "manual_approval_capabilities": ["text-to-3d", "image-to-3d", "image-to-splat", "retexture"]
-      }`
+// approvalPolicyWithPrompt declares the shipped policy with the given
+// "prompt" member, so a case changes only the Agent-facing texts under test.
+func approvalPolicyWithPrompt(prompt string) string {
+	return `"approval_policy": {"default_mode": "manual", "modes": ["auto", "manual"],
+		"manual_approval_capabilities": ["text-to-3d"], "prompt": ` + prompt + `}`
+}
+
+const validApprovalPrompt = `{"context_template": "mode {mode}: {description}", "modes": [
+	{"id": "auto", "label": "A", "description": "a"},
+	{"id": "manual", "label": "M", "description": "m"}]}`
 
 func TestApprovalPolicyValidationRejectsUnsafeDeclarations(t *testing.T) {
 	source, err := os.ReadFile("default_catalog.json")
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The policy is the object from its key to the next chat member.
+	start := bytes.Index(source, []byte(`"approval_policy": {`))
+	length := bytes.Index(source[start:], []byte(`"choice": {`))
+	if start < 0 || length < 0 {
+		t.Fatal("default approval policy fixture not found")
+	}
+	end := start + length
+	if _, err := catalog.Load(bytes.NewReader(replaceRange(source, start, end,
+		approvalPolicyWithPrompt(validApprovalPrompt)+",\n      "))); err != nil {
+		t.Fatalf("the minimal policy fixture is rejected: %v", err)
+	}
+	promptWith := func(from, to string) string { return strings.Replace(validApprovalPrompt, from, to, 1) }
 	for name, testCase := range map[string]struct{ replacement, detail string }{
 		"no modes":     {`"approval_policy": {"default_mode": "manual", "modes": [], "manual_approval_capabilities": []}`, "modes"},
 		"unknown mode": {`"approval_policy": {"default_mode": "manual", "modes": ["manual", "yolo"], "manual_approval_capabilities": []}`, "yolo"},
@@ -320,16 +337,35 @@ func TestApprovalPolicyValidationRejectsUnsafeDeclarations(t *testing.T) {
 			`"approval_policy": {"default_mode": "manual", "modes": ["auto", "manual"], "manual_approval_capabilities": ["text-to-video"]}`, "text-to-video"},
 		"duplicate capability": {
 			`"approval_policy": {"default_mode": "manual", "modes": ["auto", "manual"], "manual_approval_capabilities": ["text-to-3d", "text-to-3d"]}`, "重复"},
+		"prompt missing": {
+			`"approval_policy": {"default_mode": "manual", "modes": ["auto", "manual"], "manual_approval_capabilities": []}`, "context_template"},
+		"template without mode": {
+			approvalPolicyWithPrompt(promptWith("{mode}: ", "")), "{mode}"},
+		"template without description": {
+			approvalPolicyWithPrompt(promptWith("{description}", "")), "{description}"},
+		"mode without label": {
+			approvalPolicyWithPrompt(promptWith(`"label": "M"`, `"label": " "`)), "label"},
+		"mode without description": {
+			approvalPolicyWithPrompt(promptWith(`"description": "m"`, `"description": ""`)), "description"},
+		"offered mode without text": {
+			approvalPolicyWithPrompt(`{"context_template": "{mode}{description}", "modes": [{"id": "manual", "label": "M", "description": "m"}]}`), "auto"},
+		"text for a mode the policy does not offer": {
+			approvalPolicyWithPrompt(promptWith(`"id": "auto"`, `"id": "yolo"`)), "yolo"},
+		"duplicate mode text": {
+			approvalPolicyWithPrompt(promptWith(`"id": "auto"`, `"id": "manual"`)), "重复"},
 	} {
-		changed := bytes.Replace(source, []byte(defaultApprovalPolicyJSON), []byte(testCase.replacement), 1)
-		if bytes.Equal(changed, source) {
-			t.Fatalf("%s: default approval policy fixture not found", name)
-		}
+		changed := replaceRange(source, start, end, testCase.replacement+",\n      ")
 		_, err := catalog.Load(bytes.NewReader(changed))
 		if err == nil || !strings.Contains(err.Error(), testCase.detail) {
 			t.Errorf("%s: error = %v, want detail %q", name, err, testCase.detail)
 		}
 	}
+}
+
+func replaceRange(source []byte, start, end int, replacement string) []byte {
+	changed := append([]byte{}, source[:start]...)
+	changed = append(changed, replacement...)
+	return append(changed, source[end:]...)
 }
 
 func TestDefaultCatalogApprovalPolicyMatchesProductRule(t *testing.T) {
