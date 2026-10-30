@@ -78,7 +78,7 @@ jobs:
   go-test-race:
     name: go test race
     runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.use_self_hosted && fromJSON('["self-hosted","Linux","X64","plinth-trusted-ci"]') || 'ubuntu-latest' }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     # httpapi 包在 -race 下接近 go test 默认的 10m 单包超时，
     # 用 GOFLAGS 放宽，门禁命令本身保持与 dev_test.md §2 逐字一致。
     env:
