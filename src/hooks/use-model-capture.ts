@@ -64,7 +64,17 @@ export function useModelCapture() {
     };
     if (!stillCurrent()) return;
     // #149: a canvas already at its picture limit takes no screenshot; say so before anything is uploaded.
-    const before = bitmapCapacity(schema, useCanvasStore.getState().getNodes(sessionID));
+    // After a reload straight onto a model the board is not loaded: read this session's saved picture layers
+    // from the server first. If that read fails the server still refuses an over-limit save, as before.
+    let known: readonly { type: string }[] = useCanvasStore.getState().getNodes(sessionID);
+    if (useCanvasStore.getState()._savedHashBySession[sessionID] === undefined && known.length === 0) {
+      try {
+        const summary = (await canvasClient.listProjects()).find((entry) => entry.sessionId === sessionID);
+        if (summary) known = (await canvasClient.getProject(summary.id)).nodes ?? [];
+      } catch { /* fall through to the server's own refusal */ }
+      if (!stillCurrent()) return;
+    }
+    const before = bitmapCapacity(schema, known);
     if (before.full) throw new CanvasBitmapLimitError(before.used, before.limit);
     if (blob.size > schema.runtime.input_assets.upload_max_bytes) {
       throw new Error('model capture exceeds upload limit');
