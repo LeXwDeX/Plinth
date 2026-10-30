@@ -3,8 +3,7 @@
   "acceptance": {
     "forge_repo": "<owner>/<repo>",
     "forge_url": "https://github.com/<owner>/<repo>",
-    "issue": 0,
-    "legacy_formal_issue": 0
+    "issue": 0
   },
   "environments": {
     "dev-test": {
@@ -13,7 +12,7 @@
       "root": "<dev-test-release-root>",
       "base_url": "http://<dev-test-host>:<port>",
       "compose_project": "<dev-test-compose-project>",
-      "protect_projects": ["<candidate-compose-project>", "<legacy-formal-compose-project>"],
+      "protect_projects": ["<candidate-compose-project>"],
       "protected_paths": ["<legacy-root>"],
       "backup": {
         "scope": "database",
@@ -64,14 +63,6 @@
         "GO_LEGACY_THUMBNAIL_CACHE_DIR": "<formal-test-release-root>/production/legacy-thumbnails",
         "GO_LEGACY_INPUT_ASSETS_DIR": "<formal-test-release-root>/production/legacy-assets"
       }
-    },
-    "legacy-formal": {
-      "description": "#232 隔离正式栈（与 dev-test 同机）；只由 scripts/release-go-formal.sh 晋级，release-env.py 不发布它",
-      "ssh": "root@<dev-test-host>",
-      "root": "<dev-test-release-root>",
-      "base_url": "http://<dev-test-host>:<legacy-formal-port>",
-      "compose_project": "<legacy-formal-compose-project>",
-      "managed_by": "release-go-formal.sh"
     }
   }
 }

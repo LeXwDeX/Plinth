@@ -10,13 +10,12 @@
 |---|---|---|---|---|---|
 | `dev-test` | 开发测试环境 | 每次已推送的 `origin/main` | 历史迁移与测试数据，保留不清理 | L0、L1、L1 Agent 必跑；涉及 Agent/生成/同意链路时按 `scripts/smoke/README.md` 跑 L2 等真实模型验收 | 常设小额授权（见 `AGENTS.md`） |
 | `formal-test` | 正式测试环境（测试版本中的稳定版）：单版本、不留残余 | 只接收按 §4 晋级规则通过的精确 revision | 本栈独立，不跨主机复制 | L0、L1、L1 Agent | 不做；测试期付费同意授权不适用 |
-| `legacy-formal` | #232 建成的隔离正式栈（与 `dev-test` 同主机） | 由 `scripts/release-go-formal.sh` 晋级 | 空库起步 | 免费 L0/L1 | 须用户另行决定 |
 
-2026-10-20 的环境布局由用户决定（#270）：`dev-test` 不变，新增 `formal-test`。`legacy-formal` 在新布局下的去留**待用户确认**，确认前保持原样，不操作、不删除；它的流程与授权见 `dev_ops.md` 的两栈边界一节。
+2026-10-20 的环境布局由用户决定（#270）：`dev-test` 不变，新增 `formal-test`。与 `dev-test` 同主机的 `legacy-formal`（内部存档 #232 的隔离正式栈）经维护者 2026-10-30 决定已下线（GitHub #74）：Compose 项目、容器、专用镜像与 `<root>/formal/` 数据已移除，最终备份保留；环境名不再可用，说明见 `dev_ops.md`「dev-test 主机与镜像保留」。
 
 ## 2. 本地环境文件
 
-内部环境的地址、路径、账号与运维细节只放在不被 Git 追踪的本地部署文件夹 `deploy/local/`（`.gitignore` 排除；旧位置 `deploy/*.local.json` 也被排除并仍可读取）。环境文件是 `deploy/local/environments.json`：新工作站从 `deploy/environments.example.json` 复制并填写，或由用户/协调会话提供。`scripts/release-env.py`、`release-go-formal.sh` 与 `smoke-l1-formal-keyless.py` 经 `scripts/local_environments.py` 查找它：先用 `--file` 或 `ART_AI_ENVIRONMENTS_FILE`，再依次找当前检出与主检出（`git rev-parse --git-common-dir` 的上一级）中的 `deploy/local/environments.json` 和旧的 `deploy/environments.local.json`，因此所有 worktree 共用主检出的一份。仓库里的文件只写环境名，具体值都从本地文件读。
+内部环境的地址、路径、账号与运维细节只放在不被 Git 追踪的本地部署文件夹 `deploy/local/`（`.gitignore` 排除；旧位置 `deploy/*.local.json` 也被排除并仍可读取）。环境文件是 `deploy/local/environments.json`：新工作站从 `deploy/environments.example.json` 复制并填写，或由用户/协调会话提供。`scripts/release-env.py` 经 `scripts/local_environments.py` 查找它：先用 `--file` 或 `ART_AI_ENVIRONMENTS_FILE`，再依次找当前检出与主检出（`git rev-parse --git-common-dir` 的上一级）中的 `deploy/local/environments.json` 和旧的 `deploy/environments.local.json`，因此所有 worktree 共用主检出的一份。仓库里的文件只写环境名，具体值都从本地文件读。
 
 | 字段 | 含义 |
 |---|---|
@@ -24,17 +23,17 @@
 | `root` | 发布根：`app/`（源码）、`releases/manifest.txt`、`backups/`、`production/` |
 | `base_url` | 冒烟与回执使用的入口 |
 | `compose_project` | Compose 项目名；容器为 `<项目>-art-ai-go-1` |
-| `protect_projects` | 共享主机上同机其他 Plinth Compose 项目（例如候选栈、`legacy-formal`）；镜像保留不清理它们容器引用的镜像。仓库脚本不写任何环境的项目名（#261），共享主机必须在这里列全；`single_stack` 环境不能设置。由 `release-env.py` 发布的环境（无 `managed_by`）若不是 `single_stack`，就按共享主机处理，缺这个字段即报错；文件里与它同主机（`ssh` 主机相同）的每个环境的 `compose_project` 都必须列出，`single_stack` 环境不得与其他环境同主机（#334） |
+| `protect_projects` | 共享主机上同机其他 Plinth Compose 项目（例如候选栈）；镜像保留不清理它们容器引用的镜像。仓库脚本不写任何环境的项目名（#261），共享主机必须在这里列全；`single_stack` 环境不能设置。由 `release-env.py` 发布的环境若不是 `single_stack`，就按共享主机处理，缺这个字段即报错；文件里与它同主机（`ssh` 主机相同）的每个环境的 `compose_project` 都必须列出，`single_stack` 环境不得与其他环境同主机（#334） |
 | `protected_paths` | 迁移工具（`backup-go-production.sh create`、`run-go-etl-container.sh`、`finalize-go-production.sh`）绝不能作为目标的目录：发布根之外的绝对路径列表（例如共享主机上旧 Next 项目根），没有就写 `[]`；由 `release-env.py` 发布的环境必填。`release-env.py` 把「`root` + 本列表」用冒号连成 `ART_AI_PROTECTED_PATHS`：`compose-env` 输出它供手工运行，`release` 经服务器段写入 `production/compose.env`。三个迁移工具在未设置 `ART_AI_PROTECTED_PATHS` 时拒绝运行（finalize 在停旧容器之前），确无受保护目录时须显式设为空串（#334） |
-| `backup` | 仅 `dev-test` 可选的发布备份策略（#364）：`{"scope": "database", "keep": 2}` 表示停机时只备份 `production/data`。正常成功清理最多保留最新 2 个已结束发布备份；进行中的快照可临时排除，但不承诺长期额外保留；更早的失败快照也按最新 2 个回收，独立失败报告与诊断日志保留。省略时为全量备份 `data`、`storage-go`、`web-data`，且不自动清理历史备份（`formal-test`、`legacy-formal` 保持此默认）。`scope` 只接受 `database`，`keep` 为 1–2；带 `promote_from` 或 `managed_by` 的环境不得设置 |
+| `backup` | 仅 `dev-test` 可选的发布备份策略（#364）：`{"scope": "database", "keep": 2}` 表示停机时只备份 `production/data`。正常成功清理最多保留最新 2 个已结束发布备份；进行中的快照可临时排除，但不承诺长期额外保留；更早的失败快照也按最新 2 个回收，独立失败报告与诊断日志保留。省略时为全量备份 `data`、`storage-go`、`web-data`，且不自动清理历史备份（`formal-test` 保持此默认）。`scope` 只接受 `database`，`keep` 为 1–2；带 `promote_from` 的环境不得设置 |
 | `promote_from` | 只能从该环境晋级（`formal-test` 为 `dev-test`） |
 | `single_stack` | 单项目主机：`image_keep`（保留镜像数，含运行镜像）、`keep_source_snapshots`（保留的 `app.prev-*` 数）、`allow_bootstrap`（允许空栈首次启动） |
 | `layout` | Compose 主机路径与绑定地址（`GO_WEB_BIND_IP`、`GO_WEB_HOST_PORT`、`GO_PROD_*_DIR`、`GO_LEGACY_*_DIR`）；数据目录必须是 `<root>/production/<名称>`，未写时按此导出；legacy 目录没有缺省值，必须写明：单栈环境在 `<root>/production/` 下以 `legacy` 开头，共享主机（`dev-test`）可为发布根之外不含 `..` 的绝对路径 |
 | `extra_compose_file` | 追加在主 Compose 文件之后的服务器本地覆盖文件（`<root>/production/` 下，例如固定项目网络子网与容器地址）；只用于本栈服务，隔离预检不用它 |
 | `build` | `network`（`docker build --network`，例如构建容器须以宿主源地址访问内网镜像源时为 `host`）、`goproxy`（GOPROXY 构建参数）、`add_hosts`（`docker build --add-host` 的 `主机名:地址` 列表，用于解析内网 Go 代理等构建依赖主机；npm 固定走公共 registry）；npm 源固定为公共 `registry.npmjs.org`（#257），旧文件里的 `npm_registry` 会被拒绝，需删除 |
 | `source_transfer` | `pipe`（缺省，`git archive` 经 SSH 管道解包）或 `scp`（本地生成 tar，scp 到 `<root>/releases/` 解包后删除） |
-| `managed_by` | 只能是 `release-go-formal.sh`：该环境由其他工具发布，`release-env.py release` 拒绝它（`legacy-formal` 用此字段登记 ssh、root、`base_url` 与 `compose_project`；`release-go-formal.sh` 另读 `dev-test` 的 `compose_project` 核对测试栈未受影响） |
-| `acceptance` | 晋级验收报告所在的 GitHub 仓库 `forge_repo`（`owner/repo`）与 Issue 编号：`issue` 供 `formal-test`，`legacy_formal_issue` 供 `release-go-formal.sh`；本仓地址 `forge_url`（验收证据 URL 必须以它开头）。`--acceptance-note` 传该 Issue 下某条 comment 的数字 ID，脚本用 `gh api repos/<forge_repo>/issues/comments/<ID>` 读取，并拒绝属于其他 Issue 的 comment |
+| `managed_by` | 已移除（#74，`legacy-formal` 下线）：环境文件里出现这个字段会被拒绝，并提示删除 |
+| `acceptance` | 晋级验收报告所在的 GitHub 仓库 `forge_repo`（`owner/repo`）与 Issue 编号：`issue` 供 `formal-test`（旧字段 `legacy_formal_issue` 随 `legacy-formal` 下线不再使用，可从环境文件删除）；本仓地址 `forge_url`（验收证据 URL 必须以它开头）。`--acceptance-note` 传该 Issue 下某条 comment 的数字 ID，脚本用 `gh api repos/<forge_repo>/issues/comments/<ID>` 读取，并拒绝属于其他 Issue 的 comment |
 
 查看：`python3 scripts/release-env.py list`、`python3 scripts/release-env.py show <环境>`。
 
@@ -64,7 +63,7 @@
 
 - revision 是 40 位小写完整 SHA，且是 `origin/main` 的祖先；
 - 源环境的成功发布清单（`<root>/releases/manifest.txt`）中有该 revision 与报告中的同一镜像标签；
-- `acceptance.issue` 下指定的 comment 中恰有一个如下 JSON fenced block，四项检查都是 `pass`、`failed: 0`、`passed > 0`、`skipped: 0`、`soft_failed: 0`，每项证据为本仓库内的完整 URL（与 `legacy-formal` 晋级报告同一格式，校验函数复用 `scripts/release-formal.py`）：
+- `acceptance.issue` 下指定的 comment 中恰有一个如下 JSON fenced block，四项检查都是 `pass`、`failed: 0`、`passed > 0`、`skipped: 0`、`soft_failed: 0`，每项证据为本仓库内的完整 URL（校验函数在 `scripts/release-promotion.py`，`release-env.py` 加载，`scripts/tests/test_release_promotion.py` 覆盖）：
 
 ```json
 {
@@ -100,14 +99,14 @@
 
 与是否单栈无关、按环境文件设置的选项：`extra_compose_file` 加到每条本栈 Compose 命令的主文件之后（文件须已在服务器上，越界、缺失或符号链接即在构建前拒绝）；`build` 的 `network`、`goproxy` 与 `add_hosts` 只改变 `docker build` 参数，npm 源固定为公共 `registry.npmjs.org`（#257），镜像目标仍为 `runtime-with-migration-tools`；`source_transfer: scp` 只改变源码同步方式。`compose.env` 记录 `ART_AI_PROTECTED_PATHS`（#334）与布局变量。
 
-`dev-test` 没有 `single_stack`：它在共享主机上，环境文件用 `protect_projects` 列出同机其他 Plinth Compose 项目（候选栈、`legacy-formal`），`release-env.py` 以 `RELEASE_PROTECT_PROJECTS` 传给服务器段，镜像保留对每个项目加 `--protect-project`，这些项目容器引用的镜像不被清理；环境文件还为它给出 `build`（Go 代理与 `--add-host`）和 `layout` 中的 4 个 legacy 目录。源码同步与服务器段命令序列与参数化之前相同，只多了上述项目参数（`scripts/smoke/test-release-stack.sh` 断言）。
+`dev-test` 没有 `single_stack`：它在共享主机上，环境文件用 `protect_projects` 列出同机其他 Plinth Compose 项目（候选栈等），`release-env.py` 以 `RELEASE_PROTECT_PROJECTS` 传给服务器段，镜像保留对每个项目加 `--protect-project`，这些项目容器引用的镜像不被清理；环境文件还为它给出 `build`（Go 代理与 `--add-host`）和 `layout` 中的 4 个 legacy 目录。源码同步与服务器段命令序列与参数化之前相同，只多了上述项目参数（`scripts/smoke/test-release-stack.sh` 断言）。
 
 ### 发布备份范围与保留（#364）
 
 `dev-test` 只存放测试材料，可在环境文件写 `"backup": {"scope": "database", "keep": 2}`：停机窗口只把 `production/data` 打包到 `backups/release-<tag>/data.tar`，回滚也只替换该目录。`storage-go` 是只追加的 CAS，`web-data` 只读；候选启动后写入的资产或 Web 文件在数据库回滚后保留，可能成为无引用字节。**这不是完整回滚**：发布失败后的旧服务可能看不到候选新增的 CAS/任务数据，只能按新写入处理，不能删除这些字节来伪造一致。
 
-- 省略 `backup` 时保持全量行为：备份 `data`、`storage-go`、`web-data`，且不运行备份清理。`formal-test` 与 `legacy-formal` 保持此默认。
-- `release-env.py` 在加载环境文件时拒绝把 `backup` 用于 `promote_from`、`managed_by` 或非 `dev-test` 环境；`scope` 只接受 `database`，`keep` 为 1–2。服务器段在构建前再次校验 `RELEASE_BACKUP_SCOPE`（`full`/`database`）与 `RELEASE_BACKUP_KEEP`，非法组合不产生副作用。
+- 省略 `backup` 时保持全量行为：备份 `data`、`storage-go`、`web-data`，且不运行备份清理。`formal-test` 保持此默认。
+- `release-env.py` 在加载环境文件时拒绝把 `backup` 用于 `promote_from` 或非 `dev-test` 环境；`scope` 只接受 `database`，`keep` 为 1–2。服务器段在构建前再次校验 `RELEASE_BACKUP_SCOPE`（`full`/`database`）与 `RELEASE_BACKUP_KEEP`，非法组合不产生副作用。
 - 备份范围写入 `backups/release-<tag>/scope`（单行 `database` 或 `full`）、成功后的 `production/compose.env`（`RELEASE_BACKUP_SCOPE`、`RELEASE_BACKUP_TARGETS`）和失败报告的 `backup_scope`/`backup_targets`。手工回滚先读这些记录，不要猜归档内容。
 - 只有健康检查与成功清单都写入后，`release-server-steps.sh` 才在 database 模式调用 `scripts/retain-release-backups.py --apply`：按最新 `keep` 份（当前批准配置为 2）回收更早的已结束发布备份，更早的失败快照也在回收范围内；进行中的快照可临时排除，失败报告和独立诊断日志保留。bootstrap、构建/preflight/备份/更新/健康失败和回滚路径都不调用清理。
 - `releases/manifest.txt` 是 append-only 成功历史，可包含同一 tag 与同一完整 SHA 的重复行（成功时间戳不同）。retention 保留原始行序与字节摘要，不重写清单；仍要求最后一行匹配当前运行容器，并拒绝同一 tag 对应不同 SHA 的冲突记录。
@@ -202,7 +201,7 @@ RECOVERY
 
 ## 8. 未定事项
 
-待用户决定：中转是否放行 `formal-test` 项目网络的固定来源地址（未放行前该环境的 Agent 对话请求被中转以来源 IP 拒绝）；`legacy-formal` 的去留；`formal-test` 的域名/HTTPS 接入（共享 Nginx）及之后是否改为生产运行模式（要求 HTTPS 的 `PUBLIC_BASE_URL`）与 Meshy Webhook；去背景等跨主机依赖是否在 `formal-test` 主机另行部署；`dev-test` 验收通过后是否自动晋级。
+待用户决定：中转是否放行 `formal-test` 项目网络的固定来源地址（未放行前该环境的 Agent 对话请求被中转以来源 IP 拒绝）；`formal-test` 的域名/HTTPS 接入（共享 Nginx）及之后是否改为生产运行模式（要求 HTTPS 的 `PUBLIC_BASE_URL`）与 Meshy Webhook；去背景等跨主机依赖是否在 `formal-test` 主机另行部署；`dev-test` 验收通过后是否自动晋级。
 
 ## 9. dev-test 栈概况
 
@@ -233,7 +232,7 @@ RECOVERY
 
 - **入口**：`python3 scripts/host-ci/run.py <sha|HEAD>`，目标主机取环境 `dev-test` 的 `ssh`；CI 目录取该条目的可选字段 `"host_ci": {"dir": "<绝对路径>"}`（模板见 `deploy/environments.example.json`），缺省 `/var/lib/plinth-ci`。它必须与任何环境的 `root` 和 `protected_paths` 分开，`run.py` 会拒绝重叠。`release-env.py` 不读这个字段。
 - **目录**：`<CI 目录>/.lock`（互斥）、`run/<run id>/`（本次 bundle 与工作目录，结束即删）、`results/<run id>/`（结果 JSON、容器日志、重试证据，保留最近 10 次）。
-- **对象**：容器带标签 `plinth.host-ci=1`，名称 `plinth-ci-<run id>-aN`；镜像名 `plinth-ci:<12 位 hash>`，保留最新 2 个。与 Plinth 栈、`legacy-formal` 和同机其他业务的 Compose 项目、容器、卷、镜像互不相干；它们不在这套清理的范围内。
+- **对象**：容器带标签 `plinth.host-ci=1`，名称 `plinth-ci-<run id>-aN`；镜像名 `plinth-ci:<12 位 hash>`，保留最新 2 个。与 Plinth 栈和同机其他业务的 Compose 项目、容器、卷、镜像互不相干；它们不在这套清理的范围内。
 - **开跑条件**：`MemAvailable` ≥ 13 GiB（容器上限 12 GiB 加 1 GiB 余量，可配置），CI 目录与 Docker 根目录所在磁盘各 ≥ 10 GiB 空闲。同机其他业务忙时可能不满足，此时工具以退出码 70 停下，不会强行启动；这不是故障，等资源恢复后重跑。
 - **手工排障**：只读查看 `docker ps -a --filter label=plinth.host-ci=1` 与 `<CI 目录>/results/`。需要清理时只删带这个标签的容器和 `<CI 目录>/run/` 下的子目录；下一次运行持锁后也会自动清理遗留。不要用 `docker system prune`、`docker image prune` 或通配符删除。
 - **工作流重放（#86）**：`python3 scripts/host-ci/run.py <sha> --workflows` 复用同一目录、同一把 `.lock` 与同一预检，用固定版本的 act（`<CI 目录>/tools/act-<版本>/act`，首次使用时下载并校验发布包摘要）和按摘要固定的运行器镜像 `catthehacker/ubuntu:act-24.04` 重放 `pull_request` 与 `push` 事件，作业容器同样带标签 `plinth.host-ci=1`、限 4 CPU / 12 GiB；`<CI 目录>/act-cache` 是 Action 缓存。这是本地模拟，不是 GitHub self-hosted runner，主机不接受平台事件。与门禁模式的差别：作业需要联网。两种运行结束后，本机用 `gh` 登录对被测 SHA 写 commit status `host-ci/gates` 与 `host-ci/workflows`（`--no-status` 可关）。排障时多出的只读检查：`docker ps -a --filter label=plinth.host-ci=1` 同样能看到 act 的作业容器；act 创建的 `act-` 前缀卷和网络在运行结束时按“本次新增”清理，不要用通配符手工删除。
@@ -244,8 +243,8 @@ RECOVERY
 以下文件只服务于内网测试/正式栈和历史 Next→Go 迁移（#259），不在自部署路径里，
 自部署者可以忽略：
 
-- Compose：`docker-compose.go-production.yml`（测试栈）、`docker-compose.go-formal.yml`
-  （正式栈）、`docker-compose.go-candidate.yml`（历史候选栈）。
+- Compose：`docker-compose.go-production.yml`（`dev-test` 与 `formal-test`）、
+  `docker-compose.go-candidate.yml`（历史候选栈）。
 - 发布与验收：`scripts/release-*`、`scripts/retain-art-ai-images.py`、`scripts/smoke/`、
   `scripts/cutover-go-production.sh`、`scripts/finalize-go-production.sh`、
   `scripts/backup-go-production.sh`、`scripts/deploy-go-candidate.sh` 与相应

@@ -1,6 +1,6 @@
 # dev-test 冒烟与发布脚本
 
-Agent 控制的 `dev-test` 发布与冒烟协议（按环境名部署与冒烟见 `docs/deployment.md`：`python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/<脚本>` 为同一套 L0/L1/L1 Agent 脚本设置 `BASE`、管理员登录、`EXPECT_SHA` 与 `RELEASE_CONTAINER`；在目标主机运行 L1 Agent 时另设 `ART_AI_SERVER_ROOT=<发布根>`）。各环境相互隔离；部署与验收事实以对应 Issue 回执为准（`legacy-formal` #232，`formal-test` #270）。操作边界见 `dev_ops.md`「Agent 全自动发布协议」及其两栈边界一节。
+Agent 控制的 `dev-test` 发布与冒烟协议（按环境名部署与冒烟见 `docs/deployment.md`：`python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/<脚本>` 为同一套 L0/L1/L1 Agent 脚本设置 `BASE`、管理员登录、`EXPECT_SHA` 与 `RELEASE_CONTAINER`；在目标主机运行 L1 Agent 时另设 `ART_AI_SERVER_ROOT=<发布根>`）。各环境相互隔离；部署与验收事实以对应 Issue 回执为准（`formal-test` #270；`legacy-formal` 已于 2026-10-30 下线，GitHub #74）。操作边界见 `dev_ops.md`「Agent 全自动发布协议」及其「dev-test 主机与镜像保留」一节。
 
 ## 发布（Agent 本地一键执行，无 CI）
 
@@ -9,22 +9,12 @@ git push origin main                       # 待发布内容先进 main
 python3 scripts/release-env.py release dev-test   # 同步→构建→preflight→备份→Compose 更新→健康（驱动 release-go-testenv.sh）
 ```
 
-- 凭据只在本地，远端命令通过本地 `deploy/local/environments.json` 中该环境的 `ssh` 执行。测试栈发布由 `python3 scripts/release-env.py release dev-test` 驱动 `scripts/release-go-testenv.sh`（`RELEASE_HOST`、`RELEASE_ROOT` 必填，无缺省主机/根）执行；正式（`legacy-formal`）晋级命令与来源验收 note 格式见 `dev_ops.md`。正式镜像晋级要求与该完整 SHA 匹配的 test manifest 项和 OCI revision，并验证测试栈在晋级期间身份不变。
-- 正式栈 `legacy-formal` 使用独立的无 Provider Key 环境和 `SESSION_COOKIE_NAME=art_ai_formal_session`。免费冒烟只跑 L0/L1，不跑 L2/L3/L4 或任何真实生成。命令显式设置 `BASE`、`TEST_BASE` 和正式管理员环境变量，例如：
-
-  ```bash
-  BASE=<legacy-formal 的 base_url> \
-  TEST_BASE=<dev-test 的 base_url> \
-  ADMIN_USERNAME='<正式管理员名>' ADMIN_PASSWORD='<正式管理员密码>' \
-  python3 scripts/smoke/smoke-l1-formal-keyless.py --expect-empty
-  ```
-
-  `BASE` 必须等于本地环境文件（`deploy/local/environments.json` 或 `ART_AI_ENVIRONMENTS_FILE`）中 `legacy-formal` 条目的 `base_url`，否则脚本拒绝运行；地址用 `python3 scripts/release-env.py show legacy-formal` 查看。`--expect-empty` 只用于正式首次晋级后、尚未有正式用户数据时；后续例行验收省略该参数。检查只读健康、readiness、公开 Schema、Offerings、会话/任务列表和鉴权闭合，不创建会话、Task、Grant、消息或审批，不调用 LLM；脚本要求每个 Offering 有 `provider_id`，核验所有 `provider_id != local` 项不可用，且至少一个本地项可用。它捕获 formal 登录签发的真实 Cookie，先向 `TEST_BASE` 发送该 Cookie 的两组只读 GET：`/api/auth/session` 必须返回匿名用户与 `isAdmin=false`，`/api/v1/tasks?limit=1` 必须返回 401；再将同一 secret 错按 test 默认 cookie 名重放，两项请求也必须被拒绝。随后在 formal 登出，并用独立 opener 重放登录时捕获的原 Cookie，必须看到匿名 session 和 401 tasks，证明该真实 Cookie 已撤销。它不会登录 test、读取 test 凭据或发送 test 写请求。`TEST_BASE` 必须显式提供且不能等于 `BASE`。正式管理员通过受支持的 BootstrapAdmin 初始化；首次成功登录后移除启动用 `ADMIN_PASSWORD` 并重建验证，原凭据 JSON 保持本地 `0600` 文件并只交用户。
-- `smoke-l0-browser-boot.sh`、`smoke-l1-free.sh`、`smoke-l1-agent-mode.sh` 对非默认 `BASE` 都要求显式完整 `ADMIN_USERNAME` 与 `ADMIN_PASSWORD`，避免误读测试运行环境凭据。L1-free 会调用 Agent，不可用于无 Key formal 验收；formal runner 保持只读 L1 范围。
+- 凭据只在本地，远端命令通过本地 `deploy/local/environments.json` 中该环境的 `ssh` 执行。测试栈发布由 `python3 scripts/release-env.py release dev-test` 驱动 `scripts/release-go-testenv.sh`（`RELEASE_HOST`、`RELEASE_ROOT` 必填，无缺省主机/根）执行；`formal-test` 晋级命令与来源验收 note 格式见 `docs/deployment.md`。
+- `smoke-l0-browser-boot.sh`、`smoke-l1-free.sh`、`smoke-l1-agent-mode.sh` 对非默认 `BASE` 都要求显式完整 `ADMIN_USERNAME` 与 `ADMIN_PASSWORD`，避免误读测试运行环境凭据。
 - 候选启动或健康检查（healthz/readyz）失败时，按本次备份范围恢复数据并启动发布前实际运行的镜像。标签从原容器读取。失败报告写在服务器 `production/reports/release-failures/<tag>-<stage>.txt`，并带 `backup_scope`/`backup_targets`。
 - 默认备份 `data`、`storage-go`、`web-data`，且不自动清理历史备份。仅 `dev-test` 可在环境文件写 `"backup": {"scope": "database", "keep": 2}`：停机只备份 `production/data`，回滚只替换该目录；候选写入的 `storage-go`/`web-data` 字节保留，可能成为孤儿，因此不是完整回滚。手工回滚先读 `backups/release-<T>/scope`（单行 `database` 或 `full`；旧快照无 scope 且三个归档齐全时按 `full`）。离线故障注入回归：`bash scripts/smoke/test-release-rollback.sh`（含 database scope）以及实际 helper 的单行 scope 夹具（`test-release-stack.sh`）。
 - 构建或 preflight 失败直接中止——旧实例未被触碰，无需回滚。
-- 测试栈健康检查与成功清单写入后，自动执行 Plinth 镜像保留：按创建时间保留 `art-ai-go-production` 最新五个不同镜像 ID，额外保护运行镜像、发布前实际运行的回滚镜像，以及发布时传入的测试栈、候选栈与 `legacy-formal` Compose 项目（`--project`，名字来自本地环境文件）任意运行或停止容器引用的镜像和 formal pins 中的 current/rollback/pending 镜像。正式发布与清理共用锁；formal 根存在而 pins 缺失或无效时停止清理。保护项可能使数量超过五个。只用无强制的 `docker rmi <id>`，失败记警告，不改变发布成功结果；镜像工具不删容器、卷、数据库备份或其他仓库镜像。正式晋级不触发清理。dry-run 见 `dev_ops.md`。
+- 测试栈健康检查与成功清单写入后，自动执行 Plinth 镜像保留：按创建时间保留 `art-ai-go-production` 最新五个不同镜像 ID，额外保护运行镜像、发布前实际运行的回滚镜像，以及发布时传入的测试栈与 `protect_projects` 所列其他 Compose 项目（`--project`/`--protect-project`，名字来自本地环境文件）任意运行或停止容器引用的镜像。发布与清理共用锁。保护项可能使数量超过五个。只用无强制的 `docker rmi <id>`，失败记警告，不改变发布成功结果；镜像工具不删容器、卷、数据库备份或其他仓库镜像。dry-run 见 `dev_ops.md`。
 - database 模式在健康检查与成功清单写入后，再调用 `scripts/retain-release-backups.py --apply`，`keep` 为 1–2（当前配置 2）；正常清理最多保留最新 2 个已结束发布备份，更早失败快照也按最新 2 个回收。进行中快照可临时排除，失败报告与独立诊断日志保留。bootstrap、失败、回滚和预构建路径不清理；清理非零只警告，不改变发布结果。helper 只处理 `backups/release-*`，不碰原始资产、数据库、首次迁移冷备或其他栈备份。保留 database-only 快照可能被使用时，禁止离线 CAS/task 破坏性维护。
 - 备份目录在停机前创建，并写入单行 `scope` 文件（`database`/`full`）。备份目标（targets）在成功后的 `production/compose.env` 和失败报告中记录，快照内不另存 targets。目录准备失败时旧实例继续运行。已有同名备份不会被删除；重复标签须换用新的发布标签。
 - 停机或备份失败时，先重新启动并检查旧实例，再写失败报告。报告目录不可写时仍执行恢复。健康请求的连接超时为 3 秒，总超时为 5 秒；重试次数有上限。

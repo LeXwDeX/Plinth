@@ -8,7 +8,7 @@
 ## 2. 发布前自动化门禁
 
 **产品平台（2026-10-08 用户确认）**：本项目仅面向 PC。新增工作区 UI 验收覆盖 Chromium/WebKit 的桌面视口，默认使用 1366×768、1440×900、1920×1080，并检查鼠标、键盘及缩小的 PC 浏览器窗口。历史移动验收记录保留，不作为新功能的目标设备矩阵。浏览器全新上下文、禁用缓存和同源资源检查继续必做。
-- 内部环境按名称区分（具体主机、端口与目录只在本地 `deploy/local/environments.json`）：`dev-test` 为多业务共用主机上的测试栈；`legacy-formal` 为同主机隔离的正式栈（#232，部署与验收状态以该 Issue 回执为准；正式发布只晋级测试栈已完成 L0/L1/L1 Agent 及相关验收的精确 `main` revision），在 2026-10-20 新环境布局下的去留待用户确认。
+- 内部环境按名称区分（具体主机、端口与目录只在本地 `deploy/local/environments.json`）：`dev-test` 为多业务共用主机上的测试栈；`formal-test` 为独立主机上的正式测试环境，只晋级 `dev-test` 已完成 L0/L1/L1 Agent 及相关验收的精确 `main` revision。同主机的 `legacy-formal`（内部存档 #232）已于 2026-10-30 下线（GitHub #74）。
 - 部署按环境名进行，入口 `docs/deployment.md`（目标在本地 `deploy/local/environments.json`）。`formal-test`（正式测试环境，#270）只经 `scripts/release-env.py release formal-test --acceptance-note <noteID>` 接收已在 `dev-test` 发布成功且 L0、L1、L1 Agent 与相关验收全部 PASS 的精确 `main` revision；晋级后用 `release-env.py smoke formal-test -- <冒烟脚本>` 跑 L0、L1、L1 Agent 并核对容器 OCI revision。不做付费生成。
 - LLM、OpenAI/Gemini 生图与对话的测试接线以 `production/runtime.env`
   的 `LLM_BASE_URL`、`OPENAI_BASE_URL` 为准；均指向 llms 正式服务器
@@ -20,7 +20,7 @@
   生产凭据不在测试脚本、日志或报告中写出。模型列表 200 只能证明鉴权和
   目录可达；生成验收还须核对
   `Task` 状态、READY 资产、实际图片内容、刷新后的历史版本；
-- #232 正式栈来源验收必须先在 test 完成 L0/L1/L1 Agent 与相关检查，再以完整 revision/image tag 写入 #232 原生 note。正式晋级后仅跑正式 L0/L1；`smoke-l1-formal-keyless.py` 显式要求不同的 `BASE`/`TEST_BASE` 与完整正式管理员凭据，`--expect-empty` 仅用于首次空库。它核对正式无 Key Offering 投影、空库（首次）、登录/登出、登出后用登录时捕获的真实 formal Cookie 验证撤销，以及该 Cookie 和改名后的同 secret Cookie 对 test 的只读跨端口拒绝（匿名 session、tasks 401），不调用 Agent、Provider 或生成任务。晋级来源报告的四项检查 `L0`、`L1`、`L1_agent`、`related` 必须各为 pass、`failed=0`、`passed>0`、没有 skip/soft-fail 且附本仓 Issue comment 的完整 URL；正式部署状态仍以 Issue 读回为准，源码或本机 fixture 不能充当线上验收。
+- 正式测试环境（`formal-test`）的来源验收必须先在 `dev-test` 完成 L0/L1/L1 Agent 与相关检查，再以完整 revision/image tag 写入 GitHub #63 的 Issue comment；晋级报告的四项检查 `L0`、`L1`、`L1_agent`、`related` 必须各为 pass、`failed=0`、`passed>0`、没有 skip/soft-fail 且附本仓 Issue comment 的完整 URL；部署状态仍以 Issue 读回为准，源码或本机 fixture 不能充当线上验收。原 `legacy-formal` 的无 Key 冒烟（`smoke-l1-formal-keyless.py`）随该栈下线删除（GitHub #74）。
 - 本系统依赖的背景去除服务与 `dev-test` 同机（接线地址见 dev-test 运行环境文件 `MATTING_*`，项目目录只记在本地环境资料中，不写入仓库）；若该服务异常，先检查现有容器状态、项目配置与 `/health`，再按实际故障修复并验证；
 
 ### 自动化门禁项

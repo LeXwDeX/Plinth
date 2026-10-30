@@ -73,7 +73,7 @@ if ! [[ "$SINGLE_STACK" =~ ^[01]$ ]] || ! [[ "$PROTECT_PROJECTS" =~ ^([a-z0-9][a
 fi
 # #364: only the disposable dev-test stack may opt into a database-only
 # snapshot. The default stays the full data/storage-go/web-data backup and no
-# backup retention; formal-test and legacy-formal never set these variables.
+# backup retention; formal-test never sets these variables.
 BACKUP_SCOPE=${RELEASE_BACKUP_SCOPE:-full}
 BACKUP_KEEP=${RELEASE_BACKUP_KEEP:-}
 case "$BACKUP_SCOPE" in
