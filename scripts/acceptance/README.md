@@ -2,9 +2,9 @@
 
 `docs/acceptance-1.0.md` 的清单有一部分可以脚本化。本目录放 #62 验收中调通、可复用的脚本，换机器重新 clone 后即可再跑。
 只收脚本和说明：截图、日志、数据库、`.env`、seed、证据都不入库。脚本产出的 PASS/FAIL 是**证据线索**，逐项结果仍按
-`docs/acceptance-1.0.md`「证据格式」写在 GitHub #62 的 comment 里；脚本没覆盖的部分（界面观感、真实上游）仍须人工验收。
+`docs/acceptance-1.0.md`「证据格式」写在 #1 的 comment 里；脚本没覆盖的部分（界面观感、真实上游）仍须人工验收。
 
-English summary: reusable scripts from the #62 acceptance run. API checks against a named environment, an isolated local
+English summary: reusable scripts from the archive #62 acceptance run. API checks against a named environment, an isolated local
 Mock stack, a Playwright browser matrix, cross-user checks on a throwaway local stack, and a large-GLB Chrome spot check.
 No credentials or host details live in the scripts; environments are reached through `scripts/release-env.py smoke <env>`
 (injects `BASE`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `EXPECT_SHA`) and local stacks use random loopback ports and random

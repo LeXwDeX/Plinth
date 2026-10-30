@@ -11,7 +11,7 @@
 | `dev-test` | 开发测试环境 | 每次已推送的 `origin/main` | 历史迁移与测试数据，保留不清理 | L0、L1、L1 Agent 必跑；涉及 Agent/生成/同意链路时按 `scripts/smoke/README.md` 跑 L2 等真实模型验收 | 常设小额授权（见 `AGENTS.md`） |
 | `formal-test` | 正式测试环境（测试版本中的稳定版）：单版本、不留残余 | 只接收按 §4 晋级规则通过的精确 revision | 本栈独立，不跨主机复制 | L0、L1、L1 Agent | 不做；测试期付费同意授权不适用 |
 
-2026-10-20 的环境布局由用户决定（#270）：`dev-test` 不变，新增 `formal-test`。与 `dev-test` 同主机的 `legacy-formal`（内部存档 #232 的隔离正式栈）经维护者 2026-10-30 决定已下线（GitHub #74）：Compose 项目、容器、专用镜像与 `<root>/formal/` 数据已移除，最终备份保留；环境名不再可用，说明见 `dev_ops.md`「dev-test 主机与镜像保留」。
+2026-10-20 的环境布局由用户决定（#270）：`dev-test` 不变，新增 `formal-test`。与 `dev-test` 同主机的 `legacy-formal`（内部存档 #232 的隔离正式栈）经维护者 2026-10-30 决定已下线（存档 #74）：Compose 项目、容器、专用镜像与 `<root>/formal/` 数据已移除，最终备份保留；环境名不再可用，说明见 `dev_ops.md`「dev-test 主机与镜像保留」。
 
 ## 2. 本地环境文件
 
