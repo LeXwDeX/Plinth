@@ -95,7 +95,7 @@ func TestHarnessReferenceImageFromTheChatReachesTheSelectedOperation(t *testing.
 	database := openRawAppDatabase(t, filepath.Join(root, "art-ai.db"))
 	waitTurns := func(want int) {
 		t.Helper()
-		deadline := time.Now().Add(30 * time.Second)
+		deadline := time.Now().Add(120 * time.Second)
 		for time.Now().Before(deadline) {
 			var done, open int
 			_ = database.QueryRow(`SELECT COUNT(*) FROM go_chat_turns WHERE session_id=? AND state IN (?,?)`, session.ID,

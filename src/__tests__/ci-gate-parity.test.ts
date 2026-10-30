@@ -449,16 +449,16 @@ describe('CI workflow gate integrity (#86)', () => {
   it('rejects environment overrides that skip or weaken a gate', () => {
     for (const goflags of ['-run=NoSuchTest', '-short', '-tags=skip', '-timeout=1m', '-timeout=30m -run=X', '-p=1']) {
       flagged(mutate(TEST_STEP, `${TEST_STEP}        env:\n          GOFLAGS: ${goflags}\n`), /can skip or weaken a gate/);
-      flagged(mutate('      GOFLAGS: -timeout=30m\n', `      GOFLAGS: ${goflags}\n`), /GOFLAGS/);
+      flagged(mutate('      GOFLAGS: -timeout=60m\n', `      GOFLAGS: ${goflags}\n`), /GOFLAGS/);
     }
-    flagged(mutate('      GOFLAGS: -timeout=30m\n', '      GOFLAGS: -timeout=30m\n      CGO_ENABLED: 0\n'), /env CGO_ENABLED is not allowed/);
+    flagged(mutate('      GOFLAGS: -timeout=60m\n', '      GOFLAGS: -timeout=60m\n      CGO_ENABLED: 0\n'), /env CGO_ENABLED is not allowed/);
     flagged(mutate("  NODE_VERSION: '22'\n", "  NODE_VERSION: '22'\n  GOFLAGS: -run=X\n"), /workflow env GOFLAGS is not allowed/);
     flagged(mutate('\njobs:\n', '\ndefaults:\n  run:\n    shell: bash -c true {0}\njobs:\n'), /workflow key defaults/);
   });
 
   it('keeps a longer per-package test timeout as the only allowed GOFLAGS', () => {
-    expect(workflowProblems(mutate('GOFLAGS: -timeout=30m', 'GOFLAGS: -timeout=45m'), gates)).toEqual([]);
-    expect(workflowProblems(mutate('GOFLAGS: -timeout=30m', 'GOFLAGS: -timeout=9m'), gates).join()).toMatch(/GOFLAGS/);
+    expect(workflowProblems(mutate('GOFLAGS: -timeout=60m', 'GOFLAGS: -timeout=90m'), gates)).toEqual([]);
+    expect(workflowProblems(mutate('GOFLAGS: -timeout=60m', 'GOFLAGS: -timeout=9m'), gates).join()).toMatch(/GOFLAGS/);
   });
 
   it('rejects job-level fields that skip, reorder or fan out a gate job', () => {
