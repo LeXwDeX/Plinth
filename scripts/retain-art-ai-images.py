@@ -21,7 +21,6 @@ import re
 import stat
 import subprocess
 import sys
-import tempfile
 
 REPOSITORY = "art-ai-go-production"
 ROOT = None
@@ -44,7 +43,7 @@ def private_directory(path):
 
 @contextmanager
 def image_lock(root=ROOT):
-    """Serialize formal pin updates and image removal; callers retain the lock file."""
+    """Serialize image removal against concurrent retention runs; callers retain the lock file."""
     root = Path(root)
     if root.is_symlink() or not root.is_dir():
         raise ValueError("image lock root is not a directory")
@@ -63,89 +62,6 @@ def image_lock(root=ROOT):
             fcntl.flock(descriptor, fcntl.LOCK_UN)
     finally:
         os.close(descriptor)
-
-
-def pin_identities(document):
-    if (not isinstance(document, dict)
-            or set(document) != {"version", "current", "rollback", "pending"}
-            or type(document["version"]) is not int or document["version"] != 1):
-        raise ValueError("invalid formal image pin document")
-    identities = {image_id(document[key]) for key in ("current", "rollback", "pending")
-                  if document[key] is not None}
-    if not identities:
-        raise ValueError("formal image pins must protect at least one image")
-    return identities
-
-
-def unique_object(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate formal image pin field")
-        result[key] = value
-    return result
-
-
-def formal_image_pins(root=ROOT):
-    """Read-only. An existing formal stack without trustworthy pins stops cleanup."""
-    formal = Path(root) / "formal"
-    if formal.is_symlink():
-        raise ValueError("formal image pin directory must not be a symlink")
-    if not formal.exists():
-        return set()
-    reports = formal / "reports"
-    if not formal.is_dir() or reports.is_symlink() or not reports.is_dir():
-        raise ValueError("formal image pin directory is unavailable")
-    descriptor = os.open(reports / "image-pins.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    with os.fdopen(descriptor, "rb") as source:
-        info = os.fstat(source.fileno())
-        if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
-                or info.st_nlink != 1 or info.st_size > 4096):
-            raise ValueError("formal image pins require a bounded private regular file")
-        raw = source.read(4097)
-    if len(raw) > 4096:
-        raise ValueError("formal image pin document exceeds its bound")
-    try:
-        return pin_identities(json.loads(raw, object_pairs_hook=unique_object))
-    except (UnicodeError, json.JSONDecodeError) as error:
-        raise ValueError("invalid formal image pin JSON") from error
-
-
-def write_formal_pins(root, current, rollback, pending):
-    """Atomically publish pins (0600); caller must hold image_lock(root).
-
-    Validate IDs here; retain separately checks their exact repository inventory.
-    Never remove the file when a release fails: keep its protected identities.
-    """
-    document = {"version": 1, "current": current, "rollback": rollback, "pending": pending}
-    pin_identities(document)
-    root = Path(root)
-    if root.is_symlink() or not root.is_dir():
-        raise ValueError("formal image pin root is not a directory")
-    formal = root / "formal"
-    private_directory(formal)
-    reports = formal / "reports"
-    private_directory(reports)
-    target = reports / "image-pins.json"
-    if target.is_symlink():
-        raise ValueError("formal image pin file must not be a symlink")
-    descriptor, name = tempfile.mkstemp(prefix=".image-pins-", dir=reports)
-    staged = Path(name)
-    try:
-        with os.fdopen(descriptor, "w") as output:
-            os.fchmod(output.fileno(), 0o600)
-            json.dump(document, output, sort_keys=True)
-            output.write("\n")
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(staged, target)
-        directory = os.open(reports, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-    finally:
-        staged.unlink(missing_ok=True)
 
 
 def docker(*args):
@@ -225,13 +141,10 @@ def retain(rollback, apply=False):
         raise ValueError("rollback image is not in the Plinth repository")
     protected, running = container_images()
     protected.add(previous_id)
-    formal_pins = formal_image_pins(ROOT)
     images = candidates()
     identities = {row[1] for row in images}
     if not {running, previous_id}.issubset(identities):
         raise ValueError("running/rollback image missing from exact repository inventory")
-    if not formal_pins.issubset(identities):
-        raise ValueError("formal image pin missing from exact repository inventory")
     newest = {row[1] for row in images[:KEEP]}
     print(f"[retention] {'APPLY' if apply else 'DRY-RUN'} repository={REPOSITORY} images={len(images)} newest={KEEP}")
     for _, identity, tags, foreign in images:
@@ -240,8 +153,6 @@ def retain(rollback, apply=False):
             reasons.append("newest-five" if KEEP == 5 else f"newest-{KEEP}")
         if identity in protected:
             reasons.append("running/rollback/container-reference")
-        if identity in formal_pins:
-            reasons.append("formal-image-pin")
         # ID-based removal must not affect aliases in other repositories.
         if foreign:
             reasons.append("other-repository-alias")
@@ -251,18 +162,12 @@ def retain(rollback, apply=False):
         if not apply:
             print(f"WOULD REMOVE {identity} {','.join(tags)}")
             continue
-        # Refresh pins and references under the shared lock immediately before rmi.
+        # Refresh references under the shared lock immediately before rmi.
         fresh, _ = container_images()
-        fresh_pins = formal_image_pins(ROOT)
-        if not fresh_pins.issubset({row[1] for row in candidates()}):
-            raise ValueError("formal image pin missing from exact repository inventory")
         current = inspect("image", identity)
         if image_id(current["Id"]) != identity:
             raise ValueError("image identity changed")
         current_tags = current.get("RepoTags") or []
-        if identity in fresh_pins:
-            print(f"KEEP {identity} (formal-image-pin refreshed)")
-            continue
         if identity in fresh or not current_tags or foreign_alias(current):
             print(f"KEEP {identity} (reference/repository changed)")
             continue
@@ -306,7 +211,7 @@ def configure_stack(root, project, keep, protect=()):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rollback-image", required=True, help="actual previous release tag or full image ID")
-    parser.add_argument("--root", help="deployment root holding releases/ and formal/ (required)")
+    parser.add_argument("--root", help="deployment root holding releases/ (required)")
     parser.add_argument("--project", help="the running Plinth Compose project (required)")
     parser.add_argument("--protect-project", action="append", default=[],
                         help="another Compose project on this host whose container images are kept (repeatable)")

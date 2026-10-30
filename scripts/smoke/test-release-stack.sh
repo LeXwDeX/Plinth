@@ -114,10 +114,8 @@ export ART_AI_ENVIRONMENTS_FILE="$WORK/environments.json"
 cat >"$ART_AI_ENVIRONMENTS_FILE" <<EOF
 {"version": 1, "acceptance": {"forge_repo": "owner/project", "forge_url": "$FORGE", "issue": 7},
  "environments": {
-  "legacy-formal": {"ssh": "$DEFAULT_HOST", "root": "$DEFAULT_ROOT", "base_url": "http://dev.example.invalid:13334",
-                    "compose_project": "legacy_project", "managed_by": "release-go-formal.sh"},
   "dev-test": {"ssh": "$DEFAULT_HOST", "root": "$DEFAULT_ROOT", "base_url": "http://dev.example.invalid:13333",
-               "compose_project": "dev_project", "protect_projects": ["candidate_project", "legacy_project"],
+               "compose_project": "dev_project", "protect_projects": ["candidate_project", "other_project"],
                "protected_paths": ["/srv/legacy-app"], "backup": {"scope": "database", "keep": 2}},
   "formal-test": {"ssh": "root@formal.example.invalid", "root": "/srv/formal", "base_url": "http://formal.example.invalid:13333",
                   "compose_project": "formal-project", "promote_from": "dev-test", "protected_paths": [],
@@ -151,17 +149,12 @@ export MOCK_MANIFEST="$TAG2 $SECOND 2026-10-19T00:00:00Z"
 #     and the protected directories for the migration tools (#334).
 : >"$MOCK_TRACE"
 (cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" release dev-test) >/dev/null
-sed "s#^ssh \\([^ ]*\\) RETENTION_SCRIPT=#ssh \\1 RELEASE_COMPOSE_PROJECT=dev_project RELEASE_PROTECT_PROJECTS=candidate_project,legacy_project RELEASE_BACKUP_SCOPE=database RELEASE_BACKUP_KEEP=2 ART_AI_PROTECTED_PATHS=$DEFAULT_ROOT:/srv/legacy-app RETENTION_SCRIPT=#" \
+sed "s#^ssh \\([^ ]*\\) RETENTION_SCRIPT=#ssh \\1 RELEASE_COMPOSE_PROJECT=dev_project RELEASE_PROTECT_PROJECTS=candidate_project,other_project RELEASE_BACKUP_SCOPE=database RELEASE_BACKUP_KEEP=2 ART_AI_PROTECTED_PATHS=$DEFAULT_ROOT:/srv/legacy-app RETENTION_SCRIPT=#" \
   "$WORK/expected-default" >"$WORK/expected-dev-test"
 diff -u "$WORK/expected-dev-test" "$MOCK_TRACE" || fail "dev-test via release-env.py differs from the plain entry"
 if (cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" release dev-test --revision "$FIRST") >/dev/null 2>&1; then
   fail "dev-test accepted a pinned revision"
 fi
-: >"$MOCK_TRACE"
-if (cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" release legacy-formal) >"$WORK/legacy.log" 2>&1; then
-  fail "release-env.py released an environment managed by another tool"
-fi
-[ ! -s "$MOCK_TRACE" ] && grep -q 'released by scripts/release-go-formal.sh' "$WORK/legacy.log" || fail "legacy-formal refusal"
 echo "PASS env/dev-test-equals-plain-entry"
 
 # 1d. formal-test: accepted running revision is promoted with the stack layout.
@@ -377,7 +370,7 @@ run_locked_steps() { # $1=root, rest=env assignments; runs under the inherited r
 }
 export S_TRACE="$WORK/server-trace" S_STATE="$WORK/server-state"
 STABLE=(RELEASE_COMPOSE_PROJECT=formal-project RELEASE_SINGLE_STACK=1 RELEASE_IMAGE_KEEP=1 RELEASE_ALLOW_BOOTSTRAP=1)
-SHARED=(RELEASE_COMPOSE_PROJECT=dev_project RELEASE_PROTECT_PROJECTS=candidate_project,legacy_project)
+SHARED=(RELEASE_COMPOSE_PROJECT=dev_project RELEASE_PROTECT_PROJECTS=candidate_project,other_project)
 mode_of() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"; }
 
 # 2a. Bootstrap: empty stack, the passed layout drives every call.
@@ -488,7 +481,7 @@ run_steps "$root" S_CONTAINERS=1 "${SHARED[@]}"
 grep -q -- "-p $DEFAULT_PROJECT -f .* up -d --no-deps art-ai-go | bind= port= db=$root/production/data legacy=\$" "$S_TRACE" || fail "default compose environment changed"
 grep -q "^preflight db=$root/production/data legacy=\$" "$S_TRACE" || fail "default preflight environment changed"
 grep -qx 'curl http://127.0.0.1:13333/readyz' "$S_TRACE" || fail "default health URL changed"
-grep -qx "retention --apply --rollback-image art-ai-go-production:previous --root $root --project dev_project --protect-project candidate_project --protect-project legacy_project" "$S_TRACE" || fail "default retention arguments changed"
+grep -qx "retention --apply --rollback-image art-ai-go-production:previous --root $root --project dev_project --protect-project candidate_project --protect-project other_project" "$S_TRACE" || fail "default retention arguments changed"
 grep -qx 'full' "$root/backups/release-candidate/scope" || fail "full scope metadata changed"
 grep -qx 'preflight-project dev_project' "$S_TRACE" || fail "default preflight project changed"
 grep -qx "capacity $DEFAULT_PROJECT-art-ai-go-1 before-build" "$S_TRACE" || fail "default capacity container changed"
