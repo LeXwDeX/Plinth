@@ -57,6 +57,7 @@ BUILTIN_PATTERNS = (
     r"meshyai_g[o]_",
     # #334: local user directories (the public CI runner's home is not one), private
     # keys and credential-shaped tokens (GitLab, OpenAI-style, GitHub, Meshy, Tripo).
+    # The GitLab token prefix is a leak-detection rule, not a GitLab integration.
     # Lengths stay above the short fake secrets that test fixtures use.
     r"/(?:U[s]ers|h[o]me)/(?!runner/)[A-Za-z0-9._-]+",
     r"-----BEGIN [A-Z ]*PRIV[A]TE KEY-----",

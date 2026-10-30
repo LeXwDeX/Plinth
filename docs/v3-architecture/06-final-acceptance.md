@@ -6,9 +6,9 @@
 
 | 证据 | 读回结果 |
 |---|---|
-| 架构 MR | GitLab !76，source `f7abef16c3112e80d9d0e769043350c32348f972`，merge `e2e31c552c806f544e6110896e203e9a77cb00b1`。对应 Issue #78–83 均已关闭。 |
+| 架构 MR | 内部存档 MR !76，source `f7abef16c3112e80d9d0e769043350c32348f972`，merge `e2e31c552c806f544e6110896e203e9a77cb00b1`。对应 Issue #78–83 均已关闭。 |
 | 架构 CI | source pipeline 30363 和 merge pipeline 30364 均为 `success`；前端类型/测试/构建、Go vet/test/race/build 全绿。合并提交与 source 树相同。 |
-| L1 脚本修复 | 新的 Cookie 写入同源门禁使旧脚本的无 `Origin` 写入正确返回 403；GitLab !77 仅修复 smoke 脚本。source `8a7ce6543adf4d1330dfe888bb654d43078552a0`，merge `66d560a201aa33742b6b5e0982e72b596c25f4b8`，Issue #84 已关闭。 |
+| L1 脚本修复 | 新的 Cookie 写入同源门禁使旧脚本的无 `Origin` 写入正确返回 403；内部存档 MR !77 仅修复 smoke 脚本。source `8a7ce6543adf4d1330dfe888bb654d43078552a0`，merge `66d560a201aa33742b6b5e0982e72b596c25f4b8`，Issue #84 已关闭。 |
 | 最终 main CI | source pipeline 30365 和最终 main pipeline 30366 均为 `success`。本地推送前七项门禁、`bash -n`、ShellCheck warning 级、`git diff --check` 通过。 |
 | 最终发布 | dev-test 测试栈镜像 `art-ai-go-production:66d560a-20260929T021801Z`；容器 OCI revision、`releases/manifest.txt` 与最终 main 均指向 `66d560a201aa33742b6b5e0982e72b596c25f4b8`。测试栈容器为唯一健康实例，`healthz`/`readyz` 均 200；迁移头为 40。发布前一致性备份保留在 `backups/release-66d560a-20260929T021801Z/`。 |
 
