@@ -22,6 +22,7 @@ func newDefaultTextRig(t *testing.T, responses ...agents.Completion) *scopeRig {
 	shipped := taskCatalog.Application().Chat
 	rig.schema.Agent.SystemPrompt = shipped.Agent.SystemPrompt
 	rig.schema.AgentScope = shipped.AgentScope
+	rig.schema.ApprovalPolicy = shipped.ApprovalPolicy
 	rig.schema.Tools = shipped.Tools
 	rig.service = newChatServiceWith(t, rig.repository, func(config *chat.ServiceConfig) {
 		config.AgentScope = agentscope.FromSchema(rig.schema.AgentScope)

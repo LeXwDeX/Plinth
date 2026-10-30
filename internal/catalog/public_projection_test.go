@@ -31,6 +31,8 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		// #80: the composer's capacity text and the result limit pair.
 		"runtime.generation_messages":       {"reference_capacity", "reference_limit", "reference_limit_one"},
 		"chat":                              {"api", "defaults", "roles", "state", "frontend", "context", "stream", "tools", "skills", "presentation", "approval_policy", "agent_scope", "harness", "agent_status", "context_compaction"},
+		// #7: the Agent's approval-mode texts (approval_policy.prompt) stay on the server.
+		"chat.approval_policy":              {"default_mode", "modes", "manual_approval_capabilities"},
 		"canvas":                            {"api", "defaults", "limits", "frontend", "presentation"},
 		"task_stream":                       {"aliases"},
 		"administration":                    {"navigation", "users", "audit_logs", "generations", "usage", "user_assets"},

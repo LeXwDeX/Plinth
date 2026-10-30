@@ -1724,6 +1724,9 @@ func (orchestrator *Orchestrator) agentRequest(
 		// framed session notes stay at the end of the prompt.
 		systemPrompt += orchestrator.scopePrompt(registry, scope)
 	}
+	// The session's real approval mode follows the scope it must not be mixed
+	// up with (#7).
+	systemPrompt += orchestrator.approvalModePrompt(ctx, ownerID, sessionID)
 	if registryErr == nil {
 		systemPrompt += orchestrator.skillToolDirective(ctx, registry, options)
 	}

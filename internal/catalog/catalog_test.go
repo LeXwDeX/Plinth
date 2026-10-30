@@ -810,7 +810,14 @@ const minimalApplication = `"application":{
 		},
 		"approval_policy":{
 			"default_mode":"manual","modes":["auto","manual"],
-			"manual_approval_capabilities":["text-to-image"]
+			"manual_approval_capabilities":["text-to-image"],
+			"prompt":{
+				"context_template":"approval {mode}: {description}",
+				"modes":[
+					{"id":"auto","label":"Auto","description":"no cards"},
+					{"id":"manual","label":"Manual","description":"cards"}
+				]
+			}
 		},
 		"pending_approvals":{
 			"ttl_seconds":86400,"maximum_listed":20,

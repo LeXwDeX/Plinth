@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-10-30.issue158-admin-read-task-audit.1",
+    "revision": "2026-10-30.issue7-approval-mode-context.1",
     "terminology": {
       "user_facing": [
         {
@@ -6694,7 +6694,22 @@
       "approval_policy": {
         "default_mode": "manual",
         "modes": ["auto", "manual"],
-        "manual_approval_capabilities": ["text-to-3d", "image-to-3d", "image-to-splat", "retexture"]
+        "manual_approval_capabilities": ["text-to-3d", "image-to-3d", "image-to-splat", "retexture"],
+        "prompt": {
+          "context_template": "\n\n【批准方式】本会话的批准方式是「{mode}」（用户在顶栏的「批准方式」里设置，以下是服务端读到的真实值）。{description}\n批准方式只由用户在顶栏切换，你不能切换它，也不要主动建议用户切换它，更不要为了得到或避开批准卡片而劝用户切换。用户问起当前批准方式，或问某一步为什么出了批准卡、为什么没出卡时，按上面的事实回答，不要猜测，也不要把它说成另一种方式。它与 Agent 范围（2D 模式、3D 模式、自动模式，只限定你能用哪些工具）互不相干。",
+          "modes": [
+            {
+              "id": "auto",
+              "label": "自动",
+              "description": "自动方式下，所有付费步骤都由系统按会话批准方式自动批准，不出批准卡；会额外消耗的积分（例如额外导出格式）也随批准一起授予，不再单独询问。每一步仍会显示它消耗的积分。"
+            },
+            {
+              "id": "manual",
+              "label": "手工",
+              "description": "手工方式下，文生 3D、图生 3D、Gaussian Splat 生成、换贴图这几类步骤会先出批准卡，等用户在卡片上批准后才执行。2D 步骤、重拓扑、绑骨、动画按策略自动批准，不出卡。任何步骤只要会额外消耗积分（例如额外导出格式、Tripo 的附加费用），即使它本来自动批准，也要在批准卡上由用户批准。"
+            }
+          ]
+        }
       },
       "choice": {
         "answer_template": "\n[Choice card answer] The person answered the choice card on the card. Continue now: call the tool named in the JSON below with exactly the arguments of the chosen entry (do not ask again, do not change them).\n{continuation}",

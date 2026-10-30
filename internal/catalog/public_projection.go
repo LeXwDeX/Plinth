@@ -34,7 +34,11 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 	}
 	publicChat.Harness = cloned.Chat.Harness.Public()
 	publicChat.AgentStatus.Available = !cloned.Chat.AgentNotConfigured
-	publicChat.ApprovalPolicy = cloned.Chat.ApprovalPolicy
+	publicChat.ApprovalPolicy = PublicChatApprovalPolicy{
+		DefaultMode:                cloned.Chat.ApprovalPolicy.DefaultMode,
+		Modes:                      cloned.Chat.ApprovalPolicy.Modes,
+		ManualApprovalCapabilities: cloned.Chat.ApprovalPolicy.ManualApprovalCapabilities,
+	}
 	publicChat.ContextCompaction = PublicChatContextCompaction{
 		Enabled:            cloned.Chat.ContextCompaction.Enabled,
 		AutoThresholdRatio: cloned.Chat.ContextCompaction.AutoThresholdRatio,
