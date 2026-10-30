@@ -52,7 +52,7 @@ CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check
 
 ### CI：GitHub Actions（#257）
 
-本仓库只有一处 CI：`.github/workflows/ci.yml`。2026-10-27 起 GitHub 是唯一仓库，内部 GitLab 与其 runner 不再使用（GitHub #60）。CI 执行上面「自动化门禁项」中标为 CI 的各项，作业分组为 `frontend`、`go check`、`go test race`，不另立清单：
+本仓库只有一处 CI：`.github/workflows/ci.yml`。2026-10-27 起 GitHub 是唯一仓库，迁移前的内部仓库与其 runner 不再使用（GitHub #60）。CI 执行上面「自动化门禁项」中标为 CI 的各项，作业分组为 `frontend`、`go check`、`go test race`，不另立清单：
 
 | | GitHub Actions |
 |---|---|

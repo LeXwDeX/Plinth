@@ -1,8 +1,8 @@
 # Provider 配置 / Provider configuration
 
-本文是 Provider 连接配置的对外契约（GitLab #252）。变量由 Product Schema `application.runtime.configuration.settings` 声明，`internal/app/provider_environment_doc_test.go` 校验本文与 Schema、`.env.example` 一致。
+本文是 Provider 连接配置的对外契约（内部存档 #252）。变量由 Product Schema `application.runtime.configuration.settings` 声明，`internal/app/provider_environment_doc_test.go` 校验本文与 Schema、`.env.example` 一致。
 
-This page is the public contract for configuring Provider connections (GitLab #252). Variables are declared in the Product Schema (`application.runtime.configuration.settings`); `internal/app/provider_environment_doc_test.go` checks that this page, the Schema and `.env.example` agree.
+This page is the public contract for configuring Provider connections (内部存档 #252). Variables are declared in the Product Schema (`application.runtime.configuration.settings`); `internal/app/provider_environment_doc_test.go` checks that this page, the Schema and `.env.example` agree.
 
 ## 命名规则 / Naming rule
 

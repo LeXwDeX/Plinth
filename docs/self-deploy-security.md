@@ -1,6 +1,6 @@
 # 自部署安全配置
 
-本文说明把 Plinth 暴露到本机之外时必须做的配置，以及 1.0 安全基线（GitLab #256）各缺口的处理或接受理由。所有设置都是 Product Schema `application.runtime.configuration.settings` 声明的运行设置，经环境变量（`.env` / Compose `env_file`）注入；默认值见 `internal/catalog/default_catalog.json`。
+本文说明把 Plinth 暴露到本机之外时必须做的配置，以及 1.0 安全基线（内部存档 #256）各缺口的处理或接受理由。所有设置都是 Product Schema `application.runtime.configuration.settings` 声明的运行设置，经环境变量（`.env` / Compose `env_file`）注入；默认值见 `internal/catalog/default_catalog.json`。
 
 ## 1. 部署前必做
 

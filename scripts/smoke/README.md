@@ -483,4 +483,4 @@ candidate, meta, policy, evidence file and the matrix, and rejects policies that
 
 独立候选资格使用 `fault:"standalone"`，不填 `plan_id`，`step_index` 为 0。先通过正常 API 准备输入，再把 owner/session、capability、Offering ID/revision、PreparedInput ID/hash、至少16字符的幂等键和 `max_provider_starts:1` 写入私有清单，然后批准 Grant 并以同一幂等键提交。额度按 owner+幂等键持久保存，改场景名称或 fault 不能重置；结果未知不重新提交。控制器经只读 `TaskAdmissionStore` 核对任务实际批准的 PreparedInput ID，再检查冻结输入，并约束 Start、Observe 和 Tripo 私有准备恢复的 wire 输入，保留 Adapter 的输入资产预检。每个新的公开步骤须有自己未消费的意图和批准，不能复用已消费身份。私有 Catalog 可以仅开启本次候选，默认 Catalog 保持禁用；所有必需资产两次鉴权下载、大小/摘要/格式、匿名401和跨用户404仍必须逐项核验，资格通过后还需主测试栈同版正常 UI/Agent 回归。测试装配用通用包装器包住没有专用包装的 Provider（如 Hyper3D、本地转换），可选的 `ProviderInputValidator` 等端口因此不可见：隔离进程里的格式清单可能把实际会被转换 profile 拒绝的 glTF 显示为“可转换”，且任何不在清单场景里的 Start（包括免费的本地转换）都会被拒绝。格式清单与补齐格式要在正常二进制的严格 session 副本上核对（#187，2026-10-21）。
 
-离线回归：`python3 scripts/smoke/test-acceptance-seed.py`、`go test ./internal/app -run '^TestAcceptance'`。它们检查隔离与恢复合同，不代替真实 Provider、实际字节、发布门禁或读屏验收。每轮结果写 GitLab Issue/MR，本文不作为当前进度台账。
+离线回归：`python3 scripts/smoke/test-acceptance-seed.py`、`go test ./internal/app -run '^TestAcceptance'`。它们检查隔离与恢复合同，不代替真实 Provider、实际字节、发布门禁或读屏验收。每轮结果写 GitHub Issue/PR，本文不作为当前进度台账。
