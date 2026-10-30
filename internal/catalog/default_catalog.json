@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-10-30.issue11-mode-switch-wording.1",
+    "revision": "2026-10-30.issue16-canvas-snapshot-vision.1",
     "terminology": {
       "user_facing": [
         {
@@ -4985,6 +4985,7 @@
         "text_part_kind": "text",
         "image_part_kind": "image_url",
         "image_detail": "low",
+        "canvas_image_detail": "high",
         "user_image_label_template": "\n[历史图片 {index}：用户上传]",
         "canvas_input_source": "canvas",
         "ai_image_label_template": "\n[历史图片 {index}：AI 生成]",
