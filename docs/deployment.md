@@ -120,6 +120,8 @@
 
 `formal-test` 的 `production/runtime.env`（用户 2026-10-20 决定）：整份复制 `dev-test` 的 `runtime.env`（含会话密钥、管理员初始化与 Meshy、Tripo、Hyper3D/Rodin 等全部 Provider Key），只改两类值——中转 Key 改为用户提供的中转 Key，`PUBLIC_BASE_URL`/`NEXT_PUBLIC_APP_URL` 改为该环境的 `base_url`。模型中转地址保持原值：中转按域名路由，其域名已解析到 `formal-test` 主机上的中转，改成字面 IP 会被反代拒绝。不重新生成密钥或管理员。服务器之间直接复制（例如 `scp -3`），不经本地落盘、不回显值，权限 `0600`。修改运行配置后只重建本栈的 `art-ai-go` 服务。
 
+运行模式由 Compose 变量 `GO_APP_ENV` 决定：`docker-compose.go-production.yml` 写的是 `APP_ENV: ${GO_APP_ENV:-production}`，会覆盖运行环境文件里的 `APP_ENV`。`dev-test` 的运行环境文件设 `GO_APP_ENV='test'`；`formal-test` 已接入 HTTPS 域名（2026-10-30，#2），`APP_ENV` 与 `GO_APP_ENV` 都设为 `production`。只改 `APP_ENV` 不生效。生产模式启动即校验：拒绝 `AUTH_MODE=development`、`DEV_MOCK_AUTH`、空 `SESSION_SECRET` 与非 HTTPS 的 `PUBLIC_BASE_URL`，并要求持久会话存储。HTTPS 下会话 Cookie 带 `Secure`，冒烟的 `base_url` 必须是 HTTPS 地址，否则登录后被重定向回登录页。
+
 中转按来源 IP 放行。容器访问同机中转时来源是 Compose 项目网络中的容器地址，因此 `formal-test` 用 `extra_compose_file` 固定项目网络子网与容器地址，供中转放行；是否放行及放行范围由用户在中转侧决定。改变网络配置后须对本项目执行一次 `down`/`up` 让网络按新配置重建（只操作本项目）。
 
 冒烟（`smoke` 从目标环境的 `runtime.env` 读取管理员登录，并设置 `BASE`、`EXPECT_SHA`（容器 OCI revision）`RELEASE_CONTAINER` 与 `RELEASE_ENV`（环境名，验收脚本据此读取同一部署的日志）；不打印密码）：
@@ -201,7 +203,7 @@ RECOVERY
 
 ## 8. 未定事项
 
-待用户决定：中转是否放行 `formal-test` 项目网络的固定来源地址（未放行前该环境的 Agent 对话请求被中转以来源 IP 拒绝）；`formal-test` 的域名/HTTPS 接入（共享 Nginx）及之后是否改为生产运行模式（要求 HTTPS 的 `PUBLIC_BASE_URL`）与 Meshy Webhook；去背景等跨主机依赖是否在 `formal-test` 主机另行部署；`dev-test` 验收通过后是否自动晋级。
+待用户决定：中转是否放行 `formal-test` 项目网络的固定来源地址（未放行前该环境的 Agent 对话请求被中转以来源 IP 拒绝）；`formal-test` 的 Meshy Webhook；去背景等跨主机依赖是否在 `formal-test` 主机另行部署；`dev-test` 验收通过后是否自动晋级。
 
 ## 9. dev-test 栈概况
 
