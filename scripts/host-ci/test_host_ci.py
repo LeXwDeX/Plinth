@@ -29,6 +29,8 @@ def load(name):
 
 run = load('run')
 host_run = load('host_run')
+DEFAULT_MEMORY_GIB = host_run.DEFAULTS['memory_gib']
+DEFAULT_MIN_MEM_GIB = host_run.DEFAULTS['min_mem_gib']
 
 
 class ToolchainHash(unittest.TestCase):
@@ -100,6 +102,18 @@ class Limits(unittest.TestCase):
         limits = run.resolve_limits(self.args(min_mem_gib=18), {'min_mem_gib': 20, 'timeout_min': 30})
         self.assertEqual((limits['min_mem_gib'], limits['timeout_min'], limits['min_disk_gib']), (18, 30, 10))
 
+    def test_slots_and_memory_must_be_whole_numbers(self):
+        for key in ('slots', 'memory_gib'):
+            with self.subTest(key), self.assertRaises(run.UsageError):
+                run.resolve_limits(self.args(), {key: 2.5})
+        self.assertEqual(run.resolve_limits(self.args(slots=3), {'slots': 1})['slots'], 3)
+        self.assertEqual(run.resolve_limits(self.args(), {'slots': 4})['slots'], 4)
+
+    def test_slots_are_between_one_and_four_and_parallel_runs_are_opt_in(self):
+        self.assertEqual((run.LIMIT_DEFAULTS['slots'], run.LIMIT_DEFAULTS['memory_gib'], run.LIMIT_DEFAULTS['min_mem_gib']), (1, DEFAULT_MEMORY_GIB, DEFAULT_MIN_MEM_GIB))
+        for slots in range(1, host_run.MAX_SLOTS + 1):
+            self.assertEqual(host_run.limit_problems(argparse.Namespace(**{**host_run.DEFAULTS, 'slots': slots})), [])
+
     def test_non_numbers_in_the_environment_file_are_refused(self):
         for bad in ('15', True, None, [15], float('nan')):
             with self.subTest(bad), self.assertRaises(run.UsageError):
@@ -119,14 +133,17 @@ class Limits(unittest.TestCase):
             return host_run.limit_problems(argparse.Namespace(**values))
         self.assertEqual(problems(), [])
         self.assertEqual(problems(min_mem_gib=13, memory_gib=12), [])
-        for given in ({'min_mem_gib': 12}, {'min_mem_gib': 0}, {'min_disk_gib': 0}, {'timeout_min': 0},
-                      {'timeout_min': 24 * 60 + 1}, {'cpus': 0}, {'memory_gib': 0}, {'build_timeout_min': 0}):
+        self.assertEqual(problems(min_mem_floor_gib=DEFAULT_MIN_MEM_GIB), [])  # up to min-mem-gib is allowed
+        for given in ({'min_mem_gib': 8}, {'min_mem_gib': 0}, {'min_disk_gib': 0}, {'timeout_min': 0},
+                      {'timeout_min': 24 * 60 + 1}, {'cpus': 0}, {'memory_gib': 0}, {'build_timeout_min': 0},
+                      {'slots': 0}, {'slots': host_run.MAX_SLOTS + 1}, {'slots': -1},
+                      {'min_mem_floor_gib': 0}, {'min_mem_floor_gib': DEFAULT_MIN_MEM_GIB + 0.5}):
             with self.subTest(given):
                 self.assertTrue(problems(**given))
 
 
 def preflight_args(**given):
-    return argparse.Namespace(**{**host_run.DEFAULTS, **given})
+    return argparse.Namespace(**{**host_run.DEFAULTS, 'run_id': 'r0', 'slot': 0, **given})
 
 
 def fake_meminfo(available_gib, swap_total_gib=8, swap_free_gib=0.2):
@@ -147,14 +164,53 @@ class Preflight(unittest.TestCase):
         self.assertEqual(self.run_preflight(fake_meminfo(16.3))['problems'], [])
 
     def test_memory_just_under_the_threshold_blocks_and_just_over_passes(self):
-        self.assertEqual(self.run_preflight(fake_meminfo(12.99))['problems'], ['available memory'])
-        self.assertEqual(self.run_preflight(fake_meminfo(13.0))['problems'], [])
+        self.assertEqual(self.run_preflight(fake_meminfo(DEFAULT_MIN_MEM_GIB - 0.01))['problems'], ['available memory'])
+        self.assertEqual(self.run_preflight(fake_meminfo(DEFAULT_MIN_MEM_GIB))['problems'], [])
 
     def test_memory_threshold_is_configurable(self):
         self.assertEqual(self.run_preflight(fake_meminfo(12.5), min_mem_gib=12.2)['problems'], [])
         facts = self.run_preflight(fake_meminfo(14), min_mem_gib=20)
         self.assertEqual(facts['problems'], ['available memory'])
         self.assertEqual(facts['required']['mem_available_bytes'], 20 * host_run.GIB)
+
+    def run_with_others(self, available_gib, containers, usage, **limits):
+        """Preflight against fake running host-ci containers: {id: (run id, memory limit GiB)} and {id: usage text}."""
+        def fake_docker(*args, **kwargs):
+            if args[0] == 'info':
+                out = '/var/lib/docker\n'
+            elif args[0] == 'ps':
+                out = '\n'.join(containers) + '\n'
+            elif args[0] == 'inspect':
+                out = json.dumps([{'Id': short + 'f' * 52, 'Config': {'Labels': {'plinth.host-ci.run': run_id, 'plinth.host-ci.slot': '1'}},
+                                   'HostConfig': {'Memory': int(limit * host_run.GIB)}} for short, (run_id, limit) in containers.items()])
+            elif args[0] == 'stats':
+                out = '\n'.join(f'{short} {text} / 8GiB' for short, text in usage.items()) + '\n'
+            else:
+                out = ''
+            return subprocess.CompletedProcess(args, 0, stdout=out, stderr='')
+        with mock.patch.object(host_run, 'meminfo', return_value=fake_meminfo(available_gib)), mock.patch.object(host_run, 'say'), \
+                mock.patch.object(host_run, 'docker', fake_docker), mock.patch.object(host_run, 'free_bytes', return_value=100 * host_run.GIB):
+            return host_run.preflight(Path('/ci'), preflight_args(**limits))
+
+    def test_other_runs_remaining_headroom_is_added_to_the_threshold(self):
+        containers = {'aaaaaaaaaaaa': ('other-run', 8)}
+        usage = {'aaaaaaaaaaaa': '3GiB'}  # 5 GiB of its 8 GiB limit can still be claimed
+        required = DEFAULT_MIN_MEM_GIB + 5
+        facts = self.run_with_others(required - 0.1, containers, usage)
+        self.assertEqual(facts['problems'], ['available memory'])
+        self.assertEqual(facts['reserved_for_other_runs_bytes'], 5 * host_run.GIB)
+        self.assertEqual(facts['required']['mem_available_bytes'], required * host_run.GIB)
+        self.assertEqual([(item['container'], item['reserve_bytes']) for item in facts['other_runs']], [('aaaaaaaaaaaa', 5 * host_run.GIB)])
+        self.assertEqual(self.run_with_others(required, containers, usage)['problems'], [])
+
+    def test_a_container_over_its_limit_reserves_nothing_and_an_unreadable_one_reserves_all(self):
+        facts = self.run_with_others(30, {'aaaaaaaaaaaa': ('r1', 8), 'bbbbbbbbbbbb': ('r2', 8)}, {'aaaaaaaaaaaa': '9GiB'})
+        self.assertEqual(facts['reserved_for_other_runs_bytes'], 8 * host_run.GIB)
+
+    def test_our_own_run_and_nothing_running_reserve_nothing(self):
+        facts = self.run_with_others(DEFAULT_MIN_MEM_GIB, {'aaaaaaaaaaaa': ('r0', 8)}, {'aaaaaaaaaaaa': '1GiB'})
+        self.assertEqual((facts['reserved_for_other_runs_bytes'], facts['problems']), (0, []))
+        self.assertEqual(self.run_preflight(fake_meminfo(DEFAULT_MIN_MEM_GIB))['reserved_for_other_runs_bytes'], 0)
 
     def test_each_disk_is_checked_against_its_own_threshold(self):
         self.assertEqual(self.run_preflight(fake_meminfo(20), ci_free_gib=9)['problems'], ['ci disk free bytes'])
@@ -171,16 +227,17 @@ class Preflight(unittest.TestCase):
 class FakeDocker:
     """Records docker calls; `inspect` returns the configured container state."""
 
-    def __init__(self, state, stopped=None):
+    def __init__(self, state, stopped=None, container_id='c' * 64):
         self.calls = []
         self.state = state
         self.stopped = stopped
+        self.container_id = container_id
 
     def __call__(self, *args, check=True, timeout=120, stdin=None):
         self.calls.append(args)
         if args[0] == 'inspect':
-            return subprocess.CompletedProcess(args, 0, stdout=json.dumps([{'State': self.state}]), stderr='')
-        if args[0] == 'stop' and self.stopped is not None:
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps([{'State': self.state, 'Id': self.container_id}]), stderr='')
+        if args[0] in ('stop', 'kill') and self.stopped is not None:
             self.stopped.set()
         return subprocess.CompletedProcess(args, 0, stdout='', stderr='')
 
@@ -204,14 +261,14 @@ class FakeChild:
 class AttemptOutcomes(unittest.TestCase):
     """OOM and timeout regressions for #97's open item: run_attempt with stubbed Docker."""
 
-    def attempt(self, state, entry_result=None, timeout_min=100, waits_for_stop=False):
+    def attempt(self, state, entry_result=None, timeout_min=100, waits_for_stop=False, peak=None, host_available_gib=16, **limits):
         stopped = threading.Event() if waits_for_stop else None
         fake = FakeDocker(state, stopped)
         with tempfile.TemporaryDirectory() as base:
             root = Path(base)
             run_dir = root / 'run' / 'r1'
             run_dir.mkdir(parents=True)
-            args = preflight_args(run_id='r1', sha='a' * 40, tree='b' * 40, timeout_min=timeout_min)
+            args = preflight_args(run_id='r1', sha='a' * 40, tree='b' * 40, timeout_min=timeout_min, **limits)
             ctx = {'args': args, 'root': root, 'run_dir': run_dir, 'containers': [], 'image': {'id': 'sha256:img'}}
             original_mkdir = Path.mkdir
 
@@ -223,6 +280,8 @@ class AttemptOutcomes(unittest.TestCase):
             with mock.patch.object(host_run, 'docker', fake), \
                     mock.patch.object(host_run.os, 'chown'), \
                     mock.patch.object(host_run, 'configuration_problems', return_value=[]), \
+                    mock.patch.object(host_run, 'read_memory_peak', return_value=peak), \
+                    mock.patch.object(host_run, 'meminfo', return_value=fake_meminfo(host_available_gib)), \
                     mock.patch.object(Path, 'mkdir', mkdir_then_result), \
                     mock.patch.object(host_run.subprocess, 'Popen', return_value=FakeChild(stopped)), \
                     mock.patch.object(host_run, 'say'), mock.patch.object(host_run.sys, 'stdout', io.TextIOWrapper(io.BytesIO())):
@@ -261,6 +320,63 @@ class AttemptOutcomes(unittest.TestCase):
     def test_no_timeout_stop_is_issued_when_the_run_ends_in_time(self):
         _, _, fake = self.attempt({'ExitCode': 0, 'OOMKilled': False}, self.PASSED)
         self.assertEqual([call for call in fake.calls if call[0] == 'stop'], [])
+
+    def test_the_host_sampled_memory_peak_is_recorded_and_the_larger_of_host_and_entry_wins(self):
+        record, _, _ = self.attempt({'ExitCode': 0, 'OOMKilled': False}, self.PASSED, peak=5 * host_run.GIB)
+        self.assertEqual(record['memory_peak_bytes'], 5 * host_run.GIB)
+        entry = {**self.PASSED, 'cgroup': {'oom_kill': 0, 'memory_peak_bytes': 6 * host_run.GIB}}
+        record, _, _ = self.attempt({'ExitCode': 0, 'OOMKilled': False}, entry, peak=5 * host_run.GIB)
+        self.assertEqual(record['memory_peak_bytes'], 6 * host_run.GIB)
+
+    def test_an_unreadable_cgroup_leaves_the_peak_null(self):
+        record, _, _ = self.attempt({'ExitCode': 0, 'OOMKilled': False}, self.PASSED, peak=None)
+        self.assertIsNone(record['memory_peak_bytes'])
+
+    def test_the_lowest_host_memory_seen_during_the_run_is_recorded(self):
+        record, _, fake = self.attempt({'ExitCode': 0, 'OOMKilled': False}, self.PASSED, host_available_gib=7.5)
+        self.assertEqual(record['mem_available_min_bytes'], int(7.5 * host_run.GIB))
+        self.assertNotIn('host_memory_low', record)
+        self.assertEqual([call for call in fake.calls if call[0] == 'kill'], [])
+
+    def test_host_memory_under_the_floor_kills_only_our_container_and_ends_with_host_memory_low(self):
+        record, retry, fake = self.attempt({'ExitCode': 137, 'OOMKilled': False}, waits_for_stop=True, host_available_gib=1.5)
+        self.assertEqual([call for call in fake.calls if call[0] == 'kill'], [('kill', 'plinth-ci-r1-a1')])
+        self.assertEqual(record['status'], 'host_memory_low')
+        self.assertEqual(record['host_memory_low'], {'observed_mem_available_bytes': int(1.5 * host_run.GIB), 'floor_bytes': 2 * host_run.GIB,
+                                                      'container_killed': True})
+        self.assertEqual(record['mem_available_min_bytes'], int(1.5 * host_run.GIB))
+        self.assertFalse(retry)
+        self.assertTrue(any(reason.startswith('host memory low: MemAvailable 1.50 GiB') for reason in host_run.verdict(record)))
+
+    def test_the_floor_is_configurable_and_exactly_at_the_floor_is_not_low(self):
+        record, _, fake = self.attempt({'ExitCode': 0, 'OOMKilled': False}, self.PASSED, host_available_gib=3, min_mem_floor_gib=3)
+        self.assertEqual((record['status'], [c for c in fake.calls if c[0] == 'kill']), ('passed', []))
+        record, _, _ = self.attempt({'ExitCode': 137, 'OOMKilled': False}, waits_for_stop=True, host_available_gib=3, min_mem_floor_gib=3.5)
+        self.assertEqual(record['status'], 'host_memory_low')
+
+    def test_the_guard_retries_the_kill_until_it_succeeds_and_tolerates_unreadable_meminfo(self):
+        stop = threading.Event()
+        readings = iter([OSError('gone'), fake_meminfo(1), fake_meminfo(1)])
+        kills = iter([1, 0])
+        def fake_meminfo_call():
+            value = next(readings)
+            if isinstance(value, Exception):
+                raise value
+            return value
+        def fake_docker(*args, **kwargs):
+            return subprocess.CompletedProcess(args, next(kills), stdout='', stderr='')
+        state = {'min': None}
+        def wait(_):
+            return state.get('killed') is True
+        with mock.patch.object(host_run, 'meminfo', fake_meminfo_call), mock.patch.object(host_run, 'docker', fake_docker), mock.patch.object(host_run, 'say'), \
+                mock.patch.object(stop, 'wait', wait):
+            host_run.guard_host_memory(stop, 2 * host_run.GIB, 'c', state)
+        self.assertEqual((state['killed'], state['min'], state['low']), (True, host_run.GIB, host_run.GIB))
+
+    def test_container_is_created_with_the_slot_label(self):
+        command = host_run.container_command('n', 'r1', 'sha256:img', Path('/b'), Path('/a'), preflight_args(slot=1), 'a' * 40, 'b' * 40)
+        self.assertIn('plinth.host-ci.slot=1', command)
+        self.assertEqual(command[command.index('--memory') + 1], f'{DEFAULT_MEMORY_GIB}g')
 
     def test_only_a_staging_identity_mismatch_is_retried(self):
         _, retry, _ = self.attempt({'ExitCode': 20, 'OOMKilled': False}, {'status': 'stage_mismatch'})
@@ -314,7 +430,7 @@ class WorkflowReplay(unittest.TestCase):
         args = preflight_args(act_cache=Path('/ci/act-cache'), runner_image='img@sha256:' + '0' * 64, runner_name='plinth-ci-act:abc', act_job='', run_id='r1')
         command = host_run.act_command(Path('/ci/tools/act'), Path('/ci/run/r1/src'), 'push', Path('/ci/run/r1/e.json'), args)
         options = command[command.index('--container-options') + 1]
-        for fragment in ('--cpus 4', '--memory 12g', '--memory-swap 12g', 'no-new-privileges', host_run.LABEL):
+        for fragment in ('--cpus 4', f'--memory {DEFAULT_MEMORY_GIB}g', f'--memory-swap {DEFAULT_MEMORY_GIB}g', 'no-new-privileges', host_run.LABEL, '--label plinth.host-ci.slot=0'):
             self.assertIn(fragment, options)
         self.assertIn('ubuntu-latest=plinth-ci-act:abc', command)
         self.assertIn('--pull=false', command)  # the derived image exists only locally; act must not try to pull it
@@ -394,16 +510,159 @@ class WorkflowReplay(unittest.TestCase):
         self.assertIn('state=failure', calls[-1])
 
 
+class MemoryPeak(unittest.TestCase):
+    def test_the_peak_is_read_from_the_container_cgroup_and_absence_is_tolerated(self):
+        container_id = 'd' * 64
+        with tempfile.TemporaryDirectory() as base:
+            scope = Path(base) / 'system.slice' / f'docker-{container_id}.scope'
+            scope.mkdir(parents=True)
+            with mock.patch.object(host_run, 'CGROUP_ROOT', Path(base)):
+                self.assertIsNone(host_run.read_memory_peak(container_id))
+                (scope / 'memory.peak').write_text('4402341478\n')
+                self.assertEqual(host_run.read_memory_peak(container_id), 4402341478)
+                (scope / 'memory.peak').write_text('max\n')
+                self.assertIsNone(host_run.read_memory_peak(container_id))
+        self.assertIsNone(host_run.read_memory_peak(None))
+        self.assertIsNone(host_run.read_memory_peak('../../etc'))
+
+    def test_sampling_keeps_the_highest_value_and_survives_a_vanishing_cgroup(self):
+        stop = threading.Event()
+        readings = iter([1, 5, None, 3])
+        def fake_read(_):
+            try:
+                return next(readings)
+            except StopIteration:
+                stop.set()
+                return None
+        with mock.patch.object(host_run, 'read_memory_peak', fake_read), mock.patch.object(host_run, 'PEAK_POLL_SECONDS', 0):
+            self.assertEqual(host_run.sample_memory_peak(stop, 'x'), 5)
+
+
 class Concurrency(unittest.TestCase):
     def test_a_second_run_cannot_take_the_lock_until_the_first_releases_it(self):
         with tempfile.TemporaryDirectory() as base:
             first = host_run.acquire_lock(Path(base))
             self.assertIsNotNone(first)
             self.assertIsNone(host_run.acquire_lock(Path(base)))
-            first.close()
+            first[0].close()
             again = host_run.acquire_lock(Path(base))
             self.assertIsNotNone(again)
-            again.close()
+            again[0].close()
+
+    def test_slots_are_mutually_exclusive_and_slot_zero_keeps_the_historic_lock_file(self):
+        with tempfile.TemporaryDirectory() as base:
+            root = Path(base)
+            first = host_run.acquire_lock(root, 2)
+            second = host_run.acquire_lock(root, 2)
+            self.assertEqual((first[1], second[1]), (0, 1))
+            self.assertIsNone(host_run.acquire_lock(root, 2))
+            self.assertTrue((root / '.lock').exists() and (root / '.lock-1').exists())
+            self.assertFalse((root / '.lock-0').exists())
+            # A client from before slots only knows .lock: it is excluded while slot 0 is held, free once released.
+            self.assertIsNone(host_run.acquire_lock(root, 1))
+            first[0].close()
+            reopened = host_run.acquire_lock(root, 1)
+            self.assertEqual(reopened[1], 0)
+            reopened[0].close()
+            second[0].close()
+
+    def test_a_smaller_slot_count_only_uses_its_own_slots(self):
+        with tempfile.TemporaryDirectory() as base:
+            held = host_run.acquire_lock(Path(base), 1)
+            self.assertIsNone(host_run.acquire_lock(Path(base), 1))
+            held[0].close()
+
+    def test_the_maintenance_lock_serializes_and_times_out_with_a_clear_status(self):
+        with tempfile.TemporaryDirectory() as base:
+            root = Path(base)
+            with host_run.maintenance_lock(root, 1):
+                with mock.patch.object(host_run, 'MAINT_POLL_SECONDS', 0.01), self.assertRaises(host_run.Stop) as stop, \
+                        host_run.maintenance_lock(root, 0.05):
+                    pass
+                self.assertEqual((stop.exception.status, stop.exception.code), ('maintenance_lock_timeout', 1))
+            with host_run.maintenance_lock(root, 1):
+                pass
+
+
+class SweepScope(unittest.TestCase):
+    """Containers: (id, slot label); an empty label is a leftover of a client older than slots."""
+    CONTAINERS = [('aaaaaaaaaaaa', ''), ('bbbbbbbbbbbb', '0'), ('cccccccccccc', '1'), ('dddddddddddd', '2')]
+
+    def sweep(self, slot, root=None):
+        removed = []
+        def fake_docker(*args, **kwargs):
+            if args[0] == 'ps':
+                rows = '\n'.join(f'{cid} {label}'.rstrip() for cid, label in self.CONTAINERS) + '\n'
+                return subprocess.CompletedProcess(args, 0, stdout=rows, stderr='')
+            if args[0] == 'rm':
+                removed.append(args[-1])
+            return subprocess.CompletedProcess(args, 0, stdout='', stderr='')
+        with tempfile.TemporaryDirectory() as base, mock.patch.object(host_run, 'docker', fake_docker), mock.patch.object(host_run, 'say'):
+            host_run.sweep(Path(base), 'own', slot)
+        return sorted(removed)
+
+    def test_slot_one_removes_only_its_own_containers(self):
+        self.assertEqual(self.sweep(1), ['cccccccccccc'])
+        self.assertEqual(self.sweep(2), ['dddddddddddd'])
+
+    def test_slot_zero_also_removes_unslotted_legacy_containers(self):
+        self.assertEqual(self.sweep(0), ['aaaaaaaaaaaa', 'bbbbbbbbbbbb'])
+
+    def test_the_listing_asks_only_for_labelled_containers(self):
+        seen = []
+        def fake_docker(*args, **kwargs):
+            seen.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout='', stderr='')
+        with mock.patch.object(host_run, 'docker', fake_docker):
+            host_run.slot_containers(1)
+        self.assertIn(f'label={host_run.LABEL}', seen[0])
+
+    def test_stale_run_directories_are_removed_but_never_the_own_or_a_fresh_one(self):
+        with tempfile.TemporaryDirectory() as base:
+            root = Path(base)
+            names = {'old': '20200101T000000Z-' + 'a' * 12 + '-0001', 'fresh': '20200101T000000Z-' + 'b' * 12 + '-0002',
+                     'own': '20200101T000000Z-' + 'c' * 12 + '-0003'}
+            for name in names.values():
+                (root / 'run' / name).mkdir(parents=True)
+            for key in ('old', 'own'):
+                os.utime(root / 'run' / names[key], (1, 1))
+            with mock.patch.object(host_run, 'docker', return_value=subprocess.CompletedProcess([], 0, stdout='', stderr='')), mock.patch.object(host_run, 'say'):
+                host_run.sweep(root, names['own'], 1)
+            self.assertEqual(sorted(p.name for p in (root / 'run').iterdir()), sorted([names['fresh'], names['own']]))
+
+
+class Retention(unittest.TestCase):
+    def test_results_retention_keeps_the_newest_and_runs_still_in_progress(self):
+        with tempfile.TemporaryDirectory() as base:
+            root = Path(base)
+            names = [f'2026010{i}T000000Z-' + 'a' * 12 + f'-000{i}' for i in range(1, 9)]
+            with mock.patch.object(host_run, 'RESULTS_KEPT', 3):
+                for name in names:
+                    (root / 'results' / name).mkdir(parents=True)
+                    if name != names[1]:  # the second-oldest run has not written result.json yet and is fresh
+                        (root / 'results' / name / 'result.json').write_text('{}')
+                host_run.trim_results(root, names[-1])
+            self.assertEqual(sorted(p.name for p in (root / 'results').iterdir()), sorted([names[1]] + names[-3:]))
+
+    def test_retention_never_forces_and_skips_images_other_runs_have_marked(self):
+        calls = []
+        created = {'plinth-ci:' + c * 12: f'2026-01-0{i}' for i, c in enumerate('abcd', 1)}
+        def fake_docker(*args, **kwargs):
+            calls.append(args)
+            if args[:2] == ('image', 'ls'):
+                return subprocess.CompletedProcess(args, 0, stdout='\n'.join(created) + '\n', stderr='')
+            if args[:2] == ('image', 'inspect'):
+                return subprocess.CompletedProcess(args, 0, stdout=created[args[-1]], stderr='')
+            return subprocess.CompletedProcess(args, 0, stdout='', stderr='')
+        with tempfile.TemporaryDirectory() as base:
+            marked = Path(base) / 'run' / ('20260101T000000Z-' + 'e' * 12 + '-0001')
+            marked.mkdir(parents=True)
+            (marked / host_run.IMAGE_IN_USE).write_text('plinth-ci:' + 'a' * 12)
+            with mock.patch.object(host_run, 'docker', fake_docker), mock.patch.object(host_run, 'say'):
+                removed = host_run.retain_images('plinth-ci:' + 'd' * 12, 2, Path(base))
+        self.assertEqual(removed, ['plinth-ci:' + 'b' * 12])  # keep d (current) + c (newest other); a is marked by a live run
+        removals = [call for call in calls if call[0] == 'rmi']
+        self.assertEqual(removals, [('rmi', 'plinth-ci:' + 'b' * 12)])  # plain rmi: Docker refuses an image a container uses
 
 
 class HostSide(unittest.TestCase):

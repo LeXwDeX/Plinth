@@ -4,17 +4,22 @@
 Uploaded and started by scripts/host-ci/run.py; it is not meant to be run by hand.
 It needs only Python 3, Docker and flock-style locking on the host, and it knows
 nothing about the release roots of other stacks. Everything it creates lives under
-the CI root it is given (<root>/run/<id>, <root>/results/<id>, <root>/.lock), plus
-containers labelled plinth.host-ci=1 and images named plinth-ci:<12 hex digits>.
+the CI root it is given (<root>/run/<id>, <root>/results/<id>, the slot locks <root>/.lock and
+<root>/.lock-<k>, <root>/.maint.lock), plus containers labelled plinth.host-ci=1 (and
+plinth.host-ci.slot=<k>) and images named plinth-ci:<12 hex digits>. Up to `--slots` runs go in
+parallel, one per slot lock; image builds, image retention and results retention serialize on
+the short maintenance lock.
 
-Two modes share the lock, the preflight, the sweep and the result layout: `gates` (default) runs
+Two modes share the slot lock, the preflight, the sweep and the result layout: `gates` (default) runs
 scripts/verify-local.py in the offline image; `workflows` replays .github/workflows with a pinned
 nektos/act in throwaway containers (not a GitHub runner; dev_test.md section 2, "Host CI").
 
 Exit status: 0 gates passed; 1 gates failed or the run was not clean; 70 the host
-failed the resource preflight; 75 another run holds the lock.
+failed the resource preflight or MemAvailable fell below the runtime floor and the container was
+stopped (host_memory_low); 75 every slot is held by another run.
 """
 import argparse
+import contextlib
 import fcntl
 import hashlib
 import json
@@ -31,6 +36,12 @@ import time
 import urllib.request
 
 LABEL = 'plinth.host-ci=1'
+SLOT_LABEL_KEY = 'plinth.host-ci.slot'
+MAINT_LOCK = '.maint.lock'
+MAINT_POLL_SECONDS = 1
+PEAK_POLL_SECONDS = 2
+MEM_GUARD_POLL_SECONDS = 5
+CGROUP_ROOT = Path('/sys/fs/cgroup')
 CONTAINER_USER = 10001
 IMAGE_TAG = re.compile(r'[0-9a-f]{12}')
 RUN_ID = re.compile(r'\d{8}T\d{6}Z-[0-9a-f]{12}-[0-9a-f]{4}')
@@ -39,13 +50,15 @@ STALE_RUN_SECONDS = 24 * 3600
 RESULTS_KEPT = 10
 # Defaults of every tunable limit (dev_test.md section 2, "Host CI"). scripts/host-ci/run.py passes
 # all of them explicitly, so these only matter for a hand run; test_host_ci.py keeps both copies equal.
-DEFAULTS = {'cpus': 4, 'memory_gib': 12, 'min_mem_gib': 13, 'min_disk_gib': 10, 'timeout_min': 100, 'build_timeout_min': 40}
+DEFAULTS = {'cpus': 4, 'memory_gib': 10, 'min_mem_gib': 11, 'min_disk_gib': 10, 'timeout_min': 100, 'build_timeout_min': 40, 'slots': 1, 'min_mem_floor_gib': 2}
 # MemAvailable must exceed the container's memory limit by at least this much (host and other
 # stacks keep running while the container may use its whole limit). Smaller thresholds are refused.
+# The preflight adds the headroom other host-ci containers may still claim on top of the threshold.
 MIN_MEMORY_MARGIN_GIB = 1
 # Host swap with less than this fraction free is reported as a warning; it does not block the run
 # (the container has no swap, and MemAvailable does not count swap).
 SWAP_WARN_FREE_FRACTION = 0.10
+MAX_SLOTS = 4
 
 
 class Stop(Exception):
@@ -89,14 +102,45 @@ def free_bytes(path):
     return stat.f_bavail * stat.f_frsize
 
 
-def acquire_lock(root):
-    handle = open(root / '.lock', 'a')
+def slot_label(slot):
+    return f'{SLOT_LABEL_KEY}={slot}'
+
+
+def acquire_lock(root, slots=1):
+    """(handle, slot) of the first free run slot, or None when all `slots` are held.
+
+    Slot 0 keeps the historic <root>/.lock name, so a client from before slots existed still
+    excludes slot 0; slot k > 0 uses <root>/.lock-<k>. The lock lives as long as the handle."""
+    for slot in range(slots):
+        handle = open(root / ('.lock' if slot == 0 else f'.lock-{slot}'), 'a')
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            handle.close()
+            continue
+        return handle, slot
+    return None
+
+
+@contextlib.contextmanager
+def maintenance_lock(root, timeout_s):
+    """Short blocking lock for work that changes shared host state (image builds and retention,
+    the act download, results retention). Never held across a gate run."""
+    handle = open(root / MAINT_LOCK, 'a')
+    deadline = time.monotonic() + timeout_s
+    while True:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                handle.close()
+                raise Stop('maintenance_lock_timeout', 1) from None
+            time.sleep(MAINT_POLL_SECONDS)
     try:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+        yield
+    finally:
         handle.close()
-        return None
-    return handle
 
 
 def remove_tree(path, base):
@@ -107,13 +151,27 @@ def remove_tree(path, base):
     shutil.rmtree(path, ignore_errors=True)
 
 
-def sweep(root, own_id):
-    """Under the lock nothing of ours is running: clear leftovers of crashed runs."""
-    stale = docker('ps', '-aq', '--filter', f'label={LABEL}', check=False).stdout.split()
-    for container in stale:
-        if re.fullmatch(r'[0-9a-f]{12}', container):
-            say(f'removing leftover container {container}')
-            docker('rm', '-f', container, check=False)
+def slot_containers(slot):
+    """Short ids of labelled containers that belong to `slot`. Slot 0 also owns containers with no
+    slot label: those come from a client older than slots, which only ever ran under the slot 0 lock."""
+    rows = docker('ps', '-a', '--filter', f'label={LABEL}', '--format', '{{.ID}} {{.Label "' + SLOT_LABEL_KEY + '"}}', check=False).stdout.splitlines()
+    owned = []
+    for row in rows:
+        parts = row.split()
+        if not parts or not re.fullmatch(r'[0-9a-f]{12}', parts[0]):
+            continue
+        label = parts[1] if len(parts) > 1 else ''
+        if label == str(slot) or (slot == 0 and not label):
+            owned.append(parts[0])
+    return owned
+
+
+def sweep(root, own_id, slot=0):
+    """Under the slot lock nothing of this slot is running: clear its leftovers of crashed runs.
+    Containers of other slots belong to runs that may be alive and are never touched."""
+    for container in slot_containers(slot):
+        say(f'removing leftover container {container}')
+        docker('rm', '-f', container, check=False)
     runs = root / 'run'
     for entry in runs.iterdir() if runs.is_dir() else []:
         if entry.name != own_id and RUN_ID.fullmatch(entry.name) and time.time() - entry.stat().st_mtime > STALE_RUN_SECONDS:
@@ -128,6 +186,10 @@ def limit_problems(args):
         problems.append('cpus must be between 1 and 64')
     if not 1 <= args.memory_gib <= 256:
         problems.append('memory-gib must be between 1 and 256')
+    if not 1 <= args.min_mem_floor_gib <= args.min_mem_gib:
+        problems.append('min-mem-floor-gib must be between 1 and min-mem-gib')
+    if not 1 <= args.slots <= MAX_SLOTS:
+        problems.append(f'slots must be between 1 and {MAX_SLOTS}')
     if args.min_mem_gib < args.memory_gib + MIN_MEMORY_MARGIN_GIB:
         problems.append(f'min-mem-gib must be at least memory-gib + {MIN_MEMORY_MARGIN_GIB} '
                         f'({args.memory_gib + MIN_MEMORY_MARGIN_GIB} GiB)')
@@ -140,8 +202,40 @@ def limit_problems(args):
     return problems
 
 
+def other_run_reserves(own_run_id):
+    """Headroom the other running host-ci containers may still claim: limit minus current usage.
+
+    A container without a limit contributes nothing (this tool always sets one); one whose usage
+    cannot be read is assumed to be at zero, so its whole limit is reserved."""
+    ids = [i for i in docker('ps', '-q', '--filter', f'label={LABEL}', check=False).stdout.split() if re.fullmatch(r'[0-9a-f]{12}', i)]
+    if not ids:
+        return []
+    try:
+        inspected = json.loads(docker('inspect', *ids, check=False).stdout or '[]')
+    except ValueError:
+        inspected = []
+    stats = docker('stats', '--no-stream', '--format', '{{.ID}} {{.MemUsage}}', *ids, check=False, timeout=30).stdout.splitlines()
+    usage = {}
+    for row in stats:
+        short, _, used = row.partition(' ')
+        usage[short] = parse_size(used.split('/')[0])
+    reserves = []
+    for item in inspected:
+        labels = (item.get('Config') or {}).get('Labels') or {}
+        if labels.get('plinth.host-ci.run') == own_run_id:
+            continue
+        limit = (item.get('HostConfig') or {}).get('Memory') or 0
+        short = str(item.get('Id', ''))[:12]
+        used = usage.get(short, 0)
+        reserves.append({'container': short, 'run': labels.get('plinth.host-ci.run'), 'slot': labels.get(SLOT_LABEL_KEY),
+                         'limit_bytes': limit, 'usage_bytes': used, 'reserve_bytes': max(0, limit - used)})
+    return reserves
+
+
 def preflight(root, args):
     mem = meminfo()
+    others = other_run_reserves(args.run_id)
+    reserved = sum(item['reserve_bytes'] for item in others)
     docker_root = Path(docker('info', '--format', '{{.DockerRootDir}}').stdout.strip())
     facts = {
         'mem_available_bytes': mem['MemAvailable'],
@@ -149,11 +243,15 @@ def preflight(root, args):
         'ci_disk_free_bytes': free_bytes(root),
         'docker_disk_free_bytes': free_bytes(docker_root),
         'load_average': os.getloadavg()[0],
-        'required': {'mem_available_bytes': int(args.min_mem_gib * GIB), 'disk_free_bytes': int(args.min_disk_gib * GIB)},
+        'reserved_for_other_runs_bytes': reserved,
+        'other_runs': others,
+        'required': {'base_mem_available_bytes': int(args.min_mem_gib * GIB),
+                     'mem_available_bytes': int(args.min_mem_gib * GIB) + reserved, 'disk_free_bytes': int(args.min_disk_gib * GIB)},
     }
     say(f"preflight: MemAvailable {facts['mem_available_bytes'] / GIB:.1f} GiB, swap used "
         f"{facts['swap_used_bytes'] / GIB:.1f} GiB, CI disk free {facts['ci_disk_free_bytes'] / GIB:.0f} GiB, "
-        f"Docker disk free {facts['docker_disk_free_bytes'] / GIB:.0f} GiB, load {facts['load_average']:.1f}")
+        f"Docker disk free {facts['docker_disk_free_bytes'] / GIB:.0f} GiB, load {facts['load_average']:.1f}, "
+        f"reserved for {len(others)} other container(s) {reserved / GIB:.1f} GiB, required MemAvailable {facts['required']['mem_available_bytes'] / GIB:.1f} GiB")
     problems = []
     if facts['mem_available_bytes'] < facts['required']['mem_available_bytes']:
         problems.append('available memory')
@@ -258,6 +356,52 @@ def act_list_jobs(act, src, event):
     return parse_job_list(outcome.stdout)
 
 
+def read_memory_peak(container_id):
+    """cgroup v2 memory.peak of a running container in bytes, or None when it cannot be found.
+
+    The cgroup disappears when the container process exits, so this is only readable during the run."""
+    if not container_id or not re.fullmatch(r'[0-9a-f]{64}', container_id):
+        return None
+    for pattern in (f'system.slice/docker-{container_id}.scope', f'docker/{container_id}', f'*/docker-{container_id}.scope',
+                    f'*/*/docker-{container_id}.scope'):
+        for directory in CGROUP_ROOT.glob(pattern):
+            try:
+                return int((directory / 'memory.peak').read_text().strip())
+            except (OSError, ValueError):
+                continue
+    return None
+
+
+def sample_memory_peak(stop, container_id):
+    """Highest memory.peak read until `stop` is set (the counter only grows), or None if never readable."""
+    peak = None
+    while True:
+        value = read_memory_peak(container_id)
+        if value is not None:
+            peak = value if peak is None else max(peak, value)
+        if stop.wait(PEAK_POLL_SECONDS):
+            return peak
+
+
+def guard_host_memory(stop, floor_bytes, container, state):
+    """Runtime guard: while the gate container runs, kill it (and only it) when the host's MemAvailable
+    drops below the floor. Other stacks on the host grow without a limit, so the start-time preflight
+    is not enough. `state` collects the lowest reading ('min') and the first one under the floor ('low')."""
+    while True:
+        try:
+            available = meminfo()['MemAvailable']
+        except (OSError, KeyError, ValueError):
+            available = None
+        if available is not None:
+            state['min'] = available if state.get('min') is None else min(state['min'], available)
+            if available < floor_bytes and not state.get('killed'):
+                state.setdefault('low', available)
+                say(f'host MemAvailable {available / GIB:.2f} GiB is below the {floor_bytes / GIB:g} GiB floor; killing {container}')
+                state['killed'] = docker('kill', container, check=False, timeout=60).returncode == 0
+        if stop.wait(MEM_GUARD_POLL_SECONDS):
+            return
+
+
 def peak_container_memory(stop, label):
     """Highest summed MemUsage of labelled containers seen while `stop` is unset."""
     peak = 0
@@ -292,7 +436,8 @@ def act_command(act, src, event, event_file, args):
                '--container-architecture', 'linux/amd64', '--concurrent-jobs', '1', '--container-daemon-socket', '-', '--rm', '--pull=false',
                '--action-cache-path', str(args.act_cache),
                '--container-options', f'--cpus {args.cpus:g} --memory {args.memory_gib}g --memory-swap {args.memory_gib}g --pids-limit 4096 '
-                                      f'--security-opt no-new-privileges --label {LABEL} --label plinth.host-ci.run={args.run_id}']
+                                      f'--security-opt no-new-privileges --label {LABEL} --label plinth.host-ci.run={args.run_id} '
+                                      f'--label {slot_label(args.slot)}']
     if args.act_job:
         command += ['-j', args.act_job]
     return command
@@ -301,10 +446,12 @@ def act_command(act, src, event, event_file, args):
 def run_workflows(ctx):
     """Replays the workflows for each event; returns a report with per-job results."""
     args, root, run_dir = ctx['args'], ctx['root'], ctx['run_dir']
-    act = ensure_act(root, args.act_version, args.act_sha256)
+    with maintenance_lock(root, args.build_timeout_min * 60):
+        act = ensure_act(root, args.act_version, args.act_sha256)
     version = subprocess.run([str(act), '--version'], capture_output=True, text=True, timeout=30).stdout.strip()
     docker('pull', '-q', args.runner_image, timeout=1800)
-    args.runner_name = ensure_runner_image(args)
+    with maintenance_lock(root, args.build_timeout_min * 60):
+        args.runner_name = ensure_runner_image(args)
     src = checkout_source(run_dir, args)
     evidence = root / 'results' / args.run_id
     volumes_before = set(docker('volume', 'ls', '-q', '--filter', 'name=act-', check=False).stdout.split())
@@ -323,7 +470,7 @@ def run_workflows(ctx):
             say(f'workflows: replaying {event} ({len(expected)} jobs: {", ".join(job_id for job_id, _ in expected)})')
             stop = threading.Event()
             peak = {'value': 0}
-            sampler = threading.Thread(target=lambda: peak.__setitem__('value', peak_container_memory(stop, LABEL)), daemon=True)
+            sampler = threading.Thread(target=lambda: peak.__setitem__('value', peak_container_memory(stop, slot_label(args.slot))), daemon=True)
             sampler.start()
             started = time.monotonic()
             timed_out = False
@@ -350,14 +497,15 @@ def run_workflows(ctx):
                 'jobs': [{'name': job_id, 'job_name': job_name, 'result': results.get(job_name, results.get(job_id, 'not_run'))}
                          for job_id, job_name in expected],
                 'peak_memory_bytes': peak['value']})
-            for name in docker('ps', '-aq', '--filter', f'label={LABEL}', check=False).stdout.split():
-                if re.fullmatch(r'[0-9a-f]{12}', name):
-                    docker('rm', '-f', name, check=False)
+            for name in slot_containers(args.slot):
+                docker('rm', '-f', name, check=False)
             if timed_out or child.returncode == 143:
                 break
     finally:
         for kind, before in (('volume', volumes_before), ('network', networks_before)):
             now = set(docker(kind, 'ls', '-q', '--filter', 'name=act-', check=False).stdout.split())
+            # Another slot's act run may have created some of these; Docker refuses to remove a volume
+            # or network that is still in use, which is what keeps this from hurting a parallel run.
             for item in sorted(now - before):
                 docker(kind, 'rm', item, check=False)
     return report
@@ -383,8 +531,14 @@ def workflows_verdict(report):
     return reasons
 
 
+IMAGE_IN_USE = 'image-in-use'
+
+
 def ensure_image(run_dir, tag, args):
+    """The gates image; the caller holds the maintenance lock. The marker file tells another run's
+    retention that this run needs the image even before its container exists."""
     name = f'plinth-ci:{tag}'
+    (run_dir / IMAGE_IN_USE).write_text(name)
     found = docker('image', 'inspect', '--format', '{{.Id}}', name, check=False)
     if found.returncode == 0:
         say(f'image {name} exists; reusing it')
@@ -404,6 +558,7 @@ def ensure_image(run_dir, tag, args):
 def container_command(name, run_id, image_id, bundle, attempt_dir, args, sha, tree):
     return [
         'create', '--name', name, '--label', LABEL, '--label', f'plinth.host-ci.run={run_id}',
+        '--label', slot_label(args.slot),
         '--init', '--user', f'{CONTAINER_USER}:{CONTAINER_USER}', '--read-only', '--cap-drop', 'ALL',
         '--security-opt', 'no-new-privileges', '--network', 'none',
         '--cpus', str(args.cpus), '--memory', f'{args.memory_gib}g', '--memory-swap', f'{args.memory_gib}g',
@@ -458,6 +613,7 @@ def run_attempt(number, ctx):
     docker(*container_command(name, args.run_id, ctx['image']['id'], run_dir / 'source.bundle', attempt_dir, args,
                               args.sha, args.tree))
     inspected = json.loads(docker('inspect', name).stdout)[0]
+    container_id = inspected.get('Id')
     (evidence / 'created-config.json').write_text(json.dumps(inspected, indent=2, sort_keys=True))
     problems = configuration_problems(inspected, ctx['image']['id'], run_dir / 'source.bundle', attempt_dir, args)
     if problems:
@@ -477,6 +633,13 @@ def run_attempt(number, ctx):
 
     timer = threading.Timer(args.timeout_min * 60, stop_on_timeout)
     timer.start()
+    stop_sampling = threading.Event()
+    sampled = {'peak': None}
+    sampler = threading.Thread(target=lambda: sampled.__setitem__('peak', sample_memory_peak(stop_sampling, container_id)), daemon=True)
+    sampler.start()
+    guard = {'min': None}
+    guard_thread = threading.Thread(target=guard_host_memory, args=(stop_sampling, int(args.min_mem_floor_gib * GIB), name, guard), daemon=True)
+    guard_thread.start()
     try:
         with open(evidence / 'container.log', 'wb') as log:
             child = subprocess.Popen(['docker', 'start', '--attach', name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -487,23 +650,35 @@ def run_attempt(number, ctx):
             child.wait()
     finally:
         timer.cancel()
+        stop_sampling.set()
+        sampler.join(10)
+        guard_thread.join(10)
     seconds = round(time.monotonic() - started, 1)
+    # The container's cgroup (and its memory.peak) is gone once it has exited, so the host's value is
+    # the last one sampled while it ran; the entry script's own end-of-run reading covers the tail.
+    final = read_memory_peak(container_id)
 
     state = json.loads(docker('inspect', name).stdout)[0]['State']
     result = {}
     result_file = attempt_dir / 'out' / 'result.json'
     if result_file.is_file():
         result = json.loads(result_file.read_text())
+    candidates = [value for value in (sampled['peak'], final, (result.get('cgroup') or {}).get('memory_peak_bytes'))
+                  if isinstance(value, int) and not isinstance(value, bool)]
+    memory_peak = max(candidates) if candidates else None
     for produced in (attempt_dir / 'out').iterdir():
         if produced.is_file() and produced.stat().st_size < 64 * 1024 * 1024:
             shutil.copy2(produced, evidence / produced.name)
     record.update(
-        seconds=seconds, timed_out=timed_out, container_exit_code=state['ExitCode'], oom_killed=state['OOMKilled'],
-        docker_error=state.get('Error') or None, entry=result,
+        seconds=seconds, timed_out=timed_out, container_exit_code=state['ExitCode'], oom_killed=state['OOMKilled'], memory_peak_bytes=memory_peak,
+        docker_error=state.get('Error') or None, entry=result, mem_available_min_bytes=guard.get('min'),
         status=result.get('status') or ('timeout' if timed_out else 'no_result'))
+    if guard.get('low') is not None:
+        record.update(status='host_memory_low', host_memory_low={
+            'observed_mem_available_bytes': guard['low'], 'floor_bytes': int(args.min_mem_floor_gib * GIB), 'container_killed': bool(guard.get('killed'))})
     docker('rm', '-f', name, check=False)
     # A stage identity mismatch is the known first-launch flake; anything else is a verdict.
-    return record, state['ExitCode'] == 20 and not timed_out
+    return record, state['ExitCode'] == 20 and not timed_out and guard.get('low') is None
 
 
 def verdict(record):
@@ -517,6 +692,10 @@ def verdict(record):
         reasons.append('cgroup oom_kill counter is not zero')
     if record.get('timed_out'):
         reasons.append('timeout')
+    low = record.get('host_memory_low')
+    if low:
+        reasons.append(f"host memory low: MemAvailable {low['observed_mem_available_bytes'] / GIB:.2f} GiB under the "
+                       f"{low['floor_bytes'] / GIB:g} GiB floor; the container was stopped")
     if entry.get('status') != 'passed':
         reasons.append(f"entry status {entry.get('status') or 'missing'}")
     for gate in entry.get('gates') or []:
@@ -527,8 +706,23 @@ def verdict(record):
     return reasons
 
 
-def retain_images(current, keep):
-    """Keep the image of this run plus the newest others, at most `keep` in all."""
+def images_in_use_by_runs(root):
+    """Images that live runs (other slots included) have marked, before their container exists."""
+    runs = Path(root) / 'run'
+    names = set()
+    for marker in runs.glob(f'*/{IMAGE_IN_USE}') if runs.is_dir() else []:
+        try:
+            names.add(marker.read_text().strip())
+        except OSError:
+            pass
+    return names
+
+
+def retain_images(current, keep, root=None):
+    """Keep the image of this run plus the newest others, at most `keep` in all. Images another live
+    run has marked are kept too, and the plain `docker rmi` (never -f) refuses any image a container
+    still uses. The caller holds the maintenance lock."""
+    protected = images_in_use_by_runs(root) if root is not None else set()
     names = [line for line in docker('image', 'ls', 'plinth-ci', '--format', '{{.Repository}}:{{.Tag}}').stdout.split()
              if re.fullmatch(r'plinth-ci:[0-9a-f]{12}', line)]
     dated = []
@@ -536,7 +730,7 @@ def retain_images(current, keep):
         created = docker('image', 'inspect', '--format', '{{.Created}}', name, check=False).stdout.strip()
         dated.append((created, name))
     dated.sort(reverse=True)
-    others = [name for _, name in dated if name != current]
+    others = [name for _, name in dated if name != current and name not in protected]
     removed = []
     for name in others[max(keep - 1, 0):]:
         outcome = docker('rmi', name, check=False)
@@ -551,7 +745,9 @@ def trim_results(root, own_id):
     results = root / 'results'
     entries = sorted((p for p in results.iterdir() if RUN_ID.fullmatch(p.name) and p.is_dir()), key=lambda p: p.name)
     for entry in entries[:-RESULTS_KEPT]:
-        if entry.name != own_id:
+        # A run still in progress (slots) has no result.json yet; only abandoned ones are trimmed.
+        unfinished = not (entry / 'result.json').exists() and time.time() - entry.stat().st_mtime <= STALE_RUN_SECONDS
+        if entry.name != own_id and not unfinished:
             remove_tree(entry, results)
 
 
@@ -568,6 +764,9 @@ def main():
     parser.add_argument('--min-disk-gib', type=float, default=DEFAULTS['min_disk_gib'], help='preflight: free GiB on the CI directory and Docker root disks')
     parser.add_argument('--timeout-min', type=float, default=DEFAULTS['timeout_min'], help='the container is stopped after this many minutes')
     parser.add_argument('--build-timeout-min', type=float, default=DEFAULTS['build_timeout_min'])
+    parser.add_argument('--slots', type=int, default=DEFAULTS['slots'], help='parallel run slots on this host (1-4)')
+    parser.add_argument('--min-mem-floor-gib', type=float, default=DEFAULTS['min_mem_floor_gib'],
+                        help='runtime guard: the container is killed when host MemAvailable falls below this many GiB')
     parser.add_argument('--keep-images', type=int, default=2)
     parser.add_argument('--mode', choices=('gates', 'workflows'), default='gates')
     parser.add_argument('--act-version', default='')
@@ -614,21 +813,23 @@ def main():
 
     threading.Thread(target=watch_client, daemon=True).start()
     (root / 'results').mkdir(exist_ok=True)
-    lock = acquire_lock(root)
-    if lock is None:
-        print('[host-ci] another gate run holds the lock on this host; try again when it ends', flush=True)
+    held = acquire_lock(root, args.slots)
+    if held is None:
+        print(f'[host-ci] all {args.slots} run slot(s) on this host are busy; try again when one run ends', flush=True)
         remove_tree(run_dir, root / 'run')
         return 75
+    lock, args.slot = held
 
     ctx = {'args': args, 'root': root, 'run_dir': run_dir, 'containers': []}
     summary = {'mode': args.mode, 'run_id': args.run_id, 'sha': args.sha, 'tree': args.tree, 'command': 'GOFLAGS=-p=4 python3 scripts/verify-local.py --race --force',
-               'limits': {'cpus': args.cpus, 'memory_gib': args.memory_gib, 'swap': 'none', 'network': 'none'},
+               'slot': args.slot, 'memory_peak_bytes': None, 'mem_available_min_bytes': None,
+               'limits': {'cpus': args.cpus, 'memory_gib': args.memory_gib, 'slots': args.slots, 'min_mem_floor_gib': args.min_mem_floor_gib, 'swap': 'none', 'network': 'none'},
                'started_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
     code = 1
     began = time.monotonic()
     try:
         (root / 'results' / args.run_id).mkdir(parents=True, exist_ok=True)
-        sweep(root, args.run_id)
+        sweep(root, args.run_id, args.slot)
         summary['preflight'] = facts = preflight(root, args)
         if facts['problems']:
             summary.update(verdict='not_run', reasons=['preflight failed: ' + ', '.join(facts['problems'])])
@@ -640,7 +841,8 @@ def main():
             reasons = workflows_verdict(report)
             summary['command'] = f'act {" ".join(EVENTS)} (pinned {args.act_version}) on .github/workflows'
         else:
-            summary['image'] = ctx['image'] = ensure_image(run_dir, args.image_tag, args)
+            with maintenance_lock(root, args.build_timeout_min * 60):
+                summary['image'] = ctx['image'] = ensure_image(run_dir, args.image_tag, args)
             attempts = []
             for number in (1, 2):
                 record, retry = run_attempt(number, ctx)
@@ -652,7 +854,14 @@ def main():
                 say('identity or configuration mismatch; retrying once with a fresh staging directory (evidence of attempt 1 is kept)')
                 remove_tree(run_dir / f'a{number}', run_dir)
             summary['attempts'] = attempts
+            summary['memory_peak_bytes'] = attempts[-1].get('memory_peak_bytes')
+            summary['mem_available_min_bytes'] = attempts[-1].get('mem_available_min_bytes')
             reasons = verdict(attempts[-1])
+            if attempts[-1].get('status') == 'host_memory_low':
+                # The host, not the commit, ended the run: no pass/fail verdict, so no commit status either.
+                summary.update(verdict='not_run', reasons=reasons)
+                say(next(reason for reason in reasons if reason.startswith('host memory low')))
+                raise Stop('host_memory_low', 70)
         summary.update(verdict='pass' if not reasons else 'fail', reasons=reasons)
         code = 0 if not reasons else 1
     except Stop as stop:
@@ -671,13 +880,15 @@ def main():
         try:
             summary['mem_available_after_bytes'] = meminfo()['MemAvailable']
             if summary.get('image'):
-                summary['images_removed'] = retain_images(summary['image']['name'], args.keep_images)
+                with maintenance_lock(root, args.build_timeout_min * 60):
+                    summary['images_removed'] = retain_images(summary['image']['name'], args.keep_images, root)
         except Exception as error:  # noqa: BLE001 - cleanup problems are warnings
             say(f'warning: cleanup step failed: {error}')
         (root / 'results' / args.run_id / 'result.json').write_text(json.dumps(summary, indent=2, sort_keys=True) + '\n')
         remove_tree(run_dir, root / 'run')
         try:
-            trim_results(root, args.run_id)
+            with maintenance_lock(root, args.build_timeout_min * 60):
+                trim_results(root, args.run_id)
         except Exception as error:  # noqa: BLE001
             say(f'warning: result retention failed: {error}')
     say(f"verdict {summary['verdict'].upper()}" + (f": {'; '.join(summary['reasons'])}" if summary.get('reasons') else ''))
