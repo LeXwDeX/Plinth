@@ -1555,6 +1555,7 @@ func (s *Server) legacyGetTask(
 		)
 		return
 	}
+	s.auditCrossOwnerTaskRead(request, principal, task.ID)
 	response := map[string]any{}
 	if err := json.Unmarshal(task.Input, &response); err != nil {
 		s.writeLegacyError(
@@ -2556,6 +2557,7 @@ func (s *Server) getTask(
 		s.writeDomainError(writer, err)
 		return
 	}
+	s.auditCrossOwnerTaskRead(request, principal, task.ID)
 	response := s.newTaskResponse(requestLocale(request), task)
 	// The summary read model carries no input. The owner's own task is read once more through the
 	// kernel for the prompt and public parameters; another reader (an administrator) gets none.
@@ -2621,6 +2623,7 @@ func (s *Server) listEvents(
 		s.writeDomainError(writer, err)
 		return
 	}
+	s.auditCrossOwnerTaskRead(request, principal, generation.TaskID(request.PathValue("taskID")))
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"events": s.publicEvents(requestLocale(request), events),
 	})

@@ -105,7 +105,7 @@ curl -sS -b cj $B/api/v1/tasks/$TID | jq '{state, assets: [.assets[]?.url]}'
 | `POST` | `/api/v1/tasks/{id}/cancel` | 取消 |
 | `GET` | `/api/v1/tasks/{id}/events` | 增量事件 |
 | `GET` | `/api/v1/tasks/{id}/assets/{assetID}` | 鉴权下载 |
-| `GET` | `/api/tasks` | 与现有 UI 兼容的权限化任务历史 |
+| `GET` | `/api/tasks` | 与现有 UI 兼容的任务历史（所有角色只返回本人任务，#158） |
 
 ## live 模式
 

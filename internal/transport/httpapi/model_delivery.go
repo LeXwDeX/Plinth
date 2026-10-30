@@ -29,6 +29,7 @@ func (s *Server) getModelFormats(writer http.ResponseWriter, request *http.Reque
 		s.writeModelDeliveryError(writer, err)
 		return
 	}
+	s.auditCrossOwnerTaskRead(request, principal, generation.TaskID(request.PathValue("taskID")))
 	writeJSON(writer, http.StatusOK, s.localizedSchemaData(request, coverage))
 }
 

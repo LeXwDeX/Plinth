@@ -434,6 +434,7 @@ jq -e '
   and (.schema.runtime.input_assets.audit.access_action == "access_asset")
   and (.schema.runtime.task_audit.create_action == "create_task")
   and (.schema.runtime.task_audit.delete_action == "delete_task")
+  and (.schema.runtime.task_audit.read_other_action == "admin_read_task")
   and (.schema.runtime.task_audit.resource_type == "task")
   and (.schema.runtime.task_deletion.local_record_policy == "tombstone")
   and (.schema.runtime.task_deletion.upstream_policy == "when-supported")

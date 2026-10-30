@@ -10,7 +10,10 @@ func TestDefaultCatalogOwnsTaskAndAssetAuditContracts(t *testing.T) {
 	runtime := taskCatalog.Application().Runtime
 	if runtime.TaskAudit.CreateAction != "create_task" ||
 		runtime.TaskAudit.DeleteAction != "delete_task" ||
+		runtime.TaskAudit.ReadOtherAction != "admin_read_task" ||
 		runtime.TaskAudit.ResourceType != "task" ||
+		runtime.TaskAudit.DetailFields.TaskID != "taskId" ||
+		runtime.TaskAudit.DetailFields.OwnerID != "ownerId" ||
 		runtime.TaskAudit.DetailFields.Capability != "capability" ||
 		runtime.TaskAudit.DetailFields.OfferingID != "offeringId" ||
 		runtime.TaskAudit.DetailFields.Replayed != "replayed" {
@@ -42,6 +45,9 @@ func TestTaskAndAssetAuditContractsAreRequired(t *testing.T) {
 	for name, mutate := range map[string]func(*ApplicationSchema){
 		"task": func(application *ApplicationSchema) {
 			application.Runtime.TaskAudit.CreateAction = ""
+		},
+		"task read other": func(application *ApplicationSchema) {
+			application.Runtime.TaskAudit.ReadOtherAction = ""
 		},
 		"input asset": func(application *ApplicationSchema) {
 			application.Runtime.InputAssets.Audit.UploadAction = ""

@@ -697,11 +697,14 @@ func validateTaskAuditRuntime(schema TaskAuditRuntimeSchema) error {
 	for name, value := range map[string]string{
 		"create_action":            schema.CreateAction,
 		"delete_action":            schema.DeleteAction,
+		"read_other_action":        schema.ReadOtherAction,
 		"resource_type":            schema.ResourceType,
 		"detail_fields.capability": schema.DetailFields.Capability,
 		"detail_fields.offering_id": schema.DetailFields.
 			OfferingID,
 		"detail_fields.replayed": schema.DetailFields.Replayed,
+		"detail_fields.task_id":  schema.DetailFields.TaskID,
+		"detail_fields.owner_id": schema.DetailFields.OwnerID,
 	} {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("%s 不能为空", name)

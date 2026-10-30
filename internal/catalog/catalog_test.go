@@ -146,10 +146,11 @@ const minimalApplication = `"application":{
 		},
 		"task_audit":{
 			"create_action":"access_asset","delete_action":"access_asset",
+			"read_other_action":"access_asset",
 			"resource_type":"task",
 			"detail_fields":{
 				"capability":"capability","offering_id":"offeringId",
-				"replayed":"replayed"
+				"replayed":"replayed","task_id":"taskId","owner_id":"ownerId"
 			}
 		},
 		"cache":{

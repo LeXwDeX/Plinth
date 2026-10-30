@@ -75,10 +75,11 @@ func (s *Server) legacyTaskHistory(
 		return
 	}
 
+	// 与 GET /api/v1/tasks 一致（#154、#158）：历史列表对所有角色只返回本人任务；
+	// 管理员查看他人任务走 /api/admin/generations（按 Schema 写审计），按 ID 的
+	// 详情读取另在 auditCrossOwnerTaskRead 留痕。
 	scope := generation.OwnTasks(generation.OwnerID(principal.ID()))
-	if principal.Can(access.PermissionTasksReadAny) {
-		scope = generation.AllTasks()
-	} else if !principal.Can(access.PermissionTasksReadOwn) {
+	if !principal.Can(access.PermissionTasksReadOwn) && !principal.Can(access.PermissionTasksReadAny) {
 		writeProblem(
 			writer,
 			http.StatusForbidden,

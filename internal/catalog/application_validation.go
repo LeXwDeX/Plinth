@@ -338,6 +338,7 @@ func validateApplication(schema ApplicationSchema) error {
 		"canvas_merge_action":  schema.Canvas.Audit.MergeAction,
 		"task_create_action":   schema.Runtime.TaskAudit.CreateAction,
 		"task_delete_action":   schema.Runtime.TaskAudit.DeleteAction,
+		"task_read_other":      schema.Runtime.TaskAudit.ReadOtherAction,
 		"input_upload_action":  schema.Runtime.InputAssets.Audit.UploadAction,
 		"input_access_action":  schema.Runtime.InputAssets.Audit.AccessAction,
 		"task_asset_download": schema.Runtime.AssetDelivery.TaskAssetAudit.
