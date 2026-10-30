@@ -184,6 +184,10 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
 - **官方对齐实测（付费，须授权）：** `cmd/fake-upstream-align` 的 `official` 子命令把脚本发给真实 API，每个付费端点只发一次最便宜的请求，没有 `-confirm-paid` 拒绝运行；原始结果只写到工作树外的 0700 目录。随后 `export` 离线导出脱敏样本、`fake` 对 fake 重跑同一脚本、`compare` 生成 `alignment-report.{md,json}`。真实请求使用 dev-test 栈已有的 Key（按 `docs/deployment.md` 定位，不输出），受 `AGENTS.md` 的付费验收次数上限约束；采集必须在干净工作树进行。官方接口变更后重新实测，新版本新增目录，旧版本不动。
 - **新增上游 API 版本：** 新建同级目录（如 `tripo/v4`），带自己的实现、样本、`Profile` 与对齐报告，在 `registry.Versions()` 与 `Profiles()` 追加一行；不改旧版本目录。
 
+### 1.0 验收脚本（`scripts/acceptance/`，#160）
+
+`docs/acceptance-1.0.md` 中可脚本化的项有一套可复用脚本：已部署环境的免费 API 检查（`api_free.py`）、本机隔离 Mock 栈（`mock_stack.py`）、跨用户与管理员检查（`cross_user.py`）、Playwright 浏览器矩阵（`browser_matrix/`）和大 GLB 的 Chrome 抽查（`chrome_viewer.py`）。针对环境的脚本一律经 `python3 scripts/release-env.py smoke <环境> -- …` 注入地址与凭据，本机脚本自己起栈、用随机端口与口令；输出默认写系统临时目录，不进仓库。各脚本覆盖的验收编号、运行命令、耗时、在被测账号下创建的测试数据见 [`scripts/acceptance/README.md`](scripts/acceptance/README.md)。这些脚本不属于第 2 节自动化门禁，只是验收证据的来源；逐项结果仍记在 GitHub #62。
+
 ### 交付硬门禁
 
 - 合并前以本机门禁为准：每个分支推送时照常跑 pre-push（本地八项）；合并到 `main` 前，在待合并的 head 上跑一次 `python3 scripts/verify-local.py --race`，结果写进 PR。
