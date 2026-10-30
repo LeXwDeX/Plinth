@@ -5,15 +5,16 @@
 
 It bundles that commit, uploads the bundle to the host named by the `dev-test` entry of
 the untracked environments file, runs `GOFLAGS=-p=4 python3 scripts/verify-local.py --race
---force` plus the external-link check in a one-off container (no network, 4 CPUs, 12 GiB,
+--force` plus the external-link check in a one-off container (no network, 4 CPUs, 8 GiB,
 no swap, non-root, no capabilities, input bundle read-only) and brings result.json and the
 logs back to build/host-ci/<run id>/. Exit status: 0 pass, 1 fail, 70 host resources too
-low, 75 another run is active, 2 usage or environment error. The resource preflight
+low or fell below the runtime floor mid-run (host_memory_low), 75 every run slot is busy (`slots`, default 1; up to 4 can be
+enabled to run in parallel), 2 usage or environment error. The resource preflight
 thresholds, the container limits and the timeouts are options (and optional `host_ci`
 fields of the environment entry); the host refuses values that would weaken the gate.
 
 With --workflows it instead replays .github/workflows (the pull_request and push events) for that
-commit with a pinned nektos/act in throwaway containers on the same host, under the same lock,
+commit with a pinned nektos/act in throwaway containers on the same host, under the same slot lock,
 preflight and limits (not a GitHub runner; dev_test.md section 2). After a run, the verdict is written
 as a commit status (`host-ci/gates` or `host-ci/workflows`) with the local `gh` login; --no-status skips it.
 
@@ -50,7 +51,7 @@ STATUS_CONTEXTS = {'gates': 'host-ci/gates', 'workflows': 'host-ci/workflows'}
 # Tunable limits. Precedence: command line, then the optional `host_ci` object of the environment
 # entry (same names), then these defaults, which host_run.DEFAULTS repeats (test_host_ci.py keeps them equal).
 # The host validates the final values again (host_run.limit_problems).
-LIMIT_DEFAULTS = {'cpus': 4, 'memory_gib': 12, 'min_mem_gib': 13, 'min_disk_gib': 10, 'timeout_min': 100, 'build_timeout_min': 40}
+LIMIT_DEFAULTS = {'cpus': 4, 'memory_gib': 10, 'min_mem_gib': 11, 'min_disk_gib': 10, 'timeout_min': 100, 'build_timeout_min': 40, 'slots': 1, 'min_mem_floor_gib': 2}
 # Files that decide the image. The first two come from the tool's own checkout (the
 # image definition), the rest from the commit under test (the dependencies it needs).
 TOOL_FILES = ('Dockerfile.ci', 'scripts/host-ci/entry.sh')
@@ -136,6 +137,8 @@ def resolve_limits(args, host_ci):
             chosen = host_ci.get(key, default)
         if isinstance(chosen, bool) or not isinstance(chosen, (int, float)) or chosen != chosen:
             raise UsageError(f'limit {key} must be a number, got {chosen!r}')
+        if key in ('slots', 'memory_gib') and chosen != int(chosen):
+            raise UsageError(f'limit {key} must be a whole number, got {chosen!r}')
         limits[key] = chosen
     return limits
 
@@ -193,12 +196,18 @@ def summarize(result):
         lines.append(f"  {gate['name']:<20} {gate['result']:<8} {seconds}")
     cgroup = entry.get('cgroup') or {}
     peak = cgroup.get('memory_peak_bytes')
+    host_peak = result.get('memory_peak_bytes')
     lines.append(f"  total {result.get('total_seconds', '?')}s  attempts {len(result.get('attempts') or [])}  "
                  f"image {(result.get('image') or {}).get('name', '-')}"
                  f"{' (built)' if (result.get('image') or {}).get('built') else ''}  "
                  f"peak memory {peak / (1 << 30):.1f} GiB  OOM {attempt.get('oom_killed')}  "
                  f"oom_kill {cgroup.get('oom_kill')}  exit {attempt.get('container_exit_code')}" if peak is not None else
                  f"  total {result.get('total_seconds', '?')}s  exit {attempt.get('container_exit_code')}")
+    if host_peak is not None or result.get('slot') is not None:
+        floor = result.get('mem_available_min_bytes')
+        lines.append(f"  slot {result.get('slot', '?')}  host-sampled peak memory "
+                     f"{'-' if host_peak is None else f'{host_peak / (1 << 30):.1f} GiB'}  host MemAvailable min "
+                     f"{'-' if floor is None else f'{floor / (1 << 30):.1f} GiB'}")
     for reason in result.get('reasons') or []:
         lines.append(f'  reason: {reason}')
     return '\n'.join(lines)
@@ -261,11 +270,13 @@ def main(argv=None):
     parser.add_argument('--env', default='dev-test', help='environment name in the untracked environments file')
     parser.add_argument('--out', default=None, help='where results are stored (default: build/host-ci)')
     parser.add_argument('--timeout-min', type=float, default=None, help=f"container timeout in minutes (default {LIMIT_DEFAULTS['timeout_min']})")
-    parser.add_argument('--min-mem-gib', type=float, default=None, help=f"host preflight: required MemAvailable in GiB (default {LIMIT_DEFAULTS['min_mem_gib']}: the 12 GiB container limit plus margin)")
+    parser.add_argument('--min-mem-gib', type=float, default=None, help=f"host preflight: required MemAvailable in GiB (default {LIMIT_DEFAULTS['min_mem_gib']}: the {LIMIT_DEFAULTS['memory_gib']} GiB container limit plus margin, and the headroom other running host-ci containers may still claim is added)")
     parser.add_argument('--min-disk-gib', type=float, default=None, help=f"host preflight: free GiB on the CI directory and Docker root disks (default {LIMIT_DEFAULTS['min_disk_gib']})")
     parser.add_argument('--memory-gib', type=int, default=None, help=f"container memory and swap limit in GiB (default {LIMIT_DEFAULTS['memory_gib']})")
     parser.add_argument('--cpus', type=float, default=None, help=f"container CPU limit (default {LIMIT_DEFAULTS['cpus']})")
     parser.add_argument('--build-timeout-min', type=float, default=None, help=f"image build timeout in minutes (default {LIMIT_DEFAULTS['build_timeout_min']})")
+    parser.add_argument('--slots', type=int, default=None, help=f"parallel run slots on the host, 1-4 (default {LIMIT_DEFAULTS['slots']}: parallel runs are opt-in)")
+    parser.add_argument('--min-mem-floor-gib', type=float, default=None, help=f"runtime guard: the container is killed when host MemAvailable falls below this many GiB (default {LIMIT_DEFAULTS['min_mem_floor_gib']})")
     parser.add_argument('--workflows', action='store_true', help='replay .github/workflows (pull_request and push) with pinned act instead of the gate image')
     parser.add_argument('--act-job', default='', help='with --workflows: only this job (diagnosis; the status says so)')
     parser.add_argument('--no-status', action='store_true', help='do not write the commit status')
@@ -297,7 +308,8 @@ def main(argv=None):
         command = (f'python3 -I {run_dir}/host_run.py --root {ci_dir} --run-id {run_id} --sha {sha} --tree {tree} '
                    f'--image-tag {tag} --timeout-min {limits["timeout_min"]:g} --min-mem-gib {limits["min_mem_gib"]:g} '
                    f'--min-disk-gib {limits["min_disk_gib"]:g} --memory-gib {limits["memory_gib"]:g} '
-                   f'--cpus {limits["cpus"]:g} --build-timeout-min {limits["build_timeout_min"]:g}')
+                   f'--cpus {limits["cpus"]:g} --build-timeout-min {limits["build_timeout_min"]:g} --slots {limits["slots"]:g} '
+                   f'--min-mem-floor-gib {limits["min_mem_floor_gib"]:g}')
         if args.workflows:
             command += (f' --mode workflows --act-version {ACT_VERSION} --act-sha256 {ACT_SHA256} --runner-image {RUNNER_IMAGE}'
                         f' --repo-slug {repo_slug(repo)}' + (f' --act-job {args.act_job}' if args.act_job else ''))
