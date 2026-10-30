@@ -22,7 +22,8 @@ mid-sized teams for internal use; you bring your own Provider API keys.
   required base URL are configured; missing configuration is shown as unavailable,
   and Plinth never silently switches to another model.
 - **Try it without keys**: the default Mock mode returns built-in sample results and calls
-  no paid upstream.
+  no paid upstream. This only shows the UI and mock flows; for real use set
+  `AGENT_MODE=live` and the `LLM_*` variables.
 - **Users**: administrators and regular users, with username and password sign-in.
 - **UI languages**: Chinese and English, see "UI language" below.
 
@@ -172,7 +173,10 @@ check `docker compose logs art-ai`.
   Creating or resetting the administrator at startup writes an INFO log line and an
   administration audit entry (never the password).
 - **Try it without keys:** `PROVIDER_MODE=mock` and `AGENT_MODE=mock` are the defaults. Image
-  and 3D tasks and the chat Agent return built-in sample results without charges. To call real
+  and 3D tasks and the chat Agent return built-in sample results without charges; this only
+  shows the UI and mock flows. Mock is for testing and demos only: for real use you must set
+  `AGENT_MODE=live` with `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL`, or the Agent is not
+  usable. To call real
   Providers, switch `PROVIDER_MODE=live` and configure each Provider with its own valid API
   key and any required base URL. A Provider is unavailable when a required value is missing;
   a configured key must also be accepted by the upstream service. See
@@ -220,7 +224,7 @@ borrowed from another Provider or from the Agent. Configure the Providers you in
 set `PROVIDER_MODE=live`. Real requests spend the corresponding Provider account's credits or
 money. A configured key must be valid at the upstream service.
 
-`AGENT_MODE` still defaults to `mock` and is independent of `PROVIDER_MODE`. With
+`AGENT_MODE` still defaults to `mock` (testing and demos only; real use needs `live`) and is independent of `PROVIDER_MODE`. With
 `PROVIDER_MODE=live` and `AGENT_MODE=mock`, the Mock Agent does not understand meaning and
 submits a generation for every message based on keywords (the service logs a WARN, and paid steps
 still need your approval). To drive real generation with natural language, set both to `live`
@@ -232,7 +236,7 @@ set every connection's base URL explicitly.
 
 For live Agent chat, set `AGENT_MODE=live`, `LLM_BASE_URL` and `LLM_API_KEY`. `LLM_MODEL`
 uses the Schema default `deepseek` when empty; set the model name served by your endpoint if
-that default does not apply. The Agent model must support multimodal input and image reading.
+that default does not apply. The Agent model must support multimodal input and image reading; prefer a strong vision model, since weak ones miss canvas annotations (red circles, arrows).
 
 To let users pick more chat models, list connection IDs in `LLM_CONNECTIONS` (for example
 `QWEN,GLM`). Each connection reads only its own `<ID>_BASE_URL`, `<ID>_API_KEY` and `<ID>_MODEL`
