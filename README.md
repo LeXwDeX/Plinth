@@ -43,12 +43,18 @@ Plinth 是一个自部署的 AI 美术资产工作台：在一个对话 + 画布
 git clone https://github.com/LeXwDeX/Plinth.git
 cd Plinth
 cp .env.example .env && chmod 600 .env
-# 编辑 .env，填写 SESSION_SECRET 与 ADMIN_PASSWORD（生成方法写在 .env.example 里）
+# 生成并写入 SESSION_SECRET 与 ADMIN_PASSWORD（下一节有说明；也可手工编辑 .env）
+sed -i.bak \
+  -e "s|^SESSION_SECRET=.*|SESSION_SECRET=$(openssl rand -base64 48)|" \
+  -e "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=$(openssl rand -base64 24)|" \
+  .env && rm .env.bak
 ART_AI_SOURCE_COMMIT=$(git rev-parse HEAD) docker compose up -d --build --wait
 ```
 
 命令成功返回（`--wait` 已等到健康检查通过）后，打开 <http://127.0.0.1:13333/login>，用
 `admin` 和你填写的 `ADMIN_PASSWORD` 登录。
+
+端口 13333 被占用，或这台主机上已有另一套 Plinth 时，见下节的「同机部署多套」与「启动失败时」。
 
 ## Docker Compose 自部署
 
@@ -232,7 +238,7 @@ art-ai（单个 Go 进程，单容器）
 
 ## 本地开发
 
-前置工具：Go（最低 1.26，即 `go.mod`；镜像与 CI 使用 1.27，推荐 1.27）、Node 22、pnpm
+前置工具：Go（[安装说明](https://go.dev/doc/install)；最低 1.26，即 `go.mod`；镜像与 CI 使用 1.27，推荐 1.27）、Node 22（[下载页](https://nodejs.org/en/download)）、pnpm
 （版本以 `package.json` 的 `packageManager` 为准，用 `npm install -g pnpm@12.5.1` 安装；
 Node 22.21.1 自带的 corepack 0.34.0 执行 `corepack enable` 取不到该版本，若装过 corepack
 shim，先 `corepack disable`）、`git`、`python3`、`bash`、`jq` 与 `sqlite3`（部分前端测试和

@@ -52,12 +52,18 @@ You only need Docker. The next section is the full self-deploy guide; the shorte
 git clone https://github.com/LeXwDeX/Plinth.git
 cd Plinth
 cp .env.example .env && chmod 600 .env
-# Edit .env and fill in SESSION_SECRET and ADMIN_PASSWORD (.env.example shows how to generate them)
+# Generate and write SESSION_SECRET and ADMIN_PASSWORD (explained in the next section; you can also edit .env by hand)
+sed -i.bak \
+  -e "s|^SESSION_SECRET=.*|SESSION_SECRET=$(openssl rand -base64 48)|" \
+  -e "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=$(openssl rand -base64 24)|" \
+  .env && rm .env.bak
 ART_AI_SOURCE_COMMIT=$(git rev-parse HEAD) docker compose up -d --build --wait
 ```
 
 Once the command returns successfully, open
 <http://127.0.0.1:13333/login> and sign in as `admin` with the `ADMIN_PASSWORD` you set.
+
+If port 13333 is taken, or another Plinth stack already runs on this host, see "Several stacks on one host" and "If startup fails" in the next section.
 
 ## Self-deploy with Docker Compose
 
@@ -276,8 +282,8 @@ Design details are in [docs/architecture.md](docs/architecture.md) and domain te
 
 ## Local development
 
-Prerequisites: Go (minimum 1.26, per `go.mod`; the image and CI use 1.27, which is the
-recommended version), Node 22, pnpm (the version is the `packageManager` in `package.json`; install it with
+Prerequisites: Go ([install guide](https://go.dev/doc/install); minimum 1.26, per `go.mod`; the image and CI use 1.27, which is the
+recommended version), Node 22 ([download](https://nodejs.org/en/download)), pnpm (the version is the `packageManager` in `package.json`; install it with
 `npm install -g pnpm@12.5.1`: the corepack 0.34.0 bundled with Node 22.21.1 cannot fetch that
 version through `corepack enable`, and if you already enabled the corepack shims, run
 `corepack disable` first), `git`, `python3`, `bash`, `jq` and `sqlite3` (some frontend tests
