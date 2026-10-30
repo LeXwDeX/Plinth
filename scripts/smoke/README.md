@@ -1,6 +1,6 @@
 # dev-test 冒烟与发布脚本
 
-Agent 控制的 `dev-test` 发布与冒烟协议（按环境名部署与冒烟见 `docs/deployment.md`：`python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/<脚本>` 为同一套 L0/L1/L1 Agent 脚本设置 `BASE`、管理员登录、`EXPECT_SHA` 与 `RELEASE_CONTAINER`；在目标主机运行 L1 Agent 时另设 `ART_AI_SERVER_ROOT=<发布根>`）。各环境相互隔离；部署与验收事实以对应 Issue 回执为准（`formal-test` #270；`legacy-formal` 已于 2026-10-30 下线，GitHub #74）。操作边界见 `dev_ops.md`「Agent 全自动发布协议」及其「dev-test 主机与镜像保留」一节。
+Agent 控制的 `dev-test` 发布与冒烟协议（按环境名部署与冒烟见 `docs/deployment.md`：`python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/<脚本>` 为同一套 L0/L1/L1 Agent 脚本设置 `BASE`、管理员登录、`EXPECT_SHA` 与 `RELEASE_CONTAINER`；在目标主机运行 L1 Agent 时另设 `ART_AI_SERVER_ROOT=<发布根>`）。各环境相互隔离；部署与验收事实以对应 Issue 回执为准（`formal-test` #270；`legacy-formal` 已于 2026-10-30 下线，存档 #74）。操作边界见 `dev_ops.md`「Agent 全自动发布协议」及其「dev-test 主机与镜像保留」一节。
 
 ## 发布（Agent 本地一键执行，无 CI）
 

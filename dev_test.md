@@ -8,7 +8,7 @@
 ## 2. 发布前自动化门禁
 
 **产品平台（2026-10-08 用户确认）**：本项目仅面向 PC。新增工作区 UI 验收覆盖 Chromium/WebKit 的桌面视口，默认使用 1366×768、1440×900、1920×1080，并检查鼠标、键盘及缩小的 PC 浏览器窗口。历史移动验收记录保留，不作为新功能的目标设备矩阵。浏览器全新上下文、禁用缓存和同源资源检查继续必做。
-- 内部环境按名称区分（具体主机、端口与目录只在本地 `deploy/local/environments.json`）：`dev-test` 为多业务共用主机上的测试栈；`formal-test` 为独立主机上的正式测试环境，只晋级 `dev-test` 已完成 L0/L1/L1 Agent 及相关验收的精确 `main` revision。同主机的 `legacy-formal`（内部存档 #232）已于 2026-10-30 下线（GitHub #74）。
+- 内部环境按名称区分（具体主机、端口与目录只在本地 `deploy/local/environments.json`）：`dev-test` 为多业务共用主机上的测试栈；`formal-test` 为独立主机上的正式测试环境，只晋级 `dev-test` 已完成 L0/L1/L1 Agent 及相关验收的精确 `main` revision。同主机的 `legacy-formal`（内部存档 #232）已于 2026-10-30 下线（存档 #74）。
 - 部署按环境名进行，入口 `docs/deployment.md`（目标在本地 `deploy/local/environments.json`）。`formal-test`（正式测试环境，#270）只经 `scripts/release-env.py release formal-test --acceptance-note <noteID>` 接收已在 `dev-test` 发布成功且 L0、L1、L1 Agent 与相关验收全部 PASS 的精确 `main` revision；晋级后用 `release-env.py smoke formal-test -- <冒烟脚本>` 跑 L0、L1、L1 Agent 并核对容器 OCI revision。不做付费生成。
 - LLM、OpenAI/Gemini 生图与对话的测试接线以 `production/runtime.env`
   的 `LLM_BASE_URL`、`OPENAI_BASE_URL` 为准；均指向 llms 正式服务器
@@ -20,7 +20,7 @@
   生产凭据不在测试脚本、日志或报告中写出。模型列表 200 只能证明鉴权和
   目录可达；生成验收还须核对
   `Task` 状态、READY 资产、实际图片内容、刷新后的历史版本；
-- 正式测试环境（`formal-test`）的来源验收必须先在 `dev-test` 完成 L0/L1/L1 Agent 与相关检查，再以完整 revision/image tag 写入 GitHub #63 的 Issue comment；晋级报告的四项检查 `L0`、`L1`、`L1_agent`、`related` 必须各为 pass、`failed=0`、`passed>0`、没有 skip/soft-fail 且附本仓 Issue comment 的完整 URL；部署状态仍以 Issue 读回为准，源码或本机 fixture 不能充当线上验收。原 `legacy-formal` 的无 Key 冒烟（`smoke-l1-formal-keyless.py`）随该栈下线删除（GitHub #74）。
+- 正式测试环境（`formal-test`）的来源验收必须先在 `dev-test` 完成 L0/L1/L1 Agent 与相关检查，再以完整 revision/image tag 写入 #2 的 Issue comment；晋级报告的四项检查 `L0`、`L1`、`L1_agent`、`related` 必须各为 pass、`failed=0`、`passed>0`、没有 skip/soft-fail 且附本仓 Issue comment 的完整 URL；部署状态仍以 Issue 读回为准，源码或本机 fixture 不能充当线上验收。原 `legacy-formal` 的无 Key 冒烟（`smoke-l1-formal-keyless.py`）随该栈下线删除（存档 #74）。
 - 本系统依赖的背景去除服务与 `dev-test` 同机（接线地址见 dev-test 运行环境文件 `MATTING_*`，项目目录只记在本地环境资料中，不写入仓库）；若该服务异常，先检查现有容器状态、项目配置与 `/health`，再按实际故障修复并验证；
 
 ### 自动化门禁项
@@ -52,7 +52,7 @@ CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check
 
 ### CI：GitHub Actions（#257）
 
-本仓库只有一处 CI：`.github/workflows/ci.yml`。2026-10-27 起 GitHub 是唯一仓库，迁移前的内部仓库与其 runner 不再使用（GitHub #60）。CI 执行上面「自动化门禁项」中标为 CI 的各项，作业分组为 `frontend`、`go check`、`go test race`，不另立清单：
+本仓库只有一处 CI：`.github/workflows/ci.yml`。2026-10-27 起 GitHub 是唯一仓库，迁移前的内部仓库与其 runner 不再使用（存档 #60）。CI 执行上面「自动化门禁项」中标为 CI 的各项，作业分组为 `frontend`、`go check`、`go test race`，不另立清单：
 
 | | GitHub Actions |
 |---|---|
@@ -186,7 +186,7 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
 
 ### 1.0 验收脚本（`scripts/acceptance/`，#160）
 
-`docs/acceptance-1.0.md` 中可脚本化的项有一套可复用脚本：已部署环境的免费 API 检查（`api_free.py`）、本机隔离 Mock 栈（`mock_stack.py`）、跨用户与管理员检查（`cross_user.py`）、Playwright 浏览器矩阵（`browser_matrix/`）和大 GLB 的 Chrome 抽查（`chrome_viewer.py`）。针对环境的脚本一律经 `python3 scripts/release-env.py smoke <环境> -- …` 注入地址与凭据，本机脚本自己起栈、用随机端口与口令；输出默认写系统临时目录，不进仓库。各脚本覆盖的验收编号、运行命令、耗时、在被测账号下创建的测试数据见 [`scripts/acceptance/README.md`](scripts/acceptance/README.md)。这些脚本不属于第 2 节自动化门禁，只是验收证据的来源；逐项结果仍记在 GitHub #62。
+`docs/acceptance-1.0.md` 中可脚本化的项有一套可复用脚本：已部署环境的免费 API 检查（`api_free.py`）、本机隔离 Mock 栈（`mock_stack.py`）、跨用户与管理员检查（`cross_user.py`）、Playwright 浏览器矩阵（`browser_matrix/`）和大 GLB 的 Chrome 抽查（`chrome_viewer.py`）。针对环境的脚本一律经 `python3 scripts/release-env.py smoke <环境> -- …` 注入地址与凭据，本机脚本自己起栈、用随机端口与口令；输出默认写系统临时目录，不进仓库。各脚本覆盖的验收编号、运行命令、耗时、在被测账号下创建的测试数据见 [`scripts/acceptance/README.md`](scripts/acceptance/README.md)。这些脚本不属于第 2 节自动化门禁，只是验收证据的来源；逐项结果仍记在 #1。
 
 ### 交付硬门禁
 

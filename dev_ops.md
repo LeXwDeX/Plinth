@@ -32,9 +32,9 @@ Root 实际查看四组 control 的完整 PNG，均为预期白色 Meshy 凳。�
 
 ## Agent 全自动发布协议（2026-09-27 确认，现行发布方式）
 
-本节现行脚本、`production/` 报告路径和 L2 付费验收义务仅适用于 `dev-test`（开发测试环境）。`legacy-formal`（#232 隔离正式栈）已于 2026-10-30 下线（GitHub #74），不再有现行发布路径。
+本节现行脚本、`production/` 报告路径和 L2 付费验收义务仅适用于 `dev-test`（开发测试环境）。`legacy-formal`（#232 隔离正式栈）已于 2026-10-30 下线（存档 #74），不再有现行发布路径。
 
-**环境布局（2026-10-20 用户决定，#270）**：部署入口改为 [`docs/deployment.md`](docs/deployment.md)，按环境名（`dev-test`、`formal-test`）部署，目标主机与路径只在本地 `deploy/local/environments.json`。本节协议适用于 `dev-test`；`formal-test` 只接收 `dev-test` 全部稳定通过（含 Agent 测试）的 revision。同机的 `legacy-formal`（内部存档 #232 的隔离正式栈）在新布局下经维护者 2026-10-30 决定下线（GitHub #74），见下文「dev-test 主机与镜像保留」。
+**环境布局（2026-10-20 用户决定，#270）**：部署入口改为 [`docs/deployment.md`](docs/deployment.md)，按环境名（`dev-test`、`formal-test`）部署，目标主机与路径只在本地 `deploy/local/environments.json`。本节协议适用于 `dev-test`；`formal-test` 只接收 `dev-test` 全部稳定通过（含 Agent 测试）的 revision。同机的 `legacy-formal`（内部存档 #232 的隔离正式栈）在新布局下经维护者 2026-10-30 决定下线（存档 #74），见下文「dev-test 主机与镜像保留」。
 
 容量检查分阶段执行，不是在停服前一次完成。构建前或停服前的检查失败时旧服务不变。停服后的备份及候选启动前检查失败时，脚本先恢复旧镜像，再恢复并检查旧服务。恢复失败时服务保持停止，原备份保留并写报告。检查按设备比较 `df` 与 `statvfs` 可用值，并为 Docker 构建、TMPDIR、归档、回滚展开和恢复暂存分别估算需求；每个目标文件系统在扣除估算需求后至少留 1 GiB 和 4,096 个 inode。未知或不支持的容量数据失败关闭。
 容量检查是瞬时测量，不预留空间，也不能阻止共用主机的并发写入。恢复报告不可写不能阻止恢复尝试。健康请求的连接超时为 3 秒，总超时为 5 秒。成功清单使用同目录临时文件原子替换。
@@ -76,7 +76,7 @@ manifest（发布历史）：`<root>/releases/manifest.txt`（`<root>` 为本地
 
 `dev-test` 主机是多业务共享主机。Plinth 测试栈即 `dev-test`（入口为 dev-test 的 `base_url`，`python3 scripts/release-env.py show dev-test`）：Compose 项目为环境文件 `dev-test` 条目的 `compose_project`，服务 `art-ai-go`，数据位于 `<root>/production/`。
 
-**`legacy-formal` 已下线（2026-10-30，维护者决定，GitHub #74）。** 它是 2026-10-19 在同一主机、同一发布根下建成的隔离正式栈（内部存档 #232）：独立 Compose 项目、独立端口，数据在 `<root>/formal/`，空库起步、无 Provider Key，由 `scripts/release-go-formal.sh` 晋级。2026-10-20 改用独立主机的 `formal-test` 后，它的去留一直待决，#60 之后晋级验收来源 `acceptance.legacy_formal_issue` 也未设置。下线只动该栈自己的资源：先对 `<root>/formal/` 做全量备份（数据库、Storage、Web data、日志、报告、运行环境、源码快照与镜像导出，逐件记录大小与 sha256 并验证可列出内容），再停止并移除它的 Compose 项目与网络、删除它独有的镜像和 `<root>/formal/` 目录。该栈没有命名卷。同一发布根里 `dev-test` 的 `production/` 与 `app/`、旧候选 Compose 项目、旧 Next 目录和同机其他业务都未触碰。最终备份保存在发布根之外的独立位置，主机路径与校验值记在 GitHub #74，不写进仓库。
+**`legacy-formal` 已下线（2026-10-30，维护者决定，存档 #74）。** 它是 2026-10-19 在同一主机、同一发布根下建成的隔离正式栈（内部存档 #232）：独立 Compose 项目、独立端口，数据在 `<root>/formal/`，空库起步、无 Provider Key，由 `scripts/release-go-formal.sh` 晋级。2026-10-20 改用独立主机的 `formal-test` 后，它的去留一直待决，#60 之后晋级验收来源 `acceptance.legacy_formal_issue` 也未设置。下线只动该栈自己的资源：先对 `<root>/formal/` 做全量备份（数据库、Storage、Web data、日志、报告、运行环境、源码快照与镜像导出，逐件记录大小与 sha256 并验证可列出内容），再停止并移除它的 Compose 项目与网络、删除它独有的镜像和 `<root>/formal/` 目录。该栈没有命名卷。同一发布根里 `dev-test` 的 `production/` 与 `app/`、旧候选 Compose 项目、旧 Next 目录和同机其他业务都未触碰。最终备份保存在发布根之外的独立位置，主机路径与校验值记在存档 #74，不写进仓库。
 
 随之移除：`release-go-formal.sh`、`docker-compose.go-formal.yml`、正式栈无 Key 冒烟（`smoke-l1-formal-keyless.py` 与测试）、正式栈事务的离线测试，以及 `retain-art-ai-images.py` 里读写 `<root>/formal/reports/image-pins.json` 的保护逻辑；环境文件的 `managed_by` 与 `acceptance.legacy_formal_issue` 字段不再支持。保留并改名为 `scripts/release-promotion.py` 的是 `formal-test` 晋级仍在使用的验收报告与成功清单校验（`release-env.py` 加载，`scripts/tests/test_release_promotion.py` 在 CI 门禁中覆盖）。晋级来源报告的格式见 `docs/deployment.md` §4。
 
