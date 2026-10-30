@@ -4,7 +4,7 @@ version: 2
 remote: origin
 provider: github
 target: main
-language: en
+language: zh
 validation:
   titles: false
   labels: off
