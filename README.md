@@ -155,7 +155,7 @@ Mock Agent 不理解语义，每条消息都会按关键词调用一个生成工
   Mock 仅用于测试和演示。接真实模型时改成 `live`，只填要用的 Provider key，见
   [Provider 配置](docs/provider-configuration.md)。`AGENT_MODE=live` 必须设置
   `LLM_BASE_URL` 与 `LLM_API_KEY`，缺少地址或 key 时 Agent 显示“未配置”。`LLM_MODEL`
-  留空使用 Schema 默认值 `deepseek`，请按实际端点支持的模型名设置。`LLM_BASE_URL`
+  留空使用 Schema 默认值 `qwen3.8-omni-flash`（强多模态模型），请按实际端点支持的模型名设置。`LLM_BASE_URL`
   只供 Agent 对话使用，图像 Provider 各读自己的
   `<ID>_BASE_URL`：启用 Gemini 时必须设置 `GEMINI_BASE_URL`（没有默认值）；所有模型
   经同一网关时，把 `LLM_BASE_URL`、`OPENAI_BASE_URL`、`GEMINI_BASE_URL` 都设为网关地址。

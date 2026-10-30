@@ -164,7 +164,7 @@ llms 正式服务器；后者不限制客户端与模型）。`production/runtim
 `LLM_BASE_URL`、`OPENAI_BASE_URL` 指向该入口；`LLM_API_KEY`、
 `OPENAI_API_KEY` 使用测试上游 key `<TEST_API_KEY>`（2026-09-27 用户给定，仅适用
 测试链路；正式生产密钥仍只存正式生产自身的运行环境文件），文件权限保持
-`0600`。测试栈对话模型为字面量 `deepseek`（2026-10-19 起网关目录已无 `qwen-max`、`glm-flash`，直接请求返回 400 `model not supported by any target`；经用户确认改用 `deepseek`，网关当前路由到 `deepseek-flash`）；请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，DeepSeek 用 `thinking.type=enabled`、`reasoning_effort=low`（用户 2026-10-20 决定；官方只有 low/high/max 三档），工具循环回传 `reasoning_content`；其他中国大陆模型仍用官方最高档。除 `<TEST_API_KEY>` 外的密钥不写
+`0600`。测试栈对话模型为 `qwen3.8-omni-flash`（2026-10-30 维护者决定，替代 `deepseek`，不再使用 deepseek）；请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，该模型命中 `qwen3.8-omni-flash` profile（`enable_thinking=true`、`reasoning_effort` 默认 `xhigh`，上下文窗口 1000000）；其他中国大陆模型仍用官方最高档。除 `<TEST_API_KEY>` 外的密钥不写
 仓库、命令输出或记录，也不要把同机代理测试端口当作 Plinth 的模型入口。
 Provider 变量的规范名与别名见 `docs/provider-configuration.md`（#252）：图像 Provider 只由自己的 `<ID>_API_KEY` 启用，不再借用 `LLM_API_KEY`；测试栈的 `OPENAI_API_KEY`、`GEMINI_API_KEY` 已单独设置。每个连接只读自己的地址变量：`LLM_BASE_URL` 只是 Agent 对话模型的地址，`OPENAI_BASE_URL`、`GEMINI_BASE_URL` 都不回落到它。测试栈所有模型都经同一 llms 网关，运行环境文件须把 `LLM_BASE_URL`、`OPENAI_BASE_URL`、`GEMINI_BASE_URL` 都显式设为该网关的 `/v1`；`GEMINI_BASE_URL` 没有默认值，漏设时 Gemini 不注册，启动日志记 `Provider 连接缺少地址，未启用`（`missing_settings=GEMINI_BASE_URL`）。
 `dev-test` 测试栈允许重部署、修改管理员口令、清空数据；但发布后必须保持
@@ -176,7 +176,7 @@ dev-test Compose 项目的 `art-ai-go` 服务；回读容器的 URL、凭据是�
 
 - Plinth 测试栈的大模型对话和图片请求链路是「测试客户端 → `dev-test` Plinth
   测试栈 → llms 正式服务器（llms 网关的 `/v1`，地址在 dev-test 运行环境文件 `LLM_BASE_URL`）」。llms 正式
-  服务器不限制客户端与模型；测试栈对话模型为字面量 `deepseek`（2026-10-19 起网关目录已无 `qwen-max`、`glm-flash`，直接请求返回 400 `model not supported by any target`；经用户确认改用 `deepseek`，网关当前路由到 `deepseek-flash`）；请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，DeepSeek 用 `thinking.type=enabled`、`reasoning_effort=low`（用户 2026-10-20 决定；官方只有 low/high/max 三档），工具循环回传 `reasoning_content`；其他中国大陆模型仍用官方最高档。
+  服务器不限制客户端与模型；测试栈对话模型为 `qwen3.8-omni-flash`（2026-10-30 维护者决定，替代 `deepseek`，不再使用 deepseek）；请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，该模型命中 `qwen3.8-omni-flash` profile（`enable_thinking=true`、`reasoning_effort` 默认 `xhigh`，上下文窗口 1000000）；其他中国大陆模型仍用官方最高档。
   测试链路上游 key 为 `<TEST_API_KEY>`（2026-09-27 用户给定，仅用于测试环境文案
   与接线）；正式生产密钥仍只存其自身运行环境文件，不写仓库。`dev-test`
   测试栈允许重部署、修改管理员口令、清空数据；但发布后必须保持上游与

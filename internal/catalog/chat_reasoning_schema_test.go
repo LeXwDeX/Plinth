@@ -38,6 +38,7 @@ func TestDefaultCatalogDeclaresThinkingLevelsAndContextWindows(t *testing.T) {
 	no := false
 	wants := []want{
 		{prefix: "deepseek", levels: []string{"low", "high", "max"}, fallback: "low", window: 1000000},
+		{prefix: "qwen3.8-omni-flash", levels: []string{"low", "medium", "xhigh"}, fallback: "xhigh", window: 1000000},
 		{prefix: "qwen3.8", levels: []string{"low", "medium", "xhigh"}, fallback: "xhigh"},
 		{prefix: "qwen", levels: []string{"xhigh"}, fallback: "xhigh"},
 		{prefix: "glm", levels: []string{"low", "high", "max"}, fallback: "max", usage: &no},
