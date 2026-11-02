@@ -509,7 +509,7 @@ func localizedSourceRefusal(refusal sourceRefusal, localize func(string) string)
 // history or the selection, else its task ID.
 func handleOf(command chat.ToolCommand, task generation.TaskID) string {
 	handle := ""
-	for _, message := range command.History {
+	for _, message := range command.ReferenceHistory() {
 		for _, attachment := range message.Attachments {
 			if attachment.Kind == chat.AttachmentKindModel && attachment.TaskID == string(task) && attachment.Handle != "" {
 				handle = attachment.Handle

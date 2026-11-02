@@ -744,8 +744,16 @@ func TestExecutorRejectsMissingExplicitReferenceBeforePaidSubmit(t *testing.T) {
 			Arguments: []byte(`{"prompt":"edit this image","reference_image_indices":[1]}`)},
 		Options: chat.TurnOptions{AIModel: "configured-model"},
 	}, nil)
-	if err == nil || !result.NoSubmission {
-		t.Fatalf("invalid reference must fail before submission: result=%#v err=%v", result, err)
+	// #25: the Agent named a reference that does not exist. It is refused
+	// with the Schema's wording so the Agent can correct the call, not
+	// reported as a failed generation.
+	if err != nil || !result.NoSubmission || result.TaskID != "" {
+		t.Fatalf("invalid reference must be refused before submission: result=%#v err=%v", result, err)
+	}
+	if want := strings.NewReplacer("{index}", "1", "{count}", "0").
+		Replace(application.Chat.Presentation.Messages.ReferenceIndexOutOfRangeTemplate); result.Error != want ||
+		strings.Contains(result.AgentContent, application.Chat.Presentation.Messages.GenerationError) {
+		t.Fatalf("refusal = %q / %s, want %q", result.Error, result.AgentContent, want)
 	}
 	if gateway.submitted.OfferingID != "" {
 		t.Fatalf("invalid reference created paid task: %#v", gateway.submitted)
@@ -1352,5 +1360,39 @@ func TestExecutorTellsAnExhaustedProviderBalanceApartFromOtherFailures(t *testin
 				t.Fatalf("agent content = %s (%v)", result.AgentContent, err)
 			}
 		})
+	}
+}
+
+// #25: a handle that names nothing in this session is a refusal the Agent can
+// act on: the Schema's wording, nothing submitted, and not "生成异常".
+func TestExecutorRefusesAnUnknownHandleWithTheSchemaWording(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := product.Application()
+	tool := application.Chat.Tools[0]
+	gateway := &fakeGateway{}
+	executor, err := generationtool.New(generationtool.Config{
+		Gateway: gateway, References: &fakeReferences{}, Chat: application.Chat,
+		TaskStates: application.TaskStates,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := executor.Execute(context.Background(), chat.ToolCommand{
+		OwnerID: "owner-a", SessionID: "session-a", Tool: tool,
+		Call: agents.ToolCall{ID: "call-a", Name: tool.Name,
+			Arguments: []byte(`{"prompt":"edit this image","reference_handles":["@img3"]}`)},
+		History: []chat.Message{{Role: application.Chat.Roles.User, Content: "edit"}},
+		Options: chat.TurnOptions{AIModel: "configured-model"},
+	}, nil)
+	want := strings.ReplaceAll(application.Chat.Context.UnknownHandleTemplate, "{handle}", "@img3")
+	if err != nil || !result.NoSubmission || result.Error != want ||
+		strings.Contains(result.AgentContent, application.Chat.Presentation.Messages.GenerationError) {
+		t.Fatalf("unknown handle: result=%#v err=%v, want %q", result, err, want)
+	}
+	if gateway.submitted.OfferingID != "" {
+		t.Fatalf("unknown handle created paid task: %#v", gateway.submitted)
 	}
 }

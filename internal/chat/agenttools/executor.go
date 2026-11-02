@@ -435,7 +435,7 @@ func (e *Executor) findHistoryImages(command chat.ToolCommand) chat.ToolResult {
 			earlier = append(earlier, call.Arguments)
 		}
 	}
-	result, err := e.historyLookup.Lookup(command.History, command.Options.Selection, earlier, command.Call.Arguments)
+	result, err := e.historyLookup.Lookup(command.ReferenceHistory(), command.Options.Selection, earlier, command.Call.Arguments)
 	if err != nil {
 		var unknown *chat.UnknownHandleError
 		if errors.As(err, &unknown) {

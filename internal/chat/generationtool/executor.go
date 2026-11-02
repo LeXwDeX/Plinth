@@ -371,6 +371,9 @@ func (executor *Executor) Execute(
 	if command.Tool.AcceptReferenceImages == nil || *command.Tool.AcceptReferenceImages {
 		referenceURLs, err = executor.selectReferences(command, arguments)
 		if err != nil {
+			if result, refused := executor.refuseReference(command, err); refused {
+				return result, nil
+			}
 			result := executor.executionFailure(command, "")
 			result.NoSubmission = true
 			return result, err
@@ -534,6 +537,9 @@ func (executor *Executor) Execute(
 		skillOverrides,
 	)
 	if err != nil {
+		if result, refused := executor.refuseReference(command, err); refused {
+			return result, nil
+		}
 		if result, refused := executor.inputRefusal(command, err); refused {
 			return result, nil
 		}
@@ -926,13 +932,13 @@ func (executor *Executor) selectReferencesBy(
 		if rawIndices, named := arguments[argument]; named {
 			// Indices keep working beside handles.
 			if err := json.Unmarshal(rawIndices, &indices); err != nil || (indices == nil && len(handled) == 0) {
-				return nil, errors.New(executor.localized(command, executor.chat.Presentation.Messages.InvalidReferenceIndices))
+				return nil, &referenceRefusal{message: executor.localized(command, executor.chat.Presentation.Messages.InvalidReferenceIndices)}
 			}
 			explicitSelection = true
 		}
 	}
 	var all []string
-	for _, message := range command.History {
+	for _, message := range command.ReferenceHistory() {
 		all = append(all, message.ImageURLs...)
 	}
 	if explicitSelection {
@@ -943,7 +949,7 @@ func (executor *Executor) selectReferencesBy(
 					"{index}", fmt.Sprint(index),
 					"{count}", fmt.Sprint(len(all)),
 				).Replace(executor.localized(command, executor.chat.Presentation.Messages.ReferenceIndexOutOfRangeTemplate))
-				return nil, errors.New(message)
+				return nil, &referenceRefusal{message: message}
 			}
 			selected = append(selected, all[index-1])
 		}
@@ -996,8 +1002,9 @@ func (executor *Executor) previousPrompt(command chat.ToolCommand, edited string
 	if source == "" {
 		return ""
 	}
-	for messageIndex := len(command.History) - 1; messageIndex >= 0; messageIndex-- {
-		message := command.History[messageIndex]
+	history := command.ReferenceHistory()
+	for messageIndex := len(history) - 1; messageIndex >= 0; messageIndex-- {
+		message := history[messageIndex]
 		for callIndex := len(message.ToolCalls) - 1; callIndex >= 0; callIndex-- {
 			call := message.ToolCalls[callIndex]
 			if call.Name != command.Tool.Name || call.TaskID != source {
@@ -1024,7 +1031,7 @@ func (executor *Executor) referenceSourceTask(command chat.ToolCommand, referenc
 	if taskID, generated := executor.taskOfAssetURL(reference); generated {
 		return taskID
 	}
-	for _, message := range command.History {
+	for _, message := range command.ReferenceHistory() {
 		for _, attachment := range message.Attachments {
 			if attachment.Role == chat.AttachmentRoleGenerated && attachment.Kind == chat.AttachmentKindImage &&
 				attachment.TaskID != "" && chat.AttachmentURL(message, attachment) == reference {
@@ -1202,8 +1209,13 @@ func (executor *Executor) buildInput(
 						return nil, nil, &generation.Error{Code: generation.ErrInvalidInput, Operation: "tool-source-task"}
 					}
 					if _, _, handle := executor.handlePolicy().Parse(token); handle || executor.handlePolicy().IsSelectionAlias(token) {
-						resolved, err := executor.handlePolicy().ResolveHandles(command.History, command.Options.Selection, []string{token}, chat.AttachmentKindImage)
-						if err != nil || len(resolved) != 1 || resolved[0].Attachment.TaskID == "" {
+						resolved, err := executor.handlePolicy().ResolveHandles(command.ReferenceHistory(), command.Options.Selection, []string{token}, chat.AttachmentKindImage)
+						if err == nil && len(resolved) == 1 && resolved[0].Attachment.TaskID == "" {
+							// The handle names a picture no Task made (an upload, a
+							// capture): it cannot stand for a source Task (#25).
+							err = &chat.UnknownHandleError{Handle: token, Reason: "kind"}
+						}
+						if err != nil || len(resolved) != 1 {
 							return nil, nil, &generation.Error{Code: generation.ErrInvalidInput, Operation: "tool-source-task", Cause: executor.handleFailure(command, err)}
 						}
 						value = resolved[0].Attachment.TaskID

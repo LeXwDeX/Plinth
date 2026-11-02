@@ -112,3 +112,24 @@ func TestPlanOnAnotherModelThanTheSelectedOneAsksFirst(t *testing.T) {
 		t.Fatalf("plan on another model = %v", content)
 	}
 }
+
+// #25: the Agent made the model in this very reply for the person's request
+// and goes on with it. The model it just made is no switch away from the
+// selection, so no question is asked, and its handle resolves.
+func TestAModelThisReplyMadeNeedsNoQuestion(t *testing.T) {
+	h := againHarness(t)
+	history := []chat.Message{
+		{Role: "assistant", Attachments: []chat.Attachment{
+			{Handle: "@model2", Kind: chat.AttachmentKindModel, Role: chat.AttachmentRoleGenerated, TaskID: "bang-1"}}},
+		{Role: "user", Content: "做一个新模型然后分割成部件"},
+	}
+	reply := chat.Message{Role: "assistant",
+		ToolCalls: []chat.ToolCall{{ID: "made", Name: "create_model_3d", TaskID: "rodin-1"}},
+		Attachments: []chat.Attachment{
+			{Handle: "@model3", Kind: chat.AttachmentKindModel, Role: chat.AttachmentRoleGenerated, TaskID: "rodin-1"}}}
+	arguments := strings.ReplaceAll(againArguments, "@model1", "@model3")
+	result, _ := h.runInReply("owner-a", "session-a", "process_model", arguments, history, reply, bangSelected)
+	if result.NoSubmission || len(h.gateway.frozen) != 1 || h.frozenInput(0)["source_task"] != "rodin-1" {
+		t.Fatalf("the model this reply made was not processed: %s", result.AgentContent)
+	}
+}
