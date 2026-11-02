@@ -232,7 +232,7 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
               <span>{index + 1}. {schema.capabilities.find((item) => item.id === step.capability)?.label_cn ?? step.capability}</span>
               <span>{schemaText(schema, `ui.workspace.processing.plan_step_${
                 step.state === 'SUCCEEDED' ? 'done' : step.state === 'FAILED' ? 'failed' : step.state === 'PAUSED' ? 'paused'
-                  : step.state === 'RUNNING' ? 'running' : 'pending'
+                  : step.state === 'RUNNING' ? 'running' : step.queued_until ? 'queued' : 'pending'
               }`)}</span>
             </li>)}
           </ol>
