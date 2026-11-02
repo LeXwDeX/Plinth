@@ -252,6 +252,27 @@ for broken in '{"version": 2, "environments": {}}' \
   fi
 done
 python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$SCRIPTS/../deploy/environments.example.json" || fail "template is not JSON"
+# #28: data=ephemeral reaches the server and is limited to a plain dev-test.
+python3 - "$ART_AI_ENVIRONMENTS_FILE" "$WORK/ephemeral.json" <<'PY'
+import json, sys
+document = json.load(open(sys.argv[1]))
+document["environments"]["dev-test"].pop("backup")
+document["environments"]["dev-test"]["data"] = "ephemeral"
+json.dump(document, open(sys.argv[2], "w"))
+PY
+ART_AI_ENVIRONMENTS_FILE="$WORK/ephemeral.json" python3 "$SCRIPTS/release-env.py" list >/dev/null || fail "dev-test data ephemeral refused"
+: >"$MOCK_TRACE"
+(cd "$WORK/repo" && ART_AI_ENVIRONMENTS_FILE="$WORK/ephemeral.json" python3 "$SCRIPTS/release-env.py" release dev-test) >/dev/null
+grep -q 'RELEASE_DATA_MODE=ephemeral' "$MOCK_TRACE" && ! grep -q 'RELEASE_BACKUP_' "$MOCK_TRACE" || fail "ephemeral mode not passed to the server"
+python3 - "$WORK/ephemeral.json" "$WORK/ephemeral-both.json" <<'PY'
+import json, sys
+document = json.load(open(sys.argv[1]))
+document["environments"]["dev-test"]["backup"] = {"scope": "database", "keep": 2}
+json.dump(document, open(sys.argv[2], "w"))
+PY
+if ART_AI_ENVIRONMENTS_FILE="$WORK/ephemeral-both.json" python3 "$SCRIPTS/release-env.py" list >/dev/null 2>&1; then
+  fail "data ephemeral accepted together with backup"
+fi
 echo "PASS env/invalid-files-refused"
 
 # ---------------------------------------------------------------------------
@@ -273,7 +294,13 @@ case "$1" in
     esac ;;
   inspect)
     [ "${S_CONTAINERS:-0}" = 1 ] || exit 1
-    echo 'art-ai-go-production:previous' ;;
+    case "$*" in
+      *Mounts*) [ -z "${S_OLD_VOLUMES:-}" ] || printf '%s\n' $S_OLD_VOLUMES | paste -d' ' - - ;;  # "name destination" word pairs, as the template prints
+      *) echo 'art-ai-go-production:previous' ;;
+    esac ;;
+  volume)
+    echo "volume $*" >>"$S_TRACE"
+    [ "${S_VOLUME_RM_FAIL:-0}" = 0 ] || exit 1 ;;
   compose)
     printf 'compose %s | bind=%s port=%s db=%s legacy=%s\n' "$*" "${GO_WEB_BIND_IP:-}" "${GO_WEB_HOST_PORT:-}" \
       "${GO_PROD_DB_DIR:-}" "${GO_LEGACY_INPUT_ASSETS_DIR:-}" >>"$S_TRACE"
@@ -619,6 +646,86 @@ run_steps "$root" S_CONTAINERS=1 S_BACKUP_RETENTION_FAIL=1 "${SHARED[@]}" $(layo
 [ "$RESULT" = 0 ] && grep -q 'WARNING: release backup retention incomplete' "$root/out.log" &&
   grep -q '^candidate ' "$root/releases/manifest.txt" || fail "backup retention failure changed the release result"
 echo "PASS server/backup-retention-warns"
+
+# 2i2. Ephemeral data (#28): overlay file, fresh anonymous volumes, no backup,
+#      old anonymous volumes removed after success, previous image restarts on
+#      fresh data when the candidate fails.
+eroot() { # $1=name; a root that carries the ephemeral overlay
+  local root
+  root=$(new_root "$1")
+  touch "$root/app/docker-compose.go-ephemeral.yml"
+  printf '%s\n' "$root"
+}
+root=$(eroot ephemeral); echo previous >"$S_STATE"
+# shellcheck disable=SC2046
+run_steps "$root" S_CONTAINERS=1 "S_OLD_VOLUMES=vol-data /app/data vol-store /app/storage vol-web /app/web-data" \
+  "${SHARED[@]}" $(layout "$root") RELEASE_DATA_MODE=ephemeral RELEASE_EXTRA_COMPOSE_FILE="$root/production/extra.yml"
+[ "$RESULT" = 1 ] || fail "ephemeral accepted a missing extra compose file"
+touch "$root/production/extra.yml"
+# shellcheck disable=SC2046
+run_steps "$root" S_CONTAINERS=1 "S_OLD_VOLUMES=vol-data /app/data vol-store /app/storage vol-web /app/web-data" \
+  "${SHARED[@]}" $(layout "$root") RELEASE_DATA_MODE=ephemeral RELEASE_EXTRA_COMPOSE_FILE="$root/production/extra.yml"
+[ "$RESULT" = 0 ] || { cat "$root/out.log" >&2; fail "ephemeral release failed"; }
+grep -q -- "-p dev_project -f $root/app/docker-compose.go-production.yml -f $root/app/docker-compose.go-ephemeral.yml -f $root/production/extra.yml up -d --no-deps --renew-anon-volumes art-ai-go" "$S_TRACE" ||
+  fail "ephemeral up lacks overlay order or --renew-anon-volumes"
+grep -qx 'capacity - bootstrap' "$S_TRACE" || fail "ephemeral capacity is not the bootstrap measurement"
+! grep -q '^capacity .* before-\|restore' "$S_TRACE" || fail "ephemeral ran a mount-based capacity phase"
+! grep -q '^tar\| stop art-ai-go\|^backup-retention' "$S_TRACE" || fail "ephemeral backed up, stopped or ran backup retention"
+[ ! -e "$root/backups/release-candidate" ] || fail "ephemeral created a release backup"
+grep -qx 'volume volume rm vol-data' "$S_TRACE" && grep -qx 'volume volume rm vol-store' "$S_TRACE" ||
+  { cat "$S_TRACE" "$root/out.log" >&2; fail "old anonymous data volumes were not removed"; }
+! grep -q 'vol-web' "$S_TRACE" || fail "a volume outside the data destinations was removed"
+grep -q '^retention ' "$S_TRACE" || fail "ephemeral skipped image retention"
+grep -q "^candidate $SECOND " "$root/releases/manifest.txt" || fail "ephemeral manifest missing"
+grep -qx 'RELEASE_DATA_MODE=ephemeral' "$root/production/compose.env" && ! grep -q 'RELEASE_BACKUP' "$root/production/compose.env" ||
+  fail "ephemeral compose.env"
+grep -q 'data_mode=ephemeral' "$root/out.log" || fail "success log lacks data_mode"
+echo "PASS server/ephemeral-success"
+
+# Volume removal failure only warns; first switch from bind mounts has no volumes.
+root=$(eroot ephemeral-volume-warn); echo previous >"$S_STATE"
+# shellcheck disable=SC2046
+run_steps "$root" S_CONTAINERS=1 "S_OLD_VOLUMES=vol-data /app/data" S_VOLUME_RM_FAIL=1 "${SHARED[@]}" $(layout "$root") RELEASE_DATA_MODE=ephemeral
+[ "$RESULT" = 0 ] && grep -q 'WARNING: old data volume vol-data' "$root/out.log" || fail "volume removal failure changed the result"
+root=$(eroot ephemeral-first); echo previous >"$S_STATE"
+# shellcheck disable=SC2046
+run_steps "$root" S_CONTAINERS=1 "${SHARED[@]}" $(layout "$root") RELEASE_DATA_MODE=ephemeral
+[ "$RESULT" = 0 ] && ! grep -q '^volume' "$S_TRACE" || fail "first ephemeral switch removed volumes"
+echo "PASS server/ephemeral-volume-cleanup"
+
+root=$(eroot ephemeral-rollback); echo previous >"$S_STATE"
+# shellcheck disable=SC2046
+run_steps "$root" S_CONTAINERS=1 S_UNHEALTHY=1 "S_OLD_VOLUMES=vol-data /app/data" "${SHARED[@]}" $(layout "$root") RELEASE_DATA_MODE=ephemeral
+[ "$RESULT" = 1 ] || fail "unhealthy ephemeral release succeeded"
+grep -q -- "docker-compose.go-ephemeral.yml up -d --no-deps --renew-anon-volumes art-ai-go" "$S_TRACE" || fail "candidate up flags"
+[ "$(grep -c -- '--renew-anon-volumes' "$S_TRACE")" = 2 ] || fail "previous image was not restarted with --renew-anon-volumes"
+[ "$(cat "$S_STATE")" = previous ] || fail "previous image not running after ephemeral rollback"
+! grep -q '^tar\|^volume\|^backup-retention' "$S_TRACE" || fail "failed ephemeral release backed up or removed volumes"
+[ ! -e "$root/releases/manifest.txt" ] || fail "failed ephemeral release recorded a manifest"
+report="$root/production/reports/release-failures/candidate-unhealthy-after-up.txt"
+grep -qx 'data_mode=ephemeral' "$report" && ! grep -q '^backup' "$report" || fail "ephemeral failure report"
+grep -q 'fresh data' "$root/out.log" || fail "rollback message lacks the fresh-data note"
+echo "PASS server/ephemeral-rollback-fresh-data"
+
+# Bootstrap: renewed anonymous volumes, existing host database ignored.
+root=$(eroot ephemeral-bootstrap); echo none >"$S_STATE"; mkdir -p "$root/production/data"; touch "$root/production/data/art-ai.db"
+# shellcheck disable=SC2046
+run_steps "$root" S_CONTAINERS=0 "${STABLE[@]}" $(layout "$root") RELEASE_DATA_MODE=ephemeral
+[ "$RESULT" = 0 ] || { cat "$root/out.log" >&2; fail "ephemeral bootstrap failed"; }
+grep -q -- "up -d --no-deps --renew-anon-volumes art-ai-go" "$S_TRACE" || fail "ephemeral bootstrap lacks --renew-anon-volumes"
+echo "PASS server/ephemeral-bootstrap"
+
+# Refusals before any side effect.
+root=$(eroot ephemeral-bad); run_steps "$root" S_CONTAINERS=1 "${SHARED[@]}" $(layout "$root") RELEASE_DATA_MODE=ephemeral RELEASE_BACKUP_SCOPE=database RELEASE_BACKUP_KEEP=2
+[ "$RESULT" = 1 ] && ! grep -q '^build\|^compose' "$S_TRACE" || fail "ephemeral accepted backup settings"
+run_steps "$root" S_CONTAINERS=1 "${SHARED[@]}" $(layout "$root") RELEASE_DATA_MODE=ephemeral RELEASE_BACKUP_KEEP=2
+[ "$RESULT" = 1 ] && ! grep -q '^build\|^compose' "$S_TRACE" || fail "ephemeral accepted RELEASE_BACKUP_KEEP"
+run_steps "$root" S_CONTAINERS=1 "${SHARED[@]}" $(layout "$root") RELEASE_DATA_MODE=persistent
+[ "$RESULT" = 1 ] && ! grep -q '^build\|^compose' "$S_TRACE" || fail "unknown data mode accepted"
+root=$(new_root ephemeral-no-overlay)
+run_steps "$root" S_CONTAINERS=1 "${SHARED[@]}" $(layout "$root") RELEASE_DATA_MODE=ephemeral
+[ "$RESULT" = 1 ] && ! grep -q '^build\|^compose' "$S_TRACE" || fail "ephemeral ran without the overlay file"
+echo "PASS server/ephemeral-refused-before-side-effects"
 
 # 2j. Real helper compatibility: the caller writes a single-line scope file;
 #     the shipped helper must read it, and legacy full snapshots stay 3 archives.

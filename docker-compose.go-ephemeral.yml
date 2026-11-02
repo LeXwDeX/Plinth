@@ -1,0 +1,15 @@
+# dev-test 全新数据叠加文件（#28）：与 docker-compose.go-production.yml 并用
+# （release-server-steps.sh 在 RELEASE_DATA_MODE=ephemeral 时追加），只改写
+# art-ai-go 的挂载列表。数据库、资产存储与 legacy 缓存使用匿名卷，不落在主机
+# 目录；重建容器（--renew-anon-volumes）即得到全新数据，只有运行环境
+# ADMIN_USERNAME/ADMIN_PASSWORD 引导的管理员账号存在。日志仍写主机目录以便
+# 按请求 ID 排查。web-data、legacy-generated、legacy-assets 不挂载，使用镜像内
+# 已有的空目录（Go 代码不读 web-data）。
+services:
+  art-ai-go:
+    volumes: !override
+      - "${GO_PROD_LOG_DIR:?GO_PROD_LOG_DIR is required (environment layout; scripts/release-env.py compose-env)}:/app/logs"
+      - /app/data
+      - /app/storage
+      - /app/legacy-cache
+      - /app/legacy-thumbnails

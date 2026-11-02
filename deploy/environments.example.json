@@ -14,10 +14,7 @@
       "compose_project": "<dev-test-compose-project>",
       "protect_projects": ["<candidate-compose-project>"],
       "protected_paths": ["<legacy-root>"],
-      "backup": {
-        "scope": "database",
-        "keep": 2
-      },
+      "data": "ephemeral",
       "host_ci": {
         "dir": "<host-ci-directory-outside-every-release-root>"
       },
