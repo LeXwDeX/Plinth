@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -334,6 +335,14 @@ func TestSkillRunSourceTaskRequiresSameSessionMaterializedAsset(t *testing.T) {
 }
 
 // boundSkillStep drives one step to task_bound with a task in the given state.
+// operationSuffix is a short unique part of a skill step's operation ID for
+// test fixture IDs. The ID is "skill_op_" and a SHA-256 hex digest, so its
+// first 12 characters leave three hex digits: a retried step could collide
+// with the step it replaces. Twelve digest characters cannot.
+func operationSuffix(operationID string) string {
+	return strings.TrimPrefix(operationID, "skill_op_")[:12]
+}
+
 func boundSkillStep(t *testing.T, repo *Repository, service *skillrun.Service, run skillrun.Run, stepKey, taskState string) skillrun.StepCommand {
 	t.Helper()
 	ctx := context.Background()
@@ -343,9 +352,9 @@ func boundSkillStep(t *testing.T, repo *Repository, service *skillrun.Service, r
 	}
 	command := skillrun.StepCommand{OwnerID: "owner-a", RunID: run.ID, StepKey: stepKey,
 		OperationID: execution.OperationID, IdempotencyKey: execution.IdempotencyKey}
-	prepared := generation.PreparedInput{ID: generation.PreparedInputID("prepared-" + execution.OperationID[:12]),
+	prepared := generation.PreparedInput{ID: generation.PreparedInputID("prepared-" + operationSuffix(execution.OperationID)),
 		OwnerID: "owner-a", SessionID: "session-a", Capability: "image-to-image", OfferingID: "offering-i2i",
-		OfferingRevision: "r7", InputHash: "hash-" + execution.OperationID[:12],
+		OfferingRevision: "r7", InputHash: "hash-" + operationSuffix(execution.OperationID),
 		Assets: []generation.PreparedInputAsset{{ID: "source-a"}}, CreatedAt: time.Now().UTC()}
 	if err = repo.CreatePreparedInput(ctx, prepared); err != nil {
 		t.Fatal(err)
@@ -354,8 +363,8 @@ func boundSkillStep(t *testing.T, repo *Repository, service *skillrun.Service, r
 		PreparedInputID: prepared.ID, PreparedInputHash: prepared.InputHash}); err != nil {
 		t.Fatal(err)
 	}
-	grantID := "grant-" + execution.OperationID[:12]
-	taskID := "task-" + execution.OperationID[:12]
+	grantID := "grant-" + operationSuffix(execution.OperationID)
+	taskID := "task-" + operationSuffix(execution.OperationID)
 	if _, err = repo.db.Exec(`INSERT INTO execution_grants
 		(request_id,owner_id,session_id,offering_id,offering_revision,prepared_input_id,
 		prepared_input_hash,idempotency_key,operation_id,plan_step_id,status,source,
@@ -395,7 +404,7 @@ func TestSkillStepRestartStartsANewAttemptOnlyAfterFailureOrDenial(t *testing.T)
 		t.Fatal(err)
 	}
 	front := boundSkillStep(t, repo, service, run, "front", "RUNNING")
-	failedTask := generation.TaskID("task-" + front.OperationID[:12])
+	failedTask := generation.TaskID("task-" + operationSuffix(front.OperationID))
 	restart := skillrun.RestartCommand{OwnerID: "owner-a", RunID: run.ID, StepKey: "front", FailedTaskID: failedTask}
 	if _, err = service.RestartSkillStep(ctx, restart); !errors.Is(err, skillrun.ErrConflict) {
 		t.Fatalf("a running task was restarted: %v", err)
@@ -446,14 +455,14 @@ func TestSkillStepRestartStartsANewAttemptOnlyAfterFailureOrDenial(t *testing.T)
 	}
 	next := boundSkillStep(t, repo, service, again, "front", "")
 	if _, err = service.RestartSkillStep(ctx, skillrun.RestartCommand{OwnerID: "owner-a", RunID: run.ID,
-		StepKey: "front", ExpectedAttempt: 1, DeniedGrantID: "grant-" + next.OperationID[:12]}); !errors.Is(err, skillrun.ErrConflict) {
+		StepKey: "front", ExpectedAttempt: 1, DeniedGrantID: "grant-" + operationSuffix(next.OperationID)}); !errors.Is(err, skillrun.ErrConflict) {
 		t.Fatalf("a pending grant was restarted: %v", err)
 	}
-	if _, err = repo.db.Exec(`UPDATE execution_grants SET status='denied' WHERE request_id=?`, "grant-"+next.OperationID[:12]); err != nil {
+	if _, err = repo.db.Exec(`UPDATE execution_grants SET status='denied' WHERE request_id=?`, "grant-"+operationSuffix(next.OperationID)); err != nil {
 		t.Fatal(err)
 	}
 	denied, err := service.RestartSkillStep(ctx, skillrun.RestartCommand{OwnerID: "owner-a", RunID: run.ID,
-		StepKey: "front", ExpectedAttempt: 1, DeniedGrantID: "grant-" + next.OperationID[:12]})
+		StepKey: "front", ExpectedAttempt: 1, DeniedGrantID: "grant-" + operationSuffix(next.OperationID)})
 	if err != nil || denied.Steps[0].Attempt != 2 || denied.Steps[0].Phase != skillrun.Planned {
 		t.Fatalf("denied restart: %+v %v", denied.Steps[0], err)
 	}
@@ -482,8 +491,8 @@ func TestRuntimeRestartFollowsTheRetryRulesOfAStandaloneTask(t *testing.T) {
 	}
 	front := boundSkillStep(t, repo, service, run, "front", "FAILED")
 	side := boundSkillStep(t, repo, service, run, "side", "FAILED")
-	frontTask := generation.TaskID("task-" + front.OperationID[:12])
-	sideTask := generation.TaskID("task-" + side.OperationID[:12])
+	frontTask := generation.TaskID("task-" + operationSuffix(front.OperationID))
+	sideTask := generation.TaskID("task-" + operationSuffix(side.OperationID))
 	gateway := taskReader{tasks: map[generation.TaskID]generation.Task{
 		frontTask: {ID: frontTask, OwnerID: "owner-a", SessionID: "session-a", State: generation.TaskFailed,
 			Failure: &generation.Failure{Class: generation.FailureRejected, Retryable: false}},

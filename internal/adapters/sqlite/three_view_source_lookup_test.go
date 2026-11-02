@@ -93,8 +93,8 @@ func TestSQLiteSourceOfDuringGrantToStepBinding(t *testing.T) {
 	}
 	front := boundSkillStep(t, repo, runs, run, "front", "SUCCEEDED")
 	side := boundSkillStep(t, repo, runs, run, "side", "RUNNING")
-	frontID := generation.TaskID("task-" + front.OperationID[:12])
-	sideID := generation.TaskID("task-" + side.OperationID[:12])
+	frontID := generation.TaskID("task-" + operationSuffix(front.OperationID))
+	sideID := generation.TaskID("task-" + operationSuffix(side.OperationID))
 	if _, err := repo.db.Exec(`UPDATE skill_run_steps SET phase='grant_pending',task_id=NULL WHERE run_id=? AND step_key='side'`, run.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -239,8 +239,8 @@ func TestSQLiteSourceOfBeyondThousandRuns(t *testing.T) {
 	}
 	front := boundSkillStep(t, repo, runs, run, "front", "SUCCEEDED")
 	side := boundSkillStep(t, repo, runs, run, "side", "RUNNING")
-	frontID := "task-" + front.OperationID[:12]
-	sideID := "task-" + side.OperationID[:12]
+	frontID := "task-" + operationSuffix(front.OperationID)
+	sideID := "task-" + operationSuffix(side.OperationID)
 	if _, err := repo.db.Exec(`UPDATE skill_runs SET created_at='2020-01-01T00:00:00Z' WHERE id=?`, run.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -437,8 +437,8 @@ func TestSQLiteSourceOfAfterActualRetry(t *testing.T) {
 	}
 	front := boundSkillStep(t, repo, runs, run, "front", "SUCCEEDED")
 	side := boundSkillStep(t, repo, runs, run, "side", "FAILED")
-	frontID := generation.TaskID("task-" + front.OperationID[:12])
-	oldID := generation.TaskID("task-" + side.OperationID[:12])
+	frontID := generation.TaskID("task-" + operationSuffix(front.OperationID))
+	oldID := generation.TaskID("task-" + operationSuffix(side.OperationID))
 	gateway := taskReader{tasks: map[generation.TaskID]generation.Task{
 		frontID: {ID: frontID, OwnerID: "owner-a", SessionID: "session-a", State: generation.TaskSucceeded,
 			Assets: []generation.Asset{{ID: "front-asset", Role: "image", StorageKey: "blob"}}},
@@ -464,7 +464,7 @@ func TestSQLiteSourceOfAfterActualRetry(t *testing.T) {
 		t.Fatalf("old task after retry: %v %v", member, err)
 	}
 	newStep := boundSkillStep(t, repo, runs, restarted, "side", "SUCCEEDED")
-	newID := generation.TaskID("task-" + newStep.OperationID[:12])
+	newID := generation.TaskID("task-" + operationSuffix(newStep.OperationID))
 	gateway.tasks[newID] = generation.Task{ID: newID, OwnerID: "owner-a", SessionID: "session-a", State: generation.TaskSucceeded}
 	if source, member, err := views.SourceOf(ctx, "owner-a", "session-a", string(newID)); err != nil || !member || source.TaskID != string(frontID) || source.AssetID != "front-asset" {
 		t.Fatalf("new task after retry: %+v %v %v", source, member, err)
