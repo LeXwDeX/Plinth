@@ -155,7 +155,7 @@ function HarnessEditor({ sessionId, ownerId, object, harness, initial, message, 
         return <fieldset key={group.id} className="space-y-2"><legend className="mb-2 font-medium">{group.label}</legend>
           {operations.length ? operations.map(item => <label key={item.id} className={cn('flex cursor-pointer items-start gap-2 rounded-md px-2 py-2 hover:bg-muted focus-within:outline-2 focus-within:outline-ring', draft.operation_id === item.id && 'bg-primary/10')}>
             <input type="radio" name={`${id}-operation`} value={item.id} checked={draft.operation_id === item.id} disabled={harness.busy || Boolean(item.unavailable_reason)} onChange={() => selectOperation(item.id)} className="mt-0.5" />
-            <span className="min-w-0"><span className="font-medium">{item.label}</span><span className="mt-0.5 block leading-4 text-muted-foreground">{item.unavailable_reason || item.description}</span></span>
+            <span className="min-w-0"><span className="font-medium">{item.label}</span>{item.badge ? <span className="ml-1.5 text-[11px] font-normal text-muted-foreground" data-testid="harness-operation-badge">{item.badge}</span> : null}<span className="mt-0.5 block leading-4 text-muted-foreground">{item.unavailable_reason || item.description}</span></span>
           </label>) : <p className="leading-5 text-muted-foreground">{group.empty_message}</p>}
         </fieldset>;
       })}

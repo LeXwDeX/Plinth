@@ -1,7 +1,7 @@
 {
   "version": 2,
   "catalog": "internal/catalog/default_catalog.json",
-  "catalog_sha256": "3b0e6b84e245ed42f3f3f8bc1a7580f9a8e0e8e13d4e6628206f01b54639cf69",
+  "catalog_sha256": "f3c1d7fb8ff6f99035fcde088079877780416a1e9382fc508b7edb8ba01e2ade",
   "samples": [
     "internal/app/testdata/agent-flow/agent-flow.candidate.json",
     "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
@@ -61,21 +61,24 @@
     "offerings": {
       "disabled": 24,
       "disabled-zero-egress": 24,
-      "enabled": 52,
+      "enabled": 53,
       "local-no-wire": 4,
-      "partial": 5,
+      "partial": 6,
       "real": 43,
-      "total": 76
+      "total": 77
     },
     "units": {
       "derived": 17,
       "disabled-zero-egress": 9,
       "local-no-wire": 2,
+      "missing": 1,
       "real": 108,
-      "total": 136
+      "total": 137
     }
   },
-  "incomplete": [],
+  "incomplete": [
+    "tripo.v3|image-to-3d|declared:generation/multiview-to-model"
+  ],
   "units": [
     {
       "adapter_key": "connection:LLM",
@@ -2581,6 +2584,11 @@
           "id": "tripo/tripo-v3.1-full/image-to-3d",
           "model_id": "tripo-v3.1-full",
           "enabled": true
+        },
+        {
+          "id": "tripo/tripo-v3.1-multiview/image-to-3d",
+          "model_id": "tripo-v3.1-multiview",
+          "enabled": true
         }
       ]
     },
@@ -2625,6 +2633,20 @@
         {
           "id": "tripo/geometry/smartsegment-image",
           "model_id": "tripo-smartsegment-image",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "image-to-3d",
+      "endpoint": "declared:generation/multiview-to-model",
+      "evidence": "missing",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "tripo/tripo-v3.1-multiview/image-to-3d",
+          "model_id": "tripo-v3.1-multiview",
           "enabled": true
         }
       ]
@@ -3949,6 +3971,17 @@
       "units": [
         "tripo.v3|text-to-3d|GET /v3/tasks/{id}",
         "tripo.v3|text-to-3d|POST /v3/generation/text-to-model"
+      ]
+    },
+    {
+      "id": "tripo/tripo-v3.1-multiview/image-to-3d",
+      "model_id": "tripo-v3.1-multiview",
+      "adapter_key": "tripo.v3",
+      "enabled": true,
+      "evidence": "partial",
+      "units": [
+        "tripo.v3|image-to-3d|GET /v3/tasks/{id}",
+        "tripo.v3|image-to-3d|declared:generation/multiview-to-model"
       ]
     },
     {

@@ -26,6 +26,7 @@ const (
 	toolPlanProcessing       = "plan_model_processing"
 	toolCreateThreeView      = "create_three_view"
 	toolCreateMultiview      = "create_multiview_images"
+	toolModelFromViews       = "create_model_3d_from_views"
 	toolEditMultiview        = "edit_multiview_images"
 	toolUpdateSessionNotes   = "update_session_notes"
 	toolCreativeLabDesign    = "create_creative_lab_design"
@@ -43,6 +44,9 @@ var (
 	polycountPattern   = regexp.MustCompile(`(\d+)\s*(万)?\s*面`)
 	uploadedPattern    = regexp.MustCompile(`句柄\s*(@img\d+)[：:]\s*用户上传`)
 	// 只有明确的编辑动词才把四视角请求当作编辑；“保持/再来/继续”是新的一组。
+	// 多张视角图生成 3D：句中既有 3D 词又有视角词，且手上至少有两张图。
+	viewsTo3DPattern     = regexp.MustCompile(`(?i)(3d|模型|建模)`)
+	viewsWordPattern     = regexp.MustCompile(`三视图|四视图|多视图|多视角|四视角|视角图|各视角`)
 	multiviewEditPattern = regexp.MustCompile(`编辑|修改|改成|换成|改为`)
 	editVerbPattern      = regexp.MustCompile(`换成|改成|改为|改一下|调成|调整|重画|重绘|同一|保持|按.*(重画|画)|再来|继续`)
 	formatWordPattern    = regexp.MustCompile(`(?i)(gltf|glb|fbx|obj|usdz|stl|3mf)`)
@@ -283,6 +287,11 @@ func (adapter *Adapter) route(request agents.Request, text string) (string, map[
 		}
 		return toolUpdateSessionNotes, map[string]any{"notes": notes}
 
+	case adapter.wants(request, toolModelFromViews) && viewsTo3DPattern.MatchString(text) && viewsWordPattern.MatchString(text) &&
+		len(viewHandles(text, uploads, chosen.images)) >= 2:
+		// 同一物体的多张视角图：句中点名的句柄优先，其次随这句话上传的图，最后是当前选中的图；最多 4 张。
+		return toolModelFromViews, map[string]any{"model": "tripo-v3.1-multiview", "reference_handles": viewHandles(text, uploads, chosen.images)}
+
 	case adapter.wants(request, toolEditMultiview) && strings.Contains(text, "四视角") &&
 		!strings.Contains(text, "生成") && multiviewEditPattern.MatchString(text):
 		// 来源是该四视角组里的一张图（句柄或当前选中），服务端解析为它的公开 Task；
@@ -436,6 +445,17 @@ func (adapter *Adapter) route(request agents.Request, text string) (string, map[
 		return toolRefineImage, map[string]any{"prompt": text, "reference_handles": references}
 	}
 	return "", nil
+}
+
+// viewHandles picks the pictures of a multi-view request: handles named in the
+// sentence, else this turn's uploads, else the current selection (at most 4).
+func viewHandles(text string, uploads, selected []string) []string {
+	for _, candidates := range [][]string{uniqueMatches(imageHandlePattern, text), uploads, selected} {
+		if len(candidates) >= 2 {
+			return candidates[:min(len(candidates), 4)]
+		}
+	}
+	return nil
 }
 
 func creativeLabTemplate(text string) string {

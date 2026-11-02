@@ -186,6 +186,9 @@ func (a *Adapter) validateInput(ctx context.Context, request generation.InputVal
 		_, _, _, err := nativeProcessingSource(request)
 		return err
 	}
+	if request.Offering.Capability == schema.ImageTo3D {
+		return a.validateMultiviewInputsRequest(request)
+	}
 	if request.Offering.Capability != schema.RigCheck {
 		return nil
 	}

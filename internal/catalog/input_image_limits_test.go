@@ -32,6 +32,7 @@ func TestReferenceImageLimitsFollowOfficialLimits(t *testing.T) {
 		{"meshy/meshy-7.1/image-to-3d", 20_000_000, 0, nil},
 		{"meshy/meshy-7.1-multiview/image-to-3d", 20_000_000, 0, nil},
 		{"tripo/tripo-v3.1-full/image-to-3d", 20_000_000, 0, nil},
+		{"tripo/tripo-v3.1-multiview/image-to-3d", 20_000_000, 0, nil},
 		{"tripo/tripo-v3.1/image-to-3d", 20_000_000, 0, nil},
 		{"hyper3d/rodin-gen-2.5/image-to-3d", 10485760, 0, nil},
 	} {
