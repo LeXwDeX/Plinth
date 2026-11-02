@@ -36,7 +36,7 @@ func TestImageDimensionsReadTheOwnersPictureOnly(t *testing.T) {
 	}
 	inputs := &pictureInputs{
 		fakeInputs: fakeInputs{owned: map[generation.AssetID]generation.InputAsset{
-			"snapshot": {ID: "snapshot", OwnerID: "owner-a"},
+			"snapshot": {ID: "snapshot", OwnerID: "owner-a", SHA256: "digest-of-snapshot"},
 			"text":     {ID: "text", OwnerID: "owner-a"},
 		}},
 		bodies: map[generation.AssetID][]byte{"snapshot": encoded.Bytes(), "text": []byte("not a picture")},
@@ -69,6 +69,20 @@ func TestImageDimensionsReadTheOwnersPictureOnly(t *testing.T) {
 	} {
 		if _, _, err := resolver.ImageDimensions(ctx, call[0], call[1]); err == nil {
 			t.Fatalf("%s: measured", name)
+		}
+	}
+
+	// #49: the snapshot's digest is the one recorded for the owner's asset.
+	if digest, err := resolver.InputAssetDigest(ctx, "owner-a", "snapshot"); err != nil || digest != "digest-of-snapshot" {
+		t.Fatalf("digest = %q, %v", digest, err)
+	}
+	for name, call := range map[string][2]string{
+		"another owner": {"owner-b", "snapshot"},
+		"unknown asset": {"owner-a", "missing"},
+		"no owner":      {"", "snapshot"},
+	} {
+		if _, err := resolver.InputAssetDigest(ctx, call[0], call[1]); err == nil {
+			t.Fatalf("%s: digest read", name)
 		}
 	}
 }

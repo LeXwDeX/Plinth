@@ -41,3 +41,20 @@ func (resolver *Resolver) ImageDimensions(ctx context.Context, ownerID, assetID 
 	}
 	return config.Width, config.Height, nil
 }
+
+var _ chat.InputAssetDigester = (*Resolver)(nil)
+
+// InputAssetDigest returns the SHA-256 the platform recorded for an input
+// asset the owner holds. The chat service compares an artboard snapshot with
+// the session's earlier pictures by it (#49); no bytes are read.
+func (resolver *Resolver) InputAssetDigest(ctx context.Context, ownerID, assetID string) (string, error) {
+	if ownerID == "" || assetID == "" {
+		return "", chat.ErrAttachmentRejected
+	}
+	asset, body, err := resolver.inputs.OpenOwned(ctx, generation.OwnerID(ownerID), generation.AssetID(assetID))
+	if err != nil {
+		return "", err
+	}
+	_ = body.Close()
+	return asset.SHA256, nil
+}
