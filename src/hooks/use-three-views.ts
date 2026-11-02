@@ -5,7 +5,8 @@ import useSWR from 'swr';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { createChatBrowserClient } from '@/lib/chat/browser-client';
-import { advanceWithQueue } from '@/lib/workspace/three-view-queue';
+import { schemaText } from '@/lib/product-schema';
+import { advanceWithQueue, threeViewQueueLimitMs } from '@/lib/workspace/three-view-queue';
 import { groupsAreActive, slotAction, type ThreeViewGroup, type ThreeViewSlot } from '@/lib/workspace/three-view';
 import { useChatStore } from '@/store/chat-store';
 
@@ -50,6 +51,9 @@ export function useThreeViews() {
   const advance = useCallback(async (group: ThreeViewGroup, slot: ThreeViewSlot): Promise<string | null> => {
     const action = slotAction(slot);
     if (!sessionId || !action) return null;
+    const limitMs = threeViewQueueLimitMs(schema);
+    // Schema 没有声明排队时限时不提交：没有兜底时长，直接告诉用户不可用。
+    if (limitMs === null) return schemaText(schema, 'ui.studio.three_view.queue_unavailable');
     const busyKey = `${group.runId}:${slot.key}`;
     const controller = aborter.current;
     if (!controller) return null;
@@ -63,6 +67,7 @@ export function useThreeViews() {
           setBusy((current) => (current === busyKey ? null : current));
         },
         signal: controller.signal,
+        limitMs,
       });
       if (!next) return null;
       await mutate((current) => (current ?? NONE).map((item) => (item.runId === next.runId ? next : item)), { revalidate: false });

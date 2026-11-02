@@ -68,6 +68,7 @@ type parallelExecutor struct {
 	attempts  map[string]int
 	full      bool // the kernel refuses every new submission (admission full)
 	room      int  // submissions still accepted before the kernel refuses; negative: unlimited
+	bare      bool // a refusal carries no receipt text, like a tool that leaves it to the orchestrator
 	sessionID string
 }
 
@@ -82,8 +83,12 @@ func (e *parallelExecutor) Execute(_ context.Context, command chat.ToolCommand, 
 	if command.BoundTaskID == "" {
 		e.attempts[command.Call.ID]++
 		if e.full || e.room == 0 {
+			content := "failed:" + command.Call.ID
+			if e.bare {
+				content = ""
+			}
 			e.mu.Unlock()
-			return chat.ToolResult{NoSubmission: true, RetryAfter: time.Second, AgentContent: "failed:" + command.Call.ID},
+			return chat.ToolResult{NoSubmission: true, RetryAfter: time.Second, AgentContent: content},
 				errors.New("too many requests")
 		}
 		if e.room > 0 {
@@ -428,6 +433,36 @@ func TestQueuedSubmissionFailsAfterTheRequestTimeout(t *testing.T) {
 	}
 	if turn := f.turn(); turn.State != "configured-turn-error" {
 		t.Fatalf("state = %s", turn.State)
+	}
+}
+
+// #59: a refusal past the queue deadline is the call's final receipt. A tool
+// that gave no text must not hand the model an empty receipt; the orchestrator
+// falls back to the Schema's generic generation failure text.
+func TestQueuedSubmissionPastTheDeadlineNeverGivesAnEmptyReceipt(t *testing.T) {
+	f := newParallelFixture(t, 2)
+	o := f.orchestrator()
+	f.executor.setRoom(1)
+	f.executor.bare = true
+	if err := o.Process(context.Background(), f.command); err != nil {
+		t.Fatal(err)
+	}
+	ids := f.callIDs()
+	schema := configuredChatSchema(t)
+	timeout := time.Duration(schema.Agent.RequestTimeoutSeconds) * time.Second
+	f.saveWaiting(func(w []chat.WaitingCall) {
+		w[1].QueuedSince = time.Now().Add(-timeout - time.Minute)
+		w[1].RetryAt = time.Now().Add(-time.Second)
+	})
+	f.executor.set(ids[0], generation.TaskSucceeded)
+	f.wake(o)
+	receipts := f.agent.receipts()
+	want := schema.Presentation.Messages.GenerationError
+	if want == "" || len(receipts) != 2 || receipts[1].Content != want {
+		t.Fatalf("receipts = %+v, want %q for the queued call", receipts, want)
+	}
+	if len(f.executor.submissions()) != 1 {
+		t.Fatalf("submitted = %v", f.executor.submissions())
 	}
 }
 

@@ -1336,6 +1336,10 @@ func validatePendingApprovals(schema ChatPendingApprovalsSchema) error {
 	return nil
 }
 
+// threeViewQueueLimitMaximumSeconds keeps a page from resubmitting a refused
+// view for more than a day.
+const threeViewQueueLimitMaximumSeconds = 86400
+
 // validateThreeView accepts an absent declaration and rejects a three-view declaration that names a recipe or a
 // model-source view the Schema does not have, or that leaves a text empty.
 func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSchema) error {
@@ -1345,6 +1349,9 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 	if strings.TrimSpace(schema.Label) == "" || strings.TrimSpace(schema.ModelSourceNote) == "" ||
 		schema.MaximumListed <= 0 {
 		return errors.New("three_view 的标题、3D 来源说明与列表上限必须声明")
+	}
+	if schema.QueueLimitSeconds <= 0 || schema.QueueLimitSeconds > threeViewQueueLimitMaximumSeconds {
+		return fmt.Errorf("three_view.queue_limit_seconds 必须在 1..%d 之间", threeViewQueueLimitMaximumSeconds)
 	}
 	var recipe *ChatSkillRecipeSchema
 	for i := range recipes {
@@ -1367,7 +1374,8 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 	}
 	messages := schema.Messages
 	for name, value := range map[string]string{
-		"agent_started": messages.AgentStarted, "approval_human": messages.ApprovalHuman,
+		"agent_started": messages.AgentStarted, "admission_full": messages.AdmissionFull,
+		"approval_human":  messages.ApprovalHuman,
 		"approval_policy": messages.ApprovalPolicy, "model_source_not_yet": messages.ModelSourceNotYet,
 		"reference_required": messages.ReferenceRequired,
 	} {

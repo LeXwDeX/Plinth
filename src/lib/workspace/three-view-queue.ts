@@ -1,10 +1,14 @@
 import { ChatBrowserError } from '@/lib/chat/browser-client';
+import type { ProductSchema } from '@/lib/product-schema';
 
 /**
- * 排队等待的总时长上限。前端 Schema 没有暴露可用的请求超时，这里取 30 分钟：
- * 足够覆盖进行中任务排空的常见时间，又不会让标签页无限期挂着重试。
+ * 排队等待的总时长上限，取自 Schema 的 `chat.three_view_limits.queue_limit_seconds`（#59）。
+ * 字段缺失或不是正整数时返回 null：调用方必须显式拒绝开始，不能自带兜底时长。
  */
-export const THREE_VIEW_QUEUE_LIMIT_MS = 30 * 60 * 1000;
+export function threeViewQueueLimitMs(schema: ProductSchema): number | null {
+  const seconds = schema.chat.three_view_limits?.queue_limit_seconds;
+  return typeof seconds === 'number' && Number.isInteger(seconds) && seconds > 0 ? seconds * 1000 : null;
+}
 
 export interface QueuedAdvanceOptions<T> {
   /** 一次提交。进行中任务已满时应抛出带 `retryAfterSeconds` 的 429 `ChatBrowserError`。 */
@@ -13,7 +17,8 @@ export interface QueuedAdvanceOptions<T> {
   onQueued: () => void;
   /** 组件卸载或会话切换时中止等待。 */
   signal: AbortSignal;
-  limitMs?: number;
+  /** 排队等待的总时长上限，见 `threeViewQueueLimitMs`。 */
+  limitMs: number;
 }
 
 /**
@@ -21,7 +26,7 @@ export interface QueuedAdvanceOptions<T> {
  * 同一 action/attempt 再次提交是幂等的（同一幂等键不会重复扣积分），所以这里按服务端给的
  * 等待时间自动重提。成功、其它错误、超过总时长或被中止都会结束循环；中止时返回 undefined。
  */
-export async function advanceWithQueue<T>({ call, onQueued, signal, limitMs = THREE_VIEW_QUEUE_LIMIT_MS }: QueuedAdvanceOptions<T>): Promise<T | undefined> {
+export async function advanceWithQueue<T>({ call, onQueued, signal, limitMs }: QueuedAdvanceOptions<T>): Promise<T | undefined> {
   let waited = 0;
   let queued = false;
   for (;;) {
