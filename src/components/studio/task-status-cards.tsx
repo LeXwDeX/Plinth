@@ -91,6 +91,9 @@ export function TaskStatusCards({ part }: { part: 'running' | 'failed' }) {
             <p className="tabular-nums text-muted-foreground" data-testid="chat-task-elapsed">
               {formatSchemaText(text('ui.studio.task.elapsed'), { time: formatElapsed(elapsedSeconds(task, now, seen.current.get(task.taskId))) })}
             </p>
+            {task.queueNotice ? (
+              <p className="text-muted-foreground" data-testid="chat-task-queue-notice">{task.queueNotice.detail}</p>
+            ) : null}
           </article>
         );
         })}

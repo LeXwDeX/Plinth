@@ -102,6 +102,15 @@ describe('ResultDetail', () => {
     expect(html).not.toContain('result-detail-regenerate');
   });
 
+  it('shows the server-resolved queue reason of a task queued by a rate limit', () => {
+    state.task = ready({ state: 'QUEUED', finished_at: undefined, assets: [], queue_notice: { reason: 'rate_limited', detail: '上游限流，排队中；稍后会自动重试' } });
+    const html = renderToStaticMarkup(<ResultDetail target={{ ...target, url: '', status: 'pending' }} />);
+    expect(html).toContain('data-testid="result-detail-queue-notice"');
+    expect(html).toContain('上游限流，排队中；稍后会自动重试');
+    state.task = ready({ state: 'QUEUED', finished_at: undefined, assets: [] });
+    expect(renderToStaticMarkup(<ResultDetail target={{ ...target, url: '', status: 'pending' }} />)).not.toContain('result-detail-queue-notice');
+  });
+
   it('shows the failure reason of a failed task', () => {
     state.task = ready({ state: 'FAILED', session_id: 's1', assets: [], failure: { class: 'x', retryable: false, detail: '上游拒绝了请求' } });
     const html = renderToStaticMarkup(<ResultDetail target={{ ...target, url: '', status: 'failed' }} />);

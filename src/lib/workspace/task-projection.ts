@@ -50,6 +50,12 @@ export interface TrackedResource {
   reason: string;
 }
 
+/** 任务排队的原因；detail 是服务端已按请求语言解析好的文案，前端原样显示。 */
+export interface TrackedQueueNotice {
+  reason: string;
+  detail: string;
+}
+
 export interface TrackedTaskProjection {
   state: string;
   progress: number;
@@ -64,6 +70,8 @@ export interface TrackedTaskProjection {
   modelId?: string;
   /** When the server accepted the task (ms since epoch); the progress card counts elapsed time from it. */
   createdAt?: number;
+  /** 仅在任务因上游限流等原因排队（QUEUED）时由服务端给出。 */
+  queueNotice?: TrackedQueueNotice;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -170,6 +178,14 @@ function projectResources(raw: unknown): TrackedResource[] {
   });
 }
 
+/** 只认带非空 detail 的对象；形状不对一律忽略，不让坏数据变成空白提示。 */
+export function projectQueueNotice(raw: unknown): TrackedQueueNotice | undefined {
+  if (!isRecord(raw)) return undefined;
+  const detail = text(raw.detail).trim();
+  if (detail === '') return undefined;
+  return { reason: text(raw.reason), detail };
+}
+
 /** 终态与状态展示只从 schema.task_states 判定；未知状态按非终态处理。 */
 export function findTaskState(
   states: TaskStateSchema[],
@@ -205,6 +221,7 @@ export function projectNativeTaskDetail(
     offeringId: text(raw.offering_id),
     modelId: text(raw.model_id),
     ...(Number.isFinite(Date.parse(text(raw.created_at))) ? { createdAt: Date.parse(text(raw.created_at)) } : {}),
+    ...(projectQueueNotice(raw.queue_notice) ? { queueNotice: projectQueueNotice(raw.queue_notice) } : {}),
   };
 }
 

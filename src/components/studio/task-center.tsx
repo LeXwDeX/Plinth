@@ -548,6 +548,9 @@ export function TaskDrawer() {
                 {progressText(task)}
                 {task.resourcesPending ? ` · ${ui.resourcesPending}` : ''}
               </p>
+              {!task.terminal && task.queueNotice ? (
+                <p className="mt-0.5 text-xs text-muted-foreground" data-testid="workspace-task-queue-notice">{task.queueNotice.detail}</p>
+              ) : null}
 
               {confirmingCancel[task.taskId] ? (
                 <div role="alert" className="mt-2 flex flex-col gap-1.5 rounded-md bg-warning/10 p-2 text-xs text-warning" data-testid="workspace-task-cancel-confirm">

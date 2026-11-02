@@ -263,6 +263,9 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
             <Loader2 className="size-3.5 animate-spin" aria-hidden />{stateLabel ?? text(status === 'pending' ? 'ui.studio.strip.pending' : 'ui.studio.strip.running')}
           </p>
         ) : null}
+        {(status === 'pending' || status === 'running') && (task?.queueNotice ?? tracked?.queueNotice) ? (
+          <p className="text-xs text-muted-foreground" role="note" data-testid="result-detail-queue-notice">{(task?.queueNotice ?? tracked?.queueNotice)?.detail}</p>
+        ) : null}
         {loadFailed ? <p className="text-xs text-muted-foreground" role="status">{text('ui.result.detail.load_failed')}</p> : null}
         {displayTarget.kind === 'splat' ? <p className="text-xs text-muted-foreground" role="note" data-testid="result-detail-splat-scope">{text('ui.result.detail.splat_scope')}</p> : null}
 
