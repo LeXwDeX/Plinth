@@ -1536,6 +1536,11 @@ export interface ChatProductSchema {
     warning_ratio: number;
     keep_recent_rounds: number;
   };
+  /**
+   * #275: the per-reply tool call budget in force (the Schema value after the deployment's
+   * AGENT_MAX_TOOL_CALLS_PER_REPLY override). Absent on older servers: the tool call counter is hidden.
+   */
+  agent_limits?: { max_tool_calls_per_reply: number };
   /** Public semantic operation catalog; no private tool wiring or prompts. */
   harness?: PublicHarnessSchema;
   /**

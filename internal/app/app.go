@@ -174,6 +174,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		return nil, err
 	}
 	applicationSchema := taskCatalog.Application()
+	// The per-reply tool call budget in force (#275) is one value for the
+	// orchestrator and the public Schema, so the composer's counter shows the
+	// limit the Agent is held to rather than the Schema default.
+	applicationSchema.Chat = withToolCallBudget(applicationSchema.Chat, config.AgentMaxToolCallsPerReply)
 	if err := catalog.ValidateSkillCatalogAgainstProductSchema(
 		skillCatalog,
 		applicationSchema,

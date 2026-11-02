@@ -552,6 +552,7 @@ function normalizeMessage(
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(taskIds.length > 0 ? { taskIds } : {}),
     ...(paidSteps.length > 0 ? { paidSteps } : {}),
+    ...(wireRole !== schema.chat.roles.user ? { toolCallCount: toolCalls.length } : {}),
     isPending: pending,
     ...(pendingTaskTypes && pendingTaskTypes.length > 0
       ? { pendingTaskTypes }

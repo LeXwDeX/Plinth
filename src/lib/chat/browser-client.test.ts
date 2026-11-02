@@ -503,9 +503,27 @@ describe('ChatBrowserClient', () => {
         isPending: true,
         pendingTaskTypes: ['configured-capability'],
         taskIds: ['task-a'],
+        toolCallCount: 1,
         createdAt: Date.parse('2026-07-26T10:00:00.000Z'),
       },
     ]);
+  });
+
+  it('counts the tool calls of an assistant message and leaves user messages without a count (#275)', async () => {
+    const schema = schemaFixture();
+    const fields = schema.chat.api.response_fields;
+    const client = createChatBrowserClient(schema, {
+      fetcher: async () => Response.json({ messages: [
+        { [fields.id]: 'u1', [fields.role]: schema.chat.roles.user, [fields.content]: 'hi', [fields.created_at]: 1 },
+        { [fields.id]: 'a0', [fields.role]: schema.chat.roles.assistant, [fields.content]: 'plain', [fields.created_at]: 2 },
+        {
+          [fields.id]: 'a1', [fields.role]: schema.chat.roles.assistant, [fields.content]: 'done', [fields.created_at]: 3,
+          [fields.tool_calls]: JSON.stringify([{ [fields.tool_name]: 'a' }, { [fields.tool_name]: 'b' }, { [fields.tool_name]: 'c' }]),
+        },
+      ], next_cursor: '' }),
+    });
+    const { messages } = await client.listMessagePage('s', { limit: 50 });
+    expect(messages.map((message) => message.toolCallCount)).toEqual([undefined, 0, 3]);
   });
 
   it('reads one page of messages with limit and before, oldest first, and reports errors', async () => {

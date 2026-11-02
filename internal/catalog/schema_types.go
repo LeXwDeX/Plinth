@@ -1271,6 +1271,16 @@ type PublicChatSchema struct {
 	// the prompts stay on the server.
 	ContextCompaction PublicChatContextCompaction `json:"context_compaction"`
 	AgentStatus       PublicChatAgentStatus       `json:"agent_status"`
+	// AgentLimits is the effective per-reply tool call budget the composer's
+	// counter shows (#275); chat.agent itself stays server-only.
+	AgentLimits PublicChatAgentLimits `json:"agent_limits"`
+}
+
+// PublicChatAgentLimits carries the one Agent value the browser may read: the
+// per-reply tool call budget in force, i.e. chat.agent.max_tool_calls_per_reply
+// after the deployment's AGENT_MAX_TOOL_CALLS_PER_REPLY override.
+type PublicChatAgentLimits struct {
+	MaxToolCallsPerReply int `json:"max_tool_calls_per_reply"`
 }
 
 // PublicChatAgentStatus tells the browser whether the deployment's Agent can

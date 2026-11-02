@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import { formatSchemaText, type ProductSchema } from '@/lib/product-schema';
 import type { ChatContextUsage } from '@/lib/chat/browser-client';
-import { ContextMeter, contextLevel } from '@/components/studio/context-meter';
+import { ContextMeter, contextLevel, toolCallLevel } from '@/components/studio/context-meter';
 import { PICKER_UPPERCASE_CLASS } from '@/components/studio/table-popover';
 import { useChatStore } from '@/store/chat-store';
 import { useSessionContextStore } from '@/store/session-context-store';
@@ -16,8 +16,8 @@ const mock = vi.hoisted(() => ({ schema: null as unknown }));
 
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema: mock.schema }) }));
 vi.mock('@/components/ui/hint-tooltip', () => ({
-  HintTooltip: ({ name, hint, reason, children }: { name: string; hint?: string; reason?: string; children: React.ReactNode }) => (
-    <span data-hint-name={name} data-hint={hint ?? ''} data-reason={reason ?? ''}>{children}</span>
+  HintTooltip: ({ name, hint, reason, className, children }: { name: string; hint?: string; reason?: string; className?: string; children: React.ReactNode }) => (
+    <span data-hint-name={name} data-hint={hint ?? ''} data-reason={reason ?? ''} data-wrapper-class={className ?? ''}>{children}</span>
   ),
 }));
 vi.mock('@/store/chat-store', async (importOriginal) => {
@@ -47,7 +47,7 @@ const hintOf = (html: string, testId: string) => {
 
 beforeEach(() => { mock.schema = catalog; });
 afterEach(() => {
-  useChatStore.setState({ activeSessionId: null, streamingBuffers: {} });
+  useChatStore.setState({ activeSessionId: null, streamingBuffers: {}, toolCallCounts: {}, messagesBySession: {} });
   useSessionContextStore.setState({ context: {}, compacting: {} });
 });
 
@@ -126,5 +126,90 @@ describe('the context meter (#322)', () => {
     mock.schema = older;
     html = renderToStaticMarkup(<ContextMeter />);
     expect(html).toBe('');
+  });
+});
+
+describe('the tool call counter (#275)', () => {
+  const withLimit = (limit: number | undefined): ProductSchema => {
+    const next = structuredClone(catalog);
+    if (limit !== undefined) next.chat.agent_limits = { max_tool_calls_per_reply: limit };
+    return next;
+  };
+  const assistant = (toolCallCount: number | undefined) => ({ id: 'm1', role: 'assistant' as const, content: 'ok', createdAt: 1, ...(toolCallCount === undefined ? {} : { toolCallCount }) });
+  const render = () => renderToStaticMarkup(<ContextMeter />);
+  const label = messages['ui.studio.tool_calls.label'];
+
+  beforeEach(() => {
+    mock.schema = withLimit(20);
+    open({ tokens: 22_500, window: 1_000_000, compactions: [] });
+  });
+
+  it('shows 0 / limit while the session has no assistant reply', () => {
+    expect(render()).toContain(`>${label} 0 / 20<`);
+  });
+
+  it('counts the newest assistant reply and keeps its final value after the reply ended', () => {
+    useChatStore.setState({ messagesBySession: { s1: [assistant(3), { id: 'u2', role: 'user', content: 'again', createdAt: 2 }] } });
+    expect(render()).toContain(`>${label} 3 / 20<`);
+    useChatStore.setState({ messagesBySession: { s1: [assistant(3), assistant(7)] } });
+    expect(render()).toContain(`>${label} 7 / 20<`);
+  });
+
+  it('grows with the reply: a new reply starts at 0 and observed counts only rise', () => {
+    useChatStore.setState({ messagesBySession: { s1: [assistant(9)] } });
+    useChatStore.getState().initStreaming('s1', { content: 'go' });
+    expect(render()).toContain(`>${label} 0 / 20<`);
+    useChatStore.getState().observeToolCallCount('s1', 2);
+    expect(render()).toContain(`>${label} 2 / 20<`);
+    useChatStore.getState().observeToolCallCount('s1', 1);
+    expect(render()).toContain(`>${label} 2 / 20<`);
+    useChatStore.getState().observeToolCallCount('s1', 5);
+    expect(render()).toContain(`>${label} 5 / 20<`);
+    useChatStore.getState().finishStreaming('s1');
+    expect(render()).toContain(`>${label} 5 / 20<`);
+    // The final message read replaces the live value once the reply is over.
+    useChatStore.getState().applyNewestMessagePage('s1', { messages: [assistant(6)], nextCursor: '' });
+    expect(render()).toContain(`>${label} 6 / 20<`);
+  });
+
+  it('turns warning from 80% of the limit and destructive when it is spent', () => {
+    expect(toolCallLevel(15, 20)).toBe('normal');
+    expect(toolCallLevel(16, 20)).toBe('warning');
+    expect(toolCallLevel(19, 20)).toBe('warning');
+    expect(toolCallLevel(20, 20)).toBe('critical');
+    expect(toolCallLevel(1, 0)).toBe('normal');
+    const level = (count: number) => tag((useChatStore.setState({ messagesBySession: { s1: [assistant(count)] } }), render()), 'composer-tool-calls');
+    expect(level(15)).toContain('text-muted-foreground');
+    expect(level(16)).toContain('text-warning');
+    expect(level(20)).toContain('text-destructive');
+    expect(level(20)).toContain('data-level="critical"');
+  });
+
+  it('takes the limit from the Schema, never a built-in 20', () => {
+    mock.schema = withLimit(35);
+    useChatStore.setState({ messagesBySession: { s1: [assistant(28)] } });
+    const html = render();
+    expect(html).toContain(`>${label} 28 / 35<`);
+    expect(tag(html, 'composer-tool-calls')).toContain('text-warning');
+    expect(hintOf(html, 'composer-tool-calls')).toContain(`data-hint="${messages['ui.studio.tool_calls.hint']}"`);
+  });
+
+  it('hides the counter on a Schema without the limit', () => {
+    mock.schema = withLimit(undefined);
+    expect(render()).not.toContain('composer-tool-calls');
+  });
+
+  it('lays out the figure, the compact action and the counter in that order, the counter on the right edge', () => {
+    const html = render();
+    const order = ['composer-context-meter', 'composer-context-compact', 'composer-tool-calls'].map((id) => html.indexOf(`data-testid="${id}"`));
+    expect(order.every((at) => at >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    // The counter's wrapper takes the free space to its left; the figure and the counter give way (truncate), the action does not.
+    const wrapperClass = (id: string) => hintOf(html, id).match(/data-wrapper-class="([^"]*)"/)?.[1].split(' ') ?? [];
+    expect(wrapperClass('composer-tool-calls')).toEqual(expect.arrayContaining(['ml-auto', 'min-w-0', 'shrink']));
+    expect(wrapperClass('composer-context-meter')).toEqual(expect.arrayContaining(['min-w-0', 'shrink']));
+    expect(wrapperClass('composer-context-compact')).toContain('shrink-0');
+    expect(tag(html, 'composer-context')).not.toContain('justify-between');
+    expect(tag(html, 'composer-tool-calls')).toContain('truncate');
   });
 });
