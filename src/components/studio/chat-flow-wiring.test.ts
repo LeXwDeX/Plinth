@@ -37,6 +37,11 @@ describe('the composer while a turn runs', () => {
     expect(chat).toContain('}).finally(() => setDrainTick((tick) => tick + 1));');
   });
 
+  it('treats only a turn taken from the queue as queued: a stage action or choice answer that fails is not put in the box', () => {
+    expect(chat).toContain('const queued = extra?.queued === true;');
+    expect(chat).not.toContain('const queued = queuedSelection !== undefined;');
+  });
+
   it('does not queue the same message twice while its turn is still starting, and restores a queued one whose start failed', () => {
     expect(chat).toContain('startingRef.current?.sessionId === sessionId && startingRef.current.text === text) return;');
     expect(chat).toContain('const restore = !sent && (replaced || queued) && isCurrentSessionScope(scope) && !controller.signal.aborted;');

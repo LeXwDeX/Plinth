@@ -17,6 +17,7 @@ import (
 type pictureInputs struct {
 	fakeInputs
 	bodies map[generation.AssetID][]byte
+	opens  int
 }
 
 func (inputs *pictureInputs) OpenOwned(_ context.Context, owner generation.OwnerID, id generation.AssetID) (generation.InputAsset, io.ReadCloser, error) {
@@ -24,7 +25,16 @@ func (inputs *pictureInputs) OpenOwned(_ context.Context, owner generation.Owner
 	if !found || asset.OwnerID != owner {
 		return generation.InputAsset{}, nil, errors.New("not owned")
 	}
+	inputs.opens++
 	return asset, io.NopCloser(bytes.NewReader(inputs.bodies[id])), nil
+}
+
+func (inputs *pictureInputs) OwnedInputAsset(_ context.Context, owner generation.OwnerID, id generation.AssetID) (generation.InputAsset, error) {
+	asset, found := inputs.owned[id]
+	if !found || asset.OwnerID != owner {
+		return generation.InputAsset{}, errors.New("not owned")
+	}
+	return asset, nil
 }
 
 // #272: the artboard snapshot's size is read from the owner's own picture, so
@@ -36,7 +46,7 @@ func TestImageDimensionsReadTheOwnersPictureOnly(t *testing.T) {
 	}
 	inputs := &pictureInputs{
 		fakeInputs: fakeInputs{owned: map[generation.AssetID]generation.InputAsset{
-			"snapshot": {ID: "snapshot", OwnerID: "owner-a"},
+			"snapshot": {ID: "snapshot", OwnerID: "owner-a", SHA256: "digest-of-snapshot"},
 			"text":     {ID: "text", OwnerID: "owner-a"},
 		}},
 		bodies: map[generation.AssetID][]byte{"snapshot": encoded.Bytes(), "text": []byte("not a picture")},
@@ -70,5 +80,25 @@ func TestImageDimensionsReadTheOwnersPictureOnly(t *testing.T) {
 		if _, _, err := resolver.ImageDimensions(ctx, call[0], call[1]); err == nil {
 			t.Fatalf("%s: measured", name)
 		}
+	}
+
+	// #49: the snapshot's digest is the one recorded for the owner's asset,
+	// read from its record alone: comparing a long history must not open
+	// (and so re-hash) every earlier picture.
+	opens := inputs.opens
+	if digest, err := resolver.InputAssetDigest(ctx, "owner-a", "snapshot"); err != nil || digest != "digest-of-snapshot" {
+		t.Fatalf("digest = %q, %v", digest, err)
+	}
+	for name, call := range map[string][2]string{
+		"another owner": {"owner-b", "snapshot"},
+		"unknown asset": {"owner-a", "missing"},
+		"no owner":      {"", "snapshot"},
+	} {
+		if _, err := resolver.InputAssetDigest(ctx, call[0], call[1]); err == nil {
+			t.Fatalf("%s: digest read", name)
+		}
+	}
+	if inputs.opens != opens {
+		t.Fatalf("digest comparison opened %d pictures", inputs.opens-opens)
 	}
 }

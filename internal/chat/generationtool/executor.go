@@ -671,11 +671,7 @@ func taskStep(task generation.Task, approval string) stepInfo {
 // submission did not happen, so the orchestrator may queue the call and submit
 // it again with the same frozen idempotency key. Zero for any other error.
 func admissionRetryAfter(err error) time.Duration {
-	var domainErr *generation.Error
-	if errors.As(err, &domainErr) && domainErr.Code == generation.ErrTooManyRequests && domainErr.RetryAfter > 0 {
-		return domainErr.RetryAfter
-	}
-	return 0
+	return generation.AdmissionRetryAfter(err)
 }
 
 func knownNotSubmitted(err error) bool {

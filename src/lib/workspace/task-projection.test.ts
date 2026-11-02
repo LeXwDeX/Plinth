@@ -342,3 +342,22 @@ it.each([['clip', 'model/fbx'], ['print-archive', 'model/3mf']])('keeps explicit
 it('keeps explicit model outputs and no-role legacy model MIME fallback', () => {
   expect(projectNativeTaskDetail(nativeDetail({ assets: [{ id: 'm', role: 'model', media_type: 'model/fbx', url: '/api/m' }, { id: 'legacy', media_type: 'model/fbx', url: '/api/legacy' }] }), states, 100)?.assets.map(asset => asset.kind)).toEqual(['model','model']);
 });
+
+describe('projectNativeTaskDetail queue_notice', () => {
+  const project = (extra: Record<string, unknown>) => projectNativeTaskDetail(nativeDetail({ state: 'QUEUED', ...extra }), states, 100);
+
+  it('服务端给出 queue_notice 时原样投影 reason 与 detail', () => {
+    const notice = { reason: 'rate_limited', detail: '上游限流，排队中；稍后会自动重试，不会重复扣积分' };
+    expect(project({ queue_notice: notice })?.queueNotice).toEqual(notice);
+  });
+
+  it('没有 queue_notice 时不带该字段', () => {
+    expect(project({})).not.toHaveProperty('queueNotice');
+  });
+
+  it('形状不对或 detail 为空时忽略', () => {
+    for (const bad of ['x', 3, null, [], {}, { reason: 'rate_limited' }, { reason: 'rate_limited', detail: '  ' }, { reason: 'r', detail: 5 }]) {
+      expect(project({ queue_notice: bad })).not.toHaveProperty('queueNotice');
+    }
+  });
+});

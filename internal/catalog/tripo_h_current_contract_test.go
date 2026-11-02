@@ -136,3 +136,35 @@ func TestTripoHCurrentPriceBranchesAndConsent(t *testing.T) {
 		t.Fatalf("upper quote=%+v err=%v", q, err)
 	}
 }
+
+// #50: Tripo's image enhancement is "used for AI completion"
+// (https://developers.tripo3d.ai/en/docs/generation-image-to-model, official
+// default false). With the textured defaults above it rebuilt a head-only part
+// picture as a whole body (dev-test A/B 2026-11-02: on → whole body, off →
+// the head), so single-picture Tripo image to 3D sends it off unless the Agent
+// turns it on for a reason.
+func TestTripoImageTo3DLeavesImageAutofixOff(t *testing.T) {
+	c, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"tripo/tripo-v3.1-full/image-to-3d", "tripo/tripo-v3.1/image-to-3d"} {
+		o, ok := c.Get(schema.OfferingID(id))
+		if !ok {
+			t.Fatalf("%s missing", id)
+		}
+		found := false
+		for _, p := range o.Parameters {
+			if p.Name != "enable_image_autofix" {
+				continue
+			}
+			found = true
+			if string(p.Default) != "false" || p.AdjustmentPolicy != "advised" {
+				t.Fatalf("%s enable_image_autofix default=%s policy=%q", id, p.Default, p.AdjustmentPolicy)
+			}
+		}
+		if !found {
+			t.Fatalf("%s declares no enable_image_autofix", id)
+		}
+	}
+}

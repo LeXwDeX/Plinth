@@ -311,7 +311,7 @@
                 "name": "LLM_MODEL"
               }
             ],
-            "default": "qwen3.8-omni-flash"
+            "default": "qwen-omni-flash"
           },
           "agent_max_tool_calls_per_reply": {
             "type": "string",
@@ -3232,10 +3232,12 @@
 		"ui.workspace.processing.plan_confirm_step": "确认本步骤并执行",
         "ui.workspace.processing.plan_reconcile": "核对上次提交结果",
         "ui.workspace.processing.plan_pending": "等待上一步完成",
+        "ui.workspace.processing.plan_step_pending": "等待中",
         "ui.workspace.processing.plan_step_running": "处理中",
         "ui.workspace.processing.plan_step_done": "已完成",
         "ui.workspace.processing.plan_step_failed": "失败",
         "ui.workspace.processing.plan_step_paused": "已暂停",
+        "ui.workspace.processing.plan_step_queued": "排队等待提交",
         "ui.workspace.processing.plan_auto_rigging": "动作需要先绑骨，已加入绑骨步骤。",
         "ui.workspace.processing.plan_incompatible": "所选步骤没有可用的输入路径，请调整步骤或模型。",
         "ui.workspace.processing.source_refused": "当前模型（{size}）不能直接做这一步：{reasons}。可以换一个符合这些条件的模型再试。",
@@ -4356,6 +4358,8 @@
         "ui.studio.three_view.retry": "重试",
         "ui.studio.three_view.attempt": "第 {attempt} 次",
         "ui.studio.three_view.no_retry": "这一张不能重试",
+        "ui.studio.three_view.queued": "任务较多，已排队；稍后自动提交，不会重复扣积分",
+        "ui.studio.three_view.queue_unavailable": "三视图排队配置缺失，暂时不能开始，请联系管理员",
         "ui.studio.three_view.view": "查看",
         "ui.studio.three_view.to_3d": "转 3D",
         "ui.studio.three_view.to_3d_wait": "正面图完成后才能转 3D。",
@@ -4884,6 +4888,26 @@
         "thinking": {
           "enabled": true,
           "model_profiles": [
+            {
+              "model_prefixes": [
+                "qwen-omni-flash"
+              ],
+              "request_fields": {
+                "enable_thinking": true
+              },
+              "effort_field": "reasoning_effort",
+              "effort_levels": ["low", "medium", "xhigh"],
+              "default_effort": "xhigh",
+              "context_window_tokens": 1000000
+            },
+            {
+              "model_prefixes": [
+                "gpt-astra"
+              ],
+              "effort_field": "reasoning_effort",
+              "effort_levels": ["low", "medium", "high"],
+              "default_effort": "high"
+            },
             {
               "model_prefixes": [
                 "deepseek"
@@ -6915,8 +6939,10 @@
         "label": "三视图",
         "maximum_listed": 10,
         "model_source_note": "用三视图做 3D 模型时只使用正面图，侧面和背面图不参与。",
+        "queue_limit_seconds": 1800,
         "messages": {
           "agent_started": "三视图运行 {run} 的 {view} 步骤已提交（{approval}，估算 {credits} 积分），任务 {task}。三视图的其余视图不会自动开始，用户在三视图卡片上逐个点“继续生成”才会开始；在三张都完成之前，不要说三视图已全部完成。",
+          "admission_full": "进行中的生成任务较多，这个三视图步骤排队等待超过了时限，任务没有提交，也没有扣积分。请告诉用户稍后再试，或在三视图卡片上点“继续生成”重新开始这个视图；不要说三视图已经开始生成。",
           "approval_human": "用户已批准",
           "approval_policy": "按会话批准方式自动批准，不是用户点的批准",
           "model_source_not_yet": "这组三视图的正面图还没有生成完成，不能用它做 3D 模型。请等正面图完成，或在三视图卡片上重试正面图。",
@@ -12668,10 +12694,12 @@
             "ui.workspace.processing.plan_confirm_step": "Confirm this step and run it",
             "ui.workspace.processing.plan_reconcile": "Check the last submission result",
             "ui.workspace.processing.plan_pending": "Waiting for the previous step to finish",
+            "ui.workspace.processing.plan_step_pending": "Waiting",
             "ui.workspace.processing.plan_step_running": "Processing",
             "ui.workspace.processing.plan_step_done": "Completed",
             "ui.workspace.processing.plan_step_failed": "Failed",
             "ui.workspace.processing.plan_step_paused": "Paused",
+            "ui.workspace.processing.plan_step_queued": "Queued to submit",
             "ui.workspace.processing.plan_auto_rigging": "The animation requires rigging first; a rigging step has been added.",
             "ui.workspace.processing.plan_incompatible": "The selected steps have no usable input path. Adjust the steps or the model.",
             "ui.workspace.processing.source_refused": "The current model ({size}) cannot go into this step directly: {reasons}. Try a model that meets these conditions.",
@@ -13796,6 +13824,8 @@
             "ui.studio.three_view.retry": "Retry",
             "ui.studio.three_view.attempt": "Attempt {attempt}",
             "ui.studio.three_view.no_retry": "This one can't be retried",
+            "ui.studio.three_view.queued": "Many tasks are in flight; queued and will submit automatically without charging again",
+            "ui.studio.three_view.queue_unavailable": "The three-view queue setting is missing, so views cannot start; contact an administrator",
             "ui.studio.three_view.view": "View",
             "ui.studio.three_view.to_3d": "Convert to 3D",
             "ui.studio.three_view.to_3d_wait": "You can convert to 3D once the front view is completed.",
@@ -16133,7 +16163,7 @@
             "自信阔步 (Confident_Strut)": "Confident strut",
             "自信阔步·原地 (Confident_Strut_inplace)": "Confident strut (in place)",
             "自动": "Auto",
-            "自动优化输入图片以获得更好结果（耗时略增）": "Automatically optimizes the input image for better results (takes slightly longer)",
+            "生成前用 AI 补全并优化输入图片（耗时略增）；单独的部件或残缺主体可能被补全成完整物体，默认关闭": "Uses AI to complete and optimize the input image before generation (takes slightly longer); a separate part or partial subject may be completed into a whole object, so it is off by default",
             "自动尺寸": "Auto size",
             "自动真实尺寸": "Auto real-world size",
             "自动缩放至真实世界尺寸（单位：米），仅纹理模型可用": "Automatically scales to real-world size (in meters); available for textured models only",
@@ -22185,8 +22215,8 @@
           "name": "enable_image_autofix",
           "label": "图片增强",
           "type": "boolean",
-          "description": "自动优化输入图片以获得更好结果（耗时略增）",
-          "default": true,
+          "description": "生成前用 AI 补全并优化输入图片（耗时略增）；单独的部件或残缺主体可能被补全成完整物体，默认关闭",
+          "default": false,
           "presentation": {
             "surface": "readonly",
             "control": "boolean",
@@ -23624,8 +23654,8 @@
           "name": "enable_image_autofix",
           "label": "图片增强",
           "type": "boolean",
-          "description": "自动优化输入图片以获得更好结果（耗时略增）",
-          "default": true,
+          "description": "生成前用 AI 补全并优化输入图片（耗时略增）；单独的部件或残缺主体可能被补全成完整物体，默认关闭",
+          "default": false,
           "presentation": {
             "surface": "readonly",
             "control": "boolean",

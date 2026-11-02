@@ -6,7 +6,7 @@
 
 import { offeringShowsCredits, type OfferingParameterWire, type OfferingWire } from '@/lib/agent-offerings';
 import { formatSchemaText, schemaCountMessage, schemaText, type ProductSchema } from '@/lib/product-schema';
-import { findTaskState, projectTaskAssets, type TrackedAsset } from '@/lib/workspace/task-projection';
+import { findTaskState, projectQueueNotice, projectTaskAssets, type TrackedAsset, type TrackedQueueNotice } from '@/lib/workspace/task-projection';
 import { ratioOfSize } from '@/lib/workspace/generation-params';
 import type { AgentScope } from '@/store/chat-store';
 import { primaryParent, type VersionTiles } from '@/lib/workspace/versions';
@@ -37,6 +37,8 @@ export interface TaskDetailWire {
   assetCount: number;
   /** Owner-scoped public artifacts, including files that have no media preview. */
   assets: TrackedAsset[];
+  /** 因上游限流等原因排队时的说明，文案由服务端按请求语言解析。 */
+  queueNotice?: TrackedQueueNotice;
 }
 
 const str = (value: unknown): string => (typeof value === 'string' ? value : '');
@@ -73,6 +75,7 @@ export function parseTaskDetail(raw: unknown): TaskDetailWire | null {
       : null,
     inputDerivations: parseInputDerivations(raw.input_derivations),
     assets: projectTaskAssets(raw.assets),
+    ...(projectQueueNotice(raw.queue_notice) ? { queueNotice: projectQueueNotice(raw.queue_notice) } : {}),
     assetCount: Array.isArray(raw.assets) ? raw.assets.filter((asset) => isRecord(asset) && str(asset.media_type).startsWith('image/')).length : 0,
   };
 }

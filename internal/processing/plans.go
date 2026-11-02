@@ -111,6 +111,9 @@ type Step struct {
 	PlanStepID          string                     `json:"plan_step_id,omitempty"`
 	IdempotencyKey      string                     `json:"idempotency_key,omitempty"`
 	AuthorizationRef    string                     `json:"authorization_request_id,omitempty"`
+	// QueuedUntil 记录生成内核因在途准入已满拒绝本步提交后的下一次重试
+	// 时间：内核确定没有提交，计划保持活动，到点后后台按同一幂等键再提交。
+	QueuedUntil *time.Time `json:"queued_until,omitempty"`
 }
 
 type Plan struct {
@@ -906,6 +909,9 @@ func (s *Service) advance(ctx context.Context, plan *Plan) error {
 			plan.UpdatedAt = time.Now().UTC()
 			return s.savePlan(ctx, plan)
 		}
+		if step.QueuedUntil != nil && time.Now().Before(*step.QueuedUntil) {
+			return nil // 准入已满排队中，到点再提交
+		}
 		stepKey := stepIdempotencyKey(*plan, index)
 		// Reconcile a committed Task before consulting the possibly changed
 		// catalog. A lost Submit response must never create a second paid Task.
@@ -919,7 +925,7 @@ func (s *Service) advance(ctx context.Context, plan *Plan) error {
 				return s.stop(ctx, plan, step, Paused, ReasonSubmitUnreconciled)
 			}
 			step.TaskID, step.State, plan.State = recovered.ID, Running, Running
-			step.Failure, step.SubmissionUncertain = "", false
+			step.Failure, step.SubmissionUncertain, step.QueuedUntil = "", false, nil
 			plan.Failure, plan.UpdatedAt = "", time.Now().UTC()
 			return s.savePlan(ctx, plan)
 		case generation.IsCode(lookupErr, generation.ErrNotFound):
@@ -1017,10 +1023,19 @@ func (s *Service) advance(ctx context.Context, plan *Plan) error {
 			if submitRejected(err) {
 				return s.stop(ctx, plan, step, Failed, ReasonSubmitRejected)
 			}
+			if wait := generation.AdmissionRetryAfter(err); wait > 0 {
+				// 在途准入已满：内核确定没有提交。冻结输入和授权已在上面落库，
+				// 计划保持活动、记下重试时间，后台到点按同一幂等键再提交，
+				// 不暂停、不需要用户再次确认，也不会重复扣费。
+				until := time.Now().UTC().Add(wait)
+				step.QueuedUntil = &until
+				plan.UpdatedAt = time.Now().UTC()
+				return s.savePlan(ctx, plan)
+			}
 			return s.stop(ctx, plan, step, Paused, ReasonSubmitUnknown)
 		}
 		step.TaskID, step.State, plan.State = accepted.TaskID, Running, Running
-		step.Failure, step.SubmissionUncertain = "", false
+		step.Failure, step.SubmissionUncertain, step.QueuedUntil = "", false, nil
 		plan.UpdatedAt = time.Now().UTC()
 		return s.savePlan(ctx, plan)
 	}

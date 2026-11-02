@@ -183,7 +183,7 @@ check `docker compose logs art-ai`.
   [Provider configuration](docs/provider-configuration.md).
 - **Agent chat model:** `LLM_BASE_URL` and `LLM_API_KEY` configure only the Agent chat model.
   They do not configure image or 3D Providers. `LLM_MODEL` defaults to the Schema value
-  `qwen3.8-omni-flash` (a strong multimodal model); set it to the model name served by your endpoint when needed. The Agent model
+  `qwen-omni-flash`, a version-less alias (a strong multimodal model; the gateway currently resolves it to qwen3.8-omni-flash; thinking levels low/medium/xhigh, default xhigh). A second connection can use `LLM_CONNECTIONS=GPT` with `GPT_MODEL=gpt-astra` (currently resolves to gpt-6-astra; levels low/medium/high, default high). The aliases let the upstream gateway upgrade versions without the downstream configuration changing (2026-11-02 maintainer decision, #64). Set it to the model name served by your endpoint when needed. The Agent model
   must support multimodal input and at least be able to read images.
 - **Gemini images:** set both `GEMINI_API_KEY` and `GEMINI_BASE_URL` to enable Gemini. It has
   no default base URL and never borrows `LLM_BASE_URL`; if all models use one gateway, set
@@ -235,7 +235,7 @@ default URL, and it does not use `LLM_BASE_URL`. When one gateway serves several
 set every connection's base URL explicitly.
 
 For live Agent chat, set `AGENT_MODE=live`, `LLM_BASE_URL` and `LLM_API_KEY`. `LLM_MODEL`
-uses the Schema default `qwen3.8-omni-flash` (a strong multimodal model) when empty; set the model name served by your endpoint if
+uses the Schema default `qwen-omni-flash` (a version-less alias for a strong multimodal model; currently resolves to qwen3.8-omni-flash, thinking levels low/medium/xhigh, default xhigh; a second connection may use `LLM_CONNECTIONS=GPT`, `GPT_MODEL=gpt-astra`, levels low/medium/high, default high; maintainer decision 2026-11-02, #64) when empty; set the model name served by your endpoint if
 that default does not apply. The Agent model must support multimodal input and image reading; prefer a strong vision model, since weak ones miss canvas annotations (red circles, arrows).
 
 To let users pick more chat models, list connection IDs in `LLM_CONNECTIONS` (for example

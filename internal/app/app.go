@@ -80,6 +80,10 @@ type Application struct {
 	server           *http.Server
 }
 
+// The chat references read a snapshot's recorded digest through this, never
+// the bytes (#49).
+var _ references.InputAssetRecords = (*inputassets.Service)(nil)
+
 type renderAssetStore struct {
 	inputs   *inputassets.Service
 	maxBytes int64

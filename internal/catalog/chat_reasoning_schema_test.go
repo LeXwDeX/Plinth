@@ -37,6 +37,8 @@ func TestDefaultCatalogDeclaresThinkingLevelsAndContextWindows(t *testing.T) {
 	}
 	no := false
 	wants := []want{
+		{prefix: "qwen-omni-flash", levels: []string{"low", "medium", "xhigh"}, fallback: "xhigh", window: 1000000},
+		{prefix: "gpt-astra", levels: []string{"low", "medium", "high"}, fallback: "high"},
 		{prefix: "deepseek", levels: []string{"low", "high", "max"}, fallback: "low", window: 1000000},
 		{prefix: "qwen3.8-omni-flash", levels: []string{"low", "medium", "xhigh"}, fallback: "xhigh", window: 1000000},
 		{prefix: "qwen3.8", levels: []string{"low", "medium", "xhigh"}, fallback: "xhigh"},
@@ -60,6 +62,15 @@ func TestDefaultCatalogDeclaresThinkingLevelsAndContextWindows(t *testing.T) {
 			expected.usage != nil && *expected.usage != *profile.StreamIncludeUsage {
 			t.Fatalf("profile %s stream usage = %v", expected.prefix, profile.StreamIncludeUsage)
 		}
+	}
+	// Version-less aliases (2026-11-02, #64) resolve to their own profiles.
+	if profile, ok := thinking.ProfileFor("qwen-omni-flash"); !ok || profile.DefaultEffort != "xhigh" ||
+		!slices.Equal(profile.EffortLevels, []string{"low", "medium", "xhigh"}) {
+		t.Fatalf("qwen-omni-flash profile = %#v %v", profile, ok)
+	}
+	if profile, ok := thinking.ProfileFor("gpt-astra"); !ok || profile.DefaultEffort != "high" ||
+		!slices.Equal(profile.EffortLevels, []string{"low", "medium", "high"}) {
+		t.Fatalf("gpt-astra profile = %#v %v", profile, ok)
 	}
 	// The dev-test model name routes to DeepSeek's flash model.
 	if profile, ok := thinking.ProfileFor("DeepSeek-Flash"); !ok || profile.ModelPrefixes[0] != "deepseek" {

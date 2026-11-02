@@ -1234,3 +1234,14 @@ func mapRepositoryError(operation string, err error) error {
 		return &Error{Code: ErrUnavailable, Operation: operation, Detail: "本地持久化暂不可用", Cause: err}
 	}
 }
+
+// AdmissionRetryAfter 是生成内核因在途准入已满拒绝一次提交时要求的等待
+// 时长。这种拒绝发生在写入任何 Task 之前，调用方可以确定没有提交，沿用同一
+// 冻结幂等键排队重试。其他错误返回 0。
+func AdmissionRetryAfter(err error) time.Duration {
+	var domainErr *Error
+	if errors.As(err, &domainErr) && domainErr.Code == ErrTooManyRequests && domainErr.RetryAfter > 0 {
+		return domainErr.RetryAfter
+	}
+	return 0
+}
