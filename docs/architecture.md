@@ -1340,7 +1340,20 @@ profile 声明 `reasoning_passback` 时，Adapter 从流式 `delta.reasoning_con
 - **等待扫描。** `scanTurn` 对每个在途项读取任务：全部到达终态（成功、失败、取消）或各自超过 `deadline`，才唤醒（`Queued`）；缺失截止时间的旧项按持久等待写入时间补齐；任务不可读时不抑制截止时间；所有者或会话不符是检查点冲突。唤醒后重放每个调用，已绑定的调用经 `observeBoundTask` 取回结果，幂等键冻结，不重复提交。
 - **准入满时排队。** 生成内核的 `RepositoryAdmissionFull` 仍映射为 `ErrTooManyRequests`（`RetryAfter` 30s），内核逻辑未改。`generationtool` 在确定未提交的该错误上设置 `ToolResult.RetryAfter` 并保留失败回执；编排器据此把调用记为无 `task_id` 的待重试项（`retry_at`、`queued_since`、`deadline = queued_since + chat.agent.request_timeout_seconds`），沿用同一冻结幂等键，第一次被拒时通过 `status` 流事件推送排队文案，并停止本批后续提交。扫描器在 `retry_at` 到期、或所有在途任务已终态时唤醒，重新提交；超过 `deadline` 才把失败回执交给模型。
 - **预算。** 工具预算（#275）和 `PriorGenerationCalls` 计数不变：单次回复最多执行 `max_tool_calls_per_reply` 个调用，超出的在总结轮列给用户，第 21 个生成调用因此不被提交。
-- **验证范围。** `internal/chat` 的并发提交、统一等待与回执顺序、单个失败、停止、重启恢复、旧检查点、排队重试与超时、预算测试，`generationtool`、Adapter 与 Schema 测试均为本机测试；没有真实上游、没有部署验收。仅 `generationtool` 的通用生成与带批准卡的路径会设置 `RetryAfter`，三视图、处理计划等其他提交路径遇到准入满仍按原失败返回。
+- **验证范围。** `internal/chat` 的并发提交、统一等待与回执顺序、单个失败、停止、重启恢复、旧检查点、排队重试与超时、预算测试，`generationtool`、Adapter 与 Schema 测试均为本机测试；没有真实上游、没有部署验收。三视图与处理计划的提交入口见下一节（#59）。
+
+
+#### 三视图与处理计划在准入已满时排队重提（#59，2026-11-02；源码已实现，本机测试通过，未部署验收）
+
+起因：上一节只让对话内的生成工具在准入已满时排队，其余提交入口仍按失败处理：Agent 的三视图工具返回错误，轮次以“提交结果不明”挂起；页面上继续三视图直接弹出 429；处理计划暂停为 `plan_submit_unknown`（原因不对，还要用户手动继续）。
+
+- **排队条件。** 只针对生成内核因在途准入已满拒绝的那次提交：`RepositoryAdmissionFull` 映射为 `ErrTooManyRequests` 且带 `RetryAfter`（30s）。这一拒绝发生在写入任何 Task 之前，内核确定没有提交。统一判定是 `generation.AdmissionRetryAfter(err)`，`generationtool`、`agenttools`、`processing` 共用；其他错误返回 0，照原路径处理（提交结果不明仍暂停，确定拒绝仍失败）。内核逻辑未改。
+- **处理计划。** `Step` 新增 `queued_until`（RFC3339，随计划 `steps_json` 持久化，计划 API 原样返回）。被拒时冻结输入（PreparedInput）、授权引用（`AuthorizationRef`）、操作与步骤 ID、幂等键都已在提交前落库；计划保持 PENDING/RUNNING，步骤状态与 `failure` 不变，只记 `queued_until = now + RetryAfter`。后台 `Run` 每 2 秒推进一次：未到 `queued_until` 的步骤跳过；到点后先按幂等键对账（`LookupByIdempotency`），确实不存在再用同一冻结输入、同一授权、同一幂等键 `SubmitPrepared`，不重新确认、不重复扣费。提交成功或对账找回既有 Task 时清除 `queued_until`。排队没有总时长上限：在途任务各有 `Offering.Timeout`，准入一定会释放。
+- **Agent 三视图工具。** `SubmitStep` 遇到该错误时，`create_three_view` 返回 `ToolResult{NoSubmission: true, RetryAfter}`，交给上一节的编排器排队逻辑（`retry_at` / `queued_since` / `deadline = queued_since + chat.agent.request_timeout_seconds`，第一次被拒推送 `queued_submission` 状态）。SkillRun 步骤仍停在 `GrantPending`，授权仍是已批准；唤醒后同一调用重放，`PrepareStep` / `RequestAgentGrant` 按已有记录幂等返回，`SubmitStep` 用同一幂等键提交。
+- **页面继续三视图。** `threeview.Service.Advance` 按设计是用户发起的单次请求，没有后台 worker，这里不改：准入满时仍返回 HTTP 429 + `Retry-After`。前端 `ChatBrowserError.retryAfterSeconds` 读取该头；`advanceWithQueue`（`src/lib/workspace/three-view-queue.ts`）收到 429 + `Retry-After` 时不报错，等待后以同样的 action / attempt 重新请求（步骤与授权未变，重复请求幂等，不重复扣费）；累计等待上限 30 分钟（注释常量，前端 Schema 没有可用的请求超时），超时、其他错误或无 `Retry-After` 的 429 照旧报错；卸载或切换会话时中止。用户关掉页面后，步骤仍停在已批准，下次点击继续即可提交。
+- **待审批。** `pendingapproval.permanentSubmitFailure` 本来就不把 `ErrTooManyRequests` 当永久失败，后台清扫会重提，不改。
+- **界面。** 处理计划步骤有 `queued_until` 且未终态、未暂停、未在运行时显示 `ui.workspace.processing.plan_step_queued`（“排队等待提交”）；排队中的三视图视图显示 `ui.studio.three_view.queued`（“任务较多，已排队；稍后自动提交，不会重复扣积分”），按钮保持加载与禁用，其他视图不受影响。顺带补上一直缺失的 `ui.workspace.processing.plan_step_pending`（此前等待中步骤的文案为空）。三个键都有中英文。
+- **验证范围。** `internal/processing/admission_queue_test.go`（不暂停、保留冻结输入与授权、到点前不提交、到点后按同一幂等键只提交一次）、`internal/chat/agenttools/three_view_admission_test.go`（请求排队、授权保持已批准、重放提交且幂等键不变）、前端 `three-view-queue`（假时钟）、`browser-client` 的 `Retry-After` 解析、三视图卡片与加工面板测试，均为本机测试；没有真实准入满场景，没有部署验收。
 
 #### 会话思考强度、上下文用量与压缩（#322，2026-10-22；源码已实现，本机 Mock 栈 Chromium/WebKit 验收，未部署验收）
 
@@ -1463,6 +1476,7 @@ SkillRun 核对 owner/session/turn、冻结输入、Offering 修订、操作及�
 - **冻结回归的验证范围。** 本机测试在同一持久库上更换 Catalog 配方解析器与 SkillRun Runtime，复用未设置 SchemaVersion 的测试 Generation，证明旧 Run 的读取、准备与配方冻结；不证明 application revision `.102` → `.103` 后旧 PreparedInput 可以继续提交。实际应用把 application revision 传给 Generation，未接受的旧 PreparedInput 在版本不一致时仍由 `SubmitPrepared` 拒绝，须重新准备并按既有批准合同处理，本次不放宽此边界。
 
 - **设计选择：显式继续，不自动接力。** 首张由 Agent 工具开始；其余两张只在用户请求时开始。这与原型“第一张自动出，后两张各有继续生成”一致，且不新增无人值守的花费路径和后台 worker。`Advance(start)` 对一张视图依次做 `PrepareStep`、`RequestGrant`（真人主体；2D 步骤按会话批准方式自动批准，需要真人时停在待批准，用户决定后再次继续）和 `SubmitStep`；每一步都按步骤当前阶段幂等，已开始的视图再次继续只返回当前状态。同一视图的并发请求先在进程内互斥，再靠步骤身份和账本的比较交换在跨进程时保持唯一任务。提交脱离请求的取消，批准后不会因为用户关页面而留下半成品。
+- **准入已满时排队（#59）。** 无论由 Agent 工具还是页面开始，提交被准入拒绝时都按同一幂等键排队重提，见“三视图与处理计划在准入已满时排队重提”。
 - **单张重试 = 步骤的下一次尝试。** `skill_run_steps.attempt`（迁移 0048，默认 0）参与步骤身份：`StepIdentityAt(run, step, attempt)`，第 0 次与旧身份逐字节相同。`Runtime.RestartStep` 只在上一次尝试以“没有结果”结束时放行：任务失败且可重试、不是“结果不明”（与 `taskretry` 同一规则），或任务被取消，或批准被拒绝；运行中、等待批准和已完成的视图都拒绝。账本 `RestartSkillStep` 在事务里比较尝试序号并核对任务/授权确实属于这个 owner 和会话，然后把该步重置为 `planned`，换上新的 operation/幂等键/plan step，清掉准备、授权、任务和产出指针；旧任务和旧授权原样保留。请求带用户看到的尝试序号：序号已落后表示这是已处理过的重复，原样返回当前状态；序号超前拒绝。
 - **公开投影。** `GET /api/v1/chat/sessions/{sessionID}/three-views` 返回 `{"items":[Group]}`，`Group` 为 `run_id`、`kind`（`three_view`）、`label`、`recipe_id`、`source_asset_id`、`created_at`、`complete`、`slots[]`（`key`、`label`、`status`、`attempt`、`task_id?`、`output_asset_id?`、`request_id?`、`startable`、`retryable`）和 `model_source`（`slot`、`available`、`task_id?`、`asset_id?`、`note`）。状态取值：`not_started`、`awaiting_approval`、`denied`、`starting`、`running`、`succeeded`、`failed`、`canceled`。`POST …/three-views/{runID}/views/{viewKey}`（路由在 Schema：`chat_session_three_views`、`chat_session_three_view_item`）请求体 `{"action":"start"|"retry","attempt":n}`，返回 `{"group":Group}`；要求浏览器真人会话（Bearer/开发身份 403），先 `OwnsSession`，外人的会话、不属于该会话的分组、未知视图均 404，当前状态不允许的操作 409（Schema 文案 `error.three_view_conflict`），非法动作或负序号 400。
 - **版本条里的一个分组。** `lineage.Service` 增加可选的 `GroupSource`；图里新增可选的 `groups[]`（`id` 为 run id、`kind`、`label`、`complete`、`source_slot`、`members[{slot,label,task_id}]`）和节点上的 `group`/`slot`。只有已在图里的成功任务才计入成员，没有任何成员在图里的分组不出现；没有分组时响应形状与原来完全一致。
