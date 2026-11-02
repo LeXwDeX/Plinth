@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -38,6 +39,87 @@ func (orchestrator *Orchestrator) attachAssistantResults(
 		}
 	}
 	orchestrator.service.AttachResults(ctx, ownerID, assistant, modelTasks)
+}
+
+// turnResults is what the reply produced before this round: its pictures,
+// its calls with the Tasks bound so far and the attachments already given
+// handles. Later steps of the reply look references up in it (#25).
+func turnResults(assistant Message, boundTasks map[string]string) Message {
+	produced := copyMessage(assistant)
+	for index := range produced.ToolCalls {
+		if produced.ToolCalls[index].TaskID == "" {
+			produced.ToolCalls[index].TaskID = boundTasks[produced.ToolCalls[index].ID]
+		}
+	}
+	return produced
+}
+
+// copyMessage copies the slices a tool may read, so a tool never sees the
+// reply change under it.
+func copyMessage(message Message) Message {
+	message.ImageURLs = append([]string(nil), message.ImageURLs...)
+	message.ToolCalls = append([]ToolCall(nil), message.ToolCalls...)
+	message.Attachments = append([]Attachment(nil), message.Attachments...)
+	return message
+}
+
+// recordTurnResult adds one call's result to the reply's results and gives
+// handles to what it produced at once, with the numbering the final write
+// keeps (AttachResults numbers after the highest handle and skips what has
+// one). It returns the new handles.
+func (orchestrator *Orchestrator) recordTurnResult(
+	ctx context.Context,
+	ownerID string,
+	produced *Message,
+	callID, taskID string,
+	imageURLs []string,
+) []string {
+	if produced == nil {
+		return nil
+	}
+	produced.ImageURLs = append(produced.ImageURLs, imageURLs...)
+	if taskID != "" {
+		for index := range produced.ToolCalls {
+			if produced.ToolCalls[index].ID == callID && produced.ToolCalls[index].TaskID == "" {
+				produced.ToolCalls[index].TaskID = taskID
+			}
+		}
+	}
+	if taskID == "" && len(imageURLs) == 0 {
+		return nil
+	}
+	before := len(produced.Attachments)
+	orchestrator.attachAssistantResults(context.WithoutCancel(ctx), ownerID, produced)
+	var handles []string
+	for _, attachment := range produced.Attachments[before:] {
+		if attachment.Handle != "" {
+			handles = append(handles, attachment.Handle)
+		}
+	}
+	return handles
+}
+
+// withResultHandles writes the handles a call produced into its JSON result
+// under the Schema's key. A result that is not a JSON object is left as is.
+func (orchestrator *Orchestrator) withResultHandles(content string, handles []string) string {
+	key := orchestrator.schema.Context.ResultHandlesField
+	if key == "" || len(handles) == 0 {
+		return content
+	}
+	var result map[string]json.RawMessage
+	if json.Unmarshal([]byte(content), &result) != nil || result == nil {
+		return content
+	}
+	encoded, err := json.Marshal(handles)
+	if err != nil {
+		return content
+	}
+	result[key] = encoded
+	updated, err := json.Marshal(result)
+	if err != nil {
+		return content
+	}
+	return string(updated)
 }
 
 // canvasLayoutText names an artboard snapshot's layout with the Schema's

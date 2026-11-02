@@ -23,6 +23,10 @@ python3 scripts/release-env.py release dev-test   # 同步→构建→preflight�
 - 失败快照可能有零字节或缺失归档，只有在独立失败报告存在时才可清理；成功备份仍要求完整且非空的归档。删除资格不代表可作为恢复点。
 - 发布合同回归：`python3 scripts/tests/test_release_env.py`、`python3 scripts/tests/test_release_lock.py`、`python3 scripts/smoke/test-release-backup-retention.py`、`bash scripts/smoke/test-release-stack.sh`、`bash scripts/smoke/test-release-rollback.sh`。这些是本机 mock 合同测试，不代替真实部署或远端清理验收。
 
+## 全新数据起点（#28）
+
+`dev-test` 每次发布都是全新数据（环境文件 `"data": "ephemeral"`，匿名卷，不含历史任务、会话或老账号）。因此每次冒烟与相关验收都从空库开始：只有运行环境 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 引导的管理员测试账号可登录，脚本和手工验收按真实用户流程创建自己的会话与数据，不依赖历史任务（例如 L1 Agent 的“已有 3D 任务”检查在空库上走其文档化的 SKIP 路径；需要产物时先走真实流程，如 #25：模拟用户沟通 → Agent 先 2D 后 3D）。`formal-test` 不适用。
+
 ## 冒烟分层
 
 | 层 | 脚本 | 何时跑 | 费用 |

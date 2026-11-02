@@ -289,7 +289,7 @@ func (e *Executor) observeThreeView(ctx context.Context, command chat.ToolComman
 func (e *Executor) threeViewImages(command chat.ToolCommand, indices []int, tokens []string) ([]string, string) {
 	policy := chat.NewHandlePolicy(e.context)
 	if len(tokens) > 0 && len(command.Options.ReferenceImageIndices) == 0 {
-		resolved, err := policy.ResolveHandles(command.History, command.Options.Selection, tokens, chat.AttachmentKindImage)
+		resolved, err := policy.ResolveHandles(command.ReferenceHistory(), command.Options.Selection, tokens, chat.AttachmentKindImage)
 		if err != nil || len(resolved) == 0 {
 			handle, template := tokens[0], e.context.UnknownHandleTemplate
 			var unknown *chat.UnknownHandleError
@@ -327,7 +327,7 @@ func (e *Executor) threeViewImages(command chat.ToolCommand, indices []int, toke
 
 func selectedThreeViewImages(command chat.ToolCommand, argsIndices []int) []string {
 	all := make([]string, 0)
-	for _, message := range command.History {
+	for _, message := range command.ReferenceHistory() {
 		all = append(all, message.ImageURLs...)
 	}
 	indices := argsIndices

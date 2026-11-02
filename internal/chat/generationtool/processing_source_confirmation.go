@@ -39,8 +39,15 @@ func (executor *Executor) sourceConfirmation(ctx context.Context, command chat.T
 	if template == "" || selectedTask == "" || selectedTask == string(source.ID) {
 		return nil
 	}
+	for _, call := range command.Turn.ToolCalls {
+		if call.TaskID == string(source.ID) {
+			// This reply made the model for the person's request: the next
+			// step on it needs no question about the selected one (#25).
+			return nil
+		}
+	}
 	handles := map[string]string{}
-	for _, message := range command.History {
+	for _, message := range command.ReferenceHistory() {
 		for _, attachment := range message.Attachments {
 			if attachment.Kind == chat.AttachmentKindModel && attachment.Handle != "" && attachment.TaskID != "" {
 				handles[attachment.Handle] = attachment.TaskID

@@ -107,7 +107,7 @@ func (executor *Executor) sourceCandidates(command chat.ToolCommand, token strin
 	if _, _, handle := policy.Parse(token); !handle && !policy.IsSelectionAlias(token) {
 		return []generation.TaskID{generation.TaskID(token)}, false
 	}
-	resolved, err := policy.ResolveHandles(command.History, command.Options.Selection, []string{token}, chat.AttachmentKindImage)
+	resolved, err := policy.ResolveHandles(command.ReferenceHistory(), command.Options.Selection, []string{token}, chat.AttachmentKindImage)
 	if err != nil {
 		return nil, false
 	}
@@ -174,8 +174,9 @@ func (executor *Executor) unpairedRefusal(ctx context.Context, command chat.Tool
 	}
 	var handles []string
 	seen := map[string]bool{}
-	for index := len(command.History) - 1; index >= 0 && len(handles) < maximumSourceCandidates; index-- {
-		attachments := command.History[index].Attachments
+	history := command.ReferenceHistory()
+	for index := len(history) - 1; index >= 0 && len(handles) < maximumSourceCandidates; index-- {
+		attachments := history[index].Attachments
 		for position := len(attachments) - 1; position >= 0 && len(handles) < maximumSourceCandidates; position-- {
 			attachment := attachments[position]
 			if attachment.Kind != chat.AttachmentKindImage || attachment.TaskID == "" || attachment.Handle == "" || seen[attachment.TaskID] {

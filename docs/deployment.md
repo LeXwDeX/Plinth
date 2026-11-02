@@ -8,7 +8,7 @@
 
 | 环境名 | 用途 | 接收的 revision | 数据 | 发布后验收 | 付费生成 |
 |---|---|---|---|---|---|
-| `dev-test` | 开发测试环境 | 每次已推送的 `origin/main` | 历史迁移与测试数据，保留不清理 | L0、L1、L1 Agent 必跑；涉及 Agent/生成/同意链路时按 `scripts/smoke/README.md` 跑 L2 等真实模型验收 | 常设小额授权（见 `AGENTS.md`） |
+| `dev-test` | 开发测试环境 | 每次已推送的 `origin/main` | 每次发布全新数据（`"data": "ephemeral"`，#28）：不含历史迁移数据，只有运行环境引导的管理员测试账号 | L0、L1、L1 Agent 必跑；涉及 Agent/生成/同意链路时按 `scripts/smoke/README.md` 跑 L2 等真实模型验收 | 常设小额授权（见 `AGENTS.md`） |
 | `formal-test` | 正式测试环境（测试版本中的稳定版）：单版本、不留残余 | 只接收按 §4 晋级规则通过的精确 revision | 本栈独立，不跨主机复制 | L0、L1、L1 Agent | 不做；测试期付费同意授权不适用 |
 
 2026-10-20 的环境布局由用户决定（#270）：`dev-test` 不变，新增 `formal-test`。与 `dev-test` 同主机的 `legacy-formal`（内部存档 #232 的隔离正式栈）经维护者 2026-10-30 决定已下线（存档 #74）：Compose 项目、容器、专用镜像与 `<root>/formal/` 数据已移除，最终备份保留；环境名不再可用，说明见 `dev_ops.md`「dev-test 主机与镜像保留」。
@@ -26,6 +26,7 @@
 | `protect_projects` | 共享主机上同机其他 Plinth Compose 项目（例如候选栈）；镜像保留不清理它们容器引用的镜像。仓库脚本不写任何环境的项目名（#261），共享主机必须在这里列全；`single_stack` 环境不能设置。由 `release-env.py` 发布的环境若不是 `single_stack`，就按共享主机处理，缺这个字段即报错；文件里与它同主机（`ssh` 主机相同）的每个环境的 `compose_project` 都必须列出，`single_stack` 环境不得与其他环境同主机（#334） |
 | `protected_paths` | 迁移工具（`backup-go-production.sh create`、`run-go-etl-container.sh`、`finalize-go-production.sh`）绝不能作为目标的目录：发布根之外的绝对路径列表（例如共享主机上旧 Next 项目根），没有就写 `[]`；由 `release-env.py` 发布的环境必填。`release-env.py` 把「`root` + 本列表」用冒号连成 `ART_AI_PROTECTED_PATHS`：`compose-env` 输出它供手工运行，`release` 经服务器段写入 `production/compose.env`。三个迁移工具在未设置 `ART_AI_PROTECTED_PATHS` 时拒绝运行（finalize 在停旧容器之前），确无受保护目录时须显式设为空串（#334） |
 | `backup` | 仅 `dev-test` 可选的发布备份策略（#364）：`{"scope": "database", "keep": 2}` 表示停机时只备份 `production/data`。正常成功清理最多保留最新 2 个已结束发布备份；进行中的快照可临时排除，但不承诺长期额外保留；更早的失败快照也按最新 2 个回收，独立失败报告与诊断日志保留。省略时为全量备份 `data`、`storage-go`、`web-data`，且不自动清理历史备份（`formal-test` 保持此默认）。`scope` 只接受 `database`，`keep` 为 1–2；带 `promote_from` 的环境不得设置 |
+| `data` | 仅 `dev-test` 可选（#28）：唯一取值 `"ephemeral"`，每次发布都是全新数据，数据库、资产存储与 legacy 缓存用匿名卷、不挂载主机目录；不得与 `backup` 或 `promote_from` 同时出现；省略时为持久数据（`formal-test` 保持此默认）。`release-env.py` 向服务器段传 `RELEASE_DATA_MODE=ephemeral` |
 | `promote_from` | 只能从该环境晋级（`formal-test` 为 `dev-test`） |
 | `single_stack` | 单项目主机：`image_keep`（保留镜像数，含运行镜像）、`keep_source_snapshots`（保留的 `app.prev-*` 数）、`allow_bootstrap`（允许空栈首次启动） |
 | `layout` | Compose 主机路径与绑定地址（`GO_WEB_BIND_IP`、`GO_WEB_HOST_PORT`、`GO_PROD_*_DIR`、`GO_LEGACY_*_DIR`）；数据目录必须是 `<root>/production/<名称>`，未写时按此导出；legacy 目录没有缺省值，必须写明：单栈环境在 `<root>/production/` 下以 `legacy` 开头，共享主机（`dev-test`）可为发布根之外不含 `..` 的绝对路径 |
@@ -43,7 +44,7 @@
 
 **部署到开发测试环境（`dev-test`）**
 
-1. `python3 scripts/release-env.py release dev-test`（同步 → 构建 → preflight → 备份 → Compose 更新 → 健康 → 失败自动回滚）。
+1. `python3 scripts/release-env.py release dev-test`（同步 → 构建 → preflight → 备份 → Compose 更新 → 健康 → 失败自动回滚；`data: ephemeral` 时无备份，见下文「全新数据发布」）。
 2. 核对容器 OCI revision 等于 `origin/main` 完整 SHA（`release-env.py smoke` 设置的 `EXPECT_SHA` 即读自容器标签，L1 Agent 冒烟同时比对 `/api/version`）。
 3. 冒烟（§6），以及本次改动相关的页面、API 与 Agent/生成链路验收。
 4. 全部 PASS 后，在 `acceptance.issue` 写入一条 §4 格式的验收报告 note；记下 note ID。
@@ -100,6 +101,17 @@
 与是否单栈无关、按环境文件设置的选项：`extra_compose_file` 加到每条本栈 Compose 命令的主文件之后（文件须已在服务器上，越界、缺失或符号链接即在构建前拒绝）；`build` 的 `network`、`goproxy` 与 `add_hosts` 只改变 `docker build` 参数，npm 源固定为公共 `registry.npmjs.org`（#257），镜像目标仍为 `runtime-with-migration-tools`；`source_transfer: scp` 只改变源码同步方式。`compose.env` 记录 `ART_AI_PROTECTED_PATHS`（#334）与布局变量。
 
 `dev-test` 没有 `single_stack`：它在共享主机上，环境文件用 `protect_projects` 列出同机其他 Plinth Compose 项目（候选栈等），`release-env.py` 以 `RELEASE_PROTECT_PROJECTS` 传给服务器段，镜像保留对每个项目加 `--protect-project`，这些项目容器引用的镜像不被清理；环境文件还为它给出 `build`（Go 代理与 `--add-host`）和 `layout` 中的 4 个 legacy 目录。源码同步与服务器段命令序列与参数化之前相同，只多了上述项目参数（`scripts/smoke/test-release-stack.sh` 断言）。
+
+### 全新数据发布（`data: ephemeral`，#28）
+
+`dev-test` 的环境文件写 `"data": "ephemeral"` 后，服务器段（`RELEASE_DATA_MODE=ephemeral`）改走另一条分支，每次发布都是全新数据：
+
+- Compose 在主文件之后、`extra_compose_file` 之前叠加 `docker-compose.go-ephemeral.yml`（缺失或非普通文件即在构建前拒绝）：只保留日志主机挂载，数据库（`/app/data`）、资产存储（`/app/storage`）与 legacy 缓存使用匿名卷；`web-data`、legacy-generated、legacy-assets 不挂载。与 `RELEASE_BACKUP_SCOPE`/`RELEASE_BACKUP_KEEP` 同时出现即拒绝，未改动任何东西。
+- 构建前只做 `bootstrap` 容量检查（构建空间与 Docker 根目录余量）；不建 `backups/release-<tag>`、不停机备份、不打 tar。构建、日志目录写检查、legacy 目录准备与 preflight 不变。
+- 有旧容器：记录旧镜像标签和旧容器的匿名数据卷名，直接 `compose up -d --no-deps --renew-anon-volumes art-ai-go`；无旧容器（bootstrap）同样带 `--renew-anon-volumes`，且不再因主机 `production/data` 存在数据库而拒绝。
+- 失败（候选启动失败、健康失败、清单写入失败）：旧镜像以 `--renew-anon-volumes` 重新拉起，数据同样是全新的，不是数据回滚；失败报告记 `data_mode=ephemeral`（阶段 `candidate-up-failed`、`unhealthy-after-up`，回滚也不健康为 `rollback-also-unhealthy`，回滚启动失败为 `rollback-start-failed`）。
+- 成功：写清单与 `compose.env`（记 `RELEASE_DATA_MODE=ephemeral`，不再记备份范围），保留镜像，然后逐个 `docker volume rm` 记录下的旧匿名卷，失败只警告；不调用备份清理。首次从 bind 挂载切换过来时没有旧匿名卷，主机上原 `production/data`、`storage-go` 等目录不被读取也不被删除。
+- 验收含义：冒烟与相关验收从空库开始，只存在运行环境 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 引导的管理员账号，数据由测试流程自己创建。
 
 ### 发布备份范围与保留（#364）
 

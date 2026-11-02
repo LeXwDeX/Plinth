@@ -53,7 +53,12 @@ type ToolCommand struct {
 	Call                agents.ToolCall
 	Tool                catalog.ChatToolSchema
 	History             []Message
-	Options             TurnOptions
+	// Turn holds what this Agent reply produced before this call: its
+	// pictures, its tool calls with their bound Tasks and the attachments
+	// (with handles) already given to them (#25). A later step of the same
+	// reply names those results like any history object.
+	Turn    Message
+	Options TurnOptions
 	// EarlierCalls are the tool calls this Agent reply ran before this one, in
 	// order (a resumed reply included). A tool with a per-reply bound replays
 	// them instead of keeping state of its own.
@@ -61,6 +66,16 @@ type ToolCommand struct {
 	// ExplicitParameters preserves caller inputs before legacy defaults merge.
 	// Non-nil enables offering overrides without changing the command hash.
 	ExplicitParameters map[string]json.RawMessage `json:"-"`
+}
+
+// ReferenceHistory is the history a reference is looked up in: the messages
+// before this reply and, when it produced anything yet, this reply's results.
+// Reading "the person's latest message" still uses History, which ends with it.
+func (command ToolCommand) ReferenceHistory() []Message {
+	if len(command.Turn.ImageURLs) == 0 && len(command.Turn.Attachments) == 0 && len(command.Turn.ToolCalls) == 0 {
+		return command.History
+	}
+	return append(append(make([]Message, 0, len(command.History)+1), command.History...), command.Turn)
 }
 
 func (command ToolCommand) IdempotencyKey() string {
@@ -1421,6 +1436,7 @@ func (orchestrator *Orchestrator) Process(
 			failed = true
 			return err
 		}
+		results := turnResults(assistant, boundTasks)
 		toolContent, imageURLs, taskBindings, toolErr :=
 			orchestrator.executeTools(
 				processCtx,
@@ -1430,7 +1446,11 @@ func (orchestrator *Orchestrator) Process(
 				boundTasks,
 				assistant.ToolCalls,
 				&turn,
+				&results,
 			)
+		// Handles given during the round stay with the reply, so the next
+		// round and the final write keep the numbers the Agent was told (#25).
+		assistant.Attachments = results.Attachments
 		if errors.Is(toolErr, ErrTurnAwaitTask) {
 			suspended = true
 			return nil
@@ -2307,6 +2327,7 @@ func (orchestrator *Orchestrator) executeTools(
 	boundTasks map[string]string,
 	storedCalls []ToolCall,
 	turn *Turn,
+	produced *Message,
 ) ([]agents.Message, []string, map[string]string, error) {
 	registry, registryErr := orchestrator.registryFor(ctx)
 	if registryErr != nil {
@@ -2314,6 +2335,9 @@ func (orchestrator *Orchestrator) executeTools(
 	}
 	results := append([]agents.Message(nil), turn.Checkpoint.Completed...)
 	imageURLs := append([]string(nil), turn.Checkpoint.ImageURLs...)
+	// A resumed round already ran some calls: their pictures are this reply's
+	// results too, numbered as they were when the Agent read them.
+	orchestrator.recordTurnResult(ctx, command.OwnerID, produced, "", "", turn.Checkpoint.ImageURLs)
 	taskBindings := map[string]string{}
 	var combined error
 	if turn.Checkpoint.HadToolError {
@@ -2435,6 +2459,7 @@ func (orchestrator *Orchestrator) executeTools(
 				Call:                 call,
 				Tool:                 tool,
 				History:              history,
+				Turn:                 copyMessage(*produced),
 				Options:              command.Options,
 				EarlierCalls:         earlierCalls(storedCalls, call.ID),
 			},
@@ -2513,6 +2538,8 @@ func (orchestrator *Orchestrator) executeTools(
 		if content == "" {
 			content = result.Error
 		}
+		content = orchestrator.withResultHandles(content,
+			orchestrator.recordTurnResult(ctx, command.OwnerID, produced, call.ID, taskBindings[call.ID], result.ImageURLs))
 		reply := agents.Message{
 			Role:       orchestrator.schema.Roles.Tool,
 			Content:    content,
