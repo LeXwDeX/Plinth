@@ -111,6 +111,10 @@ type Failure struct {
 	Retryable  bool         `json:"retryable"`
 	Ambiguous  bool         `json:"ambiguous,omitempty"`
 	SafeDetail string       `json:"detail"`
+	// RateLimitQueued 标记这次失败是被上游明确限流拒绝、任务排队等待而不是
+	// 消耗重试次数的尝试（attempt.rate_limit_queued）。只落库在 Attempt 的
+	// failure_json 里，用来把"排队"与"已计入 max_attempts 的限流重试"区分开。
+	RateLimitQueued bool `json:"rate_limit_queued,omitempty"`
 	// UpstreamStatus/UpstreamCode/UpstreamExcerpt 是内部取证字段：仅落库、
 	// 日志与管理侧诊断使用，禁止进入面向用户的文案投影。
 	UpstreamStatus  int           `json:"upstream_status,omitempty"`
@@ -323,6 +327,11 @@ type Task struct {
 	// DeliveryCompleted reports that the current Attempt is a local delivery
 	// completion (#330). Read only; ordinary execution never sets it.
 	DeliveryCompleted bool `json:"-"`
+	// RateLimitQueued reports that the task is waiting in the queue because its
+	// current Attempt was refused by an upstream rate limit and the Task was
+	// queued again without spending a retry. Read only, derived from the
+	// current Attempt's failure; the public state stays QUEUED.
+	RateLimitQueued bool `json:"-"`
 }
 
 // UpstreamJobFacts are the read-only facts about a Task's upstream job that
@@ -341,23 +350,28 @@ type UpstreamJobFactsReader interface {
 }
 
 type Attempt struct {
-	ID                      AttemptID       `json:"id"`
-	TaskID                  TaskID          `json:"task_id"`
-	Ordinal                 int             `json:"ordinal"`
-	Offering                Offering        `json:"offering"`
-	State                   AttemptState    `json:"state"`
-	SubmissionKey           string          `json:"submission_key"`
-	UpstreamJob             *UpstreamJob    `json:"upstream_job,omitempty"`
-	Failure                 *Failure        `json:"failure,omitempty"`
-	Opaque                  json.RawMessage `json:"opaque,omitempty"`
-	LastObservationKey      string          `json:"-"`
-	ObservationFailures     int             `json:"-"`
-	LastObservationSequence int64           `json:"-"`
-	LastObservationAt       time.Time       `json:"-"`
-	LastObservationPhase    UpstreamPhase   `json:"-"`
-	StartedAt               time.Time       `json:"started_at"`
-	UpdatedAt               time.Time       `json:"updated_at"`
-	FinishedAt              *time.Time      `json:"finished_at,omitempty"`
+	ID                  AttemptID       `json:"id"`
+	TaskID              TaskID          `json:"task_id"`
+	Ordinal             int             `json:"ordinal"`
+	Offering            Offering        `json:"offering"`
+	State               AttemptState    `json:"state"`
+	SubmissionKey       string          `json:"submission_key"`
+	UpstreamJob         *UpstreamJob    `json:"upstream_job,omitempty"`
+	Failure             *Failure        `json:"failure,omitempty"`
+	Opaque              json.RawMessage `json:"opaque,omitempty"`
+	LastObservationKey  string          `json:"-"`
+	ObservationFailures int             `json:"-"`
+	// RateLimitQueued 是本任务截至该 Attempt（含它自己，若它被限流排队）
+	// 累计的"限流排队"次数。排队的 Attempt 不消耗 Retry.MaxAttempts：
+	// 下一个 Attempt 逐值继承，重试判定用 Ordinal - RateLimitQueued 作为
+	// 有效序号。
+	RateLimitQueued         int           `json:"-"`
+	LastObservationSequence int64         `json:"-"`
+	LastObservationAt       time.Time     `json:"-"`
+	LastObservationPhase    UpstreamPhase `json:"-"`
+	StartedAt               time.Time     `json:"started_at"`
+	UpdatedAt               time.Time     `json:"updated_at"`
+	FinishedAt              *time.Time    `json:"finished_at,omitempty"`
 	// DeliveryCompletion is the provenance of a local terminal Attempt that
 	// completed a failed conversion from an exactly related delivered Task.
 	// Ordinary Attempts leave it nil.

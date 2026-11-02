@@ -641,3 +641,7 @@ Offering 的面向用户文案（模型名、Provider 名、参数标签与说�
 按语言投影只发生在读取层：`/api/v1/offerings`、Provider discovery、模型格式、三视图分组、待批准列表、聊天工具调用、任务投影、管理后台生成记录与用户资产页里的冻结报价、Agent 待批准投影。费用项改名后，旧报价按组件 id 回退到冻结 Offering（或同模型的当前 Offering）当前声明的译文。这些接口按请求语言把 Offering 文案换成译文，响应带 `Vary: Accept-Language, Cookie`。Provider Adapter、wire 映射、冻结的 Offering 修订、PreparedInput、NativeQuote 与公开 Task 的存储都不因语言改变；报价里的费用项名称只在读取时翻译。机制见 `docs/architecture.md` §5.1。
 
 **当前限制（LEGACY，独立后续工作）：** 上述 `offering_texts` 机制以默认语言文案为中文原文：原文键、`coverage` 缺译检查和读取替换都依赖中文字符识别。默认语言不是中文的 Catalog 尚无 Offering 翻译支持；通用源语言声明与检测未实现，不纳入当前产品验收，也不把现行中文源机制表述为已完成的多语言支持。界面 `messages`/`fields` 投影不依赖该假设，但结构化字段的覆盖缺译检查同样按中文字符识别，非中文默认语言时不会强制这些译文。
+
+### 上游限流排队的 Provider/Schema 边界（2026-11-02）
+
+Adapter 只需把明确的限流拒绝映射为 `FailureRateLimited`（`Retryable`、非含糊、`RetryAfter` 取上游 `Retry-After`）；是否排队、退避与上限由 Generation 内核按 Offering 的 `retry`（`initial_backoff`、`max_backoff`）和 `timeout_seconds` 决定，Provider 不维护第二套排队状态。Schema 新增只读文案 `messages["task.queue_reason.rate_limited"]` 与公开事件 `attempt.rate_limit_queued`（`runtime.task_events.public_projection`）；没有新增 Offering 或 Provider 字段。机制见 `docs/architecture.md` 的“上游限流排队”。

@@ -2884,6 +2884,16 @@ type taskResponse struct {
 	// later step found the job gone. Neither names the job itself.
 	UpstreamJobCreatedAt *time.Time `json:"upstream_job_created_at,omitempty"`
 	UpstreamJobGone      bool       `json:"upstream_job_gone,omitempty"`
+	// QueueNotice 说明任务为什么仍在排队：上游限流拒绝后任务回到 QUEUED
+	// 等待自动重试，状态仍是 QUEUED，只多一条 Schema 文案，不改变状态机。
+	QueueNotice *queueNotice `json:"queue_notice,omitempty"`
+}
+
+// queueNotice 是排队原因的公开投影：reason 是稳定的枚举值，detail 是按
+// 语言解析的 Schema 文案（messages["task.queue_reason.<reason>"]）。
+type queueNotice struct {
+	Reason string `json:"reason"`
+	Detail string `json:"detail"`
 }
 
 type resourceResponse struct {
@@ -2975,6 +2985,13 @@ func (s *Server) newTaskResponse(locale string, task generation.Task) taskRespon
 	if !task.UpstreamJobCreatedAt.IsZero() {
 		created := task.UpstreamJobCreatedAt
 		result.UpstreamJobCreatedAt = &created
+	}
+	if task.RateLimitQueued && task.State == generation.TaskQueued {
+		reason := string(generation.FailureRateLimited)
+		result.QueueNotice = &queueNotice{
+			Reason: reason,
+			Detail: s.messageIn(locale, "task.queue_reason."+reason),
+		}
 	}
 	result.Resources = s.resourceResponses(locale, task)
 	result.ResourcesPending = generation.ResourcesPending(task.Resources)

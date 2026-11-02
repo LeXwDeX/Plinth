@@ -117,7 +117,10 @@ func (m *Module) startAttempt(ctx context.Context, lease Lease) error {
 		attempt = m.newAttempt(task, 1)
 		fresh = true
 	case attempt.State == AttemptFailed:
+		queued := attempt.RateLimitQueued
 		attempt = m.newAttempt(task, attempt.Ordinal+1)
+		// 限流排队次数逐值继承：排队不消耗重试次数。
+		attempt.RateLimitQueued = queued
 		fresh = true
 	case attempt.State == AttemptSubmitting:
 		if !task.Offering.IdempotentSubmission {
@@ -242,7 +245,13 @@ func (m *Module) startAttempt(ctx context.Context, lease Lease) error {
 	})
 	if err != nil {
 		failure := providerFailure(err, true)
-		return m.handleAttemptFailure(ctx, lease, attempt, failure, nil)
+		// 只有 Start 的明确限流拒绝可以排队（上游未受理、不计费）；
+		// 其余路径沿用 handleAttemptFailure 的原有重试规则。
+		var refused *DispatchReceiptSettlement
+		if explicitRateLimitRefusal(failure) {
+			refused = checkpoints.refusedSettlement(attempt)
+		}
+		return m.handleAttemptFailureQueueable(ctx, lease, attempt, failure, refused, true)
 	}
 	if err := validateObservation(obs); err != nil {
 		return m.handleAttemptFailure(ctx, lease, attempt, &Failure{
@@ -475,7 +484,8 @@ func (m *Module) applyObservation(
 		if obs.Failure == nil {
 			obs.Failure = &Failure{Class: FailureProtocol, SafeDetail: "上游报告失败但没有错误信息"}
 		}
-		return m.handleAttemptFailure(ctx, lease, attempt, obs.Failure, settlement)
+		// Start 直接回报的失败（尚无上游作业）同样可因明确限流排队。
+		return m.handleAttemptFailureQueueable(ctx, lease, attempt, obs.Failure, settlement, eventType == "provider.start")
 	case UpstreamCanceled:
 		if obs.Failure == nil {
 			obs.Failure = &Failure{Class: FailureRejected, SafeDetail: "上游任务已取消"}
@@ -687,6 +697,20 @@ func (m *Module) handleAttemptFailure(
 	failure *Failure,
 	settlement *DispatchReceiptSettlement,
 ) error {
+	return m.handleAttemptFailureQueueable(ctx, lease, attempt, failure, settlement, false)
+}
+
+// handleAttemptFailureQueueable 是 handleAttemptFailure 的实现。queueable
+// 为真时（仅 Start 失败路径），上游明确的限流拒绝会让任务排队等待而不
+// 消耗重试次数，见 rateLimitQueueDelay。
+func (m *Module) handleAttemptFailureQueueable(
+	ctx context.Context,
+	lease Lease,
+	attempt *Attempt,
+	failure *Failure,
+	settlement *DispatchReceiptSettlement,
+	queueable bool,
+) error {
 	if failure == nil {
 		failure = &Failure{Class: FailureInternal, SafeDetail: "未知上游错误"}
 	}
@@ -724,7 +748,13 @@ func (m *Module) handleAttemptFailure(
 	attempt.FinishedAt = &now
 
 	task := lease.Task
-	nextOrdinal := attempt.Ordinal + 1
+	if queueable {
+		if delay, ok := m.rateLimitQueueDelay(task, attempt, failure, now); ok {
+			return m.queueRateLimited(ctx, lease, attempt, failure, delay, settlement)
+		}
+	}
+	// 被限流排队的尝试不计入 max_attempts：有效序号扣除累计排队次数。
+	nextOrdinal := attempt.Ordinal + 1 - attempt.RateLimitQueued
 	if failure.Retryable && task.Offering.Retry.Allows(failure.Class, nextOrdinal) {
 		task.State = TaskQueued
 		task.Failure = nil
@@ -748,6 +778,99 @@ func (m *Module) handleAttemptFailure(
 		}))
 	}
 	return m.finishFailed(ctx, lease, attempt, failure, "attempt.failed", settlement)
+}
+
+// explicitRateLimitRefusal 报告失败是否为上游明确的限流拒绝：Class 为
+// rate_limited、可重试、非含糊（含糊或 submission_unknown 无法证明上游
+// 没有受理，永远不排队、不按未派发结算）。
+func explicitRateLimitRefusal(failure *Failure) bool {
+	return failure != nil && failure.Class == FailureRateLimited &&
+		failure.Retryable && !failure.Ambiguous
+}
+
+// rateLimitQueueDelay 判定一次失败是否应让任务因上游限流排队：
+//   - 上游明确拒绝（Class 为 rate_limited、可重试、非含糊），尚未受理任何
+//     作业，所以没有计费风险；
+//   - 排队有上限：now + 本次退避不得超过 task.CreatedAt + Offering.Timeout，
+//     即 Chat 等待任务的期限；Offering.Timeout 为 0 时不排队，回退到
+//     原有的 Allows 判定。
+//
+// 退避按累计排队次数指数增长，尊重上游 Retry-After，封顶 Retry.MaxBackoff。
+func (m *Module) rateLimitQueueDelay(
+	task Task,
+	attempt *Attempt,
+	failure *Failure,
+	now time.Time,
+) (time.Duration, bool) {
+	if !explicitRateLimitRefusal(failure) ||
+		attempt.UpstreamJob != nil || attempt.LastObservationPhase != "" {
+		return 0, false
+	}
+	timeout := task.Offering.Timeout
+	if timeout <= 0 {
+		return 0, false
+	}
+	delay := m.taskRetryDelay(task.Offering.Retry, attempt.RateLimitQueued+1, failure.RetryAfter)
+	if now.Add(delay).After(task.CreatedAt.Add(timeout)) {
+		return 0, false
+	}
+	return delay, true
+}
+
+// queueRateLimited 让被上游限流拒绝的任务回到 QUEUED 等待：尝试按未受理
+// 结算（settlement 由 Start 的派发许可得出，not_dispatched），Attempt 的
+// 失败带 rate_limit_queued 标记，累计排队次数加一，不消耗 max_attempts。
+func (m *Module) queueRateLimited(
+	ctx context.Context,
+	lease Lease,
+	attempt *Attempt,
+	failure *Failure,
+	delay time.Duration,
+	settlement *DispatchReceiptSettlement,
+) error {
+	now := m.clock.Now()
+	queued := *failure
+	queued.RateLimitQueued = true
+	attempt.State = AttemptFailed
+	attempt.Failure = &queued
+	attempt.RateLimitQueued++
+	attempt.UpdatedAt = now
+	attempt.FinishedAt = &now
+
+	task := lease.Task
+	task.State = TaskQueued
+	task.Failure = nil
+	task.Progress = 0
+	task.NextActionAt = now.Add(delay)
+	task.UpdatedAt = now
+	task.Version++
+	m.logger.Info(
+		"generation rate limited, queued",
+		"task_id", task.ID,
+		"attempt_id", string(attempt.ID),
+		"provider_id", task.Offering.ProviderID,
+		"offering_id", string(task.Offering.ID),
+		"queued", attempt.RateLimitQueued,
+		"retry_after_seconds", int(delay.Seconds()),
+	)
+	return mapRepositoryError("queue_rate_limited", m.repository.Commit(ctx, Commit{
+		LeaseToken:      lease.Token,
+		ExpectedVersion: lease.Task.Version,
+		Task:            task,
+		Attempt:         attempt,
+		Events: []Event{{
+			TaskID: task.ID,
+			Type:   "attempt.rate_limit_queued",
+			Data: eventData(map[string]any{
+				"reason":              string(FailureRateLimited),
+				"queued":              attempt.RateLimitQueued,
+				"retry_after_seconds": int(math.Ceil(delay.Seconds())),
+			}),
+			CreatedAt: now,
+		}},
+		DispatchReceipt: settlement,
+		ClearLease:      true,
+	}))
 }
 
 func (m *Module) rescheduleObservation(

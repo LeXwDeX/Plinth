@@ -525,7 +525,9 @@ func TestAcmeAsyncIdentityRunsZeroCodeFromDeclarations(t *testing.T) {
 }
 
 // TestAcmeSyncIdentityClassifiesNewErrorVocabulary：同步 image-sync 新身份，
-// 仅存在于声明中的新错误词汇 E4242 被分类为可重试限流并驱动一次重试。
+// 仅存在于声明中的新错误词汇 E4242 被分类为可重试限流。明确的限流拒绝
+// 让任务排队（不消耗 max_attempts），直到 Offering.Timeout 用完才回到原有
+// 重试规则：先断言排队期间仍是 QUEUED，再把时钟推过期限断言最终失败。
 func TestAcmeSyncIdentityClassifiesNewErrorVocabulary(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(
 		writer http.ResponseWriter,
@@ -547,6 +549,23 @@ func TestAcmeSyncIdentityClassifiesNewErrorVocabulary(t *testing.T) {
 	harness := newAcmeHarness(t, taskCatalog, settings)
 	accepted := harness.submitApproved(t, generation.TextToImage, acmeImageOfferingID,
 		json.RawMessage(`{"prompt":"acme still"}`), "acme-sync-1")
+	harness.reconcile(t)
+	queued, err := harness.module.Get(context.Background(), "owner-acme", accepted.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued.State != generation.TaskQueued || !queued.RateLimitQueued || queued.Failure != nil {
+		t.Fatalf("429 应排队: state=%s queued=%v failure=%#v", queued.State, queued.RateLimitQueued, queued.Failure)
+	}
+	events, err := harness.module.Events(context.Background(), "owner-acme", accepted.TaskID, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasAcmeEvent(events, "attempt.rate_limit_queued") {
+		t.Fatalf("缺少 attempt.rate_limit_queued: %v", events)
+	}
+	// 推过 Offering.Timeout：排队上限用完，回到原有规则（重试一次后失败）。
+	harness.clock.Advance(24 * time.Hour)
 	task := harness.runUntilTerminal(t, "owner-acme", accepted.TaskID)
 	if task.State != generation.TaskFailed {
 		t.Fatalf("task state = %s", task.State)
@@ -559,10 +578,29 @@ func TestAcmeSyncIdentityClassifiesNewErrorVocabulary(t *testing.T) {
 	if task.CurrentAttemptID == "" || task.MaterializeFailures != 0 {
 		t.Fatalf("task = %#v", task)
 	}
-	// 重试由声明的 retryable 分类驱动：两次提交都收到 E4242。
-	if attempts := attemptCount(t, harness, "owner-acme", accepted.TaskID); attempts != 2 {
-		t.Fatalf("attempts = %d, want 2", attempts)
+	// 期限用完后按原 max_attempts 判定：排队的尝试不计数，之后再有 2 次提交。
+	events, err = harness.module.Events(context.Background(), "owner-acme", accepted.TaskID, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
 	}
+	queuedCount := 0
+	for _, event := range events {
+		if event.Type == "attempt.rate_limit_queued" {
+			queuedCount++
+		}
+	}
+	if attempts := attemptCount(t, harness, "owner-acme", accepted.TaskID); attempts != queuedCount+2 {
+		t.Fatalf("attempts = %d, want queued %d + 2", attempts, queuedCount)
+	}
+}
+
+func hasAcmeEvent(events []generation.Event, eventType string) bool {
+	for _, event := range events {
+		if event.Type == eventType {
+			return true
+		}
+	}
+	return false
 }
 
 func attemptCount(
