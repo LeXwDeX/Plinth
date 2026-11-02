@@ -372,32 +372,27 @@ func (s *Service) ListOwnedInputAssets(
 	return lister.ListOwnedInputAssets(ctx, owner, page, pageSize)
 }
 
+// OwnedInputAsset returns the record of an input asset the owner holds without
+// opening its bytes, so a caller that only needs the recorded SHA-256 does not
+// pay for the full-file integrity check OpenOwned runs (#49). A foreign asset
+// reads as missing, exactly like OpenOwned.
+func (s *Service) OwnedInputAsset(
+	ctx context.Context,
+	owner generation.OwnerID,
+	id generation.AssetID,
+) (generation.InputAsset, error) {
+	return s.authorizedAsset(ctx, owner, id, false)
+}
+
 func (s *Service) OpenAuthorized(
 	ctx context.Context,
 	owner generation.OwnerID,
 	id generation.AssetID,
 	readAll bool,
 ) (generation.InputAsset, io.ReadCloser, error) {
-	asset, err := s.repository.GetInputAsset(ctx, id)
+	asset, err := s.authorizedAsset(ctx, owner, id, readAll)
 	if err != nil {
-		var domainErr *generation.Error
-		if errors.As(err, &domainErr) {
-			return generation.InputAsset{}, nil, err
-		}
-		return generation.InputAsset{}, nil, &generation.Error{
-			Code:      generation.ErrUnavailable,
-			Operation: "open_authorized_input_asset",
-			Detail:    "输入资产暂不可读取",
-			Cause:     err,
-		}
-	}
-	if !readAll && asset.OwnerID != owner {
-		return generation.InputAsset{}, nil, &generation.Error{
-			// A foreign asset is reported exactly like a missing one so
-			// the response cannot reveal whether the ID exists (AUTH-09).
-			Code:      generation.ErrNotFound,
-			Operation: "get_input_asset",
-		}
+		return generation.InputAsset{}, nil, err
 	}
 	content, err := s.Open(ctx, asset)
 	if err != nil {
@@ -409,6 +404,36 @@ func (s *Service) OpenAuthorized(
 		}
 	}
 	return asset, content, nil
+}
+
+func (s *Service) authorizedAsset(
+	ctx context.Context,
+	owner generation.OwnerID,
+	id generation.AssetID,
+	readAll bool,
+) (generation.InputAsset, error) {
+	asset, err := s.repository.GetInputAsset(ctx, id)
+	if err != nil {
+		var domainErr *generation.Error
+		if errors.As(err, &domainErr) {
+			return generation.InputAsset{}, err
+		}
+		return generation.InputAsset{}, &generation.Error{
+			Code:      generation.ErrUnavailable,
+			Operation: "open_authorized_input_asset",
+			Detail:    "输入资产暂不可读取",
+			Cause:     err,
+		}
+	}
+	if !readAll && asset.OwnerID != owner {
+		return generation.InputAsset{}, &generation.Error{
+			// A foreign asset is reported exactly like a missing one so
+			// the response cannot reveal whether the ID exists (AUTH-09).
+			Code:      generation.ErrNotFound,
+			Operation: "get_input_asset",
+		}
+	}
+	return asset, nil
 }
 
 func (s *Service) GatewayConfigured() bool {

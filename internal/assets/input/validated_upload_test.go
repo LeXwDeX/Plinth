@@ -161,3 +161,55 @@ func TestUploadValidatorPreservesDomainError(t *testing.T) {
 		t.Fatalf("cause or write boundary lost: %v", err)
 	}
 }
+
+// #49: the chat service compares an artboard snapshot with a session's earlier
+// pictures by their recorded digest. Reading that record must not open the
+// blob, whose integrity check re-hashes the whole file.
+func TestOwnedInputAssetReadsTheRecordWithoutTheBytes(t *testing.T) {
+	root := t.TempDir()
+	repo, err := sqlite.Open(filepath.Join(root, "input.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	casRoot := filepath.Join(root, "cas")
+	store, err := local.New(casRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	service, err := inputassets.NewWithConfig(repo, store, inputassets.Config{UploadValidator: func(ctx context.Context, f *os.File, _ generation.InputAssetUpload) error {
+		_, err := modelinput.ValidateGLB(ctx, f, inputModelPolicy())
+		return err
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := modelinputtest.Triangle(modelinputtest.Options{})
+	asset, err := service.UploadAsset(context.Background(), "owner", generation.InputAssetUpload{Body: bytes.NewReader(raw), OriginalFilename: "triangle.glb", AssetType: "model", MediaType: "model/gltf-binary", MaxBytes: 10 << 20})
+	if err != nil || asset.SHA256 == "" {
+		t.Fatalf("upload = %+v, %v", asset, err)
+	}
+	// Make the blob unreadable: opening it now fails, so a record read that
+	// still succeeds cannot have touched the bytes.
+	if err := filepath.WalkDir(casRoot, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		return os.Remove(path)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, body, err := service.OpenOwned(context.Background(), "owner", asset.ID); err == nil {
+		body.Close()
+		t.Fatal("blob still opens")
+	}
+	record, err := service.OwnedInputAsset(context.Background(), "owner", asset.ID)
+	if err != nil || record.SHA256 != asset.SHA256 {
+		t.Fatalf("record = %+v, %v", record, err)
+	}
+	var domainErr *generation.Error
+	if _, err := service.OwnedInputAsset(context.Background(), "foreign", asset.ID); !errors.As(err, &domainErr) || domainErr.Code != generation.ErrNotFound {
+		t.Fatalf("foreign record = %v", err)
+	}
+}
