@@ -2773,6 +2773,15 @@ type ChatAgentSchema struct {
 	// MaxGenerationCallsPerTurn 限定单个对话轮次内付费生成工具的执行
 	// 次数上限（服务端硬约束，防止 LLM 一次输出大量工具调用连击扣费）。
 	MaxGenerationCallsPerTurn int `json:"max_generation_calls_per_turn"`
+	// MaxParallelGenerationSubmissions bounds how many paid generation calls
+	// of one tool round are submitted before the turn waits for their Tasks
+	// together (in-flight steps of the round); calls beyond it form the next
+	// batch. It must not exceed the per-owner in-flight Task admission limit.
+	MaxParallelGenerationSubmissions int `json:"max_parallel_generation_submissions"`
+	// ParallelToolCalls asks the model to emit several independent tool calls
+	// in one reply: the OpenAI-compatible parallel_tool_calls request field,
+	// sent only on requests that carry tools.
+	ParallelToolCalls bool `json:"parallel_tool_calls"`
 	// MaxListedModels bounds how many of the session's succeeded 3D tasks
 	// the list_session_models tool returns (most recent first).
 	MaxListedModels int `json:"max_listed_models"`
@@ -3631,6 +3640,9 @@ type ChatStatusTexts struct {
 	Compacting       string `json:"compacting,omitempty"`
 	CompactionFailed string `json:"compaction_failed,omitempty"`
 	Compacted        string `json:"compacted,omitempty"`
+	// QueuedSubmission is shown while a paid step waits to be submitted again
+	// because the in-flight task admission is full.
+	QueuedSubmission string `json:"queued_submission,omitempty"`
 }
 
 type ChatAuditSchema struct {

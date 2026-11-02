@@ -539,6 +539,7 @@ func buildChatAgentWithTransport(
 						return chatThinkingOptions(schema.Chat.Agent, model)
 					},
 					StreamIncludeUsage: schema.Chat.Agent.StreamIncludeUsage,
+					ParallelToolCalls:  schema.Chat.Agent.ParallelToolCalls,
 				},
 			)
 			if err != nil {

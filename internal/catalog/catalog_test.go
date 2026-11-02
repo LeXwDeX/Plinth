@@ -625,7 +625,7 @@ const minimalApplication = `"application":{
 			"consent_waiting_content":"waiting","consent_duplicate_content":"duplicate","consent_blocked_content":"blocked",
 			"consent_required_content":"required","consent_limit_content":"limit",
 			"consent_reconcile_content":"reconcile original paid call before any new submission",
-			"max_generation_calls_per_turn":4,"max_listed_models":20,
+			"max_generation_calls_per_turn":20,"max_parallel_generation_submissions":8,"max_listed_models":20,
 			"max_tool_calls_per_reply":3,"max_tool_calls_per_reply_setting":"agent_max_tool_calls_per_reply","max_tool_calls_per_reply_maximum":100,
 			"error_body_max_bytes":65536,
 			"system_prompt":"configured system",
@@ -788,7 +788,7 @@ const minimalApplication = `"application":{
 				"input_shape_text":"{name}={count}","input_shape_list":"{name}[{count}]","input_shape_boolean":"{name}=布尔",
 				"input_shape_number":"{name}=数字","input_shape_value":"{name}=值"
 			},
-			"status":{"generating":"正在生成"}
+			"status":{"generating":"正在生成","queued_submission":"排队等待提交"}
 		},
 		"audit":{
 			"create_action":"access_asset","delete_action":"access_asset",

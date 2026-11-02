@@ -378,7 +378,13 @@ func (executor *Executor) resumeAgentOperation(
 		if errors.Is(err, harness.ErrStale) {
 			return executor.harnessRefusal(command, err)
 		}
-		return chat.ToolResult{NoSubmission: knownNotSubmitted(err)}, err
+		failure := executor.executionFailure(command, "")
+		failure.NoSubmission = knownNotSubmitted(err)
+		failure.RetryAfter = admissionRetryAfter(err)
+		if failure.RetryAfter == 0 {
+			return chat.ToolResult{NoSubmission: failure.NoSubmission}, err
+		}
+		return failure, err
 	}
 	task, err := executor.gateway.Get(ctx, generation.OwnerID(op.OwnerID), accepted.TaskID)
 	if err != nil {

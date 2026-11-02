@@ -546,7 +546,10 @@ func bindDownloadNames(t *testing.T, body []byte) ([]byte, int) {
 
 // opaqueChatFields reduces the chat request fields the sample records as
 // opaque (the conversation, the tool declarations and the thinking switches)
-// to the recorded "ok"; every other field is still compared as it is.
+// to the recorded "ok"; every other field is still compared as it is. The
+// sample was recorded before Schema chat.agent.parallel_tool_calls: the
+// switch the Adapter now adds beside the tools is dropped, as it is no part of
+// what the recording proves.
 func opaqueChatFields(raw []byte) []byte {
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(raw, &fields) != nil {
@@ -557,6 +560,7 @@ func opaqueChatFields(raw []byte) []byte {
 			fields[key] = json.RawMessage(`"ok"`)
 		}
 	}
+	delete(fields, "parallel_tool_calls")
 	reduced, err := json.Marshal(fields)
 	if err != nil {
 		return raw

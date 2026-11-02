@@ -158,6 +158,7 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		"presentation.turn_active":              schema.Presentation.Messages.TurnActive,
 		"presentation.agent_busy":               schema.Presentation.Messages.AgentBusy,
 		"presentation.status.generating":        schema.Presentation.Status.Generating,
+		"presentation.status.queued_submission": schema.Presentation.Status.QueuedSubmission,
 		"audit.create_action":                   schema.Audit.CreateAction,
 		"audit.delete_action":                   schema.Audit.DeleteAction,
 		"audit.session_resource_type":           schema.Audit.SessionResourceType,
@@ -381,6 +382,13 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	}
 	if err := validateToolCallBudget(schema.Agent, runtime); err != nil {
 		return err
+	}
+	if limit := runtime.HTTP.TaskAdmission.PerOwnerMaxInflightTasks; schema.Agent.MaxParallelGenerationSubmissions < 1 ||
+		schema.Agent.MaxParallelGenerationSubmissions > limit {
+		return fmt.Errorf(
+			"agent 的 max_parallel_generation_submissions 必须在 1..%d（http.task_admission.per_owner_max_inflight_tasks）之间",
+			limit,
+		)
 	}
 	if schema.Agent.WorkerCount <= 0 || schema.Agent.QueueSize <= 0 {
 		return errors.New("agent 的 worker_count 和 queue_size 必须为正数")
