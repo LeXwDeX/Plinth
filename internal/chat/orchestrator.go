@@ -1172,6 +1172,10 @@ func (orchestrator *Orchestrator) Process(
 		// A new turn first compacts the context when the session's newest
 		// usage reached the threshold (#322); a resumed one keeps its request.
 		orchestrator.autoCompact(processCtx, command, history)
+		// The title only needs the first user message, so it is summarised
+		// alongside the turn instead of after it (which can wait minutes on
+		// generation tools).
+		orchestrator.startFirstTurnTitle(command, history)
 	}
 	request := orchestrator.agentRequest(ctx, history, command.Options, command.OwnerID, command.SessionID)
 	if checkpointResuming {
@@ -1578,7 +1582,6 @@ func (orchestrator *Orchestrator) Process(
 		failed = true
 		return err
 	}
-	orchestrator.startFirstTurnTitle(command, history)
 	if err := orchestrator.appendEvent(
 		context.WithoutCancel(ctx),
 		command.SessionID,
@@ -1593,9 +1596,10 @@ func (orchestrator *Orchestrator) Process(
 	return nil
 }
 
-// startFirstTurnTitle summarises the session title from the first round in the
-// background. The turn never waits for it: it has already been saved, and the
-// summary is a convenience that may fail without anyone noticing. Only the
+// startFirstTurnTitle summarises the session title from the first user message
+// in the background as soon as a new first turn starts. The turn never waits
+// for it: the summary is a convenience that may fail without anyone noticing,
+// and a failed or stopped turn does not cancel it. Only the
 // first round qualifies (the history holds just that one user message), and the
 // write is conditional on the title still being pending, so restarts, retries
 // and a manual rename can never produce a second or overriding title.
