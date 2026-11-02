@@ -44,17 +44,28 @@ func (resolver *Resolver) ImageDimensions(ctx context.Context, ownerID, assetID 
 
 var _ chat.InputAssetDigester = (*Resolver)(nil)
 
+// InputAssetRecords reads an owner's input asset record without opening its
+// bytes. The input asset service implements it; OpenOwned would re-hash the
+// whole file on every call (#49).
+type InputAssetRecords interface {
+	OwnedInputAsset(context.Context, generation.OwnerID, generation.AssetID) (generation.InputAsset, error)
+}
+
 // InputAssetDigest returns the SHA-256 the platform recorded for an input
 // asset the owner holds. The chat service compares an artboard snapshot with
-// the session's earlier pictures by it (#49); no bytes are read.
+// the session's earlier pictures by it (#49); only the record is read, never
+// the bytes, so comparing against a long history stays cheap.
 func (resolver *Resolver) InputAssetDigest(ctx context.Context, ownerID, assetID string) (string, error) {
 	if ownerID == "" || assetID == "" {
 		return "", chat.ErrAttachmentRejected
 	}
-	asset, body, err := resolver.inputs.OpenOwned(ctx, generation.OwnerID(ownerID), generation.AssetID(assetID))
+	records, ok := resolver.inputs.(InputAssetRecords)
+	if !ok {
+		return "", errors.New("chat references: input asset records unavailable")
+	}
+	asset, err := records.OwnedInputAsset(ctx, generation.OwnerID(ownerID), generation.AssetID(assetID))
 	if err != nil {
 		return "", err
 	}
-	_ = body.Close()
 	return asset.SHA256, nil
 }
