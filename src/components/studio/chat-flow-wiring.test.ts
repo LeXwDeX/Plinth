@@ -32,6 +32,11 @@ describe('the composer while a turn runs', () => {
     expect(chat).toContain('restoreAttachments(turn.images, turn.claims)');
   });
 
+  it('waits for the ended turn to release the send lock before sending a queued message, so it is not refused and put back', () => {
+    expect(chat).toContain('if (sendPreparation.current.has(activeSessionId)) return;');
+    expect(chat).toContain('}).finally(() => setDrainTick((tick) => tick + 1));');
+  });
+
   it('does not queue the same message twice while its turn is still starting, and restores a queued one whose start failed', () => {
     expect(chat).toContain('startingRef.current?.sessionId === sessionId && startingRef.current.text === text) return;');
     expect(chat).toContain('const restore = !sent && (replaced || queued) && isCurrentSessionScope(scope) && !controller.signal.aborted;');
