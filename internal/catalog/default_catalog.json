@@ -311,7 +311,7 @@
                 "name": "LLM_MODEL"
               }
             ],
-            "default": "qwen3.8-omni-flash"
+            "default": "qwen-omni-flash"
           },
           "agent_max_tool_calls_per_reply": {
             "type": "string",
@@ -4888,6 +4888,26 @@
         "thinking": {
           "enabled": true,
           "model_profiles": [
+            {
+              "model_prefixes": [
+                "qwen-omni-flash"
+              ],
+              "request_fields": {
+                "enable_thinking": true
+              },
+              "effort_field": "reasoning_effort",
+              "effort_levels": ["low", "medium", "xhigh"],
+              "default_effort": "xhigh",
+              "context_window_tokens": 1000000
+            },
+            {
+              "model_prefixes": [
+                "gpt-astra"
+              ],
+              "effort_field": "reasoning_effort",
+              "effort_levels": ["low", "medium", "high"],
+              "default_effort": "high"
+            },
             {
               "model_prefixes": [
                 "deepseek"

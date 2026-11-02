@@ -24,13 +24,13 @@ func TestChatAgentWiringEmitsSchemaDrivenThinkingOnWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The default model is qwen3.8-omni-flash (2026-10-30, #18), sent with
+	// The default model is qwen-omni-flash (2026-10-30, #18), sent with
 	// Qwen thinking at its highest effort.
-	if config.RuntimeSettings["llm_model"] != "qwen3.8-omni-flash" {
+	if config.RuntimeSettings["llm_model"] != "qwen-omni-flash" {
 		t.Fatalf("llm_model = %q", config.RuntimeSettings["llm_model"])
 	}
 	body := chatAgentWireBody(t, application, config.RuntimeSettings["llm_model"])
-	if body["model"] != "qwen3.8-omni-flash" {
+	if body["model"] != "qwen-omni-flash" {
 		t.Errorf("wire model = %#v", body["model"])
 	}
 	if body["enable_thinking"] != true || body["reasoning_effort"] != "xhigh" {
