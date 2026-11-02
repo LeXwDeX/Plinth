@@ -6,6 +6,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/moderation"
 )
 
 // ResultAssetURLs are the pictures of a finished Task that the tool's Schema
@@ -47,6 +48,26 @@ func MeteredFailureMessage(chat catalog.ChatSchema, metered bool, failure *gener
 		return ""
 	}
 	return chat.Presentation.Messages.GenerationFailedMeteredByClass[string(failure.Class)]
+}
+
+// LocalizedFailureMessage is FailureMessage with each Schema text passed
+// through localize (nil keeps the default locale), followed for a
+// content-safety failure by the Schema's reasons template naming what the
+// review gave (#35: "safety_violations=[sexual]"), so the Agent can rewrite
+// the prompt by it.
+func LocalizedFailureMessage(chat catalog.ChatSchema, metered bool, failure *generation.Failure, localize func(string) string) string {
+	if localize == nil {
+		localize = func(text string) string { return text }
+	}
+	return localize(FailureMessage(chat, metered, failure)) +
+		contentRejectedReasons(chat.Presentation.Messages, generation.ContentRejectedReasons(failure), localize)
+}
+
+// contentRejectedReasons is the Schema's reasons text for a content-safety
+// refusal (#35).
+func contentRejectedReasons(messages catalog.ChatMessageTexts, reasons []string, localize func(string) string) string {
+	return moderation.Explain(messages.ContentRejectedReasons, reasons,
+		messages.ContentRejectedReasonLabels, messages.ContentRejectedReasonSeparator, localize)
 }
 
 // FailureMessage is the public text of a failed Task: the Schema's metered no-auto-retry text

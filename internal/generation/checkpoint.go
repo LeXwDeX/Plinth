@@ -187,6 +187,21 @@ func (c *dispatchCheckpointer) receiptValid(receipt *DispatchReceipt) bool {
 	return receipt.Sequence == c.lastAck.Sequence && receipt.AckToken == c.lastAck.AckToken
 }
 
+// refusedSettlement 为 Start 期间已取得、尚未消费的派发许可生成"未派发"
+// 结算：上游以明确的限流拒绝了请求，没有受理，必须把检查点清回 idle，
+// 否则这次尝试会永远停在 dispatching。没有未消费许可时返回 nil。
+func (c *dispatchCheckpointer) refusedSettlement(attempt *Attempt) *DispatchReceiptSettlement {
+	if c == nil || c.lastAck == nil || c.settled || attempt == nil {
+		return nil
+	}
+	return &DispatchReceiptSettlement{
+		AttemptID:     attempt.ID,
+		Sequence:      c.lastAck.Sequence,
+		AckToken:      c.lastAck.AckToken,
+		NotDispatched: true,
+	}
+}
+
 func (c *dispatchCheckpointer) markSettled() {
 	c.settled = true
 }

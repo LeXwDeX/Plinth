@@ -506,3 +506,110 @@ func TestAdapterMarksImagesRejectedOnlyForImageRefusals(t *testing.T) {
 		})
 	}
 }
+
+// #35: an upstream content-safety refusal is not a model without image input.
+// DashScope answers 400 data_inspection_failed for a picture its moderation
+// flags; it must not tell the person to switch models, while a real refusal
+// of image input still does.
+func TestAdapterMarksContentModerationRefusals(t *testing.T) {
+	withImage := agents.Request{Model: "m", Messages: []agents.Message{{Role: "user", Parts: []agents.ContentPart{
+		{Kind: "text", Text: "what is this"}, {Kind: "image_url", URL: "data:image/png;base64,QQ=="},
+	}}}}
+	textOnly := agents.Request{Model: "m", Messages: []agents.Message{{Role: "user", Content: "hello"}}}
+	for _, test := range []struct {
+		name     string
+		status   int
+		body     string
+		request  agents.Request
+		content  bool
+		rejected bool
+	}{
+		{"dashscope image moderation", http.StatusBadRequest, `{"error":{"code":"data_inspection_failed","message":"Input image data may contain inappropriate content.","type":"data_inspection_failed"}}`, withImage, true, false},
+		{"dashscope streamed refusal", http.StatusBadRequest, `data: {"error":{"code":"data_inspection_failed","param":null,"message":"Input image data may contain inappropriate content.","type":"data_inspection_failed"},"id":"chatcmpl-test"}`, withImage, true, false},
+		{"dashscope text moderation", http.StatusBadRequest, `{"error":{"code":"data_inspection_failed","message":"Input data may contain inappropriate content.","type":"data_inspection_failed"}}`, textOnly, true, false},
+		{"dashscope native code", http.StatusBadRequest, `{"code":"DataInspectionFailed","message":"Output data may contain inappropriate content."}`, withImage, true, false},
+		{"azure content filter", http.StatusBadRequest, `{"error":{"code":"content_filter","message":"The response was filtered due to the prompt triggering content management policy."}}`, withImage, true, false},
+		{"openai content policy", http.StatusBadRequest, `{"error":{"code":"content_policy_violation","message":"Your request was rejected as a result of our safety system. Image descriptions may contain text that is not allowed."}}`, withImage, true, false},
+		{"image input unsupported", http.StatusBadRequest, `{"error":{"code":"invalid_request_error","message":"Image input is not supported"}}`, withImage, false, true},
+		{"moderation word only in message", http.StatusBadRequest, `{"error":{"message":"image data may contain inappropriate content"}}`, withImage, false, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: test.status,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(test.body)),
+				}, nil
+			})
+			adapter, err := openaicompatible.New(openaicompatible.Config{
+				BaseURL: "https://configured-agent.test/v1/", APIKey: "k", EndpointPath: "/chat/completions",
+				AuthorizationName: "Authorization", AuthorizationType: "Bearer", RequestTimeout: time.Minute,
+				ScannerMaxBytes: 1 << 20, ErrorBodyMaxBytes: 1 << 16, Client: &http.Client{Transport: transport},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, call := range []func() error{
+				func() error { _, err := adapter.Complete(context.Background(), test.request); return err },
+				func() error { _, err := adapter.Stream(context.Background(), test.request, nil); return err },
+			} {
+				err := call()
+				if err == nil || errors.Is(err, agents.ErrContentRejected) != test.content || errors.Is(err, agents.ErrImagesRejected) != test.rejected {
+					t.Fatalf("err = %v, want content rejected = %v, images rejected = %v", err, test.content, test.rejected)
+				}
+				var refused *agents.StatusError
+				if !errors.As(err, &refused) || refused.Status != test.status {
+					t.Fatalf("status error = %v", err)
+				}
+				if test.name == "dashscope image moderation" && strings.Join(agents.ContentRejectedReasons(err), ",") != "input_image" {
+					t.Fatalf("reasons = %v", agents.ContentRejectedReasons(err))
+				}
+				if test.name == "openai content policy" && strings.Join(agents.ContentRejectedReasons(err), ",") != "content_policy_violation" {
+					t.Fatalf("reasons without a category = %v", agents.ContentRejectedReasons(err))
+				}
+			}
+		})
+	}
+}
+
+func TestAdapterSendsParallelToolCallsOnlyWithToolsWhenEnabled(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		enabled  bool
+		tools    bool
+		wantSent bool
+	}{
+		{"enabled with tools", true, true, true},
+		{"enabled without tools", true, false, false},
+		{"disabled with tools", false, true, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var body []byte
+			transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				body, _ = io.ReadAll(request.Body)
+				return &http.Response{StatusCode: http.StatusOK,
+					Header: http.Header{"Content-Type": []string{"text/event-stream"}},
+					Body:   io.NopCloser(strings.NewReader("data: [DONE]\n\n"))}, nil
+			})
+			adapter, err := openaicompatible.New(openaicompatible.Config{
+				BaseURL: "https://configured-agent.test/v1/", APIKey: "k", EndpointPath: "/chat/completions",
+				AuthorizationName: "Authorization", AuthorizationType: "Bearer", RequestTimeout: time.Minute,
+				ScannerMaxBytes: 1 << 20, ErrorBodyMaxBytes: 1 << 16, Client: &http.Client{Transport: transport},
+				ParallelToolCalls: test.enabled,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := agents.Request{Model: "m", Messages: []agents.Message{{Role: "user", Content: "hi"}}}
+			if test.tools {
+				request.Tools = []agents.Tool{{Name: "t", Parameters: []byte(`{"type":"object"}`)}}
+			}
+			if _, err := adapter.Stream(context.Background(), request, func(agents.Delta) error { return nil }); err != nil {
+				t.Fatal(err)
+			}
+			if sent := strings.Contains(string(body), `"parallel_tool_calls":true`); sent != test.wantSent {
+				t.Fatalf("sent=%v want=%v body=%s", sent, test.wantSent, body)
+			}
+		})
+	}
+}

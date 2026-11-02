@@ -18,6 +18,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat/dsml"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/moderation"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
@@ -114,6 +115,12 @@ type ToolResult struct {
 	// NoSubmission is internal evidence that execution stopped before Gateway.Submit.
 	// It permits releasing an unused consent claim; unknown submit results never set it.
 	NoSubmission bool `json:"-"`
+	// RetryAfter, with NoSubmission, says the generation kernel refused the
+	// submission for lack of admission room and when to try again. The
+	// result still carries the failure receipt: the orchestrator queues the
+	// call for a retry while the Schema request timeout allows, and hands
+	// that receipt to the model only once it ran out.
+	RetryAfter time.Duration `json:"-"`
 	// Suspend 表示该工具已登记等待用户输入（AGT-12）：调用方应中断
 	// 本批剩余工具并向编排器返回挂起信号，而不是在 worker 内阻塞。
 	Suspend   bool
@@ -1205,8 +1212,9 @@ func (orchestrator *Orchestrator) Process(
 	} else {
 		streamFilter := dsml.NewFilter(dsmlSchema)
 		round := orchestrator.startThinkingRound(processCtx, command.SessionID)
-		completion, err = orchestrator.agent.Stream(
+		completion, request, err = orchestrator.streamAgent(
 			processCtx,
+			command,
 			request,
 			func(delta agents.Delta) error {
 				return round.receive(delta, streamFilter)
@@ -1258,8 +1266,9 @@ func (orchestrator *Orchestrator) Process(
 		summaryRequest.Tools = nil
 		summaryFilter := dsml.NewFilter(dsmlSchema)
 		summaryRound := orchestrator.startThinkingRound(processCtx, command.SessionID)
-		summary, summaryErr := orchestrator.agent.Stream(
+		summary, summaryRequest, summaryErr := orchestrator.streamAgent(
 			processCtx,
+			command,
 			summaryRequest,
 			func(delta agents.Delta) error {
 				return summaryRound.receive(delta, summaryFilter)
@@ -1542,13 +1551,20 @@ func (orchestrator *Orchestrator) Process(
 		// 续跑流同样要过滤 DSML：模型可能在总结中继续发起调用。
 		streamFilter := dsml.NewFilter(dsmlSchema)
 		followUpRound := orchestrator.startThinkingRound(processCtx, command.SessionID)
-		next, streamErr := orchestrator.agent.Stream(
+		next, sentFollowUp, streamErr := orchestrator.streamAgent(
 			processCtx,
+			command,
 			followUp,
 			func(delta agents.Delta) error {
 				return followUpRound.receive(delta, streamFilter)
 			},
 		)
+		if requestHasPictures(followUp) && !requestHasPictures(sentFollowUp) {
+			// The upstream blocked a picture of this context: later rounds
+			// start from the request without it, so they do not hit it again.
+			request = orchestrator.withoutPictures(processCtx, request, "")
+		}
+		followUp = sentFollowUp
 		if streamErr != nil {
 			if orchestrator.turnCanceled(turnKey) {
 				return finalizeStop()
@@ -2359,6 +2375,16 @@ func (orchestrator *Orchestrator) executeTools(
 		turn.CheckpointVersion, turn.State = version, state
 		return nil
 	}
+	// 上一次挂起留下的等待项（旧单字段检查点读作一项）：带回各调用的任务
+	// 绑定、等待截止和排队起点。本轮提交阶段新产生的在途项收在 inflight。
+	waiting := turn.Checkpoint.WaitingCalls()
+	turn.Checkpoint.SetWaiting(waiting)
+	requestTimeout := time.Duration(orchestrator.schema.Agent.RequestTimeoutSeconds) * time.Second
+	maxParallel := max(1, orchestrator.schema.Agent.MaxParallelGenerationSubmissions)
+	var inflight []WaitingCall
+	// 提交阶段：按调用顺序逐个执行。付费步骤提交后若要等待任务，不再立即
+	// 挂起轮次，记为在途并继续提交同批互不依赖的下一个付费步骤；本批提交
+	// 完（或遇到必须按序处理的调用）后，由循环之后的等待阶段一次性挂起。
 	for callIndex := len(results); callIndex < len(calls); callIndex++ {
 		call := calls[callIndex]
 		frozenKey := ""
@@ -2370,11 +2396,12 @@ func (orchestrator *Orchestrator) executeTools(
 		}
 		boundTaskID := boundTasks[call.ID]
 		waitDeadline := time.Time{}
-		if turn.Checkpoint.WaitingCallID == call.ID {
+		entry, hasEntry := waitingEntry(waiting, call.ID)
+		if hasEntry && entry.TaskID != "" {
 			if boundTaskID == "" {
-				boundTaskID = turn.Checkpoint.WaitingTaskID
+				boundTaskID = entry.TaskID
 			}
-			waitDeadline = turn.Checkpoint.WaitDeadline
+			waitDeadline = entry.Deadline
 		}
 		priorTaskCalls := map[string]struct{}{}
 		for id := range boundTasks {
@@ -2412,6 +2439,15 @@ func (orchestrator *Orchestrator) executeTools(
 				}
 			}
 		}
+		batching := len(inflight) > 0
+		if batching && (!found || len(inflight) >= maxParallel ||
+			orchestrator.scopeRefuses(registry, call.Name, command.Options.AgentScope, boundTaskID != "") ||
+			!paidTool(tool.Execution) || dependsOnInflight(call, inflight)) {
+			// 同批已有在途调用：只继续提交付费步骤，且不超过单批并发上限。
+			// 其余调用（控制类、只读类、未知工具）保持顺序语义，留到在途
+			// 调用的回执补齐之后再处理。
+			break
+		}
 		if found && orchestrator.scopeRefuses(registry, call.Name, command.Options.AgentScope, boundTaskID != "") {
 			// Defense in depth for the tool list: a model that names a tool it
 			// was not offered gets an explanation, not an execution. This is a
@@ -2425,6 +2461,8 @@ func (orchestrator *Orchestrator) executeTools(
 				ToolCallID: call.ID,
 			})
 			turn.Checkpoint.Completed = append(turn.Checkpoint.Completed, results[len(results)-1])
+			waiting = removeWaiting(waiting, call.ID)
+			turn.Checkpoint.SetWaiting(waiting)
 			if err := persist(orchestrator.service.TurnRunningState()); err != nil {
 				return results, imageURLs, taskBindings, err
 			}
@@ -2443,6 +2481,8 @@ func (orchestrator *Orchestrator) executeTools(
 				ToolCallID: call.ID,
 			})
 			turn.Checkpoint.Completed = append(turn.Checkpoint.Completed, results[len(results)-1])
+			waiting = removeWaiting(waiting, call.ID)
+			turn.Checkpoint.SetWaiting(waiting)
 			if err := persist(orchestrator.service.TurnRunningState()); err != nil {
 				return results, imageURLs, taskBindings, err
 			}
@@ -2499,36 +2539,76 @@ func (orchestrator *Orchestrator) executeTools(
 			// Preserve the original Task for the waiting scanner to retry.
 			err = nil
 		}
-		combined = errors.Join(combined, err)
-		if err != nil {
-			turn.Checkpoint.HadToolError = true
+		if err != nil && result.NoSubmission && result.RetryAfter > 0 && result.TaskID == "" {
+			// 生成内核因在途准入已满拒绝了这次提交，确定没有提交：沿用同一冻结
+			// 幂等键排队重试，总时长以 Schema 请求超时为上限（自第一次被拒起算）；
+			// 超限后落到下面的失败回执。
+			now := time.Now()
+			since, firstRefusal := now, true
+			if hasEntry && entry.TaskID == "" && !entry.QueuedSince.IsZero() {
+				since, firstRefusal = entry.QueuedSince, false
+			}
+			if deadline := since.Add(requestTimeout); now.Before(deadline) {
+				retryAt := now.Add(result.RetryAfter)
+				if retryAt.After(deadline) {
+					retryAt = deadline
+				}
+				if firstRefusal {
+					orchestrator.statusEvent(ctx, command.SessionID, orchestrator.schema.Presentation.Status.QueuedSubmission)
+				}
+				inflight = append(inflight, WaitingCall{CallID: call.ID, Deadline: deadline,
+					RetryAt: retryAt, QueuedSince: since})
+				// 准入已满时后面的提交多半同样被拒，留到重试时再试。
+				break
+			}
 		}
 		if result.Suspend {
 			// AGT-12：等待用户决定的工具已登记状态；挂起返回并保留
 			// 已完成部分的结果，未执行的调用在唤醒重放时重新执行。
+			// 同批已在途的任务先把等待项落库，保留各自的截止时间。
+			if len(inflight) > 0 {
+				turn.Checkpoint.SetWaiting(mergeWaiting(inflight, waiting, results))
+				if saveErr := persist(orchestrator.service.TurnRunningState()); saveErr != nil {
+					return results, imageURLs, taskBindings, saveErr
+				}
+			}
 			return results, imageURLs, taskBindings, ErrTurnSuspended
 		}
 		if result.AwaitTask {
 			if result.TaskID == "" {
 				return results, imageURLs, taskBindings, ErrTurnCheckpointConflict
 			}
-			turn.Checkpoint.WaitingTaskID = result.TaskID
 			taskBindings[call.ID] = result.TaskID
-			turn.Checkpoint.WaitingCallID = call.ID
 			if result.WaitUntil.IsZero() {
 				// Older executors may fail observation without returning a deadline.
 				// Preserve this call's durable deadline; bound a first read failure
 				// with the Schema request timeout rather than waiting forever.
 				result.WaitUntil = waitDeadline
 				if result.WaitUntil.IsZero() {
-					result.WaitUntil = time.Now().Add(time.Duration(orchestrator.schema.Agent.RequestTimeoutSeconds) * time.Second)
+					result.WaitUntil = time.Now().Add(requestTimeout)
 				}
 			}
-			turn.Checkpoint.WaitDeadline = result.WaitUntil
-			if err := persist(orchestrator.service.TurnWaitingTaskState()); err != nil {
-				return results, imageURLs, taskBindings, err
+			inflight = append(inflight, WaitingCall{CallID: call.ID, TaskID: result.TaskID, Deadline: result.WaitUntil})
+			continue
+		}
+		if batching {
+			// 前面还有在途调用，这条回执暂时排不进有序的 Completed。已有任务
+			// 的调用记为在途（唤醒后由绑定任务重新观察得到同一回执）；没有
+			// 任务的结果（拒绝、校验失败）丢弃，唤醒后按序重新得到。
+			if result.TaskID != "" {
+				deadline := waitDeadline
+				if deadline.IsZero() {
+					deadline = time.Now().Add(requestTimeout)
+				}
+				taskBindings[call.ID] = result.TaskID
+				inflight = append(inflight, WaitingCall{CallID: call.ID, TaskID: result.TaskID, Deadline: deadline})
+				continue
 			}
-			return results, imageURLs, taskBindings, ErrTurnAwaitTask
+			break
+		}
+		combined = errors.Join(combined, err)
+		if err != nil {
+			turn.Checkpoint.HadToolError = true
 		}
 		imageURLs = append(imageURLs, result.ImageURLs...)
 		// 观察失败时 result.TaskID 可能为空：不要清空回调里已持久化
@@ -2553,13 +2633,77 @@ func (orchestrator *Orchestrator) executeTools(
 		results = append(results, reply)
 		turn.Checkpoint.Completed = append(turn.Checkpoint.Completed, results[len(results)-1])
 		turn.Checkpoint.ImageURLs = append(turn.Checkpoint.ImageURLs, result.ImageURLs...)
-		turn.Checkpoint.WaitingTaskID, turn.Checkpoint.WaitingCallID = "", ""
-		turn.Checkpoint.WaitDeadline = time.Time{}
+		waiting = removeWaiting(waiting, call.ID)
+		turn.Checkpoint.SetWaiting(waiting)
 		if err := persist(orchestrator.service.TurnRunningState()); err != nil {
 			return results, imageURLs, taskBindings, err
 		}
 	}
+	if len(inflight) > 0 {
+		// 等待阶段：本批已提交完，一次性进入 waiting_task。扫描器在全部在途
+		// 任务终态（或各自截止）后唤醒，回执按原调用顺序回填。
+		turn.Checkpoint.SetWaiting(mergeWaiting(inflight, waiting, results))
+		if err := persist(orchestrator.service.TurnWaitingTaskState()); err != nil {
+			return results, imageURLs, taskBindings, err
+		}
+		return results, imageURLs, taskBindings, ErrTurnAwaitTask
+	}
 	return results, imageURLs, taskBindings, combined
+}
+
+// dependsOnInflight reports whether a call names the Task or the call ID of a
+// step still in flight: it needs that step's result, so it is not submitted
+// next to it but after the receipt exists. A handle a step's result will get
+// is not known before the receipt, so a call using one is refused without
+// submitting and is run again, in order, after the wait.
+func dependsOnInflight(call agents.ToolCall, inflight []WaitingCall) bool {
+	arguments := string(call.Arguments)
+	for _, entry := range inflight {
+		if entry.TaskID != "" && strings.Contains(arguments, entry.TaskID) ||
+			strings.Contains(arguments, entry.CallID) {
+			return true
+		}
+	}
+	return false
+}
+
+func waitingEntry(list []WaitingCall, callID string) (WaitingCall, bool) {
+	for _, entry := range list {
+		if entry.CallID == callID {
+			return entry, true
+		}
+	}
+	return WaitingCall{}, false
+}
+
+func removeWaiting(list []WaitingCall, callID string) []WaitingCall {
+	kept := make([]WaitingCall, 0, len(list))
+	for _, entry := range list {
+		if entry.CallID != callID {
+			kept = append(kept, entry)
+		}
+	}
+	return kept
+}
+
+// mergeWaiting is the waiting list to persist: the calls in flight of this
+// pass plus earlier entries the pass did not reach, minus calls that already
+// have their receipt.
+func mergeWaiting(inflight, prior []WaitingCall, results []agents.Message) []WaitingCall {
+	merged := append([]WaitingCall(nil), inflight...)
+	answered := make(map[string]struct{}, len(results))
+	for _, result := range results {
+		answered[result.ToolCallID] = struct{}{}
+	}
+	for _, entry := range prior {
+		if _, done := answered[entry.CallID]; done {
+			continue
+		}
+		if _, present := waitingEntry(merged, entry.CallID); !present {
+			merged = append(merged, entry)
+		}
+	}
+	return merged
 }
 
 func (orchestrator *Orchestrator) projectToolObservation(
@@ -2830,6 +2974,81 @@ func mergeStoredToolCall(target *ToolCall, stored ToolCall) {
 	}
 }
 
+// streamAgent streams one Agent request. When the upstream's content-safety
+// review refused a request that carried pictures (#35), it sends the request
+// once more with every picture replaced by the Schema note, so the Agent can
+// answer knowing the picture was blocked instead of the turn failing. It
+// returns the request actually sent. The refusal comes before any delta, so
+// nothing was streamed from the refused attempt.
+func (orchestrator *Orchestrator) streamAgent(
+	ctx context.Context,
+	command ProcessTurn,
+	request agents.Request,
+	emit func(agents.Delta) error,
+) (agents.Completion, agents.Request, error) {
+	completion, err := orchestrator.agent.Stream(ctx, request, emit)
+	if err == nil || !errors.Is(err, agents.ErrContentRejected) ||
+		orchestrator.schema.Agent.ModeratedImageNote == "" || !requestHasPictures(request) {
+		return completion, request, err
+	}
+	orchestrator.logger.Warn(
+		"Agent 请求的图片被上游内容审核拦截，去掉图片后重试",
+		"session_id", command.SessionID,
+		"assistant_message_id", command.AssistantMessageID,
+		"error", err,
+	)
+	stripped := orchestrator.withoutPictures(ctx, request, orchestrator.contentRejectedReasons(ctx, err))
+	completion, err = orchestrator.agent.Stream(ctx, stripped, emit)
+	return completion, stripped, err
+}
+
+// contentRejectedReasons is the Schema's reasons text for the reasons a
+// content-safety refusal in err gave, in the turn's locale (#35).
+func (orchestrator *Orchestrator) contentRejectedReasons(ctx context.Context, err error) string {
+	messages := orchestrator.schema.Presentation.Messages
+	return moderation.Explain(messages.ContentRejectedReasons, agents.ContentRejectedReasons(err),
+		messages.ContentRejectedReasonLabels, messages.ContentRejectedReasonSeparator,
+		func(text string) string { return orchestrator.text(ctx, text) })
+}
+
+// withoutPictures copies request with each picture part replaced by the
+// Schema's moderated-image note in the request's locale, followed by the
+// reasons the review gave, if any.
+func (orchestrator *Orchestrator) withoutPictures(ctx context.Context, request agents.Request, reasons string) agents.Request {
+	if orchestrator.schema.Agent.ModeratedImageNote == "" || !requestHasPictures(request) {
+		return request
+	}
+	note := orchestrator.text(ctx, orchestrator.schema.Agent.ModeratedImageNote) + reasons
+	messages := make([]agents.Message, len(request.Messages))
+	for index, message := range request.Messages {
+		messages[index] = message
+		if len(message.Parts) == 0 {
+			continue
+		}
+		parts := make([]agents.ContentPart, 0, len(message.Parts))
+		for _, part := range message.Parts {
+			if part.URL != "" {
+				part = agents.ContentPart{Kind: orchestrator.schema.Context.TextPartKind, Text: note}
+			}
+			parts = append(parts, part)
+		}
+		messages[index].Parts = parts
+	}
+	request.Messages = messages
+	return request
+}
+
+func requestHasPictures(request agents.Request) bool {
+	for _, message := range request.Messages {
+		for _, part := range message.Parts {
+			if part.URL != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // withErrorReference appends the Schema's error reference with the assistant
 // message ID; the failure log line carries the same assistant_message_id.
 func (orchestrator *Orchestrator) withErrorReference(ctx context.Context, text, messageID string) string {
@@ -2843,11 +3062,15 @@ func (orchestrator *Orchestrator) withErrorReference(ctx context.Context, text, 
 // agentFailureMessage is what the person reads when the Agent request failed:
 // a deployment without Agent settings says the Agent is not configured, a
 // refusal of a request with pictures says the model may not read images
-// (#253); anything else stays the unknown error, whose ID is in the log.
+// (#253), an upstream content-safety refusal says the input tripped it (#35);
+// anything else stays the unknown error, whose ID is in the log.
 func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err error) string {
 	messages := orchestrator.schema.Presentation.Messages
 	if errors.Is(err, agents.ErrNotConfigured) && messages.AgentNotConfigured != "" {
 		return orchestrator.text(ctx, messages.AgentNotConfigured)
+	}
+	if errors.Is(err, agents.ErrContentRejected) && messages.AgentContentRejected != "" {
+		return orchestrator.text(ctx, messages.AgentContentRejected) + orchestrator.contentRejectedReasons(ctx, err)
 	}
 	if errors.Is(err, agents.ErrImagesRejected) && messages.AgentImagesUnsupported != "" {
 		return orchestrator.text(ctx, messages.AgentImagesUnsupported)

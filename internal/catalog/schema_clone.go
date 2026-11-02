@@ -440,6 +440,9 @@ func cloneApplication(source ApplicationSchema) ApplicationSchema {
 		result.Chat.Agent.Thinking = &thinking
 	}
 	result.Chat.ContextCompaction.RoleLabels = cloneStringMap(source.Chat.ContextCompaction.RoleLabels)
+	if source.Chat.Presentation.Messages.ContentRejectedReasonLabels != nil {
+		result.Chat.Presentation.Messages.ContentRejectedReasonLabels = cloneStringMap(source.Chat.Presentation.Messages.ContentRejectedReasonLabels)
+	}
 	if source.Chat.Presentation.Messages.GenerationFailedByClass != nil {
 		result.Chat.Presentation.Messages.GenerationFailedByClass = cloneStringMap(source.Chat.Presentation.Messages.GenerationFailedByClass)
 	}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
+	"github.com/LeXwDeX/Plinth/internal/moderation"
 )
 
 // ThinkingOptions are the vendor request extensions of the configured model,
@@ -65,6 +66,10 @@ type Config struct {
 	// StreamIncludeUsage asks streamed requests of models without thinking
 	// options for their token usage (chat.agent.stream_include_usage, #322).
 	StreamIncludeUsage bool
+	// ParallelToolCalls sends parallel_tool_calls=true on requests that carry
+	// tools, so the model may emit independent calls in one reply
+	// (chat.agent.parallel_tool_calls).
+	ParallelToolCalls bool
 }
 
 type Adapter struct {
@@ -78,6 +83,7 @@ type Adapter struct {
 	thinking          *ThinkingOptions
 	thinkingFor       func(model string) *ThinkingOptions
 	includeUsage      bool
+	parallelToolCalls bool
 }
 
 func New(config Config) (*Adapter, error) {
@@ -114,6 +120,7 @@ func New(config Config) (*Adapter, error) {
 		thinking:          thinking,
 		thinkingFor:       config.ThinkingFor,
 		includeUsage:      config.StreamIncludeUsage,
+		parallelToolCalls: config.ParallelToolCalls,
 	}, nil
 }
 
@@ -299,7 +306,7 @@ func (adapter *Adapter) send(
 	stream bool,
 ) (*http.Response, error) {
 	options := adapter.options(request.Model)
-	body, err := marshalRequest(request, stream, adapter.streamUsage(options), options)
+	body, err := marshalRequest(request, stream, adapter.streamUsage(options), adapter.parallelToolCalls, options)
 	if err != nil {
 		return nil, err
 	}
@@ -340,6 +347,15 @@ func (adapter *Adapter) requireSuccess(response *http.Response, request agents.R
 		&agents.StatusError{Status: response.StatusCode},
 		strings.TrimSpace(string(body)),
 	)
+	// #35: a vendor content-safety refusal names its own error code; it
+	// comes first, because its message may mention image data too.
+	if code := moderationRefusal(body); response.StatusCode >= 400 && response.StatusCode < 500 && code != "" {
+		reasons := moderation.Reasons(string(body))
+		if len(reasons) == 0 {
+			reasons = moderation.Tokens(code)
+		}
+		return errors.Join(&agents.ContentRejection{Reasons: reasons}, err)
+	}
 	// #253: a request with pictures refused as invalid input, whose error
 	// names image/vision/multimodal content, is a model without image input;
 	// the caller can say so instead of an unknown error. Any other refusal
@@ -348,6 +364,45 @@ func (adapter *Adapter) requireSuccess(response *http.Response, request agents.R
 		return errors.Join(agents.ErrImagesRejected, err)
 	}
 	return err
+}
+
+// moderationCodes are the error codes vendors give a content-safety
+// refusal: DashScope's compatible (data_inspection_failed) and native
+// (DataInspectionFailed) endpoints, Azure OpenAI (content_filter) and OpenAI
+// (content_policy_violation).
+var moderationCodes = map[string]bool{
+	"data_inspection_failed":   true,
+	"datainspectionfailed":     true,
+	"content_filter":           true,
+	"content_policy_violation": true,
+}
+
+// moderationRefusal is the content-safety code of an error body, either a
+// plain JSON object or one SSE "data:" line as a streamed refusal sends it;
+// "" for any other refusal.
+func moderationRefusal(body []byte) string {
+	text := strings.TrimSpace(string(body))
+	text = strings.TrimSpace(strings.TrimPrefix(text, "data:"))
+	var payload struct {
+		Code  any `json:"code"`
+		Error *struct {
+			Code any    `json:"code"`
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if json.Unmarshal([]byte(text), &payload) != nil {
+		return ""
+	}
+	codes := []any{payload.Code}
+	if payload.Error != nil {
+		codes = append(codes, payload.Error.Code, payload.Error.Type)
+	}
+	for _, code := range codes {
+		if name, ok := code.(string); ok && moderationCodes[strings.ToLower(name)] {
+			return name
+		}
+	}
+	return ""
 }
 
 func imageRefusalStatus(status int) bool {
@@ -388,6 +443,8 @@ type wireRequest struct {
 	// StreamOptions is sent only with stream=true: DeepSeek answers 400 to
 	// stream_options on a non-streamed request.
 	StreamOptions *wireStreamOptions `json:"stream_options,omitempty"`
+	// ParallelToolCalls is sent only when the request carries tools.
+	ParallelToolCalls *bool `json:"parallel_tool_calls,omitempty"`
 }
 
 type wireStreamOptions struct {
@@ -448,6 +505,7 @@ func marshalRequest(
 	request agents.Request,
 	stream bool,
 	includeUsage bool,
+	parallelToolCalls bool,
 	thinking *ThinkingOptions,
 ) ([]byte, error) {
 	wire := wireRequest{
@@ -509,6 +567,10 @@ func marshalRequest(
 				Parameters:  tool.Parameters,
 			},
 		})
+	}
+	if parallelToolCalls && len(wire.Tools) > 0 {
+		enabled := true
+		wire.ParallelToolCalls = &enabled
 	}
 	if !vendorFields {
 		return json.Marshal(wire)

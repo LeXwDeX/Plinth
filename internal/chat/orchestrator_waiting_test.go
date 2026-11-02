@@ -110,6 +110,13 @@ func TestWaitingScannerHonorsDeadlineWhenTaskCannotBeRead(t *testing.T) {
 			} else if mode == "legacy missing deadline" {
 				deadline = time.Time{}
 			}
+			// 旧版本写下的单字段检查点：扫描器必须照样读懂（兼容读取）。
+			waiting := turn.Checkpoint.WaitingCalls()
+			if len(waiting) != 1 {
+				t.Fatalf("waiting = %+v", waiting)
+			}
+			turn.Checkpoint.Waiting = nil
+			turn.Checkpoint.WaitingCallID, turn.Checkpoint.WaitingTaskID = waiting[0].CallID, waiting[0].TaskID
 			turn.Checkpoint.WaitDeadline = deadline
 			if _, err := service.SaveTurnCheckpoint(ctx, turn, turn.State, turn.Checkpoint, false); err != nil {
 				t.Fatal(err)
@@ -139,10 +146,10 @@ func TestWaitingScannerHonorsDeadlineWhenTaskCannotBeRead(t *testing.T) {
 				want = service.TurnWaitingTaskState()
 			}
 			if mode == "legacy missing deadline" {
-				if turn.Checkpoint.WaitDeadline.IsZero() {
+				if turn.Checkpoint.WaitingCalls()[0].Deadline.IsZero() {
 					t.Fatal("legacy wait deadline was not repaired")
 				}
-			} else if !turn.Checkpoint.WaitDeadline.Equal(deadline) {
+			} else if !turn.Checkpoint.WaitingCalls()[0].Deadline.Equal(deadline) {
 				t.Fatal("scanner changed durable deadline")
 			}
 			if err != nil || turn.State != want {
@@ -175,13 +182,13 @@ func TestObservationErrorCannotErasePersistedWaitDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deadline := turn.Checkpoint.WaitDeadline
+	deadline := turn.Checkpoint.WaitingCalls()[0].Deadline
 	e.omitBoundDeadline = true
 	if err := waitingOrchestrator(t, service, e).Process(ctx, command); err != nil {
 		t.Fatal(err)
 	}
 	turn, err = service.GetTurn(ctx, command.OwnerID, command.SessionID, command.AssistantMessageID)
-	if err != nil || deadline.IsZero() || !turn.Checkpoint.WaitDeadline.Equal(deadline) {
+	if err != nil || deadline.IsZero() || !turn.Checkpoint.WaitingCalls()[0].Deadline.Equal(deadline) {
 		t.Fatalf("observation reset deadline: %+v err=%v original=%v", turn, err, deadline)
 	}
 	if _, submissions := e.counts(session.ID); submissions != 1 {
@@ -282,7 +289,7 @@ func TestKnownTaskObservationErrorWaitsAndScannerRecoversOriginal(t *testing.T) 
 	}
 	turn, err := service.GetTurn(ctx, command.OwnerID, command.SessionID, command.AssistantMessageID)
 	if err != nil || turn.State != service.TurnWaitingTaskState() ||
-		turn.Checkpoint.WaitingTaskID != "task-"+session.ID || len(turn.Checkpoint.Completed) != 1 {
+		len(turn.Checkpoint.WaitingCalls()) != 1 || turn.Checkpoint.WaitingCalls()[0].TaskID != "task-"+session.ID || len(turn.Checkpoint.Completed) != 1 {
 		t.Fatalf("known Task was completed after observation error: %+v %v", turn, err)
 	}
 	if _, submissions := executor.counts(session.ID); submissions != 1 {

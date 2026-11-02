@@ -574,6 +574,7 @@ func (executor *Executor) Execute(
 		}
 		result := executor.executionFailure(command, "")
 		result.NoSubmission = knownNotSubmitted(err)
+		result.RetryAfter = admissionRetryAfter(err)
 		return result, err
 	}
 	if observe != nil {
@@ -663,6 +664,18 @@ func taskCredits(task generation.Task) int {
 func taskStep(task generation.Task, approval string) stepInfo {
 	return stepInfo{NativeQuote: task.NativeQuote, Credits: taskCredits(task), CreditsMetered: task.Offering.CreditsMetered, Approval: approval,
 		ExtraCredits: task.Offering.ExtraCreditDetail(task.Input).Credits}
+}
+
+// admissionRetryAfter is the wait the generation kernel asks for when it
+// refused a submission because the in-flight Task admission is full. The
+// submission did not happen, so the orchestrator may queue the call and submit
+// it again with the same frozen idempotency key. Zero for any other error.
+func admissionRetryAfter(err error) time.Duration {
+	var domainErr *generation.Error
+	if errors.As(err, &domainErr) && domainErr.Code == generation.ErrTooManyRequests && domainErr.RetryAfter > 0 {
+		return domainErr.RetryAfter
+	}
+	return 0
 }
 
 func knownNotSubmitted(err error) bool {
@@ -1529,7 +1542,7 @@ func (executor *Executor) failureMessage(
 	metered bool,
 	failure *generation.Failure,
 ) string {
-	return executor.localized(command, FailureMessage(executor.chat, metered, failure))
+	return LocalizedFailureMessage(executor.chat, metered, failure, executor.localizeText(command))
 }
 
 func (executor *Executor) generationFailure(

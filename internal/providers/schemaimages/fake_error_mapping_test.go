@@ -121,9 +121,12 @@ func TestImageConnectionsReadTheFakeFaultsAlike(t *testing.T) {
 		{fakeupstream.ScenarioServerError, map[string]want{
 			"openai": {generation.FailureSubmissionUnknown, false}, "gemini": {generation.FailureSubmissionUnknown, false},
 			"jimeng": {generation.FailureSubmissionUnknown, false}}},
+		// The fake's task failure is each vendor's content-safety refusal
+		// (moderation_blocked, content_policy_violation,
+		// OutputImageSensitiveContentDetected): content_rejected (#35).
 		{fakeupstream.ScenarioTaskFailed, map[string]want{
-			"openai": {generation.FailureInvalidInput, false}, "gemini": {generation.FailureInvalidInput, false},
-			"jimeng": {generation.FailureInvalidInput, false}}},
+			"openai": {generation.FailureContentRejected, false}, "gemini": {generation.FailureContentRejected, false},
+			"jimeng": {generation.FailureContentRejected, false}}},
 	}
 	for _, row := range table {
 		for _, c := range imageConnections {
@@ -203,11 +206,18 @@ func TestGeminiConnectionReadsTheDocumentedErrorCodes(t *testing.T) {
 	// Every generation-blocked code asks for different input. The page lists no
 	// HTTP status for them, so the class must not depend on one: 409 is a status
 	// the default reading would call a plain rejection.
-	for _, code := range []string{"safety", "recitation", "language", "prohibited_content", "spii", "blocklist",
-		"image_safety", "image_prohibited_content", "image_recitation", "image_other", "content_blocked"} {
+	for _, code := range []string{"recitation", "language", "image_recitation", "image_other"} {
 		answers = append(answers,
 			stubbedAnswer{"blocked " + code + " 400", 400, errorEnvelope(code, "blocked"), generation.FailureInvalidInput, false},
 			stubbedAnswer{"blocked " + code + " 409", 409, errorEnvelope(code, "blocked"), generation.FailureInvalidInput, false})
+	}
+	// #35: the safety-filter codes are a content-safety refusal, told apart
+	// from a malformed request so the person learns to change the picture.
+	for _, code := range []string{"safety", "prohibited_content", "spii", "blocklist",
+		"image_safety", "image_prohibited_content", "content_blocked"} {
+		answers = append(answers,
+			stubbedAnswer{"safety " + code + " 400", 400, errorEnvelope(code, "blocked"), generation.FailureContentRejected, false},
+			stubbedAnswer{"safety " + code + " 409", 409, errorEnvelope(code, "blocked"), generation.FailureContentRejected, false})
 	}
 	runStubbedAnswers(t, gemini, func(url string) string { return url + "/v1" }, answers)
 }
@@ -228,7 +238,9 @@ func TestJimengConnectionReadsTheDocumentedErrorCodes(t *testing.T) {
 		{"RateLimitExceeded.EndpointRPMExceeded 429", 429, body("RateLimitExceeded.EndpointRPMExceeded"), generation.FailureRateLimited, true},
 		{"ModelAccountRpmRateLimitExceeded 429", 429, body("ModelAccountRpmRateLimitExceeded"), generation.FailureRateLimited, true},
 		{"ServerOverloaded 429", 429, body("ServerOverloaded"), generation.FailureRateLimited, true},
-		{"InputTextSensitiveContentDetected 400", 400, body("InputTextSensitiveContentDetected"), generation.FailureInvalidInput, false},
+		{"InputTextSensitiveContentDetected 400", 400, body("InputTextSensitiveContentDetected"), generation.FailureContentRejected, false},
+		{"InputImageSensitiveContentDetected 400", 400, body("InputImageSensitiveContentDetected"), generation.FailureContentRejected, false},
+		{"OutputImageSensitiveContentDetected 400", 400, body("OutputImageSensitiveContentDetected"), generation.FailureContentRejected, false},
 		{"InvalidParameter 400", 400, body("InvalidParameter"), generation.FailureInvalidInput, false},
 		{"AuthenticationError 401", 401, body("AuthenticationError"), generation.FailureAuthentication, false},
 	}
@@ -263,5 +275,18 @@ func TestOpenAIConnectionReadsABare402AsAnEmptyBalance(t *testing.T) {
 		{"402 without a code", 402, `{"message":"payment required"}`, generation.FailureInsufficientBalance, false},
 		{"insufficient_quota 429", 429, errorEnvelope("insufficient_quota", "You exceeded your current quota"), generation.FailureInsufficientBalance, false},
 		{"rate_limit_exceeded 429", 429, errorEnvelope("rate_limit_exceeded", "slow down"), generation.FailureRateLimited, true},
+	})
+}
+
+// #35: formal-test 2026-11-02, gpt-image-2 image-to-image through the Azure
+// gateway answered 400 moderation_blocked ("rejected by the safety system",
+// safety_violations=[sexual]). A content-safety refusal is its own class so
+// the person reads "the picture tripped the safety review", not "invalid
+// input"; it is never retried.
+func TestOpenAIConnectionReadsSafetyRefusalsAsContentRejected(t *testing.T) {
+	runStubbedAnswers(t, imageConnections[0], func(url string) string { return url }, []stubbedAnswer{
+		{"moderation_blocked 400", 400, `{"error":{"message":"[BadRequestError] Your request was rejected by the safety system. safety_violations=[sexual].","type":"invalid_request_error","code":"moderation_blocked"}}`, generation.FailureContentRejected, false},
+		{"content_policy_violation 400", 400, errorEnvelope("content_policy_violation", "Your request was rejected as a result of our safety system."), generation.FailureContentRejected, false},
+		{"invalid_request 400 stays invalid input", 400, errorEnvelope("invalid_request", "bad parameter"), generation.FailureInvalidInput, false},
 	})
 }

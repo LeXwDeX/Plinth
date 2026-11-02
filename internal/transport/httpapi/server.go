@@ -38,6 +38,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/llmsettings"
 	"github.com/LeXwDeX/Plinth/internal/mcp"
 	"github.com/LeXwDeX/Plinth/internal/modeldelivery"
+	"github.com/LeXwDeX/Plinth/internal/moderation"
 	"github.com/LeXwDeX/Plinth/internal/processing"
 	"github.com/LeXwDeX/Plinth/internal/promptenhance"
 	"github.com/LeXwDeX/Plinth/internal/provideraccounts"
@@ -2884,6 +2885,16 @@ type taskResponse struct {
 	// later step found the job gone. Neither names the job itself.
 	UpstreamJobCreatedAt *time.Time `json:"upstream_job_created_at,omitempty"`
 	UpstreamJobGone      bool       `json:"upstream_job_gone,omitempty"`
+	// QueueNotice 说明任务为什么仍在排队：上游限流拒绝后任务回到 QUEUED
+	// 等待自动重试，状态仍是 QUEUED，只多一条 Schema 文案，不改变状态机。
+	QueueNotice *queueNotice `json:"queue_notice,omitempty"`
+}
+
+// queueNotice 是排队原因的公开投影：reason 是稳定的枚举值，detail 是按
+// 语言解析的 Schema 文案（messages["task.queue_reason.<reason>"]）。
+type queueNotice struct {
+	Reason string `json:"reason"`
+	Detail string `json:"detail"`
 }
 
 type resourceResponse struct {
@@ -2976,6 +2987,13 @@ func (s *Server) newTaskResponse(locale string, task generation.Task) taskRespon
 		created := task.UpstreamJobCreatedAt
 		result.UpstreamJobCreatedAt = &created
 	}
+	if task.RateLimitQueued && task.State == generation.TaskQueued {
+		reason := string(generation.FailureRateLimited)
+		result.QueueNotice = &queueNotice{
+			Reason: reason,
+			Detail: s.messageIn(locale, "task.queue_reason."+reason),
+		}
+	}
 	result.Resources = s.resourceResponses(locale, task)
 	result.ResourcesPending = generation.ResourcesPending(task.Resources)
 	return result
@@ -3043,12 +3061,24 @@ func (s *Server) publicFailure(locale string, failure *generation.Failure) *publ
 	if failure == nil {
 		return nil
 	}
+	messages := s.application.Chat.Presentation.Messages
 	return &publicFailure{
 		Class:     failure.Class,
 		Retryable: failure.Retryable,
 		Ambiguous: failure.Ambiguous,
-		Detail:    s.messageIn(locale, "failure."+string(failure.Class)),
+		Detail: s.messageIn(locale, "failure."+string(failure.Class)) +
+			moderation.Explain(messages.ContentRejectedReasons, generation.ContentRejectedReasons(failure),
+				messages.ContentRejectedReasonLabels, messages.ContentRejectedReasonSeparator,
+				func(text string) string { return s.localizedText(locale, text) }),
 	}
+}
+
+// localizedText is textIn that keeps the default copy without a localizer.
+func (s *Server) localizedText(locale, text string) string {
+	if s.texts == nil {
+		return text
+	}
+	return s.texts.Text(locale, text)
 }
 
 // publicEvents 按 catalog 白名单把内核事件投影为公开事件面（§8.1

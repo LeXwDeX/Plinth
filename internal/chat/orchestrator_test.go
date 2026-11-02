@@ -472,10 +472,10 @@ func TestOrchestratorGeneratesFirstTurnTitleFromSchemaAndEmitsEvent(
 		"configured title prompt {maximum}: {content}"
 	schema.Agent.TitleMaxChars = 5
 	schema.Stream.EventTypes.Title = "configured-title-event"
-	agent := &scriptedAgent{responses: []agents.Completion{
-		{Content: "configured response"},
-		{Content: "123456789"},
-	}}
+	agent := &scriptedAgent{
+		responses:   []agents.Completion{{Content: "configured response"}},
+		completions: []agents.Completion{{Content: "123456789"}},
+	}
 	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
 		Service: service,
 		Schema:  schema,
@@ -514,9 +514,16 @@ func TestOrchestratorGeneratesFirstTurnTitleFromSchemaAndEmitsEvent(
 	if len(sessions) != 1 || sessions[0].Title != "12345" {
 		t.Fatalf("sessions = %#v", sessions)
 	}
-	if len(agent.requests) != 2 ||
-		agent.requests[1].Messages[0].Content !=
-			"configured title prompt 5: configured request" {
+	// The title request runs next to the reply (#36), so its place among
+	// the requests is not fixed.
+	titleRequests := 0
+	for _, request := range agent.requests {
+		if len(request.Messages) > 0 &&
+			request.Messages[0].Content == "configured title prompt 5: configured request" {
+			titleRequests++
+		}
+	}
+	if len(agent.requests) != 2 || titleRequests != 1 {
 		t.Fatalf("agent requests = %#v", agent.requests)
 	}
 	events, err := service.ListEvents(ctx, "owner-a", session.ID, 0)
@@ -1003,9 +1010,15 @@ func configuredChatSchema(t *testing.T) catalog.ChatSchema {
 }
 
 type scriptedAgent struct {
+	mu        sync.Mutex
 	responses []agents.Completion
 	requests  []agents.Request
 	index     int
+	// completions, when set, script Complete apart from Stream: the first-turn
+	// title (Complete) runs next to the reply (Stream) since #36, so a shared
+	// call order would hand either one the other's response (#45).
+	completions   []agents.Completion
+	completeIndex int
 }
 
 type notifyingAgent struct {
@@ -1121,9 +1134,11 @@ func (agent *scriptedAgent) Stream(
 	request agents.Request,
 	emit func(agents.Delta) error,
 ) (agents.Completion, error) {
+	agent.mu.Lock()
 	agent.requests = append(agent.requests, request)
 	response := agent.responses[agent.index]
 	agent.index++
+	agent.mu.Unlock()
 	if response.Content != "" && emit != nil {
 		if err := emit(agents.Delta{Content: response.Content}); err != nil {
 			return agents.Completion{}, err
@@ -1136,7 +1151,14 @@ func (agent *scriptedAgent) Complete(
 	_ context.Context,
 	request agents.Request,
 ) (agents.Completion, error) {
+	agent.mu.Lock()
+	defer agent.mu.Unlock()
 	agent.requests = append(agent.requests, request)
+	if agent.completions != nil {
+		response := agent.completions[agent.completeIndex]
+		agent.completeIndex++
+		return response, nil
+	}
 	response := agent.responses[agent.index]
 	agent.index++
 	return response, nil
@@ -1977,6 +1999,244 @@ func TestOrchestratorSaysWhenTheAgentIsNotConfigured(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(messages[1].Content, "configured not-configured text") || strings.Contains(messages[1].Content, "LLM_API_KEY") {
+		t.Fatalf("assistant = %#v", messages[1])
+	}
+}
+
+// moderatingAgent refuses any request that carries a picture the way
+// DashScope's content-safety review does (#35) and answers text-only ones.
+type moderatingAgent struct {
+	mu       sync.Mutex
+	requests []agents.Request
+}
+
+func (agent *moderatingAgent) Stream(_ context.Context, request agents.Request, _ func(agents.Delta) error) (agents.Completion, error) {
+	agent.mu.Lock()
+	defer agent.mu.Unlock()
+	agent.requests = append(agent.requests, request)
+	for _, message := range request.Messages {
+		for _, part := range message.Parts {
+			if part.URL != "" {
+				return agents.Completion{}, errors.Join(&agents.ContentRejection{Reasons: []string{"sexual"}}, &agents.StatusError{Status: 400})
+			}
+		}
+	}
+	return agents.Completion{Content: "configured adjusted reply"}, nil
+}
+
+func (agent *moderatingAgent) Complete(ctx context.Context, request agents.Request) (agents.Completion, error) {
+	return agent.Stream(ctx, request, nil)
+}
+
+// #35: when the upstream's moderation refuses the pictures of the Agent's own
+// request, the turn does not end in an error: the request is sent once more
+// with every picture replaced by the Schema note, so the Agent learns the
+// picture was blocked and adjusts its reply by itself.
+func TestOrchestratorRetriesWithoutPicturesTheModerationBlocked(t *testing.T) {
+	repository := newMemoryChatRepository()
+	service := newChatService(t, repository)
+	schema := configuredChatSchema(t)
+	schema.Context.TextPartKind = "configured-text-part"
+	schema.Agent.ModeratedImageNote = "configured moderated note"
+	schema.Presentation.Messages.ContentRejectedReasons = " reason: {reasons}"
+	schema.Presentation.Messages.ContentRejectedReasonLabels = map[string]string{"sexual": "porn"}
+	agent := &moderatingAgent{}
+	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
+		Service: service, Schema: schema, Model: "configured-model", Agent: agent, Tools: noToolExecutor{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistant, err := service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID,
+		Content: "make this a pumpkin witch", ImageURLs: []string{"data:image/png;base64,Y29uZmlndXJlZA=="}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := orchestrator.Process(ctx, chat.ProcessTurn{OwnerID: "owner-a", SessionID: session.ID, AssistantMessageID: assistant.ID}); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := service.ListMessages(ctx, "owner-a", session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messages[1].Content != "configured adjusted reply" {
+		t.Fatalf("assistant = %#v", messages[1])
+	}
+	agent.mu.Lock()
+	defer agent.mu.Unlock()
+	if len(agent.requests) < 2 {
+		t.Fatalf("requests = %#v", agent.requests)
+	}
+	last := agent.requests[len(agent.requests)-1]
+	found := false
+	for _, message := range last.Messages {
+		for _, part := range message.Parts {
+			if part.URL != "" {
+				t.Fatalf("retried request still carries a picture: %#v", last)
+			}
+			if part.Kind == "configured-text-part" && part.Text == "configured moderated note reason: porn" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("retried request lacks the note: %#v", last)
+	}
+}
+
+// moderatedOnceToolExecutor fails its first generation the way a
+// content-safety refusal does and succeeds afterwards (#35).
+type moderatedOnceToolExecutor struct {
+	prompts []string
+}
+
+func (executor *moderatedOnceToolExecutor) Execute(
+	_ context.Context,
+	command chat.ToolCommand,
+	_ func(chat.ToolObservation) error,
+) (chat.ToolResult, error) {
+	executor.prompts = append(executor.prompts, string(command.Call.Arguments))
+	if len(executor.prompts) == 1 {
+		detail := "configured blocked reason: porn"
+		return chat.ToolResult{TaskID: "task-blocked", Error: detail,
+			AgentContent: `{"success":false,"error":"` + detail + `"}`}, errors.New(detail)
+	}
+	return chat.ToolResult{TaskID: "task-ok", ImageURLs: []string{"/configured/ok.png"}, AgentContent: `{"success":true}`}, nil
+}
+
+// #35: a generation the upstream's review blocked goes back to the Agent as
+// a tool result with the reason, and the turn goes on: the Agent rewrites the
+// prompt and calls the tool again in the same reply.
+func TestOrchestratorLetsTheAgentAdjustAfterAModeratedGeneration(t *testing.T) {
+	repository := newMemoryChatRepository()
+	service := newChatService(t, repository)
+	schema := configuredChatSchema(t)
+	tool := schema.Tools[0].Name
+	agent := &scriptedAgent{responses: []agents.Completion{
+		{ToolCalls: []agents.ToolCall{{ID: "call-1", Name: tool, Arguments: []byte(`{"prompt":"witch in a revealing dress"}`)}}},
+		{ToolCalls: []agents.ToolCall{{ID: "call-2", Name: tool, Arguments: []byte(`{"prompt":"witch in a long modest robe"}`)}}},
+		{Content: "configured final"},
+	}}
+	tools := &moderatedOnceToolExecutor{}
+	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
+		Service: service, Schema: schema, Model: "configured-model", Agent: agent, Tools: tools,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistant, err := service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID, Content: "a pumpkin witch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := orchestrator.Process(ctx, chat.ProcessTurn{OwnerID: "owner-a", SessionID: session.ID, AssistantMessageID: assistant.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if len(tools.prompts) != 2 || !strings.Contains(tools.prompts[1], "modest robe") {
+		t.Fatalf("tool calls = %v", tools.prompts)
+	}
+	if len(agent.requests) < 2 {
+		t.Fatalf("requests = %d", len(agent.requests))
+	}
+	sawReason := false
+	for _, message := range agent.requests[1].Messages {
+		if message.Role == schema.Roles.Tool && strings.Contains(message.Content, "configured blocked reason: porn") {
+			sawReason = true
+		}
+	}
+	if !sawReason {
+		t.Fatalf("second request lacks the refusal: %#v", agent.requests[1].Messages)
+	}
+	messages, err := service.ListMessages(ctx, "owner-a", session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(messages[1].Content, "configured final") || len(messages[1].ImageURLs) == 0 {
+		t.Fatalf("assistant = %#v", messages[1])
+	}
+}
+
+// #35: without a declared note the refusal is told as before, no retry.
+func TestOrchestratorWithoutModerationNoteReportsTheRefusal(t *testing.T) {
+	repository := newMemoryChatRepository()
+	service := newChatService(t, repository)
+	schema := configuredChatSchema(t)
+	schema.Agent.ModeratedImageNote = ""
+	schema.Presentation.Messages.AgentContentRejected = "configured moderation text"
+	agent := &moderatingAgent{}
+	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
+		Service: service, Schema: schema, Model: "configured-model", Agent: agent, Tools: noToolExecutor{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistant, err := service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID,
+		Content: "look", ImageURLs: []string{"data:image/png;base64,Y29uZmlndXJlZA=="}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := orchestrator.Process(ctx, chat.ProcessTurn{OwnerID: "owner-a", SessionID: session.ID, AssistantMessageID: assistant.ID}); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := service.ListMessages(ctx, "owner-a", session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(messages[1].Content, "configured moderation text") {
+		t.Fatalf("assistant = %#v", messages[1])
+	}
+}
+
+// #35: an upstream content-safety refusal says the input tripped the
+// moderation, not that the model cannot read images, without diagnostics.
+func TestOrchestratorSaysWhenUpstreamModerationRefused(t *testing.T) {
+	repository := newMemoryChatRepository()
+	service := newChatService(t, repository)
+	schema := configuredChatSchema(t)
+	schema.Presentation.Messages.UnknownError = "configured safe error"
+	schema.Presentation.Messages.AgentImagesUnsupported = "configured no-vision text"
+	schema.Presentation.Messages.AgentContentRejected = "configured moderation text"
+	schema.Presentation.Messages.ContentRejectedReasons = " reason: {reasons}"
+	schema.Presentation.Messages.ContentRejectedReasonLabels = map[string]string{"sexual": "porn"}
+	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
+		Service: service, Schema: schema, Model: "configured-model",
+		Agent: failingAgent{err: errors.Join(&agents.ContentRejection{Reasons: []string{"sexual"}}, errors.New("secret upstream diagnostic"))},
+		Tools: noToolExecutor{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistant, err := service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID, Content: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := orchestrator.Process(ctx, chat.ProcessTurn{OwnerID: "owner-a", SessionID: session.ID, AssistantMessageID: assistant.ID}); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := service.ListMessages(ctx, "owner-a", session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(messages[1].Content, "configured moderation text reason: porn") || strings.Contains(messages[1].Content, "secret") {
 		t.Fatalf("assistant = %#v", messages[1])
 	}
 }

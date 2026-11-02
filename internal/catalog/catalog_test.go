@@ -520,7 +520,8 @@ const minimalApplication = `"application":{
 		"failure.integrity_failure":"资产校验失败",
 		"failure.protocol":"上游协议错误",
 		"failure.internal":"任务处理失败",
-		"failure.source_expired":"来源原任务已过期"
+		"failure.source_expired":"来源原任务已过期",
+		"failure.content_rejected":"内容安全审核拦截"
 	}},
 	"chat":{
 		"api":{
@@ -625,7 +626,7 @@ const minimalApplication = `"application":{
 			"consent_waiting_content":"waiting","consent_duplicate_content":"duplicate","consent_blocked_content":"blocked",
 			"consent_required_content":"required","consent_limit_content":"limit",
 			"consent_reconcile_content":"reconcile original paid call before any new submission",
-			"max_generation_calls_per_turn":4,"max_listed_models":20,
+			"max_generation_calls_per_turn":20,"max_parallel_generation_submissions":8,"max_listed_models":20,
 			"max_tool_calls_per_reply":3,"max_tool_calls_per_reply_setting":"agent_max_tool_calls_per_reply","max_tool_calls_per_reply_maximum":100,
 			"error_body_max_bytes":65536,
 			"system_prompt":"configured system",
@@ -771,7 +772,7 @@ const minimalApplication = `"application":{
 				"invalid_reference_indices":"参考图序号无效",
 				"reference_index_out_of_range_template":"参考图序号 {index} 超出 {count}",
 				"invalid_input_source":"来源无效","canvas_source_missing":"画布缺失","canvas_source_tool_refused":"改用 {tools}",
-				"agent_images_unsupported":"模型不读图","agent_not_configured":"Agent 未配置",
+				"agent_images_unsupported":"模型不读图","agent_content_rejected":"内容审核拦截","agent_not_configured":"Agent 未配置",
 				"interrupted":"中断","interrupted_prompt":"中断 {prompt}",
 				"generation_failed":"生成失败","generation_error":"生成异常",
 				"summary_failed":"总结失败","no_result":"无结果",
@@ -788,7 +789,7 @@ const minimalApplication = `"application":{
 				"input_shape_text":"{name}={count}","input_shape_list":"{name}[{count}]","input_shape_boolean":"{name}=布尔",
 				"input_shape_number":"{name}=数字","input_shape_value":"{name}=值"
 			},
-			"status":{"generating":"正在生成"}
+			"status":{"generating":"正在生成","queued_submission":"排队等待提交"}
 		},
 		"audit":{
 			"create_action":"access_asset","delete_action":"access_asset",
@@ -3051,6 +3052,7 @@ func TestDefaultCatalogOwnsPublicErrorAndFailureMessages(t *testing.T) {
 		"failure.protocol",
 		"failure.internal",
 		"failure.source_expired",
+		"failure.content_rejected",
 	} {
 		if messages[key] == "" {
 			t.Errorf("missing Product Schema message %q", key)

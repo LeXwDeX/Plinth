@@ -2783,6 +2783,15 @@ type ChatAgentSchema struct {
 	// MaxGenerationCallsPerTurn 限定单个对话轮次内付费生成工具的执行
 	// 次数上限（服务端硬约束，防止 LLM 一次输出大量工具调用连击扣费）。
 	MaxGenerationCallsPerTurn int `json:"max_generation_calls_per_turn"`
+	// MaxParallelGenerationSubmissions bounds how many paid generation calls
+	// of one tool round are submitted before the turn waits for their Tasks
+	// together (in-flight steps of the round); calls beyond it form the next
+	// batch. It must not exceed the per-owner in-flight Task admission limit.
+	MaxParallelGenerationSubmissions int `json:"max_parallel_generation_submissions"`
+	// ParallelToolCalls asks the model to emit several independent tool calls
+	// in one reply: the OpenAI-compatible parallel_tool_calls request field,
+	// sent only on requests that carry tools.
+	ParallelToolCalls bool `json:"parallel_tool_calls"`
 	// MaxListedModels bounds how many of the session's succeeded 3D tasks
 	// the list_session_models tool returns (most recent first).
 	MaxListedModels int `json:"max_listed_models"`
@@ -2845,6 +2854,11 @@ type ChatAgentSchema struct {
 	// ({language} is the locale's own name). It follows the system prompt
 	// only in a turn whose UI locale is not the default one.
 	ReplyLanguageTemplate string `json:"reply_language_template,omitempty"`
+	// ModeratedImageNote replaces every picture of an Agent request that the
+	// upstream's content-safety review refused (#35); the request is sent once
+	// more with it, so the Agent learns why it cannot see the picture and
+	// adjusts by itself. Empty turns the retry off.
+	ModeratedImageNote string `json:"moderated_image_note,omitempty"`
 	// TitleTimeoutSeconds bounds the background title summary call.
 	TitleTimeoutSeconds int    `json:"title_timeout_seconds"`
 	WorkerCount         int    `json:"worker_count"`
@@ -3560,6 +3574,9 @@ type ChatMessageTexts struct {
 	// AgentImagesUnsupported replaces UnknownError when the Agent model
 	// refused a request that carried pictures (#253).
 	AgentImagesUnsupported string `json:"agent_images_unsupported"`
+	// AgentContentRejected replaces UnknownError when the upstream's content
+	// moderation refused the request's pictures or text (#35).
+	AgentContentRejected string `json:"agent_content_rejected"`
 	// AgentNotConfigured is what the person reads while the live Agent has no
 	// API key or no model: Agent replies and prompt enhancement are off (#253).
 	AgentNotConfigured string `json:"agent_not_configured"`
@@ -3623,6 +3640,15 @@ type ChatMessageTexts struct {
 	// the user hear the real cause (for example an exhausted provider balance)
 	// instead of a generic failure. Keys are failure classes.
 	GenerationFailedByClass map[string]string `json:"generation_failed_by_class,omitempty"`
+	// ContentRejectedReasons follows a content-safety refusal's text, for a
+	// failed Task and for the Agent's own request alike, with the reasons the
+	// upstream's review gave ({reasons}, #35). ContentRejectedReasonLabels
+	// names each reason (a vendor token, lower case with "-" and "/" read as
+	// "_"); a reason without a label is shown as is. The labels are joined
+	// with ContentRejectedReasonSeparator.
+	ContentRejectedReasons         string            `json:"content_rejected_reasons,omitempty"`
+	ContentRejectedReasonLabels    map[string]string `json:"content_rejected_reason_labels,omitempty"`
+	ContentRejectedReasonSeparator string            `json:"content_rejected_reason_separator,omitempty"`
 	// GenerationFailedMeteredByClass is the variant of GenerationFailedByClass
 	// for an Offering that bills in credits (credits_metered). A class listed
 	// here means: the upstream may already have finished and charged, so the
@@ -3641,6 +3667,9 @@ type ChatStatusTexts struct {
 	Compacting       string `json:"compacting,omitempty"`
 	CompactionFailed string `json:"compaction_failed,omitempty"`
 	Compacted        string `json:"compacted,omitempty"`
+	// QueuedSubmission is shown while a paid step waits to be submitted again
+	// because the in-flight task admission is full.
+	QueuedSubmission string `json:"queued_submission,omitempty"`
 }
 
 type ChatAuditSchema struct {
