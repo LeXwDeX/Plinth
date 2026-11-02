@@ -818,7 +818,7 @@ func (executor *Executor) resolveProcessingSource(
 		// checked below like one named by ID.
 		if _, _, isHandle := policy.Parse(taskID); isHandle || policy.IsSelectionAlias(taskID) {
 			handleNamesModel = assetID == "" && !policy.IsSelectionAlias(taskID)
-			resolved, err := policy.ResolveHandles(command.History, command.Options.Selection,
+			resolved, err := policy.ResolveHandles(command.ReferenceHistory(), command.Options.Selection,
 				[]string{taskID}, chat.AttachmentKindModel)
 			if err != nil || len(resolved) == 0 {
 				token := taskID

@@ -24,7 +24,7 @@ func (executor *Executor) handleTokens(command chat.ToolCommand, arguments map[s
 	if err := json.Unmarshal(raw, &tokens); err != nil {
 		var single string
 		if json.Unmarshal(raw, &single) != nil {
-			return nil, errors.New(executor.localized(command, executor.chat.Presentation.Messages.InvalidReferenceIndices))
+			return nil, &referenceRefusal{message: executor.localized(command, executor.chat.Presentation.Messages.InvalidReferenceIndices)}
 		}
 		tokens = []string{single}
 	}
@@ -35,6 +35,28 @@ func (executor *Executor) handleTokens(command chat.ToolCommand, arguments map[s
 		}
 	}
 	return cleaned, nil
+}
+
+// referenceRefusal is a reference the Agent named that cannot be used: a
+// handle that names nothing here or an object of the wrong kind, an index out
+// of range, a malformed list. Nothing was submitted; the Agent reads the
+// Schema's wording and can call again (#25), so it is a refusal, not a failed
+// generation.
+type referenceRefusal struct {
+	message string
+}
+
+func (refusal *referenceRefusal) Error() string { return refusal.message }
+
+// refuseReference answers a call whose reference was refused; ok is false
+// for any other error.
+func (executor *Executor) refuseReference(command chat.ToolCommand, err error) (chat.ToolResult, bool) {
+	var refusal *referenceRefusal
+	if !errors.As(err, &refusal) {
+		return chat.ToolResult{}, false
+	}
+	result, _ := executor.rejectBecause(command, refusal.message, err)
+	return result, true
 }
 
 // handleFailure turns a handle refusal into the Schema's wording; any other
@@ -48,7 +70,7 @@ func (executor *Executor) handleFailure(command chat.ToolCommand, err error) err
 	if unknown.Reason == "kind" {
 		template = executor.localized(command, executor.chat.Context.WrongHandleKindTemplate)
 	}
-	return errors.New(strings.ReplaceAll(template, "{handle}", unknown.Handle))
+	return &referenceRefusal{message: strings.ReplaceAll(template, "{handle}", unknown.Handle)}
 }
 
 // resolveImageHandles maps image handles (and the selection alias) to the
@@ -57,7 +79,7 @@ func (executor *Executor) handleFailure(command chat.ToolCommand, err error) err
 // object; the URLs are resolved to owned assets later like any reference.
 func (executor *Executor) resolveImageHandles(command chat.ToolCommand, tokens []string) ([]string, error) {
 	resolved, err := executor.handlePolicy().ResolveHandles(
-		command.History, command.Options.Selection, tokens, chat.AttachmentKindImage)
+		command.ReferenceHistory(), command.Options.Selection, tokens, chat.AttachmentKindImage)
 	if err != nil {
 		return nil, executor.handleFailure(command, err)
 	}

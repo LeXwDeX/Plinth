@@ -51,7 +51,7 @@ func (executor *Executor) referencePurposes(
 			// The alias names several pictures; one purpose cannot be placed.
 			return refuse(handle)
 		}
-		resolved, err := policy.ResolveHandles(command.History, command.Options.Selection, []string{handle}, chat.AttachmentKindImage)
+		resolved, err := policy.ResolveHandles(command.ReferenceHistory(), command.Options.Selection, []string{handle}, chat.AttachmentKindImage)
 		var unknown *chat.UnknownHandleError
 		if err != nil && !errors.As(err, &unknown) {
 			return "", err.Error()

@@ -244,10 +244,17 @@ func (h *processingHarness) runAs(owner, session, name, arguments string, histor
 
 func (h *processingHarness) runWith(owner, session, name, arguments string, history []chat.Message, options chat.TurnOptions) (chat.ToolResult, []chat.ToolObservation) {
 	h.t.Helper()
+	return h.runInReply(owner, session, name, arguments, history, chat.Message{}, options)
+}
+
+// runInReply runs the call as a later step of a reply that already produced
+// turn (#25).
+func (h *processingHarness) runInReply(owner, session, name, arguments string, history []chat.Message, turn chat.Message, options chat.TurnOptions) (chat.ToolResult, []chat.ToolObservation) {
+	h.t.Helper()
 	h.calls++
 	command := chat.ToolCommand{OwnerID: owner, SessionID: session, AssistantMessageID: "turn-a",
 		Call: agents.ToolCall{ID: fmt.Sprintf("call-%d", h.calls), Name: name, Arguments: []byte(arguments)},
-		Tool: h.tool(name), History: history, Options: options}
+		Tool: h.tool(name), History: history, Turn: turn, Options: options}
 	var observed []chat.ToolObservation
 	result, err := h.executor.Execute(context.Background(), command, func(o chat.ToolObservation) error {
 		observed = append(observed, o)

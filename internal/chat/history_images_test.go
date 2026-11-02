@@ -203,3 +203,26 @@ func TestHistoryLookupRefusesHandlesItCannotReach(t *testing.T) {
 		t.Fatal("a Schema without a bound must leave the lookup disabled")
 	}
 }
+
+// #25: the lookup can list a picture the running reply just made, and the
+// person's own message still counts as the current turn behind it.
+func TestHistoryLookupListsThisReplysPicturesBehindThePersonsTurn(t *testing.T) {
+	policy, schema := lookupPolicy(t, 10)
+	history := []chat.Message{
+		{Role: schema.Roles.User, Content: "isolate the tree", ImageURLs: []string{"/api/v1/input-assets/scene"},
+			Attachments: []chat.Attachment{{Handle: "@img1", Kind: chat.AttachmentKindImage, Role: chat.AttachmentRoleUpload, AssetID: "scene", ImageSlot: 1}}},
+		{Role: schema.Roles.Assistant, ImageURLs: []string{"/api/v1/tasks/t-tree/assets/tree"},
+			ToolCalls:   []chat.ToolCall{{Name: "refine_image", TaskID: "t-tree", Arguments: []byte(`{"prompt":"only the tree"}`)}},
+			Attachments: []chat.Attachment{{Handle: "@img2", Kind: chat.AttachmentKindImage, Role: chat.AttachmentRoleGenerated, TaskID: "t-tree", ImageSlot: 1}}},
+	}
+	result, err := policy.Lookup(history, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := handlesOf(result.Images); !slices.Equal(got, []string{"@img2", "@img1"}) {
+		t.Fatalf("candidates = %v", got)
+	}
+	if made, upload := result.Images[0], result.Images[1]; made.Prompt != "only the tree" || !upload.CurrentTurn {
+		t.Fatalf("reply picture = %+v, the person's upload = %+v", made, upload)
+	}
+}
