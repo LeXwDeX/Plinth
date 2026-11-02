@@ -1330,6 +1330,18 @@ profile 声明 `reasoning_passback` 时，Adapter 从流式 `delta.reasoning_con
 
 **请求侧核查（只读）。** `internal/agents/openaicompatible` 在 `request.Tools` 非空时总是发送 OpenAI 格式的 `tools`（未发送 `tool_choice`，即上游默认 auto），并在流式与非流式响应里读取原生 `tool_calls`。按 DeepSeek 官方 [Tool Calls](https://api-docs.deepseek.com/guides/tool_calls) 文档（2026-10-20 核对），传入 `tools` 时 API 以原生 `message.tool_calls` 返回调用，思考模式自 V3.2 起支持工具调用。正常工具轮因此应拿到原生 `tool_calls`。本次泄漏发生在总结轮：该请求有意不带 `tools`，但历史里有工具调用，模型就把调用写成了正文 DSML；经中转时写法也可能变化。所以 DSML 兜底仍按模型声明，现有 `chat.agent.thinking.model_profiles` 的 `deepseek` profile 保持 `dsml_tool_calls: true`，其他 profile 不读 DSML，Schema 无需新增声明。上述原因是推断，尚未在测试环境的网关上抓取原始响应验证。
 
+#### 同批付费生成并发提交与统一等待（2026-11-02；源码已实现，本机测试通过，未部署验收）
+
+起因：线上一轮回复要求拆 6 个部件图，却被逐个生成。三个原因：`executeTools` 在付费生成返回 `AwaitTask` 后立即挂起轮次，同批后面的调用要等该任务完成才提交；LLM 请求没有 `parallel_tool_calls`，提示也没要求批量发出；`max_generation_calls_per_turn` 只有 4。
+
+- **Schema。** `chat.agent.max_generation_calls_per_turn` 为 20（与 `max_tool_calls_per_reply` 一致）；`chat.agent.max_parallel_generation_submissions`（默认 8）是单批并发提交上限，`validateAgent` 要求它在 1..`runtime.http.task_admission.per_owner_max_inflight_tasks` 之间；`chat.agent.parallel_tool_calls`（默认 true）让 openai-compatible Adapter 在 `request.Tools` 非空时发送 `parallel_tool_calls: true`（`app.provider_connections` 自 Schema 接线，Adapter 不带默认）；`chat.presentation.status.queued_submission`（中英文）是排队提示；Agent 系统提示新增“互不依赖的付费生成在同一次回复里一次性发出，有依赖的仍按顺序”一条（系统提示本身不在 localization 覆盖范围内，只有中文原文）。
+- **两阶段 `executeTools`。** 提交阶段按调用顺序逐个执行。付费生成工具提交后若返回 `AwaitTask`，不再立即挂起，而是记为在途并继续提交下一个调用；同批已有在途调用后，只继续提交付费工具，遇到控制类、只读类、未知或范围外工具、依赖在途调用（参数含在途任务 ID 或调用 ID）的调用、或在途数达到单批上限，就停止提交，剩余调用留到在途回执补齐之后的下一遍。需要用户交互的 `Suspend`（批准卡、同意）保持原语义：已在途的任务把等待项落库后返回 `ErrTurnSuspended`。等待阶段在循环之后：有在途项就一次性写检查点并进入 `waiting_task`（`ErrTurnAwaitTask`）。同批后一个调用若在前面还有在途调用时同步得到终态：有任务的记为在途（唤醒后按绑定任务重新观察得到同一回执），无任务的结果丢弃、唤醒后按序重新得到。回执只在前面的调用都完成后才按调用顺序追加进 `Completed` 并落库，所以 tool_calls 与回执始终严格配对、顺序稳定；任务绑定仍在提交回调里立即持久化，停止轮次取消消息上全部已绑定任务。
+- **检查点。** `TurnCheckpoint.Waiting` 是 `[]WaitingCall{call_id, task_id, deadline, retry_at, queued_since}`。读取经 `WaitingCalls()`：旧检查点的单字段（`waiting_task_id`/`waiting_call_id`/`wait_deadline`）读作一项；写入经 `SetWaiting`，总是写新格式并清空旧字段。
+- **等待扫描。** `scanTurn` 对每个在途项读取任务：全部到达终态（成功、失败、取消）或各自超过 `deadline`，才唤醒（`Queued`）；缺失截止时间的旧项按持久等待写入时间补齐；任务不可读时不抑制截止时间；所有者或会话不符是检查点冲突。唤醒后重放每个调用，已绑定的调用经 `observeBoundTask` 取回结果，幂等键冻结，不重复提交。
+- **准入满时排队。** 生成内核的 `RepositoryAdmissionFull` 仍映射为 `ErrTooManyRequests`（`RetryAfter` 30s），内核逻辑未改。`generationtool` 在确定未提交的该错误上设置 `ToolResult.RetryAfter` 并保留失败回执；编排器据此把调用记为无 `task_id` 的待重试项（`retry_at`、`queued_since`、`deadline = queued_since + chat.agent.request_timeout_seconds`），沿用同一冻结幂等键，第一次被拒时通过 `status` 流事件推送排队文案，并停止本批后续提交。扫描器在 `retry_at` 到期、或所有在途任务已终态时唤醒，重新提交；超过 `deadline` 才把失败回执交给模型。
+- **预算。** 工具预算（#275）和 `PriorGenerationCalls` 计数不变：单次回复最多执行 `max_tool_calls_per_reply` 个调用，超出的在总结轮列给用户，第 21 个生成调用因此不被提交。
+- **验证范围。** `internal/chat` 的并发提交、统一等待与回执顺序、单个失败、停止、重启恢复、旧检查点、排队重试与超时、预算测试，`generationtool`、Adapter 与 Schema 测试均为本机测试；没有真实上游、没有部署验收。仅 `generationtool` 的通用生成与带批准卡的路径会设置 `RetryAfter`，三视图、处理计划等其他提交路径遇到准入满仍按原失败返回。
+
 #### 会话思考强度、上下文用量与压缩（#322，2026-10-22；源码已实现，本机 Mock 栈 Chromium/WebKit 验收，未部署验收）
 
 产品规则见 `docs/product.md` §4.2。本节是 A 线（Scope 1、3、4）；B 线（管理员 LLM 设置、用户选择对话模型）复用这里的 profile 定义与 `chat.ModelPolicy`，见下一节「管理员 LLM 设置与会话对话模型」。

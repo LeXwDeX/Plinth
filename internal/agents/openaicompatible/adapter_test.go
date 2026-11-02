@@ -571,3 +571,45 @@ func TestAdapterMarksContentModerationRefusals(t *testing.T) {
 		})
 	}
 }
+
+func TestAdapterSendsParallelToolCallsOnlyWithToolsWhenEnabled(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		enabled  bool
+		tools    bool
+		wantSent bool
+	}{
+		{"enabled with tools", true, true, true},
+		{"enabled without tools", true, false, false},
+		{"disabled with tools", false, true, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var body []byte
+			transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				body, _ = io.ReadAll(request.Body)
+				return &http.Response{StatusCode: http.StatusOK,
+					Header: http.Header{"Content-Type": []string{"text/event-stream"}},
+					Body:   io.NopCloser(strings.NewReader("data: [DONE]\n\n"))}, nil
+			})
+			adapter, err := openaicompatible.New(openaicompatible.Config{
+				BaseURL: "https://configured-agent.test/v1/", APIKey: "k", EndpointPath: "/chat/completions",
+				AuthorizationName: "Authorization", AuthorizationType: "Bearer", RequestTimeout: time.Minute,
+				ScannerMaxBytes: 1 << 20, ErrorBodyMaxBytes: 1 << 16, Client: &http.Client{Transport: transport},
+				ParallelToolCalls: test.enabled,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := agents.Request{Model: "m", Messages: []agents.Message{{Role: "user", Content: "hi"}}}
+			if test.tools {
+				request.Tools = []agents.Tool{{Name: "t", Parameters: []byte(`{"type":"object"}`)}}
+			}
+			if _, err := adapter.Stream(context.Background(), request, func(agents.Delta) error { return nil }); err != nil {
+				t.Fatal(err)
+			}
+			if sent := strings.Contains(string(body), `"parallel_tool_calls":true`); sent != test.wantSent {
+				t.Fatalf("sent=%v want=%v body=%s", sent, test.wantSent, body)
+			}
+		})
+	}
+}

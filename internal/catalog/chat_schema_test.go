@@ -401,3 +401,21 @@ func TestDefaultCatalogApprovalPolicyMatchesProductRule(t *testing.T) {
 		}
 	}
 }
+
+// 并行生成提交的声明：单批并发上限不得超过每所有者在途任务准入上限（#parallel-generation）。
+func TestDefaultCatalogDeclaresParallelGeneration(t *testing.T) {
+	taskCatalog, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := taskCatalog.Application().Chat.Agent
+	admission := taskCatalog.Application().Runtime.HTTP.TaskAdmission.PerOwnerMaxInflightTasks
+	if agent.MaxGenerationCallsPerTurn != 20 || agent.MaxToolCallsPerReply != 20 || !agent.ParallelToolCalls ||
+		agent.MaxParallelGenerationSubmissions != admission || admission != 8 {
+		t.Fatalf("agent = %d/%d parallel=%v submissions=%d admission=%d", agent.MaxGenerationCallsPerTurn,
+			agent.MaxToolCallsPerReply, agent.ParallelToolCalls, agent.MaxParallelGenerationSubmissions, admission)
+	}
+	if agent.SystemPrompt == "" || !strings.Contains(agent.SystemPrompt, "一次性发出全部工具调用") {
+		t.Fatal("system prompt lacks the batch rule")
+	}
+}

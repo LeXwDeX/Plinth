@@ -51,43 +51,10 @@ func (orchestrator *Orchestrator) scanTurn(ctx context.Context, turn Turn) error
 	}
 	ready := turn.StopRequested
 	if !ready {
-		if turn.Checkpoint.WaitingTaskID == "" || turn.Checkpoint.WaitingCallID == "" || orchestrator.taskGet == nil {
-			return ErrTurnCheckpointConflict
-		}
-		task, err := orchestrator.taskGet(ctx, turn.OwnerID, turn.Checkpoint.WaitingTaskID)
-		if err == nil && (task.OwnerID != generation.OwnerID(turn.OwnerID) || task.SessionID != turn.SessionID ||
-			task.ID != generation.TaskID(turn.Checkpoint.WaitingTaskID)) {
-			return ErrTurnCheckpointConflict
-		}
-		if turn.Checkpoint.WaitDeadline.IsZero() {
-			// Repair checkpoints written by an older failing observer. Anchor
-			// the deadline to the durable wait write so repeated scans cannot
-			// extend it while a Task is unreadable.
-			timeout := time.Duration(orchestrator.schema.Agent.RequestTimeoutSeconds) * time.Second
-			if err == nil && task.Offering.Timeout > 0 {
-				timeout = task.Offering.Timeout
-			}
-			turn.Checkpoint.WaitDeadline = turn.UpdatedAt.Add(timeout)
-			version, saveErr := orchestrator.service.SaveTurnCheckpoint(ctx, turn, turn.State, turn.Checkpoint, false)
-			if errors.Is(saveErr, ErrTurnCheckpointConflict) {
-				return nil
-			}
-			if saveErr != nil {
-				return saveErr
-			}
-			turn.CheckpointVersion = version
-		}
+		var err error
+		ready, err = orchestrator.waitingReady(ctx, &turn)
 		if err != nil {
-			// An unreadable or deleted Task must not suppress the durable wait
-			// deadline. Resume the same call so it can report a bounded failure.
-			if turn.Checkpoint.WaitDeadline.IsZero() || time.Now().Before(turn.Checkpoint.WaitDeadline) {
-				return err
-			}
-			ready = true
-		} else {
-			ready = task.State == generation.TaskSucceeded || task.State == generation.TaskFailed ||
-				task.State == generation.TaskCanceled || !turn.Checkpoint.WaitDeadline.IsZero() &&
-				!time.Now().Before(turn.Checkpoint.WaitDeadline)
+			return err
 		}
 	}
 	if !ready {
@@ -120,4 +87,82 @@ func (orchestrator *Orchestrator) runWaitingScanner(ctx context.Context) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// waitingReady reports whether a waiting turn can resume: every task in
+// flight is terminal or past its own deadline, or a submission queued for a
+// retry is due (the retry then runs next to the tasks still in flight, which
+// simply wait again). Entries are those of the checkpoint's Waiting list; the
+// single-call format of older checkpoints reads as a list of one.
+func (orchestrator *Orchestrator) waitingReady(ctx context.Context, turn *Turn) (bool, error) {
+	entries := turn.Checkpoint.WaitingCalls()
+	if len(entries) == 0 || orchestrator.taskGet == nil {
+		return false, ErrTurnCheckpointConflict
+	}
+	now := time.Now()
+	allReady, queuedDue, tasks := true, false, 0
+	var firstErr error
+	repaired := false
+	for index := range entries {
+		entry := &entries[index]
+		if entry.CallID == "" {
+			return false, ErrTurnCheckpointConflict
+		}
+		if entry.TaskID == "" {
+			// A submission queued for a retry holds no Task yet.
+			if entry.RetryAt.IsZero() && entry.Deadline.IsZero() {
+				return false, ErrTurnCheckpointConflict
+			}
+			if !now.Before(entry.RetryAt) || !entry.Deadline.IsZero() && !now.Before(entry.Deadline) {
+				queuedDue = true
+			}
+			continue
+		}
+		tasks++
+		task, err := orchestrator.taskGet(ctx, turn.OwnerID, entry.TaskID)
+		if err == nil && (task.OwnerID != generation.OwnerID(turn.OwnerID) || task.SessionID != turn.SessionID ||
+			task.ID != generation.TaskID(entry.TaskID)) {
+			return false, ErrTurnCheckpointConflict
+		}
+		if entry.Deadline.IsZero() {
+			// Repair checkpoints written by an older failing observer. Anchor
+			// the deadline to the durable wait write so repeated scans cannot
+			// extend it while a Task is unreadable.
+			timeout := time.Duration(orchestrator.schema.Agent.RequestTimeoutSeconds) * time.Second
+			if err == nil && task.Offering.Timeout > 0 {
+				timeout = task.Offering.Timeout
+			}
+			entry.Deadline = turn.UpdatedAt.Add(timeout)
+			repaired = true
+		}
+		pastDeadline := !now.Before(entry.Deadline)
+		switch {
+		case err != nil:
+			// An unreadable or deleted Task must not suppress the durable wait
+			// deadline. Resume the same call so it can report a bounded failure.
+			if !pastDeadline {
+				firstErr = errors.Join(firstErr, err)
+				allReady = false
+			}
+		case task.State == generation.TaskSucceeded || task.State == generation.TaskFailed ||
+			task.State == generation.TaskCanceled || pastDeadline:
+		default:
+			allReady = false
+		}
+	}
+	if repaired {
+		turn.Checkpoint.SetWaiting(entries)
+		version, saveErr := orchestrator.service.SaveTurnCheckpoint(ctx, *turn, turn.State, turn.Checkpoint, false)
+		if errors.Is(saveErr, ErrTurnCheckpointConflict) {
+			return false, nil
+		}
+		if saveErr != nil {
+			return false, saveErr
+		}
+		turn.CheckpointVersion = version
+	}
+	if queuedDue || allReady && tasks > 0 {
+		return true, nil
+	}
+	return false, firstErr
 }

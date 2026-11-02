@@ -66,6 +66,10 @@ type Config struct {
 	// StreamIncludeUsage asks streamed requests of models without thinking
 	// options for their token usage (chat.agent.stream_include_usage, #322).
 	StreamIncludeUsage bool
+	// ParallelToolCalls sends parallel_tool_calls=true on requests that carry
+	// tools, so the model may emit independent calls in one reply
+	// (chat.agent.parallel_tool_calls).
+	ParallelToolCalls bool
 }
 
 type Adapter struct {
@@ -79,6 +83,7 @@ type Adapter struct {
 	thinking          *ThinkingOptions
 	thinkingFor       func(model string) *ThinkingOptions
 	includeUsage      bool
+	parallelToolCalls bool
 }
 
 func New(config Config) (*Adapter, error) {
@@ -115,6 +120,7 @@ func New(config Config) (*Adapter, error) {
 		thinking:          thinking,
 		thinkingFor:       config.ThinkingFor,
 		includeUsage:      config.StreamIncludeUsage,
+		parallelToolCalls: config.ParallelToolCalls,
 	}, nil
 }
 
@@ -300,7 +306,7 @@ func (adapter *Adapter) send(
 	stream bool,
 ) (*http.Response, error) {
 	options := adapter.options(request.Model)
-	body, err := marshalRequest(request, stream, adapter.streamUsage(options), options)
+	body, err := marshalRequest(request, stream, adapter.streamUsage(options), adapter.parallelToolCalls, options)
 	if err != nil {
 		return nil, err
 	}
@@ -437,6 +443,8 @@ type wireRequest struct {
 	// StreamOptions is sent only with stream=true: DeepSeek answers 400 to
 	// stream_options on a non-streamed request.
 	StreamOptions *wireStreamOptions `json:"stream_options,omitempty"`
+	// ParallelToolCalls is sent only when the request carries tools.
+	ParallelToolCalls *bool `json:"parallel_tool_calls,omitempty"`
 }
 
 type wireStreamOptions struct {
@@ -497,6 +505,7 @@ func marshalRequest(
 	request agents.Request,
 	stream bool,
 	includeUsage bool,
+	parallelToolCalls bool,
 	thinking *ThinkingOptions,
 ) ([]byte, error) {
 	wire := wireRequest{
@@ -558,6 +567,10 @@ func marshalRequest(
 				Parameters:  tool.Parameters,
 			},
 		})
+	}
+	if parallelToolCalls && len(wire.Tools) > 0 {
+		enabled := true
+		wire.ParallelToolCalls = &enabled
 	}
 	if !vendorFields {
 		return json.Marshal(wire)

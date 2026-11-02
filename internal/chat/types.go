@@ -92,10 +92,51 @@ type TurnCheckpoint struct {
 	Completion    agents.Completion           `json:"completion"`
 	Completed     []agents.Message            `json:"completed,omitempty"`
 	ImageURLs     []string                    `json:"image_urls,omitempty"`
-	WaitingTaskID string                      `json:"waiting_task_id,omitempty"`
-	WaitingCallID string                      `json:"waiting_call_id,omitempty"`
-	WaitDeadline  time.Time                   `json:"wait_deadline,omitempty"`
-	HadToolError  bool                        `json:"had_tool_error,omitempty"`
+	// Waiting lists the calls of this round that have no receipt yet: tasks
+	// in flight and submissions queued for a retry. It replaces the single
+	// WaitingTaskID/WaitingCallID/WaitDeadline of older checkpoints.
+	Waiting []WaitingCall `json:"waiting,omitempty"`
+	// WaitingTaskID, WaitingCallID and WaitDeadline are the single-call format
+	// that checkpoints of earlier versions still hold. They are only read (see
+	// WaitingCalls) and never written: SetWaiting clears them.
+	WaitingTaskID string    `json:"waiting_task_id,omitempty"`
+	WaitingCallID string    `json:"waiting_call_id,omitempty"`
+	WaitDeadline  time.Time `json:"wait_deadline,omitempty"`
+	HadToolError  bool      `json:"had_tool_error,omitempty"`
+}
+
+// WaitingCall is one call of a tool round that still lacks its receipt.
+// With a TaskID it is a paid step in flight: the turn wakes once the Task is
+// terminal or Deadline passed. Without one the generation kernel refused the
+// submission for lack of admission room (nothing was submitted): the call is
+// submitted again, with the same frozen idempotency key, once RetryAt passed,
+// until Deadline (QueuedSince plus the Schema request timeout).
+type WaitingCall struct {
+	CallID      string    `json:"call_id"`
+	TaskID      string    `json:"task_id,omitempty"`
+	Deadline    time.Time `json:"deadline,omitempty"`
+	RetryAt     time.Time `json:"retry_at,omitempty"`
+	QueuedSince time.Time `json:"queued_since,omitempty"`
+}
+
+// WaitingCalls returns the calls the round waits for. A checkpoint of the
+// single-call format reads as a list of one; the result is a copy.
+func (checkpoint TurnCheckpoint) WaitingCalls() []WaitingCall {
+	if len(checkpoint.Waiting) > 0 {
+		return append([]WaitingCall(nil), checkpoint.Waiting...)
+	}
+	if checkpoint.WaitingTaskID != "" || checkpoint.WaitingCallID != "" {
+		return []WaitingCall{{CallID: checkpoint.WaitingCallID, TaskID: checkpoint.WaitingTaskID,
+			Deadline: checkpoint.WaitDeadline}}
+	}
+	return nil
+}
+
+// SetWaiting stores the waiting calls in the list format and clears the
+// single-call fields, so a saved checkpoint is always of the new format.
+func (checkpoint *TurnCheckpoint) SetWaiting(calls []WaitingCall) {
+	checkpoint.Waiting = append([]WaitingCall(nil), calls...)
+	checkpoint.WaitingTaskID, checkpoint.WaitingCallID, checkpoint.WaitDeadline = "", "", time.Time{}
 }
 
 type TurnPageCursor struct {
