@@ -77,6 +77,9 @@ type providerOptions struct {
 	NativeConversion *nativeConversionOptions   `json:"native_conversion,omitempty"`
 	SourceRig        *nativeSourceRig           `json:"source_rig,omitempty"`
 	Transform        []float64                  `json:"transform,omitempty"`
+	// ReferenceWire selects a non-default reference image wire for
+	// image-to-3d; "multiview_inputs" sends view-key `inputs` (multiview_model.go).
+	ReferenceWire string `json:"reference_wire,omitempty"`
 }
 
 func New(config Config) (*Adapter, error) {
@@ -213,10 +216,30 @@ func (a *Adapter) Start(
 			"Tripo Offering 缺少 model 或 endpoint",
 		)
 	}
+	multiviewWire := request.Offering.Capability == generation.ImageTo3D &&
+		options.ReferenceWire == referenceWireMultiviewInputs
+	var views []string
+	if multiviewWire {
+		// 视角校验是纯本地检查，必须先于任何上传与付费派发。
+		if a.inputAssets == nil {
+			return generation.Observation{}, failure(
+				generation.FailureInvalidInput,
+				false,
+				"Tripo 多视图需要已解析参考图",
+			)
+		}
+		if views, err = multiviewViews(request.Offering, input, len(request.InputAssets["reference_assets"])); err != nil {
+			return generation.Observation{}, err
+		}
+	}
 	body := make(map[string]any, len(input)+1)
 	body["model"] = options.Model
 	for name, value := range input {
 		if name == "reference_assets" || name == request.Offering.ExtraConsentParameter() {
+			continue
+		}
+		// reference_views only maps images to wire keys; it is not an upstream field.
+		if multiviewWire && name == multiviewViewsParameter {
 			continue
 		}
 		// Format selection and consent are private platform decisions. Their
@@ -226,7 +249,18 @@ func (a *Adapter) Start(
 		}
 		body[name] = value
 	}
-	if request.Offering.Capability == generation.ImageTo3D {
+	if multiviewWire {
+		assets := request.InputAssets["reference_assets"]
+		tokens := make([]string, 0, len(assets))
+		for _, asset := range assets {
+			token, err := a.upload(ctx, request, asset)
+			if err != nil {
+				return generation.Observation{}, err
+			}
+			tokens = append(tokens, token)
+		}
+		body["inputs"] = multiviewInputsBody(views, tokens)
+	} else if request.Offering.Capability == generation.ImageTo3D {
 		assets := request.InputAssets["reference_assets"]
 		if a.inputAssets == nil || len(assets) != 1 {
 			return generation.Observation{}, failure(

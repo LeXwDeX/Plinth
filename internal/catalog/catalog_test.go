@@ -1937,8 +1937,8 @@ func TestDefaultCatalogCoversCurrentProviderInventory(t *testing.T) {
 	// Smart Segmentation image/model); Decimate quad stays disabled. #329 adds
 	// Meshy T2.5 (Smart Topology) text and image to 3D. #330 adds Meshy Convert.
 	// #100: the 17 Meshy Creative Lab Offerings stay defined but are not offered
-	// (enabled=false), so only the other 52 are listed.
-	if len(offerings) != 52 {
+	// (enabled=false), so only the other 53 are listed.
+	if len(offerings) != 53 {
 		t.Fatalf("offering count = %d", len(offerings))
 	}
 	for _, id := range []generation.OfferingID{

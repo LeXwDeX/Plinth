@@ -39,10 +39,21 @@ func TestHarnessPublicOperationsDescribeSemanticGroups(t *testing.T) {
 	if len(app.Chat.Harness.Groups) != 2 || app.Chat.Harness.Groups[0].ID != "common" || app.Chat.Harness.Groups[1].ID != "model" {
 		t.Fatalf("expected common operations before model-specific operations, got %+v", app.Chat.Harness.Groups)
 	}
+	processing := map[string]bool{}
+	chatSchema := c.Application().Chat
+	for _, op := range chatSchema.Harness.Operations {
+		for _, tool := range chatSchema.Tools {
+			if tool.Name == op.ToolName && tool.Processing != nil {
+				processing[op.ID] = true
+			}
+		}
+	}
 	seen := map[string]bool{}
 	for _, op := range app.Chat.Harness.Operations {
 		seen[op.ID] = true
-		if op.Group == "common" && len(op.ModelIDs) > 0 {
+		// Only a processing operation is independent of the generation model;
+		// a generation operation names the one service it runs.
+		if op.Group == "common" && len(op.ModelIDs) > 0 && processing[op.ID] {
 			t.Errorf("common operation %s is filtered by the left generation model", op.ID)
 		}
 	}
@@ -95,7 +106,12 @@ func TestHarnessMeshProcessingOperationsStaySchemaBound(t *testing.T) {
 			t.Errorf("operation %s missing", id)
 		}
 	}
-	completion := app.Chat.Harness.Operations[len(app.Chat.Harness.Operations)-1]
+	var completion catalog.HarnessOperationSchema
+	for _, op := range app.Chat.Harness.Operations {
+		if op.ID == "mesh-completion" {
+			completion = op
+		}
+	}
 	if completion.ID != "mesh-completion" || !strings.Contains(completion.Description, "本人同会话已成功的原生 Tripo Segment") ||
 		!strings.Contains(completion.Description, "Smart Segmentation") || !strings.Contains(completion.Description, "Bang") {
 		t.Fatalf("completion source boundary missing or operation not appended last: %+v", completion)
@@ -110,6 +126,15 @@ func TestHarnessMeshProcessingOperationsStaySchemaBound(t *testing.T) {
 			t.Errorf("translation %s = %q, want %q", key, translations[key], value)
 		}
 	}
+}
+
+func harnessOperation(a *catalog.ApplicationSchema, id string) *catalog.HarnessOperationSchema {
+	for index := range a.Chat.Harness.Operations {
+		if a.Chat.Harness.Operations[index].ID == id {
+			return &a.Chat.Harness.Operations[index]
+		}
+	}
+	panic("missing harness operation " + id)
 }
 
 func TestHarnessDeclarationsRejectPermissionAndGoalDrift(t *testing.T) {
@@ -135,6 +160,14 @@ func TestHarnessDeclarationsRejectPermissionAndGoalDrift(t *testing.T) {
 		}},
 		{"common tied to generation model", func(a *catalog.ApplicationSchema) { a.Chat.Harness.Operations[1].ModelIDs = []string{"meshy-6"} }},
 		{"model-specific without model", func(a *catalog.ApplicationSchema) { a.Chat.Harness.Operations[1].Group = "model" }},
+		{"generation operation without model_ids", func(a *catalog.ApplicationSchema) { harnessOperation(a, "multiview-to-3d").ModelIDs = nil }},
+		{"generation operation with tool arguments", func(a *catalog.ApplicationSchema) {
+			harnessOperation(a, "multiview-to-3d").ToolArguments = map[string]json.RawMessage{"model": json.RawMessage(`"tripo-v3.1-multiview"`)}
+		}},
+		{"generation operation with prerequisites", func(a *catalog.ApplicationSchema) {
+			harnessOperation(a, "multiview-to-3d").Prerequisites = [][]string{{"rigging"}}
+		}},
+		{"badge with surrounding space", func(a *catalog.ApplicationSchema) { harnessOperation(a, "multiview-to-3d").Badge = " Tripo3D " }},
 		{"unknown prerequisite", func(a *catalog.ApplicationSchema) {
 			a.Chat.Harness.Operations[3].Prerequisites = [][]string{{"invented"}}
 		}},

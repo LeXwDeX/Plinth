@@ -26,6 +26,8 @@ export interface HarnessPublicOperation {
   label: string;
   description: string;
   group: 'common' | 'model';
+  /** Short tag shown after the label, such as the one provider the operation runs on. */
+  badge?: string;
   capability: string;
   model_ids?: string[];
   prerequisites?: string[][];

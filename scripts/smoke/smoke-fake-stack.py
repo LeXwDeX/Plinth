@@ -87,6 +87,7 @@ RIGGING = "tripo/processing/rigging-v3"
 ANIMATION = "tripo/processing/animation"
 TRIPO_TEXTURE = "tripo/processing/texture"
 TRIPO_IMAGE_TO_3D = "tripo/tripo-v3.1-full/image-to-3d"
+TRIPO_MULTIVIEW_TO_3D = "tripo/tripo-v3.1-multiview/image-to-3d"
 TRIPO_SPLAT = "tripo/image-to-splat"
 TRIPO_MULTIVIEW = "tripo/image-to-multiview"
 TRIPO_EDIT_MULTIVIEW = "tripo/edit-multiview"
@@ -482,6 +483,9 @@ def scenario_tripo_images(api, offerings):
         record("tripo images: upload the reference picture", False, "the library upload was refused")
         return
     gen = step(api, offerings, "tripo image-to-3d", TRIPO_IMAGE_TO_3D, "image-to-3d", {"reference_assets": [picture]}, session)
+    # Multiview-to-3D sends the ordered pictures as view-key `inputs` (front, left by default).
+    step(api, offerings, "tripo multiview-to-3d", TRIPO_MULTIVIEW_TO_3D, "image-to-3d",
+         {"reference_assets": [picture, picture], "reference_views": ["front", "back"]}, session)
     step(api, offerings, "tripo image-to-splat", TRIPO_SPLAT, "image-to-splat", {"image": picture}, session)
     views = step(api, offerings, "tripo image-to-multiview", TRIPO_MULTIVIEW, "image-to-multiview", {"image": picture}, session)
     if views and views.get("state") == "SUCCEEDED":
