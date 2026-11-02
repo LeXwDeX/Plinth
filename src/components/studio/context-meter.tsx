@@ -11,6 +11,7 @@ import { withErrorReference } from '@/lib/problem-reference';
 import { formatSchemaText, schemaCountMessage, schemaText, type ChatProductSchema, type ProductSchema } from '@/lib/product-schema';
 import { PICKER_UPPERCASE_CLASS } from '@/components/studio/table-popover';
 import { cn } from '@/lib/utils';
+import { latestToolCallCount } from '@/lib/chat/tool-call-count';
 import { useChatStore } from '@/store/chat-store';
 
 type CompactionSettings = NonNullable<ChatProductSchema['context_compaction']>;
@@ -21,6 +22,16 @@ export function contextLevel(tokens: number | null, window: number | null, setti
   const ratio = tokens / window;
   if (ratio >= settings.auto_threshold_ratio) return 'critical';
   if (ratio >= settings.warning_ratio) return 'warning';
+  return 'normal';
+}
+
+/** #275: how much of the per-reply tool call budget is used: warning from 80%, critical when it is spent. */
+export const TOOL_CALLS_WARNING_RATIO = 0.8;
+
+export function toolCallLevel(used: number, limit: number): 'normal' | 'warning' | 'critical' {
+  if (limit <= 0) return 'normal';
+  if (used >= limit) return 'critical';
+  if (used >= limit * TOOL_CALLS_WARNING_RATIO) return 'warning';
   return 'normal';
 }
 
@@ -49,6 +60,12 @@ function contextHint(schema: ProductSchema, tokens: number | null, window: numbe
 export function ContextMeter() {
   const { schema } = useProductSchema();
   const activeSessionId = useChatStore((state) => state.activeSessionId);
+  // The reply's executed tool calls: the live count while it runs and after it, else the newest assistant message's.
+  const toolCalls = useChatStore((state) => {
+    const id = state.activeSessionId;
+    if (!id) return 0;
+    return state.toolCallCounts?.[id] ?? latestToolCallCount(state.messagesBySession?.[id] ?? []) ?? 0;
+  });
   const { supported, canCompact, context, compacting, turnRunning, compact } = useSessionContext(activeSessionId);
   const settings = schema.chat.context_compaction;
   if (!supported || !settings) return null;
@@ -57,6 +74,10 @@ export function ContextMeter() {
   const label = schemaText(schema, 'ui.studio.context.label');
   const text = formatContextUsage(tokens, window, schemaText(schema, 'ui.studio.context.unknown'));
   const level = contextLevel(tokens, window, settings);
+  const toolCallLimit = schema.chat.agent_limits?.max_tool_calls_per_reply ?? 0;
+  const toolCallLabel = schemaText(schema, 'ui.studio.tool_calls.label');
+  const toolCallText = `${toolCallLabel} ${toolCalls} / ${toolCallLimit}`;
+  const toolCallLevelName = toolCallLevel(toolCalls, toolCallLimit);
   const compactLabel = schemaText(schema, compacting ? 'ui.studio.context.compacting' : 'ui.studio.context.compact');
 
   const run = () => {
@@ -71,16 +92,17 @@ export function ContextMeter() {
   };
 
   return (
-    // A full row of the composer's picker grid when narrow, two tracks when wide: the figure sits on the left
-    // edge and the compact action on the right edge, in the same one-picker height as the cells above.
-    <div className="col-span-full flex h-7 min-w-0 items-center justify-between gap-1 @[40rem]:col-span-2" data-testid="composer-context">
-      <HintTooltip name={`${label}: ${text}`} hint={contextHint(schema, tokens, window, settings)} className="min-w-0 shrink-0">
+    // A full row of the composer's picker grid when narrow, two tracks when wide, in the same one-picker height
+    // as the cells above: the figure and the compact action sit together on the left, the tool call counter
+    // alone on the right edge. Only the figure and the counter give way (truncate) when the row is short.
+    <div className="col-span-full flex h-7 min-w-0 items-center gap-1 @[40rem]:col-span-2" data-testid="composer-context">
+      <HintTooltip name={`${label}: ${text}`} hint={contextHint(schema, tokens, window, settings)} className="min-w-0 shrink">
         <span
           tabIndex={0}
           aria-label={`${label}: ${text}`}
           data-testid="composer-context-meter"
           data-level={level}
-          className={cn('truncate rounded-sm px-1 text-[11px] leading-7 tabular-nums focus-visible:outline-2 focus-visible:outline-ring', PICKER_UPPERCASE_CLASS, LEVEL_CLASS[level])}
+          className={cn('block truncate rounded-sm px-1 text-[11px] leading-7 tabular-nums focus-visible:outline-2 focus-visible:outline-ring', PICKER_UPPERCASE_CLASS, LEVEL_CLASS[level])}
         >
           {text}
         </span>
@@ -90,7 +112,7 @@ export function ContextMeter() {
           name={compactLabel}
           hint={schemaCountMessage(schema, 'ui.studio.context.compact_hint', settings.keep_recent_rounds, { rounds: settings.keep_recent_rounds })}
           reason={turnRunning ? schemaText(schema, 'ui.studio.context.compact_busy') : undefined}
-          className="min-w-0"
+          className="min-w-0 shrink-0"
         >
           <Action
             type="button"
@@ -104,6 +126,19 @@ export function ContextMeter() {
           >
             <span className="truncate">{compactLabel}</span>
           </Action>
+        </HintTooltip>
+      ) : null}
+      {toolCallLimit > 0 ? (
+        <HintTooltip name={toolCallText} hint={schemaText(schema, 'ui.studio.tool_calls.hint')} className="ml-auto min-w-0 shrink">
+          <span
+            tabIndex={0}
+            aria-label={toolCallText}
+            data-testid="composer-tool-calls"
+            data-level={toolCallLevelName}
+            className={cn('block truncate rounded-sm px-1 text-[11px] leading-7 tabular-nums focus-visible:outline-2 focus-visible:outline-ring', PICKER_UPPERCASE_CLASS, LEVEL_CLASS[toolCallLevelName])}
+          >
+            {toolCallText}
+          </span>
         </HintTooltip>
       ) : null}
     </div>

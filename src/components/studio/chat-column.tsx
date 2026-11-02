@@ -94,6 +94,7 @@ import { handleOfObject } from '@/lib/workspace/object-handle';
 import { captureSessionScope, isCurrentSessionScope, sameSessionScope, selectionForSession, type SessionScope } from '@/lib/workspace/session-scope';
 import { versionLabel } from '@/lib/workspace/version-label';
 import type { ResultTarget } from '@/lib/workspace/result-target';
+import { latestToolCallCount } from '@/lib/chat/tool-call-count';
 import { cn } from '@/lib/utils';
 import { focusWhenUnblocked } from '@/components/ui/focus-handoff';
 import {
@@ -585,6 +586,17 @@ export function ChatColumn() {
         if (next !== current) {
           updateStreamGenState(sessionId, next.statusText, next.progress, next.thinking);
         }
+      }
+      // #275: a status event follows each round's tool calls being saved on the assistant message, so
+      // the count in the saved message is read again then; it only ever rises during a reply.
+      if (event.type === 'status') {
+        chatClient
+          .listMessagePage(sessionId, { limit: 4 })
+          .then((page) => {
+            const count = latestToolCallCount(page.messages);
+            if (count !== undefined) useChatStore.getState().observeToolCallCount(sessionId, count);
+          })
+          .catch(() => {});
       }
       switch (event.type) {
         case 'text':

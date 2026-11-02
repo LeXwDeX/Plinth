@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import { mergeNewestPage, prependOlderPage } from '@/lib/chat/message-pages';
+import { latestToolCallCount } from '@/lib/chat/tool-call-count';
 import type { NativeQuote, PriceTotal } from '@/lib/pricing';
 
 // ── 类型 ──────────────────────────────────────────────
@@ -36,6 +37,8 @@ export interface ChatMessage {
   pendingTaskTypes?: string[];
   /** 本条消息里已提交的付费步骤：估算积分与批准来源（服务端按批准方式给出）。 */
   paidSteps?: ChatPaidStep[];
+  /** 助手消息里已执行（或正在执行）的工具调用数；#275 的单次回复预算按它计。 */
+  toolCallCount?: number;
   createdAt: number;
 }
 
@@ -120,6 +123,12 @@ interface ChatStore {
   // SSE 流式缓冲（按会话隔离，独立于 messages）
   streamingBuffers: Record<string, StreamingBuffer>;
 
+  /**
+   * 每个会话最新一条助手回复已执行的工具调用数（#275）。回复进行中随每轮工具调用上涨，回复结束后
+   * 保持最终值；没有记录时由 messagesBySession 里最新的助手消息推导。
+   */
+  toolCallCounts: Record<string, number>;
+
   // 会话操作
   setSessions: (sessions: ChatSession[]) => void;
   setActiveSession: (id: string | null) => void;
@@ -149,6 +158,17 @@ interface ChatStore {
   addStreamPaidStep: (sessionId: string, step: ChatPaidStep) => void;
   updateStreamGenState: (sessionId: string, statusText: string, progress: number | null, thinking?: boolean) => void;
   finishStreaming: (sessionId: string) => void;
+  /** 回复进行中读到的工具调用数：只升不降（乱序返回的旧读数不能把计数拉回去）。 */
+  observeToolCallCount: (sessionId: string, count: number) => void;
+}
+
+
+/** The counts after a message read: a running reply keeps its live count, otherwise the newest assistant message decides. */
+function countsAfterRead(state: ChatStore, sessionId: string, messages: readonly ChatMessage[]): Record<string, number> {
+  if (state.streamingBuffers[sessionId]) return state.toolCallCounts;
+  const count = latestToolCallCount(messages);
+  if (count === undefined || state.toolCallCounts[sessionId] === count) return state.toolCallCounts;
+  return { ...state.toolCallCounts, [sessionId]: count };
 }
 
 export const useChatStore = create<ChatStore>((set) => ({
@@ -160,6 +180,7 @@ export const useChatStore = create<ChatStore>((set) => ({
   messagesBySession: {},
   olderCursorBySession: {},
   streamingBuffers: {},
+  toolCallCounts: {},
 
   // ── 会话 ──
   setSessions: (sessions) => set({ sessions, sessionsLoaded: true }),
@@ -182,6 +203,7 @@ export const useChatStore = create<ChatStore>((set) => ({
       const { [id]: _m, ...restMessages } = s.messagesBySession;
       const { [id]: _c, ...restCursors } = s.olderCursorBySession;
       const { [id]: _b, ...restBuffers } = s.streamingBuffers;
+      const { [id]: _t, ...restCounts } = s.toolCallCounts;
       if (s.activeSessionId === id) useWorkspaceStore.getState().clearSessionContext();
       return {
         sessions: s.sessions.filter((ss) => ss.id !== id),
@@ -191,6 +213,7 @@ export const useChatStore = create<ChatStore>((set) => ({
         messagesBySession: restMessages,
         olderCursorBySession: restCursors,
         streamingBuffers: restBuffers,
+        toolCallCounts: restCounts,
       };
     }),
   updateSessionTitle: (id, title) =>
@@ -217,6 +240,7 @@ export const useChatStore = create<ChatStore>((set) => ({
   setMessages: (sessionId, msgs) =>
     set((s) => ({
       messagesBySession: { ...s.messagesBySession, [sessionId]: msgs },
+      toolCallCounts: countsAfterRead(s, sessionId, msgs),
     })),
   applyNewestMessagePage: (sessionId, page) =>
     set((s) => {
@@ -227,6 +251,7 @@ export const useChatStore = create<ChatStore>((set) => ({
       return {
         messagesBySession: { ...s.messagesBySession, [sessionId]: next.messages },
         olderCursorBySession: { ...s.olderCursorBySession, [sessionId]: next.olderCursor },
+        toolCallCounts: countsAfterRead(s, sessionId, next.messages),
       };
     }),
   applyOlderMessagePage: (sessionId, page) =>
@@ -251,7 +276,8 @@ export const useChatStore = create<ChatStore>((set) => ({
     set((s) => {
       const { [sessionId]: _, ...rest } = s.messagesBySession;
       const { [sessionId]: _cursor, ...restCursors } = s.olderCursorBySession;
-      return { messagesBySession: rest, olderCursorBySession: restCursors };
+      const { [sessionId]: _count, ...restCounts } = s.toolCallCounts;
+      return { messagesBySession: rest, olderCursorBySession: restCursors, toolCallCounts: restCounts };
     }),
 
   // ── 流式缓冲操作 ──
@@ -270,6 +296,8 @@ export const useChatStore = create<ChatStore>((set) => ({
           genState: { statusText: '', progress: null },
         },
       },
+      // Every new reply starts counting tool calls from 0 (#275).
+      toolCallCounts: { ...s.toolCallCounts, [sessionId]: 0 },
     })),
 
   setAssistantDbId: (sessionId, dbId) =>
@@ -337,5 +365,11 @@ export const useChatStore = create<ChatStore>((set) => ({
       const { [sessionId]: _, ...rest } = s.streamingBuffers;
       // The turn's messages moved the session's updated time, which orders the session list.
       return { streamingBuffers: rest, sessionListRevision: s.sessionListRevision + 1 };
+    }),
+
+  observeToolCallCount: (sessionId, count) =>
+    set((s) => {
+      if (!s.streamingBuffers[sessionId] || count <= (s.toolCallCounts[sessionId] ?? 0)) return s;
+      return { toolCallCounts: { ...s.toolCallCounts, [sessionId]: count } };
     }),
 }));

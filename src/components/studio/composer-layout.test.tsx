@@ -16,7 +16,8 @@ import { useSessionContextStore } from '@/store/session-context-store';
 // (`col-span-full`, `@[40rem]:col-span-N`) are read off the rendered elements, the grid's auto-placement is
 // replayed, and the resulting rows are compared with the design (docs/product.md §4.2). The pickers themselves
 // are stand-ins that carry their own test id; the context meter is the real component.
-const schema = defaultCatalog.application as unknown as ProductSchema;
+const schema = { ...(defaultCatalog.application as unknown as ProductSchema) };
+schema.chat = { ...schema.chat, agent_limits: { max_tool_calls_per_reply: 20 } };
 const mock = vi.hoisted(() => ({ chatModelPicker: true }));
 
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema }) }));
@@ -131,11 +132,14 @@ describe('the composer picker grid (#99)', () => {
     const context = within(grid).getByTestId('composer-context');
     expect(span(context, '', 2)).toBe(2);
     expect(span(context, WIDE, 4)).toBe(2);
-    // The figure and the compaction action sit on the row's left and right edges.
-    expect(context.classList.contains('justify-between')).toBe(true);
+    // The figure and the compaction action sit together on the left, the tool call counter alone on the right edge (#275).
     expect(context.classList.contains('h-7')).toBe(true);
-    expect(within(context).getByTestId('composer-context-meter')).toBeTruthy();
-    expect(within(context).getByTestId('composer-context-compact')).toBeTruthy();
+    const meter = within(context).getByTestId('composer-context-meter');
+    const compact = within(context).getByTestId('composer-context-compact');
+    const counter = within(context).getByTestId('composer-tool-calls');
+    const follows = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(meter, compact)).toBe(true);
+    expect(follows(compact, counter)).toBe(true);
   });
 
   it('moves the thinking level up into the chat model slot when only one chat model is offered, leaving no hole before a picker', () => {
