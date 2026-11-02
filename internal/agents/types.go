@@ -10,6 +10,30 @@ import (
 // pictures: most likely a model without image input (#253).
 var ErrImagesRejected = errors.New("agent model rejected a request with images")
 
+// ErrContentRejected marks an upstream content-safety refusal: the vendor's
+// moderation flagged the pictures or text of the request (#35). The model
+// may read images fine; the person should change the input, not the model.
+var ErrContentRejected = errors.New("agent upstream content moderation rejected the request")
+
+// ContentRejection is an ErrContentRejected that carries the reasons the
+// upstream's review named (vendor tokens such as "sexual" or "input_image").
+type ContentRejection struct {
+	Reasons []string
+}
+
+func (rejection *ContentRejection) Error() string { return ErrContentRejected.Error() }
+
+func (rejection *ContentRejection) Is(target error) bool { return target == ErrContentRejected }
+
+// ContentRejectedReasons are the reasons of a content-safety refusal in err.
+func ContentRejectedReasons(err error) []string {
+	var rejection *ContentRejection
+	if errors.As(err, &rejection) {
+		return rejection.Reasons
+	}
+	return nil
+}
+
 type ContentPart struct {
 	Kind   string
 	Text   string

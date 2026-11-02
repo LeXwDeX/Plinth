@@ -104,6 +104,7 @@ const (
 	FailureProtocol            = schema.FailureProtocol
 	FailureInternal            = schema.FailureInternal
 	FailureSourceExpired       = schema.FailureSourceExpired
+	FailureContentRejected     = schema.FailureContentRejected
 )
 
 type Failure struct {

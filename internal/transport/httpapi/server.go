@@ -38,6 +38,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/llmsettings"
 	"github.com/LeXwDeX/Plinth/internal/mcp"
 	"github.com/LeXwDeX/Plinth/internal/modeldelivery"
+	"github.com/LeXwDeX/Plinth/internal/moderation"
 	"github.com/LeXwDeX/Plinth/internal/processing"
 	"github.com/LeXwDeX/Plinth/internal/promptenhance"
 	"github.com/LeXwDeX/Plinth/internal/provideraccounts"
@@ -3060,12 +3061,24 @@ func (s *Server) publicFailure(locale string, failure *generation.Failure) *publ
 	if failure == nil {
 		return nil
 	}
+	messages := s.application.Chat.Presentation.Messages
 	return &publicFailure{
 		Class:     failure.Class,
 		Retryable: failure.Retryable,
 		Ambiguous: failure.Ambiguous,
-		Detail:    s.messageIn(locale, "failure."+string(failure.Class)),
+		Detail: s.messageIn(locale, "failure."+string(failure.Class)) +
+			moderation.Explain(messages.ContentRejectedReasons, generation.ContentRejectedReasons(failure),
+				messages.ContentRejectedReasonLabels, messages.ContentRejectedReasonSeparator,
+				func(text string) string { return s.localizedText(locale, text) }),
 	}
+}
+
+// localizedText is textIn that keeps the default copy without a localizer.
+func (s *Server) localizedText(locale, text string) string {
+	if s.texts == nil {
+		return text
+	}
+	return s.texts.Text(locale, text)
 }
 
 // publicEvents 按 catalog 白名单把内核事件投影为公开事件面（§8.1

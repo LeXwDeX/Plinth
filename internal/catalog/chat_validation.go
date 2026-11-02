@@ -153,6 +153,7 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		"presentation.session_not_found":        schema.Presentation.Messages.SessionNotFound,
 		"presentation.empty_message":            schema.Presentation.Messages.EmptyMessage,
 		"presentation.agent_images_unsupported": schema.Presentation.Messages.AgentImagesUnsupported,
+		"presentation.agent_content_rejected":   schema.Presentation.Messages.AgentContentRejected,
 		"presentation.agent_not_configured":     schema.Presentation.Messages.AgentNotConfigured,
 		"presentation.invalid_parameters":       schema.Presentation.Messages.InvalidParameters,
 		"presentation.turn_active":              schema.Presentation.Messages.TurnActive,
@@ -228,6 +229,14 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	}
 	if err := validateThinkingStatus(schema.Stream.EventTypes, schema.Presentation.Status); err != nil {
 		return err
+	}
+	if reasons := schema.Presentation.Messages.ContentRejectedReasons; reasons != "" && !strings.Contains(reasons, "{reasons}") {
+		return errors.New("presentation.content_rejected_reasons 须包含 {reasons}（#35）")
+	}
+	for reason, label := range schema.Presentation.Messages.ContentRejectedReasonLabels {
+		if reason == "" || reason != strings.ToLower(reason) || strings.ContainsAny(reason, "-/") || strings.TrimSpace(label) == "" {
+			return fmt.Errorf("presentation.content_rejected_reason_labels[%q] 须为小写、以 _ 分隔的原因并带文案（#35）", reason)
+		}
 	}
 	for class, message := range schema.Presentation.Messages.GenerationFailedByClass {
 		if !schemacontract.FailureClass(class).Valid() || strings.TrimSpace(message) == "" {

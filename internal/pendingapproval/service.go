@@ -899,7 +899,8 @@ func (s *Service) report(ctx context.Context, op generationtool.Operation, task 
 		}
 		s.chat.AttachResults(ctx, op.OwnerID, &posted, modelTasks)
 	case generation.TaskFailed, generation.TaskCanceled:
-		posted.Content = s.text(ctx, generationtool.FailureMessage(s.schema, task.Offering.CreditsMetered, task.Failure))
+		posted.Content = generationtool.LocalizedFailureMessage(s.schema, task.Offering.CreditsMetered, task.Failure,
+			func(text string) string { return s.text(ctx, text) })
 	default:
 		return outcome, nil
 	}

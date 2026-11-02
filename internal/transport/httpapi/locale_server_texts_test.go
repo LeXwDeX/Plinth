@@ -63,6 +63,23 @@ func TestTaskFailureDetailFollowsTheLocale(t *testing.T) {
 	}
 }
 
+// #35: a content-safety failure names the reason the review gave, in the
+// reader's locale; the rest of the upstream evidence stays hidden.
+func TestContentRejectedFailureNamesTheReason(t *testing.T) {
+	t.Parallel()
+	server, _, _ := localizedTestServer(t)
+	failure := &generation.Failure{Class: generation.FailureContentRejected, UpstreamCode: "moderation_blocked",
+		UpstreamExcerpt: `{"error":{"message":"rejected by the safety system. request ID cee1bfa6. safety_violations=[sexual]."}}`}
+	chinese := server.publicFailure("", failure).Detail
+	if !strings.Contains(chinese, "内容安全审核") || !strings.Contains(chinese, "理由：色情（涉黄）") || strings.Contains(chinese, "cee1bfa6") {
+		t.Fatalf("default detail = %q", chinese)
+	}
+	english := server.publicFailure("en", failure).Detail
+	if !strings.Contains(english, "reason: sexual content") || serverChineseText.MatchString(english) {
+		t.Fatalf("en detail = %q", english)
+	}
+}
+
 func TestLineageGroupLabelFollowsTheLocale(t *testing.T) {
 	t.Parallel()
 	server, application, english := localizedTestServer(t)

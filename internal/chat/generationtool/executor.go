@@ -1529,7 +1529,7 @@ func (executor *Executor) failureMessage(
 	metered bool,
 	failure *generation.Failure,
 ) string {
-	return executor.localized(command, FailureMessage(executor.chat, metered, failure))
+	return LocalizedFailureMessage(executor.chat, metered, failure, executor.localizeText(command))
 }
 
 func (executor *Executor) generationFailure(

@@ -89,6 +89,10 @@ const (
 	// input fails again, so it is never retried; a new request can use the
 	// saved model file instead.
 	FailureSourceExpired FailureClass = "source_expired"
+	// FailureContentRejected: the Provider's content-safety review refused
+	// the prompt or pictures (#35: moderation_blocked, a safety filter). The
+	// same input fails again, so it is never retried; other input may pass.
+	FailureContentRejected FailureClass = "content_rejected"
 )
 
 // Valid 报告声明的失败分类词是否属于封闭枚举。
@@ -107,7 +111,8 @@ func (class FailureClass) Valid() bool {
 		FailureIntegrity,
 		FailureProtocol,
 		FailureInternal,
-		FailureSourceExpired:
+		FailureSourceExpired,
+		FailureContentRejected:
 		return true
 	default:
 		return false
