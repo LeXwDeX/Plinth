@@ -33,7 +33,12 @@ import { useChatStore } from '@/store/chat-store';
 import { useStudioStore } from '@/store/studio-store';
 import { useWorkspaceStore, type CurrentObject } from '@/store/workspace-store';
 
-/** The strip is exactly this tall (h-28 = 7rem = 112px); one column may hold two compact tiles. */
+/**
+ * The strip is exactly 128px (h-32). A regular card with its detail row is 108px and the list pads it by 4px above and
+ * below; with the 1px top border that leaves 11px, room for a thin horizontal scrollbar (11px in Chromium), so the
+ * scrollbar never clips the detail row and the strip does not change height when one appears (#51).
+ * One column may hold two compact tiles.
+ */
 const LINK_ICONS: Record<LinkClass, LucideIcon> = {
   to_model: Box,
   capture: Camera,
@@ -437,7 +442,7 @@ const Connector = memo(function Connector({ column, previous, parentTile }: { co
 });
 
 /**
- * 底部 112px 的版本条：本会话每个 2D / 3D 版本一格，按先后排开；格与格之间用连接线
+ * 底部 128px 的版本条：本会话每个 2D / 3D 版本一格，按先后排开；格与格之间用连接线
  * 说明"由谁而来"（转 3D、截图、处理、编辑），来源不明的用虚线。点一格就是把它放上舞台；
  * 同一来源的多个结果在一列里叠起来。
  */
@@ -504,14 +509,14 @@ export function VersionStrip() {
   const open = useCallback((tile: VersionTile) => openLatest.current(tile), []);
 
   return (
-    <section aria-label={schemaText(schema, 'ui.studio.strip.title')} data-testid="version-strip" className="flex h-28 shrink-0 items-stretch border-t border-border bg-panel">
+    <section aria-label={schemaText(schema, 'ui.studio.strip.title')} data-testid="version-strip" className="flex h-32 shrink-0 items-stretch border-t border-border bg-panel">
       <div ref={scrollRef} className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
         {columns.length === 0 && versions.isLoading ? (
           <VersionStripSkeleton label={schemaText(schema, 'ui.studio.strip.loading')} />
         ) : columns.length === 0 ? (
           <p className="flex h-full items-center px-4 text-sm text-muted-foreground" data-testid="version-strip-empty">{schemaText(schema, 'ui.studio.strip.empty')}</p>
         ) : (
-          <ol className="flex h-full w-max items-start px-3 py-0.5">
+          <ol className="flex h-full w-max items-start px-3 py-1">
             {columns.map((column, index) => (
               <ColumnView
                 key={column.tiles[0].key}
