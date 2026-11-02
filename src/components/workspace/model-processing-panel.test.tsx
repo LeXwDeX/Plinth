@@ -83,6 +83,15 @@ describe('processing panel reconcile action states', () => {
     expect(html).not.toContain(messages['ui.workspace.processing.plan_reconcile_linked']);
     expect(html).toContain(messages['ui.workspace.processing.plan_step_running']);
   });
+  it('a queued pending step shows the queued label; a paused one keeps the paused label', () => {
+    mock.plan = { ...locked(), state: 'RUNNING', failure: undefined,
+      steps: [{ ...locked().steps[0], state: 'PENDING', failure: undefined, queued_until: '2026-11-02T10:00:30Z' }] };
+    expect(render()).toContain(messages['ui.workspace.processing.plan_step_queued']);
+    mock.plan = { ...mock.plan, steps: [{ ...mock.plan.steps[0], state: 'PAUSED' }] };
+    const html = render();
+    expect(html).not.toContain(messages['ui.workspace.processing.plan_step_queued']);
+    expect(html).toContain(messages['ui.workspace.processing.plan_step_paused']);
+  });
   it('a frozen mismatch shows the observation-only warning and no resume', () => {
     mock.plan!.failure = 'plan_reconciled_mismatch';
     mock.plan!.steps[0].failure = 'plan_reconciled_mismatch';

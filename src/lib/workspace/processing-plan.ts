@@ -24,6 +24,8 @@ export interface ProcessingPlanStep {
   prepared_input_hash?: string;
   plan_step_id?: string;
   idempotency_key?: string;
+  /** 进行中任务已满而排队：到这个时间（RFC3339）后台自动重提，提交成功后清空。 */
+  queued_until?: string;
 }
 
 export interface ProcessingPlan {

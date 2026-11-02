@@ -23,8 +23,8 @@ const group = (slots: SlotWire[], extra: Record<string, unknown> = {}): ThreeVie
   ...extra,
 }] })[0];
 
-const render = (value: ThreeViewGroup, busy: string | null = null) => renderToStaticMarkup(
-  <ThreeViewCardView schema={schema} group={value} busy={busy} thumbnail={(slot) => (slot.outputAssetId ? `/api/v1/tasks/${slot.taskId}/assets/${slot.outputAssetId}` : '')} onAdvance={() => {}} onView={() => {}} onToThreeD={() => {}} />,
+const render = (value: ThreeViewGroup, busy: string | null = null, queued: ReadonlySet<string> = new Set()) => renderToStaticMarkup(
+  <ThreeViewCardView schema={schema} group={value} busy={busy} queued={queued} thumbnail={(slot) => (slot.outputAssetId ? `/api/v1/tasks/${slot.taskId}/assets/${slot.outputAssetId}` : '')} onAdvance={() => {}} onView={() => {}} onToThreeD={() => {}} />,
 );
 
 const slotHtml = (html: string, key: string) => {
@@ -130,4 +130,18 @@ it('shows native start/retry prices and keeps unknown native prices disabled',()
  expect(slotHtml(html,'side')).toContain('已冻结估算：1 Vendor credits');
  expect(slotHtml(html,'back')).toContain('报价未知');
  expect(isDisabled(buttonTag(slotHtml(html,'back'),'three-view-start'))).toBe(true);
+});
+
+describe('three-view card queue', () => {
+  it('shows the queued line on a queued slot and keeps its button from being clicked again', () => {
+    const html = render(group([
+      { status: 'not_started', startable: true },
+      { status: 'not_started', startable: true },
+      { status: 'not_started', startable: true },
+    ]), null, new Set(['run1:front']));
+    expect(slotHtml(html, 'front')).toContain(messages['ui.studio.three_view.queued']);
+    expect(isDisabled(buttonTag(slotHtml(html, 'front'), 'three-view-start'))).toBe(true);
+    expect(slotHtml(html, 'side')).not.toContain(messages['ui.studio.three_view.queued']);
+    expect(isDisabled(buttonTag(slotHtml(html, 'side'), 'three-view-start'))).toBe(false);
+  });
 });

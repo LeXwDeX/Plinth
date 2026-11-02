@@ -40,6 +40,8 @@ export interface ThreeViewCardViewProps {
   group: ThreeViewGroup;
   /** `${runId}:${slotKey}` of the view being asked right now. */
   busy: string | null;
+  /** `${runId}:${slotKey}` of views queued behind the in-flight limit; they resubmit by themselves. */
+  queued?: ReadonlySet<string>;
   thumbnail: (slot: ThreeViewSlot) => string;
   onAdvance: (slot: ThreeViewSlot) => void;
   onView: (slot: ThreeViewSlot) => void;
@@ -51,7 +53,7 @@ export interface ThreeViewCardViewProps {
  * 能不能开始 / 重试由服务端的 startable / retryable 决定，这里只照着画；
  * 做 3D 只用正面图，卡片上直接写明。
  */
-export function ThreeViewCardView({ schema, group, busy, thumbnail, onAdvance, onView, onToThreeD }: ThreeViewCardViewProps) {
+export function ThreeViewCardView({ schema, group, busy, queued, thumbnail, onAdvance, onView, onToThreeD }: ThreeViewCardViewProps) {
   const done = succeededCount(group);
   const total = group.slots.length;
   const front = group.slots.find((slot) => slot.key === group.modelSource.slot);
@@ -73,7 +75,8 @@ export function ThreeViewCardView({ schema, group, busy, thumbnail, onAdvance, o
       <ul className="grid grid-cols-3 gap-2" aria-label={text(schema, 'slots')}>
         {group.slots.map((slot) => {
           const action = slotAction(slot);
-          const isBusy = busy === `${group.runId}:${slot.key}`;
+          const isQueued = queued?.has(`${group.runId}:${slot.key}`) ?? false;
+          const isBusy = busy === `${group.runId}:${slot.key}` || isQueued;
           const status = text(schema, `status.${slot.status}`);
           const native = slot.nativeQuote !== undefined;
           const nativeAmount = slot.nativeQuote ? formatNativePrice(slot.nativeQuote.total_amount, slot.nativeQuote.unit_label) : null;
@@ -103,13 +106,16 @@ export function ThreeViewCardView({ schema, group, busy, thumbnail, onAdvance, o
               {slot.status === 'awaiting_approval' ? (
                 <span className="text-[11px] leading-4 text-muted-foreground">{text(schema, 'waiting_approval')}</span>
               ) : null}
+              {isQueued ? (
+                <span className="text-[11px] leading-4 text-muted-foreground" data-testid="three-view-queued">{text(schema, 'queued')}</span>
+              ) : null}
               {action ? (
                 <Action
                   type="button"
                   size="xs"
                   variant={action === 'start' ? 'default' : 'outline'}
                   loading={isBusy}
-                  disabled={busy !== null || (native && nativeAmount === null)}
+                  disabled={busy !== null || isQueued || (native && nativeAmount === null)}
                   data-testid={action === 'start' ? 'three-view-start' : 'three-view-retry'}
                   onClick={() => onAdvance(slot)}
                 >
@@ -154,7 +160,7 @@ export function ThreeViewCardView({ schema, group, busy, thumbnail, onAdvance, o
 
 export function ThreeViewCard({ group }: { group: ThreeViewGroup }) {
   const { schema } = useProductSchema();
-  const { busy, advance } = useThreeViews();
+  const { busy, queued, advance } = useThreeViews();
   const { openOnStage, toThreeD } = useObjectActions();
   const sessionId = useChatStore((state) => state.activeSessionId);
 
@@ -169,6 +175,7 @@ export function ThreeViewCard({ group }: { group: ThreeViewGroup }) {
       schema={schema}
       group={group}
       busy={busy}
+      queued={queued}
       thumbnail={(slot) => urlOf(slot.taskId, slot.outputAssetId)}
       onAdvance={(slot) => {
         void advance(group, slot).then((message) => { if (message) toast.error(message); });

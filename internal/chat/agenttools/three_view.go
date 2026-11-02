@@ -148,6 +148,11 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		if accepted.TaskID != "" {
 			return e.awaitThreeView(command, string(accepted.TaskID), generation.Offering{}, err)
 		}
+		if wait := generation.AdmissionRetryAfter(err); wait > 0 {
+			// 在途准入已满：内核确定没有提交，步骤仍停在已批准的授权上。
+			// 交给编排器按 RetryAfter 排队，唤醒后同一调用重放到这里再提交。
+			return chat.ToolResult{NoSubmission: true, RetryAfter: wait}, err
+		}
 		return chat.ToolResult{}, err
 	}
 	if accepted.TaskID == "" || len(run.Steps) == 0 {

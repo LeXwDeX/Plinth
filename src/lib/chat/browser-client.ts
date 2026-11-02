@@ -294,12 +294,15 @@ export class ChatBrowserError extends Error {
   readonly status: number;
   /** The server's request ID, shown after the message as the error reference (#240). */
   readonly requestId: string;
+  /** 429 时服务端 `Retry-After` 给出的等待秒数；缺失、非法或不大于 0 时不设置。 */
+  readonly retryAfterSeconds?: number;
 
-  constructor(message: string, status: number, requestId = '') {
+  constructor(message: string, status: number, requestId = '', retryAfterSeconds?: number) {
     super(message);
     this.name = 'ChatBrowserError';
     this.status = status;
     this.requestId = requestId;
+    if (retryAfterSeconds !== undefined) this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -445,6 +448,14 @@ function problemError(schema: ProductSchema, payload: unknown, status: number): 
     withRequestReference(typeof detail === 'string' && detail !== '' ? detail : schema.chat.presentation.messages.internal_error, payload),
     status,
   );
+}
+
+/** 解析 `Retry-After` 的秒数形式；缺失、非法或不大于 0 时返回 undefined。 */
+function retryAfterSecondsOf(response: Response): number | undefined {
+  const raw = response.headers.get('Retry-After')?.trim();
+  if (!raw || !/^\d+(\.\d+)?$/.test(raw)) return undefined;
+  const seconds = Number(raw);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : undefined;
 }
 
 function pickOf(schema: ProductSchema, payload: unknown): ChatAttachment | null {
@@ -1246,7 +1257,13 @@ export function createChatBrowserClient(
         body: JSON.stringify({ action, attempt }),
       });
       const payload = await responseValue(response);
-      if (!response.ok) throw problemError(schema, payload, response.status);
+      if (!response.ok) {
+        const error = problemError(schema, payload, response.status);
+        // 进行中任务已满时服务端回 429 + Retry-After，这次一定没有提交；把等待时间交给调用方排队重提。
+        const retryAfter = response.status === 429 ? retryAfterSecondsOf(response) : undefined;
+        throw retryAfter === undefined ? error
+          : new ChatBrowserError(error.message, error.status, error.requestId, retryAfter);
+      }
       const group = parseThreeViewGroup(record(payload).group);
       if (!group) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, response.status);
       return group;
