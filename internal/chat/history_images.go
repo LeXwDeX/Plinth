@@ -177,7 +177,13 @@ func (policy HistoryLookupPolicy) apply(
 func (policy HistoryLookupPolicy) candidates(history []Message, selection []Attachment) []historyCandidate {
 	var result []historyCandidate
 	currentTurn := -1
-	if last := len(history) - 1; last >= 0 && history[last].Role == policy.UserRole {
+	last := len(history) - 1
+	if last >= 1 && history[last].Role != policy.UserRole && history[last-1].Role == policy.UserRole {
+		// A tool's history may end with the results of the reply that is
+		// running (#25); the person's message before it is still the turn.
+		last--
+	}
+	if last >= 0 && history[last].Role == policy.UserRole {
 		currentTurn = last
 	}
 	for messageIndex := len(history) - 1; messageIndex >= 0; messageIndex-- {

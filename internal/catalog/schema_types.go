@@ -2960,6 +2960,10 @@ type ChatContextSchema struct {
 	// the wrong kind. Field: {handle}.
 	UnknownHandleTemplate   string `json:"unknown_handle_template"`
 	WrongHandleKindTemplate string `json:"wrong_handle_kind_template"`
+	// ResultHandlesField is the key of the tool result that lists the handles
+	// given to the pictures and models the call produced (#25), so a later
+	// step of the same reply names them without guessing. Empty omits it.
+	ResultHandlesField string `json:"result_handles_field,omitempty"`
 	// MaximumAttachmentsPerMessage and MaximumSelection bound the structured
 	// claims a client can send in one turn.
 	MaximumAttachmentsPerMessage int `json:"maximum_attachments_per_message"`

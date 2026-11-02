@@ -194,7 +194,7 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
 ### 交付硬门禁
 
 - 合并前以本机门禁为准：每个分支推送时照常跑 pre-push（本地八项）；合并到 `main` 前，在待合并的 head 上跑一次 `python3 scripts/verify-local.py --race`，结果写进 PR。
-- 交付任何改动到 `dev-test` 前，最终待发布的精确 `main` SHA 应有一次完整的 GitHub Actions `ci` 运行且所有作业 success。可信自托管 `workflow_dispatch` 可提供同一 SHA 的 CI 证据，但须核对实际 runner、`head_sha` 和 checkout。托管 runner 因计费墙不可用，且（没有自托管 runner 或其不可用，包括安全前提未证明）时，按上节先对同一 SHA 做本机初检，再以该 SHA 的完整隔离主机自检作为 CI 替代，并在 PR 或 Issue 记录实际结果。作业因代码原因失败时不得放行；主机自检不能冒称 Actions success。旧 SHA、其他提交的结果、缺项或 skip 都不算。
+- 交付任何改动到 `dev-test` 前，最终待发布的精确 `main` SHA 应有一次完整的 GitHub Actions `CI` 运行且所有作业 success。可信自托管 `workflow_dispatch` 可提供同一 SHA 的 CI 证据，但须核对实际 runner、`head_sha` 和 checkout。托管 runner 因计费墙不可用，且（没有自托管 runner 或其不可用，包括安全前提未证明）时，按上节先对同一 SHA 做本机初检，再以该 SHA 的完整隔离主机自检作为 CI 替代，并在 PR 或 Issue 记录实际结果。作业因代码原因失败时不得放行；主机自检不能冒称 Actions success。旧 SHA、其他提交的结果、缺项或 skip 都不算。
 - 发布到 `dev-test` 前，还要在同一个待发布 `main` revision 上再跑一次本机 `--race` 全量；发布后照常做 L0、L1、L1 Agent 和相关验收。CI 只作门禁，不承担部署。
 
 ### 本地统一入口与 pre-push 复用
@@ -220,6 +220,7 @@ Hook 安装默认只预览：`python3 scripts/install-local-verification-hook.py
 SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-hooks.py`（#242），规则与上述门禁安装器一致：默认预览，`--apply` 原子替换并保留其他字节与模式，未知/损坏块拒绝改写，`--uninstall` 只移除本区块；另有只读 `--status`、`--mode warn|enforce` 与 `--init-worktrees`。回归为 `python3 -m unittest scripts/tests/test_install_specgit_required_hooks.py`。上线顺序与对已有工作树的影响见 `docs/specgit-project-integration.md`「所有分支与工作树强制初始化」。
 
 ## 3. 部署与回归流程
+0. `dev-test` 默认每次发布都是全新数据（环境文件 `"data": "ephemeral"`，#28）：发布不做备份，冒烟与相关验收都从空库开始，只存在运行环境引导的管理员测试账号，数据由测试流程按真实用户流程自己创建；`formal-test` 不适用。
 1. 本地代码修改完成；
 2. 在待合并 head 上运行本机 `python3 scripts/verify-local.py --race` 全量（清单见 §2，前端三项 + Go 门禁四条），完成独立审核；
 3. 将已验收提交合并并推送到 `main`，以 `main` 的精确提交 SHA 生成不可变

@@ -130,3 +130,32 @@ func TestDefaultToSelectionIsDeclaredByTheProductSchema(t *testing.T) {
 		}
 	}
 }
+
+// #25: a later step of a reply names a picture the reply just made, by handle
+// or by its place in the numbering. The person's pictures of this turn stay
+// the implicit references.
+func TestReferencesReachThePicturesThisReplyMade(t *testing.T) {
+	executor, schema := handleExecutor(t)
+	command := chat.ToolCommand{History: historyWithHandles(schema), Turn: chat.Message{Role: schema.Roles.Assistant,
+		ImageURLs: []string{"made-url"}, Attachments: []chat.Attachment{
+			{Handle: "@img3", Kind: chat.AttachmentKindImage, Role: chat.AttachmentRoleGenerated, TaskID: "task-made", ImageSlot: 1}}}}
+	got, err := executor.selectReferences(command, map[string]json.RawMessage{
+		schema.Context.ReferenceHandlesArgument: json.RawMessage(`["@img3"]`)})
+	if err != nil || !reflect.DeepEqual(got, []string{"made-url"}) {
+		t.Fatalf("@img3 = %v, %v", got, err)
+	}
+	got, err = executor.selectReferences(command, map[string]json.RawMessage{
+		schema.Context.ToolReferenceArgument: json.RawMessage(`[4]`)})
+	if err != nil || !reflect.DeepEqual(got, []string{"made-url"}) {
+		t.Fatalf("index 4 = %v, %v", got, err)
+	}
+	if got := executor.referenceSourceTask(command, "made-url"); got != "task-made" {
+		t.Fatalf("source task of the picture this reply made = %q", got)
+	}
+	// Nothing named: the reply's own picture is not an implicit reference.
+	command.History[len(command.History)-1].ImageURLs = []string{"turn-upload"}
+	got, err = executor.selectReferences(command, map[string]json.RawMessage{})
+	if err != nil || !reflect.DeepEqual(got, []string{"turn-upload"}) {
+		t.Fatalf("implicit references = %v, %v", got, err)
+	}
+}
