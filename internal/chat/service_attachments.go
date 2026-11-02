@@ -82,6 +82,9 @@ func (service *Service) verifyTurnAttachments(ctx context.Context, command Start
 		}
 		if command.Options.InputSource != "" && !canvasMarked {
 			canvasMarked = service.markCanvasSnapshot(ctx, command.OwnerID, command.SessionID, ref, &attachment)
+			if canvasMarked {
+				service.reuseIdenticalSnapshot(ctx, command.OwnerID, command.SessionID, &attachment)
+			}
 		}
 		duplicate := false
 		for _, other := range result.selection {
@@ -133,6 +136,45 @@ func (service *Service) markCanvasSnapshot(ctx context.Context, ownerID, session
 	attachment.Canvas = &CanvasLayout{Width: width, Height: height, Layers: layers,
 		Sources: service.canvasSources(ctx, ownerID, sessionID, ref.CanvasSources)}
 	return true
+}
+
+// reuseIdenticalSnapshot points an artboard snapshot at the earlier input
+// asset of the session with the same bytes (#49). The board is uploaded again
+// on every canvas turn, so an unchanged board arrives as a new asset; naming
+// the earlier one lets the handle step keep its handle instead of giving the
+// same picture one more @img. Only owned uploads (no Task, no capture) are
+// compared, and a digest that cannot be read leaves the snapshot as it is.
+func (service *Service) reuseIdenticalSnapshot(ctx context.Context, ownerID, sessionID string, attachment *Attachment) {
+	digester, ok := service.attachments.(InputAssetDigester)
+	if !ok {
+		return
+	}
+	digest, err := digester.InputAssetDigest(ctx, ownerID, attachment.AssetID)
+	if err != nil || digest == "" {
+		return
+	}
+	history, err := service.repository.ListMessages(ctx, ownerID, sessionID)
+	if err != nil {
+		return
+	}
+	compared := map[string]bool{attachment.AssetID: true}
+	for index := len(history) - 1; index >= 0; index-- {
+		for _, candidate := range history[index].Attachments {
+			if candidate.Kind != AttachmentKindImage || candidate.AssetID == "" || candidate.TaskID != "" ||
+				candidate.CaptureID != "" || compared[candidate.AssetID] {
+				continue
+			}
+			compared[candidate.AssetID] = true
+			url := AttachmentURL(history[index], candidate)
+			if url == "" {
+				continue
+			}
+			if earlier, err := digester.InputAssetDigest(ctx, ownerID, candidate.AssetID); err == nil && earlier == digest {
+				attachment.AssetID, attachment.URL = candidate.AssetID, url
+				return
+			}
+		}
+	}
 }
 
 // canvasSources verifies the picture layers an artboard snapshot claims to

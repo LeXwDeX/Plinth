@@ -209,3 +209,83 @@ func TestCanvasSnapshotNamesTheVerifiedTasksOfItsLayers(t *testing.T) {
 		}
 	}
 }
+
+// digestVerifier also reads the content digest of an owned input asset, like
+// the production reference resolver.
+type digestVerifier struct {
+	measuringVerifier
+	digests map[string]string
+}
+
+func (v *digestVerifier) InputAssetDigest(_ context.Context, _ string, assetID string) (string, error) {
+	digest, found := v.digests[assetID]
+	if !found {
+		return "", errors.New("unreadable")
+	}
+	return digest, nil
+}
+
+// #49: the artboard is uploaded again on every canvas turn, so an unchanged
+// board arrives as a new input asset with the same bytes. It keeps the handle
+// the session already gave that picture instead of becoming one more @img;
+// a board whose bytes changed, or whose digest cannot be read, is new.
+func TestUnchangedCanvasSnapshotKeepsItsHandle(t *testing.T) {
+	policy, schema := handlePolicyForTest(t)
+	verifier := &digestVerifier{
+		measuringVerifier: measuringVerifier{recordingVerifier: recordingVerifier{held: map[string]map[string]bool{}},
+			sizes: map[string][2]int{"snap-1": {1152, 2048}, "snap-2": {1152, 2048}, "snap-3": {1152, 2048}, "snap-4": {1152, 2048}}},
+		digests: map[string]string{"snap-1": "same", "snap-2": "same", "snap-3": "edited"},
+	}
+	repository := newMemoryChatRepository()
+	service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) {
+		config.Handles = policy
+		config.Attachments = verifier
+		config.CanvasInputSource = schema.Context.CanvasInputSource
+	})
+	ctx := context.Background()
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier.held["owner-a/"+session.ID] = map[string]bool{"snap-1": true, "snap-2": true, "snap-3": true, "snap-4": true}
+	start := func(asset string) (chat.Attachment, chat.Message) {
+		t.Helper()
+		assistant, err := service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID, Content: "转 3D",
+			Options: chat.TurnOptions{InputSource: schema.Context.CanvasInputSource},
+			Selection: []chat.AttachmentRef{{Kind: chat.AttachmentKindImage, AssetID: asset,
+				URL: "/api/v1/assets/" + asset, CanvasLayers: 1}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		turn, err := service.GetTurn(ctx, "owner-a", session.ID, assistant.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(turn.Options.Selection) != 1 {
+			t.Fatalf("selection = %+v", turn.Options.Selection)
+		}
+		repository.mu.Lock()
+		messages := repository.messages[session.ID]
+		repository.mu.Unlock()
+		return turn.Options.Selection[0], messages[len(messages)-2]
+	}
+
+	first, _ := start("snap-1")
+	if first.Handle == "" || first.AssetID != "snap-1" {
+		t.Fatalf("first snapshot = %+v", first)
+	}
+	again, user := start("snap-2")
+	if again.Handle != first.Handle || again.AssetID != "snap-1" || again.Role != chat.AttachmentRoleCanvas ||
+		!reflect.DeepEqual(again.Canvas, &chat.CanvasLayout{Width: 1152, Height: 2048, Layers: 1}) {
+		t.Fatalf("unchanged snapshot = %+v, want handle %s on snap-1", again, first.Handle)
+	}
+	if len(user.Attachments) != 0 {
+		t.Fatalf("unchanged snapshot recorded again: %+v", user.Attachments)
+	}
+	for _, asset := range []string{"snap-3", "snap-4"} {
+		changed, _ := start(asset)
+		if changed.Handle == "" || changed.Handle == first.Handle || changed.AssetID != asset {
+			t.Fatalf("%s = %+v", asset, changed)
+		}
+	}
+}

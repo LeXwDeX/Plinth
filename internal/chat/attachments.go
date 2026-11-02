@@ -100,6 +100,13 @@ type ImageDimensionReader interface {
 	ImageDimensions(ctx context.Context, ownerID, assetID string) (width, height int, err error)
 }
 
+// InputAssetDigester reads the content digest of an owned input asset. The
+// attachment verifier implements it so an artboard snapshot that repeats an
+// earlier picture byte for byte keeps that picture's handle (#49).
+type InputAssetDigester interface {
+	InputAssetDigest(ctx context.Context, ownerID, assetID string) (string, error)
+}
+
 // ErrAttachmentRejected reports a claim that is not owned by the owner or does
 // not belong to the session. The claimed IDs are never echoed back.
 var ErrAttachmentRejected = errors.New("chat: attachment rejected")
