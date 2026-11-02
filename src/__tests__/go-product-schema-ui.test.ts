@@ -501,6 +501,7 @@ describe('Go Product Schema frontend projection', () => {
     expect(advancedOfferings.map((offering) => offering.id)).toEqual([
       'tripo/tripo-v3.1-full/text-to-3d',
       'tripo/tripo-v3.1-full/image-to-3d',
+      'tripo/tripo-v3.1-multiview/image-to-3d',
     ]);
     // The narrow uploaded-file route uses its public Schema parameters; the
     // legacy six-format route remains disabled independently of this feature.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/chat"
@@ -197,6 +198,56 @@ func TestApplyAutoTitleIsOwnerScopedAndOnlyWritesOnce(t *testing.T) {
 		t.Fatalf("second apply = %v %v", applied, err)
 	}
 	if got := sessionTitle(t, service, "owner-a", session.ID); got != "first" {
+		t.Fatalf("title = %q", got)
+	}
+}
+
+// slowTurnAgent holds the turn's stream open until the title has been written,
+// standing in for a first turn that waits minutes on a generation tool.
+type slowTurnAgent struct {
+	titleAgent
+	titled chan struct{}
+}
+
+func (a *slowTurnAgent) Stream(
+	ctx context.Context,
+	request agents.Request,
+	emit func(agents.Delta) error,
+) (agents.Completion, error) {
+	select {
+	case <-a.titled:
+	case <-time.After(5 * time.Second):
+		return agents.Completion{}, errors.New("title was not generated while the turn was running")
+	case <-ctx.Done():
+		return agents.Completion{}, ctx.Err()
+	}
+	return a.titleAgent.Stream(ctx, request, emit)
+}
+
+func (a *slowTurnAgent) Complete(ctx context.Context, request agents.Request) (agents.Completion, error) {
+	completion, err := a.titleAgent.Complete(ctx, request)
+	close(a.titled)
+	return completion, err
+}
+
+func TestAutoTitleIsGeneratedWhileTheFirstTurnIsStillRunning(t *testing.T) {
+	agent := &slowTurnAgent{
+		titleAgent: titleAgent{titleReply: func() (agents.Completion, error) {
+			return agents.Completion{Content: "机械猫"}, nil
+		}},
+		titled: make(chan struct{}),
+	}
+	service := newChatService(t, newMemoryChatRepository())
+	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
+		Service: service, Schema: configuredChatSchema(t), Model: "configured-model", Agent: agent, Tools: noToolExecutor{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, _ := service.CreateSession(context.Background(), "owner-a", "Owner", "")
+	runTitleTurn(t, service, orchestrator, "owner-a", session.ID, "画一只机械猫")
+	orchestrator.WaitForTitles()
+	if got := sessionTitle(t, service, "owner-a", session.ID); got != "机械猫" {
 		t.Fatalf("title = %q", got)
 	}
 }

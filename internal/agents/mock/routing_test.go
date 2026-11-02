@@ -463,3 +463,32 @@ func TestSegmentAgainGoesBackToTheFirstModel(t *testing.T) {
 		t.Fatalf("original model = %s %v", name, arguments)
 	}
 }
+
+// #27: several views of one object go to the multi-view 3D tool, taken from
+// the handles named, else this turn's uploads; one picture keeps the old route.
+func TestMultiViewPicturesRouteToTheMultiViewModelTool(t *testing.T) {
+	tools := append(append([]agents.Tool{}, allTools...), agents.Tool{Name: "create_model_3d_from_views"})
+	cases := []struct {
+		name     string
+		text     string
+		wantTool string
+		wantArgs map[string]any
+	}{
+		{name: "named handles", text: "用 @img1 @img2 @img3 这几张三视图生成 3D 模型", wantTool: "create_model_3d_from_views",
+			wantArgs: map[string]any{"model": "tripo-v3.1-multiview", "reference_handles": []any{"@img1", "@img2", "@img3"}}},
+		{name: "this turn's uploads", text: "用这两张多视角图生成3D模型\n[历史图片 1，句柄 @img4：用户上传]\n[历史图片 2，句柄 @img5：用户上传]", wantTool: "create_model_3d_from_views",
+			wantArgs: map[string]any{"model": "tripo-v3.1-multiview", "reference_handles": []any{"@img4", "@img5"}}},
+		{name: "one picture keeps the image route", text: "用 @img1 这张多视角图生成 3D 模型", wantTool: "create_model_3d_from_image",
+			wantArgs: map[string]any{"prompt": "用 @img1 这张多视角图生成 3D 模型", "reference_handles": []any{"@img1"}}},
+		{name: "two pictures without view words keep the image route", text: "把 @img1 @img2 转成 3D 模型", wantTool: "create_model_3d_from_image",
+			wantArgs: map[string]any{"prompt": "把 @img1 @img2 转成 3D 模型", "reference_handles": []any{"@img1"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tool, arguments := plan(t, []agents.Message{{Role: "user", Content: tc.text}}, tools)
+			if tool != tc.wantTool || !reflect.DeepEqual(arguments, tc.wantArgs) {
+				t.Fatalf("got %s %#v, want %s %#v", tool, arguments, tc.wantTool, tc.wantArgs)
+			}
+		})
+	}
+}

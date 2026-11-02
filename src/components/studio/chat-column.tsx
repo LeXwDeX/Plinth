@@ -934,6 +934,8 @@ export function ChatColumn() {
           currentWorkspace.modelByDomain[domain] !== selectedModel ||
           sessionSkillId(skillBySessionRef.current, sessionId) !== skillId) return;
       }
+      // The lock is released only after the turn's own cleanup: a queued message that came due meanwhile waits for
+      // the release (the drain below re-checks on it) instead of being refused by the lock and put back.
       await withSessionSendLock(sendPreparation.current, sessionId, async () => {
         setPreparingSession(sessionId);
         try {
@@ -1082,7 +1084,7 @@ export function ChatColumn() {
         } finally {
           setPreparingSession((current) => current === sessionId ? null : current);
         }
-      });
+      }).finally(() => setDrainTick((tick) => tick + 1));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `pending.refresh` is stable per session
     [
@@ -1148,6 +1150,8 @@ export function ChatColumn() {
   // 输入框，不让用户的话丢掉。
   useEffect(() => {
     if (!activeSessionId || isStreaming || preparing || uploading || drainingRef.current) return;
+    // The turn that just ended may still hold the send lock while it cleans up; its release bumps drainTick.
+    if (sendPreparation.current.has(activeSessionId)) return;
     const { turn } = takeQueuedTurn(queue, activeSessionId);
     if (!turn) return;
     const sessionId = activeSessionId;

@@ -166,6 +166,8 @@ Catalog 只加载、校验、投影声明，不导入执行模块。SkillRun 配
 
 `application.chat.harness` 声明语义分组、操作能力、模型适用范围、默认启用集合、合法前置路径及工具接线。公开投影仅含人可读分组/操作、能力与前置关系，不含 `tool_name`、`tool_arguments`、基础工具清单、模型上下文模板或运行配置。运行 Offering 发现仍来自原 Catalog/App，不增加 UI Provider 配置表或上游 Adapter 分支。
 
+Harness 操作也可接按 `offering_argument` 选服务的生成工具（#27）：通用组用 `model_ids` 限定唯一服务，公开投影可带短标签 `badge`；无模型来源的 Offering 由 Agent 从对话按图片句柄取参考图。Tripo 多视图的 wire 差异只由 Offering 私有 `provider_options.reference_wire: "multiview_inputs"` 声明，Adapter 复用图生 3D 的任务、上传、报价与产物链，不新增 capability、任务生命周期或页面分支。
+
 服务端 resolver 按具体 Offering 参数构造本轮动态工具合同：固定值为 const，Agent 只能填写声明允许的参数，来源和精确 Offering/revision 由服务器注入并校验。通用操作按能力和可接受来源匹配，不绑定左侧生成模型；不可用 Offering 明示不可用，不静默换模型。API 路由、右侧标签及文案仍由 Product Schema 声明。旧兼容 Offering/discovery 保留原结构，新增会话选择路由承担 CAS，不把执行密钥或私有工具接线混入首屏投影。
 
 `Harness` binding 是 Grant/编排执行身份的一部分，不改变 Provider wire 请求或 PreparedInput 内容哈希。每个实际步骤仍经 Generation，Provider 私有子作业、资产完整性交付和终态规则不变。缺输入时可返回的前置方案仅做只读校验，没有独立执行器、accept API 或第二套任务状态机。前置路径可见性和 proposal 共用完整候选链解析及参数准备，从实际来源资产逐段验证 Generation 绑定合同并固定精确目标 Offering/revision，过滤不兼容的跨 Provider 或输出链；缺参仍列待补，参数已齐但规范化失败时继续检查后续候选；这些预测不替代执行时的真实资产检查。持久与恢复机制详见 `docs/architecture.md` 的“会话功能选择与冻结执行身份”；最终部署验收记录见 #181。
