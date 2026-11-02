@@ -472,10 +472,10 @@ func TestOrchestratorGeneratesFirstTurnTitleFromSchemaAndEmitsEvent(
 		"configured title prompt {maximum}: {content}"
 	schema.Agent.TitleMaxChars = 5
 	schema.Stream.EventTypes.Title = "configured-title-event"
-	agent := &scriptedAgent{responses: []agents.Completion{
-		{Content: "configured response"},
-		{Content: "123456789"},
-	}}
+	agent := &scriptedAgent{
+		responses:   []agents.Completion{{Content: "configured response"}},
+		completions: []agents.Completion{{Content: "123456789"}},
+	}
 	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
 		Service: service,
 		Schema:  schema,
@@ -514,9 +514,16 @@ func TestOrchestratorGeneratesFirstTurnTitleFromSchemaAndEmitsEvent(
 	if len(sessions) != 1 || sessions[0].Title != "12345" {
 		t.Fatalf("sessions = %#v", sessions)
 	}
-	if len(agent.requests) != 2 ||
-		agent.requests[1].Messages[0].Content !=
-			"configured title prompt 5: configured request" {
+	// The title request runs next to the reply (#36), so its place among
+	// the requests is not fixed.
+	titleRequests := 0
+	for _, request := range agent.requests {
+		if len(request.Messages) > 0 &&
+			request.Messages[0].Content == "configured title prompt 5: configured request" {
+			titleRequests++
+		}
+	}
+	if len(agent.requests) != 2 || titleRequests != 1 {
 		t.Fatalf("agent requests = %#v", agent.requests)
 	}
 	events, err := service.ListEvents(ctx, "owner-a", session.ID, 0)
@@ -1003,9 +1010,15 @@ func configuredChatSchema(t *testing.T) catalog.ChatSchema {
 }
 
 type scriptedAgent struct {
+	mu        sync.Mutex
 	responses []agents.Completion
 	requests  []agents.Request
 	index     int
+	// completions, when set, script Complete apart from Stream: the first-turn
+	// title (Complete) runs next to the reply (Stream) since #36, so a shared
+	// call order would hand either one the other's response (#45).
+	completions   []agents.Completion
+	completeIndex int
 }
 
 type notifyingAgent struct {
@@ -1121,9 +1134,11 @@ func (agent *scriptedAgent) Stream(
 	request agents.Request,
 	emit func(agents.Delta) error,
 ) (agents.Completion, error) {
+	agent.mu.Lock()
 	agent.requests = append(agent.requests, request)
 	response := agent.responses[agent.index]
 	agent.index++
+	agent.mu.Unlock()
 	if response.Content != "" && emit != nil {
 		if err := emit(agents.Delta{Content: response.Content}); err != nil {
 			return agents.Completion{}, err
@@ -1136,7 +1151,14 @@ func (agent *scriptedAgent) Complete(
 	_ context.Context,
 	request agents.Request,
 ) (agents.Completion, error) {
+	agent.mu.Lock()
+	defer agent.mu.Unlock()
 	agent.requests = append(agent.requests, request)
+	if agent.completions != nil {
+		response := agent.completions[agent.completeIndex]
+		agent.completeIndex++
+		return response, nil
+	}
 	response := agent.responses[agent.index]
 	agent.index++
 	return response, nil
