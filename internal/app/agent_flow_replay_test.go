@@ -49,6 +49,10 @@ import (
 //   - The title response recorded its message as the opaque "ok", which the
 //     title request cannot decode; the title stays at its default, as the
 //     application does for any failed title.
+//   - The title is requested alongside the first turn, so its place among the
+//     turn's own requests is a race; the sample recorded it after them, and
+//     the title request (the one without tools) is held until the turn's two
+//     requests have completed (holdTitle).
 
 const (
 	replayLLMConnection   = "LLM"
@@ -73,6 +77,10 @@ type replayTransport struct {
 	// binds a replayed response body. Either may be nil.
 	project func([]byte) []byte
 	rewrite func(*http.Request, []byte) []byte
+	// holdUntil, when set, holds a request whose body it reports as held
+	// until this many earlier round trips have completed, so a request the
+	// application sends concurrently keeps its recorded place in the sample.
+	holdUntil func([]byte) (int64, bool)
 	// sent keeps the outgoing request bodies, before projection, for assertions.
 	mu      sync.Mutex
 	sent    [][]byte
@@ -86,6 +94,17 @@ func (r *replayTransport) RoundTrip(request *http.Request) (*http.Response, erro
 		_ = request.Body.Close()
 		if err != nil {
 			return nil, err
+		}
+		if r.holdUntil != nil {
+			if after, held := r.holdUntil(raw); held {
+				for r.calls.Load() < after {
+					select {
+					case <-request.Context().Done():
+						return nil, request.Context().Err()
+					case <-time.After(5 * time.Millisecond):
+					}
+				}
+			}
 		}
 		r.mu.Lock()
 		r.sent = append(r.sent, raw)
@@ -115,6 +134,17 @@ func (r *replayTransport) RoundTrip(request *http.Request) (*http.Response, erro
 	}
 	r.calls.Add(1)
 	return response, nil
+}
+
+// holdTitle reports the title request, the only chat request without tools,
+// as held until the first turn's two recorded chat requests have completed.
+func holdTitle(body []byte) (int64, bool) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(body, &fields) != nil {
+		return 0, false
+	}
+	_, tools := fields["tools"]
+	return 2, !tools
 }
 
 // oneSecondRodinCatalog writes the shipped Product Schema with the Rodin
@@ -218,7 +248,7 @@ func newReplayStack(t *testing.T, exchanges []wirefixture.Exchange, policy wiref
 		needle := []byte(`"name":"` + replaySanitizedTool + `"`)
 		stack.toolsBound.Add(int64(bytes.Count(body, needle)))
 		return bytes.ReplaceAll(body, needle, []byte(`"name":"`+replayBoundTool+`"`))
-	}}
+	}, holdUntil: holdTitle}
 	stack.rodin = &replayTransport{inner: replay.WithConnection(replayRodinConnection), rewrite: func(request *http.Request, body []byte) []byte {
 		if !strings.HasSuffix(request.URL.Path, "/download") {
 			return body
