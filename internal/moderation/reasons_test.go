@@ -15,6 +15,8 @@ func TestReasons(t *testing.T) {
 	}{
 		{"azure image safety system", `{"error":{"message":"[BadRequestError] Your request was rejected by the safety system. safety_violations=[sexual, violence]. (request_id: x)","code":"moderation_blocked"}}`, "sexual,violence"},
 		{"azure content filter result", `{"error":{"code":"content_filter","innererror":{"content_filter_result":{"hate":{"filtered":false,"severity":"safe"},"sexual":{"filtered":true,"severity":"medium"},"self_harm":{"filtered": true}}}}}`, "sexual,self_harm"},
+		{"azure content filter result, filtered not first", `{"error":{"code":"content_filter","innererror":{"content_filter_result":{"violence":{"severity":"safe","filtered":false},"sexual":{"severity":"medium","filtered":true}}}}}`, "sexual"},
+		{"truncated excerpt", `{"error":{"innererror":{"content_filter_result":{"hate":{"severity":"high","filtered":true},"sexual":{"severity":"medi`, "hate"},
 		{"dashscope input image", `data: {"error":{"code":"data_inspection_failed","message":"Input image data may contain inappropriate content."}}`, "input_image"},
 		{"dashscope input", `{"error":{"code":"data_inspection_failed","message":"Input data may contain inappropriate content."}}`, "input"},
 		{"dashscope output", `{"code":"DataInspectionFailed","message":"Output data may contain inappropriate content."}`, "output"},

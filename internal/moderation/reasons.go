@@ -17,8 +17,11 @@ var (
 	// "safety_violations=[sexual, violence]".
 	safetyViolations = regexp.MustCompile(`safety_violations=\[([^\]]*)\]`)
 	// filteredCategory is one category Azure OpenAI's content_filter_result
-	// marks as filtered: "sexual":{"filtered":true,...}.
-	filteredCategory = regexp.MustCompile(`"([A-Za-z_/-]+)"\s*:\s*\{\s*"filtered"\s*:\s*true`)
+	// marks as filtered: a flat object with "filtered":true in any field
+	// order, such as "sexual":{"severity":"medium","filtered":true}. It reads
+	// the text rather than decoding JSON because a stored excerpt is cut at a
+	// rune bound and may not parse.
+	filteredCategory = regexp.MustCompile(`"([A-Za-z_/-]+)"\s*:\s*\{[^{}]*"filtered"\s*:\s*true[^{}]*\}`)
 	// token is the shape of one reason passed on: a short vendor word, never
 	// free text, since upstream bytes must not steer the Agent.
 	token = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_./-]{0,39}$`)
