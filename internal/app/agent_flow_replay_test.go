@@ -97,7 +97,10 @@ func (r *replayTransport) RoundTrip(request *http.Request) (*http.Response, erro
 		}
 		if r.holdUntil != nil {
 			if after, held := r.holdUntil(raw); held {
-				for r.calls.Load() < after {
+				// Bounded: a request that never gets its turn goes on and is
+				// refused by the replay instead of hanging the test.
+				deadline := time.Now().Add(30 * time.Second)
+				for r.calls.Load() < after && time.Now().Before(deadline) {
 					select {
 					case <-request.Context().Done():
 						return nil, request.Context().Err()
@@ -143,8 +146,9 @@ func holdTitle(body []byte) (int64, bool) {
 	if json.Unmarshal(body, &fields) != nil {
 		return 0, false
 	}
+	_, messages := fields["messages"]
 	_, tools := fields["tools"]
-	return 2, !tools
+	return 2, messages && !tools
 }
 
 // oneSecondRodinCatalog writes the shipped Product Schema with the Rodin
