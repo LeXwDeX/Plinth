@@ -1579,6 +1579,14 @@
             ]
           },
           {
+            "type": "attempt.rate_limit_queued",
+            "fields": [
+              "reason",
+              "queued",
+              "retry_after_seconds"
+            ]
+          },
+          {
             "type": "attempt.submission_unknown",
             "fields": [
               "class",
@@ -3744,6 +3752,7 @@
         "failure.invalid_input": "任务输入无效",
         "failure.authentication": "上游身份验证失败",
         "failure.rate_limited": "上游请求过于频繁",
+        "task.queue_reason.rate_limited": "上游限流，排队中；稍后会自动重试，不会重复扣积分",
         "failure.transport": "无法连接上游服务",
         "failure.timed_out": "上游请求超时",
         "failure.rejected": "上游拒绝或取消了任务",
@@ -13139,6 +13148,7 @@
             "failure.invalid_input": "Invalid task input",
             "failure.authentication": "Upstream authentication failed",
             "failure.rate_limited": "Too many upstream requests",
+            "task.queue_reason.rate_limited": "Upstream rate limit reached; queued and will retry automatically without charging credits again",
             "failure.transport": "Unable to reach the upstream service",
             "failure.timed_out": "Upstream request timed out",
             "failure.rejected": "The upstream rejected or canceled the task",

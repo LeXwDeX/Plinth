@@ -41,6 +41,7 @@ func TestMigration0065UpgradesExistingSessionsWithoutContext(t *testing.T) {
 		`ALTER TABLE agent_generation_operations DROP COLUMN reference_source`,
 		`DROP INDEX IF EXISTS generation_attempts_delivery_completion`,
 		`ALTER TABLE generation_attempts DROP COLUMN delivery_completion_json`,
+		`ALTER TABLE generation_attempts DROP COLUMN rate_limit_queued`,
 	} {
 		if _, err := r.db.Exec(statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)

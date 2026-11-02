@@ -1141,6 +1141,16 @@ Chat Agent 通过两个付费工具和一个读取工具处理本会话已有的
 
 `InpaintDialog` 与 `BackgroundRemovalDialog` 的直接提交把回执保存在同一浏览器标签页的 `sessionStorage`（#313）。PreparedInput 与授权请求准备完成后、任何 `POST /api/v1/tasks` 之前，保存一个 `{sourceIdentity, pending}` 信封，不论该步骤是否已由批准策略自动批准。`pending` 引用已准备的 PreparedInput、Grant 授权请求 ID、幂等键、Offering、会话和局部重绘所需的蒙版资产/URL、frame、冻结尺寸与提示词，并带上批准状态与原生报价/计价模式（如有）；来源图和蒙版的字节只在本次页面内用于准备与上传，不写入会话存储。`sourceIdentity` 是浏览器端的匹配键：局部重绘取来源与蒙版字节的指纹、frame、冻结尺寸、目标值和 Offering，不使用每次重新打开都会变化的来源上传 URL；去背景取图片 URL 与选项值。提交从已存 pending 继续；只有 Task POST 返回任务 ID 后才删除记录。POST 失败或受理后响应丢失时记录保留，下一次以同一身份（两种入口都要求会话与 Offering 未变；局部重绘还要求提示词与冻结尺寸一致）按同一幂等键重试，服务端按该键返回已受理的同一个任务，不再准备输入或创建第二个公开 Task。身份、Offering、会话或冻结参数变化时不再复用旧记录并重新准备。删除核对记录自己的幂等键：旧弹窗迟到的成功结算只删除它发起的那一份，同一身份后来准备的新请求保留。写入失败只影响刷新恢复，本次页面仍可提交。
 
+### 上游限流排队（2026-11-02；本机测试，未部署验收）
+
+Provider 对创建请求明确返回限流（`Class == rate_limited`、可重试、非含糊，即 HTTP 429 或 Schema 错误码映射到 `rate_limited`）时，上游没有受理作业，也不会计费。Agent 并发提交会让这种情况更常见，所以内核把它当作排队而不是失败重试：
+
+- **适用范围。** 只在 Start 阶段：`startAttempt` 里 `Start` 返回的错误，以及 Start 直接回报的 `UpstreamFailed` observation（`eventType == provider.start`），且 Attempt 尚无上游作业、从未有过 observation。含糊失败与 `submission_unknown` 永不排队；已受理作业的轮询、Preparing 恢复和 refetch 路径沿用原有重试规则。
+- **不计入 `Retry.MaxAttempts`。** 任务回到 `QUEUED`，`NextActionAt = now + taskRetryDelay(...)`：按累计排队次数指数退避，尊重 `Failure.RetryAfter`，封顶 `Retry.MaxBackoff`。`UNIQUE(task_id, ordinal)` 要求 Attempt 序号继续递增，所以新增 `generation_attempts.rate_limit_queued`（迁移 0071）：被排队的 Attempt 把累计值加一，下一个 Attempt 原样继承；非排队失败的重试判定用有效序号 `Ordinal + 1 - RateLimitQueued`，因此 429 之后的 `upstream_unavailable` 仍按原 `max_attempts` 计。
+- **上限。** 只要 `now + 本次退避` 不超过 `task.CreatedAt + Offering.Timeout` 就继续排队。`Offering.Timeout` 同时是单次上游请求超时和 Chat 等待任务的期限（`chat.taskWaitDeadline` 以提交时间加它计算），两边一致；超过后回到原有 `Allows` 判定与失败路径。`Offering.Timeout` 为 0 时不排队。注意同步图片类 Offering 的 `timeout_seconds` 只有 30 秒，排队窗口很短，这是有意保持与 Chat 期限一致的结果；要更长窗口需要另行声明 Schema 字段。
+- **结算。** 被拒绝的尝试按"未受理、不计费"结算：Start 前已取得私有派发许可时，同一事务提交 `DispatchReceiptSettlement{NotDispatched: true}`，检查点清回 `idle`；积分只在成功后按 `credits_metered` 记账，没有预留，排队不会重复预留或扣费。
+- **公开面。** 排队期间公开状态仍是 `QUEUED`。事件 `attempt.rate_limit_queued`（公开白名单字段 `reason`、`queued`、`retry_after_seconds`，不含上游取证字段）记录每次排队；任务响应多一个 `queue_notice {reason, detail}`，由仓储从当前 Attempt 的失败标记（`Failure.RateLimitQueued`）派生，不新增任务列，新 Attempt 开始即消失。`detail` 取 Schema 文案 `messages["task.queue_reason.rate_limited"]`（中英文）。前端 `src/` 未改，卡片展示留给前端消费 `queue_notice`。
+
 ### 失败任务重试（2026-10-13 已作独立Task正常UI验收）
 
 2026-10-13 `00dea7c5` 部署：原FAILED任务通过正常Retry、人工Grant和唯一新Task成功，12产物各两次实际GET/hash/size匹配，原任务保持FAILED。该独立Retry不覆盖#162计划中间失败恢复或lost-acceptance reconcile；平台计价40不是实际上游结算。 详细回执见 [2026-10-13验收记录](acceptance-2026-10-13-processing162-166.md)。
