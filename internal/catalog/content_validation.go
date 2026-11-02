@@ -193,6 +193,7 @@ func validateContent(schema ContentSchema) error {
 		"failure.protocol",
 		"failure.internal",
 		"failure.source_expired",
+		"failure.content_rejected",
 	}
 	if len(schema.Messages) == 0 {
 		return errors.New("messages 不能为空")

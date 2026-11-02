@@ -801,6 +801,12 @@
             "upstream_code_map": {
               "insufficient_quota": {
                 "class": "insufficient_balance"
+              },
+              "moderation_blocked": {
+                "class": "content_rejected"
+              },
+              "content_policy_violation": {
+                "class": "content_rejected"
               }
             },
             "message_matchers": [
@@ -862,7 +868,7 @@
                 "class": "invalid_input"
               },
               "safety": {
-                "class": "invalid_input"
+                "class": "content_rejected"
               },
               "recitation": {
                 "class": "invalid_input"
@@ -871,19 +877,19 @@
                 "class": "invalid_input"
               },
               "prohibited_content": {
-                "class": "invalid_input"
+                "class": "content_rejected"
               },
               "spii": {
-                "class": "invalid_input"
+                "class": "content_rejected"
               },
               "blocklist": {
-                "class": "invalid_input"
+                "class": "content_rejected"
               },
               "image_safety": {
-                "class": "invalid_input"
+                "class": "content_rejected"
               },
               "image_prohibited_content": {
-                "class": "invalid_input"
+                "class": "content_rejected"
               },
               "image_recitation": {
                 "class": "invalid_input"
@@ -892,7 +898,10 @@
                 "class": "invalid_input"
               },
               "content_blocked": {
-                "class": "invalid_input"
+                "class": "content_rejected"
+              },
+              "content_policy_violation": {
+                "class": "content_rejected"
               }
             },
             "message_matchers": [
@@ -941,6 +950,21 @@
               },
               "SetLimitExceeded": {
                 "class": "credential_quota"
+              },
+              "InputTextSensitiveContentDetected": {
+                "class": "content_rejected"
+              },
+              "InputImageSensitiveContentDetected": {
+                "class": "content_rejected"
+              },
+              "OutputTextSensitiveContentDetected": {
+                "class": "content_rejected"
+              },
+              "OutputImageSensitiveContentDetected": {
+                "class": "content_rejected"
+              },
+              "SensitiveContentDetected": {
+                "class": "content_rejected"
               }
             },
             "message_matchers": [
@@ -3754,6 +3778,7 @@
         "failure.integrity_failure": "生成资产未通过完整性校验",
         "failure.protocol": "上游返回了无法识别的数据",
         "failure.internal": "任务处理失败",
+        "failure.content_rejected": "上游服务的内容安全审核拦截了这次请求：输入的图片或描述可能被判定为不当内容。这一步没有生成结果，重试同样的输入也不会通过。请更换图片或修改描述后重新发起",
         "failure.source_expired": "来源模型在服务商处的原任务已过期，无法再引用。重新发起时会改用已保存的模型文件；不接受模型文件的服务需要先重新生成来源模型",
         "ui.workspace.harness.agent_decides": "你选择模型与可选参数，Agent 判断输入方式并执行任务。",
         "ui.canvas.node.default_text": "双击编辑文字",
@@ -4973,6 +4998,7 @@
         "title_prompt": "请根据下面的第一条用户消息，用不超过 {maximum} 个汉字写一个简短的中文会话标题。只返回标题本身，不要引号、标点、换行或解释：\n{content}",
         "title_max_characters": 12,
         "title_max_characters_by_locale": {"en": 40},
+        "moderated_image_note": "[这张图片被上游模型服务的内容安全审核拦截（审核器判定疑似色情、暴力等不当内容；审核器较敏感，正常的美术素材也可能被误判），没有发送给你，你看不到它。它的图片标签和句柄仍然有效。请在回复里如实告诉用户这张图被审核拦截，然后主动调整：根据用户的文字和上下文理解意图继续完成；需要生成时改写成不含裸露、色情、暴力等描述的提示词（例如明确服装完整、姿态得体）；生图服务很可能同样拦截这张图，必要时请用户换一张图。不要建议更换模型或修改部署配置。]",
         "reply_language_template": "界面语言是{language}。除非用户明确要求使用其他语言，请用{language}回复用户。",
         "title_timeout_seconds": 20,
         "worker_count": 4,
@@ -6643,7 +6669,42 @@
           "generation_failed_by_class": {
             "insufficient_balance": "该模型服务商的账户余额不足或已欠费，这一步没有执行。请联系管理员处理",
             "credential_quota": "该 API Key 已达额度上限，请在 Provider 控制台调整 Key 额度或更换 Key，这一步没有执行。请联系管理员处理",
+            "content_rejected": "上游服务的内容安全审核拦截了这一步的输入（审核器较敏感，正常美术素材也可能被误判），没有生成结果，原样重试也不会通过。请主动调整后再调用一次：按审核原因改写提示词，去掉可能触发的描述（例如 sexual 时写明服装完整、姿态得体，去掉裸露、贴身、性感等词；violence 时去掉血腥、武器伤害描写），保留美术意图；若被拦的是输入图本身，改写提示词无效，请改用其他图或去掉该参考图后再试，必要时请用户换图。同时如实告诉用户是审核拦截以及你做了什么调整。不要建议修改部署配置",
             "source_expired": "来源模型在服务商处的原任务已过期，这一步没有执行，也没有扣费。重新发起时平台会改用已保存的模型文件；不接受模型文件的服务（例如动画）需要先重新生成来源模型，或在它之前的版本上重新绑骨"
+          },
+          "content_rejected_reasons": "（理由：{reasons}）",
+          "content_rejected_reason_separator": "、",
+          "content_rejected_reason_labels": {
+            "sexual": "色情（涉黄）",
+            "sexual_minors": "涉及未成年人的色情内容",
+            "violence": "暴力",
+            "violence_graphic": "血腥暴力",
+            "hate": "仇恨言论",
+            "harassment": "骚扰",
+            "self_harm": "自残",
+            "illicit": "违法内容",
+            "jailbreak": "提示词越狱",
+            "input_image": "输入图片疑似不当内容",
+            "input_text": "输入文字疑似不当内容",
+            "input": "输入内容疑似不当内容",
+            "output": "生成结果疑似不当内容",
+            "moderation_blocked": "安全系统拦截（未给出具体类别）",
+            "content_policy_violation": "违反内容政策（未给出具体类别）",
+            "content_filter": "内容过滤器拦截（未给出具体类别）",
+            "data_inspection_failed": "内容安全检查未通过（未给出具体类别）",
+            "datainspectionfailed": "内容安全检查未通过（未给出具体类别）",
+            "safety": "安全过滤",
+            "prohibited_content": "违禁内容",
+            "spii": "敏感个人信息",
+            "blocklist": "命中屏蔽词",
+            "image_safety": "图片安全审核",
+            "image_prohibited_content": "图片含违禁内容",
+            "content_blocked": "内容被拦截",
+            "inputtextsensitivecontentdetected": "输入文字含敏感内容",
+            "inputimagesensitivecontentdetected": "输入图片含敏感内容",
+            "outputtextsensitivecontentdetected": "生成文字含敏感内容",
+            "outputimagesensitivecontentdetected": "生成图片含敏感内容",
+            "sensitivecontentdetected": "敏感内容"
           },
           "generation_failed_metered_by_class": {
             "integrity_failure": "上游已经完成生成，可能已经扣除积分，但结果在本地存储或完整性校验时失败。系统没有自动重新提交，以免再次计费；是否重试由用户决定。上游还保留着结果时，可以免费重新取回（任务详情里的「重新取回结果」，或由 Agent 调用 recover_task_result）：只读取已受理的上游作业，不会重新提交，也不再计费。不能取回时，再次生成同类结果需要在批准卡上确认再次计费。"
@@ -6653,6 +6714,7 @@
           "no_result": "⚠️ 未返回结果，请重试。",
           "unknown_error": "未知错误",
           "agent_images_unsupported": "当前 Agent 模型拒绝了带图片的请求，可能不支持读图。请在部署配置中换用支持图片输入的模型（LLM_MODEL），或去掉图片后重试。",
+          "agent_content_rejected": "请求被上游模型服务的内容安全审核拦截：本轮的图片或文字可能被判定为不当内容。这不是模型不支持读图，也不需要改部署配置。请更换图片或修改描述后重试；如确认内容合规，请把本条消息附带的错误 ID 发给管理员核查。",
           "agent_not_configured": "Agent 未配置：部署缺少对话模型设置（LLM_API_KEY 或 LLM_MODEL），暂时不能对话或增强提示词。请联系管理员配置后再试。",
           "error_reference": "（错误 ID：{id}）",
           "sse_interrupted": "SSE 连接中断",
@@ -11865,6 +11927,7 @@
         "runtime.asset_delivery",
         "chat.agent.title_prompt",
         "chat.agent.reply_language_template",
+        "chat.agent.moderated_image_note",
         "chat.agent.mock_summary",
         "chat.choice.mock_summary",
         "chat.agent.mock_failure_summary",
@@ -13079,6 +13142,7 @@
             "failure.integrity_failure": "The generated asset failed the integrity check",
             "failure.protocol": "The upstream returned unrecognized data",
             "failure.internal": "Task processing failed",
+            "failure.content_rejected": "The upstream service's content-safety review blocked this request: the input image or description may have been judged inappropriate. No result was produced, and retrying the same input will not pass. Change the image or rewrite the description and start again",
             "failure.source_expired": "The provider no longer keeps the source model's original task. Starting again uses the saved model file; a service that takes no model file needs the source generated again",
             "ui.workspace.harness.agent_decides": "You choose the model and optional parameters; the Agent decides how to provide inputs and runs the task.",
             "ui.canvas.node.default_text": "Double-click to edit text",
@@ -14842,6 +14906,39 @@
             "chat.presentation.messages.generation_failed": "Generation failed",
             "chat.presentation.messages.generation_failed_by_class.insufficient_balance": "This model provider's account balance is insufficient or overdue, so this step was not run. Please contact an administrator",
             "chat.presentation.messages.generation_failed_by_class.credential_quota": "This API key has reached its credit limit. Raise the key limit in the provider console or switch to another key, so this step was not run. Please contact an administrator",
+            "chat.presentation.messages.generation_failed_by_class.content_rejected": "The upstream service's content-safety review blocked this step's input (the classifier is sensitive and ordinary art material can be flagged by mistake); no result was produced, and retrying the same input will not pass. Adjust and call once more on your own: rewrite the prompt by the review's reason, dropping the descriptions that may trip it (for sexual, state that the clothing is complete and the pose is modest, and drop words such as nude, skin-tight or sexy; for violence, drop gore and weapon-injury descriptions) while keeping the art intent; if the input image itself was blocked, rewriting the prompt will not help, so use another image or drop that reference and try again, asking the user for another image when needed. Tell the user plainly it was a content-safety block and what you changed. Do not suggest changing the deployment configuration",
+            "chat.presentation.messages.content_rejected_reasons": " (reason: {reasons})",
+            "chat.presentation.messages.content_rejected_reason_separator": ", ",
+            "chat.presentation.messages.content_rejected_reason_labels.sexual": "sexual content",
+            "chat.presentation.messages.content_rejected_reason_labels.sexual_minors": "sexual content involving minors",
+            "chat.presentation.messages.content_rejected_reason_labels.violence": "violence",
+            "chat.presentation.messages.content_rejected_reason_labels.violence_graphic": "graphic violence",
+            "chat.presentation.messages.content_rejected_reason_labels.hate": "hate speech",
+            "chat.presentation.messages.content_rejected_reason_labels.harassment": "harassment",
+            "chat.presentation.messages.content_rejected_reason_labels.self_harm": "self-harm",
+            "chat.presentation.messages.content_rejected_reason_labels.illicit": "illicit content",
+            "chat.presentation.messages.content_rejected_reason_labels.jailbreak": "prompt jailbreak",
+            "chat.presentation.messages.content_rejected_reason_labels.input_image": "input image may be inappropriate",
+            "chat.presentation.messages.content_rejected_reason_labels.input_text": "input text may be inappropriate",
+            "chat.presentation.messages.content_rejected_reason_labels.input": "input may be inappropriate",
+            "chat.presentation.messages.content_rejected_reason_labels.output": "result may be inappropriate",
+            "chat.presentation.messages.content_rejected_reason_labels.moderation_blocked": "blocked by the safety system (no category given)",
+            "chat.presentation.messages.content_rejected_reason_labels.content_policy_violation": "content policy violation (no category given)",
+            "chat.presentation.messages.content_rejected_reason_labels.content_filter": "blocked by the content filter (no category given)",
+            "chat.presentation.messages.content_rejected_reason_labels.data_inspection_failed": "content-safety check failed (no category given)",
+            "chat.presentation.messages.content_rejected_reason_labels.datainspectionfailed": "content-safety check failed (no category given)",
+            "chat.presentation.messages.content_rejected_reason_labels.safety": "safety filter",
+            "chat.presentation.messages.content_rejected_reason_labels.prohibited_content": "prohibited content",
+            "chat.presentation.messages.content_rejected_reason_labels.spii": "sensitive personal information",
+            "chat.presentation.messages.content_rejected_reason_labels.blocklist": "blocked term",
+            "chat.presentation.messages.content_rejected_reason_labels.image_safety": "image safety review",
+            "chat.presentation.messages.content_rejected_reason_labels.image_prohibited_content": "prohibited image content",
+            "chat.presentation.messages.content_rejected_reason_labels.content_blocked": "content blocked",
+            "chat.presentation.messages.content_rejected_reason_labels.inputtextsensitivecontentdetected": "sensitive content in the input text",
+            "chat.presentation.messages.content_rejected_reason_labels.inputimagesensitivecontentdetected": "sensitive content in the input image",
+            "chat.presentation.messages.content_rejected_reason_labels.outputtextsensitivecontentdetected": "sensitive content in the generated text",
+            "chat.presentation.messages.content_rejected_reason_labels.outputimagesensitivecontentdetected": "sensitive content in the generated image",
+            "chat.presentation.messages.content_rejected_reason_labels.sensitivecontentdetected": "sensitive content",
             "chat.presentation.messages.generation_failed_by_class.source_expired": "The provider no longer keeps the source model's original task, so this step did not run and nothing was charged. Starting again uses the saved model file; a service that takes no model file (animation, say) needs the source generated again, or the version before it rigged again first",
             "chat.presentation.messages.generation_failed_metered_by_class.integrity_failure": "The upstream finished generating and may have already charged credits, but the result failed during local storage or integrity verification. The system did not resubmit automatically, to avoid charging again; whether to retry is up to the user. If the upstream still holds the result, you can fetch it again for free (\"Refetch result\" in the task details, or the Agent calling recover_task_result): this only reads the already-accepted upstream job, does not resubmit, and is not billed again. If it cannot be fetched, generating a similar result again requires confirming the repeat charge on the approval card.",
             "chat.presentation.messages.generation_error": "Generation error",
@@ -14849,6 +14946,7 @@
             "chat.presentation.messages.no_result": "⚠️ No result returned. Please retry.",
             "chat.presentation.messages.unknown_error": "Unknown error",
             "chat.presentation.messages.agent_images_unsupported": "The current Agent model rejected the request with images; it may not support image input. In the deployment configuration, switch to a model that supports image input (LLM_MODEL), or remove the images and retry.",
+            "chat.presentation.messages.agent_content_rejected": "The request was blocked by the upstream model service's content-safety review: the images or text in this turn may have been judged inappropriate. The model does support images and no deployment change is needed. Change the image or rewrite the description and retry; if you are sure the content is fine, send this message's error ID to an administrator.",
             "chat.presentation.messages.agent_not_configured": "Agent is not configured: the deployment is missing chat model settings (LLM_API_KEY or LLM_MODEL), so chatting and prompt enhancement are unavailable. Please contact an administrator to configure it and try again.",
             "chat.presentation.messages.error_reference": " (Error ID: {id})",
             "chat.presentation.messages.sse_interrupted": "SSE connection interrupted",
@@ -15023,6 +15121,7 @@
             "runtime.asset_delivery.proxy.messages.forbidden_host": "Domain not allowed",
             "runtime.asset_delivery.proxy.messages.fetch_failed": "Failed to fetch the proxied resource",
             "chat.agent.title_prompt": "Write a short English chat title of at most {maximum} characters for the first user message below. Return only the title itself, without quotes, punctuation, line breaks or explanation:\n{content}",
+            "chat.agent.moderated_image_note": "[This image was blocked by the upstream model service's content-safety review (the classifier flagged it as possibly sexual, violent or otherwise inappropriate; the classifier is sensitive and ordinary art material can be flagged by mistake), so it was not sent to you and you cannot see it. Its image label and handle are still valid. Tell the user plainly that the image was blocked by the review, then adjust on your own: infer the intent from the user's text and the context and carry on; when generating, rewrite the prompt without nudity, sexual or violent descriptions (for example, state that the clothing is complete and the pose is modest); the image service will likely block this image too, so ask the user for another image when needed. Do not suggest switching models or changing the deployment configuration.]",
             "chat.agent.reply_language_template": "The interface language is {language}. Reply to the user in {language} unless they explicitly ask for another language.",
             "chat.agent.mock_summary": "The image task is done. Tell me anything you'd like to adjust.",
             "chat.agent.mock_failure_summary": "This step did not finish: {error}",

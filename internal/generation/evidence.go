@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"github.com/LeXwDeX/Plinth/internal/logging"
+	"github.com/LeXwDeX/Plinth/internal/moderation"
 )
 
 // UpstreamExcerptRunes bounds Failure.UpstreamExcerpt.
@@ -146,4 +147,17 @@ func sanitizeFailureEvidence(task Task, failure *Failure) *Failure {
 	cleaned := *failure
 	cleaned.UpstreamExcerpt = UpstreamExcerpt(failure.UpstreamExcerpt, UpstreamExcerptRunes, InputEchoes(task.Offering, task.Input)...)
 	return &cleaned
+}
+
+// ContentRejectedReasons are the reasons a content_rejected failure gives
+// (#35): the categories its sanitized upstream excerpt names, else the
+// vendor's error code; short tokens only. nil for other failures.
+func ContentRejectedReasons(failure *Failure) []string {
+	if failure == nil || failure.Class != FailureContentRejected {
+		return nil
+	}
+	if reasons := moderation.Reasons(failure.UpstreamExcerpt); len(reasons) > 0 {
+		return reasons
+	}
+	return moderation.Tokens(failure.UpstreamCode)
 }

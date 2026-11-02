@@ -18,6 +18,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat/dsml"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/moderation"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
@@ -1186,8 +1187,9 @@ func (orchestrator *Orchestrator) Process(
 	} else {
 		streamFilter := dsml.NewFilter(dsmlSchema)
 		round := orchestrator.startThinkingRound(processCtx, command.SessionID)
-		completion, err = orchestrator.agent.Stream(
+		completion, request, err = orchestrator.streamAgent(
 			processCtx,
+			command,
 			request,
 			func(delta agents.Delta) error {
 				return round.receive(delta, streamFilter)
@@ -1239,8 +1241,9 @@ func (orchestrator *Orchestrator) Process(
 		summaryRequest.Tools = nil
 		summaryFilter := dsml.NewFilter(dsmlSchema)
 		summaryRound := orchestrator.startThinkingRound(processCtx, command.SessionID)
-		summary, summaryErr := orchestrator.agent.Stream(
+		summary, summaryRequest, summaryErr := orchestrator.streamAgent(
 			processCtx,
+			command,
 			summaryRequest,
 			func(delta agents.Delta) error {
 				return summaryRound.receive(delta, summaryFilter)
@@ -1518,13 +1521,20 @@ func (orchestrator *Orchestrator) Process(
 		// 续跑流同样要过滤 DSML：模型可能在总结中继续发起调用。
 		streamFilter := dsml.NewFilter(dsmlSchema)
 		followUpRound := orchestrator.startThinkingRound(processCtx, command.SessionID)
-		next, streamErr := orchestrator.agent.Stream(
+		next, sentFollowUp, streamErr := orchestrator.streamAgent(
 			processCtx,
+			command,
 			followUp,
 			func(delta agents.Delta) error {
 				return followUpRound.receive(delta, streamFilter)
 			},
 		)
+		if requestHasPictures(followUp) && !requestHasPictures(sentFollowUp) {
+			// The upstream blocked a picture of this context: later rounds
+			// start from the request without it, so they do not hit it again.
+			request = orchestrator.withoutPictures(processCtx, request, "")
+		}
+		followUp = sentFollowUp
 		if streamErr != nil {
 			if orchestrator.turnCanceled(turnKey) {
 				return finalizeStop()
@@ -2799,6 +2809,81 @@ func mergeStoredToolCall(target *ToolCall, stored ToolCall) {
 	}
 }
 
+// streamAgent streams one Agent request. When the upstream's content-safety
+// review refused a request that carried pictures (#35), it sends the request
+// once more with every picture replaced by the Schema note, so the Agent can
+// answer knowing the picture was blocked instead of the turn failing. It
+// returns the request actually sent. The refusal comes before any delta, so
+// nothing was streamed from the refused attempt.
+func (orchestrator *Orchestrator) streamAgent(
+	ctx context.Context,
+	command ProcessTurn,
+	request agents.Request,
+	emit func(agents.Delta) error,
+) (agents.Completion, agents.Request, error) {
+	completion, err := orchestrator.agent.Stream(ctx, request, emit)
+	if err == nil || !errors.Is(err, agents.ErrContentRejected) ||
+		orchestrator.schema.Agent.ModeratedImageNote == "" || !requestHasPictures(request) {
+		return completion, request, err
+	}
+	orchestrator.logger.Warn(
+		"Agent 请求的图片被上游内容审核拦截，去掉图片后重试",
+		"session_id", command.SessionID,
+		"assistant_message_id", command.AssistantMessageID,
+		"error", err,
+	)
+	stripped := orchestrator.withoutPictures(ctx, request, orchestrator.contentRejectedReasons(ctx, err))
+	completion, err = orchestrator.agent.Stream(ctx, stripped, emit)
+	return completion, stripped, err
+}
+
+// contentRejectedReasons is the Schema's reasons text for the reasons a
+// content-safety refusal in err gave, in the turn's locale (#35).
+func (orchestrator *Orchestrator) contentRejectedReasons(ctx context.Context, err error) string {
+	messages := orchestrator.schema.Presentation.Messages
+	return moderation.Explain(messages.ContentRejectedReasons, agents.ContentRejectedReasons(err),
+		messages.ContentRejectedReasonLabels, messages.ContentRejectedReasonSeparator,
+		func(text string) string { return orchestrator.text(ctx, text) })
+}
+
+// withoutPictures copies request with each picture part replaced by the
+// Schema's moderated-image note in the request's locale, followed by the
+// reasons the review gave, if any.
+func (orchestrator *Orchestrator) withoutPictures(ctx context.Context, request agents.Request, reasons string) agents.Request {
+	if orchestrator.schema.Agent.ModeratedImageNote == "" || !requestHasPictures(request) {
+		return request
+	}
+	note := orchestrator.text(ctx, orchestrator.schema.Agent.ModeratedImageNote) + reasons
+	messages := make([]agents.Message, len(request.Messages))
+	for index, message := range request.Messages {
+		messages[index] = message
+		if len(message.Parts) == 0 {
+			continue
+		}
+		parts := make([]agents.ContentPart, 0, len(message.Parts))
+		for _, part := range message.Parts {
+			if part.URL != "" {
+				part = agents.ContentPart{Kind: orchestrator.schema.Context.TextPartKind, Text: note}
+			}
+			parts = append(parts, part)
+		}
+		messages[index].Parts = parts
+	}
+	request.Messages = messages
+	return request
+}
+
+func requestHasPictures(request agents.Request) bool {
+	for _, message := range request.Messages {
+		for _, part := range message.Parts {
+			if part.URL != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // withErrorReference appends the Schema's error reference with the assistant
 // message ID; the failure log line carries the same assistant_message_id.
 func (orchestrator *Orchestrator) withErrorReference(ctx context.Context, text, messageID string) string {
@@ -2812,11 +2897,15 @@ func (orchestrator *Orchestrator) withErrorReference(ctx context.Context, text, 
 // agentFailureMessage is what the person reads when the Agent request failed:
 // a deployment without Agent settings says the Agent is not configured, a
 // refusal of a request with pictures says the model may not read images
-// (#253); anything else stays the unknown error, whose ID is in the log.
+// (#253), an upstream content-safety refusal says the input tripped it (#35);
+// anything else stays the unknown error, whose ID is in the log.
 func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err error) string {
 	messages := orchestrator.schema.Presentation.Messages
 	if errors.Is(err, agents.ErrNotConfigured) && messages.AgentNotConfigured != "" {
 		return orchestrator.text(ctx, messages.AgentNotConfigured)
+	}
+	if errors.Is(err, agents.ErrContentRejected) && messages.AgentContentRejected != "" {
+		return orchestrator.text(ctx, messages.AgentContentRejected) + orchestrator.contentRejectedReasons(ctx, err)
 	}
 	if errors.Is(err, agents.ErrImagesRejected) && messages.AgentImagesUnsupported != "" {
 		return orchestrator.text(ctx, messages.AgentImagesUnsupported)

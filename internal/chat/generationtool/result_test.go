@@ -89,3 +89,27 @@ func TestDefaultCatalogNamesAnExpiredSourceInTheChat(t *testing.T) {
 		}
 	}
 }
+
+// #35: a content-safety failure carries the review's reasons in the Schema
+// template, each Schema text localized on its own.
+func TestFailureMessageNamesContentRejectedReasons(t *testing.T) {
+	var chat catalog.ChatSchema
+	chat.Presentation.Messages.GenerationFailed = "generic"
+	chat.Presentation.Messages.GenerationFailedByClass = map[string]string{string(generation.FailureContentRejected): "blocked"}
+	chat.Presentation.Messages.ContentRejectedReasons = " reasons: {reasons}"
+	chat.Presentation.Messages.ContentRejectedReasonLabels = map[string]string{"sexual": "porn"}
+	chat.Presentation.Messages.ContentRejectedReasonSeparator = ", "
+	failure := &generation.Failure{Class: generation.FailureContentRejected, UpstreamCode: "moderation_blocked",
+		UpstreamExcerpt: `safety_violations=[sexual]`}
+	mark := func(text string) string { return "L:" + text }
+	if got := LocalizedFailureMessage(chat, false, failure, mark); got != "L:blockedL: reasons: L:porn" {
+		t.Fatalf("message = %q", got)
+	}
+	if got := LocalizedFailureMessage(chat, false, &generation.Failure{Class: generation.FailureRejected}, nil); got != "generic" {
+		t.Fatalf("other class = %q", got)
+	}
+	chat.Presentation.Messages.ContentRejectedReasons = ""
+	if got := LocalizedFailureMessage(chat, false, failure, nil); got != "blocked" {
+		t.Fatalf("no template = %q", got)
+	}
+}

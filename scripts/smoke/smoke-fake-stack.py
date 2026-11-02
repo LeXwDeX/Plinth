@@ -631,9 +631,10 @@ FAULTS = {
     "key-quota": {"tripo": ("FAILED", "insufficient_balance"), "meshy": ("FAILED", "credential_quota"),
                   "hyper3d": ("FAILED", "insufficient_balance"), "openai": ("FAILED", "insufficient_balance"),
                   "gemini": ("FAILED", "insufficient_balance"), "jimeng": ("FAILED", "credential_quota")},
+    # The image fakes fail a task with their vendor's content-safety refusal, read as content_rejected (#35).
     "task-failed": {"tripo": ("FAILED", "rejected"), "meshy": ("FAILED", "invalid_input"), "hyper3d": ("FAILED", "rejected"),
-                    "openai": ("FAILED", "invalid_input"), "gemini": ("FAILED", "invalid_input"),
-                    "jimeng": ("FAILED", "invalid_input"), "matting": ("FAILED", "rejected")},
+                    "openai": ("FAILED", "content_rejected"), "gemini": ("FAILED", "content_rejected"),
+                    "jimeng": ("FAILED", "content_rejected"), "matting": ("FAILED", "rejected")},
     # An inline picture that is not a picture is a protocol failure; a corrupt download fails the integrity check.
     "artifact-corrupt": {**{p: ("FAILED", "integrity_failure") for p in THREE_D}, "openai": ("FAILED", "protocol"),
                          "gemini": ("FAILED", "protocol"), "jimeng": ("FAILED", "integrity_failure"),
