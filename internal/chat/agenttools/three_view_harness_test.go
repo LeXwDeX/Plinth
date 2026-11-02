@@ -114,7 +114,7 @@ func threeViewHarnessFixture(t *testing.T) (*Executor, *harnessThreeGateway, *ha
 	}
 	references := &harnessThreeReferences{}
 	executor := &Executor{skillRuntime: runtime, skillReferences: references, skillOfferings: gateway, skillRecipes: map[string]string{threeViewRecipeID: "recipe-r1"}, skillTurnStopped: func(context.Context, string, string, string) (bool, error) { return false, nil }, taskObservationTimeout: time.Minute}
-	executor.SetThreeView(catalog.ChatThreeViewSchema{Messages: catalog.ChatThreeViewMessages{ReferenceRequired: "one image", AgentStarted: "{run}:{task}:{view}"}})
+	executor.SetThreeView(catalog.ChatThreeViewSchema{Messages: catalog.ChatThreeViewMessages{ReferenceRequired: "one image", AgentStarted: "{run}:{task}:{view}", AdmissionFull: "admission full, not submitted"}})
 	snapshot := resolve.Snapshot{Selection: harness.DefaultSelection("owner", "session"), Status: resolve.StatusFree}
 	command := chat.ToolCommand{OwnerID: "owner", SessionID: "session", AssistantMessageID: "turn", Call: agents.ToolCall{ID: "call", Name: ToolCreateThreeView, Arguments: json.RawMessage(`{}`)}, Options: chat.TurnOptions{AIModel: "model", CreativeDomain: "image", Harness: &snapshot}, History: []chat.Message{{Role: "user", ImageURLs: []string{"source-image"}}}}
 	return executor, gateway, references, command, path

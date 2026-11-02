@@ -30,6 +30,9 @@ func TestThreeViewAdmissionFullAsksToQueueAndReplaySubmitsOnce(t *testing.T) {
 	if err == nil || !result.NoSubmission || result.RetryAfter != 30*time.Second || result.TaskID != "" || result.AwaitTask {
 		t.Fatalf("准入已满应请求排队: %+v %v", result, err)
 	}
+	if result.AgentContent != "admission full, not submitted" {
+		t.Fatalf("排队超时时交给模型的回执应是 Schema 的 admission_full: %q", result.AgentContent)
+	}
 	_, _, grant, err = executor.existingThreeView(ctx, command)
 	if err != nil || grant.Status != executiongrant.Approved {
 		t.Fatalf("授权应保持已批准、未绑定任务: %+v %v", grant, err)

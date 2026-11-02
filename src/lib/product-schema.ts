@@ -1541,6 +1541,11 @@ export interface ChatProductSchema {
    * AGENT_MAX_TOOL_CALLS_PER_REPLY override). Absent on older servers: the tool call counter is hidden.
    */
   agent_limits?: { max_tool_calls_per_reply: number };
+  /**
+   * #59: how long the page keeps resubmitting a three-view view the server refused because
+   * admission was full. Absent or invalid: the three-view card refuses to start a view.
+   */
+  three_view_limits?: { queue_limit_seconds: number };
   /** Public semantic operation catalog; no private tool wiring or prompts. */
   harness?: PublicHarnessSchema;
   /**

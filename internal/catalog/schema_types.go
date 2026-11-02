@@ -1274,6 +1274,16 @@ type PublicChatSchema struct {
 	// AgentLimits is the effective per-reply tool call budget the composer's
 	// counter shows (#275); chat.agent itself stays server-only.
 	AgentLimits PublicChatAgentLimits `json:"agent_limits"`
+	// ThreeViewLimits is the one three-view value the page needs to queue a
+	// refused view (#59); chat.three_view itself stays server-only.
+	ThreeViewLimits PublicChatThreeViewLimits `json:"three_view_limits"`
+}
+
+// PublicChatThreeViewLimits carries chat.three_view.queue_limit_seconds: how
+// long the page resubmits a view refused because admission was full. Zero means
+// the deployment declares no three-view group.
+type PublicChatThreeViewLimits struct {
+	QueueLimitSeconds int `json:"queue_limit_seconds"`
 }
 
 // PublicChatAgentLimits carries the one Agent value the browser may read: the
@@ -2337,14 +2347,21 @@ type ChatThreeViewSchema struct {
 	MaximumListed int `json:"maximum_listed"`
 	// ModelSourceNote tells the user and the Agent that only the model-source
 	// view is used for 3D.
-	ModelSourceNote string                `json:"model_source_note"`
-	Messages        ChatThreeViewMessages `json:"messages"`
+	ModelSourceNote string `json:"model_source_note"`
+	// QueueLimitSeconds bounds how long the page keeps resubmitting a view the
+	// server refused because admission was full (429 with Retry-After, #59).
+	// The browser reads it from chat.three_view_limits.
+	QueueLimitSeconds int                   `json:"queue_limit_seconds"`
+	Messages          ChatThreeViewMessages `json:"messages"`
 }
 
 // ChatThreeViewMessages are the texts of the three-view tools. Fields of
-// AgentStarted: {run}, {view}, {approval}, {credits}, {task}.
+// AgentStarted: {run}, {view}, {approval}, {credits}, {task}. AdmissionFull is
+// the Agent's receipt when a view stayed refused by admission past the queue
+// deadline (#59): nothing was submitted or charged.
 type ChatThreeViewMessages struct {
 	AgentStarted      string `json:"agent_started"`
+	AdmissionFull     string `json:"admission_full"`
 	ApprovalHuman     string `json:"approval_human"`
 	ApprovalPolicy    string `json:"approval_policy"`
 	ModelSourceNotYet string `json:"model_source_not_yet"`

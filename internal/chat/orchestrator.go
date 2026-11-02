@@ -2561,6 +2561,11 @@ func (orchestrator *Orchestrator) executeTools(
 				// 准入已满时后面的提交多半同样被拒，留到重试时再试。
 				break
 			}
+			if result.AgentContent == "" && result.Error == "" {
+				// 排队超限后这就是最终回执：工具没给文案时也不能交给模型空回执，
+				// 退回通用生成失败文案（与生成工具的 executionFailure 一致）。
+				result.AgentContent = orchestrator.schema.Presentation.Messages.GenerationError
+			}
 		}
 		if result.Suspend {
 			// AGT-12：等待用户决定的工具已登记状态；挂起返回并保留

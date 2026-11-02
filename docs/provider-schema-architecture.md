@@ -527,6 +527,8 @@ ExecutionGrant 按会话批准模式签发（规则见 `docs/product.md`）。�
 
 `image-three-view` 默认配方的主体限制修正（#174，2026-10-13 已发布并完成限定实图验收）位于 Product Schema：recipe revision `2026-10-13.1`、application revision `2026-07-29.103`。三个模板分别改变正面、右侧面、背面视角，保持参考主体的类别、形状/几何、比例、颜色、材质与表面标记的位置；仅在参考图已经是角色时保留既有角色特征，不为普通物体添加角色身体、脸、肢体或衣物。缺少唯一参考图的拒绝文案由 `chat.three_view.messages.reference_required` 声明并校验，执行器读取 Schema，不持有第二份角色专用文案。
 
+**准入已满时的三视图排队（#59，2026-11-02；源码已实现，本机测试通过，未部署验收）。** `chat.three_view` 新增两个必填字段，均由 `validateThreeView` 校验：`queue_limit_seconds`（1..86400，默认目录 1800）是页面在准入已满（429 + `Retry-After`）时自动重提一个视图的累计等待上限；`messages.admission_full` 是 Agent 三视图排队超过 `chat.agent.request_timeout_seconds` 后交给模型的回执，说明没有提交、没有扣积分。`chat.three_view` 仍是服务端私有，浏览器只经新公开字段 `chat.three_view_limits.queue_limit_seconds` 读取时限；字段缺失或无效时前端拒绝开始视图，不用兜底时长。Provider 请求字段、Offering、报价、ExecutionGrant、幂等键与公开 Task 状态机不变。行为与三种恢复边界见 `docs/architecture.md` 的 #59 条目。
+
 边界保持：`catalogrecipes` 按所选 Offering 的参数语义映射模板与原图到 `StepSpec`，SkillRun 持久冻结 recipe revision/hash 与各步规格，Generation 冻结 PreparedInput。目录更新不会重写旧 Run；已准备和以后才准备的旧步骤仍使用该 Run 的原规格。`create_three_view` 当前只接收参考图句柄/序号，用户任意附加指令没有进入 CreateCommand/配方输入，本次不新增该能力。Provider Adapter、输出合同、逐张继续与批准/幂等机制没有改变。2026-10-13 在部署 revision `00dea7c52af622eaf62f1c8fabc6a6d10a33b8d0` 上，普通蓝色方块三张逐次继续、唯一 Task、完整分组和实际 PNG 字节均通过，逐图检查未新增角色特征；背面仍有透视，不据此保证严格正交。既有角色仅生成正面图并确认身份与服装保留，侧面和背面未启动。旧 Run 发布前后的冻结模板、步骤与 PreparedInput 摘要一致。批准策略的手工/自动模式分别有 bound Grant 回读。完整证据与范围见 [本日验收回执](acceptance-2026-10-13-processing162-166.md)，不把源码或冻结测试当实图。
 
 冻结回归只在同一持久库上替换 Catalog 解析器与 SkillRun Runtime，复用 SchemaVersion 未设置的测试 Generation，验证旧 Run 读取及准备的规格不变。它不覆盖 application revision `.102` → `.103` 的旧输入提交兼容性：实际 Generation 绑定 application revision，未接受的旧 PreparedInput 版本不一致时由 `SubmitPrepared` 拒绝，仍须重新准备并遵守既有批准合同。

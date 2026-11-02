@@ -35,6 +35,7 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 	publicChat.Harness = cloned.Chat.Harness.Public()
 	publicChat.AgentStatus.Available = !cloned.Chat.AgentNotConfigured
 	publicChat.AgentLimits.MaxToolCallsPerReply = cloned.Chat.Agent.MaxToolCallsPerReply
+	publicChat.ThreeViewLimits.QueueLimitSeconds = cloned.Chat.ThreeView.QueueLimitSeconds
 	publicChat.ApprovalPolicy = PublicChatApprovalPolicy{
 		DefaultMode:                cloned.Chat.ApprovalPolicy.DefaultMode,
 		Modes:                      cloned.Chat.ApprovalPolicy.Modes,
