@@ -767,7 +767,7 @@ export function ChatColumn() {
       queuedSelection?: ChatAttachmentClaim[],
       queuedMentions?: ChatMentionClaim[],
       queuedInputSource?: string,
-      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void },
+      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean },
     ) => {
       const scope = captureSessionScope();
       // #321: a choice-card answer is a plain turn of its own: no Skill, no draft, never queued.
@@ -995,7 +995,9 @@ export function ChatColumn() {
           let removeAbortListener: (() => void) | undefined;
           // Set once the server has the turn: from then on nothing is put back into the box.
           let sent = false;
-          const queued = queuedSelection !== undefined;
+          // Only a message taken from the queue was typed by the person and already left the box. A stage action
+          // (转 3D) or a choice-card answer also carries its own selection, but was never in the box or the queue.
+          const queued = extra?.queued === true;
           try {
             await chatClient.startTurn(
               sessionId,
@@ -1170,7 +1172,7 @@ export function ChatColumn() {
     drainingRef.current = true;
     setQueue((current) => cancelQueuedTurn(current, sessionId, turn.id));
     const started = startedTurnsRef.current;
-    void sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource).finally(() => {
+    void sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true }).finally(() => {
       drainingRef.current = false;
       if (startedTurnsRef.current === started) {
         if (useChatStore.getState().activeSessionId === sessionId) {
