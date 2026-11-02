@@ -36,6 +36,8 @@ func (r *harnessThreeReferences) Resolve(context.Context, generation.OwnerID, []
 type harnessThreeGateway struct {
 	repo                       *sqlite.Repository
 	prepares, submits, replays int
+	// submitErr, when set, refuses the next submissions before any Task is written.
+	submitErr error
 }
 
 func (g *harnessThreeGateway) Offerings(generation.Capability) []generation.Offering {
@@ -52,6 +54,9 @@ func (g *harnessThreeGateway) GetPreparedInput(ctx context.Context, owner genera
 }
 func (g *harnessThreeGateway) SubmitPrepared(ctx context.Context, cmd generation.SubmitPreparedCommand) (generation.Accepted, error) {
 	g.submits++
+	if g.submitErr != nil {
+		return generation.Accepted{}, g.submitErr
+	}
 	p, err := g.GetPreparedInput(ctx, cmd.OwnerID, cmd.PreparedInputID)
 	if err != nil {
 		return generation.Accepted{}, err
