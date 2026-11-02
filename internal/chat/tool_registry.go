@@ -178,6 +178,11 @@ func (registry *toolRegistry) offeringChoices(tool registeredTool) ([]string, bo
 	if tool.generation == nil || tool.generation.OfferingArgument == "" || registry.offeringAllowed == nil {
 		return nil, false
 	}
+	if registry.harness != nil && registry.harness.Selection.OperationID != "" && tool.name == registry.harness.ToolName {
+		// A selected operation fixes its Offering in the tool contract, which
+		// replaces the open choice of service (and its enum) altogether.
+		return nil, false
+	}
 	var parameters struct {
 		Properties map[string]struct {
 			Enum []string `json:"enum"`

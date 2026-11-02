@@ -270,7 +270,7 @@ func (s Service) ResolveSelection(ctx context.Context, selected harness.Selectio
 	}
 	snapshot.CanPropose = len(snapshot.PrerequisitePaths) > 0
 
-	needsSource := hasModelSource(offering)
+	needsSource := HasModelSource(offering)
 	sourceBlocked := needsSource && !sourceUsable
 	if sourceBlocked {
 		snapshot.MissingParameters = append(snapshot.MissingParameters, sourceParameter(offering, normalized))
@@ -342,7 +342,7 @@ func (s Service) declarations(selected harness.Selection) (catalog.HarnessOperat
 	}
 	var tool *catalog.ChatToolSchema
 	for _, candidate := range s.Tools {
-		if candidate.Name == operation.ToolName && candidate.Processing != nil && candidate.Processing.Plan == nil && slices.Contains(candidate.Execution.Capabilities, operation.Capability) {
+		if candidate.Name == operation.ToolName && catalog.HarnessToolCompatible(candidate, operation.Capability) {
 			copy := candidate
 			tool = &copy
 			break

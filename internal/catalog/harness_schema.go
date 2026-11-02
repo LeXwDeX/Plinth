@@ -54,12 +54,17 @@ type HarnessGroupSchema struct {
 }
 
 type PublicHarnessOperation struct {
-	ID          string                    `json:"id"`
-	Label       string                    `json:"label"`
-	Description string                    `json:"description"`
-	Group       string                    `json:"group"`
-	Capability  schemacontract.Capability `json:"capability"`
-	ModelIDs    []string                  `json:"model_ids,omitempty"`
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Group       string `json:"group"`
+	// Badge is a short plain tag shown beside the label, such as the one
+	// provider a common operation runs on.
+	Badge      string                    `json:"badge,omitempty"`
+	Capability schemacontract.Capability `json:"capability"`
+	// ModelIDs shows a model operation only for these generation models. On a
+	// common operation it only narrows the services the operation may use.
+	ModelIDs []string `json:"model_ids,omitempty"`
 	// Prerequisites lists legal paths that precede this exact goal. The goal
 	// is not repeated in a path. Visibility or a proposal grants no execution.
 	Prerequisites                   [][]string `json:"prerequisites,omitempty"`
@@ -176,8 +181,14 @@ func validateHarness(schema ChatSchema, capabilityPresentations []CapabilityPres
 		if _, known := capabilities[op.Capability]; !known {
 			return fmt.Errorf("harness operation %q has unknown capability", op.ID)
 		}
-		if (op.Group == "common" && len(op.ModelIDs) > 0) || (op.Group == "model" && len(op.ModelIDs) == 0) {
+		// Only a generation tool's common operation names its services; a common
+		// processing operation is never tied to the generation model.
+		generationTool := op.ToolName != "" && tools[op.ToolName].Processing == nil
+		if (op.Group == "common" && len(op.ModelIDs) > 0 && !generationTool) || (op.Group == "model" && len(op.ModelIDs) == 0) {
 			return fmt.Errorf("harness operation %q has inconsistent model grouping", op.ID)
+		}
+		if op.Badge != strings.TrimSpace(op.Badge) || len([]rune(op.Badge)) > 24 {
+			return fmt.Errorf("harness operation %q badge must be a short trimmed tag", op.ID)
 		}
 		if op.ToolName == "" {
 			if op.UnavailableReason == "" || len(op.ToolArguments) > 0 {
@@ -185,8 +196,13 @@ func validateHarness(schema ChatSchema, capabilityPresentations []CapabilityPres
 			}
 		} else {
 			tool, exists := tools[op.ToolName]
-			if !exists || tool.Processing == nil || tool.Processing.Plan != nil || !slices.Contains(tool.Execution.Capabilities, op.Capability) {
+			if !exists || !HarnessToolCompatible(tool, op.Capability) {
 				return fmt.Errorf("harness operation %q has incompatible tool wiring", op.ID)
+			}
+			if generationTool && (len(op.ToolArguments) > 0 || len(op.Prerequisites) > 0 || len(op.ModelIDs) == 0) {
+				// A generation tool runs only the operation's frozen service, so it
+				// must name that service and takes no step argument or plan.
+				return fmt.Errorf("harness operation %q generation tool needs model_ids and no arguments or prerequisites", op.ID)
 			}
 			var parameters struct {
 				Properties map[string]json.RawMessage `json:"properties"`
@@ -199,7 +215,7 @@ func validateHarness(schema ChatSchema, capabilityPresentations []CapabilityPres
 					return fmt.Errorf("harness operation %q has unknown tool argument %q", op.ID, name)
 				}
 			}
-			if tool.Processing.StepArgument != "" {
+			if tool.Processing != nil && tool.Processing.StepArgument != "" {
 				var step string
 				if json.Unmarshal(op.ToolArguments[tool.Processing.StepArgument], &step) != nil || tool.Processing.Steps[step] != op.Capability {
 					return fmt.Errorf("harness operation %q has incompatible step", op.ID)
@@ -239,6 +255,20 @@ func validateHarness(schema ChatSchema, capabilityPresentations []CapabilityPres
 		}
 	}
 	return nil
+}
+
+// HarnessToolCompatible reports whether a chat tool can carry a Harness
+// operation of capability: a single processing step tool, or a generation tool
+// of exactly that capability that picks its service by argument rather than by
+// the workspace model (the operation's frozen service replaces that choice).
+func HarnessToolCompatible(tool ChatToolSchema, capability schemacontract.Capability) bool {
+	if !slices.Contains(tool.Execution.Capabilities, capability) {
+		return false
+	}
+	if tool.Processing != nil {
+		return tool.Processing.Plan == nil
+	}
+	return tool.Capability == capability && tool.IgnoreUserModel && tool.OfferingArgument != ""
 }
 
 // ValidateHarnessParameter reuses Offering value validation without inventing

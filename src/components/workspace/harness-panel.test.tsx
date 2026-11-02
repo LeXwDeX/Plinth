@@ -124,6 +124,12 @@ describe('Harness panel', () => {
     expect(harnessSelectionInput(current, texture).fixed_parameters).toEqual({});
     expect(mock.save).not.toHaveBeenCalled();
   });
+  it('shows a common operation\'s provider badge beside its label and not on operations without one (#27)', () => {
+    const html = render();
+    expect(html).toContain('三视图生成');
+    expect(html.match(/data-testid="harness-operation-badge"/g)).toHaveLength(1);
+    expect(html).toMatch(/data-testid="harness-operation-badge">Tripo3D</);
+  });
   it('binds the request to the logged-in owner and session without submitting any work', () => {
     const html = render();
     expect(mock.hook).toHaveBeenCalledWith('s1', 'owner');

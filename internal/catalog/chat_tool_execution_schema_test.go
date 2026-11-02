@@ -16,7 +16,7 @@ func TestDefaultChatToolsDeclareRuntimeExecutionContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := c.Application()
-	if len(app.Chat.Tools) != 14 || len(app.Chat.AgentTools) != 11 {
+	if len(app.Chat.Tools) != 15 || len(app.Chat.AgentTools) != 11 {
 		t.Fatalf("chat tool inventory = generation:%d controls:%d", len(app.Chat.Tools), len(app.Chat.AgentTools))
 	}
 	if err := catalog.ValidateApplicationSchema(app); err != nil {
@@ -24,7 +24,7 @@ func TestDefaultChatToolsDeclareRuntimeExecutionContracts(t *testing.T) {
 	}
 	for _, tool := range app.Chat.Tools {
 		switch tool.Name {
-		case "create_model_3d", "create_model_3d_from_image", "create_gaussian_splat", "retexture_model", "process_model", "plan_model_processing", "convert_model_format",
+		case "create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views", "create_gaussian_splat", "retexture_model", "process_model", "plan_model_processing", "convert_model_format",
 			"create_creative_lab_design", "build_creative_lab_item":
 		default:
 			continue

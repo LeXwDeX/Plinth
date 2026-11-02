@@ -99,6 +99,9 @@ var kinds = []kind{
 	{Path: "/generation/edit-multiview", Type: "edit_multiview", Base: "edit_multiview", Required: []string{"input"}, Real: true, DocPage: "generation-edit-multiview"},
 	{Path: "/models/texture", Type: "texture_model", Base: "texture_model", Required: []string{"input"}, Real: true, DocPage: "models-texture"},
 	{Path: "/mesh/decimate", Type: "highpoly_to_lowpoly", Base: "highpoly_to_lowpoly", Required: []string{"input", "model"}, Real: true, DocPage: "mesh-decimate"},
+	// multiview-to-model has no captured sample (no paid request yet): it is constructed from the
+	// official documentation and borrows the image_to_model poll structure.
+	{Path: "/generation/multiview-to-model", Type: "multiview_to_model", Base: "image_to_model", Required: []string{"model"}, DocPage: "generation-multiview-to-model/standard"},
 	// Smart Segmentation reports smartsegment_image or smartsegment_model by seg_type; both were captured.
 	{Path: "/mesh/smartsegment", Type: "smartsegment_image", Base: "smartsegment_image", Required: []string{"input", "seg_type"}, Real: true, DocPage: "mesh-smartsegment"},
 }
@@ -114,6 +117,14 @@ var realKindNotes = map[string]string{
 	"/models/texture":                "captured: task type texture_model, 10 credits at texture_quality standard without PBR; the output has model_url and rendered_image_url",
 	"/mesh/decimate":                 "captured: the task type is highpoly_to_lowpoly (not mesh_decimation as assumed), 35 credits; the output has model_url and rendered_image_url",
 	"/mesh/smartsegment":             "captured for both seg_type values: smartsegment_image (85 credits; the first request, on a shaded sphere, ended failed with error 1001 \"Segmentation pipeline failed\" and was not charged, a second picture with distinct parts succeeded) and smartsegment_model (55 credits, a 36 KB GLB uploaded to /files); the output is seg_model_url, mask_url, prompt, seg_task_id and model_task_id",
+}
+
+// multiviewChecked is when the multiview-to-model documentation was read for the fake.
+const multiviewChecked = "2026-11-02"
+
+// constructedKindNotes explains kinds that have no captured sample.
+var constructedKindNotes = map[string]string{
+	"/generation/multiview-to-model": "constructed from the official documentation read on " + multiviewChecked + " (derived, not captured; no paid request yet): inputs is an array of single-key view objects (front is required, 2-4 images) instead of input, and the task type multiview_to_model and the output structure of image_to_model are assumptions to verify on the first real paid request",
 }
 
 var endpoints = buildEndpoints()
@@ -142,6 +153,12 @@ func buildEndpoints() []fakeupstream.Endpoint {
 		} else {
 			endpoint.Evidence = fakeupstream.EvidenceConstructed
 			endpoint.CheckedAt = researched
+			if note, ok := constructedKindNotes[k.Path]; ok {
+				endpoint.CheckedAt = multiviewChecked
+				endpoint.Note = note
+				out = append(out, endpoint)
+				continue
+			}
 			endpoint.Note = "no real sample (not requested to save credits): the create envelope is the real one of text-to-model; task type " + k.Type + " and the output structure of " + k.Base + " are assumptions to verify on first real use; the documentation was researched on " + researched + " and could not be fetched on " + captured
 		}
 		out = append(out, endpoint)
@@ -413,6 +430,12 @@ func (h *handler) create(k kind) http.HandlerFunc {
 		for _, field := range k.Required {
 			if value, ok := body[field].(string); !ok || strings.TrimSpace(value) == "" {
 				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, field+" is required", "Refer to the API documentation for parameter requirements"))
+				return
+			}
+		}
+		if k.Path == "/generation/multiview-to-model" {
+			if message := multiviewInputsError(body); message != "" {
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, message, "Refer to the API documentation for parameter requirements"))
 				return
 			}
 		}
@@ -765,3 +788,33 @@ const (
 	expiredContentType = "text/xml"
 	expiredBody        = `<?xml version="1.0" encoding="UTF-8"?><Error><Code>AccessDenied</Code><Message>Access denied</Message></Error>`
 )
+
+// multiviewInputsError checks the documented multiview-to-model inputs: 2-4 single-key
+// view objects with unique keys front/left/back/right and a front view, each a file token.
+func multiviewInputsError(body map[string]any) string {
+	if _, legacy := body["input"]; legacy {
+		return "input is not accepted; use inputs"
+	}
+	inputs, ok := body["inputs"].([]any)
+	if !ok || len(inputs) < 2 || len(inputs) > 4 {
+		return "inputs must contain 2 to 4 views"
+	}
+	seen := map[string]bool{}
+	for _, entry := range inputs {
+		view, ok := entry.(map[string]any)
+		if !ok || len(view) != 1 {
+			return "each inputs item must hold exactly one view key"
+		}
+		for key, value := range view {
+			token, _ := value.(string)
+			if !slices.Contains([]string{"front", "left", "back", "right"}, key) || strings.TrimSpace(token) == "" || seen[key] {
+				return "inputs view keys must be unique front/left/back/right with a file token"
+			}
+			seen[key] = true
+		}
+	}
+	if !seen["front"] {
+		return "inputs must include the front view"
+	}
+	return ""
+}

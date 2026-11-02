@@ -525,3 +525,28 @@ func TestFaultScenarios(t *testing.T) {
 		}
 	})
 }
+
+// multiview-to-model is constructed from the documentation: inputs is a list of
+// single-key view objects with a required front, and the legacy input is refused.
+func TestMultiviewToModelValidatesInputsAndFinishes(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	for name, body := range map[string]map[string]any{
+		"legacy input":  {"model": "v3.1-20260211", "input": "file_x"},
+		"one view":      {"model": "v3.1-20260211", "inputs": []any{map[string]any{"front": "t1"}}},
+		"missing front": {"model": "v3.1-20260211", "inputs": []any{map[string]any{"left": "t1"}, map[string]any{"back": "t2"}}},
+		"duplicate":     {"model": "v3.1-20260211", "inputs": []any{map[string]any{"front": "t1"}, map[string]any{"front": "t2"}}},
+		"two keys":      {"model": "v3.1-20260211", "inputs": []any{map[string]any{"front": "t1", "left": "t2"}, map[string]any{"back": "t3"}}},
+	} {
+		if status, _, _ := f.do(http.MethodPost, "/generation/multiview-to-model", key, body); status != http.StatusBadRequest {
+			t.Errorf("%s: status = %d", name, status)
+		}
+	}
+	id := f.create("/generation/multiview-to-model", map[string]any{
+		"model":  "v3.1-20260211",
+		"inputs": []any{map[string]any{"front": "t1"}, map[string]any{"right": "t2"}},
+	}, key)
+	_, body := f.finish(id, key)
+	if got := field(t, body, "data", "type"); got != "multiview_to_model" {
+		t.Fatalf("type = %v", got)
+	}
+}
