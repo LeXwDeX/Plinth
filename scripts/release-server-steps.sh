@@ -30,6 +30,10 @@
 #                            取值 1-2；进行中的快照可临时排除，诊断日志独立保留
 #   同一发布根的发布备份/恢复、备份清理与手工恢复共用 <root>/.release.lock；
 #   本脚本在构建或改动数据前获取，retention 继承该描述符，缺失或伪造即拒绝。
+#   RELEASE_DATA_MODE        空（缺省，持久数据）或 ephemeral（仅 dev-test，#28）：叠加
+#                            docker-compose.go-ephemeral.yml，数据/资产/缓存用匿名卷，每次发布
+#                            --renew-anon-volumes 得到全新数据；不做发布备份（与 RELEASE_BACKUP_* 互斥），
+#                            失败时旧镜像同样以全新数据拉起，成功后清理旧匿名卷
 #   RELEASE_ALLOW_BOOTSTRAP  =1 时允许空栈首次启动（无旧容器、无数据库）
 #   GO_PROD_*_DIR / GO_LEGACY_*_DIR / GO_WEB_BIND_IP / GO_WEB_HOST_PORT
 #                            Compose 主机路径与绑定地址，导出给每次 compose 与预检；
@@ -95,6 +99,21 @@ case "$BACKUP_SCOPE" in
     ;;
   *)
     echo "[server] RELEASE_BACKUP_SCOPE must be full or database; nothing was changed" >&2
+    exit 1
+    ;;
+esac
+# #28: ephemeral data mode (dev-test). Default (empty) keeps every existing branch.
+DATA_MODE=${RELEASE_DATA_MODE:-}
+case "$DATA_MODE" in
+  "") ;;
+  ephemeral)
+    if [ -n "${RELEASE_BACKUP_SCOPE:-}" ] || [ -n "${RELEASE_BACKUP_KEEP:-}" ]; then
+      echo "[server] RELEASE_DATA_MODE=ephemeral cannot be combined with RELEASE_BACKUP_SCOPE/RELEASE_BACKUP_KEEP; nothing was changed" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "[server] RELEASE_DATA_MODE must be empty or ephemeral; nothing was changed" >&2
     exit 1
     ;;
 esac
@@ -178,8 +197,12 @@ write_compose_env() {
     echo "GO_IMAGE_TAG=$TAG"
     echo "GO_SOURCE_COMMIT=$SHA"
     echo "GO_RUNTIME_ENV_FILE=$RUNTIME_ENV"
-    echo "RELEASE_BACKUP_SCOPE=$BACKUP_SCOPE"
-    echo "RELEASE_BACKUP_TARGETS=$BACKUP_TARGETS_CSV"
+    if [ "$DATA_MODE" = ephemeral ]; then
+      echo "RELEASE_DATA_MODE=ephemeral"
+    else
+      echo "RELEASE_BACKUP_SCOPE=$BACKUP_SCOPE"
+      echo "RELEASE_BACKUP_TARGETS=$BACKUP_TARGETS_CSV"
+    fi
     for key in $LAYOUT_KEYS ART_AI_PROTECTED_PATHS; do
       value=$(printenv "$key" || true)
       [ -z "$value" ] || echo "$key=$value"
@@ -199,7 +222,7 @@ BOOTSTRAP=0
 if [ "${RELEASE_ALLOW_BOOTSTRAP:-0}" = 1 ]; then
   EXISTING_CONTAINERS=$(docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT")
   if [ -z "$EXISTING_CONTAINERS" ]; then
-    if [ -e "$ROOT/production/data/art-ai.db" ]; then
+    if [ "$DATA_MODE" != ephemeral ] && [ -e "$ROOT/production/data/art-ai.db" ]; then
       echo "[server] database exists without a $COMPOSE_PROJECT container; inspect before releasing" >&2
       exit 1
     fi
@@ -219,6 +242,18 @@ if [ -n "$EXTRA_COMPOSE_FILE" ]; then
     exit 1
   fi
   COMPOSE_FILES+=(-f "$EXTRA_COMPOSE_FILE")
+fi
+if [ "$DATA_MODE" = ephemeral ]; then
+  EPHEMERAL_COMPOSE_FILE="$APP/docker-compose.go-ephemeral.yml"
+  if [ -L "$EPHEMERAL_COMPOSE_FILE" ] || [ ! -f "$EPHEMERAL_COMPOSE_FILE" ]; then
+    echo "[server] $EPHEMERAL_COMPOSE_FILE must be a regular file; nothing was changed" >&2
+    exit 1
+  fi
+  # After the main file, before the host-local override.
+  COMPOSE_FILES=(-f "$COMPOSE_FILE" -f "$EPHEMERAL_COMPOSE_FILE")
+  if [ -n "$EXTRA_COMPOSE_FILE" ]; then
+    COMPOSE_FILES+=(-f "$EXTRA_COMPOSE_FILE")
+  fi
 fi
 BUILD_OPTIONS=()
 if [ -n "${RELEASE_BUILD_NETWORK:-}" ]; then
@@ -283,17 +318,27 @@ fail_report() { # $1=阶段 $2=旧镜像标签
   mkdir -p "$REPORT_DIR" || return 1
   {
     echo "tag=$TAG sha=$SHA stage=$1 previous_image_tag=${2:-none}"
-    echo "backup_scope=$BACKUP_SCOPE"
-    echo "backup_targets=$BACKUP_TARGETS_CSV"
+    if [ "$DATA_MODE" = ephemeral ]; then
+      echo "data_mode=ephemeral"
+    else
+      echo "backup_scope=$BACKUP_SCOPE"
+      echo "backup_targets=$BACKUP_TARGETS_CSV"
+    fi
     echo "utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "healthz=$(curl --connect-timeout 3 --max-time 5 -s -o /dev/null -w '%{http_code}' "$BASE/healthz" || true)"
     echo "readyz=$(curl --connect-timeout 3 --max-time 5 -s -o /dev/null -w '%{http_code}' "$BASE/readyz" || true)"
-    echo "backup=${BACKUP_DIR}/release-$TAG"
+    [ "$DATA_MODE" = ephemeral ] || echo "backup=${BACKUP_DIR}/release-$TAG"
   } >"$REPORT_DIR/$TAG-$1.txt"
 }
 
 release_capacity_check() {
   echo "[server] capacity $1"
+  if [ "$DATA_MODE" = ephemeral ]; then
+    # Only the build headroom and the Docker root are measured; no backup, no
+    # host data mounts are used in this mode.
+    python3 "$APP/scripts/release-capacity.py" "$ROOT" - bootstrap "$BACKUP_DIR/release-$TAG"
+    return
+  fi
   if [ "$1" = bootstrap ]; then
     if [ "$BACKUP_SCOPE" = full ]; then
       python3 "$APP/scripts/release-capacity.py" "$ROOT" - bootstrap "$BACKUP_DIR/release-$TAG"
@@ -347,7 +392,14 @@ retain_release_backups() {
 }
 
 # Measurements fail closed. They are not a reservation against other services.
-if [ "$BOOTSTRAP" = 1 ]; then
+if [ "$DATA_MODE" = ephemeral ]; then
+  # The capacity helper expects the (empty) backups directory to exist.
+  mkdir -p "$ROOT/production" "$BACKUP_DIR"
+  if ! release_capacity_check bootstrap; then
+    echo "[server] capacity check failed; previous service was not stopped" >&2
+    exit 1
+  fi
+elif [ "$BOOTSTRAP" = 1 ]; then
   mkdir -p "$ROOT/production" "$BACKUP_DIR"
   if ! release_capacity_check bootstrap; then
     echo "[server] capacity check failed; nothing was started" >&2
@@ -413,9 +465,13 @@ bootstrap_failed() { # $1=failing stage; there is no previous version to restore
   exit 1
 }
 
+BOOTSTRAP_UP_FLAGS=()
+if [ "$DATA_MODE" = ephemeral ]; then
+  BOOTSTRAP_UP_FLAGS=(--renew-anon-volumes)
+fi
 if [ "$BOOTSTRAP" = 1 ]; then
   echo "[server] bootstrap: no previous $COMPOSE_PROJECT instance, first start of $TAG"
-  if ! compose "$TAG" up -d --no-deps "$COMPOSE_SERVICE" 2>&1 | tail -1; then
+  if ! compose "$TAG" up -d --no-deps ${BOOTSTRAP_UP_FLAGS[@]+"${BOOTSTRAP_UP_FLAGS[@]}"} "$COMPOSE_SERVICE" 2>&1 | tail -1; then
     bootstrap_failed candidate-up-failed
   fi
   if ! wait_healthy 30; then
@@ -436,6 +492,55 @@ if [ -z "$OLD_TAG" ]; then
   exit 1
 fi
 echo "[server] previous image tag=$OLD_TAG"
+
+if [ "$DATA_MODE" = ephemeral ]; then
+  # #28: no backup, no stop window. The candidate replaces the container with
+  # fresh anonymous volumes; the old anonymous data volumes are removed after
+  # success. Volumes of the previous container (empty on the first switch from
+  # bind mounts) are recorded now, before the container is replaced.
+  OLD_VOLUMES=()
+  while IFS= read -r line; do
+    [ -n "$line" ] && OLD_VOLUMES+=("$line")
+  done < <(docker inspect -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}} {{.Destination}}{{"\n"}}{{end}}{{end}}' "$CONTAINER" 2>/dev/null |
+    awk '$2=="/app/data"||$2=="/app/storage"||$2=="/app/legacy-cache"||$2=="/app/legacy-thumbnails"{print $1}')
+
+  ephemeral_rollback() { # $1=failing stage; previous image restarts on fresh data
+    local stage="$1"
+    echo "[server] $stage; restarting $OLD_TAG with fresh data" >&2
+    if ! compose "$OLD_TAG" up -d --no-deps --renew-anon-volumes "$COMPOSE_SERVICE" 2>&1 | tail -1; then
+      fail_report "rollback-start-failed" "$OLD_TAG" || true
+      exit 1
+    fi
+    if wait_healthy 30; then
+      fail_report "$stage" "$OLD_TAG" || true
+      echo "[server] rolled back to $OLD_TAG with fresh data - healthy" >&2
+    else
+      fail_report "rollback-also-unhealthy" "$OLD_TAG" || true
+      echo "[server] rollback target also unhealthy - manual intervention required" >&2
+    fi
+    exit 1
+  }
+
+  echo "[server] up $TAG (data_mode=ephemeral)"
+  if ! compose "$TAG" up -d --no-deps --renew-anon-volumes "$COMPOSE_SERVICE" 2>&1 | tail -1; then
+    ephemeral_rollback "candidate-up-failed"
+  fi
+  if ! wait_healthy 30; then
+    ephemeral_rollback "unhealthy-after-up"
+  fi
+  if ! record_manifest; then
+    ephemeral_rollback "manifest-write-failed"
+  fi
+  write_compose_env || echo "[server] WARNING: compose.env not written" >&2
+  retain_test_images
+  for volume in ${OLD_VOLUMES[@]+"${OLD_VOLUMES[@]}"}; do
+    if ! docker volume rm "$volume" >/dev/null 2>&1; then
+      echo "[server] WARNING: old data volume $volume was not removed; release remains successful" >&2
+    fi
+  done
+  echo "[server] healthy - deployed $TAG (previous $OLD_TAG), manifest updated (data_mode=ephemeral)"
+  exit 0
+fi
 
 # Prepare a fresh backup destination while the previous service still runs.
 # A repeated tag must not delete evidence from an earlier release attempt.

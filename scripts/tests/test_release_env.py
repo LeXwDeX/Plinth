@@ -193,6 +193,46 @@ class EnvironmentRulesTest(unittest.TestCase):
         with self.assertRaisesRegex(release_env.EnvironmentError_, "promote_from"):
             load(changed(mutate))
 
+    def test_ephemeral_data_reaches_the_server_without_backup_words(self):
+        # #28: dev-test may run on throwaway data; it excludes the backup policy.
+        def mutate(environments):
+            environments["dev-test"].pop("backup")
+            environments["dev-test"]["data"] = "ephemeral"
+        document = changed(mutate)
+        load(document)
+        words = release_env.release_variables(document["environments"]["dev-test"], None)["RELEASE_SERVER_ENV"].split()
+        self.assertIn("RELEASE_DATA_MODE=ephemeral", words)
+        self.assertFalse([word for word in words if word.startswith("RELEASE_BACKUP_")])
+        default = release_env.release_variables(load(BASE)["environments"]["shared-a"], None)["RELEASE_SERVER_ENV"]
+        self.assertNotIn("RELEASE_DATA_MODE", default)
+
+    def test_ephemeral_data_is_limited_to_dev_test(self):
+        def mutate(environments):
+            environments["shared-a"]["data"] = "ephemeral"
+        with self.assertRaisesRegex(release_env.EnvironmentError_, "data is only supported for the dev-test"):
+            load(changed(mutate))
+
+    def test_ephemeral_data_cannot_be_promoted_or_combined_with_backup(self):
+        def promoted(environments):
+            environments["dev-test"].pop("backup")
+            environments["dev-test"]["data"] = "ephemeral"
+            environments["dev-test"]["promote_from"] = "shared-a"
+        with self.assertRaisesRegex(release_env.EnvironmentError_, "promote_from"):
+            load(changed(promoted))
+
+        def with_backup(environments):
+            environments["dev-test"]["data"] = "ephemeral"  # BASE keeps its backup policy
+        with self.assertRaisesRegex(release_env.EnvironmentError_, "cannot be combined with backup"):
+            load(changed(with_backup))
+
+    def test_ephemeral_data_value_is_strict(self):
+        for value in ("persistent", "", "Ephemeral", True, 1, ["ephemeral"], {"mode": "ephemeral"}):
+            def mutate(environments, value=value):
+                environments["dev-test"].pop("backup")
+                environments["dev-test"]["data"] = value
+            with self.subTest(value=value), self.assertRaisesRegex(release_env.EnvironmentError_, "data must be"):
+                load(changed(mutate))
+
     def test_removed_managed_by_field_is_refused_with_a_fixable_message(self):
         # #74: the legacy-formal stack that used managed_by is retired.
         def mutate(environments):

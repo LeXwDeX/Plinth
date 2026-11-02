@@ -137,6 +137,13 @@ def validate_environment(name, environment, document):
         need(isinstance(backup, dict) and set(backup) == {"scope", "keep"}, "backup needs only scope and keep")
         need(backup.get("scope") == "database", "backup scope must be database")
         need(type(backup.get("keep")) is int and 1 <= backup["keep"] <= 2, "backup keep must be 1-2")
+    data = environment.get("data")
+    if data is not None:
+        # #28: only the disposable dev-test stack may run on throwaway data.
+        need(name == "dev-test", "data is only supported for the dev-test environment")
+        need(environment.get("promote_from") is None, "dev-test data mode cannot be combined with promote_from")
+        need(data == "ephemeral", "data must be the string ephemeral")
+        need(backup is None, "data ephemeral cannot be combined with backup (an ephemeral release takes no backup)")
     layout = environment.get("layout", {})
     need(isinstance(layout, dict) and set(layout) <= set(LAYOUT_KEYS), "layout has unknown keys")
     for key, value in layout.items():
@@ -248,6 +255,8 @@ def release_variables(environment, revision):
     if backup is not None:
         words.append(f"RELEASE_BACKUP_SCOPE={backup['scope']}")
         words.append(f"RELEASE_BACKUP_KEEP={backup['keep']}")
+    if environment.get("data") == "ephemeral":
+        words.append("RELEASE_DATA_MODE=ephemeral")
     words += [f"{key}={environment['layout'][key]}" for key in LAYOUT_KEYS if key in environment.get("layout", {})]
     if environment.get("extra_compose_file"):
         words.append(f"RELEASE_EXTRA_COMPOSE_FILE={environment['extra_compose_file']}")
