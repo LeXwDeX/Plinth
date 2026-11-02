@@ -359,6 +359,13 @@ func sameHarnessJSON(a, b json.RawMessage, command chat.ToolCommand) bool {
 }
 func (executor *Executor) verifyHarnessSource(ctx context.Context, command chat.ToolCommand, offering generation.Offering, input map[string]json.RawMessage) error {
 	snapshot := command.Options.Harness
+	if !resolve.HasModelSource(offering) {
+		// Its inputs are conversation pictures, resolved like any reference.
+		if len(snapshot.Selection.Sources) != 0 || len(snapshot.SourceFingerprints) != 0 {
+			return ErrOperationConflict
+		}
+		return nil
+	}
 	if len(snapshot.BoundSources()) != 1 || len(snapshot.SourceFingerprints) != 1 {
 		return ErrOperationConflict
 	}

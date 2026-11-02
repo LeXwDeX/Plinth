@@ -359,11 +359,12 @@ func TestDefaultCatalogKeepsOtherOfferingsLegacy(t *testing.T) {
 		"meshy/processing/remesh":    true,
 		"meshy/processing/retexture": true,
 		// #330 Meshy Convert: the six required model files, one per format.
-		"meshy/processing/convert":          true,
-		"tripo/tripo-v3.1/text-to-3d":       true,
-		"tripo/tripo-v3.1/image-to-3d":      true,
-		"tripo/tripo-v3.1-full/text-to-3d":  true,
-		"tripo/tripo-v3.1-full/image-to-3d": true,
+		"meshy/processing/convert":               true,
+		"tripo/tripo-v3.1/text-to-3d":            true,
+		"tripo/tripo-v3.1/image-to-3d":           true,
+		"tripo/tripo-v3.1-full/text-to-3d":       true,
+		"tripo/tripo-v3.1-full/image-to-3d":      true,
+		"tripo/tripo-v3.1-multiview/image-to-3d": true,
 		// #188 Rodin: one required PBR GLB plus the background preview.
 		"hyper3d/rodin-gen-2.5/text-to-3d":  true,
 		"hyper3d/rodin-gen-2.5/image-to-3d": true,

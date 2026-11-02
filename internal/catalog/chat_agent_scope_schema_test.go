@@ -17,6 +17,7 @@ var shippedToolScopes = map[string]string{
 	"create_three_view":          "2d",
 	"create_model_3d":            "3d",
 	"create_model_3d_from_image": "3d",
+	"create_model_3d_from_views": "3d",
 	"create_gaussian_splat":      "3d",
 	"create_multiview_images":    "2d",
 	"edit_multiview_images":      "2d",

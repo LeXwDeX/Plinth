@@ -26,6 +26,7 @@ func TestTripoHCurrentGenerationDefaultsAndQuotes(t *testing.T) {
 		{"tripo/tripo-v3.1-full/text-to-3d", "10", "90", true},
 		{"tripo/tripo-v3.1/text-to-3d", "10", "90", false},
 		{"tripo/tripo-v3.1-full/image-to-3d", "20", "100", true},
+		{"tripo/tripo-v3.1-multiview/image-to-3d", "20", "100", true},
 		{"tripo/tripo-v3.1/image-to-3d", "20", "100", false},
 	}
 	for _, tc := range cases {

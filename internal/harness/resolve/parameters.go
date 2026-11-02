@@ -43,7 +43,10 @@ func editable(offering generation.Offering, parameter generation.Parameter) bool
 func generationSourceRole(parameter generation.Parameter) (schema.ParameterSemantic, bool) {
 	return schema.SourceParameterRole(parameter)
 }
-func hasModelSource(offering generation.Offering) bool {
+
+// HasModelSource reports whether the Offering takes a model source. An
+// operation whose service takes none gets its inputs from the conversation.
+func HasModelSource(offering generation.Offering) bool {
 	for _, parameter := range offering.Parameters {
 		role, ok := generationSourceRole(parameter)
 		if ok && (role == schema.SemanticSourceTask || role == schema.SemanticSourceAsset) {

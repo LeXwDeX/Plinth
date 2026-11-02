@@ -123,7 +123,7 @@ func TestSelectionAliasAndDefaultToSelection(t *testing.T) {
 func TestDefaultToSelectionIsDeclaredByTheProductSchema(t *testing.T) {
 	_, schema := handleExecutor(t)
 	want := map[string]bool{"remove_background": true, "create_model_3d_from_image": true, "create_gaussian_splat": true, "create_multiview_images": true,
-		"create_creative_lab_design": true}
+		"create_creative_lab_design": true, "create_model_3d_from_views": true}
 	for _, tool := range schema.Tools {
 		if tool.DefaultToSelection != want[tool.Name] {
 			t.Fatalf("tool %s default_to_selection = %v", tool.Name, tool.DefaultToSelection)
