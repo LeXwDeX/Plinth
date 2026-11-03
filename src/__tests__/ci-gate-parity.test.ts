@@ -105,11 +105,20 @@ function localArgvProblems(local: LocalGate, gate: Gate): string[] {
  * boundary: a pull request can still edit this workflow.
  */
 const runnerExpression = '${{ github.event_name == \'workflow_dispatch\' && inputs.use_self_hosted && fromJSON(\'["self-hosted","Linux","X64","plinth-trusted-ci"]\') || \'ubuntu-latest\' }}';
+/**
+ * go test race only (#78): besides the manual trusted opt-in, a push to main and a pull request
+ * whose head is in this repository run on the on-demand Azure runner. Fork pull requests and
+ * every other event stay on GitHub-hosted runners.
+ */
+const raceRunnerExpression = '${{ github.event_name == \'workflow_dispatch\' && inputs.use_self_hosted && fromJSON(\'["self-hosted","Linux","X64","plinth-trusted-ci"]\') || (github.event_name == \'push\' && github.ref == \'refs/heads/main\' || github.event_name == \'pull_request\' && github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(\'["self-hosted","Linux","X64","plinth-azure"]\') || \'ubuntu-latest\' }}';
 const concurrencyGroup = "ci-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && inputs.use_self_hosted && 'trusted-' || '' }}${{ github.event.pull_request.number || github.ref }}";
 
 function hasRunnerRoute(text: string): boolean {
   const expressions = [...text.matchAll(/^ {4}runs-on: (.+)$/gm)].map((match) => match[1].trim());
-  return expressions.length === 3 && expressions.every((expression) => expression === runnerExpression);
+  return expressions.length === 3
+    && expressions[0] === runnerExpression
+    && expressions[1] === runnerExpression
+    && expressions[2] === raceRunnerExpression;
 }
 
 function hasConcurrencyGroup(text: string): boolean {
@@ -356,6 +365,38 @@ describe('CI and local gate parity with dev_test.md §2', () => {
         testCase.github.event_name === 'workflow_dispatch' && testCase.inputs.use_self_hosted === true ? trusted : 'ubuntu-latest',
         `${testCase.github.event_name} with use_self_hosted=${String(testCase.inputs.use_self_hosted)}`,
       ).toEqual(testCase.expected);
+    }
+  });
+
+  it('routes only go test race to the Azure runner, and only for trusted events (#78)', () => {
+    const text = read('.github/workflows/ci.yml');
+    expect(hasRunnerRoute(text.replace('plinth-azure', 'another-runner'))).toBe(false);
+    expect(hasRunnerRoute(text.replace(" && github.ref == 'refs/heads/main'", ''))).toBe(false);
+    expect(hasRunnerRoute(text.replace(' && github.event.pull_request.head.repo.full_name == github.repository', ''))).toBe(false);
+    expect(hasRunnerRoute(text.replace("github.event_name == 'pull_request' && github.event", "github.event_name == 'pull_request_target' && github.event"))).toBe(false);
+    expect(text.match(/plinth-azure/g)).toHaveLength(1);
+    const trusted = ['self-hosted', 'Linux', 'X64', 'plinth-trusted-ci'];
+    const azure = ['self-hosted', 'Linux', 'X64', 'plinth-azure'];
+    const repository = 'LeXwDeX/Plinth';
+    const route = (event: string, ref: string, head: string | undefined, selfHosted: boolean | undefined) =>
+      event === 'workflow_dispatch' && selfHosted === true
+        ? trusted
+        : (event === 'push' && ref === 'refs/heads/main') || (event === 'pull_request' && head === repository)
+          ? azure
+          : 'ubuntu-latest';
+    const cases: [string, string, string | undefined, boolean | undefined, unknown][] = [
+      ['push', 'refs/heads/main', undefined, undefined, azure],
+      ['push', 'refs/heads/feature', undefined, undefined, 'ubuntu-latest'],
+      ['push', 'refs/tags/v1.0.0', undefined, undefined, 'ubuntu-latest'],
+      ['pull_request', 'refs/pull/1/merge', repository, undefined, azure],
+      ['pull_request', 'refs/pull/2/merge', 'someone/Plinth', undefined, 'ubuntu-latest'],
+      ['pull_request_target', 'refs/heads/main', 'someone/Plinth', undefined, 'ubuntu-latest'],
+      ['workflow_run', 'refs/heads/main', undefined, undefined, 'ubuntu-latest'],
+      ['workflow_dispatch', 'refs/heads/main', undefined, undefined, 'ubuntu-latest'],
+      ['workflow_dispatch', 'refs/heads/main', undefined, true, trusted],
+    ];
+    for (const [event, ref, head, selfHosted, expected] of cases) {
+      expect(route(event, ref, head, selfHosted), `${event} ${ref} head=${head}`).toEqual(expected);
     }
   });
 
