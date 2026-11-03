@@ -621,7 +621,7 @@ describe('Azure runner start workflow (#78)', () => {
     expect(workflow.on).toEqual({
       push: { branches: ['main'] },
       pull_request: null,
-      schedule: [{ cron: '*/10 * * * *' }],
+      schedule: [{ cron: '7-59/10 * * * *' }],
       workflow_dispatch: null,
     });
     expect(Object.keys(workflow.jobs)).toEqual(['start']);
