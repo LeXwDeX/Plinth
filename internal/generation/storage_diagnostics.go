@@ -24,7 +24,7 @@ type DiagnosedAssetStorageError interface {
 func safeStorageDiagnostic(value AssetStorageDiagnostic) AssetStorageDiagnostic {
 	fidelityReason := diagnosticValue(value.Reason, []string{"fidelity_unsupported", "fidelity_invalid_structure", "fidelity_skeleton_missing", "fidelity_animation_missing", "fidelity_inspection_unavailable"})
 	value.Stage = diagnosticValue(value.Stage, []string{"identity", "input", "directory_check", "temp_create", "write", "temp_sync", "temp_close", "inspect_open", "inspect", "inspect_close", "cas_path", "root_open", "cas_directory", "cas_verify", "temp_cleanup", "cas_rename", "cas_sync"})
-	value.Reason = diagnosticValue(value.Reason, []string{"invalid_identity", "empty_content", "io_failure", "size_limit", "content_rejected", "png_inspection_size", "png_invalid_structure", "png_invalid_metadata", "png_invalid_pixels", "png_metadata_checksum", "png_metadata_limit", "png_metadata_structure", "jpeg_invalid_pixels", "jpeg_invalid_structure", "raster_decode_budget", "raster_inspection_size", "raster_invalid_dimensions", "raster_invalid_structure", "raster_trailing_data", "raster_unsupported_format", "fbx_invalid_structure", "fbx_invalid_array", "archive_rejected", "usdc_rejected", "glb_rejected", "gltf_rejected", "stl_rejected", "3mf_rejected", "blend_rejected", "blend_magic_missing", "external_address"})
+	value.Reason = diagnosticValue(value.Reason, []string{"invalid_identity", "empty_content", "io_failure", "size_limit", "content_rejected", "png_inspection_size", "png_invalid_structure", "png_invalid_metadata", "png_invalid_pixels", "png_metadata_checksum", "png_metadata_limit", "png_metadata_structure", "jpeg_invalid_pixels", "jpeg_invalid_structure", "raster_decode_budget", "raster_inspection_size", "raster_invalid_dimensions", "raster_invalid_structure", "raster_trailing_data", "raster_unsupported_format", "fbx_invalid_structure", "fbx_invalid_array", "xml_size_limit", "usdc_size_limit", "inspection_work_limit", "non_finite_float", "archive_rejected", "usdc_rejected", "glb_rejected", "gltf_rejected", "stl_rejected", "3mf_rejected", "blend_rejected", "blend_magic_missing", "external_address"})
 	value.Errno = diagnosticValue(value.Errno, []string{"canceled", "deadline", "permission", "not_found", "no_space", "read_only", "io", "unexpected_eof", "other"})
 	if fidelityReason != "unknown" {
 		value.Reason = fidelityReason
@@ -64,13 +64,21 @@ func AssetStoreRejection(err error, role, variant string) (*Failure, bool) {
 	if !ok {
 		return nil, false
 	}
+	return assetStoreFailure(ArtifactClaim{Role: role, Variant: variant}, diagnostic), true
+}
+
+// assetStoreFailure is the integrity failure recorded when the AssetStore
+// refuses an artifact. A content verdict (stage inspect) is deterministic for
+// the same bytes and therefore terminal; write, read and I/O stages may pass
+// on another try. The kernel materialization path and adapters share it.
+func assetStoreFailure(claim ArtifactClaim, diagnostic AssetStorageDiagnostic) *Failure {
 	return &Failure{
 		Class:           FailureIntegrity,
 		Retryable:       diagnostic.Stage != "inspect",
 		SafeDetail:      "资产写入或完整性校验失败",
 		UpstreamCode:    "asset_store_rejected",
-		UpstreamExcerpt: assetStoreForensics(ArtifactClaim{Role: role, Variant: variant}, diagnostic),
-	}, true
+		UpstreamExcerpt: assetStoreForensics(claim, diagnostic),
+	}
 }
 
 func storageDiagnosticOf(err error) AssetStorageDiagnostic {
@@ -116,7 +124,7 @@ func assetStoreForensics(claim ArtifactClaim, diagnostic AssetStorageDiagnostic)
 
 // logAssetStoreRejection names the failing role/format and the allowlisted
 // storage reason for operators. It never logs bytes, locators or err.Error().
-func (m *Module) logAssetStoreRejection(task Task, attempt *Attempt, claim ArtifactClaim, mediaType string, blocking bool, diagnostic AssetStorageDiagnostic) {
+func (m *Module) logAssetStoreRejection(task Task, attempt *Attempt, claim ArtifactClaim, mediaType string, blocking bool, diagnostic AssetStorageDiagnostic, candidateBytes int64) {
 	m.logger.Warn("asset materialization rejected",
 		"event", "materialization.asset_store_rejected",
 		"task_id", string(task.ID),
@@ -129,5 +137,6 @@ func (m *Module) logAssetStoreRejection(task Task, attempt *Attempt, claim Artif
 		"blocking", blocking,
 		"storage_stage", diagnostic.Stage,
 		"storage_reason", diagnostic.Reason,
-		"errno", diagnostic.Errno)
+		"errno", diagnostic.Errno,
+		"candidate_bytes", candidateBytes)
 }

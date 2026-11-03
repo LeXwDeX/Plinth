@@ -83,7 +83,7 @@ type usdcParser struct {
 
 func inspectUSDC(reader io.Reader, size int64, names map[string]struct{}, base string, work *inspectionWorkBudget) error {
 	if size < 88 || size > maxUSDCBytes {
-		return errors.New("USDC 大小超出检查范围")
+		return rejectInspection("usdc_size_limit", errors.New("USDC 大小超出检查范围"))
 	}
 	if strings.HasPrefix(base, "/") || strings.ContainsAny(base, "\\%[]\x00") {
 		return errors.New("USDC 层路径不支持")
