@@ -323,3 +323,45 @@ describe('用图片重贴图', () => {
     expect(useStudioStore.getState().turnRequest).toBeNull();
   });
 });
+
+// #65: the three-view card's two conversions.
+describe('three-view to 3D', () => {
+  beforeEach(() => {
+    useWorkspaceStore.setState({ modelByDomain: { ...useWorkspaceStore.getState().modelByDomain, 'model-3d': 'm3d' } });
+    useStudioStore.setState({ turnRequest: null });
+    mocks.toastError.mockClear();
+  });
+
+  it('converts a front view the person replaced with an upload as the turn\'s picture', () => {
+    expect(actions().inputPictureToThreeD('/api/v1/assets/up-front')).toBe(true);
+    const request = useStudioStore.getState().turnRequest;
+    expect(request?.text).toBe(messages['ui.studio.action.to3d_turn_current']);
+    expect(request?.selection).toEqual([{ kind: 'image', url: '/api/v1/assets/up-front' }]);
+    expect(request?.multiview).toBeUndefined();
+  });
+
+  it('asks for a 3D model before converting an uploaded front view', () => {
+    useWorkspaceStore.setState({ modelByDomain: { ...useWorkspaceStore.getState().modelByDomain, 'model-3d': null } });
+    expect(actions().inputPictureToThreeD('/api/v1/assets/up-front')).toBe(false);
+    expect(useStudioStore.getState().turnRequest).toBeNull();
+    expect(mocks.toastError).toHaveBeenCalledWith(messages['ui.studio.action.choose_3d_model']);
+  });
+
+  it('sends the group\'s finished views as the structured multiview request', () => {
+    const model = { modelId: 'mv', modelName: 'MV', views: [{ value: 'front', label: '正面' }, { value: 'left', label: '左侧' }], minimumViews: 2, mediaTypes: [] };
+    const slot = (key: string, label: string, extra: Record<string, unknown>) => ({
+      key, label, optional: false, replaced: false, status: 'succeeded' as const, attempt: 0, taskId: '', outputAssetId: '', requestId: '',
+      startable: false, retryable: false, estimatedCredits: 0, creditsMetered: false, ...extra,
+    });
+    const group = {
+      runId: 'run1', label: '三视图', sourceAssetId: '', createdAt: '', complete: false,
+      slots: [slot('front', '正面', { taskId: 't1', outputAssetId: 'x1' }), slot('left', '左侧', { outputAssetId: 'up2', replaced: true })],
+      modelSource: { slot: 'front', available: true, taskId: 't1', assetId: 'x1', note: '' },
+    };
+    expect(actions().multiviewToThreeD(group, model)).toBe(true);
+    const request = useStudioStore.getState().turnRequest;
+    expect(request?.selection).toEqual([]);
+    expect(request?.multiview).toEqual({ group: 'run1', model: 'mv', views: [{ view: 'front', assetId: 'x1', taskId: 't1' }, { view: 'left', assetId: 'up2' }] });
+    expect(request?.text).toContain('正面 / 左侧');
+  });
+});

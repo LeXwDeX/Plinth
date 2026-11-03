@@ -398,6 +398,14 @@ func (s *Server) legacySendChatMessage(
 		DomainModels: chatDomainModels(body, requestFields.DomainModels),
 		InputSource:  chatString(body, requestFields.InputSource),
 	}
+	if raw, present := body[requestFields.Multiview]; present && requestFields.Multiview != "" && string(raw) != "null" {
+		var multiview chat.MultiviewRequest
+		if err := json.Unmarshal(raw, &multiview); err != nil || !multiview.Valid() {
+			s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidParameters)
+			return
+		}
+		options.Multiview = &multiview
+	}
 	assistant, err := s.chat.StartTurn(request.Context(), chat.StartTurn{
 		OwnerID:   principal.ID(),
 		SessionID: sessionID,
@@ -432,6 +440,8 @@ func (s *Server) legacySendChatMessage(
 			http.StatusBadRequest,
 			s.application.Chat.Presentation.Messages.EmptyMessage,
 		)
+	case errors.Is(err, chat.ErrInvalidMultiview):
+		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidParameters)
 	case errors.Is(err, chat.ErrInvalidInputSource):
 		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidInputSource)
 	case errors.Is(err, chat.ErrCanvasSourceMissing):
@@ -713,7 +723,7 @@ func (s *Server) chatMessageWire(locale string, message chat.Message) map[string
 		tools = append(tools, item)
 	}
 	toolJSON, _ := json.Marshal(tools)
-	return map[string]any{
+	wire := map[string]any{
 		fields.ID:          message.ID,
 		fields.SessionID:   message.SessionID,
 		fields.Role:        message.Role,
@@ -723,6 +733,11 @@ func (s *Server) chatMessageWire(locale string, message chat.Message) map[string
 		fields.ToolCalls:   string(toolJSON),
 		fields.CreatedAt:   message.CreatedAt,
 	}
+	// #65: the structured multiview request, so regenerating the reply binds the same pictures and views.
+	if message.Multiview != nil && fields.Multiview != "" {
+		wire[fields.Multiview] = message.Multiview
+	}
+	return wire
 }
 
 // chatAttachmentWire projects a message's attachments with the Schema's member

@@ -17,6 +17,8 @@ import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { useObjectActions } from '@/hooks/use-object-actions';
 import { useStageViewer } from '@/hooks/use-stage-viewer';
 import { useThreeViews } from '@/hooks/use-three-views';
+import { useWorkspaceOfferings } from '@/hooks/use-workspace-offerings';
+import { groupMultiview, pickMultiviewModel } from '@/lib/workspace/three-view';
 import { taskAssetRoute } from '@/lib/workspace/model-formats';
 import { tileOfObject, useSessionVersions } from '@/hooks/use-session-versions';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
@@ -37,7 +39,7 @@ import { useCanvasStore } from '@/store/canvas-store';
 import { CAPTURE_BLOCK_TEXT, useModelCaptureBlock } from '@/hooks/use-model-capture-block';
 import { useChatStore } from '@/store/chat-store';
 import { useStudioStore } from '@/store/studio-store';
-import type { CurrentObject } from '@/store/workspace-store';
+import { useWorkspaceStore, type CurrentObject } from '@/store/workspace-store';
 
 const NO_MESSAGES: never[] = [];
 
@@ -73,7 +75,9 @@ type ActionBinding = PlainBinding | PanelBinding;
 export function StageHeader({ object }: { object: CurrentObject | null }) {
   const { schema } = useProductSchema();
   const { proxyAssetUrl } = useAssetURLRewriter();
-  const { openOnStage, toThreeD, captureToTwoD } = useObjectActions();
+  const { openOnStage, toThreeD, inputPictureToThreeD, multiviewToThreeD, captureToTwoD } = useObjectActions();
+  const { offeringsByCapability: modelOfferings } = useWorkspaceOfferings(schema, 'model-3d');
+  const pickedModel = useWorkspaceStore((state) => state.modelByDomain['model-3d']);
   const captureBlock = useModelCaptureBlock(object?.taskId);
   const sessionId = useChatStore((state) => state.activeSessionId);
   const messages = useChatStore((state) => state.messagesBySession[sessionId ?? ''] ?? NO_MESSAGES);
@@ -102,8 +106,17 @@ export function StageHeader({ object }: { object: CurrentObject | null }) {
   const older = object !== null && isOlderVersion(versions.tiles, tile?.key ?? null);
   const label = object ? versionLabel(schema, tile, object.kind) : text('ui.studio.stage.board');
   const group = tile && tile.views.length > 0 ? threeViews.find((item) => `g:${item.runId}` === tile.key) ?? null : null;
-  // A three-view group makes a 3D model from its front view only, whichever view is on the stage.
-  const frontObject: CurrentObject | null = group && group.modelSource.available && sessionId
+  // The 3D pick when it is a multiview model (#65); only then does 转 3D use the group's views.
+  const multiviewPick = (() => {
+    const model = pickMultiviewModel(modelOfferings, pickedModel ?? undefined);
+    return model && model.modelId === pickedModel ? model : null;
+  })();
+  // Otherwise a three-view group makes a 3D model from its front view only, whichever view is on the stage.
+  // A front view the person replaced with an upload has no Task (#65): its input asset is converted instead.
+  const replacedFront = group && group.modelSource.available && !group.modelSource.taskId
+    ? schema.runtime.http.routes.asset_item.replace('{assetID}', encodeURIComponent(group.modelSource.assetId))
+    : '';
+  const frontObject: CurrentObject | null = group && group.modelSource.available && group.modelSource.taskId && sessionId
     ? (() => {
       const url = proxyAssetUrl(taskAssetRoute(schema, group.modelSource.taskId, group.modelSource.assetId), group.modelSource.taskId);
       return url ? { taskId: group.modelSource.taskId, kind: 'image' as const, url, assetId: group.modelSource.assetId, imageUrls: [url], sessionId } : null;
@@ -155,12 +168,20 @@ export function StageHeader({ object }: { object: CurrentObject | null }) {
         target: text('ui.studio.stage.action.remove_background_board_target'),
       },
     to_3d: object
-      ? {
-        run: () => toThreeD(frontObject ?? object),
-        disabled: group !== null && frontObject === null,
-        reason: text('ui.studio.three_view.to_3d_wait'),
-        ...(group?.modelSource.note ? { target: group.modelSource.note } : {}),
-      }
+      ? multiviewPick && group
+        ? {
+          // #65: the 3D model picked takes several views (its Schema declaration), so a group on the stage is
+          // made into one model from its finished views, as the card's 用三视图生成 3D does.
+          run: () => multiviewToThreeD(group, multiviewPick),
+          disabled: !groupMultiview(group, multiviewPick).ready,
+          reason: text('ui.studio.three_view.multiview_wait'),
+        }
+        : {
+          run: () => (replacedFront ? inputPictureToThreeD(replacedFront) : toThreeD(frontObject ?? object)),
+          disabled: group !== null && frontObject === null && replacedFront === '',
+          reason: text('ui.studio.three_view.to_3d_wait'),
+          ...(group?.modelSource.note ? { target: group.modelSource.note } : {}),
+        }
       : null,
     retexture_with_image: object ? { render: (view) => <RetextureWithImageAction object={object} view={view} /> } : null,
     capture_2d: object

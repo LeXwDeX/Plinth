@@ -601,7 +601,7 @@ func (r *Repository) ListMessages(
 		return nil, chat.ErrSessionNotFound
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, session_id, role, content, image_urls, tool_calls, attachments, created_at
+		SELECT id, session_id, role, content, image_urls, tool_calls, attachments, multiview, created_at
 		FROM go_chat_messages
 		WHERE session_id = ?
 		ORDER BY created_at ASC, rowid ASC`,
@@ -652,7 +652,7 @@ func (r *Repository) ListMessagesPage(
 	}
 	args = append(args, query.Limit+1)
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, session_id, role, content, image_urls, tool_calls, attachments, created_at, rowid
+		SELECT id, session_id, role, content, image_urls, tool_calls, attachments, multiview, created_at, rowid
 		FROM go_chat_messages
 		WHERE `+where+`
 		ORDER BY created_at DESC, rowid DESC LIMIT ?`, args...)
@@ -749,15 +749,19 @@ func (r *Repository) InsertMessageIfAbsent(
 		return false, err
 	}
 	defer tx.Rollback()
+	multiviewJSON, err := marshalMultiview(message.Multiview)
+	if err != nil {
+		return false, err
+	}
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO go_chat_messages (
-			id, session_id, role, content, image_urls, tool_calls, attachments, created_at
+			id, session_id, role, content, image_urls, tool_calls, attachments, multiview, created_at
 		)
-		SELECT ?, ?, ?, ?, ?, ?, ?, ?
+		SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
 		WHERE EXISTS (SELECT 1 FROM go_chat_sessions WHERE id = ? AND owner_id = ?)
 		ON CONFLICT(id) DO NOTHING`,
 		message.ID, message.SessionID, message.Role, message.Content,
-		string(imagesJSON), toolsJSON, attachmentsJSON, formatTime(message.CreatedAt),
+		string(imagesJSON), toolsJSON, attachmentsJSON, multiviewJSON, formatTime(message.CreatedAt),
 		message.SessionID, ownerID)
 	if err != nil {
 		return false, fmt.Errorf("insert chat message: %w", err)
@@ -1419,6 +1423,19 @@ func marshalAttachments(attachments []chat.Attachment) (string, error) {
 	return string(encoded), nil
 }
 
+// marshalMultiview stores a message's structured multiview request (#65); a
+// message without one stores the empty string.
+func marshalMultiview(request *chat.MultiviewRequest) (string, error) {
+	if request == nil {
+		return "", nil
+	}
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		return "", fmt.Errorf("encode chat multiview: %w", err)
+	}
+	return string(encoded), nil
+}
+
 type chatMessageScanner interface {
 	Scan(...any) error
 }
@@ -1428,6 +1445,7 @@ func scanChatMessage(scanner chatMessageScanner) (chat.Message, error) {
 	var imagesJSON string
 	var toolsJSON string
 	var attachmentsJSON string
+	var multiviewJSON string
 	var createdAt string
 	if err := scanner.Scan(
 		&message.ID,
@@ -1437,6 +1455,7 @@ func scanChatMessage(scanner chatMessageScanner) (chat.Message, error) {
 		&imagesJSON,
 		&toolsJSON,
 		&attachmentsJSON,
+		&multiviewJSON,
 		&createdAt,
 	); err != nil {
 		return chat.Message{}, err
@@ -1449,6 +1468,12 @@ func scanChatMessage(scanner chatMessageScanner) (chat.Message, error) {
 	}
 	if err := json.Unmarshal([]byte(attachmentsJSON), &message.Attachments); err != nil {
 		return chat.Message{}, fmt.Errorf("decode chat attachments: %w", err)
+	}
+	if multiviewJSON != "" {
+		message.Multiview = &chat.MultiviewRequest{}
+		if err := json.Unmarshal([]byte(multiviewJSON), message.Multiview); err != nil {
+			return chat.Message{}, fmt.Errorf("decode chat multiview: %w", err)
+		}
 	}
 	var err error
 	message.CreatedAt, err = parseTime(createdAt)
@@ -1472,10 +1497,14 @@ func insertChatMessage(
 	if err != nil {
 		return err
 	}
+	multiviewJSON, err := marshalMultiview(message.Multiview)
+	if err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO go_chat_messages (
-			id, session_id, role, content, image_urls, tool_calls, attachments, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, session_id, role, content, image_urls, tool_calls, attachments, multiview, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		message.ID,
 		message.SessionID,
 		message.Role,
@@ -1483,6 +1512,7 @@ func insertChatMessage(
 		string(imagesJSON),
 		toolsJSON,
 		attachmentsJSON,
+		multiviewJSON,
 		formatTime(message.CreatedAt),
 	)
 	return err

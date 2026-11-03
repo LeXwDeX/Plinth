@@ -66,7 +66,7 @@ func TestThreeViewSkillUsesPreparedGrantAndOnePaidTask(t *testing.T) {
 	_, handler, cookie, session := grantTestBrowserWithApplication(t, nil, []string{"user"})
 	asset := uploadSkillSource(t, handler, cookie)
 	createBody := `{"session_id":"` + session + `","recipe_id":"image-three-view",` +
-		`"recipe_revision":"2026-10-13.1","offering_id":"openai/gpt-image-2/image-to-image",` +
+		`"recipe_revision":"2026-11-03.65.1","offering_id":"openai/gpt-image-2/image-to-image",` +
 		`"source_asset_id":"` + asset + `"}`
 	create := grantTestRequest(t, handler, cookie, http.MethodPost, "/api/v1/skill-runs", createBody, "three-view-request")
 	if create.Code != http.StatusCreated {
@@ -80,7 +80,7 @@ func TestThreeViewSkillUsesPreparedGrantAndOnePaidTask(t *testing.T) {
 			} `json:"spec"`
 		} `json:"steps"`
 	}
-	if err := json.Unmarshal(create.Body.Bytes(), &run); err != nil || run.ID == "" || len(run.Steps) != 3 {
+	if err := json.Unmarshal(create.Body.Bytes(), &run); err != nil || run.ID == "" || len(run.Steps) != 4 {
 		t.Fatalf("three-view run: %s %v", create.Body.String(), err)
 	}
 	replayedCreate := grantTestRequest(t, handler, cookie, http.MethodPost, "/api/v1/skill-runs", createBody, "three-view-request")
@@ -145,7 +145,10 @@ func TestThreeViewRecipePublicationPreservesOldRunAndPreparedInputs(t *testing.T
 	}
 	legacy := revised
 	legacy.Revision = "2026-09-29.1"
-	legacy.Steps = append([]catalog.ChatSkillRecipeStepSchema(nil), revised.Steps...)
+	// The legacy recipe had three views: front, side and back (#65 made them
+	// front, left, back and an optional right).
+	legacy.Steps = append([]catalog.ChatSkillRecipeStepSchema(nil), revised.Steps[:3]...)
+	legacy.Steps[1].Key, legacy.Steps[1].Label = "side", "侧面"
 	legacyPrompts := []string{
 		"Use the reference character as the exact identity. Render a clean full-body front view, facing the camera. Preserve clothing, colors, facial features, proportions, and accessories. Neutral pose, plain background, no text.",
 		"Use the reference character as the exact identity. Render a clean full-body right-side profile view. Preserve clothing, colors, facial features, proportions, and accessories. Neutral pose, plain background, no text.",
@@ -173,6 +176,13 @@ func TestThreeViewRecipePublicationPreservesOldRunAndPreparedInputs(t *testing.T
 		if document.Application.Chat.Skills.Recipes[index].ID == revised.ID {
 			document.Application.Chat.Skills.Recipes[index] = legacy
 		}
+	}
+	if english, ok := document.Application.Localization.Bundles["en"]; ok {
+		prefix := "chat.skills.recipes[id=image-three-view].steps[key="
+		delete(english.Fields, prefix+"left].label")
+		delete(english.Fields, prefix+"right].label")
+		english.Fields[prefix+"side].label"] = "Side"
+		document.Application.Localization.Bundles["en"] = english
 	}
 	encoded, err := json.Marshal(document)
 	if err != nil {

@@ -227,6 +227,10 @@ func (s *Server) agentConsentGet(writer http.ResponseWriter, request *http.Reque
 			} else {
 				note = generationtool.ReferenceLimitNote(tool, offering, operation.ReferenceCount, operation.ReferenceTotal, text)
 			}
+			if views := generationtool.ReferenceViewsNote(tool, offering, s.application.Chat.ThreeView.Multiview,
+				prepared.NormalizedInput, text); views != "" {
+				note = views
+			}
 			if note != "" {
 				pending["reference_note"] = note
 			}

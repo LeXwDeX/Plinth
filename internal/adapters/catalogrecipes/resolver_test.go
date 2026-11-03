@@ -18,11 +18,15 @@ func TestThreeViewRecipeResolvesSelectedImageOffering(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("resolve: %+v %v", recipe, err)
 	}
-	if recipe.Revision != "2026-10-13.1" || len(recipe.Steps) != 3 {
+	if recipe.Revision != "2026-11-03.65.1" || len(recipe.Steps) != 4 {
 		t.Fatalf("unexpected versioned recipe: %+v", recipe)
 	}
-	for index, key := range []string{"front", "side", "back"} {
+	// The views are the multiview view keys; only the right view is optional (#65).
+	for index, key := range []string{"front", "left", "back", "right"} {
 		step := recipe.Steps[index]
+		if step.Optional != (key == "right") {
+			t.Fatalf("%s optional = %v", key, step.Optional)
+		}
 		if step.Key != key || step.OfferingID != "openai/gpt-image-2/image-to-image" ||
 			step.PromptParameter != "prompt" || step.SourceParameter != "reference_assets" ||
 			step.OfferingRevision == "" || step.PromptTemplate == "" {

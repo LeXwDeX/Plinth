@@ -12,6 +12,7 @@
 #     新容器或健康失败时按备份范围恢复并以旧镜像标签重新拉起。仅 dev-test 可设
 #     RELEASE_BACKUP_SCOPE=database（只备份/恢复 data，资产与 web-data 保留），
 #     健康且成功清单写入后按 RELEASE_BACKUP_KEEP（1-2）回收更早的已结束发布备份。
+#     full 范围也可设 RELEASE_BACKUP_KEEP（#66，formal-test 用），同样只在成功路径清理。
 #
 # 用法: bash release-server-steps.sh <tag> <sha> <remote_root>
 #
@@ -24,9 +25,9 @@
 #   RELEASE_PROTECT_PROJECTS 共享主机上其他 Plinth Compose 项目（逗号分隔，环境文件
 #                            protect_projects）；其容器引用的镜像不被清理
 #   RELEASE_IMAGE_KEEP       镜像保留数（缺省 5）
-#   RELEASE_BACKUP_SCOPE     full（缺省，全量备份且不清理）或 database（仅 dev-test；
+#   RELEASE_BACKUP_SCOPE     full（缺省，全量备份；不设 KEEP 时不清理）或 database（仅 dev-test；
 #                            只备份/恢复 production/data，发布成功后再清理旧备份）
-#   RELEASE_BACKUP_KEEP      仅 database 模式必填，保留最新两个已结束发布备份，
+#   RELEASE_BACKUP_KEEP      database 模式必填，full 模式可选（设置即在成功后清理），保留最新两个已结束发布备份，
 #                            取值 1-2；进行中的快照可临时排除，诊断日志独立保留
 #   同一发布根的发布备份/恢复、备份清理与手工恢复共用 <root>/.release.lock；
 #   本脚本在构建或改动数据前获取，retention 继承该描述符，缺失或伪造即拒绝。
@@ -77,13 +78,13 @@ if ! [[ "$SINGLE_STACK" =~ ^[01]$ ]] || ! [[ "$PROTECT_PROJECTS" =~ ^([a-z0-9][a
 fi
 # #364: only the disposable dev-test stack may opt into a database-only
 # snapshot. The default stays the full data/storage-go/web-data backup and no
-# backup retention; formal-test never sets these variables.
+# backup retention; a full backup may set RELEASE_BACKUP_KEEP (#66).
 BACKUP_SCOPE=${RELEASE_BACKUP_SCOPE:-full}
 BACKUP_KEEP=${RELEASE_BACKUP_KEEP:-}
 case "$BACKUP_SCOPE" in
   full)
-    if [ -n "$BACKUP_KEEP" ]; then
-      echo "[server] RELEASE_BACKUP_KEEP requires RELEASE_BACKUP_SCOPE=database; nothing was changed" >&2
+    if [ -n "$BACKUP_KEEP" ] && ! [[ "$BACKUP_KEEP" =~ ^[12]$ ]]; then
+      echo "[server] RELEASE_BACKUP_KEEP must be 1-2 when set; nothing was changed" >&2
       exit 1
     fi
     BACKUP_TARGETS=(data storage-go web-data)
@@ -377,9 +378,9 @@ retain_test_images() {
 }
 
 retain_release_backups() {
-  # Only a database-only dev-test release prunes old snapshots, and only after
-  # the candidate is healthy and the success manifest is written.
-  [ "$BACKUP_SCOPE" = database ] || return 0
+  # Old snapshots are pruned only when RELEASE_BACKUP_KEEP is set, and only
+  # after the candidate is healthy and the success manifest is written.
+  [ -n "$BACKUP_KEEP" ] || return 0
   local helper="$APP/scripts/retain-release-backups.py"
   if [ ! -f "$helper" ]; then
     echo "[server] WARNING: release backup retention helper is missing; release remains successful" >&2

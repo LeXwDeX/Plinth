@@ -166,6 +166,7 @@ const (
 	SemanticMask           = schema.SemanticMask
 	SemanticNegativePrompt = schema.SemanticNegativePrompt
 	SemanticReferenceImage = schema.SemanticReferenceImage
+	SemanticReferenceViews = schema.SemanticReferenceViews
 	SemanticPolycount      = schema.SemanticPolycount
 	SemanticOutputSize     = schema.SemanticOutputSize
 	SemanticQuality        = schema.SemanticQuality

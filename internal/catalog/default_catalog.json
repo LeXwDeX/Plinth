@@ -4343,7 +4343,7 @@
         "ui.studio.continue.armed": "下一次的要求会从 {label} 继续，结果会成为它的分支。",
         "ui.studio.three_view.title": "三视图",
         "ui.studio.three_view.progress": "已完成 {done} / {total}",
-        "ui.studio.three_view.complete": "三张都已完成",
+        "ui.studio.three_view.complete": "必需视图都已完成",
         "ui.studio.three_view.slots": "三个视图",
         "ui.studio.three_view.status.not_started": "未开始",
         "ui.studio.three_view.status.awaiting_approval": "等待批准",
@@ -4364,6 +4364,28 @@
         "ui.studio.three_view.to_3d": "转 3D",
         "ui.studio.three_view.to_3d_wait": "正面图完成后才能转 3D。",
         "ui.studio.three_view.waiting_approval": "在“批准”卡片上批准后才会开始。",
+        "ui.studio.three_view.optional": "可选",
+        "ui.studio.three_view.replaced": "已替换",
+        "ui.studio.three_view.replace": "替换",
+        "ui.studio.three_view.replace_hint": "拖入或上传图片，替换这一张",
+        "ui.studio.three_view.replace_failed": "替换失败，请重试。",
+        "ui.studio.three_view.replace_type": "只能用 PNG 或 JPEG 图片替换。",
+        "ui.studio.three_view.generate_rest": "生成剩余视图",
+        "ui.studio.three_view.generate_rest_with_cost": "生成剩余视图（约 {credits} 积分）",
+        "ui.studio.three_view.to_3d_multiview": "用三视图生成 3D（{model}）",
+        "ui.studio.three_view.to_3d_front_only": "只用正面转 3D",
+        "ui.studio.three_view.multiview_uses": "将使用：{views}",
+        "ui.studio.three_view.multiview_wait": "正面和至少一个其他视角完成后，才能用三视图生成 3D。",
+        "ui.studio.three_view.multiview_turn": "用这组三视图的 {views} 视图生成 3D 模型",
+        "ui.studio.three_view.view_separator": " / ",
+        "ui.studio.multiview_upload.question": "这几张图是同一物体的多个视角吗？",
+        "ui.studio.multiview_upload.hint": "给每张图标上视角（必须有正面），确认后用 {model} 生成一个 3D 模型。",
+        "ui.studio.multiview_upload.view_none": "不用这张",
+        "ui.studio.multiview_upload.confirm": "用这些视角生成 3D",
+        "ui.studio.multiview_upload.dismiss": "不是",
+        "ui.studio.multiview_upload.turn": "用这几张图的 {views} 视图生成 3D 模型",
+        "ui.studio.multiview_upload.invalid": "每个视角只能用一次，必须有正面，且至少用两张图。",
+        "ui.pending_approval.view_label": "{view}视图",
         "ui.studio.strip.more": "还有 {count} 个",
         "ui.studio.strip.more_one": "还有 {count} 个",
         "ui.studio.strip.more_title": "同一来源的其他结果",
@@ -4712,6 +4734,7 @@
           "selection": "selection",
           "mentions": "mentions",
           "input_source": "inputSource",
+          "multiview": "multiview",
           "domain_models": "domainModels",
           "from_id": "fromId",
           "turn_canceled": "stopped",
@@ -4733,6 +4756,7 @@
           "content": "content",
           "image_urls": "imageUrls",
           "attachments": "attachments",
+          "multiview": "multiview",
           "tool_calls": "toolCalls",
           "tool_name": "name",
           "tool_arguments": "arguments",
@@ -5365,7 +5389,7 @@
         {
           "name": "create_three_view",
           "execution": {"implementation_key":"skill.prepare","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":[],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
-          "description": "Start the image-three-view recipe from exactly one user-selected image and the image-to-image model selected by the human. This prepares the first (front) view and requests approval by the session approval mode (an image step is approved automatically unless the session policy says otherwise). The side and back views do not start by themselves: the user starts each one from the three-view card (the continue button), and a failed view can be retried alone. All three views form one group. A 3D model made from the group uses the front view only. Never claim all three views are complete after this call.",
+          "description": "Start the image-three-view recipe from exactly one user-selected image and the image-to-image model selected by the human. This prepares the first (front) view and requests approval by the session approval mode (an image step is approved automatically unless the session policy says otherwise). The left and back views (and the optional right view) do not start by themselves: the user starts each one from the three-view card (the continue button, or generate remaining views), and a failed view can be retried or replaced alone. The views form one group whose run ID the result names. To make one 3D model from the finished views, call create_model_3d_from_views with three_view_group set to that run ID; the server reads the pictures and their views from the group. Making a 3D model from the front view alone uses create_model_3d_from_image. Never claim all views are complete after this call.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -5661,7 +5685,7 @@
           "name": "create_model_3d_from_views",
           "canvas_source": "bind",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["image-to-3d"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
-          "description": "Generate one 3D model from several views of the SAME object with Tripo multiview image-to-3D. Use it only when the user gives 2 to 4 views of one object (a front view plus left, back or right views, for example the four pictures of a four-view image group or a front/side/back sheet the user uploaded) and wants a 3D model. Pass the handles in front, left, back, right order, or say which view each handle is in reference_views (front, left, back, right); a front view is required. For one picture, or pictures of different objects, use create_model_3d_from_image instead. The estimated native price is the same as Tripo image to 3D.",
+          "description": "Generate one 3D model from several views of the SAME object with a multiview image-to-3D model. For a three-view group of this chat, pass three_view_group (the group's run ID) and nothing else about the pictures: the server reads the finished views and their view keys from the group. Otherwise use it only when the user gives 2 to 4 views of one object (a front view plus left, back or right views, for example the four pictures of a four-view image group) and wants a 3D model: pass the handles in front, left, back, right order, or say which view each handle is in reference_views (front, left, back, right); a front view is required. Left and right are the object's own left and right sides. For one picture, or pictures of different objects, use create_model_3d_from_image instead. The estimated native price is the same as Tripo image to 3D.",
           "ignore_user_model": true,
           "offering_argument": "model",
           "default_to_selection": true,
@@ -5676,12 +5700,16 @@
                 "enum": ["tripo-v3.1-multiview"],
                 "description": "The multiview image-to-3D model to run."
               },
+              "three_view_group": {
+                "type": "string",
+                "description": "The run ID of a three-view group of this chat. The server takes the group's finished views and their view keys; do not pass reference_handles or reference_views with it."
+              },
               "reference_handles": {
                 "type": "array",
                 "items": { "type": "string" },
                 "minItems": 2,
                 "maxItems": 4,
-                "description": "2 to 4 image handles (such as @img3) of the same object, in front, left, back, right order unless reference_views says otherwise."
+                "description": "2 to 4 image handles (such as @img3) of the same object, in front, left, back, right order unless reference_views says otherwise. Omit when three_view_group is given."
               },
               "reference_image_indices": {
                 "type": "array",
@@ -5697,7 +5725,7 @@
                 "description": "Optional view name of each picture, in the same order as the handles."
               }
             },
-            "required": ["model", "reference_handles"],
+            "required": ["model"],
             "additionalProperties": false
           },
           "argument_mappings": {
@@ -6641,7 +6669,7 @@
             "recommended_size": "",
             "thumbnail_path": "",
             "raw_image_url": "",
-            "prompt": "用选中的或随消息附上的那一张图生成三视图：先出正面图，侧面和背面由用户在对话里的三视图卡片上逐张继续。",
+            "prompt": "用选中的或随消息附上的那一张图生成三视图：先出正面图，左侧、背面（和可选的右侧）由用户在对话里的三视图卡片上继续。",
             "tool": "create_three_view",
             "requires_image": true,
             "default_message": "用这张图生成三视图",
@@ -6715,7 +6743,7 @@
         "recipes": [
           {
             "id": "image-three-view",
-            "revision": "2026-10-13.1",
+            "revision": "2026-11-03.65.1",
             "steps": [
               {
                 "key": "front",
@@ -6725,10 +6753,10 @@
                 "output_role": "image"
               },
               {
-                "key": "side",
-                "label": "侧面",
+                "key": "left",
+                "label": "左侧",
                 "capability": "image-to-image",
-                "prompt_template": "Use the subject in the reference image as the exact identity. Render a clean right-side profile view of that same subject. Preserve its category, shape, geometry, proportions, colors, materials, surface markings and existing features. Keep markings on their original surfaces; show or hide them only as required by the view, never move them to a different surface. Change only the viewing angle. Keep the same depicted extent of the subject in frame on a plain background. If the reference already depicts a character, retain its existing anatomy, facial features, clothing, accessories and pose. For non-character objects, do not add bodies, limbs, faces, clothing or other character features. Do not add captions, view labels, text or decoration.",
+                "prompt_template": "Use the subject in the reference image as the exact identity. Render a clean left view of that same subject: the subject is turned 90 degrees so that its own left side faces the camera, as if the camera stood at the subject's left looking at its left flank. Preserve its category, shape, geometry, proportions, colors, materials, surface markings and existing features. Keep markings on their original surfaces; show or hide them only as required by the view, never move them to a different surface. Change only the viewing angle. Keep the same depicted extent of the subject in frame on a plain background. If the reference already depicts a character, retain its existing anatomy, facial features, clothing, accessories and pose. For non-character objects, do not add bodies, limbs, faces, clothing or other character features. Do not add captions, view labels, text or decoration.",
                 "output_role": "image"
               },
               {
@@ -6737,6 +6765,14 @@
                 "capability": "image-to-image",
                 "prompt_template": "Use the subject in the reference image as the exact identity. Render a clean back view of that same subject. Preserve its category, shape, geometry, proportions, colors, materials, surface markings and existing features. Keep markings on their original surfaces; show or hide them only as required by the view, never move them to a different surface. Change only the viewing angle. Keep the same depicted extent of the subject in frame on a plain background. If the reference already depicts a character, retain its existing anatomy, facial features, clothing, accessories and pose. For non-character objects, do not add bodies, limbs, faces, clothing or other character features. Do not add captions, view labels, text or decoration.",
                 "output_role": "image"
+              },
+              {
+                "key": "right",
+                "label": "右侧",
+                "capability": "image-to-image",
+                "prompt_template": "Use the subject in the reference image as the exact identity. Render a clean right view of that same subject: the subject is turned 90 degrees so that its own right side faces the camera, as if the camera stood at the subject's right looking at its right flank. Preserve its category, shape, geometry, proportions, colors, materials, surface markings and existing features. Keep markings on their original surfaces; show or hide them only as required by the view, never move them to a different surface. Change only the viewing angle. Keep the same depicted extent of the subject in frame on a plain background. If the reference already depicts a character, retain its existing anatomy, facial features, clothing, accessories and pose. For non-character objects, do not add bodies, limbs, faces, clothing or other character features. Do not add captions, view labels, text or decoration.",
+                "output_role": "image",
+                "optional": true
               }
             ]
           }
@@ -6938,7 +6974,7 @@
         "model_source_step_key": "front",
         "label": "三视图",
         "maximum_listed": 10,
-        "model_source_note": "用三视图做 3D 模型时只使用正面图，侧面和背面图不参与。",
+        "model_source_note": "「只用正面转 3D」只用正面图；「用三视图生成 3D」按视角使用已完成的正面、左侧、背面和右侧图。",
         "queue_limit_seconds": 1800,
         "messages": {
           "agent_started": "三视图运行 {run} 的 {view} 步骤已提交（{approval}，估算 {credits} 积分），任务 {task}。三视图的其余视图不会自动开始，用户在三视图卡片上逐个点“继续生成”才会开始；在三张都完成之前，不要说三视图已全部完成。",
@@ -6946,7 +6982,22 @@
           "approval_human": "用户已批准",
           "approval_policy": "按会话批准方式自动批准，不是用户点的批准",
           "model_source_not_yet": "这组三视图的正面图还没有生成完成，不能用它做 3D 模型。请等正面图完成，或在三视图卡片上重试正面图。",
-          "reference_required": "请明确选择一张图片作为三视图来源。"
+          "reference_required": "请明确选择一张图片作为三视图来源。",
+          "group_not_found": "这个三视图组不在本会话里，没有提交任务。请用本会话三视图卡片所属的组（create_three_view 结果里的运行 ID）再调用，或请用户在三视图卡片上点「用三视图生成 3D」。",
+          "group_not_ready": "这组三视图还不能用于多视图生成 3D，没有提交任务：需要正面图和至少一个其他视角都已完成。请告诉用户先在三视图卡片上生成剩余视图，或改用「只用正面转 3D」。",
+          "views_changed": "用户点按钮之后这组三视图有视图被替换或重新生成了，没有提交任务。请告诉用户在三视图卡片上重新点「用三视图生成 3D」。",
+          "views_invalid": "图片的视角标注无效，没有提交任务：每张图只能标一个所选模型支持的视角，不能重复，且必须有正面。请让用户重新标注视角。"
+        },
+        "multiview": {
+          "tool": "create_model_3d_from_views",
+          "group_argument": "three_view_group",
+          "views_argument": "reference_views",
+          "required_view": "front",
+          "minimum_views": 2,
+          "group_directive": "\n\n【三视图生成 3D】用户在三视图卡片上点了「用三视图生成 3D」，用到的视角：{views}。本轮必须调用工具 {tool}：three_view_group 填 {group}，model 填 {model}。图片和视角由服务端从这组三视图里取，不要填 reference_handles、reference_image_indices 或 reference_views，也不要改用别的工具。",
+          "upload_directive": "\n\n【多视角生成 3D】用户确认随消息附上的图片是同一物体的多个视角，并逐张标了视角：{views}。本轮必须调用工具 {tool}，model 填 {model}。图片和视角由服务端按用户的标注绑定，不要填 reference_handles、reference_image_indices 或 reference_views，也不要改用别的工具。",
+          "views_note": "由 {views} 视图生成",
+          "view_separator": " / "
         }
       },
       "agent_scope": {
@@ -7152,7 +7203,7 @@
             "id": "multiview-to-3d",
             "label": "三视图生成",
             "badge": "Tripo3D",
-            "description": "用同一物体的正面加侧面或背面（2–4 张）生成 3D 模型；图片由 Agent 从对话里取。",
+            "description": "用同一物体的正面加左侧、背面或右侧（2–4 张）生成 3D 模型；三视图组的图片和视角由服务端从组里取。",
             "group": "common",
             "capability": "image-to-3d",
             "model_ids": ["tripo-v3.1-multiview"],
@@ -12052,6 +12103,7 @@
         "chat.tools[name=create_gaussian_splat].model_required_message",
         "chat.three_view.label",
         "chat.three_view.model_source_note",
+        "chat.three_view.multiview.views_note",
         "chat.pending_approvals",
         "model_delivery",
         "offerings"
@@ -13809,7 +13861,7 @@
             "ui.studio.continue.armed": "Your next request will continue from {label}, and the result will become a branch of it.",
             "ui.studio.three_view.title": "Three views",
             "ui.studio.three_view.progress": "{done} / {total} completed",
-            "ui.studio.three_view.complete": "All three completed",
+            "ui.studio.three_view.complete": "Required views completed",
             "ui.studio.three_view.slots": "Three views",
             "ui.studio.three_view.status.not_started": "Not started",
             "ui.studio.three_view.status.awaiting_approval": "Awaiting approval",
@@ -13830,6 +13882,28 @@
             "ui.studio.three_view.to_3d": "Convert to 3D",
             "ui.studio.three_view.to_3d_wait": "You can convert to 3D once the front view is completed.",
             "ui.studio.three_view.waiting_approval": "It starts after you approve it on the approval card.",
+            "ui.studio.three_view.optional": "Optional",
+            "ui.studio.three_view.replaced": "Replaced",
+            "ui.studio.three_view.replace": "Replace",
+            "ui.studio.three_view.replace_hint": "Drop or upload a picture to replace this one",
+            "ui.studio.three_view.replace_failed": "Couldn't replace the picture. Try again.",
+            "ui.studio.three_view.replace_type": "Only PNG or JPEG pictures can replace a view.",
+            "ui.studio.three_view.generate_rest": "Generate remaining views",
+            "ui.studio.three_view.generate_rest_with_cost": "Generate remaining views (about {credits} credits)",
+            "ui.studio.three_view.to_3d_multiview": "3D from three views ({model})",
+            "ui.studio.three_view.to_3d_front_only": "Front view only to 3D",
+            "ui.studio.three_view.multiview_uses": "Uses: {views}",
+            "ui.studio.three_view.multiview_wait": "3D from three views needs the front view and at least one other view to be completed.",
+            "ui.studio.three_view.multiview_turn": "Make a 3D model from the {views} views of this three-view group",
+            "ui.studio.three_view.view_separator": " / ",
+            "ui.studio.multiview_upload.question": "Are these pictures views of the same object?",
+            "ui.studio.multiview_upload.hint": "Label each picture with its view (a front view is required), then make one 3D model with {model}.",
+            "ui.studio.multiview_upload.view_none": "Don't use",
+            "ui.studio.multiview_upload.confirm": "Make 3D from these views",
+            "ui.studio.multiview_upload.dismiss": "No",
+            "ui.studio.multiview_upload.turn": "Make a 3D model from the {views} views of these pictures",
+            "ui.studio.multiview_upload.invalid": "Use each view once, include a front view and at least two pictures.",
+            "ui.pending_approval.view_label": "{view} view",
             "ui.studio.strip.more": "{count} more",
             "ui.studio.strip.more_one": "{count} more",
             "ui.studio.strip.more_title": "Other results from the same source",
@@ -15107,7 +15181,7 @@
             "chat.presentation.status.queued_submission": "Many tasks are running; queued to submit",
             "chat.skills.tool_directive_template": "\n\n[Selected Skill] The user selected the Skill \"{name}\": {prompt}\nThis turn must be completed with the tool {tool}. The input image is the image selected in the workspace or the image the user attached to the message. Do not substitute another tool, and do not just describe the result in text.",
             "chat.skills.system_skills[id=system-three-view].name_zh": "Three views",
-            "chat.skills.system_skills[id=system-three-view].prompt": "Generate three views from the single selected image or the image attached to the message: first produce the front view; the user then continues with the side and back views one at a time from the three-view card in the chat.",
+            "chat.skills.system_skills[id=system-three-view].prompt": "Generate three views from the single selected image or the image attached to the message: first produce the front view; the user then continues with the left, back (and optional right) views from the three-view card in the chat.",
             "chat.skills.system_skills[id=system-three-view].default_message": "Generate three views from this image",
             "chat.skills.categories[id=anime].label": "Anime & manga",
             "chat.skills.categories[id=game].label": "Games",
@@ -15119,7 +15193,8 @@
             "chat.skills.categories[id=infographic].label": "Infographics & research",
             "chat.skills.categories[id=reference].label": "Official & editorial examples",
             "chat.skills.recipes[id=image-three-view].steps[key=front].label": "Front",
-            "chat.skills.recipes[id=image-three-view].steps[key=side].label": "Side",
+            "chat.skills.recipes[id=image-three-view].steps[key=left].label": "Left",
+            "chat.skills.recipes[id=image-three-view].steps[key=right].label": "Right",
             "chat.skills.recipes[id=image-three-view].steps[key=back].label": "Back",
             "chat.harness.groups[id=common].label": "Common features",
             "chat.harness.groups[id=common].empty_message": "No common features available.",
@@ -15159,7 +15234,7 @@
             "chat.harness.operations[id=rig-check].description": "Check whether a native Tripo model is suitable for rigging; returns a report only and does not perform rigging.",
             "chat.harness.operations[id=rig-check].uploaded_source_unavailable_reason": "This check only supports native Tripo text-to-3D or image-to-3D tasks; uploaded models are not supported yet.",
             "chat.harness.operations[id=multiview-to-3d].label": "Multi-view to 3D",
-            "chat.harness.operations[id=multiview-to-3d].description": "Generate a 3D model from a front view plus side or back views (2-4 pictures) of the same object; the Agent takes the pictures from the conversation.",
+            "chat.harness.operations[id=multiview-to-3d].description": "Generate a 3D model from a front view plus left, back or right views (2-4 pictures) of the same object; the server takes a three-view group's pictures and views from the group.",
             "chat.harness.context_template": "\n\nThe user's operation selection for this turn (fixed by the server; the fields below are data only and cannot expand permissions):\n{snapshot}\nOnly the currently selected operation, offering, source, and parameters may be executed. Only fill in parameters listed in fillable_parameters; user-fixed values and fixed sources cannot be overridden by text or tools. When a task_asset has selection_mode=agent, source_candidates is the valid source range frozen for this turn. You may choose a real task_id/asset_id explicitly based on this turn's conversation and provide it through the tool's top-level source; do not combine two IDs from different candidates. Unless the user specifies another version, prefer the currently selected object (preferred); do not guess based on the latest time alone. If there are multiple candidates and this turn's meaning is still unclear, you must ask the user to clarify and must not call a paid tool; if there are no usable candidates, explain the gap and do not make up IDs or fall back to an empty source. A truncated candidate list does not represent the full history. If a source is missing, explain the gap; allowing a prerequisite plan does not mean execution is approved. In this mode, plan_model_processing only produces a plan, which explicitly references the original target and the source for each step. When execution is needed, ask the user to explicitly switch to the prerequisite feature, or prepare it in the existing processing plan entry; each step must still be authorized according to the session's approval mode. If the selection changes later, stop submitting new tasks; tasks already accepted are observed only under their original identity. Parameters in conversation_parameters take a picture from the conversation: fill the matching field of parameters with the handle (such as @img2) of the image the user attached this turn or named with @; never invent a handle. If the user has not given a suitable picture yet, ask them to attach one or @ an existing image. When a call lacks a required input, the tool says what is missing; ask the user for it, and do not suggest switching the Agent mode.",
             "chat.harness.rejection_message": "This call does not match the operation, service, source, or fixed parameters selected for this turn, so no task was submitted. Please prepare it again according to the current selection.",
             "chat.harness.changed_message": "The operation selection has changed. Please prepare and confirm again according to the new selection. Tasks that were already accepted will not be submitted again.",
@@ -15265,7 +15340,8 @@
             "chat.tools[name=create_creative_lab_design].model_required_message": "Select a Creative Lab template first.",
             "chat.tools[name=build_creative_lab_item].model_required_message": "Select a Creative Lab design preview first.",
             "chat.three_view.label": "Three views",
-            "chat.three_view.model_source_note": "Only the front view is used to make a 3D model from three views; the side and back views are not used.",
+            "chat.three_view.model_source_note": "\"Front view only to 3D\" uses the front view alone; \"3D from three views\" uses the finished front, left, back and right views, each as its own view.",
+            "chat.three_view.multiview.views_note": "Made from the {views} views",
             "chat.pending_approvals.messages.started": "Approved. Generating with {model}.",
             "chat.pending_approvals.messages.succeeded": "{model} finished generating.",
             "chat.pending_approvals.messages.succeeded_with_note": "Finished generating. {note}",
@@ -22933,6 +23009,7 @@
           "name": "reference_views",
           "label": "参考图视角",
           "type": "string-array",
+          "semantic": "reference-views",
           "min_items": 2,
           "max_items": 4,
           "options": [

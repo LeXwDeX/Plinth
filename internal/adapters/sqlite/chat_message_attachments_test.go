@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -126,5 +127,60 @@ func TestMessagesWithoutAttachmentsStayEmpty(t *testing.T) {
 	messages, err := service.ListMessages(ctx, "owner-a", session.ID)
 	if err != nil || len(messages[0].Attachments) != 0 {
 		t.Fatalf("messages = %+v, %v", messages, err)
+	}
+}
+
+// #65: the structured multiview request a user message was sent with survives
+// a reload, so regenerating the reply can send it again; other messages keep none.
+func TestChatMessageMultiviewRequestSurvivesReload(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "multiview.db")
+	repository, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := chat.NewService(chat.ServiceConfig{
+		Repository: repository, DefaultTitle: "default", UserRole: "user", AssistantRole: "assistant",
+		PendingContent: "pending", StreamActive: "active", StreamDone: "done", StreamError: "error",
+		TurnQueued: "queued", TurnRunning: "running", TurnWaitingTask: "waiting_task",
+		TurnDone: "done", TurnError: "error",
+		PlaceholderHealing:   chat.PlaceholderHealingPolicy{StaleAfter: time.Minute, PromptArgument: "prompt", PromptPreviewCharacters: 8, InterruptedMessage: "interrupted", InterruptedPromptTemplate: "{prompt}"},
+		EventFields:          chat.EventFieldPolicy{Type: "type", MessageID: "message_id"},
+		EventTypes:           chat.EventTypePolicy{MessageCreated: "created"},
+		StreamCleanupTTL:     time.Minute,
+		SubscriberBufferSize: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := &chat.MultiviewRequest{Group: "run1", Model: "tripo-v3.1-multiview", Views: []chat.MultiviewView{
+		{View: "front", TaskID: "t1", AssetID: "x1"}, {View: "left", AssetID: "up2"}}}
+	if _, err := service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID, Content: "3D",
+		Options: chat.TurnOptions{Multiview: request}}); err != nil {
+		t.Fatal(err)
+	}
+	// A malformed request never reaches a turn.
+	if _, err := service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID, Content: "x",
+		Options: chat.TurnOptions{Multiview: &chat.MultiviewRequest{Model: "m", Views: []chat.MultiviewView{{View: "front", AssetID: "a"}}}}}); !errors.Is(err, chat.ErrInvalidMultiview) {
+		t.Fatalf("one-view request = %v", err)
+	}
+	if err := repository.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	messages, err := reopened.ListMessages(ctx, "owner-a", session.ID)
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("messages = %+v, %v", messages, err)
+	}
+	if !reflect.DeepEqual(messages[0].Multiview, request) || messages[1].Multiview != nil {
+		t.Fatalf("user multiview = %+v, assistant = %+v", messages[0].Multiview, messages[1].Multiview)
 	}
 }

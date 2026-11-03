@@ -18,6 +18,9 @@ export interface PendingApprovalInput {
   mediaType?: string;
   taskId: string;
   handle: string;
+  /** For a multiview step, the view key and its localized label this picture stands for. */
+  view?: string;
+  viewLabel?: string;
 }
 
 export interface ParameterAdjustment {
@@ -92,6 +95,8 @@ export function parsePendingApprovals(payload: unknown): PendingApproval[] {
         parameter: text(input.parameter), kind: text(input.kind), role: text(input.role), assetId: text(input.asset_id),
         taskId: text(input.task_id), handle: text(input.handle),
         ...(text(input.media_type) ? { mediaType: text(input.media_type) } : {}),
+        ...(text(input.view) ? { view: text(input.view) } : {}),
+        ...(text(input.view_label) ? { viewLabel: text(input.view_label) } : {}),
       };
     });
     result.push({

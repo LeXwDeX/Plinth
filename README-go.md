@@ -201,7 +201,7 @@ GO_IMAGE_TAG=替换为镜像标签 scripts/deploy-go-candidate.sh
 
 ## dev-test 测试环境全量迁移演练
 
-`dev-test` 主机由多个业务共用。本节现行发布命令只涉及 Plinth 的 `dev-test` 栈；同机的 `legacy-formal` 已于 2026-10-30 下线（存档 #74，见 `dev_ops.md`）。各内部环境按环境名部署，入口 `docs/deployment.md`；正式测试环境 `formal-test`（#270）只晋级 `dev-test` 已全部验收的 revision。
+`dev-test` 主机由多个业务共用。本节现行发布命令只涉及 Plinth 的 `dev-test` 栈；`legacy-formal` 已下线，不是可部署环境（存档 #74）。各内部环境按环境名部署，入口 `docs/deployment.md`；正式测试环境 `formal-test`（#270）只晋级 `dev-test` 已全部验收的 revision。
 Plinth 的对话和图片模型出站请求访问 llms 正式服务器
 网关的 `/v1`（地址在 dev-test 运行环境文件 `LLM_BASE_URL`；链路：测试客户端 → `dev-test` Plinth 测试栈 →
 llms 正式服务器；后者不限制客户端与模型）。测试链路上游 key 为
@@ -276,7 +276,7 @@ Nginx Webhook 均已验收。未在 live Provider 上创建计费任务；九类
 
 ### dev-test 后续普通发布（不重跑 ETL）
 
-`dev-test` 是 Plinth 测试栈（Compose 项目为环境文件的 `compose_project`，目录 `<root>/production/`），继续按本节现行命令发布。测试日常发布入口为 `python3 scripts/release-env.py release dev-test`（它向 `scripts/release-go-testenv.sh` 传入必填的 `RELEASE_HOST`、`RELEASE_ROOT`）。同机曾有隔离正式栈 `legacy-formal`（内部存档 #232），已于 2026-10-30 下线（存档 #74），不再有对应的晋级脚本；正式测试环境 `formal-test` 的晋级入口与来源验收报告格式见 `docs/deployment.md`。
+`dev-test` 是 Plinth 测试栈（Compose 项目为环境文件的 `compose_project`，目录 `<root>/production/`），继续按本节现行命令发布。测试日常发布入口为 `python3 scripts/release-env.py release dev-test`（它向 `scripts/release-go-testenv.sh` 传入必填的 `RELEASE_HOST`、`RELEASE_ROOT`）。`legacy-formal` 已下线，不是可部署环境（存档 #74）；正式测试环境 `formal-test` 的晋级入口与来源验收报告格式见 `docs/deployment.md`。
 
 各栈默认 DEBUG，应用日志同时写 stdout（`json-file` `50m × 10`）和各栈 `logs/art-ai.log`（50 MiB 滚动、保留 30 天），响应带 `X-Request-ID` 错误 ID，日志统一脱敏（#233）。详情见 `dev_ops.md`。
 
@@ -335,7 +335,7 @@ Go 原生表的结构升级只允许使用
 migration。需要数据回填或重写时，先在生产快照副本演练并对账，再在停机
 备份后随同一 `main` 镜像执行；失败恢复备份。`cmd/art-ai-etl` 和
 `scripts/finalize-go-production.sh` 只属于一次性 Next → Go 全量迁移；
-`dev-test` 普通发布严禁调用，也不得改写 `migration-ready.txt`。这段只约束原 Next → Go 全量迁移，不适用于 #232 的独立空库正式栈；后者不导入数据，按 `dev_ops.md` 两栈规则晋级。
+`dev-test` 普通发布严禁调用，也不得改写 `migration-ready.txt`。这段只约束原 Next → Go 全量迁移；`formal-test` 不导入数据，按 `docs/deployment.md` 的晋级规则接收版本。
 
 以下内容保留为首次迁移的可审计执行设计，不是每次发布都要重跑的步骤。
 

@@ -47,8 +47,10 @@ type ReferenceResolver interface {
 type ModelSource struct {
 	// Available is true once that view finished.
 	Available bool
-	TaskID    string
-	AssetID   string
+	// TaskID is empty when the person replaced the view with an upload; the
+	// asset is then an input asset.
+	TaskID  string
+	AssetID string
 }
 
 // ThreeViews tells whether a Task is one view of a three-view group of the
@@ -56,7 +58,24 @@ type ModelSource struct {
 // reference picture is replaced by that view before the input is frozen.
 type ThreeViews interface {
 	ModelSource(ctx context.Context, owner, session, taskID string) (source ModelSource, member bool, err error)
+	// GroupViews lists the finished views of one of the owner's groups in
+	// the recipe's order (#65); ErrThreeViewGroupNotFound for a foreign or
+	// missing group.
+	GroupViews(ctx context.Context, owner, session, runID string) ([]GroupView, error)
 }
+
+// GroupView is one finished view of a three-view group: its view key, and the
+// Task and asset of the picture that stands for it. TaskID is empty for a
+// picture the person uploaded in place of the generated one; AssetID is then
+// an input asset.
+type GroupView struct {
+	View    string
+	TaskID  string
+	AssetID string
+}
+
+// ErrThreeViewGroupNotFound: the named group is not one of the owner's in the session.
+var ErrThreeViewGroupNotFound = errors.New("generation tool: three-view group not found")
 
 type Config struct {
 	HarnessResolver *resolve.Service
@@ -76,7 +95,10 @@ type Config struct {
 	Grants        *executiongrant.Service
 	StopRequested func(context.Context, string, string, string) (bool, error)
 	References    ReferenceResolver
-	Chat          catalog.ChatSchema
+	// InputAssetRoute is the Schema's input-asset item route ({assetID}); a
+	// three-view view the person replaced with an upload is named by it (#65).
+	InputAssetRoute string
+	Chat            catalog.ChatSchema
 	// Texts gives the copy of the turn's UI locale for tool results. Nil
 	// keeps the Schema's default-locale copy.
 	Texts *catalog.TextLocalizer
@@ -111,6 +133,7 @@ type Executor struct {
 	grants        *executiongrant.Service
 	stopRequested func(context.Context, string, string, string) (bool, error)
 	references    ReferenceResolver
+	inputAsset    string
 	chat          catalog.ChatSchema
 	texts         *catalog.TextLocalizer
 	modelDelivery catalog.ModelDeliverySchema
@@ -165,6 +188,7 @@ func New(config Config) (*Executor, error) {
 		grants:        config.Grants,
 		stopRequested: config.StopRequested,
 		references:    config.References,
+		inputAsset:    config.InputAssetRoute,
 		chat:          config.Chat,
 		texts:         config.Texts,
 		modelDelivery: config.ModelDelivery,
@@ -367,8 +391,30 @@ func (executor *Executor) Execute(
 		return result, nil
 	}
 	var referenceURLs []string
-	var err error
-	if command.Tool.AcceptReferenceImages == nil || *command.Tool.AcceptReferenceImages {
+	// A multiview step (#65) takes its pictures and views from the person's
+	// structured request or the named three-view group, never from handles.
+	multiview, refusal, err := executor.multiviewSelection(ctx, command, arguments)
+	if err != nil {
+		result := executor.executionFailure(command, "")
+		result.NoSubmission = true
+		return result, err
+	}
+	if refusal != "" {
+		result := executor.failure(command, "", refusal)
+		result.NoSubmission = true
+		return result, nil
+	}
+	if multiview != nil {
+		for _, name := range []string{executor.chat.ThreeView.Multiview.ViewsArgument,
+			executor.chat.Context.ReferenceHandlesArgument, executor.chat.Context.ToolReferenceArgument} {
+			delete(arguments, name)
+		}
+		if multiview.fromRequest && command.Tool.OfferingArgument != "" {
+			model, _ := json.Marshal(multiview.model)
+			arguments[command.Tool.OfferingArgument] = model
+		}
+		referenceURLs = multiview.URLs
+	} else if command.Tool.AcceptReferenceImages == nil || *command.Tool.AcceptReferenceImages {
 		referenceURLs, err = executor.selectReferences(command, arguments)
 		if err != nil {
 			if result, refused := executor.refuseReference(command, err); refused {
@@ -416,6 +462,17 @@ func (executor *Executor) Execute(
 			result.NoSubmission = true
 			return result, err
 		}
+	}
+	if multiview != nil {
+		group := !multiview.fromRequest || (command.Options.Multiview != nil && command.Options.Multiview.Group != "")
+		if refusal := executor.fitMultiviewViews(command, offering, multiview, group); refusal != "" {
+			result := executor.failure(command, "", refusal)
+			result.NoSubmission = true
+			return result, nil
+		}
+		views, _ := json.Marshal(multiview.Views)
+		arguments[executor.chat.ThreeView.Multiview.ViewsArgument] = views
+		referenceURLs = multiview.URLs
 	}
 	// references records a cut of the pictures to fewer than the turn gave.
 	var references referenceUse
@@ -601,7 +658,7 @@ func (executor *Executor) Execute(
 		observe,
 		stepInfo{Credits: offering.EstimateTotalCredits(input), CreditsMetered: offering.CreditsMetered,
 			ExtraCredits:  offering.ExtraCreditDetail(input).Credits,
-			ReferenceNote: executor.referenceNoteFor(command, offering, fact, references)},
+			ReferenceNote: executor.stepReferenceNote(command, offering, fact, references, input)},
 	)
 }
 

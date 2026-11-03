@@ -628,7 +628,8 @@ grep -qx 'backup_targets=data' "$root/production/reports/release-failures/candid
   fail "failure report lacks backup targets"
 echo "PASS server/database-rollback-keeps-assets"
 
-for bad in "RELEASE_BACKUP_SCOPE=database" "RELEASE_BACKUP_SCOPE=full RELEASE_BACKUP_KEEP=2" \
+for bad in "RELEASE_BACKUP_SCOPE=database" "RELEASE_BACKUP_SCOPE=full RELEASE_BACKUP_KEEP=0" \
+  "RELEASE_BACKUP_SCOPE=full RELEASE_BACKUP_KEEP=3" "RELEASE_BACKUP_SCOPE=full RELEASE_BACKUP_KEEP=x" \
   "RELEASE_BACKUP_SCOPE=database RELEASE_BACKUP_KEEP=0" "RELEASE_BACKUP_SCOPE=database RELEASE_BACKUP_KEEP=3" \
   "RELEASE_BACKUP_SCOPE=database RELEASE_BACKUP_KEEP=x" "RELEASE_BACKUP_SCOPE=other RELEASE_BACKUP_KEEP=2"; do
   root=$(new_root "backup-bad-$RANDOM")
@@ -646,6 +647,16 @@ run_steps "$root" S_CONTAINERS=1 S_BACKUP_RETENTION_FAIL=1 "${SHARED[@]}" $(layo
 [ "$RESULT" = 0 ] && grep -q 'WARNING: release backup retention incomplete' "$root/out.log" &&
   grep -q '^candidate ' "$root/releases/manifest.txt" || fail "backup retention failure changed the release result"
 echo "PASS server/backup-retention-warns"
+
+# #66: a full-scope backup may set RELEASE_BACKUP_KEEP and then prunes after success.
+root=$(new_root full-retention); echo previous >"$S_STATE"
+mkdir -p "$root/production/data" "$root/production/storage-go" "$root/production/web-data"
+# shellcheck disable=SC2046
+run_steps "$root" S_CONTAINERS=1 "${SHARED[@]}" $(layout "$root") \
+  RELEASE_BACKUP_SCOPE=full RELEASE_BACKUP_KEEP=2
+[ "$RESULT" = 0 ] && grep -q '^backup-retention .*--keep 2 --apply$' "$S_TRACE" &&
+  grep -q '^candidate ' "$root/releases/manifest.txt" || fail "full backup with keep did not retain backups"
+echo "PASS server/full-backup-retention"
 
 # 2i2. Ephemeral data (#28): overlay file, fresh anonymous volumes, no backup,
 #      old anonymous volumes removed after success, previous image restarts on

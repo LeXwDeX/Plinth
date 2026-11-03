@@ -68,14 +68,24 @@ const (
 	// Retry starts the next attempt of a view whose attempt ended without a
 	// result. It names the attempt the person saw, so a repeat is harmless.
 	Retry Action = "retry"
+	// Replace puts a picture the person uploaded in place of the view (#65).
+	// Repeating it with the same picture changes nothing.
+	Replace Action = "replace"
 )
 
-// Slot is one view of a group.
+// Slot is one view of a group. Its key is the view key the multiview image-to-3D
+// Offering speaks (front, left, back, right, #65); a group made before that
+// may hold another key (side), which no multiview step uses.
 type Slot struct {
 	PriceSource string                  `json:"price_source,omitempty"`
 	NativeQuote *generation.NativeQuote `json:"native_quote,omitempty"`
 	Key         string                  `json:"key"`
 	Label       string                  `json:"label"`
+	// Optional: the group is complete without this view.
+	Optional bool `json:"optional,omitempty"`
+	// Replaced: OutputAssetID is an input asset the person put in place of
+	// the generated picture; TaskID still names the generated attempt.
+	Replaced bool `json:"replaced,omitempty"`
 	Status      Status                  `json:"status"`
 	Attempt     int                     `json:"attempt"`
 	// TaskID is the Task of the current attempt, once it exists.
@@ -98,13 +108,15 @@ type Slot struct {
 	CreditsMetered bool `json:"credits_metered,omitempty"`
 }
 
-// ModelSource says which view a 3D model made from the group uses.
+// ModelSource says which view a 3D model made from the front view alone uses.
 type ModelSource struct {
 	Slot string `json:"slot"`
 	// Available is true once that view finished.
-	Available bool   `json:"available"`
-	TaskID    string `json:"task_id,omitempty"`
-	AssetID   string `json:"asset_id,omitempty"`
+	Available bool `json:"available"`
+	// TaskID is empty when the person replaced the view with an upload; the
+	// asset is then an input asset.
+	TaskID  string `json:"task_id,omitempty"`
+	AssetID string `json:"asset_id,omitempty"`
 	// Note is the Schema's statement that only this view is used.
 	Note string `json:"note"`
 }
@@ -120,6 +132,14 @@ type Group struct {
 	Complete      bool        `json:"complete"`
 	Slots         []Slot      `json:"slots"`
 	ModelSource   ModelSource `json:"model_source"`
+}
+
+// View is one finished view of a group, in the recipe's order (#65). TaskID
+// is empty for a picture the person put in place of the generated one.
+type View struct {
+	Key     string
+	TaskID  string
+	AssetID string
 }
 
 // Sessions proves a session belongs to its owner.
@@ -241,10 +261,13 @@ func (s *Service) project(ctx context.Context, run skillrun.Run) (Group, error) 
 			return Group{}, err
 		}
 		group.Slots = append(group.Slots, slot)
-		group.Complete = group.Complete && slot.Status == Succeeded
+		group.Complete = group.Complete && (slot.Status == Succeeded || slot.Optional)
 		if step.Spec.Key == s.schema.ModelSourceStepKey && slot.Status == Succeeded && slot.OutputAssetID != "" {
 			group.ModelSource.Available = true
 			group.ModelSource.TaskID, group.ModelSource.AssetID = slot.TaskID, slot.OutputAssetID
+			if slot.Replaced {
+				group.ModelSource.TaskID = ""
+			}
 		}
 	}
 	group.priceUnstartedViews()
@@ -291,7 +314,23 @@ func (group *Group) priceUnstartedViews() {
 // slot derives one view's status. A task the ledger names but the kernel can
 // no longer read is reported as an error, never guessed.
 func (s *Service) slot(ctx context.Context, run skillrun.Run, step skillrun.Step) (Slot, error) {
-	slot := Slot{Key: step.Spec.Key, Label: step.Spec.Label, Attempt: step.Attempt, Status: NotStarted, Startable: true}
+	slot, err := s.generatedSlot(ctx, run, step)
+	// A picture the person put in place stands for the view whatever its own
+	// attempt did; it is not started or retried any more.
+	if err == nil && step.ReplacementAssetID != "" && !inFlight(slot.Status) {
+		slot.Status, slot.OutputAssetID, slot.Replaced = Succeeded, string(step.ReplacementAssetID), true
+		slot.Startable, slot.Retryable = false, false
+	}
+	return slot, err
+}
+
+func inFlight(status Status) bool {
+	return status == AwaitingApproval || status == Starting || status == Running
+}
+
+func (s *Service) generatedSlot(ctx context.Context, run skillrun.Run, step skillrun.Step) (Slot, error) {
+	slot := Slot{Key: step.Spec.Key, Label: step.Spec.Label, Optional: step.Spec.Optional, Attempt: step.Attempt,
+		Status: NotStarted, Startable: true}
 	owner := run.OwnerID
 	if step.GrantRequestID != "" {
 		grant, err := s.runtime.Grants.Grants.GetExecutionGrant(ctx, string(owner), step.GrantRequestID)
@@ -372,11 +411,19 @@ func (s *Service) Advance(ctx context.Context, principal executiongrant.Principa
 	if run.SessionID != session || run.RecipeID != s.schema.RecipeID || !hasStep(run, viewKey) {
 		return Group{}, ErrNotFound
 	}
-	hash := fnv.New32a()
-	_, _ = hash.Write([]byte(principal.OwnerID + "\x00" + runID + "\x00" + viewKey))
-	guard := &s.guards[hash.Sum32()%uint32(len(s.guards))]
+	guard := s.guard(principal.OwnerID, runID, viewKey)
 	guard.Lock()
 	defer guard.Unlock()
+	// #65: a view the person replaced is not started or retried again, also from a page that has not seen the
+	// replacement; the store refuses the same transitions.
+	if run, err = s.runtime.Get(ctx, owner, runID); err != nil {
+		return Group{}, translate(err)
+	}
+	for _, step := range run.Steps {
+		if step.Spec.Key == viewKey && step.ReplacementAssetID != "" {
+			return Group{}, ErrConflict
+		}
+	}
 
 	if action == Retry {
 		if _, err := s.runtime.RestartStep(ctx, owner, runID, viewKey, attempt); err != nil {
@@ -391,6 +438,79 @@ func (s *Service) Advance(ctx context.Context, principal executiongrant.Principa
 		return Group{}, translate(err)
 	}
 	return s.project(ctx, run)
+}
+
+// Replace puts an input asset the person uploaded in place of one view (#65).
+// It spends nothing. A view whose approval or Task is still in flight is a
+// conflict; the store proves the asset is the owner's.
+func (s *Service) Replace(ctx context.Context, principal executiongrant.Principal, session, runID, viewKey,
+	assetID string) (Group, error) {
+	if principal.Source != executiongrant.HumanBrowser || principal.OwnerID == "" || principal.ActorID == "" ||
+		strings.TrimSpace(assetID) == "" {
+		return Group{}, ErrInvalid
+	}
+	if err := s.owns(ctx, principal.OwnerID, session); err != nil {
+		return Group{}, err
+	}
+	owner := generation.OwnerID(principal.OwnerID)
+	run, err := s.runtime.Get(ctx, owner, runID)
+	if err != nil {
+		return Group{}, translate(err)
+	}
+	if run.SessionID != session || run.RecipeID != s.schema.RecipeID || !hasStep(run, viewKey) {
+		return Group{}, ErrNotFound
+	}
+	guard := s.guard(principal.OwnerID, runID, viewKey)
+	guard.Lock()
+	defer guard.Unlock()
+	if _, err := s.runtime.Runs.ReplaceStepOutput(ctx, skillrun.ReplaceCommand{
+		OwnerID: owner, RunID: runID, StepKey: viewKey, AssetID: generation.AssetID(assetID),
+	}); err != nil {
+		return Group{}, translate(err)
+	}
+	run, err = s.runtime.Get(ctx, owner, runID)
+	if err != nil {
+		return Group{}, translate(err)
+	}
+	return s.project(ctx, run)
+}
+
+func (s *Service) guard(owner, runID, viewKey string) *sync.Mutex {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(owner + "\x00" + runID + "\x00" + viewKey))
+	return &s.guards[hash.Sum32()%uint32(len(s.guards))]
+}
+
+// Views lists the finished views of one of the owner's groups in the recipe's
+// order (#65), each with the picture that stands for it now. A foreign or
+// missing group is ErrNotFound.
+func (s *Service) Views(ctx context.Context, owner, session, runID string) ([]View, error) {
+	if strings.TrimSpace(owner) == "" || strings.TrimSpace(session) == "" || strings.TrimSpace(runID) == "" {
+		return nil, ErrInvalid
+	}
+	run, err := s.runtime.Get(ctx, generation.OwnerID(owner), runID)
+	if err != nil {
+		return nil, translate(err)
+	}
+	if run.OwnerID != generation.OwnerID(owner) || run.SessionID != session || run.RecipeID != s.schema.RecipeID {
+		return nil, ErrNotFound
+	}
+	group, err := s.project(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]View, 0, len(group.Slots))
+	for _, slot := range group.Slots {
+		if slot.Status != Succeeded || slot.OutputAssetID == "" {
+			continue
+		}
+		view := View{Key: slot.Key, TaskID: slot.TaskID, AssetID: slot.OutputAssetID}
+		if slot.Replaced {
+			view.TaskID = ""
+		}
+		views = append(views, view)
+	}
+	return views, nil
 }
 
 func hasStep(run skillrun.Run, key string) bool {
@@ -479,7 +599,7 @@ func (s *Service) LineageGroups(ctx context.Context, owner, session string) ([]l
 			SourceSlot: group.ModelSource.Slot, CreatedAt: group.CreatedAt,
 		}
 		for _, slot := range group.Slots {
-			if slot.Status == Succeeded && slot.TaskID != "" {
+			if slot.Status == Succeeded && slot.TaskID != "" && !slot.Replaced {
 				item.Members = append(item.Members, lineage.GroupMember{Slot: slot.Key, Label: slot.Label, TaskID: slot.TaskID})
 			}
 		}
@@ -529,6 +649,22 @@ func (a ForGeneration) ModelSource(ctx context.Context, owner, session, taskID s
 		return generationtool.ModelSource{}, false, err
 	}
 	return generationtool.ModelSource{Available: source.Available, TaskID: source.TaskID, AssetID: source.AssetID}, true, nil
+}
+
+// GroupViews implements generationtool.ThreeViews.
+func (a ForGeneration) GroupViews(ctx context.Context, owner, session, runID string) ([]generationtool.GroupView, error) {
+	views, err := a.Service.Views(ctx, owner, session, runID)
+	if errors.Is(err, ErrNotFound) || errors.Is(err, ErrInvalid) {
+		return nil, generationtool.ErrThreeViewGroupNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	result := make([]generationtool.GroupView, 0, len(views))
+	for _, view := range views {
+		result = append(result, generationtool.GroupView{View: view.Key, TaskID: view.TaskID, AssetID: view.AssetID})
+	}
+	return result, nil
 }
 
 var _ generationtool.ThreeViews = ForGeneration{}

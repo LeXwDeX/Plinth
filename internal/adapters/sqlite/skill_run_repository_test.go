@@ -529,3 +529,62 @@ func TestRuntimeRestartFollowsTheRetryRulesOfAStandaloneTask(t *testing.T) {
 		t.Fatalf("negative attempt: %v", err)
 	}
 }
+
+// #65: a view the person replaced with an upload never starts again, also
+// when a stale page asks for it: preparing, requesting a grant and restarting
+// are refused by the store itself; the replacement and the step stay as they were.
+func TestReplacedSkillStepRefusesEveryStartingTransition(t *testing.T) {
+	repo, service, _ := skillFixture(t)
+	ctx := context.Background()
+	run, err := service.Create(ctx, skillCreateCommand())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// side: replaced before it ever started; front: replaced after its task failed.
+	front := boundSkillStep(t, repo, service, run, "front", "FAILED")
+	execution, err := service.ResolveExecution(ctx, "owner-a", run.ID, "side")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"side", "front"} {
+		if _, err := service.ReplaceStepOutput(ctx, skillrun.ReplaceCommand{OwnerID: "owner-a", RunID: run.ID, StepKey: key, AssetID: "source-a"}); err != nil {
+			t.Fatalf("replace %s: %v", key, err)
+		}
+	}
+	side := skillrun.StepCommand{OwnerID: "owner-a", RunID: run.ID, StepKey: "side",
+		OperationID: execution.OperationID, IdempotencyKey: execution.IdempotencyKey}
+	prepared := generation.PreparedInput{ID: "prepared-side", OwnerID: "owner-a", SessionID: "session-a", Capability: "image-to-image",
+		OfferingID: "offering-i2i", OfferingRevision: "r7", InputHash: "hash-side", Assets: []generation.PreparedInputAsset{{ID: "source-a"}},
+		CreatedAt: time.Now().UTC()}
+	if err = repo.CreatePreparedInput(ctx, prepared); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.AttachPrepared(ctx, skillrun.PreparedCommand{StepCommand: side, PreparedInputID: prepared.ID,
+		PreparedInputHash: prepared.InputHash}); !errors.Is(err, skillrun.ErrConflict) {
+		t.Fatalf("a replaced step was prepared: %v", err)
+	}
+	if _, err = service.AttachGrant(ctx, skillrun.GrantCommand{StepCommand: side, GrantRequestID: "grant-x"}); !errors.Is(err, skillrun.ErrConflict) {
+		t.Fatalf("a replaced step got a grant: %v", err)
+	}
+	failed := generation.TaskID("task-" + operationSuffix(front.OperationID))
+	if _, err = service.RestartSkillStep(ctx, skillrun.RestartCommand{OwnerID: "owner-a", RunID: run.ID, StepKey: "front",
+		FailedTaskID: failed}); !errors.Is(err, skillrun.ErrConflict) {
+		t.Fatalf("a replaced step was restarted: %v", err)
+	}
+	stored, err := service.Get(ctx, "owner-a", run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range stored.Steps {
+		if step.ReplacementAssetID != "source-a" || step.Attempt != 0 {
+			t.Fatalf("a refused transition changed %s: %+v", step.Spec.Key, step)
+		}
+	}
+	if stored.Steps[1].Phase != skillrun.Planned || stored.Steps[0].TaskID != failed {
+		t.Fatalf("steps moved: %+v", stored.Steps)
+	}
+	// Another owner's upload cannot replace a step.
+	if _, err := service.ReplaceStepOutput(ctx, skillrun.ReplaceCommand{OwnerID: "owner-a", RunID: run.ID, StepKey: "side", AssetID: "source-b"}); !errors.Is(err, skillrun.ErrMissing) {
+		t.Fatalf("another owner's asset replaced a step: %v", err)
+	}
+}

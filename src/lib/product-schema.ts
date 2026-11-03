@@ -1371,6 +1371,8 @@ export interface ChatProductSchema {
       agent_scope: string;
       /** #321: the answer to an in-chat choice card that travels with a turn. */
       choice_answer?: string;
+      /** #65: the structured multiview request of a turn. */
+      multiview?: string;
       /** #322: the request member of the thinking level switch. */
       reasoning_effort?: string;
       /** #322: the request member of the chat model switch. */
@@ -1387,6 +1389,8 @@ export interface ChatProductSchema {
       content: string;
       image_urls: string;
       attachments: string;
+      /** #65: the structured multiview request of a user message. */
+      multiview?: string;
       tool_calls: string;
       tool_name: string;
       tool_arguments: string;

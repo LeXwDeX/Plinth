@@ -7,7 +7,8 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { createChatBrowserClient } from '@/lib/chat/browser-client';
 import { schemaText } from '@/lib/product-schema';
 import { advanceWithQueue, threeViewQueueLimitMs } from '@/lib/workspace/three-view-queue';
-import { groupsAreActive, slotAction, type ThreeViewGroup, type ThreeViewSlot } from '@/lib/workspace/three-view';
+import { uploadWorkspaceInputAssetResult } from '@/lib/workspace/input-asset-upload';
+import { groupsAreActive, remainingSlots, slotAction, slotReplaceable, type ThreeViewGroup, type ThreeViewSlot } from '@/lib/workspace/three-view';
 import { useChatStore } from '@/store/chat-store';
 
 const NONE: ThreeViewGroup[] = [];
@@ -86,5 +87,38 @@ export function useThreeViews() {
     }
   }, [chat, mutate, schema, sessionId]);
 
-  return { groups: data ?? NONE, busy, queued, advance, refresh: () => mutate() };
+  /**
+   * #65: "generate remaining views" starts every required view that has not started, one request (and so one
+   * approval) each, in the group's order. It stops at the first refusal and returns its message.
+   */
+  const startRemaining = useCallback(async (group: ThreeViewGroup): Promise<string | null> => {
+    for (const slot of remainingSlots(group)) {
+      const message = await advance(group, slot);
+      if (message) return message;
+    }
+    return null;
+  }, [advance]);
+
+  /**
+   * #65: puts a picture the person dropped or chose in place of one view. The picture becomes their input asset
+   * first; the server then records it for the view and spends nothing. Returns an error message, or null.
+   */
+  const replace = useCallback(async (group: ThreeViewGroup, slot: ThreeViewSlot, picture: File): Promise<string | null> => {
+    if (!sessionId || !slotReplaceable(slot)) return null;
+    const busyKey = `${group.runId}:${slot.key}`;
+    setBusy(busyKey);
+    try {
+      const { id } = await uploadWorkspaceInputAssetResult(schema, picture, picture.name || 'view.png');
+      const next = await chat.replaceThreeView(sessionId, group.runId, slot.key, id);
+      await mutate((current) => (current ?? NONE).map((item) => (item.runId === next.runId ? next : item)), { revalidate: false });
+      return null;
+    } catch (error) {
+      void mutate();
+      return error instanceof Error && error.message ? error.message : schemaText(schema, 'ui.studio.three_view.replace_failed');
+    } finally {
+      setBusy((current) => (current === busyKey ? null : current));
+    }
+  }, [chat, mutate, schema, sessionId]);
+
+  return { groups: data ?? NONE, busy, queued, advance, startRemaining, replace, refresh: () => mutate() };
 }

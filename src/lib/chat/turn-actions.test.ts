@@ -81,3 +81,12 @@ describe('attachments carried back into the composer', () => {
       .toEqual([{ url: '/a.png' }, { url: '/b.png', captureId: 'cap-1' }]);
   });
 });
+
+// #65: regenerating a turn sent from the three-view card sends its structured request again.
+describe('turnPayload with a multiview request', () => {
+  it('keeps the request the message was sent with', () => {
+    const multiview = { group: 'run1', model: 'mv', views: [{ view: 'front', assetId: 'x1', taskId: 't1' }, { view: 'back', assetId: 'up3' }] };
+    expect(turnPayload({ content: 'make it', multiview })).toEqual({ text: 'make it', images: [], claims: [], multiview });
+    expect(turnPayload({ content: 'plain' })).toEqual({ text: 'plain', images: [], claims: [] });
+  });
+});

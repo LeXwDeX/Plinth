@@ -157,6 +157,12 @@ func (s *Service) RestartSkillStep(ctx context.Context, cmd RestartCommand) (Run
 	}
 	return s.store.RestartSkillStep(ctx, cmd)
 }
+func (s *Service) ReplaceStepOutput(ctx context.Context, cmd ReplaceCommand) (Run, error) {
+	if !validID(string(cmd.OwnerID)) || !validID(cmd.RunID) || !validID(cmd.StepKey) || !validID(string(cmd.AssetID)) {
+		return Run{}, ErrInvalid
+	}
+	return s.store.ReplaceSkillStepOutput(ctx, cmd)
+}
 func (s *Service) Review(ctx context.Context, cmd ReviewCommand) (Run, error) {
 	return s.store.ReviewSkillOutput(ctx, cmd)
 }
@@ -217,7 +223,7 @@ func ValidateRecipe(recipe Recipe) error {
 				return ErrInvalid
 			}
 		}
-		if step.SourceStepKey != "" && !seen[step.SourceStepKey] {
+		if (step.SourceStepKey != "" && !seen[step.SourceStepKey]) || (step.Optional && len(seen) == 0) {
 			return ErrInvalid
 		}
 		seen[step.Key] = true

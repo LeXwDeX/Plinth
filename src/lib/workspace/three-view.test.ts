@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { groupIsActive, groupTileStatus, interleaveGroups, parseThreeViews, slotAction, succeededCount, type ThreeViewGroup } from './three-view';
+import type { OfferingWire } from '@/lib/agent-offerings';
+
+import {
+  groupIsActive, groupMultiview, groupTileStatus, interleaveGroups, multiviewModelOf, parseThreeViewGroup, parseThreeViews, pickMultiviewModel,
+  remainingSlots, slotAction, succeededCount, type ThreeViewGroup,
+} from './three-view';
 
 const wire = (statuses: Array<[string, Record<string, unknown>]>, extra: Record<string, unknown> = {}) => ({
   run_id: 'run-1', kind: 'three_view', label: '三视图', source_asset_id: 'a0', created_at: '2026-10-08T10:00:00Z', complete: false,
@@ -108,4 +113,48 @@ describe('native slot prices', () => {
  expect(g.slots[0]).toMatchObject({nativeQuote:null});
  expect(g.slots[0].estimatedCredits).toBe(0);
  });
+});
+
+describe('multiview from a three-view group (#65)', () => {
+  const offering = (parameters: unknown[], extra: Record<string, unknown> = {}) => ({
+    id: 'o', revision: 'r', provider_id: 'p', provider_name: 'P', model_id: 'mv', model_name: 'MV', capability: 'image-to-3d', available: true,
+    parameters, ...extra,
+  }) as unknown as OfferingWire;
+  const views = { name: 'reference_views', label: 'v', type: 'string-array', semantic: 'reference-views',
+    options: [{ value: 'front', label: '正面' }, { value: 'left', label: '左侧' }, { value: 'back', label: '背面' }, { value: 'right', label: '右侧' }] };
+  const pictures = { name: 'reference_assets', label: 'p', type: 'asset-array', semantic: 'reference-image', min_items: 2, max_items: 4, media_types: ['image/png'] };
+
+  it('reads a multiview model only from the reference-views declaration and prefers the person\'s pick', () => {
+    expect(multiviewModelOf(offering([pictures]))).toBeNull();
+    const model = multiviewModelOf(offering([pictures, views]));
+    expect(model).toMatchObject({ modelId: 'mv', minimumViews: 2, mediaTypes: ['image/png'] });
+    expect(model?.views.map((view) => view.value)).toEqual(['front', 'left', 'back', 'right']);
+    const other = offering([pictures, views], { model_id: 'other' });
+    const unavailable = offering([pictures, views], { model_id: 'off', available: false });
+    expect(pickMultiviewModel({ 'image-to-3d': [unavailable, offering([pictures, views]), other] }, 'other')?.modelId).toBe('other');
+    expect(pickMultiviewModel({ 'image-to-3d': [unavailable, other] }, 'single')?.modelId).toBe('other');
+    expect(pickMultiviewModel({ 'image-to-3d': [offering([pictures])] }, undefined)).toBeNull();
+  });
+
+  it('builds the structured request from the finished views the model takes', () => {
+    const model = multiviewModelOf(offering([pictures, views]))!;
+    const group = parseThreeViewGroup({
+      run_id: 'run1', slots: [
+        { key: 'front', label: '正面', status: 'succeeded', task_id: 't1', output_asset_id: 'x1' },
+        { key: 'side', label: '侧面', status: 'succeeded', task_id: 't2', output_asset_id: 'x2' },
+        { key: 'back', label: '背面', status: 'succeeded', task_id: 't3', output_asset_id: 'up3', replaced: true },
+        { key: 'right', label: '右侧', status: 'not_started', optional: true, startable: true },
+      ],
+      model_source: { slot: 'front', available: true, task_id: 't1', asset_id: 'x1' },
+    })!;
+    const result = groupMultiview(group, model);
+    expect(result.ready).toBe(true);
+    expect(result.request).toEqual({ group: 'run1', model: 'mv', views: [
+      { view: 'front', assetId: 'x1', taskId: 't1' }, { view: 'back', assetId: 'up3' },
+    ] });
+    // The optional right view is not part of "generate remaining views".
+    expect(remainingSlots(group)).toEqual([]);
+    const onlyFront = parseThreeViewGroup({ run_id: 'r', slots: [{ key: 'front', status: 'succeeded', task_id: 't', output_asset_id: 'x' }], model_source: { slot: 'front' } })!;
+    expect(groupMultiview(onlyFront, model).ready).toBe(false);
+  });
 });

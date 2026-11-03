@@ -20,6 +20,7 @@ import { captureBlockKeyOf } from '@/hooks/use-model-capture-block';
 import { useStudioStore } from '@/store/studio-store';
 import { useWorkspaceStore, type CurrentObject } from '@/store/workspace-store';
 import { gaussianSplatTool } from '@/lib/workspace/gaussian-splat-action';
+import { groupMultiview, type MultiviewModel, type ThreeViewGroup } from '@/lib/workspace/three-view';
 
 /**
  * 对一个对象（图或模型）的动作：在舞台打开、转 3D、截图到 2D、发到对话。结果卡、
@@ -126,6 +127,33 @@ export function useObjectActions() {
     return true;
   }, [openOnStage, schema]);
 
+  /**
+   * #65: 只用正面转 3D when the person replaced the front view with an upload. The picture is their input asset with
+   * no Task, so it travels as the turn's picture (its asset address, verified by the server), like the board's.
+   */
+  const inputPictureToThreeD = useCallback((url: string): boolean => {
+    if (!url) return false;
+    if (!useWorkspaceStore.getState().modelByDomain['model-3d']) {
+      toast.error(schemaText(schema, 'ui.studio.action.choose_3d_model'));
+      return false;
+    }
+    useStudioStore.getState().requestTurn(schemaText(schema, 'ui.studio.action.to3d_turn_current'), [{ kind: 'image', url }]);
+    return true;
+  }, [schema]);
+
+  /**
+   * #65: 用三视图生成 3D. The turn carries the structured request (the group and the exact picture of each finished
+   * view the card shows); the server binds the pictures and their views, the Agent only names the tool. The
+   * approval card then shows each picture with its view and the cost. No stage selection rides along.
+   */
+  const multiviewToThreeD = useCallback((group: ThreeViewGroup, model: MultiviewModel): boolean => {
+    const { slots, ready, request } = groupMultiview(group, model);
+    if (!ready) return false;
+    const views = slots.map((slot) => slot.label).join(schemaText(schema, 'ui.studio.three_view.view_separator'));
+    useStudioStore.getState().requestTurn(formatSchemaText(schemaText(schema, 'ui.studio.three_view.multiview_turn'), { views }), [], request);
+    return true;
+  }, [schema]);
+
   const captureToTwoD = useCallback((object: CurrentObject): boolean => {
     if (object.kind !== 'model' || !object.assetId) return false;
     // A model that is on the stage and not ready cannot be captured; the request is refused, never queued (#126).
@@ -200,5 +228,5 @@ export function useObjectActions() {
     return true;
   }, [schema]);
 
-  return { openOnStage, toThreeD, toGaussianSplat, boardToThreeD, retextureWithImage, captureToTwoD, sendToChat };
+  return { openOnStage, toThreeD, inputPictureToThreeD, multiviewToThreeD, toGaussianSplat, boardToThreeD, retextureWithImage, captureToTwoD, sendToChat };
 }

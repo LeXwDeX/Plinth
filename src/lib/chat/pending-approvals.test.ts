@@ -89,6 +89,18 @@ describe('a step that uses only the first of the pictures given (#329 E)', () =>
   });
 });
 
+describe('multiview reference pictures', () => {
+  it('parses the view key and label of each input, tolerating their absence', () => {
+    const [item] = parsePendingApprovals({ items: [{ request_id: 'rv', status: 'pending', reference_note: '由 正面 / 左侧 视图生成', inputs: [
+      { parameter: 'reference_assets', kind: 'asset', asset_id: 'a1', view: 'front', view_label: '正面' },
+      { parameter: 'reference_assets', kind: 'asset', asset_id: 'a2', view: 'left', view_label: '左侧' },
+      { parameter: 'reference_assets', kind: 'asset', asset_id: 'a3' },
+    ] }] });
+    expect(item.inputs.map((input) => [input.view, input.viewLabel])).toEqual([['front', '正面'], ['left', '左侧'], [undefined, undefined]]);
+    expect(item.referenceNote).toBe('由 正面 / 左侧 视图生成');
+  });
+});
+
 describe('a poll that was sent before a decision', () => {
   const card = approval('r1', future);
   const other = approval('r2', future);

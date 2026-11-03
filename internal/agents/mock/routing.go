@@ -287,6 +287,11 @@ func (adapter *Adapter) route(request agents.Request, text string) (string, map[
 		}
 		return toolUpdateSessionNotes, map[string]any{"notes": notes}
 
+	case adapter.wants(request, toolModelFromViews) && directedMultiview(request) != nil:
+		// 本轮带着用户的结构化多视图请求（#65）：系统上下文写明了工具、组和模型，
+		// 图片与视角由服务端绑定，Agent 只照着调用。
+		return toolModelFromViews, directedMultiview(request)
+
 	case adapter.wants(request, toolModelFromViews) && viewsTo3DPattern.MatchString(text) && viewsWordPattern.MatchString(text) &&
 		len(viewHandles(text, uploads, chosen.images)) >= 2:
 		// 同一物体的多张视角图：句中点名的句柄优先，其次随这句话上传的图，最后是当前选中的图；最多 4 张。
@@ -540,4 +545,31 @@ func (adapter *Adapter) basedOnHandle(messages []agents.Message) string {
 		return handle
 	}
 	return ""
+}
+
+// multiviewDirectivePattern reads the model, and the group when there is one,
+// from the Schema's multiview turn directive (#65) in the system context.
+var (
+	multiviewDirectiveGroup = regexp.MustCompile(`three_view_group 填 ([^\s，。,]+)`)
+	multiviewDirectiveModel = regexp.MustCompile(`model 填 ([^\s，。,]+)`)
+)
+
+// directedMultiview is the call a turn with a structured multiview request
+// asks for, or nil when the system context carries no such directive.
+func directedMultiview(request agents.Request) map[string]any {
+	for _, message := range request.Messages {
+		if message.Role != "system" {
+			continue
+		}
+		model := multiviewDirectiveModel.FindStringSubmatch(message.Content)
+		if model == nil {
+			continue
+		}
+		arguments := map[string]any{"model": model[1]}
+		if group := multiviewDirectiveGroup.FindStringSubmatch(message.Content); group != nil {
+			arguments["three_view_group"] = group[1]
+		}
+		return arguments
+	}
+	return nil
 }

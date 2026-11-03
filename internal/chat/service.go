@@ -21,7 +21,10 @@ var (
 	ErrEmptyMessage    = errors.New("chat: empty message")
 	// ErrInvalidInputSource rejects an input source the Schema does not declare;
 	// ErrCanvasSourceMissing a canvas turn without a verified snapshot (#266).
-	ErrInvalidInputSource     = errors.New("chat: invalid input source")
+	ErrInvalidInputSource = errors.New("chat: invalid input source")
+	// ErrInvalidMultiview rejects a multiview request without a model or with
+	// fewer than two, more than four or repeated views (#65).
+	ErrInvalidMultiview       = errors.New("chat: invalid multiview request")
 	ErrCanvasSourceMissing    = errors.New("chat: canvas input source without a snapshot")
 	ErrTurnActive             = errors.New("chat: turn already active")
 	ErrStreamNotFound         = errors.New("chat: stream not found")
@@ -777,6 +780,9 @@ func (service *Service) StartTurn(
 	if command.Options.InputSource != "" && command.Options.InputSource != service.canvasInputSource {
 		return Message{}, ErrInvalidInputSource
 	}
+	if command.Options.Multiview != nil && !command.Options.Multiview.Valid() {
+		return Message{}, ErrInvalidMultiview
+	}
 	verified := service.verifyTurnAttachments(ctx, command)
 	if command.OnMentionsDropped != nil && len(verified.droppedMentions) > 0 {
 		command.OnMentionsDropped(verified.droppedMentions)
@@ -788,6 +794,7 @@ func (service *Service) StartTurn(
 		Role:      service.userRole,
 		Content:   command.Content,
 		ImageURLs: append([]string(nil), command.ImageURLs...),
+		Multiview: command.Options.Multiview,
 		CreatedAt: now,
 	}
 	assistant := Message{

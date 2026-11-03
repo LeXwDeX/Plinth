@@ -78,7 +78,9 @@ describe('the extra-credit consent', () => {
     expect(studioStore).not.toContain('threeD');
     expect(chat).not.toContain('ExtraCreditConsentCard');
     expect(chat).not.toContain('confirmConsent');
-    expect(chat).toContain('void sendRef.current(turnRequest.text, undefined, undefined, undefined, turnRequest.selection);');
+    expect(chat).toContain('void sendRef.current(turnRequest.text, undefined, undefined, undefined, turnRequest.selection, undefined, undefined,');
+    // #65: regenerating a turn sent from the three-view card sends its structured request again.
+    expect(chat).toContain('payload.multiview ? { multiview: payload.multiview } : undefined');
     expect(chat).toContain('<ApprovalCard');
   });
 });

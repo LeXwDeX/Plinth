@@ -240,8 +240,48 @@ class EnvironmentRulesTest(unittest.TestCase):
         with self.assertRaisesRegex(release_env.EnvironmentError_, "managed_by was removed"):
             load(changed(mutate))
 
+    @staticmethod
+    def add_formal(environments, **extra):
+        environments["formal-test"] = {
+            "ssh": "root@host-four", "root": "/srv/formal", "base_url": "http://host-four:8080",
+            "compose_project": "formal_test", "single_stack": {"image_keep": 1}, "protected_paths": [], **extra}
+
+    def test_formal_test_full_backup_retention(self):
+        document = changed(lambda e: self.add_formal(e, backup={"scope": "full", "keep": 2}))
+        load(document)
+        words = release_env.release_variables(document["environments"]["formal-test"], None)["RELEASE_SERVER_ENV"].split()
+        self.assertIn("RELEASE_BACKUP_SCOPE=full", words)
+        self.assertIn("RELEASE_BACKUP_KEEP=2", words)
+
+    def test_formal_test_database_backup_is_refused(self):
+        with self.assertRaisesRegex(release_env.EnvironmentError_, "dev-test"):
+            load(changed(lambda e: self.add_formal(e, backup={"scope": "database", "keep": 2})))
+
+    def test_dev_test_database_backup_cannot_be_promoted(self):
+        def promoted(environments):
+            environments["dev-test"]["promote_from"] = "shared-a"
+        with self.assertRaisesRegex(release_env.EnvironmentError_, "promote_from"):
+            load(changed(promoted))
+
+    def test_full_backup_retention_is_limited_to_test_stacks(self):
+        def mutate(environments):
+            environments["shared-a"]["backup"] = {"scope": "full", "keep": 2}
+        with self.assertRaisesRegex(release_env.EnvironmentError_, "formal-test"):
+            load(changed(mutate))
+
+    def test_formal_test_full_backup_retention_rejects_bad_keep(self):
+        for keep in (0, 3):
+            with self.subTest(keep=keep), self.assertRaisesRegex(release_env.EnvironmentError_, "keep"):
+                load(changed(lambda e: self.add_formal(e, backup={"scope": "full", "keep": keep})))
+
+    def test_unknown_backup_scope_is_refused(self):
+        def mutate(environments):
+            environments["dev-test"]["backup"] = {"scope": "partial", "keep": 2}
+        with self.assertRaisesRegex(release_env.EnvironmentError_, "scope must be database or full"):
+            load(changed(mutate))
+
     def test_backup_settings_are_strict(self):
-        for backup in ({"scope": "full", "keep": 3}, {"scope": "database"}, {"scope": "database", "keep": 0},
+        for backup in ({"scope": "full", "keep": 3}, {"scope": "full", "keep": 0}, {"scope": "database"}, {"scope": "database", "keep": 0},
                        {"scope": "database", "keep": 3}, {"scope": "database", "keep": 10},
                        {"scope": "database", "keep": True}, {"scope": "database", "keep": "3"},
                        {"scope": "database", "keep": 3, "extra": 1}, "database"):

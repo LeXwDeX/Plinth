@@ -69,7 +69,7 @@ import { clearDraft } from '@/lib/chat/composer-draft';
 import { useChatScrollFollow } from '@/hooks/use-chat-scroll-follow';
 import { useElementHeight } from '@/hooks/use-element-height';
 import { useConnectivityStore } from '@/store/connectivity-store';
-import { createChatBrowserClient, paidStepFromTaskRegistered, type ChatSemanticEvent, type ChatTurnOptions } from '@/lib/chat/browser-client';
+import { createChatBrowserClient, paidStepFromTaskRegistered, type ChatSemanticEvent, type ChatTurnOptions, type MultiviewTurnRequest } from '@/lib/chat/browser-client';
 import { choiceCardPlacement, heldChoiceRelease, type ChoiceCardModel, type ChoiceSelection } from '@/lib/chat/choice-cards';
 import { readPastedImages } from '@/lib/chat/composer-input';
 import { withSessionSendLock } from '@/lib/chat/send-preparation';
@@ -106,6 +106,8 @@ import { useCanvasStore, type CanvasNode } from '@/store/canvas-store';
 import { maskStrokeCount, useMaskStore } from '@/store/mask-store';
 import { CHAT_RAIL_WIDTH, CHAT_WIDTH_MAX, CHAT_WIDTH_MIN, useStudioStore } from '@/store/studio-store';
 import { useWorkspaceStore } from '@/store/workspace-store';
+import { MultiviewUploadPanel } from '@/components/studio/multiview-upload-panel';
+import { buildMultiviewRequest, chosenViewLabels, multiviewOffering } from '@/lib/workspace/multiview-upload';
 import { withErrorReference } from '@/lib/problem-reference';
 import { referenceLimit } from '@/lib/workspace/reference-limit';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
@@ -230,6 +232,13 @@ export function ChatColumn() {
   skillBySessionRef.current = skillBySession;
   const { modelChoices, isLoading: modelsLoading, error: modelsError } =
     useWorkspaceOfferings(schema, stageDomain);
+  // Several uploaded pictures may be views of one object when a 3D Offering takes them (found by its Schema parameter).
+  const { offeringsByCapability: model3dOfferings } = useWorkspaceOfferings(schema, 'model-3d');
+  const picked3dModel = useWorkspaceStore((state) => state.modelByDomain['model-3d']);
+  const multiviewTarget = useMemo(
+    () => multiviewOffering(Object.values(model3dOfferings ?? {}).flat(), picked3dModel ?? undefined),
+    [model3dOfferings, picked3dModel],
+  );
   useRestoreSessionModels();
   const registerTask = useWorkspaceStore((state) => state.registerTask);
   const applyTaskLive = useWorkspaceStore((state) => state.applyTaskLive);
@@ -767,7 +776,7 @@ export function ChatColumn() {
       queuedSelection?: ChatAttachmentClaim[],
       queuedMentions?: ChatMentionClaim[],
       queuedInputSource?: string,
-      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean },
+      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[] },
     ) => {
       const scope = captureSessionScope();
       // #321: a choice-card answer is a plain turn of its own: no Skill, no draft, never queued.
@@ -904,12 +913,25 @@ export function ChatColumn() {
         }
         if (!isCurrentSessionScope(scope)) return;
       }
+      // Pictures the person labelled as views of one object: their asset IDs exist only after the upload above.
+      let multiview = extra?.multiview;
+      if (extra?.multiviewViews) {
+        const routes = schema.runtime.http.routes;
+        multiview = (multiviewTarget
+          ? buildMultiviewRequest(routes, multiviewTarget.offering.model_id, images, extra.multiviewViews)
+          : null) ?? undefined;
+        if (!multiview) {
+          toast.error(schemaText(schema, 'ui.studio.multiview_upload.invalid'));
+          return;
+        }
+      }
       // The draft's picks are spent with the draft (a queued turn carries its claims already).
       if (queuedMentions === undefined && reuseImages === undefined) pickedMentionsRef.current = { scope, picks: [] };
       if (turnRunning) {
         setQueue((current) => enqueueTurn(current, sessionId, {
           id: `queued-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
           text, images, claims, selection, mentions, ...(inputSource ? { inputSource } : {}),
+          ...(multiview ? { multiview } : {}),
         }));
         useWorkspaceStore.getState().forgetAttachmentSources(images);
         // The draft is spent with the turn, even when the person has moved to another session meanwhile
@@ -1013,6 +1035,7 @@ export function ChatColumn() {
                 ...(mentions.length > 0 ? { mentions } : {}),
                 ...(inputSource ? { inputSource } : {}),
                 ...(choiceAnswer ? { choiceAnswer } : {}),
+                ...(multiview ? { multiview } : {}),
               },
               controller.signal,
             );
@@ -1157,7 +1180,8 @@ export function ChatColumn() {
     if (!turnRequest) return;
     clearTurnRequest();
     if (useChatStore.getState().activeSessionId === null) return;
-    void sendRef.current(turnRequest.text, undefined, undefined, undefined, turnRequest.selection);
+    void sendRef.current(turnRequest.text, undefined, undefined, undefined, turnRequest.selection, undefined, undefined,
+      turnRequest.multiview ? { multiview: turnRequest.multiview } : undefined);
   }, [turnRequest, clearTurnRequest]);
 
   // 排队的话：上一轮结束（或回到这个会话时没有在跑的轮次）就发出最早的一条。没能发出就放回
@@ -1172,7 +1196,7 @@ export function ChatColumn() {
     drainingRef.current = true;
     setQueue((current) => cancelQueuedTurn(current, sessionId, turn.id));
     const started = startedTurnsRef.current;
-    void sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true }).finally(() => {
+    void sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, ...(turn.multiview ? { multiview: turn.multiview } : {}) }).finally(() => {
       drainingRef.current = false;
       if (startedTurnsRef.current === started) {
         if (useChatStore.getState().activeSessionId === sessionId) {
@@ -1273,7 +1297,9 @@ export function ChatColumn() {
   const regenerateReply = useCallback(() => {
     if (!regenerate) return;
     const payload = turnPayload(regenerate.user);
-    void send(payload.text, payload.images, payload.claims, regenerate.deleteIds);
+    // #65: a turn sent with a structured multiview request sends it again, so the same pictures and views are bound.
+    void send(payload.text, payload.images, payload.claims, regenerate.deleteIds, undefined, undefined, undefined,
+      payload.multiview ? { multiview: payload.multiview } : undefined);
   }, [regenerate, send]);
 
   const focusComposer = useCallback(() => {
@@ -1854,6 +1880,17 @@ export function ChatColumn() {
           </div>
           </div>
 
+          {multiviewTarget && attachedImages.length >= 2 && attachedImages.length <= 4 && !editing ? (
+            <MultiviewUploadPanel
+              images={attachedImages} target={multiviewTarget} disabled={uploading || preparing || isStreaming}
+              onConfirm={(choices) => {
+                const picked = attachedImages.flatMap((url, index) => (choices[index] ? [url] : []));
+                const views = choices.filter((view) => view !== '');
+                const labels = chosenViewLabels(choices, multiviewTarget.views).join(schemaText(schema, 'ui.studio.three_view.view_separator'));
+                void send(formatSchemaText(schemaText(schema, 'ui.studio.multiview_upload.turn'), { views: labels }), picked, undefined, undefined, undefined, undefined, undefined, { multiviewViews: views });
+              }}
+            />
+          ) : null}
           <Composer
             value={input}
             onChange={setInput}

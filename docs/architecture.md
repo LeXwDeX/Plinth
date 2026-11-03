@@ -1489,6 +1489,15 @@ SkillRun 核对 owner/session/turn、冻结输入、Offering 修订、操作及�
 - **公开投影。** `GET /api/v1/chat/sessions/{sessionID}/three-views` 返回 `{"items":[Group]}`，`Group` 为 `run_id`、`kind`（`three_view`）、`label`、`recipe_id`、`source_asset_id`、`created_at`、`complete`、`slots[]`（`key`、`label`、`status`、`attempt`、`task_id?`、`output_asset_id?`、`request_id?`、`startable`、`retryable`）和 `model_source`（`slot`、`available`、`task_id?`、`asset_id?`、`note`）。状态取值：`not_started`、`awaiting_approval`、`denied`、`starting`、`running`、`succeeded`、`failed`、`canceled`。`POST …/three-views/{runID}/views/{viewKey}`（路由在 Schema：`chat_session_three_views`、`chat_session_three_view_item`）请求体 `{"action":"start"|"retry","attempt":n}`，返回 `{"group":Group}`；要求浏览器真人会话（Bearer/开发身份 403），先 `OwnsSession`，外人的会话、不属于该会话的分组、未知视图均 404，当前状态不允许的操作 409（Schema 文案 `error.three_view_conflict`），非法动作或负序号 400。
 - **版本条里的一个分组。** `lineage.Service` 增加可选的 `GroupSource`；图里新增可选的 `groups[]`（`id` 为 run id、`kind`、`label`、`complete`、`source_slot`、`members[{slot,label,task_id}]`）和节点上的 `group`/`slot`。只有已在图里的成功任务才计入成员，没有任何成员在图里的分组不出现；没有分组时响应形状与原来完全一致。
 - **用三视图做 3D 只用正面图。** `generationtool` 在冻结输入之前，把 `image-to-3d` 的参考图里属于某个三视图分组的图（按结果图 URL 模板取出任务 ID，经 `ThreeViews.ModelSource` 按 owner 和会话查询）换成该分组的正面图，选中的侧面和背面不参与，换成同一张后去重。来源查询通过步骤当前 `task_id` 索引定位对应 SkillRun，再核对 owner、session 和 recipe，只投影目标分组，不受 `maximum_listed` 和会话运行数量限制；已绑定 Grant 的 Task 尚未写入步骤时，还按 Grant 的 Task 索引和步骤当前 Grant 定位。两次查询之间步骤绑定同一 Task 时，后备查询仍识别它；步骤已绑定不同 Task 时不按旧 Grant 匹配，并在投影中重新核对当前槽位。步骤重试清除旧 Task 和 Grant 后，旧 Task 不再是当前槽位成员，新 Task 绑定后按新身份查询；数据读取错误向上传递。公开列表和版本条仍使用原有有界扫描。正面图还没完成时不提交，返回 Schema 文案 `three_view.messages.model_source_not_yet`。工具结果与恢复路径从操作冻结的来源事实生成 `reference_note`：最终只有一个已验证正面时用 `three_view.model_source_note`，确为截断前缀时用前缀文案，替换或去重后的其他情况用中性数量说明；事实未知时不猜来源。上述来源查询为本机源码行为，未据此宣称部署或真实模型验收。
+- **视角对齐多视图与确定的多视图 3D（#65；源码已实现，本机测试通过，未部署验收）。** 多视图 3D 使用哪几张图、各是什么视角必须由结构化请求或三视图组确定，不得由 Agent 从对话里猜；`left`/`right` 必须与物体自身的左右侧对应。契约如下：
+  - **视角键。** `image-three-view` recipe revision `2026-11-03.65.1` 的步骤键就是多视图视角键：`front`（正面）、`left`（左侧）、`back`（背面）和可选的 `right`（右侧）。`left`/`right` 指物体自身的左右侧：Tripo 官方 multiview-to-model 文档只给出 `front/left/back/right` 键名与顺序、未定义方向，依据是 ComfyUI 官方 Tripo 多视图节点文档（`image_left` 为 90° 的物体自身左面，`image_right` 为 270° 的物体自身右面），左/右模板据此写明转向。`StepSpec`/recipe 步骤带 `optional` 字段（首步不能可选，`ValidateRecipe` 与 `validateThreeView` 校验；`validateThreeView` 另要求首步即 3D 来源视图）；分组 `complete` 只看必需视图。旧 Run 冻结的 `side` 键不改，多视图步骤不使用它。
+  - **能力声明。** 参数语义 `reference-views`（`schema.SemanticReferenceViews`，不在 Skill 可覆盖闭包里）：Offering 的视角参数声明它、其 options 即视角键，就是「接受同一物体多个视角」的 Offering。目前只有 `tripo-v3.1-multiview` 声明；前端（`multiviewModelOf`/`pickMultiviewModel`）与服务端都只按这个语义识别，不认模型或厂商名。`chat.three_view.multiview`（服务端私有）声明工具 `create_model_3d_from_views`、组参数 `three_view_group`、视角参数 `reference_views`、必需视角 `front`、最少 2 个视角、两条本轮指令模板和视角说明 `views_note`；`validateThreeViewMultiview` 校验工具确有这些参数。
+  - **确定性绑定。** 卡片按钮发结构化请求（`chat.api.fields.multiview`：`{group, model, views:[{view, task_id?, asset_id}]}`，冻结为 `TurnOptions.Multiview`，`StartTurn` 只校验形状）；用户给 2–4 张上传图逐张标视角后发同样的请求但不带 `group`。本轮系统上下文追加 `multiviewDirective`（仅在该工具本轮可用时），告诉 Agent 调哪个工具、填哪个组和模型。`generationtool.multiviewSelection` 在参考图选择之前接管：结构化请求优先，其次 Agent 给的 `three_view_group`；组经 `ThreeViews.GroupViews` 按 owner/会话读取已完成视图（外人或不存在的组 → `group_not_found`）。带组的请求必须与组现状逐项一致（同视角同 Task 同资产），用户点按钮后被替换或重做的视图拒绝为 `views_changed`。选定 Offering 后 `fitMultiviewViews` 只保留其 `reference-views` options 里的视角（组里的旧 `side` 被丢弃，上传标注出现不支持的视角则拒绝），缺正面或不足最少视角时拒绝为 `group_not_ready`/`views_invalid`。Agent 自己写的 `reference_handles`、`reference_image_indices`、`reference_views` 被删除，`reference_views` 与参考图由服务端写入，之后仍走原有 PreparedInput、ExecutionGrant 批准和 `internal/generation` 公开 Task；上传图的归属由参考解析器 `inputs.OpenOwned` 证明。
+  - **替换视图。** `POST .../three-views/{runID}/views/{viewKey}` 支持 `{"action":"replace","asset_id"}`（仅浏览器本人）：`skillrun.ReplaceCommand` → `ReplaceSkillStepOutput`，迁移 `0072_skill_step_replacement` 给 `skill_run_steps` 加 `replacement_asset_id`（引用 `generation_input_assets`）。存储在同一写事务里核对资产属于 owner，审批中或 Task 未结束的步骤拒绝（409）；步骤的尝试、Grant 与 Task 原样保留。投影把被替换的视图记为 `succeeded`、`replaced: true`、`output_asset_id` 为输入资产，不再可开始或重试；被替换的正面作为 3D 来源时 `model_source.task_id` 为空，`generationtool` 用 `asset_item` 路由（`Config.InputAssetRoute`）引用它。版本条的分组成员不含被替换的视图（它没有 Task）。不花费积分。
+  - **批准卡与结果说明。** `generationtool.ReferenceViews`/`ReferenceViewsNote` 从冻结输入读视角；待批准项的每张参考图带 `view` 与本地化 `view_label`，`reference_note` 为「由 正面 / 左侧 / 背面 视图生成」（结果消息、harness 待批准投影同样）。前端批准卡在缩略图上显示视角标签和原有费用。
+  - **前端。** 卡片四个槽位，可选的右侧标「可选」；每个槽位可查看、重试、替换（拖入或上传，类型按多视图 Offering 的 `media_types`）；「生成剩余视图（约 N 积分）」依次开始未开始的必需视图、逐张走批准；主按钮「用三视图生成 3D（模型名）」在正面和至少一个其他视角完成时可用，旁边写明将使用的视角；次按钮「只用正面转 3D」即原单图路径。舞台「转 3D」在所选 3D 模型声明了多视角输入且舞台是三视图组时走同一结构化请求。输入区附 2–4 张图且有多视图 Offering 时询问是否为同一物体的多个视角并逐张选视角。
+  - **审查修正（PR #67 Codex 审查）。** ① 正面被替换后没有 Task，「只用正面转 3D」与舞台转 3D 改为把该输入资产（`asset_item` 地址）作为本轮图片发出，走原单图转 3D；② 用户消息持久化结构化请求（迁移 `0073_chat_message_multiview`，`go_chat_messages.multiview`），消息投影经 `chat.api.response_fields.multiview` 返回，「重新生成」原样重发，Mock 与真实 Agent 都再次得到同一指令与绑定；③ 已替换的视图在 `threeview.Advance` 入口以及存储的 `AttachSkillPrepared`、`AttachSkillGrant`、`RestartSkillStep` 中都拒绝（`ErrConflict` → `error.three_view_conflict`），没刷新的页面不能再开始或重试它。
+  - **验证范围。** 后端：组解析、视角绑定、旧 `side` 丢弃、按钮请求与组不一致、组未就绪/无正面、跨用户组、上传标注与非法视角（`generationtool`），替换的状态、在飞拒绝、外人资产与外人请求（`httpapi` 三视图测试，真实 SQLite），mock Agent 指令路由；前端：按钮可用条件、使用视角、剩余视图费用、替换入口、批准卡视角标签、上传标注校验。均为本机测试；真实 Tripo 多视图付费请求、浏览器与 dev-test 全新数据验收尚未执行。待用户确认：默认不补出 `right`；「生成剩余视图」逐张批准。
 
 ## 8. 产品交互边界
 
@@ -1536,14 +1545,14 @@ MCP 只注册 Schema 固定的 `READ` / `none` / `session` 工具，并按实际
 | Provider Schema 边界 | 公开任务、私有作业与声明分工 |
 | dev_test.md / dev_ops.md / README-go.md | 门禁与验收 / 运维 / 运行上手 |
 
-## 11. 运行时与 Schema 真源（从根 AGENTS.md 移入，2026-10-08）
+## 11. 运行时与 Schema 真源
 
 - 运行时是 Go 1.26 单进程，托管 React 19 + Vite 8 构建的静态 SPA 和 HTTP/SSE API；Node/pnpm 不进入运行镜像。入口为 `cmd/art-ai`、`web/src/main.tsx` 和 `web/src/router.tsx`。`src/app/*/page.tsx` 是 SPA 页面模块，不是 Next.js 服务端路由。旧的按 Capability 分开的创作表单及独立聊天、画布、任务页面已退出主路由；管理页面仍由 SPA 路由加载。
 - `internal/catalog/default_catalog.json` 是 Product Schema 真源。Catalog 提供 Provider/Model/Capability/Offering、参数与输入输出契约、运行接线、公开文案和 UI 元数据。运行时可用性须结合 Adapter 与实际配置判断，不能只看 Schema 已登记。
 
 - 运行版本（#229，2026-10-19）：`Dockerfile.go-runtime` 用同一个 `GO_SOURCE_COMMIT` 构建参数既写 OCI 标签 `org.opencontainers.image.revision`，又以 `-ldflags -X github.com/LeXwDeX/Plinth/internal/app.sourceRevision=<sha>` 链接进 `art-ai`。`/api/version` 兼容响应形状 `{"version": ...}` 不变，值为该完整 40 位小写 SHA；本地或未注入完整 SHA 的构建返回 `unknown`，不回退到文件。原 `PRODUCT_VERSION_FILE` 运行设置、`runtime.frontend.product_version_file` 及 `web-data/build-version.txt` 写入已删除；前端仍按 `product_version_refresh_milliseconds` 轮询该接口。发布后 `smoke-l1-agent-mode.sh` 严格断言 `/api/version` = `EXPECT_SHA` = 容器 revision。
 
-## 12. 三方隔离与 3D 产物契约（从根 AGENTS.md 移入，2026-10-08）
+## 12. 三方隔离与 3D 产物契约
 
 本节 #167 的部署记录限定于当时的 `c8ee41b` 发布，当时不含完整 Agent 链；该链随后由 #162 验收（revision `c29c6fcd` / `95ebc30e`），见上文“Agent 提出处理计划”和 #169/#170 关联 MR 的发布回执。
 
@@ -1672,7 +1681,7 @@ Tripo 连接的 Base URL 已包含 `/v3`；Offering 的 `files`、`models/conver
 
 `model_delivery` 对已保存的 GLB/glTF 按实际媒体类型区分，不能把上游标签为 GLTF 但实际为二进制 GLB 的文件同时记成两种格式。免费本地转换通过原 Processing Plan 补齐缺失格式，成功子任务的资产仍并入原格式清单和 ZIP。旧六格式 Tripo Offering 保持停用。自由模式 Agent 工具在 Prepare 前核对显式目标格式与所选 Offering 的固定格式声明；不匹配就拒绝，不能被通用固定参数规范化替换成另一种格式，也不因此自动选择付费路线。源码合同和本机回归不证明当前账号的真实上游资格、部署或页面验收；这些证据与未覆盖项记录在 #183。
 
-## 13. Provider 任务流程与 UI 对齐（从根 AGENTS.md 移入，2026-10-08）
+## 13. Provider 任务流程与 UI 对齐
 
 ```text
 用户选择会话、Offering、参数及已拥有的输入 Asset/Task
