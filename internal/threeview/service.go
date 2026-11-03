@@ -414,6 +414,16 @@ func (s *Service) Advance(ctx context.Context, principal executiongrant.Principa
 	guard := s.guard(principal.OwnerID, runID, viewKey)
 	guard.Lock()
 	defer guard.Unlock()
+	// #65: a view the person replaced is not started or retried again, also from a page that has not seen the
+	// replacement; the store refuses the same transitions.
+	if run, err = s.runtime.Get(ctx, owner, runID); err != nil {
+		return Group{}, translate(err)
+	}
+	for _, step := range run.Steps {
+		if step.Spec.Key == viewKey && step.ReplacementAssetID != "" {
+			return Group{}, ErrConflict
+		}
+	}
 
 	if action == Retry {
 		if _, err := s.runtime.RestartStep(ctx, owner, runID, viewKey, attempt); err != nil {

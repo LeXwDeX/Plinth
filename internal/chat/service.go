@@ -794,6 +794,7 @@ func (service *Service) StartTurn(
 		Role:      service.userRole,
 		Content:   command.Content,
 		ImageURLs: append([]string(nil), command.ImageURLs...),
+		Multiview: command.Options.Multiview,
 		CreatedAt: now,
 	}
 	assistant := Message{

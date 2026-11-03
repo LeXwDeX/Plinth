@@ -2651,7 +2651,10 @@ type ChatAPIResponseFields struct {
 	Content   string `json:"content"`
 	ImageURLs string `json:"image_urls"`
 	// Attachments is the message member listing its attachment objects.
-	Attachments   string `json:"attachments"`
+	Attachments string `json:"attachments"`
+	// Multiview is the message member with the structured multiview request
+	// a user message was sent with (#65); empty leaves it out.
+	Multiview     string `json:"multiview,omitempty"`
 	ToolCalls     string `json:"tool_calls"`
 	ToolName      string `json:"tool_name"`
 	ToolArguments string `json:"tool_arguments"`

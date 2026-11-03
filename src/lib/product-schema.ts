@@ -1389,6 +1389,8 @@ export interface ChatProductSchema {
       content: string;
       image_urls: string;
       attachments: string;
+      /** #65: the structured multiview request of a user message. */
+      multiview?: string;
       tool_calls: string;
       tool_name: string;
       tool_arguments: string;

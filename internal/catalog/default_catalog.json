@@ -4756,6 +4756,7 @@
           "content": "content",
           "image_urls": "imageUrls",
           "attachments": "attachments",
+          "multiview": "multiview",
           "tool_calls": "toolCalls",
           "tool_name": "name",
           "tool_arguments": "arguments",

@@ -546,6 +546,7 @@ function normalizeMessage(
     }];
   });
   const attachments = decodeAttachments(schema, source[fields.attachments]);
+  const multiview = fields.multiview ? parseMultiviewRequest(source[fields.multiview]) : null;
   // One message can hold the pictures of several tasks, so a picture's task is the one its attachment
   // names; a picture with none belongs to the message's only task, or to no known task.
   const images: ChatImage[] = imageURLs.map((url, index) => ({
@@ -576,6 +577,7 @@ function normalizeMessage(
     content: pending ? '' : content,
     ...(images.length > 0 ? { images } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
+    ...(multiview ? { multiview } : {}),
     ...(taskIds.length > 0 ? { taskIds } : {}),
     ...(paidSteps.length > 0 ? { paidSteps } : {}),
     ...(wireRole !== schema.chat.roles.user ? { toolCallCount: toolCalls.length } : {}),
@@ -585,6 +587,21 @@ function normalizeMessage(
       : {}),
     createdAt: Number.isFinite(createdAt) ? createdAt : 0,
   };
+}
+
+/** #65: reads a stored multiview request back; anything malformed is no request. */
+export function parseMultiviewRequest(value: unknown): MultiviewTurnRequest | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const item = value as Record<string, unknown>;
+  if (typeof item.model !== 'string' || item.model === '' || !Array.isArray(item.views)) return null;
+  const views = item.views.flatMap((view): MultiviewTurnRequest['views'] => {
+    if (!view || typeof view !== 'object') return [];
+    const entry = view as Record<string, unknown>;
+    if (typeof entry.view !== 'string' || typeof entry.asset_id !== 'string' || entry.view === '' || entry.asset_id === '') return [];
+    return [{ view: entry.view, assetId: entry.asset_id, ...(typeof entry.task_id === 'string' && entry.task_id ? { taskId: entry.task_id } : {}) }];
+  });
+  if (views.length !== item.views.length || views.length === 0) return null;
+  return { ...(typeof item.group === 'string' && item.group ? { group: item.group } : {}), model: item.model, views };
 }
 
 // 服务端 approval_source 的取值：policy 表示由批准方式自动批准，不是用户点的批准。

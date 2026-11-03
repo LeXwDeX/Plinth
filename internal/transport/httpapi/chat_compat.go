@@ -723,7 +723,7 @@ func (s *Server) chatMessageWire(locale string, message chat.Message) map[string
 		tools = append(tools, item)
 	}
 	toolJSON, _ := json.Marshal(tools)
-	return map[string]any{
+	wire := map[string]any{
 		fields.ID:          message.ID,
 		fields.SessionID:   message.SessionID,
 		fields.Role:        message.Role,
@@ -733,6 +733,11 @@ func (s *Server) chatMessageWire(locale string, message chat.Message) map[string
 		fields.ToolCalls:   string(toolJSON),
 		fields.CreatedAt:   message.CreatedAt,
 	}
+	// #65: the structured multiview request, so regenerating the reply binds the same pictures and views.
+	if message.Multiview != nil && fields.Multiview != "" {
+		wire[fields.Multiview] = message.Multiview
+	}
+	return wire
 }
 
 // chatAttachmentWire projects a message's attachments with the Schema's member

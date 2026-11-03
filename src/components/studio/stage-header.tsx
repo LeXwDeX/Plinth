@@ -75,7 +75,7 @@ type ActionBinding = PlainBinding | PanelBinding;
 export function StageHeader({ object }: { object: CurrentObject | null }) {
   const { schema } = useProductSchema();
   const { proxyAssetUrl } = useAssetURLRewriter();
-  const { openOnStage, toThreeD, multiviewToThreeD, captureToTwoD } = useObjectActions();
+  const { openOnStage, toThreeD, inputPictureToThreeD, multiviewToThreeD, captureToTwoD } = useObjectActions();
   const { offeringsByCapability: modelOfferings } = useWorkspaceOfferings(schema, 'model-3d');
   const pickedModel = useWorkspaceStore((state) => state.modelByDomain['model-3d']);
   const captureBlock = useModelCaptureBlock(object?.taskId);
@@ -112,7 +112,11 @@ export function StageHeader({ object }: { object: CurrentObject | null }) {
     return model && model.modelId === pickedModel ? model : null;
   })();
   // Otherwise a three-view group makes a 3D model from its front view only, whichever view is on the stage.
-  const frontObject: CurrentObject | null = group && group.modelSource.available && sessionId
+  // A front view the person replaced with an upload has no Task (#65): its input asset is converted instead.
+  const replacedFront = group && group.modelSource.available && !group.modelSource.taskId
+    ? schema.runtime.http.routes.asset_item.replace('{assetID}', encodeURIComponent(group.modelSource.assetId))
+    : '';
+  const frontObject: CurrentObject | null = group && group.modelSource.available && group.modelSource.taskId && sessionId
     ? (() => {
       const url = proxyAssetUrl(taskAssetRoute(schema, group.modelSource.taskId, group.modelSource.assetId), group.modelSource.taskId);
       return url ? { taskId: group.modelSource.taskId, kind: 'image' as const, url, assetId: group.modelSource.assetId, imageUrls: [url], sessionId } : null;
@@ -173,8 +177,8 @@ export function StageHeader({ object }: { object: CurrentObject | null }) {
           reason: text('ui.studio.three_view.multiview_wait'),
         }
         : {
-          run: () => toThreeD(frontObject ?? object),
-          disabled: group !== null && frontObject === null,
+          run: () => (replacedFront ? inputPictureToThreeD(replacedFront) : toThreeD(frontObject ?? object)),
+          disabled: group !== null && frontObject === null && replacedFront === '',
           reason: text('ui.studio.three_view.to_3d_wait'),
           ...(group?.modelSource.note ? { target: group.modelSource.note } : {}),
         }

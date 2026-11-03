@@ -3,6 +3,7 @@ import { useWorkspaceStore } from '@/store/workspace-store';
 import { mergeNewestPage, prependOlderPage } from '@/lib/chat/message-pages';
 import { latestToolCallCount } from '@/lib/chat/tool-call-count';
 import type { NativeQuote, PriceTotal } from '@/lib/pricing';
+import type { MultiviewTurnRequest } from '@/lib/chat/browser-client';
 
 // ── 类型 ──────────────────────────────────────────────
 
@@ -31,6 +32,8 @@ export interface ChatMessage {
   content: string;
   images?: ChatImage[];
   attachments?: ChatAttachment[];
+  /** #65: the structured multiview request a user message was sent with; regenerating sends it again. */
+  multiview?: MultiviewTurnRequest;
   taskIds?: string[];
   isStreaming?: boolean;
   isPending?: boolean;

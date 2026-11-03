@@ -128,6 +128,20 @@ export function useObjectActions() {
   }, [openOnStage, schema]);
 
   /**
+   * #65: 只用正面转 3D when the person replaced the front view with an upload. The picture is their input asset with
+   * no Task, so it travels as the turn's picture (its asset address, verified by the server), like the board's.
+   */
+  const inputPictureToThreeD = useCallback((url: string): boolean => {
+    if (!url) return false;
+    if (!useWorkspaceStore.getState().modelByDomain['model-3d']) {
+      toast.error(schemaText(schema, 'ui.studio.action.choose_3d_model'));
+      return false;
+    }
+    useStudioStore.getState().requestTurn(schemaText(schema, 'ui.studio.action.to3d_turn_current'), [{ kind: 'image', url }]);
+    return true;
+  }, [schema]);
+
+  /**
    * #65: 用三视图生成 3D. The turn carries the structured request (the group and the exact picture of each finished
    * view the card shows); the server binds the pictures and their views, the Agent only names the tool. The
    * approval card then shows each picture with its view and the cost. No stage selection rides along.
@@ -214,5 +228,5 @@ export function useObjectActions() {
     return true;
   }, [schema]);
 
-  return { openOnStage, toThreeD, multiviewToThreeD, toGaussianSplat, boardToThreeD, retextureWithImage, captureToTwoD, sendToChat };
+  return { openOnStage, toThreeD, inputPictureToThreeD, multiviewToThreeD, toGaussianSplat, boardToThreeD, retextureWithImage, captureToTwoD, sendToChat };
 }
