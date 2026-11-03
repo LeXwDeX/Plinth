@@ -16,7 +16,7 @@
 ## 设计语言与边界
 
 - `src/app/globals.css` 定义语义色、半径与层序；业务代码不写固定色值。
-- 橙色表示提醒（2026-10-09 用户要求）。提醒标签用橙色底加白字：`bg-reminder` 作底色，`text-reminder-foreground`（白色）作文字色，例如模型选择表里的“推荐”标签（2026-10-09 用户要求改为白字，提高对比度）。底色为 #C2410C，白字对比度 5.2:1，不低于 4.5:1；需要更亮的橙色（如参考线）时另设 token。橙色只用于提醒，不用于错误或警告：错误用 `destructive`，警告用 `warning`。`src/__tests__/design-token-discipline.test.ts` 检查已约束的颜色、圆角、层序及 UI 基元的业务依赖边界。
+- 橙色表示提醒。提醒标签用橙色底加白字：`bg-reminder` 作底色，`text-reminder-foreground`（白色）作文字色，例如模型选择表里的“推荐”标签（白字以提高对比度）。底色为 #C2410C，白字对比度 5.2:1，不低于 4.5:1；需要更亮的橙色（如参考线）时另设 token。橙色只用于提醒，不用于错误或警告：错误用 `destructive`，警告用 `warning`。`src/__tests__/design-token-discipline.test.ts` 检查已约束的颜色、圆角、层序及 UI 基元的业务依赖边界。
 - 圆角使用 `sm/md/lg/xl/full` 阶梯。消息气泡指向角、媒体裁切和移动抽屉的上边角是有语义的局部形状。间距由 Tailwind 的既有尺度提供；本仓库的 `gap-1.5`、`p-2.5` 等控件密度仍在使用，不能引用一张没有单位的旧表强行判错。
 - `Surface` 不负责 z-index；普通容器不设层序。Overlay 使用 `z-float`、`z-scrim`、`z-modal`、`z-modal-float`、`z-blocking`、`z-blocking-float` 等语义层。付费批准以对话里的行内批准卡呈现，只允许人明确批准或拒绝，关闭或忽略不能等于批准。
 - 3D 视口的 `ViewportDialog` 是非模态处理面板：它只遮挡右侧视口，左侧 Agent 保持可操作；Escape 仅作用于面板内焦点。历史和付费确认继续由顶层 Base UI Dialog 管理焦点。

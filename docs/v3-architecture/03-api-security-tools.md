@@ -1,6 +1,6 @@
 # G1：API、安全与 Tool/Skill/MCP 边界
 
-状态：G1 契约与历史基线；**不是全部产品代码或测试环境已验收的声明**。以下标为「现状」的段落专指固定提交 `a32a93799c08cf98c6f5e0481e233809233b1b7c`。2026-09-29 工作分支的增量状态以下表为准，最终证据记录在 [05](05-local-regression.md)。路径由 `internal/catalog/default_catalog.json` 声明，表内字面路径是历史快照值，运行时仍须以装配后的 Schema 为准。
+状态：G1 契约与历史基线；**不是全部产品代码或测试环境已验收的声明**。以下标为「现状」的段落专指固定提交 `a32a93799c08cf98c6f5e0481e233809233b1b7c`。工作分支的增量状态以下表为准，最终证据记录在 [05](05-local-regression.md)。路径由 `internal/catalog/default_catalog.json` 声明，表内字面路径是历史快照值，运行时仍须以装配后的 Schema 为准。
 
 ## 1. API 身份与单一事实
 
@@ -26,7 +26,7 @@ ExecutionGrant 按会话批准模式签发（规则见 `docs/product.md`）。�
 
 ## 2. 路由、授权与 CSRF 矩阵
 
-下表按权限相同的路由族分组，覆盖 `routes()`、`registerLegacyTaskContract`、Chat/Canvas 和管理注册函数的固定快照。G1 阶段须从当前注册与 Schema 只读生成每个实际路由的 method/path/handler/permission 清单并逐项审定；C 阶段再把该清单做成自动回归；条件注册的 Processing Plan、Schema 驱动的 capability 路径和 SSO/Provider 回调不能仅凭静态字面列表作穷尽断言。`C` 表示该浏览器 cookie 写操作应受 CSRF 保护：**现行 middleware 仅在 `CSRFOriginEnforced=true` 时检查，当前部署的配置值本轮未核；目标要求实际启用并验证**。`—` 表示 GET 只读或独立的 webhook 验签/令牌边界。权限列的「目标」若高于现状，不能误读为已实施。
+下表按权限相同的路由族分组，覆盖 `routes()`、`registerLegacyTaskContract`、Chat/Canvas 和管理注册函数的固定快照。G1 阶段须从当前注册与 Schema 只读生成每个实际路由的 method/path/handler/permission 清单并逐项审定；C 阶段再把该清单做成自动回归；条件注册的 Processing Plan、Schema 驱动的 capability 路径和 SSO/Provider 回调不能仅凭静态字面列表作穷尽断言。`C` 表示该浏览器 cookie 写操作应受 CSRF 保护：**现行 middleware 仅在 `CSRFOriginEnforced=true` 时检查，当前部署的配置值未核；目标要求实际启用并验证**。`—` 表示 GET 只读或独立的 webhook 验签/令牌边界。权限列的「目标」若高于现状，不能误读为已实施。
 
 | 路由族（快照） | 方法 | 现状主体与作用域 | 目标服务边界 | CSRF 适用 |
 |---|---|---|---|---|
@@ -35,11 +35,11 @@ ExecutionGrant 按会话批准模式签发（规则见 `docs/product.md`）。�
 | `/api/v1/agent/params`, `/bind`, `/consent` | GET/PUT | 身份包装器；操作当前用户 Agent 设置与同意 | 不用客户端 `approved` 字段推断其它请求已获批准；同意仍需现行人工路径 | PUT C |
 | `/api/v1/offerings`, `/api/providers`（含 `projection=extended`） | GET | 已认证；Catalog/运行可用性投影 | Public Offering 白名单；不可用显式 `available:false`，不泄露配置名/密钥/私有 URL | — |
 | `/api/v1/assets`, `/api/v1/assets/{assetID}`, `/api/assets/upload`, `/api/assets/{assetID}` | POST/GET | 已认证；输入资产上传/下载经 owner 访问 | Asset 服务验证 owner、角色、大小与媒体类型；受控本地下载 URL | POST C |
-| `/api/v1/model-captures`, `/{captureID}` | POST/GET | 工作分支新增；Cookie/owner 及来源 Task/模型 Asset/PNG 绑定 | 不接受跨 owner、不完整模型或客户端伪造来源；Capture 是可核验的客户端像素记录，不冒充服务端 renderer | POST C |
-| `/api/v1/scenes/{sessionID}/objects`、`/{objectID}`、`/representations`、`/apply`、`/snapshot` | POST/PATCH/DELETE/GET | 工作分支新增；session owner 与 object CAS 校验 | Scene 服务保留版本/墓碑/候选，不写 Task 终态；候选应用是显式动作 | 写请求 C |
-| `/api/v1/scenes/{sessionID}/render-manifests`、`/{manifestID}` | POST/GET | 工作分支新增；session owner 和 Scene 输入校验 | POST 只接受 frame；输出像素/hash 由服务端渲染，Generation 校验投递资产与 Manifest 完全一致 | POST C |
+| `/api/v1/model-captures`, `/{captureID}` | POST/GET | 工作分支实现；Cookie/owner 及来源 Task/模型 Asset/PNG 绑定 | 不接受跨 owner、不完整模型或客户端伪造来源；Capture 是可核验的客户端像素记录，不冒充服务端 renderer | POST C |
+| `/api/v1/scenes/{sessionID}/objects`、`/{objectID}`、`/representations`、`/apply`、`/snapshot` | POST/PATCH/DELETE/GET | 工作分支实现；session owner 与 object CAS 校验 | Scene 服务保留版本/墓碑/候选，不写 Task 终态；候选应用是显式动作 | 写请求 C |
+| `/api/v1/scenes/{sessionID}/render-manifests`、`/{manifestID}` | POST/GET | 工作分支实现；session owner 和 Scene 输入校验 | POST 只接受 frame；输出像素/hash 由服务端渲染，Generation 校验投递资产与 Manifest 完全一致 | POST C |
 | `/api/v1/tasks`, `/api/v1/tasks/{taskID}`, `/cancel`, `/events`, `/assets/{assetID}` | POST/GET | 创建/取消 owner；`GET /api/v1/tasks` 列表对所有角色只返回本人任务（#154）；按 ID 的详情/事件/下载走 `taskReadScope`，管理员读他人任务写 `admin_read_task` 审计（#158） | 写入仅 owner；按 ID 读由 owner 或 `tasks.read.any`，资产 READY/授权后打开；事件同任务作用域 | POST C |
-| `/api/v1/skill-runs`、`/{runID}`、`/steps/{stepKey}`、`/review` | POST/GET | 工作分支新增；session owner、recipe/Offering revision、步骤身份与状态校验 | SkillRun 只编排，不自建 Task 状态；每个付费步骤经冻结输入与单独人工 Grant，输出 READY 后可审核下一步 | POST C |
+| `/api/v1/skill-runs`、`/{runID}`、`/steps/{stepKey}`、`/review` | POST/GET | 工作分支实现；session owner、recipe/Offering revision、步骤身份与状态校验 | SkillRun 只编排，不自建 Task 状态；每个付费步骤经冻结输入与单独人工 Grant，输出 READY 后可审核下一步 | POST C |
 | `/api/v1/processing-plans`, `/{planID}`, `/{planID}/retry`, `/{planID}/resume` | POST/GET | 仅在 processing 装配时注册；已认证，Plan 服务核验归属 | Plan 不自建任务；每个付费后续步骤经现行人审，否则停止；重试不得重提已成功步骤 | POST C |
 | `capabilities[].legacy_api.path` 与可选下载路径、`/api/tasks`, `/api/meshy/stream/{type}/{taskID}`, `/api/gpt-images/{filename}` | POST/GET/DELETE | 兼容路由；多数任务读走 principal scope（管理员读他人任务写 `admin_read_task` 审计）；`GET /api/tasks` 列表对所有角色只返回本人任务（#158）；旧生成图片另有兼容鉴权 | 与 canonical 同 Task/Asset/owner 事实，legacy token 只作可验证映射；不能返回未经物化的远端 URL | POST/DELETE C |
 | `/api/chat/sessions`, `/{sessionID}`, `/messages`, `/{messageID}`, `/stream`, `/turn/cancel`; `/api/prompt-enhance` | GET/POST/PATCH/DELETE | 身份包装器；Chat 服务按 principal/session 归属处理 | session ID 是归属键，同名不串；LLM/工具输出不改变权限；流读取仍核验 owner | 写请求 C |
@@ -48,7 +48,7 @@ ExecutionGrant 按会话批准模式签发（规则见 `docs/product.md`）。�
 | `/api/admin/users`, `/{userID}`, `/audit-logs`, `/generations`, `/{taskID}`, `/{taskID}/download`, `/usage`, `/balance-summary`, `/user-assets/{userID}`, `/backfill-status` | GET/POST/PATCH 等依注册 | 每组检查 Catalog 声明的管理 permission（`administration_*.go`）；Generation 下载独立服务 | 后台跨 owner 读必须有具体 permission；变更记录 actor、对象、结果与原因，敏感值不入审计 | 写请求 C |
 | `/api/v1/provider-assets/{token}`、Provider webhook/status 回调 | GET/POST | 签名/secret/Provider 边界，非用户 cookie 的 owner API | token 有期限、受限用途/对象；webhook 验证并只投递内核观察，不直接置公开终态 | —；独立签名/secret 校验 |
 
-**CSRF 限度与本轮修复。** 表中的 `C` 不能作为现行部署已启用 CSRF 的证据；先读回目标环境 `CSRFOriginEnforced` 的实际生效配置，再逐路由动态验证。基线 `security_middleware.go` 在 `Origin` 与 `Sec-Fetch-Site` 同时缺失时放行。本轮实现分支已令**携带 Cookie 的写请求**在双缺失时拒绝；合法同源浏览器请求和无 Cookie 的独立验签机器回调分别测试。进一步的目标是比较可信外部 scheme/host，明确非浏览器客户端的显式凭证与权限作用域，并逐路由验证 SSO callback、Provider webhook 的边界；不能单凭旧行为断言已存在可利用的 CSRF 漏洞。dev-test 当前入口为 HTTP，session Cookie 在 `secure_mode=auto` 且 public app URL 为空时不带 `Secure`，此环境限制须在 HTTPS 入口和真实 Set-Cookie 验收中单独关闭。
+**CSRF 限度与实现分支状态。** 表中的 `C` 不能作为现行部署已启用 CSRF 的证据；先读回目标环境 `CSRFOriginEnforced` 的实际生效配置，再逐路由动态验证。基线 `security_middleware.go` 在 `Origin` 与 `Sec-Fetch-Site` 同时缺失时放行。实现分支令**携带 Cookie 的写请求**在双缺失时拒绝；合法同源浏览器请求和无 Cookie 的独立验签机器回调分别测试。进一步的目标是比较可信外部 scheme/host，明确非浏览器客户端的显式凭证与权限作用域，并逐路由验证 SSO callback、Provider webhook 的边界；不能单凭旧行为断言已存在可利用的 CSRF 漏洞。dev-test 当前入口为 HTTP，session Cookie 在 `secure_mode=auto` 且 public app URL 为空时不带 `Secure`，此环境限制须在 HTTPS 入口和真实 Set-Cookie 验收中单独关闭。
 
 ## 3. 会话、owner 与错误语义
 
@@ -85,7 +85,7 @@ ExecutionGrant 按会话批准模式签发（规则见 `docs/product.md`）。�
 
 **现状。** Chat Agent 现有 `list_offerings`、`set_params`、`get_task`/`observe_task`、`request_consent` 和生成工具；执行器按工具名分派（`internal/chat/agenttools/executor.go:136-152`），付费任务最终仍经 Generation。Skill 有独立 Catalog/loader；当前源码证据不足以宣称开放 MCP connector 已存在。LLM 指令与用户内容不能授予权限。
 
-**2026-09-29 工作分支增量。** Catalog 的工具执行声明编译为服务端 ToolRegistry，执行器按 domain/effect/capability 与可用 Offering 校验；`create_three_view` 使用版本化 recipe、持久 SkillRun 和独立的人类 ExecutionGrant，仅自动发起首步。待批准的 SkillRun 步骤由同一 Agent consent API 投影，批准/拒绝都需真实 Cookie 人类身份与当前 request ID。AgentPending Grant 持久绑定 turn，Task 创建事务与 Stop 状态原子校验。后两步由 SkillRun review/advance API 推进，工作区交互及真实输出仍待验收。开放 MCP connector 未实现，不能把 ToolRegistry 存在当作任意外部工具可用。
+**工作分支实现。** Catalog 的工具执行声明编译为服务端 ToolRegistry，执行器按 domain/effect/capability 与可用 Offering 校验；`create_three_view` 使用版本化 recipe、持久 SkillRun 和独立的人类 ExecutionGrant，仅自动发起首步。待批准的 SkillRun 步骤由同一 Agent consent API 投影，批准/拒绝都需真实 Cookie 人类身份与当前 request ID。AgentPending Grant 持久绑定 turn，Task 创建事务与 Stop 状态原子校验。后两步由 SkillRun review/advance API 推进，工作区交互及真实输出仍待验收。开放 MCP connector 未实现，不能把 ToolRegistry 存在当作任意外部工具可用。
 
 **目标 ToolRegistry 契约。** 每个可信工具登记稳定 implementation key、输入/输出 schema、effect、所需 principal permission、owner/session 作用域、是否付费、幂等与取消语义、可公开描述、审计 action。effect 至少区分 `READ`、`LOCAL_EDIT`、`TASK_WRITE_NO_COST`、`PAID_TASK`、`ADMIN_WRITE`、`EXTERNAL_IO`；一个工具只能调用其声明效力及权限内的应用服务，不能由模型回复、Skill 文本或 MCP 元数据升级。READ 不得调用 Submit；LOCAL_EDIT 不得产生付费 Task；PAID_TASK 先核现行人工流程与用户所选 Offering/输入，再由统一服务 Submit，未知上游收费不得盲重试；ADMIN_WRITE 永远另查管理 permission。工具取消只发请求，不宣称上游已停或退款。
 
@@ -100,7 +100,7 @@ Skill 是带 revision 的可信 recipe：列明可用工具、参数边界、输
 **待定，不能由文档冒充现状：**
 
 1. 无 Origin/Fetch Metadata 的非浏览器调用有哪些真实客户端，采用何种独立凭证、迁移窗口和 webhook/SSO 例外；未确定前不能把「两个头均缺失」直接标为漏洞或无风险。
-2. 分支代码已将受保护任务资产、输入资产、旧生成图和旧资产代理统一为 `private, no-store`，代理不再发通配 CORS；Catalog 拒绝把相关字段改回可缓存策略。需以真实响应和共享缓存负控验收代理行为及大文件代价。旧版曾发出的 `immutable`/`public` 响应不能靠新响应头主动清除；若要求立即吊销，需核查并清除实际中间缓存或更换 URL。`immutable_asset_cache_control`、`binary_cache_control`、旧生成图 `cache_control` 仍在 Schema 类型中；清理或重新命名前须逐个核对消费者。
+2. 分支代码已将受保护任务资产、输入资产、旧生成图和旧资产代理统一为 `private, no-store`，代理不发通配 CORS；Catalog 拒绝把相关字段改回可缓存策略。需以真实响应和共享缓存负控验收代理行为及大文件代价。旧版曾发出的 `immutable`/`public` 响应不能靠新响应头主动清除；若要求立即吊销，需核查并清除实际中间缓存或更换 URL。`immutable_asset_cache_control`、`binary_cache_control`、旧生成图 `cache_control` 仍在 Schema 类型中；清理或重新命名前须逐个核对消费者。
 3. 管理 ZIP 局部失败采用 manifest、响应头还是结构化状态，以及审计持久化失败时下载/管理写操作的策略。
 4. 每条 legacy capability 路径、Canvas/Plan/Chat 付费动作的现行人工确认覆盖表；覆盖不能证明的路径在代码阶段停用或导向既有人审。这里不设计新的报价或批准协议。
 5. Public Schema 迁移期间 SPA 对 proxy 规则的最后消费者、Skill prompt 的公开需求与兼容版本窗口。

@@ -31,7 +31,7 @@ erDiagram
 
 创建与更新规则：新工作台创作 Task 必须带已归属当前 owner 的 session；兼容旧 API 若未提供 session，可保持无归属，不能按名称推断或伪造。图中 Task 到 ChatSession 因此是可选关系。owner、session、object、source asset、source task 的关系在**服务端同一准入事务**内核验；UI 的隐藏字段不构成权限。`SceneObject` 更新采用 `(object_id, expected_revision)` compare-and-swap；生成途中用户移动、替换或删除对象，结果仍可保存为候选 Representation，但不能自动覆盖已变化的当前对象。删除用墓碑保留 Task/来源链。管理员跨 owner 读取必须通过独立 permission 与审计动作；不要让普通下载继承 admin 的宽范围。
 
-### 本分支代码状态（2026-09-29）
+### 本分支代码状态
 
 | 项目 | 状态 | 证据边界 |
 |---|---|---|
@@ -71,7 +71,7 @@ erDiagram
 
 以上是目标字段示例，不是现行 API payload；`hex-example` 表示占位值。`intent_id` 和提交幂等键的作用域应固定为 `(owner_id, intent_id)`；相同键+相同规范输入只返回原平台 Task，相同键+不同输入返回冲突。接受 Task 与 `task.submitted` 事件在同一持久事务提交。**平台幂等不等于 Provider 付费请求 exactly-once**：上游提交结果不明时仍按运行时文档停机对账。
 
-Chat、Canvas、Processing Plan 和 legacy API 都只是输入适配器：先解析同一 Offering 和 `PreparedInput`，再统一调用 Generation.Submit。旧入口允许的省略/default 必须在兼容矩阵中逐一列出，不能让不同入口在同一显式选择上落到不同 Offering。付费动作只能沿用经逐入口核实的现有必需人工确认路径；本轮实现分支已移除 3D 面板的 `approved_credits` 报价批准字段，显式执行/重试仍须绑定 Offering revision 与 Plan version。缺口路径后续停用/引导至现有路径，不因已计算 `input_hash` 就视为同意。
+Chat、Canvas、Processing Plan 和 legacy API 都只是输入适配器：先解析同一 Offering 和 `PreparedInput`，再统一调用 Generation.Submit。旧入口允许的省略/default 必须在兼容矩阵中逐一列出，不能让不同入口在同一显式选择上落到不同 Offering。付费动作只能沿用经逐入口核实的现有必需人工确认路径；3D 面板不含 `approved_credits` 报价批准字段，显式执行/重试仍须绑定 Offering revision 与 Plan version。缺口路径后续停用/引导至现有路径，不因已计算 `input_hash` 就视为同意。
 
 ## 3. Scene、虚线 frame 与可见输入（D04）
 
