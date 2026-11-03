@@ -22,6 +22,16 @@ type fakeThreeViews struct {
 	sources map[string]generationtool.ModelSource
 	members map[string]bool
 	asked   []string
+	// groups holds the finished views of each group, keyed owner/session/run.
+	groups map[string][]generationtool.GroupView
+}
+
+func (f *fakeThreeViews) GroupViews(_ context.Context, owner, session, runID string) ([]generationtool.GroupView, error) {
+	views, ok := f.groups[owner+"/"+session+"/"+runID]
+	if !ok {
+		return nil, generationtool.ErrThreeViewGroupNotFound
+	}
+	return views, nil
 }
 
 func (f *fakeThreeViews) ModelSource(_ context.Context, owner, session, taskID string) (generationtool.ModelSource, bool, error) {

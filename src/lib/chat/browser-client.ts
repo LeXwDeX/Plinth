@@ -22,6 +22,17 @@ import type {
 import { parseNativeQuote, parsePriceTotals, type NativeQuote } from '@/lib/pricing';
 import { responseRequestId, withRequestReference } from '@/lib/problem-reference';
 
+/**
+ * #65: the person's structured request to make one 3D model from several views of one object. The three-view
+ * card names its group and the exact picture of each view it shows; labelled uploads name no group. The server
+ * binds the pictures and views itself; the Agent only names the tool.
+ */
+export interface MultiviewTurnRequest {
+  group?: string;
+  model: string;
+  views: { view: string; taskId?: string; assetId: string }[];
+}
+
 export interface ChatTurnOptions {
 	creativeDomain?: 'image' | 'model-3d';
   /** 其他工作区域各自已选的模型；Agent 工具跨域调用时按域取用。 */
@@ -48,6 +59,8 @@ export interface ChatTurnOptions {
   mentions?: ChatMentionClaim[];
   /** #321: the answer to an in-chat choice card; the server checks it against the card. */
   choiceAnswer?: { choiceId: string; optionId?: string; useDefault?: boolean };
+  /** #65: a structured multiview request (Schema `chat.api.fields.multiview`). */
+  multiview?: MultiviewTurnRequest;
 }
 
 /** One page of a conversation, oldest first; `nextCursor` reads the page before it ('' when none). */
@@ -271,9 +284,11 @@ export interface ChatBrowserClient {
     sessionID: string,
     runID: string,
     viewKey: string,
-    action: ThreeViewAction,
+    action: Exclude<ThreeViewAction, 'replace'>,
     attempt: number,
   ): Promise<ThreeViewGroup>;
+  /** #65: puts an uploaded input asset in place of one view; spends nothing. Returns the group as it stands. */
+  replaceThreeView(sessionID: string, runID: string, viewKey: string, assetID: string): Promise<ThreeViewGroup>;
   subscribe(
     sessionID: string,
     options: ChatSubscriptionOptions,
@@ -1061,6 +1076,15 @@ export function createChatBrowserClient(
         body[fields.mentions] = encodeMentions(schema, options.mentions);
       }
       assignIfDefined(body, fields.input_source, options.inputSource);
+      if (options.multiview && fields.multiview) {
+        body[fields.multiview] = {
+          ...(options.multiview.group ? { group: options.multiview.group } : {}),
+          model: options.multiview.model,
+          views: options.multiview.views.map((view) => ({
+            view: view.view, asset_id: view.assetId, ...(view.taskId ? { task_id: view.taskId } : {}),
+          })),
+        };
+      }
       if (options.choiceAnswer && fields.choice_answer) {
         body[fields.choice_answer] = options.choiceAnswer.useDefault
           ? { choice_id: options.choiceAnswer.choiceId, use_default: true }
@@ -1264,6 +1288,18 @@ export function createChatBrowserClient(
         throw retryAfter === undefined ? error
           : new ChatBrowserError(error.message, error.status, error.requestId, retryAfter);
       }
+      const group = parseThreeViewGroup(record(payload).group);
+      if (!group) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, response.status);
+      return group;
+    },
+    async replaceThreeView(sessionID, runID, viewKey, assetID) {
+      const response = await fetcher(threeViewItemRoute(schema, sessionID, runID, viewKey), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'replace', asset_id: assetID }),
+      });
+      const payload = await responseValue(response);
+      if (!response.ok) throw problemError(schema, payload, response.status);
       const group = parseThreeViewGroup(record(payload).group);
       if (!group) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, response.status);
       return group;

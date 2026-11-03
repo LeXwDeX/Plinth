@@ -19,6 +19,8 @@ export interface ApprovalCardInput {
   previewable?: boolean;
   /** What the input is in the session's own words ("正面", "2D v3"); empty when unknown. */
   label: string;
+  /** The localized view this picture stands for in a multiview step ("左侧"); absent otherwise. */
+  viewLabel?: string;
 }
 
 export interface ApprovalCardExtra {
@@ -79,6 +81,7 @@ export function cardFromPending(
       kind: input.kind === 'task' ? 'task' : input.kind === 'asset' ? 'asset' : '',
       ...(input.kind === 'asset' && input.mediaType ? { previewable: input.mediaType.startsWith('image/') } : {}),
       label: labelOf(input),
+      ...(input.viewLabel ? { viewLabel: input.viewLabel } : {}),
     })),
     sourceTaskId: '', expiresAt: item.expiresAt,
   };
@@ -110,7 +113,7 @@ export function cardFromConsent(pending: Record<string, unknown> | null, request
       if (ref && typeof ref === 'object') {
         const entry = ref as Record<string, unknown>;
         const mediaType = str(entry.media_type);
-        return [{ parameter: str(entry.parameter), handle: str(entry.handle), taskId: str(entry.task_id), assetId: str(entry.asset_id), kind: str(entry.asset_id) ? 'asset' : '', label: '', ...(mediaType ? { previewable: mediaType.startsWith('image/') } : {}) }];
+        return [{ parameter: str(entry.parameter), handle: str(entry.handle), taskId: str(entry.task_id), assetId: str(entry.asset_id), kind: str(entry.asset_id) ? 'asset' : '', label: '', ...(str(entry.view_label) ? { viewLabel: str(entry.view_label) } : {}), ...(mediaType ? { previewable: mediaType.startsWith('image/') } : {}) }];
       }
       return [];
     }),

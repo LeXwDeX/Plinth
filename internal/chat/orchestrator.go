@@ -1014,6 +1014,7 @@ func (orchestrator *Orchestrator) Process(
 	command.Options.Selection = turn.Options.Selection
 	command.Options.SelectionPicked = turn.Options.SelectionPicked
 	command.Options.InputSource = turn.Options.InputSource
+	command.Options.Multiview = turn.Options.Multiview
 	// So are the generation model picks: a retired model was moved to its
 	// successor when the turn started (#329 follow-up).
 	command.Options.AIModel = turn.Options.AIModel
@@ -1769,6 +1770,7 @@ func (orchestrator *Orchestrator) agentRequest(
 	systemPrompt += orchestrator.approvalModePrompt(ctx, ownerID, sessionID)
 	if registryErr == nil {
 		systemPrompt += orchestrator.skillToolDirective(ctx, registry, options)
+		systemPrompt += orchestrator.multiviewDirective(registry, options)
 	}
 	// The session summary stands in for the messages it covers (#322). Image
 	// indices and handles are counted over the whole history either way.

@@ -2,6 +2,7 @@ package generationtool
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"strings"
 
@@ -46,6 +47,19 @@ func (executor *Executor) taskAssetOfURL(reference string) (string, string, bool
 
 func (executor *Executor) assetURL(taskID, assetID string) string {
 	return strings.NewReplacer("{task_id}", taskID, "{asset_id}", assetID).Replace(executor.chat.Context.AssetURLTemplate)
+}
+
+// viewURL names the picture of a three-view view: the Task's asset, or the
+// input asset the person put in its place (no Task, #65). An empty route
+// reports false.
+func (executor *Executor) viewURL(taskID, assetID string) (string, bool) {
+	if taskID != "" {
+		return executor.assetURL(taskID, assetID), true
+	}
+	if executor.inputAsset == "" || !strings.Contains(executor.inputAsset, "{assetID}") {
+		return "", false
+	}
+	return strings.ReplaceAll(executor.inputAsset, "{assetID}", url.PathEscape(assetID)), true
 }
 
 // modelSourceReferences replaces every reference picture that is a view of a
@@ -105,9 +119,12 @@ func (executor *Executor) modelSourceReferences(ctx context.Context, command cha
 		case !source.Available:
 			return referenceSelection{}, executor.localized(command, executor.chat.ThreeView.Messages.ModelSourceNotYet), nil
 		default:
+			front, named := executor.viewURL(source.TaskID, source.AssetID)
+			if !named {
+				return referenceSelection{}, "", errors.New("generation tool: input asset route missing")
+			}
 			selection.Replaced = true
-			add(referenceCandidate{URL: executor.assetURL(source.TaskID, source.AssetID), Origin: origin,
-				FrontTaskID: source.TaskID, FrontAssetID: source.AssetID})
+			add(referenceCandidate{URL: front, Origin: origin, FrontTaskID: source.TaskID, FrontAssetID: source.AssetID})
 		}
 	}
 	selection.Candidates = result

@@ -227,6 +227,7 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
                 <InputThumbnail src={src} handle={input.handle || label || role} model={input.kind === 'task' || input.previewable === false} />
                 <span className="text-[11px]">
                   {role || label ? <span className="font-medium text-foreground" data-testid="studio-approval-input-label">{[role, label].filter(Boolean).join(' · ')}</span> : null}
+                  {input.viewLabel ? <span className="ml-1 rounded-sm bg-muted px-1 text-muted-foreground" data-testid="studio-approval-input-view">{formatSchemaText(schemaText(schema, 'ui.pending_approval.view_label'), { view: input.viewLabel })}</span> : null}
                   {input.handle && reference
                     ? <HandleTag reference={reference} testId="studio-approval-input-handle" wrapperClassName={cn((role || label) && 'ml-1')} className="px-0.5 py-0 text-[11px] leading-normal text-muted-foreground hover:text-foreground" />
                     : input.handle ? <span className={cn('text-muted-foreground', (role || label) && 'ml-1')}>{input.handle}</span> : null}

@@ -1,4 +1,5 @@
 import type { ChatAttachmentClaim } from '@/lib/chat/attachments';
+import type { MultiviewTurnRequest } from '@/lib/chat/browser-client';
 import { create } from 'zustand';
 
 import { removeCompareSlot, setCompareMode, toggleCompareSlot, type CompareMode, type CompareSlot, type CompareState } from '@/lib/workspace/compare';
@@ -104,7 +105,7 @@ interface StudioState extends StudioPrefs {
   /** 起步卡片 / 重新发起：把文字放进输入框（不发送）；seq 让相同文字也能再次触发。 */
   composerPrefill: { text: string; seq: number } | null;
   /** 舞台上的动作（如"转 3D"）请 Agent 直接做一件事；由对话栏作为一轮发出。 */
-  turnRequest: { text: string; seq: number; selection?: ChatAttachmentClaim[] } | null;
+  turnRequest: { text: string; seq: number; selection?: ChatAttachmentClaim[]; multiview?: MultiviewTurnRequest } | null;
   /** 请 3D 舞台把某个模型当前的视角截图到 2D（对话里的结果卡也能发起）。 */
   captureRequest: { taskId: string; seq: number } | null;
   /** Whether the model on the 3D stage can be captured or have a part exported (#126); `taskId` names the model it describes. */
@@ -148,7 +149,7 @@ interface StudioState extends StudioPrefs {
   prefillComposer: (text: string) => void;
   clearComposerPrefill: () => void;
   /** `selection` names the picture the turn is about (the rasterised board), instead of what the stage shows. */
-  requestTurn: (text: string, selection?: ChatAttachmentClaim[]) => void;
+  requestTurn: (text: string, selection?: ChatAttachmentClaim[], multiview?: MultiviewTurnRequest) => void;
   clearTurnRequest: () => void;
   requestCapture: (taskId: string) => void;
   clearCaptureRequest: () => void;
@@ -234,7 +235,9 @@ export const useStudioStore = create<StudioState>()((set, get) => {
     requestViewReset: () => set((state) => ({ viewResetRequest: { seq: (state.viewResetRequest?.seq ?? 0) + 1 } })),
     prefillComposer: (text) => set((state) => ({ composerPrefill: { text, seq: (state.composerPrefill?.seq ?? 0) + 1 } })),
     clearComposerPrefill: () => set({ composerPrefill: null }),
-    requestTurn: (text, selection) => set((state) => ({ turnRequest: { text, seq: (state.turnRequest?.seq ?? 0) + 1, ...(selection ? { selection } : {}) } })),
+    requestTurn: (text, selection, multiview) => set((state) => ({
+      turnRequest: { text, seq: (state.turnRequest?.seq ?? 0) + 1, ...(selection ? { selection } : {}), ...(multiview ? { multiview } : {}) },
+    })),
     clearTurnRequest: () => set({ turnRequest: null }),
     requestCapture: (taskId) => set((state) => ({ captureRequest: { taskId, seq: (state.captureRequest?.seq ?? 0) + 1 } })),
     clearCaptureRequest: () => set({ captureRequest: null }),

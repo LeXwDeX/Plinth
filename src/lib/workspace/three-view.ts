@@ -1,3 +1,5 @@
+import type { OfferingWire } from '@/lib/agent-offerings';
+import type { MultiviewTurnRequest } from '@/lib/chat/browser-client';
 import { parseNativeQuote, type NativeQuote } from '@/lib/pricing';
 
 /**
@@ -15,8 +17,13 @@ const STATUSES: readonly ThreeViewStatus[] = [
 ];
 
 export interface ThreeViewSlot {
+  /** The view key the multiview Offering speaks (front, left, back, right; #65). */
   key: string;
   label: string;
+  /** The group is complete without this view (the right view). */
+  optional: boolean;
+  /** The person put an uploaded picture in place of this view: `outputAssetId` is an input asset. */
+  replaced: boolean;
   status: ThreeViewStatus;
   attempt: number;
   taskId: string;
@@ -35,6 +42,7 @@ export interface ThreeViewSlot {
 export interface ThreeViewModelSource {
   slot: string;
   available: boolean;
+  /** Empty when the person replaced the view with an upload; `assetId` is then an input asset. */
   taskId: string;
   assetId: string;
   /** The Schema's statement that only this view is used for 3D. */
@@ -51,7 +59,7 @@ export interface ThreeViewGroup {
   modelSource: ThreeViewModelSource;
 }
 
-export type ThreeViewAction = 'start' | 'retry';
+export type ThreeViewAction = 'start' | 'retry' | 'replace';
 
 const text = (value: unknown): string => (typeof value === 'string' ? value : '');
 const flag = (value: unknown): boolean => value === true;
@@ -67,6 +75,8 @@ function parseSlot(value: unknown): ThreeViewSlot | null {
   return {
     key,
     label: text(value.label) || key,
+    optional: flag(value.optional),
+    replaced: flag(value.replaced),
     status,
     attempt: typeof value.attempt === 'number' && Number.isFinite(value.attempt) ? Math.max(0, Math.floor(value.attempt)) : 0,
     taskId: text(value.task_id),
@@ -109,7 +119,7 @@ export function parseThreeViews(payload: unknown): ThreeViewGroup[] {
 }
 
 /** What the person may ask of a view right now; null when nothing (running, done, or not retryable). */
-export function slotAction(slot: ThreeViewSlot): ThreeViewAction | null {
+export function slotAction(slot: ThreeViewSlot): 'start' | 'retry' | null {
   if (slot.startable) return 'start';
   if (slot.retryable) return 'retry';
   return null;
@@ -136,6 +146,82 @@ export function groupTileStatus(group: ThreeViewGroup): ThreeViewTileStatus {
 
 export function succeededCount(group: ThreeViewGroup): number {
   return group.slots.filter((slot) => slot.status === 'succeeded').length;
+}
+
+/** A view whose approval or Task is in flight cannot be replaced; any other view can (#65). */
+export function slotReplaceable(slot: ThreeViewSlot): boolean {
+  return slot.status !== 'awaiting_approval' && slot.status !== 'starting' && slot.status !== 'running';
+}
+
+/** The required views the person has not started yet: what "generate remaining views" starts, one approval each. */
+export function remainingSlots(group: ThreeViewGroup): ThreeViewSlot[] {
+  return group.slots.filter((slot) => !slot.optional && slot.startable && slot.status === 'not_started');
+}
+
+/** The estimate of starting the remaining views, or 0 when no metered estimate is known for every one of them. */
+export function remainingCredits(slots: readonly ThreeViewSlot[]): number {
+  if (slots.length === 0 || slots.some((slot) => slot.nativeQuote !== undefined || !slot.creditsMetered || slot.estimatedCredits <= 0)) return 0;
+  return slots.reduce((sum, slot) => sum + slot.estimatedCredits, 0);
+}
+
+/** A model that takes several views of one object, read from its Offering's public declaration (#65). */
+export interface MultiviewModel {
+  modelId: string;
+  modelName: string;
+  /** The view keys and labels, in the Offering's order. */
+  views: { value: string; label: string }[];
+  minimumViews: number;
+  /** The picture types the Offering takes (empty when it does not say). */
+  mediaTypes: string[];
+}
+
+/** The Schema semantic of the parameter that names the view of each reference picture. */
+export const REFERENCE_VIEWS_SEMANTIC = 'reference-views';
+
+/** The multiview model an Offering declares, or null: only the reference-views parameter makes one. */
+export function multiviewModelOf(offering: OfferingWire): MultiviewModel | null {
+  const views = offering.parameters.find((parameter) => parameter.semantic === REFERENCE_VIEWS_SEMANTIC);
+  if (!views?.options?.length) return null;
+  const pictures = offering.parameters.find((parameter) => parameter.semantic === 'reference-image');
+  return {
+    modelId: offering.model_id,
+    modelName: offering.model_name || offering.model_id,
+    views: views.options.map((option) => ({ value: String(option.value), label: option.label || String(option.value) })),
+    minimumViews: Math.max(2, pictures?.min_items ?? 2),
+    mediaTypes: pictures?.media_types ?? [],
+  };
+}
+
+/** The multiview model to use: the person's 3D pick when it is one, else the first available. */
+export function pickMultiviewModel(
+  offeringsByCapability: Record<string, OfferingWire[]> | undefined,
+  picked: string | undefined,
+): MultiviewModel | null {
+  const models = Object.values(offeringsByCapability ?? {}).flat()
+    .filter((offering) => offering.available)
+    .map(multiviewModelOf)
+    .filter((model): model is MultiviewModel => model !== null);
+  return models.find((model) => model.modelId === picked) ?? models[0] ?? null;
+}
+
+/** The finished views of a group the model takes, in the group's order; the request the button sends. */
+export function groupMultiview(group: ThreeViewGroup, model: MultiviewModel): {
+  slots: ThreeViewSlot[];
+  ready: boolean;
+  request: MultiviewTurnRequest;
+} {
+  const keys = new Set(model.views.map((view) => view.value));
+  const slots = group.slots.filter((slot) => slot.status === 'succeeded' && slot.outputAssetId !== '' && keys.has(slot.key));
+  const ready = slots.some((slot) => slot.key === group.modelSource.slot) && slots.length >= model.minimumViews;
+  return {
+    slots,
+    ready,
+    request: {
+      group: group.runId,
+      model: model.modelId,
+      views: slots.map((slot) => ({ view: slot.key, assetId: slot.outputAssetId, ...(slot.replaced || !slot.taskId ? {} : { taskId: slot.taskId }) })),
+    },
+  };
 }
 
 export type TimelineItem<T> = { kind: 'message'; message: T } | { kind: 'group'; group: ThreeViewGroup };

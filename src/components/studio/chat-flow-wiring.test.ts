@@ -78,7 +78,7 @@ describe('the extra-credit consent', () => {
     expect(studioStore).not.toContain('threeD');
     expect(chat).not.toContain('ExtraCreditConsentCard');
     expect(chat).not.toContain('confirmConsent');
-    expect(chat).toContain('void sendRef.current(turnRequest.text, undefined, undefined, undefined, turnRequest.selection);');
+    expect(chat).toContain('void sendRef.current(turnRequest.text, undefined, undefined, undefined, turnRequest.selection, undefined, undefined,');
     expect(chat).toContain('<ApprovalCard');
   });
 });

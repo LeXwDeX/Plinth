@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 
@@ -9,6 +10,46 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/harness/resolve"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
+
+// MultiviewRequest is the person's structured request to make one 3D model
+// from several views of one object (#65): the three-view card's button names
+// its group and the exact picture of each view it showed; labelled uploads
+// name no group. The service checks only its shape when the turn starts; the
+// generation tool proves every picture against the owner, the session and the
+// group before anything is prepared.
+type MultiviewRequest struct {
+	Group string          `json:"group,omitempty"`
+	Model string          `json:"model"`
+	Views []MultiviewView `json:"views"`
+}
+
+// MultiviewView is one picture of a MultiviewRequest and its view key. TaskID
+// is empty for an input asset (an upload).
+type MultiviewView struct {
+	View    string `json:"view"`
+	TaskID  string `json:"task_id,omitempty"`
+	AssetID string `json:"asset_id"`
+}
+
+// MaximumMultiviewViews bounds a MultiviewRequest; a multiview Offering takes
+// at most four views.
+const MaximumMultiviewViews = 4
+
+// Valid reports whether the request has the shape the tool can resolve: a
+// model, two to four distinct views and a picture for each.
+func (request MultiviewRequest) Valid() bool {
+	if strings.TrimSpace(request.Model) == "" || len(request.Views) < 2 || len(request.Views) > MaximumMultiviewViews {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, view := range request.Views {
+		if strings.TrimSpace(view.View) == "" || strings.TrimSpace(view.AssetID) == "" || seen[view.View] {
+			return false
+		}
+		seen[view.View] = true
+	}
+	return true
+}
 
 type TurnOptions struct {
 	// Harness is read from the authenticated session when a new turn starts.
@@ -49,6 +90,9 @@ type TurnOptions struct {
 	// artboard snapshot taken at send time; generation tools that read images
 	// then use it whatever the Agent named. Empty: no declared source.
 	InputSource string `json:"InputSource,omitempty"`
+	// Multiview is the person's structured multiview request (#65), frozen
+	// with the turn. Nil for an ordinary turn.
+	Multiview *MultiviewRequest `json:"Multiview,omitempty"`
 	// AgentScope is the session's Agent scope when the turn started. The
 	// service reads it from the stored session, never from the request, and the
 	// turn keeps it across restarts: the tool list, the system context and the

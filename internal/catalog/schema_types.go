@@ -2353,6 +2353,36 @@ type ChatThreeViewSchema struct {
 	// The browser reads it from chat.three_view_limits.
 	QueueLimitSeconds int                   `json:"queue_limit_seconds"`
 	Messages          ChatThreeViewMessages `json:"messages"`
+	// Multiview binds the groups, and pictures the person labelled with their
+	// views, to the multiview image-to-3D tool (#65).
+	Multiview ChatThreeViewMultiviewSchema `json:"multiview"`
+}
+
+// ChatThreeViewMultiviewSchema says how a group (or labelled uploads) becomes
+// one multiview image-to-3D step (#65). Which Offering takes several views is
+// the Offering's own declaration: a parameter with the reference-views
+// semantic, whose options are the view keys. The group's views are the recipe
+// step keys; a key no option names takes no part.
+type ChatThreeViewMultiviewSchema struct {
+	// Tool is the Agent tool that runs the step.
+	Tool string `json:"tool"`
+	// GroupArgument is the tool argument that names a group by its run ID; the
+	// server then reads the pictures and views from the group.
+	GroupArgument string `json:"group_argument"`
+	// ViewsArgument is the tool argument with the view of each picture.
+	ViewsArgument string `json:"views_argument"`
+	// RequiredView must be among the views, and MinimumViews is the fewest
+	// views a step takes.
+	RequiredView string `json:"required_view"`
+	MinimumViews int    `json:"minimum_views"`
+	// GroupDirective is the turn's system block when the person pressed the
+	// group's button: {tool}, {group}, {model}, {views}. UploadDirective is the
+	// block for uploads the person labelled: {tool}, {model}, {views}.
+	GroupDirective  string `json:"group_directive"`
+	UploadDirective string `json:"upload_directive"`
+	// ViewsNote says which views a step used: {views}, joined by ViewSeparator.
+	ViewsNote     string `json:"views_note"`
+	ViewSeparator string `json:"view_separator"`
 }
 
 // ChatThreeViewMessages are the texts of the three-view tools. Fields of
@@ -2366,6 +2396,12 @@ type ChatThreeViewMessages struct {
 	ApprovalPolicy    string `json:"approval_policy"`
 	ModelSourceNotYet string `json:"model_source_not_yet"`
 	ReferenceRequired string `json:"reference_required"`
+	// GroupNotFound, GroupNotReady, ViewsChanged and ViewsInvalid refuse a
+	// multiview step (#65) before anything is prepared.
+	GroupNotFound string `json:"group_not_found"`
+	GroupNotReady string `json:"group_not_ready"`
+	ViewsChanged  string `json:"views_changed"`
+	ViewsInvalid  string `json:"views_invalid"`
 }
 
 // ChatPendingApprovalsSchema is application.chat.pending_approvals. It is
@@ -2581,7 +2617,10 @@ type ChatAPIFields struct {
 	// InputSource names the source the person chose for the turn (#266). The
 	// only declared value is context.canvas_input_source: the selection is the
 	// artboard snapshot taken at send time and the system binds it.
-	InputSource  string `json:"input_source"`
+	InputSource string `json:"input_source"`
+	// Multiview carries the person's structured multiview request (#65):
+	// {"group", "model", "views": [{"view", "task_id", "asset_id"}]}.
+	Multiview    string `json:"multiview,omitempty"`
 	FromID       string `json:"from_id"`
 	TurnCanceled string `json:"turn_canceled"`
 	// ApprovalMode is the request field of the session approval-mode write.
@@ -3501,6 +3540,8 @@ type ChatSkillRecipeStepSchema struct {
 	OutputRole     string                     `json:"output_role"`
 	SourceStepKey  string                     `json:"source_step_key,omitempty"`
 	StaticInput    map[string]json.RawMessage `json:"static_input,omitempty"`
+	// Optional: the run is complete without this step (#65).
+	Optional bool `json:"optional,omitempty"`
 }
 
 type ChatSkillExecutionSchema struct {

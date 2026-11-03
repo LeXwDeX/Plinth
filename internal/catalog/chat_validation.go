@@ -216,7 +216,7 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validatePendingApprovals(schema.PendingApprovals); err != nil {
 		return err
 	}
-	if err := validateThreeView(schema.ThreeView, schema.Skills.Recipes); err != nil {
+	if err := validateThreeView(schema.ThreeView, schema.Skills.Recipes, schema.Tools); err != nil {
 		return err
 	}
 	if err := validateDSMLSpellings(schema.DSML); err != nil {
@@ -1342,7 +1342,7 @@ const threeViewQueueLimitMaximumSeconds = 86400
 
 // validateThreeView accepts an absent declaration and rejects a three-view declaration that names a recipe or a
 // model-source view the Schema does not have, or that leaves a text empty.
-func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSchema) error {
+func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSchema, tools []ChatToolSchema) error {
 	if schema == (ChatThreeViewSchema{}) {
 		return nil // a deployment without the three-view recipe declares none
 	}
@@ -1377,7 +1377,9 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 		"agent_started": messages.AgentStarted, "admission_full": messages.AdmissionFull,
 		"approval_human":  messages.ApprovalHuman,
 		"approval_policy": messages.ApprovalPolicy, "model_source_not_yet": messages.ModelSourceNotYet,
-		"reference_required": messages.ReferenceRequired,
+		"reference_required": messages.ReferenceRequired, "group_not_found": messages.GroupNotFound,
+		"group_not_ready": messages.GroupNotReady, "views_changed": messages.ViewsChanged,
+		"views_invalid": messages.ViewsInvalid,
 	} {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("three_view.messages.%s 不能为空", name)
@@ -1388,7 +1390,65 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 			return fmt.Errorf("three_view.messages.agent_started 必须包含 %s", field)
 		}
 	}
-	return nil
+	if recipe.Steps[0].Optional || recipe.Steps[0].Key != schema.ModelSourceStepKey {
+		return errors.New("three_view 的第一个视图必须是 3D 来源视图，且不能是可选视图")
+	}
+	return validateThreeViewMultiview(schema.Multiview, *recipe, tools)
+}
+
+// validateThreeViewMultiview checks the binding to the multiview tool (#65):
+// the tool takes the group and views arguments, and the required view is a
+// step of the recipe.
+func validateThreeViewMultiview(multiview ChatThreeViewMultiviewSchema, recipe ChatSkillRecipeSchema, tools []ChatToolSchema) error {
+	for name, value := range map[string]string{
+		"tool": multiview.Tool, "group_argument": multiview.GroupArgument, "views_argument": multiview.ViewsArgument,
+		"required_view": multiview.RequiredView, "group_directive": multiview.GroupDirective,
+		"upload_directive": multiview.UploadDirective, "views_note": multiview.ViewsNote,
+		"view_separator": multiview.ViewSeparator,
+	} {
+		if value == "" {
+			return fmt.Errorf("three_view.multiview.%s 不能为空", name)
+		}
+	}
+	if multiview.MinimumViews < 2 {
+		return errors.New("three_view.multiview.minimum_views 至少为 2")
+	}
+	required := false
+	for _, step := range recipe.Steps {
+		required = required || (step.Key == multiview.RequiredView && !step.Optional)
+	}
+	if !required {
+		return fmt.Errorf("three_view.multiview.required_view %q 必须是该 recipe 的必需步骤", multiview.RequiredView)
+	}
+	for field, text := range map[string]string{
+		"{tool}": multiview.GroupDirective, "{group}": multiview.GroupDirective, "{model}": multiview.GroupDirective,
+	} {
+		if !strings.Contains(text, field) {
+			return fmt.Errorf("three_view.multiview.group_directive 必须包含 %s", field)
+		}
+	}
+	if !strings.Contains(multiview.UploadDirective, "{tool}") || !strings.Contains(multiview.UploadDirective, "{model}") ||
+		!strings.Contains(multiview.ViewsNote, "{views}") {
+		return errors.New("three_view.multiview 的 upload_directive 须含 {tool}、{model}，views_note 须含 {views}")
+	}
+	for _, tool := range tools {
+		if tool.Name != multiview.Tool {
+			continue
+		}
+		var parameters struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(tool.Parameters, &parameters); err != nil {
+			return fmt.Errorf("three_view.multiview.tool %q 的参数无法解析: %w", tool.Name, err)
+		}
+		for _, argument := range []string{multiview.GroupArgument, multiview.ViewsArgument, tool.OfferingArgument} {
+			if _, declared := parameters.Properties[argument]; !declared || argument == "" {
+				return fmt.Errorf("three_view.multiview.tool %q 缺少参数 %q", tool.Name, argument)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("three_view.multiview.tool %q 不是已声明的 Agent 工具", multiview.Tool)
 }
 
 // agentScopeModes and agentToolClasses are the identifiers the Agent scope
