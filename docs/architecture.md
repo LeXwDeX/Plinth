@@ -1853,11 +1853,12 @@ Texture 修订 `2026-10-21.187.2` 按独立端点的最高分辨率合同固定 
 
 - `.github/workflows/ci.yml` 的 `workflow_dispatch` 有布尔输入 `use_self_hosted`，默认 `false`。`push`、`pull_request` 与默认手动运行选择 `ubuntu-latest`（`go test race` 的例外见下一条）；只有 `workflow_dispatch` 且该输入为 `true` 时，`frontend`、`go check`、`go test race` 三个作业才选择固定标签集 `[self-hosted, Linux, X64, plinth-trusted-ci]`。显式自托管 dispatch 在 ref 前加固定标识，使用独立并发组，其他事件的分组和取消规则不变。门禁命令、`permissions: contents: read`、Action 的完整 SHA 与 `persist-credentials: false` 保持不变。
 - Azure 按需 runner（#78）：`go test race` 在本仓库 `main` 的 `push`，以及 head 仓库就是本仓库的 `pull_request` 上，选择标签集 `[self-hosted, Linux, X64, plinth-azure]`。这是一台按量计费、用时开机的 Azure 16 核仓库级 runner；fork PR 与其他事件仍走 `ubuntu-latest`，`frontend` 与 `go check` 不变。门禁作业依然没有作业级 `if`、`needs` 或 `permissions`，路由表达式与事件用例由 `ci-gate-parity.test.ts` 锁定。
-  - 开机：独立工作流 `.github/workflows/azure-runner.yml` 在上述事件上以 GitHub OIDC 登录并开机，另每 10 分钟（及手动触发时）只读检查一次，有作业排队等该标签就开机，覆盖重跑作业与开机失败。它不跑门禁、不检出或读取触发方的代码，是仓库里唯一持有 `id-token: write` 的工作流。
-  - 身份与权限：OIDC 身份的角色只能读取、开机、解除分配这一台 VM，联合凭据只认本仓库的 `main` 与本仓库的 `pull_request`；fork PR 拿不到 OIDC token。
+  - 开机：独立工作流 `.github/workflows/azure-runner.yml` 在上述事件上以 GitHub OIDC 登录并开机；手动触发时只读检查一次，有作业排队等该标签就开机，作为兜底。它不跑门禁、不检出或读取触发方的代码，是仓库里唯一持有 `id-token: write` 的工作流。
+  - 重跑开机：重跑作业不会再触发 `push`/`pull_request`。仓库 `workflow_job` webhook 把事件投递给资源组内的 Azure Function（Flex Consumption，代码在 `scripts/azure-runner/webhook/`）；它校验 HMAC 签名，只对本仓库、`queued`、标签含 `plinth-azure` 的作业用自身托管身份开机，不持有 GitHub token，其他事件返回 ignored。GitHub 定时触发在本仓库实测不运行，已移除（#78）。
+  - 身份与权限：OIDC 身份与 Function 托管身份都只有读取、开机、解除分配这一台 VM 的角色；OIDC 联合凭据只认本仓库的 `main` 与本仓库的 `pull_request`，fork PR 拿不到 OIDC token。webhook 签名密钥只在函数应用设置与仓库 webhook 配置中。
   - 关机：VM 用自身托管身份在空闲 10 分钟后解除分配（空闲按 `Runner.Worker` 进程是否存在计算，卡死作业由 `timeout-minutes` 结束），平台侧每日定时关机兜底。
   - 机器内：runner 以无特权用户运行，每个作业开始前清空工作目录，测试临时目录在随解除分配清空的本地临时盘上；机器上不放 Plinth 运行密钥。常驻 runner 的注册凭据作业进程可读，是已知残留风险，靠只放行可信事件控制。安装脚本是 `scripts/azure-runner/vm-setup.sh`，资源清单与删除方式只记在 #78。
-  - 验证范围：开机、空闲解除分配与平台兜底关机各实测一次（#79）；定时检查开机的路径在合入默认分支前无法运行，合入后验证。
+  - 验证范围：开机、空闲解除分配与平台兜底关机各实测一次（#79）；webhook 开机在 VM 解除分配时重跑 race 作业实测一次：Function 托管身份发起开机，作业约 1 分钟后被领取并通过（#78）。webhook 函数的签名、过滤与 ping 由 `scripts/tests/test_azure_runner_webhook.py` 离线覆盖。
 - 路由不是隔离边界：PR 可以修改工作流；维护者只应在审查完整 SHA、核验受信任 ref 与运行环境后明确触发。运行后对照 `head_sha`、实际 runner ID 和 checkout 只提供事后证据，不能阻止不可信代码执行。私有仓库转公开前须证明平台级隔离或阻止不可信工作流触达 runner，未证明时不得称安全。两种路径均要求仅访问公共依赖源、不访问内网，但静态检查不能证明实际网络访问，运行环境须分别核验。
 - 托管 runner 遇到计费墙时：仅在存在自托管 runner 且其安全和精确 ref 已核验时优先尝试；没有或不可用时先本机初检，再在指定 `dev-test` 主机对同一精确 SHA 做完整隔离自检，作为 CI 的替代证据（隔离、源码绑定、门禁和报告条件见 `dev_test.md` §2）。自检不生成 GitHub Actions success，不代替 Git hooks 或部署后回归。离线测试不证明实际 runner 调度或隔离。
 
