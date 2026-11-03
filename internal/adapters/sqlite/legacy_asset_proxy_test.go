@@ -13,7 +13,7 @@ import (
 func TestLegacyAssetProxyRepositoryReadsAndUpdatesOnlyTaskData(
 	t *testing.T,
 ) {
-	repository, err := Open(filepath.Join(t.TempDir(), "art-ai.db"))
+	repository, err := openTestRepository(filepath.Join(t.TempDir(), "art-ai.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestLegacyAssetProxyRepositoryReadsAndUpdatesOnlyTaskData(
 func TestLegacyAssetProxyRepositoryToleratesMissingLegacyTable(
 	t *testing.T,
 ) {
-	repository, err := Open(filepath.Join(t.TempDir(), "art-ai.db"))
+	repository, err := openTestRepository(filepath.Join(t.TempDir(), "art-ai.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestLegacyAssetProxyRepositoryToleratesMissingLegacyTable(
 func TestLegacyAssetProxyRepositoryFallsBackToNativeCurrentAttempt(
 	t *testing.T,
 ) {
-	repository, err := Open(filepath.Join(t.TempDir(), "art-ai.db"))
+	repository, err := openTestRepository(filepath.Join(t.TempDir(), "art-ai.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

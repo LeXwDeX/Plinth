@@ -9,13 +9,14 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 )
 
 func choiceRepository(t *testing.T) (*sqlite.Repository, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "choices.db")
-	repo, err := sqlite.Open(path)
+	repo, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +93,7 @@ func TestChoiceCardsPersistPerOwnerAndSessionAndAnswerOnce(t *testing.T) {
 	}
 	// The answer survives a restart of the store.
 	_ = repo.Close()
-	reopened, err := sqlite.Open(path)
+	reopened, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

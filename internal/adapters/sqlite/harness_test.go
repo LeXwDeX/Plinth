@@ -36,7 +36,7 @@ func TestHarnessSelectionDurableCASAndVersions(t *testing.T) {
 	if err := r.db.QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &path); err != nil {
 		t.Fatal(err)
 	}
-	other, err := Open(path)
+	other, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestHarnessSelectionDurableCASAndVersions(t *testing.T) {
 
 func TestHarnessSelectionIndependentConnectionsOneCASWinner(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "harness.db")
-	a, err := Open(path)
+	a, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestHarnessSelectionIndependentConnectionsOneCASWinner(t *testing.T) {
 	if _, err := a.db.Exec(`INSERT INTO go_chat_sessions(id,owner_id,owner_name,title,created_at,updated_at) VALUES('s','o','','','','')`); err != nil {
 		t.Fatal(err)
 	}
-	b, err := Open(path)
+	b, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,7 +5,7 @@ import { Popover } from '@base-ui/react/popover';
 import { Check, ChevronDown, Trash2 } from 'lucide-react';
 
 import { HintTooltip } from '@/components/ui/hint-tooltip';
-import { useAnchoredPositioner } from '@/components/ui/overlay';
+import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
 import { cn } from '@/lib/utils';
 
 /**
@@ -149,7 +149,7 @@ export function TablePopover({
         {description ? <span id={descriptionId} className="sr-only">{description}</span> : null}
       </HintTooltip>
       <Popover.Portal>
-        <Popover.Positioner side="top" align="start" sideOffset={8} collisionPadding={12} className={layer}>
+        <Popover.Positioner positionMethod={anchoredPositionMethod} side="top" align="start" sideOffset={8} collisionPadding={12} className={layer}>
           <Popover.Popup
             data-testid={testId ? `${testId}-panel` : undefined}
             aria-label={label}

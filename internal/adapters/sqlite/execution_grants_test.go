@@ -25,7 +25,7 @@ func grantIdentity() executiongrant.Identity {
 
 func openGrantTestRepo(t *testing.T) *Repository {
 	t.Helper()
-	r, err := Open(filepath.Join(t.TempDir(), "grants.db"))
+	r, err := openTestRepository(filepath.Join(t.TempDir(), "grants.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

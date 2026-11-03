@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Coins } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
 
-import { useAnchoredPositioner } from '@/components/ui/overlay';
+import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { useBalance, type ProviderBalanceAccountView } from '@/hooks/use-balance';
 import { formatBalanceAmount } from '@/lib/i18n/format';
@@ -87,7 +87,7 @@ export function WorkspaceBalance() {
       </span>
     </Popover.Trigger>
     <Popover.Portal>
-      <Popover.Positioner side="bottom" align="end" sideOffset={8} className={layer}>
+      <Popover.Positioner positionMethod={anchoredPositionMethod} side="bottom" align="end" sideOffset={8} className={layer}>
         <Popover.Popup
           onPointerEnter={(event) => { if (event.pointerType === 'mouse') keepOpen(); }}
           onPointerLeave={(event) => { if (event.pointerType === 'mouse') closeLater(); }}

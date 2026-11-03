@@ -44,7 +44,7 @@ func TestRetentionBackupRoundTripAndAtomicReceipt(t *testing.T) {
 			ctx := context.Background()
 			root := retentionTestDir(t)
 			path := filepath.Join(root, "source.sqlite")
-			r, e := Open(path)
+			r, e := openTestRepository(path)
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -137,7 +137,7 @@ func TestRetentionRefusesMissingBackupAndChangedSnapshot(t *testing.T) {
 	ctx := context.Background()
 	root := retentionTestDir(t)
 	path := filepath.Join(root, "source.sqlite")
-	r, e := Open(path)
+	r, e := openTestRepository(path)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -193,7 +193,7 @@ func TestRetentionServicePartialCleanupRequiresNewApprovalAndKeepsBackup(t *test
 	if e := os.Mkdir(cas, 0700); e != nil {
 		t.Fatal(e)
 	}
-	r, e := Open(path)
+	r, e := openTestRepository(path)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -377,7 +377,7 @@ func TestRetentionTransactionFailureRollsBackAllDeletedRows(t *testing.T) {
 	ctx := context.Background()
 	root := retentionTestDir(t)
 	path := filepath.Join(root, "source.sqlite")
-	r, e := Open(path)
+	r, e := openTestRepository(path)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -432,7 +432,7 @@ func TestRetentionChangedRowsRejectFrozenManifest(t *testing.T) {
 	ctx := context.Background()
 	root := retentionTestDir(t)
 	path := filepath.Join(root, "source.sqlite")
-	r, e := Open(path)
+	r, e := openTestRepository(path)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -451,7 +451,7 @@ func TestRetentionChangedRowsRejectFrozenManifest(t *testing.T) {
 		t.Fatal(e)
 	}
 	s.Close()
-	r, e = Open(path)
+	r, e = openTestRepository(path)
 	if e != nil {
 		t.Fatal(e)
 	}

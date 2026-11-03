@@ -11,14 +11,21 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
 //go:embed default_catalog.json
 var defaultCatalog []byte
 
-func LoadDefault() (*Catalog, error) {
+// loadDefault 只解析、校验一次内置 Catalog。Catalog 构造后只读，读取方法都返回副本，
+// 所以可以在调用方之间共享；race 下每次重新校验要一到数秒，测试会大量调用。
+var loadDefault = sync.OnceValues(func() (*Catalog, error) {
 	return Load(bytes.NewReader(defaultCatalog))
+})
+
+func LoadDefault() (*Catalog, error) {
+	return loadDefault()
 }
 
 func Load(reader io.Reader) (*Catalog, error) {
@@ -312,7 +319,8 @@ func (c *Catalog) DefaultCancellationPolicy() schemacontract.CancellationPolicy 
 }
 
 func (c *Catalog) Application() ApplicationSchema {
-	return cloneApplication(c.application)
+	// c.application 在 Load 时已按 cloneApplication 整理过形状，这里只需深拷贝。
+	return deepCopy(c.application)
 }
 
 func (raw rawOffering) toOffering() schemacontract.Offering {

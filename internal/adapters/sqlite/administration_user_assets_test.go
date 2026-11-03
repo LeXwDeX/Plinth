@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/administration"
 )
 
@@ -15,7 +16,7 @@ func TestAdministrationUserAssetsCombinesNativeAndLegacyActivity(
 	t *testing.T,
 ) {
 	path := filepath.Join(t.TempDir(), "user-assets.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +96,7 @@ func TestListOwnedInputAssetsUsesOwnerScopeAndHidesDuplicateLegacyRows(
 	t *testing.T,
 ) {
 	path := filepath.Join(t.TempDir(), "account-resources.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

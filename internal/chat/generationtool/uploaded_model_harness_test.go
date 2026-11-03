@@ -273,7 +273,7 @@ func TestUploadedModelHarnessRealKernelAdmissionAndBoundReplay(t *testing.T) {
 	}
 	// Restore the original checkpoint and admission through fresh SQLite/module/
 	// executor instances, rather than relying on an in-memory operation cache.
-	restartedRepo, err := sqlite.Open(h.path)
+	restartedRepo, err := sqlitetest.Open(h.path)
 	if err != nil {
 		t.Fatal(err)
 	}

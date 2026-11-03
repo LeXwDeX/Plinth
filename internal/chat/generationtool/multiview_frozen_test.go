@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
@@ -166,7 +165,7 @@ func TestMultiviewRealPreparedInputFreezesOrderBytesAndGrantAcrossRestart(t *tes
 	if err = repo.Close(); err != nil {
 		t.Fatal(err)
 	}
-	repo, err = sqlite.Open(dbpath)
+	repo, err = sqlitetest.Open(dbpath)
 	if err != nil {
 		t.Fatal(err)
 	}

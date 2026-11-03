@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
 	"github.com/LeXwDeX/Plinth/internal/assets/modelinput/modelinputtest"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
@@ -376,7 +377,7 @@ func newAcmeHarness(
 ) *acmeHarness {
 	t.Helper()
 	root := t.TempDir()
-	repository, err := sqlite.Open(filepath.Join(root, "test.db"))
+	repository, err := sqlitetest.Open(filepath.Join(root, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 )
 
 func TestCompletenessReadGapCannotBeHidden(t *testing.T) {
@@ -192,7 +193,7 @@ func TestCompletenessRejectsSelfConsistentTaskAndCreditCorruption(t *testing.T) 
 				t.Fatal(err)
 			}
 			targetPath := filepath.Join(t.TempDir(), "target.db")
-			target, err := sqlite.Open(targetPath)
+			target, err := sqlitetest.Open(targetPath)
 			if err != nil {
 				t.Fatal(err)
 			}

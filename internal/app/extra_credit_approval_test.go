@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
@@ -65,7 +66,7 @@ func newExtraCreditStack(t *testing.T) *extraCreditStack {
 		<-agentDone
 		_ = application.generation.Close()
 	})
-	repository, err := sqlite.Open(filepath.Join(root, "art-ai.db"))
+	repository, err := sqlitetest.Open(filepath.Join(root, "art-ai.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

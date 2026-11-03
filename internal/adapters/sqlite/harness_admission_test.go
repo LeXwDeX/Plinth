@@ -172,7 +172,7 @@ func TestHarnessCASAndAdmissionSerializeBothCommitOrders(t *testing.T) {
 	if err := r.db.QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &path); err != nil {
 		t.Fatal(err)
 	}
-	other, err := Open(path)
+	other, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}

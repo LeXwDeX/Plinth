@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 )
 
 func TestReadinessTracksWorkersDatabaseAndStorage(t *testing.T) {
@@ -15,7 +15,7 @@ func TestReadinessTracksWorkersDatabaseAndStorage(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, "tmp"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	repo, err := sqlite.Open(filepath.Join(root, "data.db"))
+	repo, err := sqlitetest.Open(filepath.Join(root, "data.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

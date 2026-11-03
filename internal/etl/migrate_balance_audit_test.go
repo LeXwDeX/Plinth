@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/administration"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/etl/etltest"
@@ -43,7 +43,7 @@ func TestMigrateBalanceSnapshotsPreservesAccountValueAndTime(
 		t.Fatal(err)
 	}
 	accountID := product.Application().Administration.Usage.Balance.AccountID
-	repository, err := sqlite.Open(targetDB)
+	repository, err := sqlitetest.Open(targetDB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestMigrateAuditPreservesFiltersAndMaterializesLinkedFile(
 
 	from := time.Date(2025, 2, 3, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2025, 2, 4, 0, 0, 0, 0, time.UTC)
-	repository, err := sqlite.Open(targetDB)
+	repository, err := sqlitetest.Open(targetDB)
 	if err != nil {
 		t.Fatal(err)
 	}

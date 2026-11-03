@@ -9,20 +9,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
 func TestEmbeddedMigrationsAreIdempotentAcrossRestarts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "art-ai.db")
-	first, err := sqlite.Open(path)
+	first, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
-	second, err := sqlite.Open(path)
+	second, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestEmbeddedMigrationsAreIdempotentAcrossRestarts(t *testing.T) {
 	if err := second.Close(); err != nil {
 		t.Fatal(err)
 	}
-	third, err := sqlite.Open(path)
+	third, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestEmbeddedMigrationsAreIdempotentAcrossRestarts(t *testing.T) {
 
 func TestGeneratedOutputIsInputOnlyAfterOwnedTaskSucceeds(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "assets.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

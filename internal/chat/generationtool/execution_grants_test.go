@@ -334,7 +334,7 @@ func TestBoundAgentTaskRecoversAfterRestartWithChangedHarness(t *testing.T) {
 	if err := repo.Close(); err != nil {
 		t.Fatal(err)
 	}
-	repo, err = sqlite.Open(path)
+	repo, err = sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

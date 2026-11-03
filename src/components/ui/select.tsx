@@ -4,7 +4,7 @@ import * as React from "react"
 import { Select as SelectPrimitive } from "@base-ui/react/select"
 
 import { cn } from "@/lib/utils"
-import { anchoredPopup, useAnchoredPositioner } from "@/components/ui/overlay"
+import { anchoredPopup, anchoredPositionMethod, useAnchoredPositioner } from "@/components/ui/overlay"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
 const Select = SelectPrimitive.Root
@@ -76,6 +76,7 @@ function SelectContent({
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Positioner
+        positionMethod={anchoredPositionMethod}
         side={side}
         sideOffset={sideOffset}
         align={align}

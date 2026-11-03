@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/assets/imagefit"
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
@@ -49,7 +50,7 @@ type fitHarness struct {
 func newFitHarness(t *testing.T, fitting inputassets.Fitting) fitHarness {
 	t.Helper()
 	root := t.TempDir()
-	repository, err := sqlite.Open(filepath.Join(root, "test.db"))
+	repository, err := sqlitetest.Open(filepath.Join(root, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +152,7 @@ func refusalDetail(t *testing.T, err error) string {
 // stays diagnostic and is not marked for the requester (#288).
 func TestRefusalWithoutSchemaTextIsNotUserFacing(t *testing.T) {
 	root := t.TempDir()
-	repository, err := sqlite.Open(filepath.Join(root, "test.db"))
+	repository, err := sqlitetest.Open(filepath.Join(root, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

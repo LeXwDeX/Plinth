@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/agentparams"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -23,7 +23,7 @@ func testConsentRequestID(t *testing.T, store *agentparams.Store, scope string) 
 }
 
 func TestConsentDecisionBindsExactPendingRequest(t *testing.T) {
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "consent.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "consent.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestConsentDecisionBindsExactPendingRequest(t *testing.T) {
 
 func TestConsentClaimPersistsAndConsumesExactlyOneCall(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "consent.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestConsentClaimPersistsAndConsumesExactlyOneCall(t *testing.T) {
 	if err := repository.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := sqlite.Open(path)
+	reopened, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestConsentClaimPersistsAndConsumesExactlyOneCall(t *testing.T) {
 
 func TestConsentRecoversCommittedTaskWhenAcceptanceWriteWasLost(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "consent.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestConsentRecoversCommittedTaskWhenAcceptanceWriteWasLost(t *testing.T) {
 	if err := repository.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := sqlite.Open(path)
+	reopened, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestConsentRecoversCommittedTaskWhenAcceptanceWriteWasLost(t *testing.T) {
 }
 
 func TestConsentStorageFailureFailsClosed(t *testing.T) {
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "consent.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "consent.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

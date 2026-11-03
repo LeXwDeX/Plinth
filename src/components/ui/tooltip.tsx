@@ -3,7 +3,7 @@
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 
 import { cn } from "@/lib/utils"
-import { useAnchoredPositioner } from "@/components/ui/overlay"
+import { anchoredPositionMethod, useAnchoredPositioner } from "@/components/ui/overlay"
 
 /** Hover opens after 350ms; keyboard focus opens at once (Base UI opens focus-visible tooltips without delay). */
 const HOVER_OPEN_DELAY_MS = 350
@@ -52,6 +52,7 @@ function TooltipContent({
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Positioner
+        positionMethod={anchoredPositionMethod}
         align={align}
         alignOffset={alignOffset}
         side={side}

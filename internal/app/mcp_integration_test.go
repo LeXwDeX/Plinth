@@ -15,7 +15,7 @@ import (
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/mcphttp"
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/agentconfiguration"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
@@ -86,7 +86,7 @@ func TestWorkspaceMCPUsesRealProtocolOwnerSessionAndConfigurationAllowlist(t *te
 			t.Fatalf("private field in MCP discovery: %s", private)
 		}
 	}
-	repository, err := sqlite.Open(database)
+	repository, err := sqlitetest.Open(database)
 	if err != nil {
 		t.Fatal(err)
 	}

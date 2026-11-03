@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/chat/agentparams"
 )
 
@@ -14,7 +14,7 @@ import (
 // 仍在；会话删除级联清理 agent 状态。
 func TestAgentStatePersistsAcrossRestartAndCascadeDeletes(t *testing.T) {
 	databasePath := filepath.Join(t.TempDir(), "art-ai.db")
-	repository, err := sqlite.Open(databasePath)
+	repository, err := sqlitetest.Open(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestAgentStatePersistsAcrossRestartAndCascadeDeletes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := sqlite.Open(databasePath)
+	reopened, err := sqlitetest.Open(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}

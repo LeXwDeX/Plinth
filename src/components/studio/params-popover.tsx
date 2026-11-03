@@ -9,7 +9,7 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { ChoiceChips } from '@/components/ui/choice-chips';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { OptionSelect } from '@/components/ui/option-select';
-import { useAnchoredPositioner } from '@/components/ui/overlay';
+import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
 import type { useAgentEffectiveConfiguration } from '@/hooks/use-agent-effective-configuration';
 import type { CanvasDelivery } from '@/hooks/use-canvas-artboard';
 import type { GenerationParams } from '@/hooks/use-generation-params';
@@ -127,7 +127,7 @@ export function ParamsPopover({ params, domains, hasSession, disabled = false, s
         </Popover.Trigger>
       </HintTooltip>
       <Popover.Portal>
-        <Popover.Positioner side="top" align="end" sideOffset={8} collisionPadding={12} className={layer}>
+        <Popover.Positioner positionMethod={anchoredPositionMethod} side="top" align="end" sideOffset={8} collisionPadding={12} className={layer}>
           <Popover.Popup
             data-testid="composer-params-panel"
             // #243：固定外框高度（不超过可用高度），切换适用操作或展开更多参数时外框、标题与操作选择不再移动；

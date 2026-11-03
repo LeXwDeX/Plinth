@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/agentconfiguration"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -26,7 +26,7 @@ import (
 func TestApplicationRetiresSavedBuiltInSkillsBeforeServingNewTurns(t *testing.T) {
 	root := t.TempDir()
 	databasePath := filepath.Join(root, "art-ai.db")
-	repo, err := sqlite.Open(databasePath)
+	repo, err := sqlitetest.Open(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestApplicationRetiresSavedBuiltInSkillsBeforeServingNewTurns(t *testing.T)
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = application.generation.Close() })
-	repo, err = sqlite.Open(databasePath)
+	repo, err = sqlitetest.Open(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}

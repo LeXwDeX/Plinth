@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -95,7 +96,7 @@ func testTaskRecoveryHTTPFlow(t *testing.T, manual bool) {
 	old.Outputs[1].Variant = "converted.gltf"
 	var receipt generation.RecoveryReceipt
 	setup := func(t *testing.T, path string) {
-		repo, err := sqlite.Open(path)
+		repo, err := sqlitetest.Open(path)
 		if err != nil {
 			t.Fatal(err)
 		}

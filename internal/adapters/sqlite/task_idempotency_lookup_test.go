@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
 func TestLookupByIdempotencyIsOwnerScopedAndTombstoneStopsReplay(t *testing.T) {
 	ctx := context.Background()
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "task.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "task.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

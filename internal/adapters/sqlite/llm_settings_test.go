@@ -16,7 +16,7 @@ import (
 // sessions follow the default chat model.
 func TestMigration0066UpgradesExistingSessionsToFollowTheDefaultModel(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "llm.db")
-	r, err := Open(path)
+	r, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestMigration0066UpgradesExistingSessionsToFollowTheDefaultModel(t *testing
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := Open(path)
+	reopened, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestMigration0066UpgradesExistingSessionsToFollowTheDefaultModel(t *testing
 
 func TestLLMSettingsVersionsAppendWithRevisionCheck(t *testing.T) {
 	ctx := context.Background()
-	r, err := Open(filepath.Join(t.TempDir(), "llm.db"))
+	r, err := openTestRepository(filepath.Join(t.TempDir(), "llm.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestLLMSettingsVersionsAppendWithRevisionCheck(t *testing.T) {
 
 func TestLLMConnectionChecksKeepTheNewestPerConnection(t *testing.T) {
 	ctx := context.Background()
-	r, err := Open(filepath.Join(t.TempDir(), "llm.db"))
+	r, err := openTestRepository(filepath.Join(t.TempDir(), "llm.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestLLMConnectionChecksKeepTheNewestPerConnection(t *testing.T) {
 
 func TestSessionChatModelIsOwnerScoped(t *testing.T) {
 	ctx := context.Background()
-	r, err := Open(filepath.Join(t.TempDir(), "llm.db"))
+	r, err := openTestRepository(filepath.Join(t.TempDir(), "llm.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

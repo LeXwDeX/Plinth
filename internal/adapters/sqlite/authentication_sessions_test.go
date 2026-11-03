@@ -3,7 +3,7 @@ package sqlite_test
 import (
 	"context"
 	"github.com/LeXwDeX/Plinth/internal/access"
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/authentication"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"net/http"
@@ -17,7 +17,7 @@ import (
 func TestSessionRevocationAndExpirySurviveRepositoryReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.db")
 	now := time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC)
-	repo, err := sqlite.Open(path)
+	repo, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestSessionRevocationAndExpirySurviveRepositoryReopen(t *testing.T) {
 	if err := repo.Close(); err != nil {
 		t.Fatal(err)
 	}
-	repo, err = sqlite.Open(path)
+	repo, err = sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

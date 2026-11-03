@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/administration"
 )
 
@@ -26,12 +27,12 @@ func TestAdministrationFloorIsAtomicAcrossDatabaseConnections(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "administrators.db")
-			first, err := sqlite.Open(path)
+			first, err := sqlitetest.Open(path)
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = first.Close() })
-			second, err := sqlite.Open(path)
+			second, err := sqlitetest.Open(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -86,7 +87,7 @@ func TestAdministrationFloorIsAtomicAcrossDatabaseConnections(t *testing.T) {
 			if err := second.Close(); err != nil {
 				t.Fatal(err)
 			}
-			reopened, err := sqlite.Open(path)
+			reopened, err := sqlitetest.Open(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -112,7 +113,7 @@ func TestAdministrationFloorIsAtomicAcrossDatabaseConnections(t *testing.T) {
 }
 
 func TestAdministrationFloorUsesCurrentDurableUserState(t *testing.T) {
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "administrators.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "administrators.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/etl/etltest"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
@@ -137,7 +137,7 @@ func TestMigrateTasksStatusMapping(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("迁移应成功，输出:\n%s", output)
 	}
-	repository, err := sqlite.Open(target)
+	repository, err := sqlitetest.Open(target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestMigrateTasksFieldFidelity(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("迁移应成功，输出:\n%s", output)
 	}
-	repository, err := sqlite.Open(target)
+	repository, err := sqlitetest.Open(target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +397,7 @@ func TestMigrateTasksLedgerReconciliation(t *testing.T) {
 		"1:3:legacy-ledger:ledger-task-a,2:4:legacy-ledger:ledger-extra" {
 		t.Fatalf("逐笔 Attempt 证据不完整: %s", got)
 	}
-	repository, err := sqlite.Open(target)
+	repository, err := sqlitetest.Open(target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -661,7 +661,7 @@ func TestMigrateTasksUsesSchemaAliasForBackgroundRemoval(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("background-removal 应按 Schema 别名迁移，输出:\n%s", output)
 	}
-	repository, err := sqlite.Open(target)
+	repository, err := sqlitetest.Open(target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -730,7 +730,7 @@ func TestMigrateTasksRetryPendingOverridesStaleCache(t *testing.T) {
 	if !strings.Contains(output, "FAILED=1(含中断 1)") {
 		t.Errorf("RETRY_PENDING 应计入中断分布:\n%s", output)
 	}
-	repository, err := sqlite.Open(target)
+	repository, err := sqlitetest.Open(target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -829,7 +829,7 @@ func TestMigrateTasksRiggingLegacyRowsUnchangedByPrimaryPrefixReplacement(t *tes
 	if code != 0 {
 		t.Fatalf("rigging 迁移被目录变更破坏，输出:\n%s", output)
 	}
-	repository, err := sqlite.Open(target)
+	repository, err := sqlitetest.Open(target)
 	if err != nil {
 		t.Fatal(err)
 	}

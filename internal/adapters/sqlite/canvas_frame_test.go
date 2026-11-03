@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/canvas"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 )
@@ -17,7 +17,7 @@ import (
 func TestCanvasFrameRoundTripWithNodesAndRevision(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "canvas-frame.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestCanvasFrameRoundTripWithNodesAndRevision(t *testing.T) {
 func TestCanvasCoordinateVersionIsStampedAtCreation(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "canvas-version.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

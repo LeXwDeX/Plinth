@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
 	"github.com/LeXwDeX/Plinth/internal/assets/modelconvert/modelconverttest"
@@ -56,7 +56,7 @@ func uploadPolicyFrom(t *testing.T, product *catalog.Catalog) modelinput.Policy 
 func TestGeneratedGLBBecomesAGLTFPackageThroughTheKernelAndStore(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	repo, err := sqlite.Open(filepath.Join(root, "generation.db"))
+	repo, err := sqlitetest.Open(filepath.Join(root, "generation.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

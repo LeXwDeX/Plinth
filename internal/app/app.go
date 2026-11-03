@@ -158,6 +158,10 @@ type assemblyOverrides struct {
 	httpTransport func(connectionID string, base http.RoundTripper) http.RoundTripper
 }
 
+// openRepository opens the application database. Only this package's test
+// binary replaces it, with a copy of a migrated template for new files (#73).
+var openRepository = sqlite.Open
+
 func New(config Config, logger *slog.Logger) (*Application, error) {
 	return newWithDependencies(config, logger, assemblyOverrides{})
 }
@@ -202,7 +206,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
-	repository, err := sqlite.Open(config.DatabasePath)
+	repository, err := openRepository(config.DatabasePath)
 	if err != nil {
 		return nil, err
 	}

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/administration"
 	"github.com/LeXwDeX/Plinth/internal/etl/etltest"
 )
@@ -545,7 +545,7 @@ func TestMigrateProgressesWhileServiceReadsAndWritesWAL(t *testing.T) {
 		)
 	}
 	targetDB := migrateTarget(t)
-	serviceRepository, err := sqlite.Open(targetDB)
+	serviceRepository, err := sqlitetest.Open(targetDB)
 	if err != nil {
 		t.Fatal(err)
 	}
