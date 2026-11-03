@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/authentication"
 	"github.com/LeXwDeX/Plinth/internal/etl/etltest"
 )
@@ -63,7 +63,7 @@ func TestMigrateUsersFieldFidelity(t *testing.T) {
 		t.Fatalf("迁移应成功，退出码 %d，输出:\n%s", code, output)
 	}
 
-	repository, err := sqlite.Open(target)
+	repository, err := sqlitetest.Open(target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestMigrateReplacesUnusedManagedBootstrapAdmin(t *testing.T) {
 	fixture := etltest.NewFixture(t)
 	seedLegacyUsers(t, fixture)
 	target := migrateTarget(t)
-	repository, err := sqlite.Open(target)
+	repository, err := sqlitetest.Open(target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func TestMigrateReplacesUnusedManagedBootstrapAdmin(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("未使用的启动管理员应被旧用户替换，输出:\n%s", output)
 	}
-	repository, err = sqlite.Open(target)
+	repository, err = sqlitetest.Open(target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +301,7 @@ func TestMigrateRejectsUnmanagedUsernameConflict(t *testing.T) {
 	fixture := etltest.NewFixture(t)
 	seedLegacyUsers(t, fixture)
 	target := migrateTarget(t)
-	repository, err := sqlite.Open(target)
+	repository, err := sqlitetest.Open(target)
 	if err != nil {
 		t.Fatal(err)
 	}

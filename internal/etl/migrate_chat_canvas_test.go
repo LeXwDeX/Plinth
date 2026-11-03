@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/etl/etltest"
 )
 
@@ -54,7 +54,7 @@ func TestMigrateChatPreservesSessionsMessagesAndOrder(t *testing.T) {
 		t.Fatalf("聊天对账报告缺失:\n%s", output)
 	}
 
-	repository, err := sqlite.Open(targetDB)
+	repository, err := sqlitetest.Open(targetDB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestMigrateCanvasPreservesProjectNodesAndSessionLink(t *testing.T) {
 		t.Fatalf("Canvas 对账报告缺失:\n%s", output)
 	}
 
-	repository, err := sqlite.Open(targetDB)
+	repository, err := sqlitetest.Open(targetDB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +245,7 @@ func TestMigrateCanvasArchivesMissingSessionLinkWithoutLosingProject(
 		!strings.Contains(output, "missing-session") {
 		t.Fatalf("缺失关联未进入报告:\n%s", output)
 	}
-	repository, err := sqlite.Open(target)
+	repository, err := sqlitetest.Open(target)
 	if err != nil {
 		t.Fatal(err)
 	}

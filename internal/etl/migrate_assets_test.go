@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
 	"github.com/LeXwDeX/Plinth/internal/assets/modelinput/modelinputtest"
@@ -69,7 +69,7 @@ func TestMigrateInputAssetsMaterializesNativeCAS(t *testing.T) {
 		t.Fatalf("迁移报告缺少输入资产对账:\n%s", output)
 	}
 
-	repository, err := sqlite.Open(targetDB)
+	repository, err := sqlitetest.Open(targetDB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestMigrateInputAssetRecoversExactSHA256Copy(t *testing.T) {
 	) {
 		t.Fatalf("迁移报告缺少输入资产恢复计数:\n%s", output)
 	}
-	repository, err := sqlite.Open(targetDB)
+	repository, err := sqlitetest.Open(targetDB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestMigrateTaskOutputsMaterializesNativeAsset(t *testing.T) {
 		t.Fatalf("迁移报告缺少任务产物对账:\n%s", output)
 	}
 
-	repository, err := sqlite.Open(targetDB)
+	repository, err := sqlitetest.Open(targetDB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +374,7 @@ func TestMigrateTaskOutputReadsLegacyCacheWithoutNetwork(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("迁移应成功，退出码 %d，输出:\n%s", code, output)
 	}
-	repository, err := sqlite.Open(targetDB)
+	repository, err := sqlitetest.Open(targetDB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +493,7 @@ func TestMigrateTaskOutputRecoversExactAuditCopy(t *testing.T) {
 	if !strings.Contains(output, "审计副本恢复 1 个") {
 		t.Fatalf("迁移报告缺少审计副本恢复计数:\n%s", output)
 	}
-	repository, err := sqlite.Open(targetDB)
+	repository, err := sqlitetest.Open(targetDB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -546,7 +546,7 @@ func TestMigrateMissingTaskOutputReportsAndDowngradesMetadata(t *testing.T) {
 		t.Fatalf("缺失产物报告不完整:\n%s", output)
 	}
 
-	repository, err := sqlite.Open(targetDB)
+	repository, err := sqlitetest.Open(targetDB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -644,7 +644,7 @@ func TestSourceLossAcknowledgementIsExplicitSnapshotBoundAndAuditable(
 	) || !strings.Contains(output, "对账结论: 通过") {
 		t.Fatalf("放行报告缺少可审计计数:\n%s", output)
 	}
-	repository, err := sqlite.Open(approvedTarget)
+	repository, err := sqlitetest.Open(approvedTarget)
 	if err != nil {
 		t.Fatal(err)
 	}

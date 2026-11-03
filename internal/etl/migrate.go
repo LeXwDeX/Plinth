@@ -222,6 +222,9 @@ type migrationOptions struct {
 	sourceLossAcknowledgement *loadedSourceLossAcknowledgement
 }
 
+// openTarget 打开迁移目标库；只有本包测试会把它换成迁移模板的副本（#73）。
+var openTarget = sqlite.Open
+
 // migrate 预检通过后执行各原生业务域迁移，并返回逐域对账计数报告。
 func migrate(
 	layout legacyLayout,
@@ -401,7 +404,7 @@ func migrateWithContextOptions(
 		thumbnailFiles,
 		thumbnailBytes,
 	)
-	target, err := sqlite.Open(targetDB)
+	target, err := openTarget(targetDB)
 	if err != nil {
 		return migrationResult{}, fmt.Errorf("打开目标库: %w", err)
 	}
