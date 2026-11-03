@@ -215,8 +215,8 @@ def pick_shapes(options, default=None):
     return chosen
 
 
-def solid_png(width, height, rgb):
-    """A valid solid-colour PNG built with the standard library (stand-in for a canvas snapshot)."""
+def encode_png(width, height, rows):
+    """An 8-bit RGB PNG of the given rows (each width * 3 bytes), built with the standard library."""
     import struct
     import zlib
 
@@ -224,9 +224,91 @@ def solid_png(width, height, rgb):
         body = kind + payload
         return struct.pack(">I", len(payload)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
 
-    row = b"\x00" + bytes(rgb) * width
+    raw = b"".join(b"\x00" + bytes(row) for row in rows)
     return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress(row * height)) + chunk(b"IEND", b""))
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+def decode_png(data):
+    """(width, height, rows) of a non-interlaced 8- or 16-bit PNG, rows as 8-bit RGB bytes (alpha dropped).
+
+    Raises ValueError for anything else (JPEG, WebP, interlaced or low-bit-depth PNG)."""
+    import struct
+    import zlib
+
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("not a PNG")
+    header, palette, compressed, index = None, b"", [], 8
+    while index + 8 <= len(data):
+        length, kind = struct.unpack(">I4s", data[index:index + 8])
+        payload = data[index + 8:index + 8 + length]
+        if kind == b"IHDR":
+            header = struct.unpack(">IIBBBBB", payload)
+        elif kind == b"PLTE":
+            palette = payload
+        elif kind == b"IDAT":
+            compressed.append(payload)
+        elif kind == b"IEND":
+            break
+        index += 12 + length
+    if not header:
+        raise ValueError("PNG without IHDR")
+    width, height, depth, colour, _, _, interlace = header
+    channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}.get(colour)
+    if channels is None or depth not in (8, 16) or (colour == 3 and depth != 8) or interlace:
+        raise ValueError(f"unsupported PNG (colour type {colour}, depth {depth}, interlace {interlace})")
+    step = channels * depth // 8
+    stride = width * step
+    raw = zlib.decompress(b"".join(compressed))
+    prior, rows = bytearray(stride), []
+    for y in range(height):
+        start = y * (stride + 1)
+        kind, line = raw[start], bytearray(raw[start + 1:start + 1 + stride])
+        if kind == 1:
+            for i in range(step, stride):
+                line[i] = (line[i] + line[i - step]) & 0xFF
+        elif kind == 2:
+            line = bytearray((a + b) & 0xFF for a, b in zip(line, prior))
+        elif kind == 3:
+            for i in range(stride):
+                line[i] = (line[i] + (((line[i - step] if i >= step else 0) + prior[i]) >> 1)) & 0xFF
+        elif kind == 4:
+            for i in range(stride):
+                a, b, c = (line[i - step], prior[i], prior[i - step]) if i >= step else (0, prior[i], 0)
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                line[i] = (line[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 0xFF
+        elif kind != 0:
+            raise ValueError(f"bad PNG filter {kind}")
+        prior = line
+        samples = line[::2] if depth == 16 else line  # 16-bit samples keep their high byte
+        rgb = bytearray(width * 3)
+        if colour in (0, 4):
+            grey = samples[::channels]
+            rgb[0::3], rgb[1::3], rgb[2::3] = grey, grey, grey
+        elif colour == 3:
+            rgb = bytearray(b"".join(palette[3 * value:3 * value + 3] for value in samples))
+        else:
+            for k in range(3):
+                rgb[k::3] = samples[k::channels]
+        rows.append(bytes(rgb))
+    return width, height, rows
+
+
+def side_by_side_png(pictures, height=512):
+    """The PNG pictures scaled to one height (nearest neighbour) and laid out left to right, as one PNG.
+
+    Stands in for the browser's flattened artboard of the placed source pictures."""
+    import operator
+
+    strips = []
+    for data in pictures:
+        width, source_height, rows = decode_png(data)
+        scaled = max(1, round(width * height / source_height))
+        pick = operator.itemgetter(*[3 * (x * width // scaled) + k for x in range(scaled) for k in range(3)])
+        strips.append([bytes(pick(rows[y * source_height // height])) for y in range(height)])
+    total = sum(len(strip[0]) // 3 for strip in strips)
+    return encode_png(total, height, [b"".join(strip[y] for strip in strips) for y in range(height)])
 
 
 def canvas_attachment_ids(messages):
@@ -238,6 +320,19 @@ def canvas_attachment_ids(messages):
         for attachment in message.get("attachments") or []:
             if isinstance(attachment, dict) and (attachment.get("role") == "canvas" or attachment.get("canvas")):
                 found.append(attachment.get("handle") or attachment.get("assetId") or attachment.get("asset_id") or "")
+    return found
+
+
+def user_handles(messages):
+    """Handles of the attachments the user messages carry, in order of first appearance."""
+    found = []
+    for message in messages:
+        if message.get("role") != "user":
+            continue
+        for attachment in message.get("attachments") or []:
+            handle = attachment.get("handle") if isinstance(attachment, dict) else None
+            if handle and handle not in found:
+                found.append(handle)
     return found
 
 

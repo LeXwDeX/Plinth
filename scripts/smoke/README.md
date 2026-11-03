@@ -106,7 +106,7 @@ ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- bash scripts/
 | `smoke-l5-three-view.py` | 左右不对称角色图 → 三视图 → 补齐 `left`、`back` → 多视图 3D（必须调用 `create_model_3d_from_views`）；各视图保存为 `view-<键>.png` 供人工核对 `left` 方向 | 约 4 张图加一次多视图 3D |
 | `smoke-l5-split.py` | 拆分生成：Tripo 网格分割、Hyper3D Bang（需 Rodin 来源）、图片智能分割；某链路在当前 Schema 不可用时输出 SKIP 并写明原因；`L5_SPLIT_ONLY=segment,bang,image` 可只跑部分链路 | 两到三次 3D 生成加分割 |
 | `smoke-l5-2d-params.py` | 按 Schema 声明的输出尺寸跑矩阵（1:1、竖版、横版、一个非默认尺寸，每个可用文生图模型至少一张），核对产物真实像素比例；图生图单参考图保持原比例，多参考图时 `reference_purposes` 生效 | 约 8 到 12 张图 |
-| `smoke-l5-canvas.py` | 经场景 API 放入两张图、移动与缩放（每次编辑修订号变化），再带着画板快照附件（脚本合成的纯色图，字段与浏览器一致）按画板改图、把画板转 3D；核对画板附件存在、改图不引用旧的单图句柄、内容不变时两轮复用同一个快照资产（#53） | 两到三张图加一次 3D |
+| `smoke-l5-canvas.py` | 经场景 API 放入两张图、移动与缩放（每次编辑修订号变化），再带着画板快照附件（脚本用标准库把两张源图左右拼成一张 PNG，字段与浏览器一致；源图不是 PNG 时 FAIL 并写明格式）按画板改图、把画板转 3D；核对画板附件存在、改图不引用旧的单图句柄；画板未变时第二轮重发相同快照沿用原句柄：第二轮用户消息不新增 `@img` 句柄，整个会话只有一个画板快照句柄（#53；轮次 selection 不在公开 API 中，第二轮改图引用仅随详情输出供人工核对） | 两到三张图加一次 3D |
 | `smoke-l5-3d-params.py` | 每个可用 3D Provider 一条：分部件或贴图开关、全部声明格式须交付、参数进入冻结输入；再核对一次格式补齐请求 | 每个 Provider 一次 3D 生成 |
 | `smoke-l5-2d-split.py` | 2D 拆分：角色图拆成部件图（至少三张，且以角色图为参考）、部件抠图、部件图转 3D | 约 6 张图加一次 3D |
 | `smoke-l5-agent-hard.py` | 刁钻对话：一句话多步、中途改主意、按序号引用、前后矛盾、不支持的能力、超限尺寸、手工批准卡片、模糊指代、英文与中英混合、口语三视图；`L5_AGENT_HARD_ONLY=用例名,…` 可只跑部分 | 约 10 张图和两到三次 3D |
