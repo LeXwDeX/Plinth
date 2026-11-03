@@ -27,7 +27,7 @@ def body(live, report):
     for chat_model in models:
         session = live.new_session(f"l5-chat-{common.safe_name(chat_model)}")
         status, _ = client.call("PUT", f"/api/v1/chat/sessions/{session}/model", {"chatModel": chat_model})
-        if status != 200:
+        if not 200 <= status < 300:
             report.failed(f"{chat_model} select model", f"HTTP {status}")
             continue
         _, reasoning = client.call("GET", f"/api/v1/chat/sessions/{session}/reasoning")
@@ -38,7 +38,14 @@ def body(live, report):
         for level in levels:
             cell = f"{chat_model}/{level}"
             turn = live.new_session(f"l5-chat-{common.safe_name(chat_model)}-{level}")
-            client.call("PUT", f"/api/v1/chat/sessions/{turn}/model", {"chatModel": chat_model})
+            status, _ = client.call("PUT", f"/api/v1/chat/sessions/{turn}/model", {"chatModel": chat_model})
+            if not 200 <= status < 300:
+                report.failed(f"{cell} select model", f"HTTP {status}")
+                continue
+            status, selected = client.call("GET", f"/api/v1/chat/sessions/{turn}/model")
+            if status != 200 or selected.get("chatModel") != chat_model:
+                report.failed(f"{cell} model selected", f"HTTP {status}, session model {selected.get('chatModel')!r}")
+                continue
             status, applied = client.call("PUT", f"/api/v1/chat/sessions/{turn}/reasoning", {"reasoningEffort": level})
             if status != 200 or applied.get("reasoningEffort") != level:
                 report.failed(f"{cell} set level", f"HTTP {status}")
@@ -51,7 +58,7 @@ def body(live, report):
             messages = live.messages(turn)
             clean = common.reply_is_clean(reply) and not common.tool_errors(messages)
             report.check(f"{cell} final reply without error", clean,
-                         common.one_line((reply or {}).get("content") or (reply or {}).get("error") or "no reply", 50))
+                         common.one_line((reply or {}).get("content") or "no reply", 50))
 
 
 if __name__ == "__main__":

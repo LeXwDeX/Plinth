@@ -79,9 +79,9 @@ class ToolCalls(unittest.TestCase):
 
     def test_names_and_errors(self):
         messages = [{"toolCalls": json.dumps([{"name": "a"}, {"name": "b", "error": "boom"}])},
-                    {"toolCalls": [{"name": "c", "result": {"error": {"code": 1}}}, {"name": "d", "result": {"ok": 1}}]}]
+                    {"toolCalls": [{"name": "c", "result": {"ok": 1}}, {"name": "d", "result": {"ok": 1}}]}]
         self.assertEqual(c.tool_names(messages), ["a", "b", "c", "d"])
-        self.assertEqual(c.tool_errors(messages), ["b", "c"])
+        self.assertEqual(c.tool_errors(messages), ["b"])
 
 
 class Waiting(unittest.TestCase):
@@ -93,11 +93,26 @@ class Waiting(unittest.TestCase):
         self.assertFalse(c.reply_is_final({"isPending": False}, [{"role": "assistant", "content": "  "}]))
         self.assertFalse(c.reply_is_final({"isPending": False}, [{"role": "user", "content": "x"}]))
         self.assertFalse(c.reply_is_final(None, [done]))
-        self.assertTrue(c.reply_is_final({"isPending": False}, [{"role": "assistant", "content": "", "error": "e"}]))
+        failed = {"role": "assistant", "content": "未知错误（错误 ID：m-1）"}
+        self.assertTrue(c.reply_is_final({"isPending": False}, [failed]))
 
     def test_reply_clean(self):
         self.assertTrue(c.reply_is_clean({"content": "hi"}))
         self.assertFalse(c.reply_is_clean({"content": "hi", "error": "e"}))
+
+    def test_failure_text_is_not_clean(self):
+        # Orchestrator.fail: Schema failure copy + error_reference "（错误 ID：{id}）" (en: " (Error ID: {id})")
+        for content in ("未知错误（错误 ID：abc123）", "Unknown error (Error ID: abc123)",
+                        "Agent 未配置：部署缺少对话模型设置（LLM_API_KEY 或 LLM_MODEL），暂时不能对话。",
+                        "请求被上游模型服务的内容安全审核拦截：本轮的图片或文字可能被判定为不当内容。",
+                        "⚠️ 未返回结果，请重试。（错误 ID：m2）"):
+            reply = {"role": "assistant", "content": content}
+            self.assertTrue(c.reply_failed(reply), content)
+            self.assertFalse(c.reply_is_clean(reply), content)
+        for content in ("我是 Plinth 的美术助手。", "错误 ID 是用来排查问题的编号。"):
+            self.assertFalse(c.reply_failed({"content": content}), content)
+            self.assertTrue(c.reply_is_clean({"content": content}), content)
+        self.assertFalse(c.reply_failed(None))
         self.assertFalse(c.reply_is_clean({"content": "__GENERATING__"}))
         self.assertFalse(c.reply_is_clean(None))
 
@@ -139,6 +154,48 @@ class Waiting(unittest.TestCase):
         group["slots"][2]["status"] = "failed"
         self.assertTrue(c.views_settled(group))
         self.assertFalse(c.views_settled(None))
+
+
+class FakeClient:
+    def __init__(self, status, body):
+        self.status, self.body = status, body
+
+    def call(self, method, path, body=None, **kwargs):
+        return self.status, self.body
+
+
+class LiveStatus(unittest.TestCase):
+    def live(self, status, body):
+        return c.Live(FakeClient(status, body), None, None)
+
+    def test_ok_statuses_return_data(self):
+        self.assertEqual(self.live(200, {"tasks": [{"id": "t"}]}).tasks("s"), [{"id": "t"}])
+        self.assertEqual(self.live(200, {"messages": [{"id": "m"}]}).messages("s"), [{"id": "m"}])
+
+    def test_error_statuses_raise(self):
+        for status in (401, 404, 500):
+            live = self.live(status, {"error": "x"})
+            for call in (lambda: live.tasks("s"), lambda: live.messages("s"), lambda: live.offerings("text-to-image"),
+                         lambda: live.pending_approvals("s")):
+                with self.assertRaises(RuntimeError):
+                    call()
+
+
+class References(unittest.TestCase):
+    def test_image_handles_in_order(self):
+        messages = [{"attachments": [{"kind": "image", "handle": "@img1"}, {"kind": "model", "handle": "@model1"}]},
+                    {"attachments": [{"kind": "image", "handle": "@img2"}, {"kind": "image", "handle": "@img1"}]}]
+        self.assertEqual(c.image_handles(messages), ["@img1", "@img2"])
+
+    def test_reference_targets(self):
+        call = {"arguments": json.dumps({"reference_handles": ["@img2"], "reference_image_indices": [2]})}
+        self.assertEqual(c.reference_targets(call), ["@img2", "#2"])
+        self.assertEqual(c.reference_targets({}), [])
+
+    def test_multiview_task(self):
+        self.assertTrue(c.is_multiview_task({"offering_id": "tripo/v3.1-multiview", "model_id": "m"}, "m"))
+        self.assertFalse(c.is_multiview_task({"offering_id": "tripo/v3.1", "model_id": "m"}, "m"))
+        self.assertFalse(c.is_multiview_task({"offering_id": "tripo/v3.1-multiview", "model_id": "x"}, "m"))
 
 
 class Artifacts(unittest.TestCase):

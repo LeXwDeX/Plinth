@@ -74,9 +74,11 @@ def reference_cases(live, report, offering):
         return report.skipped("image-to-image references", "no source image")
     source_size = live.first_required_image(source["id"])
     before = {t.get("id") for t in live.tasks(session)}
-    live.run_turn(session, SINGLE_REFERENCE, "image", model, {})
-    new = [t for t in live.tasks(session) if t.get("id") not in before and t.get("state") == common.SUCCESS_STATE]
-    report.check("one reference: image-to-image task SUCCEEDED", bool(new), str(common.describe_tasks(live.tasks(session)[:3])))
+    _, tasks, settled = live.run_turn(session, SINGLE_REFERENCE, "image", model, {"image-to-image": 1})
+    new = [t for t in tasks if t.get("id") not in before and t.get("capability") == "image-to-image"
+           and t.get("state") == common.SUCCESS_STATE]
+    report.check("one reference: image-to-image (reference-using) task SUCCEEDED", settled and bool(new),
+                 f"settled={settled} " + str(common.describe_tasks(tasks[:3])))
     if new and source_size:
         result = live.first_required_image(new[0]["id"])
         report.check("one reference keeps the source ratio",

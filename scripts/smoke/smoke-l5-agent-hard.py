@@ -8,13 +8,13 @@ text is checked for a keyword at most (LLM wording varies). Cases:
   change-mind     "never mind, make it blue" -> a new image task SUCCEEDED whose
                   prompt mentions blue.
   ordinal         "use image 2" with two images -> one image-to-image task SUCCEEDED
-                  and the tool call references exactly one image.
+                  and the tool call references exactly the session's second image.
   contradiction   conflicting size demands -> no crash; at most one image task,
                   or a clarifying reply without tasks.
   unsupported     ask for a video -> no task; the reply says it cannot.
-  oversize        absurd pixel size -> no image beyond the declared maximum.
+  oversize        absurd pixel size -> at least one SUCCEEDED image, none beyond the declared maximum.
   manual-approval manual mode + 3D request -> a pending approval card, zero tasks;
-                  denying it keeps zero tasks.
+                  denying it returns 2xx, leaves no pending card, the turn finishes and zero tasks exist.
   ambiguous       "convert it to 3D" with two images -> either a clarifying reply
                   with no 3D task, or exactly one 3D task SUCCEEDED; never several.
   english / mixed English and Chinese requests each yield one SUCCEEDED image task.
@@ -89,10 +89,14 @@ def case_ordinal(live, report, models):
     report.check("ordinal: image-to-image task SUCCEEDED", any(t.get("state") == SUCCESS for t in fresh),
                  str(common.describe_tasks(new_tasks(live, session, before))) + " reply="
                  + common.one_line((reply or {}).get("content"), 70))
-    calls = common.calls_named(live.messages(session)[mark:], "refine_image")
-    refs = [len(common.tool_arguments(c).get("reference_handles") or common.tool_arguments(c).get("reference_image_indices") or [])
-            for c in calls]
-    report.check("ordinal: the call references exactly one image", bool(refs) and all(n == 1 for n in refs), str(refs))
+    messages = live.messages(session)
+    handles = common.image_handles(messages[:mark])
+    second = handles[1] if len(handles) >= 2 else None
+    refs = [common.reference_targets(c) for c in common.calls_named(messages[mark:], "refine_image")]
+    # the second picture of the session is the reference; "#2" is the same picture by index
+    right = [r for r in refs if len(r) == 1 and r[0].lstrip("@") in (str(second or "").lstrip("@"), "#2")]
+    report.check("ordinal: the single reference is image 2", bool(second) and bool(right) and len(right) == len(refs),
+                 f"second={second} refs={refs}")
 
 
 def case_contradiction(live, report, models):
@@ -121,10 +125,11 @@ def case_oversize(live, report, models):
     session = live.new_session()
     reply, tasks, settled = live.run_turn(session, "生成一张 100000x100000 像素的超大图，一棵树。", "image",
                                           models["image"], {})
-    images = [t for t in live.tasks(session) if t.get("state") == SUCCESS]
+    images = [t for t in live.tasks(session) if t.get("state") == SUCCESS and t.get("capability") == "text-to-image"]
     sizes = [live.first_required_image(t["id"]) for t in images]
-    report.check("oversize: no image beyond the declared maximum",
-                 reply is not None and all(s and max(s) <= MAX_PIXELS_SIDE for s in sizes), f"{len(images)} image(s) {sizes}")
+    report.check("oversize: a SUCCEEDED image within the declared maximum",
+                 reply is not None and settled and bool(images) and all(s and max(s) <= MAX_PIXELS_SIDE for s in sizes),
+                 f"settled={settled} {len(images)} image(s) {sizes}")
 
 
 def case_manual_approval(live, report, models):
@@ -140,10 +145,16 @@ def case_manual_approval(live, report, models):
         pending = live.pending_approvals(session)
     report.check("manual-approval: a pending approval card appears", bool(pending), f"{len(pending)} card(s)")
     report.check("manual-approval: no task before approval", not live.tasks(session))
+    denied = []
     for card in pending:
         request_id = card.get("request_id") or card.get("requestId") or card.get("id")
-        live.client.call("PUT", f"/api/v1/tasks/grants/{request_id}", {"decision": "deny"})
-    live.wait_reply(session, timeout=600)
+        status, _ = live.client.call("PUT", f"/api/v1/tasks/grants/{request_id}", {"decision": "deny"})
+        denied.append(status)
+    report.check("manual-approval: every deny returned 2xx", bool(denied) and all(200 <= s < 300 for s in denied),
+                 str(denied))
+    finished = live.wait_reply(session, timeout=600)
+    report.check("manual-approval: the turn finished after denying", finished is not None)
+    report.check("manual-approval: no card is pending any more", not live.pending_approvals(session))
     report.check("manual-approval: denying keeps zero tasks", not live.tasks(session))
 
 

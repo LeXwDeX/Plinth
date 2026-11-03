@@ -98,8 +98,8 @@ def format_case(live, report, session, offering, wanted):
                                           "model-3d", offering["model_id"], {})
     made = [t for t in tasks if t.get("id") not in before and t.get("capability") == "format-conversion"]
     if not made:
-        return report.skipped(f"format request {wanted}", "agent created no conversion task (not convertible): "
-                              + common.one_line((reply or {}).get("content"), 70))
+        return report.failed(f"format request {wanted}: format-conversion task created",
+                             "agent created no conversion task: " + common.one_line((reply or {}).get("content"), 70))
     done = [t for t in made if t.get("state") == common.SUCCESS_STATE]
     if report.check(f"format request {wanted}: format-conversion SUCCEEDED", settled and bool(done),
                     str(common.describe_tasks(made))):

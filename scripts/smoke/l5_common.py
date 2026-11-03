@@ -88,12 +88,12 @@ def tool_names(messages):
 
 
 def tool_errors(messages):
-    """Names of tool calls whose result reports an error."""
+    """Names of tool calls that carry an error. The messages wire has no per-call result; the extra
+    fields are checked only in case a later wire adds them. A failed turn is detected by reply_failed."""
     failed = []
     for message in messages:
         for call in parse_tool_calls(message):
-            result = call.get("result")
-            if call.get("error") or (isinstance(result, dict) and result.get("error")):
+            if call.get("error"):
                 failed.append(call.get("name"))
     return failed
 
@@ -107,6 +107,31 @@ def tool_arguments(call):
         except ValueError:
             return {}
     return raw if isinstance(raw, dict) else {}
+
+
+def is_multiview_task(task, model_id):
+    """The task ran on the multi-view Offering: its offering id names multiview and its model is the chosen one."""
+    return "multiview" in str(task.get("offering_id", "")) and task.get("model_id") == model_id
+
+
+def image_handles(messages):
+    """Handles of the image attachments over all messages, in order of first appearance."""
+    found = []
+    for message in messages:
+        for attachment in message.get("attachments") or []:
+            if isinstance(attachment, dict) and attachment.get("kind") == "image":
+                handle = attachment.get("handle")
+                if handle and handle not in found:
+                    found.append(handle)
+    return found
+
+
+def reference_targets(call):
+    """References one image-tool call passes: handles as given, and 1-based indices as "#<n>"."""
+    arguments = tool_arguments(call)
+    handles = [str(item) for item in arguments.get("reference_handles") or []]
+    indices = [f"#{item}" for item in arguments.get("reference_image_indices") or []]
+    return handles + indices
 
 
 def calls_named(messages, *names):
@@ -223,8 +248,24 @@ def last_assistant(messages):
     return None
 
 
+# Orchestrator.fail writes the failure text into the assistant content and appends the Schema's
+# error_reference ("（错误 ID：{id}）", English " (Error ID: {id})"). The other failure copies are the Schema's
+# agent_not_configured / agent_content_rejected / agent_images_unsupported / no_result texts.
+ERROR_REFERENCE = re.compile(r"[（(]\s*(?:错误 ID|Error ID)\s*[:：]")
+FAILURE_PREFIXES = ("Agent 未配置", "请求被上游模型服务的内容安全审核拦截", "当前 Agent 模型拒绝了带图片的请求",
+                    "⚠️ 未返回结果", "未知错误")
+
+
+def reply_failed(reply):
+    """The assistant message content is a failure text written by Orchestrator.fail."""
+    content = ((reply or {}).get("content") or "").strip()
+    if not content:
+        return False
+    return bool(ERROR_REFERENCE.search(content)) or content.startswith(FAILURE_PREFIXES)
+
+
 def reply_is_final(session, messages):
-    """The turn is over: not pending, and the last assistant message is real content or an error."""
+    """The turn is over: not pending, and the last assistant message is real content (a failure text counts)."""
     if not session or session.get("isPending"):
         return False
     reply = last_assistant(messages)
@@ -233,15 +274,15 @@ def reply_is_final(session, messages):
     content = (reply.get("content") or "").strip()
     if content == GENERATING_PLACEHOLDER:
         return False
-    return bool(content) or bool(reply.get("error"))
+    return bool(content)
 
 
 def reply_is_clean(reply):
-    """Final content with no error."""
+    """Final content that is not a failure text."""
     if not reply:
         return False
     content = (reply.get("content") or "").strip()
-    return bool(content) and content != GENERATING_PLACEHOLDER and not reply.get("error")
+    return bool(content) and content != GENERATING_PLACEHOLDER and not reply_failed(reply) and not reply.get("error")
 
 
 def tasks_by_capability(tasks):
@@ -472,6 +513,12 @@ class Client:
 
 # ------------------------------------------------------------ live helpers
 
+def require_ok(status, what):
+    """Raise on a non-200 status so execute() records a FAIL instead of reading an error body as empty data."""
+    if status != 200:
+        raise RuntimeError(f"{what}: HTTP {status}")
+
+
 class Live:
     """Session-level operations used by the scripts."""
 
@@ -509,11 +556,13 @@ class Live:
         return data if status == 200 else None
 
     def messages(self, session_id):
-        _, data = self.client.call("GET", f"/api/chat/sessions/{session_id}/messages?limit=100")
+        status, data = self.client.call("GET", f"/api/chat/sessions/{session_id}/messages?limit=100")
+        require_ok(status, "list messages")
         return (data.get("messages") if isinstance(data, dict) else data) or []
 
     def tasks(self, session_id):
-        _, data = self.client.call("GET", f"/api/v1/tasks?session_id={session_id}&limit=50")
+        status, data = self.client.call("GET", f"/api/v1/tasks?session_id={session_id}&limit=50")
+        require_ok(status, "list tasks")
         return data.get("tasks") or data.get("data") or []
 
     def task(self, task_id):
@@ -521,7 +570,8 @@ class Live:
         return data if status == 200 else {}
 
     def offerings(self, capability):
-        _, data = self.client.call("GET", f"/api/v1/offerings?capability={capability}")
+        status, data = self.client.call("GET", f"/api/v1/offerings?capability={capability}")
+        require_ok(status, "list offerings")
         return data.get("offerings") or data.get("data") or (data if isinstance(data, list) else [])
 
     # waiting: the reply must be final first, then the expected tasks must exist and be terminal
@@ -593,7 +643,8 @@ class Live:
         return None
 
     def pending_approvals(self, session_id):
-        _, data = self.client.call("GET", f"/api/v1/chat/sessions/{session_id}/pending-approvals")
+        status, data = self.client.call("GET", f"/api/v1/chat/sessions/{session_id}/pending-approvals")
+        require_ok(status, "list pending approvals")
         items = data.get("approvals") or data.get("items") or data.get("data") or (data if isinstance(data, list) else [])
         return [item for item in items if item.get("status") == "pending"]
 

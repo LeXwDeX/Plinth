@@ -87,10 +87,12 @@ def body(live, report):
     used = [r for r in refs if first_ids and (first_ids[0] in r or "@selected" in r)]
     report.check("edit used the canvas snapshot as its reference, not an old single-image handle", bool(used), str(refs))
     # the board did not change: the identical snapshot is sent again and must keep its handle (#53)
-    live.run_turn(session, AGAIN_FROM_BOARD, "image", image_model, {}, **canvas_turn_fields(board, urls))
+    _, _, again_settled = live.run_turn(session, AGAIN_FROM_BOARD, "image", image_model, {},
+                                        **canvas_turn_fields(board, urls))
     handles = common.canvas_attachment_ids(live.messages(session))
     report.check("unchanged canvas keeps one snapshot handle across turns (#53)",
-                 len(handles) >= 1 and len(set(handles)) == 1, f"{len(handles)} canvas attachment(s), {len(set(handles))} distinct")
+                 again_settled and len(handles) == 2 and all(handles) and len(set(handles)) == 1,
+                 f"settled={again_settled}, {len(handles)} canvas attachment(s), {len(set(handles))} distinct")
     # one layer on the board: the agent can turn it into a single 3D model
     # a board holding just that picture flattens to the picture itself
     status, one_layer = live.client.fetch(urls[0])

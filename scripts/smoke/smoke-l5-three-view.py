@@ -108,6 +108,9 @@ def body(live, report):
                  "create_model_3d_from_views" in common.tool_names(live.messages(session)),
                  str(sorted(set(common.tool_names(live.messages(session))))))
     done = [t for t in new if t.get("capability") == "image-to-3d" and t.get("state") == common.SUCCESS_STATE]
+    report.check("the 3D task ran on the multi-view Offering",
+                 bool(done) and all(common.is_multiview_task(t, model_3d) for t in done),
+                 str([(t.get("offering_id"), t.get("model_id")) for t in done]))
     if done:
         live.verify_task_artifacts(done[0]["id"], "multi-view 3D")
 
