@@ -384,3 +384,49 @@ func (r *Repository) RestartSkillStep(ctx context.Context, cmd skillrun.RestartC
 		return touchSkillRun(ctx, conn, run)
 	})
 }
+
+// ReplaceSkillStepOutput records an owned input asset in place of one step's
+// output (#65). A step whose approval is pending or whose Task has not ended is
+// in flight and refused; one that never started, was denied, failed, was
+// canceled or succeeded may be replaced, again and again.
+func (r *Repository) ReplaceSkillStepOutput(ctx context.Context, cmd skillrun.ReplaceCommand) (skillrun.Run, error) {
+	if cmd.OwnerID == "" || cmd.RunID == "" || cmd.StepKey == "" || cmd.AssetID == "" {
+		return skillrun.Run{}, skillrun.ErrInvalid
+	}
+	return r.skillMutate(ctx, cmd.OwnerID, cmd.RunID, func(conn *sql.Conn, run skillrun.Run) error {
+		step, ok := findSkillStep(run, cmd.StepKey)
+		if !ok {
+			return skillrun.ErrMissing
+		}
+		var one int
+		err := conn.QueryRowContext(ctx, `SELECT 1 FROM generation_input_assets WHERE id=? AND owner_id=?`,
+			cmd.AssetID, run.OwnerID).Scan(&one)
+		if errors.Is(err, sql.ErrNoRows) {
+			return skillrun.ErrMissing
+		}
+		if err != nil {
+			return err
+		}
+		switch {
+		case step.TaskID != "":
+			err = conn.QueryRowContext(ctx, `SELECT 1 FROM generation_tasks
+				WHERE id=? AND owner_id=? AND session_id=? AND state IN ('SUCCEEDED','FAILED','CANCELED')`,
+				step.TaskID, run.OwnerID, run.SessionID).Scan(&one)
+		case step.GrantRequestID != "":
+			err = conn.QueryRowContext(ctx, `SELECT 1 FROM execution_grants
+				WHERE request_id=? AND owner_id=? AND session_id=? AND status='denied'`,
+				step.GrantRequestID, run.OwnerID, run.SessionID).Scan(&one)
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			return skillrun.ErrConflict
+		}
+		if err != nil {
+			return err
+		}
+		if _, err = conn.ExecContext(ctx, `UPDATE skill_run_steps SET replacement_asset_id=? WHERE run_id=? AND step_key=?`,
+			cmd.AssetID, run.ID, cmd.StepKey); err != nil {
+			return err
+		}
+		return touchSkillRun(ctx, conn, run)
+	})
+}

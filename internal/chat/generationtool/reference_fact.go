@@ -417,6 +417,17 @@ func (executor *Executor) operationReferenceNote(command chat.ToolCommand, op Op
 		value := op.ReferenceSource
 		fact = &value
 	}
-	return executor.referenceNoteFor(command, offering, fact,
-		referenceUse{Used: op.ReferenceCount, Given: op.ReferenceTotal})
+	return executor.stepReferenceNote(command, offering, fact,
+		referenceUse{Used: op.ReferenceCount, Given: op.ReferenceTotal}, prepared.NormalizedInput)
+}
+
+// stepReferenceNote is the step's reference note: the views a multiview step
+// was made from (#65), else the source or limit note.
+func (executor *Executor) stepReferenceNote(command chat.ToolCommand, offering generation.Offering,
+	fact *ReferenceSourceFact, counts referenceUse, input json.RawMessage) string {
+	if note := ReferenceViewsNote(command.Tool, offering, executor.chat.ThreeView.Multiview, input,
+		executor.localizeText(command)); note != "" {
+		return note
+	}
+	return executor.referenceNoteFor(command, offering, fact, counts)
 }

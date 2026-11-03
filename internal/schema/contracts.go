@@ -141,6 +141,10 @@ const (
 	SemanticPolycount      ParameterSemantic = "polycount"
 	SemanticOutputSize     ParameterSemantic = "output-size"
 	SemanticQuality        ParameterSemantic = "quality"
+	// SemanticReferenceViews names the view (front, left, ...) of each
+	// reference picture, in the same order. An Offering that declares it takes
+	// several views of one object (#65); its options are the view keys.
+	SemanticReferenceViews ParameterSemantic = "reference-views"
 
 	// 来源/动作族标记处理链参数的稳定角色：跨 Provider 的参数名可由
 	// Schema 自由声明，消费方按语义定位（同名回退见 SourceParameterRole）。
@@ -159,6 +163,7 @@ func (semantic ParameterSemantic) Valid() bool {
 		SemanticPolycount,
 		SemanticOutputSize,
 		SemanticQuality,
+		SemanticReferenceViews,
 		SemanticSourceTask,
 		SemanticSourceAsset,
 		SemanticSourceURL,

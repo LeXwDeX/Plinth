@@ -15,6 +15,7 @@ type ThreeViews interface {
 	List(ctx context.Context, owner, session string) ([]threeview.Group, error)
 	Advance(ctx context.Context, principal executiongrant.Principal, session, runID, viewKey string,
 		action threeview.Action, attempt int) (threeview.Group, error)
+	Replace(ctx context.Context, principal executiongrant.Principal, session, runID, viewKey, assetID string) (threeview.Group, error)
 }
 
 // listThreeViews projects the groups of the caller's own session. A foreign or
@@ -29,14 +30,16 @@ func (s *Server) listThreeViews(writer http.ResponseWriter, request *http.Reques
 	writeJSON(writer, http.StatusOK, s.localizedSchemaData(request, map[string]any{"items": groups}))
 }
 
-// advanceThreeView starts or retries one view of a group. Only the person at
-// the browser can spend credits, so a Bearer or development identity is
-// refused; the session approval mode still decides whether the step needs a
-// separate approval.
+// advanceThreeView starts, retries or replaces one view of a group. Only the
+// person at the browser can spend credits, so a Bearer or development identity
+// is refused; the session approval mode still decides whether the step needs a
+// separate approval. Replacing puts an input asset the person uploaded in
+// place of the view (#65) and spends nothing.
 func (s *Server) advanceThreeView(writer http.ResponseWriter, request *http.Request, owner generation.OwnerID) {
 	var body struct {
 		Action  threeview.Action `json:"action"`
 		Attempt int              `json:"attempt"`
+		AssetID string           `json:"asset_id"`
 	}
 	if err := s.decodeJSON(writer, request, &body); err != nil {
 		return
@@ -46,8 +49,15 @@ func (s *Server) advanceThreeView(writer http.ResponseWriter, request *http.Requ
 		s.writeMessageProblem(writer, http.StatusForbidden, "forbidden", "error.forbidden")
 		return
 	}
-	group, err := s.threeViews.Advance(request.Context(), principal, request.PathValue("sessionID"),
-		request.PathValue("runID"), request.PathValue("viewKey"), body.Action, body.Attempt)
+	var group threeview.Group
+	var err error
+	if body.Action == threeview.Replace {
+		group, err = s.threeViews.Replace(request.Context(), principal, request.PathValue("sessionID"),
+			request.PathValue("runID"), request.PathValue("viewKey"), body.AssetID)
+	} else {
+		group, err = s.threeViews.Advance(request.Context(), principal, request.PathValue("sessionID"),
+			request.PathValue("runID"), request.PathValue("viewKey"), body.Action, body.Attempt)
+	}
 	if err != nil {
 		s.writeThreeViewError(writer, err)
 		return

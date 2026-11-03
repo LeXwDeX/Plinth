@@ -219,6 +219,22 @@ it('shows frozen advised adjustments, actual values and reasons without changing
  const html=render(model);expect(html).toContain('Frozen quality');expect(html).toContain('Frozen reason for this step');expect(html).toContain('extreme');expect(html).toContain('detailed');expect(html).toContain('Frozen not-recommended advice');expect(html).toContain('studio-approval-parameter-adjustments');expect(html).toContain('20');
 });
 
+describe('approval card multiview inputs', () => {
+  it('captions each reference picture with its view next to the cost and the note', () => {
+    const [pending] = parsePendingApprovals({ items: [{ request_id: 'rv', status: 'pending', capability: 'image-to-3d', model: 'm', provider: 'p', estimated_credits: 40, reference_note: '由 正面 / 左侧 视图生成', inputs: [
+      { parameter: 'reference_assets', kind: 'asset', role: 'image', asset_id: 'a1', media_type: 'image/png', view: 'front', view_label: '正面' },
+      { parameter: 'reference_assets', kind: 'asset', role: 'image', asset_id: 'a2', media_type: 'image/png', view: 'left', view_label: '左侧' },
+    ] }] });
+    const html = render(cardFromPending(pending));
+    expect(html).toContain('>正面视图<');
+    expect(html).toContain('>左侧视图<');
+    expect(html.match(/data-testid="studio-approval-input-view"/g)).toHaveLength(2);
+    expect(html).toContain('src="/api/v1/assets/a2');
+    expect(html).toMatch(/data-testid="studio-approval-credits"[^>]*>约 40 积分/);
+    expect(html).toContain('由 正面 / 左侧 视图生成');
+  });
+});
+
 // #329 follow-up D: a picture the person uploaded in this chat (no task behind it) shows its thumbnail on the
 // card, read through the same authenticated asset address as the chat itself; without a known address the
 // neutral placeholder stays.

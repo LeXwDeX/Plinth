@@ -80,7 +80,7 @@ func loadSkillRun(ctx context.Context, q skillQuery, owner generation.OwnerID, i
 	}
 	rows, err := q.QueryContext(ctx, `SELECT spec_json,phase,COALESCE(prepared_input_id,''),
 COALESCE(prepared_input_hash,''),COALESCE(grant_request_id,''),COALESCE(task_id,''),
-COALESCE(output_asset_id,''),review,COALESCE(reviewed_at,''),attempt
+COALESCE(output_asset_id,''),review,COALESCE(reviewed_at,''),attempt,COALESCE(replacement_asset_id,'')
 FROM skill_run_steps WHERE run_id=? ORDER BY ordinal`, id)
 	if err != nil {
 		return skillrun.Run{}, err
@@ -91,7 +91,7 @@ FROM skill_run_steps WHERE run_id=? ORDER BY ordinal`, id)
 		var spec, reviewed string
 		if err = rows.Scan(&spec, &step.Phase, &step.PreparedInputID,
 			&step.PreparedInputHash, &step.GrantRequestID, &step.TaskID,
-			&step.OutputAssetID, &step.Review, &reviewed, &step.Attempt); err != nil {
+			&step.OutputAssetID, &step.Review, &reviewed, &step.Attempt, &step.ReplacementAssetID); err != nil {
 			return skillrun.Run{}, err
 		}
 		if err = json.Unmarshal([]byte(spec), &step.Spec); err != nil {

@@ -211,6 +211,12 @@ type Input struct {
 	MediaType string `json:"media_type,omitempty"`
 	TaskID    string `json:"task_id,omitempty"`
 	Handle    string `json:"handle,omitempty"`
+	// View is the view key of a reference picture of a multiview step (#65),
+	// such as front or left; the card labels the picture with the Offering's
+	// option label for it.
+	View string `json:"view,omitempty"`
+	// ViewLabel is that option label in the reader's language.
+	ViewLabel string `json:"view_label,omitempty"`
 }
 
 // Kinds of approval input.
@@ -359,6 +365,10 @@ func (s *Service) item(ctx context.Context, owner string, op generationtool.Oper
 		item.Provider = offering.ProviderName
 		item.ProviderID = offering.ProviderID
 		item.ReferenceNote = s.referenceNote(ctx, op, prepared.Capability, offering)
+		if note := generationtool.ReferenceViewsNote(s.tools[op.ToolName], offering, s.schema.ThreeView.Multiview,
+			prepared.NormalizedInput, func(text string) string { return s.text(ctx, text) }); note != "" {
+			item.ReferenceNote = note
+		}
 		if prepared.NativeQuote == nil {
 			item.EstimatedCredits = offering.EstimateTotalCredits(prepared.NormalizedInput)
 		}
@@ -375,8 +385,22 @@ func (s *Service) item(ctx context.Context, owner string, op generationtool.Oper
 			}
 		}
 	}
+	var views []string
+	viewParameter := ""
+	if offeringKnown {
+		views, _ = generationtool.ReferenceViews(offering, prepared.NormalizedInput)
+		for _, parameter := range offering.Parameters {
+			if parameter.Semantic == generation.SemanticReferenceImage {
+				viewParameter = parameter.Name
+			}
+		}
+	}
 	for _, asset := range prepared.Assets {
 		input := Input{Parameter: asset.Parameter, Kind: InputAsset, Role: asset.Role, AssetID: string(asset.ID)}
+		if asset.Parameter == viewParameter && asset.Index >= 0 && asset.Index < len(views) {
+			input.View = views[asset.Index]
+			input.ViewLabel = s.text(ctx, generationtool.ReferenceViewLabel(offering, input.View))
+		}
 		var attachment chat.Attachment
 		var preview string
 		var modelFound bool

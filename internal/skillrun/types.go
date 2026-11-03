@@ -59,6 +59,9 @@ type StepSpec struct {
 	// SourceStepKey is empty when the original source asset is used. A step
 	// may consume only an earlier, locally materialized step output.
 	SourceStepKey string `json:"source_step_key,omitempty"`
+	// Optional marks a step the run is complete without; it still starts
+	// only when a person asks for it (#65). The first step is never optional.
+	Optional bool `json:"optional,omitempty"`
 }
 
 type Step struct {
@@ -75,6 +78,9 @@ type Step struct {
 	OutputAssetID     generation.AssetID         `json:"output_asset_id,omitempty"`
 	Review            ReviewStatus               `json:"review"`
 	ReviewedAt        *time.Time                 `json:"reviewed_at,omitempty"`
+	// ReplacementAssetID is an input asset the person put in place of the
+	// step's output (#65). The attempt, grant and task stay as they were.
+	ReplacementAssetID generation.AssetID `json:"replacement_asset_id,omitempty"`
 }
 
 type Run struct {
@@ -154,6 +160,16 @@ type RestartCommand struct {
 	DeniedGrantID   string
 }
 
+// ReplaceCommand puts an input asset of the owner in place of one step's
+// output. The store refuses it while the step's approval or Task is still in
+// flight, so a paid result is never overwritten while it is being made.
+type ReplaceCommand struct {
+	OwnerID generation.OwnerID
+	RunID   string
+	StepKey string
+	AssetID generation.AssetID
+}
+
 type ReviewCommand struct {
 	OwnerID  generation.OwnerID
 	RunID    string
@@ -213,6 +229,8 @@ type Store interface {
 	// is a compare-and-set on the attempt number: a repeated request for an
 	// attempt that was already replaced changes nothing.
 	RestartSkillStep(context.Context, RestartCommand) (Run, error)
+	// ReplaceSkillStepOutput records a replacement picture for one step.
+	ReplaceSkillStepOutput(context.Context, ReplaceCommand) (Run, error)
 }
 
 // InputTemplate and provider parameters are deliberately absent from this

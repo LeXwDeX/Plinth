@@ -554,16 +554,17 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			}
 			return values
 		},
-		Gateway:       module,
-		Tasks:         module,
-		Operations:    repository,
-		Grants:        executionGrants,
-		StopRequested: chatService.TurnStopRequested,
-		References:    referenceResolver,
-		Chat:          applicationSchema.Chat,
-		ModelDelivery: applicationSchema.ModelDelivery,
-		Skills:        skillCatalog,
-		TaskStates:    applicationSchema.TaskStates,
+		Gateway:         module,
+		Tasks:           module,
+		Operations:      repository,
+		Grants:          executionGrants,
+		StopRequested:   chatService.TurnStopRequested,
+		References:      referenceResolver,
+		InputAssetRoute: applicationSchema.Runtime.HTTP.Routes.AssetItem,
+		Chat:            applicationSchema.Chat,
+		ModelDelivery:   applicationSchema.ModelDelivery,
+		Skills:          skillCatalog,
+		TaskStates:      applicationSchema.TaskStates,
 	})
 	if err != nil {
 		return nil, err

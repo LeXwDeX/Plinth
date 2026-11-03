@@ -9,6 +9,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/agents/mock"
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
 
 func newRoutingAdapter(t *testing.T) *mock.Adapter {
@@ -490,5 +491,28 @@ func TestMultiViewPicturesRouteToTheMultiViewModelTool(t *testing.T) {
 				t.Fatalf("got %s %#v, want %s %#v", tool, arguments, tc.wantTool, tc.wantArgs)
 			}
 		})
+	}
+}
+
+// #65: a turn with the person's structured multiview request carries the
+// Schema's directive; the mock Agent calls the tool with the group and model
+// it names, whatever the message says.
+func TestMultiviewDirectiveRoutesToTheMultiViewTool(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	multiview := product.Application().Chat.ThreeView.Multiview
+	tools := append(append([]agents.Tool{}, allTools...), agents.Tool{Name: multiview.Tool})
+	group := strings.NewReplacer("{tool}", multiview.Tool, "{group}", "skill_run1", "{model}", "tripo-v3.1-multiview",
+		"{views}", "front / left").Replace(multiview.GroupDirective)
+	tool, arguments := plan(t, []agents.Message{{Role: "system", Content: "base" + group}, {Role: "user", Content: "用这组三视图生成 3D"}}, tools)
+	if want := map[string]any{"model": "tripo-v3.1-multiview", "three_view_group": "skill_run1"}; tool != multiview.Tool || !reflect.DeepEqual(arguments, want) {
+		t.Fatalf("group directive: got %s %#v, want %#v", tool, arguments, want)
+	}
+	upload := strings.NewReplacer("{tool}", multiview.Tool, "{model}", "tripo-v3.1-multiview", "{views}", "front / back").Replace(multiview.UploadDirective)
+	tool, arguments = plan(t, []agents.Message{{Role: "system", Content: upload}, {Role: "user", Content: "用这几张图生成 3D"}}, tools)
+	if want := map[string]any{"model": "tripo-v3.1-multiview"}; tool != multiview.Tool || !reflect.DeepEqual(arguments, want) {
+		t.Fatalf("upload directive: got %s %#v, want %#v", tool, arguments, want)
 	}
 }

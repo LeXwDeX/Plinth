@@ -145,3 +145,80 @@ describe('three-view card queue', () => {
     expect(isDisabled(buttonTag(slotHtml(html, 'side'), 'three-view-start'))).toBe(false);
   });
 });
+
+// #65: the views follow the multiview model's view keys; the card makes one model from the finished views.
+describe('three-view card with a multiview model', () => {
+  const model = { modelId: 'mv-model', modelName: 'MV', views: [
+    { value: 'front', label: '正面' }, { value: 'left', label: '左侧' }, { value: 'back', label: '背面' }, { value: 'right', label: '右侧' },
+  ], minimumViews: 2, mediaTypes: ['image/png', 'image/jpeg'] };
+  const four = (slots: (SlotWire & { replaced?: boolean })[]): ThreeViewGroup => parseThreeViews({ items: [{
+    run_id: 'run1', label: '三视图', source_asset_id: 'a0', created_at: '2026-11-03T10:00:00Z', complete: false,
+    slots: slots.map((slot, index) => ({ key: ['front', 'left', 'back', 'right'][index], label: ['正面', '左侧', '背面', '右侧'][index],
+      optional: index === 3, attempt: 0, startable: false, retryable: false, ...slot })),
+    model_source: { slot: 'front', available: slots[0].status === 'succeeded', task_id: 't1', asset_id: 'x1', note: 'n' },
+  }] })[0];
+  const renderFour = (value: ThreeViewGroup, busy: string | null = null) => renderToStaticMarkup(
+    <ThreeViewCardView schema={schema} group={value} busy={busy} queued={new Set()} thumbnail={() => ''} onAdvance={() => {}} onView={() => {}}
+      onToThreeD={() => {}} model={model} onMultiview={() => {}} onStartRemaining={() => {}} onReplace={() => {}} />,
+  );
+
+  it('enables 用三视图生成 3D only with the front view and one more view, and names the views it uses', () => {
+    const onlyFront = renderFour(four([
+      { status: 'succeeded', task_id: 't1', output_asset_id: 'x1' },
+      { status: 'not_started', startable: true, estimated_credits: 4, credits_metered: true } as SlotWire,
+      { status: 'not_started', startable: true, estimated_credits: 4, credits_metered: true } as SlotWire,
+      { status: 'not_started', startable: true },
+    ]));
+    expect(isDisabled(buttonTag(onlyFront, 'three-view-multiview'))).toBe(true);
+    expect(onlyFront).toContain(messages['ui.studio.three_view.multiview_wait']);
+    // The front view alone still converts.
+    expect(isDisabled(buttonTag(onlyFront, 'three-view-to-3d'))).toBe(false);
+    expect(onlyFront).toContain(messages['ui.studio.three_view.to_3d_front_only']);
+    // The remaining required views (not the optional right one) start together, priced as the sum.
+    expect(onlyFront).toContain('生成剩余视图（约 8 积分）');
+    expect(onlyFront).toContain(messages['ui.studio.three_view.optional']);
+
+    const ready = renderFour(four([
+      { status: 'succeeded', task_id: 't1', output_asset_id: 'x1' },
+      { status: 'running', task_id: 't2' },
+      { status: 'succeeded', output_asset_id: 'up3', replaced: true } as SlotWire,
+      { status: 'not_started', startable: true },
+    ]));
+    expect(isDisabled(buttonTag(ready, 'three-view-multiview'))).toBe(false);
+    expect(ready).toContain('用三视图生成 3D（MV）');
+    expect(ready).toContain('将使用：正面 / 背面');
+    expect(ready).not.toContain('data-testid="three-view-start-remaining"');
+    expect(slotHtml(ready, 'back')).toContain(messages['ui.studio.three_view.replaced']);
+
+    const noFront = renderFour(four([
+      { status: 'failed', task_id: 't1', retryable: true },
+      { status: 'succeeded', task_id: 't2', output_asset_id: 'x2' },
+      { status: 'succeeded', task_id: 't3', output_asset_id: 'x3' },
+      { status: 'not_started', startable: true },
+    ]));
+    expect(isDisabled(buttonTag(noFront, 'three-view-multiview'))).toBe(true);
+  });
+
+  it('offers 替换 on every view except one in flight', () => {
+    const html = renderFour(four([
+      { status: 'succeeded', task_id: 't1', output_asset_id: 'x1' },
+      { status: 'running', task_id: 't2' },
+      { status: 'awaiting_approval', task_id: '' },
+      { status: 'not_started', startable: true },
+    ]));
+    expect(slotHtml(html, 'front')).toContain('data-testid="three-view-replace"');
+    expect(slotHtml(html, 'right')).toContain('data-testid="three-view-replace"');
+    expect(slotHtml(html, 'left')).not.toContain('three-view-replace"');
+    expect(slotHtml(html, 'back')).not.toContain('three-view-replace"');
+    expect(html).toContain('accept="image/png,image/jpeg"');
+  });
+
+  it('hides the multiview button without a multiview model', () => {
+    const html = renderToStaticMarkup(
+      <ThreeViewCardView schema={schema} group={four([{ status: 'succeeded', task_id: 't1', output_asset_id: 'x1' }, { status: 'succeeded', task_id: 't2', output_asset_id: 'x2' }, { status: 'not_started' }, { status: 'not_started' }])}
+        busy={null} thumbnail={() => ''} onAdvance={() => {}} onView={() => {}} onToThreeD={() => {}} model={null} onMultiview={() => {}} />,
+    );
+    expect(html).not.toContain('three-view-multiview"');
+    expect(html).toContain('data-testid="three-view-to-3d"');
+  });
+});

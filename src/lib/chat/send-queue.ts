@@ -1,4 +1,5 @@
 import type { ChatAttachmentClaim, ChatMentionClaim } from '@/lib/chat/attachments';
+import type { MultiviewTurnRequest } from '@/lib/chat/browser-client';
 
 /**
  * A message the person sent while the Agent was still on the previous turn.
@@ -17,6 +18,8 @@ export interface QueuedTurn {
   mentions?: ChatMentionClaim[];
   /** The source the person chose when the turn was queued (#266): the canvas when `selection` is its snapshot. */
   inputSource?: string;
+  /** #65: the structured multiview request the turn was queued with. */
+  multiview?: MultiviewTurnRequest;
 }
 
 export type QueueBySession = Readonly<Record<string, readonly QueuedTurn[]>>;
