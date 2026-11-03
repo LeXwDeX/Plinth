@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
-import { useAnchoredPositioner } from '@/components/ui/overlay';
+import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
 import { approvalModeOptions, sessionCreditsText, sessionPriceTotalsText } from '@/lib/chat/approval-modes';
 import { useSessionApproval } from '@/hooks/use-session-approval';
 import { createChatBrowserClient } from '@/lib/chat/browser-client';
@@ -63,7 +63,7 @@ export function ApprovalMenu() {
           </Popover.Trigger>
         </HintTooltip>
         <Popover.Portal>
-          <Popover.Positioner side="bottom" align="end" sideOffset={6} collisionPadding={12} className={layer}>
+          <Popover.Positioner positionMethod={anchoredPositionMethod} side="bottom" align="end" sideOffset={6} collisionPadding={12} className={layer}>
             <Popover.Popup className="flex w-80 max-w-(--available-width) flex-col gap-1 rounded-lg bg-popover p-2 text-popover-foreground shadow-xl outline-none ring-1 ring-foreground/10">
               <Popover.Title className="px-1 pb-1 text-xs font-semibold">{schemaText(schema, 'ui.studio.approval.title')}</Popover.Title>
               <div role="radiogroup" aria-label={schemaText(schema, 'ui.studio.approval.title')} className="flex flex-col gap-0.5">

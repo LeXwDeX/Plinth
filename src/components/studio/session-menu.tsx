@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
-import { useAnchoredPositioner } from '@/components/ui/overlay';
+import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { useSessionCover } from '@/hooks/use-session-cover';
 import { createChatBrowserClient } from '@/lib/chat/browser-client';
@@ -471,7 +471,7 @@ export function SessionMenu() {
           </Popover.Trigger>
         </HintTooltip>
         <Popover.Portal>
-          <Popover.Positioner side="bottom" align="start" sideOffset={6} collisionPadding={12} className={layer}>
+          <Popover.Positioner positionMethod={anchoredPositionMethod} side="bottom" align="start" sideOffset={6} collisionPadding={12} className={layer}>
             <Popover.Popup className="flex max-h-[min(32rem,calc(100dvh-6rem))] w-80 max-w-(--available-width) flex-col overflow-hidden rounded-lg bg-popover p-2 text-popover-foreground shadow-xl outline-none ring-1 ring-foreground/10">
               <Popover.Title className="sr-only">{schemaText(schema, 'ui.studio.session.menu_label')}</Popover.Title>
               <SessionList onClose={() => setOpen(false)} />

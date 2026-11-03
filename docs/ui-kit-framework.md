@@ -22,6 +22,7 @@
 - 3D 视口的 `ViewportDialog` 是非模态处理面板：它只遮挡右侧视口，左侧 Agent 保持可操作；Escape 仅作用于面板内焦点。历史和付费确认继续由顶层 Base UI Dialog 管理焦点。
 - 右键打开的菜单一律用 `ui/context-menu.tsx`（Base UI ContextMenu），不要手工设置普通 `DropdownMenu` 的 `open` 并放一个隐藏触发器：普通 Menu 的浮层在指针离开时以 `trigger-hover` 关闭，打开动画产生的 `mouseleave` 就能让它闪现后消失（#280）；ContextMenu 在指针处锚定，浮层不做悬停关闭，子菜单仍用同一套 Menu 部件。
 - 锚定浮层宽度至少容纳触发器，并受可用视口宽度约束；不得用 `w-(--anchor-width)` 将内容锁死到触发器宽度。模态和阻断层中的 Select/Menu 通过 `OverlayLayerContext` 提升。
+- 锚定浮层的 Positioner 一律传 `positionMethod={anchoredPositionMethod}`（`overlay.ts`，值为 `fixed`），新增 Select/Menu/Popover/Tooltip 浮层也一样。Base UI 默认的 `absolute` 定位层 portal 在 `<body>` 下，首次定位前可能短暂越出视口、让文档溢出；经典滚动条下，Select/Menu/Dialog 的滚动锁若恰好在这一瞬间采样，就会给 `<html>` 写入 `scrollbar-gutter: stable`，整页左移并在右侧留下空白竖条（#74）。`overlay.test.tsx` 检查每个 Positioner 都声明了这一点，`scripts/smoke/overlay-scroll-lock-geometry.mjs` 在真实浏览器里测宽度、`scrollLeft` 与 `<html>` 溢出。
 - `Surface` 的 `className` 用于布局和定位。普通卡片不在业务文件里重复写底色、边框、圆角、阴影；视觉上需要新的语义外观时先扩展 Surface 的有限变体。表单控件的外观继续由 Input/Select 等基元负责。
 
 ## 现行覆盖

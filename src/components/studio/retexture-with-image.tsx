@@ -6,7 +6,7 @@ import { Popover } from '@base-ui/react/popover';
 import { ActionFace, ActionHint, actionButtonClass } from '@/components/studio/action-button';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action, buttonVariants } from '@/components/ui/button';
-import { useAnchoredPositioner } from '@/components/ui/overlay';
+import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
 import { useObjectActions } from '@/hooks/use-object-actions';
 import { tileOfObject, useSessionVersions } from '@/hooks/use-session-versions';
 import { schemaText } from '@/lib/product-schema';
@@ -73,7 +73,7 @@ export function RetextureWithImageAction({ object, view }: { object: CurrentObje
         </Popover.Trigger>
       </ActionHint>
       <Popover.Portal>
-        <Popover.Positioner side="bottom" align="end" sideOffset={8} collisionPadding={12} className={layer}>
+        <Popover.Positioner positionMethod={anchoredPositionMethod} side="bottom" align="end" sideOffset={8} collisionPadding={12} className={layer}>
           <Popover.Popup
             data-testid="stage-retexture-panel"
             className="flex w-72 max-w-(--available-width) flex-col gap-2 rounded-lg bg-popover p-3 text-xs text-popover-foreground shadow-xl outline-none ring-1 ring-foreground/10"

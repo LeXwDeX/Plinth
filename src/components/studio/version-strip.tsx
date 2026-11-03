@@ -10,7 +10,7 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { KindBadge } from '@/components/studio/kind-badge';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
-import { useAnchoredPositioner } from '@/components/ui/overlay';
+import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
 import { CardDownload, ResultContextMenu, openResultDetail, useCanvasDragSource } from '@/components/result/result-card-parts';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { useObjectActions } from '@/hooks/use-object-actions';
@@ -184,7 +184,7 @@ function CandidatePopover({ tile, sessionId, current }: { tile: VersionTile; ses
         </Popover.Trigger>
       </HintTooltip>
       <Popover.Portal>
-        <Popover.Positioner side="top" align="center" sideOffset={8} collisionPadding={12} className={layer}>
+        <Popover.Positioner positionMethod={anchoredPositionMethod} side="top" align="center" sideOffset={8} collisionPadding={12} className={layer}>
           <Popover.Popup className="flex max-w-(--available-width) flex-col gap-1.5 rounded-lg bg-popover p-2 text-popover-foreground shadow-xl outline-none ring-1 ring-foreground/10" data-testid="version-candidates">
             <CandidateList tile={tile} sessionId={sessionId} current={current} />
           </Popover.Popup>
@@ -621,7 +621,7 @@ function FoldedTiles({ tiles, currentKey, branch, inCompareTile, captionOf, sess
           </Popover.Trigger>
         </HintTooltip>
         <Popover.Portal>
-          <Popover.Positioner side="top" align="start" sideOffset={8} collisionPadding={12} className={layer}>
+          <Popover.Positioner positionMethod={anchoredPositionMethod} side="top" align="start" sideOffset={8} collisionPadding={12} className={layer}>
             <Popover.Popup className="flex max-h-72 max-w-(--available-width) flex-col gap-1 overflow-y-auto rounded-lg bg-popover p-2 text-popover-foreground shadow-xl outline-none ring-1 ring-foreground/10" data-testid="version-fold-list">
               <Popover.Title className="text-xs font-semibold">{schemaText(schema, 'ui.studio.strip.more_title')}</Popover.Title>
               <ol className="flex flex-col gap-0.5">
