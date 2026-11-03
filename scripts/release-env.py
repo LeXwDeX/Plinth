@@ -130,12 +130,18 @@ def validate_environment(name, environment, document):
         need(type(single.get("allow_bootstrap", False)) is bool, "allow_bootstrap must be boolean")
     backup = environment.get("backup")
     if backup is not None:
-        # Only the disposable test stack may skip the asset trees (#364).
-        need(name == "dev-test", "backup retention is only supported for the dev-test environment")
-        need(environment.get("promote_from") is None,
-             "dev-test backup retention cannot be combined with promote_from")
         need(isinstance(backup, dict) and set(backup) == {"scope", "keep"}, "backup needs only scope and keep")
-        need(backup.get("scope") == "database", "backup scope must be database")
+        scope = backup.get("scope")
+        need(scope in ("database", "full"), "backup scope must be database or full")
+        if scope == "database":
+            # Only the disposable test stack may skip the asset trees (#364).
+            need(name == "dev-test", "backup scope database is only supported for the dev-test environment")
+            need(environment.get("promote_from") is None,
+                 "dev-test backup scope database cannot be combined with promote_from")
+        else:
+            # #66: a full backup keeps every tree; retention is allowed on both test stacks.
+            need(name in ("dev-test", "formal-test"),
+                 "backup retention is only supported for the dev-test and formal-test environments")
         need(type(backup.get("keep")) is int and 1 <= backup["keep"] <= 2, "backup keep must be 1-2")
     data = environment.get("data")
     if data is not None:

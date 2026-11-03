@@ -25,7 +25,7 @@
 | `compose_project` | Compose 项目名；容器为 `<项目>-art-ai-go-1` |
 | `protect_projects` | 共享主机上同机其他 Plinth Compose 项目（例如候选栈）；镜像保留不清理它们容器引用的镜像。仓库脚本不写任何环境的项目名（#261），共享主机必须在这里列全；`single_stack` 环境不能设置。由 `release-env.py` 发布的环境若不是 `single_stack`，就按共享主机处理，缺这个字段即报错；文件里与它同主机（`ssh` 主机相同）的每个环境的 `compose_project` 都必须列出，`single_stack` 环境不得与其他环境同主机（#334） |
 | `protected_paths` | 迁移工具（`backup-go-production.sh create`、`run-go-etl-container.sh`、`finalize-go-production.sh`）绝不能作为目标的目录：发布根之外的绝对路径列表（例如共享主机上旧 Next 项目根），没有就写 `[]`；由 `release-env.py` 发布的环境必填。`release-env.py` 把「`root` + 本列表」用冒号连成 `ART_AI_PROTECTED_PATHS`：`compose-env` 输出它供手工运行，`release` 经服务器段写入 `production/compose.env`。三个迁移工具在未设置 `ART_AI_PROTECTED_PATHS` 时拒绝运行（finalize 在停旧容器之前），确无受保护目录时须显式设为空串（#334） |
-| `backup` | 仅 `dev-test` 可选的发布备份策略（#364）：`{"scope": "database", "keep": 2}` 表示停机时只备份 `production/data`。正常成功清理最多保留最新 2 个已结束发布备份；进行中的快照可临时排除，但不承诺长期额外保留；更早的失败快照也按最新 2 个回收，独立失败报告与诊断日志保留。省略时为全量备份 `data`、`storage-go`、`web-data`，且不自动清理历史备份（`formal-test` 保持此默认）。`scope` 只接受 `database`，`keep` 为 1–2；带 `promote_from` 的环境不得设置 |
+| `backup` | 可选的发布备份策略（#364、#66）：`{"scope": "database", "keep": 2}`（仅 `dev-test`，不得与 `promote_from` 同时出现）表示停机时只备份 `production/data`；`{"scope": "full", "keep": 2}`（`dev-test` 与 `formal-test` 可设，可与 `promote_from` 同时出现）仍备份 `data`、`storage-go`、`web-data`，成功后同样清理。正常成功清理最多保留最新 2 个已结束发布备份；进行中的快照可临时排除，但不承诺长期额外保留；更早的失败快照也按最新 2 个回收，独立失败报告与诊断日志保留。省略时为全量备份 `data`、`storage-go`、`web-data`，且不自动清理历史备份。`formal-test` 按 2026-11-03 用户要求（#66）写 `{"scope": "full", "keep": 2}`，全量备份成功后只保留最新 2 份；发布备份不含镜像和日志。`scope` 只接受 `database`/`full`，`keep` 为 1–2 |
 | `data` | 仅 `dev-test` 可选（#28）：唯一取值 `"ephemeral"`，每次发布都是全新数据，数据库、资产存储与 legacy 缓存用匿名卷、不挂载主机目录；不得与 `backup` 或 `promote_from` 同时出现；省略时为持久数据（`formal-test` 保持此默认）。`release-env.py` 向服务器段传 `RELEASE_DATA_MODE=ephemeral` |
 | `promote_from` | 只能从该环境晋级（`formal-test` 为 `dev-test`） |
 | `single_stack` | 单项目主机：`image_keep`（保留镜像数，含运行镜像）、`keep_source_snapshots`（保留的 `app.prev-*` 数）、`allow_bootstrap`（允许空栈首次启动） |
@@ -87,7 +87,7 @@
 两个环境走同一套脚本，`release-env.py` 只把环境参数交给 `scripts/release-go-testenv.sh`，服务器段为 `scripts/release-server-steps.sh`：
 
 1. 源码：远端旧 `app/` 移为 `app.prev-<时间>`，`git archive <revision>` 解到新 `app/`。
-2. 服务器段：获取发布根锁 → 容量检查 → 以 `Dockerfile.go-runtime` 的 `runtime-with-migration-tools` 目标构建 `art-ai-go-production:<短SHA>-<时间>`（npm 固定公共源；按环境文件传 `GOPROXY`/`--add-host`）→ 日志目录以镜像运行身份写删验证 → `cutover-go-production.sh preflight`（回环端口、临时目录）→ 停旧服务做一致性备份（`backups/release-<tag>/`；默认备份 `data`、`storage-go`、`web-data`，只有 `dev-test` 可配置 `backup.scope=database` 仅备份 `production/data`）→ Compose 更新唯一 `art-ai-go` 服务 → healthz/readyz → 写成功清单 → 镜像保留与（仅 `dev-test` database 模式的）备份保留。
+2. 服务器段：获取发布根锁 → 容量检查 → 以 `Dockerfile.go-runtime` 的 `runtime-with-migration-tools` 目标构建 `art-ai-go-production:<短SHA>-<时间>`（npm 固定公共源；按环境文件传 `GOPROXY`/`--add-host`）→ 日志目录以镜像运行身份写删验证 → `cutover-go-production.sh preflight`（回环端口、临时目录）→ 停旧服务做一致性备份（`backups/release-<tag>/`；默认备份 `data`、`storage-go`、`web-data`，只有 `dev-test` 可配置 `backup.scope=database` 仅备份 `production/data`，`backup.keep` 控制成功后清理）→ Compose 更新唯一 `art-ai-go` 服务 → healthz/readyz → 写成功清单 → 镜像保留与（仅设置了 `backup.keep` 的环境的）备份保留。
 3. 失败：构建/预检失败不动旧实例；更新后健康失败先按备份范围恢复数据，再以发布前实际运行的镜像拉起，报告在 `production/reports/release-failures/`；失败路径不清理镜像和快照。整个服务器段持有发布根锁；清理 helper 继承并校验该描述符。`database` 模式只恢复数据库，候选写入的 `storage-go`/`web-data` 字节保持不动，因此不是完整回滚。
 
 仓库不写死任何主机、地址、服务器路径或环境的 Compose 项目名（#249、#261）：`release-go-testenv.sh` 的 `RELEASE_HOST`/`RELEASE_ROOT`、服务器段的发布根与 `RELEASE_COMPOSE_PROJECT`（`release-env.py` 总是按 `compose_project` 传入）、镜像保留的 `--root`/`--project`、预检的 `GO_PROD_PROJECT` 和 `docker-compose.go-production.yml` 的 8 个主机路径都没有缺省值，一律来自环境文件。`layout` 中的键作为进程环境传给每次 Compose 与预检；设置了 `layout` 的环境成功后写出 `production/compose.env`（`0600`，无密钥：当前 `GO_IMAGE_TAG`、`GO_SOURCE_COMMIT`、`GO_RUNTIME_ENV_FILE` 与布局键），供手工 Compose 使用。
@@ -117,10 +117,10 @@
 
 `dev-test` 只存放测试材料，可在环境文件写 `"backup": {"scope": "database", "keep": 2}`：停机窗口只把 `production/data` 打包到 `backups/release-<tag>/data.tar`，回滚也只替换该目录。`storage-go` 是只追加的 CAS，`web-data` 只读；候选启动后写入的资产或 Web 文件在数据库回滚后保留，可能成为无引用字节。**这不是完整回滚**：发布失败后的旧服务可能看不到候选新增的 CAS/任务数据，只能按新写入处理，不能删除这些字节来伪造一致。
 
-- 省略 `backup` 时保持全量行为：备份 `data`、`storage-go`、`web-data`，且不运行备份清理。`formal-test` 保持此默认。
-- `release-env.py` 在加载环境文件时拒绝把 `backup` 用于 `promote_from` 或非 `dev-test` 环境；`scope` 只接受 `database`，`keep` 为 1–2。服务器段在构建前再次校验 `RELEASE_BACKUP_SCOPE`（`full`/`database`）与 `RELEASE_BACKUP_KEEP`，非法组合不产生副作用。
+- 省略 `backup` 时保持全量行为：备份 `data`、`storage-go`、`web-data`，且不运行备份清理。`formal-test` 按 #66 配置 `"backup": {"scope": "full", "keep": 2}`：备份范围不变，健康检查与成功清单写入后按最新 2 份清理更早的已结束发布备份（发布备份不含镜像和日志）。
+- `release-env.py` 在加载环境文件时拒绝：`scope=database` 用于 `promote_from` 或非 `dev-test` 环境；`scope=full` 用于 `dev-test`、`formal-test` 之外的环境；未知 `scope`。`keep` 为 1–2。服务器段在构建前再次校验 `RELEASE_BACKUP_SCOPE`（`full`/`database`）与 `RELEASE_BACKUP_KEEP`（full 可选，设置时须为 1–2），非法组合不产生副作用。
 - 备份范围写入 `backups/release-<tag>/scope`（单行 `database` 或 `full`）、成功后的 `production/compose.env`（`RELEASE_BACKUP_SCOPE`、`RELEASE_BACKUP_TARGETS`）和失败报告的 `backup_scope`/`backup_targets`。手工回滚先读这些记录，不要猜归档内容。
-- 只有健康检查与成功清单都写入后，`release-server-steps.sh` 才在 database 模式调用 `scripts/retain-release-backups.py --apply`：按最新 `keep` 份（当前批准配置为 2）回收更早的已结束发布备份，更早的失败快照也在回收范围内；进行中的快照可临时排除，失败报告和独立诊断日志保留。bootstrap、构建/preflight/备份/更新/健康失败和回滚路径都不调用清理。
+- 只有健康检查与成功清单都写入后，`release-server-steps.sh` 才在设置了 `RELEASE_BACKUP_KEEP` 时调用 `scripts/retain-release-backups.py --apply`：按最新 `keep` 份（当前批准配置为 2）回收更早的已结束发布备份，更早的失败快照也在回收范围内；进行中的快照可临时排除，失败报告和独立诊断日志保留。bootstrap、构建/preflight/备份/更新/健康失败和回滚路径都不调用清理。
 - `releases/manifest.txt` 是 append-only 成功历史，可包含同一 tag 与同一完整 SHA 的重复行（成功时间戳不同）。retention 保留原始行序与字节摘要，不重写清单；仍要求最后一行匹配当前运行容器，并拒绝同一 tag 对应不同 SHA 的冲突记录。
 - retention 只读取 tag 属于本次候选备份的失败报告；没有对应备份的历史诊断（包括旧正文格式）不再解析，字节保持原样。匹配候选的报告仍校验类型、安全性和正文中的 tag 行，文件名本身不构成完成证明。
 - 清理失败只记警告，不改变已成功发布的结论；helper 不得把部分删除报告为成功。它不处理原始资产、数据库、首次迁移冷备或其他栈的备份。

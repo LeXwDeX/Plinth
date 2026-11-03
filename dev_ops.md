@@ -110,11 +110,11 @@ manifest（发布历史）：`<root>/releases/manifest.txt`（`<root>` 为本地
 `dev-test` 只存放测试材料，用户已确认不必每次发布都完整复制约 21 GB 的 `data`、`storage-go`、`web-data`。环境文件因此可为 `dev-test` 写 `"backup": {"scope": "database", "keep": 2}`：
 
 - `scope` 为 `database` 时，停机窗口只备份 `production/data` 到 `backups/release-<tag>/data.tar`，健康失败回滚也只替换数据库。`storage-go` 是应用不可变/只追加 CAS，`web-data` 只读；候选启动后写入的字节保留，可能成为无引用孤儿。**这不是完整回滚**，不能称为全量恢复，也不能为了“一致”删除这些字节。
-- 省略 `backup` 时保持全量备份 `data`、`storage-go`、`web-data`，且不运行备份清理。`formal-test` 不使用本节的 database 模式或自动清理。
-- 只有环境名 `dev-test` 可设置 `backup`；`release-env.py` 拒绝把它用于 `promote_from` 或其他环境，`scope` 只接受 `database`，`keep` 为 1–2。服务器段在构建前再次校验 `RELEASE_BACKUP_SCOPE`/`RELEASE_BACKUP_KEEP`，非法组合不产生副作用。
+- 省略 `backup` 时保持全量备份 `data`、`storage-go`、`web-data`，且不运行备份清理。`formal-test` 不使用本节的 database 模式；按 2026-11-03 用户要求（#66）写 `"backup": {"scope": "full", "keep": 2}`，仍全量备份，成功后只保留最新 2 份（不含镜像和日志）。
+- 只有环境名 `dev-test` 可设置 `backup`；`release-env.py` 拒绝把它用于 `promote_from` 或其他环境，`database` 仅 `dev-test` 可用；`full` 可用于 `dev-test`、`formal-test`；`keep` 为 1–2。服务器段在构建前再次校验 `RELEASE_BACKUP_SCOPE`/`RELEASE_BACKUP_KEEP`，非法组合不产生副作用。
 - 范围记录在 `backups/release-<tag>/scope`（单行 `database` 或 `full`）、成功后的 `production/compose.env` 和失败报告。手工回滚先读这些记录；`database` 只恢复 `data.tar`，保留资产与 Web 字节。没有 `scope` 的旧快照仅在三个归档齐全时按 `full` 处理。
-- 只有健康检查与成功清单写入后，服务器段才在 database 模式调用 `scripts/retain-release-backups.py --apply`。正常清理最多保留最新 2 个已结束发布备份（当前批准 `keep=2`），更早的失败快照也按最新 2 个回收；进行中的快照可临时排除，失败报告与独立诊断日志保留。不处理原始资产、数据库、首次迁移冷备或其他栈的备份。bootstrap、构建/preflight/备份/更新/健康失败和回滚路径都不调用清理。
-- 同一发布根的发布备份/恢复、备份清理与手工恢复共用 `<root>/.release.lock`（`scripts/release-lock.py`）。服务器段在构建或改动数据前获取锁并持有到发布结束；database 模式的 retention 从 `RELEASE_LOCK_FD`/`RELEASE_LOCK_ROOT` 继承并校验同一描述符，缺失或身份不符时拒绝，不提供环境变量绕过。校验根、常规文件、owner 和路径身份后，直接对继承描述符执行 `flock LOCK_EX|LOCK_NB`：共享同一 open file description（正常继承）时复用已持有锁；独立描述符在锁空闲时先取得锁再操作；其他进程持锁时失败 busy。借用方不得解锁继承描述符，原持有者在最外层结束时释放。手工恢复用 `release-lock.py run --root <root> -- ...` 包住停止、移动、解包与启动全过程。发布镜像保留使用另一个 `releases/image-retention.lock`，两者不合并；`release-lock.py` 不调用镜像工具，避免自锁。
+- 只有健康检查与成功清单写入后，服务器段才在设置了 `RELEASE_BACKUP_KEEP` 时调用 `scripts/retain-release-backups.py --apply`。正常清理最多保留最新 2 个已结束发布备份（当前批准 `keep=2`），更早的失败快照也按最新 2 个回收；进行中的快照可临时排除，失败报告与独立诊断日志保留。不处理原始资产、数据库、首次迁移冷备或其他栈的备份。bootstrap、构建/preflight/备份/更新/健康失败和回滚路径都不调用清理。
+- 同一发布根的发布备份/恢复、备份清理与手工恢复共用 `<root>/.release.lock`（`scripts/release-lock.py`）。服务器段在构建或改动数据前获取锁并持有到发布结束；设置了 keep 的 retention 从 `RELEASE_LOCK_FD`/`RELEASE_LOCK_ROOT` 继承并校验同一描述符，缺失或身份不符时拒绝，不提供环境变量绕过。校验根、常规文件、owner 和路径身份后，直接对继承描述符执行 `flock LOCK_EX|LOCK_NB`：共享同一 open file description（正常继承）时复用已持有锁；独立描述符在锁空闲时先取得锁再操作；其他进程持锁时失败 busy。借用方不得解锁继承描述符，原持有者在最外层结束时释放。手工恢复用 `release-lock.py run --root <root> -- ...` 包住停止、移动、解包与启动全过程。发布镜像保留使用另一个 `releases/image-retention.lock`，两者不合并；`release-lock.py` 不调用镜像工具，避免自锁。
 - 清理递归删除前拒绝快照树内的挂载点，包括与父目录同设备的 bind mount；Linux `/proc/self/mountinfo` 是权威来源，缺失、为空或格式异常时失败关闭。该检查只用于删除，不改变成功清单或恢复资格。
 - 失败快照可能有零字节或缺失归档：只有独立失败报告存在时才可清理；成功清单中的备份仍要求完整且非空的归档。失败快照的删除资格不等于恢复资格。
 - retention 只读取 tag 属于本次候选备份的失败报告；没有对应备份的历史诊断（包括旧正文格式）不再解析，字节保持原样。匹配候选的报告仍校验类型、安全性和正文中的 tag 行，文件名本身不构成完成证明。
