@@ -86,9 +86,23 @@ if [ ! -f actions-runner/.runner ]; then
   sudo -u runner bash -c "cd /home/runner/actions-runner && ./config.sh --unattended --url https://github.com/LeXwDeX/Plinth --token '${REG_TOKEN}' --name plinth-azure-f16 --labels plinth-azure --work _work --replace"
 fi
 grep -q ACTIONS_RUNNER_HOOK_JOB_STARTED actions-runner/.env 2>/dev/null || echo "ACTIONS_RUNNER_HOOK_JOB_STARTED=/home/runner/job-started.sh" >> actions-runner/.env
+# 测试临时目录放在本地临时 SSD（/mnt，解除分配时清空）：系统盘是标准 SSD，多个包并发的
+# SQLite 测试同步写盘会把锁等待拖过 busy_timeout。目录在 runner 服务每次启动前重建。
+grep -q '^TMPDIR=' actions-runner/.env || echo "TMPDIR=/mnt/plinth-ci-tmp" >> actions-runner/.env
 chown runner:runner actions-runner/.env
 cd actions-runner
 ./svc.sh install runner || true
+service_dropin=/etc/systemd/system/actions.runner.LeXwDeX-Plinth.plinth-azure-f16.service.d
+mkdir -p "$service_dropin"
+cat > "$service_dropin/tmpdir.conf" <<'EOS'
+[Unit]
+RequiresMountsFor=/mnt
+
+[Service]
+ExecStartPre=+/usr/bin/install -d -o runner -g runner -m 700 /mnt/plinth-ci-tmp
+EOS
+systemctl daemon-reload
+./svc.sh stop || true
 ./svc.sh start
 ./svc.sh status | head -5
 systemctl list-timers plinth-ci-idle-stop.timer --no-pager | head -3

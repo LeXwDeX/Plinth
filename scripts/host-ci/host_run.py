@@ -432,7 +432,10 @@ def ensure_runner_image(args):
 
 
 def act_command(act, src, event, event_file, args):
-    command = [str(act), event, '-C', str(src), '-e', str(event_file), '-P', f'ubuntu-latest={args.runner_name}',
+    # Only the CI workflow is replayed: azure-runner.yml only starts the Azure VM (#78). The race job's
+    # plinth-azure label runs in the same limited container as ubuntu-latest.
+    command = [str(act), event, '-C', str(src), '-W', str(src / '.github' / 'workflows' / 'ci.yml'), '-e', str(event_file),
+               '-P', f'ubuntu-latest={args.runner_name}', '-P', f'plinth-azure={args.runner_name}',
                '--container-architecture', 'linux/amd64', '--concurrent-jobs', '1', '--container-daemon-socket', '-', '--rm', '--pull=false',
                '--action-cache-path', str(args.act_cache),
                '--container-options', f'--cpus {args.cpus:g} --memory {args.memory_gib}g --memory-swap {args.memory_gib}g --pids-limit 4096 '

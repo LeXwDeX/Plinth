@@ -90,8 +90,8 @@ CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check
 go test race 在可信事件上改用一台按量计费、用时开机的 Azure 16 核仓库级 runner（标签集 `[self-hosted, Linux, X64, plinth-azure]`），以缩短最慢的门禁。frontend 与 go check 不受影响。机器所在订阅、资源与资源清单只记在 #78，不写入仓库文档。
 
 - **可信事件**：只有本仓库 `main` 的 `push`，以及 head 仓库就是本仓库的 `pull_request`，才路由到该 runner。fork 的 PR、`pull_request_target`、`workflow_run` 与其他事件一律走 `ubuntu-latest`；`workflow_dispatch` 仍按上节的 `use_self_hosted`。路由表达式与事件用例由 `ci-gate-parity.test.ts` 锁定，门禁作业仍不得带作业级 `if`、`needs` 或 `permissions`。
-- **开机与关机**：`.github/workflows/azure-runner.yml` 在同样的可信事件上以 GitHub OIDC 登录并开机，CI 每次被请求（含重跑作业）还经 `workflow_run` 再开一次；它不跑门禁，也是唯一持有 `id-token: write` 的工作流。`workflow_run` 只用于开机，不用于选择门禁的 runner。OIDC 身份的角色只能读取、开机、解除分配这一台 VM，联合凭据只认本仓库的 `main` 与本仓库的 `pull_request`。VM 必须在空闲 10 分钟后由自身托管身份解除分配，卡死的作业由 `timeout-minutes` 结束，另有平台侧每日定时关机兜底；改动这些策略须在 #78 留下实测记录。开机失败时 race 作业会一直排队，按失败处理并重跑开机工作流，不得改成跳过门禁。VM 的安装与空闲关机脚本是 `scripts/azure-runner/vm-setup.sh`，可重复执行。
-- **隔离与凭据**：runner 以无特权用户运行，每个 job 开始前清空工作目录；机器上不得存放 Plinth 运行密钥、Provider Key 或部署凭据。runner 自身的注册凭据保存在机器上，job 进程可以读到，这是常驻 runner 的固有残留风险，靠只放行可信事件来控制。机器内的托管身份同样只能开关这台 VM。
+- **开机与关机**：`.github/workflows/azure-runner.yml` 在同样的可信事件上以 GitHub OIDC 登录并开机，另每 10 分钟（及手动触发时）从默认分支只读检查一次，有作业排队等 `plinth-azure` 就开机，覆盖重跑作业（重跑不会再触发 `push`/`pull_request`）与开机失败；它不跑门禁，不检出或读取触发方的代码，也是唯一持有 `id-token: write` 的工作流。OIDC 身份的角色只能读取、开机、解除分配这一台 VM，联合凭据只认本仓库的 `main` 与本仓库的 `pull_request`。VM 必须在空闲 10 分钟后由自身托管身份解除分配，卡死的作业由 `timeout-minutes` 结束，另有平台侧每日定时关机兜底；改动这些策略须在 #78 留下实测记录。开机失败时 race 作业会一直排队，按失败处理并重跑开机工作流，不得改成跳过门禁。VM 的安装与空闲关机脚本是 `scripts/azure-runner/vm-setup.sh`，可重复执行。
+- **隔离与凭据**：runner 以无特权用户运行，每个 job 开始前清空工作目录，测试临时目录（`TMPDIR`）在随解除分配清空的本地临时盘上（系统盘的同步写盘太慢，会让并发 SQLite 测试的锁等待超过 `busy_timeout`）；机器上不得存放 Plinth 运行密钥、Provider Key 或部署凭据。runner 自身的注册凭据保存在机器上，job 进程可以读到，这是常驻 runner 的固有残留风险，靠只放行可信事件来控制。机器内的托管身份同样只能开关这台 VM。
 - **不是隔离边界**：与上节相同，路由条件只决定作业去哪台机器，不能防止有写权限的人改工作流。新增可选用该 runner 的事件或作业前，须先更新本节和一致性测试。
 
 ### 主机自检替代 CI（#79）

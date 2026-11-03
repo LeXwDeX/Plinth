@@ -599,9 +599,10 @@ describe('host CI parity with the gates (#86)', () => {
 });
 
 /**
- * The Azure runner start workflow (#78) holds the only id-token in this repository. It may start
- * the VM for a push to main or a pull request from this repository (directly, or through the CI
- * run it is requested for, including re-runs), and must never run or read the triggering code.
+ * The Azure runner start workflow (#78) holds the only id-token in this repository. It starts the VM
+ * for a push to main or a pull request from this repository, and from main on a schedule or by hand
+ * when a race job is queued for the Azure label (re-runs do not re-trigger push or pull_request).
+ * It must never run or read the triggering code.
  */
 describe('Azure runner start workflow (#78)', () => {
   const text = read('.github/workflows/azure-runner.yml');
@@ -609,45 +610,42 @@ describe('Azure runner start workflow (#78)', () => {
   const startCondition = [
     "(github.event_name == 'push' && github.ref == 'refs/heads/main') ||",
     "(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||",
-    "(github.event_name == 'workflow_run' && github.event.workflow_run.head_repository.full_name == github.repository &&",
-    "(github.event.workflow_run.event == 'pull_request' ||",
-    "(github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main')))",
+    "((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')",
   ].join(' ');
   const condition = (source: string) => {
     const parsed = parseDocument(source, { uniqueKeys: true }).toJS();
     return String(parsed.jobs.start.if).replace(/\s+/g, ' ').replace(/^\$\{\{ | \}\}$/g, '').trim();
   };
 
-  it('starts only on push to main, pull requests and the CI run they request', () => {
+  it('starts only on push to main, same-repository pull requests, and a schedule or dispatch from main', () => {
     expect(workflow.on).toEqual({
       push: { branches: ['main'] },
       pull_request: null,
-      workflow_run: { workflows: ['CI'], types: ['requested'] },
+      schedule: [{ cron: '*/10 * * * *' }],
+      workflow_dispatch: null,
     });
     expect(Object.keys(workflow.jobs)).toEqual(['start']);
     expect(condition(text)).toBe(startCondition);
-    expect(condition(text.replace('github.event.workflow_run.head_repository.full_name == github.repository &&', ''))).not.toBe(startCondition);
     expect(condition(text.replace("github.event.pull_request.head.repo.full_name == github.repository", 'true'))).not.toBe(startCondition);
+    expect(condition(text.replace("github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'", "github.event_name == 'workflow_dispatch')"))).not.toBe(startCondition);
+    expect(condition(text)).not.toMatch(/workflow_run|pull_request_target/);
   });
 
   it('models the trigger cases, skipping every fork', () => {
     const repository = 'LeXwDeX/Plinth';
-    type Event = { name: string; ref?: string; head?: string; run?: { event: string; head: string; branch: string } };
+    type Event = { name: string; ref?: string; head?: string };
     const starts = (e: Event) =>
       (e.name === 'push' && e.ref === 'refs/heads/main')
       || (e.name === 'pull_request' && e.head === repository)
-      || (e.name === 'workflow_run' && e.run!.head === repository
-        && (e.run!.event === 'pull_request' || (e.run!.event === 'push' && e.run!.branch === 'main')));
+      || ((e.name === 'schedule' || e.name === 'workflow_dispatch') && e.ref === 'refs/heads/main');
     const cases: [Event, boolean][] = [
       [{ name: 'push', ref: 'refs/heads/main' }, true],
       [{ name: 'push', ref: 'refs/heads/feature' }, false],
       [{ name: 'pull_request', head: repository }, true],
       [{ name: 'pull_request', head: 'someone/Plinth' }, false],
-      [{ name: 'workflow_run', run: { event: 'pull_request', head: repository, branch: 'agent/x' } }, true],
-      [{ name: 'workflow_run', run: { event: 'push', head: repository, branch: 'main' } }, true],
-      [{ name: 'workflow_run', run: { event: 'pull_request', head: 'someone/Plinth', branch: 'main' } }, false],
-      [{ name: 'workflow_run', run: { event: 'push', head: repository, branch: 'feature' } }, false],
-      [{ name: 'workflow_run', run: { event: 'workflow_dispatch', head: repository, branch: 'main' } }, false],
+      [{ name: 'schedule', ref: 'refs/heads/main' }, true],
+      [{ name: 'workflow_dispatch', ref: 'refs/heads/main' }, true],
+      [{ name: 'workflow_dispatch', ref: 'refs/heads/feature' }, false],
     ];
     for (const [event, expected] of cases) {
       expect(starts(event), JSON.stringify(event)).toBe(expected);
@@ -656,12 +654,23 @@ describe('Azure runner start workflow (#78)', () => {
 
   it('holds only the permissions it needs and never runs or reads the triggering code', () => {
     expect(workflow.permissions).toEqual({ contents: 'read' });
-    expect(workflow.jobs.start.permissions).toEqual({ contents: 'read', 'id-token': 'write' });
-    const uses = workflow.jobs.start.steps.filter((step: { uses?: string }) => step.uses).map((step: { uses: string }) => step.uses);
-    expect(uses).toEqual(['azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906']);
-    expect(text).not.toMatch(/checkout|download-artifact|actions\/cache|github\.event\.workflow_run\.(?:head_sha|head_commit|artifacts_url)/);
-    const runs = workflow.jobs.start.steps.filter((step: { run?: string }) => step.run).map((step: { run: string }) => step.run);
-    expect(runs).toEqual(['az vm start --resource-group "$RESOURCE_GROUP" --name "$VM" --output none']);
+    expect(workflow.jobs.start.permissions).toEqual({ actions: 'read', contents: 'read', 'id-token': 'write' });
+    const steps = workflow.jobs.start.steps as { id?: string; if?: string; uses?: string; run?: string }[];
+    expect(steps.filter((step) => step.uses).map((step) => step.uses)).toEqual(['azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906']);
+    expect(text).not.toMatch(/checkout|download-artifact|actions\/cache|head_sha|head_commit|artifacts_url|github\.event\.(?:pull_request|head_commit)\.[a-z_.]*\b(?:title|body|message|ref)\b/);
+    const runs = steps.filter((step) => step.run).map((step) => step.run!.trim());
+    expect(runs).toHaveLength(2);
+    expect(runs[1]).toBe('az vm start --resource-group "$RESOURCE_GROUP" --name "$VM" --output none');
+    // The queue check only reads the CI workflow's jobs and counts those waiting for the Azure label.
+    expect(runs[0]).toMatch(/^count=0\n/);
+    expect(runs[0]).toContain('actions/workflows/ci.yml/runs');
+    expect(runs[0]).toContain('index("plinth-azure")');
+    expect(runs[0]).not.toMatch(/\$\{\{/);
+    // On a schedule or dispatch the VM starts only when a job is queued for it.
+    const guarded = "${{ steps.queued.outcome == 'skipped' || steps.queued.outputs.count != '0' }}";
+    expect(steps.filter((step) => step.id !== 'queued').map((step) => step.if)).toEqual([guarded, guarded]);
+    expect(steps[0].id).toBe('queued');
+    expect(steps[0].if).toBe("${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}");
   });
 });
 
