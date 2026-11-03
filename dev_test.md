@@ -195,7 +195,7 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
 
 - 合并前以本机门禁为准：每个分支推送时照常跑 pre-push（本地八项）；合并到 `main` 前，在待合并的 head 上跑一次 `python3 scripts/verify-local.py --race`，结果写进 PR。
 - 交付任何改动到 `dev-test` 前，最终待发布的精确 `main` SHA 应有一次完整的 GitHub Actions `CI` 运行且所有作业 success。可信自托管 `workflow_dispatch` 可提供同一 SHA 的 CI 证据，但须核对实际 runner、`head_sha` 和 checkout。托管 runner 因计费墙不可用，且（没有自托管 runner 或其不可用，包括安全前提未证明）时，按上节先对同一 SHA 做本机初检，再以该 SHA 的完整隔离主机自检作为 CI 替代，并在 PR 或 Issue 记录实际结果。作业因代码原因失败时不得放行；主机自检不能冒称 Actions success。旧 SHA、其他提交的结果、缺项或 skip 都不算。
-- 发布到 `dev-test` 前，还要在同一个待发布 `main` revision 上再跑一次本机 `--race` 全量；发布后照常做 L0、L1、L1 Agent 和相关验收。CI 只作门禁，不承担部署。
+- 发布到 `dev-test` 前，还要在同一个待发布 `main` revision 上再跑一次本机 `--race` 全量；发布后照常做 L0、L1、L1 Agent 和相关验收。每次 `dev-test` 发布后还必须运行 L5 真实能力回归的全部脚本（`scripts/smoke/smoke-l5-*.py`，入口 `smoke-l5-all.sh`，用法与费用见 `scripts/smoke/README.md`），验收报告逐项列出每个脚本的 PASS/FAIL/SKIP 结果。CI 只作门禁，不承担部署。
 
 ### 本地统一入口与 pre-push 复用
 
