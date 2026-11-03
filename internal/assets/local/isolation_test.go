@@ -305,8 +305,10 @@ func TestLarge3MFXMLIsInspectedBeyondGLTFJSONLimit(t *testing.T) {
 	defer store.Close()
 	// 3MF mesh XML can expand far beyond a glTF JSON chunk while remaining
 	// within the archive and Offering limits. The complete XML must still be
-	// scanned, including content after the previous 32 MiB cutoff.
-	geometry := strings.Repeat("x", maxModelJSONBytes+1)
+	// scanned, including content after the previous 32 MiB cutoff. Mesh XML
+	// is many records; one record is bounded by maxArchiveXMLHeldBytes.
+	record := `<metadata>` + strings.Repeat("x", 64<<10) + `</metadata>`
+	geometry := `</metadata>` + strings.Repeat(record, maxModelJSONBytes/len(record)+1) + `<metadata>`
 	safe := zipModel(t, map[string]string{
 		"[Content_Types].xml": `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>`,
 		"3D/3dmodel.model":    `<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><metadata>` + geometry + `</metadata></model>`,

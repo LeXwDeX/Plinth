@@ -61,7 +61,7 @@ func (p *usdcParser) structures(sections []usdcSection) error {
 	if e != nil {
 		return e
 	}
-	reps, e := decodeUSDCFast(body, int64(n)*8, p.work)
+	reps, e := decodeUSDCFast(body, int64(n)*8, p.limit, p.work)
 	if e != nil {
 		return e
 	}

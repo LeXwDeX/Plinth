@@ -201,7 +201,7 @@ func (p *usdcParser) numericArray(c *usdcCursor, typ uint8, compressed bool) err
 	if e = p.claim(start, c.pos, 1); e != nil {
 		return e
 	}
-	if n > uint64(maxUSDCBytes/4) {
+	if n > uint64(p.limit/4) {
 		return errors.New("USDC 数组数量超出限制")
 	}
 	if compressed {
@@ -226,7 +226,7 @@ func (p *usdcParser) numeric(c *usdcCursor, count int64, typ uint8) error {
 	if !ok {
 		return errors.New("USDC 数值类型不支持")
 	}
-	if count < 0 || count > maxUSDCBytes/width {
+	if count < 0 || count > p.limit/width {
 		return errors.New("USDC 数值数组大小无效")
 	}
 	n := count * width

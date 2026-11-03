@@ -16432,6 +16432,7 @@
             "默认建议三角面：Meshy 的 8K 纹理不支持四边面。": "Triangle faces are recommended by default: Meshy's 8K texture does not support quad faces.",
             "默认建议为三角面：Meshy 的 8K 纹理不支持四边面。": "The default is triangles: Meshy 8K textures don't support quad faces.",
             "默认建议为上限 300000；需要控制面数时用独立的重拓扑。": "The default is the 300000 upper limit; use a separate remesh when you need to control the face count.",
+            "只在开启自动重拓扑时生效。默认不重拓扑以保最高质量，面数由几何分辨率和模型本身决定（4K 实测约 25 万到 790 万面，单个格式可达数百 MB）；需要控制面数或交付体积时开启自动重拓扑，或用独立的重拓扑。": "Applies only when auto remesh is on. By default no remesh runs, for the highest quality, so the face count follows the geometry resolution and the model itself (at 4K, measured at about 250 thousand to 7.9 million faces, with single formats up to several hundred MB). To control the face count or delivery size, turn on auto remesh or use a separate remesh.",
             "默认建议为最高几何分辨率 4K。": "The default is the highest geometry resolution, 4K.",
             "默认建议为最高几何分辨率 4K（仅预览阶段上线）。": "The default is the highest geometry resolution, 4K (preview stage only).",
             "默认建议为最高分辨率档位 4K，实际宽高随画面比例变化。": "The default is the highest resolution tier, 4K; the actual width and height vary with the aspect ratio.",
@@ -19049,6 +19050,7 @@
           "default": 300000,
           "minimum": 100,
           "maximum": 300000,
+          "description": "只在开启自动重拓扑时生效。默认不重拓扑以保最高质量，面数由几何分辨率和模型本身决定（4K 实测约 25 万到 790 万面，单个格式可达数百 MB）；需要控制面数或交付体积时开启自动重拓扑，或用独立的重拓扑。",
           "semantic": "polycount"
         },
         {
@@ -20105,6 +20107,7 @@
           "default": 300000,
           "minimum": 100,
           "maximum": 300000,
+          "description": "只在开启自动重拓扑时生效。默认不重拓扑以保最高质量，面数由几何分辨率和模型本身决定（4K 实测约 25 万到 790 万面，单个格式可达数百 MB）；需要控制面数或交付体积时开启自动重拓扑，或用独立的重拓扑。",
           "presentation": {
             "surface": "provider",
             "control": "number",
@@ -20416,6 +20419,7 @@
           "default": 300000,
           "minimum": 100,
           "maximum": 300000,
+          "description": "只在开启自动重拓扑时生效。默认不重拓扑以保最高质量，面数由几何分辨率和模型本身决定（4K 实测约 25 万到 790 万面，单个格式可达数百 MB）；需要控制面数或交付体积时开启自动重拓扑，或用独立的重拓扑。",
           "presentation": {
             "surface": "readonly",
             "control": "number",

@@ -33,7 +33,7 @@ func TestUSDCTokenDeclaredCountsAndExactFraming(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			d := usdcTestTokenRecord(test.count, test.decoded)
-			p := usdcParser{work: newInspectionWorkBudget()}
+			p := usdcParser{work: newInspectionWorkBudget(), limit: maxUSDCBytes}
 			c := usdcCursor{d, 0, int64(len(d))}
 			e := p.readTokens(&c)
 			if (e == nil) != test.accepted {
@@ -66,7 +66,7 @@ func TestUSDCTokenNULCountCannotMultiplyDescriptorAllocation(t *testing.T) {
 	// or the rejection message. The bounded parser needs only decoded output
 	// and two descriptors; allow additional runtime workspace conservatively.
 	d := usdcTestTokenRecord(1, bytes.Repeat([]byte{0}, 1<<20))
-	p := usdcParser{work: newInspectionWorkBudget()}
+	p := usdcParser{work: newInspectionWorkBudget(), limit: maxUSDCBytes}
 	c := usdcCursor{d, 0, int64(len(d))}
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
@@ -85,7 +85,7 @@ func TestUSDCTokenNULCountCannotMultiplyDescriptorAllocation(t *testing.T) {
 
 func TestUSDCTokenAllocationWorkReservedBeforeDecoder(t *testing.T) {
 	good := usdcTestTokenRecord(1, []byte("a\x00"))
-	p := usdcParser{work: newInspectionWorkBudget()}
+	p := usdcParser{work: newInspectionWorkBudget(), limit: maxUSDCBytes}
 	c := usdcCursor{good, 0, int64(len(good))}
 	if e := p.readTokens(&c); e != nil {
 		t.Fatal(e)
