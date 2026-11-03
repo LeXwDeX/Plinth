@@ -96,6 +96,10 @@ func (r *Repository) AttachSkillPrepared(ctx context.Context, cmd skillrun.Prepa
 		if !ok {
 			return skillrun.ErrMissing
 		}
+		if step.ReplacementAssetID != "" {
+			// #65: a view the person replaced with an upload never starts again.
+			return skillrun.ErrConflict
+		}
 		if !skillStepIdentityMatches(cmd.StepCommand, step) {
 			return skillrun.ErrInvalid
 		}
@@ -153,6 +157,10 @@ func (r *Repository) AttachSkillGrant(ctx context.Context, cmd skillrun.GrantCom
 		step, ok := findSkillStep(run, cmd.StepKey)
 		if !ok {
 			return skillrun.ErrMissing
+		}
+		if step.ReplacementAssetID != "" {
+			// #65: a view the person replaced with an upload never starts again.
+			return skillrun.ErrConflict
 		}
 		if !skillStepIdentityMatches(cmd.StepCommand, step) {
 			return skillrun.ErrInvalid
@@ -335,6 +343,10 @@ func (r *Repository) RestartSkillStep(ctx context.Context, cmd skillrun.RestartC
 		step, ok := findSkillStep(run, cmd.StepKey)
 		if !ok {
 			return skillrun.ErrMissing
+		}
+		if step.ReplacementAssetID != "" {
+			// #65: a view the person replaced with an upload never starts again.
+			return skillrun.ErrConflict
 		}
 		if step.Attempt > cmd.ExpectedAttempt {
 			return nil // a repeat of a restart that already happened

@@ -273,7 +273,10 @@ type Message struct {
 	// Attachments describe the images and models this message shows or sends
 	// (platform IDs, lineage and the stable handle the Agent uses).
 	Attachments []Attachment
-	CreatedAt   time.Time
+	// Multiview is the structured multiview request a user message was sent
+	// with (#65); regenerating the reply sends it again. Nil otherwise.
+	Multiview *MultiviewRequest
+	CreatedAt time.Time
 }
 
 type Image struct {

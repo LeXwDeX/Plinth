@@ -74,7 +74,7 @@ describe('workspace chat message wiring', () => {
 
   it('regenerates from the original text and images instead of the current attachments', () => {
     expect(agentDialog).toContain('const payload = turnPayload(regenerate.user);');
-    expect(agentDialog).toMatch(/void send\(payload\.text, payload\.images, payload\.claims, regenerate\.deleteIds\);/);
+    expect(agentDialog).toMatch(/void send\(payload\.text, payload\.images, payload\.claims, regenerate\.deleteIds, undefined, undefined, undefined,\s+payload\.multiview \? \{ multiview: payload\.multiview \} : undefined\);/);
   });
 
   it('restores the server message list when deletion fails', () => {
@@ -106,7 +106,7 @@ describe('regenerate and edit-and-resend wiring', () => {
   it('offers them only on the last exchange and sends through the one turn path', () => {
     expect(agentDialog).toContain('onRegenerate={regenerate?.assistantId === item.message.id ? regenerateReply : undefined}');
     expect(agentDialog).toContain('onEdit={editable?.userId === item.message.id ? editLastMessage : undefined}');
-    expect(agentDialog).toMatch(/void send\(payload\.text, payload\.images, payload\.claims, regenerate\.deleteIds\);/);
+    expect(agentDialog).toMatch(/void send\(payload\.text, payload\.images, payload\.claims, regenerate\.deleteIds, undefined, undefined, undefined,\s+payload\.multiview \? \{ multiview: payload\.multiview \} : undefined\);/);
     expect(agentDialog).toContain('void send(input, undefined, undefined, editing?.deleteIds)');
   });
 

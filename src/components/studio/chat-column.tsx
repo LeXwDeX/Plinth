@@ -1297,7 +1297,9 @@ export function ChatColumn() {
   const regenerateReply = useCallback(() => {
     if (!regenerate) return;
     const payload = turnPayload(regenerate.user);
-    void send(payload.text, payload.images, payload.claims, regenerate.deleteIds);
+    // #65: a turn sent with a structured multiview request sends it again, so the same pictures and views are bound.
+    void send(payload.text, payload.images, payload.claims, regenerate.deleteIds, undefined, undefined, undefined,
+      payload.multiview ? { multiview: payload.multiview } : undefined);
   }, [regenerate, send]);
 
   const focusComposer = useCallback(() => {

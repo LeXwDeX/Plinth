@@ -405,3 +405,45 @@ func TestThreeViewViewIsReplacedByAnUpload(t *testing.T) {
 		t.Fatalf("a refused replace changed the view: %+v", back)
 	}
 }
+
+// #65: a page that has not seen a replacement still cannot start or retry the
+// replaced view; the request is the three-view conflict and makes no task.
+func TestReplacedThreeViewIsNotStartedOrRetriedFromAStalePage(t *testing.T) {
+	t.Parallel()
+	world := newThreeViewWorld(t)
+	upload := uploadSkillSource(t, world.handler, world.cookie)
+	if status, _ := world.replace(t, world.cookie, "left", upload); status != http.StatusOK {
+		t.Fatalf("replace left = %d", status)
+	}
+	for _, action := range []string{"start", "retry"} {
+		if status, _ := world.advance(t, "left", action, 0); status != http.StatusConflict {
+			t.Fatalf("%s of a replaced view = %d", action, status)
+		}
+	}
+	// A view that failed and was then replaced is not retried either.
+	status, started := world.advance(t, "back", "start", 0)
+	back := started.slot(t, "back")
+	if status != http.StatusOK || back.TaskID == "" {
+		t.Fatalf("start back: %d %+v", status, started.Slots)
+	}
+	cancel := grantTestRequest(t, world.handler, world.cookie, http.MethodPost, "/api/v1/tasks/"+back.TaskID+"/cancel", "{}", "")
+	if cancel.Code != http.StatusOK && cancel.Code != http.StatusAccepted {
+		t.Fatalf("cancel back: %d %s", cancel.Code, cancel.Body.String())
+	}
+	if status, _ := world.replace(t, world.cookie, "back", upload); status != http.StatusOK {
+		t.Fatalf("replace canceled back = %d", status)
+	}
+	if status, _ := world.advance(t, "back", "retry", 0); status != http.StatusConflict {
+		t.Fatalf("retry of a replaced canceled view = %d", status)
+	}
+	if world.tasks(t) != 1 {
+		t.Fatalf("refused requests made %d tasks in all", world.tasks(t))
+	}
+	group := world.groups(t, world.sessionID)[0]
+	if left := group.slot(t, "left"); !left.Replaced || left.TaskID != "" || left.Attempt != 0 {
+		t.Fatalf("left = %+v", left)
+	}
+	if back := group.slot(t, "back"); !back.Replaced || back.Attempt != 0 {
+		t.Fatalf("back = %+v", back)
+	}
+}

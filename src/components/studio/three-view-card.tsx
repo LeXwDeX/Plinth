@@ -284,7 +284,7 @@ export function ThreeViewCardView({
 export function ThreeViewCard({ group }: { group: ThreeViewGroup }) {
   const { schema } = useProductSchema();
   const { busy, queued, advance, startRemaining, replace } = useThreeViews();
-  const { openOnStage, toThreeD, multiviewToThreeD } = useObjectActions();
+  const { openOnStage, toThreeD, inputPictureToThreeD, multiviewToThreeD } = useObjectActions();
   const sessionId = useChatStore((state) => state.activeSessionId);
   const { offeringsByCapability } = useWorkspaceOfferings(schema, 'model-3d');
   const picked = useWorkspaceStore((state) => state.modelByDomain['model-3d']);
@@ -321,10 +321,13 @@ export function ThreeViewCard({ group }: { group: ThreeViewGroup }) {
         if (object) openOnStage(object);
       }}
       onToThreeD={() => {
-        // 只用正面转 3D: the front view alone; the card says so next to the button.
-        const object = group.modelSource.taskId
-          ? objectOf(group.modelSource.taskId, group.modelSource.assetId)
-          : null;
+        // 只用正面转 3D: the front view alone; the card says so next to the button. A front view the person
+        // replaced has no Task: its input asset is the turn's picture.
+        if (!group.modelSource.taskId) {
+          if (!inputPictureToThreeD(inputURL(group.modelSource.assetId))) toast.error(text(schema, 'replace_failed'));
+          return;
+        }
+        const object = objectOf(group.modelSource.taskId, group.modelSource.assetId);
         if (object) toThreeD(object);
       }}
     />

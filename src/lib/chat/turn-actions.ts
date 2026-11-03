@@ -1,4 +1,5 @@
 import type { ChatAttachmentClaim } from '@/lib/chat/attachments';
+import type { MultiviewTurnRequest } from '@/lib/chat/browser-client';
 import type { ChatMessage } from '@/store/chat-store';
 import type { QueuedChatAttachment } from '@/store/workspace-store';
 
@@ -11,10 +12,12 @@ export interface TurnPayload {
   text: string;
   images: string[];
   claims: ChatAttachmentClaim[];
+  /** #65: the structured multiview request the message was sent with. */
+  multiview?: MultiviewTurnRequest;
 }
 
 /** 用一条用户消息的文本、图片与附件声明重新提交时要发送的内容。 */
-export function turnPayload(message: Pick<ChatMessage, 'content' | 'images' | 'attachments'>): TurnPayload {
+export function turnPayload(message: Pick<ChatMessage, 'content' | 'images' | 'attachments' | 'multiview'>): TurnPayload {
   const images = (message.images ?? []).map((image) => image.url);
   const claims = (message.attachments ?? []).flatMap((attachment): ChatAttachmentClaim[] =>
     attachment.kind === 'image' && attachment.imageSlot
@@ -26,7 +29,7 @@ export function turnPayload(message: Pick<ChatMessage, 'content' | 'images' | 'a
           ...(attachment.captureId ? { captureId: attachment.captureId } : {}),
         }]
       : []);
-  return { text: message.content, images, claims };
+  return { text: message.content, images, claims, ...(message.multiview ? { multiview: message.multiview } : {}) };
 }
 
 export interface LastExchange {

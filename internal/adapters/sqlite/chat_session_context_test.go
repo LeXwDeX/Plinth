@@ -43,6 +43,7 @@ func TestMigration0065UpgradesExistingSessionsWithoutContext(t *testing.T) {
 		`ALTER TABLE generation_attempts DROP COLUMN delivery_completion_json`,
 		`ALTER TABLE generation_attempts DROP COLUMN rate_limit_queued`,
 		`ALTER TABLE skill_run_steps DROP COLUMN replacement_asset_id`,
+		`ALTER TABLE go_chat_messages DROP COLUMN multiview`,
 	} {
 		if _, err := r.db.Exec(statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)
