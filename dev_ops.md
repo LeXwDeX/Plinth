@@ -46,7 +46,7 @@ manifest（发布历史）：`<root>/releases/manifest.txt`（`<root>` 为本地
 
 `dev-test` 主机是多业务共享主机。Plinth 测试栈即 `dev-test`（入口为 dev-test 的 `base_url`，`python3 scripts/release-env.py show dev-test`）：Compose 项目为环境文件 `dev-test` 条目的 `compose_project`，服务 `art-ai-go`，数据位于 `<root>/production/`。
 
-`legacy-formal` 下线后不再存在的入口：`release-go-formal.sh`、`docker-compose.go-formal.yml`、正式栈无 Key 冒烟（`smoke-l1-formal-keyless.py` 与测试）、正式栈事务的离线测试，以及 `retain-art-ai-images.py` 里读写 `<root>/formal/reports/image-pins.json` 的保护逻辑；环境文件的 `managed_by` 与 `acceptance.legacy_formal_issue` 字段不再支持。保留并改名为 `scripts/release-promotion.py` 的是 `formal-test` 晋级仍在使用的验收报告与成功清单校验（`release-env.py` 加载，`scripts/tests/test_release_promotion.py` 在 CI 门禁中覆盖）。晋级来源报告的格式见 `docs/deployment.md` §4。
+`legacy-formal` 的下列入口不存在，禁止使用：`release-go-formal.sh`、`docker-compose.go-formal.yml`、正式栈无 Key 冒烟（`smoke-l1-formal-keyless.py` 与测试）、正式栈事务的离线测试，以及 `retain-art-ai-images.py` 里读写 `<root>/formal/reports/image-pins.json` 的保护逻辑；环境文件的 `managed_by` 与 `acceptance.legacy_formal_issue` 字段不再支持。保留并改名为 `scripts/release-promotion.py` 的是 `formal-test` 晋级仍在使用的验收报告与成功清单校验（`release-env.py` 加载，`scripts/tests/test_release_promotion.py` 在 CI 门禁中覆盖）。晋级来源报告的格式见 `docs/deployment.md` §4。
 
 ### 日志
 

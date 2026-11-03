@@ -1,6 +1,6 @@
 # G1：任务、计划与资产的运行可靠性契约
 
-状态：**架构草案，待 G1 联合审定；文中目标不能代表已发布功能**。基线为 `codex/art-ai-architecture-v3` 的 `a32a93799c08cf98c6f5e0481e233809233b1b7c`。本分支后续加了两个局部修复：CAS 命中校验与损坏修复，以及 Processing Plan 的按输入数量估算；它们不代表本文件全部目标已实现或测试环境已发布。本文须与 G1 身份、输入、公开投影和现行人工确认路径共同冻结。下文以「现行事实」「目标决策」「待定」标识证据层级。
+状态：**架构草案，待 G1 联合审定；文中目标不能代表已发布功能**。基线为 `codex/art-ai-architecture-v3` 的 `a32a93799c08cf98c6f5e0481e233809233b1b7c`。本分支含两个局部实现：CAS 命中校验与损坏修复，以及 Processing Plan 的按输入数量估算；它们不代表本文件全部目标已实现或测试环境已发布。本文须与 G1 身份、输入、公开投影和现行人工确认路径共同冻结。下文以「现行事实」「目标决策」「待定」标识证据层级。
 
 ## 1. 身份、写入权与不可变约束
 
@@ -59,7 +59,7 @@ Attempt 的 `SUBMISSION_UNKNOWN` 是终态证据，后续对账不能把原 Atte
 
 ### 2.2 Plan 与 Agent 等待
 
-**现行事实与本轮实现分支。** Processing Plan 为 `PENDING / RUNNING / SUCCEEDED / FAILED / PAUSED`；`PAUSED` 覆盖提交结果不明、Offering 变化/不可用、任务取消等停机原因。`advance` 跳过已成功步骤，读取现有 Task 结果，再按受限输入规则提交下一步。[plans.go](../../internal/processing/plans.go#L17)。本轮实现分支去除了数字报价批准；重试/恢复使用 Plan version CAS 和 Offering revision。对于已受理但响应丢失的 Task，先按原幂等键只读核对，再判断当前 Catalog 是否允许新提交；旧计划缺失未知提交标记时按持久失败原因恢复，不重提付费 Task。
+**现行事实与实现分支。** Processing Plan 为 `PENDING / RUNNING / SUCCEEDED / FAILED / PAUSED`；`PAUSED` 覆盖提交结果不明、Offering 变化/不可用、任务取消等停机原因。`advance` 跳过已成功步骤，读取现有 Task 结果，再按受限输入规则提交下一步。[plans.go](../../internal/processing/plans.go#L17)。本轮实现分支去除了数字报价批准；重试/恢复使用 Plan version CAS 和 Offering revision。对于已受理但响应丢失的 Task，先按原幂等键只读核对，再判断当前 Catalog 是否允许新提交；旧计划缺失未知提交标记时按持久失败原因恢复，不重提付费 Task。
 
 Plan/Step 的现行推进边按 `plans.go` 的 `Create`、`advance`、`Retry`、`Resume` 可概括为：`PENDING → RUNNING/PAUSED/FAILED`，`RUNNING → RUNNING/SUCCEEDED/PAUSED/FAILED`；`PAUSED → PENDING` 只允许可恢复原因并经显式 Resume，`FAILED → PENDING` 只允许可判定失败的 Retry，`SUCCEEDED` 不再推进。计划状态是编排事实，不得重定义 Task 的合法边。
 

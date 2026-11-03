@@ -325,3 +325,224 @@ docker-entrypoint.sh 会自动执行 prisma migrate deploy。
 1. 网站可访问、可登录
 2. WebHook 通讯正常
 3. AI 对话出图可正常创建会话和生成图片
+
+### 5.4 `README-go.md` 的 dev-test 迁移结果快照（2026-07-29，仅测试环境；从 `README-go.md` 移入）
+
+Go 已接管 `dev-test` 的入口（绑定 `0.0.0.0`，端口见本地环境文件）。当前生产同构测试容器
+（`release-env.py show dev-test` 的 `container`）的镜像标签与源码 SHA 以容器 OCI 标签为准；
+发布验收必须确认 `org.opencontainers.image.revision` 等于已推送的
+`origin/main` 完整 SHA。旧 Next 容器已删除（2026-09-02
+实测 `docker ps -a` 无此容器）；候选栈容器仍在、保持停止。
+`dev-test` 测试数据的初次全量迁移已经完成，针对该测试栈的普通发布不得再次
+运行 ETL。正式生产尚未迁移，不能复用本节的账号、数据、对账数字或批准
+清单；正式流程见 `docs/production-migration-runbook.md`。
+
+最终停写快照的迁移结果为：
+
+- 用户 5；Task / Attempt / 逐笔账本各 1,148；积分合计 8,109；
+- 输出 Asset 1,543（原迁移产物 1,473 + 历史模型截图 70），输入 Asset
+  689；
+- Chat 会话/消息 32/193；Canvas 项目/节点 9/11；
+- 余额快照 232；旧数据隔离归档 141；
+- 38 个旧任务的 40 个必需输出在原 Next 数据中已缺失。用户已批准按
+  “Next 缺、Go 也缺”的原则保留身份、参数、Attempt 与账务，并落为
+  `FAILED/integrity`，不伪造 Blob 或成功状态。
+- 原 Next 曾声明截图的 84 个成功模型任务中，70 个真实 PNG/WebP 已从
+  旧缓存补迁移为 `thumbnail` Asset；另外 14 个在旧缓存、历史签名 URL
+  与 Provider 任务中均已不存在，按“Next 缺、Go 也缺”保持缺图。
+
+测试 SQLite `quick_check=ok`、外键违规为 0。迁移后的原管理员登录、
+5 个前端资源、九类 Capability Provider 发现、1,148 条历史任务与
+8,109 积分后台汇总、历史资产 HTTP 下载及 SHA-256、内部 Webhook 和外部
+Nginx Webhook 均已验收。未在 live Provider 上创建计费任务；九类创建
+行为由候选 Mock 全套验收覆盖，生产只做无扣费可用性验证。
+
+切换后发现迁移任务中的大 `input_json` 会让旧列表 SQL 在
+`ORDER BY` 临时 B-tree 中耗尽容器 64MB tmpfs。Repository 已改为先排序和
+分页 Task ID、再批量读取完整 Task；生产 `/api/tasks` 默认 36 页已全部
+返回 200。5xx 域错误同时补充了不向客户端泄露 Cause 的结构化服务端日志。
+首页与任务历史只按 Product Schema 中的 `thumbnail`、`image` 优先级选择
+预览，不再把 `texture` 当成模型截图；浏览器已实测首页、任务历史和第 4
+页正常显示/加载。
+
+证据位置（2026-07-29 历史证据，`<root>` 为 dev-test 发布根）：
+
+- 最终备份：
+  `<root>/backups/final-cutover-20260729-final-r1`
+- 切换前 Go 生产目录归档：
+  `<root>/production-archives/20260729-final-r1`
+- 最终对账：
+  `<root>/production/reports/migration-final-approved.txt`
+- 迁移就绪证明：
+  `<root>/production/migration-ready.txt`
+- 切换记录：
+  `<root>/production/reports/cutover-record.txt`
+- 切换后 Webhook 热修复发布记录：
+  `<root>/production/reports/post-cutover-release-webhook-r1.txt`
+- 切换后任务列表修复发布记录：
+  `<root>/production/reports/post-cutover-release-tasklist-r1.txt`
+- 切换后历史模型截图补迁移记录：
+  `<root>/production/reports/post-cutover-release-preview-r2.txt`
+
+## 6. 文档改写时移出的历史叙述（#68）
+
+以下为把规范文档改写成现行要求时，从各文档移出的变更过程与决策叙述，仅作追溯；现行要求以对应文档正文为准。
+
+### 6.1 docs/architecture.md §1–13
+
+#### §7「结果的主模型与做不了的前置步骤（#326）」案例（#325 F1）
+**案例（#325 F1）。** 过期的 Meshy Rigging 结果 `task_8dd90530…` 在面板里的「当前来源」是 `basic_animations.running_armature_glb_url`：79,600 B、288 个三角面、没有贴图的骨架。该任务 8 个模型文件里排在第一的是这类附带动画文件（非必需，`basic_animations.` 前缀槽位 `minimum: 0`），必需的 `rigged_character_glb_url`（105,271,888 B）排在最后。舞台按「最小序号的 GLB」取、Agent 句柄按 `source_variant_preference`（`glb`…，Meshy 绑骨/动画的变体名都不在其中）退回第一个文件，于是都取到骨架；面板据此自动补加的「先绑骨」实际会拿骨架去绑。换成正确文件后，105 MB 又超过 Rigging `source_asset` 的 60 MiB，这条路走不通。
+
+#### §7「暂停的计划与旧失败卡按同一规则判断（#326 后续）」案例（#326 P）
+**案例（#326 P）。** 计划 `4c8af6de…` 在加工面板拒绝授权后停在 `plan_consent_required`，冻结的输入点名的多视图结果 `task_01a1114f…` 的上游作业已失效（`upstream_job_gone=true`），面板仍给出「准备本步骤确认 · 15」，继续后会在内核依赖检查以 `source_expired` 失败；这个暂停计划还让面板的复选框全部不可用。另外，92969c0c 上产生的 `source_expired` 失败卡文字在失败时写定为「生成失败」，最后一轮仍提供「重新生成（约 15 积分）」。
+
+#### §7「上游原任务的年龄与失效（N1，#324）」案例段落
+**上游原任务的年龄与失效（N1，dev-test `92969c0c` 验收 #324）。** 那次 Meshy Retexture 引用的多视图结果 `task_01a1114f…` 是 #295 的「重新取回」任务：它创建于 10-20，但交付它的上游作业属于 10-18 创建、入库失败的来源任务，提交时作业已近 3 天 19 小时，超过 Meshy 的 3 天保留，上游回 404；规则按重新取回任务自己的创建时间算成 35 小时，所以没换用已保存文件。多视图图生的能力是 `image-to-3d`，本来就在 Retexture `task_capabilities` 里，不是能力漏判。
+
+#### §7「步骤只冻结第 1 张」后续 E 的原始问题经过（已改为约束句）
+选 Meshy 7.1 附两张图时，步骤只冻结第 1 张，但等待批准的工具结果没有说明（reference_note 原来只在任务成功后由 wait 补上），真实 Agent 回复「两张图一起放进了请求」；批准卡只列 @img1，批准后的结果消息只写「Meshy 7.1 生成完成。」。
+
+#### §4「浏览器验收发现」类叙述（#189 灯罩详情单文件下载；详情三处问题；附件文件名缓存 #187 B；选择卡确认无反馈）原文要点已改为约束句，原叙述：灯罩详情只给第一个 STL；creative-lab-* 不在 model_delivery.capabilities 导致格式显示不可用；来源未知只出现在我的资源详情。
+
+### 6.2 docs/architecture.md §14–15
+
+#### §14 开头
+同机隔离正式栈 `legacy-formal`（内部存档 #232）已下线，不是可部署环境（见本节末「`legacy-formal` 下线（存档 #74）」）；下面各段中凡提到它的脚本、测试与字段均为历史记录。
+
+#### §14「按环境名部署与正式测试环境（#270）」
+新布局下内部环境以名称区分……参数化（#270；#249 起主机与发布根不再有缺省值，见下段）：……源码同步与服务器段命令序列与参数化之前相同；……`retain-art-ai-images.py` ……默认保留五个镜像（`--root` 必填，#249；不读取 `<root>/formal/` 下的 pin，#74）。保留的边界：……`formal-test` 的运行配置按用户规则整份沿用 `dev-test`。
+
+#### §14「环境标识清理（#249）」「公开快照清理（#261）」
+旧的 `deploy/*.local.json` 仍可读；`docker-compose.go-production.yml` 的 8 个主机路径改为 `:?` 必填；`RELEASE_COMPOSE_PROJECT` 改为必填；`retain-art-ai-images.py` 以必填 `--project` 与可重复的 `--protect-project` 取代写死的项目清单；迁移工具拒绝宽泛目标的规则改为通用规则；旧内部 CI 配置只用公共 `registry.npmjs.org`，不再接受 CI 变量或环境文件的内网 npm 镜像覆盖（#257）；文档中的内部 forge 链接改为 `#N`/`!N` 引用。验证范围中曾列入 `test-formal-release.py`、`test-formal-server.py`、`test-l1-formal-keyless.py`（均随 #74 删除）；#261 记录「未发布到任何环境，发布脚本改动的线上验收待下次 dev-test 发布」。
+
+#### §14「发布与快照的安全兜底（#334）」
+三处收紧，均不改普通发布的服务器流程……（2）凡由它发布的环境（`managed_by` 字段已移除，#74）……自测对象曾含 `legacy-formal`。
+
+#### §14「单一仓库（存档 #60）」
+迁移前的内部仓库及其 runner 停用（旧内部 CI 配置已删除）；晋级验收报告改为本仓库 Issue comment：`acceptance` 用 `forge_repo`、`issue`（`formal-test`）与 `legacy_formal_issue`（`release-go-formal.sh`，已随 #74 移除），`read_acceptance_comment`（现在位于 `release-promotion.py`）……；`forge_url` 的主机就是公开仓库，不再作为禁用字面量。
+
+#### §14「`legacy-formal` 下线（存档 #74）」（全段）
+运行面：只对它自己的 Compose 项目执行 `down`（不带 `-v`），移除其容器、网络、专用镜像（`050af5e` 构建，没有其他容器或标签引用）和 `<root>/formal/` 目录；该栈没有命名卷，数据都在 `<root>/formal/` 的 bind mount 里。移除前对 `<root>/formal/` 做全量备份（状态目录与运行环境、源码快照、镜像导出、容器 inspect 与 Compose 清单），存放在发布根之外，逐件校验 sha256 并列出归档内容；备份位置与校验值记在 #74，不入库。同一发布根下 `dev-test` 的 `production/`、`app/`、`backups/`、`releases/`、旧候选 Compose 项目、旧 Next 目录以及同机其他业务都没有改动，`dev-test` 的 `protect_projects` 去掉它的项目名。代码面：删除 `scripts/release-go-formal.sh`、`docker-compose.go-formal.yml`、`scripts/smoke/smoke-l1-formal-keyless.py` 及其测试、`scripts/smoke/test-formal-server.py`（正式栈事务与回滚）；`scripts/release-formal.py` 只剩 `formal-test` 晋级共用的验收报告、成功清单与 Issue comment 校验，改名为 `scripts/release-promotion.py`，对应测试移到 CI 门禁里的 `scripts/tests/test_release_promotion.py`（原 `smoke/test-formal-release.py` 的正式栈事务用例随栈删除）；`retain-art-ai-images.py` 去掉 `<root>/formal/reports/image-pins.json` 的读取、写入与按 pin 保护，保留 `--project`/`--protect-project` 的容器引用保护，`test-image-retention.py` 同步；`release-env.py` 不再支持环境字段 `managed_by`（出现即报错并提示删除），环境文件模板去掉 `legacy-formal` 条目与 `acceptance.legacy_formal_issue`。验证：`test_release_env.py`、`test_release_promotion.py`、`test-release-stack.sh`、`test-release-rollback.sh`、`test-image-retention.py`、`test-release-backup-retention.py`，以及下线后 `dev-test` 的 `/api/version`、`/readyz` 与 L0 冒烟；去掉 pin 保护后的镜像保留 `--apply` 路径要到下次 `dev-test` 发布才在真实主机上运行。
+
+#### §14 日志段之前的段落（旧双栈叙述）
+两栈日志按 #233 契约运行（见下段）。镜像保留通过共享锁保护正式运行、回滚和待晋级 pins；正式根存在但 pin 缺失、损坏、权限/文件身份不可靠或引用 ID 不在准确仓库清单时停止清理。该 fail-closed 行为已由 `test-image-retention.py` 本地测试，正式主机验收仍以 #232 Issue 回执为准。正式 smoke 只读验证 test 栈拒绝正式登录态 Cookie（也检查以 test 默认 cookie 名重放时的拒绝），并在 formal 登出后用真实旧 Cookie 验证撤销；不登录或写入 test 栈。（pin 与 legacy-formal 正式 smoke 已随 #74 删除；本段整体移出。）
+
+#### §14 其余变更过程措辞
+#79「增加布尔输入」；#86「门禁集合新增第 9 项」「改用 yaml 库（新增开发依赖）」；#249「已删除 internal/authentication/sso……」「`/api/auth/sso/*` 不再注册」；#274「前 日志只有『上传文件为空、过大或不可读取』」；#240「补测后补齐」；#134「前端改为显式清理本地存储」；#118「原为 forbidden」；#154「不再因管理员权限跨 owner 列出全部任务」；#259「决定保留到 1.0 之后」；§15「dev-test 镜像内容与发布、回滚行为不变」「未在本轮实施」「`docker-compose.go-formal.yml` 与 `legacy-formal` 的回滚兼容已随 #74 删除」。均改写为现状条款。
+
+### 6.3 docs/architecture.md 其他
+
+- 全文机械去除：日期+来源标注（如「2026-10-13 已验…」「（#N，2026-10-22；…）」）中的日期，以及 `note NNNNN` 评论编号（原文保留 Issue 编号、revision、状态标注）。
+- 章节标题去日期：「对话里的选择卡」「前端复查修复」「静默执行与换来源确认」「Agent 提出处理计划」「上游限流排队」「失败任务重试」「Tripo 几何与分件的启用」「第 14 节 dev-test 部署与日志目标（`legacy-formal` 已于 2026-10-30 下线）」等。
+
+- architecture.md 开头「更新：2026-10-08，补充 Issue #134/#135 的 PC Skill 弹窗与可选分类合同。」（更新日志行，已删除）
+- architecture.md §Fake 上游服务（#96）：「此前比较表行数，窗口约一秒，机器同时跑重负载时偶发失败，重放脚本为此把 fake 的排队与运行轮询拉长（`-queued-polls 2 -running-polls 8`）」（#139 对账脚本的旧做法）
+- architecture.md §Wire 黄金样本（#89）：「Tripo v3 原先没有真实样本的七个端点…端点表改为 `real`。补采推翻了几处按文档构造时的假设」（样本由构造改为实采的过程叙述）
+- architecture.md §Meshy 生成模型（#329）后续 E：「`reference_note` 原来只在任务成功后由 `wait` 补上」类问题经过叙述保留于该条问题陈述中
+- architecture.md §Creative Lab（#100）：「2026-10-22 曾分两批全部启用」「Catalog revision 日期前缀沿用 #103 起使用的 2026-10-30 日期…所以比实际合并日晚一天」（revision 日期与合并日差异的过程叙述）
+- architecture.md §Tripo 官方合同复核：「（的 #185 记录误写为“没有端点页”，已更正）」（#185 旧记录勘误）
+- architecture.md §Creative Lab 的 Agent 工具（#189）：「（隔离 Agent 验收发现拒绝文案曾混入构建阶段，构建 model_id 也曾能被当作模板选中，已修复）」
+- architecture.md §BLEND/可选格式：「两条 2026-10-05 的历史时点记录已随审查报告移出仓库（内部 Git 历史保留）。」
+- architecture.md §Tripo 原样缓存（分部件模型）：「起因是 dev-test 上分部件任务的 converted.fbx 被判 fbx_invalid_structure…重试 8 次后失败」（缺陷经过，保留错误码于现行描述）
+- architecture.md §LLM（#253）：「`llm_model` 默认值按用户 2026-10-19 指示改为 llms 网关别名 `deepseek`（替代已下线的 `qwen3.8-flash`…）」（旧默认值，已被 #64 的 `qwen-omni-flash` 取代）；「DeepSeek 例外：用户 2026-10-20 改为…」的决定来源
+- architecture.md §会话压缩（#322）：「#322 dev-test 验收 note 98983 发现：原来 `chat.context.maximum_messages`=20 在压缩开启时仍截断每个请求」（缺陷发现经过）
+- architecture.md §14 首段：「2026-10-19 在同一主机、同一发布根下曾建同机隔离正式栈 `legacy-formal`（内部存档 #232）：独立端口与 Compose 项目，数据在 `<root>/formal/`，空库起步、无 Provider Key，会话 cookie 名独立（`SESSION_COOKIE_NAME`…默认值兼容测试栈）；其晋级器只接受测试发布 manifest 与 OCI revision 同时匹配、且验收已写入原生 note 的精确 `main` revision」（已下线栈的描述）
+- architecture.md §14 环境标识清理（#249）：「（当时）`release-formal.py` 从环境文件 `legacy-formal` 条目读 ssh/root、从 `acceptance.forge_url` 读验收证据前缀…（以上三者已随 #74 删除或改写）」与「当时保留的边界（迁移工具拒绝危险根目录的固定清单、旧内部 CI 配置的内网 npm 镜像、内部 Issue 证据链接与历史记录）已由下段 #261 清理」
+- architecture.md §14 公开快照清理（#261）：「（当时）`release-formal.py` 从环境文件 `legacy-formal`、`dev-test` 条目读取正式栈与测试栈项目…（已随 #74 删除）」与「纯历史记录（审查报告、验收回执、旧架构档案、`.scratch/` 运维草稿）删除」
+- architecture.md §14 单一仓库：「2026-10-27 之前的 `#N`/`!N` 指内部存档编号」（改写为不含日期的说明）
+- architecture.md §14 legacy-formal 下线：「维护者决定废弃同机隔离正式栈。」
+- architecture.md §主机 CI（#97）：「2026-10-30 一次 12 GiB 上限的运行期间，共用测试主机发生主机级 OOM、同机另一业务进程被杀」（事故经过，改写为一句理由）
+- architecture.md §Fake 上游服务（#96）：「原先只能付费调真实上游，或用 `internal/providers/mock` 绕过 Adapter」（fake 上游出现前的做法）
+- architecture.md §画布背景菜单（#277）：「此前只写本机 store，项目加载时又被服务端旧值覆盖，刷新后回到点阵」；§画笔蒙版：「此前纯画笔笔画是每笔一条 `opacity=0.75` 的 `Line`…重叠处逐笔加深、正在画的一笔也叠在栅格上加深」；§画板发送：「此前单张未改动原图会直接发原图」；§画布放置：「（#284：此前只看最右图片…）」「此前 `useCanvasArtboard` 每次渲染返回新对象…（#239 的直接原因）」
+- architecture.md §前端：「（#263：此前撤销会把旧画板坐标的快照原样放回新画板…）」「此前切换瞬间会短暂拿旧版本链当新会话的」「此前这两点使需要参考图的 Hyper3D Texture / Bang 无法从面板提交」「此前 Meshy 重拓扑等所有 Offering 都显示“/”」「#324 起；此前只显示供应商简称」「此前每个消费者挂载都 mutate()」「此前草稿停在挂载时的空串」
+- architecture.md §3D 处理工具：「此前传的是空偏好…（#334）」「此前用附件记录的第一个模型文件…（#321 B）」「此前对话按 Offering priority 先选 local/static-glb/to-gltf…」「此前读的是冻结 Offering 的裸 estimated_credits」「此前后者只删会话行」「此前 91.8 MB 的文件按 MiB 换算被说成 87.5 MB」
+- architecture.md §Agent 计划提交核对（#160）：「此前该状态只能去任务列表人工查看」；§本轮上传提示（#293）：「此前的模板写的是“请使用 {tool} 工具处理”…」；§能力说明（#92）：「处理类 Offering 原先隐藏文件型输入」
+- architecture.md §i18n（#254）：「这推翻了原先「用 `fields` 路径」的设想」；§Meshy Convert（#330）：「补齐格式原来对 Meshy 以外的来源发 Remesh 的 convert_format_only」；§Rodin/Bang：多处「此前」叙述
+- architecture.md §同一轮内引用本轮结果（#25）：「起因：formal-test 上一轮回复先用 `refine_image` 抽出单体树，再用 `create_model_3d_from_image` 引用这张新图 `@img3`，被拒为“句柄无效”，3D 步骤没有提交。原因是工具只在本轮开始前的历史里查引用…」
+- architecture.md §Agent 看到画板图（#16）：「起因：…所以 `agentRequest` 的视觉图片从未包含它，模型只读到 `image.canvas` 文字标签。现在…」；§单张参考图保持比例（#296）：「起因：#293 验收里对话上传一张 800×600 的图…」
+- architecture.md §结果的主模型（#326）：「起因。dev-test 验收 #325（#325 F1）时…」案例叙述的引导语；§暂停的计划（#326 后续）：「起因。dev-test `4876a4f8` 验收（#326）发现 P」的引导语
+- architecture.md §Creative Lab Agent 工具（#189）：「构建工具原先声明 `canvas_source: refuse`，于是在解析来源之前就整轮拒绝…」；§Agent 批准方式块（#7）：「Agent 过去拿不到会话的真实批准方式…曾把手工会话说成“自动”」
+- architecture.md §同批付费生成并发提交（起因：线上一轮回复要求拆 6 个部件图，却被逐个生成）；§三视图与处理计划排队重提（#59，起因：上一节只让对话内的生成工具排队）
+- architecture.md §画布尺寸提示：「服务端 `canvasSizeNote` 原先把同比例更小也算跟随，一并改正」；§内容审核（#35）：「原先只显示“任务输入无效”」；§结构检查预算（#226）：「真实 Meshy multiview FBX 此前在第 4 张图的结构遍历处被误拒」；§下载名（#264）：「此前 `GET …/assets/{assetID}` 不带 `Content-Disposition`…下载为 `asset_<id>.zip`」；§协调器错误（#298）：「此前凡映射为 `ErrUnavailable` 的错误都会结束协调器…」；§参数编辑（#246）：「此前每个 hook 实例各自持有编辑…」；§分件结果格式清单（#187）：「此前分件结果不在格式投影范围内…」；§HTTP 错误（#118/#316）：「此前它们自行编码，403/401 缺 `request_id`」
+
+### 6.4 docs/product.md
+
+- §1.1 Meshy 升级：「参考图尺寸、像素、大小超限的拒绝理由此前在英文界面也是中文，现在同样按界面语言」；「Nano Banana Pro 文生图、图生图由 6 改为官方的 9」；「模型文件上限由 60 MiB 提高到 70 MiB」；「文生 3D 的提示词上限改为官方的 800 字」；「按当天的 Meshy 官方文档」（2026-10-22）。
+- §4 多个兼容服务选择卡：「用户原话：『多个兼容服务的时候，优先确定用户选择的，否则最好是 agent 询问用户，最后兜底一个。』」（#321，2026-10-22 用户决定）；「#321 后续，2026-10-22 用户决定，note 98949/98950」；「#321 第二轮，dev-test note 99042 的问题 G/H/I」。
+- §4 Meshy Rigging 提示：「（…即 70 MiB；#329 前为 62.91 MB）」。
+- §4.1：验收截图目录 `<内部目录>`（内部路径）。
+- §4.2：「用户 2026-10-22：『思考强度是 low high 那些』」「用户 2026-10-20 决定 DeepSeek 默认 low」「用户 2026-10-22：『默认 80% 压缩。压缩后保留 5 轮。』」「用户 2026-10-22：『图片仍然可以被@，毕竟这个属于附件机制』」；「#322 dev-test 验收 note 98983 后修正」。
+- §4.3：「统一网关下每个地址显式写同一个 URL，用户约定」；「即未设置时与 #322 之前行为一致」；note 98950/99059。
+- §5：「2026-10-10 Lex 确认」（对话无付费步骤时不写积分）；「取代了无人读取的『隐藏失败』偏好」；「局部重绘蒙版改叫蒙版、像素画笔改叫画笔」；「原来的 R/L/O/P 和 I=生成键位已取消」；「2026-10-10 起没有聚焦模式（快捷键 F 已删除）」；「虚线框居中 dev-test 验收 #282 note 96919」。
+- §8：Tripo 绑骨检查各次真实执行日期（2026-10-15/16）与 #186 note 94376；「#186 路线 B（用户决定）」（Tripo Rig v3.0、Texture/Retarget 启用，2026-10-17/20）；Smart Segmentation 2026-10-21/22 起；OBJ 压缩包下载修复 2026-10-22。
+- §8.1：「2026-10-09 在当时的 60 MiB 上限下，66 MB 的高面数 Tripo GLB 曾按此拒绝」；「BLEND 全局下线（2026-10-18，#221 用户确认）」；「USDZ/USDC 数值弱校验（2026-10-13 用户确认，#167）」；「没有 UV 视图（2026-10-11 去掉）」；note 97106/97403/97469/96368。
+- §8.2：「2026-10-08 用户确认」的要求清单标题；「#330 后续，note 99645」。
+- §8.3：「Creative Lab 自 #100（2026-10-29）起」「2026-10-22 至 #100 停用前」「2026-10-21 复核官方合同」。
+- 其余：§2/§6.1/§8.2 标题中的「2026-10-08 用户确认」；§4.1 标题「2026-10-09 用户要求」；§7「2026-10-29 对 main 核对，SKL-01 裁定」。
+
+### 6.5 docs/provider-schema-architecture.md 等
+
+#### docs/provider-schema-architecture.md 开头「更新」行（已删除）
+更新：2026-10-22，补充「Meshy 官方合同基线」（#329）；2026-10-09，补充「最新 API 与最高质量」设计宗旨与 `fixed` 参数合同，以及 Meshy 文生 3D 自动精细化；2026-10-08 补充 Issue #134/#135 的 PC Skill 界面与可选分类合同。
+
+#### docs/provider-schema-architecture.md「Meshy 官方合同基线」表
+- Image to 3D 行：参考图此前最多 4 张，多于 1 张时发送文档没列的 `image_urls`（现为 1 张、只发 `image_url`）。
+- Remesh 行：#330 前曾发 `convert_format_only`；Retexture 行：此前依赖 `latest`、声明过 `negative_prompt`；`nano-banana-pro` 估算由 6 改为 9。
+- 「模型文件的大小上限」：70 MiB 此前为 60 MiB（#329 之前）；「Hyper3D 输出合同」与「上游输入一律内联」处同样的 60 MiB 括注已删。
+
+#### docs/provider-schema-architecture.md「最新 API 与最高质量」现状表
+- Meshy Retexture：此前误用不存在的 `resolution` 字段，上游实际按默认 2K 输出（现 `texture_resolution=8k`）。
+- Meshy 文生图/图生图：2026-10-10 曾停用后恢复 `nano-banana-2`，旧版兼容 API 的 `legacy_models` 与 `legacy_constraint_option_labels` 随之恢复。
+- Seedream：2026-10-10 选“可选比例”方案（低档由 `forced_when` 升档）；GPT `output_format` 非透明背景强制值由 webp 改为 png。
+- 「固定不删声明」原标注“2026-10-10 审核返工”。
+
+#### docs/provider-schema-architecture.md「Creative Lab」
+- 2026-10-22 分两批启用（第一批：冰箱贴、手办、潮玩公仔、积木人偶、折叠解压玩具；第二批：钥匙扣、灯罩、像素解压拼图、键帽）；2026-10-29（#100）起全部 `enabled:false`。正文已改为现行状态加指向 architecture.md 的说明，批次描述保留为“曾分两批”。
+- 钥匙扣/冰箱贴导出分辨率：早先记录的 64–2048 已被 512 上限取代。
+
+#### docs/provider-schema-architecture.md Meshy 多图 / STL-3MF 槽位
+- 2026-10-18 一次真实公开任务因 URL 后缀推断 MIME 失败（FBX `application/octet-stream`、OBJ `application/x-tgif`、USDZ/3MF 空）以 `integrity_failure` 失败，据此 Adapter 只在 `model/*` 声明且响应为 `application/x-tgif` 时保留声明类型（正文保留该事实）。
+- #297：2026-10-21 本机隔离验收（#264）发现 Meshy 换贴图可选 STL 槽位接收 HTML 错误页、可选 3MF 槽位接收无模型部件的 ZIP，随后加入按 variant/MIME 识别的 STL/3MF 交付检查。
+
+#### docs/image-api-parameters.md
+- 「2026-10-09 更新」段落头：质量参数改为后端固定；Meshy `nano-banana-2` 曾停用，2026-10-10 恢复。
+- 「结论修订（取代 2026-09-17 的『均未对代理逐项验证』）」：现标题为「结论（GPT Image 2.5 Sunburst 全声明参数）」。
+- 「此前 `image_config`… 探针均未生效… 已撤下页面中这一过早结论」中的“已撤下”句。
+- 旧站点 2026-09-09 的 GPT 图生图 JSON 记录：「本期按 S2 实测改为 multipart」改写为“以 S2 实测 multipart 为准”。
+- 章节「旧模型名兼容决策（2026-09-27）」改名为「旧模型名兼容」。
+
+#### docs/go-architecture.md
+- 「本批保留 Go 单进程与统一任务内核，补充资产检查、原子写入、付费步骤恢复、会话保存和同源解码资源的实际结构」及「本页原先混合了 Next→Go 迁移分析……完整内容已移出仓库」。
+
+#### docs/ui-kit-framework.md
+- 「橙色表示提醒（2026-10-09 用户要求）」「推荐标签（2026-10-09 用户要求改为白字，提高对比度）」。
+
+#### docs/3d-special-capabilities-design.md
+- 「用户要求先找全特殊功能和本地上传边界……」改写为设计范围陈述。
+
+### 6.6 docs/design 与 docs/v3-architecture
+
+#### docs/design/README.md
+- 开头：「本目录收录 2026-10-08 至 10-11 工作台重新设计的方案、原则及当时的实施记录。原件在项目共享文件夹 `design/`；仓库副本形成于 2026-10-11。」
+- 「当前跟踪」末句：「已迁出的历史材料可从固定快照查阅：Agent 工作区实现台账（历史文件 `docs/agent-workspace-implementation-ledger.md`（已移出仓库，见内部 Git 历史 `b43d4018`））、Provider/Schema 实施计划（历史文件 `docs/provider-schema-implementation-plan.md`（已移出仓库，见内部 Git 历史 `b43d4018`））。」
+
+#### docs/design/studio-ui-spec.md 「6. 历史实施拆分记录」末段
+「2026-10-11 原记录指出当时尚未发布 dev-test、尚未完成 L0/L1 和页面回归。该记录是历史状态，不作为当前待办或验收结论；当前发布与验收进度只在原生 Milestones、Issues 和 MRs 更新。」
+
+#### docs/design/right-panel-principles.md
+- R4：「这是你今天早些时候的明确要求，PR #40（`3970ede`）已经删掉了收起按钮、记住状态和窄屏自动收起。」
+- 开头：「顺序按你说的：先定 UE（这份），再定 UI，最后统一代码框架。」
+- 「用户决定（2026-10-22，#321 note 98949/98950）」等引用头已改为不含人物日期的标题（正文规则保留）。
+
+#### docs/v3-architecture/README.md
+- 「原 G1 表格及其状态属于 2026-09-29 工作分支的阶段评审快照，已从此入口移除」（契约评审记录）
+
+#### docs/v3-architecture/04-hyper3d-provider-fit.md
+- 顶部状态段原文（含「下面除最后一节外都是历史记录」「2026-09-29 查阅……当时没有 Hyper3D API Key，历史试验不构成『真实生成可用』证据」）
+- 兼容性表「积分展示」行原文：「在单位/换算与现有人工同意语义确定前保持 Offering enabled:false、预估值 0」
+- 兼容性表「产物域名」行原文：「asset_hosts 暂为空……获得 Key 后以实际回包……登记精确 host」
+- 「2026-10-16 原生候选更新（未启用）」整节原文改写为「原生候选配置」；删去「当前 Schema 已取代上文历史零估值与 Medium 首版说明」「全部候选仍禁用、host allowlist 为空」（Rodin 已于 #188 启用）
+
+#### docs/v3-architecture 01-03
+- 仅去除日期/「本轮」措辞，无整段移出。
+- 05-local-regression.md、06-final-acceptance.md 为纯验收/证据报告，未改。

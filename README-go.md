@@ -205,68 +205,17 @@ GO_IMAGE_TAG=替换为镜像标签 scripts/deploy-go-candidate.sh
 Plinth 的对话和图片模型出站请求访问 llms 正式服务器
 网关的 `/v1`（地址在 dev-test 运行环境文件 `LLM_BASE_URL`；链路：测试客户端 → `dev-test` Plinth 测试栈 →
 llms 正式服务器；后者不限制客户端与模型）。测试链路上游 key 为
-`<TEST_API_KEY>`（2026-09-27 用户给定，仅适用测试链路；正式生产密钥只存正式
-生产自身运行环境文件，权限 `0600`）。测试栈使用无版本别名：默认连接 `LLM_MODEL=qwen-omni-flash`（网关当前解析为 qwen3.8-omni-flash；思考档位 low/medium/xhigh，默认 xhigh）；第二连接 `LLM_CONNECTIONS=GPT`、`GPT_MODEL=gpt-astra`（当前解析为 gpt-6-astra；思考档位 low/medium/high，默认 high）。别名让上游网关升级版本时下游配置无需改动（2026-11-02 维护者决定，#64）。请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，`qwen-omni-flash` 命中同名 profile（`enable_thinking=true`、`reasoning_effort` 默认 `xhigh`，上下文窗口 1000000），`gpt-astra` 命中同名 profile（`reasoning_effort` 低到高三档，默认 `high`）；其他中国大陆模型仍用官方最高档。部署只更新 dev-test Compose 项目（环境文件 `compose_project`）的 `art-ai-go`
+`<TEST_API_KEY>`（仅适用测试链路；正式生产密钥只存正式生产自身运行环境文件，权限 `0600`）。测试栈使用无版本别名：默认连接 `LLM_MODEL=qwen-omni-flash`（网关当前解析为 qwen3.8-omni-flash；思考档位 low/medium/xhigh，默认 xhigh）；第二连接 `LLM_CONNECTIONS=GPT`、`GPT_MODEL=gpt-astra`（当前解析为 gpt-6-astra；思考档位 low/medium/high，默认 high）。别名让上游网关升级版本时下游配置无需改动（#64）。请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，`qwen-omni-flash` 命中同名 profile（`enable_thinking=true`、`reasoning_effort` 默认 `xhigh`，上下文窗口 1000000），`gpt-astra` 命中同名 profile（`reasoning_effort` 低到高三档，默认 `high`）；其他中国大陆模型仍用官方最高档。部署只更新 dev-test Compose 项目（环境文件 `compose_project`）的 `art-ai-go`
 服务，不操作同机其他业务或代理测试实例。接口目录可达不能替代真实
 生成、资产落盘和页面回归。
 
-### 已完成状态（2026-07-29，仅测试环境）
+### 当前状态（仅测试环境）
 
-Go 已接管 `dev-test` 的入口（绑定 `0.0.0.0`，端口见本地环境文件）。当前生产同构测试容器
-（`release-env.py show dev-test` 的 `container`）的镜像标签与源码 SHA 以容器 OCI 标签为准；
-发布验收必须确认 `org.opencontainers.image.revision` 等于已推送的
-`origin/main` 完整 SHA。旧 Next 容器已删除（2026-09-02
-实测 `docker ps -a` 无此容器）；候选栈容器仍在、保持停止。
-`dev-test` 测试数据的初次全量迁移已经完成，针对该测试栈的普通发布不得再次
-运行 ETL。正式生产尚未迁移，不能复用本节的账号、数据、对账数字或批准
-清单；正式流程见 `docs/production-migration-runbook.md`。
+Go 已接管 `dev-test` 的入口（端口见本地环境文件）。当前生产同构测试容器（`release-env.py show dev-test` 的 `container`）的镜像标签与源码 SHA 以容器 OCI 标签为准；发布验收必须确认 `org.opencontainers.image.revision` 等于已推送的 `origin/main` 完整 SHA。
 
-最终停写快照的迁移结果为：
+`dev-test` 测试数据的全量迁移已经完成，针对该测试栈的普通发布禁止再次运行 ETL。正式生产尚未迁移，不能复用本节的账号、数据、对账数字或批准清单；正式流程见 `docs/production-migration-runbook.md`。
 
-- 用户 5；Task / Attempt / 逐笔账本各 1,148；积分合计 8,109；
-- 输出 Asset 1,543（原迁移产物 1,473 + 历史模型截图 70），输入 Asset
-  689；
-- Chat 会话/消息 32/193；Canvas 项目/节点 9/11；
-- 余额快照 232；旧数据隔离归档 141；
-- 38 个旧任务的 40 个必需输出在原 Next 数据中已缺失。用户已批准按
-  “Next 缺、Go 也缺”的原则保留身份、参数、Attempt 与账务，并落为
-  `FAILED/integrity`，不伪造 Blob 或成功状态。
-- 原 Next 曾声明截图的 84 个成功模型任务中，70 个真实 PNG/WebP 已从
-  旧缓存补迁移为 `thumbnail` Asset；另外 14 个在旧缓存、历史签名 URL
-  与 Provider 任务中均已不存在，按“Next 缺、Go 也缺”保持缺图。
-
-测试 SQLite `quick_check=ok`、外键违规为 0。迁移后的原管理员登录、
-5 个前端资源、九类 Capability Provider 发现、1,148 条历史任务与
-8,109 积分后台汇总、历史资产 HTTP 下载及 SHA-256、内部 Webhook 和外部
-Nginx Webhook 均已验收。未在 live Provider 上创建计费任务；九类创建
-行为由候选 Mock 全套验收覆盖，生产只做无扣费可用性验证。
-
-切换后发现迁移任务中的大 `input_json` 会让旧列表 SQL 在
-`ORDER BY` 临时 B-tree 中耗尽容器 64MB tmpfs。Repository 已改为先排序和
-分页 Task ID、再批量读取完整 Task；生产 `/api/tasks` 默认 36 页已全部
-返回 200。5xx 域错误同时补充了不向客户端泄露 Cause 的结构化服务端日志。
-首页与任务历史只按 Product Schema 中的 `thumbnail`、`image` 优先级选择
-预览，不再把 `texture` 当成模型截图；浏览器已实测首页、任务历史和第 4
-页正常显示/加载。
-
-证据位置（2026-07-29 历史证据，`<root>` 为 dev-test 发布根）：
-
-- 最终备份：
-  `<root>/backups/final-cutover-20260729-final-r1`
-- 切换前 Go 生产目录归档：
-  `<root>/production-archives/20260729-final-r1`
-- 最终对账：
-  `<root>/production/reports/migration-final-approved.txt`
-- 迁移就绪证明：
-  `<root>/production/migration-ready.txt`
-- 切换记录：
-  `<root>/production/reports/cutover-record.txt`
-- 切换后 Webhook 热修复发布记录：
-  `<root>/production/reports/post-cutover-release-webhook-r1.txt`
-- 切换后任务列表修复发布记录：
-  `<root>/production/reports/post-cutover-release-tasklist-r1.txt`
-- 切换后历史模型截图补迁移记录：
-  `<root>/production/reports/post-cutover-release-preview-r2.txt`
+迁移结果快照、对账数字与证据位置见 `docs/history.md` §5.4。迁移规格与状态见原生 Milestone #4。
 
 ### 镜像构建的依赖源（#248/#257）
 
@@ -376,7 +325,7 @@ R9 真实体量演练确认有 38 个历史 Task 的 40 个必需输出在旧 st
 
 生产运行环境文件位于 Go 根目录的 `production/runtime.env`，权限必须为
 0600。确认清单同样必须为 0600，root 执行时由隔离 ETL 用户 UID 100
-持有。历史演练证据（2026-07-29 候选演练记录）已移出仓库，只保留在内部 Git 历史中。当前迁移规格与状态见原生 Milestone #4。
+持有。历史演练证据不在仓库内。当前迁移规格与状态见原生 Milestone #4。
 
 
 ## 扩展 Provider
