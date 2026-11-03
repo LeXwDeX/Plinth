@@ -30,3 +30,20 @@ func TestAssetStoreFailureRetryabilityFollowsStage(t *testing.T) {
 		}
 	}
 }
+
+// An inspection that could not reach a verdict (execution slot contention,
+// cancellation) is not a content verdict: it stays retryable, and its stage and
+// reason pass the diagnostic allowlist unchanged.
+func TestAssetStoreFailureInspectionUnavailableStaysRetryable(t *testing.T) {
+	diagnostic := safeStorageDiagnostic(AssetStorageDiagnostic{Stage: "inspect_unavailable", Reason: "inspection_busy", Errno: "deadline"})
+	if diagnostic.Stage != "inspect_unavailable" || diagnostic.Reason != "inspection_busy" {
+		t.Fatalf("allowlist dropped the busy diagnostic: %+v", diagnostic)
+	}
+	failure := assetStoreFailure(ArtifactClaim{Role: "model", Variant: "glb"}, diagnostic)
+	if !failure.Retryable {
+		t.Fatalf("transient inspection failure must stay retryable: %+v", failure)
+	}
+	if repeatsSourceFailure(failure, failure) {
+		t.Fatal("retryable inspection failure must keep the refetch open")
+	}
+}

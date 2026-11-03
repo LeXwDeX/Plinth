@@ -569,6 +569,7 @@ Splat 不进入现有网格加工、格式补齐、Scene 或模型截图。处�
 
 内核物化路径（`internal/generation/coordinator.go`）按失败阶段区分资产存储拒收的重试语义，与 `AssetStoreRejection` 共用 `assetStoreFailure`：
 - 内容检查阶段（`stage=inspect`）的结论对同一字节确定，记为 `integrity_failure`、`retryable=false`，内部取证码 `asset_store_rejected`，不消耗 `materialize_attempts`，Task 在该轮直接 `FAILED`。
+- 检查器没能给出结论（等待共享执行槽如 Draco 超时、检查被取消或超时、检查读取遇 I/O 故障）不是内容结论：本地存储记为 `stage=inspect_unavailable`、`reason=inspection_busy`，保持可重试，不终止任务。区分靠诊断中的阶段，不靠错误文本。解码本身超出预算或结构无效仍是 `stage=inspect` 的不可重试结论。
 - 写入、读取、I/O 等非检查阶段的拒收保持可重试，按 Schema `materialize_attempts` 重试。
 - 一轮物化中出现不可重试的阻断失败（含检查拒收、媒体类型不符、保真度结论）后，该轮不再下载或检查其余产物；本轮已写入的资产随失败路径清理，不登记为 READY。
 - 因此同一确定性失败在 refetch 中重复出现时，`repeatsSourceFailure` 能够匹配（失败类别、不可重试、文案与取证码、取证摘录均相同），不再重复开放 refetch；可重试的存储失败仍保持 refetch 可用。
