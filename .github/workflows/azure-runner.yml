@@ -1,6 +1,6 @@
 # Azure 按需 runner 开机（#78）。ci.yml 的 go test race 在可信事件上路由到 plinth-azure 标签：
 # 本仓库 main 的 push，以及 head 在本仓库的 pull_request。这里在同样的事件上立即开机；
-# 另每 10 分钟（及手动触发时）检查一次：有 race 作业在排队等 plinth-azure 就开机，
+# 另每 10 分钟（错开整点，GitHub 在整点高峰会延迟或丢弃定时运行；及手动触发时）检查一次：有 race 作业在排队等 plinth-azure 就开机，
 # 覆盖重跑作业（重跑不会再触发 push/pull_request）与开机失败的情况。
 # VM 自己在空闲 10 分钟后解除分配，另有平台侧每日定时关机兜底。
 # 本工作流不跑任何门禁，只持有开机所需的 OIDC 身份；该身份的角色只能读取、开机、
@@ -15,7 +15,7 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '7-59/10 * * * *'
   workflow_dispatch:
 
 permissions:
