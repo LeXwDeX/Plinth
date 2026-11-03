@@ -19,7 +19,7 @@ vi.mock('react', async (original) => {
   } };
 });
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema: defaultCatalog.application }) }));
-vi.mock('@/components/ui/overlay', () => ({ useAnchoredPositioner: () => '' }));
+vi.mock('@/components/ui/overlay', () => ({ anchoredPositionMethod: 'fixed', useAnchoredPositioner: () => '' }));
 vi.mock('@/hooks/use-object-actions', () => ({ useObjectActions: () => ({ retextureWithImage: fixture.execute }) }));
 vi.mock('@/store/chat-store', () => ({ useChatStore: (select: (state: unknown) => unknown) => select({ activeSessionId: 's1', messagesBySession: { s1: fixture.messages } }) }));
 vi.mock('@/hooks/use-session-versions', () => ({ useSessionVersions: () => ({ tiles }), tileOfObject: () => null }));

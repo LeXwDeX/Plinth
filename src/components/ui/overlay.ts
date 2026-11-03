@@ -11,6 +11,19 @@ const floatingLayer: Record<OverlayLayer, string> = {
   blocking: 'z-blocking-float',
 };
 
+/**
+ * Anchored popups are portaled into <body>. With Base UI's default `absolute`
+ * method a popup that is briefly placed past the viewport edge (for example the
+ * first frame after Select falls back from alignItemWithTrigger) extends the
+ * document, so with classic scrollbars <html> shows a scrollbar for that instant.
+ * Base UI's scroll lock (Select, Menu, modal Popover) samples the scrollbar one
+ * tick later; when it lands in that instant it reserves a `scrollbar-gutter`
+ * strip on <html> while the popup stays open, shifting the whole workbench
+ * left. Fixed boxes never extend the document, so every anchored positioner
+ * uses this method.
+ */
+export const anchoredPositionMethod = 'fixed' as const;
+
 export function useAnchoredPositioner(): string {
   return `isolate ${floatingLayer[useContext(OverlayLayerContext)]}`;
 }

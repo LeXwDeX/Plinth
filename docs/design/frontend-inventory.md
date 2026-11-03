@@ -773,7 +773,7 @@ Skill 文案统一用动态 key：`schemaText(schema, \`ui.workspace.skills.${ke
 | Select | select.tsx | Base UI。页面里有原生 select 也有这个组件。 |
 | Popover、Tooltip、Tabs、Switch、Checkbox、Input、Badge、Progress、Separator | 各自的文件 | Base UI。 |
 | Slider | slider.tsx | Radix（`@radix-ui/react-slider`）。唯一的 Radix 组件。 |
-| Overlay | overlay.ts（30 行） | `OverlayLayer` 类型，`floatingLayer` 映射（8-12），`useAnchoredPositioner`（14-16），`anchoredPopup` 样式（18-29）。 |
+| Overlay | overlay.ts（42 行） | `OverlayLayer` 类型，`floatingLayer` 映射（8-12），`anchoredPositionMethod`（锚定定位层统一 `fixed`，14-25，#74），`useAnchoredPositioner`（27-29），`anchoredPopup` 样式（31-42）。 |
 | ViewportDialog | viewport-dialog.tsx（63 行） | 右侧面板。遮罩 `absolute inset-0 z-scrim bg-black/50`（48）。面板 `absolute inset-y-0 right-0 z-modal w-[min(100%,420px)]`（57）。Escape 关闭（33-36）。 |
 | Field | （ui kit 角色） | 表单字段包装。 |
 | BrowserLink | browser-link.tsx | 链接组件。 |
