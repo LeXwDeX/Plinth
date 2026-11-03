@@ -44,7 +44,9 @@ func newInspectionWorkBudgetForSize(size int64) *inspectionWorkBudget {
 	return budget
 }
 
-func inspectionWorkError() error { return errors.New("内容数值检查工作量超出限制") }
+func inspectionWorkError() error {
+	return rejectInspection("inspection_work_limit", errors.New("内容数值检查工作量超出限制"))
+}
 
 // reserve charges mandatory structural work. If the remaining budget is short,
 // it first reclaims units spent on optional image decodes: those checks may be

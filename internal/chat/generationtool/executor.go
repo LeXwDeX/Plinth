@@ -410,7 +410,7 @@ func (executor *Executor) Execute(
 			delete(arguments, name)
 		}
 		if multiview.fromRequest && command.Tool.OfferingArgument != "" {
-			model, _ := json.Marshal(multiview.model)
+			model, _ := json.Marshal(executor.multiviewModelID(command, multiview.model))
 			arguments[command.Tool.OfferingArgument] = model
 		}
 		referenceURLs = multiview.URLs
@@ -797,6 +797,18 @@ func (executor *Executor) observeBoundTask(
 		}
 	}
 	return executor.wait(ctx, command, task.Offering, task.ID, observe, info)
+}
+
+// multiviewModelID accepts a structured request's model as either the model ID
+// the tool's enum names or the Offering ID, like every other model choice, and
+// returns the model ID.
+func (executor *Executor) multiviewModelID(command chat.ToolCommand, model string) string {
+	for _, offering := range executor.gateway.Offerings(generation.Capability(command.Tool.Capability)) {
+		if string(offering.ID) == model && offering.ModelID != "" {
+			return offering.ModelID
+		}
+	}
+	return model
 }
 
 func (executor *Executor) selectOffering(

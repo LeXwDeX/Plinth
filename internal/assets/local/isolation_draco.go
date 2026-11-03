@@ -462,7 +462,8 @@ func validateDracoContext(ctx context.Context, data []byte, r dracoRange) error 
 	case dracoEngine.slot <- struct{}{}:
 		defer func() { <-dracoEngine.slot }()
 	case <-ctx.Done():
-		return dracoError()
+		// 等待共享执行槽超时或被取消：没有检查过这些字节，不是内容结论。
+		return unavailableInspection(errors.New("Draco 检查槽位繁忙或被取消"))
 	}
 	// r.work was reserved by the shared asset budget before this call. It
 	// includes decoded values, mappings, indices and traversal/carry headroom.

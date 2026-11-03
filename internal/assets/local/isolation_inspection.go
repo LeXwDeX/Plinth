@@ -196,7 +196,7 @@ func (inspector *plannedInspector) validateFloats(data []byte, offset int64, fie
 					value = float64(math.Float32frombits(binary.LittleEndian.Uint32(window[component-start : component-start+4])))
 				}
 				if math.IsNaN(value) || math.IsInf(value, 0) {
-					return errors.New("内容数值字段含非有限浮点数")
+					return rejectInspection("non_finite_float", errors.New("内容数值字段含非有限浮点数"))
 				}
 			}
 		}

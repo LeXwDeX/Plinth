@@ -257,23 +257,14 @@ func TestConvertRejectedOnceIsCleanForTheRefetch330(t *testing.T) {
 	if usdzAccepted(open(t, adapter, convert, observe, observation.Artifacts)) {
 		t.Fatal("a second read by the same Task must be refused too")
 	}
-	// The failing delivery re-observes the finished job once per retry and
-	// is refused every time; the refetch observes it once more afterwards.
-	attempts := convert.MaterializeAttempts
-	if attempts <= 0 {
-		attempts = 3
-	}
+	// The refused delivery is a content verdict and is not retried; the next
+	// observation is the refetch.
 	reobserve := func() generation.Observation {
 		again, err := adapter.Observe(context.Background(), observe)
 		if err != nil || again.Phase != generation.UpstreamCompleted {
 			t.Fatalf("observe = %v %v", again.Phase, err)
 		}
 		return again
-	}
-	for retry := 1; retry < attempts; retry++ {
-		if usdzAccepted(open(t, adapter, convert, observe, reobserve().Artifacts)) {
-			t.Fatalf("delivery retry %d must be refused", retry)
-		}
 	}
 	if !usdzAccepted(open(t, adapter, convert, observe, reobserve().Artifacts)) {
 		t.Fatal("the refetch must get clean files")

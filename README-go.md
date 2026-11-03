@@ -52,7 +52,7 @@ go run ./cmd/art-ai
 curl http://127.0.0.1:13333/readyz
 ```
 
-默认使用 `PROVIDER_MODE=mock`、`AUTH_MODE=development`，数据写入 `./data/art-ai-go.db`，Blob 写入 `./storage-go`。
+默认使用 `PROVIDER_MODE=mock`、`AGENT_MODE=live`（需要 `LLM_*`；`AGENT_MODE=mock` 只供本地测试显式设置，计划淘汰）、`AUTH_MODE=development`，数据写入 `./data/art-ai-go.db`，Blob 写入 `./storage-go`。
 
 `DEV_MOCK_AUTH=true`（不校验密码即可签发会话的 mock 登录）只用于开发；`APP_ENV=production` 时进程拒绝启动（#247），与生产禁止 `AUTH_MODE=development` 相同。它默认关闭，`.env.example` 不提供该项；自部署 Compose 固定 `APP_ENV=production`。
 

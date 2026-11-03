@@ -955,6 +955,11 @@ func (m *Module) materialize(ctx context.Context, lease Lease) error {
 	roleOrdinals := map[string]int{}
 	var contractedFailure *Failure
 	for _, claim := range lease.Claims {
+		// 本轮已有确定性（不可重试）的阻断失败：后续产物不再下载与检查，
+		// 避免对必然失败的任务重复拉取大文件。已写入的资产由下方失败路径统一清理。
+		if contractedFailure != nil && !contractedFailure.Retryable {
+			break
+		}
 		requirement, contracted := requirementForClaim(
 			task.Offering.Outputs,
 			claim.Role,
@@ -1105,7 +1110,7 @@ func (m *Module) materialize(ctx context.Context, lease Lease) error {
 		}
 		if putErr != nil {
 			diagnostic := storageDiagnosticOf(putErr)
-			m.logAssetStoreRejection(task, attempt, claim, mediaType, blocking, diagnostic)
+			m.logAssetStoreRejection(task, attempt, claim, mediaType, blocking, diagnostic, metadata.Size)
 			skipped := artifactSkipped(task.ID, claim, "store", m.clock.Now())
 			skipped.Data = eventData(map[string]string{
 				"claim_id":       claim.ID,
@@ -1118,21 +1123,16 @@ func (m *Module) materialize(ctx context.Context, lease Lease) error {
 			})
 			events = append(events, skipped)
 			if blocking {
-				contractedFailure = preferFailure(contractedFailure, &Failure{
-					Class:      FailureIntegrity,
-					Retryable:  true,
-					SafeDetail: "资产写入或完整性校验失败",
-					// 内部取证字段只落库与日志，公开投影不含：指出哪个产物、
-					// 哪个阶段与原因，不含字节、地址或原始错误文本。
-					UpstreamCode:    "asset_store_rejected",
-					UpstreamExcerpt: assetStoreForensics(claim, diagnostic),
-				})
+				// 内部取证字段只落库与日志，公开投影不含：指出哪个产物、
+				// 哪个阶段与原因，不含字节、地址或原始错误文本。内容检查
+				// 结论（inspect 阶段）对同一字节确定，不可重试。
+				contractedFailure = preferFailure(contractedFailure, assetStoreFailure(claim, diagnostic))
 			}
 			continue
 		}
 		if err := m.checkAssetFidelity(ctx, asset, requirement); err != nil {
 			diagnostic := storageDiagnosticOf(err)
-			m.logAssetStoreRejection(task, attempt, claim, mediaType, blocking, diagnostic)
+			m.logAssetStoreRejection(task, attempt, claim, mediaType, blocking, diagnostic, asset.Size)
 			skipped := artifactSkipped(task.ID, claim, "fidelity", m.clock.Now())
 			skipped.Data = eventData(map[string]string{"claim_id": claim.ID, "role": claim.Role, "variant": claim.Variant, "reason": "fidelity", "storage_reason": diagnostic.Reason})
 			events = append(events, skipped)

@@ -50,7 +50,7 @@ Plinth 是开源的多模型创作平台：Go 后端（`cmd/`、`internal/`）�
 2. **本机门禁**：按 `dev_test.md` §2 运行（见「验收要求」）。
 3. **Git 交付**：提交、推送、创建 PR 并在门禁通过后正常合并到 `main`（见「Git 与协作」）。
 4. **发布到 `dev-test`**：用 `scripts/release-env.py release dev-test` 发布已推送的 `origin/main`，发布后核对镜像 revision 与目标完整 SHA 一致。CI 只执行自动化门禁，不承担发布。
-5. **部署后回归**：执行每次发布必跑的 L0 浏览器启动检查、L1 免费冒烟，以及本次功能涉及的页面、API 和直接影响链回归；涉及 Agent、生成或同意链路时，按 `scripts/smoke/README.md` 执行 L2 等相关真实模型验收（遵守「付费验收」）。
+5. **部署后回归**：执行每次发布必跑的 L0 浏览器启动检查、L1 免费冒烟，以及本次功能涉及的页面、API 和直接影响链回归；每次 `dev-test` 发布后必须运行 L5 全部脚本（`scripts/smoke/smoke-l5-all.sh`，需显式设置 `ART_AI_LIVE_ACK=1`），验收报告逐项列出每个脚本的结果；完整 L5 运行计入下文「付费验收是正常交付流程」的每版本、每 Provider 10 次上限，超出部分须按该规则在当前对话取得用户批准；涉及 Agent、生成或同意链路时，按 `scripts/smoke/README.md` 执行 L2 等相关真实模型验收（遵守「付费验收」）。
 6. **失败处置**：发布脚本构建或 preflight 失败时中止，旧实例不动；容器更新或健康检查失败由脚本回滚并留报告。L0/L1 及后续回归失败不在脚本自动回滚范围内，必须记录证据、按部署协议恢复已验证版本，再修复并重跑受影响检查和发布验收；回滚失败或环境阻塞须明确报告，不能降级验收或跳过失败项。发布和测试协议以 `docs/deployment.md`、`dev_ops.md`「Agent 全自动发布协议」与 `scripts/smoke/README.md` 为准。
 7. **晋级到 `formal-test`**（需要时）：开发测试环境（包括 Agent 测试）全部稳定通过以后，才发布到正式测试环境。`formal-test` 只接收已在 `dev-test` 发布成功、并且 L0、L1、L1 Agent 及本次相关浏览器/Agent 验收全部 PASS（无 skip、无 soft-fail）的精确 `main` revision；验收报告以本仓库原生 Issue comment 记录，`release-env.py` 读取并核对该报告与 `dev-test` 成功发布清单，缺任一项即拒绝。晋级回执记在 #2 的 comment。
 
@@ -109,7 +109,7 @@ Plinth 是开源的多模型创作平台：Go 后端（`cmd/`、`internal/`）�
 - `docs/deployment.md`：内部环境部署入口、晋级规则与运行配置。
 - `dev_test.md`：门禁（含 CI 与 `scripts/host-ci/run.py` 干净复现）、Safari 表单注意事项和部署后验收。
 - `dev_ops.md`、`README-go.md`：运行与发布协议、测试拓扑；实际状态须在目标环境只读核验。
-- `scripts/smoke/README.md`：L0–L4 冒烟分层与真实模型验收协议。
+- `scripts/smoke/README.md`：L0–L5 冒烟分层与真实模型验收协议。
 - `docs/v3-architecture/README.md`：冻结输入、执行授权、Scene、RenderManifest 和 SkillRun 的设计与源码状态；目录内“待验收”记录不能当作当前部署事实。
 - `docs/go-architecture.md`、`docs/provider-schema-architecture.md`：Go/Provider 分层及公开任务和私有子作业的历史基线；引用“当前”表述前先对照现行源码。
 - `docs/acceptance-1.0.md`：开源 1.0 功能验收清单与全新机器部署验收步骤；逐项结果记在 #1，不写回该文档。

@@ -260,7 +260,7 @@
                 "name": "AGENT_MODE"
               }
             ],
-            "default": "mock",
+            "default": "live",
             "allowed_values": [
               "mock",
               "live"

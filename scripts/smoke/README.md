@@ -37,9 +37,12 @@ python3 scripts/release-env.py release dev-test   # 同步→构建→preflight�
 | L2 真实模型链路 | `smoke-l2-livemodel.sh` | 涉及 Agent/生成/同意链路的发布后跑 | 一张小额文生图（约 6 积分）；设 `L2_APPROVE_3D=1` 再加一次 3D 生成（约 25 积分） |
 | L3 批量回归 | `smoke-l3-batch.sh` | 涉及生成/同意/资产链路的发布后跑（按需） | 每模型 5 张小额文生图 |
 | L4 3D 格式与隔离 | `smoke-l4-3d-isolation.py` | 3D Provider、格式或缓存边界变更后跑 | Meshy 一次生成；Tripo 一次生成及六次转换；`ART_AI_3D_PROVIDERS=hyper3d` 时一次 Rodin 文生 3D（3 Hyper3D credits，只核必需 GLB） |
-| 公共 Mock 自部署冒烟 | `smoke-public-mock.sh` | 自部署后本地手动运行（`SMOKE_ENV_FILE=.env bash scripts/smoke/smoke-public-mock.sh`）；不再由公共 CI 运行（#257：CI 不构建镜像） | 零（只接受 Mock Provider/Agent、全部 `*_API_KEY` 为空的回环地址栈）；不用于内部环境 |
+| L5 真实能力回归 | `smoke-l5-*.py`，入口 `smoke-l5-all.sh` | **每次 `dev-test` 发布后必跑全部脚本**（计入付费验收次数上限） | 真实付费，必须设 `ART_AI_LIVE_ACK=1`；见下文 L5 一节 |
+| 公共 Mock 自部署冒烟 | `smoke-public-mock.sh` | 自部署后本地手动运行（`SMOKE_ENV_FILE=.env bash scripts/smoke/smoke-public-mock.sh`）；不再由公共 CI 运行（#257：CI 不构建镜像） | 零（环境文件须显式写 `PROVIDER_MODE=mock`、`AGENT_MODE=mock`，只接受 Mock Provider/Agent、全部 `*_API_KEY` 为空的回环地址栈）；不用于内部环境 |
 
 L0–L4 各层在 `dev-test` 主机上执行时用 `ART_AI_SERVER_ROOT=<root> bash scripts/smoke/<脚本>`（`<root>` 为该环境发布根，读取本栈 `runtime.env`；L1 Agent 要核对容器 revision 时另设 `RELEASE_CONTAINER=<release-env.py show 的 container>`，脚本不再带缺省容器名，#261）；在本地执行时用 `python3 scripts/release-env.py smoke dev-test -- bash scripts/smoke/<脚本>`（自动设置 `BASE`、`ADMIN_*`、`EXPECT_SHA`、`RELEASE_CONTAINER`）。
+
+L5 脚本是 `.py`，不读取 `runtime.env`，只在本地通过 `release-env.py smoke` 运行：单个脚本 `ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- python3 scripts/smoke/smoke-l5-<名称>.py`，全部脚本 `ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- bash scripts/smoke/smoke-l5-all.sh`。完整 L5 运行计入 `AGENTS.md` 的付费验收次数上限（每个版本、每个 Provider 自行发起 10 次），超出部分须在当前对话取得用户批准。
 
 ### 批准方式对冒烟的影响（会话级，迁移 0043）
 
@@ -81,6 +84,34 @@ L0–L4 各层在 `dev-test` 主机上执行时用 `ART_AI_SERVER_ROOT=<root> ba
 - **2D 成品图的抽样口径见 `dev_test.md` §11.3**（每轮随机 1–5 张、不超过 5 张；
   满 5 张仍无问题就暂停先分析，不要继续加图）。本目录不另定标准。
 - 单元/集成/竞态门禁由本地门禁与 CI 覆盖（各项在哪里执行见 `dev_test.md` §2），不属于本目录职责。
+
+## L5 真实能力回归
+
+L5 用真实请求回归关键能力链路，每个脚本只测一个能力范围，共用 `l5_common.py`（登录、会话、发消息、等待判定、`toolCalls` 解析、报告）。脚本会产生真实费用，没有设置 `ART_AI_LIVE_ACK=1` 时直接拒绝执行（退出码 2）。
+
+```
+ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- python3 scripts/smoke/smoke-l5-<名称>.py --report <目录>
+ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- bash scripts/smoke/smoke-l5-all.sh --report <目录>
+```
+
+`release-env.py smoke` 提供 `BASE`、`ADMIN_*`、`EXPECT_SHA`；L5 只通过它在本地运行。输出 `PASS` / `FAIL` / `SKIP` 计数，有 FAIL 时退出码为 1；`--report <目录>` 写每个脚本的 JSON 报告（三视图脚本还保存各视图图片）。脚本不输出凭据、Cookie、签名 URL 的 query 或提示词全文。生成模型参数一律传 Offering 的 `model_id`，模型与参数选项从 Schema 读取，不写死厂商。
+
+等待规则：先等本轮回复成为最终内容（不再是 `__GENERATING__` 占位），再等预期能力的任务都已创建并全部进入终态，任务未创建前不判定结束。硬断言只看工具调用、任务状态、必需产物和审批卡片，对 LLM 文字最多做关键词检查。
+
+| 脚本 | 覆盖范围 | 费用量级 |
+|---|---|---|
+| `smoke-l5-chat-models.py` | 每个可用对话模型 × 其每个思考级别各一轮，回复为最终内容且无错误 | 仅对话 token |
+| `smoke-l5-2d-to-3d.py` | 全新会话首轮开始后生成标题；同一轮先 2D 再 3D，两个任务 SUCCEEDED、必需产物 READY | 一张图加一次图生 3D |
+| `smoke-l5-parallel.py` | 同一轮并行提交两张图，两个任务 SUCCEEDED | 两张图 |
+| `smoke-l5-three-view.py` | 左右不对称角色图 → 三视图 → 补齐 `left`、`back` → 多视图 3D（必须调用 `create_model_3d_from_views`）；各视图保存为 `view-<键>.png` 供人工核对 `left` 方向 | 约 4 张图加一次多视图 3D |
+| `smoke-l5-split.py` | 拆分生成：Tripo 网格分割、Hyper3D Bang（需 Rodin 来源）、图片智能分割；某链路在当前 Schema 不可用时输出 SKIP 并写明原因；`L5_SPLIT_ONLY=segment,bang,image` 可只跑部分链路 | 两到三次 3D 生成加分割 |
+| `smoke-l5-2d-params.py` | 按 Schema 声明的输出尺寸跑矩阵（1:1、竖版、横版、一个非默认尺寸，每个可用文生图模型至少一张），核对产物真实像素比例；图生图单参考图保持原比例，多参考图时 `reference_purposes` 生效 | 约 8 到 12 张图 |
+| `smoke-l5-canvas.py` | 经场景 API 放入两张图、移动与缩放（每次编辑修订号变化），再带着画板快照附件（脚本合成的纯色图，字段与浏览器一致）按画板改图、把画板转 3D；核对画板附件存在、改图不引用旧的单图句柄、内容不变时两轮复用同一个快照资产（#53） | 两到三张图加一次 3D |
+| `smoke-l5-3d-params.py` | 每个可用 3D Provider 一条：分部件或贴图开关、全部声明格式须交付、参数进入冻结输入；再核对一次格式补齐请求 | 每个 Provider 一次 3D 生成 |
+| `smoke-l5-2d-split.py` | 2D 拆分：角色图拆成部件图（至少三张，且以角色图为参考）、部件抠图、部件图转 3D | 约 6 张图加一次 3D |
+| `smoke-l5-agent-hard.py` | 刁钻对话：一句话多步、中途改主意、按序号引用、前后矛盾、不支持的能力、超限尺寸、手工批准卡片、模糊指代、英文与中英混合、口语三视图；`L5_AGENT_HARD_ONLY=用例名,…` 可只跑部分 | 约 10 张图和两到三次 3D |
+
+测试数据按协议保留在 `dev-test`。纯逻辑的离线单元测试：`python3 -m unittest scripts.tests.test_l5_common`。
 
 ## Fake 上游整栈自检（#96）
 

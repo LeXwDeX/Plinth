@@ -587,7 +587,7 @@ func isArchiveXML(name string) bool {
 // Target, metadata and ordinary text still obey the no-external-address rule.
 func scanArchiveXML(reader io.Reader, size int64) error {
 	if size > maxArchiveXMLBytes {
-		return errors.New("模型 XML 超出检查上限")
+		return rejectInspection("xml_size_limit", errors.New("模型 XML 超出检查上限"))
 	}
 	decoder := xml.NewDecoder(io.LimitReader(reader, size+1))
 	for {
