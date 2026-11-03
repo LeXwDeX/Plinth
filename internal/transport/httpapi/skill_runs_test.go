@@ -16,7 +16,7 @@ import (
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/catalogrecipes"
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -244,7 +244,7 @@ func TestThreeViewRecipePublicationPreservesOldRunAndPreparedInputs(t *testing.T
 	}
 	oldRun := decodeRun(create(legacy.Revision, "old-three-view"))
 	oldPrepared := prepare(oldRun, 0)
-	repository, err := sqlite.Open(databasePath)
+	repository, err := sqlitetest.Open(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}

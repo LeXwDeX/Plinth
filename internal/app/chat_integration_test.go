@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
@@ -93,7 +93,7 @@ func TestMockChatAgentRunsHTTPTaskAndSSEToCompletion(t *testing.T) {
 	// A new session is in manual mode and text-to-image needs no human: the
 	// Agent freezes the exact operation, session policy approves that grant and
 	// the same call submits the Task. Nothing waits for a person.
-	grantRepository, err := sqlite.Open(filepath.Join(root, "art-ai.db"))
+	grantRepository, err := sqlitetest.Open(filepath.Join(root, "art-ai.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestMockChatAgentAppliesSelectedSkillFromRuntimeCatalog(t *testing.T) {
 	if send.Code != http.StatusAccepted {
 		t.Fatalf("send status=%d body=%s", send.Code, send.Body)
 	}
-	repository, err := sqlite.Open(filepath.Join(root, "art-ai.db"))
+	repository, err := sqlitetest.Open(filepath.Join(root, "art-ai.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

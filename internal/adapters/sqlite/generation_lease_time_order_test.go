@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
@@ -31,7 +32,7 @@ func taskStamp(value time.Time) string {
 func openLeaseTimeDatabase(t *testing.T, seed func(*sql.DB)) (*sqlite.Repository, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "lease-time-order.db")
-	initial, err := sqlite.Open(path)
+	initial, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +52,7 @@ func openLeaseTimeDatabase(t *testing.T, seed func(*sql.DB)) (*sqlite.Repository
 	if err := raw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +257,7 @@ func TestCommitDispatchCheckpointLeaseGuardAtNanoseconds(t *testing.T) {
 			if err := raw.Close(); err != nil {
 				t.Fatal(err)
 			}
-			fixture.repository, err = sqlite.Open(fixture.path)
+			fixture.repository, err = sqlitetest.Open(fixture.path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -431,7 +432,7 @@ func TestMigration0061NormalizesTaskScheduleTimesIdempotently(t *testing.T) {
 	if err := repository.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := sqlite.Open(path)
+	reopened, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

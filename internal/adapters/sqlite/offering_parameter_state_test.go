@@ -13,7 +13,7 @@ func TestOfferingPatchSQLiteRollsBackValueReasonAndAutoClear(t *testing.T) {
 	for _, failure := range []string{"reason", "clear"} {
 		t.Run(failure, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "params.db")
-			repo, err := Open(path)
+			repo, err := openTestRepository(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -67,7 +67,7 @@ func TestOfferingPatchSQLiteRollsBackValueReasonAndAutoClear(t *testing.T) {
 			if err = repo.Close(); err != nil {
 				t.Fatal(err)
 			}
-			repo, err = Open(path)
+			repo, err = openTestRepository(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -85,7 +85,7 @@ func TestOfferingPatchSQLiteRollsBackValueReasonAndAutoClear(t *testing.T) {
 			if err = repo.Close(); err != nil {
 				t.Fatal(err)
 			}
-			repo, err = Open(path)
+			repo, err = openTestRepository(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -112,7 +112,7 @@ func TestOfferingPatchSQLiteRollsBackValueReasonAndAutoClear(t *testing.T) {
 }
 
 func TestOfferingPatchSQLiteRejectsStaleSnapshotWithoutOverwritingConcurrentState(t *testing.T) {
-	repo, err := Open(filepath.Join(t.TempDir(), "params.db"))
+	repo, err := openTestRepository(filepath.Join(t.TempDir(), "params.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

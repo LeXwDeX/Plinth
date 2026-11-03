@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
@@ -51,7 +52,7 @@ func (reconcileSQLiteGateway) SubmitPrepared(context.Context, generation.SubmitP
 // permits a fresh prepared input under that key would hide this recovery bug.
 func TestReconcileAbsentWithSQLiteRetainsGrantIdentityAndSameKeyAdmission(t *testing.T) {
 	ctx := context.Background()
-	repository, err := sqlite.Open(t.TempDir() + "/reconcile.db")
+	repository, err := sqlitetest.Open(t.TempDir() + "/reconcile.db")
 	if err != nil {
 		t.Fatal(err)
 	}

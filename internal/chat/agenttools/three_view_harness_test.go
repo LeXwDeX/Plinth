@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
@@ -87,7 +88,7 @@ func threeViewHarnessFixture(t *testing.T) (*Executor, *harnessThreeGateway, *ha
 	t.Helper()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "three.db")
-	repo, err := sqlite.Open(path)
+	repo, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +141,7 @@ func TestThreeViewNonzeroHarnessActualAdmissionAndRestartObservation(t *testing.
 	}
 	// Reopen the real ledger and change current selection. Recovery must observe
 	// the original accepted identity with no new recipe/source/preparation work.
-	second, err := sqlite.Open(path)
+	second, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

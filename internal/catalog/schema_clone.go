@@ -4,7 +4,9 @@ package catalog
 import (
 	"encoding/json"
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
+	"reflect"
 	"slices"
+	"sync"
 )
 
 func cloneStringMap(source map[string]string) map[string]string {
@@ -764,6 +766,104 @@ func cloneApplication(source ApplicationSchema) ApplicationSchema {
 			role.Permissions...,
 		)
 	}
+	// 上面逐字段的拷贝决定副本的形状（含空切片转 nil 等投影语义）；最后再整体深拷贝，
+	// 保证副本不再与源共享任何切片、map 或指针，新增字段也不会漏拷。
+	return deepCopy(result)
+}
+
+// deepCopy returns a copy of value that shares no pointer, slice, map or
+// interface target with it. Unexported struct fields are copied as they are.
+func deepCopy[T any](value T) T {
+	var result T
+	copyValue(reflect.ValueOf(&result).Elem(), reflect.ValueOf(&value).Elem())
+	return result
+}
+
+func copyValue(target, source reflect.Value) {
+	if !holdsReferences(source.Type()) {
+		target.Set(source)
+		return
+	}
+	switch source.Kind() {
+	case reflect.Pointer:
+		if source.IsNil() {
+			return
+		}
+		copied := reflect.New(source.Elem().Type())
+		copyValue(copied.Elem(), source.Elem())
+		target.Set(copied)
+	case reflect.Interface:
+		if source.IsNil() {
+			return
+		}
+		copied := reflect.New(source.Elem().Type()).Elem()
+		copyValue(copied, source.Elem())
+		target.Set(copied)
+	case reflect.Struct:
+		target.Set(source)
+		for index := range source.NumField() {
+			if field := target.Field(index); field.CanSet() {
+				copyValue(field, source.Field(index))
+			}
+		}
+	case reflect.Slice:
+		if source.IsNil() {
+			target.Set(source)
+			return
+		}
+		copied := reflect.MakeSlice(source.Type(), source.Len(), source.Len())
+		for index := range source.Len() {
+			copyValue(copied.Index(index), source.Index(index))
+		}
+		target.Set(copied)
+	case reflect.Array:
+		for index := range source.Len() {
+			copyValue(target.Index(index), source.Index(index))
+		}
+	case reflect.Map:
+		if source.IsNil() {
+			target.Set(source)
+			return
+		}
+		copied := reflect.MakeMapWithSize(source.Type(), source.Len())
+		entries := source.MapRange()
+		for entries.Next() {
+			value := reflect.New(source.Type().Elem()).Elem()
+			copyValue(value, entries.Value())
+			copied.SetMapIndex(entries.Key(), value)
+		}
+		target.Set(copied)
+	default:
+		target.Set(source)
+	}
+}
+
+// referenceTypes caches whether a type can reach shared memory through a
+// pointer, slice, map or interface; values of other types copy by assignment.
+var referenceTypes sync.Map
+
+func holdsReferences(valueType reflect.Type) bool {
+	if cached, ok := referenceTypes.Load(valueType); ok {
+		return cached.(bool)
+	}
+	// 递归类型在计算中先按“含引用”处理，结果只会偏保守。
+	referenceTypes.Store(valueType, true)
+	result := false
+	switch valueType.Kind() {
+	case reflect.Pointer, reflect.Interface, reflect.Slice, reflect.Map,
+		reflect.Chan, reflect.Func, reflect.UnsafePointer:
+		result = true
+	case reflect.Array:
+		result = holdsReferences(valueType.Elem())
+	case reflect.Struct:
+		for index := range valueType.NumField() {
+			if field := valueType.Field(index); field.IsExported() && holdsReferences(field.Type) {
+				result = true
+				break
+			}
+		}
+	}
+	referenceTypes.Store(valueType, result)
 	return result
 }
 

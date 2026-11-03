@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/canvas"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 )
 
 func TestCanvasPlacedResultsColumnIsNullableAppendOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "canvas-placed-shape.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestCanvasPlacedResultsColumnIsNullableAppendOnly(t *testing.T) {
 func TestCanvasPlacedResultsRoundTripWithNodesAndRevision(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "canvas-placed.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

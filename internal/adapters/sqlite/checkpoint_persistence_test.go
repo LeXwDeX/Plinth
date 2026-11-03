@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
@@ -34,7 +35,7 @@ type checkpointFixture struct {
 func newCheckpointFixture(t *testing.T) *checkpointFixture {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "checkpoint.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +422,7 @@ func TestDispatchCheckpointMigrationUpgradeAndSnapshotRestore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "checkpoint.db")
 
 	// 1) 新库（0021 已应用）写入任务 + 检查点数据。
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -522,7 +523,7 @@ func TestDispatchCheckpointMigrationUpgradeAndSnapshotRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	upgraded, err := sqlite.Open(path)
+	upgraded, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -577,7 +578,7 @@ func TestDispatchCheckpointMigrationUpgradeAndSnapshotRestore(t *testing.T) {
 	if err := copySQLiteFiles(snapshot, path); err != nil {
 		t.Fatal(err)
 	}
-	restored, err := sqlite.Open(path)
+	restored, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

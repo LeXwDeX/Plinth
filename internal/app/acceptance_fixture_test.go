@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
@@ -191,7 +192,7 @@ func newAcceptanceTestRig(t *testing.T) *acceptanceTestRig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.repo, err = sqlite.Open(filepath.Join(r.root, "test.db"))
+	r.repo, err = sqlitetest.Open(filepath.Join(r.root, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	_ "modernc.org/sqlite"
 )
@@ -29,7 +30,7 @@ type claimReadyFixture struct {
 func newClaimReadyFixture(t *testing.T) *claimReadyFixture {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "claim-ready.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +181,7 @@ func TestClaimReadyConcurrentWorkersSingleWinner(t *testing.T) {
 // 写入资源态 → 停写快照整体恢复后可读（与 0021 演练同一口径）。
 func TestResourceStateMigration0022UpgradeAndSnapshotRestore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "upgrade-0022.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +240,7 @@ func TestResourceStateMigration0022UpgradeAndSnapshotRestore(t *testing.T) {
 		}
 	}
 	// 恢复快照：资源态可读、领取谓词可用。
-	restored, err := sqlite.Open(snapshot)
+	restored, err := sqlitetest.Open(snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}

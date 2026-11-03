@@ -20,7 +20,7 @@ func seedReadProjectionTask(t *testing.T, r *Repository, id string, input string
 	}
 }
 func TestTaskListReadsOnlyPresentationSummary(t *testing.T) {
-	r, err := Open(filepath.Join(t.TempDir(), "summary.db"))
+	r, err := openTestRepository(filepath.Join(t.TempDir(), "summary.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestTaskListReadsOnlyPresentationSummary(t *testing.T) {
 	}
 }
 func TestBatchTaskReadDoesNotResurrectTombstones(t *testing.T) {
-	r, err := Open(filepath.Join(t.TempDir(), "deleted.db"))
+	r, err := openTestRepository(filepath.Join(t.TempDir(), "deleted.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestBatchTaskReadDoesNotResurrectTombstones(t *testing.T) {
 }
 
 func TestTaskReadProjectionPlans(t *testing.T) {
-	r, err := Open(filepath.Join(t.TempDir(), "plans.db"))
+	r, err := openTestRepository(filepath.Join(t.TempDir(), "plans.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestTaskReadProjectionPlans(t *testing.T) {
 }
 
 func TestTaskSummaryTracksChangedInputs(t *testing.T) {
-	r, err := Open(filepath.Join(t.TempDir(), "update.db"))
+	r, err := openTestRepository(filepath.Join(t.TempDir(), "update.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,12 +146,12 @@ func TestTaskSummaryTracksChangedInputs(t *testing.T) {
 
 func TestTaskListSnapshotDoesNotMixConcurrentDeletion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "snapshot.db")
-	r, err := Open(path)
+	r, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	other, err := Open(path)
+	other, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestTaskListSnapshotDoesNotMixConcurrentDeletion(t *testing.T) {
 }
 
 func TestRepositoryPaginationRejectsUnsafeLimitAndNeverOverflows(t *testing.T) {
-	r, err := Open(filepath.Join(t.TempDir(), "bounds.db"))
+	r, err := openTestRepository(filepath.Join(t.TempDir(), "bounds.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestRepositoryPaginationRejectsUnsafeLimitAndNeverOverflows(t *testing.T) {
 // 经仓库读回后保持旧语义：Minimum 解码为显式 1、Delivery/Variant 为空，
 // 快照字节零改写。
 func TestLegacyOfferingSnapshotDecodesWithoutResourceContractFields(t *testing.T) {
-	r, err := Open(filepath.Join(t.TempDir(), "legacy-offering.db"))
+	r, err := openTestRepository(filepath.Join(t.TempDir(), "legacy-offering.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

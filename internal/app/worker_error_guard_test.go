@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -47,7 +47,7 @@ func TestWorkerErrorDoesNotStopHTTPServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repository, err := sqlite.Open(filepath.Join(root, "art-ai.db"))
+	repository, err := sqlitetest.Open(filepath.Join(root, "art-ai.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

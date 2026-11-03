@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/canvas"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 )
@@ -19,7 +19,7 @@ func TestSQLiteCanvasRepositoryPreservesOwnershipNodesAndLinkedSession(
 
 	ctx := context.Background()
 	databasePath := filepath.Join(t.TempDir(), "canvas.db")
-	repository, err := sqlite.Open(databasePath)
+	repository, err := sqlitetest.Open(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestSQLiteCanvasRepositoryPreservesOwnershipNodesAndLinkedSession(
 	if err := repository.Close(); err != nil {
 		t.Fatal(err)
 	}
-	repository, err = sqlite.Open(databasePath)
+	repository, err = sqlitetest.Open(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestSQLiteCanvasRepositoryPreservesOwnershipNodesAndLinkedSession(
 
 func TestWorkspaceCanvasDeletionPreservesExistingChatSession(t *testing.T) {
 	ctx := context.Background()
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "workspace-canvas.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "workspace-canvas.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +301,7 @@ func TestSQLiteCanvasRepositoryRevisionLockAndCreatedAtPreservation(t *testing.T
 
 	ctx := context.Background()
 	databasePath := filepath.Join(t.TempDir(), "canvas-revision.db")
-	repository, err := sqlite.Open(databasePath)
+	repository, err := sqlitetest.Open(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}

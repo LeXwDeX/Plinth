@@ -214,7 +214,7 @@ func TestAggregateReadIsOneSnapshotAcrossDeliveryCompletion330(t *testing.T) {
 	for _, loader := range loaders {
 		t.Run(loader.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "snapshot.db")
-			seed, err := Open(path)
+			seed, err := openTestRepository(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -222,7 +222,7 @@ func TestAggregateReadIsOneSnapshotAcrossDeliveryCompletion330(t *testing.T) {
 			if err := seed.db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			writer, err := Open(path)
+			writer, err := openTestRepository(path)
 			if err != nil {
 				t.Fatal(err)
 			}

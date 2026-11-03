@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
 	"github.com/LeXwDeX/Plinth/internal/assets/modelinput"
@@ -23,7 +23,7 @@ func policy() modelinput.Policy {
 func fixture(t *testing.T) (*inputassets.Service, *modelsource.Service) {
 	t.Helper()
 	dir := t.TempDir()
-	repo, err := sqlite.Open(filepath.Join(dir, "test.db"))
+	repo, err := sqlitetest.Open(filepath.Join(dir, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

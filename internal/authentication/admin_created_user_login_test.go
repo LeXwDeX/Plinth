@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/administration"
 	"github.com/LeXwDeX/Plinth/internal/authentication"
 )
@@ -17,7 +17,7 @@ import (
 // authentication 读同一张表并回写 last_login——任何一侧的列/过滤条件漂移
 // 都会让账号静默不可用（当时表现为登录 500，而不是 401）。
 func TestAdminCreatedUserCanAuthenticate(t *testing.T) {
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "test.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

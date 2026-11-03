@@ -41,7 +41,7 @@ func manifestHash(b []byte) string { sum := sha256.Sum256(b); return hex.EncodeT
 func manifestFixture(t *testing.T) (*Repository, *RenderManifestRepository, rendermanifest.Manifest) {
 	t.Helper()
 	ctx := context.Background()
-	repo, err := Open(filepath.Join(t.TempDir(), "manifest.db"))
+	repo, err := openTestRepository(filepath.Join(t.TempDir(), "manifest.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

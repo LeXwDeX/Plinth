@@ -12,17 +12,18 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
 func TestCreateAdmissionSerializesIndependentRepositories(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "admission.db")
-	first, err := sqlite.Open(path)
+	first, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer first.Close()
-	second, err := sqlite.Open(path)
+	second, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,12 +116,12 @@ func TestCreateAdmissionSerializesIndependentRepositories(t *testing.T) {
 
 func TestCreateAdmissionConcurrentSameKeyReplaysAtCapacity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "replay.db")
-	first, err := sqlite.Open(path)
+	first, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer first.Close()
-	second, err := sqlite.Open(path)
+	second, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 )
 
@@ -34,7 +35,7 @@ func TestStopBeforeConfigurationFreezeFinishesAcrossRestart(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "chat.db")
-			repository, err := sqlite.Open(path)
+			repository, err := sqlitetest.Open(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -60,7 +61,7 @@ func TestStopBeforeConfigurationFreezeFinishesAcrossRestart(t *testing.T) {
 				if err := r.Close(); err != nil {
 					t.Fatal(err)
 				}
-				r.Repository, err = sqlite.Open(path)
+				r.Repository, err = sqlitetest.Open(path)
 				if err != nil {
 					t.Fatal(err)
 				}

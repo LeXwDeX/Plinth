@@ -46,7 +46,7 @@ func (b captureTestBytes) OpenOwned(_ context.Context, owner, id string) (io.Rea
 
 func captureFixture(t *testing.T) (*Repository, *CaptureRepository, capture.Command, []byte) {
 	t.Helper()
-	repo, err := Open(filepath.Join(t.TempDir(), "capture.db"))
+	repo, err := openTestRepository(filepath.Join(t.TempDir(), "capture.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestCaptureNewRegistrationUsesFrozenRoleVariantContractAfterReopen(t *testi
 			if err = repo.Close(); err != nil {
 				t.Fatal(err)
 			}
-			reopened, err := Open(dbPath)
+			reopened, err := openTestRepository(dbPath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -241,7 +241,7 @@ func TestCaptureCommittedReplayDoesNotRevalidateChangedSource(t *testing.T) {
 	if err = repo.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := Open(dbPath)
+	reopened, err := openTestRepository(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

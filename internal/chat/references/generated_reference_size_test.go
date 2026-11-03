@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/assets/imagefit"
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
@@ -127,7 +127,7 @@ func TestGeneratedReferenceUsesOfferingLimitNotUploadLimit(t *testing.T) {
 			size, uploadLimit, runtime.GeneratedReferenceMaxBytes)
 	}
 	root := t.TempDir()
-	repository, err := sqlite.Open(filepath.Join(root, "test.db"))
+	repository, err := sqlitetest.Open(filepath.Join(root, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

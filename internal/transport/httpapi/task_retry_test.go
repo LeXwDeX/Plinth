@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/authentication"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -48,7 +49,7 @@ func retryBrowser(t *testing.T) (http.Handler, *http.Cookie) {
 
 func seedFailedTasks(t *testing.T, databasePath string) {
 	t.Helper()
-	repository, err := sqlite.Open(databasePath)
+	repository, err := sqlitetest.Open(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}

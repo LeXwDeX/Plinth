@@ -25,7 +25,7 @@ func (l lineageTasks) GetScoped(ctx context.Context, scope generation.TaskListSc
 // The version chain reads real stored rows: frozen input JSON, offering JSON,
 // capture records and byte hashes of input assets.
 func TestLineageReadsStoredTasksCapturesAndInputAssets(t *testing.T) {
-	repo, err := Open(filepath.Join(t.TempDir(), "lineage.db"))
+	repo, err := openTestRepository(filepath.Join(t.TempDir(), "lineage.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

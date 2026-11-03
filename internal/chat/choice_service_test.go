@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 )
 
@@ -16,7 +16,7 @@ import (
 // one of the card's options; the card stays answerable when the turn fails.
 func TestATurnAnswersItsSessionsChoiceCardOnce(t *testing.T) {
 	ctx := context.Background()
-	repo, err := sqlite.Open(filepath.Join(t.TempDir(), "chat.db"))
+	repo, err := sqlitetest.Open(filepath.Join(t.TempDir(), "chat.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
