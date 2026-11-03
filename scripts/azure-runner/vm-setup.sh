@@ -64,7 +64,7 @@ systemctl enable --now plinth-ci-idle-stop.timer
 
 # GitHub Actions runner as an unprivileged user.
 id runner > /dev/null 2>&1 || useradd -m -s /bin/bash runner
-cd /home/runner
+cd /home/runner/
 if [ ! -d actions-runner ]; then
   mkdir actions-runner
   curl -sfL -o /tmp/runner.tgz "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
@@ -81,7 +81,7 @@ if [ -n "${GITHUB_WORKSPACE:-}" ] && [ -d "$GITHUB_WORKSPACE" ]; then
 fi
 EOS
 chmod 755 /home/runner/job-started.sh
-chown -R runner:runner /home/runner
+chown -R runner:runner /home/runner/
 if [ ! -f actions-runner/.runner ]; then
   sudo -u runner bash -c "cd /home/runner/actions-runner && ./config.sh --unattended --url https://github.com/LeXwDeX/Plinth --token '${REG_TOKEN}' --name plinth-azure-f16 --labels plinth-azure --work _work --replace"
 fi
