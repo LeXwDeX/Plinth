@@ -1842,7 +1842,13 @@ Texture 修订 `2026-10-21.187.2` 按独立端点的最高分辨率合同固定 
 
 **CI 运行位置与主机自检（#79、#97、#86）。**
 
-- `.github/workflows/ci.yml` 的 `workflow_dispatch` 有布尔输入 `use_self_hosted`，默认 `false`。`push`、`pull_request` 与默认手动运行选择 `ubuntu-latest`；只有 `workflow_dispatch` 且该输入为 `true` 时，`frontend`、`go check`、`go test race` 三个作业才选择固定标签集 `[self-hosted, Linux, X64, plinth-trusted-ci]`。显式自托管 dispatch 在 ref 前加固定标识，使用独立并发组，其他事件的分组和取消规则不变。门禁命令、`permissions: contents: read`、Action 的完整 SHA 与 `persist-credentials: false` 保持不变。
+- `.github/workflows/ci.yml` 的 `workflow_dispatch` 有布尔输入 `use_self_hosted`，默认 `false`。`push`、`pull_request` 与默认手动运行选择 `ubuntu-latest`（`go test race` 的例外见下一条）；只有 `workflow_dispatch` 且该输入为 `true` 时，`frontend`、`go check`、`go test race` 三个作业才选择固定标签集 `[self-hosted, Linux, X64, plinth-trusted-ci]`。显式自托管 dispatch 在 ref 前加固定标识，使用独立并发组，其他事件的分组和取消规则不变。门禁命令、`permissions: contents: read`、Action 的完整 SHA 与 `persist-credentials: false` 保持不变。
+- Azure 按需 runner（#78）：`go test race` 在本仓库 `main` 的 `push`，以及 head 仓库就是本仓库的 `pull_request` 上，选择标签集 `[self-hosted, Linux, X64, plinth-azure]`。这是一台按量计费、用时开机的 Azure 16 核仓库级 runner；fork PR 与其他事件仍走 `ubuntu-latest`，`frontend` 与 `go check` 不变。门禁作业依然没有作业级 `if`、`needs` 或 `permissions`，路由表达式与事件用例由 `ci-gate-parity.test.ts` 锁定。
+  - 开机：独立工作流 `.github/workflows/azure-runner.yml` 在上述事件上以 GitHub OIDC 登录并开机，另每 10 分钟（及手动触发时）只读检查一次，有作业排队等该标签就开机，覆盖重跑作业与开机失败。它不跑门禁、不检出或读取触发方的代码，是仓库里唯一持有 `id-token: write` 的工作流。
+  - 身份与权限：OIDC 身份的角色只能读取、开机、解除分配这一台 VM，联合凭据只认本仓库的 `main` 与本仓库的 `pull_request`；fork PR 拿不到 OIDC token。
+  - 关机：VM 用自身托管身份在空闲 10 分钟后解除分配（空闲按 `Runner.Worker` 进程是否存在计算，卡死作业由 `timeout-minutes` 结束），平台侧每日定时关机兜底。
+  - 机器内：runner 以无特权用户运行，每个作业开始前清空工作目录，测试临时目录在随解除分配清空的本地临时盘上；机器上不放 Plinth 运行密钥。常驻 runner 的注册凭据作业进程可读，是已知残留风险，靠只放行可信事件控制。安装脚本是 `scripts/azure-runner/vm-setup.sh`，资源清单与删除方式只记在 #78。
+  - 验证范围：开机、空闲解除分配与平台兜底关机各实测一次（#79）；定时检查开机的路径在合入默认分支前无法运行，合入后验证。
 - 路由不是隔离边界：PR 可以修改工作流；维护者只应在审查完整 SHA、核验受信任 ref 与运行环境后明确触发。运行后对照 `head_sha`、实际 runner ID 和 checkout 只提供事后证据，不能阻止不可信代码执行。私有仓库转公开前须证明平台级隔离或阻止不可信工作流触达 runner，未证明时不得称安全。两种路径均要求仅访问公共依赖源、不访问内网，但静态检查不能证明实际网络访问，运行环境须分别核验。
 - 托管 runner 遇到计费墙时：仅在存在自托管 runner 且其安全和精确 ref 已核验时优先尝试；没有或不可用时先本机初检，再在指定 `dev-test` 主机对同一精确 SHA 做完整隔离自检，作为 CI 的替代证据（隔离、源码绑定、门禁和报告条件见 `dev_test.md` §2）。自检不生成 GitHub Actions success，不代替 Git hooks 或部署后回归。离线测试不证明实际 runner 调度或隔离。
 
@@ -1863,7 +1869,7 @@ Texture 修订 `2026-10-21.187.2` 按独立端点的最高分辨率合同固定 
 - `ci.yml` 用 `yaml` 库（开发依赖）结构化解析；门禁步骤或作业上的 `if`、`continue-on-error`、`shell`、`env`、`needs`、`strategy` 等字段、锚点别名、非 `-timeout=Nm` 的 `GOFLAGS` 必须被拒绝，引号键或流式写法的额外步骤因归一化而无法绕过。
 - 主机 CI 入口的门禁集合来自同一份 `selected_gates(race=True)`，其 `GOFLAGS` 只能是并行度；Node/Go 版本以 `ci.yml` 为准并与 `Dockerfile.ci` 核对。
 - 门禁集合含第 9 项「scripts tests」：发布与门禁脚本的 Python 单测（`scripts/tests`）进入 `verify-local.py`、`ci.yml` 的 `go check` 作业与 `dev_test.md` §2，主机 CI 的两种模式随之运行。依赖 macOS FSEvents 的监视/指纹测试类在非 macOS 上跳过（该部分覆盖只在 macOS 本机体现）；`Dockerfile.ci` 装有 `sqlite3`。
-- `scripts/host-ci/run.py --workflows` 是主机 CI 的第二种模式：复用 bundle、`flock`、资源预检和清理，在主机上用固定版本（发布包 sha256 固定）的 nektos/act 与按摘要固定的运行器镜像重放 `.github/workflows` 的 `pull_request` 与 `push` 事件，作业容器限 4 CPU、10 GiB，串行执行。它是本地模拟，不是 GitHub self-hosted runner，不监听平台事件。两种模式结束后由本机 `gh` 登录写 commit status（`host-ci/gates`、`host-ci/workflows`），只写被测 SHA 的状态，不改分支保护。
+- `scripts/host-ci/run.py --workflows` 是主机 CI 的第二种模式：复用 bundle、`flock`、资源预检和清理，在主机上用固定版本（发布包 sha256 固定）的 nektos/act 与按摘要固定的运行器镜像重放 `.github/workflows/ci.yml` 的 `pull_request` 与 `push` 事件（`azure-runner.yml` 只负责开机，不重放；`plinth-azure` 标签与 `ubuntu-latest` 映射到同一个受限运行器镜像），作业容器限 4 CPU、10 GiB，串行执行。它是本地模拟，不是 GitHub self-hosted runner，不监听平台事件。两种模式结束后由本机 `gh` 登录写 commit status（`host-ci/gates`、`host-ci/workflows`），只写被测 SHA 的状态，不改分支保护。
 - 范围限制：act 与官方 runner 的行为差异（调度、令牌、缓存服务、隔离）未验证，不能视为 Actions success；静态解析不证明 GitHub 的实际运行、runner 隔离或网络访问。镜像 hash 随 `pnpm-lock.yaml` 变化（`yaml` 属前端开发依赖），依赖变更后首次运行需要重建一次镜像。
 
 **账号密码登录（#249）。**
