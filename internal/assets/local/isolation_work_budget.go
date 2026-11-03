@@ -15,6 +15,9 @@ const (
 	// A delivered file may spend this many units per byte. Every check costs
 	// a fixed number of units per byte, so the bound stays linear in the file.
 	inspectionWorkPerByte int64 = 8
+	// The largest budget any delivered file can receive. Work arithmetic is
+	// overflow-checked against it; each file is held to its own budget.
+	maxScaledInspectionWork = maxArchiveBytes * inspectionWorkPerByte
 )
 
 type inspectionWorkBudget struct {
@@ -26,6 +29,9 @@ type inspectionWorkBudget struct {
 	reclaimable int64
 	// Every Draco range in one nested asset shares the same absolute deadline.
 	dracoDeadline time.Time
+	// delivered is the size of the file the budget was scaled for. Per-format
+	// byte ceilings scale with it, never with what an archive claims to expand to.
+	delivered int64
 }
 
 func newInspectionWorkBudget() *inspectionWorkBudget {
@@ -37,11 +43,24 @@ func newInspectionWorkBudget() *inspectionWorkBudget {
 // the fixed floor (decided by Lex, 2026-10-10).
 func newInspectionWorkBudgetForSize(size int64) *inspectionWorkBudget {
 	budget := newInspectionWorkBudget()
-	size = min(size, maxArchiveBytes)
-	if size > 0 && size*inspectionWorkPerByte > budget.remaining {
-		budget.remaining = size * inspectionWorkPerByte
-	}
+	budget.remaining = scaledInspectionCeiling(maxInspectionWork, size, maxScaledInspectionWork)
+	budget.delivered = max(size, 0)
 	return budget
+}
+
+// scaledInspectionCeiling raises a fixed floor to inspectionWorkPerByte times
+// the delivered file, capped at limit. High-poly models legitimately exceed
+// the fixed floors: a 111 MB Meshy 3MF holds 533 MB of model XML and its USDZ
+// a 295 MB USDC (#81). The ratio still rejects small files that expand far.
+func scaledInspectionCeiling(floor, size, limit int64) int64 {
+	size = min(max(size, 0), maxArchiveBytes)
+	return min(max(floor, size*inspectionWorkPerByte), max(floor, limit))
+}
+
+// bytesCeiling is a per-format byte bound for the delivered file. Bytes held
+// or decoded for one check never exceed the archive expansion bound.
+func (budget *inspectionWorkBudget) bytesCeiling(floor int64) int64 {
+	return scaledInspectionCeiling(floor, budget.delivered, maxArchiveBytes)
 }
 
 func inspectionWorkError() error {
@@ -106,7 +125,7 @@ func inspectionCeilChunks(size int64) int64 {
 }
 
 func addInspectionWork(total *int64, count, unit int64) error {
-	if count < 0 || unit <= 0 || count > (maxInspectionWork-*total)/unit {
+	if count < 0 || unit <= 0 || count > (maxScaledInspectionWork-*total)/unit {
 		return inspectionWorkError()
 	}
 	*total += count * unit
@@ -157,7 +176,7 @@ func estimateInspectionWork(fields []inspectionField, size, sections int64, inpu
 		if field.floating {
 			weight++
 		}
-		if field.count > maxInspectionWork/field.width {
+		if field.count > maxScaledInspectionWork/field.width {
 			return inspectionWorkEstimate{}, inspectionWorkError()
 		}
 		if err := addInspectionWork(&estimate.total, field.count*field.width, weight); err != nil {
@@ -186,8 +205,11 @@ func estimateInspectionWork(fields []inspectionField, size, sections int64, inpu
 	if err := addInspectionWork(&estimate.total, estimate.nodes, 1); err != nil {
 		return inspectionWorkEstimate{}, err
 	}
-	limit := maxInspectionWork
-	if size <= (maxInspectionWork-baseInspectionWork)/inspectionWorkRatio {
+	// The plan stays proportional to its bytes. The absolute ceiling is the
+	// delivered file's own budget, which the caller reserves this estimate
+	// against; a fixed cap here rejected high-poly GLBs over ~250 MiB (#81).
+	limit := maxScaledInspectionWork
+	if size <= (maxScaledInspectionWork-baseInspectionWork)/inspectionWorkRatio {
 		limit = baseInspectionWork + inspectionWorkRatio*size
 	}
 	if estimate.total > limit {

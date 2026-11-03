@@ -19,7 +19,7 @@ func inspectionReasonOf(err error) string {
 // only named the wire family. Each now names the failing check; acceptance is
 // unchanged.
 func TestInspectionCapsAndNumericRejectionsCarryTypedReasons(t *testing.T) {
-	if got := inspectionReasonOf(scanArchiveXML(bytes.NewReader(nil), maxArchiveXMLBytes+1)); got != "xml_size_limit" {
+	if got := inspectionReasonOf(scanArchiveXML(bytes.NewReader(nil), maxArchiveXMLBytes+1, archiveXMLLimit(0))); got != "xml_size_limit" {
 		t.Fatalf("xml cap reason=%q", got)
 	}
 	if got := inspectionReasonOf(inspectUSDC(bytes.NewReader(nil), maxUSDCBytes+1, nil, "", nil)); got != "usdc_size_limit" {

@@ -2,6 +2,7 @@ package local
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"encoding/xml"
 	"errors"
@@ -24,9 +25,14 @@ const (
 	isolationChunkBytes = 64 << 10
 	isolationOverlap    = 4 << 10
 	maxModelJSONBytes   = 32 << 20
-	maxArchiveXMLBytes  = 256 << 20
-	maxArchiveFiles     = 10000
-	maxArchiveBytes     = 1 << 30
+	// Model XML length floor; it scales with the delivered archive (#81).
+	maxArchiveXMLBytes = 256 << 20
+	// A decoder holds the current token plus the name and namespace state of
+	// every open element. These bound that memory however long the document is.
+	maxArchiveXMLHeldBytes = 4 << 20
+	maxArchiveXMLDepth     = 256
+	maxArchiveFiles        = 10000
+	maxArchiveBytes        = 1 << 30
 	// Matches the largest base64 image response (max_response_bytes, 256 MiB);
 	// 8K PBR textures can exceed 64 MiB. A URL-downloaded texture is bounded
 	// only by its role's max_bytes (1 GiB) and is rejected above this limit.
@@ -534,6 +540,10 @@ func inspectArchiveWithXMLPart(file io.ReaderAt, size int64, xmlPart string) err
 	buffers := newArchiveGLTFBuffers(archive.File, fileNames)
 	// Members are inspected uncompressed, so scale with the larger size.
 	budget := newInlineInspectionBudgetForSize(max(size, int64(total)))
+	// Work scales with the expanded members, but byte ceilings (model XML,
+	// USDC) scale with the delivered archive: a small file that claims a large
+	// expansion must not raise them.
+	budget.work.delivered = size
 	budget.onArchiveDocument = buffers.addModel
 	work := &archiveInspectionWork{remaining: 3 * maxArchiveBytes}
 	models := make(map[*zip.File]bool)
@@ -562,7 +572,7 @@ func inspectArchiveWithXMLPart(file io.ReaderAt, size int64, xmlPart string) err
 			continue
 		}
 		if xmlPart != "" && path.Clean(entry.Name) == xmlPart {
-			if err := inspectDeclaredXMLMember(entry, work); err != nil {
+			if err := inspectDeclaredXMLMember(entry, work, archiveXMLLimit(size)); err != nil {
 				return err
 			}
 			if layout == nil {
@@ -585,15 +595,21 @@ func isArchiveXML(name string) bool {
 // 3MF and OPC use HTTP URIs as immutable XML vocabulary identifiers. Only
 // namespace declarations and relationship Type may contain such identifiers;
 // Target, metadata and ordinary text still obey the no-external-address rule.
-func scanArchiveXML(reader io.Reader, size int64) error {
-	if size > maxArchiveXMLBytes {
+// limit comes from archiveXMLLimit: the total length scales with the archive,
+// while token size and nesting depth keep decoder memory fixed.
+func scanArchiveXML(reader io.Reader, size, limit int64) error {
+	if size > limit {
 		return rejectInspection("xml_size_limit", errors.New("模型 XML 超出检查上限"))
 	}
-	decoder := xml.NewDecoder(io.LimitReader(reader, size+1))
+	decoder := newArchiveXMLDecoder(reader, size)
 	for {
 		token, err := decoder.Token()
 		if err == io.EOF {
 			return nil
+		}
+		var rejection *inspectionRejection
+		if errors.As(err, &rejection) {
+			return err
 		}
 		if err != nil {
 			return fmt.Errorf("模型 XML 无效: %w", err)
@@ -630,4 +646,85 @@ func scanArchiveXML(reader io.Reader, size int64) error {
 			}
 		}
 	}
+}
+
+// archiveXMLLimit is the model XML length ceiling for an archive of size
+// bytes, applied by every path that reads that XML.
+func archiveXMLLimit(size int64) int64 {
+	return scaledInspectionCeiling(maxArchiveXMLBytes, size, maxArchiveBytes)
+}
+
+// archiveXMLDecoder is a strict encoding/xml decoder whose memory stays
+// bounded for any document length: it reads through xmlTokenReader, so the
+// bytes it holds (open start tags plus the current token) are counted, and
+// it refuses nesting deeper than maxArchiveXMLDepth.
+type archiveXMLDecoder struct {
+	decoder *xml.Decoder
+	reader  *xmlTokenReader
+	// Bytes of each open start tag; they stay held until the element ends.
+	open []int64
+}
+
+func newArchiveXMLDecoder(reader io.Reader, size int64) *archiveXMLDecoder {
+	tokens := &xmlTokenReader{reader: bufio.NewReaderSize(io.LimitReader(reader, size+1), isolationChunkBytes)}
+	return &archiveXMLDecoder{decoder: xml.NewDecoder(tokens), reader: tokens}
+}
+
+func (d *archiveXMLDecoder) Token() (xml.Token, error) {
+	held := d.reader.held
+	token, err := d.decoder.Token()
+	if errors.Is(err, errXMLHeldLimit) {
+		return nil, rejectInspection("xml_token_limit", errors.New("模型 XML 单个记录超出检查上限"))
+	}
+	if err != nil {
+		return nil, err
+	}
+	switch token.(type) {
+	case xml.StartElement:
+		if len(d.open) == maxArchiveXMLDepth {
+			return nil, rejectInspection("xml_depth_limit", errors.New("模型 XML 嵌套超出检查上限"))
+		}
+		d.open = append(d.open, d.reader.held-held)
+	case xml.EndElement:
+		// Strict decoding pairs every end tag with an open element,
+		// including the end it synthesizes for an empty-element tag.
+		d.reader.held = held - d.open[len(d.open)-1]
+		d.open = d.open[:len(d.open)-1]
+	default:
+		d.reader.held = held
+	}
+	return token, nil
+}
+
+var errXMLHeldLimit = errors.New("XML held bytes limit")
+
+// xmlTokenReader is an io.ByteReader, so encoding/xml reads through it
+// without its own buffer and every byte it holds passes the count below.
+// held is the open start tags plus the token being read.
+type xmlTokenReader struct {
+	reader *bufio.Reader
+	held   int64
+}
+
+func (r *xmlTokenReader) ReadByte() (byte, error) {
+	if r.held >= maxArchiveXMLHeldBytes {
+		return 0, errXMLHeldLimit
+	}
+	value, err := r.reader.ReadByte()
+	if err == nil {
+		r.held++
+	}
+	return value, err
+}
+
+func (r *xmlTokenReader) Read(buffer []byte) (int, error) {
+	if len(buffer) == 0 {
+		return 0, nil
+	}
+	value, err := r.ReadByte()
+	if err != nil {
+		return 0, err
+	}
+	buffer[0] = value
+	return 1, nil
 }

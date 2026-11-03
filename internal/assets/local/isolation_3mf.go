@@ -62,7 +62,7 @@ func inspect3MFIdentity(file io.ReaderAt, size int64) error {
 	if err := inspect3MFXMLRoot(contentTypes, "Types", maxPackageMetadataBytes); err != nil {
 		return err
 	}
-	return inspect3MFXMLRoot(model, "model", maxArchiveXMLBytes)
+	return inspect3MFXMLRoot(model, "model", uint64(archiveXMLLimit(size)))
 }
 
 // find3MFStartPart returns the package-root 3D model part named by the OPC
@@ -126,7 +126,7 @@ func inspect3MFXMLRoot(member *zip.File, root string, limit uint64) error {
 		return errNot3MF
 	}
 	defer body.Close()
-	decoder := xml.NewDecoder(io.LimitReader(body, int64(limit)+1))
+	decoder := newArchiveXMLDecoder(body, int64(limit))
 	depth, roots := 0, 0
 	for {
 		token, err := decoder.Token()

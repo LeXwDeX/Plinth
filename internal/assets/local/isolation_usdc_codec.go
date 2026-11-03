@@ -8,8 +8,8 @@ import (
 // TfFastCompression uses a chunk-count byte followed by LZ4 blocks. The
 // bounded decoder below implements that wire contract without a runtime USD
 // library. See OpenUSD pxr/base/tf/fastCompression.cpp and sdf/integerCoding.cpp.
-func decodeUSDCFast(data []byte, limit int64, work *inspectionWorkBudget) ([]byte, error) {
-	if len(data) == 0 || limit < 0 || limit > maxUSDCBytes {
+func decodeUSDCFast(data []byte, limit, ceiling int64, work *inspectionWorkBudget) ([]byte, error) {
+	if len(data) == 0 || limit < 0 || limit > ceiling {
 		return nil, errors.New("USDC 压缩大小无效")
 	}
 	if err := work.reserve(limit); err != nil {
@@ -118,7 +118,7 @@ func decodeUSDCLZ4(data, output []byte, limit int) ([]byte, error) {
 // Integer coding stores a common signed delta, two-bit widths and signed
 // deltas. Unsigned accumulation deliberately has the wire's uint32 wrap.
 func (p *usdcParser) integers(c *usdcCursor, count int64, collect bool) ([]uint32, error) {
-	if count < 0 || count > maxUSDCBytes/4 {
+	if count < 0 || count > p.limit/4 {
 		return nil, errors.New("USDC 整数数量超出限制")
 	}
 	n, err := c.u64()
@@ -133,7 +133,7 @@ func (p *usdcParser) integers(c *usdcCursor, count int64, collect bool) ([]uint3
 	if count != 0 {
 		limit = 4 + (count+3)/4 + count*4
 	}
-	if len(body) == 0 || limit > maxUSDCBytes {
+	if len(body) == 0 || limit > p.limit {
 		return nil, errors.New("USDC 压缩大小无效")
 	}
 	// Delta interpretation, reconstructed LE bytes and the independent encoded
