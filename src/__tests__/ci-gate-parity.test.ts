@@ -600,8 +600,9 @@ describe('host CI parity with the gates (#86)', () => {
 
 /**
  * The Azure runner start workflow (#78) holds the only id-token in this repository. It starts the VM
- * for a push to main or a pull request from this repository, and from main on a schedule or by hand
- * when a race job is queued for the Azure label (re-runs do not re-trigger push or pull_request).
+ * for a push to main or a pull request from this repository, and from main by hand when a race job
+ * is queued for the Azure label. Re-runs do not re-trigger push or pull_request; the workflow_job
+ * webhook (scripts/azure-runner/webhook) starts the VM for those.
  * It must never run or read the triggering code.
  */
 describe('Azure runner start workflow (#78)', () => {
@@ -610,24 +611,23 @@ describe('Azure runner start workflow (#78)', () => {
   const startCondition = [
     "(github.event_name == 'push' && github.ref == 'refs/heads/main') ||",
     "(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||",
-    "((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')",
+    "(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')",
   ].join(' ');
   const condition = (source: string) => {
     const parsed = parseDocument(source, { uniqueKeys: true }).toJS();
     return String(parsed.jobs.start.if).replace(/\s+/g, ' ').replace(/^\$\{\{ | \}\}$/g, '').trim();
   };
 
-  it('starts only on push to main, same-repository pull requests, and a schedule or dispatch from main', () => {
+  it('starts only on push to main, same-repository pull requests, and a dispatch from main', () => {
     expect(workflow.on).toEqual({
       push: { branches: ['main'] },
       pull_request: null,
-      schedule: [{ cron: '7-59/10 * * * *' }],
       workflow_dispatch: null,
     });
     expect(Object.keys(workflow.jobs)).toEqual(['start']);
     expect(condition(text)).toBe(startCondition);
     expect(condition(text.replace("github.event.pull_request.head.repo.full_name == github.repository", 'true'))).not.toBe(startCondition);
-    expect(condition(text.replace("github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'", "github.event_name == 'workflow_dispatch')"))).not.toBe(startCondition);
+    expect(condition(text.replace("github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'", "github.event_name == 'workflow_dispatch'"))).not.toBe(startCondition);
     expect(condition(text)).not.toMatch(/workflow_run|pull_request_target/);
   });
 
@@ -637,13 +637,13 @@ describe('Azure runner start workflow (#78)', () => {
     const starts = (e: Event) =>
       (e.name === 'push' && e.ref === 'refs/heads/main')
       || (e.name === 'pull_request' && e.head === repository)
-      || ((e.name === 'schedule' || e.name === 'workflow_dispatch') && e.ref === 'refs/heads/main');
+      || (e.name === 'workflow_dispatch' && e.ref === 'refs/heads/main');
     const cases: [Event, boolean][] = [
       [{ name: 'push', ref: 'refs/heads/main' }, true],
       [{ name: 'push', ref: 'refs/heads/feature' }, false],
       [{ name: 'pull_request', head: repository }, true],
       [{ name: 'pull_request', head: 'someone/Plinth' }, false],
-      [{ name: 'schedule', ref: 'refs/heads/main' }, true],
+      [{ name: 'schedule', ref: 'refs/heads/main' }, false],
       [{ name: 'workflow_dispatch', ref: 'refs/heads/main' }, true],
       [{ name: 'workflow_dispatch', ref: 'refs/heads/feature' }, false],
     ];
@@ -666,11 +666,11 @@ describe('Azure runner start workflow (#78)', () => {
     expect(runs[0]).toContain('actions/workflows/ci.yml/runs');
     expect(runs[0]).toContain('index("plinth-azure")');
     expect(runs[0]).not.toMatch(/\$\{\{/);
-    // On a schedule or dispatch the VM starts only when a job is queued for it.
+    // On a dispatch the VM starts only when a job is queued for it.
     const guarded = "${{ steps.queued.outcome == 'skipped' || steps.queued.outputs.count != '0' }}";
     expect(steps.filter((step) => step.id !== 'queued').map((step) => step.if)).toEqual([guarded, guarded]);
     expect(steps[0].id).toBe('queued');
-    expect(steps[0].if).toBe("${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}");
+    expect(steps[0].if).toBe("${{ github.event_name == 'workflow_dispatch' }}");
   });
 });
 

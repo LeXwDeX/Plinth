@@ -1,11 +1,12 @@
 # Azure 按需 runner 开机（#78）。ci.yml 的 go test race 在可信事件上路由到 plinth-azure 标签：
 # 本仓库 main 的 push，以及 head 在本仓库的 pull_request。这里在同样的事件上立即开机；
-# 另每 10 分钟（错开整点，GitHub 在整点高峰会延迟或丢弃定时运行；及手动触发时）检查一次：有 race 作业在排队等 plinth-azure 就开机，
-# 覆盖重跑作业（重跑不会再触发 push/pull_request）与开机失败的情况。
+# 重跑作业不会再触发 push/pull_request，由仓库 workflow_job webhook 调用 plinth-ci-rg 内的
+# Azure Function 开机（scripts/azure-runner/webhook/）；GitHub 定时触发在本仓库实测不运行，已移除。
+# 手动触发时检查一次：有 race 作业在排队等 plinth-azure 就开机，作为 webhook 失败时的兜底。
 # VM 自己在空闲 10 分钟后解除分配，另有平台侧每日定时关机兜底。
 # 本工作流不跑任何门禁，只持有开机所需的 OIDC 身份；该身份的角色只能读取、开机、
 # 解除分配这一台 VM。fork 的 PR 拿不到 OIDC token，判断条件也把它排除在外；
-# 定时与手动触发只执行默认分支上的本文件，也不读取任何触发方的代码。
+# 手动触发只执行默认分支上的本文件，也不读取任何触发方的代码。
 # 安装脚本在 scripts/azure-runner/vm-setup.sh，规则见 dev_test.md §2「Azure 按需 runner」。
 
 name: azure runner
@@ -14,8 +15,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  schedule:
-    - cron: '7-59/10 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -28,7 +27,7 @@ jobs:
       ${{
         (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
         (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
-        ((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -37,9 +36,9 @@ jobs:
       contents: read
       id-token: write
     steps:
-      # 定时与手动触发只在确有作业排队等 plinth-azure 时才开机。
+      # 手动触发只在确有作业排队等 plinth-azure 时才开机。
       - id: queued
-        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           count=0
           for run in $(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?per_page=50" \
