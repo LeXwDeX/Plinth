@@ -37,10 +37,12 @@ python3 scripts/release-env.py release dev-test   # 同步→构建→preflight�
 | L2 真实模型链路 | `smoke-l2-livemodel.sh` | 涉及 Agent/生成/同意链路的发布后跑 | 一张小额文生图（约 6 积分）；设 `L2_APPROVE_3D=1` 再加一次 3D 生成（约 25 积分） |
 | L3 批量回归 | `smoke-l3-batch.sh` | 涉及生成/同意/资产链路的发布后跑（按需） | 每模型 5 张小额文生图 |
 | L4 3D 格式与隔离 | `smoke-l4-3d-isolation.py` | 3D Provider、格式或缓存边界变更后跑 | Meshy 一次生成；Tripo 一次生成及六次转换；`ART_AI_3D_PROVIDERS=hyper3d` 时一次 Rodin 文生 3D（3 Hyper3D credits，只核必需 GLB） |
-| L5 真实能力回归 | `smoke-l5-*.py`，入口 `smoke-l5-all.sh` | **每次 `dev-test` 发布后必跑全部脚本** | 真实付费，必须设 `ART_AI_LIVE_ACK=1`；见下文 L5 一节 |
+| L5 真实能力回归 | `smoke-l5-*.py`，入口 `smoke-l5-all.sh` | **每次 `dev-test` 发布后必跑全部脚本**（计入付费验收次数上限） | 真实付费，必须设 `ART_AI_LIVE_ACK=1`；见下文 L5 一节 |
 | 公共 Mock 自部署冒烟 | `smoke-public-mock.sh` | 自部署后本地手动运行（`SMOKE_ENV_FILE=.env bash scripts/smoke/smoke-public-mock.sh`）；不再由公共 CI 运行（#257：CI 不构建镜像） | 零（环境文件须显式写 `PROVIDER_MODE=mock`、`AGENT_MODE=mock`，只接受 Mock Provider/Agent、全部 `*_API_KEY` 为空的回环地址栈）；不用于内部环境 |
 
-L0–L5 各层在 `dev-test` 主机上执行时用 `ART_AI_SERVER_ROOT=<root> bash scripts/smoke/<脚本>`（`<root>` 为该环境发布根，读取本栈 `runtime.env`；L1 Agent 要核对容器 revision 时另设 `RELEASE_CONTAINER=<release-env.py show 的 container>`，脚本不再带缺省容器名，#261）；在本地执行时用 `python3 scripts/release-env.py smoke dev-test -- bash scripts/smoke/<脚本>`（自动设置 `BASE`、`ADMIN_*`、`EXPECT_SHA`、`RELEASE_CONTAINER`）。
+L0–L4 各层在 `dev-test` 主机上执行时用 `ART_AI_SERVER_ROOT=<root> bash scripts/smoke/<脚本>`（`<root>` 为该环境发布根，读取本栈 `runtime.env`；L1 Agent 要核对容器 revision 时另设 `RELEASE_CONTAINER=<release-env.py show 的 container>`，脚本不再带缺省容器名，#261）；在本地执行时用 `python3 scripts/release-env.py smoke dev-test -- bash scripts/smoke/<脚本>`（自动设置 `BASE`、`ADMIN_*`、`EXPECT_SHA`、`RELEASE_CONTAINER`）。
+
+L5 脚本是 `.py`，不读取 `runtime.env`，只在本地通过 `release-env.py smoke` 运行：单个脚本 `ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- python3 scripts/smoke/smoke-l5-<名称>.py`，全部脚本 `ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- bash scripts/smoke/smoke-l5-all.sh`。完整 L5 运行计入 `AGENTS.md` 的付费验收次数上限（每个版本、每个 Provider 自行发起 10 次），超出部分须在当前对话取得用户批准。
 
 ### 批准方式对冒烟的影响（会话级，迁移 0043）
 
@@ -91,7 +93,7 @@ ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- python3 scrip
 ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- bash scripts/smoke/smoke-l5-all.sh --report <目录>
 ```
 
-`release-env.py smoke` 提供 `BASE`、`ADMIN_*`、`EXPECT_SHA`；在主机上运行时从 `$ART_AI_SERVER_ROOT/production/runtime.env` 导出同名变量。输出 `PASS` / `FAIL` / `SKIP` 计数，有 FAIL 时退出码为 1；`--report <目录>` 写每个脚本的 JSON 报告（三视图脚本还保存各视图图片）。脚本不输出凭据、Cookie、签名 URL 的 query 或提示词全文。生成模型参数一律传 Offering 的 `model_id`，模型与参数选项从 Schema 读取，不写死厂商。
+`release-env.py smoke` 提供 `BASE`、`ADMIN_*`、`EXPECT_SHA`；L5 只通过它在本地运行。输出 `PASS` / `FAIL` / `SKIP` 计数，有 FAIL 时退出码为 1；`--report <目录>` 写每个脚本的 JSON 报告（三视图脚本还保存各视图图片）。脚本不输出凭据、Cookie、签名 URL 的 query 或提示词全文。生成模型参数一律传 Offering 的 `model_id`，模型与参数选项从 Schema 读取，不写死厂商。
 
 等待规则：先等本轮回复成为最终内容（不再是 `__GENERATING__` 占位），再等预期能力的任务都已创建并全部进入终态，任务未创建前不判定结束。硬断言只看工具调用、任务状态、必需产物和审批卡片，对 LLM 文字最多做关键词检查。
 

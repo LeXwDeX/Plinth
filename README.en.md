@@ -130,20 +130,21 @@ automatically, but `/api/version` is then `unknown`, and later runs do not rebui
 update, so always pass `--build` when upgrading.
 
 **3. Sign in and try it:** open `http://127.0.0.1:13333/login` in a browser and sign in as
-`admin` (`ADMIN_USERNAME` in `.env`) with the `ADMIN_PASSWORD` from step 1. With the default `PROVIDER_MODE=mock`, tasks return built-in
-sample results, without calling an upstream service or incurring a charge:
+`admin` (`ADMIN_USERNAME` in `.env`) with the `ADMIN_PASSWORD` from step 1.
 
-- **Image:** pick a 2D model in the model picker below the message box, type a short
-  description and send it to get a sample image.
-- **3D model:** pick a 3D model and include "3D" in the description (the Mock Agent decides on
-  3D from keywords only). An approval card appears in the chat, because a new
-  session's approval mode is Manual and text-to-3D needs your approval; click Approve to get a
-  sample 3D model (GLB, FBX, OBJ, STL, USDZ and 3MF) that you can view on the stage and
-  download.
+- **The Agent needs a chat model:** `AGENT_MODE` defaults to `live`, so `.env` must set
+  `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` (or `LLM_CONNECTIONS`); without them the chat
+  reports that the Agent is not configured.
+- **Trying it without upstream cost:** with `PROVIDER_MODE=mock` (the default), generation tasks
+  return built-in sample images and 3D models (GLB, FBX, OBJ, STL, USDZ and 3MF) and call no
+  upstream generation service; the Agent still uses the chat model configured above.
+- **The mock Agent is for development and tests only:** it runs only with an explicit
+  `AGENT_MODE=mock`, does not understand meaning (it calls generation tools by keywords), is slated
+  for removal and is not meant for self-hosting.
 
-The Mock Agent does not understand meaning: every message calls one generation tool chosen by
-keywords. When no model is selected for that kind of result, it replies "This step did not
-finish" and asks you to select a model first.
+To use it, pick a 2D or 3D model in the model picker below the message box, type a description
+and send it. A new session's approval mode is Manual, so text-to-3D shows an approval card;
+click Approve to run it.
 
 **If startup fails:** when `--wait` reports an error or `docker compose ps` shows `Restarting`,
 check `docker compose logs art-ai`.

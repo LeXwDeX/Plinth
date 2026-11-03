@@ -195,7 +195,7 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
 
 - 合并前以本机门禁为准：每个分支推送时照常跑 pre-push（本地八项）；合并到 `main` 前，在待合并的 head 上跑一次 `python3 scripts/verify-local.py --race`，结果写进 PR。
 - 交付任何改动到 `dev-test` 前，最终待发布的精确 `main` SHA 应有一次完整的 GitHub Actions `CI` 运行且所有作业 success。可信自托管 `workflow_dispatch` 可提供同一 SHA 的 CI 证据，但须核对实际 runner、`head_sha` 和 checkout。托管 runner 因计费墙不可用，且（没有自托管 runner 或其不可用，包括安全前提未证明）时，按上节先对同一 SHA 做本机初检，再以该 SHA 的完整隔离主机自检作为 CI 替代，并在 PR 或 Issue 记录实际结果。作业因代码原因失败时不得放行；主机自检不能冒称 Actions success。旧 SHA、其他提交的结果、缺项或 skip 都不算。
-- 发布到 `dev-test` 前，还要在同一个待发布 `main` revision 上再跑一次本机 `--race` 全量；发布后照常做 L0、L1、L1 Agent 和相关验收。每次 `dev-test` 发布后还必须运行 L5 真实能力回归的全部脚本（`scripts/smoke/smoke-l5-*.py`，入口 `smoke-l5-all.sh`，用法与费用见 `scripts/smoke/README.md`），验收报告逐项列出每个脚本的 PASS/FAIL/SKIP 结果。CI 只作门禁，不承担部署。
+- 发布到 `dev-test` 前，还要在同一个待发布 `main` revision 上再跑一次本机 `--race` 全量；发布后照常做 L0、L1、L1 Agent 和相关验收。每次 `dev-test` 发布后还必须运行 L5 真实能力回归的全部脚本（`scripts/smoke/smoke-l5-*.py`，入口 `smoke-l5-all.sh`，用法与费用见 `scripts/smoke/README.md`），验收报告逐项列出每个脚本的 PASS/FAIL/SKIP 结果；完整 L5 运行计入 `AGENTS.md` 的付费验收次数上限，超出部分须在当前对话取得用户批准。CI 只作门禁，不承担部署。
 
 ### 本地统一入口与 pre-push 复用
 
@@ -436,7 +436,7 @@ SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-h
   页面和组件，页面路由、登录重定向、导航、布局模式及显示文本继续由
   Product Schema 投影；
 - live 候选必须保持 `CANDIDATE_ALLOW_GENERATION=false`，只运行 `scripts/test-go-candidate-http.sh` 的无扣费契约；没有单独授权不得用有效 Provider 配置生成；
-- Mock 候选必须显式设置 `CANDIDATE_ALLOW_GENERATION=true`，依次运行 `scripts/test-go-candidate-http.sh`、`scripts/test-go-candidate-all-generations.sh` 和 `scripts/test-go-candidate-restart.sh`；
+- Mock 候选必须同时设置 `GO_PROVIDER_MODE=mock` 与 `GO_AGENT_MODE=mock`（Agent 运行模式的目录默认是 live，Compose 默认值不改），并显式设置 `CANDIDATE_ALLOW_GENERATION=true`；`GO_AGENT_MODE` 也须导出给验收脚本，`scripts/test-go-candidate-http.sh` 在其不是 `mock` 时直接失败。依次运行 `scripts/test-go-candidate-http.sh`、`scripts/test-go-candidate-all-generations.sh` 和 `scripts/test-go-candidate-restart.sh`；
 - Mock 验收必须覆盖文生图、文生 3D、图生图、图生 3D、重拓扑、重纹理、绑定、动画和去背景的公共 Web 创建、轮询及资产下载；
 - 验收创建的任务必须在脚本退出时自动删除；失败时也必须执行清理；
 - Go 重启后，持久任务 ID、状态及资产 SHA-256 必须保持一致；

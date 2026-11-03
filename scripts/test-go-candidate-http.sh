@@ -7,6 +7,11 @@ candidate_model="${CANDIDATE_MODEL:-gpt-image-2.5-sunburst}"
 candidate_admin_username="${CANDIDATE_ADMIN_USERNAME:-candidate-admin}"
 candidate_admin_password="${CANDIDATE_ADMIN_PASSWORD:-candidate-only-password}"
 candidate_allow_generation="${CANDIDATE_ALLOW_GENERATION:-false}"
+if [[ "$candidate_allow_generation" == "true" && "${GO_AGENT_MODE:-}" != "mock" ]]; then
+  # The chat step below expects the mock Agent's events; the catalog default Agent mode is live.
+  echo "CANDIDATE_ALLOW_GENERATION=true needs a Mock candidate: start it with GO_AGENT_MODE=mock and GO_PROVIDER_MODE=mock, and export GO_AGENT_MODE=mock to this script (dev_test.md §11.5)." >&2
+  exit 2
+fi
 candidate_webhook_path_secret="${CANDIDATE_WEBHOOK_PATH_SECRET:-}"
 candidate_webhook_key="${CANDIDATE_WEBHOOK_KEY:-}"
 candidate_managed_username="candidate-user-${BASHPID:-$$}-${RANDOM}"

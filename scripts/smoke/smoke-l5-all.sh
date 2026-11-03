@@ -3,7 +3,7 @@
 # Costs real money; needs ART_AI_LIVE_ACK=1. Run through the release tool so BASE,
 # ADMIN_* and EXPECT_SHA are set:
 #   ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- bash scripts/smoke/smoke-l5-all.sh [--report DIR]
-# On the host: ART_AI_LIVE_ACK=1 ART_AI_SERVER_ROOT=<root> with the variables exported from runtime.env.
+# L5 runs locally only; it does not read runtime.env.
 set -u
 cd "$(dirname "$0")" || exit 2
 if [ "${ART_AI_LIVE_ACK:-}" != "1" ]; then

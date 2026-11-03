@@ -113,16 +113,17 @@ docker compose up -d --wait
 `unknown`，而且之后更新代码时它不会重新构建，所以升级一定要带 `--build`。
 
 **3. 登录并试用**：浏览器打开 `http://127.0.0.1:13333/login`，用户名 `admin`（`.env` 的
-`ADMIN_USERNAME`），密码是第 1 步 `.env` 里的 `ADMIN_PASSWORD`。默认 `PROVIDER_MODE=mock` 返回内置的
-示例结果，不调用任何上游、不产生费用：
+`ADMIN_USERNAME`），密码是第 1 步 `.env` 里的 `ADMIN_PASSWORD`。
 
-- **图片**：在输入框下方的模型选择器里选一个 2D 模型，输入一句描述发送，得到示例图片。
-- **3D 模型**：选一个 3D 模型，描述里写上「3D」或「模型」（Mock Agent 只按这类关键词判断
-  要做 3D），发送后对话里出现批准卡（新会话的批准方式是「手工」，文生 3D 要你批准），点
-  「批准」后得到示例 3D 模型（含 GLB、FBX、OBJ、STL、USDZ、3MF），可在舞台查看和下载。
+- **Agent 需要对话模型**：`AGENT_MODE` 默认为 `live`，必须在 `.env` 里填好 `LLM_BASE_URL`、
+  `LLM_API_KEY`、`LLM_MODEL`（或 `LLM_CONNECTIONS`）；缺少时对话会提示 Agent 未配置。
+- **不产生上游费用的试用**：设 `PROVIDER_MODE=mock`（默认值），生成任务返回内置的示例图片
+  和 3D 模型（含 GLB、FBX、OBJ、STL、USDZ、3MF），不调用任何上游生成服务；Agent 仍使用上面配置的对话模型。
+- **Mock Agent 只用于开发与测试**：必须显式设 `AGENT_MODE=mock` 才会运行，它不理解语义，按关键词
+  调用生成工具，计划移除，不用于自部署。
 
-Mock Agent 不理解语义，每条消息都会按关键词调用一个生成工具；对应领域还没选模型时，它回复
-“这一步没有完成”并提示先选择模型。
+用法：在输入框下方的模型选择器里选 2D 或 3D 模型，输入描述发送。新会话的批准方式是「手工」，
+文生 3D 会出现批准卡，点「批准」后执行。
 
 **启动失败时**：`--wait` 报错或 `docker compose ps` 显示 `Restarting` 时，先看
 `docker compose logs art-ai`。常见原因：
