@@ -319,6 +319,72 @@ class Images(unittest.TestCase):
         self.assertEqual(len(c.calls_named([{"toolCalls": [{"name": "a"}, {"name": "b"}]}], "b")), 1)
 
 
+def png(width, height, colour, depth, rows, filters, palette=b""):
+    """A PNG whose rows (raw samples, one bytes per row) are stored with the given per-row filter types."""
+    import struct
+    import zlib
+
+    def chunk(kind, payload):
+        body = kind + payload
+        return struct.pack(">I", len(payload)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    step = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[colour] * depth // 8
+    raw, prior = b"", bytes(len(rows[0]))
+    for row, kind in zip(rows, filters):
+        out = bytearray()
+        for i, value in enumerate(row):
+            a, b, c = (row[i - step], prior[i], prior[i - step]) if i >= step else (0, prior[i], 0)
+            p = a + b - c
+            paeth = a if abs(p - a) <= abs(p - b) and abs(p - a) <= abs(p - c) else b if abs(p - b) <= abs(p - c) else c
+            out.append((value - (0, a, b, (a + b) >> 1, paeth)[kind]) & 0xFF)
+        raw += bytes([kind]) + bytes(out)
+        prior = row
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, depth, colour, 0, 0, 0))
+            + (chunk(b"PLTE", palette) if palette else b"") + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+class Snapshot(unittest.TestCase):
+    def test_round_trip_through_every_filter(self):
+        rows = [bytes((x * 37 + y * 11 + k * 5) % 256 for x in range(4) for k in range(4)) for y in range(5)]
+        data = png(4, 5, 6, 8, rows, [0, 1, 2, 3, 4])
+        width, height, decoded = c.decode_png(data)
+        self.assertEqual((width, height), (4, 5))
+        for row, rgb in zip(rows, decoded):
+            self.assertEqual(rgb, bytes(v for i, v in enumerate(row) if i % 4 != 3))
+        self.assertEqual(c.decode_png(c.encode_png(4, 5, decoded))[2], decoded)
+
+    def test_grey_palette_and_sixteen_bit(self):
+        self.assertEqual(c.decode_png(png(2, 1, 4, 8, [b"\x10\xff\x20\x00"], [1]))[2], [b"\x10" * 3 + b"\x20" * 3])
+        palette = b"\x01\x02\x03\x04\x05\x06"
+        self.assertEqual(c.decode_png(png(2, 1, 3, 8, [b"\x01\x00"], [0], palette))[2], [b"\x04\x05\x06\x01\x02\x03"])
+        self.assertEqual(c.decode_png(png(1, 1, 2, 16, [b"\xaa\x01\xbb\x02\xcc\x03"], [0]))[2], [b"\xaa\xbb\xcc"])
+
+    def test_unsupported_pictures_raise(self):
+        with self.assertRaises(ValueError):
+            c.decode_png(b"\xff\xd8\xff\xe0")
+        with self.assertRaises(ValueError):
+            c.decode_png(png(8, 1, 0, 1, [b"\x00"], [0]))
+
+    def test_side_by_side_scales_to_one_height(self):
+        red = c.encode_png(2, 2, [b"\xff\x00\x00" * 2] * 2)
+        blue = c.encode_png(2, 1, [b"\x00\x00\xff" * 2])
+        width, height, rows = c.decode_png(c.side_by_side_png([red, blue], height=4))
+        self.assertEqual((width, height), (4 + 8, 4))
+        self.assertEqual(rows, [b"\xff\x00\x00" * 4 + b"\x00\x00\xff" * 8] * 4)
+        self.assertEqual(c.image_dimensions(c.side_by_side_png([red, blue], height=4)), (12, 4))
+
+    def test_canvas_handles_and_user_handles(self):
+        messages = [
+            {"role": "user", "attachments": [{"kind": "image", "role": "canvas", "handle": "@img3"}]},
+            {"role": "assistant", "attachments": [{"kind": "image", "handle": "@img4"}]},
+            {"role": "user", "attachments": []},
+            {"role": "user", "attachments": [{"kind": "image", "handle": "@img3"}, {"kind": "image", "handle": "@img5"}]},
+        ]
+        self.assertEqual(c.canvas_attachment_ids(messages), ["@img3"])
+        self.assertEqual(c.user_handles(messages[:3]), ["@img3"])
+        self.assertEqual(c.user_handles(messages), ["@img3", "@img5"])
+
+
 class Redaction(unittest.TestCase):
     def test_url_query_dropped(self):
         text = "see https://host/a/b?X-Signature=abc&Expires=1 and /api/v1/tasks/t/assets/a?token=zzz done"

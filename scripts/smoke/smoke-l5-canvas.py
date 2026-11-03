@@ -4,11 +4,13 @@
 Places two generated images as scene objects, moves and resizes one (each edit
 must bump the scene revision), then asks the agent to edit from the canvas and
 to turn the canvas content into 3D. The canvas turns send a
-synthetic snapshot picture (solid colour, built with the standard library) as the
-browser would send its flattened artboard, with the layer count and source
-pictures. Checks: the canvas attachment exists, the edit does not reference an old
-single-image handle, and an unchanged canvas (identical bytes uploaded again) keeps the
-same snapshot handle across both turns (#53).
+snapshot picture as the browser would send its flattened artboard (the two source
+pictures laid side by side, built with the standard library), with the layer count
+and source pictures. Checks: the canvas attachment exists, the edit does not
+reference an old single-image handle, and an unchanged canvas (identical bytes
+uploaded again) keeps its snapshot handle: the second turn adds no new handle and the
+session holds one distinct canvas handle (#53). The turn's selection itself is not in
+the public API, so the second turn's image-tool references are reported for review.
 Needs ART_AI_LIVE_ACK=1.
 """
 import os
@@ -72,7 +74,15 @@ def body(live, report):
                 "inputSource": "canvas"}
 
     urls = [asset["url"] for t in images[:2] for asset in live.task(t["id"]).get("assets") or [] if asset.get("required")]
-    board = common.solid_png(512, 256, (200, 60, 60))
+    pictures = []
+    for url in urls:
+        status, data = live.client.fetch(url)
+        common.require_ok(status, "source picture")
+        pictures.append(data)
+    try:
+        board = common.side_by_side_png(pictures)
+    except ValueError as error:
+        return report.failed("canvas snapshot laid out from the source pictures", str(error))
     before = {t.get("id") for t in live.tasks(session)}
     reply, tasks, settled = live.run_turn(session, EDIT_FROM_BOARD, "image", image_model, {},
                                           **canvas_turn_fields(board, urls))
@@ -86,13 +96,20 @@ def body(live, report):
             for c in common.calls_named(live.messages(session), "refine_image")]
     used = [r for r in refs if first_ids and (first_ids[0] in r or "@selected" in r)]
     report.check("edit used the canvas snapshot as its reference, not an old single-image handle", bool(used), str(refs))
-    # the board did not change: the identical snapshot is sent again and must keep its handle (#53)
+    # the board did not change: the identical snapshot is sent again and keeps its handle (#53); the
+    # service reuses the known attachment for the turn's selection and adds nothing to the new message
+    before_messages = live.messages(session)
     _, _, again_settled = live.run_turn(session, AGAIN_FROM_BOARD, "image", image_model, {},
                                         **canvas_turn_fields(board, urls))
-    handles = common.canvas_attachment_ids(live.messages(session))
+    after_messages = live.messages(session)
+    added = [h for h in common.user_handles(after_messages) if h not in common.user_handles(before_messages)]
+    handles = set(common.canvas_attachment_ids(after_messages))
+    again_refs = [common.reference_targets(c)
+                  for c in common.calls_named(after_messages[len(before_messages):], "refine_image")]
     report.check("unchanged canvas keeps one snapshot handle across turns (#53)",
-                 again_settled and len(handles) == 2 and all(handles) and len(set(handles)) == 1,
-                 f"settled={again_settled}, {len(handles)} canvas attachment(s), {len(set(handles))} distinct")
+                 again_settled and not added and len(handles) == 1 and all(handles),
+                 f"settled={again_settled}, new handles {added}, canvas handles {sorted(handles)}, "
+                 f"second-turn references {again_refs}")
     # one layer on the board: the agent can turn it into a single 3D model
     # a board holding just that picture flattens to the picture itself
     status, one_layer = live.client.fetch(urls[0])
