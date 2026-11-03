@@ -11,7 +11,7 @@
 | `dev-test` | 开发测试环境 | 每次已推送的 `origin/main` | 每次发布全新数据（`"data": "ephemeral"`，#28）：不含历史迁移数据，只有运行环境引导的管理员测试账号 | L0、L1、L1 Agent 必跑；涉及 Agent/生成/同意链路时按 `scripts/smoke/README.md` 跑 L2 等真实模型验收 | 常设小额授权（见 `AGENTS.md`） |
 | `formal-test` | 正式测试环境（测试版本中的稳定版）：单版本、不留残余 | 只接收按 §4 晋级规则通过的精确 revision | 本栈独立，不跨主机复制 | L0、L1、L1 Agent | 不做；测试期付费同意授权不适用 |
 
-2026-10-20 的环境布局由用户决定（#270）：`dev-test` 不变，新增 `formal-test`。与 `dev-test` 同主机的 `legacy-formal`（内部存档 #232 的隔离正式栈）经维护者 2026-10-30 决定已下线（存档 #74）：Compose 项目、容器、专用镜像与 `<root>/formal/` 数据已移除，最终备份保留；环境名不再可用，说明见 `dev_ops.md`「dev-test 主机与镜像保留」。
+只有上表两个环境可部署（#270）。`legacy-formal` 已下线，环境名不再可用（存档 #74）；环境沿革见 [`history.md`](history.md)。
 
 ## 2. 本地环境文件
 
@@ -25,7 +25,7 @@
 | `compose_project` | Compose 项目名；容器为 `<项目>-art-ai-go-1` |
 | `protect_projects` | 共享主机上同机其他 Plinth Compose 项目（例如候选栈）；镜像保留不清理它们容器引用的镜像。仓库脚本不写任何环境的项目名（#261），共享主机必须在这里列全；`single_stack` 环境不能设置。由 `release-env.py` 发布的环境若不是 `single_stack`，就按共享主机处理，缺这个字段即报错；文件里与它同主机（`ssh` 主机相同）的每个环境的 `compose_project` 都必须列出，`single_stack` 环境不得与其他环境同主机（#334） |
 | `protected_paths` | 迁移工具（`backup-go-production.sh create`、`run-go-etl-container.sh`、`finalize-go-production.sh`）绝不能作为目标的目录：发布根之外的绝对路径列表（例如共享主机上旧 Next 项目根），没有就写 `[]`；由 `release-env.py` 发布的环境必填。`release-env.py` 把「`root` + 本列表」用冒号连成 `ART_AI_PROTECTED_PATHS`：`compose-env` 输出它供手工运行，`release` 经服务器段写入 `production/compose.env`。三个迁移工具在未设置 `ART_AI_PROTECTED_PATHS` 时拒绝运行（finalize 在停旧容器之前），确无受保护目录时须显式设为空串（#334） |
-| `backup` | 可选的发布备份策略（#364、#66）：`{"scope": "database", "keep": 2}`（仅 `dev-test`，不得与 `promote_from` 同时出现）表示停机时只备份 `production/data`；`{"scope": "full", "keep": 2}`（`dev-test` 与 `formal-test` 可设，可与 `promote_from` 同时出现）仍备份 `data`、`storage-go`、`web-data`，成功后同样清理。正常成功清理最多保留最新 2 个已结束发布备份；进行中的快照可临时排除，但不承诺长期额外保留；更早的失败快照也按最新 2 个回收，独立失败报告与诊断日志保留。省略时为全量备份 `data`、`storage-go`、`web-data`，且不自动清理历史备份。`formal-test` 按 2026-11-03 用户要求（#66）写 `{"scope": "full", "keep": 2}`，全量备份成功后只保留最新 2 份；发布备份不含镜像和日志。`scope` 只接受 `database`/`full`，`keep` 为 1–2 |
+| `backup` | 可选的发布备份策略（#364、#66）：`{"scope": "database", "keep": 2}`（仅 `dev-test`，不得与 `promote_from` 同时出现）表示停机时只备份 `production/data`；`{"scope": "full", "keep": 2}`（`dev-test` 与 `formal-test` 可设，可与 `promote_from` 同时出现）仍备份 `data`、`storage-go`、`web-data`，成功后同样清理。正常成功清理最多保留最新 2 个已结束发布备份；进行中的快照可临时排除，但不承诺长期额外保留；更早的失败快照也按最新 2 个回收，独立失败报告与诊断日志保留。省略时为全量备份 `data`、`storage-go`、`web-data`，且不自动清理历史备份。`formal-test` 必须写 `{"scope": "full", "keep": 2}`（#66），全量备份成功后只保留最新 2 份；发布备份不含镜像和日志。`scope` 只接受 `database`/`full`，`keep` 为 1–2 |
 | `data` | 仅 `dev-test` 可选（#28）：唯一取值 `"ephemeral"`，每次发布都是全新数据，数据库、资产存储与 legacy 缓存用匿名卷、不挂载主机目录；不得与 `backup` 或 `promote_from` 同时出现；省略时为持久数据（`formal-test` 保持此默认）。`release-env.py` 向服务器段传 `RELEASE_DATA_MODE=ephemeral` |
 | `promote_from` | 只能从该环境晋级（`formal-test` 为 `dev-test`） |
 | `single_stack` | 单项目主机：`image_keep`（保留镜像数，含运行镜像）、`keep_source_snapshots`（保留的 `app.prev-*` 数）、`allow_bootstrap`（允许空栈首次启动） |
@@ -60,7 +60,7 @@
 
 ## 4. 晋级规则与验收报告
 
-用户规则（2026-10-20）：开发测试环境（包括 Agent 测试）全部稳定通过以后，才发布到正式测试环境。`release-env.py` 对有 `promote_from` 的环境强制执行，任一项不满足即拒绝且不联系目标主机：
+开发测试环境（包括 Agent 测试）全部稳定通过以后，才发布到正式测试环境。`release-env.py` 对有 `promote_from` 的环境强制执行，任一项不满足即拒绝且不联系目标主机：
 
 - revision 是 40 位小写完整 SHA，且是 `origin/main` 的祖先；
 - 源环境的成功发布清单（`<root>/releases/manifest.txt`）中有该 revision 与报告中的同一镜像标签；
@@ -130,9 +130,9 @@
 
 ## 6. 运行配置与冒烟
 
-`formal-test` 的 `production/runtime.env`（用户 2026-10-20 决定）：整份复制 `dev-test` 的 `runtime.env`（含会话密钥、管理员初始化与 Meshy、Tripo、Hyper3D/Rodin 等全部 Provider Key），只改两类值——中转 Key 改为用户提供的中转 Key，`PUBLIC_BASE_URL`/`NEXT_PUBLIC_APP_URL` 改为该环境的 `base_url`。模型中转地址保持原值：中转按域名路由，其域名已解析到 `formal-test` 主机上的中转，改成字面 IP 会被反代拒绝。不重新生成密钥或管理员。服务器之间直接复制（例如 `scp -3`），不经本地落盘、不回显值，权限 `0600`。修改运行配置后只重建本栈的 `art-ai-go` 服务。
+`formal-test` 的 `production/runtime.env`：整份复制 `dev-test` 的 `runtime.env`（含会话密钥、管理员初始化与 Meshy、Tripo、Hyper3D/Rodin 等全部 Provider Key），只改两类值——中转 Key 改为用户提供的中转 Key，`PUBLIC_BASE_URL`/`NEXT_PUBLIC_APP_URL` 改为该环境的 `base_url`。模型中转地址保持原值：中转按域名路由，其域名已解析到 `formal-test` 主机上的中转，改成字面 IP 会被反代拒绝。不重新生成密钥或管理员。服务器之间直接复制（例如 `scp -3`），不经本地落盘、不回显值，权限 `0600`。修改运行配置后只重建本栈的 `art-ai-go` 服务。
 
-运行模式由 Compose 变量 `GO_APP_ENV` 决定：`docker-compose.go-production.yml` 写的是 `APP_ENV: ${GO_APP_ENV:-production}`，会覆盖运行环境文件里的 `APP_ENV`。`dev-test` 的运行环境文件设 `GO_APP_ENV='test'`；`formal-test` 已接入 HTTPS 域名（2026-10-30，#2），`APP_ENV` 与 `GO_APP_ENV` 都设为 `production`。只改 `APP_ENV` 不生效。生产模式启动即校验：拒绝 `AUTH_MODE=development`、`DEV_MOCK_AUTH`、空 `SESSION_SECRET` 与非 HTTPS 的 `PUBLIC_BASE_URL`，并要求持久会话存储。HTTPS 下会话 Cookie 带 `Secure`，冒烟的 `base_url` 必须是 HTTPS 地址，否则登录后被重定向回登录页。
+运行模式由 Compose 变量 `GO_APP_ENV` 决定：`docker-compose.go-production.yml` 写的是 `APP_ENV: ${GO_APP_ENV:-production}`，会覆盖运行环境文件里的 `APP_ENV`。`dev-test` 的运行环境文件设 `GO_APP_ENV='test'`；`formal-test` 已接入 HTTPS 域名（#2），`APP_ENV` 与 `GO_APP_ENV` 都设为 `production`。只改 `APP_ENV` 不生效。生产模式启动即校验：拒绝 `AUTH_MODE=development`、`DEV_MOCK_AUTH`、空 `SESSION_SECRET` 与非 HTTPS 的 `PUBLIC_BASE_URL`，并要求持久会话存储。HTTPS 下会话 Cookie 带 `Secure`，冒烟的 `base_url` 必须是 HTTPS 地址，否则登录后被重定向回登录页。
 
 中转按来源 IP 放行。容器访问同机中转时来源是 Compose 项目网络中的容器地址，因此 `formal-test` 用 `extra_compose_file` 固定项目网络子网与容器地址，供中转放行；是否放行及放行范围由用户在中转侧决定。改变网络配置后须对本项目执行一次 `down`/`up` 让网络按新配置重建（只操作本项目）。
 
@@ -227,8 +227,7 @@ RECOVERY
 - 数据库：`production/data/art-ai.db`
 - CAS：`production/storage-go`
 
-2026-07-29 已在该测试环境完成 Next → Go 的停机全量迁移与严格对账。
-该 Compose 项目只是测试主机上的生产同构项目，不代表正式生产已接管。
+该 Compose 项目只是测试主机上的生产同构项目，不代表正式生产已接管（Next → Go 迁移沿革见 [`history.md`](history.md)）。
 这里的旧 Next 容器和旧数据目录停止、封存且不删除；dev-test 的普通发布
 不得重跑 ETL，也不得改写 `production/migration-ready.txt`。
 
@@ -278,7 +277,7 @@ RECOVERY
 
 ## 发布公开快照（#261）
 
-公开仓库 `LeXwDeX/Plinth` 于 2026-10-26 以一个单根快照提交（源 revision `6ba59481`）发布，不带内部开发历史；2026-10-27 起它是唯一仓库，此后的提交直接在其上进行，不再生成快照。下面的步骤只在需要从内部存档重建公开起点时使用；快照工具只在本地生成，不推送，替换公开仓库已有内容或强推前须由用户当场确认。日常开发中，同一扫描以 `dev_test.md` §2「public tree」门禁在每次推送前运行：每个推送的提交都会立即公开。
+公开仓库 `LeXwDeX/Plinth` 起始于一个不带内部开发历史的单根快照提交（见 [`history.md`](history.md)「编号对照」）；它是唯一仓库，提交直接在其上进行，日常开发不生成快照。下面的步骤只在需要从内部存档重建公开起点时使用；快照工具只在本地生成，不推送，替换公开仓库已有内容或强推前须由用户当场确认。日常开发中，同一扫描以 `dev_test.md` §2「public tree」门禁在每次推送前运行：每个推送的提交都会立即公开。
 
 1. 选定源 revision：已合入 `main`、通过 `dev_test.md` §2 门禁和开源 1.0 验收（#260）的精确 SHA。
 2. 先检查：`scripts/check-public-tree.sh <SHA>`（日常开发中同一扫描以 `dev_test.md` §2 第 8 项门禁「public tree」在 pre-push 与 CI 里对工作树运行）。它用 `git archive` 取出该 revision 的已跟踪文件，扣除 `scripts/public-snapshot.exclude` 列出的路径后逐个扫描（文本与二进制都扫）：私有网段前缀、内部主机与域名、服务器路径、本机临时路径、内部 Compose 项目名前缀、组织名称、本机用户目录（公开 CI runner 的家目录除外）、私钥头，以及 GitLab、OpenAI 式、GitHub、Meshy、Tripo 的凭据前缀（只匹配凭据长度，测试里的短假值不算，#334）；本机存在 `deploy/local/environments.json` 时，其中每个主机、地址、根目录、布局路径、Compose 项目与镜像源主机也作为字面量加入；还可以用 `--pattern`、`--patterns-file` 或未纳入 Git 的 `deploy/local/public-snapshot-patterns.txt`（每行一个正则，`#` 开头为注释）补充不想提交的私有词。有任一命中即以非零退出并列出 `文件:行`。

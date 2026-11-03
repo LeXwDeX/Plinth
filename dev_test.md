@@ -7,15 +7,15 @@
 
 ## 2. 发布前自动化门禁
 
-**产品平台（2026-10-08 用户确认）**：本项目仅面向 PC。新增工作区 UI 验收覆盖 Chromium/WebKit 的桌面视口，默认使用 1366×768、1440×900、1920×1080，并检查鼠标、键盘及缩小的 PC 浏览器窗口。历史移动验收记录保留，不作为新功能的目标设备矩阵。浏览器全新上下文、禁用缓存和同源资源检查继续必做。
-- 内部环境按名称区分（具体主机、端口与目录只在本地 `deploy/local/environments.json`）：`dev-test` 为多业务共用主机上的测试栈；`formal-test` 为独立主机上的正式测试环境，只晋级 `dev-test` 已完成 L0/L1/L1 Agent 及相关验收的精确 `main` revision。同主机的 `legacy-formal`（内部存档 #232）已于 2026-10-30 下线（存档 #74）。
+**产品平台**：本项目仅面向 PC。新增工作区 UI 验收覆盖 Chromium/WebKit 的桌面视口，默认使用 1366×768、1440×900、1920×1080，并检查鼠标、键盘及缩小的 PC 浏览器窗口。历史移动验收记录保留，不作为新功能的目标设备矩阵。浏览器全新上下文、禁用缓存和同源资源检查继续必做。
+- 内部环境按名称区分（具体主机、端口与目录只在本地 `deploy/local/environments.json`）：`dev-test` 为多业务共用主机上的测试栈；`formal-test` 为独立主机上的正式测试环境，只晋级 `dev-test` 已完成 L0/L1/L1 Agent 及相关验收的精确 `main` revision。`legacy-formal` 已下线，不是可部署环境（存档 #74）。
 - 部署按环境名进行，入口 `docs/deployment.md`（目标在本地 `deploy/local/environments.json`）。`formal-test`（正式测试环境，#270）只经 `scripts/release-env.py release formal-test --acceptance-note <noteID>` 接收已在 `dev-test` 发布成功且 L0、L1、L1 Agent 与相关验收全部 PASS 的精确 `main` revision；晋级后用 `release-env.py smoke formal-test -- <冒烟脚本>` 跑 L0、L1、L1 Agent 并核对容器 OCI revision。不做付费生成。
 - LLM、OpenAI/Gemini 生图与对话的测试接线以 `production/runtime.env`
   的 `LLM_BASE_URL`、`OPENAI_BASE_URL` 为准；均指向 llms 正式服务器
   网关的 `/v1`（地址在 dev-test 运行环境文件 `LLM_BASE_URL`），不使用同机代理测试端口或历史 llms-proxy 端口。
   链路是「测试客户端 → `dev-test` Plinth 测试栈 → llms 正式服务器」，后者
-  不限制客户端与模型；测试栈使用无版本别名：默认连接 `LLM_MODEL=qwen-omni-flash`（网关当前解析为 qwen3.8-omni-flash；思考档位 low/medium/xhigh，默认 xhigh）；第二连接 `LLM_CONNECTIONS=GPT`、`GPT_MODEL=gpt-astra`（当前解析为 gpt-6-astra；思考档位 low/medium/high，默认 high）。别名让上游网关升级版本时下游配置无需改动（2026-11-02 维护者决定，#64）。请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，`qwen-omni-flash` 命中同名 profile（`enable_thinking=true`、`reasoning_effort` 默认 `xhigh`，上下文窗口 1000000），`gpt-astra` 命中同名 profile（`reasoning_effort` 低到高三档，默认 `high`）；其他中国大陆模型仍用官方最高档。
-  测试凭据仅从该测试栈已授权的运行环境读取，不用于正式栈。正式栈保持 Provider Key 为空，直至用户明确决定写入；这使远程 Provider Offering 不可用，不影响可用的本地 Offering；
+  不限制客户端与模型；测试栈使用无版本别名：默认连接 `LLM_MODEL=qwen-omni-flash`（网关当前解析为 qwen3.8-omni-flash；思考档位 low/medium/xhigh，默认 xhigh）；第二连接 `LLM_CONNECTIONS=GPT`、`GPT_MODEL=gpt-astra`（当前解析为 gpt-6-astra；思考档位 low/medium/high，默认 high）。别名让上游网关升级版本时下游配置无需改动（#64）。请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，`qwen-omni-flash` 命中同名 profile（`enable_thinking=true`、`reasoning_effort` 默认 `xhigh`，上下文窗口 1000000），`gpt-astra` 命中同名 profile（`reasoning_effort` 低到高三档，默认 `high`）；其他中国大陆模型仍用官方最高档。
+  测试凭据仅从该测试栈已授权的运行环境读取，不用于正式生产；
 - 真实大模型流量测试从测试栈 `production/runtime.env` 读取接线；正式
   生产凭据不在测试脚本、日志或报告中写出。模型列表 200 只能证明鉴权和
   目录可达；生成验收还须核对
@@ -36,23 +36,23 @@
 8. **公开快照扫描**「public tree」（本地 + CI）：`bash scripts/check-public-tree.sh` 必须通过（#261：已跟踪文件不得含内网地址、内部域名、服务器路径、本机临时路径、内部 Compose 项目名或组织名称；#334 起还拒绝本机用户目录、私钥头与常见凭据前缀；本地另把未纳入 Git 的 `deploy/local/environments.json` 中的全部环境值作为禁用字面量；约 2 秒，需要 git 与 python3）；
 9. **脚本单测**「scripts tests」（本地 + CI）：`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_*.py'` 必须通过（#86：发布、门禁与公开快照脚本——`verify-local.py`、`release-env.py`、`make-public-snapshot.py`、hook 安装器、割接验收等——自己的单测，项目不用 pytest；约 2 分钟，需要 git、python3 与 sqlite3 命令行；`PYTHONDONTWRITEBYTECODE` 防止在被检出的源码树里留下 `__pycache__`，让主机 CI 的“源码未变”核对不被干扰）；
 
-**为什么这样分（2026-10-20 用户确认去重）**：第 5、6 项跑的是同一批 Go 测试，第 6 项多开 race detector，因而更严格也更慢（CI 约 21 分钟，本机 8–20 分钟，几个 worktree 同时 push 时还会因负载误报）。原先本地与 CI 各跑全部七项（当时的门禁数），每个 MR 要跑两次 race，CI 还多跑一次被 race 覆盖的普通 `go test`。现在：
+**为什么这样分**：第 5、6 项跑的是同一批 Go 测试，第 6 项多开 race detector，因而更严格也更慢（CI 约 21 分钟，本机 8–20 分钟，几个 worktree 同时 push 时还会因负载误报）。因此（决策背景见 `docs/history.md`）：
 
 - **race 只在 CI 跑**：它是最慢的一项，且在 CI 上与本地不争资源；本地需要时用 `python3 scripts/verify-local.py --race` 加跑（排在 `go test` 之后，与本节顺序一致）；
 - **普通 `go test` 只在本地跑**：pre-push 用它在几分钟内拦住测试失败；CI 不再单独跑，因为 race 作业已执行同一批测试；
 - **其余各项两处都跑**：都很快；CI 端是不依赖开发机环境的独立复核。
 
-CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check`（第 4、7、8、9 项；第 8、9 项只需 git、python3 与 sqlite3，放在已有作业里不多占 runner 槽位）、`go test race`（第 6 项）。三个作业放在同一 stage，同时排队、互不等待；前端几项合为一个作业，因为每个作业都要单独等一个 runner 槽位，排队时间远长于这几项本身的运行时间（2026-10-20 流水线 30897/30899：前端各作业运行 7–27 秒，却各排队 18–55 分钟，Go 各作业还要等前端阶段结束）。CI 只有这三个作业，不构建镜像（#257）。
+CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check`（第 4、7、8、9 项；第 8、9 项只需 git、python3 与 sqlite3，放在已有作业里不多占 runner 槽位）、`go test race`（第 6 项）。三个作业放在同一 stage，同时排队、互不等待；前端几项合为一个作业，因为每个作业都要单独等一个 runner 槽位，排队时间远长于这几项本身的运行时间。CI 只有这三个作业，不构建镜像（#257）。
 
 **`scripts/tests` 是第 9 项门禁（#135 起补测，#86 纳入）**：这是发布与门禁脚本自己的 Python 单测，约 2 分钟。纳入门禁后，本机、pre-push、CI 与主机 CI（门禁模式与 `--workflows` 模式）都会跑。它在 Linux 上也要通过，所以：依赖 macOS FSEvents 的原生输入监视与指纹绑定测试类（`FingerprintTests` 及其子类、`NativeMonitorTests`、`RootEventTests`、`RealHookReuseTests`、`MissingConfigurationMonitorTests` 及其子类；最后一组在 Linux 容器里偶发失败，已证实，所以一并跳过）在非 macOS 上跳过——这一部分覆盖只在 macOS 本机体现，CI 与主机 CI 不覆盖，不能据主机 CI 通过推断它们通过；其余测试不跳过。割接验收测试需要 `sqlite3` 命令行，已装进 `Dockerfile.ci`；`make-public-snapshot.py` 在 Python 3.11.4 之前（Debian bookworm 的 3.11.2 没有 `tarfile` 的 `data` 过滤器）改用等价的成员检查再解包。改动 `scripts/*.py`、`scripts/tests/` 或 hook 安装器时它随门禁运行。FSEvents 会丢弃监视流刚启动时的事件：`InputMonitor` 停止时每 250 ms 重建 marker 直至事件到达（最长 3 秒），监视类测试在启动监视后先等 0.3 秒再改文件，不再随机出现 `marker-missing`。
 
-本机门禁对第 5 项（及 `--race` 时的第 6 项）额外加 `-timeout=30m`：同一工作站并行运行多个会话的门禁时，`httpapi`、`sqlite` 等包会超过 Go 默认的单包 10 分钟上限而误报失败（2026-10-19 多次出现，单独重跑均通过）。CI 的 race 作业以作业级 `GOFLAGS=-timeout=30m` 做同样放宽（2026-10 在单台 runner 上 `httpapi` 包 race 约 596 秒，贴近 10 分钟上限）。这些参数只放宽单包超时，不改变测试集合与判定，门禁命令仍按上面所列。
+本机门禁对第 5 项（及 `--race` 时的第 6 项）额外加 `-timeout=30m`：同一工作站并行运行多个会话的门禁时，`httpapi`、`sqlite` 等包会超过 Go 默认的单包 10 分钟上限而误报失败。CI 的 race 作业以作业级 `GOFLAGS=-timeout=30m` 做同样放宽（单台 runner 上 `httpapi` 包 race 贴近 10 分钟上限）。这些参数只放宽单包超时，不改变测试集合与判定，门禁命令仍按上面所列。
 
 部分 Generation、Agent 工具和 HTTP 集成测试通过 `internal/adapters/sqlite/sqlitetest.Open` 创建独立数据库：该 helper 在每个测试进程内共享一个惰性构建的真实迁移模板库，关闭连接并确认没有 WAL 后缓存其字节，只为不存在的目标文件复制。每次仍调用真实 `sqlite.Open` 检查迁移版本与 checksum；已有数据库原样打开，重启、恢复和篡改场景不覆盖原文件。SQLite 迁移测试继续直接执行真实迁移，不使用该模板。此优化只减少重复 fixture 初始化，不减少测试集合、断言或 race 检测，也不改变 runner 上限。
 
 ### CI：GitHub Actions（#257）
 
-本仓库只有一处 CI：`.github/workflows/ci.yml`。2026-10-27 起 GitHub 是唯一仓库，迁移前的内部仓库与其 runner 不再使用（存档 #60）。CI 执行上面「自动化门禁项」中标为 CI 的各项，作业分组为 `frontend`、`go check`、`go test race`，不另立清单：
+本仓库只有一处 CI：`.github/workflows/ci.yml`；不得使用迁移前的内部仓库与其 runner（存档 #60）。CI 执行上面「自动化门禁项」中标为 CI 的各项，作业分组为 `frontend`、`go check`、`go test race`，不另立清单：
 
 | | GitHub Actions |
 |---|---|
@@ -72,7 +72,7 @@ CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check
   静态测试不证明 GitHub 的实际路由、runner 隔离或网络访问。增删、改写或改变执行位置时，同一提交里改这几处，测试才会通过。
 - **Action 版本**：工作流中的 Action 固定到发布标签对应的完整提交 SHA，行尾注释写标签；升级时在官方仓库核对标签与 SHA 再一起改。
 - **CI 与内部验收的分工**：当前工作流的自动事件与默认手动路径选择托管 runner；PR 可以修改工作流，因此不能据此保证外部 PR 无法选择自托管 runner。自托管只应由维护者在触发前审查完整 SHA 并核验受信任 ref 和运行环境后明确触发；工作流仍以 `persist-credentials: false` 检出。零 Key 的 Mock 自部署冒烟 `scripts/smoke/smoke-public-mock.sh` 保留为本地手动验收（自部署后运行，覆盖登录、健康、一次 Mock 图片与一次 Mock 3D 任务的全部产物下载核对、restart 与 down/up 持久化及 `down -v` 清理）。维护者内部环境（`dev-test`、`formal-test`）的部署与 L0/L1/L1 Agent 冒烟经 `scripts/release-env.py release`/`smoke` 走 `scripts/smoke/` 的脚本，真实模型付费验收也只由维护者在内部测试环境执行（§3、§11），都不进 CI，也不是外部 PR 的合并条件。
-- **分支保护**：不设置（2026-10-27 维护者决定）。仓库为私有、免费套餐不支持分支保护；合并前的门禁由本节与「交付硬门禁」的本机预检保证。
+- **分支保护**：不设置。仓库为私有、免费套餐不支持分支保护；合并前的门禁由本节与「交付硬门禁」的本机预检保证。
 
 ### 可信自托管 runner（#79 第一阶段）
 
@@ -92,11 +92,11 @@ CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check
 - 只运行已审查的精确提交。先核对本机提交 SHA 和实际字节，并执行包含本地环境禁用值的公开树扫描；源代码只经该提交的有界 Git bundle 传输，不包含其他 refs、本地环境、密钥或数据。主机独立检出后，以及检查开始和结束时，核对完整 SHA、Git 树及跟踪字节。仅工作区差异的预演不能替代最终提交的证据。
 - 主机与其他业务共机。每次使用新建的私有临时目录和独立容器，不挂业务目录、数据库、资产存储、宿主 HOME、SSH 凭据或 Docker socket，不修改其他栈。执行前核查可用内存、磁盘和运行负载；容器限制 CPU、内存与 swap，测试阶段不接外网。依赖预取阶段只执行已审查的下载命令，使用公共源，不运行项目安装脚本；不可信代码不能以此在共享主机运行。
 - 工具链须与 CI 的 Node、Go 和 pnpm 版本对应。复用 `python3 scripts/verify-local.py --race --force` 的完整门禁并单独执行 `node scripts/check-build-external-links.mjs`；不能使用空的 `--pre-push` 输入冒充完成。依赖缺失、源码变化、失败、超时、OOM、失联、缺项或跳过均不得放行。
-- 在 Issue 或 PR 记录 SHA、工具链与镜像身份、资源限制、各门禁的实际结果和失败原因；只称“主机自检”，不写成 GitHub Actions success。只清理本次明确创建的临时资源，不做广域 prune，也不清理或重启其他栈。隔离、预检、SHA 绑定与清理的实现见下节「主机 CI」的 `scripts/host-ci/run.py`，结果 JSON 就是要记录的证据；此前临时目录里的手工 stage/launch 流程不再使用。
+- 在 Issue 或 PR 记录 SHA、工具链与镜像身份、资源限制、各门禁的实际结果和失败原因；只称“主机自检”，不写成 GitHub Actions success。只清理本次明确创建的临时资源，不做广域 prune，也不清理或重启其他栈。隔离、预检、SHA 绑定与清理的实现见下节「主机 CI」的 `scripts/host-ci/run.py`，结果 JSON 就是要记录的证据；不得使用临时目录里的手工 stage/launch 流程。
 
 ### 主机 CI：干净容器运行门禁（#97）
 
-在干净容器里对精确提交跑本节全部门禁。GitHub Actions 不可用期间（计费，#79），它是本项目 CI 的正式替代：沿用 #79 的裁定，即上节「主机自检替代 CI」的规则不变，本节是它的可重复实现，取代此前临时目录里的手工 stage/launch 流程。它同时是本地 TDD 的干净复现环境，不受本机工具链、缓存和未提交文件影响。
+在干净容器里对精确提交跑本节全部门禁。GitHub Actions 不可用期间（计费，#79），它是本项目 CI 的正式替代：上节「主机自检替代 CI」的规则（#79）不变，本节是它的可重复实现。它同时是本地 TDD 的干净复现环境，不受本机工具链、缓存和未提交文件影响。
 
 ```
 python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
@@ -107,7 +107,7 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
 - **镜像 `Dockerfile.ci`**：Node 22 与 Go 1.27（两个基础镜像按摘要固定）、pnpm 取 `package.json` 的 `packageManager`，并把 pnpm store 与 Go 模块缓存预取进镜像，所以容器可以 `--network none`。构建只访问公共来源（Docker Hub、`registry.npmjs.org`、`proxy.golang.org`），不依赖内网，任何有 Docker 和公网的 runner 都能直接构建。`verify-local.py` 不需要浏览器，镜像不含 Playwright 浏览器。在测试主机上标签是 `plinth-ci:<12 位 hash>`，hash 由 `Dockerfile.ci`、`scripts/host-ci/entry.sh` 和被测提交的 `package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`go.mod`、`go.sum` 决定；这些不变就复用已有镜像，不重建，变化时才联网构建一次（几分钟）。入口在每次运行时再核对容器里的 Node、Go、pnpm 与 `.github/workflows/ci.yml`/`package.json` 一致，不一致即失败（退出 22）；将来 CI 的版本声明搬家时，这条核对要随之改读新的位置。`python3 scripts/host-ci/run.py <sha> --print-image-tag` 只打印标签。
 - **容器**：`--network none`、4 CPU、10 GiB 内存且 swap 等于内存（即无 swap）、非 root（UID 10001）、移除全部 capability、`no-new-privileges`、只读根文件系统；不挂业务目录、数据库、资产存储、宿主 HOME、SSH 凭据或 Docker socket。挂载只有：只读的 `source.bundle`，可写的绑定目录 `/scratch`（HOME、Go 构建缓存、pnpm store 副本）和 `/out`（结果），以及两个 tmpfs：`/work`（容器内从 bundle 新检出，上限 6 GiB）和 `/tmp`（4 GiB）。两个 tmpfs 的占用计入 10 GiB 内存上限。`/work` 和 `/tmp` 不能是绑定挂载：`internal/testutil/wirefixture` 的测试会拒绝位于非根绑定挂载下的工作树或证据目录。“源码只读”指输入 bundle 只读；门禁必须能写 `node_modules` 和构建产物，所以 `/work` 可写，入口在检出后和结束时都核对 HEAD、tree、工作区干净与 `source_identity` 未变，变了即失败（退出 21）。`docker create` 之后，主机再按 `docker inspect` 核对上述参数（网络、内存、swap、CPU、只读根、用户、capability、挂载），与请求不符就不启动。
 - **并发、槽位与清理（测试主机，#5）**：并行是可选项，默认只有 1 个槽位（`slots` 默认 1，可设 1–4，其余值被主机拒绝，退出 2）。每个槽位一把 `flock`：槽位 0 沿用 `<目录>/.lock`（升级前的旧客户端仍只认这一把，因此仍与槽位 0 互斥），槽位 k>0 用 `<目录>/.lock-<k>`；一次运行按序取第一个空闲槽位，全部被占用就直接失败（退出 75，提示“所有槽位繁忙”）。开跑前先做资源预检：`MemAvailable` 至少 11 GiB（容器上限 10 GiB 加 1 GiB 余量），**再加上**主机上其他正在运行的 `plinth.host-ci=1` 容器还可能继续占用的余量（各自的内存上限减当前用量，用 `docker stats` 读取，读不到用量按零计即保留其全部上限），目录和 Docker 根目录所在磁盘各至少 10 GiB 空闲，不足就停下并在结果里写明（退出 70），不启动容器；`preflight.reserved_for_other_runs_bytes` 与 `preflight.other_runs` 记录这部分预留。预检只在开跑时看一次，两个运行恰好同时起步时可能都通过，所以并行槽位要靠下面的运行中保护兜底。清理按槽位划分：本工具创建的每个容器（门禁容器与 act 模式的作业容器）都带 `plinth.host-ci=1`、`plinth.host-ci.run=<run id>` 和 `plinth.host-ci.slot=<k>` 三个标签；崩溃遗留只在持有对应槽位锁后清掉本槽位的容器，槽位 0 的持有者另外清掉有 `plinth.host-ci=1` 却没有槽位标签的旧版遗留（旧客户端只在 `.lock` 下运行过）；绝不动其他槽位的容器。`<目录>/run/<run id>` 下的 bundle 与工作目录（超过 24 小时的遗留也清）、`<目录>/results` 只留最近 10 次（尚无 `result.json` 且不足 24 小时的目录视为运行中，不清）。构建镜像（门禁镜像、act 运行器镜像）、act 下载、旧镜像保留和 results 保留都在 `<目录>/.maint.lock` 这把短时阻塞锁下进行（等待上限为镜像构建超时，等不到则以 `maintenance_lock_timeout` 失败），不会在门禁容器整个运行期间持有。旧镜像保留最新 2 个 `plinth-ci:<hash>`（含本次所用的，也不动其他进行中运行在 `run/<run id>/image-in-use` 登记的镜像），其余按精确名称 `docker rmi`（不加 `-f`，Docker 本身拒绝删除仍被容器使用的镜像），失败只警告。不 prune，不删卷，不动其他 Compose 项目、容器和 Plinth 发布根。
-- **运行中内存保护（#5，2026-10-30）**：2026-10-30，在共用的测试主机上，一次容器上限 12 GiB 的门禁运行期间发生了主机级 OOM（load 约 1100），内核杀掉了同机另一个业务栈里没有内存上限的 uvicorn 进程（RSS 约 5.9 GB）。同机其他栈的内存增长不可预测，只靠开跑时的预检不够。因此门禁容器运行期间，`host_run.py` 每约 5 秒读一次宿主 `/proc/meminfo` 的 `MemAvailable`；低于下限（`min_mem_floor_gib`，默认 2 GiB，可设 1 GiB 至 `min_mem_gib`）就 `docker kill` 本次自己的容器（只此一个），以状态 `host_memory_low` 结束，退出 70，`result.json` 的 `verdict` 为 `not_run`（不写 commit status）并在 `attempts[].host_memory_low` 记录观察到的 `MemAvailable`；不重试。运行期间观察到的最低值写入 `mem_available_min_bytes`。它只能挡住 5 秒轮询间隔内能看到的下滑，抓不住比这更快的尖峰；它保护的是同机其他栈，不替代容器自己的 cgroup 上限。该保护只用于门禁模式，`--workflows` 模式暂无。
+- **运行中内存保护（#5）**：同机其他栈的内存增长不可预测，只靠开跑时的预检不够（曾发生主机级 OOM，见 `docs/history.md`）。因此门禁容器运行期间，`host_run.py` 每约 5 秒读一次宿主 `/proc/meminfo` 的 `MemAvailable`；低于下限（`min_mem_floor_gib`，默认 2 GiB，可设 1 GiB 至 `min_mem_gib`）就 `docker kill` 本次自己的容器（只此一个），以状态 `host_memory_low` 结束，退出 70，`result.json` 的 `verdict` 为 `not_run`（不写 commit status）并在 `attempts[].host_memory_low` 记录观察到的 `MemAvailable`；不重试。运行期间观察到的最低值写入 `mem_available_min_bytes`。它只能挡住 5 秒轮询间隔内能看到的下滑，抓不住比这更快的尖峰；它保护的是同机其他栈，不替代容器自己的 cgroup 上限。该保护只用于门禁模式，`--workflows` 模式暂无。
 - **资源阈值与超时（#86）**：数值如下，均可配置，优先级为命令行、环境文件 `dev-test` 条目的可选 `host_ci` 字段（同名）、默认值。
 
   | 项 | 选项 / `host_ci` 字段 | 默认 | 说明 |
@@ -123,7 +123,7 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
 
   `run.py` 把最终值显式传给 `host_run.py`，主机侧再校验一次（CPU 1–64、内存 1–256 GiB、超时 1–1440 分钟、磁盘不少于 1 GiB，内存阈值不低于容器上限加 1 GiB，槽位 1–4，运行中下限 1 GiB 至内存阈值），非法值退出 2 且不启动容器；非数字的环境文件值在本机侧就被拒绝。结果 JSON 的 `preflight.required` 记录本次实际生效的阈值。默认值同时写在 `run.py`、`host_run.py` 和本节，`ci-gate-parity.test.ts` 保持三处一致。
 
-  **默认值的依据（#5，2026-10-30）**：容器上限从 12 GiB 降到 10 GiB、预检阈值从 13 GiB 降到 11 GiB，并让并行成为可选项（默认 1 个槽位），是为了让一次运行对同机其他栈的压力更小、必要时允许两个运行同时占用主机。已有读数：一次实跑中途读到容器 cgroup 的 `memory.peak` 约 4.1 GiB；此前 #97 合并前的完整实跑读到 8.6 GiB（当时上限 12 GiB，内核无需回收页缓存与 tmpfs 页，读数含可回收部分）。10 GiB 比已记录的 8.6 GiB 完整峰值高出约 1.4 GiB；中途 4.1 GiB 的读数不代表整轮，不能据此再往下压。10 GiB 能否稳定容纳完整一轮（含 `--race`）尚待完整实跑确认，完整一轮的峰值待记录在 #5；从本次改动起每次运行都会把宿主侧采样到的容器 `memory.peak` 写入 `result.json` 的 `memory_peak_bytes`（容器退出后 cgroup 即消失，所以是运行期间每 2 秒采样的最大值，并与入口脚本在容器内结束时读到的值取较大者；读不到则为 `null`），同时记录本次占用的 `slot`。若出现 OOM 或峰值逼近 10 GiB，先查原因，再同时调整容器上限与阈值（二者须相差至少 1 GiB）。并行槽位（`slots` > 1）只应在已记录的峰值加上主机剩余内存足以同时容纳多个运行时才调大：每个运行的最坏占用是其容器上限，预检会为其他运行的剩余余量留出空间，运行中保护兜住预检看不到的下滑，但二者都不能保证同机其他栈不增长。默认阈值留 1 GiB 余量给内核与 `MemAvailable` 估算误差（这也是主机接受的最小余量）。此前 15 GiB（余量 3 GiB）在实测中证明过严：测试主机上另一个与本项目无关的业务容器常驻约 6 GiB，`MemAvailable` 常态只有约 14 GiB，连续多个 PR 的完整门禁因预检返回 `not_run`。
+  **默认值的依据（#5）**：容器上限 10 GiB、预检阈值 11 GiB、并行可选（默认 1 个槽位），是为了让一次运行对同机其他栈的压力更小、必要时允许两个运行同时占用主机。已有读数：一次实跑中途读到容器 cgroup 的 `memory.peak` 约 4.1 GiB；此前 #97 合并前的完整实跑读到 8.6 GiB（当时上限 12 GiB，内核无需回收页缓存与 tmpfs 页，读数含可回收部分）。10 GiB 比已记录的 8.6 GiB 完整峰值高出约 1.4 GiB；中途 4.1 GiB 的读数不代表整轮，不能据此再往下压。10 GiB 能否稳定容纳完整一轮（含 `--race`）尚待完整实跑确认，完整一轮的峰值待记录在 #5；从本次改动起每次运行都会把宿主侧采样到的容器 `memory.peak` 写入 `result.json` 的 `memory_peak_bytes`（容器退出后 cgroup 即消失，所以是运行期间每 2 秒采样的最大值，并与入口脚本在容器内结束时读到的值取较大者；读不到则为 `null`），同时记录本次占用的 `slot`。若出现 OOM 或峰值逼近 10 GiB，先查原因，再同时调整容器上限与阈值（二者须相差至少 1 GiB）。并行槽位（`slots` > 1）只应在已记录的峰值加上主机剩余内存足以同时容纳多个运行时才调大：每个运行的最坏占用是其容器上限，预检会为其他运行的剩余余量留出空间，运行中保护兜住预检看不到的下滑，但二者都不能保证同机其他栈不增长。默认阈值留 1 GiB 余量给内核与 `MemAvailable` 估算误差（这也是主机接受的最小余量）。余量不宜再加大：测试主机上另一个无关业务常驻占用内存，过严的阈值会让完整门禁因预检持续返回 `not_run`（见 `docs/history.md`）。
   **swap 近满**：预检读数记录 swap 用量，空闲低于总量的 10% 时在结果的 `preflight.warnings` 写入 `swap nearly full`，只警告不拦截。理由：容器无 swap，不会因 host swap 近满而变慢或 OOM，真正的约束已由 `MemAvailable` 阈值表达；把 swap 当硬条件会让这台已知近满的主机永久无法运行。残留风险是主机整体内存紧张时内核可能优先杀其他进程，缓解靠容器自己的 10 GiB cgroup 上限、预检里为其他运行预留的余量、运行中 `MemAvailable` 下限保护，以及默认只有一个槽位。
   **OOM 判定**：容器被 OOM 杀死（`docker inspect` 的 `OOMKilled`）或容器内 cgroup `memory.events` 的 `oom_kill` 计数非零，任一即失败；`oom_kill` 能抓到“某个子进程被杀但容器仍以 0 退出”的情形。不得靠加大超时或放宽限制绕过。
 - **离线单测与自动化回归**：`python3 scripts/host-ci/test_host_ci.py`（随 `pnpm test` 通过 `ci-gate-parity.test.ts` 运行）用桩替换 Docker、容器子进程和主机文件，覆盖：容器被 OOM 杀死（`OOMKilled`，退出码 137）、容器内 `oom_kill` 非零而退出码为 0、超时（真实的计时器触发 `docker stop`，判 `timeout`）、正常结束不触发停止、只有暂存身份不一致（退出码 20）才重试、预检的内存和磁盘边界（刚好低于/等于阈值）、阈值可配置、swap 近满只警告、槽位锁（两个槽位互斥、槽位 0 沿用 `.lock`、槽位用尽返回空）、按槽位限定的清理（槽位 1 不动槽位 0 与旧版无槽位标签的容器，槽位 0 清理二者）、维护锁、预检里对其他运行剩余余量的预留、运行中内存下限触发 `host_memory_low` 并只杀本次容器、容器 `memory.peak` 与宿主最低 `MemAvailable` 的记录、限制值校验与优先级。它不证明真实 cgroup 行为和 Docker 守护进程；真实运行的证据仍是对主机的实跑（#97）。
@@ -132,7 +132,7 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
   - **结果回写**：run 结束后，`run.py` 用本机 `gh` 的登录（不读项目 `.env`，不要求提供 token）对被测 SHA 写 commit status：`host-ci/gates` 对应门禁模式，`host-ci/workflows` 对应本模式；状态为 `success`/`failure`，描述写明通过的门禁数或作业数；预检不足（70）、锁占用（75）、用法错误等没有得出通过/失败结论的运行不写状态。`target_url` 默认留空，可用 `--target-url` 指向 Issue 回执；`--no-status` 关闭回写。写入的是被测 SHA 上的状态，不修改分支保护或仓库设置。
   - **结果 JSON**：`mode: workflows`，`workflows` 下记录 act 版本、运行器镜像 ID、每个事件的退出码、耗时、各作业结果（日志里找不到结果的作业标 `not_run`）和作业容器内存峰值（每 5 秒取一次带标签容器的 `docker stats`，是采样值）；通过条件是两个事件都重放、act 退出 0 且每个作业 `success`。
 - **结果 JSON**：`sha`、`tree`、`verdict`（pass/fail/not_run）与原因、预检读数（可用内存、swap 用量、磁盘）、镜像（标签、ID、是否本次构建、构建秒数）、每次尝试的容器退出码、`OOMKilled`、入口退出状态、各步骤与各门禁的结果和耗时（未运行的门禁标 `not_run`，不会被当作通过）、cgroup 的 `memory.peak` 与 `memory.events`（`oom_kill`）。通过的条件是：容器退出 0、未被 OOM（`OOMKilled` 与 cgroup `oom_kill` 计数都为 0）、没有超时、入口报告 `passed` 且每个门禁都是 `pass`。
-- **抖动**：启动器曾偶发“创建的身份/配置与请求不一致”，检出的提交/tree 与期望不符同属此类。遇到时自动用全新的暂存目录重试一次，首次尝试的证据（`attempt-1/` 下的创建配置、容器日志、结果）保留在结果里；第二次仍不一致就按失败处理，不再重试。门禁本身失败（测试红、类型错误等）不重试。
+- **抖动**：启动器可能偶发“创建的身份/配置与请求不一致”，检出的提交/tree 与期望不符同属此类。遇到时自动用全新的暂存目录重试一次，首次尝试的证据（`attempt-1/` 下的创建配置、容器日志、结果）保留在结果里；第二次仍不一致就按失败处理，不再重试。门禁本身失败（测试红、类型错误等）不重试。
 - **不做 GitHub self-hosted runner（决定）**：公开仓库的 fork PR 可以改工作流，把任意代码送到内网主机上执行，风险不可接受（#79 的结论）；本工具由维护者手动对已审查的提交触发，不监听任何平台事件，也不注册 runner。
 - **换 runner 时复用**：门禁逻辑只在 `scripts/verify-local.py` 和 `Dockerfile.ci` 构建出的镜像里，`run.py` 与 `host_run.py` 只是把镜像送到测试主机运行的薄封装。别的 runner 做三件事：`docker build -f Dockerfile.ci -t plinth-ci .`；按 `scripts/host-ci/entry.sh` 文件头列的挂载（只读 bundle、`/work` 与 `/tmp` tmpfs、可写的 `/scratch` 与 `/out`）和 `CI_SHA`、`CI_TREE` 两个变量 `docker run`（`host_run.py` 的 `container_command` 是现成的参数清单；`/scratch`、`/out` 要让 UID 10001 可写）；读 `/out/result.json` 与退出码。把镜像直接用作某平台的 container job 没有验证过：镜像以非 root 用户运行，各平台对容器用户的要求不同。
 - **边界**：只证明被测提交在该镜像、该资源上限下通过了本节门禁；不代替 Git hooks、本机 `--race`、独立评审、`dev-test` 发布和发布后 L0/L1/L1 Agent 回归。bundle 带有该提交可达的全部历史，传输前依赖仓库的公开快照检查（`scripts/check-public-tree.sh`）保证历史不含内部标识。镜像构建需要访问公共 npm registry 与 Go proxy，只在依赖或 Dockerfile 变化时发生；运行阶段无网络。纯逻辑与 OOM/超时/预检/锁的离线单测见上文「离线单测与自动化回归」，随 `pnpm test` 运行。
@@ -150,7 +150,7 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
 - Fake 上游（#96）的离线检查同样随 `go test -count=1 ./...` 与 race 运行，不新增门禁项，因此已在本节的本地与 CI 门禁里：`internal/testutil/fakeupstream` 下各版本的 `TestDriftFakeResponsesMatchTheRealSamples`（fake 响应的字段集合与类型必须与该版本最新真实样本一致）、`TestEndpointTableIsCompleteAndHonest`、`TestAlignmentReportIsCommittedAndClean`（对齐报告无未说明差异）、每个故障场景的回归测试、产物字节的 Plinth 交付检查，以及 `TestProductionBinariesDoNotLinkAnyTestutilPackage` / `TestOnlyTestToolingImportsTestutil` / `TestRuntimeImageBuildsOnlyListedCommands`（`internal/testutil` 下任何包都不进发布二进制和镜像，也不被生产包导入）。用法见下节「Fake 上游自检」。
 
 ### 自动化门禁说明
-- **本节是发布前门禁清单的唯一真源**：`AGENTS.md`「提交前门禁」章节及
+- **本节是发布前门禁清单的唯一真源**：`AGENTS.md`「测试与门禁」章节及
   发布操作均以本节为准，不得另行维护平行清单；
 - 远端 CI 只有 GitHub Actions（`.github/workflows/ci.yml`，见上节「CI」）；指定主机自检是按上节条件提供的替代证据，不是 GitHub 作业。交付须核对最终待发布 `main` 精确 SHA 的完整 CI 或合规主机自检结果；
 - `gofmt` 格式检查与 `go mod verify` 不在门禁内：两者属格式/依赖完整性守门，不影响功能正确性，本地与 CI 门禁合起来覆盖 vet/test/race/build 已足以拦截功能性回归，需要时手动执行；
@@ -238,11 +238,10 @@ SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-h
 6. 部署后执行与本次改动相关的无扣费端到端验收；`dev-test` 测试栈的少量真实
    Provider 生成验收已有 `AGENTS.md` 常设授权，按模型和资产链留证，
    测试操作者代点同意仅是测试期操作授权；产品的批准规则见 `docs/product.md`；
-   正式栈按 `dev_ops.md` 的 2026-10-19 有界授权执行；写 Key、付费生成、导入数据及 nginx/域名变更仍须用户明确决定；
+   `formal-test` 不做付费生成；写 Key、付费生成、导入数据及 nginx/域名变更须用户明确决定；
 7. 若依赖服务异常，先修复依赖服务并重新部署，再继续验收。LLM/生图依赖
-   走 llms 正式服务器网关的 `/v1`（地址在 dev-test 运行环境文件 `LLM_BASE_URL`；原 `dev-test` 主机上的
-   llms-proxy 已迁移至此，不得再使用历史 llms-proxy 端口），不限制客户端与
-   模型；测试栈使用无版本别名：默认连接 `LLM_MODEL=qwen-omni-flash`（网关当前解析为 qwen3.8-omni-flash；思考档位 low/medium/xhigh，默认 xhigh）；第二连接 `LLM_CONNECTIONS=GPT`、`GPT_MODEL=gpt-astra`（当前解析为 gpt-6-astra；思考档位 low/medium/high，默认 high）。别名让上游网关升级版本时下游配置无需改动（2026-11-02 维护者决定，#64）。请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，`qwen-omni-flash` 命中同名 profile（`enable_thinking=true`、`reasoning_effort` 默认 `xhigh`，上下文窗口 1000000），`gpt-astra` 命中同名 profile（`reasoning_effort` 低到高三档，默认 `high`）；其他中国大陆模型仍用官方最高档；上游
+   走 llms 正式服务器网关的 `/v1`（地址在 dev-test 运行环境文件 `LLM_BASE_URL`；不得使用历史 llms-proxy 端口），不限制客户端与
+   模型；测试栈使用无版本别名：默认连接 `LLM_MODEL=qwen-omni-flash`（网关当前解析为 qwen3.8-omni-flash；思考档位 low/medium/xhigh，默认 xhigh）；第二连接 `LLM_CONNECTIONS=GPT`、`GPT_MODEL=gpt-astra`（当前解析为 gpt-6-astra；思考档位 low/medium/high，默认 high）。别名让上游网关升级版本时下游配置无需改动（#64）。请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，`qwen-omni-flash` 命中同名 profile（`enable_thinking=true`、`reasoning_effort` 默认 `xhigh`，上下文窗口 1000000），`gpt-astra` 命中同名 profile（`reasoning_effort` 低到高三档，默认 `high`）；其他中国大陆模型仍用官方最高档；上游
    测试凭据只从 `dev-test` 测试栈已授权的运行环境读取，不写入文档；抠图依赖为背景去除（matting）服务（接线地址见 dev-test 运行环境文件 `MATTING_*`）。
 
 ### 可控恢复与读屏验收
@@ -257,8 +256,8 @@ SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-h
   估算）唯一真源是 `internal/catalog/default_catalog.json`（Product
   Schema）；前端只消费其公开投影：`/api/v1/schema`、Provider discovery
   投影（扩展能力需显式 `projection=extended`）与 `task_history.labels`。
-  前端静态配置树 `src/lib/providers/provider-config.ts` 已于 Issue66 W3
-  退役删除，禁止以任何形式重新引入平行的前端配置树，禁止在 Handler、
+  禁止以任何形式重新引入平行的前端配置树（如已删除的
+  `src/lib/providers/provider-config.ts`），禁止在 Handler、
   页面中建立第三份产品配置；
 - Provider 接入参数、能力声明、UI 参数、默认值、约束规则必须在配置层收口；
 - 页面层不得拼装上游 Provider 私有参数，也不得直连上游私有协议；
@@ -392,7 +391,7 @@ SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-h
 - 每张需核对（与 §11.2 端到端口径一致）：产物实际可下载、**声明
   `media_type` 与实际字节一致**、缩略图与详情可读、`SUCCEEDED` 且资产 READY
   （`resources_pending` 为 false）、Offering 与模型可回读；
-- **生成参数只回给任务所有者本人，其他读者一律看不到**（2026-10-22 按实现核对后修订；此前写成「公开详情一律不返回参数」，与实现不符）。
+- **生成参数只回给任务所有者本人，其他读者一律看不到**。
   `GET /api/v1/tasks/{id}` 的摘要投影不含输入；只有调用者就是该 Task 的 owner 时，`publicTaskInput` 才补回本人的提示词和
   Offering 公开声明的参数，供详情回看和「再次生成」预填。引用图类参数、`*_url` 地址、额外费用同意开关和被扣留的语义不返回；
   管理员读取他人任务时也不返回。上游 wire 参数、Provider 私有字段和 Opaque 检查点在任何前台 API 中都不下发；

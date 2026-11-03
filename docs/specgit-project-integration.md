@@ -13,7 +13,7 @@
 
 ## 当前配置
 
-`docs/specgit-project.yaml` 是手工维护的项目偏好；它保留项目选择的语言（`zh`，2026-10-21 用户要求）、模板和验证策略。GitHub 是原生工作跟踪与代码评审平台。当前声明关闭 native auto-merge 和 Agent 自动关闭 Issue；这些开关不改变用户已经授权的普通交付流程。
+`docs/specgit-project.yaml` 是手工维护的项目偏好；它保留项目选择的语言（`zh`）、模板和验证策略。GitHub 是原生工作跟踪与代码评审平台。当前声明关闭 native auto-merge 和 Agent 自动关闭 Issue；这些开关不改变用户已经授权的普通交付流程。
 
 宿主集成按 `AGENTS.md` 的项目约定分别安装：Claude Code 使用 `setup --scope project --agent claude --hook-purpose guard --hook-purpose context`，Codex 使用 `setup --scope project --agent codex --hook-purpose guard --hook-purpose context`，支持 Claude hooks 的定制 OpenCode 使用 `setup --scope project --agent opencode --opencode-claude-hooks --hook-purpose guard --hook-purpose context`；`guard` 安装 Git guard，`context` 注册 SessionStart/PreToolUse。先检查各自 dry-run，不相互导入配置。`--hook-purpose none` 只是不新增宿主 hook，并保留已有 hook；它不能证明当前工作树已经注册或执行 guard。Git guard 与七门禁入口另行核验；门禁更新按 `dev_test.md` §2 预览、验证和激活，保留 SpecGit 受管块。
 
@@ -23,7 +23,7 @@
 
 ## 所有分支与工作树强制初始化
 
-2026-10-19 用户确定 SpecGit 为本项目交付规约，所有分支与工作树都须遵守（#242）。`.specgit.yaml`、Skill 与宿主配置都是各工作树本地文件，不随 Git 出现在其他工作树或 clone 中。`.git/hooks` 由同一 clone 的所有工作树共享，SpecGit 2.14.0 的 Git guard 却只在有 `.specgit.yaml` 的工作树执行 checkpoint：没有声明、也没有 SpecGit 私有状态的工作树暂存改动后 guard 退出 0，即静默放行。新建工作树默认就是这种状态。
+SpecGit 是本项目的交付规约，所有分支与工作树都必须初始化并遵守（#242）。`.specgit.yaml`、Skill 与宿主配置都是各工作树本地文件，不随 Git 出现在其他工作树或 clone 中。`.git/hooks` 由同一 clone 的所有工作树共享，SpecGit 2.14.0 的 Git guard 却只在有 `.specgit.yaml` 的工作树执行 checkpoint：没有声明、也没有 SpecGit 私有状态的工作树暂存改动后 guard 退出 0，即静默放行。新建工作树默认就是这种状态。
 
 **新工作树的初始化**：在该工作树运行
 
@@ -60,7 +60,7 @@ init 只写本工作树的 `.specgit.yaml`、Skill、私有状态和 `AGENTS.md`
 
 ### 新工作树的受管资产所有权
 
-Skill 曾被 Git 跟踪；自 #209 起不再跟踪。检出 #209 之前的提交、或从归档恢复的工作树，可能带来该文件，却不会带来原工作树 Git 私有目录中的 setup ownership receipt。不能只凭文件存在或内容相同判定可由 CLI 覆盖。
+Skill 不纳入 Git（#209）。检出 #209 之前的提交、或从归档恢复的工作树，可能带来该文件，却不会带来原工作树 Git 私有目录中的 setup ownership receipt。不能只凭文件存在或内容相同判定可由 CLI 覆盖。
 
 SpecGit 2.10.0 至 2.13.0 的 `setup` 和 `doctor` 会把无匹配 receipt 的既有项目 Skill 报为 `ownership_conflict`。这是保护既有文件的设计；这些版本没有认领命令，`doctor --fix` 和重新 init 均不能补造 setup 的所有权证明。先核查原工作树的真实记录及 CLI 支持的事务恢复条件。没有匹配证据时保留文件并记录资产刷新未完成；不得复制其他工作树的 receipt/checkpoint、手写记录、删除文件后伪装首次安装，或把此冲突解释为 GitHub 权限不足。
 
@@ -102,6 +102,6 @@ SpecGit 2.9.2 与 2.10.0 均已观察到 `pr --ready --dry-run` 要求选中 Iss
 
 本项目使用 Claude Code、Codex 与支持 Claude hook 协议的定制 OpenCode；其项目配置分别位于 `.claude/settings.json`、`.codex/hooks.json` 与 `.opencode/hooks.json`，由 CLI 独立注册。新工作树不能凭其他工作树的配置文件声称宿主集成已激活。SpecGit 2.13 起宿主回调只保留 SessionStart（短规则与 Skill 入口）和 PreToolUse（按需上下文）；checkpoint 只在真实 Git commit/push 边界由 Git guard 检查，不拦截普通编辑。PostToolUse、Stop 与异步唤醒已退休，不再注册；升级时由 `specgit setup` 迁移旧受管块，并只清除 SpecGit 自有的这些事件登记，其他工具的 hooks 保持原样。注册记录与真实 guard 阻止行为分别验证；远端观察使用显式有界 watch/inbox。官方 OpenCode 的项目 Skill 发现机制不等于该定制版本的 hook 支持；宿主能力和具体注册方式以当前 CLI 及实际运行时为准。
 
-## 历史
+## 历史记录
 
-2026-10-02 以前的全局注册、宿主 hook 和 SpecGit 2.2.1 说明仅是历史记录，不再是本项目的安装或维护要求。历史报告按原记录时点阅读，不作为当前配置、Issue 状态或部署版本的证明。
+旧的全局注册、宿主 hook 和早期 SpecGit 版本说明不是本项目的安装或维护要求。历史报告按原记录时点阅读，不作为当前配置、Issue 状态或部署版本的证明。
