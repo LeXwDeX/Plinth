@@ -12,7 +12,7 @@ import (
 
 func openApprovalRepo(t *testing.T) *Repository {
 	t.Helper()
-	r, err := Open(filepath.Join(t.TempDir(), "approval.db"))
+	r, err := openTestRepository(filepath.Join(t.TempDir(), "approval.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

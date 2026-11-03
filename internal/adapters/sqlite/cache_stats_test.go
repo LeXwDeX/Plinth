@@ -6,12 +6,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 )
 
 func TestCacheStatsCountDistinctRetainedGeneratedBlobs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache-stats.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestCacheStatsCountDistinctRetainedGeneratedBlobs(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	repository, err = sqlite.Open(path)
+	repository, err = sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

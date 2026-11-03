@@ -8,7 +8,7 @@ import (
 func TestReadinessRequiresRealDatabaseReadsAndWrites(t *testing.T) {
 	for _, fault := range []string{"PRAGMA query_only=ON", "DROP TABLE go_chat_turns", "DROP TABLE generation_tasks"} {
 		t.Run(fault, func(t *testing.T) {
-			repo, err := Open(filepath.Join(t.TempDir(), "data.db"))
+			repo, err := openTestRepository(filepath.Join(t.TempDir(), "data.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

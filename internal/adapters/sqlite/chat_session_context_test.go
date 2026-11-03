@@ -15,7 +15,7 @@ import (
 // and no compaction.
 func TestMigration0065UpgradesExistingSessionsWithoutContext(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "context.db")
-	r, err := Open(path)
+	r, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestMigration0065UpgradesExistingSessionsWithoutContext(t *testing.T) {
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := Open(path)
+	reopened, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestMigration0065UpgradesExistingSessionsWithoutContext(t *testing.T) {
 func TestSessionContextIsOwnerScopedAndSurvivesReopen(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "context.db")
-	r, err := Open(path)
+	r, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestSessionContextIsOwnerScopedAndSurvivesReopen(t *testing.T) {
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
-	r, err = Open(path)
+	r, err = openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}

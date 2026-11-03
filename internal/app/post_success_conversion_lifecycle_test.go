@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
 	"github.com/LeXwDeX/Plinth/internal/assets/modelinput/modelinputtest"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
@@ -344,7 +345,7 @@ func newLifecycleHarness(
 	taskCatalog := lifecycleCatalog(t, legacyAggregate)
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "lifecycle.db")
-	repository, err := sqlite.Open(dbPath)
+	repository, err := sqlitetest.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

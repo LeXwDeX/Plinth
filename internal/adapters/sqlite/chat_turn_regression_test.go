@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"path/filepath"
 	"testing"
@@ -11,7 +12,7 @@ import (
 )
 
 func TestOverlappingTurnsCannotOverwriteReplay(t *testing.T) {
-	r, e := sqlite.Open(filepath.Join(t.TempDir(), "probe.db"))
+	r, e := sqlitetest.Open(filepath.Join(t.TempDir(), "probe.db"))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -45,12 +46,12 @@ func TestOverlappingTurnsCannotOverwriteReplay(t *testing.T) {
 
 func TestConcurrentChatTurnsAndLateCompletionAreIsolated(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "concurrent.db")
-	a, err := sqlite.Open(path)
+	a, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	b, err := sqlite.Open(path)
+	b, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

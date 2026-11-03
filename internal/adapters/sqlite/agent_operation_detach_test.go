@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
@@ -65,7 +66,7 @@ func detachFixture(t *testing.T, r *sqlite.Repository, session, call string) (ge
 func TestDetachOnlyLandsWhileTheGrantIsPendingAndSurvivesRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "detach.db")
-	r, err := sqlite.Open(path)
+	r, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +91,7 @@ func TestDetachOnlyLandsWhileTheGrantIsPendingAndSurvivesRestart(t *testing.T) {
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
-	r, err = sqlite.Open(path)
+	r, err = sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

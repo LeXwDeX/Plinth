@@ -18,7 +18,7 @@ func TestTaskReadProjectionProfile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("large-row profile")
 	}
-	r, err := Open(filepath.Join(t.TempDir(), "profile.db"))
+	r, err := openTestRepository(filepath.Join(t.TempDir(), "profile.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

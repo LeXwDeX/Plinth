@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
@@ -66,12 +67,12 @@ func testConversionsOverlap(left, right []string) bool {
 
 func TestConversionAdmissionSerializesSimultaneousSubmissions330(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "conversion-admission.db")
-	first, err := sqlite.Open(path)
+	first, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer first.Close()
-	second, err := sqlite.Open(path)
+	second, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +132,7 @@ func TestConversionAdmissionSerializesSimultaneousSubmissions330(t *testing.T) {
 
 func TestConversionAdmissionAllowsTerminalRetryAndIndependentScopes330(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "conversion-scopes.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +176,7 @@ func TestConversionAdmissionAllowsTerminalRetryAndIndependentScopes330(t *testin
 }
 
 func TestConversionAdmissionRequiresAnOverlappingTargetFormat330(t *testing.T) {
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "conversion-formats.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "conversion-formats.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +212,7 @@ func TestConversionAdmissionRequiresAnOverlappingTargetFormat330(t *testing.T) {
 
 func TestConversionAdmissionTreatsTaskAndAssetSourcesAsOneModel330(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "conversion-source.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +260,7 @@ func TestConversionAdmissionTreatsTaskAndAssetSourcesAsOneModel330(t *testing.T)
 
 func TestConversionAdmissionFailsClosedOnUnreadableSource330(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "conversion-fail-closed.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +309,7 @@ func TestConversionAdmissionFailsClosedOnUnreadableSource330(t *testing.T) {
 
 func TestTaskListFiltersByDeclaredConversionOfferings330(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "conversion-list.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +342,7 @@ func TestTaskListFiltersByDeclaredConversionOfferings330(t *testing.T) {
 }
 
 func TestConversionAdmissionUsesUploadedInputAssetIdentity330(t *testing.T) {
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "conversion-uploaded.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "conversion-uploaded.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

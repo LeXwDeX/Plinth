@@ -213,7 +213,7 @@ func TestThreeViewRecoversAcceptedPaidStepWithoutNewPreparation(t *testing.T) {
 			if err := repo.Close(); err != nil {
 				t.Fatal(err)
 			}
-			store.Repository, err = Open(path)
+			store.Repository, err = openTestRepository(path)
 			if err != nil {
 				t.Fatal(err)
 			}

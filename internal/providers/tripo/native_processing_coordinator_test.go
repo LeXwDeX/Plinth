@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
@@ -164,7 +165,7 @@ func runNativeDeliveryCoordinator(t *testing.T, kind string) {
 	var module *generation.Module
 	open := func() {
 		var err error
-		repository, err = sqlite.Open(path)
+		repository, err = sqlitetest.Open(path)
 		if err != nil {
 			t.Fatal(err)
 		}

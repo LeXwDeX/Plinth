@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/assetcorrection"
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -63,7 +64,7 @@ func newFixture(t *testing.T) *fixture {
 	dir := t.TempDir()
 	f := &fixture{t: t, dbPath: filepath.Join(dir, "art-ai.db"), now: time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)}
 	var err error
-	if f.repository, err = sqlite.Open(f.dbPath); err != nil {
+	if f.repository, err = sqlitetest.Open(f.dbPath); err != nil {
 		t.Fatal(err)
 	}
 	if f.store, err = local.New(filepath.Join(dir, "storage")); err != nil {
@@ -199,7 +200,7 @@ func TestTripoNativeOBJCorrectionChecksBytesRecordsAndIsIdempotent(t *testing.T)
 		t.Fatalf("rollback left %d model/obj assets: %v", relabelled, err)
 	}
 	_ = db.Close()
-	if f.repository, err = sqlite.Open(f.dbPath); err != nil {
+	if f.repository, err = sqlitetest.Open(f.dbPath); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/agentconfiguration"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"os"
@@ -26,7 +27,7 @@ func TestPersonalSkillsPersistAndKeepSharedRevisionIndependent(t *testing.T) {
 		t.Fatal(err)
 	}
 	open := func() (*sqlite.Repository, *agentconfiguration.Service) {
-		repo, err := sqlite.Open(path)
+		repo, err := sqlitetest.Open(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -85,7 +86,7 @@ func TestPersonalSkillsPersistAndKeepSharedRevisionIndependent(t *testing.T) {
 
 func TestPersonalSkillStoreEnforcesConcurrentOwnerLimit(t *testing.T) {
 	ctx := context.Background()
-	repo, err := sqlite.Open(filepath.Join(t.TempDir(), "limit.db"))
+	repo, err := sqlitetest.Open(filepath.Join(t.TempDir(), "limit.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +129,7 @@ func TestPersonalSkillStoreEnforcesConcurrentOwnerLimit(t *testing.T) {
 func TestPublishedConfigurationSurvivesRestartAndRejectsStaleOrInvalidWrites(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "agent.db")
-	repo, err := sqlite.Open(path)
+	repo, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +182,7 @@ func TestPublishedConfigurationSurvivesRestartAndRejectsStaleOrInvalidWrites(t *
 	if err := repo.Close(); err != nil {
 		t.Fatal(err)
 	}
-	repo, err = sqlite.Open(path)
+	repo, err = sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +233,7 @@ func legacyBuiltInSkill(t *testing.T, name string) catalog.SkillSchema {
 func TestRetireBuiltInSkillsPreservesEditedAndCustomSkillsAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "agent.db")
-	repo, err := sqlite.Open(path)
+	repo, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +302,7 @@ func TestRetireBuiltInSkillsPreservesEditedAndCustomSkillsAcrossRestart(t *testi
 	if err := repo.Close(); err != nil {
 		t.Fatal(err)
 	}
-	repo, err = sqlite.Open(path)
+	repo, err = sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +327,7 @@ func TestRetireBuiltInSkillsPreservesEditedAndCustomSkillsAcrossRestart(t *testi
 
 func TestExternalSkillCatalogDoesNotRetireMatchingSavedContent(t *testing.T) {
 	ctx := context.Background()
-	repo, err := sqlite.Open(filepath.Join(t.TempDir(), "external.db"))
+	repo, err := sqlitetest.Open(filepath.Join(t.TempDir(), "external.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +369,7 @@ func TestSystemSkillsAreNotPublishableOrPersonal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := sqlite.Open(filepath.Join(t.TempDir(), "system.db"))
+	repo, err := sqlitetest.Open(filepath.Join(t.TempDir(), "system.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

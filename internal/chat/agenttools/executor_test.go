@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
@@ -440,7 +440,7 @@ func TestApprovedConsentIsConsumedBySingleGeneration(t *testing.T) {
 }
 
 func TestAcceptedFailureCannotReuseConsentAndSameCallRecovers(t *testing.T) {
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "agent.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "agent.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +498,7 @@ func TestAcceptedFailureCannotReuseConsentAndSameCallRecovers(t *testing.T) {
 }
 
 func TestSetParamsCannotCreatePaidApproval(t *testing.T) {
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "agent.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "agent.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -537,7 +537,7 @@ func TestSetParamsCannotCreatePaidApproval(t *testing.T) {
 }
 
 func TestPreSubmitRejectionReleasesClaimForSameApproval(t *testing.T) {
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "agent.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "agent.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -575,7 +575,7 @@ func TestPreSubmitRejectionReleasesClaimForSameApproval(t *testing.T) {
 }
 
 func TestDurableConsentDoesNotReuseLegacyApprovalOrUnknownClaim(t *testing.T) {
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "agent.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "agent.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -623,7 +623,7 @@ func TestDurableConsentDoesNotReuseLegacyApprovalOrUnknownClaim(t *testing.T) {
 }
 
 func TestGenerationLimitDoesNotReserveUnusedConsent(t *testing.T) {
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "agent.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "agent.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

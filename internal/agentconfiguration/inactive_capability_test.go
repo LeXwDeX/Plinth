@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/agentconfiguration"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
@@ -39,7 +40,7 @@ func withCreativeLab(t *testing.T, product *catalog.Catalog) []schemacontract.Of
 
 func openService(t *testing.T, product *catalog.Catalog, offerings []schemacontract.Offering) (*sqlite.Repository, *agentconfiguration.Service) {
 	t.Helper()
-	repo, err := sqlite.Open(filepath.Join(t.TempDir(), "agent.db"))
+	repo, err := sqlitetest.Open(filepath.Join(t.TempDir(), "agent.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

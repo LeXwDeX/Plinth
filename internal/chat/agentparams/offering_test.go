@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/agentparams"
 )
@@ -21,7 +22,7 @@ func params(key, value string) map[string]json.RawMessage {
 }
 
 func TestOfferingIsolationLegacyAndDurableUserPriority(t *testing.T) {
-	repo, err := sqlite.Open(filepath.Join(t.TempDir(), "params.db"))
+	repo, err := sqlitetest.Open(filepath.Join(t.TempDir(), "params.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ func TestOfferingIsolationLegacyAndDurableUserPriority(t *testing.T) {
 }
 
 func TestOfferingConcurrentPatchesAndSessionDeletion(t *testing.T) {
-	repo, err := sqlite.Open(filepath.Join(t.TempDir(), "params.db"))
+	repo, err := sqlitetest.Open(filepath.Join(t.TempDir(), "params.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +107,7 @@ func TestOfferingConcurrentPatchesAndSessionDeletion(t *testing.T) {
 }
 
 func TestOfferingBoundsAndClearPreservePrivateState(t *testing.T) {
-	repo, err := sqlite.Open(filepath.Join(t.TempDir(), "params.db"))
+	repo, err := sqlitetest.Open(filepath.Join(t.TempDir(), "params.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +136,7 @@ func TestOfferingBoundsAndClearPreservePrivateState(t *testing.T) {
 }
 
 func TestOfferingAutoClearSurvivesRestartWithoutLegacyResurrection(t *testing.T) {
-	repo, err := sqlite.Open(filepath.Join(t.TempDir(), "auto.db"))
+	repo, err := sqlitetest.Open(filepath.Join(t.TempDir(), "auto.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +202,7 @@ func (p *failingOfferingPersister) PatchOfferingState(owner, scope string, expec
 	return p.Repository.PatchOfferingState(owner, scope, expected, values, deleted)
 }
 func TestOfferingPersistenceFailureNeverPublishesFallbackMemory(t *testing.T) {
-	repo, err := sqlite.Open(filepath.Join(t.TempDir(), "params.db"))
+	repo, err := sqlitetest.Open(filepath.Join(t.TempDir(), "params.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

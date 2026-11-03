@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
 	"github.com/LeXwDeX/Plinth/internal/assets/modelinput"
@@ -68,7 +68,7 @@ func TestUploadValidatorRunsBeforeCASAndRegistration(t *testing.T) {
 }
 func TestOwnedUploadReadsRealSQLiteUploadOnly(t *testing.T) {
 	root := t.TempDir()
-	repo, err := sqlite.Open(filepath.Join(root, "input.db"))
+	repo, err := sqlitetest.Open(filepath.Join(root, "input.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestUploadValidatorPreservesDomainError(t *testing.T) {
 // blob, whose integrity check re-hashes the whole file.
 func TestOwnedInputAssetReadsTheRecordWithoutTheBytes(t *testing.T) {
 	root := t.TempDir()
-	repo, err := sqlite.Open(filepath.Join(root, "input.db"))
+	repo, err := sqlitetest.Open(filepath.Join(root, "input.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

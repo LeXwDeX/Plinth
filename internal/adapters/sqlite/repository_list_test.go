@@ -20,7 +20,7 @@ func TestListSortsIdentifiersBeforeLoadingLargeTaskPayloads(t *testing.T) {
 		databaseEnvironment  = "ART_AI_LIST_RLIMIT_DATABASE"
 	)
 	if os.Getenv(childModeEnvironment) == "1" {
-		repository, err := Open(os.Getenv(databaseEnvironment))
+		repository, err := openTestRepository(os.Getenv(databaseEnvironment))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -55,7 +55,7 @@ func TestListSortsIdentifiersBeforeLoadingLargeTaskPayloads(t *testing.T) {
 
 	root := t.TempDir()
 	databasePath := filepath.Join(root, "tasks.db")
-	repository, err := Open(databasePath)
+	repository, err := openTestRepository(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}

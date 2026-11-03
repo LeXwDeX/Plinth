@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 )
@@ -22,7 +22,7 @@ func (acceptingVerifier) VerifyAttachment(_ context.Context, _, _ string, ref ch
 
 func TestChatAttachmentsAndSelectionSurviveReload(t *testing.T) {
 	ctx := context.Background()
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "attachments.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "attachments.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestChatAttachmentsAndSelectionSurviveReload(t *testing.T) {
 
 func TestMessagesWithoutAttachmentsStayEmpty(t *testing.T) {
 	ctx := context.Background()
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "plain.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "plain.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestMessagesWithoutAttachmentsStayEmpty(t *testing.T) {
 func TestChatMessageMultiviewRequestSurvivesReload(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "multiview.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestChatMessageMultiviewRequestSurvivesReload(t *testing.T) {
 	if err := repository.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := sqlite.Open(path)
+	reopened, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

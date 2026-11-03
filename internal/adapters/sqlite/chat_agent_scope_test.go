@@ -30,7 +30,7 @@ func TestMigration0049DefaultsExistingSessionsToAuto(t *testing.T) {
 func TestSetSessionAgentScopeIsOwnerScopedAndKeepsOrdering(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "scope.db")
-	r, err := Open(path)
+	r, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestSetSessionAgentScopeIsOwnerScopedAndKeepsOrdering(t *testing.T) {
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := Open(path)
+	reopened, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}
