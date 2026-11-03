@@ -36,6 +36,7 @@
       "compose_project": "<formal-test-compose-project>",
       "protected_paths": [],
       "promote_from": "dev-test",
+      "backup": {"scope": "full", "keep": 2},
       "extra_compose_file": "<formal-test-release-root>/production/compose.network.yml",
       "source_transfer": "scp",
       "build": {
