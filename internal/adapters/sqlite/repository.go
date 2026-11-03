@@ -1974,11 +1974,18 @@ func (r *Repository) GetInputAsset(
 	return asset, nil
 }
 
+// maxInputAssetLookup bounds one LoadInputAssets call below SQLite's default
+// limit of 32766 bound parameters (the owner plus one per ID).
+const maxInputAssetLookup = 32000
+
 func (r *Repository) LoadInputAssets(
 	ctx context.Context,
 	owner generation.OwnerID,
 	ids []generation.AssetID,
 ) (map[generation.AssetID]generation.InputAsset, error) {
+	if len(ids) > maxInputAssetLookup {
+		return nil, fmt.Errorf("sqlite: %d input assets in one lookup exceed %d", len(ids), maxInputAssetLookup)
+	}
 	result := make(map[generation.AssetID]generation.InputAsset, len(ids))
 	if len(ids) == 0 {
 		return result, nil
