@@ -264,17 +264,40 @@ def reply_failed(reply):
     return bool(ERROR_REFERENCE.search(content)) or content.startswith(FAILURE_PREFIXES)
 
 
-def reply_is_final(session, messages):
-    """The turn is over: not pending, and the last assistant message is real content (a failure text counts)."""
-    if not session or session.get("isPending"):
-        return False
+def reply_is_final(messages):
+    """The last assistant message holds real content, not the placeholder or an empty body.
+
+    Content alone never proves the turn is over: Orchestrator persists planning text before it runs
+    tools, and the session wire has no pending flag. Completion is the chat stream's done event
+    (stream_finished); this only guards what to read after it. A failure text counts as content.
+    """
     reply = last_assistant(messages)
-    if not reply:
+    if not reply or reply.get("isPending"):
         return False
     content = (reply.get("content") or "").strip()
-    if content == GENERATING_PLACEHOLDER:
-        return False
-    return bool(content)
+    return bool(content) and content != GENERATING_PLACEHOLDER
+
+
+def parse_sse_events(lines):
+    """Decode the JSON payloads of `data:` lines of a text/event-stream (id/retry/heartbeat lines ignored)."""
+    events = []
+    for raw in lines:
+        line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+        line = line.rstrip("\r\n")
+        if not line.startswith("data:"):
+            continue
+        try:
+            payload = json.loads(line[len("data:"):].strip())
+        except ValueError:
+            continue
+        if isinstance(payload, dict):
+            events.append(payload)
+    return events
+
+
+def stream_finished(events):
+    """The chat stream carries the turn-done event (Schema chat.stream.event_types.done)."""
+    return any(event.get("type") == "done" for event in events)
 
 
 def reply_is_clean(reply):
@@ -330,8 +353,8 @@ def required_assets_ready(task):
     """Return (ok, reason) for the required artifacts of a terminal task payload."""
     if task.get("state") != SUCCESS_STATE:
         return False, f"state {task.get('state')}"
-    if task.get("resources_pending"):
-        return False, "resources still pending"
+    # resources_pending reports any pending slot, including optional/background ones (a
+    # thumbnail with minimum=0 may still be rendering): only required artifacts decide pass/fail.
     required = [asset for asset in task.get("assets") or [] if asset.get("required")]
     if not required:
         return False, "no required artifact declared"
@@ -341,7 +364,8 @@ def required_assets_ready(task):
         status = asset.get("status")
         if status is not None and str(status).upper() != "READY":
             return False, f"required artifact {asset.get('role')} is {status}"
-    return True, f"{len(required)} required artifact(s) ready"
+    note = "; optional resources still pending" if task.get("resources_pending") else ""
+    return True, f"{len(required)} required artifact(s) ready{note}"
 
 
 def pick_model_id(offerings, preferred=()):
@@ -454,6 +478,34 @@ class Client:
                 return error.code, {}
         except (urllib.error.URLError, TimeoutError, OSError):
             return 0, {}
+
+    def read_chat_stream(self, session_id, timeout):
+        """Follow the session's chat stream from its first event for at most `timeout` seconds.
+
+        Returns "done" (turn-done event seen, or HTTP 204: no stream is held any more because the
+        turn ended and its cleanup window passed), "open" (still running when time ran out) or
+        "error" (connection failure or an unexpected status).
+        """
+        request = urllib.request.Request(f"{self.base}/api/chat/sessions/{session_id}/stream?fromId=0",
+                                         headers={"Accept": "text/event-stream"})
+        request.add_header("Origin", self.base)
+        deadline = time.time() + timeout
+        events = []
+        try:
+            with self.opener.open(request, timeout=min(max(timeout, 1), 30)) as response:
+                if response.status == 204:
+                    return "done"
+                for raw in response:
+                    events.extend(parse_sse_events([raw]))
+                    if stream_finished(events):
+                        return "done"
+                    if time.time() >= deadline:
+                        return "open"
+        except urllib.error.HTTPError as error:
+            return "done" if error.code == 204 else "error"
+        except (urllib.error.URLError, TimeoutError, OSError):
+            return "open" if time.time() >= deadline - 1 else "error"
+        return "error"  # the server closed the stream without a done event
 
     def probe_bytes(self, path, count=16):
         """First bytes of a protected asset (status, bytes), without downloading the whole file."""
@@ -574,15 +626,26 @@ class Live:
         require_ok(status, "list offerings")
         return data.get("offerings") or data.get("data") or (data if isinstance(data, list) else [])
 
-    # waiting: the reply must be final first, then the expected tasks must exist and be terminal
-    def wait_reply(self, session_id, timeout=None, poll=8):
+    # waiting: the turn must be over (chat stream done event) first, then the expected tasks must exist
+    # and be terminal. Message content is not a completion signal: planning text is persisted before
+    # tools run.
+    def turn_finished(self, session_id, probe=3):
+        return self.client.read_chat_stream(session_id, probe) == "done"
+
+    def wait_reply(self, session_id, timeout=None, poll=4):
+        """The final assistant message once the turn is over, or None when it never finished in time."""
         deadline = time.time() + (timeout or self.arguments.turn_timeout)
-        time.sleep(poll)
         while time.time() < deadline:
-            messages = self.messages(session_id)
-            if reply_is_final(self.session(session_id), messages):
-                return last_assistant(messages)
-            time.sleep(poll)
+            outcome = self.client.read_chat_stream(session_id, min(max(deadline - time.time(), 1), 60))
+            if outcome == "done":
+                for _ in range(5):  # the done event is written after the final message is stored
+                    messages = self.messages(session_id)
+                    if reply_is_final(messages):
+                        return last_assistant(messages)
+                    time.sleep(1)
+                return None
+            if outcome == "error":
+                time.sleep(poll)
         return None
 
     def wait_tasks(self, session_id, expected, timeout=None, poll=15):

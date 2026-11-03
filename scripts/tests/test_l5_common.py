@@ -87,14 +87,32 @@ class ToolCalls(unittest.TestCase):
 class Waiting(unittest.TestCase):
     def test_reply_final(self):
         done = {"role": "assistant", "content": "好的"}
-        self.assertTrue(c.reply_is_final({"isPending": False}, [{"role": "user", "content": "x"}, done]))
-        self.assertFalse(c.reply_is_final({"isPending": True}, [done]))
-        self.assertFalse(c.reply_is_final({"isPending": False}, [{"role": "assistant", "content": "__GENERATING__"}]))
-        self.assertFalse(c.reply_is_final({"isPending": False}, [{"role": "assistant", "content": "  "}]))
-        self.assertFalse(c.reply_is_final({"isPending": False}, [{"role": "user", "content": "x"}]))
-        self.assertFalse(c.reply_is_final(None, [done]))
+        self.assertTrue(c.reply_is_final([{"role": "user", "content": "x"}, done]))
+        # the projected pending message (ProjectMessage): content blanked, isPending true
+        self.assertFalse(c.reply_is_final([{"role": "assistant", "content": "", "isPending": True}]))
+        self.assertFalse(c.reply_is_final([{"role": "assistant", "content": "__GENERATING__"}]))
+        self.assertFalse(c.reply_is_final([{"role": "assistant", "content": "  "}]))
+        self.assertFalse(c.reply_is_final([{"role": "user", "content": "x"}]))
         failed = {"role": "assistant", "content": "未知错误（错误 ID：m-1）"}
-        self.assertTrue(c.reply_is_final({"isPending": False}, [failed]))
+        self.assertTrue(c.reply_is_final([failed]))
+
+    # Wire of GET /api/chat/sessions/{id}/stream (writeChatEvent: "id: N\ndata: {json}\n\n", retry and
+    # heartbeat frames). Planning text is persisted before tools run, so only the done event ends a turn.
+    STREAM = [b"retry: 86400000\n", b"\n", b'id: 1\n', b'data: {"type":"msg_created","msgId":"m1"}\n', b"\n",
+              b'id: 2\n', b'data: {"type":"text","content":"\xe5\xa5\xbd\xe7\x9a\x84\xef\xbc\x8c\xe6\x88\x91\xe6\x9d\xa5\xe7\x94\x9f\xe6\x88\x90"}\n', b"\n",
+              b": heartbeat\n", b"\n"]
+
+    def test_stream_running_until_done_event(self):
+        events = c.parse_sse_events(self.STREAM)
+        self.assertEqual([e["type"] for e in events], ["msg_created", "text"])
+        self.assertFalse(c.stream_finished(events))
+        events = c.parse_sse_events(self.STREAM + [b"id: 3\n", b'data: {"type":"done"}\n', b"\n"])
+        self.assertTrue(c.stream_finished(events))
+
+    def test_stream_parser_ignores_garbage(self):
+        self.assertEqual(c.parse_sse_events(["data: not json\n", "data: [1]\n", "data:\n", ": x\n"]), [])
+        self.assertTrue(c.stream_finished(c.parse_sse_events(["data: {\"type\": \"done\"}"])))
+        self.assertFalse(c.stream_finished([{"type": "error"}]))
 
     def test_reply_clean(self):
         self.assertTrue(c.reply_is_clean({"content": "hi"}))
@@ -206,12 +224,19 @@ class Artifacts(unittest.TestCase):
         ok, _ = c.required_assets_ready({"state": "SUCCEEDED", "assets": [self.asset(), {"required": False}]})
         self.assertTrue(ok)
 
+    def test_optional_resources_pending_does_not_fail(self):
+        # e.g. Tripo v3.1 thumbnails: delivery background, minimum 0
+        ok, reason = c.required_assets_ready({"state": "SUCCEEDED", "resources_pending": True,
+                                              "assets": [self.asset(), {"role": "thumbnail", "required": False,
+                                                                       "status": "PENDING"}]})
+        self.assertTrue(ok)
+        self.assertIn("optional", reason)
+
     def test_not_ready(self):
         cases = [
             {"state": "FAILED", "assets": [self.asset()]},
             {"state": "SUCCEEDED", "assets": []},
             {"state": "SUCCEEDED", "assets": [{"required": False}]},
-            {"state": "SUCCEEDED", "resources_pending": True, "assets": [self.asset()]},
             {"state": "SUCCEEDED", "assets": [self.asset(size=0)]},
             {"state": "SUCCEEDED", "assets": [self.asset(url="")]},
             {"state": "SUCCEEDED", "assets": [self.asset(status="PENDING")]},

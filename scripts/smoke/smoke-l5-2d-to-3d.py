@@ -34,7 +34,7 @@ def body(live, report):
         time.sleep(4)
         data = live.session(session) or {}
         title = data.get("title") or ""
-        running = not common.reply_is_final(data, live.messages(session))
+        running = not live.turn_finished(session, probe=2)
         if common.title_generated(title):
             break
     report.check("title generated while the first turn runs", common.title_generated(title) and running,
