@@ -1,6 +1,6 @@
 # Hyper3D / Rodin Gen-2.5：Provider 扩展性验证
 
-状态：**Rodin 文生/图生 3D 已启用（修订 `2026-10-20.188.1`，开发测试环境公开验收：#188）**；Bang/Texture 仍禁用。当前合同以 [Provider/Schema 合同的 Hyper3D 一节](../provider-schema-architecture.md)为准；凭据只按运行配置核验。协议依据：[Hyper3D 官方概览](https://docs.hyper3d.ai/en)、[Quick Start](https://docs.hyper3d.ai/en/get-started/quick-start)、[Rodin Gen-2.5](https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5)、[状态](https://docs.hyper3d.ai/en/api-specification/check-status)、[下载](https://docs.hyper3d.ai/en/api-specification/download-results)、[错误](https://docs.hyper3d.ai/en/api-specification/errors)及[Features](https://docs.hyper3d.ai/en/get-started/features)。
+状态：**Rodin 文生/图生 3D 已启用（修订 `2026-10-20.188.1`，开发测试环境公开验收：#188）**；Bang（`hyper3d/bang/rodin-task`、`hyper3d/bang/local-model`）与 Texture（`hyper3d/texture/local-model`）也已启用（#187）。当前合同以 [Provider/Schema 合同的 Hyper3D 一节](../provider-schema-architecture.md)为准；凭据只按运行配置核验。协议依据：[Hyper3D 官方概览](https://docs.hyper3d.ai/en)、[Quick Start](https://docs.hyper3d.ai/en/get-started/quick-start)、[Rodin Gen-2.5](https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5)、[状态](https://docs.hyper3d.ai/en/api-specification/check-status)、[下载](https://docs.hyper3d.ai/en/api-specification/download-results)、[错误](https://docs.hyper3d.ai/en/api-specification/errors)及[Features](https://docs.hyper3d.ai/en/get-started/features)。
 
 ## 兼容性结论
 
@@ -45,7 +45,7 @@ Adapter 与 Catalog 的自动化覆盖：Catalog 加载与公开投影不泄漏 
 
 Schema 中两个 Rodin 候选固定当前 Gen-2.5 Extreme-High、Raw/2,000,000、PBR、extreme-high 纹理（HighPack/UHD 的取舍见下节启用合同），按[当前端点价格](https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5#pricing)冻结基础0.5、几何0.5、纹理2，合计3原生单位。两个 Bang 候选分别限定已交付 Rodin Task 和已归属静态 GLB+单参考图，按[独立 Bang 端点](https://docs.hyper3d.ai/en/api-specification/bang#pricing)固定0.5；业务模型别名不作为上游版本判据。Texture 仅有私有协议测试，其最高档表价是否加总仍未知，不登记猜测报价。
 
-Bang 与 Texture 候选仍禁用；原生必需 GLB wire 不等于完整六格式交付，尤其3MF没有在这些端点获得证明。额外格式/转换、账户权限、实际字节、鉴权、真实费用和Agentic资格均未由离线测试建立。1/3/5图顺序测试是 Adapter 层协议证据，不是完整 Agent 选源交付。最终可执行边界由精确 Offering 修订与对应原生 Issue 验收决定。
+Bang 与 Texture 候选已启用（#187），各只声明一个必需 GLB 槽位；原生必需 GLB wire 不等于完整六格式交付，尤其3MF没有在这些端点获得证明。额外格式/转换、账户权限、实际字节、鉴权、真实费用和Agentic资格均未由离线测试建立。1/3/5图顺序测试是 Adapter 层协议证据，不是完整 Agent 选源交付。最终可执行边界由精确 Offering 修订与对应原生 Issue 验收决定。
 
 
 ## Rodin 启用合同（#188）
