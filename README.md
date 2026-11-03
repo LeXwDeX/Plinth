@@ -13,7 +13,7 @@ Plinth 是一个自部署的 AI 美术资产工作台：在一个对话 + 画布
   批准方式（自动 / 手动）执行。Agent 使用任意 OpenAI chat completions 兼容的多模态模型。
 - **内置 Provider**：Meshy、Tripo、Hyper3D、即梦（Jimeng）、Gemini，以及 OpenAI 图像与
   自部署抠图服务。配置有效的 key 和所需地址后才可用；配置缺失时明确显示不可用，不会切换模型。
-- **零 key 可体验**：默认 Mock 模式返回内置示例结果，不调用任何付费上游。
+- **Provider 默认 Mock**：`PROVIDER_MODE` 默认 `mock`，返回内置示例结果，不调用任何付费上游；Agent 默认 `live`，需要配置 `LLM_*`。
 - **用户**：管理员 + 普通用户，账号密码登录。
 - **界面语言**：中文与英文，见下文「界面语言」。
 
@@ -113,7 +113,7 @@ docker compose up -d --wait
 `unknown`，而且之后更新代码时它不会重新构建，所以升级一定要带 `--build`。
 
 **3. 登录并试用**：浏览器打开 `http://127.0.0.1:13333/login`，用户名 `admin`（`.env` 的
-`ADMIN_USERNAME`），密码是第 1 步 `.env` 里的 `ADMIN_PASSWORD`。默认 Mock 模式返回内置的
+`ADMIN_USERNAME`），密码是第 1 步 `.env` 里的 `ADMIN_PASSWORD`。默认 `PROVIDER_MODE=mock` 返回内置的
 示例结果，不调用任何上游、不产生费用：
 
 - **图片**：在输入框下方的模型选择器里选一个 2D 模型，输入一句描述发送，得到示例图片。
@@ -149,11 +149,12 @@ Mock Agent 不理解语义，每条消息都会按关键词调用一个生成工
   `ADMIN_PASSWORD_RESET` 改回 `false`，再执行一次 `docker compose up -d --wait` 应用配置；
   只编辑 `.env` 或执行 `docker compose restart` 不会更新已有容器的环境。
   创建与重置都会写一条 INFO 日志「管理员初始化」并记入管理后台审计（不含密码）。
-- **零 Key 可体验**：默认 `PROVIDER_MODE=mock`、`AGENT_MODE=mock`，不需要任何
-  Provider key：只能看到界面和 Mock 流程（内置示例结果，不产生费用）。真正使用必须设置
-  `AGENT_MODE=live` 与 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`，否则 Agent 不可用；
-  Mock 仅用于测试和演示。接真实模型时改成 `live`，只填要用的 Provider key，见
-  [Provider 配置](docs/provider-configuration.md)。`AGENT_MODE=live` 必须设置
+- **Agent 需要配置对话模型**：`AGENT_MODE` 默认 `live`，必须设置
+  `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`，不配置时 Agent 不可用。`PROVIDER_MODE`
+  默认 `mock`，不需要任何 Provider key，只返回内置示例结果、不产生费用；接真实模型时改成
+  `live`，只填要用的 Provider key，见 [Provider 配置](docs/provider-configuration.md)。
+  免 Key 体验需要显式设置 `PROVIDER_MODE=mock`、`AGENT_MODE=mock`，仅用于本地测试，计划淘汰。
+  `AGENT_MODE=live` 必须设置
   `LLM_BASE_URL` 与 `LLM_API_KEY`，缺少地址或 key 时 Agent 显示“未配置”。`LLM_MODEL`
   留空使用 Schema 默认值 `qwen-omni-flash`（无版本别名，强多模态模型；网关当前解析为 qwen3.8-omni-flash，思考档位 low/medium/xhigh，默认 xhigh；第二连接可用 `LLM_CONNECTIONS=GPT`、`GPT_MODEL=gpt-astra`，档位 low/medium/high，默认 high；别名让上游网关升级版本时下游配置无需改动，#64），请按实际端点支持的模型名设置。`LLM_BASE_URL`
   只供 Agent 对话使用，图像 Provider 各读自己的
@@ -191,10 +192,9 @@ Mock Agent 不理解语义，每条消息都会按关键词调用一个生成工
   `JIMENG_API_KEY`、`GEMINI_API_KEY`（启用 Gemini 时同时设置 `GEMINI_BASE_URL`）。
 - 把 `PROVIDER_MODE` 改为 `live` 才会调用真实上游；只填要用的 key。真实生成会消耗对应
   账户的积分或费用。
-- `AGENT_MODE` 默认仍是 `mock`（仅用于测试和演示，真正使用须设为 `live`），与 `PROVIDER_MODE` 各自独立。`PROVIDER_MODE=live` 而
-  `AGENT_MODE=mock` 时，Mock Agent 不理解语义，每条消息都会按关键词提交一次生成（服务日志
-  有 WARN，付费步骤仍要你同意）。要用自然语言驱动真实生成，两者都设为 `live`，并配置
-  下面的 Agent 对话模型。
+- `AGENT_MODE` 默认 `live`，与 `PROVIDER_MODE` 各自独立，需要配置下面的 Agent 对话模型。
+  `AGENT_MODE=mock` 只供本地自动化测试显式设置，计划淘汰：Mock Agent 不理解语义，每条消息
+  都会按关键词提交一次生成（服务日志有 WARN，付费步骤仍要你同意）。
 - Agent 对话模型：`AGENT_MODE=live` 时设置 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`，
   指向任意 OpenAI chat completions 兼容的接口；模型必须是多模态的，至少能读图；建议选读图能力强的模型，弱视觉模型会漏看画布标注（红圈、箭头）。
   想让用户选择更多对话模型时，用 `LLM_CONNECTIONS=QWEN,GLM` 列出连接，每个连接只读自己的

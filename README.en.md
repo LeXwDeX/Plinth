@@ -21,9 +21,8 @@ mid-sized teams for internal use; you bring your own Provider API keys.
   self-hosted matting service. Providers become available when a valid key and any
   required base URL are configured; missing configuration is shown as unavailable,
   and Plinth never silently switches to another model.
-- **Try it without keys**: the default Mock mode returns built-in sample results and calls
-  no paid upstream. This only shows the UI and mock flows; for real use set
-  `AGENT_MODE=live` and the `LLM_*` variables.
+- **Provider defaults to Mock**: `PROVIDER_MODE` defaults to `mock` and returns built-in sample
+  results without calling a paid upstream. The Agent defaults to `live` and needs the `LLM_*` variables.
 - **Users**: administrators and regular users, with username and password sign-in.
 - **UI languages**: Chinese and English, see "UI language" below.
 
@@ -131,7 +130,7 @@ automatically, but `/api/version` is then `unknown`, and later runs do not rebui
 update, so always pass `--build` when upgrading.
 
 **3. Sign in and try it:** open `http://127.0.0.1:13333/login` in a browser and sign in as
-`admin` (`ADMIN_USERNAME` in `.env`) with the `ADMIN_PASSWORD` from step 1. With the default Mock settings, tasks return built-in
+`admin` (`ADMIN_USERNAME` in `.env`) with the `ADMIN_PASSWORD` from step 1. With the default `PROVIDER_MODE=mock`, tasks return built-in
 sample results, without calling an upstream service or incurring a charge:
 
 - **Image:** pick a 2D model in the model picker below the message box, type a short
@@ -172,11 +171,11 @@ check `docker compose logs art-ai`.
   `docker compose restart` does not update a container's environment.
   Creating or resetting the administrator at startup writes an INFO log line and an
   administration audit entry (never the password).
-- **Try it without keys:** `PROVIDER_MODE=mock` and `AGENT_MODE=mock` are the defaults. Image
-  and 3D tasks and the chat Agent return built-in sample results without charges; this only
-  shows the UI and mock flows. Mock is for testing and demos only: for real use you must set
-  `AGENT_MODE=live` with `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL`, or the Agent is not
-  usable. To call real
+- **The Agent needs a chat model:** `AGENT_MODE` defaults to `live` and requires `LLM_BASE_URL`,
+  `LLM_API_KEY` and `LLM_MODEL`; without them the Agent is not usable. `PROVIDER_MODE` defaults
+  to `mock`, so image and 3D tasks return built-in sample results without charges. Trying the UI
+  without any key needs an explicit `PROVIDER_MODE=mock` and `AGENT_MODE=mock`, for local testing
+  only; Mock Agent is planned for removal. To call real
   Providers, switch `PROVIDER_MODE=live` and configure each Provider with its own valid API
   key and any required base URL. A Provider is unavailable when a required value is missing;
   a configured key must also be accepted by the upstream service. See
@@ -224,11 +223,10 @@ borrowed from another Provider or from the Agent. Configure the Providers you in
 set `PROVIDER_MODE=live`. Real requests spend the corresponding Provider account's credits or
 money. A configured key must be valid at the upstream service.
 
-`AGENT_MODE` still defaults to `mock` (testing and demos only; real use needs `live`) and is independent of `PROVIDER_MODE`. With
-`PROVIDER_MODE=live` and `AGENT_MODE=mock`, the Mock Agent does not understand meaning and
-submits a generation for every message based on keywords (the service logs a WARN, and paid steps
-still need your approval). To drive real generation with natural language, set both to `live`
-and configure the Agent chat model below.
+`AGENT_MODE` defaults to `live` and is independent of `PROVIDER_MODE`; it needs the Agent chat model below.
+`AGENT_MODE=mock` is for local automated tests to set explicitly and is planned for removal: the Mock Agent does not
+understand meaning and submits a generation for every message based on keywords (the service logs a WARN, and
+paid steps still need your approval).
 
 Gemini images require both `GEMINI_API_KEY` and an explicit `GEMINI_BASE_URL`: Gemini has no
 default URL, and it does not use `LLM_BASE_URL`. When one gateway serves several models,

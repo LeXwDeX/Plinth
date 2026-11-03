@@ -1903,7 +1903,7 @@ Texture 修订 `2026-10-21.187.2` 按独立端点的最高分辨率合同固定 
 - `SESSION_SECRET`、`ADMIN_PASSWORD` 用 `${VAR:?}` 插值，缺失时 Compose 拒绝启动；长度与生产约束由 `internal/app/config.go` 的 `Config.Validate` 判定。`ADMIN_PASSWORD` 短于 `password_minimum_characters` 时 `BootstrapAdmin` 返回 `ErrWeakPassword`，`internal/app` 包装成写明变量名与最小字符数的启动错误（#251）。
 - 端口绑定取 `ART_AI_BIND_IP`（默认 `127.0.0.1`）与 `ART_AI_PORT`（默认 `13333`），使用 Compose 默认桥接网络，不固定子网或容器 IP。
 - 持久化只有两个命名卷 `art-ai-data`（SQLite）与 `art-ai-storage`（CAS）；不挂载任何 legacy 目录。`legacy_generated_images_root` 取 Schema 默认值 `./storage/generated`（容器内 `/app/storage/generated`；CAS 只使用 `blobs/`、`tmp/`，该目录不存在），旧生成图兼容读取因此只返回不存在。
-- `PROVIDER_MODE`/`AGENT_MODE` 默认 `mock`；零 Provider key 时生成与 Agent 走内置 Mock Adapter，仍经 `internal/generation` 的 Prepared Input → Execution Grant → Task 正常链路。
+- `PROVIDER_MODE` 默认 `mock`，`AGENT_MODE` 默认 `live`（需要 `LLM_*`，未配置时 Agent 不可用）；零 Provider key 时生成走内置 Mock Adapter，Agent 的 Mock 只供本地测试显式设置、计划淘汰，仍经 `internal/generation` 的 Prepared Input → Execution Grant → Task 正常链路。
 
 **Compose 契约测试。** `internal/app/compose_config_test.go` 锁定：无固定子网/IP；无 legacy 与内网主机引用；必填密钥用 `:?`；`.env.example` 密钥为空值；`.env.example` 与 Compose `environment` 的每个运行变量都是 Product Schema 声明的设置；Compose 插值变量都写进了 `.env.example`。
 

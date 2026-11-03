@@ -3,7 +3,7 @@
  * Captures the README screenshots in this directory from a local Mock stack (no keys, no cost).
  *
  * 1. Start an empty stack in Mock mode on a loopback address, for example the self-deploy
- *    compose stack (README "Docker Compose 自部署", default PROVIDER_MODE=mock / AGENT_MODE=mock),
+ *    compose stack (README "Docker Compose 自部署", default PROVIDER_MODE=mock; set AGENT_MODE=mock explicitly),
  *    or a local build: APP_ENV=production AUTH_MODE=session PROVIDER_MODE=mock AGENT_MODE=mock
  *    SESSION_SECRET=… ADMIN_PASSWORD=… WEB_ASSETS_ROOT=build/go-web DATABASE_PATH=<tmp>/a.db
  *    STORAGE_ROOT=<tmp>/storage go run ./cmd/art-ai
