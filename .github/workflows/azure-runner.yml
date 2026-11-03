@@ -1,9 +1,11 @@
 # Azure 按需 runner 开机（#78）。ci.yml 的 go test race 在可信事件上路由到 plinth-azure 标签：
 # 本仓库 main 的 push，以及 head 在本仓库的 pull_request。这里在同样的事件上开机；
-# VM 自己在空闲 10 分钟或开机满 3 小时后解除分配，另有 Azure 侧每日定时关机兜底。
+# CI 每次被请求（含重跑作业）还会经 workflow_run 再开一次，避免重跑时 VM 已关机而一直排队。
+# VM 自己在空闲 10 分钟后解除分配，另有平台侧每日定时关机兜底。
 # 本工作流不跑任何门禁，只持有开机所需的 OIDC 身份；该身份的角色只能读取、开机、
-# 解除分配这一台 VM。fork 的 PR 拿不到 OIDC token，判断条件也把它排除在外。
-# 规则见 dev_test.md §2「Azure 按需 runner」。
+# 解除分配这一台 VM。fork 的 PR 拿不到 OIDC token，判断条件也把它排除在外；
+# workflow_run 只执行默认分支上的本文件，不执行 PR 里的代码。
+# 安装脚本在 scripts/azure-runner/vm-setup.sh，规则见 dev_test.md §2「Azure 按需 runner」。
 
 name: azure runner
 
@@ -11,6 +13,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_run:
+    workflows: [CI]
+    types: [requested]
 
 permissions:
   contents: read
@@ -18,7 +23,14 @@ permissions:
 jobs:
   start:
     name: start azure runner
-    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: >-
+      ${{
+        (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+        (github.event_name == 'workflow_run' && github.event.workflow_run.head_repository.full_name == github.repository &&
+          (github.event.workflow_run.event == 'pull_request' ||
+            (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main')))
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
