@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 )
 
@@ -17,7 +17,7 @@ func TestSQLiteChatRepositoryPersistsOwnerScopedSessionTurnAndEvents(
 	t *testing.T,
 ) {
 	databasePath := filepath.Join(t.TempDir(), "chat.db")
-	repository, err := sqlite.Open(databasePath)
+	repository, err := sqlitetest.Open(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestSQLiteChatRepositoryPersistsOwnerScopedSessionTurnAndEvents(
 		t.Fatal(err)
 	}
 
-	reopened, err := sqlite.Open(databasePath)
+	reopened, err := sqlitetest.Open(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +417,7 @@ func TestSQLiteChatRepositoryPersistsOwnerScopedSessionTurnAndEvents(
 }
 
 func TestSQLiteChatMessagePagesWalkBackwardsWithoutGapsOrRepeats(t *testing.T) {
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "messages.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "messages.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

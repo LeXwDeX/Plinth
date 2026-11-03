@@ -14,7 +14,7 @@ import (
 )
 
 func TestSessionHistorySearchAndCursorStayOwnerScoped(t *testing.T) {
-	repository, err := Open(filepath.Join(t.TempDir(), "history.db"))
+	repository, err := openTestRepository(filepath.Join(t.TempDir(), "history.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestSessionHistorySearchAndCursorStayOwnerScoped(t *testing.T) {
 }
 
 func TestSessionPageTotalSurvivesAnEmptyPageAfterTheCursor(t *testing.T) {
-	repository, err := Open(filepath.Join(t.TempDir(), "session-total-empty-page.db"))
+	repository, err := openTestRepository(filepath.Join(t.TempDir(), "session-total-empty-page.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestTaskSessionMigrationBackfillsOnlyUnambiguousOwnedBindings(t *testing.T)
 		t.Fatal(err)
 	}
 
-	current, err := Open(path)
+	current, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestTaskSessionMigrationBackfillsOnlyUnambiguousOwnedBindings(t *testing.T)
 }
 
 func TestCreateTaskRequiresOwnedSessionAndKeepsIdempotencyInSession(t *testing.T) {
-	repository, err := Open(filepath.Join(t.TempDir(), "sessions.db"))
+	repository, err := openTestRepository(filepath.Join(t.TempDir(), "sessions.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestCreateTaskRequiresOwnedSessionAndKeepsIdempotencyInSession(t *testing.T
 }
 
 func TestSessionCursorStaysContinuousWhenOlderSessionsGainActivity(t *testing.T) {
-	repository, err := Open(filepath.Join(t.TempDir(), "cursor.db"))
+	repository, err := openTestRepository(filepath.Join(t.TempDir(), "cursor.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestSessionCursorStaysContinuousWhenOlderSessionsGainActivity(t *testing.T)
 }
 
 func TestRenameKeepsOrderingActivity(t *testing.T) {
-	repository, err := Open(filepath.Join(t.TempDir(), "rename-order.db"))
+	repository, err := openTestRepository(filepath.Join(t.TempDir(), "rename-order.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestRenameKeepsOrderingActivity(t *testing.T) {
 }
 
 func TestAutoTitleIsConditionalOnThePendingSource(t *testing.T) {
-	repository, err := Open(filepath.Join(t.TempDir(), "title.db"))
+	repository, err := openTestRepository(filepath.Join(t.TempDir(), "title.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestAutoTitleIsConditionalOnThePendingSource(t *testing.T) {
 }
 
 func TestSessionPageTotalCountsOwnerAndSearchBeforeTheCursor(t *testing.T) {
-	repository, err := Open(filepath.Join(t.TempDir(), "session-total.db"))
+	repository, err := openTestRepository(filepath.Join(t.TempDir(), "session-total.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

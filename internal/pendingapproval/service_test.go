@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
@@ -192,7 +193,7 @@ func chatService(t *testing.T, repo *sqlite.Repository, schema catalog.ChatSchem
 
 func openWorld(t *testing.T, path string, ttl time.Duration) *world {
 	t.Helper()
-	repo, err := sqlite.Open(path)
+	repo, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

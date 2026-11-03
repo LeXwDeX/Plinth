@@ -34,7 +34,7 @@ func TestHarnessSkillRunPersistsBindingAndStrictlyRecoversAcceptedTask(t *testin
 	if _, err := runs.Create(ctx, changed); !errors.Is(err, skillrun.ErrConflict) {
 		t.Fatalf("rebound run accepted %v", err)
 	}
-	second, err := Open(path)
+	second, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestHarnessProcessingPlanPersistsBindingAndCannotBeReboundOnSave(t *testing
 	if err := repo.db.QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &path); err != nil {
 		t.Fatal(err)
 	}
-	second, err := Open(path)
+	second, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}

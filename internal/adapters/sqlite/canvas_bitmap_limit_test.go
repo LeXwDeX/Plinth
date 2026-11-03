@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/canvas"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 )
@@ -27,7 +28,7 @@ func bitmapNodes(count int, vectorCount int) []canvas.Node {
 
 func TestCanvasBitmapLimitIsAtomicWithRevisionAndOwner(t *testing.T) {
 	ctx := context.Background()
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "canvas-bitmap-limit.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "canvas-bitmap-limit.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,11 +78,11 @@ func TestCanvasBitmapLimitIsAtomicWithRevisionAndOwner(t *testing.T) {
 func TestCanvasConcurrentReplaceFrom49SerializesRevision(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "canvas-bitmap-race.db")
-	first, err := sqlite.Open(path)
+	first, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := sqlite.Open(path)
+	second, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
 	"github.com/LeXwDeX/Plinth/internal/assets/modelinput/modelinputtest"
@@ -88,7 +88,7 @@ func TestLocalModelDeliveryCoverageChecksRealBytesWithoutWriting(t *testing.T) {
 			ctx := context.Background()
 			root := t.TempDir()
 			path := filepath.Join(root, "db")
-			repo, err := sqlite.Open(path)
+			repo, err := sqlitetest.Open(path)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -27,7 +28,7 @@ func choiceHarness(t *testing.T, mode string) (*processingHarness, *sqlite.Repos
 	h := newProcessingHarness(t, mode, func(h *processingHarness) []generation.Task {
 		return append(meshyCatalogTasks(h), rodinTask(h))
 	})
-	repo, err := sqlite.Open(h.databasePath)
+	repo, err := sqlitetest.Open(h.databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +159,7 @@ func TestManualModeAsksForTheServiceFirstAndTheApprovalAfterwards(t *testing.T) 
 func TestPlanToolAsksForTheAmbiguousStep(t *testing.T) {
 	h := newAgentPlanHarness(t, "auto", false)
 	h.gateway.tasks["rodin-1"] = rodinTask(h.processingHarness)
-	repo, err := sqlite.Open(h.databasePath)
+	repo, err := sqlitetest.Open(h.databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/administration"
 )
 
@@ -15,7 +15,7 @@ func TestBackfillStatusRepairsLegacySQLiteRecordsThroughAdministrationSeam(
 	t *testing.T,
 ) {
 	path := filepath.Join(t.TempDir(), "legacy-backfill.db")
-	repository, err := sqlite.Open(path)
+	repository, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestBackfillStatusRepairsLegacySQLiteRecordsThroughAdministrationSeam(
 }
 
 func TestBackfillStatusTreatsAbsentLegacyTablesAsNoPendingWork(t *testing.T) {
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "native-only.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "native-only.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

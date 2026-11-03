@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
@@ -59,7 +60,7 @@ func TestHistoricalCreativeLabTaskStaysReadable(t *testing.T) {
 		if !ok || offering.Enabled {
 			t.Fatal("keycap build must stay defined and hidden")
 		}
-		repository, err := sqlite.Open(databasePath)
+		repository, err := sqlitetest.Open(databasePath)
 		if err != nil {
 			t.Fatal(err)
 		}

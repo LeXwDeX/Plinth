@@ -3,7 +3,7 @@ package agenttools
 import (
 	"context"
 	"encoding/json"
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
@@ -52,7 +52,7 @@ func TestSetParamsRequiresExactOfferingAndExplainedLegalAdvice(t *testing.T) {
 }
 
 func TestSetParamsReturnsPersistenceFailureWithoutClaimingUpdate(t *testing.T) {
-	repo, err := sqlite.Open(filepath.Join(t.TempDir(), "params.db"))
+	repo, err := sqlitetest.Open(filepath.Join(t.TempDir(), "params.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

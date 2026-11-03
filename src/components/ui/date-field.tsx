@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { Popover } from '@base-ui/react/popover';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 
-import { useAnchoredPositioner } from '@/components/ui/overlay';
+import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
 import { cn } from '@/lib/utils';
 import { addMonths, buildMonthGrid, formatLocalDate, parseDate } from './date-field-math';
 
@@ -92,7 +92,7 @@ export function DateField({
           <CalendarDays aria-hidden className="size-4 shrink-0 text-muted-foreground" />
         </Popover.Trigger>
         <Popover.Portal>
-          <Popover.Positioner side="bottom" align="start" sideOffset={6} collisionPadding={12} className={layer}>
+          <Popover.Positioner positionMethod={anchoredPositionMethod} side="bottom" align="start" sideOffset={6} collisionPadding={12} className={layer}>
             <Popover.Popup className="w-64 rounded-lg bg-popover p-2 text-popover-foreground shadow-xl outline-none ring-1 ring-foreground/10">
               <div className="mb-2 flex items-center justify-between">
                 <button

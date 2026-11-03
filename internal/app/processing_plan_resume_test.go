@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/processing"
 )
@@ -62,7 +62,7 @@ func TestProcessingPlanResumeRouteRequiresCurrentVersions(t *testing.T) {
 	if !ok {
 		t.Fatal("remesh offering missing from default catalog")
 	}
-	repository, err := sqlite.Open(databasePath)
+	repository, err := sqlitetest.Open(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/assetdelivery"
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
@@ -30,7 +31,7 @@ func TestBackfillAllowsOnlyExplicitAcknowledgedOriginalSourceLoss(
 	if !ok {
 		t.Fatal("缺少测试 Offering")
 	}
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "test.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +101,7 @@ func TestBackfillMaterializesOnlyDeclaredMissingThumbnailAndIsIdempotent(
 	if !ok {
 		t.Fatal("缺少测试 Offering")
 	}
-	repository, err := sqlite.Open(filepath.Join(t.TempDir(), "test.db"))
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +336,7 @@ func TestBackfillRetriesUnrelatedVersionConflictOnce(t *testing.T) {
 		t.Run(fmt.Sprint(persistent), func(t *testing.T) {
 			catalog, _ := catalog.LoadDefault()
 			offering, _ := catalog.Get("meshy/meshy-7/text-to-3d")
-			repo, err := sqlite.Open(filepath.Join(t.TempDir(), "test.db"))
+			repo, err := sqlitetest.Open(filepath.Join(t.TempDir(), "test.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -370,7 +371,7 @@ func TestBackfillRetriesUnrelatedVersionConflictOnce(t *testing.T) {
 func TestBackfillRetriesVersionChangedBySignedURLRefresh(t *testing.T) {
 	taskCatalog, _ := catalog.LoadDefault()
 	offering, _ := taskCatalog.Get("meshy/meshy-7/text-to-3d")
-	repo, err := sqlite.Open(filepath.Join(t.TempDir(), "test.db"))
+	repo, err := sqlitetest.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -195,7 +195,7 @@ func TestRetentionRecoveryReceiptOnlyCASRealSnapshotBackup(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cas, slot.StorageKey), data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	r, err := Open(dbPath)
+	r, err := openTestRepository(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

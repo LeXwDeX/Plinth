@@ -14,7 +14,7 @@ import (
 )
 
 func TestProcessingPlanPersistenceAndOwnership(t *testing.T) {
-	repository, err := Open(filepath.Join(t.TempDir(), "plans.db"))
+	repository, err := openTestRepository(filepath.Join(t.TempDir(), "plans.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestProcessingPlanPersistenceAndOwnership(t *testing.T) {
 }
 
 func TestActiveProcessingPlansPageByStableID(t *testing.T) {
-	repository, err := Open(filepath.Join(t.TempDir(), "plans.db"))
+	repository, err := openTestRepository(filepath.Join(t.TempDir(), "plans.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,12 +128,12 @@ func TestActiveProcessingPlansPageByStableID(t *testing.T) {
 
 func TestProcessingPlanCASAcrossRepositoryInstances(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "plans-cas.db")
-	first, err := Open(path)
+	first, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer first.Close()
-	second, err := Open(path)
+	second, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestProcessingPlanCASAcrossRepositoryInstances(t *testing.T) {
 }
 
 func TestProcessingPlansBySourceAreUncappedAndScoped(t *testing.T) {
-	repository, err := Open(filepath.Join(t.TempDir(), "plans.db"))
+	repository, err := openTestRepository(filepath.Join(t.TempDir(), "plans.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

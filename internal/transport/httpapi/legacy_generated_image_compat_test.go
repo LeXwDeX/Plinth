@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
@@ -191,7 +192,7 @@ func TestLegacyGeneratedImageKeepsAdministratorTaskReadScope(t *testing.T) {
 func legacyImageTaskSetup(owner generation.OwnerID, unavailableNative bool) func(*testing.T, string) {
 	return func(t *testing.T, databasePath string) {
 		t.Helper()
-		repository, err := sqlite.Open(databasePath)
+		repository, err := sqlitetest.Open(databasePath)
 		if err != nil {
 			t.Fatal(err)
 		}

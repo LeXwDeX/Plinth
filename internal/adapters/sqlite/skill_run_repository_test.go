@@ -22,7 +22,7 @@ func (r testRecipeResolver) ResolveRecipe(_ context.Context, id string, offering
 func skillFixture(t *testing.T) (*Repository, *skillrun.Service, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "skill.db")
-	repo, err := Open(path)
+	repo, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestSkillRunFreezesRecipeSourceAndRecoversIdempotently(t *testing.T) {
 	if err = repo.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := Open(path)
+	reopened, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestSkillRunStepRecoveryUsesGenerationEvidence(t *testing.T) {
 	if _, err = service.PendingGrant(ctx, "owner-b", "session-b"); !errors.Is(err, skillrun.ErrMissing) {
 		t.Fatalf("cross-owner pending grant exposed: %v", err)
 	}
-	second, err := Open(path)
+	second, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}

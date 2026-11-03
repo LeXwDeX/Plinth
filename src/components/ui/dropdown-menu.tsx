@@ -4,7 +4,7 @@ import * as React from "react"
 import { Menu as MenuPrimitive } from "@base-ui/react/menu"
 
 import { cn } from "@/lib/utils"
-import { anchoredPopup, useAnchoredPositioner } from "@/components/ui/overlay"
+import { anchoredPopup, anchoredPositionMethod, useAnchoredPositioner } from "@/components/ui/overlay"
 import { ChevronRightIcon, CheckIcon } from "lucide-react"
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
@@ -35,6 +35,7 @@ function DropdownMenuContent({
   return (
     <MenuPrimitive.Portal>
       <MenuPrimitive.Positioner
+        positionMethod={anchoredPositionMethod}
         className={cn(anchoredPositioner, "outline-none")}
         align={align}
         alignOffset={alignOffset}

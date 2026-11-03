@@ -85,7 +85,7 @@ func TestSessionDeletionPathsClearEverySessionDependentTable(t *testing.T) {
 	for name, deleteFn := range paths {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			r, err := Open(filepath.Join(t.TempDir(), "dependents.db"))
+			r, err := openTestRepository(filepath.Join(t.TempDir(), "dependents.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
@@ -127,7 +128,7 @@ func TestProcessingPlanMiddleSubmissionRecoveryPersists(t *testing.T) {
 			var store *recoveryPlanStore
 			open := func() {
 				var err error
-				repo, err = sqlite.Open(dbPath)
+				repo, err = sqlitetest.Open(dbPath)
 				if err != nil {
 					t.Fatal(err)
 				}

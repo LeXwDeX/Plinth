@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
 	"github.com/LeXwDeX/Plinth/internal/assets/modelinput/modelinputtest"
@@ -23,7 +23,7 @@ func TestLocalModelRegistrationUsesRealConversionInLiveAndMock(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx := context.Background()
 			root := t.TempDir()
-			repo, err := sqlite.Open(filepath.Join(root, "db"))
+			repo, err := sqlitetest.Open(filepath.Join(root, "db"))
 			if err != nil {
 				t.Fatal(err)
 			}

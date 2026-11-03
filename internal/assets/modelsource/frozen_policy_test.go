@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
 	"github.com/LeXwDeX/Plinth/internal/assets/modelinput"
@@ -99,7 +99,7 @@ func TestCurrentUploadPolicyCannotBeBypassedByOldFrozenParameter(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "uploads.db")
-	repo, err := sqlite.Open(dbPath)
+	repo, err := sqlitetest.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

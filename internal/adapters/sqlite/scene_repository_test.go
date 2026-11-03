@@ -19,7 +19,7 @@ var sceneMigrationForTest string
 
 func sceneTestRepository(t *testing.T) (*Repository, *SceneRepository) {
 	t.Helper()
-	repo, err := Open(filepath.Join(t.TempDir(), "scene.db"))
+	repo, err := openTestRepository(filepath.Join(t.TempDir(), "scene.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestSucceededModelCandidateSurvivesMoveAndRestart(t *testing.T) {
 	if err := repo.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := Open(path)
+	reopened, err := openTestRepository(path)
 	if err != nil {
 		t.Fatal(err)
 	}

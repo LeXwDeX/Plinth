@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
 	"github.com/LeXwDeX/Plinth/internal/assets/local"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -19,7 +19,7 @@ import (
 
 func TestUploadResolveOwnershipAndOpen(t *testing.T) {
 	root := t.TempDir()
-	repository, err := sqlite.Open(filepath.Join(root, "test.db"))
+	repository, err := sqlitetest.Open(filepath.Join(root, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestUploadResolveOwnershipAndOpen(t *testing.T) {
 
 func TestResolveEnforcesOfferingExtensionSchema(t *testing.T) {
 	root := t.TempDir()
-	repository, err := sqlite.Open(filepath.Join(root, "test.db"))
+	repository, err := sqlitetest.Open(filepath.Join(root, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestResolveEnforcesOfferingExtensionSchema(t *testing.T) {
 
 func TestResolveEnforcesOfferingAssetLimitsForMasks(t *testing.T) {
 	root := t.TempDir()
-	repository, err := sqlite.Open(filepath.Join(root, "test.db"))
+	repository, err := sqlitetest.Open(filepath.Join(root, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestResolveEnforcesOfferingAssetLimitsForMasks(t *testing.T) {
 
 func TestSignedProviderURLAuthenticatesAndExpires(t *testing.T) {
 	root := t.TempDir()
-	repository, err := sqlite.Open(filepath.Join(root, "test.db"))
+	repository, err := sqlitetest.Open(filepath.Join(root, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

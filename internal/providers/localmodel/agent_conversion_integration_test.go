@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
@@ -57,7 +57,7 @@ func runAgentConversion(t *testing.T, raw []byte) (generation.Task, *local.Store
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
-	repo, err := sqlite.Open(filepath.Join(root, "generation.db"))
+	repo, err := sqlitetest.Open(filepath.Join(root, "generation.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

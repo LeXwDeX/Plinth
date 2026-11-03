@@ -52,7 +52,7 @@ func TestAssetDeliveryProfileMigrationPreservesExistingLegacyRows(t *testing.T) 
 	if err = db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := Open(dbPath)
+	reopened, err := openTestRepository(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestAssetDeliveryProfileMigrationPreservesExistingLegacyRows(t *testing.T) 
 func TestAssetDeliveryProfileImportPersistsAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "import.db")
-	r, err := Open(dbPath)
+	r, err := openTestRepository(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestAssetDeliveryProfileImportPersistsAcrossRestart(t *testing.T) {
 	if err = r.Close(); err != nil {
 		t.Fatal(err)
 	}
-	r, err = Open(dbPath)
+	r, err = openTestRepository(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

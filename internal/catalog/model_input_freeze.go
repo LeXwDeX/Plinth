@@ -133,7 +133,8 @@ func cloneOfferingModelProfiles(source schema.Offering) schema.Offering {
 	source.ProviderOptions = append(json.RawMessage(nil), source.ProviderOptions...)
 	source.SourceModelLimit = cloneSourceModelLimit(source.SourceModelLimit)
 	source.OutputTriangles = cloneOutputTriangles(source.OutputTriangles)
-	return source
+	// 调用方拿到的 Offering 不得与共享的 Catalog 共用任何底层数据。
+	return deepCopy(source)
 }
 
 func cloneSourceModelLimit(source *schema.SourceModelLimit) *schema.SourceModelLimit {
