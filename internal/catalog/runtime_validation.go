@@ -58,6 +58,11 @@ func validateRuntime(schema RuntimeSchema) error {
 			!strings.Contains(capacity, "{total}")) {
 		return errors.New("generation_messages.reference_capacity 必须包含 {model}、{count} 与 {total}")
 	}
+	if capacity := messages.ReferenceCapacityMultiview; capacity != "" &&
+		(!strings.Contains(capacity, "{model}") || !strings.Contains(capacity, "{count}") ||
+			!strings.Contains(capacity, "{total}") || !strings.Contains(capacity, "{multiview}")) {
+		return errors.New("generation_messages.reference_capacity_multiview 必须包含 {model}、{count}、{total} 与 {multiview}")
+	}
 	if exceeded := messages.ReferenceLimitExceeded; exceeded != "" &&
 		(!strings.Contains(exceeded, "{label}") || !strings.Contains(exceeded, "{max}") ||
 			!strings.Contains(exceeded, "{actual}")) {

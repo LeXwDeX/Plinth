@@ -158,6 +158,10 @@ function followsCanvas(size: SizeValue, canvas: CanvasPixels): boolean {
   return sameShape(size.ratio, canvas) && (size.width === 0 || size.width * size.height >= canvas.width * canvas.height);
 }
 
+function pixelSizeValue(pixels: CanvasPixels): SizeValue {
+  return { value: `${pixels.width}x${pixels.height}`, width: pixels.width, height: pixels.height, ratio: pixels.width / pixels.height };
+}
+
 /** Whether a custom width×height is within the Schema image_size bounds (server: ImageSizeConstraint.Check). */
 export function imageSizeAllows(constraint: ImageSizeConstraintWire, width: number, height: number): boolean {
   if (width <= 0 || height <= 0) return false;
@@ -269,7 +273,10 @@ export function canvasTurnOutput(
     const pixels = size.width > 0
       ? { width: size.width, height: size.height }
       : outputPixels([{ name: parameter.name, label: parameter.label, type: 'select' }], input, tables);
-    return { value: text, pixels, ratioOnly: size.width === 0, nearest: !followsCanvas(size, canvas) };
+    // A ratio is also read as the pixels the Schema maps it to: Gemini's 9:16 at 4K is 3072x5504, not exactly 9:16,
+    // and on a canvas of that size it still follows the canvas (server: Executor.followsCanvas).
+    const follows = followsCanvas(size, canvas) || (size.width === 0 && pixels !== null && followsCanvas(pixelSizeValue(pixels), canvas));
+    return { value: text, pixels, ratioOnly: size.width === 0, nearest: !follows };
   }
   return null;
 }
@@ -307,7 +314,8 @@ export function referenceTurnOutput(
   if (!turn) return null;
   const size = parseSizeValue(turn.value);
   const changed = !parameters.some((parameter) => String(values[parameter.name] ?? '') === turn.value);
-  return { ...turn, nearest: !size || !sameShape(size.ratio, reference), changed };
+  const shapeKept = size !== null && (sameShape(size.ratio, reference) || (turn.pixels !== null && sameShape(turn.pixels.width / turn.pixels.height, reference)));
+  return { ...turn, nearest: !shapeKept, changed };
 }
 
 /**

@@ -150,7 +150,7 @@ func (executor *Executor) referenceSizeNoteFor(offering generation.Offering, inp
 			continue
 		}
 		template := context.ReferenceOutputSizeNearestTemplate
-		if size.sameShape(width, height) {
+		if size.sameShape(width, height) || executor.ratioSameShape(offering, input, size, width, height) {
 			template = context.ReferenceOutputSizeTemplate
 		}
 		if localize != nil {
@@ -167,6 +167,13 @@ func (executor *Executor) referenceSizeNoteFor(offering generation.Offering, inp
 // model's maximum, see followsCanvas).
 func (size sizeValue) sameShape(width, height int) bool {
 	return math.Abs(math.Log(size.Ratio*float64(height)/float64(width))) < sameRatioTolerance
+}
+
+// ratioSameShape reports whether a ratio-only value has the picture's shape
+// once read as the pixels the Schema maps it to (see Executor.followsCanvas).
+func (executor *Executor) ratioSameShape(offering generation.Offering, input map[string]any, size sizeValue, width, height int) bool {
+	pixels, ok := executor.ratioPixels(offering, input, size)
+	return ok && pixels.Width > 0 && pixels.sameShape(width, height)
 }
 
 // submittedReferences are the reference assets of a frozen input.

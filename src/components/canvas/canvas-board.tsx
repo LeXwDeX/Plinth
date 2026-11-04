@@ -37,6 +37,7 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
 import { Surface } from '@/components/ui/surface';
 import { sameMaskDraft, useMaskStore } from '@/store/mask-store';
+import { canvasBackgroundStyle } from '@/lib/canvas/background-style';
 import { artboardToWorld, inpaintGeometry, paintMask, rectangleRegion, worldToArtboard } from '@/lib/canvas/inpaint-export';
 import { CanvasExportError, exportArtboardToBlob } from '@/lib/canvas/export-canvas';
 import { CanvasImageCache, pictureKeys, pictureSize, splitPictureKey } from '@/lib/canvas/image-cache';
@@ -1200,16 +1201,7 @@ export function CanvasBoard({
 
   const patternStyle = useMemo(() => {
     if (!background) return { backgroundColor: palette.canvasBackground } as const;
-    const base = { backgroundColor: background.background_color } as Record<string, string>;
-    if (background.pattern === 'dots') {
-      base.backgroundImage = `radial-gradient(circle, ${background.pattern_color} ${background.pattern_width}px, transparent ${background.pattern_width}px)`;
-      base.backgroundSize = `${background.cell_size}px ${background.cell_size}px`;
-    }
-    if (background.pattern === 'grid') {
-      base.backgroundImage = `linear-gradient(${background.pattern_color} 1px, transparent 1px), linear-gradient(90deg, ${background.pattern_color} 1px, transparent 1px)`;
-      base.backgroundSize = `${background.cell_size}px ${background.cell_size}px`;
-    }
-    return base;
+    return canvasBackgroundStyle(background);
   }, [background]);
 
   // 蒙版和裁剪的"应用 / 取消"放进顶部参数条，不再在画布上叠悬浮按钮。

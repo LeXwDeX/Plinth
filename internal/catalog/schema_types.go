@@ -1197,6 +1197,8 @@ type PublicGenerationMessagesSchema struct {
 	ReferenceLimit    string `json:"reference_limit,omitempty"`
 	ReferenceLimitOne string `json:"reference_limit_one,omitempty"`
 	ReferenceCapacity string `json:"reference_capacity,omitempty"`
+	// ReferenceCapacityMultiview: see schema.ExecutionMessages (#86).
+	ReferenceCapacityMultiview string `json:"reference_capacity_multiview,omitempty"`
 }
 
 // Public DTOs list browser-owned fields explicitly. Adding a server setting to
@@ -3646,6 +3648,9 @@ type ChatMessageTexts struct {
 	// AgentContentRejected replaces UnknownError when the upstream's content
 	// moderation refused the request's pictures or text (#35).
 	AgentContentRejected string `json:"agent_content_rejected"`
+	// AgentInlineImageOutput replaces UnknownError when the Agent model drew
+	// a picture itself instead of answering or calling a generation tool.
+	AgentInlineImageOutput string `json:"agent_inline_image_output"`
 	// AgentNotConfigured is what the person reads while the live Agent has no
 	// API key or no model: Agent replies and prompt enhancement are off (#253).
 	AgentNotConfigured string `json:"agent_not_configured"`

@@ -27,7 +27,7 @@ import { handleLabel, handleOfPicture } from '@/lib/workspace/object-handle';
 import { targetOfTile } from '@/lib/workspace/result-target';
 import { objectOfTile, type TilePick } from '@/lib/workspace/version-object';
 import { versionCaption, versionLabel, versionTitle } from '@/lib/workspace/version-label';
-import { branchOf, foldColumn, layoutColumns, versionStatusLabel, type LinkClass, type VersionColumn, type VersionParent, type VersionTile } from '@/lib/workspace/versions';
+import { branchOf, foldColumn, layoutColumns, shownVersionTiles, versionStatusLabel, type LinkClass, type VersionColumn, type VersionParent, type VersionTile } from '@/lib/workspace/versions';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { keepUnchanged } from '@/lib/core/keep-unchanged';
@@ -415,7 +415,9 @@ const TileButton = memo(function TileButton({ tile, size, current, inBranch, inC
           className="rounded-sm px-1 text-[10px] leading-4 text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
         >{schemaText(schema, 'ui.studio.strip.detail')}</button> : null}
       </div>
-      <CardDownload target={target} className="absolute right-1 top-1 z-10" buttonClassName="size-5" />
+      {/* In the +N list every row shows its download: revealing it on hover left one row with the icon (the one
+          focused) and the next without, which read as a version that cannot be downloaded. */}
+      <CardDownload target={target} className="absolute right-1 top-1 z-10" buttonClassName={cn('size-5', size === 'compact' && 'opacity-100')} />
       {tile.status === 'ready' ? <CandidatePopover tile={tile} sessionId={sessionId} current={current} /> : null}
     </ResultContextMenu>
   );
@@ -495,15 +497,16 @@ export function VersionStrip() {
     candidatesOf(tile, String, imageResultSlots(schema, tile.capability)).some((candidate) => compareKeys.has(slotKey(candidate.taskId, candidate.assetId)))
     || compareKeys.has(slotOf(tile)?.key ?? '')
   );
-  const branch = useMemo(() => branchOf(versions.tiles, currentTile?.key ?? null), [versions.tiles, currentTile?.key]);
+  const tiles = useMemo(() => shownVersionTiles(versions.tiles), [versions.tiles]);
+  const branch = useMemo(() => branchOf(tiles, currentTile?.key ?? null), [tiles, currentTile?.key]);
   // Columns that did not change keep their objects, so their memoized connectors are not redrawn (#291).
   const previousColumns = useRef<VersionColumn[] | undefined>(undefined);
   const columns = useMemo(() => {
-    const next = keepUnchanged(previousColumns.current, layoutColumns(versions.tiles), (column) => column.tiles[0].key);
+    const next = keepUnchanged(previousColumns.current, layoutColumns(tiles), (column) => column.tiles[0].key);
     previousColumns.current = next;
     return next;
-  }, [versions.tiles]);
-  const captionOf = useCallback((tile: VersionTile) => versionCaption(schema, tile, versions.tiles), [schema, versions.tiles]);
+  }, [tiles]);
+  const captionOf = useCallback((tile: VersionTile) => versionCaption(schema, tile, tiles), [schema, tiles]);
   const chat = useMemo(() => createChatBrowserClient(schema), [schema]);
   const { pick } = useSessionPick(chat, sessionId);
   const { openOnStage } = useObjectActions();
@@ -538,7 +541,7 @@ export function VersionStrip() {
                 key={column.tiles[0].key}
                 column={column}
                 previous={index > 0 ? columns[index - 1] : null}
-                tiles={versions.tiles}
+                tiles={tiles}
                 currentKey={currentTile?.key ?? null}
                 branch={branch}
                 inCompareTile={inCompareTile}
@@ -555,7 +558,7 @@ export function VersionStrip() {
         {versions.hasEarlier ? <Action type="button" variant="ghost" size="sm" loading={versions.loadingEarlier} onClick={() => void loadEarlier()} data-testid="versions-load-earlier">
           {schemaText(schema, versions.loadingEarlier ? 'ui.studio.strip.loading_earlier' : 'ui.studio.strip.load_earlier')}
         </Action> : null}
-        <Action type="button" variant="outline" size="sm" onClick={() => setAllOutputsOpen(true)} disabled={versions.tiles.length === 0} data-testid="all-outputs-button">
+        <Action type="button" variant="outline" size="sm" onClick={() => setAllOutputsOpen(true)} disabled={tiles.length === 0} data-testid="all-outputs-button">
           <Grid2x2 />{schemaText(schema, 'ui.studio.strip.all_outputs')}
         </Action>
       </div>

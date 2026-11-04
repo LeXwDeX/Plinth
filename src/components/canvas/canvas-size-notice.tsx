@@ -2,7 +2,7 @@
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import type { CanvasDelivery } from '@/hooks/use-canvas-artboard';
-import { clampCanvasPixels, type CanvasPixels } from '@/lib/canvas/artboard';
+import { clampCanvasPixels, samePixels, type CanvasPixels } from '@/lib/canvas/artboard';
 import { schemaMessage, schemaText, type ProductSchema } from '@/lib/product-schema';
 import type { CanvasTurnOutput } from '@/lib/workspace/canvas-size';
 import { cn } from '@/lib/utils';
@@ -70,7 +70,9 @@ export function CanvasSizeNotice({ sessionId, delivery, className }: { sessionId
   if (turn) {
     if (!turn.nearest && fit.kind !== 'align' && fit.kind !== 'conflict') return null;
     const output = turnOutputText(schema, turn, sizeText);
-    const adoptTurn = turn.nearest ? clampCanvasPixels(turn.pixels, schema.canvas.limits) : null;
+    const nearest = turn.nearest ? clampCanvasPixels(turn.pixels, schema.canvas.limits) : null;
+    // Resizing the canvas to the size it already has does nothing, so it is not offered.
+    const adoptTurn = nearest && !samePixels(nearest, pixels) ? nearest : null;
     const kind = turn.nearest ? 'follows_nearest' : 'follows';
     return (
       <div role="status" data-testid="canvas-size-notice" data-kind={kind} className={cn(NOTICE_CLASS, className)}>
@@ -80,7 +82,8 @@ export function CanvasSizeNotice({ sessionId, delivery, className }: { sessionId
     );
   }
   if (fit.kind !== 'align' && fit.kind !== 'conflict') return null;
-  const adopt = fit.kind === 'conflict' ? clampCanvasPixels(fit.output, schema.canvas.limits) : null;
+  const conflictSize = fit.kind === 'conflict' ? clampCanvasPixels(fit.output, schema.canvas.limits) : null;
+  const adopt = conflictSize && !samePixels(conflictSize, pixels) ? conflictSize : null;
   const message = fit.kind === 'align'
     ? schemaMessage(schema, 'ui.canvas.size.mismatch', { output: fit.output ? sizeText(fit.output) : '', canvas })
     : fit.output

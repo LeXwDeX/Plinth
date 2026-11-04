@@ -93,7 +93,16 @@ describe('output strip navigation and details', () => {
     expect(detail()).toBeUndefined(); expect(state.targets[0].taskId).toBeUndefined();
     primary().props.onClick(click); expect(state.stage).toHaveBeenCalledTimes(1);
   });
-  it.each(['pending', 'running', 'failed'] as const)('disables unavailable %s display and retains its request details', (status) => {
+  it('leaves a failed attempt out: it has nothing to show or take, and the conversation says why it failed', () => {
+    state.tiles = [tile(), tile({ key: 'n:failed', taskId: 'failed', taskIds: ['failed'], status: 'failed', assets: [] })];
+    const html = renderToStaticMarkup(<VersionStrip />);
+    expect(html).not.toContain('data-key="n:failed"');
+    expect(html).toContain('data-key="n:old"');
+    state.tiles = [tile({ status: 'failed', assets: [] })];
+    expect(renderToStaticMarkup(<VersionStrip />)).toContain('data-testid="version-strip-empty"');
+  });
+
+  it.each(['pending', 'running'] as const)('disables unavailable %s display and retains its request details', (status) => {
     state.tiles = [tile({ status, assets: [] })]; renderToStaticMarkup(<VersionStrip />);
     expect(primary().props.disabled).toBe(true); detail().props.onClick(click);
     expect(state.detail).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'old', status }));

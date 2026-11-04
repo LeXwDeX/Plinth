@@ -99,6 +99,9 @@ type Config struct {
 	// three-view view the person replaced with an upload is named by it (#65).
 	InputAssetRoute string
 	Chat            catalog.ChatSchema
+	// CanvasArtboard gives the Schema tables that turn a ratio-only output
+	// size into pixels (ratio_pixels, ratio_pixel_tiers) for the size notes.
+	CanvasArtboard catalog.CanvasArtboardSchema
 	// Texts gives the copy of the turn's UI locale for tool results. Nil
 	// keeps the Schema's default-locale copy.
 	Texts *catalog.TextLocalizer
@@ -141,6 +144,9 @@ type Executor struct {
 	publicStates  map[generation.TaskState]string
 	clock         func() time.Time
 	sleep         func(context.Context, time.Duration) error
+
+	// canvasArtboard holds the Schema tables that turn a ratio into pixels.
+	canvasArtboard catalog.CanvasArtboardSchema
 
 	offeringParameters       func(string, string, string) map[string]json.RawMessage
 	offeringParameterReasons func(string, string, string) map[string]generation.ParameterReason
@@ -196,6 +202,8 @@ func New(config Config) (*Executor, error) {
 		publicStates:  states,
 		clock:         config.Clock,
 		sleep:         config.Sleep,
+
+		canvasArtboard: config.CanvasArtboard,
 
 		offeringParameters:       config.OfferingParameters,
 		offeringParameterReasons: config.OfferingParameterReasons,

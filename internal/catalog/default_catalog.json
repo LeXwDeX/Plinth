@@ -795,7 +795,7 @@
               {
                 "min": 403,
                 "max": 403,
-                "class": "invalid_input"
+                "class": "upstream_denied"
               }
             ],
             "upstream_code_map": {
@@ -848,7 +848,7 @@
               {
                 "min": 403,
                 "max": 403,
-                "class": "invalid_input"
+                "class": "upstream_denied"
               }
             ],
             "upstream_code_map": {
@@ -938,7 +938,7 @@
               {
                 "min": 403,
                 "max": 403,
-                "class": "invalid_input"
+                "class": "upstream_denied"
               }
             ],
             "upstream_code_map": {
@@ -1514,6 +1514,7 @@
         "reference_limit_one": "{model} 一次只用 1 张参考图：这次共 {total} 张，只用第 1 张。要用多张不同角度的图，请改选支持多图的模型。",
         "reference_selection_note": "{model} 这次使用 {count} 张参考图；来源图经过替换或去重，不能说明只用了原顺序的前几张。",
         "reference_capacity": "{model} 一次最多用 {count} 张参考图；这次共 {total} 张。发送后以实际冻结的来源说明为准，发送前不预测具体使用哪张。",
+        "reference_capacity_multiview": "直接发送时，{model} 一次最多用 {count} 张参考图（这次共 {total} 张）；在上方标好视角并确认，会用 {multiview} 多视图生成，{total} 张都会用上。",
         "reference_limit_exceeded": "{label} 最多接受 {max} 张图片，这次提供了 {actual} 张；这一步没有提交，也没有扣积分。请减少图片数量，或改选支持更多图片的模型。",
         "extra_credits_consent_required": "这一步包含需要额外积分的项目；请先明确同意这次额外积分消耗，再重新提交。",
         "extra_credits_over_limit": "这一步的额外积分超出本次提交允许同意的上限；请减少需要额外积分的选项，或改走新的任务。",
@@ -3789,6 +3790,7 @@
         "failure.integrity_failure": "生成资产未通过完整性校验",
         "failure.protocol": "上游返回了无法识别的数据",
         "failure.internal": "任务处理失败",
+        "failure.upstream_denied": "上游图像生成服务拒绝了这次请求（HTTP 403），这一步没有生成结果。这与提示词和图片无关，原样重试也不会通过，请联系管理员检查上游服务的访问权限",
         "failure.content_rejected": "上游服务的内容安全审核拦截了这次请求：输入的图片或描述可能被判定为不当内容。这一步没有生成结果，重试同样的输入也不会通过。请更换图片或修改描述后重新发起",
         "failure.source_expired": "来源模型在服务商处的原任务已过期，无法再引用。重新发起时会改用已保存的模型文件；不接受模型文件的服务需要先重新生成来源模型",
         "ui.workspace.harness.agent_decides": "你选择模型与可选参数，Agent 判断输入方式并执行任务。",
@@ -6810,6 +6812,7 @@
             "insufficient_balance": "该模型服务商的账户余额不足或已欠费，这一步没有执行。请联系管理员处理",
             "credential_quota": "该 API Key 已达额度上限，请在 Provider 控制台调整 Key 额度或更换 Key，这一步没有执行。请联系管理员处理",
             "content_rejected": "上游服务的内容安全审核拦截了这一步的输入（审核器较敏感，正常美术素材也可能被误判），没有生成结果，原样重试也不会通过。请主动调整后再调用一次：按审核原因改写提示词，去掉可能触发的描述（例如 sexual 时写明服装完整、姿态得体，去掉裸露、贴身、性感等词；violence 时去掉血腥、武器伤害描写），保留美术意图；若被拦的是输入图本身，改写提示词无效，请改用其他图或去掉该参考图后再试，必要时请用户换图。同时如实告诉用户是审核拦截以及你做了什么调整。不要建议修改部署配置",
+            "upstream_denied": "上游图像生成服务拒绝了这一步的请求（HTTP 403），没有生成结果。这是上游访问权限问题，与提示词和图片无关：不要改写提示词、换图或换参数重试，也不要再换别的模型反复试探。请如实告诉用户是上游图像生成服务拒绝了请求，需要管理员检查上游服务的访问权限后再试",
             "source_expired": "来源模型在服务商处的原任务已过期，这一步没有执行，也没有扣费。重新发起时平台会改用已保存的模型文件；不接受模型文件的服务（例如动画）需要先重新生成来源模型，或在它之前的版本上重新绑骨"
           },
           "content_rejected_reasons": "（理由：{reasons}）",
@@ -6853,6 +6856,7 @@
           "summary_failed": "生成总结失败",
           "no_result": "⚠️ 未返回结果，请重试。",
           "unknown_error": "未知错误",
+          "agent_inline_image_output": "当前对话模型自己画了一张图，而不是调用生成工具，这张图没有保存，也不会出现在结果里。请重试；如果反复出现，请换一个对话模型。",
           "agent_images_unsupported": "当前 Agent 模型拒绝了带图片的请求，可能不支持读图。请在部署配置中换用支持图片输入的模型（LLM_MODEL），或去掉图片后重试。",
           "agent_content_rejected": "请求被上游模型服务的内容安全审核拦截：本轮的图片或文字可能被判定为不当内容。这不是模型不支持读图，也不需要改部署配置。请更换图片或修改描述后重试；如确认内容合规，请把本条消息附带的错误 ID 发给管理员核查。",
           "agent_not_configured": "Agent 未配置：部署缺少对话模型设置（LLM_API_KEY 或 LLM_MODEL），暂时不能对话或增强提示词。请联系管理员配置后再试。",
@@ -7724,16 +7728,16 @@
             "label_key": "toolbar.background.dots",
             "pattern": "dots",
             "background_color": "#10141d",
-            "pattern_color": "#1e2634",
+            "pattern_color": "#3a4558",
             "cell_size": 20,
-            "pattern_width": 1
+            "pattern_width": 1.5
           },
           {
             "value": "grid",
             "label_key": "toolbar.background.grid",
             "pattern": "grid",
             "background_color": "#10141d",
-            "pattern_color": "#182029",
+            "pattern_color": "#262f3e",
             "cell_size": 20,
             "pattern_width": 1
           },
@@ -7741,8 +7745,8 @@
             "value": "plain",
             "label_key": "toolbar.background.plain",
             "pattern": "solid",
-            "background_color": "#10141d",
-            "pattern_color": "#10141d",
+            "background_color": "#1a1f2a",
+            "pattern_color": "#1a1f2a",
             "cell_size": 20,
             "pattern_width": 1
           },
@@ -7750,8 +7754,8 @@
             "value": "dark",
             "label_key": "toolbar.background.dark",
             "pattern": "solid",
-            "background_color": "#0a0d14",
-            "pattern_color": "#0a0d14",
+            "background_color": "#050608",
+            "pattern_color": "#050608",
             "cell_size": 20,
             "pattern_width": 1
           }
@@ -13316,6 +13320,7 @@
             "failure.integrity_failure": "The generated asset failed the integrity check",
             "failure.protocol": "The upstream returned unrecognized data",
             "failure.internal": "Task processing failed",
+            "failure.upstream_denied": "The upstream image generation service refused this request (HTTP 403), so no result was produced. This is not about the prompt or pictures, and retrying will not pass; please ask an administrator to check access to the upstream service",
             "failure.content_rejected": "The upstream service's content-safety review blocked this request: the input image or description may have been judged inappropriate. No result was produced, and retrying the same input will not pass. Change the image or rewrite the description and start again",
             "failure.source_expired": "The provider no longer keeps the source model's original task. Starting again uses the saved model file; a service that takes no model file needs the source generated again",
             "ui.workspace.harness.agent_decides": "You choose the model and optional parameters; the Agent decides how to provide inputs and runs the task.",
@@ -15112,6 +15117,7 @@
             "chat.presentation.messages.generation_failed": "Generation failed",
             "chat.presentation.messages.generation_failed_by_class.insufficient_balance": "This model provider's account balance is insufficient or overdue, so this step was not run. Please contact an administrator",
             "chat.presentation.messages.generation_failed_by_class.credential_quota": "This API key has reached its credit limit. Raise the key limit in the provider console or switch to another key, so this step was not run. Please contact an administrator",
+            "chat.presentation.messages.generation_failed_by_class.upstream_denied": "The upstream image generation service refused this step's request (HTTP 403); no result was produced. It is an access problem upstream, not about the prompt or pictures: do not rewrite the prompt, change pictures or parameters and retry, and do not keep probing other models. Tell the user plainly that the upstream image generation service refused the request and that an administrator needs to check access to the upstream service before trying again",
             "chat.presentation.messages.generation_failed_by_class.content_rejected": "The upstream service's content-safety review blocked this step's input (the classifier is sensitive and ordinary art material can be flagged by mistake); no result was produced, and retrying the same input will not pass. Adjust and call once more on your own: rewrite the prompt by the review's reason, dropping the descriptions that may trip it (for sexual, state that the clothing is complete and the pose is modest, and drop words such as nude, skin-tight or sexy; for violence, drop gore and weapon-injury descriptions) while keeping the art intent; if the input image itself was blocked, rewriting the prompt will not help, so use another image or drop that reference and try again, asking the user for another image when needed. Tell the user plainly it was a content-safety block and what you changed. Do not suggest changing the deployment configuration",
             "chat.presentation.messages.content_rejected_reasons": " (reason: {reasons})",
             "chat.presentation.messages.content_rejected_reason_separator": ", ",
@@ -15151,6 +15157,7 @@
             "chat.presentation.messages.summary_failed": "Failed to generate summary",
             "chat.presentation.messages.no_result": "⚠️ No result returned. Please retry.",
             "chat.presentation.messages.unknown_error": "Unknown error",
+            "chat.presentation.messages.agent_inline_image_output": "The current conversation model drew a picture itself instead of calling a generation tool; the picture was not kept and will not appear in the results. Please retry; if it keeps happening, switch to another conversation model.",
             "chat.presentation.messages.agent_images_unsupported": "The current Agent model rejected the request with images; it may not support image input. In the deployment configuration, switch to a model that supports image input (LLM_MODEL), or remove the images and retry.",
             "chat.presentation.messages.agent_content_rejected": "The request was blocked by the upstream model service's content-safety review: the images or text in this turn may have been judged inappropriate. The model does support images and no deployment change is needed. Change the image or rewrite the description and retry; if you are sure the content is fine, send this message's error ID to an administrator.",
             "chat.presentation.messages.agent_not_configured": "Agent is not configured: the deployment is missing chat model settings (LLM_API_KEY or LLM_MODEL), so chatting and prompt enhancement are unavailable. Please contact an administrator to configure it and try again.",
@@ -15303,6 +15310,7 @@
             "runtime.generation_messages.reference_limit_one": "{model} uses only 1 reference picture at a time: of the {total} pictures given, only the first is used. To use several pictures from different angles, pick a model that takes several pictures.",
             "runtime.generation_messages.reference_selection_note": "The {model} reference picture count for this step is {count}. A source replacement or de-duplication means the pictures used are not stated as the first ones in the original order.",
             "runtime.generation_messages.reference_capacity": "{model} has a reference picture limit of {count} per request; {total} pictures are attached. Which pictures are used is stated only after sending, in the result's source note.",
+            "runtime.generation_messages.reference_capacity_multiview": "Sent as is, {model} uses at most {count} reference pictures ({total} attached); mark the views above and confirm to make it with the {multiview} multiview model, which uses all {total}.",
             "runtime.generation_messages.reference_limit_exceeded": "{label} accepts at most {max} pictures; {actual} were provided. This step was not submitted and no credits were spent. Remove pictures or pick a model that takes more.",
             "runtime.generation_messages.extra_credits_consent_required": "This step includes extra credits. Explicitly approve the extra credits before submitting again.",
             "runtime.generation_messages.extra_credits_over_limit": "The extra credits for this step exceed the limit this submission may approve. Remove options that cost extra credits, or start a new task.",

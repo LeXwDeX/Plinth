@@ -9,6 +9,7 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { Surface } from '@/components/ui/surface';
+import { canvasBackgroundStyle, type CanvasBackground } from '@/lib/canvas/background-style';
 import { createCanvasBrowserClient } from '@/lib/canvas/browser-client';
 import { cn } from '@/lib/utils';
 import { canvasDefaultViewport, useCanvasStore } from '@/store/canvas-store';
@@ -133,7 +134,7 @@ export function CanvasZoomControls({ sessionId, containerRef, artboard = null, o
       <span className="mx-0.5 h-5 w-px bg-border" aria-hidden="true" />
       <div className="relative" ref={bgRef}>
         <RailButton label={text('ui.canvas.toolbar.background')} active={bgOpen} onClick={() => setBgOpen((value) => !value)}>
-          <span className="size-4 rounded-md border border-border" style={{ backgroundColor: background?.background_color }} />
+          <span className="size-4 rounded-md border border-border" style={background ? canvasBackgroundStyle(background, SWATCH_CELL / 2) : undefined} />
         </RailButton>
         {bgOpen ? (
           <CanvasBackgroundMenu
@@ -149,13 +150,16 @@ export function CanvasZoomControls({ sessionId, containerRef, artboard = null, o
   );
 }
 
+/** The pattern cell of a menu swatch: small enough that a 24px swatch shows a few dots or grid lines. */
+const SWATCH_CELL = 6;
+
 /**
  * The background choices of the zoom bar, from the Schema. The current one is a checked radio with a check
  * mark in its own column, kept while the pointer or the keyboard focus is on another row: hover only tints a
  * row and focus only draws the ring, so neither looks like the choice (#277).
  */
 export function CanvasBackgroundMenu({ options, value, label, optionLabel, onChoose }: {
-  options: ReadonlyArray<{ value: string; background_color: string }>;
+  options: ReadonlyArray<CanvasBackground>;
   value: string;
   label: string;
   optionLabel: (value: string) => string;
@@ -188,7 +192,7 @@ export function CanvasBackgroundMenu({ options, value, label, optionLabel, onCho
             )}
           >
             <span data-slot="background-check" className="flex size-3.5 shrink-0 text-primary">{selected ? <Check aria-hidden className="size-3.5" /> : null}</span>
-            <span aria-hidden className={cn('size-4 shrink-0 rounded-sm border', selected ? 'border-primary' : 'border-border')} style={{ backgroundColor: item.background_color }} />
+            <span aria-hidden data-slot="background-swatch" className={cn('size-6 shrink-0 rounded-sm border', selected ? 'border-primary' : 'border-border')} style={canvasBackgroundStyle(item, SWATCH_CELL)} />
             {optionLabel(item.value)}
           </button>
         );

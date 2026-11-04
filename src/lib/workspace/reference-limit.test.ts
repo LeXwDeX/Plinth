@@ -26,6 +26,19 @@ describe('referenceLimit', () => {
     expect(referenceLimit(undefined, 2)).toBeNull();
   });
 
+  it('keeps the limit while the multiview panel is offered, and the note names both ways (#86)', () => {
+    const single = offering('meshy/meshy-7.1/image-to-3d');
+    const limit = referenceLimit(single, 4, 'Tripo v3.1 多视图');
+    // A plain send still runs the single-picture model and cuts: the limit is not hidden.
+    expect(limit).toEqual({ model: 'Meshy 7.1', count: 1, total: 4, multiview: 'Tripo v3.1 多视图' });
+    const note = referenceLimitNote(defaultCatalog.application as unknown as ProductSchema, limit!);
+    expect(note).toContain('Meshy 7.1');
+    expect(note).toContain('Tripo v3.1 多视图');
+    expect(note).not.toContain('{');
+    // Without the panel the plain capacity text is used.
+    expect(referenceLimitNote(defaultCatalog.application as unknown as ProductSchema, referenceLimit(single, 4)!)).not.toContain('Tripo');
+  });
+
   it('is silent for an Offering that keeps its picture sequence (the step refuses instead of cutting)', () => {
     const preserve = { ...offering('meshy/meshy-7.1/image-to-3d'), reference_selection_policy: 'preserve' as const };
     expect(referenceLimit(preserve, 2)).toBeNull();

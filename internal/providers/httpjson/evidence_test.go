@@ -226,7 +226,7 @@ func TestErrorEvidencePrefersNestedOpenAIMessage(t *testing.T) {
 	}
 }
 
-// 网宿网关专属分类器：401 鉴权、403 请求体问题（我方）、其余回退通用分类。
+// 网宿网关专属分类器：401 鉴权、403 上游拒绝服务、其余回退通用分类。
 func TestClassifyGatewayErrorMatchesGatewaySemantics(t *testing.T) {
 	cases := []struct {
 		status    int
@@ -234,7 +234,7 @@ func TestClassifyGatewayErrorMatchesGatewaySemantics(t *testing.T) {
 		wantClass generation.FailureClass
 	}{
 		{http.StatusUnauthorized, `{"message":"token expired"}`, generation.FailureAuthentication},
-		{http.StatusForbidden, `{"message":"MissingPrompt"}`, generation.FailureInvalidInput},
+		{http.StatusForbidden, `{"error":{"code":"eca_access_denied","message":"Eca IP not in whitelist"}}`, generation.FailureUpstreamDenied},
 	}
 	for _, testCase := range cases {
 		response := &http.Response{StatusCode: testCase.status}

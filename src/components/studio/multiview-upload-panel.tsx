@@ -19,6 +19,8 @@ export interface MultiviewUploadPanelProps {
   disabled?: boolean;
   /** The view of each picture, aligned with `images`; an empty view leaves that picture out. */
   onConfirm: (choices: string[]) => void;
+  /** The person answered 不是: the composer stops mentioning the multiview way for these pictures (#86). */
+  onDismiss?: () => void;
 }
 
 /**
@@ -26,7 +28,7 @@ export interface MultiviewUploadPanelProps {
  * change once dismissed. A click on a thumbnail shows that picture large inside the stage area (#87), with its
  * chat handle when the session's messages give it one, so the views can be told apart before labelling.
  */
-export function MultiviewUploadPanel({ images, target, disabled = false, onConfirm }: MultiviewUploadPanelProps) {
+export function MultiviewUploadPanel({ images, target, disabled = false, onConfirm, onDismiss }: MultiviewUploadPanelProps) {
   const { schema } = useProductSchema();
   const signature = images.join('\n');
   const [choices, setChoices] = useState<string[]>(() => defaultViewChoices(images.length, target.views));
@@ -85,7 +87,7 @@ export function MultiviewUploadPanel({ images, target, disabled = false, onConfi
         <Action type="button" size="sm" disabled={disabled || !valid} onClick={() => onConfirm(choices)} data-testid="studio-multiview-upload-confirm">
           {schemaText(schema, 'ui.studio.multiview_upload.confirm')}
         </Action>
-        <Action type="button" size="sm" variant="ghost" onClick={() => setDismissedFor(signature)} data-testid="studio-multiview-upload-dismiss">
+        <Action type="button" size="sm" variant="ghost" onClick={() => { setDismissedFor(signature); onDismiss?.(); }} data-testid="studio-multiview-upload-dismiss">
           {schemaText(schema, 'ui.studio.multiview_upload.dismiss')}
         </Action>
       </div>

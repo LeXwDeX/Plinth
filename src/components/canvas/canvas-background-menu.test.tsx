@@ -26,6 +26,16 @@ const tagOf = (button: string) => button.match(/^<button[^>]*>/)?.[0] ?? '';
 const classesOf = (button: string) => (tagOf(button).match(/class="([^"]*)"/)?.[1] ?? '').split(/\s+/);
 
 describe('the canvas background menu (#277)', () => {
+  it('draws each choice as it looks behind the canvas: its own colour and its dots or grid lines (#86)', () => {
+    const swatches = radios(render(backgrounds[0].value)).map((button) => button.match(/data-slot="background-swatch"[^>]*style="([^"]*)"/)?.[1] ?? '');
+    expect(new Set(swatches).size).toBe(backgrounds.length);
+    backgrounds.forEach((item, index) => {
+      expect(swatches[index]).toContain(`background-color:${item.background_color}`);
+      if (item.pattern === 'dots') expect(swatches[index]).toContain('radial-gradient');
+      if (item.pattern === 'grid') expect(swatches[index]).toContain('linear-gradient');
+    });
+  });
+
   it('is a radio group of the Schema backgrounds, named and labelled from the Schema', () => {
     const html = render(backgrounds[0].value);
     expect(html).toContain(`role="radiogroup" aria-label="${messages['ui.canvas.toolbar.background']}"`);
