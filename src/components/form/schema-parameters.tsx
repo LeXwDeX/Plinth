@@ -2,7 +2,9 @@
 
 import { useId, type ReactNode } from 'react';
 import type { ParamSchema } from '@/lib/providers/types';
-import { parameterDisabled, parameterNotices, parameterVisible } from '@/lib/product-schema';
+import { formatSchemaText, parameterConditionMatches, parameterDisabled, parameterNotices, parameterVisible, schemaText } from '@/lib/product-schema';
+import { unavailableLabel } from '@/lib/unavailable';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { ChoiceChips } from '@/components/ui/choice-chips';
 import { Field } from '@/components/ui/field';
@@ -43,10 +45,22 @@ export function SchemaParameters({ parameters, values, onChange, disabled, param
     const fieldId = `${id}-${parameter.name}`;
     const validation = parameter.validation;
     const notices = parameterNotices(parameter, values);
-    const help = parameter.description || notices.length > 0
+    // A parameter the current settings lock says so (#94): the short reason inline, the conditions in the hint.
+    const conditions = disabled ? [] : (parameter.disabled_when ?? []).filter(condition => parameterConditionMatches(condition, values));
+    const conditionDetail = conditions.length
+      ? formatSchemaText(schemaText(schema, 'ui.studio.params.condition_disabled'), {
+        conditions: conditions.map(condition => {
+          const dependency = parameters.find(entry => entry.name === condition.parameter);
+          const current = values[condition.parameter];
+          return `${dependency?.label ?? condition.parameter}: ${dependency?.options?.find(option => option.value === String(current))?.label ?? String(current ?? '')}`;
+        }).join(schemaText(schema, 'ui.studio.list_separator')),
+      })
+      : '';
+    const help = parameter.description || notices.length > 0 || conditionDetail
       ? <>
           {parameter.description && <p>{parameter.description}</p>}
           {notices.map(notice => <p key={notice.message_key}>{text(notice.message_key)}</p>)}
+          {conditionDetail ? <UnavailableNotice testId="parameter-disabled-reason" label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.params.condition'))} detail={conditionDetail} /> : null}
         </>
       : undefined;
     const group = parameter.type === 'string-array' || parameter.type === 'multi-select';

@@ -212,7 +212,10 @@ describe('ResultDetail', () => {
     expect(html).not.toContain('title=');
     expect(html).toContain(`aria-label="${schemaText(schema, 'ui.studio.result.to_3d')}: ${reason}"`);
     // The reason is also written out as text, and the dimmed buttons point at it.
-    expect(html).toMatch(new RegExp(`data-testid="result-detail-blocked-reason"[^>]*>${reason}<`));
+    expect(html).toContain('data-testid="result-detail-blocked-reason"');
+    expect(html).toContain('data-testid="unavailable-icon"');
+    expect(html).toContain(`data-testid="unavailable-label">${schemaText(schema, 'ui.unavailable.label').replace('{reason}', schemaText(schema, 'ui.unavailable.reason.result.other_session'))}<`);
+    expect(html).toContain(`data-testid="unavailable-detail">${reason}<`);
     expect(html).toContain('aria-describedby="result-detail-blocked-reason"');
     expect(html).not.toContain('data-testid="result-detail-to3d"');
     state.scope = '2d';
@@ -370,6 +373,11 @@ it('does not substitute another asset when the explicitly selected asset is abse
   state.task = ready({ assets: [{ id: 'a1', role: 'image', media_type: 'image/png', url: target.url }] });
   const html = renderToStaticMarkup(<ResultDetail target={{ ...target, assetId: 'unavailable', url: '' }} />);
   expect(html).toContain('data-kind="none"');
+  // A ready result without a previewable file says so with the shared notice: icon, short reason, full sentence in the hint.
+  expect(html).toContain('data-testid="result-detail-no-preview"');
+  expect(html).toContain('data-testid="unavailable-icon"');
+  expect(html).toContain(`data-testid="unavailable-label">${schemaText(schema, 'ui.unavailable.label').replace('{reason}', schemaText(schema, 'ui.unavailable.reason.result.no_preview'))}<`);
+  expect(html).toContain(`data-testid="unavailable-detail">${schemaText(schema, 'ui.account.preview_unavailable')}<`);
   expect(html).not.toContain('data-testid="result-detail-download"');
   expect(html).not.toContain('data-testid="result-detail-open-canvas"');
 });

@@ -47,6 +47,18 @@ describe('Schema-driven domain parameter sections', () => {
 });
 
 
+it('shows one "无法使用，<短原因>" notice, with the full sentence as its detail, when the section cannot be used (#94)', () => {
+  const noSession = renderToStaticMarkup(<ParamsDomainSection params={params(offering('image'))} hasSession={false} skill={null} />);
+  expect(noSession.match(/data-testid="unavailable-icon"/g)).toHaveLength(1);
+  expect(noSession).toContain(`data-testid="unavailable-label">无法使用，${schemaText(schema, 'ui.unavailable.reason.params.no_session')}<`);
+  expect(noSession).toContain(`data-testid="unavailable-detail">${schemaText(schema, 'ui.studio.params.no_session')}<`);
+  const operation = renderToStaticMarkup(<ParamsDomainSection params={params({ ...offering('model'), available: false })} hasSession skill={null} />);
+  expect(operation.match(/data-testid="unavailable-icon"/g)).toHaveLength(1);
+  expect(operation).toContain(`无法使用，${schemaText(schema, 'ui.unavailable.reason.params.operation_unavailable')}`);
+  const usable = renderToStaticMarkup(<ParamsDomainSection params={params(offering('image'))} hasSession skill={null} />);
+  expect(usable).not.toContain('unavailable-icon');
+});
+
 it('shows the Agent source and reason on an advised readonly value without enabling a user control', () => {
   const wire = offering('model');
   wire.parameters = [

@@ -16,11 +16,13 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import useSWR from 'swr';
-import { Ban, ChevronDown, ChevronRight, Download, FileArchive, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Download, FileArchive, Loader2 } from 'lucide-react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
+import { unavailableLabel } from '@/lib/unavailable';
 import { useModelFormatCoverage } from '@/hooks/use-model-format-coverage';
 import { useProcessingPlanResume } from '@/hooks/use-processing-plan-resume';
 import { safeAssetURL } from '@/lib/core/tasks/asset-url-rewriter';
@@ -236,6 +238,9 @@ export function ModelFormatsView({
   schema, coverage, phase = 'ready', busy, error, onComplete, onRetry, onConvert, onRefetch, pendingFormat, layout = 'flow', header, resume, pausedReason,
 }: ModelFormatsViewProps) {
   const message = (key: string) => schemaText(schema, key);
+  // The few words of an "unavailable" line (#94); the full sentence goes in the hover hint.
+  const notice = (reason: string, detail: string | undefined, testId: string) => (
+    <UnavailableNotice label={unavailableLabel(schema, message(`ui.unavailable.reason.formats.${reason}`))} detail={detail || undefined} testId={testId} />);
   const pinned = layout === 'pinned';
   const rows = deliveryFormatRows(schema.delivery_formats, coverage, phase, {
     notReady: message('ui.studio.formats.not_ready'),
@@ -334,11 +339,10 @@ export function ModelFormatsView({
             className="flex h-9 min-h-9 items-center gap-2 rounded-md bg-muted/40 px-2 text-xs"
           >
             <span className="w-12 shrink-0 font-medium">{row.label}</span>
-            {row.status !== 'unknown' ? (
+            {row.status !== 'unknown' && row.status !== 'unavailable' ? (
               <span className={cn(
                 'rounded-full px-2 py-0.5',
                 row.status === 'available' && 'bg-primary/15 text-primary',
-                row.status === 'unavailable' && 'text-muted-foreground',
                 row.status === 'converting' && 'bg-muted text-foreground',
               )}>
                 {[
@@ -350,28 +354,16 @@ export function ModelFormatsView({
             {/* A conversion can run at another provider than the one that made
                 the model (the file is uploaded there); the pill above names which. */}
             {row.status === 'converting' && <Loader2 className="size-3 animate-spin text-muted-foreground" aria-hidden="true" />}
-            {(row.status === 'unavailable' || row.status === 'unknown') && row.reasonText && (
-              row.status === 'unavailable' && rows.filter((candidate) => candidate.reasonText === row.reasonText).length > 1 ? (
-                <HintTooltip
-                  name={row.label}
-                  reason={row.reasonText}
-                  reopenOnKeyboardFocus
-                  className="ml-auto shrink-0 rounded p-1 text-muted-foreground hover:text-foreground focus-within:ring-2 focus-within:ring-ring"
-                  triggerProps={{ role: 'img', tabIndex: 0, 'aria-label': `${message('ui.workspace.model_formats.reason')}: ${row.label}` }}
-                >
-                  <Ban className="size-3.5" aria-hidden="true" />
-                </HintTooltip>
-              ) : (
-                <HintTooltip
-                  name={row.label}
-                  reason={row.reasonText}
-                  reopenOnKeyboardFocus
-                  className="min-w-0 flex-1 rounded-sm text-muted-foreground focus-within:ring-2 focus-within:ring-ring"
-                  triggerProps={{ role: 'note', tabIndex: 0, 'aria-label': `${message('ui.workspace.model_formats.reason')}: ${row.label}` }}
-                >
-                  <span className="block min-w-0 truncate text-left">{row.reasonText}</span>
-                </HintTooltip>
-              )
+            {row.status === 'unavailable' && (
+              <span className="min-w-0 flex-1" data-testid={`model-format-reason-${row.id}`}>
+                {notice(
+                  row.reasonText === message('ui.studio.formats.not_ready') ? 'not_ready'
+                    : row.reasonText === message('ui.studio.formats.not_listed') ? 'not_listed' : 'no_route',
+                  row.reasonText, `model-format-unavailable-${row.id}`)}
+              </span>
+            )}
+            {row.status === 'unknown' && row.reasonText && (
+              <span className="block min-w-0 flex-1 truncate text-left text-muted-foreground" role="note" data-testid={`model-format-reason-${row.id}`}>{row.reasonText}</span>
             )}
             {href && (
               <HintTooltip name={message('ui.workspace.model_formats.download')} hint={row.label} className="ml-auto">
@@ -390,7 +382,7 @@ export function ModelFormatsView({
       })}
     </ul>
   );
-  const resumeControl = paused.length > 0 && resume ? (
+  const resumeButton = paused.length > 0 && resume ? (
     <Action
       type="button"
       size={pinned ? 'lg' : 'sm'}
@@ -403,6 +395,12 @@ export function ModelFormatsView({
       {resume.label}
     </Action>
   ) : null;
+  // A service that cannot take the step now is the reason the button is grey (#94); a request under way is not.
+  const resumeControl = resumeButton && resume && resume.disabled && !resume.busy && !busy ? (
+    <HintTooltip name={resume.label} reason={message('ui.workspace.processing.unavailable_reason.unavailable')} className={pinned ? 'w-full' : undefined}>
+      {resumeButton}
+    </HintTooltip>
+  ) : resumeButton;
   const completeControl = footer === 'complete' && coverage ? (
     <Action
       type="button"
@@ -427,15 +425,18 @@ export function ModelFormatsView({
       {message('ui.workspace.model_formats.completing')}
     </p>
   ) : null;
-  const emptyNote = footer === 'not_ready' || footer === 'all_present' || footer === 'no_route' ? (
+  const emptyNote = footer === 'not_ready' || footer === 'all_present' ? (
     <p role="status" className="text-xs text-muted-foreground" data-testid="model-formats-empty" data-reason={footer}>
       {message(`ui.studio.formats.footer.${footer}`)}
     </p>
+  ) : footer === 'no_route' ? (
+    <div className="text-xs" data-testid="model-formats-empty" data-reason={footer}>
+      {notice('no_route', message('ui.studio.formats.footer.no_route'), 'model-formats-no-route')}
+    </div>
   ) : null;
   const pausedNote = paused.length > 0 ? (
-    <div role="status" className="flex flex-col gap-0.5 text-xs text-warning" data-testid="model-formats-paused">
-      <p>{message('ui.workspace.model_formats.plan_paused')}</p>
-      {pausedReason ? <p data-testid="model-formats-paused-reason">{pausedReason}</p> : null}
+    <div className="text-xs" data-testid="model-formats-paused">
+      {notice('paused', [message('ui.workspace.model_formats.plan_paused'), pausedReason].filter(Boolean).join(' '), 'model-formats-paused-notice')}
     </div>
   ) : null;
   // One group per failed conversion (#330): which formats at which provider, the charge only in the group of the
@@ -469,7 +470,7 @@ export function ModelFormatsView({
                 <span className="text-muted-foreground" data-testid="model-formats-charged">{schemaCountMessage(schema, 'ui.workspace.model_formats.charged_note', step.chargedCredits, { credits: step.chargedCredits })}</span>
               ) : null}
               {!free && step.retryBlocked ? (
-                <span className="text-muted-foreground" data-testid="model-formats-retry-blocked">{message('ui.workspace.model_formats.retry_blocked')}</span>
+                <span data-testid="model-formats-retry-blocked">{notice('retry_blocked', message('ui.workspace.model_formats.retry_blocked'), 'model-formats-retry-blocked-notice')}</span>
               ) : (
                 <Action
                   type="button"

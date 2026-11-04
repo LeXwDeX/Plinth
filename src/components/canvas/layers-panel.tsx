@@ -22,6 +22,8 @@ import {
 import { Action } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
+import { unavailableLabel } from '@/lib/unavailable';
 import { Surface } from '@/components/ui/surface';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { artboardBackdrop, checkerTile } from '@/lib/canvas/artboard-backdrop';
@@ -158,7 +160,7 @@ export function InpaintMaskDialog({
         </div>
         <p className="mt-2 text-xs text-muted-foreground">{formatSchemaText(labels.size, { size: `${width}×${height}` })}</p>
         {state.kind === 'loading' ? <p className="mt-2 text-xs text-muted-foreground" data-testid="inpaint-mask-loading">{labels.loading}</p> : null}
-        {state.kind === 'unavailable' ? <p role="alert" className="mt-2 text-xs text-warning" data-testid="inpaint-mask-unavailable">{labels.unavailable}</p> : null}
+        {state.kind === 'unavailable' ? <UnavailableNotice className="mt-2 text-xs" testId="inpaint-mask-unavailable" label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.canvas.mask_unreadable'))} detail={labels.unavailable} /> : null}
       </DialogContent>
     </Dialog>
   );

@@ -7,6 +7,8 @@ import { schemaMessage, schemaText, type ProductSchema } from '@/lib/product-sch
 import type { CanvasTurnOutput } from '@/lib/workspace/canvas-size';
 import { cn } from '@/lib/utils';
 import { applyCanvasResize } from '@/lib/canvas/apply-canvas-resize';
+import { unavailableLabel } from '@/lib/unavailable';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 
 const NOTICE_CLASS = 'flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-reminder/40 bg-reminder/10 px-2 py-1 text-[11px] leading-4 text-foreground';
 
@@ -21,6 +23,11 @@ function AdoptButton({ label, onClick }: { label: string; onClick: () => void })
       {label}
     </button>
   );
+}
+
+/** The "model cannot output the canvas size" line: icon and short reason inline, the full sentence in the hint (#94). */
+function SizeUnavailable({ schema, detail }: { schema: ProductSchema; detail: string }) {
+  return <UnavailableNotice testId="canvas-size-unavailable" label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.canvas.size_unsupported'))} detail={detail} />;
 }
 
 /** The size a canvas turn sends, as the person reads it: pixels, or a ratio with the pixels the Schema maps it to. */
@@ -43,11 +50,13 @@ export function ReferenceSizeNotice({ delivery, className }: { delivery: CanvasD
   if (!delivery || delivery.turn || !reference || !reference.turn.changed) return null;
   const sizeText = (size: CanvasPixels) => schemaMessage(schema, 'ui.canvas.size.pixels', { width: size.width, height: size.height });
   const kind = reference.turn.nearest ? 'follows_reference_nearest' : 'follows_reference';
+  const text = schemaMessage(schema, `ui.canvas.size.${kind}`, { reference: sizeText(reference.pixels), output: turnOutputText(schema, reference.turn, sizeText) });
+  // #94: the model cannot keep the reference's ratio, so that is said as "unavailable" with the sizes in the hint.
   return (
-    <div role="status" data-testid="reference-size-notice" data-kind={kind} className={cn(NOTICE_CLASS, className)}>
-      <span className="min-w-0 [overflow-wrap:anywhere]">
-        {schemaMessage(schema, `ui.canvas.size.${kind}`, { reference: sizeText(reference.pixels), output: turnOutputText(schema, reference.turn, sizeText) })}
-      </span>
+    <div role={reference.turn.nearest ? undefined : 'status'} data-testid="reference-size-notice" data-kind={kind} className={cn(NOTICE_CLASS, className)}>
+      {reference.turn.nearest
+        ? <UnavailableNotice testId="reference-size-unavailable" label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.canvas.reference_ratio_unsupported'))} detail={text} />
+        : <span className="min-w-0 [overflow-wrap:anywhere]">{text}</span>}
     </div>
   );
 }
@@ -74,9 +83,10 @@ export function CanvasSizeNotice({ sessionId, delivery, className }: { sessionId
     // Resizing the canvas to the size it already has does nothing, so it is not offered.
     const adoptTurn = nearest && !samePixels(nearest, pixels) ? nearest : null;
     const kind = turn.nearest ? 'follows_nearest' : 'follows';
+    const text = schemaMessage(schema, `ui.canvas.size.${kind}`, { canvas, output });
     return (
-      <div role="status" data-testid="canvas-size-notice" data-kind={kind} className={cn(NOTICE_CLASS, className)}>
-        <span className="min-w-0 [overflow-wrap:anywhere]">{schemaMessage(schema, `ui.canvas.size.${kind}`, { canvas, output })}</span>
+      <div role={turn.nearest ? undefined : 'status'} data-testid="canvas-size-notice" data-kind={kind} className={cn(NOTICE_CLASS, className)}>
+        {turn.nearest ? <SizeUnavailable schema={schema} detail={text} /> : <span className="min-w-0 [overflow-wrap:anywhere]">{text}</span>}
         {adoptTurn ? <AdoptButton label={schemaMessage(schema, 'ui.canvas.size.adopt', { output: sizeText(adoptTurn) })} onClick={() => applyCanvasResize(schema, sessionId, adoptTurn)} /> : null}
       </div>
     );
@@ -90,8 +100,8 @@ export function CanvasSizeNotice({ sessionId, delivery, className }: { sessionId
       ? schemaMessage(schema, 'ui.canvas.size.conflict', { canvas, output: sizeText(fit.output) })
       : schemaMessage(schema, 'ui.canvas.size.conflict_unknown', { canvas });
   return (
-    <div role="status" data-testid="canvas-size-notice" data-kind={fit.kind} className={cn(NOTICE_CLASS, className)}>
-      <span className="min-w-0 [overflow-wrap:anywhere]">{message}</span>
+    <div role={fit.kind === 'conflict' ? undefined : 'status'} data-testid="canvas-size-notice" data-kind={fit.kind} className={cn(NOTICE_CLASS, className)}>
+      {fit.kind === 'conflict' ? <SizeUnavailable schema={schema} detail={message} /> : <span className="min-w-0 [overflow-wrap:anywhere]">{message}</span>}
       {fit.kind === 'align' ? (
         <button
           type="button"

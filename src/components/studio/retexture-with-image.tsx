@@ -6,6 +6,7 @@ import { Popover } from '@base-ui/react/popover';
 import { ActionFace, ActionHint, actionButtonClass } from '@/components/studio/action-button';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action, buttonVariants } from '@/components/ui/button';
+import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
 import { useObjectActions } from '@/hooks/use-object-actions';
 import { tileOfObject, useSessionVersions } from '@/hooks/use-session-versions';
@@ -86,7 +87,7 @@ export function RetextureWithImageAction({ object, view }: { object: CurrentObje
                 const reason = initial?.tile.key === row.tile.key
                   ? text(initial.reason === 'from_image' ? 'ui.studio.retexture.target_from_image' : 'ui.studio.retexture.target_latest')
                   : '';
-                return (
+                const target = (
                   <button
                     key={row.tile.key}
                     type="button"
@@ -105,10 +106,17 @@ export function RetextureWithImageAction({ object, view }: { object: CurrentObje
                     {reason ? <span className="ml-auto text-[11px] text-primary">{reason}</span> : null}
                   </button>
                 );
+                return row.handle ? target : (
+                  <HintTooltip key={row.tile.key} name={row.label} reason={text('ui.unavailable.reason.stage.retexture_no_handle')} className="w-full min-w-0">
+                    {target}
+                  </HintTooltip>
+                );
               })}
             </div>
             <div className="flex items-center gap-1.5 pt-1">
-              <Action type="button" size="sm" disabled={!selected} onClick={confirm} data-testid="stage-retexture-confirm">{text('ui.studio.retexture.confirm')}</Action>
+              <HintTooltip name={text('ui.studio.retexture.confirm')} reason={selected ? undefined : text('ui.unavailable.reason.stage.retexture_no_target')}>
+                <Action type="button" size="sm" disabled={!selected} onClick={confirm} data-testid="stage-retexture-confirm">{text('ui.studio.retexture.confirm')}</Action>
+              </HintTooltip>
               <Action type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>{text('ui.studio.retexture.cancel')}</Action>
             </div>
           </Popover.Popup>

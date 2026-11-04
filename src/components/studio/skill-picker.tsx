@@ -12,6 +12,8 @@ import type { AgentEffectiveConfiguration } from '@/lib/agent-configuration';
 import type { ChatSkillCatalog } from '@/lib/chat/browser-client';
 import { deletePersonalSkill, listPersonalSkillIds } from '@/lib/personal-skills';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
+import { unavailableLabel } from '@/lib/unavailable';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { withErrorReference } from '@/lib/problem-reference';
 
 /** The row id of "use no Skill"; it cannot collide with a catalog skill id. */
@@ -22,7 +24,7 @@ const NO_SKILL = '';
  * 只有本人的个人 Skill 带删除操作（#238）；“不使用”与系统/共享 Skill 都没有。
  */
 export function skillPickerRows({
-  catalog, effective, personalIds, noneLabel, noneHint, deleteLabel, deleting, onDelete,
+  catalog, effective, personalIds, noneLabel, noneHint, deleteLabel, deleting, onDelete, notEnabledReason,
 }: {
   catalog: ChatSkillCatalog | null;
   effective: AgentEffectiveConfiguration | null;
@@ -32,11 +34,14 @@ export function skillPickerRows({
   deleteLabel: (name: string) => string;
   deleting: ReadonlySet<string>;
   onDelete: (id: string) => void;
+  /** Why a row the effective configuration leaves out is dimmed (#94); no hint when omitted. */
+  notEnabledReason?: string;
 }): TableRow[] {
   return [
     ...(catalog?.skills ?? []).map((skill) => ({
       key: skill.id,
       disabled: !effective?.skills.some((item) => item.id === skill.id),
+      ...(notEnabledReason && !effective?.skills.some((item) => item.id === skill.id) ? { disabledReason: notEnabledReason } : {}),
       cells: [
         { text: skill.displayName, strong: true, kind: 'name' as const },
         { text: skill.prompt.replace(/\s+/g, ' '), muted: true },
@@ -132,6 +137,7 @@ export function SkillPicker({
     noneHint: schemaText(schema, 'ui.studio.skill.none_hint'),
     deleteLabel: (name) => formatSchemaText(schemaText(schema, 'ui.workspace.skills.delete_label'), { name }),
     deleting, onDelete: (id) => { void remove(id); },
+    notEnabledReason: schemaText(schema, 'ui.unavailable.reason.picker.skill_not_enabled'),
   });
 
   return (
@@ -141,6 +147,7 @@ export function SkillPicker({
         label={schemaText(schema, 'ui.studio.skill.title')}
         value={value}
         fullValue={fullValue}
+        triggerDisabledReason={!sessionId ? schemaText(schema, 'ui.unavailable.reason.picker.no_session') : undefined}
         disabled={disabled || !sessionId}
         sections={[{
           title: schemaText(schema, 'ui.studio.skill.title'),
@@ -157,7 +164,13 @@ export function SkillPicker({
           foot: (close) => (
             <div className="flex flex-col gap-1">
               {selectedId && !loading && (failed || unavailable)
-                ? <p role="alert" className="text-destructive">{schemaText(schema, failed ? 'ui.workspace.skills.load_failed' : 'ui.workspace.skills.unavailable')}</p>
+                ? (
+                  <UnavailableNotice
+                    testId="skill-picker-unavailable"
+                    label={unavailableLabel(schema, schemaText(schema, failed ? 'ui.unavailable.reason.picker.skill_load_failed' : 'ui.unavailable.reason.picker.skill_unavailable'))}
+                    detail={schemaText(schema, failed ? 'ui.workspace.skills.load_failed' : 'ui.workspace.skills.unavailable')}
+                  />
+                )
                 : null}
               <button
                 type="button"

@@ -11,6 +11,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
+import { unavailableLabel } from '@/lib/unavailable';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { safeAssetURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -421,10 +423,7 @@ export function InpaintDialog({
       <DialogContent closeLabel={text('ui.dialog.close')} className="flex flex-col gap-0 p-5">
         <DialogTitle className="mb-3 text-sm font-semibold">{text('ui.canvas.inpaint.title')}</DialogTitle>
         {!offering ? (
-          <p role="alert" className="flex items-start gap-2 text-xs text-warning">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            {text('ui.canvas.inpaint.missing_semantics')}
-          </p>
+          <UnavailableNotice testId="inpaint-unavailable" label={unavailableLabel(schema, text('ui.unavailable.reason.canvas.inpaint_model'))} detail={text('ui.canvas.inpaint.missing_semantics')} />
         ) : (
           <>
             {pending?.priceMode === 'native' ? <p className="mb-3 rounded-md bg-muted/40 p-2 text-xs text-muted-foreground" data-testid="inpaint-native-price">
@@ -433,17 +432,17 @@ export function InpaintDialog({
                 : schemaMessage(schema, 'ui.pricing.unknown', {})}
             </p> : null}
             <div className="mb-3 space-y-2" data-testid="inpaint-target">
-              <p
-                role={targetBlocks ? 'alert' : undefined}
-                className={`rounded-md p-2 text-xs ${targetBlocks ? 'bg-warning/10 text-warning' : 'bg-muted/40 text-muted-foreground'}`}
-                data-testid="inpaint-output-size"
-              >
-                {targetExact
-                  ? schemaMessage(schema, 'ui.canvas.inpaint.output_size', { size: targetLabel })
-                  : target
+              {targetExact ? (
+                <p className="rounded-md bg-muted/40 p-2 text-xs text-muted-foreground" data-testid="inpaint-output-size">
+                  {schemaMessage(schema, 'ui.canvas.inpaint.output_size', { size: targetLabel })}
+                </p>
+              ) : (
+                <UnavailableNotice testId="inpaint-output-size"
+                  label={unavailableLabel(schema, text('ui.unavailable.reason.canvas.output_size'))}
+                  detail={target
                     ? schemaMessage(schema, 'ui.canvas.inpaint.output_size_nearest', { canvas: canvasLabel, size: targetLabel })
-                    : schemaMessage(schema, 'ui.canvas.inpaint.output_size_unconfirmed', { size: canvasLabel })}
-              </p>
+                    : schemaMessage(schema, 'ui.canvas.inpaint.output_size_unconfirmed', { size: canvasLabel })} />
+              )}
               <div className="flex gap-2 rounded-md bg-muted/40 p-2">
                 {maskPreviewUrl ? (
                   <img
@@ -489,13 +488,16 @@ export function InpaintDialog({
               >
                 {text('ui.canvas.inpaint.cancel')}
               </Action>
-              <Action size="sm"
-                type="button"
-                loading={busy} disabled={ !sessionID || !sourceIdentity || prompt.trim() === '' || targetBlocks}
-                onClick={() => void submit()}
-              >
-                {text(pending ? 'ui.canvas.inpaint.confirm_execution' : 'ui.canvas.inpaint.prepare')}
-              </Action>
+              <HintTooltip name={text(pending ? 'ui.canvas.inpaint.confirm_execution' : 'ui.canvas.inpaint.prepare')}
+                reason={!sessionID ? text('ui.unavailable.reason.canvas.no_session') : targetBlocks ? text('ui.unavailable.reason.canvas.output_size') : undefined}>
+                <Action size="sm"
+                  type="button"
+                  loading={busy} disabled={ !sessionID || !sourceIdentity || prompt.trim() === '' || targetBlocks}
+                  onClick={() => void submit()}
+                >
+                  {text(pending ? 'ui.canvas.inpaint.confirm_execution' : 'ui.canvas.inpaint.prepare')}
+                </Action>
+              </HintTooltip>
             </div>
           </>
         )}
@@ -606,10 +608,7 @@ export function BackgroundRemovalDialog({
         <DialogTitle className="mb-3 text-sm font-semibold">{text('ui.canvas.bgremoval.title')}</DialogTitle>
         {!offering ? (
           <>
-            <p role="alert" className="flex items-start gap-2 text-xs text-warning">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-              {text('ui.canvas.bgremoval.unavailable')}
-            </p>
+            <UnavailableNotice testId="bgremoval-unavailable" label={unavailableLabel(schema, text('ui.unavailable.reason.canvas.bgremoval_service'))} detail={text('ui.canvas.bgremoval.unavailable')} />
             {/* UE-07：服务不可用也必须有关闭按钮，不允许死路。 */}
             <div className="mt-4 flex justify-end">
               <Action size="sm"
@@ -672,13 +671,15 @@ export function BackgroundRemovalDialog({
               >
                 {text('ui.canvas.bgremoval.cancel')}
               </Action>
-              <Action size="sm"
-                type="button"
-                loading={busy} disabled={ !sessionID}
-                onClick={() => void submit()}
-              >
-                {text(pending ? 'ui.canvas.bgremoval.confirm_execution' : 'ui.canvas.bgremoval.prepare')}
-              </Action>
+              <HintTooltip name={text(pending ? 'ui.canvas.bgremoval.confirm_execution' : 'ui.canvas.bgremoval.prepare')} reason={sessionID ? undefined : text('ui.unavailable.reason.canvas.no_session')}>
+                <Action size="sm"
+                  type="button"
+                  loading={busy} disabled={ !sessionID}
+                  onClick={() => void submit()}
+                >
+                  {text(pending ? 'ui.canvas.bgremoval.confirm_execution' : 'ui.canvas.bgremoval.prepare')}
+                </Action>
+              </HintTooltip>
             </div>
           </>
         )}

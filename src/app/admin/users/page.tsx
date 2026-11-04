@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Action } from '@/components/ui/button';
+import { HintTooltip } from '@/components/ui/hint-tooltip';
+import { schemaText } from '@/lib/product-schema';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
@@ -343,34 +345,46 @@ export default function AdminUsersPage() {
                             >
                               <Pencil className="h-3.5 w-3.5" />
                             </Action>
-                            <Action
-                              variant="ghost"
-                              size="icon-sm"
-                              onClick={() => toggleActive(user)}
-                              disabled={ownUser}
-                              aria-label={ownUser
-                                ? text('self_deactivate')
-                                : text(user.isActive
-                                  ? 'deactivate'
-                                  : 'activate')}
+                            <HintTooltip
+                              name={text(user.isActive ? 'deactivate' : 'activate')}
+                              reason={ownUser ? schemaText(schema, 'ui.unavailable.reason.admin.own_account') : undefined}
+                              hint={ownUser ? text('self_deactivate') : undefined}
                             >
-                              {user.isActive ? (
-                                <UserX className="h-3.5 w-3.5 text-destructive" />
-                              ) : (
-                                <UserCheck className="h-3.5 w-3.5 text-success" />
-                              )}
-                            </Action>
-                            <Action
-                              variant="ghost"
-                              size="icon-sm"
-                              onClick={() => openDelete(user)}
-                              disabled={ownUser}
-                              aria-label={ownUser
-                                ? text('self_delete')
-                                : text('delete_user')}
+                              <Action
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() => toggleActive(user)}
+                                disabled={ownUser}
+                                aria-label={ownUser
+                                  ? text('self_deactivate')
+                                  : text(user.isActive
+                                    ? 'deactivate'
+                                    : 'activate')}
+                              >
+                                {user.isActive ? (
+                                  <UserX className="h-3.5 w-3.5 text-destructive" />
+                                ) : (
+                                  <UserCheck className="h-3.5 w-3.5 text-success" />
+                                )}
+                              </Action>
+                            </HintTooltip>
+                            <HintTooltip
+                              name={text('delete_user')}
+                              reason={ownUser ? schemaText(schema, 'ui.unavailable.reason.admin.own_account') : undefined}
+                              hint={ownUser ? text('self_delete') : undefined}
                             >
-                              <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                            </Action>
+                              <Action
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() => openDelete(user)}
+                                disabled={ownUser}
+                                aria-label={ownUser
+                                  ? text('self_delete')
+                                  : text('delete_user')}
+                              >
+                                <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                              </Action>
+                            </HintTooltip>
                           </div>
                         </td>
                       </tr>

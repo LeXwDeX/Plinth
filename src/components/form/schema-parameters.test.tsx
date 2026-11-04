@@ -190,3 +190,18 @@ it('lists only the Retexture style picture formats the Schema declares', () => {
   expect(html).not.toContain('GIF');
   expect(html).not.toContain('BMP');
 });
+
+it('says why a parameter is locked by the current settings with the shared unavailable notice', () => {
+  vi.stubGlobal('React', React);
+  const parameters: ParamSchema[] = [
+    { name: 'mode', label: '模式', type: 'text' },
+    { name: 'count', label: '数量', type: 'number', disabled_when: [{ parameter: 'mode', operator: 'equals', value: 'fixed' }] } as ParamSchema,
+  ];
+  const locked = renderToStaticMarkup(<SchemaParameters parameters={parameters} values={{ mode: 'fixed' }} onChange={() => {}} />);
+  expect(locked).toContain('data-testid="unavailable-icon"');
+  expect(locked).toContain('data-testid="parameter-disabled-reason"');
+  expect(locked).toContain('无法使用，');
+  expect(locked).toMatch(/data-testid="unavailable-detail">[^<]*模式: fixed/);
+  const free = renderToStaticMarkup(<SchemaParameters parameters={parameters} values={{ mode: 'free' }} onChange={() => {}} />);
+  expect(free).not.toContain('parameter-disabled-reason');
+});

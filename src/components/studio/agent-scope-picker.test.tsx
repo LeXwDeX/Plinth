@@ -65,6 +65,14 @@ function Reason({ domain }: { domain: WorkspaceDomain }) {
 }
 
 describe('the model picker follows the Agent scope', () => {
+  it('words the switched-off table as "无法使用，<短原因>" with the full sentence as its detail (#94)', () => {
+    inScope('2d');
+    function Label() { const section = useDomainModelPick('model-3d').section; return <i>{section.disabledLabel}|{section.disabledReason}</i>; }
+    const html = renderToStaticMarkup(<Label />).replace(/<\/?i>/g, '');
+    expect(html).toContain(`无法使用，${messages['ui.unavailable.reason.picker.scope_excludes']}|`);
+    expect(html).toContain('2D 模式');
+  });
+
   const states = () => ({
     image: renderToStaticMarkup(<Reason domain="image" />).replace(/<\/?i>/g, ''),
     model: renderToStaticMarkup(<Reason domain="model-3d" />).replace(/<\/?i>/g, ''),

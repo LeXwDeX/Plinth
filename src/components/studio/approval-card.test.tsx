@@ -184,7 +184,11 @@ describe('approval card', () => {
   it('says the step uses only the first of the pictures given, in the server sentence (#329 E)', () => {
     const note = 'Meshy 7.1 一次只用 1 张参考图：这次共 2 张，只用第 1 张。要用多张不同角度的图，请改选支持多图的模型。';
     const html = render({ ...card(null), capability: 'image-to-3d', referenceNote: note });
-    expect(html).toContain(`data-testid="studio-approval-reference-note">${note}<`);
+    // #94: the page says only "无法使用，<短原因>" with the warning icon; the server sentence is the hover detail.
+    expect(html).toContain('data-testid="studio-approval-reference-note"');
+    expect(html).toContain('data-testid="unavailable-icon"');
+    expect(html).toContain(`data-testid="unavailable-label">${messages['ui.unavailable.label'].replace('{reason}', messages['ui.unavailable.reason.approval.reference_unused'])}<`);
+    expect(html).toContain(`data-testid="unavailable-detail">${note}<`);
     expect(render(card(null))).not.toContain('studio-approval-reference-note');
     // An expired card keeps saying which picture the step would have used.
     expect(render({ ...card(null), referenceNote: note, status: 'expired' })).toContain('studio-approval-reference-note');

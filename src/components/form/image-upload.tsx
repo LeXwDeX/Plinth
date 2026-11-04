@@ -4,9 +4,11 @@ import { useState, useRef, useCallback, useId } from 'react';
 import { cn } from '@/lib/utils';
 import { Upload, X, ImagePlus } from 'lucide-react';
 import { useProductSchema } from '@/components/product-schema-provider';
-import { schemaCountMessage, schemaMessage } from '@/lib/product-schema';
+import { schemaCountMessage, schemaMessage, schemaText } from '@/lib/product-schema';
 import { imageUploadAccept, ImageUploadError, prepareImageUpload } from '@/lib/image-upload';
 import { Action } from '@/components/ui/button';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
+import { unavailableLabel } from '@/lib/unavailable';
 import { formatSizeLimit } from '@/lib/size-text';
 import type { ProductSchema } from '@/lib/product-schema';
 
@@ -67,7 +69,7 @@ export function ImageUpload({
   const uploadPolicy = schema.runtime.frontend.image_upload;
   const configuredAccept = imageUploadAccept(acceptedOutput, uploadPolicy);
   const [previews, setPreviews] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ reason: string; detail: string } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const previewsRef = useRef<string[]>([]);
@@ -103,9 +105,10 @@ export function ImageUpload({
           // 如果指定了 maxFiles，截断到上限
           if (maxFiles !== undefined && next.length > maxFiles) {
             next = next.slice(0, maxFiles);
-            setError(schemaCountMessage(schema, 'ui.form.image_upload.maximum', maxFiles, {
-              count: maxFiles,
-            }));
+            setError({
+              reason: schemaText(schema, 'ui.unavailable.reason.form.upload_maximum'),
+              detail: schemaCountMessage(schema, 'ui.form.image_upload.maximum', maxFiles, { count: maxFiles }),
+            });
           }
           previewsRef.current = next;
           setPreviews(next);
@@ -117,11 +120,14 @@ export function ImageUpload({
         }
       } catch (error) {
         const code = error instanceof ImageUploadError ? error.code : 'read_failed';
-        setError(schemaMessage(schema, `ui.form.image_upload.${code}`, {
-          filename,
-          size: maxSizeText,
-          pixels: uploadPolicy.maximum_pixels,
-        }));
+        setError({
+          reason: schemaText(schema, `ui.unavailable.reason.form.upload_${code}`),
+          detail: schemaMessage(schema, `ui.form.image_upload.${code}`, {
+            filename,
+            size: maxSizeText,
+            pixels: uploadPolicy.maximum_pixels,
+          }),
+        });
       } finally {
         processingRef.current = false;
         setIsProcessing(false);
@@ -245,7 +251,9 @@ export function ImageUpload({
 
       {/* Error message */}
       {error && (
-        <p id={errorId} role="alert" className="text-xs text-destructive">{error}</p>
+        <div id={errorId} className="text-xs">
+          <UnavailableNotice testId="image-upload-error" label={unavailableLabel(schema, error.reason)} detail={error.detail} />
+        </div>
       )}
 
       {/* Previews */}

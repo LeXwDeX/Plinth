@@ -14,6 +14,8 @@ import { clampPan, zoomAt, ZOOM_MINIMUM, ZOOM_STEP, type View } from '@/lib/work
 import { cn } from '@/lib/utils';
 import { useStudioStore } from '@/store/studio-store';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
+import { unavailableLabel } from '@/lib/unavailable';
 
 const SLIDER_STEP = 5;
 const FIT: View = { zoom: ZOOM_MINIMUM, x: 0, y: 0 };
@@ -305,9 +307,9 @@ export function CompareView({ onEnlarge }: { onEnlarge: (slots: readonly Compare
         <Action type="button" variant="outline" size="sm" onClick={end} data-testid="compare-exit"><X />{schemaText(schema, 'ui.studio.compare.exit')}</Action>
       </div>
       {notice ? (
-        <p role="status" className="shrink-0 rounded-md border border-warning/40 bg-warning/10 px-3 py-1.5 text-xs" data-testid="compare-notice">
-          {schemaText(schema, 'ui.studio.compare.unavailable')}
-        </p>
+        <UnavailableNotice className="shrink-0 px-1 text-xs" testId="compare-notice"
+          label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.stage.compare_file_missing'))}
+          detail={schemaText(schema, 'ui.studio.compare.unavailable')} />
       ) : null}
       {compare.mode === 'slider' ? (
         <SliderCompare slots={slots} />

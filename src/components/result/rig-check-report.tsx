@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { Action } from '@/components/ui/button';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
+import { useProductSchema } from '@/components/product-schema-provider';
+import { unavailableLabel } from '@/lib/unavailable';
+import { schemaText } from '@/lib/product-schema';
 import type { RigCheckReportPresentation } from '@/lib/product-schema';
 import { safeAssetURL } from '@/lib/core/tasks/asset-url-rewriter';
 
@@ -60,6 +64,7 @@ export async function readRigCheckReport(url: string, ui: RigCheckReportPresenta
 
 /** An old owner/task/asset response cannot appear after the detail scope changes. */
 export function RigCheckReportAsset({ ownerId, taskId, assetId, url, presentation: ui }: { ownerId?: string; taskId: string; assetId: string; url: string; presentation: RigCheckReportPresentation }) {
+  const { schema } = useProductSchema();
   const scope = JSON.stringify([ownerId, taskId, assetId, url, ui.format, ui.media_type, ui.max_bytes]);
   const [result, setResult] = useState<{ scope: string; report?: NormalizedRigCheckReport; error?: 'unavailable' | 'unsupported' }>();
   const [retry, setRetry] = useState(0);
@@ -72,6 +77,6 @@ export function RigCheckReportAsset({ ownerId, taskId, assetId, url, presentatio
   }, [scope, retry, ownerId, url, ui.format, ui.media_type, ui.max_bytes]);
   const current = result?.scope === scope ? result : undefined;
   return <section className="mt-3 flex min-w-0 flex-col gap-2 border-t border-border pt-3" aria-label={ui.title} data-testid="rig-check-report">
-    {current?.report ? <RigCheckReportContent report={current.report} presentation={ui} /> : current?.error ? <div className="flex items-start justify-between gap-3 text-xs"><p role="status" className="text-muted-foreground">{current.error === 'unsupported' ? ui.unsupported : ui.load_failed}</p><Action type="button" variant="outline" size="xs" onClick={() => setRetry(value => value + 1)}>{ui.retry}</Action></div> : <p role="status" className="text-xs text-muted-foreground">{ui.loading}</p>}
+    {current?.report ? <RigCheckReportContent report={current.report} presentation={ui} /> : current?.error ? <div className="flex items-start justify-between gap-3 text-xs">{current.error === 'unsupported' ? <UnavailableNotice testId="report-unsupported" label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.result.report_unsupported'))} detail={ui.unsupported} /> : <p role="status" className="text-muted-foreground">{ui.load_failed}</p>}<Action type="button" variant="outline" size="xs" onClick={() => setRetry(value => value + 1)}>{ui.retry}</Action></div> : <p role="status" className="text-xs text-muted-foreground">{ui.loading}</p>}
   </section>;
 }

@@ -55,7 +55,7 @@ describe('canvas picture limit: capture and every add entry say so (#149)', () =
     expect(stage).toContain('if (error instanceof CanvasBitmapLimitError) {');
     expect(stage).toContain("bitmapLimitMessage(schema, 'reached'");
     expect(stage).toContain('data-testid="stage-canvas-capacity"');
-    expect(stage).toContain('capacity.full || capacity.near');
+    expect(stage).toContain('capacity.full ?');
     expect(viewer).toContain('onCaptureError?.(error)');
     // The limit is the Schema's, never a literal.
     expect(stage + read('../../hooks/use-model-capture.ts') + read('../../lib/canvas/bitmap-limit.ts')).not.toMatch(/\b50\b/);

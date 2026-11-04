@@ -30,6 +30,7 @@ export function AgentScopePicker() {
       label={label}
       value={schemaText(schema, `ui.studio.agent_scope.short_${current.scope}`)}
       fullValue={current.label}
+      triggerDisabledReason={!activeSessionId ? schemaText(schema, 'ui.unavailable.reason.picker.no_session') : undefined}
       disabled={!activeSessionId || busy}
       sections={[{
         title: label,

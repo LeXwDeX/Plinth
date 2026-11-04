@@ -55,6 +55,14 @@ describe('ProcessingCostSummary (#335)', () => {
     expect(html).not.toContain('data-testid="processing-cost-native"');
     expect(html).toMatch(/data-testid="processing-cost" data-kind="none"/);
     expect(html).toContain(messages['ui.studio.processing.cost_none']);
+    // The state is the shared notice (#94): icon and a few words inline, the full sentence in the hint.
+    expect(html).toContain('data-testid="unavailable-icon"');
+    expect(html).toContain('无法使用，所选步骤无法执行');
+  });
+
+  it('shows no unavailable notice while some chosen step can run', () => {
+    const html = render([{ capability: 'remesh', offering: meshyRemesh, route: runs }]);
+    expect(html).not.toContain('unavailable-icon');
   });
 
   it('shows only the native estimates when every step that can run is native-priced', () => {

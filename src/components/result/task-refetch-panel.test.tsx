@@ -56,6 +56,9 @@ describe('TaskRefetchPanel', () => {
       const html = markup({ sourceTaskId: 'source-1', eligible: false, reason });
       expect(html).toContain(`data-reason="${reason}"`);
       expect(html).toContain(messages[`ui.task.refetch.unavailable.${reason}`]);
+      expect(html).toContain('data-testid="unavailable-icon"');
+      expect(html).toContain(`data-testid="unavailable-label">${schema.content.messages['ui.unavailable.label'].replace('{reason}', messages[`ui.unavailable.reason.result.refetch_${reason}`])}<`);
+      expect(html).toMatch(/data-testid="unavailable-detail"/);
       expect(html).not.toContain('data-testid="task-refetch-start"');
     }
     expect(markup({ sourceTaskId: 'source-1', eligible: false, reason: 'not_applicable' })).toBe('');

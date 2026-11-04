@@ -19,6 +19,8 @@ import { canvasDragItem, startCanvasDrag, uploadDragItem } from '@/lib/workspace
 import { candidateAttachment, isPickedCandidate, pickClaim } from '@/lib/chat/pick';
 import { safeAssetURL, safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-schema';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
+import { unavailableLabel } from '@/lib/unavailable';
 import { cn } from '@/lib/utils';
 import type { ChatAttachment, ChatImage } from '@/store/chat-store';
 import type { ResultTarget } from '@/lib/workspace/result-target';
@@ -170,7 +172,7 @@ export function ImageResultCard({
                   {url
                     // #290: the card shows the downscaled preview; copying and dragging still carry the original.
                     ? <img src={previewAssetUrl(entry.image.url)} alt={label} loading="lazy" decoding="async" className="size-full object-cover" data-chat-picture={url} />
-                    : <span role="status" className="flex size-full items-center justify-center p-2 text-center text-[11px] text-muted-foreground">{schemaText(schema, 'error.unavailable')}</span>}
+                    : <span className="flex size-full items-center justify-center p-2 text-center text-[11px]"><UnavailableNotice label={unavailableLabel(schema, schemaText(schema, 'error.unavailable'))} /></span>}
                 </button>
                 {(() => {
                   const reference = referenceAt(entry);
@@ -252,7 +254,7 @@ export function ImageResultCard({
           })()}
         </div>
       ) : (
-        <p className="px-0.5 text-[11px] text-muted-foreground">{schemaText(schema, 'ui.chat.image.send_to_canvas_unavailable')}</p>
+        <UnavailableNotice className="px-0.5 text-[11px]" label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.result.send_to_canvas'))} detail={schemaText(schema, 'ui.chat.image.send_to_canvas_unavailable')} />
       )}
     </div>
   );

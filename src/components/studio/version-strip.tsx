@@ -239,16 +239,19 @@ function CandidateList({ tile, sessionId, current }: { tile: VersionTile; sessio
     <>
       <div className="flex items-center gap-2">
         <Popover.Title className="min-w-0 flex-1 truncate text-xs font-semibold">{tile.groupLabel || schemaText(schema, 'ui.studio.strip.candidates')}</Popover.Title>
-        <Action
-          type="button"
-          size="xs"
-          variant="outline"
-          data-testid="version-compare-group"
-          disabled={candidateSlots.length < 2}
-          onClick={() => useStudioStore.getState().startCompare(compareFromGroup(candidateSlots))}
-        >
-          <Columns2 />{schemaText(schema, 'ui.studio.strip.compare_group')}
-        </Action>
+        <HintTooltip name={schemaText(schema, 'ui.studio.strip.compare_group')}
+          reason={candidateSlots.length < 2 ? schemaText(schema, 'ui.unavailable.reason.stage.compare_needs_two') : undefined}>
+          <Action
+            type="button"
+            size="xs"
+            variant="outline"
+            data-testid="version-compare-group"
+            disabled={candidateSlots.length < 2}
+            onClick={() => useStudioStore.getState().startCompare(compareFromGroup(candidateSlots))}
+          >
+            <Columns2 />{schemaText(schema, 'ui.studio.strip.compare_group')}
+          </Action>
+        </HintTooltip>
         {groupSource ? <Action type="button" size="xs" variant="outline" disabled={busy}
           data-testid="version-pick-image-group" onClick={() => {
             void choose({ kind: 'image', taskId: groupSource.taskId, assetId: groupSource.assetId }).then((ok) => {
@@ -277,16 +280,19 @@ function CandidateList({ tile, sessionId, current }: { tile: VersionTile; sessio
                 <img src={previewAssetUrl(candidate.url)} alt={''} decoding="async" className="size-full object-cover" />
               </button>
               <span className="truncate text-center text-[11px] text-muted-foreground">{candidate.label}</span>
-              <Action
-                type="button"
-                size="xs"
-                variant="ghost"
-                data-testid="version-enlarge"
-                disabled={!candidateSlots.some((slot) => slot.key === slotKey(candidate.taskId, candidate.assetId))}
-                onClick={() => enlarge(Math.max(0, candidateSlots.findIndex((slot) => slot.key === slotKey(candidate.taskId, candidate.assetId))))}
-              >
-                <Maximize2 />{schemaText(schema, 'ui.studio.strip.enlarge')}
-              </Action>
+              <HintTooltip name={schemaText(schema, 'ui.studio.strip.enlarge')}
+                reason={candidateSlots.some((slot) => slot.key === slotKey(candidate.taskId, candidate.assetId)) ? undefined : schemaText(schema, 'ui.unavailable.reason.stage.no_output')}>
+                <Action
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  data-testid="version-enlarge"
+                  disabled={!candidateSlots.some((slot) => slot.key === slotKey(candidate.taskId, candidate.assetId))}
+                  onClick={() => enlarge(Math.max(0, candidateSlots.findIndex((slot) => slot.key === slotKey(candidate.taskId, candidate.assetId))))}
+                >
+                  <Maximize2 />{schemaText(schema, 'ui.studio.strip.enlarge')}
+                </Action>
+              </HintTooltip>
               <Action
                 type="button"
                 size="xs"
@@ -364,7 +370,8 @@ const TileButton = memo(function TileButton({ tile, size, current, inBranch, inC
       {/* The card shows a short caption; the hover hint carries the whole label and, for a failed one, why it failed.
           The wrapper is block-level and full width, so every tile of a column stays as wide as the column (its
           ring and hover background included), as the bare button was. */}
-      <HintTooltip name={label} hint={tile.status === 'failed' && tile.failure ? tile.failure : undefined} className="flex w-full">
+      <HintTooltip name={label} hint={tile.status === 'failed' && tile.failure ? tile.failure : undefined}
+        reason={tile.status === 'ready' && !canDisplay ? schemaText(schema, 'ui.unavailable.reason.stage.no_output') : undefined} className="flex w-full">
         <button
           type="button"
           disabled={!canDisplay}
@@ -558,9 +565,11 @@ export function VersionStrip() {
         {versions.hasEarlier ? <Action type="button" variant="ghost" size="sm" loading={versions.loadingEarlier} onClick={() => void loadEarlier()} data-testid="versions-load-earlier">
           {schemaText(schema, versions.loadingEarlier ? 'ui.studio.strip.loading_earlier' : 'ui.studio.strip.load_earlier')}
         </Action> : null}
-        <Action type="button" variant="outline" size="sm" onClick={() => setAllOutputsOpen(true)} disabled={tiles.length === 0} data-testid="all-outputs-button">
-          <Grid2x2 />{schemaText(schema, 'ui.studio.strip.all_outputs')}
-        </Action>
+        <HintTooltip name={schemaText(schema, 'ui.studio.strip.all_outputs')} reason={tiles.length === 0 ? schemaText(schema, 'ui.unavailable.reason.stage.no_output') : undefined}>
+          <Action type="button" variant="outline" size="sm" onClick={() => setAllOutputsOpen(true)} disabled={tiles.length === 0} data-testid="all-outputs-button">
+            <Grid2x2 />{schemaText(schema, 'ui.studio.strip.all_outputs')}
+          </Action>
+        </HintTooltip>
       </div>
     </section>
   );

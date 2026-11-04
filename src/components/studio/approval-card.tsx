@@ -6,6 +6,8 @@ import useSWR from 'swr';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
+import { HintTooltip } from '@/components/ui/hint-tooltip';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { useBalance } from '@/hooks/use-balance';
 import { useHandleReferences } from '@/hooks/use-handle-references';
 import { HandleTag } from '@/components/chat/handle-tag';
@@ -17,6 +19,7 @@ import { formatNumber } from '@/lib/i18n/format';
 import { activeLocale } from '@/lib/i18n/locale';
 import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-schema';
 import { formatNativePrice, formatPriceTotal } from '@/lib/pricing';
+import { unavailableLabel } from '@/lib/unavailable';
 import { taskAssetRoute } from '@/lib/workspace/model-formats';
 import { cn } from '@/lib/utils';
 
@@ -132,7 +135,9 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
             </dd>
           </>
         ) : invalidNativeQuote ? (
-          <><dt className="text-muted-foreground">{formatSchemaText(schemaText(schema, 'ui.pricing.frozen_estimate'), { amount: schemaText(schema, 'ui.pricing.unknown') })}</dt><dd role="alert" data-testid="studio-approval-native-price-unknown">{schemaText(schema, 'ui.pricing.unknown')}</dd></>
+          <><dt className="text-muted-foreground">{formatSchemaText(schemaText(schema, 'ui.pricing.frozen_estimate'), { amount: schemaText(schema, 'ui.pricing.unknown') })}</dt><dd>
+            <UnavailableNotice testId="studio-approval-native-price-unknown" label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.approval.price_unknown'))} detail={schemaText(schema, 'ui.studio.approval.card.price_unknown_detail')} />
+          </dd></>
         ) : extra && (model.credits != null || !showCredits) ? (
           <>
             <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.credits_base')}</dt>
@@ -238,12 +243,14 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
         </ul>
       ) : null}
       {model.referenceNote ? (
-        <p className="text-muted-foreground [overflow-wrap:anywhere]" data-testid="studio-approval-reference-note">{model.referenceNote}</p>
+        <UnavailableNotice testId="studio-approval-reference-note" label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.approval.reference_unused'))} detail={model.referenceNote} />
       ) : null}
       {short ? (
-        <p role="status" className="text-warning" data-testid="studio-approval-balance-low">
-          {schemaCountMessage(schema, 'ui.studio.approval.card.balance_low', model.credits ?? 0, { provider: providerLabel, balance: balance ?? 0, credits: model.credits ?? 0 })}
-        </p>
+        <UnavailableNotice
+          testId="studio-approval-balance-low"
+          label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.approval.balance_low'))}
+          detail={schemaCountMessage(schema, 'ui.studio.approval.card.balance_low', model.credits ?? 0, { provider: providerLabel, balance: balance ?? 0, credits: model.credits ?? 0 })}
+        />
       ) : null}
       {model.rechargeTaskId && !expired ? (
         <p role="status" className="text-warning" data-testid="studio-approval-recharge" data-task-id={model.rechargeTaskId}>
@@ -264,7 +271,12 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
           </>
         ) : (
           <>
-            <Action type="button" size="sm" disabled={busy || short || invalidNativeQuote} loading={busy} onClick={() => onDecide(true)} data-testid="studio-approval-approve">{schemaText(schema, 'ui.studio.approval.card.approve')}</Action>
+            <HintTooltip
+              name={schemaText(schema, 'ui.studio.approval.card.approve')}
+              reason={short ? schemaText(schema, 'ui.unavailable.reason.approval.balance_low') : invalidNativeQuote ? schemaText(schema, 'ui.unavailable.reason.approval.price_unknown') : undefined}
+            >
+              <Action type="button" size="sm" disabled={busy || short || invalidNativeQuote} loading={busy} onClick={() => onDecide(true)} data-testid="studio-approval-approve">{schemaText(schema, 'ui.studio.approval.card.approve')}</Action>
+            </HintTooltip>
             <Action type="button" size="sm" variant="outline" disabled={busy} onClick={() => onDecide(false)} data-testid="studio-approval-deny">{schemaText(schema, 'ui.studio.approval.card.deny')}</Action>
           </>
         )}

@@ -73,13 +73,15 @@ describe('the thinking level picker (#322)', () => {
     open('s1', { effort: '', levels: [], defaultLevel: '' });
     const html = renderToStaticMarkup(<ReasoningPicker />);
     expect(trigger(html)).toContain('disabled=""');
-    expect(wrapper(html)).toContain(`data-reason="${messages['ui.studio.reasoning.unavailable']}"`);
-    expect(html).toContain(messages['ui.studio.reasoning.unavailable']);
+    // #94: the hover hint's first line carries the short reason; the full sentence is the table's own detail.
+    expect(wrapper(html)).toContain(`data-reason="${messages['ui.unavailable.reason.picker.reasoning_none']}"`);
+    expect(html).toContain(messages['ui.unavailable.reason.picker.reasoning_none']);
   });
 
   it('is off without a session and while a switch is being saved', () => {
     open(null);
     expect(trigger(renderToStaticMarkup(<ReasoningPicker />))).toContain('disabled=""');
+    expect(wrapper(renderToStaticMarkup(<ReasoningPicker />))).toContain(`data-reason="${messages['ui.unavailable.reason.picker.no_session']}"`);
     open('s1', deepseek, true);
     expect(trigger(renderToStaticMarkup(<ReasoningPicker />))).toContain('disabled=""');
   });
