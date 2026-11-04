@@ -106,9 +106,10 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
     ? processingSourceSteps(availableCapabilities, selected, offerings, source, asset, chosen)
     : [], [source, asset, availableCapabilities, selected, offerings, chosen]);
   // 每步按 Schema 声明的可填参数组装提交输入，并按 input_rules 在提交前提示违例。
-  // A face-reducing step before one with a face limit starts at the most faces that limit takes (Remesh before UV, #93).
+  // A face-reducing step before steps with a face limit starts at the most faces the tightest one takes (Remesh before
+  // UV, also with Retexture in between, #93).
   const budgets = useMemo(() => Object.fromEntries(steps.map((step, index) => [step.capability,
-    faceBudgetDefaults(step.offering, steps[index + 1]?.offering, values[formKey(step.capability, step.offering.id)] ?? {})])), [steps, values]);
+    faceBudgetDefaults(step.offering, steps.slice(index + 1).map((next) => next.offering), values[formKey(step.capability, step.offering.id)] ?? {})])), [steps, values]);
   const stepInputs = useMemo(() => Object.fromEntries(steps.map((step) => {
     const parameters = panelFields(step.offering);
     const defaults = { ...Object.fromEntries(parameters.filter((parameter) => parameter.default !== undefined).map((parameter) => [parameter.name, parameter.default])), ...budgets[step.capability] };

@@ -419,9 +419,13 @@ describe('Meshy extension steps: task ID first, local file as fallback, Remesh b
     expect(chooseProcessingSource(uv, meshyTask, big, now)).not.toBeNull();
   });
   it('starts Remesh at the most faces UV unwrap takes', () => {
-    expect(faceBudgetDefaults(remesh, uv, {})).toEqual({ target_polycount: 20000 });
-    expect(faceBudgetDefaults(remesh, uv, { topology: 'triangle' })).toEqual({ target_polycount: 40000 });
-    expect(faceBudgetDefaults(remesh, undefined, {})).toEqual({});
-    expect(faceBudgetDefaults(retexture, uv, {})).toEqual({});
+    expect(faceBudgetDefaults(remesh, [uv], {})).toEqual({ target_polycount: 20000 });
+    expect(faceBudgetDefaults(remesh, [uv], { topology: 'triangle' })).toEqual({ target_polycount: 40000 });
+    expect(faceBudgetDefaults(remesh, [], {})).toEqual({});
+    expect(faceBudgetDefaults(retexture, [uv], {})).toEqual({});
+  });
+  it('carries the face limit past a step that keeps the faces, and stops at one that sets its own', () => {
+    expect(faceBudgetDefaults(remesh, [retexture, uv], {})).toEqual({ target_polycount: 20000 });
+    expect(faceBudgetDefaults(remesh, [remesh, uv], {})).toEqual({});
   });
 });

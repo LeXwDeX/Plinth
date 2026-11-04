@@ -393,14 +393,20 @@ export function processingSourceLabel(source: Pick<ProcessingSourceTask, 'provid
 }
 
 /**
- * The face budget a face-reducing step (Remesh) starts with when the step after it takes at most so many triangles
- * (UV unwrap's 40,000, #93): the most faces of the step's topology that stay within the limit, so the plan passes
- * the server's face check without the person working it out. Only defaults: a value the person typed is kept, and
- * the server still refuses a plan whose estimate goes over.
+ * The face budget a face-reducing step (Remesh) starts with when a later step takes at most so many triangles
+ * (UV unwrap's 40,000, #93): the most faces of the step's topology that stay within the tightest limit of the steps
+ * after it, up to the next step that sets its own face count. A step in between that keeps the faces (Retexture)
+ * passes the estimate on, as the server's plan check does (internal/processing/chain_limits.go). Only defaults: a
+ * value the person typed is kept, and the server still refuses a plan whose estimate goes over.
  */
-export function faceBudgetDefaults(offering: OfferingWire, next: OfferingWire | undefined, input: Record<string, unknown>): Record<string, number> {
+export function faceBudgetDefaults(offering: OfferingWire, following: readonly OfferingWire[], input: Record<string, unknown>): Record<string, number> {
   const estimate = offering.output_triangles;
-  const limit = next?.source_model_limit?.max_triangles ?? 0;
+  let limit = 0;
+  for (const next of following) {
+    const ceiling = next.source_model_limit?.max_triangles ?? 0;
+    if (ceiling > 0 && (limit === 0 || ceiling < limit)) limit = ceiling;
+    if (next.output_triangles) break;
+  }
   if (!estimate || limit <= 0) return {};
   const countParameter = offering.parameters.find((parameter) => parameter.name === estimate.count_parameter);
   const topologyParameter = offering.parameters.find((parameter) => parameter.name === estimate.topology_parameter);
