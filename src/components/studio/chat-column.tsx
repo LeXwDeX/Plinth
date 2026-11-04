@@ -40,7 +40,7 @@ import { useSessionChoices } from '@/hooks/use-session-choices';
 import { useSessionPick } from '@/hooks/use-session-pick';
 import { useSessionState } from '@/hooks/use-session-state';
 import { useThreeViews } from '@/hooks/use-three-views';
-import { interleaveGroups, pickMultiviewModel } from '@/lib/workspace/three-view';
+import { interleaveGroups } from '@/lib/workspace/three-view';
 import { ThreeViewCard } from '@/components/studio/three-view-card';
 import { tileOfObject, useSessionVersions } from '@/hooks/use-session-versions';
 import { useRestoreSessionModels } from '@/hooks/use-restore-session-models';
@@ -362,11 +362,16 @@ export function ChatColumn() {
   // T2.5 image to 3D take one), say so before sending, whenever the session's Agent scope allows 3D (the Agent may
   // make a 3D model from any stage). The note says it is about 3D; the pictures stay attached, nothing is blocked
   // and the model is not switched.
+  // #86: while the 是不是多个视角 panel is offered for these pictures, the note says both ways: a plain send cuts,
+  // confirming the views makes the model from all of them with the multiview model.
+  const [multiviewDismissedFor, setMultiviewDismissedFor] = useState<string | null>(null);
+  const multiviewOffered = Boolean(multiviewTarget) && attachedImages.length >= 2 && attachedImages.length <= 4 && !editing
+    && multiviewDismissedFor !== attachedImages.join('\n');
   const composerReferenceLimit = modelGeneration.allowed
     ? referenceLimit(
       modelGeneration.nextTurn.offering,
       attachedImages.length + (hasCanvasReference ? 1 : 0),
-      pickMultiviewModel(model3dOfferings, modelGeneration.nextTurn.offering?.model_id),
+      multiviewOffered && !hasCanvasReference ? multiviewTarget?.offering.model_name ?? '' : '',
     )
     : null;
   const { consent, awaiting: consentAwaiting, busy: consentBusy, decide: decideConsent } =
@@ -1887,6 +1892,7 @@ export function ChatColumn() {
           {multiviewTarget && attachedImages.length >= 2 && attachedImages.length <= 4 && !editing ? (
             <MultiviewUploadPanel
               images={attachedImages} target={multiviewTarget} disabled={uploading || preparing || isStreaming}
+              onDismiss={() => setMultiviewDismissedFor(attachedImages.join('\n'))}
               onConfirm={(choices) => {
                 const picked = attachedImages.flatMap((url, index) => (choices[index] ? [url] : []));
                 const views = choices.filter((view) => view !== '');

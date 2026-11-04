@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import type { OfferingWire } from '@/lib/agent-offerings';
 import type { ProductSchema } from '@/lib/product-schema';
-import { pickMultiviewModel } from './three-view';
 import { referenceLimit, referenceLimitNote } from './reference-limit';
 
 const offering = (id: string) => {
@@ -27,15 +26,17 @@ describe('referenceLimit', () => {
     expect(referenceLimit(undefined, 2)).toBeNull();
   });
 
-  it('is silent when an available multiview model takes the pictures: the Agent makes the 3D model from all of them (#86)', () => {
-    const offerings = (defaultCatalog.offerings as unknown as OfferingWire[]).map((item) => ({ ...item, available: true }));
-    const multiview = pickMultiviewModel({ 'image-to-3d': offerings }, undefined);
-    expect(multiview).not.toBeNull();
+  it('keeps the limit while the multiview panel is offered, and the note names both ways (#86)', () => {
     const single = offering('meshy/meshy-7.1/image-to-3d');
-    expect(referenceLimit(single, 4, multiview)).toBeNull();
-    expect(referenceLimit(single, 2, multiview)).toBeNull();
-    // More pictures than the multiview model takes are still cut by the single-picture model.
-    expect(referenceLimit(single, multiview!.views.length + 1, multiview)).toMatchObject({ count: 1 });
+    const limit = referenceLimit(single, 4, 'Tripo v3.1 多视图');
+    // A plain send still runs the single-picture model and cuts: the limit is not hidden.
+    expect(limit).toEqual({ model: 'Meshy 7.1', count: 1, total: 4, multiview: 'Tripo v3.1 多视图' });
+    const note = referenceLimitNote(defaultCatalog.application as unknown as ProductSchema, limit!);
+    expect(note).toContain('Meshy 7.1');
+    expect(note).toContain('Tripo v3.1 多视图');
+    expect(note).not.toContain('{');
+    // Without the panel the plain capacity text is used.
+    expect(referenceLimitNote(defaultCatalog.application as unknown as ProductSchema, referenceLimit(single, 4)!)).not.toContain('Tripo');
   });
 
   it('is silent for an Offering that keeps its picture sequence (the step refuses instead of cutting)', () => {

@@ -50,7 +50,7 @@ export interface ProductSchema {
      * the form for a model that takes one picture. The task API, the approval card and the finished message use it too.
      * Absent on older servers: the composer says nothing.
      */
-    generation_messages?: { reference_limit?: string; reference_limit_one?: string; reference_capacity?: string };
+    generation_messages?: { reference_limit?: string; reference_limit_one?: string; reference_capacity?: string; reference_capacity_multiview?: string };
     http: {
       routes: {
         home: string;

@@ -242,6 +242,11 @@ type ExecutionMessages struct {
 	// reference-picture capacity ({model}, {count}, {total}). It never predicts
 	// which pictures will be used (#80).
 	ReferenceCapacity string `json:"reference_capacity,omitempty"`
+	// ReferenceCapacityMultiview is ReferenceCapacity while the composer also
+	// offers the multiview model for these pictures ({multiview}): sent as is,
+	// the single-picture model takes {count} of {total}; confirmed as views,
+	// the multiview model takes them all (#86).
+	ReferenceCapacityMultiview string `json:"reference_capacity_multiview,omitempty"`
 	// ReferenceLimitExceeded is the reason a step that keeps its selected
 	// reference pictures is refused because the Offering takes fewer
 	// ({label} {max} {actual}). It is a refusal, not the cut reported by

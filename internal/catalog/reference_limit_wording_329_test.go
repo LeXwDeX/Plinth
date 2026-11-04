@@ -132,9 +132,9 @@ func TestReferenceLimitIsOneSchemaPairWithOnePictureWording(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for locale, want := range map[string][3]string{
-		"zh-CN": {messages.ReferenceLimit, messages.ReferenceLimitOne, messages.ReferenceCapacity},
-		"en":    {english["runtime.generation_messages.reference_limit"], english["runtime.generation_messages.reference_limit_one"], english["runtime.generation_messages.reference_capacity"]},
+	for locale, want := range map[string][4]string{
+		"zh-CN": {messages.ReferenceLimit, messages.ReferenceLimitOne, messages.ReferenceCapacity, messages.ReferenceCapacityMultiview},
+		"en":    {english["runtime.generation_messages.reference_limit"], english["runtime.generation_messages.reference_limit_one"], english["runtime.generation_messages.reference_capacity"], english["runtime.generation_messages.reference_capacity_multiview"]},
 	} {
 		var public struct {
 			Runtime struct {
@@ -146,7 +146,7 @@ func TestReferenceLimitIsOneSchemaPairWithOnePictureWording(t *testing.T) {
 		}
 		got := public.Runtime.GenerationMessages
 		if got["reference_limit"] != want[0] || got["reference_limit_one"] != want[1] ||
-			got["reference_capacity"] != want[2] || len(got) != 3 {
+			got["reference_capacity"] != want[2] || got["reference_capacity_multiview"] != want[3] || want[3] == "" || len(got) != 4 {
 			t.Fatalf("%s public generation_messages = %v", locale, got)
 		}
 	}
