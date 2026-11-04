@@ -33,3 +33,49 @@ export function handleOfObject(
   const handles = new Set(candidates);
   return handles.size === 1 && candidates[0]?.trim() ? candidates[0] : '';
 }
+
+/** The task and asset a platform asset address names (`…/tasks/{task}/assets/{asset}`), or null. */
+function assetRoute(url: string | undefined): { taskId: string; assetId: string } | null {
+  const route = url ? /\/tasks\/([^/?#]+)\/assets\/([^/?#]+)/.exec(url) : null;
+  return route ? { taskId: decodeURIComponent(route[1]), assetId: decodeURIComponent(route[2]) } : null;
+}
+
+/**
+ * The handle (@img5) of one exact picture shown somewhere else than the chat: a canvas layer or a version
+ * tile. Unlike `handleOfObject` it never falls back to "the only picture of the task": a layer painted over
+ * or cropped into a new picture keeps its task id, and it must not borrow the handle of the original. The
+ * picture matches an attachment by its model capture, by the task and asset its platform address names,
+ * or by the very same address (a sent picture). Nothing found, or two handles: no handle.
+ */
+export function handleOfPicture(
+  messages: readonly (Pick<ChatMessage, 'attachments'> & Partial<Pick<ChatMessage, 'images'>>)[],
+  picture: { url: string; captureId?: string },
+): string {
+  if (!picture.url && !picture.captureId) return '';
+  const route = assetRoute(picture.url);
+  const handles = new Set<string>();
+  for (const message of messages) {
+    for (const attachment of message.attachments ?? []) {
+      if (attachment.kind !== 'image' || !attachment.handle?.trim()) continue;
+      if (picture.captureId) {
+        if (attachment.captureId === picture.captureId) handles.add(attachment.handle);
+        continue;
+      }
+      if (route) {
+        const own = attachment.assetId && attachment.taskId
+          ? { taskId: attachment.taskId, assetId: attachment.assetId }
+          : assetRoute(attachment.url);
+        if (own && own.taskId === route.taskId && own.assetId === route.assetId) handles.add(attachment.handle);
+        continue;
+      }
+      const address = attachment.url ?? (attachment.imageSlot ? message.images?.[attachment.imageSlot - 1]?.url : undefined);
+      if (address && address === picture.url) handles.add(attachment.handle);
+    }
+  }
+  return handles.size === 1 ? [...handles][0] : '';
+}
+
+/** A handle as a short label ("img5"): the Schema prefix's leading marker is dropped, as the server's parser does. */
+export function handleLabel(handle: string): string {
+  return handle.replace(/^[@#]+/, '');
+}

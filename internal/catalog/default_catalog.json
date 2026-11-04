@@ -4296,6 +4296,8 @@
         "ui.connectivity.session_unavailable": "暂时无法确认登录状态，正在自动重试。登录状态不受影响。",
         "ui.studio.composer.handle_tag_title": "加入附件",
         "ui.studio.composer.handle_tag_model_title": "写入输入框",
+        "ui.studio.handle_badge.label": "对话里的句柄 {handle}",
+        "ui.studio.handle_preview.alt": "{handle} 的预览",
         "ui.studio.composer.stop_note": "停止只会结束这一轮对话。已经提交给上游的任务可能仍会计费，可在任务进度里查看。",
         "ui.studio.lightbox.title": "大图查看",
         "ui.studio.lightbox.close": "关闭大图",
@@ -4897,7 +4899,9 @@
         "internal_api_path_prefix": "/api/",
         "legacy_hidden_content_prefix": "[本条消息中生成的图片 URL:",
         "legacy_hidden_content_suffix": "]",
-        "progress_maximum": 100
+        "progress_maximum": 100,
+        "handle_preview_delay_milliseconds": 150,
+        "handle_preview_maximum_pixels": 360
       },
       "agent": {
         "adapter_key": "openai-compatible",
@@ -7346,6 +7350,7 @@
         "initial_node_y": 40,
         "node_gap_pixels": 20,
         "minimum_node_size": 50,
+        "handle_badge_minimum_screen_pixels": 48,
         "maximum_node_edge": 512,
         "model_capture_long_edge_pixels": 2048,
         "to_3d_long_edge_pixels": 1024,
@@ -13814,6 +13819,8 @@
             "ui.connectivity.session_unavailable": "Can't confirm your sign-in right now; retrying automatically. Your sign-in is unaffected.",
             "ui.studio.composer.handle_tag_title": "Add as attachment",
             "ui.studio.composer.handle_tag_model_title": "Insert into input box",
+            "ui.studio.handle_badge.label": "Chat handle {handle}",
+            "ui.studio.handle_preview.alt": "Preview of {handle}",
             "ui.studio.composer.stop_note": "Stop only ends this turn of the chat. Tasks already submitted upstream may still be billed; check task progress for details.",
             "ui.studio.lightbox.title": "Large view",
             "ui.studio.lightbox.close": "Close large view",

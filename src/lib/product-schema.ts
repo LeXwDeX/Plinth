@@ -1055,6 +1055,8 @@ export interface CanvasProductSchema {
     node_gap_pixels: number;
     minimum_node_size: number;
     maximum_node_edge: number;
+    /** The shorter on-screen edge a picture layer needs before its chat handle badge is drawn. */
+    handle_badge_minimum_screen_pixels: number;
     model_capture_long_edge_pixels: number;
     to_3d_long_edge_pixels: number;
     /** #246: the bitmap layer a new canvas starts with; fill is the transparent value or a #rrggbb colour. */
@@ -1512,6 +1514,10 @@ export interface ChatProductSchema {
     legacy_hidden_content_prefix: string;
     legacy_hidden_content_suffix: string;
     progress_maximum: number;
+    /** How long the pointer rests on a picture handle in an Agent message before its large preview shows. */
+    handle_preview_delay_milliseconds: number;
+    /** The longer edge of that preview; it never takes pointer events. */
+    handle_preview_maximum_pixels: number;
   };
   context: { image_index_base: number; maximum_session_notes_characters: number; canvas_input_source: string; reference_filename: string };
   /** Paid-step approval modes the Schema offers, and which capabilities a person still decides in manual mode. */

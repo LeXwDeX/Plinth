@@ -1,7 +1,11 @@
+import { handleLabel } from '@/lib/workspace/object-handle';
+
 /**
  * The name a layer goes by on screen: the layers panel row and the floating bar over the selected layer
- * read this one rule. A layer that was named (a 局部重绘 result) shows its name; a text layer shows its
- * first characters; anything else is called by its type. The words come from the Product Schema
+ * read this one rule. A layer that was named (a 局部重绘 result, or one the person renamed) shows its name; a
+ * picture layer that shows a picture of the chat shows that picture's chat handle without its marker
+ * ("img25", #87; the handle comes from the server, see `handleOfPicture`); a text layer shows its first
+ * characters; anything else is called by its type. The words come from the Product Schema
  * (`ui.canvas.layers.type_<type>`), passed in as `text`.
  *
  * A saved name that is still an untouched default (the first canvas layer is saved as "画布图层" or
@@ -13,6 +17,8 @@ export interface NamedLayer {
   type: string;
   name?: string;
   text?: string;
+  /** The chat handle of the picture the layer shows ("@img25"), when the session's messages give it one. */
+  handle?: string;
 }
 
 /** How many characters of a text layer's content stand in for its name. */
@@ -27,6 +33,7 @@ export function layerName(
     const key = Object.keys(persisted).find((candidate) => persisted[candidate].includes(layer.name!));
     return key ? text(key) : layer.name;
   }
+  if (layer.type === 'image' && layer.handle) return handleLabel(layer.handle);
   const typeName = text(`ui.canvas.layers.type_${layer.type}`);
   if (layer.type === 'text') return (layer.text ?? '').slice(0, TEXT_LAYER_NAME_CHARACTERS) || typeName;
   return typeName;
