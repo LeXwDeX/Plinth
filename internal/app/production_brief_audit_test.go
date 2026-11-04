@@ -25,18 +25,33 @@ func (store *briefStoreFake) Session(context.Context, string, string) (chat.Sess
 	return store.session, store.found, store.readErr
 }
 
-func (store *briefStoreFake) SetProductionBrief(
+func (store *briefStoreFake) UpdateProductionBrief(
 	_ context.Context,
 	_ string,
 	_ string,
-	raw map[string]json.RawMessage,
-) (chat.ProductionBrief, error) {
+	patch map[string]json.RawMessage,
+) (chat.ProductionBrief, chat.ProductionBrief, error) {
 	if store.setErr != nil {
-		return nil, store.setErr
+		return nil, nil, store.setErr
+	}
+	previous := chat.ProductionBrief{}
+	for name, value := range store.session.Brief {
+		previous[name] = value
+	}
+	next := chat.ProductionBrief{}
+	for name, value := range previous {
+		next[name] = value
+	}
+	for name, value := range patch {
+		if trimmed := strings.TrimSpace(string(value)); trimmed == "" || trimmed == "null" {
+			delete(next, name)
+			continue
+		}
+		next[name] = value
 	}
 	store.writes++
-	store.session.Brief = chat.ProductionBrief(raw)
-	return store.session.Brief, nil
+	store.session.Brief = next
+	return previous, next, nil
 }
 
 type failingAudits struct{ events int }
@@ -77,6 +92,7 @@ func TestAgentProductionBriefWriteIsAuditedByFieldNames(t *testing.T) {
 	fields, _ := event.Detail["fields"].([]string)
 	if event.Action != "set_production_brief" || event.ResourceType != "session" ||
 		event.ResourceID != "session-a" || event.ActorID != "owner-a" || event.ActorName != "A" ||
+		event.Detail["source"] != "agent" ||
 		len(fields) != 2 || fields[0] != "needs_rig" || fields[1] != "purpose" {
 		t.Fatalf("audit event = %+v", event)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -495,6 +496,10 @@ type memoryChatRepository struct {
 	turns    map[string]chat.Turn
 	notes    map[string]string
 	picks    map[string]chat.Attachment
+	// interposeBrief simulates a concurrent writer landing between the read and
+	// the conditional replace; it runs under the repository lock (#103 review
+	// C5).
+	interposeBrief func(current chat.ProductionBrief) (chat.ProductionBrief, bool)
 }
 
 func newMemoryChatRepository() *memoryChatRepository {
@@ -672,21 +677,31 @@ func (r *memoryChatRepository) SessionBrief(
 	return session.Brief, true, nil
 }
 
-func (r *memoryChatRepository) SetSessionBrief(
+func (r *memoryChatRepository) ReplaceSessionBrief(
 	_ context.Context,
 	ownerID string,
 	sessionID string,
-	brief chat.ProductionBrief,
-) (bool, error) {
+	expected chat.ProductionBrief,
+	next chat.ProductionBrief,
+) (bool, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	session, found := r.sessions[sessionID]
 	if !found || session.OwnerID != ownerID {
-		return false, nil
+		return false, false, nil
 	}
-	session.Brief = brief
+	if r.interposeBrief != nil {
+		if next, changed := r.interposeBrief(session.Brief); changed {
+			session.Brief = next
+			r.sessions[sessionID] = session
+		}
+	}
+	if !reflect.DeepEqual(session.Brief, expected) {
+		return true, true, nil
+	}
+	session.Brief = next
 	r.sessions[sessionID] = session
-	return true, nil
+	return true, false, nil
 }
 
 func (r *memoryChatRepository) SessionExplicitModel3D(

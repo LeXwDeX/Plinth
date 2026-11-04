@@ -67,12 +67,16 @@ type Repository interface {
 	// foreign session. Writing does not touch updated_at.
 	SessionNotes(ctx context.Context, owner, session string) (string, bool, error)
 	SetSessionNotes(ctx context.Context, owner, session, notes string) (bool, error)
-	// SessionBrief and SetSessionBrief read and replace the session's
-	// structured production brief (#103). Both are scoped to the owner; found
-	// is false for a missing or foreign session. Writing does not touch
-	// updated_at.
+	// SessionBrief and ReplaceSessionBrief read and conditionally replace the
+	// session's structured production brief (#103). Both are scoped to the
+	// owner; found is false for a missing or foreign session. Writing does not
+	// touch updated_at.
 	SessionBrief(ctx context.Context, owner, session string) (ProductionBrief, bool, error)
-	SetSessionBrief(ctx context.Context, owner, session string, brief ProductionBrief) (bool, error)
+	// ReplaceSessionBrief writes next only when the stored brief still equals
+	// expected, so two writers cannot silently drop each other's update
+	// (#103 review C5). found is false for a missing or foreign session;
+	// conflict is true when the stored brief changed since it was read.
+	ReplaceSessionBrief(ctx context.Context, owner, session string, expected, next ProductionBrief) (found bool, conflict bool, err error)
 	// SessionExplicitModel3D and SetSessionExplicitModel3D read and replace the
 	// 3D model the person explicitly picked in the session (#103). An empty
 	// model clears the pick. Both are owner scoped; writing does not touch
@@ -214,6 +218,10 @@ type ServiceConfig struct {
 	// production brief may name, their parameter overrides and the brief's
 	// field declarations. Zero disables the brief API and the purpose card.
 	Model3DUsage catalog.ChatModel3DUsageSchema
+	// ExplicitModel3DValid reports whether a pick names an enabled 3D
+	// generation Offering (#103 review C4). Nil accepts any well-formed token,
+	// for assemblies that do not load a Catalog.
+	ExplicitModel3DValid func(model string) bool
 	// ChoiceKinds are application.chat.choice.kinds (#103). The brief write
 	// settles the kind whose option_source is usage_profiles; without it no
 	// card is settled.
@@ -252,6 +260,7 @@ type Service struct {
 	canvasInputSource    string
 	retiredModels        map[string]catalog.RetiredModelSuccessor
 	model3DUsage         catalog.ChatModel3DUsageSchema
+	explicitModel3DValid func(string) bool
 	// usageProfileKind is the declared card the brief write settles; its ID and
 	// argument name come from the Schema, not from code (#103).
 	usageProfileKind *catalog.ChatChoiceKindSchema
@@ -358,6 +367,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 		canvasInputSource:    config.CanvasInputSource,
 		retiredModels:        retiredModelIndex(config.RetiredModels),
 		model3DUsage:         config.Model3DUsage,
+		explicitModel3DValid: config.ExplicitModel3DValid,
 		usageProfileKind:     usageProfileKindOf(config.ChoiceKinds),
 		models:               config.Models,
 	}, nil
@@ -409,17 +419,18 @@ func (service *Service) CreateSession(
 	})
 }
 
-// SetAgentScope switches a session's Agent scope. The scope must be one the
-// Schema offers. It returns the updated session and the previous scope so the
-// caller can audit a real change. The scope applies to the turns that start
-// afterwards; a turn already running keeps the scope it started with.
+// SetAgentScope keeps a session on the unrestricted Agent scope. The public
+// scope picker was removed (#103 review F1); accepting 2D/3D here would let a
+// stale client or API call lock the session out of the other workspace with no
+// way back, so only "auto" is writable. It returns the updated session and the
+// previous scope so the caller can audit a real change.
 func (service *Service) SetAgentScope(
 	ctx context.Context,
 	ownerID string,
 	sessionID string,
 	scope string,
 ) (Session, string, error) {
-	if !service.agentScope.Allows(scope) {
+	if scope != agentscope.ModeAuto || !service.agentScope.Allows(scope) {
 		return Session{}, "", ErrInvalidAgentScope
 	}
 	previous, found, err := service.repository.SessionAgentScope(ctx, ownerID, sessionID)

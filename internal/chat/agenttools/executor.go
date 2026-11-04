@@ -122,9 +122,11 @@ type Config struct {
 	// names one by id and never supplies options of its own.
 	ChoiceKinds []catalog.ChatChoiceKindSchema
 	// BriefSavedMessage and BriefInvalidTemplate word the update tool's result
-	// (model3d_usage.brief.saved_message / invalid_template).
+	// (model3d_usage.brief.saved_message / invalid_template); BriefMessages
+	// words its field refusals (model3d_usage.brief.messages).
 	BriefSavedMessage    string
 	BriefInvalidTemplate string
+	BriefMessages        catalog.ChatProductionBriefMessages
 	// Consent 创建待批准项。snapshot 是服务端计算的生成目标快照
 	//（当前模型+合并参数哈希），与 pending 一并存入会话状态；
 	// 生成执行前校验一致性（AGT-05）。
@@ -189,6 +191,7 @@ type Executor struct {
 	choiceKinds            map[string]catalog.ChatChoiceKindSchema
 	briefSavedMessage      string
 	briefInvalidTemplate   string
+	briefMessages          catalog.ChatProductionBriefMessages
 	consent                func(command chat.ToolCommand, request json.RawMessage, snapshot json.RawMessage) error
 	consentState           func(scope string) map[string]json.RawMessage
 	consentClear           func(scope string)
@@ -298,6 +301,7 @@ func New(config Config) (*Executor, error) {
 		choiceKinds:            choiceKinds,
 		briefSavedMessage:      config.BriefSavedMessage,
 		briefInvalidTemplate:   config.BriefInvalidTemplate,
+		briefMessages:          config.BriefMessages,
 		offerings:              config.Offerings,
 		context:                config.Context,
 		params:                 config.Params,
@@ -562,17 +566,23 @@ func (e *Executor) updateSessionNotes(ctx context.Context, command chat.ToolComm
 	return chat.ToolResult{AgentContent: e.context.SessionNotesSavedMessage}
 }
 
-// updateProductionBrief replaces the session's whole production brief (#103).
-// The arguments are the brief object itself: only the fields the Schema
-// declares, with the bounds it declares. A refused field comes back through
-// the Schema's invalid_template so the Agent can correct it.
+// updateProductionBrief patches the session's production brief (#103). The
+// arguments are the fields to change: only the fields the Schema declares,
+// with the bounds it declares. A field omitted from the arguments keeps its
+// stored value, so the choice-card continuation that replays only the purpose
+// does not clear the rest of the brief (#103 review C2). A refused field comes
+// back through the Schema's invalid_template so the Agent can correct it.
 func (e *Executor) updateProductionBrief(ctx context.Context, command chat.ToolCommand) chat.ToolResult {
 	if e.updateBrief == nil {
 		return chat.ToolResult{Error: "production brief unavailable", NoSubmission: true}
 	}
 	fields := map[string]json.RawMessage{}
 	if err := json.Unmarshal(command.Call.Arguments, &fields); err != nil || fields == nil {
-		return chat.ToolResult{Error: e.briefInvalid("参数必须是对象"), NoSubmission: true}
+		reason := e.briefMessages.NotObject
+		if strings.TrimSpace(reason) == "" {
+			reason = "参数必须是对象"
+		}
+		return chat.ToolResult{Error: e.briefInvalid(reason), NoSubmission: true}
 	}
 	if err := e.updateBrief(ctx, command.OwnerID, command.SessionID, fields); err != nil {
 		if text := chat.ProductionBriefValidationErrorText(e.briefInvalidTemplate, err); text != "" {

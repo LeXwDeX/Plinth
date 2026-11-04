@@ -10,19 +10,21 @@ import (
 )
 
 // productionBriefStore is the chat service's shared brief write path. The
-// Agent tool and the HTTP PUT both replace the whole brief through it; only the
-// audit call differs because the tool has no HTTP request metadata.
+// Agent tool patches the brief and the HTTP PUT replaces it; both go through
+// the service's compare-and-swap update, which returns the previous value the
+// audit compares against (#103 review C5).
 type productionBriefStore interface {
 	Session(context.Context, string, string) (chat.Session, bool, error)
-	SetProductionBrief(context.Context, string, string, map[string]json.RawMessage) (chat.ProductionBrief, error)
+	UpdateProductionBrief(context.Context, string, string, map[string]json.RawMessage) (chat.ProductionBrief, chat.ProductionBrief, error)
 }
 
-// updateProductionBriefAudited replaces the brief of the Agent tool's own
+// updateProductionBriefAudited patches the brief of the Agent tool's own
 // session and records a real change with the same product audit event as the
 // HTTP PUT (#103): the action and resource type come from the Schema, the
-// resource is the session, and the detail holds only the changed field names.
-// Audit is best effort: a write failure is logged and never fails a brief that
-// was already stored.
+// resource is the session, and the detail holds only the changed field names
+// plus the agent source, because the tool acts for the session's owner (#103
+// review C5). Audit is best effort: a write failure is logged and never fails
+// a brief that was already stored.
 func updateProductionBriefAudited(
 	ctx context.Context,
 	store productionBriefStore,
@@ -34,28 +36,28 @@ func updateProductionBriefAudited(
 	sessionID string,
 	brief map[string]json.RawMessage,
 ) error {
-	previous, found, err := store.Session(ctx, ownerID, sessionID)
+	session, found, err := store.Session(ctx, ownerID, sessionID)
 	if err != nil {
 		return err
 	}
 	if !found {
 		return chat.ErrSessionNotFound
 	}
-	stored, err := store.SetProductionBrief(ctx, ownerID, sessionID, brief)
+	previous, stored, err := store.UpdateProductionBrief(ctx, ownerID, sessionID, brief)
 	if err != nil {
 		return err
 	}
-	changed := chat.ChangedProductionBriefFields(previous.Brief, stored)
+	changed := chat.ChangedProductionBriefFields(previous, stored)
 	if len(changed) == 0 || audits == nil {
 		return nil
 	}
 	event := administration.AuditEvent{
 		Action:       action,
 		ActorID:      ownerID,
-		ActorName:    previous.OwnerName,
+		ActorName:    session.OwnerName,
 		ResourceType: resourceType,
 		ResourceID:   sessionID,
-		Detail:       map[string]any{"fields": changed},
+		Detail:       map[string]any{"fields": changed, "source": "agent"},
 	}
 	if err := audits.RecordAudit(ctx, event); err != nil && logger != nil {
 		logger.WarnContext(

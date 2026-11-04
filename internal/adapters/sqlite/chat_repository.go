@@ -283,24 +283,48 @@ func (r *Repository) SessionBrief(ctx context.Context, ownerID, sessionID string
 	return chat.DecodeProductionBrief(stored), true, nil
 }
 
-// SetSessionBrief replaces the production brief of the owner's own session. It
-// keeps updated_at so editing the brief does not reorder the history list.
-func (r *Repository) SetSessionBrief(ctx context.Context, ownerID, sessionID string, brief chat.ProductionBrief) (bool, error) {
-	stored, err := chat.EncodeProductionBrief(brief)
+// ReplaceSessionBrief writes the production brief of the owner's own session
+// only while the stored value is still expected. A concurrent writer makes the
+// second call report conflict instead of silently overwriting (#103 review
+// C5). It keeps updated_at so editing the brief does not reorder the history
+// list.
+func (r *Repository) ReplaceSessionBrief(
+	ctx context.Context,
+	ownerID, sessionID string,
+	expected, next chat.ProductionBrief,
+) (found bool, conflict bool, err error) {
+	before, err := chat.EncodeProductionBrief(expected)
 	if err != nil {
-		return false, err
+		return false, false, err
+	}
+	stored, err := chat.EncodeProductionBrief(next)
+	if err != nil {
+		return false, false, err
 	}
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE go_chat_sessions SET brief = ? WHERE id = ? AND owner_id = ?`,
-		stored, sessionID, ownerID)
+		UPDATE go_chat_sessions SET brief = ? WHERE id = ? AND owner_id = ? AND brief = ?`,
+		stored, sessionID, ownerID, before)
 	if err != nil {
-		return false, fmt.Errorf("set chat session brief: %w", err)
+		return false, false, fmt.Errorf("replace chat session brief: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
-	return affected > 0, nil
+	if affected > 0 {
+		return true, false, nil
+	}
+	var exists int
+	err = r.db.QueryRowContext(ctx, `
+		SELECT 1 FROM go_chat_sessions WHERE id = ? AND owner_id = ?`,
+		sessionID, ownerID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, fmt.Errorf("check chat session brief: %w", err)
+	}
+	return true, true, nil
 }
 
 // SessionExplicitModel3D reads the explicitly picked 3D model of the owner's

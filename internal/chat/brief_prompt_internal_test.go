@@ -105,3 +105,25 @@ func TestBriefPromptStaysOutWhenTheSchemaDeclaresNoContext(t *testing.T) {
 		t.Fatalf("prompt without a context template = %q", prompt)
 	}
 }
+
+// #103 review C3: the purpose and the triangle override are located by their
+// declared types, so renaming either field in the Schema keeps the prompt and
+// the single budget rendering intact.
+func TestBriefPromptLocatesThePurposeAndOverrideByType(t *testing.T) {
+	schema := briefTestSchema()
+	schema.Fields = []catalog.ChatProductionBriefField{
+		{Name: "use", Type: "profile", Label: "用途"},
+		{Name: "look", Type: "text", Label: "风格"},
+		{Name: "faces", Type: "integer", Label: "三角面预算"},
+	}
+	orchestrator := &Orchestrator{schema: catalog.ChatSchema{Model3DUsage: briefTestUsage(schema)}}
+	prompt := orchestrator.briefPrompt(TurnOptions{ProductionBrief: briefRaw(t, map[string]any{
+		"use":   "game_character",
+		"look":  "写实",
+		"faces": 40000,
+	})})
+	want := "制作简报：\n用途：游戏/实时·角色（三角面预算 40000，要求UV）；风格：写实"
+	if prompt != want {
+		t.Fatalf("renamed brief prompt = %q, want %q", prompt, want)
+	}
+}

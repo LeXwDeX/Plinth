@@ -127,8 +127,8 @@ func approvalPromptSystem(t *testing.T, c approvalPromptCase) string {
 		}
 	}
 	if c.scope != "" {
-		if _, _, err := service.SetAgentScope(ctx, "owner-a", session.ID, c.scope); err != nil {
-			t.Fatal(err)
+		if _, found, err := repository.SetSessionAgentScope(ctx, "owner-a", session.ID, c.scope); err != nil || !found {
+			t.Fatalf("seed scope: found=%v err=%v", found, err)
 		}
 	}
 	options := chat.TurnOptions{CreativeDomain: "image"}
