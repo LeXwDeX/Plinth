@@ -455,7 +455,11 @@ for directory in "${GO_LEGACY_GENERATED_IMAGES_DIR:-}" "${GO_LEGACY_ASSET_CACHE_
 done
 
 echo "[server] preflight"
-GO_PROD_PROJECT="$COMPOSE_PROJECT" bash "$APP/scripts/cutover-go-production.sh" preflight \
+# 预检的临时目录放在发布根下，不在主机 /tmp 留文件（主机只允许项目目录内写入）。
+PREFLIGHT_TMP="$ROOT/tmp"
+mkdir -p "$PREFLIGHT_TMP"
+chmod 0711 "$PREFLIGHT_TMP"
+TMPDIR="$PREFLIGHT_TMP" GO_PROD_PROJECT="$COMPOSE_PROJECT" bash "$APP/scripts/cutover-go-production.sh" preflight \
   --env-file "$RUNTIME_ENV" \
   --image-tag "$TAG" --source-commit "$SHA" --no-build 2>&1 | tail -1
 
