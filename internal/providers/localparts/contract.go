@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/LeXwDeX/Plinth/internal/assets/modelinput"
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
@@ -24,7 +25,6 @@ const (
 	manifestVariant      = "json"
 	manifestMIME         = "application/json"
 	maxSplitParts        = 64
-	maxPartsConcurrency  = 8
 	maxPiecesPerDocument = 100000
 	maxManifestBytes     = 16 << 20
 )
@@ -179,7 +179,7 @@ func validateManifestOutput(output generation.AssetRequirement) error {
 
 func partsPolicy(options schema.ModelPartsOptions) (modelinput.Policy, error) {
 	if options.ProfileLimits == nil || options.MaxWork <= 0 || options.MaxWork > 1<<32 ||
-		options.MaxConcurrent <= 0 || options.MaxConcurrent > maxPartsConcurrency {
+		options.MaxConcurrent <= 0 || options.MaxConcurrent > catalog.MaxLocalModelPartsConcurrency {
 		return modelinput.Policy{}, invalidContract()
 	}
 	p := *options.ProfileLimits

@@ -7,6 +7,35 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
+func TestLocalModelPartsConcurrencyBound(t *testing.T) {
+	if MaxLocalModelPartsConcurrency != 8 {
+		t.Fatalf("MaxLocalModelPartsConcurrency = %d, want 8", MaxLocalModelPartsConcurrency)
+	}
+	application := ApplicationSchema{Runtime: RuntimeSchema{
+		ProviderConnections: []ProviderConnectionSchema{{Protocol: "local-model-parts", AdapterKey: "local.parts"}},
+		InputAssets: InputAssetRuntimeSchema{GeneratedModelProfile: &GeneratedModelProfile{
+			ID: "generated-glb-v1", Revision: "1", Limits: ModelInputLimits{MaxBytes: 128 << 20, MaxWork: 1 << 31},
+		}},
+	}}
+	for _, test := range []struct {
+		concurrent int
+		valid      bool
+	}{
+		{concurrent: MaxLocalModelPartsConcurrency, valid: true},
+		{concurrent: MaxLocalModelPartsConcurrency + 1, valid: false},
+	} {
+		raw, _ := json.Marshal(map[string]any{
+			"profile_id": "generated-glb-v1", "profile_revision": "1",
+			"max_work": 1 << 31, "max_concurrent": test.concurrent,
+		})
+		offering := schema.Offering{AdapterKey: "local.parts", Capability: schema.ModelSplit, ProviderOptions: raw}
+		err := freezeLocalPartsProfile(&offering, application)
+		if (err == nil) != test.valid {
+			t.Fatalf("max_concurrent=%d error = %v, want valid=%v", test.concurrent, err, test.valid)
+		}
+	}
+}
+
 func TestLocalModelPartsFreezesTheGeneratedProfile(t *testing.T) {
 	application := ApplicationSchema{Runtime: RuntimeSchema{
 		ProviderConnections: []ProviderConnectionSchema{{Protocol: "local-model-parts", AdapterKey: "local.parts"}},

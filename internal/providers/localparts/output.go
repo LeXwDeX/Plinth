@@ -119,15 +119,16 @@ func groupByNode(pieces []*piece) ([][]*piece, []int) {
 }
 
 // buildGroup writes one mesh and the source ancestor chain that positions it.
-// Ancestor nodes carry only their name and local transform; the leaf carries
-// the mesh. Reproducing the chain (instead of composing a world matrix) keeps
-// every accepted source matrix intact and makes the world-space result
-// bit-identical to modelinspect's traversal.
-func (b *outputBuilder) buildGroup(name string, pieces []*piece) (int, error) {
+// Ancestor nodes carry their source name, extras and local transform; the leaf
+// carries the mesh and, for a split part, the part name. Reproducing the chain
+// (instead of composing a world matrix) keeps every accepted source matrix
+// intact and makes the world-space result bit-identical to modelinspect's
+// traversal.
+func (b *outputBuilder) buildGroup(leafName string, pieces []*piece) (int, error) {
 	if len(pieces) == 0 {
 		return 0, invalidModel("empty_group")
 	}
-	meshIndex, err := b.mesh(name, pieces)
+	meshIndex, err := b.mesh(pieces)
 	if err != nil {
 		return 0, err
 	}
@@ -138,10 +139,13 @@ func (b *outputBuilder) buildGroup(name string, pieces []*piece) (int, error) {
 	child := -1
 	for i := len(leaf.node.chain) - 1; i >= 0; i-- {
 		source := leaf.source.doc.Nodes[leaf.node.chain[i]]
-		node := nodeDef{Name: source.Name}
+		node := nodeDef{Name: source.Name, Extras: cloneRaw(source.Extras)}
 		copyTransform(&node, source)
 		if i == len(leaf.node.chain)-1 {
 			node.Mesh = intPointer(meshIndex)
+			if leafName != "" {
+				node.Name = leafName
+			}
 		}
 		if child >= 0 {
 			node.Children = []int{child}
@@ -174,7 +178,7 @@ func (b *outputBuilder) buildPart(target *part) error {
 	return nil
 }
 
-func (b *outputBuilder) mesh(name string, pieces []*piece) (int, error) {
+func (b *outputBuilder) mesh(pieces []*piece) (int, error) {
 	primitives := make([]primitiveDef, 0, len(pieces))
 	for _, piece := range pieces {
 		primitive, err := b.primitive(piece)
@@ -186,7 +190,12 @@ func (b *outputBuilder) mesh(name string, pieces []*piece) (int, error) {
 	if len(primitives) == 0 {
 		return 0, invalidModel("empty_mesh")
 	}
-	b.meshes = append(b.meshes, meshDef{Name: name, Primitives: primitives})
+	source := pieces[0].source
+	if pieces[0].mesh < 0 || pieces[0].mesh >= len(source.doc.Meshes) {
+		return 0, invalidModel("mesh")
+	}
+	mesh := source.doc.Meshes[pieces[0].mesh]
+	b.meshes = append(b.meshes, meshDef{Name: mesh.Name, Extras: cloneRaw(mesh.Extras), Primitives: primitives})
 	return len(b.meshes) - 1, nil
 }
 
@@ -552,7 +561,7 @@ func buildMerged(sources []*sourceModel, name string, limits modelinput.Limits, 
 		wrapper := nodeDef{Name: sourceDisplayName(source.asset, index, used)}
 		groups, _ := groupByNode(pieces)
 		for _, group := range groups {
-			child, err := builder.buildGroup(wrapper.Name, group)
+			child, err := builder.buildGroup("", group)
 			if err != nil {
 				return nil, err
 			}

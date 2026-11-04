@@ -9,6 +9,11 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
+// MaxLocalModelPartsConcurrency bounds how many local split or merge jobs may
+// run at once per Offering. The adapter enforces the same bound on the frozen
+// ProviderOptions.
+const MaxLocalModelPartsConcurrency = 8
+
 // freezeLocalPartsProfile expands the generated model profile into the
 // immutable local-model-parts Offering. Splits and merges always read Task
 // model outputs, so they use the generated profile's limits, exactly like the
@@ -36,7 +41,7 @@ func freezeLocalPartsProfile(offering *schema.Offering, application ApplicationS
 	if options.MaxWork <= 0 || options.MaxWork > 1<<32 {
 		return fmt.Errorf("invalid local model parts work bound")
 	}
-	if options.MaxConcurrent <= 0 || options.MaxConcurrent > 16 {
+	if options.MaxConcurrent <= 0 || options.MaxConcurrent > MaxLocalModelPartsConcurrency {
 		return fmt.Errorf("invalid local model parts concurrency bound")
 	}
 	if offering.Capability != schema.ModelSplit && offering.Capability != schema.ModelMerge {

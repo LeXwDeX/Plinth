@@ -513,7 +513,11 @@ func buildManifest(parts []*part, mode string) (schema.ModelPartsManifest, error
 			Source: schema.ModelPartSource{},
 		}
 		if mode == schema.ModelSplitModeNode {
-			part.Source.Nodes = distinctNodePaths([]nodeInstance{candidate.pieces[0].node})
+			instances := make([]nodeInstance, 0, len(candidate.pieces))
+			for _, piece := range candidate.pieces {
+				instances = append(instances, piece.node)
+			}
+			part.Source.Nodes = distinctNodePaths(instances)
 		} else {
 			part.Source.Primitives = make([]schema.ModelPartPrimitiveSource, 0, len(candidate.pieces))
 			for _, piece := range candidate.pieces {

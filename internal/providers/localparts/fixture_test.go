@@ -273,10 +273,14 @@ func (f *fixtureGLB) addQuadPrimitive(minX, maxX, minY, maxY, z float32, materia
 	uv := f.addVertexAttribute(uvs, 2, false)
 	normal := f.addVertexAttribute(normals, 3, false)
 	indices := f.addIndices(quadIndices(0))
-	return primitiveDef{
+	primitive := primitiveDef{
 		Attributes: map[string]int{"POSITION": position, "TEXCOORD_0": uv, "NORMAL": normal},
-		Indices:    intAddress(indices), Material: intAddress(material),
+		Indices:    intAddress(indices),
 	}
+	if material >= 0 {
+		primitive.Material = intAddress(material)
+	}
+	return primitive
 }
 
 // twoCubesAndFragment is a single node with three primitives: two closed cubes
