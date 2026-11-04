@@ -28,7 +28,12 @@ func TestAgentTextsSeparateAgentScopeFromApprovalMode(t *testing.T) {
 	// onto the person.
 	require("system prompt", chat.Agent.SystemPrompt,
 		"批准由服务端按批准方式和预算决定", "不要让用户去勾选任何设置或切换任何模式",
-		"approval 是 policy 或 budget 时不是用户点了批准")
+		"approval 只会是 policy 或 human",
+		"policy 表示服务端按批准方式（含预算计划）自动批准，不是用户点的",
+		"budget 对象说明所属计划与剩余额度")
+	if strings.Contains(chat.Agent.SystemPrompt, "policy 或 budget") {
+		t.Error("system prompt still claims approval can be budget instead of human")
+	}
 	require("agent scope context", chat.AgentScope.ContextTemplate,
 		"与付费步骤是否需要批准无关", "批准方式", "你都不能切换", "不要为了得到付费确认建议用户切换 Agent 范围")
 	require("agent scope rejection", chat.AgentScope.RejectionTemplate,

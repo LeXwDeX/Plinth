@@ -1,12 +1,14 @@
 package catalog_test
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/modelinspect"
 )
 
 // The one shipped craft brief must cover exactly the 3D toolbox: every tool
@@ -41,6 +43,26 @@ func TestShippedCraftPromptCoversThe3DToolbox(t *testing.T) {
 	}
 	if !strings.HasPrefix(prompts[0].Text, "【3D 制作要领】") || !strings.Contains(prompts[0].Text, "自检要点") {
 		t.Fatalf("model3d text = %q", prompts[0].Text)
+	}
+	// The brief names the fields inspect_model really returns, not a summary
+	// that the Agent would have to map by hand. The actual JSON names come from
+	// modelinspect's topology report, so a rename there breaks this assertion.
+	topology := reflect.TypeOf(modelinspect.TopologyReport{})
+	jsonFields := make(map[string]struct{}, topology.NumField())
+	for index := 0; index < topology.NumField(); index++ {
+		name, _, _ := strings.Cut(topology.Field(index).Tag.Get("json"), ",")
+		jsonFields[name] = struct{}{}
+	}
+	for _, field := range []string{"connected_components", "debris_components", "debris_triangles"} {
+		if _, ok := jsonFields[field]; !ok {
+			t.Fatalf("modelinspect.TopologyReport no longer returns %q", field)
+		}
+		if !strings.Contains(prompts[0].Text, field) {
+			t.Fatalf("model3d text omits inspect field %q", field)
+		}
+	}
+	if strings.Contains(prompts[0].Text, "connected_components 和 debris") {
+		t.Fatal("model3d text still uses the old debris field summary")
 	}
 }
 
