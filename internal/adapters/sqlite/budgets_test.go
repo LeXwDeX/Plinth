@@ -3,6 +3,8 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"reflect"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -103,6 +105,57 @@ func reservationState(t *testing.T, r *Repository, requestID string) string {
 		t.Fatal(err)
 	}
 	return state
+}
+
+// The exhausted/expired notice follows the committed state transition. A plan
+// whose chat post fails therefore stays in the notice queue until the post is
+// recorded, and a recorded notice is never posted again (#103 review B3).
+func TestProductionBudgetNoticesAwaitAndAreMarkedOnce(t *testing.T) {
+	ctx := context.Background()
+	r := openGrantTestRepo(t)
+	now := time.Now().UTC()
+	exhausted := budgetTestPlan(t, r, "pb-notice", 20, "text-to-image")
+	if _, err := r.db.Exec(`UPDATE production_budgets SET state = 'exhausted', decided_at = ? WHERE id = ?`,
+		now.Format(time.RFC3339Nano), exhausted.ID); err != nil {
+		t.Fatal(err)
+	}
+	denied, err := r.CreateProductionBudget(ctx, budget.ProductionBudget{
+		ID: "pb-denied-notice", OwnerID: "owner-a", SessionID: "session-a",
+		Plan:         budget.Plan{Title: "人工拒绝", Steps: []budget.PlanStep{{Capability: "text-to-image", EstimatedCredits: 1}}},
+		LimitCredits: 10, State: budget.StatePending, CreatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.DecideProductionBudget(ctx, "owner-a", denied.ID, "owner-a", false, now); err != nil {
+		t.Fatal(err)
+	}
+	awaiting, err := r.ProductionBudgetsAwaitingNotice(ctx, 10)
+	if err != nil || len(awaiting) != 1 || awaiting[0].ID != exhausted.ID {
+		t.Fatalf("awaiting notices = %+v err=%v", awaiting, err)
+	}
+	if err := r.MarkProductionBudgetNoticeSent(ctx, "owner-a", exhausted.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	if awaiting, err := r.ProductionBudgetsAwaitingNotice(ctx, 10); err != nil || len(awaiting) != 0 {
+		t.Fatalf("a recorded notice was listed again = %+v err=%v", awaiting, err)
+	}
+
+	pending, err := r.CreateProductionBudget(ctx, budget.ProductionBudget{
+		ID: "pb-expired-notice", OwnerID: "owner-a", SessionID: "session-a",
+		Plan:         budget.Plan{Title: "过期", Steps: []budget.PlanStep{{Capability: "text-to-image", EstimatedCredits: 1}}},
+		LimitCredits: 10, State: budget.StatePending, CreatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.ExpireProductionBudgets(ctx, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	awaiting, err = r.ProductionBudgetsAwaitingNotice(ctx, 10)
+	if err != nil || len(awaiting) != 1 || awaiting[0].ID != pending.ID || awaiting[0].State != budget.StateDenied {
+		t.Fatalf("expired notice queue = %+v err=%v", awaiting, err)
+	}
 }
 
 // A reservation becomes charged only when the Task might have been charged:
@@ -453,5 +506,172 @@ func TestProductionBudgetApprovalRefusalsLeaveThePlanUntouched(t *testing.T) {
 	var reservations int
 	if err := r.db.QueryRow(`SELECT COUNT(*) FROM budget_reservations`).Scan(&reservations); err != nil || reservations != 0 {
 		t.Fatalf("refusals reserved credits: %d err=%v", reservations, err)
+	}
+}
+
+func insertBudgetSession(t *testing.T, r *Repository, id string) {
+	t.Helper()
+	if _, err := r.db.Exec(`INSERT INTO go_chat_sessions
+ (id, owner_id, owner_name, title, created_at, updated_at)
+ VALUES (?, 'owner-a', 'owner', 'test', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`, id); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func budgetPlanForSession(t *testing.T, r *Repository, id, sessionID string, limit int) budget.ProductionBudget {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	stored, err := r.CreateProductionBudget(ctx, budget.ProductionBudget{
+		ID: id, OwnerID: "owner-a", SessionID: sessionID,
+		Plan: budget.Plan{Title: "批量计划", Steps: []budget.PlanStep{
+			{Capability: "text-to-image", Purpose: "text-to-image", EstimatedCredits: 7},
+		}},
+		LimitCredits: limit, State: budget.StatePending, CreatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := r.DecideProductionBudget(ctx, "owner-a", stored.ID, "human-a", true, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return active
+}
+
+func insertBudgetReservation(t *testing.T, r *Repository, requestID, budgetID string, credits int, state string, createdAt time.Time) {
+	t.Helper()
+	if _, err := r.db.Exec(`INSERT INTO budget_reservations
+ (grant_request_id, budget_id, task_id, credits, state, created_at)
+ VALUES (?, ?, '', ?, ?, ?)`, requestID, budgetID, credits, state, createdAt.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The list projection reads the same summaries as the per-session method in
+// one batch, omits sessions without a current plan and stays owner-scoped.
+func TestProductionBudgetSummariesMatchPerSessionReads(t *testing.T) {
+	ctx := context.Background()
+	r := openGrantTestRepo(t)
+	insertBudgetSession(t, r, "session-b")
+	insertBudgetSession(t, r, "session-c")
+	planA := budgetTestPlan(t, r, "pb-batch-a", 20, "text-to-image")
+	planB := budgetPlanForSession(t, r, "pb-batch-b", "session-b", 30)
+	created := time.Now().UTC()
+	insertBudgetReservation(t, r, "reservation-a-charged", planA.ID, 7, budget.ReservationCharged, created)
+	insertBudgetReservation(t, r, "reservation-a-reserved", planA.ID, 5, budget.ReservationReserved, created)
+	insertBudgetReservation(t, r, "reservation-b-charged", planB.ID, 4, budget.ReservationCharged, created)
+
+	summaries, err := r.ProductionBudgetSummaries(ctx, "owner-a",
+		[]string{"session-a", "session-b", "session-c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 2 {
+		t.Fatalf("summaries = %+v, want the two sessions with a current plan", summaries)
+	}
+	if _, found := summaries["session-c"]; found {
+		t.Fatal("a session without a plan was not omitted")
+	}
+	for _, sessionID := range []string{"session-a", "session-b"} {
+		single, found, err := r.ProductionBudgetSummary(ctx, "owner-a", sessionID)
+		if err != nil || !found {
+			t.Fatalf("per-session summary %s: %+v found=%v err=%v", sessionID, single, found, err)
+		}
+		if batch := summaries[sessionID]; !reflect.DeepEqual(batch, single) {
+			t.Fatalf("batch %s = %+v, per-session = %+v", sessionID, batch, single)
+		}
+	}
+	if summary := summaries["session-a"]; summary.ID != planA.ID || summary.SpentCredits != 7 ||
+		summary.ReservedCredits != 5 || summary.RemainingCredits != 8 || summary.State != budget.StateActive {
+		t.Fatalf("session-a summary = %+v", summary)
+	}
+	if summary := summaries["session-b"]; summary.ID != planB.ID || summary.SpentCredits != 4 ||
+		summary.ReservedCredits != 0 || summary.RemainingCredits != 26 {
+		t.Fatalf("session-b summary = %+v", summary)
+	}
+
+	empty, err := r.ProductionBudgetSummaries(ctx, "owner-a", nil)
+	if err != nil || empty == nil || len(empty) != 0 {
+		t.Fatalf("empty list = %+v err=%v", empty, err)
+	}
+	foreign, err := r.ProductionBudgetSummaries(ctx, "owner-b", []string{"session-a", "session-b"})
+	if err != nil || len(foreign) != 0 {
+		t.Fatalf("another owner read summaries = %+v err=%v", foreign, err)
+	}
+}
+
+// A long session list crosses SQLite's bound-parameter limit: both queries
+// split into batches of productionBudgetSummaryBatch.
+func TestProductionBudgetSummariesBatchBeyondTheParameterLimit(t *testing.T) {
+	ctx := context.Background()
+	r := openGrantTestRepo(t)
+	const sessions = productionBudgetSummaryBatch + 1
+	stamp := formatTime(time.Now().UTC())
+	planJSON := `{"title":"批量","steps":[]}`
+	tx, err := r.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionIDs := make([]string, 0, sessions)
+	for index := 0; index < sessions; index++ {
+		sessionID := "batch-session-" + strconv.Itoa(index)
+		sessionIDs = append(sessionIDs, sessionID)
+		if _, err := tx.Exec(`INSERT INTO go_chat_sessions
+ (id, owner_id, owner_name, title, created_at, updated_at)
+ VALUES (?, 'owner-a', 'owner', 'test', ?, ?)`, sessionID, stamp, stamp); err != nil {
+			tx.Rollback()
+			t.Fatal(err)
+		}
+		budgetID := "pb-" + sessionID
+		if _, err := tx.Exec(`INSERT INTO production_budgets
+ (id, owner_id, session_id, plan_json, limit_credits, state, created_at, decided_by)
+ VALUES (?, 'owner-a', ?, ?, 10, 'active', ?, 'human-a')`,
+			budgetID, sessionID, planJSON, stamp); err != nil {
+			tx.Rollback()
+			t.Fatal(err)
+		}
+		if index%2 == 0 {
+			if _, err := tx.Exec(`INSERT INTO budget_reservations
+ (grant_request_id, budget_id, task_id, credits, state, created_at)
+ VALUES (?, ?, '', 2, 'charged', ?)`, "reservation-"+sessionID, budgetID, stamp); err != nil {
+				tx.Rollback()
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	summaries, err := r.ProductionBudgetSummaries(ctx, "owner-a", sessionIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != sessions {
+		t.Fatalf("summaries = %d, want %d", len(summaries), sessions)
+	}
+	// Even indexes reserved and spent 2 credits; odd indexes have no charges.
+	for index, wantSpent := range map[int]int{0: 2, 1: 0, sessions - 1: 2} {
+		summary, found := summaries["batch-session-"+strconv.Itoa(index)]
+		if !found || summary.SpentCredits != wantSpent || summary.LimitCredits != 10 {
+			t.Fatalf("batch-session-%d = %+v found=%v, want spent %d", index, summary, found, wantSpent)
+		}
+	}
+}
+
+// The batch read reports a store failure instead of returning an empty map,
+// so the caller can fall back to per-session reads (#103 review C6).
+func TestProductionBudgetSummariesReturnsStoreErrors(t *testing.T) {
+	r := openGrantTestRepo(t)
+	if err := r.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	summaries, err := r.ProductionBudgetSummaries(context.Background(), "owner-a", []string{"session-a"})
+	if err == nil {
+		t.Fatal("a closed store returned no error")
+	}
+	if summaries != nil {
+		t.Fatalf("summaries on failure = %+v, want nil", summaries)
 	}
 }

@@ -134,7 +134,7 @@ func (service *Service) ProposeProductionPlan(ctx context.Context, command ToolC
 			return ToolResult{NoSubmission: true}, err
 		}
 	}
-	content, err := json.Marshal(planProposedContent(stored))
+	content, err := json.Marshal(planProposedContent(stored, policy.Budget.ToolMessages))
 	if err != nil {
 		return ToolResult{NoSubmission: true}, err
 	}
@@ -208,11 +208,19 @@ func (policy *ProductionPlanPolicy) buildPlan(arguments proposedPlanArguments) (
 		if !ok {
 			return budget.Plan{}, 0, "no available offering for capability " + capability
 		}
+		estimated := budget.EstimateOffering(offering)
+		if offering.CreditsMetered && estimated <= 0 {
+			// A metered step the server cannot quote cannot be covered by a
+			// total budget: reserving zero would let it spend outside the plan
+			// (#103 review B1). The Agent must pick a priceable model or let the
+			// person approve the step directly.
+			return budget.Plan{}, 0, "step " + capability + " has no server credit estimate and cannot be budgeted"
+		}
 		plan.Steps = append(plan.Steps, budget.PlanStep{
 			Capability:       capability,
 			OfferingID:       strings.TrimSpace(step.Model),
 			Purpose:          purpose,
-			EstimatedCredits: budget.EstimateOffering(offering),
+			EstimatedCredits: estimated,
 		})
 	}
 	estimated := plan.EstimatedTotal()
@@ -268,7 +276,10 @@ func (policy *ProductionPlanPolicy) capabilityKnown(capability string) bool {
 	return false
 }
 
-func planProposedContent(stored budget.ProductionBudget) map[string]any {
+// planProposedContent is the Agent-facing result of the plan tool. Its state
+// messages come from the Schema's approval_policy.budget.tool_messages, with
+// an English fallback for a historical Catalog (#103 review B4).
+func planProposedContent(stored budget.ProductionBudget, messages catalog.ChatApprovalBudgetToolMessages) map[string]any {
 	steps := make([]map[string]any, 0, len(stored.Plan.Steps))
 	for _, step := range stored.Plan.Steps {
 		item := map[string]any{
@@ -281,14 +292,16 @@ func planProposedContent(stored budget.ProductionBudget) map[string]any {
 		}
 		steps = append(steps, item)
 	}
-	message := "Production plan proposed; wait for the person to approve or deny it. Do not propose another plan before this one is decided."
+	message := planToolMessage(messages.Proposed,
+		"Production plan proposed; wait for the person to approve or deny it. Do not propose another plan before this one is decided.")
 	switch stored.State {
 	case budget.StateActive:
-		message = "Production plan is approved; its steps may run within the budget."
+		message = planToolMessage(messages.Active, "Production plan is approved; its steps may run within the budget.")
 	case budget.StateExhausted:
-		message = "Production plan is approved but its credit budget is used up; a step beyond it needs the person's approval."
+		message = planToolMessage(messages.Exhausted,
+			"Production plan is approved but its credit budget is used up; a step beyond it needs the person's approval.")
 	case budget.StateDenied, budget.StateClosed:
-		message = "This production plan is no longer pending."
+		message = planToolMessage(messages.Closed, "This production plan is no longer pending.")
 	}
 	return map[string]any{
 		"success":                 true,
@@ -301,6 +314,13 @@ func planProposedContent(stored budget.ProductionBudget) map[string]any {
 		"correction_capabilities": stored.Plan.CorrectionCapabilities,
 		"message":                 message,
 	}
+}
+
+func planToolMessage(declared, fallback string) string {
+	if strings.TrimSpace(declared) == "" {
+		return fallback
+	}
+	return declared
 }
 
 func planRefusal(reason string) ToolResult {

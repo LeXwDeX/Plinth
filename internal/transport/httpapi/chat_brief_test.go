@@ -103,8 +103,8 @@ func TestChatSessionBriefIsOwnerScoped(t *testing.T) {
 		OwnerName: "Other", Title: "other", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repository.SetSessionBrief(context.Background(), "owner-b", "foreign-brief",
-		chat.ProductionBrief{"purpose": json.RawMessage(`"print"`)}); err != nil {
+	if _, _, err := repository.ReplaceSessionBrief(context.Background(), "owner-b", "foreign-brief",
+		chat.ProductionBrief{}, chat.ProductionBrief{"purpose": json.RawMessage(`"print"`)}); err != nil {
 		t.Fatal(err)
 	}
 	get := grantTestRequest(t, handler, cookie, http.MethodGet, briefPath("foreign-brief"), "", "")

@@ -92,6 +92,36 @@ describe('workspace chat message wiring', () => {
   });
 });
 
+describe('plan reload and explicit 3D lock wiring (#103)', () => {
+  it('re-reads the session after a plan decision, retries, and offers a reload instead of a stale card', () => {
+    expect(agentDialog).toContain('reloadSessionBudget(chatClient, sessionId)');
+    expect(agentDialog).not.toContain('chatClient.getSession(sessionId).catch(() => null)');
+    expect(agentDialog).toContain('ui.studio.plan.reload_failed');
+    expect(agentDialog).toContain('<PlanReloadNotice');
+    expect(agentDialog).toContain("planReloadError || sessionBudget?.state === 'pending'");
+    expect(agentDialog).toContain('onReload={reloadPlans}');
+  });
+
+  it('refuses a duplicate plan or step decision while the first one is in flight', () => {
+    expect(agentDialog).toMatch(/const decidePlan = useCallback\([\s\S]{0,200}deciding\.current\.begin\(budgetId\)/);
+    const decidePlan = agentDialog.slice(agentDialog.indexOf('const decidePlan = useCallback('), agentDialog.indexOf('// #321:', agentDialog.indexOf('const decidePlan = useCallback(')));
+    expect(decidePlan).toContain('deciding.current.end(budgetId);');
+    expect(agentDialog).toMatch(/const decideDetached = useCallback\([\s\S]{0,400}deciding\.current\.begin\(card\.requestId\)/);
+    expect(agentDialog).toMatch(/deciding\.current\.end\(requestId\);/);
+  });
+
+  it('waits for the explicit 3D lock before the turn starts and sends nothing when it fails', () => {
+    const send = agentDialog.slice(agentDialog.indexOf('const send = useCallback('), agentDialog.indexOf('const sendRef = useRef(send);'));
+    const flush = send.indexOf('await flushExplicitModel3D(sessionId, (id, model) => chatClient.setExplicitModel3D(id, model));');
+    expect(flush).toBeGreaterThan(0);
+    expect(flush).toBeLessThan(send.indexOf('initStreaming(sessionId, {'));
+    expect(flush).toBeLessThan(send.indexOf('await chatClient.startTurn('));
+    // The draft is spent only after the server took the turn; a failed lock returns first.
+    expect(flush).toBeLessThan(send.indexOf('if (!choiceAnswer) {'));
+    expect(send).toMatch(/catch \{\s*if \(isCurrentSessionScope\(scope\)\) toast\.error\(schemaText\(schema, 'ui\.studio\.picker\.lock_failed'\)\);\s*return;/);
+  });
+});
+
 describe('candidate pick wiring', () => {
   it('connects the carousel pick to the server-side session pick', () => {
     expect(agentDialog).toContain('useSessionPick(chatClient, activeSessionId)');

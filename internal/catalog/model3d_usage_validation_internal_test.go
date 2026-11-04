@@ -118,6 +118,123 @@ func TestProfileParameterSimulationAcceptsAPublicValue(t *testing.T) {
 	}
 }
 
+// #103 review C3: the service locates the purpose and the triangle override by
+// field type, so the validator must accept renamed fields and refuse only the
+// shapes the service cannot serve.
+func TestProductionBriefValidationLocatesFieldsByType(t *testing.T) {
+	brief := func(fields ...ChatProductionBriefField) ChatProductionBriefSchema {
+		return ChatProductionBriefSchema{
+			Fields:                 fields,
+			ContextTemplate:        "{brief}",
+			EmptyText:              "none",
+			FieldTemplate:          "{label}: {value}",
+			FlagTemplate:           "{label}",
+			Separator:              "; ",
+			PurposeTemplate:        "{label} ({budget})",
+			BudgetTemplate:         "{minimum}-{maximum}{requirements}",
+			OpenBudgetTemplate:     "{maximum}{requirements}",
+			OverrideBudgetTemplate: "{value}{requirements}",
+			RequirementsTemplate:   "{items}",
+			RequirementSeparator:   ", ",
+			UVText:                 "uv",
+			WatertightText:         "watertight",
+			SkinText:               "skin",
+			SavedMessage:           "saved",
+			InvalidTemplate:        "invalid: {reason}",
+		}
+	}
+	profile := ChatProductionBriefField{Name: "use", Type: "profile", Label: "Use"}
+	text := ChatProductionBriefField{Name: "look", Type: "text", Label: "Look", MaximumCharacters: 20}
+	flag := ChatProductionBriefField{Name: "animate", Type: "boolean", Label: "Animate"}
+	integer := ChatProductionBriefField{Name: "faces", Type: "integer", Label: "Faces", Minimum: 100, Maximum: 1000}
+	renamed := brief(profile, text, flag, integer)
+	if err := validateProductionBrief(renamed); err != nil {
+		t.Fatalf("renamed fields refused: %v", err)
+	}
+	if got := renamed.FieldNameOfType("profile"); got != "use" {
+		t.Fatalf("profile field = %q", got)
+	}
+	if got := renamed.FieldNameOfType("integer"); got != "faces" {
+		t.Fatalf("integer field = %q", got)
+	}
+	for _, test := range []struct {
+		name  string
+		brief ChatProductionBriefSchema
+		want  string
+	}{
+		{name: "no profile field", brief: brief(text, flag, integer), want: "profile"},
+		{name: "two profile fields", brief: brief(profile, ChatProductionBriefField{Name: "use2", Type: "profile", Label: "Use"}), want: "profile"},
+		{name: "no integer field", brief: brief(profile, text, flag), want: "integer"},
+		{name: "two integer fields", brief: brief(profile, text, integer, ChatProductionBriefField{Name: "faces2", Type: "integer", Label: "Faces"}), want: "integer"},
+		{name: "an unimplemented type", brief: brief(profile, ChatProductionBriefField{Name: "ratio", Type: "number", Label: "Ratio"}), want: "未实现"},
+		{name: "an unbounded text", brief: brief(profile, ChatProductionBriefField{Name: "look", Type: "text", Label: "Look"}), want: "maximum_characters"},
+		{name: "an unbounded integer", brief: brief(profile, ChatProductionBriefField{Name: "faces", Type: "integer", Label: "Faces"}), want: "最小/最大值"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateProductionBrief(test.brief)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want mention of %q", err, test.want)
+			}
+		})
+	}
+}
+
+// #103 review C3: a Schema that declares the brief refusal messages must
+// declare all of them with their placeholders, so no refusal falls back to a
+// hardcoded sentence in one language.
+func TestProductionBriefMessagesAreCompleteAndPlaceheld(t *testing.T) {
+	valid := ChatProductionBriefMessages{
+		UnknownField:      `unknown "{field}"`,
+		NotObject:         "object required",
+		NotString:         `"{field}" must be text`,
+		NotBoolean:        `"{field}" must be a boolean`,
+		NotInteger:        `"{field}" must be an integer`,
+		ProfileUndeclared: `purpose "{value}" is not declared`,
+		TextTooLong:       `"{field}" exceeds {maximum}`,
+		OutOfRange:        `"{field}" must be {minimum}-{maximum}`,
+		UnsupportedType:   `"{field}" has unsupported type "{type}"`,
+	}
+	if err := validateProductionBriefMessages(valid); err != nil {
+		t.Fatalf("valid messages refused: %v", err)
+	}
+	missing := valid
+	missing.OutOfRange = ""
+	if err := validateProductionBriefMessages(missing); err == nil || !strings.Contains(err.Error(), "out_of_range") {
+		t.Fatalf("a partially declared set = %v", err)
+	}
+	badPlaceholder := valid
+	badPlaceholder.TextTooLong = `"{field}" is too long`
+	if err := validateProductionBriefMessages(badPlaceholder); err == nil || !strings.Contains(err.Error(), "maximum") {
+		t.Fatalf("a missing placeholder = %v", err)
+	}
+	if err := validateProductionBriefMessages(ChatProductionBriefMessages{}); err != nil {
+		t.Fatalf("a historical Catalog without messages was refused: %v", err)
+	}
+}
+
+// #103 review C3: the usage-profile kind is located by its option source, so
+// it may sit at any position in choice.kinds.
+func TestChoiceKindsAcceptTheUsageProfileKindAtAnyPosition(t *testing.T) {
+	kind := func(id string) ChatChoiceKindSchema {
+		return ChatChoiceKindSchema{
+			ID: id, OptionSource: "usage_profiles", ToolName: "update_production_brief",
+			Argument: "purpose", Question: "Purpose?", Message: "Choose a purpose.",
+		}
+	}
+	schema := ChatSchema{
+		AgentTools: []ChatAgentToolSchema{
+			{Name: "ask_choice", Parameters: json.RawMessage(
+				`{"type":"object","properties":{"kind":{"type":"string","enum":["first","usage_profile"]}}}`)},
+			{Name: "update_production_brief", Parameters: json.RawMessage(
+				`{"type":"object","properties":{"purpose":{"type":"string"}}}`)},
+		},
+		Choice: ChatChoiceSchema{Kinds: []ChatChoiceKindSchema{kind("first"), kind("usage_profile")}},
+	}
+	if err := validateChoiceKinds(schema); err != nil {
+		t.Fatalf("usage_profile at the second position refused: %v", err)
+	}
+}
+
 func TestModel3DUsageOfferingsRefuseUnknownReferences(t *testing.T) {
 	text := schemacontract.Offering{
 		ID: "test/text/text-to-3d", ModelID: "text-model",

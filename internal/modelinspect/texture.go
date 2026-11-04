@@ -16,21 +16,86 @@ type decodedTexture struct {
 	wrapS, wrapT  int
 }
 
+// decodedImage is the decoded pixel data of one glTF image, shared by every
+// texture that references that image.
+type decodedImage struct {
+	width, height int
+	pixels        []uint8
+}
+
 // decodeTexture decodes the base-color texture identified by textureIndex.
 // A nil result with a nil error means the image exceeds MaxTexturePixels and
-// the caller must fall back to material factors.
+// the caller must fall back to material factors. Exceeding either cumulative
+// budget is an ErrTooLarge error so decoding stops before more pixels are
+// allocated.
 func (m *Model) decodeTexture(textureIndex int) (*decodedTexture, error) {
 	m.textureCache.mu.Lock()
 	defer m.textureCache.mu.Unlock()
 	if texture, ok := m.textureCache.images[textureIndex]; ok {
 		return texture, nil
 	}
+	if textureIndex < 0 || textureIndex >= len(m.Textures) {
+		return nil, invalidf("texture index %d is out of range", textureIndex)
+	}
 	texture := m.Textures[textureIndex]
-	info := m.Images[texture.Source]
-	if m.limits.MaxTexturePixels > 0 &&
-		int64(info.Width)*int64(info.Height) > m.limits.MaxTexturePixels {
+	if texture.Source < 0 || texture.Source >= len(m.Images) {
+		return nil, invalidf("texture %d references an invalid image", textureIndex)
+	}
+	if m.textureCache.decoded == nil {
+		m.textureCache.decoded = make(map[int]*decodedImage)
+	}
+	decoded, ok := m.textureCache.decoded[texture.Source]
+	if !ok {
+		var err error
+		decoded, err = m.decodeImage(texture.Source)
+		if err != nil {
+			return nil, err
+		}
+		m.textureCache.decoded[texture.Source] = decoded
+	}
+	if decoded == nil {
 		m.textureCache.images[textureIndex] = nil
 		return nil, nil
+	}
+	wrapS, wrapT := 10497, 10497
+	if texture.Sampler >= 0 {
+		if texture.Sampler >= len(m.samplers) {
+			return nil, invalidf("texture %d references an invalid sampler", textureIndex)
+		}
+		sampler := m.samplers[texture.Sampler]
+		wrapS, wrapT = sampler.wrapS, sampler.wrapT
+	}
+	result := &decodedTexture{
+		width: decoded.width, height: decoded.height, pixels: decoded.pixels,
+		wrapS: wrapS, wrapT: wrapT,
+	}
+	m.textureCache.images[textureIndex] = result
+	return result, nil
+}
+
+// decodeImage decodes one image and charges the cumulative pixel and byte
+// budgets once per distinct image. It returns nil without an error when the
+// image exceeds MaxTexturePixels, which the caller reports as a factor
+// fallback.
+func (m *Model) decodeImage(imageIndex int) (*decodedImage, error) {
+	info := m.Images[imageIndex]
+	width, height := int64(info.Width), int64(info.Height)
+	if width <= 0 || height <= 0 || width > math.MaxInt64/height {
+		return nil, invalidf("image %d has invalid dimensions", imageIndex)
+	}
+	pixels := width * height
+	if m.limits.MaxTexturePixels > 0 && pixels > m.limits.MaxTexturePixels {
+		return nil, nil
+	}
+	if pixels > math.MaxInt64/4 {
+		return nil, toolargef("image %d is too large to decode", imageIndex)
+	}
+	decodedBytes := pixels * 4
+	if !withinBudget(m.textureCache.pixels, pixels, m.limits.MaxTotalTexturePixels) {
+		return nil, toolargef("decoded texture pixels exceed MaxTotalTexturePixels")
+	}
+	if !withinBudget(m.textureCache.bytes, decodedBytes, m.limits.MaxTextureBytes) {
+		return nil, toolargef("decoded texture bytes exceed MaxTextureBytes")
 	}
 	view := m.bufferViews[info.BufferView]
 	data, err := readAt(m.src, view.offset, view.length)
@@ -39,27 +104,31 @@ func (m *Model) decodeTexture(textureIndex int) (*decodedTexture, error) {
 	}
 	decoded, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return nil, invalidf("image %d cannot be decoded", texture.Source)
+		return nil, invalidf("image %d cannot be decoded", imageIndex)
 	}
 	if decoded.Bounds().Dx() != info.Width || decoded.Bounds().Dy() != info.Height {
-		return nil, invalidf("image %d dimensions changed after decoding", texture.Source)
+		return nil, invalidf("image %d dimensions changed after decoding", imageIndex)
 	}
 	nrgba, ok := decoded.(*image.NRGBA)
 	if !ok {
 		nrgba = image.NewNRGBA(image.Rect(0, 0, info.Width, info.Height))
 		draw.Draw(nrgba, nrgba.Bounds(), decoded, decoded.Bounds().Min, draw.Src)
 	}
-	wrapS, wrapT := 10497, 10497
-	if texture.Sampler >= 0 {
-		sampler := m.samplers[texture.Sampler]
-		wrapS, wrapT = sampler.wrapS, sampler.wrapT
+	m.textureCache.pixels += pixels
+	m.textureCache.bytes += decodedBytes
+	return &decodedImage{width: info.Width, height: info.Height, pixels: nrgba.Pix}, nil
+}
+
+// withinBudget reports whether add still fits under limit. A non-positive
+// limit disables the cap.
+func withinBudget(used, add, limit int64) bool {
+	if limit <= 0 {
+		return true
 	}
-	result := &decodedTexture{
-		width: info.Width, height: info.Height, pixels: nrgba.Pix,
-		wrapS: wrapS, wrapT: wrapT,
+	if add < 0 || add > limit {
+		return false
 	}
-	m.textureCache.images[textureIndex] = result
-	return result, nil
+	return used <= limit-add
 }
 
 // sample returns bilinearly interpolated linear RGBA at (u, v). glTF UVs use

@@ -120,21 +120,73 @@ func readProcessingPlans(rows *sql.Rows) ([]processing.Plan, error) {
 	return plans, rows.Err()
 }
 
+// SaveProcessingPlan updates the plan under BEGIN IMMEDIATE and, in the same
+// transaction, gives back the unbound budget reservation of every
+// authorization reference the new plan no longer holds (Retry, freezeAgain, a
+// cleared consent reference). A crash between the two can therefore not leave
+// reserved credits without a step that can spend them (#103 review B2).
 func (r *Repository) SaveProcessingPlan(ctx context.Context, plan processing.Plan) error {
 	steps, err := json.Marshal(plan.Steps)
 	if err != nil {
 		return err
 	}
-	result, err := r.db.ExecContext(ctx, `UPDATE processing_plans SET state = ?, steps_json = ?, failure = ?, updated_at = ?, version = version + 1 WHERE id = ? AND owner_id = ? AND version = ? AND harness_revision = ? AND harness_digest = ?`, plan.State, string(steps), plan.Failure, plan.UpdatedAt.Format(time.RFC3339Nano), plan.ID, plan.OwnerID, plan.Version, plan.Harness.Revision, plan.Harness.Digest)
+	conn, err := r.grantWriteConn(ctx)
 	if err != nil {
 		return err
 	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if changed != 1 {
+	committed := false
+	defer func() {
+		if !committed {
+			rollbackGrantConn(conn)
+		}
+	}()
+	var previousJSON string
+	err = conn.QueryRowContext(ctx, `SELECT steps_json FROM processing_plans
+ WHERE id = ? AND owner_id = ? AND version = ? AND harness_revision = ? AND harness_digest = ?`,
+		plan.ID, plan.OwnerID, plan.Version, plan.Harness.Revision, plan.Harness.Digest).Scan(&previousJSON)
+	if errors.Is(err, sql.ErrNoRows) {
 		return processing.ErrConflict
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE processing_plans SET state = ?, steps_json = ?, failure = ?, updated_at = ?, version = version + 1 WHERE id = ? AND owner_id = ? AND version = ? AND harness_revision = ? AND harness_digest = ?`, plan.State, string(steps), plan.Failure, plan.UpdatedAt.Format(time.RFC3339Nano), plan.ID, plan.OwnerID, plan.Version, plan.Harness.Revision, plan.Harness.Digest); err != nil {
+		return err
+	}
+	if err := releaseRemovedStepReservations(ctx, conn, plan.OwnerID, previousJSON, plan.Steps, time.Now().UTC()); err != nil {
+		return err
+	}
+	if err := commitGrantConn(ctx, conn); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+// releaseRemovedStepReservations abandons approved grants whose authorization
+// reference the saved plan no longer contains. A reference still present in
+// another step keeps its reservation: that step may still submit it.
+func releaseRemovedStepReservations(ctx context.Context, conn *sql.Conn, owner generation.OwnerID, previousJSON string, steps []processing.Step, now time.Time) error {
+	var previous []processing.Step
+	if json.Unmarshal([]byte(previousJSON), &previous) != nil {
+		return nil
+	}
+	kept := make(map[string]bool, len(steps))
+	for _, step := range steps {
+		if step.AuthorizationRef != "" {
+			kept[step.AuthorizationRef] = true
+		}
+	}
+	released := make(map[string]bool, len(previous))
+	for _, step := range previous {
+		reference := step.AuthorizationRef
+		if reference == "" || kept[reference] || released[reference] {
+			continue
+		}
+		released[reference] = true
+		if err := abandonUnboundGrantOnConn(ctx, conn, string(owner), reference, now); err != nil {
+			return err
+		}
 	}
 	return nil
 }

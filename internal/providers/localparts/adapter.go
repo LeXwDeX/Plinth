@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"hash"
 	"io"
 	"math"
 	"sort"
@@ -334,25 +335,38 @@ type execution struct {
 	attemptID generation.AttemptID
 }
 
+// outputFile is the immutable metadata of one produced file. The bytes are
+// streamed to the asset store and never retained here, so a split keeps only
+// one part's body in memory at a time.
 type outputFile struct {
 	role      string
 	variant   string
 	mediaType string
 	ordinal   int
-	body      []byte
+	sha256    string
+	size      int64
 }
 
-func (a *Adapter) storeFile(ctx context.Context, ids execution, requirement generation.AssetRequirement, file outputFile, claimID string) (generation.ArtifactClaim, generation.Asset, error) {
+func newOutputFile(role, variant, mediaType string, ordinal int, body []byte) outputFile {
+	return outputFile{
+		role: role, variant: variant, mediaType: mediaType, ordinal: ordinal,
+		sha256: digest(body), size: int64(len(body)),
+	}
+}
+
+func (a *Adapter) storeFile(ctx context.Context, ids execution, requirement generation.AssetRequirement, file outputFile, body []byte, claimID string) (generation.ArtifactClaim, generation.Asset, error) {
+	if file.size != int64(len(body)) || !validDigest(file.sha256) {
+		return generation.ArtifactClaim{}, generation.Asset{}, sourceError()
+	}
 	assetID, err := randomAssetID()
 	if err != nil {
 		return generation.ArtifactClaim{}, generation.Asset{}, err
 	}
-	sha := digest(file.body)
 	asset, err := a.assets.Put(ctx, generation.AssetWrite{
 		AssetID: assetID, OwnerID: ids.ownerID, TaskID: ids.taskID, AttemptID: ids.attemptID,
 		Role: file.role, Variant: file.variant, Ordinal: file.ordinal, MediaType: file.mediaType,
 		MaxBytes: requirement.MaxBytes, DeliveryProfile: requirement.DeliveryProfile,
-		Body: bytes.NewReader(file.body),
+		Body: bytes.NewReader(body),
 	})
 	if err != nil {
 		if failure, rejected := generation.AssetStoreRejection(err, file.role, file.variant); rejected {
@@ -361,14 +375,14 @@ func (a *Adapter) storeFile(ctx context.Context, ids execution, requirement gene
 		return generation.ArtifactClaim{}, generation.Asset{}, err
 	}
 	if asset.ID != assetID || asset.TaskID != ids.taskID || asset.AttemptID != ids.attemptID ||
-		asset.Role != file.role || asset.MediaType != file.mediaType || asset.Size != int64(len(file.body)) || !strings.EqualFold(asset.SHA256, sha) {
+		asset.Role != file.role || asset.MediaType != file.mediaType || asset.Size != file.size || !strings.EqualFold(asset.SHA256, file.sha256) {
 		_ = a.assets.Delete(ctx, asset)
 		return generation.ArtifactClaim{}, generation.Asset{}, sourceError()
 	}
 	metadata, _ := json.Marshal(struct {
 		SHA256 string `json:"sha256"`
 		Size   int64  `json:"size"`
-	}{sha, int64(len(file.body))})
+	}{file.sha256, file.size})
 	return generation.ArtifactClaim{
 		ID: claimID, Role: file.role, Variant: file.variant, MediaType: file.mediaType,
 		StoredAsset: &asset, Metadata: metadata,
@@ -382,17 +396,28 @@ func validateOutput(ctx context.Context, body []byte, c contract) error {
 	return nil
 }
 
-func combinedDigest(files []outputFile) string {
-	hasher := sha256.New()
-	var length [8]byte
-	for _, file := range files {
-		for _, value := range []string{file.role, file.variant, file.mediaType, strconv.Itoa(file.ordinal), digest(file.body)} {
-			binary.LittleEndian.PutUint64(length[:], uint64(len(value)))
-			hasher.Write(length[:])
-			hasher.Write([]byte(value))
-		}
+// combinedDigest accumulates the length-prefixed digest of each output file
+// as it is produced, keeping the exact order and bytes of the previous
+// whole-slice algorithm without retaining any output body.
+type combinedDigest struct {
+	hasher hash.Hash
+	length [8]byte
+}
+
+func newCombinedDigest() *combinedDigest {
+	return &combinedDigest{hasher: sha256.New()}
+}
+
+func (d *combinedDigest) add(file outputFile) {
+	for _, value := range []string{file.role, file.variant, file.mediaType, strconv.Itoa(file.ordinal), file.sha256} {
+		binary.LittleEndian.PutUint64(d.length[:], uint64(len(value)))
+		d.hasher.Write(d.length[:])
+		d.hasher.Write([]byte(value))
 	}
-	return hex.EncodeToString(hasher.Sum(nil))
+}
+
+func (d *combinedDigest) sum() string {
+	return hex.EncodeToString(d.hasher.Sum(nil))
 }
 
 func (a *Adapter) cleanup(ctx context.Context, stored []generation.Asset) {
@@ -419,7 +444,7 @@ func (a *Adapter) split(ctx context.Context, request generation.InputValidationR
 	if err != nil {
 		return nil, "", err
 	}
-	files := make([]outputFile, 0, len(parts)+1)
+	digests := newCombinedDigest()
 	claims := make([]generation.ArtifactClaim, 0, len(parts)+1)
 	stored := make([]generation.Asset, 0, len(parts)+1)
 	for index, part := range parts {
@@ -437,10 +462,10 @@ func (a *Adapter) split(ctx context.Context, request generation.InputValidationR
 			a.cleanup(ctx, stored)
 			return nil, "", err
 		}
-		file := outputFile{role: c.modelOutput.Role, variant: c.modelOutput.Variant, mediaType: modelMIME, ordinal: index + 1, body: body}
-		files = append(files, file)
+		file := newOutputFile(c.modelOutput.Role, c.modelOutput.Variant, modelMIME, index+1, body)
+		digests.add(file)
 		if store {
-			claim, asset, err := a.storeFile(ctx, ids, c.modelOutput, file, string(ids.attemptID)+":model:"+strconv.Itoa(index+1))
+			claim, asset, err := a.storeFile(ctx, ids, c.modelOutput, file, body, string(ids.attemptID)+":model:"+strconv.Itoa(index+1))
 			if err != nil {
 				a.cleanup(ctx, stored)
 				return nil, "", err
@@ -458,10 +483,10 @@ func (a *Adapter) split(ctx context.Context, request generation.InputValidationR
 		a.cleanup(ctx, stored)
 		return nil, "", limitError("manifest_bytes")
 	}
-	file := outputFile{role: c.manifestOutput.Role, variant: c.manifestOutput.Variant, mediaType: manifestMIME, ordinal: 1, body: manifestBytes}
-	files = append(files, file)
+	file := newOutputFile(c.manifestOutput.Role, c.manifestOutput.Variant, manifestMIME, 1, manifestBytes)
+	digests.add(file)
 	if store {
-		claim, asset, err := a.storeFile(ctx, ids, *c.manifestOutput, file, string(ids.attemptID)+":parts_manifest")
+		claim, asset, err := a.storeFile(ctx, ids, *c.manifestOutput, file, manifestBytes, string(ids.attemptID)+":parts_manifest")
 		if err != nil {
 			a.cleanup(ctx, stored)
 			return nil, "", err
@@ -469,7 +494,7 @@ func (a *Adapter) split(ctx context.Context, request generation.InputValidationR
 		claims = append(claims, claim)
 		stored = append(stored, asset)
 	}
-	return claims, combinedDigest(files), nil
+	return claims, digests.sum(), nil
 }
 
 func (a *Adapter) merge(ctx context.Context, request generation.InputValidationRequest, c contract, store bool, ids execution) ([]generation.ArtifactClaim, string, error) {
@@ -489,17 +514,18 @@ func (a *Adapter) merge(ctx context.Context, request generation.InputValidationR
 	if err := validateOutput(ctx, body, c); err != nil {
 		return nil, "", err
 	}
-	file := outputFile{role: c.modelOutput.Role, variant: c.modelOutput.Variant, mediaType: modelMIME, ordinal: 1, body: body}
-	files := []outputFile{file}
+	file := newOutputFile(c.modelOutput.Role, c.modelOutput.Variant, modelMIME, 1, body)
+	digests := newCombinedDigest()
+	digests.add(file)
 	claims := make([]generation.ArtifactClaim, 0, 1)
 	if store {
-		claim, _, err := a.storeFile(ctx, ids, c.modelOutput, file, string(ids.attemptID)+":model:1")
+		claim, _, err := a.storeFile(ctx, ids, c.modelOutput, file, body, string(ids.attemptID)+":model:1")
 		if err != nil {
 			return nil, "", err
 		}
 		claims = append(claims, claim)
 	}
-	return claims, combinedDigest(files), nil
+	return claims, digests.sum(), nil
 }
 
 func (a *Adapter) run(ctx context.Context, request generation.InputValidationRequest, c contract, store bool, ids execution) ([]generation.ArtifactClaim, string, error) {
@@ -593,13 +619,17 @@ func randomAssetID() (generation.AssetID, error) {
 }
 
 // verdictKey binds a verdict to the frozen Offering, normalized input and the
-// immutable source digests (in input order).
+// full source asset identity, including digests, in input order. Identical
+// bytes attached to a different asset or Task context must not share a verdict.
 func verdictKey(offering generation.Offering, input json.RawMessage, assets []generation.InputAsset) string {
 	hasher := sha256.New()
 	outputs, _ := json.Marshal(offering.Outputs)
 	parts := [][]byte{[]byte(offering.ID), []byte(offering.Revision), offering.ProviderOptions, outputs, input}
 	for _, asset := range assets {
-		parts = append(parts, []byte(asset.SHA256))
+		parts = append(parts,
+			[]byte(asset.ID), []byte(asset.OwnerID), []byte(asset.Role), []byte(asset.Variant),
+			[]byte(asset.TaskID), []byte(asset.SessionID), []byte(asset.SHA256),
+		)
 	}
 	var length [8]byte
 	for _, part := range parts {

@@ -89,6 +89,7 @@ type gltfMaterial struct {
 	EmissiveTexture  *gltfTextureInfo      `json:"emissiveTexture"`
 	EmissiveFactor   []float64             `json:"emissiveFactor"`
 	AlphaMode        string                `json:"alphaMode"`
+	AlphaCutoff      *float64              `json:"alphaCutoff"`
 	DoubleSided      bool                  `json:"doubleSided"`
 }
 

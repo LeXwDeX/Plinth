@@ -1,3 +1,5 @@
+import type { ProductSchema } from '@/lib/product-schema';
+
 /**
  * The production plan and total credit budget of a session (#103). The server
  * freezes the plan when the person decides; this module only reads the public
@@ -19,7 +21,13 @@ export interface ProductionPlan {
   correctionCapabilities: string[];
 }
 
-export type BudgetState = 'pending' | 'active' | 'exhausted' | 'closed' | 'denied';
+/**
+ * #103: the state stays an open string. Which states exist is product Schema
+ * data (`chat.approval_policy.budget_states`), and a newer server may know one
+ * this client build does not; it must still be shown instead of being folded
+ * into "pending".
+ */
+export type BudgetState = string;
 
 export interface SessionBudget {
   id: string;
@@ -33,7 +41,10 @@ export interface SessionBudget {
   decidedAt: string;
 }
 
-export const BUDGET_STATES: readonly BudgetState[] = ['pending', 'active', 'exhausted', 'closed', 'denied'];
+/** The budget states the Schema declares; empty on older servers that do not project them. */
+export function budgetStates(schema: ProductSchema): readonly string[] {
+  return schema.chat.approval_policy.budget_states ?? [];
+}
 
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -76,12 +87,13 @@ export function parseProductionPlan(value: unknown): ProductionPlan | null {
   };
 }
 
-export function parseSessionBudget(value: unknown): SessionBudget | null {
+export function parseSessionBudget(_schema: ProductSchema, value: unknown): SessionBudget | null {
   const item = record(value);
   const id = text(item.id);
   const plan = parseProductionPlan(item.plan);
   if (!id || !plan) return null;
-  const state = BUDGET_STATES.includes(item.state as BudgetState) ? item.state as BudgetState : 'pending';
+  // Only a missing state falls back; a state this build does not know is preserved.
+  const state = text(item.state) || 'pending';
   return {
     id,
     state,

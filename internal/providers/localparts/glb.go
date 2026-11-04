@@ -55,8 +55,9 @@ type nodeDef struct {
 }
 
 type meshDef struct {
-	Name       string         `json:"name,omitempty"`
-	Primitives []primitiveDef `json:"primitives"`
+	Name       string          `json:"name,omitempty"`
+	Extras     json.RawMessage `json:"extras,omitempty"`
+	Primitives []primitiveDef  `json:"primitives"`
 }
 
 type primitiveDef struct {
@@ -105,7 +106,7 @@ type textureDef struct {
 
 type textureRef struct {
 	Index    int             `json:"index"`
-	TexCoord int             `json:"tex_coord,omitempty"`
+	TexCoord int             `json:"texCoord,omitempty"`
 	Extras   json.RawMessage `json:"extras,omitempty"`
 	// Scale/Strength are the scalar factors of normalTexture/occlusionTexture.
 	Scale    *float64 `json:"scale,omitempty"`

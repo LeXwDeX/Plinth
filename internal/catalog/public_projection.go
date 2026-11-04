@@ -57,6 +57,9 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 		Modes:                      cloned.Chat.ApprovalPolicy.Modes,
 		ManualApprovalCapabilities: cloned.Chat.ApprovalPolicy.ManualApprovalCapabilities,
 	}
+	for _, state := range cloned.Chat.ApprovalPolicy.Budget.States {
+		publicChat.ApprovalPolicy.BudgetStates = append(publicChat.ApprovalPolicy.BudgetStates, state.ID)
+	}
 	publicChat.ContextCompaction = PublicChatContextCompaction{
 		Enabled:            cloned.Chat.ContextCompaction.Enabled,
 		AutoThresholdRatio: cloned.Chat.ContextCompaction.AutoThresholdRatio,

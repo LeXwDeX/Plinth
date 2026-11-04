@@ -273,8 +273,11 @@ type renderPart struct {
 	indices         []uint32 // nil for non-indexed primitives
 	texture         *decodedTexture
 	highlighted     bool
-	bounds          bounds
-	triangleCount   int
+	// mirrored marks a negative-determinant world transform, which reverses
+	// the winding of every triangle.
+	mirrored      bool
+	bounds        bounds
+	triangleCount int
 }
 
 var fallbackMaterial = Material{
@@ -282,6 +285,7 @@ var fallbackMaterial = Material{
 	MetallicFactor:  1,
 	RoughnessFactor: 1,
 	AlphaMode:       "OPAQUE",
+	AlphaCutoff:     0.5,
 }
 
 func (m *Model) buildRenderParts(req RenderRequest, mode RenderMode, highlight map[string]bool) ([]*renderPart, int64, error) {
@@ -324,6 +328,7 @@ func (m *Model) buildRenderParts(req RenderRequest, mode RenderMode, highlight m
 			source: source, material: material,
 			positions: worldPositions, indices: indices,
 			highlighted:   len(highlight) == 0 || highlight[source.id],
+			mirrored:      source.world.determinant3() < 0,
 			bounds:        partBounds,
 			triangleCount: source.partTriangles(indices),
 		}
@@ -569,6 +574,12 @@ func (r *renderer) drawPartBand(part *renderPart, pixels []float32, depth []floa
 			continue
 		}
 		faceNormal := p1.sub(p0).cross(p2.sub(p0)).normalized()
+		if part.mirrored {
+			// A negative-determinant world matrix reverses the winding, so the
+			// geometric normal computed from world positions points to the back
+			// of the material's front face.
+			faceNormal = faceNormal.scale(-1)
+		}
 		toEye := r.camera.forward.scale(-1)
 		if !r.camera.orthographic {
 			toEye = r.camera.eye.sub(p0).normalized()
@@ -738,7 +749,7 @@ func (r *renderer) shade(part *renderPart, normal, faceNormal, toEye vec3, uv [2
 		result[1] *= vertexColor[1]
 		result[2] *= vertexColor[2]
 		alpha *= vertexColor[3]
-		if material.AlphaMode == "MASK" && alpha < 0.5 {
+		if material.AlphaMode == "MASK" && alpha < material.AlphaCutoff {
 			return [3]float64{}, true
 		}
 		result = applyLighting(result, normal, faceNormal, toEye)

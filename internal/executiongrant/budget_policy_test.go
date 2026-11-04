@@ -22,6 +22,22 @@ type fakeProductionBudgets struct {
 	approve int
 }
 
+// A store that only implements the per-session read keeps the old assembly
+// usable: the batch projection returns an empty map and no error, so the list
+// still renders without budgets instead of failing (#103 review C6).
+func TestProductionBudgetSummariesFallBackWithoutBatchStore(t *testing.T) {
+	service := Service{Budgets: &fakeProductionBudgets{
+		summary: budget.Summary{ID: "pb-1"}, found: true,
+	}}
+	summaries, err := service.ProductionBudgetSummaries(context.Background(), "owner-a", []string{"session-a"})
+	if err != nil || len(summaries) != 0 {
+		t.Fatalf("summaries without a batch store = %+v err=%v", summaries, err)
+	}
+	if summaries == nil {
+		t.Fatal("the batch projection returned a nil map")
+	}
+}
+
 func (store *fakeProductionBudgets) CreateProductionBudget(context.Context, budget.ProductionBudget) (budget.ProductionBudget, error) {
 	return budget.ProductionBudget{}, ErrInvalid
 }
@@ -181,6 +197,43 @@ func TestBudgetModeLeavesEveryStepOfAnExhaustedPlanToThePerson(t *testing.T) {
 	}
 	if store.approved != 0 || budgets.approve != 0 {
 		t.Fatalf("an exhausted plan approved a step: store=%d budget=%d", store.approved, budgets.approve)
+	}
+}
+
+// A metered step the server could not price has no number to reserve; it must
+// wait for a person instead of spending a zero-sized reservation from the
+// approved total. An unmetered zero-cost step stays genuinely free.
+func TestBudgetModeLeavesUnpricedMeteredStepsToThePerson(t *testing.T) {
+	store, budgets := budgetStep("text-to-image")
+	store.snapshot.CreditsMetered = true
+	store.snapshot.EstimatedCredits = 0
+	budgets.found = true
+	budgets.summary = budget.Summary{ID: "pb_1", State: budget.StateActive, LimitCredits: 100,
+		RemainingCredits: 100,
+		Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
+			{Capability: "text-to-image", EstimatedCredits: 5},
+		}}}
+	result, err := runBudgetPolicy(t, "text-to-image", budgets, store)
+	if !errors.Is(err, ErrHumanRequired) || result.Outcome != PolicyOutcomeHuman ||
+		result.Reason != BudgetReasonUnpriced || result.Budget == nil {
+		t.Fatalf("unpriced metered step = %+v err=%v", result, err)
+	}
+	if store.approved != 0 || budgets.approve != 0 {
+		t.Fatalf("an unpriced step spent the budget: store=%d budget=%d", store.approved, budgets.approve)
+	}
+
+	store, budgets = budgetStep("text-to-image")
+	store.snapshot.CreditsMetered = false
+	store.snapshot.EstimatedCredits = 0
+	budgets.found = true
+	budgets.summary = budget.Summary{ID: "pb_1", State: budget.StateActive, LimitCredits: 100,
+		RemainingCredits: 100,
+		Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
+			{Capability: "text-to-image", EstimatedCredits: 0},
+		}}}
+	result, err = runBudgetPolicy(t, "text-to-image", budgets, store)
+	if err != nil || result.Outcome != PolicyOutcomeApproved || budgets.approve != 1 || budgets.credits != 0 {
+		t.Fatalf("free step = %+v err=%v approvals=%d credits=%d", result, err, budgets.approve, budgets.credits)
 	}
 }
 

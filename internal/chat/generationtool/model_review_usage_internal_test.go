@@ -340,6 +340,32 @@ func TestModelReviewUsageCheckNamesTheBriefPurposeAndTriangleOverride(t *testing
 	}
 }
 
+// TestModelReviewUsageCheckFindsBriefFieldsByDeclaredType covers a Schema that
+// renames the profile and integer fields: the usage check must still find them
+// (#103 review C3).
+func TestModelReviewUsageCheckFindsBriefFieldsByDeclaredType(t *testing.T) {
+	usage := usageBaseUsage()
+	usage.Brief.Fields = []catalog.ChatProductionBriefField{
+		{Name: "use", Type: "profile"},
+		{Name: "faces", Type: "integer"},
+	}
+	brief := chat.ProductionBrief{
+		"use":   []byte(`"prop"`),
+		"faces": []byte(`12`),
+	}
+	check := newModelReviewUsageCheck(
+		usageBaseReport(), usage, usageProduction(t), brief,
+		usageIdentityText, func(catalog.ChatModelInspectFixCapabilitySchema) bool { return true },
+	)
+	if check == nil || check.Purpose != "prop" {
+		t.Fatalf("usage check = %+v, want the renamed profile field", check)
+	}
+	triangles := usageItem(t, check, catalog.ModelReviewUsageCheckTriangles)
+	if got, _ := triangles.Budget["maximum"].(int); got != 12 {
+		t.Fatalf("triangle maximum = %v, want 12 from the renamed integer field", triangles.Budget["maximum"])
+	}
+}
+
 // TestModelReviewUsageCheckFallsBackToTheDefaultPurpose covers a session
 // without a brief and a brief whose purpose is absent or no longer declared.
 func TestModelReviewUsageCheckFallsBackToTheDefaultPurpose(t *testing.T) {

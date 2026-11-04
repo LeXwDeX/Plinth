@@ -11,6 +11,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
+	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/pendingapproval"
 )
 
@@ -213,6 +214,139 @@ func TestProductionPlanDecisionIsScopedToTheOwnersSession(t *testing.T) {
 	}
 	if stored, err := w.repo.GetProductionBudget(ctx, "owner-a", plan.ID); err != nil || stored.State != budget.StatePending {
 		t.Fatalf("refused decisions changed the plan: %+v err=%v", stored, err)
+	}
+}
+
+// A chat step the production plan approved and the kernel then rejected
+// permanently must return its reservation when the operation settles. A
+// transient error is retried and keeps it. Without the release the plan would
+// reserve credits no operation can ever spend (#103 review B2).
+func TestBudgetApprovedChatSubmitFailureReleasesTheReservation(t *testing.T) {
+	ctx := context.Background()
+	setup := func(t *testing.T) (*world, string) {
+		t.Helper()
+		w := openWorld(t, filepath.Join(t.TempDir(), "a.db"), time.Hour)
+		operation, grant := w.pending("call-budget-submit")
+		if _, err := w.grants.Prepare(ctx, executiongrant.PrepareCommand{
+			Principal: executiongrant.Principal{OwnerID: "owner-a", ActorID: "agent:" + operation.AssistantMessageID, Source: executiongrant.AgentPending},
+			SessionID: operation.SessionID, OfferingID: string(operation.OfferingID), OfferingRevision: operation.OfferingRevision,
+			PreparedInputID: string(operation.PreparedInputID), PreparedInputHash: operation.PreparedInputHash,
+			IdempotencyKey: operation.IdempotencyKey, OperationID: operation.OperationID,
+			TriggerTurnID: operation.AssistantMessageID, Harness: operation.Harness, BudgetEligible: true,
+		}); err != nil {
+			t.Fatalf("marking the step budget-eligible: %v", err)
+		}
+		production := w.productionPlan(t, "budget-submit", 20,
+			budget.PlanStep{Capability: string(generation.TextTo3D), Purpose: "生成模型", EstimatedCredits: 5})
+		if _, err := w.service.DecideBudget(ctx, w.operator, "session-a", production.ID, executiongrant.Approve); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.repo.ApproveExecutionGrantWithBudget(ctx, "owner-a", grant.RequestID,
+			production.ID, executiongrant.BudgetActorPrefix+production.ID, 5); err != nil {
+			t.Fatal(err)
+		}
+		summary, found, err := w.grants.BudgetSummary(ctx, "owner-a", "session-a")
+		if err != nil || !found || summary.ReservedCredits != 5 || summary.RemainingCredits != 15 {
+			t.Fatalf("approved reservation = %+v found=%v err=%v", summary, found, err)
+		}
+		return w, grant.RequestID
+	}
+
+	t.Run("permanent", func(t *testing.T) {
+		w, requestID := setup(t)
+		w.gateway.submitError = &generation.Error{Code: generation.ErrUnknownOffering, Operation: "submit", Detail: "gone"}
+		if _, err := w.service.Sweep(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if message, ok := w.message(pendingapproval.MessageID(requestID)); !ok || message.Content != w.schema.PendingApprovals.Messages.SubmitFailed {
+			t.Fatalf("submit failure message = %+v ok=%v", message, ok)
+		}
+		summary, found, err := w.grants.BudgetSummary(ctx, "owner-a", "session-a")
+		if err != nil || !found || summary.ReservedCredits != 0 || summary.RemainingCredits != 20 || summary.State != budget.StateActive {
+			t.Fatalf("budget after a permanent rejection = %+v found=%v err=%v", summary, found, err)
+		}
+		stored, err := w.repo.GetExecutionGrant(ctx, "owner-a", requestID)
+		if err != nil || stored.Status != executiongrant.Denied {
+			t.Fatalf("rejected grant = %+v err=%v", stored, err)
+		}
+	})
+
+	t.Run("transient", func(t *testing.T) {
+		w, requestID := setup(t)
+		w.gateway.submitError = errors.New("database is busy")
+		if _, err := w.service.Sweep(ctx); err == nil {
+			t.Fatal("a transient submit failure must surface to the sweep")
+		}
+		summary, found, err := w.grants.BudgetSummary(ctx, "owner-a", "session-a")
+		if err != nil || !found || summary.ReservedCredits != 5 || summary.RemainingCredits != 15 {
+			t.Fatalf("a retry released the reservation = %+v found=%v err=%v", summary, found, err)
+		}
+		stored, err := w.repo.GetExecutionGrant(ctx, "owner-a", requestID)
+		if err != nil || stored.Status != executiongrant.Approved {
+			t.Fatalf("retried grant = %+v err=%v", stored, err)
+		}
+	})
+}
+
+// failingNoticeChat refuses budget notices while failing is set.
+type failingNoticeChat struct {
+	pendingapproval.Chat
+	failing bool
+	tries   int
+}
+
+func (c *failingNoticeChat) PostAssistantMessage(ctx context.Context, owner string, message chat.Message) (chat.Message, bool, error) {
+	if c.failing && (strings.HasSuffix(message.ID, ":expired") || strings.HasSuffix(message.ID, ":exhausted")) {
+		c.tries++
+		return chat.Message{}, false, errors.New("chat store unavailable")
+	}
+	return c.Chat.PostAssistantMessage(ctx, owner, message)
+}
+
+// The plan's state transition commits before its notice is posted. A failed
+// post must not lose the notice: the next sweep retries the deterministic
+// message and records it, and later sweeps neither repeat nor recount it
+// (#103 review B3).
+func TestBudgetNoticePostFailureIsRetriedByTheNextSweep(t *testing.T) {
+	ctx := context.Background()
+	var flaky *failingNoticeChat
+	w := openWorldWithChat(t, filepath.Join(t.TempDir(), "a.db"), time.Hour, func(chats pendingapproval.Chat) pendingapproval.Chat {
+		flaky = &failingNoticeChat{Chat: chats, failing: true}
+		return flaky
+	})
+	plan := w.productionPlan(t, "notice-retry", 40,
+		budget.PlanStep{Capability: "image-to-3d", Purpose: "生成模型", EstimatedCredits: 25})
+	w.grants.Clock = func() time.Time { return time.Now().UTC().Add(2 * time.Hour) }
+	noticeID := pendingapproval.BudgetMessageID(plan.ID) + ":expired"
+	if settled, err := w.service.Sweep(ctx); err == nil || settled != 0 {
+		t.Fatalf("sweep with a failing notice post: settled=%d err=%v", settled, err)
+	}
+	if flaky.tries != 1 {
+		t.Fatalf("notice post attempts in one sweep = %d", flaky.tries)
+	}
+	if _, ok := w.message(noticeID); ok {
+		t.Fatal("a failed notice was stored")
+	}
+
+	flaky.failing = false
+	if settled, err := w.service.Sweep(ctx); err != nil || settled != 1 {
+		t.Fatalf("retrying sweep: settled=%d err=%v", settled, err)
+	}
+	notice, ok := w.message(noticeID)
+	if !ok || !strings.Contains(notice.Content, "骑士") || !strings.Contains(notice.Content, "超时") {
+		t.Fatalf("retried notice = %+v ok=%v", notice, ok)
+	}
+	if settled, err := w.service.Sweep(ctx); err != nil || settled != 0 {
+		t.Fatalf("a recorded notice was posted again: settled=%d err=%v", settled, err)
+	}
+	posted := 0
+	for _, message := range w.allMessages(t) {
+		if message.ID == noticeID {
+			posted++
+		}
+	}
+	if posted != 1 {
+		t.Fatalf("expiry notices = %d", posted)
 	}
 }
 

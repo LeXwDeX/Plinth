@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-05.issue103-prompts.2",
+    "revision": "2026-11-05.issue103-prompts.4",
     "terminology": {
       "user_facing": [
         {
@@ -4053,6 +4053,7 @@
         "ui.studio.picker.model.title": "3D 生成模型",
         "ui.studio.picker.image.hint": "积分为每张估算",
         "ui.studio.picker.model.hint": "积分为每次估算",
+        "ui.studio.picker.lock_failed": "3D 模型锁定失败，请重试。",
         "ui.studio.picker.col.model": "模型",
         "ui.studio.picker.col.provider": "供应商",
         "ui.studio.picker.col.image_to_image": "图改图",
@@ -4184,6 +4185,9 @@
         "ui.studio.plan.state.exhausted": "预算已用完",
         "ui.studio.plan.state.closed": "已被新计划取代",
         "ui.studio.plan.state.denied": "未批准",
+        "ui.studio.plan.reload": "重新读取",
+        "ui.studio.plan.reload_failed": "计划状态读取失败，请重试。",
+        "ui.studio.plan.state.unknown": "未知状态",
         "ui.studio.plan.step_pending": "等待执行",
         "ui.studio.plan.decide_failed": "提交计划决定失败，请稍后重试",
         "ui.studio.plan.steps_done": "{done}/{total} 步已完成",
@@ -4979,6 +4983,7 @@
           "notes": "notes",
           "brief": "brief",
           "explicit_model_3d": "explicit_model_3d",
+          "decision": "decision",
           "agent_scope": "agentScope",
           "choice_answer": "choiceAnswer",
           "reasoning_effort": "reasoningEffort",
@@ -5547,6 +5552,8 @@
             "max_triangles": 8000000,
             "max_vertices": 12000000,
             "max_texture_pixels": 16777216,
+            "max_total_texture_pixels": 33554432,
+            "max_texture_bytes": 134217728,
             "max_nodes": 65536,
             "max_depth": 256
           },
@@ -6189,7 +6196,9 @@
             "model": "model",
             "model_fallback": "model_fallback",
             "model_note": "model_note",
-            "size_note": "size_note"
+            "size_note": "size_note",
+            "budget": "budget",
+            "reason": "reason"
           }
         },
         {
@@ -6240,7 +6249,9 @@
             "image_urls": "image_urls",
             "error": "error",
             "estimated_credits": "estimated_credits",
-            "approval": "approval"
+            "approval": "approval",
+            "budget": "budget",
+            "reason": "reason"
           }
         },
         {
@@ -6301,7 +6312,9 @@
             "model": "model",
             "model_fallback": "model_fallback",
             "model_note": "model_note",
-            "model_choice": "model_choice"
+            "model_choice": "model_choice",
+            "budget": "budget",
+            "reason": "reason"
           }
         },
         {
@@ -6384,7 +6397,9 @@
             "model_fallback": "model_fallback",
             "model_note": "model_note",
             "model_choice": "model_choice",
-            "reference_note": "reference_note"
+            "reference_note": "reference_note",
+            "budget": "budget",
+            "reason": "reason"
           }
         },
         {
@@ -6447,7 +6462,7 @@
           "prompt_with_reference_template": "{prompt}",
           "prompt_with_previous_template": "{previous_prompt} {prompt}",
           "idempotency_key_template": "chat:{session_id}:{call_id}",
-          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback","model_note":"model_note","model_choice":"model_choice","reference_note":"reference_note"}
+          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback","model_note":"model_note","model_choice":"model_choice","reference_note":"reference_note","budget":"budget","reason":"reason"}
         },
         {
           "name": "retexture_model",
@@ -6554,7 +6569,9 @@
             "estimated_credits": "estimated_credits",
             "extra_credits": "extra_credits",
             "approval": "approval",
-            "model_formats": "model_formats"
+            "model_formats": "model_formats",
+            "budget": "budget",
+            "reason": "reason"
           }
         },
         {
@@ -6828,7 +6845,9 @@
             "estimated_credits": "estimated_credits",
             "extra_credits": "extra_credits",
             "approval": "approval",
-            "model_formats": "model_formats"
+            "model_formats": "model_formats",
+            "budget": "budget",
+            "reason": "reason"
           }
         },
         {
@@ -6925,7 +6944,7 @@
           "result_attachment_kind": "model",
           "result_asset_roles": ["thumbnail"],
           "idempotency_key_template": "chat:{session_id}:{call_id}",
-          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits"}
+          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","budget":"budget","reason":"reason"}
         },
         {
           "name": "convert_model_format",
@@ -6995,7 +7014,9 @@
             "estimated_credits": "estimated_credits",
             "extra_credits": "extra_credits",
             "approval": "approval",
-            "model_formats": "model_formats"
+            "model_formats": "model_formats",
+            "budget": "budget",
+            "reason": "reason"
           }
         },
         {
@@ -7074,7 +7095,9 @@
             "extra_credits": "extra_credits",
             "approval": "approval",
             "model": "model",
-            "model_fallback": "model_fallback"
+            "model_fallback": "model_fallback",
+            "budget": "budget",
+            "reason": "reason"
           },
           "ignore_user_model": true,
           "accept_reference_images": false,
@@ -7166,7 +7189,9 @@
             "approval": "approval",
             "model": "model",
             "model_fallback": "model_fallback",
-            "reference_note": "reference_note"
+            "reference_note": "reference_note",
+            "budget": "budget",
+            "reason": "reason"
           }
         },
         {
@@ -7188,7 +7213,7 @@
           "prompt_with_reference_template": "{prompt}",
           "prompt_with_previous_template": "{previous_prompt} {prompt}",
           "idempotency_key_template": "chat:{session_id}:{call_id}",
-          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback"}
+          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback","budget":"budget","reason":"reason"}
         },
         {
           "name": "edit_multiview_images",
@@ -7207,7 +7232,7 @@
           "default_parameters": {},
           "result_asset_roles": ["image"],
           "idempotency_key_template": "chat:{session_id}:{call_id}",
-          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback"}
+          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback","budget":"budget","reason":"reason"}
         },
         {
           "name": "create_creative_lab_design",
@@ -7326,7 +7351,9 @@
             "error": "error",
             "warning": "warning",
             "estimated_credits": "estimated_credits",
-            "approval": "approval"
+            "approval": "approval",
+            "budget": "budget",
+            "reason": "reason"
           }
         },
         {
@@ -7388,7 +7415,9 @@
             "error": "error",
             "warning": "warning",
             "estimated_credits": "estimated_credits",
-            "approval": "approval"
+            "approval": "approval",
+            "budget": "budget",
+            "reason": "reason"
           }
         }
       ],
@@ -7547,6 +7576,8 @@
           "canvas_source_tool_refused": "本轮的输入来源是用户发送时的画布区域快照，这个工具不读图片，不能用于本轮。请改用会读图片的工具（{tools}），画布快照会自动作为第一张输入图，无需填写引用。",
           "retired_model_fallback": "用户选的 {from} 已停用，这一步改用了 {to}。请如实告诉用户，并说明需要时可以在模型选择里改选。",
           "model_choice_conflict": "这次调用指定的模型与用户在本会话明确选定的模型（{locked}）不一致，没有提交任务。用户明确选择的模型优先；要改用 {requested}，请先让用户在本会话里重新选择模型。",
+          "model_choice_workspace_conflict": "工作区当前选择的模型是 {workspace}，但用途「{profile}」推荐 {recommended}。请先与用户确认保留哪个模型，再继续准备，不要静默替换用户的选择。",
+          "production_brief_conflict": "制作简报已被其他修改更新，请重新读取后再保存。",
           "model_choice_unavailable": "这次调用指定的模型 {model} 当前不可用，或不能接受本次输入，没有提交任务。可用选项：{choices}。请改用其中一个，或按用途推荐继续。",
           "offering_choice_unavailable": "所选项当前不可用，没有提交任务。只能从这些可用项中选择：{choices}。",
           "source_offering_unpaired": "这个来源任务不能用于本工具，没有提交任务。来源必须是本人在本会话中成功完成、且与本工具某个可用功能配对的任务（例如同一模板的 Creative Lab 设计预览）。",
@@ -7684,6 +7715,12 @@
             "denied": "制作计划「{title}」未获批准，未执行任何步骤。",
             "expired": "制作计划「{title}」等待批准超时，已失效；未执行任何步骤。",
             "exhausted": "制作计划「{title}」的 {limit} 积分预算已用完，后续步骤需要重新提交计划并获得批准。"
+          },
+          "tool_messages": {
+            "proposed": "制作计划已提交；等待用户批准或拒绝。在该计划被决定前不要再提交新计划。",
+            "active": "制作计划已获批准；其步骤可在预算内执行。",
+            "exhausted": "制作计划已获批准，但积分预算已用完；超出预算的步骤需要用户批准。",
+            "closed": "该制作计划已不再等待批准。"
           }
         },
         "prompt": {
@@ -7938,13 +7975,16 @@
               "name": "style",
               "type": "text",
               "label": "风格",
-              "maximum_characters": 200
+              "maximum_characters": 200,
+              "multiline": true,
+              "placeholder": "如：写实、低多边形、暖色调金属材质"
             },
             {
               "name": "target_platform",
               "type": "text",
               "label": "目标平台",
-              "maximum_characters": 120
+              "maximum_characters": 120,
+              "placeholder": "如：Unity、Unreal、Web、AR、3D 打印"
             },
             {
               "name": "needs_parts",
@@ -7972,7 +8012,9 @@
               "name": "notes",
               "type": "text",
               "label": "补充说明",
-              "maximum_characters": 1000
+              "maximum_characters": 1000,
+              "multiline": true,
+              "placeholder": "记录限制、排除项和参考方向。"
             }
           ],
           "context_template": "\n\n【制作简报】{brief}\n这是本会话的制作简报：用途决定质量与默认参数；用户明确锁定的事项必须遵守，未锁定的事项由你按用途决定并说明理由。没有写入的字段不代表用户锁定。",
@@ -7990,7 +8032,18 @@
           "watertight_text": "水密",
           "skin_text": "蒙皮",
           "saved_message": "制作简报已更新。",
-          "invalid_template": "制作简报无效：{reason}"
+          "invalid_template": "制作简报无效：{reason}",
+          "messages": {
+            "unknown_field": "未知字段 “{field}”",
+            "not_object": "制作简报必须是对象",
+            "not_string": "字段 “{field}” 必须是字符串",
+            "not_boolean": "字段 “{field}” 必须是布尔值",
+            "not_integer": "字段 “{field}” 必须是整数",
+            "profile_undeclared": "用途 “{value}” 未声明",
+            "text_too_long": "字段 “{field}” 不能超过 {maximum} 个字符",
+            "out_of_range": "字段 “{field}” 必须在 {minimum} 与 {maximum} 之间",
+            "unsupported_type": "字段 “{field}” 的类型 “{type}” 未实现"
+          }
         }
       },
       "context_compaction": {
@@ -14662,6 +14715,7 @@
             "ui.studio.picker.model.title": "3D generation models",
             "ui.studio.picker.image.hint": "Credits are estimated per image",
             "ui.studio.picker.model.hint": "Credits are estimated per run",
+            "ui.studio.picker.lock_failed": "Could not lock the 3D model. Please try again.",
             "ui.studio.picker.col.model": "Model",
             "ui.studio.picker.col.provider": "Provider",
             "ui.studio.picker.col.image_to_image": "Image to image",
@@ -14793,6 +14847,9 @@
             "ui.studio.plan.state.exhausted": "Budget used up",
             "ui.studio.plan.state.closed": "Replaced by a newer plan",
             "ui.studio.plan.state.denied": "Not approved",
+            "ui.studio.plan.reload": "Reload",
+            "ui.studio.plan.reload_failed": "Could not load the production plan. Please try again.",
+            "ui.studio.plan.state.unknown": "Unknown state",
             "ui.studio.plan.step_pending": "Waiting to run",
             "ui.studio.plan.decide_failed": "Failed to submit the plan decision. Please try again later",
             "ui.studio.plan.steps_done": "{done}/{total} steps done",
@@ -16420,6 +16477,8 @@
             "chat.presentation.messages.canvas_source_tool_refused": "The input source for this turn is the canvas region snapshot taken when the user sent the message. This tool does not read images, so it cannot be used for this turn. Use a tool that reads images ({tools}) instead; the canvas snapshot is automatically used as the first input image, so no reference is needed.",
             "chat.presentation.messages.retired_model_fallback": "The {from} model the user picked is no longer offered, so this step used {to}. Tell the user so, and that they can pick another model in the model menu.",
             "chat.presentation.messages.model_choice_conflict": "This call named a model that differs from the model the user explicitly picked in this session ({locked}), so nothing was submitted. The user's explicit choice wins; to use {requested}, first have the user pick the model again in this session.",
+            "chat.presentation.messages.model_choice_workspace_conflict": "The workspace currently uses model {workspace}, but purpose “{profile}” recommends {recommended}. Confirm with the user which model to keep before continuing; do not silently replace their choice.",
+            "chat.presentation.messages.production_brief_conflict": "The production brief was changed by another writer. Read it again and retry the save.",
             "chat.presentation.messages.model_choice_unavailable": "The model named by this call ({model}) is not available right now, or cannot accept this input, so nothing was submitted. Available options: {choices}. Use one of them, or continue with the purpose's recommendation.",
             "chat.choice.kinds[id=usage_profile].question": "What is this 3D model mainly for?",
             "chat.choice.kinds[id=usage_profile].message": "Choose the purpose of this 3D work. The purpose decides the default model, triangle budget and UV requirements; after you choose, I will continue with that purpose.",
@@ -16440,12 +16499,15 @@
             "chat.model3d_usage.profiles[id=print].reason": "Printing needs full detail and a watertight mesh; prefer Meshy 7.1's high-detail output, then Tripo v3.1.",
             "chat.model3d_usage.brief.fields[name=purpose].label": "Purpose",
             "chat.model3d_usage.brief.fields[name=style].label": "Style",
+            "chat.model3d_usage.brief.fields[name=style].placeholder": "For example: realistic, low-poly, warm-toned metal materials",
             "chat.model3d_usage.brief.fields[name=target_platform].label": "Target platform",
+            "chat.model3d_usage.brief.fields[name=target_platform].placeholder": "For example: Unity, Unreal, Web, AR, 3D print",
             "chat.model3d_usage.brief.fields[name=needs_parts].label": "Parts need separating",
             "chat.model3d_usage.brief.fields[name=needs_rig].label": "Rigging needed",
             "chat.model3d_usage.brief.fields[name=needs_animation].label": "Animation needed",
             "chat.model3d_usage.brief.fields[name=triangle_budget].label": "Triangle budget",
             "chat.model3d_usage.brief.fields[name=notes].label": "Additional notes",
+            "chat.model3d_usage.brief.fields[name=notes].placeholder": "Record constraints, exclusions and references.",
             "chat.model3d_usage.brief.context_template": "\n\n[Production brief] {brief}\nThis is the session's production brief: the purpose decides quality and default parameters; anything the user explicitly locked must be obeyed, and unlocked choices are yours to decide and explain. A field that was not written does not mean the user locked it.",
             "chat.model3d_usage.brief.empty_text": "No production brief yet. Before starting 3D work, ask one or two short questions to learn the purpose, then call update_production_brief to write the brief and ask the user to confirm it.",
             "chat.model3d_usage.brief.field_template": "{label}: {value}",
@@ -16460,6 +16522,15 @@
             "chat.model3d_usage.brief.requirement_separator": ", ",
             "chat.model3d_usage.brief.saved_message": "Production brief updated.",
             "chat.model3d_usage.brief.invalid_template": "The production brief is invalid: {reason}",
+            "chat.model3d_usage.brief.messages.unknown_field": "Unknown field “{field}”",
+            "chat.model3d_usage.brief.messages.not_object": "The production brief must be a JSON object",
+            "chat.model3d_usage.brief.messages.not_string": "Field “{field}” must be a string",
+            "chat.model3d_usage.brief.messages.not_boolean": "Field “{field}” must be a boolean",
+            "chat.model3d_usage.brief.messages.not_integer": "Field “{field}” must be an integer",
+            "chat.model3d_usage.brief.messages.profile_undeclared": "Purpose “{value}” is not declared",
+            "chat.model3d_usage.brief.messages.text_too_long": "Field “{field}” cannot exceed {maximum} characters",
+            "chat.model3d_usage.brief.messages.out_of_range": "Field “{field}” must be between {minimum} and {maximum}",
+            "chat.model3d_usage.brief.messages.unsupported_type": "Field “{field}” has an unsupported type “{type}”",
             "chat.presentation.messages.offering_choice_unavailable": "The selected option is not available right now, so nothing was submitted. Choose only from these available options: {choices}.",
             "chat.presentation.messages.source_offering_unpaired": "This source Task cannot be used with this tool, so nothing was submitted. The source must be a Task you completed successfully in this session that pairs with one of this tool's available functions (for example, a Creative Lab design preview of the same template).",
             "chat.presentation.messages.source_offering_canvas": "This turn's input is the artboard snapshot. The snapshot is not a source Task itself, and the artboard does not show exactly one design preview you completed successfully in this session that can pair, so nothing was submitted. Call again with the design preview's image handle or its Task ID; the user does not need to clear the artboard or select again.",

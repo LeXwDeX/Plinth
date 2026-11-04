@@ -38,6 +38,12 @@ func (s *Server) writeChatBriefError(writer http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, chat.ErrSessionNotFound):
 		s.writeChatError(writer, http.StatusNotFound, messages.SessionNotFound)
+	case errors.Is(err, chat.ErrProductionBriefConflict):
+		message := messages.ProductionBriefConflict
+		if message == "" {
+			message = messages.InvalidParameters
+		}
+		s.writeChatError(writer, http.StatusConflict, message)
 	case errors.As(err, &brief):
 		s.writeChatError(writer, http.StatusBadRequest,
 			chat.ProductionBriefValidationErrorText(s.application.Chat.Model3DUsage.Brief.InvalidTemplate, err))
@@ -81,12 +87,7 @@ func (s *Server) putChatSessionBrief(writer http.ResponseWriter, request *http.R
 			return
 		}
 	}
-	previous, err := s.chat.SessionBrief(request.Context(), string(owner), sessionID)
-	if err != nil {
-		s.writeChatBriefError(writer, err)
-		return
-	}
-	stored, err := s.chat.SetProductionBrief(request.Context(), string(owner), sessionID, next)
+	previous, stored, err := s.chat.SetProductionBrief(request.Context(), string(owner), sessionID, next)
 	if err != nil {
 		s.writeChatBriefError(writer, err)
 		return

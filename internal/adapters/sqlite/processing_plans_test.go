@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/budget"
+	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/processing"
 )
@@ -233,6 +235,76 @@ func TestProcessingPlansBySourceAreUncappedAndScoped(t *testing.T) {
 	}
 	if foreign, err := repository.ListProcessingPlansBySource(ctx, "another-owner", "session", "task"); err != nil || len(foreign) != 0 {
 		t.Fatalf("foreign owner = %v, %v", planIDs(foreign), err)
+	}
+}
+
+// A processing step that gives up its authorization reference (Retry,
+// freezeAgain, or a failed submission that keeps the step paused) must return
+// its unbound budget reservation in the same transaction that forgets the
+// reference. Otherwise the plan forever reserves credits no step can spend
+// (#103 review B2).
+func TestSaveProcessingPlanReleasesRemovedStepReservations(t *testing.T) {
+	ctx := context.Background()
+	repository := openGrantTestRepo(t)
+	insertGrantTurn(t, repository, "turn-b2", "owner-a", "session-a")
+	production := budgetTestPlan(t, repository, "pb-b2", 20, "retexture")
+	identity, grant := prepareBudgetGrant(t, repository, "turn-b2", "b2", "retexture", 7)
+	if _, err := repository.ApproveExecutionGrantWithBudget(ctx, identity.OwnerID, grant.RequestID,
+		production.ID, executiongrant.BudgetActorPrefix+production.ID, 7); err != nil {
+		t.Fatal(err)
+	}
+	if state := reservationState(t, repository, grant.RequestID); state != budget.ReservationReserved {
+		t.Fatalf("reservation before save = %q", state)
+	}
+	now := time.Now().UTC()
+	plan := processing.Plan{ID: "processing-b2", OwnerID: "owner-a", SessionID: "session-a",
+		State: processing.Pending, RequestHash: "request", Version: 1, CreatedAt: now, UpdatedAt: now,
+		Steps: []processing.Step{
+			{State: processing.Pending, AuthorizationRef: grant.RequestID},
+			{State: processing.Pending, AuthorizationRef: grant.RequestID},
+		}}
+	if err := repository.CreateProcessingPlan(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	// One step still holds the reference: the reservation stays reserved.
+	plan.Steps = plan.Steps[1:]
+	plan.UpdatedAt = now.Add(time.Second)
+	if err := repository.SaveProcessingPlan(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	plan.Version++
+	if state := reservationState(t, repository, grant.RequestID); state != budget.ReservationReserved {
+		t.Fatalf("a still-referenced reservation was released: %q", state)
+	}
+	// Retry clears the last reference; saving must release at once.
+	plan.Steps[0].AuthorizationRef = ""
+	plan.UpdatedAt = now.Add(2 * time.Second)
+	if err := repository.SaveProcessingPlan(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	if state := reservationState(t, repository, grant.RequestID); state != budget.ReservationReleased {
+		t.Fatalf("reservation after losing its last reference = %q", state)
+	}
+	summary, found, err := repository.ProductionBudgetSummary(ctx, identity.OwnerID, identity.SessionID)
+	if err != nil || !found || summary.ReservedCredits != 0 || summary.RemainingCredits != 20 {
+		t.Fatalf("budget summary after release = %+v found=%v err=%v", summary, found, err)
+	}
+	stored, err := repository.GetExecutionGrant(ctx, identity.OwnerID, grant.RequestID)
+	if err != nil || stored.Status != executiongrant.Denied {
+		t.Fatalf("abandoned grant = %+v err=%v", stored, err)
+	}
+	var actor string
+	if err := repository.db.QueryRowContext(ctx, `SELECT actor_id FROM execution_grant_audit
+ WHERE request_id = ? AND event = 'denied'`, grant.RequestID).Scan(&actor); err != nil || actor != executiongrant.AbandonedActor {
+		t.Fatalf("denied audit actor = %q err=%v", actor, err)
+	}
+	conn, err := repository.grantWriteConn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rollbackGrantConn(conn)
+	if _, err := repository.ClaimExecutionGrantOnConn(ctx, conn, grant.RequestID, identity); !errors.Is(err, executiongrant.ErrState) {
+		t.Fatalf("claiming a released grant = %v", err)
 	}
 }
 

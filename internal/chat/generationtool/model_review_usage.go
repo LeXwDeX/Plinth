@@ -69,7 +69,7 @@ func newModelReviewUsageCheck(
 	if !found {
 		return nil
 	}
-	budget, override := modelReviewUsageBudget(profile, brief)
+	budget, override := modelReviewUsageBudget(usage, profile, brief)
 	note := modelReviewUsageNote(profile, source, override, production, text)
 	checks := []modelReviewUsageCheckItem{
 		modelReviewUsageTrianglesCheck(report, budget),
@@ -141,15 +141,18 @@ func modelReviewUsageProfile(
 	return catalog.ChatModel3DUsageProfile{}, "", false
 }
 
-// modelReviewUsageBudget applies the brief's triangle_budget to the profile's
-// maximum. The value is reported verbatim even when it is below the profile's
-// minimum; the check then fails for the range it actually declares.
+// modelReviewUsageBudget applies the brief's triangle override to the profile's
+// maximum. The field is located by its declared type, so a renamed Schema
+// field keeps working (#103 review C3). The value is reported verbatim even
+// when it is below the profile's minimum; the check then fails for the range
+// it actually declares.
 func modelReviewUsageBudget(
+	usage catalog.ChatModel3DUsageSchema,
 	profile catalog.ChatModel3DUsageProfile,
 	brief chat.ProductionBrief,
 ) (catalog.ChatModel3DUsageBudget, *int) {
 	budget := profile.Budget
-	if value, exists := brief.Integer("triangle_budget"); exists && value > 0 {
+	if value, exists := brief.Integer(usage.Brief.FieldNameOfType("integer")); exists && value > 0 {
 		budget.MaxTriangles = value
 		return budget, &value
 	}

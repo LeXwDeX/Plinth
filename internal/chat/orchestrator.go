@@ -2682,10 +2682,6 @@ func (orchestrator *Orchestrator) executeTools(
 		if err != nil {
 			turn.Checkpoint.HadToolError = true
 		}
-		// A read-only tool's compact summary travels with its call, so the
-		// conversation can show one line per check (#103). Keep it on the
-		// checkpoint too: a later resume must not lose it.
-		orchestrator.recordToolSummary(produced, &turn.Checkpoint.Assistant, call.ID, result.Summary)
 		imageURLs = append(imageURLs, result.ImageURLs...)
 		// 观察失败时 result.TaskID 可能为空：不要清空回调里已持久化
 		// 的绑定，否则停止轮次时找不到在飞任务（计费止损依赖它）。
@@ -2702,8 +2698,16 @@ func (orchestrator *Orchestrator) executeTools(
 		// appends the call's pictures after them, so each picture's attachment
 		// slot is known even when verification skipped one.
 		imagesBefore := len(produced.ImageURLs)
-		content = orchestrator.withResultHandles(content,
-			orchestrator.recordTurnResult(ctx, command.OwnerID, produced, call.ID, taskBindings[call.ID], result.ImageURLs))
+		handles := orchestrator.recordTurnResult(ctx, command.OwnerID, produced, call.ID, taskBindings[call.ID], result.ImageURLs)
+		content = orchestrator.withResultHandles(content, handles)
+		// A read-only tool's compact summary travels with its call, so the
+		// conversation can show one line per check (#103). The handles its
+		// pictures received belong in the summary too, so the frontend binds
+		// each picture to its view instead of guessing by position (#103
+		// review F9). Keep it on the checkpoint as well: a later resume must
+		// not lose it.
+		orchestrator.recordToolSummary(produced, &turn.Checkpoint.Assistant, call.ID,
+			orchestrator.withSummaryHandles(result.Summary, handles))
 		reply := agents.Message{
 			Role:       orchestrator.schema.Roles.Tool,
 			Content:    content,

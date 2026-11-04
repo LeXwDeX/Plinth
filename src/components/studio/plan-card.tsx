@@ -13,6 +13,41 @@ import { completedPlanSteps, planStepProgress, type PlanTask } from '@/lib/chat/
 import { formatSchemaText, schemaCountMessage, schemaText, taskStatePresentation } from '@/lib/product-schema';
 import { cn } from '@/lib/utils';
 
+/**
+ * #103: shown when the plan card cannot be trusted or shown: a pending budget
+ * without its approval card, or a failed session re-read after a decision. It
+ * says what happened and offers an explicit reload instead of an unusable card.
+ */
+export function PlanReloadNotice({
+  message, busy = false, onReload,
+}: {
+  message: string;
+  busy?: boolean;
+  onReload: () => void;
+}) {
+  const { schema } = useProductSchema();
+  return (
+    <div
+      role="alert"
+      className="flex flex-col items-start gap-1.5 rounded-lg border border-border bg-panel-raised p-3 text-xs"
+      data-testid="studio-plan-reload"
+    >
+      <p className="text-destructive [overflow-wrap:anywhere]">{message}</p>
+      <Action
+        type="button"
+        size="sm"
+        variant="outline"
+        disabled={busy}
+        loading={busy}
+        onClick={onReload}
+        data-testid="studio-plan-reload-button"
+      >
+        {schemaText(schema, 'ui.studio.plan.reload')}
+      </Action>
+    </div>
+  );
+}
+
 export interface PlanCardProps {
   plan: ProductionPlan;
   /** The total budget the person approves; the plan's step quotes when the server sends none. */
@@ -51,7 +86,8 @@ export function PlanCard({ plan, budgetCredits, tasks, onDecide, busy = false, e
     )),
     { revalidateOnFocus: false },
   );
-  const stepProgress = useMemo(() => planStepProgress(plan, tasks), [plan, tasks]);
+  const decidedAt = progress?.decidedAt ?? '';
+  const stepProgress = useMemo(() => planStepProgress(plan, tasks, decidedAt), [plan, tasks, decidedAt]);
   const total = progress?.limitCredits ?? (budgetCredits > 0 ? budgetCredits : planEstimatedTotal(plan));
   const done = progress
     ? completedPlanSteps(stepProgress, (task) => taskStatePresentation(schema, task.state).outcome === 'success')
@@ -60,7 +96,10 @@ export function PlanCard({ plan, budgetCredits, tasks, onDecide, busy = false, e
     if (!offeringId) return text('ui.studio.plan.model_unspecified');
     return offeringsByCapability?.[capability]?.find((offering) => offering.id === offeringId)?.model_name || offeringId;
   };
-  const stateLabel = progress ? text(`ui.studio.plan.state.${progress.state}`) : '';
+  // #103: a state this build's Schema does not name is shown as "unknown", never as pending.
+  const stateLabel = progress
+    ? text(`ui.studio.plan.state.${progress.state}`) || text('ui.studio.plan.state.unknown')
+    : '';
   return (
     <article
       className="flex flex-col gap-1.5 rounded-lg border border-border bg-panel-raised p-3 text-xs"

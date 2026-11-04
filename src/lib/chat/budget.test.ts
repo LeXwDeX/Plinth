@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { budgetIsSpendable, parseProductionPlan, parseProductionPlanStep, parseSessionBudget, planEstimatedTotal } from '@/lib/chat/budget';
+import { budgetIsSpendable, budgetStates, parseProductionPlan, parseProductionPlanStep, parseSessionBudget, planEstimatedTotal } from '@/lib/chat/budget';
+import type { ProductSchema } from '@/lib/product-schema';
+
+function schemaWith(states: string[] | undefined): ProductSchema {
+  return { chat: { approval_policy: states === undefined ? {} : { budget_states: states } } } as unknown as ProductSchema;
+}
 
 describe('the production plan', () => {
   it('reads the title, each step and the correction capabilities', () => {
@@ -44,9 +49,10 @@ describe('the production plan', () => {
 
 describe('the session budget', () => {
   const plan = { title: 'p', steps: [{ capability: 'a', estimated_credits: 10 }] };
+  const schema = schemaWith(['pending', 'active', 'exhausted', 'closed', 'denied']);
 
   it('reads the public fields and drops malformed numbers to zero', () => {
-    expect(parseSessionBudget({
+    expect(parseSessionBudget(schema, {
       id: 'b1', state: 'active', limit_credits: 300, spent_credits: 120, reserved_credits: 'x', remaining_credits: 180,
       plan, created_at: '2026-10-01T00:00:00Z', decided_at: '2026-10-01T00:01:00Z',
     })).toMatchObject({
@@ -55,14 +61,20 @@ describe('the session budget', () => {
     });
   });
 
-  it('words an unknown state as pending and needs an id and a plan', () => {
-    expect(parseSessionBudget({ id: 'b1', state: 'strange', plan })?.state).toBe('pending');
-    expect(parseSessionBudget({ state: 'active', plan })).toBeNull();
-    expect(parseSessionBudget({ id: 'b1', plan: { steps: [] } })).toBeNull();
+  it('keeps a state this build does not know instead of folding it into pending', () => {
+    expect(parseSessionBudget(schema, { id: 'b1', state: 'refunded', plan })?.state).toBe('refunded');
+    expect(parseSessionBudget(schema, { id: 'b1', plan })?.state).toBe('pending');
+    expect(parseSessionBudget(schema, { state: 'active', plan })).toBeNull();
+    expect(parseSessionBudget(schema, { id: 'b1', plan: { steps: [] } })).toBeNull();
+  });
+
+  it('reads the declared budget states from the Schema and falls back to none', () => {
+    expect(budgetStates(schemaWith(['pending', 'active']))).toEqual(['pending', 'active']);
+    expect(budgetStates(schemaWith(undefined))).toEqual([]);
   });
 
   it('is spendable only while approved, unfinished and with credits left', () => {
-    const budget = parseSessionBudget({ id: 'b1', state: 'active', remaining_credits: 1, plan })!;
+    const budget = parseSessionBudget(schema, { id: 'b1', state: 'active', remaining_credits: 1, plan })!;
     expect(budgetIsSpendable(budget)).toBe(true);
     expect(budgetIsSpendable({ ...budget, remainingCredits: 0 })).toBe(false);
     expect(budgetIsSpendable({ ...budget, state: 'exhausted' })).toBe(false);

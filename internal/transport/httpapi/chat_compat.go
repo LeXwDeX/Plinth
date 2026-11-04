@@ -12,6 +12,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/access"
 	"github.com/LeXwDeX/Plinth/internal/administration"
+	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -108,8 +109,9 @@ func (s *Server) legacyListChatSessions(
 			return
 		}
 		result := make([]map[string]any, 0, len(page.Sessions))
+		summaries := s.chatSessionBudgetSummaries(request.Context(), principal.ID(), page.Sessions)
 		for _, session := range page.Sessions {
-			result = append(result, s.chatSessionWire(request.Context(), writer, session, true))
+			result = append(result, s.chatSessionWireWithBudgets(request.Context(), writer, session, true, summaries))
 		}
 		writeJSON(writer, http.StatusOK, map[string]any{"sessions": result, "next_cursor": page.NextCursor, "total": page.Total})
 		return
@@ -123,10 +125,38 @@ func (s *Server) legacyListChatSessions(
 		return
 	}
 	result := make([]map[string]any, 0, len(sessions))
+	summaries := s.chatSessionBudgetSummaries(request.Context(), principal.ID(), sessions)
 	for _, session := range sessions {
-		result = append(result, s.chatSessionWire(request.Context(), writer, session, true))
+		result = append(result, s.chatSessionWireWithBudgets(request.Context(), writer, session, true, summaries))
 	}
 	writeJSON(writer, http.StatusOK, result)
+}
+
+// chatSessionBudgetSummaries prefetches the current plan of every listed
+// session in one store round trip, so the list does not read one budget per
+// session (#103 review C6). It returns nil when the read failed and the list
+// must fall back to per-session reads, which log their own failures.
+func (s *Server) chatSessionBudgetSummaries(
+	ctx context.Context,
+	ownerID string,
+	sessions []chat.Session,
+) map[string]budget.Summary {
+	if s.executionGrants == nil || len(sessions) == 0 {
+		return nil
+	}
+	sessionIDs := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		sessionIDs = append(sessionIDs, session.ID)
+	}
+	summaries, err := s.executionGrants.ProductionBudgetSummaries(ctx, ownerID, sessionIDs)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.ErrorContext(ctx, "批量读取会话生产预算失败，回退逐条读取",
+				"owner_id", ownerID, "session_count", len(sessionIDs), "error", err)
+		}
+		return nil
+	}
+	return summaries
 }
 
 // legacyGetChatSession reads one session of the caller. A session that does not
@@ -673,6 +703,21 @@ func (s *Server) chatSessionWire(
 	session chat.Session,
 	includeCount bool,
 ) map[string]any {
+	return s.chatSessionWireWithBudgets(ctx, writer, session, includeCount, nil)
+}
+
+// chatSessionWireWithBudgets projects one session. summaries is the list
+// prefetch: a non-nil map means the caller read every listed session's current
+// plan in one round trip, so a missing key is a session without a plan. A nil
+// map keeps the single-session read, whose failure is logged instead of
+// silently dropping the budget member (#103 review C6).
+func (s *Server) chatSessionWireWithBudgets(
+	ctx context.Context,
+	writer http.ResponseWriter,
+	session chat.Session,
+	includeCount bool,
+	summaries map[string]budget.Summary,
+) map[string]any {
 	fields := s.application.Chat.API.ResponseFields
 	title := session.Title
 	if session.TitleSource == chat.TitleSourcePending {
@@ -702,7 +747,16 @@ func (s *Server) chatSessionWire(
 	if field := fields.Budget; field != "" && s.executionGrants != nil {
 		// The session's current production plan (#103). A session without a plan
 		// omits the member rather than claiming an empty one.
-		if summary, found, err := s.executionGrants.BudgetSummary(ctx, session.OwnerID, session.ID); err == nil && found {
+		if summaries != nil {
+			if summary, found := summaries[session.ID]; found {
+				result[field] = summary
+			}
+		} else if summary, found, err := s.executionGrants.BudgetSummary(ctx, session.OwnerID, session.ID); err != nil {
+			if s.logger != nil {
+				s.logger.ErrorContext(ctx, "读取会话生产预算失败",
+					"owner_id", session.OwnerID, "session_id", session.ID, "error", err)
+			}
+		} else if found {
 			result[field] = summary
 		}
 	}

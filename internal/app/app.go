@@ -318,6 +318,12 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		RetiredModels: taskCatalog.RetiredModelSuccessors(),
 		// The production purposes and the brief fields (#103).
 		Model3DUsage: applicationSchema.Chat.Model3DUsage,
+		// An explicit 3D model lock must name an enabled 3D Offering (#103
+		// review C4); the picker sends a model_id, and the tools also match the
+		// Offering id and provider/model pair.
+		ExplicitModel3DValid: func(model string) bool {
+			return explicitModel3DValid(taskCatalog.List(""), model)
+		},
 		// The declared generic cards; the brief write settles the usage-profile
 		// kind by its Schema id and argument name (#103).
 		ChoiceKinds: applicationSchema.Chat.Choice.Kinds,
@@ -661,6 +667,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		ChoiceKinds:          applicationSchema.Chat.Choice.Kinds,
 		BriefSavedMessage:    applicationSchema.Chat.Model3DUsage.Brief.SavedMessage,
 		BriefInvalidTemplate: applicationSchema.Chat.Model3DUsage.Brief.InvalidTemplate,
+		BriefMessages:        applicationSchema.Chat.Model3DUsage.Brief.Messages,
 		Consent: func(command chat.ToolCommand, request json.RawMessage, snapshot json.RawMessage) error {
 			scope := agentparams.ScopeKey(command.OwnerID, command.SessionID)
 			return agentStateStore.BeginConsent(scope, request, snapshot)

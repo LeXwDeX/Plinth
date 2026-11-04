@@ -20,9 +20,15 @@ vi.mock('@/components/ui/hint-tooltip', () => ({
   HintTooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-const profileAdjustment = (name: string, label: string, recommended: unknown, value: unknown): ParameterAdjustment => ({
+const profileAdjustment = (
+  name: string,
+  label: string,
+  recommended: unknown,
+  value: unknown,
+  reason = '道具与场景件的面数预算更低',
+): ParameterAdjustment => ({
   name, label, recommendedValue: recommended, value,
-  reason: '道具与场景件的面数预算更低', advice: '建议保留低面数', source: 'profile:game_prop', profile: 'game_prop',
+  reason, advice: '建议保留低面数', source: 'profile:game_prop', profile: 'game_prop',
 });
 const agentAdjustment: ParameterAdjustment = {
   name: 'texture_resolution', label: '贴图分辨率', recommendedValue: '2k', value: '4k',
@@ -113,13 +119,37 @@ describe('the adjustments of one approval step (#103)', () => {
     expect(button.className).not.toContain('line-clamp-1');
   });
 
-  it('keeps the whole card inside the Schema height and scrolls its inside', () => {
+  it('keeps the whole card inside the Schema height and scrolls only its body', () => {
     const view = renderCard();
     const article = view.getByTestId('studio-approval-card');
     expect(article.getAttribute('style')).toContain(
       `max-height: ${defaultCatalog.application.chat.frontend.approval_card_max_height_pixels}px`,
     );
-    expect(article.getAttribute('style')).toContain('overflow-y: auto');
+    expect(article.getAttribute('style') ?? '').not.toContain('overflow-y');
+    const body = view.getByTestId('studio-approval-body');
+    expect(body.className).toContain('overflow-y-auto');
+    // The decision footer stays outside the scrolling body, so it is always visible.
+    const footer = view.getByTestId('studio-approval-footer');
+    expect(body.contains(footer)).toBe(false);
+    expect(view.getByTestId('studio-approval-card').contains(footer)).toBe(true);
+  });
+
+  it('shows every distinct reason of a merged profile group, not only its first', () => {
+    const view = renderCard([
+      profileAdjustment('face_limit', '面数上限', 100000, 8000, '面数预算更低'),
+      profileAdjustment('target_polycount', '目标面数', 100000, 8000, '目标面数也要降'),
+    ]);
+    const reason = view.getByTestId('studio-approval-profile-reason');
+    expect(reason.textContent).toContain('面数预算更低');
+    expect(reason.textContent).toContain('目标面数也要降');
+  });
+
+  it('does not repeat a reason shared by several adjustments of one profile', () => {
+    const view = renderCard([
+      profileAdjustment('face_limit', '面数上限', 100000, 8000, '同一个理由'),
+      profileAdjustment('target_polycount', '目标面数', 100000, 8000, '同一个理由'),
+    ]);
+    expect(view.getByTestId('studio-approval-profile-reason').textContent).toBe('同一个理由');
   });
 
   it('shows only the Agent line for an Agent-only adjustment and nothing without adjustments', () => {

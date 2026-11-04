@@ -43,6 +43,10 @@ const (
 	ReasonOffPlan = "off_plan"
 	// ReasonOverBudget: the step's estimate would exceed the plan's limit.
 	ReasonOverBudget = "over_budget"
+	// ReasonUnpriced: the step is metered but the server has no usable credit
+	// quote for this exact input. A zero reservation would spend the budget
+	// without covering the step, so the person decides it (#103 review B1).
+	ReasonUnpriced = "unpriced"
 )
 
 // SystemActor marks a budget decision made by the server rather than a person.

@@ -381,9 +381,13 @@ func TestAdapterKeepsTexturesAndAncestorTransforms(t *testing.T) {
 			t.Fatalf("output %d nodes = %d, want 4", index, len(document.Nodes))
 		}
 		// buildGroup writes the leaf first, then its ancestors, and buildPart
-		// appends the part root last: model, turntable, stage, root.
-		names := []string{document.Nodes[0].Name, document.Nodes[1].Name, document.Nodes[2].Name}
-		if strings.Join(names, "/") != "model/turntable/stage" {
+		// appends the part root last: part leaf, turntable, stage, root. The
+		// leaf carries the part name; ancestors keep their source names.
+		manifest := decodeManifest(t, store, observation.Artifacts[len(observation.Artifacts)-1])
+		if document.Nodes[0].Name != manifest.Parts[index].Name {
+			t.Fatalf("output %d leaf node name = %q, want part name %q", index, document.Nodes[0].Name, manifest.Parts[index].Name)
+		}
+		if names := []string{document.Nodes[1].Name, document.Nodes[2].Name}; strings.Join(names, "/") != "turntable/stage" {
 			t.Fatalf("output %d ancestor chain = %v", index, names)
 		}
 		if len(document.Nodes[2].Translation) != 3 || document.Nodes[2].Translation[0] != 10 ||

@@ -59,6 +59,15 @@ function profileAdjustmentGroups(adjustments: readonly ParameterAdjustment[]): P
   return order.map((id) => ({ id, items: groups.get(id) ?? [] }));
 }
 
+/**
+ * #103: one shared line for a profile group. Every distinct reason of its
+ * adjustments is shown, not just the first one, so a second changed parameter
+ * never hides why it was changed.
+ */
+function profileGroupReason(group: ProfileAdjustmentGroup): string {
+  return Array.from(new Set(group.items.map((item) => item.reason).filter((reason) => reason !== ''))).join(' ');
+}
+
 function adjustmentValueText(value: unknown): string {
   if (typeof value === 'string') return value;
   if (value === null || value === undefined) return '';
@@ -156,6 +165,9 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
         ? schemaCountMessage(schema, 'ui.studio.approval.card.valid_minutes', validity.value, { minutes: validity.value })
         : schemaText(schema, 'ui.studio.approval.card.waiting');
 
+  // #103: only the card's body scrolls inside the Schema height; the header and
+  // the approve / decline footer stay visible.
+  const maxHeight = schema.chat.frontend.approval_card_max_height_pixels;
   return (
     <article
       data-testid="studio-approval-card"
@@ -164,12 +176,11 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
       className={cn(
         'flex flex-col gap-2 rounded-lg border bg-panel-raised p-3 text-xs',
         expired ? 'border-border opacity-90' : 'border-warning/40',
+        maxHeight > 0 && 'overflow-hidden',
       )}
-      style={schema.chat.frontend.approval_card_max_height_pixels > 0
-        ? { maxHeight: schema.chat.frontend.approval_card_max_height_pixels, overflowY: 'auto' }
-        : undefined}
+      style={maxHeight > 0 ? { maxHeight } : undefined}
     >
-      <header className="flex items-center gap-2">
+      <header className="flex shrink-0 items-center gap-2">
         <ShieldQuestion aria-hidden className={cn('size-4 shrink-0', expired ? 'text-muted-foreground' : 'text-warning')} />
         <span className="text-[13px] font-semibold">{schemaText(schema, 'ui.studio.approval.card.title')}</span>
         <span className={cn('ml-auto flex items-center gap-1', expired ? 'text-muted-foreground' : 'text-warning')} data-testid="studio-approval-validity">
@@ -177,6 +188,10 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
           {validityText}
         </span>
       </header>
+      <div
+        className={cn('flex min-h-0 flex-col gap-2', maxHeight > 0 && 'overflow-y-auto')}
+        data-testid="studio-approval-body"
+      >
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
         <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.step')}</dt>
         <dd className="truncate font-medium">{capability?.label_cn || capability?.label || model.capability}</dd>
@@ -265,7 +280,7 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
           {profileGroups.map((group) => (
             <div key={group.id} className="flex flex-col gap-0.5" data-testid="studio-approval-profile-summary" data-profile={group.id}>
               <span className="font-medium">{profileSummary(group)}</span>
-              <HintTooltip name={group.items[0]?.reason ?? ''} className="min-w-0">
+              <HintTooltip name={profileGroupReason(group)} className="min-w-0">
                 <button
                   type="button"
                   aria-expanded={openReasons.has(`profile:${group.id}`)}
@@ -276,7 +291,7 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
                   )}
                   data-testid="studio-approval-profile-reason"
                 >
-                  {group.items[0]?.reason}
+                  {profileGroupReason(group)}
                 </button>
               </HintTooltip>
             </div>
@@ -468,7 +483,8 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
       {error ? (
         <p role="alert" className="text-destructive" data-testid="studio-approval-error">{error}</p>
       ) : null}
-      <footer className="flex items-center gap-1.5">
+      </div>
+      <footer className="flex shrink-0 items-center gap-1.5" data-testid="studio-approval-footer">
         {expired ? (
           <>
             <Action type="button" size="sm" variant="outline" disabled={busy} onClick={onRerequest} data-testid="studio-approval-rerequest">{schemaText(schema, 'ui.studio.approval.card.rerequest')}</Action>

@@ -77,7 +77,9 @@ func (err *BriefError) Error() string { return err.Reason }
 // ValidateProductionBrief checks a whole replacement against the Schema's
 // declared fields and returns the normalized object. Unknown members are
 // refused instead of dropped, so a typo cannot silently lose a locked choice.
-// Empty text and null clear a field. purpose must name a declared profile.
+// Empty text and null clear a field. A profile field must name a declared
+// profile. The refusal wording comes from the Schema's messages, with the
+// built-in sentence as the fallback for a historical Catalog (#103 review C3).
 func ValidateProductionBrief(
 	schema catalog.ChatProductionBriefSchema,
 	profiles []catalog.ChatModel3DUsageProfile,
@@ -91,11 +93,12 @@ func ValidateProductionBrief(
 	for _, profile := range profiles {
 		profileIDs[profile.ID] = true
 	}
+	messages := schema.Messages
 	normalized := ProductionBrief{}
 	for name, value := range raw {
 		field, exists := declared[name]
 		if !exists {
-			return nil, &BriefError{Reason: fmt.Sprintf("未知字段 %q", name)}
+			return nil, &BriefError{Reason: briefMessage(messages.UnknownField, `未知字段 "{field}"`, "{field}", name)}
 		}
 		if len(bytes.TrimSpace(value)) == 0 || string(bytes.TrimSpace(value)) == "null" {
 			continue
@@ -104,54 +107,73 @@ func ValidateProductionBrief(
 		case "profile":
 			var purpose string
 			if json.Unmarshal(value, &purpose) != nil {
-				return nil, &BriefError{Reason: fmt.Sprintf("字段 %q 必须是字符串", name)}
+				return nil, &BriefError{Reason: briefMessage(messages.NotString, `字段 "{field}" 必须是字符串`, "{field}", name)}
 			}
 			purpose = strings.TrimSpace(purpose)
 			if purpose == "" {
 				continue
 			}
 			if !profileIDs[purpose] {
-				return nil, &BriefError{Reason: fmt.Sprintf("用途 %q 未声明", purpose)}
+				return nil, &BriefError{Reason: briefMessage(messages.ProfileUndeclared, `用途 "{value}" 未声明`, "{value}", purpose)}
 			}
 			normalized[name] = mustJSON(purpose)
 		case "text":
 			var text string
 			if json.Unmarshal(value, &text) != nil {
-				return nil, &BriefError{Reason: fmt.Sprintf("字段 %q 必须是字符串", name)}
+				return nil, &BriefError{Reason: briefMessage(messages.NotString, `字段 "{field}" 必须是字符串`, "{field}", name)}
 			}
 			text = strings.TrimSpace(text)
 			if text == "" {
 				continue
 			}
 			if field.MaximumCharacters > 0 && len([]rune(text)) > field.MaximumCharacters {
-				return nil, &BriefError{Reason: fmt.Sprintf("字段 %q 不能超过 %d 个字符", name, field.MaximumCharacters)}
+				return nil, &BriefError{Reason: briefMessage(
+					messages.TextTooLong, `字段 "{field}" 不能超过 {maximum} 个字符`,
+					"{field}", name, "{maximum}", fmt.Sprint(field.MaximumCharacters),
+				)}
 			}
 			normalized[name] = mustJSON(text)
 		case "boolean":
 			var flag bool
 			if json.Unmarshal(value, &flag) != nil {
-				return nil, &BriefError{Reason: fmt.Sprintf("字段 %q 必须是布尔值", name)}
+				return nil, &BriefError{Reason: briefMessage(messages.NotBoolean, `字段 "{field}" 必须是布尔值`, "{field}", name)}
 			}
 			normalized[name] = mustJSON(flag)
 		case "integer":
 			var number json.Number
 			if json.Unmarshal(value, &number) != nil {
-				return nil, &BriefError{Reason: fmt.Sprintf("字段 %q 必须是整数", name)}
+				return nil, &BriefError{Reason: briefMessage(messages.NotInteger, `字段 "{field}" 必须是整数`, "{field}", name)}
 			}
 			integer, err := number.Int64()
 			if err != nil {
-				return nil, &BriefError{Reason: fmt.Sprintf("字段 %q 必须是整数", name)}
+				return nil, &BriefError{Reason: briefMessage(messages.NotInteger, `字段 "{field}" 必须是整数`, "{field}", name)}
 			}
 			if (field.Minimum > 0 && integer < int64(field.Minimum)) ||
 				(field.Maximum > 0 && integer > int64(field.Maximum)) {
-				return nil, &BriefError{Reason: fmt.Sprintf("字段 %q 必须在 %d 与 %d 之间", name, field.Minimum, field.Maximum)}
+				return nil, &BriefError{Reason: briefMessage(
+					messages.OutOfRange, `字段 "{field}" 必须在 {minimum} 与 {maximum} 之间`,
+					"{field}", name, "{minimum}", fmt.Sprint(field.Minimum), "{maximum}", fmt.Sprint(field.Maximum),
+				)}
 			}
 			normalized[name] = mustJSON(integer)
 		default:
-			return nil, &BriefError{Reason: fmt.Sprintf("字段 %q 的类型 %q 未实现", name, field.Type)}
+			return nil, &BriefError{Reason: briefMessage(
+				messages.UnsupportedType, `字段 "{field}" 的类型 "{type}" 未实现`,
+				"{field}", name, "{type}", field.Type,
+			)}
 		}
 	}
 	return normalized, nil
+}
+
+// briefMessage fills a Schema message, or the built-in fallback for a
+// historical Catalog that declares no messages. Replacements is a flat
+// placeholder/value list.
+func briefMessage(template, fallback string, replacements ...string) string {
+	if strings.TrimSpace(template) == "" {
+		template = fallback
+	}
+	return strings.NewReplacer(replacements...).Replace(template)
 }
 
 // DecodeProductionBrief reads a stored brief. Malformed storage reads as the

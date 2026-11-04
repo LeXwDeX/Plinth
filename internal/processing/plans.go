@@ -1100,6 +1100,15 @@ func (s *Service) stop(ctx context.Context, plan *Plan, step *Step, state, reaso
 		step.SubmissionUncertain = true
 	}
 	step.Resumable = state == Paused && resumableReason(reason)
+	if step.TaskID == "" && !step.Resumable && reason != ReasonSubmitUnreconciled {
+		// No Task bound this authorization and no continue can use it: the step
+		// is terminally failed or paused without a resume. Dropping the
+		// reference lets SaveProcessingPlan release its unbound budget
+		// reservation in the same transaction (#103 review B2). A
+		// submit-unreconciled step keeps it: Reconcile verifies the landed Task
+		// and links it with this exact grant.
+		step.AuthorizationRef = ""
+	}
 	plan.UpdatedAt = time.Now().UTC()
 	return s.savePlan(ctx, plan)
 }

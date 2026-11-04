@@ -27,6 +27,32 @@ func TestMigration0049DefaultsExistingSessionsToAuto(t *testing.T) {
 	}
 }
 
+func TestMigration0077ResetsStoredScopesToAuto(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "scope-reset.db")
+	r, err := openTestRepository(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createApprovalSession(t, r, "locked", "owner-a", chat.Session{AgentScope: "3d"})
+	// Reopen at the pre-0077 head so the upgrade runs again on a stored value.
+	if _, err := r.db.Exec(`DELETE FROM go_schema_migrations WHERE version = 77`); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := openTestRepository(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	session, found, err := reopened.Session(ctx, "owner-a", "locked")
+	if err != nil || !found || session.AgentScope != "auto" {
+		t.Fatalf("scope after 0077 = %+v found=%v err=%v", session, found, err)
+	}
+}
+
 func TestSetSessionAgentScopeIsOwnerScopedAndKeepsOrdering(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "scope.db")

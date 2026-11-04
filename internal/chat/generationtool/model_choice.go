@@ -278,6 +278,16 @@ func (executor *Executor) chooseOffering(
 		return offeringChoice{Offering: offering, Source: source}, nil
 	}
 	if offering, profile, found := executor.profileOffering(command, capability, input); found {
+		// The workspace picker shows a model the person may already consider
+		// chosen, even when it is not an explicit lock. A purpose recommendation
+		// that differs must not replace that visible choice silently: the Agent
+		// asks the person to confirm the switch (#103 review C1).
+		workspace := strings.TrimSpace(executor.userModel(command))
+		if workspace != "" && !modelMatches(offering, workspace) {
+			if text := executor.modelWorkspaceConflictText(command, workspace, offering, profile); text != "" {
+				return offeringChoice{Refusal: text}, nil
+			}
+		}
 		return offeringChoice{Offering: offering, Source: "profile", Profile: profile.ID, Reason: profile.Reason}, nil
 	}
 	model := ""
@@ -372,6 +382,26 @@ func (executor *Executor) modelConflictText(command chat.ToolCommand, locked gen
 	return strings.NewReplacer(
 		"{locked}", executor.localized(command, OfferingModelName(locked)),
 		"{requested}", executor.modelLabel(command, requested),
+	).Replace(executor.localized(command, template))
+}
+
+// modelWorkspaceConflictText asks the person to confirm a purpose
+// recommendation that differs from the model still selected in the workspace,
+// instead of replacing the visible choice silently (#103 review C1).
+func (executor *Executor) modelWorkspaceConflictText(
+	command chat.ToolCommand,
+	workspace string,
+	recommended generation.Offering,
+	profile catalog.ChatModel3DUsageProfile,
+) string {
+	template := executor.chat.Presentation.Messages.ModelChoiceWorkspaceConflict
+	if template == "" {
+		return ""
+	}
+	return strings.NewReplacer(
+		"{workspace}", executor.modelLabel(command, workspace),
+		"{recommended}", executor.localized(command, OfferingModelName(recommended)),
+		"{profile}", profile.Label,
 	).Replace(executor.localized(command, template))
 }
 

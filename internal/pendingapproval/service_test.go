@@ -193,6 +193,13 @@ func chatService(t *testing.T, repo *sqlite.Repository, schema catalog.ChatSchem
 
 func openWorld(t *testing.T, path string, ttl time.Duration) *world {
 	t.Helper()
+	return openWorldWithChat(t, path, ttl, nil)
+}
+
+// openWorldWithChat additionally decorates the chat service the approval
+// service posts through; message assertions still read the real store.
+func openWorldWithChat(t *testing.T, path string, ttl time.Duration, wrap func(pendingapproval.Chat) pendingapproval.Chat) *world {
+	t.Helper()
 	repo, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
@@ -215,6 +222,10 @@ func openWorld(t *testing.T, path string, ttl time.Duration) *world {
 	}}
 	grants := &executiongrant.Service{Grants: repo, Prepared: repo, Budgets: repo, PendingTTL: ttl}
 	chats := chatService(t, repo, schema)
+	var approvalChat pendingapproval.Chat = chats
+	if wrap != nil {
+		approvalChat = wrap(chats)
+	}
 	service, err := pendingapproval.New(pendingapproval.Config{
 		// This fixture supplies historical calls only. Agent-source submission is
 		// exercised through the production App verifier, never this legacy stub.
@@ -228,7 +239,7 @@ func openWorld(t *testing.T, path string, ttl time.Duration) *world {
 			}
 			return nil
 		},
-		Operations: repo, Grants: grants, Gateway: gateway, Chat: chats, Schema: schema, Texts: texts,
+		Operations: repo, Grants: grants, Gateway: gateway, Chat: approvalChat, Schema: schema, Texts: texts,
 		DefaultLocale: product.Application().Runtime.Frontend.DisplayLocale,
 	})
 	if err != nil {

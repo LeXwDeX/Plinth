@@ -1047,3 +1047,96 @@ func TestModelReviewInspectReportsThePurposeCheckAndFiltersFixHints(t *testing.T
 		t.Fatalf("scale status = %v, want pass for a 2 m model", got)
 	}
 }
+
+// countingAssetBody counts Read calls on one opened model file. The second
+// open in the cache test fails on any Read, so a cache hit that still read the
+// bytes would surface as a tool error and a nonzero count.
+type countingAssetBody struct {
+	reader io.Reader
+	reads  int
+	err    error
+}
+
+func (body *countingAssetBody) Read(p []byte) (int, error) {
+	body.reads++
+	if body.err != nil {
+		return 0, body.err
+	}
+	return body.reader.Read(p)
+}
+
+func (body *countingAssetBody) Close() error { return nil }
+
+// reviewCountingAssets opens the same GLB every time, records each opened
+// body and refuses UploadAsset: the inspect path must not store anything.
+type reviewCountingAssets struct {
+	data   []byte
+	opens  int
+	bodies []*countingAssetBody
+}
+
+func (assets *reviewCountingAssets) OpenAsset(
+	_ context.Context,
+	_ generation.OwnerID,
+	_ generation.TaskID,
+	_ generation.AssetID,
+) (generation.AssetContent, error) {
+	assets.opens++
+	body := &countingAssetBody{reader: bytes.NewReader(assets.data)}
+	if assets.opens > 1 {
+		body.err = errors.New("a cache hit must not read the asset bytes")
+	}
+	assets.bodies = append(assets.bodies, body)
+	return generation.AssetContent{
+		Body: body, MediaType: "model/gltf-binary", Size: int64(len(assets.data)),
+		SHA256: reviewDigest(assets.data),
+	}, nil
+}
+
+func (assets *reviewCountingAssets) UploadAsset(
+	_ context.Context,
+	_ generation.OwnerID,
+	_ generation.InputAssetUpload,
+) (generation.InputAsset, error) {
+	return generation.InputAsset{}, errors.New("inspect must not upload")
+}
+
+// TestLoadReviewedModelCacheHitSkipsReadingBytes proves the parsed-model cache
+// is consulted before the saved bytes are read, while OpenAsset still runs on
+// every call so the owner check is never skipped (#103 review C7).
+func TestLoadReviewedModelCacheHitSkipsReadingBytes(t *testing.T) {
+	glb := reviewModelGLB(t, 1, 1)
+	gateway := newReviewGateway(reviewTask("task-a", "owner-a", "session-a", glb, generation.TaskSucceeded))
+	assets := &reviewCountingAssets{data: glb}
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := product.Application()
+	executor, err := generationtool.New(generationtool.Config{
+		Gateway: gateway, References: &fakeReferences{}, Chat: app.Chat,
+		TaskStates: app.TaskStates, ModelAssets: assets, InputAssets: assets,
+		InputAssetRoute: app.Runtime.HTTP.Routes.AssetItem,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		result, err := executor.InspectModel(context.Background(), reviewCommand("inspect_model", `{"model":"task-a"}`))
+		if err != nil || result.Error != "" {
+			t.Fatalf("inspect attempt %d = %+v err=%v", attempt, result, err)
+		}
+	}
+	if assets.opens != 2 {
+		t.Fatalf("OpenAsset calls = %d, want 2 (owner check on every call)", assets.opens)
+	}
+	if len(assets.bodies) != 2 {
+		t.Fatalf("opened bodies = %d, want 2", len(assets.bodies))
+	}
+	if assets.bodies[0].reads == 0 {
+		t.Fatal("the first inspect did not read the model bytes")
+	}
+	if assets.bodies[1].reads != 0 {
+		t.Fatalf("the cache hit read the asset %d times", assets.bodies[1].reads)
+	}
+}

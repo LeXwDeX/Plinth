@@ -23,7 +23,15 @@ var (
 	// ErrInvalidExplicitModel3D refuses a model id outside the stored form: a
 	// bounded token naming a model or Offering, never free text.
 	ErrInvalidExplicitModel3D = errors.New("chat: invalid explicit 3d model")
+	// ErrProductionBriefConflict means another writer changed the brief during
+	// every bounded retry of a read-merge-write (#103 review C5).
+	ErrProductionBriefConflict = errors.New("chat: production brief changed")
 )
+
+// productionBriefWriteAttempts bounds the compare-and-swap retries of a brief
+// write. A conflict means another writer committed between the read and the
+// conditional update, so the merged value is recomputed from the new state.
+const productionBriefWriteAttempts = 3
 
 var explicitModel3DName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
 
@@ -52,33 +60,115 @@ func (service *Service) SessionBrief(ctx context.Context, ownerID, sessionID str
 }
 
 // SetProductionBrief validates and replaces the whole brief of the owner's
-// session. The Agent tool and the session API share this one write path, so
-// both obey the same declared fields and bounds. Returns the stored brief.
+// session. The session API uses it; the Agent tool patches through
+// UpdateProductionBrief. Both share one compare-and-swap write path, so a
+// concurrent writer cannot drop the other's change and the returned previous
+// value is the one the audit compares against (#103 review C5). Returns the
+// brief before and after the write.
 func (service *Service) SetProductionBrief(
 	ctx context.Context,
 	ownerID string,
 	sessionID string,
 	raw map[string]json.RawMessage,
-) (ProductionBrief, error) {
+) (previous, stored ProductionBrief, err error) {
+	return service.writeProductionBrief(ctx, ownerID, sessionID, func(ProductionBrief) (ProductionBrief, error) {
+		return ValidateProductionBrief(service.model3DUsage.Brief, service.model3DUsage.Profiles, raw)
+	})
+}
+
+// UpdateProductionBrief applies the named fields to the session's brief and
+// leaves every other field as it was. The choice-card continuation replays
+// update_production_brief with only the purpose argument, so treating that
+// replay as a whole replacement would clear the style, notes and triangle
+// budget the person had already set (#103 review C2). A present empty value
+// clears that field.
+func (service *Service) UpdateProductionBrief(
+	ctx context.Context,
+	ownerID string,
+	sessionID string,
+	patch map[string]json.RawMessage,
+) (previous, stored ProductionBrief, err error) {
+	return service.writeProductionBrief(ctx, ownerID, sessionID, func(previous ProductionBrief) (ProductionBrief, error) {
+		normalized, err := ValidateProductionBrief(service.model3DUsage.Brief, service.model3DUsage.Profiles, patch)
+		if err != nil {
+			return nil, err
+		}
+		merged := make(ProductionBrief, len(previous)+len(normalized))
+		for name, value := range previous {
+			merged[name] = value
+		}
+		for name, value := range patch {
+			if briefValueEmpty(value) {
+				delete(merged, name)
+				continue
+			}
+			merged[name] = normalized[name]
+		}
+		return merged, nil
+	})
+}
+
+// writeProductionBrief is the one read-merge-validate-write loop of the brief.
+// The conditional update makes the previous value truthful for the audit; a
+// conflict re-reads and recomputes instead of overwriting the other writer.
+func (service *Service) writeProductionBrief(
+	ctx context.Context,
+	ownerID, sessionID string,
+	transform func(ProductionBrief) (ProductionBrief, error),
+) (previous, stored ProductionBrief, err error) {
 	if !service.ProductionBriefEnabled() {
-		return nil, ErrProductionBriefUnavailable
+		return nil, nil, ErrProductionBriefUnavailable
 	}
-	brief, err := ValidateProductionBrief(service.model3DUsage.Brief, service.model3DUsage.Profiles, raw)
-	if err != nil {
-		return nil, err
+	for attempt := 0; attempt < productionBriefWriteAttempts; attempt++ {
+		before, found, err := service.repository.SessionBrief(ctx, ownerID, sessionID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !found {
+			return nil, nil, ErrSessionNotFound
+		}
+		next, err := transform(before)
+		if err != nil {
+			return nil, nil, err
+		}
+		found, conflict, err := service.repository.ReplaceSessionBrief(ctx, ownerID, sessionID, before, next)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !found {
+			return nil, nil, ErrSessionNotFound
+		}
+		if conflict {
+			continue
+		}
+		// A purpose card the Agent opened before this write is now answered by
+		// the value the brief carries. Answering twice is harmless: a closed
+		// card is left as it is.
+		if purpose := next.Text(productionBriefPurposeField(service.model3DUsage.Brief)); purpose != "" {
+			service.settleUsageProfileChoice(ctx, ownerID, sessionID, purpose)
+		}
+		return before, next, nil
 	}
-	found, err := service.repository.SetSessionBrief(ctx, ownerID, sessionID, brief)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, ErrSessionNotFound
-	}
-	// A purpose card the Agent opened before this write is now answered by the
-	// value the brief carries. Answering twice is harmless: a closed card is
-	// left as it is.
-	service.settleUsageProfileChoice(ctx, ownerID, sessionID, brief.Text("purpose"))
-	return brief, nil
+	return nil, nil, ErrProductionBriefConflict
+}
+
+// productionBriefPurposeField is the declared profile field's name. Locating
+// it by type keeps a renamed Schema field working without a code change (#103
+// review C3).
+func productionBriefPurposeField(brief catalog.ChatProductionBriefSchema) string {
+	return brief.FieldNameOfType("profile")
+}
+
+// productionBriefIntegerField is the declared integer field's name, the one
+// carrying the session triangle override. Locating it by type keeps a renamed
+// Schema field working without a code change (#103 review C3).
+func productionBriefIntegerField(brief catalog.ChatProductionBriefSchema) string {
+	return brief.FieldNameOfType("integer")
+}
+
+func briefValueEmpty(value json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(value))
+	return trimmed == "" || trimmed == "null"
 }
 
 // SessionExplicitModel3D reads the 3D model the person explicitly picked in
@@ -100,6 +190,12 @@ func (service *Service) SessionExplicitModel3D(ctx context.Context, ownerID, ses
 func (service *Service) SetExplicitModel3D(ctx context.Context, ownerID, sessionID, model string) (string, error) {
 	model = strings.TrimSpace(model)
 	if model != "" && !explicitModel3DName.MatchString(model) {
+		return "", ErrInvalidExplicitModel3D
+	}
+	// The lock is honored by every 3D tool, so a token that names no enabled
+	// 3D Offering would refuse the whole session instead of one step (#103
+	// review C4).
+	if model != "" && service.explicitModel3DValid != nil && !service.explicitModel3DValid(model) {
 		return "", ErrInvalidExplicitModel3D
 	}
 	found, err := service.repository.SetSessionExplicitModel3D(ctx, ownerID, sessionID, model)

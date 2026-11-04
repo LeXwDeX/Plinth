@@ -25,4 +25,18 @@ func TestNativeQuoteHashKeepsHistoricalNilBytes(t *testing.T) {
 	if VerifyPreparedPricingHash(p) == nil {
 		t.Fatal("changed unit reused grant hash")
 	}
+	p.NativeQuote.Unit = "hyper3d.credit"
+	p.CreditsMetered = true
+	metered, err := hashPreparedInput(p)
+	if err != nil || metered == hash {
+		t.Fatal("metered declaration is not bound to the prepared hash")
+	}
+	p.InputHash = metered
+	if VerifyPreparedPricingHash(p) != nil {
+		t.Fatal("valid metered hash rejected")
+	}
+	p.CreditsMetered = false
+	if VerifyPreparedPricingHash(p) == nil {
+		t.Fatal("removed metered declaration reused the hash")
+	}
 }

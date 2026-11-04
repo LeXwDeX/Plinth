@@ -1380,6 +1380,8 @@ export interface ChatProductSchema {
       /** #103: 会话制作简报与明确选定的 3D 模型。 */
       brief?: string;
       explicit_model_3d?: string;
+      /** #103: the request member that carries an approval decision. */
+      decision?: string;
       /** 会话 Agent 范围的请求成员。 */
       agent_scope: string;
       /** #321: the answer to an in-chat choice card that travels with a turn. */
@@ -1550,6 +1552,8 @@ export interface ChatProductSchema {
     default_mode: string;
     modes: string[];
     manual_approval_capabilities: string[];
+    /** #103: the budget states the Schema declares, in display order. */
+    budget_states?: string[];
   };
   /**
    * Agent 范围（2D 模式 / 3D 模式 / 自动模式）：有哪些模式，以及每个模式让哪些领域的
@@ -1668,6 +1672,10 @@ export interface ChatModel3DBriefFieldSchema {
   label: string;
   /** type 为 text 时的最大字符数。 */
   maximum_characters?: number;
+  /** #103: a long text field, rendered as a textarea. Absent means a single line. */
+  multiline?: boolean;
+  /** #103: the hint shown inside an empty text field. */
+  placeholder?: string;
   /** type 为 integer 时的取值范围。 */
   minimum?: number;
   maximum?: number;

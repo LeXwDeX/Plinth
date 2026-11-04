@@ -153,6 +153,26 @@ func TestProcessingPlanFromTheAgentRunsUnderTheBudget(t *testing.T) {
 	}
 }
 
+// A budget-approved step the kernel rejects permanently (for instance because
+// the Offering vanished) keeps no authorization reference: the saved plan then
+// releases the reservation instead of holding credits for a step that can
+// never spend them (#103 review B2).
+func TestRejectedBudgetStepDropsItsAuthorizationReference(t *testing.T) {
+	ctx := context.Background()
+	service, gateway, _, plan := budgetProcessingFixture(t, OriginAgent)
+	gateway.submitError = &generation.Error{Code: generation.ErrUnknownOffering, Operation: "submit_prepared"}
+	if err := service.advanceAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := service.Get(ctx, "owner", plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != Failed || got.Steps[0].Failure != ReasonSubmitRejected || got.Steps[0].AuthorizationRef != "" {
+		t.Fatalf("rejected budget step = %+v", got)
+	}
+}
+
 // A browser-created processing plan keeps the per-step human approval: the
 // same capability pauses and spends no budget.
 func TestProcessingPlanFromTheBrowserKeepsPerStepApproval(t *testing.T) {

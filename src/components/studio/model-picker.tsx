@@ -2,12 +2,14 @@
 
 import { useEffect, useMemo } from 'react';
 import useSWR from 'swr';
+import { toast } from 'sonner';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { TablePopover, type TableCell, type TableSection } from '@/components/studio/table-popover';
 import { useWorkspaceOfferings } from '@/hooks/use-workspace-offerings';
 import { fetchCapabilityOfferings, type OfferingWire } from '@/lib/agent-offerings';
 import { createChatBrowserClient } from '@/lib/chat/browser-client';
+import { pickExplicitModel3D } from '@/lib/chat/explicit-model';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
@@ -127,9 +129,19 @@ export function useDomainModelPick(domain: WorkspaceDomain): DomainPick {
         setModel(domain, key);
         // #103: a 3D pick is the person's explicit lock for this session. The
         // restore and retired-successor paths above call setModel directly and
-        // do not mark it.
-        if (domain === 'model-3d' && activeSessionId && schema.runtime.http.routes.chat_session_model3d) {
-          void client.setExplicitModel3D(activeSessionId, key).catch(() => undefined);
+        // do not mark it. A pick before the session exists waits for the first
+        // send; later picks are serialized per session and the newest wins.
+        if (domain === 'model-3d' && schema.runtime.http.routes.chat_session_model3d) {
+          pickExplicitModel3D({
+            sessionId: activeSessionId,
+            model: key,
+            previous: selectedModel ?? null,
+            write: (sessionId, model) => client.setExplicitModel3D(sessionId, model),
+            onFailure: (previous) => {
+              setModel('model-3d', previous);
+              toast.error(schemaText(schema, 'ui.studio.picker.lock_failed'));
+            },
+          });
         }
       },
     },

@@ -140,12 +140,17 @@ func (executor *Executor) awaitingApproval(ctx context.Context, command chat.Too
 	}
 	// A budget-mode step that the plan could not cover says why it needs a
 	// person, and what the plan still holds (#103), so the Agent does not
-	// repeat the same request or misreport the budget.
+	// repeat the same request or misreport the budget. Both keys are declared
+	// by the tool's result_fields (#103 review B4).
 	if decision.Reason != "" {
-		content["reason"] = decision.Reason
+		if key := tool.ResultFields.Reason; key != "" {
+			content[key] = decision.Reason
+		}
 	}
 	if decision.Budget != nil {
-		content["budget"] = budgetResult(*decision.Budget)
+		if key := tool.ResultFields.Budget; key != "" {
+			content[key] = budgetResult(*decision.Budget)
+		}
 	}
 	if gateway, ok := executor.gateway.(preparedGateway); ok {
 		if prepared, err := gateway.GetPreparedInput(ctx, generation.OwnerID(op.OwnerID), op.PreparedInputID); err == nil {

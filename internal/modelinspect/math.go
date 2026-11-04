@@ -106,6 +106,15 @@ func (m mat3) transform(v vec3) vec3 {
 	}
 }
 
+// determinant3 returns the determinant of the upper-left 3x3 part of m. A
+// negative value means the transform mirrors and reverses triangle winding.
+func (m mat4) determinant3() float64 {
+	a, b, c := m[0], m[4], m[8]
+	d, e, f := m[1], m[5], m[9]
+	g, h, i := m[2], m[6], m[10]
+	return a*(e*i-f*h) - b*(d*i-f*g) + c*(d*h-e*g)
+}
+
 // normalMatrix returns the inverse transpose of the upper-left 3x3 part of m.
 // A singular matrix (for example a zero scale) falls back to the identity so
 // that a malformed transform cannot produce NaNs throughout a render.

@@ -36,9 +36,9 @@ const session = (withBudget?: SessionBudget): ChatSession => ({
   id: 's1', title: '会话', createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
   ...(withBudget ? { budget: withBudget } : {}),
 });
-const task = (taskId: string, sessionId: string, state: string): TrackedTask => ({
+const task = (taskId: string, sessionId: string, state: string, startedAt = Date.parse('2026-10-01T00:02:00Z')): TrackedTask => ({
   taskId, sessionId, capability: 'text-to-3d', prompt: '', state, progress: 0, progressMaximum: 100, terminal: false,
-  failure: null, liveError: '', assets: [], downloadables: [], resources: [], resourcesPending: false, notFound: false, updatedAt: 0,
+  failure: null, liveError: '', assets: [], downloadables: [], resources: [], resourcesPending: false, notFound: false, updatedAt: 0, startedAt,
 });
 
 beforeEach(() => {
@@ -67,6 +67,8 @@ describe('the session budget badge (#103)', () => {
       task('t1', 's1', 'SUCCEEDED'),
       // A task of another session must not count toward this plan.
       task('other', 's2', 'RUNNING'),
+      // A task from before the plan was approved must not fill its first step.
+      task('historical', 's1', 'SUCCEEDED', Date.parse('2026-10-01T00:00:30Z')),
     ] });
     const view = render(<BudgetBadge />);
     const badge = view.getByTestId('studio-budget-badge');

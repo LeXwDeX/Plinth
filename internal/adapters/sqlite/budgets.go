@@ -17,6 +17,7 @@ import (
 var (
 	_ executiongrant.ProductionBudgetStore = (*Repository)(nil)
 	_ executiongrant.BudgetGrantStore      = (*Repository)(nil)
+	_ executiongrant.BudgetNoticeStore     = (*Repository)(nil)
 )
 
 const productionBudgetSelect = `SELECT id, owner_id, session_id, plan_json, limit_credits,
@@ -208,6 +209,79 @@ func (r *Repository) DecideProductionBudget(ctx context.Context, ownerID, budget
 	return stored, nil
 }
 
+// abandonUnboundGrantOnConn denies an approved grant whose reservation is still
+// unbound and releases that reservation in the same transaction. It is called
+// when the operation the grant authorized ends without a Task (a permanently
+// rejected submit, or a processing authorization that will never be used), so
+// the plan's reserved credits are not held forever (#103 review B2). Grants
+// without a reservation, claimed grants (a submit is in flight) and decided
+// grants are left untouched.
+func abandonUnboundGrantOnConn(ctx context.Context, conn *sql.Conn, owner, requestID string, now time.Time) error {
+	if owner == "" || requestID == "" {
+		return nil
+	}
+	stamp := formatTime(now)
+	result, err := conn.ExecContext(ctx, `UPDATE execution_grants
+ SET status = 'denied', decided_by = ?, decided_at = ?, updated_at = ?
+ WHERE request_id = ? AND owner_id = ? AND status = 'approved'
+ AND EXISTS (SELECT 1 FROM budget_reservations
+  WHERE budget_reservations.grant_request_id = execution_grants.request_id
+  AND budget_reservations.state = 'reserved' AND budget_reservations.task_id = '')`,
+		executiongrant.AbandonedActor, stamp, stamp, requestID, owner)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed == 0 {
+		return err
+	}
+	grant, err := grantByRequest(ctx, conn, owner, requestID)
+	if err != nil {
+		return err
+	}
+	identityJSON, err := json.Marshal(grant.Identity)
+	if err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO execution_grant_audit
+ (request_id, owner_id, request_version, event, actor_id, identity_json, occurred_at)
+ VALUES (?, ?, ?, 'denied', ?, ?, ?)`,
+		requestID, owner, grant.RequestVersion, executiongrant.AbandonedActor, string(identityJSON), stamp); err != nil {
+		return err
+	}
+	_, err = conn.ExecContext(ctx, `UPDATE budget_reservations
+ SET state = 'released', settled_at = ?
+ WHERE grant_request_id = ? AND state = 'reserved' AND task_id = ''`,
+		stamp, requestID)
+	return err
+}
+
+// ReleaseUnboundBudgetReservation is the data-layer side of
+// executiongrant.Service.AbandonBudgetReservation.
+func (r *Repository) ReleaseUnboundBudgetReservation(ctx context.Context, owner, requestID string) error {
+	if owner == "" || requestID == "" {
+		return executiongrant.ErrInvalid
+	}
+	conn, err := r.grantWriteConn(ctx)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			rollbackGrantConn(conn)
+		}
+	}()
+	if err := abandonUnboundGrantOnConn(ctx, conn, owner, requestID, time.Now().UTC()); err != nil {
+		return err
+	}
+	if err := commitGrantConn(ctx, conn); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
 func productionBudgetsInStates(ctx context.Context, conn queryer, ownerID, sessionID string, states ...string) ([]budget.ProductionBudget, error) {
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(states)), ",")
 	args := []any{ownerID, sessionID}
@@ -376,6 +450,104 @@ func (r *Repository) ProductionBudgetSummary(ctx context.Context, ownerID, sessi
 	return summary, err == nil, err
 }
 
+// productionBudgetSummaryBatch bounds the IN lists of the list projection:
+// SQLite binds one parameter per value and a session list can be long.
+const productionBudgetSummaryBatch = 500
+
+// ProductionBudgetSummaries reads the current plan summaries of many sessions
+// for the session list: one query selects each session's active/exhausted plan
+// (the newest created_at, as ProductionBudgetSummary reads it) and one grouped
+// query totals its reservations. A session without a current plan is absent
+// from the map, so the projection omits its member instead of claiming a plan.
+func (r *Repository) ProductionBudgetSummaries(ctx context.Context, ownerID string, sessionIDs []string) (map[string]budget.Summary, error) {
+	summaries := make(map[string]budget.Summary)
+	if ownerID == "" || len(sessionIDs) == 0 {
+		return summaries, nil
+	}
+	current := make(map[string]budget.ProductionBudget)
+	for start := 0; start < len(sessionIDs); start += productionBudgetSummaryBatch {
+		end := min(start+productionBudgetSummaryBatch, len(sessionIDs))
+		chunk := sessionIDs[start:end]
+		args := make([]any, 0, len(chunk)+3)
+		args = append(args, ownerID)
+		for _, sessionID := range chunk {
+			args = append(args, sessionID)
+		}
+		args = append(args, budget.StateActive, budget.StateExhausted)
+		rows, err := r.db.QueryContext(ctx, productionBudgetSelect+`
+ WHERE owner_id = ? AND session_id IN (`+queryPlaceholders(len(chunk))+`)
+ AND state IN (?, ?) ORDER BY created_at DESC`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			value, err := scanProductionBudget(rows)
+			if err != nil {
+				rows.Close()
+				return nil, err
+			}
+			// The unique current-plan index keeps this to one row per session;
+			// ORDER BY created_at DESC keeps the read identical to the
+			// single-session method if that ever changes.
+			if _, found := current[value.SessionID]; !found {
+				current[value.SessionID] = value
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	if len(current) == 0 {
+		return summaries, nil
+	}
+	budgetIDs := make([]string, 0, len(current))
+	for _, value := range current {
+		budgetIDs = append(budgetIDs, value.ID)
+	}
+	totals := make(map[string][2]int, len(budgetIDs))
+	for start := 0; start < len(budgetIDs); start += productionBudgetSummaryBatch {
+		end := min(start+productionBudgetSummaryBatch, len(budgetIDs))
+		chunk := budgetIDs[start:end]
+		args := make([]any, 0, len(chunk))
+		for _, budgetID := range chunk {
+			args = append(args, budgetID)
+		}
+		rows, err := r.db.QueryContext(ctx, `SELECT budget_id,
+ COALESCE(SUM(CASE WHEN state = 'charged' THEN credits END), 0),
+ COALESCE(SUM(CASE WHEN state = 'reserved' THEN credits END), 0)
+ FROM budget_reservations WHERE budget_id IN (`+queryPlaceholders(len(chunk))+`)
+ GROUP BY budget_id`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var budgetID string
+			var spent, reserved int
+			if err := rows.Scan(&budgetID, &spent, &reserved); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			totals[budgetID] = [2]int{spent, reserved}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	for sessionID, value := range current {
+		total := totals[value.ID]
+		summaries[sessionID] = budget.SummaryOf(value, total[0], total[1])
+	}
+	return summaries, nil
+}
+
+func queryPlaceholders(count int) string {
+	return strings.TrimSuffix(strings.Repeat("?,", count), ",")
+}
+
 func (r *Repository) BudgetSummaryForGrant(ctx context.Context, ownerID, requestID string) (budget.Summary, bool, error) {
 	if ownerID == "" || requestID == "" {
 		return budget.Summary{}, false, executiongrant.ErrInvalid
@@ -448,6 +620,43 @@ func (r *Repository) ExpireProductionBudgets(ctx context.Context, cutoff time.Ti
 	}
 	committed = true
 	return expired, nil
+}
+
+// ProductionBudgetsAwaitingNotice lists exhausted plans and plans the system
+// expired whose chat notice was never recorded. The sweep posts and marks each
+// one, so a post that failed after the state transition committed is retried
+// instead of being lost (#103 review B3).
+func (r *Repository) ProductionBudgetsAwaitingNotice(ctx context.Context, limit int) ([]budget.ProductionBudget, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	rows, err := r.db.QueryContext(ctx, productionBudgetSelect+`
+ WHERE notice_sent_at = '' AND (state = 'exhausted' OR (state = 'denied' AND decided_by = ?))
+ ORDER BY created_at ASC LIMIT ?`, budget.SystemActor, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	plans := make([]budget.ProductionBudget, 0)
+	for rows.Next() {
+		value, err := scanProductionBudget(rows)
+		if err != nil {
+			return nil, err
+		}
+		plans = append(plans, value)
+	}
+	return plans, rows.Err()
+}
+
+// MarkProductionBudgetNoticeSent records the one notice of an exhausted or
+// system-expired plan. A repeated mark is a no-op.
+func (r *Repository) MarkProductionBudgetNoticeSent(ctx context.Context, ownerID, budgetID string, now time.Time) error {
+	if ownerID == "" || budgetID == "" || now.IsZero() {
+		return executiongrant.ErrInvalid
+	}
+	_, err := r.db.ExecContext(ctx, `UPDATE production_budgets SET notice_sent_at = ?
+ WHERE id = ? AND owner_id = ? AND notice_sent_at = ''`, formatTime(now), budgetID, ownerID)
+	return err
 }
 
 // ApproveExecutionGrantWithBudget is the atomic budget authorization: settle

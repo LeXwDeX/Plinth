@@ -90,7 +90,10 @@ func Parse(r io.ReaderAt, size int64, limits Limits) (*Model, error) {
 			f32: make(map[int][]float32),
 			u32: make(map[int][]uint32),
 		},
-		textureCache: textureCache{images: make(map[int]*decodedTexture)},
+		textureCache: textureCache{
+			images:  make(map[int]*decodedTexture),
+			decoded: make(map[int]*decodedImage),
+		},
 	}
 	if err := m.loadBuffersAndViews(doc.Buffers, doc.BufferViews); err != nil {
 		return nil, err
@@ -313,8 +316,11 @@ func (m *Model) loadAccessors(defs []gltfAccessor) error {
 			return invalidf("accessor %d count is too large", i)
 		}
 		if def.Count > 0 {
-			span := int64(stride)*int64(def.Count-1) + int64(elemSize)
-			if span < 0 || span > view.length-int64(def.ByteOffset) {
+			// Compare by division so an enormous count cannot overflow the
+			// multiplication; stride is positive and at least elemSize.
+			remaining := view.length - int64(def.ByteOffset)
+			if remaining < int64(elemSize) ||
+				int64(def.Count-1) > (remaining-int64(elemSize))/int64(stride) {
 				return invalidf("accessor %d is out of bufferView bounds", i)
 			}
 		}
@@ -504,6 +510,7 @@ func (m *Model) loadMaterials(defs []gltfMaterial) error {
 			MetallicFactor:  1,
 			RoughnessFactor: 1,
 			AlphaMode:       "OPAQUE",
+			AlphaCutoff:     0.5,
 			DoubleSided:     def.DoubleSided,
 		}
 		if def.PBR != nil {
@@ -577,6 +584,12 @@ func (m *Model) loadMaterials(defs []gltfMaterial) error {
 			default:
 				return invalidf("material %d alphaMode %q", i, def.AlphaMode)
 			}
+		}
+		if def.AlphaCutoff != nil {
+			if *def.AlphaCutoff < 0 || !finite(*def.AlphaCutoff) {
+				return invalidf("material %d alphaCutoff", i)
+			}
+			material.AlphaCutoff = *def.AlphaCutoff
 		}
 		m.Materials[i] = material
 	}

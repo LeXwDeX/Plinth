@@ -70,9 +70,7 @@ func (rig *scopeRig) turn(t *testing.T, scope string) string {
 		t.Fatal(err)
 	}
 	if scope != "" {
-		if _, _, err := rig.service.SetAgentScope(ctx, "owner-a", session.ID, scope); err != nil {
-			t.Fatal(err)
-		}
+		rig.seedScope(t, "owner-a", session.ID, scope)
 	}
 	assistant, err := rig.service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID, Content: "hello",
 		Options: chat.TurnOptions{CreativeDomain: "image", AgentScope: "forged"}})
@@ -84,6 +82,16 @@ func (rig *scopeRig) turn(t *testing.T, scope string) string {
 		t.Fatal(err)
 	}
 	return session.ID
+}
+
+// seedScope writes a legacy scope directly. The public API only accepts auto
+// (#103 review F1); these tests still exercise the stored-scope filtering that
+// protects a session created before the migration.
+func (rig *scopeRig) seedScope(t *testing.T, ownerID, sessionID, scope string) {
+	t.Helper()
+	if _, found, err := rig.repository.SetSessionAgentScope(context.Background(), ownerID, sessionID, scope); err != nil || !found {
+		t.Fatalf("seed scope %q: found=%v err=%v", scope, found, err)
+	}
 }
 
 func toolNames(request agents.Request) []string {
@@ -171,12 +179,11 @@ func TestSystemContextTellsTheAgentItsScopeEveryTurn(t *testing.T) {
 			}
 		})
 	}
-	// The line follows the session: switching the scope changes the next turn.
+	// The line follows the stored scope: a legacy session moved to 3d gets the
+	// 3D line on its next turn.
 	rig := newScopeRig(t, agents.Completion{Content: "one"}, agents.Completion{Content: "two"})
 	sessionID := rig.turn(t, "2d")
-	if _, _, err := rig.service.SetAgentScope(context.Background(), "owner-a", sessionID, "3d"); err != nil {
-		t.Fatal(err)
-	}
+	rig.seedScope(t, "owner-a", sessionID, "3d")
 	assistant, err := rig.service.StartTurn(context.Background(), chat.StartTurn{OwnerID: "owner-a", SessionID: sessionID, Content: "again"})
 	if err != nil {
 		t.Fatal(err)
@@ -259,18 +266,14 @@ func TestTheTurnKeepsTheScopeItStartedWith(t *testing.T) {
 	rig := newScopeRig(t)
 	ctx := context.Background()
 	session, _ := rig.service.CreateSession(ctx, "owner-a", "Owner", "chat")
-	if _, _, err := rig.service.SetAgentScope(ctx, "owner-a", session.ID, "2d"); err != nil {
-		t.Fatal(err)
-	}
+	rig.seedScope(t, "owner-a", session.ID, "2d")
 	assistant, err := rig.service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID, Content: "hello",
 		Options: chat.TurnOptions{AgentScope: "auto"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The user switches while the turn is queued; the turn is unaffected.
-	if _, _, err := rig.service.SetAgentScope(ctx, "owner-a", session.ID, "3d"); err != nil {
-		t.Fatal(err)
-	}
+	// The stored scope changes while the turn is queued; the turn is unaffected.
+	rig.seedScope(t, "owner-a", session.ID, "3d")
 	turn, err := rig.service.GetTurn(ctx, "owner-a", session.ID, assistant.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -286,7 +289,9 @@ func TestTheTurnKeepsTheScopeItStartedWith(t *testing.T) {
 	}
 }
 
-func TestSessionsDefaultToAutoAndRememberTheirScope(t *testing.T) {
+// #103 review F1: the public scope write only accepts auto, so a session can
+// never be locked out of the other workspace again.
+func TestSessionsDefaultToAutoAndRefuseAScopeLock(t *testing.T) {
 	rig := newScopeRig(t)
 	ctx := context.Background()
 	session, err := rig.service.CreateSession(ctx, "owner-a", "Owner", "chat")
@@ -296,22 +301,24 @@ func TestSessionsDefaultToAutoAndRememberTheirScope(t *testing.T) {
 	if session.AgentScope != "auto" {
 		t.Fatalf("new session scope = %q, want auto", session.AgentScope)
 	}
-	updated, previous, err := rig.service.SetAgentScope(ctx, "owner-a", session.ID, "3d")
-	if err != nil || updated.AgentScope != "3d" || previous != "auto" {
-		t.Fatalf("SetAgentScope = %+v, previous %q, err %v", updated, previous, err)
-	}
-	stored, found, err := rig.service.Session(ctx, "owner-a", session.ID)
-	if err != nil || !found || stored.AgentScope != "3d" {
-		t.Fatalf("stored session = %+v found=%v err=%v", stored, found, err)
+	for _, scope := range []string{"2d", "3d"} {
+		if _, _, err := rig.service.SetAgentScope(ctx, "owner-a", session.ID, scope); !errors.Is(err, chat.ErrInvalidAgentScope) {
+			t.Fatalf("scope %q was accepted: %v", scope, err)
+		}
 	}
 	if _, _, err := rig.service.SetAgentScope(ctx, "owner-a", session.ID, "4d"); !errors.Is(err, chat.ErrInvalidAgentScope) {
 		t.Fatalf("unknown scope accepted: %v", err)
 	}
-	if _, _, err := rig.service.SetAgentScope(ctx, "owner-b", session.ID, "2d"); !errors.Is(err, chat.ErrSessionNotFound) {
-		t.Fatalf("a foreign session was switched: %v", err)
+	updated, previous, err := rig.service.SetAgentScope(ctx, "owner-a", session.ID, "auto")
+	if err != nil || updated.AgentScope != "auto" || previous != "auto" {
+		t.Fatalf("SetAgentScope(auto) = %+v, previous %q, err %v", updated, previous, err)
 	}
-	if after, _, _ := rig.service.Session(ctx, "owner-a", session.ID); after.AgentScope != "3d" {
-		t.Fatalf("a rejected switch changed the scope to %q", after.AgentScope)
+	stored, found, err := rig.service.Session(ctx, "owner-a", session.ID)
+	if err != nil || !found || stored.AgentScope != "auto" {
+		t.Fatalf("stored session = %+v found=%v err=%v", stored, found, err)
+	}
+	if _, _, err := rig.service.SetAgentScope(ctx, "owner-b", session.ID, "auto"); !errors.Is(err, chat.ErrSessionNotFound) {
+		t.Fatalf("a foreign session was written: %v", err)
 	}
 	if _, err := rig.service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-b", SessionID: session.ID, Content: "hi"}); !errors.Is(err, chat.ErrSessionNotFound) {
 		t.Fatalf("a foreign owner started a turn: %v", err)
