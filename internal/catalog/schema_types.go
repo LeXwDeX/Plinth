@@ -3646,6 +3646,11 @@ type ChatToolProcessingSchema struct {
 	// SourceAssetArgument optionally carries one saved model Asset ID of the
 	// source Task (or, alone, of any succeeded Task of the session).
 	SourceAssetArgument string `json:"source_asset_argument,omitempty"`
+	// SourceAssetsArgument optionally carries several saved model Asset IDs of
+	// succeeded Tasks of this session, for an Offering whose source parameter
+	// is an asset-array (local merge). It replaces the single-source arguments
+	// for that step and is never combined with them.
+	SourceAssetsArgument string `json:"source_assets_argument,omitempty"`
 	// StepArgument selects one capability of Steps for a tool that performs
 	// several kinds of processing. Without it the tool's Capability is used.
 	StepArgument string                               `json:"step_argument,omitempty"`

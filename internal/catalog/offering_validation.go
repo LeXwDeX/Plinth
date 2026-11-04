@@ -1421,8 +1421,16 @@ func validateValueDefinition(schema schemacontract.Parameter) (schemacontract.Pa
 }
 
 func validateTaskSourceParameter(parameter schemacontract.Parameter) error {
+	// same_session binds task sources to this chat session. A saved-model
+	// source parameter (asset or asset-array with source-asset semantics) may
+	// also declare it: the referenced model assets must then belong to Tasks of
+	// the same session (enforced by the adapter, which sees each asset's
+	// originating Task). Reference images and other inputs stay session-free.
 	if parameter.SameSession && parameter.Type != "task" {
-		return fmt.Errorf("same_session requires task source")
+		role, isSource := schemacontract.SourceParameterRole(parameter)
+		if (parameter.Type != "asset" && parameter.Type != "asset-array") || !isSource || role != schemacontract.SemanticSourceAsset {
+			return fmt.Errorf("same_session requires task or saved-model source")
+		}
 	}
 	if parameter.TaskSourceBinding != "" && (parameter.TaskSourceBinding != "provider" || parameter.Type != "task" || parameter.TaskSourceKind == schemacontract.TaskSourceAssets || !parameter.Required || !parameter.SameProvider || len(parameter.TaskOfferings) != 1) {
 		return fmt.Errorf("task_source_binding requires a required exact same-provider upstream task source")

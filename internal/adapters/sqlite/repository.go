@@ -2104,7 +2104,8 @@ func (r *Repository) LoadInputAssets(
 	rows, err = r.db.QueryContext(ctx, `
 		SELECT asset.id, task.owner_id, asset.storage_key, asset.media_type,
 		       asset.size_bytes, asset.sha256, asset.created_at,
-		       asset.role, asset.variant
+		       asset.role, asset.variant, task.id, COALESCE(task.session_id, ''),
+		       asset.ordinal
 		FROM generation_assets AS asset
 		JOIN generation_tasks AS task ON task.id = asset.task_id
 		WHERE task.owner_id = ? AND task.state = 'SUCCEEDED'
@@ -2132,6 +2133,9 @@ func (r *Repository) LoadInputAssets(
 			&createdAt,
 			&asset.Role,
 			&asset.Variant,
+			&asset.TaskID,
+			&asset.SessionID,
+			&asset.Ordinal,
 		); err != nil {
 			return nil, err
 		}

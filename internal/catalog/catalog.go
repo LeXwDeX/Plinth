@@ -84,6 +84,9 @@ func Load(reader io.Reader) (*Catalog, error) {
 		if err := freezeLocalConversionProfile(&offering, *doc.Application); err != nil {
 			return nil, fmt.Errorf("offerings[%d]: %w", index, err)
 		}
+		if err := freezeLocalPartsProfile(&offering, *doc.Application); err != nil {
+			return nil, fmt.Errorf("offerings[%d]: %w", index, err)
+		}
 		if err := validateOffering(
 			offering,
 			ProtocolByAdapterKey(doc.Application.Runtime.ProviderConnections),

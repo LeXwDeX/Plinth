@@ -17,6 +17,7 @@ var ProviderProtocolEnum = map[string]struct{}{
 	"hyper3d.rodin":     {},
 	"matting":           {},
 	"local-model":       {},
+	"local-model-parts": {},
 	"local-recovery":    {},
 	"mock":              {},
 	"openai-compatible": {},
@@ -82,6 +83,27 @@ func ConnectionCapabilitiesByAdapterKey(
 	return result
 }
 
+// sameCapabilitySet reports whether capabilities holds exactly the given
+// capabilities in any order (the slice length is checked by the caller).
+func sameCapabilitySet(capabilities []schemacontract.Capability, wanted ...schemacontract.Capability) bool {
+	if len(capabilities) != len(wanted) {
+		return false
+	}
+	remaining := make(map[schemacontract.Capability]int, len(wanted))
+	for _, capability := range wanted {
+		remaining[capability]++
+	}
+	for _, capability := range capabilities {
+		remaining[capability]--
+	}
+	for _, count := range remaining {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func validateProviderConnections(schema RuntimeSchema) error {
 	seenIDs := map[string]struct{}{}
 	seenAdapterKeys := map[string]struct{}{}
@@ -108,6 +130,11 @@ func validateProviderConnections(schema RuntimeSchema) error {
 		if connection.Protocol == "local-recovery" {
 			if connection.BaseURLSetting != "" || connection.APIKeySetting != "" || connection.AuthHeader != "" || connection.AuthPrefix != "" || connection.RequestTimeoutSeconds != 0 || connection.AllowHTTPAssets || len(connection.ConditionalCapabilities) != 0 || connection.ErrorMapping != nil || connection.StatusMapping != nil || len(connection.Capabilities) != 1 || connection.Capabilities[0] != schemacontract.AssetRecovery {
 				return fmt.Errorf("local-recovery connection %q must declare only receipt recovery without network settings", connection.ID)
+			}
+		}
+		if connection.Protocol == "local-model-parts" {
+			if connection.BaseURLSetting != "" || connection.APIKeySetting != "" || connection.AuthHeader != "" || connection.AuthPrefix != "" || connection.RequestTimeoutSeconds != 0 || connection.AllowHTTPAssets || len(connection.ConditionalCapabilities) != 0 || connection.ErrorMapping != nil || connection.StatusMapping != nil || len(connection.Capabilities) != 2 || !sameCapabilitySet(connection.Capabilities, schemacontract.ModelSplit, schemacontract.ModelMerge) {
+				return fmt.Errorf("local-model-parts connection %q must declare only local model split and merge without network settings", connection.ID)
 			}
 		}
 		if connection.Protocol == "mock" {

@@ -47,6 +47,34 @@ func TestHandlePolicyParsesOnlyDeclaredHandles(t *testing.T) {
 	}
 }
 
+func TestHandlePolicyParsesPartHandlesWithCanonicalOrdinals(t *testing.T) {
+	policy, _ := handlePolicyForTest(t)
+	for token, want := range map[string]struct {
+		kind   string
+		number int
+		part   int
+		ok     bool
+	}{
+		"@model2#3":   {chat.AttachmentKindModel, 2, 3, true},
+		"@MODEL2#3":   {chat.AttachmentKindModel, 2, 3, true},
+		" @model2#3 ": {chat.AttachmentKindModel, 2, 3, true},
+		"@img1#2":     {chat.AttachmentKindImage, 1, 2, true},
+		"@model2":     {"", 0, 0, false},
+		"@model2#0":   {"", 0, 0, false},
+		"@model2#03":  {"", 0, 0, false},
+		"@model2#":    {"", 0, 0, false},
+		"@model2#x":   {"", 0, 0, false},
+		"@model2#2#3": {"", 0, 0, false},
+		"#2":          {"", 0, 0, false},
+		"task-1#2":    {"", 0, 0, false},
+	} {
+		kind, number, part, ok := policy.ParsePart(token)
+		if kind != want.kind || number != want.number || part != want.part || ok != want.ok {
+			t.Fatalf("ParsePart(%q) = %q %d %d %v; want %+v", token, kind, number, part, ok, want)
+		}
+	}
+}
+
 func TestHandlesAreNumberedPerKindAndNeverReused(t *testing.T) {
 	policy, _ := handlePolicyForTest(t)
 	history := []chat.Message{

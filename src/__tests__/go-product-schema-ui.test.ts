@@ -419,6 +419,8 @@ describe('Go Product Schema frontend projection', () => {
       'image-to-splat',
       'image-to-multiview',
       'edit-multiview',
+      'model-split',
+      'model-merge',
     ]);
   });
 

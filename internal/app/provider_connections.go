@@ -23,6 +23,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/providers/httpjson"
 	"github.com/LeXwDeX/Plinth/internal/providers/hyper3d"
 	"github.com/LeXwDeX/Plinth/internal/providers/localmodel"
+	"github.com/LeXwDeX/Plinth/internal/providers/localparts"
 	"github.com/LeXwDeX/Plinth/internal/providers/matting"
 	"github.com/LeXwDeX/Plinth/internal/providers/meshy"
 	"github.com/LeXwDeX/Plinth/internal/providers/mock"
@@ -52,24 +53,27 @@ func registerProvidersWithTransport(
 		if _, known := catalog.ProviderProtocolEnum[connection.Protocol]; !known {
 			return fmt.Errorf("Provider 连接 %q 使用未知协议 %q", connection.ID, connection.Protocol)
 		}
-		if connection.Protocol != "local-model" && connection.Protocol != "local-recovery" {
+		if connection.Protocol != "local-model" && connection.Protocol != "local-recovery" && connection.Protocol != "local-model-parts" {
 			continue
 		}
 		localKeys[connection.AdapterKey] = true
 		offerings := offeringsForAdapter(taskCatalog.List(""), connection.AdapterKey)
 		for _, offering := range offerings {
 			var err error
-			if connection.Protocol == "local-recovery" {
+			switch connection.Protocol {
+			case "local-recovery":
 				err = assetrecovery.ValidateOffering(offering)
-			} else {
+			case "local-model-parts":
+				err = localparts.ValidateOffering(offering)
+			default:
 				err = localmodel.ValidateOffering(offering)
 			}
 			if err != nil {
 				return fmt.Errorf("local Offering %q 的 Schema 无效: %w", offering.ID, err)
 			}
 		}
-		if assets == nil || connection.Protocol == "local-model" && inputs == nil || connection.Protocol == "local-recovery" && (len(recoveryStores) != 1 || recoveryStores[0] == nil) {
-			logger.Warn("本地模型转换缺少输入或资产存储，路由不可用", "connection", connection.ID)
+		if assets == nil || (connection.Protocol == "local-model" || connection.Protocol == "local-model-parts") && inputs == nil || connection.Protocol == "local-recovery" && (len(recoveryStores) != 1 || recoveryStores[0] == nil) {
+			logger.Warn("本地模型处理缺少输入或资产存储，路由不可用", "connection", connection.ID)
 			continue
 		}
 		adapter, err := buildProviderAdapterWithTransport(offerings, connection, "", "", 0, "", inputs, assets, httpTransport, recoveryStores...)
@@ -112,8 +116,8 @@ func registerProvidersWithTransport(
 			)
 		}
 		// chat LLM 与账户余额连接由各自消费方接线，不注册生成 Provider。
-		if connection.Protocol == "local-model" || connection.Protocol == "openai-compatible" ||
-			connection.Protocol == "http-json" {
+		if connection.Protocol == "local-model" || connection.Protocol == "local-model-parts" ||
+			connection.Protocol == "openai-compatible" || connection.Protocol == "http-json" {
 			continue
 		}
 		if setting(connection.APIKeySetting) == "" {
@@ -199,6 +203,17 @@ func buildProviderAdapterWithTransport(
 			}
 		}
 		adapter, err := localmodel.New(localmodel.Config{Inputs: inputs, Assets: assets})
+		if err != nil {
+			return nil, err
+		}
+		return adapter, nil
+	case "local-model-parts":
+		for _, offering := range offerings {
+			if err := localparts.ValidateOffering(offering); err != nil {
+				return nil, fmt.Errorf("local Offering %q 的 Schema 无效: %w", offering.ID, err)
+			}
+		}
+		adapter, err := localparts.New(localparts.Config{Inputs: inputs, Assets: assets})
 		if err != nil {
 			return nil, err
 		}

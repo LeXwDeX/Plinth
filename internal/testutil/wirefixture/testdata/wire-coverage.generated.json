@@ -1,7 +1,7 @@
 {
   "version": 2,
   "catalog": "internal/catalog/default_catalog.json",
-  "catalog_sha256": "2569d5838baa68f81b5c1d4e8a3658b810699eb23f1b8100ae156f9e8d199713",
+  "catalog_sha256": "3a5485fdcbf1f2c55ffc94df27264b2e4463d11a250fc4a06e3d06d15deccf55",
   "samples": [
     "internal/app/testdata/agent-flow/agent-flow.candidate.json",
     "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
@@ -61,19 +61,19 @@
     "offerings": {
       "disabled": 27,
       "disabled-zero-egress": 27,
-      "enabled": 53,
-      "local-no-wire": 4,
+      "enabled": 55,
+      "local-no-wire": 6,
       "partial": 6,
       "real": 43,
-      "total": 80
+      "total": 82
     },
     "units": {
       "derived": 17,
       "disabled-zero-egress": 9,
-      "local-no-wire": 2,
+      "local-no-wire": 4,
       "missing": 1,
       "real": 108,
-      "total": 137
+      "total": 139
     }
   },
   "incomplete": [
@@ -703,6 +703,34 @@
         {
           "id": "local/static-gltf/to-glb",
           "model_id": "local-gltf-to-glb",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "local.parts",
+      "capability": "model-merge",
+      "endpoint": "(local)",
+      "evidence": "local-no-wire",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "local/model-parts/merge",
+          "model_id": "local-model-merge",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "local.parts",
+      "capability": "model-split",
+      "endpoint": "(local)",
+      "evidence": "local-no-wire",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "local/model-parts/split",
+          "model_id": "local-model-split",
           "enabled": true
         }
       ]
@@ -3292,6 +3320,26 @@
       "evidence": "local-no-wire",
       "units": [
         "local.model|format-conversion|(local)"
+      ]
+    },
+    {
+      "id": "local/model-parts/merge",
+      "model_id": "local-model-merge",
+      "adapter_key": "local.parts",
+      "enabled": true,
+      "evidence": "local-no-wire",
+      "units": [
+        "local.parts|model-merge|(local)"
+      ]
+    },
+    {
+      "id": "local/model-parts/split",
+      "model_id": "local-model-split",
+      "adapter_key": "local.parts",
+      "enabled": true,
+      "evidence": "local-no-wire",
+      "units": [
+        "local.parts|model-split|(local)"
       ]
     },
     {

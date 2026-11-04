@@ -1949,8 +1949,9 @@ func TestDefaultCatalogCoversCurrentProviderInventory(t *testing.T) {
 	// Smart Segmentation image/model); Decimate quad stays disabled. #329 adds
 	// Meshy T2.5 (Smart Topology) text and image to 3D. #330 adds Meshy Convert.
 	// #100: the 17 Meshy Creative Lab Offerings stay defined but are not offered
-	// (enabled=false), so only the other 53 are listed.
-	if len(offerings) != 53 {
+	// (enabled=false), so only the other 55 are listed. #103 adds the two free
+	// local model-parts Offerings (split and merge).
+	if len(offerings) != 55 {
 		t.Fatalf("offering count = %d", len(offerings))
 	}
 	for _, id := range []generation.OfferingID{
@@ -1974,6 +1975,8 @@ func TestDefaultCatalogCoversCurrentProviderInventory(t *testing.T) {
 		"local/static-glb/to-gltf",
 		"local/static-gltf/to-glb",
 		"local/generated-glb/to-gltf",
+		"local/model-parts/split",
+		"local/model-parts/merge",
 		"tripo/format-conversion/uploaded-glb-to-stl",
 		"hyper3d/rodin-gen-2.5/text-to-3d",
 		"hyper3d/rodin-gen-2.5/image-to-3d",
@@ -2027,7 +2030,7 @@ func TestDefaultCatalogOwnsCapabilityRoutesLabelsAndRuntimePresentation(t *testi
 		t.Fatal(err)
 	}
 	application := taskCatalog.Application()
-	if len(application.Capabilities) != 25 {
+	if len(application.Capabilities) != 27 {
 		t.Fatalf("capability count = %d", len(application.Capabilities))
 	}
 	legacyPaths := map[string]generation.Capability{}

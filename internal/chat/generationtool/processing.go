@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"sort"
 	"strconv"
@@ -76,6 +77,10 @@ func hasSavedModel(task generation.Task) bool {
 
 const modelRole = "model"
 
+// maxPartsManifestBytes bounds the parts_manifest read of the model listing,
+// matching the split Offering's declared output size.
+const maxPartsManifestBytes = 16 << 20
+
 // ModelAssetRole is the asset role of a saved 3D model file.
 const ModelAssetRole = modelRole
 
@@ -92,6 +97,9 @@ type sessionModelView struct {
 	ModelAssets  []sessionModelAsset    `json:"model_assets"`
 	HasThumbnail bool                   `json:"has_thumbnail"`
 	NextSteps    []sessionModelNextStep `json:"next_steps"`
+	// Parts lists the model files of a split result, in ordinal order, so the
+	// Agent can name one with @modelN#ordinal.
+	Parts []sessionModelPart `json:"parts,omitempty"`
 	// ExportFormats is the format coverage the 格式 tab shows (#321): format
 	// ID → available, obtainable, converting or unavailable. Only these say
 	// which formats can be downloaded or converted.
@@ -164,6 +172,17 @@ type sessionModelService struct {
 	Model      string `json:"model"`
 }
 
+// sessionModelPart is one model file of a split result. AssetID is what a
+// merge call passes; Ordinal is what @modelN#ordinal names.
+type sessionModelPart struct {
+	Ordinal   int                    `json:"ordinal"`
+	AssetID   string                 `json:"asset_id"`
+	Name      string                 `json:"name"`
+	Triangles int                    `json:"triangles"`
+	Bounds    schema.ModelPartBounds `json:"bounds"`
+	NextSteps []sessionModelNextStep `json:"next_steps,omitempty"`
+}
+
 // ListSessionModels backs the list_session_models tool: this owner's
 // succeeded 3D tasks of this session with the processing steps each can feed.
 func (executor *Executor) ListSessionModels(ctx context.Context, ownerID, sessionID string) (json.RawMessage, error) {
@@ -181,11 +200,12 @@ func (executor *Executor) ListSessionModels(ctx context.Context, ownerID, sessio
 	views := make([]sessionModelView, 0, len(tasks))
 	labels := executor.versionLabels(ctx, ownerID, sessionID)
 	for _, task := range tasks {
+		nextSteps := executor.nextSteps(task, localize)
 		view := sessionModelView{
 			TaskID: string(task.ID), Capability: string(task.Capability),
 			Provider: localize(task.Offering.ProviderName), ProviderID: task.Offering.ProviderID,
 			Model: localize(task.Offering.ModelName), CreatedAt: task.CreatedAt.UTC().Format(time.RFC3339),
-			Formats: []string{}, ModelAssets: []sessionModelAsset{}, NextSteps: executor.nextSteps(task, localize),
+			Formats: []string{}, ModelAssets: []sessionModelAsset{}, NextSteps: nextSteps,
 			Version: labels[task.ID],
 		}
 		main := preferredModelAsset(task, executor.sourcePreference())
@@ -209,9 +229,70 @@ func (executor *Executor) ListSessionModels(ctx context.Context, ownerID, sessio
 				executor.logger.Warn("format coverage unavailable for the model listing", "task_id", task.ID, "error", err)
 			}
 		}
+		view.Parts = executor.modelParts(ctx, generation.OwnerID(ownerID), task, nextSteps)
 		views = append(views, view)
 	}
 	return json.Marshal(map[string]any{"models": views})
+}
+
+// modelParts reads a split result's parts_manifest and pairs each entry with
+// the saved model file of the same ordinal. A missing or unreadable manifest
+// leaves the list without parts; it never fails the model listing.
+func (executor *Executor) modelParts(
+	ctx context.Context, owner generation.OwnerID, task generation.Task, nextSteps []sessionModelNextStep,
+) []sessionModelPart {
+	if executor.modelAssets == nil {
+		return nil
+	}
+	var manifest generation.Asset
+	for _, asset := range task.Assets {
+		if asset.Role == "parts_manifest" && asset.StorageKey != "" {
+			manifest = asset
+			break
+		}
+	}
+	if manifest.ID == "" {
+		return nil
+	}
+	content, err := executor.modelAssets.OpenAsset(ctx, owner, task.ID, manifest.ID)
+	if err != nil {
+		executor.logger.Warn("parts manifest unreadable for the model listing", "task_id", task.ID, "asset_id", manifest.ID, "error", err)
+		return nil
+	}
+	defer content.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(content.Body, maxPartsManifestBytes+1))
+	if err != nil || len(raw) > maxPartsManifestBytes {
+		executor.logger.Warn("parts manifest unreadable for the model listing", "task_id", task.ID, "asset_id", manifest.ID, "error", err)
+		return nil
+	}
+	var parsed schema.ModelPartsManifest
+	if json.Unmarshal(raw, &parsed) != nil || parsed.Version != schema.ModelPartsManifestVersion || len(parsed.Parts) == 0 {
+		executor.logger.Warn("parts manifest invalid for the model listing", "task_id", task.ID, "asset_id", manifest.ID)
+		return nil
+	}
+	byOrdinal := make(map[int]generation.Asset, len(task.Assets))
+	for _, asset := range task.Assets {
+		if asset.Role == modelRole && asset.StorageKey != "" && asset.Ordinal > 0 {
+			byOrdinal[asset.Ordinal] = asset
+		}
+	}
+	seen := make(map[int]bool, len(parsed.Parts))
+	parts := make([]sessionModelPart, 0, len(parsed.Parts))
+	for _, part := range parsed.Parts {
+		asset, exists := byOrdinal[part.Ordinal]
+		if part.Ordinal < 1 || !exists || seen[part.Ordinal] {
+			continue
+		}
+		seen[part.Ordinal] = true
+		parts = append(parts, sessionModelPart{
+			Ordinal: part.Ordinal, AssetID: string(asset.ID), Name: part.Name,
+			Triangles: part.Triangles, Bounds: part.Bounds, NextSteps: nextSteps,
+		})
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	return parts
 }
 
 // nextSteps lists the processing tool calls whose available Offering accepts
@@ -483,7 +564,8 @@ func (executor *Executor) executeProcessing(
 		}
 	}
 	allowed := map[string]bool{processing.SourceTaskArgument: true, processing.SourceAssetArgument: true,
-		processing.StepArgument: true, processing.PromptArgument: true, processing.ReferenceArgument: true,
+		processing.SourceAssetsArgument: true,
+		processing.StepArgument:         true, processing.PromptArgument: true, processing.ReferenceArgument: true,
 		executor.chat.Context.ReferenceHandlesArgument: true}
 	choice := processing.Choice
 	if choice != nil {
@@ -503,6 +585,11 @@ func (executor *Executor) executeProcessing(
 		}
 	}
 	owner := generation.OwnerID(command.OwnerID)
+	if processing.SourceAssetsArgument != "" {
+		if _, present := arguments[processing.SourceAssetsArgument]; present {
+			return executor.executeMultiSourceProcessing(ctx, command, capability, arguments, observe)
+		}
+	}
 	source, asset, rejection, err := executor.resolveProcessingSource(ctx, command, arguments)
 	if err != nil {
 		return chat.ToolResult{NoSubmission: true}, err
@@ -627,10 +714,6 @@ func (executor *Executor) executeProcessing(
 		}
 	}
 	input := map[string]any{chosen.binding.Parameter: chosen.binding.Value}
-	declared := make(map[string]generation.Parameter, len(chosen.offering.Parameters))
-	for _, parameter := range chosen.offering.Parameters {
-		declared[parameter.Name] = parameter
-	}
 	if raw, present := arguments[processing.PromptArgument]; present && processing.PromptArgument != "" {
 		prompt := rawString(raw)
 		parameter, ok := semanticParameter(chosen.offering, generation.SemanticPrompt)
@@ -689,42 +772,8 @@ func (executor *Executor) executeProcessing(
 			}
 		}
 	}
-	for _, argument := range names {
-		parameterName, mapped := processing.ParameterArguments[argument]
-		if !mapped || (allFormats && argument == processing.DeliveryFormatArgument) {
-			// A whole-run conversion route already delivers the requested
-			// format among all it provides (#330).
-			continue
-		}
-		parameter, ok := declared[parameterName]
-		if !ok {
-			return executor.reject(command, executor.fillText(command, messages.ArgumentUnsupported, "{argument}", argument))
-		}
-		if _, isSource := schema.SourceParameterRole(parameter); isSource {
-			return executor.reject(command, executor.fillText(command, messages.ArgumentUnsupported, "{argument}", argument))
-		}
-		// Consent to extra credits comes from the approval of the frozen step
-		// (prepareAgentOperation); no tool argument may set it, whatever the
-		// Schema maps.
-		if parameterName == chosen.offering.ExtraConsentParameter() {
-			return executor.reject(command, executor.fillText(command, messages.ArgumentUnsupported, "{argument}", argument))
-		}
-		var value any
-		if err := json.Unmarshal(arguments[argument], &value); err != nil {
-			return executor.reject(command, executor.fillText(command, messages.InvalidInput, "{detail}", argument))
-		}
-		// A converter's fixed target must not replace an explicitly requested
-		// format. Keep fixed quality policy elsewhere, and do not select a
-		// different (potentially paid) route as a side effect of this check.
-		if cost := chosen.offering.Cost; cost != nil && parameterName == cost.FormatParameter && parameter.Fixed {
-			var fixedFormat string
-			requestedFormat, isString := value.(string)
-			if json.Unmarshal(parameter.Default, &fixedFormat) != nil || !isString || requestedFormat != fixedFormat {
-				return executor.reject(command, executor.fillText(command, messages.InvalidInput, "{detail}",
-					executor.formatRefusal(command, chosen.offering, fixedFormat)))
-			}
-		}
-		input[parameterName] = value
+	if rejection := executor.applyProcessingParameterArguments(command, chosen, processing, arguments, input, allFormats); rejection != nil {
+		return executor.reject(command, rejection.message)
 	}
 	if gaps := executor.inputGaps(command, chosen.offering, input); len(gaps) > 0 {
 		return executor.reject(command, executor.fillText(command, messages.InvalidInput, "{detail}", strings.Join(gaps, "; ")))
@@ -736,6 +785,223 @@ func (executor *Executor) executeProcessing(
 	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, "",
 		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, observe)
 	return executor.processingOutcome(command, result, err, executor.inputShape(command, input))
+}
+
+// applyProcessingParameterArguments maps the tool arguments declared in
+// parameter_arguments onto the chosen Offering's parameters. Source and
+// extra-credit consent parameters are never settable from a tool argument.
+func (executor *Executor) applyProcessingParameterArguments(
+	command chat.ToolCommand, chosen selectedOffering, processing *catalog.ChatToolProcessingSchema,
+	arguments map[string]json.RawMessage, input map[string]any, allFormats bool,
+) *processingRejection {
+	messages := processing.Messages
+	declared := make(map[string]generation.Parameter, len(chosen.offering.Parameters))
+	for _, parameter := range chosen.offering.Parameters {
+		declared[parameter.Name] = parameter
+	}
+	names := make([]string, 0, len(arguments))
+	for argument := range arguments {
+		names = append(names, argument)
+	}
+	sort.Strings(names)
+	for _, argument := range names {
+		parameterName, mapped := processing.ParameterArguments[argument]
+		if !mapped || (allFormats && argument == processing.DeliveryFormatArgument) {
+			// A whole-run conversion route already delivers the requested
+			// format among all it provides (#330).
+			continue
+		}
+		parameter, ok := declared[parameterName]
+		if !ok {
+			return &processingRejection{message: executor.fillText(command, messages.ArgumentUnsupported, "{argument}", argument)}
+		}
+		if _, isSource := schema.SourceParameterRole(parameter); isSource {
+			return &processingRejection{message: executor.fillText(command, messages.ArgumentUnsupported, "{argument}", argument)}
+		}
+		// Consent to extra credits comes from the approval of the frozen step
+		// (prepareAgentOperation); no tool argument may set it, whatever the
+		// Schema maps.
+		if parameterName == chosen.offering.ExtraConsentParameter() {
+			return &processingRejection{message: executor.fillText(command, messages.ArgumentUnsupported, "{argument}", argument)}
+		}
+		var value any
+		if err := json.Unmarshal(arguments[argument], &value); err != nil {
+			return &processingRejection{message: executor.fillText(command, messages.InvalidInput, "{detail}", argument)}
+		}
+		// A converter's fixed target must not replace an explicitly requested
+		// format. Keep fixed quality policy elsewhere, and do not select a
+		// different (potentially paid) route as a side effect of this check.
+		if cost := chosen.offering.Cost; cost != nil && parameterName == cost.FormatParameter && parameter.Fixed {
+			var fixedFormat string
+			requestedFormat, isString := value.(string)
+			if json.Unmarshal(parameter.Default, &fixedFormat) != nil || !isString || requestedFormat != fixedFormat {
+				return &processingRejection{message: executor.fillText(command, messages.InvalidInput, "{detail}",
+					executor.formatRefusal(command, chosen.offering, fixedFormat))}
+			}
+		}
+		input[parameterName] = value
+	}
+	return nil
+}
+
+// executeMultiSourceProcessing submits a step whose source is an asset-array
+// (local model merge): every named file must be a saved model of a succeeded
+// Task of this same session. The source count and per-file limits come from
+// the Offering's own source parameter; the kernel resolves and checks the
+// assets again before freezing the step.
+func (executor *Executor) executeMultiSourceProcessing(
+	ctx context.Context, command chat.ToolCommand, capability generation.Capability,
+	arguments map[string]json.RawMessage, observe func(chat.ToolObservation) error,
+) (chat.ToolResult, error) {
+	processing := command.Tool.Processing
+	messages := processing.Messages
+	if capability != generation.ModelMerge {
+		return executor.reject(command, executor.fillText(command, messages.ArgumentUnsupported, "{argument}", processing.SourceAssetsArgument))
+	}
+	for _, argument := range []string{processing.SourceTaskArgument, processing.SourceAssetArgument} {
+		if argument == "" {
+			continue
+		}
+		if _, present := arguments[argument]; present {
+			return executor.reject(command, executor.fillText(command, messages.ArgumentUnsupported, "{argument}", argument))
+		}
+	}
+	choice := processing.Choice
+	requestedOffering := generation.OfferingID("")
+	useDefault := false
+	if choice != nil {
+		requestedOffering = generation.OfferingID(rawString(arguments[choice.OfferingArgument]))
+		useDefault = rawBool(arguments[choice.DefaultArgument])
+	}
+	candidates := executor.multiSourceOfferings(capability)
+	var chosen selectedOffering
+	found := false
+	if requestedOffering != "" {
+		for _, candidate := range candidates {
+			if candidate.ID == requestedOffering {
+				chosen, found = selectedOffering{offering: candidate}, true
+			}
+		}
+		if !found {
+			return executor.unknownService(command, executor.fillText(command, choice.UnknownOffering, "{step}", string(capability)), requestedOffering)
+		}
+	}
+	if !found && len(candidates) > 1 && !useDefault && executor.choices != nil {
+		return executor.askChoice(ctx, command, capability, -1, candidates,
+			func(offering generation.Offering) json.RawMessage {
+				return withArguments(command.Call.Arguments, func(values map[string]any) {
+					delete(values, choice.DefaultArgument)
+					values[choice.OfferingArgument] = string(offering.ID)
+				})
+			},
+			withArguments(command.Call.Arguments, func(values map[string]any) {
+				delete(values, choice.OfferingArgument)
+				values[choice.DefaultArgument] = true
+			}))
+	}
+	if !found && len(candidates) > 0 {
+		chosen, found = selectedOffering{offering: candidates[0]}, true
+	}
+	if !found {
+		return executor.reject(command, executor.fillText(command, processing.Messages.NoOffering, "{step}", string(capability)))
+	}
+	if choice != nil && (requestedOffering != "" || useDefault) {
+		executor.settleChoice(ctx, command, capability, -1, chosen.offering.ID, useDefault)
+	}
+	sourceParameter, ok := multiSourceParameter(chosen.offering)
+	if !ok {
+		return executor.reject(command, executor.fillText(command, messages.NoOffering, "{step}", string(capability)))
+	}
+	var requestedAssets []string
+	if err := json.Unmarshal(arguments[processing.SourceAssetsArgument], &requestedAssets); err != nil {
+		return executor.reject(command, executor.fillText(command, messages.InvalidInput, "{detail}", "source_assets must be an array of model asset IDs"))
+	}
+	minimum := sourceParameter.MinItems
+	if minimum < 1 {
+		minimum = 1
+	}
+	if len(requestedAssets) < minimum || (sourceParameter.MaxItems > 0 && len(requestedAssets) > sourceParameter.MaxItems) {
+		detail := fmt.Sprintf("source_assets must contain between %d and %d model files", minimum, sourceParameter.MaxItems)
+		if sourceParameter.MaxItems <= 0 {
+			detail = fmt.Sprintf("source_assets must contain at least %d model files", minimum)
+		}
+		return executor.reject(command, executor.fillText(command, messages.InvalidInput, "{detail}", detail))
+	}
+	seen := make(map[string]bool, len(requestedAssets))
+	ids := make([]string, 0, len(requestedAssets))
+	for _, value := range requestedAssets {
+		id := strings.TrimSpace(value)
+		if id == "" || seen[id] {
+			return executor.reject(command, executor.fillText(command, messages.InvalidInput, "{detail}", "source_assets must name distinct non-empty model asset IDs"))
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	// A merge may draw from several finished tasks, so scan the same bounded
+	// window list_session_models uses, not only its display limit.
+	tasks, err := executor.sessionModelTasks(ctx, command.OwnerID, command.SessionID, sessionTaskMaxPages*sessionTaskPageSize)
+	if err != nil {
+		return chat.ToolResult{NoSubmission: true}, err
+	}
+	owned := make(map[string]generation.Asset)
+	for _, task := range tasks {
+		for _, asset := range task.Assets {
+			if asset.Role == modelRole && asset.StorageKey != "" {
+				owned[string(asset.ID)] = asset
+			}
+		}
+	}
+	for _, id := range ids {
+		asset, exists := owned[id]
+		if !exists {
+			return executor.reject(command, messages.SourceNotFound)
+		}
+		if len(sourceParameter.MediaTypes) > 0 && !slices.Contains(sourceParameter.MediaTypes, asset.MediaType) ||
+			sourceParameter.MaxBytes > 0 && asset.Size > sourceParameter.MaxBytes {
+			return executor.reject(command, executor.fillText(command, messages.SourceIncompatible, "{step}", string(capability)))
+		}
+	}
+	input := map[string]any{sourceParameter.Name: ids}
+	if rejection := executor.applyProcessingParameterArguments(command, chosen, processing, arguments, input, false); rejection != nil {
+		return executor.reject(command, rejection.message)
+	}
+	if gaps := executor.inputGaps(command, chosen.offering, input); len(gaps) > 0 {
+		return executor.reject(command, executor.fillText(command, messages.InvalidInput, "{detail}", strings.Join(gaps, "; ")))
+	}
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return chat.ToolResult{NoSubmission: true}, err
+	}
+	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, "",
+		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, observe)
+	return executor.processingOutcome(command, result, err, executor.inputShape(command, input))
+}
+
+// multiSourceParameter is the Offering's asset-array source parameter.
+func multiSourceParameter(offering generation.Offering) (generation.Parameter, bool) {
+	for _, parameter := range offering.Parameters {
+		role, isSource := schema.SourceParameterRole(parameter)
+		if isSource && role == schema.SemanticSourceAsset && parameter.Type == "asset-array" {
+			return parameter, true
+		}
+	}
+	return generation.Parameter{}, false
+}
+
+// multiSourceOfferings lists the available Offerings of a multi-source step.
+// The person's explicit choice, then a choice card, then Schema order decide
+// among them, exactly like the single-source path.
+func (executor *Executor) multiSourceOfferings(capability generation.Capability) []generation.Offering {
+	candidates := make([]generation.Offering, 0, 1)
+	for _, offering := range executor.gateway.Offerings(capability) {
+		if !offering.Enabled || !executor.gateway.OfferingAvailable(offering.ID) {
+			continue
+		}
+		if _, ok := multiSourceParameter(offering); ok {
+			candidates = append(candidates, offering)
+		}
+	}
+	return candidates
 }
 
 // processingOutcome reports a step the kernel or the Provider refused before
@@ -840,16 +1106,27 @@ func (executor *Executor) resolveModelSource(
 	// is whichever the result listed first (a 3MF package, say). The source
 	// file is then chosen like the stage and the 加工 panel choose it (#321 B).
 	handleNamesModel := false
+	part := 0
+	partToken := ""
 	if policy.Enabled() {
+		handleToken := taskID
+		// @modelN#k names the k-th part of a split result: the saved model
+		// asset of that Task whose role ordinal is k.
+		if kind, number, ordinal, isPart := policy.ParsePart(taskID); isPart {
+			if kind != chat.AttachmentKindModel || assetID != "" {
+				return generation.Task{}, "", notFound, nil
+			}
+			handleToken, part, partToken = policy.Format(kind, number), ordinal, taskID
+		}
 		// A model handle (or the selection alias) stands for the Task of a
 		// model the server recorded for this session. The Task is still
 		// checked below like one named by ID.
-		if _, _, isHandle := policy.Parse(taskID); isHandle || policy.IsSelectionAlias(taskID) {
-			handleNamesModel = assetID == "" && !policy.IsSelectionAlias(taskID)
+		if _, _, isHandle := policy.Parse(handleToken); isHandle || policy.IsSelectionAlias(handleToken) {
+			handleNamesModel = part == 0 && assetID == "" && !policy.IsSelectionAlias(handleToken)
 			resolved, err := policy.ResolveHandles(command.ReferenceHistory(), command.Options.Selection,
-				[]string{taskID}, chat.AttachmentKindModel)
+				[]string{handleToken}, chat.AttachmentKindModel)
 			if err != nil || len(resolved) == 0 {
-				token := taskID
+				token := handleToken
 				reason := "unknown"
 				var unknown *chat.UnknownHandleError
 				if errors.As(err, &unknown) {
@@ -860,7 +1137,7 @@ func (executor *Executor) resolveModelSource(
 				}, nil
 			}
 			taskID = resolved[0].Attachment.TaskID
-			if assetID == "" {
+			if part == 0 && assetID == "" {
 				assetID = resolved[0].Attachment.AssetID
 			}
 		}
@@ -905,6 +1182,20 @@ func (executor *Executor) resolveModelSource(
 	}
 	if task.State != generation.TaskSucceeded || !hasSavedModel(task) {
 		return generation.Task{}, "", &processingRejection{message: contract.SourceNotReady}, nil
+	}
+	if part > 0 {
+		assetID = ""
+		for _, asset := range task.Assets {
+			if asset.Ordinal == part && asset.Role == modelRole && asset.StorageKey != "" {
+				assetID = string(asset.ID)
+				break
+			}
+		}
+		if assetID == "" {
+			return generation.Task{}, "", &processingRejection{
+				message: executor.handleFailure(command, &chat.UnknownHandleError{Handle: partToken, Reason: "unknown"}).Error(),
+			}, nil
+		}
 	}
 	if handleNamesModel || assetID == "" {
 		// A model named without one of its files is its main model (#326):

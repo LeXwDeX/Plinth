@@ -1049,6 +1049,17 @@ func validateChatToolProcessing(tool ChatToolSchema, capabilityDomains map[schem
 			return nil, err
 		}
 	}
+	if argument := processing.SourceAssetsArgument; argument != "" {
+		if processing.Plan != nil {
+			return nil, errors.New("source_assets_argument 不能用于加工计划工具")
+		}
+		if err := inParameters("source_assets_argument", argument); err != nil {
+			return nil, err
+		}
+		if err := claim("source_assets_argument", argument); err != nil {
+			return nil, err
+		}
+	}
 	for argument, parameter := range processing.ParameterArguments {
 		if err := inParameters("parameter_arguments", argument); err != nil {
 			return nil, err

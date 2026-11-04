@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-04.issue103-brief.1",
+    "revision": "2026-11-05.issue103-parts.1",
     "terminology": {
       "user_facing": [
         {
@@ -1350,6 +1350,15 @@
           "capabilities": [
             "asset-recovery"
           ]
+        },
+        {
+          "id": "local-model-parts",
+          "protocol": "local-model-parts",
+          "adapter_key": "local.parts",
+          "capabilities": [
+            "model-split",
+            "model-merge"
+          ]
         }
       ],
       "input_assets": {
@@ -2397,7 +2406,9 @@
           "analyze-printability",
           "repair-printability",
           "multi-color-print",
-          "rig-check"
+          "rig-check",
+          "model-split",
+          "model-merge"
         ],
         "image_upload": {
           "maximum_pixels": 16777216,
@@ -4263,6 +4274,8 @@
         "ui.studio.stage.action.process_hint.analyze-printability": "检查模型的可打印性，查看诊断报告。",
         "ui.studio.stage.action.process_hint.repair-printability": "处理模型的打印问题，保存新模型并查看修复报告。",
         "ui.studio.stage.action.process_hint.multi-color-print": "把使用同一张基础色贴图的模型转换为多色打印文件。",
+        "ui.studio.stage.action.process_hint.model-split": "把模型拆成多个部件，每个部件单独保存为一个模型。",
+        "ui.studio.stage.action.process_hint.model-merge": "把同一会话中的多个模型合并成一个模型，保留各自的材质与贴图。",
         "ui.studio.stage.action.process_target": "当前 3D 模型",
         "ui.studio.stage.action.remove_background": "去背景",
         "ui.studio.stage.action.remove_background_hint": "去掉背景，只留主体，结果是一个新的 2D 版本。",
@@ -6295,7 +6308,9 @@
               "multi-color-print",
               "rig-check",
               "mesh-segmentation",
-              "mesh-completion"
+              "mesh-completion",
+              "model-split",
+              "model-merge"
             ],
             "consent": "human",
             "idempotency": "required",
@@ -6325,13 +6340,15 @@
                   "multi-color-print",
                   "rig-check",
                   "mesh-segmentation",
-                  "mesh-completion"
+                  "mesh-completion",
+                  "model-split",
+                  "model-merge"
                 ],
-                "description": "Declared processing operation. Check list_offerings for exact source, parameters, delivery and cost; print analysis/report/archive are not model previews."
+                "description": "Declared processing operation. Check list_offerings for exact source, parameters, delivery and cost; print analysis/report/archive are not model previews. model-merge takes source_assets (2-64 models) instead of source_task_id."
               },
               "source_task_id": {
                 "type": "string",
-                "description": "Task ID from list_session_models. For animation it must be a finished rigging task. A model handle such as @model2 (or @selected for the selected model) is accepted instead."
+                "description": "Task ID from list_session_models. For animation it must be a finished rigging task. A model handle such as @model2 (or @selected for the selected model) is accepted instead. Omit it only for model-merge, which takes source_assets."
               },
               "topology": {
                 "type": "string",
@@ -6362,6 +6379,42 @@
               "source_asset_id": {
                 "type": "string",
                 "description": "Optional owned saved model asset of source_task_id; active Harness binds its uploaded source on the server."
+              },
+              "source_assets": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 2,
+                "maxItems": 64,
+                "description": "model-merge only: 2 to 64 saved GLB asset IDs of this session, from list_session_models model_assets. May come from different finished tasks; do not pass source_task_id or source_asset_id with it."
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "node",
+                  "primitive",
+                  "material",
+                  "connected_component"
+                ],
+                "description": "model-split only: split by node, primitive, material or connected mesh component; the Offering default applies when omitted."
+              },
+              "min_part_ratio": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 0.2,
+                "description": "model-split only: fragments below this fraction of the triangles merge into the nearest part by bounding-box center."
+              },
+              "max_parts": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 64,
+                "description": "model-split only: above this many parts, the largest by triangles are kept and the rest merge into one rest part."
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 64,
+                "description": "model-merge only: optional name prefix for the merged result and its source nodes."
               },
               "resize_longest_side": {
                 "type": "number",
@@ -6416,13 +6469,13 @@
               }
             },
             "required": [
-              "step",
-              "source_task_id"
+              "step"
             ],
             "additionalProperties": false
           },
           "processing": {
             "source_task_argument": "source_task_id",
+            "source_assets_argument": "source_assets",
             "step_argument": "step",
             "reference_argument": "reference_image_indices",
             "steps": {
@@ -6436,7 +6489,9 @@
               "multi-color-print": "multi-color-print",
               "rig-check": "rig-check",
               "mesh-segmentation": "mesh-segmentation",
-              "mesh-completion": "mesh-completion"
+              "mesh-completion": "mesh-completion",
+              "model-split": "model-split",
+              "model-merge": "model-merge"
             },
             "parameter_arguments": {
               "topology": "topology",
@@ -6451,7 +6506,11 @@
               "intended_print_height_mm": "intended_print_height_mm",
               "intended_print_longest_side_mm": "intended_print_longest_side_mm",
               "max_colors": "max_colors",
-              "printer_brand": "printer_brand"
+              "printer_brand": "printer_brand",
+              "mode": "mode",
+              "min_part_ratio": "min_part_ratio",
+              "max_parts": "max_parts",
+              "name": "name"
             },
             "source_variant_preference": [
               "glb",
@@ -6517,7 +6576,8 @@
             "repair-printability",
             "multi-color-print",
             "mesh-segmentation",
-            "mesh-completion"
+            "mesh-completion",
+            "model-split"
           ],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
@@ -6540,7 +6600,8 @@
                 "repair-printability",
                 "multi-color-print",
                 "mesh-segmentation",
-                "mesh-completion"
+                "mesh-completion",
+                "model-split"
               ]},"offering_id":{"type":"string","description":"Optional available compatible Offering from list_offerings."},"parameters":{"type":"object","description":"Offering parameter names and values. No source-task/source-asset/consent parameter; defaults are applied by Catalog."}},"required":["capability","parameters"],"additionalProperties":false}}
             },
             "required": ["source_task_id","steps"],
@@ -6559,7 +6620,8 @@
               "repair-printability": "repair-printability",
               "multi-color-print": "multi-color-print",
               "mesh-segmentation": "mesh-segmentation",
-              "mesh-completion": "mesh-completion"
+              "mesh-completion": "mesh-completion",
+              "model-split": "model-split"
             },
             "source_variant_preference": ["glb","gltf","fbx","obj","stl"],
             "plan": {
@@ -9549,6 +9611,18 @@
           "recommended": false
         },
         {
+          "model_id": "local-model-split",
+          "provider_key": "local-model-parts",
+          "name": "拆解模型（本地）",
+          "recommended": false
+        },
+        {
+          "model_id": "local-model-merge",
+          "provider_key": "local-model-parts",
+          "name": "合并模型（本地）",
+          "recommended": false
+        },
+        {
           "model_id": "tripo-uploaded-glb-to-stl",
           "provider_key": "tripo-processing",
           "name": "上传 GLB → STL",
@@ -11587,6 +11661,22 @@
         "label_cn": "编辑四视角图片",
         "order": 24,
         "image_result_group": {"slots":[{"variant":"front","label":"正面"},{"variant":"left","label":"左侧"},{"variant":"back","label":"背面"},{"variant":"right","label":"右侧"}],"partial_message":"ui.studio.result.image_group_partial"}
+      },
+      {
+        "id": "model-split",
+        "domain": "processing",
+        "label": "Split Model",
+        "label_cn": "拆解模型",
+        "icon": "split",
+        "order": 25
+      },
+      {
+        "id": "model-merge",
+        "domain": "processing",
+        "label": "Merge Models",
+        "label_cn": "合并模型",
+        "icon": "combine",
+        "order": 26
       }
     ],
     "task_states": [
@@ -11846,7 +11936,9 @@
         "asset-recovery",
         "mesh-completion",
         "creative-lab-prototype",
-        "creative-lab-build"
+        "creative-lab-build",
+        "model-split",
+        "model-merge"
       ],
       "formats": [
         {
@@ -14512,6 +14604,8 @@
             "ui.studio.stage.action.process_hint.analyze-printability": "Check the model's printability and view the diagnostic report.",
             "ui.studio.stage.action.process_hint.repair-printability": "Fix the model's printing issues, save a new model, and view the repair report.",
             "ui.studio.stage.action.process_hint.multi-color-print": "Convert a model that uses a single base color texture into a multi-color print file.",
+            "ui.studio.stage.action.process_hint.model-split": "Split the model into parts, each saved as its own model.",
+            "ui.studio.stage.action.process_hint.model-merge": "Merge several models of this session into one, keeping each model's materials and textures.",
             "ui.studio.stage.action.process_target": "Current 3D model",
             "ui.studio.stage.action.remove_background": "Remove background",
             "ui.studio.stage.action.remove_background_hint": "Remove the background and keep only the subject; the result is a new 2D version.",
@@ -15156,6 +15250,8 @@
             "capabilities[id=creative-lab-build].label_cn": "Creative Lab · Final build",
             "capabilities[id=mesh-segmentation].label_cn": "Mesh segmentation",
             "capabilities[id=mesh-completion].label_cn": "Part completion",
+            "capabilities[id=model-split].label_cn": "Split model",
+            "capabilities[id=model-merge].label_cn": "Merge models",
             "capabilities[id=image-to-splat].label_cn": "Image to Gaussian Splat",
             "capabilities[id=image-to-multiview].label_cn": "Generate four-view images",
             "capabilities[id=image-to-multiview].image_result_group.slots[variant=front].label": "Front",
@@ -16147,6 +16243,8 @@
             "provider_discovery.legacy_models[name=静态 GLB → glTF].name": "Static GLB → glTF",
             "provider_discovery.legacy_models[name=自包含 glTF → GLB].name": "Self-contained glTF → GLB",
             "provider_discovery.legacy_models[name=平台生成 GLB → glTF 文件包].name": "Platform-generated GLB → glTF bundle",
+            "provider_discovery.legacy_models[name=拆解模型（本地）].name": "Split model (local)",
+            "provider_discovery.legacy_models[name=合并模型（本地）].name": "Merge models (local)",
             "provider_discovery.legacy_models[name=上传 GLB → STL].name": "Uploaded GLB → STL",
             "provider_discovery.legacy_constraint_option_labels.nano-banana-pro.1:1": "1:1 square",
             "provider_discovery.legacy_constraint_option_labels.nano-banana-2.1:1": "1:1 square",
@@ -16289,6 +16387,25 @@
             "Mask 精炼": "Mask refinement",
             "Matting 下载返回 HTTP {status}": "Matting download returned HTTP {status}",
             "Matting 产物定位符无效": "The Matting output locator is invalid.",
+            "拆分方式": "Split method",
+            "拆解模型（本地）": "Split model (local)",
+            "按图元": "By primitive",
+            "按材质": "By material",
+            "按节点": "By node",
+            "按连通块": "By connected component",
+            "按节点、图元、材质或网格连通块拆分；默认按连通块。": "Split by node, primitive, material, or connected mesh component; connected component is the default.",
+            "最小部件占比": "Minimum part ratio",
+            "面数占比低于此值的碎片并入包围盒中心最近的部件。": "Fragments below this triangle ratio are merged into the part whose bounding-box center is nearest.",
+            "最大部件数": "Maximum parts",
+            "超出时按面数保留最大的部件，其余合并为一个 rest 部件。": "Above this count, the largest parts by triangles are kept and the rest merge into one rest part.",
+            "本地模型处理": "Local model processing",
+            "合并模型（本地）": "Merge models (local)",
+            "合并后名称": "Merged name",
+            "可选；合并结果与各来源节点的命名前缀。": "Optional name prefix for the merged result and its source nodes.",
+            "源模型列表": "Source models",
+            "本人同一会话中已成功的平台任务保存的 2 到 64 个静态 GLB，可来自不同任务。": "2 to 64 static GLBs saved by succeeded platform tasks of this same session; they may come from different tasks.",
+            "源模型": "Source model",
+            "本人同一会话中已成功的平台任务保存的静态 GLB；不接受直接上传的文件。": "A static GLB saved by a succeeded platform task of this same session; direct uploads are not accepted.",
             "Matting 创建响应缺少 batch_id": "The Matting create response is missing batch_id.",
             "Matting 批次失败": "Matting batch failed",
             "Matting 批次完成但没有可下载的成功产物": "The Matting batch finished but has no successful outputs to download.",
@@ -31788,6 +31905,210 @@
       ],
       "provider_options": {
         "direction": "glb-to-gltf-package",
+        "profile_id": "generated-glb-v1",
+        "profile_revision": "1",
+        "max_work": 2147483648,
+        "max_concurrent": 1
+      }
+    },
+    {
+      "id": "local/model-parts/split",
+      "revision": "2026-11-05.1",
+      "provider_id": "local",
+      "provider_name": "本地模型处理",
+      "provider_short_label": "本地",
+      "model_id": "local-model-split",
+      "model_name": "拆解模型（本地）",
+      "capability": "model-split",
+      "domain": "processing",
+      "adapter_key": "local.parts",
+      "enabled": true,
+      "default": false,
+      "recommended": false,
+      "display_order": 1,
+      "capability_order": 0,
+      "priority": 280,
+      "estimated_credits": 0,
+      "credits_metered": false,
+      "cancellation_supported": false,
+      "idempotent_submission": true,
+      "timeout_seconds": 300,
+      "poll_interval_seconds": 1,
+      "retry": {
+        "max_attempts": 1,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 1,
+        "retryable": []
+      },
+      "materialize_attempts": 3,
+      "cost": {
+        "base_credits": 0
+      },
+      "parameters": [
+        {
+          "name": "source_asset",
+          "label": "源模型",
+          "type": "asset",
+          "required": true,
+          "semantic": "source-asset",
+          "same_session": true,
+          "media_types": [
+            "model/gltf-binary"
+          ],
+          "extensions": [
+            ".glb"
+          ],
+          "max_bytes": 134217728,
+          "description": "本人同一会话中已成功的平台任务保存的静态 GLB；不接受直接上传的文件。"
+        },
+        {
+          "name": "mode",
+          "label": "拆分方式",
+          "type": "select",
+          "required": true,
+          "default": "connected_component",
+          "options": [
+            {
+              "value": "node",
+              "label": "按节点"
+            },
+            {
+              "value": "primitive",
+              "label": "按图元"
+            },
+            {
+              "value": "material",
+              "label": "按材质"
+            },
+            {
+              "value": "connected_component",
+              "label": "按连通块"
+            }
+          ],
+          "description": "按节点、图元、材质或网格连通块拆分；默认按连通块。"
+        },
+        {
+          "name": "min_part_ratio",
+          "label": "最小部件占比",
+          "type": "number",
+          "required": true,
+          "default": 0.002,
+          "minimum": 0,
+          "maximum": 0.2,
+          "description": "面数占比低于此值的碎片并入包围盒中心最近的部件。"
+        },
+        {
+          "name": "max_parts",
+          "label": "最大部件数",
+          "type": "number",
+          "required": true,
+          "integer": true,
+          "default": 32,
+          "minimum": 1,
+          "maximum": 64,
+          "description": "超出时按面数保留最大的部件，其余合并为一个 rest 部件。"
+        }
+      ],
+      "outputs": [
+        {
+          "role": "model",
+          "variant": "glb",
+          "minimum": 1,
+          "media_types": [
+            "model/gltf-binary"
+          ],
+          "max_bytes": 134217728
+        },
+        {
+          "role": "parts_manifest",
+          "variant": "json",
+          "minimum": 1,
+          "media_types": [
+            "application/json"
+          ],
+          "max_bytes": 16777216
+        }
+      ],
+      "provider_options": {
+        "profile_id": "generated-glb-v1",
+        "profile_revision": "1",
+        "max_work": 2147483648,
+        "max_concurrent": 1
+      }
+    },
+    {
+      "id": "local/model-parts/merge",
+      "revision": "2026-11-05.1",
+      "provider_id": "local",
+      "provider_name": "本地模型处理",
+      "provider_short_label": "本地",
+      "model_id": "local-model-merge",
+      "model_name": "合并模型（本地）",
+      "capability": "model-merge",
+      "domain": "processing",
+      "adapter_key": "local.parts",
+      "enabled": true,
+      "default": false,
+      "recommended": false,
+      "display_order": 1,
+      "capability_order": 0,
+      "priority": 280,
+      "estimated_credits": 0,
+      "credits_metered": false,
+      "cancellation_supported": false,
+      "idempotent_submission": true,
+      "timeout_seconds": 300,
+      "poll_interval_seconds": 1,
+      "retry": {
+        "max_attempts": 1,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 1,
+        "retryable": []
+      },
+      "materialize_attempts": 3,
+      "cost": {
+        "base_credits": 0
+      },
+      "parameters": [
+        {
+          "name": "source_assets",
+          "label": "源模型列表",
+          "type": "asset-array",
+          "required": true,
+          "semantic": "source-asset",
+          "same_session": true,
+          "media_types": [
+            "model/gltf-binary"
+          ],
+          "extensions": [
+            ".glb"
+          ],
+          "max_bytes": 134217728,
+          "min_items": 2,
+          "max_items": 64,
+          "max_total_encoded_bytes": 268435456,
+          "description": "本人同一会话中已成功的平台任务保存的 2 到 64 个静态 GLB，可来自不同任务。"
+        },
+        {
+          "name": "name",
+          "label": "合并后名称",
+          "type": "text",
+          "max_length": 64,
+          "description": "可选；合并结果与各来源节点的命名前缀。"
+        }
+      ],
+      "outputs": [
+        {
+          "role": "model",
+          "variant": "glb",
+          "minimum": 1,
+          "media_types": [
+            "model/gltf-binary"
+          ],
+          "max_bytes": 134217728
+        }
+      ],
+      "provider_options": {
         "profile_id": "generated-glb-v1",
         "profile_revision": "1",
         "max_work": 2147483648,

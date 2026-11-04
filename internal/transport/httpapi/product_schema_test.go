@@ -83,7 +83,7 @@ func TestProductSchemaIsPubliclyProjectedForRuntimeAndFrontend(t *testing.T) {
 		t.Fatal(err)
 	}
 	if body.Schema.Revision == "" ||
-		len(body.Schema.Capabilities) != 25 ||
+		len(body.Schema.Capabilities) != 27 ||
 		body.Schema.Capabilities[0].Label == "" ||
 		body.Schema.Capabilities[0].LabelCN == "" ||
 		body.Schema.Capabilities[0].LegacyAPI == nil ||
