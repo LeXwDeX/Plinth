@@ -282,6 +282,30 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
+	// The audit service is created before the chat service so the Agent's
+	// production-brief tool can record the same product audit as the HTTP PUT
+	// (#103); the bootstrap report below still uses it.
+	administrationAuditLogs := applicationSchema.Administration.AuditLogs
+	administrationAuditService, err := administration.NewAuditService(
+		administration.AuditServiceConfig{
+			Repository: repository,
+			DefaultPage: administrationAuditLogs.Limits.
+				DefaultPage,
+			DefaultPageSize: administrationAuditLogs.Limits.
+				DefaultPageSize,
+			MaximumPageSize: administrationAuditLogs.Limits.
+				MaximumPageSize,
+			IDPrefix: administrationAuditLogs.Defaults.IDPrefix,
+			WriteMaximumAttempts: administrationAuditLogs.WritePolicy.
+				MaximumAttempts,
+			WriteRetryDelay: time.Duration(
+				administrationAuditLogs.WritePolicy.RetryDelayMilliseconds,
+			) * time.Millisecond,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
 	approvalPolicy := approvalPolicyFromSchema(applicationSchema)
 	chatService, err := chat.NewService(chat.ServiceConfig{
 		ApprovalPolicy:      approvalPolicy,
@@ -294,6 +318,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		RetiredModels: taskCatalog.RetiredModelSuccessors(),
 		// The production purposes and the brief fields (#103).
 		Model3DUsage: applicationSchema.Chat.Model3DUsage,
+		// The declared generic cards; the brief write settles the usage-profile
+		// kind by its Schema id and argument name (#103).
+		ChoiceKinds: applicationSchema.Chat.Choice.Kinds,
 		// The deployment's chat model, its thinking profile and context
 		// window (#322).
 		Models: chat.ModelPolicy{
@@ -604,10 +631,19 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		InspectModel:       toolExecutor.InspectModel,
 		RenderModelViews:   toolExecutor.RenderModelViews,
 		CompareModels:      toolExecutor.CompareModels,
-		UpdateNotes: chatService.SetSessionNotes,
+		UpdateNotes:        chatService.SetSessionNotes,
 		UpdateBrief: func(ctx context.Context, ownerID, sessionID string, brief map[string]json.RawMessage) error {
-			_, err := chatService.SetProductionBrief(ctx, ownerID, sessionID, brief)
-			return err
+			return updateProductionBriefAudited(
+				ctx,
+				chatService,
+				administrationAuditService,
+				logger,
+				applicationSchema.Chat.Audit.ProductionBriefAction,
+				applicationSchema.Chat.Audit.SessionResourceType,
+				ownerID,
+				sessionID,
+				brief,
+			)
 		},
 		AskChoice:            chatService.AskChoice,
 		ChoiceKinds:          applicationSchema.Chat.Choice.Kinds,
@@ -872,27 +908,6 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		return nil, err
 	}
 	administrationUsers := applicationSchema.Administration.Users
-	administrationAuditLogs := applicationSchema.Administration.AuditLogs
-	administrationAuditService, err := administration.NewAuditService(
-		administration.AuditServiceConfig{
-			Repository: repository,
-			DefaultPage: administrationAuditLogs.Limits.
-				DefaultPage,
-			DefaultPageSize: administrationAuditLogs.Limits.
-				DefaultPageSize,
-			MaximumPageSize: administrationAuditLogs.Limits.
-				MaximumPageSize,
-			IDPrefix: administrationAuditLogs.Defaults.IDPrefix,
-			WriteMaximumAttempts: administrationAuditLogs.WritePolicy.
-				MaximumAttempts,
-			WriteRetryDelay: time.Duration(
-				administrationAuditLogs.WritePolicy.RetryDelayMilliseconds,
-			) * time.Millisecond,
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
 	// #319: the bootstrap ran before the audit trail existed; report it now.
 	reportAdminBootstrap(context.Background(), logger, administrationAuditService,
 		authenticationSchema.API, config.AdminUsername, adminBootstrap)

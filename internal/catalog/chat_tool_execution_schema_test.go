@@ -16,7 +16,7 @@ func TestDefaultChatToolsDeclareRuntimeExecutionContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := c.Application()
-	if len(app.Chat.Tools) != 15 || len(app.Chat.AgentTools) != 14 {
+	if len(app.Chat.Tools) != 15 || len(app.Chat.AgentTools) != 16 {
 		t.Fatalf("chat tool inventory = generation:%d controls:%d", len(app.Chat.Tools), len(app.Chat.AgentTools))
 	}
 	if err := catalog.ValidateApplicationSchema(app); err != nil {
@@ -52,7 +52,19 @@ func TestCatalogAllowsNewGenerationToolNameWithRegisteredCapability(t *testing.T
 	if err := json.Unmarshal(document["application"], &app); err != nil {
 		t.Fatal(err)
 	}
-	app.Chat.Tools[0].Name = "generate_image_variant"
+	// Rename a tool the Catalog localizes by identity (its description lives in
+	// the tool declaration, not the bundles), so the new name only has to keep a
+	// registered generation capability; the old name appears nowhere else.
+	renamed := false
+	for index := range app.Chat.Tools {
+		if app.Chat.Tools[index].Name == "create_model_3d" {
+			app.Chat.Tools[index].Name = "generate_model_3d_variant"
+			renamed = true
+		}
+	}
+	if !renamed {
+		t.Fatal("create_model_3d is not declared")
+	}
 	encoded, err := json.Marshal(app)
 	if err != nil {
 		t.Fatal(err)

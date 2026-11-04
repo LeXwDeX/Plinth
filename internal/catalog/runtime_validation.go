@@ -332,6 +332,8 @@ func validateRuntime(schema RuntimeSchema) error {
 		"task_grant_decision":             {"requestID"},
 		"chat_session_approval":           {"sessionID"},
 		"chat_session_notes":              {"sessionID"},
+		"chat_session_brief":              {"sessionID"},
+		"chat_session_model3d":            {"sessionID"},
 		"chat_session_pick":               {"sessionID"},
 		"chat_session_choices":            {"sessionID"},
 		"chat_session_agent_scope":        {"sessionID"},

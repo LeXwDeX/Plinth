@@ -154,29 +154,29 @@ type Config struct {
 }
 
 type Executor struct {
-	offerings              func() []generation.Offering
-	context                catalog.ChatContextSchema
-	skillRuntime           *skillrun.Runtime
-	skillReferences        SkillReferenceResolver
-	skillOfferings         SkillOfferingResolver
-	skillRecipes           map[string]string
-	skillTurnStopped       func(context.Context, string, string, string) (bool, error)
-	threeView              catalog.ChatThreeViewSchema
-	params                 *agentparams.Store
-	generate               chat.ToolExecutor
-	preflight              func(command chat.ToolCommand) string
-	projection             func() json.RawMessage
-	historyLookup          chat.HistoryLookupPolicy
-	readTask               func(ctx context.Context, ownerID, taskID string) (json.RawMessage, error)
-	recoverTask            func(ctx context.Context, ownerID, sessionID, taskID string) (json.RawMessage, error)
-	listModels             func(ctx context.Context, ownerID, sessionID string) (json.RawMessage, error)
-	readProcessingPlan     func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
-	inspectModel           func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
-	renderModelViews       func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
-	compareModels          func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
-	updateNotes            func(ctx context.Context, ownerID, sessionID, notes string) (string, error)
-	updateBrief            func(ctx context.Context, ownerID, sessionID string, brief map[string]json.RawMessage) error
-	askChoice              func(ctx context.Context, command chat.ToolCommand, kind catalog.ChatChoiceKindSchema,
+	offerings          func() []generation.Offering
+	context            catalog.ChatContextSchema
+	skillRuntime       *skillrun.Runtime
+	skillReferences    SkillReferenceResolver
+	skillOfferings     SkillOfferingResolver
+	skillRecipes       map[string]string
+	skillTurnStopped   func(context.Context, string, string, string) (bool, error)
+	threeView          catalog.ChatThreeViewSchema
+	params             *agentparams.Store
+	generate           chat.ToolExecutor
+	preflight          func(command chat.ToolCommand) string
+	projection         func() json.RawMessage
+	historyLookup      chat.HistoryLookupPolicy
+	readTask           func(ctx context.Context, ownerID, taskID string) (json.RawMessage, error)
+	recoverTask        func(ctx context.Context, ownerID, sessionID, taskID string) (json.RawMessage, error)
+	listModels         func(ctx context.Context, ownerID, sessionID string) (json.RawMessage, error)
+	readProcessingPlan func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	inspectModel       func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	renderModelViews   func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	compareModels      func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	updateNotes        func(ctx context.Context, ownerID, sessionID, notes string) (string, error)
+	updateBrief        func(ctx context.Context, ownerID, sessionID string, brief map[string]json.RawMessage) error
+	askChoice          func(ctx context.Context, command chat.ToolCommand, kind catalog.ChatChoiceKindSchema,
 		arguments chat.AskChoiceArguments) (chat.ToolResult, error)
 	choiceKinds            map[string]catalog.ChatChoiceKindSchema
 	briefSavedMessage      string

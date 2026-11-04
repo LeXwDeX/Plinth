@@ -79,6 +79,7 @@ func TestAskChoiceBuildsAUsageProfileCardAndTheBriefSettlesIt(t *testing.T) {
 	}
 	service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) {
 		config.Model3DUsage = testModel3DUsage()
+		config.ChoiceKinds = []catalog.ChatChoiceKindSchema{usageProfileKind()}
 	})
 	service.SetChoices(repository, 20)
 	command := chat.ToolCommand{
@@ -196,6 +197,49 @@ func TestAskChoiceBuildsAUsageProfileCardAndTheBriefSettlesIt(t *testing.T) {
 	}
 }
 
+// The brief write settles the usage-profile kind by the id and argument the
+// Schema declares, so renaming either needs no code change (#103).
+func TestBriefSettlesTheUsageProfileKindDeclaredByTheSchema(t *testing.T) {
+	ctx := context.Background()
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "chat.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repository.Close() })
+	now := time.Now().UTC()
+	if _, err := repository.CreateSession(ctx, chat.Session{
+		ID: "session-a", OwnerID: "owner-a", OwnerName: "A", Title: "a", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	kind := catalog.ChatChoiceKindSchema{
+		ID: "purpose_card", OptionSource: "usage_profiles",
+		ToolName: "update_production_brief", Argument: "profile",
+		Question: "用途？", Message: "请选择用途。",
+	}
+	service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) {
+		config.Model3DUsage = testModel3DUsage()
+		config.ChoiceKinds = []catalog.ChatChoiceKindSchema{kind}
+	})
+	service.SetChoices(repository, 20)
+	if _, err := service.AskChoice(ctx, chat.ToolCommand{
+		OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-1",
+		Call: agents.ToolCall{ID: "call-1", Name: "ask_choice"},
+	}, kind, chat.AskChoiceArguments{Kind: kind.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SetProductionBrief(ctx, "owner-a", "session-a", map[string]json.RawMessage{
+		"purpose": json.RawMessage(`"game_character"`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	choices, err := service.ListChoices(ctx, "owner-a", "session-a")
+	if err != nil || len(choices) != 1 || choices[0].Kind != kind.ID ||
+		choices[0].State != chat.ChoiceAnswered || choices[0].AnswerOptionID != "game_character" {
+		t.Fatalf("settled card = %+v %v", choices, err)
+	}
+}
+
 func TestValidateProductionBriefNormalizesAndBounds(t *testing.T) {
 	usage := testModel3DUsage()
 	tests := []struct {
@@ -205,9 +249,9 @@ func TestValidateProductionBriefNormalizesAndBounds(t *testing.T) {
 		success bool
 	}{
 		{name: "a whole brief", raw: map[string]json.RawMessage{
-			"purpose": json.RawMessage(`" game_character "`),
-			"style":   json.RawMessage(`"  写实  "`),
-			"needs_rig": json.RawMessage(`true`),
+			"purpose":         json.RawMessage(`" game_character "`),
+			"style":           json.RawMessage(`"  写实  "`),
+			"needs_rig":       json.RawMessage(`true`),
 			"triangle_budget": json.RawMessage(`40000`),
 		}, success: true},
 		{name: "null clears a field", raw: map[string]json.RawMessage{
@@ -234,7 +278,7 @@ func TestValidateProductionBriefNormalizesAndBounds(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			brief, err := chat.ValidateProductionBrief(usage.Brief, usage.Profiles, test.raw)
+			_, err := chat.ValidateProductionBrief(usage.Brief, usage.Profiles, test.raw)
 			if test.success {
 				if err != nil {
 					t.Fatalf("valid brief refused: %v", err)
@@ -248,9 +292,9 @@ func TestValidateProductionBriefNormalizesAndBounds(t *testing.T) {
 		})
 	}
 	brief, err := chat.ValidateProductionBrief(usage.Brief, usage.Profiles, map[string]json.RawMessage{
-		"purpose": json.RawMessage(`" game_character "`),
-		"style":   json.RawMessage(`" 写实 "`),
-		"needs_rig": json.RawMessage(`true`),
+		"purpose":         json.RawMessage(`" game_character "`),
+		"style":           json.RawMessage(`" 写实 "`),
+		"needs_rig":       json.RawMessage(`true`),
 		"triangle_budget": json.RawMessage(`40000`),
 	})
 	if err != nil {

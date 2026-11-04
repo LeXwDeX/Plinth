@@ -212,17 +212,19 @@ func TestCrossDomainModelFallbackValidationRejectsUnsafeDeclarations(t *testing.
 		name   string
 		mutate func(*catalog.ApplicationSchema)
 	}{
+		// refine_image still uses the workspace model and its cross-domain
+		// fallback; the 3D generation tools moved to the model argument (#103).
 		{"fallback needs the user-model requirement", func(a *catalog.ApplicationSchema) {
-			find(a, "create_model_3d").RequireUserModel = false
+			find(a, "refine_image").RequireUserModel = false
 		}},
 		{"fallback needs exactly one domain", func(a *catalog.ApplicationSchema) {
-			find(a, "create_model_3d").Execution.Domains = []string{"image", "model-3d"}
+			find(a, "refine_image").Execution.Domains = []string{"image", "model-3d"}
 		}},
 		{"fallback must be disclosed to the Agent", func(a *catalog.ApplicationSchema) {
-			find(a, "create_model_3d").ResultFields.ModelFallback = ""
+			find(a, "refine_image").ResultFields.ModelFallback = ""
 		}},
 		{"fallback needs the model name result key", func(a *catalog.ApplicationSchema) {
-			find(a, "create_model_3d").ResultFields.Model = ""
+			find(a, "refine_image").ResultFields.Model = ""
 		}},
 		{"domain models field is required", func(a *catalog.ApplicationSchema) {
 			a.Chat.API.Fields.DomainModels = ""

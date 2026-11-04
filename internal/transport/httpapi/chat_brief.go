@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"sort"
 
 	"github.com/LeXwDeX/Plinth/internal/access"
 	"github.com/LeXwDeX/Plinth/internal/administration"
@@ -92,7 +91,7 @@ func (s *Server) putChatSessionBrief(writer http.ResponseWriter, request *http.R
 		s.writeChatBriefError(writer, err)
 		return
 	}
-	if changed := changedBriefFields(previous, stored); len(changed) > 0 {
+	if changed := chat.ChangedProductionBriefFields(previous, stored); len(changed) > 0 {
 		s.recordProductAudit(request, administration.AuditEvent{
 			Action:       s.application.Chat.Audit.ProductionBriefAction,
 			ActorID:      principal.ID(),
@@ -104,28 +103,6 @@ func (s *Server) putChatSessionBrief(writer http.ResponseWriter, request *http.R
 	}
 	writer.Header().Set("Cache-Control", s.application.Runtime.HTTP.PrivateCacheControl)
 	writeJSON(writer, http.StatusOK, s.chatBriefWire(sessionID, stored))
-}
-
-// changedBriefFields lists the field names whose stored value differs,
-// including fields one side does not have.
-func changedBriefFields(previous, next chat.ProductionBrief) []string {
-	names := map[string]struct{}{}
-	for name := range previous {
-		names[name] = struct{}{}
-	}
-	for name := range next {
-		names[name] = struct{}{}
-	}
-	changed := make([]string, 0, len(names))
-	for name := range names {
-		before, hadBefore := previous[name]
-		after, hadAfter := next[name]
-		if hadBefore != hadAfter || string(before) != string(after) {
-			changed = append(changed, name)
-		}
-	}
-	sort.Strings(changed)
-	return changed
 }
 
 func (s *Server) chatExplicitModel3DWire(sessionID, model string) map[string]any {

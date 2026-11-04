@@ -114,17 +114,32 @@ func (executor *Executor) ToolDescriptionNote(tool catalog.ChatToolSchema, optio
 			return ""
 		}
 	} else {
-		if selectsOfferingByArgument(tool) {
+		switch {
+		case selectsOfferingByArgument(tool):
 			return ""
-		}
-		model := executor.userModel(command)
-		if model == "" && tool.RequireUserModel && !executor.fallbackModelAllowed(command) {
-			return ""
-		}
-		var err error
-		offering, err = executor.selectOffering(tool.Capability, tool, model)
-		if err != nil {
-			return ""
+		case tool.ModelArgument != "":
+			// #103: the 3D model is no longer the workspace pick. Only the
+			// person's explicit session pick is known when tool descriptions are
+			// written, so the note names that model and stays silent otherwise;
+			// a purpose or default recommendation is not a pick.
+			if strings.TrimSpace(options.ExplicitModel3D) == "" {
+				return ""
+			}
+			choice, err := executor.chooseOffering(command, tool.Capability, nil, modelInput{})
+			if err != nil || choice.Refusal != "" || choice.Offering.ID == "" {
+				return ""
+			}
+			offering = choice.Offering
+		default:
+			model := executor.userModel(command)
+			if model == "" && tool.RequireUserModel && !executor.fallbackModelAllowed(command) {
+				return ""
+			}
+			var err error
+			offering, err = executor.selectOffering(tool.Capability, tool, model)
+			if err != nil {
+				return ""
+			}
 		}
 	}
 	limit := referenceImageLimit(offering)

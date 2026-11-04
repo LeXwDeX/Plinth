@@ -294,14 +294,17 @@ func TestTheToolDescriptionFollowsThePickedModelsPictureLimit(t *testing.T) {
 		options chat.TurnOptions
 		want    string
 	}{
-		"Meshy 7.1 in 3D":                 {chat.TurnOptions{AIModel: "meshy-7.1", CreativeDomain: "model-3d"}, fill(notes.Single, "Meshy 7.1", 1)},
-		"Meshy 7.1 picked from 2D":        {chat.TurnOptions{AIModel: "gpt-image-2", CreativeDomain: "image", DomainModels: map[string]string{"model-3d": "meshy-7.1"}}, fill(notes.Single, "Meshy 7.1", 1)},
-		"Meshy 7.1 multi-view":            {chat.TurnOptions{AIModel: "meshy-7.1-multiview", CreativeDomain: "model-3d", Locale: "zh-CN"}, fill(notes.Multiple, "Meshy 7.1 多视图", 4)},
-		"Meshy 7.1 multi-view in English": {chat.TurnOptions{AIModel: "meshy-7.1-multiview", CreativeDomain: "model-3d", Locale: "en"}, fill(notes.Multiple, "Meshy 7.1 multi-view", 4)},
-		"Rodin Gen-2.5":                   {chat.TurnOptions{AIModel: "rodin-gen-2.5", CreativeDomain: "model-3d"}, fill(notes.Multiple, "Rodin Gen-2.5", 5)},
-		"Rodin Gen-2.5 in English":        {chat.TurnOptions{AIModel: "rodin-gen-2.5", CreativeDomain: "model-3d", Locale: "en"}, fill(notes.Multiple, "Rodin Gen-2.5", 5)},
+		"Meshy 7.1 in 3D": {chat.TurnOptions{ExplicitModel3D: "meshy-7.1", CreativeDomain: "model-3d"}, fill(notes.Single, "Meshy 7.1", 1)},
+		// #103: the workspace's per-domain pick is not the session's explicit
+		// pick, so only the latter may be named as the model chosen for 3D.
+		"Meshy 7.1 explicitly picked":     {chat.TurnOptions{ExplicitModel3D: "meshy-7.1", AIModel: "gpt-image-2", CreativeDomain: "image"}, fill(notes.Single, "Meshy 7.1", 1)},
+		"Meshy 7.1 multi-view":            {chat.TurnOptions{ExplicitModel3D: "meshy-7.1-multiview", CreativeDomain: "model-3d", Locale: "zh-CN"}, fill(notes.Multiple, "Meshy 7.1 多视图", 4)},
+		"Meshy 7.1 multi-view in English": {chat.TurnOptions{ExplicitModel3D: "meshy-7.1-multiview", CreativeDomain: "model-3d", Locale: "en"}, fill(notes.Multiple, "Meshy 7.1 multi-view", 4)},
+		"Rodin Gen-2.5":                   {chat.TurnOptions{ExplicitModel3D: "rodin-gen-2.5", CreativeDomain: "model-3d"}, fill(notes.Multiple, "Rodin Gen-2.5", 5)},
+		"Rodin Gen-2.5 in English":        {chat.TurnOptions{ExplicitModel3D: "rodin-gen-2.5", CreativeDomain: "model-3d", Locale: "en"}, fill(notes.Multiple, "Rodin Gen-2.5", 5)},
 		"no 3D model picked in 3D":        {chat.TurnOptions{CreativeDomain: "model-3d"}, ""},
-		"a model of another domain":       {chat.TurnOptions{AIModel: "gpt-image-2", CreativeDomain: "model-3d"}, ""},
+		"workspace pick only":             {chat.TurnOptions{AIModel: "meshy-7.1", CreativeDomain: "model-3d"}, ""},
+		"a model of another domain":       {chat.TurnOptions{ExplicitModel3D: "gpt-image-2", CreativeDomain: "model-3d"}, ""},
 	} {
 		if strings.HasPrefix(name, "Meshy") {
 			model := "Meshy 7.1"
@@ -320,12 +323,12 @@ func TestTheToolDescriptionFollowsThePickedModelsPictureLimit(t *testing.T) {
 	// A tool without the declaration gets no note.
 	plain := tool
 	plain.ReferenceCapacityNote = catalog.ChatToolReferenceCapacityNote{}
-	if got := executor.ToolDescriptionNote(plain, chat.TurnOptions{AIModel: "meshy-7.1", CreativeDomain: "model-3d"}); got != "" {
+	if got := executor.ToolDescriptionNote(plain, chat.TurnOptions{ExplicitModel3D: "meshy-7.1", CreativeDomain: "model-3d"}); got != "" {
 		t.Fatalf("undeclared note = %q", got)
 	}
 	old := tool
 	old.ReferenceCapacityNote.NoPrompt = ""
-	if got, want := executor.ToolDescriptionNote(old, chat.TurnOptions{AIModel: "meshy-7.1", CreativeDomain: "model-3d"}), fill(old.ReferenceCapacityNote.Single, "Meshy 7.1", 1); got != want {
+	if got, want := executor.ToolDescriptionNote(old, chat.TurnOptions{ExplicitModel3D: "meshy-7.1", CreativeDomain: "model-3d"}), fill(old.ReferenceCapacityNote.Single, "Meshy 7.1", 1); got != want {
 		t.Fatalf("old note = %q, want %q", got, want)
 	}
 }
@@ -389,9 +392,9 @@ func TestTheMultiPictureToolNoteScopesItsLimitToTheSelectedModel(t *testing.T) {
 		model   string
 		count   int
 	}{
-		"Meshy 7.1 multi-view":            {chat.TurnOptions{AIModel: "meshy-7.1-multiview", CreativeDomain: "model-3d"}, "Meshy 7.1 多视图", 4},
-		"Meshy 7.1 multi-view in English": {chat.TurnOptions{AIModel: "meshy-7.1-multiview", CreativeDomain: "model-3d", Locale: "en"}, "Meshy 7.1 multi-view", 4},
-		"Rodin Gen-2.5":                   {chat.TurnOptions{AIModel: "rodin-gen-2.5", CreativeDomain: "model-3d"}, "Rodin Gen-2.5", 5},
+		"Meshy 7.1 multi-view":            {chat.TurnOptions{ExplicitModel3D: "meshy-7.1-multiview", CreativeDomain: "model-3d"}, "Meshy 7.1 多视图", 4},
+		"Meshy 7.1 multi-view in English": {chat.TurnOptions{ExplicitModel3D: "meshy-7.1-multiview", CreativeDomain: "model-3d", Locale: "en"}, "Meshy 7.1 multi-view", 4},
+		"Rodin Gen-2.5":                   {chat.TurnOptions{ExplicitModel3D: "rodin-gen-2.5", CreativeDomain: "model-3d"}, "Rodin Gen-2.5", 5},
 	} {
 		note := executor.ToolDescriptionNote(tool, test.options)
 		limit := strconv.Itoa(test.count)
@@ -431,7 +434,7 @@ func TestReferenceToolDescriptionDoesNotPromiseUnsentText(t *testing.T) {
 		{"unknown", "en", false}, {"", "zh-CN", false},
 	} {
 		t.Run(tc.model+"/"+tc.locale, func(t *testing.T) {
-			note := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: tc.model, CreativeDomain: "model-3d", Locale: tc.locale})
+			note := executor.ToolDescriptionNote(tool, chat.TurnOptions{ExplicitModel3D: tc.model, CreativeDomain: "model-3d", Locale: tc.locale})
 			if strings.Contains(note, warning) != tc.warn {
 				t.Fatalf("warning presence = %v, want %v: %q", strings.Contains(note, warning), tc.warn, note)
 			}
@@ -450,7 +453,7 @@ func TestReferenceToolDescriptionDoesNotPromiseUnsentText(t *testing.T) {
 		})
 	}
 	for _, model := range []string{"meshy-7.1-multiview", "rodin-gen-2.5"} {
-		note := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: model, CreativeDomain: "model-3d"})
+		note := executor.ToolDescriptionNote(tool, chat.TurnOptions{ExplicitModel3D: model, CreativeDomain: "model-3d"})
 		if !strings.Contains(note, "Do not claim that a collage sent as one picture is equivalent to sending each original picture separately unless the selected Offering's input contract explicitly supports it") {
 			t.Errorf("%s: missing collage guidance: %s", model, note)
 		}
@@ -461,7 +464,7 @@ func TestReferenceToolNoteKeepsActionAndEvidenceBoundaries(t *testing.T) {
 	tool, executor := toolDescriptionNoteFixture(t)
 	for _, model := range []string{"meshy-7.1", "meshy-7.1-multiview", "rodin-gen-2.5"} {
 		t.Run(model, func(t *testing.T) {
-			note := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: model, CreativeDomain: "model-3d"})
+			note := executor.ToolDescriptionNote(tool, chat.TurnOptions{ExplicitModel3D: model, CreativeDomain: "model-3d"})
 			for _, guidance := range []string{
 				"Only the person can change the selected generation model in the workspace selector",
 				"Chat confirmation does not let you switch it",
@@ -563,7 +566,7 @@ func TestReferenceToolDescriptionFollowsFrozenHarnessOffering(t *testing.T) {
 	}
 	free := snapshot(rodin)
 	free.Selection.OperationID = ""
-	if got := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: "meshy-7.1-multiview", CreativeDomain: "model-3d", Harness: free}); !strings.Contains(got, "Do not promise that the person's text") {
+	if got := executor.ToolDescriptionNote(tool, chat.TurnOptions{ExplicitModel3D: "meshy-7.1-multiview", CreativeDomain: "model-3d", Harness: free}); !strings.Contains(got, "Do not promise that the person's text") {
 		t.Fatalf("inactive harness did not use workspace model: %q", got)
 	}
 }
@@ -643,7 +646,7 @@ func TestToolDescriptionListsOnlyDeclaredSettings(t *testing.T) {
 		"rodin-gen-2.5":       {"Rodin Gen-2.5", ""},
 	} {
 		t.Run(model, func(t *testing.T) {
-			note := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: model, CreativeDomain: "model-3d", Locale: "en"})
+			note := executor.ToolDescriptionNote(tool, chat.TurnOptions{ExplicitModel3D: model, CreativeDomain: "model-3d", Locale: "en"})
 			if test.settings == "" {
 				if strings.Contains(note, "offers only these settings") {
 					t.Fatalf("a settings sentence for an Offering without user settings: %s", note)
@@ -660,18 +663,18 @@ func TestToolDescriptionListsOnlyDeclaredSettings(t *testing.T) {
 		})
 	}
 	// An Offering that declares no target face count never lists one.
-	multiview := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: "meshy-7.1-multiview", CreativeDomain: "model-3d", Locale: "en"})
+	multiview := executor.ToolDescriptionNote(tool, chat.TurnOptions{ExplicitModel3D: "meshy-7.1-multiview", CreativeDomain: "model-3d", Locale: "en"})
 	if strings.Contains(multiview, "Target face count") {
 		t.Fatalf("multi-view note lists an undeclared setting: %s", multiview)
 	}
 	// The default locale lists the Schema's own names.
-	if zh := executor.ToolDescriptionNote(tool, chat.TurnOptions{AIModel: "meshy-7.1-multiview", CreativeDomain: "model-3d"}); !strings.Contains(zh, "几何分辨率, 拓扑类型, 姿势模式") {
+	if zh := executor.ToolDescriptionNote(tool, chat.TurnOptions{ExplicitModel3D: "meshy-7.1-multiview", CreativeDomain: "model-3d"}); !strings.Contains(zh, "几何分辨率, 拓扑类型, 姿势模式") {
 		t.Fatalf("default-locale note lacks the Schema names: %s", zh)
 	}
 	// A tool without the declaration keeps the earlier note.
 	old := tool
 	old.ReferenceCapacityNote.Settings = ""
-	if got := executor.ToolDescriptionNote(old, chat.TurnOptions{AIModel: "meshy-7.1", CreativeDomain: "model-3d"}); strings.Contains(got, "offers only these settings") {
+	if got := executor.ToolDescriptionNote(old, chat.TurnOptions{ExplicitModel3D: "meshy-7.1", CreativeDomain: "model-3d"}); strings.Contains(got, "offers only these settings") {
 		t.Fatalf("settings sentence without declaration: %s", got)
 	}
 }

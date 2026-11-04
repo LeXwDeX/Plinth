@@ -1879,11 +1879,20 @@ func testProductDocument(offerings string) []byte {
 		}
 	}
 	// The reused plan tool asks for a service on a choice card (#321), so the
-	// fixture carries the card's declarations too.
+	// fixture carries the card's declarations too. The generic kinds (#103)
+	// target tools this minimal fixture does not declare, so it carries only
+	// the processing choice contract.
 	application.Chat.Choice = defaultChat.Choice
+	application.Chat.Choice.Kinds = nil
 	application.Chat.API.Fields.ChoiceAnswer = defaultChat.API.Fields.ChoiceAnswer
+	application.Chat.API.Fields.Brief = defaultChat.API.Fields.Brief
+	application.Chat.API.Fields.ExplicitModel3D = defaultChat.API.Fields.ExplicitModel3D
+	application.Chat.API.ResponseFields.Brief = defaultChat.API.ResponseFields.Brief
+	application.Chat.Audit.ProductionBriefAction = defaultChat.Audit.ProductionBriefAction
 	application.Chat.Presentation.Messages.ChoiceAnswered = defaultChat.Presentation.Messages.ChoiceAnswered
 	application.Chat.Presentation.Messages.ChoiceRejected = defaultChat.Presentation.Messages.ChoiceRejected
+	application.Chat.Presentation.Messages.ModelChoiceConflict = defaultChat.Presentation.Messages.ModelChoiceConflict
+	application.Chat.Presentation.Messages.ModelChoiceUnavailable = defaultChat.Presentation.Messages.ModelChoiceUnavailable
 	harness := defaultChat.Harness
 	harness.BaseTools = []string{"list_offerings"}
 	harness.Operations = []catalog.HarnessOperationSchema{{

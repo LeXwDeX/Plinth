@@ -214,6 +214,10 @@ type ServiceConfig struct {
 	// production brief may name, their parameter overrides and the brief's
 	// field declarations. Zero disables the brief API and the purpose card.
 	Model3DUsage catalog.ChatModel3DUsageSchema
+	// ChoiceKinds are application.chat.choice.kinds (#103). The brief write
+	// settles the kind whose option_source is usage_profiles; without it no
+	// card is settled.
+	ChoiceKinds []catalog.ChatChoiceKindSchema
 }
 
 type Service struct {
@@ -248,6 +252,9 @@ type Service struct {
 	canvasInputSource    string
 	retiredModels        map[string]catalog.RetiredModelSuccessor
 	model3DUsage         catalog.ChatModel3DUsageSchema
+	// usageProfileKind is the declared card the brief write settles; its ID and
+	// argument name come from the Schema, not from code (#103).
+	usageProfileKind *catalog.ChatChoiceKindSchema
 
 	harnessSnapshotResolver HarnessSnapshotResolver
 
@@ -347,6 +354,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 		canvasInputSource:    config.CanvasInputSource,
 		retiredModels:        retiredModelIndex(config.RetiredModels),
 		model3DUsage:         config.Model3DUsage,
+		usageProfileKind:     usageProfileKindOf(config.ChoiceKinds),
 		models:               config.Models,
 	}, nil
 }

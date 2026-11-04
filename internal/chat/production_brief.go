@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
@@ -210,11 +211,49 @@ func (service *Service) AskChoice(
 	return ToolResult{AgentContent: string(content), NoSubmission: true}, nil
 }
 
+// usageProfileKindOf finds the declared choice kind that a brief write settles:
+// the one whose options come from the purpose profiles. Its id and the argument
+// carrying the purpose are Schema values, so renaming either needs no code
+// change.
+func usageProfileKindOf(kinds []catalog.ChatChoiceKindSchema) *catalog.ChatChoiceKindSchema {
+	for _, kind := range kinds {
+		if kind.OptionSource == "usage_profiles" {
+			declared := kind
+			return &declared
+		}
+	}
+	return nil
+}
+
+// ChangedProductionBriefFields lists the field names whose stored value differs,
+// including fields one side does not have. It never returns field text, so an
+// audit event can record the shape of a change without copying the brief.
+func ChangedProductionBriefFields(previous, next ProductionBrief) []string {
+	names := map[string]struct{}{}
+	for name := range previous {
+		names[name] = struct{}{}
+	}
+	for name := range next {
+		names[name] = struct{}{}
+	}
+	changed := make([]string, 0, len(names))
+	for name := range names {
+		before, hadBefore := previous[name]
+		after, hadAfter := next[name]
+		if hadBefore != hadAfter || string(before) != string(after) {
+			changed = append(changed, name)
+		}
+	}
+	sort.Strings(changed)
+	return changed
+}
+
 // settleUsageProfileChoice answers the session's open usage-profile card when
 // the brief now carries the purpose it offered. The answer is recorded with
 // the Agent source: the value came from the brief write, not from a click.
 func (service *Service) settleUsageProfileChoice(ctx context.Context, ownerID, sessionID, purpose string) {
-	if service.choices == nil || purpose == "" {
+	kind := service.usageProfileKind
+	if service.choices == nil || purpose == "" || kind == nil || kind.Argument == "" {
 		return
 	}
 	choices, err := service.choices.ListChoices(ctx, ownerID, sessionID, service.choiceLimit)
@@ -223,14 +262,14 @@ func (service *Service) settleUsageProfileChoice(ctx context.Context, ownerID, s
 	}
 	now := service.clock()
 	for _, choice := range choices {
-		if choice.State != ChoicePending || choice.Kind != "usage_profile" {
+		if choice.State != ChoicePending || choice.Kind != kind.ID {
 			continue
 		}
 		for _, option := range choice.Options {
-			var arguments struct {
-				Purpose string `json:"purpose"`
-			}
-			if json.Unmarshal(option.Arguments, &arguments) != nil || arguments.Purpose != purpose {
+			var arguments map[string]json.RawMessage
+			var value string
+			if json.Unmarshal(option.Arguments, &arguments) != nil ||
+				json.Unmarshal(arguments[kind.Argument], &value) != nil || value != purpose {
 				continue
 			}
 			_, _ = service.choices.AnswerChoice(ctx, ownerID, sessionID, choice.ID, ChoiceRecord{

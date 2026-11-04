@@ -748,22 +748,22 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		implementation, effect string
 		domains                []string
 	}{
-		"set_params":           {"params.set", "SESSION_WRITE", []string{"image", "model-3d"}},
-		"list_offerings":       {"catalog.list", "READ", []string{"image", "model-3d"}},
-		"get_task":             {"task.read", "READ", []string{"image", "model-3d"}},
-		"observe_task":         {"task.read", "READ", []string{"image", "model-3d"}},
-		"request_consent":      {"consent.request", "SESSION_WRITE", []string{"image", "model-3d"}},
-		"create_three_view":    {"skill.prepare", "PAID_TASK", []string{"image"}},
-		"list_session_models":  {"model.list", "READ", []string{"model-3d"}},
-		"get_processing_plan":  {"processing.read", "READ", []string{"model-3d"}},
+		"set_params":              {"params.set", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"list_offerings":          {"catalog.list", "READ", []string{"image", "model-3d"}},
+		"get_task":                {"task.read", "READ", []string{"image", "model-3d"}},
+		"observe_task":            {"task.read", "READ", []string{"image", "model-3d"}},
+		"request_consent":         {"consent.request", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"create_three_view":       {"skill.prepare", "PAID_TASK", []string{"image"}},
+		"list_session_models":     {"model.list", "READ", []string{"model-3d"}},
+		"get_processing_plan":     {"processing.read", "READ", []string{"model-3d"}},
 		"update_session_notes":    {"session.notes", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"update_production_brief": {"session.brief", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"ask_choice":              {"choice.ask", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"find_history_images":     {"history.images", "READ", []string{"image", "model-3d"}},
-		"recover_task_result":  {"task.refetch", "SESSION_WRITE", []string{"image", "model-3d"}},
-		"inspect_model":        {"model.inspect", "READ", []string{"model-3d"}},
-		"render_model_views":   {"model.render", "READ", []string{"model-3d"}},
-		"compare_models":       {"model.compare", "READ", []string{"model-3d"}},
+		"recover_task_result":     {"task.refetch", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"inspect_model":           {"model.inspect", "READ", []string{"model-3d"}},
+		"render_model_views":      {"model.render", "READ", []string{"model-3d"}},
+		"compare_models":          {"model.compare", "READ", []string{"model-3d"}},
 	}
 	var controlDomains []string
 	var expectedEffect string
@@ -1463,7 +1463,14 @@ func validateThreeViewMultiview(multiview ChatThreeViewMultiviewSchema, recipe C
 		if err := json.Unmarshal(tool.Parameters, &parameters); err != nil {
 			return fmt.Errorf("three_view.multiview.tool %q 的参数无法解析: %w", tool.Name, err)
 		}
-		for _, argument := range []string{multiview.GroupArgument, multiview.ViewsArgument, tool.OfferingArgument} {
+		// The model the multiview run is frozen to is named by the tool's model
+		// argument (#103); a historical catalog may still carry it as the exact
+		// Offering argument (#189).
+		modelArgument := tool.ModelArgument
+		if modelArgument == "" {
+			modelArgument = tool.OfferingArgument
+		}
+		for _, argument := range []string{multiview.GroupArgument, multiview.ViewsArgument, modelArgument} {
 			if _, declared := parameters.Properties[argument]; !declared || argument == "" {
 				return fmt.Errorf("three_view.multiview.tool %q 缺少参数 %q", tool.Name, argument)
 			}

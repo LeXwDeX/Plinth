@@ -261,6 +261,8 @@ func validateHarness(schema ChatSchema, capabilityPresentations []CapabilityPres
 // operation of capability: a single processing step tool, or a generation tool
 // of exactly that capability that picks its service by argument rather than by
 // the workspace model (the operation's frozen service replaces that choice).
+// The argument is either the exact Offering argument (#189) or the optional
+// model argument (#103); the Harness selects the Offering itself either way.
 func HarnessToolCompatible(tool ChatToolSchema, capability schemacontract.Capability) bool {
 	if !slices.Contains(tool.Execution.Capabilities, capability) {
 		return false
@@ -268,7 +270,8 @@ func HarnessToolCompatible(tool ChatToolSchema, capability schemacontract.Capabi
 	if tool.Processing != nil {
 		return tool.Processing.Plan == nil
 	}
-	return tool.Capability == capability && tool.IgnoreUserModel && tool.OfferingArgument != ""
+	return tool.Capability == capability && tool.IgnoreUserModel &&
+		(tool.OfferingArgument != "" || tool.ModelArgument != "")
 }
 
 // ValidateHarnessParameter reuses Offering value validation without inventing

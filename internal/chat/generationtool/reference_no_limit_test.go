@@ -67,7 +67,7 @@ func TestNoPromptNoteWithoutKnownReferenceLimit(t *testing.T) {
 				}
 			}
 			for _, active := range []bool{false, true} {
-				options := chat.TurnOptions{AIModel: offering.ModelID, CreativeDomain: "model-3d"}
+				options := chat.TurnOptions{ExplicitModel3D: offering.ModelID, CreativeDomain: "model-3d"}
 				if active {
 					options.AIModel = "other"
 					options.Harness = &resolve.Snapshot{Selection: harness.Selection{OperationID: "selected", OfferingID: string(offering.ID), OfferingRevision: offering.Revision}, ToolName: tool.Name, Capability: tool.Capability, OfferingRevision: offering.Revision}

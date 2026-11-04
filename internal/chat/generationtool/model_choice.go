@@ -254,9 +254,12 @@ func (executor *Executor) chooseOffering(
 	locked := strings.TrimSpace(command.Options.ExplicitModel3D)
 	if locked != "" {
 		offering, matched := matchOffering(candidates, locked)
-		if !matched || !executor.acceptsModelInput(offering, input) {
+		if !matched {
 			return offeringChoice{Refusal: executor.modelUnavailableText(command, candidates, locked)}, nil
 		}
+		// A named or locked model is not filtered by the input shape here: the
+		// ordinary reference and view checks refuse an input it cannot take
+		// with their precise messages (#103).
 		if named != "" && !modelMatches(offering, named) {
 			return offeringChoice{Refusal: executor.modelConflictText(command, offering, named)}, nil
 		}
@@ -264,7 +267,7 @@ func (executor *Executor) chooseOffering(
 	}
 	if named != "" {
 		offering, matched := matchOffering(candidates, named)
-		if !matched || !executor.acceptsModelInput(offering, input) {
+		if !matched {
 			return offeringChoice{Refusal: executor.modelUnavailableText(command, candidates, named)}, nil
 		}
 		source := "agent"

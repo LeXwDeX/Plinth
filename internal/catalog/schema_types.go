@@ -2552,9 +2552,9 @@ type ChatProductionBriefSchema struct {
 	EmptyText       string `json:"empty_text"`
 	// FieldTemplate renders one non-empty field ({label}, {value}); FlagTemplate
 	// renders a true boolean ({label}); Separator joins them.
-	FieldTemplate  string `json:"field_template"`
-	FlagTemplate   string `json:"flag_template"`
-	Separator      string `json:"separator"`
+	FieldTemplate string `json:"field_template"`
+	FlagTemplate  string `json:"flag_template"`
+	Separator     string `json:"separator"`
 	// PurposeTemplate renders the purpose label with its budget ({label},
 	// {budget}).
 	PurposeTemplate string `json:"purpose_template"`
@@ -2568,21 +2568,21 @@ type ChatProductionBriefSchema struct {
 	// RequirementsTemplate wraps the requirement texts ({items}); each text is
 	// one of UVText, WatertightText and SkinText, joined by
 	// RequirementSeparator.
-	RequirementsTemplate   string `json:"requirements_template"`
-	RequirementSeparator   string `json:"requirement_separator"`
-	UVText                 string `json:"uv_text"`
-	WatertightText         string `json:"watertight_text"`
-	SkinText               string `json:"skin_text"`
-	SavedMessage           string `json:"saved_message"`
-	InvalidTemplate        string `json:"invalid_template"`
+	RequirementsTemplate string `json:"requirements_template"`
+	RequirementSeparator string `json:"requirement_separator"`
+	UVText               string `json:"uv_text"`
+	WatertightText       string `json:"watertight_text"`
+	SkinText             string `json:"skin_text"`
+	SavedMessage         string `json:"saved_message"`
+	InvalidTemplate      string `json:"invalid_template"`
 }
 
 // ChatProductionBriefField declares one brief member and its bound.
 type ChatProductionBriefField struct {
 	Name string `json:"name"`
 	// Type is profile, text, boolean or integer.
-	Type    string `json:"type"`
-	Label   string `json:"label"`
+	Type  string `json:"type"`
+	Label string `json:"label"`
 	// MaximumCharacters bounds a text field; Minimum and Maximum bound an
 	// integer. Zero leaves the bound unset.
 	MaximumCharacters int `json:"maximum_characters,omitempty"`
@@ -3518,7 +3518,7 @@ type ChatToolSchema struct {
 	// the default. The enum, when declared, names the models the tool tells
 	// the Agent about; execution accepts an enabled, runtime-available
 	// Offering of the call's capability, matched by any of those names.
-	ModelArgument string `json:"model_argument,omitempty"`
+	ModelArgument        string                     `json:"model_argument,omitempty"`
 	ModelRequiredMessage string                     `json:"model_required_message"`
 	Capability           schemacontract.Capability  `json:"capability"`
 	FallbackCapability   schemacontract.Capability  `json:"fallback_capability"`
@@ -4222,15 +4222,15 @@ type CoreHTTPRoutesSchema struct {
 	AccountResources string `json:"account_resources"`
 	ChatSkills       string `json:"chat_skills"`
 	// ClientErrors receives browser error reports for the server log (#233).
-	ClientErrors          string `json:"client_errors,omitempty"`
-	ChatSessionApproval   string `json:"chat_session_approval"`
-	ChatSessionNotes      string `json:"chat_session_notes"`
-	ChatSessionBrief      string `json:"chat_session_brief,omitempty"`
+	ClientErrors        string `json:"client_errors,omitempty"`
+	ChatSessionApproval string `json:"chat_session_approval"`
+	ChatSessionNotes    string `json:"chat_session_notes"`
+	ChatSessionBrief    string `json:"chat_session_brief,omitempty"`
 	// ChatSessionModel3D writes the 3D model the person explicitly picked in
 	// the session (#103); it is a lock for the generation tools and submits
 	// nothing. Empty (historical Catalogs) disables the write.
-	ChatSessionModel3D string `json:"chat_session_model3d,omitempty"`
-	ChatSessionPick    string `json:"chat_session_pick"`
+	ChatSessionModel3D    string `json:"chat_session_model3d,omitempty"`
+	ChatSessionPick       string `json:"chat_session_pick"`
 	ChatSessionChoices    string `json:"chat_session_choices"`
 	ChatSessionAgentScope string `json:"chat_session_agent_scope"`
 	// ChatSessionReasoning reads and writes the session thinking level;
