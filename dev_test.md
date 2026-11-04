@@ -209,7 +209,7 @@ Hook 安装默认只预览：`python3 scripts/install-local-verification-hook.py
 SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-hooks.py`（#242），规则与上述门禁安装器一致：默认预览，`--apply` 原子替换并保留其他字节与模式，未知/损坏块拒绝改写，`--uninstall` 只移除本区块；另有只读 `--status`、`--mode warn|enforce` 与 `--init-worktrees`。回归为 `python3 -m unittest scripts/tests/test_install_specgit_required_hooks.py`。上线顺序与对已有工作树的影响见 `docs/specgit-project-integration.md`「所有分支与工作树强制初始化」。
 
 ## 3. 部署与回归流程
-0. `dev-test` 默认每次发布都是全新数据（环境文件 `"data": "ephemeral"`，#28）：发布不做备份，冒烟与相关验收都从空库开始，只存在运行环境引导的管理员测试账号；Agent 测试开发账号在发布后由 Agent 经管理接口重新创建（见 AGENTS.md「环境与运维」），数据由测试流程按真实用户流程自己创建；`formal-test` 不适用。
+0. `dev-test` 默认每次发布都是全新数据（环境文件 `"data": "ephemeral"`，#28）：发布不做备份，冒烟与相关验收都从空库开始，只存在运行环境引导的管理员测试账号；Agent 测试开发账号在发布后由 `scripts/smoke/ensure-agent-account.sh` 经管理接口重新创建（见 AGENTS.md「环境与运维」），数据由测试流程按真实用户流程自己创建；`formal-test` 不适用。
 1. 本地代码修改完成；
 2. 在待合并 head 上运行本机 `python3 scripts/verify-local.py --race` 全量（清单见 §2，前端三项 + Go 门禁四条），完成独立审核；
 3. 将已验收提交合并并推送到 `main`，以 `main` 的精确提交 SHA 生成不可变
