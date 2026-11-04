@@ -416,8 +416,8 @@ elif ! release_capacity_check before-build; then
 fi
 
 echo "[server] build $TAG"
-# 构建的 --add-host 与 GOPROXY 来自环境文件的 build 设置（#248、#249）；npm 源固定为公共
-# registry（#257），不再有构建参数覆盖。
+# 构建的 --add-host、GOPROXY 与 NPM_REGISTRY 来自环境文件的 build 设置（#248、#249）；
+# 未设置时 npm 走公共 registry（#257）。
 # 测试/正式栈运行含历史迁移工具的内部镜像目标（#259）；Dockerfile 默认目标是自部署镜像。
 docker build ${BUILD_OPTIONS[@]+"${BUILD_OPTIONS[@]}"} \
   --target runtime-with-migration-tools \

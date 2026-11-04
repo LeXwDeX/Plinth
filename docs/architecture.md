@@ -1819,7 +1819,7 @@ Texture 修订 `2026-10-21.187.2` 按独立端点的最高分辨率合同固定 
 - `release-go-testenv.sh` 接受 `RELEASE_HOST`/`RELEASE_ROOT`/`RELEASE_REF`/`RELEASE_SERVER_ENV`/`RELEASE_KEEP_SOURCE_SNAPSHOTS`。`RELEASE_HOST`、`RELEASE_ROOT` 必填，没有缺省值。
 - `release-server-steps.sh` 接受 `RELEASE_COMPOSE_PROJECT`（必填）、`RELEASE_IMAGE_KEEP`、`RELEASE_ALLOW_BOOTSTRAP` 与 `GO_*` 布局，其 `<remote_root>` 必填。数据目录必须是 `<根>/production/<名称>`，否则构建前拒绝。服务器段在未传路径时按 `<root>/production/{data,storage-go,web-data,logs}` 导出数据目录，并导出 `GO_PROD_ROOT` 给预检。legacy 目录只来自环境文件 `layout`（共享主机可为发布根之外的绝对路径，单栈主机限 `<root>/production/legacy-*`）。
 - 健康检查地址随绑定地址。成功后写出无密钥的 `production/compose.env` 供手工 Compose。
-- 可按环境追加：服务器本地 Compose 覆盖文件（例如固定项目网络供模型中转按来源 IP 放行，隔离预检不使用）、`docker build` 的网络/GOPROXY/`--add-host` 参数，以及 tar+scp 源码同步。内网构建的 `--add-host` 由环境文件 `build.add_hosts` 给出；npm 源固定为公共 `registry.npmjs.org`（#257），不接受 CI 变量或环境文件的内网 npm 镜像覆盖。
+- 可按环境追加：服务器本地 Compose 覆盖文件（例如固定项目网络供模型中转按来源 IP 放行，隔离预检不使用）、`docker build` 的网络/NPM_REGISTRY/GOPROXY/`--add-host` 参数，以及 tar+scp 源码同步。内网构建的 `--add-host` 由环境文件 `build.add_hosts` 给出；npm 源缺省为公共 `registry.npmjs.org`（#257），内部环境可用环境文件 `build.npm_registry` 指向包缓存。
 - `release-env.py` 总是按环境的 `compose_project` 传入 `RELEASE_COMPOSE_PROJECT`；单栈环境另传 `RELEASE_SINGLE_STACK=1`；共享主机用环境文件字段 `protect_projects` 经 `RELEASE_PROTECT_PROJECTS` 传入同机其他 Plinth 项目。
 - 空栈 bootstrap 只在本项目无容器且无数据库时进行；失败时停止候选并保留现场。`release-capacity.py` 为此有不测量容器挂载的 `bootstrap` 阶段。
 - `retain-art-ai-images.py` 以必填 `--root`、必填 `--project` 与可重复的 `--protect-project` 运行，`--keep` 默认保留五个镜像；单项目主机只保护该项目容器引用、运行镜像与本次回滚镜像。
