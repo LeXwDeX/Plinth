@@ -64,7 +64,8 @@ import {
 } from '@/lib/canvas/viewport';
 import { layerDraggable, pansView, resolveToolKey } from '@/lib/canvas/tool-keys';
 import { clickTargets, selectionAfterClick } from '@/lib/canvas/auto-select';
-import { outsideDimRects, visibleWorld } from '@/lib/canvas/outside-dim';
+import { drawOutsideDim, outsideDimRects, revealSteps, visibleWorld, type OutsideDimTarget } from '@/lib/canvas/outside-dim';
+import { konvaRevealPainter, paintedNodes, type RevealScratch } from '@/lib/canvas/outside-dim-painter';
 import { antsOutlines } from '@/lib/canvas/selection-preview';
 import { brushCursorRadius, drawMaskOverlay, maskOverlaySteps, overlayTintKind, type MaskOverlayTarget } from '@/lib/canvas/mask-overlay';
 import { sampleColor } from '@/lib/canvas/eyedropper';
@@ -335,6 +336,10 @@ export function CanvasBoard({
     ? { tintColor: maskTintColor, tintOpacity: maskSchema.tint_opacity }
     : { tintColor: selectionSchema.tint_color, tintOpacity: selectionSchema.tint_opacity };
   const maskOverlayScratch = useRef<HTMLCanvasElement | null>(null);
+  // #91: the layer the pictures are drawn in, the veil layer above it, and the veil's reusable cut-out canvases.
+  const contentLayerRef = useRef<Konva.Layer>(null);
+  const outsideDimLayerRef = useRef<Konva.Layer>(null);
+  const outsideDimScratch = useRef<RevealScratch>({ mask: null, cover: null });
   const outlines = useMemo(() => (maskStrokes ? antsOutlines(maskStrokes) : []), [maskStrokes]);
   // Marching ants: the dash offset steps on a Schema tick while there is an outline to animate.
   const [antsOffset, setAntsOffset] = useState(0);
@@ -481,6 +486,21 @@ export function CanvasBoard({
     transformer.nodes(selected);
     transformer.getLayer()?.batchDraw();
   }, [selectedIds, sorted, size]);
+
+  // #91: dragging or transforming a selected layer redraws only the picture layer; the hole the selection cuts
+  // into the outside veil follows it in the same frame. Without a selection to reveal the veil keeps to React.
+  const revealSelected = outsideDim.reveal_selected;
+  const hasSelection = selectedIds.length > 0;
+  useEffect(() => {
+    const content = contentLayerRef.current;
+    const veil = outsideDimLayerRef.current;
+    if (!content || !veil || !revealSelected || !hasSelection) return;
+    const follow = () => veil.draw();
+    content.on('draw.outsideDim', follow);
+    return () => {
+      content.off('draw.outsideDim', follow);
+    };
+  }, [revealSelected, hasSelection]);
 
   useEffect(() => {
     const transformer = cropTransformerRef.current;
@@ -1548,7 +1568,7 @@ export function CanvasBoard({
         }}
         style={{ cursor, touchAction: 'none' }}
       >
-        <Layer>
+        <Layer ref={contentLayerRef}>
           {artboard ? (
             // #246: the canvas area under every layer — a checkerboard where it exports transparent (screen-sized
             // squares at any zoom), or the export background colour.
@@ -2060,12 +2080,28 @@ export function CanvasBoard({
             />
           ) : null}
         </Layer>
-        <Layer listening={false}>
-          {artboard
-            ? outsideDimRects(visibleWorld(viewport, size, 4), artboard).map((rect, index) => (
-              <Rect key={`dim-${index}`} {...rect} fill={outsideDim.color} opacity={outsideDim.opacity} listening={false} />
-            ))
-            : null}
+        <Layer ref={outsideDimLayerRef} listening={false}>
+          {artboard ? (
+            // The veil outside the frame, drawn first in this layer: a selected layer reaching outside the frame
+            // cuts its visible pixels out of it, so it shows at full brightness while selected (#91).
+            <Shape
+              name="outside-dim"
+              listening={false}
+              sceneFunc={(context) => {
+                const stage = stageRef.current;
+                const steps = stage && outsideDim.reveal_selected && selectedIds.length > 0
+                  ? revealSteps(paintedNodes(stage, sorted.map((node) => node.id)), new Set(selectedIds), artboard)
+                  : [];
+                drawOutsideDim(
+                  context._context as unknown as OutsideDimTarget,
+                  outsideDimRects(visibleWorld(viewport, size, 4), artboard),
+                  outsideDim,
+                  steps,
+                  stage && steps.length > 0 ? konvaRevealPainter(stage, context.canvas, outsideDimScratch.current) : null,
+                );
+              }}
+            />
+          ) : null}
           {artboard ? (
             <Rect
               x={artboard.x}

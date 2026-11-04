@@ -222,7 +222,7 @@ describe('stage, right panel, lightbox and compare wiring', () => {
     const label = boardSource.indexOf('text={artboardLabel}');
     expect(frame).toBeGreaterThan(nodesLayer);
     expect(label).toBeGreaterThan(nodesLayer);
-    expect(boardSource).toContain('<Layer listening={false}>\n          {artboard\n            ? outsideDimRects(');
+    expect(boardSource).toContain('<Layer ref={outsideDimLayerRef} listening={false}>\n          {artboard ? (');
     // The veil outside the frame is drawn first in that layer, under the frame line.
     expect(boardSource.indexOf('outsideDimRects(visibleWorld')).toBeLessThan(frame);
     expect(boardSource).toContain('{artboard ? (\n            <Rect\n              x={artboard.x}');

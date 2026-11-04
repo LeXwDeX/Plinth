@@ -1101,6 +1101,8 @@ export interface CanvasProductSchema {
       outside_dim: {
         color: string;
         opacity: number;
+        /** #91: a selected layer outside the frame shows at full brightness (its pixels are cut out of the veil). */
+        reveal_selected: boolean;
       };
       /** #246: the checkerboard inside the frame while the exported canvas background is transparent. */
       transparency: {
