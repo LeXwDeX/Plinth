@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -1136,9 +1137,11 @@ func (agent *scriptedAgent) Stream(
 ) (agents.Completion, error) {
 	agent.mu.Lock()
 	agent.requests = append(agent.requests, request)
-	response := agent.responses[agent.index]
-	agent.index++
+	response, err := agent.nextLocked()
 	agent.mu.Unlock()
+	if err != nil {
+		return agents.Completion{}, err
+	}
 	if response.Content != "" && emit != nil {
 		if err := emit(agents.Delta{Content: response.Content}); err != nil {
 			return agents.Completion{}, err
@@ -1155,9 +1158,31 @@ func (agent *scriptedAgent) Complete(
 	defer agent.mu.Unlock()
 	agent.requests = append(agent.requests, request)
 	if agent.completions != nil {
+		if agent.completeIndex >= len(agent.completions) {
+			agent.completeIndex++
+			return agents.Completion{}, fmt.Errorf(
+				"scriptedAgent: Complete call %d exceeds the %d scripted completions",
+				agent.completeIndex, len(agent.completions),
+			)
+		}
 		response := agent.completions[agent.completeIndex]
 		agent.completeIndex++
 		return response, nil
+	}
+	return agent.nextLocked()
+}
+
+// nextLocked hands out the next scripted response. A call past the script is
+// an unexpected Agent call: it fails that turn with a named error instead of
+// panicking the whole test binary, and the extra request stays recorded for
+// the test to assert on (#90).
+func (agent *scriptedAgent) nextLocked() (agents.Completion, error) {
+	if agent.index >= len(agent.responses) {
+		agent.index++
+		return agents.Completion{}, fmt.Errorf(
+			"scriptedAgent: call %d exceeds the %d scripted responses",
+			agent.index, len(agent.responses),
+		)
 	}
 	response := agent.responses[agent.index]
 	agent.index++
