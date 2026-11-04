@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+
+	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentations []CapabilityPresentation) error {
@@ -605,6 +606,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateSystemSkills(schema.Skills, toolNames); err != nil {
 		return err
 	}
+	if err := validateModelReview(schema); err != nil {
+		return err
+	}
 	for index, tool := range schema.Tools {
 		if tool.RequireUniqueOffering && (!tool.IgnoreUserModel || tool.RequireUserModel || tool.CrossDomainModelFallback) {
 			return fmt.Errorf("tools[%d] require_unique_offering requires independent model selection", index)
@@ -746,6 +750,9 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"update_session_notes": {"session.notes", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"find_history_images":  {"history.images", "READ", []string{"image", "model-3d"}},
 		"recover_task_result":  {"task.refetch", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"inspect_model":        {"model.inspect", "READ", []string{"model-3d"}},
+		"render_model_views":   {"model.render", "READ", []string{"model-3d"}},
+		"compare_models":       {"model.compare", "READ", []string{"model-3d"}},
 	}
 	var controlDomains []string
 	var expectedEffect string
@@ -1998,6 +2005,150 @@ func validateChatChoice(schema ChatSchema) error {
 	}
 	if schema.Choice.MaxOptions < 2 || schema.Choice.ListLimit < 1 {
 		return errors.New("choice.max_options 至少为 2，choice.list_limit 至少为 1")
+	}
+	return nil
+}
+
+// Catalog validates declarations without importing the renderer, so the
+// rendering vocabulary is repeated here. TestModelReviewVocabularyMatchesRenderer
+// keeps these copies equal to internal/modelinspect.
+const modelReviewMaxRenderDimension = 2048
+
+// modelReviewViews and modelReviewModes are the rendering vocabulary of
+// internal/modelinspect. The Schema may offer a subset of them, never a name
+// the renderer does not know.
+var (
+	modelReviewViews = []string{"front", "back", "left", "right", "top", "three_quarter"}
+	modelReviewModes = []string{"textured", "clay", "normals", "wireframe"}
+)
+
+// validateModelReview checks application.chat.model_review (#103) once any
+// model review tool is declared: every bound positive, the render vocabulary
+// renderable, defaults inside their enumerations, and every Agent-facing text
+// present with the placeholders the executor fills. Schemas without the tools
+// stay valid.
+func validateModelReview(schema ChatSchema) error {
+	used := false
+	for _, tool := range schema.AgentTools {
+		switch tool.Execution.ImplementationKey {
+		case "model.inspect", "model.render", "model.compare":
+			used = true
+		}
+	}
+	if !used {
+		return nil
+	}
+	review := schema.ModelReview
+	limits := review.Inspect.Limits
+	if limits.MaxBytes <= 0 || limits.MaxTriangles <= 0 || limits.MaxVertices <= 0 ||
+		limits.MaxTexturePixels <= 0 || limits.MaxNodes <= 0 || limits.MaxDepth <= 0 ||
+		review.Inspect.WeldEpsilonRatio <= 0 || review.Inspect.DebrisRatio <= 0 ||
+		review.Inspect.MaxListedParts <= 0 {
+		return errors.New("chat.model_review.inspect 的限额、比例与部件上限必须为正数")
+	}
+
+	render := review.Render
+	if render.Size <= 0 || render.MaxSize < render.Size || render.Supersample <= 0 ||
+		render.WireframeMaxTriangles <= 0 || render.Workers <= 0 ||
+		render.MaxConcurrentRenders <= 0 || render.MaxViewsPerCall <= 0 ||
+		render.MaxRenderCallsPerTurn <= 0 {
+		return errors.New("chat.model_review.render 的尺寸、并发与额度必须为正数，size 不能超过 max_size")
+	}
+	if render.MaxSize*render.Supersample > modelReviewMaxRenderDimension {
+		return fmt.Errorf(
+			"chat.model_review.render 的 max_size × supersample 不能超过 %d",
+			modelReviewMaxRenderDimension,
+		)
+	}
+	if len(render.Views) == 0 || len(render.Modes) == 0 || len(render.DefaultViews) == 0 {
+		return errors.New("chat.model_review.render 必须声明 views、modes 与 default_views")
+	}
+	views := make(map[string]bool, len(render.Views))
+	for _, view := range render.Views {
+		if !slices.Contains(modelReviewViews, view) || views[view] {
+			return fmt.Errorf("chat.model_review.render.views 含未知或重复的视角 %q", view)
+		}
+		views[view] = true
+	}
+	modes := make(map[string]bool, len(render.Modes))
+	for _, mode := range render.Modes {
+		if !slices.Contains(modelReviewModes, mode) || modes[mode] {
+			return fmt.Errorf("chat.model_review.render.modes 含未知或重复的模式 %q", mode)
+		}
+		modes[mode] = true
+	}
+	for _, view := range render.DefaultViews {
+		if !views[view] {
+			return fmt.Errorf("chat.model_review.render.default_views 含未声明的视角 %q", view)
+		}
+	}
+	if !modes[render.DefaultMode] {
+		return fmt.Errorf("chat.model_review.render.default_mode %q 未在 modes 中声明", render.DefaultMode)
+	}
+	if strings.TrimSpace(render.AssetType) == "" || !visionFlattenColour.MatchString(render.Background) {
+		return errors.New("chat.model_review.render 的 asset_type 不能为空，background 必须是 #rrggbb")
+	}
+
+	if review.Compare.MaxViewsPerCall <= 0 || review.Compare.MaxViewsPerCall > render.MaxViewsPerCall ||
+		review.Compare.Layout != "side_by_side" {
+		return errors.New("chat.model_review.compare 需要正数且不超过 render 上限的 max_views_per_call 与 layout side_by_side")
+	}
+	if review.Cache.MaxModels <= 0 || review.Cache.MaxBytes <= 0 {
+		return errors.New("chat.model_review.cache 的上限必须为正数")
+	}
+	if strings.TrimSpace(review.ResultViewsField) == "" {
+		return errors.New("chat.model_review.result_views_field 不能为空")
+	}
+
+	source := review.Source
+	if strings.TrimSpace(source.TaskArgument) == "" || strings.TrimSpace(source.AssetArgument) == "" ||
+		strings.TrimSpace(source.SourceRequired) == "" || strings.TrimSpace(source.SourceNotFound) == "" ||
+		strings.TrimSpace(source.SourceNotReady) == "" || strings.TrimSpace(source.SourceNotModel) == "" ||
+		strings.TrimSpace(source.SourceNotGLB) == "" {
+		return errors.New("chat.model_review.source 的参数名与文案不能为空")
+	}
+	if !strings.Contains(source.SourceNotModel, "{asset}") {
+		return errors.New("chat.model_review.source.source_not_model 必须包含 {asset}")
+	}
+	if !strings.Contains(source.SourceNotGLB, "{asset}") || !strings.Contains(source.SourceNotGLB, "{media}") {
+		return errors.New("chat.model_review.source.source_not_glb 必须包含 {asset} 与 {media}")
+	}
+
+	texts := []struct {
+		name     string
+		value    string
+		required []string
+	}{
+		{"inspect_ready", review.Texts.InspectReady, []string{"{model}"}},
+		{"render_ready", review.Texts.RenderReady, []string{"{count}", "{views}"}},
+		{"compare_ready", review.Texts.CompareReady, []string{"{count}", "{views}"}},
+		{"images_attached", review.Texts.ImagesAttached, []string{"{count}"}},
+		{"vision_off", review.Texts.VisionOff, nil},
+		{"budget_remaining", review.Texts.BudgetRemaining, []string{"{remaining}", "{limit}"}},
+		{"budget_exhausted", review.Texts.BudgetExhausted, []string{"{limit}"}},
+		{"too_large", review.Texts.TooLarge, []string{"{bytes}", "{limit}"}},
+		{"unsupported", review.Texts.Unsupported, []string{"{reason}"}},
+		{"source_read_failed", review.Texts.SourceReadFailed, []string{"{reason}"}},
+		{"upload_failed", review.Texts.UploadFailed, []string{"{reason}"}},
+		{"render_failed", review.Texts.RenderFailed, []string{"{view}", "{reason}"}},
+		{"wireframe_too_dense", review.Texts.WireframeTooDense, []string{"{triangles}", "{limit}"}},
+		{"too_many_views", review.Texts.TooManyViews, []string{"{count}", "{limit}"}},
+		{"unknown_view", review.Texts.UnknownView, []string{"{view}", "{views}"}},
+		{"unknown_mode", review.Texts.UnknownMode, []string{"{mode}", "{modes}"}},
+		{"invalid_arguments", review.Texts.InvalidArguments, []string{"{detail}"}},
+		{"parts_required", review.Texts.PartsRequired, nil},
+		{"unknown_part", review.Texts.UnknownPart, []string{"{part}"}},
+		{"too_many_models", review.Texts.TooManyModels, []string{"{count}"}},
+	}
+	for _, text := range texts {
+		if strings.TrimSpace(text.value) == "" {
+			return fmt.Errorf("chat.model_review.texts.%s 不能为空", text.name)
+		}
+		for _, placeholder := range text.required {
+			if !strings.Contains(text.value, placeholder) {
+				return fmt.Errorf("chat.model_review.texts.%s 必须包含 %s", text.name, placeholder)
+			}
+		}
 	}
 	return nil
 }

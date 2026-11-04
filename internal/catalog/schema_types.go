@@ -2181,6 +2181,164 @@ type LegacyTaskExclusionSchema struct {
 	Reason       string `json:"reason"`
 }
 
+// ChatModelReviewSchema is application.chat.model_review: the read-only
+// tools that inspect, render and compare 3D models of the session (#103).
+// They never create a Task and never spend credits. Every bound, enumeration
+// and Agent-facing text they use is declared here; the tools themselves stay
+// server-side.
+type ChatModelReviewSchema struct {
+	Inspect ChatModelInspectSchema      `json:"inspect"`
+	Render  ChatModelRenderSchema       `json:"render"`
+	Compare ChatModelCompareSchema      `json:"compare"`
+	Cache   ChatModelReviewCacheSchema  `json:"cache"`
+	Source  ChatModelReviewSourceSchema `json:"source"`
+	Texts   ChatModelReviewTextsSchema  `json:"texts"`
+	// ResultViewsField names the result array that pairs each rendered
+	// picture with the handle the reply gave it. Entries are in the order the
+	// pictures were attached, so the first view carries the first handle.
+	ResultViewsField string `json:"result_views_field"`
+}
+
+// ChatModelReviewLimits bounds what Parse may accept before any topology is
+// computed. The values are those of modelinspect.Limits.
+type ChatModelReviewLimits struct {
+	MaxBytes         int64 `json:"max_bytes"`
+	MaxTriangles     int64 `json:"max_triangles"`
+	MaxVertices      int64 `json:"max_vertices"`
+	MaxTexturePixels int64 `json:"max_texture_pixels"`
+	MaxNodes         int   `json:"max_nodes"`
+	MaxDepth         int   `json:"max_depth"`
+}
+
+// ChatModelInspectSchema tunes the inspection report.
+type ChatModelInspectSchema struct {
+	Limits           ChatModelReviewLimits `json:"limits"`
+	WeldEpsilonRatio float64               `json:"weld_epsilon_ratio"`
+	DebrisRatio      float64               `json:"debris_ratio"`
+	MaxListedParts   int                   `json:"max_listed_parts"`
+}
+
+// ChatModelRenderSchema declares the views, modes and bounds of the render
+// tool.
+type ChatModelRenderSchema struct {
+	// Views are the view names the tool accepts; DefaultViews is used when a
+	// call names none.
+	Views        []string `json:"views"`
+	DefaultViews []string `json:"default_views"`
+	// Modes are the render modes the tool accepts; DefaultMode is used when a
+	// call names none.
+	Modes       []string `json:"modes"`
+	DefaultMode string   `json:"default_mode"`
+	// Size is the output edge in pixels, MaxSize its upper bound. Supersample
+	// is the factor applied before downsampling: Size*Supersample must stay
+	// within modelinspect.MaxRenderDimension.
+	Size        int `json:"size"`
+	MaxSize     int `json:"max_size"`
+	Supersample int `json:"supersample"`
+	// WireframeMaxTriangles refuses wireframe above this triangle count.
+	WireframeMaxTriangles int64 `json:"wireframe_max_triangles"`
+	// Workers caps the rasteriser's goroutines per view.
+	Workers int `json:"workers"`
+	// MaxConcurrentRenders bounds renders running at the same time in the
+	// process; MaxViewsPerCall bounds one call and MaxRenderCallsPerTurn
+	// bounds one Agent reply.
+	MaxConcurrentRenders  int `json:"max_concurrent_renders"`
+	MaxViewsPerCall       int `json:"max_views_per_call"`
+	MaxRenderCallsPerTurn int `json:"max_render_calls_per_turn"`
+	// AssetType is the input-asset type the rendered PNG files are stored
+	// under. Background is the #rrggbb colour behind the model.
+	AssetType  string `json:"asset_type"`
+	Background string `json:"background"`
+}
+
+// ChatModelCompareSchema bounds a comparison; Layout is the one picture
+// arrangement the tool implements.
+type ChatModelCompareSchema struct {
+	MaxViewsPerCall int    `json:"max_views_per_call"`
+	Layout          string `json:"layout"`
+}
+
+// ChatModelReviewCacheSchema bounds the process-wide parsed-model cache: at
+// most MaxModels entries and MaxBytes of source files, whichever binds first.
+type ChatModelReviewCacheSchema struct {
+	MaxModels int   `json:"max_models"`
+	MaxBytes  int64 `json:"max_bytes"`
+}
+
+// ChatModelReviewSourceSchema names the arguments that choose a model and the
+// texts of a call that names no usable one.
+type ChatModelReviewSourceSchema struct {
+	TaskArgument  string `json:"task_argument"`
+	AssetArgument string `json:"asset_argument"`
+	// SourceRequired, SourceNotFound and SourceNotReady are read like the
+	// processing tools' messages; SourceNotModel refuses an explicit asset
+	// that is not one of the Task's model files ({asset}).
+	SourceRequired string `json:"source_required"`
+	SourceNotFound string `json:"source_not_found"`
+	SourceNotReady string `json:"source_not_ready"`
+	SourceNotModel string `json:"source_not_model"`
+	// SourceNotGLB refuses a saved file in a format the read-only tools
+	// cannot parse ({asset}, {media}).
+	SourceNotGLB string `json:"source_not_glb"`
+}
+
+// ChatModelReviewTextsSchema are the English texts the read-only model review
+// tools return to the Agent. Braced placeholders are substituted by the
+// executor; the texts stay server-side.
+type ChatModelReviewTextsSchema struct {
+	// InspectReady heads a successful inspection ({model}, {triangles}).
+	InspectReady string `json:"inspect_ready"`
+	// RenderReady heads a successful render ({count}, {views}).
+	RenderReady string `json:"render_ready"`
+	// CompareReady heads a successful comparison ({count}, {views}).
+	CompareReady string `json:"compare_ready"`
+	// ImagesAttached tells the Agent that the rendered PNGs are attached
+	// ({count}).
+	ImagesAttached string `json:"images_attached"`
+	// VisionOff tells the Agent that it cannot see its own renders because
+	// the deployment's vision input is off.
+	VisionOff string `json:"vision_off"`
+	// BudgetRemaining reports this reply's remaining render calls
+	// ({remaining}, {limit}).
+	BudgetRemaining string `json:"budget_remaining"`
+	// BudgetExhausted refuses another render or compare call in this reply
+	// ({limit}).
+	BudgetExhausted string `json:"budget_exhausted"`
+	// TooLarge refuses a file above inspect.limits.max_bytes ({bytes},
+	// {limit}).
+	TooLarge string `json:"too_large"`
+	// Unsupported explains a file that cannot be parsed ({reason}); it also
+	// carries a parse limit the file exceeded (size, triangles or vertices).
+	Unsupported string `json:"unsupported"`
+	// SourceReadFailed refuses a model whose saved bytes could not be read
+	// ({reason}).
+	SourceReadFailed string `json:"source_read_failed"`
+	// UploadFailed reports a rendered picture that could not be stored
+	// ({reason}).
+	UploadFailed string `json:"upload_failed"`
+	// RenderFailed names the view that could not be drawn ({view}, {reason}).
+	RenderFailed string `json:"render_failed"`
+	// WireframeTooDense refuses wireframe above the Schema's bound
+	// ({triangles}, {limit}).
+	WireframeTooDense string `json:"wireframe_too_dense"`
+	// TooManyViews refuses more views than one call may render ({count},
+	// {limit}).
+	TooManyViews string `json:"too_many_views"`
+	// UnknownView and UnknownMode refuse a value the Schema does not declare
+	// ({view}/{mode}, {views}/{modes}).
+	UnknownView string `json:"unknown_view"`
+	UnknownMode string `json:"unknown_mode"`
+	// InvalidArguments refuses unreadable arguments ({detail}).
+	InvalidArguments string `json:"invalid_arguments"`
+	// PartsRequired refuses isolate=true without parts.
+	PartsRequired string `json:"parts_required"`
+	// UnknownPart refuses a part ID the model does not have ({part}).
+	UnknownPart string `json:"unknown_part"`
+	// TooManyModels refuses a comparison that does not name exactly two
+	// models ({count}).
+	TooManyModels string `json:"too_many_models"`
+}
+
 // ChatSchema 同时描述 Chat Agent 的运行策略、旧 HTTP 线协议、SSE 事件协议
 // 和浏览器展示内容。Go 代码只实现稳定算法，不拥有产品字段名、状态字面量、
 // Prompt 或可见文本。
@@ -2215,6 +2373,10 @@ type ChatSchema struct {
 	// the Agent reads about its scope.
 	AgentScope ChatAgentScopeSchema `json:"agent_scope"`
 	Harness    ChatHarnessSchema    `json:"harness"`
+	// ModelReview declares the read-only model inspection, rendering and
+	// comparison tools (#103): their bounds, enumerations and Agent-facing
+	// texts. Server-side only, like the tools themselves.
+	ModelReview ChatModelReviewSchema `json:"model_review"`
 	// Choice declares the in-chat choice card (#321): the Agent-facing texts of
 	// an answered or pending card and its bounds. Server side only; the card's
 	// visible words are content messages ui.chat.choice.*.
