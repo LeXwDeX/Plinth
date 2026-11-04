@@ -42,6 +42,8 @@ export interface ReviewSummary {
   models: string[];
   /** The Schema view keys that rendered. */
   views: string[];
+  /** #103: the attachment handles of the rendered pictures, in the same order as `views`; absent on old replies. */
+  handles: string[];
   failedViews: string[];
   triangles: number | null;
   hasUV: boolean | null;
@@ -132,6 +134,7 @@ export function reviewSummaryOf(schema: ProductSchema, call: ChatToolCall): Revi
     model: text(item.model),
     models: strings(item.models),
     views: strings(item.views),
+    handles: strings(item.handles),
     failedViews: strings(item.failed_views),
     triangles: number(item.triangles),
     hasUV: bool(item.has_uv),
@@ -215,9 +218,12 @@ function withFailedViews(schema: ProductSchema, line: string, summary: ReviewSum
 }
 
 /**
- * The review calls of one reply and the pictures they rendered. Rendered
- * pictures are attached in call order, so each render or comparison claims as
- * many as its summary says it produced; nothing is claimed by position alone.
+ * The review calls of one reply and the pictures they rendered (#103). New
+ * summaries name each rendered picture by its attachment handle, in view order;
+ * those handles bind pictures even when the attachment order differs or the
+ * view count disagrees. Older replies carry no handles: only then do calls
+ * claim the next pictures positionally, as many as their view count says.
+ * Nothing is claimed twice, and pictures no call names stay in `leftover`.
  */
 export function reviewRecordOf(
   schema: ProductSchema,
@@ -225,16 +231,31 @@ export function reviewRecordOf(
   renders: readonly MessagePicture[],
 ): ReviewRecord {
   const result: ReviewCallModel[] = [];
-  let cursor = 0;
+  const used = new Set<number>();
   for (const call of calls) {
     const summary = reviewSummaryOf(schema, call);
     if (!summary) continue;
-    const count = summary.kind === 'inspect' ? 0 : summary.views.length;
-    const pictures = count > 0 ? renders.slice(cursor, cursor + count) : [];
-    cursor += pictures.length;
+    const pictures: MessagePicture[] = [];
+    if (summary.kind !== 'inspect') {
+      if (summary.handles.length > 0) {
+        for (const handle of summary.handles) {
+          const at = renders.findIndex((entry, index) => !used.has(index) && entry.handle === handle);
+          if (at < 0) continue;
+          used.add(at);
+          pictures.push(renders[at]);
+        }
+      } else {
+        const count = summary.views.length;
+        for (let at = 0; at < renders.length && pictures.length < count; at += 1) {
+          if (used.has(at)) continue;
+          used.add(at);
+          pictures.push(renders[at]);
+        }
+      }
+    }
     result.push({ kind: summary.kind, summary, pictures });
   }
-  return { calls: result, leftover: renders.slice(cursor) };
+  return { calls: result, leftover: renders.filter((_entry, index) => !used.has(index)) };
 }
 
 export type ReviewRoundResult = { kind: 'ok' } | { kind: 'rest'; count: number } | { kind: 'pending' };

@@ -12,6 +12,8 @@ import type { TrackedTask } from '@/store/workspace-store';
 export interface MessagePicture {
   image: ChatImage;
   index: number;
+  /** #103: 图片所在槽位的附件句柄；没有附件或句柄为空时省略。 */
+  handle?: string;
 }
 
 export interface MessagePictures {
@@ -85,13 +87,14 @@ export function splitMessagePictures(
   const split: MessagePictures = { candidates: [], previews: [], renders: [] };
   (message.images ?? []).forEach((image, index) => {
     const slot = attachments.find((attachment) => attachment.imageSlot === index + 1);
+    const handle = slot?.handle ? { handle: slot.handle } : {};
     if (slot?.role === 'render') {
-      split.renders.push({ image, index });
+      split.renders.push({ image, index, ...handle });
       return;
     }
     const modelSlot = slot?.kind === 'model';
     const preview = modelSlot || (image.taskId !== '' && modelTasks.has(image.taskId));
-    (preview ? split.previews : split.candidates).push({ image, index });
+    (preview ? split.previews : split.candidates).push({ image, index, ...handle });
   });
   return split;
 }

@@ -94,14 +94,16 @@ function BriefFieldInput({
   }
   const text = typeof value === 'string' ? value : '';
   const maximum = field.maximumCharacters;
-  const long = maximum !== undefined && maximum >= 500;
-  return long ? (
+  // #103: the Schema declares which text fields are long and what hint they
+  // show; no field name or character-count heuristic decides that here.
+  const placeholder = field.placeholder;
+  return field.multiline ? (
     <textarea
       id={id}
       value={text}
       maxLength={maximum}
       rows={3}
-      placeholder={field.name === 'notes' ? schemaText(schema, 'ui.studio.brief.notes_hint') : undefined}
+      placeholder={placeholder}
       onChange={(event) => onChange(event.target.value)}
       className={`${shared} min-h-16 resize-y`}
       data-testid={`studio-brief-field-${field.name}`}
@@ -112,6 +114,7 @@ function BriefFieldInput({
       type="text"
       value={text}
       maxLength={maximum}
+      placeholder={placeholder}
       onChange={(event) => onChange(event.target.value)}
       className={shared}
       data-testid={`studio-brief-field-${field.name}`}

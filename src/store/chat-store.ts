@@ -71,7 +71,6 @@ export interface ChatPaidStep {
 export type ApprovalMode = 'auto' | 'manual' | 'budget';
 
 /** 会话的 Agent 范围：Agent 只能用 2D 工具、只能用 3D 工具，或由它按要求决定。 */
-export type AgentScope = '2d' | '3d' | 'auto';
 
 export interface ChatSession {
   id: string;
@@ -80,8 +79,6 @@ export interface ChatSession {
   updatedAt: string;
   /** 会话的批准方式；服务端未给出时按手工处理。 */
   approvalMode?: ApprovalMode;
-  /** 会话的 Agent 范围；服务端未给出时按 Schema 默认（自动模式）。 */
-  agentScope?: AgentScope;
   /** 本会话累计估算积分（估算值，不是结算值）。 */
   estimatedCredits?: number;
   /** Server-grouped totals replace the legacy single total when native units are present. */

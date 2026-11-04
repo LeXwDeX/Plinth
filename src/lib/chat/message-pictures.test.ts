@@ -20,7 +20,11 @@ describe('splitMessagePictures', () => {
     const images = [image(1, 't1'), image(2, 't1'), image(3, 't1')];
     const { candidates, previews } = splitMessagePictures({ images, attachments: [picture('@img1', 't1', 1), picture('@img2', 't1', 2)] });
     expect(previews).toEqual([]);
-    expect(candidates).toEqual(images.map((item, index) => ({ image: item, index })));
+    expect(candidates).toEqual([
+      { image: images[0], index: 0, handle: '@img1' },
+      { image: images[1], index: 1, handle: '@img2' },
+      { image: images[2], index: 2 },
+    ]);
   });
 
   it('takes the picture at a model attachment slot and the pre-model picture of the same task as previews', () => {
@@ -43,14 +47,14 @@ describe('splitMessagePictures', () => {
     const images = [image(1, 't3d')];
     const { candidates, previews } = splitMessagePictures({ images, attachments: [model('t3d', 1)] });
     expect(candidates).toEqual([]);
-    expect(previews).toEqual([{ image: images[0], index: 0 }]);
+    expect(previews).toEqual([{ image: images[0], index: 0, handle: '@model1' }]);
   });
 
   it('leaves a 2D task of the same message as a candidate that keeps its original index', () => {
     const images = [image(1, 't3d'), image(2, 't3d'), image(3, 't2d')];
     const { candidates, previews } = splitMessagePictures({ images, attachments: [model('t3d', 1), picture('@img1', 't2d', 3)] });
     expect(previews.map((item) => item.index)).toEqual([0, 1]);
-    expect(candidates).toEqual([{ image: images[2], index: 2 }]);
+    expect(candidates).toEqual([{ image: images[2], index: 2, handle: '@img1' }]);
   });
 
   it('knows a 3D task from the tracker when the message has no attachments yet', () => {
@@ -80,6 +84,21 @@ describe('splitMessagePictures', () => {
     expect(split.renders).toEqual([{ image: images[1], index: 1 }]);
     expect(split.previews.map((item) => item.index)).toEqual([0]);
     expect(split.candidates.map((item) => item.index)).toEqual([2]);
+  });
+
+  it('carries the attachment handle of the slot on every kind of picture (#103)', () => {
+    const images = [image(1, 't3d'), image(2, ''), image(3, 't2d')];
+    const split = splitMessagePictures({
+      images,
+      attachments: [
+        model('t3d', 1, '@model9'),
+        { handle: '@render2', kind: 'image', taskId: '', role: 'render', imageSlot: 2 },
+        picture('@img3', 't2d', 3),
+      ],
+    });
+    expect(split.previews[0].handle).toBe('@model9');
+    expect(split.renders[0].handle).toBe('@render2');
+    expect(split.candidates[0].handle).toBe('@img3');
   });
 
   it('handles a message with no pictures', () => {

@@ -22,7 +22,7 @@ import {
 const schema = defaultCatalog.application as unknown as ProductSchema;
 
 const summary = (overrides: Partial<ReviewSummary> = {}): ReviewSummary => ({
-  kind: 'inspect', model: '', models: [], views: [], failedViews: [],
+  kind: 'inspect', model: '', models: [], views: [], handles: [], failedViews: [],
   triangles: null, hasUV: null, watertight: null, hasSkin: null, usage: null,
   ...overrides,
 });
@@ -33,7 +33,9 @@ const check = (name: string, status: ReviewCheckItem['status'], fixHint = ''): R
   check: name, status, actual: null, budget: {}, fixHint,
 });
 
-const picture = (index: number): MessagePicture => ({ image: { url: `/api/v1/assets/${index}`, taskId: 't1' }, index });
+const picture = (index: number, handle?: string): MessagePicture => ({
+  image: { url: `/api/v1/assets/${index}`, taskId: 't1' }, index, ...(handle ? { handle } : {}),
+});
 
 const reviewCall = (kind: ReviewCallModel['kind'], value: Partial<ReviewSummary> = {}, pictures: MessagePicture[] = []): ReviewCallModel => ({
   kind, summary: summary({ kind, ...value }), pictures,
@@ -78,12 +80,12 @@ describe('a review call summary', () => {
     const value = reviewSummaryOf(schema, {
       name: 'render_model_views',
       summary: {
-        views: ['front', 'back', 7], failed_views: ['top'], triangles: 'many',
+        views: ['front', 'back', 7], handles: ['@render1', '', 9], failed_views: ['top'], triangles: 'many',
         usage: { checks: [{ check: '', status: 'fail' }, { check: 'skin', status: 'odd' }] },
       },
     });
     expect(value).toMatchObject({
-      kind: 'render', views: ['front', 'back'], failedViews: ['top'], triangles: null,
+      kind: 'render', views: ['front', 'back'], handles: ['@render1'], failedViews: ['top'], triangles: null,
       usage: { checks: [{ check: 'skin', status: 'unknown' }] },
     });
   });
@@ -172,6 +174,43 @@ describe('pairing rendered pictures with the calls that produced them', () => {
     const record = reviewRecordOf(schema, [call('inspect_model', { view: [] })], [picture(0), picture(1)]);
     expect(record.calls[0].pictures).toEqual([]);
     expect(record.leftover.map((entry) => entry.index)).toEqual([0, 1]);
+  });
+
+  it('binds pictures by the handles each summary names, whatever their attachment order', () => {
+    const renders = [picture(0, '@c'), picture(1, '@a'), picture(2, '@b')];
+    const record = reviewRecordOf(schema, [
+      call('render_model_views', { tool: 'render', views: ['front', 'back', 'three_quarter'], handles: ['@a', '@b', '@c'] }),
+    ], renders);
+    expect(record.calls[0].pictures.map((entry) => [entry.index, entry.handle])).toEqual([[1, '@a'], [2, '@b'], [0, '@c']]);
+    expect(record.leftover).toEqual([]);
+  });
+
+  it('does not guess a picture when the named handles are fewer than the views', () => {
+    const renders = [picture(0, '@a'), picture(1, '@b'), picture(2, '@c')];
+    const record = reviewRecordOf(schema, [
+      call('render_model_views', { tool: 'render', views: ['front', 'back', 'three_quarter'], handles: ['@a', '@b'] }),
+    ], renders);
+    expect(record.calls[0].pictures.map((entry) => entry.index)).toEqual([0, 1]);
+    expect(record.leftover.map((entry) => [entry.index, entry.handle])).toEqual([[2, '@c']]);
+  });
+
+  it('never claims one picture for two calls, and keeps unresolved pictures as leftovers in order', () => {
+    const renders = [picture(0, '@a'), picture(1, '@shared'), picture(2, '@shared'), picture(3, '@z')];
+    const record = reviewRecordOf(schema, [
+      call('render_model_views', { tool: 'render', views: ['front'], handles: ['@shared'] }),
+      call('compare_models', { tool: 'compare', models: ['a', 'b'], views: ['front'], handles: ['@shared', '@a'] }),
+    ], renders);
+    expect(record.calls[0].pictures.map((entry) => entry.index)).toEqual([1]);
+    expect(record.calls[1].pictures.map((entry) => entry.index)).toEqual([2, 0]);
+    expect(record.leftover.map((entry) => entry.index)).toEqual([3]);
+  });
+
+  it('keeps the positional fallback only for old summaries without handles', () => {
+    const renders = [picture(0, '@later'), picture(1, '@a')];
+    const record = reviewRecordOf(schema, [
+      call('render_model_views', { tool: 'render', views: ['front', 'back'] }),
+    ], renders);
+    expect(record.calls[0].pictures.map((entry) => entry.index)).toEqual([0, 1]);
   });
 });
 

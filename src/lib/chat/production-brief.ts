@@ -13,6 +13,10 @@ export interface ProductionBriefField {
   type: string;
   label: string;
   maximumCharacters?: number;
+  /** A long text field; absent means a single line. */
+  multiline?: boolean;
+  /** The hint shown inside an empty text field. */
+  placeholder?: string;
   minimum?: number;
   maximum?: number;
 }
@@ -26,6 +30,8 @@ export function productionBriefFields(schema: ProductSchema): ProductionBriefFie
     type: field.type,
     label: field.label,
     ...(typeof field.maximum_characters === 'number' ? { maximumCharacters: field.maximum_characters } : {}),
+    ...(field.multiline === true ? { multiline: true } : {}),
+    ...(typeof field.placeholder === 'string' && field.placeholder !== '' ? { placeholder: field.placeholder } : {}),
     ...(typeof field.minimum === 'number' ? { minimum: field.minimum } : {}),
     ...(typeof field.maximum === 'number' ? { maximum: field.maximum } : {}),
   }));

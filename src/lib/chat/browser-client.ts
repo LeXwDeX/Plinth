@@ -1,5 +1,4 @@
 import type { ProductSchema } from '@/lib/product-schema';
-import { agentScopeOf } from '@/lib/chat/agent-scope';
 import { isApprovalMode } from '@/lib/chat/approval-modes';
 import { parseLineage, type LineageGraph } from '@/lib/workspace/lineage';
 import { parseThreeViewGroup, parseThreeViews, type ThreeViewAction, type ThreeViewGroup } from '@/lib/workspace/three-view';
@@ -12,7 +11,6 @@ import {
   type ChatMentionClaim,
 } from '@/lib/chat/attachments';
 import type {
-  AgentScope,
   ApprovalMode,
   ChatImage,
   ChatMessage,
@@ -254,9 +252,6 @@ export interface ChatBrowserClient {
   cancelTurn(sessionID: string, signal?: AbortSignal): Promise<boolean>;
   getApproval(sessionID: string, signal?: AbortSignal): Promise<ChatApproval>;
   setApprovalMode(sessionID: string, mode: ApprovalMode): Promise<ChatApproval>;
-  /** 会话的 Agent 范围（2D 模式 / 3D 模式 / 自动模式）。服务端按它限制 Agent 能用的工具。 */
-  getAgentScope(sessionID: string, signal?: AbortSignal): Promise<AgentScope>;
-  setAgentScope(sessionID: string, scope: AgentScope): Promise<AgentScope>;
   /** #103: the session's production brief (an empty object when none is stored). */
   getBrief(sessionID: string, signal?: AbortSignal): Promise<ProductionBrief>;
   /** #103: replace the whole production brief; an empty object clears it. */
@@ -347,12 +342,6 @@ function approvalError(schema: ProductSchema, payload: unknown, status: number):
     typeof message === 'string' ? message : schema.chat.presentation.messages.internal_error,
     status,
   );
-}
-
-function agentScopeRoute(schema: ProductSchema, sessionID: string): string {
-  const template = schema.runtime.http.routes.chat_session_agent_scope;
-  if (!template) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, 0);
-  return route(template, { sessionID });
 }
 
 function sessionRoute(schema: ProductSchema, template: string | undefined, sessionID: string): string {
@@ -653,17 +642,14 @@ function normalizeSession(
 ): ChatSession {
   const source = record(value);
   const fields = schema.chat.api.response_fields;
-  // 旧响应没有这个成员：此时不写，界面按 Schema 默认显示。
-  const agentScope = source[fields.agent_scope] === undefined ? {} : { agentScope: agentScopeOf(schema, source[fields.agent_scope]) };
   const generationModels = sessionModels(fields.generation_models ? source[fields.generation_models] : undefined);
   const generationModelsRetired = sessionModels(fields.generation_models_retired ? source[fields.generation_models_retired] : undefined);
   // #103: an answered brief is an object (possibly empty); responses without the member stay untouched.
   const briefField = fields.brief;
   const budgetField = fields.budget;
   const brief = briefField && Object.hasOwn(source, briefField) ? parseProductionBrief(source[briefField]) : null;
-  const budget = budgetField ? parseSessionBudget(source[budgetField]) : null;
+  const budget = budgetField ? parseSessionBudget(schema, source[budgetField]) : null;
   return {
-    ...agentScope,
     ...(generationModels ? { generationModels } : {}),
     ...(generationModels && generationModelsRetired ? { generationModelsRetired } : {}),
     ...(brief ? { brief } : {}),
@@ -1203,22 +1189,6 @@ export function createChatBrowserClient(
       const payload = await responseValue(response);
       if (!response.ok) throw approvalError(schema, payload, response.status);
       return normalizeApproval(schema, record(payload));
-    },
-    async getAgentScope(sessionID, signal) {
-      const response = await fetcher(agentScopeRoute(schema, sessionID), { signal });
-      const payload = await responseValue(response);
-      if (!response.ok) throw approvalError(schema, payload, response.status);
-      return agentScopeOf(schema, record(payload)[schema.chat.api.response_fields.agent_scope]);
-    },
-    async setAgentScope(sessionID, scope) {
-      const response = await fetcher(agentScopeRoute(schema, sessionID), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [fields.agent_scope]: scope }),
-      });
-      const payload = await responseValue(response);
-      if (!response.ok) throw approvalError(schema, payload, response.status);
-      return agentScopeOf(schema, record(payload)[schema.chat.api.response_fields.agent_scope]);
     },
     async getBrief(sessionID, signal) {
       const template = schema.runtime.http.routes.chat_session_brief;

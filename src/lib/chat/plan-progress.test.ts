@@ -43,6 +43,30 @@ describe('pairing plan steps with session tasks', () => {
   it('counts no task for a plan without steps', () => {
     expect(planStepProgress(plan(), [task('t1', 'remesh')])).toEqual([]);
   });
+
+  it('never claims a task that started before the plan was approved', () => {
+    const decidedAt = '2026-10-01T00:00:10Z';
+    const earlier = { ...task('old', 'text-to-3d', 'SUCCEEDED', 'tripo-v3'), startedAt: Date.parse('2026-10-01T00:00:00Z') };
+    const later = { ...task('new', 'text-to-3d', 'RUNNING', 'tripo-v3'), startedAt: Date.parse('2026-10-01T00:00:20Z') };
+    const progress = planStepProgress(plan(['text-to-3d', 'tripo-v3']), [earlier, later], decidedAt);
+    expect(progress.map((entry) => entry.task?.taskId)).toEqual(['new']);
+  });
+
+  it('accepts ISO task start times when filtering by the decision', () => {
+    const after = { ...task('new', 'remesh'), startedAt: '2026-10-01T00:00:20Z' };
+    expect(planStepProgress(plan(['remesh', '']), [after], '2026-10-01T00:00:10Z')[0].task?.taskId).toBe('new');
+  });
+
+  it('does not claim a task without a start time once a decision time is known', () => {
+    expect(planStepProgress(plan(['remesh', '']), [task('unknown', 'remesh')], '2026-10-01T00:00:10Z')[0].task).toBeNull();
+  });
+
+  it('keeps the old pairing when no usable decision time is known', () => {
+    const startedAt = Date.parse('2026-10-01T00:00:00Z');
+    const old = { ...task('old', 'remesh'), startedAt };
+    expect(planStepProgress(plan(['remesh', '']), [old], '')[0].task?.taskId).toBe('old');
+    expect(planStepProgress(plan(['remesh', '']), [old], 'not-a-time')[0].task?.taskId).toBe('old');
+  });
 });
 
 describe('counting completed steps', () => {

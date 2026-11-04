@@ -249,6 +249,17 @@ export class PendingApprovalError extends Error {
 }
 
 /**
+ * #103: the request member that carries an approval decision is Schema data. A
+ * response that lacks it cannot be decided safely: refuse before sending an
+ * empty key the server would not understand.
+ */
+function decisionBody(schema: ProductSchema, approve: boolean): Record<string, string> {
+  const member = schema.chat.api.fields.decision;
+  if (!member) throw new Error('chat.api.fields.decision is required to decide an approval');
+  return { [member]: approve ? 'approve' : 'deny' };
+}
+
+/**
  * 对一条待批准步骤做决定：PUT 任务授权。批准 / 拒绝都由服务端检查有效期和
  * 来源；过期的批准返回 409，拒绝仍可。
  */
@@ -258,11 +269,12 @@ export async function decidePendingApproval(
   approve: boolean,
   fetcher: typeof fetch = fetch,
 ): Promise<PendingApprovalDecision> {
+  const body = decisionBody(schema, approve);
   const route = schema.runtime.http.routes.task_grant_decision.replace('{requestID}', encodeURIComponent(requestId));
   const response = await fetcher(route, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ decision: approve ? 'approve' : 'deny' }),
+    body: JSON.stringify(body),
   });
   const payload = record(await response.json().catch(() => null));
   if (!response.ok) throw new PendingApprovalError(text(payload.detail), response.status);
@@ -287,11 +299,12 @@ export async function decideSessionBudget(
 ): Promise<PendingApprovalDecision> {
   const template = schema.runtime.http.routes.chat_session_budget;
   if (!template) throw new PendingApprovalError('', 0);
+  const body = decisionBody(schema, approve);
   const route = template.replace('{budgetID}', encodeURIComponent(budgetId));
   const response = await fetcher(route, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ decision: approve ? 'approve' : 'deny' }),
+    body: JSON.stringify(body),
   });
   const payload = record(await response.json().catch(() => null));
   if (!response.ok) throw new PendingApprovalError(text(payload.detail), response.status);
