@@ -146,9 +146,14 @@ type PreparedInput struct {
 	// frozen values and part of InputHash, so a budget reservation covers the
 	// same estimate the approval card shows. Zero on records written before
 	// the field existed; readers then fall back to the Offering's quote.
-	EstimatedCredits int       `json:"estimated_credits,omitempty"`
-	InputHash        string    `json:"input_hash"`
-	CreatedAt        time.Time `json:"created_at"`
+	EstimatedCredits int `json:"estimated_credits,omitempty"`
+	// CreditsMetered copies the Offering's declaration that its provider bills
+	// in credits. A metered input whose server estimate is still zero cannot be
+	// priced: the budget policy must leave the step to a person instead of
+	// treating zero as free (#103 review B1). Part of InputHash when true.
+	CreditsMetered bool      `json:"credits_metered,omitempty"`
+	InputHash      string    `json:"input_hash"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 type SubmitPreparedCommand struct {

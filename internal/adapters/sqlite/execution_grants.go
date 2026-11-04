@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
@@ -603,6 +604,20 @@ func (r *Repository) BindExecutionGrantOnConn(ctx context.Context, conn *sql.Con
 	}
 	if n != 1 {
 		return fmt.Errorf("bind execution grant: %w", executiongrant.ErrState)
+	}
+	// A budget-funded grant may bind only while its reservation still holds the
+	// plan's credits. A reservation released when the operation was abandoned
+	// must not let the Task run outside the budget (#103 review B2).
+	var reservationState, reservationTask string
+	err = conn.QueryRowContext(ctx, `SELECT state, task_id FROM budget_reservations WHERE grant_request_id = ?`, requestID).
+		Scan(&reservationState, &reservationTask)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		// No budget funded this grant.
+	case err != nil:
+		return err
+	case reservationState != budget.ReservationReserved || reservationTask != "":
+		return executiongrant.ErrConflict
 	}
 	// The budget reservation now follows the Task: settlement reads the Task's
 	// charge fact from here on (#103).

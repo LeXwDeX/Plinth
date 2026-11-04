@@ -1663,7 +1663,9 @@ func (executor *Executor) success(
 		result[key] = info.ModelNote
 	}
 	if info.Budget != nil {
-		result["budget"] = budgetResult(*info.Budget)
+		if key := tool.ResultFields.Budget; key != "" {
+			result[key] = budgetResult(*info.Budget)
+		}
 	}
 	content, _ := json.Marshal(result)
 	return chat.ToolResult{

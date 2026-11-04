@@ -394,11 +394,28 @@ func (s *Service) planItem(production budget.ProductionBudget) Item {
 	plan := production.Plan
 	return Item{
 		Kind: ItemKindPlan, RequestID: production.ID, Status: StatusPending,
-		Tool: "propose_production_plan", EstimatedCredits: plan.EstimatedTotal(),
+		Tool: s.planToolName(), EstimatedCredits: plan.EstimatedTotal(),
 		BudgetCredits: production.LimitCredits, Plan: &plan, Inputs: []Input{},
 		MessageID: production.MessageID, CreatedAt: production.CreatedAt,
 		ExpiresAt: s.grants.PendingBudgetExpiry(production),
 	}
+}
+
+// planToolName is the declared proposal tool's name. The plan card names the
+// tool whose result proposed it, so renaming the tool in the Schema needs no
+// code change (#103 review B4).
+func (s *Service) planToolName() string {
+	for _, tool := range s.schema.AgentTools {
+		if tool.Execution.ImplementationKey == "plan.propose" {
+			return tool.Name
+		}
+	}
+	for _, tool := range s.schema.Tools {
+		if tool.Execution.ImplementationKey == "plan.propose" {
+			return tool.Name
+		}
+	}
+	return ""
 }
 
 func (s *Service) item(ctx context.Context, owner string, op generationtool.Operation, grant executiongrant.Grant,
@@ -747,6 +764,16 @@ func (s *Service) postBudgetNotice(ctx context.Context, production budget.Produc
 	return nil
 }
 
+// postBudgetNoticeAndMark posts the one notice of a plan and records that it
+// was posted. Recording is what stops the sweep retrying it; a failed post
+// leaves the plan unmarked so a later sweep tries again.
+func (s *Service) postBudgetNoticeAndMark(ctx context.Context, production budget.ProductionBudget, kind string) error {
+	if err := s.postBudgetNotice(ctx, production, kind); err != nil {
+		return err
+	}
+	return s.grants.MarkProductionBudgetNoticeSent(ctx, production.OwnerID, production.ID)
+}
+
 // budgetDecisionText renders the Schema's approved or denied message with the
 // plan's title, limit and remaining budget.
 func (s *Service) budgetDecisionText(ctx context.Context, production budget.ProductionBudget) string {
@@ -928,6 +955,20 @@ func (s *Service) settleExpired(ctx context.Context, op generationtool.Operation
 	return s.postAndSettle(ctx, op, s.text(ctx, s.schema.PendingApprovals.Messages.Expired))
 }
 
+// settleOperation finalizes the operation and gives back the plan reservation
+// of an approved grant that ended without a bound Task. The abandon is
+// idempotent and does nothing for a denied, pending, bound or unbudgeted
+// grant; without it a permanently rejected submit would hold the plan's
+// credits forever (#103 review B2).
+func (s *Service) settleOperation(ctx context.Context, op generationtool.Operation) error {
+	if op.GrantRequestID != "" {
+		if err := s.grants.AbandonBudgetReservation(ctx, op.OwnerID, op.GrantRequestID); err != nil {
+			return err
+		}
+	}
+	return s.operations.SettleAgentOperation(ctx, op)
+}
+
 // postAndSettle posts the one message that reports a request (a fixed ID makes
 // a second post a no-op) and marks the operation settled.
 func (s *Service) postAndSettle(ctx context.Context, op generationtool.Operation, content string) (Outcome, error) {
@@ -937,7 +978,7 @@ func (s *Service) postAndSettle(ctx context.Context, op generationtool.Operation
 	}); err != nil && !errors.Is(err, chat.ErrSessionNotFound) {
 		return Outcome{}, err
 	}
-	if err := s.operations.SettleAgentOperation(ctx, op); err != nil {
+	if err := s.settleOperation(ctx, op); err != nil {
 		return Outcome{}, err
 	}
 	return Outcome{MessageID: messageID}, nil
@@ -1026,7 +1067,7 @@ func (s *Service) report(ctx context.Context, op generationtool.Operation, task 
 	messages, err := s.chat.ListMessages(ctx, op.OwnerID, op.SessionID)
 	if errors.Is(err, chat.ErrSessionNotFound) {
 		// The session is gone; nothing is left to report into.
-		return outcome, s.operations.SettleAgentOperation(ctx, op)
+		return outcome, s.settleOperation(ctx, op)
 	}
 	if err != nil {
 		return outcome, err
@@ -1055,7 +1096,7 @@ func (s *Service) report(ctx context.Context, op generationtool.Operation, task 
 		})
 		if err != nil {
 			if errors.Is(err, chat.ErrSessionNotFound) {
-				return outcome, s.operations.SettleAgentOperation(ctx, op)
+				return outcome, s.settleOperation(ctx, op)
 			}
 			return outcome, err
 		}
@@ -1093,7 +1134,7 @@ func (s *Service) report(ctx context.Context, op generationtool.Operation, task 
 	if err := s.chat.UpdateMessage(ctx, op.OwnerID, posted); err != nil && !errors.Is(err, chat.ErrMessageNotFound) {
 		return outcome, err
 	}
-	return outcome, s.operations.SettleAgentOperation(ctx, op)
+	return outcome, s.settleOperation(ctx, op)
 }
 
 // originalArguments recovers the arguments of the tool call that asked for the
@@ -1131,9 +1172,11 @@ func (s *Service) Sweep(ctx context.Context) (int, error) {
 	if err != nil {
 		failures = append(failures, err)
 	}
+	failedNotices := map[string]bool{}
 	for _, production := range exhausted {
-		if err := s.postBudgetNotice(ctx, production, budgetNoticeExhausted); err != nil {
+		if err := s.postBudgetNoticeAndMark(ctx, production, budgetNoticeExhausted); err != nil {
 			failures = append(failures, err)
+			failedNotices[production.ID] = true
 			continue
 		}
 		settled++
@@ -1146,11 +1189,37 @@ func (s *Service) Sweep(ctx context.Context) (int, error) {
 		if ctx.Err() != nil {
 			break
 		}
-		if err := s.postBudgetNotice(ctx, production, budgetNoticeExpired); err != nil {
+		if err := s.postBudgetNoticeAndMark(ctx, production, budgetNoticeExpired); err != nil {
 			failures = append(failures, err)
+			failedNotices[production.ID] = true
 			continue
 		}
 		settled++
+	}
+	// The state transition commits before the notice is posted. A plan whose
+	// post failed (or whose process stopped before posting) keeps no notice
+	// date and is retried here until the deterministic message is stored
+	// (#103 review B3). This sweep already tried the plans above once.
+	if pending, err := s.grants.ProductionBudgetsAwaitingNotice(ctx, batch); err != nil {
+		failures = append(failures, err)
+	} else {
+		for _, production := range pending {
+			if ctx.Err() != nil {
+				break
+			}
+			if failedNotices[production.ID] {
+				continue
+			}
+			kind := budgetNoticeExhausted
+			if production.State == budget.StateDenied {
+				kind = budgetNoticeExpired
+			}
+			if err := s.postBudgetNoticeAndMark(ctx, production, kind); err != nil {
+				failures = append(failures, err)
+				continue
+			}
+			settled++
+		}
 	}
 	run := func(list func(int64, int) ([]generationtool.Operation, error), cursor *int64,
 		handle func(generationtool.Operation) error) {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
@@ -105,7 +104,8 @@ func planCommand(arguments string) chat.ToolCommand {
 // carry the server's number.
 func TestProposeProductionPlanQuotesEveryStepServerSide(t *testing.T) {
 	store := &recordingProductionPlans{}
-	service := proposalService(t, store, shippedBudgetSchema(t))
+	budgetSchema := shippedBudgetSchema(t)
+	service := proposalService(t, store, budgetSchema)
 	result, err := service.ProposeProductionPlan(context.Background(), planCommand(`{
 		"title":"  从草图做骑士  ",
 		"steps":[
@@ -159,8 +159,37 @@ func TestProposeProductionPlanQuotesEveryStepServerSide(t *testing.T) {
 		second["offering_id"] != "three-pinned" {
 		t.Fatalf("proposal step quotes = %v / %v", first, second)
 	}
-	if !strings.Contains(content["message"].(string), "wait for the person") {
-		t.Fatalf("proposal message = %q", content["message"])
+	if content["message"] != budgetSchema.ToolMessages.Proposed {
+		t.Fatalf("proposal message = %q, want the Schema's %q", content["message"], budgetSchema.ToolMessages.Proposed)
+	}
+}
+
+// A metered model the server cannot quote cannot be covered by a total budget:
+// the proposal is refused instead of storing a zero-estimate step. A free model
+// remains plannable at zero.
+func TestProposeProductionPlanRefusesUnpricedMeteredSteps(t *testing.T) {
+	store := &recordingProductionPlans{}
+	service := &chat.Service{}
+	service.SetProductionPlans(chat.ProductionPlanPolicy{
+		Budget: shippedBudgetSchema(t),
+		Offerings: func() []generation.Offering {
+			return []generation.Offering{
+				{ID: "free", Revision: "v1", Capability: "text-to-image", Enabled: true, Default: true},
+				{ID: "metered-unpriced", Revision: "v1", Capability: "text-to-image", Enabled: true, CreditsMetered: true},
+			}
+		},
+		Store: store,
+	})
+	result, err := service.ProposeProductionPlan(context.Background(), planCommand(
+		`{"title":"p","steps":[{"capability":"text-to-image","model":"metered-unpriced","purpose":"a"}],"budget_credits":5}`))
+	want := "step text-to-image has no server credit estimate and cannot be budgeted"
+	if err != nil || result.Error != want || len(store.created) != 0 {
+		t.Fatalf("unpriced metered step = %+v err=%v stored=%d", result, err, len(store.created))
+	}
+	result, err = service.ProposeProductionPlan(context.Background(), planCommand(
+		`{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budget_credits":5}`))
+	if err != nil || result.Error != "" || len(store.created) != 1 || store.plans[0].Steps[0].EstimatedCredits != 0 {
+		t.Fatalf("free step = %+v err=%v stored=%d", result, err, len(store.created))
 	}
 }
 

@@ -17,12 +17,17 @@ const (
 	BudgetReasonNoPlan   = budget.ReasonNoPlan
 	BudgetReasonOffPlan  = budget.ReasonOffPlan
 	BudgetReasonOver     = budget.ReasonOverBudget
+	BudgetReasonUnpriced = budget.ReasonUnpriced
 	BudgetActorPrefix    = "budget:"
 	BudgetStatePending   = budget.StatePending
 	BudgetStateActive    = budget.StateActive
 	BudgetStateExhausted = budget.StateExhausted
 	BudgetStateClosed    = budget.StateClosed
 	BudgetStateDenied    = budget.StateDenied
+	// AbandonedActor is Grant.DecidedBy of an approved grant denied by the
+	// system because the operation it authorized ended without binding a Task;
+	// its budget reservation is released in the same transaction.
+	AbandonedActor = "system:budget_abandoned"
 )
 
 var (
@@ -47,8 +52,9 @@ const (
 type PolicyResult struct {
 	Grant   Grant
 	Outcome string
-	// Reason is one of BudgetReasonNoPlan, BudgetReasonOffPlan or
-	// BudgetReasonOver for a budget-mode step left to a person, else empty.
+	// Reason is one of BudgetReasonNoPlan, BudgetReasonOffPlan,
+	// BudgetReasonOver or BudgetReasonUnpriced for a budget-mode step left to
+	// a person, else empty.
 	Reason string
 	// Budget is the session's current plan summary when the evaluation read
 	// one; nil when there is no plan or the mode did not use the budget.
@@ -101,6 +107,61 @@ type BudgetGrantStore interface {
 	// grant in one BEGIN IMMEDIATE transaction. ErrBudgetOver means the
 	// estimate does not fit; ErrBudgetGone means the plan is no longer active.
 	ApproveExecutionGrantWithBudget(ctx context.Context, owner, requestID, budgetID, actor string, credits int) (Grant, error)
+}
+
+// BudgetReservationReleaser is the optional data-layer part that gives back an
+// approved-but-unbound budget reservation when its operation ends without a
+// Task. The grant itself is denied in the same transaction, so a later claim or
+// policy replay cannot spend the plan without a reservation (#103 review B2).
+type BudgetReservationReleaser interface {
+	ReleaseUnboundBudgetReservation(ctx context.Context, ownerID, requestID string) error
+}
+
+// AbandonBudgetReservation releases the reservation of an approved grant whose
+// operation ended without binding a Task (a permanently rejected submit, or a
+// plan step that will never submit this authorization). It is idempotent: a
+// grant that is not approved, already bound, or has no reservation is left
+// untouched. Deployments without plan storage have nothing to release.
+func (s Service) AbandonBudgetReservation(ctx context.Context, ownerID, requestID string) error {
+	if ownerID == "" || requestID == "" {
+		return ErrInvalid
+	}
+	releaser, ok := s.Budgets.(BudgetReservationReleaser)
+	if !ok {
+		return nil
+	}
+	return releaser.ReleaseUnboundBudgetReservation(ctx, ownerID, requestID)
+}
+
+// BudgetNoticeStore records which exhausted or expired plan already posted its
+// one chat notice. The notice follows the state transition, so a failed post is
+// retried by a later sweep until the date is recorded (#103 review B3).
+type BudgetNoticeStore interface {
+	ProductionBudgetsAwaitingNotice(ctx context.Context, limit int) ([]budget.ProductionBudget, error)
+	MarkProductionBudgetNoticeSent(ctx context.Context, ownerID, budgetID string, now time.Time) error
+}
+
+// ProductionBudgetsAwaitingNotice returns the plans whose notice has not been
+// recorded yet. Deployments without notice storage return none.
+func (s Service) ProductionBudgetsAwaitingNotice(ctx context.Context, limit int) ([]budget.ProductionBudget, error) {
+	store, ok := s.Budgets.(BudgetNoticeStore)
+	if !ok {
+		return nil, nil
+	}
+	return store.ProductionBudgetsAwaitingNotice(ctx, limit)
+}
+
+// MarkProductionBudgetNoticeSent records a posted notice. Deployments without
+// notice storage have nothing to record.
+func (s Service) MarkProductionBudgetNoticeSent(ctx context.Context, ownerID, budgetID string) error {
+	if ownerID == "" || budgetID == "" {
+		return ErrInvalid
+	}
+	store, ok := s.Budgets.(BudgetNoticeStore)
+	if !ok {
+		return nil
+	}
+	return store.MarkProductionBudgetNoticeSent(ctx, ownerID, budgetID, s.now())
 }
 
 // CreateProductionPlan stores a new pending plan for the owner's session.
@@ -220,6 +281,30 @@ func (s Service) BudgetSummary(ctx context.Context, ownerID, sessionID string) (
 	return s.Budgets.ProductionBudgetSummary(ctx, ownerID, sessionID)
 }
 
+// productionBudgetSummariesStore is the optional data-layer batch read of a
+// session list's current plans. Deployments that predate it keep the
+// per-session read through ProductionBudgetStore.
+type productionBudgetSummariesStore interface {
+	ProductionBudgetSummaries(context.Context, string, []string) (map[string]budget.Summary, error)
+}
+
+// ProductionBudgetSummaries reads the current plan summaries of many sessions
+// in one store round trip, so listing sessions does not read one budget per
+// session (#103 review C6). A session without a current plan is absent from
+// the map. A deployment without plan storage, or whose store only implements
+// the per-session read, returns an empty map and no error.
+func (s Service) ProductionBudgetSummaries(ctx context.Context, ownerID string, sessionIDs []string) (map[string]budget.Summary, error) {
+	summaries := make(map[string]budget.Summary)
+	if s.Budgets == nil || ownerID == "" || len(sessionIDs) == 0 {
+		return summaries, nil
+	}
+	store, ok := s.Budgets.(productionBudgetSummariesStore)
+	if !ok {
+		return summaries, nil
+	}
+	return store.ProductionBudgetSummaries(ctx, ownerID, sessionIDs)
+}
+
 // BudgetForGrant returns the plan summary that reserved the grant, if any.
 func (s Service) BudgetForGrant(ctx context.Context, ownerID, requestID string) (budget.Summary, bool, error) {
 	if s.Budgets == nil || ownerID == "" || requestID == "" {
@@ -277,6 +362,12 @@ func (s Service) applyBudgetPolicy(ctx context.Context, grant Grant, snapshot Pr
 		// without a person, even one manual mode would approve on its own: the
 		// person approved a total, and going past it needs a new decision.
 		return PolicyResult{Grant: grant, Outcome: PolicyOutcomeHuman, Reason: BudgetReasonOver, Budget: &summary}, true, nil
+	}
+	if snapshot.CreditsMetered && snapshot.EstimatedCredits <= 0 {
+		// A metered step without a server quote cannot be reserved: approving it
+		// at zero would spend the plan without covering the step, so the person
+		// decides it like any other unpriced charge (#103 review B1).
+		return PolicyResult{Grant: grant, Outcome: PolicyOutcomeHuman, Reason: BudgetReasonUnpriced, Budget: &summary}, true, nil
 	}
 	approver, ok := s.Grants.(BudgetGrantStore)
 	if !ok {

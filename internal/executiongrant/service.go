@@ -59,6 +59,10 @@ type PreparedSnapshot struct {
 	// budget). It is part of the input hash; zero on records written before
 	// the field existed.
 	EstimatedCredits int `json:"estimated_credits,omitempty"`
+	// CreditsMetered is true when the Offering bills in credits. With a zero
+	// estimate it marks an input the server cannot price; a budget plan must
+	// leave that step to a person (#103 review B1).
+	CreditsMetered bool `json:"credits_metered,omitempty"`
 }
 
 type PreparedReader interface {

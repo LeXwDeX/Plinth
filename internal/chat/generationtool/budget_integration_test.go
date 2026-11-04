@@ -67,11 +67,11 @@ func budgetContent(t *testing.T, result chat.ToolResult) map[string]any {
 	return content
 }
 
-func budgetNumbers(t *testing.T, content map[string]any) (remaining, reserved float64) {
+func budgetNumbers(t *testing.T, content map[string]any, key string) (remaining, reserved float64) {
 	t.Helper()
-	value, ok := content["budget"].(map[string]any)
+	value, ok := content[key].(map[string]any)
 	if !ok {
-		t.Fatalf("tool result carries no budget: %v", content)
+		t.Fatalf("tool result carries no budget under %q: %v", key, content)
 	}
 	return value["remaining"].(float64), value["reserved"].(float64)
 }
@@ -87,7 +87,7 @@ func TestBudgetModeRunsPlannedStepsInsideTheLimitWithoutCards(t *testing.T) {
 		t.Fatalf("first planned step waited: %+v submits=%d", first, gateway.submitCount)
 	}
 	content := budgetContent(t, first)
-	remaining, reserved := budgetNumbers(t, content)
+	remaining, reserved := budgetNumbers(t, content, command.Tool.ResultFields.Budget)
 	if remaining != 8 || reserved != 7 {
 		t.Fatalf("first step budget = remaining %v reserved %v", remaining, reserved)
 	}
@@ -97,7 +97,7 @@ func TestBudgetModeRunsPlannedStepsInsideTheLimitWithoutCards(t *testing.T) {
 		t.Fatalf("second planned step waited: %+v submits=%d", second, gateway.submitCount)
 	}
 	content = budgetContent(t, second)
-	remaining, reserved = budgetNumbers(t, content)
+	remaining, reserved = budgetNumbers(t, content, command.Tool.ResultFields.Budget)
 	if remaining != 1 || reserved != 14 {
 		t.Fatalf("second step budget = remaining %v reserved %v", remaining, reserved)
 	}
@@ -132,10 +132,10 @@ func TestBudgetModeSendsAStepBeyondTheLimitToItsCard(t *testing.T) {
 		t.Fatalf("third step ran: %+v submits=%d", third, gateway.submitCount)
 	}
 	content := budgetContent(t, third)
-	if content["status"] != "awaiting_approval" || content["reason"] != budget.ReasonOverBudget {
+	if content["status"] != "awaiting_approval" || content[command.Tool.ResultFields.Reason] != budget.ReasonOverBudget {
 		t.Fatalf("third step content = %v", content)
 	}
-	remaining, reserved := budgetNumbers(t, content)
+	remaining, reserved := budgetNumbers(t, content, command.Tool.ResultFields.Budget)
 	if remaining != 1 || reserved != 14 {
 		t.Fatalf("third step budget = remaining %v reserved %v", remaining, reserved)
 	}
@@ -151,10 +151,10 @@ func TestBudgetModeSendsAnOffPlanStepToItsCard(t *testing.T) {
 		t.Fatalf("off-plan step ran: %+v submits=%d", result, gateway.submitCount)
 	}
 	content := budgetContent(t, result)
-	if content["reason"] != budget.ReasonOffPlan {
+	if content[command.Tool.ResultFields.Reason] != budget.ReasonOffPlan {
 		t.Fatalf("off-plan content = %v", content)
 	}
-	if _, ok := content["budget"]; !ok {
+	if _, ok := content[command.Tool.ResultFields.Budget]; !ok {
 		t.Fatalf("off-plan content omits the plan: %v", content)
 	}
 }
@@ -168,7 +168,7 @@ func TestBudgetModeWithoutAPlanSendsTheStepToItsCardWithNoPlan(t *testing.T) {
 		t.Fatalf("no-plan step ran: %+v submits=%d", result, gateway.submitCount)
 	}
 	content := budgetContent(t, result)
-	if content["reason"] != budget.ReasonNoPlan {
+	if content[command.Tool.ResultFields.Reason] != budget.ReasonNoPlan {
 		t.Fatalf("no-plan content = %v", content)
 	}
 }
@@ -198,5 +198,35 @@ func TestBudgetModeNeverCoversARechargeAttempt(t *testing.T) {
 	}
 	if summary, found, err := repo.BudgetSummaryForGrant(context.Background(), "owner-a", op.GrantRequestID); err != nil || found {
 		t.Fatalf("recharge attempt reserved credits: %+v found=%v err=%v", summary, found, err)
+	}
+}
+
+// #103 review B4: the receipt keys are the tool's own result_fields, so a
+// Schema can rename them; the built-in names are never written on the side.
+func TestBudgetReceiptKeysComeFromTheToolResultFields(t *testing.T) {
+	executor, command, _, repo := budgetHarness(t, "refine_image", "text-to-image")
+	createActiveBudgetPlan(t, repo, "pb-keys", 15, "text-to-image")
+	command.Tool.ResultFields.Budget = "plan_credits"
+	content := budgetContent(t, executeBudgetCall(t, executor, command, "call-a"))
+	if _, present := content["budget"]; present {
+		t.Fatalf("the built-in budget key is still written: %v", content)
+	}
+	if _, ok := content["plan_credits"].(map[string]any); !ok {
+		t.Fatalf("no budget under the Schema key: %v", content)
+	}
+
+	offPlan, offPlanCommand, _, offPlanRepo := budgetHarness(t, "create_model_3d_from_image", "image-to-3d")
+	createActiveBudgetPlan(t, offPlanRepo, "pb-keys-off-plan", 100, "text-to-image")
+	offPlanCommand.Tool.ResultFields.Budget = "plan_credits"
+	offPlanCommand.Tool.ResultFields.Reason = "waiting_reason"
+	refused := budgetContent(t, executeBudgetCall(t, offPlan, offPlanCommand, "call-a"))
+	if refused["waiting_reason"] != budget.ReasonOffPlan {
+		t.Fatalf("no reason under the Schema key: %v", refused)
+	}
+	if _, present := refused["reason"]; present {
+		t.Fatalf("the built-in reason key is still written: %v", refused)
+	}
+	if _, ok := refused["plan_credits"].(map[string]any); !ok {
+		t.Fatalf("no budget under the Schema key: %v", refused)
 	}
 }
