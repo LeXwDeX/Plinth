@@ -1568,7 +1568,10 @@ type CanvasFrontendSchema struct {
 	NodeGapPixels                    float64 `json:"node_gap_pixels"`
 	MinimumNodeSize                  float64 `json:"minimum_node_size"`
 	MaximumNodeEdge                  float64 `json:"maximum_node_edge"`
-	ModelCaptureLongEdgePixels       int     `json:"model_capture_long_edge_pixels"`
+	// HandleBadgeMinimumScreenPixels is the shorter on-screen edge a picture layer needs before its chat
+	// handle badge ("img3") is drawn in its top-right corner; smaller layers show none.
+	HandleBadgeMinimumScreenPixels float64 `json:"handle_badge_minimum_screen_pixels"`
+	ModelCaptureLongEdgePixels     int     `json:"model_capture_long_edge_pixels"`
 	// ToThreeDLongEdgePixels is the long edge of the board picture handed to an image-to-3D Offering when no
 	// 2D output size names exact pixels (the artboard itself is only max_edge units across).
 	ToThreeDLongEdgePixels int                  `json:"to_3d_long_edge_pixels"`
@@ -2772,6 +2775,11 @@ type ChatFrontendSchema struct {
 	LegacyHiddenContentPrefix       string `json:"legacy_hidden_content_prefix"`
 	LegacyHiddenContentSuffix       string `json:"legacy_hidden_content_suffix"`
 	ProgressMaximum                 int    `json:"progress_maximum"`
+	// HandlePreviewDelayMilliseconds is how long the pointer rests on a picture handle ("@img3") in an
+	// Agent message before its large preview shows; HandlePreviewMaximumPixels bounds the preview's
+	// longer edge. The preview never takes pointer events.
+	HandlePreviewDelayMilliseconds int `json:"handle_preview_delay_milliseconds"`
+	HandlePreviewMaximumPixels     int `json:"handle_preview_maximum_pixels"`
 }
 
 type ChatThinkingSchema struct {

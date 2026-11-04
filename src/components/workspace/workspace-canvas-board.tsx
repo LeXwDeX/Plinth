@@ -15,6 +15,8 @@ import {
 } from '@/components/workspace/canvas-image-actions';
 import { useWorkspaceOfferings } from '@/hooks/use-workspace-offerings';
 import { useCanvasArtboard } from '@/hooks/use-canvas-artboard';
+import { useSessionMessages } from '@/hooks/use-picture-handles';
+import { handleOfPicture } from '@/lib/workspace/object-handle';
 import { Action } from '@/components/ui/button';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -697,6 +699,11 @@ export function WorkspaceCanvasBoard() {
   }, [handleUpload]);
 
   const selectedImageNode = useMemo(() => selectedImageLayer(nodes, selectedNodeIds), [nodes, selectedNodeIds]);
+  // #87: the floating bar names a picture of the chat by its handle, as the layers panel does.
+  const sessionMessages = useSessionMessages(sessionID);
+  const selectedHandle = useMemo(() => (selectedImageNode
+    ? handleOfPicture(sessionMessages, { url: selectedImageNode.imageUrl, ...(selectedImageNode.captureId ? { captureId: selectedImageNode.captureId } : {}) })
+    : ''), [selectedImageNode, sessionMessages]);
 
   // File name: the session title and the artboard ratio ("sunset-3x2.png"); the schema fallback when untitled.
   const sessionTitle = useChatStore((state) => state.sessions.find((item) => item.id === sessionID)?.title ?? '');
@@ -1201,7 +1208,7 @@ export function WorkspaceCanvasBoard() {
       />
       {selectedImageNode && layerBarShown(activeTool, selectedImageNode) ? (
         <CanvasImageActionBar
-          layer={selectedImageNode}
+          layer={{ ...selectedImageNode, ...(selectedHandle ? { handle: selectedHandle } : {}) }}
           onDuplicate={() => useCanvasStore.getState().duplicateSelected(sessionID)}
           onDownload={() => downloadImage(selectedImageNode.imageUrl)}
           onDelete={() => removeNode(sessionID, selectedImageNode.id)}

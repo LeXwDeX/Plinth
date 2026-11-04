@@ -14,7 +14,7 @@ export function MessageText({ text, references }: { text: string; references?: R
       {splitHandles(text, (handle) => references.has(handle)).map((segment, index) => {
         const reference = segment.handle ? references.get(segment.handle) : undefined;
         return reference
-          ? <HandleTag key={index} reference={reference} testId="chat-text-handle" className="inline px-0.5 py-0 text-[13px] font-medium leading-[inherit] text-primary hover:underline hover:ring-0" />
+          ? <HandleTag key={index} reference={reference} testId="chat-text-handle" preview className="inline px-0.5 py-0 text-[13px] font-medium leading-[inherit] text-primary hover:underline hover:ring-0" />
           : <span key={index}>{segment.text}</span>;
       })}
     </>

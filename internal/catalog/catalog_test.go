@@ -613,7 +613,9 @@ const minimalApplication = `"application":{
 			"internal_api_path_prefix":"/api/",
 			"legacy_hidden_content_prefix":"[hidden:",
 			"legacy_hidden_content_suffix":"]",
-			"progress_maximum":100
+			"progress_maximum":100,
+			"handle_preview_delay_milliseconds":150,
+			"handle_preview_maximum_pixels":360
 		},
 		"agent":{
 			"adapter_key":"openai-compatible","base_url_setting":"llm_base_url",
@@ -874,7 +876,7 @@ const minimalApplication = `"application":{
 			"context_menu_bind_delay_milliseconds":0,
 			"permission_redirect_path":"/tasks",
 			"initial_node_x":40,"initial_node_y":40,"node_gap_pixels":20,
-			"minimum_node_size":50,
+			"minimum_node_size":50,"handle_badge_minimum_screen_pixels":48,
 			"maximum_node_edge":512,"model_capture_long_edge_pixels":2048,"to_3d_long_edge_pixels":1024,"upload_task_id":"upload",
 			"initial_layer":{"enabled":true,"fill":"transparent","maximum_bitmap_pixels":16777216},"artboard":{"center_x":600,"center_y":400,"resize":{"default_anchor":"center","anchors":["center","top-left"]},"legacy_max_edge":512,"default_width":2048,"default_height":2048,"ratio_pixels":{"1:1":{"width":1024,"height":1024}},"frame_stroke_width":1,"frame_line_dash":[6,4],"label":{"common_ratios":["1:1","3:2"],"font_size_pixels":10,"offset_pixels":4,"color_token":"--muted-foreground","padding_pixels":3,"background_token":"--background","background_opacity":0.72},"outside_dim":{"color":"#000000","opacity":0.45},"transparency":{"cell_pixels":8,"light_color":"#ffffff","dark_color":"#000000","opacity":0.08}},
 			"brush":{"minimum_size":1,"maximum_size":200,"default_size":12},

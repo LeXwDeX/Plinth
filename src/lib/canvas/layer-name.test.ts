@@ -12,6 +12,13 @@ describe('layerName', () => {
     expect(layerName({ type: 'text', name: '标题', text: '正文' }, text)).toBe('标题');
   });
 
+  it('calls a picture of the chat by its handle, keeps a given name and leaves other layers alone (#87)', () => {
+    expect(layerName({ type: 'image', handle: '@img25' }, text)).toBe('img25');
+    expect(layerName({ type: 'image', name: '我的主图', handle: '@img25' }, text)).toBe('我的主图');
+    expect(layerName({ type: 'image' }, text)).toBe('图片');
+    expect(layerName({ type: 'shape', handle: '@img25' }, text)).toBe('形状');
+  });
+
   it('calls a text layer by its first 12 characters', () => {
     expect(TEXT_LAYER_NAME_CHARACTERS).toBe(12);
     expect(layerName({ type: 'text', text: '一二三四五六七八九十甲乙丙丁' }, text)).toBe('一二三四五六七八九十甲乙');

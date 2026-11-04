@@ -62,6 +62,7 @@ const canvasSchema: CanvasProductSchema = {
     initial_node_y: 40,
     node_gap_pixels: 20,
     minimum_node_size: 50,
+    handle_badge_minimum_screen_pixels: 48,
     model_capture_long_edge_pixels: 2048,
     to_3d_long_edge_pixels: 1024,
     initial_layer: { enabled: true, fill: 'transparent', maximum_bitmap_pixels: 16777216 },
