@@ -85,9 +85,12 @@ fi
 
 # 2) 服务器端：构建 → preflight → 备份 → Compose 更新 → 健康 → 镜像保留；失败自动回滚
 # 同步同版 helper，--skip-source-sync 时也不依赖远端旧 app 中是否已有 helper。
-scp -q "$SCRIPT_DIR/release-server-steps.sh" "$HOST:/tmp/art-ai-release-steps.sh"
-scp -q "$SCRIPT_DIR/retain-art-ai-images.py" "$HOST:/tmp/art-ai-retain-images.py"
-ssh "$HOST" "${SERVER_ENV:+$SERVER_ENV }RETENTION_SCRIPT=/tmp/art-ai-retain-images.py bash /tmp/art-ai-release-steps.sh '$TAG' '$SHA' '$REMOTE_ROOT'"
+# helper 放在发布根的 tmp/ 下，不写主机 /tmp（主机只允许项目目录内写入）。
+REMOTE_TMP="$REMOTE_ROOT/tmp"
+ssh "$HOST" "mkdir -p $REMOTE_TMP && chmod 0711 $REMOTE_TMP"
+scp -q "$SCRIPT_DIR/release-server-steps.sh" "$HOST:$REMOTE_TMP/art-ai-release-steps.sh"
+scp -q "$SCRIPT_DIR/retain-art-ai-images.py" "$HOST:$REMOTE_TMP/art-ai-retain-images.py"
+ssh "$HOST" "${SERVER_ENV:+$SERVER_ENV }RETENTION_SCRIPT=$REMOTE_TMP/art-ai-retain-images.py bash $REMOTE_TMP/art-ai-release-steps.sh '$TAG' '$SHA' '$REMOTE_ROOT'"
 
 # 3) 单版本主机：成功后只留最新 N 份源码快照（失败时上面已退出，不清理）。
 if [ -n "$KEEP_SNAPSHOTS" ]; then

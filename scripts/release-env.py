@@ -38,6 +38,7 @@ LAYOUT_KEYS = (
 WORD = re.compile(r"[A-Za-z0-9_./:-]+")
 ADD_HOST = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}:[0-9A-Fa-f.:]+")
 COMPOSE_PROJECT = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
+URL = re.compile(r"https?://[A-Za-z0-9.:/_-]+")
 URL_LIST = re.compile(r"https?://[A-Za-z0-9.:/_-]+(,(https?://[A-Za-z0-9.:/_-]+|direct|off))*")
 
 
@@ -161,17 +162,18 @@ def validate_environment(name, environment, document):
              "extra_compose_file must be a .yml file under <root>/production/")
     build = environment.get("build", {})
     need(isinstance(build, dict), "build must be an object")
-    # #257: image builds always use the public registry.npmjs.org. A leftover
-    # field would silently mislead, so refuse it with a fixable message.
-    need("npm_registry" not in build,
-         "build.npm_registry was removed (#257); image builds use the public registry.npmjs.org, "
-         "so delete this field from the local environment file")
-    need(set(build) <= {"network", "goproxy", "add_hosts"}, "build has unknown fields")
+    # #257 keeps the repository free of internal sources: without npm_registry
+    # the image build uses the public registry.npmjs.org. An internal stack may
+    # name its own package cache here, only in its local environment file.
+    need(set(build) <= {"network", "goproxy", "npm_registry", "add_hosts"}, "build has unknown fields")
     if "network" in build:
         need(isinstance(build["network"], str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}", build["network"]),
              "build.network is invalid")
     if "goproxy" in build:
         need(isinstance(build["goproxy"], str) and URL_LIST.fullmatch(build["goproxy"]), "build.goproxy is invalid")
+    if "npm_registry" in build:
+        need(isinstance(build["npm_registry"], str) and URL.fullmatch(build["npm_registry"]),
+             "build.npm_registry must be one http(s) registry URL")
     if "add_hosts" in build:
         need(isinstance(build["add_hosts"], list) and build["add_hosts"] and all(
             isinstance(entry, str) and ADD_HOST.fullmatch(entry) for entry in build["add_hosts"]),
@@ -267,7 +269,8 @@ def release_variables(environment, revision):
     if environment.get("extra_compose_file"):
         words.append(f"RELEASE_EXTRA_COMPOSE_FILE={environment['extra_compose_file']}")
     build = environment.get("build", {})
-    for field, key in (("network", "RELEASE_BUILD_NETWORK"), ("goproxy", "RELEASE_GOPROXY")):
+    for field, key in (("network", "RELEASE_BUILD_NETWORK"), ("goproxy", "RELEASE_GOPROXY"),
+                       ("npm_registry", "RELEASE_NPM_REGISTRY")):
         if field in build:
             words.append(f"{key}={build[field]}")
     if "add_hosts" in build:
