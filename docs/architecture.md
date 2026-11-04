@@ -333,7 +333,7 @@ UV 展开、尺寸调整、可打印性分析、打印修复、多色打印和�
 
 公开 Harness operation 的 `unavailable_reason` 是静态禁用声明，四条已开放处理路线不设置该字段；它不是连接故障的动态提示。运行接入不可用时，公开 Offering 的 `available` 为 false，编辑器禁止保存该不可用 Offering；服务端 Snapshot 返回不可用状态并回退到 Schema 消息，保留已有选择身份而不执行。Repair 保留静态禁用原因。
 
-前五个步骤只接收有界、自包含静态 GLB 的 `source_asset`，可以是原生上传或当前 owner 的已交付资产，不使用上游任务 ID 或任意 URL。`provider_options.model_input_profile` 引用公开参数及 profile/revision；Catalog 冻结其完整限制。Meshy 的只读输入验证端口检查实际内容、owner、ID、SHA-256 和大小；Start 再读取一次，并对同一缓冲区校验、编码和发送，避免验证与提交读取不同字节。UV 的额外三角数上限按节点实例累计；旧 profile 的网格定义计数语义不变，未引用网格保守计一次。多色打印的单基础色贴图条件检查所有 primitive，包括未引用网格；有效 UV 与同一基础色 texture 引用是前置条件，不用“存在某张贴图”代替。
+前五个步骤（#93 起）在 `source_task` 与 `source_asset` 中恰选其一：来源是本人同一 Meshy 连接的成功且未超龄任务时只发上游 `input_task_id`，不读、不传模型字节；否则走有界、自包含静态 GLB 的 `source_asset`，可以是原生上传（`static-glb-v1`，10 MiB）或当前 owner 的已交付资产（`generated-glb-v1` 结构规则，最多 70 MiB，base64 后仍在 Meshy 100 MB data URI 上限内），不使用任意 URL，也不发布公网签名 URL。UV 另声明 `source_model_limit`（40,000 三角），任务来源按其已保存 GLB 在提交前量面；加工面板超限时自动带入 Remesh 前置步骤，Remesh 结果按任务 ID 交给 UV。公开 offerings 投影新增 `source_model_limit`、`output_triangles` 供面板判断。面板里不能执行的步骤统一用共享组件 `src/components/ui/unavailable-notice.tsx`（`UnavailableNotice`）显示：警告图标加一行「无法使用，<短原因>」，限制与实际值、上游要求和下一步做法（如先 Remesh）只放在 `HintTooltip` 悬停提示与无障碍描述里；文案全部来自 Schema（`ui.unavailable.label` 与 `ui.workspace.processing.unavailable_reason.*`），Catalog 加载时核对中英文各键的占位符（`validateUnavailableNotices`），短原因与详情由 `processingUnavailableNotice` 组装。其余页面的「不可用」提示迁移到该组件见 #94。细节见 `docs/provider-schema-architecture.md`「Meshy 六类扩展步骤」。以下为资产来源路线的检查：`provider_options.model_input_profile` 引用公开参数及 profile/revision；Catalog 冻结其完整限制。Meshy 的只读输入验证端口检查实际内容、owner、ID、SHA-256 和大小；Start 再读取一次，并对同一缓冲区校验、编码和发送，避免验证与提交读取不同字节。UV 的额外三角数上限按节点实例累计；旧 profile 的网格定义计数语义不变，未引用网格保守计一次。多色打印的单基础色贴图条件检查所有 primitive，包括未引用网格；有效 UV 与同一基础色 texture 引用是前置条件，不用“存在某张贴图”代替。
 
 多色打印目前固定为已验收的 Bambu；公开参数只有该选项，并按既有 fixed 规则规范化调用方输入。资格只覆盖测试样本的单色来源一致性，不能据此承诺其他打印机、任意多色分区或打印质量。`max_colors` 是允许的颜色数量上限，不保证产物达到该种数；实际颜色须以下载的 3MF 检查结果为准。
 
@@ -1858,16 +1858,9 @@ Texture 修订 `2026-10-21.187.2` 按独立端点的最高分辨率合同固定 
 
 **CI 运行位置与主机自检（#79、#97、#86）。**
 
-- `.github/workflows/ci.yml` 的 `workflow_dispatch` 有布尔输入 `use_self_hosted`，默认 `false`。`push`、`pull_request` 与默认手动运行选择 `ubuntu-latest`（`go test race` 的例外见下一条）；只有 `workflow_dispatch` 且该输入为 `true` 时，`frontend`、`go check`、`go test race` 三个作业才选择固定标签集 `[self-hosted, Linux, X64, plinth-trusted-ci]`。显式自托管 dispatch 在 ref 前加固定标识，使用独立并发组，其他事件的分组和取消规则不变。门禁命令、`permissions: contents: read`、Action 的完整 SHA 与 `persist-credentials: false` 保持不变。
-- Azure 按需 runner（#78）：`go test race` 在本仓库 `main` 的 `push`，以及 head 仓库就是本仓库的 `pull_request` 上，选择标签集 `[self-hosted, Linux, X64, plinth-azure]`。这是一台按量计费、用时开机的 Azure 16 核仓库级 runner；fork PR 与其他事件仍走 `ubuntu-latest`，`frontend` 与 `go check` 不变。门禁作业依然没有作业级 `if`、`needs` 或 `permissions`，路由表达式与事件用例由 `ci-gate-parity.test.ts` 锁定。
-  - 开机：独立工作流 `.github/workflows/azure-runner.yml` 在上述事件上以 GitHub OIDC 登录并开机；手动触发时只读检查一次，有作业排队等该标签就开机，作为兜底。它不跑门禁、不检出或读取触发方的代码，是仓库里唯一持有 `id-token: write` 的工作流。
-  - 重跑开机：重跑作业不会再触发 `push`/`pull_request`。仓库 `workflow_job` webhook 把事件投递给资源组内的 Azure Function（Flex Consumption，代码在 `scripts/azure-runner/webhook/`）；它校验 HMAC 签名，只对本仓库、`queued`、标签含 `plinth-azure` 的作业用自身托管身份开机，不持有 GitHub token，其他事件返回 ignored。GitHub 定时触发在本仓库实测不运行，已移除（#78）。
-  - 身份与权限：OIDC 身份与 Function 托管身份都只有读取、开机、解除分配这一台 VM 的角色；OIDC 联合凭据只认本仓库的 `main` 与本仓库的 `pull_request`，fork PR 拿不到 OIDC token。webhook 签名密钥只在函数应用设置与仓库 webhook 配置中。
-  - 关机：VM 用自身托管身份在空闲 10 分钟后解除分配（空闲按 `Runner.Worker` 进程是否存在计算，卡死作业由 `timeout-minutes` 结束），平台侧每日定时关机兜底。
-  - 机器内：runner 以无特权用户运行，每个作业开始前清空工作目录，测试临时目录在随解除分配清空的本地临时盘上；机器上不放 Plinth 运行密钥。常驻 runner 的注册凭据作业进程可读，是已知残留风险，靠只放行可信事件控制。安装脚本是 `scripts/azure-runner/vm-setup.sh`，资源清单与删除方式只记在 #78。
-  - 验证范围：开机、空闲解除分配与平台兜底关机各实测一次（#79）；webhook 开机在 VM 解除分配时重跑 race 作业实测一次：Function 托管身份发起开机，作业约 1 分钟后被领取并通过（#78）。webhook 函数的签名、过滤与 ping 由 `scripts/tests/test_azure_runner_webhook.py` 离线覆盖。
-- 路由不是隔离边界：PR 可以修改工作流；维护者只应在审查完整 SHA、核验受信任 ref 与运行环境后明确触发。运行后对照 `head_sha`、实际 runner ID 和 checkout 只提供事后证据，不能阻止不可信代码执行。私有仓库转公开前须证明平台级隔离或阻止不可信工作流触达 runner，未证明时不得称安全。两种路径均要求仅访问公共依赖源、不访问内网，但静态检查不能证明实际网络访问，运行环境须分别核验。
-- 托管 runner 遇到计费墙时：仅在存在自托管 runner 且其安全和精确 ref 已核验时优先尝试；没有或不可用时先本机初检，再在指定 `dev-test` 主机对同一精确 SHA 做完整隔离自检，作为 CI 的替代证据（隔离、源码绑定、门禁和报告条件见 `dev_test.md` §2）。自检不生成 GitHub Actions success，不代替 Git hooks 或部署后回归。离线测试不证明实际 runner 调度或隔离。
+- `.github/workflows/ci.yml` 的三个门禁作业（`frontend`、`go check`、`go test race`）全部选择 `ubuntu-latest`，即 GitHub 托管的 runner。2026-11-04 起 Azure 按需 runner 已下线，工作流不再提供 `use_self_hosted` 输入或自托管路由；门禁命令、`permissions: contents: read`、Action 的完整 SHA 与 `persist-credentials: false` 保持不变。
+- 路由不是隔离边界：PR 可以修改工作流；合并前须审查工作流改动。静态检查不能证明托管 runner 的实际网络访问，运行环境仍须核验。
+- 托管 runner 遇到计费墙时：先本机初检，再在指定 `dev-test` 主机对同一精确 SHA 做完整隔离自检，作为 CI 的替代证据（隔离、源码绑定、门禁和报告条件见 `dev_test.md` §2）。自检不生成 GitHub Actions success，不代替 Git hooks 或部署后回归。离线测试不证明实际 runner 调度或隔离。
 
 **主机 CI：干净容器运行门禁（#97，沿用 #79 的裁定）。**
 
@@ -1886,7 +1879,7 @@ Texture 修订 `2026-10-21.187.2` 按独立端点的最高分辨率合同固定 
 - `ci.yml` 用 `yaml` 库（开发依赖）结构化解析；门禁步骤或作业上的 `if`、`continue-on-error`、`shell`、`env`、`needs`、`strategy` 等字段、锚点别名、非 `-timeout=Nm` 的 `GOFLAGS` 必须被拒绝，引号键或流式写法的额外步骤因归一化而无法绕过。
 - 主机 CI 入口的门禁集合来自同一份 `selected_gates(race=True)`，其 `GOFLAGS` 只能是并行度；Node/Go 版本以 `ci.yml` 为准并与 `Dockerfile.ci` 核对。
 - 门禁集合含第 9 项「scripts tests」：发布与门禁脚本的 Python 单测（`scripts/tests`）进入 `verify-local.py`、`ci.yml` 的 `go check` 作业与 `dev_test.md` §2，主机 CI 的两种模式随之运行。依赖 macOS FSEvents 的监视/指纹测试类在非 macOS 上跳过（该部分覆盖只在 macOS 本机体现）；`Dockerfile.ci` 装有 `sqlite3`。
-- `scripts/host-ci/run.py --workflows` 是主机 CI 的第二种模式：复用 bundle、`flock`、资源预检和清理，在主机上用固定版本（发布包 sha256 固定）的 nektos/act 与按摘要固定的运行器镜像重放 `.github/workflows/ci.yml` 的 `pull_request` 与 `push` 事件（`azure-runner.yml` 只负责开机，不重放；`plinth-azure` 标签与 `ubuntu-latest` 映射到同一个受限运行器镜像），作业容器限 4 CPU、10 GiB，串行执行。它是本地模拟，不是 GitHub self-hosted runner，不监听平台事件。两种模式结束后由本机 `gh` 登录写 commit status（`host-ci/gates`、`host-ci/workflows`），只写被测 SHA 的状态，不改分支保护。
+- `scripts/host-ci/run.py --workflows` 是主机 CI 的第二种模式：复用 bundle、`flock`、资源预检和清理，在主机上用固定版本（发布包 sha256 固定）的 nektos/act 与按摘要固定的运行器镜像重放 `.github/workflows/ci.yml` 的 `pull_request` 与 `push` 事件；`plinth-azure` 标签仍映射到同一个受限运行器镜像，供重放旧提交中的 race 路由使用。作业容器限 4 CPU、10 GiB，串行执行。它是本地模拟，不是 GitHub self-hosted runner，不监听平台事件。两种模式结束后由本机 `gh` 登录写 commit status（`host-ci/gates`、`host-ci/workflows`），只写被测 SHA 的状态，不改分支保护。
 - 范围限制：act 与官方 runner 的行为差异（调度、令牌、缓存服务、隔离）未验证，不能视为 Actions success；静态解析不证明 GitHub 的实际运行、runner 隔离或网络访问。镜像 hash 随 `pnpm-lock.yaml` 变化（`yaml` 属前端开发依赖），依赖变更后首次运行需要重建一次镜像。
 
 **账号密码登录（#249）。**

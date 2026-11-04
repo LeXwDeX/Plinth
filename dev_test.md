@@ -56,47 +56,27 @@ CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check
 
 | | GitHub Actions |
 |---|---|
-| 触发 | 推送到 `main`、所有 Pull Request、手动；自动事件与默认手动使用托管 runner，只有显式 `workflow_dispatch` 的 `use_self_hosted: true` 选择可信自托管 runner |
-| 依赖源 | 两种路径均要求仅使用公共 npm registry（`registry.npmjs.org`）与公共 Go proxy，不访问内网主机；须分别核验运行时配置与网络，静态工作流检查不能证明实际访问 |
+| 触发 | 推送到 `main`、所有 Pull Request、手动；全部使用 GitHub 托管的 `ubuntu-latest` |
+| 依赖源 | 门禁作业仅使用公共 npm registry（`registry.npmjs.org`）与公共 Go proxy，不访问内网主机；须核验运行时配置与网络，静态工作流检查不能证明实际访问 |
 | 工具链 | Node 22、Go 1.27、pnpm 取 `package.json` 的 `packageManager`（与 `Dockerfile.go-runtime` 一致） |
-| 作业 | 三个门禁作业，runner 由事件与 `use_self_hosted` 路由；不新增平行作业，不构建镜像（#257） |
-| 用途 | 所有 PR 的门禁；不承担发布。托管 runner 受计费墙影响时，若有已核验安全与精确 ref 的自托管 runner，优先尝试；没有或不可用时按下方「主机自检」执行 |
+| 作业 | 三个门禁作业，全部在 `ubuntu-latest` 上运行；不新增平行作业，不构建镜像（#257） |
+| 用途 | 所有 PR 的门禁；不承担发布。托管 runner 受计费墙影响时，按下方「主机自检替代 CI」执行本机初检与主机自检 |
 
 - **对齐守门**：`src/__tests__/ci-gate-parity.test.ts`（随 `pnpm test` 在本地、CI 和主机 CI 运行）解析本节「自动化门禁项」、`scripts/verify-local.py`（经 `--list-gates` 输出 JSON）、`scripts/host-ci` 与 `.github/workflows/ci.yml`，要求：
   - 标为 CI 的每项命令逐字出现在恰好一个 CI 作业里（同一项的多条命令在同一作业、按本节顺序），CI 作业里没有本节以外的命令；本地入口默认集合的门禁名与顺序等于标为本地的各项，`--race` 加跑的门禁名等于唯一标为仅 CI 的一项；
   - **参数一致（#86）**：本地每个门禁的命令去掉已登记的“只放宽、不跳过”的本地专用参数（`--incremental false`、`-timeout=30m`、`-o /dev/null`）后须等于本节所列命令，环境变量（`CGO_ENABLED`）相同；主机 CI 跑完整的 `verify-local.py --race --force`（门禁集合与本地入口同源），单独跑的外链检查就是本节第 3 项的命令，其 `GOFLAGS` 只能是并行度 `-p=N`；Node/Go 版本以 `ci.yml` 的 `env` 为准，入口脚本读取它们的 `sed` 写法、`Dockerfile.ci` 的基础镜像版本都与之核对；
   - **工作流按结构解析（#86）**：用 `yaml` 库解析 `ci.yml`，带引号的键、流式 `{}`、块标量等写法归一成同一结构，所以额外步骤无论怎么写都会被“不是本节门禁命令”拒绝；锚点、别名和重复键直接拒绝。步骤只允许 `run`（或固定到完整提交 SHA 的 `uses` 与 `with` 白名单）加 `name`，门禁步骤上出现 `if`、`continue-on-error`、`shell`、`env`、`working-directory`、`timeout-minutes` 等字段，或作业级 `if`、`needs`、`strategy`、`continue-on-error`、`container`、`defaults` 等字段，一律拒绝；`GOFLAGS` 只允许作业级的 `-timeout=Nm`（N 不小于 10），工作流级 `env` 只允许 Node/Go 版本；
-  - 工作流不含已知内网主机字面量且每个 Action 固定到完整提交 SHA；静态断言三个作业使用相同的固定路由表达式，并对已知事件和并发分组建模。
+  - 工作流不含已知内网主机字面量且每个 Action 固定到完整提交 SHA；静态断言三个作业都使用 `ubuntu-latest`，并对并发分组建模。
   - 同一文件还运行 `python3 scripts/host-ci/test_host_ci.py`（主机 CI 驱动的离线单测，见「主机 CI」），因此该单测随 `pnpm test` 成为门禁的一部分，不单列门禁项。
 
   静态测试不证明 GitHub 的实际路由、runner 隔离或网络访问。增删、改写或改变执行位置时，同一提交里改这几处，测试才会通过。
 - **Action 版本**：工作流中的 Action 固定到发布标签对应的完整提交 SHA，行尾注释写标签；升级时在官方仓库核对标签与 SHA 再一起改。
-- **CI 与内部验收的分工**：当前工作流的自动事件与默认手动路径选择托管 runner；PR 可以修改工作流，因此不能据此保证外部 PR 无法选择自托管 runner。自托管只应由维护者在触发前审查完整 SHA 并核验受信任 ref 和运行环境后明确触发；工作流仍以 `persist-credentials: false` 检出。零 Key 的 Mock 自部署冒烟 `scripts/smoke/smoke-public-mock.sh` 要求环境文件显式写 `PROVIDER_MODE=mock`、`AGENT_MODE=mock`，保留为本地手动验收（自部署后运行，覆盖登录、健康、一次 Mock 图片与一次 Mock 3D 任务的全部产物下载核对、restart 与 down/up 持久化及 `down -v` 清理）。维护者内部环境（`dev-test`、`formal-test`）的部署与 L0/L1/L1 Agent 冒烟经 `scripts/release-env.py release`/`smoke` 走 `scripts/smoke/` 的脚本，真实模型付费验收也只由维护者在内部测试环境执行（§3、§11），都不进 CI，也不是外部 PR 的合并条件。
+- **CI 与内部验收的分工**：三个门禁作业都在 GitHub 托管的 `ubuntu-latest` 上运行。PR 仍可修改工作流，合并前须审查工作流改动；工作流以 `persist-credentials: false` 检出。零 Key 的 Mock 自部署冒烟 `scripts/smoke/smoke-public-mock.sh` 要求环境文件显式写 `PROVIDER_MODE=mock`、`AGENT_MODE=mock`，保留为本地手动验收（自部署后运行，覆盖登录、健康、一次 Mock 图片与一次 Mock 3D 任务的全部产物下载核对、restart 与 down/up 持久化及 `down -v` 清理）。维护者内部环境（`dev-test`、`formal-test`）的部署与 L0/L1/L1 Agent 冒烟经 `scripts/release-env.py release`/`smoke` 走 `scripts/smoke/` 的脚本，真实模型付费验收也只由维护者在内部测试环境执行（§3、§11），都不进 CI，也不是外部 PR 的合并条件。
 - **分支保护**：不设置。仓库为私有、免费套餐不支持分支保护；合并前的门禁由本节与「交付硬门禁」的本机预检保证。
-
-### 可信自托管 runner（#79 第一阶段）
-
-`workflow_dispatch` 提供布尔输入 `use_self_hosted`，默认 `false`。只有该输入为 `true` 时，三个门禁作业才用仓库级 runner 的固定标签集 `[self-hosted, Linux, X64, plinth-trusted-ci]`；`push`、`pull_request` 与不带输入或 `false` 的手动运行都保持 `ubuntu-latest`，唯一例外是下节「Azure 按需 runner」对 go test race 的路由。触发器、门禁命令、`permissions: contents: read`、Action 的完整 SHA 与 `persist-credentials: false` 不随路由改变，也不新增 shell 拼接或作业。
-
-- 维护者须在触发前审查完整提交 SHA，并核验所选 ref 与运行环境可信；分支名不能代替 SHA。运行后逐个作业对照实际 `head_sha`、runner ID、checkout 与步骤结论，只是事后证据，不能阻止已执行的不可信代码。
-- YAML 条件与标签不是安全边界：有写权限的人仍可选择分支或标签，PR 也可以修改工作流。仓库当前为私有；转公开前必须证明平台级隔离（包括业务凭据、Docker socket、数据库、资产存储和其他栈），或阻止不可信工作流到达该 runner。尚未证明，不得称其安全。
-- 两种路径都要求只访问公共依赖源且不访问内网。工作流文本和静态检查仅能排除列出的已知内网字面量，不能证明 hosted runner 上 Action、测试及依赖的实际网络访问；自托管 runner 的配置、依赖源及网络访问目前也无证据。两种运行环境都须分别核验。
-- 显式自托管 dispatch 在 ref 前加固定 `trusted-` 标识，使用独立并发组，避免与其他 ref 的 hosted 运行碰撞；自动路径和默认 dispatch 保持原有分组，PR 仍按编号分组并取消进行中的同组运行。GitHub 默认同组至多一个 running 和一个 pending，新 pending 可替换旧 pending；上述分组目前仅做静态验证，未实测 GitHub 调度。
-- runner 在线、标签匹配都不证明工具链与调度可用。缺 Node/pnpm、Go、`CGO_ENABLED=1` 的 race 工具链、磁盘或网络时，作业失败按失败记录，不得跳过门禁或记为通过。
-- 自托管 CI 可以作为并行工作流中的独立节点，与不修改待检查 revision 的工作并行；最终集成、发布、真实付费验收和部署后回归仍须串行，不能因 CI 节点并行而并行执行或跳过。真实调度、平台级隔离与工具链须另行核实，不能据静态检查宣称已验收。
-
-### Azure 按需 runner（#78）
-
-go test race 在可信事件上改用一台按量计费、用时开机的 Azure 16 核仓库级 runner（标签集 `[self-hosted, Linux, X64, plinth-azure]`），以缩短最慢的门禁。frontend 与 go check 不受影响。机器所在订阅、资源与资源清单只记在 #78，不写入仓库文档。
-
-- **可信事件**：只有本仓库 `main` 的 `push`，以及 head 仓库就是本仓库的 `pull_request`，才路由到该 runner。fork 的 PR、`pull_request_target`、`workflow_run` 与其他事件一律走 `ubuntu-latest`；`workflow_dispatch` 仍按上节的 `use_self_hosted`。路由表达式与事件用例由 `ci-gate-parity.test.ts` 锁定，门禁作业仍不得带作业级 `if`、`needs` 或 `permissions`。
-- **开机与关机**：`.github/workflows/azure-runner.yml` 在同样的可信事件上以 GitHub OIDC 登录并开机；手动触发时从默认分支只读检查一次，有作业排队等 `plinth-azure` 就开机，作为兜底。重跑作业不会再触发 `push`/`pull_request`，由仓库 `workflow_job` webhook 调用资源组内的 Azure Function（`scripts/azure-runner/webhook/`）开机：它只接受 HMAC 签名有效、来自本仓库、动作为 `queued` 且标签含 `plinth-azure` 的事件，用自身托管身份开机，不持有任何 GitHub token；签名密钥只在函数应用设置与仓库 webhook 配置里，不入库。GitHub 定时触发在本仓库实测不运行（#78），不得依赖。开机工作流不跑门禁，不检出或读取触发方的代码，也是唯一持有 `id-token: write` 的工作流。OIDC 身份与 Function 的托管身份都只有读取、开机、解除分配这一台 VM 的角色，OIDC 联合凭据只认本仓库的 `main` 与本仓库的 `pull_request`。VM 必须在空闲 10 分钟后由自身托管身份解除分配，卡死的作业由 `timeout-minutes` 结束，另有平台侧每日定时关机兜底；改动这些策略须在 #78 留下实测记录。开机失败时 race 作业会一直排队，按失败处理并手动触发开机工作流，不得改成跳过门禁。VM 的安装与空闲关机脚本是 `scripts/azure-runner/vm-setup.sh`，可重复执行；webhook 函数的单测是 `scripts/tests/test_azure_runner_webhook.py`（随第 9 项脚本单测运行）。
-- **隔离与凭据**：runner 以无特权用户运行，每个 job 开始前清空工作目录，测试临时目录（`TMPDIR`）在随解除分配清空的本地临时盘上（系统盘的同步写盘太慢，会让并发 SQLite 测试的锁等待超过 `busy_timeout`）；机器上不得存放 Plinth 运行密钥、Provider Key 或部署凭据。runner 自身的注册凭据保存在机器上，job 进程可以读到，这是常驻 runner 的固有残留风险，靠只放行可信事件来控制。机器内的托管身份同样只能开关这台 VM。
-- **不是隔离边界**：与上节相同，路由条件只决定作业去哪台机器，不能防止有写权限的人改工作流。新增可选用该 runner 的事件或作业前，须先更新本节和一致性测试。
 
 ### 主机自检替代 CI（#79）
 
-托管 runner 遇到计费墙时，若存在自托管 runner 且已核验其安全与精确 ref，优先尝试该 runner。若没有自托管 runner 或其不可用（包括安全隔离等前提未证明），直接先对本机同一精确提交 SHA 做快速初检；初检失败就停止，不送主机。通过后，在环境文件登记的 `dev-test` 主机对同一 SHA 执行与本节 CI 同集合的完整隔离自检，结果作为 CI 的替代证据。任何实际使用的 runner 和该主机都须先满足安全前提（含平台级隔离、受信任 ref/SHA、公共依赖源与网络）；Git hooks、本机 `--race`、来源身份、隔离和下方独立的合并、发布和部署后门禁不因此跳过。作业因代码原因失败时不进入该替代路径，仍按失败处理，不得放行或记为通过。
+托管 runner 遇到计费墙时，直接先对本机同一精确提交 SHA 做快速初检；初检失败就停止，不送主机。通过后，在环境文件登记的 `dev-test` 主机对同一 SHA 执行与本节 CI 同集合的完整隔离自检，结果作为 CI 的替代证据。该主机须先满足安全前提（含平台级隔离、受信任 ref/SHA、公共依赖源与网络）；Git hooks、本机 `--race`、来源身份、隔离和下方独立的合并、发布和部署后门禁不因此跳过。作业因代码原因失败时不进入该替代路径，仍按失败处理，不得放行或记为通过。
 
 - 只运行已审查的精确提交。先核对本机提交 SHA 和实际字节，并执行包含本地环境禁用值的公开树扫描；源代码只经该提交的有界 Git bundle 传输，不包含其他 refs、本地环境、密钥或数据。主机独立检出后，以及检查开始和结束时，核对完整 SHA、Git 树及跟踪字节。仅工作区差异的预演不能替代最终提交的证据。
 - 主机与其他业务共机。每次使用新建的私有临时目录和独立容器，不挂业务目录、数据库、资产存储、宿主 HOME、SSH 凭据或 Docker socket，不修改其他栈。执行前核查可用内存、磁盘和运行负载；容器限制 CPU、内存与 swap，测试阶段不接外网。依赖预取阶段只执行已审查的下载命令，使用公共源，不运行项目安装脚本；不可信代码不能以此在共享主机运行。
@@ -203,7 +183,7 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
 ### 交付硬门禁
 
 - 合并前以本机门禁为准：每个分支推送时照常跑 pre-push（本地八项）；合并到 `main` 前，在待合并的 head 上跑一次 `python3 scripts/verify-local.py --race`，结果写进 PR。
-- 交付任何改动到 `dev-test` 前，最终待发布的精确 `main` SHA 应有一次完整的 GitHub Actions `CI` 运行且所有作业 success。可信自托管 `workflow_dispatch` 可提供同一 SHA 的 CI 证据，但须核对实际 runner、`head_sha` 和 checkout。托管 runner 因计费墙不可用，且（没有自托管 runner 或其不可用，包括安全前提未证明）时，按上节先对同一 SHA 做本机初检，再以该 SHA 的完整隔离主机自检作为 CI 替代，并在 PR 或 Issue 记录实际结果。作业因代码原因失败时不得放行；主机自检不能冒称 Actions success。旧 SHA、其他提交的结果、缺项或 skip 都不算。
+- 交付任何改动到 `dev-test` 前，最终待发布的精确 `main` SHA 应有一次完整的 GitHub Actions `CI` 运行且所有作业 success。托管 runner 因计费墙不可用时，按上节先对同一 SHA 做本机初检，再以该 SHA 的完整隔离主机自检作为 CI 替代，并在 PR 或 Issue 记录实际结果。作业因代码原因失败时不得放行；主机自检不能冒称 Actions success。旧 SHA、其他提交的结果、缺项或 skip 都不算。
 - 发布到 `dev-test` 前，还要在同一个待发布 `main` revision 上再跑一次本机 `--race` 全量；发布后照常做 L0、L1、L1 Agent 和相关验收。每次 `dev-test` 发布后还必须运行 L5 真实能力回归的全部脚本（`scripts/smoke/smoke-l5-*.py`，入口 `smoke-l5-all.sh`，用法与费用见 `scripts/smoke/README.md`），验收报告逐项列出每个脚本的 PASS/FAIL/SKIP 结果；完整 L5 运行计入 `AGENTS.md` 的付费验收次数上限，超出部分须在当前对话取得用户批准。CI 只作门禁，不承担部署。
 
 ### 本地统一入口与 pre-push 复用

@@ -469,13 +469,17 @@ func TestAgentOfferingProjectionTellsTheRemeshRiggingConstraint(t *testing.T) {
 	if rigging.MaxSourceTriangles != 320000 || animation.MaxSourceTriangles != 0 {
 		t.Fatalf("max source triangles: rigging %d, animation %d", rigging.MaxSourceTriangles, animation.MaxSourceTriangles)
 	}
-	if len(remesh.ChainLimits) != 1 {
+	// #93: UV unwrap takes at most 40,000 triangles, so Remesh also tells that chain.
+	if len(remesh.ChainLimits) != 2 {
 		t.Fatalf("remesh chain limits = %#v", remesh.ChainLimits)
 	}
 	limit := remesh.ChainLimits[0]
 	if limit.NextCapability != "rigging" || limit.MaxTriangles != 320000 || limit.CountParameter != "target_polycount" ||
 		limit.Topology != "topology" || limit.Compatible != "quad ≤ 160000 / triangle ≤ 320000" {
 		t.Fatalf("chain limit = %#v", limit)
+	}
+	if uv := remesh.ChainLimits[1]; uv.NextCapability != "uv-unwrap" || uv.MaxTriangles != 40000 || uv.Compatible != "quad ≤ 20000 / triangle ≤ 40000" {
+		t.Fatalf("UV chain limit = %#v", uv)
 	}
 	if len(rigging.ChainLimits) != 0 || len(animation.ChainLimits) != 0 {
 		t.Fatalf("only the step that sets the triangle count lists chain limits: %#v %#v", rigging.ChainLimits, animation.ChainLimits)
@@ -490,7 +494,7 @@ func TestAgentOfferingProjectionTellsTheRemeshRiggingConstraint(t *testing.T) {
 	}
 	for _, capability := range hidden.Capabilities {
 		for _, offering := range capability.Offerings {
-			if offering.OfferingID == "meshy/processing/remesh" && len(offering.ChainLimits) != 0 {
+			if offering.OfferingID == "meshy/processing/remesh" && slices.ContainsFunc(offering.ChainLimits, func(limit agentChainLimitView) bool { return limit.NextCapability == "rigging" }) {
 				t.Fatalf("limit of an unavailable step advertised: %#v", offering.ChainLimits)
 			}
 		}

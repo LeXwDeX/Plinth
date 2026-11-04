@@ -162,7 +162,7 @@ func TestProfiledStartRechecksAfterPreparation(t *testing.T) {
 	}
 }
 func TestProfiledOfferingRejectsMismatchedContract(t *testing.T) {
-	for _, name := range []string{"valid", "missing media", "wrong media", "missing limits", "wrong revision", "missing parameter", "wrong inline bound", "ambiguous source"} {
+	for _, name := range []string{"valid", "missing media", "wrong media", "missing limits", "wrong revision", "missing parameter", "wrong inline bound", "ambiguous source", "two source tasks", "valid with source task"} {
 		t.Run(name, func(t *testing.T) {
 			r := modelProfileRequest(modelinputtest.Triangle(modelinputtest.Options{}), "application/octet-stream")
 			mutateProfileOptions(&r, func(o *wireOptions) {
@@ -181,11 +181,18 @@ func TestProfiledOfferingRejectsMismatchedContract(t *testing.T) {
 					o.InlineModelInput.MaxBytes++
 				}
 			})
-			if name == "ambiguous source" {
+			switch name {
+			case "ambiguous source":
+				r.Offering.Parameters = append(r.Offering.Parameters, schema.Parameter{Name: "source_url", Type: "text", Semantic: schema.SemanticSourceURL})
+			case "two source tasks":
+				r.Offering.Parameters = append(r.Offering.Parameters, schema.Parameter{Name: "source_task", Type: "task", Semantic: schema.SemanticSourceTask},
+					schema.Parameter{Name: "other_task", Type: "task", Semantic: schema.SemanticSourceTask})
+			case "valid with source task":
+				// #93: a source task beside the profiled asset is the input_task_id route.
 				r.Offering.Parameters = append(r.Offering.Parameters, schema.Parameter{Name: "source_task", Type: "task", Semantic: schema.SemanticSourceTask})
 			}
 			err := ValidateOffering(r.Offering)
-			if name == "valid" {
+			if name == "valid" || name == "valid with source task" {
 				if err != nil {
 					t.Fatal(err)
 				}

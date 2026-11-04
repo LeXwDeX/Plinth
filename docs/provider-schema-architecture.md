@@ -23,7 +23,7 @@
 | [Balance](https://docs.meshy.ai/en/api/balance) | `GET /openapi/v1/balance`（免费） | — | — | 新增 `monthly_credits`、`permanent_credits`、`monthly_resets_at`（10-10），`balance` 不变 | 0 | 平台只读 `balance` |
 | [Asset Retention](https://docs.meshy.ai/en/api/asset-retention) | — | — | — | 结果最多保留 3 天；签名 URL 到 `expires_at` 失效；过期后 `input_task_id` 返回 404 | — | `upstream_job_max_age_seconds` 为 172800（2 天，留余量），过期后改用已保存文件（#325/#326） |
 
-UV 展开、尺寸调整、打印三端点与 Text to Motion 无参数调整，见下文「Meshy 六类扩展步骤」；它们的 `model_url` 同样升到 400 MB / 100 MB，但平台入口是 `static-glb-v1` 的 10 MiB 上传合同（#184 资格边界），不随之放宽。
+UV 展开、尺寸调整、打印三端点与 Text to Motion 无参数调整，见下文「Meshy 六类扩展步骤」；它们的 `model_url` 同样升到 400 MB / 100 MB。#93 起前五个步骤优先按 `input_task_id` 引用同连接的成功 Meshy 任务；本地内联时，直接上传仍是 `static-glb-v1` 的 10 MiB 上传合同（#184 资格边界，不放宽），本人成功平台任务产出的 GLB 最多 70 MiB（见下文）。
 
 **模型的选择。** 生成默认 `meshy-7.1`，Offering 写明具体模型；`latest` 不作为对外选项，也不能写进 Offering：官方说明 `latest` 随新版本改指向，而且不同端点含义不同（Retexture 的 `latest` 是 `meshy-7`），冻结报价、冻结执行身份和历史复现都要求请求体里的模型是确定的。`meshy-t2.5` 以独立 Offering 呈现（`model_id` `meshy-t2.5`，「Meshy T2.5 智能拓扑」，非默认、非推荐），而不是 7.1 Offering 上的一个参数：两者可用的字段、面数范围、价格和不兼容组合都不同（Smart Topology 不收 `should_remesh`、`topology: quad`、`geometry_resolution`、`image_enhancement`、`remove_lighting`），做成参数要在一个 Offering 里写一套按模型切换的条件，报价也会变成区间。文生 3D 的 T2.5 精细化不发 `ai_model`（官方精细化没有 `meshy-t2.5` 值，省略时沿用预览的模型），纹理固定 2K：官方只对 `meshy-6`、`meshy-7.1` 写明 4K/8K 精细化，没写 Smart Topology 预览能否用。
 
@@ -230,7 +230,11 @@ resolver 在新 turn 的验证后选择上下文中，只读冻结有界、本�
 
 Bambu 的参数只公开该品牌，`required + fixed + readonly` 沿现有规范化合同将调用方输入固定为 `bambu`，不改变旧固定参数规则。真实资格只验证固定样本的单色来源一致性，未声明其他打印机或任意多色分区已获验收。动作时长仍以数值 wire 值提交；3 秒资格样本为 90 个 30 fps 均匀采样，关键帧跨度 89/30 秒，3 秒覆盖使用末帧保持一帧的项目验收约定，连续运动 3 秒并未证明（`continuous_target_duration_proven=false`）。Provider 的 3000 ms 另列为元数据，不能替代实际 FBX 曲线检查。
 
-前五项输入只走 `source_asset` 静态 GLB 合同和 `model_input_profile` 实际字节检查。`inline_model_input.media_type` 明确 data URI 的端点要求：UV/尺寸使用 `application/octet-stream`，打印三端点使用 `model/gltf-binary`；未声明值的旧 Offering 保留原 wire 行为。Start 校验并内联同一份有界缓冲区。节点实例数是 UV 专用约束，不改变旧 profile 的三角定义预算。数值 select 的 wire 值来自 `WireValues`，不会将动作时长作为 JSON 字符串直接发送。
+前五项输入（#93，修订 `2026-11-04.93.1`）在 `source_task`（`input_task_id`）与 `source_asset`（`model_url`）中恰选其一（`input_rules`）。官方文档（2026-11-04 核对）五个端点都接受 `input_task_id`：须是本账号 API 创建、状态 SUCCEEDED 且产出 GLB 的任务，两者都传时上游用 `input_task_id`。`source_task` 与 Remesh/Convert 同一声明：`same_provider`、`upstream_job_max_age_seconds: 172800`、来源任务为 Meshy 文生/图生 3D、Remesh、Retexture（分析、修复、多色另含官方列出的多图生成 `meshy/meshy-7.1-multiview/image-to-3d`）。来源是本人同一 Meshy 连接的成功任务且未超龄时，Generation 绑定任务来源，Adapter 只发上游任务 ID，不读不传模型字节；超龄或其他 Provider 的来源走 `source_asset` 本地内联；上游对已删除任务回 404 时仍按 #325 记为 `source_expired`。
+
+本地内联的大小按来源分两档：直接上传（`InputAsset.Role` 为空）仍按 `static-glb-v1` 上传 profile 校验，上限 10 MiB；本人成功平台任务已保存的 GLB（`Role == "model"`）按 `generated-glb-v1` 结构规则校验，上限是参数与 `inline_model_input.max_bytes` 声明的 73,400,320 字节（70 MiB）。取 70 MiB 而不是官方的 100 MB data URI 上限，是因为 base64 膨胀 4/3：70 MiB 编码后约 97.9 MB，仍在 100 MB 内；它与 Convert/Remesh/Rigging 已有的内联上限一致，Adapter 读取仍有界（`LimitReader` 至声明大小 +1）并核对长度与 SHA-256。不改用公网签名 URL（官方 400 MB）：声明 `inline_model_input` 的 Offering 一律内联，下游部署不保证存在 Meshy 可从公网访问的资产地址（`assetWireValue` 只在未声明内联时才发布签名 URL），因此这条路线未开放。Catalog 与 Adapter 的合同相应改为：参数 `max_bytes` 等于 `inline_model_input.max_bytes` 且不小于 profile 的 `max_bytes`，`model_input_profile` 旁可并列一个 `source-task` 参数。纹理要求（多色打印的单基础色贴图）对两档来源都检查。
+
+`inline_model_input.media_type` 明确 data URI 的端点要求：UV/尺寸使用 `application/octet-stream`，打印三端点使用 `model/gltf-binary`；未声明值的旧 Offering 保留原 wire 行为。Start 校验并内联同一份有界缓冲区。节点实例数是 UV 专用约束，不改变旧 profile 的三角定义预算。UV 另声明 `source_model_limit: 40000`：任务来源在提交前按来源 Task 已保存的 GLB 量面（与绑骨同一检查，量不出来时交给上游判断），超限即拒绝（`input_source_face_limit`，提示先 Remesh）。加工面板按舞台测得的场景三角面判断该上限，超限时自动把声明了 `output_triangles` 的「重拓扑」作为前置步骤带入，Remesh 默认目标面数取后一步上限能容纳的最大值（四边面 20,000、三角面 40,000），其结果再以 `input_task_id` 交给 UV；两步都是付费公开 Task，照常走批准/同意流程。公开 offerings 投影因此新增 `source_model_limit` 与 `output_triangles`（产品约束，不含运行配置）。fake upstream `meshy/openapi-v1` 按官方文档对超过 40,000 面的 UV 来源任务返回 400。数值 select 的 wire 值来自 `WireValues`，不会将动作时长作为 JSON 字符串直接发送。
 
 标量 `result_assets.media_type` 可声明一个与精确 role/variant 输出槽位一致的 MIME；启动与恢复投影都检查标量模式、唯一槽位及精确类型。新 FBX、3MF 分别声明 `model/fbx`、`model/3mf`，避免依赖 URL 后缀或操作系统 MIME 表。未声明值的历史 Offering 继续原推断。通用 CDN 类型可以保留已声明的类型，具体不兼容响应仍被物化拒绝；声明 MIME 不替代资产实际字节检查与端点产物属性验收。
 
