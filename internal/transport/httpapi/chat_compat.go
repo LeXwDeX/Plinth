@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -108,7 +109,7 @@ func (s *Server) legacyListChatSessions(
 		}
 		result := make([]map[string]any, 0, len(page.Sessions))
 		for _, session := range page.Sessions {
-			result = append(result, s.chatSessionWire(writer, session, true))
+			result = append(result, s.chatSessionWire(request.Context(), writer, session, true))
 		}
 		writeJSON(writer, http.StatusOK, map[string]any{"sessions": result, "next_cursor": page.NextCursor, "total": page.Total})
 		return
@@ -123,7 +124,7 @@ func (s *Server) legacyListChatSessions(
 	}
 	result := make([]map[string]any, 0, len(sessions))
 	for _, session := range sessions {
-		result = append(result, s.chatSessionWire(writer, session, true))
+		result = append(result, s.chatSessionWire(request.Context(), writer, session, true))
 	}
 	writeJSON(writer, http.StatusOK, result)
 }
@@ -151,7 +152,7 @@ func (s *Server) legacyGetChatSession(
 			s.application.Chat.Presentation.Messages.SessionNotFound,
 		)
 	default:
-		wire := s.chatSessionWire(writer, session, true)
+		wire := s.chatSessionWire(request.Context(), writer, session, true)
 		// #318: the models last sent per domain, so a browser without local
 		// picks restores them; the session read is owner-scoped above.
 		models, retired, err := s.chat.SessionModels(request.Context(), principal.ID(), session.ID)
@@ -195,7 +196,7 @@ func (s *Server) legacyCreateChatSession(
 		s.application.Chat.Audit.SessionResourceType,
 		session.ID,
 	)
-	writeJSON(writer, http.StatusCreated, s.chatSessionWire(writer, session, false))
+	writeJSON(writer, http.StatusCreated, s.chatSessionWire(request.Context(), writer, session, false))
 }
 
 func (s *Server) legacyRenameChatSession(
@@ -235,7 +236,7 @@ func (s *Server) legacyRenameChatSession(
 	case err != nil:
 		s.writeChatInternalError(writer, err)
 	default:
-		writeJSON(writer, http.StatusOK, s.chatSessionWire(writer, session, false))
+		writeJSON(writer, http.StatusOK, s.chatSessionWire(request.Context(), writer, session, false))
 	}
 }
 
@@ -667,6 +668,7 @@ func (s *Server) chatEventIsDone(event chat.Event) bool {
 }
 
 func (s *Server) chatSessionWire(
+	ctx context.Context,
 	writer http.ResponseWriter,
 	session chat.Session,
 	includeCount bool,
@@ -696,6 +698,13 @@ func (s *Server) chatSessionWire(
 	if len(session.PriceTotals) > 0 {
 		delete(result, fields.EstimatedCredits)
 		result["price_totals"] = session.PriceTotals
+	}
+	if field := fields.Budget; field != "" && s.executionGrants != nil {
+		// The session's current production plan (#103). A session without a plan
+		// omits the member rather than claiming an empty one.
+		if summary, found, err := s.executionGrants.BudgetSummary(ctx, session.OwnerID, session.ID); err == nil && found {
+			result[field] = summary
+		}
 	}
 	if includeCount {
 		result[fields.Count] = map[string]any{

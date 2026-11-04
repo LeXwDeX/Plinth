@@ -21,18 +21,30 @@ func (r *Repository) CreateProcessingPlan(ctx context.Context, plan processing.P
 		return err
 	}
 	_, err = r.db.ExecContext(ctx, `INSERT INTO processing_plans
-		(id, owner_id, session_id, source_task_id, source_asset_id, state, approved_credits, request_hash, steps_json, failure, created_at, updated_at, version, harness_revision, harness_digest)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, plan.ID, plan.OwnerID, plan.SessionID, plan.SourceTaskID, plan.SourceAssetID, plan.State, 0, plan.RequestHash, string(steps), plan.Failure, plan.CreatedAt.Format(time.RFC3339Nano), plan.UpdatedAt.Format(time.RFC3339Nano), plan.Version, plan.Harness.Revision, plan.Harness.Digest)
+		(id, owner_id, session_id, source_task_id, source_asset_id, state, approved_credits, request_hash, steps_json, failure, created_at, updated_at, version, harness_revision, harness_digest, origin)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, plan.ID, plan.OwnerID, plan.SessionID, plan.SourceTaskID, plan.SourceAssetID, plan.State, 0, plan.RequestHash, string(steps), plan.Failure, plan.CreatedAt.Format(time.RFC3339Nano), plan.UpdatedAt.Format(time.RFC3339Nano), plan.Version, plan.Harness.Revision, plan.Harness.Digest, processingOrigin(plan.Origin))
 	return err
+}
+
+// processingOrigin keeps historical plans, whose JSON has no origin, on the
+// browser path that needs a human decision per step.
+func processingOrigin(origin string) string {
+	if origin == processing.OriginAgent {
+		return processing.OriginAgent
+	}
+	return processing.OriginBrowser
 }
 
 func scanProcessingPlan(rows interface{ Scan(...any) error }) (processing.Plan, error) {
 	var plan processing.Plan
 	var steps, created, updated string
 	var legacyApprovedCredits int
-	err := rows.Scan(&plan.ID, &plan.OwnerID, &plan.SessionID, &plan.SourceTaskID, &plan.SourceAssetID, &plan.State, &legacyApprovedCredits, &plan.RequestHash, &steps, &plan.Failure, &created, &updated, &plan.Version, &plan.Harness.Revision, &plan.Harness.Digest)
+	err := rows.Scan(&plan.ID, &plan.OwnerID, &plan.SessionID, &plan.SourceTaskID, &plan.SourceAssetID, &plan.State, &legacyApprovedCredits, &plan.RequestHash, &steps, &plan.Failure, &created, &updated, &plan.Version, &plan.Harness.Revision, &plan.Harness.Digest, &plan.Origin)
 	if err != nil {
 		return processing.Plan{}, err
+	}
+	if plan.Origin != processing.OriginAgent {
+		plan.Origin = processing.OriginBrowser
 	}
 	if !plan.Harness.Valid() {
 		return processing.Plan{}, processing.ErrInvalid
@@ -48,7 +60,7 @@ func scanProcessingPlan(rows interface{ Scan(...any) error }) (processing.Plan, 
 	return plan, err
 }
 
-const processingPlanColumns = `id, owner_id, session_id, source_task_id, source_asset_id, state, approved_credits, request_hash, steps_json, failure, created_at, updated_at, version, harness_revision, harness_digest`
+const processingPlanColumns = `id, owner_id, session_id, source_task_id, source_asset_id, state, approved_credits, request_hash, steps_json, failure, created_at, updated_at, version, harness_revision, harness_digest, origin`
 
 func (r *Repository) GetProcessingPlan(ctx context.Context, owner generation.OwnerID, id string) (processing.Plan, error) {
 	plan, err := scanProcessingPlan(r.db.QueryRowContext(ctx, `SELECT `+processingPlanColumns+` FROM processing_plans WHERE owner_id = ? AND id = ?`, owner, id))

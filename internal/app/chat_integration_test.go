@@ -90,9 +90,10 @@ func TestMockChatAgentRunsHTTPTaskAndSSEToCompletion(t *testing.T) {
 	if send.Code != http.StatusAccepted {
 		t.Fatalf("send status=%d body=%s", send.Code, send.Body)
 	}
-	// A new session is in manual mode and text-to-image needs no human: the
-	// Agent freezes the exact operation, session policy approves that grant and
-	// the same call submits the Task. Nothing waits for a person.
+	// A new session is in budget mode. Without a production plan the budget
+	// policy falls back to manual's rules, and text-to-image needs no human:
+	// the Agent freezes the exact operation, session policy approves that grant
+	// and the same call submits the Task. Nothing waits for a person.
 	grantRepository, err := sqlitetest.Open(filepath.Join(root, "art-ai.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -134,11 +135,11 @@ func TestMockChatAgentRunsHTTPTaskAndSSEToCompletion(t *testing.T) {
 		WHERE owner_id='owner-a' AND session_id=?`, sessionID).Scan(&grantStatus, &grantDecidedBy, &grantSource); err != nil {
 		t.Fatal(err)
 	}
-	if grantStatus != "bound" || grantDecidedBy != "policy:manual" || grantSource != executiongrant.AgentPending {
-		t.Fatalf("grant = status %q decided_by %q source %q, want bound by policy:manual", grantStatus, grantDecidedBy, grantSource)
+	if grantStatus != "bound" || grantDecidedBy != "policy:budget" || grantSource != executiongrant.AgentPending {
+		t.Fatalf("grant = status %q decided_by %q source %q, want bound by policy:budget", grantStatus, grantDecidedBy, grantSource)
 	}
 	var auditActor string
-	if err := rawDatabase.QueryRow(`SELECT actor_id FROM execution_grant_audit WHERE owner_id='owner-a' AND event='approved'`).Scan(&auditActor); err != nil || auditActor != "policy:manual" {
+	if err := rawDatabase.QueryRow(`SELECT actor_id FROM execution_grant_audit WHERE owner_id='owner-a' AND event='approved'`).Scan(&auditActor); err != nil || auditActor != "policy:budget" {
 		t.Fatalf("policy approval audit actor = %q, %v", auditActor, err)
 	}
 
@@ -196,8 +197,8 @@ func TestMockChatAgentRunsHTTPTaskAndSSEToCompletion(t *testing.T) {
 	if err := json.Unmarshal(read.Body.Bytes(), &approval); err != nil || read.Code != http.StatusOK {
 		t.Fatalf("approval read = %d %s", read.Code, read.Body)
 	}
-	if approval["approvalMode"] != "manual" {
-		t.Fatalf("new session approval mode = %v, want manual", approval["approvalMode"])
+	if approval["approvalMode"] != "budget" {
+		t.Fatalf("new session approval mode = %v, want budget", approval["approvalMode"])
 	}
 	if credits, _ := approval["estimatedCredits"].(float64); credits <= 0 {
 		t.Fatalf("session estimated credits = %v", approval["estimatedCredits"])

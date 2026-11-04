@@ -19,10 +19,12 @@ describe('approval modes', () => {
   it('offers exactly the modes the Schema declares, with Schema text', () => {
     const schema = schemaFixture();
     const options = approvalModeOptions(schema);
-    expect(options.map((option) => option.mode)).toEqual(['auto', 'manual']);
+    expect(options.map((option) => option.mode)).toEqual(['auto', 'budget', 'manual']);
     expect(options[0].label).toBe('自动');
-    expect(options[1].label).toBe('手工');
-    expect(options[1].tooltip).toContain('文生 3D');
+    expect(options[1].label).toBe('预算（制作计划）');
+    expect(options[1].tooltip).toContain('制作计划');
+    expect(options[2].label).toBe('严格（逐步批准）');
+    expect(options[2].tooltip).toContain('文生 3D');
 
     schema.chat.approval_policy.modes = ['manual'];
     expect(approvalModeOptions(schema).map((option) => option.mode)).toEqual(['manual']);

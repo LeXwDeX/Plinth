@@ -9,7 +9,7 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
-import { approvalModeOptions, sessionCreditsText, sessionPriceTotalsText } from '@/lib/chat/approval-modes';
+import { approvalModeOptions, defaultApprovalMode, sessionCreditsText, sessionPriceTotalsText } from '@/lib/chat/approval-modes';
 import { useSessionApproval } from '@/hooks/use-session-approval';
 import { createChatBrowserClient } from '@/lib/chat/browser-client';
 import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-schema';
@@ -24,7 +24,7 @@ export function ApprovalMenu() {
   const { schema } = useProductSchema();
   const chat = useMemo(() => createChatBrowserClient(schema), [schema]);
   const activeSessionId = useChatStore((state) => state.activeSessionId);
-  const approval = useSessionApproval(chat, activeSessionId, schema.chat.approval_policy.default_mode === 'auto' ? 'auto' : 'manual');
+  const approval = useSessionApproval(chat, activeSessionId, defaultApprovalMode(schema));
   const options = useMemo(() => approvalModeOptions(schema), [schema]);
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState<ApprovalMode | null>(null);

@@ -10,6 +10,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
@@ -201,7 +202,7 @@ func TestAwaitingApprovalResultFollowsTheTurnLocale(t *testing.T) {
 			Prefix: true, Identity: "locale-source"}}
 
 	content := map[string]any{}
-	if err := json.Unmarshal([]byte(executor.awaitingApproval(context.Background(), command, op)), &content); err != nil {
+	if err := json.Unmarshal([]byte(executor.awaitingApproval(context.Background(), command, op, executiongrant.PolicyResult{})), &content); err != nil {
 		t.Fatal(err)
 	}
 	status, _ := content["status_text"].(string)

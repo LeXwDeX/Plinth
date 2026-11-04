@@ -92,7 +92,9 @@ export function parsePendingApprovals(payload: unknown): PendingApproval[] {
     const item = record(raw);
     const requestId = text(item.request_id);
     const status = item.status === 'expired' ? 'expired' : item.status === 'pending' ? 'pending' : null;
-    if (!requestId || !status) continue;
+    // A card kind this client does not render yet (the production plan card,
+    // #103) is skipped instead of being shown as a step with no capability.
+    if (!requestId || !status || text(item.kind) !== '') continue;
     const inputs = (Array.isArray(item.inputs) ? item.inputs : []).map((value) => {
       const input = record(value);
       return {

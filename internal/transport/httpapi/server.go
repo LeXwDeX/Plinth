@@ -596,6 +596,9 @@ func (s *Server) routes() {
 	if s.pendingApprovals != nil && routes.ChatSessionPendingApprovals != "" {
 		s.mux.HandleFunc("GET "+routes.ChatSessionPendingApprovals, s.withIdentity(s.listPendingApprovals))
 	}
+	if s.pendingApprovals != nil && routes.ChatSessionBudget != "" {
+		s.mux.HandleFunc("PUT "+routes.ChatSessionBudget, s.withIdentity(s.decideChatSessionBudget))
+	}
 	if s.threeViews != nil && routes.ChatSessionThreeViews != "" && routes.ChatSessionThreeViewItem != "" {
 		s.mux.HandleFunc("GET "+routes.ChatSessionThreeViews, s.withIdentity(s.listThreeViews))
 		s.mux.HandleFunc("POST "+routes.ChatSessionThreeViewItem, s.withIdentity(s.advanceThreeView))

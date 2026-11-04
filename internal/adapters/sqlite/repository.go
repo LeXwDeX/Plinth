@@ -346,6 +346,9 @@ var chatMessageMultiviewMigration string
 //go:embed migrations/0074_chat_production_brief.sql
 var chatProductionBriefMigration string
 
+//go:embed migrations/0075_production_budgets.sql
+var productionBudgetsMigration string
+
 func migrations() []migration {
 	return []migration{{
 		version: 1,
@@ -411,13 +414,18 @@ func migrations() []migration {
 		version: 16,
 		name:    "legacy_migration_records",
 		sql:     legacyMigrationRecordsMigration,
-	}, {version: 17, name: "observation_order", sql: observationOrderMigration}, {version: 18, name: "session_lifecycle", sql: sessionLifecycleMigration}, {version: 19, name: "claim_assets", sql: claimAssetsMigration}, {version: 20, name: "task_read_projections", sql: taskReadProjectionsMigration}, {version: 21, name: "dispatch_checkpoint", sql: dispatchCheckpointMigration}, {version: 22, name: "resource_state", sql: resourceStateMigration}, {version: 23, name: "task_session", sql: taskSessionMigration}, {version: 24, name: "canvas_session_ownership", sql: canvasSessionOwnershipMigration}, {version: 25, name: "processing_plans", sql: processingPlansMigration}, {version: 26, name: "agent_state", sql: agentStateMigration}, {version: 27, name: "canvas_node_pk_revision", sql: canvasNodePKRevisionMigration}, {version: 28, name: "administration_audit_indexes", sql: administrationAuditIndexesMigration}, {version: 29, name: "login_failure_throttle", sql: loginFailureThrottleMigration}, {version: 30, name: "chat_turn_stop", sql: chatTurnStopMigration}, {version: 31, name: "chat_turn_checkpoint", sql: chatTurnCheckpointMigration}, {version: 32, name: "agent_consent_request_identity", sql: agentConsentRequestIdentityMigration}, {version: 33, name: "scene_objects", sql: sceneObjectsMigration}, {version: 34, name: "render_manifests", sql: renderManifestsMigration}, {version: 35, name: "prepared_inputs", sql: preparedInputsMigration}, {version: 36, name: "execution_grants", sql: executionGrantsMigration}, {version: 37, name: "agent_generation_operations", sql: agentGenerationOperationsMigration}, {version: 38, name: "skill_runs", sql: skillRunsMigration}, {version: 39, name: "model_captures", sql: modelCapturesMigration}, {version: 40, name: "execution_grant_turn", sql: executionGrantTurnMigration}, {version: 41, name: "agent_configuration", sql: agentConfigurationMigration}, {version: 42, name: "personal_skills", sql: personalSkillsMigration}, {version: 43, name: "chat_approval_mode", sql: chatApprovalModeMigration}, {version: 44, name: "chat_message_attachments", sql: chatMessageAttachmentsMigration}, {version: 45, name: "chat_session_notes", sql: chatSessionNotesMigration}, {version: 46, name: "chat_session_pick", sql: chatSessionPickMigration}, {version: 47, name: "pending_approvals", sql: pendingApprovalsMigration}, {version: 48, name: "skill_step_attempt", sql: skillStepAttemptMigration}, {version: 49, name: "chat_agent_scope", sql: chatAgentScopeMigration}, {version: 50, name: "chat_session_title_source", sql: chatSessionTitleSourceMigration}, {version: 51, name: "harness", sql: harnessMigration}, {version: 52, name: "asset_delivery_profile", sql: assetDeliveryProfileMigration}, {version: 53, name: "retention_receipts", sql: retentionReceiptsMigration}, {version: 54, name: "asset_recovery_receipts", sql: assetRecoveryReceiptsMigration}, {version: 55, name: "native_pricing", sql: nativePricingMigration}, {version: 56, name: "canvas_placed_results", sql: canvasPlacedResultsMigration}, {version: 57, name: "canvas_frame", sql: canvasFrameMigration}, {version: 58, name: "input_asset_derivation", sql: inputAssetDerivationMigration}, {version: 59, name: "agent_operation_recharge", sql: agentOperationRechargeMigration}, {version: 60, name: "upstream_refetches", sql: upstreamRefetchesMigration}, {version: 61, name: "generation_task_time_order", sql: generationTaskTimeOrderMigration}, {version: 62, name: "chat_turn_session_index", sql: chatTurnSessionIndexMigration}, {version: 63, name: "asset_media_type_corrections", sql: assetMediaTypeCorrectionsMigration}, {version: 64, name: "chat_choices", sql: chatChoicesMigration}, {version: 65, name: "chat_session_context", sql: chatSessionContextMigration}, {version: 66, name: "llm_settings", sql: llmSettingsMigration}, {version: 67, name: "agent_operation_reference_use", sql: agentOperationReferenceUseMigration}, {version: 68, name: "lineage_conversion_fold", sql: lineageConversionFoldMigration}, {version: 69, name: "delivery_completion", sql: deliveryCompletionMigration}, {version: 70, name: "agent_operation_reference_source", sql: agentOperationReferenceSourceMigration}, {version: 71, name: "rate_limit_queue", sql: rateLimitQueueMigration}, {version: 72, name: "skill_step_replacement", sql: skillStepReplacementMigration}, {version: 73, name: "chat_message_multiview", sql: chatMessageMultiviewMigration}, {version: 74, name: "chat_production_brief", sql: chatProductionBriefMigration}}
+	}, {version: 17, name: "observation_order", sql: observationOrderMigration}, {version: 18, name: "session_lifecycle", sql: sessionLifecycleMigration}, {version: 19, name: "claim_assets", sql: claimAssetsMigration}, {version: 20, name: "task_read_projections", sql: taskReadProjectionsMigration}, {version: 21, name: "dispatch_checkpoint", sql: dispatchCheckpointMigration}, {version: 22, name: "resource_state", sql: resourceStateMigration}, {version: 23, name: "task_session", sql: taskSessionMigration}, {version: 24, name: "canvas_session_ownership", sql: canvasSessionOwnershipMigration}, {version: 25, name: "processing_plans", sql: processingPlansMigration}, {version: 26, name: "agent_state", sql: agentStateMigration}, {version: 27, name: "canvas_node_pk_revision", sql: canvasNodePKRevisionMigration}, {version: 28, name: "administration_audit_indexes", sql: administrationAuditIndexesMigration}, {version: 29, name: "login_failure_throttle", sql: loginFailureThrottleMigration}, {version: 30, name: "chat_turn_stop", sql: chatTurnStopMigration}, {version: 31, name: "chat_turn_checkpoint", sql: chatTurnCheckpointMigration}, {version: 32, name: "agent_consent_request_identity", sql: agentConsentRequestIdentityMigration}, {version: 33, name: "scene_objects", sql: sceneObjectsMigration}, {version: 34, name: "render_manifests", sql: renderManifestsMigration}, {version: 35, name: "prepared_inputs", sql: preparedInputsMigration}, {version: 36, name: "execution_grants", sql: executionGrantsMigration}, {version: 37, name: "agent_generation_operations", sql: agentGenerationOperationsMigration}, {version: 38, name: "skill_runs", sql: skillRunsMigration}, {version: 39, name: "model_captures", sql: modelCapturesMigration}, {version: 40, name: "execution_grant_turn", sql: executionGrantTurnMigration}, {version: 41, name: "agent_configuration", sql: agentConfigurationMigration}, {version: 42, name: "personal_skills", sql: personalSkillsMigration}, {version: 43, name: "chat_approval_mode", sql: chatApprovalModeMigration}, {version: 44, name: "chat_message_attachments", sql: chatMessageAttachmentsMigration}, {version: 45, name: "chat_session_notes", sql: chatSessionNotesMigration}, {version: 46, name: "chat_session_pick", sql: chatSessionPickMigration}, {version: 47, name: "pending_approvals", sql: pendingApprovalsMigration}, {version: 48, name: "skill_step_attempt", sql: skillStepAttemptMigration}, {version: 49, name: "chat_agent_scope", sql: chatAgentScopeMigration}, {version: 50, name: "chat_session_title_source", sql: chatSessionTitleSourceMigration}, {version: 51, name: "harness", sql: harnessMigration}, {version: 52, name: "asset_delivery_profile", sql: assetDeliveryProfileMigration}, {version: 53, name: "retention_receipts", sql: retentionReceiptsMigration}, {version: 54, name: "asset_recovery_receipts", sql: assetRecoveryReceiptsMigration}, {version: 55, name: "native_pricing", sql: nativePricingMigration}, {version: 56, name: "canvas_placed_results", sql: canvasPlacedResultsMigration}, {version: 57, name: "canvas_frame", sql: canvasFrameMigration}, {version: 58, name: "input_asset_derivation", sql: inputAssetDerivationMigration}, {version: 59, name: "agent_operation_recharge", sql: agentOperationRechargeMigration}, {version: 60, name: "upstream_refetches", sql: upstreamRefetchesMigration}, {version: 61, name: "generation_task_time_order", sql: generationTaskTimeOrderMigration}, {version: 62, name: "chat_turn_session_index", sql: chatTurnSessionIndexMigration}, {version: 63, name: "asset_media_type_corrections", sql: assetMediaTypeCorrectionsMigration}, {version: 64, name: "chat_choices", sql: chatChoicesMigration}, {version: 65, name: "chat_session_context", sql: chatSessionContextMigration}, {version: 66, name: "llm_settings", sql: llmSettingsMigration}, {version: 67, name: "agent_operation_reference_use", sql: agentOperationReferenceUseMigration}, {version: 68, name: "lineage_conversion_fold", sql: lineageConversionFoldMigration}, {version: 69, name: "delivery_completion", sql: deliveryCompletionMigration}, {version: 70, name: "agent_operation_reference_source", sql: agentOperationReferenceSourceMigration}, {version: 71, name: "rate_limit_queue", sql: rateLimitQueueMigration}, {version: 72, name: "skill_step_replacement", sql: skillStepReplacementMigration}, {version: 73, name: "chat_message_multiview", sql: chatMessageMultiviewMigration}, {version: 74, name: "chat_production_brief", sql: chatProductionBriefMigration}, {version: 75, name: "production_budgets", sql: productionBudgetsMigration, foreignKeysOff: true}}
 }
 
 type migration struct {
 	version int
 	name    string
 	sql     string
+	// foreignKeysOff runs this migration with foreign key enforcement disabled
+	// and refuses to commit if PRAGMA foreign_key_check reports a violation.
+	// A table rebuild that DROP TABLEs a session table needs this: with
+	// enforcement on, the DROP cascades into every child table.
+	foreignKeysOff bool
 }
 
 func (r *Repository) runMigrations(
@@ -464,36 +472,81 @@ func (r *Repository) runMigrations(
 			return fmt.Errorf("读取 migration %d: %w", migration.version, err)
 		}
 
-		tx, err := r.db.BeginTx(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("开始 migration %d: %w", migration.version, err)
-		}
-		if _, err := tx.ExecContext(ctx, migration.sql); err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf(
-				"执行 migration %04d_%s: %w",
-				migration.version,
-				migration.name,
-				err,
-			)
-		}
-		if _, err := tx.ExecContext(
-			ctx,
-			`INSERT INTO go_schema_migrations (version, name, checksum, applied_at)
-			 VALUES (?, ?, ?, ?)`,
-			migration.version,
-			migration.name,
-			checksum,
-			formatTime(time.Now()),
-		); err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("登记 migration %d: %w", migration.version, err)
-		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("提交 migration %d: %w", migration.version, err)
+		if err := r.applyMigration(ctx, migration, checksum); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// applyMigration runs one migration and records it in the ledger. A migration
+// that rebuilds a referenced table sets foreignKeysOff: the pragma must be
+// changed outside the transaction, and the commit is refused when the rebuilt
+// rows leave a dangling reference.
+func (r *Repository) applyMigration(ctx context.Context, migration migration, checksum string) error {
+	if migration.foreignKeysOff {
+		if _, err := r.db.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+			return fmt.Errorf("关闭 foreign_keys (migration %d): %w", migration.version, err)
+		}
+		defer func() {
+			_, _ = r.db.ExecContext(context.Background(), "PRAGMA foreign_keys = ON")
+		}()
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("开始 migration %d: %w", migration.version, err)
+	}
+	if _, err := tx.ExecContext(ctx, migration.sql); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf(
+			"执行 migration %04d_%s: %w",
+			migration.version,
+			migration.name,
+			err,
+		)
+	}
+	if migration.foreignKeysOff {
+		if err := checkForeignKeys(ctx, tx); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("migration %04d_%s: %w", migration.version, migration.name, err)
+		}
+	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO go_schema_migrations (version, name, checksum, applied_at)
+		 VALUES (?, ?, ?, ?)`,
+		migration.version,
+		migration.name,
+		checksum,
+		formatTime(time.Now()),
+	); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("登记 migration %d: %w", migration.version, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("提交 migration %d: %w", migration.version, err)
+	}
+	return nil
+}
+
+// checkForeignKeys fails when the transaction left a foreign key violation.
+// With foreign_keys OFF the pragma does not enforce while the table is
+// rebuilt, so this is the check that keeps the rebuild safe.
+func checkForeignKeys(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, "PRAGMA foreign_key_check")
+	if err != nil {
+		return fmt.Errorf("foreign_key_check: %w", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var table, parent string
+		var rowID, fkID sql.NullInt64
+		if err := rows.Scan(&table, &rowID, &parent, &fkID); err != nil {
+			return fmt.Errorf("foreign_key_check 读取: %w", err)
+		}
+		return fmt.Errorf("foreign_key_check 发现悬空引用: 表 %s, 父表 %s", table, parent)
+	}
+	return rows.Err()
 }
 
 func migrationChecksum(source string) string {

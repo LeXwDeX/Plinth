@@ -545,12 +545,22 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	// One grant service for every paid-step entry point. The session approval
 	// mode and the Schema policy decide whether a step waits for a person.
 	executionGrants := &executiongrant.Service{
-		Grants: repository, Prepared: repository,
+		Grants: repository, Prepared: repository, Budgets: repository,
 		Policy: approvalPolicy, Modes: chatService,
 		// An Agent approval stays approvable for the Schema's duration; after
 		// that it can only be requested again in a new turn.
 		PendingTTL: time.Duration(applicationSchema.Chat.PendingApprovals.TTLSeconds) * time.Second,
 	}
+	// Budget-mode plans (#103) need the grant service, which needs the chat
+	// service for the session mode; install the writer once both exist.
+	chatService.SetProductionPlans(chat.ProductionPlanPolicy{
+		Budget: applicationSchema.Chat.ApprovalPolicy.Budget,
+		Offerings: func() []generation.Offering {
+			return module.Offerings("")
+		},
+		OfferingAvailable: module.OfferingAvailable,
+		Store:             executionGrants,
+	})
 	paramsStore := agentparams.NewPersistentParameterStore(repository, logger)
 	// One localizer serves the Agent turn and its tool results.
 	texts, err := catalog.NewTextLocalizer(applicationSchema)
@@ -646,6 +656,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			)
 		},
 		AskChoice:            chatService.AskChoice,
+		ProposePlan:          chatService.ProposeProductionPlan,
 		ChoiceKinds:          applicationSchema.Chat.Choice.Kinds,
 		BriefSavedMessage:    applicationSchema.Chat.Model3DUsage.Brief.SavedMessage,
 		BriefInvalidTemplate: applicationSchema.Chat.Model3DUsage.Brief.InvalidTemplate,

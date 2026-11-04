@@ -11,6 +11,14 @@ const (
 	ModeAuto = "auto"
 	// ModeManual asks a human only for the capabilities the policy lists.
 	ModeManual = "manual"
+	// ModeBudget approves an Agent step inside an approved production plan and
+	// its total credit budget (#103). The budget decision needs the plan, the
+	// step estimate and the reservation, so executiongrant resolves this mode
+	// before calling RequiresHuman. A step that is not budget eligible (one
+	// the browser itself started, and every step when no plan is active) is
+	// judged exactly as in manual mode; RequiresHuman therefore treats budget
+	// as manual here.
+	ModeBudget = "budget"
 )
 
 // Policy is the server-side form of application.chat.approval_policy.
@@ -26,8 +34,15 @@ type Policy struct {
 // NormalizeMode maps a stored or requested mode to a usable one. An unknown
 // mode is treated as manual: the stricter mode is always the safe default.
 func (p Policy) NormalizeMode(mode string) string {
-	if mode == ModeAuto && p.Allows(ModeAuto) {
-		return ModeAuto
+	switch mode {
+	case ModeAuto:
+		if p.Allows(ModeAuto) {
+			return ModeAuto
+		}
+	case ModeBudget:
+		if p.Allows(ModeBudget) {
+			return ModeBudget
+		}
 	}
 	return ModeManual
 }
@@ -42,6 +57,10 @@ func (p Policy) Allows(mode string) bool {
 //   - auto: never.
 //   - manual: for capabilities the policy lists, and for any capability the
 //     Schema does not know (including an empty one).
+//   - budget: like manual here. The budget branch of executiongrant decides
+//     Agent steps first; only a step it leaves to a person (no plan, off plan,
+//     over budget) or a step the browser started reaches this function, and
+//     all of them keep manual's rules.
 //   - any other mode is treated as manual.
 func RequiresHuman(policy Policy, mode, capability string) bool {
 	if policy.NormalizeMode(mode) == ModeAuto {

@@ -53,6 +53,9 @@ const (
 	ToolRenderModelViews = "render_model_views"
 	// ToolCompareModels renders two finished 3D models side by side (#103).
 	ToolCompareModels = "compare_models"
+	// ToolProposeProductionPlan proposes the budget-mode production plan the
+	// person approves once (#103).
+	ToolProposeProductionPlan = "propose_production_plan"
 )
 
 // 同意状态键与决定值（agent 状态 store 与 harness consent 端点共用词汇）。
@@ -111,6 +114,10 @@ type Config struct {
 	// builds the options from model3d_usage.profiles.
 	AskChoice func(ctx context.Context, command chat.ToolCommand, kind catalog.ChatChoiceKindSchema,
 		arguments chat.AskChoiceArguments) (chat.ToolResult, error)
+	// ProposePlan validates the Agent's production plan against the Schema,
+	// re-quotes every step from the runtime Catalog and stores one pending
+	// plan card (#103).
+	ProposePlan func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	// ChoiceKinds are chat.choice.kinds from the Product Schema; the Agent
 	// names one by id and never supplies options of its own.
 	ChoiceKinds []catalog.ChatChoiceKindSchema
@@ -178,6 +185,7 @@ type Executor struct {
 	updateBrief        func(ctx context.Context, ownerID, sessionID string, brief map[string]json.RawMessage) error
 	askChoice          func(ctx context.Context, command chat.ToolCommand, kind catalog.ChatChoiceKindSchema,
 		arguments chat.AskChoiceArguments) (chat.ToolResult, error)
+	proposePlan            func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	choiceKinds            map[string]catalog.ChatChoiceKindSchema
 	briefSavedMessage      string
 	briefInvalidTemplate   string
@@ -307,6 +315,7 @@ func New(config Config) (*Executor, error) {
 		updateNotes:            config.UpdateNotes,
 		updateBrief:            config.UpdateBrief,
 		askChoice:              config.AskChoice,
+		proposePlan:            config.ProposePlan,
 		consent:                config.Consent,
 		consentState:           config.ConsentState,
 		consentClear:           config.ConsentClear,
@@ -356,6 +365,11 @@ func (e *Executor) Execute(
 		return e.updateProductionBrief(ctx, command), nil
 	case ToolAskChoice:
 		return e.askChoiceCard(ctx, command), nil
+	case ToolProposeProductionPlan:
+		if e.proposePlan == nil {
+			return chat.ToolResult{Error: "production plans unavailable", NoSubmission: true}, nil
+		}
+		return e.proposePlan(ctx, command)
 	case ToolFindHistoryImages:
 		return e.findHistoryImages(command), nil
 	case ToolInspectModel, ToolRenderModelViews, ToolCompareModels:

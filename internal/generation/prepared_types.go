@@ -138,9 +138,17 @@ type PreparedInput struct {
 	// Offering's base price (0 when none). It is derived from NormalizedInput
 	// and the pinned Offering revision, and it is part of InputHash when above
 	// zero, so an approval of this input is an approval of exactly this amount.
-	ExtraCredits int       `json:"extra_credits,omitempty"`
-	InputHash    string    `json:"input_hash"`
-	CreatedAt    time.Time `json:"created_at"`
+	ExtraCredits int `json:"extra_credits,omitempty"`
+	// EstimatedCredits is the server's estimate of what this exact input will
+	// charge: the Offering's base price plus its extra credits for a platform
+	// priced step, or the frozen native total rounded up to whole provider
+	// credits for a native priced step (#103 budget). It is derived from the
+	// frozen values and part of InputHash, so a budget reservation covers the
+	// same estimate the approval card shows. Zero on records written before
+	// the field existed; readers then fall back to the Offering's quote.
+	EstimatedCredits int       `json:"estimated_credits,omitempty"`
+	InputHash        string    `json:"input_hash"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 type SubmitPreparedCommand struct {

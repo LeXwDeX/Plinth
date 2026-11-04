@@ -1,5 +1,6 @@
 import type { ProductSchema } from '@/lib/product-schema';
 import { agentScopeOf } from '@/lib/chat/agent-scope';
+import { isApprovalMode } from '@/lib/chat/approval-modes';
 import { parseLineage, type LineageGraph } from '@/lib/workspace/lineage';
 import { parseThreeViewGroup, parseThreeViews, type ThreeViewAction, type ThreeViewGroup } from '@/lib/workspace/three-view';
 import {
@@ -610,9 +611,9 @@ export function parseMultiviewRequest(value: unknown): MultiviewTurnRequest | nu
 const approvalSourcePolicy = 'policy';
 
 function approvalModeOf(schema: ProductSchema, value: unknown): ApprovalMode {
-  // 与服务端一致：Schema 没有声明的方式一律按手工处理。
-  return value === 'auto' && schema.chat.approval_policy.modes.includes('auto')
-    ? 'auto'
+  // 与服务端一致：Schema 没有声明的方式一律按严格（手工）处理。
+  return isApprovalMode(value) && schema.chat.approval_policy.modes.includes(value)
+    ? value
     : 'manual';
 }
 

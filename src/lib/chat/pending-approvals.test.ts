@@ -49,6 +49,16 @@ describe('expired approval cards', () => {
   });
 });
 
+describe('a card kind this client does not render yet (#103)', () => {
+  it('skips a production plan card instead of showing it as a step', () => {
+    const items = parsePendingApprovals({ items: [
+      { request_id: 'plan-1', status: 'pending', kind: 'plan', budget_credits: 100, estimated_credits: 80 },
+      { request_id: 'step-1', status: 'pending', capability: 'text-to-3d' },
+    ] });
+    expect(items.map((item) => item.requestId)).toEqual(['step-1']);
+  });
+});
+
 describe('the extra credits of a pending step', () => {
   it('reads the split between base and extra credits and what the extra pays for', () => {
     const [item] = parsePendingApprovals({ items: [{

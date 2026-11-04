@@ -26,12 +26,12 @@ func decodeApproval(t *testing.T, body string) (mode string, credits float64) {
 	return mode, credits
 }
 
-func TestChatApprovalModeDefaultsToManualAndSwitchesForOwner(t *testing.T) {
+func TestChatApprovalModeDefaultsToBudgetAndSwitchesForOwner(t *testing.T) {
 	t.Parallel()
 	handler, cookie, sessionID := grantTestBrowser(t)
 
 	read := grantTestRequest(t, handler, cookie, http.MethodGet, approvalPath(sessionID), "", "")
-	if mode, credits := decodeApproval(t, read.Body.String()); read.Code != http.StatusOK || mode != "manual" || credits != 0 {
+	if mode, credits := decodeApproval(t, read.Body.String()); read.Code != http.StatusOK || mode != "budget" || credits != 0 {
 		t.Fatalf("default mode: %d %s", read.Code, read.Body.String())
 	}
 	put := grantTestRequest(t, handler, cookie, http.MethodPut, approvalPath(sessionID), `{"approvalMode":"auto"}`, "")
@@ -51,6 +51,10 @@ func TestChatApprovalModeDefaultsToManualAndSwitchesForOwner(t *testing.T) {
 	if mode, _ := decodeApproval(t, back.Body.String()); back.Code != http.StatusOK || mode != "manual" {
 		t.Fatalf("switch back: %d %s", back.Code, back.Body.String())
 	}
+	planned := grantTestRequest(t, handler, cookie, http.MethodPut, approvalPath(sessionID), `{"approvalMode":"budget"}`, "")
+	if mode, _ := decodeApproval(t, planned.Body.String()); planned.Code != http.StatusOK || mode != "budget" {
+		t.Fatalf("switch to budget: %d %s", planned.Code, planned.Body.String())
+	}
 }
 
 func TestChatApprovalModeRejectsInvalidAndCredentialOnlyRequests(t *testing.T) {
@@ -68,7 +72,7 @@ func TestChatApprovalModeRejectsInvalidAndCredentialOnlyRequests(t *testing.T) {
 		t.Fatalf("credential-only switch accepted: %s", bare.Body.String())
 	}
 	read := grantTestRequest(t, handler, cookie, http.MethodGet, approvalPath(sessionID), "", "")
-	if mode, _ := decodeApproval(t, read.Body.String()); mode != "manual" {
+	if mode, _ := decodeApproval(t, read.Body.String()); mode != "budget" {
 		t.Fatalf("rejected requests changed the mode: %s", read.Body.String())
 	}
 }
@@ -128,7 +132,7 @@ func TestChatApprovalModeChangeIsAudited(t *testing.T) {
 		if event.ResourceID != sessionID || event.ActorID != "owner-a" {
 			t.Fatalf("audit event = %+v", event)
 		}
-		if event.Detail["from"] != "manual" || event.Detail["to"] != "auto" {
+		if event.Detail["from"] != "budget" || event.Detail["to"] != "auto" {
 			t.Fatalf("audit detail = %+v", event.Detail)
 		}
 	}

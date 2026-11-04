@@ -2064,6 +2064,7 @@
           "chat_session_context_compaction": "/api/v1/chat/sessions/{sessionID}/context/compaction",
           "chat_session_model": "/api/v1/chat/sessions/{sessionID}/model",
           "chat_session_pending_approvals": "/api/v1/chat/sessions/{sessionID}/pending-approvals",
+          "chat_session_budget": "/api/v1/chat/sessions/{sessionID}/budgets/{budgetID}",
           "chat_session_three_views": "/api/v1/chat/sessions/{sessionID}/three-views",
           "chat_session_three_view_item": "/api/v1/chat/sessions/{sessionID}/three-views/{runID}/views/{viewKey}",
           "chat_session_lineage": "/api/v1/chat/sessions/{sessionID}/lineage",
@@ -3443,9 +3444,11 @@
         "ui.workspace.canvas.ratio": "比例",
         "ui.workspace.approval.label": "批准方式",
         "ui.workspace.approval.mode_auto": "自动",
-        "ui.workspace.approval.mode_manual": "手工",
+        "ui.workspace.approval.mode_budget": "预算（制作计划）",
+        "ui.workspace.approval.mode_manual": "严格（逐步批准）",
         "ui.workspace.approval.tooltip_auto": "自动：所有付费步骤都会自动批准，每一步都会显示它消耗的积分。",
-        "ui.workspace.approval.tooltip_manual": "手工：文生 3D、图生 3D、Gaussian Splat、换贴图需要你批准；其余步骤自动批准。",
+        "ui.workspace.approval.tooltip_budget": "预算：先批准一份制作计划和总积分预算，计划内步骤自动连续执行；计划外、超出预算或会再次扣费的步骤仍需要你批准。",
+        "ui.workspace.approval.tooltip_manual": "严格（逐步批准）：文生 3D、图生 3D、Gaussian Splat、换贴图需要你批准；其余步骤自动批准。",
         "ui.workspace.approval.step_credits": "本步消耗 {credits} 积分",
         "ui.workspace.approval.step_credits_one": "本步消耗 {credits} 积分",
         "ui.workspace.approval.session_credits": "本会话累计约 {credits} 积分（估算；失败且未扣费的任务不计入）",
@@ -4882,6 +4885,7 @@
           "approval_source": "approvalSource",
           "notes": "notes",
           "brief": "brief",
+          "budget": "budget",
           "explicit_model_3d": "explicit_model_3d",
           "pick": "pick",
           "agent_scope": "agentScope",
@@ -5534,6 +5538,60 @@
             "required": [
               "kind"
             ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "propose_production_plan",
+          "execution": {"implementation_key":"plan.propose","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "description": "Propose a production plan with a total credit budget when the work needs several paid steps (for example: generate a model, inspect it, then fix what the self-check finds). The person approves the plan and its budget on one card; afterwards the plan's steps and the correction capabilities you list run continuously by budget without a card per step. The server re-estimates every step from the Catalog and refuses a budget below that estimate; the numbers you send are only a summary. A capability outside the plan and its correction capabilities, a step that would exceed the remaining budget, and a step that would charge again (extra export formats, additional fees) still show an approval card. Browser-started steps do not use this budget. Propose once and wait for the person: do not open a second plan while one is pending, and do not use this tool to avoid a card the rules require.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "description": "Short plan title shown on the approval card, such as 'Game character from this sketch'."
+              },
+              "steps": {
+                "type": "array",
+                "description": "The paid steps in execution order, one entry per step.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "capability": {
+                      "type": "string",
+                      "description": "Capability id of the step, such as text-to-3d, image-to-3d or retexture."
+                    },
+                    "model": {
+                      "type": "string",
+                      "description": "Optional offering id the person explicitly chose. Omit when the person did not choose; never pick a model on your own."
+                    },
+                    "purpose": {
+                      "type": "string",
+                      "description": "What this step produces, in the person's words."
+                    },
+                    "estimated_credits": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Your own estimate; the server replaces it with its Catalog estimate."
+                    }
+                  },
+                  "required": ["capability", "purpose"],
+                  "additionalProperties": false
+                }
+              },
+              "budget_credits": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Total credits the person approves. Must be at least the server's estimate of all steps and no more than the Schema maximum."
+              },
+              "correction_capabilities": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Capabilities the plan allows for self-check correction steps that are not listed as steps, such as retexture or process_model. Each must be a known capability."
+              }
+            },
+            "required": ["title", "steps", "budget_credits"],
             "additionalProperties": false
           }
         },
@@ -7273,9 +7331,31 @@
         "production_brief_action": "set_production_brief"
       },
       "approval_policy": {
-        "default_mode": "manual",
-        "modes": ["auto", "manual"],
+        "default_mode": "budget",
+        "modes": ["auto", "budget", "manual"],
         "manual_approval_capabilities": ["text-to-3d", "image-to-3d", "image-to-splat", "retexture"],
+        "budget": {
+          "max_credits": 20000,
+          "max_steps": 12,
+          "max_title_characters": 80,
+          "max_purpose_characters": 200,
+          "context_template": "\n\n【制作预算】本会话的批准方式是「预算（制作计划）」。当前制作计划：{state}；总预算 {limit} 积分，已扣费 {spent} 积分，执行中预留 {reserved} 积分，剩余 {remaining} 积分。计划：{plan}\n计划内的步骤由系统按预算自动批准，不出批准卡；计划外的能力、超出剩余预算、以及会再次扣费的步骤（例如额外导出格式、Tripo 的附加费用）仍会出批准卡，由用户决定。需要连续执行多个付费步骤时，先用 propose_production_plan 提交制作计划和总积分预算，等用户批准后再执行；在计划获批前，按严格（逐步批准）方式的规则执行。浏览器面板自己发起的步骤不消耗这份预算，仍由用户逐张批准。",
+          "no_plan_state": "尚未提交计划",
+          "no_plan_text": "无。如果这次制作需要多个付费步骤，先用 propose_production_plan 把制作计划和总积分预算提交给用户批准。",
+          "states": [
+            {"id": "pending", "label": "待批准"},
+            {"id": "active", "label": "执行中"},
+            {"id": "exhausted", "label": "预算已用完"},
+            {"id": "closed", "label": "已结束"},
+            {"id": "denied", "label": "已拒绝"}
+          ],
+          "messages": {
+            "approved": "制作计划「{title}」已批准，总预算 {limit} 积分，剩余 {remaining} 积分。计划内的步骤会按预算自动执行，不再逐张出批准卡。",
+            "denied": "制作计划「{title}」未获批准，未执行任何步骤。",
+            "expired": "制作计划「{title}」等待批准超时，已失效；未执行任何步骤。",
+            "exhausted": "制作计划「{title}」的 {limit} 积分预算已用完，后续步骤需要重新提交计划并获得批准。"
+          }
+        },
         "prompt": {
           "context_template": "\n\n【批准方式】本会话的批准方式是「{mode}」（用户在顶栏的「批准方式」里设置，以下是服务端读到的真实值）。{description}\n批准方式只由用户在顶栏切换，你不能切换它，也不要主动建议用户切换它，更不要为了得到或避开批准卡片而劝用户切换。用户问起当前批准方式，或问某一步为什么出了批准卡、为什么没出卡时，按上面的事实回答，不要猜测，也不要把它说成另一种方式。它与 Agent 范围（2D 模式、3D 模式、自动模式，只限定你能用哪些工具）互不相干。\n用户可能在对话中途切换批准方式。如果这里的方式与你在本会话里之前说过的不同，那是用户刚刚切换了，你之前的说法在当时并没有错：直接说明“批准方式已切换为「{mode}」”，再按现在的方式回答，不要说自己之前说错了，也不要道歉更正。",
           "modes": [
@@ -7285,9 +7365,14 @@
               "description": "自动方式下，所有付费步骤都由系统按会话批准方式自动批准，不出批准卡；会额外消耗的积分（例如额外导出格式）也随批准一起授予，不再单独询问。每一步仍会显示它消耗的积分。"
             },
             {
+              "id": "budget",
+              "label": "预算（制作计划）",
+              "description": "预算方式下，Agent 先用 propose_production_plan 提交一份制作计划和总积分预算，用户在卡片上批准后，计划内的步骤按估算积分自动执行，不再逐步出批准卡；自检后的修正步骤只要在计划允许的修正能力内、且总积分不超预算，也自动执行。计划外的能力、超出剩余预算、以及会再次扣费的步骤仍会出批准卡。浏览器面板自己发起的步骤仍按严格（逐步批准）方式的规则逐张批准。没有已批准的计划时，按严格（逐步批准）方式的规则执行。"
+            },
+            {
               "id": "manual",
-              "label": "手工",
-              "description": "手工方式下，文生 3D、图生 3D、Gaussian Splat 生成、换贴图这几类步骤会先出批准卡，等用户在卡片上批准后才执行。2D 步骤、重拓扑、绑骨、动画按策略自动批准，不出卡。任何步骤只要会额外消耗积分（例如额外导出格式、Tripo 的附加费用），即使它本来自动批准，也要在批准卡上由用户批准。"
+              "label": "严格（逐步批准）",
+              "description": "严格（逐步批准）方式下，文生 3D、图生 3D、Gaussian Splat 生成、换贴图这几类步骤会先出批准卡，等用户在卡片上批准后才执行。2D 步骤、重拓扑、绑骨、动画按策略自动批准，不出卡。任何步骤只要会额外消耗积分（例如额外导出格式、Tripo 的附加费用），即使它本来自动批准，也要在批准卡上由用户批准。"
             }
           ]
         }
@@ -13604,9 +13689,11 @@
             "ui.workspace.canvas.ratio": "Ratio",
             "ui.workspace.approval.label": "Approval mode",
             "ui.workspace.approval.mode_auto": "Auto",
-            "ui.workspace.approval.mode_manual": "Manual",
+            "ui.workspace.approval.mode_budget": "Budget (production plan)",
+            "ui.workspace.approval.mode_manual": "Strict (approve each step)",
             "ui.workspace.approval.tooltip_auto": "Auto: all paid steps are approved automatically, and each step shows the credits it uses.",
-            "ui.workspace.approval.tooltip_manual": "Manual: text-to-3D, image-to-3D, Gaussian Splat, and retexture need your approval; other steps are approved automatically.",
+            "ui.workspace.approval.tooltip_budget": "Budget: approve a production plan and its total credit budget first; planned steps then run continuously. A step outside the plan, over the budget, or charging again still needs your approval.",
+            "ui.workspace.approval.tooltip_manual": "Strict (approve each step): text-to-3D, image-to-3D, Gaussian Splat, and retexture need your approval; other steps are approved automatically.",
             "ui.workspace.approval.step_credits": "This step uses {credits} credits",
             "ui.workspace.approval.step_credits_one": "This step uses {credits} credit",
             "ui.workspace.approval.session_credits": "About {credits} credits this session (estimate; failed tasks that were not charged are not counted)",

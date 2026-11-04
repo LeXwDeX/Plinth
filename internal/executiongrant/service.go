@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
+	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/harness"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
@@ -54,6 +55,10 @@ type PreparedSnapshot struct {
 	// incurs some is the person's to approve in manual mode, whatever its
 	// capability.
 	ExtraCredits int `json:"extra_credits,omitempty"`
+	// EstimatedCredits is the server's quote for this frozen input (#103
+	// budget). It is part of the input hash; zero on records written before
+	// the field existed.
+	EstimatedCredits int `json:"estimated_credits,omitempty"`
 }
 
 type PreparedReader interface {
@@ -72,6 +77,10 @@ type PrepareCommand struct {
 	OperationID       string
 	PlanStepID        string
 	TriggerTurnID     string
+	// BudgetEligible marks a step the Agent started that may be approved by an
+	// active production plan instead of a per-step human decision (#103). It
+	// is stored with the grant; browser-started steps are never eligible.
+	BudgetEligible bool
 }
 
 // SessionModeReader returns the owner's approval mode for one of its sessions.
@@ -86,6 +95,9 @@ type Service struct {
 	Prepared PreparedReader
 	Policy   approvalpolicy.Policy
 	Modes    SessionModeReader
+	// Budgets stores production plans and reservations (#103). Without it the
+	// budget mode behaves like manual: every Agent step waits for a person.
+	Budgets ProductionBudgetStore
 	// PendingTTL is how long an Agent approval stays approvable (Schema
 	// chat.pending_approvals.ttl_seconds). Zero means it never expires.
 	PendingTTL time.Duration
@@ -151,6 +163,16 @@ func (s Service) Prepare(ctx context.Context, cmd PrepareCommand) (Grant, error)
 		IdempotencyKey: cmd.IdempotencyKey, OperationID: cmd.OperationID,
 		PlanStepID: cmd.PlanStepID, Harness: cmd.Harness,
 	}
+	if cmd.BudgetEligible {
+		// Budget eligibility is declared by the server-side caller: an Agent
+		// step of a chat turn, or a step of an Agent-created processing plan.
+		// A browser-started step never sets it.
+		store, ok := s.Grants.(BudgetGrantStore)
+		if !ok {
+			return Grant{}, ErrInvalid
+		}
+		return store.PreparePendingWithBudget(ctx, identity, cmd.Source, cmd.TriggerTurnID, true)
+	}
 	return s.Grants.PreparePending(ctx, identity, cmd.Source, cmd.TriggerTurnID)
 }
 
@@ -181,34 +203,65 @@ func (s Service) Decide(ctx context.Context, principal Principal, requestID stri
 // and ErrHumanRequired is returned. A repeated call for a grant already
 // approved by the same policy actor returns it unchanged.
 func (s Service) ApproveByPolicy(ctx context.Context, ownerID, requestID, mode string) (Grant, error) {
+	result, err := s.ApproveByPolicyDecision(ctx, ownerID, requestID, mode)
+	return result.Grant, err
+}
+
+// ApproveByPolicyDecision is ApproveByPolicy with the budget context the
+// Agent's tool result reports (#103): the outcome, why a step was left to a
+// person, and the session plan summary that was read.
+func (s Service) ApproveByPolicyDecision(ctx context.Context, ownerID, requestID, mode string) (PolicyResult, error) {
 	if s.Grants == nil || s.Prepared == nil || ownerID == "" || requestID == "" {
-		return Grant{}, ErrInvalid
+		return PolicyResult{Grant: Grant{}, Outcome: PolicyOutcomeNone}, ErrInvalid
 	}
-	actor := PolicyActorPrefix + s.Policy.NormalizeMode(mode)
+	normalized := s.Policy.NormalizeMode(mode)
+	actor := PolicyActorPrefix + normalized
 	grant, err := s.Grants.GetExecutionGrant(ctx, ownerID, requestID)
 	if err != nil {
-		return Grant{}, err
+		return PolicyResult{Grant: Grant{}, Outcome: PolicyOutcomeNone}, err
 	}
 	if grant.OwnerID != ownerID || (grant.Source != HumanBrowser && grant.Source != AgentPending) {
-		return Grant{}, ErrConflict
+		return PolicyResult{Grant: Grant{}, Outcome: PolicyOutcomeNone}, ErrConflict
 	}
 	if grant.Status != Pending {
-		if grant.DecidedBy == actor && (grant.Status == Approved || grant.Status == Claimed || grant.Status == Bound) {
-			return grant, nil
+		if (grant.DecidedBy == actor || grant.ApprovedByBudget()) &&
+			(grant.Status == Approved || grant.Status == Claimed || grant.Status == Bound) {
+			return PolicyResult{Grant: grant, Outcome: PolicyOutcomeApproved}, nil
 		}
-		return Grant{}, ErrState
+		return PolicyResult{Grant: grant, Outcome: PolicyOutcomeNone}, ErrState
 	}
 	snapshot, err := s.Prepared.GetExecutionPreparedSnapshot(ctx, ownerID, grant.PreparedInputID)
 	if err != nil {
-		return Grant{}, err
+		return PolicyResult{Grant: grant, Outcome: PolicyOutcomeNone}, err
 	}
 	if snapshot.ID != grant.PreparedInputID || snapshot.OwnerID != ownerID ||
 		snapshot.SessionID != grant.SessionID || snapshot.OfferingID != grant.OfferingID ||
 		snapshot.OfferingRevision != grant.OfferingRevision || snapshot.InputHash != grant.PreparedInputHash {
-		return Grant{}, ErrConflict
+		return PolicyResult{Grant: Grant{}, Outcome: PolicyOutcomeNone}, ErrConflict
+	}
+	// A budget-mode Agent step is decided against the approved plan before the
+	// per-capability rules. A browser-started step and a grant created before
+	// budget eligibility existed still follow manual's rules below.
+	noPlan := false
+	var planSummary *budget.Summary
+	if normalized == approvalpolicy.ModeBudget && grant.BudgetEligible {
+		result, handled, budgetErr := s.applyBudgetPolicy(ctx, grant, snapshot)
+		if budgetErr != nil {
+			return result, budgetErr
+		}
+		if handled {
+			if result.Outcome == PolicyOutcomeHuman {
+				return result, ErrHumanRequired
+			}
+			return result, nil
+		}
+		// No active plan: the step follows manual's rules. If those leave it to
+		// a person, the tool result says why the budget did not decide it.
+		noPlan = true
+		planSummary = result.Budget
 	}
 	if approvalpolicy.RequiresHuman(s.Policy, mode, snapshot.Capability) {
-		return Grant{}, ErrHumanRequired
+		return PolicyResult{Grant: grant, Outcome: PolicyOutcomeHuman, Reason: budgetReason(noPlan), Budget: planSummary}, ErrHumanRequired
 	}
 	// An Agent step that spends extra credits is the person's to approve in
 	// manual mode, even on a capability that is otherwise automatic: the
@@ -217,13 +270,17 @@ func (s Service) ApproveByPolicy(ctx context.Context, ownerID, requestID, mode s
 	if snapshot.NativeQuote != nil {
 		extra, err = snapshot.NativeQuote.HasExtra()
 		if err != nil {
-			return Grant{}, ErrConflict
+			return PolicyResult{Grant: Grant{}, Outcome: PolicyOutcomeNone}, ErrConflict
 		}
 	}
 	if grant.Source == AgentPending && approvalpolicy.RequiresHumanForExtraSpend(s.Policy, mode, extra) {
-		return Grant{}, ErrHumanRequired
+		return PolicyResult{Grant: grant, Outcome: PolicyOutcomeHuman, Reason: budgetReason(noPlan), Budget: planSummary}, ErrHumanRequired
 	}
-	return s.Grants.ApproveExecutionGrantByPolicy(ctx, ownerID, requestID, actor)
+	approved, err := s.Grants.ApproveExecutionGrantByPolicy(ctx, ownerID, requestID, actor)
+	if err != nil {
+		return PolicyResult{Grant: grant, Outcome: PolicyOutcomeNone}, err
+	}
+	return PolicyResult{Grant: approved, Outcome: PolicyOutcomeApproved}, nil
 }
 
 // ApplyPolicy looks up the session approval mode and approves the grant by
@@ -232,19 +289,37 @@ func (s Service) ApproveByPolicy(ctx context.Context, ownerID, requestID, mode s
 // returned unchanged without error. A failed mode lookup is an error: the
 // caller must not guess a mode.
 func (s Service) ApplyPolicy(ctx context.Context, grant Grant) (Grant, error) {
+	result, err := s.ApplyPolicyDecision(ctx, grant)
+	return result.Grant, err
+}
+
+// ApplyPolicyDecision is ApplyPolicy with the budget context of the decision
+// (#103). Budget reasons come back with a nil error when the grant was left
+// pending for a human; a real failure comes back with the error.
+func (s Service) ApplyPolicyDecision(ctx context.Context, grant Grant) (PolicyResult, error) {
 	if grant.Status != Pending || s.Modes == nil {
-		return grant, nil
+		return PolicyResult{Grant: grant, Outcome: PolicyOutcomeNone}, nil
 	}
 	mode, err := s.Modes.SessionApprovalMode(ctx, grant.OwnerID, grant.SessionID)
 	if err != nil {
-		return grant, err
+		return PolicyResult{Grant: grant, Outcome: PolicyOutcomeNone}, err
 	}
-	approved, err := s.ApproveByPolicy(ctx, grant.OwnerID, grant.RequestID, mode)
+	result, err := s.ApproveByPolicyDecision(ctx, grant.OwnerID, grant.RequestID, mode)
 	if err == nil {
-		return approved, nil
+		return result, nil
 	}
 	if errors.Is(err, ErrHumanRequired) {
-		return grant, nil
+		result.Grant = grant
+		return result, nil
 	}
-	return grant, err
+	return PolicyResult{Grant: grant, Outcome: PolicyOutcomeNone, Reason: result.Reason, Budget: result.Budget}, err
+}
+
+// budgetReason names the budget reason only when a budget-mode step without an
+// active plan was left to a person by manual's rules.
+func budgetReason(noPlan bool) string {
+	if noPlan {
+		return BudgetReasonNoPlan
+	}
+	return ""
 }

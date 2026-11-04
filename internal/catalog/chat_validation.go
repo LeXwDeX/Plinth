@@ -758,6 +758,7 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"get_processing_plan":     {"processing.read", "READ", []string{"model-3d"}},
 		"update_session_notes":    {"session.notes", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"update_production_brief": {"session.brief", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"propose_production_plan": {"plan.propose", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"ask_choice":              {"choice.ask", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"find_history_images":     {"history.images", "READ", []string{"image", "model-3d"}},
 		"recover_task_result":     {"task.refetch", "SESSION_WRITE", []string{"image", "model-3d"}},
@@ -868,7 +869,7 @@ func validateApprovalPolicy(policy ChatApprovalPolicySchema, capabilities []Capa
 	if len(policy.Modes) == 0 {
 		return errors.New("approval_policy.modes 不能为空")
 	}
-	known := map[string]bool{approvalModeAuto: true, approvalModeManual: true}
+	known := map[string]bool{approvalModeAuto: true, approvalModeManual: true, approvalModeBudget: true}
 	offered := make(map[string]bool, len(policy.Modes))
 	for _, mode := range policy.Modes {
 		if !known[mode] {
@@ -899,7 +900,66 @@ func validateApprovalPolicy(policy ChatApprovalPolicySchema, capabilities []Capa
 		}
 		seen[capability] = true
 	}
-	return validateApprovalPrompt(policy.Prompt, offered)
+	if err := validateApprovalPrompt(policy.Prompt, offered); err != nil {
+		return err
+	}
+	// Historical Catalogs that do not offer budget mode stay readable; a
+	// Catalog that offers it must declare a usable plan budget.
+	if offered[approvalModeBudget] {
+		return validateApprovalBudget(policy.Budget)
+	}
+	return nil
+}
+
+// validateApprovalBudget checks the production-plan bounds and texts (#103).
+// The state IDs are fixed by internal/budget; the labels and messages are the
+// product's words. A budget mode without a usable budget must not load.
+func validateApprovalBudget(budget ChatApprovalBudgetSchema) error {
+	if budget.MaxCredits <= 0 || budget.MaxSteps <= 0 ||
+		budget.MaxTitleCharacters <= 0 || budget.MaxPurposeCharacters <= 0 {
+		return errors.New("approval_policy.budget 的上限必须为正数")
+	}
+	if strings.TrimSpace(budget.ContextTemplate) == "" || strings.TrimSpace(budget.NoPlanState) == "" ||
+		strings.TrimSpace(budget.NoPlanText) == "" {
+		return errors.New("approval_policy.budget 的上下文文案不能为空")
+	}
+	for _, field := range []string{"{state}", "{limit}", "{spent}", "{reserved}", "{remaining}", "{plan}"} {
+		if !strings.Contains(budget.ContextTemplate, field) {
+			return fmt.Errorf("approval_policy.budget.context_template 缺少占位符 %s", field)
+		}
+	}
+	knownStates := map[string]bool{
+		"pending": true, "active": true, "exhausted": true, "closed": true, "denied": true,
+	}
+	seen := make(map[string]bool, len(budget.States))
+	for _, state := range budget.States {
+		if !knownStates[state.ID] || seen[state.ID] {
+			return fmt.Errorf("approval_policy.budget.states 含未知或重复的状态 %q", state.ID)
+		}
+		if strings.TrimSpace(state.Label) == "" {
+			return fmt.Errorf("approval_policy.budget.states[%s] 缺少 label", state.ID)
+		}
+		seen[state.ID] = true
+	}
+	for id := range knownStates {
+		if !seen[id] {
+			return fmt.Errorf("approval_policy.budget.states 缺少状态 %q", id)
+		}
+	}
+	for name, text := range map[string]string{
+		"approved": budget.Messages.Approved, "denied": budget.Messages.Denied,
+		"expired": budget.Messages.Expired, "exhausted": budget.Messages.Exhausted,
+	} {
+		if strings.TrimSpace(text) == "" {
+			return fmt.Errorf("approval_policy.budget.messages.%s 不能为空", name)
+		}
+	}
+	for _, field := range []string{"{title}", "{limit}", "{remaining}"} {
+		if !strings.Contains(budget.Messages.Approved, field) {
+			return fmt.Errorf("approval_policy.budget.messages.approved 缺少占位符 %s", field)
+		}
+	}
+	return nil
 }
 
 // validateApprovalPrompt checks the Agent-facing texts of the approval modes
@@ -938,6 +998,7 @@ func validateApprovalPrompt(prompt ChatApprovalPromptSchema, offered map[string]
 const (
 	approvalModeAuto   = "auto"
 	approvalModeManual = "manual"
+	approvalModeBudget = "budget"
 )
 
 // validateChatToolProcessing checks that a processing tool's argument names

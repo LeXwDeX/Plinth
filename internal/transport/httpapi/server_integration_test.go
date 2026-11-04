@@ -1613,7 +1613,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		grantRepository = &hookedGrantRepository{Repository: repository, state: state.(*fixtureExecutionState)}
 	}
 	executionGrants := &executiongrant.Service{Grants: grantRepository, Prepared: repository,
-		Policy: approvalPolicy, Modes: chatService,
+		Budgets: repository, Policy: approvalPolicy, Modes: chatService,
 		PendingTTL: time.Duration(applicationSchema.Chat.PendingApprovals.TTLSeconds) * time.Second}
 	approvalTexts, err := catalog.NewTextLocalizer(applicationSchema)
 	if err != nil {

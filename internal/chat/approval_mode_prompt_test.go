@@ -8,8 +8,11 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/agentscope"
+	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
+	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
 // sessionLookupRepository fails the session read of the approval mode on
@@ -31,20 +34,46 @@ func (repository *sessionLookupRepository) Session(
 }
 
 // Texts of the shipped Schema (application.chat.approval_policy.prompt) that
-// tell the two modes apart.
+// tell the three modes apart.
 const (
-	manualModeLabel   = "批准方式是「手工」"
-	manualModeText    = "手工方式下，文生 3D、图生 3D、Gaussian Splat 生成、换贴图这几类步骤会先出批准卡"
+	manualModeLabel   = "批准方式是「严格（逐步批准）」"
+	manualModeText    = "严格（逐步批准）方式下，文生 3D、图生 3D、Gaussian Splat 生成、换贴图这几类步骤会先出批准卡"
 	autoModeLabel     = "批准方式是「自动」"
 	autoModeText      = "自动方式下，所有付费步骤都由系统按会话批准方式自动批准，不出批准卡"
+	budgetModeLabel   = "批准方式是「预算（制作计划）」"
+	budgetModeText    = "预算方式下，Agent 先用 propose_production_plan 提交一份制作计划和总积分预算"
+	budgetBlockHead   = "【制作预算】"
+	noPlanStateText   = "尚未提交计划"
 	approvalBlockHead = "【批准方式】"
 )
+
+// promptBudgetStore gives the Agent's budget context one frozen plan summary.
+type promptBudgetStore struct {
+	summary budget.Summary
+	found   bool
+}
+
+func (store promptBudgetStore) CreateProductionPlan(context.Context, string, string, string, string, string,
+	budget.Plan, int) (budget.ProductionBudget, error) {
+	return budget.ProductionBudget{}, errors.New("unused")
+}
+
+func (store promptBudgetStore) BudgetSummary(context.Context, string, string) (budget.Summary, bool, error) {
+	return store.summary, store.found, nil
+}
+
+func (store promptBudgetStore) PendingBudgets(context.Context, string, string) ([]budget.ProductionBudget, error) {
+	return nil, nil
+}
 
 type approvalPromptCase struct {
 	// mode is written to the session as stored ("" keeps the new-session
 	// default); it may be a value the Schema does not offer.
 	mode  string
 	scope string
+	// budget is the plan summary the Agent's context reads; nil wires no plan
+	// store, so a budget session reads the Schema's no-plan state.
+	budget *budget.Summary
 	// failLookup makes the session read fail from the turn on.
 	failLookup bool
 }
@@ -67,7 +96,19 @@ func approvalPromptSystem(t *testing.T, c approvalPromptCase) string {
 	repository := &sessionLookupRepository{memoryChatRepository: newMemoryChatRepository()}
 	service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) {
 		config.AgentScope = agentscope.FromSchema(schema.AgentScope)
+		// A new session takes its default from the same shipped policy the
+		// Orchestrator reads its texts from.
+		config.ApprovalPolicy = approvalpolicy.New(shipped.ApprovalPolicy.DefaultMode,
+			shipped.ApprovalPolicy.Modes, []string{"text-to-3d"},
+			[]string{"text-to-3d", "text-to-image"})
 	})
+	if c.budget != nil {
+		service.SetProductionPlans(chat.ProductionPlanPolicy{
+			Budget:    schema.ApprovalPolicy.Budget,
+			Offerings: func() []generation.Offering { return nil },
+			Store:     promptBudgetStore{summary: *c.budget, found: true},
+		})
+	}
 	agent := &scriptedAgent{responses: []agents.Completion{{Content: "ok"}}}
 	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
 		Service: service, Schema: schema, Model: "m", Agent: agent, Tools: &scopeToolExecutor{},
@@ -114,12 +155,16 @@ func TestAgentSystemContextCarriesTheSessionApprovalMode(t *testing.T) {
 		session          approvalPromptCase
 		want, wantAbsent []string
 	}{
-		"manual session":                  {approvalPromptCase{mode: "manual"}, []string{manualModeLabel, manualModeText}, []string{autoModeLabel, autoModeText}},
-		"auto session":                    {approvalPromptCase{mode: "auto"}, []string{autoModeLabel, autoModeText}, []string{manualModeLabel, manualModeText}},
-		"new session defaults to manual":  {approvalPromptCase{}, []string{manualModeLabel, manualModeText}, []string{autoModeLabel, autoModeText}},
-		"a stored unknown mode is manual": {approvalPromptCase{mode: "yolo"}, []string{manualModeLabel, manualModeText}, []string{autoModeLabel, autoModeText}},
+		"manual session": {approvalPromptCase{mode: "manual"}, []string{manualModeLabel, manualModeText},
+			[]string{autoModeLabel, autoModeText, budgetModeLabel, budgetModeText}},
+		"auto session": {approvalPromptCase{mode: "auto"}, []string{autoModeLabel, autoModeText},
+			[]string{manualModeLabel, manualModeText, budgetModeLabel, budgetModeText}},
+		"new session defaults to budget": {approvalPromptCase{}, []string{budgetModeLabel, budgetModeText, budgetBlockHead, noPlanStateText},
+			[]string{autoModeLabel, autoModeText, manualModeLabel, manualModeText}},
+		"a stored unknown mode is manual": {approvalPromptCase{mode: "yolo"}, []string{manualModeLabel, manualModeText},
+			[]string{autoModeLabel, autoModeText, budgetModeLabel, budgetModeText}},
 		"the Agent scope does not change it": {approvalPromptCase{mode: "auto", scope: "2d"},
-			[]string{autoModeLabel, autoModeText}, []string{manualModeLabel, manualModeText}},
+			[]string{autoModeLabel, autoModeText}, []string{manualModeLabel, manualModeText, budgetModeLabel, budgetModeText}},
 	} {
 		system := approvalPromptSystem(t, testCase.session)
 		for _, want := range testCase.want {
@@ -151,6 +196,33 @@ func TestApprovalModePromptKeepsTheAgentOutOfTheModeAndFollowsTheScope(t *testin
 	}
 	if strings.Count(system, approvalBlockHead) != 1 {
 		t.Errorf("the approval block appears %d times", strings.Count(system, approvalBlockHead))
+	}
+}
+
+// A person who approved a plan is told its limits and what is left, so the
+// Agent runs inside the approved budget instead of opening another card or
+// proposing the same plan again (#103).
+func TestBudgetModePromptCarriesTheActivePlanAndWhatIsLeft(t *testing.T) {
+	summary := budget.Summary{
+		ID: "pb_1", State: budget.StateActive, LimitCredits: 200,
+		SpentCredits: 120, ReservedCredits: 30, RemainingCredits: 50,
+		Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
+			{Capability: "text-to-3d", Purpose: "主体模型", EstimatedCredits: 80},
+		}},
+	}
+	system := approvalPromptSystem(t, approvalPromptCase{mode: "budget", budget: &summary})
+	for _, want := range []string{
+		budgetBlockHead, budgetModeLabel,
+		"当前制作计划：执行中",
+		"总预算 200 积分", "已扣费 120 积分", "执行中预留 30 积分", "剩余 50 积分",
+		"计划：骑士；text-to-3d：主体模型，约 80 积分",
+	} {
+		if !strings.Contains(system, want) {
+			t.Errorf("the budget context omits %q", want)
+		}
+	}
+	if strings.Contains(system, noPlanStateText) || strings.Contains(system, "{limit}") {
+		t.Errorf("an approved plan still reads as unplanned: %q", system)
 	}
 }
 

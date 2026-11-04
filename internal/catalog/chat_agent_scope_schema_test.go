@@ -35,6 +35,7 @@ var shippedToolScopes = map[string]string{
 	"build_creative_lab_item":    "3d",
 	"update_session_notes":       "utility",
 	"update_production_brief":    "utility",
+	"propose_production_plan":    "utility",
 	"ask_choice":                 "utility",
 	"find_history_images":        "utility",
 	"recover_task_result":        "utility",

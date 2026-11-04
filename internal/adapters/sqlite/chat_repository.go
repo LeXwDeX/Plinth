@@ -388,7 +388,8 @@ func (r *Repository) SetSessionPick(ctx context.Context, ownerID, sessionID stri
 }
 
 func sessionApprovalModeOrManual(mode string) string {
-	if mode == "auto" {
+	switch mode {
+	case "auto", "budget":
 		return mode
 	}
 	return "manual"
@@ -458,7 +459,7 @@ func (r *Repository) SetSessionApprovalMode(
 	sessionID string,
 	mode string,
 ) (chat.Session, bool, error) {
-	if mode != "auto" && mode != "manual" {
+	if mode != "auto" && mode != "manual" && mode != "budget" {
 		return chat.Session{}, false, chat.ErrInvalidApprovalMode
 	}
 	result, err := r.db.ExecContext(ctx, `

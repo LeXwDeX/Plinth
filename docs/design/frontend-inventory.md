@@ -385,7 +385,7 @@
 | 操作 | Schema key | 中文文案 | 行为 | 文件:行 |
 |---|---|---|---|---|
 | 标签 | `ui.workspace.approval.label` | 批准方式 | 标签。 | approval-mode-switch.tsx；agent-dialog 225 |
-| 选项 | Schema `chat.approval_policy.modes`（auto、manual） | 来自 Schema | 单选组，原生按钮实现。默认 manual。 | approval-mode-switch.tsx:14-22、61-86 |
+| 选项 | Schema `chat.approval_policy.modes`（auto、budget、manual） | 来自 Schema | 单选组，原生按钮实现。默认 budget（严格逐步批准与自动方式仍可选）。 | approval-mode-switch.tsx:14-22、61-86 |
 | 会话累计积分 | `ui.workspace.approval.session_credits` | 本会话累计约 {credits} 积分（估算） | 显示估算，`data-testid="approval-session-credits"`。 | approval-mode-switch.tsx:26、87-89 |
 | 本步积分 | `ui.workspace.approval.step_credits` | 本步消耗 {credits} 积分 | 显示单步费用。 | approval-mode-switch.tsx:31 |
 | 自动批准说明 | `ui.workspace.approval.auto_approved_note` | 已按批准方式自动批准 | 消息中的提示。 | chat-message.tsx:599 |

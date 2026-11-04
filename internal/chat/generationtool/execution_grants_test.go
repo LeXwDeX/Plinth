@@ -54,6 +54,24 @@ func (g *grantGateway) extraCreditsOf(id generation.OfferingID, input json.RawMe
 	return 0
 }
 
+// creditsOf is the fake kernel's server quote for a frozen input, as the real
+// kernel records it (#103): the Offering's base price and the extra credits
+// this exact input incurs. Budget reservations read this value.
+func (g *grantGateway) creditsOf(id generation.OfferingID, input json.RawMessage) int {
+	if g.offering != nil {
+		if offering, found := g.offering(id); found {
+			return offering.EstimateTotalCredits(input)
+		}
+		return 0
+	}
+	for _, offering := range g.offerings {
+		if offering.ID == id {
+			return offering.EstimateTotalCredits(input)
+		}
+	}
+	return 0
+}
+
 type persistedGrantGateway struct {
 	*grantGateway
 	getErrors int
@@ -105,7 +123,8 @@ func (g *grantGateway) PrepareInput(ctx context.Context, cmd generation.PrepareI
 		OwnerID: cmd.OwnerID, SessionID: cmd.SessionID, Capability: cmd.Capability,
 		OfferingID: cmd.OfferingID, OfferingRevision: "rev-a", SchemaVersion: "1",
 		NormalizedInput: cmd.Input, ExtraCredits: g.extraCreditsOf(cmd.OfferingID, cmd.Input),
-		InputHash: fmt.Sprintf("frozen-%d", count), CreatedAt: time.Now().UTC()}
+		EstimatedCredits: g.creditsOf(cmd.OfferingID, cmd.Input),
+		InputHash:        fmt.Sprintf("frozen-%d", count), CreatedAt: time.Now().UTC()}
 	if err := g.repo.CreatePreparedInput(ctx, p); err != nil {
 		return p, err
 	}

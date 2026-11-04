@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
@@ -728,6 +729,20 @@ type stepInfo struct {
 	// artboard or which nearest legal size was used (#272); else that it
 	// followed the one reference picture (#296).
 	SizeNote string
+	// Budget is the production plan that authorized the step (#103); nil when
+	// no plan did (another mode, or a browser-started step).
+	Budget *budget.Summary
+}
+
+// budgetResult is the budget part of a paid tool result: the plan's identity
+// and what it still holds after this step. The Agent uses it to decide whether
+// the next planned step fits, without guessing from earlier numbers.
+func budgetResult(summary budget.Summary) map[string]any {
+	return map[string]any{
+		"id":        summary.ID,
+		"remaining": summary.RemainingCredits,
+		"reserved":  summary.ReservedCredits,
+	}
 }
 
 const (
@@ -832,6 +847,9 @@ func (executor *Executor) observeBoundTask(
 			// read failure only leaves the source unknown, as before.
 			if grant, err := executor.grants.Grants.GetExecutionGrant(ctx, op.OwnerID, op.GrantRequestID); err == nil {
 				info.Approval = approvalSource(grant)
+			}
+			if summary, found, err := executor.grants.BudgetForGrant(ctx, op.OwnerID, op.GrantRequestID); err == nil && found {
+				info.Budget = &summary
 			}
 		}
 	}
@@ -1643,6 +1661,9 @@ func (executor *Executor) success(
 	}
 	if key := tool.ResultFields.ModelNote; key != "" && info.ModelNote != "" {
 		result[key] = info.ModelNote
+	}
+	if info.Budget != nil {
+		result["budget"] = budgetResult(*info.Budget)
 	}
 	content, _ := json.Marshal(result)
 	return chat.ToolResult{

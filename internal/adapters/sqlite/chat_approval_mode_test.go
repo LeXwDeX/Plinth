@@ -79,14 +79,19 @@ func TestSetSessionApprovalModeIsOwnerScopedAndKeepsOrdering(t *testing.T) {
 	if mine, _, _ := r.Session(ctx, "owner-a", "s1"); mine.ApprovalMode != "auto" {
 		t.Fatalf("invalid mode wrote: %+v", mine)
 	}
+	// Budget is a stored mode of its own (#103), not a manual alias.
+	if session, found, err := r.SetSessionApprovalMode(ctx, "owner-a", "s1", "budget"); err != nil || !found || session.ApprovalMode != "budget" {
+		t.Fatalf("set budget = %+v found=%v err=%v", session, found, err)
+	}
 }
 
 func TestCreateSessionStoresModeAndUnknownBecomesManual(t *testing.T) {
 	r := openApprovalRepo(t)
 	createApprovalSession(t, r, "s-auto", "owner-a", chat.Session{ApprovalMode: "auto"})
+	createApprovalSession(t, r, "s-budget", "owner-a", chat.Session{ApprovalMode: "budget"})
 	createApprovalSession(t, r, "s-odd", "owner-a", chat.Session{ApprovalMode: "whatever"})
 	createApprovalSession(t, r, "s-empty", "owner-a", chat.Session{})
-	for id, want := range map[string]string{"s-auto": "auto", "s-odd": "manual", "s-empty": "manual"} {
+	for id, want := range map[string]string{"s-auto": "auto", "s-budget": "budget", "s-odd": "manual", "s-empty": "manual"} {
 		got, found, err := r.Session(context.Background(), "owner-a", id)
 		if err != nil || !found || got.ApprovalMode != want {
 			t.Fatalf("%s = %+v found=%v err=%v; want %s", id, got, found, err, want)

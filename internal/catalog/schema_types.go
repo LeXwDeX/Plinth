@@ -2756,16 +2756,63 @@ type ChatPendingApprovalMessages struct {
 }
 
 // ChatApprovalPolicySchema is application.chat.approval_policy. Modes are
-// "auto" and "manual". Capabilities listed here need a human decision in
-// manual mode; every other capability is approved by policy.
+// "auto", "manual" and "budget". Capabilities listed here need a human
+// decision in manual mode; every other capability is approved by policy.
+// Budget mode approves an Agent step inside the plan and total credit budget a
+// person approved (#103); the manual rules still decide a step no active plan
+// covers and every step the browser started.
 type ChatApprovalPolicySchema struct {
 	DefaultMode                string                      `json:"default_mode"`
 	Modes                      []string                    `json:"modes"`
 	ManualApprovalCapabilities []schemacontract.Capability `json:"manual_approval_capabilities"`
+	// Budget is the production-plan budget of budget mode. Server-only.
+	Budget ChatApprovalBudgetSchema `json:"budget"`
 	// Prompt is what the Agent is told about the session's approval mode
 	// (#7). It is server-only: the browser reads the three fields above and
 	// the mode names from content messages (ui.workspace.approval.*).
 	Prompt ChatApprovalPromptSchema `json:"prompt"`
+}
+
+// ChatApprovalBudgetSchema is application.chat.approval_policy.budget. It
+// bounds a production plan the Agent proposes and the total credits a person
+// approves; the server re-estimates every step from the Catalog instead of
+// trusting the Agent's numbers.
+type ChatApprovalBudgetSchema struct {
+	MaxCredits           int `json:"max_credits"`
+	MaxSteps             int `json:"max_steps"`
+	MaxTitleCharacters   int `json:"max_title_characters"`
+	MaxPurposeCharacters int `json:"max_purpose_characters"`
+	// ContextTemplate is appended to the Agent's system context in budget mode.
+	// Fields: {state} (the state's label), {limit}, {spent}, {reserved},
+	// {remaining}, {plan}.
+	ContextTemplate string `json:"context_template"`
+	// NoPlanState and NoPlanText render {state} and {plan} before the session
+	// has a plan at all.
+	NoPlanState string `json:"no_plan_state"`
+	NoPlanText  string `json:"no_plan_text"`
+	// States labels the plan states the runtime may report. The IDs are fixed
+	// by internal/budget.
+	States []ChatApprovalBudgetState `json:"states"`
+	// Messages are the session messages posted when a plan card is decided or
+	// expires. Fields: {title}, {limit}, {remaining}.
+	Messages ChatApprovalBudgetMessages `json:"messages"`
+}
+
+// ChatApprovalBudgetState is the person-facing label of one plan state.
+type ChatApprovalBudgetState struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// ChatApprovalBudgetMessages are the texts posted to the session for a plan
+// decision. None of them posts an approval card: a plan decision is read from
+// the pending-approvals projection.
+type ChatApprovalBudgetMessages struct {
+	Approved string `json:"approved"`
+	Denied   string `json:"denied"`
+	Expired  string `json:"expired"`
+	// Exhausted is posted once when the approved plan spends its last credit.
+	Exhausted string `json:"exhausted"`
 }
 
 // PublicChatApprovalPolicy is the browser's view of
@@ -2977,6 +3024,10 @@ type ChatAPIResponseFields struct {
 	Notes string `json:"notes"`
 	// Brief is the member carrying the session production brief (#103).
 	Brief string `json:"brief,omitempty"`
+	// Budget is the member carrying the session's current production budget:
+	// limit, spent, reserved, remaining, state and the approved plan (#103).
+	// Empty when the session has no plan or the Catalog predates budgets.
+	Budget string `json:"budget,omitempty"`
 	// ExplicitModel3D is the member carrying the 3D model the person
 	// explicitly picked in the session (#103); empty leaves it out.
 	ExplicitModel3D string `json:"explicit_model_3d,omitempty"`
@@ -4229,7 +4280,10 @@ type CoreHTTPRoutesSchema struct {
 	// ChatSessionModel3D writes the 3D model the person explicitly picked in
 	// the session (#103); it is a lock for the generation tools and submits
 	// nothing. Empty (historical Catalogs) disables the write.
-	ChatSessionModel3D    string `json:"chat_session_model3d,omitempty"`
+	ChatSessionModel3D string `json:"chat_session_model3d,omitempty"`
+	// ChatSessionBudget decides one production plan card of the session (#103):
+	// PUT {sessionID, budgetID} with {"decision": "approve"|"deny"}.
+	ChatSessionBudget     string `json:"chat_session_budget,omitempty"`
 	ChatSessionPick       string `json:"chat_session_pick"`
 	ChatSessionChoices    string `json:"chat_session_choices"`
 	ChatSessionAgentScope string `json:"chat_session_agent_scope"`

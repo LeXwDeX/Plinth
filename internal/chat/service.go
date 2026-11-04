@@ -263,6 +263,10 @@ type Service struct {
 	choices     ChoiceStore
 	choiceLimit int
 
+	// productionPlans is the budget-mode proposal writer and summary reader
+	// (#103); nil leaves the tool and the budget context unavailable.
+	productionPlans *ProductionPlanPolicy
+
 	// models and contextStore serve the thinking level, the context usage
 	// and the compactions of sessions (#322).
 	models              ModelPolicy

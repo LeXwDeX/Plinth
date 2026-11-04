@@ -230,6 +230,7 @@ func (executor *Executor) resumeAgentOperation(
 	// Recover it before consulting mutable harness options or current history.
 	// No second submission is possible on this branch.
 	var grant executiongrant.Grant
+	var decision executiongrant.PolicyResult
 	var err error
 	if op.GrantRequestID != "" {
 		grant, err = executor.grants.Grants.GetExecutionGrant(ctx, op.OwnerID, op.GrantRequestID)
@@ -243,7 +244,7 @@ func (executor *Executor) resumeAgentOperation(
 			// The turn stopped waiting for this grant. Its decision and result
 			// belong to the pending-approval service now; the turn must not
 			// submit, observe or report the task a second time.
-			return chat.ToolResult{AgentContent: executor.awaitingApproval(ctx, command, op), NoSubmission: true}, nil
+			return chat.ToolResult{AgentContent: executor.awaitingApproval(ctx, command, op, executiongrant.PolicyResult{}), NoSubmission: true}, nil
 		}
 		if grant.Status == executiongrant.Bound {
 			if grant.TaskID == "" {
@@ -286,6 +287,9 @@ func (executor *Executor) resumeAgentOperation(
 			PreparedInputID: string(op.PreparedInputID), PreparedInputHash: op.PreparedInputHash,
 			IdempotencyKey: op.IdempotencyKey, OperationID: op.OperationID,
 			TriggerTurnID: op.AssistantMessageID, Harness: op.Harness,
+			// This is an Agent step: an approved production plan of the session
+			// may authorize it instead of a card per step (#103).
+			BudgetEligible: true,
 		})
 		if err != nil {
 			return chat.ToolResult{NoSubmission: true}, err
@@ -305,10 +309,11 @@ func (executor *Executor) resumeAgentOperation(
 		// already shown. A step that repeats a charged-but-unstored attempt is
 		// never the policy's to approve (#294).
 		if op.RechargeTaskID == "" {
-			grant, err = executor.grants.ApplyPolicy(ctx, grant)
+			decision, err = executor.grants.ApplyPolicyDecision(ctx, grant)
 			if err != nil {
 				return chat.ToolResult{NoSubmission: true}, err
 			}
+			grant = decision.Grant
 		}
 		if grant.Status == executiongrant.Pending {
 			if err := executor.operations.MarkAgentPolicyEvaluated(ctx, op); err != nil {
@@ -328,7 +333,7 @@ func (executor *Executor) resumeAgentOperation(
 			return chat.ToolResult{NoSubmission: true}, err
 		}
 		if detached {
-			return chat.ToolResult{AgentContent: executor.awaitingApproval(ctx, command, op), NoSubmission: true}, nil
+			return chat.ToolResult{AgentContent: executor.awaitingApproval(ctx, command, op, decision), NoSubmission: true}, nil
 		}
 		// The detach is refused after a Stop of this turn (the card must not be
 		// handed to a person while the turn that owns it is being cancelled; the
@@ -406,6 +411,9 @@ func (executor *Executor) resumeAgentOperation(
 	}
 	info := taskStep(task, approvalSource(grant))
 	info.ReferenceNote = executor.operationReferenceNote(command, op, prepared, task.Offering)
+	if summary, found, err := executor.grants.BudgetForGrant(ctx, op.OwnerID, op.GrantRequestID); err == nil && found {
+		info.Budget = &summary
+	}
 	return executor.wait(ctx, command, task.Offering, task.ID, observe, info)
 }
 

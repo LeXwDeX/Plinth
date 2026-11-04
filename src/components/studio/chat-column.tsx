@@ -33,6 +33,7 @@ import { useGenerationParams } from '@/hooks/use-generation-params';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { stageDomainOf } from '@/hooks/use-stage-domain';
 import { useSessionAgentConsent } from '@/hooks/use-session-agent-consent';
+import { defaultApprovalMode } from '@/lib/chat/approval-modes';
 import { useSessionApproval } from '@/hooks/use-session-approval';
 import { useSessionNotes } from '@/hooks/use-session-notes';
 import { useSessionPendingApprovals } from '@/hooks/use-session-pending-approvals';
@@ -269,7 +270,7 @@ export function ChatColumn() {
   const approval = useSessionApproval(
     chatClient,
     activeSessionId,
-    schema.chat.approval_policy.default_mode === 'auto' ? 'auto' : 'manual',
+    defaultApprovalMode(schema),
   );
   const refreshApproval = approval.refresh;
   const sessionNotes = useSessionNotes(chatClient, activeSessionId);
