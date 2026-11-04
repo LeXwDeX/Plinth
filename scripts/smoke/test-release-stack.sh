@@ -87,9 +87,10 @@ cat >"$WORK/expected-default" <<EOF
 ssh $DEFAULT_HOST mv $DEFAULT_ROOT/app $DEFAULT_ROOT/app.prev-\$(date -u +%Y%m%dT%H%M%SZ) 2>/dev/null || true; mkdir -p $DEFAULT_ROOT/app
 ssh $DEFAULT_HOST tar -x -C $DEFAULT_ROOT/app
 $ARCHIVE_SHA
-scp -q $SCRIPTS/release-server-steps.sh $DEFAULT_HOST:/tmp/art-ai-release-steps.sh
-scp -q $SCRIPTS/retain-art-ai-images.py $DEFAULT_HOST:/tmp/art-ai-retain-images.py
-ssh $DEFAULT_HOST RETENTION_SCRIPT=/tmp/art-ai-retain-images.py bash /tmp/art-ai-release-steps.sh '$SHORT-20261020T010203Z' '$SECOND' '$DEFAULT_ROOT'
+ssh $DEFAULT_HOST mkdir -p $DEFAULT_ROOT/tmp && chmod 0711 $DEFAULT_ROOT/tmp
+scp -q $SCRIPTS/release-server-steps.sh $DEFAULT_HOST:$DEFAULT_ROOT/tmp/art-ai-release-steps.sh
+scp -q $SCRIPTS/retain-art-ai-images.py $DEFAULT_HOST:$DEFAULT_ROOT/tmp/art-ai-retain-images.py
+ssh $DEFAULT_HOST RETENTION_SCRIPT=$DEFAULT_ROOT/tmp/art-ai-retain-images.py bash $DEFAULT_ROOT/tmp/art-ai-release-steps.sh '$SHORT-20261020T010203Z' '$SECOND' '$DEFAULT_ROOT'
 EOF
 diff -u "$WORK/expected-default" "$MOCK_TRACE" || fail "default release commands changed"
 grep -qx "\[release\] main=$SECOND tag=$SHORT-20261020T010203Z" "$WORK/default.log" || fail "default banner changed"
@@ -168,9 +169,10 @@ ssh $DEFAULT_HOST cat $DEFAULT_ROOT/releases/manifest.txt
 ssh root@formal.example.invalid mv /srv/formal/app /srv/formal/app.prev-\$(date -u +%Y%m%dT%H%M%SZ) 2>/dev/null || true; mkdir -p /srv/formal/app /srv/formal/releases
 scp -q archive:$ARCHIVE_SHA root@formal.example.invalid:/srv/formal/releases/source-$SHORT-20261020T010203Z.tar
 ssh root@formal.example.invalid tar -x -C /srv/formal/app -f /srv/formal/releases/source-$SHORT-20261020T010203Z.tar && rm -f /srv/formal/releases/source-$SHORT-20261020T010203Z.tar
-scp -q $SCRIPTS/release-server-steps.sh root@formal.example.invalid:/tmp/art-ai-release-steps.sh
-scp -q $SCRIPTS/retain-art-ai-images.py root@formal.example.invalid:/tmp/art-ai-retain-images.py
-ssh root@formal.example.invalid RELEASE_COMPOSE_PROJECT=formal-project RELEASE_SINGLE_STACK=1 RELEASE_IMAGE_KEEP=1 RELEASE_ALLOW_BOOTSTRAP=1 GO_WEB_BIND_IP=10.0.0.9 GO_WEB_HOST_PORT=13333 GO_PROD_DB_DIR=/srv/formal/production/data GO_LEGACY_INPUT_ASSETS_DIR=/srv/formal/production/legacy-assets RELEASE_EXTRA_COMPOSE_FILE=/srv/formal/production/compose.network.yml RELEASE_BUILD_NETWORK=host RELEASE_GOPROXY=https://proxy.example.invalid/go/ RELEASE_BUILD_ADD_HOSTS=npm.example.invalid:10.0.0.5,proxy.example.invalid:10.0.0.6 ART_AI_PROTECTED_PATHS=/srv/formal RETENTION_SCRIPT=/tmp/art-ai-retain-images.py bash /tmp/art-ai-release-steps.sh '$SHORT-20261020T010203Z' '$SECOND' '/srv/formal'
+ssh root@formal.example.invalid mkdir -p /srv/formal/tmp && chmod 0711 /srv/formal/tmp
+scp -q $SCRIPTS/release-server-steps.sh root@formal.example.invalid:/srv/formal/tmp/art-ai-release-steps.sh
+scp -q $SCRIPTS/retain-art-ai-images.py root@formal.example.invalid:/srv/formal/tmp/art-ai-retain-images.py
+ssh root@formal.example.invalid RELEASE_COMPOSE_PROJECT=formal-project RELEASE_SINGLE_STACK=1 RELEASE_IMAGE_KEEP=1 RELEASE_ALLOW_BOOTSTRAP=1 GO_WEB_BIND_IP=10.0.0.9 GO_WEB_HOST_PORT=13333 GO_PROD_DB_DIR=/srv/formal/production/data GO_LEGACY_INPUT_ASSETS_DIR=/srv/formal/production/legacy-assets RELEASE_EXTRA_COMPOSE_FILE=/srv/formal/production/compose.network.yml RELEASE_BUILD_NETWORK=host RELEASE_GOPROXY=https://proxy.example.invalid/go/ RELEASE_BUILD_ADD_HOSTS=npm.example.invalid:10.0.0.5,proxy.example.invalid:10.0.0.6 ART_AI_PROTECTED_PATHS=/srv/formal RETENTION_SCRIPT=/srv/formal/tmp/art-ai-retain-images.py bash /srv/formal/tmp/art-ai-release-steps.sh '$SHORT-20261020T010203Z' '$SECOND' '/srv/formal'
 ssh root@formal.example.invalid cd /srv/formal && ls -1d app.prev-[0-9]*T[0-9]*Z 2>/dev/null | sort | head -n -1 | xargs -r rm -rf --
 EOF
 diff -u "$WORK/expected" "$MOCK_TRACE" || fail "formal-test release commands differ"
