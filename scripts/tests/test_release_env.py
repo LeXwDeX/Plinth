@@ -162,13 +162,18 @@ class EnvironmentRulesTest(unittest.TestCase):
         words = release_env.release_variables(document["environments"]["dev-test"], None)["RELEASE_SERVER_ENV"].split()
         self.assertFalse([word for word in words if word.startswith("RELEASE_BACKUP_")])
 
-    def test_obsolete_npm_registry_is_refused_with_a_removal_hint(self):
-        # #257: builds use the public registry; a leftover field must not be
-        # silently ignored, or the local file would keep claiming a mirror.
+    def test_npm_registry_is_passed_to_the_build_and_must_be_one_url(self):
+        # Internal stacks may point the image build at their package cache; the
+        # repository default stays the public registry (#257).
         document = changed(lambda environments: environments["shared-a"].update(
             build={"npm_registry": "https://npm.internal.test/npm/"}))
-        with self.assertRaisesRegex(release_env.EnvironmentError_, "build.npm_registry was removed"):
-            load(document)
+        load(document)
+        words = release_env.release_variables(document["environments"]["shared-a"], None)["RELEASE_SERVER_ENV"].split()
+        self.assertIn("RELEASE_NPM_REGISTRY=https://npm.internal.test/npm/", words)
+        for bad in ("https://a.test/npm/,direct", "ftp://a.test/npm/", "https://a.test/npm/ x"):
+            document = changed(lambda environments, bad=bad: environments["shared-a"].update(build={"npm_registry": bad}))
+            with self.assertRaisesRegex(release_env.EnvironmentError_, "build.npm_registry"):
+                load(document)
 
     def test_build_options_keep_network_proxy_and_add_hosts(self):
         document = changed(lambda environments: environments["shared-a"].update(

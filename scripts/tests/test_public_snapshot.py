@@ -147,9 +147,9 @@ class PatternTests(unittest.TestCase):
             "plinth_candidate", "/srv/legacy/assets", "npm.internal.test", "proxy.internal.test", "10.9.8.6"}))
         self.assertEqual(snapshot.environment_literals(Path(directory) / "missing.json"), [])
 
-    def test_obsolete_npm_registry_address_stays_forbidden(self):
-        # release-env.py refuses this removed field (#257); scanning stays independent of
-        # release config, so a stale local file's address is still a forbidden literal.
+    def test_npm_registry_address_stays_forbidden(self):
+        # The npm package cache is an internal address from the local environment file, so it
+        # must never reach the public tree.
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "environments.json"
             path.write_text(json.dumps({"version": 1, "environments": {"dev-test": {

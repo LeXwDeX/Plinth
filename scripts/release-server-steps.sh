@@ -47,6 +47,7 @@
 #                            只用于本栈服务，隔离预检不使用它
 #   RELEASE_BUILD_NETWORK    docker build --network（例如构建容器需用宿主源地址访问内网 Go 代理或基础镜像源）
 #   RELEASE_GOPROXY          docker build 的 GOPROXY 构建参数（缺省用 Dockerfile 默认值）
+#   RELEASE_NPM_REGISTRY     docker build 的 NPM_REGISTRY 构建参数（缺省为公共 registry.npmjs.org）
 #   RELEASE_BUILD_ADD_HOSTS  docker build --add-host，逗号分隔的 主机名:地址（解析内网 Go 代理等构建依赖主机）
 #   ART_AI_PROTECTED_PATHS   本栈根与环境文件 protected_paths（冒号分隔）；发布本身不用，只记入
 #                            production/compose.env，供在该主机手工运行的备份/ETL/finalize 读取（#334）
@@ -263,6 +264,9 @@ fi
 if [ -n "${RELEASE_GOPROXY:-}" ]; then
   BUILD_OPTIONS+=(--build-arg GOPROXY="$RELEASE_GOPROXY")
 fi
+if [ -n "${RELEASE_NPM_REGISTRY:-}" ]; then
+  BUILD_OPTIONS+=(--build-arg NPM_REGISTRY="$RELEASE_NPM_REGISTRY")
+fi
 if [ -n "${RELEASE_BUILD_ADD_HOSTS:-}" ]; then
   IFS=, read -r -a BUILD_ADD_HOSTS <<<"$RELEASE_BUILD_ADD_HOSTS"
   for entry in "${BUILD_ADD_HOSTS[@]}"; do
@@ -412,8 +416,8 @@ elif ! release_capacity_check before-build; then
 fi
 
 echo "[server] build $TAG"
-# 构建的 --add-host 与 GOPROXY 来自环境文件的 build 设置（#248、#249）；npm 源固定为公共
-# registry（#257），不再有构建参数覆盖。
+# 构建的 --add-host、GOPROXY 与 NPM_REGISTRY 来自环境文件的 build 设置（#248、#249）；
+# 未设置时 npm 走公共 registry（#257）。
 # 测试/正式栈运行含历史迁移工具的内部镜像目标（#259）；Dockerfile 默认目标是自部署镜像。
 docker build ${BUILD_OPTIONS[@]+"${BUILD_OPTIONS[@]}"} \
   --target runtime-with-migration-tools \
@@ -455,7 +459,11 @@ for directory in "${GO_LEGACY_GENERATED_IMAGES_DIR:-}" "${GO_LEGACY_ASSET_CACHE_
 done
 
 echo "[server] preflight"
-GO_PROD_PROJECT="$COMPOSE_PROJECT" bash "$APP/scripts/cutover-go-production.sh" preflight \
+# 预检的临时目录放在发布根下，不在主机 /tmp 留文件（主机只允许项目目录内写入）。
+PREFLIGHT_TMP="$ROOT/tmp"
+mkdir -p "$PREFLIGHT_TMP"
+chmod 0711 "$PREFLIGHT_TMP"
+TMPDIR="$PREFLIGHT_TMP" GO_PROD_PROJECT="$COMPOSE_PROJECT" bash "$APP/scripts/cutover-go-production.sh" preflight \
   --env-file "$RUNTIME_ENV" \
   --image-tag "$TAG" --source-commit "$SHA" --no-build 2>&1 | tail -1
 

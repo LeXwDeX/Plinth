@@ -6,7 +6,8 @@ services:
       # 内部镜像目标：含历史迁移工具与 legacy 挂载点（#259）。
       target: runtime-with-migration-tools
       args:
-        # npm 源固定为公共 registry（#257）；Go 代理可由环境文件调整。
+        # 缺省走公共 npm registry 与 Go proxy（#257）；内部环境可用覆盖文件或环境变量指向包缓存。
+        NPM_REGISTRY: "${GO_NPM_REGISTRY:-https://registry.npmjs.org/}"
         GOPROXY: "${GO_GOPROXY:-https://proxy.golang.org,direct}"
         GO_IMAGE_TAG: "${GO_IMAGE_TAG:?GO_IMAGE_TAG is required}"
         GO_SOURCE_COMMIT: "${GO_SOURCE_COMMIT:?GO_SOURCE_COMMIT is required}"

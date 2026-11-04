@@ -31,7 +31,7 @@
 | `single_stack` | 单项目主机：`image_keep`（保留镜像数，含运行镜像）、`keep_source_snapshots`（保留的 `app.prev-*` 数）、`allow_bootstrap`（允许空栈首次启动） |
 | `layout` | Compose 主机路径与绑定地址（`GO_WEB_BIND_IP`、`GO_WEB_HOST_PORT`、`GO_PROD_*_DIR`、`GO_LEGACY_*_DIR`）；数据目录必须是 `<root>/production/<名称>`，未写时按此导出；legacy 目录没有缺省值，必须写明：单栈环境在 `<root>/production/` 下以 `legacy` 开头，共享主机（`dev-test`）可为发布根之外不含 `..` 的绝对路径 |
 | `extra_compose_file` | 追加在主 Compose 文件之后的服务器本地覆盖文件（`<root>/production/` 下，例如固定项目网络子网与容器地址）；只用于本栈服务，隔离预检不用它 |
-| `build` | `network`（`docker build --network`，例如构建容器须以宿主源地址访问内网镜像源时为 `host`）、`goproxy`（GOPROXY 构建参数）、`add_hosts`（`docker build --add-host` 的 `主机名:地址` 列表，用于解析内网 Go 代理等构建依赖主机；npm 固定走公共 registry）；npm 源固定为公共 `registry.npmjs.org`（#257），旧文件里的 `npm_registry` 会被拒绝，需删除 |
+| `build` | `network`（`docker build --network`，例如构建容器须以宿主源地址访问内网镜像源时为 `host`）、`goproxy`（GOPROXY 构建参数）、`npm_registry`（NPM_REGISTRY 构建参数，单个 http(s) 地址，指向内部包缓存）、`add_hosts`（`docker build --add-host` 的 `主机名:地址` 列表，用于解析内网 Go 代理等构建依赖主机；缺省 npm 源为公共 registry）；仓库缺省 npm 源为公共 `registry.npmjs.org`（#257：仓库不依赖内部源），内部环境只在本地环境文件里设 `npm_registry` |
 | `source_transfer` | `pipe`（缺省，`git archive` 经 SSH 管道解包）或 `scp`（本地生成 tar，scp 到 `<root>/releases/` 解包后删除） |
 | `managed_by` | 已移除（#74，`legacy-formal` 下线）：环境文件里出现这个字段会被拒绝，并提示删除 |
 | `acceptance` | 晋级验收报告所在的 GitHub 仓库 `forge_repo`（`owner/repo`）与 Issue 编号：`issue` 供 `formal-test`（旧字段 `legacy_formal_issue` 随 `legacy-formal` 下线不再使用，可从环境文件删除）；本仓地址 `forge_url`（验收证据 URL 必须以它开头）。`--acceptance-note` 传该 Issue 下某条 comment 的数字 ID，脚本用 `gh api repos/<forge_repo>/issues/comments/<ID>` 读取，并拒绝属于其他 Issue 的 comment |
@@ -87,7 +87,7 @@
 两个环境走同一套脚本，`release-env.py` 只把环境参数交给 `scripts/release-go-testenv.sh`，服务器段为 `scripts/release-server-steps.sh`：
 
 1. 源码：远端旧 `app/` 移为 `app.prev-<时间>`，`git archive <revision>` 解到新 `app/`。
-2. 服务器段：获取发布根锁 → 容量检查 → 以 `Dockerfile.go-runtime` 的 `runtime-with-migration-tools` 目标构建 `art-ai-go-production:<短SHA>-<时间>`（npm 固定公共源；按环境文件传 `GOPROXY`/`--add-host`）→ 日志目录以镜像运行身份写删验证 → `cutover-go-production.sh preflight`（回环端口、临时目录）→ 停旧服务做一致性备份（`backups/release-<tag>/`；默认备份 `data`、`storage-go`、`web-data`，只有 `dev-test` 可配置 `backup.scope=database` 仅备份 `production/data`，`backup.keep` 控制成功后清理）→ Compose 更新唯一 `art-ai-go` 服务 → healthz/readyz → 写成功清单 → 镜像保留与（仅设置了 `backup.keep` 的环境的）备份保留。
+2. 服务器段：获取发布根锁 → 容量检查 → 以 `Dockerfile.go-runtime` 的 `runtime-with-migration-tools` 目标构建 `art-ai-go-production:<短SHA>-<时间>`（npm 缺省公共源，环境文件设 `build.npm_registry` 时用该源；按环境文件传 `GOPROXY`/`--add-host`）→ 日志目录以镜像运行身份写删验证 → `cutover-go-production.sh preflight`（回环端口、临时目录；临时目录放在发布根的 `tmp/` 下，不写主机 `/tmp`）→ 停旧服务做一致性备份（`backups/release-<tag>/`；默认备份 `data`、`storage-go`、`web-data`，只有 `dev-test` 可配置 `backup.scope=database` 仅备份 `production/data`，`backup.keep` 控制成功后清理）→ Compose 更新唯一 `art-ai-go` 服务 → healthz/readyz → 写成功清单 → 镜像保留与（仅设置了 `backup.keep` 的环境的）备份保留。
 3. 失败：构建/预检失败不动旧实例；更新后健康失败先按备份范围恢复数据，再以发布前实际运行的镜像拉起，报告在 `production/reports/release-failures/`；失败路径不清理镜像和快照。整个服务器段持有发布根锁；清理 helper 继承并校验该描述符。`database` 模式只恢复数据库，候选写入的 `storage-go`/`web-data` 字节保持不动，因此不是完整回滚。
 
 仓库不写死任何主机、地址、服务器路径或环境的 Compose 项目名（#249、#261）：`release-go-testenv.sh` 的 `RELEASE_HOST`/`RELEASE_ROOT`、服务器段的发布根与 `RELEASE_COMPOSE_PROJECT`（`release-env.py` 总是按 `compose_project` 传入）、镜像保留的 `--root`/`--project`、预检的 `GO_PROD_PROJECT` 和 `docker-compose.go-production.yml` 的 8 个主机路径都没有缺省值，一律来自环境文件。`layout` 中的键作为进程环境传给每次 Compose 与预检；设置了 `layout` 的环境成功后写出 `production/compose.env`（`0600`，无密钥：当前 `GO_IMAGE_TAG`、`GO_SOURCE_COMMIT`、`GO_RUNTIME_ENV_FILE` 与布局键），供手工 Compose 使用。
@@ -98,7 +98,7 @@
 - 本项目没有容器且没有数据库时，允许空栈 bootstrap 首次启动，失败则停止候选并保留现场；有数据库而无容器时拒绝；
 - 健康检查访问 `GO_WEB_BIND_IP:GO_WEB_HOST_PORT`。
 
-与是否单栈无关、按环境文件设置的选项：`extra_compose_file` 加到每条本栈 Compose 命令的主文件之后（文件须已在服务器上，越界、缺失或符号链接即在构建前拒绝）；`build` 的 `network`、`goproxy` 与 `add_hosts` 只改变 `docker build` 参数，npm 源固定为公共 `registry.npmjs.org`（#257），镜像目标仍为 `runtime-with-migration-tools`；`source_transfer: scp` 只改变源码同步方式。`compose.env` 记录 `ART_AI_PROTECTED_PATHS`（#334）与布局变量。
+与是否单栈无关、按环境文件设置的选项：`extra_compose_file` 加到每条本栈 Compose 命令的主文件之后（文件须已在服务器上，越界、缺失或符号链接即在构建前拒绝）；`build` 的 `network`、`goproxy`、`npm_registry` 与 `add_hosts` 只改变 `docker build` 参数，未设 `npm_registry` 时 npm 源为公共 `registry.npmjs.org`（#257），镜像目标仍为 `runtime-with-migration-tools`；`source_transfer: scp` 只改变源码同步方式。`compose.env` 记录 `ART_AI_PROTECTED_PATHS`（#334）与布局变量。
 
 `dev-test` 没有 `single_stack`：它在共享主机上，环境文件用 `protect_projects` 列出同机其他 Plinth Compose 项目（候选栈等），`release-env.py` 以 `RELEASE_PROTECT_PROJECTS` 传给服务器段，镜像保留对每个项目加 `--protect-project`，这些项目容器引用的镜像不被清理；环境文件还为它给出 `build`（Go 代理与 `--add-host`）和 `layout` 中的 4 个 legacy 目录。源码同步与服务器段命令序列与参数化之前相同，只多了上述项目参数（`scripts/smoke/test-release-stack.sh` 断言）。
 
