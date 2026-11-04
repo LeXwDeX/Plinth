@@ -47,6 +47,7 @@
 #                            只用于本栈服务，隔离预检不使用它
 #   RELEASE_BUILD_NETWORK    docker build --network（例如构建容器需用宿主源地址访问内网 Go 代理或基础镜像源）
 #   RELEASE_GOPROXY          docker build 的 GOPROXY 构建参数（缺省用 Dockerfile 默认值）
+#   RELEASE_NPM_REGISTRY     docker build 的 NPM_REGISTRY 构建参数（缺省为公共 registry.npmjs.org）
 #   RELEASE_BUILD_ADD_HOSTS  docker build --add-host，逗号分隔的 主机名:地址（解析内网 Go 代理等构建依赖主机）
 #   ART_AI_PROTECTED_PATHS   本栈根与环境文件 protected_paths（冒号分隔）；发布本身不用，只记入
 #                            production/compose.env，供在该主机手工运行的备份/ETL/finalize 读取（#334）
@@ -262,6 +263,9 @@ if [ -n "${RELEASE_BUILD_NETWORK:-}" ]; then
 fi
 if [ -n "${RELEASE_GOPROXY:-}" ]; then
   BUILD_OPTIONS+=(--build-arg GOPROXY="$RELEASE_GOPROXY")
+fi
+if [ -n "${RELEASE_NPM_REGISTRY:-}" ]; then
+  BUILD_OPTIONS+=(--build-arg NPM_REGISTRY="$RELEASE_NPM_REGISTRY")
 fi
 if [ -n "${RELEASE_BUILD_ADD_HOSTS:-}" ]; then
   IFS=, read -r -a BUILD_ADD_HOSTS <<<"$RELEASE_BUILD_ADD_HOSTS"
