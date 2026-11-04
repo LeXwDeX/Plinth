@@ -20,6 +20,13 @@ type Limits struct {
 	// will decode. Larger images are reported but replaced by the material
 	// factor.
 	MaxTexturePixels int64
+	// MaxTotalTexturePixels caps the total pixel count of all distinct images
+	// Render decodes in one Model. Zero disables that cumulative cap.
+	MaxTotalTexturePixels int64
+	// MaxTextureBytes caps the total decoded RGBA bytes (four per pixel) of all
+	// distinct images Render decodes in one Model. Zero disables that
+	// cumulative cap.
+	MaxTextureBytes int64
 	// MaxNodes is the largest node count accepted in the JSON document.
 	MaxNodes int
 	// MaxDepth is the deepest node path accepted while walking the scene.
@@ -31,11 +38,13 @@ type Limits struct {
 // Production callers should choose their own values.
 func DefaultLimits() Limits {
 	return Limits{
-		MaxBytes:         1 << 30,
-		MaxTriangles:     10_000_000,
-		MaxVertices:      20_000_000,
-		MaxTexturePixels: 16_777_216, // 4096 x 4096
-		MaxNodes:         65_536,
-		MaxDepth:         256,
+		MaxBytes:              1 << 30,
+		MaxTriangles:          10_000_000,
+		MaxVertices:           20_000_000,
+		MaxTexturePixels:      16_777_216, // 4096 x 4096
+		MaxTotalTexturePixels: 33_554_432, // two 4096 x 4096 images
+		MaxTextureBytes:       134_217_728,
+		MaxNodes:              65_536,
+		MaxDepth:              256,
 	}
 }

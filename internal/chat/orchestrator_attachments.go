@@ -128,6 +128,31 @@ func (orchestrator *Orchestrator) withResultHandles(content string, handles []st
 	return string(updated)
 }
 
+// withSummaryHandles writes the handles a call produced into its compact
+// summary under the Schema's key, so the conversation can bind each picture to
+// its view by handle (#103 review F9). A summary that is absent or not a JSON
+// object is left as is.
+func (orchestrator *Orchestrator) withSummaryHandles(summary json.RawMessage, handles []string) json.RawMessage {
+	key := orchestrator.schema.Context.ResultHandlesField
+	if key == "" || len(handles) == 0 || len(summary) == 0 {
+		return summary
+	}
+	var result map[string]json.RawMessage
+	if json.Unmarshal(summary, &result) != nil || result == nil {
+		return summary
+	}
+	encoded, err := json.Marshal(handles)
+	if err != nil {
+		return summary
+	}
+	result[key] = encoded
+	updated, err := json.Marshal(result)
+	if err != nil {
+		return summary
+	}
+	return updated
+}
+
 // bindViewHandles writes one handle into each entry of a tool result's views
 // array. It returns the array unchanged unless its length matches the handles
 // and every entry is a JSON object; a partial pairing could name the wrong
@@ -428,8 +453,13 @@ func (orchestrator *Orchestrator) productionBriefText(
 	if brief.Empty() {
 		return ""
 	}
-	purposeID := brief.Text("purpose")
-	override, hasOverride := brief.Integer("triangle_budget")
+	// Locate the purpose and the triangle override by their declared types, so
+	// renaming either field in the Schema needs no code change (#103 review
+	// C3).
+	purposeField := productionBriefPurposeField(briefSchema)
+	integerField := productionBriefIntegerField(briefSchema)
+	purposeID := brief.Text(purposeField)
+	override, hasOverride := brief.Integer(integerField)
 	// The purpose's budget carries a session triangle override, so it is
 	// rendered with the purpose and not again as a separate field.
 	usage := orchestrator.schema.Model3DUsage
@@ -439,12 +469,12 @@ func (orchestrator *Orchestrator) productionBriefText(
 		if label == "" {
 			label = field.Name
 		}
-		if field.Name == "triangle_budget" && hasOverride && purposeID != "" {
+		if integerField != "" && field.Name == integerField && hasOverride && purposeID != "" {
 			continue
 		}
 		switch field.Type {
 		case "profile":
-			if field.Name != "purpose" || purposeID == "" {
+			if field.Name != purposeField || purposeID == "" {
 				continue
 			}
 			profile, found := usageProfile(usage, purposeID)

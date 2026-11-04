@@ -580,6 +580,18 @@ func (executor *Executor) loadReviewedModel(
 		return nil, &refusal, nil
 	}
 	defer content.Body.Close()
+	key := strings.ToLower(strings.TrimSpace(content.SHA256))
+	if key == "" {
+		key = strings.ToLower(strings.TrimSpace(source.asset.SHA256))
+	}
+	// A known digest answers from the cache without reading the saved bytes;
+	// the body was still opened above, so the owner check always ran
+	// (#103 review C7).
+	if key != "" {
+		if entry := executor.modelReview.cache.get(key); entry != nil {
+			return entry, nil, nil
+		}
+	}
 	data, err := io.ReadAll(io.LimitReader(content.Body, limits.MaxBytes+1))
 	if err != nil {
 		executor.logger.Warn("model review asset read failed",
@@ -594,16 +606,14 @@ func (executor *Executor) loadReviewedModel(
 			"{limit}", strconv.FormatInt(limits.MaxBytes, 10)))
 		return nil, &refusal, nil
 	}
-	key := strings.ToLower(strings.TrimSpace(content.SHA256))
-	if key == "" {
-		key = strings.ToLower(strings.TrimSpace(source.asset.SHA256))
-	}
 	if key == "" {
 		digest := sha256.Sum256(data)
 		key = hex.EncodeToString(digest[:])
-	}
-	if entry := executor.modelReview.cache.get(key); entry != nil {
-		return entry, nil, nil
+		// The digest is only known now; another call may have cached the same
+		// bytes while this one read them.
+		if entry := executor.modelReview.cache.get(key); entry != nil {
+			return entry, nil, nil
+		}
 	}
 	model, err := modelinspect.Parse(bytes.NewReader(data), int64(len(data)), limits)
 	if err != nil {
@@ -714,16 +724,38 @@ func (executor *Executor) modelReviewBudgetRefusal(
 
 // modelReviewRenderCalls replays the reply's earlier render and comparison
 // calls, like find_history_images replays its lookups, so the bound holds
-// across tool rounds and a resumed reply.
+// across tool rounds and a resumed reply. Only a call that produced a view
+// used a render slot: a recorded summary with no views is a refusal or a call
+// whose every view failed. A call without a summary predates the summary
+// record and keeps counting as before (#103 review C7).
 func (executor *Executor) modelReviewRenderCalls(command chat.ToolCommand) int {
 	render, compare := executor.modelReviewToolNames()
 	used := 0
 	for _, call := range command.EarlierCalls {
-		if (render != "" && call.Name == render) || (compare != "" && call.Name == compare) {
-			used++
+		if (render == "" || call.Name != render) && (compare == "" || call.Name != compare) {
+			continue
 		}
+		if !modelReviewCallRendered(call.Summary) {
+			continue
+		}
+		used++
 	}
 	return used
+}
+
+// modelReviewCallRendered reports whether a stored render or comparison call
+// produced at least one view. No summary means the record predates summaries
+// or the call was refused before one was written; neither is distinguishable,
+// so it counts as before.
+func modelReviewCallRendered(summary json.RawMessage) bool {
+	if len(summary) == 0 {
+		return true
+	}
+	var parsed modelReviewMessageSummary
+	if err := json.Unmarshal(summary, &parsed); err != nil {
+		return true
+	}
+	return len(parsed.Views) > 0
 }
 
 // modelReviewToolNames reads the render and comparison tool names from the
@@ -988,12 +1020,14 @@ func modelReviewSize(raw json.RawMessage, fallback, maximum int) (int, bool) {
 func modelReviewLimits(review catalog.ChatModelReviewSchema) modelinspect.Limits {
 	limits := review.Inspect.Limits
 	return modelinspect.Limits{
-		MaxBytes:         limits.MaxBytes,
-		MaxTriangles:     limits.MaxTriangles,
-		MaxVertices:      limits.MaxVertices,
-		MaxTexturePixels: limits.MaxTexturePixels,
-		MaxNodes:         limits.MaxNodes,
-		MaxDepth:         limits.MaxDepth,
+		MaxBytes:              limits.MaxBytes,
+		MaxTriangles:          limits.MaxTriangles,
+		MaxVertices:           limits.MaxVertices,
+		MaxTexturePixels:      limits.MaxTexturePixels,
+		MaxTotalTexturePixels: limits.MaxTotalTexturePixels,
+		MaxTextureBytes:       limits.MaxTextureBytes,
+		MaxNodes:              limits.MaxNodes,
+		MaxDepth:              limits.MaxDepth,
 	}
 }
 

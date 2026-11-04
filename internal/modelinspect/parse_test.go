@@ -7,9 +7,29 @@ import (
 	"image/color"
 	"math"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestParseAccessorSpanOverflowIsRejected(t *testing.T) {
+	if strconv.IntSize < 64 {
+		t.Skip("needs a 64-bit int for a wrapping accessor count")
+	}
+	builder := newTestGLB()
+	view := builder.addBufferView(make([]byte, 12), 0)
+	// stride 12 * (count-1) == 12 * (2^62) wraps to 0 in int64, so the old
+	// bounds check accepted a span of only elemSize.
+	builder.addAccessor(view, 0, 5126, int(int64(1)<<62)+1, "VEC3", false, nil, nil)
+	raw := builder.finish()
+	_, err := Parse(bytes.NewReader(raw), int64(len(raw)), DefaultLimits())
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Parse error = %v, want ErrInvalid", err)
+	}
+	if !strings.Contains(err.Error(), "out of bufferView bounds") {
+		t.Fatalf("Parse error = %v, want the bufferView bounds error", err)
+	}
+}
 
 func TestParseCubeMetadata(t *testing.T) {
 	data := cubeGLB()

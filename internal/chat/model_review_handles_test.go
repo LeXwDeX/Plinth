@@ -25,6 +25,7 @@ func (tools *reviewPictureTools) Execute(
 	tools.commands = append(tools.commands, command)
 	return chat.ToolResult{
 		AgentContent: `{"ok":true,"views":[{"view":"front"},{"view":"back"}]}`,
+		Summary:      json.RawMessage(`{"tool":"render","views":["front","back"]}`),
 		ImageURLs:    []string{"/api/assets/render-1", "/api/assets/render-2"},
 		Pictures: []chat.ToolPicture{
 			{URL: "/api/assets/render-1"},
@@ -136,6 +137,22 @@ func TestReadOnlyToolPicturesGetHandlesAndEachViewNamesItsOwn(t *testing.T) {
 	if got := attachmentSummary(final.Attachments); len(got) != 2 || !strings.HasPrefix(got[0], "@img1/image//1") ||
 		!strings.HasPrefix(got[1], "@img2/image//2") {
 		t.Fatalf("final attachments = %v", got)
+	}
+
+	// The compact summary carries the handles too, so the conversation can
+	// bind each view to its picture by handle (#103 review F9).
+	var summary map[string]json.RawMessage
+	for _, call := range final.ToolCalls {
+		if call.Name != "render_model_views" {
+			continue
+		}
+		if err := json.Unmarshal(call.Summary, &summary); err != nil {
+			t.Fatalf("summary = %q: %v", call.Summary, err)
+		}
+	}
+	if string(summary[rig.schema.Context.ResultHandlesField]) != `["@img1","@img2"]` ||
+		string(summary["views"]) != `["front","back"]` {
+		t.Fatalf("summary = %v", summary)
 	}
 }
 

@@ -117,7 +117,9 @@ type Material struct {
 	EmissiveTexture          *TextureRef
 	EmissiveFactor           [3]float64
 	AlphaMode                string
-	DoubleSided              bool
+	// AlphaCutoff is the MASK threshold; the glTF default is 0.5.
+	AlphaCutoff float64
+	DoubleSided bool
 }
 
 // Texture is one glTF texture. Sampler is -1 when the default sampler is used.
@@ -205,6 +207,14 @@ type accessorCache struct {
 }
 
 type textureCache struct {
-	mu     sync.Mutex
+	mu sync.Mutex
+	// images caches decoded textures by texture index, including a nil entry
+	// for an image that exceeds MaxTexturePixels.
 	images map[int]*decodedTexture
+	// decoded caches the shared pixel buffer by image index so textures that
+	// reference the same image decode it only once.
+	decoded map[int]*decodedImage
+	// pixels and bytes are the cumulative budgets already charged.
+	pixels int64
+	bytes  int64
 }

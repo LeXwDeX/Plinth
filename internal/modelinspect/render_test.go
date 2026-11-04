@@ -341,3 +341,108 @@ func absByte(value, want uint8) int {
 	}
 	return difference
 }
+
+// alphaMaskQuadGLB builds one front-facing quad whose base-color alpha is
+// masked at the given cutoff. A nil cutoff exercises the glTF default.
+func alphaMaskQuadGLB(t testing.TB, alpha float64, cutoff *float64) []byte {
+	t.Helper()
+	builder := newTestGLB()
+	position := builder.addVec3Accessor([]float32{
+		-1, -1, 0,
+		1, -1, 0,
+		1, 1, 0,
+		-1, 1, 0,
+	}, true)
+	indices := builder.addIndices16([]uint16{0, 1, 2, 0, 2, 3})
+	fields := map[string]any{
+		"pbrMetallicRoughness": map[string]any{
+			"baseColorFactor": []float64{1, 1, 1, alpha},
+		},
+		"alphaMode": "MASK",
+	}
+	if cutoff != nil {
+		fields["alphaCutoff"] = *cutoff
+	}
+	material := builder.addMaterial(fields)
+	mesh := builder.addMesh([]any{map[string]any{
+		"attributes": map[string]int{"POSITION": position},
+		"indices":    indices,
+		"material":   material,
+	}})
+	node := builder.addNode(map[string]any{"mesh": mesh})
+	builder.addScene([]int{node})
+	return builder.finish()
+}
+
+func TestRenderMaskUsesMaterialAlphaCutoff(t *testing.T) {
+	low, high := 0.2, 0.8
+	cases := []struct {
+		name    string
+		cutoff  *float64
+		visible bool
+	}{
+		{name: "default cutoff keeps alpha at the threshold", visible: true},
+		{name: "low cutoff keeps a half-transparent texel", cutoff: &low, visible: true},
+		{name: "high cutoff discards a half-transparent texel", cutoff: &high, visible: false},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			model := mustParseModel(t, alphaMaskQuadGLB(t, 0.5, test.cutoff), DefaultLimits())
+			image := renderOrFail(t, model, RenderRequest{
+				Width: 32, Height: 32, View: ViewFront, Mode: ModeTextured, Workers: 1,
+			})
+			center := image.NRGBAAt(16, 16)
+			if test.visible && center == testBackground {
+				t.Fatalf("centre pixel = background, want the masked material to survive")
+			}
+			if !test.visible && center != testBackground {
+				t.Fatalf("centre pixel = %v, want background for the discarded mask", center)
+			}
+		})
+	}
+}
+
+// quadWithMatrixDocument builds a front-facing quad, optionally under a
+// mirrored world transform (the matrix determinant is negative).
+func quadWithMatrixDocument(t testing.TB, mirrored bool) *testGLB {
+	t.Helper()
+	builder := newTestGLB()
+	position := builder.addVec3Accessor([]float32{
+		-1, -1, 0,
+		1, -1, 0,
+		1, 1, 0,
+		-1, 1, 0,
+	}, true)
+	indices := builder.addIndices16([]uint16{0, 1, 2, 0, 2, 3})
+	mesh := builder.addMesh([]any{map[string]any{
+		"attributes": map[string]int{"POSITION": position},
+		"indices":    indices,
+	}})
+	node := map[string]any{"mesh": mesh}
+	if mirrored {
+		// Column-major scale (-1, 1, 1); determinant = -1 reverses winding.
+		node["matrix"] = []float64{-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}
+	}
+	builder.addNode(node)
+	builder.addScene([]int{0})
+	return builder
+}
+
+func TestRenderCullingAccountsForMirroredTransform(t *testing.T) {
+	for _, mirrored := range []bool{false, true} {
+		name := "upright"
+		if mirrored {
+			name = "mirrored"
+		}
+		t.Run(name, func(t *testing.T) {
+			model := mustParseModel(t, quadWithMatrixDocument(t, mirrored).finish(), DefaultLimits())
+			image := renderOrFail(t, model, RenderRequest{
+				Width: 32, Height: 32, View: ViewFront, Mode: ModeClay,
+				CullBackfaces: true, Workers: 1,
+			})
+			if countNonBackground(image) == 0 {
+				t.Fatal("front-facing quad was culled")
+			}
+		})
+	}
+}

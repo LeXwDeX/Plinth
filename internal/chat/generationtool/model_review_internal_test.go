@@ -2,16 +2,64 @@ package generationtool
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"image"
 	"image/color"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/chat"
 )
 
 // TestModelReviewStateBoundsConcurrentRenders holds every slot the Schema
 // declares and shows that a waiting render gives up with its context.
+// TestModelReviewLimitsCarryTextureBudgets proves the Schema's cumulative
+// texture caps reach the parser and renderer; leaving them unmapped would keep
+// the per-image cache unbounded in production (#103 review P2).
+func TestModelReviewLimitsCarryTextureBudgets(t *testing.T) {
+	limits := modelReviewLimits(catalog.ChatModelReviewSchema{
+		Inspect: catalog.ChatModelInspectSchema{Limits: catalog.ChatModelReviewLimits{
+			MaxTexturePixels: 100, MaxTotalTexturePixels: 200, MaxTextureBytes: 300,
+		}},
+	})
+	if limits.MaxTexturePixels != 100 || limits.MaxTotalTexturePixels != 200 || limits.MaxTextureBytes != 300 {
+		t.Fatalf("mapped limits = %+v", limits)
+	}
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := product.Application().Chat.ModelReview.Inspect.Limits
+	if declared.MaxTotalTexturePixels <= 0 || declared.MaxTextureBytes <= 0 {
+		t.Fatalf("default Catalog declares no cumulative texture budget: %+v", declared)
+	}
+}
+
+// TestModelReviewRenderCallsCountOnlySuccessfulCalls keeps failed or refused
+// renders and comparisons from spending the reply's render slots: a summary
+// with no views is not a rendered call, while a summary-less record keeps the
+// old counting (it may predate summaries) (#103 review C7).
+func TestModelReviewRenderCallsCountOnlySuccessfulCalls(t *testing.T) {
+	executor := &Executor{chat: catalog.ChatSchema{AgentTools: []catalog.ChatAgentToolSchema{
+		{Name: "render_model_views", Execution: catalog.ChatToolExecutionSchema{ImplementationKey: "model.render"}},
+		{Name: "compare_models", Execution: catalog.ChatToolExecutionSchema{ImplementationKey: "model.compare"}},
+	}}}
+	command := chat.ToolCommand{EarlierCalls: []chat.ToolCall{
+		{Name: "render_model_views", Summary: json.RawMessage(`{"tool":"render","views":["front"]}`)},
+		{Name: "render_model_views", Summary: json.RawMessage(`{"tool":"render","failed_views":["front"]}`)},
+		// A refusal has no summary; the record cannot say whether it predates
+		// summaries, so it keeps counting as before.
+		{Name: "render_model_views"},
+		{Name: "inspect_model", Summary: json.RawMessage(`{"tool":"inspect"}`)},
+		{Name: "compare_models", Summary: json.RawMessage(`{"tool":"compare","views":["front"]}`)},
+		{Name: "compare_models", Summary: json.RawMessage(`{"tool":"compare","failed_views":["front"]}`)},
+	}}
+	if used := executor.modelReviewRenderCalls(command); used != 3 {
+		t.Fatalf("render calls = %d, want 3 (successful render, summary-less record, successful compare)", used)
+	}
+}
+
 func TestModelReviewStateBoundsConcurrentRenders(t *testing.T) {
 	state := newModelReviewState(catalog.ChatModelReviewSchema{
 		Render: catalog.ChatModelRenderSchema{MaxConcurrentRenders: 2},
