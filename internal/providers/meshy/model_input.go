@@ -18,10 +18,24 @@ import (
 )
 
 type modelInputContract struct {
-	source    schema.Parameter
+	source schema.Parameter
+	// task is the optional source-task parameter declared beside the profiled
+	// asset (#93): a successful Meshy task goes upstream as input_task_id and
+	// no bytes are read or inlined. Its Name is empty when none is declared.
+	task      schema.Parameter
 	options   schema.ModelInputProfileOptions
 	policy    modelinput.Policy
 	mediaType string
+}
+
+// taskRoute reports whether the request names the declared source task
+// instead of the profiled asset.
+func (c modelInputContract) taskRoute(request generation.InputValidationRequest) bool {
+	if c.task.Name == "" {
+		return false
+	}
+	_, named := request.TaskDependencies[c.task.Name]
+	return named
 }
 
 func profiledModelContract(offering generation.Offering) (modelInputContract, bool, error) {
@@ -41,7 +55,9 @@ func profiledModelContract(offering generation.Offering) (modelInputContract, bo
 	}
 	l := *c.options.ProfileLimits
 	c.policy = modelinput.Policy{ProfileID: c.options.ProfileID, Revision: c.options.ProfileRevision, Limits: modelinput.Limits{MaxBytes: l.MaxBytes, MaxJSONBytes: l.MaxJSONBytes, MaxDepth: l.MaxDepth, MaxElements: l.MaxElements, MaxVertices: l.MaxVertices, MaxTriangles: l.MaxTriangles, MaxNodes: l.MaxNodes, MaxWork: l.MaxWork, MaxImagePixels: l.MaxImagePixels, MaxTotalImagePixels: l.MaxTotalImagePixels}}
-	if c.policy.Validate() != nil || wire.InlineModelInput.MaxBytes != l.MaxBytes {
+	// Direct uploads stay within the upload profile; the inline ceiling may be
+	// larger for a successful platform Task's GLB (#93).
+	if c.policy.Validate() != nil || wire.InlineModelInput.MaxBytes < l.MaxBytes {
 		return invalid()
 	}
 	c.mediaType = wire.InlineModelInput.MediaType
@@ -50,8 +66,14 @@ func profiledModelContract(offering generation.Offering) (modelInputContract, bo
 	}
 	sources, assets := 0, 0
 	for _, p := range offering.Parameters {
-		if _, source := schema.SourceParameterRole(p); source {
+		if role, source := schema.SourceParameterRole(p); source {
 			sources++
+			if role == schema.SemanticSourceTask {
+				if p.Type != "task" || c.task.Name != "" {
+					return invalid()
+				}
+				c.task = p
+			}
 		}
 		if p.Type == "asset" || p.Type == "asset-array" {
 			assets++
@@ -66,7 +88,11 @@ func profiledModelContract(offering generation.Offering) (modelInputContract, bo
 	p := c.source
 	role, isSource := schema.SourceParameterRole(p)
 	u := p.UploadedModel
-	if sources != 1 || assets != 1 || !isSource || role != schema.SemanticSourceAsset || p.Type != "asset" || !p.Required || p.MaxBytes != l.MaxBytes || !slices.Contains(p.MediaTypes, "model/gltf-binary") || u == nil || u.ProfileID != c.options.ProfileID || u.ProfileRevision != c.options.ProfileRevision || u.ProfileLimits == nil || *u.ProfileLimits != l {
+	wantSources := 1
+	if c.task.Name != "" {
+		wantSources = 2
+	}
+	if sources != wantSources || assets != 1 || !isSource || role != schema.SemanticSourceAsset || p.Type != "asset" || (!p.Required && c.task.Name == "") || p.MaxBytes != wire.InlineModelInput.MaxBytes || !slices.Contains(p.MediaTypes, "model/gltf-binary") || u == nil || u.ProfileID != c.options.ProfileID || u.ProfileRevision != c.options.ProfileRevision || u.ProfileLimits == nil || *u.ProfileLimits != l {
 		return invalid()
 	}
 	return c, true, nil
@@ -129,9 +155,24 @@ func (a *Adapter) readProfiledModel(ctx context.Context, request generation.Inpu
 	if err != nil || len(digest) != 32 || asset.ID != generation.AssetID(id) || asset.OwnerID != request.OwnerID || asset.StorageKey == "" || asset.Size <= 0 {
 		return nil, missing()
 	}
-	if asset.Size > c.source.MaxBytes {
+	// A direct upload (no Role) is bound by the upload profile; a GLB that a
+	// successful platform Task delivered (Role "model") is read under the
+	// generated-model profile up to the inline ceiling (#93). Anything else is
+	// not a model source.
+	policy, limit := c.policy, c.policy.Limits.MaxBytes
+	switch asset.Role {
+	case "":
+	case "model":
+		policy = modelinput.GeneratedPolicy()
+		limit = c.source.MaxBytes
+		policy.Limits.MaxBytes = min(policy.Limits.MaxBytes, limit)
+		policy.Limits.MaxJSONBytes = min(policy.Limits.MaxJSONBytes, policy.Limits.MaxBytes)
+	default:
+		return nil, missing()
+	}
+	if asset.Size > limit {
 		return nil, inputRefusal(request.Offering, schema.InputRefusalTooLarge, schema.InputRefusalValues{
-			Size: schema.SizeText(asset.Size, true), Limit: schema.SizeText(c.source.MaxBytes, false),
+			Size: schema.SizeText(asset.Size, true), Limit: schema.SizeText(limit, false),
 		}, generation.ErrInvalidInput, nil)
 	}
 	if !slices.Contains(c.source.MediaTypes, asset.MediaType) {
@@ -164,7 +205,7 @@ func (a *Adapter) readProfiledModel(ctx context.Context, request generation.Inpu
 	if int64(len(raw)) != asset.Size {
 		return nil, modelSourceFailure(generation.ErrConflict, nil)
 	}
-	profile, err := modelinput.ValidateGLBBytes(ctx, raw, c.policy)
+	profile, err := modelinput.ValidateGLBBytes(ctx, raw, policy)
 	if err != nil {
 		return nil, modelProfileFailure(err)
 	}
@@ -176,6 +217,12 @@ func (a *Adapter) readProfiledModel(ctx context.Context, request generation.Inpu
 	// SourceModelLimit, compared by the same helper (source_face_limit.go).
 	if profile.ExceedsInstancedTriangles(c.options.MaxInstancedTriangles) {
 		return nil, modelSourceFailure(generation.ErrModelInputLimit, nil)
+	}
+	if policy.ProfileID != c.policy.ProfileID {
+		if err := validateGeneratedRoute(c.source, profile); err != nil {
+			return nil, err
+		}
+		return raw, nil
 	}
 	if err := modelsource.ValidateRoute(c.source, profile); err != nil {
 		return nil, err
@@ -204,7 +251,9 @@ func (a *Adapter) ValidateInput(ctx context.Context, request generation.InputVal
 	if err != nil {
 		return modelSourceFailure(generation.ErrUnavailable, err)
 	}
-	if !bound {
+	if !bound || c.taskRoute(request) {
+		// A source task travels as input_task_id: no bytes are inlined, and the
+		// step's source_model_limit is checked on the GLB the Task delivered.
 		return a.validateSourceFaceLimit(ctx, request)
 	}
 	_, err = a.readProfiledModel(ctx, request, c)
@@ -232,3 +281,18 @@ func (a *Adapter) profiledModelWireValue(ctx context.Context, request generation
 }
 
 var _ generation.ProviderInputValidator = (*Adapter)(nil)
+
+// validateGeneratedRoute applies the uploaded-model route conditions that do
+// not depend on the upload profile to a platform Task's GLB: the byte limit
+// and the declared texture requirements (#93).
+func validateGeneratedRoute(parameter schema.Parameter, profile modelinput.Profile) error {
+	if parameter.MaxBytes > 0 && profile.Size > parameter.MaxBytes {
+		return modelSourceFailure(generation.ErrModelInputLimit, nil)
+	}
+	if u := parameter.UploadedModel; u != nil {
+		if (u.RequireTextures && !profile.HasTextures) || (u.RequireSingleBaseColorTexture && !profile.HasSingleBaseColorTexture) {
+			return modelSourceFailure(generation.ErrUnsupportedModelInput, nil)
+		}
+	}
+	return nil
+}

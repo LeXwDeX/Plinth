@@ -120,13 +120,26 @@ func TestMeshySpecialQualifiedAvailabilityWithExactDelivery(t *testing.T) {
 				return
 			}
 			p := specialParameter(t, o, "source_asset")
-			if !p.Required || p.Type != "asset" || p.Semantic != schema.SemanticSourceAsset || p.WireName != "model_url" || p.SameProvider || p.MaxBytes != 10485760 || !slices.Equal(p.Extensions, []string{".glb"}) || p.UploadedModel == nil || p.UploadedModel.NativeOnly || p.UploadedModel.ProfileRevision != "1" || p.UploadedModel.ProfileLimits == nil {
+			// #93: the asset is the local fallback beside the source task; direct
+			// uploads stay within the 10 MiB upload profile, a platform Task's GLB
+			// may be inlined up to 70 MiB (base64 stays under Meshy's 100 MB data URI).
+			if p.Required || p.Type != "asset" || p.Semantic != schema.SemanticSourceAsset || p.WireName != "model_url" || p.SameProvider || p.MaxBytes != 73400320 || !slices.Equal(p.Extensions, []string{".glb"}) || p.UploadedModel == nil || p.UploadedModel.NativeOnly || p.UploadedModel.ProfileRevision != "1" || p.UploadedModel.ProfileLimits == nil || p.UploadedModel.ProfileLimits.MaxBytes != 10485760 {
 				t.Fatalf("wrong frozen cross-provider source: %+v", p)
 			}
+			task := specialParameter(t, o, "source_task")
+			if task.Type != "task" || task.Semantic != schema.SemanticSourceTask || task.WireName != "input_task_id" || !task.SameProvider || task.UpstreamJobMaxAgeSeconds != 172800 || !slices.Contains(task.TaskOfferings, "meshy/processing/remesh") || !slices.Contains(task.TaskOfferings, "meshy/meshy-7.1/image-to-3d") {
+				t.Fatalf("wrong Meshy source task: %+v", task)
+			}
+			if len(o.InputRules) == 0 || !slices.Equal(o.InputRules[0].Parameters, []string{"source_task", "source_asset"}) || o.InputRules[0].Minimum != 1 || o.InputRules[0].Maximum != 1 {
+				t.Fatalf("source task and asset must be exactly one of: %+v", o.InputRules)
+			}
 			for _, p := range o.Parameters {
-				if p.Type == "task" || p.Semantic == schema.SemanticSourceURL {
+				if p.Semantic == schema.SemanticSourceURL {
 					t.Fatal("unqualified upstream source path")
 				}
+			}
+			if limit := o.SourceModelLimit; (tc.capability == "uv-unwrap") != (limit != nil && limit.MaxTriangles == 40000) {
+				t.Fatalf("UV task source triangle cap: %+v", limit)
 			}
 			wantMime := "model/gltf-binary"
 			if tc.capability == "uv-unwrap" || tc.capability == "resize" {
@@ -284,12 +297,16 @@ func TestMeshyQualifiedPromotionAvailabilityAndPublicContract(t *testing.T) {
 			t.Fatal("missing offering")
 		}
 		if tc.capability == "repair-printability" {
-			if o.Enabled || published[o.ModelID] || o.Revision != "2026-10-15.1" {
+			if o.Enabled || published[o.ModelID] || o.Revision != "2026-11-04.93.1" {
 				t.Fatal("unqualified Repair became executable")
 			}
 			continue
 		}
-		if !o.Enabled || o.Revision != "2026-10-15.2" || !published[o.ModelID] || strings.Contains(o.ModelName, "候选") {
+		revision := "2026-11-04.93.1"
+		if tc.capability == "text-to-motion" {
+			revision = "2026-10-15.2"
+		}
+		if !o.Enabled || o.Revision != revision || !published[o.ModelID] || strings.Contains(o.ModelName, "候选") {
 			t.Errorf("qualified %s missing exact promoted availability", tc.id)
 		}
 		if _, _, err := c.Normalize(o.Capability, o.ID, inputs[tc.capability]); err != nil {

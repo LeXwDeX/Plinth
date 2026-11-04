@@ -3206,7 +3206,7 @@
         "ui.workspace.processing.route": "输入方式",
         "ui.workspace.processing.asset_route": "本地模型资产",
         "ui.workspace.processing.asset_route_expired": "本地模型资产（{provider} 原任务已超过保留期）",
-        "ui.workspace.processing.task_route": "同服务商任务",
+        "ui.workspace.processing.task_route": "{provider} 任务（按任务 ID 引用，不上传模型文件）",
         "ui.workspace.processing.unavailable": "不可用",
         "ui.workspace.processing.no_compatible_offering": "当前模型与处理模型的输入要求不兼容；动作处理需要先有可用的绑骨任务。",
         "ui.workspace.processing.session_mismatch": "请先切换到该模型所属的创作任务。",
@@ -3241,7 +3241,16 @@
         "ui.workspace.processing.plan_step_queued": "排队等待提交",
         "ui.workspace.processing.plan_auto_rigging": "动作需要先绑骨，已加入绑骨步骤。",
         "ui.workspace.processing.plan_incompatible": "所选步骤没有可用的输入路径，请调整步骤或模型。",
-        "ui.workspace.processing.source_refused": "当前模型（{size}）不能直接做这一步：{reasons}。可以换一个符合这些条件的模型再试。",
+        "ui.workspace.processing.source_refused": "当前模型（{size}）不能直接做这一步：{reasons}。可以先勾选「重拓扑」（Remesh），把模型减面、缩小后再接着做这一步（它的结果按任务 ID 交给下一步，不再上传文件）；或换一个符合这些条件的模型。",
+        "ui.workspace.processing.source_refused_face_limit": "{service} 最多接受 {limit} 个三角面，当前模型约 {faces} 个",
+        "ui.unavailable.label": "无法使用，{reason}",
+        "ui.workspace.processing.unavailable_reason.too_large": "模型超过 {limit}",
+        "ui.workspace.processing.unavailable_reason.face_limit": "面数超过 {limit}",
+        "ui.workspace.processing.unavailable_reason.media": "不支持这种模型文件",
+        "ui.workspace.processing.unavailable_reason.needs_task": "需要 {provider} 的原任务",
+        "ui.workspace.processing.unavailable_reason.expired": "原任务已过保留期",
+        "ui.workspace.processing.unavailable_reason.blocked": "前一步无法执行",
+        "ui.workspace.processing.unavailable_reason.unavailable": "服务当前不可用",
         "ui.workspace.processing.source_refused_separator": "；",
         "ui.workspace.processing.source_refused_too_large": "{service} 最多接受 {limit}",
         "ui.workspace.processing.source_refused_media": "{service} 不接受这种模型文件",
@@ -12733,7 +12742,7 @@
             "ui.workspace.processing.route": "Input method",
             "ui.workspace.processing.asset_route": "Local model asset",
             "ui.workspace.processing.asset_route_expired": "Local model asset (the {provider} original task is past its retention)",
-            "ui.workspace.processing.task_route": "Same-provider task",
+            "ui.workspace.processing.task_route": "{provider} task (referenced by task ID; no model file is uploaded)",
             "ui.workspace.processing.unavailable": "Unavailable",
             "ui.workspace.processing.no_compatible_offering": "The current model's input requirements are incompatible with the processing model; animation requires an available rigging task first.",
             "ui.workspace.processing.session_mismatch": "Switch to the creation task this model belongs to first.",
@@ -12768,7 +12777,16 @@
             "ui.workspace.processing.plan_step_queued": "Queued to submit",
             "ui.workspace.processing.plan_auto_rigging": "The animation requires rigging first; a rigging step has been added.",
             "ui.workspace.processing.plan_incompatible": "The selected steps have no usable input path. Adjust the steps or the model.",
-            "ui.workspace.processing.source_refused": "The current model ({size}) cannot go into this step directly: {reasons}. Try a model that meets these conditions.",
+            "ui.workspace.processing.source_refused": "The current model ({size}) cannot go into this step directly: {reasons}. Tick Remesh first to reduce the model's faces and size, then do this step on its result (passed on by task ID, with no file upload); or pick a model that meets these conditions.",
+            "ui.workspace.processing.source_refused_face_limit": "{service} accepts at most {limit} triangles, and the current model has about {faces}",
+            "ui.unavailable.label": "Unavailable: {reason}",
+            "ui.workspace.processing.unavailable_reason.too_large": "model over {limit}",
+            "ui.workspace.processing.unavailable_reason.face_limit": "over {limit} faces",
+            "ui.workspace.processing.unavailable_reason.media": "unsupported model file",
+            "ui.workspace.processing.unavailable_reason.needs_task": "needs the original {provider} task",
+            "ui.workspace.processing.unavailable_reason.expired": "original task has expired",
+            "ui.workspace.processing.unavailable_reason.blocked": "the previous step cannot run",
+            "ui.workspace.processing.unavailable_reason.unavailable": "service unavailable right now",
             "ui.workspace.processing.source_refused_separator": "; ",
             "ui.workspace.processing.source_refused_too_large": "{service} accepts at most {limit}",
             "ui.workspace.processing.source_refused_media": "{service} does not accept this kind of model file",
@@ -16013,10 +16031,10 @@
             "本人拥有且已成功的原生 Tripo 文生或图生 3D 模型；不接收检查报告、上传文件或其他服务模型。": "A native Tripo text-to-3D or image-to-3D model that you own and that has completed successfully. Check reports, uploaded files, and models from other services are not accepted.",
             "本人拥有的 JPG、PNG 或 WebP 图片，最多 20,000,000 字节。": "A JPG, PNG, or WebP image that you own, up to 20,000,000 bytes.",
             "本人拥有的 JPG、PNG 或 WebP 图片，最多 20,000,000 字节。每边至少 32 像素，总像素不超过 178,956,970。": "A JPG, PNG, or WebP image that you own, up to 20,000,000 bytes. Each side must be at least 32 pixels, and the total pixel count must not exceed 178,956,970.",
-            "本人拥有的自包含静态 GLB；不限制生成服务。": "A self-contained static GLB that you own, from any generation service.",
-            "本人拥有的自包含静态 GLB；不限制生成服务。UV 展开会移除原纹理；仅接收按实例累计不超过 40000 个三角面的模型。": "A self-contained static GLB that you own, from any generation service. UV unwrapping removes the original texture. Only models with no more than 40,000 triangles in total across instances are accepted.",
-            "本人拥有的自包含静态 GLB；不限制生成服务。候选待真实端点及完整交付验收，当前停用。 修复可能移除纹理；报告明确区分上游已报告与未提供的修复细节。": "A self-contained static GLB that you own, from any generation service. This candidate is pending real-endpoint and full-delivery acceptance and is currently disabled. Repair may remove textures. The report clearly distinguishes repair details reported by the upstream from those not provided.",
-            "本人拥有的自包含静态 GLB；不限制生成服务。分析结果不构成打印安全认证。": "A self-contained static GLB that you own, from any generation service. The analysis result is not a print safety certification.",
+            "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。": "A self-contained static GLB that you own, from any generation service. Direct uploads are limited to 10 MiB; a GLB produced by your own successful task can be up to 70 MiB (sent inline as a data URI).",
+            "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。UV 展开会移除原纹理；仅接收按实例累计不超过 40000 个三角面的模型。": "A self-contained static GLB that you own, from any generation service. Direct uploads are limited to 10 MiB; a GLB produced by your own successful task can be up to 70 MiB (sent inline as a data URI). UV unwrapping removes the original texture. Only models with no more than 40,000 triangles in total across instances are accepted.",
+            "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。候选待真实端点及完整交付验收，当前停用。 修复可能移除纹理；报告明确区分上游已报告与未提供的修复细节。": "A self-contained static GLB that you own, from any generation service. Direct uploads are limited to 10 MiB; a GLB produced by your own successful task can be up to 70 MiB (sent inline as a data URI). This candidate is pending real-endpoint and full-delivery acceptance and is currently disabled. Repair may remove textures. The report clearly distinguishes repair details reported by the upstream from those not provided.",
+            "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。分析结果不构成打印安全认证。": "A self-contained static GLB that you own, from any generation service. Direct uploads are limited to 10 MiB; a GLB produced by your own successful task can be up to 70 MiB (sent inline as a data URI). The analysis result is not a print safety certification.",
             "本人本会话已成功交付的上述 Rodin 服务；不接受其他服务、加工结果或任意上游 UUID。": "The Rodin service above that you successfully delivered in this session. Other services, processed results, and arbitrary upstream UUIDs are not accepted.",
             "本服务固定交付所列全部附加格式；格式与额外费用在原生处理开始前一并批准。": "This service always delivers all the listed additional formats. The formats and extra fees are approved together before native processing starts.",
             "一次转换固定导出全部六种格式（共 1 积分）。Meshy Convert 只返回各格式的模型文件，不单独返回贴图或材质库：OBJ 文件里引用了一个材质库（如 temp.mtl），但这个文件不随结果提供；OBJ 的形状和贴图坐标（UV）完整，但没有材质和贴图。任一格式校验失败则任务失败。": "One run always exports all six formats (1 credit in total). Meshy Convert returns only the model file of each format, with no separate textures or material library: the OBJ references a material library (such as temp.mtl) that is not provided with the result; its shape and texture coordinates (UVs) are complete, but it has no materials or textures. The task fails if any format fails its check.",
@@ -16093,6 +16111,7 @@
             "游到岸边 (swimming_to_edge)": "Swim to edge",
             "游泳待机 (Swim_Idle)": "Swim idle",
             "源任务": "Source task",
+            "同一 Meshy 连接上本人成功且仍在保留期内的任务：直接按任务 ID 引用，不上传模型文件。": "Your own successful task on the same Meshy connection that is still within its retention period: referenced directly by task ID, with no model file uploaded.",
             "源模型": "Source model",
             "源模型 URL": "Source model URL",
             "源模型任务": "Source model task",
@@ -29904,7 +29923,7 @@
         "cdn.meshy.ai"
       ],
       "id": "meshy/processing/uv-unwrap",
-      "revision": "2026-10-15.2",
+      "revision": "2026-11-04.93.1",
       "model_id": "meshy-uv-unwrap",
       "model_name": "Meshy UV Unwrap",
       "capability": "uv-unwrap",
@@ -29927,10 +29946,35 @@
       },
       "parameters": [
         {
+          "name": "source_task",
+          "label": "源任务",
+          "type": "task",
+          "wire_name": "input_task_id",
+          "upstream_job_max_age_seconds": 172800,
+          "task_capabilities": [
+            "text-to-3d",
+            "image-to-3d",
+            "remesh",
+            "retexture"
+          ],
+          "same_provider": true,
+          "semantic": "source-task",
+          "task_offerings": [
+            "meshy/meshy-7.1/text-to-3d",
+            "meshy/meshy-7.1/image-to-3d",
+            "meshy/meshy-t2.5/text-to-3d",
+            "meshy/meshy-t2.5/image-to-3d",
+            "meshy/meshy-7/text-to-3d",
+            "meshy/meshy-7/image-to-3d",
+            "meshy/processing/remesh",
+            "meshy/processing/retexture"
+          ],
+          "description": "同一 Meshy 连接上本人成功且仍在保留期内的任务：直接按任务 ID 引用，不上传模型文件。"
+        },
+        {
           "name": "source_asset",
           "label": "源模型（静态 GLB）",
           "type": "asset",
-          "required": true,
           "wire_name": "model_url",
           "semantic": "source-asset",
           "media_types": [
@@ -29940,17 +29984,31 @@
           "extensions": [
             ".glb"
           ],
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "uploaded_model": {
             "profile_id": "static-glb-v1"
           },
-          "description": "本人拥有的自包含静态 GLB；不限制生成服务。UV 展开会移除原纹理；仅接收按实例累计不超过 40000 个三角面的模型。",
+          "description": "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。UV 展开会移除原纹理；仅接收按实例累计不超过 40000 个三角面的模型。",
           "presentation": {
             "surface": "task",
             "control": "asset"
           }
         }
       ],
+      "input_rules": [
+        {
+          "parameters": [
+            "source_task",
+            "source_asset"
+          ],
+          "minimum": 1,
+          "maximum": 1
+        }
+      ],
+      "source_model_limit": {
+        "max_triangles": 40000,
+        "count_basis": "triangles"
+      },
       "outputs": [
         {
           "role": "model",
@@ -29991,7 +30049,7 @@
           }
         ],
         "inline_model_input": {
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "media_type": "application/octet-stream"
         },
         "model_input_profile": {
@@ -30015,7 +30073,7 @@
         "cdn.meshy.ai"
       ],
       "id": "meshy/processing/resize",
-      "revision": "2026-10-15.2",
+      "revision": "2026-11-04.93.1",
       "model_id": "meshy-resize",
       "model_name": "Meshy Resize",
       "capability": "resize",
@@ -30038,10 +30096,35 @@
       },
       "parameters": [
         {
+          "name": "source_task",
+          "label": "源任务",
+          "type": "task",
+          "wire_name": "input_task_id",
+          "upstream_job_max_age_seconds": 172800,
+          "task_capabilities": [
+            "text-to-3d",
+            "image-to-3d",
+            "remesh",
+            "retexture"
+          ],
+          "same_provider": true,
+          "semantic": "source-task",
+          "task_offerings": [
+            "meshy/meshy-7.1/text-to-3d",
+            "meshy/meshy-7.1/image-to-3d",
+            "meshy/meshy-t2.5/text-to-3d",
+            "meshy/meshy-t2.5/image-to-3d",
+            "meshy/meshy-7/text-to-3d",
+            "meshy/meshy-7/image-to-3d",
+            "meshy/processing/remesh",
+            "meshy/processing/retexture"
+          ],
+          "description": "同一 Meshy 连接上本人成功且仍在保留期内的任务：直接按任务 ID 引用，不上传模型文件。"
+        },
+        {
           "name": "source_asset",
           "label": "源模型（静态 GLB）",
           "type": "asset",
-          "required": true,
           "wire_name": "model_url",
           "semantic": "source-asset",
           "media_types": [
@@ -30051,11 +30134,11 @@
           "extensions": [
             ".glb"
           ],
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "uploaded_model": {
             "profile_id": "static-glb-v1"
           },
-          "description": "本人拥有的自包含静态 GLB；不限制生成服务。",
+          "description": "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。",
           "presentation": {
             "surface": "task",
             "control": "asset"
@@ -30128,7 +30211,7 @@
           }
         ],
         "inline_model_input": {
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "media_type": "application/octet-stream"
         },
         "model_input_profile": {
@@ -30138,6 +30221,14 @@
         }
       },
       "input_rules": [
+        {
+          "parameters": [
+            "source_task",
+            "source_asset"
+          ],
+          "minimum": 1,
+          "maximum": 1
+        },
         {
           "parameters": [
             "resize_height",
@@ -30162,7 +30253,7 @@
         "cdn.meshy.ai"
       ],
       "id": "meshy/processing/analyze-printability",
-      "revision": "2026-10-15.2",
+      "revision": "2026-11-04.93.1",
       "model_id": "meshy-analyze-printability",
       "model_name": "Meshy Analyze Printability",
       "capability": "analyze-printability",
@@ -30185,10 +30276,36 @@
       },
       "parameters": [
         {
+          "name": "source_task",
+          "label": "源任务",
+          "type": "task",
+          "wire_name": "input_task_id",
+          "upstream_job_max_age_seconds": 172800,
+          "task_capabilities": [
+            "text-to-3d",
+            "image-to-3d",
+            "remesh",
+            "retexture"
+          ],
+          "same_provider": true,
+          "semantic": "source-task",
+          "task_offerings": [
+            "meshy/meshy-7.1/text-to-3d",
+            "meshy/meshy-7.1/image-to-3d",
+            "meshy/meshy-t2.5/text-to-3d",
+            "meshy/meshy-t2.5/image-to-3d",
+            "meshy/meshy-7/text-to-3d",
+            "meshy/meshy-7/image-to-3d",
+            "meshy/meshy-7.1-multiview/image-to-3d",
+            "meshy/processing/remesh",
+            "meshy/processing/retexture"
+          ],
+          "description": "同一 Meshy 连接上本人成功且仍在保留期内的任务：直接按任务 ID 引用，不上传模型文件。"
+        },
+        {
           "name": "source_asset",
           "label": "源模型（静态 GLB）",
           "type": "asset",
-          "required": true,
           "wire_name": "model_url",
           "semantic": "source-asset",
           "media_types": [
@@ -30198,11 +30315,11 @@
           "extensions": [
             ".glb"
           ],
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "uploaded_model": {
             "profile_id": "static-glb-v1"
           },
-          "description": "本人拥有的自包含静态 GLB；不限制生成服务。分析结果不构成打印安全认证。",
+          "description": "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。分析结果不构成打印安全认证。",
           "presentation": {
             "surface": "task",
             "control": "asset"
@@ -30271,7 +30388,7 @@
         "api_version": "v1",
         "result_assets": [],
         "inline_model_input": {
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "media_type": "model/gltf-binary"
         },
         "model_input_profile": {
@@ -30288,6 +30405,14 @@
         ]
       },
       "input_rules": [
+        {
+          "parameters": [
+            "source_task",
+            "source_asset"
+          ],
+          "minimum": 1,
+          "maximum": 1
+        },
         {
           "parameters": [
             "intended_print_height_mm",
@@ -30312,7 +30437,7 @@
         "cdn.meshy.ai"
       ],
       "id": "meshy/processing/repair-printability",
-      "revision": "2026-10-15.1",
+      "revision": "2026-11-04.93.1",
       "model_id": "meshy-repair-printability",
       "model_name": "Meshy Repair Printability（候选，待实测）",
       "capability": "repair-printability",
@@ -30335,10 +30460,36 @@
       },
       "parameters": [
         {
+          "name": "source_task",
+          "label": "源任务",
+          "type": "task",
+          "wire_name": "input_task_id",
+          "upstream_job_max_age_seconds": 172800,
+          "task_capabilities": [
+            "text-to-3d",
+            "image-to-3d",
+            "remesh",
+            "retexture"
+          ],
+          "same_provider": true,
+          "semantic": "source-task",
+          "task_offerings": [
+            "meshy/meshy-7.1/text-to-3d",
+            "meshy/meshy-7.1/image-to-3d",
+            "meshy/meshy-t2.5/text-to-3d",
+            "meshy/meshy-t2.5/image-to-3d",
+            "meshy/meshy-7/text-to-3d",
+            "meshy/meshy-7/image-to-3d",
+            "meshy/meshy-7.1-multiview/image-to-3d",
+            "meshy/processing/remesh",
+            "meshy/processing/retexture"
+          ],
+          "description": "同一 Meshy 连接上本人成功且仍在保留期内的任务：直接按任务 ID 引用，不上传模型文件。"
+        },
+        {
           "name": "source_asset",
           "label": "源模型（静态 GLB）",
           "type": "asset",
-          "required": true,
           "wire_name": "model_url",
           "semantic": "source-asset",
           "media_types": [
@@ -30348,11 +30499,11 @@
           "extensions": [
             ".glb"
           ],
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "uploaded_model": {
             "profile_id": "static-glb-v1"
           },
-          "description": "本人拥有的自包含静态 GLB；不限制生成服务。候选待真实端点及完整交付验收，当前停用。 修复可能移除纹理；报告明确区分上游已报告与未提供的修复细节。",
+          "description": "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。候选待真实端点及完整交付验收，当前停用。 修复可能移除纹理；报告明确区分上游已报告与未提供的修复细节。",
           "presentation": {
             "surface": "task",
             "control": "asset"
@@ -30438,7 +30589,7 @@
           }
         ],
         "inline_model_input": {
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "media_type": "model/gltf-binary"
         },
         "model_input_profile": {
@@ -30455,6 +30606,14 @@
         ]
       },
       "input_rules": [
+        {
+          "parameters": [
+            "source_task",
+            "source_asset"
+          ],
+          "minimum": 1,
+          "maximum": 1
+        },
         {
           "parameters": [
             "intended_print_height_mm",
@@ -30479,7 +30638,7 @@
         "cdn.meshy.ai"
       ],
       "id": "meshy/processing/multi-color-print",
-      "revision": "2026-10-15.2",
+      "revision": "2026-11-04.93.1",
       "model_id": "meshy-multi-color-print",
       "model_name": "Meshy Multi-Color Print",
       "capability": "multi-color-print",
@@ -30502,10 +30661,36 @@
       },
       "parameters": [
         {
+          "name": "source_task",
+          "label": "源任务",
+          "type": "task",
+          "wire_name": "input_task_id",
+          "upstream_job_max_age_seconds": 172800,
+          "task_capabilities": [
+            "text-to-3d",
+            "image-to-3d",
+            "remesh",
+            "retexture"
+          ],
+          "same_provider": true,
+          "semantic": "source-task",
+          "task_offerings": [
+            "meshy/meshy-7.1/text-to-3d",
+            "meshy/meshy-7.1/image-to-3d",
+            "meshy/meshy-t2.5/text-to-3d",
+            "meshy/meshy-t2.5/image-to-3d",
+            "meshy/meshy-7/text-to-3d",
+            "meshy/meshy-7/image-to-3d",
+            "meshy/meshy-7.1-multiview/image-to-3d",
+            "meshy/processing/remesh",
+            "meshy/processing/retexture"
+          ],
+          "description": "同一 Meshy 连接上本人成功且仍在保留期内的任务：直接按任务 ID 引用，不上传模型文件。"
+        },
+        {
           "name": "source_asset",
           "label": "源模型（静态 GLB）",
           "type": "asset",
-          "required": true,
           "wire_name": "model_url",
           "semantic": "source-asset",
           "media_types": [
@@ -30515,14 +30700,14 @@
           "extensions": [
             ".glb"
           ],
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "uploaded_model": {
             "profile_id": "static-glb-v1",
             "require_textures": true,
             "require_single_base_color_texture": true,
             "requirements": "所有部件须共用同一基础色贴图引用并有对应 UV；包括文件内未被场景引用的网格。不同 texture 引用即使指向同图像也不接受；法线贴图不算。"
           },
-          "description": "本人拥有的自包含静态 GLB；不限制生成服务。",
+          "description": "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。",
           "presentation": {
             "surface": "task",
             "control": "asset"
@@ -30594,6 +30779,16 @@
           "fixed": true
         }
       ],
+      "input_rules": [
+        {
+          "parameters": [
+            "source_task",
+            "source_asset"
+          ],
+          "minimum": 1,
+          "maximum": 1
+        }
+      ],
       "outputs": [
         {
           "role": "print-archive",
@@ -30620,7 +30815,7 @@
           }
         ],
         "inline_model_input": {
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "media_type": "model/gltf-binary"
         },
         "model_input_profile": {

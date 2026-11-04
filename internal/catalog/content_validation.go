@@ -307,3 +307,57 @@ func validateContent(schema ContentSchema) error {
 	}
 	return nil
 }
+
+// unavailableNoticeMessages are the texts of the shared "unavailable" notice
+// (#93, #94): a warning icon, "无法使用，<short reason>" inline, and the full
+// explanation (the limit against the actual value, what upstream requires,
+// what to do next) only in the hover hint. Each key carries exactly these
+// placeholders in the default copy and in every bundle that translates it, so
+// the frontend never assembles a reason or a remedy of its own.
+var unavailableNoticeMessages = map[string][]string{
+	"ui.unavailable.label":                                   {"reason"},
+	"ui.workspace.processing.unavailable_reason.too_large":   {"limit"},
+	"ui.workspace.processing.unavailable_reason.face_limit":  {"limit"},
+	"ui.workspace.processing.unavailable_reason.media":       nil,
+	"ui.workspace.processing.unavailable_reason.needs_task":  {"provider"},
+	"ui.workspace.processing.unavailable_reason.expired":     nil,
+	"ui.workspace.processing.unavailable_reason.blocked":     nil,
+	"ui.workspace.processing.unavailable_reason.unavailable": nil,
+	"ui.workspace.processing.source_refused":                 {"size", "reasons"},
+	"ui.workspace.processing.source_refused_face_limit":      {"service", "limit", "faces"},
+}
+
+func validateUnavailableNotices(schema ApplicationSchema) error {
+	check := func(where, key, text string, want []string) error {
+		// Presence is the default Catalog's contract (its tests assert every
+		// key); a smaller custom Application may leave them out, but a declared
+		// text must carry exactly its placeholders.
+		if strings.TrimSpace(text) == "" {
+			return nil
+		}
+		got := placeholderSet(text)
+		if len(got) != len(want) {
+			return fmt.Errorf("%s 的 %q 占位符须恰为 %v", where, key, want)
+		}
+		for _, name := range want {
+			if !got[name] {
+				return fmt.Errorf("%s 的 %q 占位符须恰为 %v", where, key, want)
+			}
+		}
+		return nil
+	}
+	for key, want := range unavailableNoticeMessages {
+		if err := check("content.messages", key, schema.Content.Messages[key], want); err != nil {
+			return err
+		}
+		if schema.Localization == nil {
+			continue
+		}
+		for locale, bundle := range schema.Localization.Bundles {
+			if err := check("bundles."+locale+".messages", key, bundle.Messages[key], want); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

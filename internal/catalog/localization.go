@@ -197,6 +197,9 @@ func validateLocalization(schema ApplicationSchema) error {
 	if err := validateCountForms(schema); err != nil {
 		return err
 	}
+	if err := validateUnavailableNotices(schema); err != nil {
+		return err
+	}
 	localization := schema.Localization
 	if localization == nil {
 		return nil
