@@ -433,8 +433,8 @@ class WorkflowReplay(unittest.TestCase):
         for fragment in ('--cpus 4', f'--memory {DEFAULT_MEMORY_GIB}g', f'--memory-swap {DEFAULT_MEMORY_GIB}g', 'no-new-privileges', host_run.LABEL, '--label plinth.host-ci.slot=0'):
             self.assertIn(fragment, options)
         self.assertIn('ubuntu-latest=plinth-ci-act:abc', command)
-        self.assertIn('plinth-azure=plinth-ci-act:abc', command)  # the race job's push route (#78) stays in the limited container
-        self.assertEqual(command[command.index('-W') + 1], '/ci/run/r1/src/.github/workflows/ci.yml')  # azure-runner.yml is not replayed
+        self.assertIn('plinth-azure=plinth-ci-act:abc', command)  # kept for replaying older commits with the Azure race route (#78)
+        self.assertEqual(command[command.index('-W') + 1], '/ci/run/r1/src/.github/workflows/ci.yml')  # only ci.yml is replayed
         self.assertIn('--pull=false', command)  # the derived image exists only locally; act must not try to pull it
         self.assertEqual(command[command.index('--concurrent-jobs') + 1], '1')
         self.assertEqual(command[command.index('--container-daemon-socket') + 1], '-')

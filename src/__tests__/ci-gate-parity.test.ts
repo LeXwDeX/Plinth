@@ -16,7 +16,7 @@ import { isAlias, parseDocument, visit } from 'yaml';
  *   `verify-local.py --race`，其 GOFLAGS 不得带入跳过或削弱测试的开关；
  * - ci.yml 用 yaml 库结构化解析（#86）：引号键、流式 `{}`、锚点别名等写法都归一成同一结构，
  *   门禁步骤上出现 if、continue-on-error、shell、env 等字段，或作业级 if/needs/strategy，都会被拒绝。
- * 其余检查（运行器路由、并发分组、权限）仍按文本解析，只依赖这些文件现有的固定写法；写法变了先改这里的解析。
+ * 其余检查（托管 runner、并发分组、权限）仍按文本解析，只依赖这些文件现有的固定写法；写法变了先改这里的解析。
  */
 const read = (path: string) => readFileSync(path, 'utf8');
 
@@ -99,26 +99,16 @@ function localArgvProblems(local: LocalGate, gate: Gate): string[] {
 }
 
 /**
- * Runner routing (#79 phase 1): push, pull_request and a default manual dispatch stay on
- * GitHub-hosted runners. Only an explicit workflow_dispatch with use_self_hosted=true
- * selects the repository-level trusted label set. This is a routing rule, not an isolation
- * boundary: a pull request can still edit this workflow.
+ * All gate jobs run on GitHub-hosted runners. The workflow must not route a job to a
+ * self-hosted label set: the Azure runner and the trusted manual opt-in were removed (#100).
+ * This is a routing rule, not an isolation boundary: a pull request can still edit this workflow.
  */
-const runnerExpression = '${{ github.event_name == \'workflow_dispatch\' && inputs.use_self_hosted && fromJSON(\'["self-hosted","Linux","X64","plinth-trusted-ci"]\') || \'ubuntu-latest\' }}';
-/**
- * go test race only (#78): besides the manual trusted opt-in, a push to main and a pull request
- * whose head is in this repository run on the on-demand Azure runner. Fork pull requests and
- * every other event stay on GitHub-hosted runners.
- */
-const raceRunnerExpression = '${{ github.event_name == \'workflow_dispatch\' && inputs.use_self_hosted && fromJSON(\'["self-hosted","Linux","X64","plinth-trusted-ci"]\') || (github.event_name == \'push\' && github.ref == \'refs/heads/main\' || github.event_name == \'pull_request\' && github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(\'["self-hosted","Linux","X64","plinth-azure"]\') || \'ubuntu-latest\' }}';
-const concurrencyGroup = "ci-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && inputs.use_self_hosted && 'trusted-' || '' }}${{ github.event.pull_request.number || github.ref }}";
+const hostedRunner = 'ubuntu-latest';
+const concurrencyGroup = 'ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}';
 
 function hasRunnerRoute(text: string): boolean {
   const expressions = [...text.matchAll(/^ {4}runs-on: (.+)$/gm)].map((match) => match[1].trim());
-  return expressions.length === 3
-    && expressions[0] === runnerExpression
-    && expressions[1] === runnerExpression
-    && expressions[2] === raceRunnerExpression;
+  return expressions.length === 3 && expressions.every((expression) => expression === hostedRunner);
 }
 
 function hasConcurrencyGroup(text: string): boolean {
@@ -147,13 +137,6 @@ function triggerBlock(onBlock: string, trigger: string): string {
     body.push(line);
   }
   return body.join('\n');
-}
-
-function validManualInput(manual: string): boolean {
-  return /^ {4}inputs:\s*$/m.test(manual)
-    && (manual.match(/^ {6}use_self_hosted:\s*$/gm) || []).length === 1
-    && /^ {8}type: boolean\s*$/m.test(manual)
-    && /^ {8}default: false\s*$/m.test(manual);
 }
 
 function validEvents(onBlock: string): boolean {
@@ -305,34 +288,19 @@ describe('CI and local gate parity with dev_test.md §2', () => {
     expect(workflowProblems(read('.github/workflows/ci.yml'), gates)).toEqual([]);
   });
 
-  it('separates only explicit self-hosted dispatch concurrency from hosted runs', () => {
+  it('groups concurrent runs by pull request number or ref', () => {
     const text = read('.github/workflows/ci.yml');
     expect(hasConcurrencyGroup(text)).toBe(true);
     expect(text).toContain("  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n");
-    expect(hasConcurrencyGroup(text.replace("github.event_name == 'workflow_dispatch' && inputs.use_self_hosted && 'trusted-'", "inputs.use_self_hosted && 'trusted-'"))).toBe(false);
     expect(hasConcurrencyGroup(text.replace('github.event.pull_request.number || ', ''))).toBe(false);
-    expect(hasConcurrencyGroup(text.replace("'trusted-'", 'inputs.prefix'))).toBe(false);
     // Model only the exact expression above, not the GitHub expression engine.
     const cases = [
-      { event: 'push', input: undefined, number: undefined, expected: 'ci-ci-refs/heads/main' },
-      { event: 'push', input: true, number: undefined, expected: 'ci-ci-refs/heads/main' },
-      { event: 'pull_request', input: undefined, number: 79, expected: 'ci-ci-79' },
-      { event: 'pull_request', input: true, number: 79, expected: 'ci-ci-79' },
-      { event: 'workflow_dispatch', input: undefined, number: undefined, expected: 'ci-ci-refs/heads/main' },
-      { event: 'workflow_dispatch', input: false, number: undefined, expected: 'ci-ci-refs/heads/main' },
-      { event: 'workflow_dispatch', input: true, number: undefined, expected: 'ci-ci-trusted-refs/heads/main' },
+      { event: 'push', ref: 'refs/heads/main', number: undefined, expected: 'ci-ci-refs/heads/main' },
+      { event: 'pull_request', ref: 'refs/pull/100/merge', number: 100, expected: 'ci-ci-100' },
+      { event: 'workflow_dispatch', ref: 'refs/heads/main', number: undefined, expected: 'ci-ci-refs/heads/main' },
     ];
-    for (const { event, input, number, expected } of cases) {
-      const prefix = event === 'workflow_dispatch' && input === true ? 'trusted-' : '';
-      expect(`ci-ci-${prefix}${number || 'refs/heads/main'}`, event).toBe(expected);
-    }
-  });
-
-  it('does not collide across different dispatch refs', () => {
-    const dispatchGroup = (ref: string, selfHosted: boolean) => `ci-ci-${selfHosted ? 'trusted-' : ''}${ref}`;
-    expect(dispatchGroup('refs/heads/main', true)).not.toBe(dispatchGroup('refs/heads/main-self-hosted', false));
-    for (const hostedKey of ['refs/heads/trusted-main', 'refs/tags/main', '79']) {
-      expect(dispatchGroup('refs/heads/main', true)).not.toBe(dispatchGroup(hostedKey, false));
+    for (const { event, ref, number, expected } of cases) {
+      expect(`ci-ci-${number || ref}`, event).toBe(expected);
     }
   });
 
@@ -344,81 +312,29 @@ describe('CI and local gate parity with dev_test.md §2', () => {
     uses.forEach((ref) => expect(ref).toMatch(/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/));
   });
 
-  it('statically fixes the runner expression and models the known event cases', () => {
+  it('runs every gate job on a GitHub-hosted runner', () => {
     const text = read('.github/workflows/ci.yml');
     expect(hasRunnerRoute(text)).toBe(true);
-    expect(hasRunnerRoute(text.replaceAll('plinth-trusted-ci', 'another-runner'))).toBe(false);
-    expect(hasRunnerRoute(text.replaceAll("github.event_name == 'workflow_dispatch' && ", ''))).toBe(false);
-    expect(hasRunnerRoute(text.replaceAll('"X64",', ''))).toBe(false);
-    const trusted = ['self-hosted', 'Linux', 'X64', 'plinth-trusted-ci'];
-    const cases = [
-      { github: { event_name: 'push' }, inputs: { use_self_hosted: undefined }, expected: 'ubuntu-latest' },
-      { github: { event_name: 'pull_request' }, inputs: { use_self_hosted: undefined }, expected: 'ubuntu-latest' },
-      { github: { event_name: 'workflow_dispatch' }, inputs: { use_self_hosted: undefined }, expected: 'ubuntu-latest' },
-      { github: { event_name: 'workflow_dispatch' }, inputs: { use_self_hosted: false }, expected: 'ubuntu-latest' },
-      { github: { event_name: 'workflow_dispatch' }, inputs: { use_self_hosted: true }, expected: trusted },
-      { github: { event_name: 'push' }, inputs: { use_self_hosted: true }, expected: 'ubuntu-latest' },
-      { github: { event_name: 'pull_request' }, inputs: { use_self_hosted: true }, expected: 'ubuntu-latest' },
-    ];
-    for (const testCase of cases) {
-      expect(
-        testCase.github.event_name === 'workflow_dispatch' && testCase.inputs.use_self_hosted === true ? trusted : 'ubuntu-latest',
-        `${testCase.github.event_name} with use_self_hosted=${String(testCase.inputs.use_self_hosted)}`,
-      ).toEqual(testCase.expected);
-    }
+    expect(hasRunnerRoute(text.replaceAll(hostedRunner, 'self-hosted'))).toBe(false);
+    expect(hasRunnerRoute(text.replaceAll(hostedRunner, "fromJSON('[\"self-hosted\",\"Linux\",\"X64\",\"plinth-trusted-ci\"]')"))).toBe(false);
+    expect(text).not.toMatch(/self-hosted|plinth-azure|plinth-trusted-ci|use_self_hosted/);
   });
 
-  it('routes only go test race to the Azure runner, and only for trusted events (#78)', () => {
-    const text = read('.github/workflows/ci.yml');
-    expect(hasRunnerRoute(text.replace('plinth-azure', 'another-runner'))).toBe(false);
-    expect(hasRunnerRoute(text.replace(" && github.ref == 'refs/heads/main'", ''))).toBe(false);
-    expect(hasRunnerRoute(text.replace(' && github.event.pull_request.head.repo.full_name == github.repository', ''))).toBe(false);
-    expect(hasRunnerRoute(text.replace("github.event_name == 'pull_request' && github.event", "github.event_name == 'pull_request_target' && github.event"))).toBe(false);
-    expect(text.match(/plinth-azure/g)).toHaveLength(1);
-    const trusted = ['self-hosted', 'Linux', 'X64', 'plinth-trusted-ci'];
-    const azure = ['self-hosted', 'Linux', 'X64', 'plinth-azure'];
-    const repository = 'LeXwDeX/Plinth';
-    const route = (event: string, ref: string, head: string | undefined, selfHosted: boolean | undefined) =>
-      event === 'workflow_dispatch' && selfHosted === true
-        ? trusted
-        : (event === 'push' && ref === 'refs/heads/main') || (event === 'pull_request' && head === repository)
-          ? azure
-          : 'ubuntu-latest';
-    const cases: [string, string, string | undefined, boolean | undefined, unknown][] = [
-      ['push', 'refs/heads/main', undefined, undefined, azure],
-      ['push', 'refs/heads/feature', undefined, undefined, 'ubuntu-latest'],
-      ['push', 'refs/tags/v1.0.0', undefined, undefined, 'ubuntu-latest'],
-      ['pull_request', 'refs/pull/1/merge', repository, undefined, azure],
-      ['pull_request', 'refs/pull/2/merge', 'someone/Plinth', undefined, 'ubuntu-latest'],
-      ['pull_request_target', 'refs/heads/main', 'someone/Plinth', undefined, 'ubuntu-latest'],
-      ['workflow_run', 'refs/heads/main', undefined, undefined, 'ubuntu-latest'],
-      ['workflow_dispatch', 'refs/heads/main', undefined, undefined, 'ubuntu-latest'],
-      ['workflow_dispatch', 'refs/heads/main', undefined, true, trusted],
-    ];
-    for (const [event, ref, head, selfHosted, expected] of cases) {
-      expect(route(event, ref, head, selfHosted), `${event} ${ref} head=${head}`).toEqual(expected);
-    }
-  });
-
-  it('declares the manual runner opt-in as a boolean defaulting to hosted', () => {
+  it('keeps workflow_dispatch available without manual runner inputs', () => {
     const text = read('.github/workflows/ci.yml');
     const onBlock = text.slice(text.indexOf('\non:'), text.indexOf('\npermissions:'));
     expect(validEvents(onBlock)).toBe(true);
     for (const event of ['push', 'pull_request', 'workflow_dispatch']) {
       expect(validEvents(onBlock.replace(`  ${event}:`, `  missing_${event}:`)), event).toBe(false);
     }
-    const manual = triggerBlock(onBlock, 'workflow_dispatch');
-    expect(validManualInput(manual)).toBe(true);
-    expect(validManualInput(manual.replace('type: boolean', 'type: string'))).toBe(false);
-    expect(validManualInput(manual.replace('default: false', 'default: true'))).toBe(false);
+    expect(triggerBlock(onBlock, 'workflow_dispatch').trim()).toBe('');
   });
 
-  it('keeps the CI security preconditions independent of the runner route', () => {
+  it('keeps the CI security preconditions', () => {
     const text = read('.github/workflows/ci.yml');
     expect(hasSafePermissions(text)).toBe(true);
     expect(text.match(/^ {10}persist-credentials: false$/gm)).toHaveLength(3);
-    // The opt-in reaches only the three runs-on lines and the concurrency group.
-    expect(text.match(/inputs\.use_self_hosted/g)).toHaveLength(4);
+    expect(text).not.toMatch(/inputs\.use_self_hosted|self-hosted/);
     expect(text).not.toContain('github.event.inputs');
   });
 
@@ -595,82 +511,6 @@ describe('host CI parity with the gates (#86)', () => {
     const limits = Object.fromEntries([...(/LIMIT_DEFAULTS = \{(.+)\}/.exec(runPy)![1]).matchAll(/'(\w+)': (\d+)/g)].map((m) => [m[1], Number(m[2])]));
     const margin = Number(/^MIN_MEMORY_MARGIN_GIB = (\d+)$/m.exec(hostRun)![1]);
     expect(limits.min_mem_gib).toBeGreaterThanOrEqual(limits.memory_gib + margin);
-  });
-});
-
-/**
- * The Azure runner start workflow (#78) holds the only id-token in this repository. It starts the VM
- * for a push to main or a pull request from this repository, and from main by hand when a race job
- * is queued for the Azure label. Re-runs do not re-trigger push or pull_request; the workflow_job
- * webhook (scripts/azure-runner/webhook) starts the VM for those.
- * It must never run or read the triggering code.
- */
-describe('Azure runner start workflow (#78)', () => {
-  const text = read('.github/workflows/azure-runner.yml');
-  const workflow = parseDocument(text, { uniqueKeys: true }).toJS();
-  const startCondition = [
-    "(github.event_name == 'push' && github.ref == 'refs/heads/main') ||",
-    "(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||",
-    "(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')",
-  ].join(' ');
-  const condition = (source: string) => {
-    const parsed = parseDocument(source, { uniqueKeys: true }).toJS();
-    return String(parsed.jobs.start.if).replace(/\s+/g, ' ').replace(/^\$\{\{ | \}\}$/g, '').trim();
-  };
-
-  it('starts only on push to main, same-repository pull requests, and a dispatch from main', () => {
-    expect(workflow.on).toEqual({
-      push: { branches: ['main'] },
-      pull_request: null,
-      workflow_dispatch: null,
-    });
-    expect(Object.keys(workflow.jobs)).toEqual(['start']);
-    expect(condition(text)).toBe(startCondition);
-    expect(condition(text.replace("github.event.pull_request.head.repo.full_name == github.repository", 'true'))).not.toBe(startCondition);
-    expect(condition(text.replace("github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'", "github.event_name == 'workflow_dispatch'"))).not.toBe(startCondition);
-    expect(condition(text)).not.toMatch(/workflow_run|pull_request_target/);
-  });
-
-  it('models the trigger cases, skipping every fork', () => {
-    const repository = 'LeXwDeX/Plinth';
-    type Event = { name: string; ref?: string; head?: string };
-    const starts = (e: Event) =>
-      (e.name === 'push' && e.ref === 'refs/heads/main')
-      || (e.name === 'pull_request' && e.head === repository)
-      || (e.name === 'workflow_dispatch' && e.ref === 'refs/heads/main');
-    const cases: [Event, boolean][] = [
-      [{ name: 'push', ref: 'refs/heads/main' }, true],
-      [{ name: 'push', ref: 'refs/heads/feature' }, false],
-      [{ name: 'pull_request', head: repository }, true],
-      [{ name: 'pull_request', head: 'someone/Plinth' }, false],
-      [{ name: 'schedule', ref: 'refs/heads/main' }, false],
-      [{ name: 'workflow_dispatch', ref: 'refs/heads/main' }, true],
-      [{ name: 'workflow_dispatch', ref: 'refs/heads/feature' }, false],
-    ];
-    for (const [event, expected] of cases) {
-      expect(starts(event), JSON.stringify(event)).toBe(expected);
-    }
-  });
-
-  it('holds only the permissions it needs and never runs or reads the triggering code', () => {
-    expect(workflow.permissions).toEqual({ contents: 'read' });
-    expect(workflow.jobs.start.permissions).toEqual({ actions: 'read', contents: 'read', 'id-token': 'write' });
-    const steps = workflow.jobs.start.steps as { id?: string; if?: string; uses?: string; run?: string }[];
-    expect(steps.filter((step) => step.uses).map((step) => step.uses)).toEqual(['azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906']);
-    expect(text).not.toMatch(/checkout|download-artifact|actions\/cache|head_sha|head_commit|artifacts_url|github\.event\.(?:pull_request|head_commit)\.[a-z_.]*\b(?:title|body|message|ref)\b/);
-    const runs = steps.filter((step) => step.run).map((step) => step.run!.trim());
-    expect(runs).toHaveLength(2);
-    expect(runs[1]).toBe('az vm start --resource-group "$RESOURCE_GROUP" --name "$VM" --output none');
-    // The queue check only reads the CI workflow's jobs and counts those waiting for the Azure label.
-    expect(runs[0]).toMatch(/^count=0\n/);
-    expect(runs[0]).toContain('actions/workflows/ci.yml/runs');
-    expect(runs[0]).toContain('index("plinth-azure")');
-    expect(runs[0]).not.toMatch(/\$\{\{/);
-    // On a dispatch the VM starts only when a job is queued for it.
-    const guarded = "${{ steps.queued.outcome == 'skipped' || steps.queued.outputs.count != '0' }}";
-    expect(steps.filter((step) => step.id !== 'queued').map((step) => step.if)).toEqual([guarded, guarded]);
-    expect(steps[0].id).toBe('queued');
-    expect(steps[0].if).toBe("${{ github.event_name == 'workflow_dispatch' }}");
   });
 });
 
