@@ -582,6 +582,14 @@ func (s *Server) routes() {
 		s.mux.HandleFunc("GET "+routes.ChatSessionNotes, s.withIdentity(s.getChatSessionNotes))
 		s.mux.HandleFunc("PUT "+routes.ChatSessionNotes, s.withIdentity(s.putChatSessionNotes))
 	}
+	if routes.ChatSessionBrief != "" {
+		s.mux.HandleFunc("GET "+routes.ChatSessionBrief, s.withIdentity(s.getChatSessionBrief))
+		s.mux.HandleFunc("PUT "+routes.ChatSessionBrief, s.withPrincipal(s.putChatSessionBrief))
+	}
+	if routes.ChatSessionModel3D != "" {
+		s.mux.HandleFunc("GET "+routes.ChatSessionModel3D, s.withIdentity(s.getChatSessionExplicitModel3D))
+		s.mux.HandleFunc("PUT "+routes.ChatSessionModel3D, s.withIdentity(s.putChatSessionExplicitModel3D))
+	}
 	if s.lineage != nil && routes.ChatSessionLineage != "" {
 		s.mux.HandleFunc("GET "+routes.ChatSessionLineage, s.withIdentity(s.getChatSessionLineage))
 	}

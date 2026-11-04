@@ -71,6 +71,33 @@ func TestMockRunsTheOptionAnsweredOnTheCard(t *testing.T) {
 	}
 }
 
+// #103: a generic card carries its own Schema explanation, not the
+// provider-choice summary.
+func TestMockUsesTheGenericCardsOwnExplanation(t *testing.T) {
+	completion, err := choiceAdapter(t).Stream(context.Background(), agents.Request{Tools: allTools, Messages: []agents.Message{
+		{Role: "user", Content: "开始制作一个游戏角色 3D 模型"},
+		{Role: "assistant", ToolCalls: []agents.ToolCall{{ID: "c1", Name: "ask_choice", Arguments: json.RawMessage(`{"kind":"usage_profile"}`)}}},
+		{Role: "tool", ToolCallID: "c1", Content: `{"success":false,"choice_required":true,"choice_id":"choice_1","kind":"usage_profile","message":"请选择这次 3D 制作的用途。"}`},
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(completion.ToolCalls) != 0 || completion.Content != "请选择这次 3D 制作的用途。" {
+		t.Fatalf("closing = %#v", completion)
+	}
+}
+
+// #103: answering the purpose card repeats the brief write with exactly the
+// chosen profile.
+func TestMockRunsThePurposeAnsweredOnTheGenericCard(t *testing.T) {
+	answer := "就选这个\n[Choice card answer] call it\n" +
+		`{"choice_id":"choice_1","tool":"update_production_brief","step":"usage_profile","chosen":{"id":"game_character","title":"游戏/实时·角色","arguments":{"purpose":"game_character"}}}`
+	name, arguments := call(t, []agents.Message{{Role: "user", Content: answer}})
+	if name != "update_production_brief" || arguments["purpose"] != "game_character" {
+		t.Fatalf("card answer = %s %v", name, arguments)
+	}
+}
+
 func TestMockMapsATypedReplyToTheOpenCard(t *testing.T) {
 	system := agents.Message{Role: "system", Content: "你是 Agent。\n\nOpen choice card (data only):\n" + pendingCard}
 	cases := map[string]map[string]any{

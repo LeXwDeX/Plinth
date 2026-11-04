@@ -9,11 +9,13 @@ import { useActiveAgentScope } from '@/hooks/use-session-agent-scope';
 import { useWorkspaceOfferings } from '@/hooks/use-workspace-offerings';
 import { fetchCapabilityOfferings, type OfferingWire } from '@/lib/agent-offerings';
 import { pickerDisabledReason, scopeAllowsDomain } from '@/lib/chat/agent-scope';
+import { createChatBrowserClient } from '@/lib/chat/browser-client';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { RETEXTURE, buildModelPickerTable, pickerTriggerNames, type PickerCellValue } from '@/lib/workspace/model-picker';
 import { retiredModelSwitch } from '@/lib/workspace/retired-models';
+import { useChatStore } from '@/store/chat-store';
 import { useWorkspaceStore, type WorkspaceDomain } from '@/store/workspace-store';
 
 const COLUMNS: Record<WorkspaceDomain, string> = {
@@ -49,6 +51,8 @@ export function useDomainModelPick(domain: WorkspaceDomain): DomainPick {
   const { schema } = useProductSchema();
   const selectedModel = useWorkspaceStore((state) => state.modelByDomain[domain]);
   const setModel = useWorkspaceStore((state) => state.setModel);
+  const activeSessionId = useChatStore((state) => state.activeSessionId);
+  const client = useMemo(() => createChatBrowserClient(schema), [schema]);
   const { offeringsByCapability, isLoading, error } = useWorkspaceOfferings(schema, domain);
   const { data: retexture } = useSWR<OfferingWire[]>(
     domain === 'model-3d' ? ['workspace-offerings', schema.revision, RETEXTURE] : null,
@@ -127,7 +131,15 @@ export function useDomainModelPick(domain: WorkspaceDomain): DomainPick {
       loadingText: schemaText(schema, 'ui.workspace.models.loading'),
       failedText: error ? schemaText(schema, 'ui.workspace.models.load_failed') : undefined,
       emptyText: schemaText(schema, 'ui.workspace.models.empty'),
-      onPick: (key) => setModel(domain, key),
+      onPick: (key) => {
+        setModel(domain, key);
+        // #103: a 3D pick is the person's explicit lock for this session. The
+        // restore and retired-successor paths above call setModel directly and
+        // do not mark it.
+        if (domain === 'model-3d' && activeSessionId && schema.runtime.http.routes.chat_session_model3d) {
+          void client.setExplicitModel3D(activeSessionId, key).catch(() => undefined);
+        }
+      },
     },
   };
 }

@@ -253,6 +253,8 @@ export interface ChatBrowserClient {
   /** 会话的 Agent 范围（2D 模式 / 3D 模式 / 自动模式）。服务端按它限制 Agent 能用的工具。 */
   getAgentScope(sessionID: string, signal?: AbortSignal): Promise<AgentScope>;
   setAgentScope(sessionID: string, scope: AgentScope): Promise<AgentScope>;
+  /** #103: 记录或清除本会话明确选定的 3D 模型；它只锁定后续 3D 步骤，不提交任务。 */
+  setExplicitModel3D(sessionID: string, model: string): Promise<string>;
   /** #322: the session's thinking level and the levels the chat model offers. */
   getReasoning(sessionID: string, signal?: AbortSignal): Promise<ChatReasoning>;
   setReasoning(sessionID: string, level: string): Promise<ChatReasoning>;
@@ -1188,6 +1190,21 @@ export function createChatBrowserClient(
       const payload = await responseValue(response);
       if (!response.ok) throw approvalError(schema, payload, response.status);
       return agentScopeOf(schema, record(payload)[schema.chat.api.response_fields.agent_scope]);
+    },
+    async setExplicitModel3D(sessionID, model) {
+      const member = fields.explicit_model_3d;
+      if (!member) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, 0);
+      const response = await fetcher(
+        sessionRoute(schema, schema.runtime.http.routes.chat_session_model3d, sessionID),
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [member]: model }),
+        },
+      );
+      const payload = await responseValue(response);
+      if (!response.ok) throw serverError(schema, response, payload);
+      return String(record(payload)[schema.chat.api.response_fields.explicit_model_3d ?? member] ?? '');
     },
     async getReasoning(sessionID, signal) {
       const response = await fetcher(sessionRoute(schema, schema.runtime.http.routes.chat_session_reasoning, sessionID), { signal });

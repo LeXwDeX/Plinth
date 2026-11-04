@@ -44,6 +44,10 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		"audit.agent_scope_action":         schema.Audit.AgentScopeAction,
 		"api.fields.notes":                 schema.API.Fields.Notes,
 		"api.response_fields.notes":        schema.API.ResponseFields.Notes,
+		"api.fields.brief":                 schema.API.Fields.Brief,
+		"api.response_fields.brief":        schema.API.ResponseFields.Brief,
+		"api.fields.explicit_model_3d":     schema.API.Fields.ExplicitModel3D,
+		"audit.production_brief_action":    schema.Audit.ProductionBriefAction,
 		"api.response_fields.pick":         schema.API.ResponseFields.Pick,
 		"api.fields.title":                 schema.API.Fields.Title,
 		"api.fields.content":               schema.API.Fields.Content,
@@ -157,6 +161,8 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		"presentation.agent_content_rejected":   schema.Presentation.Messages.AgentContentRejected,
 		"presentation.agent_not_configured":     schema.Presentation.Messages.AgentNotConfigured,
 		"presentation.invalid_parameters":       schema.Presentation.Messages.InvalidParameters,
+		"presentation.model_choice_conflict":    schema.Presentation.Messages.ModelChoiceConflict,
+		"presentation.model_choice_unavailable": schema.Presentation.Messages.ModelChoiceUnavailable,
 		"presentation.turn_active":              schema.Presentation.Messages.TurnActive,
 		"presentation.agent_busy":               schema.Presentation.Messages.AgentBusy,
 		"presentation.status.generating":        schema.Presentation.Status.Generating,
@@ -202,6 +208,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		return err
 	}
 	if err := validateChatChoice(schema); err != nil {
+		return err
+	}
+	if err := validateModel3DUsageShape(schema, capabilityPresentations); err != nil {
 		return err
 	}
 	if err := validateHarness(schema, capabilityPresentations); err != nil {
@@ -747,8 +756,10 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"create_three_view":    {"skill.prepare", "PAID_TASK", []string{"image"}},
 		"list_session_models":  {"model.list", "READ", []string{"model-3d"}},
 		"get_processing_plan":  {"processing.read", "READ", []string{"model-3d"}},
-		"update_session_notes": {"session.notes", "SESSION_WRITE", []string{"image", "model-3d"}},
-		"find_history_images":  {"history.images", "READ", []string{"image", "model-3d"}},
+		"update_session_notes":    {"session.notes", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"update_production_brief": {"session.brief", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"ask_choice":              {"choice.ask", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"find_history_images":     {"history.images", "READ", []string{"image", "model-3d"}},
 		"recover_task_result":  {"task.refetch", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"inspect_model":        {"model.inspect", "READ", []string{"model-3d"}},
 		"render_model_views":   {"model.render", "READ", []string{"model-3d"}},

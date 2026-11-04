@@ -431,9 +431,9 @@ func (executor *Executor) Execute(
 			executor.chat.Context.ReferenceHandlesArgument, executor.chat.Context.ToolReferenceArgument} {
 			delete(arguments, name)
 		}
-		if multiview.fromRequest && command.Tool.OfferingArgument != "" {
+		if multiview.fromRequest && command.Tool.ModelArgument != "" {
 			model, _ := json.Marshal(executor.multiviewModelID(command, multiview.model))
-			arguments[command.Tool.OfferingArgument] = model
+			arguments[command.Tool.ModelArgument] = model
 		}
 		referenceURLs = multiview.URLs
 	} else if command.Tool.AcceptReferenceImages == nil || *command.Tool.AcceptReferenceImages {
@@ -467,6 +467,20 @@ func (executor *Executor) Execute(
 			return result, nil
 		}
 		offering, capability = selected, selected.Capability
+	} else if command.Tool.ModelArgument != "" {
+		// #103: the person's explicit pick, the Agent's model argument, the
+		// session's production purpose and the defaults decide, in that order.
+		choice, err := executor.chooseOffering(command, capability, arguments,
+			modelInputFor(command, referenceURLs, multiview))
+		if err != nil {
+			result := executor.executionFailure(command, "")
+			result.NoSubmission = true
+			return result, err
+		}
+		if choice.Refusal != "" {
+			return executor.modelChoiceFailure(command, choice.Refusal), nil
+		}
+		offering = choice.Offering
 	} else {
 		model := executor.userModel(command)
 		if model == "" && command.Tool.RequireUserModel && !executor.fallbackModelAllowed(command) {
@@ -701,6 +715,9 @@ type stepInfo struct {
 	// the Schema's fallback chose it because the user picked none.
 	Model    string
 	Fallback bool
+	// ModelChoice names who chose the 3D model (#103) when the tool declares
+	// a result key for it.
+	ModelChoice *modelChoice
 	// ModelNote says the person's pick was a retired model and the step ran
 	// on its successor (#329 follow-up). Empty when it does not apply.
 	ModelNote string
@@ -1190,6 +1207,20 @@ func (executor *Executor) buildInput(
 		}
 		input[parameter] = value
 	}
+	// #103: the production purpose's public values sit above the Offering's
+	// defaults and below the person's panel and the Agent's own values, which
+	// are applied next.
+	profileValues := map[string]json.RawMessage{}
+	if _, values := executor.profileParameterValues(command, offering); len(values) > 0 {
+		for name, encoded := range values {
+			var value any
+			if err := json.Unmarshal(encoded, &value); err != nil {
+				return nil, nil, err
+			}
+			input[name] = value
+			profileValues[name] = encoded
+		}
+	}
 	parameters := make(map[string]json.RawMessage, len(command.Options.Parameters))
 	for name, value := range command.Options.Parameters {
 		if parameter, declared := allowed[name]; declared && turnParameterAllowed(offering, parameter) {
@@ -1238,6 +1269,13 @@ func (executor *Executor) buildInput(
 		}
 		input[name] = value
 		chosen[name] = true
+	}
+	// A purpose value survived the later layers (a panel "null" deleted it):
+	// it counts as chosen, so the reference size rule leaves it alone.
+	for name := range profileValues {
+		if _, present := input[name]; present {
+			chosen[name] = true
+		}
 	}
 	var referenceAssets []generation.AssetID
 	if promptParameter != "" {
@@ -1496,6 +1534,7 @@ func (executor *Executor) wait(
 		if err != nil {
 			return executor.awaitTask(command, taskID, deadline, err)
 		}
+		info.ModelChoice = executor.modelChoiceOf(command, task.Offering, task.Input)
 		status := executor.publicStates[task.State]
 		observation := chat.ToolObservation{
 			TaskID:   string(taskID),
@@ -1598,6 +1637,9 @@ func (executor *Executor) success(
 	}
 	if key := tool.ResultFields.ModelFallback; key != "" && info.Fallback {
 		result[key] = true
+	}
+	if key := tool.ResultFields.ModelChoice; key != "" && info.ModelChoice != nil {
+		result[key] = info.ModelChoice
 	}
 	if key := tool.ResultFields.ModelNote; key != "" && info.ModelNote != "" {
 		result[key] = info.ModelNote

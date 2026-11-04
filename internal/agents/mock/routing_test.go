@@ -30,7 +30,7 @@ var allTools = []agents.Tool{
 	{Name: "create_model_3d_from_image"}, {Name: "retexture_model"}, {Name: "process_model"},
 	{Name: "create_three_view"}, {Name: "update_session_notes"},
 	{Name: "plan_model_processing"}, {Name: "create_multiview_images"}, {Name: "edit_multiview_images"},
-	{Name: "convert_model_format"},
+	{Name: "convert_model_format"}, {Name: "ask_choice"}, {Name: "update_production_brief"},
 }
 
 func selectionPrompt(handles ...string) agents.Message {
@@ -99,6 +99,29 @@ func TestRoutesByIntentToTheRealTools(t *testing.T) {
 				t.Fatalf("got %s %#v, want %s %#v", tool, arguments, tc.wantTool, tc.wantArgs)
 			}
 		})
+	}
+}
+
+// #103: before a production brief exists, starting 3D work asks the purpose on
+// the generic card; once the brief carries one, the same words go to the tool.
+func TestStartingWithoutABriefAsksThePurpose(t *testing.T) {
+	brief := func(value string) agents.Message {
+		return agents.Message{Role: "system", Content: "制作简报：\n" + value}
+	}
+	text := "开始制作一个游戏角色 3D 模型"
+	tool, arguments := plan(t, []agents.Message{
+		brief("尚未建立制作简报。开始 3D 工作前，先用一两个简短的问题问清用途。"),
+		{Role: "user", Content: text},
+	}, allTools)
+	if tool != "ask_choice" || !reflect.DeepEqual(arguments, map[string]any{"kind": "usage_profile"}) {
+		t.Fatalf("without a brief = %s %#v", tool, arguments)
+	}
+	tool, arguments = plan(t, []agents.Message{
+		brief("用途：游戏/实时·角色（预算 5000–60000 三角面，需 UV）"),
+		{Role: "user", Content: text},
+	}, allTools)
+	if tool != "create_model_3d" || arguments["prompt"] != text {
+		t.Fatalf("with a brief = %s %#v", tool, arguments)
 	}
 }
 
@@ -313,6 +336,11 @@ func TestPlainTextToolAnswerIsNotReportedAsDone(t *testing.T) {
 	// that confirmation, not a claim that an image was made.
 	if got := closing("update_session_notes", "设定摘要已更新。"); got != "设定摘要已更新。" {
 		t.Fatalf("notes closing = %q", got)
+	}
+	// Writing the production brief is the same kind of plain-text success
+	// (#103): the confirmation is the closing line, not a failure.
+	if got := closing("update_production_brief", "制作简报已更新。"); got != "制作简报已更新。" {
+		t.Fatalf("brief closing = %q", got)
 	}
 	// The JSON success path keeps the configured summary.
 	if got := closing("refine_image", `{"success":true,"task_id":"t1"}`); got != "图片任务已完成。" {

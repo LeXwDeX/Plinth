@@ -265,6 +265,13 @@ func Load(reader io.Reader) (*Catalog, error) {
 	if err := validateChatToolOfferingSelection(result.application.Chat.Tools, result.byID); err != nil {
 		return nil, fmt.Errorf("application.chat: %w", err)
 	}
+	if err := validateModel3DUsageOfferings(
+		result.application.Chat.Model3DUsage,
+		result.byID,
+		result.application.Chat.ThreeView.Multiview.ViewsArgument,
+	); err != nil {
+		return nil, fmt.Errorf("application.chat.model3d_usage: %w", err)
+	}
 	if err := validateProviderDiscoveryLegacyModels(
 		result.application.ProviderDiscovery.LegacyModels,
 		result.byID,

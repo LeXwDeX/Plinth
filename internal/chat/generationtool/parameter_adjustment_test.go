@@ -12,7 +12,7 @@ func TestSessionAdjustmentReasonOnlyFollowsItsExactValue(t *testing.T) {
 		return map[string]generation.ParameterReason{"quality": {Value: json.RawMessage(`"low"`), Reason: "draft"}}
 	}}
 	for _, tc := range []struct{ input, want string }{{`{"quality":"low"}`, "draft"}, {`{"quality":"max"}`, ""}} {
-		got, err := e.parameterReasons(chat.ToolCommand{OwnerID: "owner", SessionID: "session"}, generation.Offering{ID: "offering"}, json.RawMessage(tc.input))
+		got, _, err := e.parameterReasons(chat.ToolCommand{OwnerID: "owner", SessionID: "session"}, generation.Offering{ID: "offering"}, json.RawMessage(tc.input))
 		if err != nil || got["quality"] != tc.want {
 			t.Fatalf("%s %+v %v", tc.input, got, err)
 		}

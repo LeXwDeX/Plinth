@@ -67,7 +67,7 @@ func (m *Module) PrepareInput(ctx context.Context, cmd PrepareInputCommand) (Pre
 	if err != nil {
 		return PreparedInput{}, &Error{Code: ErrInvalidInput, Operation: "prepare_input", Cause: err}
 	}
-	adjustments, err := freezeParameterAdjustments(offering, normalized, cmd.ParameterReasons)
+	adjustments, err := freezeParameterAdjustments(offering, normalized, cmd.ParameterReasons, cmd.ParameterSources)
 	if err != nil {
 		return PreparedInput{}, err
 	}

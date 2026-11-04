@@ -687,6 +687,12 @@ func (s *Server) chatSessionWire(
 		fields.AgentScope:       s.chat.NormalizeAgentScope(session.AgentScope),
 		fields.EstimatedCredits: session.EstimatedCredits,
 	}
+	if fields.Brief != "" {
+		result[fields.Brief] = productionBriefWire(session.Brief)
+	}
+	if fields.ExplicitModel3D != "" && session.ExplicitModel3D != "" {
+		result[fields.ExplicitModel3D] = session.ExplicitModel3D
+	}
 	if len(session.PriceTotals) > 0 {
 		delete(result, fields.EstimatedCredits)
 		result["price_totals"] = session.PriceTotals

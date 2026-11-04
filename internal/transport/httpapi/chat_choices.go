@@ -15,9 +15,15 @@ import (
 // default and the answer. The next-call arguments stay on the server.
 
 type choiceOptionWire struct {
-	ID               string         `json:"id"`
-	ProviderName     string         `json:"provider_name"`
-	ModelName        string         `json:"model_name"`
+	ID           string `json:"id"`
+	ProviderName string `json:"provider_name,omitempty"`
+	ModelName    string `json:"model_name,omitempty"`
+	// Label and Description are the Schema words of a generic card (#103);
+	// Recommended marks the option the Agent suggests. A provider-choice card
+	// (#321) leaves them empty.
+	Label            string         `json:"label,omitempty"`
+	Description      string         `json:"description,omitempty"`
+	Recommended      bool           `json:"recommended,omitempty"`
 	CreditsMetered   bool           `json:"credits_metered,omitempty"`
 	EstimatedCredits int            `json:"estimated_credits,omitempty"`
 	NativeQuote      map[string]any `json:"native_quote,omitempty"`
@@ -34,6 +40,7 @@ type choiceWire struct {
 	ID                 string             `json:"id"`
 	AssistantMessageID string             `json:"assistant_message_id"`
 	Tool               string             `json:"tool"`
+	Kind               string             `json:"kind,omitempty"`
 	Capability         string             `json:"capability"`
 	Options            []choiceOptionWire `json:"options"`
 	DefaultOptionID    string             `json:"default_option_id"`
@@ -45,10 +52,11 @@ type choiceWire struct {
 
 func choiceToWire(choice chat.Choice) choiceWire {
 	wire := choiceWire{ID: choice.ID, AssistantMessageID: choice.AssistantMessageID, Tool: choice.ToolName,
-		Capability: choice.Capability, DefaultOptionID: choice.DefaultOptionID, AllowDefault: choice.AllowDefault,
+		Kind: choice.Kind, Capability: choice.Capability, DefaultOptionID: choice.DefaultOptionID, AllowDefault: choice.AllowDefault,
 		State: string(choice.State), CreatedAt: choice.CreatedAt.UTC().Format(time.RFC3339), Options: []choiceOptionWire{}}
 	for _, option := range choice.Options {
 		view := choiceOptionWire{ID: option.ID, ProviderName: option.ProviderName, ModelName: option.ModelName,
+			Label: option.Label, Description: option.Description, Recommended: option.Recommended,
 			CreditsMetered: option.CreditsMetered, EstimatedCredits: option.EstimatedCredits}
 		if quote := option.NativeQuote; quote != nil {
 			encoded, _ := json.Marshal(quote)

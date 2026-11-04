@@ -15,7 +15,11 @@ type PreparedInputID string
 // PrepareInputCommand requests validation and an immutable input snapshot. It
 // does not authorize a paid Task or reserve an admission slot.
 type PrepareInputCommand struct {
-	ParameterReasons    map[string]string
+	ParameterReasons map[string]string
+	// ParameterSources labels why an advised change happened, keyed by
+	// parameter name: "agent" (the default when unset) or "profile:<id>" for a
+	// usage-profile override (#103). The reason text is shared per profile.
+	ParameterSources    map[string]string
 	OwnerID             OwnerID
 	SessionID           string
 	Capability          Capability
@@ -79,6 +83,8 @@ type ParameterAdjustment struct {
 	Reason           string          `json:"reason"`
 	Advice           string          `json:"advice"`
 	Source           string          `json:"source"`
+	// Profile is the usage-profile ID when Source is "profile:<id>" (#103).
+	Profile string `json:"profile,omitempty"`
 }
 
 // ParameterReason associates a session explanation with its exact value.

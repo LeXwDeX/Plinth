@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-04.issue103-tripo-p2.1",
+    "revision": "2026-11-04.issue103-brief.1",
     "terminology": {
       "user_facing": [
         {
@@ -2054,6 +2054,8 @@
           "client_errors": "/api/v1/client-errors",
           "chat_session_approval": "/api/v1/chat/sessions/{sessionID}/approval",
           "chat_session_notes": "/api/v1/chat/sessions/{sessionID}/notes",
+          "chat_session_brief": "/api/v1/chat/sessions/{sessionID}/brief",
+          "chat_session_model3d": "/api/v1/chat/sessions/{sessionID}/model3d",
           "chat_session_pick": "/api/v1/chat/sessions/{sessionID}/pick",
           "chat_session_choices": "/api/v1/chat/sessions/{sessionID}/choices",
           "chat_session_agent_scope": "/api/v1/chat/sessions/{sessionID}/agent-scope",
@@ -4845,6 +4847,8 @@
           "turn_canceled": "stopped",
           "approval_mode": "approvalMode",
           "notes": "notes",
+          "brief": "brief",
+          "explicit_model_3d": "explicit_model_3d",
           "agent_scope": "agentScope",
           "choice_answer": "choiceAnswer",
           "reasoning_effort": "reasoningEffort",
@@ -4877,6 +4881,8 @@
           "estimated_credits": "estimatedCredits",
           "approval_source": "approvalSource",
           "notes": "notes",
+          "brief": "brief",
+          "explicit_model_3d": "explicit_model_3d",
           "pick": "pick",
           "agent_scope": "agentScope",
           "generation_models": "generationModels",
@@ -5456,6 +5462,82 @@
           }
         },
         {
+          "name": "update_production_brief",
+          "execution": {"implementation_key":"session.brief","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "description": "Replace this session's production brief with a complete, concise version. Before 3D work, first ask briefly what the result is for (show, game character, game prop or scene piece, web/AR, 3D print) and how it will be used; then write the brief and ask the person to confirm it before generating. The purpose sets the default model, triangle budget, UV and watertight requirements; a value the person explicitly locked must be kept exactly, while unlocked choices are yours to decide and explain. The object you submit replaces the previous brief entirely, so repeat every field still in force. Omit fields to clear them; submit an empty object to clear the brief. Use ask_choice with kind usage_profile when the person should pick a purpose from a card.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "purpose": {
+                "type": "string",
+                "description": "Production purpose id: render, game_character, game_prop, web_ar or print. Omit or leave empty to let the default purpose apply."
+              },
+              "style": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "Short style note: visual style, materials, palette or reference direction."
+              },
+              "target_platform": {
+                "type": "string",
+                "maxLength": 120,
+                "description": "Where the model will be used: Unity, Unreal, Web, an AR runtime, or a printer model."
+              },
+              "needs_parts": {
+                "type": "boolean",
+                "description": "True when the model must be split into separate parts."
+              },
+              "needs_rig": {
+                "type": "boolean",
+                "description": "True when the model needs a skeleton."
+              },
+              "needs_animation": {
+                "type": "boolean",
+                "description": "True when the model needs animation."
+              },
+              "triangle_budget": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 2000000,
+                "description": "Optional triangle budget that overrides the purpose's maximum for this session."
+              },
+              "notes": {
+                "type": "string",
+                "maxLength": 1000,
+                "description": "Anything else that must survive the conversation."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "ask_choice",
+          "execution": {"implementation_key":"choice.ask","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "description": "Open a choice card in the chat for a decision the person should make themselves. Use kind usage_profile to ask what the 3D result is for; the card lists the declared production purposes, and the person's answer calls update_production_brief with the chosen purpose. Ask once, then continue from the answer; do not open the same card again while it is pending. The card grants nothing and charges nothing.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["usage_profile"],
+                "description": "The kind of choice card to open."
+              },
+              "question": {
+                "type": "string",
+                "maxLength": 300,
+                "description": "Optional question shown above the options; omit to use the kind's default question."
+              },
+              "recommended": {
+                "type": "string",
+                "description": "Optional option id to mark as recommended, such as game_character. Ignored when it is not one of the card's options."
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
           "name": "find_history_images",
           "execution": {"implementation_key":"history.images","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"utility"},
           "description": "Look through the pictures of this chat session when the user's words refer to images (for example 'keep the pose of the white-clad gunman and use the outfit of the other one') but this turn does not attach or select all of them. Without handles it lists the newest pictures of this session, newest first, with their handle, source (upload, generated, capture, canvas), the user's words that came with them, the generation prompt of a generated picture, and whether the picture is part of this turn or the current selection. With handles it also shows you those pictures so you can check them. Only this session's pictures are reachable. One reply may surface a limited number of distinct pictures (the server counts it and the result says how many remain); listing them again or looking at a listed picture costs nothing. Read-only: it never selects or changes anything; put the pictures you settle on into reference_handles of the generation tool yourself.",
@@ -5827,9 +5909,8 @@
           "canvas_source": "refuse",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["text-to-3d"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Generate a 3D model from an English text description.",
-          "require_user_model": true,
+          "model_argument": "model",
           "cross_domain_model_fallback": true,
-          "model_required_message": "请先在工作区选择生成模型。",
           "capability": "text-to-3d",
           "fallback_capability": "text-to-3d",
           "pending_capability": "text-to-3d",
@@ -5839,6 +5920,11 @@
               "prompt": {
                 "type": "string",
                 "description": "A concise English description of the requested image or complete visual change."
+              },
+              "model": {
+                "type": "string",
+                "enum": ["tripo-v3.1-full", "meshy-7.1", "rodin-gen-2.5", "meshy-t2.5"],
+                "description": "Optional 3D model to run, by model name. Omit to let the session's production brief pick the first available recommended model. The person's explicit model choice in this session always wins; if it conflicts with this value, nothing is submitted."
               }
             },
             "required": [
@@ -5876,7 +5962,8 @@
             "approval": "approval",
             "model": "model",
             "model_fallback": "model_fallback",
-            "model_note": "model_note"
+            "model_note": "model_note",
+            "model_choice": "model_choice"
           }
         },
         {
@@ -5884,10 +5971,10 @@
           "canvas_source": "bind",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["image-to-3d","text-to-3d"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Generate a 3D model from reference image(s). Without references the images selected on the workspace are used. How many pictures a model uses depends on the model picked for 3D (stated below when known): never say that pictures beyond that number are used, or that they are used as views of one object. When a result has reference_note, including while the step waits on its approval card, it states the facts about the pictures: which pictures are used, how many were given, and that using several pictures needs a model that takes several pictures. Your reply must state each of these facts; put them in your own words if you like. Several views of the same object (a front view plus left, back or right views) belong to create_model_3d_from_views instead.",
-          "require_user_model": true,
+          "require_user_model": false,
           "cross_domain_model_fallback": true,
           "default_to_selection": true,
-          "model_required_message": "请先在工作区选择生成模型。",
+          "model_argument": "model",
           "capability": "image-to-3d",
           "fallback_capability": "text-to-3d",
           "pending_capability": "image-to-3d",
@@ -5897,6 +5984,11 @@
               "prompt": {
                 "type": "string",
                 "description": "A concise English description of the requested image or complete visual change."
+              },
+              "model": {
+                "type": "string",
+                "enum": ["tripo-v3.1-full", "meshy-7.1", "rodin-gen-2.5", "meshy-t2.5"],
+                "description": "Optional 3D model to run, by model name. Omit to let the session's production brief pick the first available recommended model. The person's explicit model choice in this session always wins; if it conflicts with this value, nothing is submitted."
               },
               "reference_handles": {
                 "type": "array",
@@ -5955,6 +6047,7 @@
             "model": "model",
             "model_fallback": "model_fallback",
             "model_note": "model_note",
+            "model_choice": "model_choice",
             "reference_note": "reference_note"
           }
         },
@@ -5964,7 +6057,7 @@
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["image-to-3d"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Generate one 3D model from several views of the SAME object with a multiview image-to-3D model. For a three-view group of this chat, pass three_view_group (the group's run ID) and nothing else about the pictures: the server reads the finished views and their view keys from the group. Otherwise use it only when the user gives 2 to 4 views of one object (a front view plus left, back or right views, for example the four pictures of a four-view image group) and wants a 3D model: pass the handles in front, left, back, right order, or say which view each handle is in reference_views (front, left, back, right); a front view is required. Left and right are the object's own left and right sides. For one picture, or pictures of different objects, use create_model_3d_from_image instead. The estimated native price is the same as Tripo image to 3D.",
           "ignore_user_model": true,
-          "offering_argument": "model",
+          "model_argument": "model",
           "default_to_selection": true,
           "capability": "image-to-3d",
           "fallback_capability": "image-to-3d",
@@ -5975,7 +6068,7 @@
               "model": {
                 "type": "string",
                 "enum": ["tripo-v3.1-multiview"],
-                "description": "The multiview image-to-3D model to run."
+                "description": "Optional multiview image-to-3D model to run, by model name. The model comes from the person's structured three-view request; when that request names one, the server sets this argument from it and it cannot be overridden. Omit otherwise to let the session's production brief recommend one."
               },
               "three_view_group": {
                 "type": "string",
@@ -6002,7 +6095,7 @@
                 "description": "Optional view name of each picture, in the same order as the handles."
               }
             },
-            "required": ["model"],
+            "required": [],
             "additionalProperties": false
           },
           "argument_mappings": {
@@ -6018,7 +6111,7 @@
           "prompt_with_reference_template": "{prompt}",
           "prompt_with_previous_template": "{previous_prompt} {prompt}",
           "idempotency_key_template": "chat:{session_id}:{call_id}",
-          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback","model_note":"model_note","reference_note":"reference_note"}
+          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback","model_note":"model_note","model_choice":"model_choice","reference_note":"reference_note"}
         },
         {
           "name": "retexture_model",
@@ -7068,6 +7161,8 @@
           "canvas_source_missing": "画布快照没有随消息送达，本轮未执行。请重试；若不需要画布，先移除输入框上方的当前引用再发送。",
           "canvas_source_tool_refused": "本轮的输入来源是用户发送时的画布区域快照，这个工具不读图片，不能用于本轮。请改用会读图片的工具（{tools}），画布快照会自动作为第一张输入图，无需填写引用。",
           "retired_model_fallback": "用户选的 {from} 已停用，这一步改用了 {to}。请如实告诉用户，并说明需要时可以在模型选择里改选。",
+          "model_choice_conflict": "这次调用指定的模型与用户在本会话明确选定的模型（{locked}）不一致，没有提交任务。用户明确选择的模型优先；要改用 {requested}，请先让用户在本会话里重新选择模型。",
+          "model_choice_unavailable": "这次调用指定的模型 {model} 当前不可用，或不能接受本次输入，没有提交任务。可用选项：{choices}。请改用其中一个，或按用途推荐继续。",
           "offering_choice_unavailable": "所选项当前不可用，没有提交任务。只能从这些可用项中选择：{choices}。",
           "source_offering_unpaired": "这个来源任务不能用于本工具，没有提交任务。来源必须是本人在本会话中成功完成、且与本工具某个可用功能配对的任务（例如同一模板的 Creative Lab 设计预览）。",
           "source_offering_canvas": "本轮的输入是画板快照，它本身不是来源任务，画板上也没有唯一一张本人在本会话中成功完成、可以配对的设计预览，没有提交任务。请直接用设计预览的图片句柄或任务 ID 再调用，不需要用户清空画板或重新选择。",
@@ -7177,7 +7272,8 @@
         "session_resource_type": "chat_session",
         "message_resource_type": "chat_message",
         "approval_mode_action": "set_approval_mode",
-        "agent_scope_action": "set_agent_scope"
+        "agent_scope_action": "set_agent_scope",
+        "production_brief_action": "set_production_brief"
       },
       "approval_policy": {
         "default_mode": "manual",
@@ -7205,7 +7301,276 @@
         "mock_summary": "这一步有多个可用服务，请在下方卡片中选择一个。",
         "max_options": 8,
         "list_limit": 20,
-        "mention_negations": ["不要", "不用", "别用", "不想", "换掉", "除了", "not", "don't", "without", "instead of"]
+        "mention_negations": ["不要", "不用", "别用", "不想", "换掉", "除了", "not", "don't", "without", "instead of"],
+        "kinds": [
+          {
+            "id": "usage_profile",
+            "tool_name": "update_production_brief",
+            "argument": "purpose",
+            "option_source": "usage_profiles",
+            "question": "这个 3D 模型主要用来做什么？",
+            "message": "请选择这次 3D 制作的用途。用途决定默认的模型、面数与 UV 要求；选好后我会按该用途继续。"
+          }
+        ]
+      },
+      "model3d_usage": {
+        "default_profile": "render",
+        "profiles": [
+          {
+            "id": "render",
+            "label": "展示/渲染",
+            "description": "展示、预览或宣传用模型，不以实时运行或打印为目标。",
+            "recommended_offerings": {
+              "text-to-3d": [
+                "tripo/tripo-v3.1-full/text-to-3d",
+                "meshy/meshy-7.1/text-to-3d",
+                "hyper3d/rodin-gen-2.5/text-to-3d"
+              ],
+              "image-to-3d": [
+                "tripo/tripo-v3.1-full/image-to-3d",
+                "meshy/meshy-7.1/image-to-3d",
+                "hyper3d/rodin-gen-2.5/image-to-3d"
+              ],
+              "multiview-to-3d": [
+                "tripo/tripo-v3.1-multiview/image-to-3d"
+              ]
+            },
+            "reason": "展示用途不限制面数，优先完整细节与观感，并选用当前可用的高保真模型。",
+            "budget": {
+              "max_triangles": 2000000,
+              "require_uv": false,
+              "require_watertight": false,
+              "require_skin": false
+            }
+          },
+          {
+            "id": "game_character",
+            "label": "游戏/实时·角色",
+            "description": "游戏或实时应用中的角色；控制面数并保留 UV，便于绑骨、动画与引擎导入。",
+            "recommended_offerings": {
+              "text-to-3d": [
+                "tripo/tripo-p2/text-to-3d",
+                "meshy/meshy-t2.5/text-to-3d"
+              ],
+              "image-to-3d": [
+                "tripo/tripo-p2/image-to-3d",
+                "meshy/meshy-t2.5/image-to-3d"
+              ],
+              "multiview-to-3d": [
+                "tripo/tripo-p2-multiview/image-to-3d"
+              ]
+            },
+            "parameter_overrides": {
+              "tripo/tripo-p2/text-to-3d": {
+                "face_limit": 20000
+              },
+              "tripo/tripo-p2/image-to-3d": {
+                "face_limit": 20000
+              },
+              "meshy/meshy-t2.5/text-to-3d": {
+                "target_polycount": 20000,
+                "pose_mode": "a-pose"
+              },
+              "meshy/meshy-t2.5/image-to-3d": {
+                "target_polycount": 20000,
+                "pose_mode": "a-pose"
+              }
+            },
+            "reason": "角色用于实时渲染，需要受控面数与 UV；优先可设置低面数的 Tripo P2，其次使用智能拓扑的 Meshy T2.5。",
+            "pipeline": [
+              {
+                "capability": "rigging"
+              },
+              {
+                "capability": "animation"
+              }
+            ],
+            "budget": {
+              "min_triangles": 5000,
+              "max_triangles": 60000,
+              "require_uv": true,
+              "require_watertight": false,
+              "require_skin": false
+            }
+          },
+          {
+            "id": "game_prop",
+            "label": "游戏/实时·道具与场景件",
+            "description": "游戏或实时应用中的道具、场景小件；面数更低，保留 UV。",
+            "recommended_offerings": {
+              "text-to-3d": [
+                "tripo/tripo-p2/text-to-3d",
+                "meshy/meshy-t2.5/text-to-3d"
+              ],
+              "image-to-3d": [
+                "tripo/tripo-p2/image-to-3d",
+                "meshy/meshy-t2.5/image-to-3d"
+              ],
+              "multiview-to-3d": [
+                "tripo/tripo-p2-multiview/image-to-3d"
+              ]
+            },
+            "parameter_overrides": {
+              "meshy/meshy-t2.5/text-to-3d": {
+                "target_polycount": 8000
+              },
+              "meshy/meshy-t2.5/image-to-3d": {
+                "target_polycount": 8000
+              }
+            },
+            "reason": "道具与场景件的面数预算更低；优先 P2 的自适应低模，其次 Meshy T2.5。",
+            "pipeline": [
+              {
+                "capability": "mesh-segmentation"
+              }
+            ],
+            "budget": {
+              "min_triangles": 300,
+              "max_triangles": 20000,
+              "require_uv": true,
+              "require_watertight": false,
+              "require_skin": false
+            }
+          },
+          {
+            "id": "web_ar",
+            "label": "Web/AR 展示",
+            "description": "网页或 AR 中实时展示的模型；控制面数并保留 UV。",
+            "recommended_offerings": {
+              "text-to-3d": [
+                "tripo/tripo-p2/text-to-3d",
+                "meshy/meshy-7.1/text-to-3d"
+              ],
+              "image-to-3d": [
+                "tripo/tripo-p2/image-to-3d",
+                "meshy/meshy-7.1/image-to-3d"
+              ],
+              "multiview-to-3d": [
+                "tripo/tripo-p2-multiview/image-to-3d"
+              ]
+            },
+            "parameter_overrides": {
+              "tripo/tripo-p2/text-to-3d": {
+                "face_limit": 40000
+              },
+              "tripo/tripo-p2/image-to-3d": {
+                "face_limit": 40000
+              },
+              "meshy/meshy-7.1/text-to-3d": {
+                "target_polycount": 50000,
+                "should_remesh": true,
+                "texture_resolution": "2k"
+              },
+              "meshy/meshy-7.1/image-to-3d": {
+                "target_polycount": 50000,
+                "should_remesh": true,
+                "texture_resolution": "2k"
+              }
+            },
+            "reason": "Web 与 AR 需要更小的面数和纹理；优先 Tripo P2，其次 Meshy 7.1 的低面数与 2K 纹理。",
+            "budget": {
+              "max_triangles": 100000,
+              "require_uv": true,
+              "require_watertight": false,
+              "require_skin": false
+            }
+          },
+          {
+            "id": "print",
+            "label": "3D 打印",
+            "description": "用于 3D 打印的实体模型；保持高细节并要求水密，便于切片。",
+            "recommended_offerings": {
+              "text-to-3d": [
+                "meshy/meshy-7.1/text-to-3d",
+                "tripo/tripo-v3.1-full/text-to-3d"
+              ],
+              "image-to-3d": [
+                "meshy/meshy-7.1/image-to-3d",
+                "tripo/tripo-v3.1-full/image-to-3d"
+              ]
+            },
+            "reason": "打印需要完整细节与水密网格；优先 Meshy 7.1 的高细节输出，其次 Tripo v3.1。",
+            "pipeline": [
+              {
+                "capability": "analyze-printability"
+              },
+              {
+                "capability": "repair-printability"
+              }
+            ],
+            "budget": {
+              "max_triangles": 2000000,
+              "require_uv": false,
+              "require_watertight": true,
+              "require_skin": false
+            }
+          }
+        ],
+        "brief": {
+          "fields": [
+            {
+              "name": "purpose",
+              "type": "profile",
+              "label": "用途"
+            },
+            {
+              "name": "style",
+              "type": "text",
+              "label": "风格",
+              "maximum_characters": 200
+            },
+            {
+              "name": "target_platform",
+              "type": "text",
+              "label": "目标平台",
+              "maximum_characters": 120
+            },
+            {
+              "name": "needs_parts",
+              "type": "boolean",
+              "label": "需要拆分部件"
+            },
+            {
+              "name": "needs_rig",
+              "type": "boolean",
+              "label": "需要绑骨"
+            },
+            {
+              "name": "needs_animation",
+              "type": "boolean",
+              "label": "需要动画"
+            },
+            {
+              "name": "triangle_budget",
+              "type": "integer",
+              "label": "三角面预算",
+              "minimum": 100,
+              "maximum": 2000000
+            },
+            {
+              "name": "notes",
+              "type": "text",
+              "label": "补充说明",
+              "maximum_characters": 1000
+            }
+          ],
+          "context_template": "\n\n【制作简报】{brief}\n这是本会话的制作简报：用途决定质量与默认参数；用户明确锁定的事项必须遵守，未锁定的事项由你按用途决定并说明理由。没有写入的字段不代表用户锁定。",
+          "empty_text": "尚未建立制作简报。开始 3D 工作前，先用一两个简短的问题问清用途，再调用 update_production_brief 写入简报并请用户确认。",
+          "field_template": "{label}：{value}",
+          "flag_template": "{label}",
+          "separator": "；",
+          "purpose_template": "{label}（{budget}）",
+          "budget_template": "预算 {minimum}–{maximum} 三角面{requirements}",
+          "open_budget_template": "预算 ≤{maximum} 三角面{requirements}",
+          "override_budget_template": "预算 {value} 三角面{requirements}",
+          "requirements_template": "，需 {items}",
+          "requirement_separator": "、",
+          "uv_text": "UV",
+          "watertight_text": "水密",
+          "skin_text": "蒙皮",
+          "saved_message": "制作简报已更新。",
+          "invalid_template": "制作简报无效：{reason}"
+        }
       },
       "context_compaction": {
         "enabled": true,
@@ -11349,6 +11714,10 @@
         "label": "设置 Agent 范围"
       },
       {
+        "value": "set_production_brief",
+        "label": "设置制作简报"
+      },
+      {
         "value": "change_own_password",
         "label": "修改自己的密码"
       },
@@ -12382,13 +12751,13 @@
         "chat.tools[name=process_model].description",
         "chat.tools[name=plan_model_processing].description",
         "chat.tools[name=create_gaussian_splat].description",
-        "chat.tools[name=create_model_3d].model_required_message",
-        "chat.tools[name=create_model_3d_from_image].model_required_message",
         "chat.tools[name=create_gaussian_splat].model_required_message",
         "chat.three_view.label",
         "chat.three_view.model_source_note",
         "chat.three_view.multiview.views_note",
         "chat.pending_approvals",
+        "chat.model3d_usage",
+        "chat.choice.kinds",
         "model_delivery",
         "offerings"
       ],
@@ -15457,6 +15826,7 @@
             "audit_actions[value=bootstrap_admin_password_reset].label": "Administrator password reset at startup",
             "audit_actions[value=set_approval_mode].label": "Set approval mode",
             "audit_actions[value=set_agent_scope].label": "Set Agent scope",
+            "audit_actions[value=set_production_brief].label": "Set production brief",
             "audit_actions[value=change_own_password].label": "Change own password",
             "audit_actions[value=admin_read_users].label": "Administrator viewed users",
             "audit_actions[value=admin_read_audit_logs].label": "Administrator viewed audit logs",
@@ -15476,6 +15846,47 @@
             "chat.presentation.messages.canvas_source_missing": "The canvas snapshot was not delivered with the message, so this turn was not run. Please retry; if you don't need the canvas, remove the current reference above the input box before sending.",
             "chat.presentation.messages.canvas_source_tool_refused": "The input source for this turn is the canvas region snapshot taken when the user sent the message. This tool does not read images, so it cannot be used for this turn. Use a tool that reads images ({tools}) instead; the canvas snapshot is automatically used as the first input image, so no reference is needed.",
             "chat.presentation.messages.retired_model_fallback": "The {from} model the user picked is no longer offered, so this step used {to}. Tell the user so, and that they can pick another model in the model menu.",
+            "chat.presentation.messages.model_choice_conflict": "This call named a model that differs from the model the user explicitly picked in this session ({locked}), so nothing was submitted. The user's explicit choice wins; to use {requested}, first have the user pick the model again in this session.",
+            "chat.presentation.messages.model_choice_unavailable": "The model named by this call ({model}) is not available right now, or cannot accept this input, so nothing was submitted. Available options: {choices}. Use one of them, or continue with the purpose's recommendation.",
+            "chat.choice.kinds[id=usage_profile].question": "What is this 3D model mainly for?",
+            "chat.choice.kinds[id=usage_profile].message": "Choose the purpose of this 3D work. The purpose decides the default model, triangle budget and UV requirements; after you choose, I will continue with that purpose.",
+            "chat.model3d_usage.profiles[id=render].label": "Display / rendering",
+            "chat.model3d_usage.profiles[id=render].description": "A model for display, preview or promotion; not aimed at real-time use or printing.",
+            "chat.model3d_usage.profiles[id=render].reason": "Display does not limit the triangle count; prefer full detail and looks, and use the available high-fidelity models.",
+            "chat.model3d_usage.profiles[id=game_character].label": "Game / real-time · character",
+            "chat.model3d_usage.profiles[id=game_character].description": "A character for a game or real-time app; the triangle count is controlled and UVs are kept for rigging, animation and engine import.",
+            "chat.model3d_usage.profiles[id=game_character].reason": "A character rendered in real time needs a controlled triangle count and UVs; prefer Tripo P2, which can set a low face limit, then Meshy T2.5 with smart topology.",
+            "chat.model3d_usage.profiles[id=game_prop].label": "Game / real-time · prop and scene piece",
+            "chat.model3d_usage.profiles[id=game_prop].description": "A prop or scene piece for a game or real-time app; a lower triangle count, with UVs kept.",
+            "chat.model3d_usage.profiles[id=game_prop].reason": "Props and scene pieces have a lower triangle budget; prefer P2's adaptive low-poly output, then Meshy T2.5.",
+            "chat.model3d_usage.profiles[id=web_ar].label": "Web / AR display",
+            "chat.model3d_usage.profiles[id=web_ar].description": "A model shown live on the web or in AR; the triangle count is controlled and UVs are kept.",
+            "chat.model3d_usage.profiles[id=web_ar].reason": "Web and AR need fewer triangles and smaller textures; prefer Tripo P2, then Meshy 7.1 with its low triangle count and 2K textures.",
+            "chat.model3d_usage.profiles[id=print].label": "3D printing",
+            "chat.model3d_usage.profiles[id=print].description": "A solid model for 3D printing; full detail is kept and a watertight mesh is required so it can be sliced.",
+            "chat.model3d_usage.profiles[id=print].reason": "Printing needs full detail and a watertight mesh; prefer Meshy 7.1's high-detail output, then Tripo v3.1.",
+            "chat.model3d_usage.brief.fields[name=purpose].label": "Purpose",
+            "chat.model3d_usage.brief.fields[name=style].label": "Style",
+            "chat.model3d_usage.brief.fields[name=target_platform].label": "Target platform",
+            "chat.model3d_usage.brief.fields[name=needs_parts].label": "Parts need separating",
+            "chat.model3d_usage.brief.fields[name=needs_rig].label": "Rigging needed",
+            "chat.model3d_usage.brief.fields[name=needs_animation].label": "Animation needed",
+            "chat.model3d_usage.brief.fields[name=triangle_budget].label": "Triangle budget",
+            "chat.model3d_usage.brief.fields[name=notes].label": "Additional notes",
+            "chat.model3d_usage.brief.context_template": "\n\n[Production brief] {brief}\nThis is the session's production brief: the purpose decides quality and default parameters; anything the user explicitly locked must be obeyed, and unlocked choices are yours to decide and explain. A field that was not written does not mean the user locked it.",
+            "chat.model3d_usage.brief.empty_text": "No production brief yet. Before starting 3D work, ask one or two short questions to learn the purpose, then call update_production_brief to write the brief and ask the user to confirm it.",
+            "chat.model3d_usage.brief.field_template": "{label}: {value}",
+            "chat.model3d_usage.brief.purpose_template": "{label} ({budget})",
+            "chat.model3d_usage.brief.budget_template": "Budget {minimum}–{maximum} triangles{requirements}",
+            "chat.model3d_usage.brief.open_budget_template": "Budget ≤{maximum} triangles{requirements}",
+            "chat.model3d_usage.brief.override_budget_template": "Budget {value} triangles{requirements}",
+            "chat.model3d_usage.brief.requirements_template": ", requiring {items}",
+            "chat.model3d_usage.brief.watertight_text": "watertight",
+            "chat.model3d_usage.brief.skin_text": "skinned",
+            "chat.model3d_usage.brief.separator": "; ",
+            "chat.model3d_usage.brief.requirement_separator": ", ",
+            "chat.model3d_usage.brief.saved_message": "Production brief updated.",
+            "chat.model3d_usage.brief.invalid_template": "The production brief is invalid: {reason}",
             "chat.presentation.messages.offering_choice_unavailable": "The selected option is not available right now, so nothing was submitted. Choose only from these available options: {choices}.",
             "chat.presentation.messages.source_offering_unpaired": "This source Task cannot be used with this tool, so nothing was submitted. The source must be a Task you completed successfully in this session that pairs with one of this tool's available functions (for example, a Creative Lab design preview of the same template).",
             "chat.presentation.messages.source_offering_canvas": "This turn's input is the artboard snapshot. The snapshot is not a source Task itself, and the artboard does not show exactly one design preview you completed successfully in this session that can pair, so nothing was submitted. Call again with the design preview's image handle or its Task ID; the user does not need to clear the artboard or select again.",
@@ -15725,8 +16136,6 @@
             "chat.tools[name=process_model].description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
             "chat.tools[name=plan_model_processing].description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
             "chat.tools[name=create_gaussian_splat].description": "Generate Gaussian Splat (image to Gaussian Splat) from exactly one explicitly selected owned image. This distinct representation supports preview and raw .splat download, not mesh processing or mesh export. Never substitute a mesh model or silently choose one of several images.",
-            "chat.tools[name=create_model_3d].model_required_message": "Select a generation model in the workspace first.",
-            "chat.tools[name=create_model_3d_from_image].model_required_message": "Select a generation model in the workspace first.",
             "chat.tools[name=create_gaussian_splat].model_required_message": "Select a Gaussian Splat generation model first.",
             "chat.tools[name=create_creative_lab_design].model_required_message": "Select a Creative Lab template first.",
             "chat.tools[name=build_creative_lab_item].model_required_message": "Select a Creative Lab design preview first.",

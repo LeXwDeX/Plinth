@@ -67,6 +67,18 @@ type Repository interface {
 	// foreign session. Writing does not touch updated_at.
 	SessionNotes(ctx context.Context, owner, session string) (string, bool, error)
 	SetSessionNotes(ctx context.Context, owner, session, notes string) (bool, error)
+	// SessionBrief and SetSessionBrief read and replace the session's
+	// structured production brief (#103). Both are scoped to the owner; found
+	// is false for a missing or foreign session. Writing does not touch
+	// updated_at.
+	SessionBrief(ctx context.Context, owner, session string) (ProductionBrief, bool, error)
+	SetSessionBrief(ctx context.Context, owner, session string, brief ProductionBrief) (bool, error)
+	// SessionExplicitModel3D and SetSessionExplicitModel3D read and replace the
+	// 3D model the person explicitly picked in the session (#103). An empty
+	// model clears the pick. Both are owner scoped; writing does not touch
+	// updated_at.
+	SessionExplicitModel3D(ctx context.Context, owner, session string) (string, bool, error)
+	SetSessionExplicitModel3D(ctx context.Context, owner, session, model string) (bool, error)
 	// SessionPick and SetSessionPick read and replace the candidate the user
 	// picked as the session's current object (platform IDs only; a zero
 	// Attachment clears it). Both are scoped to the owner; found is false for a
@@ -198,6 +210,10 @@ type ServiceConfig struct {
 	// #329 follow-up). A turn's pick of a retired model is moved to its
 	// successor and the turn records the switch.
 	RetiredModels []catalog.RetiredModelSuccessor
+	// Model3DUsage is application.chat.model3d_usage (#103): the purposes a
+	// production brief may name, their parameter overrides and the brief's
+	// field declarations. Zero disables the brief API and the purpose card.
+	Model3DUsage catalog.ChatModel3DUsageSchema
 }
 
 type Service struct {
@@ -231,6 +247,7 @@ type Service struct {
 	maximumNotes         int
 	canvasInputSource    string
 	retiredModels        map[string]catalog.RetiredModelSuccessor
+	model3DUsage         catalog.ChatModel3DUsageSchema
 
 	harnessSnapshotResolver HarnessSnapshotResolver
 
@@ -329,6 +346,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 		maximumNotes:         config.MaximumSessionNotes,
 		canvasInputSource:    config.CanvasInputSource,
 		retiredModels:        retiredModelIndex(config.RetiredModels),
+		model3DUsage:         config.Model3DUsage,
 		models:               config.Models,
 	}, nil
 }
@@ -762,6 +780,24 @@ func (service *Service) StartTurn(
 		return Message{}, ErrSessionNotFound
 	}
 	command.Options.AgentScope = service.agentScope.Normalize(scope)
+	// The production brief and the explicitly picked 3D model are frozen from
+	// the stored session like the scope, never taken from the request (#103).
+	brief, found, err := service.repository.SessionBrief(ctx, command.OwnerID, command.SessionID)
+	if err != nil {
+		return Message{}, err
+	}
+	if !found {
+		return Message{}, ErrSessionNotFound
+	}
+	command.Options.ProductionBrief = brief
+	explicitModel, found, err := service.repository.SessionExplicitModel3D(ctx, command.OwnerID, command.SessionID)
+	if err != nil {
+		return Message{}, err
+	}
+	if !found {
+		return Message{}, ErrSessionNotFound
+	}
+	command.Options.ExplicitModel3D = explicitModel
 	// A pick of a retired generation model runs on its successor; the turn
 	// records the switch (#329 follow-up).
 	service.moveRetiredModels(&command.Options)

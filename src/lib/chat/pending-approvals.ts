@@ -24,15 +24,19 @@ export interface PendingApprovalInput {
 }
 
 export interface ParameterAdjustment {
-  name: string; label: string; recommendedValue: unknown; value: unknown; reason: string; advice: string; source: 'agent';
+  /** 'agent', or 'profile:<id>' when the session's production purpose contributed the value (#103). */
+  name: string; label: string; recommendedValue: unknown; value: unknown; reason: string; advice: string; source: string;
+  /** The purpose id when the source is 'profile:<id>' (#103). */
+  profile?: string;
 }
 /** Values are already frozen by Generation; never recalculate them from the live parameter panel. */
 export function parseParameterAdjustments(raw: unknown): ParameterAdjustment[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap(value => {
     const item = record(value);
-    if (item.source !== 'agent' || !text(item.name) || !text(item.label) || !text(item.reason) || !('value' in item) || !('recommended_value' in item)) return [];
-    return [{ name: text(item.name), label: text(item.label), recommendedValue: item.recommended_value, value: item.value, reason: text(item.reason), advice: text(item.advice), source: 'agent' as const }];
+    const source = text(item.source);
+    if ((source !== 'agent' && !source.startsWith('profile:')) || !text(item.name) || !text(item.label) || !text(item.reason) || !('value' in item) || !('recommended_value' in item)) return [];
+    return [{ name: text(item.name), label: text(item.label), recommendedValue: item.recommended_value, value: item.value, reason: text(item.reason), advice: text(item.advice), source, ...(text(item.profile) ? { profile: text(item.profile) } : {}) }];
   });
 }
 

@@ -110,6 +110,14 @@ type TurnOptions struct {
 	// empty (a turn stored before it, or a deployment with one model) is the
 	// deployment's own connection.
 	ModelConnection string `json:"ModelConnection,omitempty"`
+	// ProductionBrief is the session's production brief when the turn started
+	// (#103). The service reads it from the stored session, never from the
+	// request, and freezes it with the turn. Nil or empty is no brief.
+	ProductionBrief ProductionBrief `json:"ProductionBrief,omitempty"`
+	// ExplicitModel3D is the 3D model the person explicitly picked in this
+	// session (#103). While set it is locked: a production purpose and an
+	// Agent-named model cannot replace it.
+	ExplicitModel3D string `json:"ExplicitModel3D,omitempty"`
 }
 
 type Turn struct {
@@ -204,6 +212,11 @@ type Session struct {
 	// AgentScope is the session's Agent scope ("2d", "3d" or "auto"): which
 	// tools the Agent may use. It is stored with the session.
 	AgentScope string
+	// Brief is the session's structured production brief (#103).
+	Brief ProductionBrief
+	// ExplicitModel3D is the 3D model the person explicitly picked in this
+	// session (#103); empty means no explicit pick.
+	ExplicitModel3D string
 	// EstimatedCredits is the sum of the estimated credits of the tasks this
 	// session has accepted. It is an estimate, never a settled charge.
 	EstimatedCredits int

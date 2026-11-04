@@ -142,6 +142,7 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"runtime.input_assets.legacy_storage_root_setting", "runtime.input_assets.audit",
 		"runtime.asset_delivery.proxy.cache", "runtime.asset_delivery.proxy.security.host_source",
 		"chat.agent", "chat.agent_tools", "chat.pending_approvals", "chat.three_view", "chat.dsml", "chat.audit",
+		"chat.model3d_usage", "chat.choice",
 		"chat.api.prompt_enhance.profiles", "chat.stream.headers",
 		"chat.skills.execution", "chat.context.asset_url_template",
 		"canvas.audit", "canvas.defaults.project_id_prefix",

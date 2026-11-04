@@ -2381,6 +2381,12 @@ type ChatSchema struct {
 	// an answered or pending card and its bounds. Server side only; the card's
 	// visible words are content messages ui.chat.choice.*.
 	Choice ChatChoiceSchema `json:"choice"`
+	// Model3DUsage declares the production purposes of 3D work (#103): the
+	// recommended offerings and public parameter overrides per purpose, the
+	// triangle/texture budget, and the session production brief. Server side
+	// only: the browser reads a brief projection on the session, never the
+	// purpose table or its reasons.
+	Model3DUsage ChatModel3DUsageSchema `json:"model3d_usage"`
 	// ContextCompaction declares how a long conversation is summarized for
 	// the model (#322): the automatic threshold, how many recent rounds stay
 	// verbatim and the prompts. The visible words are content messages
@@ -2462,6 +2468,126 @@ type ChatChoiceSchema struct {
 	// person's message, mean they do not want it ("不要 Tripo"). A negated
 	// name is never run without asking (#321 G).
 	MentionNegations []string `json:"mention_negations,omitempty"`
+	// Kinds declares the generic cards an Agent tool may open (#103). The
+	// first kind is usage_profile, whose options the server builds from
+	// model3d_usage.profiles; each kind names the tool its answer calls and
+	// the argument field its options fill. Empty (historical Catalogs) leaves
+	// ask_choice without a kind.
+	Kinds []ChatChoiceKindSchema `json:"kinds,omitempty"`
+}
+
+// ChatChoiceKindSchema is one kind of generic choice card (#103).
+type ChatChoiceKindSchema struct {
+	ID string `json:"id"`
+	// ToolName is the tool an answer calls; Argument is the name of its
+	// string parameter that receives the option id.
+	ToolName string `json:"tool_name"`
+	Argument string `json:"argument"`
+	// OptionSource names where the server builds the options: the only
+	// declared source is "usage_profiles".
+	OptionSource string `json:"option_source"`
+	// Question is the default question the tool result shows when the Agent
+	// names none; Message is the Agent-facing line of the tool result.
+	Question string `json:"question"`
+	Message  string `json:"message"`
+}
+
+// ChatModel3DUsageSchema is application.chat.model3d_usage (#103).
+type ChatModel3DUsageSchema struct {
+	// DefaultProfile is the purpose used when a session has no brief purpose.
+	DefaultProfile string                    `json:"default_profile"`
+	Profiles       []ChatModel3DUsageProfile `json:"profiles"`
+	Brief          ChatProductionBriefSchema `json:"brief"`
+}
+
+// ChatModel3DUsageProfile is one production purpose.
+type ChatModel3DUsageProfile struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	// RecommendedOfferings maps a 3D input shape to Offering IDs in preference
+	// order. Keys: text-to-3d, image-to-3d and multiview-to-3d (an
+	// image-to-3d Offering that declares the multiview views argument).
+	RecommendedOfferings map[string][]string `json:"recommended_offerings"`
+	// ParameterOverrides maps an Offering ID to public parameter values the
+	// purpose applies. A value must pass the same normalization as a real
+	// submission; fixed, hidden, protocol, reference and extra-credit consent
+	// parameters are refused at load time.
+	ParameterOverrides map[string]map[string]json.RawMessage `json:"parameter_overrides,omitempty"`
+	// Reason explains the purpose once; every adjusted parameter frozen from
+	// this purpose carries it and source "profile:<id>".
+	Reason string `json:"reason"`
+	// Pipeline is reference only: later processing capabilities that suit the
+	// purpose, in order. It is never executed automatically.
+	Pipeline []ChatModel3DUsagePipelineStep `json:"pipeline,omitempty"`
+	Budget   ChatModel3DUsageBudget         `json:"budget"`
+}
+
+// ChatModel3DUsagePipelineStep names a later capability and, optionally, the
+// Offering and public parameters that fit the purpose.
+type ChatModel3DUsagePipelineStep struct {
+	Capability string                     `json:"capability"`
+	OfferingID string                     `json:"offering_id,omitempty"`
+	Parameters map[string]json.RawMessage `json:"parameters,omitempty"`
+}
+
+// ChatModel3DUsageBudget is the purpose's triangle and delivery budget.
+type ChatModel3DUsageBudget struct {
+	MinTriangles      *int `json:"min_triangles,omitempty"`
+	MaxTriangles      int  `json:"max_triangles"`
+	MaxTextureSize    *int `json:"max_texture_size,omitempty"`
+	RequireUV         bool `json:"require_uv"`
+	RequireWatertight bool `json:"require_watertight"`
+	RequireSkin       bool `json:"require_skin"`
+}
+
+// ChatProductionBriefSchema declares the session production brief: its field
+// names, types and bounds, and the words of the system-context block. The
+// brief is replaced as a whole by the Agent tool and by the session API.
+type ChatProductionBriefSchema struct {
+	Fields []ChatProductionBriefField `json:"fields"`
+	// ContextTemplate adds the brief to the system prompt ({brief}); a session
+	// without a brief adds EmptyText in its place.
+	ContextTemplate string `json:"context_template"`
+	EmptyText       string `json:"empty_text"`
+	// FieldTemplate renders one non-empty field ({label}, {value}); FlagTemplate
+	// renders a true boolean ({label}); Separator joins them.
+	FieldTemplate  string `json:"field_template"`
+	FlagTemplate   string `json:"flag_template"`
+	Separator      string `json:"separator"`
+	// PurposeTemplate renders the purpose label with its budget ({label},
+	// {budget}).
+	PurposeTemplate string `json:"purpose_template"`
+	// BudgetTemplate renders a budget with a minimum ({minimum}, {maximum},
+	// {requirements}); OpenBudgetTemplate renders one without
+	// ({maximum}, {requirements}); OverrideBudgetTemplate renders a session
+	// triangle override ({value}, {requirements}).
+	BudgetTemplate         string `json:"budget_template"`
+	OpenBudgetTemplate     string `json:"open_budget_template"`
+	OverrideBudgetTemplate string `json:"override_budget_template"`
+	// RequirementsTemplate wraps the requirement texts ({items}); each text is
+	// one of UVText, WatertightText and SkinText, joined by
+	// RequirementSeparator.
+	RequirementsTemplate   string `json:"requirements_template"`
+	RequirementSeparator   string `json:"requirement_separator"`
+	UVText                 string `json:"uv_text"`
+	WatertightText         string `json:"watertight_text"`
+	SkinText               string `json:"skin_text"`
+	SavedMessage           string `json:"saved_message"`
+	InvalidTemplate        string `json:"invalid_template"`
+}
+
+// ChatProductionBriefField declares one brief member and its bound.
+type ChatProductionBriefField struct {
+	Name string `json:"name"`
+	// Type is profile, text, boolean or integer.
+	Type    string `json:"type"`
+	Label   string `json:"label"`
+	// MaximumCharacters bounds a text field; Minimum and Maximum bound an
+	// integer. Zero leaves the bound unset.
+	MaximumCharacters int `json:"maximum_characters,omitempty"`
+	Minimum           int `json:"minimum,omitempty"`
+	Maximum           int `json:"maximum,omitempty"`
 }
 
 // ChatAgentScopeSchema is application.chat.agent_scope. The scope of a session
@@ -2797,6 +2923,12 @@ type ChatAPIFields struct {
 	ApprovalMode string `json:"approval_mode"`
 	// Notes is the request field of the session settings-summary write.
 	Notes string `json:"notes"`
+	// Brief is the request field of the session production-brief write
+	// (#103): a whole brief object.
+	Brief string `json:"brief"`
+	// ExplicitModel3D carries the 3D model the person explicitly picked for
+	// this session (#103), so a production purpose may not replace it.
+	ExplicitModel3D string `json:"explicit_model_3d,omitempty"`
 	// AgentScope is the request field of the session Agent-scope write.
 	AgentScope string `json:"agent_scope"`
 	// ChoiceAnswer carries the answer to an in-chat choice card with a turn
@@ -2843,6 +2975,11 @@ type ChatAPIResponseFields struct {
 	EstimatedCredits string `json:"estimated_credits"`
 	// Notes is the member carrying the session settings summary.
 	Notes string `json:"notes"`
+	// Brief is the member carrying the session production brief (#103).
+	Brief string `json:"brief,omitempty"`
+	// ExplicitModel3D is the member carrying the 3D model the person
+	// explicitly picked in the session (#103); empty leaves it out.
+	ExplicitModel3D string `json:"explicit_model_3d,omitempty"`
 	// Pick is the member carrying the session's picked candidate.
 	Pick string `json:"pick"`
 	// AgentScope is the member carrying the session's Agent scope.
@@ -3373,7 +3510,15 @@ type ChatToolSchema struct {
 	// the one enabled, available Offering of the tool's capabilities whose
 	// source-task parameter lists that Task's Offering in task_offerings, such
 	// as the build stage paired with a Creative Lab prototype (#189).
-	OfferingFromSource   string                     `json:"offering_from_source,omitempty"`
+	OfferingFromSource string `json:"offering_from_source,omitempty"`
+	// ModelArgument names the optional string argument by which the Agent
+	// names the Offering to run, by model_id, provider/model_id or Offering
+	// ID, among the tool's capabilities (#103). The session's explicitly
+	// picked 3D model wins over the argument, and a usage profile may supply
+	// the default. The enum, when declared, names the models the tool tells
+	// the Agent about; execution accepts an enabled, runtime-available
+	// Offering of the call's capability, matched by any of those names.
+	ModelArgument string `json:"model_argument,omitempty"`
 	ModelRequiredMessage string                     `json:"model_required_message"`
 	Capability           schemacontract.Capability  `json:"capability"`
 	FallbackCapability   schemacontract.Capability  `json:"fallback_capability"`
@@ -3647,6 +3792,10 @@ type ChatToolResultFields struct {
 	// domain. Empty keys omit the values.
 	Model         string `json:"model,omitempty"`
 	ModelFallback string `json:"model_fallback,omitempty"`
+	// ModelChoice is the optional key of the object naming who chose the 3D
+	// model (#103): source user, agent, profile or default, the purpose id when
+	// the profile chose, and the reason. Empty omits it.
+	ModelChoice string `json:"model_choice,omitempty"`
 	// ModelNote is the optional key of chat.presentation.messages
 	// retired_model_fallback: the model the person picked is retired and the
 	// step ran on its successor (#329 follow-up). Present only then.
@@ -3788,6 +3937,13 @@ type ChatMessageTexts struct {
 	// (result_fields.model_note) when the turn named a retired model and the
 	// service ran its successor instead ({from}, {to}; #329 follow-up).
 	RetiredModelFallback string `json:"retired_model_fallback,omitempty"`
+	// ModelChoiceConflict refuses a 3D call whose explicit model disagrees
+	// with the model the person locked in this session ({locked}, {requested});
+	// ModelChoiceUnavailable refuses a model the call named that is not
+	// available or cannot take the input ({model}, {choices}) (#103). Neither
+	// submits a Task.
+	ModelChoiceConflict    string `json:"model_choice_conflict,omitempty"`
+	ModelChoiceUnavailable string `json:"model_choice_unavailable,omitempty"`
 	// OfferingChoiceUnavailable tells the Agent that the Offering named by a
 	// tool's offering_argument is not enabled or available ({choices} lists
 	// the ones that are); SourceOfferingUnpaired that the source Task of an
@@ -3920,6 +4076,8 @@ type ChatAuditSchema struct {
 	ApprovalModeAction string `json:"approval_mode_action"`
 	// AgentScopeAction records a change of the session Agent scope.
 	AgentScopeAction string `json:"agent_scope_action"`
+	// ProductionBriefAction records a change of the session production brief.
+	ProductionBriefAction string `json:"production_brief_action"`
 }
 
 type RuntimeConfigurationSchema struct {
@@ -4067,7 +4225,12 @@ type CoreHTTPRoutesSchema struct {
 	ClientErrors          string `json:"client_errors,omitempty"`
 	ChatSessionApproval   string `json:"chat_session_approval"`
 	ChatSessionNotes      string `json:"chat_session_notes"`
-	ChatSessionPick       string `json:"chat_session_pick"`
+	ChatSessionBrief      string `json:"chat_session_brief,omitempty"`
+	// ChatSessionModel3D writes the 3D model the person explicitly picked in
+	// the session (#103); it is a lock for the generation tools and submits
+	// nothing. Empty (historical Catalogs) disables the write.
+	ChatSessionModel3D string `json:"chat_session_model3d,omitempty"`
+	ChatSessionPick    string `json:"chat_session_pick"`
 	ChatSessionChoices    string `json:"chat_session_choices"`
 	ChatSessionAgentScope string `json:"chat_session_agent_scope"`
 	// ChatSessionReasoning reads and writes the session thinking level;

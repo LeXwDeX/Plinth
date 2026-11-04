@@ -184,7 +184,7 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
       {(model.parameterAdjustments?.length ?? 0) > 0 ? <section className="flex flex-col gap-2 border-t border-border pt-2" data-testid="studio-approval-parameter-adjustments" aria-label={schemaText(schema, 'ui.studio.approval.card.parameter_adjustments')}>
         <h4 className="font-medium">{schemaText(schema, 'ui.studio.approval.card.parameter_adjustments')}</h4>
         {model.parameterAdjustments?.map(item => <div key={item.name} className="flex flex-col gap-1 [overflow-wrap:anywhere]" data-parameter={item.name}>
-          <p className="font-medium">{item.label} <span className="font-normal text-muted-foreground">{schemaText(schema, 'ui.studio.params.source_agent')}</span></p>
+          <p className="font-medium">{item.label} {item.profile ? null : <span className="font-normal text-muted-foreground">{schemaText(schema, 'ui.studio.params.source_agent')}</span>}</p>
           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
             <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.recommended_value')}</dt><dd>{typeof item.recommendedValue === 'string' ? item.recommendedValue : JSON.stringify(item.recommendedValue)}</dd>
             <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.actual_value')}</dt><dd>{typeof item.value === 'string' ? item.value : JSON.stringify(item.value)}</dd>

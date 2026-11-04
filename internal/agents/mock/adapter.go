@@ -244,14 +244,14 @@ func (adapter *Adapter) creativeLabBuildRetry(request agents.Request) (agents.To
 // A plain-text answer that is not the waiting, recharge or denied text means
 // the server refused the step before submitting anything (no model chosen,
 // the turn's limit, a missing consent), so it closes the turn as not done.
-// Saving the session notes is the one plain-text success: a turn that only
-// did that closes with the tool's own confirmation.
+// Saving the session notes and writing the production brief are the two
+// plain-text successes: a turn that only did one closes with its confirmation.
 func (adapter *Adapter) closingSummary(ctx context.Context, messages []agents.Message) string {
 	failure, waiting, denied := "", false, false
 	// referenceNote is what a waiting step says about the pictures it uses
 	// (#329 E); the reply repeats it.
 	referenceNote := ""
-	notesSaved, ranStep := "", false
+	notesSaved, briefSaved, ranStep := "", "", false
 	toolNames := turnToolNames(messages, adapter.userRole)
 	for index := len(messages) - 1; index >= 0; index-- {
 		message := messages[index]
@@ -278,6 +278,11 @@ func (adapter *Adapter) closingSummary(ctx context.Context, messages []agents.Me
 			denied = true
 			continue
 		}
+		// A generic card (#103) carries its own Schema explanation, which says
+		// what the person is choosing; a provider-choice card (#321) does not.
+		if text := genericChoiceText(message.Content); text != "" {
+			return adapter.text(ctx, text)
+		}
 		if adapter.choiceSummary != "" && choiceOpened(message.Content) {
 			// The tool asked the person on a choice card; nothing ran.
 			return adapter.text(ctx, adapter.choiceSummary)
@@ -296,6 +301,10 @@ func (adapter *Adapter) closingSummary(ctx context.Context, messages []agents.Me
 			case toolNames[message.ToolCallID] == toolUpdateSessionNotes:
 				if notesSaved == "" {
 					notesSaved = adapter.text(ctx, content)
+				}
+			case toolNames[message.ToolCallID] == toolUpdateBrief:
+				if briefSaved == "" {
+					briefSaved = adapter.text(ctx, content)
 				}
 			case content != "" && failure == "":
 				failure = adapter.text(ctx, content)
@@ -327,6 +336,8 @@ func (adapter *Adapter) closingSummary(ctx context.Context, messages []agents.Me
 		return adapter.text(ctx, adapter.waitingSummary)
 	case notesSaved != "" && !ranStep:
 		return notesSaved
+	case briefSaved != "" && !ranStep:
+		return briefSaved
 	}
 	return adapter.text(ctx, adapter.summary)
 }

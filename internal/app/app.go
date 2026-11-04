@@ -292,6 +292,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// A turn's pick of a retired generation model runs on its successor
 		// (#329 follow-up).
 		RetiredModels: taskCatalog.RetiredModelSuccessors(),
+		// The production purposes and the brief fields (#103).
+		Model3DUsage: applicationSchema.Chat.Model3DUsage,
 		// The deployment's chat model, its thinking profile and context
 		// window (#322).
 		Models: chat.ModelPolicy{
@@ -602,7 +604,15 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		InspectModel:       toolExecutor.InspectModel,
 		RenderModelViews:   toolExecutor.RenderModelViews,
 		CompareModels:      toolExecutor.CompareModels,
-		UpdateNotes:        chatService.SetSessionNotes,
+		UpdateNotes: chatService.SetSessionNotes,
+		UpdateBrief: func(ctx context.Context, ownerID, sessionID string, brief map[string]json.RawMessage) error {
+			_, err := chatService.SetProductionBrief(ctx, ownerID, sessionID, brief)
+			return err
+		},
+		AskChoice:            chatService.AskChoice,
+		ChoiceKinds:          applicationSchema.Chat.Choice.Kinds,
+		BriefSavedMessage:    applicationSchema.Chat.Model3DUsage.Brief.SavedMessage,
+		BriefInvalidTemplate: applicationSchema.Chat.Model3DUsage.Brief.InvalidTemplate,
 		Consent: func(command chat.ToolCommand, request json.RawMessage, snapshot json.RawMessage) error {
 			scope := agentparams.ScopeKey(command.OwnerID, command.SessionID)
 			return agentStateStore.BeginConsent(scope, request, snapshot)

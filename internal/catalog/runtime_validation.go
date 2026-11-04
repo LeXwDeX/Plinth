@@ -264,6 +264,8 @@ func validateRuntime(schema RuntimeSchema) error {
 		"asset_model_preview": httpRuntime.Routes.AssetModelPreview, "processing_plan_reconcile": httpRuntime.Routes.ProcessingPlanReconcile,
 		"chat_session_approval":           httpRuntime.Routes.ChatSessionApproval,
 		"chat_session_notes":              httpRuntime.Routes.ChatSessionNotes,
+		"chat_session_brief":              httpRuntime.Routes.ChatSessionBrief,
+		"chat_session_model3d":            httpRuntime.Routes.ChatSessionModel3D,
 		"chat_session_pick":               httpRuntime.Routes.ChatSessionPick,
 		"chat_session_choices":            httpRuntime.Routes.ChatSessionChoices,
 		"chat_session_agent_scope":        httpRuntime.Routes.ChatSessionAgentScope,

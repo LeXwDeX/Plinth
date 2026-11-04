@@ -61,6 +61,10 @@ export interface ProductSchema {
         client_errors?: string;
         chat_session_approval: string;
         chat_session_notes?: string;
+        /** #103: the session's production brief (GET/PUT). Absent on older servers. */
+        chat_session_brief?: string;
+        /** #103: the 3D model the person explicitly picked in the session (GET/PUT). Absent on older servers. */
+        chat_session_model3d?: string;
         chat_session_pick?: string;
         chat_session_agent_scope?: string;
         /** #322: the session's thinking level (GET/PUT). Absent on older servers: the picker is hidden. */
@@ -1371,6 +1375,9 @@ export interface ChatProductSchema {
       approval_mode: string;
       /** 会话设定摘要的请求成员。 */
       notes: string;
+      /** #103: 会话制作简报与明确选定的 3D 模型。 */
+      brief?: string;
+      explicit_model_3d?: string;
       /** 会话 Agent 范围的请求成员。 */
       agent_scope: string;
       /** #321: the answer to an in-chat choice card that travels with a turn. */
@@ -1410,6 +1417,10 @@ export interface ChatProductSchema {
       estimated_credits: string;
       approval_source: string;
       notes: string;
+      /** #103: 会话制作简报成员。 */
+      brief?: string;
+      /** #103: 会话明确选定的 3D 模型成员。 */
+      explicit_model_3d?: string;
       /** 会话选用的候选图成员。 */
       pick: string;
       /** 会话 Agent 范围成员。 */

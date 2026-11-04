@@ -658,6 +658,68 @@ func (r *memoryChatRepository) SessionAgentScope(
 	return session.AgentScope, true, nil
 }
 
+func (r *memoryChatRepository) SessionBrief(
+	_ context.Context,
+	ownerID string,
+	sessionID string,
+) (chat.ProductionBrief, bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	session, found := r.sessions[sessionID]
+	if !found || session.OwnerID != ownerID {
+		return chat.ProductionBrief{}, false, nil
+	}
+	return session.Brief, true, nil
+}
+
+func (r *memoryChatRepository) SetSessionBrief(
+	_ context.Context,
+	ownerID string,
+	sessionID string,
+	brief chat.ProductionBrief,
+) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	session, found := r.sessions[sessionID]
+	if !found || session.OwnerID != ownerID {
+		return false, nil
+	}
+	session.Brief = brief
+	r.sessions[sessionID] = session
+	return true, nil
+}
+
+func (r *memoryChatRepository) SessionExplicitModel3D(
+	_ context.Context,
+	ownerID string,
+	sessionID string,
+) (string, bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	session, found := r.sessions[sessionID]
+	if !found || session.OwnerID != ownerID {
+		return "", false, nil
+	}
+	return session.ExplicitModel3D, true, nil
+}
+
+func (r *memoryChatRepository) SetSessionExplicitModel3D(
+	_ context.Context,
+	ownerID string,
+	sessionID string,
+	model string,
+) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	session, found := r.sessions[sessionID]
+	if !found || session.OwnerID != ownerID {
+		return false, nil
+	}
+	session.ExplicitModel3D = model
+	r.sessions[sessionID] = session
+	return true, nil
+}
+
 func (r *memoryChatRepository) SessionNotes(
 	_ context.Context,
 	ownerID string,

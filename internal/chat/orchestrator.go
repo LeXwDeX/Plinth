@@ -64,6 +64,10 @@ type ToolCommand struct {
 	// order (a resumed reply included). A tool with a per-reply bound replays
 	// them instead of keeping state of its own.
 	EarlierCalls []ToolCall
+	// ToolAvailable reports whether a named tool is declared and available in
+	// this turn's Agent scope (#103). ask_choice uses it to refuse a card whose
+	// answer would call a tool the turn cannot run. Nil means no check.
+	ToolAvailable func(name string) bool
 	// ExplicitParameters preserves caller inputs before legacy defaults merge.
 	// Non-nil enables offering overrides without changing the command hash.
 	ExplicitParameters map[string]json.RawMessage `json:"-"`
@@ -1834,6 +1838,7 @@ func (orchestrator *Orchestrator) agentRequest(
 	systemPrompt += orchestrator.summaryPrompt(latest)
 	systemPrompt += orchestrator.compactedHandlePrompt(history, indexedByMessage, summarized, lastUserMessage)
 	systemPrompt += orchestrator.selectionPrompt(options)
+	systemPrompt += orchestrator.briefPrompt(options)
 	systemPrompt += orchestrator.notesPrompt(ctx, ownerID, sessionID)
 	var choices []Choice
 	if orchestrator.service != nil && sessionID != "" {
@@ -2557,6 +2562,11 @@ func (orchestrator *Orchestrator) executeTools(
 				Turn:                 copyMessage(*produced),
 				Options:              command.Options,
 				EarlierCalls:         earlierCalls(storedCalls, call.ID),
+				ToolAvailable: func(name string) bool {
+					candidate, exists := registry.byName[name]
+					return exists && registry.permits(candidate, false) &&
+						!orchestrator.scopeRefuses(registry, name, command.Options.AgentScope, false)
+				},
 			},
 			func(observation ToolObservation) error {
 				if observation.TaskID != "" &&

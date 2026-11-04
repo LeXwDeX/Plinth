@@ -19,7 +19,7 @@ import (
 
 const choiceColumns = `id, owner_id, session_id, assistant_message_id, call_id, tool_name, capability, step_index,
 	options_json, default_option_id, allow_default, default_arguments, state, answer_option_id, answer_default,
-	answer_source, answer_message_id, created_at, answered_at`
+	answer_source, answer_message_id, created_at, answered_at, kind`
 
 func newChoiceID() (string, error) {
 	random := make([]byte, 12)
@@ -36,7 +36,7 @@ func scanChoice(row interface{ Scan(...any) error }) (chat.Choice, error) {
 	if err := row.Scan(&choice.ID, &choice.OwnerID, &choice.SessionID, &choice.AssistantMessageID, &choice.CallID,
 		&choice.ToolName, &choice.Capability, &choice.StepIndex, &options, &choice.DefaultOptionID, &allowDefault,
 		&defaults, &state, &choice.AnswerOptionID, &answerDefault, &choice.AnswerSource, &choice.AnswerMessageID,
-		&created, &answered); err != nil {
+		&created, &answered, &choice.Kind); err != nil {
 		return chat.Choice{}, err
 	}
 	if err := json.Unmarshal([]byte(options), &choice.Options); err != nil {
@@ -99,10 +99,10 @@ func (r *Repository) CreateChoice(ctx context.Context, choice chat.Choice) (chat
 		created = time.Now().UTC()
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO chat_choices (`+choiceColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0, '', '', ?, '')`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0, '', '', ?, '', ?)`,
 		id, choice.OwnerID, choice.SessionID, choice.AssistantMessageID, choice.CallID, choice.ToolName,
 		choice.Capability, choice.StepIndex, string(options), choice.DefaultOptionID, boolInt(choice.AllowDefault),
-		defaults, string(chat.ChoicePending), formatTaskTime(created)); err != nil {
+		defaults, string(chat.ChoicePending), formatTaskTime(created), choice.Kind); err != nil {
 		return chat.Choice{}, fmt.Errorf("insert chat choice: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

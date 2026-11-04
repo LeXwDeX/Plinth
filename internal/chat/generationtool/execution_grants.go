@@ -107,7 +107,7 @@ func (executor *Executor) prepareAgentOperation(
 	if activeHarness(command) && !forcedHarnessInputMatches(command, offering, input) {
 		return executor.harnessRefusal(command, ErrOperationConflict)
 	}
-	reasons, err := executor.parameterReasons(command, offering, input)
+	reasons, sources, err := executor.parameterReasons(command, offering, input)
 	if err != nil {
 		return chat.ToolResult{NoSubmission: true}, err
 	}
@@ -115,6 +115,7 @@ func (executor *Executor) prepareAgentOperation(
 	prepared, err := preparedGateway.PrepareInput(ctx, generation.PrepareInputCommand{
 		OwnerID: generation.OwnerID(command.OwnerID), SessionID: command.SessionID,
 		Capability: capability, OfferingID: offering.ID, Input: input, ParameterReasons: reasons,
+		ParameterSources: sources,
 	})
 	if err != nil {
 		// An input the Schema refuses (a count out of range, extra credits over

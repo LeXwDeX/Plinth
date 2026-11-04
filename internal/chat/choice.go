@@ -43,18 +43,28 @@ var (
 
 // ChoiceOption is one option of a card: the exact Offering, the public names
 // and Schema quote the card shows, and the arguments of the call that runs it.
+// A generic card (#103) uses Label and Description instead of the Offering
+// names and marks its recommended option. The Offering fields and Arguments
+// stay for the #321 provider-choice cards.
 type ChoiceOption struct {
 	ID               string              `json:"id"`
-	ProviderName     string              `json:"provider_name"`
-	ModelName        string              `json:"model_name"`
+	ProviderName     string              `json:"provider_name,omitempty"`
+	ModelName        string              `json:"model_name,omitempty"`
+	Label            string              `json:"label,omitempty"`
+	Description      string              `json:"description,omitempty"`
+	Recommended      bool                `json:"recommended,omitempty"`
 	CreditsMetered   bool                `json:"credits_metered,omitempty"`
 	EstimatedCredits int                 `json:"estimated_credits,omitempty"`
 	NativeQuote      *schema.NativeQuote `json:"native_quote,omitempty"`
 	Arguments        json.RawMessage     `json:"arguments"`
 }
 
-// Title is how the Agent and the card name the option.
+// Title is how the Agent and the card name the option. A generic option's
+// Schema label wins over the Offering names.
 func (option ChoiceOption) Title() string {
+	if label := strings.TrimSpace(option.Label); label != "" {
+		return label
+	}
 	return strings.TrimSpace(option.ProviderName + " · " + option.ModelName)
 }
 
@@ -68,8 +78,12 @@ type Choice struct {
 	AssistantMessageID string
 	CallID             string
 	ToolName           string
+	// Kind is the generic choice kind (#103), e.g. usage_profile. Empty is a
+	// #321 provider-choice card.
+	Kind string
 	// Capability is the step being chosen for; StepIndex its position in a
-	// plan (-1 for a single-step tool).
+	// plan (-1 for a single-step tool). A generic card stores its kind here
+	// too, for the continuation, and -1 as its index.
 	Capability       string
 	StepIndex        int
 	Options          []ChoiceOption
