@@ -95,6 +95,11 @@ type Config struct {
 	Grants        *executiongrant.Service
 	StopRequested func(context.Context, string, string, string) (bool, error)
 	References    ReferenceResolver
+	// ModelAssets opens a saved model file for the read-only review tools
+	// (#103); InputAssets stores their rendered pictures as the owner's input
+	// assets. Both stay nil when the tools are not configured.
+	ModelAssets ModelAssetGateway
+	InputAssets ModelRenderStore
 	// InputAssetRoute is the Schema's input-asset item route ({assetID}); a
 	// three-view view the person replaced with an upload is named by it (#65).
 	InputAssetRoute string
@@ -136,6 +141,8 @@ type Executor struct {
 	grants        *executiongrant.Service
 	stopRequested func(context.Context, string, string, string) (bool, error)
 	references    ReferenceResolver
+	modelAssets   ModelAssetGateway
+	inputAssets   ModelRenderStore
 	inputAsset    string
 	chat          catalog.ChatSchema
 	texts         *catalog.TextLocalizer
@@ -144,6 +151,10 @@ type Executor struct {
 	publicStates  map[generation.TaskState]string
 	clock         func() time.Time
 	sleep         func(context.Context, time.Duration) error
+
+	// modelReview holds the parsed-model cache and render concurrency bound
+	// of the read-only review tools (#103).
+	modelReview *modelReviewState
 
 	// canvasArtboard holds the Schema tables that turn a ratio into pixels.
 	canvasArtboard catalog.CanvasArtboardSchema
@@ -194,6 +205,8 @@ func New(config Config) (*Executor, error) {
 		grants:        config.Grants,
 		stopRequested: config.StopRequested,
 		references:    config.References,
+		modelAssets:   config.ModelAssets,
+		inputAssets:   config.InputAssets,
 		inputAsset:    config.InputAssetRoute,
 		chat:          config.Chat,
 		texts:         config.Texts,
@@ -202,6 +215,7 @@ func New(config Config) (*Executor, error) {
 		publicStates:  states,
 		clock:         config.Clock,
 		sleep:         config.Sleep,
+		modelReview:   newModelReviewState(config.Chat.ModelReview),
 
 		canvasArtboard: config.CanvasArtboard,
 

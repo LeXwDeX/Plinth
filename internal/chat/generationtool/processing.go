@@ -793,6 +793,20 @@ func semanticParameter(offering generation.Offering, semantic generation.Paramet
 	return generation.Parameter{}, false
 }
 
+// modelSourceContract names the arguments that choose a model and the texts
+// of a refusal. Processing tools and the read-only model review tools share
+// the same owner, session and model-file checks.
+type modelSourceContract struct {
+	VariantPreference []string
+	SourceRequired    string
+	SourceNotFound    string
+	SourceNotReady    string
+	// SourceNotModel optionally distinguishes an explicit asset that belongs
+	// to the task but is not one of its saved model files. Empty reports it
+	// like a missing one.
+	SourceNotModel string
+}
+
 // resolveProcessingSource finds the owner's succeeded task of this very
 // session (and, when asked, one of its saved model files). A task of another
 // owner or session is reported exactly like a missing one.
@@ -800,13 +814,27 @@ func (executor *Executor) resolveProcessingSource(
 	ctx context.Context, command chat.ToolCommand, arguments map[string]json.RawMessage,
 ) (generation.Task, generation.AssetID, *processingRejection, error) {
 	processing := command.Tool.Processing
-	messages := processing.Messages
-	taskID := rawString(arguments[processing.SourceTaskArgument])
-	assetID := generation.AssetID("")
+	assetID := ""
 	if processing.SourceAssetArgument != "" {
-		assetID = generation.AssetID(rawString(arguments[processing.SourceAssetArgument]))
+		assetID = rawString(arguments[processing.SourceAssetArgument])
 	}
-	notFound := &processingRejection{message: messages.SourceNotFound}
+	return executor.resolveModelSource(ctx, command,
+		rawString(arguments[processing.SourceTaskArgument]), assetID,
+		modelSourceContract{
+			VariantPreference: processing.SourceVariantPreference,
+			SourceRequired:    processing.Messages.SourceRequired,
+			SourceNotFound:    processing.Messages.SourceNotFound,
+			SourceNotReady:    processing.Messages.SourceNotReady,
+		})
+}
+
+// resolveModelSource is the shared source resolution of the processing and
+// model review tools.
+func (executor *Executor) resolveModelSource(
+	ctx context.Context, command chat.ToolCommand, taskID, assetID string, contract modelSourceContract,
+) (generation.Task, generation.AssetID, *processingRejection, error) {
+	explicitAsset := assetID != ""
+	notFound := &processingRejection{message: contract.SourceNotFound}
 	policy := executor.handlePolicy()
 	// A chat handle names a model, not one of its files: the file it recorded
 	// is whichever the result listed first (a 3MF package, say). The source
@@ -833,17 +861,17 @@ func (executor *Executor) resolveProcessingSource(
 			}
 			taskID = resolved[0].Attachment.TaskID
 			if assetID == "" {
-				assetID = generation.AssetID(resolved[0].Attachment.AssetID)
+				assetID = resolved[0].Attachment.AssetID
 			}
 		}
 		if taskID == "" && assetID == "" {
 			// "This model": nothing was named, so the selected model is the source.
 			selectedTask, selectedAsset := selectedModelTask(command)
-			taskID, assetID = selectedTask, generation.AssetID(selectedAsset)
+			taskID, assetID = selectedTask, selectedAsset
 		}
 	}
 	if taskID == "" && assetID == "" {
-		return generation.Task{}, "", &processingRejection{message: messages.SourceRequired}, nil
+		return generation.Task{}, "", &processingRejection{message: contract.SourceRequired}, nil
 	}
 	var task generation.Task
 	if taskID == "" {
@@ -854,7 +882,7 @@ func (executor *Executor) resolveProcessingSource(
 		}
 		for _, candidate := range tasks {
 			for _, asset := range candidate.Assets {
-				if asset.ID == assetID {
+				if string(asset.ID) == assetID {
 					task = candidate
 				}
 			}
@@ -876,24 +904,29 @@ func (executor *Executor) resolveProcessingSource(
 		}
 	}
 	if task.State != generation.TaskSucceeded || !hasSavedModel(task) {
-		return generation.Task{}, "", &processingRejection{message: messages.SourceNotReady}, nil
+		return generation.Task{}, "", &processingRejection{message: contract.SourceNotReady}, nil
 	}
 	if handleNamesModel || assetID == "" {
 		// A model named without one of its files is its main model (#326):
 		// the file the stage shows and the 加工 panel binds, never an
 		// attachment the result happened to list first.
-		assetID = preferredModelAsset(task, processing.SourceVariantPreference)
+		assetID = string(preferredModelAsset(task, contract.VariantPreference))
 	}
 	if assetID != "" {
 		owned := false
 		for _, asset := range task.Assets {
-			owned = owned || (asset.ID == assetID && asset.Role == modelRole && asset.StorageKey != "")
+			owned = owned || (string(asset.ID) == assetID && asset.Role == modelRole && asset.StorageKey != "")
 		}
 		if !owned {
+			if explicitAsset && contract.SourceNotModel != "" {
+				return generation.Task{}, "", &processingRejection{
+					message: fill(contract.SourceNotModel, "{asset}", string(assetID)),
+				}, nil
+			}
 			return generation.Task{}, "", notFound, nil
 		}
 	}
-	return task, assetID, nil, nil
+	return task, generation.AssetID(assetID), nil, nil
 }
 
 // preferredModelAsset is the main model file of a task

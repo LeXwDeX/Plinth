@@ -2678,6 +2678,10 @@ func (orchestrator *Orchestrator) executeTools(
 		if content == "" {
 			content = result.Error
 		}
+		// The reply had this many pictures before this call. recordTurnResult
+		// appends the call's pictures after them, so each picture's attachment
+		// slot is known even when verification skipped one.
+		imagesBefore := len(produced.ImageURLs)
 		content = orchestrator.withResultHandles(content,
 			orchestrator.recordTurnResult(ctx, command.OwnerID, produced, call.ID, taskBindings[call.ID], result.ImageURLs))
 		reply := agents.Message{
@@ -2685,7 +2689,8 @@ func (orchestrator *Orchestrator) executeTools(
 			Content:    content,
 			ToolCallID: call.ID,
 		}
-		orchestrator.attachToolPictures(ctx, command.OwnerID, &reply, result.Pictures)
+		orchestrator.attachToolPictures(ctx, command.OwnerID, &reply,
+			picturesWithHandles(*produced, imagesBefore, result.Pictures))
 		results = append(results, reply)
 		turn.Checkpoint.Completed = append(turn.Checkpoint.Completed, results[len(results)-1])
 		turn.Checkpoint.ImageURLs = append(turn.Checkpoint.ImageURLs, result.ImageURLs...)

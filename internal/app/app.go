@@ -564,6 +564,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Grants:          executionGrants,
 		StopRequested:   chatService.TurnStopRequested,
 		References:      referenceResolver,
+		ModelAssets:     module,
+		InputAssets:     inputAssetService,
 		InputAssetRoute: applicationSchema.Runtime.HTTP.Routes.AssetItem,
 		Chat:            applicationSchema.Chat,
 		CanvasArtboard:  applicationSchema.Canvas.Frontend.Artboard,
@@ -597,6 +599,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		RecoverTask:        newAgentTaskRecoverer(module, applicationSchema.Chat, applicationSchema.Content.Messages, texts),
 		ListModels:         toolExecutor.ListSessionModels,
 		ReadProcessingPlan: toolExecutor.ReadProcessingPlan,
+		InspectModel:       toolExecutor.InspectModel,
+		RenderModelViews:   toolExecutor.RenderModelViews,
+		CompareModels:      toolExecutor.CompareModels,
 		UpdateNotes:        chatService.SetSessionNotes,
 		Consent: func(command chat.ToolCommand, request json.RawMessage, snapshot json.RawMessage) error {
 			scope := agentparams.ScopeKey(command.OwnerID, command.SessionID)

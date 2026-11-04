@@ -100,7 +100,9 @@ func (orchestrator *Orchestrator) recordTurnResult(
 }
 
 // withResultHandles writes the handles a call produced into its JSON result
-// under the Schema's key. A result that is not a JSON object is left as is.
+// under the Schema's key. When the result also carries the Schema's views
+// array and it has one entry per handle, each entry gets its own handle in
+// render order. A result that is not a JSON object is left as is.
 func (orchestrator *Orchestrator) withResultHandles(content string, handles []string) string {
 	key := orchestrator.schema.Context.ResultHandlesField
 	if key == "" || len(handles) == 0 {
@@ -115,11 +117,43 @@ func (orchestrator *Orchestrator) withResultHandles(content string, handles []st
 		return content
 	}
 	result[key] = encoded
+	if viewsField := orchestrator.schema.ModelReview.ResultViewsField; viewsField != "" && len(result[viewsField]) > 0 {
+		result[viewsField] = bindViewHandles(result[viewsField], handles)
+	}
 	updated, err := json.Marshal(result)
 	if err != nil {
 		return content
 	}
 	return string(updated)
+}
+
+// bindViewHandles writes one handle into each entry of a tool result's views
+// array. It returns the array unchanged unless its length matches the handles
+// and every entry is a JSON object; a partial pairing could name the wrong
+// picture.
+func bindViewHandles(raw json.RawMessage, handles []string) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+	var views []map[string]json.RawMessage
+	if json.Unmarshal(raw, &views) != nil || len(views) != len(handles) {
+		return raw
+	}
+	for index, view := range views {
+		if view == nil {
+			return raw
+		}
+		encoded, err := json.Marshal(handles[index])
+		if err != nil {
+			return raw
+		}
+		view["handle"] = encoded
+	}
+	updated, err := json.Marshal(views)
+	if err != nil {
+		return raw
+	}
+	return updated
 }
 
 // canvasLayoutText names an artboard snapshot's layout with the Schema's

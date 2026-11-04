@@ -41,6 +41,14 @@ const (
 	// ToolRecoverTaskResult fetches a failed Task's accepted upstream result
 	// again at no charge (#295).
 	ToolRecoverTaskResult = "recover_task_result"
+	// ToolInspectModel reports the structure of a finished 3D model without
+	// creating a Task (#103).
+	ToolInspectModel = "inspect_model"
+	// ToolRenderModelViews renders still views of a finished 3D model and
+	// attaches them to the reply (#103).
+	ToolRenderModelViews = "render_model_views"
+	// ToolCompareModels renders two finished 3D models side by side (#103).
+	ToolCompareModels = "compare_models"
 )
 
 // 同意状态键与决定值（agent 状态 store 与 harness consent 端点共用词汇）。
@@ -81,6 +89,12 @@ type Config struct {
 	// only, no upstream IDs or URLs).
 	ListModels         func(ctx context.Context, ownerID, sessionID string) (json.RawMessage, error)
 	ReadProcessingPlan func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	// InspectModel, RenderModelViews and CompareModels are the read-only model
+	// review tools (#103). They read only the command's owner and session,
+	// never create a Task and never spend credits.
+	InspectModel     func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	RenderModelViews func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	CompareModels    func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	// UpdateNotes replaces the settings summary of the command's own session
 	// (owner and session come from the server-held command, never from the
 	// arguments) and returns the stored text. It fails with
@@ -139,6 +153,9 @@ type Executor struct {
 	recoverTask            func(ctx context.Context, ownerID, sessionID, taskID string) (json.RawMessage, error)
 	listModels             func(ctx context.Context, ownerID, sessionID string) (json.RawMessage, error)
 	readProcessingPlan     func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	inspectModel           func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	renderModelViews       func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	compareModels          func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	updateNotes            func(ctx context.Context, ownerID, sessionID, notes string) (string, error)
 	consent                func(command chat.ToolCommand, request json.RawMessage, snapshot json.RawMessage) error
 	consentState           func(scope string) map[string]json.RawMessage
@@ -253,6 +270,9 @@ func New(config Config) (*Executor, error) {
 		recoverTask:            config.RecoverTask,
 		listModels:             config.ListModels,
 		readProcessingPlan:     config.ReadProcessingPlan,
+		inspectModel:           config.InspectModel,
+		renderModelViews:       config.RenderModelViews,
+		compareModels:          config.CompareModels,
 		updateNotes:            config.UpdateNotes,
 		consent:                config.Consent,
 		consentState:           config.ConsentState,
@@ -301,6 +321,17 @@ func (e *Executor) Execute(
 		return e.updateSessionNotes(ctx, command), nil
 	case ToolFindHistoryImages:
 		return e.findHistoryImages(command), nil
+	case ToolInspectModel, ToolRenderModelViews, ToolCompareModels:
+		reader := e.inspectModel
+		if command.Call.Name == ToolRenderModelViews {
+			reader = e.renderModelViews
+		} else if command.Call.Name == ToolCompareModels {
+			reader = e.compareModels
+		}
+		if reader == nil {
+			return chat.ToolResult{Error: "model review unavailable", NoSubmission: true}, nil
+		}
+		return reader(ctx, command)
 	case ToolRequestConsent:
 		return e.requestConsent(ctx, command), nil
 	case ToolCreateThreeView:

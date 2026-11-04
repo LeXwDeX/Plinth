@@ -97,7 +97,7 @@ func toolNames(request agents.Request) []string {
 
 var (
 	twoDTools      = []string{"create_multiview_images", "create_three_view", "edit_multiview_images", "refine_image", "remove_background"}
-	threeDTools    = []string{"build_creative_lab_item", "create_creative_lab_design", "convert_model_format", "create_gaussian_splat", "create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views", "create_motion_clip", "get_processing_plan", "list_session_models", "plan_model_processing", "process_model", "retexture_model"}
+	threeDTools    = []string{"build_creative_lab_item", "compare_models", "create_creative_lab_design", "convert_model_format", "create_gaussian_splat", "create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views", "create_motion_clip", "get_processing_plan", "inspect_model", "list_session_models", "plan_model_processing", "process_model", "render_model_views", "retexture_model"}
 	utilityToolSet = []string{"find_history_images", "get_task", "list_offerings", "observe_task", "recover_task_result", "request_consent", "set_params", "update_session_notes"}
 )
 
@@ -199,11 +199,15 @@ func TestServerRefusesAnOutOfScopeToolCallEvenWhenTheModelNamesIt(t *testing.T) 
 		{"2d", "list_session_models", true},
 		{"2d", "plan_model_processing", true},
 		{"2d", "get_processing_plan", true},
+		{"2d", "inspect_model", true},
+		{"2d", "render_model_views", true},
+		{"2d", "compare_models", true},
 		{"3d", "refine_image", true},
 		{"3d", "remove_background", true},
 		{"3d", "create_three_view", true},
 		{"2d", "refine_image", false},
 		{"3d", "create_model_3d_from_image", false},
+		{"3d", "inspect_model", false},
 		// Utility tools run in every scope.
 		{"2d", "update_session_notes", false},
 		{"3d", "find_history_images", false},
