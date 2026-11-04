@@ -45,14 +45,15 @@ function assetRoute(url: string | undefined): { taskId: string; assetId: string 
  * tile. Unlike `handleOfObject` it never falls back to "the only picture of the task": a layer painted over
  * or cropped into a new picture keeps its task id, and it must not borrow the handle of the original. The
  * picture matches an attachment by its model capture, by the task and asset its platform address names,
- * or by the very same address (a sent picture). Nothing found, or two handles: no handle.
+ * (or the task and asset IDs the caller already holds), or by the very same address (a sent picture). Nothing found, or two handles: no handle.
  */
 export function handleOfPicture(
   messages: readonly (Pick<ChatMessage, 'attachments'> & Partial<Pick<ChatMessage, 'images'>>)[],
-  picture: { url: string; captureId?: string },
+  picture: { url: string; captureId?: string; taskId?: string; assetId?: string },
 ): string {
   if (!picture.url && !picture.captureId) return '';
-  const route = assetRoute(picture.url);
+  // Platform IDs the client already holds for the picture (an attachment's source) name it as its address would.
+  const route = picture.taskId && picture.assetId ? { taskId: picture.taskId, assetId: picture.assetId } : assetRoute(picture.url);
   const handles = new Set<string>();
   for (const message of messages) {
     for (const attachment of message.attachments ?? []) {
