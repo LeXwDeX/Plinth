@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { handleLabel, handleOfObject, handleOfPicture } from '@/lib/workspace/object-handle';
 
-const message = (...attachments: Array<{ handle: string; kind: 'image' | 'model'; taskId?: string; assetId?: string; url?: string }>) => ({ attachments });
+const message = (...attachments: Array<{ handle: string; kind: 'image' | 'model'; taskId?: string; assetId?: string; url?: string; captureId?: string }>) => ({ attachments });
 
 it('finds the handle the server gave this exact asset', () => {
   const messages = [
@@ -91,9 +91,14 @@ describe('handleOfPicture (#87)', () => {
     expect(handleOfPicture([sent], { url: '/uploads/u1.png' })).toBe('@img1');
   });
 
-  it('gives no handle when two handles name the picture, and ignores models', () => {
-    const twice = message({ handle: '@img1', kind: 'image', taskId: 't1', assetId: 'a1' }, { handle: '@img9', kind: 'image', taskId: 't1', assetId: 'a1' });
-    expect(handleOfPicture([twice], { url: '/api/v1/tasks/t1/assets/a1' })).toBe('');
+  it('shows the newest handle of a picture sent again, and ignores models', () => {
+    // Production session: a generated picture (@img25) the person later attached again (@img30).
+    const generated = message({ handle: '@img25', kind: 'image', taskId: 't1', assetId: 'a1' });
+    const sentAgain = message({ handle: '@img30', kind: 'image', taskId: 't1', assetId: 'a1' });
+    expect(handleOfPicture([generated, sentAgain], { url: '/api/v1/tasks/t1/assets/a1' })).toBe('@img30');
+    const capture = message({ handle: '@img4', kind: 'image', captureId: 'c1' });
+    const captureAgain = message({ handle: '@img7', kind: 'image', captureId: 'c1' });
+    expect(handleOfPicture([capture, captureAgain], { url: '/captures/c1.png', captureId: 'c1' })).toBe('@img7');
     expect(handleOfPicture([message({ handle: '@model1', kind: 'model', taskId: 't1', assetId: 'a1' })], { url: '/api/v1/tasks/t1/assets/a1' })).toBe('');
   });
 
