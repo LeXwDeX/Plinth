@@ -1814,8 +1814,10 @@ func (orchestrator *Orchestrator) agentRequest(
 	registry, registryErr := orchestrator.registryFor(ctx)
 	scope := orchestrator.agentScope.Normalize(options.AgentScope)
 	if registryErr == nil {
-		// The scope follows the domain hint it overrides. The selection and the
-		// framed session notes stay at the end of the prompt.
+		// A craft brief comes before the scope block: it teaches how to work in
+		// a domain, while the scope only says which tools this turn offers. The
+		// selection and the framed session notes stay at the end of the prompt.
+		systemPrompt += orchestrator.craftPrompt(registry, scope)
 		systemPrompt += orchestrator.scopePrompt(registry, scope)
 	}
 	// The session's real approval mode follows the scope it must not be mixed

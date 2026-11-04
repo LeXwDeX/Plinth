@@ -16,7 +16,8 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded, err := json.Marshal(source.Application().Public())
+	application := source.Application()
+	encoded, err := json.Marshal(application.Public())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,6 +62,13 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		slices.Sort(keys)
 		if !slices.Equal(actual, keys) {
 			t.Errorf("public path %s keys = %v, want %v", path, actual, keys)
+		}
+	}
+
+	// Craft briefs are appended to the server-side system context only (#103).
+	for _, prompt := range application.Chat.Agent.CraftPrompts {
+		if strings.Contains(string(encoded), prompt.Text) {
+			t.Fatalf("craft prompt %q leaked into the public schema", prompt.ID)
 		}
 	}
 

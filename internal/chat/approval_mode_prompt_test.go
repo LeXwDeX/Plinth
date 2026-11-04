@@ -181,14 +181,18 @@ func TestAgentSystemContextCarriesTheSessionApprovalMode(t *testing.T) {
 }
 
 // The block states that the person alone sets the mode, so the Agent neither
-// switches it nor sells a switch as the way to get approval cards (#150, #7),
-// and it follows the Agent scope block it must not be confused with.
+// switches it nor sells a switch as the way to get approval cards (#150, #7).
+// The prompt no longer explains the Agent scope, and the approval block still
+// follows the scope block.
 func TestApprovalModePromptKeepsTheAgentOutOfTheModeAndFollowsTheScope(t *testing.T) {
 	system := approvalPromptSystem(t, approvalPromptCase{mode: "manual"})
-	for _, want := range []string{"只由用户在顶栏切换", "你不能切换它", "不要主动建议用户切换它", "不要猜测", "与 Agent 范围"} {
+	for _, want := range []string{"只由用户在顶栏切换", "你不能切换它", "不要主动建议用户切换它", "不要猜测"} {
 		if !strings.Contains(system, want) {
 			t.Errorf("the system context omits %q", want)
 		}
+	}
+	if strings.Contains(system, "它与 Agent 范围") {
+		t.Error("the approval block still explains the Agent scope")
 	}
 	scope, approval := strings.Index(system, "【Agent 范围】"), strings.Index(system, approvalBlockHead)
 	if scope < 0 || approval < scope {

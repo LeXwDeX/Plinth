@@ -207,6 +207,19 @@ func TestModelReviewIsOnlyValidatedWhenAToolUsesIt(t *testing.T) {
 		remaining = append(remaining, tool)
 	}
 	app.Chat.AgentTools = remaining
+	// A craft brief may only trigger on a tool the Schema declares; the review
+	// trigger goes with the review tools.
+	for index := range app.Chat.Agent.CraftPrompts {
+		var triggers []string
+		for _, name := range app.Chat.Agent.CraftPrompts[index].WhenToolsAny {
+			switch name {
+			case "compare_models", "inspect_model", "render_model_views":
+				continue
+			}
+			triggers = append(triggers, name)
+		}
+		app.Chat.Agent.CraftPrompts[index].WhenToolsAny = triggers
+	}
 	var base []string
 	for _, name := range app.Chat.Harness.BaseTools {
 		if name == "inspect_model" || name == "render_model_views" || name == "compare_models" {

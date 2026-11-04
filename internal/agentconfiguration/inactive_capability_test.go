@@ -88,7 +88,7 @@ func TestInactiveCapabilityToolsAndPromptStayOutOfProjections(t *testing.T) {
 	if strings.Contains(management.Configuration.SystemPrompt, creativeLabLine) || strings.Contains(management.Presets.SystemPrompt, creativeLabLine) {
 		t.Fatal("system prompt still teaches the Creative Lab path")
 	}
-	if !slices.Contains(management.Configuration.EnabledToolNames, "create_model_3d") || !strings.Contains(management.Configuration.SystemPrompt, "- 处理已有 3D") {
+	if !slices.Contains(management.Configuration.EnabledToolNames, "create_model_3d") || !strings.Contains(management.Configuration.SystemPrompt, "自检后交付") {
 		t.Fatalf("unrelated tools or prompt text were removed: %v", management.Configuration.EnabledToolNames)
 	}
 
@@ -117,7 +117,7 @@ func TestInactiveCapabilityToolsAndPromptStayOutOfProjections(t *testing.T) {
 	if strings.Contains(snapshot.Configuration.SystemPrompt, creativeLabLine) || slices.Contains(snapshot.Configuration.EnabledToolNames, creativeLabDesign) || slices.Contains(snapshot.Configuration.EnabledToolNames, creativeLabBuild) {
 		t.Fatal("a frozen version must not project tools or prompt without an enabled Offering")
 	}
-	if !strings.Contains(snapshot.Configuration.SystemPrompt, "- 处理已有 3D") || !slices.Contains(snapshot.Configuration.EnabledToolNames, "create_model_3d") {
+	if !strings.Contains(snapshot.Configuration.SystemPrompt, "自检后交付") || !slices.Contains(snapshot.Configuration.EnabledToolNames, "create_model_3d") {
 		t.Fatal("projection removed more than the inactive capability")
 	}
 	// The published version itself stays as it was published.

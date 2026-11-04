@@ -13,7 +13,7 @@ import (
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
 
-func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentations []CapabilityPresentation) error {
+func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentations []CapabilityPresentation, maxPromptCharacters int) error {
 	capabilityDomains := make(map[schemacontract.Capability]schemacontract.CapabilityDomain, len(capabilityPresentations))
 	for _, capability := range capabilityPresentations {
 		capabilityDomains[capability.ID] = capability.Domain
@@ -738,6 +738,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 			return fmt.Errorf("tool 名称重复: %q", tool.Name)
 		}
 		toolNames[tool.Name] = struct{}{}
+	}
+	if err := validateCraftPrompts(schema.Agent.CraftPrompts, toolNames, maxPromptCharacters); err != nil {
+		return err
 	}
 	return nil
 }

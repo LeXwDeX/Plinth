@@ -418,7 +418,7 @@ func TestDefaultCatalogDeclaresParallelGeneration(t *testing.T) {
 		t.Fatalf("agent = %d/%d parallel=%v submissions=%d admission=%d", agent.MaxGenerationCallsPerTurn,
 			agent.MaxToolCallsPerReply, agent.ParallelToolCalls, agent.MaxParallelGenerationSubmissions, admission)
 	}
-	if agent.SystemPrompt == "" || !strings.Contains(agent.SystemPrompt, "一次性发出全部工具调用") {
+	if agent.SystemPrompt == "" || !strings.Contains(agent.SystemPrompt, "互不依赖的付费步骤在同一次回复里一起发出") {
 		t.Fatal("system prompt lacks the batch rule")
 	}
 }

@@ -93,11 +93,9 @@ func TestDefaultSchemaDeclaresModelProcessingTools(t *testing.T) {
 		!slices.Contains(app.Runtime.Frontend.ModelProcessingCapabilities, "format-conversion") {
 		t.Fatalf("panel capabilities = %v", app.Runtime.Frontend.ModelProcessingCapabilities)
 	}
-	for _, text := range []string{"模型分件", "部件补全", "本人同会话已成功的原生 Tripo Segment", "Smart Segmentation", "Bang"} {
-		if !strings.Contains(app.Chat.Agent.SystemPrompt, text) {
-			t.Errorf("Chinese Agent instructions omit %q", text)
-		}
-	}
+	// The mesh-completion source boundary is enforced by the processing
+	// validation and stated by each tool's own description, which the model
+	// reads; the system prompt no longer repeats it.
 	var listed bool
 	for _, tool := range app.Chat.AgentTools {
 		if tool.Name == "list_session_models" {

@@ -21,6 +21,13 @@ import (
 //     (low/high/max accepted by GLM-5.2 and GLM-5.3, default max; the usage
 //     comes in the last chunk and stream_options is not documented). Windows
 //     differ per model under the "qwen" and "glm" prefixes, so none is declared.
+//   - GPT-6 family: the commander checked the dev-test LLM proxy's /models
+//     list on 2026-11-04 (gpt-6-astra, gpt-6-luna, gpt-6.1-sol, gpt-6.1-terra,
+//     plus the bare gpt-terra/gpt-sol/gpt-luna aliases); a request with
+//     reasoning_effort=high returned reasoning_tokens, and gpt-astra is the
+//     alias of gpt-6-astra. The proxy carries no Claude model, so the "claude"
+//     profile's reasoning_effort field is still to be verified against the
+//     internal deployment proxy.
 func TestDefaultCatalogDeclaresThinkingLevelsAndContextWindows(t *testing.T) {
 	loaded, err := LoadDefault()
 	if err != nil {
@@ -39,6 +46,11 @@ func TestDefaultCatalogDeclaresThinkingLevelsAndContextWindows(t *testing.T) {
 	wants := []want{
 		{prefix: "qwen-omni-flash", levels: []string{"low", "medium", "xhigh"}, fallback: "xhigh", window: 1000000},
 		{prefix: "gpt-astra", levels: []string{"low", "medium", "high"}, fallback: "high"},
+		{prefix: "gpt-6", levels: []string{"low", "medium", "high"}, fallback: "high"},
+		{prefix: "gpt-terra", levels: []string{"low", "medium", "high"}, fallback: "high"},
+		{prefix: "gpt-sol", levels: []string{"low", "medium", "high"}, fallback: "high"},
+		{prefix: "gpt-luna", levels: []string{"low", "medium", "high"}, fallback: "high"},
+		{prefix: "claude", levels: []string{"low", "medium", "high"}, fallback: "high"},
 		{prefix: "deepseek", levels: []string{"low", "high", "max"}, fallback: "low", window: 1000000},
 		{prefix: "qwen3.8-omni-flash", levels: []string{"low", "medium", "xhigh"}, fallback: "xhigh", window: 1000000},
 		{prefix: "qwen3.8", levels: []string{"low", "medium", "xhigh"}, fallback: "xhigh"},
@@ -71,6 +83,18 @@ func TestDefaultCatalogDeclaresThinkingLevelsAndContextWindows(t *testing.T) {
 	if profile, ok := thinking.ProfileFor("gpt-astra"); !ok || profile.DefaultEffort != "high" ||
 		!slices.Equal(profile.EffortLevels, []string{"low", "medium", "high"}) {
 		t.Fatalf("gpt-astra profile = %#v %v", profile, ok)
+	}
+	// gpt-6 covers the versioned family; the bare aliases and Claude match
+	// their own prefixes, and the first matching profile wins.
+	for model, prefix := range map[string]string{
+		"gpt-6-astra": "gpt-6", "gpt-6-luna": "gpt-6", "gpt-6.1-sol": "gpt-6", "gpt-6.1-terra": "gpt-6",
+		"gpt-terra": "gpt-terra", "gpt-sol": "gpt-sol", "gpt-luna": "gpt-luna",
+		"claude-sonnet-4": "claude",
+	} {
+		if profile, ok := thinking.ProfileFor(model); !ok || profile.ModelPrefixes[0] != prefix ||
+			profile.DefaultEffort != "high" {
+			t.Fatalf("%s profile = %#v %v", model, profile, ok)
+		}
 	}
 	// The dev-test model name routes to DeepSeek's flash model.
 	if profile, ok := thinking.ProfileFor("DeepSeek-Flash"); !ok || profile.ModelPrefixes[0] != "deepseek" {

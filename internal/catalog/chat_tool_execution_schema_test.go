@@ -62,6 +62,15 @@ func TestCatalogAllowsNewGenerationToolNameWithRegisteredCapability(t *testing.T
 			renamed = true
 		}
 	}
+	// A rename has to reach every declaration that names the tool, including a
+	// craft brief's trigger list.
+	for index := range app.Chat.Agent.CraftPrompts {
+		for trigger := range app.Chat.Agent.CraftPrompts[index].WhenToolsAny {
+			if app.Chat.Agent.CraftPrompts[index].WhenToolsAny[trigger] == "create_model_3d" {
+				app.Chat.Agent.CraftPrompts[index].WhenToolsAny[trigger] = "generate_model_3d_variant"
+			}
+		}
+	}
 	if !renamed {
 		t.Fatal("create_model_3d is not declared")
 	}

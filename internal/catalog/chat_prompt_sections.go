@@ -3,6 +3,7 @@ package catalog
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
@@ -22,6 +23,21 @@ type ChatAgentPromptSection struct {
 	ID           string                      `json:"id"`
 	Capabilities []schemacontract.Capability `json:"capabilities"`
 	Text         string                      `json:"text"`
+}
+
+// ChatAgentCraftPrompt is a domain brief appended to the system context of a
+// turn whose offered tools include at least one name in WhenToolsAny. It lets
+// the shipped Catalog teach a craft (for example 3D modeling) only when the
+// Agent can actually act in that domain, without growing the base system
+// prompt on unrelated turns.
+//
+// Texts are plain prompt text; unlike ChatAgentPromptSection they are not
+// tied to capability activation, because tool availability already reflects
+// the enabled Offerings and the session's Agent scope.
+type ChatAgentCraftPrompt struct {
+	ID           string   `json:"id"`
+	WhenToolsAny []string `json:"when_tools_any"`
+	Text         string   `json:"text"`
 }
 
 // CapabilityActive reports whether a capability currently has an enabled
@@ -87,6 +103,36 @@ func (schema ChatSchema) WithoutInactivePromptText(active CapabilityActive) Chat
 	}
 	schema.AgentScope.Modes = modes
 	return schema
+}
+
+// validateCraftPrompts checks the domain briefs: every id is unique, every
+// trigger names a registered tool, and every text is non-empty and within the
+// same character bound as the editable system prompt. toolNames holds both the
+// Agent tools and the generation tools, because describe() offers both.
+func validateCraftPrompts(prompts []ChatAgentCraftPrompt, toolNames map[string]struct{}, maxPromptCharacters int) error {
+	seen := make(map[string]bool, len(prompts))
+	for _, prompt := range prompts {
+		id := strings.TrimSpace(prompt.ID)
+		if id == "" || seen[id] {
+			return fmt.Errorf("chat.agent.craft_prompts id 为空或重复: %q", prompt.ID)
+		}
+		seen[id] = true
+		if len(prompt.WhenToolsAny) == 0 {
+			return fmt.Errorf("chat.agent.craft_prompts %q 必须声明 when_tools_any", prompt.ID)
+		}
+		for _, tool := range prompt.WhenToolsAny {
+			if _, known := toolNames[tool]; !known {
+				return fmt.Errorf("chat.agent.craft_prompts %q 引用了未注册工具 %q", prompt.ID, tool)
+			}
+		}
+		if strings.TrimSpace(prompt.Text) == "" {
+			return fmt.Errorf("chat.agent.craft_prompts %q 的 text 不能为空", prompt.ID)
+		}
+		if maxPromptCharacters > 0 && utf8.RuneCountInString(prompt.Text) > maxPromptCharacters {
+			return fmt.Errorf("chat.agent.craft_prompts %q 的 text 超过 %d 字符", prompt.ID, maxPromptCharacters)
+		}
+	}
+	return nil
 }
 
 func validatePromptSections(schema ChatSchema, capabilityDomains map[schemacontract.Capability]schemacontract.CapabilityDomain) error {
