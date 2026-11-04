@@ -74,10 +74,18 @@ class EnvironmentLookup(unittest.TestCase):
         self.assertEqual((target, directory, host_ci), ('root@host.example', run.DEFAULT_CI_DIR, {}))
 
     def test_directory_overlapping_a_release_root_or_protected_path_is_refused(self):
-        for configured in ('/srv/plinth', '/srv/plinth/ci', '/srv', '/data/other'):
+        for configured in ('/srv/plinth', '/srv/plinth/app/ci', '/srv/plinth/cid', '/srv', '/data/other', '/srv/other/ci'):
             with self.subTest(configured), self.assertRaises(run.UsageError):
                 self.load({'dev-test': {'ssh': 'root@host.example', 'root': '/srv/plinth', 'protected_paths': ['/data/other'],
-                                        'host_ci': {'dir': configured}}})
+                                        'host_ci': {'dir': configured}},
+                           'formal-test': {'ssh': 'root@other.example', 'root': '/srv/other'}})
+
+    def test_the_ci_directory_inside_the_own_release_root_is_allowed(self):
+        _, directory, _ = self.load({'dev-test': {'ssh': 'root@host.example', 'root': '/srv/plinth', 'host_ci': {'dir': '/srv/plinth/ci'}}})
+        self.assertEqual(directory, '/srv/plinth/ci')
+        with self.assertRaises(run.UsageError):
+            self.load({'dev-test': {'ssh': 'root@host.example', 'root': '/srv/plinth', 'protected_paths': ['/srv/plinth/ci'],
+                                    'host_ci': {'dir': '/srv/plinth/ci'}}})
 
     def test_unsafe_directory_text_is_refused(self):
         for configured in ('relative', '/a/../b', '/a b', '/a;rm', '/trailing/'):

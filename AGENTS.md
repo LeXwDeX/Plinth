@@ -61,7 +61,7 @@ Plinth 是开源的多模型创作平台：Go 后端（`cmd/`、`internal/`）�
 - **完成的定义**：影响产品运行的修改（代码、Schema、配置或前端产物），只有发布到已定义测试环境并验证相关页面、API 和直接影响链后才能报告“完成”；不得只停在本机实现、构建通过或健康检查通过，也不得把未部署的改动记作完成。
 - **按公开交付契约验收**：Provider 返回 `SUCCEEDED`、模型能打开、服务健康或局部测试通过，不等于公开任务完整交付成功。按 `docs/architecture.md` 核对必需产物槽位、实际字节、资产状态及鉴权交付。不得用放松安全校验、把必需产物改成可选、盲目付费重试或仅增大超时来掩盖原因；契约变更须有独立依据并遵循既有授权与验收规则。
 - **自动化门禁**：`dev_test.md` §2 是本地与 CI 自动化门禁的唯一真源；按最终 diff 和影响链运行，合并前的 CI 门禁按其「交付硬门禁」执行。前端构建使用 pnpm；Go 验证使用 go 命令。不要把远端 CI 当本机可复现问题的首次测试环境。需要干净环境复现门禁时，用 `python3 scripts/host-ci/run.py <sha|HEAD>` 在 `dev-test` 主机的一次性容器里对精确提交跑同一套门禁；GitHub Actions 不可用期间它也是项目的 CI 替代（#79），规则见 `dev_test.md` §2「主机 CI」。
-- **验收数据**：`dev-test` 的每次冒烟与相关验收都从全新数据开始，按真实用户流程创建自己的会话与数据（例如 #25：全新数据 → 模拟用户沟通 → Agent 先 2D 后 3D，真实请求），不依赖历史任务或会话；只使用运行环境 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 引导的管理员测试账号 suntao341（#28）。
+- **验收数据**：`dev-test` 的每次冒烟与相关验收都从全新数据开始，按真实用户流程创建自己的会话与数据（例如 #25：全新数据 → 模拟用户沟通 → Agent 先 2D 后 3D，真实请求），不依赖历史任务或会话。账号只有两类：运行环境 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 引导的管理员测试账号 suntao341（#28），以及下文「Agent 测试开发账号」。
 - **付费验收**：真实模型/付费验收是产品落地与功能验收的正常组成部分；是否需要按 Issue 范围与 `scripts/smoke/README.md` 判定，并以下达任务的用户最新指示为准。活动中某条「停止/暂停付费验收」的阶段性记录不构成长期规则。发起前核对当前官方协议、价格与余额，只做小额单次请求，绝不重放已消费的 intent。
   - 在 `dev-test` 做真实生成验收时，Agent 以「人」的身份代为点击/调用同意批准，不再逐次向用户请示。这只是 `dev-test` 的测试期操作授权，不适用于 `formal-test` 或正式生产；产品的批准规则见 `docs/product.md`。
   - **次数上限**：每个 revision、每个 Provider，Agent 依上述授权自行发起的付费验收请求以 10 次为限；第 11 次起，每次发起前须在当前对话中取得用户的人工批准。计数只在当前对话中有效，不需要记录或持久化。
@@ -71,6 +71,8 @@ Plinth 是开源的多模型创作平台：Go 后端（`cmd/`、`internal/`）�
 
 - **环境**：内部环境只有 `dev-test`（开发测试环境）和 `formal-test`（正式测试环境，测试版本中的稳定版）。`legacy-formal` 已下线，不是可部署环境（存档 #74）。部署入口、各环境的部署事实与差异以 [`docs/deployment.md`](docs/deployment.md) 为准。
 - **按环境名部署**：用户在仓库根目录说要部署到哪个环境（例如「部署到正式测试环境」）时，按 `docs/deployment.md` 执行：从未纳入 Git 的 `deploy/local/environments.json`（模板 `deploy/environments.example.json`）按环境名解析目标，用 `scripts/release-env.py release <环境>` 发布，核对 revision，冒烟并汇报。
+- **dev-test 自建 CI**：在 `dev-test` 主机上自建的 CI（主机 CI `scripts/host-ci/run.py` 等）只在该环境发布根（项目目录）下的 `ci/` 内创建与运行：环境文件 `dev-test` 条目设 `host_ci.dir` 为 `<发布根>/ci`。发布脚本不触碰 `<发布根>/ci`；该主机上除发布根外（含 `/tmp`）不写文件。
+- **Agent 测试开发账号**：`dev-test` 的浏览器与 API 验收使用 Agent 自己创建的专用测试开发账号，不使用用户本人账号，也不复用 `formal-test` 或其他环境的凭据。账号名与口令由 Agent 生成，只存于 `dev-test` 主机的 `<发布根>/production/agent-test.env`（0600；`AGENT_TEST_USERNAME`/`AGENT_TEST_PASSWORD`），不写入 Git、日志、Issue 或回复。`dev-test` 每次发布都是全新数据，发布后先导出该文件的两个变量，再运行 `python3 scripts/release-env.py smoke dev-test -- bash scripts/smoke/ensure-agent-account.sh`，由管理员账号经管理接口重新创建并验证可登录。Agent 用它自行登录，不再请用户登录、提供口令或确认。`dev-test` 另有一个以 `.test` 结尾的开发主机名（内网 DNS 解析到 `dev-test` 主机），写在本地环境文件 `dev-test` 条目的 `base_url`；浏览器登录与验收一律经该主机名访问，不用裸 IP（Agent 只在开发主机名上输入测试账号口令）。
 - **dev-test 常设授权**：`dev-test` 的发布、重启、回滚、小额真实模型验收、测试期付费同意及有界镜像清理，Agent 可直接执行，无需逐次请示；范围限 Plinth 的 `dev-test` 栈。
 - **运维边界**：普通发布仅调用 `scripts/cutover-go-production.sh` 的 preflight，不调用 takeover、不重跑 ETL、不使用旧 `deploy.sh` 或 `--remove-orphans`。各环境的发布、回滚、镜像清理和数据目录互相隔离；各栈互不操作，不触碰同机其他业务或其他栈的数据库备份与卷。
 - **数据与备份**：`dev-test` 每次发布都是全新数据（环境文件 `"data": "ephemeral"`，只有 `dev-test` 可设，与 `promote_from`、`backup` 互斥），不做发布备份，日志仍写主机 `logs/`（#28）。`formal-test` 保留数据，环境文件必须写 `"backup": {"scope": "full", "keep": 2}`：每次发布全量备份，只在成功路径清理，保留最新 2 份；发布备份不含镜像和日志（#66）。`dev-test` 仍写 `backup` 时可用 database 范围，它不是完整回滚；保留 database-only 快照可能被使用时，禁止离线 CAS/task 破坏性维护（见 `docs/storage-maintenance.md`），不得为回滚删除 CAS 字节。备份范围、保留数量、`.release.lock` 与清理边界按 `dev_ops.md`「发布备份范围与保留」执行（#364）。
