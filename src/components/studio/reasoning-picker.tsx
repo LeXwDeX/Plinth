@@ -7,6 +7,7 @@ import { TablePopover, type TableSection } from '@/components/studio/table-popov
 import { useSessionReasoning } from '@/hooks/use-session-reasoning';
 import type { ChatReasoning } from '@/lib/chat/browser-client';
 import { schemaText, type ProductSchema } from '@/lib/product-schema';
+import { unavailableLabel } from '@/lib/unavailable';
 import { useChatStore } from '@/store/chat-store';
 
 /**
@@ -37,7 +38,10 @@ export function reasoningSection(
     selectedKey: reasoning?.effort || null,
     foot: schemaText(schema, 'ui.studio.reasoning.note'),
     emptyText: schemaText(schema, 'ui.studio.reasoning.unavailable'),
-    ...(reasoning && levels.length === 0 ? { disabledReason: schemaText(schema, 'ui.studio.reasoning.unavailable') } : {}),
+    ...(reasoning && levels.length === 0 ? {
+      disabledReason: schemaText(schema, 'ui.studio.reasoning.unavailable'),
+      disabledLabel: unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.picker.reasoning_none')),
+    } : {}),
     onPick,
   };
 }
@@ -67,7 +71,7 @@ export function ReasoningPicker() {
       label={label}
       value={value}
       hint={schemaText(schema, 'ui.studio.reasoning.hint')}
-      triggerDisabledReason={noLevels ? schemaText(schema, 'ui.studio.reasoning.unavailable') : undefined}
+      triggerDisabledReason={!activeSessionId ? schemaText(schema, 'ui.unavailable.reason.picker.no_session') : noLevels ? schemaText(schema, 'ui.unavailable.reason.picker.reasoning_none') : undefined}
       disabled={!activeSessionId || busy || reasoning === null || noLevels}
       sections={[section]}
     />

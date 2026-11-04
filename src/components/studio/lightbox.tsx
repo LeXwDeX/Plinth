@@ -173,19 +173,22 @@ function LightboxView() {
           </HintTooltip>
         </div>
         {item.pick ? (
-          <Action
-            type="button"
-            size="sm"
-            variant={picked ? 'secondary' : 'default'}
-            disabled={pickBusy || picked || !sessionId}
-            aria-pressed={picked}
-            onClick={pickCurrent}
-            onPointerDown={(event) => event.stopPropagation()}
-            data-testid="lightbox-pick"
-            data-picked={picked}
-          >
-            {picked ? <Check /> : null}{schemaText(schema, picked ? 'ui.studio.lightbox.picked' : 'ui.studio.lightbox.pick')}
-          </Action>
+          <HintTooltip name={schemaText(schema, picked ? 'ui.studio.lightbox.picked' : 'ui.studio.lightbox.pick')}
+            reason={sessionId ? undefined : schemaText(schema, 'ui.unavailable.reason.stage.no_session')}>
+            <Action
+              type="button"
+              size="sm"
+              variant={picked ? 'secondary' : 'default'}
+              disabled={pickBusy || picked || !sessionId}
+              aria-pressed={picked}
+              onClick={pickCurrent}
+              onPointerDown={(event) => event.stopPropagation()}
+              data-testid="lightbox-pick"
+              data-picked={picked}
+            >
+              {picked ? <Check /> : null}{schemaText(schema, picked ? 'ui.studio.lightbox.picked' : 'ui.studio.lightbox.pick')}
+            </Action>
+          </HintTooltip>
         ) : null}
         {safeAssetURL(item.downloadUrl) ? (
           <HintTooltip name={text('download')}>

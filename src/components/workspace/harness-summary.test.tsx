@@ -46,6 +46,18 @@ describe('Harness summary', () => {
     expect(html).not.toContain('下轮生效');
   });
 
+  it('shows an unavailable or input-missing status as the shared notice, the sentence only in the hint (#94)', () => {
+    for (const status of ['unavailable', 'needs_input'] as const) {
+      mock.view = { ...mock.view!, status };
+      const html = renderToStaticMarkup(<HarnessSummary sessionId="s1" />);
+      expect(html).toContain('data-testid="unavailable-icon"');
+      expect(html).toContain(`data-testid="unavailable-label">无法使用，ui.unavailable.reason.harness.status_${status}<`);
+      expect(html).toContain(`data-testid="unavailable-detail">ui.harness.status_${status}<`);
+    }
+    mock.view = { ...mock.view!, status: 'ready' };
+    expect(renderToStaticMarkup(<HarnessSummary sessionId="s1" />)).not.toContain('unavailable-icon');
+  });
+
   it('does not show a stale-turn notice for the same revision and digest', () => {
     mock.view!.turn = { assistant_message_id: 'm', selection: { ...selection } };
     expect(harnessTurnDiffers(mock.view!)).toBe(false);

@@ -10,6 +10,8 @@ import { useWorkspaceOfferings } from '@/hooks/use-workspace-offerings';
 import { fetchCapabilityOfferings, type OfferingWire } from '@/lib/agent-offerings';
 import { pickerDisabledReason, scopeAllowsDomain } from '@/lib/chat/agent-scope';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
+import { unavailableLabel } from '@/lib/unavailable';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { RETEXTURE, buildModelPickerTable, pickerTriggerNames, type PickerCellValue } from '@/lib/workspace/model-picker';
 import { retiredModelSwitch } from '@/lib/workspace/retired-models';
 import { useWorkspaceStore, type WorkspaceDomain } from '@/store/workspace-store';
@@ -77,6 +79,7 @@ export function useDomainModelPick(domain: WorkspaceDomain): DomainPick {
   const rows = table.rows.map((row) => ({
     key: row.modelId,
     disabled: !row.enabled,
+    ...(!row.enabled ? { disabledReason: schemaText(schema, 'ui.unavailable.reason.picker.model_disabled') } : {}),
     cells: [
       {
         text: row.name,
@@ -119,6 +122,7 @@ export function useDomainModelPick(domain: WorkspaceDomain): DomainPick {
       selectedKey: selectedModel,
       foot,
       disabledReason: outOfScope ? pickerDisabledReason(schema, agentScope) : undefined,
+      disabledLabel: outOfScope ? unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.picker.scope_excludes')) : undefined,
       loading: isLoading,
       loadingText: schemaText(schema, 'ui.workspace.models.loading'),
       failedText: error ? schemaText(schema, 'ui.workspace.models.load_failed') : undefined,
@@ -163,9 +167,13 @@ export function GenerationModelNotice() {
   return (
     <>
       {lines.map((notice) => (
-        <p key={notice.from} role="status" className="text-[11px] leading-4 text-warning" data-testid="workspace-model-retired-notice">
-          {formatSchemaText(schemaText(schema, 'ui.studio.picker.model_retired'), { from: notice.from, to: notice.to })}
-        </p>
+        <UnavailableNotice
+          key={notice.from}
+          testId="workspace-model-retired-notice"
+          className="text-[11px] leading-4"
+          label={unavailableLabel(schema, formatSchemaText(schemaText(schema, 'ui.unavailable.reason.picker.model_retired'), { from: notice.from }))}
+          detail={formatSchemaText(schemaText(schema, 'ui.studio.picker.model_retired'), { from: notice.from, to: notice.to })}
+        />
       ))}
     </>
   );

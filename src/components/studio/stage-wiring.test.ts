@@ -64,7 +64,7 @@ describe('stage, right panel, lightbox and compare wiring', () => {
     expect(compare).toContain('const [view, setView] = useState<View>(FIT);');
     expect(compare).toContain("addEventListener('wheel', onWheel, { passive: false })");
     expect(compare).toContain('view={view} onView={setView}');
-    expect(compare).toContain('data-testid="compare-notice"');
+    expect(compare).toContain('testId="compare-notice"');
     expect(viewer).toContain("setCompareNotice('unavailable')");
   });
 

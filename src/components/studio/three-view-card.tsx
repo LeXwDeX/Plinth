@@ -6,10 +6,13 @@ import { toast } from 'sonner';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
+import { HintTooltip } from '@/components/ui/hint-tooltip';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { useObjectActions } from '@/hooks/use-object-actions';
 import { useThreeViews } from '@/hooks/use-three-views';
 import { safeAssetURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { formatSchemaText, schemaText, type ProductSchema } from '@/lib/product-schema';
+import { unavailableLabel } from '@/lib/unavailable';
 import { taskAssetRoute } from '@/lib/workspace/model-formats';
 import {
   groupMultiview, pickMultiviewModel, remainingCredits, remainingSlots, slotAction, slotReplaceable, succeededCount,
@@ -190,20 +193,25 @@ export function ThreeViewCardView({
                 <span className="text-[11px] leading-4 text-muted-foreground" data-testid="three-view-queued">{text(schema, 'queued')}</span>
               ) : null}
               {action ? (
-                <Action
-                  type="button"
-                  size="xs"
-                  variant={action === 'start' ? 'default' : 'outline'}
-                  loading={isBusy}
-                  disabled={busy !== null || isQueued || (native && nativeAmount === null)}
-                  data-testid={action === 'start' ? 'three-view-start' : 'three-view-retry'}
-                  onClick={() => onAdvance(slot)}
+                <HintTooltip
+                  name={text(schema, action)}
+                  reason={native && nativeAmount === null ? schemaText(schema, 'ui.unavailable.reason.three_view.price_unknown') : undefined}
                 >
-                  {action === 'retry' ? <RotateCcw /> : null}
-                  {!native && slot.creditsMetered && slot.estimatedCredits > 0
-                    ? formatSchemaText(text(schema, `${action}_with_cost`), { credits: slot.estimatedCredits })
-                    : text(schema, action)}
-                </Action>
+                  <Action
+                    type="button"
+                    size="xs"
+                    variant={action === 'start' ? 'default' : 'outline'}
+                    loading={isBusy}
+                    disabled={busy !== null || isQueued || (native && nativeAmount === null)}
+                    data-testid={action === 'start' ? 'three-view-start' : 'three-view-retry'}
+                    onClick={() => onAdvance(slot)}
+                  >
+                    {action === 'retry' ? <RotateCcw /> : null}
+                    {!native && slot.creditsMetered && slot.estimatedCredits > 0
+                      ? formatSchemaText(text(schema, `${action}_with_cost`), { credits: slot.estimatedCredits })
+                      : text(schema, action)}
+                  </Action>
+                </HintTooltip>
               ) : slot.status === 'succeeded' ? (
                 <Action type="button" size="xs" variant="ghost" data-testid="three-view-open" onClick={() => onView(slot)}>
                   {text(schema, 'view')}
@@ -255,9 +263,18 @@ export function ThreeViewCardView({
             >
               <Box />{formatSchemaText(text(schema, 'to_3d_multiview'), { model: model.modelName })}
             </Action>
-            <span className="text-[11px] text-muted-foreground" data-testid="three-view-multiview-views">
-              {multiview.ready ? formatSchemaText(text(schema, 'multiview_uses'), { views: usedViews }) : text(schema, 'multiview_wait')}
-            </span>
+            {multiview.ready ? (
+              <span className="text-[11px] text-muted-foreground" data-testid="three-view-multiview-views">
+                {formatSchemaText(text(schema, 'multiview_uses'), { views: usedViews })}
+              </span>
+            ) : (
+              <UnavailableNotice
+                testId="three-view-multiview-views"
+                className="text-[11px]"
+                label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.three_view.multiview_wait'))}
+                detail={text(schema, 'multiview_wait')}
+              />
+            )}
           </div>
         ) : null}
         <div className="flex items-center gap-2">
@@ -271,7 +288,14 @@ export function ThreeViewCardView({
           >
             <Box />{text(schema, 'to_3d_front_only')}
           </Action>
-          {!group.modelSource.available ? <span className="text-[11px] text-muted-foreground">{text(schema, 'to_3d_wait')}</span> : null}
+          {!group.modelSource.available || !front ? (
+            <UnavailableNotice
+              testId="three-view-to-3d-wait"
+              className="text-[11px]"
+              label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.three_view.front_wait'))}
+              detail={text(schema, 'to_3d_wait')}
+            />
+          ) : null}
         </div>
         {group.modelSource.note ? (
           <p className="text-[11px] leading-4 text-muted-foreground" data-testid="three-view-source-note">{group.modelSource.note}</p>

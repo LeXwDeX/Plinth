@@ -1,8 +1,10 @@
 "use client"
 
 import { useId, useState, type FocusEvent, type HTMLAttributes, type ReactNode } from "react"
+import { TriangleAlert } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { useUnavailableLabel } from "@/components/ui/unavailable-label-context"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 /**
@@ -16,7 +18,10 @@ export interface HintContent {
   name: string
   /** Key caps printed beside the name, e.g. ["Ctrl", "Z"]. */
   shortcut?: readonly string[]
-  /** Why the control is disabled; written first so a greyed button explains itself. */
+  /**
+   * Why the control is disabled, as a short reason; written first so a greyed button explains itself. It is drawn
+   * the way every "unavailable" state is (#94): a warning icon and "无法使用，<reason>".
+   */
   reason?: string
   /** What it does. */
   hint?: string
@@ -28,9 +33,15 @@ export interface HintContent {
 
 /** The bubble's content on its own, so it can be rendered and tested without the floating layer. */
 export function HintBubble({ name, shortcut, reason, hint, target, cost }: HintContent) {
+  const unavailable = useUnavailableLabel()
   return (
     <div className="flex flex-col gap-0.5 text-left text-xs leading-relaxed [overflow-wrap:anywhere]" data-testid="hint-bubble">
-      {reason ? <p className="font-medium text-warning" data-testid="hint-reason">{reason}</p> : null}
+      {reason ? (
+        <p className="flex items-start gap-1 font-medium text-warning" data-testid="hint-reason">
+          <TriangleAlert aria-hidden="true" className="mt-[3px] size-3 shrink-0" data-testid="hint-reason-icon" />
+          <span className="min-w-0">{unavailable(reason)}</span>
+        </p>
+      ) : null}
       <div className="flex items-center justify-between gap-3" data-testid="hint-name">
         <span className="whitespace-pre-wrap text-[12.5px] font-semibold">{name}</span>
         {shortcut && shortcut.length > 0 ? (

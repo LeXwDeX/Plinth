@@ -7,12 +7,15 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { ModelViewer3D } from '@/components/viewer/model-viewer-3d';
 import { safeAssetURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { Field } from '@/components/ui/field';
+import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { OptionSelect } from '@/components/ui/option-select';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { useOwnedModelSources } from '@/hooks/use-owned-model-sources';
 import { useSessionVersions } from '@/hooks/use-session-versions';
 import type { OfferingParameterWire, OfferingWire } from '@/lib/agent-offerings';
 import type { HarnessSource, HarnessSourceKind, HarnessSourceView, HarnessTaskSourceMode } from '@/lib/harness';
 import { formatSchemaText, schemaText, type ProductSchema } from '@/lib/product-schema';
+import { unavailableLabel } from '@/lib/unavailable';
 import { ModelInputUploadError, modelInputAccept, uploadModelInputSource } from '@/lib/workspace/model-input-upload';
 import { sourceParameterRole } from '@/lib/workspace/processing-source';
 import { useChatStore } from '@/store/chat-store';
@@ -120,6 +123,9 @@ export function HarnessModelSourcePicker({ ownerId, sessionId, object, offering,
   };
   useEffect(() => { setPreviewRequest(null); }, [previewScope]);
   const explain = (message: string) => schemaText(schema, message) || message;
+  // The few words of an "unavailable" line, with the full sentence in the hover hint (#94).
+  const reasonLabel = (reason: string) => unavailableLabel(schema, text(`ui.unavailable.reason.harness.${reason}`));
+  const notice = (reason: string, detail: string, testId: string) => <UnavailableNotice label={reasonLabel(reason)} detail={detail} testId={testId} />;
   const invalidate = () => { request.current.controller?.abort(); request.current.sequence += 1; setUpload({ scope, busy: false }); };
   useEffect(() => {
     // React may replay mount effects in StrictMode; setup must restore liveness.
@@ -170,14 +176,16 @@ export function HarnessModelSourcePicker({ ownerId, sessionId, object, offering,
       }} />}
     </Field> : null}
     {agentSource ? <p className="leading-5 text-muted-foreground" data-testid="harness-agent-source-help">{text('ui.harness.agent_source_help')}</p> : kind === 'input_asset' ? <>
-      {filename ? <p className="break-all leading-5" data-testid="harness-upload-filename">{filename}</p> : source?.asset_id ? <p className="text-muted-foreground">{text('ui.harness.source_unavailable')}</p> : null}
-      {savedView?.state === 'unavailable' ? <p role="status" className="leading-5 text-warning">{savedView.reason ? explain(savedView.reason) : text('ui.harness.source_unavailable')}</p> : null}
-      {!parameter || !profile ? <p role="status" className="leading-5 text-muted-foreground">{unavailableReason ? explain(unavailableReason) : text('ui.harness.upload.unavailable')}</p> : <>
+      {filename ? <p className="break-all leading-5" data-testid="harness-upload-filename">{filename}</p> : source?.asset_id ? notice('source_unavailable', text('ui.harness.source_unavailable'), 'harness-source-unavailable') : null}
+      {savedView?.state === 'unavailable' ? notice('source_unavailable', savedView.reason ? explain(savedView.reason) : text('ui.harness.source_unavailable'), 'harness-saved-source-unavailable') : null}
+      {!parameter || !profile ? notice('upload_unavailable', unavailableReason ? explain(unavailableReason) : text('ui.harness.upload.unavailable'), 'harness-upload-unavailable') : <>
         <p className="leading-5 text-muted-foreground">{profile.description}</p>
         {parameter.uploaded_model?.requirements ? <p className="leading-5 text-muted-foreground">{explain(parameter.uploaded_model.requirements)}</p> : null}
         <Field id={`${id}-uploaded`} label={text('ui.harness.upload.existing')} help={text('ui.harness.upload.validation_help')}>
           {control => <OptionSelect {...control} value={ownedView?.id ?? ''} placeholder={text('ui.harness.choose_source')} options={owned.assets.map(asset => ({ value: asset.id, label: asset.original_filename }))} disabled={busy || owned.isLoading} onValueChange={changeUpload} />}
         </Field>
+      <HintTooltip name={text('ui.harness.upload.preview')} className="self-start" suppressed={Boolean(previewURL) || busy}
+        reason={!previewURL && !busy ? text(`ui.unavailable.reason.harness.${source?.asset_id ? 'preview_unavailable' : 'no_file'}`) : undefined}>
       <Dialog key={previewScope} open={previewOpen} onOpenChange={open => { if (open) openPreview(); else setPreviewRequest(null); }}>
         <DialogTrigger render={<Action variant="outline" size="sm" disabled={busy || !previewURL} />} data-testid="harness-model-preview-open">{text('ui.harness.upload.preview')}</DialogTrigger>
         <DialogContent closeLabel={text('ui.harness.upload.preview_close')} className="w-[min(56rem,calc(100vw-3rem))] max-w-none sm:max-w-none" data-testid="harness-model-preview">
@@ -189,7 +197,9 @@ export function HarnessModelSourcePicker({ ownerId, sessionId, object, offering,
           {previewOpen ? <ModelViewer3D key={previewScope} src={previewRequest!.src} onRetry={openPreview} failureMessage={text('ui.harness.upload.preview_failed')} alt={filename} autoRotate={false} className="h-[min(60vh,34rem)] aspect-auto" /> : null}
         </DialogContent>
       </Dialog>
-      {!previewURL ? <p className="leading-5 text-muted-foreground">{text(source?.asset_id ? 'ui.harness.upload.preview_unavailable' : 'ui.harness.upload.preview_choose')}</p> : null}
+      </HintTooltip>
+      {!previewURL ? (source?.asset_id ? notice('preview_unavailable', text('ui.harness.upload.preview_unavailable'), 'harness-preview-unavailable')
+        : <p className="leading-5 text-muted-foreground">{text('ui.harness.upload.preview_choose')}</p>) : null}
         {owned.error ? <p role="alert" className="text-destructive">{text('ui.harness.sources_failed')}</p> : owned.isLoading ? <p role="status" className="text-muted-foreground">{text('ui.harness.loading')}</p> : !owned.assets.length ? <p className="leading-5 text-muted-foreground">{text('ui.harness.upload.no_files')}</p> : null}
         <div className="flex flex-wrap gap-2">
           <Action variant="outline" size="sm" disabled={busy} onClick={() => fileInput.current?.click()}>{text(upload.scope === scope && upload.busy ? 'ui.harness.upload.uploading' : 'ui.harness.upload.choose_file')}</Action>
@@ -203,12 +213,12 @@ export function HarnessModelSourcePicker({ ownerId, sessionId, object, offering,
       {upload.scope === scope && (upload.uploaded || upload.message) ? <p role={upload.uploaded ? 'status' : 'alert'} className={`leading-5 break-words ${upload.uploaded ? 'text-muted-foreground' : 'text-destructive'}`}>{upload.uploaded ? text('ui.harness.upload.uploaded') : explain(upload.message!)}</p> : null}
     </> : <>
       <Field id={`${id}-source`} label={text('ui.harness.source_model')} help={text('ui.harness.source_help')}>
-        {control => <OptionSelect {...control} value={sourceTile?.taskId ?? ''} placeholder={text(source?.task_id ? 'ui.harness.source_unavailable' : 'ui.harness.choose_source')} options={sources.map(tile => ({ value: tile.taskId, label: formatSchemaText(text('ui.harness.model_version'), { version: tile.version }) }))} disabled={busy || versions.isLoading} onValueChange={taskId => changeTask(taskId)} />}
+        {control => <OptionSelect {...control} value={sourceTile?.taskId ?? ''} placeholder={source?.task_id ? reasonLabel('source_unavailable') : text('ui.harness.choose_source')} options={sources.map(tile => ({ value: tile.taskId, label: formatSchemaText(text('ui.harness.model_version'), { version: tile.version }) }))} disabled={busy || versions.isLoading} onValueChange={taskId => changeTask(taskId)} />}
       </Field>
       {versions.error ? <div role="alert" className="space-y-2"><p>{text('ui.harness.sources_failed')}</p><Action size="sm" variant="outline" onClick={() => void versions.refresh().catch(() => undefined)}>{text('ui.harness.reload')}</Action></div> : !versions.isLoading && !sources.length ? <p className="leading-5 text-muted-foreground">{text('ui.harness.no_sources')}</p> : null}
       {object?.kind === 'model' && object.sessionId === sessionId && sources.some(tile => tile.taskId === object.taskId) ? <Action variant="outline" size="sm" disabled={busy} onClick={() => changeTask(object.taskId, object.assetId)}>{text('ui.harness.use_current')}</Action> : null}
       {sourceTile && assets.length ? <Field id={`${id}-asset`} label={text('ui.harness.source_asset')}>
-        {control => <OptionSelect {...control} value={source?.asset_id ?? ''} placeholder={text(source?.asset_id ? 'ui.harness.source_unavailable' : 'ui.harness.asset_default')} options={[{ value: '', label: text('ui.harness.asset_default') }, ...assets.map((asset, index) => ({ value: asset.id, label: asset.variant || formatSchemaText(text('ui.harness.model_file'), { number: index + 1 }) }))]} disabled={busy} onValueChange={assetId => changeTask(sourceTile.taskId, assetId)} />}
+        {control => <OptionSelect {...control} value={source?.asset_id ?? ''} placeholder={source?.asset_id ? reasonLabel('source_unavailable') : text('ui.harness.asset_default')} options={[{ value: '', label: text('ui.harness.asset_default') }, ...assets.map((asset, index) => ({ value: asset.id, label: asset.variant || formatSchemaText(text('ui.harness.model_file'), { number: index + 1 }) }))]} disabled={busy} onValueChange={assetId => changeTask(sourceTile.taskId, assetId)} />}
       </Field> : null}
     </>}
     {!agentSource && parameters.length > 1 ? <Field id={`${id}-binding`} label={text('ui.harness.source_binding')}>

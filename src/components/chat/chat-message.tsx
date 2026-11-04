@@ -15,6 +15,7 @@ import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-
 import { PaidStepNotes } from '@/components/chat/paid-step-notes';
 import { GaussianSplatResultCard, ImageResultCard, ModelResultCard, SentImages } from '@/components/chat/result-card';
 import { paidStepFailed, stepCreditsText, stepFailedText } from '@/lib/chat/approval-modes';
+import { unavailableLabel } from '@/lib/unavailable';
 import { fetchSourceRetries, regenerateBlockedBy, sourceExpiredSteps, sourceRetryText } from '@/lib/chat/source-retry';
 import { messageTaskIds, modelCardsOf, modelTaskIdsOf, splitMessagePictures, type MessagePictures, type ModelCardModel } from '@/lib/chat/message-pictures';
 import { chatGaussianSplatResults, chatModelResults } from '@/lib/chat/model-results';
@@ -292,6 +293,7 @@ export const ChatMessage = memo(function ChatMessage({
           failedText={(credits) => stepFailedText(schema, credits)}
           failed={(taskId) => paidStepFailed(schema, trackedTasks.find((task) => task.taskId === taskId))}
           note={(taskId) => sourceRetryText(schema, sourceRetries?.[taskId] ?? '')}
+          noteUnavailableLabel={(taskId) => regenerateBlockedBy({ [taskId]: sourceRetries?.[taskId] ?? '' }) ? unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.result.source_retry')) : ''}
           autoApprovedText={schemaText(schema, 'ui.workspace.approval.auto_approved_note')}
           nativeText={(amount) => formatSchemaText(schemaText(schema, 'ui.pricing.frozen_estimate'), { amount })}
           unknownPriceText={schemaText(schema, 'ui.pricing.unknown')}

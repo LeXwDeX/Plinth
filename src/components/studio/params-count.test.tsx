@@ -74,11 +74,11 @@ describe('quantity controls use saved values independently of pricing', () => {
     f.setValue('n', 3);
     expect(f.value()).toBe(3);
     expect(find(f.render(), p => p['data-testid'] === 'params-count')?.['aria-disabled']).toBe(true);
-    expect(find(f.render(), p => p['data-testid'] === 'parameter-disabled-reason')).toBeDefined();
+    expect(find(f.render(), p => p.testId === 'parameter-disabled-reason')).toBeDefined();
   });
   it('explains why controls cannot be edited before a session exists', () => {
     const f = fixture('unmetered');
-    expect(find(f.render(false), p => p['data-testid'] === 'params-disabled-reason')).toBeDefined();
+    expect(find(f.render(false), p => p.testId === 'params-disabled-reason')).toBeDefined();
     expect(find(f.render(false), p => p['data-testid'] === 'params-count')?.['aria-disabled']).toBe(true);
   });
 });

@@ -359,5 +359,67 @@ func validateUnavailableNotices(schema ApplicationSchema) error {
 			}
 		}
 	}
+	return validateUnavailableReasons(schema)
+}
+
+// unavailableReasonPrefixes name the short reasons of the shared notice (#94):
+// the few words after "无法使用，" on the page, whose full explanation lives
+// in the hover hint. A short reason is declared in the default copy and in
+// every bundle, with the same placeholders, so no locale falls back to a long
+// paragraph or to a reason the frontend made up.
+var unavailableReasonPrefixes = []string{"ui.unavailable.reason.", "ui.workspace.processing.unavailable_reason."}
+
+func isUnavailableReason(key string) bool {
+	for _, prefix := range unavailableReasonPrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func validateUnavailableReasons(schema ApplicationSchema) error {
+	same := func(a, b map[string]bool) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for name := range a {
+			if !b[name] {
+				return false
+			}
+		}
+		return true
+	}
+	for key, text := range schema.Content.Messages {
+		if !isUnavailableReason(key) {
+			continue
+		}
+		if strings.TrimSpace(text) == "" {
+			return fmt.Errorf("content.messages 的无法使用原因 %q 不能为空", key)
+		}
+		if schema.Localization == nil {
+			continue
+		}
+		want := placeholderSet(text)
+		for locale, bundle := range schema.Localization.Bundles {
+			translated := bundle.Messages[key]
+			if strings.TrimSpace(translated) == "" {
+				return fmt.Errorf("bundles.%s.messages 缺少无法使用原因 %q", locale, key)
+			}
+			if !same(want, placeholderSet(translated)) {
+				return fmt.Errorf("bundles.%s.messages 的 %q 占位符须与默认文案一致", locale, key)
+			}
+		}
+	}
+	if schema.Localization == nil {
+		return nil
+	}
+	for locale, bundle := range schema.Localization.Bundles {
+		for key := range bundle.Messages {
+			if isUnavailableReason(key) && strings.TrimSpace(schema.Content.Messages[key]) == "" {
+				return fmt.Errorf("bundles.%s.messages 的无法使用原因 %q 没有默认文案", locale, key)
+			}
+		}
+	}
 	return nil
 }

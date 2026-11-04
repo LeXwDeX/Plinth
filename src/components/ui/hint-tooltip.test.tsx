@@ -4,6 +4,7 @@ import { expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 import { HintBubble, HintTooltip } from './hint-tooltip';
+import { UnavailableLabelContext } from './unavailable-label-context';
 
 const tooltipSource = readFileSync(new URL('./tooltip.tsx', import.meta.url), 'utf8');
 const hintSource = readFileSync(new URL('./hint-tooltip.tsx', import.meta.url), 'utf8');
@@ -33,6 +34,22 @@ it('puts the reason a control is disabled before its name', () => {
   expect(html.indexOf('正面图完成后才能转 3D。')).toBeGreaterThan(-1);
   expect(html.indexOf('正面图完成后才能转 3D。')).toBeLessThan(html.indexOf('转 3D</span>'));
   expect(html).toContain('data-testid="hint-reason"');
+});
+
+// #94: a disabled control's reason is drawn like every "unavailable" state: the warning icon and the Schema's
+// "无法使用，<reason>" line (supplied by the Product Schema provider), never the bare sentence on its own.
+it('draws the disabled reason as a warning with the unavailable label', () => {
+  const html = renderToStaticMarkup(
+    <UnavailableLabelContext.Provider value={(reason) => `无法使用，${reason}`}>
+      <HintBubble name="转 3D" reason="正面图未完成" />
+    </UnavailableLabelContext.Provider>,
+  );
+  expect(html).toContain('data-testid="hint-reason-icon"');
+  expect(html).toContain('无法使用，正面图未完成');
+  const bare = renderToStaticMarkup(<HintBubble name="转 3D" reason="正面图未完成" />);
+  expect(bare).toContain('data-testid="hint-reason-icon"');
+  expect(bare).not.toContain('无法使用');
+  expect(renderToStaticMarkup(<HintBubble name="转 3D" />)).not.toContain('hint-reason-icon');
 });
 
 it('omits the lines it was not given', () => {

@@ -5,8 +5,10 @@ import { useEffect, useState } from 'react';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { useSessionMessages } from '@/hooks/use-picture-handles';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
+import { unavailableLabel } from '@/lib/unavailable';
 import { defaultViewChoices, validViewChoices, type MultiviewOffering } from '@/lib/workspace/multiview-upload';
 import { handleOfPicture } from '@/lib/workspace/object-handle';
 import { useChatStore } from '@/store/chat-store';
@@ -82,7 +84,13 @@ export function MultiviewUploadPanel({ images, target, disabled = false, onConfi
           </li>
         ))}
       </ul>
-      {!valid ? <p role="status" className="text-warning" data-testid="studio-multiview-upload-invalid">{schemaText(schema, 'ui.studio.multiview_upload.invalid')}</p> : null}
+      {!valid ? (
+        <UnavailableNotice
+          testId="studio-multiview-upload-invalid"
+          label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.composer.multiview_invalid'))}
+          detail={schemaText(schema, 'ui.studio.multiview_upload.invalid')}
+        />
+      ) : null}
       <div className="flex items-center gap-1.5">
         <Action type="button" size="sm" disabled={disabled || !valid} onClick={() => onConfirm(choices)} data-testid="studio-multiview-upload-confirm">
           {schemaText(schema, 'ui.studio.multiview_upload.confirm')}

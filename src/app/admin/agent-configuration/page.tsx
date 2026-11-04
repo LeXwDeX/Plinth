@@ -4,6 +4,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { createAgentConfigurationClient, AgentConfigurationError, type AgentConfiguration, type AgentConfigurationSnapshot } from '@/lib/agent-configuration';
 import { schemaText } from '@/lib/product-schema';
+import { unavailableLabel } from '@/lib/unavailable';
+import { HintTooltip } from '@/components/ui/hint-tooltip';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { Field } from '@/components/ui/field';
 import { OptionSelect } from '@/components/ui/option-select';
 import { Action } from '@/components/ui/button';
@@ -15,6 +18,8 @@ export default function AgentConfigurationPage() {
   const { schema } = useProductSchema();
   const client = useMemo(() => createAgentConfigurationClient(schema), [schema]);
   const ui = (key: string) => schema.agent_configuration.ui[key] ?? schemaText(schema, `ui.agent_configuration.${key}`);
+  // The states this page cannot use (#94): a short reason inline, the page's own sentence in the hint.
+  const unavailableNotice = (reason: string, detail: string, testId: string) => <UnavailableNotice testId={testId} label={unavailableLabel(schema, schemaText(schema, `ui.unavailable.reason.admin.${reason}`))} detail={detail} />;
   const [snapshot, setSnapshot] = useState<AgentConfigurationSnapshot | null>(null);
   const [draft, setDraft] = useState<AgentConfiguration | null>(null);
   const [validated, setValidated] = useState<string | null>(null);
@@ -81,12 +86,12 @@ export default function AgentConfigurationPage() {
           {(['name', 'name_zh', 'category'] as const).map(field => <Field key={field} id={`agent-skill-${skill.id}-${field}`} label={ui(field === 'category' ? 'skill_category' : 'skill_name')}>{props => <input {...props} value={skill[field] ?? ''} disabled={busy} onChange={event => updateSkill(index, field, event.target.value)} className="w-full rounded-md border bg-background p-2 text-sm" />}</Field>)}
           <Field id={`agent-skill-${skill.id}-prompt`} label={ui('skill_prompt')}>{props => <textarea {...props} value={skill.prompt} maxLength={schema.agent_configuration.limits.max_skill_prompt_characters} disabled={busy} onChange={event => updateSkill(index, 'prompt', event.target.value)} rows={4} className="w-full rounded-md border bg-background p-2 text-sm" />}</Field>
           <Field id={`agent-skill-${skill.id}-image-prompt`} label={ui('image_to_image_template')}>{props => <textarea {...props} value={skill.image_to_image_template ?? ''} maxLength={schema.agent_configuration.limits.max_skill_prompt_characters} disabled={busy} onChange={event => updateSkill(index, 'image_to_image_template', event.target.value)} rows={3} className="w-full rounded-md border bg-background p-2 text-sm" />}</Field>
-          <div className="flex flex-wrap gap-2"><Action variant="outline" disabled={busy || draft.skills.length >= schema.agent_configuration.limits.max_skill_count} onClick={() => { const id = newSkillID(); revise({ ...draft, skills: [...draft.skills, { ...structuredClone(skill), id }] }); setEditingSkillId(id); }}>{ui('add_skill')}</Action><Action variant="outline" disabled={busy} onClick={() => { revise({ ...draft, skills: draft.skills.filter((_, at) => at !== index) }); setEditingSkillId(null); }}>{ui('remove_skill')}</Action></div>
+          <div className="flex flex-wrap gap-2"><HintTooltip name={ui('add_skill')} reason={draft.skills.length >= schema.agent_configuration.limits.max_skill_count ? schemaText(schema, 'ui.unavailable.reason.admin.agent_skill_limit') : undefined}><Action variant="outline" disabled={busy || draft.skills.length >= schema.agent_configuration.limits.max_skill_count} onClick={() => { const id = newSkillID(); revise({ ...draft, skills: [...draft.skills, { ...structuredClone(skill), id }] }); setEditingSkillId(id); }}>{ui('add_skill')}</Action></HintTooltip><Action variant="outline" disabled={busy} onClick={() => { revise({ ...draft, skills: draft.skills.filter((_, at) => at !== index) }); setEditingSkillId(null); }}>{ui('remove_skill')}</Action></div>
         </Surface>)}
         {draft.skills.length === 0 && snapshot.presets.skills[0] ? <Action disabled={busy} onClick={() => revise({ ...draft, skills: [{ ...structuredClone(snapshot.presets.skills[0]), id: newSkillID() }] })}>{ui('add_skill')}</Action> : null}
       </Surface>
       <Surface padding="md" className="space-y-3"><h2 className="font-semibold">{ui('mcp')}</h2>
-        {snapshot.mcp_presets.length === 0 ? <p className="text-sm text-muted-foreground">{ui('empty')}</p> : snapshot.mcp_presets.map(preset => <Field key={preset.id} id={`agent-mcp-${preset.id}`} label={preset.name} help={<>{preset.description}{preset.available === false ? <><br /><span>{ui('mcp_unavailable')}</span></> : null}<br />{ui('mcp_protocol')}: {preset.protocol_version ?? ''}<br />{ui('transport')}: {preset.transport ?? ''}<br />{ui('mcp_tools')}: {preset.tool_names.join(', ')}</>} layout="inline">{props => <input {...props} type="checkbox" disabled={busy} checked={draft.enabled_mcp_preset_ids.includes(preset.id)} onChange={event => toggle('enabled_mcp_preset_ids', preset.id, event.target.checked)} />}</Field>)}
+        {snapshot.mcp_presets.length === 0 ? <p className="text-sm text-muted-foreground">{ui('empty')}</p> : snapshot.mcp_presets.map(preset => <Field key={preset.id} id={`agent-mcp-${preset.id}`} label={preset.name} help={<>{preset.description}{preset.available === false ? <><br />{unavailableNotice('agent_mcp_unavailable', ui('mcp_unavailable'), `agent-mcp-unavailable-${preset.id}`)}</> : null}<br />{ui('mcp_protocol')}: {preset.protocol_version ?? ''}<br />{ui('transport')}: {preset.transport ?? ''}<br />{ui('mcp_tools')}: {preset.tool_names.join(', ')}</>} layout="inline">{props => <input {...props} type="checkbox" disabled={busy} checked={draft.enabled_mcp_preset_ids.includes(preset.id)} onChange={event => toggle('enabled_mcp_preset_ids', preset.id, event.target.checked)} />}</Field>)}
       </Surface>
       <div className="flex flex-wrap gap-2">
         <Action disabled={busy} onClick={() => void run(async () => {
@@ -98,7 +103,7 @@ export default function AgentConfigurationPage() {
         <Action disabled={busy || validated !== JSON.stringify(draft)} onClick={() => void run(() => client.publish(snapshot.revision, draft, signal()), ui('published'))}>{ui('publish')}</Action>
         <Action variant="outline" disabled={busy} onClick={() => void run(() => client.reset(snapshot.revision, signal()), ui('restore_preset'))}>{ui('restore_preset')}</Action>
       </div>
-      {validated !== JSON.stringify(draft) ? <p className="text-sm text-muted-foreground">{ui('preview_required')}</p> : null}
+      {validated !== JSON.stringify(draft) ? <div className="text-sm">{unavailableNotice('agent_preview_required', ui('preview_required'), 'agent-preview-required')}</div> : null}
       {preview ? <Surface padding="md" className="space-y-3"><h2 className="font-semibold">{ui('preview')}</h2>{Object.entries(preview).map(([domain, prompt]) => <div key={domain}><h3 className="text-sm font-medium">{ui(domain === 'image' ? 'domain_image' : 'domain_model_3d')}</h3><pre className="mt-2 whitespace-pre-wrap break-words text-xs">{prompt}</pre></div>)}</Surface> : null}
       <Surface padding="md" className="space-y-3"><h2 className="font-semibold">{ui('history')}</h2>
         {snapshot.history.length === 0 ? <p>{ui('history_empty')}</p> : <ul className="space-y-2">{snapshot.history.map(version => <li key={version.revision} className="flex flex-wrap items-center justify-between gap-2 text-xs"><span className="break-all">{version.revision} · {version.created_at} · {version.source}</span><Action variant="outline" size="sm" disabled={busy || version.revision === snapshot.revision} onClick={() => void run(() => client.restore(snapshot.revision, version.revision, signal()), ui('restore_version'))}>{ui('restore_version')}</Action></li>)}</ul>}

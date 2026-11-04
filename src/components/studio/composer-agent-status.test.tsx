@@ -19,7 +19,7 @@ vi.mock('@/components/studio/skill-picker', () => ({ SkillPicker: () => null }))
 vi.mock('@/components/studio/agent-scope-picker', () => ({ AgentScopePicker: () => null }));
 vi.mock('@/components/studio/params-popover', () => ({ ParamsPopover: () => null }));
 vi.mock('@/components/result/result-card-parts', () => ({ openResultDetail: vi.fn() }));
-vi.mock('@/components/ui/hint-tooltip', () => ({ HintTooltip: ({ name, children }: { name: string; children: React.ReactNode }) => <span data-hint-name={name}>{children}</span> }));
+vi.mock('@/components/ui/hint-tooltip', () => ({ HintTooltip: ({ name, reason, children }: { name: string; reason?: string; children: React.ReactNode }) => <span data-hint-name={name} data-hint-reason={reason}>{children}</span> }));
 const noop = () => undefined;
 const props: ComposerProps = {
   value: 'Continue', onChange: noop, onSend: noop, onStop: noop, streaming: false, locked: false, canSend: true,
@@ -46,9 +46,13 @@ describe('composer while the Agent is not configured', () => {
     mock.schema = withAgentStatus(false);
     const html = renderToStaticMarkup(<Composer {...props} />);
     expect(html).toContain('data-testid="composer-agent-unavailable"');
-    expect(html).toContain(notConfigured);
+    // #94: the page says only the warning icon and "无法使用，<短原因>"; the full sentence is the hover detail.
+    const shortReason = catalog.application.content.messages['ui.unavailable.reason.composer.agent_not_configured'];
+    expect(html).toContain('data-testid="unavailable-icon"');
+    expect(html).toContain(`data-testid="unavailable-label">无法使用，${shortReason}<`);
+    expect(html).toContain(`data-testid="unavailable-detail">${notConfigured}<`);
     expect(sendButton(html)).toContain('disabled=""');
-    expect(html).toContain(`data-hint-name="${notConfigured}"`);
+    expect(html).toContain(`data-hint-reason="${shortReason}"`);
     expect(textarea(html)).not.toContain(' disabled=""');
   });
   it.each([true, undefined])('keeps the send on while the Agent is available (agent_status %s)', available => {
@@ -71,7 +75,8 @@ describe('composer reference limit', () => {
     const text = catalog.application.runtime.generation_messages.reference_capacity
       .replace('{model}', 'Meshy 7.1').replace('{count}', '1').replace('{total}', '2');
     expect(html).toContain('data-testid="composer-reference-limit"');
-    expect(html).toContain(text);
+    expect(html).toContain(`data-testid="unavailable-detail">${text}<`);
+    expect(html).toContain('data-testid="unavailable-icon"');
     expect(html.match(/data-testid="composer-attachment-chip"/g)).toHaveLength(2);
     expect(sendButton(html)).not.toContain(' disabled=""');
     expect(renderToStaticMarkup(<Composer {...props} images={images} />)).not.toContain('composer-reference-limit');

@@ -7,6 +7,10 @@ import { Action } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { OptionSelect } from '@/components/ui/option-select';
 import { Surface } from '@/components/ui/surface';
+import { HintTooltip } from '@/components/ui/hint-tooltip';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
+import { unavailableLabel } from '@/lib/unavailable';
+import { schemaText } from '@/lib/product-schema';
 import {
   createLLMSettingsClient,
   LLMSettingsError,
@@ -27,6 +31,8 @@ export default function LLMSettingsPage() {
   const { schema } = useProductSchema();
   const client = useMemo(() => createLLMSettingsClient(schema), [schema]);
   const ui = (key: string) => schema.llm_settings?.ui[key] ?? '';
+  // The state this page cannot use (#94): a short reason inline, the page's own sentence in the hint.
+  const unavailable = (reason: string, detail: string, testId?: string) => <UnavailableNotice testId={testId} label={unavailableLabel(schema, schemaText(schema, `ui.unavailable.reason.admin.${reason}`))} detail={detail} />;
   const [management, setManagement] = useState<LLMSettingsManagement | null>(null);
   const [draft, setDraft] = useState<LLMSettings | null>(null);
   const [error, setError] = useState('');
@@ -97,8 +103,8 @@ export default function LLMSettingsPage() {
             onValueChange={(value) => { setDraft({ ...draft, default_model: value }); setNotice(''); }}
             options={management.connections.map((connection) => ({ value: connection.id, label: `${connection.model || connection.id} (${connection.id})` }))} />}
         </Field>
-        {!management.default_available ? <p className="text-sm text-warning" data-testid="llm-default-unavailable">{ui('default_unavailable')}</p> : null}
-        {defaultConnection?.check?.vision === 'unsupported' ? <p className="text-sm text-warning">{ui('vision_required')}</p> : null}
+        {!management.default_available ? <div className="text-sm">{unavailable('llm_default_unavailable', ui('default_unavailable'), 'llm-default-unavailable')}</div> : null}
+        {defaultConnection?.check?.vision === 'unsupported' ? <div className="text-sm">{unavailable('llm_vision_required', ui('vision_required'), 'llm-vision-required')}</div> : null}
       </Surface>
 
       <Surface padding="md" className="space-y-4">
@@ -124,8 +130,8 @@ export default function LLMSettingsPage() {
                   {connection.deployment_default ? <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[11px]">{ui('default_connection')}</span> : null}
                   {draft.default_model === connection.id ? <span className="ml-2 rounded bg-primary/15 px-1.5 py-0.5 text-[11px] text-primary">{ui('default_tag')}</span> : null}
                 </h3>
-                <p className={connection.configured ? 'text-xs text-muted-foreground' : 'text-xs text-warning'} data-testid={`llm-configured-${connection.id}`}>
-                  {connection.configured ? ui('configured') : ui('not_configured')}
+                <p className="flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground" data-testid={`llm-configured-${connection.id}`}>
+                  {connection.configured ? ui('configured') : unavailable('llm_not_configured', ui('not_configured'), `llm-not-configured-${connection.id}`)}
                   {' · '}{ui('context_window')}: {connection.context_window > 0 ? formatTokenCount(connection.context_window) : ui('window_unknown')}
                 </p>
               </div>
@@ -145,9 +151,9 @@ export default function LLMSettingsPage() {
               <div className="space-y-1 text-xs" data-testid={`llm-check-${connection.id}`}>
                 <p className="font-medium">{ui('connectivity')} · {ui('vision')}</p>
                 {check ? <>
-                  <p className={check.reachable ? '' : 'text-warning'}>
-                    {check.reachable ? ui('reachable') : ui('unreachable')} · {ui(`outcome_${check.outcome}`) || check.outcome}
-                  </p>
+                  {check.reachable
+                    ? <p>{ui('reachable')} · {ui(`outcome_${check.outcome}`) || check.outcome}</p>
+                    : <div>{unavailable('llm_unreachable', `${ui('unreachable')} · ${ui(`outcome_${check.outcome}`) || check.outcome}`, `llm-unreachable-${connection.id}`)}</div>}
                   <p>{check.vision === 'supported' ? ui('vision_supported') : check.vision === 'unsupported' ? ui('vision_unsupported') : ui('vision_unknown')}</p>
                   <p className="text-muted-foreground">{ui('checked_at')}: {check.checked_at}</p>
                 </> : <p className="text-muted-foreground">{ui('never_tested')}</p>}
@@ -163,9 +169,14 @@ export default function LLMSettingsPage() {
                 <div className="flex flex-wrap gap-3">
                   {connection.profile_levels.map((level) => (
                     <Field key={level} id={`llm-level-${connection.id}-${level}`} label={level} layout="inline">
-                      {(props) => <input {...props} type="checkbox" disabled={busy || (model.effort_levels.length === 1 && model.effort_levels[0] === level)}
-                        checked={model.effort_levels.includes(level)}
-                        onChange={(event) => updateModel(connection.id, (current) => toggleLevel(connection, current, level, event.target.checked))} />}
+                      {(props) => {
+                        // The last chosen level cannot be unchecked; a level always stays on offer.
+                        const last = model.effort_levels.length === 1 && model.effort_levels[0] === level;
+                        const input = <input {...props} type="checkbox" disabled={busy || last}
+                          checked={model.effort_levels.includes(level)}
+                          onChange={(event) => updateModel(connection.id, (current) => toggleLevel(connection, current, level, event.target.checked))} />;
+                        return last ? <HintTooltip name={level} reason={schemaText(schema, 'ui.unavailable.reason.admin.llm_last_level')}>{input}</HintTooltip> : input;
+                      }}
                     </Field>
                   ))}
                 </div>

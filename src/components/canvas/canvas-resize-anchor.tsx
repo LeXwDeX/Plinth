@@ -27,7 +27,7 @@ export function CanvasResizeAnchor({ disabled = false }: { disabled?: boolean })
           const offered = artboard.resize.anchors.includes(anchor);
           const name = schemaText(schema, `ui.canvas.size.anchor.${anchor}`);
           return (
-            <HintTooltip key={anchor} name={name}>
+            <HintTooltip key={anchor} name={name} reason={!disabled && !offered ? schemaText(schema, 'ui.unavailable.reason.canvas.anchor') : undefined}>
               <button
                 type="button"
                 role="radio"

@@ -77,6 +77,17 @@ describe('SkillPicker selected trigger label', () => {
 
 // #238: only the owner's personal Skills carry a delete action.
 describe('skillPickerRows', () => {
+  it('gives a row the effective configuration leaves out a short reason (#94)', () => {
+    const rows = skillPickerRows({
+      catalog: { revision: 'r', skills: [{ id: 'a', displayName: 'A', prompt: 'p', recommendedSize: '' }] } as never,
+      effective: { skills: [] } as never,
+      personalIds: new Set(), noneLabel: 'n', noneHint: 'h', deleteLabel: () => '', deleting: new Set(), onDelete: () => undefined,
+      notEnabledReason: 'not enabled',
+    });
+    expect(rows[0]).toMatchObject({ key: 'a', disabled: true, disabledReason: 'not enabled' });
+    expect(rows[1].disabledReason).toBeUndefined();
+  });
+
   it('offers delete on personal Skills only, never on system Skills or "none"', () => {
     const deleted: string[] = [];
     const rows = skillPickerRows({

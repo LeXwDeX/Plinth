@@ -18,6 +18,8 @@ import { useCanvasArtboard } from '@/hooks/use-canvas-artboard';
 import { useSessionMessages } from '@/hooks/use-picture-handles';
 import { handleOfPicture } from '@/lib/workspace/object-handle';
 import { Action } from '@/components/ui/button';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
+import { unavailableLabel } from '@/lib/unavailable';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { useBitmapLimitNotice } from '@/hooks/use-bitmap-limit-notice';
@@ -1254,9 +1256,7 @@ export function WorkspaceCanvasBoard() {
                 </div>
               </>
             ) : (
-              <p className="text-xs leading-5 text-muted-foreground">
-                {schemaText(schema, 'ui.canvas.inpaint.missing_semantics')}
-              </p>
+              <UnavailableNotice testId="mask-switch-unavailable" label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.canvas.inpaint_model'))} detail={schemaText(schema, 'ui.canvas.inpaint.missing_semantics')} />
             )}
           </DialogContent>
         </Dialog>

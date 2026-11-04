@@ -71,6 +71,34 @@ describe('the shared unavailable notice on the processing panel (#93)', () => {
     expect((screen.getByDisplayValue('20000') as HTMLInputElement)).toBeTruthy();
   });
 
+  it('a model from another task says so in one short line, the instruction only in the hint (#94)', () => {
+    source('meshy', 31_270_000);
+    mock.source = { ...mock.source, session_id: 'other' };
+    render(<ModelProcessingPanel selection={selection} />);
+    const notice = screen.getByTestId('processing-session-mismatch');
+    expect(notice.querySelector('[data-testid="unavailable-icon"]')).not.toBeNull();
+    expect(notice.querySelector('[data-testid="unavailable-label"]')!.textContent).toBe('无法使用，不是当前任务的模型');
+    expect(notice.querySelector('[data-testid="unavailable-detail"]')!.textContent).toBe(messages['ui.workspace.processing.session_mismatch']);
+  });
+
+  it('a model of the current task shows no session notice, and a model without a usable asset says so (#94)', () => {
+    source('meshy', 31_270_000);
+    render(<ModelProcessingPanel selection={selection} />);
+    expect(screen.queryByTestId('processing-session-mismatch')).toBeNull();
+    expect(screen.queryByTestId('processing-asset-unavailable')).toBeNull();
+    cleanup();
+    mock.source = { ...mock.source, assets: [] };
+    render(<ModelProcessingPanel selection={selection} />);
+    expect(screen.getByTestId('processing-asset-unavailable').querySelector('[data-testid="unavailable-label"]')!.textContent).toBe('无法使用，模型没有可用资产');
+  });
+
+  it('a chosen step with the confirm button grey names the reason in a few words (#94)', () => {
+    source('tripo', 80_000_000);
+    chooseUV();
+    expect(screen.getByTestId('processing-plan-incompatible').querySelector('[data-testid="unavailable-label"]')!.textContent).toBe('无法使用，所选步骤没有输入路径');
+    expect(screen.getByTestId('processing-plan-incompatible').querySelector('[data-testid="unavailable-detail"]')!.textContent).toBe(messages['ui.workspace.processing.plan_incompatible']);
+  });
+
   it('the copy is the Schema\'s', () => {
     expect(messages['ui.unavailable.label']).toBe('无法使用，{reason}');
   });

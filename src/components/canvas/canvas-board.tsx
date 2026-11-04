@@ -35,6 +35,7 @@ import { CanvasZoomControls } from './canvas-zoom-controls';
 import { useBrushLayers } from './use-brush-layers';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
+import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { Surface } from '@/components/ui/surface';
 import { sameMaskDraft, useMaskStore } from '@/store/mask-store';
 import { canvasBackgroundStyle } from '@/lib/canvas/background-style';
@@ -1290,15 +1291,20 @@ export function CanvasBoard({
   const keyLabel = (key: string) => schema.content.messages[`ui.studio.mask.key.${key}`] ?? key;
   const maskActions = onInpaintRequest && (maskState || activeTool === 'mask') ? (
     <>
-      <Action
-        type="button"
-        size="sm"
-        data-testid="mask-done"
-        disabled={!maskState || maskState.strokes.length === 0 || onUploadBlob === undefined}
-        onClick={completeMask}
+      <HintTooltip
+        name={formatSchemaText(schemaText(schema, 'ui.studio.mask.done'), { key: keyLabel(keyboard.mask_confirm_key) })}
+        reason={!maskState || maskState.strokes.length === 0 ? schemaText(schema, 'ui.unavailable.reason.canvas.no_mask_strokes') : undefined}
       >
-        {formatSchemaText(schemaText(schema, 'ui.studio.mask.done'), { key: keyLabel(keyboard.mask_confirm_key) })}
-      </Action>
+        <Action
+          type="button"
+          size="sm"
+          data-testid="mask-done"
+          disabled={!maskState || maskState.strokes.length === 0 || onUploadBlob === undefined}
+          onClick={completeMask}
+        >
+          {formatSchemaText(schemaText(schema, 'ui.studio.mask.done'), { key: keyLabel(keyboard.mask_confirm_key) })}
+        </Action>
+      </HintTooltip>
       <Action
         type="button"
         variant="ghost"

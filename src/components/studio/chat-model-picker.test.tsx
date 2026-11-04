@@ -69,7 +69,10 @@ describe('the chat model picker (#322)', () => {
     open('s1', { selected: 'LLM', chosen: 'GLM', defaultId: 'LLM', fallback: true, options: [{ id: 'LLM', model: 'deepseek' }] });
     const html = renderToStaticMarkup(<ChatModelNotice />);
     expect(html).toContain('data-testid="workspace-chat-model-notice"');
-    expect(html).toContain(messages['ui.studio.chat_model.fallback'].replace('{model}', 'deepseek'));
+    // #94: icon and "无法使用，<短原因>" on the page, the full sentence in the hover detail.
+    expect(html).toContain('data-testid="unavailable-icon"');
+    expect(html).toContain(`data-testid="unavailable-label">无法使用，${messages['ui.unavailable.reason.picker.chat_model_offline']}<`);
+    expect(html).toContain(`data-testid="unavailable-detail">${messages['ui.studio.chat_model.fallback'].replace('{model}', 'deepseek')}<`);
     open('s1', two);
     expect(renderToStaticMarkup(<ChatModelNotice />)).toBe('');
   });

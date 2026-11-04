@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, type DragEvent } from 'react';
-import { Ban, Box, BotOff, Frame, GitBranch, Image as ImageIcon, ImagePlus, Paintbrush, RotateCcw, Send, Square, Zap } from 'lucide-react';
+import { Ban, Box, Frame, GitBranch, Image as ImageIcon, ImagePlus, Paintbrush, RotateCcw, Send, Square, Zap } from 'lucide-react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { HarnessSummary } from '@/components/workspace/harness-summary';
@@ -21,10 +21,12 @@ import { SkillPicker, type SkillPickerProps } from '@/components/studio/skill-pi
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { Field } from '@/components/ui/field';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { ATTACHMENT_PURPOSES, type AttachmentPurpose } from '@/lib/chat/attachment-purpose';
 import { attachedIndex, insertReference, namesHandle } from '@/lib/chat/composer-reference';
 import { activeMention, filterMentions, insertMention, overridingHandle, type MentionCandidate } from '@/lib/chat/mentions';
 import { agentUnavailableReason, formatSchemaText, schemaCountMessage, schemaMessage, schemaText } from '@/lib/product-schema';
+import { unavailableLabel } from '@/lib/unavailable';
 import { CHAT_COMPOSER_ELEMENT_ID } from '@/lib/workspace/chat-composer';
 import { openResultDetail } from '@/components/result/result-card-parts';
 import { composerDragKind, dropFiles, insertPastedText, planComposerPaste } from '@/lib/chat/composer-input';
@@ -183,6 +185,7 @@ export function Composer({
   // No API key or no model on the server: every send would be an Agent turn that cannot answer, so the
   // send is off and the reason stays in view. The draft can still be written (#253).
   const agentUnavailable = agentUnavailableReason(schema);
+  const agentUnavailableLabel = unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.composer.agent_not_configured'));
 
   // After a pick the text changes under the caret; put the caret back once it has rendered.
   useEffect(() => {
@@ -297,10 +300,12 @@ export function Composer({
         </span>
       ) : null}
       {agentUnavailable ? (
-        <p role="alert" className="flex items-start gap-1.5 rounded-lg bg-warning/15 px-3 py-1.5 text-xs leading-4 text-foreground" data-testid="composer-agent-unavailable">
-          <BotOff aria-hidden className="mt-px size-3.5 shrink-0 text-warning" />
-          <span>{agentUnavailable}</span>
-        </p>
+        <UnavailableNotice
+          testId="composer-agent-unavailable"
+          className="text-xs"
+          label={agentUnavailableLabel}
+          detail={agentUnavailable}
+        />
       ) : null}
       {editing ? (
         <div className="flex items-center justify-between gap-2 rounded-lg bg-muted px-3 py-1.5 text-xs text-muted-foreground" data-testid="chat-editing-bar">
@@ -439,9 +444,12 @@ export function Composer({
           {/* #296: what an edit of the one attached picture outputs when no size was chosen. */}
           <ReferenceSizeNotice delivery={params.canvas?.delivery} />
           {referenceLimitText ? (
-            <div role="status" data-testid="composer-reference-limit" className="rounded-md border border-reminder/40 bg-reminder/10 px-2 py-1 text-[11px] leading-4 text-foreground [overflow-wrap:anywhere]">
-              {referenceLimitText}
-            </div>
+            <UnavailableNotice
+              testId="composer-reference-limit"
+              className="text-[11px] leading-4"
+              label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.composer.reference_unused'))}
+              detail={referenceLimitText}
+            />
           ) : null}
           {onAttachmentPurpose ? (
         <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground" data-testid="composer-attachment-purpose">
@@ -614,7 +622,9 @@ export function Composer({
             </HintTooltip>
           ) : null}
           <HintTooltip
-            name={agentUnavailable ?? sendLabel}
+            name={sendLabel}
+            reason={agentUnavailable ? schemaText(schema, 'ui.unavailable.reason.composer.agent_not_configured') : undefined}
+            hint={agentUnavailable ?? undefined}
             cost={sendCredits === null ? undefined : { text: formatSchemaText(schemaText(schema, 'ui.studio.composer.send_cost_hint'), { credits: sendCredits }), ai: true }}
           >
             <Action

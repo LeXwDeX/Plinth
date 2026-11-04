@@ -1,5 +1,6 @@
 import type { ChatPaidStep } from '@/store/chat-store';
 import { formatNativePrice } from '@/lib/pricing';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 
 /**
  * 消息里每个已提交付费步骤的积分与批准来源。积分是估算值；
@@ -13,6 +14,7 @@ export function PaidStepNotes({
   autoApprovedText,
   failed,
   note,
+  noteUnavailableLabel,
   nativeText,
   unknownPriceText,
 }: {
@@ -24,6 +26,8 @@ export function PaidStepNotes({
   failed?: (taskId: string) => boolean;
   /** What running a failed step again would do (#326: certain to fail, or the saved file it uses); empty for nothing. */
   note?: (taskId: string) => string;
+  /** The "无法使用，<reason>" line when that note says the step cannot run again (#94); the note itself then goes to the hint. */
+  noteUnavailableLabel?: (taskId: string) => string;
   nativeText?: (amount: string) => string;
   unknownPriceText?: string;
 }) {
@@ -41,7 +45,9 @@ export function PaidStepNotes({
                 : unknownPriceText ?? ''
               : isFailed ? failedText!(step.credits) : creditsText(step.credits)}
             {step.approvedByPolicy ? ` · ${autoApprovedText}` : ''}
-            {stepNote ? <span className="mt-0.5 block text-warning" data-testid="paid-step-source-retry">{stepNote}</span> : null}
+            {stepNote ? (noteUnavailableLabel?.(step.taskId)
+              ? <UnavailableNotice className="mt-0.5 flex" testId="paid-step-source-retry" label={noteUnavailableLabel(step.taskId)} detail={stepNote} />
+              : <span className="mt-0.5 block text-warning" data-testid="paid-step-source-retry">{stepNote}</span>) : null}
           </li>
         );
       })}

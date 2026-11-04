@@ -6,6 +6,8 @@ import { X } from 'lucide-react';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
+import { unavailableLabel } from '@/lib/unavailable';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { schemaText } from '@/lib/product-schema';
 import { handleLabel } from '@/lib/workspace/object-handle';
@@ -79,7 +81,7 @@ function StageImageModal() {
         onPointerDown={(event) => { if (event.target === event.currentTarget) close(); }}
       >
         {broken || !src ? (
-          <p role="status" className="text-sm text-white/70">{schemaText(schema, 'ui.studio.lightbox.missing')}</p>
+          <UnavailableNotice className="text-sm" label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.stage.no_output'))} detail={schemaText(schema, 'ui.studio.lightbox.missing')} />
         ) : (
           <img
             src={src}

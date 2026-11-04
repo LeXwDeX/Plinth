@@ -184,7 +184,14 @@ describe('approval card', () => {
   it('says the step uses only the first of the pictures given, in the server sentence (#329 E)', () => {
     const note = 'Meshy 7.1 一次只用 1 张参考图：这次共 2 张，只用第 1 张。要用多张不同角度的图，请改选支持多图的模型。';
     const html = render({ ...card(null), capability: 'image-to-3d', referenceNote: note });
-    expect(html).toContain(`data-testid="studio-approval-reference-note">${note}<`);
+    expect(html).toContain('data-testid="studio-approval-reference-note"');
+    expect(html).toContain(note);
+    // #94 review: the same field also carries the plain source note of a step that uses every picture (which views a
+    // multiview step is made from), so it is a note, never an "unavailable" warning.
+    expect(html).not.toContain('data-testid="unavailable-icon"');
+    const views = render({ ...card(null), capability: 'multiview-to-3d', referenceNote: '由 正面 / 左侧 视图生成' });
+    expect(views).toContain('由 正面 / 左侧 视图生成');
+    expect(views).not.toContain('unavailable-label');
     expect(render(card(null))).not.toContain('studio-approval-reference-note');
     // An expired card keeps saying which picture the step would have used.
     expect(render({ ...card(null), referenceNote: note, status: 'expired' })).toContain('studio-approval-reference-note');
