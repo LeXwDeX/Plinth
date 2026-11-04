@@ -31,7 +31,6 @@ vi.mock('@/components/studio/model-picker', () => ({
   GenerationModelNotice: () => null,
 }));
 vi.mock('@/components/studio/skill-picker', () => ({ SkillPicker: () => <button type="button" data-testid="picker-skill" /> }));
-vi.mock('@/components/studio/agent-scope-picker', () => ({ AgentScopePicker: () => <button type="button" data-testid="picker-agent-scope" /> }));
 vi.mock('@/components/studio/chat-model-picker', () => ({
   ChatModelPicker: () => (mock.chatModelPicker ? <button type="button" data-testid="picker-chat-model" /> : null),
   ChatModelNotice: () => null,
@@ -98,10 +97,10 @@ afterEach(() => {
 });
 
 describe('the composer picker grid (#99)', () => {
-  it('declares two tracks when narrow and four when the column is at least 40rem wide', () => {
+  it('declares two tracks when narrow and three when the column is at least 40rem wide', () => {
     const grid = open({ chatModelPicker: true });
     expect(tracks(grid, '')).toBe(2);
-    expect(tracks(grid, WIDE)).toBe(4);
+    expect(tracks(grid, WIDE)).toBe(3);
     // The container query that switches the tracks is on the grid's wrapper, not on the page.
     expect(grid.parentElement?.classList.contains('@container')).toBe(true);
   });
@@ -109,29 +108,29 @@ describe('the composer picker grid (#99)', () => {
   it('renders the pickers in reading order, once each, with the context row last', () => {
     const grid = open({ chatModelPicker: true });
     const order = [...grid.children].map((child) => child.getAttribute('data-testid'));
-    expect(order).toEqual(['picker-model', 'picker-skill', 'picker-agent-scope', 'composer-params-slot', 'picker-chat-model', 'picker-reasoning', 'composer-context']);
+    expect(order).toEqual(['picker-model', 'picker-skill', 'composer-params-slot', 'picker-chat-model', 'picker-reasoning', 'composer-context']);
     expect(within(grid).getByTestId('composer-params-slot').querySelector('[data-testid="picker-params"]')).not.toBeNull();
   });
 
-  it('pairs them left to right: models | Skill, Agent mode | parameters, chat model | thinking, then the context row', () => {
+  it('pairs them left to right: models | Skill, parameters | chat model, thinking, then the context row', () => {
     const grid = open({ chatModelPicker: true });
     expect(rows(grid, false)).toEqual([
       ['picker-model', 'picker-skill'],
-      ['picker-agent-scope', 'composer-params-slot'],
-      ['picker-chat-model', 'picker-reasoning'],
+      ['composer-params-slot', 'picker-chat-model'],
+      ['picker-reasoning'],
       ['composer-context'],
     ]);
     expect(rows(grid, true)).toEqual([
-      ['picker-model', 'picker-skill', 'picker-agent-scope', 'composer-params-slot'],
+      ['picker-model', 'picker-skill', 'composer-params-slot'],
       ['picker-chat-model', 'picker-reasoning', 'composer-context'],
     ]);
   });
 
-  it('lets the context row fill the whole narrow row and two wide tracks, one picker high', () => {
+  it('lets the context row fill the whole narrow row and one wide track, one picker high', () => {
     const grid = open({ chatModelPicker: true });
     const context = within(grid).getByTestId('composer-context');
     expect(span(context, '', 2)).toBe(2);
-    expect(span(context, WIDE, 4)).toBe(2);
+    expect(span(context, WIDE, 3)).toBe(1);
     // The figure and the compaction action sit together on the left, the tool call counter alone on the right edge (#275).
     expect(context.classList.contains('h-7')).toBe(true);
     const meter = within(context).getByTestId('composer-context-meter');
@@ -147,17 +146,16 @@ describe('the composer picker grid (#99)', () => {
     expect([...grid.children].map((child) => child.getAttribute('data-testid'))).not.toContain('picker-chat-model');
     expect(rows(grid, false)).toEqual([
       ['picker-model', 'picker-skill'],
-      ['picker-agent-scope', 'composer-params-slot'],
-      ['picker-reasoning'],
+      ['composer-params-slot', 'picker-reasoning'],
       ['composer-context'],
     ]);
     expect(rows(grid, true)).toEqual([
-      ['picker-model', 'picker-skill', 'picker-agent-scope', 'composer-params-slot'],
+      ['picker-model', 'picker-skill', 'composer-params-slot'],
       ['picker-reasoning', 'composer-context'],
     ]);
   });
 
-  it('keeps the parameters button in the bottom grid, beside the Agent mode, and out of the chips and the attachment box', () => {
+  it('keeps the parameters button in the bottom grid beside Skill, and out of the chips and the attachment box', () => {
     const grid = open({ chatModelPicker: true });
     const composer = grid.closest('[data-testid="studio-composer"]') as HTMLElement;
     // The only parameters button is the one in the grid: none in the chips or the attachment box above it.

@@ -5,7 +5,8 @@ import { countPending, DecisionLedger, displayedApprovals, hasExpired, parsePend
 
 function approval(requestId: string, expiresAt: string, status: PendingApproval['status'] = 'pending'): PendingApproval {
   return {
-    requestId, status, tool: 'create_model_3d', capability: 'text-to-3d', model: 'meshy-7.1', provider: 'Meshy AI', providerId: 'meshy',
+    requestId, status, kind: 'step', plan: null, budgetCredits: 0,
+    tool: 'create_model_3d', capability: 'text-to-3d', model: 'meshy-7.1', provider: 'Meshy AI', providerId: 'meshy',
     estimatedCredits: 20, baseCredits: 0, extraCredits: 0, extraLabel: '', extraItems: [], prompt: 'a chair', inputs: [], messageId: '', createdAt: '', expiresAt,
   };
 }

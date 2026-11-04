@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strconv"
@@ -137,7 +138,9 @@ func TestSQLiteChatRepositoryPersistsOwnerScopedSessionTurnAndEvents(
 		t.Fatalf("messages = %#v", messages)
 	}
 	messages[1].ToolCalls = []chat.ToolCall{{ID: "call-1", Name: "configured-generator",
-		IdempotencyKey: "chat:" + session.ID + ":call-1"}}
+		IdempotencyKey: "chat:" + session.ID + ":call-1",
+		// #103: the compact result of a read-only tool must survive a restart.
+		Summary: json.RawMessage(`{"tool":"inspect","triangles":19123,"has_uv":true}`)}}
 	if err := service.UpdateMessage(ctx, "owner-a", messages[1]); err != nil {
 		t.Fatal(err)
 	}
@@ -201,8 +204,9 @@ func TestSQLiteChatRepositoryPersistsOwnerScopedSessionTurnAndEvents(
 	if err != nil || len(persisted) != 2 {
 		t.Fatalf("persisted=%#v error=%v", persisted, err)
 	}
-	if len(persisted[1].ToolCalls) != 1 || persisted[1].ToolCalls[0].IdempotencyKey != "chat:"+session.ID+":call-1" {
-		t.Fatalf("frozen call key after restart = %#v", persisted[1].ToolCalls)
+	if len(persisted[1].ToolCalls) != 1 || persisted[1].ToolCalls[0].IdempotencyKey != "chat:"+session.ID+":call-1" ||
+		string(persisted[1].ToolCalls[0].Summary) != `{"tool":"inspect","triangles":19123,"has_uv":true}` {
+		t.Fatalf("frozen call after restart = %#v", persisted[1].ToolCalls)
 	}
 	recoveredAfterRestart, err := reopenedService.RecoverTurns(ctx)
 	if err != nil || len(recoveredAfterRestart) != 1 ||

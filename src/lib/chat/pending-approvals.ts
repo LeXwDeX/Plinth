@@ -1,6 +1,7 @@
 import type { ProductSchema } from '@/lib/product-schema';
 import type { NativeQuote } from '@/lib/pricing';
 import { parseNativeQuote } from '@/lib/pricing';
+import { parseProductionPlan, type ProductionPlan } from '@/lib/chat/budget';
 
 /**
  * 脱离轮次仍待决的付费步骤（服务端保存，默认 24 小时有效）。
@@ -43,6 +44,12 @@ export function parseParameterAdjustments(raw: unknown): ParameterAdjustment[] {
 export interface PendingApproval {
   requestId: string;
   status: PendingApprovalStatus;
+  /** 'plan' is a production plan card (#103); its request id is the budget id. */
+  kind: 'step' | 'plan';
+  /** The plan a plan card asks to approve; null on a step card. */
+  plan: ProductionPlan | null;
+  /** The total credit limit the person approves (plan cards only; 0 on a step card). */
+  budgetCredits: number;
   tool: string;
   capability: string;
   model: string;
@@ -92,9 +99,11 @@ export function parsePendingApprovals(payload: unknown): PendingApproval[] {
     const item = record(raw);
     const requestId = text(item.request_id);
     const status = item.status === 'expired' ? 'expired' : item.status === 'pending' ? 'pending' : null;
-    // A card kind this client does not render yet (the production plan card,
-    // #103) is skipped instead of being shown as a step with no capability.
-    if (!requestId || !status || text(item.kind) !== '') continue;
+    const kind = text(item.kind) === 'plan' ? 'plan' : 'step';
+    // A plan card without its plan cannot be decided or shown; leave it out
+    // rather than showing an approval with nothing to approve.
+    const plan = kind === 'plan' ? parseProductionPlan(item.plan) : null;
+    if (!requestId || !status || (kind === 'plan' && !plan)) continue;
     const inputs = (Array.isArray(item.inputs) ? item.inputs : []).map((value) => {
       const input = record(value);
       return {
@@ -106,7 +115,8 @@ export function parsePendingApprovals(payload: unknown): PendingApproval[] {
       };
     });
     result.push({
-      requestId, status,
+      requestId, status, kind, plan,
+      budgetCredits: typeof item.budget_credits === 'number' ? item.budget_credits : 0,
       tool: text(item.tool), capability: text(item.capability), model: text(item.model), provider: text(item.provider), providerId: text(item.provider_id),
       priceMode: text(item.price_mode) || (item.native_quote !== undefined ? 'native' : ''),
       nativeQuote: parseNativeQuote(item.native_quote),
@@ -262,4 +272,45 @@ export async function decidePendingApproval(
     taskId: text(payload.task_id),
     messageId: text(payload.message_id),
   };
+}
+
+/**
+ * #103: a production plan is decided on its own session route. Approving makes
+ * it the session's active budget; denying ends it. The response is the budget's
+ * state, not a task.
+ */
+export async function decideSessionBudget(
+  schema: ProductSchema,
+  budgetId: string,
+  approve: boolean,
+  fetcher: typeof fetch = fetch,
+): Promise<PendingApprovalDecision> {
+  const template = schema.runtime.http.routes.chat_session_budget;
+  if (!template) throw new PendingApprovalError('', 0);
+  const route = template.replace('{budgetID}', encodeURIComponent(budgetId));
+  const response = await fetcher(route, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ decision: approve ? 'approve' : 'deny' }),
+  });
+  const payload = record(await response.json().catch(() => null));
+  if (!response.ok) throw new PendingApprovalError(text(payload.detail), response.status);
+  return {
+    requestId: text(payload.budget_id) || budgetId,
+    status: text(payload.state),
+    taskId: '',
+    messageId: text(payload.message_id),
+  };
+}
+
+/** Decide a pending card on the route its kind uses. */
+export function decidePendingCard(
+  schema: ProductSchema,
+  item: Pick<PendingApproval, 'requestId' | 'kind'>,
+  approve: boolean,
+  fetcher: typeof fetch = fetch,
+): Promise<PendingApprovalDecision> {
+  return item.kind === 'plan'
+    ? decideSessionBudget(schema, item.requestId, approve, fetcher)
+    : decidePendingApproval(schema, item.requestId, approve, fetcher);
 }

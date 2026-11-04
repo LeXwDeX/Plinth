@@ -20,6 +20,7 @@ import {
 import { markdownSourceOf } from '@/components/chat/markdown-text';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { ApprovalCard } from '@/components/studio/approval-card';
+import { PlanCard } from '@/components/studio/plan-card';
 import { ChoiceCard } from '@/components/studio/choice-card';
 import { QueuedTurns } from '@/components/studio/queued-turns';
 import { TaskStatusCards } from '@/components/studio/task-status-cards';
@@ -1460,6 +1461,49 @@ export function ChatColumn() {
     [activeSessionId, applyNewestMessagePage, chatClient, hydrateLateTasks, messagePageSize, pending, refreshApproval, registerTask, schema],
   );
 
+  // #103: a plan is decided on the session budget route, not on a step grant. After the
+  // decision the session is read again so the budget card and the topbar badge show the
+  // server's new spent/limit figures without waiting for another turn.
+  const decidePlan = useCallback(
+    async (budgetId: string, approved: boolean) => {
+      if (!activeSessionId || !deciding.current.begin(budgetId)) return;
+      const sessionId = activeSessionId;
+      setDecisionBusy((current) => new Set(current).add(budgetId));
+      setDecisionError((current) => {
+        if (!(budgetId in current)) return current;
+        const { [budgetId]: _cleared, ...rest } = current;
+        return rest;
+      });
+      try {
+        const result = await pending.decide(budgetId, approved, 'plan');
+        if (result.messageId) {
+          const page = await chatClient.listMessagePage(sessionId, { limit: messagePageSize }).catch(() => null);
+          if (page && useChatStore.getState().activeSessionId === sessionId) applyNewestMessagePage(sessionId, page);
+        }
+        const session = await chatClient.getSession(sessionId).catch(() => null);
+        if (session && useChatStore.getState().activeSessionId === sessionId) {
+          useChatStore.getState().updateSessionBudget(sessionId, session.budget ?? null);
+          if (session.brief) useChatStore.getState().updateSessionBrief(sessionId, session.brief);
+        }
+        void refreshApproval();
+      } catch (error) {
+        const detail = error instanceof PendingApprovalError ? schemaText(schema, error.detail) : '';
+        setDecisionError((current) => ({
+          ...current,
+          [budgetId]: detail || schemaText(schema, 'ui.studio.plan.decide_failed'),
+        }));
+      } finally {
+        deciding.current.end(budgetId);
+        setDecisionBusy((current) => {
+          const next = new Set(current);
+          next.delete(budgetId);
+          return next;
+        });
+      }
+    },
+    [activeSessionId, applyNewestMessagePage, chatClient, messagePageSize, pending, refreshApproval, schema],
+  );
+
   // #321: the answer goes back as a user message of its own with the card's structured answer.
   // #335: confirmed while the composer's pictures are still being read or uploaded, it is held (the card
   // says so) and goes out once they are done, instead of being dropped by the attachment guard in `send`.
@@ -1531,10 +1575,12 @@ export function ChatColumn() {
     return tile ? versionLabel(schema, tile, tile.domain === 'model' ? 'model' : 'image') : '';
   }, [schema, threeViews, versions.byTask, versions.tiles]);
   const turnCard = consentAwaiting ? cardFromConsent(consent.pending, consent.requestId) : null;
+  const planCards = pending.items.filter((item) => item.kind === 'plan' && item.plan !== null);
   const approvalCards = [
     ...(turnCard ? [turnCard] : []),
-    ...pending.items.map((item) => cardFromPending(item, labelOfInput)),
+    ...pending.items.filter((item) => item.kind === 'step').map((item) => cardFromPending(item, labelOfInput)),
   ];
+  const sessionBudget = useChatStore((state) => state.sessions.find((session) => session.id === activeSessionId)?.budget ?? null);
 
   // Tasks of this session that the page saw running. When one of them ends outside a turn (a late
   // approval), the result message, the version strip and the session credits catch up by themselves.
@@ -1787,7 +1833,7 @@ export function ChatColumn() {
           >
             {historyLoading && displayMessages.length === 0 ? (
               <ChatHistorySkeleton label={schemaText(schema, 'ui.chat.loading')} />
-            ) : displayMessages.length === 0 && threeViews.length === 0 && !isStreaming && approvalCards.length === 0 && queuedTurns.length === 0 ? (
+            ) : displayMessages.length === 0 && threeViews.length === 0 && !isStreaming && approvalCards.length === 0 && planCards.length === 0 && !(sessionBudget && sessionBudget.state !== 'denied') && queuedTurns.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
                 <div className="rounded-xl bg-primary/15 p-3 text-primary"><ImagePlus className="size-6" /></div>
                 <p className="max-w-xs text-sm leading-6 text-muted-foreground">{schemaText(schema, 'ui.workspace.agent.empty')}</p>
@@ -1847,6 +1893,29 @@ export function ChatColumn() {
             {choicePlacement.loose.length > 0 ? (
               <div className="mt-2 flex flex-col gap-2 px-1" data-testid="chat-choice-cards">
                 {choicePlacement.loose.map(renderChoiceCard)}
+              </div>
+            ) : null}
+            {(planCards.length > 0 || (sessionBudget && sessionBudget.state !== 'denied')) ? (
+              <div className="mt-2 flex flex-col gap-2 px-1" data-testid="chat-plan-cards">
+                {planCards.map((item) => item.plan ? (
+                  <PlanCard
+                    key={item.requestId}
+                    plan={item.plan}
+                    budgetCredits={item.budgetCredits}
+                    tasks={sessionTasks}
+                    busy={decisionBusy.has(item.requestId)}
+                    error={decisionError[item.requestId] ?? null}
+                    onDecide={(approved) => { void decidePlan(item.requestId, approved); }}
+                  />
+                ) : null)}
+                {planCards.length === 0 && sessionBudget && sessionBudget.state !== 'denied' ? (
+                  <PlanCard
+                    plan={sessionBudget.plan}
+                    budgetCredits={sessionBudget.limitCredits}
+                    tasks={sessionTasks}
+                    progress={sessionBudget}
+                  />
+                ) : null}
               </div>
             ) : null}
             {approvalCards.length > 0 ? (

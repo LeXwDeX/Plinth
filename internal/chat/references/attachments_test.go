@@ -31,6 +31,7 @@ func attachmentFixture(t *testing.T) *references.Resolver {
 		"upload-b":  {ID: "upload-b", OwnerID: "owner-b"},
 		"shot-a":    {ID: "shot-a", OwnerID: "owner-a"},
 		"shot-a-s2": {ID: "shot-a-s2", OwnerID: "owner-a"},
+		"render-a":  {ID: "render-a", OwnerID: "owner-a", AssetType: "model-render"},
 	}}
 	tasks := &fakeTasks{tasks: map[generation.TaskID]generation.Task{
 		"image-task": {ID: "image-task", OwnerID: "owner-a", SessionID: "session-1", State: generation.TaskSucceeded,
@@ -64,7 +65,8 @@ func attachmentFixture(t *testing.T) *references.Resolver {
 			"capture-b": {Command: capture.Command{ID: "capture-b", OwnerID: "owner-b", SessionID: "session-1",
 				SourceTaskID: "foreign-task", ModelAssetID: "foreign-model", ScreenshotAssetID: "upload-b"}},
 		}},
-		ModelAssetRole: "model-file",
+		ModelAssetRole:  "model-file",
+		RenderAssetType: "model-render",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -122,6 +124,34 @@ func TestVerifyAcceptsOwnedSessionObjects(t *testing.T) {
 	got, err = verify(t, resolver, "owner-a", "session-1", chat.AttachmentRef{Kind: image, URL: "data:image/png;base64,QQ=="})
 	if err != nil || got.Role != chat.AttachmentRoleUpload || got.AssetID != "" {
 		t.Fatalf("data URI = %+v, %v", got, err)
+	}
+}
+
+// #103: a model-review render is attached with the render role, so the
+// conversation shows it inside the self-check record instead of as an ordinary
+// result picture. The role follows the declared asset type, not the URL or the
+// Task that produced it.
+func TestVerifyMarksModelReviewRenders(t *testing.T) {
+	resolver := attachmentFixture(t)
+	image := chat.AttachmentKindImage
+
+	got, err := verify(t, resolver, "owner-a", "session-1", chat.AttachmentRef{Kind: image, URL: "/configured/assets/render-a"})
+	if err != nil || got.Role != chat.AttachmentRoleRender || got.Kind != image ||
+		got.AssetID != "render-a" || got.URL != "/configured/assets/render-a" {
+		t.Fatalf("render = %+v, %v", got, err)
+	}
+	// An image without the declared render type keeps the ordinary upload role.
+	got, err = verify(t, resolver, "owner-a", "session-1", chat.AttachmentRef{Kind: image, URL: "/configured/assets/upload-a"})
+	if err != nil || got.Role != chat.AttachmentRoleUpload {
+		t.Fatalf("ordinary upload = %+v, %v", got, err)
+	}
+	// Without a declared render type the same asset stays an ordinary upload.
+	unconfigured := newResolver(t, &fakeInputs{owned: map[generation.AssetID]generation.InputAsset{
+		"render-b": {ID: "render-b", OwnerID: "owner-a", AssetType: "model-render"},
+	}}, &fakeTasks{}, fakeLegacy{})
+	got, err = verify(t, unconfigured, "owner-a", "session-1", chat.AttachmentRef{Kind: image, URL: "/configured/assets/render-b"})
+	if err != nil || got.Role != chat.AttachmentRoleUpload {
+		t.Fatalf("unconfigured render = %+v, %v", got, err)
 	}
 }
 

@@ -19,7 +19,10 @@ import type {
   ChatAttachment,
   ChatPaidStep,
   ChatSession,
+  ChatToolCall,
 } from '@/store/chat-store';
+import { parseProductionBrief, type ProductionBrief } from '@/lib/chat/production-brief';
+import { parseSessionBudget } from '@/lib/chat/budget';
 import { parseNativeQuote, parsePriceTotals, type NativeQuote } from '@/lib/pricing';
 import { responseRequestId, withRequestReference } from '@/lib/problem-reference';
 
@@ -254,6 +257,10 @@ export interface ChatBrowserClient {
   /** 会话的 Agent 范围（2D 模式 / 3D 模式 / 自动模式）。服务端按它限制 Agent 能用的工具。 */
   getAgentScope(sessionID: string, signal?: AbortSignal): Promise<AgentScope>;
   setAgentScope(sessionID: string, scope: AgentScope): Promise<AgentScope>;
+  /** #103: the session's production brief (an empty object when none is stored). */
+  getBrief(sessionID: string, signal?: AbortSignal): Promise<ProductionBrief>;
+  /** #103: replace the whole production brief; an empty object clears it. */
+  setBrief(sessionID: string, brief: ProductionBrief): Promise<ProductionBrief>;
   /** #103: 记录或清除本会话明确选定的 3D 模型；它只锁定后续 3D 步骤，不提交任务。 */
   setExplicitModel3D(sessionID: string, model: string): Promise<string>;
   /** #322: the session's thinking level and the levels the chat model offers. */
@@ -529,6 +536,19 @@ function normalizeMessage(
   const imageURLs = array(source[fields.image_urls])
     .filter((item): item is string => typeof item === 'string');
   const toolCalls = array(source[fields.tool_calls]).map(record);
+  // #103: the compact result of a read-only tool, shown as one line in the reply.
+  const summaryField = fields.tool_summary;
+  const chatToolCalls: ChatToolCall[] = toolCalls.flatMap((call) => {
+    const name = typeof call[fields.tool_name] === 'string' ? call[fields.tool_name] as string : '';
+    if (!name) return [];
+    const taskId = optionalString(call, fields.task_id);
+    return [{
+      name,
+      ...(typeof call[fields.tool_arguments] === 'string' ? { arguments: call[fields.tool_arguments] as string } : {}),
+      ...(taskId ? { taskId } : {}),
+      ...(summaryField && call[summaryField] !== undefined ? { summary: call[summaryField] } : {}),
+    }];
+  });
   const taskIds = toolCalls
     .map((call) => optionalString(call, fields.task_id))
     .filter((taskID): taskID is string => Boolean(taskID));
@@ -583,6 +603,7 @@ function normalizeMessage(
     ...(multiview ? { multiview } : {}),
     ...(taskIds.length > 0 ? { taskIds } : {}),
     ...(paidSteps.length > 0 ? { paidSteps } : {}),
+    ...(wireRole !== schema.chat.roles.user && chatToolCalls.length > 0 ? { toolCalls: chatToolCalls } : {}),
     ...(wireRole !== schema.chat.roles.user ? { toolCallCount: toolCalls.length } : {}),
     isPending: pending,
     ...(pendingTaskTypes && pendingTaskTypes.length > 0
@@ -636,10 +657,17 @@ function normalizeSession(
   const agentScope = source[fields.agent_scope] === undefined ? {} : { agentScope: agentScopeOf(schema, source[fields.agent_scope]) };
   const generationModels = sessionModels(fields.generation_models ? source[fields.generation_models] : undefined);
   const generationModelsRetired = sessionModels(fields.generation_models_retired ? source[fields.generation_models_retired] : undefined);
+  // #103: an answered brief is an object (possibly empty); responses without the member stay untouched.
+  const briefField = fields.brief;
+  const budgetField = fields.budget;
+  const brief = briefField && Object.hasOwn(source, briefField) ? parseProductionBrief(source[briefField]) : null;
+  const budget = budgetField ? parseSessionBudget(source[budgetField]) : null;
   return {
     ...agentScope,
     ...(generationModels ? { generationModels } : {}),
     ...(generationModels && generationModelsRetired ? { generationModelsRetired } : {}),
+    ...(brief ? { brief } : {}),
+    ...(budget ? { budget } : {}),
     id: String(source[fields.id] ?? ''),
     title: String(source[fields.title] ?? ''),
     createdAt: String(source[fields.created_at] ?? ''),
@@ -1191,6 +1219,28 @@ export function createChatBrowserClient(
       const payload = await responseValue(response);
       if (!response.ok) throw approvalError(schema, payload, response.status);
       return agentScopeOf(schema, record(payload)[schema.chat.api.response_fields.agent_scope]);
+    },
+    async getBrief(sessionID, signal) {
+      const template = schema.runtime.http.routes.chat_session_brief;
+      if (!template) return {};
+      const response = await fetcher(sessionRoute(schema, template, sessionID), { signal });
+      const payload = await responseValue(response);
+      if (!response.ok) throw serverError(schema, response, payload);
+      return parseProductionBrief(record(payload)[responseFields.brief ?? fields.brief ?? 'brief']);
+    },
+    async setBrief(sessionID, brief) {
+      const template = schema.runtime.http.routes.chat_session_brief;
+      const member = fields.brief;
+      if (!template || !member) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, 0);
+      const response = await fetcher(sessionRoute(schema, template, sessionID), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        // A brief with no member left is cleared; the server stores null as "no brief".
+        body: JSON.stringify({ [member]: Object.keys(brief).length > 0 ? brief : null }),
+      });
+      const payload = await responseValue(response);
+      if (!response.ok) throw serverError(schema, response, payload);
+      return parseProductionBrief(record(payload)[responseFields.brief ?? member]);
     },
     async setExplicitModel3D(sessionID, model) {
       const member = fields.explicit_model_3d;

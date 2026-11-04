@@ -101,6 +101,61 @@ describe('ChatBrowserClient', () => {
     expect(await client.getPick('s')).toBeNull();
   });
 
+  it('reads and replaces the production brief through the Schema route and member names (#103)', async () => {
+    const schema = schemaFixture();
+    schema.runtime.http.routes.chat_session_brief = '/configured/{sessionID}/brief';
+    schema.chat.api.fields.brief = 'configured-brief-in';
+    schema.chat.api.response_fields.brief = 'configured-brief-out';
+    const calls: Array<{ url: string; method: string; body?: unknown }> = [];
+    const client = createChatBrowserClient(schema, {
+      fetcher: async (input, init) => {
+        const method = init?.method ?? 'GET';
+        calls.push({ url: String(input), method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+        if (String(input).includes('missing')) return Response.json({ error: 'gone' }, { status: 404 });
+        return Response.json({
+          'configured-brief-out': method === 'PUT' ? { purpose: 'game_prop' } : { style: 'low poly', needs_rig: true },
+        });
+      },
+    });
+    expect(await client.getBrief('s/1')).toEqual({ style: 'low poly', needs_rig: true });
+    expect(await client.setBrief('s/1', { purpose: 'game_prop' })).toEqual({ purpose: 'game_prop' });
+    // An empty brief is sent as null: the server clears the stored brief.
+    await client.setBrief('s/2', {});
+    expect(calls).toEqual([
+      { url: '/configured/s%2F1/brief', method: 'GET', body: undefined },
+      { url: '/configured/s%2F1/brief', method: 'PUT', body: { 'configured-brief-in': { purpose: 'game_prop' } } },
+      { url: '/configured/s%2F2/brief', method: 'PUT', body: { 'configured-brief-in': null } },
+    ]);
+    await expect(client.getBrief('missing')).rejects.toMatchObject({ status: 404, message: 'gone' });
+    delete schema.runtime.http.routes.chat_session_brief;
+    // Without a declared route there is no brief to read; saving one is a configuration error.
+    await expect(createChatBrowserClient(schema).getBrief('s')).resolves.toEqual({});
+    await expect(createChatBrowserClient(schema).setBrief('s', { style: 'x' })).rejects.toBeInstanceOf(Error);
+  });
+
+  it('reads the session brief and budget from the Schema response fields (#103)', async () => {
+    const schema = schemaFixture();
+    schema.runtime.http.legacy_routes.chat_sessions = '/configured/sessions';
+    schema.chat.api.response_fields.brief = 'configured-brief';
+    schema.chat.api.response_fields.budget = 'configured-budget';
+    const client = createChatBrowserClient(schema, {
+      fetcher: async () => Response.json({
+        id: 's1', title: 'Session', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:01Z',
+        'configured-brief': { purpose: 'game_prop', style: 'low poly' },
+        'configured-budget': {
+          id: 'b1', state: 'active', limit_credits: 300, spent_credits: 120, reserved_credits: 10, remaining_credits: 170,
+          plan: { title: '制作计划', steps: [{ capability: 'text-to-3d', offering_id: 'tripo-v3', estimated_credits: 100 }] },
+        },
+      }),
+    });
+    const session = await client.createSession();
+    expect(session.brief).toEqual({ purpose: 'game_prop', style: 'low poly' });
+    expect(session.budget).toMatchObject({
+      id: 'b1', state: 'active', limitCredits: 300, spentCredits: 120, reservedCredits: 10, remainingCredits: 170,
+      plan: { steps: [{ capability: 'text-to-3d', offeringId: 'tripo-v3', estimatedCredits: 100 }] },
+    });
+  });
+
   it('reads the session version chain through the Schema route', async () => {
     const schema = schemaFixture();
     schema.runtime.http.routes.chat_session_lineage = '/configured/{sessionID}/versions';
@@ -503,6 +558,7 @@ describe('ChatBrowserClient', () => {
         isPending: true,
         pendingTaskTypes: ['configured-capability'],
         taskIds: ['task-a'],
+        toolCalls: [{ name: 'configured-tool', taskId: 'task-a' }],
         toolCallCount: 1,
         createdAt: Date.parse('2026-07-26T10:00:00.000Z'),
       },

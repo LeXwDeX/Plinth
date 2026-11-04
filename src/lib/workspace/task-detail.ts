@@ -8,7 +8,6 @@ import { offeringShowsCredits, type OfferingParameterWire, type OfferingWire } f
 import { formatSchemaText, schemaCountMessage, schemaText, type ProductSchema } from '@/lib/product-schema';
 import { findTaskState, projectQueueNotice, projectTaskAssets, type TrackedAsset, type TrackedQueueNotice } from '@/lib/workspace/task-projection';
 import { ratioOfSize } from '@/lib/workspace/generation-params';
-import type { AgentScope } from '@/store/chat-store';
 import { primaryParent, type VersionTiles } from '@/lib/workspace/versions';
 import { versionLabel } from '@/lib/workspace/version-label';
 import { formatNativePrice, parseNativeQuote, type NativeQuote } from '@/lib/pricing';
@@ -271,7 +270,6 @@ export interface ActionContext {
   inActiveSession: boolean;
   hasPrompt: boolean;
   hasFile: boolean;
-  scope: AgentScope;
 }
 
 export interface DetailActions {
@@ -285,24 +283,23 @@ export interface DetailActions {
   copyPrompt: boolean;
 }
 
-/** Which buttons a result shows. Only a finished result has a file; the Agent mode hides the conversion that mode cannot run. */
+/** Which buttons a result shows. Only a finished result has a file; in auto mode both conversions are offered. */
 export function detailActions(context: ActionContext): DetailActions {
   const ready = context.status === 'ready' && context.hasFile;
   const media = context.kind === 'image' || context.kind === 'model';
   return {
     download: ready,
     openOnCanvas: ready && media && context.hasTask && context.inActiveSession,
-    sendTo3D: ready && context.kind === 'image' && context.hasTask && context.inActiveSession && context.scope !== '2d',
-    sendTo2D: ready && context.kind === 'model' && context.hasTask && context.inActiveSession && context.scope !== '3d',
+    sendTo3D: ready && context.kind === 'image' && context.hasTask && context.inActiveSession,
+    sendTo2D: ready && context.kind === 'model' && context.hasTask && context.inActiveSession,
     regenerate: context.hasTask && context.hasPrompt && context.inActiveSession && (context.status === 'ready' || context.status === 'failed'),
     copyPrompt: context.hasPrompt,
   };
 }
 
 /**
- * Why an action that fits the result and the mode is still not usable, as a Schema text key; null when
- * nothing blocks it. A result of another session is shown dimmed with this reason on the button, instead
- * of vanishing. (The Agent mode hides the other mode's conversion outright: that is not a blocked action.)
+ * Why an action that fits the result is still not usable, as a Schema text key; null when nothing blocks
+ * it. A result of another session is shown dimmed with this reason on the button, instead of vanishing.
  */
 export function detailBlockedReason(context: ActionContext): 'ui.result.detail.disabled.other_session' | null {
   const ready = context.status === 'ready' && context.hasFile;
@@ -310,9 +307,9 @@ export function detailBlockedReason(context: ActionContext): 'ui.result.detail.d
   return ready && media && context.hasTask && !context.inActiveSession ? 'ui.result.detail.disabled.other_session' : null;
 }
 
-/** The conversion the current mode allows for this kind of result. */
-export function conversionAllowed(kind: ActionContext['kind'], scope: AgentScope): 'sendTo3D' | 'sendTo2D' | null {
-  if (kind === 'image') return scope === '2d' ? null : 'sendTo3D';
-  if (kind === 'model') return scope === '3d' ? null : 'sendTo2D';
+/** The conversion this kind of result offers; auto mode never hides one. */
+export function conversionAllowed(kind: ActionContext['kind']): 'sendTo3D' | 'sendTo2D' | null {
+  if (kind === 'image') return 'sendTo3D';
+  if (kind === 'model') return 'sendTo2D';
   return null;
 }

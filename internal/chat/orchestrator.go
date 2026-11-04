@@ -135,6 +135,9 @@ type ToolResult struct {
 	// Agent reads images, shows it after the tool results; a picture it cannot
 	// read is named as unreadable instead.
 	Pictures []ToolPicture `json:"-"`
+	// Summary is a compact result the frontend can show as one line (#103).
+	// It is persisted with the tool call and never sent to the Agent.
+	Summary json.RawMessage `json:"-"`
 }
 
 // ToolPicture is one picture a tool shows the Agent, by handle and platform URL.
@@ -1422,6 +1425,7 @@ func (orchestrator *Orchestrator) Process(
 						assistant.ToolCalls[index].EstimatedCredits = stored.EstimatedCredits
 						assistant.ToolCalls[index].NativeQuote = stored.NativeQuote
 						assistant.ToolCalls[index].ApprovalSource = stored.ApprovalSource
+						assistant.ToolCalls[index].Summary = stored.Summary
 						break
 					}
 				}
@@ -2678,6 +2682,10 @@ func (orchestrator *Orchestrator) executeTools(
 		if err != nil {
 			turn.Checkpoint.HadToolError = true
 		}
+		// A read-only tool's compact summary travels with its call, so the
+		// conversation can show one line per check (#103). Keep it on the
+		// checkpoint too: a later resume must not lose it.
+		orchestrator.recordToolSummary(produced, &turn.Checkpoint.Assistant, call.ID, result.Summary)
 		imageURLs = append(imageURLs, result.ImageURLs...)
 		// 观察失败时 result.TaskID 可能为空：不要清空回调里已持久化
 		// 的绑定，否则停止轮次时找不到在飞任务（计费止损依赖它）。
@@ -3022,9 +3030,34 @@ func (orchestrator *Orchestrator) mergeDurableToolCalls(
 				if assistant.ToolCalls[index].ApprovalSource == "" {
 					assistant.ToolCalls[index].ApprovalSource = call.ApprovalSource
 				}
+				if len(assistant.ToolCalls[index].Summary) == 0 {
+					assistant.ToolCalls[index].Summary = call.Summary
+				}
 			}
 		}
 		return
+	}
+}
+
+// recordToolSummary stores one tool's compact result on the call in the message
+// being built and on the checkpointed copy of that message.
+func (orchestrator *Orchestrator) recordToolSummary(message, checkpoint *Message, callID string, summary json.RawMessage) {
+	if len(summary) == 0 || callID == "" {
+		return
+	}
+	set := func(calls []ToolCall) {
+		for index := range calls {
+			if calls[index].ID == callID {
+				calls[index].Summary = summary
+				return
+			}
+		}
+	}
+	if message != nil {
+		set(message.ToolCalls)
+	}
+	if checkpoint != nil {
+		set(checkpoint.ToolCalls)
 	}
 }
 
@@ -3044,6 +3077,9 @@ func mergeStoredToolCall(target *ToolCall, stored ToolCall) {
 	}
 	if target.ApprovalSource == "" {
 		target.ApprovalSource = stored.ApprovalSource
+	}
+	if len(target.Summary) == 0 {
+		target.Summary = stored.Summary
 	}
 }
 

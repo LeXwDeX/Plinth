@@ -10,11 +10,12 @@ const composer = source('./composer.tsx');
 const chatMessage = source('../../components/chat/chat-message.tsx');
 
 describe('workspace chat message wiring', () => {
-  it('shows the active session Harness summary before the input while retaining all four selectors', () => {
+  it('shows the active session Harness summary before the input while retaining the model, Skill and parameter pickers', () => {
     expect(composer).toContain('const activeSessionId = useChatStore((state) => state.activeSessionId);');
     expect(composer).toContain('<HarnessSummary sessionId={activeSessionId} />');
     expect(composer.indexOf('<HarnessSummary')).toBeLessThan(composer.indexOf('<textarea'));
-    expect(composer).toContain('<AgentScopePicker');
+    // #103: the Agent scope picker is gone; every session runs in auto mode.
+    expect(composer).not.toContain('AgentScopePicker');
     expect(composer).toContain('<ModelPicker />');
     expect(composer).toContain('<ParamsPopover');
     expect(composer).toContain('<SkillPicker');
@@ -144,7 +145,7 @@ describe('the conversation is read a page at a time', () => {
   it('reads only the newest page on every refresh and merges it with earlier pages already shown', () => {
     expect(column).not.toContain('listMessages(');
     expect(column).toContain('const messagePageSize = schema.runtime.frontend.chat_message_page_size;');
-    expect(column.match(/listMessagePage\(sessionId, \{ limit: messagePageSize \}\)/g)).toHaveLength(4);
+    expect(column.match(/listMessagePage\(sessionId, \{ limit: messagePageSize \}\)/g)).toHaveLength(5);
     expect(column).toContain('pageSize: messagePageSize,');
     expect(column).not.toMatch(/setMessages\(sessionId, (data|await)/);
   });

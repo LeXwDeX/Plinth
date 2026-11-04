@@ -63,6 +63,8 @@ export interface ProductSchema {
         chat_session_notes?: string;
         /** #103: the session's production brief (GET/PUT). Absent on older servers. */
         chat_session_brief?: string;
+        /** #103: decide one production plan budget (PUT approve/deny). Absent on older servers. */
+        chat_session_budget?: string;
         /** #103: the 3D model the person explicitly picked in the session (GET/PUT). Absent on older servers. */
         chat_session_model3d?: string;
         chat_session_pick?: string;
@@ -1405,6 +1407,8 @@ export interface ChatProductSchema {
       tool_calls: string;
       tool_name: string;
       tool_arguments: string;
+      /** #103: 只读工具结果的紧凑摘要（工具调用上的成员）。 */
+      tool_summary?: string;
       message_id: string;
       session_id: string;
       error: string;
@@ -1419,6 +1423,8 @@ export interface ChatProductSchema {
       notes: string;
       /** #103: 会话制作简报成员。 */
       brief?: string;
+      /** #103: 会话当前制作计划预算成员；没有计划时省略。 */
+      budget?: string;
       /** #103: 会话明确选定的 3D 模型成员。 */
       explicit_model_3d?: string;
       /** 会话选用的候选图成员。 */
@@ -1515,6 +1521,12 @@ export interface ChatProductSchema {
     lightbox_previous_key: string;
     lightbox_next_key: string;
     textarea_maximum_height_pixels: number;
+    /** #103: 批准卡的最大高度；超出时卡片内部滚动。 */
+    approval_card_max_height_pixels: number;
+    /** #103: 自检记录里的渲染缩略图边长。 */
+    review_thumbnail_pixels: number;
+    /** #103: 已完成的 Agent 回复默认显示的行数，超过即折叠。 */
+    reply_collapse_lines: number;
     optimistic_message_id_prefix: string;
     optimistic_user_message_id: string;
     optimistic_assistant_message_id: string;
@@ -1577,6 +1589,15 @@ export interface ChatProductSchema {
    * is only in the server log. Absent (older servers, raw catalog fixtures) means available.
    */
   agent_status?: { available: boolean };
+  /**
+   * #103: 只读模型审查工具与渲染图。工具名用于把工具调用认成自检记录；渲染图
+   * 的资产类型由服务端在附件上标记 role，前端据此不再把它当普通结果图展示。
+   */
+  model_review?: ChatModelReviewSchema;
+  /**
+   * #103: 3D 制作简报。字段名、类型与上限来自 Schema；用途选项来自 profiles。
+   */
+  model3d_usage?: ChatModel3DUsageSchema;
   stream: { event_fields: ChatStreamEventFieldsSchema; event_types: ChatStreamEventTypesSchema };
   tools: Array<{
     name: string;
@@ -1622,6 +1643,40 @@ export interface ChatProductSchema {
       thinking?: string;
     };
   };
+}
+
+export interface ChatModelReviewToolsSchema {
+  inspect: string;
+  render: string;
+  compare: string;
+}
+
+export interface ChatModelReviewSchema {
+  tools?: ChatModelReviewToolsSchema;
+  render?: { asset_type?: string };
+}
+
+export interface ChatModel3DProfileSchema {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface ChatModel3DBriefFieldSchema {
+  name: string;
+  type: string;
+  label: string;
+  /** type 为 text 时的最大字符数。 */
+  maximum_characters?: number;
+  /** type 为 integer 时的取值范围。 */
+  minimum?: number;
+  maximum?: number;
+}
+
+export interface ChatModel3DUsageSchema {
+  default_profile?: string;
+  profiles?: ChatModel3DProfileSchema[];
+  brief?: { fields?: ChatModel3DBriefFieldSchema[] };
 }
 
 export interface ChatStreamEventFieldsSchema {

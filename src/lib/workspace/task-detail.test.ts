@@ -202,16 +202,14 @@ describe('prompt, status, duration', () => {
 });
 
 describe('detailActions', () => {
-  const base: ActionContext = { kind: 'image', status: 'ready', hasTask: true, inActiveSession: true, hasPrompt: true, hasFile: true, scope: 'auto' };
+  const base: ActionContext = { kind: 'image', status: 'ready', hasTask: true, inActiveSession: true, hasPrompt: true, hasFile: true };
 
   it('offers everything on a finished picture in auto mode', () => {
     expect(detailActions(base)).toEqual({ download: true, openOnCanvas: true, sendTo3D: true, sendTo2D: false, regenerate: true, copyPrompt: true });
   });
 
-  it('hides 3D conversion in 2D mode and the 2D screenshot in 3D mode', () => {
-    expect(detailActions({ ...base, scope: '2d' }).sendTo3D).toBe(false);
-    expect(detailActions({ ...base, kind: 'model', scope: '3d' }).sendTo2D).toBe(false);
-    expect(detailActions({ ...base, kind: 'model', scope: '2d' }).sendTo2D).toBe(true);
+  it('offers each conversion for its own kind only', () => {
+    expect(detailActions({ ...base, kind: 'model' }).sendTo2D).toBe(true);
     expect(detailActions({ ...base, kind: 'model' }).sendTo3D).toBe(false);
   });
 
@@ -232,7 +230,7 @@ describe('detailActions', () => {
 });
 
 describe('detailBlockedReason / conversionAllowed', () => {
-  const base: ActionContext = { kind: 'image', status: 'ready', hasTask: true, inActiveSession: true, hasPrompt: true, hasFile: true, scope: 'auto' };
+  const base: ActionContext = { kind: 'image', status: 'ready', hasTask: true, inActiveSession: true, hasPrompt: true, hasFile: true };
 
   it('gives a reason only for a finished media result of another session', () => {
     expect(detailBlockedReason(base)).toBeNull();
@@ -241,12 +239,10 @@ describe('detailBlockedReason / conversionAllowed', () => {
     expect(detailBlockedReason({ ...base, inActiveSession: false, hasTask: false })).toBeNull();
   });
 
-  it('allows only the conversion of the current mode', () => {
-    expect(conversionAllowed('image', 'auto')).toBe('sendTo3D');
-    expect(conversionAllowed('image', '2d')).toBeNull();
-    expect(conversionAllowed('model', '3d')).toBeNull();
-    expect(conversionAllowed('model', '2d')).toBe('sendTo2D');
-    expect(conversionAllowed('other', 'auto')).toBeNull();
+  it('allows the conversion of the result kind', () => {
+    expect(conversionAllowed('image')).toBe('sendTo3D');
+    expect(conversionAllowed('model')).toBe('sendTo2D');
+    expect(conversionAllowed('other')).toBeNull();
   });
 });
 

@@ -23,7 +23,7 @@ function withTabs(change: (tabs: ProductSchema['canvas']['frontend']['panel_tabs
 describe('which tabs a kind of thing gets', () => {
   it('reads the Schema table: a picture, the bare board and a model', () => {
     expect(panelTabIds(schema, 'image')).toEqual(['layers', 'history', 'details', 'operations']);
-    expect(panelTabIds(schema, 'board')).toEqual(['layers', 'history', 'operations']);
+    expect(panelTabIds(schema, 'board')).toEqual(['layers', 'history', 'operations', 'details']);
     expect(panelTabIds(schema, 'model')).toEqual(['operations', 'process', 'formats', 'parts', 'details']);
     expect(panelWidth(schema)).toBe(300);
   });
@@ -43,7 +43,7 @@ describe('which tabs a kind of thing gets', () => {
     const unknown = withTabs((tabs) => { tabs.kinds.find((entry) => entry.kind === 'board')!.tabs = ['layers', 'sparkle', 'history']; });
     expect(panelTabIds(unknown, 'board')).toEqual(['layers', 'history']);
     const undeclared = withTabs((tabs) => { tabs.tabs = tabs.tabs.filter((tab) => tab.id !== 'history'); });
-    expect(panelTabIds(undeclared, 'board')).toEqual(['layers', 'operations']);
+    expect(panelTabIds(undeclared, 'board')).toEqual(['layers', 'operations', 'details']);
   });
 
   it('words every tab from Schema messages: name, one-line hint, icon and shortcut setting', () => {
@@ -123,9 +123,9 @@ describe('the tab shown with a remembered choice', () => {
     expect(activePanelTab(schema, 'model', 'process', noProcess)).toBe('process');
   });
 
-  it('is the default when the kind does not offer the remembered tab (2D remembered 详情, now the board)', () => {
+  it('keeps a shared 2D choice the board now offers, and is the default otherwise', () => {
     expect(activePanelTab(schema, 'image', 'details', ALL_PANEL_TABS_AVAILABLE)).toBe('details');
-    expect(activePanelTab(schema, 'board', 'details', ALL_PANEL_TABS_AVAILABLE)).toBe('layers');
+    expect(activePanelTab(schema, 'board', 'details', ALL_PANEL_TABS_AVAILABLE)).toBe('details');
     expect(activePanelTab(schema, 'image', 'parts', ALL_PANEL_TABS_AVAILABLE)).toBe('layers');
     expect(activePanelTab(schema, 'model', 'layers', noProcess)).toBe('operations');
   });
@@ -153,10 +153,10 @@ describe('tab memory in the studio store', () => {
     expect(shown('model')).toBe('parts');
   });
 
-  it('shows the board default again after 2D remembered 详情 on a picture', () => {
+  it('shares 详情 between a picture and the board', () => {
     useStudioStore.getState().setPanelTab('image', 'details');
     expect(shown('image')).toBe('details');
-    expect(shown('board')).toBe('layers');
+    expect(shown('board')).toBe('details');
     // The memory itself is kept: the picture comes back on 详情.
     expect(shown('image')).toBe('details');
   });

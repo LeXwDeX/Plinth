@@ -236,7 +236,13 @@ func (executor *Executor) InspectModel(ctx context.Context, command chat.ToolCom
 	if err != nil {
 		return chat.ToolResult{Error: "model report not readable", NoSubmission: true}, nil
 	}
-	return chat.ToolResult{AgentContent: string(encoded), NoSubmission: true}, nil
+	hasUV, watertight, hasSkin := report.UV.AllHaveUV, report.Topology.Watertight, len(report.Skins) > 0
+	summary := modelReviewSummaryJSON(modelReviewMessageSummary{
+		Tool: "inspect", Model: rawString(arguments[review.Source.TaskArgument]),
+		Triangles: report.Triangles, HasUV: &hasUV, Watertight: &watertight, HasSkin: &hasSkin,
+		Usage: usageCheck,
+	})
+	return chat.ToolResult{AgentContent: string(encoded), NoSubmission: true, Summary: summary}, nil
 }
 
 // RenderModelViews backs render_model_views: one PNG per requested view,
@@ -342,6 +348,11 @@ func (executor *Executor) RenderModelViews(ctx context.Context, command chat.Too
 		NoSubmission: true,
 		ImageURLs:    result.ImageURLs,
 		Pictures:     result.Pictures,
+		Summary: modelReviewSummaryJSON(modelReviewMessageSummary{
+			Tool: "render", Model: rawString(arguments[review.Source.TaskArgument]),
+			Views: modelReviewSummaryViews(result.Views), FailedViews: modelReviewSummaryFailedViews(result.FailedViews),
+			RenderCallsRemaining: result.RenderCallsRemaining,
+		}),
 	}, nil
 }
 
@@ -482,6 +493,11 @@ func (executor *Executor) CompareModels(ctx context.Context, command chat.ToolCo
 		NoSubmission: true,
 		ImageURLs:    result.ImageURLs,
 		Pictures:     result.Pictures,
+		Summary: modelReviewSummaryJSON(modelReviewMessageSummary{
+			Tool: "compare", Models: models,
+			Views: modelReviewSummaryCompareViews(result.Views), FailedViews: modelReviewSummaryFailedViews(result.FailedViews),
+			RenderCallsRemaining: result.RenderCallsRemaining,
+		}),
 	}, nil
 }
 
@@ -1180,4 +1196,60 @@ type modelReviewCompareResult struct {
 	Note                 string                   `json:"note,omitempty"`
 	ImageURLs            []string                 `json:"-"`
 	Pictures             []chat.ToolPicture       `json:"-"`
+}
+
+// modelReviewMessageSummary is the compact result of one review tool call,
+// stored with the call and shown as one line in the conversation (#103). It
+// carries only facts the conversation renders; the full report stays in the
+// Agent-facing result.
+type modelReviewMessageSummary struct {
+	// Tool is the Schema tool key: inspect, render or compare.
+	Tool string `json:"tool"`
+	// Model and Models are the handles or task IDs the call named, so the
+	// person recognises the object; empty means the selected model.
+	Model  string   `json:"model,omitempty"`
+	Models []string `json:"models,omitempty"`
+	// Views and FailedViews name the Schema view keys.
+	Views                []string `json:"views,omitempty"`
+	FailedViews          []string `json:"failed_views,omitempty"`
+	RenderCallsRemaining int      `json:"render_calls_remaining,omitempty"`
+	// Triangles, HasUV, Watertight and HasSkin are the fallback line when the
+	// Catalog declares no purpose profiles.
+	Triangles  int64                  `json:"triangles,omitempty"`
+	HasUV      *bool                  `json:"has_uv,omitempty"`
+	Watertight *bool                  `json:"watertight,omitempty"`
+	HasSkin    *bool                  `json:"has_skin,omitempty"`
+	Usage      *modelReviewUsageCheck `json:"usage,omitempty"`
+}
+
+func modelReviewSummaryViews(views []modelReviewViewResult) []string {
+	names := make([]string, 0, len(views))
+	for _, view := range views {
+		names = append(names, view.View)
+	}
+	return names
+}
+
+func modelReviewSummaryCompareViews(views []modelReviewCompareView) []string {
+	names := make([]string, 0, len(views))
+	for _, view := range views {
+		names = append(names, view.View)
+	}
+	return names
+}
+
+func modelReviewSummaryFailedViews(views []modelReviewFailedView) []string {
+	names := make([]string, 0, len(views))
+	for _, view := range views {
+		names = append(names, view.View)
+	}
+	return names
+}
+
+func modelReviewSummaryJSON(summary modelReviewMessageSummary) json.RawMessage {
+	encoded, err := json.Marshal(summary)
+	if err != nil {
+		return nil
+	}
+	return encoded
 }

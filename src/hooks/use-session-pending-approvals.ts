@@ -7,7 +7,7 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import {
   countPending,
   DecisionLedger,
-  decidePendingApproval,
+  decidePendingCard,
   displayedApprovals,
   fetchPendingApprovals,
   pendingApprovalsRoute,
@@ -66,9 +66,13 @@ export function useSessionPendingApprovals(sessionId: string | null) {
   }, [data, sessionId]);
   const kept = retained.sessionId === sessionId ? retained.items : null;
   const items = useMemo(() => displayedApprovals(listed ?? [], kept ?? []), [listed, kept]);
-  const decide = useCallback(async (requestId: string, approve: boolean): Promise<PendingApprovalDecision> => {
+  const decide = useCallback(async (
+    requestId: string,
+    approve: boolean,
+    kind: PendingApproval['kind'] = 'step',
+  ): Promise<PendingApprovalDecision> => {
     try {
-      const outcome = await decidePendingApproval(schema, requestId, approve);
+      const outcome = await decidePendingCard(schema, { requestId, kind }, approve);
       decided.current.add(requestId);
       ledger.current.markDecided(requestId, Date.now());
       setDecisions((count) => count + 1);

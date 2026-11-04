@@ -503,6 +503,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		VisionDerivative: visionDerivative,
 		Captures:         captureStore,
 		ModelAssetRole:   generationtool.ModelAssetRole,
+		RenderAssetType:  applicationSchema.Chat.ModelReview.Render.AssetType,
 	})
 	if err != nil {
 		return nil, err

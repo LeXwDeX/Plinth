@@ -17,6 +17,12 @@ export interface ChoiceOptionModel {
   id: string;
   providerName: string;
   modelName: string;
+  /** #103: the service's own name for this choice; empty on older servers. */
+  label: string;
+  /** #103: one sentence on what the choice is for; empty on older servers. */
+  description: string;
+  /** #103: the server's recommendation for this request. */
+  recommended: boolean;
   creditsMetered: boolean;
   estimatedCredits: number | null;
   nativeQuote: NativeQuote | null;
@@ -60,6 +66,9 @@ function parseOption(value: unknown): ChoiceOptionModel | null {
     id: text(item.id),
     providerName: text(item.provider_name),
     modelName: text(item.model_name),
+    label: text(item.label),
+    description: text(item.description),
+    recommended: item.recommended === true,
     creditsMetered: item.credits_metered === true,
     estimatedCredits: typeof item.estimated_credits === 'number' ? item.estimated_credits : null,
     nativeQuote: parseNativeQuote(item.native_quote),
@@ -113,8 +122,14 @@ const liveOffering = (option: ChoiceOptionModel, offerings: readonly OfferingWir
 
 /** Provider and model, in the reader's language when the public Offering list has them. */
 export function choiceOptionTitle(option: ChoiceOptionModel, offerings?: readonly OfferingWire[]): string {
+  if (option.label) return option.label;
   const live = liveOffering(option, offerings);
   return [live?.provider_name || option.providerName, live?.model_name || option.modelName].filter(Boolean).join(' · ');
+}
+
+/** #103: whether the card carries the rich option fields and should render as option tiles. */
+export function choiceCardHasDetails(card: Pick<ChoiceCardModel, 'options'>): boolean {
+  return card.options.some((option) => option.label !== '' || option.description !== '' || option.recommended);
 }
 
 /** The option's Schema quote: the live Offering's, else the one stored with the card. */

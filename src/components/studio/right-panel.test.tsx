@@ -58,6 +58,9 @@ vi.mock('@/components/canvas/history-panel', () => ({
 vi.mock('@/components/studio/object-details', () => ({
   ObjectDetails: ({ object }: { object: { taskId: string } }) => <div data-testid="stub-details" data-task={object.taskId} />,
 }));
+vi.mock('@/components/studio/brief-panel', () => ({
+  BriefPanel: ({ sessionId }: { sessionId: string | null }) => <div data-testid="stub-brief" data-session={sessionId ?? ''} />,
+}));
 vi.mock('@/components/studio/model-parts-panel', () => ({
   ModelPartsPanel: ({ object }: { object: { taskId: string } }) => <div data-testid="stub-parts" data-task={object.taskId} />,
 }));
@@ -101,6 +104,7 @@ describe('nothing on the stage and an empty board', () => {
     expect(html).toMatch(/id="right-panel-tab-layers"[^>]*aria-disabled="true"/);
     expect(html).toMatch(/id="right-panel-tab-history"[^>]*aria-disabled="true"/);
     expect(html).not.toMatch(/id="right-panel-tab-operations"[^>]*aria-disabled/);
+    expect(html).not.toMatch(/id="right-panel-tab-details"[^>]*aria-disabled/);
     expect(html).toContain('right-panel-board-empty');
   });
 
@@ -144,6 +148,7 @@ describe('a picture on the stage', () => {
     useStudioStore.getState().setPanelTab('image', 'details');
     const details = render();
     expect(selectedTab(details)).toEqual(['details']);
+    expect(details).toContain('data-testid="stub-brief" data-session="s1"');
     expect(details).toContain('data-testid="stub-details" data-task="t-img"');
   });
 
@@ -168,21 +173,22 @@ describe('a picture on the stage', () => {
 describe('the bare board', () => {
   beforeEach(() => { mock.nodes = 3; });
 
-  it('adds 功能 after 图层 and 历史 and still opens on 图层', () => {
+  it('adds 功能 and 详情 after 图层 and 历史 and still opens on 图层', () => {
     const html = render();
     expect(html).toContain('data-kind="board"');
-    expect(tabIds(html)).toEqual(['layers', 'history', 'operations']);
+    expect(tabIds(html)).toEqual(['layers', 'history', 'operations', 'details']);
     expect(selectedTab(html)).toEqual(['layers']);
     expect(html).not.toContain('right-panel-empty');
   });
 
-  it('shares the picture\'s 2D choice, and falls back to 图层 when that choice was 详情', () => {
+  it('shares the picture\'s 2D choice, including 详情, with the board', () => {
     useStudioStore.getState().setPanelTab('image', 'history');
     expect(selectedTab(render())).toEqual(['history']);
     useStudioStore.getState().setPanelTab('image', 'details');
     const html = render();
-    expect(selectedTab(html)).toEqual(['layers']);
-    expect(bodyOf(html)).toBe('layers');
+    expect(selectedTab(html)).toEqual(['details']);
+    expect(bodyOf(html)).toBe('details');
+    expect(html).toContain('data-testid="stub-brief" data-session="s1"');
   });
 });
 

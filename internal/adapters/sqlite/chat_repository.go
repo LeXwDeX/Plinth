@@ -1634,6 +1634,9 @@ type storedToolCall struct {
 	EstimatedCredits int                     `json:"estimated_credits,omitempty"`
 	NativeQuote      *generation.NativeQuote `json:"native_quote,omitempty"`
 	ApprovalSource   string                  `json:"approval_source,omitempty"`
+	// Summary is the compact result of a read-only tool (#103); older rows
+	// omit it.
+	Summary json.RawMessage `json:"summary,omitempty"`
 }
 
 func marshalToolCalls(calls []chat.ToolCall) (string, error) {
@@ -1648,6 +1651,7 @@ func marshalToolCalls(calls []chat.ToolCall) (string, error) {
 			EstimatedCredits: call.EstimatedCredits,
 			NativeQuote:      call.NativeQuote,
 			ApprovalSource:   call.ApprovalSource,
+			Summary:          call.Summary,
 		})
 	}
 	encoded, err := json.Marshal(stored)
@@ -1670,6 +1674,7 @@ func unmarshalToolCalls(raw string, target *[]chat.ToolCall) error {
 			EstimatedCredits: call.EstimatedCredits,
 			NativeQuote:      call.NativeQuote,
 			ApprovalSource:   call.ApprovalSource,
+			Summary:          call.Summary,
 		})
 	}
 	*target = result

@@ -5,6 +5,7 @@ import type { OfferingWire } from '@/lib/agent-offerings';
 import type { ProductSchema } from '@/lib/product-schema';
 import {
   choiceAnswerText,
+  choiceCardHasDetails,
   choiceCardPlacement,
   choiceOptionQuote,
   choiceOptionTitle,
@@ -57,6 +58,22 @@ describe('choice cards (#321)', () => {
     expect(choiceOptionQuote(schema, bang, undefined)).toBe(estimate);
     expect(choiceOptionQuote(schema, tripo, undefined)).toBe(`${messages['ui.workspace.harness.credits']}: 40`);
     expect(choiceOptionQuote(schema, free, undefined)).toBe(`${messages['ui.workspace.harness.credits']}: /`);
+  });
+
+  it('reads the rich option fields and renders tiles only when one of them is present (#103)', () => {
+    const rich = parseChoiceCards({ choices: [{ ...wire, options: [
+      { id: 'a', provider_name: 'P', model_name: 'M', label: '快速草模', description: '几十秒出一个低面数草模', recommended: true },
+      { id: 'b', provider_name: 'P', model_name: 'M2' },
+    ] }] })[0];
+    expect(rich.options[0]).toMatchObject({ label: '快速草模', description: '几十秒出一个低面数草模', recommended: true });
+    expect(rich.options[1]).toMatchObject({ label: '', description: '', recommended: false });
+    expect(choiceOptionTitle(rich.options[0], [])).toBe('快速草模');
+    expect(choiceCardHasDetails(rich)).toBe(true);
+    // An older card carries no rich field: its familiar list rendering stays.
+    expect(choiceCardHasDetails(card())).toBe(false);
+    expect(choiceCardHasDetails({ options: [{ ...card().options[0], label: 'only a label' }] })).toBe(true);
+    expect(choiceCardHasDetails({ options: [{ ...card().options[0], description: 'only a description' }] })).toBe(true);
+    expect(choiceCardHasDetails({ options: [{ ...card().options[0], recommended: true }] })).toBe(true);
   });
 
   it('words the answer the turn sends and the status of a closed card from the Schema', () => {

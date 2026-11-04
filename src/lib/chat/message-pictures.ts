@@ -19,6 +19,8 @@ export interface MessagePictures {
   candidates: MessagePicture[];
   /** 3D 结果附带的图：只作 3D 结果卡的封面，各自保留原序号。 */
   previews: MessagePicture[];
+  /** #103: 自检工具生成的渲染图（附件角色为 render），归自检记录，不作候选或封面。 */
+  renders: MessagePicture[];
 }
 
 /** 一张图在卡片里的身份：与位置无关，卡片重排（例如按四视角槽位）后仍指同一张图。 */
@@ -65,7 +67,9 @@ export function modelTaskIdsOf(
 }
 
 /**
- * 把消息的图片拆成 2D 候选与 3D 预览图。一张图是 3D 预览图，当且仅当：它所在槽位的附件是模型；
+ * 把消息的图片拆成 2D 候选、3D 预览图与自检渲染图。渲染图由服务端在附件上标记
+ * `role === 'render'`（`model_review.render.asset_type`），不按任务或位置猜；它们既不是候选，
+ * 也不是模型封面。一张图是 3D 预览图，当且仅当：它所在槽位的附件是模型；
  * 或它的任务就是消息里某个模型附件的任务（旧消息里上游的模型前 2D 图是 `image` 附件，任务同模型）；
  * 或它的任务是这条消息的 3D 结果（`modelTaskIds`，来自任务跟踪，覆盖还没有附件的流式消息）。
  */
@@ -78,9 +82,14 @@ export function splitMessagePictures(
   for (const attachment of attachments) {
     if (attachment.kind === 'model' && attachment.taskId) modelTasks.add(attachment.taskId);
   }
-  const split: MessagePictures = { candidates: [], previews: [] };
+  const split: MessagePictures = { candidates: [], previews: [], renders: [] };
   (message.images ?? []).forEach((image, index) => {
-    const modelSlot = attachments.some((attachment) => attachment.kind === 'model' && attachment.imageSlot === index + 1);
+    const slot = attachments.find((attachment) => attachment.imageSlot === index + 1);
+    if (slot?.role === 'render') {
+      split.renders.push({ image, index });
+      return;
+    }
+    const modelSlot = slot?.kind === 'model';
     const preview = modelSlot || (image.taskId !== '' && modelTasks.has(image.taskId));
     (preview ? split.previews : split.candidates).push({ image, index });
   });

@@ -67,8 +67,23 @@ describe('splitMessagePictures', () => {
     expect(splitMessagePictures({ images, attachments: [model('')] }, ['']).previews).toEqual([]);
   });
 
+  it('sets the self-check renders apart by their attachment role, in every slot order', () => {
+    const images = [image(1, 't3d'), image(2, ''), image(3, 't2d')];
+    const split = splitMessagePictures({
+      images,
+      attachments: [
+        model('t3d', 1),
+        { handle: '', kind: 'image', taskId: '', role: 'render', imageSlot: 2 },
+        picture('@img1', 't2d', 3),
+      ],
+    });
+    expect(split.renders).toEqual([{ image: images[1], index: 1 }]);
+    expect(split.previews.map((item) => item.index)).toEqual([0]);
+    expect(split.candidates.map((item) => item.index)).toEqual([2]);
+  });
+
   it('handles a message with no pictures', () => {
-    expect(splitMessagePictures({})).toEqual({ candidates: [], previews: [] });
+    expect(splitMessagePictures({})).toEqual({ candidates: [], previews: [], renders: [] });
   });
 });
 

@@ -18,6 +18,9 @@ import { paidStepFailed, stepCreditsText, stepFailedText } from '@/lib/chat/appr
 import { unavailableLabel } from '@/lib/unavailable';
 import { fetchSourceRetries, regenerateBlockedBy, sourceExpiredSteps, sourceRetryText } from '@/lib/chat/source-retry';
 import { messageTaskIds, modelCardsOf, modelTaskIdsOf, splitMessagePictures, type MessagePictures, type ModelCardModel } from '@/lib/chat/message-pictures';
+import { reviewRecordOf } from '@/lib/chat/model-review';
+import { REPLY_LINE_HEIGHT_EM, replyNeedsCollapse } from '@/lib/chat/reply-collapse';
+import { ReviewRecordCard } from '@/components/chat/review-record';
 import { chatGaussianSplatResults, chatModelResults } from '@/lib/chat/model-results';
 import type { ComposerReference } from '@/lib/chat/composer-reference';
 import { domainOfCapability } from '@/lib/workspace/versions';
@@ -201,9 +204,18 @@ export const ChatMessage = memo(function ChatMessage({
   // A 3D task counts as soon as the tracker knows it (a streaming message gets its pictures before the model can be downloaded).
   const modelResults = isUser ? [] : chatModelResults(trackedTasks, messageTaskIds(message), sessionId);
   const splatResults = isUser ? [] : chatGaussianSplatResults(trackedTasks, messageTaskIds(message), sessionId);
-  const { candidates, previews }: MessagePictures = isUser
-    ? { candidates: [], previews: [] }
+  const { candidates, previews, renders }: MessagePictures = isUser
+    ? { candidates: [], previews: [], renders: [] }
     : splitMessagePictures(message, modelTaskIdsOf(message, modelResults, trackedTasks, sessionId, (capability) => domainOfCapability(schema, capability) === 'model'));
+  // #103: read-only inspect/render/compare calls of this reply become one compact self-check card;
+  // the pictures they rendered are shown there, never as 2D candidates or 3D covers.
+  const review = isUser
+    ? { calls: [], leftover: [] }
+    : reviewRecordOf(schema, message.toolCalls ?? [], renders);
+  const collapseLines = schema.chat.frontend.reply_collapse_lines;
+  const [replyOpen, setReplyOpen] = useState(false);
+  const collapsibleReply = !isUser && settled && replyNeedsCollapse(displayContent, collapseLines);
+  const foldedReply = collapsibleReply && !replyOpen;
   const modelCards = modelCardsOf(message, previews, modelResults);
   // #326: a paid step that failed because its source's original task is gone is judged by the server with the
   // rule plans use; a regenerate certain to fail again is not offered, and one that takes the saved file says so.
@@ -246,7 +258,10 @@ export const ChatMessage = memo(function ChatMessage({
           className={cn(
             'min-w-0 max-w-[92%] text-[13px] leading-relaxed [overflow-wrap:anywhere]',
             isUser ? 'whitespace-pre-wrap rounded-lg bg-panel-raised px-3 py-2' : 'w-full text-foreground',
+            foldedReply && 'overflow-hidden',
           )}
+          style={foldedReply ? { maxHeight: `${collapseLines * REPLY_LINE_HEIGHT_EM}em` } : undefined}
+          data-testid={foldedReply ? 'chat-reply-folded' : undefined}
         >
           {isUser ? (
             <>
@@ -257,6 +272,24 @@ export const ChatMessage = memo(function ChatMessage({
             <MarkdownText text={displayContent} streaming={message.isStreaming === true} references={handleReferences} tail={spinner} />
           )}
         </div>
+      )}
+
+      {/* #103: a finished reply longer than the Schema's line budget starts folded; a streaming one never does. */}
+      {collapsibleReply && (
+        <Action
+          type="button"
+          variant="ghost"
+          size="xs"
+          onClick={() => setReplyOpen((value) => !value)}
+          aria-expanded={replyOpen}
+          data-testid="chat-reply-toggle"
+        >
+          {schemaText(schema, replyOpen ? 'ui.chat.message.collapse_full' : 'ui.chat.message.expand_full')}
+        </Action>
+      )}
+
+      {(review.calls.length > 0 || review.leftover.length > 0) && (
+        <ReviewRecordCard calls={review.calls} leftover={review.leftover} />
       )}
 
       {isUser && message.images && message.images.length > 0 && (

@@ -12,7 +12,7 @@ import { parseModelFormatCoverage, type ModelFormatCoverage } from '@/lib/worksp
 import { blankTile, type VersionTiles } from '@/lib/workspace/versions';
 
 const schema = defaultCatalog.application as unknown as ProductSchema;
-const state: { task: TaskDetailWire | null; offering: OfferingWire | undefined; scope: string } = { task: null, offering: undefined, scope: 'auto' };
+const state: { task: TaskDetailWire | null; offering: OfferingWire | undefined } = { task: null, offering: undefined };
 const versions: VersionTiles = { tiles: [], byTask: new Map(), byCapture: new Map(), fileTaskParents: new Map() };
 const versionLookups: (string | null)[] = [];
 vi.mock('@/hooks/use-session-versions', () => ({ useSessionVersions: (sessionId: string | null) => { versionLookups.push(sessionId); return versions; } }));
@@ -29,7 +29,6 @@ vi.mock('@/store/chat-store', async (importOriginal) => {
   const hook = Object.assign((selector: (value: { activeSessionId: string }) => unknown) => selector({ activeSessionId: 's1' }), actual.useChatStore);
   return { ...actual, useChatStore: hook };
 });
-vi.mock('@/hooks/use-session-agent-scope', () => ({ useActiveAgentScope: () => state.scope }));
 const formats: { coverage: ModelFormatCoverage | null } = { coverage: null };
 vi.mock('@/hooks/use-model-format-coverage', () => ({ useModelFormatCoverage: (route: string | null) => ({ data: route ? formats.coverage : undefined, error: undefined, mutate: async () => undefined }) }));
 
@@ -52,7 +51,7 @@ const target = { taskId: 't1', sessionId: 's1', kind: 'image' as const, url: '/a
 const rowOf = (html: string, key: string) => html.match(new RegExp(`data-key="${key}"[^>]*>(.*?)</div>`))?.[1] ?? '';
 
 beforeEach(() => {
-  state.task = null; state.offering = undefined; state.scope = 'auto';
+  state.task = null; state.offering = undefined;
   versions.tiles = []; versions.byTask = new Map(); versions.fileTaskParents = new Map();
   versionLookups.length = 0; formats.coverage = null;
 });
@@ -131,11 +130,8 @@ describe('ResultDetail', () => {
     expect(html).not.toContain('opaque');
   });
 
-  it('hides the conversion the Agent mode cannot run', () => {
+  it('offers the picture-to-3D conversion in the Agent auto mode', () => {
     state.task = ready(); state.offering = offering(true);
-    state.scope = '2d';
-    expect(renderToStaticMarkup(<ResultDetail target={target} />)).not.toContain('result-detail-to3d');
-    state.scope = 'auto';
     expect(renderToStaticMarkup(<ResultDetail target={target} />)).toContain('result-detail-to3d');
   });
 
@@ -218,8 +214,8 @@ describe('ResultDetail', () => {
     expect(html).toContain(`data-testid="unavailable-detail">${reason}<`);
     expect(html).toContain('aria-describedby="result-detail-blocked-reason"');
     expect(html).not.toContain('data-testid="result-detail-to3d"');
-    state.scope = '2d';
-    expect(renderToStaticMarkup(<ResultDetail target={{ ...target, sessionId: 'other' }} />)).not.toContain('result-detail-to3d-blocked');
+    // The conversation no longer restricts conversions by scope (#103), but it still dims another session's result.
+    expect(renderToStaticMarkup(<ResultDetail target={{ ...target, sessionId: 'other' }} />)).toContain('result-detail-to3d-blocked');
   });
 
   it('keeps downloads in one area under the actions: formats for a finished 3D task, one file otherwise', () => {

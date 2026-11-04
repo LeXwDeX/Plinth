@@ -24,6 +24,10 @@ const (
 	// layout the person arranged, flattened into one picture (#272). The
 	// service gives this role itself; a client cannot claim it.
 	AttachmentRoleCanvas = "canvas"
+	// AttachmentRoleRender marks a picture produced by the read-only model
+	// review tools (#103). The service gives this role from the render
+	// asset's declared type; a client cannot claim it.
+	AttachmentRoleRender = "render"
 )
 
 // CanvasLayout describes an artboard snapshot. Width and Height are read from

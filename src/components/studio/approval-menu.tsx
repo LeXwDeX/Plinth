@@ -17,8 +17,9 @@ import { cn } from '@/lib/utils';
 import { useChatStore, type ApprovalMode } from '@/store/chat-store';
 
 /**
- * 批准方式下拉：手工 / 自动，写明两者的区别。切到自动要先确认（之后的付费步骤
- * 不再询问）；切换只影响之后的步骤，已经在等待的批准不会因此被通过。
+ * 批准方式下拉（#103）：严格（逐步批准）、自动与预算制，顺序、名称和说明都来自
+ * Schema。切到自动要先确认（之后的付费步骤不再询问）；切换只影响之后的步骤，
+ * 已经在等待的批准不会因此被通过。
  */
 export function ApprovalMenu() {
   const { schema } = useProductSchema();

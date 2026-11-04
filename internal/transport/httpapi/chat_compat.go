@@ -735,6 +735,11 @@ func (s *Server) chatMessageWire(locale string, message chat.Message) map[string
 		if call.ApprovalSource != "" {
 			item[fields.ApprovalSource] = call.ApprovalSource
 		}
+		// #103: a read-only tool's compact result, shown as one line. The
+		// field name is the Schema's; old Catalogs leave the member out.
+		if len(call.Summary) > 0 && fields.ToolSummary != "" {
+			item[fields.ToolSummary] = call.Summary
+		}
 		tools = append(tools, item)
 	}
 	toolJSON, _ := json.Marshal(tools)

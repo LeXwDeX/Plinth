@@ -274,6 +274,10 @@ type ToolCall struct {
 	EstimatedCredits int
 	NativeQuote      *schema.NativeQuote
 	ApprovalSource   string
+	// Summary is the compact, display-ready result of a read-only tool (#103).
+	// It is stored with the call and projected as the call's summary member; a
+	// nil summary leaves the member out.
+	Summary json.RawMessage
 }
 
 type Message struct {

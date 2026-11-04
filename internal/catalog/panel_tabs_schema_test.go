@@ -37,7 +37,7 @@ func TestDefaultCatalogDeclaresTheRightPanelTabs(t *testing.T) {
 	}
 	wantKinds := []CanvasPanelKindSchema{
 		{Kind: "image", Tabs: []string{"layers", "history", "details", "operations"}, Default: "layers"},
-		{Kind: "board", Tabs: []string{"layers", "history", "operations"}, Default: "layers"},
+		{Kind: "board", Tabs: []string{"layers", "history", "operations", "details"}, Default: "layers", DefaultWhenUnavailable: "operations"},
 		{Kind: "model", Tabs: []string{"operations", "process", "formats", "parts", "details"}, Default: "operations"},
 	}
 	if !reflect.DeepEqual(panel.Kinds, wantKinds) {
@@ -240,7 +240,7 @@ func TestPanelTabsRejectInvalidDeclarations(t *testing.T) {
 		{"kind lists a tab twice", func(a *ApplicationSchema) {
 			a.Canvas.Frontend.PanelTabs.Kinds[image].Tabs = []string{"layers", "layers", "details"}
 		}, "tabs 重复"},
-		{"default is not one of the kind's tabs", func(a *ApplicationSchema) { a.Canvas.Frontend.PanelTabs.Kinds[board].Default = "details" }, "default 必须"},
+		{"default is not one of the kind's tabs", func(a *ApplicationSchema) { a.Canvas.Frontend.PanelTabs.Kinds[board].Default = "process" }, "default 必须"},
 		{"empty default", func(a *ApplicationSchema) { a.Canvas.Frontend.PanelTabs.Kinds[image].Default = "" }, "default 必须"},
 		{"default is not a declared tab", func(a *ApplicationSchema) { a.Canvas.Frontend.PanelTabs.Kinds[image].Default = "nowhere" }, "default 必须"},
 		{"fallback is not one of the kind's tabs", func(a *ApplicationSchema) {

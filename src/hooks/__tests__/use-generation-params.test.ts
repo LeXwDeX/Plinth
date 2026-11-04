@@ -7,7 +7,6 @@ const runtime = vi.hoisted(() => ({
 }));
 vi.mock('react', () => ({ useMemo: (factory: any) => factory(), useState: (initial: any) => { runtime.choice ??= initial; return [runtime.choice, (value: any) => { runtime.choice = value; }]; } }));
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema: catalog.application }) }));
-vi.mock('@/hooks/use-session-agent-scope', () => ({ useActiveAgentScope: () => 'auto' }));
 vi.mock('@/store/workspace-store', () => ({ useWorkspaceStore: (select: any) => select({ modelByDomain: { image: runtime.selectedModel, 'model-3d': runtime.selectedModel } }) }));
 const text: OfferingWire = { id: 'fixture/text', revision: 'r', provider_id: 'fixture', provider_name: 'fixture', model_id: 'fixture', model_name: 'fixture', capability: 'text-to-image', available: true, estimated_credits: 2, credits_metered: true, estimated_credits_unit_parameter: 'n', parameters: [
   { name: 'n', label: 'Count', type: 'number', default: 1, minimum: 1, maximum: 4 },

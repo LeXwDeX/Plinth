@@ -92,10 +92,10 @@ export function ContextMeter() {
   };
 
   return (
-    // A full row of the composer's picker grid when narrow, two tracks when wide, in the same one-picker height
+    // A full row of the composer's picker grid when narrow, one track when wide, in the same one-picker height
     // as the cells above: the figure and the compact action sit together on the left, the tool call counter
     // alone on the right edge. Only the figure and the counter give way (truncate) when the row is short.
-    <div className="col-span-full flex h-7 min-w-0 items-center gap-1 @[40rem]:col-span-2" data-testid="composer-context">
+    <div className="col-span-full flex h-7 min-w-0 items-center gap-1 @[40rem]:col-span-1" data-testid="composer-context">
       <HintTooltip name={`${label}: ${text}`} hint={contextHint(schema, tokens, window, settings)} className="min-w-0 shrink">
         <span
           tabIndex={0}

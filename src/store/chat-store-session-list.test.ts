@@ -27,7 +27,6 @@ describe('chat store session list revision', () => {
     useChatStore.getState().setSessions([session('a')]);
     useChatStore.getState().setActiveSession('b');
     useChatStore.getState().updateSessionApproval('a', { approvalMode: 'auto' });
-    useChatStore.getState().updateSessionAgentScope('a', '3d');
     useChatStore.getState().initStreaming('a', { content: 'hi' });
     expect(revision()).toBe(0);
   });

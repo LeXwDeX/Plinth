@@ -3,6 +3,8 @@ import { useWorkspaceStore } from '@/store/workspace-store';
 import { mergeNewestPage, prependOlderPage } from '@/lib/chat/message-pages';
 import { latestToolCallCount } from '@/lib/chat/tool-call-count';
 import type { NativeQuote, PriceTotal } from '@/lib/pricing';
+import type { SessionBudget } from '@/lib/chat/budget';
+import type { ProductionBrief } from '@/lib/chat/production-brief';
 import type { MultiviewTurnRequest } from '@/lib/chat/browser-client';
 
 // ── 类型 ──────────────────────────────────────────────
@@ -26,6 +28,16 @@ export interface ChatAttachment {
   url?: string;
 }
 
+/** One tool call the server recorded on an assistant message (#103). */
+export interface ChatToolCall {
+  name: string;
+  /** The call's arguments as the model wrote them; a read-only review tool carries none worth showing. */
+  arguments?: string;
+  taskId?: string;
+  /** The compact result summary a read-only tool stored with the call; shape by tool. */
+  summary?: unknown;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -42,6 +54,8 @@ export interface ChatMessage {
   paidSteps?: ChatPaidStep[];
   /** 助手消息里已执行（或正在执行）的工具调用数；#275 的单次回复预算按它计。 */
   toolCallCount?: number;
+  /** 助手消息里的工具调用及其紧凑结果（#103）；用户消息没有。 */
+  toolCalls?: ChatToolCall[];
   createdAt: number;
 }
 
@@ -76,6 +90,10 @@ export interface ChatSession {
   generationModels?: Record<string, string>;
   /** 会话读取时返回：上一项里哪些域原本用的是已停用的模型（#329 后续），值是那个已停用模型。 */
   generationModelsRetired?: Record<string, string>;
+  /** #103: the session's production brief; absent when the server never stored one. */
+  brief?: ProductionBrief;
+  /** #103: the session's current production plan budget; absent when no plan exists. */
+  budget?: SessionBudget;
 }
 
 export interface GenState {
@@ -141,8 +159,10 @@ interface ChatStore {
   updateSessionTitle: (id: string, title: string) => void;
   /** 只更新批准方式与累计积分，不改动其它会话字段。 */
   updateSessionApproval: (id: string, approval: { approvalMode?: ApprovalMode; estimatedCredits?: number; priceTotals?: PriceTotal[] }) => void;
-  /** 只更新 Agent 范围，不改动其它会话字段。 */
-  updateSessionAgentScope: (id: string, agentScope: AgentScope) => void;
+  /** #103: replace the session's production brief without touching other session fields. */
+  updateSessionBrief: (id: string, brief: ProductionBrief) => void;
+  /** #103: replace (or clear) the session's production plan budget. */
+  updateSessionBudget: (id: string, budget: SessionBudget | null) => void;
   setSessionsLoaded: (v: boolean) => void;
 
   // 消息操作（按会话隔离，仅用于 DB 数据）
@@ -234,9 +254,18 @@ export const useChatStore = create<ChatStore>((set) => ({
         ...(approval.priceTotals !== undefined ? { priceTotals: approval.priceTotals, estimatedCredits: undefined } : {}),
       } : ss)),
     })),
-  updateSessionAgentScope: (id, agentScope) =>
+  updateSessionBrief: (id, brief) =>
     set((s) => ({
-      sessions: s.sessions.map((ss) => (ss.id === id ? { ...ss, agentScope } : ss)),
+      sessions: s.sessions.map((ss) => (ss.id === id ? { ...ss, brief } : ss)),
+    })),
+  updateSessionBudget: (id, budget) =>
+    set((s) => ({
+      sessions: s.sessions.map((ss) => {
+        if (ss.id !== id) return ss;
+        if (budget) return { ...ss, budget };
+        const { budget: _cleared, ...rest } = ss;
+        return rest;
+      }),
     })),
   setSessionsLoaded: (v) => set({ sessionsLoaded: v }),
 

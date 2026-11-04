@@ -1279,6 +1279,40 @@ type PublicChatSchema struct {
 	// ThreeViewLimits is the one three-view value the page needs to queue a
 	// refused view (#59); chat.three_view itself stays server-only.
 	ThreeViewLimits PublicChatThreeViewLimits `json:"three_view_limits"`
+	// ModelReview names the read-only review tools so the conversation can
+	// recognise their calls (#103); the limits, prompts, cache and text
+	// templates stay server-only.
+	ModelReview *PublicChatModelReviewSchema `json:"model_review,omitempty"`
+	// Model3DUsage publishes the purpose labels and brief field declarations
+	// the approval card and brief panel render (#103); recommendations,
+	// parameter overrides, reasons, budgets and brief prompt templates stay
+	// server-only.
+	Model3DUsage *PublicChatModel3DUsageSchema `json:"model3d_usage,omitempty"`
+}
+
+// PublicChatModelReviewSchema is the browser contract of the read-only model
+// review tools (#103).
+type PublicChatModelReviewSchema struct {
+	Tools ChatModelReviewToolsSchema `json:"tools"`
+}
+
+// PublicChatModel3DUsageSchema is the public part of the 3D production
+// purposes (#103).
+type PublicChatModel3DUsageSchema struct {
+	Profiles []PublicChatModel3DUsageProfile `json:"profiles"`
+	Brief    PublicChatProductionBriefSchema `json:"brief"`
+}
+
+// PublicChatModel3DUsageProfile is one purpose the page can label.
+type PublicChatModel3DUsageProfile struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// PublicChatProductionBriefSchema declares the session brief fields the panel
+// edits.
+type PublicChatProductionBriefSchema struct {
+	Fields []ChatProductionBriefField `json:"fields"`
 }
 
 // PublicChatThreeViewLimits carries chat.three_view.queue_limit_seconds: how
@@ -2193,10 +2227,22 @@ type ChatModelReviewSchema struct {
 	Cache   ChatModelReviewCacheSchema  `json:"cache"`
 	Source  ChatModelReviewSourceSchema `json:"source"`
 	Texts   ChatModelReviewTextsSchema  `json:"texts"`
+	// Tools names the three read-only tool implementations the public Agent
+	// tool list registers; the frontend uses these names to recognise the
+	// compact self-check record (#103).
+	Tools ChatModelReviewToolsSchema `json:"tools"`
 	// ResultViewsField names the result array that pairs each rendered
 	// picture with the handle the reply gave it. Entries are in the order the
 	// pictures were attached, so the first view carries the first handle.
 	ResultViewsField string `json:"result_views_field"`
+}
+
+// ChatModelReviewToolsSchema names the public Agent tool of each read-only
+// model review capability.
+type ChatModelReviewToolsSchema struct {
+	Inspect string `json:"inspect"`
+	Render  string `json:"render"`
+	Compare string `json:"compare"`
 }
 
 // ChatModelReviewLimits bounds what Parse may accept before any topology is
@@ -3104,14 +3150,17 @@ type ChatAPIResponseFields struct {
 	ToolCalls     string `json:"tool_calls"`
 	ToolName      string `json:"tool_name"`
 	ToolArguments string `json:"tool_arguments"`
-	MessageID     string `json:"message_id"`
-	SessionID     string `json:"session_id"`
-	Error         string `json:"error"`
-	IsPending     string `json:"is_pending"`
-	PendingTypes  string `json:"pending_task_types"`
-	Images        string `json:"images"`
-	URL           string `json:"url"`
-	TaskID        string `json:"task_id"`
+	// ToolSummary is the compact result summary a read-only tool attaches to
+	// its tool call (#103); empty leaves it out.
+	ToolSummary  string `json:"tool_summary,omitempty"`
+	MessageID    string `json:"message_id"`
+	SessionID    string `json:"session_id"`
+	Error        string `json:"error"`
+	IsPending    string `json:"is_pending"`
+	PendingTypes string `json:"pending_task_types"`
+	Images       string `json:"images"`
+	URL          string `json:"url"`
+	TaskID       string `json:"task_id"`
 	// ApprovalMode and EstimatedCredits carry the session approval mode and
 	// the estimated credits of accepted tasks (session DTO) or of one step
 	// (tool call DTO).
@@ -3213,18 +3262,27 @@ type ChatFrontendSchema struct {
 	LightboxPreviousKey             string `json:"lightbox_previous_key"`
 	LightboxNextKey                 string `json:"lightbox_next_key"`
 	TextareaMaximumHeightPixels     int    `json:"textarea_maximum_height_pixels"`
-	OptimisticMessageIDPrefix       string `json:"optimistic_message_id_prefix"`
-	OptimisticUserMessageID         string `json:"optimistic_user_message_id"`
-	OptimisticAssistantMessageID    string `json:"optimistic_assistant_message_id"`
-	FilenameQueryParameter          string `json:"filename_query_parameter"`
-	DownloadFilenameMaxCharacters   int    `json:"download_filename_max_characters"`
-	DownloadTaskIDCharacters        int    `json:"download_task_id_characters"`
-	DownloadExtension               string `json:"download_extension"`
-	FallbackDownloadIdentifier      string `json:"fallback_download_identifier"`
-	InternalAPIPathPrefix           string `json:"internal_api_path_prefix"`
-	LegacyHiddenContentPrefix       string `json:"legacy_hidden_content_prefix"`
-	LegacyHiddenContentSuffix       string `json:"legacy_hidden_content_suffix"`
-	ProgressMaximum                 int    `json:"progress_maximum"`
+	// ApprovalCardMaxHeightPixels bounds the approval card; the card scrolls
+	// inside instead of growing the conversation (#103).
+	ApprovalCardMaxHeightPixels int `json:"approval_card_max_height_pixels"`
+	// ReviewThumbnailPixels is the edge of one self-check render thumbnail
+	// (#103).
+	ReviewThumbnailPixels int `json:"review_thumbnail_pixels"`
+	// ReplyCollapseLines is how many lines of a settled Agent reply show
+	// before it is folded (#103).
+	ReplyCollapseLines            int    `json:"reply_collapse_lines"`
+	OptimisticMessageIDPrefix     string `json:"optimistic_message_id_prefix"`
+	OptimisticUserMessageID       string `json:"optimistic_user_message_id"`
+	OptimisticAssistantMessageID  string `json:"optimistic_assistant_message_id"`
+	FilenameQueryParameter        string `json:"filename_query_parameter"`
+	DownloadFilenameMaxCharacters int    `json:"download_filename_max_characters"`
+	DownloadTaskIDCharacters      int    `json:"download_task_id_characters"`
+	DownloadExtension             string `json:"download_extension"`
+	FallbackDownloadIdentifier    string `json:"fallback_download_identifier"`
+	InternalAPIPathPrefix         string `json:"internal_api_path_prefix"`
+	LegacyHiddenContentPrefix     string `json:"legacy_hidden_content_prefix"`
+	LegacyHiddenContentSuffix     string `json:"legacy_hidden_content_suffix"`
+	ProgressMaximum               int    `json:"progress_maximum"`
 	// HandlePreviewDelayMilliseconds is how long the pointer rests on a picture handle ("@img3") in an
 	// Agent message before its large preview shows; HandlePreviewMaximumPixels bounds the preview's
 	// longer edge. The preview never takes pointer events.
