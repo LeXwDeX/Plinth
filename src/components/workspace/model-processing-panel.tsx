@@ -8,8 +8,9 @@ import { useModelProcessingCapabilities } from '@/hooks/use-model-processing-cap
 import { useProcessingPlanResume } from '@/hooks/use-processing-plan-resume';
 import { offeringFixedValues } from '@/lib/agent-offerings';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
-import { prerequisiteRefusal, processingPrerequisite, processingSourceLabel, processingSourceSteps, actionParameter, panelFields, sourceRefusals, type ProcessingSourceTask } from '@/lib/workspace/processing-source';
-import { prerequisiteRefusalText, sourceRefusalText } from '@/lib/workspace/processing-refusals';
+import { faceBudgetDefaults, prerequisiteRefusal, processingPrerequisite, processingSourceLabel, processingSourceSteps, actionParameter, panelFields, sourceRefusals, type ProcessingSourceAsset, type ProcessingSourceTask } from '@/lib/workspace/processing-source';
+import { partsKeyOf } from '@/lib/workspace/model-parts';
+import { processingUnavailableNotice } from '@/lib/workspace/processing-refusals';
 import { offeringQuoteText } from '@/lib/workspace/processing-cost';
 import { inputRuleViolations, missingRequiredParameters, uploadAssetInputs } from '@/lib/workspace/processing-inputs';
 import { uploadWorkspaceInputAssetResult } from '@/lib/workspace/input-asset-upload';
@@ -22,6 +23,7 @@ import { Action } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { OptionSelect } from '@/components/ui/option-select';
 import { Surface } from '@/components/ui/surface';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { ProcessingCostSummary } from '@/components/workspace/processing-cost-summary';
 import { ProcessingStepService } from '@/components/workspace/processing-step-service';
 
@@ -72,7 +74,13 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
       upstream_job_created_at: typeof task.upstream_job_created_at === 'string' ? task.upstream_job_created_at : undefined,
       upstream_job_gone: task.upstream_job_gone === true };
   }, { revalidateOnFocus: false });
-  const asset = source?.assets.find((candidate) => candidate.id === selection.assetId && candidate.kind === 'model') ?? null;
+  const tracked = source?.assets.find((candidate) => candidate.id === selection.assetId && candidate.kind === 'model') ?? null;
+  // The triangles the stage measured on this model (every mesh instance in its scene), so a step over its face limit
+  // brings in Remesh first (#93). Unknown until the stage has loaded the model; the server measures again either way.
+  const measuredTriangles = useStudioStore((state) => (state.stageParts && state.stageParts.key === partsKeyOf(selection)
+    ? state.stageParts.parts.reduce((total, part) => total + part.triangles, 0) : undefined));
+  const asset = useMemo<ProcessingSourceAsset | null>(() => (tracked && measuredTriangles
+    ? { ...tracked, triangles: measuredTriangles } : tracked), [tracked, measuredTriangles]);
   const ownedSession = Boolean(sessionID && source?.session_id === sessionID);
   const plansRoute = sessionID ? `${schema.runtime.http.routes.processing_plans}?session_id=${encodeURIComponent(sessionID)}` : null;
   const { data: plans, mutate: reload } = useSWR<ProcessingPlan[]>(ownedSession ? plansRoute : null, async (route: string) => {
@@ -98,21 +106,24 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
     ? processingSourceSteps(availableCapabilities, selected, offerings, source, asset, chosen)
     : [], [source, asset, availableCapabilities, selected, offerings, chosen]);
   // 每步按 Schema 声明的可填参数组装提交输入，并按 input_rules 在提交前提示违例。
+  // A face-reducing step before one with a face limit starts at the most faces that limit takes (Remesh before UV, #93).
+  const budgets = useMemo(() => Object.fromEntries(steps.map((step, index) => [step.capability,
+    faceBudgetDefaults(step.offering, steps[index + 1]?.offering, values[formKey(step.capability, step.offering.id)] ?? {})])), [steps, values]);
   const stepInputs = useMemo(() => Object.fromEntries(steps.map((step) => {
     const parameters = panelFields(step.offering);
-    const defaults = Object.fromEntries(parameters.filter((parameter) => parameter.default !== undefined).map((parameter) => [parameter.name, parameter.default]));
+    const defaults = { ...Object.fromEntries(parameters.filter((parameter) => parameter.default !== undefined).map((parameter) => [parameter.name, parameter.default])), ...budgets[step.capability] };
     const key = formKey(step.capability, step.offering.id);
     const input = { ...offeringFixedValues(step.offering), ...schemaParameterValues(parameters, { ...defaults, ...values[key] }) };
     const action = actionParameter(step.offering);
     if (action && actions[key]) input[action.name] = Number(actions[key]);
     return [step.capability, input];
-  })), [steps, values, actions]);
+  })), [steps, values, actions, budgets]);
   // Required inputs still empty (a reference image, say): confirm stays disabled and the step names them (#321).
   const missingFields = useMemo(() => Object.fromEntries(steps.map((step) => {
     const parameters = panelFields(step.offering);
-    const defaults = Object.fromEntries(parameters.filter((parameter) => parameter.default !== undefined).map((parameter) => [parameter.name, parameter.default]));
+    const defaults = { ...Object.fromEntries(parameters.filter((parameter) => parameter.default !== undefined).map((parameter) => [parameter.name, parameter.default])), ...budgets[step.capability] };
     return [step.capability, missingRequiredParameters(parameters, { ...defaults, ...values[formKey(step.capability, step.offering.id)] })];
-  })), [steps, values]);
+  })), [steps, values, budgets]);
   const ruleViolations = useMemo(() => Object.fromEntries(steps.map((step) => [
     step.capability, inputRuleViolations(step.offering, stepInputs[step.capability] ?? {}),
   ])), [steps, stepInputs]);
@@ -276,29 +287,27 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
               <ProcessingStepService step={step} fieldId={`${fieldPrefix}-${capability.id}-offering`}
                 disabled={working || Boolean(activePlan)}
                 onChoose={(offeringID) => setChosen((current) => ({ ...current, [capability.id]: offeringID }))} />
-              <p className="text-muted-foreground" data-testid={`processing-route-${capability.id}`}>
+              {step.route ? <p className="text-muted-foreground" data-testid={`processing-route-${capability.id}`}>
                 {schemaText(schema, 'ui.workspace.processing.route')}: {
-                  step.route?.sourceRole === 'source_task'
-                    ? schemaText(schema, 'ui.workspace.processing.task_route')
-                    : step.route && 'taskExpired' in step.route && step.route.taskExpired
+                  step.route.sourceRole === 'source_task'
+                    ? formatSchemaText(schemaText(schema, 'ui.workspace.processing.task_route'), { provider: step.offering.provider_name })
+                    : 'taskExpired' in step.route && step.route.taskExpired
                       ? formatSchemaText(schemaText(schema, 'ui.workspace.processing.asset_route_expired'), { provider: step.offering.provider_name })
-                      : step.route ? schemaText(schema, 'ui.workspace.processing.asset_route')
-                        : schemaText(schema, 'ui.workspace.processing.unavailable')
+                      : schemaText(schema, 'ui.workspace.processing.asset_route')
                 }
-              </p>
-              {!step.route && source && asset && <p role="status" className="text-warning" data-testid={`processing-refused-${capability.id}`}>
-                {step.blocked
-                  ? schemaText(schema, 'ui.workspace.processing.blocked_by_previous')
-                  : [sourceRefusalText(schema, sourceRefusals(offerings?.[capability.id] ?? [], source, asset), asset.size),
-                    // #326: the step that would come first cannot run on the model either: say why and what works.
-                    prerequisiteRefusalText(schema, prerequisiteRefusal(capability.id, availableCapabilities, offerings, source, asset), capability.id)]
-                    .filter(Boolean).join('')}
-              </p>}
+              </p> : <UnavailableNotice testId={`processing-refused-${capability.id}`}
+                {...processingUnavailableNotice(schema, step.blocked || !source || !asset ? { blocked: step.blocked, step: capability.id } : {
+                  step: capability.id, size: asset.size,
+                  refusals: sourceRefusals(offerings?.[capability.id] ?? [], source, asset),
+                  // #326: the step that would come first cannot run on the model either: say why and what works.
+                  prerequisite: prerequisiteRefusal(capability.id, availableCapabilities, offerings, source, asset),
+                })} />}
               <p data-testid={`processing-quote-${capability.id}`}>{offering ? offeringQuoteText(schema, offering) : schemaText(schema, 'ui.workspace.harness.credits_unknown')}</p>
               {offering && <SchemaParameters parameters={parameters}
                 values={{
                   ...Object.fromEntries(parameters.filter((parameter) => parameter.default !== undefined)
                     .map((parameter) => [parameter.name, parameter.default])),
+                  ...budgets[capability.id],
                   ...values[key],
                 }}
                 onChange={(name, value) => setValues((current) => ({

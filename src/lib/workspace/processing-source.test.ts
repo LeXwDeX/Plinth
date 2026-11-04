@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { OfferingWire } from '@/lib/agent-offerings';
-import { actionParameter, chooseProcessingSource, chooseProjectedProcessingSource, prerequisiteRefusal, processingPrerequisite, processingSourceSteps, sourceRefusals, inputImageParameter, isActionParameter, isSourceParameter, sourceParameterRole, consentField, panelFields, visibleOfferingFields, type ProcessingSourceTask } from './processing-source';
+import { actionParameter, chooseProcessingSource, faceBudgetDefaults, chooseProjectedProcessingSource, prerequisiteRefusal, processingPrerequisite, processingSourceSteps, sourceRefusals, inputImageParameter, isActionParameter, isSourceParameter, sourceParameterRole, consentField, panelFields, visibleOfferingFields, type ProcessingSourceTask } from './processing-source';
 
 const asset = { id: 'asset-a', role: 'model', variant: 'glb', delivery: 'required', ordinal: 0, mediaType: 'model/gltf-binary', size: 100, url: '/assets/a', kind: 'model' as const };
 const task: ProcessingSourceTask = { id: 'task-a', capability: 'text-to-3d', provider_id: 'provider-a', state: 'SUCCEEDED', assets: [asset] };
@@ -376,5 +376,52 @@ describe('an expired original task', () => {
     expect(chooseProcessingSource(animation, rig, asset, now)).toBeNull();
     expect(sourceRefusals([animation], rig, asset, now)).toEqual([{ offering: animation, kind: 'expired' }]);
     expect(chooseProcessingSource(animation, { ...rig, created_at: created(1) }, asset, now)).toEqual({ sourceRole: 'source_task', value: 'task-a' });
+  });
+});
+
+describe('Meshy extension steps: task ID first, local file as fallback, Remesh before a face limit (#93)', () => {
+  const meshyTask: ProcessingSourceTask = { ...task, provider_id: 'meshy', capability: 'image-to-3d', offering_id: 'meshy/meshy-7.1/image-to-3d', created_at: '2026-11-04T00:00:00Z' };
+  const big = { ...asset, size: 31_270_000 };
+  const sourceTask = { name: 'source_task', label: 'task', type: 'task' as const, semantic: 'source-task', same_provider: true, wire_name: 'input_task_id',
+    upstream_job_max_age_seconds: 172800, task_capabilities: ['text-to-3d', 'image-to-3d', 'remesh', 'retexture'],
+    task_offerings: ['meshy/meshy-7.1/image-to-3d', 'meshy/processing/remesh', 'meshy/processing/retexture'] };
+  const sourceAsset = { name: 'source_asset', label: 'model', type: 'asset' as const, semantic: 'source-asset', max_bytes: 73400320, media_types: ['model/gltf-binary'] };
+  const uv: OfferingWire = { id: 'meshy/processing/uv-unwrap', revision: '1', provider_id: 'meshy', provider_name: 'Meshy AI', model_id: 'uv', model_name: 'Meshy UV Unwrap',
+    capability: 'uv-unwrap', available: true, parameters: [sourceTask, sourceAsset], source_model_limit: { max_triangles: 40000, count_basis: 'triangles' } };
+  const remesh: OfferingWire = { id: 'meshy/processing/remesh', revision: '1', provider_id: 'meshy', provider_name: 'Meshy AI', model_id: 'remesh', model_name: 'Meshy Remesh',
+    capability: 'remesh', available: true, parameters: [sourceTask, sourceAsset,
+      { name: 'topology', label: 'topology', type: 'select', default: 'quad' },
+      { name: 'target_polycount', label: 'faces', type: 'number', default: 300000, minimum: 100, maximum: 300000 }],
+    output_triangles: { count_parameter: 'target_polycount', topology_parameter: 'topology', triangles_per_face: { quad: 2, triangle: 1 } } };
+  const retexture: OfferingWire = { ...remesh, id: 'meshy/processing/retexture', capability: 'retexture', output_triangles: undefined };
+  const capabilities = [{ id: 'remesh' }, { id: 'retexture' }, { id: 'uv-unwrap' }];
+  const offerings = { remesh: [remesh], retexture: [retexture], 'uv-unwrap': [uv] };
+  const now = Date.parse('2026-11-04T01:00:00Z');
+
+  it('names a same-connection Meshy task by its ID, whatever the file size', () => {
+    expect(chooseProcessingSource(uv, meshyTask, big, now)).toEqual({ sourceRole: 'source_task', value: 'task-a' });
+  });
+  it('falls back to the saved file once the Meshy task is past its retention', () => {
+    expect(chooseProcessingSource(uv, meshyTask, big, Date.parse('2026-11-07T00:00:00Z'))).toEqual({ sourceRole: 'source_asset', value: 'asset-a', taskExpired: true });
+  });
+  it('inlines another provider\'s model up to the declared 70 MiB', () => {
+    expect(chooseProcessingSource(uv, { ...meshyTask, provider_id: 'tripo' }, big, now)).toEqual({ sourceRole: 'source_asset', value: 'asset-a' });
+  });
+  it('refuses a model over the face limit and brings in Remesh, not Retexture, first', () => {
+    const dense = { ...big, triangles: 600000 };
+    expect(chooseProcessingSource(uv, meshyTask, dense, now)).toBeNull();
+    expect(sourceRefusals([uv], meshyTask, dense, now)).toEqual([{ offering: uv, kind: 'face_limit', limit: 40000, faces: 600000 }]);
+    expect(processingPrerequisite('uv-unwrap', capabilities, offerings, meshyTask, dense)).toBe('remesh');
+    const steps = processingSourceSteps(capabilities, ['remesh', 'uv-unwrap'], offerings, meshyTask, dense);
+    expect(steps.map((step) => [step.capability, step.route?.sourceRole])).toEqual([['remesh', 'source_task'], ['uv-unwrap', 'source_task']]);
+  });
+  it('an unmeasured model is never refused for faces; the server measures it', () => {
+    expect(chooseProcessingSource(uv, meshyTask, big, now)).not.toBeNull();
+  });
+  it('starts Remesh at the most faces UV unwrap takes', () => {
+    expect(faceBudgetDefaults(remesh, uv, {})).toEqual({ target_polycount: 20000 });
+    expect(faceBudgetDefaults(remesh, uv, { topology: 'triangle' })).toEqual({ target_polycount: 40000 });
+    expect(faceBudgetDefaults(remesh, undefined, {})).toEqual({});
+    expect(faceBudgetDefaults(retexture, uv, {})).toEqual({});
   });
 });

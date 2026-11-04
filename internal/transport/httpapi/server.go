@@ -1880,6 +1880,8 @@ func (s *Server) listOfferings(
 			Parameters:                    offering.Parameters,
 			InputRules:                    offering.InputRules,
 			Outputs:                       offering.Outputs,
+			SourceModelLimit:              offering.SourceModelLimit,
+			OutputTriangles:               offering.OutputTriangles,
 		})
 	}
 	writeJSON(writer, http.StatusOK, s.localizedSchemaData(request, map[string]any{"offerings": response}))
@@ -1919,6 +1921,12 @@ type offeringResponse struct {
 	Parameters                  []generation.Parameter        `json:"parameters"`
 	InputRules                  []generation.InputRule        `json:"input_rules,omitempty"`
 	Outputs                     []generation.AssetRequirement `json:"outputs"`
+	// SourceModelLimit and OutputTriangles are the declared face ceiling of a
+	// step's source and the faces a step delivers for its inputs (#93): the
+	// processing panel brings in a face-reducing step before one whose ceiling
+	// the model exceeds. Product constraints only; the server rechecks them.
+	SourceModelLimit *schemacontract.SourceModelLimit       `json:"source_model_limit,omitempty"`
+	OutputTriangles  *schemacontract.OutputTriangleEstimate `json:"output_triangles,omitempty"`
 }
 
 func extraCreditConsentParameter(offering generation.Offering) string {
