@@ -212,12 +212,23 @@ func (executor *Executor) InspectModel(ctx context.Context, command chat.ToolCom
 	if label == "" {
 		label = identity.TaskID
 	}
+	usageCheck := newModelReviewUsageCheck(
+		report,
+		executor.chat.Model3DUsage,
+		review.Inspect.Production,
+		command.Options.ProductionBrief,
+		func(template string, replacements ...string) string {
+			return executor.fillText(command, template, replacements...)
+		},
+		executor.modelReviewFixAvailability(),
+	)
 	result := modelReviewInspectResult{
 		OK: true,
 		Message: executor.fillText(command, review.Texts.InspectReady,
 			"{model}", label, "{triangles}", strconv.FormatInt(report.Triangles, 10)),
 		Model:          identity,
 		Report:         report,
+		UsageCheck:     usageCheck,
 		PartsTotal:     total,
 		PartsTruncated: truncated,
 	}
@@ -971,9 +982,16 @@ func modelReviewLimits(review catalog.ChatModelReviewSchema) modelinspect.Limits
 }
 
 func modelReviewInspectOptions(review catalog.ChatModelReviewSchema) modelinspect.InspectOptions {
+	// The usage check judges debris against the larger of the report's own
+	// classification threshold and the production threshold, so topology
+	// never hides a component the stricter check would count.
+	debrisRatio := review.Inspect.DebrisRatio
+	if production := review.Inspect.Production.DebrisRatio; production > debrisRatio {
+		debrisRatio = production
+	}
 	return modelinspect.InspectOptions{
 		WeldEpsilonRatio: review.Inspect.WeldEpsilonRatio,
-		DebrisRatio:      review.Inspect.DebrisRatio,
+		DebrisRatio:      debrisRatio,
 	}
 }
 
@@ -1096,12 +1114,13 @@ type modelReviewIdentity struct {
 }
 
 type modelReviewInspectResult struct {
-	OK             bool                `json:"ok"`
-	Message        string              `json:"message,omitempty"`
-	Model          modelReviewIdentity `json:"model"`
-	Report         modelinspect.Report `json:"report"`
-	PartsTotal     int                 `json:"parts_total"`
-	PartsTruncated bool                `json:"parts_truncated"`
+	OK             bool                   `json:"ok"`
+	Message        string                 `json:"message,omitempty"`
+	Model          modelReviewIdentity    `json:"model"`
+	Report         modelinspect.Report    `json:"report"`
+	UsageCheck     *modelReviewUsageCheck `json:"usage_check,omitempty"`
+	PartsTotal     int                    `json:"parts_total"`
+	PartsTruncated bool                   `json:"parts_truncated"`
 }
 
 type modelReviewViewResult struct {

@@ -86,6 +86,9 @@ func validateModel3DUsageShape(schema ChatSchema, capabilityPresentations []Capa
 		if profile.Budget.MaxTextureSize != nil && *profile.Budget.MaxTextureSize <= 0 {
 			return fmt.Errorf("model3d_usage.profiles[%d].budget.max_texture_size 必须大于 0", index)
 		}
+		if scale := profile.ScaleRangeM; scale != nil && (scale.Min <= 0 || scale.Max <= scale.Min) {
+			return fmt.Errorf("model3d_usage.profiles[%d].scale_range_m 必须满足 0 < min < max", index)
+		}
 		for stepIndex, step := range profile.Pipeline {
 			if !capabilities[step.Capability] {
 				return fmt.Errorf("model3d_usage.profiles[%d].pipeline[%d].capability %q 未声明", index, stepIndex, step.Capability)
@@ -348,6 +351,85 @@ func validateModel3DUsageOfferings(usage ChatModel3DUsageSchema, byID generation
 		}
 	}
 	return nil
+}
+
+// validateModelReviewProductionOfferings checks the fix capabilities declared
+// by model_review.inspect.production against the built Offerings. A capability
+// must exist in at least one Offering; a named parameter must be public (or
+// fixed to the requested value) and accept the value. Disabled Offerings count
+// here because they are declarations; the runtime hint filters them out until
+// they are enabled.
+func validateModelReviewProductionOfferings(review ChatModelReviewSchema, byID generationMap) error {
+	for _, fix := range review.Inspect.Production.Fixes {
+		for optionIndex, option := range fix.Options {
+			for candidateIndex, candidate := range option.Capabilities {
+				if !modelReviewFixCapabilityDeclared(candidate, byID) {
+					return fmt.Errorf(
+						"model_review.inspect.production.fixes[%s].options[%d].capabilities[%d] 的能力 %q 没有支持该修复的 Offering",
+						fix.Check, optionIndex, candidateIndex, candidate.Capability,
+					)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func modelReviewFixCapabilityDeclared(candidate ChatModelInspectFixCapabilitySchema, byID generationMap) bool {
+	for _, offering := range byID {
+		if string(offering.Capability) != candidate.Capability {
+			continue
+		}
+		if candidate.Parameter == "" {
+			return true
+		}
+		parameter, exists := offeringParameter(offering.Parameters, candidate.Parameter)
+		if !exists {
+			continue
+		}
+		if parameter.Fixed {
+			if modelReviewParameterDefaultMatches(parameter, candidate.Value) {
+				return true
+			}
+			continue
+		}
+		if !offering.AgentParameterAllowed(parameter) {
+			continue
+		}
+		if modelReviewParameterAccepts(parameter, candidate.Value) {
+			return true
+		}
+	}
+	return false
+}
+
+func modelReviewParameterAccepts(parameter schemacontract.Parameter, value string) bool {
+	switch parameter.Type {
+	case "select":
+		for _, option := range parameter.Options {
+			if option.Value == value {
+				return true
+			}
+		}
+		return false
+	case "boolean":
+		return value == "true" || value == "false"
+	default:
+		return true
+	}
+}
+
+func modelReviewParameterDefaultMatches(parameter schemacontract.Parameter, value string) bool {
+	switch parameter.Type {
+	case "select", "text":
+		var text string
+		return json.Unmarshal(parameter.Default, &text) == nil && text == value
+	case "boolean":
+		var flag bool
+		return json.Unmarshal(parameter.Default, &flag) == nil && strconv.FormatBool(flag) == value
+	default:
+		return false
+	}
 }
 
 func checkRecommendedShape(offering schemacontract.Offering, shape, viewsArgument string) error {

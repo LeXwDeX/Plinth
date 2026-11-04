@@ -615,7 +615,7 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateSystemSkills(schema.Skills, toolNames); err != nil {
 		return err
 	}
-	if err := validateModelReview(schema); err != nil {
+	if err := validateModelReview(schema, capabilityPresentations); err != nil {
 		return err
 	}
 	for index, tool := range schema.Tools {
@@ -2113,6 +2113,9 @@ const modelReviewMaxRenderDimension = 2048
 var (
 	modelReviewViews = []string{"front", "back", "left", "right", "top", "three_quarter"}
 	modelReviewModes = []string{"textured", "clay", "normals", "wireframe"}
+	// modelReviewPlaceholder finds the braces the executor fills. Any other
+	// brace left in a template would reach the Agent verbatim.
+	modelReviewPlaceholder = regexp.MustCompile(`\{[a-z_]+\}`)
 )
 
 // validateModelReview checks application.chat.model_review (#103) once any
@@ -2120,7 +2123,7 @@ var (
 // renderable, defaults inside their enumerations, and every Agent-facing text
 // present with the placeholders the executor fills. Schemas without the tools
 // stay valid.
-func validateModelReview(schema ChatSchema) error {
+func validateModelReview(schema ChatSchema, capabilityPresentations []CapabilityPresentation) error {
 	used := false
 	for _, tool := range schema.AgentTools {
 		switch tool.Execution.ImplementationKey {
@@ -2138,6 +2141,9 @@ func validateModelReview(schema ChatSchema) error {
 		review.Inspect.WeldEpsilonRatio <= 0 || review.Inspect.DebrisRatio <= 0 ||
 		review.Inspect.MaxListedParts <= 0 {
 		return errors.New("chat.model_review.inspect 的限额、比例与部件上限必须为正数")
+	}
+	if err := validateModelInspectProduction(review.Inspect.Production, capabilityPresentations); err != nil {
+		return err
 	}
 
 	render := review.Render
@@ -2241,6 +2247,122 @@ func validateModelReview(schema ChatSchema) error {
 			if !strings.Contains(text.value, placeholder) {
 				return fmt.Errorf("chat.model_review.texts.%s 必须包含 %s", text.name, placeholder)
 			}
+		}
+	}
+	return nil
+}
+
+// validateModelInspectProduction checks model_review.inspect.production: the
+// thresholds of the purpose check, its Agent-facing sentences and the fix
+// options. Every check has exactly one fix; a dynamic fix names only declared
+// capabilities and public parameter values, while a static fix carries no
+// placeholder the executor would leave behind.
+func validateModelInspectProduction(
+	production ChatModelInspectProductionSchema,
+	capabilityPresentations []CapabilityPresentation,
+) error {
+	if production.PivotBottomCenterRatio <= 0 || production.PivotBottomCenterRatio > 1 {
+		return errors.New("chat.model_review.inspect.production.pivot_bottom_center_ratio 必须在 (0, 1] 内")
+	}
+	if production.YUpFlatRatio <= 0 || production.YUpFlatRatio >= 1 {
+		return errors.New("chat.model_review.inspect.production.y_up_flat_ratio 必须在 (0, 1) 内")
+	}
+	if production.DebrisRatio < 0 || production.DebrisRatio > 1 {
+		return errors.New("chat.model_review.inspect.production.debris_ratio 必须在 [0, 1] 内")
+	}
+	if production.DegenerateRatio < 0 || production.DegenerateRatio > 1 {
+		return errors.New("chat.model_review.inspect.production.degenerate_ratio 必须在 [0, 1] 内")
+	}
+
+	texts := []struct {
+		name     string
+		value    string
+		required []string
+	}{
+		{"default_purpose_text", production.DefaultPurposeText, []string{"{purpose}"}},
+		{"brief_purpose_text", production.BriefPurposeText, []string{"{purpose}"}},
+		{"triangle_override_text", production.TriangleOverrideText, []string{"{value}"}},
+		{"no_capability_text", production.NoCapabilityText, nil},
+		{"capability_joiner", production.CapabilityJoiner, nil},
+		{"option_separator", production.OptionSeparator, nil},
+	}
+	for _, text := range texts {
+		if strings.TrimSpace(text.value) == "" {
+			return fmt.Errorf("chat.model_review.inspect.production.%s 不能为空", text.name)
+		}
+		for _, placeholder := range text.required {
+			if !strings.Contains(text.value, placeholder) {
+				return fmt.Errorf("chat.model_review.inspect.production.%s 必须包含 %s", text.name, placeholder)
+			}
+		}
+		for _, placeholder := range modelReviewPlaceholder.FindAllString(text.value, -1) {
+			if !slices.Contains(text.required, placeholder) {
+				return fmt.Errorf("chat.model_review.inspect.production.%s 含未填充的占位符 %s", text.name, placeholder)
+			}
+		}
+	}
+
+	capabilities := make(map[string]bool, len(capabilityPresentations))
+	for _, capability := range capabilityPresentations {
+		capabilities[string(capability.ID)] = true
+	}
+	checkIDs := ModelReviewUsageCheckIDs()
+	declared := make(map[string]bool, len(production.Fixes))
+	for _, fix := range production.Fixes {
+		if !slices.Contains(checkIDs, fix.Check) {
+			return fmt.Errorf("chat.model_review.inspect.production.fixes 含未知检查 %q", fix.Check)
+		}
+		if declared[fix.Check] {
+			return fmt.Errorf("chat.model_review.inspect.production.fixes 中 %q 重复", fix.Check)
+		}
+		declared[fix.Check] = true
+		if strings.TrimSpace(fix.Template) == "" {
+			return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].template 不能为空", fix.Check)
+		}
+		allowed := map[string]bool{}
+		if len(fix.Options) > 0 {
+			allowed["{capabilities}"] = true
+			if !strings.Contains(fix.Template, "{capabilities}") {
+				return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].template 必须包含 {capabilities}", fix.Check)
+			}
+		}
+		if fix.Check == ModelReviewUsageCheckPlausibleScale && len(fix.Options) > 0 {
+			allowed["{minimum}"] = true
+			allowed["{maximum}"] = true
+			for _, placeholder := range []string{"{minimum}", "{maximum}"} {
+				if !strings.Contains(fix.Template, placeholder) {
+					return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].template 必须包含 %s", fix.Check, placeholder)
+				}
+			}
+		}
+		for _, placeholder := range modelReviewPlaceholder.FindAllString(fix.Template, -1) {
+			if !allowed[placeholder] {
+				return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].template 含未填充的占位符 %s", fix.Check, placeholder)
+			}
+		}
+		for optionIndex, option := range fix.Options {
+			if len(option.Capabilities) == 0 {
+				return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].options[%d] 没有能力", fix.Check, optionIndex)
+			}
+			for candidateIndex, candidate := range option.Capabilities {
+				if strings.TrimSpace(candidate.Capability) == "" || !capabilities[candidate.Capability] {
+					return fmt.Errorf(
+						"chat.model_review.inspect.production.fixes[%s].options[%d].capabilities[%d] 的能力 %q 未声明",
+						fix.Check, optionIndex, candidateIndex, candidate.Capability,
+					)
+				}
+				if (candidate.Parameter == "") != (candidate.Value == "") {
+					return fmt.Errorf(
+						"chat.model_review.inspect.production.fixes[%s].options[%d].capabilities[%d] 的 parameter 与 value 必须同时为空或同时非空",
+						fix.Check, optionIndex, candidateIndex,
+					)
+				}
+			}
+		}
+	}
+	for _, check := range checkIDs {
+		if !declared[check] {
+			return fmt.Errorf("chat.model_review.inspect.production.fixes 缺少检查 %q", check)
 		}
 	}
 	return nil

@@ -2216,6 +2216,94 @@ type ChatModelInspectSchema struct {
 	WeldEpsilonRatio float64               `json:"weld_epsilon_ratio"`
 	DebrisRatio      float64               `json:"debris_ratio"`
 	MaxListedParts   int                   `json:"max_listed_parts"`
+	// Production declares the purpose check inspect_model returns as
+	// usage_check (#103).
+	Production ChatModelInspectProductionSchema `json:"production"`
+}
+
+// Usage check ids of inspect_model.usage_check. They are a wire contract:
+// inspect reports them in this order, and the Schema must declare one fix for
+// each.
+const (
+	ModelReviewUsageCheckTriangles         = "triangles"
+	ModelReviewUsageCheckUV                = "uv"
+	ModelReviewUsageCheckWatertight        = "watertight"
+	ModelReviewUsageCheckSkin              = "skin"
+	ModelReviewUsageCheckTextureSize       = "texture_size"
+	ModelReviewUsageCheckPivotBottomCenter = "pivot_bottom_center"
+	ModelReviewUsageCheckYUp               = "y_up"
+	ModelReviewUsageCheckPlausibleScale    = "plausible_scale"
+	ModelReviewUsageCheckDebris            = "debris"
+	ModelReviewUsageCheckDegenerate        = "degenerate"
+)
+
+// ModelReviewUsageCheckIDs returns the usage checks in the order
+// inspect_model reports them.
+func ModelReviewUsageCheckIDs() []string {
+	return []string{
+		ModelReviewUsageCheckTriangles,
+		ModelReviewUsageCheckUV,
+		ModelReviewUsageCheckWatertight,
+		ModelReviewUsageCheckSkin,
+		ModelReviewUsageCheckTextureSize,
+		ModelReviewUsageCheckPivotBottomCenter,
+		ModelReviewUsageCheckYUp,
+		ModelReviewUsageCheckPlausibleScale,
+		ModelReviewUsageCheckDebris,
+		ModelReviewUsageCheckDegenerate,
+	}
+}
+
+// ChatModelInspectProductionSchema holds the thresholds, words and fix
+// suggestions of the purpose check. Ratio thresholds are fractions of one.
+type ChatModelInspectProductionSchema struct {
+	// PivotBottomCenterRatio bounds the distance from the bbox bottom centre
+	// to the origin, relative to the bbox diagonal.
+	PivotBottomCenterRatio float64 `json:"pivot_bottom_center_ratio"`
+	// YUpFlatRatio marks a bbox as flat (and therefore its up axis unknown)
+	// when its shortest edge is at most this fraction of its longest edge.
+	YUpFlatRatio    float64 `json:"y_up_flat_ratio"`
+	DebrisRatio     float64 `json:"debris_ratio"`
+	DegenerateRatio float64 `json:"degenerate_ratio"`
+	// DefaultPurposeText explains that the session has no usable brief
+	// purpose ({purpose}); BriefPurposeText names the brief purpose
+	// ({purpose}); TriangleOverrideText records the brief's triangle budget
+	// ({value}).
+	DefaultPurposeText   string `json:"default_purpose_text"`
+	BriefPurposeText     string `json:"brief_purpose_text"`
+	TriangleOverrideText string `json:"triangle_override_text"`
+	// NoCapabilityText replaces a fix hint when no enabled Offering of the
+	// declared capability is available.
+	NoCapabilityText string `json:"no_capability_text"`
+	// CapabilityJoiner joins the capabilities of one fix option;
+	// OptionSeparator joins alternative options.
+	CapabilityJoiner string                      `json:"capability_joiner"`
+	OptionSeparator  string                      `json:"option_separator"`
+	Fixes            []ChatModelInspectFixSchema `json:"fixes"`
+}
+
+// ChatModelInspectFixSchema is the fix hint of one usage check. An empty
+// Options list makes Template a static sentence; otherwise Template contains
+// {capabilities} and the server fills only the options whose capabilities are
+// available.
+type ChatModelInspectFixSchema struct {
+	Check    string                            `json:"check"`
+	Template string                            `json:"template"`
+	Options  []ChatModelInspectFixOptionSchema `json:"options"`
+}
+
+// ChatModelInspectFixOptionSchema is one way to fix a failed check. Every
+// capability of the option must be available for the option to be offered.
+type ChatModelInspectFixOptionSchema struct {
+	Capabilities []ChatModelInspectFixCapabilitySchema `json:"capabilities"`
+}
+
+// ChatModelInspectFixCapabilitySchema names a capability and, optionally, the
+// public parameter value that makes it fix this check.
+type ChatModelInspectFixCapabilitySchema struct {
+	Capability string `json:"capability"`
+	Parameter  string `json:"parameter,omitempty"`
+	Value      string `json:"value,omitempty"`
 }
 
 // ChatModelRenderSchema declares the views, modes and bounds of the render
@@ -2521,6 +2609,15 @@ type ChatModel3DUsageProfile struct {
 	// purpose, in order. It is never executed automatically.
 	Pipeline []ChatModel3DUsagePipelineStep `json:"pipeline,omitempty"`
 	Budget   ChatModel3DUsageBudget         `json:"budget"`
+	// ScaleRangeM is the plausible longest-edge range in metres. Nil means
+	// the purpose does not judge scale (render).
+	ScaleRangeM *ChatModel3DUsageScaleRange `json:"scale_range_m,omitempty"`
+}
+
+// ChatModel3DUsageScaleRange is a closed longest-edge range in metres.
+type ChatModel3DUsageScaleRange struct {
+	Min float64 `json:"min"`
+	Max float64 `json:"max"`
 }
 
 // ChatModel3DUsagePipelineStep names a later capability and, optionally, the

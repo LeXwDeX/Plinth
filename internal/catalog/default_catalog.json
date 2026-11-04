@@ -5434,7 +5434,88 @@
           },
           "weld_epsilon_ratio": 0.000001,
           "debris_ratio": 0.001,
-          "max_listed_parts": 50
+          "max_listed_parts": 50,
+          "production": {
+            "pivot_bottom_center_ratio": 0.01,
+            "y_up_flat_ratio": 0.05,
+            "debris_ratio": 0.01,
+            "degenerate_ratio": 0.001,
+            "default_purpose_text": "会话没有可用的制作简报用途，按默认用途「{purpose}」判定。",
+            "brief_purpose_text": "按制作简报的用途「{purpose}」判定。",
+            "triangle_override_text": "三角面上限采用制作简报的 triangle_budget：{value}。",
+            "no_capability_text": "当前 Catalog 没有可用于修复这一项的已启用能力。",
+            "capability_joiner": " → ",
+            "option_separator": " 或 ",
+            "fixes": [
+              {
+                "check": "triangles",
+                "template": "可用 {capabilities} 把面数调整到用途预算内。",
+                "options": [
+                  {"capabilities": [{"capability": "remesh"}]}
+                ]
+              },
+              {
+                "check": "uv",
+                "template": "可用 {capabilities} 展开 UV。",
+                "options": [
+                  {"capabilities": [{"capability": "uv-unwrap"}]}
+                ]
+              },
+              {
+                "check": "watertight",
+                "template": "可用 {capabilities} 修复水密性。",
+                "options": [
+                  {"capabilities": [{"capability": "repair-printability"}]}
+                ]
+              },
+              {
+                "check": "skin",
+                "template": "可用 {capabilities} 为模型绑骨。",
+                "options": [
+                  {"capabilities": [{"capability": "rigging"}]}
+                ]
+              },
+              {
+                "check": "texture_size",
+                "template": "贴图超过用途上限；请重新生成并降低贴图尺寸。",
+                "options": []
+              },
+              {
+                "check": "pivot_bottom_center",
+                "template": "可用 {capabilities} 把模型原点移到底部中心。",
+                "options": [
+                  {"capabilities": [{"capability": "resize", "parameter": "origin_at", "value": "bottom"}]},
+                  {"capabilities": [{"capability": "format-conversion", "parameter": "pivot_to_center_bottom", "value": "true"}]}
+                ]
+              },
+              {
+                "check": "y_up",
+                "template": "模型最高轴不是 Y；请重新生成或在上游把模型调整为 Y 轴朝上。",
+                "options": []
+              },
+              {
+                "check": "plausible_scale",
+                "template": "可用 {capabilities} 把最长边调整到 {minimum}–{maximum} 米。",
+                "options": [
+                  {"capabilities": [{"capability": "resize"}]}
+                ]
+              },
+              {
+                "check": "debris",
+                "template": "可用 {capabilities} 先拆分再合并碎片。",
+                "options": [
+                  {"capabilities": [{"capability": "model-split"}, {"capability": "model-merge"}]}
+                ]
+              },
+              {
+                "check": "degenerate",
+                "template": "可用 {capabilities} 清理退化三角形。",
+                "options": [
+                  {"capabilities": [{"capability": "repair-printability"}]}
+                ]
+              }
+            ]
+          }
         },
         "render": {
           "views": ["front", "back", "left", "right", "top", "three_quarter"],
@@ -5715,7 +5796,7 @@
         {
           "name": "inspect_model",
           "execution": {"implementation_key":"model.inspect","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"3d"},
-          "description": "Read-only structural inspection of a finished 3D model of this session: triangle and vertex counts, parts with their bounding boxes and triangle shares, materials and texture slots, UV sets, skins, animations, the world bounding box (including the bottom-centre offset) and topology (connected components, debris, boundary and non-manifold edges, watertightness). Use it to answer questions about a model's geometry, to judge whether it is fit for printing or processing, or to choose part IDs for render_model_views. Pass a task ID or model handle in model (such as @model2, or @selected); omit it to inspect the selected model. source_asset_id optionally names one saved model file of that task; omit it to use the model's main file. It never creates a task, charges credits or changes the session. A model above the configured size or triangle limit is refused with the limit and the reason; report that clearly instead of guessing the model's contents.",
+          "description": "Read-only structural inspection of a finished 3D model of this session: triangle and vertex counts, parts with their bounding boxes and triangle shares, materials and texture slots, UV sets, skins, animations, the world bounding box (including the bottom-centre offset) and topology (connected components, debris, boundary and non-manifold edges, watertightness). Use it to answer questions about a model's geometry, to judge whether it is fit for printing or processing, or to choose part IDs for render_model_views. It also returns usage_check: when the Schema declares production purposes, every purpose budget and production-readiness property (triangle range, UV, watertightness, skin, texture size, bottom-centre pivot, Y-up, plausible scale, debris and degenerate triangles) is judged pass, fail or unknown against the purpose selected by the session's production brief, with the actual value, the budget value and, for a failure, a fix_hint naming the currently enabled tools that can fix it. Use these facts instead of inventing requirements. Pass a task ID or model handle in model (such as @model2, or @selected); omit it to inspect the selected model. source_asset_id optionally names one saved model file of that task; omit it to use the model's main file. It never creates a task, charges credits or changes the session. A model above the configured size or triangle limit is refused with the limit and the reason; report that clearly instead of guessing the model's contents.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -7546,6 +7627,7 @@
             "reason": "展示用途不限制面数，优先完整细节与观感，并选用当前可用的高保真模型。",
             "budget": {
               "max_triangles": 2000000,
+              "max_texture_size": 8192,
               "require_uv": false,
               "require_watertight": false,
               "require_skin": false
@@ -7596,10 +7678,12 @@
             "budget": {
               "min_triangles": 5000,
               "max_triangles": 60000,
+              "max_texture_size": 2048,
               "require_uv": true,
               "require_watertight": false,
               "require_skin": false
-            }
+            },
+            "scale_range_m": {"min": 0.3, "max": 5}
           },
           {
             "id": "game_prop",
@@ -7635,10 +7719,12 @@
             "budget": {
               "min_triangles": 300,
               "max_triangles": 20000,
+              "max_texture_size": 2048,
               "require_uv": true,
               "require_watertight": false,
               "require_skin": false
-            }
+            },
+            "scale_range_m": {"min": 0.02, "max": 20}
           },
           {
             "id": "web_ar",
@@ -7678,10 +7764,12 @@
             "reason": "Web 与 AR 需要更小的面数和纹理；优先 Tripo P2，其次 Meshy 7.1 的低面数与 2K 纹理。",
             "budget": {
               "max_triangles": 100000,
+              "max_texture_size": 2048,
               "require_uv": true,
               "require_watertight": false,
               "require_skin": false
-            }
+            },
+            "scale_range_m": {"min": 0.05, "max": 10}
           },
           {
             "id": "print",
@@ -7708,10 +7796,12 @@
             ],
             "budget": {
               "max_triangles": 2000000,
+              "max_texture_size": 4096,
               "require_uv": false,
               "require_watertight": true,
               "require_skin": false
-            }
+            },
+            "scale_range_m": {"min": 0.01, "max": 2}
           }
         ],
         "brief": {

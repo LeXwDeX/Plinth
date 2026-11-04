@@ -275,6 +275,12 @@ func Load(reader io.Reader) (*Catalog, error) {
 	); err != nil {
 		return nil, fmt.Errorf("application.chat.model3d_usage: %w", err)
 	}
+	if err := validateModelReviewProductionOfferings(
+		result.application.Chat.ModelReview,
+		result.byID,
+	); err != nil {
+		return nil, fmt.Errorf("application.chat.model_review: %w", err)
+	}
 	if err := validateProviderDiscoveryLegacyModels(
 		result.application.ProviderDiscovery.LegacyModels,
 		result.byID,

@@ -23,10 +23,13 @@ import (
 )
 
 // reviewGateway serves saved Tasks to the read-only review tools and records
-// that they never submit a paid Task.
+// that they never submit a paid Task. Its Offerings and availability let a
+// test check which fix capabilities inspect_model may name.
 type reviewGateway struct {
-	tasks     map[generation.TaskID]generation.Task
-	submitted int
+	tasks       map[generation.TaskID]generation.Task
+	offerings   map[generation.Capability][]generation.Offering
+	unavailable map[generation.OfferingID]bool
+	submitted   int
 }
 
 func newReviewGateway(tasks ...generation.Task) *reviewGateway {
@@ -37,9 +40,13 @@ func newReviewGateway(tasks ...generation.Task) *reviewGateway {
 	return gateway
 }
 
-func (gateway *reviewGateway) Offerings(generation.Capability) []generation.Offering { return nil }
+func (gateway *reviewGateway) Offerings(capability generation.Capability) []generation.Offering {
+	return gateway.offerings[capability]
+}
 
-func (gateway *reviewGateway) OfferingAvailable(generation.OfferingID) bool { return true }
+func (gateway *reviewGateway) OfferingAvailable(id generation.OfferingID) bool {
+	return !gateway.unavailable[id]
+}
 
 func (gateway *reviewGateway) Submit(
 	context.Context,
@@ -884,5 +891,159 @@ func TestModelReviewToolsReportUnavailableWithoutTheirGateways(t *testing.T) {
 		if err != nil || !result.NoSubmission || result.Error == "" {
 			t.Fatalf("%s without gateways = %+v err=%v", name, result, err)
 		}
+	}
+}
+
+func reviewUsageItem(t *testing.T, payload map[string]any, check string) map[string]any {
+	t.Helper()
+	usage, ok := payload["usage_check"].(map[string]any)
+	if !ok {
+		t.Fatalf("payload has no usage_check: %v", payload)
+	}
+	items, _ := usage["checks"].([]any)
+	for _, item := range items {
+		object, ok := item.(map[string]any)
+		if ok && object["check"] == check {
+			return object
+		}
+	}
+	t.Fatalf("usage_check has no %q item: %v", check, usage)
+	return nil
+}
+
+// TestModelReviewInspectReportsThePurposeCheckAndFiltersFixHints wires
+// inspect_model end to end: the shipped Catalog's default purpose judges the
+// saved GLB, only enabled Offerings the runtime can reach are named in a fix
+// hint, and a frozen brief purpose with a triangle_budget overrides the
+// default.
+func TestModelReviewInspectReportsThePurposeCheckAndFiltersFixHints(t *testing.T) {
+	glb := reviewModelGLB(t, 1, 1)
+	gateway := newReviewGateway(reviewTask("task-a", "owner-a", "session-a", glb, generation.TaskSucceeded))
+	gateway.offerings = map[generation.Capability][]generation.Offering{
+		"resize": {{
+			ID: "test/resize", Capability: "resize", Enabled: true,
+			Parameters: []generation.Parameter{{
+				Name: "origin_at", Type: "text", Default: json.RawMessage(`"bottom"`),
+			}},
+		}},
+		"format-conversion": {{
+			ID: "test/format-conversion", Capability: "format-conversion", Enabled: true,
+			Parameters: []generation.Parameter{{
+				Name: "pivot_to_center_bottom", Type: "boolean", Default: json.RawMessage(`true`),
+			}},
+		}},
+		"remesh":    {{ID: "test/remesh", Capability: "remesh", Enabled: true}},
+		"uv-unwrap": {{ID: "test/uv-unwrap", Capability: "uv-unwrap", Enabled: true}},
+	}
+	gateway.unavailable = map[generation.OfferingID]bool{"test/format-conversion": true}
+	assets := newReviewAssets(map[generation.AssetID][]byte{"task-a-glb": glb})
+	executor, schema := reviewExecutor(t, gateway, assets, nil)
+
+	// Without a brief the Schema's default purpose is used and says so.
+	result, err := executor.InspectModel(context.Background(), reviewCommand("inspect_model", `{"model":"task-a"}`))
+	if err != nil || result.Error != "" {
+		t.Fatalf("inspect = %+v err=%v", result, err)
+	}
+	payload := reviewPayload(t, result)
+	usage := payload["usage_check"].(map[string]any)
+	if usage["purpose"] != "render" || usage["purpose_source"] != "default_profile" {
+		t.Fatalf("usage purpose = %v/%v, want the default render purpose", usage["purpose"], usage["purpose_source"])
+	}
+	if note, _ := usage["note"].(string); !strings.Contains(note, "默认用途") || !strings.Contains(note, "展示/渲染") {
+		t.Fatalf("usage note = %q", note)
+	}
+	if items, _ := usage["checks"].([]any); len(items) != len(catalog.ModelReviewUsageCheckIDs()) {
+		t.Fatalf("checks = %d, want %d", len(items), len(catalog.ModelReviewUsageCheckIDs()))
+	}
+	for check, want := range map[string]string{
+		"triangles":           "pass",
+		"uv":                  "unknown",
+		"watertight":          "unknown",
+		"skin":                "unknown",
+		"texture_size":        "pass",
+		"pivot_bottom_center": "fail",
+		"y_up":                "unknown",
+		"plausible_scale":     "unknown",
+		"debris":              "pass",
+		"degenerate":          "pass",
+	} {
+		if got := reviewUsageItem(t, payload, check)["status"]; got != want {
+			t.Errorf("%s status = %v, want %s", check, got, want)
+		}
+	}
+	pivot := reviewUsageItem(t, payload, "pivot_bottom_center")
+	hint, _ := pivot["fix_hint"].(string)
+	if !strings.Contains(hint, "resize(origin_at=bottom)") {
+		t.Fatalf("pivot fix hint = %q, want the enabled resize capability", hint)
+	}
+	if strings.Contains(hint, "format-conversion") {
+		t.Fatalf("pivot fix hint = %q names an unavailable Offering", hint)
+	}
+	if got := reviewNumber(t, pivot, "budget", "maximum_ratio"); got != schema.ModelReview.Inspect.Production.PivotBottomCenterRatio {
+		t.Fatalf("pivot maximum_ratio = %v", got)
+	}
+	if got := reviewNumber(t, pivot, "actual"); got <= schema.ModelReview.Inspect.Production.PivotBottomCenterRatio {
+		t.Fatalf("pivot actual ratio = %v, want above the tolerance", got)
+	}
+
+	// An unavailable Offering and a disabled one both disappear from the hint.
+	gateway.unavailable = map[generation.OfferingID]bool{"test/resize": true, "test/format-conversion": true}
+	result, err = executor.InspectModel(context.Background(), reviewCommand("inspect_model", `{"model":"task-a"}`))
+	if err != nil || result.Error != "" {
+		t.Fatalf("inspect = %+v err=%v", result, err)
+	}
+	hint, _ = reviewUsageItem(t, reviewPayload(t, result), "pivot_bottom_center")["fix_hint"].(string)
+	if hint != schema.ModelReview.Inspect.Production.NoCapabilityText {
+		t.Fatalf("fix hint = %q, want the no-capability text when every option is unavailable", hint)
+	}
+	gateway.unavailable = map[generation.OfferingID]bool{"test/format-conversion": true}
+	gateway.offerings["resize"][0].Enabled = false
+	result, err = executor.InspectModel(context.Background(), reviewCommand("inspect_model", `{"model":"task-a"}`))
+	if err != nil || result.Error != "" {
+		t.Fatalf("inspect = %+v err=%v", result, err)
+	}
+	hint, _ = reviewUsageItem(t, reviewPayload(t, result), "pivot_bottom_center")["fix_hint"].(string)
+	if strings.Contains(hint, "resize") || hint != schema.ModelReview.Inspect.Production.NoCapabilityText {
+		t.Fatalf("fix hint = %q names a disabled Offering", hint)
+	}
+
+	// A frozen brief selects its purpose and its triangle_budget overrides the
+	// profile maximum; the fixes for the failed checks name the enabled tools.
+	command := reviewCommand("inspect_model", `{"model":"task-a"}`)
+	command.Options.ProductionBrief = chat.ProductionBrief{
+		"purpose":         []byte(`"game_character"`),
+		"triangle_budget": []byte(`100`),
+	}
+	result, err = executor.InspectModel(context.Background(), command)
+	if err != nil || result.Error != "" {
+		t.Fatalf("brief inspect = %+v err=%v", result, err)
+	}
+	payload = reviewPayload(t, result)
+	usage = payload["usage_check"].(map[string]any)
+	if usage["purpose"] != "game_character" || usage["purpose_source"] != "production_brief" {
+		t.Fatalf("usage purpose = %v/%v, want the brief purpose", usage["purpose"], usage["purpose_source"])
+	}
+	if note, _ := usage["note"].(string); !strings.Contains(note, "游戏/实时·角色") || !strings.Contains(note, "100") {
+		t.Fatalf("usage note = %q, want the brief purpose and the override", note)
+	}
+	triangles := reviewUsageItem(t, payload, "triangles")
+	if triangles["status"] != "fail" {
+		t.Fatalf("triangles = %v, want a failure below the character minimum", triangles)
+	}
+	if got, _ := triangles["budget"].(map[string]any)["maximum"].(float64); got != 100 {
+		t.Fatalf("triangle maximum = %v, want the brief override 100", got)
+	}
+	if hint, _ := triangles["fix_hint"].(string); !strings.Contains(hint, "remesh") {
+		t.Fatalf("triangle fix hint = %q, want remesh", hint)
+	}
+	uv := reviewUsageItem(t, payload, "uv")
+	if uv["status"] != "fail" {
+		t.Fatalf("uv = %v, want a failure for a quad without TEXCOORD_0", uv)
+	}
+	if hint, _ := uv["fix_hint"].(string); !strings.Contains(hint, "uv-unwrap") {
+		t.Fatalf("uv fix hint = %q, want uv-unwrap", hint)
+	}
+	if got := reviewUsageItem(t, payload, "plausible_scale")["status"]; got != "pass" {
+		t.Fatalf("scale status = %v, want pass for a 2 m model", got)
 	}
 }

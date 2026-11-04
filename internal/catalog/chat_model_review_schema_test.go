@@ -20,6 +20,16 @@ func modelReviewApplication(t *testing.T) catalog.ApplicationSchema {
 	return product.Application()
 }
 
+func modelReviewFix(app *catalog.ApplicationSchema, check string) *catalog.ChatModelInspectFixSchema {
+	for index := range app.Chat.ModelReview.Inspect.Production.Fixes {
+		fix := &app.Chat.ModelReview.Inspect.Production.Fixes[index]
+		if fix.Check == check {
+			return fix
+		}
+	}
+	return nil
+}
+
 // TestShippedModelReviewToolsAreReadOnlySessionBound3D declares the contract
 // the Agent relies on: the three review tools never create a Task, never ask
 // for consent and are offered only in 3D scope.
@@ -110,6 +120,14 @@ func TestShippedModelReviewBoundsAreConsistent(t *testing.T) {
 		review.Inspect.MaxListedParts != 50 {
 		t.Fatalf("inspect defaults = %+v", review.Inspect)
 	}
+	production := review.Inspect.Production
+	if production.PivotBottomCenterRatio != 0.01 || production.YUpFlatRatio != 0.05 ||
+		production.DebrisRatio != 0.01 || production.DegenerateRatio != 0.001 {
+		t.Fatalf("production thresholds = %+v", production)
+	}
+	if len(production.Fixes) != len(catalog.ModelReviewUsageCheckIDs()) {
+		t.Fatalf("production fixes = %d, want one per usage check", len(production.Fixes))
+	}
 	if len(review.Render.DefaultViews) != 3 || review.Render.DefaultViews[0] != "front" ||
 		review.Render.DefaultViews[1] != "back" || review.Render.DefaultViews[2] != "three_quarter" {
 		t.Fatalf("default views = %v", review.Render.DefaultViews)
@@ -135,6 +153,67 @@ func TestModelReviewDeclarationsAreValidated(t *testing.T) {
 		{"no triangle limit", func(a *catalog.ApplicationSchema) { a.Chat.ModelReview.Inspect.Limits.MaxTriangles = -1 }, "inspect"},
 		{"no weld ratio", func(a *catalog.ApplicationSchema) { a.Chat.ModelReview.Inspect.WeldEpsilonRatio = 0 }, "inspect"},
 		{"no parts bound", func(a *catalog.ApplicationSchema) { a.Chat.ModelReview.Inspect.MaxListedParts = 0 }, "inspect"},
+		{"no pivot tolerance", func(a *catalog.ApplicationSchema) {
+			a.Chat.ModelReview.Inspect.Production.PivotBottomCenterRatio = 0
+		}, "pivot_bottom_center_ratio"},
+		{"pivot tolerance above one", func(a *catalog.ApplicationSchema) {
+			a.Chat.ModelReview.Inspect.Production.PivotBottomCenterRatio = 1.1
+		}, "pivot_bottom_center_ratio"},
+		{"flat ratio one", func(a *catalog.ApplicationSchema) {
+			a.Chat.ModelReview.Inspect.Production.YUpFlatRatio = 1
+		}, "y_up_flat_ratio"},
+		{"negative debris ratio", func(a *catalog.ApplicationSchema) {
+			a.Chat.ModelReview.Inspect.Production.DebrisRatio = -0.1
+		}, "debris_ratio"},
+		{"degenerate ratio above one", func(a *catalog.ApplicationSchema) {
+			a.Chat.ModelReview.Inspect.Production.DegenerateRatio = 1.1
+		}, "degenerate_ratio"},
+		{"empty default purpose text", func(a *catalog.ApplicationSchema) {
+			a.Chat.ModelReview.Inspect.Production.DefaultPurposeText = " "
+		}, "default_purpose_text"},
+		{"default purpose text lacks the purpose", func(a *catalog.ApplicationSchema) {
+			a.Chat.ModelReview.Inspect.Production.DefaultPurposeText = "按默认用途判定。"
+		}, "{purpose}"},
+		{"brief purpose text lacks the purpose", func(a *catalog.ApplicationSchema) {
+			a.Chat.ModelReview.Inspect.Production.BriefPurposeText = "按制作简报判定。"
+		}, "{purpose}"},
+		{"triangle override text lacks the value", func(a *catalog.ApplicationSchema) {
+			a.Chat.ModelReview.Inspect.Production.TriangleOverrideText = "按简报预算判定。"
+		}, "{value}"},
+		{"empty no-capability text", func(a *catalog.ApplicationSchema) {
+			a.Chat.ModelReview.Inspect.Production.NoCapabilityText = ""
+		}, "no_capability_text"},
+		{"no fixes", func(a *catalog.ApplicationSchema) {
+			a.Chat.ModelReview.Inspect.Production.Fixes = nil
+		}, "缺少检查"},
+		{"unknown fix check", func(a *catalog.ApplicationSchema) {
+			a.Chat.ModelReview.Inspect.Production.Fixes[0].Check = "unknown"
+		}, "未知检查"},
+		{"duplicate fix check", func(a *catalog.ApplicationSchema) {
+			fixes := a.Chat.ModelReview.Inspect.Production.Fixes
+			a.Chat.ModelReview.Inspect.Production.Fixes = append(fixes, fixes[0])
+		}, "重复"},
+		{"dynamic fix without capabilities", func(a *catalog.ApplicationSchema) {
+			modelReviewFix(a, "triangles").Template = "可用能力降低面数。"
+		}, "{capabilities}"},
+		{"static fix with a capability placeholder", func(a *catalog.ApplicationSchema) {
+			fix := modelReviewFix(a, "texture_size")
+			fix.Template = "可用 {capabilities} 降低贴图。"
+		}, "{capabilities}"},
+		{"fix option without capabilities", func(a *catalog.ApplicationSchema) {
+			modelReviewFix(a, "triangles").Options[0].Capabilities = nil
+		}, "没有能力"},
+		{"fix capability not declared", func(a *catalog.ApplicationSchema) {
+			modelReviewFix(a, "triangles").Options[0].Capabilities[0].Capability = "missing"
+		}, "未声明"},
+		{"fix parameter without value", func(a *catalog.ApplicationSchema) {
+			candidate := &modelReviewFix(a, "triangles").Options[0].Capabilities[0]
+			candidate.Parameter = "origin_at"
+			candidate.Value = ""
+		}, "同时为空或同时非空"},
+		{"scale fix lacks the range", func(a *catalog.ApplicationSchema) {
+			modelReviewFix(a, "plausible_scale").Template = "可用 {capabilities} 调整尺度。"
+		}, "{minimum}"},
 		{"default size above max", func(a *catalog.ApplicationSchema) {
 			a.Chat.ModelReview.Render.Size = a.Chat.ModelReview.Render.MaxSize + 1
 		}, "size"},
