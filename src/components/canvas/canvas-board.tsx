@@ -27,6 +27,8 @@ import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
 import { toast } from 'sonner';
 
+import { CanvasHandleBadges } from '@/components/canvas/canvas-handle-badges';
+import { useNodeHandles } from '@/hooks/use-picture-handles';
 import { CanvasToolRail } from './canvas-tool-rail';
 import { CanvasToolOptions } from './canvas-tool-options';
 import { CanvasZoomControls } from './canvas-zoom-controls';
@@ -237,6 +239,8 @@ export function CanvasBoard({
   const keyboard = canvasSchema.frontend.keyboard;
   const drawing = canvasSchema.frontend.drawing;
   const nodes = useCanvasStore((state) => state.nodesBySession[sessionId] ?? EMPTY_NODES);
+  // #87: the chat handle of each picture of the chat on the board, drawn as a badge in its corner.
+  const nodeHandles = useNodeHandles(sessionId, nodes);
   const selectedIds = useCanvasStore((state) => state.selectedNodeIds);
   const clipboardSize = useCanvasStore((state) => state._clipboard.length);
   const viewport =
@@ -2187,6 +2191,12 @@ export function CanvasBoard({
         }) : null}
       </ContextMenuContent>
       </ContextMenu>
+      <CanvasHandleBadges
+        nodes={nodes}
+        handles={nodeHandles}
+        viewport={viewport}
+        minimumScreenPixels={canvasSchema.frontend.handle_badge_minimum_screen_pixels}
+      />
       {editing && editingNode ? (
         // 文字就地编辑：文本框盖在画布上文字所在的位置，大小随缩放。
         <textarea

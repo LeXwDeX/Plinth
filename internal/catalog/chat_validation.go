@@ -338,7 +338,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		schema.Frontend.TextareaMaximumHeightPixels <= 0 ||
 		schema.Frontend.DownloadFilenameMaxCharacters <= 0 ||
 		schema.Frontend.DownloadTaskIDCharacters <= 0 ||
-		schema.Frontend.ProgressMaximum <= 0 {
+		schema.Frontend.ProgressMaximum <= 0 ||
+		schema.Frontend.HandlePreviewDelayMilliseconds <= 0 ||
+		schema.Frontend.HandlePreviewMaximumPixels <= 0 {
 		return errors.New("chat.frontend 数值配置必须为正数")
 	}
 	if list := schema.API.SessionList; list.DefaultPageSize <= 0 ||

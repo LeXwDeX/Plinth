@@ -4,14 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import catalog from '../../../internal/catalog/default_catalog.json';
 import { blankTile, type VersionTile } from '@/lib/workspace/versions';
 
-const state = vi.hoisted(() => ({ tiles: [] as VersionTile[], pick: null as null | { kind: string; taskId: string; assetId: string }, compare: null as object | null, object: null as null | { taskId: string; assetId: string; kind: string; url: string; sessionId: string }, stage: vi.fn(), detail: vi.fn(), toggle: vi.fn(() => true), buttons: [] as ReactElement<Record<string, any>>[], targets: [] as any[] }));
+const state = vi.hoisted(() => ({ tiles: [] as VersionTile[], pick: null as null | { kind: string; taskId: string; assetId: string }, compare: null as object | null, object: null as null | { taskId: string; assetId: string; kind: string; url: string; sessionId: string }, stage: vi.fn(), detail: vi.fn(), toggle: vi.fn(() => true), buttons: [] as ReactElement<Record<string, any>>[], targets: [] as any[], messages: [] as any[] }));
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema: catalog.application }) }));
 vi.mock('@/hooks/use-session-versions', () => ({ useSessionVersions: () => ({ tiles: state.tiles }), tileOfObject: () => null }));
 vi.mock('@/hooks/use-session-pick', () => ({ useSessionPick: () => ({ pick: state.pick }) }));
 vi.mock('@/hooks/use-object-actions', () => ({ useObjectActions: () => ({ openOnStage: state.stage }) }));
 vi.mock('@/hooks/use-stage-viewer', () => ({ useStageViewer: () => ({ toggleTileInCompare: state.toggle, slotOf: () => null }) }));
 vi.mock('@/hooks/use-asset-url-rewriter', () => ({ useAssetURLRewriter: () => ({ proxyAssetUrl: (url: string) => url, previewAssetUrl: (url: string) => url }) }));
-vi.mock('@/store/chat-store', () => ({ useChatStore: (selector: any) => selector({ activeSessionId: 'session' }) }));
+vi.mock('@/store/chat-store', () => ({ useChatStore: (selector: any) => selector({ activeSessionId: 'session', messagesBySession: { session: state.messages } }) }));
 vi.mock('@/store/workspace-store', () => ({ useWorkspaceStore: (selector: any) => selector({ currentObject: state.object }) }));
 vi.mock('@/store/studio-store', () => ({ useStudioStore: (selector: any) => selector({ compare: state.compare, setAllOutputsOpen: vi.fn() }) }));
 vi.mock('@/components/ui/hint-tooltip', () => ({ HintTooltip: ({ children }: { children: ReactNode }) => children }));
@@ -31,7 +31,7 @@ const tile = (patch: Partial<VersionTile> = {}) => blankTile({ key: 'n:old', tas
 const primary = () => state.buttons.find((button) => button.props['data-shortcut-arrows'])!;
 const detail = () => state.buttons.find((button) => button.props['data-testid'] === 'version-detail')!;
 const click = { detail: 1, stopPropagation: vi.fn(), currentTarget: { focus: vi.fn() } };
-beforeEach(() => { state.tiles = [tile()]; state.pick = null; state.object = null; state.compare = null; state.buttons = []; state.targets = []; vi.clearAllMocks(); });
+beforeEach(() => { state.tiles = [tile()]; state.pick = null; state.object = null; state.compare = null; state.buttons = []; state.targets = []; state.messages = []; vi.clearAllMocks(); });
 
 describe('output strip navigation and details', () => {
   it('selects the historical output on primary activation and keeps request details separate', () => {
@@ -128,5 +128,21 @@ describe('output strip navigation and details', () => {
   it('does not turn a drag into pointer navigation and still permits keyboard activation', () => {
     renderToStaticMarkup(<VersionStrip />); primary().props.onDragStart({}); primary().props.onClick(click);
     expect(state.stage).not.toHaveBeenCalled(); primary().props.onClick({ detail: 0 }); expect(state.stage).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('chat handle badge on a version tile (#87)', () => {
+  const routed = (assetId: string) => `/api/v1/tasks/old/assets/${assetId}`;
+  it('shows the handle the session messages gave this one picture, without its marker', () => {
+    state.tiles = [tile({ assets: [{ id: 'a', kind: 'image', url: routed('a'), role: 'output', variant: '', mediaType: 'image/png', ordinal: 0 }] })];
+    state.messages = [{ attachments: [{ handle: '@img25', kind: 'image', taskId: 'old', assetId: 'a' }] }];
+    const html = renderToStaticMarkup(<VersionStrip />);
+    expect(html).toMatch(/data-testid="version-handle-badge"[^>]*>img25</);
+    expect(html).toContain('aria-label="对话里的句柄 @img25"');
+  });
+  it('shows no badge when no message names the picture', () => {
+    state.tiles = [tile({ assets: [{ id: 'a', kind: 'image', url: routed('a'), role: 'output', variant: '', mediaType: 'image/png', ordinal: 0 }] })];
+    state.messages = [{ attachments: [{ handle: '@img3', kind: 'image', taskId: 'old', assetId: 'other' }] }];
+    expect(renderToStaticMarkup(<VersionStrip />)).not.toContain('version-handle-badge');
   });
 });

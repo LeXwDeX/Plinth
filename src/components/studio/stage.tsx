@@ -9,6 +9,7 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { AllOutputs } from '@/components/studio/all-outputs';
 import { CompareView } from '@/components/studio/compare-view';
 import { Stage3D } from '@/components/studio/stage-3d';
+import { StageImageView } from '@/components/studio/stage-image-view';
 import { StageHeader } from '@/components/studio/stage-header';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
@@ -102,6 +103,7 @@ export function Stage() {
         ) : null}
         {compare ? <CompareView onEnlarge={enlargeCompare} /> : null}
         {allOutputsOpen ? <AllOutputs /> : null}
+        <StageImageView />
       </div>
     </section>
   );

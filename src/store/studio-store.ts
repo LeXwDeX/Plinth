@@ -34,6 +34,13 @@ export type StageModelState = 'loading' | 'ready' | 'failed' | 'incomplete';
 export type ImageCommandKind = 'inpaint' | 'remove-background' | 'export-board' | 'send-board' | 'merge-version';
 
 /** What the composer's next turn carries, published for the canvas notices (derived; never persisted). */
+/** A picture shown large in the stage area (#87): its address, its name and its chat handle when it has one. */
+export interface StageImage {
+  url: string;
+  label: string;
+  handle?: string;
+}
+
 export interface GenerationReferenceContext {
   sessionId: string;
   hasReference: boolean;
@@ -128,6 +135,8 @@ interface StudioState extends StudioPrefs {
   versionsWatchUntil: number;
   /** 全窗口大图（缩放、平移、逐个切换）；null 为关闭。 */
   lightbox: LightboxState | null;
+  /** #87: one picture shown large inside the stage area (not over the chat column); null when closed. */
+  stageImage: StageImage | null;
   /** 比较：2 联、4 联或滑块；null 为没有在比较。 */
   compare: CompareState | null;
   /** Why the last version offered to the comparison was not taken; cleared by the next one that is. */
@@ -168,6 +177,8 @@ interface StudioState extends StudioPrefs {
   watchVersions: (durationMs?: number) => void;
   openLightbox: (items: LightboxItem[], index?: number) => void;
   closeLightbox: () => void;
+  openStageImage: (image: StageImage) => void;
+  closeStageImage: () => void;
   stepLightbox: (delta: number) => void;
   setLightboxIndex: (index: number) => void;
   setCompareNotice: (notice: 'unavailable' | null) => void;
@@ -206,6 +217,7 @@ export const useStudioStore = create<StudioState>()((set, get) => {
     versionsRevision: 0,
     versionsWatchUntil: 0,
     lightbox: null,
+    stageImage: null,
     compare: null,
     compareNotice: null,
     setChatWidth: (width) => {
@@ -259,6 +271,8 @@ export const useStudioStore = create<StudioState>()((set, get) => {
     })),
     openLightbox: (items, index = 0) => set(items.length === 0 ? {} : { lightbox: { items, index: Math.min(Math.max(index, 0), items.length - 1) } }),
     closeLightbox: () => set({ lightbox: null }),
+    openStageImage: (image) => set({ stageImage: image }),
+    closeStageImage: () => set({ stageImage: null }),
     stepLightbox: (delta) => set((state) => state.lightbox
       ? { lightbox: { ...state.lightbox, index: stepIndex(state.lightbox.index, delta, state.lightbox.items.length) } }
       : {}),

@@ -14,6 +14,7 @@ import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/o
 import { CardDownload, ResultContextMenu, openResultDetail, useCanvasDragSource } from '@/components/result/result-card-parts';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { useObjectActions } from '@/hooks/use-object-actions';
+import { useSessionMessages } from '@/hooks/use-picture-handles';
 import { useSessionPick } from '@/hooks/use-session-pick';
 import { useStageViewer } from '@/hooks/use-stage-viewer';
 import { tileOfObject, useSessionVersions } from '@/hooks/use-session-versions';
@@ -22,6 +23,7 @@ import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-
 import { compareFromGroup, slotKey, type CompareSlot } from '@/lib/workspace/compare';
 import { selectionForSession } from '@/lib/workspace/session-scope';
 import { imageResultSlots, orderedImageResults, type ImageResultSlot } from '@/lib/workspace/image-result-group';
+import { handleLabel, handleOfPicture } from '@/lib/workspace/object-handle';
 import { targetOfTile } from '@/lib/workspace/result-target';
 import { objectOfTile, type TilePick } from '@/lib/workspace/version-object';
 import { versionCaption, versionLabel, versionTitle } from '@/lib/workspace/version-label';
@@ -101,6 +103,13 @@ function Thumb({ tile, size }: { tile: VersionTile; size: 'regular' | 'compact' 
   const text = (key: string) => schemaText(schema, `ui.studio.strip.${key}`);
   const dimension = size === 'regular' ? 'size-14' : 'size-7';
   const finished = tile.views.filter((view) => view.status === 'succeeded').length;
+  // #87: a tile of one picture carries that picture's chat handle in its top-right corner (never a handle
+  // the messages do not give; a group or candidate grid shows several pictures, so none).
+  const messages = useSessionMessages(useChatStore((state) => state.activeSessionId));
+  const handle = size === 'regular' && tile.domain === 'image' && tile.status === 'ready' && !grid
+    && tile.slots.length === 0 && tile.views.length === 0 && tile.assets.length === 1 && source
+    ? handleOfPicture(messages, { url: source })
+    : '';
   return (
     <span className={cn('relative flex shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted', dimension)} data-testid="version-thumb" data-grid={grid ? grid.length : undefined}>
       {grid ? (
@@ -135,6 +144,13 @@ function Thumb({ tile, size }: { tile: VersionTile; size: 'regular' | 'compact' 
         <span className="absolute bottom-0.5 right-0.5 rounded-sm bg-panel/90 px-1 text-[9px] font-semibold leading-3">{tile.slots.length}</span>
       ) : size === 'regular' && tile.domain === 'image' && tile.assets.length > 1 ? (
         <span className="absolute bottom-0.5 right-0.5 rounded-sm bg-panel/90 px-1 text-[9px] font-semibold leading-3" data-testid="version-candidate-count">{tile.assets.length}</span>
+      ) : null}
+      {handle ? (
+        <span
+          aria-label={formatSchemaText(schemaText(schema, 'ui.studio.handle_badge.label'), { handle })}
+          className="pointer-events-none absolute right-0.5 top-0.5 rounded-sm bg-black/60 px-0.5 font-mono text-[9px] leading-3 text-white"
+          data-testid="version-handle-badge"
+        >{handleLabel(handle)}</span>
       ) : null}
     </span>
   );
