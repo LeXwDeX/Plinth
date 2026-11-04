@@ -1385,6 +1385,115 @@ async function boardFitContract(browser, engine, viewport) {
   await page.close();
 }
 
+/**
+ * #91: a selected layer outside the dashed frame shows at full brightness; deselected it is dimmed again. A
+ * solid white layer inside the frame is the reference; one outside the frame is partly covered by a later,
+ * unselected layer, which stays dimmed where it covers the selected one. Pixels are the stage's layer canvases
+ * composited in DOM (= drawing) order and read back, brightness weighted by alpha.
+ */
+async function outsideDimRevealContract(browser, engine, viewport) {
+  const { page, errors } = await openPage(browser, viewport, 'board-fit');
+  await page.getByTestId('canvas-zoom-controls').waitFor();
+  const layout = await page.evaluate(() => {
+    const board = window.__board;
+    const area = document.querySelector('[data-canvas-drawing-area]');
+    const W = board.width; const H = board.height;
+    const zoom = Math.min(area.clientWidth / (W * 2.4), area.clientHeight / (H * 1.6));
+    const view = { zoom, panX: area.clientWidth * 0.55 - (board.x + W * 0.25) * zoom, panY: area.clientHeight / 2 - (board.y + H / 2) * zoom };
+    const rect = (id, x, y, width, height, zIndex) => ({
+      id, type: 'shape', shapeType: 'rect', imageUrl: '', taskId: '', x, y, width, height, zIndex,
+      fillColor: '#ffffff', strokeColor: '#ffffff', strokeWidth: 0,
+    });
+    const nodes = [
+      rect('inside', board.x + W * 0.3, board.y + H * 0.3, W * 0.3, H * 0.3, 1),
+      rect('outside', board.x - W * 0.9, board.y + H * 0.2, W * 0.6, H * 0.4, 2),
+      rect('cover', board.x - W * 0.5, board.y + H * 0.3, W * 0.3, H * 0.2, 3),
+    ];
+    window.__canvasStore.setState({ nodesBySession: { s1: nodes }, viewportBySession: { s1: view }, selectedNodeIds: [] });
+    const at = (wx, wy) => ({ x: view.panX + wx * zoom, y: view.panY + wy * zoom });
+    return {
+      inside: at(board.x + W * 0.45, board.y + H * 0.45),
+      outside: at(board.x - W * 0.8, board.y + H * 0.4),
+      cover: at(board.x - W * 0.35, board.y + H * 0.4),
+      background: at(board.x - W * 0.6, board.y + H * 0.85),
+      moved: at(board.x - W * 0.8 - W * 0.05, board.y + H * 0.4 + H * 0.3),
+    };
+  });
+  const sample = async (names) => {
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    return page.evaluate(({ points, names }) => {
+      const stage = window.Konva.stages.find((item) => item.container().closest('[data-canvas-drawing-area]'));
+      const canvases = [...stage.content.querySelectorAll('canvas')];
+      const scale = canvases[0].width / canvases[0].getBoundingClientRect().width;
+      return Object.fromEntries(names.map((name) => {
+        const point = points[name];
+        const x = Math.floor((point.x - 3) * scale); const y = Math.floor((point.y - 3) * scale);
+        const size = Math.max(1, Math.ceil(6 * scale));
+        const out = document.createElement('canvas');
+        out.width = size; out.height = size;
+        const context = out.getContext('2d');
+        for (const canvas of canvases) context.drawImage(canvas, x, y, size, size, 0, 0, size, size);
+        const data = context.getImageData(0, 0, size, size).data;
+        let sum = 0;
+        for (let i = 0; i < data.length; i += 4) sum += Math.max(data[i], data[i + 1], data[i + 2]) * data[i + 3] / 255;
+        return [name, sum / (size * size)];
+      }));
+    }, { points: layout, names });
+  };
+  const select = (ids) => page.evaluate((list) => window.__canvasStore.getState().selectNodes(list), ids);
+  const names = ['inside', 'outside', 'cover', 'background'];
+  const ratio = (values, name) => values[name] / values.inside;
+  const notes = [];
+
+  const unselected = await sample(names);
+  assert(unselected.inside >= 200, `the reference layer inside the frame is too dark (${unselected.inside})`);
+  assert(ratio(unselected, 'outside') <= 0.75, `unselected outside layer is not dimmed (${ratio(unselected, 'outside')})`);
+  assert(ratio(unselected, 'cover') <= 0.75, `unselected covering layer is not dimmed (${ratio(unselected, 'cover')})`);
+  notes.push(`unselected outside ${ratio(unselected, 'outside').toFixed(2)}`);
+
+  await select(['outside']);
+  const outside = await sample(names);
+  assert(ratio(outside, 'outside') >= 0.95, `selected outside layer is dimmed (${ratio(outside, 'outside')})`);
+  assert(Math.abs(outside.cover - unselected.cover) <= 2, `the unselected layer over the selection changed (${outside.cover} vs ${unselected.cover})`);
+  assert(Math.abs(outside.background - unselected.background) <= 2, 'the background outside the frame changed');
+  assert(Math.abs(outside.inside - unselected.inside) <= 2, 'the layer inside the frame changed');
+  notes.push(`selected outside ${ratio(outside, 'outside').toFixed(2)}, cover over it ${ratio(outside, 'cover').toFixed(2)}`);
+  await page.screenshot({ path: path.join(OUT, `${engine}-${viewport.width}-outside-dim-selected.png`) });
+
+  await select(['cover']);
+  const cover = await sample(names);
+  assert(ratio(cover, 'cover') >= 0.95, `selected covering layer is dimmed (${ratio(cover, 'cover')})`);
+  assert(Math.abs(cover.outside - unselected.outside) <= 2, 'the unselected layer under the selection changed');
+
+  await select(['inside']);
+  const inside = await sample(names);
+  for (const name of names) assert(Math.abs(inside[name] - unselected[name]) <= 2, `selecting the layer inside the frame changed ${name}`);
+
+  // The hole follows a selected layer moved on the Konva side only (as a drag does), before React renders.
+  await select(['outside']);
+  await sample(names);
+  const before = await sample(['moved']);
+  await page.evaluate(() => {
+    const board = window.__board;
+    const stage = window.Konva.stages.find((item) => item.container().closest('[data-canvas-drawing-area]'));
+    const node = stage.findOne('#node-outside');
+    node.position({ x: node.x() - board.width * 0.05, y: node.y() + board.height * 0.3 });
+    node.getLayer().batchDraw();
+  });
+  const moved = await sample(['moved', 'inside']);
+  assert(moved.moved / moved.inside >= 0.95, `the hole did not follow the moved selection (${moved.moved / moved.inside})`);
+  assert(before.moved / unselected.inside <= 0.05, 'the moved-to point was not empty before the move');
+  await page.evaluate(() => window.__canvasStore.setState({ nodesBySession: { s1: [...window.__canvasStore.getState().nodesBySession.s1] } }));
+
+  await select([]);
+  const deselected = await sample(['inside', 'cover', 'background']);
+  assert(ratio(deselected, 'cover') <= 0.75, 'deselected layer is not dimmed again');
+  await page.screenshot({ path: path.join(OUT, `${engine}-${viewport.width}-outside-dim-deselected.png`) });
+  assert.deepEqual(unexpectedErrors(errors), []);
+  await page.close();
+  return notes.join('; ');
+}
+
 async function openMask(page) {
   await page.getByTestId('mask-done').waitFor();
   await page.getByTestId('mask-done').click();
@@ -2207,6 +2316,7 @@ try {
       try {
         await record(engine, `${width}x${height}`, 'layer mask viewer, reload, errors, session', () => layerMaskContract(browser, engine, { width, height }));
         await record(engine, `${width}x${height}`, 'back-to-content fit, lines, empty, repeat', () => boardFitContract(browser, engine, { width, height }));
+        await record(engine, `${width}x${height}`, 'selected layer outside the frame undimmed, deselected dimmed (#91)', () => outsideDimRevealContract(browser, engine, { width, height }));
         await record(engine, `${width}x${height}`, 'wide mask/source bytes and prepare', () => maskExportContract(browser, engine, { width, height }, 'wide'));
         await record(engine, `${width}x${height}`, 'workspace inpaint raw suppression and normal task', () => workspaceContract(browser, engine, { width, height }, 'match'));
         await record(engine, `${width}x${height}`, 'workspace mismatched inpaint raw rejection', () => workspaceContract(browser, engine, { width, height }, 'mismatch'));

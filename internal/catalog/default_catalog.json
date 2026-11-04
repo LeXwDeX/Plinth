@@ -7596,7 +7596,8 @@
           },
           "outside_dim": {
             "color": "#000000",
-            "opacity": 0.45
+            "opacity": 0.45,
+            "reveal_selected": true
           },
           "transparency": {
             "cell_pixels": 8,

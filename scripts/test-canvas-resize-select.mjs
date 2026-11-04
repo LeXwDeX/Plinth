@@ -24,8 +24,10 @@
  *
  * Pixel checks (the stage's layer canvases composited in drawing order and read back): with the picture partly
  * and then fully outside the canvas, its selection handles are drawn exactly as when it is selected inside the
- * canvas (above the outside dim, #311), while the picture's own pixels outside the canvas stay dimmed and those
- * inside do not. Screenshots of the inside, partly outside and fully outside selections go to OUT.
+ * canvas (above the outside dim, #311), and the picture's own pixels outside the canvas show at the same full
+ * brightness as inside it while it is selected (#91); once it is deselected the part outside the canvas is
+ * dimmed again and the part inside is not. Screenshots of the inside, partly outside and fully outside selections
+ * go to OUT.
  */
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -202,8 +204,9 @@ const inFrame = async (page, id, fx, fy) => (await frameSide(page, id, fx, fy)) 
 
 /**
  * #311: with the picture selected, every corner handle is as bright as the handles of the same picture selected
- * inside the canvas (the outside dim must not cover the selection), while the picture's own pixels outside the
- * canvas stay dimmed and those inside do not.
+ * inside the canvas (the outside dim must not cover the selection). #91: the picture itself is not dimmed while
+ * selected, outside the canvas or inside it; deselected, its pixels outside the canvas are dimmed again and
+ * those inside are not. Leaves the picture deselected.
  */
 async function expectHandlesUndimmed(page, id, reference, label) {
   const handles = await handlePixels(page);
@@ -220,19 +223,26 @@ async function expectHandlesUndimmed(page, id, reference, label) {
     assert(ratio >= 0.9, `${label}: the ${name} handle ${outside ? 'outside' : 'inside'} the canvas is drawn at ${ratio.toFixed(2)} of its brightness inside the canvas`);
   }
   assert(outsideCorners > 0, `${label}: no handle is outside the canvas`);
-  let dimmedPatches = 0;
+  const patches = [];
   for (const [fx, fy] of [[0.2, 0.2], [0.8, 0.8], [0.5, 0.5]]) {
     const side = await frameSide(page, id, fx, fy, 8);
-    if (side === 'edge') continue;
-    const patch = await picturePatch(page, id, fx, fy);
-    const ratio = patch.mean / reference.patches[`${fx},${fy}`].mean;
-    const outside = side === 'outside';
-    notes.push(`picture ${fx},${fy}${outside ? '(outside)' : ''} ${ratio.toFixed(2)}`);
-    dimmedPatches += outside ? 1 : 0;
-    if (outside) assert(ratio <= 0.75, `${label}: the picture outside the canvas is not dimmed (${ratio.toFixed(2)})`);
-    else assert(ratio >= 0.85, `${label}: the picture inside the canvas is dimmed (${ratio.toFixed(2)})`);
+    if (side !== 'edge') patches.push({ fx, fy, outside: side === 'outside' });
   }
-  assert(dimmedPatches > 0, `${label}: no part of the picture outside the canvas was checked`);
+  assert(patches.some((patch) => patch.outside), `${label}: no part of the picture outside the canvas was checked`);
+  for (const { fx, fy, outside } of patches) {
+    const ratio = (await picturePatch(page, id, fx, fy)).mean / reference.patches[`${fx},${fy}`].mean;
+    notes.push(`selected picture ${fx},${fy}${outside ? '(outside)' : ''} ${ratio.toFixed(2)}`);
+    assert(ratio >= 0.85, `${label}: the selected picture ${outside ? 'outside' : 'inside'} the canvas is dimmed (${ratio.toFixed(2)})`);
+  }
+  await clickEmpty(page);
+  await expectSelected(page, [], `${label}, deselected`);
+  await page.waitForTimeout(100);
+  for (const { fx, fy, outside } of patches) {
+    const ratio = (await picturePatch(page, id, fx, fy)).mean / reference.patches[`${fx},${fy}`].mean;
+    notes.push(`deselected picture ${fx},${fy}${outside ? '(outside)' : ''} ${ratio.toFixed(2)}`);
+    if (outside) assert(ratio <= 0.75, `${label}: the deselected picture outside the canvas is not dimmed (${ratio.toFixed(2)})`);
+    else assert(ratio >= 0.85, `${label}: the deselected picture inside the canvas is dimmed (${ratio.toFixed(2)})`);
+  }
   return notes.join(', ');
 }
 
@@ -469,7 +479,7 @@ async function checks(engine, browser, [width, height]) {
     await clickPicture(page, picture.id);
     await expectSelected(page, [picture.id], 'unlocked');
   });
-  await step('fully outside the canvas after a top-left anchored shrink: selected, handles not dimmed, picture dimmed', async () => {
+  await step('fully outside the canvas after a top-left anchored shrink: selected, handles and picture not dimmed; deselected, picture dimmed', async () => {
     await resizeTo(page, larger);
     await resizeTo(page, smaller, 'top-left');
     for (const [fx, fy] of [[0, 0], [1, 1], [0.5, 0.5]]) assert(!(await inFrame(page, picture.id, fx, fy)), 'the picture is not fully outside');
