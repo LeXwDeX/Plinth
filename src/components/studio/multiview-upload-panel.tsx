@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
+import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { useSessionMessages } from '@/hooks/use-picture-handles';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
 import { defaultViewChoices, validViewChoices, type MultiviewOffering } from '@/lib/workspace/multiview-upload';
@@ -56,16 +57,17 @@ export function MultiviewUploadPanel({ images, target, disabled = false, onConfi
       <ul className="flex flex-wrap gap-2">
         {images.map((url, index) => (
           <li key={`${index}-${url.slice(-24)}`} className="flex items-center gap-1.5">
+            <HintTooltip name={formatSchemaText(schemaText(schema, 'ui.studio.multiview_upload.open_image'), { index: index + 1 })}>
             <button
               type="button"
               onClick={() => openImage(url, index)}
               aria-label={formatSchemaText(schemaText(schema, 'ui.studio.multiview_upload.open_image'), { index: index + 1 })}
-              title={formatSchemaText(schemaText(schema, 'ui.studio.multiview_upload.open_image'), { index: index + 1 })}
               className="cursor-zoom-in rounded-sm transition-shadow hover:ring-2 hover:ring-primary focus-visible:outline-2 focus-visible:outline-ring"
               data-testid="studio-multiview-upload-thumb"
             >
               <img src={url} alt={String(index + 1)} className="size-9 rounded-sm border border-border object-cover" />
             </button>
+            </HintTooltip>
             <select
               value={choices[index] ?? ''} disabled={disabled} data-testid="studio-multiview-upload-view"
               aria-label={String(index + 1)}

@@ -5,6 +5,7 @@ import { X } from 'lucide-react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
+import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { schemaText } from '@/lib/product-schema';
 import { handleLabel } from '@/lib/workspace/object-handle';
@@ -69,7 +70,9 @@ function StageImageModal() {
           <span className="shrink-0 rounded-sm bg-black/60 px-1.5 py-0.5 font-mono text-[11px] leading-none text-white ring-1 ring-white/20" data-testid="stage-image-handle">{handleLabel(image.handle)}</span>
         ) : null}
         <span className="flex-1" />
-        <Action ref={closeButton} type="button" variant="ghost" size="icon-sm" onClick={close} aria-label={closeLabel} title={closeLabel} className="text-white hover:bg-white/10 hover:text-white" data-testid="stage-image-close"><X /></Action>
+        <HintTooltip name={closeLabel}>
+          <Action ref={closeButton} type="button" variant="ghost" size="icon-sm" onClick={close} aria-label={closeLabel} className="text-white hover:bg-white/10 hover:text-white" data-testid="stage-image-close"><X /></Action>
+        </HintTooltip>
       </header>
       <div
         className="flex min-h-0 flex-1 items-center justify-center p-4"
