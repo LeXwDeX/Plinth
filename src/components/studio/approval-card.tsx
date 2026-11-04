@@ -243,7 +243,10 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
         </ul>
       ) : null}
       {model.referenceNote ? (
-        <UnavailableNotice testId="studio-approval-reference-note" label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.approval.reference_unused'))} detail={model.referenceNote} />
+        // The server's reference note is the step's source note (which views or source model it is made from), or the
+        // count cut; it is never on its own a block of this step, so it stays a plain note, not an "unavailable" warning
+        // (the composer already warns about pictures it will not send, #94).
+        <p className="text-muted-foreground [overflow-wrap:anywhere]" data-testid="studio-approval-reference-note">{model.referenceNote}</p>
       ) : null}
       {short ? (
         <UnavailableNotice
