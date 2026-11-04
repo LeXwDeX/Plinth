@@ -97,8 +97,9 @@ func choiceTestExecutor(gateway Gateway) *Executor {
 				Multiview: catalog.ChatThreeViewMultiviewSchema{Tool: "create_model_3d_from_views"},
 			},
 			Presentation: catalog.ChatPresentationSchema{Messages: catalog.ChatMessageTexts{
-				ModelChoiceConflict:    "模型已锁定为 {locked}，不能改为 {requested}",
-				ModelChoiceUnavailable: "模型 {model} 不可用；可选：{choices}",
+				ModelChoiceConflict:          "模型已锁定为 {locked}，不能改为 {requested}",
+				ModelChoiceUnavailable:       "模型 {model} 不可用；可选：{choices}",
+				ModelChoiceWorkspaceConflict: "工作区当前选择 {workspace}，用途 {profile} 推荐 {recommended}；请先确认",
 			}},
 		},
 	}
@@ -161,8 +162,10 @@ func TestChooseOfferingFollowsTheModelChoiceLayers(t *testing.T) {
 		{name: "a conflict with the person's pick is refused", locked: choiceP2ID, named: choiceMeshyID,
 			refusal: "锁定"},
 		{name: "an unavailable Agent model is refused", named: "missing/model", refusal: "不可用"},
-		{name: "the workspace picker value does not outrank the purpose", purpose: "game_character",
-			workspace: choiceFullID, wantID: choiceP2ID, source: "profile", profile: "game_character"},
+		{name: "a purpose step that differs from the workspace model asks first", purpose: "game_character",
+			workspace: choiceFullID, refusal: "确认"},
+		{name: "the purpose step runs when the workspace model already matches", purpose: "render",
+			workspace: choiceFullID, wantID: choiceFullID, source: "profile", profile: "render"},
 		{name: "the Agent outranks the workspace picker value", named: choiceMeshyID,
 			workspace: choiceFullID, wantID: choiceMeshyID, source: "agent"},
 		{name: "without a purpose the workspace picker value still runs", workspace: choiceMeshyID,
@@ -196,10 +199,33 @@ func TestChooseOfferingFollowsTheModelChoiceLayers(t *testing.T) {
 				choice.Source != test.source || choice.Profile != test.profile {
 				t.Fatalf("choice = %+v, want %s from %s (profile %q)", choice, test.wantID, test.source, test.profile)
 			}
-			if test.source == "profile" && choice.Reason != "角色用途需要受控面数与 UV。" {
-				t.Fatalf("purpose reason = %q", choice.Reason)
+			if test.source == "profile" {
+				wantReason := "角色用途需要受控面数与 UV。"
+				if test.profile == "render" {
+					wantReason = "展示用途优先完整细节。"
+				}
+				if choice.Reason != wantReason {
+					t.Fatalf("purpose reason = %q", choice.Reason)
+				}
 			}
 		})
+	}
+}
+
+func TestChooseOfferingDoesNotSilentlyReplaceTheWorkspaceModel(t *testing.T) {
+	full := choiceTestOffering(choiceFullID, "tripo-v3.1-full", generation.TextTo3D)
+	p2 := choiceTestOffering(choiceP2ID, "tripo-p2", generation.TextTo3D)
+	command := choiceTestCommand(choiceTestTool("create_model_3d", generation.TextTo3D))
+	command.Options.AIModel = choiceFullID
+	command.Options.ProductionBrief = choiceTestBrief("game_character")
+	choice, err := choiceTestExecutor(&choiceTestGateway{offerings: []generation.Offering{full, p2}}).
+		chooseOffering(command, generation.TextTo3D, nil, modelInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if choice.Offering.ID != "" || !strings.Contains(choice.Refusal, "确认") ||
+		!strings.Contains(choice.Refusal, "tripo-p2") {
+		t.Fatalf("choice = %+v, want a refusal naming the recommended model", choice)
 	}
 }
 
