@@ -231,3 +231,14 @@ func TestMultiviewWithoutAGroupKeepsTheHandlePath(t *testing.T) {
 		t.Fatalf("a call without a group must use the handle path: %+v", run.result)
 	}
 }
+
+func TestMultiviewRequestAcceptsTheOfferingID(t *testing.T) {
+	request := chat.MultiviewRequest{Group: "run-1", Model: multiviewOffering, Views: []chat.MultiviewView{
+		{View: "front", TaskID: "task-front", AssetID: "asset-front"},
+		{View: "back", AssetID: "upload-back"},
+	}}
+	run := runMultiview(t, groupOfFour(), `{"model":"tripo-v3.1-multiview"}`, &request)
+	if run.err != nil || run.result.NoSubmission {
+		t.Fatalf("a request naming the Offering ID was refused: %+v %v", run.result, run.err)
+	}
+}

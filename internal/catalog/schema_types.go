@@ -1197,6 +1197,8 @@ type PublicGenerationMessagesSchema struct {
 	ReferenceLimit    string `json:"reference_limit,omitempty"`
 	ReferenceLimitOne string `json:"reference_limit_one,omitempty"`
 	ReferenceCapacity string `json:"reference_capacity,omitempty"`
+	// ReferenceCapacityMultiview: see schema.ExecutionMessages (#86).
+	ReferenceCapacityMultiview string `json:"reference_capacity_multiview,omitempty"`
 }
 
 // Public DTOs list browser-owned fields explicitly. Adding a server setting to
@@ -1566,7 +1568,10 @@ type CanvasFrontendSchema struct {
 	NodeGapPixels                    float64 `json:"node_gap_pixels"`
 	MinimumNodeSize                  float64 `json:"minimum_node_size"`
 	MaximumNodeEdge                  float64 `json:"maximum_node_edge"`
-	ModelCaptureLongEdgePixels       int     `json:"model_capture_long_edge_pixels"`
+	// HandleBadgeMinimumScreenPixels is the shorter on-screen edge a picture layer needs before its chat
+	// handle badge ("img3") is drawn in its top-right corner; smaller layers show none.
+	HandleBadgeMinimumScreenPixels float64 `json:"handle_badge_minimum_screen_pixels"`
+	ModelCaptureLongEdgePixels     int     `json:"model_capture_long_edge_pixels"`
 	// ToThreeDLongEdgePixels is the long edge of the board picture handed to an image-to-3D Offering when no
 	// 2D output size names exact pixels (the artboard itself is only max_edge units across).
 	ToThreeDLongEdgePixels int                  `json:"to_3d_long_edge_pixels"`
@@ -1757,10 +1762,13 @@ type CanvasTransparencySchema struct {
 	Opacity    float64 `json:"opacity"`
 }
 
-// CanvasOutsideDimSchema colours the veil outside the artboard; Opacity is 0..1.
+// CanvasOutsideDimSchema colours the veil outside the artboard; Opacity is 0..1. RevealSelected lets a
+// selected layer outside the artboard show at full brightness: its visible pixels are cut out of the veil
+// while it stays selected (#91). It changes only the board view, never the export.
 type CanvasOutsideDimSchema struct {
-	Color   string  `json:"color"`
-	Opacity float64 `json:"opacity"`
+	Color          string  `json:"color"`
+	Opacity        float64 `json:"opacity"`
+	RevealSelected bool    `json:"reveal_selected"`
 }
 
 // CanvasBrushSchema bounds the pixel brush (also the quick-mask brush) in canvas pixels.
@@ -2770,6 +2778,11 @@ type ChatFrontendSchema struct {
 	LegacyHiddenContentPrefix       string `json:"legacy_hidden_content_prefix"`
 	LegacyHiddenContentSuffix       string `json:"legacy_hidden_content_suffix"`
 	ProgressMaximum                 int    `json:"progress_maximum"`
+	// HandlePreviewDelayMilliseconds is how long the pointer rests on a picture handle ("@img3") in an
+	// Agent message before its large preview shows; HandlePreviewMaximumPixels bounds the preview's
+	// longer edge. The preview never takes pointer events.
+	HandlePreviewDelayMilliseconds int `json:"handle_preview_delay_milliseconds"`
+	HandlePreviewMaximumPixels     int `json:"handle_preview_maximum_pixels"`
 }
 
 type ChatThinkingSchema struct {
@@ -3638,6 +3651,9 @@ type ChatMessageTexts struct {
 	// AgentContentRejected replaces UnknownError when the upstream's content
 	// moderation refused the request's pictures or text (#35).
 	AgentContentRejected string `json:"agent_content_rejected"`
+	// AgentInlineImageOutput replaces UnknownError when the Agent model drew
+	// a picture itself instead of answering or calling a generation tool.
+	AgentInlineImageOutput string `json:"agent_inline_image_output"`
 	// AgentNotConfigured is what the person reads while the live Agent has no
 	// API key or no model: Agent replies and prompt enhancement are off (#253).
 	AgentNotConfigured string `json:"agent_not_configured"`

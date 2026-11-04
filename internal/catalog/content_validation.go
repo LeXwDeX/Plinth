@@ -194,6 +194,7 @@ func validateContent(schema ContentSchema) error {
 		"failure.internal",
 		"failure.source_expired",
 		"failure.content_rejected",
+		"failure.upstream_denied",
 	}
 	if len(schema.Messages) == 0 {
 		return errors.New("messages 不能为空")
@@ -302,6 +303,122 @@ func validateContent(schema ContentSchema) error {
 	for _, key := range required {
 		if strings.TrimSpace(schema.Messages[key]) == "" {
 			return fmt.Errorf("messages 缺少必需文本 %q", key)
+		}
+	}
+	return nil
+}
+
+// unavailableNoticeMessages are the texts of the shared "unavailable" notice
+// (#93, #94): a warning icon, "无法使用，<short reason>" inline, and the full
+// explanation (the limit against the actual value, what upstream requires,
+// what to do next) only in the hover hint. Each key carries exactly these
+// placeholders in the default copy and in every bundle that translates it, so
+// the frontend never assembles a reason or a remedy of its own.
+var unavailableNoticeMessages = map[string][]string{
+	"ui.unavailable.label":                                   {"reason"},
+	"ui.workspace.processing.unavailable_reason.too_large":   {"limit"},
+	"ui.workspace.processing.unavailable_reason.face_limit":  {"limit"},
+	"ui.workspace.processing.unavailable_reason.media":       nil,
+	"ui.workspace.processing.unavailable_reason.needs_task":  {"provider"},
+	"ui.workspace.processing.unavailable_reason.expired":     nil,
+	"ui.workspace.processing.unavailable_reason.blocked":     nil,
+	"ui.workspace.processing.unavailable_reason.unavailable": nil,
+	"ui.workspace.processing.source_refused":                 {"size", "reasons"},
+	"ui.workspace.processing.source_refused_face_limit":      {"service", "limit", "faces"},
+}
+
+func validateUnavailableNotices(schema ApplicationSchema) error {
+	check := func(where, key, text string, want []string) error {
+		// Presence is the default Catalog's contract (its tests assert every
+		// key); a smaller custom Application may leave them out, but a declared
+		// text must carry exactly its placeholders.
+		if strings.TrimSpace(text) == "" {
+			return nil
+		}
+		got := placeholderSet(text)
+		if len(got) != len(want) {
+			return fmt.Errorf("%s 的 %q 占位符须恰为 %v", where, key, want)
+		}
+		for _, name := range want {
+			if !got[name] {
+				return fmt.Errorf("%s 的 %q 占位符须恰为 %v", where, key, want)
+			}
+		}
+		return nil
+	}
+	for key, want := range unavailableNoticeMessages {
+		if err := check("content.messages", key, schema.Content.Messages[key], want); err != nil {
+			return err
+		}
+		if schema.Localization == nil {
+			continue
+		}
+		for locale, bundle := range schema.Localization.Bundles {
+			if err := check("bundles."+locale+".messages", key, bundle.Messages[key], want); err != nil {
+				return err
+			}
+		}
+	}
+	return validateUnavailableReasons(schema)
+}
+
+// unavailableReasonPrefixes name the short reasons of the shared notice (#94):
+// the few words after "无法使用，" on the page, whose full explanation lives
+// in the hover hint. A short reason is declared in the default copy and in
+// every bundle, with the same placeholders, so no locale falls back to a long
+// paragraph or to a reason the frontend made up.
+var unavailableReasonPrefixes = []string{"ui.unavailable.reason.", "ui.workspace.processing.unavailable_reason."}
+
+func isUnavailableReason(key string) bool {
+	for _, prefix := range unavailableReasonPrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func validateUnavailableReasons(schema ApplicationSchema) error {
+	same := func(a, b map[string]bool) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for name := range a {
+			if !b[name] {
+				return false
+			}
+		}
+		return true
+	}
+	for key, text := range schema.Content.Messages {
+		if !isUnavailableReason(key) {
+			continue
+		}
+		if strings.TrimSpace(text) == "" {
+			return fmt.Errorf("content.messages 的无法使用原因 %q 不能为空", key)
+		}
+		if schema.Localization == nil {
+			continue
+		}
+		want := placeholderSet(text)
+		for locale, bundle := range schema.Localization.Bundles {
+			translated := bundle.Messages[key]
+			if strings.TrimSpace(translated) == "" {
+				return fmt.Errorf("bundles.%s.messages 缺少无法使用原因 %q", locale, key)
+			}
+			if !same(want, placeholderSet(translated)) {
+				return fmt.Errorf("bundles.%s.messages 的 %q 占位符须与默认文案一致", locale, key)
+			}
+		}
+	}
+	if schema.Localization == nil {
+		return nil
+	}
+	for locale, bundle := range schema.Localization.Bundles {
+		for key := range bundle.Messages {
+			if isUnavailableReason(key) && strings.TrimSpace(schema.Content.Messages[key]) == "" {
+				return fmt.Errorf("bundles.%s.messages 的无法使用原因 %q 没有默认文案", locale, key)
+			}
 		}
 	}
 	return nil

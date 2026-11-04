@@ -12,6 +12,8 @@
     {"name": "Seedream below its minimum takes the nearest square, forced to 4K", "offering": "jimeng/seedream-4-5/image-to-image", "width": 1000, "height": 1000, "parameter": "size", "value": "4096x4096", "nearest": false},
     {"name": "Gemini takes the artboard ratio", "offering": "gemini/gemini-3-pro-image/image-to-image", "width": 2048, "height": 1536, "parameter": "aspect_ratio", "value": "4:3", "nearest": false},
     {"name": "Gemini takes the nearest ratio", "offering": "gemini/gemini-3-pro-image/image-to-image", "width": 2048, "height": 1000, "parameter": "aspect_ratio", "value": "21:9", "nearest": true},
+    {"name": "Gemini at 4K on an artboard of its own 9:16 size follows the artboard", "offering": "gemini/gemini-3-pro-image/image-to-image", "width": 3072, "height": 5504, "parameter": "aspect_ratio", "value": "9:16", "nearest": false},
+    {"name": "Gemini at 4K on its 2K 9:16 artboard gives a larger size of that shape", "offering": "gemini/gemini-3-pro-image/image-to-image", "width": 1536, "height": 2752, "parameter": "aspect_ratio", "value": "9:16", "nearest": false},
     {"name": "Nano Banana takes the nearest ratio it offers", "offering": "meshy/nano-banana-pro/image-to-image", "width": 2048, "height": 1000, "parameter": "aspect_ratio", "value": "16:9", "nearest": true},
     {"name": "Chat edit: a 4:3 upload below GPT Image's minimum takes its 4:3 option", "source": "reference", "offering": "openai/gpt-image-2/image-to-image", "width": 800, "height": 600, "parameter": "size", "value": "1536x1152", "nearest": false},
     {"name": "Chat edit: a square upload stays square", "source": "reference", "offering": "openai/gpt-image-2/image-to-image", "width": 2048, "height": 2048, "parameter": "size", "value": "2048x2048", "nearest": false},
@@ -21,6 +23,7 @@
     {"name": "Chat edit: an upload off GPT Image's grid snaps to it", "source": "reference", "offering": "openai/gpt-image-2/image-to-image", "width": 1000, "height": 700, "parameter": "size", "value": "1008x704", "nearest": true},
     {"name": "Chat edit: Seedream takes the 4:3 option, forced to its 4K size", "source": "reference", "offering": "jimeng/seedream-4-5/image-to-image", "width": 800, "height": 600, "parameter": "size", "value": "4704x3520", "nearest": true},
     {"name": "Chat edit: Gemini takes the upload's ratio", "source": "reference", "offering": "gemini/gemini-3-pro-image/image-to-image", "width": 600, "height": 800, "parameter": "aspect_ratio", "value": "3:4", "nearest": false},
+    {"name": "Chat edit: Gemini keeps a picture of its own 9:16 size", "source": "reference", "offering": "gemini/gemini-3-pro-image/image-to-image", "width": 3072, "height": 5504, "parameter": "aspect_ratio", "value": "9:16", "nearest": false},
     {"name": "Chat edit: Nano Banana takes the nearest ratio it offers", "source": "reference", "offering": "meshy/nano-banana-pro/image-to-image", "width": 1000, "height": 700, "parameter": "aspect_ratio", "value": "4:3", "nearest": true}
   ]
 }

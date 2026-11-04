@@ -37,9 +37,9 @@ import (
 //   - MarkerConvertRejected：结果本身正常，但以它为来源的转换得到的贴图在结束块
 //     后带真正的多余数据，交付检查拒收：转换在上游完成（计费）后交付失败，用来在
 //     本机走一遍“已扣费但交付失败”的免费取回与再次计费重试（#330）；
-//   - MarkerConvertRejectedOnce：同上，但原任务的交付重试（每次重试重读一次已完成
-//     的作业，共 materialize_attempts−1 次）用完之后，再次观察（免费取回）时去掉
-//     多余数据，取回拿到干净文件并成功，用来在本机走一遍取回成功后的状态（#330 第二轮）。
+//   - MarkerConvertRejectedOnce：同上，但交付被拒收（内容检查结论不可重试，原任务
+//     不再重试交付）之后，再次观察（免费取回）时去掉多余数据，取回拿到干净文件
+//     并成功，用来在本机走一遍取回成功后的状态（#330 第二轮）。
 const (
 	MarkerInsufficientBalance = "[mock:insufficient_balance]"
 	MarkerSlow                = "[mock:slow]"
@@ -116,10 +116,9 @@ type job struct {
 	derivedTail []byte
 	// derivedOnce marks jobs made from this one as tailOnce. A tailOnce job
 	// drops its textureTail on the first observation that the failing
-	// delivery cannot have made: after the tail was served, the kernel
-	// re-observes the finished job once per materialization retry (the
-	// Offering's materialize_attempts minus one, under the source Task's
-	// IDs); the next observation is a refetch.
+	// delivery cannot have made: the refused delivery is a content verdict
+	// and is not retried, so the first observation after the tail was served
+	// (under the source Task's IDs) is the refetch.
 	derivedOnce bool
 	tailOnce    bool
 	tailServed  bool
@@ -276,13 +275,7 @@ func (a *Adapter) Observe(
 	stored, ok := a.jobs[request.Job.RemoteID]
 	if ok && stored.tailOnce && stored.completed && stored.tailServed && len(stored.textureTail) > 0 {
 		stored.reobserved++
-		attempts := request.Offering.MaterializeAttempts
-		if attempts <= 0 {
-			attempts = 3 // the kernel's default
-		}
-		if stored.reobserved >= attempts {
-			stored.textureTail = nil
-		}
+		stored.textureTail = nil
 	}
 	if !ok {
 		return generation.Observation{}, &generation.ProviderError{

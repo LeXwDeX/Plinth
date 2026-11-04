@@ -27,6 +27,8 @@ import { toast } from 'sonner';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { formatSchemaText } from '@/lib/product-schema';
+import { unavailableLabel } from '@/lib/unavailable';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { openResultDetail } from '@/components/result/result-card-parts';
 import { cn } from '@/lib/utils';
@@ -248,7 +250,7 @@ export function TaskDrawer() {
       {noticePermission === 'granted' ? (
         <p role="status" className="text-muted-foreground">{ui.noticeEnabled}</p>
       ) : noticePermission === 'denied' ? (
-        <p role="status" className="text-muted-foreground">{ui.noticeDenied}</p>
+        <UnavailableNotice testId="workspace-notice-denied" label={unavailableLabel(schema, text('ui.unavailable.reason.task_center.notice_blocked'))} detail={ui.noticeDenied} />
       ) : (
         <Action
           type="button"

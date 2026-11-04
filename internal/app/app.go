@@ -566,6 +566,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		References:      referenceResolver,
 		InputAssetRoute: applicationSchema.Runtime.HTTP.Routes.AssetItem,
 		Chat:            applicationSchema.Chat,
+		CanvasArtboard:  applicationSchema.Canvas.Frontend.Artboard,
 		ModelDelivery:   applicationSchema.ModelDelivery,
 		Skills:          skillCatalog,
 		TaskStates:      applicationSchema.TaskStates,

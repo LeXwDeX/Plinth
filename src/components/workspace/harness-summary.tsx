@@ -5,10 +5,12 @@ import { useAuth } from '@/hooks/use-auth';
 import { useSessionHarness } from '@/hooks/use-session-harness';
 import type { HarnessSelection, HarnessView } from '@/lib/harness';
 import { formatSchemaText, type ProductSchema } from '@/lib/product-schema';
+import { unavailableLabel } from '@/lib/unavailable';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 
 export function harnessSelectionLabel(schema: ProductSchema, selection: HarnessSelection, text: (key: string) => string) {
   if (!selection.operation_id) return text('ui.harness.status_free');
-  return schema.chat.harness?.operations.find(operation => operation.id === selection.operation_id)?.label ?? text('ui.harness.selection_unavailable');
+  return schema.chat.harness?.operations.find(operation => operation.id === selection.operation_id)?.label ?? unavailableLabel(schema, text('ui.unavailable.reason.harness.selection_gone'));
 }
 
 export function harnessTurnDiffers(view: HarnessView) {
@@ -30,6 +32,7 @@ export function HarnessSummary({ sessionId }: { sessionId: string | null }) {
   return <div data-testid="harness-summary" aria-busy={busy} className="space-y-1 text-[11px] leading-4 text-muted-foreground">
     <p>{formatSchemaText(text('ui.harness.current_summary'), { operation: label })}</p>
     {differs && view.turn ? <><p>{formatSchemaText(text('ui.harness.turn_summary'), { operation: harnessSelectionLabel(schema, view.turn.selection, text) })}</p><p>{text('ui.harness.next_turn')}</p></> : null}
-    {view.status === 'needs_input' || view.status === 'unavailable' ? <p>{text(`ui.harness.status_${view.status}`)}</p> : null}
+    {view.status === 'needs_input' || view.status === 'unavailable'
+      ? <UnavailableNotice label={unavailableLabel(schema, text(`ui.unavailable.reason.harness.status_${view.status}`))} detail={text(`ui.harness.status_${view.status}`)} testId="harness-summary-unavailable" /> : null}
   </div>;
 }

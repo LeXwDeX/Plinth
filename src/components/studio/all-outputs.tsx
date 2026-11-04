@@ -28,7 +28,7 @@ import { clearSelection, escapeClearsSelection, groupByDay, selectionAfterClick 
 import { selectionForSession } from '@/lib/workspace/session-scope';
 import { targetOfTile } from '@/lib/workspace/result-target';
 import { versionCaption, versionLabel } from '@/lib/workspace/version-label';
-import { versionStatusLabel, type VersionTile } from '@/lib/workspace/versions';
+import { shownVersionTiles, versionStatusLabel, type VersionTile } from '@/lib/workspace/versions';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/store/chat-store';
 import { useStudioStore } from '@/store/studio-store';
@@ -57,12 +57,13 @@ export function AllOutputs() {
   // The checkbox last clicked: a Shift range runs from it to the next one.
   const anchor = useRef<string | null>(null);
   const currentKey = tileOfObject(versions, object)?.key ?? null;
+  const tiles = useMemo(() => shownVersionTiles(versions.tiles), [versions.tiles]);
   const counts = useMemo(() => ({
-    all: versions.tiles.length,
-    image: versions.tiles.filter((tile) => tile.domain === 'image').length,
-    model: versions.tiles.filter((tile) => tile.domain === 'model').length,
-  }), [versions.tiles]);
-  const shown = versions.tiles.filter((tile) => filter === 'all' || tile.domain === filter);
+    all: tiles.length,
+    image: tiles.filter((tile) => tile.domain === 'image').length,
+    model: tiles.filter((tile) => tile.domain === 'model').length,
+  }), [tiles]);
+  const shown = tiles.filter((tile) => filter === 'all' || tile.domain === filter);
   const filters: Array<[Filter, string]> = [['all', schemaText(schema, 'ui.studio.outputs.filter_all')], ['image', schemaText(schema, 'ui.studio.outputs.filter_2d')], ['model', schemaText(schema, 'ui.studio.outputs.filter_3d')]];
 
   // Only finished versions have files to take; the selection follows what is still in the list.
@@ -214,7 +215,7 @@ export function AllOutputs() {
                     // #290: cards show the downscaled preview of a task picture.
                     const src = first ? previewAssetUrl(first) : '';
                     const label = labelOf(tile);
-                    const caption = versionCaption(schema, tile, versions.tiles);
+                    const caption = versionCaption(schema, tile, tiles);
                     const whole = tile.status === 'ready' && tile.domain === 'image' && tile.assets.filter((asset) => asset.kind === 'image').length > 1;
                     return (
                       <OutputCard

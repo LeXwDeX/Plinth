@@ -3,6 +3,8 @@
 import { useProductSchema } from '@/components/product-schema-provider';
 import { NO_CREDITS, type OfferingWire } from '@/lib/agent-offerings';
 import { schemaCountMessage, schemaText } from '@/lib/product-schema';
+import { unavailableLabel } from '@/lib/unavailable';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { offeringQuoteText, processingStepsCost } from '@/lib/workspace/processing-cost';
 import { cn } from '@/lib/utils';
 
@@ -27,11 +29,13 @@ export function ProcessingCostSummary({ steps }: { steps: readonly ProcessingCos
       <p className="mb-1 font-medium">{schemaText(schema, 'ui.pricing.totals_heading')}</p>
       {native.map((step) => <p key={step.capability}>{stepLabel(step.capability)}: {offeringQuoteText(schema, step.offering)}</p>)}
     </div>}
-    {credits && <p className={cn('mb-3', (credits.kind === 'empty' || credits.kind === 'none') && 'text-xs text-muted-foreground')} data-testid="processing-cost" data-kind={credits.kind}>{credits.kind === 'empty'
+    {credits?.kind === 'none' && <p className="mb-3 text-xs" data-testid="processing-cost" data-kind="none">
+      <UnavailableNotice label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.processing.step_unrunnable'))}
+        detail={schemaText(schema, 'ui.studio.processing.cost_none')} testId="processing-cost-none" />
+    </p>}
+    {credits && credits.kind !== 'none' && <p className={cn('mb-3', credits.kind === 'empty' && 'text-xs text-muted-foreground')} data-testid="processing-cost" data-kind={credits.kind}>{credits.kind === 'empty'
       ? schemaText(schema, 'ui.studio.processing.cost_empty')
-      : credits.kind === 'none'
-        ? schemaText(schema, 'ui.studio.processing.cost_none')
-        : credits.kind === 'unmetered'
+      : credits.kind === 'unmetered'
           ? `${schemaText(schema, 'ui.workspace.harness.credits')}: ${NO_CREDITS}`
           : credits.kind === 'unknown'
             ? schemaText(schema, 'ui.workspace.harness.credits_unknown')

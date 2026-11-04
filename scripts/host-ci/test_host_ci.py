@@ -74,10 +74,18 @@ class EnvironmentLookup(unittest.TestCase):
         self.assertEqual((target, directory, host_ci), ('root@host.example', run.DEFAULT_CI_DIR, {}))
 
     def test_directory_overlapping_a_release_root_or_protected_path_is_refused(self):
-        for configured in ('/srv/plinth', '/srv/plinth/ci', '/srv', '/data/other'):
+        for configured in ('/srv/plinth', '/srv/plinth/app/ci', '/srv/plinth/cid', '/srv', '/data/other', '/srv/other/ci'):
             with self.subTest(configured), self.assertRaises(run.UsageError):
                 self.load({'dev-test': {'ssh': 'root@host.example', 'root': '/srv/plinth', 'protected_paths': ['/data/other'],
-                                        'host_ci': {'dir': configured}}})
+                                        'host_ci': {'dir': configured}},
+                           'formal-test': {'ssh': 'root@other.example', 'root': '/srv/other'}})
+
+    def test_the_ci_directory_inside_the_own_release_root_is_allowed(self):
+        _, directory, _ = self.load({'dev-test': {'ssh': 'root@host.example', 'root': '/srv/plinth', 'host_ci': {'dir': '/srv/plinth/ci'}}})
+        self.assertEqual(directory, '/srv/plinth/ci')
+        with self.assertRaises(run.UsageError):
+            self.load({'dev-test': {'ssh': 'root@host.example', 'root': '/srv/plinth', 'protected_paths': ['/srv/plinth/ci'],
+                                    'host_ci': {'dir': '/srv/plinth/ci'}}})
 
     def test_unsafe_directory_text_is_refused(self):
         for configured in ('relative', '/a/../b', '/a b', '/a;rm', '/trailing/'):
@@ -433,8 +441,8 @@ class WorkflowReplay(unittest.TestCase):
         for fragment in ('--cpus 4', f'--memory {DEFAULT_MEMORY_GIB}g', f'--memory-swap {DEFAULT_MEMORY_GIB}g', 'no-new-privileges', host_run.LABEL, '--label plinth.host-ci.slot=0'):
             self.assertIn(fragment, options)
         self.assertIn('ubuntu-latest=plinth-ci-act:abc', command)
-        self.assertIn('plinth-azure=plinth-ci-act:abc', command)  # the race job's push route (#78) stays in the limited container
-        self.assertEqual(command[command.index('-W') + 1], '/ci/run/r1/src/.github/workflows/ci.yml')  # azure-runner.yml is not replayed
+        self.assertIn('plinth-azure=plinth-ci-act:abc', command)  # kept for replaying older commits with the Azure race route (#78)
+        self.assertEqual(command[command.index('-W') + 1], '/ci/run/r1/src/.github/workflows/ci.yml')  # only ci.yml is replayed
         self.assertIn('--pull=false', command)  # the derived image exists only locally; act must not try to pull it
         self.assertEqual(command[command.index('--concurrent-jobs') + 1], '1')
         self.assertEqual(command[command.index('--container-daemon-socket') + 1], '-')

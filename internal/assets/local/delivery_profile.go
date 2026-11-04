@@ -168,7 +168,8 @@ func inspect3MFPackage(file io.ReaderAt, size int64) error {
 	if contentType != packageModelContentType {
 		return deliveryProfileError()
 	}
-	if model.UncompressedSize64 > maxArchiveXMLBytes {
+	xmlLimit := archiveXMLLimit(size)
+	if model.UncompressedSize64 > uint64(xmlLimit) {
 		return deliveryProfileError()
 	}
 	// Only packages with bounded identity metadata reach the full existing
@@ -184,7 +185,7 @@ func inspect3MFPackage(file io.ReaderAt, size int64) error {
 	// Check document identity and well-formedness, without interpreting model
 	// objects, topology or extension semantics. Token work is bounded by the
 	// existing XML byte cap and an explicit nesting limit.
-	decoder := xml.NewDecoder(io.LimitReader(body, maxArchiveXMLBytes+1))
+	decoder := newArchiveXMLDecoder(body, xmlLimit)
 	depth, roots := 0, 0
 	for {
 		token, err := decoder.Token()
@@ -334,13 +335,13 @@ func readPackageMetadata(member *zip.File, root, namespace string, visit func(xm
 
 // This uses the same expansion work, exact-length and CRC boundary as ordinary
 // archive members. The caller established the XML media contract via OPC.
-func inspectDeclaredXMLMember(entry *zip.File, work *archiveInspectionWork) error {
+func inspectDeclaredXMLMember(entry *zip.File, work *archiveInspectionWork, limit int64) error {
 	body, reader, err := openArchiveInspectionEntry(entry, work)
 	if err != nil {
 		return err
 	}
 	limited := &io.LimitedReader{R: reader, N: int64(entry.UncompressedSize64) + 1}
-	inspection := scanArchiveXML(limited, int64(entry.UncompressedSize64))
+	inspection := scanArchiveXML(limited, int64(entry.UncompressedSize64), limit)
 	if inspection == nil {
 		var extra [1]byte
 		n, readErr := limited.Read(extra[:])

@@ -7,6 +7,8 @@ import { TablePopover, type TableSection } from '@/components/studio/table-popov
 import { useSessionChatModel } from '@/hooks/use-session-chat-model';
 import type { ChatModelChoice } from '@/lib/chat/browser-client';
 import { formatSchemaText, schemaText, type ProductSchema } from '@/lib/product-schema';
+import { unavailableLabel } from '@/lib/unavailable';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { useChatStore } from '@/store/chat-store';
 import { useSessionContextStore } from '@/store/session-context-store';
 
@@ -66,6 +68,7 @@ export function ChatModelPicker() {
       label={label}
       value={modelName(choice, choice.selected)}
       hint={schemaText(schema, 'ui.studio.chat_model.hint')}
+      triggerDisabledReason={!activeSessionId ? schemaText(schema, 'ui.unavailable.reason.picker.no_session') : undefined}
       disabled={!activeSessionId || busy}
       sections={[section]}
     />
@@ -82,8 +85,11 @@ export function ChatModelNotice() {
   const choice = useSessionContextStore((state) => (activeSessionId ? state.chatModel[activeSessionId] : undefined));
   if (!choice?.fallback) return null;
   return (
-    <p role="status" className="text-[11px] leading-4 text-warning" data-testid="workspace-chat-model-notice">
-      {formatSchemaText(schemaText(schema, 'ui.studio.chat_model.fallback'), { model: modelName(choice, choice.selected) })}
-    </p>
+    <UnavailableNotice
+      testId="workspace-chat-model-notice"
+      className="text-[11px] leading-4"
+      label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.picker.chat_model_offline'))}
+      detail={formatSchemaText(schemaText(schema, 'ui.studio.chat_model.fallback'), { model: modelName(choice, choice.selected) })}
+    />
   );
 }

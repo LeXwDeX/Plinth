@@ -106,9 +106,14 @@ describe('three-view card', () => {
     const waiting = render(group([{ status: 'running', task_id: 't1' }, { status: 'not_started' }, { status: 'not_started' }]));
     expect(waiting).toContain('用三视图做 3D 模型时只使用正面图。');
     expect(waiting).toContain(messages['ui.studio.three_view.to_3d_wait']);
+    // #94: icon plus "无法使用，<短原因>"; the full sentence is the hover detail only.
+    expect(waiting).toContain('data-testid="unavailable-icon"');
+    expect(waiting).toContain(`data-testid="unavailable-label">无法使用，${messages['ui.unavailable.reason.three_view.front_wait']}<`);
+    expect(waiting).toContain(`data-testid="unavailable-detail">${messages['ui.studio.three_view.to_3d_wait']}<`);
     expect(isDisabled(buttonTag(waiting, 'three-view-to-3d'))).toBe(true);
     const ready = render(group([{ status: 'succeeded', task_id: 't1', output_asset_id: 'x1' }, { status: 'not_started' }, { status: 'not_started' }]));
     expect(ready).not.toContain(messages['ui.studio.three_view.to_3d_wait']);
+    expect(ready).not.toContain('three-view-to-3d-wait');
     expect(isDisabled(buttonTag(ready, 'three-view-to-3d'))).toBe(false);
   });
 
@@ -170,7 +175,8 @@ describe('three-view card with a multiview model', () => {
       { status: 'not_started', startable: true },
     ]));
     expect(isDisabled(buttonTag(onlyFront, 'three-view-multiview'))).toBe(true);
-    expect(onlyFront).toContain(messages['ui.studio.three_view.multiview_wait']);
+    expect(onlyFront).toContain(`data-testid="unavailable-detail">${messages['ui.studio.three_view.multiview_wait']}<`);
+    expect(onlyFront).toContain(`无法使用，${messages['ui.unavailable.reason.three_view.multiview_wait']}`);
     // The front view alone still converts.
     expect(isDisabled(buttonTag(onlyFront, 'three-view-to-3d'))).toBe(false);
     expect(onlyFront).toContain(messages['ui.studio.three_view.to_3d_front_only']);

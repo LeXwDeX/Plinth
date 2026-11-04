@@ -10,6 +10,12 @@ import (
 // pictures: most likely a model without image input (#253).
 var ErrImagesRejected = errors.New("agent model rejected a request with images")
 
+// ErrInlineImageOutput marks a reply in which the Agent model drew a picture
+// itself (delta.images) instead of answering in text or calling a generation
+// tool. The picture is not kept, so the person is told to retry or switch the
+// conversation model rather than reading an unknown error.
+var ErrInlineImageOutput = errors.New("agent model answered with a picture of its own instead of text or a tool call")
+
 // ErrContentRejected marks an upstream content-safety refusal: the vendor's
 // moderation flagged the pictures or text of the request (#35). The model
 // may read images fine; the person should change the input, not the model.

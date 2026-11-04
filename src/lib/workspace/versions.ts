@@ -441,6 +441,14 @@ function addThreeViewTiles({ tiles, byKey, byTask, groups }: {
 }
 
 /** 某版本的祖先、自身和后代：当前分支。 */
+/**
+ * The versions the strip and the 全部产出 gallery show: a failed attempt produced nothing to look at or take, so it is
+ * left out there; the conversation and the task's details still say why it failed.
+ */
+export function shownVersionTiles(tiles: readonly VersionTile[]): VersionTile[] {
+  return tiles.filter((tile) => tile.status !== 'failed');
+}
+
 export function branchOf(tiles: readonly VersionTile[], key: string | null): Set<string> {
   const branch = new Set<string>();
   if (!key) return branch;

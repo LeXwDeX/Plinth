@@ -18,6 +18,8 @@ import { partFilename, partsKeyOf } from '@/lib/workspace/model-parts';
 import { activeLocale } from '@/lib/i18n/locale';
 import { groupedCount, type ModelStats, type TextureSize } from '@/lib/workspace/model-stats';
 import type { ViewMode } from '@/lib/workspace/view-mode';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
+import { unavailableLabel } from '@/lib/unavailable';
 import { useCanvasStore } from '@/store/canvas-store';
 import { useStudioStore, type StageModelState } from '@/store/studio-store';
 import type { CurrentObject } from '@/store/workspace-store';
@@ -161,13 +163,17 @@ export function Stage3D({ object }: { object: CurrentObject }) {
           ))}
         </dl>
       </Surface>
-      {capacity.full || capacity.near ? (
+      {capacity.full ? (
+        <div data-testid="stage-canvas-capacity" className="absolute left-1/2 top-3 z-float flex max-w-[80%] -translate-x-1/2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-1 text-xs shadow-lg">
+          <UnavailableNotice label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.stage.canvas_full'))} detail={bitmapLimitMessage(schema, 'reached', capacity)} />
+        </div>
+      ) : capacity.near ? (
         <p
           role="status"
           data-testid="stage-canvas-capacity"
-          className={`absolute left-1/2 top-3 z-float max-w-[80%] -translate-x-1/2 rounded-md px-3 py-1 text-xs shadow-lg ${capacity.full ? 'border border-destructive/30 bg-destructive/10 text-destructive' : 'border border-warning/30 bg-warning/10 text-warning'}`}
+          className="absolute left-1/2 top-3 z-float max-w-[80%] -translate-x-1/2 rounded-md border border-warning/30 bg-warning/10 px-3 py-1 text-xs text-warning shadow-lg"
         >
-          {bitmapLimitMessage(schema, capacity.full ? 'reached' : 'near', capacity)}
+          {bitmapLimitMessage(schema, 'near', capacity)}
         </p>
       ) : null}
       {capturing ? (

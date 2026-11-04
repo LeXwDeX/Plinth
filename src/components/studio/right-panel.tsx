@@ -8,6 +8,8 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { ModelPartsPanel } from '@/components/studio/model-parts-panel';
 import { ObjectDetails } from '@/components/studio/object-details';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
+import { unavailableLabel } from '@/lib/unavailable';
 import { iconByName } from '@/components/ui/icon-map';
 import { ModelArchiveLink, ModelFormatsPanel } from '@/components/workspace/model-formats';
 import { ModelProcessingPanel } from '@/components/workspace/model-processing-panel';
@@ -62,7 +64,7 @@ export function PanelTabBar({ views, active, onSelect, label, disabled = [] }: P
         const selected = view.id === active;
         const isDisabled = disabled.includes(view.id);
         return (
-          <HintTooltip key={view.id} {...panelTabHintContent(schema, view)} className="min-w-0 flex-1">
+          <HintTooltip key={view.id} {...panelTabHintContent(schema, view)} reason={isDisabled ? schemaText(schema, 'ui.unavailable.reason.stage.board_empty') : undefined} className="min-w-0 flex-1">
             <button
               type="button"
               role="tab"
@@ -159,9 +161,9 @@ function PanelFrame({ context, object, sessionId, availability }: PanelFrameProp
           label={schemaText(schema, 'ui.studio.panel.tabs')}
           disabled={disabled}
         />
-        <p data-testid="right-panel-board-empty" className="shrink-0 border-b border-border px-3 py-2 text-xs text-muted-foreground">
-          {schemaText(schema, 'ui.studio.panel.board_empty')}
-        </p>
+        <div data-testid="right-panel-board-empty" className="shrink-0 border-b border-border px-3 py-2 text-xs">
+          <UnavailableNotice label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.stage.board_empty'))} detail={schemaText(schema, 'ui.studio.panel.board_empty')} />
+        </div>
         <div
           role="tabpanel"
           id={BODY_ID}

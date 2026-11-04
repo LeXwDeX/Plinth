@@ -143,6 +143,8 @@ describe('Harness panel', () => {
     const html = render();
     expect(html).toContain('ui.harness.selection_unavailable');
     expect(html).toContain('ui.harness.status_unavailable');
+    expect(html).toContain('data-testid="unavailable-icon"');
+    expect(html).toContain('data-testid="harness-status-unavailable"');
     expect(html).not.toContain('retired');
     expect(mock.save).not.toHaveBeenCalled();
   });

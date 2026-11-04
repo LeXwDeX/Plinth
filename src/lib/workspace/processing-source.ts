@@ -25,6 +25,15 @@ export type ProcessingSource =
   | { sourceRole: 'source_task'; value: string };
 
 export type SourceParameter = OfferingWire['parameters'][number];
+
+/** The model the panel works on; `triangles` is what the stage measured, absent until it has (#93). */
+export type ProcessingSourceAsset = TrackedAsset & { triangles?: number };
+
+/** The model has more triangles than the step takes (#93). Unknown counts never refuse; the server measures again. */
+export function exceedsSourceModelLimit(offering: Pick<OfferingWire, 'source_model_limit'>, asset: Pick<ProcessingSourceAsset, 'triangles'>): boolean {
+  const limit = offering.source_model_limit?.max_triangles ?? 0;
+  return limit > 0 && typeof asset.triangles === 'number' && asset.triangles > limit;
+}
 export type SourceParameterRole = 'task' | 'asset' | 'url';
 
 /**
@@ -88,10 +97,11 @@ export function upstreamJobExpired(parameter: SourceParameter,
 export function chooseProcessingSource(
   offering: OfferingWire,
   task: ProcessingSourceTask,
-  asset: TrackedAsset,
+  asset: ProcessingSourceAsset,
   now: number = Date.now(),
 ): ProcessingSource | null {
   if (!offering.available || task.state !== 'SUCCEEDED' || asset.kind !== 'model' || !asset.id || !asset.url) return null;
+  if (exceedsSourceModelLimit(offering, asset)) return null;
   const taskParameter = offering.parameters.find((parameter) => sourceParameterRole(parameter) === 'task' && parameter.type === 'task');
   let taskExpired = false;
   if (taskParameter
@@ -196,7 +206,7 @@ export function processingSourceSteps(
   selected: readonly string[],
   offerings: Record<string, OfferingWire[]> | undefined,
   source: ProcessingSourceTask,
-  asset: TrackedAsset,
+  asset: ProcessingSourceAsset,
   chosen: Readonly<Record<string, string>> = {},
 ): ProcessingSourceStep[] {
   const steps: ProcessingSourceStep[] = [];
@@ -233,16 +243,19 @@ export function processingPrerequisite(
   capabilities: readonly { id: string }[],
   offerings: Record<string, OfferingWire[]> | undefined,
   source: ProcessingSourceTask,
-  asset: TrackedAsset,
+  asset: ProcessingSourceAsset,
 ): string | null {
   const available = offerings?.[capabilityID]?.filter((choice) => choice.available) ?? [];
   if (available.length === 0 || available.some((choice) => chooseProcessingSource(choice, source, asset))) return null;
+  // Over a step's face limit only a step that sets how many faces it delivers helps (Remesh before UV unwrap, #93).
+  const needsFewerFaces = available.every((choice) => exceedsSourceModelLimit(choice, asset));
   const wanted = new Set(available.flatMap((choice) => choice.parameters
     .filter((parameter) => sourceParameterRole(parameter) === 'task')
     .flatMap((parameter) => parameter.task_capabilities ?? [])));
   for (const candidate of capabilities) {
     if (candidate.id === capabilityID || !wanted.has(candidate.id)) continue;
-    const runs = (offerings?.[candidate.id] ?? []).filter((choice) => choice.available && chooseProcessingSource(choice, source, asset));
+    const runs = (offerings?.[candidate.id] ?? []).filter((choice) => choice.available && chooseProcessingSource(choice, source, asset)
+      && (!needsFewerFaces || Boolean(choice.output_triangles)));
     if (runs.some((first) => available.some((step) => chooseProjectedProcessingSource(step, first)))) return candidate.id;
   }
   return null;
@@ -266,7 +279,7 @@ export function prerequisiteRefusal(
   capabilities: readonly { id: string }[],
   offerings: Record<string, OfferingWire[]> | undefined,
   source: ProcessingSourceTask,
-  asset: TrackedAsset,
+  asset: ProcessingSourceAsset,
   now: number = Date.now(),
 ): PrerequisiteRefusal | null {
   const available = offerings?.[capabilityID]?.filter((choice) => choice.available) ?? [];
@@ -292,13 +305,18 @@ export type SourceRefusal =
   | { offering: OfferingWire; kind: 'too_large'; limit: number }
   | { offering: OfferingWire; kind: 'media' }
   | { offering: OfferingWire; kind: 'needs_task'; capabilities: string[] }
-  | { offering: OfferingWire; kind: 'expired' };
+  | { offering: OfferingWire; kind: 'expired' }
+  | { offering: OfferingWire; kind: 'face_limit'; limit: number; faces: number };
 
 /** The reasons, per available service that does not accept the model, in server order (#321 E). */
-export function sourceRefusals(offerings: readonly OfferingWire[], task: ProcessingSourceTask, asset: TrackedAsset, now: number = Date.now()): SourceRefusal[] {
+export function sourceRefusals(offerings: readonly OfferingWire[], task: ProcessingSourceTask, asset: ProcessingSourceAsset, now: number = Date.now()): SourceRefusal[] {
   const refusals: SourceRefusal[] = [];
   for (const offering of offerings) {
     if (!offering.available || chooseProcessingSource(offering, task, asset, now)) continue;
+    if (exceedsSourceModelLimit(offering, asset)) {
+      refusals.push({ offering, kind: 'face_limit', limit: offering.source_model_limit!.max_triangles, faces: asset.triangles! });
+      continue;
+    }
     const assetParameter = offering.parameters.find((parameter) => sourceParameterRole(parameter) === 'asset' && parameter.type === 'asset'
       && !parameter.uploaded_model?.native_only);
     const expiredTask = offering.parameters.find((parameter) => sourceParameterRole(parameter) === 'task' && parameter.type === 'task'
@@ -372,4 +390,31 @@ export function panelFields(offering: OfferingWire): ParamSchema[] {
  */
 export function processingSourceLabel(source: Pick<ProcessingSourceTask, 'provider_id' | 'capability'>, asset: Pick<TrackedAsset, 'format' | 'mediaType'> | null): string {
   return `${source.provider_id} · ${asset?.format || asset?.mediaType || source.capability}`;
+}
+
+/**
+ * The face budget a face-reducing step (Remesh) starts with when a later step takes at most so many triangles
+ * (UV unwrap's 40,000, #93): the most faces of the step's topology that stay within the tightest limit of the steps
+ * after it, up to the next step that sets its own face count. A step in between that keeps the faces (Retexture)
+ * passes the estimate on, as the server's plan check does (internal/processing/chain_limits.go). Only defaults: a
+ * value the person typed is kept, and the server still refuses a plan whose estimate goes over.
+ */
+export function faceBudgetDefaults(offering: OfferingWire, following: readonly OfferingWire[], input: Record<string, unknown>): Record<string, number> {
+  const estimate = offering.output_triangles;
+  let limit = 0;
+  for (const next of following) {
+    const ceiling = next.source_model_limit?.max_triangles ?? 0;
+    if (ceiling > 0 && (limit === 0 || ceiling < limit)) limit = ceiling;
+    if (next.output_triangles) break;
+  }
+  if (!estimate || limit <= 0) return {};
+  const countParameter = offering.parameters.find((parameter) => parameter.name === estimate.count_parameter);
+  const topologyParameter = offering.parameters.find((parameter) => parameter.name === estimate.topology_parameter);
+  const topology = input[estimate.topology_parameter] ?? topologyParameter?.default;
+  const factor = typeof topology === 'string' ? estimate.triangles_per_face[topology] ?? 0 : 0;
+  if (!countParameter || factor <= 0) return {};
+  let count = Math.floor(limit / factor);
+  if (typeof countParameter.maximum === 'number') count = Math.min(count, countParameter.maximum);
+  if (typeof countParameter.minimum === 'number' && count < countParameter.minimum) return {};
+  return { [estimate.count_parameter]: count };
 }

@@ -205,6 +205,9 @@ func (s *Store) putBlob(
 		inspectErr := inspect(file, mediaType)
 		closeErr := file.Close()
 		if inspectErr != nil {
+			if inspectionTransient(inspectErr) {
+				inspectErr = unavailableInspection(inspectErr)
+			}
 			reason = "content_rejected"
 			return Blob{}, fmt.Errorf("资产包含不可交付的外部依赖: %w", inspectErr)
 		}

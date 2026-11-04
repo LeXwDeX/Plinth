@@ -38,13 +38,15 @@ const rows = [
 
 it('renders each format with its status, download link, credits and reason', () => {
   const html = view({ formats: rows, can_complete: true, completion_credits: 5 });
-  for (const status of ['available', 'obtainable', 'converting', 'unavailable']) {
+  for (const status of ['available', 'obtainable', 'converting']) {
     expect(html).toContain(messages[`ui.workspace.model_formats.status.${status}`]);
   }
   expect(html).toContain('data-testid="model-format-glb"');
   expect(html).toContain('data-status="available"');
   expect(html).toContain('href="/api/v1/tasks/t1/assets/a1"');
   expect(html).toContain('约 5 积分');
+  // The unavailable row is the shared notice: few words inline, the server's sentence in the hint.
+  expect(html).toContain('无法使用，没有转换途径');
   expect(html).toContain('没有适用于该模型的转换服务。');
   // Only available rows are downloadable.
   expect(html.match(/download=""/g)?.length).toBe(1);
@@ -104,9 +106,10 @@ it('lists every Schema delivery format even when the API has nothing to say', ()
   expect(html.match(/data-status="unavailable"/g)).toHaveLength(7);
   expect(html).toContain(messages['ui.studio.formats.footer.not_ready']);
   expect(html).toContain('data-reason="not_ready"');
-  expect(html.match(/role="img" tabindex="0" aria-label="查看原因:/g)).toHaveLength(7);
+  // Each row is the shared notice (#94): the warning icon and "无法使用，<few words>"; the sentence is the hint.
+  expect(html.match(/data-testid="unavailable-icon"/g)).toHaveLength(7);
+  expect(html.match(/无法使用，任务未完成/g)).toHaveLength(7);
   expect(html.match(/class="[^"]*h-9 min-h-9[^"]*"/g)).toHaveLength(7);
-  expect(html).toContain('role="img" tabindex="0"');
   expect(html).not.toContain('没有适用于该模型的转换服务。');
   expect(html).not.toContain('data-testid="model-formats-complete"');
 });
@@ -116,12 +119,11 @@ it('keeps a distinct unavailable reason visible beside the affected format', () 
     { id: 'glb', label: 'GLB', status: 'unavailable', reason_text: '该模型没有可用的导出文件。' },
     { id: 'obj', label: 'OBJ', status: 'unavailable', reason_text: 'OBJ 导出暂不可用。' },
   ] });
-  expect(html).toContain('该模型没有可用的导出文件。');
-  expect(html).toContain('OBJ 导出暂不可用。');
-  expect(html).not.toContain('model-format-reason-glb');
-  expect(html).toContain('role="note" tabindex="0"');
-  expect(html).toContain('aria-label="查看原因: GLB"');
-  expect(html).toContain('truncate');
+  expect(html.match(/无法使用，没有转换途径/g)).toHaveLength(3); // two rows and the footer
+  expect(html).toContain('<span class="sr-only" data-testid="unavailable-detail">该模型没有可用的导出文件。</span>');
+  expect(html).toContain('<span class="sr-only" data-testid="unavailable-detail">OBJ 导出暂不可用。</span>');
+  expect(html).toContain('data-testid="model-format-unavailable-glb"');
+  expect(html).not.toContain('不可用</span>');
 });
 
 it('keeps a repeated unknown/loading state visible instead of replacing it with symbols', () => {
@@ -170,9 +172,9 @@ describe('a paused conversion', () => {
 
   it('says why the conversion waits when the plan names a reason', () => {
     const html = withResume(resumeControl, { pausedReason: messages['ui.workspace.processing.plan_task_canceled'] });
-    expect(html).toContain('data-testid="model-formats-paused-reason"');
-    expect(html).toContain(messages['ui.workspace.processing.plan_task_canceled']);
-    expect(withResume(resumeControl)).not.toContain('model-formats-paused-reason');
+    expect(html).toContain('无法使用，转换已暂停');
+    expect(html).toContain(`data-testid="unavailable-detail">${messages['ui.workspace.model_formats.plan_paused']} ${messages['ui.workspace.processing.plan_task_canceled']}</span>`);
+    expect(withResume(resumeControl)).not.toContain(messages['ui.workspace.processing.plan_task_canceled']);
   });
 
   it('has only the note while nothing can be resumed, and no control when nothing is paused', () => {

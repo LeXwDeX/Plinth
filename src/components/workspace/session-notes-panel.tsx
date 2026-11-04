@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
-import { schemaCountMessage, schemaText, type ProductSchema } from '@/lib/product-schema';
+import { formatSchemaText, schemaCountMessage, schemaText, type ProductSchema } from '@/lib/product-schema';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 
 /** 面板里所有可见文字，来自 Product Schema 的 ui.workspace.notes.* 。 */
@@ -15,6 +15,8 @@ export interface SessionNotesText {
   save: string;
   revert: string;
   tooLong: string;
+  /** The few words that say why saving is unavailable once the draft is over the bound (#94). */
+  overLimitReason: (maximum: number) => string;
   counter: (count: number, maximum: number) => string;
 }
 
@@ -26,6 +28,7 @@ export function sessionNotesText(schema: ProductSchema): SessionNotesText {
     save: schemaText(schema, 'ui.workspace.notes.save'),
     revert: schemaText(schema, 'ui.workspace.notes.revert'),
     tooLong: schemaText(schema, 'ui.workspace.notes.too_long'),
+    overLimitReason: (maximum) => formatSchemaText(schemaText(schema, 'ui.unavailable.reason.notes.too_long'), { limit: maximum }),
     counter: (count, maximum) => schemaCountMessage(schema, 'ui.workspace.notes.counter', count, { count, maximum }),
   };
 }
@@ -108,7 +111,7 @@ export function SessionNotesPanel({ text, saved, maximum, busy = false, defaultE
             className="w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-sm leading-5 outline-none focus-visible:ring-1 focus-visible:ring-primary"
           />
           <div className="flex items-center gap-2">
-            <HintTooltip name={state.overLimit ? text.tooLong : ''}>
+            <HintTooltip name={state.overLimit ? text.counter(state.count, maximum) : ''} reason={state.overLimit ? text.overLimitReason(maximum) : undefined} hint={state.overLimit ? text.tooLong : undefined}>
               <span
                 className={cn('text-xs', state.overLimit ? 'text-destructive' : 'text-muted-foreground')}
                 data-testid="session-notes-counter"
@@ -125,14 +128,16 @@ export function SessionNotesPanel({ text, saved, maximum, busy = false, defaultE
               >
                 {text.revert}
               </button>
-              <button
-                type="button"
-                disabled={busy || !state.canSave}
-                onClick={() => void onSave(draft)}
-                className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground disabled:opacity-50"
-              >
-                {text.save}
-              </button>
+              <HintTooltip name={state.overLimit && !busy ? text.save : ''} reason={state.overLimit && !busy ? text.overLimitReason(maximum) : undefined} hint={state.overLimit && !busy ? text.tooLong : undefined}>
+                <button
+                  type="button"
+                  disabled={busy || !state.canSave}
+                  onClick={() => void onSave(draft)}
+                  className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                >
+                  {text.save}
+                </button>
+              </HintTooltip>
             </span>
           </div>
         </div>

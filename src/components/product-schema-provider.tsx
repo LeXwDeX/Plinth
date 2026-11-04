@@ -15,6 +15,8 @@ import {
 } from '@/lib/client-error-report';
 import { activeLocale } from '@/lib/i18n/locale';
 import { configureErrorReference } from '@/lib/problem-reference';
+import { unavailableLabel } from '@/lib/unavailable';
+import { UnavailableLabelContext } from '@/components/ui/unavailable-label-context';
 import {
   projectRuntimeProductSchema,
   schemaText,
@@ -105,9 +107,14 @@ export function ProductSchemaProvider({
     [schema, text, isLoading, versionLoading],
   );
 
+  // #94: a disabled control's hover reason reads "无法使用，<reason>", like the inline notice.
+  const unavailable = useCallback((reason: string) => unavailableLabel(schema, reason), [schema]);
+
   return (
     <ProductSchemaContext.Provider value={value}>
-      {children}
+      <UnavailableLabelContext.Provider value={unavailable}>
+        {children}
+      </UnavailableLabelContext.Provider>
     </ProductSchemaContext.Provider>
   );
 }

@@ -5,6 +5,7 @@ import { Popover } from '@base-ui/react/popover';
 import { Check, ChevronDown, Trash2 } from 'lucide-react';
 
 import { HintTooltip } from '@/components/ui/hint-tooltip';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
 import { cn } from '@/lib/utils';
 
@@ -38,6 +39,8 @@ export interface TableRow {
   key: string;
   cells: TableCell[];
   disabled?: boolean;
+  /** 行停用时的短原因（#94）：写在该行的悬停提示第一行（「无法使用，…」）；缺省则无提示。 */
+  disabledReason?: string;
   /**
    * 行尾的独立操作（如删除，#238）。它是行按钮旁的兄弟按钮，不嵌在行里：
    * 点击不会选中该行，键盘可单独聚焦。
@@ -59,8 +62,12 @@ export interface TableSection {
   loadingText?: string;
   loading?: boolean;
   failedText?: string;
-  /** 整张表停用时的说明（写明为什么不能用）；此时所有行变暗且不可点。 */
+  /**
+   * 整张表停用时的完整说明（写明为什么不能用，只在悬停提示里）；此时所有行变暗且不可点。
+   * 页面上只显示 `disabledLabel`（「无法使用，<短原因>」，#94）；缺省时整句说明就是那一行。
+   */
   disabledReason?: string;
+  disabledLabel?: string;
   testId?: string;
   onPick: (key: string) => void;
 }
@@ -185,7 +192,7 @@ export function pickerRowClass(selected: boolean): string {
 function Section({ section, close, closeOnPick }: { section: TableSection; close: () => void; closeOnPick: boolean }) {
   const {
     title, hint, head, columns, rows, selectedKey, foot, emptyText, loadingText, loading = false, failedText,
-    disabledReason, testId, onPick,
+    disabledReason, disabledLabel, testId, onPick,
   } = section;
   const items = useRef<Array<HTMLButtonElement | null>>([]);
   const hasActions = rows.some((row) => row.action);
@@ -212,7 +219,14 @@ function Section({ section, close, closeOnPick }: { section: TableSection; close
       <div className="flex items-center justify-between gap-2 px-2 pb-1.5 pt-0.5">
         <span className="text-xs font-semibold">{title}</span>
         {off
-          ? <span role="note" className="truncate text-[11px] text-muted-foreground">{disabledReason}</span>
+          ? (
+            <UnavailableNotice
+              label={disabledLabel ?? disabledReason ?? ''}
+              detail={disabledLabel ? disabledReason : undefined}
+              testId={testId ? `${testId}-unavailable` : undefined}
+              className="text-[11px]"
+            />
+          )
           : hint ? <span className="text-[11px] text-muted-foreground">{hint}</span> : null}
       </div>
       <div
@@ -232,8 +246,7 @@ function Section({ section, close, closeOnPick }: { section: TableSection; close
           <p role="status" className="px-2 py-4 text-xs text-muted-foreground">{emptyText}</p>
         ) : rows.map((row, index) => {
           const selected = row.key === selectedKey;
-          return (
-            <div key={row.key} className="relative">
+          const rowButton = (
             <button
               ref={(node) => { items.current[index] = node; }}
               type="button"
@@ -266,6 +279,12 @@ function Section({ section, close, closeOnPick }: { section: TableSection; close
               {hasActions ? <span aria-hidden /> : null}
               <span className="flex text-primary">{selected ? <Check aria-hidden className="size-3.5" /> : null}</span>
             </button>
+          );
+          return (
+            <div key={row.key} className="relative">
+            {row.disabled && row.disabledReason && !off ? (
+              <HintTooltip name={row.cells[0]?.text ?? ''} reason={row.disabledReason} className="w-full min-w-0">{rowButton}</HintTooltip>
+            ) : rowButton}
             {row.action ? (
               <HintTooltip name={row.action.label} className="absolute right-8 top-1/2 -translate-y-1/2">
                 <button

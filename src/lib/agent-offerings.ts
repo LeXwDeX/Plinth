@@ -100,6 +100,10 @@ export interface OfferingWire {
   parameters: OfferingParameterWire[];
   input_rules?: Array<{ parameters: string[]; minimum: number; maximum: number }>;
   outputs?: unknown[];
+  /** The most triangles this step takes from its source model (#93); the server rechecks it. */
+  source_model_limit?: { max_triangles: number; count_basis: string };
+  /** How this step's face budget turns into delivered triangles (Remesh's target and topology, #93). */
+  output_triangles?: { count_parameter: string; topology_parameter: string; triangles_per_face: Record<string, number> };
 }
 
 /** What stands where credits would be for an Offering whose provider does not bill in credits. */

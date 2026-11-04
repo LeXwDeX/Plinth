@@ -18,6 +18,8 @@ describe('session notes panel', () => {
     const text = sessionNotesText(schema);
     expect(text.label).toBe('设定摘要');
     expect(text.counter(12, schema.chat.context.maximum_session_notes_characters)).toBe('12 / 2000');
+    // Over the bound, the save button's reason is a few words; the full sentence is the hint (#94).
+    expect(text.overLimitReason(2000)).toBe('超过 2000 字');
     schema.content.messages['ui.workspace.notes.label'] = 'configured label';
     schema.content.messages['ui.workspace.notes.counter'] = '{count} of {maximum}';
     const changed = sessionNotesText(schema);

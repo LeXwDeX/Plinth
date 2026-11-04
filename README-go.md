@@ -52,7 +52,7 @@ go run ./cmd/art-ai
 curl http://127.0.0.1:13333/readyz
 ```
 
-默认使用 `PROVIDER_MODE=mock`、`AUTH_MODE=development`，数据写入 `./data/art-ai-go.db`，Blob 写入 `./storage-go`。
+默认使用 `PROVIDER_MODE=mock`、`AGENT_MODE=live`（需要 `LLM_*`；`AGENT_MODE=mock` 只供本地测试显式设置，计划淘汰）、`AUTH_MODE=development`，数据写入 `./data/art-ai-go.db`，Blob 写入 `./storage-go`。
 
 `DEV_MOCK_AUTH=true`（不校验密码即可签发会话的 mock 登录）只用于开发；`APP_ENV=production` 时进程拒绝启动（#247），与生产禁止 `AUTH_MODE=development` 相同。它默认关闭，`.env.example` 不提供该项；自部署 Compose 固定 `APP_ENV=production`。
 
@@ -219,7 +219,7 @@ Go 已接管 `dev-test` 的入口（端口见本地环境文件）。当前生�
 
 ### 镜像构建的依赖源（#248/#257）
 
-`Dockerfile.go-runtime` 只从公共 npm registry（`https://registry.npmjs.org/`）安装 pnpm 与前端依赖，Go 模块走 `GOPROXY`（默认 `https://proxy.golang.org,direct`）；`pnpm-lock.yaml` 只记完整性校验值、不写死任何源，因此外部网络可直接 `docker build -f Dockerfile.go-runtime .`。npm 源固定为公共 registry，构建不再接受覆盖：内部环境由 `scripts/release-env.py` 只把环境文件中的 Go 代理（`build.goproxy`）与 `--add-host`（`build.add_hosts`）传给 `scripts/release-server-steps.sh`（对应 `RELEASE_GOPROXY`、`RELEASE_BUILD_ADD_HOSTS`），仓库不写死镜像源；旧本地环境文件里的 `build.npm_registry` 会被拒绝，需删除该字段。构建阶段与 CI 同用 `golang:1.27`。
+`Dockerfile.go-runtime` 缺省从公共 npm registry（`https://registry.npmjs.org/`，构建参数 `NPM_REGISTRY`）安装 pnpm 与前端依赖，Go 模块走 `GOPROXY`（默认 `https://proxy.golang.org,direct`）；`pnpm-lock.yaml` 只记完整性校验值、不写死任何源，因此外部网络可直接 `docker build -f Dockerfile.go-runtime .`。仓库不写死内部源：内部环境由 `scripts/release-env.py` 把环境文件中的 npm 源（`build.npm_registry`）、Go 代理（`build.goproxy`）与 `--add-host`（`build.add_hosts`）传给 `scripts/release-server-steps.sh`（对应 `RELEASE_NPM_REGISTRY`、`RELEASE_GOPROXY`、`RELEASE_BUILD_ADD_HOSTS`），指向各环境的包缓存。构建阶段与 CI 同用 `golang:1.27`。
 
 镜像目标（#259）：默认目标 `runtime` 是自部署镜像，含 `art-ai`、`art-ai-storage`、`art-ai-retention`；`runtime-with-migration-tools` 在其上追加历史迁移与有界维护命令 `art-ai-etl`、`art-ai-recover-assets`、`art-ai-complete-conversion-delivery` 与 `/app/legacy-*` 挂载点，供内部环境（`dev-test` 与 `formal-test`）使用。`scripts/release-server-steps.sh` 以 `--target runtime-with-migration-tools` 构建，`docker-compose.go-production.yml` 与 `docker-compose.go-candidate.yml` 的 `build.target` 相同，内部运维与候选构建因此使用同一目标并包含同一组维护命令。
 

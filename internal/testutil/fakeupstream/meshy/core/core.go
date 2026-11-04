@@ -34,6 +34,11 @@ const (
 // (https://docs.meshy.ai/en/api/rigging-and-animation, 2026-10-29).
 const MaxRigFaces = 320000
 
+// MaxUVUnwrapFaces is the input face limit the official UV Unwrap documentation
+// names; a larger mesh answers 400 at create (https://docs.meshy.ai/en/api/uv-unwrap,
+// 2026-11-04, #93).
+const MaxUVUnwrapFaces = 40000
+
 // Kind is one task-creating route of a version.
 type Kind struct {
 	// Path is relative to the version prefix, for example "/remesh".
@@ -381,6 +386,10 @@ func (e *engine) create(kind Kind) http.HandlerFunc {
 			}
 			if e.statusOf(found) != StatusSucceeded {
 				e.fail(w, http.StatusBadRequest, "The input task has not succeeded")
+				return
+			}
+			if kind.Path == "/uv-unwrap" && found.faces > MaxUVUnwrapFaces {
+				e.fail(w, http.StatusBadRequest, "The input model exceeds the maximum of 40,000 faces. Run Remesh first to reduce the face count.")
 				return
 			}
 			t.faces = found.faces

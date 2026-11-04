@@ -2,7 +2,7 @@
 
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
-import { AlertTriangle, Box, ChevronLeft, ChevronRight, Copy, Download, FileText, ImageIcon, Loader2, Maximize2, RotateCw, Share2, Eye } from 'lucide-react';
+import { AlertTriangle, Box, ChevronLeft, ChevronRight, Copy, Download, Loader2, Maximize2, RotateCw, Share2, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { ResultAttachments } from './result-attachments';
@@ -11,6 +11,8 @@ import { TaskRefetchPanel } from './task-refetch-panel';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
+import { unavailableLabel } from '@/lib/unavailable';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ModelViewer3D } from '@/components/viewer/model-viewer-3d';
 import { ModelArchiveLink, ModelFormatsPanel } from '@/components/workspace/model-formats';
@@ -107,6 +109,7 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
   // A result of another session keeps its stage actions, dimmed, with the reason on the button.
   const blockedReason = detailBlockedReason(actionContext);
   const blockedText = blockedReason ? text(blockedReason) : '';
+  const blockedShort = blockedReason ? text('ui.unavailable.reason.result.other_session') : '';
   const conversion = blockedReason ? conversionAllowed(displayTarget.kind, scope) : null;
   const position = groupPosition(target);
   const stepGroup = useStudioStore((state) => state.stepResultDetail);
@@ -238,10 +241,15 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
             />
           </Suspense>
         ) : (
-          <p className={`flex items-center gap-2 ${displayTarget.kind === 'other' ? 'p-3' : 'p-6'} text-sm text-muted-foreground`} role="status">
-            {status === 'failed' ? <AlertTriangle className="size-4" aria-hidden /> : status === 'ready' ? (displayTarget.kind === 'model' ? <Box className="size-4" aria-hidden /> : displayTarget.kind === 'other' ? <FileText className="size-4" aria-hidden /> : <ImageIcon className="size-4" aria-hidden />) : <Loader2 className="size-4 animate-spin" aria-hidden />}
-            {status === 'ready' && displayTarget.kind === 'other' ? schema.task_history.assets.attachments.no_preview : text(status === 'ready' ? 'ui.account.preview_unavailable' : status === 'failed' ? 'ui.result.detail.no_file_failed' : 'ui.result.detail.no_file_running')}
-          </p>
+          status === 'ready' || status === 'failed' ? (
+            <UnavailableNotice className={`${displayTarget.kind === 'other' ? 'p-3' : 'p-6'} text-sm`} testId={status === 'failed' ? 'result-detail-no-file' : 'result-detail-no-preview'}
+              label={unavailableLabel(schema, text(status === 'failed' ? 'ui.unavailable.reason.result.no_file' : 'ui.unavailable.reason.result.no_preview'))}
+              detail={status === 'ready' && displayTarget.kind === 'other' ? schema.task_history.assets.attachments.no_preview : text(status === 'ready' ? 'ui.account.preview_unavailable' : 'ui.result.detail.no_file_failed')} />
+          ) : (
+            <p className={`flex items-center gap-2 ${displayTarget.kind === 'other' ? 'p-3' : 'p-6'} text-sm text-muted-foreground`} role="status">
+              <Loader2 className="size-4 animate-spin" aria-hidden />{text('ui.result.detail.no_file_running')}
+            </p>
+          )
         )}
         {kind !== 'none' ? (
           <HintTooltip name={text('ui.account.fullscreen')} className="absolute right-2 top-2">
@@ -318,7 +326,9 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
 
         {/* A disabled button on its own says nothing on touch screens or to a keyboard: the reason is written out. */}
         {blockedReason ? (
-          <p id="result-detail-blocked-reason" role="note" className="text-right text-xs text-muted-foreground" data-testid="result-detail-blocked-reason">{blockedText}</p>
+          <div id="result-detail-blocked-reason" className="flex justify-end text-xs" data-testid="result-detail-blocked-reason">
+            <UnavailableNotice testId="result-detail-blocked-notice" label={unavailableLabel(schema, blockedShort)} detail={blockedText} />
+          </div>
         ) : null}
         <div className="flex flex-wrap items-center justify-end gap-2" role="group" aria-label={text('ui.result.detail.actions')} data-testid="result-detail-actions">
           {actions.copyPrompt ? (
@@ -346,17 +356,17 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
             </HintTooltip>
           ) : null}
           {blockedReason && conversion === 'sendTo3D' ? (
-            <HintTooltip name={text('ui.studio.result.to_3d')} reason={blockedText}>
+            <HintTooltip name={text('ui.studio.result.to_3d')} reason={blockedShort}>
               <Action type="button" variant="outline" size="sm" disabled aria-describedby="result-detail-blocked-reason" aria-label={`${text('ui.studio.result.to_3d')}: ${blockedText}`} data-testid="result-detail-to3d-blocked"><Box />{text('ui.studio.result.to_3d')}</Action>
             </HintTooltip>
           ) : null}
           {blockedReason && conversion === 'sendTo2D' ? (
-            <HintTooltip name={text('ui.result.detail.send_to_2d')} reason={blockedText}>
+            <HintTooltip name={text('ui.result.detail.send_to_2d')} reason={blockedShort}>
               <Action type="button" variant="outline" size="sm" disabled aria-describedby="result-detail-blocked-reason" aria-label={`${text('ui.result.detail.send_to_2d')}: ${blockedText}`} data-testid="result-detail-to2d-blocked"><Share2 />{text('ui.result.detail.send_to_2d')}</Action>
             </HintTooltip>
           ) : null}
           {blockedReason ? (
-            <HintTooltip name={text('ui.result.detail.open_canvas')} reason={blockedText}>
+            <HintTooltip name={text('ui.result.detail.open_canvas')} reason={blockedShort}>
               <Action type="button" variant="outline" size="sm" disabled aria-describedby="result-detail-blocked-reason" aria-label={`${text('ui.result.detail.open_canvas')}: ${blockedText}`} data-testid="result-detail-open-canvas-blocked"><Eye />{text('ui.result.detail.open_canvas')}</Action>
             </HintTooltip>
           ) : null}

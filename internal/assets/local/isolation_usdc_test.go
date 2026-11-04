@@ -591,7 +591,7 @@ func TestUSDCUnsupportedLayerPathAndEncodingFraming(t *testing.T) {
 	}
 	// A decodable but noncanonical stream must not grant an encoded span.
 	for _, wire := range [][]byte{{0, 0x10, 'A', 1, 0, 0x10, 0}, {1, 2, 0, 0, 0, 0x10, 'A', 0}, {0, 0x00, 0x01, 0}} {
-		if _, e := decodeUSDCFast(wire, 64, newInspectionWorkBudget()); e == nil {
+		if _, e := decodeUSDCFast(wire, 64, maxUSDCBytes, newInspectionWorkBudget()); e == nil {
 			t.Fatal("invalid LZ4 framing accepted")
 		}
 	}
@@ -666,7 +666,7 @@ func TestUSDCTypedBoundaryPreservesDeliveredAddressChecks(t *testing.T) {
 						mask[i] = ' '
 					}
 					wantReject := containsAddress(d, absoluteAddress) || scanExternalAddresses(bytes.NewReader(mask)) != nil
-					p := usdcParser{data: d, work: newInspectionWorkBudget(), plan: inspectionPlan{numeric: []inspectionSpan{{int64(prefix), int64(prefix + length)}}}}
+					p := usdcParser{data: d, work: newInspectionWorkBudget(), limit: maxUSDCBytes, plan: inspectionPlan{numeric: []inspectionSpan{{int64(prefix), int64(prefix + length)}}}}
 					wireError := readUSDCWire(bytes.NewReader(d), make([]byte, len(d)))
 					if got := wireError != nil || p.inspectRelativeAddresses() != nil; got != wantReject {
 						t.Fatalf("boundary rejection=%v complete-mask rejection=%v", got, wantReject)
@@ -678,7 +678,7 @@ func TestUSDCTypedBoundaryPreservesDeliveredAddressChecks(t *testing.T) {
 	// A complete wire address can cross two numeric/text boundaries. Neither
 	// the byte-level absolute check nor encoded absolute checks may be masked.
 	for _, d := range [][]byte{[]byte("https://private.invalid/a"), usdcTestUTF16("https://private.invalid/a"), []byte("https:%2f%2fprivate.invalid/a")} {
-		p := usdcParser{data: d, work: newInspectionWorkBudget(), plan: inspectionPlan{numeric: []inspectionSpan{{2, int64(len(d) - 2)}}}}
+		p := usdcParser{data: d, work: newInspectionWorkBudget(), limit: maxUSDCBytes, plan: inspectionPlan{numeric: []inspectionSpan{{2, int64(len(d) - 2)}}}}
 		if readUSDCWire(bytes.NewReader(d), make([]byte, len(d))) == nil && p.inspectRelativeAddresses() == nil {
 			t.Fatal("absolute wire address across typed boundaries accepted")
 		}

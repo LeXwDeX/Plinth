@@ -124,7 +124,7 @@ func TestMeshyModelProfileFreezesExactReference(t *testing.T) {
 			case "unknown field":
 				opts["remote_url"] = "x"
 			}
-			raw, _ := json.Marshal(map[string]any{"model_input_profile": opts})
+			raw, _ := json.Marshal(map[string]any{"model_input_profile": opts, "inline_model_input": map[string]any{"max_bytes": p.Limits.MaxBytes}})
 			o.ProviderOptions = raw
 			err := freezeOfferingModelProfiles(&o, app)
 			if name != "valid" {

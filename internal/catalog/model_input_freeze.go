@@ -65,7 +65,10 @@ func freezeOfferingModelProfiles(offering *schema.Offering, application Applicat
 			continue
 		}
 		role, declared := schema.SourceParameterRole(*parameter)
-		if source != nil || !declared || role != schema.SemanticSourceAsset || parameter.Type != "asset" || parameter.UploadedModel == nil || parameter.UploadedModel.ProfileID != binding.ProfileID || parameter.MaxBytes != profile.Limits.MaxBytes {
+		// Direct uploads stay within the profile (the upload contract); the
+		// parameter's byte limit is the inline ceiling for a successful
+		// platform Task's GLB (#93), never below the profile.
+		if source != nil || !declared || role != schema.SemanticSourceAsset || parameter.Type != "asset" || parameter.UploadedModel == nil || parameter.UploadedModel.ProfileID != binding.ProfileID || parameter.MaxBytes < profile.Limits.MaxBytes || parameter.MaxBytes != inlineModelInputMaxBytes(options) {
 			return fmt.Errorf("model_input_profile requires one exact uploaded model source")
 		}
 		source = parameter
@@ -155,4 +158,16 @@ func cloneOutputTriangles(source *schema.OutputTriangleEstimate) *schema.OutputT
 		copied.TrianglesPerFace[topology] = factor
 	}
 	return &copied
+}
+
+// inlineModelInputMaxBytes is the declared inline_model_input.max_bytes, or
+// zero when it is missing or malformed.
+func inlineModelInputMaxBytes(options map[string]json.RawMessage) int64 {
+	var inline struct {
+		MaxBytes int64 `json:"max_bytes"`
+	}
+	if raw, present := options["inline_model_input"]; !present || json.Unmarshal(raw, &inline) != nil {
+		return 0
+	}
+	return inline.MaxBytes
 }

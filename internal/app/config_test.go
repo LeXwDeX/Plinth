@@ -41,6 +41,23 @@ func TestProductionSchemaDefaultsToSessionIdentityWithoutBearerTokens(
 	}
 }
 
+func TestAgentModeDefaultsToLive(t *testing.T) {
+	taskCatalog, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := loadConfigFromSchema(
+		taskCatalog.Application(),
+		func(string) string { return "" },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.AgentMode != "live" {
+		t.Fatalf("AgentMode = %q, want live", config.AgentMode)
+	}
+}
+
 func TestRuntimeConfigDefaultsAndEnvironmentSourcesComeFromProductSchema(t *testing.T) {
 	taskCatalog, err := catalog.LoadDefault()
 	if err != nil {

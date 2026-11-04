@@ -11,8 +11,9 @@ import (
 	"unicode/utf8"
 )
 
-// This is a wire safety bound, not product configuration. Version 0.8.0 is
-// the explicitly supported subset; another version never falls back to text.
+// This is a wire safety floor, not product configuration; it scales with the
+// delivered file (#81). Version 0.8.0 is the explicitly supported subset;
+// another version never falls back to text.
 const maxUSDCBytes int64 = 128 << 20
 
 func isUSDCMagic(magic []byte) bool { return bytes.HasPrefix(magic, []byte("PXR-USDC")) }
@@ -64,8 +65,10 @@ type usdcClaim struct {
 	kind uint8
 }
 type usdcParser struct {
-	data        []byte
-	work        *inspectionWorkBudget
+	data []byte
+	work *inspectionWorkBudget
+	// limit bounds the crate and every decoded section or array in it.
+	limit       int64
 	names       map[string]struct{}
 	base        string
 	tokens      []string
@@ -82,14 +85,16 @@ type usdcParser struct {
 }
 
 func inspectUSDC(reader io.Reader, size int64, names map[string]struct{}, base string, work *inspectionWorkBudget) error {
-	if size < 88 || size > maxUSDCBytes {
-		return errors.New("USDC 大小超出检查范围")
+	if work == nil {
+		work = newInspectionWorkBudget()
+	}
+	// The crate is held in memory, so this ceiling is also its memory bound.
+	limit := work.bytesCeiling(maxUSDCBytes)
+	if size < 88 || size > limit {
+		return rejectInspection("usdc_size_limit", errors.New("USDC 大小超出检查范围"))
 	}
 	if strings.HasPrefix(base, "/") || strings.ContainsAny(base, "\\%[]\x00") {
 		return errors.New("USDC 层路径不支持")
-	}
-	if work == nil {
-		work = newInspectionWorkBudget()
 	}
 	// Acquire and inspect each bounded wire window in one stage. Do not reuse
 	// this prepayment for a later independent traversal of the entire crate.
@@ -100,7 +105,7 @@ func inspectUSDC(reader io.Reader, size int64, names map[string]struct{}, base s
 	if err := readUSDCWire(reader, data); err != nil {
 		return err
 	}
-	p := usdcParser{data: data, work: work, names: names, base: base, seen: map[uint64]bool{}, active: map[uint64]bool{}}
+	p := usdcParser{data: data, work: work, limit: limit, names: names, base: base, seen: map[uint64]bool{}, active: map[uint64]bool{}}
 	sections, err := p.bootstrap()
 	if err != nil {
 		return err

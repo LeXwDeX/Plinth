@@ -85,14 +85,14 @@ func (validator *typedRunValidator) inspect(data []byte) error {
 		data = data[count:]
 		if validator.used == width {
 			if !finiteTypedWord(validator.word[:width]) {
-				return errors.New("内容数值字段含非有限浮点数")
+				return rejectInspection("non_finite_float", errors.New("内容数值字段含非有限浮点数"))
 			}
 			validator.used = 0
 		}
 	}
 	for len(data) >= width {
 		if !finiteTypedWord(data[:width]) {
-			return errors.New("内容数值字段含非有限浮点数")
+			return rejectInspection("non_finite_float", errors.New("内容数值字段含非有限浮点数"))
 		}
 		data = data[width:]
 	}

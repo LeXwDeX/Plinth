@@ -920,6 +920,18 @@ func (orchestrator *Orchestrator) runWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case command := <-orchestrator.queue:
+			dispatch, err := orchestrator.turnAwaitsDispatch(context.WithoutCancel(ctx), command)
+			if err != nil || !dispatch {
+				if err != nil {
+					orchestrator.logger.Error(
+						"读取 Chat Agent Turn 状态失败",
+						"assistant_message_id", command.AssistantMessageID,
+						"error", err,
+					)
+				}
+				orchestrator.unmarkQueued(command.AssistantMessageID)
+				continue
+			}
 			if err := orchestrator.service.MarkTurnRunning(
 				context.WithoutCancel(ctx),
 				command.AssistantMessageID,
@@ -944,6 +956,43 @@ func (orchestrator *Orchestrator) runWorker(ctx context.Context) {
 			orchestrator.unmarkQueued(command.AssistantMessageID)
 		}
 	}
+}
+
+// turnAwaitsDispatch reports whether a dequeued command still names a turn
+// that needs processing. Run's startup recovery and the waiting scanner both
+// enqueue queued turns from their own snapshots, and the in-flight dedup only
+// holds while one copy runs, so a copy can arrive after the turn finished or
+// was parked on a Task. Reopening it would set a terminal turn back to running
+// and replay its persisted tool round: the tools run again and the Agent is
+// called again (#90). A waiting turn is dispatched only to honour a stop; its
+// normal wake moves it to queued first.
+func (orchestrator *Orchestrator) turnAwaitsDispatch(
+	ctx context.Context,
+	command ProcessTurn,
+) (bool, error) {
+	turn, err := orchestrator.service.GetTurn(
+		ctx,
+		command.OwnerID,
+		command.SessionID,
+		command.AssistantMessageID,
+	)
+	if err != nil {
+		return false, err
+	}
+	switch turn.State {
+	case orchestrator.service.TurnQueuedState(), orchestrator.service.TurnRunningState():
+		return true, nil
+	case orchestrator.service.TurnWaitingTaskState():
+		if turn.StopRequested {
+			return true, nil
+		}
+	}
+	orchestrator.logger.Debug(
+		"跳过已不需处理的 Chat Agent 轮次命令",
+		"assistant_message_id", command.AssistantMessageID,
+		"state", turn.State,
+	)
+	return false, nil
 }
 
 func (orchestrator *Orchestrator) enqueueRecovered(
@@ -3069,7 +3118,8 @@ func (orchestrator *Orchestrator) withErrorReference(ctx context.Context, text, 
 // agentFailureMessage is what the person reads when the Agent request failed:
 // a deployment without Agent settings says the Agent is not configured, a
 // refusal of a request with pictures says the model may not read images
-// (#253), an upstream content-safety refusal says the input tripped it (#35);
+// (#253), an upstream content-safety refusal says the input tripped it (#35),
+// a picture the model drew itself says it was not kept;
 // anything else stays the unknown error, whose ID is in the log.
 func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err error) string {
 	messages := orchestrator.schema.Presentation.Messages
@@ -3081,6 +3131,9 @@ func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err e
 	}
 	if errors.Is(err, agents.ErrImagesRejected) && messages.AgentImagesUnsupported != "" {
 		return orchestrator.text(ctx, messages.AgentImagesUnsupported)
+	}
+	if errors.Is(err, agents.ErrInlineImageOutput) && messages.AgentInlineImageOutput != "" {
+		return orchestrator.text(ctx, messages.AgentInlineImageOutput)
 	}
 	return orchestrator.text(ctx, messages.UnknownError)
 }

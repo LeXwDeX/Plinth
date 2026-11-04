@@ -66,6 +66,14 @@ describe('CanvasSizeNotice (#246)', () => {
       .toContain('data-kind="follows_nearest"');
   });
 
+  it('never offers to resize the canvas to the size it already has', () => {
+    const tall = { width: 3072, height: 5504 };
+    const html = render(delivery({ kind: 'match' }, true, { value: '9:16', pixels: tall, ratioOnly: true, nearest: true }, tall));
+    expect(html).toContain('data-kind="follows_nearest"');
+    expect(html).not.toContain('canvas-size-adopt');
+    expect(render(delivery({ kind: 'conflict', output: tall }, true, null, tall))).not.toContain('canvas-size-adopt');
+  });
+
   it('shows a ratio-only size with the pixels the Schema maps it to', () => {
     const html = render(delivery({ kind: 'conflict', output: { width: 4096, height: 4096 } }, true,
       { value: '21:9', pixels: { width: 6336, height: 2688 }, ratioOnly: true, nearest: true }, { width: 2048, height: 1000 }));
@@ -88,6 +96,8 @@ describe('ReferenceSizeNotice (#296)', () => {
   it('names the nearest legal size when the model cannot give the picture its shape', () => {
     const html = renderReference(withReference({ value: '4704x3520', pixels: { width: 4704, height: 3520 }, ratioOnly: false, nearest: true, changed: true }));
     expect(html).toContain('data-kind="follows_reference_nearest"');
+    expect(html).toContain('data-testid="unavailable-icon"');
+    expect(html).toContain(messages['ui.unavailable.reason.canvas.reference_ratio_unsupported']);
     expect(html).toContain(messages['ui.canvas.size.follows_reference_nearest'].replace('{reference}', '800×600').replace('{output}', '4704×3520'));
   });
 
@@ -96,5 +106,14 @@ describe('ReferenceSizeNotice (#296)', () => {
     expect(renderReference(delivery({ kind: 'match' }))).toBe('');
     const canvasTurn = { value: '2048x2048', pixels: { width: 2048, height: 2048 }, ratioOnly: false, nearest: false };
     expect(renderReference(withReference({ value: '1536x1152', pixels: { width: 1536, height: 1152 }, ratioOnly: false, nearest: false, changed: true }, canvasTurn))).toBe('');
+  });
+
+  it('says an unsupported canvas size as the shared unavailable notice: icon, short reason, full sentence in the hint (#94)', () => {
+    const html = render(delivery({ kind: 'conflict', output: { width: 4096, height: 4096 } }));
+    expect(html).toContain('data-testid="unavailable-icon"');
+    expect(html).toContain('无法使用，模型不支持该画布尺寸');
+    expect(html).toMatch(/data-testid="unavailable-detail"[^>]*>当前模型不能输出画布尺寸 2048×2048，将输出 4096×4096/);
+    // A size the model can produce is only a hint to align, not an unavailable state.
+    expect(render(delivery({ kind: 'align', settings: { size: '2048x2048' }, output: { width: 1024, height: 1024 } }))).not.toContain('unavailable-icon');
   });
 });

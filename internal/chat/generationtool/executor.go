@@ -99,6 +99,9 @@ type Config struct {
 	// three-view view the person replaced with an upload is named by it (#65).
 	InputAssetRoute string
 	Chat            catalog.ChatSchema
+	// CanvasArtboard gives the Schema tables that turn a ratio-only output
+	// size into pixels (ratio_pixels, ratio_pixel_tiers) for the size notes.
+	CanvasArtboard catalog.CanvasArtboardSchema
 	// Texts gives the copy of the turn's UI locale for tool results. Nil
 	// keeps the Schema's default-locale copy.
 	Texts *catalog.TextLocalizer
@@ -141,6 +144,9 @@ type Executor struct {
 	publicStates  map[generation.TaskState]string
 	clock         func() time.Time
 	sleep         func(context.Context, time.Duration) error
+
+	// canvasArtboard holds the Schema tables that turn a ratio into pixels.
+	canvasArtboard catalog.CanvasArtboardSchema
 
 	offeringParameters       func(string, string, string) map[string]json.RawMessage
 	offeringParameterReasons func(string, string, string) map[string]generation.ParameterReason
@@ -196,6 +202,8 @@ func New(config Config) (*Executor, error) {
 		publicStates:  states,
 		clock:         config.Clock,
 		sleep:         config.Sleep,
+
+		canvasArtboard: config.CanvasArtboard,
 
 		offeringParameters:       config.OfferingParameters,
 		offeringParameterReasons: config.OfferingParameterReasons,
@@ -410,7 +418,7 @@ func (executor *Executor) Execute(
 			delete(arguments, name)
 		}
 		if multiview.fromRequest && command.Tool.OfferingArgument != "" {
-			model, _ := json.Marshal(multiview.model)
+			model, _ := json.Marshal(executor.multiviewModelID(command, multiview.model))
 			arguments[command.Tool.OfferingArgument] = model
 		}
 		referenceURLs = multiview.URLs
@@ -797,6 +805,18 @@ func (executor *Executor) observeBoundTask(
 		}
 	}
 	return executor.wait(ctx, command, task.Offering, task.ID, observe, info)
+}
+
+// multiviewModelID accepts a structured request's model as either the model ID
+// the tool's enum names or the Offering ID, like every other model choice, and
+// returns the model ID.
+func (executor *Executor) multiviewModelID(command chat.ToolCommand, model string) string {
+	for _, offering := range executor.gateway.Offerings(generation.Capability(command.Tool.Capability)) {
+		if string(offering.ID) == model && offering.ModelID != "" {
+			return offering.ModelID
+		}
+	}
+	return model
 }
 
 func (executor *Executor) selectOffering(

@@ -56,47 +56,27 @@ CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check
 
 | | GitHub Actions |
 |---|---|
-| 触发 | 推送到 `main`、所有 Pull Request、手动；自动事件与默认手动使用托管 runner，只有显式 `workflow_dispatch` 的 `use_self_hosted: true` 选择可信自托管 runner |
-| 依赖源 | 两种路径均要求仅使用公共 npm registry（`registry.npmjs.org`）与公共 Go proxy，不访问内网主机；须分别核验运行时配置与网络，静态工作流检查不能证明实际访问 |
+| 触发 | 推送到 `main`、所有 Pull Request、手动；全部使用 GitHub 托管的 `ubuntu-latest` |
+| 依赖源 | 门禁作业仅使用公共 npm registry（`registry.npmjs.org`）与公共 Go proxy，不访问内网主机；须核验运行时配置与网络，静态工作流检查不能证明实际访问 |
 | 工具链 | Node 22、Go 1.27、pnpm 取 `package.json` 的 `packageManager`（与 `Dockerfile.go-runtime` 一致） |
-| 作业 | 三个门禁作业，runner 由事件与 `use_self_hosted` 路由；不新增平行作业，不构建镜像（#257） |
-| 用途 | 所有 PR 的门禁；不承担发布。托管 runner 受计费墙影响时，若有已核验安全与精确 ref 的自托管 runner，优先尝试；没有或不可用时按下方「主机自检」执行 |
+| 作业 | 三个门禁作业，全部在 `ubuntu-latest` 上运行；不新增平行作业，不构建镜像（#257） |
+| 用途 | 所有 PR 的门禁；不承担发布。托管 runner 受计费墙影响时，按下方「主机自检替代 CI」执行本机初检与主机自检 |
 
 - **对齐守门**：`src/__tests__/ci-gate-parity.test.ts`（随 `pnpm test` 在本地、CI 和主机 CI 运行）解析本节「自动化门禁项」、`scripts/verify-local.py`（经 `--list-gates` 输出 JSON）、`scripts/host-ci` 与 `.github/workflows/ci.yml`，要求：
   - 标为 CI 的每项命令逐字出现在恰好一个 CI 作业里（同一项的多条命令在同一作业、按本节顺序），CI 作业里没有本节以外的命令；本地入口默认集合的门禁名与顺序等于标为本地的各项，`--race` 加跑的门禁名等于唯一标为仅 CI 的一项；
   - **参数一致（#86）**：本地每个门禁的命令去掉已登记的“只放宽、不跳过”的本地专用参数（`--incremental false`、`-timeout=30m`、`-o /dev/null`）后须等于本节所列命令，环境变量（`CGO_ENABLED`）相同；主机 CI 跑完整的 `verify-local.py --race --force`（门禁集合与本地入口同源），单独跑的外链检查就是本节第 3 项的命令，其 `GOFLAGS` 只能是并行度 `-p=N`；Node/Go 版本以 `ci.yml` 的 `env` 为准，入口脚本读取它们的 `sed` 写法、`Dockerfile.ci` 的基础镜像版本都与之核对；
   - **工作流按结构解析（#86）**：用 `yaml` 库解析 `ci.yml`，带引号的键、流式 `{}`、块标量等写法归一成同一结构，所以额外步骤无论怎么写都会被“不是本节门禁命令”拒绝；锚点、别名和重复键直接拒绝。步骤只允许 `run`（或固定到完整提交 SHA 的 `uses` 与 `with` 白名单）加 `name`，门禁步骤上出现 `if`、`continue-on-error`、`shell`、`env`、`working-directory`、`timeout-minutes` 等字段，或作业级 `if`、`needs`、`strategy`、`continue-on-error`、`container`、`defaults` 等字段，一律拒绝；`GOFLAGS` 只允许作业级的 `-timeout=Nm`（N 不小于 10），工作流级 `env` 只允许 Node/Go 版本；
-  - 工作流不含已知内网主机字面量且每个 Action 固定到完整提交 SHA；静态断言三个作业使用相同的固定路由表达式，并对已知事件和并发分组建模。
+  - 工作流不含已知内网主机字面量且每个 Action 固定到完整提交 SHA；静态断言三个作业都使用 `ubuntu-latest`，并对并发分组建模。
   - 同一文件还运行 `python3 scripts/host-ci/test_host_ci.py`（主机 CI 驱动的离线单测，见「主机 CI」），因此该单测随 `pnpm test` 成为门禁的一部分，不单列门禁项。
 
   静态测试不证明 GitHub 的实际路由、runner 隔离或网络访问。增删、改写或改变执行位置时，同一提交里改这几处，测试才会通过。
 - **Action 版本**：工作流中的 Action 固定到发布标签对应的完整提交 SHA，行尾注释写标签；升级时在官方仓库核对标签与 SHA 再一起改。
-- **CI 与内部验收的分工**：当前工作流的自动事件与默认手动路径选择托管 runner；PR 可以修改工作流，因此不能据此保证外部 PR 无法选择自托管 runner。自托管只应由维护者在触发前审查完整 SHA 并核验受信任 ref 和运行环境后明确触发；工作流仍以 `persist-credentials: false` 检出。零 Key 的 Mock 自部署冒烟 `scripts/smoke/smoke-public-mock.sh` 保留为本地手动验收（自部署后运行，覆盖登录、健康、一次 Mock 图片与一次 Mock 3D 任务的全部产物下载核对、restart 与 down/up 持久化及 `down -v` 清理）。维护者内部环境（`dev-test`、`formal-test`）的部署与 L0/L1/L1 Agent 冒烟经 `scripts/release-env.py release`/`smoke` 走 `scripts/smoke/` 的脚本，真实模型付费验收也只由维护者在内部测试环境执行（§3、§11），都不进 CI，也不是外部 PR 的合并条件。
+- **CI 与内部验收的分工**：三个门禁作业都在 GitHub 托管的 `ubuntu-latest` 上运行。PR 仍可修改工作流，合并前须审查工作流改动；工作流以 `persist-credentials: false` 检出。零 Key 的 Mock 自部署冒烟 `scripts/smoke/smoke-public-mock.sh` 要求环境文件显式写 `PROVIDER_MODE=mock`、`AGENT_MODE=mock`，保留为本地手动验收（自部署后运行，覆盖登录、健康、一次 Mock 图片与一次 Mock 3D 任务的全部产物下载核对、restart 与 down/up 持久化及 `down -v` 清理）。维护者内部环境（`dev-test`、`formal-test`）的部署与 L0/L1/L1 Agent 冒烟经 `scripts/release-env.py release`/`smoke` 走 `scripts/smoke/` 的脚本，真实模型付费验收也只由维护者在内部测试环境执行（§3、§11），都不进 CI，也不是外部 PR 的合并条件。
 - **分支保护**：不设置。仓库为私有、免费套餐不支持分支保护；合并前的门禁由本节与「交付硬门禁」的本机预检保证。
-
-### 可信自托管 runner（#79 第一阶段）
-
-`workflow_dispatch` 提供布尔输入 `use_self_hosted`，默认 `false`。只有该输入为 `true` 时，三个门禁作业才用仓库级 runner 的固定标签集 `[self-hosted, Linux, X64, plinth-trusted-ci]`；`push`、`pull_request` 与不带输入或 `false` 的手动运行都保持 `ubuntu-latest`，唯一例外是下节「Azure 按需 runner」对 go test race 的路由。触发器、门禁命令、`permissions: contents: read`、Action 的完整 SHA 与 `persist-credentials: false` 不随路由改变，也不新增 shell 拼接或作业。
-
-- 维护者须在触发前审查完整提交 SHA，并核验所选 ref 与运行环境可信；分支名不能代替 SHA。运行后逐个作业对照实际 `head_sha`、runner ID、checkout 与步骤结论，只是事后证据，不能阻止已执行的不可信代码。
-- YAML 条件与标签不是安全边界：有写权限的人仍可选择分支或标签，PR 也可以修改工作流。仓库当前为私有；转公开前必须证明平台级隔离（包括业务凭据、Docker socket、数据库、资产存储和其他栈），或阻止不可信工作流到达该 runner。尚未证明，不得称其安全。
-- 两种路径都要求只访问公共依赖源且不访问内网。工作流文本和静态检查仅能排除列出的已知内网字面量，不能证明 hosted runner 上 Action、测试及依赖的实际网络访问；自托管 runner 的配置、依赖源及网络访问目前也无证据。两种运行环境都须分别核验。
-- 显式自托管 dispatch 在 ref 前加固定 `trusted-` 标识，使用独立并发组，避免与其他 ref 的 hosted 运行碰撞；自动路径和默认 dispatch 保持原有分组，PR 仍按编号分组并取消进行中的同组运行。GitHub 默认同组至多一个 running 和一个 pending，新 pending 可替换旧 pending；上述分组目前仅做静态验证，未实测 GitHub 调度。
-- runner 在线、标签匹配都不证明工具链与调度可用。缺 Node/pnpm、Go、`CGO_ENABLED=1` 的 race 工具链、磁盘或网络时，作业失败按失败记录，不得跳过门禁或记为通过。
-- 自托管 CI 可以作为并行工作流中的独立节点，与不修改待检查 revision 的工作并行；最终集成、发布、真实付费验收和部署后回归仍须串行，不能因 CI 节点并行而并行执行或跳过。真实调度、平台级隔离与工具链须另行核实，不能据静态检查宣称已验收。
-
-### Azure 按需 runner（#78）
-
-go test race 在可信事件上改用一台按量计费、用时开机的 Azure 16 核仓库级 runner（标签集 `[self-hosted, Linux, X64, plinth-azure]`），以缩短最慢的门禁。frontend 与 go check 不受影响。机器所在订阅、资源与资源清单只记在 #78，不写入仓库文档。
-
-- **可信事件**：只有本仓库 `main` 的 `push`，以及 head 仓库就是本仓库的 `pull_request`，才路由到该 runner。fork 的 PR、`pull_request_target`、`workflow_run` 与其他事件一律走 `ubuntu-latest`；`workflow_dispatch` 仍按上节的 `use_self_hosted`。路由表达式与事件用例由 `ci-gate-parity.test.ts` 锁定，门禁作业仍不得带作业级 `if`、`needs` 或 `permissions`。
-- **开机与关机**：`.github/workflows/azure-runner.yml` 在同样的可信事件上以 GitHub OIDC 登录并开机，另每 10 分钟（及手动触发时）从默认分支只读检查一次，有作业排队等 `plinth-azure` 就开机，覆盖重跑作业（重跑不会再触发 `push`/`pull_request`）与开机失败；它不跑门禁，不检出或读取触发方的代码，也是唯一持有 `id-token: write` 的工作流。OIDC 身份的角色只能读取、开机、解除分配这一台 VM，联合凭据只认本仓库的 `main` 与本仓库的 `pull_request`。VM 必须在空闲 10 分钟后由自身托管身份解除分配，卡死的作业由 `timeout-minutes` 结束，另有平台侧每日定时关机兜底；改动这些策略须在 #78 留下实测记录。开机失败时 race 作业会一直排队，按失败处理并重跑开机工作流，不得改成跳过门禁。VM 的安装与空闲关机脚本是 `scripts/azure-runner/vm-setup.sh`，可重复执行。
-- **隔离与凭据**：runner 以无特权用户运行，每个 job 开始前清空工作目录，测试临时目录（`TMPDIR`）在随解除分配清空的本地临时盘上（系统盘的同步写盘太慢，会让并发 SQLite 测试的锁等待超过 `busy_timeout`）；机器上不得存放 Plinth 运行密钥、Provider Key 或部署凭据。runner 自身的注册凭据保存在机器上，job 进程可以读到，这是常驻 runner 的固有残留风险，靠只放行可信事件来控制。机器内的托管身份同样只能开关这台 VM。
-- **不是隔离边界**：与上节相同，路由条件只决定作业去哪台机器，不能防止有写权限的人改工作流。新增可选用该 runner 的事件或作业前，须先更新本节和一致性测试。
 
 ### 主机自检替代 CI（#79）
 
-托管 runner 遇到计费墙时，若存在自托管 runner 且已核验其安全与精确 ref，优先尝试该 runner。若没有自托管 runner 或其不可用（包括安全隔离等前提未证明），直接先对本机同一精确提交 SHA 做快速初检；初检失败就停止，不送主机。通过后，在环境文件登记的 `dev-test` 主机对同一 SHA 执行与本节 CI 同集合的完整隔离自检，结果作为 CI 的替代证据。任何实际使用的 runner 和该主机都须先满足安全前提（含平台级隔离、受信任 ref/SHA、公共依赖源与网络）；Git hooks、本机 `--race`、来源身份、隔离和下方独立的合并、发布和部署后门禁不因此跳过。作业因代码原因失败时不进入该替代路径，仍按失败处理，不得放行或记为通过。
+托管 runner 遇到计费墙时，直接先对本机同一精确提交 SHA 做快速初检；初检失败就停止，不送主机。通过后，在环境文件登记的 `dev-test` 主机对同一 SHA 执行与本节 CI 同集合的完整隔离自检，结果作为 CI 的替代证据。该主机须先满足安全前提（含平台级隔离、受信任 ref/SHA、公共依赖源与网络）；Git hooks、本机 `--race`、来源身份、隔离和下方独立的合并、发布和部署后门禁不因此跳过。作业因代码原因失败时不进入该替代路径，仍按失败处理，不得放行或记为通过。
 
 - 只运行已审查的精确提交。先核对本机提交 SHA 和实际字节，并执行包含本地环境禁用值的公开树扫描；源代码只经该提交的有界 Git bundle 传输，不包含其他 refs、本地环境、密钥或数据。主机独立检出后，以及检查开始和结束时，核对完整 SHA、Git 树及跟踪字节。仅工作区差异的预演不能替代最终提交的证据。
 - 主机与其他业务共机。每次使用新建的私有临时目录和独立容器，不挂业务目录、数据库、资产存储、宿主 HOME、SSH 凭据或 Docker socket，不修改其他栈。执行前核查可用内存、磁盘和运行负载；容器限制 CPU、内存与 swap，测试阶段不接外网。依赖预取阶段只执行已审查的下载命令，使用公共源，不运行项目安装脚本；不可信代码不能以此在共享主机运行。
@@ -111,7 +91,7 @@ go test race 在可信事件上改用一台按量计费、用时开机的 Azure 
 python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
 ```
 
-- **做什么**：把该提交（只有该提交可达的历史）打成 Git bundle，传到主机上专用的目录（环境文件 `dev-test` 条目的可选字段 `host_ci.dir`，缺省 `/var/lib/plinth-ci`；与 Plinth 发布根和各环境的受保护路径不得重叠，否则拒绝），在一次性容器里执行 `GOFLAGS=-p=4 python3 scripts/verify-local.py --race --force`，再单独执行 `node scripts/check-build-external-links.mjs`，把 `result.json` 与日志取回 `build/host-ci/<run id>/`（已被 `/build` 忽略）。只测已提交的内容：工作区未提交的改动不在其中，`HEAD` 且有未提交改动时会提示。退出码：0 通过、1 失败、70 主机资源不足（开跑前预检不足，或运行中主机可用内存跌破下限而被中止，状态 `host_memory_low`）、75 所有运行槽位被占用、2 用法或环境文件错误。
+- **做什么**：把该提交（只有该提交可达的历史）打成 Git bundle，传到主机上专用的目录（环境文件 `dev-test` 条目的可选字段 `host_ci.dir`，缺省 `/var/lib/plinth-ci`；与 Plinth 发布根和各环境的受保护路径不得重叠，否则拒绝。唯一例外是本环境发布根下专用的 `<发布根>/ci`：只允许写项目目录的主机（`dev-test`）就设为它，发布步骤不触碰该目录），在一次性容器里执行 `GOFLAGS=-p=4 python3 scripts/verify-local.py --race --force`，再单独执行 `node scripts/check-build-external-links.mjs`，把 `result.json` 与日志取回 `build/host-ci/<run id>/`（已被 `/build` 忽略）。只测已提交的内容：工作区未提交的改动不在其中，`HEAD` 且有未提交改动时会提示。退出码：0 通过、1 失败、70 主机资源不足（开跑前预检不足，或运行中主机可用内存跌破下限而被中止，状态 `host_memory_low`）、75 所有运行槽位被占用、2 用法或环境文件错误。
 - **与本机门禁的关系**：门禁集合和顺序仍只由本节「自动化门禁项」和 `scripts/verify-local.py` 决定，容器里运行的就是它，不另立清单、不改命令。本机 `verify-local.py` 与 Git hooks 照常执行，主机 CI 不替代 pre-push，也不让本机 `--race` 免跑。结果只称“主机 CI 结果”，不写成 GitHub Actions 的成功。
 - **镜像 `Dockerfile.ci`**：Node 22 与 Go 1.27（两个基础镜像按摘要固定）、pnpm 取 `package.json` 的 `packageManager`，并把 pnpm store 与 Go 模块缓存预取进镜像，所以容器可以 `--network none`。构建只访问公共来源（Docker Hub、`registry.npmjs.org`、`proxy.golang.org`），不依赖内网，任何有 Docker 和公网的 runner 都能直接构建。`verify-local.py` 不需要浏览器，镜像不含 Playwright 浏览器。在测试主机上标签是 `plinth-ci:<12 位 hash>`，hash 由 `Dockerfile.ci`、`scripts/host-ci/entry.sh` 和被测提交的 `package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`go.mod`、`go.sum` 决定；这些不变就复用已有镜像，不重建，变化时才联网构建一次（几分钟）。入口在每次运行时再核对容器里的 Node、Go、pnpm 与 `.github/workflows/ci.yml`/`package.json` 一致，不一致即失败（退出 22）；将来 CI 的版本声明搬家时，这条核对要随之改读新的位置。`python3 scripts/host-ci/run.py <sha> --print-image-tag` 只打印标签。
 - **容器**：`--network none`、4 CPU、10 GiB 内存且 swap 等于内存（即无 swap）、非 root（UID 10001）、移除全部 capability、`no-new-privileges`、只读根文件系统；不挂业务目录、数据库、资产存储、宿主 HOME、SSH 凭据或 Docker socket。挂载只有：只读的 `source.bundle`，可写的绑定目录 `/scratch`（HOME、Go 构建缓存、pnpm store 副本）和 `/out`（结果），以及两个 tmpfs：`/work`（容器内从 bundle 新检出，上限 6 GiB）和 `/tmp`（4 GiB）。两个 tmpfs 的占用计入 10 GiB 内存上限。`/work` 和 `/tmp` 不能是绑定挂载：`internal/testutil/wirefixture` 的测试会拒绝位于非根绑定挂载下的工作树或证据目录。“源码只读”指输入 bundle 只读；门禁必须能写 `node_modules` 和构建产物，所以 `/work` 可写，入口在检出后和结束时都核对 HEAD、tree、工作区干净与 `source_identity` 未变，变了即失败（退出 21）。`docker create` 之后，主机再按 `docker inspect` 核对上述参数（网络、内存、swap、CPU、只读根、用户、capability、挂载），与请求不符就不启动。
@@ -166,7 +146,7 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
 - 任一失败则中止部署，必须修复后重试；
 - 单元测试配置：`vitest.config.ts`（默认 node 环境；需要真实 DOM 的组件渲染测试在文件头写 `// @vitest-environment jsdom`，用 `@testing-library/react` 渲染。工作台输入区的布局契约见 `src/components/studio/composer-layout.test.tsx`：jsdom 没有布局引擎，它读渲染出的网格列声明与各格 `col-span` 并回放自动落位，不读组件源码文本；真实像素位置仍由浏览器验收脚本负责）；
 - Mock 基础设施位于 `src/__tests__/mocks/`；
-- 本地 Mock 栈（`PROVIDER_MODE=mock`、`AGENT_MODE=mock`，仅开发与测试）按真实形态交付：图片是按宽高比和尺寸档程序化绘制的 PNG（长边不小于 768，颜色随提示词、标签含能力与序号，同一提交键字节相同）；3D 与处理 Offering 交付 Catalog 声明的全部格式（GLB、glTF、OBJ+MTL、STL、FBX、USDZ、3MF、贴图），字节通过 `internal/assets/local` 的交付检查，任务可以真正成功；冻结后 `minimum` 为 0 的条件必需槽位（如四视角编辑里没点名的视角）不交付，四视角编辑的来源（完整的四视角生成 Task）由 Mock 的只读依赖绑定投影解析，其他 `task_source_binding: provider` 来源在 Mock 栈上仍被拒绝；3D 约 8 秒、图片不到 1 秒，让进度和“已完成”提示可见。提示词含 `[mock:insufficient_balance]` 时 Provider 返回余额不足分类，含 `[mock:slow]` 时任务用约 20 秒逐步推进度，含 `[mock:duplicate_remote_id]` 时所有这类提交都拿到同一个上游任务 ID（#298）：第一个正常完成，其后的提交以 `submission_unknown` 和 Schema 文案 `upstream_job_conflict` 结束，服务不退出。含 `[mock:texture_padding]` 时结果内嵌贴图在 PNG IEND 后多 1 个对齐空格，由它（按上游任务或已存 GLB）转换出的文件也带同一张贴图，交付检查接受；含 `[mock:convert_rejected]` 时结果本身干净，但它的每次转换都带 IEND 后有真实尾随数据的贴图，上游完成并扣费后交付检查拒绝，用于复现免费取回与再次计费重试（#330）；含 `[mock:convert_rejected_once]` 时原转换任务的交付与重试同样被拒绝，之后的免费取回拿到干净文件并成功，用于复现取回成功后的状态（#330 第二轮）。含 `[mock:markdown]` 时 Mock Agent 不调用工具，分段流式回复一段固定的 Markdown（粗体切在两段之间，含列表、代码块、http/https 链接与 `javascript:`/`data:` 链接、`<script>`、`<img onerror>`、HTML 实体和图片语法；句中写了句柄时最后一行回显），用于对话 Markdown 子集与 XSS 的浏览器验收（#333，`scripts/test-chat-markdown-333.mjs`）。Mock Agent 按用户这句话的关键词选工具（3D/模型→`create_model_3d(_from_image)`，三视图→`create_three_view`，四视角→`create_multiview_images`（参考图取句柄、当前选中或随这句话上传的图），四视角加明确的编辑动词（编辑/修改/改成/换成/改为）且句中没有“生成”→`edit_multiview_images`（句中点名的正面/左/背面/右各带一条说明，没点名只改正面），换贴图→`retexture_model`，重拓扑/绑骨/动画→`process_model`，去背景→`remove_background`，记住/设定→`update_session_notes`，其余→`refine_image`），工具名、参数和批准路径沿用真实契约。图改图会读参考图：带蒙版的局部重绘只改蒙版透明的区域，其余像素与原图一致；同比例的参考图改色后交付（构图不变）；白底草图只当构图参考；去背景真的抠掉背景；图生 3D 的模型颜色随输入图的主色。用户话里列了“出 3 个天气：雪夜、正午、雾”这样的变体时，Agent 为每个变体各发一次 `refine_image`。Mock Agent 也遵守会话的 Agent 范围：2D 模式下说“做个 3D 模型”（或 3D 模式下说“修改这张图”）得到“当前模式不允许这个请求”而不是工具调用，自动模式照常。Mock Agent 的收尾句按工具结果写：生成类工具执行过的步骤返回 JSON 结果；服务端没提交就拒绝的步骤（没为该领域选模型、本轮次数上限等）只返回一句文字，这时以 `mock_failure_summary`（“这一步没有完成：…”，按该轮语言）收尾，不说已完成；只保存了设定摘要的一轮以工具自己的确认文字收尾（#251：未选 2D 模型时不得回复“图片任务已完成”）。这些记号和关键词只在 mock 适配器里生效，live 配置不会构造它们。
+- 本地 Mock 栈（须显式设置 `PROVIDER_MODE=mock`、`AGENT_MODE=mock`，后者默认是 `live`；仅开发与测试，计划淘汰）按真实形态交付：图片是按宽高比和尺寸档程序化绘制的 PNG（长边不小于 768，颜色随提示词、标签含能力与序号，同一提交键字节相同）；3D 与处理 Offering 交付 Catalog 声明的全部格式（GLB、glTF、OBJ+MTL、STL、FBX、USDZ、3MF、贴图），字节通过 `internal/assets/local` 的交付检查，任务可以真正成功；冻结后 `minimum` 为 0 的条件必需槽位（如四视角编辑里没点名的视角）不交付，四视角编辑的来源（完整的四视角生成 Task）由 Mock 的只读依赖绑定投影解析，其他 `task_source_binding: provider` 来源在 Mock 栈上仍被拒绝；3D 约 8 秒、图片不到 1 秒，让进度和“已完成”提示可见。提示词含 `[mock:insufficient_balance]` 时 Provider 返回余额不足分类，含 `[mock:slow]` 时任务用约 20 秒逐步推进度，含 `[mock:duplicate_remote_id]` 时所有这类提交都拿到同一个上游任务 ID（#298）：第一个正常完成，其后的提交以 `submission_unknown` 和 Schema 文案 `upstream_job_conflict` 结束，服务不退出。含 `[mock:texture_padding]` 时结果内嵌贴图在 PNG IEND 后多 1 个对齐空格，由它（按上游任务或已存 GLB）转换出的文件也带同一张贴图，交付检查接受；含 `[mock:convert_rejected]` 时结果本身干净，但它的每次转换都带 IEND 后有真实尾随数据的贴图，上游完成并扣费后交付检查拒绝，用于复现免费取回与再次计费重试（#330）；含 `[mock:convert_rejected_once]` 时原转换任务的交付与重试同样被拒绝，之后的免费取回拿到干净文件并成功，用于复现取回成功后的状态（#330 第二轮）。含 `[mock:markdown]` 时 Mock Agent 不调用工具，分段流式回复一段固定的 Markdown（粗体切在两段之间，含列表、代码块、http/https 链接与 `javascript:`/`data:` 链接、`<script>`、`<img onerror>`、HTML 实体和图片语法；句中写了句柄时最后一行回显），用于对话 Markdown 子集与 XSS 的浏览器验收（#333，`scripts/test-chat-markdown-333.mjs`）。Mock Agent 按用户这句话的关键词选工具（3D/模型→`create_model_3d(_from_image)`，三视图→`create_three_view`，四视角→`create_multiview_images`（参考图取句柄、当前选中或随这句话上传的图），四视角加明确的编辑动词（编辑/修改/改成/换成/改为）且句中没有“生成”→`edit_multiview_images`（句中点名的正面/左/背面/右各带一条说明，没点名只改正面），换贴图→`retexture_model`，重拓扑/绑骨/动画→`process_model`，去背景→`remove_background`，记住/设定→`update_session_notes`，其余→`refine_image`），工具名、参数和批准路径沿用真实契约。图改图会读参考图：带蒙版的局部重绘只改蒙版透明的区域，其余像素与原图一致；同比例的参考图改色后交付（构图不变）；白底草图只当构图参考；去背景真的抠掉背景；图生 3D 的模型颜色随输入图的主色。用户话里列了“出 3 个天气：雪夜、正午、雾”这样的变体时，Agent 为每个变体各发一次 `refine_image`。Mock Agent 也遵守会话的 Agent 范围：2D 模式下说“做个 3D 模型”（或 3D 模式下说“修改这张图”）得到“当前模式不允许这个请求”而不是工具调用，自动模式照常。Mock Agent 的收尾句按工具结果写：生成类工具执行过的步骤返回 JSON 结果；服务端没提交就拒绝的步骤（没为该领域选模型、本轮次数上限等）只返回一句文字，这时以 `mock_failure_summary`（“这一步没有完成：…”，按该轮语言）收尾，不说已完成；只保存了设定摘要的一轮以工具自己的确认文字收尾（#251：未选 2D 模型时不得回复“图片任务已完成”）。这些记号和关键词只在 mock 适配器里生效，live 配置不会构造它们。
 - **CSP 门禁分两半，缺一不可**：门禁一
   `internal/transport/webui/shell_csp_test.go` 以 `os.DirFS("../../../web")`
   挂载生产真实 shell（不用内存副本，模板改动必须直接触发断言），断言响应头
@@ -203,8 +183,8 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
 ### 交付硬门禁
 
 - 合并前以本机门禁为准：每个分支推送时照常跑 pre-push（本地八项）；合并到 `main` 前，在待合并的 head 上跑一次 `python3 scripts/verify-local.py --race`，结果写进 PR。
-- 交付任何改动到 `dev-test` 前，最终待发布的精确 `main` SHA 应有一次完整的 GitHub Actions `CI` 运行且所有作业 success。可信自托管 `workflow_dispatch` 可提供同一 SHA 的 CI 证据，但须核对实际 runner、`head_sha` 和 checkout。托管 runner 因计费墙不可用，且（没有自托管 runner 或其不可用，包括安全前提未证明）时，按上节先对同一 SHA 做本机初检，再以该 SHA 的完整隔离主机自检作为 CI 替代，并在 PR 或 Issue 记录实际结果。作业因代码原因失败时不得放行；主机自检不能冒称 Actions success。旧 SHA、其他提交的结果、缺项或 skip 都不算。
-- 发布到 `dev-test` 前，还要在同一个待发布 `main` revision 上再跑一次本机 `--race` 全量；发布后照常做 L0、L1、L1 Agent 和相关验收。CI 只作门禁，不承担部署。
+- 交付任何改动到 `dev-test` 前，最终待发布的精确 `main` SHA 应有一次完整的 GitHub Actions `CI` 运行且所有作业 success。托管 runner 因计费墙不可用时，按上节先对同一 SHA 做本机初检，再以该 SHA 的完整隔离主机自检作为 CI 替代，并在 PR 或 Issue 记录实际结果。作业因代码原因失败时不得放行；主机自检不能冒称 Actions success。旧 SHA、其他提交的结果、缺项或 skip 都不算。
+- 发布到 `dev-test` 前，还要在同一个待发布 `main` revision 上再跑一次本机 `--race` 全量；发布后照常做 L0、L1、L1 Agent 和相关验收。每次 `dev-test` 发布后还必须运行 L5 真实能力回归的全部脚本（`scripts/smoke/smoke-l5-*.py`，入口 `smoke-l5-all.sh`，用法与费用见 `scripts/smoke/README.md`），验收报告逐项列出每个脚本的 PASS/FAIL/SKIP 结果；完整 L5 运行计入 `AGENTS.md` 的付费验收次数上限，超出部分须在当前对话取得用户批准。CI 只作门禁，不承担部署。
 
 ### 本地统一入口与 pre-push 复用
 
@@ -229,7 +209,7 @@ Hook 安装默认只预览：`python3 scripts/install-local-verification-hook.py
 SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-hooks.py`（#242），规则与上述门禁安装器一致：默认预览，`--apply` 原子替换并保留其他字节与模式，未知/损坏块拒绝改写，`--uninstall` 只移除本区块；另有只读 `--status`、`--mode warn|enforce` 与 `--init-worktrees`。回归为 `python3 -m unittest scripts/tests/test_install_specgit_required_hooks.py`。上线顺序与对已有工作树的影响见 `docs/specgit-project-integration.md`「所有分支与工作树强制初始化」。
 
 ## 3. 部署与回归流程
-0. `dev-test` 默认每次发布都是全新数据（环境文件 `"data": "ephemeral"`，#28）：发布不做备份，冒烟与相关验收都从空库开始，只存在运行环境引导的管理员测试账号，数据由测试流程按真实用户流程自己创建；`formal-test` 不适用。
+0. `dev-test` 默认每次发布都是全新数据（环境文件 `"data": "ephemeral"`，#28）：发布不做备份，冒烟与相关验收都从空库开始，只存在运行环境引导的管理员测试账号；Agent 测试开发账号在发布后由 `scripts/smoke/ensure-agent-account.sh` 经管理接口重新创建（见 AGENTS.md「环境与运维」），数据由测试流程按真实用户流程自己创建；`formal-test` 不适用。
 1. 本地代码修改完成；
 2. 在待合并 head 上运行本机 `python3 scripts/verify-local.py --race` 全量（清单见 §2，前端三项 + Go 门禁四条），完成独立审核；
 3. 将已验收提交合并并推送到 `main`，以 `main` 的精确提交 SHA 生成不可变
@@ -365,7 +345,8 @@ SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-h
 - 改动附件文件名缓存（`src/lib/image-upload.ts`）、加工面板底部报价或对话选择卡的提交时，用 `scripts/test-frontend-335.mjs`（#335）在 Chromium 和 WebKit、1366×768 与 1920×1080、中英两种语言回归：服务同 §10.3a（mock Provider、mock Agent、mock 登录，先 `pnpm run build`），`BASE=http://127.0.0.1:<端口> node scripts/test-frontend-335.mjs`。检查 Meshy 与 Hyper3D 混选时底部同时列出原生估算行与积分合计、`[mock:large_model]` 来源上不能运行的步骤不计价；脚本在页面里推迟 `FileReader` 读取（不需要新的 Mock 记号），输入区图片读取期间点选择卡「确认」，卡片显示等待文案、按钮锁定且不发请求，读完后自动提交、图片仍留在输入区。附件文件名缓存的内存上限由 vitest `src/lib/image-upload.test.ts` 证明（40 轮 2 MB 图后不超过 `IMAGE_UPLOAD_NAME_CACHE_MAX_BYTES`）。手动运行，不在 §2 门禁内。
 
 ### 10.3c 画布改尺寸后的选择（#311）
-- 改动画布尺寸、锚点、图层坐标、命中或选择逻辑时，用 `scripts/test-canvas-resize-select.mjs`（服务同 §10.3a，先 `pnpm run build`；`BASE=http://127.0.0.1:<端口> node scripts/test-canvas-resize-select.mjs`）在 Chromium 和 WebKit 的 1366×768、1440×900、1920×1080 回归「画布已有图片 → 在参数面板改尺寸 → 选择工具点图片」：缩小、放大、左上锚点缩小后图片一半在画布外（点画布内和画布外的部分）、撤销/重做、自动保存后与刷新后、锁定图片改尺寸后仍不可选且解锁后可选、两张成组图片改尺寸后一起选中。每次点击前确认该点没有页面元素或其他图层遮挡；“选中”要求图层面板与舞台上的变换手柄都只指向预期图层。图片部分和完全在画布外时还做像素检查（按绘制顺序合成舞台各图层画布后读回）：选中手柄与画布内选中时一致、不被画布外暗层压暗，图片自身画布外的部分仍被压暗、画布内的部分不变；测试图是脚本生成的纯色图，读数不随缩放变化。截图和 `report.json` 写到 `OUT`。手动运行，不在 §2 门禁内；store 层的同类不变量由 `src/store/canvas-store-size.test.ts`、手柄图层在暗层之上的顺序由 `src/components/canvas/canvas-selection-layer-wiring.test.ts` 随 `pnpm test` 覆盖。
+- 改动画布尺寸、锚点、图层坐标、命中或选择逻辑时，用 `scripts/test-canvas-resize-select.mjs`（服务同 §10.3a，先 `pnpm run build`；`BASE=http://127.0.0.1:<端口> node scripts/test-canvas-resize-select.mjs`）在 Chromium 和 WebKit 的 1366×768、1440×900、1920×1080 回归「画布已有图片 → 在参数面板改尺寸 → 选择工具点图片」：缩小、放大、左上锚点缩小后图片一半在画布外（点画布内和画布外的部分）、撤销/重做、自动保存后与刷新后、锁定图片改尺寸后仍不可选且解锁后可选、两张成组图片改尺寸后一起选中。每次点击前确认该点没有页面元素或其他图层遮挡；“选中”要求图层面板与舞台上的变换手柄都只指向预期图层。图片部分和完全在画布外时还做像素检查（按绘制顺序合成舞台各图层画布后读回）：选中手柄与画布内选中时一致、不被画布外暗层压暗；选中时图片自身画布外的部分也与画布内同样亮（#91），取消选中后画布外的部分重新压暗、画布内的部分不变；测试图是脚本生成的纯色图，读数不随缩放变化。截图和 `report.json` 写到 `OUT`。手动运行，不在 §2 门禁内；store 层的同类不变量由 `src/store/canvas-store-size.test.ts`、手柄图层在暗层之上的顺序由 `src/components/canvas/canvas-selection-layer-wiring.test.ts` 随 `pnpm test` 覆盖。
+- 改动画布外压暗或选中显示时（#91），用 `CASES='#91' node scripts/test-canvas-inpaint-contract.mjs`（挂载夹具，不需要服务、凭据或付费）在 Chromium 和 WebKit 的 1366×768、1920×1080 核对：画布外未选中的纯色图层被压暗；选中后与画布内同样亮，盖在它上面的未选中图层仍压暗，背景和画布内不变；只在 Konva 侧移动选中图层（等同拖动）时挖空同帧跟随；取消选中后重新压暗。选中与取消选中的截图写到 `OUT`。挖除步骤与合成次序由 `src/lib/canvas/outside-dim.test.ts` 随 `pnpm test` 覆盖。
 
 ### 10.4 通用规则
 - 不使用 `alert()` / `confirm()` / `prompt()` 等浏览器系统弹窗；错误用页面内 `role="alert"` 文字，确认用项目 Dialog；
@@ -445,7 +426,7 @@ SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-h
   页面和组件，页面路由、登录重定向、导航、布局模式及显示文本继续由
   Product Schema 投影；
 - live 候选必须保持 `CANDIDATE_ALLOW_GENERATION=false`，只运行 `scripts/test-go-candidate-http.sh` 的无扣费契约；没有单独授权不得用有效 Provider 配置生成；
-- Mock 候选必须显式设置 `CANDIDATE_ALLOW_GENERATION=true`，依次运行 `scripts/test-go-candidate-http.sh`、`scripts/test-go-candidate-all-generations.sh` 和 `scripts/test-go-candidate-restart.sh`；
+- Mock 候选必须同时设置 `GO_PROVIDER_MODE=mock` 与 `GO_AGENT_MODE=mock`（Agent 运行模式的目录默认是 live，Compose 默认值不改），并显式设置 `CANDIDATE_ALLOW_GENERATION=true`；`GO_AGENT_MODE` 也须导出给验收脚本，`scripts/test-go-candidate-http.sh` 在其不是 `mock` 时直接失败。依次运行 `scripts/test-go-candidate-http.sh`、`scripts/test-go-candidate-all-generations.sh` 和 `scripts/test-go-candidate-restart.sh`；
 - Mock 验收必须覆盖文生图、文生 3D、图生图、图生 3D、重拓扑、重纹理、绑定、动画和去背景的公共 Web 创建、轮询及资产下载；
 - 验收创建的任务必须在脚本退出时自动删除；失败时也必须执行清理；
 - Go 重启后，持久任务 ID、状态及资产 SHA-256 必须保持一致；

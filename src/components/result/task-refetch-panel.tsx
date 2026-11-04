@@ -5,9 +5,11 @@ import useSWR from 'swr';
 import { toast } from 'sonner';
 
 import { Action } from '@/components/ui/button';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { schemaCountMessage, schemaMessage, schemaText } from '@/lib/product-schema';
 import { fetchRefetchEligibility, refetchUnavailableText, startRefetch, type RefetchEligibility } from '@/lib/workspace/task-refetch';
+import { unavailableLabel } from '@/lib/unavailable';
 import { useWorkspaceStore } from '@/store/workspace-store';
 
 type RefetchPanelProps = {
@@ -80,10 +82,10 @@ function ScopedRefetchPanel({ taskId, sessionId, capability, prompt, onOpenTask 
   // A refetch that already delivered (#330) is opened below; any other ineligible view says why.
   if (!view.eligible && !(view.reason === 'delivered' && view.refetchTaskId)) {
     return (
-      <p className="rounded-md border border-border px-3 py-2 text-xs text-muted-foreground" role="note" data-testid="task-refetch-unavailable" data-reason={view.reason}>
+      <div className="flex flex-col gap-1 text-xs text-muted-foreground" data-testid="task-refetch-unavailable" data-reason={view.reason}>
         {charged}
-        {refetchUnavailableText(schema, view)}
-      </p>
+        <UnavailableNotice testId="task-refetch-unavailable-notice" label={unavailableLabel(schema, t(`ui.unavailable.reason.result.refetch_${view.reason}`))} detail={refetchUnavailableText(schema, view)} />
+      </div>
     );
   }
   const existing = view.refetchTaskId;

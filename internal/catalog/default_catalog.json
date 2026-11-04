@@ -260,7 +260,7 @@
                 "name": "AGENT_MODE"
               }
             ],
-            "default": "mock",
+            "default": "live",
             "allowed_values": [
               "mock",
               "live"
@@ -795,7 +795,7 @@
               {
                 "min": 403,
                 "max": 403,
-                "class": "invalid_input"
+                "class": "upstream_denied"
               }
             ],
             "upstream_code_map": {
@@ -848,7 +848,7 @@
               {
                 "min": 403,
                 "max": 403,
-                "class": "invalid_input"
+                "class": "upstream_denied"
               }
             ],
             "upstream_code_map": {
@@ -938,7 +938,7 @@
               {
                 "min": 403,
                 "max": 403,
-                "class": "invalid_input"
+                "class": "upstream_denied"
               }
             ],
             "upstream_code_map": {
@@ -1514,6 +1514,7 @@
         "reference_limit_one": "{model} 一次只用 1 张参考图：这次共 {total} 张，只用第 1 张。要用多张不同角度的图，请改选支持多图的模型。",
         "reference_selection_note": "{model} 这次使用 {count} 张参考图；来源图经过替换或去重，不能说明只用了原顺序的前几张。",
         "reference_capacity": "{model} 一次最多用 {count} 张参考图；这次共 {total} 张。发送后以实际冻结的来源说明为准，发送前不预测具体使用哪张。",
+        "reference_capacity_multiview": "直接发送时，{model} 一次最多用 {count} 张参考图（这次共 {total} 张）；在上方标好视角并确认，会用 {multiview} 多视图生成，{total} 张都会用上。",
         "reference_limit_exceeded": "{label} 最多接受 {max} 张图片，这次提供了 {actual} 张；这一步没有提交，也没有扣积分。请减少图片数量，或改选支持更多图片的模型。",
         "extra_credits_consent_required": "这一步包含需要额外积分的项目；请先明确同意这次额外积分消耗，再重新提交。",
         "extra_credits_over_limit": "这一步的额外积分超出本次提交允许同意的上限；请减少需要额外积分的选项，或改走新的任务。",
@@ -3037,7 +3038,7 @@
         "ui.chat.image.pick_unavailable": "仅生成结果可选用",
         "ui.chat.image.pick_failed": "选用失败，请重试",
         "ui.chat.image.send_to_canvas": "发送到画布",
-        "ui.chat.image.send_to_canvas_unavailable": "仅生成结果可发送到画布",
+        "ui.chat.image.send_to_canvas_unavailable": "仅生成结果可发送到画布。上传的图片请直接在画布里添加",
         "ui.workspace.model_formats.title": "交付格式",
         "ui.workspace.model_formats.loading": "正在读取格式清单…",
         "ui.workspace.model_formats.load_failed": "读取格式清单失败，请稍后重试。",
@@ -3048,7 +3049,6 @@
         "ui.workspace.model_formats.reason": "查看原因",
         "ui.workspace.model_formats.download": "下载",
         "ui.workspace.model_formats.download_all": "下载全部（ZIP）",
-        "ui.workspace.model_formats.download_all_unavailable": "暂无可打包的文件",
         "ui.workspace.model_formats.preparing": "正在准备压缩包…",
         "ui.workspace.model_formats.downloading": "正在下载…",
         "ui.workspace.model_formats.cancel_download": "取消下载",
@@ -3097,8 +3097,8 @@
         "ui.chat.message.uploaded_image": "上传图片",
         "ui.chat.message.generated_image": "生成图片",
         "ui.chat.message.processing": "处理中",
-        "ui.chat.input.upload_limit": "最多上传 {count} 张图片",
-        "ui.chat.input.upload_limit_one": "最多上传 {count} 张图片",
+        "ui.chat.input.upload_limit": "最多上传 {count} 张图片，请先移除多余的图片",
+        "ui.chat.input.upload_limit_one": "最多上传 {count} 张图片，请先移除多余的图片",
         "ui.chat.input.upload_limit_dropped": "最多上传 {count} 张图片，已忽略 {dropped} 张",
         "ui.chat.input.upload_limit_dropped_one": "最多上传 {count} 张图片，已忽略 {dropped} 张",
         "ui.chat.input.images_added": "已添加 {count} 张图到对话",
@@ -3178,7 +3178,7 @@
         "ui.workspace.session.rename": "重命名主题",
         "ui.workspace.session.rename_failed": "重命名失败，请重试",
         "ui.workspace.harness.capability": "生成能力",
-        "ui.workspace.harness.choose_model": "请选择生成模型",
+        "ui.workspace.harness.choose_model": "请选择生成模型后再发送",
         "ui.workspace.harness.loading": "参数加载中…",
         "ui.workspace.harness.empty": "选择模型后可设置参数",
         "ui.workspace.harness.credits": "预计积分",
@@ -3186,7 +3186,6 @@
         "ui.workspace.harness.credits_short": "积分",
         "ui.workspace.harness.session_pending": "Agent 会话就绪后可编辑参数",
         "ui.workspace.harness.synced": "与 Agent 共享 · 双向同步",
-        "ui.workspace.harness.unavailable": "当前模型不可用",
         "ui.workspace.harness.load_failed": "加载模型参数失败",
         "ui.workspace.harness.save_failed": "保存参数失败",
         "ui.workspace.canvas.empty_image": "生成的图片会显示在这里，也可以从历史面板选择查看",
@@ -3205,8 +3204,7 @@
         "ui.workspace.processing.route": "输入方式",
         "ui.workspace.processing.asset_route": "本地模型资产",
         "ui.workspace.processing.asset_route_expired": "本地模型资产（{provider} 原任务已超过保留期）",
-        "ui.workspace.processing.task_route": "同服务商任务",
-        "ui.workspace.processing.unavailable": "不可用",
+        "ui.workspace.processing.task_route": "{provider} 任务（按任务 ID 引用，不上传模型文件）",
         "ui.workspace.processing.no_compatible_offering": "当前模型与处理模型的输入要求不兼容；动作处理需要先有可用的绑骨任务。",
         "ui.workspace.processing.session_mismatch": "请先切换到该模型所属的创作任务。",
         "ui.workspace.processing.asset_unavailable": "当前模型没有已保存、可用的资产。",
@@ -3240,7 +3238,112 @@
         "ui.workspace.processing.plan_step_queued": "排队等待提交",
         "ui.workspace.processing.plan_auto_rigging": "动作需要先绑骨，已加入绑骨步骤。",
         "ui.workspace.processing.plan_incompatible": "所选步骤没有可用的输入路径，请调整步骤或模型。",
-        "ui.workspace.processing.source_refused": "当前模型（{size}）不能直接做这一步：{reasons}。可以换一个符合这些条件的模型再试。",
+        "ui.workspace.processing.source_refused": "当前模型（{size}）不能直接做这一步：{reasons}。可以先勾选「重拓扑」（Remesh），把模型减面、缩小后再接着做这一步（它的结果按任务 ID 交给下一步，不再上传文件）；或换一个符合这些条件的模型。",
+        "ui.workspace.processing.source_refused_face_limit": "{service} 最多接受 {limit} 个三角面，当前模型约 {faces} 个",
+        "ui.unavailable.label": "无法使用，{reason}",
+        "ui.unavailable.reason.canvas.reference_ratio_unsupported": "模型不支持参考图比例",
+        "ui.unavailable.reason.task_center.notice_blocked": "浏览器已禁止通知",
+        "ui.unavailable.reason.notes.too_long": "超过 {limit} 字",
+        "ui.unavailable.reason.result.source_retry": "来源模型不能用于重新生成",
+        "ui.unavailable.reason.composer.multiview_invalid": "视角选择不符",
+        "ui.unavailable.reason.stage.retexture_no_target": "未选目标模型",
+        "ui.unavailable.reason.stage.retexture_no_handle": "模型还没有句柄",
+        "ui.unavailable.reason.admin.own_account": "这是你自己的账号",
+        "ui.unavailable.reason.three_view.price_unknown": "报价未知",
+        "ui.unavailable.reason.three_view.front_wait": "正面图未完成",
+        "ui.unavailable.reason.three_view.multiview_wait": "完成的视角不够",
+        "ui.unavailable.reason.admin.agent_mcp_unavailable": "此预设当前不可用",
+        "ui.unavailable.reason.admin.agent_preview_required": "需先预览校验",
+        "ui.unavailable.reason.admin.agent_skill_limit": "已达技能数量上限",
+        "ui.unavailable.reason.result.send_to_canvas": "不能发送到画布",
+        "ui.unavailable.reason.harness.no_file": "还没选择文件",
+        "ui.unavailable.reason.harness.preview_unavailable": "无法预览",
+        "ui.unavailable.reason.harness.upload_unavailable": "不支持上传模型",
+        "ui.unavailable.reason.harness.source_unavailable": "来源模型不可用",
+        "ui.unavailable.reason.harness.status_needs_input": "缺少来源或参数",
+        "ui.unavailable.reason.harness.status_unavailable": "功能不可用",
+        "ui.unavailable.reason.harness.no_service": "没有可用服务",
+        "ui.unavailable.reason.harness.no_offering": "还没选择服务",
+        "ui.unavailable.reason.harness.offering_unavailable": "服务不可用",
+        "ui.unavailable.reason.harness.operation_unavailable": "尚未启用",
+        "ui.unavailable.reason.harness.selection_gone": "选择已失效",
+        "ui.unavailable.reason.admin.llm_last_level": "至少保留一档",
+        "ui.unavailable.reason.admin.llm_unreachable": "连接不上",
+        "ui.unavailable.reason.admin.llm_not_configured": "连接未配置",
+        "ui.unavailable.reason.admin.llm_vision_required": "默认模型需支持识图",
+        "ui.unavailable.reason.admin.llm_default_unavailable": "默认模型不可用",
+        "ui.unavailable.reason.stage.board_empty": "画布为空",
+        "ui.unavailable.reason.composer.reference_unused": "部分图片不会使用",
+        "ui.unavailable.reason.composer.agent_not_configured": "Agent 尚未配置",
+        "ui.unavailable.reason.stage.no_session": "没有会话",
+        "ui.unavailable.reason.stage.compare_file_missing": "没有可比较的文件",
+        "ui.studio.approval.card.price_unknown_detail": "上游报价无法解析，暂时不能批准这一步；请让 Agent 重新发起此步骤。",
+        "ui.unavailable.reason.approval.balance_low": "余额不足",
+        "ui.unavailable.reason.approval.price_unknown": "报价无法解析",
+        "ui.unavailable.reason.stage.no_output": "暂无可展示产出",
+        "ui.unavailable.reason.stage.compare_needs_two": "候选不足两张",
+        "ui.unavailable.reason.stage.canvas_full": "画布图片已满",
+        "ui.unavailable.reason.formats.retry_blocked": "不能重试",
+        "ui.unavailable.reason.formats.paused": "转换已暂停",
+        "ui.unavailable.reason.formats.no_route": "没有转换途径",
+        "ui.unavailable.reason.formats.not_listed": "状态未知",
+        "ui.unavailable.reason.formats.not_ready": "任务未完成",
+        "ui.unavailable.reason.form.upload_maximum": "已达数量上限",
+        "ui.unavailable.reason.form.upload_read_failed": "读取文件失败",
+        "ui.unavailable.reason.form.upload_file_too_large": "文件过大",
+        "ui.unavailable.reason.form.upload_too_many_pixels": "图片尺寸过大",
+        "ui.unavailable.reason.form.upload_conversion_failed": "图片无法转换",
+        "ui.unavailable.reason.form.upload_unsupported": "格式不支持",
+        "ui.unavailable.reason.canvas.no_mask_strokes": "还没有画出遮罩",
+        "ui.unavailable.reason.params.condition": "当前设置不允许修改",
+        "ui.unavailable.reason.params.scope_excludes": "当前模式不含此项",
+        "ui.unavailable.reason.params.operation_unavailable": "当前模型不支持此操作",
+        "ui.unavailable.reason.params.no_session": "没有会话",
+        "ui.unavailable.reason.result.report_unsupported": "报告版本不支持",
+        "ui.unavailable.reason.picker.model_retired": "{from} 已停用",
+        "ui.unavailable.reason.picker.chat_model_offline": "所选对话模型已停用",
+        "ui.unavailable.reason.picker.skill_load_failed": "Skill 加载失败",
+        "ui.unavailable.reason.picker.skill_unavailable": "所选 Skill 不可用",
+        "ui.unavailable.reason.picker.skill_not_enabled": "当前配置未启用",
+        "ui.unavailable.reason.picker.reasoning_none": "模型没有思考档位",
+        "ui.unavailable.reason.picker.scope_excludes": "当前模式不含此项",
+        "ui.unavailable.reason.picker.model_disabled": "模型未启用",
+        "ui.unavailable.reason.picker.no_session": "没有会话",
+        "ui.unavailable.reason.canvas.anchor": "此锚点不可用",
+        "ui.unavailable.reason.canvas.mask_unreadable": "蒙版无法读取",
+        "ui.unavailable.reason.canvas.no_session": "没有会话",
+        "ui.unavailable.reason.canvas.output_size": "输出尺寸与画布不一致",
+        "ui.unavailable.reason.canvas.bgremoval_service": "没有去背景服务",
+        "ui.unavailable.reason.canvas.inpaint_model": "该模型不支持局部重绘",
+        "ui.unavailable.reason.result.refetch_repeated_failure": "再取回仍会失败",
+        "ui.unavailable.reason.result.refetch_provider_unavailable": "服务商未配置",
+        "ui.unavailable.reason.result.refetch_not_supported": "上游只交付一次",
+        "ui.unavailable.reason.result.refetch_expired": "上游已不保留结果",
+        "ui.unavailable.reason.result.refetch_delivered": "已重新取回",
+        "ui.unavailable.reason.result.other_session": "属于其他会话",
+        "ui.unavailable.reason.result.no_file": "没有文件",
+        "ui.unavailable.reason.result.no_preview": "无法预览",
+        "ui.unavailable.reason.processing.action_missing": "还没选择动作",
+        "ui.unavailable.reason.processing.no_steps": "还没选择步骤",
+        "ui.unavailable.reason.processing.step_unrunnable": "所选步骤无法执行",
+        "ui.unavailable.reason.processing.plan_incompatible": "所选步骤没有输入路径",
+        "ui.unavailable.reason.processing.required_missing": "还有必填项未填",
+        "ui.unavailable.reason.processing.input_rule": "需且仅需填一项",
+        "ui.unavailable.reason.processing.plan_running": "方案进行中",
+        "ui.unavailable.reason.processing.reconcile_unavailable": "暂时无法核对",
+        "ui.unavailable.reason.processing.plan_reconciled_mismatch": "原任务与本步骤不符",
+        "ui.unavailable.reason.processing.plan_prepare_unavailable": "暂时无法准备输入",
+        "ui.unavailable.reason.processing.plan_offering_unavailable": "处理服务不可用",
+        "ui.unavailable.reason.processing.asset_unavailable": "模型没有可用资产",
+        "ui.unavailable.reason.processing.session_mismatch": "不是当前任务的模型",
+        "ui.unavailable.reason.canvas.size_unsupported": "模型不支持该画布尺寸",
+        "ui.workspace.processing.unavailable_reason.too_large": "模型超过 {limit}",
+        "ui.workspace.processing.unavailable_reason.face_limit": "面数超过 {limit}",
+        "ui.workspace.processing.unavailable_reason.media": "不支持这种模型文件",
+        "ui.workspace.processing.unavailable_reason.needs_task": "需要 {provider} 的原任务",
+        "ui.workspace.processing.unavailable_reason.expired": "原任务已过保留期",
+        "ui.workspace.processing.unavailable_reason.blocked": "前一步无法执行",
+        "ui.workspace.processing.unavailable_reason.unavailable": "服务当前不可用",
         "ui.workspace.processing.source_refused_separator": "；",
         "ui.workspace.processing.source_refused_too_large": "{service} 最多接受 {limit}",
         "ui.workspace.processing.source_refused_media": "{service} 不接受这种模型文件",
@@ -3300,7 +3403,7 @@
         "ui.workspace.tasks.retryable": "可重试",
         "ui.workspace.tasks.retry": "重试",
         "ui.workspace.tasks.retry_confirm": "确认重试",
-        "ui.workspace.tasks.retry_awaiting": "重试需要你确认后才会提交，可能产生费用。",
+        "ui.workspace.tasks.retry_awaiting": "重试需要你确认才会提交，再点一次重试即可确认，可能产生费用。",
         "ui.workspace.tasks.retry_started": "已重新提交",
         "ui.workspace.tasks.retry_failed": "重试失败，请稍后再试",
         "ui.workspace.notice.done": "任务已完成",
@@ -3389,7 +3492,6 @@
         "ui.dashboard.description": "选择功能模块开始创建 3D 资产",
         "ui.dashboard.balance": "账户余额",
         "ui.dashboard.fallback_initial": "·",
-        "ui.dashboard.balance_unavailable": "—",
         "ui.dashboard.credits": "积分",
         "ui.dashboard.available": "可用",
         "ui.dashboard.modules": "功能模块",
@@ -3441,12 +3543,12 @@
         "ui.form.image_upload.format.webp": "WebP",
         "ui.form.image_upload.format.gif": "GIF",
         "ui.form.image_upload.format.bmp": "BMP",
-        "ui.form.image_upload.unsupported": "不支持此文件格式：{filename}",
+        "ui.form.image_upload.unsupported": "不支持此文件格式：{filename}。请换成 JPG、PNG、WebP、GIF 或 BMP",
         "ui.form.image_upload.conversion_failed": "图片转换失败，请检查文件是否损坏：{filename}",
         "ui.form.image_upload.too_many_pixels": "图片尺寸过大，最多支持 {pixels} 像素",
         "ui.form.image_upload.too_many_pixels_one": "图片尺寸过大，最多支持 {pixels} 像素",
         "ui.form.image_upload.multi_role_hint": "第1张为主图，后续图为风格参考。可在提示词中用「第1张图」「第2张图」明确指定角色。",
-        "ui.form.image_upload.file_too_large": "文件「{filename}」超过 {size} 限制",
+        "ui.form.image_upload.file_too_large": "文件「{filename}」超过 {size} 限制，请压缩或换一张图",
         "ui.form.image_upload.maximum": "最多只能上传 {count} 张图片",
         "ui.form.image_upload.maximum_one": "最多只能上传 {count} 张图片",
         "ui.form.image_upload.read_failed": "读取文件失败，请重试",
@@ -3458,8 +3560,6 @@
         "ui.form.image_upload.multiple_hint": "，可多选",
         "ui.form.image_upload.preview_alt": "图片预览 {index}",
         "ui.form.model_upload.supported": "支持 GLB、GLTF、OBJ、FBX、STL、USDZ，最大 {size}",
-        "ui.form.model_upload.file_too_large": "文件超过 {size} 限制",
-        "ui.form.model_upload.unsupported_format": "不支持的格式 {extension}，请上传 {accepted} 格式",
         "ui.form.model_upload.release": "松开以上传",
         "ui.form.model_upload.drop": "点击或拖拽 3D 模型到此处",
         "ui.form.model_upload.remove": "移除模型",
@@ -3708,7 +3808,6 @@
         "ui.canvas.brush.target_loading": "这张图片还在加载，加载完成后再擦写",
         "ui.canvas.lock.hint": "已锁定的图层不能移动、变换、裁剪或被框选；在图层面板里仍可选中解锁",
         "ui.canvas.mask.no_candidate": "没有可用的高质量图像模型支持局部重绘",
-        "ui.canvas.mask.unavailable": "当前模型不支持局部重绘，请选择支持蒙版的模型",
         "ui.canvas.inpaint.title": "局部重绘",
         "ui.canvas.inpaint.missing_semantics": "这个模型没有完整声明提示词、参考图和蒙版输入，不能用于局部重绘。请选择支持局部重绘的模型。",
         "ui.canvas.inpaint.prompt_label": "重绘描述",
@@ -3722,7 +3821,7 @@
 		"ui.canvas.inpaint.confirm_execution": "确认并执行本次重绘",
         "ui.canvas.inpaint.cancel": "取消",
         "ui.canvas.inpaint.failed": "局部重绘提交失败",
-        "ui.canvas.inpaint.job_storage_unavailable": "浏览器无法保存本次重绘的位置记录。本页仍可放回结果；请勿刷新或关闭页面，否则只能在任务中心查看原始结果。",
+        "ui.canvas.inpaint.job_storage_unavailable": "浏览器无法保存本次重绘的位置记录（请检查浏览器的存储空间或隐私模式）。本页仍可放回结果；请勿刷新或关闭页面，否则只能在任务中心查看原始结果。",
         "ui.canvas.inpaint.output_size": "将按 {size} 输出，与画布和蒙版一致。",
         "ui.canvas.inpaint.output_size_nearest": "这个模型不能输出画布尺寸 {canvas}（最接近的合法尺寸是 {size}）。请换一个支持该尺寸的模型，或先把画布改成该尺寸。",
         "ui.canvas.inpaint.output_size_unconfirmed": "无法确认这个模型的输出尺寸与画布 {size} 一致，不能提交局部重绘。请选择支持该尺寸的模型。",
@@ -3740,7 +3839,7 @@
 		"ui.canvas.bgremoval.confirm_execution": "确认并执行去背景",
         "ui.canvas.bgremoval.cancel": "取消",
         "ui.canvas.bgremoval.failed": "去背景提交失败",
-        "ui.canvas.bgremoval.unavailable": "当前没有可用的去背景服务",
+        "ui.canvas.bgremoval.unavailable": "当前没有可用的去背景服务。请到设置中检查去背景服务是否已启用，稍后再试",
         "ui.canvas.action.download": "下载这一层",
         "ui.canvas.action.delete": "删除",
         "ui.canvas.action.delete_layer": "删除这一层",
@@ -3789,6 +3888,7 @@
         "failure.integrity_failure": "生成资产未通过完整性校验",
         "failure.protocol": "上游返回了无法识别的数据",
         "failure.internal": "任务处理失败",
+        "failure.upstream_denied": "上游图像生成服务拒绝了这次请求（HTTP 403），这一步没有生成结果。这与提示词和图片无关，原样重试也不会通过，请联系管理员检查上游服务的访问权限",
         "failure.content_rejected": "上游服务的内容安全审核拦截了这次请求：输入的图片或描述可能被判定为不当内容。这一步没有生成结果，重试同样的输入也不会通过。请更换图片或修改描述后重新发起",
         "failure.source_expired": "来源模型在服务商处的原任务已过期，无法再引用。重新发起时会改用已保存的模型文件；不接受模型文件的服务需要先重新生成来源模型",
         "ui.workspace.harness.agent_decides": "你选择模型与可选参数，Agent 判断输入方式并执行任务。",
@@ -3802,7 +3902,7 @@
         "ui.workspace.skills.select": "选择",
         "ui.workspace.skills.loading": "加载中",
         "ui.workspace.skills.load_failed": "Skill 加载失败",
-        "ui.workspace.skills.unavailable": "当前模型不支持该 Skill",
+        "ui.workspace.skills.unavailable": "当前模型不支持该 Skill，请换一个支持它的模型",
         "ui.workspace.skills.revision": "版本",
         "ui.workspace.skills.selected": "已选择",
         "ui.account.title": "我的资源",
@@ -3873,7 +3973,6 @@
         "ui.workspace.skills.delete_label": "删除 Skill「{name}」",
         "ui.workspace.skills.delete_failed": "Skill 删除失败，列表未改变。请重试。",
         "ui.workspace.skills.content_invalid": "请填写名称和创作要求。",
-        "ui.workspace.skills.size_unavailable": "建议尺寸加载失败。请关闭后重试。",
         "ui.studio.picker.image.prefix": "2D",
         "ui.studio.picker.model.prefix": "3D",
         "ui.studio.picker.image.title": "2D 生成模型",
@@ -4145,7 +4244,7 @@
         "ui.studio.stage.action.inpaint": "局部重绘",
         "ui.studio.stage.action.inpaint_hint": "按你的描述，重画选中的区域。没有选区时先进入蒙版，让你涂出要重画的部分。",
         "ui.studio.stage.action.inpaint_target": "选区（蒙版、矩形选框或套索画出的区域）",
-        "ui.studio.stage.action.inpaint_board_empty": "虚线框内还没有内容，没有可以局部重绘的画面",
+        "ui.studio.stage.action.inpaint_board_empty": "虚线框内还没有内容，没有可以局部重绘的画面。请先在虚线框内放入图片或绘制内容",
         "ui.studio.stage.action.process_hint.animation": "给已经绑好骨骼的模型生成动作。",
         "ui.studio.stage.action.process_hint.format-conversion": "把模型转换成其他格式。",
         "ui.studio.stage.action.process_hint.remesh": "重新整理模型的网格，让面更少、更规整。",
@@ -4296,6 +4395,8 @@
         "ui.connectivity.session_unavailable": "暂时无法确认登录状态，正在自动重试。登录状态不受影响。",
         "ui.studio.composer.handle_tag_title": "加入附件",
         "ui.studio.composer.handle_tag_model_title": "写入输入框",
+        "ui.studio.handle_badge.label": "对话里的句柄 {handle}",
+        "ui.studio.handle_preview.alt": "{handle} 的预览",
         "ui.studio.composer.stop_note": "停止只会结束这一轮对话。已经提交给上游的任务可能仍会计费，可在任务进度里查看。",
         "ui.studio.lightbox.title": "大图查看",
         "ui.studio.lightbox.close": "关闭大图",
@@ -4309,7 +4410,7 @@
         "ui.studio.lightbox.download": "下载",
         "ui.studio.lightbox.counter": "{current} / {total}",
         "ui.studio.lightbox.hint": "滚轮缩放 · 拖动平移 · 双击放大或还原 · 左右键切换 · 空格或 Esc 关闭",
-        "ui.studio.lightbox.missing": "这张图暂时无法显示。",
+        "ui.studio.lightbox.missing": "这张图暂时无法显示。请关闭后重新打开，或刷新页面重试。",
         "ui.studio.compare.title": "比较",
         "ui.studio.compare.mode": "比较方式",
         "ui.studio.compare.mode_two": "2 联",
@@ -4384,7 +4485,11 @@
         "ui.studio.multiview_upload.confirm": "用这些视角生成 3D",
         "ui.studio.multiview_upload.dismiss": "不是",
         "ui.studio.multiview_upload.turn": "用这几张图的 {views} 视图生成 3D 模型",
-        "ui.studio.multiview_upload.invalid": "每个视角只能用一次，必须有正面，且至少用两张图。",
+        "ui.studio.multiview_upload.invalid": "每个视角只能用一次，必须有正面，且至少用两张图。请调整后再确认",
+        "ui.studio.multiview_upload.image_label": "第 {index} 张图",
+        "ui.studio.multiview_upload.open_image": "在舞台上查看第 {index} 张图",
+        "ui.studio.stage_image.title": "图片查看",
+        "ui.studio.stage_image.close": "关闭图片查看（Esc）",
         "ui.pending_approval.view_label": "{view}视图",
         "ui.studio.strip.more": "还有 {count} 个",
         "ui.studio.strip.more_one": "还有 {count} 个",
@@ -4550,7 +4655,7 @@
         "ui.canvas.layers.inpaint_mask_title": "这个重绘图层使用的蒙版",
         "ui.canvas.layers.inpaint_mask_note": "蒙版使用生成时的画布坐标；不透明区域保留，透明区域为重绘范围。",
         "ui.canvas.layers.inpaint_mask_loading": "正在读取蒙版…",
-        "ui.canvas.layers.inpaint_mask_unavailable": "这个重绘图层的蒙版无法读取，可能已不可用。",
+        "ui.canvas.layers.inpaint_mask_unavailable": "这个重绘图层的蒙版无法读取，可能已不可用。可关闭后重试，或重新做一次局部重绘。",
         "ui.canvas.layers.inpaint_mask_size": "蒙版尺寸：{size}",
         "ui.canvas.inpaint.layer_added": "局部重绘结果已作为新图层放到画板上。",
         "ui.canvas.inpaint.layer_failed": "重绘已完成，但没能放到画板上；结果可在任务中心查看。",
@@ -4631,8 +4736,8 @@
         "ui.canvas.size.pixels": "{width}×{height}",
         "ui.canvas.size.mismatch": "模型将输出 {output}，画布是 {canvas}",
         "ui.canvas.size.align": "按画布尺寸输出",
-        "ui.canvas.size.conflict": "当前模型不能输出画布尺寸 {canvas}，将输出 {output}",
-        "ui.canvas.size.conflict_unknown": "当前模型不能输出画布尺寸 {canvas}",
+        "ui.canvas.size.conflict": "当前模型不能输出画布尺寸 {canvas}，将输出 {output}。可点“画布改为…”，或换一个支持该尺寸的模型",
+        "ui.canvas.size.conflict_unknown": "当前模型不能输出画布尺寸 {canvas}。请换一个支持该尺寸的模型，或调整画布尺寸",
         "ui.canvas.size.adopt": "画布改为 {output}",
         "ui.canvas.size.follows": "本轮以画板为来源，输出跟随画板：将按 {output} 输出（画布 {canvas}）",
         "ui.canvas.size.follows_nearest": "本轮以画板为来源，输出跟随画板：模型给不了画布尺寸 {canvas}，将改用最接近的合法尺寸 {output}",
@@ -4677,7 +4782,7 @@
         "ui.studio.outputs.group_yesterday": "昨天",
         "ui.studio.outputs.group_date": "{year} 年 {month} 月 {day} 日",
         "ui.studio.outputs.range_hint": "按住 Shift 再点一项，可以连选一段",
-        "ui.studio.compare.unavailable": "这个版本现在没有可比较的文件。",
+        "ui.studio.compare.unavailable": "这个版本现在没有可比较的文件。请等它生成完成，或换一个版本再比较。",
         "ui.studio.outputs.download_group": "下载 {label} 的全部图片",
         "ui.studio.params.chip_pick_model": "先选模型",
         "ui.studio.stage.view.label": "显示方式",
@@ -4897,7 +5002,9 @@
         "internal_api_path_prefix": "/api/",
         "legacy_hidden_content_prefix": "[本条消息中生成的图片 URL:",
         "legacy_hidden_content_suffix": "]",
-        "progress_maximum": 100
+        "progress_maximum": 100,
+        "handle_preview_delay_milliseconds": 150,
+        "handle_preview_maximum_pixels": 360
       },
       "agent": {
         "adapter_key": "openai-compatible",
@@ -6802,6 +6909,7 @@
             "insufficient_balance": "该模型服务商的账户余额不足或已欠费，这一步没有执行。请联系管理员处理",
             "credential_quota": "该 API Key 已达额度上限，请在 Provider 控制台调整 Key 额度或更换 Key，这一步没有执行。请联系管理员处理",
             "content_rejected": "上游服务的内容安全审核拦截了这一步的输入（审核器较敏感，正常美术素材也可能被误判），没有生成结果，原样重试也不会通过。请主动调整后再调用一次：按审核原因改写提示词，去掉可能触发的描述（例如 sexual 时写明服装完整、姿态得体，去掉裸露、贴身、性感等词；violence 时去掉血腥、武器伤害描写），保留美术意图；若被拦的是输入图本身，改写提示词无效，请改用其他图或去掉该参考图后再试，必要时请用户换图。同时如实告诉用户是审核拦截以及你做了什么调整。不要建议修改部署配置",
+            "upstream_denied": "上游图像生成服务拒绝了这一步的请求（HTTP 403），没有生成结果。这是上游访问权限问题，与提示词和图片无关：不要改写提示词、换图或换参数重试，也不要再换别的模型反复试探。请如实告诉用户是上游图像生成服务拒绝了请求，需要管理员检查上游服务的访问权限后再试",
             "source_expired": "来源模型在服务商处的原任务已过期，这一步没有执行，也没有扣费。重新发起时平台会改用已保存的模型文件；不接受模型文件的服务（例如动画）需要先重新生成来源模型，或在它之前的版本上重新绑骨"
           },
           "content_rejected_reasons": "（理由：{reasons}）",
@@ -6845,6 +6953,7 @@
           "summary_failed": "生成总结失败",
           "no_result": "⚠️ 未返回结果，请重试。",
           "unknown_error": "未知错误",
+          "agent_inline_image_output": "当前对话模型自己画了一张图，而不是调用生成工具，这张图没有保存，也不会出现在结果里。请重试；如果反复出现，请换一个对话模型。",
           "agent_images_unsupported": "当前 Agent 模型拒绝了带图片的请求，可能不支持读图。请在部署配置中换用支持图片输入的模型（LLM_MODEL），或去掉图片后重试。",
           "agent_content_rejected": "请求被上游模型服务的内容安全审核拦截：本轮的图片或文字可能被判定为不当内容。这不是模型不支持读图，也不需要改部署配置。请更换图片或修改描述后重试；如确认内容合规，请把本条消息附带的错误 ID 发给管理员核查。",
           "agent_not_configured": "Agent 未配置：部署缺少对话模型设置（LLM_API_KEY 或 LLM_MODEL），暂时不能对话或增强提示词。请联系管理员配置后再试。",
@@ -7346,6 +7455,7 @@
         "initial_node_y": 40,
         "node_gap_pixels": 20,
         "minimum_node_size": 50,
+        "handle_badge_minimum_screen_pixels": 48,
         "maximum_node_edge": 512,
         "model_capture_long_edge_pixels": 2048,
         "to_3d_long_edge_pixels": 1024,
@@ -7574,7 +7684,8 @@
           },
           "outside_dim": {
             "color": "#000000",
-            "opacity": 0.45
+            "opacity": 0.45,
+            "reveal_selected": true
           },
           "transparency": {
             "cell_pixels": 8,
@@ -7715,16 +7826,16 @@
             "label_key": "toolbar.background.dots",
             "pattern": "dots",
             "background_color": "#10141d",
-            "pattern_color": "#1e2634",
+            "pattern_color": "#3a4558",
             "cell_size": 20,
-            "pattern_width": 1
+            "pattern_width": 1.5
           },
           {
             "value": "grid",
             "label_key": "toolbar.background.grid",
             "pattern": "grid",
             "background_color": "#10141d",
-            "pattern_color": "#182029",
+            "pattern_color": "#262f3e",
             "cell_size": 20,
             "pattern_width": 1
           },
@@ -7732,8 +7843,8 @@
             "value": "plain",
             "label_key": "toolbar.background.plain",
             "pattern": "solid",
-            "background_color": "#10141d",
-            "pattern_color": "#10141d",
+            "background_color": "#1a1f2a",
+            "pattern_color": "#1a1f2a",
             "cell_size": 20,
             "pattern_width": 1
           },
@@ -7741,8 +7852,8 @@
             "value": "dark",
             "label_key": "toolbar.background.dark",
             "pattern": "solid",
-            "background_color": "#0a0d14",
-            "pattern_color": "#0a0d14",
+            "background_color": "#050608",
+            "pattern_color": "#050608",
             "cell_size": 20,
             "pattern_width": 1
           }
@@ -12551,7 +12662,7 @@
             "ui.chat.image.pick_unavailable": "Only generated results can be used",
             "ui.chat.image.pick_failed": "Failed to use image, please retry",
             "ui.chat.image.send_to_canvas": "Send to canvas",
-            "ui.chat.image.send_to_canvas_unavailable": "Only generated results can be sent to the canvas",
+            "ui.chat.image.send_to_canvas_unavailable": "Only generated results can be sent to the canvas. Add uploaded pictures on the canvas directly",
             "ui.workspace.model_formats.title": "Delivery formats",
             "ui.workspace.model_formats.loading": "Loading format list…",
             "ui.workspace.model_formats.load_failed": "Failed to load the format list. Please try again later.",
@@ -12562,7 +12673,6 @@
             "ui.workspace.model_formats.reason": "View reason",
             "ui.workspace.model_formats.download": "Download",
             "ui.workspace.model_formats.download_all": "Download all (ZIP)",
-            "ui.workspace.model_formats.download_all_unavailable": "No files to archive yet",
             "ui.workspace.model_formats.preparing": "Preparing archive…",
             "ui.workspace.model_formats.downloading": "Downloading…",
             "ui.workspace.model_formats.cancel_download": "Cancel download",
@@ -12611,8 +12721,8 @@
             "ui.chat.message.uploaded_image": "Uploaded image",
             "ui.chat.message.generated_image": "Generated image",
             "ui.chat.message.processing": "Processing",
-            "ui.chat.input.upload_limit": "Up to {count} images can be uploaded",
-            "ui.chat.input.upload_limit_one": "Up to {count} image can be uploaded",
+            "ui.chat.input.upload_limit": "Up to {count} images can be uploaded; remove some first",
+            "ui.chat.input.upload_limit_one": "Up to {count} image can be uploaded; remove the extra one first",
             "ui.chat.input.upload_limit_dropped": "Up to {count} images can be uploaded; {dropped} ignored",
             "ui.chat.input.upload_limit_dropped_one": "Up to {count} image can be uploaded; {dropped} ignored",
             "ui.chat.input.images_added": "Added {count} images to the chat",
@@ -12692,7 +12802,7 @@
             "ui.workspace.session.rename": "Rename topic",
             "ui.workspace.session.rename_failed": "Failed to rename, please retry",
             "ui.workspace.harness.capability": "Generation capability",
-            "ui.workspace.harness.choose_model": "Select a generation model",
+            "ui.workspace.harness.choose_model": "Select a generation model, then send again",
             "ui.workspace.harness.loading": "Loading parameters…",
             "ui.workspace.harness.empty": "Select a model to set parameters",
             "ui.workspace.harness.credits": "Estimated credits",
@@ -12700,7 +12810,6 @@
             "ui.workspace.harness.credits_short": "credits",
             "ui.workspace.harness.session_pending": "Parameters can be edited once the Agent session is ready",
             "ui.workspace.harness.synced": "Shared with the Agent · two-way sync",
-            "ui.workspace.harness.unavailable": "The current model is unavailable",
             "ui.workspace.harness.load_failed": "Failed to load model parameters",
             "ui.workspace.harness.save_failed": "Failed to save parameters",
             "ui.workspace.canvas.empty_image": "Generated images appear here; you can also pick one from the history panel to view",
@@ -12719,8 +12828,7 @@
             "ui.workspace.processing.route": "Input method",
             "ui.workspace.processing.asset_route": "Local model asset",
             "ui.workspace.processing.asset_route_expired": "Local model asset (the {provider} original task is past its retention)",
-            "ui.workspace.processing.task_route": "Same-provider task",
-            "ui.workspace.processing.unavailable": "Unavailable",
+            "ui.workspace.processing.task_route": "{provider} task (referenced by task ID; no model file is uploaded)",
             "ui.workspace.processing.no_compatible_offering": "The current model's input requirements are incompatible with the processing model; animation requires an available rigging task first.",
             "ui.workspace.processing.session_mismatch": "Switch to the creation task this model belongs to first.",
             "ui.workspace.processing.asset_unavailable": "The current model has no saved, usable asset.",
@@ -12754,7 +12862,112 @@
             "ui.workspace.processing.plan_step_queued": "Queued to submit",
             "ui.workspace.processing.plan_auto_rigging": "The animation requires rigging first; a rigging step has been added.",
             "ui.workspace.processing.plan_incompatible": "The selected steps have no usable input path. Adjust the steps or the model.",
-            "ui.workspace.processing.source_refused": "The current model ({size}) cannot go into this step directly: {reasons}. Try a model that meets these conditions.",
+            "ui.workspace.processing.source_refused": "The current model ({size}) cannot go into this step directly: {reasons}. Tick Remesh first to reduce the model's faces and size, then do this step on its result (passed on by task ID, with no file upload); or pick a model that meets these conditions.",
+            "ui.workspace.processing.source_refused_face_limit": "{service} accepts at most {limit} triangles, and the current model has about {faces}",
+            "ui.unavailable.label": "Unavailable: {reason}",
+            "ui.unavailable.reason.canvas.reference_ratio_unsupported": "Model does not support the reference ratio",
+            "ui.unavailable.reason.task_center.notice_blocked": "Notifications blocked",
+            "ui.unavailable.reason.notes.too_long": "Over {limit} characters",
+            "ui.unavailable.reason.result.source_retry": "Source model cannot be reused",
+            "ui.unavailable.reason.composer.multiview_invalid": "Views do not fit",
+            "ui.unavailable.reason.stage.retexture_no_target": "No target model chosen",
+            "ui.unavailable.reason.stage.retexture_no_handle": "Model has no handle yet",
+            "ui.unavailable.reason.admin.own_account": "This is your own account",
+            "ui.unavailable.reason.three_view.price_unknown": "Price unknown",
+            "ui.unavailable.reason.three_view.front_wait": "Front view not done",
+            "ui.unavailable.reason.three_view.multiview_wait": "Not enough views done",
+            "ui.unavailable.reason.admin.agent_mcp_unavailable": "Preset unavailable",
+            "ui.unavailable.reason.admin.agent_preview_required": "Preview first",
+            "ui.unavailable.reason.admin.agent_skill_limit": "Skill limit reached",
+            "ui.unavailable.reason.result.send_to_canvas": "Cannot send to canvas",
+            "ui.unavailable.reason.harness.no_file": "No file chosen",
+            "ui.unavailable.reason.harness.preview_unavailable": "Cannot preview",
+            "ui.unavailable.reason.harness.upload_unavailable": "Model upload not supported",
+            "ui.unavailable.reason.harness.source_unavailable": "Source model unavailable",
+            "ui.unavailable.reason.harness.status_needs_input": "Source or parameters missing",
+            "ui.unavailable.reason.harness.status_unavailable": "Feature unavailable",
+            "ui.unavailable.reason.harness.no_service": "No service available",
+            "ui.unavailable.reason.harness.no_offering": "No service chosen",
+            "ui.unavailable.reason.harness.offering_unavailable": "Service unavailable",
+            "ui.unavailable.reason.harness.operation_unavailable": "Not enabled yet",
+            "ui.unavailable.reason.harness.selection_gone": "Selection no longer valid",
+            "ui.unavailable.reason.admin.llm_last_level": "Keep at least one level",
+            "ui.unavailable.reason.admin.llm_unreachable": "Cannot connect",
+            "ui.unavailable.reason.admin.llm_not_configured": "Connection not configured",
+            "ui.unavailable.reason.admin.llm_vision_required": "Default model needs vision",
+            "ui.unavailable.reason.admin.llm_default_unavailable": "Default model unavailable",
+            "ui.unavailable.reason.stage.board_empty": "Canvas is empty",
+            "ui.unavailable.reason.composer.reference_unused": "Some pictures unused",
+            "ui.unavailable.reason.composer.agent_not_configured": "Agent not configured",
+            "ui.unavailable.reason.stage.no_session": "No session",
+            "ui.unavailable.reason.stage.compare_file_missing": "No file to compare",
+            "ui.studio.approval.card.price_unknown_detail": "The provider quote could not be read, so this step cannot be approved now. Ask the Agent to request the step again.",
+            "ui.unavailable.reason.approval.balance_low": "Balance too low",
+            "ui.unavailable.reason.approval.price_unknown": "Price unreadable",
+            "ui.unavailable.reason.stage.no_output": "No output to show",
+            "ui.unavailable.reason.stage.compare_needs_two": "Fewer than two candidates",
+            "ui.unavailable.reason.stage.canvas_full": "Canvas is full",
+            "ui.unavailable.reason.formats.retry_blocked": "Cannot retry",
+            "ui.unavailable.reason.formats.paused": "Conversion paused",
+            "ui.unavailable.reason.formats.no_route": "No conversion route",
+            "ui.unavailable.reason.formats.not_listed": "Status unknown",
+            "ui.unavailable.reason.formats.not_ready": "Task not finished",
+            "ui.unavailable.reason.form.upload_maximum": "Image limit reached",
+            "ui.unavailable.reason.form.upload_read_failed": "File could not be read",
+            "ui.unavailable.reason.form.upload_file_too_large": "File too large",
+            "ui.unavailable.reason.form.upload_too_many_pixels": "Image too large",
+            "ui.unavailable.reason.form.upload_conversion_failed": "Image cannot be converted",
+            "ui.unavailable.reason.form.upload_unsupported": "Format not supported",
+            "ui.unavailable.reason.canvas.no_mask_strokes": "No mask drawn yet",
+            "ui.unavailable.reason.params.condition": "Locked by current settings",
+            "ui.unavailable.reason.params.scope_excludes": "Not in this mode",
+            "ui.unavailable.reason.params.operation_unavailable": "Not supported by this model",
+            "ui.unavailable.reason.params.no_session": "No session",
+            "ui.unavailable.reason.result.report_unsupported": "Report version not supported",
+            "ui.unavailable.reason.picker.model_retired": "{from} is retired",
+            "ui.unavailable.reason.picker.chat_model_offline": "Chosen chat model retired",
+            "ui.unavailable.reason.picker.skill_load_failed": "Skills failed to load",
+            "ui.unavailable.reason.picker.skill_unavailable": "Chosen Skill unavailable",
+            "ui.unavailable.reason.picker.skill_not_enabled": "Not enabled in config",
+            "ui.unavailable.reason.picker.reasoning_none": "Model has no levels",
+            "ui.unavailable.reason.picker.scope_excludes": "Not in this mode",
+            "ui.unavailable.reason.picker.model_disabled": "Model not enabled",
+            "ui.unavailable.reason.picker.no_session": "No session",
+            "ui.unavailable.reason.canvas.anchor": "Anchor not available",
+            "ui.unavailable.reason.canvas.mask_unreadable": "Mask cannot be read",
+            "ui.unavailable.reason.canvas.no_session": "No session",
+            "ui.unavailable.reason.canvas.output_size": "Output size does not match canvas",
+            "ui.unavailable.reason.canvas.bgremoval_service": "No background removal service",
+            "ui.unavailable.reason.canvas.inpaint_model": "Model cannot inpaint",
+            "ui.unavailable.reason.result.refetch_repeated_failure": "Another fetch would fail",
+            "ui.unavailable.reason.result.refetch_provider_unavailable": "Provider not configured",
+            "ui.unavailable.reason.result.refetch_not_supported": "Provider delivers once",
+            "ui.unavailable.reason.result.refetch_expired": "Provider no longer keeps it",
+            "ui.unavailable.reason.result.refetch_delivered": "Already fetched again",
+            "ui.unavailable.reason.result.other_session": "Belongs to another session",
+            "ui.unavailable.reason.result.no_file": "No file",
+            "ui.unavailable.reason.result.no_preview": "No preview",
+            "ui.unavailable.reason.processing.action_missing": "No action chosen",
+            "ui.unavailable.reason.processing.no_steps": "No step chosen",
+            "ui.unavailable.reason.processing.step_unrunnable": "Chosen steps cannot run",
+            "ui.unavailable.reason.processing.plan_incompatible": "No input path for the steps",
+            "ui.unavailable.reason.processing.required_missing": "Required fields missing",
+            "ui.unavailable.reason.processing.input_rule": "Fill exactly one input",
+            "ui.unavailable.reason.processing.plan_running": "A plan is in progress",
+            "ui.unavailable.reason.processing.reconcile_unavailable": "Cannot reconcile now",
+            "ui.unavailable.reason.processing.plan_reconciled_mismatch": "Original task does not match",
+            "ui.unavailable.reason.processing.plan_prepare_unavailable": "Cannot prepare input now",
+            "ui.unavailable.reason.processing.plan_offering_unavailable": "Processing service unavailable",
+            "ui.unavailable.reason.processing.asset_unavailable": "No usable model asset",
+            "ui.unavailable.reason.processing.session_mismatch": "Model is from another task",
+            "ui.unavailable.reason.canvas.size_unsupported": "Model does not support this canvas size",
+            "ui.workspace.processing.unavailable_reason.too_large": "Model over {limit}",
+            "ui.workspace.processing.unavailable_reason.face_limit": "Over {limit} faces",
+            "ui.workspace.processing.unavailable_reason.media": "Unsupported model file",
+            "ui.workspace.processing.unavailable_reason.needs_task": "Needs the original {provider} task",
+            "ui.workspace.processing.unavailable_reason.expired": "Original task has expired",
+            "ui.workspace.processing.unavailable_reason.blocked": "The previous step cannot run",
+            "ui.workspace.processing.unavailable_reason.unavailable": "Service unavailable right now",
             "ui.workspace.processing.source_refused_separator": "; ",
             "ui.workspace.processing.source_refused_too_large": "{service} accepts at most {limit}",
             "ui.workspace.processing.source_refused_media": "{service} does not accept this kind of model file",
@@ -12814,7 +13027,7 @@
             "ui.workspace.tasks.retryable": "Retryable",
             "ui.workspace.tasks.retry": "Retry",
             "ui.workspace.tasks.retry_confirm": "Confirm retry",
-            "ui.workspace.tasks.retry_awaiting": "The retry is submitted only after you confirm, and may incur charges.",
+            "ui.workspace.tasks.retry_awaiting": "The retry is submitted only after you confirm. Click Retry again to confirm; it may incur charges.",
             "ui.workspace.tasks.retry_started": "Resubmitted",
             "ui.workspace.tasks.retry_failed": "Retry failed, please try again later",
             "ui.workspace.notice.done": "Task completed",
@@ -12903,7 +13116,6 @@
             "ui.dashboard.description": "Choose a feature to start creating 3D assets",
             "ui.dashboard.balance": "Account balance",
             "ui.dashboard.fallback_initial": "·",
-            "ui.dashboard.balance_unavailable": "—",
             "ui.dashboard.credits": "credits",
             "ui.dashboard.available": "available",
             "ui.dashboard.modules": "Features",
@@ -12959,12 +13171,12 @@
             "ui.form.image_upload.format.webp": "WebP",
             "ui.form.image_upload.format.gif": "GIF",
             "ui.form.image_upload.format.bmp": "BMP",
-            "ui.form.image_upload.unsupported": "Unsupported file format: {filename}",
+            "ui.form.image_upload.unsupported": "Unsupported file format: {filename}. Use JPG, PNG, WebP, GIF or BMP",
             "ui.form.image_upload.conversion_failed": "Image conversion failed. Check whether the file is corrupted: {filename}",
             "ui.form.image_upload.too_many_pixels": "Image is too large. Up to {pixels} pixels are supported.",
             "ui.form.image_upload.too_many_pixels_one": "Image is too large. Up to {pixels} pixel is supported.",
             "ui.form.image_upload.multi_role_hint": "The 1st image is the main image; the rest are style references. In your prompt, use \"image 1\" or \"image 2\" to specify each role explicitly.",
-            "ui.form.image_upload.file_too_large": "File \"{filename}\" exceeds the {size} limit",
+            "ui.form.image_upload.file_too_large": "File \"{filename}\" exceeds the {size} limit; compress it or pick another picture",
             "ui.form.image_upload.maximum": "You can upload at most {count} images",
             "ui.form.image_upload.maximum_one": "You can upload at most {count} image",
             "ui.form.image_upload.read_failed": "Failed to read the file. Please try again.",
@@ -12976,8 +13188,6 @@
             "ui.form.image_upload.multiple_hint": ", multiple allowed",
             "ui.form.image_upload.preview_alt": "Image preview {index}",
             "ui.form.model_upload.supported": "Supports GLB, GLTF, OBJ, FBX, STL, and USDZ, up to {size}",
-            "ui.form.model_upload.file_too_large": "File exceeds the {size} limit",
-            "ui.form.model_upload.unsupported_format": "Unsupported format {extension}. Please upload {accepted}.",
             "ui.form.model_upload.release": "Release to upload",
             "ui.form.model_upload.drop": "Click or drag a 3D model here",
             "ui.form.model_upload.remove": "Remove model",
@@ -13226,7 +13436,6 @@
             "ui.canvas.brush.target_loading": "This image is still loading. Paint or erase once it has loaded",
             "ui.canvas.lock.hint": "Locked layers can't be moved, transformed, cropped, or box-selected. You can still select and unlock them in the layers panel",
             "ui.canvas.mask.no_candidate": "No high-quality image model that supports inpainting is available",
-            "ui.canvas.mask.unavailable": "The current model doesn't support inpainting. Choose a model that supports masks",
             "ui.canvas.inpaint.title": "Inpaint",
             "ui.canvas.inpaint.missing_semantics": "This model doesn't fully declare prompt, reference image, and mask inputs, so it can't be used for inpainting. Choose a model that supports inpainting.",
             "ui.canvas.inpaint.prompt_label": "Inpaint description",
@@ -13240,7 +13449,7 @@
             "ui.canvas.inpaint.confirm_execution": "Confirm and run this inpaint",
             "ui.canvas.inpaint.cancel": "Cancel",
             "ui.canvas.inpaint.failed": "Failed to submit inpaint",
-            "ui.canvas.inpaint.job_storage_unavailable": "The browser could not save placement details for this inpaint. This page can still place the result. Do not reload or close it; otherwise, the original result will only be available in the task center.",
+            "ui.canvas.inpaint.job_storage_unavailable": "The browser could not save placement details for this inpaint (check the browser storage space or private mode). This page can still place the result. Do not reload or close it; otherwise, the original result will only be available in the task center.",
             "ui.canvas.inpaint.output_size": "Output: {size}, matching the canvas and the mask.",
             "ui.canvas.inpaint.output_size_nearest": "This model cannot output the canvas size {canvas} (the nearest legal size is {size}). Choose a model that supports it, or resize the canvas first.",
             "ui.canvas.inpaint.output_size_unconfirmed": "The output size of this model cannot be confirmed to match the canvas ({size}), so this inpaint cannot be submitted. Choose a model that supports this size.",
@@ -13258,7 +13467,7 @@
             "ui.canvas.bgremoval.confirm_execution": "Confirm and run background removal",
             "ui.canvas.bgremoval.cancel": "Cancel",
             "ui.canvas.bgremoval.failed": "Failed to submit background removal",
-            "ui.canvas.bgremoval.unavailable": "No background removal service is currently available",
+            "ui.canvas.bgremoval.unavailable": "No background removal service is currently available. Check in settings that one is enabled, then try again later",
             "ui.canvas.action.download": "Download this layer",
             "ui.canvas.action.delete": "Delete",
             "ui.canvas.action.delete_layer": "Delete this layer",
@@ -13307,6 +13516,7 @@
             "failure.integrity_failure": "The generated asset failed the integrity check",
             "failure.protocol": "The upstream returned unrecognized data",
             "failure.internal": "Task processing failed",
+            "failure.upstream_denied": "The upstream image generation service refused this request (HTTP 403), so no result was produced. This is not about the prompt or pictures, and retrying will not pass; please ask an administrator to check access to the upstream service",
             "failure.content_rejected": "The upstream service's content-safety review blocked this request: the input image or description may have been judged inappropriate. No result was produced, and retrying the same input will not pass. Change the image or rewrite the description and start again",
             "failure.source_expired": "The provider no longer keeps the source model's original task. Starting again uses the saved model file; a service that takes no model file needs the source generated again",
             "ui.workspace.harness.agent_decides": "You choose the model and optional parameters; the Agent decides how to provide inputs and runs the task.",
@@ -13320,7 +13530,7 @@
             "ui.workspace.skills.select": "Select",
             "ui.workspace.skills.loading": "Loading",
             "ui.workspace.skills.load_failed": "Failed to load Skills",
-            "ui.workspace.skills.unavailable": "The current model doesn't support this Skill",
+            "ui.workspace.skills.unavailable": "The current model doesn't support this Skill; switch to a model that does",
             "ui.workspace.skills.revision": "Version",
             "ui.workspace.skills.selected": "Selected",
             "ui.account.title": "My resources",
@@ -13391,7 +13601,6 @@
             "ui.workspace.skills.delete_label": "Delete Skill \"{name}\"",
             "ui.workspace.skills.delete_failed": "Failed to delete Skill. The list is unchanged. Please try again.",
             "ui.workspace.skills.content_invalid": "Enter a name and creative requirements.",
-            "ui.workspace.skills.size_unavailable": "Failed to load suggested sizes. Close and try again.",
             "ui.studio.picker.image.prefix": "2D",
             "ui.studio.picker.model.prefix": "3D",
             "ui.studio.picker.image.title": "2D generation models",
@@ -13663,7 +13872,7 @@
             "ui.studio.stage.action.inpaint": "Inpaint",
             "ui.studio.stage.action.inpaint_hint": "Redraw the selected area based on your description. With no selection, it enters mask mode first so you can paint the part to redraw.",
             "ui.studio.stage.action.inpaint_target": "Selection (area drawn with a mask, rectangular marquee, or lasso)",
-            "ui.studio.stage.action.inpaint_board_empty": "The dashed frame is empty, so there's nothing to inpaint",
+            "ui.studio.stage.action.inpaint_board_empty": "The dashed frame is empty, so there is nothing to inpaint. Put a picture or drawing inside the frame first",
             "ui.studio.stage.action.process_hint.animation": "Generate motion for a model that's already rigged.",
             "ui.studio.stage.action.process_hint.format-conversion": "Convert the model to other formats.",
             "ui.studio.stage.action.process_hint.remesh": "Reorganize the model's mesh for fewer, cleaner faces.",
@@ -13814,6 +14023,8 @@
             "ui.connectivity.session_unavailable": "Can't confirm your sign-in right now; retrying automatically. Your sign-in is unaffected.",
             "ui.studio.composer.handle_tag_title": "Add as attachment",
             "ui.studio.composer.handle_tag_model_title": "Insert into input box",
+            "ui.studio.handle_badge.label": "Chat handle {handle}",
+            "ui.studio.handle_preview.alt": "Preview of {handle}",
             "ui.studio.composer.stop_note": "Stop only ends this turn of the chat. Tasks already submitted upstream may still be billed; check task progress for details.",
             "ui.studio.lightbox.title": "Large view",
             "ui.studio.lightbox.close": "Close large view",
@@ -13827,7 +14038,7 @@
             "ui.studio.lightbox.download": "Download",
             "ui.studio.lightbox.counter": "{current} / {total}",
             "ui.studio.lightbox.hint": "Scroll to zoom · drag to pan · double-click to zoom or reset · left/right keys to switch · Space or Esc to close",
-            "ui.studio.lightbox.missing": "This image can't be displayed right now.",
+            "ui.studio.lightbox.missing": "This image can't be displayed right now. Close and reopen it, or reload the page and try again.",
             "ui.studio.compare.title": "Compare",
             "ui.studio.compare.mode": "Compare mode",
             "ui.studio.compare.mode_two": "2-up",
@@ -13902,7 +14113,11 @@
             "ui.studio.multiview_upload.confirm": "Make 3D from these views",
             "ui.studio.multiview_upload.dismiss": "No",
             "ui.studio.multiview_upload.turn": "Make a 3D model from the {views} views of these pictures",
-            "ui.studio.multiview_upload.invalid": "Use each view once, include a front view and at least two pictures.",
+            "ui.studio.multiview_upload.invalid": "Use each view once, include a front view and at least two pictures. Adjust the choices and confirm again",
+            "ui.studio.multiview_upload.image_label": "Picture {index}",
+            "ui.studio.multiview_upload.open_image": "View picture {index} on the stage",
+            "ui.studio.stage_image.title": "Picture view",
+            "ui.studio.stage_image.close": "Close picture view (Esc)",
             "ui.pending_approval.view_label": "{view} view",
             "ui.studio.strip.more": "{count} more",
             "ui.studio.strip.more_one": "{count} more",
@@ -14068,7 +14283,7 @@
             "ui.canvas.layers.inpaint_mask_title": "Mask used by this inpaint layer",
             "ui.canvas.layers.inpaint_mask_note": "The mask uses the canvas coordinates at generation time; opaque areas are kept and transparent areas mark the area to redraw.",
             "ui.canvas.layers.inpaint_mask_loading": "Loading the mask…",
-            "ui.canvas.layers.inpaint_mask_unavailable": "The mask for this inpaint layer cannot be read and may no longer be available.",
+            "ui.canvas.layers.inpaint_mask_unavailable": "The mask for this inpaint layer cannot be read and may no longer be available. Close and try again, or run the inpaint again.",
             "ui.canvas.layers.inpaint_mask_size": "Mask size: {size}",
             "ui.canvas.inpaint.layer_added": "The inpaint result was placed on the artboard as a new layer.",
             "ui.canvas.inpaint.layer_failed": "Inpainting finished, but the result couldn't be placed on the artboard. You can find it in the task center.",
@@ -14149,8 +14364,8 @@
             "ui.canvas.size.pixels": "{width}×{height}",
             "ui.canvas.size.mismatch": "The model will output {output}; the canvas is {canvas}",
             "ui.canvas.size.align": "Output at canvas size",
-            "ui.canvas.size.conflict": "The current model can't output the canvas size {canvas}; it will output {output}",
-            "ui.canvas.size.conflict_unknown": "The current model can't output the canvas size {canvas}",
+            "ui.canvas.size.conflict": "The current model can't output the canvas size {canvas}; it will output {output}. Resize the canvas to that, or switch to a model that supports this size",
+            "ui.canvas.size.conflict_unknown": "The current model can't output the canvas size {canvas}. Switch to a model that supports it, or change the canvas size",
             "ui.canvas.size.adopt": "Set canvas to {output}",
             "ui.canvas.size.follows": "This turn uses the artboard as its source, so the output follows the artboard: it will be output at {output} (canvas {canvas})",
             "ui.canvas.size.follows_nearest": "This turn uses the artboard as its source, so the output follows the artboard: the model can't produce the canvas size {canvas}, so the closest valid size {output} will be used",
@@ -14191,7 +14406,7 @@
             "ui.studio.outputs.group_yesterday": "Yesterday",
             "ui.studio.outputs.group_date": "{month}/{day}/{year}",
             "ui.studio.outputs.range_hint": "Hold Shift and click another item to select a range",
-            "ui.studio.compare.unavailable": "This version has no files to compare right now.",
+            "ui.studio.compare.unavailable": "This version has no file to compare right now. Wait for it to finish, or pick another version.",
             "ui.studio.outputs.download_group": "Download all images from {label}",
             "ui.studio.params.chip_pick_model": "Pick a model first",
             "ui.studio.stage.view.label": "View mode",
@@ -15097,6 +15312,7 @@
             "chat.presentation.messages.generation_failed": "Generation failed",
             "chat.presentation.messages.generation_failed_by_class.insufficient_balance": "This model provider's account balance is insufficient or overdue, so this step was not run. Please contact an administrator",
             "chat.presentation.messages.generation_failed_by_class.credential_quota": "This API key has reached its credit limit. Raise the key limit in the provider console or switch to another key, so this step was not run. Please contact an administrator",
+            "chat.presentation.messages.generation_failed_by_class.upstream_denied": "The upstream image generation service refused this step's request (HTTP 403); no result was produced. It is an access problem upstream, not about the prompt or pictures: do not rewrite the prompt, change pictures or parameters and retry, and do not keep probing other models. Tell the user plainly that the upstream image generation service refused the request and that an administrator needs to check access to the upstream service before trying again",
             "chat.presentation.messages.generation_failed_by_class.content_rejected": "The upstream service's content-safety review blocked this step's input (the classifier is sensitive and ordinary art material can be flagged by mistake); no result was produced, and retrying the same input will not pass. Adjust and call once more on your own: rewrite the prompt by the review's reason, dropping the descriptions that may trip it (for sexual, state that the clothing is complete and the pose is modest, and drop words such as nude, skin-tight or sexy; for violence, drop gore and weapon-injury descriptions) while keeping the art intent; if the input image itself was blocked, rewriting the prompt will not help, so use another image or drop that reference and try again, asking the user for another image when needed. Tell the user plainly it was a content-safety block and what you changed. Do not suggest changing the deployment configuration",
             "chat.presentation.messages.content_rejected_reasons": " (reason: {reasons})",
             "chat.presentation.messages.content_rejected_reason_separator": ", ",
@@ -15136,6 +15352,7 @@
             "chat.presentation.messages.summary_failed": "Failed to generate summary",
             "chat.presentation.messages.no_result": "⚠️ No result returned. Please retry.",
             "chat.presentation.messages.unknown_error": "Unknown error",
+            "chat.presentation.messages.agent_inline_image_output": "The current conversation model drew a picture itself instead of calling a generation tool; the picture was not kept and will not appear in the results. Please retry; if it keeps happening, switch to another conversation model.",
             "chat.presentation.messages.agent_images_unsupported": "The current Agent model rejected the request with images; it may not support image input. In the deployment configuration, switch to a model that supports image input (LLM_MODEL), or remove the images and retry.",
             "chat.presentation.messages.agent_content_rejected": "The request was blocked by the upstream model service's content-safety review: the images or text in this turn may have been judged inappropriate. The model does support images and no deployment change is needed. Change the image or rewrite the description and retry; if you are sure the content is fine, send this message's error ID to an administrator.",
             "chat.presentation.messages.agent_not_configured": "Agent is not configured: the deployment is missing chat model settings (LLM_API_KEY or LLM_MODEL), so chatting and prompt enhancement are unavailable. Please contact an administrator to configure it and try again.",
@@ -15288,6 +15505,7 @@
             "runtime.generation_messages.reference_limit_one": "{model} uses only 1 reference picture at a time: of the {total} pictures given, only the first is used. To use several pictures from different angles, pick a model that takes several pictures.",
             "runtime.generation_messages.reference_selection_note": "The {model} reference picture count for this step is {count}. A source replacement or de-duplication means the pictures used are not stated as the first ones in the original order.",
             "runtime.generation_messages.reference_capacity": "{model} has a reference picture limit of {count} per request; {total} pictures are attached. Which pictures are used is stated only after sending, in the result's source note.",
+            "runtime.generation_messages.reference_capacity_multiview": "Sent as is, {model} uses at most {count} reference pictures ({total} attached); mark the views above and confirm to make it with the {multiview} multiview model, which uses all {total}.",
             "runtime.generation_messages.reference_limit_exceeded": "{label} accepts at most {max} pictures; {actual} were provided. This step was not submitted and no credits were spent. Remove pictures or pick a model that takes more.",
             "runtime.generation_messages.extra_credits_consent_required": "This step includes extra credits. Explicitly approve the extra credits before submitting again.",
             "runtime.generation_messages.extra_credits_over_limit": "The extra credits for this step exceed the limit this submission may approve. Remove options that cost extra credits, or start a new task.",
@@ -15989,10 +16207,10 @@
             "本人拥有且已成功的原生 Tripo 文生或图生 3D 模型；不接收检查报告、上传文件或其他服务模型。": "A native Tripo text-to-3D or image-to-3D model that you own and that has completed successfully. Check reports, uploaded files, and models from other services are not accepted.",
             "本人拥有的 JPG、PNG 或 WebP 图片，最多 20,000,000 字节。": "A JPG, PNG, or WebP image that you own, up to 20,000,000 bytes.",
             "本人拥有的 JPG、PNG 或 WebP 图片，最多 20,000,000 字节。每边至少 32 像素，总像素不超过 178,956,970。": "A JPG, PNG, or WebP image that you own, up to 20,000,000 bytes. Each side must be at least 32 pixels, and the total pixel count must not exceed 178,956,970.",
-            "本人拥有的自包含静态 GLB；不限制生成服务。": "A self-contained static GLB that you own, from any generation service.",
-            "本人拥有的自包含静态 GLB；不限制生成服务。UV 展开会移除原纹理；仅接收按实例累计不超过 40000 个三角面的模型。": "A self-contained static GLB that you own, from any generation service. UV unwrapping removes the original texture. Only models with no more than 40,000 triangles in total across instances are accepted.",
-            "本人拥有的自包含静态 GLB；不限制生成服务。候选待真实端点及完整交付验收，当前停用。 修复可能移除纹理；报告明确区分上游已报告与未提供的修复细节。": "A self-contained static GLB that you own, from any generation service. This candidate is pending real-endpoint and full-delivery acceptance and is currently disabled. Repair may remove textures. The report clearly distinguishes repair details reported by the upstream from those not provided.",
-            "本人拥有的自包含静态 GLB；不限制生成服务。分析结果不构成打印安全认证。": "A self-contained static GLB that you own, from any generation service. The analysis result is not a print safety certification.",
+            "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。": "A self-contained static GLB that you own, from any generation service. Direct uploads are limited to 10 MiB; a GLB produced by your own successful task can be up to 70 MiB (sent inline as a data URI).",
+            "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。UV 展开会移除原纹理；仅接收按实例累计不超过 40000 个三角面的模型。": "A self-contained static GLB that you own, from any generation service. Direct uploads are limited to 10 MiB; a GLB produced by your own successful task can be up to 70 MiB (sent inline as a data URI). UV unwrapping removes the original texture. Only models with no more than 40,000 triangles in total across instances are accepted.",
+            "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。候选待真实端点及完整交付验收，当前停用。 修复可能移除纹理；报告明确区分上游已报告与未提供的修复细节。": "A self-contained static GLB that you own, from any generation service. Direct uploads are limited to 10 MiB; a GLB produced by your own successful task can be up to 70 MiB (sent inline as a data URI). This candidate is pending real-endpoint and full-delivery acceptance and is currently disabled. Repair may remove textures. The report clearly distinguishes repair details reported by the upstream from those not provided.",
+            "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。分析结果不构成打印安全认证。": "A self-contained static GLB that you own, from any generation service. Direct uploads are limited to 10 MiB; a GLB produced by your own successful task can be up to 70 MiB (sent inline as a data URI). The analysis result is not a print safety certification.",
             "本人本会话已成功交付的上述 Rodin 服务；不接受其他服务、加工结果或任意上游 UUID。": "The Rodin service above that you successfully delivered in this session. Other services, processed results, and arbitrary upstream UUIDs are not accepted.",
             "本服务固定交付所列全部附加格式；格式与额外费用在原生处理开始前一并批准。": "This service always delivers all the listed additional formats. The formats and extra fees are approved together before native processing starts.",
             "一次转换固定导出全部六种格式（共 1 积分）。Meshy Convert 只返回各格式的模型文件，不单独返回贴图或材质库：OBJ 文件里引用了一个材质库（如 temp.mtl），但这个文件不随结果提供；OBJ 的形状和贴图坐标（UV）完整，但没有材质和贴图。任一格式校验失败则任务失败。": "One run always exports all six formats (1 credit in total). Meshy Convert returns only the model file of each format, with no separate textures or material library: the OBJ references a material library (such as temp.mtl) that is not provided with the result; its shape and texture coordinates (UVs) are complete, but it has no materials or textures. The task fails if any format fails its check.",
@@ -16069,6 +16287,7 @@
             "游到岸边 (swimming_to_edge)": "Swim to edge",
             "游泳待机 (Swim_Idle)": "Swim idle",
             "源任务": "Source task",
+            "同一 Meshy 连接上本人成功且仍在保留期内的任务：直接按任务 ID 引用，不上传模型文件。": "Your own successful task on the same Meshy connection that is still within its retention period: referenced directly by task ID, with no model file uploaded.",
             "源模型": "Source model",
             "源模型 URL": "Source model URL",
             "源模型任务": "Source model task",
@@ -16432,6 +16651,7 @@
             "默认建议三角面：Meshy 的 8K 纹理不支持四边面。": "Triangle faces are recommended by default: Meshy's 8K texture does not support quad faces.",
             "默认建议为三角面：Meshy 的 8K 纹理不支持四边面。": "The default is triangles: Meshy 8K textures don't support quad faces.",
             "默认建议为上限 300000；需要控制面数时用独立的重拓扑。": "The default is the 300000 upper limit; use a separate remesh when you need to control the face count.",
+            "只在开启自动重拓扑时生效。默认不重拓扑以保最高质量，面数由几何分辨率和模型本身决定（4K 实测约 25 万到 790 万面，单个格式可达数百 MB）；需要控制面数或交付体积时开启自动重拓扑，或用独立的重拓扑。": "Applies only when auto remesh is on. By default no remesh runs, for the highest quality, so the face count follows the geometry resolution and the model itself (at 4K, measured at about 250 thousand to 7.9 million faces, with single formats up to several hundred MB). To control the face count or delivery size, turn on auto remesh or use a separate remesh.",
             "默认建议为最高几何分辨率 4K。": "The default is the highest geometry resolution, 4K.",
             "默认建议为最高几何分辨率 4K（仅预览阶段上线）。": "The default is the highest geometry resolution, 4K (preview stage only).",
             "默认建议为最高分辨率档位 4K，实际宽高随画面比例变化。": "The default is the highest resolution tier, 4K; the actual width and height vary with the aspect ratio.",
@@ -19049,6 +19269,7 @@
           "default": 300000,
           "minimum": 100,
           "maximum": 300000,
+          "description": "只在开启自动重拓扑时生效。默认不重拓扑以保最高质量，面数由几何分辨率和模型本身决定（4K 实测约 25 万到 790 万面，单个格式可达数百 MB）；需要控制面数或交付体积时开启自动重拓扑，或用独立的重拓扑。",
           "semantic": "polycount"
         },
         {
@@ -20105,6 +20326,7 @@
           "default": 300000,
           "minimum": 100,
           "maximum": 300000,
+          "description": "只在开启自动重拓扑时生效。默认不重拓扑以保最高质量，面数由几何分辨率和模型本身决定（4K 实测约 25 万到 790 万面，单个格式可达数百 MB）；需要控制面数或交付体积时开启自动重拓扑，或用独立的重拓扑。",
           "presentation": {
             "surface": "provider",
             "control": "number",
@@ -20416,6 +20638,7 @@
           "default": 300000,
           "minimum": 100,
           "maximum": 300000,
+          "description": "只在开启自动重拓扑时生效。默认不重拓扑以保最高质量，面数由几何分辨率和模型本身决定（4K 实测约 25 万到 790 万面，单个格式可达数百 MB）；需要控制面数或交付体积时开启自动重拓扑，或用独立的重拓扑。",
           "presentation": {
             "surface": "readonly",
             "control": "number",
@@ -29876,7 +30099,7 @@
         "cdn.meshy.ai"
       ],
       "id": "meshy/processing/uv-unwrap",
-      "revision": "2026-10-15.2",
+      "revision": "2026-11-04.93.1",
       "model_id": "meshy-uv-unwrap",
       "model_name": "Meshy UV Unwrap",
       "capability": "uv-unwrap",
@@ -29899,10 +30122,35 @@
       },
       "parameters": [
         {
+          "name": "source_task",
+          "label": "源任务",
+          "type": "task",
+          "wire_name": "input_task_id",
+          "upstream_job_max_age_seconds": 172800,
+          "task_capabilities": [
+            "text-to-3d",
+            "image-to-3d",
+            "remesh",
+            "retexture"
+          ],
+          "same_provider": true,
+          "semantic": "source-task",
+          "task_offerings": [
+            "meshy/meshy-7.1/text-to-3d",
+            "meshy/meshy-7.1/image-to-3d",
+            "meshy/meshy-t2.5/text-to-3d",
+            "meshy/meshy-t2.5/image-to-3d",
+            "meshy/meshy-7/text-to-3d",
+            "meshy/meshy-7/image-to-3d",
+            "meshy/processing/remesh",
+            "meshy/processing/retexture"
+          ],
+          "description": "同一 Meshy 连接上本人成功且仍在保留期内的任务：直接按任务 ID 引用，不上传模型文件。"
+        },
+        {
           "name": "source_asset",
           "label": "源模型（静态 GLB）",
           "type": "asset",
-          "required": true,
           "wire_name": "model_url",
           "semantic": "source-asset",
           "media_types": [
@@ -29912,17 +30160,31 @@
           "extensions": [
             ".glb"
           ],
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "uploaded_model": {
             "profile_id": "static-glb-v1"
           },
-          "description": "本人拥有的自包含静态 GLB；不限制生成服务。UV 展开会移除原纹理；仅接收按实例累计不超过 40000 个三角面的模型。",
+          "description": "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。UV 展开会移除原纹理；仅接收按实例累计不超过 40000 个三角面的模型。",
           "presentation": {
             "surface": "task",
             "control": "asset"
           }
         }
       ],
+      "input_rules": [
+        {
+          "parameters": [
+            "source_task",
+            "source_asset"
+          ],
+          "minimum": 1,
+          "maximum": 1
+        }
+      ],
+      "source_model_limit": {
+        "max_triangles": 40000,
+        "count_basis": "triangles"
+      },
       "outputs": [
         {
           "role": "model",
@@ -29963,7 +30225,7 @@
           }
         ],
         "inline_model_input": {
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "media_type": "application/octet-stream"
         },
         "model_input_profile": {
@@ -29987,7 +30249,7 @@
         "cdn.meshy.ai"
       ],
       "id": "meshy/processing/resize",
-      "revision": "2026-10-15.2",
+      "revision": "2026-11-04.93.1",
       "model_id": "meshy-resize",
       "model_name": "Meshy Resize",
       "capability": "resize",
@@ -30010,10 +30272,35 @@
       },
       "parameters": [
         {
+          "name": "source_task",
+          "label": "源任务",
+          "type": "task",
+          "wire_name": "input_task_id",
+          "upstream_job_max_age_seconds": 172800,
+          "task_capabilities": [
+            "text-to-3d",
+            "image-to-3d",
+            "remesh",
+            "retexture"
+          ],
+          "same_provider": true,
+          "semantic": "source-task",
+          "task_offerings": [
+            "meshy/meshy-7.1/text-to-3d",
+            "meshy/meshy-7.1/image-to-3d",
+            "meshy/meshy-t2.5/text-to-3d",
+            "meshy/meshy-t2.5/image-to-3d",
+            "meshy/meshy-7/text-to-3d",
+            "meshy/meshy-7/image-to-3d",
+            "meshy/processing/remesh",
+            "meshy/processing/retexture"
+          ],
+          "description": "同一 Meshy 连接上本人成功且仍在保留期内的任务：直接按任务 ID 引用，不上传模型文件。"
+        },
+        {
           "name": "source_asset",
           "label": "源模型（静态 GLB）",
           "type": "asset",
-          "required": true,
           "wire_name": "model_url",
           "semantic": "source-asset",
           "media_types": [
@@ -30023,11 +30310,11 @@
           "extensions": [
             ".glb"
           ],
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "uploaded_model": {
             "profile_id": "static-glb-v1"
           },
-          "description": "本人拥有的自包含静态 GLB；不限制生成服务。",
+          "description": "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。",
           "presentation": {
             "surface": "task",
             "control": "asset"
@@ -30100,7 +30387,7 @@
           }
         ],
         "inline_model_input": {
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "media_type": "application/octet-stream"
         },
         "model_input_profile": {
@@ -30110,6 +30397,14 @@
         }
       },
       "input_rules": [
+        {
+          "parameters": [
+            "source_task",
+            "source_asset"
+          ],
+          "minimum": 1,
+          "maximum": 1
+        },
         {
           "parameters": [
             "resize_height",
@@ -30134,7 +30429,7 @@
         "cdn.meshy.ai"
       ],
       "id": "meshy/processing/analyze-printability",
-      "revision": "2026-10-15.2",
+      "revision": "2026-11-04.93.1",
       "model_id": "meshy-analyze-printability",
       "model_name": "Meshy Analyze Printability",
       "capability": "analyze-printability",
@@ -30157,10 +30452,36 @@
       },
       "parameters": [
         {
+          "name": "source_task",
+          "label": "源任务",
+          "type": "task",
+          "wire_name": "input_task_id",
+          "upstream_job_max_age_seconds": 172800,
+          "task_capabilities": [
+            "text-to-3d",
+            "image-to-3d",
+            "remesh",
+            "retexture"
+          ],
+          "same_provider": true,
+          "semantic": "source-task",
+          "task_offerings": [
+            "meshy/meshy-7.1/text-to-3d",
+            "meshy/meshy-7.1/image-to-3d",
+            "meshy/meshy-t2.5/text-to-3d",
+            "meshy/meshy-t2.5/image-to-3d",
+            "meshy/meshy-7/text-to-3d",
+            "meshy/meshy-7/image-to-3d",
+            "meshy/meshy-7.1-multiview/image-to-3d",
+            "meshy/processing/remesh",
+            "meshy/processing/retexture"
+          ],
+          "description": "同一 Meshy 连接上本人成功且仍在保留期内的任务：直接按任务 ID 引用，不上传模型文件。"
+        },
+        {
           "name": "source_asset",
           "label": "源模型（静态 GLB）",
           "type": "asset",
-          "required": true,
           "wire_name": "model_url",
           "semantic": "source-asset",
           "media_types": [
@@ -30170,11 +30491,11 @@
           "extensions": [
             ".glb"
           ],
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "uploaded_model": {
             "profile_id": "static-glb-v1"
           },
-          "description": "本人拥有的自包含静态 GLB；不限制生成服务。分析结果不构成打印安全认证。",
+          "description": "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。分析结果不构成打印安全认证。",
           "presentation": {
             "surface": "task",
             "control": "asset"
@@ -30243,7 +30564,7 @@
         "api_version": "v1",
         "result_assets": [],
         "inline_model_input": {
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "media_type": "model/gltf-binary"
         },
         "model_input_profile": {
@@ -30260,6 +30581,14 @@
         ]
       },
       "input_rules": [
+        {
+          "parameters": [
+            "source_task",
+            "source_asset"
+          ],
+          "minimum": 1,
+          "maximum": 1
+        },
         {
           "parameters": [
             "intended_print_height_mm",
@@ -30284,7 +30613,7 @@
         "cdn.meshy.ai"
       ],
       "id": "meshy/processing/repair-printability",
-      "revision": "2026-10-15.1",
+      "revision": "2026-11-04.93.1",
       "model_id": "meshy-repair-printability",
       "model_name": "Meshy Repair Printability（候选，待实测）",
       "capability": "repair-printability",
@@ -30307,10 +30636,36 @@
       },
       "parameters": [
         {
+          "name": "source_task",
+          "label": "源任务",
+          "type": "task",
+          "wire_name": "input_task_id",
+          "upstream_job_max_age_seconds": 172800,
+          "task_capabilities": [
+            "text-to-3d",
+            "image-to-3d",
+            "remesh",
+            "retexture"
+          ],
+          "same_provider": true,
+          "semantic": "source-task",
+          "task_offerings": [
+            "meshy/meshy-7.1/text-to-3d",
+            "meshy/meshy-7.1/image-to-3d",
+            "meshy/meshy-t2.5/text-to-3d",
+            "meshy/meshy-t2.5/image-to-3d",
+            "meshy/meshy-7/text-to-3d",
+            "meshy/meshy-7/image-to-3d",
+            "meshy/meshy-7.1-multiview/image-to-3d",
+            "meshy/processing/remesh",
+            "meshy/processing/retexture"
+          ],
+          "description": "同一 Meshy 连接上本人成功且仍在保留期内的任务：直接按任务 ID 引用，不上传模型文件。"
+        },
+        {
           "name": "source_asset",
           "label": "源模型（静态 GLB）",
           "type": "asset",
-          "required": true,
           "wire_name": "model_url",
           "semantic": "source-asset",
           "media_types": [
@@ -30320,11 +30675,11 @@
           "extensions": [
             ".glb"
           ],
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "uploaded_model": {
             "profile_id": "static-glb-v1"
           },
-          "description": "本人拥有的自包含静态 GLB；不限制生成服务。候选待真实端点及完整交付验收，当前停用。 修复可能移除纹理；报告明确区分上游已报告与未提供的修复细节。",
+          "description": "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。候选待真实端点及完整交付验收，当前停用。 修复可能移除纹理；报告明确区分上游已报告与未提供的修复细节。",
           "presentation": {
             "surface": "task",
             "control": "asset"
@@ -30410,7 +30765,7 @@
           }
         ],
         "inline_model_input": {
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "media_type": "model/gltf-binary"
         },
         "model_input_profile": {
@@ -30427,6 +30782,14 @@
         ]
       },
       "input_rules": [
+        {
+          "parameters": [
+            "source_task",
+            "source_asset"
+          ],
+          "minimum": 1,
+          "maximum": 1
+        },
         {
           "parameters": [
             "intended_print_height_mm",
@@ -30451,7 +30814,7 @@
         "cdn.meshy.ai"
       ],
       "id": "meshy/processing/multi-color-print",
-      "revision": "2026-10-15.2",
+      "revision": "2026-11-04.93.1",
       "model_id": "meshy-multi-color-print",
       "model_name": "Meshy Multi-Color Print",
       "capability": "multi-color-print",
@@ -30474,10 +30837,36 @@
       },
       "parameters": [
         {
+          "name": "source_task",
+          "label": "源任务",
+          "type": "task",
+          "wire_name": "input_task_id",
+          "upstream_job_max_age_seconds": 172800,
+          "task_capabilities": [
+            "text-to-3d",
+            "image-to-3d",
+            "remesh",
+            "retexture"
+          ],
+          "same_provider": true,
+          "semantic": "source-task",
+          "task_offerings": [
+            "meshy/meshy-7.1/text-to-3d",
+            "meshy/meshy-7.1/image-to-3d",
+            "meshy/meshy-t2.5/text-to-3d",
+            "meshy/meshy-t2.5/image-to-3d",
+            "meshy/meshy-7/text-to-3d",
+            "meshy/meshy-7/image-to-3d",
+            "meshy/meshy-7.1-multiview/image-to-3d",
+            "meshy/processing/remesh",
+            "meshy/processing/retexture"
+          ],
+          "description": "同一 Meshy 连接上本人成功且仍在保留期内的任务：直接按任务 ID 引用，不上传模型文件。"
+        },
+        {
           "name": "source_asset",
           "label": "源模型（静态 GLB）",
           "type": "asset",
-          "required": true,
           "wire_name": "model_url",
           "semantic": "source-asset",
           "media_types": [
@@ -30487,14 +30876,14 @@
           "extensions": [
             ".glb"
           ],
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "uploaded_model": {
             "profile_id": "static-glb-v1",
             "require_textures": true,
             "require_single_base_color_texture": true,
             "requirements": "所有部件须共用同一基础色贴图引用并有对应 UV；包括文件内未被场景引用的网格。不同 texture 引用即使指向同图像也不接受；法线贴图不算。"
           },
-          "description": "本人拥有的自包含静态 GLB；不限制生成服务。",
+          "description": "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。",
           "presentation": {
             "surface": "task",
             "control": "asset"
@@ -30566,6 +30955,16 @@
           "fixed": true
         }
       ],
+      "input_rules": [
+        {
+          "parameters": [
+            "source_task",
+            "source_asset"
+          ],
+          "minimum": 1,
+          "maximum": 1
+        }
+      ],
       "outputs": [
         {
           "role": "print-archive",
@@ -30592,7 +30991,7 @@
           }
         ],
         "inline_model_input": {
-          "max_bytes": 10485760,
+          "max_bytes": 73400320,
           "media_type": "model/gltf-binary"
         },
         "model_input_profile": {

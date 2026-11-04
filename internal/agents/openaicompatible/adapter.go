@@ -1,7 +1,6 @@
 package openaicompatible
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -153,8 +152,7 @@ func (adapter *Adapter) Stream(
 	if err := adapter.requireSuccess(response, request); err != nil {
 		return agents.Completion{}, err
 	}
-	scanner := bufio.NewScanner(response.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), adapter.scannerMaxBytes)
+	lines := newStreamLines(response.Body, adapter.scannerMaxBytes)
 	options := adapter.options(request.Model)
 	var content, reasoning strings.Builder
 	var usage *agents.Usage
@@ -164,8 +162,20 @@ func (adapter *Adapter) Stream(
 	thinking := false
 	calls := map[int]*agents.ToolCall{}
 	var callOrder []int
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	// inlineImage is set when the model drew a picture itself (delta.images,
+	// a multi-megabyte base64 line from models such as gpt-astra): the reply
+	// has no place for it, so it is dropped, and a turn that said nothing
+	// else ends with ErrInlineImageOutput instead of an unknown error.
+	inlineImage := false
+	for lines.Scan() {
+		if lines.Oversized() {
+			if !lines.OversizedImage() {
+				return agents.Completion{}, fmt.Errorf("read agent stream: line exceeds %d bytes", adapter.scannerMaxBytes)
+			}
+			inlineImage = true
+			continue
+		}
+		line := strings.TrimSpace(lines.Text())
 		if line == "" || strings.HasPrefix(line, ":") {
 			continue
 		}
@@ -189,6 +199,9 @@ func (adapter *Adapter) Stream(
 			usage = chunk.Usage.agentUsage()
 		}
 		for _, choice := range chunk.Choices {
+			if len(choice.Delta.Images) > 0 {
+				inlineImage = true
+			}
 			if passback(options) {
 				reasoning.WriteString(choice.Delta.ReasoningContent)
 			}
@@ -229,8 +242,11 @@ func (adapter *Adapter) Stream(
 			}
 		}
 	}
-	if err := scanner.Err(); err != nil {
+	if err := lines.Err(); err != nil {
 		return agents.Completion{}, fmt.Errorf("read agent stream: %w", err)
+	}
+	if inlineImage && strings.TrimSpace(content.String()) == "" && len(callOrder) == 0 {
+		return agents.Completion{}, agents.ErrInlineImageOutput
 	}
 	result := agents.Completion{Content: content.String(), ReasoningContent: reasoning.String(), Usage: usage}
 	for _, index := range callOrder {
@@ -608,7 +624,10 @@ type streamChunk struct {
 		Delta struct {
 			Content          string `json:"content"`
 			ReasoningContent string `json:"reasoning_content"`
-			ToolCalls        []struct {
+			// Images are pictures the model drew itself (OpenRouter-style
+			// delta.images); they are noticed, never kept.
+			Images    []json.RawMessage `json:"images"`
+			ToolCalls []struct {
 				Index    int    `json:"index"`
 				ID       string `json:"id"`
 				Function struct {

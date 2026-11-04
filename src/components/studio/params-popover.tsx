@@ -19,6 +19,8 @@ import { applyCanvasResize } from '@/lib/canvas/apply-canvas-resize';
 import { CanvasResizeAnchor } from '@/components/canvas/canvas-resize-anchor';
 import { formatSchemaText, parameterConditionMatches, parameterDisabled, parameterVisible, schemaCountMessage, schemaText } from '@/lib/product-schema';
 import { formatNativePrice, parseNativeQuote } from '@/lib/pricing';
+import { unavailableLabel } from '@/lib/unavailable';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { PICKER_TRIGGER_CLASS } from '@/components/studio/table-popover';
 import { defaultParamsChipText, generationCount, paramsChipText, paramsRatioText, readonlyParameterText, sizeOptionText } from '@/lib/workspace/generation-params';
 import type { ParamSchema } from '@/lib/providers/types';
@@ -207,6 +209,11 @@ export function ParamsDomainSection({ params, hasSession, disabled, skill, canva
     : params.failed ? text('ui.studio.params.load_failed')
     : !params.ready ? text('ui.studio.params.loading')
     : disabled ? text('ui.studio.params.edit_disabled') : '';
+  // The reasons the section cannot be used at all (#94): one notice with a short reason; the full sentence is its hint.
+  const unavailableNotice = !hasSession ? { reason: 'no_session', detail: text('ui.studio.params.no_session'), testId: 'params-disabled-reason' }
+    : unavailable ? { reason: 'operation_unavailable', detail: text('ui.studio.params.unavailable'), testId: 'params-disabled-reason' }
+    : !params.allowed ? { reason: 'scope_excludes', detail: params.restrictedReason, testId: 'params-scope-restriction' }
+    : null;
   const conditionReason = (param: ParamSchema) => {
     const conditions = (param.disabled_when ?? []).filter((condition) => parameterConditionMatches(condition, values));
     if (!conditions.length) return '';
@@ -217,6 +224,13 @@ export function ParamsDomainSection({ params, hasSession, disabled, skill, canva
       return `${dependency?.label ?? condition.parameter}: ${label}`;
     });
     return formatSchemaText(text('ui.studio.params.condition_disabled'), { conditions: labels.join(text('ui.studio.list_separator')) });
+  };
+  const conditionNotice = (param: ParamSchema) => {
+    const detail = conditionReason(param);
+    return detail ? (
+      <UnavailableNotice testId="parameter-disabled-reason" className="text-[11px]"
+        label={unavailableLabel(schema, text('ui.unavailable.reason.params.condition'))} detail={detail} />
+    ) : null;
   };
   const countReason = count ? disabledReason || conditionReason(count) : '';
   const countLocked = !hasSession || disabled || countDisabled;
@@ -264,17 +278,18 @@ export function ParamsDomainSection({ params, hasSession, disabled, skill, canva
       ) : params.offering ? (
         <p className="text-[11px] text-muted-foreground">{capabilityLabel(params.offering.capability)}</p>
       ) : null}
-      {disabledReason ? <p id={reasonId} role="status" className="text-xs text-muted-foreground" data-testid="params-disabled-reason">{disabledReason}</p> : null}
+      {unavailableNotice ? (
+        <div id={reasonId}>
+          <UnavailableNotice testId={unavailableNotice.testId} className="text-xs"
+            label={unavailableLabel(schema, text(`ui.unavailable.reason.params.${unavailableNotice.reason}`))} detail={unavailableNotice.detail} />
+        </div>
+      ) : disabledReason && !params.failed && params.ready ? (
+        <p id={reasonId} role="status" className="text-xs text-muted-foreground" data-testid="params-disabled-reason">{disabledReason}</p>
+      ) : null}
       {params.failed ? (
         <p role="alert" className="text-xs text-destructive">{text('ui.studio.params.load_failed')}</p>
       ) : !params.ready && hasModel ? (
         <p role="status" className="text-xs text-muted-foreground">{text('ui.studio.params.loading')}</p>
-      ) : null}
-      {unavailable ? (
-        <p role="status" className="text-xs text-muted-foreground">{text('ui.studio.params.unavailable')}</p>
-      ) : null}
-      {params.restrictedReason ? (
-        <p role="status" className="text-xs text-muted-foreground" data-testid="params-scope-restriction">{params.restrictedReason}</p>
       ) : null}
       {params.saveError ? <p role="alert" className="text-xs text-destructive">{params.saveError}</p> : null}
       {!hasModel ? (
@@ -295,7 +310,7 @@ export function ParamsDomainSection({ params, hasSession, disabled, skill, canva
           >
             <ParameterOrigin params={params} name={param.name} size disabled={!hasSession || disabled || parameterDisabled(param, values)} onReset={() => resizeCanvasTo(param.name, null)} />
             <ChoiceControl param={param} value={values[param.name]} disabled={!hasSession || disabled || parameterDisabled(param, values)} onChange={(value) => { setValue(param.name, value); resizeCanvasTo(param.name, value); }} optionText={sizeText} />
-            {conditionReason(param) ? <p className="text-[11px] text-muted-foreground" data-testid="parameter-disabled-reason">{conditionReason(param)}</p> : null}
+            {conditionNotice(param)}
           </Row>
         );
       })}
@@ -315,7 +330,7 @@ export function ParamsDomainSection({ params, hasSession, disabled, skill, canva
             <Row key={param.name} label={param.label}>
               <ParameterOrigin params={params} name={param.name} disabled={!hasSession || disabled || parameterDisabled(param, values)} />
               <ChoiceControl param={param} value={values[param.name]} disabled={!hasSession || disabled || parameterDisabled(param, values)} onChange={(value) => setValue(param.name, value)} />
-              {conditionReason(param) ? <p className="text-[11px] text-muted-foreground" data-testid="parameter-disabled-reason">{conditionReason(param)}</p> : null}
+              {conditionNotice(param)}
             </Row>
           ))}
           <Row label={count.label}>
@@ -356,7 +371,7 @@ export function ParamsDomainSection({ params, hasSession, disabled, skill, canva
                     : formatSchemaText(text('ui.studio.params.cost_one'), { total: estimate.total })}
               </span>
             </div>
-            {!disabledReason && countReason ? <p id={`${reasonId}-count`} className="text-[11px] text-muted-foreground" data-testid="parameter-disabled-reason">{countReason}</p> : null}
+            {!disabledReason && countReason ? <div id={`${reasonId}-count`}>{conditionNotice(count)}</div> : null}
           </Row>
         </>
       ) : hasModel && nativePriceLines.length > 0 ? (
@@ -380,7 +395,7 @@ export function ParamsDomainSection({ params, hasSession, disabled, skill, canva
           </button>
           {showMore ? (
             <div className="flex flex-col gap-3 text-xs" data-testid="params-more">
-              <SchemaParameters parameters={model.moreParams} values={values} disabled={!hasSession || disabled} onChange={setValue} parameterMeta={(param) => <><ParameterOrigin params={params} name={param.name} disabled={!hasSession || disabled || parameterDisabled(param, values)} />{conditionReason(param) ? <p className="text-[11px] text-muted-foreground" data-testid="parameter-disabled-reason">{conditionReason(param)}</p> : null}</>} />
+              <SchemaParameters parameters={model.moreParams} values={values} disabled={!hasSession || disabled} onChange={setValue} parameterMeta={(param) => <><ParameterOrigin params={params} name={param.name} disabled={!hasSession || disabled || parameterDisabled(param, values)} />{conditionNotice(param)}</>} />
             </div>
           ) : null}
         </div>

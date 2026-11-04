@@ -301,6 +301,7 @@ func validateCanvas(schema CanvasSchema, runtime RuntimeSchema, content ContentS
 		frontend.NodeGapPixels <= 0 ||
 		frontend.MinimumNodeSize <= 0 ||
 		frontend.MaximumNodeEdge <= 0 ||
+		frontend.HandleBadgeMinimumScreenPixels <= 0 ||
 		frontend.ModelCaptureLongEdgePixels < 512 ||
 		frontend.ModelCaptureLongEdgePixels > 4096 ||
 		frontend.ToThreeDLongEdgePixels < 512 ||

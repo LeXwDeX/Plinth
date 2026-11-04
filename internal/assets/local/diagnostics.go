@@ -26,7 +26,13 @@ func diagnoseWrite(stage, reason string, err error) error {
 		return nil
 	}
 	var inspection *inspectionRejection
-	if errors.As(err, &inspection) {
+	var unavailable *inspectionUnavailable
+	switch {
+	case errors.As(err, &unavailable):
+		// 检查器因资源争用、超时或取消而没能给出结论：不是对字节的判定，
+		// 单独的阶段让内核保持可重试，而不是按内容拒收终止任务。
+		stage, reason = "inspect_unavailable", "inspection_busy"
+	case errors.As(err, &inspection):
 		reason = inspection.reason
 	}
 	errno := "other"
@@ -62,6 +68,22 @@ func (e *inspectionRejection) Error() string { return e.cause.Error() }
 func (e *inspectionRejection) Unwrap() error { return e.cause }
 func rejectInspection(reason string, err error) error {
 	return &inspectionRejection{reason: reason, cause: err}
+}
+
+// inspectionUnavailable marks an inspection that could not reach a verdict for
+// reasons unrelated to the bytes (execution slot contention, cancellation). The
+// same bytes may pass on another try, so it is never a content rejection.
+type inspectionUnavailable struct{ cause error }
+
+func (e *inspectionUnavailable) Error() string { return e.cause.Error() }
+func (e *inspectionUnavailable) Unwrap() error { return e.cause }
+func unavailableInspection(err error) error    { return &inspectionUnavailable{cause: err} }
+
+// inspectionTransient reports an inspection error caused by cancellation, a
+// deadline or an I/O fault rather than by the content being inspected.
+func inspectionTransient(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, syscall.EIO) || errors.Is(err, syscall.ENOSPC)
 }
 
 // labelInspectionFailure keeps a specific structural reason when the inspector

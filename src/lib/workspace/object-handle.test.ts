@@ -1,8 +1,8 @@
-import { expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { handleOfObject } from '@/lib/workspace/object-handle';
+import { handleLabel, handleOfObject, handleOfPicture } from '@/lib/workspace/object-handle';
 
-const message = (...attachments: Array<{ handle: string; kind: 'image' | 'model'; taskId?: string; assetId?: string; url?: string }>) => ({ attachments });
+const message = (...attachments: Array<{ handle: string; kind: 'image' | 'model'; taskId?: string; assetId?: string; url?: string; captureId?: string }>) => ({ attachments });
 
 it('finds the handle the server gave this exact asset', () => {
   const messages = [
@@ -67,4 +67,43 @@ it('keeps legacy exact URL resolution and rejects ambiguous unnamed images', () 
   const image = { taskId: 't1', kind: 'image' as const, url: '/result.png' };
   expect(handleOfObject([message({ handle: '@img1', kind: 'image', taskId: 't1', url: '/result.png' })], image)).toBe('@img1');
   expect(handleOfObject([message({ handle: '@img1', kind: 'image', taskId: 't1' }, { handle: '@img2', kind: 'image', taskId: 't1' })], image)).toBe('');
+});
+
+describe('handleOfPicture (#87)', () => {
+  const generated = message({ handle: '@img25', kind: 'image', taskId: 't1', assetId: 'a1' }, { handle: '@img26', kind: 'image', taskId: 't1', assetId: 'a2' });
+
+  it('finds the handle of the asset a platform address names, query and absolute origin included', () => {
+    expect(handleOfPicture([generated], { url: '/api/v1/tasks/t1/assets/a2' })).toBe('@img26');
+    expect(handleOfPicture([generated], { url: 'https://host.example/api/v1/tasks/t1/assets/a1?variant=preview' })).toBe('@img25');
+  });
+
+  it('never borrows the handle of another picture of the same task', () => {
+    expect(handleOfPicture([message({ handle: '@img1', kind: 'image', taskId: 't1', assetId: 'a1' })], { url: 'blob:painted' })).toBe('');
+    expect(handleOfPicture([generated], { url: '/api/v1/tasks/t1/assets/a3' })).toBe('');
+  });
+
+  it('matches a model capture by its capture id and a sent picture by its address', () => {
+    const capture = message({ handle: '@img4', kind: 'image', taskId: 'm1', assetId: 'x' });
+    (capture.attachments[0] as { captureId?: string }).captureId = 'c1';
+    expect(handleOfPicture([capture], { url: '/captures/c1.png', captureId: 'c1' })).toBe('@img4');
+    expect(handleOfPicture([capture], { url: '/captures/c2.png', captureId: 'c2' })).toBe('');
+    const sent = { attachments: [{ handle: '@img1', kind: 'image' as const, imageSlot: 1 }], images: [{ url: '/uploads/u1.png', taskId: '' }] };
+    expect(handleOfPicture([sent], { url: '/uploads/u1.png' })).toBe('@img1');
+  });
+
+  it('shows the newest handle of a picture sent again, and ignores models', () => {
+    // Production session: a generated picture (@img25) the person later attached again (@img30).
+    const generated = message({ handle: '@img25', kind: 'image', taskId: 't1', assetId: 'a1' });
+    const sentAgain = message({ handle: '@img30', kind: 'image', taskId: 't1', assetId: 'a1' });
+    expect(handleOfPicture([generated, sentAgain], { url: '/api/v1/tasks/t1/assets/a1' })).toBe('@img30');
+    const capture = message({ handle: '@img4', kind: 'image', captureId: 'c1' });
+    const captureAgain = message({ handle: '@img7', kind: 'image', captureId: 'c1' });
+    expect(handleOfPicture([capture, captureAgain], { url: '/captures/c1.png', captureId: 'c1' })).toBe('@img7');
+    expect(handleOfPicture([message({ handle: '@model1', kind: 'model', taskId: 't1', assetId: 'a1' })], { url: '/api/v1/tasks/t1/assets/a1' })).toBe('');
+  });
+
+  it('labels a handle without its marker', () => {
+    expect(handleLabel('@img25')).toBe('img25');
+    expect(handleLabel('img3')).toBe('img3');
+  });
 });

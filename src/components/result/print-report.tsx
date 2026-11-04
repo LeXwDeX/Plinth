@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { Action } from '@/components/ui/button';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
+import { useProductSchema } from '@/components/product-schema-provider';
+import { unavailableLabel } from '@/lib/unavailable';
+import { schemaText } from '@/lib/product-schema';
 import type { PrintReportPresentation } from '@/lib/product-schema';
 import { safeAssetURL } from '@/lib/core/tasks/asset-url-rewriter';
 
@@ -131,6 +135,7 @@ export async function readPrintReport(url: string, ui: PrintReportPresentation, 
 
 /** Scope keys and abort cleanup prevent an old owner/task/asset response from flashing into a new detail. */
 export function PrintReportAsset({ ownerId, taskId, assetId, url, presentation: ui }: { ownerId?: string; taskId: string; assetId: string; url: string; presentation: PrintReportPresentation }) {
+  const { schema } = useProductSchema();
   const scope = JSON.stringify([ownerId, taskId, assetId, url, ui.format, ui.media_type, ui.max_bytes]);
   const [result, setResult] = useState<{ scope: string; report?: NormalizedPrintReport; error?: 'unavailable' | 'unsupported' }>();
   const [retry, setRetry] = useState(0);
@@ -143,6 +148,6 @@ export function PrintReportAsset({ ownerId, taskId, assetId, url, presentation: 
   }, [scope, retry, ownerId, url, ui.format, ui.media_type, ui.max_bytes]);
   const current = result?.scope === scope ? result : undefined;
   return <section className="mt-3 flex min-w-0 flex-col gap-2 border-t border-border pt-3" aria-label={ui.title} data-testid="print-report">
-    {current?.report ? <PrintReportContent report={current.report} presentation={ui} /> : current?.error ? <div className="flex items-start justify-between gap-3 text-xs"><p role="status" className="text-muted-foreground">{current.error === 'unsupported' ? ui.unsupported : ui.load_failed}</p><Action type="button" variant="outline" size="xs" onClick={() => setRetry(value => value + 1)}>{ui.retry}</Action></div> : <p role="status" className="text-xs text-muted-foreground">{ui.loading}</p>}
+    {current?.report ? <PrintReportContent report={current.report} presentation={ui} /> : current?.error ? <div className="flex items-start justify-between gap-3 text-xs">{current.error === 'unsupported' ? <UnavailableNotice testId="report-unsupported" label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.result.report_unsupported'))} detail={ui.unsupported} /> : <p role="status" className="text-muted-foreground">{ui.load_failed}</p>}<Action type="button" variant="outline" size="xs" onClick={() => setRetry(value => value + 1)}>{ui.retry}</Action></div> : <p role="status" className="text-xs text-muted-foreground">{ui.loading}</p>}
   </section>;
 }

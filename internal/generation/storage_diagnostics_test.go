@@ -28,3 +28,12 @@ func TestInlineDiagnosticNeverFormatsRawErrorAndAllowlistsAdapterFields(t *testi
 		}
 	}
 }
+
+// The typed inspection limits reach the log by name (#72, #81).
+func TestInspectionLimitReasonsAreAllowlisted(t *testing.T) {
+	for _, reason := range []string{"xml_size_limit", "xml_token_limit", "xml_depth_limit", "usdc_size_limit", "inspection_work_limit", "non_finite_float"} {
+		if got := safeStorageDiagnostic(AssetStorageDiagnostic{Stage: "inspect", Reason: reason, Errno: "other"}).Reason; got != reason {
+			t.Errorf("reason %q logged as %q", reason, got)
+		}
+	}
+}

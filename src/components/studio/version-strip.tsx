@@ -14,6 +14,7 @@ import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/o
 import { CardDownload, ResultContextMenu, openResultDetail, useCanvasDragSource } from '@/components/result/result-card-parts';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { useObjectActions } from '@/hooks/use-object-actions';
+import { useSessionMessages } from '@/hooks/use-picture-handles';
 import { useSessionPick } from '@/hooks/use-session-pick';
 import { useStageViewer } from '@/hooks/use-stage-viewer';
 import { tileOfObject, useSessionVersions } from '@/hooks/use-session-versions';
@@ -22,10 +23,11 @@ import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-
 import { compareFromGroup, slotKey, type CompareSlot } from '@/lib/workspace/compare';
 import { selectionForSession } from '@/lib/workspace/session-scope';
 import { imageResultSlots, orderedImageResults, type ImageResultSlot } from '@/lib/workspace/image-result-group';
+import { handleLabel, handleOfPicture } from '@/lib/workspace/object-handle';
 import { targetOfTile } from '@/lib/workspace/result-target';
 import { objectOfTile, type TilePick } from '@/lib/workspace/version-object';
 import { versionCaption, versionLabel, versionTitle } from '@/lib/workspace/version-label';
-import { branchOf, foldColumn, layoutColumns, versionStatusLabel, type LinkClass, type VersionColumn, type VersionParent, type VersionTile } from '@/lib/workspace/versions';
+import { branchOf, foldColumn, layoutColumns, shownVersionTiles, versionStatusLabel, type LinkClass, type VersionColumn, type VersionParent, type VersionTile } from '@/lib/workspace/versions';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { keepUnchanged } from '@/lib/core/keep-unchanged';
@@ -101,6 +103,13 @@ function Thumb({ tile, size }: { tile: VersionTile; size: 'regular' | 'compact' 
   const text = (key: string) => schemaText(schema, `ui.studio.strip.${key}`);
   const dimension = size === 'regular' ? 'size-14' : 'size-7';
   const finished = tile.views.filter((view) => view.status === 'succeeded').length;
+  // #87: a tile of one picture carries that picture's chat handle in its top-right corner (never a handle
+  // the messages do not give; a group or candidate grid shows several pictures, so none).
+  const messages = useSessionMessages(useChatStore((state) => state.activeSessionId));
+  const handle = size === 'regular' && tile.domain === 'image' && tile.status === 'ready' && !grid
+    && tile.slots.length === 0 && tile.views.length === 0 && tile.assets.length === 1 && source
+    ? handleOfPicture(messages, { url: source })
+    : '';
   return (
     <span className={cn('relative flex shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted', dimension)} data-testid="version-thumb" data-grid={grid ? grid.length : undefined}>
       {grid ? (
@@ -135,6 +144,13 @@ function Thumb({ tile, size }: { tile: VersionTile; size: 'regular' | 'compact' 
         <span className="absolute bottom-0.5 right-0.5 rounded-sm bg-panel/90 px-1 text-[9px] font-semibold leading-3">{tile.slots.length}</span>
       ) : size === 'regular' && tile.domain === 'image' && tile.assets.length > 1 ? (
         <span className="absolute bottom-0.5 right-0.5 rounded-sm bg-panel/90 px-1 text-[9px] font-semibold leading-3" data-testid="version-candidate-count">{tile.assets.length}</span>
+      ) : null}
+      {handle ? (
+        <span
+          aria-label={formatSchemaText(schemaText(schema, 'ui.studio.handle_badge.label'), { handle })}
+          className="pointer-events-none absolute right-0.5 top-0.5 rounded-sm bg-black/60 px-0.5 font-mono text-[9px] leading-3 text-white"
+          data-testid="version-handle-badge"
+        >{handleLabel(handle)}</span>
       ) : null}
     </span>
   );
@@ -223,16 +239,19 @@ function CandidateList({ tile, sessionId, current }: { tile: VersionTile; sessio
     <>
       <div className="flex items-center gap-2">
         <Popover.Title className="min-w-0 flex-1 truncate text-xs font-semibold">{tile.groupLabel || schemaText(schema, 'ui.studio.strip.candidates')}</Popover.Title>
-        <Action
-          type="button"
-          size="xs"
-          variant="outline"
-          data-testid="version-compare-group"
-          disabled={candidateSlots.length < 2}
-          onClick={() => useStudioStore.getState().startCompare(compareFromGroup(candidateSlots))}
-        >
-          <Columns2 />{schemaText(schema, 'ui.studio.strip.compare_group')}
-        </Action>
+        <HintTooltip name={schemaText(schema, 'ui.studio.strip.compare_group')}
+          reason={candidateSlots.length < 2 ? schemaText(schema, 'ui.unavailable.reason.stage.compare_needs_two') : undefined}>
+          <Action
+            type="button"
+            size="xs"
+            variant="outline"
+            data-testid="version-compare-group"
+            disabled={candidateSlots.length < 2}
+            onClick={() => useStudioStore.getState().startCompare(compareFromGroup(candidateSlots))}
+          >
+            <Columns2 />{schemaText(schema, 'ui.studio.strip.compare_group')}
+          </Action>
+        </HintTooltip>
         {groupSource ? <Action type="button" size="xs" variant="outline" disabled={busy}
           data-testid="version-pick-image-group" onClick={() => {
             void choose({ kind: 'image', taskId: groupSource.taskId, assetId: groupSource.assetId }).then((ok) => {
@@ -261,16 +280,19 @@ function CandidateList({ tile, sessionId, current }: { tile: VersionTile; sessio
                 <img src={previewAssetUrl(candidate.url)} alt={''} decoding="async" className="size-full object-cover" />
               </button>
               <span className="truncate text-center text-[11px] text-muted-foreground">{candidate.label}</span>
-              <Action
-                type="button"
-                size="xs"
-                variant="ghost"
-                data-testid="version-enlarge"
-                disabled={!candidateSlots.some((slot) => slot.key === slotKey(candidate.taskId, candidate.assetId))}
-                onClick={() => enlarge(Math.max(0, candidateSlots.findIndex((slot) => slot.key === slotKey(candidate.taskId, candidate.assetId))))}
-              >
-                <Maximize2 />{schemaText(schema, 'ui.studio.strip.enlarge')}
-              </Action>
+              <HintTooltip name={schemaText(schema, 'ui.studio.strip.enlarge')}
+                reason={candidateSlots.some((slot) => slot.key === slotKey(candidate.taskId, candidate.assetId)) ? undefined : schemaText(schema, 'ui.unavailable.reason.stage.no_output')}>
+                <Action
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  data-testid="version-enlarge"
+                  disabled={!candidateSlots.some((slot) => slot.key === slotKey(candidate.taskId, candidate.assetId))}
+                  onClick={() => enlarge(Math.max(0, candidateSlots.findIndex((slot) => slot.key === slotKey(candidate.taskId, candidate.assetId))))}
+                >
+                  <Maximize2 />{schemaText(schema, 'ui.studio.strip.enlarge')}
+                </Action>
+              </HintTooltip>
               <Action
                 type="button"
                 size="xs"
@@ -348,7 +370,8 @@ const TileButton = memo(function TileButton({ tile, size, current, inBranch, inC
       {/* The card shows a short caption; the hover hint carries the whole label and, for a failed one, why it failed.
           The wrapper is block-level and full width, so every tile of a column stays as wide as the column (its
           ring and hover background included), as the bare button was. */}
-      <HintTooltip name={label} hint={tile.status === 'failed' && tile.failure ? tile.failure : undefined} className="flex w-full">
+      <HintTooltip name={label} hint={tile.status === 'failed' && tile.failure ? tile.failure : undefined}
+        reason={tile.status === 'ready' && !canDisplay ? schemaText(schema, 'ui.unavailable.reason.stage.no_output') : undefined} className="flex w-full">
         <button
           type="button"
           disabled={!canDisplay}
@@ -399,7 +422,9 @@ const TileButton = memo(function TileButton({ tile, size, current, inBranch, inC
           className="rounded-sm px-1 text-[10px] leading-4 text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
         >{schemaText(schema, 'ui.studio.strip.detail')}</button> : null}
       </div>
-      <CardDownload target={target} className="absolute right-1 top-1 z-10" buttonClassName="size-5" />
+      {/* In the +N list every row shows its download: revealing it on hover left one row with the icon (the one
+          focused) and the next without, which read as a version that cannot be downloaded. */}
+      <CardDownload target={target} className="absolute right-1 top-1 z-10" buttonClassName={cn('size-5', size === 'compact' && 'opacity-100')} />
       {tile.status === 'ready' ? <CandidatePopover tile={tile} sessionId={sessionId} current={current} /> : null}
     </ResultContextMenu>
   );
@@ -479,15 +504,16 @@ export function VersionStrip() {
     candidatesOf(tile, String, imageResultSlots(schema, tile.capability)).some((candidate) => compareKeys.has(slotKey(candidate.taskId, candidate.assetId)))
     || compareKeys.has(slotOf(tile)?.key ?? '')
   );
-  const branch = useMemo(() => branchOf(versions.tiles, currentTile?.key ?? null), [versions.tiles, currentTile?.key]);
+  const tiles = useMemo(() => shownVersionTiles(versions.tiles), [versions.tiles]);
+  const branch = useMemo(() => branchOf(tiles, currentTile?.key ?? null), [tiles, currentTile?.key]);
   // Columns that did not change keep their objects, so their memoized connectors are not redrawn (#291).
   const previousColumns = useRef<VersionColumn[] | undefined>(undefined);
   const columns = useMemo(() => {
-    const next = keepUnchanged(previousColumns.current, layoutColumns(versions.tiles), (column) => column.tiles[0].key);
+    const next = keepUnchanged(previousColumns.current, layoutColumns(tiles), (column) => column.tiles[0].key);
     previousColumns.current = next;
     return next;
-  }, [versions.tiles]);
-  const captionOf = useCallback((tile: VersionTile) => versionCaption(schema, tile, versions.tiles), [schema, versions.tiles]);
+  }, [tiles]);
+  const captionOf = useCallback((tile: VersionTile) => versionCaption(schema, tile, tiles), [schema, tiles]);
   const chat = useMemo(() => createChatBrowserClient(schema), [schema]);
   const { pick } = useSessionPick(chat, sessionId);
   const { openOnStage } = useObjectActions();
@@ -522,7 +548,7 @@ export function VersionStrip() {
                 key={column.tiles[0].key}
                 column={column}
                 previous={index > 0 ? columns[index - 1] : null}
-                tiles={versions.tiles}
+                tiles={tiles}
                 currentKey={currentTile?.key ?? null}
                 branch={branch}
                 inCompareTile={inCompareTile}
@@ -539,9 +565,11 @@ export function VersionStrip() {
         {versions.hasEarlier ? <Action type="button" variant="ghost" size="sm" loading={versions.loadingEarlier} onClick={() => void loadEarlier()} data-testid="versions-load-earlier">
           {schemaText(schema, versions.loadingEarlier ? 'ui.studio.strip.loading_earlier' : 'ui.studio.strip.load_earlier')}
         </Action> : null}
-        <Action type="button" variant="outline" size="sm" onClick={() => setAllOutputsOpen(true)} disabled={versions.tiles.length === 0} data-testid="all-outputs-button">
-          <Grid2x2 />{schemaText(schema, 'ui.studio.strip.all_outputs')}
-        </Action>
+        <HintTooltip name={schemaText(schema, 'ui.studio.strip.all_outputs')} reason={tiles.length === 0 ? schemaText(schema, 'ui.unavailable.reason.stage.no_output') : undefined}>
+          <Action type="button" variant="outline" size="sm" onClick={() => setAllOutputsOpen(true)} disabled={tiles.length === 0} data-testid="all-outputs-button">
+            <Grid2x2 />{schemaText(schema, 'ui.studio.strip.all_outputs')}
+          </Action>
+        </HintTooltip>
       </div>
     </section>
   );

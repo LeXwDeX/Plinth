@@ -24,7 +24,7 @@ func TestCanvasTurnSizesSharedWithTheWebClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	executor := Executor{chat: product.Application().Chat}
+	executor := Executor{chat: product.Application().Chat, canvasArtboard: product.Application().Canvas.Frontend.Artboard}
 	raw, err := os.ReadFile("testdata/canvas_turn_sizes.json")
 	if err != nil {
 		t.Fatal(err)

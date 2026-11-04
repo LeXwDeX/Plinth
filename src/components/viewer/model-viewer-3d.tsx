@@ -492,10 +492,12 @@ export function ModelViewer3D({
         </HintTooltip>
       ) : null}
       {onCapture && captureLabel && (
-        <Action type="button" variant="raised" size="lg" disabled={!ready || incompleteTextures > 0} loading={capturing} onClick={() => void capture()}
-          className="absolute right-3 bottom-3">
-          {capturing ? capturingLabel || captureLabel : captureLabel}
-        </Action>
+        <HintTooltip name={captureLabel} className="absolute right-3 bottom-3"
+          reason={!ready ? text('ui.studio.stage.action.capture_unavailable') : incompleteTextures > 0 ? text('ui.studio.stage.action.capture_textures_incomplete') : undefined}>
+          <Action type="button" variant="raised" size="lg" disabled={!ready || incompleteTextures > 0} loading={capturing} onClick={() => void capture()}>
+            {capturing ? capturingLabel || captureLabel : captureLabel}
+          </Action>
+        </HintTooltip>
       )}
     </Surface>
   );

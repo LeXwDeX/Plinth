@@ -151,7 +151,8 @@ describe('batch B wiring', () => {
   it('keeps the dashed frame, the dimmed outside and the marching ants out of the pointer\'s way', () => {
     const board = read('canvas-board.tsx');
     expect(board).toContain('outsideDimRects(visibleWorld(viewport, size');
-    expect(board).toMatch(/<Layer listening=\{false\}>\s*\{artboard\s*\?\s*outsideDimRects/);
+    expect(board).toMatch(/<Layer ref=\{outsideDimLayerRef\} listening=\{false\}>\s*\{artboard \? \(/);
+    expect(board).toMatch(/<Shape\s+name="outside-dim"\s+listening=\{false\}/);
     expect(board).toContain('dash={selectionSchema.ants_dash}');
   });
 

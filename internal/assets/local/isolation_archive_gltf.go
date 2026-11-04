@@ -240,7 +240,7 @@ func inspectArchiveMemberReader(reader *bufio.Reader, entry *zip.File, names map
 	if layout != nil {
 		err = inspectGLBBIN(limited, int64(entry.UncompressedSize64), layout.images, layout.fields, newPlannedInspectorWithWork(budget.inspectionWork()))
 	} else if isArchiveXML(entry.Name) {
-		err = scanArchiveXML(limited, int64(entry.UncompressedSize64))
+		err = scanArchiveXML(limited, int64(entry.UncompressedSize64), archiveXMLLimit(budget.inspectionWork().delivered))
 	} else if isUSDCFormat(magic, entry.Name) {
 		err = inspectUSDC(limited, int64(entry.UncompressedSize64), names, entry.Name, budget.inspectionWork())
 	} else if isBinaryFBXMagic(magic) {

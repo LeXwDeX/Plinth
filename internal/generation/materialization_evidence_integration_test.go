@@ -105,7 +105,8 @@ func TestMaterializationNonRetryableFailureCountsOnePass(t *testing.T) {
 		t.Fatalf("nonretryable state=%s failures=%d failure=%v", task.State, task.MaterializeFailures, task.Failure)
 	}
 	events := materializationEvidenceEvents(t, h.repository, accepted.TaskID)
-	if countEvents(events, "materialization.artifact_skipped") != 2 ||
+	// The deterministic GLB failure ends the pass: the thumbnail is not visited.
+	if countEvents(events, "materialization.artifact_skipped") != 1 ||
 		countEvents(events, "materialization.failed") != 1 || countEvents(events, "materialization.retry_scheduled") != 0 {
 		t.Fatalf("nonretryable events=%v", eventTypes(events))
 	}
@@ -380,4 +381,80 @@ func reopenMaterializationEvidenceRepository(t *testing.T, h *harness) *sqlite.R
 	repository.SetClock(h.clock.Now)
 	t.Cleanup(func() { _ = repository.Close() })
 	return repository
+}
+
+type diagnosedMaterializationError struct{ stage, reason string }
+
+func (e diagnosedMaterializationError) Error() string {
+	return "raw storage error " + privateMaterializationSentinel
+}
+func (e diagnosedMaterializationError) StorageDiagnostic() generation.AssetStorageDiagnostic {
+	return generation.AssetStorageDiagnostic{Stage: e.stage, Reason: e.reason, Errno: "other"}
+}
+
+type diagnosedRejectingStore struct {
+	generation.AssetStore
+	err error
+}
+
+func (s diagnosedRejectingStore) Put(ctx context.Context, write generation.AssetWrite) (generation.Asset, error) {
+	if write.Role == "model" && write.Variant == "glb" {
+		return generation.Asset{}, s.err
+	}
+	return s.AssetStore.Put(ctx, write)
+}
+
+// opens counts OpenAsset calls per role so a test can prove which claims were
+// downloaded.
+type countingOpenAdapter struct {
+	generation.ProviderPort
+	mu    *sync.Mutex
+	opens map[string]int
+}
+
+func (a countingOpenAdapter) OpenAsset(ctx context.Context, request generation.OpenAssetRequest) (io.ReadCloser, generation.AssetMetadata, error) {
+	a.mu.Lock()
+	a.opens[request.Claim.Role]++
+	a.mu.Unlock()
+	return a.ProviderPort.OpenAsset(ctx, request)
+}
+
+func TestInspectRefusalIsTerminalAndStopsFurtherDownloads(t *testing.T) {
+	base := newRejectingMaterializationStore(t, 0)
+	store := diagnosedRejectingStore{AssetStore: base, err: diagnosedMaterializationError{stage: "inspect", reason: "xml_size_limit"}}
+	adapter := countingOpenAdapter{ProviderPort: completeWithBrokenOptional{}, mu: &sync.Mutex{}, opens: map[string]int{}}
+	h := newConfiguredHarness(t, adapter, store, materializationBudget(8))
+	accepted := submitMaterializationEvidenceTask(t, h)
+	h.reconcile(t)
+	task := h.runUntilTerminal(t, "owner-a", accepted.TaskID)
+	if task.State != generation.TaskFailed || task.MaterializeFailures != 1 || len(task.Assets) != 0 ||
+		task.Failure == nil || task.Failure.Class != generation.FailureIntegrity || task.Failure.Retryable {
+		t.Fatalf("state=%s failures=%d assets=%d failure=%+v", task.State, task.MaterializeFailures, len(task.Assets), task.Failure)
+	}
+	if task.Failure.UpstreamCode != "asset_store_rejected" ||
+		task.Failure.UpstreamExcerpt != "role=model format=glb stage=inspect reason=xml_size_limit errno=other" {
+		t.Fatalf("forensics = %q %q", task.Failure.UpstreamCode, task.Failure.UpstreamExcerpt)
+	}
+	events := materializationEvidenceEvents(t, h.repository, accepted.TaskID)
+	if countEvents(events, "materialization.retry_scheduled") != 0 || countEvents(events, "materialization.failed") != 1 {
+		t.Fatalf("events=%v", eventTypes(events))
+	}
+	if adapter.opens["model"] != 1 || adapter.opens["thumbnail"] != 0 {
+		t.Fatalf("downloads after the refusal: %v", adapter.opens)
+	}
+}
+
+func TestWriteStageRefusalStaysRetryable(t *testing.T) {
+	store := diagnosedRejectingStore{AssetStore: newRejectingMaterializationStore(t, 0), err: diagnosedMaterializationError{stage: "write", reason: "io_failure"}}
+	h := newConfiguredHarness(t, completeWithBrokenOptional{}, store, materializationBudget(3))
+	accepted := submitMaterializationEvidenceTask(t, h)
+	h.reconcile(t)
+	task := h.runUntilTerminal(t, "owner-a", accepted.TaskID)
+	if task.State != generation.TaskFailed || task.MaterializeFailures != 3 || task.Failure == nil || !task.Failure.Retryable {
+		t.Fatalf("state=%s failures=%d failure=%+v", task.State, task.MaterializeFailures, task.Failure)
+	}
+	events := materializationEvidenceEvents(t, h.repository, accepted.TaskID)
+	if countEvents(events, "materialization.retry_scheduled") != 2 {
+		t.Fatalf("events=%v", eventTypes(events))
+	}
 }

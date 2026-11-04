@@ -77,7 +77,7 @@ func TestUSDCReconstructedIntegerAddressesAndWindowCarry(t *testing.T) {
 				t.Fatalf("%s independent delta wire already contains an absolute address", name)
 			}
 			for _, collect := range []bool{false, true} {
-				p := usdcParser{work: newInspectionWorkBudget()}
+				p := usdcParser{work: newInspectionWorkBudget(), limit: maxUSDCBytes}
 				record := usdcTestIntegerRecord(encoded)
 				c := usdcCursor{record, 0, int64(len(record))}
 				result, e := p.integers(&c, count, collect)
@@ -103,7 +103,7 @@ func TestUSDCReconstructedIntegerAddressesAndWindowCarry(t *testing.T) {
 func TestUSDCIntegerDecodeWorkAndFramingFailClosed(t *testing.T) {
 	encoded, count := usdcTestIntegerDeltaBytes(bytes.Repeat([]byte{1, 0, 0, 0}, 16))
 	record := usdcTestIntegerRecord(encoded)
-	p := usdcParser{work: newInspectionWorkBudget()}
+	p := usdcParser{work: newInspectionWorkBudget(), limit: maxUSDCBytes}
 	c := usdcCursor{record, 0, int64(len(record))}
 	if _, e := p.integers(&c, count, false); e != nil {
 		t.Fatal(e)

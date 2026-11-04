@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import useSWR from 'swr';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { SchemaParameters, schemaParameterValues } from '@/components/form/schema-parameters';
@@ -8,8 +9,10 @@ import { useModelProcessingCapabilities } from '@/hooks/use-model-processing-cap
 import { useProcessingPlanResume } from '@/hooks/use-processing-plan-resume';
 import { offeringFixedValues } from '@/lib/agent-offerings';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
-import { prerequisiteRefusal, processingPrerequisite, processingSourceLabel, processingSourceSteps, actionParameter, panelFields, sourceRefusals, type ProcessingSourceTask } from '@/lib/workspace/processing-source';
-import { prerequisiteRefusalText, sourceRefusalText } from '@/lib/workspace/processing-refusals';
+import { unavailableLabel } from '@/lib/unavailable';
+import { faceBudgetDefaults, prerequisiteRefusal, processingPrerequisite, processingSourceLabel, processingSourceSteps, actionParameter, panelFields, sourceRefusals, type ProcessingSourceAsset, type ProcessingSourceTask } from '@/lib/workspace/processing-source';
+import { partsKeyOf } from '@/lib/workspace/model-parts';
+import { processingUnavailableNotice } from '@/lib/workspace/processing-refusals';
 import { offeringQuoteText } from '@/lib/workspace/processing-cost';
 import { inputRuleViolations, missingRequiredParameters, uploadAssetInputs } from '@/lib/workspace/processing-inputs';
 import { uploadWorkspaceInputAssetResult } from '@/lib/workspace/input-asset-upload';
@@ -21,7 +24,9 @@ import { useWorkspaceStore, type CurrentObject } from '@/store/workspace-store';
 import { Action } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { OptionSelect } from '@/components/ui/option-select';
+import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { Surface } from '@/components/ui/surface';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { ProcessingCostSummary } from '@/components/workspace/processing-cost-summary';
 import { ProcessingStepService } from '@/components/workspace/processing-step-service';
 
@@ -29,6 +34,11 @@ function randomKey() {
   const words = new Uint32Array(4);
   globalThis.crypto.getRandomValues(words);
   return Array.from(words, (word) => word.toString(16).padStart(8, '0')).join('');
+}
+
+/** Wraps a control in the hover hint that says why it is disabled (#94); without a reason the control stands alone. */
+function ReasonHint({ name, reason, className, children }: { name: string; reason?: string; className?: string; children: ReactNode }) {
+  return reason ? <HintTooltip name={name} reason={reason} className={className}>{children}</HintTooltip> : <>{children}</>;
 }
 
 /** A step's form values and action are kept per service, so switching never sends one Offering's inputs to another. */
@@ -44,6 +54,9 @@ function formKey(capability: string, offeringID: string): string {
 export function ModelProcessingPanel({ selection }: { selection: CurrentObject }) {
   const fieldPrefix = useId();
   const { schema } = useProductSchema();
+  const reasonText = (name: string) => schemaText(schema, `ui.unavailable.reason.processing.${name}`);
+  const notice = (reason: string, detail: string, testId?: string, className?: string) => (
+    <UnavailableNotice label={unavailableLabel(schema, reason)} detail={detail} testId={testId} className={className} />);
   const sessionID = useChatStore((state) => state.activeSessionId);
   const registerTask = useWorkspaceStore((state) => state.registerTask);
   const [selected, setSelected] = useState<string[]>([]);
@@ -72,7 +85,13 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
       upstream_job_created_at: typeof task.upstream_job_created_at === 'string' ? task.upstream_job_created_at : undefined,
       upstream_job_gone: task.upstream_job_gone === true };
   }, { revalidateOnFocus: false });
-  const asset = source?.assets.find((candidate) => candidate.id === selection.assetId && candidate.kind === 'model') ?? null;
+  const tracked = source?.assets.find((candidate) => candidate.id === selection.assetId && candidate.kind === 'model') ?? null;
+  // The triangles the stage measured on this model (every mesh instance in its scene), so a step over its face limit
+  // brings in Remesh first (#93). Unknown until the stage has loaded the model; the server measures again either way.
+  const measuredTriangles = useStudioStore((state) => (state.stageParts && state.stageParts.key === partsKeyOf(selection)
+    ? state.stageParts.parts.reduce((total, part) => total + part.triangles, 0) : undefined));
+  const asset = useMemo<ProcessingSourceAsset | null>(() => (tracked && measuredTriangles
+    ? { ...tracked, triangles: measuredTriangles } : tracked), [tracked, measuredTriangles]);
   const ownedSession = Boolean(sessionID && source?.session_id === sessionID);
   const plansRoute = sessionID ? `${schema.runtime.http.routes.processing_plans}?session_id=${encodeURIComponent(sessionID)}` : null;
   const { data: plans, mutate: reload } = useSWR<ProcessingPlan[]>(ownedSession ? plansRoute : null, async (route: string) => {
@@ -98,21 +117,25 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
     ? processingSourceSteps(availableCapabilities, selected, offerings, source, asset, chosen)
     : [], [source, asset, availableCapabilities, selected, offerings, chosen]);
   // 每步按 Schema 声明的可填参数组装提交输入，并按 input_rules 在提交前提示违例。
+  // A face-reducing step before steps with a face limit starts at the most faces the tightest one takes (Remesh before
+  // UV, also with Retexture in between, #93).
+  const budgets = useMemo(() => Object.fromEntries(steps.map((step, index) => [step.capability,
+    faceBudgetDefaults(step.offering, steps.slice(index + 1).map((next) => next.offering), values[formKey(step.capability, step.offering.id)] ?? {})])), [steps, values]);
   const stepInputs = useMemo(() => Object.fromEntries(steps.map((step) => {
     const parameters = panelFields(step.offering);
-    const defaults = Object.fromEntries(parameters.filter((parameter) => parameter.default !== undefined).map((parameter) => [parameter.name, parameter.default]));
+    const defaults = { ...Object.fromEntries(parameters.filter((parameter) => parameter.default !== undefined).map((parameter) => [parameter.name, parameter.default])), ...budgets[step.capability] };
     const key = formKey(step.capability, step.offering.id);
     const input = { ...offeringFixedValues(step.offering), ...schemaParameterValues(parameters, { ...defaults, ...values[key] }) };
     const action = actionParameter(step.offering);
     if (action && actions[key]) input[action.name] = Number(actions[key]);
     return [step.capability, input];
-  })), [steps, values, actions]);
+  })), [steps, values, actions, budgets]);
   // Required inputs still empty (a reference image, say): confirm stays disabled and the step names them (#321).
   const missingFields = useMemo(() => Object.fromEntries(steps.map((step) => {
     const parameters = panelFields(step.offering);
-    const defaults = Object.fromEntries(parameters.filter((parameter) => parameter.default !== undefined).map((parameter) => [parameter.name, parameter.default]));
+    const defaults = { ...Object.fromEntries(parameters.filter((parameter) => parameter.default !== undefined).map((parameter) => [parameter.name, parameter.default])), ...budgets[step.capability] };
     return [step.capability, missingRequiredParameters(parameters, { ...defaults, ...values[formKey(step.capability, step.offering.id)] })];
-  })), [steps, values]);
+  })), [steps, values, budgets]);
   const ruleViolations = useMemo(() => Object.fromEntries(steps.map((step) => [
     step.capability, inputRuleViolations(step.offering, stepInputs[step.capability] ?? {}),
   ])), [steps, stepInputs]);
@@ -121,6 +144,18 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
       && (ruleViolations[step.capability] ?? []).length === 0 && (missingFields[step.capability] ?? []).length === 0);
   const missingSummary = steps.filter((step) => (missingFields[step.capability] ?? []).length > 0).map((step) =>
     `${schema.capabilities.find((item) => item.id === step.capability)?.label_cn ?? step.capability}: ${(missingFields[step.capability] ?? []).map((field) => field.label).join(' / ')}`);
+
+  // Why confirm is greyed, in a few words (#94); a request under way is not a reason.
+  const submitReason = working || valid ? undefined
+    : !ownedSession ? reasonText('session_mismatch')
+      : !asset ? reasonText('asset_unavailable')
+        : activePlan ? reasonText('plan_running')
+          : selected.length === 0 ? reasonText('no_steps')
+            : steps.length !== selected.length || steps.some((step) => !step.route || !step.offering.available) ? reasonText('step_unrunnable')
+              : steps.some((step) => actionParameter(step.offering) && !actions[formKey(step.capability, step.offering.id)]) ? reasonText('action_missing')
+                : steps.some((step) => (ruleViolations[step.capability] ?? []).length > 0) ? reasonText('input_rule')
+                  : reasonText('required_missing');
+  const lockReason = activePlan && !working ? reasonText('plan_running') : undefined;
 
   // Choosing a step the current model cannot feed directly (animation needs a rigged
   // source) also chooses the step that produces what it needs, but only one that can run on
@@ -219,8 +254,8 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
         {source && <Surface variant="inset" radius="xl" padding="md">
           <p className="text-muted-foreground">{schemaText(schema, 'ui.workspace.processing.source')}</p>
           <p className="break-all" data-testid="processing-source-label" data-asset-id={asset?.id ?? ''}>{processingSourceLabel(source, asset)}</p>
-          {!ownedSession && <p className="text-warning">{schemaText(schema, 'ui.workspace.processing.session_mismatch')}</p>}
-          {!asset && <p className="text-warning">{schemaText(schema, 'ui.workspace.processing.asset_unavailable')}</p>}
+          {!ownedSession && notice(reasonText('session_mismatch'), schemaText(schema, 'ui.workspace.processing.session_mismatch'), 'processing-session-mismatch')}
+          {!asset && notice(reasonText('asset_unavailable'), schemaText(schema, 'ui.workspace.processing.asset_unavailable'), 'processing-asset-unavailable')}
         </Surface>}
         {currentPlan && <Surface variant="inset" radius="xl" padding="md">
           <p className="font-medium">{schemaText(schema, `ui.workspace.processing.plan_${
@@ -236,26 +271,35 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
               }`)}</span>
             </li>)}
           </ol>
-          {currentPlan.failure && <p role="alert" className="mt-2 text-warning">
-            {schemaText(schema, `ui.workspace.processing.${currentPlan.failure}`)}
-          </p>}
+          {currentPlan.failure && <div className="mt-2" data-testid="processing-plan-failure">
+            {notice(reasonText(currentPlan.failure) || schemaText(schema, 'ui.workspace.processing.unavailable_reason.unavailable'), schemaText(schema, `ui.workspace.processing.${currentPlan.failure}`))}
+          </div>}
           {linkedTaskID && currentPlan.state === 'RUNNING' && currentPlan.steps.some((step) => step.state === 'RUNNING' && step.task_id === linkedTaskID)
             && !currentPlan.failure && <p role="status" className="mt-2 text-muted-foreground">
               {schemaText(schema, 'ui.workspace.processing.plan_reconcile_linked')}
             </p>}
-          {needsReconciliation && <Action type="button" className="mt-3"
-            loading={working} disabled={working || !schema.runtime.http.routes.processing_plan_reconcile} onClick={() => void reconcile()}>
-            {schemaText(schema, 'ui.workspace.processing.plan_reconcile_action')}
-          </Action>}
+          {needsReconciliation && <ReasonHint name={schemaText(schema, 'ui.workspace.processing.plan_reconcile_action')} className="mt-3"
+            reason={!working && !schema.runtime.http.routes.processing_plan_reconcile ? reasonText('reconcile_unavailable') : undefined}>
+            <Action type="button"
+              loading={working} disabled={working || !schema.runtime.http.routes.processing_plan_reconcile} onClick={() => void reconcile()}>
+              {schemaText(schema, 'ui.workspace.processing.plan_reconcile_action')}
+            </Action>
+          </ReasonHint>}
           {currentPlan.state === 'FAILED' && currentPlan.steps.some((step) => step.state === 'FAILED' && step.retryable)
-            && <Action type="button" className="mt-3"
-              loading={working} disabled={!failedOffering} onClick={() => void retry()}>
-              {schemaText(schema, 'ui.workspace.processing.plan_retry')}{stepCreditSuffix(schema, failedOffering)}
-            </Action>}
-          {resume.step && <Action type="button" className="mt-3"
-            loading={working} disabled={!resume.available} onClick={() => { setError(''); void resume.resume(); }}>
-            {resume.label}
-          </Action>}
+            && <ReasonHint name={schemaText(schema, 'ui.workspace.processing.plan_retry')} className="mt-3"
+              reason={!working && !failedOffering ? schemaText(schema, 'ui.workspace.processing.unavailable_reason.unavailable') : undefined}>
+              <Action type="button"
+                loading={working} disabled={!failedOffering} onClick={() => void retry()}>
+                {schemaText(schema, 'ui.workspace.processing.plan_retry')}{stepCreditSuffix(schema, failedOffering)}
+              </Action>
+            </ReasonHint>}
+          {resume.step && <ReasonHint name={resume.label} className="mt-3"
+            reason={!working && !resume.available ? schemaText(schema, 'ui.workspace.processing.unavailable_reason.unavailable') : undefined}>
+            <Action type="button"
+              loading={working} disabled={!resume.available} onClick={() => { setError(''); void resume.resume(); }}>
+              {resume.label}
+            </Action>
+          </ReasonHint>}
           {currentPlan.state === 'PAUSED' && !activePlan && <p className="mt-2 text-muted-foreground" data-testid="processing-plan-alternative">
             {schemaText(schema, 'ui.workspace.processing.plan_waiting_alternative')}
           </p>}
@@ -269,50 +313,50 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
           const key = offering ? formKey(capability.id, offering.id) : capability.id;
           return <Surface key={capability.id} variant="inset" radius="xl" padding="md">
             <Field id={`${fieldPrefix}-${capability.id}-selected`} label={capability.label_cn} layout="inline">
-              {(control) => <input {...control} type="checkbox" checked={selected.includes(capability.id)}
-                onChange={() => toggle(capability.id)} disabled={working || Boolean(activePlan)} />}
+              {(control) => <ReasonHint name={capability.label_cn} reason={lockReason}>
+                <input {...control} type="checkbox" checked={selected.includes(capability.id)}
+                  onChange={() => toggle(capability.id)} disabled={working || Boolean(activePlan)} />
+              </ReasonHint>}
             </Field>
             {step && <div className="mt-3 space-y-3">
               <ProcessingStepService step={step} fieldId={`${fieldPrefix}-${capability.id}-offering`}
-                disabled={working || Boolean(activePlan)}
+                disabled={working || Boolean(activePlan)} disabledReason={lockReason}
                 onChoose={(offeringID) => setChosen((current) => ({ ...current, [capability.id]: offeringID }))} />
-              <p className="text-muted-foreground" data-testid={`processing-route-${capability.id}`}>
+              {step.route ? <p className="text-muted-foreground" data-testid={`processing-route-${capability.id}`}>
                 {schemaText(schema, 'ui.workspace.processing.route')}: {
-                  step.route?.sourceRole === 'source_task'
-                    ? schemaText(schema, 'ui.workspace.processing.task_route')
-                    : step.route && 'taskExpired' in step.route && step.route.taskExpired
+                  step.route.sourceRole === 'source_task'
+                    ? formatSchemaText(schemaText(schema, 'ui.workspace.processing.task_route'), { provider: step.offering.provider_name })
+                    : 'taskExpired' in step.route && step.route.taskExpired
                       ? formatSchemaText(schemaText(schema, 'ui.workspace.processing.asset_route_expired'), { provider: step.offering.provider_name })
-                      : step.route ? schemaText(schema, 'ui.workspace.processing.asset_route')
-                        : schemaText(schema, 'ui.workspace.processing.unavailable')
+                      : schemaText(schema, 'ui.workspace.processing.asset_route')
                 }
-              </p>
-              {!step.route && source && asset && <p role="status" className="text-warning" data-testid={`processing-refused-${capability.id}`}>
-                {step.blocked
-                  ? schemaText(schema, 'ui.workspace.processing.blocked_by_previous')
-                  : [sourceRefusalText(schema, sourceRefusals(offerings?.[capability.id] ?? [], source, asset), asset.size),
-                    // #326: the step that would come first cannot run on the model either: say why and what works.
-                    prerequisiteRefusalText(schema, prerequisiteRefusal(capability.id, availableCapabilities, offerings, source, asset), capability.id)]
-                    .filter(Boolean).join('')}
-              </p>}
+              </p> : <UnavailableNotice testId={`processing-refused-${capability.id}`}
+                {...processingUnavailableNotice(schema, step.blocked || !source || !asset ? { blocked: step.blocked, step: capability.id } : {
+                  step: capability.id, size: asset.size,
+                  refusals: sourceRefusals(offerings?.[capability.id] ?? [], source, asset),
+                  // #326: the step that would come first cannot run on the model either: say why and what works.
+                  prerequisite: prerequisiteRefusal(capability.id, availableCapabilities, offerings, source, asset),
+                })} />}
               <p data-testid={`processing-quote-${capability.id}`}>{offering ? offeringQuoteText(schema, offering) : schemaText(schema, 'ui.workspace.harness.credits_unknown')}</p>
-              {offering && <SchemaParameters parameters={parameters}
+              {offering && <ReasonHint name={capability.label_cn} reason={lockReason} className="flex w-full flex-col"><SchemaParameters parameters={parameters}
                 values={{
                   ...Object.fromEntries(parameters.filter((parameter) => parameter.default !== undefined)
                     .map((parameter) => [parameter.name, parameter.default])),
+                  ...budgets[capability.id],
                   ...values[key],
                 }}
                 onChange={(name, value) => setValues((current) => ({
                   ...current, [key]: { ...current[key], [name]: value },
                 }))}
-                disabled={working || Boolean(activePlan)} />}
-              {(ruleViolations[capability.id] ?? []).filter((names) => names.some((name) => parameters.some((parameter) => parameter.name === name))).map((names) => <p key={names.join('|')} role="alert" className="text-warning">
-                {schemaText(schema, 'ui.workspace.processing.input_rule_violation')}: {
-                  names.map((name) => parameters.find((parameter) => parameter.name === name)?.label ?? name).join(' / ')}
-              </p>)}
-              {(missingFields[capability.id] ?? []).length > 0 && <p className="text-warning" data-testid={`processing-missing-${capability.id}`}>
-                {formatSchemaText(schemaText(schema, 'ui.workspace.processing.required_missing'), {
-                  fields: (missingFields[capability.id] ?? []).map((field) => field.label).join(' / ') })}
-              </p>}
+                disabled={working || Boolean(activePlan)} /></ReasonHint>}
+              {(ruleViolations[capability.id] ?? []).filter((names) => names.some((name) => parameters.some((parameter) => parameter.name === name))).map((names) => <div key={names.join('|')}>
+                {notice(reasonText('input_rule'), `${schemaText(schema, 'ui.workspace.processing.input_rule_violation')}: ${
+                  names.map((name) => parameters.find((parameter) => parameter.name === name)?.label ?? name).join(' / ')}`, 'processing-input-rule')}
+              </div>)}
+              {(missingFields[capability.id] ?? []).length > 0 && <div>
+                {notice(reasonText('required_missing'), formatSchemaText(schemaText(schema, 'ui.workspace.processing.required_missing'), {
+                  fields: (missingFields[capability.id] ?? []).map((field) => field.label).join(' / ') }), `processing-missing-${capability.id}`)}
+              </div>}
               {action && <Field id={`${fieldPrefix}-${capability.id}-action`} label={action.label} required>
                 {(control) => <OptionSelect {...control} required
                   value={actions[key] ?? ''}
@@ -324,20 +368,21 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
             </div>}
           </Surface>;
         })}
-        {selected.length > 0 && steps.some((step) => !step.route) && <p role="alert" className="text-warning">
-          {schemaText(schema, 'ui.workspace.processing.plan_incompatible')}
-        </p>}
+        {selected.length > 0 && steps.some((step) => !step.route)
+          && notice(reasonText('plan_incompatible'), schemaText(schema, 'ui.workspace.processing.plan_incompatible'), 'processing-plan-incompatible')}
         {(error || resume.error) && <p role="alert" className="text-destructive">{error || resume.error}</p>}
       </div>
       <footer className="border-t border-border p-3">
         <ProcessingCostSummary steps={steps} />
-        {missingSummary.length > 0 && <p className="mb-3 text-xs text-warning" data-testid="processing-missing">
-          {formatSchemaText(schemaText(schema, 'ui.workspace.processing.required_missing'), { fields: missingSummary.join(' · ') })}
-        </p>}
-        <Action type="button" size="lg" className="w-full"
-          loading={working} disabled={!valid} onClick={() => void submit()}>
-          {working ? schemaText(schema, 'ui.workspace.processing.submitting') : schemaText(schema, 'ui.workspace.processing.plan_confirm')}
-        </Action>
+        {missingSummary.length > 0 && <div className="mb-3 text-xs">
+          {notice(reasonText('required_missing'), formatSchemaText(schemaText(schema, 'ui.workspace.processing.required_missing'), { fields: missingSummary.join(' · ') }), 'processing-missing')}
+        </div>}
+        <ReasonHint name={schemaText(schema, 'ui.workspace.processing.plan_confirm')} reason={submitReason} className="w-full">
+          <Action type="button" size="lg" className="w-full"
+            loading={working} disabled={!valid} onClick={() => void submit()}>
+            {working ? schemaText(schema, 'ui.workspace.processing.submitting') : schemaText(schema, 'ui.workspace.processing.plan_confirm')}
+          </Action>
+        </ReasonHint>
       </footer>
   </div>;
 }
