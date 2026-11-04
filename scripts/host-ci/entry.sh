@@ -177,8 +177,13 @@ fi
 
 AFTER=$(source_identity)
 unchanged() {
-  [[ $AFTER == "$BEFORE" && $(git rev-parse HEAD) == "$SHA" && $(git rev-parse 'HEAD^{tree}') == "$TREE" ]] &&
-    [[ -z $(git status --porcelain --untracked-files=all) ]]
+  local dirty ok=0
+  [[ $AFTER == "$BEFORE" ]] || { echo '[host-ci] source identity changed during the gates'; ok=1; }
+  [[ $(git rev-parse HEAD) == "$SHA" && $(git rev-parse 'HEAD^{tree}') == "$TREE" ]] ||
+    { echo '[host-ci] HEAD or tree changed during the gates'; ok=1; }
+  dirty=$(git status --porcelain --untracked-files=all)
+  [[ -z $dirty ]] || { echo '[host-ci] worktree not clean after the gates:'; head -50 <<<"$dirty"; ok=1; }
+  return $ok
 }
 phase source-unchanged unchanged || fail source_changed 21 source-unchanged
 if [[ $GATES_RC -ne 0 ]]; then fail failed 1 gates; fi
