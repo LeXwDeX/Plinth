@@ -521,7 +521,8 @@ const minimalApplication = `"application":{
 		"failure.protocol":"上游协议错误",
 		"failure.internal":"任务处理失败",
 		"failure.source_expired":"来源原任务已过期",
-		"failure.content_rejected":"内容安全审核拦截"
+		"failure.content_rejected":"内容安全审核拦截",
+		"failure.upstream_denied":"上游图像生成服务拒绝"
 	}},
 	"chat":{
 		"api":{
@@ -772,7 +773,7 @@ const minimalApplication = `"application":{
 				"invalid_reference_indices":"参考图序号无效",
 				"reference_index_out_of_range_template":"参考图序号 {index} 超出 {count}",
 				"invalid_input_source":"来源无效","canvas_source_missing":"画布缺失","canvas_source_tool_refused":"改用 {tools}",
-				"agent_images_unsupported":"模型不读图","agent_content_rejected":"内容审核拦截","agent_not_configured":"Agent 未配置",
+				"agent_images_unsupported":"模型不读图","agent_content_rejected":"内容审核拦截","agent_inline_image_output":"模型自己画了图","agent_not_configured":"Agent 未配置",
 				"interrupted":"中断","interrupted_prompt":"中断 {prompt}",
 				"generation_failed":"生成失败","generation_error":"生成异常",
 				"summary_failed":"总结失败","no_result":"无结果",
@@ -3053,6 +3054,7 @@ func TestDefaultCatalogOwnsPublicErrorAndFailureMessages(t *testing.T) {
 		"failure.internal",
 		"failure.source_expired",
 		"failure.content_rejected",
+		"failure.upstream_denied",
 	} {
 		if messages[key] == "" {
 			t.Errorf("missing Product Schema message %q", key)

@@ -189,6 +189,8 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		"api.attachment.image_slot":             schema.API.Attachment.ImageSlot,
 		"api.attachment.url":                    schema.API.Attachment.URL,
 		"api.attachment.canvas_layers":          schema.API.Attachment.CanvasLayers,
+
+		"presentation.agent_inline_image_output": schema.Presentation.Messages.AgentInlineImageOutput,
 	}
 	for name, value := range required {
 		if strings.TrimSpace(value) == "" {

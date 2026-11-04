@@ -93,6 +93,11 @@ const (
 	// the prompt or pictures (#35: moderation_blocked, a safety filter). The
 	// same input fails again, so it is never retried; other input may pass.
 	FailureContentRejected FailureClass = "content_rejected"
+	// FailureUpstreamDenied: the upstream image service refused to serve the
+	// request (HTTP 403, e.g. a gateway whose IP allow-list misses us). It is
+	// about access, not about the prompt or pictures, so rewriting the input
+	// does not help and it is never retried; an administrator has to fix it.
+	FailureUpstreamDenied FailureClass = "upstream_denied"
 )
 
 // Valid 报告声明的失败分类词是否属于封闭枚举。
@@ -112,7 +117,8 @@ func (class FailureClass) Valid() bool {
 		FailureProtocol,
 		FailureInternal,
 		FailureSourceExpired,
-		FailureContentRejected:
+		FailureContentRejected,
+		FailureUpstreamDenied:
 		return true
 	default:
 		return false

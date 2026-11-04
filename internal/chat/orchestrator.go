@@ -3069,7 +3069,8 @@ func (orchestrator *Orchestrator) withErrorReference(ctx context.Context, text, 
 // agentFailureMessage is what the person reads when the Agent request failed:
 // a deployment without Agent settings says the Agent is not configured, a
 // refusal of a request with pictures says the model may not read images
-// (#253), an upstream content-safety refusal says the input tripped it (#35);
+// (#253), an upstream content-safety refusal says the input tripped it (#35),
+// a picture the model drew itself says it was not kept;
 // anything else stays the unknown error, whose ID is in the log.
 func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err error) string {
 	messages := orchestrator.schema.Presentation.Messages
@@ -3081,6 +3082,9 @@ func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err e
 	}
 	if errors.Is(err, agents.ErrImagesRejected) && messages.AgentImagesUnsupported != "" {
 		return orchestrator.text(ctx, messages.AgentImagesUnsupported)
+	}
+	if errors.Is(err, agents.ErrInlineImageOutput) && messages.AgentInlineImageOutput != "" {
+		return orchestrator.text(ctx, messages.AgentInlineImageOutput)
 	}
 	return orchestrator.text(ctx, messages.UnknownError)
 }

@@ -1,5 +1,6 @@
 import type { OfferingWire } from '@/lib/agent-offerings';
 import { formatSchemaText, type ProductSchema } from '@/lib/product-schema';
+import type { MultiviewModel } from '@/lib/workspace/three-view';
 
 /** A turn gives more pictures than the model takes: only the first `count` of `total` are used (#329 follow-up). */
 export interface ReferenceLimit {
@@ -12,9 +13,12 @@ export interface ReferenceLimit {
  * Whether the Offering the next turn runs takes fewer reference pictures than are attached. The limit is its
  * reference-image parameter's Schema `max_items`; the Agent and a direct request both keep the first pictures, so the
  * composer says so before sending. An Offering that preserves its picture sequence refuses instead of cutting.
+ * #86: when an available multiview model takes this many pictures, the Agent makes the 3D model from all of them
+ * (it asks which view each picture is, #65), so nothing is cut and there is nothing to say.
  */
-export function referenceLimit(offering: OfferingWire | undefined, pictures: number): ReferenceLimit | null {
+export function referenceLimit(offering: OfferingWire | undefined, pictures: number, multiview: MultiviewModel | null = null): ReferenceLimit | null {
   if (!offering || pictures <= 0 || offering.reference_selection_policy === 'preserve') return null;
+  if (multiview && pictures >= Math.max(multiview.minimumViews, 2) && pictures <= multiview.views.length) return null;
   const parameter = offering.parameters.find((wire) => wire.semantic === 'reference-image' && wire.type === 'asset-array');
   const count = parameter?.max_items;
   if (!count || pictures <= count) return null;

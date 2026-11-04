@@ -40,7 +40,7 @@ import { useSessionChoices } from '@/hooks/use-session-choices';
 import { useSessionPick } from '@/hooks/use-session-pick';
 import { useSessionState } from '@/hooks/use-session-state';
 import { useThreeViews } from '@/hooks/use-three-views';
-import { interleaveGroups } from '@/lib/workspace/three-view';
+import { interleaveGroups, pickMultiviewModel } from '@/lib/workspace/three-view';
 import { ThreeViewCard } from '@/components/studio/three-view-card';
 import { tileOfObject, useSessionVersions } from '@/hooks/use-session-versions';
 import { useRestoreSessionModels } from '@/hooks/use-restore-session-models';
@@ -363,7 +363,11 @@ export function ChatColumn() {
   // make a 3D model from any stage). The note says it is about 3D; the pictures stay attached, nothing is blocked
   // and the model is not switched.
   const composerReferenceLimit = modelGeneration.allowed
-    ? referenceLimit(modelGeneration.nextTurn.offering, attachedImages.length + (hasCanvasReference ? 1 : 0))
+    ? referenceLimit(
+      modelGeneration.nextTurn.offering,
+      attachedImages.length + (hasCanvasReference ? 1 : 0),
+      pickMultiviewModel(model3dOfferings, modelGeneration.nextTurn.offering?.model_id),
+    )
     : null;
   const { consent, awaiting: consentAwaiting, busy: consentBusy, decide: decideConsent } =
     useSessionAgentConsent(activeSessionId, harness, schema.chat.frontend.fallback_poll_milliseconds);

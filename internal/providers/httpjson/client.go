@@ -71,8 +71,10 @@ type HTTPErrorClassifier func(response *http.Response, payload []byte) error
 
 // ClassifyGatewayError 是网宿 AI 网关（chat/completions、images/generations、
 // images/edits）的专属分类器。依据官方文档（2026-09-17 检索）：
-// 401 = 缺 Authorization/token 无效（鉴权问题）；403 = 请求主体 JSON 格式
-// 错误或缺必填参数（我方请求构造问题）；500 = 网关/上游内部错误（第三方）。
+// 401 = 缺 Authorization/token 无效（鉴权问题）；403 = 网关拒绝服务，按
+// upstream_denied 处理：文档称它表示请求体错误，但实际出现的是网关访问拒绝
+// （eca_access_denied，IP 不在白名单），改写输入无济于事；500 = 网关/上游
+// 内部错误（第三方）。
 // 未覆盖的状态码返回 nil，回退到通用 HTTP 分类。
 func ClassifyGatewayError(response *http.Response, payload []byte) error {
 	var class generation.FailureClass
@@ -80,7 +82,7 @@ func ClassifyGatewayError(response *http.Response, payload []byte) error {
 	case http.StatusUnauthorized:
 		class = generation.FailureAuthentication
 	case http.StatusForbidden:
-		class = generation.FailureInvalidInput
+		class = generation.FailureUpstreamDenied
 	default:
 		return nil
 	}
@@ -362,6 +364,10 @@ func classifyHTTP(response *http.Response, payload []byte) error {
 // Upstream error bodies may contain private URLs, request IDs or account data.
 // Keep their evidence in the private failure fields, never in public task text.
 func publicHTTPErrorMessage(status int) string {
+	if status == http.StatusForbidden {
+		// 403 is the upstream refusing service, not a bad input (upstream_denied).
+		return "上游服务返回 HTTP 403，拒绝了这次请求"
+	}
 	return fmt.Sprintf("上游服务返回 HTTP %d，请检查输入或稍后重试", status)
 }
 

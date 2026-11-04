@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import type { OfferingWire } from '@/lib/agent-offerings';
 import type { ProductSchema } from '@/lib/product-schema';
+import { pickMultiviewModel } from './three-view';
 import { referenceLimit, referenceLimitNote } from './reference-limit';
 
 const offering = (id: string) => {
@@ -24,6 +25,17 @@ describe('referenceLimit', () => {
     expect(referenceLimit(offering('meshy/meshy-7.1-multiview/image-to-3d'), 4)).toBeNull();
     expect(referenceLimit(offering('meshy/meshy-7.1/text-to-3d'), 2)).toBeNull();
     expect(referenceLimit(undefined, 2)).toBeNull();
+  });
+
+  it('is silent when an available multiview model takes the pictures: the Agent makes the 3D model from all of them (#86)', () => {
+    const offerings = (defaultCatalog.offerings as unknown as OfferingWire[]).map((item) => ({ ...item, available: true }));
+    const multiview = pickMultiviewModel({ 'image-to-3d': offerings }, undefined);
+    expect(multiview).not.toBeNull();
+    const single = offering('meshy/meshy-7.1/image-to-3d');
+    expect(referenceLimit(single, 4, multiview)).toBeNull();
+    expect(referenceLimit(single, 2, multiview)).toBeNull();
+    // More pictures than the multiview model takes are still cut by the single-picture model.
+    expect(referenceLimit(single, multiview!.views.length + 1, multiview)).toMatchObject({ count: 1 });
   });
 
   it('is silent for an Offering that keeps its picture sequence (the step refuses instead of cutting)', () => {

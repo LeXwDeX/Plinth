@@ -81,7 +81,7 @@ func TestInsufficientBalanceHasItsOwnClassAcrossProviders(t *testing.T) {
 // Ordinary refusals on the same statuses keep their classes.
 func TestBalanceEvidenceDoesNotRecastOtherErrors(t *testing.T) {
 	openai := connectionMapping(t, "openai-images")
-	if failure := classify(t, openai, http.StatusForbidden, `{"error":{"message":"Your request was blocked by the safety system"}}`); failure.Class != generation.FailureInvalidInput {
+	if failure := classify(t, openai, http.StatusForbidden, `{"error":{"code":"eca_access_denied","message":"Eca IP not in whitelist"}}`); failure.Class != generation.FailureUpstreamDenied {
 		t.Fatalf("403 = %+v", failure)
 	}
 	if failure := classify(t, openai, http.StatusUnauthorized, `{"error":{"message":"Incorrect API key"}}`); failure.Class != generation.FailureAuthentication {

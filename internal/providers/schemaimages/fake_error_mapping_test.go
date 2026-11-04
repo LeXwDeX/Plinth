@@ -201,7 +201,7 @@ func TestGeminiConnectionReadsTheDocumentedErrorCodes(t *testing.T) {
 		{"invalid_request 400", 400, errorEnvelope("invalid_request", "bad parameter"), generation.FailureInvalidInput, false},
 		{"out_of_range 416", 416, errorEnvelope("out_of_range", "size"), generation.FailureInvalidInput, false},
 		{"authentication 401", 401, errorEnvelope("authentication", "bad key"), generation.FailureAuthentication, false},
-		{"permission_denied 403 stays an input refusal like the other image connections", 403, errorEnvelope("permission_denied", "no"), generation.FailureInvalidInput, false},
+		{"permission_denied 403 is the upstream refusing service like the other image connections", 403, errorEnvelope("permission_denied", "no"), generation.FailureUpstreamDenied, false},
 	}
 	// Every generation-blocked code asks for different input. The page lists no
 	// HTTP status for them, so the class must not depend on one: 409 is a status

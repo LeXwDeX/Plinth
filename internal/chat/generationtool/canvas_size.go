@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
@@ -86,6 +88,72 @@ func (size sizeValue) followsCanvas(width, height int) bool {
 	}
 	sameShape := math.Abs(math.Log(size.Ratio*float64(height)/float64(width))) < sameRatioTolerance
 	return sameShape && (size.Width == 0 || size.Width*size.Height >= int64(width)*int64(height))
+}
+
+// followsCanvas is sizeValue.followsCanvas, with a ratio-only value also read
+// as the pixels the Schema maps it to: Gemini's 9:16 at 4K is 3072×5504, not
+// exactly 9:16, and on a canvas of that size it still follows the canvas.
+func (executor *Executor) followsCanvas(offering generation.Offering, input map[string]any, size sizeValue, width, height int) bool {
+	if size.followsCanvas(width, height) {
+		return true
+	}
+	pixels, ok := executor.ratioPixels(offering, input, size)
+	return ok && pixels.followsCanvas(width, height)
+}
+
+// ratioPixels is the size a ratio-only value produces by the Schema's canvas
+// tables (canvas.frontend.artboard): the tier table of a tier parameter set in
+// the input (else to its default), otherwise ratio_pixels. The web client
+// reads them the same way (outputPixels).
+func (executor *Executor) ratioPixels(offering generation.Offering, input map[string]any, size sizeValue) (sizeValue, bool) {
+	if size.Width > 0 {
+		return sizeValue{}, false
+	}
+	artboard := executor.canvasArtboard
+	names := make([]string, 0, len(artboard.RatioPixelTiers))
+	for name := range artboard.RatioPixelTiers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		tier, ok := parameterText(offering, input, name)
+		if !ok {
+			continue
+		}
+		if pixels, ok := artboard.RatioPixelTiers[name][tier][size.Value]; ok {
+			return pixelSizeValue(pixels), true
+		}
+	}
+	if pixels, ok := artboard.RatioPixels[size.Value]; ok {
+		return pixelSizeValue(pixels), true
+	}
+	return sizeValue{}, false
+}
+
+// parameterText is a parameter's value in the input, else the Offering's
+// default for it, as text.
+func parameterText(offering generation.Offering, input map[string]any, name string) (string, bool) {
+	if value, ok := input[name]; ok && value != nil {
+		return fmt.Sprint(value), true
+	}
+	for _, parameter := range offering.Parameters {
+		var value any
+		if parameter.Name == name && len(parameter.Default) > 0 && json.Unmarshal(parameter.Default, &value) == nil && value != nil {
+			return fmt.Sprint(value), true
+		}
+	}
+	return "", false
+}
+
+func pixelSizeValue(pixels catalog.CanvasPixelSize) sizeValue {
+	if pixels.Width <= 0 || pixels.Height <= 0 {
+		return sizeValue{}
+	}
+	return sizeValue{
+		Value: fmt.Sprintf("%dx%d", pixels.Width, pixels.Height),
+		Width: int64(pixels.Width), Height: int64(pixels.Height),
+		Ratio: float64(pixels.Width) / float64(pixels.Height),
+	}
 }
 
 // canvasSizeChoice is the value of one output-size parameter that comes
@@ -182,7 +250,7 @@ func (executor *Executor) canvasSizeNote(command chat.ToolCommand, offering gene
 			continue
 		}
 		template := context.CanvasOutputSizeNearestTemplate
-		if size.followsCanvas(layout.Width, layout.Height) {
+		if executor.followsCanvas(offering, input, size, layout.Width, layout.Height) {
 			template = context.CanvasOutputSizeTemplate
 		}
 		template = executor.localized(command, template)
