@@ -39,6 +39,37 @@ func TestAgentOfferingProjectionIncludesProcessingDependenciesAndCredits(t *test
 	t.Fatal("animation offering missing")
 }
 
+func TestAgentOfferingProjectionExposesTheConditionalFaceLimit(t *testing.T) {
+	// P2 ships disabled until its price and a real sample are verified, so it
+	// is not listed yet; the shared input projection still carries its
+	// Agent-adjustable face budget once it is enabled.
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	offering, ok := product.Get("tripo/tripo-p2/image-to-3d")
+	if !ok {
+		t.Fatal("P2 offering missing")
+	}
+	for _, input := range agentInputViews(offering) {
+		if input.Name != "face_limit" {
+			continue
+		}
+		if input.Minimum == nil || *input.Minimum != 48 || input.Maximum == nil || *input.Maximum != 50000 {
+			t.Fatalf("face_limit range = %#v", input)
+		}
+		if len(input.Default) != 0 || input.AdjustmentPolicy != "advised" {
+			t.Fatalf("adaptive advised face_limit = %#v", input)
+		}
+		if len(input.MaximumWhen) != 1 || input.MaximumWhen[0].Maximum != 25000 ||
+			input.MaximumWhen[0].When.Parameter != "quad" || input.MaximumWhen[0].When.Operator != "truthy" {
+			t.Fatalf("quad face_limit bound missing: %#v", input.MaximumWhen)
+		}
+		return
+	}
+	t.Fatal("face_limit input missing")
+}
+
 func TestAgentOfferingProjectionListsActionChoicesAndExtraCredits(t *testing.T) {
 	// Conversion ships disabled (the 3D stage reads GLB only); the projection
 	// of its extra-credit inputs is still checked with it enabled.

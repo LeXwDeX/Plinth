@@ -31,11 +31,17 @@ func ValidateParameterPatch(o schema.Offering, values map[string]json.RawMessage
 			return nil, err
 		}
 		if agent && p.AdjustmentPolicy == "advised" {
-			recommended, err := ValidateHarnessParameter(p, p.Default)
-			if err != nil {
-				return nil, err
+			// A parameter without a default is never sent unless the Agent
+			// chooses it; every supplied value is then an adjustment.
+			adjusted := true
+			if len(bytes.TrimSpace(p.Default)) > 0 {
+				recommended, err := ValidateHarnessParameter(p, p.Default)
+				if err != nil {
+					return nil, err
+				}
+				adjusted = !bytes.Equal(normalized, recommended)
 			}
-			if !bytes.Equal(normalized, recommended) && (strings.TrimSpace(reasons[name]) == "" || len(reasons[name]) > 4096) {
+			if adjusted && (strings.TrimSpace(reasons[name]) == "" || len(reasons[name]) > 4096) {
 				return nil, fmt.Errorf("parameter %q requires a bounded adjustment reason", name)
 			}
 		}

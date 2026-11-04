@@ -1,7 +1,7 @@
 {
   "version": 2,
   "catalog": "internal/catalog/default_catalog.json",
-  "catalog_sha256": "eb0acafa8b48cfc1114135fc08325e179817ded04a929b354ab075b4c785f276",
+  "catalog_sha256": "cfbb2be6ffbe38da2a26ec0b33fcd818776c27105336ed11369a07fabb76a151",
   "samples": [
     "internal/app/testdata/agent-flow/agent-flow.candidate.json",
     "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
@@ -59,13 +59,13 @@
   ],
   "counts": {
     "offerings": {
-      "disabled": 24,
-      "disabled-zero-egress": 24,
+      "disabled": 27,
+      "disabled-zero-egress": 27,
       "enabled": 53,
       "local-no-wire": 4,
       "partial": 6,
       "real": 43,
-      "total": 77
+      "total": 80
     },
     "units": {
       "derived": 17,
@@ -2552,6 +2552,16 @@
       "evidence_files": [],
       "offerings": [
         {
+          "id": "tripo/tripo-p2-multiview/image-to-3d",
+          "model_id": "tripo-p2-multiview",
+          "enabled": false
+        },
+        {
+          "id": "tripo/tripo-p2/image-to-3d",
+          "model_id": "tripo-p2",
+          "enabled": false
+        },
+        {
           "id": "tripo/tripo-v3.1/image-to-3d",
           "model_id": "tripo-v3.1",
           "enabled": false
@@ -3101,6 +3111,11 @@
       "evidence": "disabled-zero-egress",
       "evidence_files": [],
       "offerings": [
+        {
+          "id": "tripo/tripo-p2/text-to-3d",
+          "model_id": "tripo-p2-text",
+          "enabled": false
+        },
         {
           "id": "tripo/tripo-v3.1/text-to-3d",
           "model_id": "tripo-v3.1",
@@ -3949,6 +3964,36 @@
       "units": [
         "tripo.v3|retexture|GET /v3/tasks/{id}",
         "tripo.v3|retexture|POST /v3/models/texture"
+      ]
+    },
+    {
+      "id": "tripo/tripo-p2-multiview/image-to-3d",
+      "model_id": "tripo-p2-multiview",
+      "adapter_key": "tripo.v3",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
+      "units": [
+        "tripo.v3|image-to-3d|(disabled)"
+      ]
+    },
+    {
+      "id": "tripo/tripo-p2/image-to-3d",
+      "model_id": "tripo-p2",
+      "adapter_key": "tripo.v3",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
+      "units": [
+        "tripo.v3|image-to-3d|(disabled)"
+      ]
+    },
+    {
+      "id": "tripo/tripo-p2/text-to-3d",
+      "model_id": "tripo-p2-text",
+      "adapter_key": "tripo.v3",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
+      "units": [
+        "tripo.v3|text-to-3d|(disabled)"
       ]
     },
     {
