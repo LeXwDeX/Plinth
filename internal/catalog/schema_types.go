@@ -2252,8 +2252,13 @@ type ChatModelReviewLimits struct {
 	MaxTriangles     int64 `json:"max_triangles"`
 	MaxVertices      int64 `json:"max_vertices"`
 	MaxTexturePixels int64 `json:"max_texture_pixels"`
-	MaxNodes         int   `json:"max_nodes"`
-	MaxDepth         int   `json:"max_depth"`
+	// MaxTotalTexturePixels and MaxTextureBytes cap all images decoded in one
+	// review, so a model with many individually-valid textures cannot exhaust
+	// memory (#103 review P2).
+	MaxTotalTexturePixels int64 `json:"max_total_texture_pixels"`
+	MaxTextureBytes       int64 `json:"max_texture_bytes"`
+	MaxNodes              int   `json:"max_nodes"`
+	MaxDepth              int   `json:"max_depth"`
 }
 
 // ChatModelInspectSchema tunes the inspection report.
@@ -2602,11 +2607,11 @@ type ChatChoiceSchema struct {
 	// person's message, mean they do not want it ("不要 Tripo"). A negated
 	// name is never run without asking (#321 G).
 	MentionNegations []string `json:"mention_negations,omitempty"`
-	// Kinds declares the generic cards an Agent tool may open (#103). The
-	// first kind is usage_profile, whose options the server builds from
-	// model3d_usage.profiles; each kind names the tool its answer calls and
-	// the argument field its options fill. Empty (historical Catalogs) leaves
-	// ask_choice without a kind.
+	// Kinds declares the generic cards an Agent tool may open (#103). Each kind
+	// whose options the server builds from model3d_usage.profiles names the
+	// tool its answer calls and the argument field its options fill; the kind
+	// may sit at any position. Empty (historical Catalogs) leaves ask_choice
+	// without a kind.
 	Kinds []ChatChoiceKindSchema `json:"kinds,omitempty"`
 }
 
@@ -2718,6 +2723,22 @@ type ChatProductionBriefSchema struct {
 	SkinText             string `json:"skin_text"`
 	SavedMessage         string `json:"saved_message"`
 	InvalidTemplate      string `json:"invalid_template"`
+	// Messages are the Agent-facing refusal reasons; invalid_template wraps
+	// them (#103 review C3).
+	Messages ChatProductionBriefMessages `json:"messages"`
+}
+
+// FieldNameOfType returns the name of the first declared field of a type. The
+// service reads the purpose (profile) and the triangle override (integer) by
+// type, so a renamed Schema field keeps working without a code change (#103
+// review C3). Catalog validation guarantees exactly one field of each.
+func (brief ChatProductionBriefSchema) FieldNameOfType(fieldType string) string {
+	for _, field := range brief.Fields {
+		if field.Type == fieldType {
+			return field.Name
+		}
+	}
+	return ""
 }
 
 // ChatProductionBriefField declares one brief member and its bound.
@@ -2731,6 +2752,33 @@ type ChatProductionBriefField struct {
 	MaximumCharacters int `json:"maximum_characters,omitempty"`
 	Minimum           int `json:"minimum,omitempty"`
 	Maximum           int `json:"maximum,omitempty"`
+	// Multiline asks the panel for a textarea instead of one line, and
+	// Placeholder is the hint an empty text field shows. Both are declared
+	// here so the panel keeps no name-based heuristics (#103 review F11/F7).
+	Multiline   bool   `json:"multiline,omitempty"`
+	Placeholder string `json:"placeholder,omitempty"`
+}
+
+// ChatProductionBriefMessages are the Agent-facing refusals of a brief write.
+// Each template names the refused field and rule; the rejected text never
+// appears. The suffix is the reason inside invalid_template.
+type ChatProductionBriefMessages struct {
+	// UnknownField: {field}.
+	UnknownField string `json:"unknown_field"`
+	// NotObject is the whole brief being something other than a JSON object.
+	NotObject string `json:"not_object"`
+	// NotString, NotBoolean and NotInteger: {field}.
+	NotString  string `json:"not_string"`
+	NotBoolean string `json:"not_boolean"`
+	NotInteger string `json:"not_integer"`
+	// ProfileUndeclared: {value}.
+	ProfileUndeclared string `json:"profile_undeclared"`
+	// TextTooLong: {field}, {maximum}.
+	TextTooLong string `json:"text_too_long"`
+	// OutOfRange: {field}, {minimum}, {maximum}.
+	OutOfRange string `json:"out_of_range"`
+	// UnsupportedType: {field}, {type}.
+	UnsupportedType string `json:"unsupported_type"`
 }
 
 // ChatAgentScopeSchema is application.chat.agent_scope. The scope of a session
@@ -2939,6 +2987,18 @@ type ChatApprovalBudgetSchema struct {
 	// Messages are the session messages posted when a plan card is decided or
 	// expires. Fields: {title}, {limit}, {remaining}.
 	Messages ChatApprovalBudgetMessages `json:"messages"`
+	// ToolMessages are the Agent-facing tool result of propose_production_plan
+	// in each state, so the execution layer keeps no English copy (#103
+	// review B4).
+	ToolMessages ChatApprovalBudgetToolMessages `json:"tool_messages"`
+}
+
+// ChatApprovalBudgetToolMessages is the Agent-facing result of the plan tool.
+type ChatApprovalBudgetToolMessages struct {
+	Proposed  string `json:"proposed"`
+	Active    string `json:"active"`
+	Exhausted string `json:"exhausted"`
+	Closed    string `json:"closed"`
 }
 
 // ChatApprovalBudgetState is the person-facing label of one plan state.
@@ -2966,6 +3026,10 @@ type PublicChatApprovalPolicy struct {
 	DefaultMode                string                      `json:"default_mode"`
 	Modes                      []string                    `json:"modes"`
 	ManualApprovalCapabilities []schemacontract.Capability `json:"manual_approval_capabilities"`
+	// BudgetStates are the plan state ids the runtime may report, so the
+	// browser labels a state instead of keeping its own list (#103 review F7).
+	// Empty means the deployment declares no budget plan.
+	BudgetStates []string `json:"budget_states,omitempty"`
 }
 
 // ChatApprovalPromptSchema is application.chat.approval_policy.prompt. The
@@ -3121,6 +3185,9 @@ type ChatAPIFields struct {
 	ExplicitModel3D string `json:"explicit_model_3d,omitempty"`
 	// AgentScope is the request field of the session Agent-scope write.
 	AgentScope string `json:"agent_scope"`
+	// Decision is the request field of a pending-approval decision: approve,
+	// deny, rerequest or drop, as the pending-approvals API declares.
+	Decision string `json:"decision"`
 	// ChoiceAnswer carries the answer to an in-chat choice card with a turn
 	// (#321): {"choice_id", "option_id"} or {"choice_id", "use_default": true}.
 	ChoiceAnswer string `json:"choice_answer"`
@@ -4027,6 +4094,13 @@ type ChatToolResultFields struct {
 	// (#272), or that it followed the one reference picture (#296). It is
 	// present only when the canvas or the reference set the size.
 	SizeNote string `json:"size_note,omitempty"`
+	// Budget is the optional key of the plan balance object a budget-mode
+	// step's result carries (#103): the plan's state, limit, spent, reserved
+	// and remaining credits. Reason is the optional key of the explanation a
+	// step gives when the plan cannot cover it and the step waits for the
+	// person. Empty keys omit the values (#103 review B4).
+	Budget string `json:"budget,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // ChatAgentToolSchema 声明非生成类 agent 控制工具（set_params /
@@ -4132,13 +4206,17 @@ type ChatMessageTexts struct {
 	TurnActive string `json:"turn_active"`
 	// ChoiceAnswered refuses an answer to a choice card that is no longer open;
 	// ChoiceRejected one whose option the card does not offer (#321).
-	ChoiceAnswered                   string `json:"choice_answered"`
-	ChoiceRejected                   string `json:"choice_rejected"`
-	SessionNotFound                  string `json:"session_not_found"`
-	MessageNotFound                  string `json:"message_not_found"`
-	EmptyTitle                       string `json:"empty_title"`
-	EmptyMessage                     string `json:"empty_message"`
-	InvalidParameters                string `json:"invalid_parameters"`
+	ChoiceAnswered    string `json:"choice_answered"`
+	ChoiceRejected    string `json:"choice_rejected"`
+	SessionNotFound   string `json:"session_not_found"`
+	MessageNotFound   string `json:"message_not_found"`
+	EmptyTitle        string `json:"empty_title"`
+	EmptyMessage      string `json:"empty_message"`
+	InvalidParameters string `json:"invalid_parameters"`
+	// ProductionBriefConflict refuses a whole-brief replacement that lost
+	// every bounded retry to a concurrent writer, so the caller retries instead
+	// of overwriting the other change (#103 review C5).
+	ProductionBriefConflict          string `json:"production_brief_conflict,omitempty"`
 	InvalidReferenceIndices          string `json:"invalid_reference_indices"`
 	ReferenceIndexOutOfRangeTemplate string `json:"reference_index_out_of_range_template"`
 	// InvalidInputSource rejects an undeclared input_source; CanvasSourceMissing
@@ -4159,6 +4237,12 @@ type ChatMessageTexts struct {
 	// submits a Task.
 	ModelChoiceConflict    string `json:"model_choice_conflict,omitempty"`
 	ModelChoiceUnavailable string `json:"model_choice_unavailable,omitempty"`
+	// ModelChoiceWorkspaceConflict refuses a purpose step whose recommended
+	// model differs from the model still selected in the workspace, so the
+	// person confirms the switch instead of the purpose silently replacing
+	// their visible choice ({workspace}, {recommended}, {profile}; #103
+	// review C1).
+	ModelChoiceWorkspaceConflict string `json:"model_choice_workspace_conflict,omitempty"`
 	// OfferingChoiceUnavailable tells the Agent that the Offering named by a
 	// tool's offering_argument is not enabled or available ({choices} lists
 	// the ones that are); SourceOfferingUnpaired that the source Task of an

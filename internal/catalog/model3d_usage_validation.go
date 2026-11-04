@@ -17,14 +17,6 @@ import (
 // image-to-3d Offerings that declare the multiview views argument.
 var model3dUsageShapes = []string{"text-to-3d", "image-to-3d", "multiview-to-3d"}
 
-// productionBriefFields are the members the service stores. The Schema
-// declares their labels, bounds and order, but not an arbitrary vocabulary:
-// the Go brief struct is fixed.
-var productionBriefFields = []string{
-	"purpose", "style", "target_platform", "needs_parts",
-	"needs_rig", "needs_animation", "triangle_budget", "notes",
-}
-
 // validateModel3DUsageShape checks the parts of application.chat.model3d_usage
 // that need no Offering: profiles, budgets, pipeline names, brief fields and
 // templates, and the generic choice kinds. A Schema without purposes stays
@@ -105,16 +97,17 @@ func validateModel3DUsageShape(schema ChatSchema, capabilityPresentations []Capa
 }
 
 // validateProductionBrief checks the brief field declarations and the words
-// the Agent reads in the system context.
+// the Agent reads in the system context. Fields are validated by their type,
+// not by a fixed name list: the service locates the purpose and the triangle
+// override by type, so a renamed Schema field needs no code change (#103
+// review C3).
 func validateProductionBrief(brief ChatProductionBriefSchema) error {
 	if len(brief.Fields) == 0 {
 		return fmt.Errorf("model3d_usage.brief.fields 不能为空")
 	}
 	declared := map[string]ChatProductionBriefField{}
+	profiles, integers := 0, 0
 	for index, field := range brief.Fields {
-		if !containsString(productionBriefFields, field.Name) {
-			return fmt.Errorf("model3d_usage.brief.fields[%d].name %q 未实现", index, field.Name)
-		}
 		if _, exists := declared[field.Name]; exists {
 			return fmt.Errorf("model3d_usage.brief.fields 中 %q 重复", field.Name)
 		}
@@ -122,29 +115,31 @@ func validateProductionBrief(brief ChatProductionBriefSchema) error {
 		if strings.TrimSpace(field.Label) == "" {
 			return fmt.Errorf("model3d_usage.brief.fields[%d].label 不能为空", index)
 		}
-		switch field.Name {
-		case "purpose":
-			if field.Type != "profile" {
-				return fmt.Errorf("model3d_usage.brief.fields[purpose].type 必须为 profile")
+		switch field.Type {
+		case "profile":
+			profiles++
+		case "boolean":
+			// A boolean field has no other declaration.
+		case "integer":
+			integers++
+			if field.Minimum <= 0 || field.Maximum <= 0 || field.Minimum > field.Maximum {
+				return fmt.Errorf("model3d_usage.brief.fields[%s] 必须是带有效最小/最大值的 integer", field.Name)
 			}
-		case "needs_parts", "needs_rig", "needs_animation":
-			if field.Type != "boolean" {
-				return fmt.Errorf("model3d_usage.brief.fields[%s].type 必须为 boolean", field.Name)
-			}
-		case "triangle_budget":
-			if field.Type != "integer" || field.Minimum <= 0 || field.Maximum <= 0 || field.Minimum > field.Maximum {
-				return fmt.Errorf("model3d_usage.brief.fields[triangle_budget] 必须是带有效最小/最大值的 integer")
-			}
-		default:
-			if field.Type != "text" || field.MaximumCharacters <= 0 {
+		case "text":
+			if field.MaximumCharacters <= 0 {
 				return fmt.Errorf("model3d_usage.brief.fields[%s] 必须是带 maximum_characters 的 text", field.Name)
 			}
+		default:
+			return fmt.Errorf("model3d_usage.brief.fields[%s].type %q 未实现", field.Name, field.Type)
 		}
 	}
-	for _, name := range productionBriefFields {
-		if _, exists := declared[name]; !exists {
-			return fmt.Errorf("model3d_usage.brief.fields 缺少 %q", name)
-		}
+	// The service reads exactly one profile (the purpose) and one integer (the
+	// triangle override); a second one would be silently ignored.
+	if profiles != 1 {
+		return fmt.Errorf("model3d_usage.brief.fields 必须声明且只声明一个 profile 字段")
+	}
+	if integers != 1 {
+		return fmt.Errorf("model3d_usage.brief.fields 必须声明且只声明一个 integer 字段")
 	}
 	templates := map[string]string{
 		"context_template":         brief.ContextTemplate,
@@ -187,18 +182,68 @@ func validateProductionBrief(brief ChatProductionBriefSchema) error {
 			}
 		}
 	}
+	return validateProductionBriefMessages(brief.Messages)
+}
+
+// validateProductionBriefMessages checks the refusal wording of the brief
+// write. A historical Catalog may declare none of it; a Catalog that declares
+// any of it must declare all of it, so no refusal silently falls back to a
+// hardcoded sentence in one language (#103 review C3).
+func validateProductionBriefMessages(messages ChatProductionBriefMessages) error {
+	all := map[string]string{
+		"unknown_field":      messages.UnknownField,
+		"not_object":         messages.NotObject,
+		"not_string":         messages.NotString,
+		"not_boolean":        messages.NotBoolean,
+		"not_integer":        messages.NotInteger,
+		"profile_undeclared": messages.ProfileUndeclared,
+		"text_too_long":      messages.TextTooLong,
+		"out_of_range":       messages.OutOfRange,
+		"unsupported_type":   messages.UnsupportedType,
+	}
+	any := false
+	for _, value := range all {
+		if strings.TrimSpace(value) != "" {
+			any = true
+			break
+		}
+	}
+	if !any {
+		return nil
+	}
+	for name, value := range all {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("model3d_usage.brief.messages.%s 不能为空", name)
+		}
+	}
+	placeholders := map[string][]string{
+		"unknown_field":      {"{field}"},
+		"not_string":         {"{field}"},
+		"not_boolean":        {"{field}"},
+		"not_integer":        {"{field}"},
+		"profile_undeclared": {"{value}"},
+		"text_too_long":      {"{field}", "{maximum}"},
+		"out_of_range":       {"{field}", "{minimum}", "{maximum}"},
+		"unsupported_type":   {"{field}", "{type}"},
+	}
+	for name, required := range placeholders {
+		for _, placeholder := range required {
+			if !strings.Contains(all[name], placeholder) {
+				return fmt.Errorf("model3d_usage.brief.messages.%s 必须包含 %s", name, placeholder)
+			}
+		}
+	}
 	return nil
 }
 
 // validateChoiceKinds checks the generic choice kinds declared by
-// application.chat.choice.kinds. The usage_profile kind must come first and
-// every kind must name a declared tool and one of its string arguments.
+// application.chat.choice.kinds. Every kind must take its options from the
+// usage profiles, the only option source the service builds, and name a
+// declared tool and one of its string arguments. The usage-profile kind may
+// sit at any position (#103 review C3).
 func validateChoiceKinds(schema ChatSchema) error {
 	if len(schema.Choice.Kinds) == 0 {
 		return nil
-	}
-	if schema.Choice.Kinds[0].ID != "usage_profile" {
-		return fmt.Errorf("choice.kinds 的第一个 kind 必须是 usage_profile")
 	}
 	ids := make([]string, 0, len(schema.Choice.Kinds))
 	seen := map[string]bool{}

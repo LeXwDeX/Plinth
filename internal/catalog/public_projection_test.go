@@ -33,7 +33,7 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"runtime.generation_messages": {"reference_capacity", "reference_capacity_multiview", "reference_limit", "reference_limit_one"},
 		"chat":                        {"api", "defaults", "roles", "state", "frontend", "context", "stream", "tools", "skills", "presentation", "approval_policy", "agent_scope", "harness", "agent_status", "agent_limits", "three_view_limits", "context_compaction", "model_review", "model3d_usage"},
 		// #7: the Agent's approval-mode texts (approval_policy.prompt) stay on the server.
-		"chat.approval_policy": {"default_mode", "modes", "manual_approval_capabilities"},
+		"chat.approval_policy": {"default_mode", "modes", "manual_approval_capabilities", "budget_states"},
 		// #103: only the review tool names, purpose labels and brief field
 		// declarations reach the browser.
 		"chat.model_review":                 {"tools"},
