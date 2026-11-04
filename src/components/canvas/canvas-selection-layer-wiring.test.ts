@@ -45,3 +45,30 @@ describe('selection handles above the outside-canvas dim (#311)', () => {
     }
   });
 });
+
+/**
+ * #91: a selected layer outside the canvas shows at full brightness. The veil is one custom shape drawn first
+ * in its non-listening layer, so its `destination-out` cut only removes the veil; the Schema switch gates it,
+ * and the veil follows every redraw of the picture layer while something is selected (drag, transform).
+ */
+describe('selected layers outside the canvas undimmed (#91)', () => {
+  const veil = board.indexOf('name="outside-dim"');
+
+  it('draws the veil as the first shape of the non-listening dim layer and cuts the selection out of it', () => {
+    expect(veil).toBeGreaterThan(0);
+    const layer = enclosingLayer(veil);
+    expect(layer.tag).toBe('<Layer ref={outsideDimLayerRef} listening={false}>');
+    expect(board.slice(layer.start + layer.tag.length, veil)).toMatch(/^\s*\{artboard \? \(\s*<Shape\s*$/);
+    const scene = board.slice(veil, board.indexOf('/>', board.indexOf('drawOutsideDim(', veil)));
+    expect(scene).toContain('outsideDim.reveal_selected && selectedIds.length > 0');
+    expect(scene).toContain('revealSteps(paintedNodes(stage, sorted.map((node) => node.id)), new Set(selectedIds), artboard)');
+    expect(scene).toContain('konvaRevealPainter(stage, context.canvas, outsideDimScratch.current)');
+  });
+
+  it('redraws the veil with the picture layer while a selection can be revealed', () => {
+    expect(board).toContain('<Layer ref={contentLayerRef}>');
+    expect(board).toContain("content.on('draw.outsideDim', follow);");
+    expect(board).toContain("content.off('draw.outsideDim', follow);");
+    expect(board).toContain('if (!content || !veil || !revealSelected || !hasSelection) return;');
+  });
+});

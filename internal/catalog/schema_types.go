@@ -1762,10 +1762,13 @@ type CanvasTransparencySchema struct {
 	Opacity    float64 `json:"opacity"`
 }
 
-// CanvasOutsideDimSchema colours the veil outside the artboard; Opacity is 0..1.
+// CanvasOutsideDimSchema colours the veil outside the artboard; Opacity is 0..1. RevealSelected lets a
+// selected layer outside the artboard show at full brightness: its visible pixels are cut out of the veil
+// while it stays selected (#91). It changes only the board view, never the export.
 type CanvasOutsideDimSchema struct {
-	Color   string  `json:"color"`
-	Opacity float64 `json:"opacity"`
+	Color          string  `json:"color"`
+	Opacity        float64 `json:"opacity"`
+	RevealSelected bool    `json:"reveal_selected"`
 }
 
 // CanvasBrushSchema bounds the pixel brush (also the quick-mask brush) in canvas pixels.
