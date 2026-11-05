@@ -52,7 +52,7 @@ func TestUSDCTableEntryCeilingStillRejects111(t *testing.T) {
 		d := usdcFixture(t, "typed")
 		for _, s := range usdcTestSections(d) {
 			if s.name == name {
-				binary.LittleEndian.PutUint64(d[s.start:], maxUSDCTableEntries+1)
+				binary.LittleEndian.PutUint64(d[s.start:], maxModelStructureEntries+1)
 			}
 		}
 		archive := usdcTestZIP(t, d, false, false)
