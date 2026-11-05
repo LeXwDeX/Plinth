@@ -191,3 +191,33 @@ func TestProcessingPlanFromTheBrowserKeepsPerStepApproval(t *testing.T) {
 			grants.approve, grants.reserved, grants.summary)
 	}
 }
+
+// A paused plan step keeps its plan's budget eligibility in the identity the
+// browser re-prepares the grant with: approving an Agent-created plan's step
+// in the processing panel must replay that step's eligible grant, not
+// conflict with it or turn it into a browser step (#120).
+func TestPausedStepGrantIdentityCarriesThePlanBudgetEligibility(t *testing.T) {
+	for _, testCase := range []struct {
+		origin   string
+		eligible bool
+	}{{OriginAgent, true}, {OriginBrowser, false}} {
+		t.Run(testCase.origin, func(t *testing.T) {
+			ctx := context.Background()
+			service, gateway, grants, plan := budgetProcessingFixture(t, testCase.origin)
+			// Too little budget left: the Agent's step waits for a person too.
+			grants.summary.RemainingCredits = 1
+			if err := service.advanceAll(ctx); err != nil {
+				t.Fatal(err)
+			}
+			paused, err := service.Get(ctx, "owner", plan.ID)
+			if err != nil || paused.State != Paused || paused.Failure != ReasonConsentRequired || len(gateway.commands) != 0 {
+				t.Fatalf("plan = %+v commands=%d err=%v", paused, len(gateway.commands), err)
+			}
+			step := paused.Steps[0]
+			identity, err := service.ExecutionGrantIdentity(ctx, "owner", plan.ID, string(step.PreparedInputID), step.PlanStepID)
+			if err != nil || identity.BudgetEligible != testCase.eligible {
+				t.Fatalf("grant identity = %+v err=%v", identity, err)
+			}
+		})
+	}
+}

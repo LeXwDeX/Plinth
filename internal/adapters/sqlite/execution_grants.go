@@ -196,24 +196,15 @@ func (r *Repository) preparePending(ctx context.Context, identity executiongrant
 		return executiongrant.Grant{}, err
 	}
 	if err == nil {
-		if old.Source != source || old.TriggerTurnID != triggerTurnID {
+		// Budget eligibility belongs to the operation like its source and
+		// trigger turn: who started it decides whether a production plan may
+		// approve it. A replay or re-request that would change it is an
+		// identity conflict, never a silent flip of a grant's budget standing.
+		if old.Source != source || old.TriggerTurnID != triggerTurnID || old.BudgetEligible != budgetEligible {
 			return executiongrant.Grant{}, executiongrant.ErrConflict
 		}
 		if sameGrantIdentity(old.Identity, identity) {
 			if old.Status != executiongrant.Denied {
-				// A pending grant issued before budget eligibility existed can
-				// still be marked eligible on the same operation; this changes
-				// no identity and no frozen input.
-				if old.Status == executiongrant.Pending && old.BudgetEligible != budgetEligible {
-					if _, err := conn.ExecContext(ctx, `UPDATE execution_grants SET budget_eligible=?
- WHERE request_id=? AND owner_id=? AND status='pending'`, boolInt(budgetEligible), old.RequestID, old.OwnerID); err != nil {
-						return executiongrant.Grant{}, err
-					}
-					old, err = grantByRequest(ctx, conn, old.OwnerID, old.RequestID)
-					if err != nil {
-						return executiongrant.Grant{}, err
-					}
-				}
 				if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 					return executiongrant.Grant{}, err
 				}

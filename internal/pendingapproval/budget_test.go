@@ -226,15 +226,10 @@ func TestBudgetApprovedChatSubmitFailureReleasesTheReservation(t *testing.T) {
 	setup := func(t *testing.T) (*world, string) {
 		t.Helper()
 		w := openWorld(t, filepath.Join(t.TempDir(), "a.db"), time.Hour)
-		operation, grant := w.pending("call-budget-submit")
-		if _, err := w.grants.Prepare(ctx, executiongrant.PrepareCommand{
-			Principal: executiongrant.Principal{OwnerID: "owner-a", ActorID: "agent:" + operation.AssistantMessageID, Source: executiongrant.AgentPending},
-			SessionID: operation.SessionID, OfferingID: string(operation.OfferingID), OfferingRevision: operation.OfferingRevision,
-			PreparedInputID: string(operation.PreparedInputID), PreparedInputHash: operation.PreparedInputHash,
-			IdempotencyKey: operation.IdempotencyKey, OperationID: operation.OperationID,
-			TriggerTurnID: operation.AssistantMessageID, Harness: operation.Harness, BudgetEligible: true,
-		}); err != nil {
-			t.Fatalf("marking the step budget-eligible: %v", err)
+		w.budgetEligible = true
+		_, grant := w.pending("call-budget-submit")
+		if !grant.BudgetEligible {
+			t.Fatalf("the Agent step was not issued budget-eligible: %+v", grant)
 		}
 		production := w.productionPlan(t, "budget-submit", 20,
 			budget.PlanStep{Capability: string(generation.TextTo3D), Purpose: "生成模型", EstimatedCredits: 5})

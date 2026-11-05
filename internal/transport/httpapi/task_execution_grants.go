@@ -137,6 +137,11 @@ func (s *Server) requestTaskGrant(writer http.ResponseWriter, request *http.Requ
 	operationID := standaloneOperationID(prepared.ID)
 	planStepID := ""
 	binding := harness.Binding{}
+	// A plan step keeps the eligibility its plan gave it: the person approving
+	// an Agent-created plan's paused step re-prepares that step's own grant,
+	// it does not start a browser step (#120). A standalone step is never
+	// eligible.
+	budgetEligible := false
 	if body.PlanID != "" || body.PlanStepID != "" {
 		if body.PlanID == "" || body.PlanStepID == "" || s.processing == nil {
 			s.writeMessageProblem(writer, http.StatusBadRequest, "invalid_input", "error.invalid_input")
@@ -157,6 +162,7 @@ func (s *Server) requestTaskGrant(writer http.ResponseWriter, request *http.Requ
 		operationID = planIdentity.OperationID
 		planStepID = planIdentity.PlanStepID
 		binding = planIdentity.Harness
+		budgetEligible = planIdentity.BudgetEligible
 	}
 	grant, err := s.executionGrants.Prepare(request.Context(), executiongrant.PrepareCommand{
 		Harness:   binding,
@@ -166,6 +172,7 @@ func (s *Server) requestTaskGrant(writer http.ResponseWriter, request *http.Requ
 		IdempotencyKey: key,
 		OperationID:    operationID,
 		PlanStepID:     planStepID,
+		BudgetEligible: budgetEligible,
 	})
 	if err != nil {
 		s.writeTaskGrantError(writer, err)
