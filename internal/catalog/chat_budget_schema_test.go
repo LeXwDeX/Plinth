@@ -57,15 +57,33 @@ func TestDefaultCatalogDeclaresTheBudgetModeAndItsPlanTool(t *testing.T) {
 	if err := json.Unmarshal(planTool.Parameters, &parameters); err != nil {
 		t.Fatalf("plan tool parameters: %v", err)
 	}
-	for _, name := range []string{"title", "steps", "budget_credits"} {
+	// #120: the budget is one amount per credit unit, never a single total.
+	for _, name := range []string{"title", "steps", "budgets"} {
 		if parameters.Properties[name] == nil {
 			t.Fatalf("plan tool parameter %q is not declared", name)
 		}
 	}
-	for _, name := range []string{"title", "steps", "budget_credits"} {
+	for _, name := range []string{"title", "steps", "budgets"} {
 		if !slicesContain(parameters.Required, name) {
 			t.Fatalf("plan tool parameter %q is not required", name)
 		}
+	}
+	if parameters.Properties["budget_credits"] != nil {
+		t.Fatal("the plan tool still declares a single budget_credits total")
+	}
+	var budgets struct {
+		Items struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+			Required   []string                   `json:"required"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(parameters.Properties["budgets"], &budgets); err != nil ||
+		budgets.Items.Properties["unit"] == nil || budgets.Items.Properties["amount"] == nil ||
+		!slicesContain(budgets.Items.Required, "unit") || !slicesContain(budgets.Items.Required, "amount") {
+		t.Fatalf("plan tool budgets = %s err=%v", parameters.Properties["budgets"], err)
+	}
+	if strings.TrimSpace(budget.LegacyUnitLabel) == "" || strings.TrimSpace(budget.UnitSeparator) == "" {
+		t.Fatalf("budget unit copy = %q / %q", budget.LegacyUnitLabel, budget.UnitSeparator)
 	}
 
 	public := app.Public()
@@ -128,6 +146,12 @@ func TestBudgetModeRequiresItsPlanBoundsAndTexts(t *testing.T) {
 		},
 		"approved message without remaining": func(a *catalog.ApplicationSchema) {
 			a.Chat.ApprovalPolicy.Budget.Messages.Approved = "{title} {limit}"
+		},
+		"no legacy unit label": func(a *catalog.ApplicationSchema) {
+			a.Chat.ApprovalPolicy.Budget.LegacyUnitLabel = " "
+		},
+		"no unit separator": func(a *catalog.ApplicationSchema) {
+			a.Chat.ApprovalPolicy.Budget.UnitSeparator = ""
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

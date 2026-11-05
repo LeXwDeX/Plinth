@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness"
@@ -23,8 +24,8 @@ func (r *hookedGrantRepository) PreparePendingWithBudget(ctx context.Context, id
 }
 
 func (r *hookedGrantRepository) ApproveExecutionGrantWithBudget(ctx context.Context, owner, requestID, budgetID, actor string,
-	credits int) (executiongrant.Grant, error) {
-	return r.Repository.(executiongrant.BudgetGrantStore).ApproveExecutionGrantWithBudget(ctx, owner, requestID, budgetID, actor, credits)
+	amount budget.Amount) (executiongrant.Grant, error) {
+	return r.Repository.(executiongrant.BudgetGrantStore).ApproveExecutionGrantWithBudget(ctx, owner, requestID, budgetID, actor, amount)
 }
 
 // #120 item 9: the processing panel approving a paused step of an

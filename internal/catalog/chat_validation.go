@@ -926,6 +926,11 @@ func validateApprovalBudget(budget ChatApprovalBudgetSchema) error {
 		strings.TrimSpace(budget.NoPlanText) == "" {
 		return errors.New("approval_policy.budget 的上下文文案不能为空")
 	}
+	// #120: amounts are listed per unit; the legacy bucket's name and the
+	// separator between units are product copy, not code.
+	if strings.TrimSpace(budget.LegacyUnitLabel) == "" || strings.TrimSpace(budget.UnitSeparator) == "" {
+		return errors.New("approval_policy.budget 的 legacy_unit_label 与 unit_separator 不能为空")
+	}
 	for _, field := range []string{"{state}", "{limit}", "{spent}", "{reserved}", "{remaining}", "{plan}"} {
 		if !strings.Contains(budget.ContextTemplate, field) {
 			return fmt.Errorf("approval_policy.budget.context_template 缺少占位符 %s", field)

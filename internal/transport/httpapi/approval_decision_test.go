@@ -72,8 +72,8 @@ func TestApprovalDecisionMemberFollowsTheSchema(t *testing.T) {
 	// A production plan on its session budget route.
 	plan, err := w.state.repository.CreateProductionBudget(context.Background(), budget.ProductionBudget{
 		ID: "pb-decision-member", OwnerID: "owner-a", SessionID: w.sessionID,
-		Plan:         budget.Plan{Title: "改名", Steps: []budget.PlanStep{{Capability: "image-to-3d", Purpose: "生成模型", EstimatedCredits: 5}}},
-		LimitCredits: 10, State: budget.StatePending, CreatedAt: time.Now().UTC(),
+		Plan:   budget.Plan{Title: "改名", Steps: []budget.PlanStep{{Capability: "image-to-3d", Purpose: "生成模型", Estimate: budget.Legacy(5)}}},
+		Limits: []budget.Amount{budget.Legacy(10)}, State: budget.StatePending, CreatedAt: time.Now().UTC(),
 		MessageID: "turn-decision-member", CallID: "call-decision-member",
 	})
 	if err != nil {

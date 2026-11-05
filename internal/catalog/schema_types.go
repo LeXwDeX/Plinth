@@ -2965,18 +2965,28 @@ type ChatApprovalPolicySchema struct {
 }
 
 // ChatApprovalBudgetSchema is application.chat.approval_policy.budget. It
-// bounds a production plan the Agent proposes and the total credits a person
-// approves; the server re-estimates every step from the Catalog instead of
+// bounds a production plan the Agent proposes and the credits a person
+// approves per credit unit (#120: units are limited separately and never
+// added); the server re-estimates every step from the Catalog instead of
 // trusting the Agent's numbers.
 type ChatApprovalBudgetSchema struct {
+	// MaxCredits bounds the limit of each unit of a plan.
 	MaxCredits           int `json:"max_credits"`
 	MaxSteps             int `json:"max_steps"`
 	MaxTitleCharacters   int `json:"max_title_characters"`
 	MaxPurposeCharacters int `json:"max_purpose_characters"`
 	// ContextTemplate is appended to the Agent's system context in budget mode.
 	// Fields: {state} (the state's label), {limit}, {spent}, {reserved},
-	// {remaining}, {plan}.
+	// {remaining}, {plan}. The amounts are listed per unit, each with its
+	// label, joined by UnitSeparator.
 	ContextTemplate string `json:"context_template"`
+	// LegacyUnitLabel names the legacy bucket (historical integer credit
+	// estimates) in the Agent context and the session messages; a provider
+	// unit keeps its own label from the Offering's native pricing (#120).
+	LegacyUnitLabel string `json:"legacy_unit_label"`
+	// UnitSeparator joins the amounts of different units, which are listed
+	// side by side and never added.
+	UnitSeparator string `json:"unit_separator"`
 	// NoPlanState and NoPlanText render {state} and {plan} before the session
 	// has a plan at all.
 	NoPlanState string `json:"no_plan_state"`
@@ -2986,7 +2996,7 @@ type ChatApprovalBudgetSchema struct {
 	// internal/budget.
 	States []ChatApprovalBudgetState `json:"states"`
 	// Messages are the session messages posted when a plan card is decided or
-	// expires. Fields: {title}, {limit}, {remaining}.
+	// expires. Fields: {title}, {limit}, {remaining}, each listed per unit.
 	Messages ChatApprovalBudgetMessages `json:"messages"`
 	// ToolMessages are the Agent-facing tool result of propose_production_plan
 	// in each state, so the execution layer keeps no English copy (#103

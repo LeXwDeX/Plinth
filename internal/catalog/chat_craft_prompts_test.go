@@ -156,7 +156,7 @@ func TestApprovalPromptKeepsTheBudgetFieldsAndDropsTheAgentScope(t *testing.T) {
 	}
 	for _, want := range []string{
 		"propose_production_plan", "title", "steps", "capability", "purpose", "model",
-		"estimated_credits", "budget_credits", "correction_capabilities", "重新估算",
+		"estimated_credits", "budgets", "legacy.credits", "correction_capabilities", "重新估算", "从不相加",
 	} {
 		if !strings.Contains(budget, want) {
 			t.Errorf("budget description omits %q", want)

@@ -21,12 +21,12 @@ func budgetTestPlan(t *testing.T, r *Repository, id string, limit int, capabilit
 	ctx := context.Background()
 	steps := make([]budget.PlanStep, 0, len(capabilities))
 	for _, capability := range capabilities {
-		steps = append(steps, budget.PlanStep{Capability: capability, Purpose: capability, EstimatedCredits: 7})
+		steps = append(steps, budget.PlanStep{Capability: capability, Purpose: capability, Estimate: budget.Legacy(7)})
 	}
 	now := time.Now().UTC()
 	stored, err := r.CreateProductionBudget(ctx, budget.ProductionBudget{
 		ID: id, OwnerID: "owner-a", SessionID: "session-a",
-		Plan: budget.Plan{Title: "制作计划", Steps: steps}, LimitCredits: limit,
+		Plan: budget.Plan{Title: "制作计划", Steps: steps}, Limits: []budget.Amount{budget.Legacy(limit)},
 		State: budget.StatePending, CreatedAt: now,
 	})
 	if err != nil {
@@ -98,6 +98,21 @@ func finishBudgetTask(t *testing.T, r *Repository, taskID string, state generati
 	}
 }
 
+// credits is a whole number of credits in millionths, the unit of a budget
+// amount.
+func credits(whole int) int64 { return int64(whole) * 1000000 }
+
+// legacyFigure is the summary's legacy bucket: the integer test plans budget
+// historical credits only.
+func legacyFigure(t *testing.T, summary budget.Summary) budget.UnitBudget {
+	t.Helper()
+	unit, found := summary.Unit(budget.LegacyUnit)
+	if !found {
+		t.Fatalf("summary without a legacy bucket: %+v", summary)
+	}
+	return unit
+}
+
 func reservationState(t *testing.T, r *Repository, requestID string) string {
 	t.Helper()
 	var state string
@@ -121,8 +136,8 @@ func TestProductionBudgetNoticesAwaitAndAreMarkedOnce(t *testing.T) {
 	}
 	denied, err := r.CreateProductionBudget(ctx, budget.ProductionBudget{
 		ID: "pb-denied-notice", OwnerID: "owner-a", SessionID: "session-a",
-		Plan:         budget.Plan{Title: "人工拒绝", Steps: []budget.PlanStep{{Capability: "text-to-image", EstimatedCredits: 1}}},
-		LimitCredits: 10, State: budget.StatePending, CreatedAt: now,
+		Plan:   budget.Plan{Title: "人工拒绝", Steps: []budget.PlanStep{{Capability: "text-to-image", Estimate: budget.Legacy(1)}}},
+		Limits: []budget.Amount{budget.Legacy(10)}, State: budget.StatePending, CreatedAt: now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -143,8 +158,8 @@ func TestProductionBudgetNoticesAwaitAndAreMarkedOnce(t *testing.T) {
 
 	pending, err := r.CreateProductionBudget(ctx, budget.ProductionBudget{
 		ID: "pb-expired-notice", OwnerID: "owner-a", SessionID: "session-a",
-		Plan:         budget.Plan{Title: "过期", Steps: []budget.PlanStep{{Capability: "text-to-image", EstimatedCredits: 1}}},
-		LimitCredits: 10, State: budget.StatePending, CreatedAt: now,
+		Plan:   budget.Plan{Title: "过期", Steps: []budget.PlanStep{{Capability: "text-to-image", Estimate: budget.Legacy(1)}}},
+		Limits: []budget.Amount{budget.Legacy(10)}, State: budget.StatePending, CreatedAt: now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -180,7 +195,7 @@ func TestProductionBudgetReservationFollowsTheTaskChargeFact(t *testing.T) {
 			plan := budgetTestPlan(t, r, "pb-"+testCase.name, 20, "text-to-image")
 			i, g := prepareBudgetGrant(t, r, "turn-a", testCase.name, "text-to-image", 7)
 			if _, err := r.ApproveExecutionGrantWithBudget(ctx, i.OwnerID, g.RequestID, plan.ID,
-				executiongrant.BudgetActorPrefix+plan.ID, 7); err != nil {
+				executiongrant.BudgetActorPrefix+plan.ID, budget.Legacy(7)); err != nil {
 				t.Fatal(err)
 			}
 			bindBudgetTask(t, r, i, g.RequestID, "task-"+testCase.name)
@@ -202,8 +217,8 @@ func TestProductionBudgetReservationFollowsTheTaskChargeFact(t *testing.T) {
 			if err != nil || !found {
 				t.Fatalf("summary: %+v found=%v err=%v", summary, found, err)
 			}
-			if summary.SpentCredits != testCase.wantSpent || summary.ReservedCredits != 0 ||
-				summary.RemainingCredits != testCase.wantRemain || summary.State != budget.StateActive {
+			if legacyFigure(t, summary).Spent != credits(testCase.wantSpent) || legacyFigure(t, summary).Reserved != credits(0) ||
+				legacyFigure(t, summary).Remaining != credits(testCase.wantRemain) || summary.State != budget.StateActive {
 				t.Fatalf("summary after %s = %+v", testCase.name, summary)
 			}
 		})
@@ -239,7 +254,7 @@ func TestProductionBudgetApprovesAnAgentProcessingStepWithoutAChatTurn(t *testin
 		t.Fatal(err)
 	}
 	if _, err := r.ApproveExecutionGrantWithBudget(ctx, i.OwnerID, g.RequestID, plan.ID,
-		executiongrant.BudgetActorPrefix+plan.ID, 5); err != nil {
+		executiongrant.BudgetActorPrefix+plan.ID, budget.Legacy(5)); err != nil {
 		t.Fatalf("agent processing step: %v", err)
 	}
 	stored, err := r.GetExecutionGrant(ctx, i.OwnerID, g.RequestID)
@@ -247,7 +262,7 @@ func TestProductionBudgetApprovesAnAgentProcessingStepWithoutAChatTurn(t *testin
 		t.Fatalf("processing grant = %+v err=%v", stored, err)
 	}
 	summary, found, err := r.ProductionBudgetSummary(ctx, i.OwnerID, i.SessionID)
-	if err != nil || !found || summary.ReservedCredits != 5 || summary.RemainingCredits != 15 {
+	if err != nil || !found || legacyFigure(t, summary).Reserved != credits(5) || legacyFigure(t, summary).Remaining != credits(15) {
 		t.Fatalf("budget summary = %+v found=%v err=%v", summary, found, err)
 	}
 
@@ -275,7 +290,7 @@ func TestProductionBudgetApprovesAnAgentProcessingStepWithoutAChatTurn(t *testin
 		t.Fatalf("browser processing grant = %+v err=%v", storedBrowser, err)
 	}
 	if _, err := r.ApproveExecutionGrantWithBudget(ctx, i.OwnerID, browser.RequestID, plan.ID,
-		executiongrant.BudgetActorPrefix+plan.ID, 1); !errors.Is(err, executiongrant.ErrConflict) {
+		executiongrant.BudgetActorPrefix+plan.ID, budget.Legacy(1)); !errors.Is(err, executiongrant.ErrConflict) {
 		t.Fatalf("ineligible browser grant: %v", err)
 	}
 }
@@ -287,7 +302,7 @@ func TestProductionBudgetExhaustsOnceAndRefusesFurtherSteps(t *testing.T) {
 	plan := budgetTestPlan(t, r, "pb-exhaust", 7, "text-to-image")
 	i, g := prepareBudgetGrant(t, r, "turn-a", "spend", "text-to-image", 7)
 	if _, err := r.ApproveExecutionGrantWithBudget(ctx, i.OwnerID, g.RequestID, plan.ID,
-		executiongrant.BudgetActorPrefix+plan.ID, 7); err != nil {
+		executiongrant.BudgetActorPrefix+plan.ID, budget.Legacy(7)); err != nil {
 		t.Fatal(err)
 	}
 	bindBudgetTask(t, r, i, g.RequestID, "task-spend")
@@ -301,13 +316,13 @@ func TestProductionBudgetExhaustsOnceAndRefusesFurtherSteps(t *testing.T) {
 	}
 	summary, found, err := r.ProductionBudgetSummary(ctx, "owner-a", "session-a")
 	if err != nil || !found || summary.State != budget.StateExhausted ||
-		summary.SpentCredits != 7 || summary.RemainingCredits != 0 {
+		legacyFigure(t, summary).Spent != credits(7) || legacyFigure(t, summary).Remaining != credits(0) {
 		t.Fatalf("exhausted summary = %+v found=%v err=%v", summary, found, err)
 	}
 
 	_, next := prepareBudgetGrant(t, r, "turn-a", "after-exhaust", "text-to-image", 1)
 	if _, err := r.ApproveExecutionGrantWithBudget(ctx, "owner-a", next.RequestID, plan.ID,
-		executiongrant.BudgetActorPrefix+plan.ID, 1); !errors.Is(err, budget.ErrInactive) {
+		executiongrant.BudgetActorPrefix+plan.ID, budget.Legacy(1)); !errors.Is(err, budget.ErrInactive) {
 		t.Fatalf("step after exhaustion: %v", err)
 	}
 	var reservations int
@@ -324,8 +339,8 @@ func TestProductionBudgetDenialAndExpiryApproveNothing(t *testing.T) {
 	now := time.Now().UTC()
 	denied, err := r.CreateProductionBudget(ctx, budget.ProductionBudget{
 		ID: "pb-denied", OwnerID: "owner-a", SessionID: "session-a",
-		Plan:         budget.Plan{Title: "不需要", Steps: []budget.PlanStep{{Capability: "text-to-image"}}},
-		LimitCredits: 10, State: budget.StatePending, CreatedAt: now,
+		Plan:   budget.Plan{Title: "不需要", Steps: []budget.PlanStep{{Capability: "text-to-image"}}},
+		Limits: []budget.Amount{budget.Legacy(10)}, State: budget.StatePending, CreatedAt: now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -341,8 +356,8 @@ func TestProductionBudgetDenialAndExpiryApproveNothing(t *testing.T) {
 	created := now.Add(-2 * time.Hour)
 	expiring, err := r.CreateProductionBudget(ctx, budget.ProductionBudget{
 		ID: "pb-expired", OwnerID: "owner-a", SessionID: "session-a",
-		Plan:         budget.Plan{Title: "过期", Steps: []budget.PlanStep{{Capability: "text-to-image"}}},
-		LimitCredits: 10, State: budget.StatePending, CreatedAt: created,
+		Plan:   budget.Plan{Title: "过期", Steps: []budget.PlanStep{{Capability: "text-to-image"}}},
+		Limits: []budget.Amount{budget.Legacy(10)}, State: budget.StatePending, CreatedAt: created,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -374,7 +389,7 @@ func TestProductionBudgetNewPlanClosesTheOldOneAndReleasesUnclaimableReservation
 	old := budgetTestPlan(t, r, "pb-old", 20, "text-to-image")
 	i, g := prepareBudgetGrant(t, r, "turn-a", "old", "text-to-image", 7)
 	if _, err := r.ApproveExecutionGrantWithBudget(ctx, i.OwnerID, g.RequestID, old.ID,
-		executiongrant.BudgetActorPrefix+old.ID, 7); err != nil {
+		executiongrant.BudgetActorPrefix+old.ID, budget.Legacy(7)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.db.Exec(`UPDATE go_chat_turns SET stop_requested=1 WHERE assistant_message_id='turn-a'`); err != nil {
@@ -382,8 +397,8 @@ func TestProductionBudgetNewPlanClosesTheOldOneAndReleasesUnclaimableReservation
 	}
 	pending, err := r.CreateProductionBudget(ctx, budget.ProductionBudget{
 		ID: "pb-new", OwnerID: "owner-a", SessionID: "session-a",
-		Plan:         budget.Plan{Title: "新计划", Steps: []budget.PlanStep{{Capability: "text-to-image"}}},
-		LimitCredits: 30, State: budget.StatePending, CreatedAt: time.Now().UTC(),
+		Plan:   budget.Plan{Title: "新计划", Steps: []budget.PlanStep{{Capability: "text-to-image"}}},
+		Limits: []budget.Amount{budget.Legacy(30)}, State: budget.StatePending, CreatedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -400,7 +415,7 @@ func TestProductionBudgetNewPlanClosesTheOldOneAndReleasesUnclaimableReservation
 	}
 	summary, found, err := r.BudgetSummaryForGrant(ctx, "owner-a", g.RequestID)
 	if err != nil || !found || summary.State != budget.StateClosed ||
-		summary.ReservedCredits != 0 || summary.SpentCredits != 0 {
+		legacyFigure(t, summary).Reserved != credits(0) || legacyFigure(t, summary).Spent != credits(0) {
 		t.Fatalf("old plan summary = %+v found=%v err=%v", summary, found, err)
 	}
 	current, found, err := r.CurrentProductionBudget(ctx, "owner-a", "session-a")
@@ -433,7 +448,7 @@ func TestProductionBudgetConcurrentApprovalsCannotBothTakeTheLastCredits(t *test
 			defer wg.Done()
 			<-start
 			_, err := r.ApproveExecutionGrantWithBudget(ctx, "owner-a", requestID, plan.ID,
-				executiongrant.BudgetActorPrefix+plan.ID, 7)
+				executiongrant.BudgetActorPrefix+plan.ID, budget.Legacy(7))
 			results <- outcome{request: requestID, err: err}
 		}(request)
 	}
@@ -457,9 +472,9 @@ func TestProductionBudgetConcurrentApprovalsCannotBothTakeTheLastCredits(t *test
 		t.Fatalf("winners=%v over_budget=%d", won, over)
 	}
 	var reservations int
-	var reservedCredits int
-	if err := r.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(credits), 0) FROM budget_reservations WHERE state = 'reserved'`).
-		Scan(&reservations, &reservedCredits); err != nil || reservations != 1 || reservedCredits != 7 {
+	var reservedCredits int64
+	if err := r.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(amount_micros), 0) FROM budget_reservations WHERE state = 'reserved'`).
+		Scan(&reservations, &reservedCredits); err != nil || reservations != 1 || reservedCredits != credits(7) {
 		t.Fatalf("reservations = %d credits=%d err=%v", reservations, reservedCredits, err)
 	}
 	approved, pending := 0, 0
@@ -478,7 +493,7 @@ func TestProductionBudgetConcurrentApprovalsCannotBothTakeTheLastCredits(t *test
 		t.Fatalf("grants approved=%d pending=%d", approved, pending)
 	}
 	summary, found, err := r.ProductionBudgetSummary(ctx, "owner-a", "session-a")
-	if err != nil || !found || summary.RemainingCredits != 3 || summary.ReservedCredits != 7 {
+	if err != nil || !found || legacyFigure(t, summary).Remaining != credits(3) || legacyFigure(t, summary).Reserved != credits(7) {
 		t.Fatalf("summary = %+v found=%v err=%v", summary, found, err)
 	}
 }
@@ -492,11 +507,11 @@ func TestProductionBudgetApprovalRefusalsLeaveThePlanUntouched(t *testing.T) {
 	plan := budgetTestPlan(t, r, "pb-refuse", 10, "text-to-image")
 	_, tooBig := prepareBudgetGrant(t, r, "turn-a", "big", "text-to-image", 11)
 	if _, err := r.ApproveExecutionGrantWithBudget(ctx, "owner-a", tooBig.RequestID, plan.ID,
-		executiongrant.BudgetActorPrefix+plan.ID, 11); !errors.Is(err, budget.ErrOverLimit) {
+		executiongrant.BudgetActorPrefix+plan.ID, budget.Legacy(11)); !errors.Is(err, budget.ErrOverLimit) {
 		t.Fatalf("over-limit step: %v", err)
 	}
 	if _, err := r.ApproveExecutionGrantWithBudget(ctx, "owner-b", tooBig.RequestID, plan.ID,
-		executiongrant.BudgetActorPrefix+plan.ID, 1); err == nil {
+		executiongrant.BudgetActorPrefix+plan.ID, budget.Legacy(1)); err == nil {
 		t.Fatal("another owner approved the grant")
 	}
 	stored, err := r.GetExecutionGrant(ctx, "owner-a", tooBig.RequestID)
@@ -525,9 +540,9 @@ func budgetPlanForSession(t *testing.T, r *Repository, id, sessionID string, lim
 	stored, err := r.CreateProductionBudget(ctx, budget.ProductionBudget{
 		ID: id, OwnerID: "owner-a", SessionID: sessionID,
 		Plan: budget.Plan{Title: "批量计划", Steps: []budget.PlanStep{
-			{Capability: "text-to-image", Purpose: "text-to-image", EstimatedCredits: 7},
+			{Capability: "text-to-image", Purpose: "text-to-image", Estimate: budget.Legacy(7)},
 		}},
-		LimitCredits: limit, State: budget.StatePending, CreatedAt: now,
+		Limits: []budget.Amount{budget.Legacy(limit)}, State: budget.StatePending, CreatedAt: now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -539,11 +554,11 @@ func budgetPlanForSession(t *testing.T, r *Repository, id, sessionID string, lim
 	return active
 }
 
-func insertBudgetReservation(t *testing.T, r *Repository, requestID, budgetID string, credits int, state string, createdAt time.Time) {
+func insertBudgetReservation(t *testing.T, r *Repository, requestID, budgetID string, amount int, state string, createdAt time.Time) {
 	t.Helper()
 	if _, err := r.db.Exec(`INSERT INTO budget_reservations
- (grant_request_id, budget_id, task_id, credits, state, created_at)
- VALUES (?, ?, '', ?, ?, ?)`, requestID, budgetID, credits, state, createdAt.Format(time.RFC3339Nano)); err != nil {
+ (grant_request_id, budget_id, task_id, unit, amount_micros, state, created_at)
+ VALUES (?, ?, '', 'legacy.credits', ?, ?, ?)`, requestID, budgetID, credits(amount), state, createdAt.Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -582,12 +597,12 @@ func TestProductionBudgetSummariesMatchPerSessionReads(t *testing.T) {
 			t.Fatalf("batch %s = %+v, per-session = %+v", sessionID, batch, single)
 		}
 	}
-	if summary := summaries["session-a"]; summary.ID != planA.ID || summary.SpentCredits != 7 ||
-		summary.ReservedCredits != 5 || summary.RemainingCredits != 8 || summary.State != budget.StateActive {
+	if summary := summaries["session-a"]; summary.ID != planA.ID || legacyFigure(t, summary).Spent != credits(7) ||
+		legacyFigure(t, summary).Reserved != credits(5) || legacyFigure(t, summary).Remaining != credits(8) || summary.State != budget.StateActive {
 		t.Fatalf("session-a summary = %+v", summary)
 	}
-	if summary := summaries["session-b"]; summary.ID != planB.ID || summary.SpentCredits != 4 ||
-		summary.ReservedCredits != 0 || summary.RemainingCredits != 26 {
+	if summary := summaries["session-b"]; summary.ID != planB.ID || legacyFigure(t, summary).Spent != credits(4) ||
+		legacyFigure(t, summary).Reserved != credits(0) || legacyFigure(t, summary).Remaining != credits(26) {
 		t.Fatalf("session-b summary = %+v", summary)
 	}
 
@@ -625,16 +640,16 @@ func TestProductionBudgetSummariesBatchBeyondTheParameterLimit(t *testing.T) {
 		}
 		budgetID := "pb-" + sessionID
 		if _, err := tx.Exec(`INSERT INTO production_budgets
- (id, owner_id, session_id, plan_json, limit_credits, state, created_at, decided_by)
- VALUES (?, 'owner-a', ?, ?, 10, 'active', ?, 'human-a')`,
+ (id, owner_id, session_id, plan_json, limits_json, state, created_at, decided_by)
+ VALUES (?, 'owner-a', ?, ?, '[{"unit":"legacy.credits","unit_label":"legacy.credits","amount":"10"}]', 'active', ?, 'human-a')`,
 			budgetID, sessionID, planJSON, stamp); err != nil {
 			tx.Rollback()
 			t.Fatal(err)
 		}
 		if index%2 == 0 {
 			if _, err := tx.Exec(`INSERT INTO budget_reservations
- (grant_request_id, budget_id, task_id, credits, state, created_at)
- VALUES (?, ?, '', 2, 'charged', ?)`, "reservation-"+sessionID, budgetID, stamp); err != nil {
+ (grant_request_id, budget_id, task_id, unit, amount_micros, state, created_at)
+ VALUES (?, ?, '', 'legacy.credits', 2000000, 'charged', ?)`, "reservation-"+sessionID, budgetID, stamp); err != nil {
 				tx.Rollback()
 				t.Fatal(err)
 			}
@@ -654,7 +669,7 @@ func TestProductionBudgetSummariesBatchBeyondTheParameterLimit(t *testing.T) {
 	// Even indexes reserved and spent 2 credits; odd indexes have no charges.
 	for index, wantSpent := range map[int]int{0: 2, 1: 0, sessions - 1: 2} {
 		summary, found := summaries["batch-session-"+strconv.Itoa(index)]
-		if !found || summary.SpentCredits != wantSpent || summary.LimitCredits != 10 {
+		if !found || legacyFigure(t, summary).Spent != credits(wantSpent) || legacyFigure(t, summary).Limit != credits(10) {
 			t.Fatalf("batch-session-%d = %+v found=%v, want spent %d", index, summary, found, wantSpent)
 		}
 	}

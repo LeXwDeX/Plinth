@@ -1952,7 +1952,7 @@ export function ChatColumn() {
                   <PlanCard
                     key={item.requestId}
                     plan={item.plan}
-                    budgetCredits={item.budgetCredits}
+                    budgets={item.budgets}
                     tasks={sessionTasks}
                     busy={decisionBusy.has(item.requestId)}
                     error={decisionError[item.requestId] ?? null}
@@ -1968,7 +1968,6 @@ export function ChatColumn() {
                 ) : planCards.length === 0 && budgetShown && sessionBudget ? (
                   <PlanCard
                     plan={sessionBudget.plan}
-                    budgetCredits={sessionBudget.limitCredits}
                     tasks={sessionTasks}
                     progress={sessionBudget}
                   />

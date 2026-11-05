@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -15,13 +16,27 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/pendingapproval"
 )
 
+// credits is a whole number of credits in millionths.
+func credits(whole int) int64 { return int64(whole) * 1000000 }
+
+// legacyFigure is the summary's legacy bucket: these plans budget historical
+// credits only.
+func legacyFigure(t *testing.T, summary budget.Summary) budget.UnitBudget {
+	t.Helper()
+	unit, found := summary.Unit(budget.LegacyUnit)
+	if !found {
+		t.Fatalf("summary without a legacy bucket: %+v", summary)
+	}
+	return unit
+}
+
 // productionPlan stores one pending plan the Agent's proposal tool would have
 // opened, with the message and call identity the card is anchored to.
 func (w *world) productionPlan(t *testing.T, key string, limit int, steps ...budget.PlanStep) budget.ProductionBudget {
 	t.Helper()
 	w.ensureSession()
 	production, err := w.grants.CreateProductionPlan(context.Background(), "owner-a", "session-a",
-		"plan-"+key, "turn-"+key, "call-"+key, budget.Plan{Title: "骑士", Steps: steps}, limit)
+		"plan-"+key, "turn-"+key, "call-"+key, budget.Plan{Title: "骑士", Steps: steps}, []budget.Amount{budget.Legacy(limit)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,8 +48,8 @@ func (w *world) productionPlan(t *testing.T, key string, limit int, steps ...bud
 func TestPendingListCarriesTheProductionPlanCard(t *testing.T) {
 	w := openWorld(t, filepath.Join(t.TempDir(), "a.db"), time.Hour)
 	plan := w.productionPlan(t, "one", 40,
-		budget.PlanStep{Capability: "image-to-3d", Purpose: "生成模型", EstimatedCredits: 25},
-		budget.PlanStep{Capability: "retexture", Purpose: "修贴图", EstimatedCredits: 5})
+		budget.PlanStep{Capability: "image-to-3d", Purpose: "生成模型", Estimate: budget.Legacy(25)},
+		budget.PlanStep{Capability: "retexture", Purpose: "修贴图", Estimate: budget.Legacy(5)})
 
 	items, err := w.service.List(context.Background(), "owner-a", "session-a")
 	if err != nil || len(items) != 1 {
@@ -43,12 +58,13 @@ func TestPendingListCarriesTheProductionPlanCard(t *testing.T) {
 	item := items[0]
 	if item.Kind != pendingapproval.ItemKindPlan || item.RequestID != plan.ID ||
 		item.Status != pendingapproval.StatusPending || item.Tool != "propose_production_plan" ||
-		item.EstimatedCredits != 30 || item.BudgetCredits != 40 ||
+		!reflect.DeepEqual(item.EstimatedTotals, []budget.Amount{budget.Legacy(30)}) ||
+		!reflect.DeepEqual(item.Budgets, []budget.Amount{budget.Legacy(40)}) || item.EstimatedCredits != 0 ||
 		item.MessageID != "turn-one" || len(item.Inputs) != 0 {
 		t.Fatalf("plan card = %+v", item)
 	}
 	if item.Plan == nil || item.Plan.Title != "骑士" || len(item.Plan.Steps) != 2 ||
-		item.Plan.Steps[0].Capability != "image-to-3d" || item.Plan.Steps[0].EstimatedCredits != 25 {
+		item.Plan.Steps[0].Capability != "image-to-3d" || item.Plan.Steps[0].Estimate != budget.Legacy(25) {
 		t.Fatalf("plan card data = %+v", item.Plan)
 	}
 	if got := item.ExpiresAt.Sub(item.CreatedAt); got != time.Hour {
@@ -68,7 +84,7 @@ func TestDecidingAProductionPlanCard(t *testing.T) {
 	t.Run("approve", func(t *testing.T) {
 		w := openWorld(t, filepath.Join(t.TempDir(), "a.db"), time.Hour)
 		plan := w.productionPlan(t, "approve", 40,
-			budget.PlanStep{Capability: "image-to-3d", Purpose: "生成模型", EstimatedCredits: 25})
+			budget.PlanStep{Capability: "image-to-3d", Purpose: "生成模型", Estimate: budget.Legacy(25)})
 
 		outcome, err := w.service.DecideBudget(context.Background(), w.operator, "session-a", plan.ID, executiongrant.Approve)
 		if err != nil || outcome.BudgetID != plan.ID || outcome.State != budget.StateActive ||
@@ -88,7 +104,7 @@ func TestDecidingAProductionPlanCard(t *testing.T) {
 			t.Fatalf("plan still listed = %+v err=%v", items, err)
 		}
 		summary, found, err := w.grants.BudgetSummary(context.Background(), "owner-a", "session-a")
-		if err != nil || !found || summary.State != budget.StateActive || summary.RemainingCredits != 40 {
+		if err != nil || !found || summary.State != budget.StateActive || legacyFigure(t, summary).Remaining != credits(40) {
 			t.Fatalf("active summary = %+v found=%v err=%v", summary, found, err)
 		}
 		if _, err := w.service.DecideBudget(context.Background(), w.operator, "session-a", plan.ID, executiongrant.Approve); !errors.Is(err, executiongrant.ErrBudgetState) {
@@ -99,7 +115,7 @@ func TestDecidingAProductionPlanCard(t *testing.T) {
 	t.Run("deny", func(t *testing.T) {
 		w := openWorld(t, filepath.Join(t.TempDir(), "a.db"), time.Hour)
 		plan := w.productionPlan(t, "deny", 40,
-			budget.PlanStep{Capability: "image-to-3d", Purpose: "生成模型", EstimatedCredits: 25})
+			budget.PlanStep{Capability: "image-to-3d", Purpose: "生成模型", Estimate: budget.Legacy(25)})
 		outcome, err := w.service.DecideBudget(context.Background(), w.operator, "session-a", plan.ID, executiongrant.Deny)
 		if err != nil || outcome.State != budget.StateDenied || outcome.MessageID != pendingapproval.BudgetMessageID(plan.ID) {
 			t.Fatalf("deny = %+v err=%v", outcome, err)
@@ -119,7 +135,7 @@ func TestDecidingAProductionPlanCard(t *testing.T) {
 func TestProductionPlanCardExpires(t *testing.T) {
 	w := openWorld(t, filepath.Join(t.TempDir(), "a.db"), time.Hour)
 	plan := w.productionPlan(t, "expire", 40,
-		budget.PlanStep{Capability: "image-to-3d", Purpose: "生成模型", EstimatedCredits: 25})
+		budget.PlanStep{Capability: "image-to-3d", Purpose: "生成模型", Estimate: budget.Legacy(25)})
 	w.grants.Clock = func() time.Time { return time.Now().UTC().Add(2 * time.Hour) }
 
 	if _, err := w.service.DecideBudget(context.Background(), w.operator, "session-a", plan.ID, executiongrant.Approve); !errors.Is(err, executiongrant.ErrExpired) {
@@ -161,12 +177,12 @@ func TestANewerPlanClosesTheFormerOne(t *testing.T) {
 	ctx := context.Background()
 	w := openWorld(t, filepath.Join(t.TempDir(), "a.db"), time.Hour)
 	former := w.productionPlan(t, "former", 20,
-		budget.PlanStep{Capability: "image-to-3d", Purpose: "生成模型", EstimatedCredits: 5})
+		budget.PlanStep{Capability: "image-to-3d", Purpose: "生成模型", Estimate: budget.Legacy(5)})
 	if _, err := w.service.DecideBudget(ctx, w.operator, "session-a", former.ID, executiongrant.Approve); err != nil {
 		t.Fatal(err)
 	}
 	newer := w.productionPlan(t, "newer", 50,
-		budget.PlanStep{Capability: "image-to-3d", Purpose: "重新生成", EstimatedCredits: 15})
+		budget.PlanStep{Capability: "image-to-3d", Purpose: "重新生成", Estimate: budget.Legacy(15)})
 	if summary, found, err := w.grants.BudgetSummary(ctx, "owner-a", "session-a"); err != nil || !found || summary.ID != former.ID {
 		t.Fatalf("former plan before the decision = %+v found=%v err=%v", summary, found, err)
 	}
@@ -179,7 +195,7 @@ func TestANewerPlanClosesTheFormerOne(t *testing.T) {
 		t.Fatalf("former plan = %+v err=%v", closed, err)
 	}
 	summary, found, err := w.grants.BudgetSummary(ctx, "owner-a", "session-a")
-	if err != nil || !found || summary.ID != newer.ID || summary.LimitCredits != 50 || summary.RemainingCredits != 50 {
+	if err != nil || !found || summary.ID != newer.ID || legacyFigure(t, summary).Limit != credits(50) || legacyFigure(t, summary).Remaining != credits(50) {
 		t.Fatalf("current plan = %+v found=%v err=%v", summary, found, err)
 	}
 }
@@ -190,7 +206,7 @@ func TestProductionPlanDecisionIsScopedToTheOwnersSession(t *testing.T) {
 	ctx := context.Background()
 	w := openWorld(t, filepath.Join(t.TempDir(), "a.db"), time.Hour)
 	plan := w.productionPlan(t, "scope", 40,
-		budget.PlanStep{Capability: "image-to-3d", Purpose: "生成模型", EstimatedCredits: 5})
+		budget.PlanStep{Capability: "image-to-3d", Purpose: "生成模型", Estimate: budget.Legacy(5)})
 
 	foreignOwner := w.operator
 	foreignOwner.OwnerID, foreignOwner.ActorID = "owner-b", "owner-b"
@@ -232,16 +248,16 @@ func TestBudgetApprovedChatSubmitFailureReleasesTheReservation(t *testing.T) {
 			t.Fatalf("the Agent step was not issued budget-eligible: %+v", grant)
 		}
 		production := w.productionPlan(t, "budget-submit", 20,
-			budget.PlanStep{Capability: string(generation.TextTo3D), Purpose: "生成模型", EstimatedCredits: 5})
+			budget.PlanStep{Capability: string(generation.TextTo3D), Purpose: "生成模型", Estimate: budget.Legacy(5)})
 		if _, err := w.service.DecideBudget(ctx, w.operator, "session-a", production.ID, executiongrant.Approve); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := w.repo.ApproveExecutionGrantWithBudget(ctx, "owner-a", grant.RequestID,
-			production.ID, executiongrant.BudgetActorPrefix+production.ID, 5); err != nil {
+			production.ID, executiongrant.BudgetActorPrefix+production.ID, budget.Legacy(5)); err != nil {
 			t.Fatal(err)
 		}
 		summary, found, err := w.grants.BudgetSummary(ctx, "owner-a", "session-a")
-		if err != nil || !found || summary.ReservedCredits != 5 || summary.RemainingCredits != 15 {
+		if err != nil || !found || legacyFigure(t, summary).Reserved != credits(5) || legacyFigure(t, summary).Remaining != credits(15) {
 			t.Fatalf("approved reservation = %+v found=%v err=%v", summary, found, err)
 		}
 		return w, grant.RequestID
@@ -257,7 +273,7 @@ func TestBudgetApprovedChatSubmitFailureReleasesTheReservation(t *testing.T) {
 			t.Fatalf("submit failure message = %+v ok=%v", message, ok)
 		}
 		summary, found, err := w.grants.BudgetSummary(ctx, "owner-a", "session-a")
-		if err != nil || !found || summary.ReservedCredits != 0 || summary.RemainingCredits != 20 || summary.State != budget.StateActive {
+		if err != nil || !found || legacyFigure(t, summary).Reserved != credits(0) || legacyFigure(t, summary).Remaining != credits(20) || summary.State != budget.StateActive {
 			t.Fatalf("budget after a permanent rejection = %+v found=%v err=%v", summary, found, err)
 		}
 		stored, err := w.repo.GetExecutionGrant(ctx, "owner-a", requestID)
@@ -273,7 +289,7 @@ func TestBudgetApprovedChatSubmitFailureReleasesTheReservation(t *testing.T) {
 			t.Fatal("a transient submit failure must surface to the sweep")
 		}
 		summary, found, err := w.grants.BudgetSummary(ctx, "owner-a", "session-a")
-		if err != nil || !found || summary.ReservedCredits != 5 || summary.RemainingCredits != 15 {
+		if err != nil || !found || legacyFigure(t, summary).Reserved != credits(5) || legacyFigure(t, summary).Remaining != credits(15) {
 			t.Fatalf("a retry released the reservation = %+v found=%v err=%v", summary, found, err)
 		}
 		stored, err := w.repo.GetExecutionGrant(ctx, "owner-a", requestID)
@@ -310,7 +326,7 @@ func TestBudgetNoticePostFailureIsRetriedByTheNextSweep(t *testing.T) {
 		return flaky
 	})
 	plan := w.productionPlan(t, "notice-retry", 40,
-		budget.PlanStep{Capability: "image-to-3d", Purpose: "生成模型", EstimatedCredits: 25})
+		budget.PlanStep{Capability: "image-to-3d", Purpose: "生成模型", Estimate: budget.Legacy(25)})
 	w.grants.Clock = func() time.Time { return time.Now().UTC().Add(2 * time.Hour) }
 	noticeID := pendingapproval.BudgetMessageID(plan.ID) + ":expired"
 	if settled, err := w.service.Sweep(ctx); err == nil || settled != 0 {
@@ -373,7 +389,7 @@ func TestBudgetDecisionNoticeFailureKeepsTheDecision(t *testing.T) {
 		return decisionNoticeChat{Chat: chats}
 	})
 	plan := w.productionPlan(t, "decision-notice", 40,
-		budget.PlanStep{Capability: "image-to-3d", Purpose: "生成模型", EstimatedCredits: 25})
+		budget.PlanStep{Capability: "image-to-3d", Purpose: "生成模型", Estimate: budget.Legacy(25)})
 	if got := pendingapproval.BudgetMessageID(plan.ID); !strings.HasPrefix(got, "pa_") || strings.Contains(got, ":") {
 		t.Fatalf("decision message id %q no longer matches the test double", got)
 	}

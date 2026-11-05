@@ -1,6 +1,6 @@
 import type { ProductSchema } from '@/lib/product-schema';
-import type { NativeQuote } from '@/lib/pricing';
-import { parseNativeQuote } from '@/lib/pricing';
+import type { NativeQuote, PriceTotal } from '@/lib/pricing';
+import { parseNativeQuote, parsePriceTotals } from '@/lib/pricing';
 import { parseProductionPlan, type ProductionPlan } from '@/lib/chat/budget';
 import { approvalDecisionBody } from '@/lib/approval-decision';
 
@@ -49,8 +49,11 @@ export interface PendingApproval {
   kind: 'step' | 'plan';
   /** The plan a plan card asks to approve; null on a step card. */
   plan: ProductionPlan | null;
-  /** The total credit limit the person approves (plan cards only; 0 on a step card). */
-  budgetCredits: number;
+  /**
+   * #120: the limits the person approves, one per credit unit and never summed
+   * (plan cards only; empty on a step card).
+   */
+  budgets: PriceTotal[];
   tool: string;
   capability: string;
   model: string;
@@ -117,7 +120,7 @@ export function parsePendingApprovals(payload: unknown): PendingApproval[] {
     });
     result.push({
       requestId, status, kind, plan,
-      budgetCredits: typeof item.budget_credits === 'number' ? item.budget_credits : 0,
+      budgets: kind === 'plan' ? parsePriceTotals(item.budgets) ?? [] : [],
       tool: text(item.tool), capability: text(item.capability), model: text(item.model), provider: text(item.provider), providerId: text(item.provider_id),
       priceMode: text(item.price_mode) || (item.native_quote !== undefined ? 'native' : ''),
       nativeQuote: parseNativeQuote(item.native_quote),

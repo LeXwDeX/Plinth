@@ -17,8 +17,16 @@ import (
 type budgetMemoryGrants struct {
 	*memoryGrants
 	summary  budget.Summary
-	reserved int
+	reserved int64
 	approve  int
+}
+
+// credits is a whole number of credits in millionths.
+func credits(whole int) int64 { return int64(whole) * 1000000 }
+
+// legacyBudget is the plan's one legacy bucket with the given figures.
+func legacyBudget(limit, spent, reserved int) []budget.UnitBudget {
+	return []budget.UnitBudget{budget.NewUnitBudget(budget.Legacy(limit), credits(spent), credits(reserved))}
 }
 
 func (m *budgetMemoryGrants) GetExecutionPreparedSnapshot(ctx context.Context, owner, id string) (executiongrant.PreparedSnapshot, error) {
@@ -43,11 +51,17 @@ func (m *budgetMemoryGrants) PreparePendingWithBudget(ctx context.Context, ident
 	return grant, nil
 }
 
-func (m *budgetMemoryGrants) ApproveExecutionGrantWithBudget(ctx context.Context, owner, requestID, budgetID, actor string, credits int) (executiongrant.Grant, error) {
+func (m *budgetMemoryGrants) ApproveExecutionGrantWithBudget(ctx context.Context, owner, requestID, budgetID, actor string, amount budget.Amount) (executiongrant.Grant, error) {
 	if budgetID != m.summary.ID || m.summary.State != budget.StateActive {
 		return executiongrant.Grant{}, budget.ErrInactive
 	}
-	if credits > m.summary.RemainingCredits {
+	index := -1
+	for at, unit := range m.summary.Units {
+		if unit.Unit == amount.Unit {
+			index = at
+		}
+	}
+	if index < 0 || amount.Micros > m.summary.Units[index].Remaining {
 		return executiongrant.Grant{}, budget.ErrOverLimit
 	}
 	grant, err := m.memoryGrants.ApproveExecutionGrantByPolicy(ctx, owner, requestID, actor)
@@ -55,9 +69,9 @@ func (m *budgetMemoryGrants) ApproveExecutionGrantWithBudget(ctx context.Context
 		return executiongrant.Grant{}, err
 	}
 	m.approve++
-	m.reserved += credits
-	m.summary.ReservedCredits += credits
-	m.summary.RemainingCredits -= credits
+	m.reserved += amount.Micros
+	m.summary.Units[index].Reserved += amount.Micros
+	m.summary.Units[index].Remaining -= amount.Micros
 	return grant, nil
 }
 
@@ -113,9 +127,9 @@ func budgetProcessingFixture(t *testing.T, origin string) (*Service, *gatewayFak
 	grants := &budgetMemoryGrants{
 		memoryGrants: &memoryGrants{grants: map[string]executiongrant.Grant{}, gateway: gateway},
 		summary: budget.Summary{ID: "pb-processing", State: budget.StateActive,
-			LimitCredits: 20, RemainingCredits: 20,
+			Units: legacyBudget(20, 0, 0),
 			Plan: budget.Plan{Title: "加工计划", Steps: []budget.PlanStep{
-				{Capability: "retexture", Purpose: "换贴图", EstimatedCredits: 5},
+				{Capability: "retexture", Purpose: "换贴图", Estimate: budget.Legacy(5)},
 			}}},
 	}
 	policy := approvalpolicy.New("budget", []string{"auto", "budget", "manual"},
@@ -148,7 +162,7 @@ func TestProcessingPlanFromTheAgentRunsUnderTheBudget(t *testing.T) {
 	if err != nil || !grant.ApprovedByBudget() || grant.DecidedBy != executiongrant.BudgetActorPrefix+"pb-processing" {
 		t.Fatalf("step grant = %+v err=%v", grant, err)
 	}
-	if grants.approve != 1 || grants.reserved != 5 || grants.summary.RemainingCredits != 15 {
+	if grants.approve != 1 || grants.reserved != credits(5) || grants.summary.Units[0].Remaining != credits(15) {
 		t.Fatalf("budget reservations = approvals=%d reserved=%d summary=%+v", grants.approve, grants.reserved, grants.summary)
 	}
 }
@@ -186,7 +200,7 @@ func TestProcessingPlanFromTheBrowserKeepsPerStepApproval(t *testing.T) {
 		got.Steps[0].AuthorizationRef != "" || len(gateway.commands) != 0 {
 		t.Fatalf("browser processing plan = %+v commands=%d err=%v", got, len(gateway.commands), err)
 	}
-	if grants.approve != 0 || grants.reserved != 0 || grants.summary.RemainingCredits != 20 {
+	if grants.approve != 0 || grants.reserved != 0 || grants.summary.Units[0].Remaining != credits(20) {
 		t.Fatalf("browser plan spent the budget: approvals=%d reserved=%d summary=%+v",
 			grants.approve, grants.reserved, grants.summary)
 	}
@@ -205,7 +219,7 @@ func TestPausedStepGrantIdentityCarriesThePlanBudgetEligibility(t *testing.T) {
 			ctx := context.Background()
 			service, gateway, grants, plan := budgetProcessingFixture(t, testCase.origin)
 			// Too little budget left: the Agent's step waits for a person too.
-			grants.summary.RemainingCredits = 1
+			grants.summary.Units = legacyBudget(20, 19, 0)
 			if err := service.advanceAll(ctx); err != nil {
 				t.Fatal(err)
 			}

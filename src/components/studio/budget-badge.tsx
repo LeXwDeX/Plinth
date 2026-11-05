@@ -7,9 +7,9 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { PlanCard } from '@/components/studio/plan-card';
-import { budgetIsShown } from '@/lib/chat/budget';
+import { budgetIsShown, budgetUsageText } from '@/lib/chat/budget';
 import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
-import { schemaCountMessage, schemaText } from '@/lib/product-schema';
+import { formatSchemaText, schemaText } from '@/lib/product-schema';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/store/chat-store';
 import { useWorkspaceStore } from '@/store/workspace-store';
@@ -40,17 +40,14 @@ export function BudgetBadge() {
       >
         <Wallet aria-hidden className="size-3.5" />
         <span className="tabular-nums">
-          {schemaCountMessage(schema, 'ui.studio.budget.badge', budget.spentCredits, {
-            spent: budget.spentCredits,
-            limit: budget.limitCredits,
-          })}
+          {formatSchemaText(schemaText(schema, 'ui.studio.budget.badge'), { amounts: budgetUsageText(schema, budget.units) })}
         </span>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner positionMethod={anchoredPositionMethod} side="bottom" align="end" sideOffset={6} collisionPadding={12} className={layer}>
           <Popover.Popup className="flex w-80 max-w-(--available-width) flex-col gap-2 rounded-lg bg-popover p-2 text-popover-foreground shadow-xl outline-none ring-1 ring-foreground/10">
             <Popover.Title className="px-1 text-xs font-semibold">{schemaText(schema, 'ui.studio.budget.title')}</Popover.Title>
-            <PlanCard plan={budget.plan} budgetCredits={budget.limitCredits} tasks={tasks} progress={budget} />
+            <PlanCard plan={budget.plan} tasks={tasks} progress={budget} />
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>

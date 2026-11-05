@@ -4163,10 +4163,9 @@
         "ui.studio.approval.card.adjustment_expand": "展开",
         "ui.studio.approval.card.adjustment_collapse": "收起",
         "ui.studio.plan.title": "制作计划",
-        "ui.studio.plan.budget": "总预算：{credits} 积分",
-        "ui.studio.plan.budget_one": "总预算：{credits} 积分",
-        "ui.studio.plan.estimated": "预计 {credits} 积分",
-        "ui.studio.plan.estimated_one": "预计 {credits} 积分",
+        "ui.studio.plan.budget": "总预算：{amounts}",
+        "ui.studio.plan.estimated": "预计 {amount}",
+        "ui.studio.plan.unit_usage": "{spent} / {limit} {unit}",
         "ui.studio.plan.step": "步骤",
         "ui.studio.plan.model": "模型",
         "ui.studio.plan.model_unspecified": "由 Agent 选择",
@@ -4174,12 +4173,9 @@
         "ui.studio.plan.corrections_none": "没有额外修正能力",
         "ui.studio.plan.approve": "批准计划",
         "ui.studio.plan.deny": "不批准",
-        "ui.studio.plan.progress": "已用 {spent} / {limit} 积分",
-        "ui.studio.plan.progress_one": "已用 {spent} / {limit} 积分",
-        "ui.studio.plan.remaining": "剩余 {credits} 积分",
-        "ui.studio.plan.remaining_one": "剩余 {credits} 积分",
-        "ui.studio.plan.reserved": "已预留 {credits} 积分",
-        "ui.studio.plan.reserved_one": "已预留 {credits} 积分",
+        "ui.studio.plan.progress": "已用 {amounts}",
+        "ui.studio.plan.remaining": "剩余 {amounts}",
+        "ui.studio.plan.reserved": "已预留 {amounts}",
         "ui.studio.plan.state.pending": "等待批准",
         "ui.studio.plan.state.active": "执行中",
         "ui.studio.plan.state.exhausted": "预算已用完",
@@ -4206,8 +4202,7 @@
         "ui.studio.brief.load_failed": "读取制作简报失败",
         "ui.studio.brief.loading": "正在读取制作简报…",
         "ui.studio.brief.notes_hint": "写清用途之外的限制、禁忌和参考。",
-        "ui.studio.budget.badge": "预算 {spent} / {limit}",
-        "ui.studio.budget.badge_one": "预算 {spent} / {limit}",
+        "ui.studio.budget.badge": "预算 {amounts}",
         "ui.studio.budget.title": "本会话预算",
         "ui.studio.budget.plan_title": "计划：{title}",
         "ui.studio.chat.queued": "排队中",
@@ -5832,7 +5827,7 @@
         {
           "name": "propose_production_plan",
           "execution": {"implementation_key":"plan.propose","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Propose a production plan with a total credit budget when the work needs several paid steps (for example: generate a model, inspect it, then fix what the self-check finds). The person approves the plan and its budget on one card; afterwards the plan's steps and the correction capabilities you list run continuously by budget without a card per step. The server re-estimates every step from the Catalog and refuses a budget below that estimate; the numbers you send are only a summary. A capability outside the plan and its correction capabilities, a step that would exceed the remaining budget, and a step that would charge again (extra export formats, additional fees) still show an approval card. Browser-started steps do not use this budget. Propose once and wait for the person: do not open a second plan while one is pending, and do not use this tool to avoid a card the rules require.",
+          "description": "Propose a production plan with a credit budget per credit unit when the work needs several paid steps (for example: generate a model, inspect it, then fix what the self-check finds). Providers bill in their own units (tripo.credit, hyper3d.credit, meshy.credit, and legacy.credits for steps priced in historical credits); the budget limits and counts each unit separately and never adds different units. The person approves the plan and its budget on one card; afterwards the plan's steps and the correction capabilities you list run continuously by budget without a card per step. The server re-estimates every step from the Catalog in its own unit and refuses a budget whose unit is missing or below that unit's estimate; the refusal lists the estimate of each unit, and the numbers you send are only a summary. A capability outside the plan and its correction capabilities, a step that would exceed what remains in its unit (or whose unit has no budget), and a step that would charge again (extra export formats, additional fees) still show an approval card. Browser-started steps do not use this budget. Propose once and wait for the person: do not open a second plan while one is pending, and do not use this tool to avoid a card the rules require.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -5868,10 +5863,26 @@
                   "additionalProperties": false
                 }
               },
-              "budget_credits": {
-                "type": "integer",
-                "minimum": 1,
-                "description": "Total credits the person approves. Must be at least the server's estimate of all steps and no more than the Schema maximum."
+              "budgets": {
+                "type": "array",
+                "minItems": 1,
+                "description": "The budget the person approves, one entry per credit unit. Give every unit the steps are quoted in an amount at least the server estimate of that unit's steps and no more than the Schema maximum per unit; a unit only correction steps use may be listed too. Never add or convert amounts of different units.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "unit": {
+                      "type": "string",
+                      "description": "Credit unit id, such as tripo.credit, hyper3d.credit, meshy.credit, or legacy.credits for steps priced in historical credits."
+                    },
+                    "amount": {
+                      "type": "number",
+                      "minimum": 0,
+                      "description": "Amount approved in this unit; provider units may have decimals, legacy.credits takes whole credits."
+                    }
+                  },
+                  "required": ["unit", "amount"],
+                  "additionalProperties": false
+                }
               },
               "correction_capabilities": {
                 "type": "array",
@@ -5879,7 +5890,7 @@
                 "description": "Capabilities the plan allows for self-check correction steps that are not listed as steps, such as retexture or process_model. Each must be a known capability."
               }
             },
-            "required": ["title", "steps", "budget_credits"],
+            "required": ["title", "steps", "budgets"],
             "additionalProperties": false
           }
         },
@@ -7700,9 +7711,11 @@
           "max_steps": 12,
           "max_title_characters": 80,
           "max_purpose_characters": 200,
-          "context_template": "\n\n【制作预算】本会话的批准方式是「预算（制作计划）」。当前制作计划：{state}；总预算 {limit} 积分，已扣费 {spent} 积分，执行中预留 {reserved} 积分，剩余 {remaining} 积分。计划：{plan}\n计划内的步骤由系统按预算自动批准，不出批准卡；计划外的能力、超出剩余预算、以及会再次扣费的步骤（例如额外导出格式、Tripo 的附加费用）仍会出批准卡，由用户决定。需要连续执行多个付费步骤时，先用 propose_production_plan 提交制作计划和总积分预算，等用户批准后再执行；在计划获批前，按严格（逐步批准）方式的规则执行。浏览器面板自己发起的步骤不消耗这份预算，仍由用户逐张批准。",
+          "context_template": "\n\n【制作预算】本会话的批准方式是「预算（制作计划）」。预算按积分单位分别计算，不同供应商的单位不相加。当前制作计划：{state}；总预算 {limit}；已扣费 {spent}；执行中预留 {reserved}；剩余 {remaining}。计划：{plan}\n计划内的步骤由系统按预算自动批准，不出批准卡；计划外的能力、超出该步骤所用单位的剩余预算（或计划没有该单位的预算）、以及会再次扣费的步骤（例如额外导出格式、Tripo 的附加费用）仍会出批准卡，由用户决定。需要连续执行多个付费步骤时，先用 propose_production_plan 提交制作计划和按单位的预算，等用户批准后再执行；在计划获批前，按严格（逐步批准）方式的规则执行。浏览器面板自己发起的步骤不消耗这份预算，仍由用户逐张批准。",
+          "legacy_unit_label": "历史积分估算",
+          "unit_separator": " · ",
           "no_plan_state": "尚未提交计划",
-          "no_plan_text": "无。如果这次制作需要多个付费步骤，先用 propose_production_plan 把制作计划和总积分预算提交给用户批准。",
+          "no_plan_text": "无。如果这次制作需要多个付费步骤，先用 propose_production_plan 把制作计划和按积分单位的预算提交给用户批准。",
           "states": [
             {"id": "pending", "label": "待批准", "role": "pending"},
             {"id": "active", "label": "执行中", "role": "active"},
@@ -7711,10 +7724,10 @@
             {"id": "denied", "label": "已拒绝", "role": "denied"}
           ],
           "messages": {
-            "approved": "制作计划「{title}」已批准，总预算 {limit} 积分，剩余 {remaining} 积分。计划内的步骤会按预算自动执行，不再逐张出批准卡。",
+            "approved": "制作计划「{title}」已批准，总预算 {limit}，剩余 {remaining}。计划内的步骤会按预算自动执行，不再逐张出批准卡。",
             "denied": "制作计划「{title}」未获批准，未执行任何步骤。",
             "expired": "制作计划「{title}」等待批准超时，已失效；未执行任何步骤。",
-            "exhausted": "制作计划「{title}」的 {limit} 积分预算已用完，后续步骤需要重新提交计划并获得批准。"
+            "exhausted": "制作计划「{title}」的预算（{limit}）已用完，后续步骤需要重新提交计划并获得批准。"
           },
           "tool_messages": {
             "proposed": "制作计划已提交；等待用户批准或拒绝。在该计划被决定前不要再提交新计划。",
@@ -7734,7 +7747,7 @@
             {
               "id": "budget",
               "label": "预算（制作计划）",
-              "description": "预算方式下，Agent 先用 propose_production_plan 提交一份制作计划和总积分预算：title、steps（每步 capability、purpose，可用 model 指定用户已选的供给项，estimated_credits 只是你的估算）、budget_credits 和 correction_capabilities；服务端会按 Catalog 重新估算每一步，预算低于估算会被拒绝。用户在卡片上批准后，计划内的步骤按估算积分自动执行，不再逐步出批准卡；自检后的修正步骤只要在计划允许的修正能力内、且总积分不超预算，也自动执行。计划外的能力、超出剩余预算、以及会再次扣费的步骤仍会出批准卡。浏览器面板自己发起的步骤仍按严格（逐步批准）方式的规则逐张批准。没有已批准的计划时，按严格（逐步批准）方式的规则执行。"
+              "description": "预算方式下，Agent 先用 propose_production_plan 提交一份制作计划和按积分单位的预算：title、steps（每步 capability、purpose，可用 model 指定用户已选的供给项，estimated_credits 只是你的估算）、budgets（每个积分单位一项，如 tripo.credit、hyper3d.credit；按历史积分计价的步骤用 legacy.credits）和 correction_capabilities；不同供应商的单位分别限额、分别累计，从不相加。服务端会按 Catalog 重新估算每一步，某个单位的预算低于该单位步骤的估算会被拒绝。用户在卡片上批准后，计划内的步骤按估算积分自动执行，不再逐步出批准卡；自检后的修正步骤只要在计划允许的修正能力内、且不超出所用单位的剩余预算，也自动执行。计划外的能力、超出该单位剩余预算（或计划没有该单位的预算）、以及会再次扣费的步骤仍会出批准卡。浏览器面板自己发起的步骤仍按严格（逐步批准）方式的规则逐张批准。没有已批准的计划时，按严格（逐步批准）方式的规则执行。"
             },
             {
               "id": "manual",
@@ -14825,10 +14838,9 @@
             "ui.studio.approval.card.adjustment_expand": "More",
             "ui.studio.approval.card.adjustment_collapse": "Less",
             "ui.studio.plan.title": "Production plan",
-            "ui.studio.plan.budget": "Total budget: {credits} credits",
-            "ui.studio.plan.budget_one": "Total budget: {credits} credit",
-            "ui.studio.plan.estimated": "About {credits} credits",
-            "ui.studio.plan.estimated_one": "About {credits} credit",
+            "ui.studio.plan.budget": "Total budget: {amounts}",
+            "ui.studio.plan.estimated": "About {amount}",
+            "ui.studio.plan.unit_usage": "{spent} / {limit} {unit}",
             "ui.studio.plan.step": "Step",
             "ui.studio.plan.model": "Model",
             "ui.studio.plan.model_unspecified": "Chosen by the Agent",
@@ -14836,12 +14848,9 @@
             "ui.studio.plan.corrections_none": "No extra correction capabilities",
             "ui.studio.plan.approve": "Approve plan",
             "ui.studio.plan.deny": "Decline",
-            "ui.studio.plan.progress": "Used {spent} / {limit} credits",
-            "ui.studio.plan.progress_one": "Used {spent} / {limit} credit",
-            "ui.studio.plan.remaining": "{credits} credits left",
-            "ui.studio.plan.remaining_one": "{credits} credit left",
-            "ui.studio.plan.reserved": "{credits} credits reserved",
-            "ui.studio.plan.reserved_one": "{credits} credit reserved",
+            "ui.studio.plan.progress": "Used {amounts}",
+            "ui.studio.plan.remaining": "{amounts} left",
+            "ui.studio.plan.reserved": "{amounts} reserved",
             "ui.studio.plan.state.pending": "Waiting for approval",
             "ui.studio.plan.state.active": "In progress",
             "ui.studio.plan.state.exhausted": "Budget used up",
@@ -14868,8 +14877,7 @@
             "ui.studio.brief.load_failed": "Could not load the production brief",
             "ui.studio.brief.loading": "Loading the production brief…",
             "ui.studio.brief.notes_hint": "Record constraints, exclusions and references beyond the purpose.",
-            "ui.studio.budget.badge": "Budget {spent} / {limit}",
-            "ui.studio.budget.badge_one": "Budget {spent} / {limit}",
+            "ui.studio.budget.badge": "Budget {amounts}",
             "ui.studio.budget.title": "Session budget",
             "ui.studio.budget.plan_title": "Plan: {title}",
             "ui.studio.chat.queued": "Queued",

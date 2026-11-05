@@ -18,7 +18,7 @@ type fakeProductionBudgets struct {
 	found   bool
 	over    bool
 	actor   string
-	credits int
+	amount  budget.Amount
 	approve int
 }
 
@@ -78,7 +78,7 @@ func (store *fakeProductionBudgets) PreparePendingWithBudget(context.Context, Id
 	return Grant{}, ErrInvalid
 }
 
-func (store *fakeProductionBudgets) ApproveExecutionGrantWithBudget(ctx context.Context, owner, requestID, budgetID, actor string, credits int) (Grant, error) {
+func (store *fakeProductionBudgets) ApproveExecutionGrantWithBudget(ctx context.Context, owner, requestID, budgetID, actor string, amount budget.Amount) (Grant, error) {
 	if store.over {
 		return Grant{}, budget.ErrOverLimit
 	}
@@ -89,9 +89,17 @@ func (store *fakeProductionBudgets) ApproveExecutionGrantWithBudget(ctx context.
 	if err != nil {
 		return Grant{}, err
 	}
-	store.actor, store.credits = actor, credits
+	store.actor, store.amount = actor, amount
 	store.approve++
 	return grant, nil
+}
+
+// credits is a whole number of credits in millionths.
+func credits(whole int) int64 { return int64(whole) * 1000000 }
+
+// legacyUnits is the one legacy bucket of an integer-credit test plan.
+func legacyUnits(limit, spent, reserved int) []budget.UnitBudget {
+	return []budget.UnitBudget{budget.NewUnitBudget(budget.Legacy(limit), credits(spent), credits(reserved))}
 }
 
 func budgetPolicy() approvalpolicy.Policy {
@@ -143,11 +151,9 @@ func TestBudgetModeWithoutAPlanFallsBackToManual(t *testing.T) {
 func TestBudgetModeLeavesOffPlanStepsToThePerson(t *testing.T) {
 	store, budgets := budgetStep("image-to-3d")
 	budgets.found = true
-	budgets.summary = budget.Summary{ID: "pb_1", State: budget.StateActive, LimitCredits: 100,
-		ReservedCredits: 20, RemainingCredits: 80,
-		Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
-			{Capability: "text-to-3d", EstimatedCredits: 20},
-		}}}
+	budgets.summary = budget.Summary{ID: "pb_1", State: budget.StateActive, Units: legacyUnits(100, 0, 20), Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
+		{Capability: "text-to-3d", Estimate: budget.Legacy(20)},
+	}}}
 	result, err := runBudgetPolicy(t, "image-to-3d", budgets, store)
 	if !errors.Is(err, ErrHumanRequired) || result.Outcome != PolicyOutcomeHuman ||
 		result.Reason != BudgetReasonOffPlan || result.Budget == nil || result.Budget.ID != "pb_1" {
@@ -164,14 +170,12 @@ func TestBudgetModeLeavesStepsBeyondTheLimitToThePerson(t *testing.T) {
 	store, budgets := budgetStep("text-to-image")
 	budgets.found = true
 	budgets.over = true
-	budgets.summary = budget.Summary{ID: "pb_1", State: budget.StateActive, LimitCredits: 20,
-		SpentCredits: 12, ReservedCredits: 7, RemainingCredits: 1,
-		Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
-			{Capability: "text-to-image", EstimatedCredits: 7},
-		}}}
+	budgets.summary = budget.Summary{ID: "pb_1", State: budget.StateActive, Units: legacyUnits(20, 12, 7), Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
+		{Capability: "text-to-image", Estimate: budget.Legacy(7)},
+	}}}
 	result, err := runBudgetPolicy(t, "text-to-image", budgets, store)
 	if !errors.Is(err, ErrHumanRequired) || result.Outcome != PolicyOutcomeHuman ||
-		result.Reason != BudgetReasonOver || result.Budget == nil || result.Budget.RemainingCredits != 1 {
+		result.Reason != BudgetReasonOver || result.Budget == nil || result.Budget.Units[0].Remaining != credits(1) {
 		t.Fatalf("over-budget step = %+v err=%v", result, err)
 	}
 	if store.approved != 0 || budgets.approve != 0 {
@@ -185,11 +189,9 @@ func TestBudgetModeLeavesStepsBeyondTheLimitToThePerson(t *testing.T) {
 func TestBudgetModeLeavesEveryStepOfAnExhaustedPlanToThePerson(t *testing.T) {
 	store, budgets := budgetStep("text-to-image")
 	budgets.found = true
-	budgets.summary = budget.Summary{ID: "pb_1", State: budget.StateExhausted, LimitCredits: 20,
-		SpentCredits: 20, RemainingCredits: 0,
-		Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
-			{Capability: "text-to-image", EstimatedCredits: 7},
-		}}}
+	budgets.summary = budget.Summary{ID: "pb_1", State: budget.StateExhausted, Units: legacyUnits(20, 20, 0), Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
+		{Capability: "text-to-image", Estimate: budget.Legacy(7)},
+	}}}
 	result, err := runBudgetPolicy(t, "text-to-image", budgets, store)
 	if !errors.Is(err, ErrHumanRequired) || result.Outcome != PolicyOutcomeHuman ||
 		result.Reason != BudgetReasonOver || result.Budget == nil || result.Budget.State != budget.StateExhausted {
@@ -208,11 +210,9 @@ func TestBudgetModeLeavesUnpricedMeteredStepsToThePerson(t *testing.T) {
 	store.snapshot.CreditsMetered = true
 	store.snapshot.EstimatedCredits = 0
 	budgets.found = true
-	budgets.summary = budget.Summary{ID: "pb_1", State: budget.StateActive, LimitCredits: 100,
-		RemainingCredits: 100,
-		Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
-			{Capability: "text-to-image", EstimatedCredits: 5},
-		}}}
+	budgets.summary = budget.Summary{ID: "pb_1", State: budget.StateActive, Units: legacyUnits(100, 0, 0), Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
+		{Capability: "text-to-image", Estimate: budget.Legacy(5)},
+	}}}
 	result, err := runBudgetPolicy(t, "text-to-image", budgets, store)
 	if !errors.Is(err, ErrHumanRequired) || result.Outcome != PolicyOutcomeHuman ||
 		result.Reason != BudgetReasonUnpriced || result.Budget == nil {
@@ -226,14 +226,12 @@ func TestBudgetModeLeavesUnpricedMeteredStepsToThePerson(t *testing.T) {
 	store.snapshot.CreditsMetered = false
 	store.snapshot.EstimatedCredits = 0
 	budgets.found = true
-	budgets.summary = budget.Summary{ID: "pb_1", State: budget.StateActive, LimitCredits: 100,
-		RemainingCredits: 100,
-		Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
-			{Capability: "text-to-image", EstimatedCredits: 0},
-		}}}
+	budgets.summary = budget.Summary{ID: "pb_1", State: budget.StateActive, Units: legacyUnits(100, 0, 0), Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
+		{Capability: "text-to-image", Estimate: budget.Legacy(0)},
+	}}}
 	result, err = runBudgetPolicy(t, "text-to-image", budgets, store)
-	if err != nil || result.Outcome != PolicyOutcomeApproved || budgets.approve != 1 || budgets.credits != 0 {
-		t.Fatalf("free step = %+v err=%v approvals=%d credits=%d", result, err, budgets.approve, budgets.credits)
+	if err != nil || result.Outcome != PolicyOutcomeApproved || budgets.approve != 1 || budgets.amount != budget.Legacy(0) {
+		t.Fatalf("free step = %+v err=%v approvals=%d amount=%+v", result, err, budgets.approve, budgets.amount)
 	}
 }
 
@@ -246,25 +244,23 @@ func TestBudgetModeApprovesAPlannedStepAndReportsWhatIsLeft(t *testing.T) {
 	store.snapshot.ExtraCredits = 3
 	store.snapshot.EstimatedCredits = 10
 	budgets.found = true
-	before := budget.Summary{ID: "pb_1", State: budget.StateActive, LimitCredits: 100,
-		SpentCredits: 20, ReservedCredits: 10, RemainingCredits: 70,
-		Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
-			{Capability: "text-to-image", EstimatedCredits: 10},
-		}}}
+	before := budget.Summary{ID: "pb_1", State: budget.StateActive, Units: legacyUnits(100, 20, 10), Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
+		{Capability: "text-to-image", Estimate: budget.Legacy(10)},
+	}}}
 	budgets.summary = before
 	service := Service{Grants: budgets, Prepared: budgets, Policy: budgetPolicy(), Budgets: budgets}
 	// After approval the plan reports the step reserved.
-	budgets.summary.ReservedCredits, budgets.summary.RemainingCredits = 20, 60
+	budgets.summary.Units = legacyUnits(100, 20, 20)
 	result, err := service.ApproveByPolicyDecision(context.Background(), "owner-a", "request-a", "budget")
 	if err != nil || result.Outcome != PolicyOutcomeApproved {
 		t.Fatalf("planned step = %+v err=%v", result, err)
 	}
-	if budgets.approve != 1 || budgets.credits != 10 ||
+	if budgets.approve != 1 || budgets.amount != budget.Legacy(10) ||
 		budgets.actor != BudgetActorPrefix+"pb_1" || store.grant.DecidedBy != BudgetActorPrefix+"pb_1" {
-		t.Fatalf("reservation = approvals=%d credits=%d actor=%q grant=%+v",
-			budgets.approve, budgets.credits, budgets.actor, store.grant)
+		t.Fatalf("reservation = approvals=%d amount=%+v actor=%q grant=%+v",
+			budgets.approve, budgets.amount, budgets.actor, store.grant)
 	}
-	if result.Budget == nil || result.Budget.RemainingCredits != 60 || result.Budget.ReservedCredits != 20 {
+	if result.Budget == nil || result.Budget.Units[0].Remaining != credits(60) || result.Budget.Units[0].Reserved != credits(20) {
 		t.Fatalf("result budget = %+v", result.Budget)
 	}
 }
