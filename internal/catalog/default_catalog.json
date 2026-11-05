@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-05.v1-4-1-batch.1",
+    "revision": "2026-11-06.issue139-smart-low-poly.1",
     "terminology": {
       "user_facing": [
         {
@@ -1562,7 +1562,8 @@
         "input_source_task_expired": "来源任务 {label} 在服务商处的原任务已超过保留期；这一步没有提交，也没有扣积分。请先重新生成来源模型，或改用接受已保存模型文件的服务。",
         "input_source_task_unsupported": "来源任务 {label} 不满足这一步的来源要求；这一步没有提交，也没有扣积分。请重新选择来源。",
         "input_source_face_limit": "来源模型有 {faces} 个三角面，超过这一步最多 {limit} 个三角面的限制；这一步没有提交，也没有扣积分。请先把模型简化（Remesh）到上限以内再试。",
-        "plan_source_face_limit": "这个计划里，「{source_service}」按当前参数会交付约 {estimate} 个三角面，超过后面的步骤「{service}」最多接受的 {limit} 个三角面；整个计划没有创建，也没有扣积分。请调低「{source_service}」的目标面数后重新规划，兼容的拓扑与目标面数上限：{choices}。"
+        "plan_source_face_limit": "这个计划里，「{source_service}」按当前参数会交付约 {estimate} 个三角面，超过后面的步骤「{service}」最多接受的 {limit} 个三角面；整个计划没有创建，也没有扣积分。请调低「{source_service}」的目标面数后重新规划，兼容的拓扑与目标面数上限：{choices}。",
+        "input_parameter_range": "{label}为 {value}，按当前参数组合只能在 {minimum}–{maximum} 之间；这一步没有提交，也没有扣积分。请改为这个范围内的值，或去掉这个值改用默认值后重试。"
       },
       "task_cancellation": {
         "timeout_seconds": 15,
@@ -16824,6 +16825,7 @@
             "runtime.generation_messages.input_source_task_unsupported": "Source {label} does not meet this step's source requirements. This step was not submitted and no credits were spent. Select another source.",
             "runtime.generation_messages.input_source_face_limit": "The source model has {faces} triangle faces, over this step's limit of {limit}. This step was not submitted and no credits were spent. Simplify the model (Remesh) to within the limit first, then retry.",
             "runtime.generation_messages.plan_source_face_limit": "In this plan, {source_service} with its current settings would deliver about {estimate} triangle faces, over the {limit} that the later step {service} accepts. The plan was not created and no credits were spent. Lower the target face count of {source_service} and plan again; compatible topology and maximum target face count: {choices}.",
+            "runtime.generation_messages.input_parameter_range": "{label} is {value}, but with the current combination of settings it must be between {minimum} and {maximum}. This step was not submitted and no credits were spent. Use a value in that range, or leave it out to use the default, then retry.",
             "runtime.task_cancellation.local_only": "Task canceled; it had not yet been submitted upstream",
             "runtime.task_cancellation.requesting": "Task canceled locally; requesting the upstream to stop. Execution and billing outcome are not yet confirmed",
             "runtime.task_cancellation.confirmed": "Task canceled; the upstream confirmed it stopped. The final cost is per the upstream bill",
@@ -17958,7 +17960,7 @@
             "默认优化参考图以改善生成质量；需要严格保留原图外观时可说明理由关闭。": "Reference images are optimized by default to improve generation quality. Turn this off, with a stated reason, when the original image's look must be strictly preserved.",
             "默认使用三角面输出。": "Triangle output is used by default.",
             "默认使用当前最新纹理模型；Agent 可基于明确需求调整为本端点支持的其他版本并说明理由。": "Defaults to the latest texture model; the Agent may switch to another version supported by this endpoint based on explicit needs and explain why.",
-            "默认使用最高 200 万面上限；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。": "Defaults to the highest limit of 2 million faces; when the session's purpose sets a lower triangle limit, a generation the Agent starts uses that limit.",
+            "默认使用最高 200 万面上限；标准几何质量最多 150 万面，四边面最多 15 万面，开启智能低模时三角面最多 20000、四边面最多 10000。未指定面数时默认值按当前组合收敛到范围内；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。": "Defaults to the highest limit of 2 million faces; standard geometry quality allows at most 1.5 million faces and a quad mesh at most 150,000, and with smart low poly a triangle mesh allows at most 20,000 and a quad mesh at most 10,000. Without a face count the default moves into the range of the chosen combination; when the session's purpose sets a lower triangle limit, a generation the Agent starts uses that limit.",
             "导出分辨率范围为 64–512，默认 512（最高档）；几何来自 512 像素深度图，更高网格不会增加细节。": "Export resolution ranges from 64 to 512, with a default of 512 (the highest); the geometry comes from a 512-pixel depth map, so a finer grid adds no detail.",
             "GLB 模型（可在 3D 舞台预览）": "GLB model (previewable on the 3D stage)",
             "完整文件包 ZIP（只能下载）": "Complete file bundle ZIP (download only)",
@@ -22583,7 +22585,7 @@
     },
     {
       "id": "tripo/tripo-v3.1-full/text-to-3d",
-      "revision": "2026-10-17.218.1",
+      "revision": "2026-11-06.139.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -22818,8 +22820,27 @@
           "type": "number",
           "minimum": 1000,
           "maximum": 2000000,
+          "maximum_when": [
+            {
+              "when": {"parameter": "geometry_quality", "operator": "equals", "value": "standard"},
+              "maximum": 1500000
+            },
+            {
+              "when": {"parameter": "quad", "operator": "truthy"},
+              "maximum": 150000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "maximum": 20000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "also_when": [{"parameter": "quad", "operator": "truthy"}],
+              "maximum": 10000
+            }
+          ],
           "default": 2000000,
-          "description": "默认使用最高 200 万面上限；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
+          "description": "默认使用最高 200 万面上限；标准几何质量最多 150 万面，四边面最多 15 万面，开启智能低模时三角面最多 20000、四边面最多 10000。未指定面数时默认值按当前组合收敛到范围内；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
           "presentation": {
             "surface": "readonly",
             "control": "number",
@@ -23224,7 +23245,7 @@
     },
     {
       "id": "tripo/tripo-v3.1/text-to-3d",
-      "revision": "2026-10-17.218.1",
+      "revision": "2026-11-06.139.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -23458,8 +23479,27 @@
           "type": "number",
           "minimum": 1000,
           "maximum": 2000000,
+          "maximum_when": [
+            {
+              "when": {"parameter": "geometry_quality", "operator": "equals", "value": "standard"},
+              "maximum": 1500000
+            },
+            {
+              "when": {"parameter": "quad", "operator": "truthy"},
+              "maximum": 150000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "maximum": 20000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "also_when": [{"parameter": "quad", "operator": "truthy"}],
+              "maximum": 10000
+            }
+          ],
           "default": 2000000,
-          "description": "默认使用最高 200 万面上限；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
+          "description": "默认使用最高 200 万面上限；标准几何质量最多 150 万面，四边面最多 15 万面，开启智能低模时三角面最多 20000、四边面最多 10000。未指定面数时默认值按当前组合收敛到范围内；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
           "presentation": {
             "surface": "readonly",
             "control": "number",
@@ -23834,7 +23874,7 @@
     },
     {
       "id": "tripo/tripo-v3.1-full/image-to-3d",
-      "revision": "2026-10-17.218.1",
+      "revision": "2026-11-06.139.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -24144,8 +24184,27 @@
           "type": "number",
           "minimum": 1000,
           "maximum": 2000000,
+          "maximum_when": [
+            {
+              "when": {"parameter": "geometry_quality", "operator": "equals", "value": "standard"},
+              "maximum": 1500000
+            },
+            {
+              "when": {"parameter": "quad", "operator": "truthy"},
+              "maximum": 150000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "maximum": 20000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "also_when": [{"parameter": "quad", "operator": "truthy"}],
+              "maximum": 10000
+            }
+          ],
           "default": 2000000,
-          "description": "默认使用最高 200 万面上限；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
+          "description": "默认使用最高 200 万面上限；标准几何质量最多 150 万面，四边面最多 15 万面，开启智能低模时三角面最多 20000、四边面最多 10000。未指定面数时默认值按当前组合收敛到范围内；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
           "presentation": {
             "surface": "readonly",
             "control": "number",
@@ -24551,7 +24610,7 @@
     },
     {
       "id": "tripo/tripo-v3.1-multiview/image-to-3d",
-      "revision": "2026-11-02.27.1",
+      "revision": "2026-11-06.139.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -24865,8 +24924,27 @@
           "type": "number",
           "minimum": 1000,
           "maximum": 2000000,
+          "maximum_when": [
+            {
+              "when": {"parameter": "geometry_quality", "operator": "equals", "value": "standard"},
+              "maximum": 1500000
+            },
+            {
+              "when": {"parameter": "quad", "operator": "truthy"},
+              "maximum": 150000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "maximum": 20000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "also_when": [{"parameter": "quad", "operator": "truthy"}],
+              "maximum": 10000
+            }
+          ],
           "default": 2000000,
-          "description": "默认使用最高 200 万面上限；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
+          "description": "默认使用最高 200 万面上限；标准几何质量最多 150 万面，四边面最多 15 万面，开启智能低模时三角面最多 20000、四边面最多 10000。未指定面数时默认值按当前组合收敛到范围内；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
           "presentation": {
             "surface": "readonly",
             "control": "number",
@@ -25274,7 +25352,7 @@
     },
     {
       "id": "tripo/tripo-v3.1/image-to-3d",
-      "revision": "2026-10-17.218.1",
+      "revision": "2026-11-06.139.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -25584,8 +25662,27 @@
           "type": "number",
           "minimum": 1000,
           "maximum": 2000000,
+          "maximum_when": [
+            {
+              "when": {"parameter": "geometry_quality", "operator": "equals", "value": "standard"},
+              "maximum": 1500000
+            },
+            {
+              "when": {"parameter": "quad", "operator": "truthy"},
+              "maximum": 150000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "maximum": 20000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "also_when": [{"parameter": "quad", "operator": "truthy"}],
+              "maximum": 10000
+            }
+          ],
           "default": 2000000,
-          "description": "默认使用最高 200 万面上限；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
+          "description": "默认使用最高 200 万面上限；标准几何质量最多 150 万面，四边面最多 15 万面，开启智能低模时三角面最多 20000、四边面最多 10000。未指定面数时默认值按当前组合收敛到范围内；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
           "presentation": {
             "surface": "readonly",
             "control": "number",

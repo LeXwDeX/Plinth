@@ -2,6 +2,7 @@ package generationtool
 
 import (
 	"encoding/json"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -19,7 +20,15 @@ import (
 
 // budgetValues are the values the purpose budget gives an Offering's bounded
 // public parameters whose baseline is over it. overrides are the purpose's
-// own values; current holds values the step already has (a remesh topology).
+// own values; current holds values the step already has (a remesh topology,
+// Tripo's smart low poly and quad switches).
+//
+// The baseline is first moved into the range the parameter's maximum_when
+// entries give the step's combination (#139), as normalization moves a
+// default: the stricter of that range and the budget wins. A purpose override
+// or tool default moved that way is returned even within the budget, since
+// normalization would refuse it as given; an Offering default is left to
+// normalization.
 func (executor *Executor) budgetValues(command chat.ToolCommand, profile catalog.ChatModel3DUsageProfile,
 	offering generation.Offering, overrides, current map[string]json.RawMessage) map[string]json.RawMessage {
 	usage := executor.chat.Model3DUsage
@@ -38,6 +47,7 @@ func (executor *Executor) budgetValues(command chat.ToolCommand, profile catalog
 			values[name] = value
 		}
 	}
+	combination := decodedValues(values)
 	result := map[string]json.RawMessage{}
 	for _, parameter := range offering.Parameters {
 		limit, bounded := usage.BudgetLimit(parameter.Semantic)
@@ -48,18 +58,60 @@ func (executor *Executor) budgetValues(command chat.ToolCommand, profile catalog
 		if !declared {
 			continue
 		}
-		baseline := overrides[parameter.Name]
+		baseline, fromDefault := overrides[parameter.Name], false
 		if baseline == nil {
 			baseline = command.Tool.DefaultParameters[parameter.Name]
 		}
 		if baseline == nil {
-			baseline = parameter.Default
+			baseline, fromDefault = parameter.Default, true
 		}
-		if value, fits := limit.Fit(offering, parameter, baseline, values, maximum); fits {
+		converged := convergedValue(parameter, baseline, combination)
+		if value, fits := limit.Fit(offering, parameter, converged, values, maximum); fits {
 			result[parameter.Name] = value
+		} else if !fromDefault && !sameJSON(converged, baseline) {
+			result[parameter.Name] = converged
 		}
 	}
 	return result
+}
+
+// convergedValue moves a number into the range the parameter's maximum_when
+// entries give combination; any other value is returned as it is.
+func convergedValue(parameter generation.Parameter, value json.RawMessage, combination map[string]any) json.RawMessage {
+	var number float64
+	if parameter.Type != "number" || len(parameter.MaximumWhen) == 0 || json.Unmarshal(value, &number) != nil {
+		return value
+	}
+	clamped := parameter.ClampNumber(number, combination)
+	if clamped == number {
+		return value
+	}
+	encoded, err := json.Marshal(clamped)
+	if err != nil {
+		return value
+	}
+	return encoded
+}
+
+// decodedValues decodes a step's values for condition matching.
+func decodedValues(values map[string]json.RawMessage) map[string]any {
+	decoded := make(map[string]any, len(values))
+	for name, raw := range values {
+		var value any
+		if json.Unmarshal(raw, &value) == nil {
+			decoded[name] = value
+		}
+	}
+	return decoded
+}
+
+// sameJSON reports whether two encodings hold the same value.
+func sameJSON(a, b json.RawMessage) bool {
+	var left, right any
+	if json.Unmarshal(a, &left) != nil || json.Unmarshal(b, &right) != nil {
+		return false
+	}
+	return reflect.DeepEqual(left, right)
 }
 
 // applyPurposeValues gives a processing step's unset parameters the values of
@@ -75,6 +127,35 @@ func (executor *Executor) applyPurposeValues(command chat.ToolCommand, offering 
 		}
 		input[name] = value
 	}
+}
+
+// refreshPurposeValues chooses the purpose's values of a generation step again
+// once every layer has set its values (#139). first are the values the
+// purpose layer put into input; one a later layer replaced is left alone.
+func (executor *Executor) refreshPurposeValues(command chat.ToolCommand, offering generation.Offering,
+	input map[string]any, first map[string]json.RawMessage, chosen map[string]bool) error {
+	current, err := rawInput(input)
+	if err != nil {
+		return err
+	}
+	_, final := executor.purposeParameterValues(command, offering, current)
+	for name, value := range first {
+		if now, present := current[name]; !present || !sameJSON(now, value) {
+			continue
+		}
+		refreshed, kept := final[name]
+		if !kept {
+			delete(input, name)
+			delete(chosen, name)
+			continue
+		}
+		var decoded any
+		if err := json.Unmarshal(refreshed, &decoded); err != nil {
+			return err
+		}
+		input[name] = decoded
+	}
+	return nil
 }
 
 // rawInput encodes a step input built as Go values, for applyPurposeValues.
@@ -129,7 +210,8 @@ func (executor *Executor) purposeBudgetItems(command chat.ToolCommand, offering 
 		}
 		value, present := values[parameter.Name]
 		if parameter.Fixed || !present {
-			value = parameter.Default
+			// An absent default is read as normalization sets it (#139).
+			value = convergedValue(parameter, parameter.Default, decodedValues(values))
 		}
 		if len(value) == 0 || string(value) == "null" {
 			continue

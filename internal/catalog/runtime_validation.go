@@ -82,6 +82,7 @@ func validateRuntime(schema RuntimeSchema) error {
 		"input_source_task_expired":     {messages.InputSourceTaskExpired, []string{"{label}"}},
 		"input_source_task_unsupported": {messages.InputSourceTaskUnsupported, []string{"{label}"}},
 		"input_source_face_limit":       {messages.InputSourceFaceLimit, []string{"{faces}", "{limit}"}},
+		"input_parameter_range":         {messages.InputParameterRange, []string{"{label}", "{value}", "{minimum}", "{maximum}"}},
 	} {
 		if check.text == "" {
 			continue

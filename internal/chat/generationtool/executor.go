@@ -1436,6 +1436,15 @@ func (executor *Executor) buildInput(
 		input[parameter] = value
 		chosen[parameter] = true
 	}
+	// #139: the purpose's values were chosen before the later layers set the
+	// step's combination (Tripo's smart low poly or quad). A purpose value no
+	// later layer replaced is chosen again against the final input; one the
+	// purpose no longer needs is left to normalization's default.
+	if len(profileValues) > 0 {
+		if err := executor.refreshPurposeValues(command, offering, input, profileValues, chosen); err != nil {
+			return nil, nil, err
+		}
+	}
 	// #296: outside a canvas turn, one reference picture sets the output size
 	// that nobody chose.
 	executor.applyReferenceOutputSize(ctx, command, offering, input, chosen, referenceAssets)

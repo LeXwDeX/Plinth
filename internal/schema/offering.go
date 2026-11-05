@@ -302,6 +302,11 @@ type ExecutionMessages struct {
 	// count is over the step's declared limit (#103); {faces} is the counted
 	// value and {limit} the declared maximum.
 	InputSourceFaceLimit string `json:"input_source_face_limit,omitempty"`
+	// InputParameterRange is the refusal for a number the caller gave outside
+	// the range the parameter's maximum_when entries allow for the chosen
+	// combination (#139: Tripo's face limit with smart low poly); {label},
+	// {value}, {minimum} and {maximum}. Nothing is sent upstream.
+	InputParameterRange string `json:"input_parameter_range,omitempty"`
 	// PlanSourceFaceLimit is the refusal of a whole Processing Plan before any
 	// step is paid (#121): an earlier step's declared output (Offering.
 	// OutputTriangles) is estimated over the SourceModelLimit of a later step.
