@@ -7,7 +7,7 @@ target: main
 language: zh
 validation:
   titles: false
-  labels: off
+  labels: kind
   bodies: false
 init_policy:
   required_checks: []

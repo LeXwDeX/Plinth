@@ -95,6 +95,10 @@ graphify-out/
 /.playwright-mcp/
 /handoff.md
 
-# SpecGit 与本地 Agent 生成的本地资产（不追踪）
+# SpecGit 生成的全部本地文件（specgit init/setup 在各工作树生成，不追踪）
 /.specgit.yaml
-/.agents/skills/specgit-native/
+/.agents/
+/.claude/settings.json
+/.claude/skills/specgit-native/
+/.codex/hooks.json
+/.opencode/hooks.json
