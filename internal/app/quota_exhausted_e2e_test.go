@@ -26,7 +26,8 @@ func TestExhaustedQuotaOn429FailsTheTaskAtOnce(t *testing.T) {
 		body  string
 		class generation.FailureClass
 	}{
-		{"gateway quota_exceeded", `{"error":{"code":"quota_exceeded","message":"caller quota exceeded","type":"aigateway_error"}}`, generation.FailureCredentialQuota},
+		// The body the gateway actually sent on dev-test (weekly quota).
+		{"gateway quota_exceeded", `{"error":{"code":"quota_exceeded","message":"Quota exceeded (weekly). Limit: $100.00, used: $101.21. Resets at 2026-11-09T00:00:00Z","quota":{"dimension":"weekly","group_name":"API","limit_usd":100,"resets_at":"2026-11-09T00:00:00Z","scope":"model_group","used_usd":101.20632699999999},"type":"quota_exceeded"}}`, generation.FailureCredentialQuota},
 		{"openai insufficient_quota", `{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","param":null,"code":"insufficient_quota"}}`, generation.FailureInsufficientBalance},
 	}
 	for _, tc := range cases {

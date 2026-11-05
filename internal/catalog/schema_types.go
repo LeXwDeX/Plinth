@@ -4268,6 +4268,10 @@ type ChatMessageTexts struct {
 	// AgentContentRejected replaces UnknownError when the upstream's content
 	// moderation refused the request's pictures or text (#35).
 	AgentContentRejected string `json:"agent_content_rejected"`
+	// AgentQuotaExhausted replaces UnknownError when the chat connection's
+	// error_mapping reads the refusal as a used-up account balance or key
+	// quota (#120: the LLMs gateway's 429 quota_exceeded).
+	AgentQuotaExhausted string `json:"agent_quota_exhausted"`
 	// AgentInlineImageOutput replaces UnknownError when the Agent model drew
 	// a picture itself instead of answering or calling a generation tool.
 	AgentInlineImageOutput string `json:"agent_inline_image_output"`

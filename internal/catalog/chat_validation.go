@@ -159,6 +159,7 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		"presentation.empty_message":            schema.Presentation.Messages.EmptyMessage,
 		"presentation.agent_images_unsupported": schema.Presentation.Messages.AgentImagesUnsupported,
 		"presentation.agent_content_rejected":   schema.Presentation.Messages.AgentContentRejected,
+		"presentation.agent_quota_exhausted":    schema.Presentation.Messages.AgentQuotaExhausted,
 		"presentation.agent_not_configured":     schema.Presentation.Messages.AgentNotConfigured,
 		"presentation.invalid_parameters":       schema.Presentation.Messages.InvalidParameters,
 		"presentation.model_choice_conflict":    schema.Presentation.Messages.ModelChoiceConflict,

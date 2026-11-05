@@ -90,6 +90,13 @@ docker logs <container> 2>&1 | grep 'generation attempt finished failed'
   OpenAI 图片连接没有声明这个码，它被读成可重试限流，任务排队重发到 Offering
   超时（gpt-image-2 为 1800 秒），十分钟内被拒 200 多次。普通 429（无码或
   `rate_limit_exceeded` 等未声明的码）仍按限流排队。
+  真实样本（dev-test 网关，周额度用尽）：`error.code` 与 `error.type` 都是
+  `quota_exceeded`，另带 `error.quota`（`dimension`、`limit_usd`、`used_usd`、
+  `resets_at`、`scope`）；当时取证为 `upstream_code=quota_exceeded`、
+  `class=rate_limited`、`retryable=true`。样本作为回归用例保存在
+  `httpjson/quota_test.go`（`gatewayWeeklyQuotaSample`），现判为 `credential_quota`。
+  对话模型（`chat-llm` 连接）在 Schema 声明同样的两个码，Agent 请求遇到时回复
+  Schema `agent_quota_exhausted`，见 `docs/architecture.md`「Adapter 路由」。
 - Meshy 任务错误：`internal/providers/meshy/adapter.go`（`task_error.type`
   决定 class 与可重试性：timeout/service_unavailable/server_error 可重试）。
 - 即梦/火山 Ark：走通用分类 + OpenAI 兼容信封 `error.code` 提取；`QuotaExceeded`、`SetLimitExceeded`（均 429）声明为 `credential_quota`，否则会按 429 读成可重试的限流（#139，码表来自 <https://docs.volcengine.com/docs/82379/1299023>，2026-10-29 核对）。

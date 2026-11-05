@@ -51,6 +51,26 @@ func TestGatewayQuotaExhaustionOn429IsNotARateLimit(t *testing.T) {
 	}
 }
 
+// gatewayWeeklyQuotaSample is the 429 body the LLMs gateway sent on dev-test
+// (#120) when the caller's weekly model-group quota ran out. Plinth read it as
+// class=rate_limited, retryable=true, upstream_code=quota_exceeded. It holds no
+// credentials; the amounts and the reset time are kept as observed.
+const gatewayWeeklyQuotaSample = `{"error":{"code":"quota_exceeded","message":"Quota exceeded (weekly). Limit: $100.00, used: $101.21. Resets at 2026-11-09T00:00:00Z","quota":{"dimension":"weekly","group_name":"API","limit_usd":100,"resets_at":"2026-11-09T00:00:00Z","scope":"model_group","used_usd":101.20632699999999},"type":"quota_exceeded"}}`
+
+// The real gateway sample ends the gpt-image-2 create as the connection's
+// declared credential_quota: not retryable, no Retry-After, and the same
+// upstream code evidence as before.
+func TestGatewayWeeklyQuotaSampleIsACredentialQuota(t *testing.T) {
+	failure := submitAgainst(t, connectionMapping(t, "openai-images"), http.StatusTooManyRequests, gatewayWeeklyQuotaSample)
+	if failure.Class != generation.FailureCredentialQuota || failure.Retryable || failure.Ambiguous || failure.RetryAfter != 0 {
+		t.Fatalf("class %s retryable %v ambiguous %v retry-after %v, want a definite credential_quota",
+			failure.Class, failure.Retryable, failure.Ambiguous, failure.RetryAfter)
+	}
+	if failure.UpstreamStatus != http.StatusTooManyRequests || failure.UpstreamCode != "quota_exceeded" {
+		t.Fatalf("evidence = status %d code %q", failure.UpstreamStatus, failure.UpstreamCode)
+	}
+}
+
 // A code the connection declares as an exhausted balance or key quota outranks
 // its HTTP status ranges, like the balance codes always did: a connection that
 // declares 429 as a retryable rate limit must still end a 429 quota_exceeded,

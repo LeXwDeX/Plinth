@@ -31,6 +31,24 @@ func (rejection *ContentRejection) Error() string { return ErrContentRejected.Er
 
 func (rejection *ContentRejection) Is(target error) bool { return target == ErrContentRejected }
 
+// ErrQuotaExhausted marks an upstream refusal that the chat connection's
+// Schema error mapping declares as a used-up account balance or key quota
+// (#120: the LLMs gateway's 429 quota_exceeded). Resending does not help
+// until an administrator tops up or raises the quota.
+var ErrQuotaExhausted = errors.New("agent upstream balance or quota is exhausted")
+
+// QuotaExhaustion is an ErrQuotaExhausted that carries the failure class the
+// declaration named (insufficient_balance or credential_quota).
+type QuotaExhaustion struct {
+	Class string
+}
+
+func (exhaustion *QuotaExhaustion) Error() string {
+	return ErrQuotaExhausted.Error() + " (" + exhaustion.Class + ")"
+}
+
+func (exhaustion *QuotaExhaustion) Is(target error) bool { return target == ErrQuotaExhausted }
+
 // ContentRejectedReasons are the reasons of a content-safety refusal in err.
 func ContentRejectedReasons(err error) []string {
 	var rejection *ContentRejection

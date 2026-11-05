@@ -115,6 +115,26 @@ func matchExhaustionEvidence(
 	})
 }
 
+// DeclaredExhaustion reports whether the connection's mapping classifies an
+// upstream refusal (HTTP status and body) as a used-up account balance or key
+// quota, and which of the two. Callers outside this client, such as the chat
+// model adapter, use it so one Schema declaration and one matching algorithm
+// decide for every upstream call (#120).
+func DeclaredExhaustion(
+	mapping *generation.ErrorMapping,
+	status int,
+	payload []byte,
+) (generation.FailureClass, bool) {
+	if mapping == nil {
+		return "", false
+	}
+	rule, ok := matchErrorMapping(mapping, status, payload)
+	if !ok || !exhaustionClass(rule.Class) {
+		return "", false
+	}
+	return generation.FailureClass(rule.Class), true
+}
+
 func exhaustionClass(class string) bool {
 	switch generation.FailureClass(class) {
 	case generation.FailureInsufficientBalance, generation.FailureCredentialQuota:

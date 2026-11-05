@@ -1336,7 +1336,17 @@
           "protocol": "openai-compatible",
           "adapter_key": "openai-compatible-chat",
           "base_url_setting": "llm_base_url",
-          "api_key_setting": "llm_api_key"
+          "api_key_setting": "llm_api_key",
+          "error_mapping": {
+            "upstream_code_map": {
+              "insufficient_quota": {
+                "class": "insufficient_balance"
+              },
+              "quota_exceeded": {
+                "class": "credential_quota"
+              }
+            }
+          }
         },
         {
           "id": "local-model",
@@ -7640,6 +7650,7 @@
           "agent_inline_image_output": "当前对话模型自己画了一张图，而不是调用生成工具，这张图没有保存，也不会出现在结果里。请重试；如果反复出现，请换一个对话模型。",
           "agent_images_unsupported": "当前 Agent 模型拒绝了带图片的请求，可能不支持读图。请在部署配置中换用支持图片输入的模型（LLM_MODEL），或去掉图片后重试。",
           "agent_content_rejected": "请求被上游模型服务的内容安全审核拦截：本轮的图片或文字可能被判定为不当内容。这不是模型不支持读图，也不需要改部署配置。请更换图片或修改描述后重试；如确认内容合规，请把本条消息附带的错误 ID 发给管理员核查。",
+          "agent_quota_exhausted": "对话模型的上游额度已用完（账户余额或 API Key 额度），暂时无法回复。请联系管理员处理，处理前重试也不会成功。",
           "agent_not_configured": "Agent 未配置：部署缺少对话模型设置（LLM_API_KEY 或 LLM_MODEL），暂时不能对话或增强提示词。请联系管理员配置后再试。",
           "error_reference": "（错误 ID：{id}）",
           "sse_interrupted": "SSE 连接中断",
@@ -16585,7 +16596,8 @@
             "chat.presentation.messages.unknown_error": "Unknown error",
             "chat.presentation.messages.agent_inline_image_output": "The current conversation model drew a picture itself instead of calling a generation tool; the picture was not kept and will not appear in the results. Please retry; if it keeps happening, switch to another conversation model.",
             "chat.presentation.messages.agent_images_unsupported": "The current Agent model rejected the request with images; it may not support image input. In the deployment configuration, switch to a model that supports image input (LLM_MODEL), or remove the images and retry.",
-            "chat.presentation.messages.agent_content_rejected": "The request was blocked by the upstream model service's content-safety review: the images or text in this turn may have been judged inappropriate. The model does support images and no deployment change is needed. Change the image or rewrite the description and retry; if you are sure the content is fine, send this message's error ID to an administrator.",
+            "chat.presentation.messages.agent_quota_exhausted": "The chat model's upstream quota is used up (account balance or API key quota), so no reply can be given for now. Please contact an administrator; retrying will not help until then.",
+            "chat.presentation.messages.agent_content_rejected":"The request was blocked by the upstream model service's content-safety review: the images or text in this turn may have been judged inappropriate. The model does support images and no deployment change is needed. Change the image or rewrite the description and retry; if you are sure the content is fine, send this message's error ID to an administrator.",
             "chat.presentation.messages.agent_not_configured": "Agent is not configured: the deployment is missing chat model settings (LLM_API_KEY or LLM_MODEL), so chatting and prompt enhancement are unavailable. Please contact an administrator to configure it and try again.",
             "chat.presentation.messages.error_reference": " (Error ID: {id})",
             "chat.presentation.messages.sse_interrupted": "SSE connection interrupted",
