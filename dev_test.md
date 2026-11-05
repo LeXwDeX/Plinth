@@ -72,7 +72,7 @@ CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check
   静态测试不证明 GitHub 的实际路由、runner 隔离或网络访问。增删、改写或改变执行位置时，同一提交里改这几处，测试才会通过。
 - **Action 版本**：工作流中的 Action 固定到发布标签对应的完整提交 SHA，行尾注释写标签；升级时在官方仓库核对标签与 SHA 再一起改。
 - **CI 与内部验收的分工**：三个门禁作业都在 GitHub 托管的 `ubuntu-latest` 上运行。PR 仍可修改工作流，合并前须审查工作流改动；工作流以 `persist-credentials: false` 检出。零 Key 的 Mock 自部署冒烟 `scripts/smoke/smoke-public-mock.sh` 要求环境文件显式写 `PROVIDER_MODE=mock`、`AGENT_MODE=mock`，保留为本地手动验收（自部署后运行，覆盖登录、健康、一次 Mock 图片与一次 Mock 3D 任务的全部产物下载核对、restart 与 down/up 持久化及 `down -v` 清理）。维护者内部环境（`dev-test`、`formal-test`）的部署与 L0/L1/L1 Agent 冒烟经 `scripts/release-env.py release`/`smoke` 走 `scripts/smoke/` 的脚本，真实模型付费验收也只由维护者在内部测试环境执行（§3、§11），都不进 CI，也不是外部 PR 的合并条件。
-- **分支保护**：`main` 要求 GitHub 检查 `frontend`、`go check`、`go test race` 通过才能合并；合并前的门禁另由本节与「交付硬门禁」的本机预检和主机 CI 保证。
+- **分支保护**：`main` 只要求主机 CI 提交状态 `host-ci/gates` 通过才能合并；GitHub Actions 照常运行但不阻塞开发期合并，只在晋级 `formal-test` 前作为最终完整 CI 必须全绿。
 
 ### 主机自检替代 CI（#79）
 
