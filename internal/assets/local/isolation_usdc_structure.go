@@ -19,7 +19,7 @@ func (p *usdcParser) structures(sections []usdcSection) error {
 	if e != nil {
 		return e
 	}
-	if n > maxArchiveFiles || n > uint64(c.end-c.pos)/4 {
+	if n > maxUSDCTableEntries || n > uint64(c.end-c.pos)/4 {
 		return errors.New("USDC 字符串表大小无效")
 	}
 	p.strings = make([]uint32, int(n))
@@ -41,7 +41,7 @@ func (p *usdcParser) structures(sections []usdcSection) error {
 	if e != nil {
 		return e
 	}
-	if n > maxArchiveFiles {
+	if n > maxUSDCTableEntries {
 		return errors.New("USDC 字段数量超出限制")
 	}
 	indexes, e := p.integers(c, int64(n), true)
@@ -83,7 +83,7 @@ func (p *usdcParser) structures(sections []usdcSection) error {
 	if e != nil {
 		return e
 	}
-	if n > maxArchiveFiles {
+	if n > maxUSDCTableEntries {
 		return errors.New("USDC 字段集数量超出限制")
 	}
 	sets, e := p.integers(c, int64(n), true)
@@ -112,7 +112,7 @@ func (p *usdcParser) structures(sections []usdcSection) error {
 	if e != nil {
 		return e
 	}
-	if n > maxArchiveFiles {
+	if n > maxUSDCTableEntries {
 		return errors.New("USDC 定义数量超出限制")
 	}
 	paths, e := p.integers(c, int64(n), true)
@@ -154,7 +154,7 @@ func (p *usdcParser) paths(c *usdcCursor) error {
 	if e != nil {
 		return e
 	}
-	if total > maxArchiveFiles || n > total {
+	if total > maxUSDCTableEntries || n > total {
 		return errors.New("USDC 路径数量无效")
 	}
 	indexes, e := p.integers(c, int64(n), true)

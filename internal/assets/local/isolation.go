@@ -32,7 +32,11 @@ const (
 	maxArchiveXMLHeldBytes = 4 << 20
 	maxArchiveXMLDepth     = 256
 	maxArchiveFiles        = 10000
-	maxArchiveBytes        = 1 << 30
+	// USDC string, field, field-set, spec and path tables: a multi-part Tripo
+	// segmentation carried 10640 field-set entries (#111). Decoded bytes and CPU
+	// stay bound by the delivered-size limit and the inspection work budget.
+	maxUSDCTableEntries = 1 << 20
+	maxArchiveBytes     = 1 << 30
 	// Matches the largest base64 image response (max_response_bytes, 256 MiB);
 	// 8K PBR textures can exceed 64 MiB. A URL-downloaded texture is bounded
 	// only by its role's max_bytes (1 GiB) and is rejected above this limit.

@@ -453,7 +453,7 @@ func TestUSDCMalformedStructuresFailClosed(t *testing.T) {
 		"field_count": func(d []byte) []byte {
 			for _, s := range usdcTestSections(d) {
 				if s.name == "FIELDS" {
-					binary.LittleEndian.PutUint64(d[s.start:], maxArchiveFiles+1)
+					binary.LittleEndian.PutUint64(d[s.start:], maxUSDCTableEntries+1)
 				}
 			}
 			return d
