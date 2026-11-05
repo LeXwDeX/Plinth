@@ -441,6 +441,11 @@ func cloneApplication(source ApplicationSchema) ApplicationSchema {
 		}
 		result.Chat.Agent.Thinking = &thinking
 	}
+	if source.Chat.Agent.BackgroundWait != nil {
+		background := *source.Chat.Agent.BackgroundWait
+		background.Tools = slices.Clone(background.Tools)
+		result.Chat.Agent.BackgroundWait = &background
+	}
 	result.Chat.ContextCompaction.RoleLabels = cloneStringMap(source.Chat.ContextCompaction.RoleLabels)
 	if source.Chat.Presentation.Messages.ContentRejectedReasonLabels != nil {
 		result.Chat.Presentation.Messages.ContentRejectedReasonLabels = cloneStringMap(source.Chat.Presentation.Messages.ContentRejectedReasonLabels)

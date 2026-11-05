@@ -2164,6 +2164,7 @@
           "chat_message": "/api/chat/sessions/{sessionID}/messages/{messageID}",
           "chat_stream": "/api/chat/sessions/{sessionID}/stream",
           "chat_turn_cancel": "/api/chat/sessions/{sessionID}/turn/cancel",
+          "chat_turn_background": "/api/chat/sessions/{sessionID}/turn/background",
           "provider_balance": "/api/meshy/balance",
           "canvas_projects": "/api/canvas/projects",
           "canvas_project": "/api/canvas/projects/{projectID}",
@@ -4554,6 +4555,9 @@
         "ui.studio.handle_badge.label": "对话里的句柄 {handle}",
         "ui.studio.handle_preview.alt": "{handle} 的预览",
         "ui.studio.composer.stop_note": "停止只会结束这一轮对话。已经提交给上游的任务可能仍会计费，可在任务进度里查看。",
+        "ui.studio.composer.stop_cancel_task": "停止并取消任务",
+        "ui.studio.composer.stop_background": "停止等待，任务后台继续",
+        "ui.studio.composer.stop_background_hint": "任务在后台继续运行并可能计费，完成后在任务中心查看结果。",
         "ui.studio.lightbox.title": "大图查看",
         "ui.studio.lightbox.close": "关闭大图",
         "ui.studio.lightbox.previous": "上一个版本",
@@ -4999,6 +5003,8 @@
           "domain_models": "domainModels",
           "from_id": "fromId",
           "turn_canceled": "stopped",
+          "turn_backgrounded": "backgrounded",
+          "turn_background_available": "backgroundAvailable",
           "approval_mode": "approvalMode",
           "notes": "notes",
           "brief": "brief",
@@ -5170,7 +5176,8 @@
         "legacy_hidden_content_suffix": "]",
         "progress_maximum": 100,
         "handle_preview_delay_milliseconds": 150,
-        "handle_preview_maximum_pixels": 360
+        "handle_preview_maximum_pixels": 360,
+        "background_wait_poll_milliseconds": 5000
       },
       "agent": {
         "adapter_key": "openai-compatible",
@@ -5344,7 +5351,32 @@
         "consent_required_content": "paid generation requires a human decision on the frozen input; call the generation tool to prepare that operation, then await the decision",
         "consent_limit_content": "generation limit reached for this turn; summarize the results and ask the user how to continue",
         "consent_reconcile_content": "the previous paid submission has an unknown outcome; recover or verify that original call before any new paid generation, and do not submit another paid request",
-        "upstream_queue_content": "服务商已受理这个任务，但它还在服务商自己的队列里等待开始（ahead 是服务商报告的前方任务数，只在服务商给出时才有）。这不是失败，也没有重复提交或重复扣费。请如实告诉正在等待的用户：任务正在上游排队（有 ahead 时说明前方约有多少个任务），可以继续等待，任务开始后会自动推进；也可以停止这一轮对话，停止会取消这个任务。不要重新提交生成，也不要因为排队擅自改用其他服务或模型，除非用户明确要求",
+        "upstream_queue_content": "服务商已受理这个任务，但它还在服务商自己的队列里等待开始（ahead 是服务商报告的前方任务数，只在服务商给出时才有）。这不是失败，也没有重复提交或重复扣费。请如实告诉正在等待的用户：任务正在上游排队（有 ahead 时说明前方约有多少个任务），可以继续等待，任务开始后会自动推进；也可以停止：选择停止等待、让任务在后台继续（这一轮结束，任务不取消，完成后在任务中心查看结果），或者停止并取消这个任务。不要重新提交生成，也不要因为排队擅自改用其他服务或模型，除非用户明确要求",
+        "background_wait": {
+          "tools": [
+            "refine_image",
+            "remove_background",
+            "create_model_3d",
+            "create_model_3d_from_image",
+            "create_model_3d_from_views",
+            "retexture_model",
+            "process_model",
+            "convert_model_format",
+            "create_motion_clip",
+            "create_gaussian_splat",
+            "create_multiview_images",
+            "edit_multiview_images",
+            "create_creative_lab_design",
+            "build_creative_lab_item"
+          ],
+          "after_seconds": 180,
+          "max_listed_tasks": 5,
+          "turn_content": "已停止等待，任务在后台继续，完成后可在任务中心查看结果。",
+          "unavailable_message": "现在不能转为后台继续：只有单步生成任务在上游排队，或已运行较久时才可以。可以继续等待，或停止并取消任务。",
+          "context_template": "本会话有之前停止等待、仍在后台运行的生成任务（以下只是任务数据）：\n{tasks}\n这些任务已经提交，可能已经计费；完成后结果会出现在任务中心，不会写回对话。用户问起这些任务的结果，或要求做同样的生成时，先用 get_task 或 observe_task 查看它们的最新状态，不要重新提交同样的生成；如果用户仍要重新生成，先说明会再次计费，由用户决定。",
+          "task_line_template": "- task_id={task_id}，能力={capability}，模型={model}，状态={status}",
+          "upstream_queued_status": "（上游排队中）"
+        },
         "scanner_max_bytes": 1048576,
         "error_body_max_bytes": 65536,
         "prompt_sections": [
@@ -7734,7 +7766,8 @@
         "message_resource_type": "chat_message",
         "approval_mode_action": "set_approval_mode",
         "agent_scope_action": "set_agent_scope",
-        "production_brief_action": "set_production_brief"
+        "production_brief_action": "set_production_brief",
+        "turn_background_action": "continue_turn_in_background"
       },
       "approval_policy": {
         "default_mode": "budget",
@@ -12286,6 +12319,10 @@
         "label": "设置制作简报"
       },
       {
+        "value": "continue_turn_in_background",
+        "label": "停止等待，任务后台继续"
+      },
+      {
         "value": "change_own_password",
         "label": "修改自己的密码"
       },
@@ -13311,6 +13348,7 @@
         "runtime.task_cancellation",
         "runtime.asset_delivery",
         "chat.agent.title_prompt",
+        "chat.agent.background_wait",
         "chat.agent.reply_language_template",
         "chat.agent.moderated_image_note",
         "chat.agent.mock_summary",
@@ -15259,6 +15297,9 @@
             "ui.studio.handle_badge.label": "Chat handle {handle}",
             "ui.studio.handle_preview.alt": "Preview of {handle}",
             "ui.studio.composer.stop_note": "Stop only ends this turn of the chat. Tasks already submitted upstream may still be billed; check task progress for details.",
+            "ui.studio.composer.stop_cancel_task": "Stop and cancel the task",
+            "ui.studio.composer.stop_background": "Stop waiting, keep the task running",
+            "ui.studio.composer.stop_background_hint": "The task keeps running in the background and may be charged; see the result in the task center when it finishes.",
             "ui.studio.lightbox.title": "Large view",
             "ui.studio.lightbox.close": "Close large view",
             "ui.studio.lightbox.previous": "Previous version",
@@ -16521,6 +16562,7 @@
             "audit_actions[value=set_approval_mode].label": "Set approval mode",
             "audit_actions[value=set_agent_scope].label": "Set Agent scope",
             "audit_actions[value=set_production_brief].label": "Set production brief",
+            "audit_actions[value=continue_turn_in_background].label": "Stop waiting, keep the task running",
             "audit_actions[value=change_own_password].label": "Change own password",
             "audit_actions[value=admin_read_users].label": "Administrator viewed users",
             "audit_actions[value=admin_read_audit_logs].label": "Administrator viewed audit logs",
@@ -16842,7 +16884,12 @@
             "chat.agent.mock_waiting_summary": "This step needs your approval; the approval card is below. It shows the base credits, any extra credits (such as extra export formats) and the total. Click “Approve” to accept this cost; “Deny” uses no credits. Nothing is charged before you approve, and you can keep chatting meanwhile.",
             "chat.agent.mock_denied_summary": "OK, this step was not run and no credits were used. You can reduce or drop the extra export formats and generate again (fewer credits without them), or switch to a model without extra charges. Tell me what you'd like to do.",
             "chat.agent.consent_waiting_status": "An approval card has been created; nothing has been submitted or started yet, and the step runs only after you approve it on that card.",
-            "chat.agent.upstream_queue_content": "the provider has accepted this task but it is still waiting in the provider's own queue to start (ahead is the number of the provider's tasks before it, present only when the provider reports one). This is not a failure, and nothing was submitted or charged twice. Tell the waiting user plainly that the task is queued at the provider (with about how many tasks are ahead when ahead is present), that they can keep waiting and the task moves on by itself once it starts, or stop this turn, which cancels the task. Do not resubmit the generation, and do not switch to another service or model because of the queue unless the user explicitly asks",
+            "chat.agent.upstream_queue_content": "the provider has accepted this task but it is still waiting in the provider's own queue to start (ahead is the number of the provider's tasks before it, present only when the provider reports one). This is not a failure, and nothing was submitted or charged twice. Tell the waiting user plainly that the task is queued at the provider (with about how many tasks are ahead when ahead is present), that they can keep waiting and the task moves on by itself once it starts, or stop: either stop waiting and let the task keep running in the background (this turn ends, the task is not cancelled, and the result shows in the task center when it finishes), or stop and cancel the task. Do not resubmit the generation, and do not switch to another service or model because of the queue unless the user explicitly asks",
+            "chat.agent.background_wait.turn_content": "Stopped waiting. The task keeps running in the background; when it finishes, see the result in the task center.",
+            "chat.agent.background_wait.unavailable_message": "This turn cannot continue in the background right now: that is only possible while a single generation step is queued at the provider or has been running for a while. Keep waiting, or stop and cancel the task.",
+            "chat.agent.background_wait.context_template": "This session has generation tasks that the user stopped waiting for and that still run in the background (task data only):\n{tasks}\nThese tasks were submitted and may already be charged; when they finish, the result appears in the task center and is not written back into the chat. When the user asks about their result or asks for the same generation, first check their latest state with get_task or observe_task, and do not submit the same generation again. If the user still wants to generate again, say that it charges again and let the user decide.",
+            "chat.agent.background_wait.task_line_template": "- task_id={task_id}, capability={capability}, model={model}, status={status}",
+            "chat.agent.background_wait.upstream_queued_status": " (queued at the provider)",
             "chat.agent.refetch_started_content": "the accepted upstream result of the failed task is being fetched again as task {task_id}: nothing was submitted for generation and nothing is charged. Tell the user so, follow {task_id} with observe_task, and when it succeeds present its result as the earlier generation recovered. Do not call recover_task_result again for the same task and do not resubmit the generation",
             "chat.agent.refetch_unavailable_content.not_applicable": "this task did not fail after its upstream result was accepted, so there is nothing to fetch again. Do not call recover_task_result for it",
             "chat.agent.refetch_unavailable_content.not_supported": "this model's provider handed over its result only once, so it cannot be fetched again. Tell the user plainly; a new generation would charge again and needs their explicit decision",

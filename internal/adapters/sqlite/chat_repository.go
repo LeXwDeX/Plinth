@@ -1661,6 +1661,9 @@ type storedToolCall struct {
 	// Summary is the compact result of a read-only tool (#103); older rows
 	// omit it.
 	Summary json.RawMessage `json:"summary,omitempty"`
+	// Background marks a call whose Task kept running after the person
+	// stopped waiting (#137); older rows omit it.
+	Background bool `json:"background,omitempty"`
 }
 
 func marshalToolCalls(calls []chat.ToolCall) (string, error) {
@@ -1676,6 +1679,7 @@ func marshalToolCalls(calls []chat.ToolCall) (string, error) {
 			NativeQuote:      call.NativeQuote,
 			ApprovalSource:   call.ApprovalSource,
 			Summary:          call.Summary,
+			Background:       call.Background,
 		})
 	}
 	encoded, err := json.Marshal(stored)
@@ -1699,6 +1703,7 @@ func unmarshalToolCalls(raw string, target *[]chat.ToolCall) error {
 			NativeQuote:      call.NativeQuote,
 			ApprovalSource:   call.ApprovalSource,
 			Summary:          call.Summary,
+			Background:       call.Background,
 		})
 	}
 	*target = result

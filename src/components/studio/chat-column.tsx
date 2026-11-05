@@ -42,6 +42,7 @@ import { useSessionChoices } from '@/hooks/use-session-choices';
 import { useSessionPick } from '@/hooks/use-session-pick';
 import { useSessionState } from '@/hooks/use-session-state';
 import { useThreeViews } from '@/hooks/use-three-views';
+import { asksTurnBackground, useTurnBackground } from '@/hooks/use-turn-background';
 import { interleaveGroups } from '@/lib/workspace/three-view';
 import { ThreeViewCard } from '@/components/studio/three-view-card';
 import { tileOfObject, useSessionVersions } from '@/hooks/use-session-versions';
@@ -1796,6 +1797,27 @@ export function ChatColumn() {
       controllers.current.get(activeSessionId)?.abort();
     }
   };
+  // #137: while a Task of the streaming turn runs, ask the server whether the turn may stop waiting
+  // with its Task running on; only then does the stop offer that choice. The SSE stays open: the
+  // server ends the turn with its note and the done event, and the Task stays in the task tray.
+  const backgroundPollMilliseconds = schema.chat.frontend.background_wait_poll_milliseconds;
+  const asksBackground = asksTurnBackground({
+    sessionId: activeSessionId,
+    streaming: isStreaming,
+    taskRunning: sessionTasks.some((task) => !task.terminal),
+    route: schema.runtime.http.legacy_routes.chat_turn_background,
+    member: schema.chat.api.fields.turn_background_available,
+    intervalMilliseconds: backgroundPollMilliseconds,
+  });
+  const backgroundAvailable = useTurnBackground(chatClient, activeSessionId, asksBackground, backgroundPollMilliseconds);
+  const stopInBackground = () => {
+    if (!activeSessionId) return;
+    void chatClient.continueTurnInBackground(activeSessionId).catch((error: unknown) => {
+      toast.error(error instanceof Error && error.message !== ''
+        ? withErrorReference(error.message, error)
+        : schema.chat.presentation.messages.internal_error);
+    });
+  };
 
   const title = schemaText(schema, 'ui.studio.chat.title');
   const collapseLabel = schemaText(schema, 'ui.studio.chat.collapse');
@@ -2032,6 +2054,7 @@ export function ChatColumn() {
             onChange={setInput}
             onSend={() => { void send(input, undefined, undefined, editing?.deleteIds); }}
             onStop={stopTurn}
+            onStopInBackground={backgroundAvailable ? stopInBackground : null}
             streaming={isStreaming}
             locked={uploading || preparing}
             canSend={(input.trim() !== '' || attachedImages.length > 0 || hasCanvasReference || Boolean(currentSkill?.tool)) && Boolean(activeSessionId)}

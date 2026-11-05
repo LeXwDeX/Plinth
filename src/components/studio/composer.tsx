@@ -17,6 +17,7 @@ import { KindBadge } from '@/components/studio/kind-badge';
 import { GenerationModelNotice, ModelPicker } from '@/components/studio/model-picker';
 import { ParamsPopover, type ParamsPopoverProps } from '@/components/studio/params-popover';
 import { SkillPicker, type SkillPickerProps } from '@/components/studio/skill-picker';
+import { StopChoices } from '@/components/studio/stop-choices';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { Field } from '@/components/ui/field';
@@ -74,6 +75,11 @@ export interface ComposerProps {
   onChange: (value: string) => void;
   onSend: () => void;
   onStop: () => void;
+  /**
+   * #137: set while the server says the waiting turn may stop waiting with its Task running on; the
+   * stop button then offers "stop and cancel the task" (onStop) and this. Null keeps the single stop.
+   */
+  onStopInBackground?: (() => void) | null;
   streaming: boolean;
   /** Uploading or preparing a Skill: the box is locked. A running turn does not lock it. */
   locked: boolean;
@@ -126,7 +132,7 @@ function polylinePoints(flat: readonly number[]): string {
  * 服务端按本人和本会话核对。
  */
 export function Composer({
-  value, onChange, onSend, onStop, streaming, locked, canSend, chip, chipSkipped, onToggleChip, mask = null, branch = null,
+  value, onChange, onSend, onStop, onStopInBackground = null, streaming, locked, canSend, chip, chipSkipped, onToggleChip, mask = null, branch = null,
   attachmentPurpose = null, onAttachmentPurpose,
   images, onRemoveImage, pinnedImage, onUnpin, acceptedImages, onFiles, onPasteImages, editing, onCancelEdit,
   skill, params, sendCredits: generationSendCredits, mentions, onMentionPicked, referenceLimit = null,
@@ -612,7 +618,9 @@ export function Composer({
             </Action>
           </HintTooltip>
           <span className="flex-1" />
-          {streaming ? (
+          {streaming && onStopInBackground ? (
+            <StopChoices label={stopLabel} onCancel={onStop} onBackground={onStopInBackground} />
+          ) : streaming ? (
             <HintTooltip name={stopLabel}>
               <Action type="button" variant="secondary" size="sm" aria-label={stopLabel} onClick={onStop} data-testid="composer-stop">
                 <Square className="size-3.5" />

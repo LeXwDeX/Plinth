@@ -417,6 +417,15 @@ func validateRuntime(schema RuntimeSchema) error {
 		httpRuntime.LegacyRoutes.AdminBackfillStatus,
 		httpRuntime.LegacyRoutes.MeshyProxyAsset,
 	}
+	// The background-continue route (#137) is optional; when declared it is
+	// a distinct route with the stop route's single session parameter.
+	if route := httpRuntime.LegacyRoutes.ChatTurnBackground; route != "" {
+		if route == httpRuntime.LegacyRoutes.ChatTurnCancel ||
+			len(configuredRouteParameters(route)) != 1 {
+			return errors.New("http legacy chat_turn_background route 必须与 chat_turn_cancel 不同且声明一个路径参数")
+		}
+		legacyRoutes = append(legacyRoutes, route)
+	}
 	seenLegacyRoutes := map[string]struct{}{}
 	for _, route := range legacyRoutes {
 		if !strings.HasPrefix(route, "/") {
