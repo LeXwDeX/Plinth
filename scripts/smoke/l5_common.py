@@ -673,6 +673,11 @@ class Live:
         self.client = client
         self.report = report
         self.arguments = arguments
+        # The domain, model and extra fields (for example structured
+        # parameters) of each session's last message, reused when a choice card
+        # is answered; and the cards whose answer the server accepted.
+        self._last_send = {}
+        self._answered_choices = set()
 
     # sessions
     def new_session(self, title=DEFAULT_SESSION_TITLE, approval="auto"):
@@ -685,6 +690,8 @@ class Live:
         return session_id
 
     def send(self, session_id, content, domain, model, **extra):
+        if "choiceAnswer" not in extra:
+            self._last_send[session_id] = (domain, model, dict(extra))
         body = {"content": content, "creative_domain": domain, "ai_model": model}
         body.update(extra)
         # 409 means the session has not released the previous turn yet; the rejected message was not
@@ -751,8 +758,48 @@ class Live:
             settled, _ = tasks_settled(tasks, expected)
             if settled:
                 return tasks, True
+            # #103: the Agent may stop at a choice card (for example the 3D usage
+            # card) before the expected step; answer it as a person would.
+            self.answer_pending_choices(session_id)
             time.sleep(poll)
         return tasks, False
+
+    def pending_choices(self, session_id):
+        status, data = self.client.call("GET", f"/api/v1/chat/sessions/{session_id}/choices")
+        if status != 200 or not isinstance(data, dict):
+            return []
+        return [card for card in data.get("choices") or []
+                if isinstance(card, dict) and card.get("state") == "pending"
+                and card.get("id") not in self._answered_choices]
+
+    def answer_pending_choices(self, session_id):
+        """Answer each pending choice card once, after its turn has finished, with the default
+        (or else the recommended, or else the first) option. Returns whether a card was answered."""
+        cards = self.pending_choices(session_id)
+        if not cards or session_id not in self._last_send or not self.turn_finished(session_id, probe=2):
+            return False
+        domain, model, extra = self._last_send[session_id]
+        for card in cards:
+            options = [option for option in card.get("options") or [] if isinstance(option, dict) and option.get("id")]
+            if card.get("allow_default") and card.get("default_option_id"):
+                answer, label = {"choice_id": card["id"], "use_default": True}, "default"
+            elif options:
+                pick = next((option for option in options if option.get("recommended")), options[0])
+                answer, label = {"choice_id": card["id"], "option_id": pick["id"]}, pick["id"]
+            else:
+                continue
+            # The answer turn carries the original request's fields (for example
+            # its structured parameters): the server reads them from this turn only.
+            status, _ = self.send(session_id, "按默认选项继续。", domain, model, **extra, choiceAnswer=answer)
+            if status not in (200, 201, 202):
+                # The card stays pending on the server unless the answer landed; the
+                # next poll reads its state again and retries only if still pending.
+                print(f"choice card {card.get('id')} answer not accepted: HTTP {status}", flush=True)
+                return False
+            self._answered_choices.add(card["id"])
+            print(f"answered choice card {card.get('tool', '')} with {label}", flush=True)
+            return True
+        return False
 
     def run_turn(self, session_id, content, domain, model, expected, **extra):
         """Send a message, wait for the final reply, then for the expected tasks. Returns (reply, tasks, ok)."""
