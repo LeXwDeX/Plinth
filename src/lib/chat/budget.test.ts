@@ -30,7 +30,7 @@ describe('the production plan', () => {
     const plan = parseProductionPlan({
       title: '木椅',
       steps: [
-        { capability: 'text-to-3d', offering_id: 'tripo-v3', purpose: '主体', estimate: tripo('80') },
+        { capability: 'text-to-3d', offering_id: 'tripo-v3', purpose: '主体', estimate: tripo('80'), purpose_budget_note: '面数超出用途预算' },
         { capability: 'retexture', purpose: '材质', estimate: legacy('20') },
       ],
       correction_capabilities: ['remesh', 'retexture'],
@@ -38,8 +38,8 @@ describe('the production plan', () => {
     expect(plan).toEqual({
       title: '木椅',
       steps: [
-        { capability: 'text-to-3d', offeringId: 'tripo-v3', purpose: '主体', estimate: tripo('80') },
-        { capability: 'retexture', offeringId: '', purpose: '材质', estimate: legacy('20') },
+        { capability: 'text-to-3d', offeringId: 'tripo-v3', purpose: '主体', estimate: tripo('80'), purposeBudgetNote: '面数超出用途预算' },
+        { capability: 'retexture', offeringId: '', purpose: '材质', estimate: legacy('20'), purposeBudgetNote: '' },
       ],
       correctionCapabilities: ['remesh', 'retexture'],
     });

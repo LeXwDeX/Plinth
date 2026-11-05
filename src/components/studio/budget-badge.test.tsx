@@ -32,7 +32,7 @@ vi.mock('swr', () => ({
 const plan = {
   title: '木椅',
   steps: [{ capability: 'text-to-3d', offeringId: 'tripo-v3', purpose: '主体',
-    estimate: { unit: 'tripo.credit', unit_label: 'Tripo credits', amount: '80' } }],
+    estimate: { unit: 'tripo.credit', unit_label: 'Tripo credits', amount: '80' }, purposeBudgetNote: '' }],
   correctionCapabilities: [],
 };
 // #120: a budget in two credit units, each with its own figures.

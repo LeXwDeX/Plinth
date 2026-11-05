@@ -107,3 +107,42 @@ func TestProposeProductionPlanBudgetsEachUnitSeparately(t *testing.T) {
 		})
 	}
 }
+
+// #129: a planned step whose values would be over the session purpose's
+// budget carries the note on the stored plan (the plan card reads it) and in
+// the Agent's plan receipt; a step that fits carries none.
+func TestProposeProductionPlanCarriesThePurposeBudgetNoteOfEachStep(t *testing.T) {
+	store := &recordingProductionPlans{}
+	service := unitProposalService(t, store)
+	var checked []string
+	service.SetProductionPlanPurposeBudget(func(command chat.ToolCommand, offering generation.Offering) string {
+		checked = append(checked, string(offering.ID)+"@"+command.SessionID)
+		if offering.ID == "tripo-3d" {
+			return "Tripo 的面数上限超过用途预算"
+		}
+		return ""
+	})
+	result, err := service.ProposeProductionPlan(context.Background(), planCommand(`{"title":"分单位",`+unitPlanSteps+`,
+		"budgets":[{"unit":"tripo.credit","amount":40},{"unit":"hyper3d.credit","amount":1.5},{"unit":"legacy.credits","amount":4}]}`))
+	if err != nil || result.Error != "" || len(store.created) != 1 {
+		t.Fatalf("proposal = %+v err=%v", result, err)
+	}
+	if len(checked) != 3 || checked[0] != "tripo-3d@session-a" {
+		t.Fatalf("checked steps = %v", checked)
+	}
+	steps := store.plans[0].Steps
+	if steps[0].PurposeBudgetNote != "Tripo 的面数上限超过用途预算" || steps[1].PurposeBudgetNote != "" {
+		t.Fatalf("stored notes = %+v", steps)
+	}
+	var content map[string]any
+	if err := json.Unmarshal([]byte(result.AgentContent), &content); err != nil {
+		t.Fatal(err)
+	}
+	receipt := content["steps"].([]any)
+	if receipt[0].(map[string]any)["purpose_budget_note"] != "Tripo 的面数上限超过用途预算" {
+		t.Fatalf("receipt step = %v", receipt[0])
+	}
+	if _, noted := receipt[1].(map[string]any)["purpose_budget_note"]; noted {
+		t.Fatalf("a fitting step was noted: %v", receipt[1])
+	}
+}

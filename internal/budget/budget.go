@@ -78,6 +78,10 @@ type PlanStep struct {
 	// Estimate is the server's quote for the step at plan time, in the step's
 	// own unit; an Agent-supplied number is never trusted.
 	Estimate Amount `json:"estimate"`
+	// PurposeBudgetNote names the values the step would run with that are over
+	// the session purpose's budget (#129), in the turn's language; empty when
+	// they fit or the session has no purpose.
+	PurposeBudgetNote string `json:"purpose_budget_note,omitempty"`
 }
 
 // UnmarshalJSON also reads a step stored before #120, whose integer
@@ -85,17 +89,18 @@ type PlanStep struct {
 // legacy bucket unchanged.
 func (s *PlanStep) UnmarshalJSON(data []byte) error {
 	var wire struct {
-		Capability       string          `json:"capability"`
-		OfferingID       string          `json:"offering_id"`
-		Purpose          string          `json:"purpose"`
-		Estimate         json.RawMessage `json:"estimate"`
-		EstimatedCredits int             `json:"estimated_credits"`
+		Capability        string          `json:"capability"`
+		OfferingID        string          `json:"offering_id"`
+		Purpose           string          `json:"purpose"`
+		Estimate          json.RawMessage `json:"estimate"`
+		EstimatedCredits  int             `json:"estimated_credits"`
+		PurposeBudgetNote string          `json:"purpose_budget_note"`
 	}
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
 	step := PlanStep{Capability: wire.Capability, OfferingID: wire.OfferingID, Purpose: wire.Purpose,
-		Estimate: Legacy(wire.EstimatedCredits)}
+		Estimate: Legacy(wire.EstimatedCredits), PurposeBudgetNote: wire.PurposeBudgetNote}
 	if len(wire.Estimate) > 0 && string(wire.Estimate) != "null" {
 		if err := json.Unmarshal(wire.Estimate, &step.Estimate); err != nil {
 			return err

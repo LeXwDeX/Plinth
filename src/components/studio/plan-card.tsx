@@ -167,6 +167,12 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
                     {state ? state.label : text('ui.studio.plan.step_pending')}
                   </span>
                 </span>
+                {entry.step.purposeBudgetNote ? (
+                  // #129: the server says which values of this step are over the purpose's budget.
+                  <p className="col-start-2 col-end-4 text-[11px] text-warning [overflow-wrap:anywhere]" data-testid="studio-plan-step-budget-note">
+                    {entry.step.purposeBudgetNote}
+                  </p>
+                ) : null}
               </li>
             );
           })}

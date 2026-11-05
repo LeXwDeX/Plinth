@@ -95,6 +95,19 @@ type ProductionPlanPolicy struct {
 	Offerings         func() []generation.Offering
 	OfferingAvailable func(generation.OfferingID) bool
 	Store             ProductionPlanStore
+	// PurposeBudgetNote words the values a planned step would run with that
+	// are over the session purpose's budget (#129), or "" when they fit. It is
+	// optional: without it a plan carries no purpose budget note.
+	PurposeBudgetNote func(command ToolCommand, offering generation.Offering) string
+}
+
+// SetProductionPlanPurposeBudget installs the purpose budget check of planned
+// steps (#129). Application assembly calls it once the generation tools that
+// own the purpose budget exist; it does nothing without production plans.
+func (service *Service) SetProductionPlanPurposeBudget(note func(ToolCommand, generation.Offering) string) {
+	if service.productionPlans != nil {
+		service.productionPlans.PurposeBudgetNote = note
+	}
 }
 
 // SetProductionPlans installs the budget-mode proposal writer. It is called
@@ -168,7 +181,7 @@ func (service *Service) ProposeProductionPlan(ctx context.Context, command ToolC
 		decoder.Decode(new(any)) != io.EOF {
 		return planRefusal("arguments must match the declared plan object"), nil
 	}
-	plan, limits, refusal := policy.buildPlan(arguments)
+	plan, limits, refusal := policy.buildPlan(command, arguments)
 	if refusal != "" {
 		return planRefusal(refusal), nil
 	}
@@ -208,7 +221,7 @@ func productionPlanRequestKey(command ToolCommand) string {
 // from the runtime Catalog in the step's own unit. A step's Agent-supplied
 // estimate is never used, and every unit the steps are quoted in needs its own
 // limit that covers them; units are never added or converted (#120).
-func (policy *ProductionPlanPolicy) buildPlan(arguments proposedPlanArguments) (budget.Plan, []budget.Amount, string) {
+func (policy *ProductionPlanPolicy) buildPlan(command ToolCommand, arguments proposedPlanArguments) (budget.Plan, []budget.Amount, string) {
 	config := policy.Budget
 	title := strings.TrimSpace(arguments.Title)
 	if title == "" {
@@ -269,12 +282,19 @@ func (policy *ProductionPlanPolicy) buildPlan(arguments proposedPlanArguments) (
 			// person approve the step directly.
 			return budget.Plan{}, nil, "step " + capability + " has no server credit estimate and cannot be budgeted"
 		}
-		plan.Steps = append(plan.Steps, budget.PlanStep{
+		planned := budget.PlanStep{
 			Capability: capability,
 			OfferingID: strings.TrimSpace(step.Model),
 			Purpose:    purpose,
 			Estimate:   estimated,
-		})
+		}
+		if policy.PurposeBudgetNote != nil {
+			// A plan step names no parameters, so the check reads the values it
+			// would run with; the person sees an over-budget value on the card
+			// before approving the plan, not only after the step ran (#129).
+			planned.PurposeBudgetNote = policy.PurposeBudgetNote(command, offering)
+		}
+		plan.Steps = append(plan.Steps, planned)
 	}
 	if uncovered := plan.Uncovered(limits); len(uncovered) > 0 {
 		return budget.Plan{}, nil, "budgets must give every unit the steps are quoted in at least the server estimate of that unit (" +
@@ -421,6 +441,9 @@ func planProposedContent(stored budget.ProductionBudget, messages catalog.ChatAp
 		}
 		if step.OfferingID != "" {
 			item["offering_id"] = step.OfferingID
+		}
+		if step.PurposeBudgetNote != "" {
+			item["purpose_budget_note"] = step.PurposeBudgetNote
 		}
 		steps = append(steps, item)
 	}
