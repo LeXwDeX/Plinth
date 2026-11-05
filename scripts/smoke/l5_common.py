@@ -811,7 +811,16 @@ class Live:
         if reply is None:
             self.report.failed("final reply", "timed out waiting for the turn to finish")
             return None, self.tasks(session_id), False
+        answered = len(self._answered_choices)
         tasks, settled = self.wait_tasks(session_id, expected)
+        if len(self._answered_choices) > answered:
+            # Answering a choice card started a turn of its own, which may still be
+            # reviewing the result after the tasks settled; the next message would be
+            # rejected until it ends, and its final message is this turn's real reply.
+            reply = self.wait_reply(session_id)
+            if reply is None:
+                self.report.failed("final reply", "timed out waiting for the turn after the choice answer")
+                return None, self.tasks(session_id), False
         return reply, tasks, settled
 
     def login(self):
