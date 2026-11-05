@@ -58,6 +58,9 @@ def judge_split(live, report, label, tasks, capability, offering_id):
 
 def model_chain(live, report, label, base_capability, base_model, base_prompt, split_offering, split_turn):
     session = live.new_session()
+    # The chain needs this provider's source model (Bang splits only a Rodin task), so pick it the way
+    # a person does; otherwise the Agent may choose another model for the purpose (#103).
+    live.lock_model_3d(session, base_model)
     reply, tasks, settled = live.run_turn(session, base_prompt, "model-3d", base_model, {base_capability: 1})
     if not report.check(f"{label} source model generated",
                         settled and common.succeeded_count(tasks, base_capability) >= 1,
@@ -105,6 +108,7 @@ def image_chain(live, report):
                         str(common.describe_tasks(tasks))):
         return
     before = {t.get("id") for t in tasks}
+    live.lock_model_3d(session, model)
     reply, tasks, settled = live.run_turn(session, IMAGE_TURN, "model-3d", model, {"image-to-3d": 1})
     if reply is None:
         return
