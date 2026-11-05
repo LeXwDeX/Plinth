@@ -53,7 +53,9 @@ class AckAndArguments(unittest.TestCase):
             c.parse_arguments(["--unknown"])
 
     def test_scripts_refuse_without_ack(self):
-        env = {"PATH": "/usr/bin:/bin", "BASE": "https://example.test", "ADMIN_USERNAME": "u", "ADMIN_PASSWORD": "p"}
+        # A bare environment, but still no bytecode: the gates must leave the checkout untouched.
+        env = {"PATH": "/usr/bin:/bin", "BASE": "https://example.test", "ADMIN_USERNAME": "u", "ADMIN_PASSWORD": "p",
+               "PYTHONDONTWRITEBYTECODE": "1"}
         for name in ("chat-models", "2d-to-3d", "parallel", "three-view", "split", "2d-params", "canvas", "3d-params",
                      "2d-split", "agent-hard"):
             result = subprocess.run([sys.executable, str(SMOKE / f"smoke-l5-{name}.py")], env=env,

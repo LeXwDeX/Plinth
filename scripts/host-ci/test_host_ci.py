@@ -78,7 +78,13 @@ class EnvironmentLookup(unittest.TestCase):
             with self.subTest(configured), self.assertRaises(run.UsageError):
                 self.load({'dev-test': {'ssh': 'root@host.example', 'root': '/srv/plinth', 'protected_paths': ['/data/other'],
                                         'host_ci': {'dir': configured}},
-                           'formal-test': {'ssh': 'root@other.example', 'root': '/srv/other'}})
+                           'candidate': {'ssh': 'deploy@host.example', 'root': '/srv/other'}})
+
+    def test_release_roots_on_another_host_do_not_block_the_directory(self):
+        _, directory, _ = self.load({'dev-test': {'ssh': 'root@host.example', 'root': '/srv/plinth', 'host_ci': {'dir': '/srv/plinth/ci'}},
+                                     'formal-test': {'ssh': 'root@other.example', 'root': '/srv/plinth',
+                                                     'protected_paths': ['/srv/plinth/ci']}})
+        self.assertEqual(directory, '/srv/plinth/ci')
 
     def test_the_ci_directory_inside_the_own_release_root_is_allowed(self):
         _, directory, _ = self.load({'dev-test': {'ssh': 'root@host.example', 'root': '/srv/plinth', 'host_ci': {'dir': '/srv/plinth/ci'}}})
