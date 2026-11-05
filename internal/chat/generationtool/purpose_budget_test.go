@@ -257,3 +257,36 @@ func TestProcessingPlanStepsFollowThePurposeBudget(t *testing.T) {
 		t.Fatalf("plan budget note = %q, want the planned 300000 quads (600000 triangles)", note)
 	}
 }
+
+// A production plan step names no parameters: it is checked before approval
+// with the values it would run with (#129). Values the purpose budget can
+// bound fit and say nothing; a value the budget cannot bring within it (a
+// brief budget below the Offering's minimum face limit, so the step runs at
+// that minimum) is named on the plan.
+func TestPlanStepPurposeBudgetNoteNamesValuesTheBudgetCannotBound(t *testing.T) {
+	h := newProcessingHarness(t, "auto", meshyCatalogTasks)
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	offering, found := product.Get("tripo/tripo-v3.1-full/text-to-3d")
+	if !found {
+		t.Fatal("missing the shipped Tripo text-to-3d Offering")
+	}
+	command := chat.ToolCommand{OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-a",
+		Call: agents.ToolCall{ID: "call-plan", Name: "propose_production_plan", Arguments: []byte(`{}`)}}
+	if note := h.executor.PlanStepPurposeBudgetNote(command, offering); note != "" {
+		t.Fatalf("a step without a purpose was noted: %q", note)
+	}
+	command.Options.ProductionBrief = purposeBrief(t, map[string]any{"purpose": "game_prop"})
+	if note := h.executor.PlanStepPurposeBudgetNote(command, offering); note != "" {
+		t.Fatalf("a face limit the purpose bounds was noted: %q", note)
+	}
+	command.Options.ProductionBrief = purposeBrief(t, map[string]any{"purpose": "game_prop", "triangle_budget": 500})
+	note := h.executor.PlanStepPurposeBudgetNote(command, offering)
+	for _, want := range []string{"1000", "500"} {
+		if !strings.Contains(note, want) {
+			t.Fatalf("plan step note %q does not mention %q", note, want)
+		}
+	}
+}

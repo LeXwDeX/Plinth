@@ -1615,6 +1615,14 @@ func newHTTPHarnessWithCatalogAndProviders(
 	executionGrants := &executiongrant.Service{Grants: grantRepository, Prepared: repository,
 		Budgets: repository, Policy: approvalPolicy, Modes: chatService,
 		PendingTTL: time.Duration(applicationSchema.Chat.PendingApprovals.TTLSeconds) * time.Second}
+	// As the application assembles it: the plan store and its continuation
+	// turn (#103, #134) use the same grant service.
+	chatService.SetProductionPlans(chat.ProductionPlanPolicy{
+		Budget:            applicationSchema.Chat.ApprovalPolicy.Budget,
+		Offerings:         func() []generation.Offering { return module.Offerings("") },
+		OfferingAvailable: module.OfferingAvailable,
+		Store:             executionGrants,
+	})
 	approvalTexts, err := catalog.NewTextLocalizer(applicationSchema)
 	if err != nil {
 		t.Fatal(err)

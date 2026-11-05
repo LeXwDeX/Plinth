@@ -185,12 +185,15 @@ func (s *Server) requestTaskGrant(writer http.ResponseWriter, request *http.Requ
 		s.writeTaskGrantError(writer, err)
 		return
 	}
+	// A step an approved production plan covered needs no click either (#135):
+	// the processing panel re-prepares an Agent plan's step with its budget
+	// eligibility (#120).
 	writeJSON(writer, http.StatusCreated, frozenQuoteWire(map[string]any{
 		"request_id":         grant.RequestID,
 		"status":             grant.Status,
 		"request_version":    grant.RequestVersion,
 		"prepared_input_id":  grant.PreparedInputID,
-		"approved_by_policy": grant.ApprovedByPolicy(),
+		"approved_by_policy": grant.ApprovedByPolicy() || grant.ApprovedByBudget(),
 	}, prepared.NativeQuote))
 }
 

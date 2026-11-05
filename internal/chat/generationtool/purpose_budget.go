@@ -90,6 +90,25 @@ func rawInput(input map[string]any) (map[string]json.RawMessage, error) {
 	return raw, nil
 }
 
+// PlanStepPurposeBudgetNote checks a production plan step against the session
+// purpose's budget before the plan is approved (#129). A plan step names no
+// parameters, so the values are the ones the step would run with when nobody
+// sets one: the Offering's defaults and fixed values, with the purpose's own
+// values and budget fits. Fixed values and defaults the budget cannot bound
+// are what it reports; the note is empty when they fit or the session has no
+// purpose.
+func (executor *Executor) PlanStepPurposeBudgetNote(command chat.ToolCommand, offering generation.Offering) string {
+	_, values := executor.purposeParameterValues(command, offering, nil)
+	if values == nil {
+		values = map[string]json.RawMessage{}
+	}
+	input, err := json.Marshal(values)
+	if err != nil {
+		return ""
+	}
+	return executor.purposeBudgetText(command, executor.purposeBudgetItems(command, offering, input))
+}
+
 // purposeBudgetNote is the Schema's note naming a step's values over the
 // session purpose's budget, for the tool's result key. Empty when the tool
 // declares no key, the session has no purpose or every bounded value fits.

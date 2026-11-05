@@ -118,6 +118,10 @@ type TurnOptions struct {
 	// session (#103). While set it is locked: a production purpose and an
 	// Agent-named model cannot replace it.
 	ExplicitModel3D string `json:"ExplicitModel3D,omitempty"`
+	// PlanContinuation is the production plan this turn runs: the server
+	// started it when the person approved the plan (#134). Only the service
+	// sets it; a request never does. Empty for an ordinary turn.
+	PlanContinuation string `json:"PlanContinuation,omitempty"`
 }
 
 type Turn struct {

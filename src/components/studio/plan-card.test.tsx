@@ -37,8 +37,8 @@ vi.mock('swr', () => ({
 const plan: ProductionPlan = {
   title: '木椅',
   steps: [
-    { capability: 'text-to-3d', offeringId: 'tripo-v3', purpose: '主体', estimate: tripo('80') },
-    { capability: 'retexture', offeringId: '', purpose: '材质', estimate: legacy('20') },
+    { capability: 'text-to-3d', offeringId: 'tripo-v3', purpose: '主体', estimate: tripo('80'), purposeBudgetNote: '' },
+    { capability: 'retexture', offeringId: '', purpose: '材质', estimate: legacy('20'), purposeBudgetNote: '' },
   ],
   correctionCapabilities: ['remesh'],
 };
@@ -84,6 +84,16 @@ describe('a production plan waiting for approval (#103)', () => {
       words('ui.studio.plan.budget', { amounts: text('ui.pricing.unknown') }),
     );
     expect(view.getByTestId('studio-plan-corrections').textContent).toContain(text('ui.studio.plan.corrections_none'));
+  });
+
+  // #129: a step whose values would be over the session purpose's budget says so before the plan is approved.
+  it('shows the purpose budget note of a step and nothing for a step that fits', () => {
+    const noted = { ...plan, steps: [{ ...plan.steps[0], purposeBudgetNote: '面数上限 1000 超过用途预算 500' }, plan.steps[1]] };
+    const view = render(<PlanCard plan={noted} budgets={budgets} tasks={[]} />);
+    const notes = view.getAllByTestId('studio-plan-step-budget-note');
+    expect(notes).toHaveLength(1);
+    expect(notes[0].textContent).toBe('面数上限 1000 超过用途预算 500');
+    expect(within(view.getAllByTestId('studio-plan-step')[0]).getByTestId('studio-plan-step-budget-note')).toBeTruthy();
   });
 
   it('approves and declines through the card, and disables both while a decision is on its way', () => {

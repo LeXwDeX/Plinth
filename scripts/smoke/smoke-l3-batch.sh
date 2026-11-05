@@ -28,6 +28,15 @@ C=$(req /tmp/s3.json -X POST "$BASE/api/auth/login" -H 'Content-Type: applicatio
   -d "{\"username\":\"$ADMIN_USERNAME\",\"password\":\"$ADMIN_PASSWORD\"}" -c /tmp/s3-cookies.txt)
 [ "$C" = 200 ] && ok "login" || { bad "login"; exit 1; }
 J=/tmp/s3-cookies.txt
+req /tmp/s3-schema.json "$BASE/api/v1/schema" -b "$J" >/dev/null
+# The approval decision member is Schema data (chat.api.fields.decision, #120): the server reads
+# the same declaration, so the body is built from the public schema like the browser builds it.
+decision_body() { # approve|deny -> {"<member>": "<decision>"}; empty when the Schema declares none
+  python3 -c 'import json,sys
+d=json.load(open(sys.argv[1])); d=d.get("schema", d)
+m=((d.get("chat") or {}).get("api") or {}).get("fields",{}).get("decision")
+sys.exit(1) if not m else print(json.dumps({m: sys.argv[2]}))' "/tmp/s3-schema.json" "$1" 2>/dev/null
+}
 
 # 模型清单：schema 可用 text-to-image offering 的 model_id（去重）
 req /tmp/s3-off.json "$BASE/api/v1/offerings?capability=text-to-image" -b "$J" >/dev/null
@@ -89,13 +98,13 @@ EOF2
     *)
       echo "REFUSED: pending approval is '$capability', not the 2D image step — denied, not approved"
       req /tmp/s3.json -X PUT "$BASE/api/v1/tasks/grants/$request_id" \
-        -H 'Content-Type: application/json' -H "Origin: $BASE" -b "$J" -d '{"decision":"deny"}' >/dev/null
+        -H 'Content-Type: application/json' -H "Origin: $BASE" -b "$J" -d "$(decision_body deny)" >/dev/null
       return 1 ;;
   esac
   local status
   status=$(req /tmp/s3.json -X PUT "$BASE/api/v1/tasks/grants/$request_id" \
     -H 'Content-Type: application/json' -H "Origin: $BASE" -b "$J" \
-    -d '{"decision":"approve"}')
+    -d "$(decision_body approve)")
   case "$status" in 2[0-9][0-9]) return 0 ;; *) return 1 ;; esac
 }
 newest_task_id() { # $1=session → 最新任务 ID（无任务为空）

@@ -37,6 +37,15 @@ C=$(req /tmp/s2.json -X POST "$BASE/api/auth/login" -H 'Content-Type: applicatio
   -d "{\"username\":\"${ADMIN_USERNAME:-}\",\"password\":\"${ADMIN_PASSWORD:-}\"}" -c /tmp/s2-cookies.txt)
 [ "$C" = 200 ] && ok "login" || { bad "login ($C)"; exit 1; }
 J=/tmp/s2-cookies.txt
+req /tmp/s2-schema.json "$BASE/api/v1/schema" -b "$J" >/dev/null
+# The approval decision member is Schema data (chat.api.fields.decision, #120): the server reads
+# the same declaration, so the body is built from the public schema like the browser builds it.
+decision_body() { # approve|deny -> {"<member>": "<decision>"}; empty when the Schema declares none
+  python3 -c 'import json,sys
+d=json.load(open(sys.argv[1])); d=d.get("schema", d)
+m=((d.get("chat") or {}).get("api") or {}).get("fields",{}).get("decision")
+sys.exit(1) if not m else print(json.dumps({m: sys.argv[2]}))' "/tmp/s2-schema.json" "$1" 2>/dev/null
+}
 
 mk() { # 创建会话，失败重试一次
   local sid=""
@@ -99,7 +108,7 @@ approve_consent() { # session request_id true|false：只决定这一张卡片�
   local status
   status=$(req /tmp/s2-decision.json -X PUT "$BASE/api/v1/tasks/grants/$request_id" \
     -H 'Content-Type: application/json' -H "Origin: $BASE" -b "$J" \
-    -d "{\"decision\":\"$decision\"}")
+    -d "$(decision_body "$decision")")
   case "$status" in 2[0-9][0-9]) return 0 ;; *) return 1 ;; esac
 }
 deny_all() { # $1=session：拒绝会话里所有待批准卡片（免费）；全部拒绝成功返回 0

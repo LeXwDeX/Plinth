@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { SessionBudget } from '@/lib/chat/budget';
 import { reloadSessionBudget } from '@/lib/chat/session-budget';
 
-const plan = { title: 'p', steps: [{ capability: 'a', offeringId: '', purpose: '', estimate: null }], correctionCapabilities: [] };
+const plan = { title: 'p', steps: [{ capability: 'a', offeringId: '', purpose: '', estimate: null, purposeBudgetNote: '' }], correctionCapabilities: [] };
 const budget: SessionBudget = {
   id: 'b1', state: 'active',
   units: [{ unit: 'legacy.credits', unitLabel: 'legacy.credits', limit: '10', spent: '2', reserved: '0', remaining: '8' }],

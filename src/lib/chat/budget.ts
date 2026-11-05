@@ -16,6 +16,11 @@ export interface ProductionPlanStep {
   purpose: string;
   /** The server's quote for the step at plan time, in the step's own unit; null when none was sent. */
   estimate: PriceTotal | null;
+  /**
+   * #129: the server's note naming the values this step would run with that are
+   * over the session purpose's budget; empty when they fit.
+   */
+  purposeBudgetNote: string;
 }
 
 /** #120: one credit unit of a plan budget, as the server's decimal strings. */
@@ -186,6 +191,7 @@ export function parseProductionPlanStep(value: unknown): ProductionPlanStep | nu
     offeringId: text(item.offering_id),
     purpose: text(item.purpose),
     estimate: priceTotal(item.estimate),
+    purposeBudgetNote: text(item.purpose_budget_note),
   };
 }
 

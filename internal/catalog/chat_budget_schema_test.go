@@ -153,6 +153,12 @@ func TestBudgetModeRequiresItsPlanBoundsAndTexts(t *testing.T) {
 		"no unit separator": func(a *catalog.ApplicationSchema) {
 			a.Chat.ApprovalPolicy.Budget.UnitSeparator = ""
 		},
+		"no continuation message": func(a *catalog.ApplicationSchema) {
+			a.Chat.ApprovalPolicy.Budget.Continuation.Message = ""
+		},
+		"no continuation text for the Agent": func(a *catalog.ApplicationSchema) {
+			a.Chat.ApprovalPolicy.Budget.Continuation.AgentTemplate = " "
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			c, err := catalog.LoadDefault()

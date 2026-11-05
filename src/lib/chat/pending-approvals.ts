@@ -85,6 +85,11 @@ export interface PendingApprovalDecision {
   taskId: string;
   /** 提交后服务端插入的结果消息；有值时需要重新读取消息列表。 */
   messageId: string;
+  /**
+   * #134: the assistant message of the turn the server started to run an
+   * approved plan; the chat attaches to its stream. Absent when none started.
+   */
+  turnMessageId?: string;
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -314,6 +319,7 @@ export async function decideSessionBudget(
     status: text(payload.state),
     taskId: '',
     messageId: text(payload.message_id),
+    ...(text(payload.turn_message_id) ? { turnMessageId: text(payload.turn_message_id) } : {}),
   };
 }
 

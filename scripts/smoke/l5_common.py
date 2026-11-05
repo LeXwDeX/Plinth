@@ -12,7 +12,6 @@ import argparse
 import decimal
 import http.cookiejar
 import json
-import math
 import os
 import re
 import sys
@@ -503,24 +502,23 @@ def safe_name(text):
 
 # ------------------------------------------------- budget approval mode (#103)
 #
-# Wire facts (server side): GET pending-approvals lists {"items": [...]}; a production plan card has
-# kind "plan", request_id = its budget ID, budget_credits = its limit, estimated_credits = the server's
-# quote of all steps and plan = {title, steps[{capability, offering_id, purpose, estimated_credits}],
-# correction_capabilities}. Every other pending item is a per-step approval card. The plan is decided
-# on the Schema route chat_session_budget (PUT {sessionID}/{budgetID}, body {<chat.api.fields.decision>:
-# "approve"|"deny"}), answered with {budget_id, state, message_id}. The session read carries the current
-# (active or exhausted) plan as "budget": {id, state, limit_credits, spent_credits, reserved_credits,
-# remaining_credits, plan}.
+# Wire facts (server side, #103 and #120: a plan budgets every credit unit on its own and never adds
+# units). GET pending-approvals lists {"items": [...]}; a production plan card has kind "plan",
+# request_id = its budget ID, budgets = its limits [{unit, unit_label, amount}], estimated_totals = the
+# server's quote of all steps per unit [{unit, unit_label, amount}] and plan = {title, steps[{capability,
+# offering_id, purpose, estimate: {unit, unit_label, amount}, purpose_budget_note}],
+# correction_capabilities}. Amounts are decimal strings. Every other pending item is a per-step
+# approval card. The plan is decided on the Schema route chat_session_budget (PUT {sessionID}/{budgetID},
+# body {<chat.api.fields.decision>: "approve"|"deny"}), answered with {budget_id, state, message_id} and,
+# for an approval, turn_message_id: the server starts the turn that runs the plan itself (#134). The
+# session read carries the current (active or exhausted) plan as "budget": {id, state, units[{unit,
+# unit_label, limit, spent, reserved, remaining}], plan}. A paid tool result's budget object is {id,
+# title, remaining[{unit, unit_label, amount}], reserved[...]}.
 
 PLAN_KIND = "plan"
 APPROVE, DENY = "approve", "deny"
-# schema.PriceAccumulator's bucket for integer (non-native) credit estimates.
+# The bucket of integer (non-native) credit estimates (budget.LegacyUnit).
 LEGACY_UNIT = "legacy.credits"
-# Key of a single limit that bounds the sum over every unit (see budget_limits).
-ANY_UNIT = "*"
-# Members that may carry one limit per unit, each entry {"unit", "amount"} like the session's
-# price_totals. #120 item 7 introduces per-unit limits; adjust the names here when its wire lands.
-PER_UNIT_LIMIT_MEMBERS = ("limit_totals", "budget_totals", "limits")
 FAILED_STATES = ("FAILED", "CANCELED", "CANCELLED")
 
 
@@ -534,25 +532,44 @@ def step_cards(items):
     return [item for item in items or [] if isinstance(item, dict) and item.get("kind") != PLAN_KIND]
 
 
+def unit_amounts(entries, figure="amount"):
+    """{unit: Decimal} from a per-unit list ({unit, unit_label, <figure>} entries), or None when the list
+    is missing, empty, names a unit twice or carries an unreadable amount."""
+    if not isinstance(entries, list) or not entries:
+        return None
+    amounts = {}
+    for entry in entries:
+        if not isinstance(entry, dict) or not entry.get("unit") or entry["unit"] in amounts:
+            return None
+        amount = native_amount(entry.get(figure))
+        if amount is None:
+            return None
+        amounts[entry["unit"]] = amount
+    return amounts
+
+
 def plan_card_problems(card):
-    """What a plan card lacks to be decided as the browser shows it: a budget ID, a positive limit that
-    covers the server's quote, and at least one step, each naming its capability."""
+    """What a plan card lacks to be decided as the browser shows it: a budget ID, a positive limit per
+    unit that covers the server's quote of that unit, and at least one step, each naming its capability.
+    Units are compared one by one, never summed."""
     if not isinstance(card, dict):
         return ["no plan card"]
     problems = []
     if not card.get("request_id"):
         problems.append("no budget id")
-    limit = card.get("budget_credits")
-    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
-        problems.append(f"budget_credits {limit!r}")
+    limits = unit_amounts(card.get("budgets"))
+    if limits is None or any(amount <= 0 for amount in limits.values()):
+        problems.append(f"budgets {card.get('budgets')!r}")
     steps = (card.get("plan") or {}).get("steps") if isinstance(card.get("plan"), dict) else None
     if not isinstance(steps, list) or not steps:
         problems.append("no steps")
     elif any(not isinstance(step, dict) or not step.get("capability") for step in steps):
         problems.append("a step without capability")
-    estimate = card.get("estimated_credits")
-    if isinstance(limit, int) and isinstance(estimate, int) and estimate > limit:
-        problems.append(f"limit {limit} below the quote {estimate}")
+    quotes = unit_amounts(card.get("estimated_totals")) or {}
+    for unit, quote in sorted(quotes.items()):
+        limit = (limits or {}).get(unit)
+        if quote > 0 and (limit is None or quote > limit):
+            problems.append(f"{unit} limit {limit} below the quote {quote}")
     return problems
 
 
@@ -660,31 +677,12 @@ def may_be_charged(task):
 
 
 def budget_limits(payload):
-    """Credit limits of a plan card or a session budget, by unit.
-
-    #120 item 7 moves the limit to one amount per unit (a list of {"unit", "amount"} under one of
-    PER_UNIT_LIMIT_MEMBERS). Until then the single limit_credits (budget_credits on a plan card) bounds
-    the sum over every unit, keyed ANY_UNIT: budget.EstimateNativeTotal counts one native unit as one
-    credit when it reserves a step. Empty when the payload has no readable limit."""
+    """Credit limits of a plan card (budgets) or a session budget (units[].limit), by unit (#120).
+    Empty when the payload has no readable limit."""
     payload = payload if isinstance(payload, dict) else {}
-    for member in PER_UNIT_LIMIT_MEMBERS:
-        entries = payload.get(member)
-        if not isinstance(entries, list) or not entries:
-            continue
-        limits = {}
-        for entry in entries:
-            if not isinstance(entry, dict) or not entry.get("unit"):
-                return {}
-            amount = native_amount(entry.get("amount", entry.get("limit")))
-            if amount is None:
-                return {}
-            limits[entry["unit"]] = amount
-        return limits
-    for member in ("limit_credits", "budget_credits"):
-        limit = native_amount(payload.get(member))
-        if limit is not None and limit > 0:
-            return {ANY_UNIT: limit}
-    return {}
+    if "units" in payload:
+        return unit_amounts(payload.get("units"), "limit") or {}
+    return unit_amounts(payload.get("budgets")) or {}
 
 
 def spend_by_unit(prices):
@@ -698,14 +696,10 @@ def budget_overruns(prices, limits):
     """Where the priced steps exceed the plan's limits, as (unit, spent, limit) triples; empty when
     every unit stays within its own limit.
 
-    Per-unit limits are checked per unit, never summed across units; a unit that spent without a limit
-    of its own is an overrun with limit None. A single limit (ANY_UNIT) bounds the sum over all units,
-    each step rounded up to whole credits as the server reserves it."""
+    Limits are checked per unit, never summed across units; a unit that spent without a limit of its
+    own is an overrun with limit None. Without any readable limit every spend is an overrun."""
     if not limits:
-        return [(ANY_UNIT, sum((amount for _, amount in prices), decimal.Decimal(0)), None)]
-    if ANY_UNIT in limits:
-        spent = decimal.Decimal(sum(math.ceil(amount) for _, amount in prices))
-        return [] if spent <= limits[ANY_UNIT] else [(ANY_UNIT, spent, limits[ANY_UNIT])]
+        return [(unit, spent, None) for unit, spent in sorted(spend_by_unit(prices).items())] or [("*", decimal.Decimal(0), None)]
     overruns = []
     for unit, spent in sorted(spend_by_unit(prices).items()):
         limit = limits.get(unit)
@@ -715,14 +709,20 @@ def budget_overruns(prices, limits):
 
 
 def ledger_overrun(summary):
-    """The server's own plan ledger: spent plus reserved must stay within limit_credits. Returns a
-    reason when it does not, None when it does; "" when the summary has no single limit to check."""
-    if not isinstance(summary, dict) or not isinstance(summary.get("limit_credits"), int):
+    """The server's own plan ledger, per unit: spent plus reserved must stay within that unit's limit.
+    Returns a reason when a unit does not, None when every unit does; "" when the summary has no
+    readable per-unit ledger."""
+    if not isinstance(summary, dict):
         return ""
-    spent = (summary.get("spent_credits") or 0) + (summary.get("reserved_credits") or 0)
-    if spent > summary["limit_credits"]:
-        return f"spent {summary.get('spent_credits')} + reserved {summary.get('reserved_credits')} > limit {summary['limit_credits']}"
-    return None
+    units = summary.get("units")
+    limits = unit_amounts(units, "limit")
+    spent = unit_amounts(units, "spent")
+    reserved = unit_amounts(units, "reserved")
+    if limits is None or spent is None or reserved is None:
+        return ""
+    over = [f"{unit}: spent {spent[unit]} + reserved {reserved[unit]} > limit {limit}"
+            for unit, limit in sorted(limits.items()) if spent[unit] + reserved[unit] > limit]
+    return "; ".join(over) or None
 
 
 def session_charges(session):
@@ -738,9 +738,11 @@ def session_charges(session):
         if amount:
             found.append(f"{entry.get('unit')} {amount}")
     plan = session.get("budget") if isinstance(session.get("budget"), dict) else {}
-    for member in ("spent_credits", "reserved_credits"):
-        if plan.get(member):
-            found.append(f"budget {member} {plan[member]}")
+    for entry in plan.get("units") or []:
+        for figure in ("spent", "reserved"):
+            amount = native_amount((entry or {}).get(figure))
+            if amount:
+                found.append(f"budget {entry.get('unit')} {figure} {amount}")
     return found
 
 
@@ -1078,6 +1080,12 @@ class Live:
         if status not in (200, 201, 202):
             self.report.failed("message accepted", f"HTTP {status}")
             return None, [], False
+        return self.follow_turn(session_id, expected, watch=watch)
+
+    def follow_turn(self, session_id, expected, watch=None):
+        """Follow the session's running turn, one the person sent or one the server started (an approved
+        plan runs in a turn of its own, #134): wait for its final reply, then for the expected tasks.
+        Returns (reply, tasks, ok)."""
         reply = self.wait_reply(session_id)
         if reply is None:
             self.report.failed("final reply", "timed out waiting for the turn to finish")
@@ -1155,6 +1163,17 @@ class Live:
             require_ok(status, "read product schema")
             self._schema = data.get("schema") if isinstance(data.get("schema"), dict) else data
         return self._schema
+
+    def decide_grant(self, request_id, approve):
+        """Approve or deny a step's approval card on the Schema's task_grant_decision route with the
+        Schema's decision member, as the browser does (decidePendingApproval). Returns (status,
+        payload); status 0 when the Schema lacks the route or the decision member."""
+        schema = self.public_schema()
+        template = (((schema.get("runtime") or {}).get("http") or {}).get("routes") or {}).get("task_grant_decision")
+        body = decision_body(((schema.get("chat") or {}).get("api") or {}).get("fields"), approve)
+        if not template or "{requestID}" not in template or not request_id or body is None:
+            return 0, {}
+        return self.client.call("PUT", template.replace("{requestID}", urllib.parse.quote(str(request_id), safe="")), body)
 
     def plan_route(self, session_id, budget_id):
         """The Schema's chat_session_budget route for this plan card, or None (see budget_route)."""

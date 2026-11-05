@@ -60,6 +60,15 @@ func (store *recordingProductionPlans) PendingBudgets(context.Context, string, s
 	return nil, nil
 }
 
+func (store *recordingProductionPlans) GetBudget(_ context.Context, _ string, budgetID string) (budget.ProductionBudget, error) {
+	for _, created := range store.created {
+		if created.ID == budgetID {
+			return created, nil
+		}
+	}
+	return budget.ProductionBudget{}, budget.ErrNotFound
+}
+
 func planOfferings() []generation.Offering {
 	return []generation.Offering{
 		{ID: "image-default", Revision: "v1", Capability: "text-to-image", Enabled: true, Default: true, EstimatedCredits: 5},

@@ -44,6 +44,14 @@ d=json.load(open('/tmp/s1-schema.json')).get('schema') or {}
 chat=d.get('chat') or {}
 exit(0 if d.get('revision') and chat else 1)
 " 2>/dev/null; then ok "schema projection readable"; else bad "schema ($C)"; fi
+# The approval decision member is Schema data (chat.api.fields.decision, #120): the server reads
+# the same declaration, so the body is built from the public schema like the browser builds it.
+decision_body() { # approve|deny -> {"<member>": "<decision>"}; empty when the Schema declares none
+  python3 -c 'import json,sys
+d=json.load(open(sys.argv[1])); d=d.get("schema", d)
+m=((d.get("chat") or {}).get("api") or {}).get("fields",{}).get("decision")
+sys.exit(1) if not m else print(json.dumps({m: sys.argv[2]}))' "/tmp/s1-schema.json" "$1" 2>/dev/null
+}
 
 # 3. SPA shell 安全头（SEC-04）
 H=$(curl -s -D - -o /dev/null "$BASE/login" | grep -ic "content-security-policy" || true)
@@ -197,7 +205,7 @@ exit(0 if ('停止' in c or '停止本轮' in c or len(c)>0) else 1)
       for R in $(pending_cards | grep -v '^ERROR' | cut -d' ' -f1); do
         C=$(req /tmp/s1-deny.json -X PUT "$BASE/api/v1/tasks/grants/$R" \
           -H 'Content-Type: application/json' -H "Origin: $BASE" -b /tmp/s1-cookies.txt \
-          -d '{"decision":"deny"}')
+          -d "$(decision_body deny)")
         [ "$C" = 200 ] || bad "deny approval card $R ($C)"
       done
       [ -z "$(pending_cards)" ] && ok "approval cards denied after Stop (no card left pending)" || bad "approval cards still pending after deny"
@@ -218,7 +226,7 @@ exit(0 if ('停止' in c or '停止本轮' in c or len(c)>0) else 1)
       for R in $(pending_cards | grep -v '^ERROR' | cut -d' ' -f1); do
         req /tmp/s1-deny.json -X PUT "$BASE/api/v1/tasks/grants/$R" \
           -H 'Content-Type: application/json' -H "Origin: $BASE" -b /tmp/s1-cookies.txt \
-          -d '{"decision":"deny"}' >/dev/null || true
+          -d "$(decision_body deny)" >/dev/null || true
         echo "  denied leftover approval card $R (status $(cat /tmp/s1-deny.json 2>/dev/null | head -c 120))"
       done
       NT=$(session_tasks)

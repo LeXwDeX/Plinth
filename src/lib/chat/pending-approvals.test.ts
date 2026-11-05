@@ -221,6 +221,13 @@ describe('deciding an approval through the Schema-declared decision member (#103
     expect(outcome).toEqual({ requestId: 'b1', status: 'denied', taskId: '', messageId: 'm2' });
   });
 
+  // #134: an approved plan runs in a turn the server started; the outcome names its reply.
+  it('reads the turn the server started to run an approved plan', async () => {
+    const fetcher = vi.fn(async () => response({ budget_id: 'b1', state: 'active', message_id: 'm3', turn_message_id: 'a9' }));
+    const outcome = await decideSessionBudget(approvalSchema('decision'), 's1', 'b1', true, fetcher as unknown as typeof fetch);
+    expect(outcome).toEqual({ requestId: 'b1', status: 'active', taskId: '', messageId: 'm3', turnMessageId: 'a9' });
+  });
+
   it('refuses to send an empty decision member when the Schema declares none', async () => {
     const fetcher = vi.fn();
     await expect(decidePendingApproval(approvalSchema(), 'r1', true, fetcher as unknown as typeof fetch))

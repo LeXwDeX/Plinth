@@ -148,7 +148,7 @@ def case_manual_approval(live, report, models):
     denied = []
     for card in pending:
         request_id = card.get("request_id") or card.get("requestId") or card.get("id")
-        status, _ = live.client.call("PUT", f"/api/v1/tasks/grants/{request_id}", {"decision": "deny"})
+        status, _ = live.decide_grant(request_id, approve=False)
         denied.append(status)
     report.check("manual-approval: every deny returned 2xx", bool(denied) and all(200 <= s < 300 for s in denied),
                  str(denied))
