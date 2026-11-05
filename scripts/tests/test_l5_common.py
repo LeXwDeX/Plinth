@@ -166,6 +166,21 @@ class ChoiceCards(unittest.TestCase):
         live.wait_tasks = wait_tasks
         return live.run_turn("s1", "make a model", "model-3d", "m1", {"text-to-3d": 1})
 
+    def test_run_turn_answers_a_card_the_turn_stopped_at_without_expected_tasks(self):
+        # The turn ends at the usage card before doing anything; with no expected
+        # task the wait for tasks would return at once, so the card is answered
+        # first and the reply is the one of the turn the answer started.
+        card = {"id": "ch6", "state": "pending", "allow_default": True, "default_option_id": "render",
+                "options": [{"id": "render"}]}
+        live, client = self.live([card])
+        replies = iter(["请先选用途", "已按展示用途生成"])
+        live.wait_reply = lambda session_id: next(replies)
+        live.wait_tasks = lambda session_id, expected, watch=None: ([], True)
+        reply, _, _ = live.run_turn("s1", "make a model", "model-3d", "m1", {})
+        self.assertEqual(reply, "已按展示用途生成")
+        answers = [body["choiceAnswer"] for body in self.posted(client) if "choiceAnswer" in body]
+        self.assertEqual(answers, [{"choice_id": "ch6", "use_default": True}])
+
     def test_run_turn_waits_for_the_turn_a_choice_answer_started(self):
         # The answer turn keeps reviewing the model after the task settles; the
         # next message is only accepted once it ends.

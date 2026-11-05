@@ -116,7 +116,7 @@ def body(live, report):
     if status != 200 or not one_layer:
         return report.failed("canvas to 3D: source picture readable", f"HTTP {status}")
     before = {t.get("id") for t in live.tasks(session)}
-    reply, tasks, settled = live.run_turn(session, BOARD_TO_3D, "model-3d", model_3d, {},
+    reply, tasks, settled = live.run_turn(session, BOARD_TO_3D, "model-3d", model_3d, {"image-to-3d": 1},
                                           **canvas_turn_fields(one_layer, urls[:1]))
     done = [t for t in tasks if t.get("id") not in before and t.get("capability") == "image-to-3d"
             and t.get("state") == common.SUCCESS_STATE]
