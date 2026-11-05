@@ -23,10 +23,14 @@ SEGMENT_OFFERING = "tripo/geometry/segment"
 BANG_OFFERING = "hyper3d/bang/rodin-task"
 IMAGE_OFFERING = "tripo/geometry/smartsegment-image"
 
-TRIPO_MODEL = "生成一个简单的低多边形木凳 3D 模型，由座面和四条腿组成。"
+TRIPO_MODEL = "生成一个简单的木凳 3D 模型，由座面和四条腿组成。生成后直接交付，不要减面、重拓扑或做其他后处理。"
 SEGMENT_TURN = ("把刚才这个 3D 模型拆分成部件：用 Tripo 的网格分割服务（tripo-segment），"
                 "按连通性拆分，其余参数用默认值。")
-RODIN_MODEL = "生成一个简单的低多边形木凳 3D 模型，由座面和四条腿组成。"
+RODIN_MODEL = TRIPO_MODEL
+# The split chains need the provider's own source model as the latest one. A real-time purpose would
+# let the Agent optimise it (decimate, remesh) into another provider's model that the split refuses,
+# so the session states a display purpose that keeps the source as generated (#103).
+SPLIT_BRIEF = {"purpose": "render", "needs_parts": True}
 BANG_TURN = "把刚才这个 3D 模型用 Hyper3D Bang 拆分成部件，其余参数用默认值。"
 IMAGE_TURN = "对这张图做 Tripo 智能分割（tripo-smartsegment-image）生成部件，其余参数用默认值。"
 IMAGE_PROMPT = "生成一张机械茶壶的产品渲染图：壶身、壶盖、壶嘴、壶把清晰分明，白色背景。"
@@ -61,6 +65,7 @@ def model_chain(live, report, label, base_capability, base_model, base_prompt, s
     # The chain needs this provider's source model (Bang splits only a Rodin task), so pick it the way
     # a person does; otherwise the Agent may choose another model for the purpose (#103).
     live.lock_model_3d(session, base_model)
+    live.set_brief(session, SPLIT_BRIEF)
     reply, tasks, settled = live.run_turn(session, base_prompt, "model-3d", base_model, {base_capability: 1})
     if not report.check(f"{label} source model generated",
                         settled and common.succeeded_count(tasks, base_capability) >= 1,
