@@ -85,9 +85,9 @@ type Slot struct {
 	Optional bool `json:"optional,omitempty"`
 	// Replaced: OutputAssetID is an input asset the person put in place of
 	// the generated picture; TaskID still names the generated attempt.
-	Replaced bool `json:"replaced,omitempty"`
-	Status      Status                  `json:"status"`
-	Attempt     int                     `json:"attempt"`
+	Replaced bool   `json:"replaced,omitempty"`
+	Status   Status `json:"status"`
+	Attempt  int    `json:"attempt"`
 	// TaskID is the Task of the current attempt, once it exists.
 	TaskID string `json:"task_id,omitempty"`
 	// OutputAssetID is the finished picture of the Task.
