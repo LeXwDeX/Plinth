@@ -330,6 +330,9 @@ export function ChatColumn() {
   });
   // Back from offline: the event stream of the open session is joined again.
   const reconnectTick = useConnectivityStore((state) => state.reconnectTick);
+  // #134: bumped when the server starts a turn on its own (an approved plan runs), so the
+  // session recovery reads the newest messages again and attaches to that turn's stream.
+  const [serverTurnTick, setServerTurnTick] = useState(0);
   const [uploading, setUploading] = useSessionState(false);
   // Synchronous send guard for pictures that are still being read or prepared; state alone is one render late.
   const attachmentReads = useRef<PendingAttachmentReads>({ scope: captureSessionScope(), count: 0 });
@@ -727,6 +730,7 @@ export function ChatColumn() {
   useEffect(() => {
     if (!activeSessionId) return;
     void reconnectTick;
+    void serverTurnTick;
     setHistoryLoading(!(activeSessionId in useChatStore.getState().messagesBySession));
     return recoverChatSession({
       sessionId: activeSessionId,
@@ -740,6 +744,7 @@ export function ChatColumn() {
   }, [
     activeSessionId,
     reconnectTick,
+    serverTurnTick,
     chatClient,
     connectEventSource,
     messagePageSize,
@@ -1529,6 +1534,10 @@ export function ChatColumn() {
         const reloaded = await refreshSessionBudget(sessionId);
         if (!reloaded) toast.error(schemaText(schema, 'ui.studio.plan.reload_failed'));
         void refreshApproval();
+        // #134: an approved plan runs in a turn the server started; follow its stream like any reply.
+        if (result.turnMessageId && useChatStore.getState().activeSessionId === sessionId) {
+          setServerTurnTick((tick) => tick + 1);
+        }
       } catch (error) {
         const detail = error instanceof PendingApprovalError ? schemaText(schema, error.detail) : '';
         setDecisionError((current) => ({

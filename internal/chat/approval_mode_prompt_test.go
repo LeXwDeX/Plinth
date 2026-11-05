@@ -66,6 +66,10 @@ func (store promptBudgetStore) PendingBudgets(context.Context, string, string) (
 	return nil, nil
 }
 
+func (store promptBudgetStore) GetBudget(context.Context, string, string) (budget.ProductionBudget, error) {
+	return budget.ProductionBudget{}, budget.ErrNotFound
+}
+
 type approvalPromptCase struct {
 	// mode is written to the session as stored ("" keeps the new-session
 	// default); it may be a value the Schema does not offer.

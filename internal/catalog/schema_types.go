@@ -3038,6 +3038,20 @@ type ChatApprovalBudgetSchema struct {
 	// in each state, so the execution layer keeps no English copy (#103
 	// review B4).
 	ToolMessages ChatApprovalBudgetToolMessages `json:"tool_messages"`
+	// Continuation is the turn the server starts when the person approves a
+	// plan, so the Agent runs it without being told to start (#134).
+	Continuation ChatApprovalBudgetContinuation `json:"continuation"`
+}
+
+// ChatApprovalBudgetContinuation is the turn that follows a plan approval
+// (#134), like the turn that carries a choice card's answer (#321).
+type ChatApprovalBudgetContinuation struct {
+	// Message is the turn's user message, shown in the chat as the person's
+	// go-ahead. Field: {title}.
+	Message string `json:"message"`
+	// AgentTemplate follows that message in the Agent's request only: it says
+	// the plan was approved on its card and the steps run now.
+	AgentTemplate string `json:"agent_template"`
 }
 
 // ChatApprovalBudgetToolMessages is the Agent-facing result of the plan tool.

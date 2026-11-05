@@ -1088,6 +1088,8 @@ func (orchestrator *Orchestrator) Process(
 	// Agent-named model would replace the person's pick.
 	command.Options.ProductionBrief = turn.Options.ProductionBrief
 	command.Options.ExplicitModel3D = turn.Options.ExplicitModel3D
+	// A plan continuation is the service's mark, never the caller's (#134).
+	command.Options.PlanContinuation = turn.Options.PlanContinuation
 	// DSML tool calls are read only for a model whose profile writes them.
 	dsmlSchema := orchestrator.dsmlSchema(command.Options)
 	command.Options.Harness = turn.Options.Harness
@@ -1999,6 +2001,10 @@ func (orchestrator *Orchestrator) agentRequest(
 		if messageIndex == lastUserMessage && message.Role == orchestrator.schema.Roles.User {
 			// A card answered on the card: the Agent reads the exact next call (#321).
 			appendText(orchestrator.choiceAnswerText(choices, message.ID))
+			// A plan approved on its card: the Agent runs it now (#134).
+			if options.PlanContinuation != "" {
+				appendText(orchestrator.schema.ApprovalPolicy.Budget.Continuation.AgentTemplate)
+			}
 		}
 		if messageIndex == lastUserMessage &&
 			message.Role == orchestrator.schema.Roles.User &&

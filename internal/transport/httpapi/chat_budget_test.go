@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/budget"
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/pendingapproval"
 )
 
@@ -73,15 +74,16 @@ func TestProductionPlanCardAndSessionBudgetOverHTTP(t *testing.T) {
 		t.Fatalf("approve status=%d body=%s", approved.Code, approved.Body.String())
 	}
 	var outcome struct {
-		BudgetID  string `json:"budget_id"`
-		State     string `json:"state"`
-		MessageID string `json:"message_id"`
+		BudgetID      string `json:"budget_id"`
+		State         string `json:"state"`
+		MessageID     string `json:"message_id"`
+		TurnMessageID string `json:"turn_message_id"`
 	}
 	if err := json.Unmarshal(approved.Body.Bytes(), &outcome); err != nil {
 		t.Fatal(err)
 	}
 	if outcome.BudgetID != plan.ID || outcome.State != budget.StateActive ||
-		outcome.MessageID != pendingapproval.BudgetMessageID(plan.ID) {
+		outcome.MessageID != pendingapproval.BudgetMessageID(plan.ID) || outcome.TurnMessageID == "" {
 		t.Fatalf("approve outcome = %+v", outcome)
 	}
 	posted := false
@@ -92,6 +94,18 @@ func TestProductionPlanCardAndSessionBudgetOverHTTP(t *testing.T) {
 	}
 	if !posted {
 		t.Fatal("the plan decision message was not posted")
+	}
+	// #134: the approval starts the turn that runs the plan: the person's
+	// go-ahead and the Agent's reply waiting to be written.
+	messages := w.messages(t)
+	goAhead := strings.ReplaceAll(shippedContinuationMessage(t), "{title}", "骑士")
+	if len(messages) < 2 || messages[len(messages)-1].ID != outcome.TurnMessageID ||
+		messages[len(messages)-2].Content != goAhead {
+		t.Fatalf("continuation turn messages = %+v, want the go-ahead %q", messages, goAhead)
+	}
+	turn, err := w.state.chat.GetTurn(context.Background(), "owner-a", w.sessionID, outcome.TurnMessageID)
+	if err != nil || turn.Options.PlanContinuation != plan.ID {
+		t.Fatalf("continuation turn = %+v err=%v", turn, err)
 	}
 
 	session := w.getIn(t, w.cookie, "/api/chat/sessions/"+w.sessionID, "")
@@ -127,6 +141,42 @@ func TestProductionPlanCardAndSessionBudgetOverHTTP(t *testing.T) {
 // tripoAmount is a whole number of Tripo credits, a provider-native unit.
 func tripoAmount(whole int64) budget.Amount {
 	return budget.Amount{Unit: "tripo.credit", UnitLabel: "Tripo credits", Micros: whole * 1000000}
+}
+
+// shippedContinuationMessage is the go-ahead the shipped Schema words.
+func shippedContinuationMessage(t *testing.T) string {
+	t.Helper()
+	shipped, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return shipped.Application().Chat.ApprovalPolicy.Budget.Continuation.Message
+}
+
+// #134: a denied plan keeps its notice and starts no turn.
+func TestDeniedProductionPlanStartsNoTurn(t *testing.T) {
+	w := pendingApprovalBrowsers(t, nil)
+	plan, err := w.state.repository.CreateProductionBudget(context.Background(), budget.ProductionBudget{
+		ID: "pb-denied-http", OwnerID: "owner-a", SessionID: w.sessionID,
+		Plan:   budget.Plan{Title: "不要", Steps: []budget.PlanStep{{Capability: "image-to-3d", Purpose: "生成模型", Estimate: budget.Legacy(5)}}},
+		Limits: []budget.Amount{budget.Legacy(10)}, State: budget.StatePending, CreatedAt: time.Now().UTC(),
+		MessageID: "turn-denied-http", CallID: "call-denied-http",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := len(w.messages(t))
+	denied := grantTestRequest(t, w.handler, w.cookie, http.MethodPut,
+		"/api/v1/chat/sessions/"+w.sessionID+"/budgets/"+plan.ID, `{"decision":"deny"}`, "")
+	var outcome map[string]any
+	if err := json.Unmarshal(denied.Body.Bytes(), &outcome); err != nil || denied.Code != http.StatusOK ||
+		outcome["state"] != budget.StateDenied || outcome["turn_message_id"] != nil {
+		t.Fatalf("deny = %d %s err=%v", denied.Code, denied.Body.String(), err)
+	}
+	messages := w.messages(t)
+	if len(messages) != before+1 || messages[len(messages)-1].ID != pendingapproval.BudgetMessageID(plan.ID) {
+		t.Fatalf("after a denial = %+v, want only the notice", messages)
+	}
 }
 
 func (w pendingApprovalWorld) serviceList(t *testing.T, cookie *http.Cookie) ([]pendingapproval.Item, error) {

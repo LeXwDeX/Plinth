@@ -785,10 +785,21 @@ func (service *Service) StartTurn(
 	ctx context.Context,
 	command StartTurn,
 ) (Message, error) {
+	return service.startTurn(ctx, command, "")
+}
+
+// startTurn starts a turn; planContinuation names the approved production
+// plan a server-started continuation runs (#134), empty for a person's turn.
+func (service *Service) startTurn(
+	ctx context.Context,
+	command StartTurn,
+	planContinuation string,
+) (Message, error) {
 	// Client-supplied execution context never becomes a durable turn snapshot.
 	command.Options.Harness = nil
 	command.Options.Selection = nil
 	command.Options.SelectionPicked = false
+	command.Options.PlanContinuation = planContinuation
 	command.Content = strings.TrimSpace(command.Content)
 	if command.Content == "" && len(command.ImageURLs) == 0 {
 		return Message{}, ErrEmptyMessage

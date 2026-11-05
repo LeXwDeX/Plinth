@@ -102,6 +102,10 @@ describe('plan reload and explicit 3D lock wiring (#103)', () => {
     expect(agentDialog).toContain('const budgetAwaiting = budgetAwaitsDecision(schema, sessionBudget);');
     expect(agentDialog).toContain('const budgetShown = budgetIsShown(schema, sessionBudget);');
     expect(agentDialog).toContain('planReloadError || budgetAwaiting');
+    // #134: the turn the server starts for an approved plan is followed by re-running the session recovery.
+    const decidePlan = agentDialog.slice(agentDialog.indexOf('const decidePlan = useCallback('), agentDialog.indexOf('// #321:', agentDialog.indexOf('const decidePlan = useCallback(')));
+    expect(decidePlan).toMatch(/if \(result\.turnMessageId &&[\s\S]{0,120}\{\s*setServerTurnTick\(\(tick\) => tick \+ 1\);/);
+    expect(agentDialog).toMatch(/void serverTurnTick;[\s\S]{0,200}return recoverChatSession\(/);
     expect(agentDialog).not.toMatch(/sessionBudget\??\.state/);
     expect(agentDialog).toContain('onReload={reloadPlans}');
   });

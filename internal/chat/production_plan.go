@@ -29,7 +29,52 @@ var (
 	// ErrProductionPlanUnavailable refuses a proposal when the Schema declares
 	// no budget configuration (a historical Catalog).
 	ErrProductionPlanUnavailable = errors.New("chat: production plans are not declared")
+	// ErrPlanNotActive refuses a continuation of a plan that is not the
+	// session's active plan.
+	ErrPlanNotActive = errors.New("chat: production plan is not the session's active plan")
 )
+
+// StartPlanContinuation starts the turn that runs a plan the person just
+// approved (#134), like the turn that carries a choice card's answer (#321):
+// its user message is the Schema's go-ahead, and the Agent's request follows
+// it with the Schema's continuation text. The turn is an ordinary one: the
+// service freezes the scope, brief, model lock and chat model as for any turn,
+// and it takes the workspace choices (domain, picked models) and the locale of
+// the turn that proposed the plan. Only the session's active plan continues;
+// an active turn of the session refuses it with ErrTurnActive. It returns the
+// assistant message and the options the caller schedules the turn with.
+func (service *Service) StartPlanContinuation(ctx context.Context, ownerID, sessionID, budgetID, locale string) (Message, TurnOptions, error) {
+	policy := service.productionPlans
+	if policy == nil || strings.TrimSpace(policy.Budget.Continuation.Message) == "" {
+		return Message{}, TurnOptions{}, ErrProductionPlanUnavailable
+	}
+	summary, found, err := policy.Store.BudgetSummary(ctx, ownerID, sessionID)
+	if err != nil {
+		return Message{}, TurnOptions{}, err
+	}
+	if !found || summary.ID != budgetID || summary.State != budget.StateActive {
+		return Message{}, TurnOptions{}, ErrPlanNotActive
+	}
+	options := TurnOptions{Locale: locale}
+	if production, err := policy.Store.GetBudget(ctx, ownerID, budgetID); err == nil && production.MessageID != "" {
+		if proposing, err := service.repository.GetTurn(ctx, ownerID, sessionID, production.MessageID); err == nil {
+			options.CreativeDomain = proposing.Options.CreativeDomain
+			options.AIModel = proposing.Options.AIModel
+			options.DomainModels = proposing.Options.DomainModels
+			if proposing.Options.Locale != "" {
+				options.Locale = proposing.Options.Locale
+			}
+		}
+	}
+	content := strings.ReplaceAll(policy.Budget.Continuation.Message, "{title}", summary.Plan.Title)
+	assistant, err := service.startTurn(ctx, StartTurn{OwnerID: ownerID, SessionID: sessionID,
+		Content: content, Options: options}, budgetID)
+	if err != nil {
+		return Message{}, TurnOptions{}, err
+	}
+	options.PlanContinuation = budgetID
+	return assistant, options, nil
+}
 
 // ProductionPlanStore is the part of executiongrant.Service the proposal tool
 // and the Agent's budget context read.
@@ -38,6 +83,9 @@ type ProductionPlanStore interface {
 		plan budget.Plan, limits []budget.Amount) (budget.ProductionBudget, error)
 	BudgetSummary(ctx context.Context, ownerID, sessionID string) (budget.Summary, bool, error)
 	PendingBudgets(ctx context.Context, ownerID, sessionID string) ([]budget.ProductionBudget, error)
+	// GetBudget reads one plan of the owner; the continuation turn takes the
+	// workspace choices of the turn that proposed it (#134).
+	GetBudget(ctx context.Context, ownerID, budgetID string) (budget.ProductionBudget, error)
 }
 
 // ProductionPlanPolicy wires the proposal tool: the Schema's bounds and texts,

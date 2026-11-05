@@ -979,6 +979,10 @@ func validateApprovalBudget(budget ChatApprovalBudgetSchema) error {
 			return fmt.Errorf("approval_policy.budget.messages.approved 缺少占位符 %s", field)
 		}
 	}
+	// #134: approving a plan starts the turn that runs it.
+	if strings.TrimSpace(budget.Continuation.Message) == "" || strings.TrimSpace(budget.Continuation.AgentTemplate) == "" {
+		return errors.New("approval_policy.budget.continuation 的 message 与 agent_template 不能为空")
+	}
 	return nil
 }
 
