@@ -57,20 +57,37 @@ type gltfPrimitive struct {
 }
 
 type gltfTextureInfo struct {
-	Index    *int `json:"index"`
-	TexCoord *int `json:"texCoord"`
+	Index      *int                       `json:"index"`
+	TexCoord   *int                       `json:"texCoord"`
+	Extensions *gltfTextureInfoExtensions `json:"extensions"`
 }
 
 type gltfNormalTexture struct {
-	Index    *int     `json:"index"`
-	TexCoord *int     `json:"texCoord"`
-	Scale    *float64 `json:"scale"`
+	Index      *int                       `json:"index"`
+	TexCoord   *int                       `json:"texCoord"`
+	Scale      *float64                   `json:"scale"`
+	Extensions *gltfTextureInfoExtensions `json:"extensions"`
 }
 
 type gltfOcclusionTexture struct {
-	Index    *int     `json:"index"`
-	TexCoord *int     `json:"texCoord"`
-	Strength *float64 `json:"strength"`
+	Index      *int                       `json:"index"`
+	TexCoord   *int                       `json:"texCoord"`
+	Strength   *float64                   `json:"strength"`
+	Extensions *gltfTextureInfoExtensions `json:"extensions"`
+}
+
+// gltfTextureInfoExtensions holds the texture-info extensions this package
+// applies. KHR_texture_transform is how quantizing exporters such as gltfpack
+// map integer texture coordinates back to their original range.
+type gltfTextureInfoExtensions struct {
+	Transform *gltfTextureTransform `json:"KHR_texture_transform"`
+}
+
+type gltfTextureTransform struct {
+	Offset   []float64 `json:"offset"`
+	Rotation *float64  `json:"rotation"`
+	Scale    []float64 `json:"scale"`
+	TexCoord *int      `json:"texCoord"`
 }
 
 type gltfPBR struct {
@@ -112,16 +129,43 @@ type gltfSampler struct {
 }
 
 type gltfBuffer struct {
-	URI        string `json:"uri"`
-	ByteLength int    `json:"byteLength"`
+	URI        string                `json:"uri"`
+	ByteLength int                   `json:"byteLength"`
+	Extensions *gltfBufferExtensions `json:"extensions"`
+}
+
+// gltfBufferExtensions marks an EXT_meshopt_compression fallback buffer: a
+// buffer without data whose views are only reachable through their
+// compressed copies.
+type gltfBufferExtensions struct {
+	Meshopt *struct {
+		Fallback bool `json:"fallback"`
+	} `json:"EXT_meshopt_compression"`
 }
 
 type gltfBufferView struct {
-	Buffer     int `json:"buffer"`
-	ByteOffset int `json:"byteOffset"`
-	ByteLength int `json:"byteLength"`
-	ByteStride int `json:"byteStride"`
-	Target     int `json:"target"`
+	Buffer     int                       `json:"buffer"`
+	ByteOffset int                       `json:"byteOffset"`
+	ByteLength int                       `json:"byteLength"`
+	ByteStride int                       `json:"byteStride"`
+	Target     int                       `json:"target"`
+	Extensions *gltfBufferViewExtensions `json:"extensions"`
+}
+
+type gltfBufferViewExtensions struct {
+	Meshopt *gltfMeshoptView `json:"EXT_meshopt_compression"`
+}
+
+// gltfMeshoptView is the EXT_meshopt_compression bufferView extension: the
+// compressed range in a data buffer and how to decode it into the view.
+type gltfMeshoptView struct {
+	Buffer     *int   `json:"buffer"`
+	ByteOffset int    `json:"byteOffset"`
+	ByteLength *int   `json:"byteLength"`
+	ByteStride *int   `json:"byteStride"`
+	Count      *int   `json:"count"`
+	Mode       string `json:"mode"`
+	Filter     string `json:"filter"`
 }
 
 type gltfAccessor struct {

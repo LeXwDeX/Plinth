@@ -1,6 +1,7 @@
 package modelinspect
 
 import (
+	"context"
 	"sort"
 	"strconv"
 )
@@ -27,6 +28,12 @@ func DefaultInspectOptions() InspectOptions {
 
 // Report is the JSON-ready result of Inspect. All lengths are in the glTF
 // unit (meters) as stored in the file; no unit conversion is applied.
+//
+// Triangles counts drawable triangles: a strip or fan triangle that repeats
+// an index (strip stitching or restart) is not a face and is excluded.
+// Vertices counts stored POSITION elements, used or not. Geometry is placed
+// as a viewer shows it before any animation: skinned parts are posed by
+// their joints and ignore their own node transform.
 type Report struct {
 	Triangles       int64 `json:"triangles"`
 	Vertices        int64 `json:"vertices"`
@@ -59,6 +66,11 @@ type BBox struct {
 // BBoxReport adds the bottom-center offset used to judge whether a model's
 // pivot sits at the bottom centre. The offset is the world position of the
 // bottom centre, so an offset of [0, 0, 0] means the pivot already is there.
+//
+// The box covers the vertices that triangle primitives reference. Point and
+// line primitives (often helpers that Render does not draw) and vertices no
+// element references are excluded, so a model without triangles has an
+// empty box.
 type BBoxReport struct {
 	Min                [3]float64 `json:"min"`
 	Max                [3]float64 `json:"max"`
@@ -68,7 +80,8 @@ type BBoxReport struct {
 }
 
 // PartReport describes one node x primitive instance. ID is stable for a
-// given file (for example "n3.p0"), TriangleRatio is in [0, 1].
+// given file (for example "n3.p0"), TriangleRatio is in [0, 1]. BBox covers
+// the vertices the part's elements reference, points and lines included.
 type PartReport struct {
 	ID            string  `json:"id"`
 	Node          string  `json:"node"`
@@ -146,26 +159,50 @@ type AnimationReport struct {
 
 // TopologyReport is computed after welding positions. Watertight is true
 // exactly when every triangle was analysed, at least one is not degenerate,
-// and BoundaryEdges and NonManifoldEdges are both zero.
+// and BoundaryEdges, NonManifoldEdges and InconsistentWindingEdges are all
+// zero: the surface is closed, manifold and consistently oriented.
+//
+// InconsistentWindingEdges counts manifold edges whose two triangles
+// traverse them in the same direction, i.e. adjacent faces facing opposite
+// ways. Winding is judged in world space, with mirrored (negative
+// determinant) parts flipped as glTF requires.
 type TopologyReport struct {
-	WeldEpsilon           float64 `json:"weld_epsilon"`
-	ConnectedComponents   int     `json:"connected_components"`
-	LargestComponentRatio float64 `json:"largest_component_ratio"`
-	DebrisComponents      int     `json:"debris_components"`
-	DebrisTriangles       int64   `json:"debris_triangles"`
-	BoundaryEdges         int64   `json:"boundary_edges"`
-	NonManifoldEdges      int64   `json:"non_manifold_edges"`
-	DegenerateTriangles   int64   `json:"degenerate_triangles"`
-	Watertight            bool    `json:"watertight"`
+	WeldEpsilon              float64 `json:"weld_epsilon"`
+	ConnectedComponents      int     `json:"connected_components"`
+	LargestComponentRatio    float64 `json:"largest_component_ratio"`
+	DebrisComponents         int     `json:"debris_components"`
+	DebrisTriangles          int64   `json:"debris_triangles"`
+	BoundaryEdges            int64   `json:"boundary_edges"`
+	NonManifoldEdges         int64   `json:"non_manifold_edges"`
+	InconsistentWindingEdges int64   `json:"inconsistent_winding_edges"`
+	DegenerateTriangles      int64   `json:"degenerate_triangles"`
+	Watertight               bool    `json:"watertight"`
 }
 
-// Inspect summarizes m for an Agent. It reads accessor data lazily through the
-// Model's reader; a read failure is reported as the "read_error" warning
-// rather than as an error because the signature has no error result.
+// Inspect summarizes m for an Agent. It is InspectContext without
+// cancellation; a read failure is reported as the "read_error" warning
+// because the signature has no error result.
+func Inspect(m *Model, opts InspectOptions) Report {
+	report, _ := InspectContext(context.Background(), m, opts)
+	return report
+}
+
+// inspectCheckInterval is how many vertices or triangles Inspect processes
+// between checks of its context.
+const inspectCheckInterval = 1 << 16
+
+// InspectContext summarizes m for an Agent. It reads accessor data lazily
+// through the Model's reader; a read failure is reported as the
+// "read_error" warning, not as an error. The only error is ctx.Err() when
+// ctx is done before the report is complete, so the topology pass, which
+// allocates in proportion to the model, can be cancelled.
 //
 // Ratios are clamped to non-negative values. The report is deterministic for
 // a given model and options.
-func Inspect(m *Model, opts InspectOptions) Report {
+func InspectContext(ctx context.Context, m *Model, opts InspectOptions) (Report, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	report := Report{
 		Parts:      []PartReport{},
 		Materials:  []MaterialReport{},
@@ -176,7 +213,7 @@ func Inspect(m *Model, opts InspectOptions) Report {
 	}
 	if m == nil {
 		report.Warnings = []string{"nil_model"}
-		return report
+		return report, nil
 	}
 	report.Meshes = len(m.Meshes)
 	report.Nodes = len(m.Nodes)
@@ -192,43 +229,63 @@ func Inspect(m *Model, opts InspectOptions) Report {
 		opts.DebrisRatio = 0
 	}
 
+	analyses := make([]*partAnalysis, len(m.parts))
+	triangles := make([]int64, len(m.parts))
 	partBoxes := make([]bounds, len(m.parts))
-	readOK := make([]bool, len(m.parts))
 	readFailed := false
 	var worldBox bounds
 	invalidPositions := false
 	missingNormals := false
+	bindPose := false
 	for index, p := range m.parts {
-		report.Vertices += int64(p.vertexCount)
-		report.Triangles += p.triangleCount
-		if p.triangleCount > 0 && p.normal < 0 {
-			missingNormals = true
+		if err := ctx.Err(); err != nil {
+			return Report{}, err
 		}
+		report.Vertices += int64(p.vertexCount)
 		switch p.mode {
 		case 0:
 			report.PointPrimitives++
 		case 1, 2, 3:
 			report.LinePrimitives++
 		}
-		positions, err := m.positions(p)
+		triangles[index] = p.triangleCount
+		analysis, err := m.analyzePart(p)
 		if err != nil {
 			readFailed = true
+			report.Triangles += triangles[index]
 			continue
 		}
-		readOK[index] = true
+		analyses[index] = analysis
+		triangles[index] = analysis.triangles
+		report.Triangles += analysis.triangles
+		if analysis.triangles > 0 && p.normal < 0 {
+			missingNormals = true
+		}
+		bindPose = bindPose || analysis.pose.bindPose
+		surface := p.mode >= 4 && analysis.triangles > 0
+		positions := analysis.positions
 		for vertex := 0; vertex < p.vertexCount; vertex++ {
-			local := vec3{
+			if vertex%inspectCheckInterval == 0 && vertex > 0 {
+				if err := ctx.Err(); err != nil {
+					return Report{}, err
+				}
+			}
+			if !analysis.uses(vertex) {
+				continue
+			}
+			world := analysis.pose.point(vertex,
 				float64(positions[vertex*3]),
 				float64(positions[vertex*3+1]),
 				float64(positions[vertex*3+2]),
-			}
-			world := p.world.transformPoint(local[0], local[1], local[2])
+			)
 			if !world.finite() {
 				invalidPositions = true
 				continue
 			}
 			partBoxes[index].add(world)
-			worldBox.add(world)
+			if surface {
+				worldBox.add(world)
+			}
 		}
 	}
 
@@ -243,12 +300,15 @@ func Inspect(m *Model, opts InspectOptions) Report {
 	}
 
 	report.BBox = makeBBoxReport(worldBox)
-	report.Parts = makePartReports(m, partBoxes, report.Triangles)
+	report.Parts = makePartReports(m, partBoxes, triangles, report.Triangles)
 	report.Materials = makeMaterialReports(m)
-	report.UV = makeUVReport(m.parts)
+	report.UV = makeUVReport(m.parts, triangles)
 	report.Skins = makeSkinReports(m)
 	report.Animations = makeAnimationReports(m)
-	topology, issues := m.computeTopology(readOK, worldBox, opts)
+	topology, issues, err := m.computeTopology(ctx, analyses, worldBox, opts)
+	if err != nil {
+		return Report{}, err
+	}
 	report.Topology = topology
 
 	invalidIndices := issues.invalidIndices
@@ -257,6 +317,9 @@ func Inspect(m *Model, opts InspectOptions) Report {
 	}
 	if invalidIndices {
 		report.Warnings = append(report.Warnings, "invalid_indices")
+	}
+	if bindPose {
+		report.Warnings = append(report.Warnings, "skin_bind_pose")
 	}
 	if !report.UV.AllHaveUV && report.Triangles > 0 {
 		report.Warnings = append(report.Warnings, "missing_uv")
@@ -282,7 +345,7 @@ func Inspect(m *Model, opts InspectOptions) Report {
 	if readFailed {
 		report.Warnings = append(report.Warnings, "read_error")
 	}
-	return report
+	return report, nil
 }
 
 func makeBBoxReport(worldBox bounds) BBoxReport {
@@ -302,7 +365,7 @@ func makeBBoxReport(worldBox bounds) BBoxReport {
 	return report
 }
 
-func makePartReports(m *Model, boxes []bounds, totalTriangles int64) []PartReport {
+func makePartReports(m *Model, boxes []bounds, triangles []int64, totalTriangles int64) []PartReport {
 	reports := make([]PartReport, 0, len(m.parts))
 	for index, p := range m.parts {
 		meshName := m.Meshes[p.mesh].Name
@@ -315,12 +378,12 @@ func makePartReports(m *Model, boxes []bounds, totalTriangles int64) []PartRepor
 		}
 		ratio := 0.0
 		if totalTriangles > 0 {
-			ratio = float64(p.triangleCount) / float64(totalTriangles)
+			ratio = float64(triangles[index]) / float64(totalTriangles)
 		}
 		reports = append(reports, PartReport{
 			ID: p.id, Node: p.path, Mesh: meshName,
 			Material: p.material, MaterialName: materialName,
-			Triangles: p.triangleCount, BBox: makeBBox(boxes[index]),
+			Triangles: triangles[index], BBox: makeBBox(boxes[index]),
 			TriangleRatio: ratio,
 		})
 	}
@@ -398,16 +461,16 @@ func (m *Model) makeSlotReport(ref *TextureRef, slot string, factor []float64) M
 	return report
 }
 
-func makeUVReport(parts []*part) UVReport {
+func makeUVReport(parts []*part, triangles []int64) UVReport {
 	report := UVReport{Primitives: make([]PrimitiveUVReport, 0, len(parts)), AllHaveUV: true}
-	for _, p := range parts {
+	for index, p := range parts {
 		sets := make([]int, 0, len(p.uv))
 		for set := range p.uv {
 			sets = append(sets, set)
 		}
 		sort.Ints(sets)
 		report.Primitives = append(report.Primitives, PrimitiveUVReport{PartID: p.id, Sets: sets})
-		if p.triangleCount > 0 && len(sets) == 0 {
+		if triangles[index] > 0 && len(sets) == 0 {
 			report.AllHaveUV = false
 		}
 	}

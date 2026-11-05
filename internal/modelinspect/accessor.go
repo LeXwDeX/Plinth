@@ -22,6 +22,7 @@ func (m *Model) decodeF32(index int) ([]float32, error) {
 		return nil, err
 	}
 	m.cache.f32[index] = values
+	m.decodedBytes.Add(int64(cap(values)) * 4)
 	return values, nil
 }
 
@@ -108,6 +109,7 @@ func (m *Model) decodeU32(index int) ([]uint32, error) {
 		return nil, err
 	}
 	m.cache.u32[index] = values
+	m.decodedBytes.Add(int64(cap(values)) * 4)
 	return values, nil
 }
 
@@ -147,6 +149,8 @@ func (m *Model) decodeAccessorU32(a accessor) ([]uint32, error) {
 	return out, nil
 }
 
+// readAccessor returns the bytes one accessor spans. The caller holds
+// m.cache.mu, which also guards the decoded meshopt views.
 func (m *Model) readAccessor(a accessor) ([]byte, error) {
 	if a.count <= 0 {
 		return nil, nil
@@ -155,7 +159,38 @@ func (m *Model) readAccessor(a accessor) ([]byte, error) {
 	if span <= 0 || span > int64(maxIntValue) {
 		return nil, invalidf("accessor payload is too large")
 	}
+	if a.view >= 0 && m.bufferViews[a.view].meshopt != nil {
+		view, err := m.meshoptViewLocked(a.view)
+		if err != nil {
+			return nil, err
+		}
+		if a.viewOffset < 0 || a.viewOffset > int64(len(view)) || span > int64(len(view))-a.viewOffset {
+			return nil, invalidf("accessor payload is outside its decoded bufferView")
+		}
+		return view[a.viewOffset : a.viewOffset+span], nil
+	}
 	return readAt(m.src, a.srcOffset, span)
+}
+
+// meshoptViewLocked returns the decoded bytes of a compressed bufferView,
+// decoding it once. A failed decode is not cached, so a transient read error
+// can succeed later; the caller holds m.cache.mu.
+func (m *Model) meshoptViewLocked(index int) ([]byte, error) {
+	if data, ok := m.cache.meshopt[index]; ok {
+		return data, nil
+	}
+	view := m.bufferViews[index]
+	compressed, err := readAt(m.src, view.meshopt.offset, view.meshopt.length)
+	if err != nil {
+		return nil, err
+	}
+	decoded, err := decodeMeshopt(view.meshopt, compressed)
+	if err != nil {
+		return nil, err
+	}
+	m.cache.meshopt[index] = decoded[:view.length]
+	m.decodedBytes.Add(int64(cap(decoded)))
+	return decoded[:view.length], nil
 }
 
 func (m *Model) positions(p *part) ([]float32, error) {

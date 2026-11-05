@@ -18,6 +18,8 @@ func FuzzParse(f *testing.F) {
 	f.Add(stripDocument().finish())
 	f.Add(skinAnimationDocument().finish())
 	f.Add(texturedQuadGLB(f))
+	f.Add(meshoptCubeDocument(f).finish())
+	f.Add(skinnedCubeDocument(skinnedCubeOptions{armatureScale: 0.01}).finish())
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		model, err := Parse(bytes.NewReader(data), int64(len(data)), DefaultLimits())

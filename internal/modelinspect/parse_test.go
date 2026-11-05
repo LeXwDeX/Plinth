@@ -69,7 +69,7 @@ func TestParseExtensionsUsedVerbatim(t *testing.T) {
 func TestParseRequiredExtensionsUnsupported(t *testing.T) {
 	for _, extension := range []string{
 		"KHR_draco_mesh_compression",
-		"EXT_meshopt_compression",
+		"KHR_meshopt_compression",
 		"KHR_texture_basisu",
 		"VENDOR_unknown_extension",
 	} {

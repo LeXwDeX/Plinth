@@ -32,3 +32,19 @@ func toolargef(format string, args ...any) error {
 func toodensef(format string, args ...any) error {
 	return wrapf(ErrTooDense, format, args...)
 }
+
+// CompressionError reports a required mesh compression extension that Parse
+// cannot decode. It wraps ErrUnsupported, so errors.Is(err, ErrUnsupported)
+// still holds; callers use errors.As to tell a compressed file apart from
+// other unsupported features and to name the extension.
+type CompressionError struct {
+	// Extension is the glTF extension name, for example
+	// "KHR_draco_mesh_compression".
+	Extension string
+}
+
+func (e *CompressionError) Error() string {
+	return ErrUnsupported.Error() + ": compressed geometry (" + e.Extension + ")"
+}
+
+func (e *CompressionError) Unwrap() error { return ErrUnsupported }
