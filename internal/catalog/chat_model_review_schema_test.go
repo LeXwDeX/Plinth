@@ -254,6 +254,7 @@ func TestModelReviewDeclarationsAreValidated(t *testing.T) {
 		{"too-large text lacks the limit", func(a *catalog.ApplicationSchema) { a.Chat.ModelReview.Texts.TooLarge = "too large {bytes}" }, "too_large"},
 		{"unknown-part text lacks the part", func(a *catalog.ApplicationSchema) { a.Chat.ModelReview.Texts.UnknownPart = "no such part" }, "unknown_part"},
 		{"source-read text lacks the reason", func(a *catalog.ApplicationSchema) { a.Chat.ModelReview.Texts.SourceReadFailed = "unreadable" }, "source_read_failed"},
+		{"compressed text lacks the extension", func(a *catalog.ApplicationSchema) { a.Chat.ModelReview.Texts.Compressed = "compressed" }, "compressed"},
 		{"upload text lacks the reason", func(a *catalog.ApplicationSchema) { a.Chat.ModelReview.Texts.UploadFailed = "not stored" }, "upload_failed"},
 		{"empty vision note", func(a *catalog.ApplicationSchema) { a.Chat.ModelReview.Texts.VisionOff = " " }, "vision_off"},
 		{"empty parts-required text", func(a *catalog.ApplicationSchema) { a.Chat.ModelReview.Texts.PartsRequired = "" }, "parts_required"},
