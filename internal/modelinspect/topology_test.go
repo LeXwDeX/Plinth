@@ -31,6 +31,94 @@ func TestInspectFlippedFaceIsNotWatertight(t *testing.T) {
 	}
 }
 
+// cubeIndices returns the unit cube's triangles, every one reversed when
+// inward is set, which turns all faces inward but keeps them consistent.
+func cubeIndices(inward bool) []uint16 {
+	indices := flattenFaces(cubeFaces())
+	if inward {
+		for i := 0; i < len(indices); i += 3 {
+			indices[i+1], indices[i+2] = indices[i+2], indices[i+1]
+		}
+	}
+	return indices
+}
+
+// cubeNodesDocument places one cube per node; each node lists whether its
+// cube faces inward and the node's scale.
+func cubeNodesDocument(nodes ...cubeNode) *testGLB {
+	b := newTestGLB()
+	position := b.addVec3Accessor(cubePositions(), true)
+	var roots []int
+	for _, node := range nodes {
+		mesh := b.addMesh([]any{map[string]any{
+			"attributes": map[string]int{"POSITION": position},
+			"indices":    b.addIndices16(cubeIndices(node.inward)),
+		}})
+		roots = append(roots, b.addNode(map[string]any{"mesh": mesh, "scale": node.scale[:]}))
+	}
+	b.addScene(roots)
+	return b
+}
+
+type cubeNode struct {
+	inward bool
+	scale  [3]float64
+}
+
+// A closed, consistently wound cube whose faces all point inward encloses
+// a negative volume: it is reported inside out and not watertight.
+func TestInspectInsideOutCubeIsNotWatertight(t *testing.T) {
+	report := Inspect(mustParseModel(t, cubeNodesDocument(cubeNode{inward: true, scale: [3]float64{1, 1, 1}}).finish(),
+		DefaultLimits()), DefaultInspectOptions())
+	topology := report.Topology
+	if topology.BoundaryEdges != 0 || topology.NonManifoldEdges != 0 || topology.InconsistentWindingEdges != 0 {
+		t.Fatalf("inverted cube is not a closed, consistent surface: %+v", topology)
+	}
+	if !topology.InsideOut || topology.Watertight {
+		t.Fatalf("inverted cube topology = %+v, want inside out and not watertight", topology)
+	}
+	if !containsWarning(report, "inside_out") || !containsWarning(report, "not_watertight") {
+		t.Fatalf("warnings = %v, want inside_out and not_watertight", report.Warnings)
+	}
+	outward := Inspect(mustParseModel(t, cubeGLB(), DefaultLimits()), DefaultInspectOptions())
+	if outward.Topology.InsideOut || containsWarning(outward, "inside_out") {
+		t.Fatalf("outward cube reported inside out: %+v", outward.Topology)
+	}
+}
+
+// glTF makes a mirrored instance's front faces clockwise: an outward cube
+// under scale (-1, 1, 1) still faces outward, and an inverted one inward.
+func TestInspectInsideOutHonoursMirroring(t *testing.T) {
+	mirror := [3]float64{-1, 1, 1}
+	outward := Inspect(mustParseModel(t, cubeNodesDocument(cubeNode{scale: mirror}).finish(),
+		DefaultLimits()), DefaultInspectOptions())
+	if outward.Topology.InsideOut || !outward.Topology.Watertight {
+		t.Fatalf("mirrored outward cube = %+v", outward.Topology)
+	}
+	inward := Inspect(mustParseModel(t, cubeNodesDocument(cubeNode{inward: true, scale: mirror}).finish(),
+		DefaultLimits()), DefaultInspectOptions())
+	if !inward.Topology.InsideOut || inward.Topology.Watertight {
+		t.Fatalf("mirrored inverted cube = %+v", inward.Topology)
+	}
+	halves := Inspect(mustParseModel(t, halfBoxDocument().finish(), DefaultLimits()), DefaultInspectOptions())
+	if halves.Topology.InsideOut {
+		t.Fatalf("mirrored halves reported inside out: %+v", halves.Topology)
+	}
+}
+
+// A hollow solid's cavity shell faces inward by design; it subtracts from
+// the outer shell's volume, so the model is not inside out.
+func TestInspectHollowSolidIsNotInsideOut(t *testing.T) {
+	report := Inspect(mustParseModel(t, cubeNodesDocument(
+		cubeNode{scale: [3]float64{2, 2, 2}},
+		cubeNode{inward: true, scale: [3]float64{1, 1, 1}},
+	).finish(), DefaultLimits()), DefaultInspectOptions())
+	topology := report.Topology
+	if topology.InsideOut || !topology.Watertight || topology.ConnectedComponents != 2 {
+		t.Fatalf("hollow box topology = %+v", topology)
+	}
+}
+
 // halfBoxDocument is the x in [0, 1] half of a 1 x 1 x 1 box without its
 // x = 0 face, used twice: once as is and once mirrored by scale (-1, 1, 1).
 // Together the halves close the box along the seam at x = 0.

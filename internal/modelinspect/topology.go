@@ -127,6 +127,11 @@ func (m *Model) computeTopology(
 	}
 	edges := make([]uint64, 0, int(capacity))
 	representatives := make([]uint32, 0, int(minInt64(capacity/3, int64(maxIntValue))))
+	// Six times the signed volume the triangles enclose, measured from the
+	// box centre: a closed surface encloses the same volume from any point,
+	// and a nearby one keeps the float error small.
+	origin := worldBox.center()
+	signedVolume := 0.0
 
 	checked := 0
 	for index, p := range m.parts {
@@ -179,11 +184,16 @@ func (m *Model) computeTopology(
 			}
 			union.union(wa, wb)
 			union.union(wa, wc)
+			pa := vec3{float64(ax) - origin[0], float64(ay) - origin[1], float64(az) - origin[2]}
+			pb := vec3{float64(bx) - origin[0], float64(by) - origin[1], float64(bz) - origin[2]}
+			pc := vec3{float64(cx) - origin[0], float64(cy) - origin[1], float64(cz) - origin[2]}
 			if mirrored {
 				// A mirroring transform reverses the winding glTF assigns to
 				// the front face, so the world-space orientation is flipped.
 				wb, wc = wc, wb
+				pb, pc = pc, pb
 			}
+			signedVolume += pa.dot(pb.cross(pc))
 			edges = append(edges,
 				edgeKey(wa, wb), edgeKey(wb, wc), edgeKey(wc, wa),
 			)
@@ -244,11 +254,22 @@ func (m *Model) computeTopology(
 	}
 	// Parts skipped for invalid indices or positions were never counted, so a
 	// closed remainder does not prove the whole model is closed.
-	report.Watertight = report.BoundaryEdges == 0 && report.NonManifoldEdges == 0 &&
+	closed := report.BoundaryEdges == 0 && report.NonManifoldEdges == 0 &&
 		report.InconsistentWindingEdges == 0 &&
 		!issues.invalidIndices && !issues.invalidPositions
+	// Only a closed, consistently wound surface has a meaningful signed
+	// volume; a negative one means every face points inward. Shells nested
+	// as cavities subtract from the outer shell, so a hollow model stays
+	// positive. The tolerance ignores volumes lost to float rounding.
+	diagonal := worldBox.diagonal()
+	report.InsideOut = closed && signedVolume/6 < -insideOutTolerance*diagonal*diagonal*diagonal
+	report.Watertight = closed && !report.InsideOut
 	return report, issues, nil
 }
+
+// insideOutTolerance is the share of the bounding-box diagonal cubed below
+// which a negative enclosed volume is treated as zero.
+const insideOutTolerance = 1e-9
 
 // weldKey quantizes a world position to the welding tolerance. Coordinates
 // that would overflow the int64 grid fall back to exact float bits, which only

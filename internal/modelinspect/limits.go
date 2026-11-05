@@ -39,10 +39,14 @@ type Limits struct {
 // Fixed ceilings that apply whatever Limits a caller passes. Zero-triangle
 // primitives pass MaxTriangles and MaxVertices, so instancing them across many
 // nodes could otherwise multiply into millions of parts, and long node names
-// are copied into every descendant's path.
+// are copied into every descendant's path. maxPathBytes bounds one path;
+// maxTotalPathBytes bounds the paths of all walked nodes together, because a
+// long name on a node with thousands of children is copied into each child's
+// path and a few kilobytes of JSON could otherwise allocate a gigabyte.
 const (
-	maxParts     = 1 << 17
-	maxPathBytes = 16 << 10
+	maxParts          = 1 << 17
+	maxPathBytes      = 16 << 10
+	maxTotalPathBytes = 64 << 20
 )
 
 // DefaultLimits returns limits suitable for tests and for the model sizes this

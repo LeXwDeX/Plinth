@@ -1143,6 +1143,7 @@ func (m *Model) loadScenes(sceneDefs []gltfScene, active *int, limits Limits) er
 	state := make([]uint8, len(m.Nodes))
 	totalTriangles := int64(0)
 	totalVertices := int64(0)
+	totalPathBytes := int64(0)
 	stack := make([]walkItem, 0, len(roots))
 	for i := len(roots) - 1; i >= 0; i-- {
 		stack = append(stack, walkItem{node: roots[i], parent: identity4(), depth: 1})
@@ -1172,15 +1173,26 @@ func (m *Model) loadScenes(sceneDefs []gltfScene, active *int, limits Limits) er
 		if joints[item.node] {
 			m.jointWorld[item.node] = world
 		}
-		path := node.Name
-		if path == "" {
-			path = "node_" + strconv.Itoa(item.node)
+		name := node.Name
+		if name == "" {
+			name = "node_" + strconv.Itoa(item.node)
 		}
+		// Both ceilings are checked before the path is built, so a rejected
+		// hierarchy never allocates the string that exceeded them.
+		pathBytes := len(name)
 		if item.path != "" {
-			path = item.path + "/" + path
+			pathBytes += len(item.path) + 1
 		}
-		if len(path) > maxPathBytes {
+		if pathBytes > maxPathBytes {
 			return toolargef("node path exceeds %d bytes", maxPathBytes)
+		}
+		totalPathBytes += int64(pathBytes)
+		if totalPathBytes > maxTotalPathBytes {
+			return toolargef("node paths exceed %d bytes in total", maxTotalPathBytes)
+		}
+		path := name
+		if item.path != "" {
+			path = item.path + "/" + name
 		}
 		if node.Mesh >= 0 {
 			mesh := &m.Meshes[node.Mesh]

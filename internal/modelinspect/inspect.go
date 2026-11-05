@@ -159,13 +159,18 @@ type AnimationReport struct {
 
 // TopologyReport is computed after welding positions. Watertight is true
 // exactly when every triangle was analysed, at least one is not degenerate,
-// and BoundaryEdges, NonManifoldEdges and InconsistentWindingEdges are all
-// zero: the surface is closed, manifold and consistently oriented.
+// BoundaryEdges, NonManifoldEdges and InconsistentWindingEdges are all zero
+// and InsideOut is false: the surface is closed, manifold and consistently
+// oriented outward.
 //
 // InconsistentWindingEdges counts manifold edges whose two triangles
 // traverse them in the same direction, i.e. adjacent faces facing opposite
-// ways. Winding is judged in world space, with mirrored (negative
-// determinant) parts flipped as glTF requires.
+// ways. InsideOut is true when such an otherwise closed surface encloses a
+// negative signed volume, i.e. all its faces point inward. Both judge
+// winding in world space, with mirrored (negative determinant) parts
+// flipped as glTF requires. InsideOut is judged over the whole model: cavity
+// shells nested in an outer shell are expected to face inward, so a single
+// inverted shell among several closed shells is not always detected.
 type TopologyReport struct {
 	WeldEpsilon              float64 `json:"weld_epsilon"`
 	ConnectedComponents      int     `json:"connected_components"`
@@ -175,6 +180,7 @@ type TopologyReport struct {
 	BoundaryEdges            int64   `json:"boundary_edges"`
 	NonManifoldEdges         int64   `json:"non_manifold_edges"`
 	InconsistentWindingEdges int64   `json:"inconsistent_winding_edges"`
+	InsideOut                bool    `json:"inside_out"`
 	DegenerateTriangles      int64   `json:"degenerate_triangles"`
 	Watertight               bool    `json:"watertight"`
 }
@@ -335,6 +341,9 @@ func InspectContext(ctx context.Context, m *Model, opts InspectOptions) (Report,
 	}
 	if !topology.Watertight {
 		report.Warnings = append(report.Warnings, "not_watertight")
+	}
+	if topology.InsideOut {
+		report.Warnings = append(report.Warnings, "inside_out")
 	}
 	if report.PointPrimitives+report.LinePrimitives > 0 {
 		report.Warnings = append(report.Warnings, "unsupported_primitive_mode")
