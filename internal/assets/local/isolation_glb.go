@@ -179,7 +179,7 @@ func gltfArray(document map[string]any, key string) ([]any, error) {
 		return nil, nil
 	}
 	array, ok := value.([]any)
-	if !ok || len(array) > maxArchiveFiles {
+	if !ok || len(array) > maxModelStructureEntries {
 		return nil, errors.New("glTF 字节范围数量无效")
 	}
 	return array, nil

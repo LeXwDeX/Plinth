@@ -103,7 +103,7 @@ func gltfNumericFields(value any, bufferIndex, bufferSize int64) ([]inspectionFi
 		if err != nil || count <= 0 || count-1 > (length-offset-width)/stride {
 			return nil, errors.New("glTF 访问器数量无效")
 		}
-		if len(fields) >= maxArchiveFiles {
+		if len(fields) >= maxModelStructureEntries {
 			return nil, errors.New("glTF 数值字段数量超出限制")
 		}
 		fields = append(fields, inspectionField{start + offset, width, stride, count, component == 5126})
