@@ -11,17 +11,17 @@ import (
 )
 
 // #150: the approval policy the shipped Product Schema declares. In manual
-// mode only the listed capabilities need a person; Remesh, Rigging and
-// Animation are approved by policy in both modes, so the Agent must never
-// tell a person to switch a mode to "get a confirmation" for them.
-func TestDefaultSchemaManualModeAutoApprovesRemeshRiggingAnimation(t *testing.T) {
+// and budget modes only the listed capabilities need a person; Remesh,
+// Rigging and Animation are approved by policy, so the Agent must never tell
+// a person to switch a mode to "get a confirmation" for them.
+func TestDefaultSchemaApprovalPolicyAutoApprovesRemeshRiggingAnimation(t *testing.T) {
 	product, err := catalog.LoadDefault()
 	if err != nil {
 		t.Fatal(err)
 	}
 	policy := approvalPolicyFromSchema(product.Application())
-	if policy.DefaultMode != approvalpolicy.ModeManual {
-		t.Fatalf("default approval mode = %q, want manual", policy.DefaultMode)
+	if policy.DefaultMode != approvalpolicy.ModeBudget {
+		t.Fatalf("default approval mode = %q, want budget", policy.DefaultMode)
 	}
 	for _, capability := range []string{"remesh", "rigging", "animation"} {
 		if !slices.Contains(policy.KnownCapabilities, capability) {

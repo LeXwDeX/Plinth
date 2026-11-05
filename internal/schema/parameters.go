@@ -61,6 +61,15 @@ type ForcedValue struct {
 	Value json.RawMessage    `json:"value"`
 }
 
+// ConditionalMaximum narrows a number parameter's upper bound when the
+// referenced parameter values match. Every matching entry applies, so the
+// effective bound is the smallest matching Maximum; the static Maximum still
+// applies. It only validates values; it never rewrites the caller's input.
+type ConditionalMaximum struct {
+	When    ParameterCondition `json:"when"`
+	Maximum float64            `json:"maximum"`
+}
+
 // ImageSizeConstraint validates pixel dimensions as well as named presets.
 type ImageSizeConstraint struct {
 	MinPixels int64   `json:"min_pixels"`
@@ -162,6 +171,7 @@ type Parameter struct {
 	Options           []ParameterOption      `json:"options,omitempty"`
 	Minimum           *float64               `json:"minimum,omitempty"`
 	Maximum           *float64               `json:"maximum,omitempty"`
+	MaximumWhen       []ConditionalMaximum   `json:"maximum_when,omitempty"`
 	MaxLength         int                    `json:"max_length,omitempty"`
 	MinItems          int                    `json:"min_items,omitempty"`
 	MaxItems          int                    `json:"max_items,omitempty"`

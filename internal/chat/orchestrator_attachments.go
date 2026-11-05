@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -100,7 +101,9 @@ func (orchestrator *Orchestrator) recordTurnResult(
 }
 
 // withResultHandles writes the handles a call produced into its JSON result
-// under the Schema's key. A result that is not a JSON object is left as is.
+// under the Schema's key. When the result also carries the Schema's views
+// array and it has one entry per handle, each entry gets its own handle in
+// render order. A result that is not a JSON object is left as is.
 func (orchestrator *Orchestrator) withResultHandles(content string, handles []string) string {
 	key := orchestrator.schema.Context.ResultHandlesField
 	if key == "" || len(handles) == 0 {
@@ -115,11 +118,68 @@ func (orchestrator *Orchestrator) withResultHandles(content string, handles []st
 		return content
 	}
 	result[key] = encoded
+	if viewsField := orchestrator.schema.ModelReview.ResultViewsField; viewsField != "" && len(result[viewsField]) > 0 {
+		result[viewsField] = bindViewHandles(result[viewsField], handles)
+	}
 	updated, err := json.Marshal(result)
 	if err != nil {
 		return content
 	}
 	return string(updated)
+}
+
+// withSummaryHandles writes the handles a call produced into its compact
+// summary under the Schema's key, so the conversation can bind each picture to
+// its view by handle (#103 review F9). A summary that is absent or not a JSON
+// object is left as is.
+func (orchestrator *Orchestrator) withSummaryHandles(summary json.RawMessage, handles []string) json.RawMessage {
+	key := orchestrator.schema.Context.ResultHandlesField
+	if key == "" || len(handles) == 0 || len(summary) == 0 {
+		return summary
+	}
+	var result map[string]json.RawMessage
+	if json.Unmarshal(summary, &result) != nil || result == nil {
+		return summary
+	}
+	encoded, err := json.Marshal(handles)
+	if err != nil {
+		return summary
+	}
+	result[key] = encoded
+	updated, err := json.Marshal(result)
+	if err != nil {
+		return summary
+	}
+	return updated
+}
+
+// bindViewHandles writes one handle into each entry of a tool result's views
+// array. It returns the array unchanged unless its length matches the handles
+// and every entry is a JSON object; a partial pairing could name the wrong
+// picture.
+func bindViewHandles(raw json.RawMessage, handles []string) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+	var views []map[string]json.RawMessage
+	if json.Unmarshal(raw, &views) != nil || len(views) != len(handles) {
+		return raw
+	}
+	for index, view := range views {
+		if view == nil {
+			return raw
+		}
+		encoded, err := json.Marshal(handles[index])
+		if err != nil {
+			return raw
+		}
+		view["handle"] = encoded
+	}
+	updated, err := json.Marshal(views)
+	if err != nil {
+		return raw
+	}
+	return updated
 }
 
 // canvasLayoutText names an artboard snapshot's layout with the Schema's
@@ -366,6 +426,149 @@ func (orchestrator *Orchestrator) notesPrompt(ctx context.Context, ownerID, sess
 		"{notes}", notes,
 		"{close}", notesContext.SessionNotesCloseMarker,
 	).Replace(notesContext.SessionNotesTemplate)
+}
+
+// briefPrompt renders the production brief frozen with the turn (#103). The
+// brief is read from the stored session when the turn starts, so a brief the
+// user or the Agent writes applies to the next turn. A session without a brief
+// gets the Schema's empty text, which tells the Agent to ask for the purpose
+// before starting 3D work. Field labels come from the brief Schema; a profile
+// adds its budget and requirements.
+func (orchestrator *Orchestrator) briefPrompt(options TurnOptions) string {
+	briefSchema := orchestrator.schema.Model3DUsage.Brief
+	if strings.TrimSpace(briefSchema.ContextTemplate) == "" {
+		return ""
+	}
+	body := orchestrator.productionBriefText(options.ProductionBrief, briefSchema)
+	if body == "" {
+		body = briefSchema.EmptyText
+	}
+	return strings.ReplaceAll(briefSchema.ContextTemplate, "{brief}", body)
+}
+
+func (orchestrator *Orchestrator) productionBriefText(
+	brief ProductionBrief,
+	briefSchema catalog.ChatProductionBriefSchema,
+) string {
+	if brief.Empty() {
+		return ""
+	}
+	// Locate the purpose and the triangle override by their declared types, so
+	// renaming either field in the Schema needs no code change (#103 review
+	// C3).
+	purposeField := productionBriefPurposeField(briefSchema)
+	integerField := productionBriefIntegerField(briefSchema)
+	purposeID := brief.Text(purposeField)
+	override, hasOverride := brief.Integer(integerField)
+	// The purpose's budget carries a session triangle override, so it is
+	// rendered with the purpose and not again as a separate field.
+	usage := orchestrator.schema.Model3DUsage
+	var parts []string
+	for _, field := range briefSchema.Fields {
+		label := field.Label
+		if label == "" {
+			label = field.Name
+		}
+		if integerField != "" && field.Name == integerField && hasOverride && purposeID != "" {
+			continue
+		}
+		switch field.Type {
+		case "profile":
+			if field.Name != purposeField || purposeID == "" {
+				continue
+			}
+			profile, found := usageProfile(usage, purposeID)
+			value := purposeID
+			budget := ""
+			if found {
+				value = profile.Label
+				budget = productionBriefBudgetText(profile.Budget, override, hasOverride, briefSchema)
+			}
+			if budget != "" {
+				value = strings.NewReplacer("{label}", value, "{budget}", budget).Replace(briefSchema.PurposeTemplate)
+			}
+			parts = append(parts, strings.NewReplacer("{label}", label, "{value}", value).Replace(briefSchema.FieldTemplate))
+		case "text":
+			value := brief.Text(field.Name)
+			if value == "" {
+				continue
+			}
+			parts = append(parts, strings.NewReplacer("{label}", label, "{value}", value).Replace(briefSchema.FieldTemplate))
+		case "boolean":
+			if !brief.Flag(field.Name) {
+				continue
+			}
+			parts = append(parts, strings.ReplaceAll(briefSchema.FlagTemplate, "{label}", label))
+		case "integer":
+			value, exists := brief.Integer(field.Name)
+			if !exists {
+				continue
+			}
+			parts = append(parts, strings.NewReplacer(
+				"{label}", label,
+				"{value}", strconv.Itoa(value),
+			).Replace(briefSchema.FieldTemplate))
+		}
+	}
+	return strings.Join(parts, briefSchema.Separator)
+}
+
+// productionBriefBudgetText renders the triangle budget of a purpose. A
+// session override replaces the maximum; the requirements still come from the
+// purpose, because the purpose is what asks for UV, a watertight mesh or skin.
+func productionBriefBudgetText(
+	budget catalog.ChatModel3DUsageBudget,
+	override int,
+	hasOverride bool,
+	briefSchema catalog.ChatProductionBriefSchema,
+) string {
+	requirements := productionBriefRequirements(budget, briefSchema)
+	switch {
+	case hasOverride:
+		return strings.NewReplacer(
+			"{value}", strconv.Itoa(override),
+			"{requirements}", requirements,
+		).Replace(briefSchema.OverrideBudgetTemplate)
+	case budget.MinTriangles != nil && *budget.MinTriangles > 0:
+		return strings.NewReplacer(
+			"{minimum}", strconv.Itoa(*budget.MinTriangles),
+			"{maximum}", strconv.Itoa(budget.MaxTriangles),
+			"{requirements}", requirements,
+		).Replace(briefSchema.BudgetTemplate)
+	case budget.MaxTriangles > 0:
+		return strings.NewReplacer(
+			"{maximum}", strconv.Itoa(budget.MaxTriangles),
+			"{requirements}", requirements,
+		).Replace(briefSchema.OpenBudgetTemplate)
+	default:
+		return ""
+	}
+}
+
+func productionBriefRequirements(budget catalog.ChatModel3DUsageBudget, briefSchema catalog.ChatProductionBriefSchema) string {
+	var items []string
+	if budget.RequireUV && briefSchema.UVText != "" {
+		items = append(items, briefSchema.UVText)
+	}
+	if budget.RequireWatertight && briefSchema.WatertightText != "" {
+		items = append(items, briefSchema.WatertightText)
+	}
+	if budget.RequireSkin && briefSchema.SkinText != "" {
+		items = append(items, briefSchema.SkinText)
+	}
+	if len(items) == 0 {
+		return ""
+	}
+	return strings.ReplaceAll(briefSchema.RequirementsTemplate, "{items}", strings.Join(items, briefSchema.RequirementSeparator))
+}
+
+func usageProfile(usage catalog.ChatModel3DUsageSchema, id string) (catalog.ChatModel3DUsageProfile, bool) {
+	for _, profile := range usage.Profiles {
+		if profile.ID == id {
+			return profile, true
+		}
+	}
+	return catalog.ChatModel3DUsageProfile{}, false
 }
 
 // withoutMarkers removes every marker from text until none is left, so that

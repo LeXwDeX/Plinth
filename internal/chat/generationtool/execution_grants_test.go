@@ -32,6 +32,8 @@ type grantGateway struct {
 	submitCount   int
 	// prepareErr, when set, is what freezing the input answers.
 	prepareErr error
+	// submitErr, when set, is what submitting the frozen input answers.
+	submitErr error
 	// offering finds the Offering a frozen input is priced by; the default
 	// looks in the fake gateway's own list.
 	offering func(generation.OfferingID) (generation.Offering, bool)
@@ -49,6 +51,24 @@ func (g *grantGateway) extraCreditsOf(id generation.OfferingID, input json.RawMe
 	for _, offering := range g.offerings {
 		if offering.ID == id {
 			return offering.ExtraCreditDetail(input).Credits
+		}
+	}
+	return 0
+}
+
+// creditsOf is the fake kernel's server quote for a frozen input, as the real
+// kernel records it (#103): the Offering's base price and the extra credits
+// this exact input incurs. Budget reservations read this value.
+func (g *grantGateway) creditsOf(id generation.OfferingID, input json.RawMessage) int {
+	if g.offering != nil {
+		if offering, found := g.offering(id); found {
+			return offering.EstimateTotalCredits(input)
+		}
+		return 0
+	}
+	for _, offering := range g.offerings {
+		if offering.ID == id {
+			return offering.EstimateTotalCredits(input)
 		}
 	}
 	return 0
@@ -105,7 +125,8 @@ func (g *grantGateway) PrepareInput(ctx context.Context, cmd generation.PrepareI
 		OwnerID: cmd.OwnerID, SessionID: cmd.SessionID, Capability: cmd.Capability,
 		OfferingID: cmd.OfferingID, OfferingRevision: "rev-a", SchemaVersion: "1",
 		NormalizedInput: cmd.Input, ExtraCredits: g.extraCreditsOf(cmd.OfferingID, cmd.Input),
-		InputHash: fmt.Sprintf("frozen-%d", count), CreatedAt: time.Now().UTC()}
+		EstimatedCredits: g.creditsOf(cmd.OfferingID, cmd.Input),
+		InputHash:        fmt.Sprintf("frozen-%d", count), CreatedAt: time.Now().UTC()}
 	if err := g.repo.CreatePreparedInput(ctx, p); err != nil {
 		return p, err
 	}
@@ -119,7 +140,11 @@ func (g *grantGateway) GetPreparedInput(ctx context.Context, owner generation.Ow
 func (g *grantGateway) SubmitPrepared(_ context.Context, cmd generation.SubmitPreparedCommand) (generation.Accepted, error) {
 	g.mu.Lock()
 	g.submitCount++
+	submitErr := g.submitErr
 	g.mu.Unlock()
+	if submitErr != nil {
+		return generation.Accepted{}, submitErr
+	}
 	return generation.Accepted{TaskID: "accepted-agent-task"}, nil
 }
 

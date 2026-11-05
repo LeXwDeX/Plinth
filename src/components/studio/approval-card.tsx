@@ -13,6 +13,7 @@ import { useHandleReferences } from '@/hooks/use-handle-references';
 import { HandleTag } from '@/components/chat/handle-tag';
 import { fetchCapabilityOfferings, NO_CREDITS } from '@/lib/agent-offerings';
 import { accountOfCard, approvalInputParameterLabel, approvalOfferingNames, approvalShowsCredits, creditBalanceOf, isRetextureCard, remainingValidity, type ApprovalCardModel } from '@/lib/chat/approval-card';
+import type { ParameterAdjustment } from '@/lib/chat/pending-approvals';
 import { safeAssetURL, safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { formatNumber } from '@/lib/i18n/format';
@@ -35,6 +36,55 @@ export interface ApprovalCardProps {
   error?: string | null;
 }
 
+interface ProfileAdjustmentGroup {
+  id: string;
+  items: ParameterAdjustment[];
+}
+
+/** #103: adjustments that came from one usage profile are shown together, with one shared reason. */
+function profileAdjustmentGroups(adjustments: readonly ParameterAdjustment[]): ProfileAdjustmentGroup[] {
+  const groups = new Map<string, ParameterAdjustment[]>();
+  const order: string[] = [];
+  for (const item of adjustments) {
+    const id = item.profile;
+    if (!id) continue;
+    const known = groups.get(id);
+    if (known) {
+      known.push(item);
+    } else {
+      groups.set(id, [item]);
+      order.push(id);
+    }
+  }
+  return order.map((id) => ({ id, items: groups.get(id) ?? [] }));
+}
+
+/**
+ * #103: one shared line for a profile group. Every distinct reason of its
+ * adjustments is shown, not just the first one, so a second changed parameter
+ * never hides why it was changed.
+ */
+function profileGroupReason(group: ProfileAdjustmentGroup): string {
+  return Array.from(new Set(group.items.map((item) => item.reason).filter((reason) => reason !== ''))).join(' ');
+}
+
+function adjustmentValueText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value === null || value === undefined) return '';
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function toggleReason(current: ReadonlySet<string>, key: string): Set<string> {
+  const next = new Set(current);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
+}
+
 /**
  * 批准卡片：步骤、模型、输入图、积分、批准 / 不批准。它在对话里，不弹窗，也不会
  * 因为 Esc 或点击别处产生默认决定；过期后只剩"重新发起"和"放弃"。
@@ -45,6 +95,26 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
   const { previewAssetUrl } = useAssetURLRewriter();
   const { accounts } = useBalance();
   const [expandedPrompt, setExpandedPrompt] = useState(false);
+  const [parametersOpen, setParametersOpen] = useState(false);
+  const [openReasons, setOpenReasons] = useState<ReadonlySet<string>>(() => new Set());
+  const adjustments = model.parameterAdjustments ?? [];
+  const profileGroups = profileAdjustmentGroups(adjustments);
+  const agentAdjustments = adjustments.filter((item) => !item.profile);
+  const profileLabel = (id: string) => schema.chat.model3d_usage?.profiles?.find((profile) => profile.id === id)?.label ?? id;
+  const profileSummary = (group: ProfileAdjustmentGroup) => schemaCountMessage(
+    schema,
+    'ui.studio.approval.card.parameter_summary',
+    group.items.length,
+    { profile: profileLabel(group.id), count: group.items.length },
+  );
+  const agentLine = (item: ParameterAdjustment) => formatSchemaText(
+    schemaText(schema, 'ui.studio.approval.card.parameter_agent_line'),
+    {
+      name: item.label,
+      recommended: adjustmentValueText(item.recommendedValue),
+      actual: adjustmentValueText(item.value),
+    },
+  );
   const capability = schema.capabilities.find((item) => item.id === model.capability);
   const { data: offerings, isLoading: offeringsLoading } = useSWR(
     model.capability ? ['approval-card-offerings', schema.revision, model.capability] : null,
@@ -95,6 +165,9 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
         ? schemaCountMessage(schema, 'ui.studio.approval.card.valid_minutes', validity.value, { minutes: validity.value })
         : schemaText(schema, 'ui.studio.approval.card.waiting');
 
+  // #103: only the card's body scrolls inside the Schema height; the header and
+  // the approve / decline footer stay visible.
+  const maxHeight = schema.chat.frontend.approval_card_max_height_pixels;
   return (
     <article
       data-testid="studio-approval-card"
@@ -103,9 +176,11 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
       className={cn(
         'flex flex-col gap-2 rounded-lg border bg-panel-raised p-3 text-xs',
         expired ? 'border-border opacity-90' : 'border-warning/40',
+        maxHeight > 0 && 'overflow-hidden',
       )}
+      style={maxHeight > 0 ? { maxHeight } : undefined}
     >
-      <header className="flex items-center gap-2">
+      <header className="flex shrink-0 items-center gap-2">
         <ShieldQuestion aria-hidden className={cn('size-4 shrink-0', expired ? 'text-muted-foreground' : 'text-warning')} />
         <span className="text-[13px] font-semibold">{schemaText(schema, 'ui.studio.approval.card.title')}</span>
         <span className={cn('ml-auto flex items-center gap-1', expired ? 'text-muted-foreground' : 'text-warning')} data-testid="studio-approval-validity">
@@ -113,6 +188,10 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
           {validityText}
         </span>
       </header>
+      <div
+        className={cn('flex min-h-0 flex-col gap-2', maxHeight > 0 && 'overflow-y-auto')}
+        data-testid="studio-approval-body"
+      >
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
         <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.step')}</dt>
         <dd className="truncate font-medium">{capability?.label_cn || capability?.label || model.capability}</dd>
@@ -181,18 +260,156 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
           </>
         ) : null}
       </dl>
-      {(model.parameterAdjustments?.length ?? 0) > 0 ? <section className="flex flex-col gap-2 border-t border-border pt-2" data-testid="studio-approval-parameter-adjustments" aria-label={schemaText(schema, 'ui.studio.approval.card.parameter_adjustments')}>
-        <h4 className="font-medium">{schemaText(schema, 'ui.studio.approval.card.parameter_adjustments')}</h4>
-        {model.parameterAdjustments?.map(item => <div key={item.name} className="flex flex-col gap-1 [overflow-wrap:anywhere]" data-parameter={item.name}>
-          <p className="font-medium">{item.label} <span className="font-normal text-muted-foreground">{schemaText(schema, 'ui.studio.params.source_agent')}</span></p>
-          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
-            <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.recommended_value')}</dt><dd>{typeof item.recommendedValue === 'string' ? item.recommendedValue : JSON.stringify(item.recommendedValue)}</dd>
-            <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.actual_value')}</dt><dd>{typeof item.value === 'string' ? item.value : JSON.stringify(item.value)}</dd>
-            <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.adjustment_reason')}</dt><dd>{item.reason}</dd>
-          </dl>
-          {item.advice ? <p className="text-muted-foreground">{item.advice}</p> : null}
-        </div>)}
-      </section> : null}
+      {adjustments.length > 0 ? (
+        <section className="flex flex-col gap-1.5 border-t border-border pt-2" data-testid="studio-approval-parameter-adjustments" aria-label={schemaText(schema, 'ui.studio.approval.card.parameter_adjustments')}>
+          <div className="flex items-center gap-2">
+            <h4 className="font-medium">{schemaText(schema, 'ui.studio.approval.card.parameter_adjustments')}</h4>
+            <button
+              type="button"
+              aria-expanded={parametersOpen}
+              onClick={() => setParametersOpen((value) => !value)}
+              className="ml-auto text-[11px] text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+              data-testid="studio-approval-parameters-toggle"
+            >
+              {parametersOpen
+                ? schemaText(schema, 'ui.studio.approval.card.parameters_hide')
+                : schemaCountMessage(schema, 'ui.studio.approval.card.parameters_toggle', adjustments.length, { count: adjustments.length })}
+            </button>
+          </div>
+          {/* 摘要行：用途调整按来源合并、理由只出现一次；Agent 调整逐项一行。参数表默认收起。 */}
+          {profileGroups.map((group) => (
+            <div key={group.id} className="flex flex-col gap-0.5" data-testid="studio-approval-profile-summary" data-profile={group.id}>
+              <span className="font-medium">{profileSummary(group)}</span>
+              <HintTooltip name={profileGroupReason(group)} className="min-w-0">
+                <button
+                  type="button"
+                  aria-expanded={openReasons.has(`profile:${group.id}`)}
+                  onClick={() => setOpenReasons((current) => toggleReason(current, `profile:${group.id}`))}
+                  className={cn(
+                    'w-full text-left text-[11px] leading-snug text-muted-foreground [overflow-wrap:anywhere] hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring',
+                    !openReasons.has(`profile:${group.id}`) && 'line-clamp-1',
+                  )}
+                  data-testid="studio-approval-profile-reason"
+                >
+                  {profileGroupReason(group)}
+                </button>
+              </HintTooltip>
+            </div>
+          ))}
+          {agentAdjustments.map((item) => {
+            const reasonOpen = openReasons.has(`agent-line:${item.name}`);
+            const reasonText = item.advice ? `${item.reason} ${item.advice}` : item.reason;
+            return (
+              <div
+                key={`agent-line:${item.name}`}
+                className="flex flex-col gap-0.5"
+                data-testid="studio-approval-agent-line"
+                data-parameter={item.name}
+              >
+                <span className="font-medium [overflow-wrap:anywhere]">{agentLine(item)}</span>
+                {reasonText ? (
+                  <HintTooltip name={reasonText} className="min-w-0">
+                    <button
+                      type="button"
+                      aria-expanded={reasonOpen}
+                      onClick={() => setOpenReasons((current) => toggleReason(current, `agent-line:${item.name}`))}
+                      className={cn(
+                        'w-full text-left text-[11px] leading-snug text-muted-foreground [overflow-wrap:anywhere] hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring',
+                        !reasonOpen && 'line-clamp-1',
+                      )}
+                      data-testid="studio-approval-agent-line-reason"
+                    >
+                      {item.reason}
+                      {reasonOpen && item.advice ? ` ${item.advice}` : ''}
+                    </button>
+                  </HintTooltip>
+                ) : null}
+              </div>
+            );
+          })}
+          {parametersOpen ? (
+            <table className="w-full table-fixed border-collapse text-[11px]" data-testid="studio-approval-parameter-table">
+              <colgroup>
+                <col className="w-[34%]" />
+                <col className="w-[44%]" />
+                <col className="w-[22%]" />
+              </colgroup>
+              <thead>
+                <tr className="text-left text-muted-foreground">
+                  <th className="pb-0.5 font-normal">{schemaText(schema, 'ui.studio.params.label')}</th>
+                  <th className="pb-0.5 font-normal">{schemaText(schema, 'ui.studio.approval.card.recommended_value')} → {schemaText(schema, 'ui.studio.approval.card.actual_value')}</th>
+                  <th className="pb-0.5 text-right font-normal">{schemaText(schema, 'ui.studio.approval.card.parameter_source')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {profileGroups.flatMap((group) => {
+                  const sourceText = formatSchemaText(schemaText(schema, 'ui.studio.approval.card.parameter_source_profile'), { profile: profileLabel(group.id) });
+                  return group.items.map((item) => {
+                    const valueText = `${adjustmentValueText(item.recommendedValue)} → ${adjustmentValueText(item.value)}`;
+                    return (
+                      <tr key={`${group.id}:${item.name}`} className="border-t border-border/60" data-parameter={item.name} data-profile={group.id}>
+                        <td className="truncate py-0.5 pr-1">
+                          <HintTooltip name={item.label} className="block max-w-full">
+                            <span className="block truncate">{item.label}</span>
+                          </HintTooltip>
+                        </td>
+                        <td className="truncate py-0.5 pr-1">
+                          <HintTooltip name={valueText} className="block max-w-full">
+                            <span className="block truncate">{valueText}</span>
+                          </HintTooltip>
+                        </td>
+                        <td className="truncate py-0.5 text-right text-muted-foreground">
+                          <HintTooltip name={sourceText} className="block max-w-full">
+                            <span className="block truncate">{sourceText}</span>
+                          </HintTooltip>
+                        </td>
+                      </tr>
+                    );
+                  });
+                })}
+                {agentAdjustments.map((item) => {
+                  const reasonOpen = openReasons.has(`agent:${item.name}`);
+                  const valueText = `${adjustmentValueText(item.recommendedValue)} → ${adjustmentValueText(item.value)}`;
+                  const reasonText = item.advice ? `${item.reason} ${item.advice}` : item.reason;
+                  return [
+                    <tr key={`agent:${item.name}`} className="border-t border-border/60" data-parameter={item.name} data-source="agent">
+                      <td className="truncate py-0.5 pr-1">
+                        <HintTooltip name={item.label} className="block max-w-full">
+                          <span className="block truncate">{item.label}</span>
+                        </HintTooltip>
+                      </td>
+                      <td className="truncate py-0.5 pr-1">
+                        <HintTooltip name={valueText} className="block max-w-full">
+                          <span className="block truncate">{valueText}</span>
+                        </HintTooltip>
+                      </td>
+                      <td className="truncate py-0.5 text-right text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.parameter_source_agent')}</td>
+                    </tr>,
+                    <tr key={`agent-reason:${item.name}`} data-testid="studio-approval-agent-reason">
+                      <td colSpan={3} className="pb-1">
+                        <HintTooltip name={reasonText} className="block w-full">
+                          <button
+                            type="button"
+                            aria-expanded={reasonOpen}
+                            onClick={() => setOpenReasons((current) => toggleReason(current, `agent:${item.name}`))}
+                            className={cn(
+                              'w-full text-left text-[11px] leading-snug text-muted-foreground [overflow-wrap:anywhere] hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring',
+                              !reasonOpen && 'line-clamp-1',
+                            )}
+                          >
+                            {item.reason}
+                            {reasonOpen && item.advice ? ` ${item.advice}` : ''}
+                          </button>
+                        </HintTooltip>
+                      </td>
+                    </tr>,
+                  ];
+                })}
+              </tbody>
+            </table>
+          ) : null}
+        </section>
+      ) : null}
       {retexture ? (
         <p className="text-muted-foreground" data-testid="studio-approval-retexture-note">{schemaText(schema, 'ui.studio.approval.card.retexture_note')}</p>
       ) : null}
@@ -266,7 +483,8 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
       {error ? (
         <p role="alert" className="text-destructive" data-testid="studio-approval-error">{error}</p>
       ) : null}
-      <footer className="flex items-center gap-1.5">
+      </div>
+      <footer className="flex shrink-0 items-center gap-1.5" data-testid="studio-approval-footer">
         {expired ? (
           <>
             <Action type="button" size="sm" variant="outline" disabled={busy} onClick={onRerequest} data-testid="studio-approval-rerequest">{schemaText(schema, 'ui.studio.approval.card.rerequest')}</Action>

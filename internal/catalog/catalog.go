@@ -84,6 +84,9 @@ func Load(reader io.Reader) (*Catalog, error) {
 		if err := freezeLocalConversionProfile(&offering, *doc.Application); err != nil {
 			return nil, fmt.Errorf("offerings[%d]: %w", index, err)
 		}
+		if err := freezeLocalPartsProfile(&offering, *doc.Application); err != nil {
+			return nil, fmt.Errorf("offerings[%d]: %w", index, err)
+		}
 		if err := validateOffering(
 			offering,
 			ProtocolByAdapterKey(doc.Application.Runtime.ProviderConnections),
@@ -264,6 +267,19 @@ func Load(reader io.Reader) (*Catalog, error) {
 	}
 	if err := validateChatToolOfferingSelection(result.application.Chat.Tools, result.byID); err != nil {
 		return nil, fmt.Errorf("application.chat: %w", err)
+	}
+	if err := validateModel3DUsageOfferings(
+		result.application.Chat.Model3DUsage,
+		result.byID,
+		result.application.Chat.ThreeView.Multiview.ViewsArgument,
+	); err != nil {
+		return nil, fmt.Errorf("application.chat.model3d_usage: %w", err)
+	}
+	if err := validateModelReviewProductionOfferings(
+		result.application.Chat.ModelReview,
+		result.byID,
+	); err != nil {
+		return nil, fmt.Errorf("application.chat.model_review: %w", err)
 	}
 	if err := validateProviderDiscoveryLegacyModels(
 		result.application.ProviderDiscovery.LegacyModels,

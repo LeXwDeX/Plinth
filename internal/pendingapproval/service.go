@@ -20,12 +20,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"hash/fnv"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
@@ -41,6 +44,10 @@ var (
 	ErrUnavailable = errors.New("pending approval: unavailable")
 	// ErrSessionNotFound means the session is not the owner's.
 	ErrSessionNotFound = errors.New("pending approval: session not found")
+	// ErrBudgetNoticeFailed means a plan decision was applied but the chat
+	// message reporting it could not be posted. The decision stands; callers
+	// report success and log the cause.
+	ErrBudgetNoticeFailed = errors.New("pending approval: budget decision notice not posted")
 )
 
 // Status of a listed approval.
@@ -48,6 +55,11 @@ const (
 	StatusPending = "pending"
 	StatusExpired = "expired"
 )
+
+// ItemKindPlan marks a budget-mode production plan card (#103). A step
+// approval card omits the kind so clients that predate budgets keep reading
+// the same object they always did.
+const ItemKindPlan = "plan"
 
 // ApprovalSourceHuman names a human decision on a posted tool call.
 const approvalSourceHuman = "human"
@@ -160,11 +172,23 @@ func defaultLocaleRequested(ctx context.Context) bool {
 // so what the service posts into the conversation, even from the background
 // sweep, reads in the language the person used for that turn.
 func (s *Service) inTurnLocale(ctx context.Context, op generationtool.Operation) context.Context {
+	return s.frozenLocale(ctx, op.OwnerID, op.SessionID, op.AssistantMessageID)
+}
+
+// budgetLocale is inTurnLocale for a production plan card: its anchor is the
+// assistant message that called the proposal tool (#103).
+func (s *Service) budgetLocale(ctx context.Context, production budget.ProductionBudget) context.Context {
+	return s.frozenLocale(ctx, production.OwnerID, production.SessionID, production.MessageID)
+}
+
+// frozenLocale reads the locale frozen on a turn. A missing turn or an empty
+// locale must not inherit the request/background language.
+func (s *Service) frozenLocale(ctx context.Context, ownerID, sessionID, assistantMessageID string) context.Context {
 	reader, ok := s.chat.(turnReader)
-	if !ok {
+	if !ok || assistantMessageID == "" {
 		return ctx
 	}
-	turn, err := reader.GetTurn(ctx, op.OwnerID, op.SessionID, op.AssistantMessageID)
+	turn, err := reader.GetTurn(ctx, ownerID, sessionID, assistantMessageID)
 	if err != nil {
 		// A failed read cannot freeze the turn's locale. Never inherit the
 		// request/background language.
@@ -261,6 +285,15 @@ type Item struct {
 	MessageID     string    `json:"message_id"`
 	CreatedAt     time.Time `json:"created_at"`
 	ExpiresAt     time.Time `json:"expires_at"`
+
+	// Kind is ItemKindPlan for a production plan card and empty for a step
+	// approval (#103). RequestID of a plan card is its budget ID, decided
+	// through the session budget route rather than the grant route.
+	Kind string `json:"kind,omitempty"`
+	// Plan is the plan the person approves; BudgetCredits is its limit and
+	// EstimatedCredits the server's quote of all steps.
+	Plan          *budget.Plan `json:"plan,omitempty"`
+	BudgetCredits int          `json:"budget_credits,omitempty"`
 }
 
 // Outcome is what a decision produced. TaskID and MessageID are empty while
@@ -315,32 +348,79 @@ func (s *Service) List(ctx context.Context, owner, session string) ([]Item, erro
 		return nil, err
 	}
 	items := make([]Item, 0, len(ops))
-	if len(ops) == 0 {
-		return items, nil
+	if len(ops) > 0 {
+		messages, err := s.chat.ListMessages(ctx, owner, session)
+		if err != nil {
+			return nil, err
+		}
+		for _, op := range ops {
+			grant, err := s.grants.Grants.GetExecutionGrant(ctx, owner, op.GrantRequestID)
+			if err != nil {
+				return nil, err
+			}
+			if !generationtool.AgentGrantMatchesOperation(grant, op) || grant.Status != executiongrant.Pending ||
+				s.grants.Expired(grant) {
+				continue
+			}
+			prepared, err := s.gateway.GetPreparedInput(ctx, generation.OwnerID(owner), op.PreparedInputID)
+			if err != nil {
+				return nil, err
+			}
+			if prepared.InputHash != op.PreparedInputHash || prepared.SessionID != session {
+				continue
+			}
+			items = append(items, s.item(ctx, owner, op, grant, prepared, messages))
+		}
 	}
-	messages, err := s.chat.ListMessages(ctx, owner, session)
+	// A plan card lives beside the step cards (#103): it is the one card that
+	// authorizes a chain of steps, so it must not disappear when no detached
+	// operation happens to be listed. Expired plans are not listed; the sweep
+	// posts their expiry message.
+	pendingBudgets, err := s.grants.PendingBudgets(ctx, owner, session)
 	if err != nil {
 		return nil, err
 	}
-	for _, op := range ops {
-		grant, err := s.grants.Grants.GetExecutionGrant(ctx, owner, op.GrantRequestID)
-		if err != nil {
-			return nil, err
-		}
-		if !generationtool.AgentGrantMatchesOperation(grant, op) || grant.Status != executiongrant.Pending ||
-			s.grants.Expired(grant) {
-			continue
-		}
-		prepared, err := s.gateway.GetPreparedInput(ctx, generation.OwnerID(owner), op.PreparedInputID)
-		if err != nil {
-			return nil, err
-		}
-		if prepared.InputHash != op.PreparedInputHash || prepared.SessionID != session {
-			continue
-		}
-		items = append(items, s.item(ctx, owner, op, grant, prepared, messages))
+	for _, production := range pendingBudgets {
+		items = append(items, s.planItem(production))
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
+	if maximum := s.schema.PendingApprovals.MaximumListed; maximum > 0 && len(items) > maximum {
+		items = items[:maximum]
 	}
 	return items, nil
+}
+
+// planItem projects one pending production plan as the card the person
+// decides. It carries the plan's steps and the total limit; the step quotes
+// are the server's, never the Agent's.
+func (s *Service) planItem(production budget.ProductionBudget) Item {
+	plan := production.Plan
+	return Item{
+		Kind: ItemKindPlan, RequestID: production.ID, Status: StatusPending,
+		Tool: s.planToolName(), EstimatedCredits: plan.EstimatedTotal(),
+		BudgetCredits: production.LimitCredits, Plan: &plan, Inputs: []Input{},
+		MessageID: production.MessageID, CreatedAt: production.CreatedAt,
+		ExpiresAt: s.grants.PendingBudgetExpiry(production),
+	}
+}
+
+// planToolName is the declared proposal tool's name. The plan card names the
+// tool whose result proposed it, so renaming the tool in the Schema needs no
+// code change (#103 review B4).
+func (s *Service) planToolName() string {
+	for _, tool := range s.schema.AgentTools {
+		if tool.Execution.ImplementationKey == "plan.propose" {
+			return tool.Name
+		}
+	}
+	for _, tool := range s.schema.Tools {
+		if tool.Execution.ImplementationKey == "plan.propose" {
+			return tool.Name
+		}
+	}
+	return ""
 }
 
 func (s *Service) item(ctx context.Context, owner string, op generationtool.Operation, grant executiongrant.Grant,
@@ -605,6 +685,121 @@ func (s *Service) Decide(ctx context.Context, principal executiongrant.Principal
 	return outcome, true, nil
 }
 
+// BudgetOutcome is what a production plan decision produced: the plan's new
+// state and the deterministic message that reports it.
+type BudgetOutcome struct {
+	BudgetID  string
+	State     string
+	MessageID string
+}
+
+// BudgetMessageID is the deterministic ID of the message that reports a plan
+// decision, so retrying the decision cannot post it twice.
+func BudgetMessageID(budgetID string) string { return "pa_" + budgetID }
+
+// DecideBudget applies the person's decision to a pending production plan of
+// the owner's session (#103). Approval makes the plan active and closes the
+// session's former active plan in the same transaction; denial makes it
+// denied. The decision and the message that reports it are separate, so a
+// transient post failure never undoes the decision.
+func (s *Service) DecideBudget(ctx context.Context, principal executiongrant.Principal,
+	sessionID, budgetID string, decision executiongrant.Decision) (BudgetOutcome, error) {
+	if s.grants == nil || sessionID == "" || budgetID == "" ||
+		principal.OwnerID == "" || principal.Source != executiongrant.HumanBrowser {
+		return BudgetOutcome{}, executiongrant.ErrInvalid
+	}
+	owned, err := s.chat.OwnsSession(ctx, principal.OwnerID, sessionID)
+	if err != nil {
+		return BudgetOutcome{}, err
+	}
+	if !owned {
+		return BudgetOutcome{}, ErrSessionNotFound
+	}
+	production, err := s.grants.GetBudget(ctx, principal.OwnerID, budgetID)
+	if err != nil {
+		return BudgetOutcome{}, err
+	}
+	if production.SessionID != sessionID {
+		return BudgetOutcome{}, executiongrant.ErrConflict
+	}
+	decided, err := s.grants.DecideBudget(ctx, principal, budgetID, decision)
+	if err != nil {
+		return BudgetOutcome{}, err
+	}
+	ctx = s.budgetLocale(ctx, decided)
+	content := s.budgetDecisionText(ctx, decided)
+	messageID := BudgetMessageID(budgetID)
+	if _, _, err := s.chat.PostAssistantMessage(ctx, principal.OwnerID, chat.Message{
+		ID: messageID, SessionID: sessionID, Content: content,
+	}); err != nil && !errors.Is(err, chat.ErrSessionNotFound) {
+		return BudgetOutcome{BudgetID: budgetID, State: decided.State, MessageID: messageID},
+			fmt.Errorf("%w: %w", ErrBudgetNoticeFailed, err)
+	}
+	return BudgetOutcome{BudgetID: budgetID, State: decided.State, MessageID: messageID}, nil
+}
+
+// Kinds of production plan notices posted by the sweep.
+const (
+	budgetNoticeExpired   = "expired"
+	budgetNoticeExhausted = "exhausted"
+)
+
+// postBudgetNotice posts the one expired or exhausted notice of a plan. The ID
+// is deterministic, so a repeated sweep never posts it twice.
+func (s *Service) postBudgetNotice(ctx context.Context, production budget.ProductionBudget, kind string) error {
+	messages := s.schema.ApprovalPolicy.Budget.Messages
+	template := messages.Expired
+	if kind == budgetNoticeExhausted {
+		template = messages.Exhausted
+	}
+	if strings.TrimSpace(template) == "" {
+		return nil
+	}
+	ctx = s.budgetLocale(ctx, production)
+	content := strings.NewReplacer(
+		"{title}", production.Plan.Title,
+		"{limit}", strconv.Itoa(production.LimitCredits),
+		"{remaining}", strconv.Itoa(0),
+	).Replace(s.text(ctx, template))
+	messageID := BudgetMessageID(production.ID) + ":" + kind
+	if _, _, err := s.chat.PostAssistantMessage(ctx, production.OwnerID, chat.Message{
+		ID: messageID, SessionID: production.SessionID, Content: content,
+	}); err != nil && !errors.Is(err, chat.ErrSessionNotFound) {
+		return err
+	}
+	return nil
+}
+
+// postBudgetNoticeAndMark posts the one notice of a plan and records that it
+// was posted. Recording is what stops the sweep retrying it; a failed post
+// leaves the plan unmarked so a later sweep tries again.
+func (s *Service) postBudgetNoticeAndMark(ctx context.Context, production budget.ProductionBudget, kind string) error {
+	if err := s.postBudgetNotice(ctx, production, kind); err != nil {
+		return err
+	}
+	return s.grants.MarkProductionBudgetNoticeSent(ctx, production.OwnerID, production.ID)
+}
+
+// budgetDecisionText renders the Schema's approved or denied message with the
+// plan's title, limit and remaining budget.
+func (s *Service) budgetDecisionText(ctx context.Context, production budget.ProductionBudget) string {
+	messages := s.schema.ApprovalPolicy.Budget.Messages
+	template := messages.Denied
+	remaining := 0
+	if production.State == budget.StateActive {
+		template = messages.Approved
+		remaining = production.LimitCredits
+		if summary, found, err := s.grants.BudgetSummary(ctx, production.OwnerID, production.SessionID); err == nil && found {
+			remaining = summary.RemainingCredits
+		}
+	}
+	return strings.NewReplacer(
+		"{title}", production.Plan.Title,
+		"{limit}", strconv.Itoa(production.LimitCredits),
+		"{remaining}", strconv.Itoa(remaining),
+	).Replace(s.text(ctx, template))
+}
+
 // checkUsable refuses a decision on an approval that can never run: its turn
 // is gone, or (to approve) its Offering changed. A turn that was stopped after
 // the card was detached does not matter: the card left the turn.
@@ -766,6 +961,20 @@ func (s *Service) settleExpired(ctx context.Context, op generationtool.Operation
 	return s.postAndSettle(ctx, op, s.text(ctx, s.schema.PendingApprovals.Messages.Expired))
 }
 
+// settleOperation finalizes the operation and gives back the plan reservation
+// of an approved grant that ended without a bound Task. The abandon is
+// idempotent and does nothing for a denied, pending, bound or unbudgeted
+// grant; without it a permanently rejected submit would hold the plan's
+// credits forever (#103 review B2).
+func (s *Service) settleOperation(ctx context.Context, op generationtool.Operation) error {
+	if op.GrantRequestID != "" {
+		if err := s.grants.AbandonBudgetReservation(ctx, op.OwnerID, op.GrantRequestID); err != nil {
+			return err
+		}
+	}
+	return s.operations.SettleAgentOperation(ctx, op)
+}
+
 // postAndSettle posts the one message that reports a request (a fixed ID makes
 // a second post a no-op) and marks the operation settled.
 func (s *Service) postAndSettle(ctx context.Context, op generationtool.Operation, content string) (Outcome, error) {
@@ -775,7 +984,7 @@ func (s *Service) postAndSettle(ctx context.Context, op generationtool.Operation
 	}); err != nil && !errors.Is(err, chat.ErrSessionNotFound) {
 		return Outcome{}, err
 	}
-	if err := s.operations.SettleAgentOperation(ctx, op); err != nil {
+	if err := s.settleOperation(ctx, op); err != nil {
 		return Outcome{}, err
 	}
 	return Outcome{MessageID: messageID}, nil
@@ -864,7 +1073,7 @@ func (s *Service) report(ctx context.Context, op generationtool.Operation, task 
 	messages, err := s.chat.ListMessages(ctx, op.OwnerID, op.SessionID)
 	if errors.Is(err, chat.ErrSessionNotFound) {
 		// The session is gone; nothing is left to report into.
-		return outcome, s.operations.SettleAgentOperation(ctx, op)
+		return outcome, s.settleOperation(ctx, op)
 	}
 	if err != nil {
 		return outcome, err
@@ -893,7 +1102,7 @@ func (s *Service) report(ctx context.Context, op generationtool.Operation, task 
 		})
 		if err != nil {
 			if errors.Is(err, chat.ErrSessionNotFound) {
-				return outcome, s.operations.SettleAgentOperation(ctx, op)
+				return outcome, s.settleOperation(ctx, op)
 			}
 			return outcome, err
 		}
@@ -931,7 +1140,7 @@ func (s *Service) report(ctx context.Context, op generationtool.Operation, task 
 	if err := s.chat.UpdateMessage(ctx, op.OwnerID, posted); err != nil && !errors.Is(err, chat.ErrMessageNotFound) {
 		return outcome, err
 	}
-	return outcome, s.operations.SettleAgentOperation(ctx, op)
+	return outcome, s.settleOperation(ctx, op)
 }
 
 // originalArguments recovers the arguments of the tool call that asked for the
@@ -950,8 +1159,12 @@ func originalArguments(messages []chat.Message, op generationtool.Operation) []b
 	return []byte("{}")
 }
 
-// Sweep finishes one batch of work per kind and returns how many operations it
+// Sweep finishes one batch of work per kind and returns how many approvals it
 // settled:
+//   - ended Tasks of a production plan: it marks their reservations charged or
+//     released and posts the plan's one exhausted notice (#103);
+//   - pending plans past their expiry: it refuses them and posts that they
+//     expired;
 //   - decided but unsettled operations: it submits an approval whose submit
 //     never ran, posts denials, and finalizes the message of a finished task;
 //   - waiting operations past their expiry: it posts that they expired;
@@ -961,6 +1174,59 @@ func (s *Service) Sweep(ctx context.Context) (int, error) {
 	batch := s.schema.PendingApprovals.MonitorBatchSize
 	var failures []error
 	settled := 0
+	exhausted, err := s.grants.SettleBudgets(ctx)
+	if err != nil {
+		failures = append(failures, err)
+	}
+	failedNotices := map[string]bool{}
+	for _, production := range exhausted {
+		if err := s.postBudgetNoticeAndMark(ctx, production, budgetNoticeExhausted); err != nil {
+			failures = append(failures, err)
+			failedNotices[production.ID] = true
+			continue
+		}
+		settled++
+	}
+	expiredPlans, err := s.grants.ExpireBudgets(ctx, s.grants.ExpiryCutoff())
+	if err != nil {
+		failures = append(failures, err)
+	}
+	for _, production := range expiredPlans {
+		if ctx.Err() != nil {
+			break
+		}
+		if err := s.postBudgetNoticeAndMark(ctx, production, budgetNoticeExpired); err != nil {
+			failures = append(failures, err)
+			failedNotices[production.ID] = true
+			continue
+		}
+		settled++
+	}
+	// The state transition commits before the notice is posted. A plan whose
+	// post failed (or whose process stopped before posting) keeps no notice
+	// date and is retried here until the deterministic message is stored
+	// (#103 review B3). This sweep already tried the plans above once.
+	if pending, err := s.grants.ProductionBudgetsAwaitingNotice(ctx, batch); err != nil {
+		failures = append(failures, err)
+	} else {
+		for _, production := range pending {
+			if ctx.Err() != nil {
+				break
+			}
+			if failedNotices[production.ID] {
+				continue
+			}
+			kind := budgetNoticeExhausted
+			if production.State == budget.StateDenied {
+				kind = budgetNoticeExpired
+			}
+			if err := s.postBudgetNoticeAndMark(ctx, production, kind); err != nil {
+				failures = append(failures, err)
+				continue
+			}
+			settled++
+		}
+	}
 	run := func(list func(int64, int) ([]generationtool.Operation, error), cursor *int64,
 		handle func(generationtool.Operation) error) {
 		ops, err := list(*cursor, batch)

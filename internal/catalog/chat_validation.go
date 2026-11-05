@@ -5,14 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+
+	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
 
-func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentations []CapabilityPresentation) error {
+func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentations []CapabilityPresentation, maxPromptCharacters int) error {
 	capabilityDomains := make(map[schemacontract.Capability]schemacontract.CapabilityDomain, len(capabilityPresentations))
 	for _, capability := range capabilityPresentations {
 		capabilityDomains[capability.ID] = capability.Domain
@@ -43,6 +44,10 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		"audit.agent_scope_action":         schema.Audit.AgentScopeAction,
 		"api.fields.notes":                 schema.API.Fields.Notes,
 		"api.response_fields.notes":        schema.API.ResponseFields.Notes,
+		"api.fields.brief":                 schema.API.Fields.Brief,
+		"api.response_fields.brief":        schema.API.ResponseFields.Brief,
+		"api.fields.explicit_model_3d":     schema.API.Fields.ExplicitModel3D,
+		"audit.production_brief_action":    schema.Audit.ProductionBriefAction,
 		"api.response_fields.pick":         schema.API.ResponseFields.Pick,
 		"api.fields.title":                 schema.API.Fields.Title,
 		"api.fields.content":               schema.API.Fields.Content,
@@ -156,6 +161,8 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		"presentation.agent_content_rejected":   schema.Presentation.Messages.AgentContentRejected,
 		"presentation.agent_not_configured":     schema.Presentation.Messages.AgentNotConfigured,
 		"presentation.invalid_parameters":       schema.Presentation.Messages.InvalidParameters,
+		"presentation.model_choice_conflict":    schema.Presentation.Messages.ModelChoiceConflict,
+		"presentation.model_choice_unavailable": schema.Presentation.Messages.ModelChoiceUnavailable,
 		"presentation.turn_active":              schema.Presentation.Messages.TurnActive,
 		"presentation.agent_busy":               schema.Presentation.Messages.AgentBusy,
 		"presentation.status.generating":        schema.Presentation.Status.Generating,
@@ -201,6 +208,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		return err
 	}
 	if err := validateChatChoice(schema); err != nil {
+		return err
+	}
+	if err := validateModel3DUsageShape(schema, capabilityPresentations); err != nil {
 		return err
 	}
 	if err := validateHarness(schema, capabilityPresentations); err != nil {
@@ -605,6 +615,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateSystemSkills(schema.Skills, toolNames); err != nil {
 		return err
 	}
+	if err := validateModelReview(schema, capabilityPresentations); err != nil {
+		return err
+	}
 	for index, tool := range schema.Tools {
 		if tool.RequireUniqueOffering && (!tool.IgnoreUserModel || tool.RequireUserModel || tool.CrossDomainModelFallback) {
 			return fmt.Errorf("tools[%d] require_unique_offering requires independent model selection", index)
@@ -726,6 +739,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		}
 		toolNames[tool.Name] = struct{}{}
 	}
+	if err := validateCraftPrompts(schema.Agent.CraftPrompts, toolNames, maxPromptCharacters); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -735,17 +751,23 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		implementation, effect string
 		domains                []string
 	}{
-		"set_params":           {"params.set", "SESSION_WRITE", []string{"image", "model-3d"}},
-		"list_offerings":       {"catalog.list", "READ", []string{"image", "model-3d"}},
-		"get_task":             {"task.read", "READ", []string{"image", "model-3d"}},
-		"observe_task":         {"task.read", "READ", []string{"image", "model-3d"}},
-		"request_consent":      {"consent.request", "SESSION_WRITE", []string{"image", "model-3d"}},
-		"create_three_view":    {"skill.prepare", "PAID_TASK", []string{"image"}},
-		"list_session_models":  {"model.list", "READ", []string{"model-3d"}},
-		"get_processing_plan":  {"processing.read", "READ", []string{"model-3d"}},
-		"update_session_notes": {"session.notes", "SESSION_WRITE", []string{"image", "model-3d"}},
-		"find_history_images":  {"history.images", "READ", []string{"image", "model-3d"}},
-		"recover_task_result":  {"task.refetch", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"set_params":              {"params.set", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"list_offerings":          {"catalog.list", "READ", []string{"image", "model-3d"}},
+		"get_task":                {"task.read", "READ", []string{"image", "model-3d"}},
+		"observe_task":            {"task.read", "READ", []string{"image", "model-3d"}},
+		"request_consent":         {"consent.request", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"create_three_view":       {"skill.prepare", "PAID_TASK", []string{"image"}},
+		"list_session_models":     {"model.list", "READ", []string{"model-3d"}},
+		"get_processing_plan":     {"processing.read", "READ", []string{"model-3d"}},
+		"update_session_notes":    {"session.notes", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"update_production_brief": {"session.brief", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"propose_production_plan": {"plan.propose", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"ask_choice":              {"choice.ask", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"find_history_images":     {"history.images", "READ", []string{"image", "model-3d"}},
+		"recover_task_result":     {"task.refetch", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"inspect_model":           {"model.inspect", "READ", []string{"model-3d"}},
+		"render_model_views":      {"model.render", "READ", []string{"model-3d"}},
+		"compare_models":          {"model.compare", "READ", []string{"model-3d"}},
 	}
 	var controlDomains []string
 	var expectedEffect string
@@ -850,7 +872,7 @@ func validateApprovalPolicy(policy ChatApprovalPolicySchema, capabilities []Capa
 	if len(policy.Modes) == 0 {
 		return errors.New("approval_policy.modes 不能为空")
 	}
-	known := map[string]bool{approvalModeAuto: true, approvalModeManual: true}
+	known := map[string]bool{approvalModeAuto: true, approvalModeManual: true, approvalModeBudget: true}
 	offered := make(map[string]bool, len(policy.Modes))
 	for _, mode := range policy.Modes {
 		if !known[mode] {
@@ -881,7 +903,66 @@ func validateApprovalPolicy(policy ChatApprovalPolicySchema, capabilities []Capa
 		}
 		seen[capability] = true
 	}
-	return validateApprovalPrompt(policy.Prompt, offered)
+	if err := validateApprovalPrompt(policy.Prompt, offered); err != nil {
+		return err
+	}
+	// Historical Catalogs that do not offer budget mode stay readable; a
+	// Catalog that offers it must declare a usable plan budget.
+	if offered[approvalModeBudget] {
+		return validateApprovalBudget(policy.Budget)
+	}
+	return nil
+}
+
+// validateApprovalBudget checks the production-plan bounds and texts (#103).
+// The state IDs are fixed by internal/budget; the labels and messages are the
+// product's words. A budget mode without a usable budget must not load.
+func validateApprovalBudget(budget ChatApprovalBudgetSchema) error {
+	if budget.MaxCredits <= 0 || budget.MaxSteps <= 0 ||
+		budget.MaxTitleCharacters <= 0 || budget.MaxPurposeCharacters <= 0 {
+		return errors.New("approval_policy.budget 的上限必须为正数")
+	}
+	if strings.TrimSpace(budget.ContextTemplate) == "" || strings.TrimSpace(budget.NoPlanState) == "" ||
+		strings.TrimSpace(budget.NoPlanText) == "" {
+		return errors.New("approval_policy.budget 的上下文文案不能为空")
+	}
+	for _, field := range []string{"{state}", "{limit}", "{spent}", "{reserved}", "{remaining}", "{plan}"} {
+		if !strings.Contains(budget.ContextTemplate, field) {
+			return fmt.Errorf("approval_policy.budget.context_template 缺少占位符 %s", field)
+		}
+	}
+	knownStates := map[string]bool{
+		"pending": true, "active": true, "exhausted": true, "closed": true, "denied": true,
+	}
+	seen := make(map[string]bool, len(budget.States))
+	for _, state := range budget.States {
+		if !knownStates[state.ID] || seen[state.ID] {
+			return fmt.Errorf("approval_policy.budget.states 含未知或重复的状态 %q", state.ID)
+		}
+		if strings.TrimSpace(state.Label) == "" {
+			return fmt.Errorf("approval_policy.budget.states[%s] 缺少 label", state.ID)
+		}
+		seen[state.ID] = true
+	}
+	for id := range knownStates {
+		if !seen[id] {
+			return fmt.Errorf("approval_policy.budget.states 缺少状态 %q", id)
+		}
+	}
+	for name, text := range map[string]string{
+		"approved": budget.Messages.Approved, "denied": budget.Messages.Denied,
+		"expired": budget.Messages.Expired, "exhausted": budget.Messages.Exhausted,
+	} {
+		if strings.TrimSpace(text) == "" {
+			return fmt.Errorf("approval_policy.budget.messages.%s 不能为空", name)
+		}
+	}
+	for _, field := range []string{"{title}", "{limit}", "{remaining}"} {
+		if !strings.Contains(budget.Messages.Approved, field) {
+			return fmt.Errorf("approval_policy.budget.messages.approved 缺少占位符 %s", field)
+		}
+	}
+	return nil
 }
 
 // validateApprovalPrompt checks the Agent-facing texts of the approval modes
@@ -920,6 +1001,7 @@ func validateApprovalPrompt(prompt ChatApprovalPromptSchema, offered map[string]
 const (
 	approvalModeAuto   = "auto"
 	approvalModeManual = "manual"
+	approvalModeBudget = "budget"
 )
 
 // validateChatToolProcessing checks that a processing tool's argument names
@@ -967,6 +1049,17 @@ func validateChatToolProcessing(tool ChatToolSchema, capabilityDomains map[schem
 			return nil, err
 		}
 		if err := claim(label, argument); err != nil {
+			return nil, err
+		}
+	}
+	if argument := processing.SourceAssetsArgument; argument != "" {
+		if processing.Plan != nil {
+			return nil, errors.New("source_assets_argument 不能用于加工计划工具")
+		}
+		if err := inParameters("source_assets_argument", argument); err != nil {
+			return nil, err
+		}
+		if err := claim("source_assets_argument", argument); err != nil {
 			return nil, err
 		}
 	}
@@ -1445,7 +1538,14 @@ func validateThreeViewMultiview(multiview ChatThreeViewMultiviewSchema, recipe C
 		if err := json.Unmarshal(tool.Parameters, &parameters); err != nil {
 			return fmt.Errorf("three_view.multiview.tool %q 的参数无法解析: %w", tool.Name, err)
 		}
-		for _, argument := range []string{multiview.GroupArgument, multiview.ViewsArgument, tool.OfferingArgument} {
+		// The model the multiview run is frozen to is named by the tool's model
+		// argument (#103); a historical catalog may still carry it as the exact
+		// Offering argument (#189).
+		modelArgument := tool.ModelArgument
+		if modelArgument == "" {
+			modelArgument = tool.OfferingArgument
+		}
+		for _, argument := range []string{multiview.GroupArgument, multiview.ViewsArgument, modelArgument} {
 			if _, declared := parameters.Properties[argument]; !declared || argument == "" {
 				return fmt.Errorf("three_view.multiview.tool %q 缺少参数 %q", tool.Name, argument)
 			}
@@ -1998,6 +2098,272 @@ func validateChatChoice(schema ChatSchema) error {
 	}
 	if schema.Choice.MaxOptions < 2 || schema.Choice.ListLimit < 1 {
 		return errors.New("choice.max_options 至少为 2，choice.list_limit 至少为 1")
+	}
+	return nil
+}
+
+// Catalog validates declarations without importing the renderer, so the
+// rendering vocabulary is repeated here. TestModelReviewVocabularyMatchesRenderer
+// keeps these copies equal to internal/modelinspect.
+const modelReviewMaxRenderDimension = 2048
+
+// modelReviewViews and modelReviewModes are the rendering vocabulary of
+// internal/modelinspect. The Schema may offer a subset of them, never a name
+// the renderer does not know.
+var (
+	modelReviewViews = []string{"front", "back", "left", "right", "top", "three_quarter"}
+	modelReviewModes = []string{"textured", "clay", "normals", "wireframe"}
+	// modelReviewPlaceholder finds the braces the executor fills. Any other
+	// brace left in a template would reach the Agent verbatim.
+	modelReviewPlaceholder = regexp.MustCompile(`\{[a-z_]+\}`)
+)
+
+// validateModelReview checks application.chat.model_review (#103) once any
+// model review tool is declared: every bound positive, the render vocabulary
+// renderable, defaults inside their enumerations, and every Agent-facing text
+// present with the placeholders the executor fills. Schemas without the tools
+// stay valid.
+func validateModelReview(schema ChatSchema, capabilityPresentations []CapabilityPresentation) error {
+	used := false
+	for _, tool := range schema.AgentTools {
+		switch tool.Execution.ImplementationKey {
+		case "model.inspect", "model.render", "model.compare":
+			used = true
+		}
+	}
+	if !used {
+		return nil
+	}
+	review := schema.ModelReview
+	limits := review.Inspect.Limits
+	if limits.MaxBytes <= 0 || limits.MaxTriangles <= 0 || limits.MaxVertices <= 0 ||
+		limits.MaxTexturePixels <= 0 || limits.MaxNodes <= 0 || limits.MaxDepth <= 0 ||
+		review.Inspect.WeldEpsilonRatio <= 0 || review.Inspect.DebrisRatio <= 0 ||
+		review.Inspect.MaxListedParts <= 0 {
+		return errors.New("chat.model_review.inspect 的限额、比例与部件上限必须为正数")
+	}
+	if err := validateModelInspectProduction(review.Inspect.Production, capabilityPresentations); err != nil {
+		return err
+	}
+
+	render := review.Render
+	if render.Size <= 0 || render.MaxSize < render.Size || render.Supersample <= 0 ||
+		render.WireframeMaxTriangles <= 0 || render.Workers <= 0 ||
+		render.MaxConcurrentRenders <= 0 || render.MaxViewsPerCall <= 0 ||
+		render.MaxRenderCallsPerTurn <= 0 {
+		return errors.New("chat.model_review.render 的尺寸、并发与额度必须为正数，size 不能超过 max_size")
+	}
+	if render.MaxSize*render.Supersample > modelReviewMaxRenderDimension {
+		return fmt.Errorf(
+			"chat.model_review.render 的 max_size × supersample 不能超过 %d",
+			modelReviewMaxRenderDimension,
+		)
+	}
+	if len(render.Views) == 0 || len(render.Modes) == 0 || len(render.DefaultViews) == 0 {
+		return errors.New("chat.model_review.render 必须声明 views、modes 与 default_views")
+	}
+	views := make(map[string]bool, len(render.Views))
+	for _, view := range render.Views {
+		if !slices.Contains(modelReviewViews, view) || views[view] {
+			return fmt.Errorf("chat.model_review.render.views 含未知或重复的视角 %q", view)
+		}
+		views[view] = true
+	}
+	modes := make(map[string]bool, len(render.Modes))
+	for _, mode := range render.Modes {
+		if !slices.Contains(modelReviewModes, mode) || modes[mode] {
+			return fmt.Errorf("chat.model_review.render.modes 含未知或重复的模式 %q", mode)
+		}
+		modes[mode] = true
+	}
+	for _, view := range render.DefaultViews {
+		if !views[view] {
+			return fmt.Errorf("chat.model_review.render.default_views 含未声明的视角 %q", view)
+		}
+	}
+	if !modes[render.DefaultMode] {
+		return fmt.Errorf("chat.model_review.render.default_mode %q 未在 modes 中声明", render.DefaultMode)
+	}
+	if strings.TrimSpace(render.AssetType) == "" || !visionFlattenColour.MatchString(render.Background) {
+		return errors.New("chat.model_review.render 的 asset_type 不能为空，background 必须是 #rrggbb")
+	}
+
+	if review.Compare.MaxViewsPerCall <= 0 || review.Compare.MaxViewsPerCall > render.MaxViewsPerCall ||
+		review.Compare.Layout != "side_by_side" {
+		return errors.New("chat.model_review.compare 需要正数且不超过 render 上限的 max_views_per_call 与 layout side_by_side")
+	}
+	if review.Cache.MaxModels <= 0 || review.Cache.MaxBytes <= 0 {
+		return errors.New("chat.model_review.cache 的上限必须为正数")
+	}
+	if strings.TrimSpace(review.ResultViewsField) == "" {
+		return errors.New("chat.model_review.result_views_field 不能为空")
+	}
+
+	source := review.Source
+	if strings.TrimSpace(source.TaskArgument) == "" || strings.TrimSpace(source.AssetArgument) == "" ||
+		strings.TrimSpace(source.SourceRequired) == "" || strings.TrimSpace(source.SourceNotFound) == "" ||
+		strings.TrimSpace(source.SourceNotReady) == "" || strings.TrimSpace(source.SourceNotModel) == "" ||
+		strings.TrimSpace(source.SourceNotGLB) == "" {
+		return errors.New("chat.model_review.source 的参数名与文案不能为空")
+	}
+	if !strings.Contains(source.SourceNotModel, "{asset}") {
+		return errors.New("chat.model_review.source.source_not_model 必须包含 {asset}")
+	}
+	if !strings.Contains(source.SourceNotGLB, "{asset}") || !strings.Contains(source.SourceNotGLB, "{media}") {
+		return errors.New("chat.model_review.source.source_not_glb 必须包含 {asset} 与 {media}")
+	}
+
+	texts := []struct {
+		name     string
+		value    string
+		required []string
+	}{
+		{"inspect_ready", review.Texts.InspectReady, []string{"{model}"}},
+		{"render_ready", review.Texts.RenderReady, []string{"{count}", "{views}"}},
+		{"compare_ready", review.Texts.CompareReady, []string{"{count}", "{views}"}},
+		{"images_attached", review.Texts.ImagesAttached, []string{"{count}"}},
+		{"vision_off", review.Texts.VisionOff, nil},
+		{"budget_remaining", review.Texts.BudgetRemaining, []string{"{remaining}", "{limit}"}},
+		{"budget_exhausted", review.Texts.BudgetExhausted, []string{"{limit}"}},
+		{"too_large", review.Texts.TooLarge, []string{"{bytes}", "{limit}"}},
+		{"unsupported", review.Texts.Unsupported, []string{"{reason}"}},
+		{"source_read_failed", review.Texts.SourceReadFailed, []string{"{reason}"}},
+		{"upload_failed", review.Texts.UploadFailed, []string{"{reason}"}},
+		{"render_failed", review.Texts.RenderFailed, []string{"{view}", "{reason}"}},
+		{"wireframe_too_dense", review.Texts.WireframeTooDense, []string{"{triangles}", "{limit}"}},
+		{"too_many_views", review.Texts.TooManyViews, []string{"{count}", "{limit}"}},
+		{"unknown_view", review.Texts.UnknownView, []string{"{view}", "{views}"}},
+		{"unknown_mode", review.Texts.UnknownMode, []string{"{mode}", "{modes}"}},
+		{"invalid_arguments", review.Texts.InvalidArguments, []string{"{detail}"}},
+		{"parts_required", review.Texts.PartsRequired, nil},
+		{"unknown_part", review.Texts.UnknownPart, []string{"{part}"}},
+		{"too_many_models", review.Texts.TooManyModels, []string{"{count}"}},
+	}
+	for _, text := range texts {
+		if strings.TrimSpace(text.value) == "" {
+			return fmt.Errorf("chat.model_review.texts.%s 不能为空", text.name)
+		}
+		for _, placeholder := range text.required {
+			if !strings.Contains(text.value, placeholder) {
+				return fmt.Errorf("chat.model_review.texts.%s 必须包含 %s", text.name, placeholder)
+			}
+		}
+	}
+	return nil
+}
+
+// validateModelInspectProduction checks model_review.inspect.production: the
+// thresholds of the purpose check, its Agent-facing sentences and the fix
+// options. Every check has exactly one fix; a dynamic fix names only declared
+// capabilities and public parameter values, while a static fix carries no
+// placeholder the executor would leave behind.
+func validateModelInspectProduction(
+	production ChatModelInspectProductionSchema,
+	capabilityPresentations []CapabilityPresentation,
+) error {
+	if production.PivotBottomCenterRatio <= 0 || production.PivotBottomCenterRatio > 1 {
+		return errors.New("chat.model_review.inspect.production.pivot_bottom_center_ratio 必须在 (0, 1] 内")
+	}
+	if production.YUpFlatRatio <= 0 || production.YUpFlatRatio >= 1 {
+		return errors.New("chat.model_review.inspect.production.y_up_flat_ratio 必须在 (0, 1) 内")
+	}
+	if production.DebrisRatio < 0 || production.DebrisRatio > 1 {
+		return errors.New("chat.model_review.inspect.production.debris_ratio 必须在 [0, 1] 内")
+	}
+	if production.DegenerateRatio < 0 || production.DegenerateRatio > 1 {
+		return errors.New("chat.model_review.inspect.production.degenerate_ratio 必须在 [0, 1] 内")
+	}
+
+	texts := []struct {
+		name     string
+		value    string
+		required []string
+	}{
+		{"default_purpose_text", production.DefaultPurposeText, []string{"{purpose}"}},
+		{"brief_purpose_text", production.BriefPurposeText, []string{"{purpose}"}},
+		{"triangle_override_text", production.TriangleOverrideText, []string{"{value}"}},
+		{"no_capability_text", production.NoCapabilityText, nil},
+		{"capability_joiner", production.CapabilityJoiner, nil},
+		{"option_separator", production.OptionSeparator, nil},
+	}
+	for _, text := range texts {
+		if strings.TrimSpace(text.value) == "" {
+			return fmt.Errorf("chat.model_review.inspect.production.%s 不能为空", text.name)
+		}
+		for _, placeholder := range text.required {
+			if !strings.Contains(text.value, placeholder) {
+				return fmt.Errorf("chat.model_review.inspect.production.%s 必须包含 %s", text.name, placeholder)
+			}
+		}
+		for _, placeholder := range modelReviewPlaceholder.FindAllString(text.value, -1) {
+			if !slices.Contains(text.required, placeholder) {
+				return fmt.Errorf("chat.model_review.inspect.production.%s 含未填充的占位符 %s", text.name, placeholder)
+			}
+		}
+	}
+
+	capabilities := make(map[string]bool, len(capabilityPresentations))
+	for _, capability := range capabilityPresentations {
+		capabilities[string(capability.ID)] = true
+	}
+	checkIDs := ModelReviewUsageCheckIDs()
+	declared := make(map[string]bool, len(production.Fixes))
+	for _, fix := range production.Fixes {
+		if !slices.Contains(checkIDs, fix.Check) {
+			return fmt.Errorf("chat.model_review.inspect.production.fixes 含未知检查 %q", fix.Check)
+		}
+		if declared[fix.Check] {
+			return fmt.Errorf("chat.model_review.inspect.production.fixes 中 %q 重复", fix.Check)
+		}
+		declared[fix.Check] = true
+		if strings.TrimSpace(fix.Template) == "" {
+			return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].template 不能为空", fix.Check)
+		}
+		allowed := map[string]bool{}
+		if len(fix.Options) > 0 {
+			allowed["{capabilities}"] = true
+			if !strings.Contains(fix.Template, "{capabilities}") {
+				return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].template 必须包含 {capabilities}", fix.Check)
+			}
+		}
+		if fix.Check == ModelReviewUsageCheckPlausibleScale && len(fix.Options) > 0 {
+			allowed["{minimum}"] = true
+			allowed["{maximum}"] = true
+			for _, placeholder := range []string{"{minimum}", "{maximum}"} {
+				if !strings.Contains(fix.Template, placeholder) {
+					return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].template 必须包含 %s", fix.Check, placeholder)
+				}
+			}
+		}
+		for _, placeholder := range modelReviewPlaceholder.FindAllString(fix.Template, -1) {
+			if !allowed[placeholder] {
+				return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].template 含未填充的占位符 %s", fix.Check, placeholder)
+			}
+		}
+		for optionIndex, option := range fix.Options {
+			if len(option.Capabilities) == 0 {
+				return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].options[%d] 没有能力", fix.Check, optionIndex)
+			}
+			for candidateIndex, candidate := range option.Capabilities {
+				if strings.TrimSpace(candidate.Capability) == "" || !capabilities[candidate.Capability] {
+					return fmt.Errorf(
+						"chat.model_review.inspect.production.fixes[%s].options[%d].capabilities[%d] 的能力 %q 未声明",
+						fix.Check, optionIndex, candidateIndex, candidate.Capability,
+					)
+				}
+				if (candidate.Parameter == "") != (candidate.Value == "") {
+					return fmt.Errorf(
+						"chat.model_review.inspect.production.fixes[%s].options[%d].capabilities[%d] 的 parameter 与 value 必须同时为空或同时非空",
+						fix.Check, optionIndex, candidateIndex,
+					)
+				}
+			}
+		}
+	}
+	for _, check := range checkIDs {
+		if !declared[check] {
+			return fmt.Errorf("chat.model_review.inspect.production.fixes 缺少检查 %q", check)
+		}
 	}
 	return nil
 }

@@ -384,8 +384,11 @@ func TestDefaultCatalogApprovalPolicyMatchesProductRule(t *testing.T) {
 		known = append(known, string(capability.ID))
 	}
 	policy := approvalpolicy.New(declared.DefaultMode, declared.Modes, manual, known)
-	if policy.DefaultMode != "manual" {
-		t.Fatalf("default mode = %q, want manual", policy.DefaultMode)
+	if policy.DefaultMode != "budget" {
+		t.Fatalf("default mode = %q, want budget", policy.DefaultMode)
+	}
+	if !policy.Allows("budget") || !policy.Allows("manual") || !policy.Allows("auto") {
+		t.Fatalf("offered modes = %v", policy.Modes)
 	}
 	humanCapabilities := map[string]bool{"text-to-3d": true, "image-to-3d": true, "image-to-splat": true, "retexture": true}
 	for _, capability := range []string{"text-to-image", "image-to-image", "background-removal",
@@ -415,7 +418,7 @@ func TestDefaultCatalogDeclaresParallelGeneration(t *testing.T) {
 		t.Fatalf("agent = %d/%d parallel=%v submissions=%d admission=%d", agent.MaxGenerationCallsPerTurn,
 			agent.MaxToolCallsPerReply, agent.ParallelToolCalls, agent.MaxParallelGenerationSubmissions, admission)
 	}
-	if agent.SystemPrompt == "" || !strings.Contains(agent.SystemPrompt, "一次性发出全部工具调用") {
+	if agent.SystemPrompt == "" || !strings.Contains(agent.SystemPrompt, "互不依赖的付费步骤在同一次回复里一起发出") {
 		t.Fatal("system prompt lacks the batch rule")
 	}
 }

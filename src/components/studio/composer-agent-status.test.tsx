@@ -16,7 +16,6 @@ vi.mock('@/store/chat-store', () => ({ useChatStore: (select: (state: object) =>
 vi.mock('@/components/workspace/harness-summary', () => ({ HarnessSummary: () => null }));
 vi.mock('@/components/studio/model-picker', () => ({ ModelPicker: () => null, GenerationModelNotice: () => null }));
 vi.mock('@/components/studio/skill-picker', () => ({ SkillPicker: () => null }));
-vi.mock('@/components/studio/agent-scope-picker', () => ({ AgentScopePicker: () => null }));
 vi.mock('@/components/studio/params-popover', () => ({ ParamsPopover: () => null }));
 vi.mock('@/components/result/result-card-parts', () => ({ openResultDetail: vi.fn() }));
 vi.mock('@/components/ui/hint-tooltip', () => ({ HintTooltip: ({ name, reason, children }: { name: string; reason?: string; children: React.ReactNode }) => <span data-hint-name={name} data-hint-reason={reason}>{children}</span> }));

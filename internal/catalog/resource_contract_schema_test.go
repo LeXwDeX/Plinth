@@ -327,6 +327,10 @@ func TestDefaultCatalogKeepsOtherOfferingsLegacy(t *testing.T) {
 		"tripo/format-conversion/uploaded-glb-to-stl": true,
 		// #264 the Task-output glTF package has one exact model/gltf ZIP slot.
 		"local/generated-glb/to-gltf": true,
+		// #103 local split/merge declare exact model/glb slots; split also
+		// declares its bounded parts_manifest JSON sidecar.
+		"local/model-parts/split": true,
+		"local/model-parts/merge": true,
 		// #184 qualified routes use explicit required model/report/archive/clip slots.
 		"meshy/processing/uv-unwrap":            true,
 		"meshy/processing/resize":               true,

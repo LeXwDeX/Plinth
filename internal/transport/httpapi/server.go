@@ -582,11 +582,22 @@ func (s *Server) routes() {
 		s.mux.HandleFunc("GET "+routes.ChatSessionNotes, s.withIdentity(s.getChatSessionNotes))
 		s.mux.HandleFunc("PUT "+routes.ChatSessionNotes, s.withIdentity(s.putChatSessionNotes))
 	}
+	if routes.ChatSessionBrief != "" {
+		s.mux.HandleFunc("GET "+routes.ChatSessionBrief, s.withIdentity(s.getChatSessionBrief))
+		s.mux.HandleFunc("PUT "+routes.ChatSessionBrief, s.withPrincipal(s.putChatSessionBrief))
+	}
+	if routes.ChatSessionModel3D != "" {
+		s.mux.HandleFunc("GET "+routes.ChatSessionModel3D, s.withIdentity(s.getChatSessionExplicitModel3D))
+		s.mux.HandleFunc("PUT "+routes.ChatSessionModel3D, s.withIdentity(s.putChatSessionExplicitModel3D))
+	}
 	if s.lineage != nil && routes.ChatSessionLineage != "" {
 		s.mux.HandleFunc("GET "+routes.ChatSessionLineage, s.withIdentity(s.getChatSessionLineage))
 	}
 	if s.pendingApprovals != nil && routes.ChatSessionPendingApprovals != "" {
 		s.mux.HandleFunc("GET "+routes.ChatSessionPendingApprovals, s.withIdentity(s.listPendingApprovals))
+	}
+	if s.pendingApprovals != nil && routes.ChatSessionBudget != "" {
+		s.mux.HandleFunc("PUT "+routes.ChatSessionBudget, s.withIdentity(s.decideChatSessionBudget))
 	}
 	if s.threeViews != nil && routes.ChatSessionThreeViews != "" && routes.ChatSessionThreeViewItem != "" {
 		s.mux.HandleFunc("GET "+routes.ChatSessionThreeViews, s.withIdentity(s.listThreeViews))

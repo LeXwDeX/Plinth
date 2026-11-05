@@ -55,6 +55,37 @@ describe('ChoiceCard (#321)', () => {
     expect(button?.[1]).toContain(`<span class="truncate">${text}</span>`);
   });
 
+  it('renders an option tile grid when the card carries a label, description or recommendation (#103)', () => {
+    const rich = {
+      ...base,
+      options: base.options.map((option, index) => index === 0
+        ? { ...option, label: '快速草模', description: '几十秒出一个低面数草模，适合先看比例', recommended: true }
+        : option),
+    };
+    const html = render(rich);
+    expect(html).toMatch(/data-testid="chat-choice-options"[^>]*data-layout="grid"/);
+    expect(html).toContain('快速草模');
+    // The service's own name replaces provider · model, and the row keeps the quote.
+    expect(html).toContain('data-testid="chat-choice-description"');
+    expect(html).toContain('几十秒出一个低面数草模，适合先看比例');
+    expect(html).toContain('data-testid="chat-choice-recommended-badge"');
+    expect(html).toContain(messages['ui.chat.choice.recommended_badge']);
+    expect(html).toContain('data-testid="chat-choice-default-badge"');
+    expect(html).toContain(`${messages['ui.workspace.harness.credits']}: 40`);
+    // A recommended option without a name or description stays a plain row.
+    const recommendedOnly = render({ ...base, options: base.options.map((option, index) => index === 1 ? { ...option, recommended: true } : option) });
+    expect(recommendedOnly).toMatch(/data-testid="chat-choice-options"[^>]*data-layout="grid"/);
+    expect(recommendedOnly).not.toContain('data-testid="chat-choice-description"');
+    expect(recommendedOnly).toContain('Hyper3D · Bang Rodin');
+  });
+
+  it('keeps the familiar single-column list for an older card without rich option fields (#103)', () => {
+    const html = render(base);
+    expect(html).toMatch(/data-testid="chat-choice-options"[^>]*data-layout="list"/);
+    expect(html).not.toContain('data-testid="chat-choice-description"');
+    expect(html).not.toContain('data-testid="chat-choice-recommended-badge"');
+  });
+
   it('offers no default button when the card does not allow one, and disables the buttons while busy', () => {
     expect(render({ ...base, allowDefault: false })).not.toContain('data-testid="chat-choice-default"');
     expect(render(base, { busy: true })).toMatch(/<button[^>]*disabled=""[^>]*data-testid="chat-choice-confirm"/);

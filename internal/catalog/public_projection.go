@@ -36,10 +36,29 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 	publicChat.AgentStatus.Available = !cloned.Chat.AgentNotConfigured
 	publicChat.AgentLimits.MaxToolCallsPerReply = cloned.Chat.Agent.MaxToolCallsPerReply
 	publicChat.ThreeViewLimits.QueueLimitSeconds = cloned.Chat.ThreeView.QueueLimitSeconds
+	// #103: the conversation recognises review calls by these public tool
+	// names; the brief panel and approval card label purposes and fields from
+	// the public purpose table.
+	if tools := cloned.Chat.ModelReview.Tools; tools != (ChatModelReviewToolsSchema{}) {
+		publicChat.ModelReview = &PublicChatModelReviewSchema{Tools: tools}
+	}
+	if usage := cloned.Chat.Model3DUsage; len(usage.Profiles) > 0 || len(usage.Brief.Fields) > 0 {
+		profiles := make([]PublicChatModel3DUsageProfile, 0, len(usage.Profiles))
+		for _, profile := range usage.Profiles {
+			profiles = append(profiles, PublicChatModel3DUsageProfile{ID: profile.ID, Label: profile.Label})
+		}
+		publicChat.Model3DUsage = &PublicChatModel3DUsageSchema{
+			Profiles: profiles,
+			Brief:    PublicChatProductionBriefSchema{Fields: append([]ChatProductionBriefField(nil), usage.Brief.Fields...)},
+		}
+	}
 	publicChat.ApprovalPolicy = PublicChatApprovalPolicy{
 		DefaultMode:                cloned.Chat.ApprovalPolicy.DefaultMode,
 		Modes:                      cloned.Chat.ApprovalPolicy.Modes,
 		ManualApprovalCapabilities: cloned.Chat.ApprovalPolicy.ManualApprovalCapabilities,
+	}
+	for _, state := range cloned.Chat.ApprovalPolicy.Budget.States {
+		publicChat.ApprovalPolicy.BudgetStates = append(publicChat.ApprovalPolicy.BudgetStates, state.ID)
 	}
 	publicChat.ContextCompaction = PublicChatContextCompaction{
 		Enabled:            cloned.Chat.ContextCompaction.Enabled,

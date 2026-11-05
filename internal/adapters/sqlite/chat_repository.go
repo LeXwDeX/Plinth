@@ -23,7 +23,8 @@ func (r *Repository) ListSessions(
 ) ([]chat.Session, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
-		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source
+		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
+		       s.brief, s.explicit_model_3d
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE s.owner_id = ?
@@ -89,7 +90,8 @@ func (r *Repository) ListSessionsPage(
 	args = append(args, query.Limit+1)
 	rows, err := tx.QueryContext(ctx, `
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
-		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source
+		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
+		       s.brief, s.explicit_model_3d
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE `+where+`
@@ -266,6 +268,98 @@ func (r *Repository) SetSessionNotes(ctx context.Context, ownerID, sessionID, no
 	return affected > 0, nil
 }
 
+// SessionBrief reads the production brief of the owner's own session (#103).
+func (r *Repository) SessionBrief(ctx context.Context, ownerID, sessionID string) (chat.ProductionBrief, bool, error) {
+	var stored string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT brief FROM go_chat_sessions WHERE id = ? AND owner_id = ?`,
+		sessionID, ownerID).Scan(&stored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return chat.ProductionBrief{}, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("read chat session brief: %w", err)
+	}
+	return chat.DecodeProductionBrief(stored), true, nil
+}
+
+// ReplaceSessionBrief writes the production brief of the owner's own session
+// only while the stored value is still expected. A concurrent writer makes the
+// second call report conflict instead of silently overwriting (#103 review
+// C5). It keeps updated_at so editing the brief does not reorder the history
+// list.
+func (r *Repository) ReplaceSessionBrief(
+	ctx context.Context,
+	ownerID, sessionID string,
+	expected, next chat.ProductionBrief,
+) (found bool, conflict bool, err error) {
+	before, err := chat.EncodeProductionBrief(expected)
+	if err != nil {
+		return false, false, err
+	}
+	stored, err := chat.EncodeProductionBrief(next)
+	if err != nil {
+		return false, false, err
+	}
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE go_chat_sessions SET brief = ? WHERE id = ? AND owner_id = ? AND brief = ?`,
+		stored, sessionID, ownerID, before)
+	if err != nil {
+		return false, false, fmt.Errorf("replace chat session brief: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, false, err
+	}
+	if affected > 0 {
+		return true, false, nil
+	}
+	var exists int
+	err = r.db.QueryRowContext(ctx, `
+		SELECT 1 FROM go_chat_sessions WHERE id = ? AND owner_id = ?`,
+		sessionID, ownerID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, fmt.Errorf("check chat session brief: %w", err)
+	}
+	return true, true, nil
+}
+
+// SessionExplicitModel3D reads the explicitly picked 3D model of the owner's
+// own session (#103). An empty value means no explicit pick.
+func (r *Repository) SessionExplicitModel3D(ctx context.Context, ownerID, sessionID string) (string, bool, error) {
+	var model string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT explicit_model_3d FROM go_chat_sessions WHERE id = ? AND owner_id = ?`,
+		sessionID, ownerID).Scan(&model)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read chat session explicit 3d model: %w", err)
+	}
+	return model, true, nil
+}
+
+// SetSessionExplicitModel3D replaces (or, for an empty model, clears) the 3D
+// model the person explicitly picked in the session. It keeps updated_at so
+// picking does not reorder the history list.
+func (r *Repository) SetSessionExplicitModel3D(ctx context.Context, ownerID, sessionID, model string) (bool, error) {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE go_chat_sessions SET explicit_model_3d = ? WHERE id = ? AND owner_id = ?`,
+		model, sessionID, ownerID)
+	if err != nil {
+		return false, fmt.Errorf("set chat session explicit 3d model: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, nil
+}
+
 // SessionPick reads the candidate the owner picked for the session. A zero
 // Attachment means no pick; found is false for a missing or foreign session.
 func (r *Repository) SessionPick(ctx context.Context, ownerID, sessionID string) (chat.Attachment, bool, error) {
@@ -318,7 +412,8 @@ func (r *Repository) SetSessionPick(ctx context.Context, ownerID, sessionID stri
 }
 
 func sessionApprovalModeOrManual(mode string) string {
-	if mode == "auto" {
+	switch mode {
+	case "auto", "budget":
 		return mode
 	}
 	return "manual"
@@ -388,7 +483,7 @@ func (r *Repository) SetSessionApprovalMode(
 	sessionID string,
 	mode string,
 ) (chat.Session, bool, error) {
-	if mode != "auto" && mode != "manual" {
+	if mode != "auto" && mode != "manual" && mode != "budget" {
 		return chat.Session{}, false, chat.ErrInvalidApprovalMode
 	}
 	result, err := r.db.ExecContext(ctx, `
@@ -1343,7 +1438,8 @@ func (r *Repository) Session(
 ) (chat.Session, bool, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
-		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source
+		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
+		       s.brief, s.explicit_model_3d
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE s.id = ? AND s.owner_id = ?
@@ -1368,7 +1464,8 @@ func (r *Repository) getChatSession(
 ) (chat.Session, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
-		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source
+		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
+		       s.brief, s.explicit_model_3d
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE s.id = ? AND s.owner_id = ?
@@ -1387,6 +1484,7 @@ func scanChatSession(scanner chatSessionScanner) (chat.Session, error) {
 	var session chat.Session
 	var createdAt string
 	var updatedAt string
+	var brief string
 	if err := scanner.Scan(
 		&session.ID,
 		&session.OwnerID,
@@ -1398,9 +1496,12 @@ func scanChatSession(scanner chatSessionScanner) (chat.Session, error) {
 		&session.ApprovalMode,
 		&session.AgentScope,
 		&session.TitleSource,
+		&brief,
+		&session.ExplicitModel3D,
 	); err != nil {
 		return chat.Session{}, err
 	}
+	session.Brief = chat.DecodeProductionBrief(brief)
 	var err error
 	session.CreatedAt, err = parseTime(createdAt)
 	if err != nil {
@@ -1557,6 +1658,9 @@ type storedToolCall struct {
 	EstimatedCredits int                     `json:"estimated_credits,omitempty"`
 	NativeQuote      *generation.NativeQuote `json:"native_quote,omitempty"`
 	ApprovalSource   string                  `json:"approval_source,omitempty"`
+	// Summary is the compact result of a read-only tool (#103); older rows
+	// omit it.
+	Summary json.RawMessage `json:"summary,omitempty"`
 }
 
 func marshalToolCalls(calls []chat.ToolCall) (string, error) {
@@ -1571,6 +1675,7 @@ func marshalToolCalls(calls []chat.ToolCall) (string, error) {
 			EstimatedCredits: call.EstimatedCredits,
 			NativeQuote:      call.NativeQuote,
 			ApprovalSource:   call.ApprovalSource,
+			Summary:          call.Summary,
 		})
 	}
 	encoded, err := json.Marshal(stored)
@@ -1593,6 +1698,7 @@ func unmarshalToolCalls(raw string, target *[]chat.ToolCall) error {
 			EstimatedCredits: call.EstimatedCredits,
 			NativeQuote:      call.NativeQuote,
 			ApprovalSource:   call.ApprovalSource,
+			Summary:          call.Summary,
 		})
 	}
 	*target = result

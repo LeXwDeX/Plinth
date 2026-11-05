@@ -100,7 +100,7 @@ describe('the composer bottom row (#322)', () => {
     const { readFileSync } = await import('node:fs');
     const composer = readFileSync(new URL('./composer.tsx', import.meta.url), 'utf8');
     const bottom = composer.slice(composer.indexOf('data-testid="composer-pickers"'));
-    expect(bottom.indexOf('<AgentScopePicker />')).toBeLessThan(bottom.indexOf('<ParamsPopover {...params}'));
+    expect(bottom).not.toContain('AgentScopePicker');
     expect(bottom.indexOf('<ParamsPopover {...params}')).toBeLessThan(bottom.indexOf('<ChatModelPicker />'));
     expect(bottom.indexOf('<ChatModelPicker />')).toBeLessThan(bottom.indexOf('<ReasoningPicker />'));
     expect(bottom.indexOf('<ReasoningPicker />')).toBeLessThan(bottom.indexOf('<ContextMeter />'));

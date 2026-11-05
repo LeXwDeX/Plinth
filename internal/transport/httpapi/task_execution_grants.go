@@ -243,9 +243,11 @@ func (s *Server) writeTaskGrantError(writer http.ResponseWriter, err error) {
 		s.writeMessageProblem(writer, http.StatusConflict, "pending_approval_expired", "error.pending_approval_expired")
 	case errors.Is(err, pendingapproval.ErrUnavailable):
 		s.writeMessageProblem(writer, http.StatusConflict, "pending_approval_unavailable", "error.pending_approval_unavailable")
-	case errors.Is(err, executiongrant.ErrConflict), errors.Is(err, executiongrant.ErrState):
+	case errors.Is(err, executiongrant.ErrConflict), errors.Is(err, executiongrant.ErrState),
+		errors.Is(err, executiongrant.ErrBudgetState), errors.Is(err, executiongrant.ErrBudgetGone),
+		errors.Is(err, executiongrant.ErrBudgetOver):
 		s.writeMessageProblem(writer, http.StatusConflict, "conflict", "error.conflict")
-	case errors.Is(err, sql.ErrNoRows):
+	case errors.Is(err, executiongrant.ErrNoBudget), errors.Is(err, pendingapproval.ErrSessionNotFound), errors.Is(err, sql.ErrNoRows):
 		s.writeMessageProblem(writer, http.StatusNotFound, "not_found", "error.task_not_found")
 	default:
 		// Every rejection carries a Schema message (`detail`) the approval card

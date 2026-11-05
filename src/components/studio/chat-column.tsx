@@ -20,6 +20,7 @@ import {
 import { markdownSourceOf } from '@/components/chat/markdown-text';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { ApprovalCard } from '@/components/studio/approval-card';
+import { PlanCard, PlanReloadNotice } from '@/components/studio/plan-card';
 import { ChoiceCard } from '@/components/studio/choice-card';
 import { QueuedTurns } from '@/components/studio/queued-turns';
 import { TaskStatusCards } from '@/components/studio/task-status-cards';
@@ -33,6 +34,7 @@ import { useGenerationParams } from '@/hooks/use-generation-params';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { stageDomainOf } from '@/hooks/use-stage-domain';
 import { useSessionAgentConsent } from '@/hooks/use-session-agent-consent';
+import { defaultApprovalMode } from '@/lib/chat/approval-modes';
 import { useSessionApproval } from '@/hooks/use-session-approval';
 import { useSessionNotes } from '@/hooks/use-session-notes';
 import { useSessionPendingApprovals } from '@/hooks/use-session-pending-approvals';
@@ -74,6 +76,8 @@ import { choiceCardPlacement, heldChoiceRelease, type ChoiceCardModel, type Choi
 import { readPastedImages } from '@/lib/chat/composer-input';
 import { withSessionSendLock } from '@/lib/chat/send-preparation';
 import { InFlightGuard } from '@/lib/chat/in-flight-guard';
+import { flushExplicitModel3D } from '@/lib/chat/explicit-model';
+import { reloadSessionBudget } from '@/lib/chat/session-budget';
 import { PendingApprovalError, type PendingApprovalInput } from '@/lib/chat/pending-approvals';
 import { cancelQueuedTurn, enqueueTurn, queuedFor, takeQueuedTurn, type QueueBySession } from '@/lib/chat/send-queue';
 import { ChatHistorySkeleton } from '@/components/chat/chat-history-skeleton';
@@ -269,7 +273,7 @@ export function ChatColumn() {
   const approval = useSessionApproval(
     chatClient,
     activeSessionId,
-    schema.chat.approval_policy.default_mode === 'auto' ? 'auto' : 'manual',
+    defaultApprovalMode(schema),
   );
   const refreshApproval = approval.refresh;
   const sessionNotes = useSessionNotes(chatClient, activeSessionId);
@@ -340,6 +344,11 @@ export function ChatColumn() {
   // The turn whose start the server has not answered yet: the box still holds its words.
   const startingRef = useRef<{ sessionId: string; text: string } | null>(null);
   const [decisionError, setDecisionError] = useState<Record<string, string>>({});
+  // #103: the plan card cannot be shown or trusted after a failed session re-read.
+  const [planReloadFailure, setPlanReloadFailure] = useState<{ sessionId: string; message: string } | null>(null);
+  const [planReloadingSession, setPlanReloadingSession] = useState<string | null>(null);
+  const planReloadError = planReloadFailure?.sessionId === activeSessionId ? planReloadFailure.message : null;
+  const planReloading = planReloadingSession === activeSessionId;
   // The next turn's settings and estimate. A turn that carries a picture (the
   // object on the stage, an upload or a pinned canvas image) runs the Offering
   // that takes references, so that is the one priced.
@@ -995,6 +1004,20 @@ export function ChatColumn() {
           }
           if (!isCurrentSessionScope(scope) || useWorkspaceStore.getState().modelByDomain[domain] !== selectedModel ||
               useChatStore.getState().streamingBuffers[sessionId] || startingRef.current?.sessionId === sessionId) return;
+          // #103: the session's explicit 3D lock is written before the turn that
+          // may use it. The pick's write is already in flight (or was made before
+          // this session existed); wait for it. A failed write was rolled back and
+          // toasted, and this turn must not start under a lock the server lacks.
+          if (schema.runtime.http.routes.chat_session_model3d) {
+            try {
+              await flushExplicitModel3D(sessionId, (id, model) => chatClient.setExplicitModel3D(id, model));
+            } catch {
+              if (isCurrentSessionScope(scope)) toast.error(schemaText(schema, 'ui.studio.picker.lock_failed'));
+              return;
+            }
+            if (!isCurrentSessionScope(scope) || useWorkspaceStore.getState().modelByDomain[domain] !== selectedModel ||
+                useChatStore.getState().streamingBuffers[sessionId] || startingRef.current?.sessionId === sessionId) return;
+          }
           let replaced = false;
           // "重新生成"和"编辑后重发"替换最后一轮：先删旧消息，删不掉就整轮保持原样。
           if (replaceIds && replaceIds.length > 0) {
@@ -1459,6 +1482,70 @@ export function ChatColumn() {
     [activeSessionId, applyNewestMessagePage, chatClient, hydrateLateTasks, messagePageSize, pending, refreshApproval, registerTask, schema],
   );
 
+  // #103: re-read the session after a plan decision. One retry is made because a
+  // stale budget is worse than a short wait; when both reads fail the plan area
+  // shows the reload notice instead of keeping the old figures.
+  const refreshSessionBudget = useCallback(
+    async (sessionId: string): Promise<boolean> => {
+      setPlanReloadingSession(sessionId);
+      try {
+        const loaded = await reloadSessionBudget(chatClient, sessionId);
+        if (useChatStore.getState().activeSessionId === sessionId) {
+          useChatStore.getState().updateSessionBudget(sessionId, loaded.budget);
+          if (loaded.brief) useChatStore.getState().updateSessionBrief(sessionId, loaded.brief);
+        }
+        setPlanReloadFailure(null);
+        return true;
+      } catch {
+        setPlanReloadFailure({ sessionId, message: schemaText(schema, 'ui.studio.plan.reload_failed') });
+        return false;
+      } finally {
+        setPlanReloadingSession((current) => (current === sessionId ? null : current));
+      }
+    },
+    [chatClient, schema],
+  );
+
+  // #103: a plan is decided on the session budget route, not on a step grant. After the
+  // decision the session is read again so the budget card and the topbar badge show the
+  // server's new spent/limit figures without waiting for another turn.
+  const decidePlan = useCallback(
+    async (budgetId: string, approved: boolean) => {
+      if (!activeSessionId || !deciding.current.begin(budgetId)) return;
+      const sessionId = activeSessionId;
+      setDecisionBusy((current) => new Set(current).add(budgetId));
+      setDecisionError((current) => {
+        if (!(budgetId in current)) return current;
+        const { [budgetId]: _cleared, ...rest } = current;
+        return rest;
+      });
+      try {
+        const result = await pending.decide(budgetId, approved, 'plan');
+        if (result.messageId) {
+          const page = await chatClient.listMessagePage(sessionId, { limit: messagePageSize }).catch(() => null);
+          if (page && useChatStore.getState().activeSessionId === sessionId) applyNewestMessagePage(sessionId, page);
+        }
+        const reloaded = await refreshSessionBudget(sessionId);
+        if (!reloaded) toast.error(schemaText(schema, 'ui.studio.plan.reload_failed'));
+        void refreshApproval();
+      } catch (error) {
+        const detail = error instanceof PendingApprovalError ? schemaText(schema, error.detail) : '';
+        setDecisionError((current) => ({
+          ...current,
+          [budgetId]: detail || schemaText(schema, 'ui.studio.plan.decide_failed'),
+        }));
+      } finally {
+        deciding.current.end(budgetId);
+        setDecisionBusy((current) => {
+          const next = new Set(current);
+          next.delete(budgetId);
+          return next;
+        });
+      }
+    },
+    [activeSessionId, applyNewestMessagePage, chatClient, messagePageSize, pending, refreshApproval, refreshSessionBudget, schema],
+  );
+
   // #321: the answer goes back as a user message of its own with the card's structured answer.
   // #335: confirmed while the composer's pictures are still being read or uploaded, it is held (the card
   // says so) and goes out once they are done, instead of being dropped by the attachment guard in `send`.
@@ -1530,10 +1617,17 @@ export function ChatColumn() {
     return tile ? versionLabel(schema, tile, tile.domain === 'model' ? 'model' : 'image') : '';
   }, [schema, threeViews, versions.byTask, versions.tiles]);
   const turnCard = consentAwaiting ? cardFromConsent(consent.pending, consent.requestId) : null;
+  const planCards = pending.items.filter((item) => item.kind === 'plan' && item.plan !== null);
+  const reloadPlans = useCallback(() => {
+    if (!activeSessionId) return;
+    void pending.refresh();
+    void refreshSessionBudget(activeSessionId);
+  }, [activeSessionId, pending, refreshSessionBudget]);
   const approvalCards = [
     ...(turnCard ? [turnCard] : []),
-    ...pending.items.map((item) => cardFromPending(item, labelOfInput)),
+    ...pending.items.filter((item) => item.kind === 'step').map((item) => cardFromPending(item, labelOfInput)),
   ];
+  const sessionBudget = useChatStore((state) => state.sessions.find((session) => session.id === activeSessionId)?.budget ?? null);
 
   // Tasks of this session that the page saw running. When one of them ends outside a turn (a late
   // approval), the result message, the version strip and the session credits catch up by themselves.
@@ -1786,7 +1880,7 @@ export function ChatColumn() {
           >
             {historyLoading && displayMessages.length === 0 ? (
               <ChatHistorySkeleton label={schemaText(schema, 'ui.chat.loading')} />
-            ) : displayMessages.length === 0 && threeViews.length === 0 && !isStreaming && approvalCards.length === 0 && queuedTurns.length === 0 ? (
+            ) : displayMessages.length === 0 && threeViews.length === 0 && !isStreaming && approvalCards.length === 0 && planCards.length === 0 && !(sessionBudget && sessionBudget.state !== 'denied') && queuedTurns.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
                 <div className="rounded-xl bg-primary/15 p-3 text-primary"><ImagePlus className="size-6" /></div>
                 <p className="max-w-xs text-sm leading-6 text-muted-foreground">{schemaText(schema, 'ui.workspace.agent.empty')}</p>
@@ -1846,6 +1940,35 @@ export function ChatColumn() {
             {choicePlacement.loose.length > 0 ? (
               <div className="mt-2 flex flex-col gap-2 px-1" data-testid="chat-choice-cards">
                 {choicePlacement.loose.map(renderChoiceCard)}
+              </div>
+            ) : null}
+            {(planCards.length > 0 || (sessionBudget && sessionBudget.state !== 'denied') || planReloadError) ? (
+              <div className="mt-2 flex flex-col gap-2 px-1" data-testid="chat-plan-cards">
+                {planCards.map((item) => item.plan ? (
+                  <PlanCard
+                    key={item.requestId}
+                    plan={item.plan}
+                    budgetCredits={item.budgetCredits}
+                    tasks={sessionTasks}
+                    busy={decisionBusy.has(item.requestId)}
+                    error={decisionError[item.requestId] ?? null}
+                    onDecide={(approved) => { void decidePlan(item.requestId, approved); }}
+                  />
+                ) : null)}
+                {planCards.length === 0 && (planReloadError || sessionBudget?.state === 'pending') ? (
+                  <PlanReloadNotice
+                    message={planReloadError ?? schemaText(schema, 'ui.studio.plan.reload_failed')}
+                    busy={planReloading}
+                    onReload={reloadPlans}
+                  />
+                ) : planCards.length === 0 && sessionBudget && sessionBudget.state !== 'denied' ? (
+                  <PlanCard
+                    plan={sessionBudget.plan}
+                    budgetCredits={sessionBudget.limitCredits}
+                    tasks={sessionTasks}
+                    progress={sessionBudget}
+                  />
+                ) : null}
               </div>
             ) : null}
             {approvalCards.length > 0 ? (

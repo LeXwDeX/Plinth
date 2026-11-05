@@ -345,14 +345,14 @@ func TestHistoryLookupBudgetsInterplayWithTheReplyToolBudget(t *testing.T) {
 }
 
 // The shipped Schema offers the lookup and replaces the old "ask the user to
-// point again at older pictures" rule with the find / add / ask rule.
+// point again at older pictures" rule with the find / short-question rule.
 func TestShippedPromptTellsTheAgentToFindHistoryPicturesOrAsk(t *testing.T) {
 	product, err := catalog.LoadDefault()
 	if err != nil {
 		t.Fatal(err)
 	}
 	prompt := product.Application().Chat.Agent.SystemPrompt
-	for _, want := range []string{"find_history_images", "reference_purposes", "不要猜、不要生成"} {
+	for _, want := range []string{"find_history_images", "找不到或分不清就简短地问"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("system prompt lacks %q", want)
 		}

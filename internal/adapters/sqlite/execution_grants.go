@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
@@ -66,13 +67,16 @@ func scanGrant(row interface{ Scan(...any) error }) (executiongrant.Grant, error
 	var taskID sql.NullString
 	var decidedBy, decidedAt sql.NullString
 	var created, updated string
+	var budgetEligible int
 	err := row.Scan(&g.RequestID, &g.OwnerID, &g.SessionID, &g.OfferingID,
 		&g.OfferingRevision, &g.PreparedInputID, &g.PreparedInputHash,
 		&g.IdempotencyKey, &g.OperationID, &g.PlanStepID, &g.TriggerTurnID, &g.Status,
-		&taskID, &g.Source, &g.RequestVersion, &decidedBy, &decidedAt, &created, &updated, &g.Harness.Revision, &g.Harness.Digest)
+		&taskID, &g.Source, &g.RequestVersion, &decidedBy, &decidedAt, &created, &updated,
+		&g.Harness.Revision, &g.Harness.Digest, &budgetEligible)
 	if err != nil {
 		return g, err
 	}
+	g.BudgetEligible = budgetEligible != 0
 	g.TaskID = taskID.String
 	g.DecidedBy = decidedBy.String
 	if decidedAt.Valid {
@@ -93,7 +97,8 @@ func scanGrant(row interface{ Scan(...any) error }) (executiongrant.Grant, error
 const grantSelect = `SELECT request_id, owner_id, session_id, offering_id,
  offering_revision, prepared_input_id, prepared_input_hash, idempotency_key,
  operation_id, plan_step_id, trigger_turn_id, status, task_id, source, request_version,
- decided_by, decided_at, created_at, updated_at, harness_revision, harness_digest FROM execution_grants`
+ decided_by, decided_at, created_at, updated_at, harness_revision, harness_digest,
+ budget_eligible FROM execution_grants`
 
 func grantByRequest(ctx context.Context, conn interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
@@ -151,6 +156,21 @@ func (r *Repository) bindTaskExecutionGrant(ctx context.Context, conn *sql.Conn,
 // A changed pending/denied request replaces its former ID; an approved or
 // consumed request cannot be changed. Reuse of the original key is exact-only.
 func (r *Repository) PreparePending(ctx context.Context, identity executiongrant.Identity, source, triggerTurnID string) (executiongrant.Grant, error) {
+	return r.preparePending(ctx, identity, source, triggerTurnID, false)
+}
+
+// PreparePendingWithBudget issues a grant that an active production plan may
+// approve (#103): an Agent chat step, or a step of an Agent-created processing
+// plan. A replayed operation keeps its original eligibility; changing it is an
+// identity conflict.
+func (r *Repository) PreparePendingWithBudget(ctx context.Context, identity executiongrant.Identity, source, triggerTurnID string, budgetEligible bool) (executiongrant.Grant, error) {
+	if !budgetEligible || (source != executiongrant.AgentPending && source != executiongrant.HumanBrowser) {
+		return executiongrant.Grant{}, executiongrant.ErrInvalid
+	}
+	return r.preparePending(ctx, identity, source, triggerTurnID, true)
+}
+
+func (r *Repository) preparePending(ctx context.Context, identity executiongrant.Identity, source, triggerTurnID string, budgetEligible bool) (executiongrant.Grant, error) {
 	if !identity.Valid() || (source != executiongrant.HumanBrowser && source != executiongrant.AgentPending) {
 		return executiongrant.Grant{}, executiongrant.ErrInvalid
 	}
@@ -181,6 +201,19 @@ func (r *Repository) PreparePending(ctx context.Context, identity executiongrant
 		}
 		if sameGrantIdentity(old.Identity, identity) {
 			if old.Status != executiongrant.Denied {
+				// A pending grant issued before budget eligibility existed can
+				// still be marked eligible on the same operation; this changes
+				// no identity and no frozen input.
+				if old.Status == executiongrant.Pending && old.BudgetEligible != budgetEligible {
+					if _, err := conn.ExecContext(ctx, `UPDATE execution_grants SET budget_eligible=?
+ WHERE request_id=? AND owner_id=? AND status='pending'`, boolInt(budgetEligible), old.RequestID, old.OwnerID); err != nil {
+						return executiongrant.Grant{}, err
+					}
+					old, err = grantByRequest(ctx, conn, old.OwnerID, old.RequestID)
+					if err != nil {
+						return executiongrant.Grant{}, err
+					}
+				}
 				if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 					return executiongrant.Grant{}, err
 				}
@@ -223,18 +256,18 @@ func (r *Repository) PreparePending(ctx context.Context, identity executiongrant
 		}
 		_, err = conn.ExecContext(ctx, `UPDATE execution_grants SET request_id=?, offering_id=?, offering_revision=?,
  prepared_input_id=?, prepared_input_hash=?, idempotency_key=?, status='pending', task_id=NULL,
- request_version=request_version+1, decided_by=NULL, decided_at=NULL, trigger_turn_id=?, updated_at=?, harness_revision=?, harness_digest=?
+ request_version=request_version+1, decided_by=NULL, decided_at=NULL, trigger_turn_id=?, updated_at=?, harness_revision=?, harness_digest=?, budget_eligible=?
  WHERE request_id=? AND owner_id=? AND status IN ('pending','denied')`,
 			requestID, identity.OfferingID, identity.OfferingRevision, identity.PreparedInputID,
-			identity.PreparedInputHash, identity.IdempotencyKey, triggerTurnID, now.Format(time.RFC3339Nano), identity.Harness.Revision, identity.Harness.Digest, old.RequestID, identity.OwnerID)
+			identity.PreparedInputHash, identity.IdempotencyKey, triggerTurnID, now.Format(time.RFC3339Nano), identity.Harness.Revision, identity.Harness.Digest, boolInt(budgetEligible), old.RequestID, identity.OwnerID)
 	} else {
 		_, err = conn.ExecContext(ctx, `INSERT INTO execution_grants
  (request_id,owner_id,session_id,offering_id,offering_revision,prepared_input_id,prepared_input_hash,
- idempotency_key,operation_id,plan_step_id,trigger_turn_id,status,source,request_version,created_at,updated_at,harness_revision,harness_digest)
- VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?,1,?,?,?,?)`, requestID, identity.OwnerID, identity.SessionID,
+ idempotency_key,operation_id,plan_step_id,trigger_turn_id,status,source,request_version,created_at,updated_at,harness_revision,harness_digest,budget_eligible)
+ VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?,1,?,?,?,?,?)`, requestID, identity.OwnerID, identity.SessionID,
 			identity.OfferingID, identity.OfferingRevision, identity.PreparedInputID,
 			identity.PreparedInputHash, identity.IdempotencyKey, identity.OperationID,
-			identity.PlanStepID, triggerTurnID, source, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), identity.Harness.Revision, identity.Harness.Digest)
+			identity.PlanStepID, triggerTurnID, source, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), identity.Harness.Revision, identity.Harness.Digest, boolInt(budgetEligible))
 	}
 	if err != nil {
 		return executiongrant.Grant{}, err
@@ -571,6 +604,26 @@ func (r *Repository) BindExecutionGrantOnConn(ctx context.Context, conn *sql.Con
 	}
 	if n != 1 {
 		return fmt.Errorf("bind execution grant: %w", executiongrant.ErrState)
+	}
+	// A budget-funded grant may bind only while its reservation still holds the
+	// plan's credits. A reservation released when the operation was abandoned
+	// must not let the Task run outside the budget (#103 review B2).
+	var reservationState, reservationTask string
+	err = conn.QueryRowContext(ctx, `SELECT state, task_id FROM budget_reservations WHERE grant_request_id = ?`, requestID).
+		Scan(&reservationState, &reservationTask)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		// No budget funded this grant.
+	case err != nil:
+		return err
+	case reservationState != budget.ReservationReserved || reservationTask != "":
+		return executiongrant.ErrConflict
+	}
+	// The budget reservation now follows the Task: settlement reads the Task's
+	// charge fact from here on (#103).
+	if _, err := conn.ExecContext(ctx, `UPDATE budget_reservations SET task_id = ?
+ WHERE grant_request_id = ? AND task_id = ''`, taskID, requestID); err != nil {
+		return err
 	}
 	return nil
 }

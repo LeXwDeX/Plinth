@@ -38,6 +38,10 @@ const (
 	Animation        = schema.Animation
 	BackgroundRemove = schema.BackgroundRemove
 	FormatConversion = schema.FormatConversion
+	AssetRecovery    = schema.AssetRecovery
+	RigCheck         = schema.RigCheck
+	ModelSplit       = schema.ModelSplit
+	ModelMerge       = schema.ModelMerge
 )
 
 type CapabilityDomain = schema.CapabilityDomain
@@ -749,6 +753,13 @@ type InputAsset struct {
 	// out of model inputs.
 	Role    string
 	Variant string
+	// TaskID and SessionID identify the successful Task that produced this
+	// asset. They are empty for direct uploads. Parameters that require a
+	// same-session task source check them before reading bytes.
+	TaskID    TaskID
+	SessionID string
+	// Ordinal is the stored output slot ordinal of a Task asset (0 for uploads).
+	Ordinal int
 }
 
 type InputAssetUpload struct {

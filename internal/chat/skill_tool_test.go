@@ -38,8 +38,8 @@ func TestToolBindingSkillDirectsTheAgentToItsTool(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := service.SetAgentScope(ctx, "owner-a", session.ID, scope); err != nil {
-			t.Fatal(err)
+		if _, found, err := repository.SetSessionAgentScope(ctx, "owner-a", session.ID, scope); err != nil || !found {
+			t.Fatalf("seed scope: found=%v err=%v", found, err)
 		}
 		assistant, err := service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID, Content: "go",
 			Options: chat.TurnOptions{CreativeDomain: "image", SkillID: skillID}})

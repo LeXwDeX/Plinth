@@ -221,8 +221,14 @@ func (s *Service) admission(ctx context.Context, principal executiongrant.Princi
 		command.SceneID, command.ManifestID, command.ManifestHash = frozen.SceneID, frozen.ManifestID, frozen.ManifestHash
 		command.SourceSceneObjectID, command.SourceSceneRevision = frozen.SourceSceneObjectID, frozen.SourceSceneRevision
 		command.ParameterReasons = make(map[string]string, len(frozen.ParameterAdjustments))
+		command.ParameterSources = make(map[string]string, len(frozen.ParameterAdjustments))
 		for _, adjustment := range frozen.ParameterAdjustments {
 			command.ParameterReasons[adjustment.Name] = adjustment.Reason
+			// A value the session's production purpose contributed stays
+			// labelled with its purpose on the retried input (#103).
+			if strings.HasPrefix(adjustment.Source, "profile:") {
+				command.ParameterSources[adjustment.Name] = adjustment.Source
+			}
 		}
 	}
 	prepared, err := s.config.Kernel.PrepareInput(ctx, command)

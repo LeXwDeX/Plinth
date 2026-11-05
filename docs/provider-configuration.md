@@ -109,6 +109,6 @@ GLM_MODEL=glm-5.3
 
 ## 计费风险 / Billing risk
 
-只配置你要使用的 Provider 的 key。真实生成、换贴图、绑骨等步骤会消耗对应账户的积分或费用；会话的批准方式（自动/手工）决定付费步骤是否先等人确认。默认 `PROVIDER_MODE=mock` 不调用任何付费上游。
+只配置你要使用的 Provider 的 key。真实生成、换贴图、绑骨等步骤会消耗对应账户的积分或费用；会话的批准方式（自动 / 预算制作计划 / 严格逐步批准）决定付费步骤是否先等人确认；新会话默认预算方式，没有已批准制作计划时按严格方式的规则。默认 `PROVIDER_MODE=mock` 不调用任何付费上游。
 
 Configure keys only for the Providers you use. Real generation, retexturing, rigging and similar steps spend that account's credits or money; the session approval mode (auto / manual) decides whether a paid step waits for a person. The default `PROVIDER_MODE=mock` calls no paid upstream.

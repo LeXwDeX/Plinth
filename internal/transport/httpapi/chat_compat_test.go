@@ -3,10 +3,13 @@ package httpapi_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -488,6 +491,91 @@ func TestLegacyChatWireAndVisibleTextChangeWithProductSchema(t *testing.T) {
 			emptyResponse.Code,
 			failure,
 		)
+	}
+}
+
+// The session list projects each session's current production plan, read in
+// one batch through the SQLite repository instead of one query per session.
+// The budget is the same public summary the single-session read returns
+// (#103 review C6).
+func TestChatSessionListProjectsProductionBudgets(t *testing.T) {
+	t.Parallel()
+	var databasePath string
+	_, handler, _, _ := newHTTPHarnessWithServices(t, nil, nil, nil, nil, nil,
+		func(_ *testing.T, path string) { databasePath = path })
+	sessionIDs := make([]string, 0, 2)
+	for _, title := range []string{"批量预算一", "批量预算二"} {
+		response := performChatRequest(handler, http.MethodPost, "/api/chat/sessions", `{"title":"`+title+`"}`)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("create session status=%d body=%s", response.Code, response.Body)
+		}
+		var created map[string]any
+		decodeChatRecorder(t, response, &created)
+		sessionIDs = append(sessionIDs, created["id"].(string))
+	}
+
+	db, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	stamp := "2026-01-01T00:00:00Z"
+	planJSON := `{"title":"批量","steps":[{"capability":"text-to-image","estimated_credits":5}]}`
+	for index, sessionID := range sessionIDs {
+		budgetID := "pb-" + strconv.Itoa(index)
+		if _, err := db.Exec(`INSERT INTO production_budgets
+ (id, owner_id, session_id, plan_json, limit_credits, state, created_at, decided_at, decided_by)
+ VALUES (?, 'local-user', ?, ?, ?, 'active', ?, ?, 'human')`,
+			budgetID, sessionID, planJSON, 20+index*10, stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+		for _, reservation := range []struct {
+			request string
+			credits int
+			state   string
+		}{
+			{"charged-" + strconv.Itoa(index), 3 + index, "charged"},
+			{"reserved-" + strconv.Itoa(index), 2, "reserved"},
+		} {
+			if _, err := db.Exec(`INSERT INTO budget_reservations
+ (grant_request_id, budget_id, task_id, credits, state, created_at)
+ VALUES (?, ?, '', ?, ?, ?)`,
+				reservation.request, budgetID, reservation.credits, reservation.state, stamp); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	list := performChatRequest(handler, http.MethodGet, "/api/chat/sessions", "")
+	if list.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", list.Code, list.Body)
+	}
+	var sessions []map[string]any
+	decodeChatRecorder(t, list, &sessions)
+	if len(sessions) != 2 {
+		t.Fatalf("sessions = %#v, want 2", sessions)
+	}
+	for _, session := range sessions {
+		// The list orders by updated_at DESC, so match each entry by ID.
+		sessionID := session["id"].(string)
+		position := slices.Index(sessionIDs, sessionID)
+		if position < 0 {
+			t.Fatalf("listed session %s was not created by this test", sessionID)
+		}
+		budgetObject, ok := session["budget"].(map[string]any)
+		if !ok {
+			t.Fatalf("session %s has no budget member: %#v", sessionID, session)
+		}
+		limit := 20 + position*10
+		spent := 3 + position
+		if budgetObject["id"] != "pb-"+strconv.Itoa(position) ||
+			budgetObject["state"] != "active" ||
+			budgetObject["limit_credits"] != float64(limit) ||
+			budgetObject["spent_credits"] != float64(spent) ||
+			budgetObject["reserved_credits"] != float64(2) ||
+			budgetObject["remaining_credits"] != float64(limit-spent-2) {
+			t.Fatalf("session %s budget = %#v", sessionID, budgetObject)
+		}
 	}
 }
 

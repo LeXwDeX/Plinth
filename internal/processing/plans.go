@@ -116,6 +116,14 @@ type Step struct {
 	QueuedUntil *time.Time `json:"queued_until,omitempty"`
 }
 
+// Origins of a processing plan. An Agent-created plan's steps are eligible for
+// the session production budget; a browser-created plan keeps per-step human
+// approval (#103).
+const (
+	OriginAgent   = "agent"
+	OriginBrowser = "browser"
+)
+
 type Plan struct {
 	Harness       harness.Binding    `json:"harness,omitempty"`
 	ID            string             `json:"id"`
@@ -130,6 +138,9 @@ type Plan struct {
 	RequestHash   string             `json:"-"`
 	CreatedAt     time.Time          `json:"created_at"`
 	UpdatedAt     time.Time          `json:"updated_at"`
+	// Origin is agent or browser. It is internal: the public projection does
+	// not need to tell a client which one started the plan.
+	Origin string `json:"-"`
 }
 
 type StepRequest struct {
@@ -146,6 +157,9 @@ type CreateCommand struct {
 	SourceTaskID   generation.TaskID  `json:"source_task_id"`
 	SourceAssetID  generation.AssetID `json:"source_asset_id"`
 	Steps          []StepRequest      `json:"steps"`
+	// Origin is OriginAgent when an Agent tool created the plan; empty means
+	// OriginBrowser. It is not part of the idempotency hash.
+	Origin string `json:"-"`
 }
 
 type Store interface {
@@ -257,6 +271,7 @@ func (s *Service) approveStepByPolicy(ctx context.Context, plan *Plan, step *Ste
 		IdempotencyKey:    step.IdempotencyKey,
 		OperationID:       step.OperationID,
 		PlanStepID:        step.PlanStepID,
+		BudgetEligible:    plan.Origin == OriginAgent,
 	})
 	if err == nil {
 		grant, err = s.grants.ApplyPolicy(ctx, grant)
@@ -265,7 +280,7 @@ func (s *Service) approveStepByPolicy(ctx context.Context, plan *Plan, step *Ste
 		s.logger.Warn("按批准方式准备处理步骤失败，改为等待确认", "plan_id", plan.ID, "error", err)
 		return ""
 	}
-	if grant.Status == executiongrant.Approved && grant.ApprovedByPolicy() {
+	if grant.Status == executiongrant.Approved && (grant.ApprovedByPolicy() || grant.ApprovedByBudget()) {
 		return grant.RequestID
 	}
 	return ""
@@ -385,7 +400,11 @@ func (s *Service) Create(ctx context.Context, command CreateCommand) (Plan, erro
 		previous = offering
 	}
 	now := time.Now().UTC()
-	plan := Plan{Harness: command.Harness, ID: planID, OwnerID: command.OwnerID, SessionID: command.SessionID, SourceTaskID: command.SourceTaskID, SourceAssetID: command.SourceAssetID, State: Pending, Steps: steps, Version: 1, RequestHash: hex.EncodeToString(requestHash[:]), CreatedAt: now, UpdatedAt: now}
+	origin := command.Origin
+	if origin != OriginAgent {
+		origin = OriginBrowser
+	}
+	plan := Plan{Harness: command.Harness, ID: planID, OwnerID: command.OwnerID, SessionID: command.SessionID, SourceTaskID: command.SourceTaskID, SourceAssetID: command.SourceAssetID, State: Pending, Steps: steps, Version: 1, RequestHash: hex.EncodeToString(requestHash[:]), CreatedAt: now, UpdatedAt: now, Origin: origin}
 	if err := s.store.CreateProcessingPlan(ctx, plan); err != nil {
 		if existing, lookupErr := s.store.GetProcessingPlan(ctx, command.OwnerID, planID); lookupErr == nil {
 			if existing.RequestHash == plan.RequestHash {
@@ -1081,6 +1100,15 @@ func (s *Service) stop(ctx context.Context, plan *Plan, step *Step, state, reaso
 		step.SubmissionUncertain = true
 	}
 	step.Resumable = state == Paused && resumableReason(reason)
+	if step.TaskID == "" && !step.Resumable && reason != ReasonSubmitUnreconciled {
+		// No Task bound this authorization and no continue can use it: the step
+		// is terminally failed or paused without a resume. Dropping the
+		// reference lets SaveProcessingPlan release its unbound budget
+		// reservation in the same transaction (#103 review B2). A
+		// submit-unreconciled step keeps it: Reconcile verifies the landed Task
+		// and links it with this exact grant.
+		step.AuthorizationRef = ""
+	}
 	plan.UpdatedAt = time.Now().UTC()
 	return s.savePlan(ctx, plan)
 }

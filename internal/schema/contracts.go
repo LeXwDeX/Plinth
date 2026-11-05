@@ -21,6 +21,8 @@ const (
 	BackgroundRemove Capability = "background-removal"
 	FormatConversion Capability = "format-conversion"
 	AssetRecovery    Capability = "asset-recovery"
+	ModelSplit       Capability = "model-split"
+	ModelMerge       Capability = "model-merge"
 )
 
 func (c Capability) Valid() bool {

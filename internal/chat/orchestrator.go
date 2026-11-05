@@ -64,6 +64,10 @@ type ToolCommand struct {
 	// order (a resumed reply included). A tool with a per-reply bound replays
 	// them instead of keeping state of its own.
 	EarlierCalls []ToolCall
+	// ToolAvailable reports whether a named tool is declared and available in
+	// this turn's Agent scope (#103). ask_choice uses it to refuse a card whose
+	// answer would call a tool the turn cannot run. Nil means no check.
+	ToolAvailable func(name string) bool
 	// ExplicitParameters preserves caller inputs before legacy defaults merge.
 	// Non-nil enables offering overrides without changing the command hash.
 	ExplicitParameters map[string]json.RawMessage `json:"-"`
@@ -131,6 +135,9 @@ type ToolResult struct {
 	// Agent reads images, shows it after the tool results; a picture it cannot
 	// read is named as unreadable instead.
 	Pictures []ToolPicture `json:"-"`
+	// Summary is a compact result the frontend can show as one line (#103).
+	// It is persisted with the tool call and never sent to the Agent.
+	Summary json.RawMessage `json:"-"`
 }
 
 // ToolPicture is one picture a tool shows the Agent, by handle and platform URL.
@@ -1418,6 +1425,7 @@ func (orchestrator *Orchestrator) Process(
 						assistant.ToolCalls[index].EstimatedCredits = stored.EstimatedCredits
 						assistant.ToolCalls[index].NativeQuote = stored.NativeQuote
 						assistant.ToolCalls[index].ApprovalSource = stored.ApprovalSource
+						assistant.ToolCalls[index].Summary = stored.Summary
 						break
 					}
 				}
@@ -1810,8 +1818,10 @@ func (orchestrator *Orchestrator) agentRequest(
 	registry, registryErr := orchestrator.registryFor(ctx)
 	scope := orchestrator.agentScope.Normalize(options.AgentScope)
 	if registryErr == nil {
-		// The scope follows the domain hint it overrides. The selection and the
-		// framed session notes stay at the end of the prompt.
+		// A craft brief comes before the scope block: it teaches how to work in
+		// a domain, while the scope only says which tools this turn offers. The
+		// selection and the framed session notes stay at the end of the prompt.
+		systemPrompt += orchestrator.craftPrompt(registry, scope)
 		systemPrompt += orchestrator.scopePrompt(registry, scope)
 	}
 	// The session's real approval mode follows the scope it must not be mixed
@@ -1834,6 +1844,7 @@ func (orchestrator *Orchestrator) agentRequest(
 	systemPrompt += orchestrator.summaryPrompt(latest)
 	systemPrompt += orchestrator.compactedHandlePrompt(history, indexedByMessage, summarized, lastUserMessage)
 	systemPrompt += orchestrator.selectionPrompt(options)
+	systemPrompt += orchestrator.briefPrompt(options)
 	systemPrompt += orchestrator.notesPrompt(ctx, ownerID, sessionID)
 	var choices []Choice
 	if orchestrator.service != nil && sessionID != "" {
@@ -2557,6 +2568,11 @@ func (orchestrator *Orchestrator) executeTools(
 				Turn:                 copyMessage(*produced),
 				Options:              command.Options,
 				EarlierCalls:         earlierCalls(storedCalls, call.ID),
+				ToolAvailable: func(name string) bool {
+					candidate, exists := registry.byName[name]
+					return exists && registry.permits(candidate, false) &&
+						!orchestrator.scopeRefuses(registry, name, command.Options.AgentScope, false)
+				},
 			},
 			func(observation ToolObservation) error {
 				if observation.TaskID != "" &&
@@ -2678,14 +2694,27 @@ func (orchestrator *Orchestrator) executeTools(
 		if content == "" {
 			content = result.Error
 		}
-		content = orchestrator.withResultHandles(content,
-			orchestrator.recordTurnResult(ctx, command.OwnerID, produced, call.ID, taskBindings[call.ID], result.ImageURLs))
+		// The reply had this many pictures before this call. recordTurnResult
+		// appends the call's pictures after them, so each picture's attachment
+		// slot is known even when verification skipped one.
+		imagesBefore := len(produced.ImageURLs)
+		handles := orchestrator.recordTurnResult(ctx, command.OwnerID, produced, call.ID, taskBindings[call.ID], result.ImageURLs)
+		content = orchestrator.withResultHandles(content, handles)
+		// A read-only tool's compact summary travels with its call, so the
+		// conversation can show one line per check (#103). The handles its
+		// pictures received belong in the summary too, so the frontend binds
+		// each picture to its view instead of guessing by position (#103
+		// review F9). Keep it on the checkpoint as well: a later resume must
+		// not lose it.
+		orchestrator.recordToolSummary(produced, &turn.Checkpoint.Assistant, call.ID,
+			orchestrator.withSummaryHandles(result.Summary, handles))
 		reply := agents.Message{
 			Role:       orchestrator.schema.Roles.Tool,
 			Content:    content,
 			ToolCallID: call.ID,
 		}
-		orchestrator.attachToolPictures(ctx, command.OwnerID, &reply, result.Pictures)
+		orchestrator.attachToolPictures(ctx, command.OwnerID, &reply,
+			picturesWithHandles(*produced, imagesBefore, result.Pictures))
 		results = append(results, reply)
 		turn.Checkpoint.Completed = append(turn.Checkpoint.Completed, results[len(results)-1])
 		turn.Checkpoint.ImageURLs = append(turn.Checkpoint.ImageURLs, result.ImageURLs...)
@@ -3005,9 +3034,34 @@ func (orchestrator *Orchestrator) mergeDurableToolCalls(
 				if assistant.ToolCalls[index].ApprovalSource == "" {
 					assistant.ToolCalls[index].ApprovalSource = call.ApprovalSource
 				}
+				if len(assistant.ToolCalls[index].Summary) == 0 {
+					assistant.ToolCalls[index].Summary = call.Summary
+				}
 			}
 		}
 		return
+	}
+}
+
+// recordToolSummary stores one tool's compact result on the call in the message
+// being built and on the checkpointed copy of that message.
+func (orchestrator *Orchestrator) recordToolSummary(message, checkpoint *Message, callID string, summary json.RawMessage) {
+	if len(summary) == 0 || callID == "" {
+		return
+	}
+	set := func(calls []ToolCall) {
+		for index := range calls {
+			if calls[index].ID == callID {
+				calls[index].Summary = summary
+				return
+			}
+		}
+	}
+	if message != nil {
+		set(message.ToolCalls)
+	}
+	if checkpoint != nil {
+		set(checkpoint.ToolCalls)
 	}
 }
 
@@ -3027,6 +3081,9 @@ func mergeStoredToolCall(target *ToolCall, stored ToolCall) {
 	}
 	if target.ApprovalSource == "" {
 		target.ApprovalSource = stored.ApprovalSource
+	}
+	if len(target.Summary) == 0 {
+		target.Summary = stored.Summary
 	}
 }
 

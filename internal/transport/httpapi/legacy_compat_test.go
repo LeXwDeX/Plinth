@@ -211,6 +211,8 @@ func TestLegacyProviderDiscoveryPreservesDefaultProjectionAndOptInExtensions(
 		{"local-glb-to-gltf", "local-model"},
 		{"local-gltf-to-glb", "local-model"},
 		{"local-generated-glb-to-gltf", "local-model"},
+		{"local-model-split", "local-model-parts"},
+		{"local-model-merge", "local-model-parts"},
 		{"tripo-uploaded-glb-to-stl", "tripo-processing"},
 		{"meshy-uv-unwrap", "meshy-uv-unwrap"},
 		{"meshy-resize", "meshy-resize"},

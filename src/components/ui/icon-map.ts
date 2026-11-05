@@ -1,9 +1,9 @@
 import {
   ClipboardCheck, Clapperboard, Printer, Ruler, ScanLine, UnfoldHorizontal, Wrench,
-  ArrowLeftRight, Bone, Box, Camera, Circle, Columns2, Cylinder, Eraser, FileBox, FileOutput, GitBranch, Grid3x3, Hand, History,
+  ArrowLeftRight, Bone, Box, Camera, Circle, Columns2, Combine, Cylinder, Eraser, FileBox, FileOutput, GitBranch, Grid3x3, Hand, History,
   Image as ImageGlyph, ImageMinus, ImagePlus, Info, Lasso, Layers, ListChecks, Magnet, Maximize2, Merge, MessageSquarePlus, MousePointer2, Network, PackagePlus,
   PaintBucket, Paintbrush, Palette, Pencil, PersonStanding, Pipette, Puzzle, Redo2, Rotate3d, Scissors, SlidersHorizontal, SprayCan,
-  Square, SquareDashed, Type, Undo2, Wallpaper, WandSparkles, ZoomIn, type LucideIcon,
+  Split, Square, SquareDashed, Type, Undo2, Wallpaper, WandSparkles, ZoomIn, type LucideIcon,
 } from 'lucide-react';
 
 /**
@@ -26,6 +26,7 @@ const ICONS: Readonly<Record<string, LucideIcon>> = {
   bone: Bone,
   box: Box,
   camera: Camera,
+  combine: Combine,
   'columns-2': Columns2,
   cylinder: Cylinder,
   eraser: Eraser,
@@ -60,6 +61,7 @@ const ICONS: Readonly<Record<string, LucideIcon>> = {
   'rotate-3d': Rotate3d,
   scissors: Scissors,
   'sliders-horizontal': SlidersHorizontal,
+  split: Split,
   'spray-can': SprayCan,
   square: Square,
   'square-dashed': SquareDashed,

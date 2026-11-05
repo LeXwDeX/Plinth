@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
@@ -67,7 +68,7 @@ func (m *Module) PrepareInput(ctx context.Context, cmd PrepareInputCommand) (Pre
 	if err != nil {
 		return PreparedInput{}, &Error{Code: ErrInvalidInput, Operation: "prepare_input", Cause: err}
 	}
-	adjustments, err := freezeParameterAdjustments(offering, normalized, cmd.ParameterReasons)
+	adjustments, err := freezeParameterAdjustments(offering, normalized, cmd.ParameterReasons, cmd.ParameterSources)
 	if err != nil {
 		return PreparedInput{}, err
 	}
@@ -101,6 +102,7 @@ func (m *Module) PrepareInput(ctx context.Context, cmd PrepareInputCommand) (Pre
 	if err := m.validateProviderInput(ctx, cmd.OwnerID, cmd.SessionID, offering, normalized, resolved, dependencies); err != nil {
 		return PreparedInput{}, err
 	}
+	estimatedCredits := estimatePreparedCredits(offering, normalized, quote)
 	prepared := PreparedInput{
 		ReferenceLimit:       referenceLimit,
 		NativeQuote:          quote,
@@ -114,6 +116,8 @@ func (m *Module) PrepareInput(ctx context.Context, cmd PrepareInputCommand) (Pre
 		SourceSceneObjectID: cmd.SourceSceneObjectID, SourceSceneRevision: cmd.SourceSceneRevision,
 		SourceSceneRepresentationID: sourceRepresentationID,
 		ExtraCredits:                offering.ExtraCreditDetail(normalized).Credits,
+		EstimatedCredits:            estimatedCredits,
+		CreditsMetered:              offering.CreditsMetered,
 		CreatedAt:                   m.clock.Now(),
 	}
 	if prepared.SchemaVersion == "" {
@@ -133,6 +137,22 @@ func (m *Module) PrepareInput(ctx context.Context, cmd PrepareInputCommand) (Pre
 		return PreparedInput{}, mapRepositoryError("prepare_input", err)
 	}
 	return prepared, nil
+}
+
+// estimatePreparedCredits derives the frozen server estimate of one prepared
+// input. A metered step whose quote came out zero falls back to the Offering's
+// declared estimate; a still-zero result is kept, and the execution policy
+// leaves that step to a person instead of reserving "free" credits (#103
+// review B1).
+func estimatePreparedCredits(offering Offering, normalized json.RawMessage, quote *NativeQuote) int {
+	estimated := offering.EstimateTotalCredits(normalized)
+	if quote != nil {
+		estimated = budget.EstimateNativeTotal(quote)
+	}
+	if offering.CreditsMetered && estimated <= 0 {
+		estimated = budget.EstimateOffering(offering)
+	}
+	return estimated
 }
 
 func (m *Module) GetPreparedInput(ctx context.Context, owner OwnerID, id PreparedInputID) (PreparedInput, error) {
@@ -456,13 +476,16 @@ func hashPreparedInput(prepared PreparedInput) (string, error) {
 		SourceSceneRevision         int64                     `json:"source_scene_revision,omitempty"`
 		SourceSceneRepresentationID string                    `json:"source_scene_representation_id,omitempty"`
 		ExtraCredits                int                       `json:"extra_credits,omitempty"`
+		EstimatedCredits            int                       `json:"estimated_credits,omitempty"`
+		CreditsMetered              bool                      `json:"credits_metered,omitempty"`
 		ParameterAdjustments        []ParameterAdjustment     `json:"parameter_adjustments,omitempty"`
 		NativeQuote                 *NativeQuote              `json:"native_quote,omitempty"`
 	}{prepared.OwnerID, prepared.SessionID, prepared.Capability, prepared.OfferingID,
 		prepared.OfferingRevision, prepared.SchemaVersion, prepared.NormalizedInput,
 		prepared.Assets, prepared.Dependencies, prepared.SceneID, prepared.ManifestID, prepared.ManifestHash,
 		prepared.SourceSceneObjectID, prepared.SourceSceneRevision, prepared.SourceSceneRepresentationID,
-		prepared.ExtraCredits, prepared.ParameterAdjustments, prepared.NativeQuote}
+		prepared.ExtraCredits, prepared.EstimatedCredits, prepared.CreditsMetered,
+		prepared.ParameterAdjustments, prepared.NativeQuote}
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return "", fmt.Errorf("encode prepared input: %w", err)

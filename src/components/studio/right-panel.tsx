@@ -5,6 +5,7 @@ import { useMemo, useRef, type KeyboardEvent } from 'react';
 import { CanvasHistoryPanel } from '@/components/canvas/history-panel';
 import { CanvasLayersPanel } from '@/components/canvas/layers-panel';
 import { useProductSchema } from '@/components/product-schema-provider';
+import { BriefPanel } from '@/components/studio/brief-panel';
 import { ModelPartsPanel } from '@/components/studio/model-parts-panel';
 import { ObjectDetails } from '@/components/studio/object-details';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
@@ -17,7 +18,7 @@ import { HarnessPanel } from '@/components/workspace/harness-panel';
 import { useModelProcessingCapabilities } from '@/hooks/use-model-processing-capabilities';
 import { schemaText } from '@/lib/product-schema';
 import {
-  activePanelTab, ALL_PANEL_TABS_AVAILABLE, panelContextOf, panelTabHintContent, panelTabViews, panelWidth, steppedPanelTab,
+  activePanelTab, ALL_PANEL_TABS_AVAILABLE, defaultPanelTab, panelContextOf, panelTabHintContent, panelTabViews, panelWidth, steppedPanelTab,
   type PanelAvailability, type PanelContext, type PanelTabId, type PanelTabView,
 } from '@/lib/workspace/panel-tabs';
 import { selectionForSession } from '@/lib/workspace/session-scope';
@@ -113,7 +114,12 @@ function PanelBody({ tab, object, sessionId }: PanelBodyProps) {
     case 'history':
       return sessionId ? <CanvasHistoryPanel sessionId={sessionId} /> : null;
     case 'details':
-      return object ? <div className="min-h-0 flex-1 overflow-y-auto"><ObjectDetails object={object} /></div> : null;
+      return (
+        <div className="min-h-0 flex-1 overflow-y-auto" data-testid="right-panel-details">
+          <BriefPanel sessionId={sessionId} />
+          {object ? <ObjectDetails object={object} /> : null}
+        </div>
+      );
     case 'process':
       return object?.kind === 'model' ? <ModelProcessingPanel key={`${object.taskId}:${object.assetId}`} selection={object} /> : null;
     case 'formats':
@@ -148,30 +154,37 @@ function PanelFrame({ context, object, sessionId, availability }: PanelFrameProp
   const width = { width: panelWidth(schema) };
   const title = schemaText(schema, 'ui.studio.panel.title');
 
-  // Empty board and nothing selected: the board's tabs (Schema), with only function settings usable.
+  // Empty board and nothing selected: the board's tabs (Schema). Layers and history have nothing to show
+  // yet; function settings and the session's production brief stay available.
   if (context === 'none') {
     const views = panelTabViews(schema, 'board');
-    const disabled = views.map((view) => view.id).filter((id) => id !== 'operations');
+    const disabled: PanelTabId[] = ['layers', 'history'];
+    const requested = remembered && !disabled.includes(remembered) && views.some((view) => view.id === remembered)
+      ? remembered
+      : null;
+    const active = requested ?? defaultPanelTab(schema, 'board', { unavailable: disabled }) ?? 'operations';
     return (
-      <aside aria-label={title} data-testid="right-panel" data-kind="none" data-tab="operations" style={width} className={aside}>
+      <aside aria-label={title} data-testid="right-panel" data-kind="none" data-tab={active} style={width} className={aside}>
         <PanelTabBar
           views={views}
-          active="operations"
-          onSelect={() => undefined}
+          active={active}
+          onSelect={(id) => setPanelTab('board', id)}
           label={schemaText(schema, 'ui.studio.panel.tabs')}
           disabled={disabled}
         />
-        <div data-testid="right-panel-board-empty" className="shrink-0 border-b border-border px-3 py-2 text-xs">
-          <UnavailableNotice label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.stage.board_empty'))} detail={schemaText(schema, 'ui.studio.panel.board_empty')} />
-        </div>
+        {active === 'operations' ? (
+          <div data-testid="right-panel-board-empty" className="shrink-0 border-b border-border px-3 py-2 text-xs">
+            <UnavailableNotice label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.stage.board_empty'))} detail={schemaText(schema, 'ui.studio.panel.board_empty')} />
+          </div>
+        ) : null}
         <div
           role="tabpanel"
           id={BODY_ID}
-          aria-labelledby={tabDomId('operations')}
-          data-testid="right-panel-operations"
+          aria-labelledby={tabDomId(active)}
+          data-testid={`right-panel-${active}`}
           className="flex min-h-0 flex-1 flex-col"
         >
-          <HarnessPanel sessionId={sessionId} object={null} />
+          <PanelBody tab={active} object={null} sessionId={sessionId} />
         </div>
       </aside>
     );

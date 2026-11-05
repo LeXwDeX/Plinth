@@ -99,16 +99,20 @@ func (resolver *Resolver) verifyInputAsset(
 	if ref.TaskID != "" || ref.CaptureID != "" || (ref.AssetID != "" && ref.AssetID != string(id)) {
 		return chat.Attachment{}, chat.ErrAttachmentRejected
 	}
-	_, body, err := resolver.inputs.OpenOwned(ctx, owner, id)
+	asset, body, err := resolver.inputs.OpenOwned(ctx, owner, id)
 	if err != nil {
 		return chat.Attachment{}, err
 	}
 	if err := body.Close(); err != nil {
 		return chat.Attachment{}, err
 	}
+	role := chat.AttachmentRoleUpload
+	if resolver.renderAssetType != "" && asset.AssetType == resolver.renderAssetType {
+		role = chat.AttachmentRoleRender
+	}
 	return chat.Attachment{
 		Kind:    chat.AttachmentKindImage,
-		Role:    chat.AttachmentRoleUpload,
+		Role:    role,
 		AssetID: string(id),
 		URL:     resolver.inputAssetURL(id),
 	}, nil

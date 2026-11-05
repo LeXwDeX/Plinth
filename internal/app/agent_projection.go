@@ -67,6 +67,7 @@ type agentInputView struct {
 	Required         bool                        `json:"required,omitempty"`
 	Minimum          *float64                    `json:"minimum,omitempty"`
 	Maximum          *float64                    `json:"maximum,omitempty"`
+	MaximumWhen      []schema.ConditionalMaximum `json:"maximum_when,omitempty"`
 	MaxLength        int                         `json:"max_length,omitempty"`
 	Options          []agentOptionView           `json:"options,omitempty"`
 	// OptionsCompact replaces Options for a list longer than
@@ -292,7 +293,7 @@ func agentInputViews(offering generation.Offering) []agentInputView {
 			continue
 		}
 		view := agentInputView{ImageSize: parameter.ImageSize, Integer: parameter.Integer, Name: parameter.Name, Label: parameter.Label, Type: parameter.Type,
-			Required: parameter.Required, Minimum: parameter.Minimum, Maximum: parameter.Maximum,
+			Required: parameter.Required, Minimum: parameter.Minimum, Maximum: parameter.Maximum, MaximumWhen: parameter.MaximumWhen,
 			MaxLength: parameter.MaxLength, Default: parameter.Default, AdjustmentPolicy: parameter.AdjustmentPolicy, AdjustmentReason: parameter.AdjustmentReason, MinItems: parameter.MinItems, MaxItems: parameter.MaxItems}
 		if compact, ok := compactAgentOptions(parameter.Options); ok {
 			view.OptionsCompact = compact

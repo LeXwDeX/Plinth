@@ -24,6 +24,10 @@ const (
 	// layout the person arranged, flattened into one picture (#272). The
 	// service gives this role itself; a client cannot claim it.
 	AttachmentRoleCanvas = "canvas"
+	// AttachmentRoleRender marks a picture produced by the read-only model
+	// review tools (#103). The service gives this role from the render
+	// asset's declared type; a client cannot claim it.
+	AttachmentRoleRender = "render"
 )
 
 // CanvasLayout describes an artboard snapshot. Width and Height are read from
@@ -169,6 +173,28 @@ func (policy HandlePolicy) Parse(token string) (kind string, number int, ok bool
 		}
 	}
 	return "", 0, false
+}
+
+// ParsePart splits a part handle "model handle#ordinal" (for example
+// @model2#3) into the handle's kind and number and the 1-based part ordinal.
+// The base must be a valid handle of the policy; the suffix must be a
+// canonical positive integer.
+func (policy HandlePolicy) ParsePart(token string) (kind string, number int, part int, ok bool) {
+	token = strings.TrimSpace(token)
+	index := strings.LastIndexByte(token, '#')
+	if index <= 0 || index == len(token)-1 {
+		return "", 0, 0, false
+	}
+	kind, number, ok = policy.Parse(token[:index])
+	if !ok {
+		return "", 0, 0, false
+	}
+	suffix := token[index+1:]
+	value, err := strconv.Atoi(suffix)
+	if err != nil || value < 1 || strconv.Itoa(value) != suffix {
+		return "", 0, 0, false
+	}
+	return kind, number, value, true
 }
 
 // Format renders the handle of the number-th attachment of a kind.

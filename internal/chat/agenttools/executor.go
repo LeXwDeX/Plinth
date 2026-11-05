@@ -35,12 +35,27 @@ const (
 	ToolListSessionModels = "list_session_models"
 	// ToolUpdateSessionNotes replaces the session's settings summary.
 	ToolUpdateSessionNotes = "update_session_notes"
+	// ToolUpdateProductionBrief replaces the session's production brief (#103).
+	ToolUpdateProductionBrief = "update_production_brief"
+	// ToolAskChoice opens a Schema-declared generic choice card (#103).
+	ToolAskChoice = "ask_choice"
 	// ToolFindHistoryImages lets the Agent look through the session's
 	// pictures when the user refers to images the turn does not carry (#279).
 	ToolFindHistoryImages = "find_history_images"
 	// ToolRecoverTaskResult fetches a failed Task's accepted upstream result
 	// again at no charge (#295).
 	ToolRecoverTaskResult = "recover_task_result"
+	// ToolInspectModel reports the structure of a finished 3D model without
+	// creating a Task (#103).
+	ToolInspectModel = "inspect_model"
+	// ToolRenderModelViews renders still views of a finished 3D model and
+	// attaches them to the reply (#103).
+	ToolRenderModelViews = "render_model_views"
+	// ToolCompareModels renders two finished 3D models side by side (#103).
+	ToolCompareModels = "compare_models"
+	// ToolProposeProductionPlan proposes the budget-mode production plan the
+	// person approves once (#103).
+	ToolProposeProductionPlan = "propose_production_plan"
 )
 
 // 同意状态键与决定值（agent 状态 store 与 harness consent 端点共用词汇）。
@@ -81,11 +96,37 @@ type Config struct {
 	// only, no upstream IDs or URLs).
 	ListModels         func(ctx context.Context, ownerID, sessionID string) (json.RawMessage, error)
 	ReadProcessingPlan func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	// InspectModel, RenderModelViews and CompareModels are the read-only model
+	// review tools (#103). They read only the command's owner and session,
+	// never create a Task and never spend credits.
+	InspectModel     func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	RenderModelViews func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	CompareModels    func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	// UpdateNotes replaces the settings summary of the command's own session
 	// (owner and session come from the server-held command, never from the
 	// arguments) and returns the stored text. It fails with
 	// chat.ErrSessionNotesTooLong above the Schema bound.
 	UpdateNotes func(ctx context.Context, ownerID, sessionID, notes string) (string, error)
+	// UpdateBrief replaces the production brief of the command's own session
+	// (#103). It fails with a *chat.BriefError that names the refused field.
+	UpdateBrief func(ctx context.Context, ownerID, sessionID string, brief map[string]json.RawMessage) error
+	// AskChoice opens a generic card of a declared kind (#103). The service
+	// builds the options from model3d_usage.profiles.
+	AskChoice func(ctx context.Context, command chat.ToolCommand, kind catalog.ChatChoiceKindSchema,
+		arguments chat.AskChoiceArguments) (chat.ToolResult, error)
+	// ProposePlan validates the Agent's production plan against the Schema,
+	// re-quotes every step from the runtime Catalog and stores one pending
+	// plan card (#103).
+	ProposePlan func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	// ChoiceKinds are chat.choice.kinds from the Product Schema; the Agent
+	// names one by id and never supplies options of its own.
+	ChoiceKinds []catalog.ChatChoiceKindSchema
+	// BriefSavedMessage and BriefInvalidTemplate word the update tool's result
+	// (model3d_usage.brief.saved_message / invalid_template); BriefMessages
+	// words its field refusals (model3d_usage.brief.messages).
+	BriefSavedMessage    string
+	BriefInvalidTemplate string
+	BriefMessages        catalog.ChatProductionBriefMessages
 	// Consent 创建待批准项。snapshot 是服务端计算的生成目标快照
 	//（当前模型+合并参数哈希），与 pending 一并存入会话状态；
 	// 生成执行前校验一致性（AGT-05）。
@@ -122,24 +163,35 @@ type Config struct {
 }
 
 type Executor struct {
-	offerings              func() []generation.Offering
-	context                catalog.ChatContextSchema
-	skillRuntime           *skillrun.Runtime
-	skillReferences        SkillReferenceResolver
-	skillOfferings         SkillOfferingResolver
-	skillRecipes           map[string]string
-	skillTurnStopped       func(context.Context, string, string, string) (bool, error)
-	threeView              catalog.ChatThreeViewSchema
-	params                 *agentparams.Store
-	generate               chat.ToolExecutor
-	preflight              func(command chat.ToolCommand) string
-	projection             func() json.RawMessage
-	historyLookup          chat.HistoryLookupPolicy
-	readTask               func(ctx context.Context, ownerID, taskID string) (json.RawMessage, error)
-	recoverTask            func(ctx context.Context, ownerID, sessionID, taskID string) (json.RawMessage, error)
-	listModels             func(ctx context.Context, ownerID, sessionID string) (json.RawMessage, error)
-	readProcessingPlan     func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
-	updateNotes            func(ctx context.Context, ownerID, sessionID, notes string) (string, error)
+	offerings          func() []generation.Offering
+	context            catalog.ChatContextSchema
+	skillRuntime       *skillrun.Runtime
+	skillReferences    SkillReferenceResolver
+	skillOfferings     SkillOfferingResolver
+	skillRecipes       map[string]string
+	skillTurnStopped   func(context.Context, string, string, string) (bool, error)
+	threeView          catalog.ChatThreeViewSchema
+	params             *agentparams.Store
+	generate           chat.ToolExecutor
+	preflight          func(command chat.ToolCommand) string
+	projection         func() json.RawMessage
+	historyLookup      chat.HistoryLookupPolicy
+	readTask           func(ctx context.Context, ownerID, taskID string) (json.RawMessage, error)
+	recoverTask        func(ctx context.Context, ownerID, sessionID, taskID string) (json.RawMessage, error)
+	listModels         func(ctx context.Context, ownerID, sessionID string) (json.RawMessage, error)
+	readProcessingPlan func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	inspectModel       func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	renderModelViews   func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	compareModels      func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	updateNotes        func(ctx context.Context, ownerID, sessionID, notes string) (string, error)
+	updateBrief        func(ctx context.Context, ownerID, sessionID string, brief map[string]json.RawMessage) error
+	askChoice          func(ctx context.Context, command chat.ToolCommand, kind catalog.ChatChoiceKindSchema,
+		arguments chat.AskChoiceArguments) (chat.ToolResult, error)
+	proposePlan            func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	choiceKinds            map[string]catalog.ChatChoiceKindSchema
+	briefSavedMessage      string
+	briefInvalidTemplate   string
+	briefMessages          catalog.ChatProductionBriefMessages
 	consent                func(command chat.ToolCommand, request json.RawMessage, snapshot json.RawMessage) error
 	consentState           func(scope string) map[string]json.RawMessage
 	consentClear           func(scope string)
@@ -241,7 +293,15 @@ func New(config Config) (*Executor, error) {
 	if config.ConsentClaim != nil && config.ConsentState == nil {
 		return nil, errors.New("agent tools: durable consent requires state reader")
 	}
+	choiceKinds := make(map[string]catalog.ChatChoiceKindSchema, len(config.ChoiceKinds))
+	for _, kind := range config.ChoiceKinds {
+		choiceKinds[kind.ID] = kind
+	}
 	return &Executor{
+		choiceKinds:            choiceKinds,
+		briefSavedMessage:      config.BriefSavedMessage,
+		briefInvalidTemplate:   config.BriefInvalidTemplate,
+		briefMessages:          config.BriefMessages,
 		offerings:              config.Offerings,
 		context:                config.Context,
 		params:                 config.Params,
@@ -253,7 +313,13 @@ func New(config Config) (*Executor, error) {
 		recoverTask:            config.RecoverTask,
 		listModels:             config.ListModels,
 		readProcessingPlan:     config.ReadProcessingPlan,
+		inspectModel:           config.InspectModel,
+		renderModelViews:       config.RenderModelViews,
+		compareModels:          config.CompareModels,
 		updateNotes:            config.UpdateNotes,
+		updateBrief:            config.UpdateBrief,
+		askChoice:              config.AskChoice,
+		proposePlan:            config.ProposePlan,
 		consent:                config.Consent,
 		consentState:           config.ConsentState,
 		consentClear:           config.ConsentClear,
@@ -299,8 +365,28 @@ func (e *Executor) Execute(
 		return e.readProcessingPlan(ctx, command)
 	case ToolUpdateSessionNotes:
 		return e.updateSessionNotes(ctx, command), nil
+	case ToolUpdateProductionBrief:
+		return e.updateProductionBrief(ctx, command), nil
+	case ToolAskChoice:
+		return e.askChoiceCard(ctx, command), nil
+	case ToolProposeProductionPlan:
+		if e.proposePlan == nil {
+			return chat.ToolResult{Error: "production plans unavailable", NoSubmission: true}, nil
+		}
+		return e.proposePlan(ctx, command)
 	case ToolFindHistoryImages:
 		return e.findHistoryImages(command), nil
+	case ToolInspectModel, ToolRenderModelViews, ToolCompareModels:
+		reader := e.inspectModel
+		if command.Call.Name == ToolRenderModelViews {
+			reader = e.renderModelViews
+		} else if command.Call.Name == ToolCompareModels {
+			reader = e.compareModels
+		}
+		if reader == nil {
+			return chat.ToolResult{Error: "model review unavailable", NoSubmission: true}, nil
+		}
+		return reader(ctx, command)
 	case ToolRequestConsent:
 		return e.requestConsent(ctx, command), nil
 	case ToolCreateThreeView:
@@ -478,6 +564,75 @@ func (e *Executor) updateSessionNotes(ctx context.Context, command chat.ToolComm
 		return chat.ToolResult{Error: "session notes not saved"}
 	}
 	return chat.ToolResult{AgentContent: e.context.SessionNotesSavedMessage}
+}
+
+// updateProductionBrief patches the session's production brief (#103). The
+// arguments are the fields to change: only the fields the Schema declares,
+// with the bounds it declares. A field omitted from the arguments keeps its
+// stored value, so the choice-card continuation that replays only the purpose
+// does not clear the rest of the brief (#103 review C2). A refused field comes
+// back through the Schema's invalid_template so the Agent can correct it.
+func (e *Executor) updateProductionBrief(ctx context.Context, command chat.ToolCommand) chat.ToolResult {
+	if e.updateBrief == nil {
+		return chat.ToolResult{Error: "production brief unavailable", NoSubmission: true}
+	}
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(command.Call.Arguments, &fields); err != nil || fields == nil {
+		reason := e.briefMessages.NotObject
+		if strings.TrimSpace(reason) == "" {
+			reason = "参数必须是对象"
+		}
+		return chat.ToolResult{Error: e.briefInvalid(reason), NoSubmission: true}
+	}
+	if err := e.updateBrief(ctx, command.OwnerID, command.SessionID, fields); err != nil {
+		if text := chat.ProductionBriefValidationErrorText(e.briefInvalidTemplate, err); text != "" {
+			return chat.ToolResult{Error: text, NoSubmission: true}
+		}
+		if errors.Is(err, chat.ErrProductionBriefUnavailable) {
+			return chat.ToolResult{Error: "production brief unavailable", NoSubmission: true}
+		}
+		return chat.ToolResult{Error: "production brief not saved", NoSubmission: true}
+	}
+	return chat.ToolResult{AgentContent: e.briefSavedMessage, NoSubmission: true}
+}
+
+func (e *Executor) briefInvalid(reason string) string {
+	return strings.ReplaceAll(e.briefInvalidTemplate, "{reason}", reason)
+}
+
+// askChoiceCard opens a generic choice card declared by chat.choice.kinds
+// (#103). The Agent names the kind only; the options and their arguments come
+// from the Schema and the service. The card's answer would call its target
+// tool, so that tool must be registered and available in this turn's scope.
+func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) chat.ToolResult {
+	if e.askChoice == nil {
+		return chat.ToolResult{Error: "choice cards unavailable", NoSubmission: true}
+	}
+	var arguments struct {
+		Kind        string `json:"kind"`
+		Question    string `json:"question"`
+		Recommended string `json:"recommended"`
+	}
+	if err := json.Unmarshal(command.Call.Arguments, &arguments); err != nil || arguments.Kind == "" {
+		return chat.ToolResult{Error: "invalid choice arguments", NoSubmission: true}
+	}
+	kind, declared := e.choiceKinds[arguments.Kind]
+	if !declared {
+		return chat.ToolResult{Error: "choice kind unavailable", NoSubmission: true}
+	}
+	if command.ToolAvailable != nil && !command.ToolAvailable(kind.ToolName) {
+		return chat.ToolResult{Error: "choice target tool unavailable", NoSubmission: true}
+	}
+	result, err := e.askChoice(ctx, command, kind, chat.AskChoiceArguments{
+		Kind: arguments.Kind, Question: arguments.Question, Recommended: arguments.Recommended,
+	})
+	if err != nil {
+		if errors.Is(err, chat.ErrSessionNotFound) {
+			return chat.ToolResult{Error: "session not found", NoSubmission: true}
+		}
+		return chat.ToolResult{Error: "choice card not opened", NoSubmission: true}
+	}
+	return result
 }
 
 func (e *Executor) requestConsent(

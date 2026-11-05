@@ -10,6 +10,7 @@ import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { fetchCapabilityOfferings } from '@/lib/agent-offerings';
 import {
   choiceAnswerText,
+  choiceCardHasDetails,
   choiceOptionQuote,
   choiceOptionTitle,
   choiceStatusText,
@@ -60,6 +61,7 @@ export function ChoiceCard({ card, busy, disabled, waiting = false, error, onAns
     ? formatSchemaText(schemaText(schema, 'ui.chat.choice.use_default'), { title: choiceOptionTitle(defaultOption, offerings) })
     : '';
   const status = choiceStatusText(schema, card, offerings);
+  const detailed = choiceCardHasDetails(card);
   const answer = (selection: ChoiceSelection) => onAnswer(selection, choiceAnswerText(schema, card, selection, offerings));
 
   const choose = (index: number, focus: boolean) => {
@@ -100,7 +102,17 @@ export function ChoiceCard({ card, busy, disabled, waiting = false, error, onAns
           {formatSchemaText(schemaText(schema, 'ui.chat.choice.offering_question'), { step })}
         </span>
       </header>
-      <div role="radiogroup" aria-labelledby={questionId} aria-disabled={!open || locked ? true : undefined} className="flex flex-col gap-1" data-testid="chat-choice-options">
+      <div
+        role="radiogroup"
+        aria-labelledby={questionId}
+        aria-disabled={!open || locked ? true : undefined}
+        className={cn(
+          'gap-1',
+          detailed ? 'grid [grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))]' : 'flex flex-col',
+        )}
+        data-testid="chat-choice-options"
+        data-layout={detailed ? 'grid' : 'list'}
+      >
         {card.options.map((option, index) => {
           const checked = option.id === checkedId;
           return (
@@ -113,6 +125,7 @@ export function ChoiceCard({ card, busy, disabled, waiting = false, error, onAns
               aria-disabled={!open || locked ? true : undefined}
               data-testid="chat-choice-option"
               data-option-id={option.id}
+              data-recommended={option.recommended ? 'true' : undefined}
               onClick={() => choose(index, true)}
               onKeyDown={(event) => onKeyDown(event, index)}
               className={cn(
@@ -125,14 +138,22 @@ export function ChoiceCard({ card, busy, disabled, waiting = false, error, onAns
                 {checked ? <Check className="size-2.5" /> : null}
               </span>
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="font-medium [overflow-wrap:anywhere]">
-                  {choiceOptionTitle(option, offerings)}
+                <span className="flex flex-wrap items-center gap-1">
+                  <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{choiceOptionTitle(option, offerings)}</span>
+                  {option.recommended ? (
+                    <span className="whitespace-nowrap rounded bg-primary/15 px-1 py-px text-[10px] font-normal text-primary" data-testid="chat-choice-recommended-badge">
+                      {schemaText(schema, 'ui.chat.choice.recommended_badge')}
+                    </span>
+                  ) : null}
                   {option.id === card.defaultOptionId ? (
-                    <span className="ml-1.5 inline-block whitespace-nowrap rounded bg-muted px-1 py-px text-[10px] font-normal text-muted-foreground" data-testid="chat-choice-default-badge">
+                    <span className="whitespace-nowrap rounded bg-muted px-1 py-px text-[10px] font-normal text-muted-foreground" data-testid="chat-choice-default-badge">
                       {schemaText(schema, 'ui.chat.choice.default_badge')}
                     </span>
                   ) : null}
                 </span>
+                {detailed && option.description ? (
+                  <span className="line-clamp-2 text-[11px] leading-snug text-muted-foreground" data-testid="chat-choice-description">{option.description}</span>
+                ) : null}
                 <span className="text-muted-foreground tabular-nums" data-testid="chat-choice-quote">{choiceOptionQuote(schema, option, offerings)}</span>
               </span>
             </div>

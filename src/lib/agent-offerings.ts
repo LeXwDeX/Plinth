@@ -32,6 +32,8 @@ export interface OfferingParameterWire {
   options?: ParamOption[];
   minimum?: number;
   maximum?: number;
+  /** Schema `maximum_when`: conditional upper bounds of a number input. */
+  maximum_when?: Array<{ when: ParamCondition; maximum: number }>;
   max_length?: number;
   min_items?: number;
   max_items?: number;

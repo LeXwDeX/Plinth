@@ -79,6 +79,52 @@ func TestCreativeLabAgentToolsDeclareTemplatesAndPairing(t *testing.T) {
 	}
 }
 
+// #103: a model argument names one Offering per capability. A model with both
+// a text and an image Offering is unambiguous because the call's capability
+// narrows it; two Offerings in the same capability are not.
+func TestChatToolModelSelectionRejectsAmbiguousOrUnknownValues(t *testing.T) {
+	c, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	index, tool := creativeLabTool(t, c, "create_model_3d_from_image")
+	check := func(t *testing.T, mutate func(tools []ChatToolSchema, offerings generationMap), want string) {
+		t.Helper()
+		tools := slices.Clone(c.application.Chat.Tools)
+		tools[index] = tool
+		tools[index].ArgumentMappings = maps.Clone(tool.ArgumentMappings)
+		offerings := maps.Clone(c.byID)
+		mutate(tools, offerings)
+		err := validateChatToolModelSelection(tools, offerings)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %v, want %q", err, want)
+		}
+	}
+	t.Run("two image Offerings share one model name", func(t *testing.T) {
+		check(t, func(_ []ChatToolSchema, offerings generationMap) {
+			duplicate := offerings["meshy/meshy-7.1/image-to-3d"]
+			duplicate.ID = "meshy/meshy-7.1/image-to-3d-copy"
+			offerings[duplicate.ID] = duplicate
+		}, `能力 "image-to-3d" 内对应 2 个 Offering`)
+	})
+	t.Run("an unknown model name", func(t *testing.T) {
+		check(t, func(tools []ChatToolSchema, _ generationMap) {
+			tools[index].Parameters = json.RawMessage(strings.Replace(
+				string(tools[index].Parameters), `"rodin-gen-2.5"`, `"rodin-gen-2.5","no-such-model"`, 1))
+		}, "没有对应的 Offering")
+	})
+	t.Run("a model argument mapped as an Offering parameter", func(t *testing.T) {
+		check(t, func(tools []ChatToolSchema, _ generationMap) {
+			tools[index].ArgumentMappings["model"] = "model"
+		}, "不能映射")
+	})
+	t.Run("both model and Offering selectors", func(t *testing.T) {
+		check(t, func(tools []ChatToolSchema, _ generationMap) {
+			tools[index].OfferingArgument = "offering"
+		}, "不能同时声明")
+	})
+}
+
 func TestChatToolOfferingSelectionRejectsAmbiguousOrUnboundDeclarations(t *testing.T) {
 	c, err := LoadDefault()
 	if err != nil {

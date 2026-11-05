@@ -19,6 +19,26 @@ func earlierCalls(calls []ToolCall, id string) []ToolCall {
 	return append([]ToolCall(nil), calls...)
 }
 
+// picturesWithHandles names each tool picture by the handle its attachment
+// received. imagesBefore is how many pictures the reply had before the call
+// appended this result's images; the call's pictures occupy the following
+// slots in order. A picture without an attachment keeps an empty handle.
+func picturesWithHandles(message Message, imagesBefore int, pictures []ToolPicture) []ToolPicture {
+	if len(pictures) == 0 {
+		return nil
+	}
+	named := append([]ToolPicture(nil), pictures...)
+	for index := range named {
+		if named[index].Handle != "" {
+			continue
+		}
+		if attachment, found := AttachmentForSlot(message, imagesBefore+index+1); found {
+			named[index].Handle = attachment.Handle
+		}
+	}
+	return named
+}
+
 // attachToolPictures adds the pictures a tool asked to show (#279) to its
 // reply: the tool text first, then each picture followed by its label. Every
 // picture is read for the turn's owner; one that cannot be read is named as

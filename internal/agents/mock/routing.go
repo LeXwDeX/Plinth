@@ -29,6 +29,8 @@ const (
 	toolModelFromViews       = "create_model_3d_from_views"
 	toolEditMultiview        = "edit_multiview_images"
 	toolUpdateSessionNotes   = "update_session_notes"
+	toolUpdateBrief          = "update_production_brief"
+	toolAskChoice            = "ask_choice"
 	toolCreativeLabDesign    = "create_creative_lab_design"
 	toolCreativeLabBuild     = "build_creative_lab_item"
 	selectionMarker          = "当前选中对象"
@@ -50,6 +52,8 @@ var (
 	multiviewEditPattern = regexp.MustCompile(`编辑|修改|改成|换成|改为`)
 	editVerbPattern      = regexp.MustCompile(`换成|改成|改为|改一下|调成|调整|重画|重绘|同一|保持|按.*(重画|画)|再来|继续`)
 	formatWordPattern    = regexp.MustCompile(`(?i)(gltf|glb|fbx|obj|usdz|stl|3mf)`)
+	// 3D 制作开工的说法：还没有制作简报时，mock 先用选择卡问用途（#103）。
+	startMakingPattern = regexp.MustCompile(`开始制作|开始做|开工`)
 )
 
 // multiviewPrompts 是四视角编辑里视角词到 edit_multiview_images 参数的对应，按 front、left、back、right 排列。
@@ -286,6 +290,11 @@ func (adapter *Adapter) route(request agents.Request, text string) (string, map[
 			notes = strings.TrimSpace(text)
 		}
 		return toolUpdateSessionNotes, map[string]any{"notes": notes}
+
+	case adapter.wants(request, toolAskChoice) && briefMissing(request.Messages) && startMakingPattern.MatchString(text):
+		// #103: a new 3D job has no production brief yet; the mock asks the
+		// purpose on the generic card, whose options the server builds.
+		return toolAskChoice, map[string]any{"kind": "usage_profile"}
 
 	case adapter.wants(request, toolModelFromViews) && directedMultiview(request) != nil:
 		// 本轮带着用户的结构化多视图请求（#65）：系统上下文写明了工具、组和模型，
@@ -545,6 +554,18 @@ func (adapter *Adapter) basedOnHandle(messages []agents.Message) string {
 		return handle
 	}
 	return ""
+}
+
+// briefMissing reports whether the system context says this session has no
+// production brief yet (#103). The Schema renders that as the brief's empty
+// text; the mock only reads the marker, not the full template.
+func briefMissing(messages []agents.Message) bool {
+	for _, message := range messages {
+		if message.Role == "system" && strings.Contains(message.Content, "尚未建立制作简报") {
+			return true
+		}
+	}
+	return false
 }
 
 // multiviewDirectivePattern reads the model, and the group when there is one,

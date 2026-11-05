@@ -20,7 +20,6 @@ import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { useModelCaptureBlock } from '@/hooks/use-model-capture-block';
 import { useObjectActions } from '@/hooks/use-object-actions';
-import { useActiveAgentScope } from '@/hooks/use-session-agent-scope';
 import { useAuth } from '@/hooks/use-auth';
 import { writeSessionAgentParams } from '@/hooks/use-session-agent-params';
 import { useTaskDetail } from '@/hooks/use-task-detail';
@@ -63,7 +62,6 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
   const { proxyAssetUrl } = useAssetURLRewriter();
   const { openOnStage, toThreeD, toGaussianSplat, captureToTwoD } = useObjectActions();
   const captureBlock = useModelCaptureBlock(target.taskId);
-  const scope = useActiveAgentScope();
   const activeSessionId = useChatStore((state) => state.activeSessionId);
   const tracked = useWorkspaceStore((state) => state.trackedTasks.find((task) => task.taskId === target.taskId));
   const closeResultDetail = useStudioStore((state) => state.closeResultDetail);
@@ -90,7 +88,7 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
   const actionContext = {
     kind: displayTarget.kind, status, hasTask,
     inActiveSession: Boolean(target.sessionId) && target.sessionId === activeSessionId,
-    hasPrompt: prompt !== '', hasFile: Boolean(file), scope,
+    hasPrompt: prompt !== '', hasFile: Boolean(file),
   };
   const actions = detailActions(actionContext);
   const formatsRoute = target.taskId ? modelFormatsRoute(schema, target.taskId) : null;
@@ -110,7 +108,7 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
   const blockedReason = detailBlockedReason(actionContext);
   const blockedText = blockedReason ? text(blockedReason) : '';
   const blockedShort = blockedReason ? text('ui.unavailable.reason.result.other_session') : '';
-  const conversion = blockedReason ? conversionAllowed(displayTarget.kind, scope) : null;
+  const conversion = blockedReason ? conversionAllowed(displayTarget.kind) : null;
   const position = groupPosition(target);
   const stepGroup = useStudioStore((state) => state.stepResultDetail);
   const object = objectOfTarget(displayTarget);

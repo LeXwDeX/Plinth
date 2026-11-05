@@ -1,6 +1,4 @@
 import { useMemo, useState } from 'react';
-import { useActiveAgentScope } from '@/hooks/use-session-agent-scope';
-import { pickerDisabledReason, scopeAllowsDomain } from '@/lib/chat/agent-scope';
 import { parameterDisabled, parameterVisible } from '@/lib/product-schema';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { useSessionAgentParams } from '@/hooks/use-session-agent-params';
@@ -70,8 +68,6 @@ function useOfferingParams(sessionId: string | null, offering: OfferingWire | un
 /** Each domain/capability reads its exact Offering. Opening the panel never writes defaults. */
 export function useGenerationParams(domain: WorkspaceDomain, sessionId: string | null, hasReference: boolean): GenerationParams {
   const { schema } = useProductSchema();
-  const scope = useActiveAgentScope();
-  const allowed = scopeAllowsDomain(schema, scope, domain);
   const selectedModelId = useWorkspaceStore((state) => state.modelByDomain[domain]);
   const { offeringsByCapability, error } = useWorkspaceOfferings(schema, domain);
   const offerings = useMemo(
@@ -90,8 +86,9 @@ export function useGenerationParams(domain: WorkspaceDomain, sessionId: string |
   return {
     ...display,
     domain,
-    allowed,
-    restrictedReason: allowed ? '' : pickerDisabledReason(schema, scope),
+    // #103: the scope picker is gone; every session runs in the Agent's auto mode, so neither domain is restricted.
+    allowed: true,
+    restrictedReason: '',
     modelName: offering?.model_name ?? '',
     ready: offeringsByCapability !== undefined && !display.loading,
     failed: Boolean(error || display.error),

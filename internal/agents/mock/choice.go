@@ -135,3 +135,17 @@ func choiceOpened(content string) bool {
 	}
 	return json.Unmarshal([]byte(content), &result) == nil && result.ChoiceRequired
 }
+
+// genericChoiceText is the Schema explanation a generic card (#103) carries.
+// A provider-choice card (#321) has no kind and keeps the configured summary.
+func genericChoiceText(content string) string {
+	var result struct {
+		ChoiceRequired bool   `json:"choice_required"`
+		Kind           string `json:"kind"`
+		Message        string `json:"message"`
+	}
+	if json.Unmarshal([]byte(content), &result) != nil || !result.ChoiceRequired || result.Kind == "" {
+		return ""
+	}
+	return strings.TrimSpace(result.Message)
+}

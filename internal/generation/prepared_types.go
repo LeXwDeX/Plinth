@@ -15,7 +15,11 @@ type PreparedInputID string
 // PrepareInputCommand requests validation and an immutable input snapshot. It
 // does not authorize a paid Task or reserve an admission slot.
 type PrepareInputCommand struct {
-	ParameterReasons    map[string]string
+	ParameterReasons map[string]string
+	// ParameterSources labels why an advised change happened, keyed by
+	// parameter name: "agent" (the default when unset) or "profile:<id>" for a
+	// usage-profile override (#103). The reason text is shared per profile.
+	ParameterSources    map[string]string
 	OwnerID             OwnerID
 	SessionID           string
 	Capability          Capability
@@ -79,6 +83,8 @@ type ParameterAdjustment struct {
 	Reason           string          `json:"reason"`
 	Advice           string          `json:"advice"`
 	Source           string          `json:"source"`
+	// Profile is the usage-profile ID when Source is "profile:<id>" (#103).
+	Profile string `json:"profile,omitempty"`
 }
 
 // ParameterReason associates a session explanation with its exact value.
@@ -132,9 +138,22 @@ type PreparedInput struct {
 	// Offering's base price (0 when none). It is derived from NormalizedInput
 	// and the pinned Offering revision, and it is part of InputHash when above
 	// zero, so an approval of this input is an approval of exactly this amount.
-	ExtraCredits int       `json:"extra_credits,omitempty"`
-	InputHash    string    `json:"input_hash"`
-	CreatedAt    time.Time `json:"created_at"`
+	ExtraCredits int `json:"extra_credits,omitempty"`
+	// EstimatedCredits is the server's estimate of what this exact input will
+	// charge: the Offering's base price plus its extra credits for a platform
+	// priced step, or the frozen native total rounded up to whole provider
+	// credits for a native priced step (#103 budget). It is derived from the
+	// frozen values and part of InputHash, so a budget reservation covers the
+	// same estimate the approval card shows. Zero on records written before
+	// the field existed; readers then fall back to the Offering's quote.
+	EstimatedCredits int `json:"estimated_credits,omitempty"`
+	// CreditsMetered copies the Offering's declaration that its provider bills
+	// in credits. A metered input whose server estimate is still zero cannot be
+	// priced: the budget policy must leave the step to a person instead of
+	// treating zero as free (#103 review B1). Part of InputHash when true.
+	CreditsMetered bool      `json:"credits_metered,omitempty"`
+	InputHash      string    `json:"input_hash"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 type SubmitPreparedCommand struct {

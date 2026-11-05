@@ -16,7 +16,8 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded, err := json.Marshal(source.Application().Public())
+	application := source.Application()
+	encoded, err := json.Marshal(application.Public())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,9 +31,15 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"runtime":      {"http", "input_assets", "cache", "asset_delivery", "frontend", "generation_messages"},
 		// #80: the composer's capacity text and the result limit pair.
 		"runtime.generation_messages": {"reference_capacity", "reference_capacity_multiview", "reference_limit", "reference_limit_one"},
-		"chat":                        {"api", "defaults", "roles", "state", "frontend", "context", "stream", "tools", "skills", "presentation", "approval_policy", "agent_scope", "harness", "agent_status", "agent_limits", "three_view_limits", "context_compaction"},
+		"chat":                        {"api", "defaults", "roles", "state", "frontend", "context", "stream", "tools", "skills", "presentation", "approval_policy", "agent_scope", "harness", "agent_status", "agent_limits", "three_view_limits", "context_compaction", "model_review", "model3d_usage"},
 		// #7: the Agent's approval-mode texts (approval_policy.prompt) stay on the server.
-		"chat.approval_policy":              {"default_mode", "modes", "manual_approval_capabilities"},
+		"chat.approval_policy": {"default_mode", "modes", "manual_approval_capabilities", "budget_states"},
+		// #103: only the review tool names, purpose labels and brief field
+		// declarations reach the browser.
+		"chat.model_review":                 {"tools"},
+		"chat.model_review.tools":           {"inspect", "render", "compare"},
+		"chat.model3d_usage":                {"profiles", "brief"},
+		"chat.model3d_usage.brief":          {"fields"},
 		"canvas":                            {"api", "defaults", "limits", "frontend", "presentation"},
 		"task_stream":                       {"aliases"},
 		"administration":                    {"navigation", "users", "audit_logs", "generations", "usage", "user_assets"},
@@ -64,6 +71,13 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		}
 	}
 
+	// Craft briefs are appended to the server-side system context only (#103).
+	for _, prompt := range application.Chat.Agent.CraftPrompts {
+		if strings.Contains(string(encoded), prompt.Text) {
+			t.Fatalf("craft prompt %q leaked into the public schema", prompt.ID)
+		}
+	}
+
 	// Each positive path has a current browser reader. The HTTP endpoint and the
 	// Go Web shell both serialize this same Public() DTO.
 	for _, path := range []string{
@@ -88,6 +102,11 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"chat.context.image_index_base",
 		"chat.skills.fields.skills",
 		"chat.presentation.messages.internal_error",
+		"chat.model_review.tools.inspect",
+		"chat.model_review.tools.render",
+		"chat.model_review.tools.compare",
+		"chat.model3d_usage.profiles",
+		"chat.model3d_usage.brief.fields",
 		"canvas.api.fields.id",
 		"canvas.defaults.bg_style",
 		"canvas.limits.maximum_dimension",
@@ -142,6 +161,14 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"runtime.input_assets.legacy_storage_root_setting", "runtime.input_assets.audit",
 		"runtime.asset_delivery.proxy.cache", "runtime.asset_delivery.proxy.security.host_source",
 		"chat.agent", "chat.agent_tools", "chat.pending_approvals", "chat.three_view", "chat.dsml", "chat.audit",
+		"chat.choice",
+		// #103: the review limits, prompts, cache and brief prompt templates
+		// stay server-side behind the public tool names and field table.
+		"chat.model_review.inspect", "chat.model_review.render", "chat.model_review.compare",
+		"chat.model_review.cache", "chat.model_review.source", "chat.model_review.texts",
+		"chat.model_review.result_views_field", "chat.model3d_usage.default_profile",
+		"chat.model3d_usage.brief.context_template", "chat.model3d_usage.brief.empty_text",
+		"chat.model3d_usage.brief.field_template", "chat.model3d_usage.brief.saved_message",
 		"chat.api.prompt_enhance.profiles", "chat.stream.headers",
 		"chat.skills.execution", "chat.context.asset_url_template",
 		"canvas.audit", "canvas.defaults.project_id_prefix",

@@ -17,10 +17,18 @@ func sameParameterValue(a, b json.RawMessage) bool {
 	}
 	return reflect.DeepEqual(x, y)
 }
-func freezeParameterAdjustments(o Offering, normalized json.RawMessage, reasons map[string]string) ([]ParameterAdjustment, error) {
+func freezeParameterAdjustments(o Offering, normalized json.RawMessage, reasons map[string]string, sources ...map[string]string) ([]ParameterAdjustment, error) {
 	values := map[string]json.RawMessage{}
 	if err := json.Unmarshal(normalized, &values); err != nil {
 		return nil, err
+	}
+	sourceOf := func(name string) (string, string) {
+		if len(sources) > 0 {
+			if source := strings.TrimSpace(sources[0][name]); strings.HasPrefix(source, "profile:") {
+				return source, strings.TrimPrefix(source, "profile:")
+			}
+		}
+		return "agent", ""
 	}
 	allowed := map[string]bool{}
 	result := []ParameterAdjustment{}
@@ -46,7 +54,8 @@ func freezeParameterAdjustments(o Offering, normalized json.RawMessage, reasons 
 		if reason == "" || len(reason) > 4096 {
 			return nil, &Error{Code: ErrInvalidInput, Operation: "prepare_input", Detail: fmt.Sprintf("参数 %q 不建议更改，调整时须说明理由", p.Name)}
 		}
-		result = append(result, ParameterAdjustment{Name: p.Name, Label: p.Label, RecommendedValue: append(json.RawMessage(nil), recommended...), Value: append(json.RawMessage(nil), value...), Reason: reason, Advice: p.AdjustmentReason, Source: "agent"})
+		source, profile := sourceOf(p.Name)
+		result = append(result, ParameterAdjustment{Name: p.Name, Label: p.Label, RecommendedValue: append(json.RawMessage(nil), recommended...), Value: append(json.RawMessage(nil), value...), Reason: reason, Advice: p.AdjustmentReason, Source: source, Profile: profile})
 	}
 	for name, reason := range reasons {
 		if !allowed[name] || len(reason) > 4096 {

@@ -238,6 +238,35 @@ func validateOffering(
 				return err
 			}
 		}
+		for index, limit := range parameter.MaximumWhen {
+			target, exists := offeringParameter(offering.Parameters, limit.When.Parameter)
+			if !exists {
+				return fmt.Errorf(
+					"Offering %q 参数 %q 的 maximum_when[%d] 引用了未知参数 %q",
+					offering.ID,
+					parameter.Name,
+					index,
+					limit.When.Parameter,
+				)
+			}
+			if limit.When.Parameter == parameter.Name {
+				return fmt.Errorf(
+					"Offering %q 参数 %q 的 maximum_when[%d] 不能引用自身",
+					offering.ID,
+					parameter.Name,
+					index,
+				)
+			}
+			if err := validateParameterCondition(limit.When, target); err != nil {
+				return fmt.Errorf(
+					"Offering %q 参数 %q 的 maximum_when[%d]: %w",
+					offering.ID,
+					parameter.Name,
+					index,
+					err,
+				)
+			}
+		}
 		if parameter.AlphaFlatten != nil {
 			for _, condition := range parameter.AlphaFlatten.KeepWhen {
 				target, exists := offeringParameter(offering.Parameters, condition.Parameter)
@@ -313,7 +342,7 @@ func validateOffering(
 		if parameter.AdjustmentPolicy != "" && parameter.AdjustmentPolicy != "advised" {
 			return fmt.Errorf("Offering %q parameter %q has unknown adjustment policy", offering.ID, parameter.Name)
 		}
-		if parameter.AdjustmentPolicy == "advised" && (parameter.Fixed || len(bytes.TrimSpace(parameter.Default)) == 0 || strings.TrimSpace(parameter.AdjustmentReason) == "" || parameter.Presentation == nil || parameter.Presentation.Surface != schemacontract.SurfaceReadOnly || !offering.AgentParameterAllowed(parameter)) {
+		if parameter.AdjustmentPolicy == "advised" && (parameter.Fixed || (parameter.Required && len(bytes.TrimSpace(parameter.Default)) == 0) || strings.TrimSpace(parameter.AdjustmentReason) == "" || parameter.Presentation == nil || parameter.Presentation.Surface != schemacontract.SurfaceReadOnly || !offering.AgentParameterAllowed(parameter)) {
 			return fmt.Errorf("Offering %q parameter %q has invalid advised policy", offering.ID, parameter.Name)
 		}
 		if parameter.AdjustmentPolicy == "" && parameter.AdjustmentReason != "" {
@@ -1265,6 +1294,28 @@ func validateValueDefinition(schema schemacontract.Parameter) (schemacontract.Pa
 	if schema.Minimum != nil && schema.Maximum != nil && *schema.Minimum > *schema.Maximum {
 		return schema, fmt.Errorf("参数 %q 的 minimum 大于 maximum", schema.Name)
 	}
+	if len(schema.MaximumWhen) > 0 {
+		if schema.Type != "number" {
+			return schema, fmt.Errorf("参数 %q 只有 number 类型可以声明 maximum_when", schema.Name)
+		}
+		for index, limit := range schema.MaximumWhen {
+			if math.IsNaN(limit.Maximum) || math.IsInf(limit.Maximum, 0) || limit.Maximum <= 0 {
+				return schema, fmt.Errorf("参数 %q 的 maximum_when[%d] 上限无效", schema.Name, index)
+			}
+			if schema.Integer && math.Trunc(limit.Maximum) != limit.Maximum {
+				return schema, fmt.Errorf("参数 %q 的 maximum_when[%d] 上限必须是整数", schema.Name, index)
+			}
+			if schema.Maximum != nil && limit.Maximum > *schema.Maximum {
+				return schema, fmt.Errorf("参数 %q 的 maximum_when[%d] 不能大于 maximum", schema.Name, index)
+			}
+			if schema.Minimum != nil && limit.Maximum < *schema.Minimum {
+				return schema, fmt.Errorf("参数 %q 的 maximum_when[%d] 不能小于 minimum", schema.Name, index)
+			}
+			if strings.TrimSpace(limit.When.Parameter) == "" {
+				return schema, fmt.Errorf("参数 %q 的 maximum_when[%d] 缺少条件参数", schema.Name, index)
+			}
+		}
+	}
 	if schema.MinItems < 0 || schema.MaxItems < 0 ||
 		(schema.MaxItems > 0 && schema.MinItems > schema.MaxItems) {
 		return schema, fmt.Errorf("参数 %q 的数组数量约束无效", schema.Name)
@@ -1370,8 +1421,16 @@ func validateValueDefinition(schema schemacontract.Parameter) (schemacontract.Pa
 }
 
 func validateTaskSourceParameter(parameter schemacontract.Parameter) error {
+	// same_session binds task sources to this chat session. A saved-model
+	// source parameter (asset or asset-array with source-asset semantics) may
+	// also declare it: the referenced model assets must then belong to Tasks of
+	// the same session (enforced by the adapter, which sees each asset's
+	// originating Task). Reference images and other inputs stay session-free.
 	if parameter.SameSession && parameter.Type != "task" {
-		return fmt.Errorf("same_session requires task source")
+		role, isSource := schemacontract.SourceParameterRole(parameter)
+		if (parameter.Type != "asset" && parameter.Type != "asset-array") || !isSource || role != schemacontract.SemanticSourceAsset {
+			return fmt.Errorf("same_session requires task or saved-model source")
+		}
 	}
 	if parameter.TaskSourceBinding != "" && (parameter.TaskSourceBinding != "provider" || parameter.Type != "task" || parameter.TaskSourceKind == schemacontract.TaskSourceAssets || !parameter.Required || !parameter.SameProvider || len(parameter.TaskOfferings) != 1) {
 		return fmt.Errorf("task_source_binding requires a required exact same-provider upstream task source")

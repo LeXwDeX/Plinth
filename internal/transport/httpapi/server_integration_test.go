@@ -1292,6 +1292,8 @@ func newHTTPHarnessWithCatalogAndProviders(
 		Handles:             chat.NewHandlePolicy(applicationSchema.Chat.Context),
 		MaximumSessionNotes: applicationSchema.Chat.Context.MaximumSessionNotesCharacters,
 		Attachments:         harnessAttachmentVerifier{},
+		Model3DUsage:        applicationSchema.Chat.Model3DUsage,
+		ChoiceKinds:         applicationSchema.Chat.Choice.Kinds,
 		RetiredModels:       taskCatalog.RetiredModelSuccessors(),
 		// The harness deployment chats with the DeepSeek profile (#322).
 		Models:          chat.ModelPolicy{Model: "deepseek", Thinking: applicationSchema.Chat.Agent.Thinking},
@@ -1611,7 +1613,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		grantRepository = &hookedGrantRepository{Repository: repository, state: state.(*fixtureExecutionState)}
 	}
 	executionGrants := &executiongrant.Service{Grants: grantRepository, Prepared: repository,
-		Policy: approvalPolicy, Modes: chatService,
+		Budgets: repository, Policy: approvalPolicy, Modes: chatService,
 		PendingTTL: time.Duration(applicationSchema.Chat.PendingApprovals.TTLSeconds) * time.Second}
 	approvalTexts, err := catalog.NewTextLocalizer(applicationSchema)
 	if err != nil {

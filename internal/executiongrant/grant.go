@@ -5,6 +5,7 @@ package executiongrant
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/harness"
@@ -63,15 +64,24 @@ func (i Identity) Valid() bool {
 type Grant struct {
 	RequestID string
 	Identity
-	TriggerTurnID  string
-	Status         Status
-	TaskID         string
-	Source         string
+	TriggerTurnID string
+	Status        Status
+	TaskID        string
+	Source        string
+	// BudgetEligible reports whether this Agent step may be approved by an
+	// active production plan instead of a per-step human decision (#103).
+	BudgetEligible bool
 	RequestVersion int64
 	DecidedBy      string
 	DecidedAt      *time.Time
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+}
+
+// ApprovedByBudget reports whether an approved production plan authorized the
+// grant rather than a person or the per-step policy.
+func (g Grant) ApprovedByBudget() bool {
+	return strings.HasPrefix(g.DecidedBy, "budget:")
 }
 
 // PendingSince is when the grant started waiting for a decision. A pending

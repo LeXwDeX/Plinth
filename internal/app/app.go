@@ -282,6 +282,30 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
+	// The audit service is created before the chat service so the Agent's
+	// production-brief tool can record the same product audit as the HTTP PUT
+	// (#103); the bootstrap report below still uses it.
+	administrationAuditLogs := applicationSchema.Administration.AuditLogs
+	administrationAuditService, err := administration.NewAuditService(
+		administration.AuditServiceConfig{
+			Repository: repository,
+			DefaultPage: administrationAuditLogs.Limits.
+				DefaultPage,
+			DefaultPageSize: administrationAuditLogs.Limits.
+				DefaultPageSize,
+			MaximumPageSize: administrationAuditLogs.Limits.
+				MaximumPageSize,
+			IDPrefix: administrationAuditLogs.Defaults.IDPrefix,
+			WriteMaximumAttempts: administrationAuditLogs.WritePolicy.
+				MaximumAttempts,
+			WriteRetryDelay: time.Duration(
+				administrationAuditLogs.WritePolicy.RetryDelayMilliseconds,
+			) * time.Millisecond,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
 	approvalPolicy := approvalPolicyFromSchema(applicationSchema)
 	chatService, err := chat.NewService(chat.ServiceConfig{
 		ApprovalPolicy:      approvalPolicy,
@@ -292,6 +316,17 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// A turn's pick of a retired generation model runs on its successor
 		// (#329 follow-up).
 		RetiredModels: taskCatalog.RetiredModelSuccessors(),
+		// The production purposes and the brief fields (#103).
+		Model3DUsage: applicationSchema.Chat.Model3DUsage,
+		// An explicit 3D model lock must name an enabled 3D Offering (#103
+		// review C4); the picker sends a model_id, and the tools also match the
+		// Offering id and provider/model pair.
+		ExplicitModel3DValid: func(model string) bool {
+			return explicitModel3DValid(taskCatalog.List(""), model)
+		},
+		// The declared generic cards; the brief write settles the usage-profile
+		// kind by its Schema id and argument name (#103).
+		ChoiceKinds: applicationSchema.Chat.Choice.Kinds,
 		// The deployment's chat model, its thinking profile and context
 		// window (#322).
 		Models: chat.ModelPolicy{
@@ -474,6 +509,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		VisionDerivative: visionDerivative,
 		Captures:         captureStore,
 		ModelAssetRole:   generationtool.ModelAssetRole,
+		RenderAssetType:  applicationSchema.Chat.ModelReview.Render.AssetType,
 	})
 	if err != nil {
 		return nil, err
@@ -516,12 +552,22 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	// One grant service for every paid-step entry point. The session approval
 	// mode and the Schema policy decide whether a step waits for a person.
 	executionGrants := &executiongrant.Service{
-		Grants: repository, Prepared: repository,
+		Grants: repository, Prepared: repository, Budgets: repository,
 		Policy: approvalPolicy, Modes: chatService,
 		// An Agent approval stays approvable for the Schema's duration; after
 		// that it can only be requested again in a new turn.
 		PendingTTL: time.Duration(applicationSchema.Chat.PendingApprovals.TTLSeconds) * time.Second,
 	}
+	// Budget-mode plans (#103) need the grant service, which needs the chat
+	// service for the session mode; install the writer once both exist.
+	chatService.SetProductionPlans(chat.ProductionPlanPolicy{
+		Budget: applicationSchema.Chat.ApprovalPolicy.Budget,
+		Offerings: func() []generation.Offering {
+			return module.Offerings("")
+		},
+		OfferingAvailable: module.OfferingAvailable,
+		Store:             executionGrants,
+	})
 	paramsStore := agentparams.NewPersistentParameterStore(repository, logger)
 	// One localizer serves the Agent turn and its tool results.
 	texts, err := catalog.NewTextLocalizer(applicationSchema)
@@ -564,6 +610,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Grants:          executionGrants,
 		StopRequested:   chatService.TurnStopRequested,
 		References:      referenceResolver,
+		ModelAssets:     module,
+		InputAssets:     inputAssetService,
 		InputAssetRoute: applicationSchema.Runtime.HTTP.Routes.AssetItem,
 		Chat:            applicationSchema.Chat,
 		CanvasArtboard:  applicationSchema.Canvas.Frontend.Artboard,
@@ -597,7 +645,29 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		RecoverTask:        newAgentTaskRecoverer(module, applicationSchema.Chat, applicationSchema.Content.Messages, texts),
 		ListModels:         toolExecutor.ListSessionModels,
 		ReadProcessingPlan: toolExecutor.ReadProcessingPlan,
+		InspectModel:       toolExecutor.InspectModel,
+		RenderModelViews:   toolExecutor.RenderModelViews,
+		CompareModels:      toolExecutor.CompareModels,
 		UpdateNotes:        chatService.SetSessionNotes,
+		UpdateBrief: func(ctx context.Context, ownerID, sessionID string, brief map[string]json.RawMessage) error {
+			return updateProductionBriefAudited(
+				ctx,
+				chatService,
+				administrationAuditService,
+				logger,
+				applicationSchema.Chat.Audit.ProductionBriefAction,
+				applicationSchema.Chat.Audit.SessionResourceType,
+				ownerID,
+				sessionID,
+				brief,
+			)
+		},
+		AskChoice:            chatService.AskChoice,
+		ProposePlan:          chatService.ProposeProductionPlan,
+		ChoiceKinds:          applicationSchema.Chat.Choice.Kinds,
+		BriefSavedMessage:    applicationSchema.Chat.Model3DUsage.Brief.SavedMessage,
+		BriefInvalidTemplate: applicationSchema.Chat.Model3DUsage.Brief.InvalidTemplate,
+		BriefMessages:        applicationSchema.Chat.Model3DUsage.Brief.Messages,
 		Consent: func(command chat.ToolCommand, request json.RawMessage, snapshot json.RawMessage) error {
 			scope := agentparams.ScopeKey(command.OwnerID, command.SessionID)
 			return agentStateStore.BeginConsent(scope, request, snapshot)
@@ -857,27 +927,6 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		return nil, err
 	}
 	administrationUsers := applicationSchema.Administration.Users
-	administrationAuditLogs := applicationSchema.Administration.AuditLogs
-	administrationAuditService, err := administration.NewAuditService(
-		administration.AuditServiceConfig{
-			Repository: repository,
-			DefaultPage: administrationAuditLogs.Limits.
-				DefaultPage,
-			DefaultPageSize: administrationAuditLogs.Limits.
-				DefaultPageSize,
-			MaximumPageSize: administrationAuditLogs.Limits.
-				MaximumPageSize,
-			IDPrefix: administrationAuditLogs.Defaults.IDPrefix,
-			WriteMaximumAttempts: administrationAuditLogs.WritePolicy.
-				MaximumAttempts,
-			WriteRetryDelay: time.Duration(
-				administrationAuditLogs.WritePolicy.RetryDelayMilliseconds,
-			) * time.Millisecond,
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
 	// #319: the bootstrap ran before the audit trail existed; report it now.
 	reportAdminBootstrap(context.Background(), logger, administrationAuditService,
 		authenticationSchema.API, config.AdminUsername, adminBootstrap)

@@ -1879,11 +1879,20 @@ func testProductDocument(offerings string) []byte {
 		}
 	}
 	// The reused plan tool asks for a service on a choice card (#321), so the
-	// fixture carries the card's declarations too.
+	// fixture carries the card's declarations too. The generic kinds (#103)
+	// target tools this minimal fixture does not declare, so it carries only
+	// the processing choice contract.
 	application.Chat.Choice = defaultChat.Choice
+	application.Chat.Choice.Kinds = nil
 	application.Chat.API.Fields.ChoiceAnswer = defaultChat.API.Fields.ChoiceAnswer
+	application.Chat.API.Fields.Brief = defaultChat.API.Fields.Brief
+	application.Chat.API.Fields.ExplicitModel3D = defaultChat.API.Fields.ExplicitModel3D
+	application.Chat.API.ResponseFields.Brief = defaultChat.API.ResponseFields.Brief
+	application.Chat.Audit.ProductionBriefAction = defaultChat.Audit.ProductionBriefAction
 	application.Chat.Presentation.Messages.ChoiceAnswered = defaultChat.Presentation.Messages.ChoiceAnswered
 	application.Chat.Presentation.Messages.ChoiceRejected = defaultChat.Presentation.Messages.ChoiceRejected
+	application.Chat.Presentation.Messages.ModelChoiceConflict = defaultChat.Presentation.Messages.ModelChoiceConflict
+	application.Chat.Presentation.Messages.ModelChoiceUnavailable = defaultChat.Presentation.Messages.ModelChoiceUnavailable
 	harness := defaultChat.Harness
 	harness.BaseTools = []string{"list_offerings"}
 	harness.Operations = []catalog.HarnessOperationSchema{{
@@ -1940,8 +1949,9 @@ func TestDefaultCatalogCoversCurrentProviderInventory(t *testing.T) {
 	// Smart Segmentation image/model); Decimate quad stays disabled. #329 adds
 	// Meshy T2.5 (Smart Topology) text and image to 3D. #330 adds Meshy Convert.
 	// #100: the 17 Meshy Creative Lab Offerings stay defined but are not offered
-	// (enabled=false), so only the other 53 are listed.
-	if len(offerings) != 53 {
+	// (enabled=false), so only the other 55 are listed. #103 adds the two free
+	// local model-parts Offerings (split and merge).
+	if len(offerings) != 55 {
 		t.Fatalf("offering count = %d", len(offerings))
 	}
 	for _, id := range []generation.OfferingID{
@@ -1965,6 +1975,8 @@ func TestDefaultCatalogCoversCurrentProviderInventory(t *testing.T) {
 		"local/static-glb/to-gltf",
 		"local/static-gltf/to-glb",
 		"local/generated-glb/to-gltf",
+		"local/model-parts/split",
+		"local/model-parts/merge",
 		"tripo/format-conversion/uploaded-glb-to-stl",
 		"hyper3d/rodin-gen-2.5/text-to-3d",
 		"hyper3d/rodin-gen-2.5/image-to-3d",
@@ -2018,7 +2030,7 @@ func TestDefaultCatalogOwnsCapabilityRoutesLabelsAndRuntimePresentation(t *testi
 		t.Fatal(err)
 	}
 	application := taskCatalog.Application()
-	if len(application.Capabilities) != 25 {
+	if len(application.Capabilities) != 27 {
 		t.Fatalf("capability count = %d", len(application.Capabilities))
 	}
 	legacyPaths := map[string]generation.Capability{}
@@ -3713,10 +3725,10 @@ func TestDefaultCatalogOwnsChatThinkingAndModelDefaults(t *testing.T) {
 	thinking := application.Chat.Agent.Thinking
 	// #253: no generic thinking fields; DeepSeek, Qwen and GLM are vendor
 	// profiles and only DeepSeek reads DSML tool calls (global chat.dsml is off).
-	if thinking == nil || !thinking.Enabled || len(thinking.ModelProfiles) != 7 ||
-		!thinking.ModelProfiles[2].DSMLToolCalls ||
-		thinking.ModelProfiles[5].ModelPrefixes[0] != "qwen" ||
-		string(thinking.ModelProfiles[5].RequestFields["enable_thinking"]) != "true" ||
+	if thinking == nil || !thinking.Enabled || len(thinking.ModelProfiles) != 12 ||
+		!thinking.ModelProfiles[7].DSMLToolCalls ||
+		thinking.ModelProfiles[10].ModelPrefixes[0] != "qwen" ||
+		string(thinking.ModelProfiles[10].RequestFields["enable_thinking"]) != "true" ||
 		application.Chat.DSML.Enabled {
 		t.Fatalf("chat agent thinking = %#v, dsml = %v", thinking, application.Chat.DSML.Enabled)
 	}
@@ -3724,25 +3736,25 @@ func TestDefaultCatalogOwnsChatThinkingAndModelDefaults(t *testing.T) {
 	// accepts low/high/max), reasoning passed back in tool loops
 	// (https://api-docs.deepseek.com/guides/thinking_mode). Since #322 the
 	// level is the session's choice written to effort_field.
-	if thinking.ModelProfiles[2].ModelPrefixes[0] != "deepseek" ||
-		thinking.ModelProfiles[2].EffortField != "reasoning_effort" ||
-		thinking.ModelProfiles[2].DefaultEffort != "low" ||
-		!strings.Contains(strings.Join(strings.Fields(string(thinking.ModelProfiles[2].RequestFields["thinking"])), ""), `{"type":"enabled"}`) ||
-		!thinking.ModelProfiles[2].ReasoningPassback {
+	if thinking.ModelProfiles[7].ModelPrefixes[0] != "deepseek" ||
+		thinking.ModelProfiles[7].EffortField != "reasoning_effort" ||
+		thinking.ModelProfiles[7].DefaultEffort != "low" ||
+		!strings.Contains(strings.Join(strings.Fields(string(thinking.ModelProfiles[7].RequestFields["thinking"])), ""), `{"type":"enabled"}`) ||
+		!thinking.ModelProfiles[7].ReasoningPassback {
 		t.Fatalf("deepseek thinking profile = %#v", thinking.ModelProfiles)
 	}
 	application.Chat.Agent.Thinking.Enabled = false
-	application.Chat.Agent.Thinking.ModelProfiles[2].ModelPrefixes[0] = "mutated"
-	application.Chat.Agent.Thinking.ModelProfiles[2].EffortLevels[0] = "mutated"
-	application.Chat.Agent.Thinking.ModelProfiles[2].RequestFields["thinking"][1] = 'X'
-	*application.Chat.Agent.Thinking.ModelProfiles[6].StreamIncludeUsage = true
+	application.Chat.Agent.Thinking.ModelProfiles[7].ModelPrefixes[0] = "mutated"
+	application.Chat.Agent.Thinking.ModelProfiles[7].EffortLevels[0] = "mutated"
+	application.Chat.Agent.Thinking.ModelProfiles[7].RequestFields["thinking"][1] = 'X'
+	*application.Chat.Agent.Thinking.ModelProfiles[11].StreamIncludeUsage = true
 	defensive := taskCatalog.Application()
 	if defensive.Chat.Agent.Thinking == nil ||
 		!defensive.Chat.Agent.Thinking.Enabled ||
-		defensive.Chat.Agent.Thinking.ModelProfiles[2].ModelPrefixes[0] != "deepseek" ||
-		defensive.Chat.Agent.Thinking.ModelProfiles[2].EffortLevels[0] != "low" ||
-		*defensive.Chat.Agent.Thinking.ModelProfiles[6].StreamIncludeUsage ||
-		!strings.Contains(strings.Join(strings.Fields(string(defensive.Chat.Agent.Thinking.ModelProfiles[2].RequestFields["thinking"])), ""), `{"type":"enabled"}`) {
+		defensive.Chat.Agent.Thinking.ModelProfiles[7].ModelPrefixes[0] != "deepseek" ||
+		defensive.Chat.Agent.Thinking.ModelProfiles[7].EffortLevels[0] != "low" ||
+		*defensive.Chat.Agent.Thinking.ModelProfiles[11].StreamIncludeUsage ||
+		!strings.Contains(strings.Join(strings.Fields(string(defensive.Chat.Agent.Thinking.ModelProfiles[7].RequestFields["thinking"])), ""), `{"type":"enabled"}`) {
 		t.Fatal("Application() did not defensively clone thinking config")
 	}
 }

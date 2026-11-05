@@ -64,6 +64,9 @@ func normalizeInput(offering schemacontract.Offering, raw json.RawMessage) (json
 		}
 		values[schema.Name] = normalized
 	}
+	if err := validateConditionalMaximums(offering, values); err != nil {
+		return nil, err
+	}
 	for index, rule := range offering.InputRules {
 		if len(rule.ForbiddenWhen) > 0 {
 			matched := true
@@ -131,6 +134,39 @@ func normalizeInput(offering schemacontract.Offering, raw json.RawMessage) (json
 		return nil, err
 	}
 	return canonical, nil
+}
+
+// validateConditionalMaximums applies maximum_when after every value is
+// normalized: each matching entry narrows the parameter's upper bound, and the
+// static maximum checked by validateValue still holds. The value is never
+// rewritten; a combination above a matching bound is refused.
+func validateConditionalMaximums(offering schemacontract.Offering, values map[string]any) error {
+	for _, schema := range offering.Parameters {
+		if len(schema.MaximumWhen) == 0 {
+			continue
+		}
+		value, exists := values[schema.Name]
+		if !exists {
+			continue
+		}
+		number, ok := asFloat(value)
+		if !ok {
+			continue
+		}
+		for _, limit := range schema.MaximumWhen {
+			if !schemacontract.ConditionMatches(limit.When, values) {
+				continue
+			}
+			if number > limit.Maximum {
+				return fmt.Errorf(
+					"参数 %q 在当前组合下最多为 %s",
+					schema.Name,
+					strconv.FormatFloat(limit.Maximum, 'f', -1, 64),
+				)
+			}
+		}
+	}
+	return nil
 }
 
 // arrayLimitError is the typed form of "more elements than max_items" so a

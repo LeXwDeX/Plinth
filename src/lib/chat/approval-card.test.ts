@@ -14,7 +14,7 @@ it('reads how long a pending step stays valid from the server expiry', () => {
 
 it('builds one card shape from both sources', () => {
   const detached = cardFromPending({
-    requestId: 'r1', status: 'expired', tool: 'x', capability: 'image-to-3d', model: 'Meshy 7.1', provider: 'Meshy AI', providerId: 'meshy',
+    requestId: 'r1', status: 'expired', kind: 'step', plan: null, budgetCredits: 0, tool: 'x', capability: 'image-to-3d', model: 'Meshy 7.1', provider: 'Meshy AI', providerId: 'meshy',
     estimatedCredits: 35, baseCredits: 0, extraCredits: 0, extraLabel: '', extraItems: [], prompt: 'a knight', inputs: [{ parameter: 'image', kind: 'asset', role: 'reference', assetId: 'a1', taskId: 't1', handle: '@img5' }],
     messageId: 'm1', createdAt: '', expiresAt: '2026-10-09T09:30:00Z',
   });
@@ -39,7 +39,8 @@ it('maps the active HTTP consent frozen assets and source note', () => {
 
 it('carries the note that only the first pictures are used to the card (#329 E)', () => {
   const base = {
-    requestId: 'r1', status: 'pending' as const, tool: 'create_model_3d_from_image', capability: 'image-to-3d', model: 'Meshy 7.1', provider: 'Meshy AI', providerId: 'meshy',
+    requestId: 'r1', status: 'pending' as const, kind: 'step' as const, plan: null, budgetCredits: 0,
+    tool: 'create_model_3d_from_image', capability: 'image-to-3d', model: 'Meshy 7.1', provider: 'Meshy AI', providerId: 'meshy',
     estimatedCredits: 40, baseCredits: 0, extraCredits: 0, extraLabel: '', extraItems: [], prompt: 'a stool', inputs: [], messageId: 'm1', createdAt: '', expiresAt: '2026-10-09T09:30:00Z',
   };
   expect(cardFromPending({ ...base, referenceNote: 'only the first of 2' }).referenceNote).toBe('only the first of 2');
@@ -48,7 +49,7 @@ it('carries the note that only the first pictures are used to the card (#329 E)'
 
 it('carries the extra credits and what they pay for from either source, and none when there are none', () => {
   const detached = cardFromPending({
-    requestId: 'r1', status: 'pending', tool: 'x', capability: 'text-to-3d', model: 'Tripo', provider: 'Tripo', providerId: 'tripo',
+    requestId: 'r1', status: 'pending', kind: 'step', plan: null, budgetCredits: 0, tool: 'x', capability: 'text-to-3d', model: 'Tripo', provider: 'Tripo', providerId: 'tripo',
     estimatedCredits: 50, baseCredits: 20, extraCredits: 30, extraLabel: '附加导出格式', extraItems: ['FBX', 'USDZ'], prompt: '木凳', inputs: [],
     messageId: '', createdAt: '', expiresAt: '2026-10-09T09:30:00Z',
   });
@@ -77,7 +78,8 @@ describe('approvalOfferingNames', () => {
 
 describe('what the card says about its inputs and provider', () => {
   const pending = {
-    requestId: 'r1', status: 'pending' as const, tool: 'x', capability: 'retexture', model: 'Meshy Retexture', provider: 'Meshy AI', providerId: 'meshy',
+    requestId: 'r1', status: 'pending' as const, kind: 'step' as const, plan: null, budgetCredits: 0,
+    tool: 'x', capability: 'retexture', model: 'Meshy Retexture', provider: 'Meshy AI', providerId: 'meshy',
     estimatedCredits: 10, baseCredits: 0, extraCredits: 0, extraLabel: '', extraItems: [], prompt: '', messageId: 'm1', createdAt: '', expiresAt: '',
     inputs: [
       { parameter: 'source_task', kind: 'task', role: 'thumbnail', assetId: '', taskId: 'model-1', handle: '@model1' },
@@ -134,7 +136,8 @@ describe('an input the session cannot name (#324)', () => {
     const turn = cardFromConsent({ capability: 'retexture', model: 'texture', reference_assets: [{ parameter: 'source_asset', asset_id: 'a1' }] }, 'r1');
     expect(turn?.inputs[0]).toMatchObject({ parameter: 'source_asset', assetId: 'a1' });
     const detached = cardFromPending({
-      requestId: 'r1', status: 'pending', tool: 'x', capability: 'retexture', model: 'texture', provider: 'hyper3d', providerId: 'hyper3d',
+      requestId: 'r1', status: 'pending', kind: 'step', plan: null, budgetCredits: 0,
+      tool: 'x', capability: 'retexture', model: 'texture', provider: 'hyper3d', providerId: 'hyper3d',
       estimatedCredits: 0, baseCredits: 0, extraCredits: 0, extraLabel: '', extraItems: [], prompt: '', messageId: '', createdAt: '', expiresAt: '',
       inputs: [{ parameter: 'source_asset', kind: 'asset', role: 'source_asset', assetId: 'a1', taskId: '', handle: '' }],
     });

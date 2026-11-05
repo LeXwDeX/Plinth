@@ -6,8 +6,9 @@ auth) on free loopback ports with their own database and storage under a fresh w
 
 Covers LOG-05 (invalid LOG_LEVEL refuses to start), PRV-02 (live mode without keys: remote Offerings unavailable, reason
 text from the public Schema, no silent substitution), IMG-01..06, M3D-01..04 (API half; M3D-04 is PARTIAL: one-step plan),
-DLV-02 (archive), TSK-02..05, AGT-05..07 (API half), SEC-04 (429 + Retry-After). CNV-01 is reported NOT-COVERED
-(frontend store behaviour; see browser_matrix and scripts/test-canvas-recovery.mjs).
+DLV-02 (archive), TSK-02..05, AGT-05..07 (API half), SEC-04 (429 + Retry-After), #103 (usage-purpose card
+writes the session production brief). CNV-01 is reported NOT-COVERED (frontend store behaviour; see browser_matrix
+and scripts/test-canvas-recovery.mjs).
 
 Needs: go, and build/go-web (run `pnpm build` once). Time: about 3 minutes. Side effects: only the work directory
 (default: a new directory under the system temp dir, removed on success unless --keep). Exit status 1 on any FAIL.
@@ -383,6 +384,25 @@ sc2 = new_session(); a.j("PUT", f"/api/v1/chat/sessions/{sc2}/agent-scope", {"ag
 _, m2 = say(sc2, "帮我改图，把这张图改成红色", ai_model=I2I)
 calls2d = [x for x in m2 if x["role"] == "assistant" and x.get("toolCalls") not in ("[]", "", None)]
 rec("AGT-07", "PASS" if s1 == 200 and not calls3d and not calls2d and not pending(sc) and not pending(sc2) else "FAIL", f"scope GET {s} {json.dumps(sc0)[:60]}; PUT 2d -> {s1}; 3D request: tool calls={len(calls3d)} reply={r3d!r}; scope 3d + image edit: tool calls={len(calls2d)} reply={m2[-1]['content'][:90]!r}")
+
+# ---- #103 production brief: the usage-purpose card writes the session brief
+s103 = new_session()
+say(s103, "开始制作一个游戏角色 3D 模型", creative_domain="3d", ai_model=TXT3D)
+s, ch, _ = a.j("GET", f"/api/v1/chat/sessions/{s103}/choices")
+cards = [c for c in ch.get("choices", []) if c.get("kind") == "usage_profile" and c.get("state") == "pending"]
+card = cards[0] if cards else None
+if card and card.get("options"):
+    opt = next((o for o in card["options"] if o.get("recommended")), card["options"][0])
+    s_ans, _, _ = a.j("POST", f"/api/chat/sessions/{s103}/messages", {"content": "选这个用途", "choiceAnswer": {"choice_id": card["id"], "option_id": opt["id"]}})
+    time.sleep(2.5)
+    s_brief, bd, _ = a.j("GET", f"/api/v1/chat/sessions/{s103}/brief")
+    _, ch2, _ = a.j("GET", f"/api/v1/chat/sessions/{s103}/choices")
+    answered = next((c for c in ch2.get("choices", []) if c.get("id") == card["id"]), {})
+    purpose = (bd.get("brief") or {}).get("purpose") if isinstance(bd.get("brief"), dict) else None
+    rec("#103 usage card -> brief", "PASS" if s_ans == 200 and s_brief == 200 and purpose == opt["id"] and answered.get("state") == "answered" else "FAIL",
+        f"card kind={card.get('kind')} options={[o.get('id') for o in card['options']]} recommended={opt.get('id')}; answer -> {s_ans}; brief purpose={purpose}; card state={answered.get('state')}")
+else:
+    rec("#103 usage card -> brief", "FAIL", f"no pending usage_profile card: {json.dumps(ch, ensure_ascii=False)[:240]}")
 
 # ---- SEC-04 burst on the throwaway stack (own client; own limiter bucket is per-IP so run on a separate process)
 stop(main)

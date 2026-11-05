@@ -26,7 +26,7 @@ func TestInsufficientBalanceIsDeclaredEndToEndInTheSchema(t *testing.T) {
 	}
 	// The system prompt tells the Agent what to do when a provider fails.
 	prompt := app.Chat.Agent.SystemPrompt
-	for _, needle := range []string{"换一个当前可用的模型", "list_offerings", "余额不足"} {
+	for _, needle := range []string{"余额不足", "请用户联系管理员", "不要换模型重试"} {
 		if !strings.Contains(prompt, needle) {
 			t.Errorf("system prompt lacks %q", needle)
 		}

@@ -1,6 +1,7 @@
 import type { ProductSchema } from '@/lib/product-schema';
 import type { NativeQuote } from '@/lib/pricing';
 import { parseNativeQuote } from '@/lib/pricing';
+import { parseProductionPlan, type ProductionPlan } from '@/lib/chat/budget';
 
 /**
  * 脱离轮次仍待决的付费步骤（服务端保存，默认 24 小时有效）。
@@ -24,21 +25,31 @@ export interface PendingApprovalInput {
 }
 
 export interface ParameterAdjustment {
-  name: string; label: string; recommendedValue: unknown; value: unknown; reason: string; advice: string; source: 'agent';
+  /** 'agent', or 'profile:<id>' when the session's production purpose contributed the value (#103). */
+  name: string; label: string; recommendedValue: unknown; value: unknown; reason: string; advice: string; source: string;
+  /** The purpose id when the source is 'profile:<id>' (#103). */
+  profile?: string;
 }
 /** Values are already frozen by Generation; never recalculate them from the live parameter panel. */
 export function parseParameterAdjustments(raw: unknown): ParameterAdjustment[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap(value => {
     const item = record(value);
-    if (item.source !== 'agent' || !text(item.name) || !text(item.label) || !text(item.reason) || !('value' in item) || !('recommended_value' in item)) return [];
-    return [{ name: text(item.name), label: text(item.label), recommendedValue: item.recommended_value, value: item.value, reason: text(item.reason), advice: text(item.advice), source: 'agent' as const }];
+    const source = text(item.source);
+    if ((source !== 'agent' && !source.startsWith('profile:')) || !text(item.name) || !text(item.label) || !text(item.reason) || !('value' in item) || !('recommended_value' in item)) return [];
+    return [{ name: text(item.name), label: text(item.label), recommendedValue: item.recommended_value, value: item.value, reason: text(item.reason), advice: text(item.advice), source, ...(text(item.profile) ? { profile: text(item.profile) } : {}) }];
   });
 }
 
 export interface PendingApproval {
   requestId: string;
   status: PendingApprovalStatus;
+  /** 'plan' is a production plan card (#103); its request id is the budget id. */
+  kind: 'step' | 'plan';
+  /** The plan a plan card asks to approve; null on a step card. */
+  plan: ProductionPlan | null;
+  /** The total credit limit the person approves (plan cards only; 0 on a step card). */
+  budgetCredits: number;
   tool: string;
   capability: string;
   model: string;
@@ -88,7 +99,11 @@ export function parsePendingApprovals(payload: unknown): PendingApproval[] {
     const item = record(raw);
     const requestId = text(item.request_id);
     const status = item.status === 'expired' ? 'expired' : item.status === 'pending' ? 'pending' : null;
-    if (!requestId || !status) continue;
+    const kind = text(item.kind) === 'plan' ? 'plan' : 'step';
+    // A plan card without its plan cannot be decided or shown; leave it out
+    // rather than showing an approval with nothing to approve.
+    const plan = kind === 'plan' ? parseProductionPlan(item.plan) : null;
+    if (!requestId || !status || (kind === 'plan' && !plan)) continue;
     const inputs = (Array.isArray(item.inputs) ? item.inputs : []).map((value) => {
       const input = record(value);
       return {
@@ -100,7 +115,8 @@ export function parsePendingApprovals(payload: unknown): PendingApproval[] {
       };
     });
     result.push({
-      requestId, status,
+      requestId, status, kind, plan,
+      budgetCredits: typeof item.budget_credits === 'number' ? item.budget_credits : 0,
       tool: text(item.tool), capability: text(item.capability), model: text(item.model), provider: text(item.provider), providerId: text(item.provider_id),
       priceMode: text(item.price_mode) || (item.native_quote !== undefined ? 'native' : ''),
       nativeQuote: parseNativeQuote(item.native_quote),
@@ -233,6 +249,17 @@ export class PendingApprovalError extends Error {
 }
 
 /**
+ * #103: the request member that carries an approval decision is Schema data. A
+ * response that lacks it cannot be decided safely: refuse before sending an
+ * empty key the server would not understand.
+ */
+function decisionBody(schema: ProductSchema, approve: boolean): Record<string, string> {
+  const member = schema.chat.api.fields.decision;
+  if (!member) throw new Error('chat.api.fields.decision is required to decide an approval');
+  return { [member]: approve ? 'approve' : 'deny' };
+}
+
+/**
  * 对一条待批准步骤做决定：PUT 任务授权。批准 / 拒绝都由服务端检查有效期和
  * 来源；过期的批准返回 409，拒绝仍可。
  */
@@ -242,11 +269,12 @@ export async function decidePendingApproval(
   approve: boolean,
   fetcher: typeof fetch = fetch,
 ): Promise<PendingApprovalDecision> {
+  const body = decisionBody(schema, approve);
   const route = schema.runtime.http.routes.task_grant_decision.replace('{requestID}', encodeURIComponent(requestId));
   const response = await fetcher(route, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ decision: approve ? 'approve' : 'deny' }),
+    body: JSON.stringify(body),
   });
   const payload = record(await response.json().catch(() => null));
   if (!response.ok) throw new PendingApprovalError(text(payload.detail), response.status);
@@ -256,4 +284,50 @@ export async function decidePendingApproval(
     taskId: text(payload.task_id),
     messageId: text(payload.message_id),
   };
+}
+
+/**
+ * #103: a production plan is decided on its own session route. Approving makes
+ * it the session's active budget; denying ends it. The response is the budget's
+ * state, not a task.
+ */
+export async function decideSessionBudget(
+  schema: ProductSchema,
+  sessionId: string,
+  budgetId: string,
+  approve: boolean,
+  fetcher: typeof fetch = fetch,
+): Promise<PendingApprovalDecision> {
+  const template = schema.runtime.http.routes.chat_session_budget;
+  if (!template) throw new PendingApprovalError('', 0);
+  const body = decisionBody(schema, approve);
+  const route = template
+    .replace('{sessionID}', encodeURIComponent(sessionId))
+    .replace('{budgetID}', encodeURIComponent(budgetId));
+  const response = await fetcher(route, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const payload = record(await response.json().catch(() => null));
+  if (!response.ok) throw new PendingApprovalError(text(payload.detail), response.status);
+  return {
+    requestId: text(payload.budget_id) || budgetId,
+    status: text(payload.state),
+    taskId: '',
+    messageId: text(payload.message_id),
+  };
+}
+
+/** Decide a pending card on the route its kind uses. */
+export function decidePendingCard(
+  schema: ProductSchema,
+  sessionId: string,
+  item: Pick<PendingApproval, 'requestId' | 'kind'>,
+  approve: boolean,
+  fetcher: typeof fetch = fetch,
+): Promise<PendingApprovalDecision> {
+  return item.kind === 'plan'
+    ? decideSessionBudget(schema, sessionId, item.requestId, approve, fetcher)
+    : decidePendingApproval(schema, item.requestId, approve, fetcher);
 }

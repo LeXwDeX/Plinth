@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
@@ -131,11 +132,25 @@ func (executor *Executor) unstoredChargedTasks(ctx context.Context, command chat
 // for (#321 I), so a reply quotes it instead of estimating. When the step uses
 // fewer of the reference pictures than the turn gave, the tool's reference
 // note says so (#329 E), as the card and the finished result do.
-func (executor *Executor) awaitingApproval(ctx context.Context, command chat.ToolCommand, op Operation) string {
+func (executor *Executor) awaitingApproval(ctx context.Context, command chat.ToolCommand, op Operation, decision executiongrant.PolicyResult) string {
 	tool := command.Tool
 	content := map[string]any{"status": "awaiting_approval", "message": executor.rechargeContent(command, op)}
 	if status := executor.chat.Agent.ConsentWaitingStatus; status != "" {
 		content["status_text"] = executor.localized(command, status)
+	}
+	// A budget-mode step that the plan could not cover says why it needs a
+	// person, and what the plan still holds (#103), so the Agent does not
+	// repeat the same request or misreport the budget. Both keys are declared
+	// by the tool's result_fields (#103 review B4).
+	if decision.Reason != "" {
+		if key := tool.ResultFields.Reason; key != "" {
+			content[key] = decision.Reason
+		}
+	}
+	if decision.Budget != nil {
+		if key := tool.ResultFields.Budget; key != "" {
+			content[key] = budgetResult(*decision.Budget)
+		}
 	}
 	if gateway, ok := executor.gateway.(preparedGateway); ok {
 		if prepared, err := gateway.GetPreparedInput(ctx, generation.OwnerID(op.OwnerID), op.PreparedInputID); err == nil {

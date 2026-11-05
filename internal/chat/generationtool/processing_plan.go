@@ -109,7 +109,7 @@ func (executor *Executor) executeProcessingPlan(ctx context.Context, command cha
 		asset = preferredModelAsset(source, config.SourceVariantPreference)
 	}
 	create := processing.CreateCommand{Harness: turnHarnessBinding(command), OwnerID: owner, IdempotencyKey: key, SessionID: command.SessionID,
-		SourceTaskID: source.ID, SourceAssetID: asset}
+		SourceTaskID: source.ID, SourceAssetID: asset, Origin: processing.OriginAgent}
 	previous, chosenAsset := source, asset
 	type settled struct {
 		capability generation.Capability

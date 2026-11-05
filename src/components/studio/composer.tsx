@@ -7,7 +7,6 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { HarnessSummary } from '@/components/workspace/harness-summary';
 import { useAuth } from '@/hooks/use-auth';
 import { useSessionHarness } from '@/hooks/use-session-harness';
-import { AgentScopePicker } from '@/components/studio/agent-scope-picker';
 import { ContextMeter } from '@/components/studio/context-meter';
 import { ChatModelNotice, ChatModelPicker } from '@/components/studio/chat-model-picker';
 import { ReasoningPicker } from '@/components/studio/reasoning-picker';
@@ -649,19 +648,19 @@ export function Composer({
       <GenerationModelNotice />
       {/* Fixed column tracks, so a cell's width depends only on the track, never on the chosen name, and every
           cell is one picker row high (h-7). The DOM order is the reading order in both widths, and pickers pair
-          up left to right: two tracks when the column is narrow, four when it is wide (>= 40rem).
-            narrow: models | Skill / Agent mode | parameters / chat model | thinking level / context usage (full row)
-            wide:   models | Skill | Agent mode | parameters / chat model | thinking level | context usage (2 tracks)
+          up left to right: two tracks when the column is narrow, three when it is wide (>= 40rem).
+            narrow: models | Skill / parameters | chat model / thinking level / context usage (full row)
+            wide:   models | Skill | parameters / chat model | thinking level | context usage
           The chat model picker only shows when the administrator offers two or more models; without it the
           thinking level moves up into its track (narrow: alone in the left track of that row, the context usage
           still takes the full row below), so no row ever has a hole in front of a picker. The context usage is
-          not a picker: it spans the row so the figure and the compact action sit on the grid's left and right
-          edges. The short names carry the full name in their tooltip. */}
+          not a picker: it spans the narrow row so the figure and the compact action sit on the grid's left and
+          right edges, and takes one wide track beside the thinking level. The short names carry the full name in
+          their tooltip. */}
       <div className="@container min-w-0">
-        <div className="grid min-w-0 grid-cols-2 items-center gap-1.5 @[40rem]:grid-cols-4" data-testid="composer-pickers">
+        <div className="grid min-w-0 grid-cols-2 items-center gap-1.5 @[40rem]:grid-cols-3" data-testid="composer-pickers">
           <ModelPicker />
           <SkillPicker {...skill} />
-          <AgentScopePicker />
           <div className="min-w-0" data-testid="composer-params-slot">
             <ParamsPopover {...params} disabled={disabled} />
           </div>

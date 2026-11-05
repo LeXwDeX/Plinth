@@ -193,6 +193,13 @@ func chatService(t *testing.T, repo *sqlite.Repository, schema catalog.ChatSchem
 
 func openWorld(t *testing.T, path string, ttl time.Duration) *world {
 	t.Helper()
+	return openWorldWithChat(t, path, ttl, nil)
+}
+
+// openWorldWithChat additionally decorates the chat service the approval
+// service posts through; message assertions still read the real store.
+func openWorldWithChat(t *testing.T, path string, ttl time.Duration, wrap func(pendingapproval.Chat) pendingapproval.Chat) *world {
+	t.Helper()
 	repo, err := sqlitetest.Open(path)
 	if err != nil {
 		t.Fatal(err)
@@ -213,8 +220,12 @@ func openWorld(t *testing.T, path string, ttl time.Duration) *world {
 		Parameters:        []generation.Parameter{{Name: "prompt", Type: "string", Semantic: generation.SemanticPrompt}},
 		ExecutionMessages: product.Application().Runtime.GenerationMessages,
 	}}
-	grants := &executiongrant.Service{Grants: repo, Prepared: repo, PendingTTL: ttl}
+	grants := &executiongrant.Service{Grants: repo, Prepared: repo, Budgets: repo, PendingTTL: ttl}
 	chats := chatService(t, repo, schema)
+	var approvalChat pendingapproval.Chat = chats
+	if wrap != nil {
+		approvalChat = wrap(chats)
+	}
 	service, err := pendingapproval.New(pendingapproval.Config{
 		// This fixture supplies historical calls only. Agent-source submission is
 		// exercised through the production App verifier, never this legacy stub.
@@ -228,7 +239,7 @@ func openWorld(t *testing.T, path string, ttl time.Duration) *world {
 			}
 			return nil
 		},
-		Operations: repo, Grants: grants, Gateway: gateway, Chat: chats, Schema: schema, Texts: texts,
+		Operations: repo, Grants: grants, Gateway: gateway, Chat: approvalChat, Schema: schema, Texts: texts,
 		DefaultLocale: product.Application().Runtime.Frontend.DisplayLocale,
 	})
 	if err != nil {
@@ -236,6 +247,21 @@ func openWorld(t *testing.T, path string, ttl time.Duration) *world {
 	}
 	return &world{t: t, path: path, repo: repo, chat: chats, gateway: gateway, grants: grants, service: service,
 		schema: schema, operator: executiongrant.Principal{OwnerID: "owner-a", ActorID: "owner-a", Source: executiongrant.HumanBrowser}}
+}
+
+// ensureSession creates the fixture's session once.
+func (w *world) ensureSession() {
+	w.t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if _, found, err := w.repo.Session(ctx, "owner-a", "session-a"); err != nil {
+		w.t.Fatal(err)
+	} else if !found {
+		if _, err := w.repo.CreateSession(ctx, chat.Session{ID: "session-a", OwnerID: "owner-a", OwnerName: "Owner",
+			Title: "test", CreatedAt: now, UpdatedAt: now}); err != nil {
+			w.t.Fatal(err)
+		}
+	}
 }
 
 // pending creates a session, a finished turn, and one detached approval.
@@ -255,14 +281,7 @@ func (w *world) approval(callID string, detach bool) (generationtool.Operation, 
 	w.t.Helper()
 	ctx := context.Background()
 	now := time.Now().UTC()
-	if _, found, err := w.repo.Session(ctx, "owner-a", "session-a"); err != nil {
-		w.t.Fatal(err)
-	} else if !found {
-		if _, err := w.repo.CreateSession(ctx, chat.Session{ID: "session-a", OwnerID: "owner-a", OwnerName: "Owner",
-			Title: "test", CreatedAt: now, UpdatedAt: now}); err != nil {
-			w.t.Fatal(err)
-		}
-	}
+	w.ensureSession()
 	turnID := "turn-" + callID
 	if _, _, err := w.repo.StartTurn(ctx, "owner-a",
 		chat.Message{ID: "user-" + callID, SessionID: "session-a", Role: "user", Content: "make it", CreatedAt: now,

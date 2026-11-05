@@ -17,6 +17,8 @@ type PendingApprovals interface {
 	DetachedSession(ctx context.Context, owner, requestID string) (session string, ok bool, err error)
 	Decide(ctx context.Context, principal executiongrant.Principal, requestID string,
 		decision executiongrant.Decision) (pendingapproval.Outcome, bool, error)
+	DecideBudget(ctx context.Context, principal executiongrant.Principal,
+		sessionID, budgetID string, decision executiongrant.Decision) (pendingapproval.BudgetOutcome, error)
 }
 
 // listPendingApprovals projects the caller's own session's pending approvals.

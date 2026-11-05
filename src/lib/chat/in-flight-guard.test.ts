@@ -38,4 +38,10 @@ describe('the chat column decision handler', () => {
     expect(chat).toContain('decisionBusy.has(card.requestId)');
     expect(chat).not.toContain('decisionBusy === card.requestId');
   });
+
+  it('guards a production plan decision the same way, and releases it however it ends', () => {
+    expect(chat).toContain('if (!activeSessionId || !deciding.current.begin(budgetId)) return;');
+    expect(chat).toContain('deciding.current.end(budgetId);');
+    expect(chat).toContain('decisionBusy.has(item.requestId)');
+  });
 });

@@ -2,18 +2,20 @@
 
 import { useEffect, useMemo } from 'react';
 import useSWR from 'swr';
+import { toast } from 'sonner';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { TablePopover, type TableCell, type TableSection } from '@/components/studio/table-popover';
-import { useActiveAgentScope } from '@/hooks/use-session-agent-scope';
 import { useWorkspaceOfferings } from '@/hooks/use-workspace-offerings';
 import { fetchCapabilityOfferings, type OfferingWire } from '@/lib/agent-offerings';
-import { pickerDisabledReason, scopeAllowsDomain } from '@/lib/chat/agent-scope';
+import { createChatBrowserClient } from '@/lib/chat/browser-client';
+import { pickExplicitModel3D } from '@/lib/chat/explicit-model';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { RETEXTURE, buildModelPickerTable, pickerTriggerNames, type PickerCellValue } from '@/lib/workspace/model-picker';
 import { retiredModelSwitch } from '@/lib/workspace/retired-models';
+import { useChatStore } from '@/store/chat-store';
 import { useWorkspaceStore, type WorkspaceDomain } from '@/store/workspace-store';
 
 const COLUMNS: Record<WorkspaceDomain, string> = {
@@ -42,13 +44,15 @@ interface DomainPick {
 }
 
 /**
- * 一个域（2D 或 3D）的小表格：列出模型、供应商、能力对勾和积分。Agent 模式不含这个域时
- * 整张表变暗并写明原因，已选的模型保留。
+ * 一个域（2D 或 3D）的小表格：列出模型、供应商、能力对勾和积分。会话一律按 auto 模式
+ * 工作，两张表都可用（范围选择器已删除，#103）。
  */
 export function useDomainModelPick(domain: WorkspaceDomain): DomainPick {
   const { schema } = useProductSchema();
   const selectedModel = useWorkspaceStore((state) => state.modelByDomain[domain]);
   const setModel = useWorkspaceStore((state) => state.setModel);
+  const activeSessionId = useChatStore((state) => state.activeSessionId);
+  const client = useMemo(() => createChatBrowserClient(schema), [schema]);
   const { offeringsByCapability, isLoading, error } = useWorkspaceOfferings(schema, domain);
   const { data: retexture } = useSWR<OfferingWire[]>(
     domain === 'model-3d' ? ['workspace-offerings', schema.revision, RETEXTURE] : null,
@@ -56,10 +60,6 @@ export function useDomainModelPick(domain: WorkspaceDomain): DomainPick {
     { revalidateOnFocus: false },
   );
   const scope = domain === 'image' ? 'image' : 'model';
-  // The session's Agent scope can switch this domain off: in 2D mode the Agent has no 3D tools,
-  // so the 3D model cannot be used (and the other way round). The pick itself is kept.
-  const agentScope = useActiveAgentScope();
-  const outOfScope = !scopeAllowsDomain(schema, agentScope, domain);
   const text = (key: string) => schemaText(schema, `ui.studio.picker.${key}`);
 
   const table = useMemo(
@@ -121,20 +121,36 @@ export function useDomainModelPick(domain: WorkspaceDomain): DomainPick {
       rows,
       selectedKey: selectedModel,
       foot,
-      disabledReason: outOfScope ? pickerDisabledReason(schema, agentScope) : undefined,
-      disabledLabel: outOfScope ? unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.picker.scope_excludes')) : undefined,
       loading: isLoading,
       loadingText: schemaText(schema, 'ui.workspace.models.loading'),
       failedText: error ? schemaText(schema, 'ui.workspace.models.load_failed') : undefined,
       emptyText: schemaText(schema, 'ui.workspace.models.empty'),
-      onPick: (key) => setModel(domain, key),
+      onPick: (key) => {
+        setModel(domain, key);
+        // #103: a 3D pick is the person's explicit lock for this session. The
+        // restore and retired-successor paths above call setModel directly and
+        // do not mark it. A pick before the session exists waits for the first
+        // send; later picks are serialized per session and the newest wins.
+        if (domain === 'model-3d' && schema.runtime.http.routes.chat_session_model3d) {
+          pickExplicitModel3D({
+            sessionId: activeSessionId,
+            model: key,
+            previous: selectedModel ?? null,
+            write: (sessionId, model) => client.setExplicitModel3D(sessionId, model),
+            onFailure: (previous) => {
+              setModel('model-3d', previous);
+              toast.error(schemaText(schema, 'ui.studio.picker.lock_failed'));
+            },
+          });
+        }
+      },
     },
   };
 }
 
 /**
  * 生成模型选择：一个按钮显示 2D 和 3D 各自选中的模型，点开是左 2D、右 3D 两张小表格，
- * 每张各单选一项，互不影响。Agent 跨域时各用各的。
+ * 每张各单选一项，互不影响。
  */
 export function ModelPicker() {
   const { schema } = useProductSchema();

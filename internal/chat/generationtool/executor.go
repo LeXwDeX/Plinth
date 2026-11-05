@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
@@ -95,6 +96,11 @@ type Config struct {
 	Grants        *executiongrant.Service
 	StopRequested func(context.Context, string, string, string) (bool, error)
 	References    ReferenceResolver
+	// ModelAssets opens a saved model file for the read-only review tools
+	// (#103); InputAssets stores their rendered pictures as the owner's input
+	// assets. Both stay nil when the tools are not configured.
+	ModelAssets ModelAssetGateway
+	InputAssets ModelRenderStore
 	// InputAssetRoute is the Schema's input-asset item route ({assetID}); a
 	// three-view view the person replaced with an upload is named by it (#65).
 	InputAssetRoute string
@@ -136,6 +142,8 @@ type Executor struct {
 	grants        *executiongrant.Service
 	stopRequested func(context.Context, string, string, string) (bool, error)
 	references    ReferenceResolver
+	modelAssets   ModelAssetGateway
+	inputAssets   ModelRenderStore
 	inputAsset    string
 	chat          catalog.ChatSchema
 	texts         *catalog.TextLocalizer
@@ -144,6 +152,10 @@ type Executor struct {
 	publicStates  map[generation.TaskState]string
 	clock         func() time.Time
 	sleep         func(context.Context, time.Duration) error
+
+	// modelReview holds the parsed-model cache and render concurrency bound
+	// of the read-only review tools (#103).
+	modelReview *modelReviewState
 
 	// canvasArtboard holds the Schema tables that turn a ratio into pixels.
 	canvasArtboard catalog.CanvasArtboardSchema
@@ -194,6 +206,8 @@ func New(config Config) (*Executor, error) {
 		grants:        config.Grants,
 		stopRequested: config.StopRequested,
 		references:    config.References,
+		modelAssets:   config.ModelAssets,
+		inputAssets:   config.InputAssets,
 		inputAsset:    config.InputAssetRoute,
 		chat:          config.Chat,
 		texts:         config.Texts,
@@ -202,6 +216,7 @@ func New(config Config) (*Executor, error) {
 		publicStates:  states,
 		clock:         config.Clock,
 		sleep:         config.Sleep,
+		modelReview:   newModelReviewState(config.Chat.ModelReview),
 
 		canvasArtboard: config.CanvasArtboard,
 
@@ -417,9 +432,9 @@ func (executor *Executor) Execute(
 			executor.chat.Context.ReferenceHandlesArgument, executor.chat.Context.ToolReferenceArgument} {
 			delete(arguments, name)
 		}
-		if multiview.fromRequest && command.Tool.OfferingArgument != "" {
+		if multiview.fromRequest && command.Tool.ModelArgument != "" {
 			model, _ := json.Marshal(executor.multiviewModelID(command, multiview.model))
-			arguments[command.Tool.OfferingArgument] = model
+			arguments[command.Tool.ModelArgument] = model
 		}
 		referenceURLs = multiview.URLs
 	} else if command.Tool.AcceptReferenceImages == nil || *command.Tool.AcceptReferenceImages {
@@ -453,6 +468,20 @@ func (executor *Executor) Execute(
 			return result, nil
 		}
 		offering, capability = selected, selected.Capability
+	} else if command.Tool.ModelArgument != "" {
+		// #103: the person's explicit pick, the Agent's model argument, the
+		// session's production purpose and the defaults decide, in that order.
+		choice, err := executor.chooseOffering(command, capability, arguments,
+			modelInputFor(command, referenceURLs, multiview))
+		if err != nil {
+			result := executor.executionFailure(command, "")
+			result.NoSubmission = true
+			return result, err
+		}
+		if choice.Refusal != "" {
+			return executor.modelChoiceFailure(command, choice.Refusal), nil
+		}
+		offering = choice.Offering
 	} else {
 		model := executor.userModel(command)
 		if model == "" && command.Tool.RequireUserModel && !executor.fallbackModelAllowed(command) {
@@ -687,6 +716,9 @@ type stepInfo struct {
 	// the Schema's fallback chose it because the user picked none.
 	Model    string
 	Fallback bool
+	// ModelChoice names who chose the 3D model (#103) when the tool declares
+	// a result key for it.
+	ModelChoice *modelChoice
 	// ModelNote says the person's pick was a retired model and the step ran
 	// on its successor (#329 follow-up). Empty when it does not apply.
 	ModelNote string
@@ -697,6 +729,20 @@ type stepInfo struct {
 	// artboard or which nearest legal size was used (#272); else that it
 	// followed the one reference picture (#296).
 	SizeNote string
+	// Budget is the production plan that authorized the step (#103); nil when
+	// no plan did (another mode, or a browser-started step).
+	Budget *budget.Summary
+}
+
+// budgetResult is the budget part of a paid tool result: the plan's identity
+// and what it still holds after this step. The Agent uses it to decide whether
+// the next planned step fits, without guessing from earlier numbers.
+func budgetResult(summary budget.Summary) map[string]any {
+	return map[string]any{
+		"id":        summary.ID,
+		"remaining": summary.RemainingCredits,
+		"reserved":  summary.ReservedCredits,
+	}
 }
 
 const (
@@ -801,6 +847,9 @@ func (executor *Executor) observeBoundTask(
 			// read failure only leaves the source unknown, as before.
 			if grant, err := executor.grants.Grants.GetExecutionGrant(ctx, op.OwnerID, op.GrantRequestID); err == nil {
 				info.Approval = approvalSource(grant)
+			}
+			if summary, found, err := executor.grants.BudgetForGrant(ctx, op.OwnerID, op.GrantRequestID); err == nil && found {
+				info.Budget = &summary
 			}
 		}
 	}
@@ -1176,6 +1225,20 @@ func (executor *Executor) buildInput(
 		}
 		input[parameter] = value
 	}
+	// #103: the production purpose's public values sit above the Offering's
+	// defaults and below the person's panel and the Agent's own values, which
+	// are applied next.
+	profileValues := map[string]json.RawMessage{}
+	if _, values := executor.profileParameterValues(command, offering); len(values) > 0 {
+		for name, encoded := range values {
+			var value any
+			if err := json.Unmarshal(encoded, &value); err != nil {
+				return nil, nil, err
+			}
+			input[name] = value
+			profileValues[name] = encoded
+		}
+	}
 	parameters := make(map[string]json.RawMessage, len(command.Options.Parameters))
 	for name, value := range command.Options.Parameters {
 		if parameter, declared := allowed[name]; declared && turnParameterAllowed(offering, parameter) {
@@ -1224,6 +1287,13 @@ func (executor *Executor) buildInput(
 		}
 		input[name] = value
 		chosen[name] = true
+	}
+	// A purpose value survived the later layers (a panel "null" deleted it):
+	// it counts as chosen, so the reference size rule leaves it alone.
+	for name := range profileValues {
+		if _, present := input[name]; present {
+			chosen[name] = true
+		}
 	}
 	var referenceAssets []generation.AssetID
 	if promptParameter != "" {
@@ -1482,6 +1552,7 @@ func (executor *Executor) wait(
 		if err != nil {
 			return executor.awaitTask(command, taskID, deadline, err)
 		}
+		info.ModelChoice = executor.modelChoiceOf(command, task.Offering, task.Input)
 		status := executor.publicStates[task.State]
 		observation := chat.ToolObservation{
 			TaskID:   string(taskID),
@@ -1585,8 +1656,16 @@ func (executor *Executor) success(
 	if key := tool.ResultFields.ModelFallback; key != "" && info.Fallback {
 		result[key] = true
 	}
+	if key := tool.ResultFields.ModelChoice; key != "" && info.ModelChoice != nil {
+		result[key] = info.ModelChoice
+	}
 	if key := tool.ResultFields.ModelNote; key != "" && info.ModelNote != "" {
 		result[key] = info.ModelNote
+	}
+	if info.Budget != nil {
+		if key := tool.ResultFields.Budget; key != "" {
+			result[key] = budgetResult(*info.Budget)
+		}
 	}
 	content, _ := json.Marshal(result)
 	return chat.ToolResult{

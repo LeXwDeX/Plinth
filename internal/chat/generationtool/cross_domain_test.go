@@ -35,9 +35,17 @@ func newCrossDomainHarness(t *testing.T, offerings ...generation.Offering) *cros
 			tool = candidate
 		}
 	}
-	if tool.Name == "" || !tool.CrossDomainModelFallback {
-		t.Fatalf("default catalog must declare a cross-domain fallback 3D tool: %#v", tool)
+	if tool.Name == "" || tool.ModelArgument == "" {
+		t.Fatalf("default catalog must declare the model-argument 3D tool: %#v", tool)
 	}
+	// #103 moved the 3D generation tools from the workspace model to the
+	// optional model argument. This suite exercises the cross-domain fallback
+	// that other tools still declare, so it gives this tool that legacy
+	// contract explicitly instead of depending on the shipped declaration.
+	tool.ModelArgument = ""
+	tool.RequireUserModel = true
+	tool.CrossDomainModelFallback = true
+	tool.ModelRequiredMessage = "请先在工作区选择生成模型。"
 	for index := range offerings {
 		offerings[index].Capability = tool.Capability
 		offerings[index].Enabled = true

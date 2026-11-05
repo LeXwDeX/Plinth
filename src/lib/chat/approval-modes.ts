@@ -9,10 +9,23 @@ export interface ApprovalModeOption {
   tooltip: string;
 }
 
+const approvalModes: readonly ApprovalMode[] = ['auto', 'manual', 'budget'];
+
+/** 服务端声明的批准方式；未声明的一律按严格（手工）处理，与服务端一致。 */
+export function isApprovalMode(value: unknown): value is ApprovalMode {
+  return typeof value === 'string' && (approvalModes as readonly string[]).includes(value);
+}
+
+/** Schema 的默认批准方式，用于会话数据尚未到达时的显示。 */
+export function defaultApprovalMode(schema: ProductSchema): ApprovalMode {
+  const mode = schema.chat.approval_policy.default_mode;
+  return isApprovalMode(mode) ? mode : 'manual';
+}
+
 /** 可选的批准方式、顺序与文案全部来自 Product Schema，不在组件里写死。 */
 export function approvalModeOptions(schema: ProductSchema): ApprovalModeOption[] {
   return schema.chat.approval_policy.modes
-    .filter((mode): mode is ApprovalMode => mode === 'auto' || mode === 'manual')
+    .filter(isApprovalMode)
     .map((mode) => ({
       mode,
       label: schemaText(schema, `ui.workspace.approval.mode_${mode}`),

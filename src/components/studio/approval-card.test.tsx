@@ -221,9 +221,16 @@ describe('approval card', () => {
   });
 });
 
-it('shows frozen advised adjustments, actual values and reasons without changing the quoted credit total', () => {
+it('shows frozen advised adjustments as one compact Agent line without changing the quoted credit total', () => {
  const model={...card(null),parameterAdjustments:[{name:'quality',label:'Frozen quality',recommendedValue:'extreme',value:'detailed',reason:'Frozen reason for this step',advice:'Frozen not-recommended advice',source:'agent' as const}]};
- const html=render(model);expect(html).toContain('Frozen quality');expect(html).toContain('Frozen reason for this step');expect(html).toContain('extreme');expect(html).toContain('detailed');expect(html).toContain('Frozen not-recommended advice');expect(html).toContain('studio-approval-parameter-adjustments');expect(html).toContain('20');
+ const html=render(model);
+ expect(html).toContain('studio-approval-parameter-adjustments');
+ expect(html).toContain('Frozen quality：extreme → detailed');
+ expect(html).toContain('Frozen reason for this step');
+ expect(html).toContain('展开 1 项参数');
+ expect(html).not.toContain('studio-approval-parameter-table');
+ expect(html).not.toContain('Frozen not-recommended advice');
+ expect(html).toContain('20');
 });
 
 describe('approval card multiview inputs', () => {

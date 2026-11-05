@@ -9,7 +9,7 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
-import { approvalModeOptions, sessionCreditsText, sessionPriceTotalsText } from '@/lib/chat/approval-modes';
+import { approvalModeOptions, defaultApprovalMode, sessionCreditsText, sessionPriceTotalsText } from '@/lib/chat/approval-modes';
 import { useSessionApproval } from '@/hooks/use-session-approval';
 import { createChatBrowserClient } from '@/lib/chat/browser-client';
 import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-schema';
@@ -17,14 +17,15 @@ import { cn } from '@/lib/utils';
 import { useChatStore, type ApprovalMode } from '@/store/chat-store';
 
 /**
- * 批准方式下拉：手工 / 自动，写明两者的区别。切到自动要先确认（之后的付费步骤
- * 不再询问）；切换只影响之后的步骤，已经在等待的批准不会因此被通过。
+ * 批准方式下拉（#103）：严格（逐步批准）、自动与预算制，顺序、名称和说明都来自
+ * Schema。切到自动要先确认（之后的付费步骤不再询问）；切换只影响之后的步骤，
+ * 已经在等待的批准不会因此被通过。
  */
 export function ApprovalMenu() {
   const { schema } = useProductSchema();
   const chat = useMemo(() => createChatBrowserClient(schema), [schema]);
   const activeSessionId = useChatStore((state) => state.activeSessionId);
-  const approval = useSessionApproval(chat, activeSessionId, schema.chat.approval_policy.default_mode === 'auto' ? 'auto' : 'manual');
+  const approval = useSessionApproval(chat, activeSessionId, defaultApprovalMode(schema));
   const options = useMemo(() => approvalModeOptions(schema), [schema]);
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState<ApprovalMode | null>(null);

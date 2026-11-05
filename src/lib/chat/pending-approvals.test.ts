@@ -1,11 +1,25 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { countPending, DecisionLedger, displayedApprovals, hasExpired, parsePendingApprovals, retainExpired, type PendingApproval } from '@/lib/chat/pending-approvals';
+import {
+  countPending,
+  DecisionLedger,
+  decidePendingApproval,
+  decidePendingCard,
+  decideSessionBudget,
+  displayedApprovals,
+  hasExpired,
+  parsePendingApprovals,
+  PendingApprovalError,
+  retainExpired,
+  type PendingApproval,
+} from '@/lib/chat/pending-approvals';
+import type { ProductSchema } from '@/lib/product-schema';
 
 function approval(requestId: string, expiresAt: string, status: PendingApproval['status'] = 'pending'): PendingApproval {
   return {
-    requestId, status, tool: 'create_model_3d', capability: 'text-to-3d', model: 'meshy-7.1', provider: 'Meshy AI', providerId: 'meshy',
+    requestId, status, kind: 'step', plan: null, budgetCredits: 0,
+    tool: 'create_model_3d', capability: 'text-to-3d', model: 'meshy-7.1', provider: 'Meshy AI', providerId: 'meshy',
     estimatedCredits: 20, baseCredits: 0, extraCredits: 0, extraLabel: '', extraItems: [], prompt: 'a chair', inputs: [], messageId: '', createdAt: '', expiresAt,
   };
 }
@@ -46,6 +60,16 @@ describe('expired approval cards', () => {
     const items = displayedApprovals([approval('r1', past), approval('r2', future)], []);
     expect(countPending(items, now)).toBe(1);
     expect(items).toHaveLength(2);
+  });
+});
+
+describe('a card kind this client does not render yet (#103)', () => {
+  it('skips a production plan card instead of showing it as a step', () => {
+    const items = parsePendingApprovals({ items: [
+      { request_id: 'plan-1', status: 'pending', kind: 'plan', budget_credits: 100, estimated_credits: 80 },
+      { request_id: 'step-1', status: 'pending', capability: 'text-to-3d' },
+    ] });
+    expect(items.map((item) => item.requestId)).toEqual(['step-1']);
   });
 });
 
@@ -157,4 +181,78 @@ describe('the pending-approval hook', () => {
 it('keeps only the server-frozen Agent adjustment facts on pending cards', () => {
  const items=parsePendingApprovals({items:[{request_id:'frozen',status:'pending',parameter_adjustments:[{name:'quality',label:'Quality',recommended_value:'extreme',value:'detailed',reason:'User requested an earlier draft',advice:'Not recommended',source:'agent'},{name:'bad',label:'Bad',recommended_value:1,value:2,source:'user'}]}]});
  expect(items[0].parameterAdjustments).toEqual([{name:'quality',label:'Quality',recommendedValue:'extreme',value:'detailed',reason:'User requested an earlier draft',advice:'Not recommended',source:'agent'}]);
+});
+
+describe('deciding an approval through the Schema-declared decision member (#103)', () => {
+  function approvalSchema(decision?: string): ProductSchema {
+    return {
+      chat: { api: { fields: decision === undefined ? {} : { decision } } },
+      runtime: { http: { routes: {
+        task_grant_decision: '/api/grants/{requestID}/decision',
+        chat_session_budget: '/api/v1/chat/sessions/{sessionID}/budgets/{budgetID}',
+      } } },
+    } as unknown as ProductSchema;
+  }
+
+  const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+
+  function expectBody(call: [unknown, RequestInit | undefined], expected: unknown): void {
+    expect(JSON.parse(String(call[1]?.body))).toEqual(expected);
+  }
+
+  it('sends the decision under the Schema member and reads the step answer', async () => {
+    const fetcher = vi.fn(async () => response({
+      request_id: 'r1', status: 'approved', task_id: 'task-1', message_id: 'm1',
+    }));
+    const outcome = await decidePendingApproval(approvalSchema('verdict'), 'r 1', true, fetcher as unknown as typeof fetch);
+    const call = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+    expect(call[0]).toBe('/api/grants/r%201/decision');
+    expect(call[1].method).toBe('PUT');
+    expectBody(call, { verdict: 'approve' });
+    expect(outcome).toEqual({ requestId: 'r1', status: 'approved', taskId: 'task-1', messageId: 'm1' });
+  });
+
+  it('sends a deny under the same member on the session budget route', async () => {
+    const fetcher = vi.fn(async () => response({ budget_id: 'b1', state: 'denied', message_id: 'm2' }));
+    const outcome = await decideSessionBudget(approvalSchema('verdict'), 's 1', 'b/1', false, fetcher as unknown as typeof fetch);
+    const call = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+    expect(call[0]).toBe('/api/v1/chat/sessions/s%201/budgets/b%2F1');
+    expectBody(call, { verdict: 'deny' });
+    expect(outcome).toEqual({ requestId: 'b1', status: 'denied', taskId: '', messageId: 'm2' });
+  });
+
+  it('refuses to send an empty decision member when the Schema declares none', async () => {
+    const fetcher = vi.fn();
+    await expect(decidePendingApproval(approvalSchema(), 'r1', true, fetcher as unknown as typeof fetch))
+      .rejects.toThrow('chat.api.fields.decision is required to decide an approval');
+    await expect(decideSessionBudget(approvalSchema(), 's1', 'b1', true, fetcher as unknown as typeof fetch))
+      .rejects.toThrow('chat.api.fields.decision is required to decide an approval');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('keeps the server status and detail of a refused decision', async () => {
+    const fetcher = vi.fn(async () => response({ detail: 'ui.pending_approval.expired' }, 409));
+    await expect(decidePendingApproval(approvalSchema('decision'), 'r1', true, fetcher as unknown as typeof fetch))
+      .rejects.toMatchObject({ name: PendingApprovalError.name, status: 409, detail: 'ui.pending_approval.expired' });
+    const planFetcher = vi.fn(async () => response({ detail: 'ui.studio.plan.decide_failed' }, 409));
+    await expect(decideSessionBudget(approvalSchema('decision'), 's1', 'b1', false, planFetcher as unknown as typeof fetch))
+      .rejects.toMatchObject({ name: PendingApprovalError.name, status: 409, detail: 'ui.studio.plan.decide_failed' });
+  });
+
+  it('dispatches a plan card to the budget route and a step card to the grant route', async () => {
+    const fetcher = vi.fn(async (url: string) => url.includes('/budgets/')
+      ? response({ budget_id: 'b1', state: 'active' })
+      : response({ request_id: 'r1', status: 'approved' }));
+    await decidePendingCard(approvalSchema('decision'), 's1', { requestId: 'b1', kind: 'plan' }, true, fetcher as unknown as typeof fetch);
+    await decidePendingCard(approvalSchema('decision'), 's1', { requestId: 'r1', kind: 'step' }, false, fetcher as unknown as typeof fetch);
+    const calls = fetcher.mock.calls as unknown as Array<[string, RequestInit]>;
+    expect(calls.map((call) => call[0])).toEqual([
+      '/api/v1/chat/sessions/s1/budgets/b1',
+      '/api/grants/r1/decision',
+    ]);
+    // Every route placeholder must be filled; a literal {sessionID} 404s on the server.
+    expect(calls.every((call) => !/[{}]/.test(decodeURIComponent(call[0])))).toBe(true);
+    expectBody(calls[0], { decision: 'approve' });
+    expectBody(calls[1], { decision: 'deny' });
+  });
 });

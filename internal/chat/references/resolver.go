@@ -89,6 +89,11 @@ type Config struct {
 	// model objects; without them those claims are rejected.
 	Captures       CaptureReader
 	ModelAssetRole string
+	// RenderAssetType is the declared asset type of model-review renders
+	// (#103). An owned input asset of this type is attached with the render
+	// role instead of upload, so the conversation does not show it as an
+	// ordinary result picture.
+	RenderAssetType string
 }
 
 type Resolver struct {
@@ -113,6 +118,7 @@ type Resolver struct {
 	visionDerivative        *visionimage.Deriver
 	captures                CaptureReader
 	modelAssetRole          string
+	renderAssetType         string
 }
 
 func New(config Config) (*Resolver, error) {
@@ -150,6 +156,7 @@ func New(config Config) (*Resolver, error) {
 		visionDerivative:        config.VisionDerivative,
 		captures:                config.Captures,
 		modelAssetRole:          config.ModelAssetRole,
+		renderAssetType:         config.RenderAssetType,
 	}, nil
 }
 

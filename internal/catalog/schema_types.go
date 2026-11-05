@@ -1279,6 +1279,40 @@ type PublicChatSchema struct {
 	// ThreeViewLimits is the one three-view value the page needs to queue a
 	// refused view (#59); chat.three_view itself stays server-only.
 	ThreeViewLimits PublicChatThreeViewLimits `json:"three_view_limits"`
+	// ModelReview names the read-only review tools so the conversation can
+	// recognise their calls (#103); the limits, prompts, cache and text
+	// templates stay server-only.
+	ModelReview *PublicChatModelReviewSchema `json:"model_review,omitempty"`
+	// Model3DUsage publishes the purpose labels and brief field declarations
+	// the approval card and brief panel render (#103); recommendations,
+	// parameter overrides, reasons, budgets and brief prompt templates stay
+	// server-only.
+	Model3DUsage *PublicChatModel3DUsageSchema `json:"model3d_usage,omitempty"`
+}
+
+// PublicChatModelReviewSchema is the browser contract of the read-only model
+// review tools (#103).
+type PublicChatModelReviewSchema struct {
+	Tools ChatModelReviewToolsSchema `json:"tools"`
+}
+
+// PublicChatModel3DUsageSchema is the public part of the 3D production
+// purposes (#103).
+type PublicChatModel3DUsageSchema struct {
+	Profiles []PublicChatModel3DUsageProfile `json:"profiles"`
+	Brief    PublicChatProductionBriefSchema `json:"brief"`
+}
+
+// PublicChatModel3DUsageProfile is one purpose the page can label.
+type PublicChatModel3DUsageProfile struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// PublicChatProductionBriefSchema declares the session brief fields the panel
+// edits.
+type PublicChatProductionBriefSchema struct {
+	Fields []ChatProductionBriefField `json:"fields"`
 }
 
 // PublicChatThreeViewLimits carries chat.three_view.queue_limit_seconds: how
@@ -2181,6 +2215,269 @@ type LegacyTaskExclusionSchema struct {
 	Reason       string `json:"reason"`
 }
 
+// ChatModelReviewSchema is application.chat.model_review: the read-only
+// tools that inspect, render and compare 3D models of the session (#103).
+// They never create a Task and never spend credits. Every bound, enumeration
+// and Agent-facing text they use is declared here; the tools themselves stay
+// server-side.
+type ChatModelReviewSchema struct {
+	Inspect ChatModelInspectSchema      `json:"inspect"`
+	Render  ChatModelRenderSchema       `json:"render"`
+	Compare ChatModelCompareSchema      `json:"compare"`
+	Cache   ChatModelReviewCacheSchema  `json:"cache"`
+	Source  ChatModelReviewSourceSchema `json:"source"`
+	Texts   ChatModelReviewTextsSchema  `json:"texts"`
+	// Tools names the three read-only tool implementations the public Agent
+	// tool list registers; the frontend uses these names to recognise the
+	// compact self-check record (#103).
+	Tools ChatModelReviewToolsSchema `json:"tools"`
+	// ResultViewsField names the result array that pairs each rendered
+	// picture with the handle the reply gave it. Entries are in the order the
+	// pictures were attached, so the first view carries the first handle.
+	ResultViewsField string `json:"result_views_field"`
+}
+
+// ChatModelReviewToolsSchema names the public Agent tool of each read-only
+// model review capability.
+type ChatModelReviewToolsSchema struct {
+	Inspect string `json:"inspect"`
+	Render  string `json:"render"`
+	Compare string `json:"compare"`
+}
+
+// ChatModelReviewLimits bounds what Parse may accept before any topology is
+// computed. The values are those of modelinspect.Limits.
+type ChatModelReviewLimits struct {
+	MaxBytes         int64 `json:"max_bytes"`
+	MaxTriangles     int64 `json:"max_triangles"`
+	MaxVertices      int64 `json:"max_vertices"`
+	MaxTexturePixels int64 `json:"max_texture_pixels"`
+	// MaxTotalTexturePixels and MaxTextureBytes cap all images decoded in one
+	// review, so a model with many individually-valid textures cannot exhaust
+	// memory (#103 review P2).
+	MaxTotalTexturePixels int64 `json:"max_total_texture_pixels"`
+	MaxTextureBytes       int64 `json:"max_texture_bytes"`
+	MaxNodes              int   `json:"max_nodes"`
+	MaxDepth              int   `json:"max_depth"`
+}
+
+// ChatModelInspectSchema tunes the inspection report.
+type ChatModelInspectSchema struct {
+	Limits           ChatModelReviewLimits `json:"limits"`
+	WeldEpsilonRatio float64               `json:"weld_epsilon_ratio"`
+	DebrisRatio      float64               `json:"debris_ratio"`
+	MaxListedParts   int                   `json:"max_listed_parts"`
+	// Production declares the purpose check inspect_model returns as
+	// usage_check (#103).
+	Production ChatModelInspectProductionSchema `json:"production"`
+}
+
+// Usage check ids of inspect_model.usage_check. They are a wire contract:
+// inspect reports them in this order, and the Schema must declare one fix for
+// each.
+const (
+	ModelReviewUsageCheckTriangles         = "triangles"
+	ModelReviewUsageCheckUV                = "uv"
+	ModelReviewUsageCheckWatertight        = "watertight"
+	ModelReviewUsageCheckSkin              = "skin"
+	ModelReviewUsageCheckTextureSize       = "texture_size"
+	ModelReviewUsageCheckPivotBottomCenter = "pivot_bottom_center"
+	ModelReviewUsageCheckYUp               = "y_up"
+	ModelReviewUsageCheckPlausibleScale    = "plausible_scale"
+	ModelReviewUsageCheckDebris            = "debris"
+	ModelReviewUsageCheckDegenerate        = "degenerate"
+)
+
+// ModelReviewUsageCheckIDs returns the usage checks in the order
+// inspect_model reports them.
+func ModelReviewUsageCheckIDs() []string {
+	return []string{
+		ModelReviewUsageCheckTriangles,
+		ModelReviewUsageCheckUV,
+		ModelReviewUsageCheckWatertight,
+		ModelReviewUsageCheckSkin,
+		ModelReviewUsageCheckTextureSize,
+		ModelReviewUsageCheckPivotBottomCenter,
+		ModelReviewUsageCheckYUp,
+		ModelReviewUsageCheckPlausibleScale,
+		ModelReviewUsageCheckDebris,
+		ModelReviewUsageCheckDegenerate,
+	}
+}
+
+// ChatModelInspectProductionSchema holds the thresholds, words and fix
+// suggestions of the purpose check. Ratio thresholds are fractions of one.
+type ChatModelInspectProductionSchema struct {
+	// PivotBottomCenterRatio bounds the distance from the bbox bottom centre
+	// to the origin, relative to the bbox diagonal.
+	PivotBottomCenterRatio float64 `json:"pivot_bottom_center_ratio"`
+	// YUpFlatRatio marks a bbox as flat (and therefore its up axis unknown)
+	// when its shortest edge is at most this fraction of its longest edge.
+	YUpFlatRatio    float64 `json:"y_up_flat_ratio"`
+	DebrisRatio     float64 `json:"debris_ratio"`
+	DegenerateRatio float64 `json:"degenerate_ratio"`
+	// DefaultPurposeText explains that the session has no usable brief
+	// purpose ({purpose}); BriefPurposeText names the brief purpose
+	// ({purpose}); TriangleOverrideText records the brief's triangle budget
+	// ({value}).
+	DefaultPurposeText   string `json:"default_purpose_text"`
+	BriefPurposeText     string `json:"brief_purpose_text"`
+	TriangleOverrideText string `json:"triangle_override_text"`
+	// NoCapabilityText replaces a fix hint when no enabled Offering of the
+	// declared capability is available.
+	NoCapabilityText string `json:"no_capability_text"`
+	// CapabilityJoiner joins the capabilities of one fix option;
+	// OptionSeparator joins alternative options.
+	CapabilityJoiner string                      `json:"capability_joiner"`
+	OptionSeparator  string                      `json:"option_separator"`
+	Fixes            []ChatModelInspectFixSchema `json:"fixes"`
+}
+
+// ChatModelInspectFixSchema is the fix hint of one usage check. An empty
+// Options list makes Template a static sentence; otherwise Template contains
+// {capabilities} and the server fills only the options whose capabilities are
+// available.
+type ChatModelInspectFixSchema struct {
+	Check    string                            `json:"check"`
+	Template string                            `json:"template"`
+	Options  []ChatModelInspectFixOptionSchema `json:"options"`
+}
+
+// ChatModelInspectFixOptionSchema is one way to fix a failed check. Every
+// capability of the option must be available for the option to be offered.
+type ChatModelInspectFixOptionSchema struct {
+	Capabilities []ChatModelInspectFixCapabilitySchema `json:"capabilities"`
+}
+
+// ChatModelInspectFixCapabilitySchema names a capability and, optionally, the
+// public parameter value that makes it fix this check.
+type ChatModelInspectFixCapabilitySchema struct {
+	Capability string `json:"capability"`
+	Parameter  string `json:"parameter,omitempty"`
+	Value      string `json:"value,omitempty"`
+}
+
+// ChatModelRenderSchema declares the views, modes and bounds of the render
+// tool.
+type ChatModelRenderSchema struct {
+	// Views are the view names the tool accepts; DefaultViews is used when a
+	// call names none.
+	Views        []string `json:"views"`
+	DefaultViews []string `json:"default_views"`
+	// Modes are the render modes the tool accepts; DefaultMode is used when a
+	// call names none.
+	Modes       []string `json:"modes"`
+	DefaultMode string   `json:"default_mode"`
+	// Size is the output edge in pixels, MaxSize its upper bound. Supersample
+	// is the factor applied before downsampling: Size*Supersample must stay
+	// within modelinspect.MaxRenderDimension.
+	Size        int `json:"size"`
+	MaxSize     int `json:"max_size"`
+	Supersample int `json:"supersample"`
+	// WireframeMaxTriangles refuses wireframe above this triangle count.
+	WireframeMaxTriangles int64 `json:"wireframe_max_triangles"`
+	// Workers caps the rasteriser's goroutines per view.
+	Workers int `json:"workers"`
+	// MaxConcurrentRenders bounds renders running at the same time in the
+	// process; MaxViewsPerCall bounds one call and MaxRenderCallsPerTurn
+	// bounds one Agent reply.
+	MaxConcurrentRenders  int `json:"max_concurrent_renders"`
+	MaxViewsPerCall       int `json:"max_views_per_call"`
+	MaxRenderCallsPerTurn int `json:"max_render_calls_per_turn"`
+	// AssetType is the input-asset type the rendered PNG files are stored
+	// under. Background is the #rrggbb colour behind the model.
+	AssetType  string `json:"asset_type"`
+	Background string `json:"background"`
+}
+
+// ChatModelCompareSchema bounds a comparison; Layout is the one picture
+// arrangement the tool implements.
+type ChatModelCompareSchema struct {
+	MaxViewsPerCall int    `json:"max_views_per_call"`
+	Layout          string `json:"layout"`
+}
+
+// ChatModelReviewCacheSchema bounds the process-wide parsed-model cache: at
+// most MaxModels entries and MaxBytes of source files, whichever binds first.
+type ChatModelReviewCacheSchema struct {
+	MaxModels int   `json:"max_models"`
+	MaxBytes  int64 `json:"max_bytes"`
+}
+
+// ChatModelReviewSourceSchema names the arguments that choose a model and the
+// texts of a call that names no usable one.
+type ChatModelReviewSourceSchema struct {
+	TaskArgument  string `json:"task_argument"`
+	AssetArgument string `json:"asset_argument"`
+	// SourceRequired, SourceNotFound and SourceNotReady are read like the
+	// processing tools' messages; SourceNotModel refuses an explicit asset
+	// that is not one of the Task's model files ({asset}).
+	SourceRequired string `json:"source_required"`
+	SourceNotFound string `json:"source_not_found"`
+	SourceNotReady string `json:"source_not_ready"`
+	SourceNotModel string `json:"source_not_model"`
+	// SourceNotGLB refuses a saved file in a format the read-only tools
+	// cannot parse ({asset}, {media}).
+	SourceNotGLB string `json:"source_not_glb"`
+}
+
+// ChatModelReviewTextsSchema are the English texts the read-only model review
+// tools return to the Agent. Braced placeholders are substituted by the
+// executor; the texts stay server-side.
+type ChatModelReviewTextsSchema struct {
+	// InspectReady heads a successful inspection ({model}, {triangles}).
+	InspectReady string `json:"inspect_ready"`
+	// RenderReady heads a successful render ({count}, {views}).
+	RenderReady string `json:"render_ready"`
+	// CompareReady heads a successful comparison ({count}, {views}).
+	CompareReady string `json:"compare_ready"`
+	// ImagesAttached tells the Agent that the rendered PNGs are attached
+	// ({count}).
+	ImagesAttached string `json:"images_attached"`
+	// VisionOff tells the Agent that it cannot see its own renders because
+	// the deployment's vision input is off.
+	VisionOff string `json:"vision_off"`
+	// BudgetRemaining reports this reply's remaining render calls
+	// ({remaining}, {limit}).
+	BudgetRemaining string `json:"budget_remaining"`
+	// BudgetExhausted refuses another render or compare call in this reply
+	// ({limit}).
+	BudgetExhausted string `json:"budget_exhausted"`
+	// TooLarge refuses a file above inspect.limits.max_bytes ({bytes},
+	// {limit}).
+	TooLarge string `json:"too_large"`
+	// Unsupported explains a file that cannot be parsed ({reason}); it also
+	// carries a parse limit the file exceeded (size, triangles or vertices).
+	Unsupported string `json:"unsupported"`
+	// SourceReadFailed refuses a model whose saved bytes could not be read
+	// ({reason}).
+	SourceReadFailed string `json:"source_read_failed"`
+	// UploadFailed reports a rendered picture that could not be stored
+	// ({reason}).
+	UploadFailed string `json:"upload_failed"`
+	// RenderFailed names the view that could not be drawn ({view}, {reason}).
+	RenderFailed string `json:"render_failed"`
+	// WireframeTooDense refuses wireframe above the Schema's bound
+	// ({triangles}, {limit}).
+	WireframeTooDense string `json:"wireframe_too_dense"`
+	// TooManyViews refuses more views than one call may render ({count},
+	// {limit}).
+	TooManyViews string `json:"too_many_views"`
+	// UnknownView and UnknownMode refuse a value the Schema does not declare
+	// ({view}/{mode}, {views}/{modes}).
+	UnknownView string `json:"unknown_view"`
+	UnknownMode string `json:"unknown_mode"`
+	// InvalidArguments refuses unreadable arguments ({detail}).
+	InvalidArguments string `json:"invalid_arguments"`
+	// PartsRequired refuses isolate=true without parts.
+	PartsRequired string `json:"parts_required"`
+	// UnknownPart refuses a part ID the model does not have ({part}).
+	UnknownPart string `json:"unknown_part"`
+	// TooManyModels refuses a comparison that does not name exactly two
+	// models ({count}).
+	TooManyModels string `json:"too_many_models"`
+}
+
 // ChatSchema 同时描述 Chat Agent 的运行策略、旧 HTTP 线协议、SSE 事件协议
 // 和浏览器展示内容。Go 代码只实现稳定算法，不拥有产品字段名、状态字面量、
 // Prompt 或可见文本。
@@ -2215,10 +2512,20 @@ type ChatSchema struct {
 	// the Agent reads about its scope.
 	AgentScope ChatAgentScopeSchema `json:"agent_scope"`
 	Harness    ChatHarnessSchema    `json:"harness"`
+	// ModelReview declares the read-only model inspection, rendering and
+	// comparison tools (#103): their bounds, enumerations and Agent-facing
+	// texts. Server-side only, like the tools themselves.
+	ModelReview ChatModelReviewSchema `json:"model_review"`
 	// Choice declares the in-chat choice card (#321): the Agent-facing texts of
 	// an answered or pending card and its bounds. Server side only; the card's
 	// visible words are content messages ui.chat.choice.*.
 	Choice ChatChoiceSchema `json:"choice"`
+	// Model3DUsage declares the production purposes of 3D work (#103): the
+	// recommended offerings and public parameter overrides per purpose, the
+	// triangle/texture budget, and the session production brief. Server side
+	// only: the browser reads a brief projection on the session, never the
+	// purpose table or its reasons.
+	Model3DUsage ChatModel3DUsageSchema `json:"model3d_usage"`
 	// ContextCompaction declares how a long conversation is summarized for
 	// the model (#322): the automatic threshold, how many recent rounds stay
 	// verbatim and the prompts. The visible words are content messages
@@ -2300,6 +2607,178 @@ type ChatChoiceSchema struct {
 	// person's message, mean they do not want it ("不要 Tripo"). A negated
 	// name is never run without asking (#321 G).
 	MentionNegations []string `json:"mention_negations,omitempty"`
+	// Kinds declares the generic cards an Agent tool may open (#103). Each kind
+	// whose options the server builds from model3d_usage.profiles names the
+	// tool its answer calls and the argument field its options fill; the kind
+	// may sit at any position. Empty (historical Catalogs) leaves ask_choice
+	// without a kind.
+	Kinds []ChatChoiceKindSchema `json:"kinds,omitempty"`
+}
+
+// ChatChoiceKindSchema is one kind of generic choice card (#103).
+type ChatChoiceKindSchema struct {
+	ID string `json:"id"`
+	// ToolName is the tool an answer calls; Argument is the name of its
+	// string parameter that receives the option id.
+	ToolName string `json:"tool_name"`
+	Argument string `json:"argument"`
+	// OptionSource names where the server builds the options: the only
+	// declared source is "usage_profiles".
+	OptionSource string `json:"option_source"`
+	// Question is the default question the tool result shows when the Agent
+	// names none; Message is the Agent-facing line of the tool result.
+	Question string `json:"question"`
+	Message  string `json:"message"`
+}
+
+// ChatModel3DUsageSchema is application.chat.model3d_usage (#103).
+type ChatModel3DUsageSchema struct {
+	// DefaultProfile is the purpose used when a session has no brief purpose.
+	DefaultProfile string                    `json:"default_profile"`
+	Profiles       []ChatModel3DUsageProfile `json:"profiles"`
+	Brief          ChatProductionBriefSchema `json:"brief"`
+}
+
+// ChatModel3DUsageProfile is one production purpose.
+type ChatModel3DUsageProfile struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	// RecommendedOfferings maps a 3D input shape to Offering IDs in preference
+	// order. Keys: text-to-3d, image-to-3d and multiview-to-3d (an
+	// image-to-3d Offering that declares the multiview views argument).
+	RecommendedOfferings map[string][]string `json:"recommended_offerings"`
+	// ParameterOverrides maps an Offering ID to public parameter values the
+	// purpose applies. A value must pass the same normalization as a real
+	// submission; fixed, hidden, protocol, reference and extra-credit consent
+	// parameters are refused at load time.
+	ParameterOverrides map[string]map[string]json.RawMessage `json:"parameter_overrides,omitempty"`
+	// Reason explains the purpose once; every adjusted parameter frozen from
+	// this purpose carries it and source "profile:<id>".
+	Reason string `json:"reason"`
+	// Pipeline is reference only: later processing capabilities that suit the
+	// purpose, in order. It is never executed automatically.
+	Pipeline []ChatModel3DUsagePipelineStep `json:"pipeline,omitempty"`
+	Budget   ChatModel3DUsageBudget         `json:"budget"`
+	// ScaleRangeM is the plausible longest-edge range in metres. Nil means
+	// the purpose does not judge scale (render).
+	ScaleRangeM *ChatModel3DUsageScaleRange `json:"scale_range_m,omitempty"`
+}
+
+// ChatModel3DUsageScaleRange is a closed longest-edge range in metres.
+type ChatModel3DUsageScaleRange struct {
+	Min float64 `json:"min"`
+	Max float64 `json:"max"`
+}
+
+// ChatModel3DUsagePipelineStep names a later capability and, optionally, the
+// Offering and public parameters that fit the purpose.
+type ChatModel3DUsagePipelineStep struct {
+	Capability string                     `json:"capability"`
+	OfferingID string                     `json:"offering_id,omitempty"`
+	Parameters map[string]json.RawMessage `json:"parameters,omitempty"`
+}
+
+// ChatModel3DUsageBudget is the purpose's triangle and delivery budget.
+type ChatModel3DUsageBudget struct {
+	MinTriangles      *int `json:"min_triangles,omitempty"`
+	MaxTriangles      int  `json:"max_triangles"`
+	MaxTextureSize    *int `json:"max_texture_size,omitempty"`
+	RequireUV         bool `json:"require_uv"`
+	RequireWatertight bool `json:"require_watertight"`
+	RequireSkin       bool `json:"require_skin"`
+}
+
+// ChatProductionBriefSchema declares the session production brief: its field
+// names, types and bounds, and the words of the system-context block. The
+// brief is replaced as a whole by the Agent tool and by the session API.
+type ChatProductionBriefSchema struct {
+	Fields []ChatProductionBriefField `json:"fields"`
+	// ContextTemplate adds the brief to the system prompt ({brief}); a session
+	// without a brief adds EmptyText in its place.
+	ContextTemplate string `json:"context_template"`
+	EmptyText       string `json:"empty_text"`
+	// FieldTemplate renders one non-empty field ({label}, {value}); FlagTemplate
+	// renders a true boolean ({label}); Separator joins them.
+	FieldTemplate string `json:"field_template"`
+	FlagTemplate  string `json:"flag_template"`
+	Separator     string `json:"separator"`
+	// PurposeTemplate renders the purpose label with its budget ({label},
+	// {budget}).
+	PurposeTemplate string `json:"purpose_template"`
+	// BudgetTemplate renders a budget with a minimum ({minimum}, {maximum},
+	// {requirements}); OpenBudgetTemplate renders one without
+	// ({maximum}, {requirements}); OverrideBudgetTemplate renders a session
+	// triangle override ({value}, {requirements}).
+	BudgetTemplate         string `json:"budget_template"`
+	OpenBudgetTemplate     string `json:"open_budget_template"`
+	OverrideBudgetTemplate string `json:"override_budget_template"`
+	// RequirementsTemplate wraps the requirement texts ({items}); each text is
+	// one of UVText, WatertightText and SkinText, joined by
+	// RequirementSeparator.
+	RequirementsTemplate string `json:"requirements_template"`
+	RequirementSeparator string `json:"requirement_separator"`
+	UVText               string `json:"uv_text"`
+	WatertightText       string `json:"watertight_text"`
+	SkinText             string `json:"skin_text"`
+	SavedMessage         string `json:"saved_message"`
+	InvalidTemplate      string `json:"invalid_template"`
+	// Messages are the Agent-facing refusal reasons; invalid_template wraps
+	// them (#103 review C3).
+	Messages ChatProductionBriefMessages `json:"messages"`
+}
+
+// FieldNameOfType returns the name of the first declared field of a type. The
+// service reads the purpose (profile) and the triangle override (integer) by
+// type, so a renamed Schema field keeps working without a code change (#103
+// review C3). Catalog validation guarantees exactly one field of each.
+func (brief ChatProductionBriefSchema) FieldNameOfType(fieldType string) string {
+	for _, field := range brief.Fields {
+		if field.Type == fieldType {
+			return field.Name
+		}
+	}
+	return ""
+}
+
+// ChatProductionBriefField declares one brief member and its bound.
+type ChatProductionBriefField struct {
+	Name string `json:"name"`
+	// Type is profile, text, boolean or integer.
+	Type  string `json:"type"`
+	Label string `json:"label"`
+	// MaximumCharacters bounds a text field; Minimum and Maximum bound an
+	// integer. Zero leaves the bound unset.
+	MaximumCharacters int `json:"maximum_characters,omitempty"`
+	Minimum           int `json:"minimum,omitempty"`
+	Maximum           int `json:"maximum,omitempty"`
+	// Multiline asks the panel for a textarea instead of one line, and
+	// Placeholder is the hint an empty text field shows. Both are declared
+	// here so the panel keeps no name-based heuristics (#103 review F11/F7).
+	Multiline   bool   `json:"multiline,omitempty"`
+	Placeholder string `json:"placeholder,omitempty"`
+}
+
+// ChatProductionBriefMessages are the Agent-facing refusals of a brief write.
+// Each template names the refused field and rule; the rejected text never
+// appears. The suffix is the reason inside invalid_template.
+type ChatProductionBriefMessages struct {
+	// UnknownField: {field}.
+	UnknownField string `json:"unknown_field"`
+	// NotObject is the whole brief being something other than a JSON object.
+	NotObject string `json:"not_object"`
+	// NotString, NotBoolean and NotInteger: {field}.
+	NotString  string `json:"not_string"`
+	NotBoolean string `json:"not_boolean"`
+	NotInteger string `json:"not_integer"`
+	// ProfileUndeclared: {value}.
+	ProfileUndeclared string `json:"profile_undeclared"`
+	// TextTooLong: {field}, {maximum}.
+	TextTooLong string `json:"text_too_long"`
+	// OutOfRange: {field}, {minimum}, {maximum}.
+	OutOfRange string `json:"out_of_range"`
+	// UnsupportedType: {field}, {type}.
+	UnsupportedType string `json:"unsupported_type"`
 }
 
 // ChatAgentScopeSchema is application.chat.agent_scope. The scope of a session
@@ -2468,16 +2947,75 @@ type ChatPendingApprovalMessages struct {
 }
 
 // ChatApprovalPolicySchema is application.chat.approval_policy. Modes are
-// "auto" and "manual". Capabilities listed here need a human decision in
-// manual mode; every other capability is approved by policy.
+// "auto", "manual" and "budget". Capabilities listed here need a human
+// decision in manual mode; every other capability is approved by policy.
+// Budget mode approves an Agent step inside the plan and total credit budget a
+// person approved (#103); the manual rules still decide a step no active plan
+// covers and every step the browser started.
 type ChatApprovalPolicySchema struct {
 	DefaultMode                string                      `json:"default_mode"`
 	Modes                      []string                    `json:"modes"`
 	ManualApprovalCapabilities []schemacontract.Capability `json:"manual_approval_capabilities"`
+	// Budget is the production-plan budget of budget mode. Server-only.
+	Budget ChatApprovalBudgetSchema `json:"budget"`
 	// Prompt is what the Agent is told about the session's approval mode
 	// (#7). It is server-only: the browser reads the three fields above and
 	// the mode names from content messages (ui.workspace.approval.*).
 	Prompt ChatApprovalPromptSchema `json:"prompt"`
+}
+
+// ChatApprovalBudgetSchema is application.chat.approval_policy.budget. It
+// bounds a production plan the Agent proposes and the total credits a person
+// approves; the server re-estimates every step from the Catalog instead of
+// trusting the Agent's numbers.
+type ChatApprovalBudgetSchema struct {
+	MaxCredits           int `json:"max_credits"`
+	MaxSteps             int `json:"max_steps"`
+	MaxTitleCharacters   int `json:"max_title_characters"`
+	MaxPurposeCharacters int `json:"max_purpose_characters"`
+	// ContextTemplate is appended to the Agent's system context in budget mode.
+	// Fields: {state} (the state's label), {limit}, {spent}, {reserved},
+	// {remaining}, {plan}.
+	ContextTemplate string `json:"context_template"`
+	// NoPlanState and NoPlanText render {state} and {plan} before the session
+	// has a plan at all.
+	NoPlanState string `json:"no_plan_state"`
+	NoPlanText  string `json:"no_plan_text"`
+	// States labels the plan states the runtime may report. The IDs are fixed
+	// by internal/budget.
+	States []ChatApprovalBudgetState `json:"states"`
+	// Messages are the session messages posted when a plan card is decided or
+	// expires. Fields: {title}, {limit}, {remaining}.
+	Messages ChatApprovalBudgetMessages `json:"messages"`
+	// ToolMessages are the Agent-facing tool result of propose_production_plan
+	// in each state, so the execution layer keeps no English copy (#103
+	// review B4).
+	ToolMessages ChatApprovalBudgetToolMessages `json:"tool_messages"`
+}
+
+// ChatApprovalBudgetToolMessages is the Agent-facing result of the plan tool.
+type ChatApprovalBudgetToolMessages struct {
+	Proposed  string `json:"proposed"`
+	Active    string `json:"active"`
+	Exhausted string `json:"exhausted"`
+	Closed    string `json:"closed"`
+}
+
+// ChatApprovalBudgetState is the person-facing label of one plan state.
+type ChatApprovalBudgetState struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// ChatApprovalBudgetMessages are the texts posted to the session for a plan
+// decision. None of them posts an approval card: a plan decision is read from
+// the pending-approvals projection.
+type ChatApprovalBudgetMessages struct {
+	Approved string `json:"approved"`
+	Denied   string `json:"denied"`
+	Expired  string `json:"expired"`
+	// Exhausted is posted once when the approved plan spends its last credit.
+	Exhausted string `json:"exhausted"`
 }
 
 // PublicChatApprovalPolicy is the browser's view of
@@ -2488,6 +3026,10 @@ type PublicChatApprovalPolicy struct {
 	DefaultMode                string                      `json:"default_mode"`
 	Modes                      []string                    `json:"modes"`
 	ManualApprovalCapabilities []schemacontract.Capability `json:"manual_approval_capabilities"`
+	// BudgetStates are the plan state ids the runtime may report, so the
+	// browser labels a state instead of keeping its own list (#103 review F7).
+	// Empty means the deployment declares no budget plan.
+	BudgetStates []string `json:"budget_states,omitempty"`
 }
 
 // ChatApprovalPromptSchema is application.chat.approval_policy.prompt. The
@@ -2635,8 +3177,17 @@ type ChatAPIFields struct {
 	ApprovalMode string `json:"approval_mode"`
 	// Notes is the request field of the session settings-summary write.
 	Notes string `json:"notes"`
+	// Brief is the request field of the session production-brief write
+	// (#103): a whole brief object.
+	Brief string `json:"brief"`
+	// ExplicitModel3D carries the 3D model the person explicitly picked for
+	// this session (#103), so a production purpose may not replace it.
+	ExplicitModel3D string `json:"explicit_model_3d,omitempty"`
 	// AgentScope is the request field of the session Agent-scope write.
 	AgentScope string `json:"agent_scope"`
+	// Decision is the request field of a pending-approval decision: approve,
+	// deny, rerequest or drop, as the pending-approvals API declares.
+	Decision string `json:"decision"`
 	// ChoiceAnswer carries the answer to an in-chat choice card with a turn
 	// (#321): {"choice_id", "option_id"} or {"choice_id", "use_default": true}.
 	ChoiceAnswer string `json:"choice_answer"`
@@ -2666,14 +3217,17 @@ type ChatAPIResponseFields struct {
 	ToolCalls     string `json:"tool_calls"`
 	ToolName      string `json:"tool_name"`
 	ToolArguments string `json:"tool_arguments"`
-	MessageID     string `json:"message_id"`
-	SessionID     string `json:"session_id"`
-	Error         string `json:"error"`
-	IsPending     string `json:"is_pending"`
-	PendingTypes  string `json:"pending_task_types"`
-	Images        string `json:"images"`
-	URL           string `json:"url"`
-	TaskID        string `json:"task_id"`
+	// ToolSummary is the compact result summary a read-only tool attaches to
+	// its tool call (#103); empty leaves it out.
+	ToolSummary  string `json:"tool_summary,omitempty"`
+	MessageID    string `json:"message_id"`
+	SessionID    string `json:"session_id"`
+	Error        string `json:"error"`
+	IsPending    string `json:"is_pending"`
+	PendingTypes string `json:"pending_task_types"`
+	Images       string `json:"images"`
+	URL          string `json:"url"`
+	TaskID       string `json:"task_id"`
 	// ApprovalMode and EstimatedCredits carry the session approval mode and
 	// the estimated credits of accepted tasks (session DTO) or of one step
 	// (tool call DTO).
@@ -2681,6 +3235,15 @@ type ChatAPIResponseFields struct {
 	EstimatedCredits string `json:"estimated_credits"`
 	// Notes is the member carrying the session settings summary.
 	Notes string `json:"notes"`
+	// Brief is the member carrying the session production brief (#103).
+	Brief string `json:"brief,omitempty"`
+	// Budget is the member carrying the session's current production budget:
+	// limit, spent, reserved, remaining, state and the approved plan (#103).
+	// Empty when the session has no plan or the Catalog predates budgets.
+	Budget string `json:"budget,omitempty"`
+	// ExplicitModel3D is the member carrying the 3D model the person
+	// explicitly picked in the session (#103); empty leaves it out.
+	ExplicitModel3D string `json:"explicit_model_3d,omitempty"`
 	// Pick is the member carrying the session's picked candidate.
 	Pick string `json:"pick"`
 	// AgentScope is the member carrying the session's Agent scope.
@@ -2766,18 +3329,27 @@ type ChatFrontendSchema struct {
 	LightboxPreviousKey             string `json:"lightbox_previous_key"`
 	LightboxNextKey                 string `json:"lightbox_next_key"`
 	TextareaMaximumHeightPixels     int    `json:"textarea_maximum_height_pixels"`
-	OptimisticMessageIDPrefix       string `json:"optimistic_message_id_prefix"`
-	OptimisticUserMessageID         string `json:"optimistic_user_message_id"`
-	OptimisticAssistantMessageID    string `json:"optimistic_assistant_message_id"`
-	FilenameQueryParameter          string `json:"filename_query_parameter"`
-	DownloadFilenameMaxCharacters   int    `json:"download_filename_max_characters"`
-	DownloadTaskIDCharacters        int    `json:"download_task_id_characters"`
-	DownloadExtension               string `json:"download_extension"`
-	FallbackDownloadIdentifier      string `json:"fallback_download_identifier"`
-	InternalAPIPathPrefix           string `json:"internal_api_path_prefix"`
-	LegacyHiddenContentPrefix       string `json:"legacy_hidden_content_prefix"`
-	LegacyHiddenContentSuffix       string `json:"legacy_hidden_content_suffix"`
-	ProgressMaximum                 int    `json:"progress_maximum"`
+	// ApprovalCardMaxHeightPixels bounds the approval card; the card scrolls
+	// inside instead of growing the conversation (#103).
+	ApprovalCardMaxHeightPixels int `json:"approval_card_max_height_pixels"`
+	// ReviewThumbnailPixels is the edge of one self-check render thumbnail
+	// (#103).
+	ReviewThumbnailPixels int `json:"review_thumbnail_pixels"`
+	// ReplyCollapseLines is how many lines of a settled Agent reply show
+	// before it is folded (#103).
+	ReplyCollapseLines            int    `json:"reply_collapse_lines"`
+	OptimisticMessageIDPrefix     string `json:"optimistic_message_id_prefix"`
+	OptimisticUserMessageID       string `json:"optimistic_user_message_id"`
+	OptimisticAssistantMessageID  string `json:"optimistic_assistant_message_id"`
+	FilenameQueryParameter        string `json:"filename_query_parameter"`
+	DownloadFilenameMaxCharacters int    `json:"download_filename_max_characters"`
+	DownloadTaskIDCharacters      int    `json:"download_task_id_characters"`
+	DownloadExtension             string `json:"download_extension"`
+	FallbackDownloadIdentifier    string `json:"fallback_download_identifier"`
+	InternalAPIPathPrefix         string `json:"internal_api_path_prefix"`
+	LegacyHiddenContentPrefix     string `json:"legacy_hidden_content_prefix"`
+	LegacyHiddenContentSuffix     string `json:"legacy_hidden_content_suffix"`
+	ProgressMaximum               int    `json:"progress_maximum"`
 	// HandlePreviewDelayMilliseconds is how long the pointer rests on a picture handle ("@img3") in an
 	// Agent message before its large preview shows; HandlePreviewMaximumPixels bounds the preview's
 	// longer edge. The preview never takes pointer events.
@@ -2917,8 +3489,12 @@ type ChatAgentSchema struct {
 	// its capabilities has an enabled Offering (#115). See
 	// ChatAgentPromptSection.
 	PromptSections []ChatAgentPromptSection `json:"prompt_sections,omitempty"`
-	TitlePrompt    string                   `json:"title_prompt"`
-	TitleMaxChars  int                      `json:"title_max_characters"`
+	// CraftPrompts are domain briefs appended to the system context only on a
+	// turn whose offered tools include one of their WhenToolsAny. See
+	// ChatAgentCraftPrompt.
+	CraftPrompts  []ChatAgentCraftPrompt `json:"craft_prompts,omitempty"`
+	TitlePrompt   string                 `json:"title_prompt"`
+	TitleMaxChars int                    `json:"title_max_characters"`
 	// TitleMaxCharsByLocale overrides title_max_characters for a UI locale
 	// whose words take more characters than Chinese (an English title).
 	TitleMaxCharsByLocale map[string]int `json:"title_max_characters_by_locale,omitempty"`
@@ -3211,7 +3787,15 @@ type ChatToolSchema struct {
 	// the one enabled, available Offering of the tool's capabilities whose
 	// source-task parameter lists that Task's Offering in task_offerings, such
 	// as the build stage paired with a Creative Lab prototype (#189).
-	OfferingFromSource   string                     `json:"offering_from_source,omitempty"`
+	OfferingFromSource string `json:"offering_from_source,omitempty"`
+	// ModelArgument names the optional string argument by which the Agent
+	// names the Offering to run, by model_id, provider/model_id or Offering
+	// ID, among the tool's capabilities (#103). The session's explicitly
+	// picked 3D model wins over the argument, and a usage profile may supply
+	// the default. The enum, when declared, names the models the tool tells
+	// the Agent about; execution accepts an enabled, runtime-available
+	// Offering of the call's capability, matched by any of those names.
+	ModelArgument        string                     `json:"model_argument,omitempty"`
 	ModelRequiredMessage string                     `json:"model_required_message"`
 	Capability           schemacontract.Capability  `json:"capability"`
 	FallbackCapability   schemacontract.Capability  `json:"fallback_capability"`
@@ -3288,6 +3872,11 @@ type ChatToolProcessingSchema struct {
 	// SourceAssetArgument optionally carries one saved model Asset ID of the
 	// source Task (or, alone, of any succeeded Task of the session).
 	SourceAssetArgument string `json:"source_asset_argument,omitempty"`
+	// SourceAssetsArgument optionally carries several saved model Asset IDs of
+	// succeeded Tasks of this session, for an Offering whose source parameter
+	// is an asset-array (local merge). It replaces the single-source arguments
+	// for that step and is never combined with them.
+	SourceAssetsArgument string `json:"source_assets_argument,omitempty"`
 	// StepArgument selects one capability of Steps for a tool that performs
 	// several kinds of processing. Without it the tool's Capability is used.
 	StepArgument string                               `json:"step_argument,omitempty"`
@@ -3485,6 +4074,10 @@ type ChatToolResultFields struct {
 	// domain. Empty keys omit the values.
 	Model         string `json:"model,omitempty"`
 	ModelFallback string `json:"model_fallback,omitempty"`
+	// ModelChoice is the optional key of the object naming who chose the 3D
+	// model (#103): source user, agent, profile or default, the purpose id when
+	// the profile chose, and the reason. Empty omits it.
+	ModelChoice string `json:"model_choice,omitempty"`
 	// ModelNote is the optional key of chat.presentation.messages
 	// retired_model_fallback: the model the person picked is retired and the
 	// step ran on its successor (#329 follow-up). Present only then.
@@ -3501,6 +4094,13 @@ type ChatToolResultFields struct {
 	// (#272), or that it followed the one reference picture (#296). It is
 	// present only when the canvas or the reference set the size.
 	SizeNote string `json:"size_note,omitempty"`
+	// Budget is the optional key of the plan balance object a budget-mode
+	// step's result carries (#103): the plan's state, limit, spent, reserved
+	// and remaining credits. Reason is the optional key of the explanation a
+	// step gives when the plan cannot cover it and the step waits for the
+	// person. Empty keys omit the values (#103 review B4).
+	Budget string `json:"budget,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // ChatAgentToolSchema 声明非生成类 agent 控制工具（set_params /
@@ -3606,13 +4206,17 @@ type ChatMessageTexts struct {
 	TurnActive string `json:"turn_active"`
 	// ChoiceAnswered refuses an answer to a choice card that is no longer open;
 	// ChoiceRejected one whose option the card does not offer (#321).
-	ChoiceAnswered                   string `json:"choice_answered"`
-	ChoiceRejected                   string `json:"choice_rejected"`
-	SessionNotFound                  string `json:"session_not_found"`
-	MessageNotFound                  string `json:"message_not_found"`
-	EmptyTitle                       string `json:"empty_title"`
-	EmptyMessage                     string `json:"empty_message"`
-	InvalidParameters                string `json:"invalid_parameters"`
+	ChoiceAnswered    string `json:"choice_answered"`
+	ChoiceRejected    string `json:"choice_rejected"`
+	SessionNotFound   string `json:"session_not_found"`
+	MessageNotFound   string `json:"message_not_found"`
+	EmptyTitle        string `json:"empty_title"`
+	EmptyMessage      string `json:"empty_message"`
+	InvalidParameters string `json:"invalid_parameters"`
+	// ProductionBriefConflict refuses a whole-brief replacement that lost
+	// every bounded retry to a concurrent writer, so the caller retries instead
+	// of overwriting the other change (#103 review C5).
+	ProductionBriefConflict          string `json:"production_brief_conflict,omitempty"`
 	InvalidReferenceIndices          string `json:"invalid_reference_indices"`
 	ReferenceIndexOutOfRangeTemplate string `json:"reference_index_out_of_range_template"`
 	// InvalidInputSource rejects an undeclared input_source; CanvasSourceMissing
@@ -3626,6 +4230,19 @@ type ChatMessageTexts struct {
 	// (result_fields.model_note) when the turn named a retired model and the
 	// service ran its successor instead ({from}, {to}; #329 follow-up).
 	RetiredModelFallback string `json:"retired_model_fallback,omitempty"`
+	// ModelChoiceConflict refuses a 3D call whose explicit model disagrees
+	// with the model the person locked in this session ({locked}, {requested});
+	// ModelChoiceUnavailable refuses a model the call named that is not
+	// available or cannot take the input ({model}, {choices}) (#103). Neither
+	// submits a Task.
+	ModelChoiceConflict    string `json:"model_choice_conflict,omitempty"`
+	ModelChoiceUnavailable string `json:"model_choice_unavailable,omitempty"`
+	// ModelChoiceWorkspaceConflict refuses a purpose step whose recommended
+	// model differs from the model still selected in the workspace, so the
+	// person confirms the switch instead of the purpose silently replacing
+	// their visible choice ({workspace}, {recommended}, {profile}; #103
+	// review C1).
+	ModelChoiceWorkspaceConflict string `json:"model_choice_workspace_conflict,omitempty"`
 	// OfferingChoiceUnavailable tells the Agent that the Offering named by a
 	// tool's offering_argument is not enabled or available ({choices} lists
 	// the ones that are); SourceOfferingUnpaired that the source Task of an
@@ -3758,6 +4375,8 @@ type ChatAuditSchema struct {
 	ApprovalModeAction string `json:"approval_mode_action"`
 	// AgentScopeAction records a change of the session Agent scope.
 	AgentScopeAction string `json:"agent_scope_action"`
+	// ProductionBriefAction records a change of the session production brief.
+	ProductionBriefAction string `json:"production_brief_action"`
 }
 
 type RuntimeConfigurationSchema struct {
@@ -3902,9 +4521,17 @@ type CoreHTTPRoutesSchema struct {
 	AccountResources string `json:"account_resources"`
 	ChatSkills       string `json:"chat_skills"`
 	// ClientErrors receives browser error reports for the server log (#233).
-	ClientErrors          string `json:"client_errors,omitempty"`
-	ChatSessionApproval   string `json:"chat_session_approval"`
-	ChatSessionNotes      string `json:"chat_session_notes"`
+	ClientErrors        string `json:"client_errors,omitempty"`
+	ChatSessionApproval string `json:"chat_session_approval"`
+	ChatSessionNotes    string `json:"chat_session_notes"`
+	ChatSessionBrief    string `json:"chat_session_brief,omitempty"`
+	// ChatSessionModel3D writes the 3D model the person explicitly picked in
+	// the session (#103); it is a lock for the generation tools and submits
+	// nothing. Empty (historical Catalogs) disables the write.
+	ChatSessionModel3D string `json:"chat_session_model3d,omitempty"`
+	// ChatSessionBudget decides one production plan card of the session (#103):
+	// PUT {sessionID, budgetID} with {"decision": "approve"|"deny"}.
+	ChatSessionBudget     string `json:"chat_session_budget,omitempty"`
 	ChatSessionPick       string `json:"chat_session_pick"`
 	ChatSessionChoices    string `json:"chat_session_choices"`
 	ChatSessionAgentScope string `json:"chat_session_agent_scope"`

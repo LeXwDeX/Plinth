@@ -34,7 +34,12 @@ func validateApplication(schema ApplicationSchema) error {
 	if err := validateContent(schema.Content); err != nil {
 		return fmt.Errorf("content: %w", err)
 	}
-	if err := validateChat(schema.Chat, schema.Runtime, schema.Capabilities); err != nil {
+	if err := validateChat(
+		schema.Chat,
+		schema.Runtime,
+		schema.Capabilities,
+		schema.AgentConfiguration.Limits.MaxPromptCharacters,
+	); err != nil {
 		return fmt.Errorf("chat: %w", err)
 	}
 	if err := validateCanvas(schema.Canvas, schema.Runtime, schema.Content); err != nil {
