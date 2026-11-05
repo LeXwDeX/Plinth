@@ -705,6 +705,14 @@ class Live:
             print(f"message rejected: HTTP {status} {one_line(json.dumps(data, ensure_ascii=False), 160)}", flush=True)
         return status, data
 
+    def lock_model_3d(self, session_id, model):
+        """Pick a 3D model in the session's model picker, as a person does: since #103 only this
+        explicit pick binds the 3D tools; the per-message ai_model is only the picker's display."""
+        status, data = self.client.call("PUT", f"/api/v1/chat/sessions/{session_id}/model3d",
+                                        {"explicit_model_3d": model})
+        require_ok(status, "lock 3D model")
+        return data
+
     def session(self, session_id):
         status, data = self.client.call("GET", f"/api/chat/sessions/{session_id}")
         return data if status == 200 else None
@@ -811,7 +819,16 @@ class Live:
         if reply is None:
             self.report.failed("final reply", "timed out waiting for the turn to finish")
             return None, self.tasks(session_id), False
+        answered = len(self._answered_choices)
         tasks, settled = self.wait_tasks(session_id, expected)
+        if len(self._answered_choices) > answered:
+            # Answering a choice card started a turn of its own, which may still be
+            # reviewing the result after the tasks settled; the next message would be
+            # rejected until it ends, and its final message is this turn's real reply.
+            reply = self.wait_reply(session_id)
+            if reply is None:
+                self.report.failed("final reply", "timed out waiting for the turn after the choice answer")
+                return None, self.tasks(session_id), False
         return reply, tasks, settled
 
     def login(self):

@@ -154,6 +154,27 @@ class ChoiceCards(unittest.TestCase):
         self.assertFalse(live.answer_pending_choices("other-session"))
         self.assertEqual(self.posted(client), [])
 
+    def run_turn(self, answers):
+        live, client = self.live([])
+        replies = iter(["请先选用途", "已生成并检查了模型"])
+        live.wait_reply = lambda session_id: next(replies)
+
+        def wait_tasks(session_id, expected):
+            live._answered_choices.update(answers)
+            return [{"id": "t1"}], True
+        live.wait_tasks = wait_tasks
+        return live.run_turn("s1", "make a model", "model-3d", "m1", {"text-to-3d": 1})
+
+    def test_run_turn_waits_for_the_turn_a_choice_answer_started(self):
+        # The answer turn keeps reviewing the model after the task settles; the
+        # next message is only accepted once it ends.
+        reply, tasks, settled = self.run_turn({"ch5"})
+        self.assertEqual((reply, settled), ("已生成并检查了模型", True))
+
+    def test_run_turn_without_a_choice_keeps_the_first_reply(self):
+        reply, _, _ = self.run_turn(set())
+        self.assertEqual(reply, "请先选用途")
+
 
 class Waiting(unittest.TestCase):
     def test_reply_final(self):
