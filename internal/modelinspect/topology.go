@@ -16,7 +16,9 @@ type topologyIssues struct {
 // sorted, which keeps memory linear and is faster than a map for the ~2M
 // triangle models this package targets (see BenchmarkTopologyEdgeCounting).
 func (m *Model) computeTopology(readOK []bool, worldBox bounds, opts InspectOptions) (TopologyReport, topologyIssues) {
-	report := TopologyReport{Watertight: true}
+	// Watertight stays false until every triangle has been analysed and the
+	// edge counts prove a closed surface.
+	var report TopologyReport
 	var issues topologyIssues
 	if !worldBox.valid || len(m.parts) == 0 {
 		return report, issues
@@ -158,7 +160,6 @@ func (m *Model) computeTopology(readOK []bool, worldBox bounds, opts InspectOpti
 	}
 
 	if len(representatives) == 0 {
-		report.Watertight = true
 		return report, issues
 	}
 
@@ -198,7 +199,10 @@ func (m *Model) computeTopology(readOK []bool, worldBox bounds, opts InspectOpti
 		}
 		start = end
 	}
-	report.Watertight = report.BoundaryEdges == 0 && report.NonManifoldEdges == 0
+	// Parts skipped for invalid indices or positions were never counted, so a
+	// closed remainder does not prove the whole model is closed.
+	report.Watertight = report.BoundaryEdges == 0 && report.NonManifoldEdges == 0 &&
+		!issues.invalidIndices && !issues.invalidPositions
 	return report, issues
 }
 

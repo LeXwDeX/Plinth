@@ -658,6 +658,7 @@ func (executor *Executor) renderReviewedView(
 		Isolate:               isolate,
 		Workers:               review.Render.Workers,
 		WireframeMaxTriangles: int(review.Render.WireframeMaxTriangles),
+		Context:               ctx,
 	})
 	if err != nil {
 		return nil, err

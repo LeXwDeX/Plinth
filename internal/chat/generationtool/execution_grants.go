@@ -373,6 +373,7 @@ func (executor *Executor) resumeAgentOperation(
 	}
 	command, err = executor.verifyAgentHarnessPreparedSource(ctx, command, prepared)
 	if err != nil {
+		executor.abandonBudgetReservation(ctx, op)
 		return executor.harnessRefusal(command, err)
 	}
 	accepted, err := preparedGateway.SubmitPrepared(context.WithoutCancel(ctx), generation.SubmitPreparedCommand{
@@ -382,14 +383,20 @@ func (executor *Executor) resumeAgentOperation(
 	})
 	if err != nil {
 		if errors.Is(err, harness.ErrStale) {
+			executor.abandonBudgetReservation(ctx, op)
 			return executor.harnessRefusal(command, err)
 		}
 		failure := executor.executionFailure(command, "")
 		failure.NoSubmission = knownNotSubmitted(err)
 		failure.RetryAfter = admissionRetryAfter(err)
 		if failure.RetryAfter == 0 {
+			if failure.NoSubmission {
+				executor.abandonBudgetReservation(ctx, op)
+			}
 			return chat.ToolResult{NoSubmission: failure.NoSubmission}, err
 		}
+		// With RetryAfter the turn resubmits this same authorization later, so
+		// its reservation stays.
 		return failure, err
 	}
 	task, err := executor.gateway.Get(ctx, generation.OwnerID(op.OwnerID), accepted.TaskID)
@@ -434,4 +441,20 @@ func agentGrantMatchesOperation(grant executiongrant.Grant, op Operation) bool {
 		grant.OfferingRevision == op.OfferingRevision &&
 		grant.PlanStepID == "" && grant.Source == executiongrant.AgentPending &&
 		grant.TriggerTurnID == op.AssistantMessageID
+}
+
+// abandonBudgetReservation gives back the plan reservation of an approved
+// grant whose submit was refused for good in this turn. A retry is a new tool
+// call with a new grant, so without it the credits would stay reserved until
+// a new plan replaces this one (#103 review). The release is idempotent and
+// does nothing for a grant without a reservation or one already bound.
+func (executor *Executor) abandonBudgetReservation(ctx context.Context, op Operation) {
+	if executor.grants == nil || op.GrantRequestID == "" {
+		return
+	}
+	if err := executor.grants.AbandonBudgetReservation(context.WithoutCancel(ctx), op.OwnerID, op.GrantRequestID); err != nil &&
+		executor.logger != nil {
+		executor.logger.WarnContext(ctx, "budget reservation release failed",
+			"grant_request_id", op.GrantRequestID, "error", err)
+	}
 }

@@ -1,11 +1,13 @@
 package modelinspect
 
 import (
+	"context"
 	"image"
 	"image/color"
 	"math"
 	"runtime"
 	"sync"
+	"sync/atomic"
 )
 
 // MaxRenderDimension is the absolute ceiling Render enforces on Width and
@@ -99,7 +101,17 @@ type RenderRequest struct {
 	// CullBackfaces enables back-face culling for single-sided materials.
 	// It is off by default so a model with inverted normals still has no holes.
 	CullBackfaces bool
+	// Context, when set, stops rasterisation once it is done; Render then
+	// returns its error.
+	Context context.Context
 }
+
+// renderCoverageFactor bounds rasterisation work: the summed screen bounding
+// boxes of all drawn triangles may cover the supersampled image at most this
+// many times. Real models stay far below it; a mesh that repeats a
+// full-screen triangle millions of times is rejected instead of running for
+// hours.
+const renderCoverageFactor = 256
 
 // Render draws one view of m with a software rasteriser and returns an opaque
 // NRGBA image. It uses a z-buffer, 2x supersampling and bilinear texture
@@ -200,6 +212,10 @@ func Render(m *Model, req RenderRequest) (*image.NRGBA, error) {
 	pixels := make([]float32, supersampledWidth*supersampledHeight*3)
 	depth := make([]float64, supersampledWidth*supersampledHeight)
 
+	ctx := req.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	raster := renderer{
 		camera:        camera,
 		mode:          mode,
@@ -207,8 +223,13 @@ func Render(m *Model, req RenderRequest) (*image.NRGBA, error) {
 		parts:         parts,
 		background:    backgroundLinear,
 		cullBackfaces: req.CullBackfaces,
+		ctx:           ctx,
+		coverageLeft:  int64(supersampledWidth) * int64(supersampledHeight) * renderCoverageFactor,
 	}
 	renderInBands(&raster, pixels, depth, supersampledHeight, workers)
+	if err := raster.failure(); err != nil {
+		return nil, err
+	}
 
 	return downsample(pixels, supersampledWidth, req.Width, req.Height), nil
 }
@@ -500,6 +521,51 @@ type renderer struct {
 	parts         []*renderPart
 	background    [3]float64
 	cullBackfaces bool
+
+	ctx          context.Context
+	coverageLeft int64 // atomic; shared by all bands
+	stopped      atomic.Bool
+	stopOnce     sync.Once
+	stopErr      error
+}
+
+// renderCheckInterval is how many triangles a band draws between checks of
+// the context and the coverage budget.
+const renderCheckInterval = 1024
+
+func (r *renderer) stop(err error) {
+	r.stopOnce.Do(func() { r.stopErr = err })
+	r.stopped.Store(true)
+}
+
+func (r *renderer) failure() error {
+	if !r.stopped.Load() {
+		return nil
+	}
+	return r.stopErr
+}
+
+// halted reports whether drawing must stop: the render was already stopped or
+// its context is done.
+func (r *renderer) halted() bool {
+	if r.stopped.Load() {
+		return true
+	}
+	if err := r.ctx.Err(); err != nil {
+		r.stop(err)
+		return true
+	}
+	return false
+}
+
+// spend charges one triangle's screen bounding box against the coverage
+// budget and reports whether drawing may continue.
+func (r *renderer) spend(area int64) bool {
+	if atomic.AddInt64(&r.coverageLeft, -area) < 0 {
+		r.stop(toolargef("render coverage exceeds %d times the image", renderCoverageFactor))
+		return false
+	}
+	return true
 }
 
 func renderInBands(renderer *renderer, pixels []float32, depth []float64, height, workers int) {
@@ -552,6 +618,9 @@ const mainLightZ = 0.5999
 
 func (r *renderer) drawPartBand(part *renderPart, pixels []float32, depth []float64, startY, endY int) {
 	for triangle := 0; triangle < part.triangleCount; triangle++ {
+		if triangle%renderCheckInterval == 0 && r.halted() {
+			return
+		}
 		a, b, c, ok := part.source.triangle(triangle, part.indices)
 		if !ok {
 			continue
@@ -599,6 +668,9 @@ func (r *renderer) drawPartBand(part *renderPart, pixels []float32, depth []floa
 		maxY := min(endY-1, int(math.Ceil(max3(y0, y1, y2))))
 		if minX > maxX || minY > maxY {
 			continue
+		}
+		if !r.spend(int64(maxX-minX+1) * int64(maxY-minY+1)) {
+			return
 		}
 		invZ0 := r.camera.inverseDepth(z0)
 		invZ1 := r.camera.inverseDepth(z1)
@@ -796,6 +868,9 @@ func edgeFunction(ax, ay, bx, by, px, py float64) float64 {
 
 func (r *renderer) drawWireBand(part *renderPart, pixels []float32, depth []float64, startY, endY int) {
 	for triangle := 0; triangle < part.triangleCount; triangle++ {
+		if triangle%renderCheckInterval == 0 && r.halted() {
+			return
+		}
 		a, b, c, ok := part.source.triangle(triangle, part.indices)
 		if !ok {
 			continue

@@ -63,9 +63,9 @@ func TestVerdictKeyBindsAssetIdentity(t *testing.T) {
 		ID: "asset", OwnerID: "owner", Role: "model", Variant: "glb",
 		TaskID: "task", SessionID: "session", SHA256: strings.Repeat("a", 64),
 	}
-	key := verdictKey(offering, input, []generation.InputAsset{base})
+	key := verdictKey(offering, input, "owner", "session", []generation.InputAsset{base})
 	same := base
-	if got := verdictKey(offering, input, []generation.InputAsset{same}); got != key {
+	if got := verdictKey(offering, input, "owner", "session", []generation.InputAsset{same}); got != key {
 		t.Fatalf("identical asset identity produced a different key: %s != %s", got, key)
 	}
 	changes := map[string]func(*generation.InputAsset){
@@ -79,9 +79,15 @@ func TestVerdictKeyBindsAssetIdentity(t *testing.T) {
 	for name, change := range changes {
 		changed := base
 		change(&changed)
-		if got := verdictKey(offering, input, []generation.InputAsset{changed}); got == key {
+		if got := verdictKey(offering, input, "owner", "session", []generation.InputAsset{changed}); got == key {
 			t.Fatalf("changing %s did not change the verdict key", name)
 		}
+	}
+	// The same asset requested from another session or by another owner must
+	// not reuse a verdict: the session check depends on the request.
+	if verdictKey(offering, input, "owner", "other-session", []generation.InputAsset{base}) == key ||
+		verdictKey(offering, input, "other-owner", "session", []generation.InputAsset{base}) == key {
+		t.Fatal("the requesting owner or session did not change the verdict key")
 	}
 }
 

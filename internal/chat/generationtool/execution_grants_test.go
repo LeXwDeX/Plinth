@@ -32,6 +32,8 @@ type grantGateway struct {
 	submitCount   int
 	// prepareErr, when set, is what freezing the input answers.
 	prepareErr error
+	// submitErr, when set, is what submitting the frozen input answers.
+	submitErr error
 	// offering finds the Offering a frozen input is priced by; the default
 	// looks in the fake gateway's own list.
 	offering func(generation.OfferingID) (generation.Offering, bool)
@@ -138,7 +140,11 @@ func (g *grantGateway) GetPreparedInput(ctx context.Context, owner generation.Ow
 func (g *grantGateway) SubmitPrepared(_ context.Context, cmd generation.SubmitPreparedCommand) (generation.Accepted, error) {
 	g.mu.Lock()
 	g.submitCount++
+	submitErr := g.submitErr
 	g.mu.Unlock()
+	if submitErr != nil {
+		return generation.Accepted{}, submitErr
+	}
 	return generation.Accepted{TaskID: "accepted-agent-task"}, nil
 }
 

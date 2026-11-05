@@ -182,9 +182,15 @@ func modelReviewUsageItem(check, status string, actual any, budget map[string]an
 }
 
 func modelReviewUsageReadError(report modelinspect.Report) bool {
+	return modelReviewUsageWarned(report, "read_error")
+}
+
+func modelReviewUsageWarned(report modelinspect.Report, names ...string) bool {
 	for _, warning := range report.Warnings {
-		if warning == "read_error" {
-			return true
+		for _, name := range names {
+			if warning == name {
+				return true
+			}
 		}
 	}
 	return false
@@ -234,7 +240,9 @@ func modelReviewUsageWatertightCheck(
 	status := modelReviewUsageStatusUnknown
 	if budget.RequireWatertight {
 		switch {
-		case modelReviewUsageReadError(report) || report.Triangles == 0:
+		case modelReviewUsageReadError(report) || report.Triangles == 0,
+			// Topology skipped the parts with bad data, so it cannot judge them.
+			modelReviewUsageWarned(report, "invalid_indices", "invalid_positions"):
 		case report.Topology.Watertight:
 			status = modelReviewUsageStatusPass
 		default:

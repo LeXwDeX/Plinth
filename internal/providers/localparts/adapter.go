@@ -90,6 +90,12 @@ func domainError(err error) error {
 }
 
 func providerError(err error) error {
+	// A failure that already carries its own classification (for example an
+	// integrity failure from storing the output) keeps it.
+	var classified *generation.ProviderError
+	if errors.As(err, &classified) && classified.Failure != nil {
+		return err
+	}
 	class := generation.FailureInvalidInput
 	retryable := false
 	var domain *generation.Error
@@ -285,6 +291,10 @@ func (a *Adapter) readSources(ctx context.Context, request generation.InputValid
 			return nil, limitError("total_encoded_bytes")
 		}
 		totalEncoded += int64(base64.StdEncoding.EncodedLen(int(asset.Size)))
+		// Check before reading: every source is read whole into memory.
+		if c.capability == generation.ModelMerge && totalEncoded > c.source.MaxTotalEncodedBytes {
+			return nil, mergeTotalError()
+		}
 		reader, err := a.inputs.Open(ctx, asset)
 		if err != nil {
 			return nil, err
@@ -308,10 +318,11 @@ func (a *Adapter) readSources(ctx context.Context, request generation.InputValid
 		}
 		sources = append(sources, &sourceModel{asset: asset, doc: document, bin: bin, budget: budget})
 	}
-	if c.capability == generation.ModelMerge && totalEncoded > c.source.MaxTotalEncodedBytes {
-		return nil, &generation.Error{Code: generation.ErrInvalidInput, Operation: operation, Detail: "合并来源模型的总大小超过上限"}
-	}
 	return sources, nil
+}
+
+func mergeTotalError() error {
+	return &generation.Error{Code: generation.ErrInvalidInput, Operation: operation, Detail: "合并来源模型的总大小超过上限"}
 }
 
 // acquire waits for one of the Offering's declared slots. Each slot holds one
@@ -543,7 +554,7 @@ func (a *Adapter) ValidateInput(ctx context.Context, request generation.InputVal
 	if err != nil {
 		return unavailableError("本地拆分或合并配置无效", err)
 	}
-	key := verdictKey(request.Offering, request.Input, flattenAssets(request.InputAssets))
+	key := verdictKey(request.Offering, request.Input, string(request.OwnerID), request.SessionID, flattenAssets(request.InputAssets))
 	if verdict, ok := a.verdicts.get(key); ok {
 		return verdict
 	}
@@ -619,12 +630,15 @@ func randomAssetID() (generation.AssetID, error) {
 }
 
 // verdictKey binds a verdict to the frozen Offering, normalized input and the
-// full source asset identity, including digests, in input order. Identical
-// bytes attached to a different asset or Task context must not share a verdict.
-func verdictKey(offering generation.Offering, input json.RawMessage, assets []generation.InputAsset) string {
+// full source asset identity, including digests, in input order, and to the
+// requesting owner and session. Identical bytes attached to a different asset,
+// Task or request context must not share a verdict: the session check in run
+// depends on the request, not only on the asset.
+func verdictKey(offering generation.Offering, input json.RawMessage, ownerID, sessionID string, assets []generation.InputAsset) string {
 	hasher := sha256.New()
 	outputs, _ := json.Marshal(offering.Outputs)
-	parts := [][]byte{[]byte(offering.ID), []byte(offering.Revision), offering.ProviderOptions, outputs, input}
+	parts := [][]byte{[]byte(offering.ID), []byte(offering.Revision), offering.ProviderOptions, outputs, input,
+		[]byte(ownerID), []byte(sessionID)}
 	for _, asset := range assets {
 		parts = append(parts,
 			[]byte(asset.ID), []byte(asset.OwnerID), []byte(asset.Role), []byte(asset.Variant),

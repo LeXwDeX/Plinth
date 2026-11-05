@@ -145,7 +145,8 @@ type AnimationReport struct {
 }
 
 // TopologyReport is computed after welding positions. Watertight is true
-// exactly when BoundaryEdges and NonManifoldEdges are both zero.
+// exactly when every triangle was analysed, at least one is not degenerate,
+// and BoundaryEdges and NonManifoldEdges are both zero.
 type TopologyReport struct {
 	WeldEpsilon           float64 `json:"weld_epsilon"`
 	ConnectedComponents   int     `json:"connected_components"`

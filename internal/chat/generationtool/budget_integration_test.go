@@ -230,3 +230,31 @@ func TestBudgetReceiptKeysComeFromTheToolResultFields(t *testing.T) {
 		t.Fatalf("no budget under the Schema key: %v", refused)
 	}
 }
+
+// A budget-approved step whose submit is refused for good inside the turn gives
+// its reservation back; otherwise the plan would look spent until replaced.
+func TestBudgetModeReleasesTheReservationOfARefusedSubmit(t *testing.T) {
+	executor, command, gateway, repo := budgetHarness(t, "refine_image", "text-to-image")
+	createActiveBudgetPlan(t, repo, "pb-refused", 15, "text-to-image")
+	gateway.submitErr = &generation.Error{Code: generation.ErrInvalidInput, Operation: "submit"}
+
+	command.Call.ID = "call-refused"
+	command.ConsentWaitDeadline = time.Time{}
+	result, err := executor.Execute(context.Background(), command, nil)
+	if err == nil || !result.NoSubmission || gateway.submitCount != 1 {
+		t.Fatalf("refused submit: result=%+v err=%v submits=%d", result, err, gateway.submitCount)
+	}
+	summary, found, err := repo.ProductionBudgetSummary(context.Background(), "owner-a", "session-a")
+	if err != nil || !found {
+		t.Fatalf("plan summary: found=%v err=%v", found, err)
+	}
+	if summary.ReservedCredits != 0 || summary.RemainingCredits != 15 {
+		t.Fatalf("after a refused submit: reserved %d remaining %d", summary.ReservedCredits, summary.RemainingCredits)
+	}
+
+	gateway.submitErr = nil
+	retried := executeBudgetCall(t, executor, command, "call-retry")
+	if retried.Suspend || retried.NoSubmission || gateway.submitCount != 2 {
+		t.Fatalf("retry after the refusal waited: %+v submits=%d", retried, gateway.submitCount)
+	}
+}
