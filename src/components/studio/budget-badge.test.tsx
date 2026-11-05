@@ -11,7 +11,13 @@ import type { ChatSession } from '@/store/chat-store';
 import { useChatStore } from '@/store/chat-store';
 import { useWorkspaceStore, type TrackedTask } from '@/store/workspace-store';
 
-const schema = defaultCatalog.application as unknown as ProductSchema;
+const raw = defaultCatalog.application;
+// The public projection names each plan state with its role (#120); the raw Catalog keeps them under budget.states.
+const schema = {
+  ...raw,
+  chat: { ...raw.chat, approval_policy: { ...raw.chat.approval_policy,
+    budget_states: raw.chat.approval_policy.budget.states.map(({ id, role }) => ({ id, role })) } },
+} as unknown as ProductSchema;
 const messages = defaultCatalog.application.content.messages as Record<string, string>;
 const text = (key: string) => schemaText(schema, key);
 

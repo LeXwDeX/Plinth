@@ -7704,11 +7704,11 @@
           "no_plan_state": "尚未提交计划",
           "no_plan_text": "无。如果这次制作需要多个付费步骤，先用 propose_production_plan 把制作计划和总积分预算提交给用户批准。",
           "states": [
-            {"id": "pending", "label": "待批准"},
-            {"id": "active", "label": "执行中"},
-            {"id": "exhausted", "label": "预算已用完"},
-            {"id": "closed", "label": "已结束"},
-            {"id": "denied", "label": "已拒绝"}
+            {"id": "pending", "label": "待批准", "role": "pending"},
+            {"id": "active", "label": "执行中", "role": "active"},
+            {"id": "exhausted", "label": "预算已用完", "role": "ended"},
+            {"id": "closed", "label": "已结束", "role": "ended"},
+            {"id": "denied", "label": "已拒绝", "role": "denied"}
           ],
           "messages": {
             "approved": "制作计划「{title}」已批准，总预算 {limit} 积分，剩余 {remaining} 积分。计划内的步骤会按预算自动执行，不再逐张出批准卡。",

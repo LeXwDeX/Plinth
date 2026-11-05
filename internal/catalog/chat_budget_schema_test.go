@@ -75,6 +75,24 @@ func TestDefaultCatalogDeclaresTheBudgetModeAndItsPlanTool(t *testing.T) {
 		!slicesContain(public.Chat.ApprovalPolicy.Modes, "budget") {
 		t.Fatalf("public budget schema = %+v / %+v", public.Chat.API.ResponseFields, public.Runtime.HTTP.Routes)
 	}
+	// #120: the browser acts on each state's declared role, never on its ID.
+	roles := map[string]string{}
+	for _, state := range public.Chat.ApprovalPolicy.BudgetStates {
+		roles[state.ID] = state.Role
+	}
+	want := map[string]string{
+		"pending": catalog.ChatApprovalBudgetRolePending, "active": catalog.ChatApprovalBudgetRoleActive,
+		"exhausted": catalog.ChatApprovalBudgetRoleEnded, "closed": catalog.ChatApprovalBudgetRoleEnded,
+		"denied": catalog.ChatApprovalBudgetRoleDenied,
+	}
+	if len(roles) != len(want) {
+		t.Fatalf("public budget states = %+v", public.Chat.ApprovalPolicy.BudgetStates)
+	}
+	for id, role := range want {
+		if roles[id] != role {
+			t.Fatalf("public budget state %s role = %q, want %q", id, roles[id], role)
+		}
+	}
 }
 
 // A Catalog that offers budget mode must carry a usable plan budget; a
@@ -94,6 +112,16 @@ func TestBudgetModeRequiresItsPlanBoundsAndTexts(t *testing.T) {
 		},
 		"unknown state": func(a *catalog.ApplicationSchema) {
 			a.Chat.ApprovalPolicy.Budget.States[0].ID = "paused"
+		},
+		"state without a role": func(a *catalog.ApplicationSchema) {
+			a.Chat.ApprovalPolicy.Budget.States[0].Role = ""
+		},
+		"role contradicting the state": func(a *catalog.ApplicationSchema) {
+			for index := range a.Chat.ApprovalPolicy.Budget.States {
+				if a.Chat.ApprovalPolicy.Budget.States[index].ID == "active" {
+					a.Chat.ApprovalPolicy.Budget.States[index].Role = catalog.ChatApprovalBudgetRoleDenied
+				}
+			}
 		},
 		"empty approved message": func(a *catalog.ApplicationSchema) {
 			a.Chat.ApprovalPolicy.Budget.Messages.Approved = ""

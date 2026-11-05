@@ -8,7 +8,7 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { fetchCapabilityOfferings, type OfferingWire } from '@/lib/agent-offerings';
-import { planEstimatedTotal, type ProductionPlan, type SessionBudget } from '@/lib/chat/budget';
+import { budgetStateRole, budgetStateWithRole, planEstimatedTotal, type ProductionPlan, type SessionBudget } from '@/lib/chat/budget';
 import { completedPlanSteps, planStepProgress, type PlanTask } from '@/lib/chat/plan-progress';
 import { formatSchemaText, schemaCountMessage, schemaText, taskStatePresentation } from '@/lib/product-schema';
 import { cn } from '@/lib/utils';
@@ -104,7 +104,8 @@ export function PlanCard({ plan, budgetCredits, tasks, onDecide, busy = false, e
     <article
       className="flex flex-col gap-1.5 rounded-lg border border-border bg-panel-raised p-3 text-xs"
       data-testid="studio-plan-card"
-      data-state={progress?.state ?? 'pending'}
+      data-state={progress?.state ?? budgetStateWithRole(schema, 'pending')}
+      data-role={progress ? budgetStateRole(schema, progress.state) ?? '' : 'pending'}
       aria-label={text('ui.studio.plan.title')}
     >
       <header className="flex items-center gap-1.5">

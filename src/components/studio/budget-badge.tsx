@@ -7,6 +7,7 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { PlanCard } from '@/components/studio/plan-card';
+import { budgetIsShown } from '@/lib/chat/budget';
 import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
 import { schemaCountMessage, schemaText } from '@/lib/product-schema';
 import { cn } from '@/lib/utils';
@@ -25,7 +26,8 @@ export function BudgetBadge() {
   const tasks = useWorkspaceStore(useShallow((state) => state.trackedTasks.filter((task) => task.sessionId === activeSessionId)));
   const [open, setOpen] = useState(false);
   const layer = useAnchoredPositioner();
-  if (!activeSessionId || !budget || budget.state === 'denied') return null;
+  // #120: a refused plan is hidden by its Schema role, not by a state id.
+  if (!activeSessionId || !budgetIsShown(schema, budget)) return null;
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger

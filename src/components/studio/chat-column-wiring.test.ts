@@ -98,7 +98,11 @@ describe('plan reload and explicit 3D lock wiring (#103)', () => {
     expect(agentDialog).not.toContain('chatClient.getSession(sessionId).catch(() => null)');
     expect(agentDialog).toContain('ui.studio.plan.reload_failed');
     expect(agentDialog).toContain('<PlanReloadNotice');
-    expect(agentDialog).toContain("planReloadError || sessionBudget?.state === 'pending'");
+    // #120: the waiting and shown checks are the Schema roles of the plan state, not state ids.
+    expect(agentDialog).toContain('const budgetAwaiting = budgetAwaitsDecision(schema, sessionBudget);');
+    expect(agentDialog).toContain('const budgetShown = budgetIsShown(schema, sessionBudget);');
+    expect(agentDialog).toContain('planReloadError || budgetAwaiting');
+    expect(agentDialog).not.toMatch(/sessionBudget\??\.state/);
     expect(agentDialog).toContain('onReload={reloadPlans}');
   });
 
