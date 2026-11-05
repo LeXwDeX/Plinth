@@ -131,6 +131,11 @@ type Offering struct {
 	CapabilityOrder  int              `json:"capability_order"`
 	Priority         int              `json:"priority,omitempty"`
 	EstimatedCredits int              `json:"estimated_credits,omitempty"`
+	// Description states what the step does and what it does not keep (for
+	// example textures or size), so the Agent can choose and chain steps from
+	// list_offerings (#130). It is Offering copy: the copy guards and the
+	// English offering_texts apply to it.
+	Description string `json:"description,omitempty"`
 	// CreditsMetered 声明该 Offering 的 Provider 按积分计费；未声明的
 	// Offering 不向用户展示积分（estimated_credits 仍用于内部审批与预估）。
 	CreditsMetered bool `json:"credits_metered,omitempty"`

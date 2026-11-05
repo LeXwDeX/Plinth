@@ -517,7 +517,7 @@ type offeringCopyField struct {
 // offeringUserFacingCopy lists the Offering strings a person reads. The
 // terminology guard and the internal-identifier guard share this scope.
 func offeringUserFacingCopy(offering schemacontract.Offering) []offeringCopyField {
-	copies := []offeringCopyField{{"model_name", offering.ModelName}}
+	copies := []offeringCopyField{{"model_name", offering.ModelName}, {"description", offering.Description}}
 	for parameterIndex, parameter := range offering.Parameters {
 		prefix := fmt.Sprintf("parameters[%d]", parameterIndex)
 		copies = append(copies,

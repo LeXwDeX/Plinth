@@ -66,6 +66,25 @@ func TestShippedCraftPromptCoversThe3DToolbox(t *testing.T) {
 	}
 }
 
+// #130: the craft brief used to say remesh keeps texture detail by baking.
+// Only the baked decimation does; remesh loses textures and may change size,
+// and the brief sends the Agent to the Offering descriptions for the details.
+func TestCraftPromptDoesNotPromiseThatRemeshKeepsTextures(t *testing.T) {
+	c, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := c.Application().Chat.Agent.CraftPrompts[0].Text
+	if strings.Contains(text, "重拓扑（烘焙保留贴图") {
+		t.Fatal("craft brief still says remesh keeps textures by baking")
+	}
+	for _, want := range []string{"list_offerings", "description", "带烘焙的减面", "重拓扑（如 Meshy 重拓扑）不保留贴图", "尺寸也可能改变", "换贴图", "精确尺寸", "不要再叠加重拓扑"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("craft brief omits %q", want)
+		}
+	}
+}
+
 func TestCraftPromptDeclarationsAreValidated(t *testing.T) {
 	tests := []struct {
 		name   string

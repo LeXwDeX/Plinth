@@ -150,6 +150,8 @@ Meshy 的自动 preview/refine 链仍保留 preview 提交身份。对象式或�
 
 MR !111 已合入并发布 revision `c29c6fcdfa82be552dc28e7a07e438d7db4ff8c6`。真实 Agent 计划的 Remesh、Rigging、Animation 均成功；冻结依赖只读核对证明 Remesh 消费已交付 refine，冻结 Offering 无 `model_parameter`，每步一个 Attempt。原始上游 HTTP 请求未抓取，不用数据库重建冒充抓包。Retexture 的 refine wire 引用、旧批准冲突和暂时读故障恢复仍以本机契约测试为证，本轮未追加这些付费或故障路径。精确任务、产物、浏览器范围和剩余项见 #162、#166。
 
+**Remesh 只处理几何（#130；源码已实现，未部署验收）。** dev-test 上 Agent 对 Tripo 带烘焙减面的结果叠加 Remesh 后，底色贴图几乎空白，包围盒由约 0.98 m 变为 2.00 m。Remesh 可保持尺寸的字段已弃用（见上表与 `provider_deprecations`），所以不新增映射；Offering 顶层 `description` 把这两点和替代路线（带烘焙的减面、换贴图、Resize）交给 Agent，字段规则见 `docs/architecture.md`「3D 处理工具」的 Offering 说明。wire 请求与 revision 不变。
+
 ## 2. Schema 与执行代码
 
 | 归属 | 内容 |

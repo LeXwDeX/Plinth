@@ -5394,6 +5394,7 @@ type rawOffering struct {
 	ProviderOrder                 *int                            `json:"provider_order,omitempty"`
 	ModelID                       string                          `json:"model_id"`
 	ModelName                     string                          `json:"model_name"`
+	Description                   string                          `json:"description,omitempty"`
 	Capability                    schemacontract.Capability       `json:"capability"`
 	Domain                        schemacontract.CapabilityDomain `json:"domain"`
 	AdapterKey                    string                          `json:"adapter_key"`

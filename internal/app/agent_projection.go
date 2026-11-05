@@ -15,6 +15,9 @@ type agentOfferingView struct {
 	UpperNativeQuote   *schema.NativeQuote `json:"upper_native_quote,omitempty"`
 	OfferingID         string              `json:"offering_id"`
 	ModelID            string              `json:"model_id"`
+	// Description is the Offering's Schema description: what the step keeps
+	// or changes (for example textures or size, #130). Absent when undeclared.
+	Description string `json:"description,omitempty"`
 	// An absent capacity is unknown, not a single-picture limit.
 	ReferenceImageMax int `json:"reference_image_max,omitempty"`
 	EstimatedCredits  int `json:"estimated_credits,omitempty"`
@@ -172,8 +175,9 @@ func buildAgentOfferingsProjection(
 				continue
 			}
 			offeringView := agentOfferingView{
-				OfferingID: string(offering.ID),
-				ModelID:    offering.ModelID,
+				OfferingID:  string(offering.ID),
+				ModelID:     offering.ModelID,
+				Description: offering.Description,
 			}
 			for _, parameter := range offering.Parameters {
 				if parameter.Semantic == generation.SemanticReferenceImage && parameter.Type == "asset-array" && parameter.MaxItems > 0 {
