@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-05.issue103-prompts.6",
+    "revision": "2026-11-05.issue129-purpose-budget.1",
     "terminology": {
       "user_facing": [
         {
@@ -6314,7 +6314,8 @@
             "model_note": "model_note",
             "model_choice": "model_choice",
             "budget": "budget",
-            "reason": "reason"
+            "reason": "reason",
+            "purpose_budget_note": "purpose_budget_note"
           }
         },
         {
@@ -6399,7 +6400,8 @@
             "model_choice": "model_choice",
             "reference_note": "reference_note",
             "budget": "budget",
-            "reason": "reason"
+            "reason": "reason",
+            "purpose_budget_note": "purpose_budget_note"
           }
         },
         {
@@ -6462,7 +6464,7 @@
           "prompt_with_reference_template": "{prompt}",
           "prompt_with_previous_template": "{previous_prompt} {prompt}",
           "idempotency_key_template": "chat:{session_id}:{call_id}",
-          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback","model_note":"model_note","model_choice":"model_choice","reference_note":"reference_note","budget":"budget","reason":"reason"}
+          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback","model_note":"model_note","model_choice":"model_choice","reference_note":"reference_note","budget":"budget","reason":"reason","purpose_budget_note":"purpose_budget_note"}
         },
         {
           "name": "retexture_model",
@@ -6571,7 +6573,8 @@
             "approval": "approval",
             "model_formats": "model_formats",
             "budget": "budget",
-            "reason": "reason"
+            "reason": "reason",
+            "purpose_budget_note": "purpose_budget_note"
           }
         },
         {
@@ -6847,7 +6850,8 @@
             "approval": "approval",
             "model_formats": "model_formats",
             "budget": "budget",
-            "reason": "reason"
+            "reason": "reason",
+            "purpose_budget_note": "purpose_budget_note"
           }
         },
         {
@@ -6944,7 +6948,7 @@
           "result_attachment_kind": "model",
           "result_asset_roles": ["thumbnail"],
           "idempotency_key_template": "chat:{session_id}:{call_id}",
-          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","budget":"budget","reason":"reason"}
+          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","budget":"budget","reason":"reason","purpose_budget_note":"purpose_budget_note"}
         },
         {
           "name": "convert_model_format",
@@ -8044,6 +8048,23 @@
             "out_of_range": "字段 “{field}” 必须在 {minimum} 与 {maximum} 之间",
             "unsupported_type": "字段 “{field}” 的类型 “{type}” 未实现"
           }
+        },
+        "budget_limits": [
+          {
+            "semantic": "polycount",
+            "bound": "max_triangles",
+            "item_template": "{model} 的「{parameter}」为 {value}（约 {amount} 个三角面），超过用途「{purpose}」的三角面上限 {maximum}"
+          },
+          {
+            "semantic": "texture-size",
+            "bound": "max_texture_size",
+            "option_values": {"2k": 2048, "4k": 4096, "8k": 8192},
+            "item_template": "{model} 的「{parameter}」为 {value}（贴图边长 {amount} 像素），超过用途「{purpose}」的贴图边长上限 {maximum} 像素"
+          }
+        ],
+        "budget_note": {
+          "template": "以下取值超出本会话用途「{purpose}」的预算，服务端照常提交、没有拒绝：{items}。请如实告诉用户哪些值超出预算以及可能的影响；用户没有明确要这些值时，建议改用预算内的取值。",
+          "separator": "；"
         }
       },
       "context_compaction": {
@@ -16531,6 +16552,10 @@
             "chat.model3d_usage.brief.messages.text_too_long": "Field “{field}” cannot exceed {maximum} characters",
             "chat.model3d_usage.brief.messages.out_of_range": "Field “{field}” must be between {minimum} and {maximum}",
             "chat.model3d_usage.brief.messages.unsupported_type": "Field “{field}” has an unsupported type “{type}”",
+            "chat.model3d_usage.budget_limits[semantic=polycount].item_template": "{parameter} of {model} is {value} (about {amount} triangles), over the {maximum}-triangle limit of the purpose “{purpose}”",
+            "chat.model3d_usage.budget_limits[semantic=texture-size].item_template": "{parameter} of {model} is {value} (textures {amount} pixels on a side), over the {maximum}-pixel texture limit of the purpose “{purpose}”",
+            "chat.model3d_usage.budget_note.template": "These values are over the budget of this session's purpose “{purpose}”; the server submits them as given and refused nothing: {items}. Tell the user plainly which values are over the budget and what that may mean; unless the user explicitly asked for these values, suggest values within the budget.",
+            "chat.model3d_usage.budget_note.separator": "; ",
             "chat.presentation.messages.offering_choice_unavailable": "The selected option is not available right now, so nothing was submitted. Choose only from these available options: {choices}.",
             "chat.presentation.messages.source_offering_unpaired": "This source Task cannot be used with this tool, so nothing was submitted. The source must be a Task you completed successfully in this session that pairs with one of this tool's available functions (for example, a Creative Lab design preview of the same template).",
             "chat.presentation.messages.source_offering_canvas": "This turn's input is the artboard snapshot. The snapshot is not a source Task itself, and the artboard does not show exactly one design preview you completed successfully in this session that can pair, so nothing was submitted. Call again with the design preview's image handle or its Task ID; the user does not need to clear the artboard or select again.",
@@ -17071,7 +17096,7 @@
             "后空翻接勾拳 (Backflip_and_Hooks)": "Backflip and hooks",
             "后空翻起身 (Backflip_and_Rise)": "Backflip and rise",
             "后空翻跳 (Backflip_Jump)": "Backflip jump",
-            "后端固定为最高纹理分辨率 8K。": "The backend always uses the highest texture resolution, 8K.",
+            "默认使用最高纹理分辨率 8K；会话用途规定了更低的贴图上限时，Agent 发起的换贴图按上限取值。": "Defaults to the highest texture resolution, 8K; when the session's purpose sets a lower texture limit, a retexture the Agent starts uses that limit.",
             "后端固定从预览开始，预览完成后自动提交精细化，交付带贴图的最高质量模型。精细化阶段由适配器内部提交。": "The backend always starts with a preview and submits refinement automatically once the preview completes, delivering the highest-quality textured model. The refine stage is submitted internally by the adapter.",
             "后退射击 (Walk_Backward_While_Shooting)": "Walk backward while shooting",
             "后退射击·原地 (Walk_Backward_While_Shooting_inplace)": "Backward walk while shooting (in place)",
@@ -17884,7 +17909,7 @@
             "默认优化参考图以改善生成质量；需要严格保留原图外观时可说明理由关闭。": "Reference images are optimized by default to improve generation quality. Turn this off, with a stated reason, when the original image's look must be strictly preserved.",
             "默认使用三角面输出。": "Triangle output is used by default.",
             "默认使用当前最新纹理模型；Agent 可基于明确需求调整为本端点支持的其他版本并说明理由。": "Defaults to the latest texture model; the Agent may switch to another version supported by this endpoint based on explicit needs and explain why.",
-            "默认使用最高 200 万面上限；需要控制面数时使用独立重拓扑。": "Defaults to the highest limit of 2 million faces; use a separate remesh when you need to control the face count.",
+            "默认使用最高 200 万面上限；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。": "Defaults to the highest limit of 2 million faces; when the session's purpose sets a lower triangle limit, a generation the Agent starts uses that limit.",
             "导出分辨率范围为 64–512，默认 512（最高档）；几何来自 512 像素深度图，更高网格不会增加细节。": "Export resolution ranges from 64 to 512, with a default of 512 (the highest); the geometry comes from a 512-pixel depth map, so a finer grid adds no detail.",
             "GLB 模型（可在 3D 舞台预览）": "GLB model (previewable on the 3D stage)",
             "完整文件包 ZIP（只能下载）": "Complete file bundle ZIP (download only)",
@@ -20682,7 +20707,7 @@
     },
     {
       "id": "meshy/meshy-7.1/text-to-3d",
-      "revision": "2026-10-22.329.1",
+      "revision": "2026-11-05.129.1",
       "provider_id": "meshy",
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
@@ -20857,6 +20882,16 @@
         },
         {
           "name": "should_remesh",
+          "forced_when": [
+            {
+              "when": {
+                "parameter": "target_polycount",
+                "operator": "not-equals",
+                "value": 300000
+              },
+              "value": true
+            }
+          ],
           "label": "自动重拓扑",
           "type": "boolean",
           "default": false,
@@ -20883,6 +20918,7 @@
           "name": "texture_resolution",
           "label": "纹理分辨率",
           "type": "select",
+          "semantic": "texture-size",
           "default": "8k",
           "options": [
             {
@@ -21288,6 +21324,7 @@
           "name": "texture_resolution",
           "label": "纹理分辨率",
           "type": "select",
+          "semantic": "texture-size",
           "default": "2k",
           "fixed": true,
           "options": [
@@ -21786,7 +21823,7 @@
     },
     {
       "id": "meshy/meshy-7.1/image-to-3d",
-      "revision": "2026-10-22.329.2",
+      "revision": "2026-11-05.129.1",
       "provider_id": "meshy",
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
@@ -21997,6 +22034,16 @@
         },
         {
           "name": "should_remesh",
+          "forced_when": [
+            {
+              "when": {
+                "parameter": "target_polycount",
+                "operator": "not-equals",
+                "value": 300000
+              },
+              "value": true
+            }
+          ],
           "label": "自动重拓扑",
           "type": "boolean",
           "default": false,
@@ -22035,6 +22082,7 @@
           "name": "texture_resolution",
           "label": "纹理分辨率",
           "type": "select",
+          "semantic": "texture-size",
           "default": "8k",
           "options": [
             {
@@ -22358,6 +22406,7 @@
           "name": "texture_resolution",
           "label": "纹理分辨率",
           "type": "select",
+          "semantic": "texture-size",
           "default": "8k",
           "options": [
             {
@@ -22721,7 +22770,7 @@
           "minimum": 1000,
           "maximum": 2000000,
           "default": 2000000,
-          "description": "默认使用最高 200 万面上限；需要控制面数时使用独立重拓扑。",
+          "description": "默认使用最高 200 万面上限；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
           "presentation": {
             "surface": "readonly",
             "control": "number",
@@ -23361,7 +23410,7 @@
           "minimum": 1000,
           "maximum": 2000000,
           "default": 2000000,
-          "description": "默认使用最高 200 万面上限；需要控制面数时使用独立重拓扑。",
+          "description": "默认使用最高 200 万面上限；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
           "presentation": {
             "surface": "readonly",
             "control": "number",
@@ -24047,7 +24096,7 @@
           "minimum": 1000,
           "maximum": 2000000,
           "default": 2000000,
-          "description": "默认使用最高 200 万面上限；需要控制面数时使用独立重拓扑。",
+          "description": "默认使用最高 200 万面上限；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
           "presentation": {
             "surface": "readonly",
             "control": "number",
@@ -24768,7 +24817,7 @@
           "minimum": 1000,
           "maximum": 2000000,
           "default": 2000000,
-          "description": "默认使用最高 200 万面上限；需要控制面数时使用独立重拓扑。",
+          "description": "默认使用最高 200 万面上限；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
           "presentation": {
             "surface": "readonly",
             "control": "number",
@@ -25487,7 +25536,7 @@
           "minimum": 1000,
           "maximum": 2000000,
           "default": 2000000,
-          "description": "默认使用最高 200 万面上限；需要控制面数时使用独立重拓扑。",
+          "description": "默认使用最高 200 万面上限；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
           "presentation": {
             "surface": "readonly",
             "control": "number",
@@ -27555,7 +27604,7 @@
     },
     {
       "id": "meshy/processing/retexture",
-      "revision": "2026-10-22.329.2",
+      "revision": "2026-11-05.129.1",
       "provider_id": "meshy",
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
@@ -27716,6 +27765,7 @@
           "name": "texture_resolution",
           "label": "纹理分辨率",
           "type": "select",
+          "semantic": "texture-size",
           "default": "8k",
           "options": [
             {
@@ -27731,12 +27781,11 @@
               "label": "8K"
             }
           ],
-          "description": "后端固定为最高纹理分辨率 8K。",
+          "description": "默认使用最高纹理分辨率 8K；会话用途规定了更低的贴图上限时，Agent 发起的换贴图按上限取值。",
           "presentation": {
-            "surface": "readonly",
+            "surface": "provider",
             "control": "select"
-          },
-          "fixed": true
+          }
         },
         {
           "name": "enable_pbr",
@@ -38736,6 +38785,7 @@
           "name": "texture_resolution",
           "label": "纹理分辨率",
           "type": "select",
+          "semantic": "texture-size",
           "default": "8k",
           "options": [
             {
@@ -39088,6 +39138,7 @@
           "name": "face_limit",
           "label": "目标面数（留空为自适应）",
           "type": "number",
+          "semantic": "polycount",
           "integer": true,
           "minimum": 500,
           "maximum": 20000,
@@ -39394,6 +39445,7 @@
           "name": "face_limit",
           "label": "目标面数（留空为自适应）",
           "type": "number",
+          "semantic": "polycount",
           "integer": true,
           "minimum": 500,
           "maximum": 10000,

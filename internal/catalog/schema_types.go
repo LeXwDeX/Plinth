@@ -2637,6 +2637,36 @@ type ChatModel3DUsageSchema struct {
 	DefaultProfile string                    `json:"default_profile"`
 	Profiles       []ChatModel3DUsageProfile `json:"profiles"`
 	Brief          ChatProductionBriefSchema `json:"brief"`
+	// BudgetLimits declares which parameter semantics a purpose's budget
+	// bounds (#129). A bounded parameter nobody chose takes a value within the
+	// session purpose's budget; a chosen value over it is kept and reported
+	// with BudgetNote. Empty (historical Catalogs) bounds nothing.
+	BudgetLimits []ChatModel3DUsageBudgetLimit `json:"budget_limits,omitempty"`
+	BudgetNote   ChatModel3DUsageBudgetNote    `json:"budget_note"`
+}
+
+// ChatModel3DUsageBudgetLimit bounds the parameters of one semantic by one
+// field of the purpose budget (#129).
+type ChatModel3DUsageBudgetLimit struct {
+	Semantic schemacontract.ParameterSemantic `json:"semantic"`
+	// Bound names the budget field: max_triangles or max_texture_size.
+	Bound string `json:"bound"`
+	// OptionValues gives the amount, in the bound's unit, of each value of a
+	// select parameter ("2k": 2048 pixels). Every option of a bounded select
+	// parameter must be listed.
+	OptionValues map[string]float64 `json:"option_values,omitempty"`
+	// ItemTemplate words one value over the budget: {model}, {parameter},
+	// {value}, {amount} (the value in the bound's unit), {maximum} and
+	// {purpose}.
+	ItemTemplate string `json:"item_template"`
+}
+
+// ChatModel3DUsageBudgetNote is the tool-result note listing a step's values
+// over the session purpose's budget: Template wraps the items ({items},
+// {purpose}) joined by Separator.
+type ChatModel3DUsageBudgetNote struct {
+	Template  string `json:"template"`
+	Separator string `json:"separator"`
 }
 
 // ChatModel3DUsageProfile is one production purpose.
@@ -4101,6 +4131,10 @@ type ChatToolResultFields struct {
 	// person. Empty keys omit the values (#103 review B4).
 	Budget string `json:"budget,omitempty"`
 	Reason string `json:"reason,omitempty"`
+	// PurposeBudgetNote is the optional key of the model3d_usage.budget_note
+	// naming the step's values over the session purpose's budget (#129). It
+	// is present only when some value is over it.
+	PurposeBudgetNote string `json:"purpose_budget_note,omitempty"`
 }
 
 // ChatAgentToolSchema 声明非生成类 agent 控制工具（set_params /

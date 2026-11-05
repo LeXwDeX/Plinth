@@ -223,6 +223,10 @@ func (executor *Executor) executeProcessingPlan(ctx context.Context, command cha
 				return executor.reject(command, executor.fillText(command, messages.ArgumentUnsupported, "{argument}", name))
 			}
 		}
+		// #129: the session purpose's budget fills the bounded parameters the
+		// step left unset. A plan step carries no adjustment reason, so an
+		// advised parameter keeps its default and the plan's note reports it.
+		executor.applyPurposeValues(command, chosen.offering, input, true)
 		input[chosen.binding.Parameter], _ = json.Marshal(chosen.binding.Value)
 		encoded, _ := json.Marshal(input)
 		encoded, consentErr := agentConsentInput(chosen.offering, encoded)
@@ -340,10 +344,19 @@ func (v processingPriceStepView) MarshalJSON() ([]byte, error) {
 func (executor *Executor) processingPlanResult(command chat.ToolCommand, config *catalog.ChatToolProcessingSchema, plan processing.Plan) (chat.ToolResult, error) {
 	steps := make([]processingPriceStepView, 0, len(plan.Steps))
 	var prices schema.PriceAccumulator
+	var overBudget []string
 	for _, step := range plan.Steps {
 		steps = append(steps, processingPriceStepView{Capability: step.Capability, OfferingID: step.OfferingID, Revision: step.Revision, Parameters: step.Input, EstimatedCredits: step.EstimatedCredits, NativeQuote: step.NativeQuote, State: step.State, TaskID: step.TaskID, Failure: step.Failure})
 		if e := prices.Add(step.EstimatedCredits, step.NativeQuote); e != nil {
 			return chat.ToolResult{NoSubmission: true}, e
+		}
+		if command.Tool.ResultFields.PurposeBudgetNote != "" {
+			for _, offering := range executor.gateway.Offerings(step.Capability) {
+				if offering.ID == step.OfferingID {
+					overBudget = append(overBudget, executor.purposeBudgetItems(command, offering, step.Input)...)
+					break
+				}
+			}
 		}
 	}
 	totals, e := prices.Totals()
@@ -362,6 +375,11 @@ func (executor *Executor) processingPlanResult(command chat.ToolCommand, config 
 	if len(totals) > 0 {
 		delete(payload, "estimated_credits")
 		payload["price_totals"] = totals
+	}
+	// #129: the plan says which planned values are over the session purpose's
+	// budget, as a single step's result does.
+	if note := executor.purposeBudgetText(command, overBudget); note != "" {
+		payload[command.Tool.ResultFields.PurposeBudgetNote] = note
 	}
 	content, err := json.Marshal(payload)
 	return chat.ToolResult{AgentContent: string(content), NoSubmission: true}, err

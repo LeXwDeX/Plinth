@@ -79,6 +79,8 @@ func TestSkillSettableClosureIsExplicitAllowlist(t *testing.T) {
 		schema.SemanticSourceAsset,
 		schema.SemanticSourceURL,
 		schema.SemanticAction,
+		// The session purpose's budget bounds the texture size (#129).
+		schema.SemanticTextureSize,
 	}
 	for _, semantic := range excluded {
 		if !semantic.Valid() {

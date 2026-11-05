@@ -175,6 +175,7 @@ const (
 	SemanticPolycount      = schema.SemanticPolycount
 	SemanticOutputSize     = schema.SemanticOutputSize
 	SemanticQuality        = schema.SemanticQuality
+	SemanticTextureSize    = schema.SemanticTextureSize
 
 	SemanticSourceTask  = schema.SemanticSourceTask
 	SemanticSourceAsset = schema.SemanticSourceAsset

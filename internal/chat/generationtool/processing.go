@@ -775,6 +775,23 @@ func (executor *Executor) executeProcessing(
 	if rejection := executor.applyProcessingParameterArguments(command, chosen, processing, arguments, input, allFormats); rejection != nil {
 		return executor.reject(command, rejection.message)
 	}
+	// #129: the session purpose's budget fills the bounded parameters this
+	// call left unset, as it does for the generation tools.
+	current, err := rawInput(input)
+	if err != nil {
+		return chat.ToolResult{NoSubmission: true}, err
+	}
+	executor.applyPurposeValues(command, chosen.offering, current, false)
+	for name, value := range current {
+		if _, set := input[name]; set {
+			continue
+		}
+		var decoded any
+		if err := json.Unmarshal(value, &decoded); err != nil {
+			return chat.ToolResult{NoSubmission: true}, err
+		}
+		input[name] = decoded
+	}
 	if gaps := executor.inputGaps(command, chosen.offering, input); len(gaps) > 0 {
 		return executor.reject(command, executor.fillText(command, messages.InvalidInput, "{detail}", strings.Join(gaps, "; ")))
 	}
