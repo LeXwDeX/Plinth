@@ -7,3 +7,9 @@ allowBuilds:
   esbuild: true
   msw: true
   unrs-resolver: false
+overrides:
+  esbuild@~0.28: ^0.28.1
+  nanoid@^3: ^3.3.18
+  postcss@^8: ^8.5.23
+  source-map-js@^1: ^1.2.2
+  tsx@^4: ^4.22.0

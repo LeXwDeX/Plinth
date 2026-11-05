@@ -39,13 +39,13 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/three": "0.180.0",
-    "@vitest/coverage-v8": "^4.1.8",
+    "@vitest/coverage-v8": "^4.1.12",
     "jsdom": "^26.1.0",
     "msw": "^2.12.14",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vite": "^8.1.6",
-    "vitest": "^4.1.2",
+    "vitest": "^4.1.12",
     "yaml": "^2.9.1"
   }
 }
