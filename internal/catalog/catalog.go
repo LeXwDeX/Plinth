@@ -349,6 +349,7 @@ func (raw rawOffering) toOffering() schemacontract.Offering {
 		ProviderOrder:                 valueOrZero(raw.ProviderOrder),
 		ModelID:                       raw.ModelID,
 		ModelName:                     raw.ModelName,
+		Description:                   raw.Description,
 		Capability:                    raw.Capability,
 		Domain:                        raw.Domain,
 		AdapterKey:                    raw.AdapterKey,

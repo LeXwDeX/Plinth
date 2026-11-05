@@ -37,6 +37,14 @@ func TestOfferingCopyValidationRejectsInternalFieldLeaks(t *testing.T) {
 			want: "model_seed",
 		},
 		{
+			name: "wire name in an Offering description",
+			mutate: func(document map[string]any) {
+				remesh := offeringDocumentByID(t, document, "meshy/processing/remesh")
+				remesh["description"] = remesh["description"].(string) + " target_polycount"
+			},
+			want: `用户文案 description 含内部参数名 "target_polycount"`,
+		},
+		{
 			name: "wire name in an input rule message",
 			mutate: func(document map[string]any) {
 				keychain := offeringDocumentByID(t, document, "meshy/creative-lab/keychain/build")
