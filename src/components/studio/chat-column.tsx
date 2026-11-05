@@ -78,6 +78,7 @@ import { withSessionSendLock } from '@/lib/chat/send-preparation';
 import { InFlightGuard } from '@/lib/chat/in-flight-guard';
 import { flushExplicitModel3D } from '@/lib/chat/explicit-model';
 import { reloadSessionBudget } from '@/lib/chat/session-budget';
+import { budgetAwaitsDecision, budgetIsShown } from '@/lib/chat/budget';
 import { PendingApprovalError, type PendingApprovalInput } from '@/lib/chat/pending-approvals';
 import { cancelQueuedTurn, enqueueTurn, queuedFor, takeQueuedTurn, type QueueBySession } from '@/lib/chat/send-queue';
 import { ChatHistorySkeleton } from '@/components/chat/chat-history-skeleton';
@@ -1628,6 +1629,9 @@ export function ChatColumn() {
     ...pending.items.filter((item) => item.kind === 'step').map((item) => cardFromPending(item, labelOfInput)),
   ];
   const sessionBudget = useChatStore((state) => state.sessions.find((session) => session.id === activeSessionId)?.budget ?? null);
+  // #120: whether the plan is shown or still waits for a decision is the Schema role of its state.
+  const budgetShown = budgetIsShown(schema, sessionBudget);
+  const budgetAwaiting = budgetAwaitsDecision(schema, sessionBudget);
 
   // Tasks of this session that the page saw running. When one of them ends outside a turn (a late
   // approval), the result message, the version strip and the session credits catch up by themselves.
@@ -1880,7 +1884,7 @@ export function ChatColumn() {
           >
             {historyLoading && displayMessages.length === 0 ? (
               <ChatHistorySkeleton label={schemaText(schema, 'ui.chat.loading')} />
-            ) : displayMessages.length === 0 && threeViews.length === 0 && !isStreaming && approvalCards.length === 0 && planCards.length === 0 && !(sessionBudget && sessionBudget.state !== 'denied') && queuedTurns.length === 0 ? (
+            ) : displayMessages.length === 0 && threeViews.length === 0 && !isStreaming && approvalCards.length === 0 && planCards.length === 0 && !budgetShown && queuedTurns.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
                 <div className="rounded-xl bg-primary/15 p-3 text-primary"><ImagePlus className="size-6" /></div>
                 <p className="max-w-xs text-sm leading-6 text-muted-foreground">{schemaText(schema, 'ui.workspace.agent.empty')}</p>
@@ -1942,29 +1946,28 @@ export function ChatColumn() {
                 {choicePlacement.loose.map(renderChoiceCard)}
               </div>
             ) : null}
-            {(planCards.length > 0 || (sessionBudget && sessionBudget.state !== 'denied') || planReloadError) ? (
+            {(planCards.length > 0 || budgetShown || planReloadError) ? (
               <div className="mt-2 flex flex-col gap-2 px-1" data-testid="chat-plan-cards">
                 {planCards.map((item) => item.plan ? (
                   <PlanCard
                     key={item.requestId}
                     plan={item.plan}
-                    budgetCredits={item.budgetCredits}
+                    budgets={item.budgets}
                     tasks={sessionTasks}
                     busy={decisionBusy.has(item.requestId)}
                     error={decisionError[item.requestId] ?? null}
                     onDecide={(approved) => { void decidePlan(item.requestId, approved); }}
                   />
                 ) : null)}
-                {planCards.length === 0 && (planReloadError || sessionBudget?.state === 'pending') ? (
+                {planCards.length === 0 && (planReloadError || budgetAwaiting) ? (
                   <PlanReloadNotice
                     message={planReloadError ?? schemaText(schema, 'ui.studio.plan.reload_failed')}
                     busy={planReloading}
                     onReload={reloadPlans}
                   />
-                ) : planCards.length === 0 && sessionBudget && sessionBudget.state !== 'denied' ? (
+                ) : planCards.length === 0 && budgetShown && sessionBudget ? (
                   <PlanCard
                     plan={sessionBudget.plan}
-                    budgetCredits={sessionBudget.limitCredits}
                     tasks={sessionTasks}
                     progress={sessionBudget}
                   />

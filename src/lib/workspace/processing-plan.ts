@@ -1,4 +1,5 @@
 import { offeringShowsCredits, type OfferingWire } from '@/lib/agent-offerings';
+import { approvalDecisionBody } from '@/lib/approval-decision';
 import { schemaText, type ProductSchema } from '@/lib/product-schema';
 import { formatNativePrice, parseNativeQuote, type NativeQuote } from '@/lib/pricing';
 import { withRequestReference } from '@/lib/problem-reference';
@@ -226,7 +227,7 @@ export async function resumeProcessingPlan(request: ResumeRequest): Promise<Resu
       const decision = await fetcher(decisionRoute, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decision: 'approve' }),
+        body: JSON.stringify(approvalDecisionBody(schema, true)),
       });
       if (!decision.ok) throw await problem(decision);
     }

@@ -3001,27 +3001,38 @@ type ChatApprovalPolicySchema struct {
 }
 
 // ChatApprovalBudgetSchema is application.chat.approval_policy.budget. It
-// bounds a production plan the Agent proposes and the total credits a person
-// approves; the server re-estimates every step from the Catalog instead of
+// bounds a production plan the Agent proposes and the credits a person
+// approves per credit unit (#120: units are limited separately and never
+// added); the server re-estimates every step from the Catalog instead of
 // trusting the Agent's numbers.
 type ChatApprovalBudgetSchema struct {
+	// MaxCredits bounds the limit of each unit of a plan.
 	MaxCredits           int `json:"max_credits"`
 	MaxSteps             int `json:"max_steps"`
 	MaxTitleCharacters   int `json:"max_title_characters"`
 	MaxPurposeCharacters int `json:"max_purpose_characters"`
 	// ContextTemplate is appended to the Agent's system context in budget mode.
 	// Fields: {state} (the state's label), {limit}, {spent}, {reserved},
-	// {remaining}, {plan}.
+	// {remaining}, {plan}. The amounts are listed per unit, each with its
+	// label, joined by UnitSeparator.
 	ContextTemplate string `json:"context_template"`
+	// LegacyUnitLabel names the legacy bucket (historical integer credit
+	// estimates) in the Agent context and the session messages; a provider
+	// unit keeps its own label from the Offering's native pricing (#120).
+	LegacyUnitLabel string `json:"legacy_unit_label"`
+	// UnitSeparator joins the amounts of different units, which are listed
+	// side by side and never added.
+	UnitSeparator string `json:"unit_separator"`
 	// NoPlanState and NoPlanText render {state} and {plan} before the session
 	// has a plan at all.
 	NoPlanState string `json:"no_plan_state"`
 	NoPlanText  string `json:"no_plan_text"`
-	// States labels the plan states the runtime may report. The IDs are fixed
-	// by internal/budget.
+	// States labels the plan states the runtime may report and declares what
+	// each one means to the browser (its role). The IDs are fixed by
+	// internal/budget.
 	States []ChatApprovalBudgetState `json:"states"`
 	// Messages are the session messages posted when a plan card is decided or
-	// expires. Fields: {title}, {limit}, {remaining}.
+	// expires. Fields: {title}, {limit}, {remaining}, each listed per unit.
 	Messages ChatApprovalBudgetMessages `json:"messages"`
 	// ToolMessages are the Agent-facing tool result of propose_production_plan
 	// in each state, so the execution layer keeps no English copy (#103
@@ -3037,10 +3048,31 @@ type ChatApprovalBudgetToolMessages struct {
 	Closed    string `json:"closed"`
 }
 
-// ChatApprovalBudgetState is the person-facing label of one plan state.
+// ChatApprovalBudgetState is the person-facing label of one plan state and
+// its role (#120): the meaning the browser acts on, so the UI never keeps its
+// own table of which state waits for a decision, spends, ended or was refused.
 type ChatApprovalBudgetState struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
+	// Role is one of the ChatApprovalBudgetRole* values.
+	Role string `json:"role"`
+}
+
+// Roles of a production plan state (#120). Pending waits for the person's
+// decision; active may spend; ended is decided and finished (used up or
+// replaced) but still shown; denied was refused and is not shown.
+const (
+	ChatApprovalBudgetRolePending = "pending"
+	ChatApprovalBudgetRoleActive  = "active"
+	ChatApprovalBudgetRoleEnded   = "ended"
+	ChatApprovalBudgetRoleDenied  = "denied"
+)
+
+// PublicChatApprovalBudgetState is one plan state the browser may see: its ID
+// and role. Labels reach the browser as ui.studio.plan.state.* messages.
+type PublicChatApprovalBudgetState struct {
+	ID   string `json:"id"`
+	Role string `json:"role"`
 }
 
 // ChatApprovalBudgetMessages are the texts posted to the session for a plan
@@ -3062,10 +3094,11 @@ type PublicChatApprovalPolicy struct {
 	DefaultMode                string                      `json:"default_mode"`
 	Modes                      []string                    `json:"modes"`
 	ManualApprovalCapabilities []schemacontract.Capability `json:"manual_approval_capabilities"`
-	// BudgetStates are the plan state ids the runtime may report, so the
-	// browser labels a state instead of keeping its own list (#103 review F7).
-	// Empty means the deployment declares no budget plan.
-	BudgetStates []string `json:"budget_states,omitempty"`
+	// BudgetStates are the plan states the runtime may report with their
+	// roles, so the browser labels a state and acts on its role instead of
+	// keeping its own list (#103 review F7, #120). Empty means the deployment
+	// declares no budget plan.
+	BudgetStates []PublicChatApprovalBudgetState `json:"budget_states,omitempty"`
 }
 
 // ChatApprovalPromptSchema is application.chat.approval_policy.prompt. The

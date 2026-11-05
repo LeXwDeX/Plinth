@@ -41,7 +41,7 @@ const (
 	autoModeLabel     = "批准方式是「自动」"
 	autoModeText      = "自动方式下，所有付费步骤都由系统按会话批准方式自动批准，不出批准卡"
 	budgetModeLabel   = "批准方式是「预算（制作计划）」"
-	budgetModeText    = "预算方式下，Agent 先用 propose_production_plan 提交一份制作计划和总积分预算"
+	budgetModeText    = "预算方式下，Agent 先用 propose_production_plan 提交一份制作计划和按积分单位的预算"
 	budgetBlockHead   = "【制作预算】"
 	noPlanStateText   = "尚未提交计划"
 	approvalBlockHead = "【批准方式】"
@@ -54,7 +54,7 @@ type promptBudgetStore struct {
 }
 
 func (store promptBudgetStore) CreateProductionPlan(context.Context, string, string, string, string, string,
-	budget.Plan, int) (budget.ProductionBudget, error) {
+	budget.Plan, []budget.Amount) (budget.ProductionBudget, error) {
 	return budget.ProductionBudget{}, errors.New("unused")
 }
 
@@ -205,21 +205,33 @@ func TestApprovalModePromptKeepsTheAgentOutOfTheModeAndFollowsTheScope(t *testin
 
 // A person who approved a plan is told its limits and what is left, so the
 // Agent runs inside the approved budget instead of opening another card or
-// proposing the same plan again (#103).
+// proposing the same plan again (#103). Every amount is given per credit unit
+// with its label, and different units are never added (#120).
 func TestBudgetModePromptCarriesTheActivePlanAndWhatIsLeft(t *testing.T) {
+	tripo := budget.Amount{Unit: "tripo.credit", UnitLabel: "Tripo credits", Micros: 200000000}
+	hyper3D := budget.Amount{Unit: "hyper3d.credit", UnitLabel: "Hyper3D credits", Micros: 3000000}
 	summary := budget.Summary{
-		ID: "pb_1", State: budget.StateActive, LimitCredits: 200,
-		SpentCredits: 120, ReservedCredits: 30, RemainingCredits: 50,
+		ID: "pb_1", State: budget.StateActive,
+		Units: []budget.UnitBudget{
+			budget.NewUnitBudget(hyper3D, 500000, 0),
+			budget.NewUnitBudget(budget.Legacy(40), 0, 0),
+			budget.NewUnitBudget(tripo, 120000000, 30000000),
+		},
 		Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
-			{Capability: "text-to-3d", Purpose: "主体模型", EstimatedCredits: 80},
+			{Capability: "text-to-3d", Purpose: "主体模型", Estimate: budget.Amount{Unit: "tripo.credit", UnitLabel: "Tripo credits", Micros: 80000000}},
+			{Capability: "mesh-segmentation", Purpose: "拆件", Estimate: budget.Amount{Unit: "hyper3d.credit", UnitLabel: "Hyper3D credits", Micros: 500000}},
 		}},
 	}
 	system := approvalPromptSystem(t, approvalPromptCase{mode: "budget", budget: &summary})
 	for _, want := range []string{
 		budgetBlockHead, budgetModeLabel,
 		"当前制作计划：执行中",
-		"总预算 200 积分", "已扣费 120 积分", "执行中预留 30 积分", "剩余 50 积分",
-		"计划：骑士；text-to-3d：主体模型，约 80 积分",
+		"不同供应商的单位不相加",
+		"总预算 3 Hyper3D credits · 40 历史积分估算 · 200 Tripo credits",
+		"已扣费 0.5 Hyper3D credits · 0 历史积分估算 · 120 Tripo credits",
+		"执行中预留 0 Hyper3D credits · 0 历史积分估算 · 30 Tripo credits",
+		"剩余 2.5 Hyper3D credits · 40 历史积分估算 · 50 Tripo credits",
+		"计划：骑士；text-to-3d：主体模型，约 80 Tripo credits；mesh-segmentation：拆件，约 0.5 Hyper3D credits",
 	} {
 		if !strings.Contains(system, want) {
 			t.Errorf("the budget context omits %q", want)

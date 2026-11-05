@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
+	"github.com/LeXwDeX/Plinth/internal/budget"
 	"testing"
 	"time"
 
@@ -33,7 +34,7 @@ func TestTimedOutAcceptedJobKeepsItsBudgetReservationCharged(t *testing.T) {
 			plan := budgetTestPlan(t, r, "pb-timeout", 20, "text-to-3d")
 			i, g := prepareBudgetGrant(t, r, "turn-a", "timeout", "text-to-3d", 7)
 			if _, err := r.ApproveExecutionGrantWithBudget(ctx, i.OwnerID, g.RequestID, plan.ID,
-				executiongrant.BudgetActorPrefix+plan.ID, 7); err != nil {
+				executiongrant.BudgetActorPrefix+plan.ID, budget.Legacy(7)); err != nil {
 				t.Fatal(err)
 			}
 			bindBudgetTask(t, r, i, g.RequestID, "task-timeout")
@@ -52,7 +53,8 @@ func TestTimedOutAcceptedJobKeepsItsBudgetReservationCharged(t *testing.T) {
 				t.Fatalf("reservation = %q, want %q", state, testCase.wantState)
 			}
 			summary, found, err := r.ProductionBudgetSummary(ctx, "owner-a", "session-a")
-			if err != nil || !found || summary.SpentCredits != testCase.wantSpent || summary.ReservedCredits != 0 {
+			legacy, ok := summary.Unit(budget.LegacyUnit)
+			if err != nil || !found || !ok || legacy.Spent != budget.Legacy(testCase.wantSpent).Micros || legacy.Reserved != 0 {
 				t.Fatalf("summary = %+v found=%v err=%v", summary, found, err)
 			}
 		})

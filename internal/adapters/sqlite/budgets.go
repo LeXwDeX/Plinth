@@ -20,21 +20,28 @@ var (
 	_ executiongrant.BudgetNoticeStore     = (*Repository)(nil)
 )
 
-const productionBudgetSelect = `SELECT id, owner_id, session_id, plan_json, limit_credits,
+const productionBudgetSelect = `SELECT id, owner_id, session_id, plan_json, limits_json,
  state, created_at, decided_at, decided_by, message_id, call_id FROM production_budgets`
 
 func scanProductionBudget(row interface{ Scan(...any) error }) (budget.ProductionBudget, error) {
 	var value budget.ProductionBudget
-	var planJSON, created string
+	var planJSON, limitsJSON, created string
 	var decidedAt sql.NullString
 	err := row.Scan(&value.ID, &value.OwnerID, &value.SessionID, &planJSON,
-		&value.LimitCredits, &value.State, &created, &decidedAt, &value.DecidedBy,
+		&limitsJSON, &value.State, &created, &decidedAt, &value.DecidedBy,
 		&value.MessageID, &value.CallID)
 	if err != nil {
 		return value, err
 	}
 	if err := json.Unmarshal([]byte(planJSON), &value.Plan); err != nil {
 		return value, fmt.Errorf("解析 production_budgets.plan_json: %w", err)
+	}
+	var limits []budget.Amount
+	if err := json.Unmarshal([]byte(limitsJSON), &limits); err != nil {
+		return value, fmt.Errorf("解析 production_budgets.limits_json: %w", err)
+	}
+	if value.Limits, err = budget.NormalizeLimits(limits); err != nil {
+		return value, fmt.Errorf("production_budgets.limits_json 无效: %w", err)
 	}
 	value.CreatedAt, err = parseTime(created)
 	if err != nil {
@@ -59,20 +66,48 @@ func productionBudgetByID(ctx context.Context, conn queryer, owner, budgetID str
 	return value, err
 }
 
-func budgetTotals(ctx context.Context, conn queryer, budgetID string) (spent, reserved int, err error) {
-	err = conn.QueryRowContext(ctx, `SELECT
- COALESCE(SUM(CASE WHEN state = 'charged' THEN credits END), 0),
- COALESCE(SUM(CASE WHEN state = 'reserved' THEN credits END), 0)
- FROM budget_reservations WHERE budget_id = ?`, budgetID).Scan(&spent, &reserved)
-	return spent, reserved, err
+// budgetTotalsSelect totals reservations per plan and unit; amounts of
+// different units are never summed together (#120).
+const budgetTotalsSelect = `SELECT budget_id, unit,
+ COALESCE(SUM(CASE WHEN state = 'charged' THEN amount_micros END), 0),
+ COALESCE(SUM(CASE WHEN state = 'reserved' THEN amount_micros END), 0)
+ FROM budget_reservations`
+
+// scanBudgetTotals reads budgetTotalsSelect rows into totals by plan.
+func scanBudgetTotals(rows *sql.Rows, into map[string]budget.Totals) error {
+	defer rows.Close()
+	for rows.Next() {
+		var budgetID, unit string
+		var spent, reserved int64
+		if err := rows.Scan(&budgetID, &unit, &spent, &reserved); err != nil {
+			return err
+		}
+		if into[budgetID] == nil {
+			into[budgetID] = budget.Totals{}
+		}
+		into[budgetID][unit] = budget.UnitTotals{Spent: spent, Reserved: reserved}
+	}
+	return rows.Err()
+}
+
+func budgetTotals(ctx context.Context, conn queryer, budgetID string) (budget.Totals, error) {
+	rows, err := conn.QueryContext(ctx, budgetTotalsSelect+` WHERE budget_id = ? GROUP BY budget_id, unit`, budgetID)
+	if err != nil {
+		return nil, err
+	}
+	totals := map[string]budget.Totals{}
+	if err := scanBudgetTotals(rows, totals); err != nil {
+		return nil, err
+	}
+	return totals[budgetID], nil
 }
 
 func budgetSummary(ctx context.Context, conn queryer, value budget.ProductionBudget) (budget.Summary, error) {
-	spent, reserved, err := budgetTotals(ctx, conn, value.ID)
+	totals, err := budgetTotals(ctx, conn, value.ID)
 	if err != nil {
 		return budget.Summary{}, err
 	}
-	return budget.SummaryOf(value, spent, reserved), nil
+	return budget.SummaryOf(value, totals), nil
 }
 
 // CreateProductionBudget stores a pending plan and closes the session's other
@@ -80,10 +115,18 @@ func budgetSummary(ctx context.Context, conn queryer, value budget.ProductionBud
 // unchanged stored plan; the same ID with different content is a conflict.
 func (r *Repository) CreateProductionBudget(ctx context.Context, value budget.ProductionBudget) (budget.ProductionBudget, error) {
 	if value.ID == "" || value.OwnerID == "" || value.SessionID == "" ||
-		value.LimitCredits <= 0 || value.State != budget.StatePending || value.CreatedAt.IsZero() {
+		value.State != budget.StatePending || value.CreatedAt.IsZero() {
+		return budget.ProductionBudget{}, executiongrant.ErrInvalid
+	}
+	limits, err := budget.NormalizeLimits(value.Limits)
+	if err != nil {
 		return budget.ProductionBudget{}, executiongrant.ErrInvalid
 	}
 	planJSON, err := json.Marshal(value.Plan)
+	if err != nil {
+		return budget.ProductionBudget{}, err
+	}
+	limitsJSON, err := json.Marshal(limits)
 	if err != nil {
 		return budget.ProductionBudget{}, err
 	}
@@ -104,8 +147,12 @@ func (r *Repository) CreateProductionBudget(ctx context.Context, value budget.Pr
 		if marshalErr != nil {
 			return budget.ProductionBudget{}, marshalErr
 		}
+		storedLimits, marshalErr := json.Marshal(existing.Limits)
+		if marshalErr != nil {
+			return budget.ProductionBudget{}, marshalErr
+		}
 		if existing.OwnerID != value.OwnerID || existing.SessionID != value.SessionID ||
-			existing.LimitCredits != value.LimitCredits || string(storedPlan) != string(planJSON) {
+			string(storedLimits) != string(limitsJSON) || string(storedPlan) != string(planJSON) {
 			return budget.ProductionBudget{}, executiongrant.ErrConflict
 		}
 		if err := commitGrantConn(ctx, conn); err != nil {
@@ -125,9 +172,9 @@ func (r *Repository) CreateProductionBudget(ctx context.Context, value budget.Pr
 		return budget.ProductionBudget{}, err
 	}
 	if _, err := conn.ExecContext(ctx, `INSERT INTO production_budgets
- (id, owner_id, session_id, plan_json, limit_credits, state, created_at, decided_at, decided_by, message_id, call_id)
+ (id, owner_id, session_id, plan_json, limits_json, state, created_at, decided_at, decided_by, message_id, call_id)
  VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL, '', ?, ?)`,
-		value.ID, value.OwnerID, value.SessionID, string(planJSON), value.LimitCredits, now, value.MessageID, value.CallID); err != nil {
+		value.ID, value.OwnerID, value.SessionID, string(planJSON), string(limitsJSON), now, value.MessageID, value.CallID); err != nil {
 		return budget.ProductionBudget{}, err
 	}
 	stored, err := productionBudgetByID(ctx, conn, value.OwnerID, value.ID)
@@ -363,8 +410,9 @@ func settleReservationsOnConn(ctx context.Context, conn *sql.Conn, budgetID stri
 
 // SettleBudgetReservations settles ended Tasks' reservations, releases the
 // reservations of grants that can no longer spend, and marks an active plan
-// exhausted once its charged total reached the limit. It returns the plans it
-// marked exhausted in this call, so their notice is posted once.
+// exhausted once its charged totals reached the limit of every unit. It
+// returns the plans it marked exhausted in this call, so their notice is
+// posted once.
 func (r *Repository) SettleBudgetReservations(ctx context.Context, now time.Time) ([]budget.ProductionBudget, error) {
 	conn, err := r.grantWriteConn(ctx)
 	if err != nil {
@@ -379,28 +427,39 @@ func (r *Repository) SettleBudgetReservations(ctx context.Context, now time.Time
 	if err := settleReservationsOnConn(ctx, conn, "", now); err != nil {
 		return nil, err
 	}
+	// Only an active plan that charged something can have used up every unit.
 	rows, err := conn.QueryContext(ctx, productionBudgetSelect+`
- WHERE state = 'active' AND (
-  SELECT COALESCE(SUM(credits), 0) FROM budget_reservations
+ WHERE state = 'active' AND EXISTS (
+  SELECT 1 FROM budget_reservations
   WHERE budget_id = production_budgets.id AND state = 'charged'
- ) >= limit_credits`)
+ )`)
 	if err != nil {
 		return nil, err
 	}
-	var exhausted []budget.ProductionBudget
+	var charged []budget.ProductionBudget
 	for rows.Next() {
 		value, err := scanProductionBudget(rows)
 		if err != nil {
 			rows.Close()
 			return nil, err
 		}
-		exhausted = append(exhausted, value)
+		charged = append(charged, value)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
 		return nil, err
 	}
 	rows.Close()
+	var exhausted []budget.ProductionBudget
+	for _, value := range charged {
+		totals, err := budgetTotals(ctx, conn, value.ID)
+		if err != nil {
+			return nil, err
+		}
+		if value.ExhaustedBy(totals) {
+			exhausted = append(exhausted, value)
+		}
+	}
 	stamp := formatTime(now)
 	for _, value := range exhausted {
 		if _, err := conn.ExecContext(ctx, `UPDATE production_budgets
@@ -506,7 +565,7 @@ func (r *Repository) ProductionBudgetSummaries(ctx context.Context, ownerID stri
 	for _, value := range current {
 		budgetIDs = append(budgetIDs, value.ID)
 	}
-	totals := make(map[string][2]int, len(budgetIDs))
+	totals := make(map[string]budget.Totals, len(budgetIDs))
 	for start := 0; start < len(budgetIDs); start += productionBudgetSummaryBatch {
 		end := min(start+productionBudgetSummaryBatch, len(budgetIDs))
 		chunk := budgetIDs[start:end]
@@ -514,32 +573,17 @@ func (r *Repository) ProductionBudgetSummaries(ctx context.Context, ownerID stri
 		for _, budgetID := range chunk {
 			args = append(args, budgetID)
 		}
-		rows, err := r.db.QueryContext(ctx, `SELECT budget_id,
- COALESCE(SUM(CASE WHEN state = 'charged' THEN credits END), 0),
- COALESCE(SUM(CASE WHEN state = 'reserved' THEN credits END), 0)
- FROM budget_reservations WHERE budget_id IN (`+queryPlaceholders(len(chunk))+`)
- GROUP BY budget_id`, args...)
+		rows, err := r.db.QueryContext(ctx, budgetTotalsSelect+` WHERE budget_id IN (`+queryPlaceholders(len(chunk))+`)
+ GROUP BY budget_id, unit`, args...)
 		if err != nil {
 			return nil, err
 		}
-		for rows.Next() {
-			var budgetID string
-			var spent, reserved int
-			if err := rows.Scan(&budgetID, &spent, &reserved); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			totals[budgetID] = [2]int{spent, reserved}
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
+		if err := scanBudgetTotals(rows, totals); err != nil {
 			return nil, err
 		}
-		rows.Close()
 	}
 	for sessionID, value := range current {
-		total := totals[value.ID]
-		summaries[sessionID] = budget.SummaryOf(value, total[0], total[1])
+		summaries[sessionID] = budget.SummaryOf(value, totals[value.ID])
 	}
 	return summaries, nil
 }
@@ -660,11 +704,14 @@ func (r *Repository) MarkProductionBudgetNoticeSent(ctx context.Context, ownerID
 }
 
 // ApproveExecutionGrantWithBudget is the atomic budget authorization: settle
-// what already ended, re-check the remaining limit, insert the reservation and
-// approve the grant in one BEGIN IMMEDIATE transaction. Two concurrent steps
-// therefore cannot both take the last credits.
-func (r *Repository) ApproveExecutionGrantWithBudget(ctx context.Context, owner, requestID, budgetID, actor string, credits int) (executiongrant.Grant, error) {
-	if owner == "" || requestID == "" || budgetID == "" || credits < 0 ||
+// what already ended, re-check what remains in the amount's unit, insert the
+// reservation and approve the grant in one BEGIN IMMEDIATE transaction. Two
+// concurrent steps therefore cannot both take the last credits of a unit. A
+// positive amount needs the plan's limit in its own unit; different units are
+// never compared or added (#120). A zero amount reserves nothing and fits any
+// active plan.
+func (r *Repository) ApproveExecutionGrantWithBudget(ctx context.Context, owner, requestID, budgetID, actor string, amount budget.Amount) (executiongrant.Grant, error) {
+	if owner == "" || requestID == "" || budgetID == "" || amount.Unit == "" || amount.Micros < 0 ||
 		!strings.HasPrefix(actor, executiongrant.BudgetActorPrefix) ||
 		len(actor) == len(executiongrant.BudgetActorPrefix) {
 		return executiongrant.Grant{}, executiongrant.ErrInvalid
@@ -714,17 +761,24 @@ func (r *Repository) ApproveExecutionGrantWithBudget(ctx context.Context, owner,
 	if value.State != budget.StateActive || value.SessionID != grant.SessionID {
 		return executiongrant.Grant{}, budget.ErrInactive
 	}
-	spent, reserved, err := budgetTotals(ctx, conn, budgetID)
-	if err != nil {
-		return executiongrant.Grant{}, err
-	}
-	if credits > value.LimitCredits-spent-reserved {
-		return executiongrant.Grant{}, budget.ErrOverLimit
+	if amount.Micros > 0 {
+		limit, limited := value.Limit(amount.Unit)
+		if !limited {
+			return executiongrant.Grant{}, budget.ErrOverLimit
+		}
+		totals, err := budgetTotals(ctx, conn, budgetID)
+		if err != nil {
+			return executiongrant.Grant{}, err
+		}
+		settled := totals[amount.Unit]
+		if amount.Micros > limit.Micros-settled.Spent-settled.Reserved {
+			return executiongrant.Grant{}, budget.ErrOverLimit
+		}
 	}
 	if _, err := conn.ExecContext(ctx, `INSERT INTO budget_reservations
- (grant_request_id, budget_id, task_id, credits, state, created_at)
- VALUES (?, ?, '', ?, 'reserved', ?)`,
-		requestID, budgetID, credits, formatTime(now)); err != nil {
+ (grant_request_id, budget_id, task_id, unit, amount_micros, state, created_at)
+ VALUES (?, ?, '', ?, ?, 'reserved', ?)`,
+		requestID, budgetID, amount.Unit, amount.Micros, formatTime(now)); err != nil {
 		return executiongrant.Grant{}, err
 	}
 	stamp := formatTime(now)

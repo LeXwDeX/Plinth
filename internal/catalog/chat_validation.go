@@ -927,21 +927,37 @@ func validateApprovalBudget(budget ChatApprovalBudgetSchema) error {
 		strings.TrimSpace(budget.NoPlanText) == "" {
 		return errors.New("approval_policy.budget 的上下文文案不能为空")
 	}
+	// #120: amounts are listed per unit; the legacy bucket's name and the
+	// separator between units are product copy, not code.
+	if strings.TrimSpace(budget.LegacyUnitLabel) == "" || strings.TrimSpace(budget.UnitSeparator) == "" {
+		return errors.New("approval_policy.budget 的 legacy_unit_label 与 unit_separator 不能为空")
+	}
 	for _, field := range []string{"{state}", "{limit}", "{spent}", "{reserved}", "{remaining}", "{plan}"} {
 		if !strings.Contains(budget.ContextTemplate, field) {
 			return fmt.Errorf("approval_policy.budget.context_template 缺少占位符 %s", field)
 		}
 	}
-	knownStates := map[string]bool{
-		"pending": true, "active": true, "exhausted": true, "closed": true, "denied": true,
+	// The role of each state follows what the server does with it (#120): a
+	// role the browser acts on must not contradict the state machine, or an
+	// active budget could be hidden or a refused plan shown as spendable.
+	knownStates := map[string]string{
+		"pending":   ChatApprovalBudgetRolePending,
+		"active":    ChatApprovalBudgetRoleActive,
+		"exhausted": ChatApprovalBudgetRoleEnded,
+		"closed":    ChatApprovalBudgetRoleEnded,
+		"denied":    ChatApprovalBudgetRoleDenied,
 	}
 	seen := make(map[string]bool, len(budget.States))
 	for _, state := range budget.States {
-		if !knownStates[state.ID] || seen[state.ID] {
+		role, known := knownStates[state.ID]
+		if !known || seen[state.ID] {
 			return fmt.Errorf("approval_policy.budget.states 含未知或重复的状态 %q", state.ID)
 		}
 		if strings.TrimSpace(state.Label) == "" {
 			return fmt.Errorf("approval_policy.budget.states[%s] 缺少 label", state.ID)
+		}
+		if state.Role != role {
+			return fmt.Errorf("approval_policy.budget.states[%s] 的 role 必须是 %q", state.ID, role)
 		}
 		seen[state.ID] = true
 	}

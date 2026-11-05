@@ -6,12 +6,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import { BudgetBadge } from '@/components/studio/budget-badge';
 import type { SessionBudget } from '@/lib/chat/budget';
-import { formatSchemaText, schemaCountMessage, schemaText, type ProductSchema } from '@/lib/product-schema';
+import { formatSchemaText, schemaText, type ProductSchema } from '@/lib/product-schema';
 import type { ChatSession } from '@/store/chat-store';
 import { useChatStore } from '@/store/chat-store';
 import { useWorkspaceStore, type TrackedTask } from '@/store/workspace-store';
 
-const schema = defaultCatalog.application as unknown as ProductSchema;
+const raw = defaultCatalog.application;
+// The public projection names each plan state with its role (#120); the raw Catalog keeps them under budget.states.
+const schema = {
+  ...raw,
+  chat: { ...raw.chat, approval_policy: { ...raw.chat.approval_policy,
+    budget_states: raw.chat.approval_policy.budget.states.map(({ id, role }) => ({ id, role })) } },
+} as unknown as ProductSchema;
 const messages = defaultCatalog.application.content.messages as Record<string, string>;
 const text = (key: string) => schemaText(schema, key);
 
@@ -25,13 +31,20 @@ vi.mock('swr', () => ({
 
 const plan = {
   title: '木椅',
-  steps: [{ capability: 'text-to-3d', offeringId: 'tripo-v3', purpose: '主体', estimatedCredits: 80 }],
+  steps: [{ capability: 'text-to-3d', offeringId: 'tripo-v3', purpose: '主体',
+    estimate: { unit: 'tripo.credit', unit_label: 'Tripo credits', amount: '80' } }],
   correctionCapabilities: [],
 };
+// #120: a budget in two credit units, each with its own figures.
 const budget: SessionBudget = {
-  id: 'budget-1', state: 'active', limitCredits: 300, spentCredits: 120, reservedCredits: 0, remainingCredits: 180,
+  id: 'budget-1', state: 'active',
+  units: [
+    { unit: 'tripo.credit', unitLabel: 'Tripo credits', limit: '300', spent: '120', reserved: '0', remaining: '180' },
+    { unit: 'hyper3d.credit', unitLabel: 'Hyper3D credits', limit: '3', spent: '0.5', reserved: '0', remaining: '2.5' },
+  ],
   plan, createdAt: '2026-10-01T00:00:00Z', decidedAt: '2026-10-01T00:01:00Z',
 };
+const usage = '120 / 300 Tripo credits · 0.5 / 3 Hyper3D credits';
 const session = (withBudget?: SessionBudget): ChatSession => ({
   id: 's1', title: '会话', createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
   ...(withBudget ? { budget: withBudget } : {}),
@@ -72,7 +85,8 @@ describe('the session budget badge (#103)', () => {
     ] });
     const view = render(<BudgetBadge />);
     const badge = view.getByTestId('studio-budget-badge');
-    expect(badge.textContent).toBe(schemaCountMessage(schema, 'ui.studio.budget.badge', 120, { spent: 120, limit: 300 }));
+    // Each unit is listed apart; the badge never adds Tripo and Hyper3D credits.
+    expect(badge.textContent).toBe(formatSchemaText(text('ui.studio.budget.badge'), { amounts: usage }));
     expect(badge.getAttribute('aria-label')).toBe(text('ui.studio.budget.title'));
 
     fireEvent.click(badge);
@@ -81,7 +95,7 @@ describe('the session budget badge (#103)', () => {
     expect(card.getAttribute('data-state')).toBe('active');
     expect(card.textContent).toContain('木椅');
     expect(view.getByTestId('studio-plan-budget').textContent).toBe(
-      schemaCountMessage(schema, 'ui.studio.plan.progress', 120, { spent: 120, limit: 300 }),
+      formatSchemaText(text('ui.studio.plan.progress'), { amounts: usage }),
     );
     // One of the plan's single step has a successful task in this session; the other session's task is ignored.
     expect(view.getByTestId('studio-plan-progress').textContent).toContain(

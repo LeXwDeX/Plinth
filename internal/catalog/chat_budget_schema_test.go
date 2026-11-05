@@ -57,15 +57,33 @@ func TestDefaultCatalogDeclaresTheBudgetModeAndItsPlanTool(t *testing.T) {
 	if err := json.Unmarshal(planTool.Parameters, &parameters); err != nil {
 		t.Fatalf("plan tool parameters: %v", err)
 	}
-	for _, name := range []string{"title", "steps", "budget_credits"} {
+	// #120: the budget is one amount per credit unit, never a single total.
+	for _, name := range []string{"title", "steps", "budgets"} {
 		if parameters.Properties[name] == nil {
 			t.Fatalf("plan tool parameter %q is not declared", name)
 		}
 	}
-	for _, name := range []string{"title", "steps", "budget_credits"} {
+	for _, name := range []string{"title", "steps", "budgets"} {
 		if !slicesContain(parameters.Required, name) {
 			t.Fatalf("plan tool parameter %q is not required", name)
 		}
+	}
+	if parameters.Properties["budget_credits"] != nil {
+		t.Fatal("the plan tool still declares a single budget_credits total")
+	}
+	var budgets struct {
+		Items struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+			Required   []string                   `json:"required"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(parameters.Properties["budgets"], &budgets); err != nil ||
+		budgets.Items.Properties["unit"] == nil || budgets.Items.Properties["amount"] == nil ||
+		!slicesContain(budgets.Items.Required, "unit") || !slicesContain(budgets.Items.Required, "amount") {
+		t.Fatalf("plan tool budgets = %s err=%v", parameters.Properties["budgets"], err)
+	}
+	if strings.TrimSpace(budget.LegacyUnitLabel) == "" || strings.TrimSpace(budget.UnitSeparator) == "" {
+		t.Fatalf("budget unit copy = %q / %q", budget.LegacyUnitLabel, budget.UnitSeparator)
 	}
 
 	public := app.Public()
@@ -74,6 +92,24 @@ func TestDefaultCatalogDeclaresTheBudgetModeAndItsPlanTool(t *testing.T) {
 		public.Chat.ApprovalPolicy.DefaultMode != "budget" ||
 		!slicesContain(public.Chat.ApprovalPolicy.Modes, "budget") {
 		t.Fatalf("public budget schema = %+v / %+v", public.Chat.API.ResponseFields, public.Runtime.HTTP.Routes)
+	}
+	// #120: the browser acts on each state's declared role, never on its ID.
+	roles := map[string]string{}
+	for _, state := range public.Chat.ApprovalPolicy.BudgetStates {
+		roles[state.ID] = state.Role
+	}
+	want := map[string]string{
+		"pending": catalog.ChatApprovalBudgetRolePending, "active": catalog.ChatApprovalBudgetRoleActive,
+		"exhausted": catalog.ChatApprovalBudgetRoleEnded, "closed": catalog.ChatApprovalBudgetRoleEnded,
+		"denied": catalog.ChatApprovalBudgetRoleDenied,
+	}
+	if len(roles) != len(want) {
+		t.Fatalf("public budget states = %+v", public.Chat.ApprovalPolicy.BudgetStates)
+	}
+	for id, role := range want {
+		if roles[id] != role {
+			t.Fatalf("public budget state %s role = %q, want %q", id, roles[id], role)
+		}
 	}
 }
 
@@ -95,11 +131,27 @@ func TestBudgetModeRequiresItsPlanBoundsAndTexts(t *testing.T) {
 		"unknown state": func(a *catalog.ApplicationSchema) {
 			a.Chat.ApprovalPolicy.Budget.States[0].ID = "paused"
 		},
+		"state without a role": func(a *catalog.ApplicationSchema) {
+			a.Chat.ApprovalPolicy.Budget.States[0].Role = ""
+		},
+		"role contradicting the state": func(a *catalog.ApplicationSchema) {
+			for index := range a.Chat.ApprovalPolicy.Budget.States {
+				if a.Chat.ApprovalPolicy.Budget.States[index].ID == "active" {
+					a.Chat.ApprovalPolicy.Budget.States[index].Role = catalog.ChatApprovalBudgetRoleDenied
+				}
+			}
+		},
 		"empty approved message": func(a *catalog.ApplicationSchema) {
 			a.Chat.ApprovalPolicy.Budget.Messages.Approved = ""
 		},
 		"approved message without remaining": func(a *catalog.ApplicationSchema) {
 			a.Chat.ApprovalPolicy.Budget.Messages.Approved = "{title} {limit}"
+		},
+		"no legacy unit label": func(a *catalog.ApplicationSchema) {
+			a.Chat.ApprovalPolicy.Budget.LegacyUnitLabel = " "
+		},
+		"no unit separator": func(a *catalog.ApplicationSchema) {
+			a.Chat.ApprovalPolicy.Budget.UnitSeparator = ""
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

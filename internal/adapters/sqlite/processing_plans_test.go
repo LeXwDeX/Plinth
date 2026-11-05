@@ -250,7 +250,7 @@ func TestSaveProcessingPlanReleasesRemovedStepReservations(t *testing.T) {
 	production := budgetTestPlan(t, repository, "pb-b2", 20, "retexture")
 	identity, grant := prepareBudgetGrant(t, repository, "turn-b2", "b2", "retexture", 7)
 	if _, err := repository.ApproveExecutionGrantWithBudget(ctx, identity.OwnerID, grant.RequestID,
-		production.ID, executiongrant.BudgetActorPrefix+production.ID, 7); err != nil {
+		production.ID, executiongrant.BudgetActorPrefix+production.ID, budget.Legacy(7)); err != nil {
 		t.Fatal(err)
 	}
 	if state := reservationState(t, repository, grant.RequestID); state != budget.ReservationReserved {
@@ -286,7 +286,7 @@ func TestSaveProcessingPlanReleasesRemovedStepReservations(t *testing.T) {
 		t.Fatalf("reservation after losing its last reference = %q", state)
 	}
 	summary, found, err := repository.ProductionBudgetSummary(ctx, identity.OwnerID, identity.SessionID)
-	if err != nil || !found || summary.ReservedCredits != 0 || summary.RemainingCredits != 20 {
+	if err != nil || !found || legacyFigure(t, summary).Reserved != 0 || legacyFigure(t, summary).Remaining != credits(20) {
 		t.Fatalf("budget summary after release = %+v found=%v err=%v", summary, found, err)
 	}
 	stored, err := repository.GetExecutionGrant(ctx, identity.OwnerID, grant.RequestID)

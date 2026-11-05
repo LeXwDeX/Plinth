@@ -8,9 +8,14 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { fetchCapabilityOfferings, type OfferingWire } from '@/lib/agent-offerings';
-import { planEstimatedTotal, type ProductionPlan, type SessionBudget } from '@/lib/chat/budget';
+import {
+  budgetStateRole, budgetStateWithRole, budgetUnitTotals, budgetUnitsWith, budgetUsageText, stepEstimate,
+  type ProductionPlan, type SessionBudget,
+} from '@/lib/chat/budget';
+import { priceTotalsAmountsText } from '@/lib/chat/approval-modes';
+import type { PriceTotal } from '@/lib/pricing';
 import { completedPlanSteps, planStepProgress, type PlanTask } from '@/lib/chat/plan-progress';
-import { formatSchemaText, schemaCountMessage, schemaText, taskStatePresentation } from '@/lib/product-schema';
+import { formatSchemaText, schemaText, taskStatePresentation } from '@/lib/product-schema';
 import { cn } from '@/lib/utils';
 
 /**
@@ -50,8 +55,11 @@ export function PlanReloadNotice({
 
 export interface PlanCardProps {
   plan: ProductionPlan;
-  /** The total budget the person approves; the plan's step quotes when the server sends none. */
-  budgetCredits: number;
+  /**
+   * #120: the limits the person approves, one per credit unit and never summed.
+   * Unused once `progress` carries the decided plan's own units.
+   */
+  budgets?: readonly PriceTotal[];
   /** The session's Task projection: each plan step takes the task that ran it. */
   tasks: readonly PlanTask[];
   /** Waiting for a decision: the card shows the approve and decline buttons. */
@@ -72,7 +80,7 @@ function capabilityLabel(schema: ReturnType<typeof useProductSchema>['schema'], 
  * their models and quotes plus the correction capabilities it allows; once
  * approved the same card shows the live budget and each step's Task state.
  */
-export function PlanCard({ plan, budgetCredits, tasks, onDecide, busy = false, error = null, progress = null }: PlanCardProps) {
+export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, error = null, progress = null }: PlanCardProps) {
   const { schema } = useProductSchema();
   const text = (key: string) => schemaText(schema, key);
   const capabilities = useMemo(
@@ -88,7 +96,9 @@ export function PlanCard({ plan, budgetCredits, tasks, onDecide, busy = false, e
   );
   const decidedAt = progress?.decidedAt ?? '';
   const stepProgress = useMemo(() => planStepProgress(plan, tasks, decidedAt), [plan, tasks, decidedAt]);
-  const total = progress?.limitCredits ?? (budgetCredits > 0 ? budgetCredits : planEstimatedTotal(plan));
+  // Every amount is listed per credit unit with its label; the card never adds units.
+  const limits = progress ? budgetUnitTotals(progress.units, 'limit') : budgets;
+  const reserved = progress ? budgetUnitsWith(progress.units, 'reserved') : [];
   const done = progress
     ? completedPlanSteps(stepProgress, (task) => taskStatePresentation(schema, task.state).outcome === 'success')
     : 0;
@@ -104,7 +114,8 @@ export function PlanCard({ plan, budgetCredits, tasks, onDecide, busy = false, e
     <article
       className="flex flex-col gap-1.5 rounded-lg border border-border bg-panel-raised p-3 text-xs"
       data-testid="studio-plan-card"
-      data-state={progress?.state ?? 'pending'}
+      data-state={progress?.state ?? budgetStateWithRole(schema, 'pending')}
+      data-role={progress ? budgetStateRole(schema, progress.state) ?? '' : 'pending'}
       aria-label={text('ui.studio.plan.title')}
     >
       <header className="flex items-center gap-1.5">
@@ -118,13 +129,13 @@ export function PlanCard({ plan, budgetCredits, tasks, onDecide, busy = false, e
       </header>
       <p className="tabular-nums text-muted-foreground" data-testid="studio-plan-budget">
         {progress
-          ? schemaCountMessage(schema, 'ui.studio.plan.progress', progress.spentCredits, { spent: progress.spentCredits, limit: progress.limitCredits })
-          : schemaCountMessage(schema, 'ui.studio.plan.budget', total, { credits: total })}
+          ? formatSchemaText(text('ui.studio.plan.progress'), { amounts: budgetUsageText(schema, progress.units) })
+          : formatSchemaText(text('ui.studio.plan.budget'), { amounts: priceTotalsAmountsText(schema, limits) })}
       </p>
       {progress ? (
         <p className="flex flex-wrap gap-x-2 text-[11px] tabular-nums text-muted-foreground" data-testid="studio-plan-progress">
-          <span>{schemaCountMessage(schema, 'ui.studio.plan.remaining', progress.remainingCredits, { credits: progress.remainingCredits })}</span>
-          {progress.reservedCredits > 0 ? <span>{schemaCountMessage(schema, 'ui.studio.plan.reserved', progress.reservedCredits, { credits: progress.reservedCredits })}</span> : null}
+          <span>{formatSchemaText(text('ui.studio.plan.remaining'), { amounts: priceTotalsAmountsText(schema, budgetUnitTotals(progress.units, 'remaining')) })}</span>
+          {reserved.length > 0 ? <span>{formatSchemaText(text('ui.studio.plan.reserved'), { amounts: priceTotalsAmountsText(schema, budgetUnitTotals(reserved, 'reserved')) })}</span> : null}
           <span>{formatSchemaText(schemaText(schema, 'ui.studio.plan.steps_done'), { done, total: plan.steps.length })}</span>
         </p>
       ) : null}
@@ -132,6 +143,7 @@ export function PlanCard({ plan, budgetCredits, tasks, onDecide, busy = false, e
         <ol className="flex flex-col gap-0.5" aria-label={text('ui.studio.plan.step')}>
           {stepProgress.map((entry, index) => {
             const state = entry.task ? taskStatePresentation(schema, entry.task.state) : null;
+            const estimate = stepEstimate(entry.step);
             return (
               <li
                 key={`${index}-${entry.step.capability}-${entry.step.offeringId}`}
@@ -148,8 +160,8 @@ export function PlanCard({ plan, budgetCredits, tasks, onDecide, busy = false, e
                   </span>
                 </HintTooltip>
                 <span className="flex shrink-0 items-baseline gap-1.5 tabular-nums text-muted-foreground">
-                  {entry.step.estimatedCredits > 0 ? (
-                    <span>{schemaCountMessage(schema, 'ui.studio.plan.estimated', entry.step.estimatedCredits, { credits: entry.step.estimatedCredits })}</span>
+                  {estimate ? (
+                    <span>{formatSchemaText(text('ui.studio.plan.estimated'), { amount: priceTotalsAmountsText(schema, [estimate]) })}</span>
                   ) : null}
                   <span className={cn('text-[11px]', state?.outcome === 'success' && 'text-success', state?.outcome === 'failure' && 'text-destructive')}>
                     {state ? state.label : text('ui.studio.plan.step_pending')}

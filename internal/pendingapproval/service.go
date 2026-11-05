@@ -290,10 +290,13 @@ type Item struct {
 	// approval (#103). RequestID of a plan card is its budget ID, decided
 	// through the session budget route rather than the grant route.
 	Kind string `json:"kind,omitempty"`
-	// Plan is the plan the person approves; BudgetCredits is its limit and
-	// EstimatedCredits the server's quote of all steps.
-	Plan          *budget.Plan `json:"plan,omitempty"`
-	BudgetCredits int          `json:"budget_credits,omitempty"`
+	// Plan is the plan the person approves; Budgets are its limits per credit
+	// unit and EstimatedTotals the server's quotes of all steps per unit
+	// (#120). Different units are never added, so a plan card carries no
+	// single total.
+	Plan            *budget.Plan    `json:"plan,omitempty"`
+	Budgets         []budget.Amount `json:"budgets,omitempty"`
+	EstimatedTotals []budget.Amount `json:"estimated_totals,omitempty"`
 }
 
 // Outcome is what a decision produced. TaskID and MessageID are empty while
@@ -393,14 +396,14 @@ func (s *Service) List(ctx context.Context, owner, session string) ([]Item, erro
 }
 
 // planItem projects one pending production plan as the card the person
-// decides. It carries the plan's steps and the total limit; the step quotes
-// are the server's, never the Agent's.
+// decides. It carries the plan's steps and its limits per unit; the step
+// quotes are the server's, never the Agent's.
 func (s *Service) planItem(production budget.ProductionBudget) Item {
 	plan := production.Plan
 	return Item{
 		Kind: ItemKindPlan, RequestID: production.ID, Status: StatusPending,
-		Tool: s.planToolName(), EstimatedCredits: plan.EstimatedTotal(),
-		BudgetCredits: production.LimitCredits, Plan: &plan, Inputs: []Input{},
+		Tool: s.planToolName(), Budgets: production.Limits, EstimatedTotals: plan.EstimatedTotals(),
+		Plan: &plan, Inputs: []Input{},
 		MessageID: production.MessageID, CreatedAt: production.CreatedAt,
 		ExpiresAt: s.grants.PendingBudgetExpiry(production),
 	}
@@ -756,10 +759,11 @@ func (s *Service) postBudgetNotice(ctx context.Context, production budget.Produc
 		return nil
 	}
 	ctx = s.budgetLocale(ctx, production)
+	format := s.budgetAmountFormat(ctx)
 	content := strings.NewReplacer(
 		"{title}", production.Plan.Title,
-		"{limit}", strconv.Itoa(production.LimitCredits),
-		"{remaining}", strconv.Itoa(0),
+		"{limit}", format.List(production.Limits),
+		"{remaining}", format.List(zeroAmounts(production.Limits)),
 	).Replace(s.text(ctx, template))
 	messageID := BudgetMessageID(production.ID) + ":" + kind
 	if _, _, err := s.chat.PostAssistantMessage(ctx, production.OwnerID, chat.Message{
@@ -781,23 +785,44 @@ func (s *Service) postBudgetNoticeAndMark(ctx context.Context, production budget
 }
 
 // budgetDecisionText renders the Schema's approved or denied message with the
-// plan's title, limit and remaining budget.
+// plan's title, limits and remaining budget, each listed per unit.
 func (s *Service) budgetDecisionText(ctx context.Context, production budget.ProductionBudget) string {
 	messages := s.schema.ApprovalPolicy.Budget.Messages
+	format := s.budgetAmountFormat(ctx)
 	template := messages.Denied
-	remaining := 0
+	remaining := zeroAmounts(production.Limits)
 	if production.State == budget.StateActive {
 		template = messages.Approved
-		remaining = production.LimitCredits
+		remaining = production.Limits
 		if summary, found, err := s.grants.BudgetSummary(ctx, production.OwnerID, production.SessionID); err == nil && found {
-			remaining = summary.RemainingCredits
+			remaining = make([]budget.Amount, 0, len(summary.Units))
+			for _, unit := range summary.Units {
+				remaining = append(remaining, unit.Amount(unit.Remaining))
+			}
 		}
 	}
 	return strings.NewReplacer(
 		"{title}", production.Plan.Title,
-		"{limit}", strconv.Itoa(production.LimitCredits),
-		"{remaining}", strconv.Itoa(remaining),
+		"{limit}", format.List(production.Limits),
+		"{remaining}", format.List(remaining),
 	).Replace(s.text(ctx, template))
+}
+
+// budgetAmountFormat renders plan amounts per unit with the Schema's label of
+// the legacy bucket and separator between units (#120), in the reader's
+// language.
+func (s *Service) budgetAmountFormat(ctx context.Context) budget.AmountFormat {
+	config := s.schema.ApprovalPolicy.Budget
+	return budget.AmountFormat{LegacyLabel: s.text(ctx, config.LegacyUnitLabel), Separator: config.UnitSeparator}
+}
+
+// zeroAmounts is nothing left in each unit of the limits.
+func zeroAmounts(limits []budget.Amount) []budget.Amount {
+	result := make([]budget.Amount, 0, len(limits))
+	for _, limit := range limits {
+		result = append(result, budget.Amount{Unit: limit.Unit, UnitLabel: limit.UnitLabel})
+	}
+	return result
 }
 
 // checkUsable refuses a decision on an approval that can never run: its turn

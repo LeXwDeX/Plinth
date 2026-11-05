@@ -1552,8 +1552,11 @@ export interface ChatProductSchema {
     default_mode: string;
     modes: string[];
     manual_approval_capabilities: string[];
-    /** #103: the budget states the Schema declares, in display order. */
-    budget_states?: string[];
+    /**
+     * #103 / #120: the budget states the Schema declares, in display order, each with
+     * its role (`pending`, `active`, `ended` or `denied`) the browser acts on.
+     */
+    budget_states?: Array<{ id: string; role: string }>;
   };
   /**
    * Agent 范围（2D 模式 / 3D 模式 / 自动模式）：有哪些模式，以及每个模式让哪些领域的

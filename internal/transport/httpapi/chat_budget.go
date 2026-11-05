@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/pendingapproval"
 )
@@ -23,18 +22,12 @@ func (s *Server) decideChatSessionBudget(writer http.ResponseWriter, request *ht
 		s.writeMessageProblem(writer, http.StatusServiceUnavailable, "unavailable", "error.unavailable")
 		return
 	}
-	var body struct {
-		Decision executiongrant.Decision `json:"decision"`
-	}
-	if err := s.decodeJSON(writer, request, &body); err != nil {
-		return
-	}
-	if body.Decision != executiongrant.Approve && body.Decision != executiongrant.Deny {
-		s.writeMessageProblem(writer, http.StatusBadRequest, "invalid_input", "error.invalid_input")
+	decision, ok := s.decodeApprovalDecision(writer, request)
+	if !ok {
 		return
 	}
 	outcome, err := s.pendingApprovals.DecideBudget(request.Context(), principal,
-		request.PathValue("sessionID"), request.PathValue("budgetID"), body.Decision)
+		request.PathValue("sessionID"), request.PathValue("budgetID"), decision)
 	if errors.Is(err, pendingapproval.ErrBudgetNoticeFailed) {
 		// The decision is committed; only its chat notice is missing.
 		noteCause(writer, err)

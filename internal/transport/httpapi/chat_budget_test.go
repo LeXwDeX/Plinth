@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -21,10 +22,10 @@ func TestProductionPlanCardAndSessionBudgetOverHTTP(t *testing.T) {
 	plan, err := w.state.repository.CreateProductionBudget(context.Background(), budget.ProductionBudget{
 		ID: "pb-http", OwnerID: "owner-a", SessionID: w.sessionID,
 		Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
-			{Capability: "image-to-3d", Purpose: "生成模型", EstimatedCredits: 25},
-			{Capability: "retexture", Purpose: "修贴图", EstimatedCredits: 5},
+			{Capability: "image-to-3d", Purpose: "生成模型", Estimate: tripoAmount(25)},
+			{Capability: "retexture", Purpose: "修贴图", Estimate: budget.Legacy(5)},
 		}},
-		LimitCredits: 50, State: budget.StatePending, CreatedAt: now,
+		Limits: []budget.Amount{tripoAmount(50), budget.Legacy(10)}, State: budget.StatePending, CreatedAt: now,
 		MessageID: "turn-http", CallID: "call-http",
 	})
 	if err != nil {
@@ -43,7 +44,8 @@ func TestProductionPlanCardAndSessionBudgetOverHTTP(t *testing.T) {
 			Status           string                  `json:"status"`
 			Tool             string                  `json:"tool"`
 			EstimatedCredits int                     `json:"estimated_credits"`
-			BudgetCredits    int                     `json:"budget_credits"`
+			Budgets          []budget.Amount         `json:"budgets"`
+			EstimatedTotals  []budget.Amount         `json:"estimated_totals"`
 			MessageID        string                  `json:"message_id"`
 			Plan             *budget.Plan            `json:"plan"`
 			Inputs           []pendingapproval.Input `json:"inputs"`
@@ -58,7 +60,9 @@ func TestProductionPlanCardAndSessionBudgetOverHTTP(t *testing.T) {
 	item := listed.Items[0]
 	if item.Kind != pendingapproval.ItemKindPlan || item.RequestID != plan.ID ||
 		item.Status != pendingapproval.StatusPending || item.Tool != "propose_production_plan" ||
-		item.EstimatedCredits != 30 || item.BudgetCredits != 50 || item.MessageID != "turn-http" ||
+		item.EstimatedCredits != 0 || item.MessageID != "turn-http" ||
+		!reflect.DeepEqual(item.Budgets, []budget.Amount{budget.Legacy(10), tripoAmount(50)}) ||
+		!reflect.DeepEqual(item.EstimatedTotals, []budget.Amount{budget.Legacy(5), tripoAmount(25)}) ||
 		item.Plan == nil || item.Plan.Title != "骑士" || len(item.Plan.Steps) != 2 || len(item.Inputs) != 0 {
 		t.Fatalf("plan card = %+v", item)
 	}
@@ -101,8 +105,8 @@ func TestProductionPlanCardAndSessionBudgetOverHTTP(t *testing.T) {
 		t.Fatalf("session budget = %s err=%v", session.Body.String(), err)
 	}
 	if projected.Budget.ID != plan.ID || projected.Budget.State != budget.StateActive ||
-		projected.Budget.LimitCredits != 50 || projected.Budget.SpentCredits != 0 ||
-		projected.Budget.ReservedCredits != 0 || projected.Budget.RemainingCredits != 50 ||
+		!reflect.DeepEqual(projected.Budget.Units, []budget.UnitBudget{
+			budget.NewUnitBudget(budget.Legacy(10), 0, 0), budget.NewUnitBudget(tripoAmount(50), 0, 0)}) ||
 		projected.Budget.Plan.Title != "骑士" {
 		t.Fatalf("session budget = %+v", projected.Budget)
 	}
@@ -118,6 +122,11 @@ func TestProductionPlanCardAndSessionBudgetOverHTTP(t *testing.T) {
 	if foreign.Code != http.StatusNotFound {
 		t.Fatalf("foreign decision status=%d body=%s", foreign.Code, foreign.Body.String())
 	}
+}
+
+// tripoAmount is a whole number of Tripo credits, a provider-native unit.
+func tripoAmount(whole int64) budget.Amount {
+	return budget.Amount{Unit: "tripo.credit", UnitLabel: "Tripo credits", Micros: whole * 1000000}
 }
 
 func (w pendingApprovalWorld) serviceList(t *testing.T, cookie *http.Cookie) ([]pendingapproval.Item, error) {

@@ -40,7 +40,7 @@ export function useTaskRetry() {
       const waiting = awaiting[task.taskId];
       if (waiting) {
         // Second click: the person confirmed this paid retry, so it goes through the ordinary approval and submit.
-        started(await submitDirectTask(schema.runtime.http.routes, waiting));
+        started(await submitDirectTask(schema, waiting));
         return;
       }
       const outcome = await requestRetry(schema, task.taskId, text('ui.workspace.tasks.retry_failed'));
