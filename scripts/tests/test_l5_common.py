@@ -86,6 +86,58 @@ class ToolCalls(unittest.TestCase):
         self.assertEqual(c.tool_errors(messages), ["b"])
 
 
+class ChoiceClient:
+    """Records calls; answers the choices list with the given cards and the stream as done."""
+
+    def __init__(self, cards):
+        self.cards = cards
+        self.calls = []
+
+    def call(self, method, path, body=None, **_):
+        self.calls.append((method, path, body))
+        if path.endswith("/choices"):
+            return 200, {"choices": self.cards}
+        return 202, {}
+
+    def read_chat_stream(self, session_id, timeout):
+        return "done"
+
+
+class ChoiceCards(unittest.TestCase):
+    def live(self, cards):
+        client = ChoiceClient(cards)
+        live = c.Live(client, report=None, arguments=None)
+        live._last_send["s1"] = ("model-3d", "m1")
+        return live, client
+
+    def posted(self, client):
+        return [body for method, path, body in client.calls if method == "POST"]
+
+    def test_answers_a_pending_card_once_with_the_default(self):
+        card = {"id": "ch1", "tool": "ask_choice", "state": "pending", "allow_default": True,
+                "default_option_id": "render", "options": [{"id": "render"}, {"id": "print"}]}
+        live, client = self.live([card])
+        self.assertTrue(live.answer_pending_choices("s1"))
+        self.assertFalse(live.answer_pending_choices("s1"))
+        posted = self.posted(client)
+        self.assertEqual(len(posted), 1)
+        self.assertEqual(posted[0]["choiceAnswer"], {"choice_id": "ch1", "use_default": True})
+        self.assertEqual((posted[0]["creative_domain"], posted[0]["ai_model"]), ("model-3d", "m1"))
+
+    def test_picks_the_recommended_option_without_a_default(self):
+        card = {"id": "ch2", "state": "pending", "allow_default": False,
+                "options": [{"id": "a"}, {"id": "b", "recommended": True}]}
+        live, client = self.live([card])
+        self.assertTrue(live.answer_pending_choices("s1"))
+        self.assertEqual(self.posted(client)[0]["choiceAnswer"], {"choice_id": "ch2", "option_id": "b"})
+
+    def test_ignores_answered_cards_and_sessions_without_a_message(self):
+        live, client = self.live([{"id": "ch3", "state": "answered", "options": [{"id": "a"}]}])
+        self.assertFalse(live.answer_pending_choices("s1"))
+        self.assertFalse(live.answer_pending_choices("other-session"))
+        self.assertEqual(self.posted(client), [])
+
+
 class Waiting(unittest.TestCase):
     def test_reply_final(self):
         done = {"role": "assistant", "content": "好的"}
