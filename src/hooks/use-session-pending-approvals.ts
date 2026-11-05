@@ -10,6 +10,7 @@ import {
   decidePendingCard,
   displayedApprovals,
   fetchPendingApprovals,
+  PendingApprovalError,
   pendingApprovalsRoute,
   retainExpired,
   type PendingApproval,
@@ -71,8 +72,9 @@ export function useSessionPendingApprovals(sessionId: string | null) {
     approve: boolean,
     kind: PendingApproval['kind'] = 'step',
   ): Promise<PendingApprovalDecision> => {
+    if (sessionId === null) throw new PendingApprovalError('', 0);
     try {
-      const outcome = await decidePendingCard(schema, { requestId, kind }, approve);
+      const outcome = await decidePendingCard(schema, sessionId, { requestId, kind }, approve);
       decided.current.add(requestId);
       ledger.current.markDecided(requestId, Date.now());
       setDecisions((count) => count + 1);
@@ -81,6 +83,6 @@ export function useSessionPendingApprovals(sessionId: string | null) {
       // 无论成功或失败（409 过期、已处理）都以服务端当前列表为准。
       void mutate();
     }
-  }, [mutate, schema]);
+  }, [mutate, schema, sessionId]);
   return { items, pendingCount: countPending(items, Date.now()), refresh: () => mutate(), decide };
 }

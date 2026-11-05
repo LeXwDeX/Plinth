@@ -1016,6 +1016,9 @@ func (m *Model) loadScenes(sceneDefs []gltfScene, active *int, limits Limits) er
 		if item.path != "" {
 			path = item.path + "/" + path
 		}
+		if len(path) > maxPathBytes {
+			return toolargef("node path exceeds %d bytes", maxPathBytes)
+		}
 		if node.Mesh >= 0 {
 			mesh := &m.Meshes[node.Mesh]
 			for primitiveIndex := range mesh.Primitives {
@@ -1027,6 +1030,9 @@ func (m *Model) loadScenes(sceneDefs []gltfScene, active *int, limits Limits) er
 				}
 				if limits.MaxVertices > 0 && totalVertices > limits.MaxVertices {
 					return toolargef("vertex count exceeds MaxVertices")
+				}
+				if len(m.parts) >= maxParts {
+					return toolargef("part count exceeds %d", maxParts)
 				}
 				m.parts = append(m.parts, m.makePart(item.node, node.Mesh, primitiveIndex, path, world, *primitive))
 			}

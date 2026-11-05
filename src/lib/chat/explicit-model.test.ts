@@ -80,7 +80,19 @@ describe('the explicit 3D model lock (#103)', () => {
     expect(write).toHaveBeenCalledWith('s1', 'new');
     expect(onFailure).toHaveBeenCalledTimes(1);
     expect(onFailure).toHaveBeenCalledWith('old', 'new');
-    expect(explicitModel3DPending('s1')).toBe(true);
+    expect(explicitModel3DPending('s1')).toBe(false);
+  });
+
+  it('reports a failed write to one send and lets the next send go through', async () => {
+    const write = vi.fn().mockResolvedValue(undefined);
+    pickExplicitModel3D({ sessionId: 's1', model: 'accepted', previous: null, write });
+    await flushExplicitModel3D('s1', write);
+    write.mockRejectedValueOnce(new Error('offline'));
+    pickExplicitModel3D({ sessionId: 's1', model: 'rejected', previous: null, write, onFailure: vi.fn() });
+    await expect(flushExplicitModel3D('s1', write)).rejects.toBeInstanceOf(ExplicitModelLockError);
+    await expect(flushExplicitModel3D('s1', write)).resolves.toBeUndefined();
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(explicitModel3DPending('s1')).toBe(false);
   });
 
   it('rolls back a later failure to the last model the server accepted', async () => {

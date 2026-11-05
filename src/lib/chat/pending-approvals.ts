@@ -293,6 +293,7 @@ export async function decidePendingApproval(
  */
 export async function decideSessionBudget(
   schema: ProductSchema,
+  sessionId: string,
   budgetId: string,
   approve: boolean,
   fetcher: typeof fetch = fetch,
@@ -300,7 +301,9 @@ export async function decideSessionBudget(
   const template = schema.runtime.http.routes.chat_session_budget;
   if (!template) throw new PendingApprovalError('', 0);
   const body = decisionBody(schema, approve);
-  const route = template.replace('{budgetID}', encodeURIComponent(budgetId));
+  const route = template
+    .replace('{sessionID}', encodeURIComponent(sessionId))
+    .replace('{budgetID}', encodeURIComponent(budgetId));
   const response = await fetcher(route, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -319,11 +322,12 @@ export async function decideSessionBudget(
 /** Decide a pending card on the route its kind uses. */
 export function decidePendingCard(
   schema: ProductSchema,
+  sessionId: string,
   item: Pick<PendingApproval, 'requestId' | 'kind'>,
   approve: boolean,
   fetcher: typeof fetch = fetch,
 ): Promise<PendingApprovalDecision> {
   return item.kind === 'plan'
-    ? decideSessionBudget(schema, item.requestId, approve, fetcher)
+    ? decideSessionBudget(schema, sessionId, item.requestId, approve, fetcher)
     : decidePendingApproval(schema, item.requestId, approve, fetcher);
 }

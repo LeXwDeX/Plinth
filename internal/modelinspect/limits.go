@@ -33,6 +33,15 @@ type Limits struct {
 	MaxDepth int
 }
 
+// Fixed ceilings that apply whatever Limits a caller passes. Zero-triangle
+// primitives pass MaxTriangles and MaxVertices, so instancing them across many
+// nodes could otherwise multiply into millions of parts, and long node names
+// are copied into every descendant's path.
+const (
+	maxParts     = 1 << 17
+	maxPathBytes = 16 << 10
+)
+
 // DefaultLimits returns limits suitable for tests and for the model sizes this
 // package was designed for: roughly two million triangles and a 62-68 MiB GLB.
 // Production callers should choose their own values.

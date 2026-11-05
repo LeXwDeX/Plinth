@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"sort"
 	"strconv"
@@ -43,6 +44,10 @@ var (
 	ErrUnavailable = errors.New("pending approval: unavailable")
 	// ErrSessionNotFound means the session is not the owner's.
 	ErrSessionNotFound = errors.New("pending approval: session not found")
+	// ErrBudgetNoticeFailed means a plan decision was applied but the chat
+	// message reporting it could not be posted. The decision stands; callers
+	// report success and log the cause.
+	ErrBudgetNoticeFailed = errors.New("pending approval: budget decision notice not posted")
 )
 
 // Status of a listed approval.
@@ -727,7 +732,8 @@ func (s *Service) DecideBudget(ctx context.Context, principal executiongrant.Pri
 	if _, _, err := s.chat.PostAssistantMessage(ctx, principal.OwnerID, chat.Message{
 		ID: messageID, SessionID: sessionID, Content: content,
 	}); err != nil && !errors.Is(err, chat.ErrSessionNotFound) {
-		return BudgetOutcome{BudgetID: budgetID, State: decided.State, MessageID: messageID}, err
+		return BudgetOutcome{BudgetID: budgetID, State: decided.State, MessageID: messageID},
+			fmt.Errorf("%w: %w", ErrBudgetNoticeFailed, err)
 	}
 	return BudgetOutcome{BudgetID: budgetID, State: decided.State, MessageID: messageID}, nil
 }

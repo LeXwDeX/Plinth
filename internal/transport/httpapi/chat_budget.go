@@ -1,10 +1,12 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/pendingapproval"
 )
 
 // decideChatSessionBudget applies the person's decision to one production plan
@@ -33,6 +35,11 @@ func (s *Server) decideChatSessionBudget(writer http.ResponseWriter, request *ht
 	}
 	outcome, err := s.pendingApprovals.DecideBudget(request.Context(), principal,
 		request.PathValue("sessionID"), request.PathValue("budgetID"), body.Decision)
+	if errors.Is(err, pendingapproval.ErrBudgetNoticeFailed) {
+		// The decision is committed; only its chat notice is missing.
+		noteCause(writer, err)
+		err = nil
+	}
 	if err != nil {
 		s.writeTaskGrantError(writer, err)
 		return

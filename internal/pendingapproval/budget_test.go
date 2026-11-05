@@ -359,3 +359,34 @@ func (w *world) allMessages(t *testing.T) []chat.Message {
 	}
 	return messages
 }
+
+// decisionNoticeChat refuses the message that reports a plan decision.
+type decisionNoticeChat struct{ pendingapproval.Chat }
+
+func (c decisionNoticeChat) PostAssistantMessage(ctx context.Context, owner string, message chat.Message) (chat.Message, bool, error) {
+	if strings.HasPrefix(message.ID, "pa_") && !strings.Contains(message.ID, ":") {
+		return chat.Message{}, false, errors.New("chat store unavailable")
+	}
+	return c.Chat.PostAssistantMessage(ctx, owner, message)
+}
+
+// A committed decision stays the answer even when its chat message cannot be
+// posted: the caller learns the plan's real state and that only the notice is
+// missing, so the browser does not show a failed decision for an active plan.
+func TestBudgetDecisionNoticeFailureKeepsTheDecision(t *testing.T) {
+	w := openWorldWithChat(t, filepath.Join(t.TempDir(), "a.db"), time.Hour, func(chats pendingapproval.Chat) pendingapproval.Chat {
+		return decisionNoticeChat{Chat: chats}
+	})
+	plan := w.productionPlan(t, "decision-notice", 40,
+		budget.PlanStep{Capability: "image-to-3d", Purpose: "生成模型", EstimatedCredits: 25})
+	if got := pendingapproval.BudgetMessageID(plan.ID); !strings.HasPrefix(got, "pa_") || strings.Contains(got, ":") {
+		t.Fatalf("decision message id %q no longer matches the test double", got)
+	}
+	outcome, err := w.service.DecideBudget(context.Background(), w.operator, "session-a", plan.ID, executiongrant.Approve)
+	if !errors.Is(err, pendingapproval.ErrBudgetNoticeFailed) {
+		t.Fatalf("decision with a failing notice: err = %v", err)
+	}
+	if outcome.State != budget.StateActive || outcome.BudgetID != plan.ID {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+}

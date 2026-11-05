@@ -155,7 +155,16 @@ export async function flushExplicitModel3D(sessionId: string, write: ExplicitMod
       await state.running;
       continue;
     }
-    if (state.failed) throw new ExplicitModelLockError(state.failed.error);
+    if (state.failed) {
+      // Report the failure to this send only. The picker was already rolled
+      // back, so later sends follow the last model the server accepted
+      // instead of failing on the same stale write forever.
+      const { error } = state.failed;
+      state.failed = null;
+      if (state.confirmed === null) locks.delete(sessionId);
+      else state.wanted = state.confirmed;
+      throw new ExplicitModelLockError(error);
+    }
     if (state.wanted === state.confirmed) return;
     start(state, sessionId);
   }

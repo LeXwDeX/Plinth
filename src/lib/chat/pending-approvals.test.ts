@@ -189,7 +189,7 @@ describe('deciding an approval through the Schema-declared decision member (#103
       chat: { api: { fields: decision === undefined ? {} : { decision } } },
       runtime: { http: { routes: {
         task_grant_decision: '/api/grants/{requestID}/decision',
-        chat_session_budget: '/api/budgets/{budgetID}/decision',
+        chat_session_budget: '/api/v1/chat/sessions/{sessionID}/budgets/{budgetID}',
       } } },
     } as unknown as ProductSchema;
   }
@@ -214,9 +214,9 @@ describe('deciding an approval through the Schema-declared decision member (#103
 
   it('sends a deny under the same member on the session budget route', async () => {
     const fetcher = vi.fn(async () => response({ budget_id: 'b1', state: 'denied', message_id: 'm2' }));
-    const outcome = await decideSessionBudget(approvalSchema('verdict'), 'b/1', false, fetcher as unknown as typeof fetch);
+    const outcome = await decideSessionBudget(approvalSchema('verdict'), 's 1', 'b/1', false, fetcher as unknown as typeof fetch);
     const call = fetcher.mock.calls[0] as unknown as [string, RequestInit];
-    expect(call[0]).toBe('/api/budgets/b%2F1/decision');
+    expect(call[0]).toBe('/api/v1/chat/sessions/s%201/budgets/b%2F1');
     expectBody(call, { verdict: 'deny' });
     expect(outcome).toEqual({ requestId: 'b1', status: 'denied', taskId: '', messageId: 'm2' });
   });
@@ -225,7 +225,7 @@ describe('deciding an approval through the Schema-declared decision member (#103
     const fetcher = vi.fn();
     await expect(decidePendingApproval(approvalSchema(), 'r1', true, fetcher as unknown as typeof fetch))
       .rejects.toThrow('chat.api.fields.decision is required to decide an approval');
-    await expect(decideSessionBudget(approvalSchema(), 'b1', true, fetcher as unknown as typeof fetch))
+    await expect(decideSessionBudget(approvalSchema(), 's1', 'b1', true, fetcher as unknown as typeof fetch))
       .rejects.toThrow('chat.api.fields.decision is required to decide an approval');
     expect(fetcher).not.toHaveBeenCalled();
   });
@@ -235,7 +235,7 @@ describe('deciding an approval through the Schema-declared decision member (#103
     await expect(decidePendingApproval(approvalSchema('decision'), 'r1', true, fetcher as unknown as typeof fetch))
       .rejects.toMatchObject({ name: PendingApprovalError.name, status: 409, detail: 'ui.pending_approval.expired' });
     const planFetcher = vi.fn(async () => response({ detail: 'ui.studio.plan.decide_failed' }, 409));
-    await expect(decideSessionBudget(approvalSchema('decision'), 'b1', false, planFetcher as unknown as typeof fetch))
+    await expect(decideSessionBudget(approvalSchema('decision'), 's1', 'b1', false, planFetcher as unknown as typeof fetch))
       .rejects.toMatchObject({ name: PendingApprovalError.name, status: 409, detail: 'ui.studio.plan.decide_failed' });
   });
 
@@ -243,13 +243,15 @@ describe('deciding an approval through the Schema-declared decision member (#103
     const fetcher = vi.fn(async (url: string) => url.includes('/budgets/')
       ? response({ budget_id: 'b1', state: 'active' })
       : response({ request_id: 'r1', status: 'approved' }));
-    await decidePendingCard(approvalSchema('decision'), { requestId: 'b1', kind: 'plan' }, true, fetcher as unknown as typeof fetch);
-    await decidePendingCard(approvalSchema('decision'), { requestId: 'r1', kind: 'step' }, false, fetcher as unknown as typeof fetch);
+    await decidePendingCard(approvalSchema('decision'), 's1', { requestId: 'b1', kind: 'plan' }, true, fetcher as unknown as typeof fetch);
+    await decidePendingCard(approvalSchema('decision'), 's1', { requestId: 'r1', kind: 'step' }, false, fetcher as unknown as typeof fetch);
     const calls = fetcher.mock.calls as unknown as Array<[string, RequestInit]>;
     expect(calls.map((call) => call[0])).toEqual([
-      '/api/budgets/b1/decision',
+      '/api/v1/chat/sessions/s1/budgets/b1',
       '/api/grants/r1/decision',
     ]);
+    // Every route placeholder must be filled; a literal {sessionID} 404s on the server.
+    expect(calls.every((call) => !/[{}]/.test(decodeURIComponent(call[0])))).toBe(true);
     expectBody(calls[0], { decision: 'approve' });
     expectBody(calls[1], { decision: 'deny' });
   });
