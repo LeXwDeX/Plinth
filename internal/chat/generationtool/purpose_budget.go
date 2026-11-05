@@ -1,0 +1,190 @@
+package generationtool
+
+import (
+	"encoding/json"
+	"strconv"
+	"strings"
+
+	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/generation"
+)
+
+// The purpose budget (#129): the session brief's purpose bounds the triangle
+// count and the texture size of every 3D generation and processing step, not
+// only of the Offerings it names overrides for. A bounded parameter nobody
+// chose takes a value within the budget at the purpose's layer, so it keeps
+// the purpose's provenance; a value the person or the Agent chose is kept even
+// when it is over the budget, and the step's result says so.
+
+// budgetValues are the values the purpose budget gives an Offering's bounded
+// public parameters whose baseline is over it. overrides are the purpose's
+// own values; current holds values the step already has (a remesh topology).
+func (executor *Executor) budgetValues(command chat.ToolCommand, profile catalog.ChatModel3DUsageProfile,
+	offering generation.Offering, overrides, current map[string]json.RawMessage) map[string]json.RawMessage {
+	usage := executor.chat.Model3DUsage
+	if len(usage.BudgetLimits) == 0 {
+		return nil
+	}
+	budget, _ := modelReviewUsageBudget(usage, profile, command.Options.ProductionBrief)
+	values := map[string]json.RawMessage{}
+	for _, parameter := range offering.Parameters {
+		if len(parameter.Default) > 0 {
+			values[parameter.Name] = parameter.Default
+		}
+	}
+	for _, layer := range []map[string]json.RawMessage{command.Tool.DefaultParameters, overrides, current} {
+		for name, value := range layer {
+			values[name] = value
+		}
+	}
+	result := map[string]json.RawMessage{}
+	for _, parameter := range offering.Parameters {
+		limit, bounded := usage.BudgetLimit(parameter.Semantic)
+		if !bounded || !offering.AgentParameterAllowed(parameter) {
+			continue
+		}
+		maximum, declared := limit.Maximum(budget)
+		if !declared {
+			continue
+		}
+		baseline := overrides[parameter.Name]
+		if baseline == nil {
+			baseline = command.Tool.DefaultParameters[parameter.Name]
+		}
+		if baseline == nil {
+			baseline = parameter.Default
+		}
+		if value, fits := limit.Fit(offering, parameter, baseline, values, maximum); fits {
+			result[parameter.Name] = value
+		}
+	}
+	return result
+}
+
+// applyPurposeValues gives a processing step's unset parameters the values of
+// the session purpose. A plan step cannot carry the reason an advised change
+// needs, so skipAdvised leaves those at their default; the plan's note then
+// reports one that is over the budget.
+func (executor *Executor) applyPurposeValues(command chat.ToolCommand, offering generation.Offering,
+	input map[string]json.RawMessage, skipAdvised bool) {
+	_, values := executor.purposeParameterValues(command, offering, input)
+	for name, value := range values {
+		if _, set := input[name]; set || (skipAdvised && advisedParameter(offering, name)) {
+			continue
+		}
+		input[name] = value
+	}
+}
+
+// rawInput encodes a step input built as Go values, for applyPurposeValues.
+func rawInput(input map[string]any) (map[string]json.RawMessage, error) {
+	raw := make(map[string]json.RawMessage, len(input))
+	for name, value := range input {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		raw[name] = encoded
+	}
+	return raw, nil
+}
+
+// purposeBudgetNote is the Schema's note naming a step's values over the
+// session purpose's budget, for the tool's result key. Empty when the tool
+// declares no key, the session has no purpose or every bounded value fits.
+func (executor *Executor) purposeBudgetNote(command chat.ToolCommand, offering generation.Offering, input json.RawMessage) string {
+	if command.Tool.ResultFields.PurposeBudgetNote == "" {
+		return ""
+	}
+	return executor.purposeBudgetText(command, executor.purposeBudgetItems(command, offering, input))
+}
+
+// purposeBudgetItems words each bounded value of a step input that is over the
+// session purpose's budget. A fixed parameter is read at its fixed value; an
+// absent one at its default.
+func (executor *Executor) purposeBudgetItems(command chat.ToolCommand, offering generation.Offering, input json.RawMessage) []string {
+	usage := executor.chat.Model3DUsage
+	if len(usage.BudgetLimits) == 0 {
+		return nil
+	}
+	profile, found := executor.briefPurpose(command)
+	if !found {
+		return nil
+	}
+	budget, _ := modelReviewUsageBudget(usage, profile, command.Options.ProductionBrief)
+	values := map[string]json.RawMessage{}
+	if len(input) > 0 && json.Unmarshal(input, &values) != nil {
+		return nil
+	}
+	var items []string
+	for _, parameter := range offering.Parameters {
+		limit, bounded := usage.BudgetLimit(parameter.Semantic)
+		if !bounded {
+			continue
+		}
+		maximum, declared := limit.Maximum(budget)
+		if !declared {
+			continue
+		}
+		value, present := values[parameter.Name]
+		if parameter.Fixed || !present {
+			value = parameter.Default
+		}
+		if len(value) == 0 || string(value) == "null" {
+			continue
+		}
+		amount, measured := limit.Measure(offering, parameter, value, values)
+		if !measured || amount <= maximum {
+			continue
+		}
+		items = append(items, strings.NewReplacer(
+			"{model}", executor.localized(command, OfferingModelName(offering)),
+			"{parameter}", executor.localized(command, parameter.Label),
+			"{value}", executor.budgetValueLabel(command, parameter, value),
+			"{amount}", budgetNumber(amount),
+			"{maximum}", budgetNumber(maximum),
+			"{purpose}", executor.localized(command, profile.Label),
+		).Replace(executor.localized(command, limit.ItemTemplate)))
+	}
+	return items
+}
+
+// purposeBudgetText wraps the items in the Schema's note.
+func (executor *Executor) purposeBudgetText(command chat.ToolCommand, items []string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	note := executor.chat.Model3DUsage.BudgetNote
+	label := ""
+	if profile, found := executor.briefPurpose(command); found {
+		label = executor.localized(command, profile.Label)
+	}
+	return strings.NewReplacer(
+		"{items}", strings.Join(items, executor.localized(command, note.Separator)),
+		"{purpose}", label,
+	).Replace(executor.localized(command, note.Template))
+}
+
+// budgetValueLabel shows a value as the person sees it: a select option by
+// its label, a number as written.
+func (executor *Executor) budgetValueLabel(command chat.ToolCommand, parameter generation.Parameter, value json.RawMessage) string {
+	var text string
+	if json.Unmarshal(value, &text) == nil {
+		for _, option := range parameter.Options {
+			if option.Value == text && option.Label != "" {
+				return executor.localized(command, option.Label)
+			}
+		}
+		return text
+	}
+	var number float64
+	if json.Unmarshal(value, &number) == nil {
+		return budgetNumber(number)
+	}
+	return string(value)
+}
+
+func budgetNumber(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
+}

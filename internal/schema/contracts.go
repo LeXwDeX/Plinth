@@ -158,6 +158,9 @@ const (
 	// reference picture, in the same order. An Offering that declares it takes
 	// several views of one object (#65); its options are the view keys.
 	SemanticReferenceViews ParameterSemantic = "reference-views"
+	// SemanticTextureSize marks the texture resolution a 3D step delivers, by
+	// its edge in pixels; a session purpose's max_texture_size bounds it (#129).
+	SemanticTextureSize ParameterSemantic = "texture-size"
 
 	// 来源/动作族标记处理链参数的稳定角色：跨 Provider 的参数名可由
 	// Schema 自由声明，消费方按语义定位（同名回退见 SourceParameterRole）。
@@ -177,6 +180,7 @@ func (semantic ParameterSemantic) Valid() bool {
 		SemanticOutputSize,
 		SemanticQuality,
 		SemanticReferenceViews,
+		SemanticTextureSize,
 		SemanticSourceTask,
 		SemanticSourceAsset,
 		SemanticSourceURL,

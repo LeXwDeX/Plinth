@@ -92,7 +92,9 @@ func TestHiddenParametersStayOutOfProviderDiscovery(t *testing.T) {
 		{"image-to-3d", "tripo-v3.1-full", []string{"face_limit", "enable_image_autofix", "texture_quality", "geometry_quality"}},
 		{"text-to-3d", "meshy-7.1", []string{"geometry_resolution", "texture_resolution", "should_remesh", "topology", "enable_pbr"}},
 		{"image-to-3d", "meshy-7.1", []string{"geometry_resolution", "texture_resolution", "should_remesh", "topology", "target_polycount", "should_texture", "enable_pbr", "image_enhancement"}},
-		{"retexture", "meshy-processing", []string{"texture_resolution", "enable_pbr"}},
+		// The retexture texture resolution is a public choice since #129: a
+		// session purpose may need a texture below the 8K default.
+		{"retexture", "meshy-processing", []string{"enable_pbr"}},
 	}
 	for _, tc := range hidden {
 		for _, projection := range []string{"", "&projection=extended"} {

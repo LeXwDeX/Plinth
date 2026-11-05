@@ -315,7 +315,8 @@ func meshyCatalogTasks(h *processingHarness) []generation.Task {
 func TestRetextureAutoModeSubmitsFrozenSourceAndReportsCredits(t *testing.T) {
 	h := newProcessingHarness(t, "auto", meshyCatalogTasks)
 	// resolution and enable_pbr stay tool arguments mapped to the offering's
-	// parameters; the Schema fixes both, so normalization replaces the values.
+	// parameters. The Schema fixes PBR, so normalization replaces it; the
+	// texture resolution is a public choice since #129, so 2k is kept.
 	result, observed := h.run("retexture_model", `{"source_task_id":"model-1","prompt":"mossy stone","resolution":"2k","enable_pbr":false}`)
 	if result.Suspend || h.gateway.submitCount != 1 {
 		t.Fatalf("auto retexture did not submit: %+v submits=%d", result, h.gateway.submitCount)
@@ -334,8 +335,8 @@ func TestRetextureAutoModeSubmitsFrozenSourceAndReportsCredits(t *testing.T) {
 		t.Fatal(err)
 	}
 	var fixed map[string]any
-	if err := json.Unmarshal(normalized, &fixed); err != nil || fixed["texture_resolution"] != "8k" || fixed["enable_pbr"] != true {
-		t.Fatalf("normalized retexture = %s, want the Schema-fixed 8k and PBR", normalized)
+	if err := json.Unmarshal(normalized, &fixed); err != nil || fixed["texture_resolution"] != "2k" || fixed["enable_pbr"] != true {
+		t.Fatalf("normalized retexture = %s, want the chosen 2k and the Schema-fixed PBR", normalized)
 	}
 	if _, leaked := input["source_url"]; leaked {
 		t.Fatalf("source URL must never be passed: %v", input)
@@ -356,7 +357,8 @@ func TestRetextureAutoModeSubmitsFrozenSourceAndReportsCredits(t *testing.T) {
 func TestRetextureManualModeWaitsForTheHuman(t *testing.T) {
 	h := newProcessingHarness(t, "manual", meshyCatalogTasks)
 	// resolution and enable_pbr stay tool arguments mapped to the offering's
-	// parameters; the Schema fixes both, so normalization replaces the values.
+	// parameters. The Schema fixes PBR, so normalization replaces it; the
+	// texture resolution is a public choice since #129, so 2k is kept.
 	result, observed := h.run("retexture_model", `{"source_task_id":"model-1","prompt":"mossy stone","resolution":"2k","enable_pbr":false}`)
 	if result.Suspend || !result.NoSubmission || h.gateway.submitCount != 0 || len(observed) != 0 {
 		t.Fatalf("manual retexture must wait for approval: %+v submits=%d observed=%d", result, h.gateway.submitCount, len(observed))

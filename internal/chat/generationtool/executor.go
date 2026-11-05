@@ -729,6 +729,9 @@ type stepInfo struct {
 	// artboard or which nearest legal size was used (#272); else that it
 	// followed the one reference picture (#296).
 	SizeNote string
+	// PurposeBudgetNote names the step's values over the session purpose's
+	// budget (#129). Empty when every bounded value fits.
+	PurposeBudgetNote string
 	// Budget is the production plan that authorized the step (#103); nil when
 	// no plan did (another mode, or a browser-started step).
 	Budget *budget.Summary
@@ -1557,6 +1560,7 @@ func (executor *Executor) wait(
 			return executor.awaitTask(command, taskID, deadline, err)
 		}
 		info.ModelChoice = executor.modelChoiceOf(command, task.Offering, task.Input)
+		info.PurposeBudgetNote = executor.purposeBudgetNote(command, task.Offering, task.Input)
 		status := executor.publicStates[task.State]
 		observation := chat.ToolObservation{
 			TaskID:   string(taskID),
@@ -1665,6 +1669,9 @@ func (executor *Executor) success(
 	}
 	if key := tool.ResultFields.ModelNote; key != "" && info.ModelNote != "" {
 		result[key] = info.ModelNote
+	}
+	if key := tool.ResultFields.PurposeBudgetNote; key != "" && info.PurposeBudgetNote != "" {
+		result[key] = info.PurposeBudgetNote
 	}
 	if info.Budget != nil {
 		if key := tool.ResultFields.Budget; key != "" {

@@ -77,18 +77,24 @@ func (executor *Executor) briefPurpose(command chat.ToolCommand) (catalog.ChatMo
 }
 
 // profileParameterValues are the values the brief's purpose applies to an
-// Offering. The Catalog has already checked every override at load time; this
-// repeats the public-parameter rule so a hand-built Executor cannot apply a
-// value the Offering does not expose to the Agent.
+// Offering: its parameter overrides and the values its budget gives the
+// bounded parameters (#129). The Catalog has already checked every override at
+// load time; this repeats the public-parameter rule so a hand-built Executor
+// cannot apply a value the Offering does not expose to the Agent.
 func (executor *Executor) profileParameterValues(command chat.ToolCommand, offering generation.Offering) (catalog.ChatModel3DUsageProfile, map[string]json.RawMessage) {
+	return executor.purposeParameterValues(command, offering, nil)
+}
+
+// purposeParameterValues is profileParameterValues for a step whose other
+// values are already known: current supplies them (a remesh topology) when
+// the budget measures a face count.
+func (executor *Executor) purposeParameterValues(command chat.ToolCommand, offering generation.Offering,
+	current map[string]json.RawMessage) (catalog.ChatModel3DUsageProfile, map[string]json.RawMessage) {
 	profile, found := executor.briefPurpose(command)
 	if !found {
 		return catalog.ChatModel3DUsageProfile{}, nil
 	}
 	overrides := profile.ParameterOverrides[string(offering.ID)]
-	if len(overrides) == 0 {
-		return profile, nil
-	}
 	values := make(map[string]json.RawMessage, len(overrides))
 	for name, value := range overrides {
 		declared := false
@@ -102,6 +108,12 @@ func (executor *Executor) profileParameterValues(command chat.ToolCommand, offer
 		if declared {
 			values[name] = value
 		}
+	}
+	for name, value := range executor.budgetValues(command, profile, offering, values, current) {
+		values[name] = value
+	}
+	if len(values) == 0 {
+		return profile, nil
 	}
 	return profile, values
 }
