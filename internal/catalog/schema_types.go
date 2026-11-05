@@ -3474,6 +3474,10 @@ type ChatAgentSchema struct {
 	ConsentRequiredContent    string            `json:"consent_required_content"`
 	ConsentLimitContent       string            `json:"consent_limit_content"`
 	ConsentReconcileContent   string            `json:"consent_reconcile_content"`
+	// UpstreamQueueContent is the note get_task and observe_task attach while
+	// the Provider holds the accepted job in its own queue (#131): what the
+	// Agent tells the person waiting. Optional.
+	UpstreamQueueContent string `json:"upstream_queue_content,omitempty"`
 	// MaxToolCallsPerReply 限定一次 Agent 回复内实际执行的工具调用数
 	// （>=1，#275，替代按 LLM 轮数计的 max_tool_rounds）。每次新回复从 0
 	// 起算；恢复与续跑时已执行的调用计入同一次回复。一批调用超出剩余
@@ -4359,6 +4363,11 @@ type ChatMessageTexts struct {
 	// Agent must not resubmit on its own; the text states the cause and leaves
 	// the retry to the user. It wins over GenerationFailedByClass.
 	GenerationFailedMeteredByClass map[string]string `json:"generation_failed_metered_by_class,omitempty"`
+	// GenerationFailedAmbiguous is the text of a failure whose upstream may
+	// already have run and charged (an ambiguous failure: an unknown
+	// submission, an accepted job that timed out; #136) when no class text
+	// applies: the Agent does not resubmit and has the result checked first.
+	GenerationFailedAmbiguous string `json:"generation_failed_ambiguous,omitempty"`
 }
 
 type ChatStatusTexts struct {
@@ -5438,6 +5447,9 @@ type rawOffering struct {
 	Cost                *schemacontract.CostDeclaration        `json:"cost"`
 	CostPolicy          *schemacontract.CostPolicy             `json:"cost_policy"`
 	PostSuccess         *schemacontract.PostSuccessPolicy      `json:"post_success"`
+	// UpstreamQueueTimeoutSeconds overrides the connection's
+	// status_mapping.queue_timeout_seconds for this Offering (#136).
+	UpstreamQueueTimeoutSeconds int `json:"upstream_queue_timeout_seconds,omitempty"`
 }
 
 type rawRetry struct {

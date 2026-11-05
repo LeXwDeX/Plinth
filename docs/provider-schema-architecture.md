@@ -671,3 +671,22 @@ Offering 的面向用户文案（模型名、Provider 名、参数标签与说�
 ### 上游限流排队的 Provider/Schema 边界
 
 Adapter 只需把明确的限流拒绝映射为 `FailureRateLimited`（`Retryable`、非含糊、`RetryAfter` 取上游 `Retry-After`）；是否排队、退避与上限由 Generation 内核按 Offering 的 `retry`（`initial_backoff`、`max_backoff`）和 `timeout_seconds` 决定，Provider 不维护第二套排队状态。Schema 含只读文案 `messages["task.queue_reason.rate_limited"]` 与公开事件 `attempt.rate_limit_queued`（`runtime.task_events.public_projection`）；没有新增 Offering 或 Provider 字段。机制见 `docs/architecture.md` 的“上游限流排队”。
+
+### 上游排队的 Provider/Schema 边界（#131）
+
+上游已受理作业、但作业仍在上游自己的队列里等待开始时，Provider 不另设排队状态，也不在 Adapter 里拼提示文案，只在 Schema 里声明：
+
+- `status_mapping.upstream_status.<状态词>` 的可选 `queued: true` 标记该状态词表示“已受理、在上游排队”，只允许用于 `accepted` 相位，不能同时带 `class` 或 `max_consecutive`。
+- `status_mapping.queue_ahead_field` 可选，给出携带状态词的 JSON 对象里“前方任务数”的点分字段路径；声明时必须至少有一个 `queued` 状态词。上游没有该字段（如 Tripo）就不声明，界面只显示“上游排队中”而不带数字。
+- 读取由通用函数 `httpjson.UpstreamQueue` 完成，只接受非负整数；Adapter 把结果放进 `Observation.Queue`，内核记录、持久化与对外投影都不再需要 Provider 参与。
+- 提示文案是只读 `messages["task.queue_reason.upstream_queued"]` 与 `messages["task.queue_reason.upstream_queued_ahead"]`（后者含 `{ahead}`）；Agent 说明是 `chat.agent.upstream_queue_content`。默认 Catalog 提供中英文；Catalog 加载时校验已声明文案（含各语言 bundle）的占位符。没有新增 Offering 字段。
+
+当前接线：Meshy（`preceding_tasks`）、Tripo（无数字）、Hyper3D（`queue_length`，按子作业读取；含义为推断，未经官方文档确认）。机制、持久化与公开面见 `docs/architecture.md` 的“上游排队提示（#131，本机测试，未部署验收）”。
+
+**排队等待上限与超时失败（#136）。** 上游排队时间不计入作业执行超时，另由 Schema 声明排队最长等多久，超过后以新的失败分类终止。上面“没有新增 Offering 字段”只对 #131 的提示文案成立；#136 新增了一个可选的 Offering 覆盖字段：
+
+- 连接级 `status_mapping.queue_timeout_seconds` 由 Provider 声明排队等待上限（秒），需要至少一个 `queued` 状态词，不能为负。Offering 可用 `upstream_queue_timeout_seconds` 覆盖，只允许用于声明了 `queued` 状态词的连接，不能为负。Catalog 加载时校验，并把生效值冻结进 Offering 的 `UpstreamQueueTimeout`；没有声明的 Provider 为 0，此时排队时间照旧计入作业超时。默认 Catalog 里 Meshy、Tripo、Hyper3D 都是 7200 秒。
+- 排队超过上限的失败分类是 `upstream_queue_timeout`，与已受理作业执行超时的 `timed_out` 一样是 ambiguous、不可重试（上游可能仍会执行并扣费），Adapter 不参与判定；即使 Offering 的重试列表包含该分类，内核也不会自动重提。
+- 公开文案是只读 `messages["failure.upstream_queue_timeout"]`；Agent 侧是 `chat.presentation.messages.generation_failed_by_class.upstream_queue_timeout`，以及用于其他 ambiguous 失败的 `chat.presentation.messages.generation_failed_ambiguous`。默认 Catalog 提供中英文。
+
+机制、持久化、结算语义与验证范围见 `docs/architecture.md` 的“上游排队不计入执行超时（#136，本机测试，未部署验收）”。

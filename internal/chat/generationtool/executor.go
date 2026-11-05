@@ -1514,6 +1514,10 @@ func (executor *Executor) taskWaitDeadline(command chat.ToolCommand, offering ge
 		// A historical Task may be unreadable before its Offering can be read.
 		// Give that read a bounded recovery window using the Schema timeout.
 		timeout = time.Duration(executor.chat.Agent.RequestTimeoutSeconds) * time.Second
+	} else {
+		// Upstream queue time does not count toward the job timeout (#136),
+		// so the Task may run that much longer.
+		timeout += offering.UpstreamQueueTimeout
 	}
 	return executor.clock().Add(timeout)
 }

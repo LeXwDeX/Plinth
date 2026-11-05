@@ -130,7 +130,7 @@ func (orchestrator *Orchestrator) waitingReady(ctx context.Context, turn *Turn) 
 			// extend it while a Task is unreadable.
 			timeout := time.Duration(orchestrator.schema.Agent.RequestTimeoutSeconds) * time.Second
 			if err == nil && task.Offering.Timeout > 0 {
-				timeout = task.Offering.Timeout
+				timeout = task.Offering.Timeout + task.Offering.UpstreamQueueTimeout
 			}
 			entry.Deadline = turn.UpdatedAt.Add(timeout)
 			repaired = true

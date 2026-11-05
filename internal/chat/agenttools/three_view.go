@@ -232,6 +232,9 @@ func (e *Executor) awaitThreeView(command chat.ToolCommand, taskID string, offer
 		timeout := offering.Timeout
 		if timeout <= 0 {
 			timeout = e.taskObservationTimeout
+		} else {
+			// Upstream queue time does not count toward the job timeout (#136).
+			timeout += offering.UpstreamQueueTimeout
 		}
 		deadline = time.Now().Add(timeout)
 	}

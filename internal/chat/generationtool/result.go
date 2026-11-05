@@ -81,6 +81,22 @@ func FailureMessage(chat catalog.ChatSchema, metered bool, failure *generation.F
 		if message := chat.Presentation.Messages.GenerationFailedByClass[string(failure.Class)]; message != "" {
 			return message
 		}
+		if message := chat.Presentation.Messages.GenerationFailedAmbiguous; failure.Ambiguous && message != "" {
+			return message
+		}
 	}
 	return chat.Presentation.Messages.GenerationFailed
+}
+
+// AmbiguousFailureMessage is the Schema text the Agent relays for a failure
+// whose upstream may already have run and charged (#136): the class text,
+// else the shared ambiguous text. Empty for any other failure.
+func AmbiguousFailureMessage(chat catalog.ChatSchema, failure *generation.Failure) string {
+	if failure == nil || !failure.Ambiguous {
+		return ""
+	}
+	if message := chat.Presentation.Messages.GenerationFailedByClass[string(failure.Class)]; message != "" {
+		return message
+	}
+	return chat.Presentation.Messages.GenerationFailedAmbiguous
 }
