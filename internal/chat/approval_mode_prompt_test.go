@@ -231,7 +231,7 @@ func TestBudgetModePromptCarriesTheActivePlanAndWhatIsLeft(t *testing.T) {
 		budgetBlockHead, budgetModeLabel,
 		"当前制作计划：执行中",
 		"不同供应商的单位不相加",
-		"总预算 3 Hyper3D credits · 40 历史积分估算 · 200 Tripo credits",
+		"各单位预算 3 Hyper3D credits · 40 历史积分估算 · 200 Tripo credits",
 		"已扣费 0.5 Hyper3D credits · 0 历史积分估算 · 120 Tripo credits",
 		"执行中预留 0 Hyper3D credits · 0 历史积分估算 · 30 Tripo credits",
 		"剩余 2.5 Hyper3D credits · 40 历史积分估算 · 50 Tripo credits",

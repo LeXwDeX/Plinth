@@ -67,7 +67,7 @@ export interface ChatPaidStep {
   nativeQuote?: NativeQuote | null;
 }
 
-/** 付费步骤的批准方式；budget 是制作计划加总积分预算（#103）。 */
+/** 付费步骤的批准方式；budget 是制作计划加按积分单位的预算（#103、#120）。 */
 export type ApprovalMode = 'auto' | 'manual' | 'budget';
 
 /** 会话的 Agent 范围：Agent 只能用 2D 工具、只能用 3D 工具，或由它按要求决定。 */
