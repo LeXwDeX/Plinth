@@ -355,6 +355,12 @@ var productionBudgetNoticeMigration string
 //go:embed migrations/0077_chat_agent_scope_auto.sql
 var chatAgentScopeAutoMigration string
 
+//go:embed migrations/0078_upstream_queue.sql
+var upstreamQueueMigration string
+
+//go:embed migrations/0079_production_budget_units.sql
+var productionBudgetUnitsMigration string
+
 func migrations() []migration {
 	return []migration{{
 		version: 1,
@@ -420,7 +426,7 @@ func migrations() []migration {
 		version: 16,
 		name:    "legacy_migration_records",
 		sql:     legacyMigrationRecordsMigration,
-	}, {version: 17, name: "observation_order", sql: observationOrderMigration}, {version: 18, name: "session_lifecycle", sql: sessionLifecycleMigration}, {version: 19, name: "claim_assets", sql: claimAssetsMigration}, {version: 20, name: "task_read_projections", sql: taskReadProjectionsMigration}, {version: 21, name: "dispatch_checkpoint", sql: dispatchCheckpointMigration}, {version: 22, name: "resource_state", sql: resourceStateMigration}, {version: 23, name: "task_session", sql: taskSessionMigration}, {version: 24, name: "canvas_session_ownership", sql: canvasSessionOwnershipMigration}, {version: 25, name: "processing_plans", sql: processingPlansMigration}, {version: 26, name: "agent_state", sql: agentStateMigration}, {version: 27, name: "canvas_node_pk_revision", sql: canvasNodePKRevisionMigration}, {version: 28, name: "administration_audit_indexes", sql: administrationAuditIndexesMigration}, {version: 29, name: "login_failure_throttle", sql: loginFailureThrottleMigration}, {version: 30, name: "chat_turn_stop", sql: chatTurnStopMigration}, {version: 31, name: "chat_turn_checkpoint", sql: chatTurnCheckpointMigration}, {version: 32, name: "agent_consent_request_identity", sql: agentConsentRequestIdentityMigration}, {version: 33, name: "scene_objects", sql: sceneObjectsMigration}, {version: 34, name: "render_manifests", sql: renderManifestsMigration}, {version: 35, name: "prepared_inputs", sql: preparedInputsMigration}, {version: 36, name: "execution_grants", sql: executionGrantsMigration}, {version: 37, name: "agent_generation_operations", sql: agentGenerationOperationsMigration}, {version: 38, name: "skill_runs", sql: skillRunsMigration}, {version: 39, name: "model_captures", sql: modelCapturesMigration}, {version: 40, name: "execution_grant_turn", sql: executionGrantTurnMigration}, {version: 41, name: "agent_configuration", sql: agentConfigurationMigration}, {version: 42, name: "personal_skills", sql: personalSkillsMigration}, {version: 43, name: "chat_approval_mode", sql: chatApprovalModeMigration}, {version: 44, name: "chat_message_attachments", sql: chatMessageAttachmentsMigration}, {version: 45, name: "chat_session_notes", sql: chatSessionNotesMigration}, {version: 46, name: "chat_session_pick", sql: chatSessionPickMigration}, {version: 47, name: "pending_approvals", sql: pendingApprovalsMigration}, {version: 48, name: "skill_step_attempt", sql: skillStepAttemptMigration}, {version: 49, name: "chat_agent_scope", sql: chatAgentScopeMigration}, {version: 50, name: "chat_session_title_source", sql: chatSessionTitleSourceMigration}, {version: 51, name: "harness", sql: harnessMigration}, {version: 52, name: "asset_delivery_profile", sql: assetDeliveryProfileMigration}, {version: 53, name: "retention_receipts", sql: retentionReceiptsMigration}, {version: 54, name: "asset_recovery_receipts", sql: assetRecoveryReceiptsMigration}, {version: 55, name: "native_pricing", sql: nativePricingMigration}, {version: 56, name: "canvas_placed_results", sql: canvasPlacedResultsMigration}, {version: 57, name: "canvas_frame", sql: canvasFrameMigration}, {version: 58, name: "input_asset_derivation", sql: inputAssetDerivationMigration}, {version: 59, name: "agent_operation_recharge", sql: agentOperationRechargeMigration}, {version: 60, name: "upstream_refetches", sql: upstreamRefetchesMigration}, {version: 61, name: "generation_task_time_order", sql: generationTaskTimeOrderMigration}, {version: 62, name: "chat_turn_session_index", sql: chatTurnSessionIndexMigration}, {version: 63, name: "asset_media_type_corrections", sql: assetMediaTypeCorrectionsMigration}, {version: 64, name: "chat_choices", sql: chatChoicesMigration}, {version: 65, name: "chat_session_context", sql: chatSessionContextMigration}, {version: 66, name: "llm_settings", sql: llmSettingsMigration}, {version: 67, name: "agent_operation_reference_use", sql: agentOperationReferenceUseMigration}, {version: 68, name: "lineage_conversion_fold", sql: lineageConversionFoldMigration}, {version: 69, name: "delivery_completion", sql: deliveryCompletionMigration}, {version: 70, name: "agent_operation_reference_source", sql: agentOperationReferenceSourceMigration}, {version: 71, name: "rate_limit_queue", sql: rateLimitQueueMigration}, {version: 72, name: "skill_step_replacement", sql: skillStepReplacementMigration}, {version: 73, name: "chat_message_multiview", sql: chatMessageMultiviewMigration}, {version: 74, name: "chat_production_brief", sql: chatProductionBriefMigration}, {version: 75, name: "production_budgets", sql: productionBudgetsMigration, foreignKeysOff: true}, {version: 76, name: "production_budget_notice", sql: productionBudgetNoticeMigration}, {version: 77, name: "chat_agent_scope_auto", sql: chatAgentScopeAutoMigration}}
+	}, {version: 17, name: "observation_order", sql: observationOrderMigration}, {version: 18, name: "session_lifecycle", sql: sessionLifecycleMigration}, {version: 19, name: "claim_assets", sql: claimAssetsMigration}, {version: 20, name: "task_read_projections", sql: taskReadProjectionsMigration}, {version: 21, name: "dispatch_checkpoint", sql: dispatchCheckpointMigration}, {version: 22, name: "resource_state", sql: resourceStateMigration}, {version: 23, name: "task_session", sql: taskSessionMigration}, {version: 24, name: "canvas_session_ownership", sql: canvasSessionOwnershipMigration}, {version: 25, name: "processing_plans", sql: processingPlansMigration}, {version: 26, name: "agent_state", sql: agentStateMigration}, {version: 27, name: "canvas_node_pk_revision", sql: canvasNodePKRevisionMigration}, {version: 28, name: "administration_audit_indexes", sql: administrationAuditIndexesMigration}, {version: 29, name: "login_failure_throttle", sql: loginFailureThrottleMigration}, {version: 30, name: "chat_turn_stop", sql: chatTurnStopMigration}, {version: 31, name: "chat_turn_checkpoint", sql: chatTurnCheckpointMigration}, {version: 32, name: "agent_consent_request_identity", sql: agentConsentRequestIdentityMigration}, {version: 33, name: "scene_objects", sql: sceneObjectsMigration}, {version: 34, name: "render_manifests", sql: renderManifestsMigration}, {version: 35, name: "prepared_inputs", sql: preparedInputsMigration}, {version: 36, name: "execution_grants", sql: executionGrantsMigration}, {version: 37, name: "agent_generation_operations", sql: agentGenerationOperationsMigration}, {version: 38, name: "skill_runs", sql: skillRunsMigration}, {version: 39, name: "model_captures", sql: modelCapturesMigration}, {version: 40, name: "execution_grant_turn", sql: executionGrantTurnMigration}, {version: 41, name: "agent_configuration", sql: agentConfigurationMigration}, {version: 42, name: "personal_skills", sql: personalSkillsMigration}, {version: 43, name: "chat_approval_mode", sql: chatApprovalModeMigration}, {version: 44, name: "chat_message_attachments", sql: chatMessageAttachmentsMigration}, {version: 45, name: "chat_session_notes", sql: chatSessionNotesMigration}, {version: 46, name: "chat_session_pick", sql: chatSessionPickMigration}, {version: 47, name: "pending_approvals", sql: pendingApprovalsMigration}, {version: 48, name: "skill_step_attempt", sql: skillStepAttemptMigration}, {version: 49, name: "chat_agent_scope", sql: chatAgentScopeMigration}, {version: 50, name: "chat_session_title_source", sql: chatSessionTitleSourceMigration}, {version: 51, name: "harness", sql: harnessMigration}, {version: 52, name: "asset_delivery_profile", sql: assetDeliveryProfileMigration}, {version: 53, name: "retention_receipts", sql: retentionReceiptsMigration}, {version: 54, name: "asset_recovery_receipts", sql: assetRecoveryReceiptsMigration}, {version: 55, name: "native_pricing", sql: nativePricingMigration}, {version: 56, name: "canvas_placed_results", sql: canvasPlacedResultsMigration}, {version: 57, name: "canvas_frame", sql: canvasFrameMigration}, {version: 58, name: "input_asset_derivation", sql: inputAssetDerivationMigration}, {version: 59, name: "agent_operation_recharge", sql: agentOperationRechargeMigration}, {version: 60, name: "upstream_refetches", sql: upstreamRefetchesMigration}, {version: 61, name: "generation_task_time_order", sql: generationTaskTimeOrderMigration}, {version: 62, name: "chat_turn_session_index", sql: chatTurnSessionIndexMigration}, {version: 63, name: "asset_media_type_corrections", sql: assetMediaTypeCorrectionsMigration}, {version: 64, name: "chat_choices", sql: chatChoicesMigration}, {version: 65, name: "chat_session_context", sql: chatSessionContextMigration}, {version: 66, name: "llm_settings", sql: llmSettingsMigration}, {version: 67, name: "agent_operation_reference_use", sql: agentOperationReferenceUseMigration}, {version: 68, name: "lineage_conversion_fold", sql: lineageConversionFoldMigration}, {version: 69, name: "delivery_completion", sql: deliveryCompletionMigration}, {version: 70, name: "agent_operation_reference_source", sql: agentOperationReferenceSourceMigration}, {version: 71, name: "rate_limit_queue", sql: rateLimitQueueMigration}, {version: 72, name: "skill_step_replacement", sql: skillStepReplacementMigration}, {version: 73, name: "chat_message_multiview", sql: chatMessageMultiviewMigration}, {version: 74, name: "chat_production_brief", sql: chatProductionBriefMigration}, {version: 75, name: "production_budgets", sql: productionBudgetsMigration, foreignKeysOff: true}, {version: 76, name: "production_budget_notice", sql: productionBudgetNoticeMigration}, {version: 77, name: "chat_agent_scope_auto", sql: chatAgentScopeAutoMigration}, {version: 78, name: "upstream_queue", sql: upstreamQueueMigration}, {version: 79, name: "production_budget_units", sql: productionBudgetUnitsMigration, foreignKeysOff: true}}
 }
 
 type migration struct {
@@ -2169,6 +2175,15 @@ const rateLimitQueuedColumn = `(generation_tasks.state = 'QUEUED' AND EXISTS (
 			  AND queued_attempt.state = 'FAILED'
 			  AND json_extract(queued_attempt.failure_json, '$.rate_limit_queued') = 1))`
 
+// upstreamQueueColumn 派生"上游已受理、仍在上游自己的队列里"（#131）：
+// 任务为 RUNNING 时，取运行中当前 Attempt 最近一次观察报告的排队 JSON。
+// 不新增任务列，上游开始执行或 Attempt 结束即自然消失。
+const upstreamQueueColumn = `(SELECT queue_attempt.last_observation_queue_json
+			FROM generation_attempts queue_attempt
+			WHERE queue_attempt.id = generation_tasks.current_attempt_id
+			  AND queue_attempt.state = 'RUNNING'
+			  AND generation_tasks.state = 'RUNNING')`
+
 const taskSelect = `
 	SELECT
 		id, owner_id, capability, offering_json, input_json, request_hash,
@@ -2178,11 +2193,26 @@ const taskSelect = `
 		EXISTS (SELECT 1 FROM generation_attempts completion_attempt
 			WHERE completion_attempt.task_id = generation_tasks.id
 			  AND completion_attempt.delivery_completion_json IS NOT NULL),
-		` + rateLimitQueuedColumn + `
+		` + rateLimitQueuedColumn + `,
+		` + upstreamQueueColumn + `
 	FROM generation_tasks`
 
 type scanner interface {
 	Scan(...any) error
+}
+
+// decodeUpstreamQueue reads last_observation_queue_json (#131); NULL is no
+// queue.
+func decodeUpstreamQueue(raw sql.NullString) (*generation.UpstreamQueue, error) {
+	value := strings.TrimSpace(raw.String)
+	if !raw.Valid || value == "" || value == "null" {
+		return nil, nil
+	}
+	var queue generation.UpstreamQueue
+	if err := json.Unmarshal([]byte(value), &queue); err != nil {
+		return nil, fmt.Errorf("解析 last_observation_queue_json: %w", err)
+	}
+	return &queue, nil
 }
 
 func scanTask(row scanner) (generation.Task, error) {
@@ -2200,6 +2230,7 @@ func scanTask(row scanner) (generation.Task, error) {
 	var nativeQuoteJSON sql.NullString
 	var deliveryCompleted int
 	var rateLimitQueued int
+	var upstreamQueueJSON sql.NullString
 	err := row.Scan(
 		&task.ID,
 		&task.OwnerID,
@@ -2219,13 +2250,16 @@ func scanTask(row scanner) (generation.Task, error) {
 		&updatedAt,
 		&finishedAt,
 		&resourcesJSON,
-		&sessionID, &nativeQuoteJSON, &deliveryCompleted, &rateLimitQueued,
+		&sessionID, &nativeQuoteJSON, &deliveryCompleted, &rateLimitQueued, &upstreamQueueJSON,
 	)
 	if err != nil {
 		return generation.Task{}, err
 	}
 	task.DeliveryCompleted = deliveryCompleted != 0
 	task.RateLimitQueued = rateLimitQueued != 0
+	if task.UpstreamQueue, err = decodeUpstreamQueue(upstreamQueueJSON); err != nil {
+		return generation.Task{}, err
+	}
 	if err := json.Unmarshal([]byte(offeringJSON), &task.Offering); err != nil {
 		return generation.Task{}, fmt.Errorf("解析 Offering snapshot: %w", err)
 	}
@@ -2375,6 +2409,9 @@ func loadAttempt(
 	var failureJSON sql.NullString
 	var opaqueJSON sql.NullString
 	var deliveryCompletionJSON sql.NullString
+	var upstreamQueueJSON sql.NullString
+	var upstreamQueuedSince sql.NullString
+	var upstreamQueuedMS int64
 	var startedAt string
 	var updatedAt string
 	var finishedAt sql.NullString
@@ -2383,7 +2420,8 @@ func loadAttempt(
 		SELECT id, task_id, ordinal, offering_json, state, submission_key,
 		       upstream_provider_id, upstream_job_id, failure_json, opaque_json,
 		       last_observation_key, last_observation_sequence, observation_failures, last_observation_at, last_observation_phase,
-		       started_at, updated_at, finished_at, delivery_completion_json, rate_limit_queued
+		       started_at, updated_at, finished_at, delivery_completion_json, rate_limit_queued, last_observation_queue_json,
+		       upstream_queued_since, upstream_queued_ms
 		FROM generation_attempts WHERE id = ?`,
 		id,
 	).Scan(
@@ -2407,10 +2445,22 @@ func loadAttempt(
 		&finishedAt,
 		&deliveryCompletionJSON,
 		&attempt.RateLimitQueued,
+		&upstreamQueueJSON,
+		&upstreamQueuedSince,
+		&upstreamQueuedMS,
 	)
 	if err != nil {
 		return generation.Attempt{}, err
 	}
+	if attempt.UpstreamQueue, err = decodeUpstreamQueue(upstreamQueueJSON); err != nil {
+		return generation.Attempt{}, err
+	}
+	if upstreamQueuedSince.Valid {
+		if attempt.UpstreamQueuedSince, err = parseTime(upstreamQueuedSince.String); err != nil {
+			return generation.Attempt{}, err
+		}
+	}
+	attempt.UpstreamQueuedFor = time.Duration(upstreamQueuedMS) * time.Millisecond
 	if err := json.Unmarshal([]byte(offeringJSON), &attempt.Offering); err != nil {
 		return generation.Attempt{}, err
 	}
@@ -2540,12 +2590,21 @@ func upsertAttempt(ctx context.Context, tx *sql.Tx, attempt generation.Attempt) 
 		}
 		deliveryCompletion = string(encoded)
 	}
+	var upstreamQueue any
+	if attempt.UpstreamQueue != nil {
+		encoded, err := json.Marshal(attempt.UpstreamQueue)
+		if err != nil {
+			return err
+		}
+		upstreamQueue = string(encoded)
+	}
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO generation_attempts (
 			id, task_id, ordinal, offering_json, state, submission_key,
 			upstream_provider_id, upstream_job_id, failure_json, opaque_json,
-			last_observation_key, last_observation_sequence, observation_failures, last_observation_at, last_observation_phase, started_at, updated_at, finished_at, delivery_completion_json, rate_limit_queued
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			last_observation_key, last_observation_sequence, observation_failures, last_observation_at, last_observation_phase, started_at, updated_at, finished_at, delivery_completion_json, rate_limit_queued, last_observation_queue_json,
+			upstream_queued_since, upstream_queued_ms
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			state = excluded.state,
 			upstream_provider_id = excluded.upstream_provider_id,
@@ -2560,7 +2619,10 @@ func upsertAttempt(ctx context.Context, tx *sql.Tx, attempt generation.Attempt) 
 			updated_at = excluded.updated_at,
 			finished_at = excluded.finished_at,
 			delivery_completion_json = COALESCE(excluded.delivery_completion_json, generation_attempts.delivery_completion_json),
-			rate_limit_queued = excluded.rate_limit_queued`,
+			rate_limit_queued = excluded.rate_limit_queued,
+			last_observation_queue_json = excluded.last_observation_queue_json,
+			upstream_queued_since = excluded.upstream_queued_since,
+			upstream_queued_ms = excluded.upstream_queued_ms`,
 		attempt.ID,
 		attempt.TaskID,
 		attempt.Ordinal,
@@ -2581,6 +2643,9 @@ func upsertAttempt(ctx context.Context, tx *sql.Tx, attempt generation.Attempt) 
 		nullTimePointer(attempt.FinishedAt),
 		deliveryCompletion,
 		attempt.RateLimitQueued,
+		upstreamQueue,
+		nullTime(attempt.UpstreamQueuedSince),
+		attempt.UpstreamQueuedFor.Milliseconds(),
 	)
 	if err != nil && isUpstreamJobConflict(err) {
 		return fmt.Errorf("%w: %v", generation.RepositoryUpstreamJobConflict, err)

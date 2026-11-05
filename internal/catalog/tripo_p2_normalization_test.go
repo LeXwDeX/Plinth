@@ -83,7 +83,8 @@ func TestTripoP2NormalizeEnforcesFaceLimitAndFastTextureRules(t *testing.T) {
 	} else if values["quad"] != true {
 		t.Fatalf("quad not normalized: %+v", values)
 	}
-	if _, err = normalizeP2(t, offering, map[string]any{"quad": true, "face_limit": 30000}); err == nil || !strings.Contains(err.Error(), "最多为 25000") {
+	// The refusal is the Schema's text naming the legal range (#139).
+	if _, err = normalizeP2(t, offering, map[string]any{"quad": true, "face_limit": 30000}); err == nil || !strings.Contains(err.Error(), "48–25000") {
 		t.Fatalf("quad face_limit above 25000 accepted: %v", err)
 	}
 	if _, err = normalizeP2(t, offering, map[string]any{"face_limit": 50001}); err == nil || !strings.Contains(err.Error(), "不能大于 50000") {

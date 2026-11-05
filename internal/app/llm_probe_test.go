@@ -83,6 +83,13 @@ func TestConnectionProbeClassifiesReachabilityAndImageInput(t *testing.T) {
 			answer: func(agents.Request, bool) error { return &agents.StatusError{Status: 429} },
 			want:   llmsettings.ProbeResult{Vision: llmsettings.VisionUnknown, Outcome: llmsettings.OutcomeRateLimited}, requests: 1,
 		},
+		// #120: the adapter read the 429 as a declared used-up quota.
+		"quota exhausted": {
+			answer: func(agents.Request, bool) error {
+				return errors.Join(&agents.QuotaExhaustion{Class: "credential_quota"}, &agents.StatusError{Status: 429}, errors.New(upstreamBody))
+			},
+			want: llmsettings.ProbeResult{Vision: llmsettings.VisionUnknown, Outcome: llmsettings.OutcomeQuotaExhausted}, requests: 1,
+		},
 		"server error": {
 			answer: func(agents.Request, bool) error { return &agents.StatusError{Status: 503} },
 			want:   llmsettings.ProbeResult{Vision: llmsettings.VisionUnknown, Outcome: llmsettings.OutcomeUpstreamError}, requests: 1,

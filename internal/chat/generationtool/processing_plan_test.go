@@ -324,7 +324,8 @@ func TestAgentPlanHumanConsentGatesEveryStepAndUsesPlanIdentity(t *testing.T) {
 			Principal: executiongrant.Principal{OwnerID: "owner-a", ActorID: "owner-a", Source: executiongrant.HumanBrowser},
 			SessionID: identity.SessionID, OfferingID: string(step.OfferingID), OfferingRevision: step.Revision,
 			PreparedInputID: string(step.PreparedInputID), PreparedInputHash: step.PreparedInputHash,
-			OperationID: identity.OperationID, PlanStepID: identity.PlanStepID, IdempotencyKey: identity.IdempotencyKey})
+			OperationID: identity.OperationID, PlanStepID: identity.PlanStepID, IdempotencyKey: identity.IdempotencyKey,
+			BudgetEligible: identity.BudgetEligible})
 		if err != nil {
 			t.Fatal(err)
 		}

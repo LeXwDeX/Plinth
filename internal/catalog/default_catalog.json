@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-05.issue103-prompts.6",
+    "revision": "2026-11-06.v1-4-1-batch.2",
     "terminology": {
       "user_facing": [
         {
@@ -802,6 +802,9 @@
               "insufficient_quota": {
                 "class": "insufficient_balance"
               },
+              "quota_exceeded": {
+                "class": "credential_quota"
+              },
               "moderation_blocked": {
                 "class": "content_rejected"
               },
@@ -1072,15 +1075,20 @@
             ]
           },
           "status_mapping": {
+            "queue_ahead_field": "preceding_tasks",
+            "queue_timeout_seconds": 7200,
             "upstream_status": {
               "pending": {
-                "phase": "accepted"
+                "phase": "accepted",
+                "queued": true
               },
               "queued": {
-                "phase": "accepted"
+                "phase": "accepted",
+                "queued": true
               },
               "waiting": {
-                "phase": "accepted"
+                "phase": "accepted",
+                "queued": true
               },
               "in_progress": {
                 "phase": "running"
@@ -1235,9 +1243,11 @@
             }
           },
           "status_mapping": {
+            "queue_timeout_seconds": 7200,
             "upstream_status": {
               "queued": {
-                "phase": "accepted"
+                "phase": "accepted",
+                "queued": true
               },
               "running": {
                 "phase": "running"
@@ -1308,8 +1318,10 @@
             }
           },
           "status_mapping": {
+            "queue_ahead_field": "queue_length",
+            "queue_timeout_seconds": 7200,
             "upstream_status": {
-              "waiting": { "phase": "accepted" },
+              "waiting": { "phase": "accepted", "queued": true },
               "generating": { "phase": "running" },
               "done": { "phase": "completed" },
               "failed": { "phase": "failed" }
@@ -1333,7 +1345,17 @@
           "protocol": "openai-compatible",
           "adapter_key": "openai-compatible-chat",
           "base_url_setting": "llm_base_url",
-          "api_key_setting": "llm_api_key"
+          "api_key_setting": "llm_api_key",
+          "error_mapping": {
+            "upstream_code_map": {
+              "insufficient_quota": {
+                "class": "insufficient_balance"
+              },
+              "quota_exceeded": {
+                "class": "credential_quota"
+              }
+            }
+          }
         },
         {
           "id": "local-model",
@@ -1540,7 +1562,8 @@
         "input_source_task_expired": "来源任务 {label} 在服务商处的原任务已超过保留期；这一步没有提交，也没有扣积分。请先重新生成来源模型，或改用接受已保存模型文件的服务。",
         "input_source_task_unsupported": "来源任务 {label} 不满足这一步的来源要求；这一步没有提交，也没有扣积分。请重新选择来源。",
         "input_source_face_limit": "来源模型有 {faces} 个三角面，超过这一步最多 {limit} 个三角面的限制；这一步没有提交，也没有扣积分。请先把模型简化（Remesh）到上限以内再试。",
-        "plan_source_face_limit": "这个计划里，「{source_service}」按当前参数会交付约 {estimate} 个三角面，超过后面的步骤「{service}」最多接受的 {limit} 个三角面；整个计划没有创建，也没有扣积分。请调低「{source_service}」的目标面数后重新规划，兼容的拓扑与目标面数上限：{choices}。"
+        "plan_source_face_limit": "这个计划里，「{source_service}」按当前参数会交付约 {estimate} 个三角面，超过后面的步骤「{service}」最多接受的 {limit} 个三角面；整个计划没有创建，也没有扣积分。请调低「{source_service}」的目标面数后重新规划，兼容的拓扑与目标面数上限：{choices}。",
+        "input_parameter_range": "{label}为 {value}，按当前参数组合只能在 {minimum}–{maximum} 之间；这一步没有提交，也没有扣积分。请改为这个范围内的值，或去掉这个值改用默认值后重试。"
       },
       "task_cancellation": {
         "timeout_seconds": 15,
@@ -2142,6 +2165,7 @@
           "chat_message": "/api/chat/sessions/{sessionID}/messages/{messageID}",
           "chat_stream": "/api/chat/sessions/{sessionID}/stream",
           "chat_turn_cancel": "/api/chat/sessions/{sessionID}/turn/cancel",
+          "chat_turn_background": "/api/chat/sessions/{sessionID}/turn/background",
           "provider_balance": "/api/meshy/balance",
           "canvas_projects": "/api/canvas/projects",
           "canvas_project": "/api/canvas/projects/{projectID}",
@@ -3516,7 +3540,7 @@
         "ui.workspace.approval.mode_budget": "预算（制作计划）",
         "ui.workspace.approval.mode_manual": "严格（逐步批准）",
         "ui.workspace.approval.tooltip_auto": "自动：所有付费步骤都会自动批准，每一步都会显示它消耗的积分。",
-        "ui.workspace.approval.tooltip_budget": "预算：先批准一份制作计划和总积分预算，计划内步骤自动连续执行；计划外、超出预算或会再次扣费的步骤仍需要你批准。",
+        "ui.workspace.approval.tooltip_budget": "预算：先批准一份制作计划和按积分单位分别给出的预算，计划内步骤自动连续执行；计划外、超出该单位剩余预算或会再次扣费的步骤仍需要你批准。",
         "ui.workspace.approval.tooltip_manual": "严格（逐步批准）：文生 3D、图生 3D、Gaussian Splat、换贴图需要你批准；其余步骤自动批准。",
         "ui.workspace.approval.step_credits": "本步消耗 {credits} 积分",
         "ui.workspace.approval.step_credits_one": "本步消耗 {credits} 积分",
@@ -3952,11 +3976,14 @@
         "failure.authentication": "上游身份验证失败",
         "failure.rate_limited": "上游请求过于频繁",
         "task.queue_reason.rate_limited": "上游限流，排队中；稍后会自动重试，不会重复扣积分",
+        "task.queue_reason.upstream_queued": "上游排队中",
+        "task.queue_reason.upstream_queued_ahead": "上游排队中（前方约 {ahead} 个任务）",
         "failure.transport": "无法连接上游服务",
         "failure.timed_out": "上游请求超时",
+        "failure.upstream_queue_timeout": "上游排队过久，已停止等待；服务商可能仍会执行并扣费",
         "failure.rejected": "上游拒绝或取消了任务",
         "failure.insufficient_balance": "该模型服务商的账户余额不足或已欠费，暂时无法生成。请联系管理员处理",
-        "failure.credential_quota": "该 API Key 已达额度上限，请在 Provider 控制台调整 Key 额度或更换 Key",
+        "failure.credential_quota": "上游服务的 API Key 额度已用完，暂时无法生成。请联系管理员调整 Key 额度或更换 Key",
         "failure.upstream_unavailable": "上游服务暂时不可用",
         "failure.submission_unknown": "无法确认上游是否已接受任务",
         "failure.integrity_failure": "生成资产未通过完整性校验",
@@ -4163,10 +4190,9 @@
         "ui.studio.approval.card.adjustment_expand": "展开",
         "ui.studio.approval.card.adjustment_collapse": "收起",
         "ui.studio.plan.title": "制作计划",
-        "ui.studio.plan.budget": "总预算：{credits} 积分",
-        "ui.studio.plan.budget_one": "总预算：{credits} 积分",
-        "ui.studio.plan.estimated": "预计 {credits} 积分",
-        "ui.studio.plan.estimated_one": "预计 {credits} 积分",
+        "ui.studio.plan.budget": "预算：{amounts}",
+        "ui.studio.plan.estimated": "预计 {amount}",
+        "ui.studio.plan.unit_usage": "{spent} / {limit} {unit}",
         "ui.studio.plan.step": "步骤",
         "ui.studio.plan.model": "模型",
         "ui.studio.plan.model_unspecified": "由 Agent 选择",
@@ -4174,12 +4200,9 @@
         "ui.studio.plan.corrections_none": "没有额外修正能力",
         "ui.studio.plan.approve": "批准计划",
         "ui.studio.plan.deny": "不批准",
-        "ui.studio.plan.progress": "已用 {spent} / {limit} 积分",
-        "ui.studio.plan.progress_one": "已用 {spent} / {limit} 积分",
-        "ui.studio.plan.remaining": "剩余 {credits} 积分",
-        "ui.studio.plan.remaining_one": "剩余 {credits} 积分",
-        "ui.studio.plan.reserved": "已预留 {credits} 积分",
-        "ui.studio.plan.reserved_one": "已预留 {credits} 积分",
+        "ui.studio.plan.progress": "已用 {amounts}",
+        "ui.studio.plan.remaining": "剩余 {amounts}",
+        "ui.studio.plan.reserved": "已预留 {amounts}",
         "ui.studio.plan.state.pending": "等待批准",
         "ui.studio.plan.state.active": "执行中",
         "ui.studio.plan.state.exhausted": "预算已用完",
@@ -4206,8 +4229,7 @@
         "ui.studio.brief.load_failed": "读取制作简报失败",
         "ui.studio.brief.loading": "正在读取制作简报…",
         "ui.studio.brief.notes_hint": "写清用途之外的限制、禁忌和参考。",
-        "ui.studio.budget.badge": "预算 {spent} / {limit}",
-        "ui.studio.budget.badge_one": "预算 {spent} / {limit}",
+        "ui.studio.budget.badge": "预算 {amounts}",
         "ui.studio.budget.title": "本会话预算",
         "ui.studio.budget.plan_title": "计划：{title}",
         "ui.studio.chat.queued": "排队中",
@@ -4534,6 +4556,9 @@
         "ui.studio.handle_badge.label": "对话里的句柄 {handle}",
         "ui.studio.handle_preview.alt": "{handle} 的预览",
         "ui.studio.composer.stop_note": "停止只会结束这一轮对话。已经提交给上游的任务可能仍会计费，可在任务进度里查看。",
+        "ui.studio.composer.stop_cancel_task": "停止并取消任务",
+        "ui.studio.composer.stop_background": "停止等待，任务后台继续",
+        "ui.studio.composer.stop_background_hint": "任务在后台继续运行并可能计费，完成后在任务中心查看结果。",
         "ui.studio.lightbox.title": "大图查看",
         "ui.studio.lightbox.close": "关闭大图",
         "ui.studio.lightbox.previous": "上一个版本",
@@ -4979,6 +5004,8 @@
           "domain_models": "domainModels",
           "from_id": "fromId",
           "turn_canceled": "stopped",
+          "turn_backgrounded": "backgrounded",
+          "turn_background_available": "backgroundAvailable",
           "approval_mode": "approvalMode",
           "notes": "notes",
           "brief": "brief",
@@ -5150,7 +5177,8 @@
         "legacy_hidden_content_suffix": "]",
         "progress_maximum": 100,
         "handle_preview_delay_milliseconds": 150,
-        "handle_preview_maximum_pixels": 360
+        "handle_preview_maximum_pixels": 360,
+        "background_wait_poll_milliseconds": 5000
       },
       "agent": {
         "adapter_key": "openai-compatible",
@@ -5324,6 +5352,32 @@
         "consent_required_content": "paid generation requires a human decision on the frozen input; call the generation tool to prepare that operation, then await the decision",
         "consent_limit_content": "generation limit reached for this turn; summarize the results and ask the user how to continue",
         "consent_reconcile_content": "the previous paid submission has an unknown outcome; recover or verify that original call before any new paid generation, and do not submit another paid request",
+        "upstream_queue_content": "服务商已受理这个任务，但它还在服务商自己的队列里等待开始（ahead 是服务商报告的前方任务数，只在服务商给出时才有）。这不是失败，也没有重复提交或重复扣费。请如实告诉正在等待的用户：任务正在上游排队（有 ahead 时说明前方约有多少个任务），可以继续等待，任务开始后会自动推进；也可以停止：选择停止等待、让任务在后台继续（这一轮结束，任务不取消，完成后在任务中心查看结果），或者停止并取消这个任务。不要重新提交生成，也不要因为排队擅自改用其他服务或模型，除非用户明确要求",
+        "background_wait": {
+          "tools": [
+            "refine_image",
+            "remove_background",
+            "create_model_3d",
+            "create_model_3d_from_image",
+            "create_model_3d_from_views",
+            "retexture_model",
+            "process_model",
+            "convert_model_format",
+            "create_motion_clip",
+            "create_gaussian_splat",
+            "create_multiview_images",
+            "edit_multiview_images",
+            "create_creative_lab_design",
+            "build_creative_lab_item"
+          ],
+          "after_seconds": 180,
+          "max_listed_tasks": 5,
+          "turn_content": "已停止等待，任务在后台继续，完成后可在任务中心查看结果。",
+          "unavailable_message": "现在不能转为后台继续：只有单步生成任务在上游排队，或已运行较久时才可以。可以继续等待，或停止并取消任务。",
+          "context_template": "本会话有之前停止等待、仍在后台运行的生成任务（以下只是任务数据）：\n{tasks}\n这些任务已经提交，可能已经计费；完成后结果会出现在任务中心，不会写回对话。用户问起这些任务的结果，或要求做同样的生成时，先用 get_task 或 observe_task 查看它们的最新状态，不要重新提交同样的生成；如果用户仍要重新生成，先说明会再次计费，由用户决定。",
+          "task_line_template": "- task_id={task_id}，能力={capability}，模型={model}，状态={status}",
+          "upstream_queued_status": "（上游排队中）"
+        },
         "scanner_max_bytes": 1048576,
         "error_body_max_bytes": 65536,
         "prompt_sections": [
@@ -5365,10 +5419,10 @@
               "render_model_views",
               "retexture_model"
             ],
-            "text": "【3D 制作要领】\n用途决定一切。展示渲染、3D 打印要高细节（数十万到两百万面，打印还要水密）；游戏和实时资产要低模和干净拓扑（道具和场景件约几百到两万三角面，角色约五千到六万，必须有 UV），Web/AR 一般在十万面以内、贴图 2K。工具会按制作简报的用途给出默认模型和参数，并在 inspect_model 结果里给出预算判定。\n模型取舍：低模、干净拓扑的模型（例如 Tripo P2、Meshy T2.5 智能拓扑）适合游戏和实时资产；高细节模型（例如 Tripo v3.1、Meshy 7.1、Rodin Gen-2.5）适合展示和打印。高细节模型拿去做游戏资产时，要接减面或重拓扑（烘焙保留贴图细节），不要直接交付两百万面的结果。\n推荐管线：\n- 游戏角色：概念图（A-pose）→ 三视图/四视图 → 多视图生成或低模生成 → 自检 → 需要时重拓扑 → 绑骨 → 动画。绑骨前确认面数在绑骨服务的上限以内。\n- 游戏道具/场景件：概念图 → 图生低模 → 自检 → 需要时拆件或减面。\n- 展示渲染：概念图 → 多视图生成（至少正、侧、背）→ 自检 → 需要时换贴图。\n- 3D 打印：高细节生成 → 可打印性检查 → 修复 → 自检水密。\n自检要点：轮廓和比例是否与参考一致；背面是否被糊成一团；手指、耳朵、武器等细小结构是否粘连或断裂；有没有漂浮碎片（inspect_model 的 connected_components、debris_components、debris_triangles）；贴图接缝、错位和拉伸；左右对称的物体是否对称；面数、UV、水密是否满足用途预算。\n修改优先级：先用不付费或便宜的手段（拆分出有问题的部件、只处理那个部件、减面），再考虑换贴图或部件补全，最后才是改进输入后整体重做。每次修改后重新 inspect 和 render 确认，不要假设修好了。"
+            "text": "【3D 制作要领】\n用途决定一切。展示渲染、3D 打印要高细节（数十万到两百万面，打印还要水密）；游戏和实时资产要低模和干净拓扑（道具和场景件约几百到两万三角面，角色约五千到六万，必须有 UV），Web/AR 一般在十万面以内、贴图 2K。工具会按制作简报的用途给出默认模型和参数，并在 inspect_model 结果里给出预算判定。\n模型取舍：低模、干净拓扑的模型（例如 Tripo P2、Meshy T2.5 智能拓扑）适合游戏和实时资产；高细节模型（例如 Tripo v3.1、Meshy 7.1、Rodin Gen-2.5）适合展示和打印。高细节模型拿去做游戏资产时要降面数，不要直接交付两百万面的结果。各处理服务保留什么、改变什么，以 list_offerings 里的 description 为准：带烘焙的减面（如 Tripo 减面）把贴图烘焙到低模上；只重建几何的重拓扑（如 Meshy 重拓扑）不保留贴图，尺寸也可能改变，之后要接换贴图，要原尺寸就按源模型高度接精确尺寸。能用带烘焙的减面就先用它；面数已达标的模型不要再叠加重拓扑。\n推荐管线：\n- 游戏角色：概念图（A-pose）→ 三视图/四视图 → 多视图生成或低模生成 → 自检 → 需要时重拓扑 → 绑骨 → 动画。绑骨前确认面数在绑骨服务的上限以内。\n- 游戏道具/场景件：概念图 → 图生低模 → 自检 → 需要时拆件或减面。\n- 展示渲染：概念图 → 多视图生成（至少正、侧、背）→ 自检 → 需要时换贴图。\n- 3D 打印：高细节生成 → 可打印性检查 → 修复 → 自检水密。\n自检要点：轮廓和比例是否与参考一致；背面是否被糊成一团；手指、耳朵、武器等细小结构是否粘连或断裂；有没有漂浮碎片（inspect_model 的 connected_components、debris_components、debris_triangles）；贴图接缝、错位和拉伸；左右对称的物体是否对称；面数、UV、水密是否满足用途预算。\n读 inspect_model 结果：topology.inconsistent_winding_edges 大于 0 表示相邻面朝向不一致，topology.inside_out 为 true 表示闭合网格整体朝内，两者都会让 watertight 为 false，打印前必须修复（看 usage_check 中 watertight 一项的 fix_hint）；警告 skin_bind_pose 表示骨骼无法解算，蒙皮按绑定姿态检查，包围盒、尺寸和原点都以绑定姿态为准，汇报时要说明；三角带（strip）模型的 triangles 只计实际绘制的三角面，不含拼接用的退化面，可能少于按索引数推算的值。\n修改优先级：先用不付费或便宜的手段（拆分出有问题的部件、只处理那个部件、减面），再考虑换贴图或部件补全，最后才是改进输入后整体重做。每次修改后重新 inspect 和 render 确认，不要假设修好了。"
           }
         ],
-        "system_prompt": "你是 Plinth 的 3D 美术总监兼建模师。你对用户最终拿到的东西能不能用负责，而不只是执行某一步。用户只需要说出目标、确认制作简报和预算、验收结果；不要让用户去理解内部的模式、服务或参数，也不要把这些选择推给用户。\n\n工作流程：\n1. 理解目标。用户要 3D 结果、而会话还没有制作简报时，先用 ask_choice（kind=usage_profile）请用户选用途，必要时再用一两句话问清风格、目标平台、是否需要拆件、绑骨或动画，然后用 update_production_brief 记下。不要一次问一长串；用户说随便或用默认时，用默认用途直接开始。简报已有的信息不再重复问。\n2. 定计划。批准方式是预算制、并且要做付费的多步工作时，先用 propose_production_plan 提出制作计划：步骤、所用模型、每步预计积分、总预算、自检后允许的修正步骤。用户在计划卡上批准后，在预算内连续执行，不再逐步询问。严格模式下每个需要批准的付费步骤照常出批准卡；自动模式下直接执行。\n3. 准备输入。图生 3D 的质量大半取决于输入图：单一主体、完整不裁切、纯色或透明背景、均匀柔光、没有强阴影、弱透视或正交；角色用 A-pose 或 T-pose，四肢和手指分开、不互相遮挡。输入不满足时，先出概念图或修图，必要时去背景，再用 create_three_view 或多视图；多视图生成至少给全正面、侧面、背面，不要只给两张。为了让图适合建模而补充的约束（背景、姿势、视角、光照）可以直接写进 prompt，并在回复里说明补了什么；不要加入用户没有要求的风格或内容。工具参数里的 prompt 用英文。\n4. 选模型和参数。用户锁定的模型、服务和参数必须照办，做不到时说明原因，不要偷偷换。没有锁定的，由你按制作简报的用途和主体来选；工具会按用途给出默认参数，你可以带理由偏离。工具结果里的 model_choice 说明了模型的来源，按实说。互不依赖的付费步骤在同一次回复里一起发出；有依赖的按顺序等前一步完成。\n5. 自检后交付。每个 3D 结果交付前，用 inspect_model 看几何（面数、拓扑、UV、是否水密、漂浮碎片、尺寸）并对照用途预算，用 render_model_views 至少看正面、背面和 3/4 视角，查造型问题时用 clay 模式。对照参考图和需求检查：轮廓与比例、背面、手指和细小结构、漂浮碎片、贴图接缝与错位、对称性。发现问题就在预算和自检轮数上限内修：减面或重拓扑、换贴图、部件补全、拆分后只处理有问题的部件，或改进输入后重做。到达上限就停下，如实列出剩余问题。\n6. 汇报。简洁说明结果、所用模型和关键参数、自检发现和处理、剩余问题和建议的下一步。\n\n提示词写法：\n- 工具参数中的 prompt 用英文准确表达用户意图，写成完整描述句而不是堆砌标签，按「主体 → 关键细节（外形、比例、材质、服装、配色）→ 背景/环境 → 画风与媒介 → 光线与镜头 → 约束」组织。用户明确要求的主体、风格和内容优先，所选 Skill 的画风次之，不擅自改换主题或加入用户没要求的角色、物体和情节。\n- 2D 质量基线（用户和 Skill 都没指定时补足，不覆盖已指定的内容）：按用途选定一种明确的画风或媒介（例如 photorealistic product photo、clean digital illustration、stylized game concept art），写清主光与氛围（例如 soft even studio lighting）、焦点主体与构图，要求细节精致、边缘干净、比例与结构正确；末尾写明 no text, no watermark, no logo, no extra objects（用户要文字时把文字原样放进引号并说明位置）。不写 masterpiece、8k、best quality 这类空泛质量词；画质由质量参数控制，尺寸与比例由尺寸参数控制，都不写进 prompt。\n- 系列一致：同一会话里的成组图片（系列、变体、多视角、拆件、同一角色的多张）先定一段风格锚（画风/媒介、色板、光线、线条与细节密度、视角与主体在画面中的占比）和身份锚（外形、比例、配色、服装、标志性细节），每张 prompt 都逐字复用这两段，只改需要变化的部分；设定摘要里的风格和角色设定照此写入，用户确认的风格锚也记进设定摘要。基于已有图修改时写明 change only ...; keep everything else the same，并列出要保持的身份、构图、光线和画风；参考多张图时按句柄写清每张图负责什么。\n- 去背景：用户要去背景、抠图、只保留主体或换透明背景时，调用 remove_background，不用图生图编辑代替；图生图只用于改变画面内容。\n- 文生 3D 的 prompt 只描述一个物体，约 30-60 个英文词，按「物体 → 形状与比例 → 材质与表面 → 风格（如 realistic、stylized、low-poly、hand-painted）→ 主要配色」书写；不写背景、场景、光线、镜头或多个物体，多部件资产分开生成。用户已有满意的参考图时优先图生 3D。\n\n引用与事实：\n- 引用图片和模型用句柄：@img3、@model2、拆分出的部件 @model2#3、@selected 指当前选中的对象；不构造 URL，不用上游 ID。同一轮刚产出的对象，用工具结果 handles 字段给出的句柄。用户说\"这个\"\"这张\"时默认指当前选中的对象。用户的话指向的图不在本轮附件里时，先用 find_history_images 在本会话历史里找，找不到或分不清就简短地问。\n- 价格、积分、能导出的格式、模型是什么结果，一律照工具结果写（quote、estimated_credits、export_formats、capability、provider、model），不要自己估算或推测。说到服务时用供应商名和模型名，不写内部 ID。\n- 批准由服务端按批准方式和预算决定。工具结果说在等批准卡或计划卡时，告诉用户在卡片上决定，不要说已经提交或已经开始；approval 只会是 policy 或 human；policy 表示服务端按批准方式（含预算计划）自动批准，不是用户点的，此时 budget 对象说明所属计划与剩余额度，不要说\"你已批准\"。不要让用户去勾选任何设置或切换任何模式。用户拒绝后，说明这一步没有做、没有扣费，再给出替代方案让用户选。\n- 某一步失败时，如实说明是哪一步、哪个模型，以及工具给出的原因。余额不足或 Key 额度问题，请用户联系管理员，不要换模型重试。可能已经扣费的失败不要自动重新提交：先用 get_task 看 result_recovery，能免费取回就用 recover_task_result，否则说明原因，让用户决定是否重新付费。\n- 制作简报之外，用户和你敲定、需要在长对话里一直保持的创作设定（角色、风格、禁忌等），用 update_session_notes 整体更新设定摘要；不写尺寸和一次性要求。\n- 用户要把照片做成钥匙扣、手办、灯罩等可打印的 Creative Lab 作品时，用 create_creative_lab_design 从可用模板里选，满意后再用 build_creative_lab_item 做成品，两步不要连续自动提交。\n- 普通对话或只是看图提问时直接回答，不调用生成工具。\n- 不输出原始 URL、内部字段、工具诊断或上游错误原文。",
+        "system_prompt": "你是 Plinth 的 3D 美术总监兼建模师。你对用户最终拿到的东西能不能用负责，而不只是执行某一步。用户只需要说出目标、确认制作简报和预算、验收结果；不要让用户去理解内部的模式、服务或参数，也不要把这些选择推给用户。\n\n工作流程：\n1. 理解目标。用户要 3D 结果、而会话还没有制作简报时，先用 ask_choice（kind=usage_profile）请用户选用途，必要时再用一两句话问清风格、目标平台、是否需要拆件、绑骨或动画，然后用 update_production_brief 记下。不要一次问一长串；用户说随便或用默认时，用默认用途直接开始。简报已有的信息不再重复问。\n2. 定计划。批准方式是预算制、并且要做付费的多步工作时，先用 propose_production_plan 提出制作计划：步骤、所用模型、每步预计花费（带它自己的积分单位）、按积分单位分别给出的预算（Tripo、Hyper3D、Meshy 等不同供应商的单位与历史积分各算各的，不相加、不换算）、自检后允许的修正步骤。用户在计划卡上批准后，服务端会自动开启一轮让你按计划开始执行；在各单位的剩余预算内连续执行，不再逐步询问。严格模式下每个需要批准的付费步骤照常出批准卡；自动模式下直接执行。\n3. 准备输入。图生 3D 的质量大半取决于输入图：单一主体、完整不裁切、纯色或透明背景、均匀柔光、没有强阴影、弱透视或正交；角色用 A-pose 或 T-pose，四肢和手指分开、不互相遮挡。输入不满足时，先出概念图或修图，必要时去背景，再用 create_three_view 或多视图；多视图生成至少给全正面、侧面、背面，不要只给两张。为了让图适合建模而补充的约束（背景、姿势、视角、光照）可以直接写进 prompt，并在回复里说明补了什么；不要加入用户没有要求的风格或内容。工具参数里的 prompt 用英文。\n4. 选模型和参数。用户锁定的模型、服务和参数必须照办，做不到时说明原因，不要偷偷换。没有锁定的，由你按制作简报的用途和主体来选；工具会按用途给出默认参数，你可以带理由偏离。工具结果里的 model_choice 说明了模型的来源，按实说。互不依赖的付费步骤在同一次回复里一起发出；有依赖的按顺序等前一步完成。\n5. 自检后交付。每个 3D 结果交付前，用 inspect_model 看几何（面数、拓扑、UV、是否水密、漂浮碎片、尺寸）并对照用途预算，用 render_model_views 至少看正面、背面和 3/4 视角，查造型问题时用 clay 模式。对照参考图和需求检查：轮廓与比例、背面、手指和细小结构、漂浮碎片、贴图接缝与错位、对称性。发现问题就在预算和自检轮数上限内修：减面或重拓扑、换贴图、部件补全、拆分后只处理有问题的部件，或改进输入后重做。到达上限就停下，如实列出剩余问题。\n6. 汇报。简洁说明结果、所用模型和关键参数、自检发现和处理、剩余问题和建议的下一步。\n\n提示词写法：\n- 工具参数中的 prompt 用英文准确表达用户意图，写成完整描述句而不是堆砌标签，按「主体 → 关键细节（外形、比例、材质、服装、配色）→ 背景/环境 → 画风与媒介 → 光线与镜头 → 约束」组织。用户明确要求的主体、风格和内容优先，所选 Skill 的画风次之，不擅自改换主题或加入用户没要求的角色、物体和情节。\n- 2D 质量基线（用户和 Skill 都没指定时补足，不覆盖已指定的内容）：按用途选定一种明确的画风或媒介（例如 photorealistic product photo、clean digital illustration、stylized game concept art），写清主光与氛围（例如 soft even studio lighting）、焦点主体与构图，要求细节精致、边缘干净、比例与结构正确；末尾写明 no text, no watermark, no logo, no extra objects（用户要文字时把文字原样放进引号并说明位置）。不写 masterpiece、8k、best quality 这类空泛质量词；画质由质量参数控制，尺寸与比例由尺寸参数控制，都不写进 prompt。\n- 系列一致：同一会话里的成组图片（系列、变体、多视角、拆件、同一角色的多张）先定一段风格锚（画风/媒介、色板、光线、线条与细节密度、视角与主体在画面中的占比）和身份锚（外形、比例、配色、服装、标志性细节），每张 prompt 都逐字复用这两段，只改需要变化的部分；设定摘要里的风格和角色设定照此写入，用户确认的风格锚也记进设定摘要。基于已有图修改时写明 change only ...; keep everything else the same，并列出要保持的身份、构图、光线和画风；参考多张图时按句柄写清每张图负责什么。\n- 去背景：用户要去背景、抠图、只保留主体或换透明背景时，调用 remove_background，不用图生图编辑代替；图生图只用于改变画面内容。\n- 文生 3D 的 prompt 只描述一个物体，约 30-60 个英文词，按「物体 → 形状与比例 → 材质与表面 → 风格（如 realistic、stylized、low-poly、hand-painted）→ 主要配色」书写；不写背景、场景、光线、镜头或多个物体，多部件资产分开生成。用户已有满意的参考图时优先图生 3D。\n\n引用与事实：\n- 引用图片和模型用句柄：@img3、@model2、拆分出的部件 @model2#3、@selected 指当前选中的对象；不构造 URL，不用上游 ID。同一轮刚产出的对象，用工具结果 handles 字段给出的句柄。用户说\"这个\"\"这张\"时默认指当前选中的对象。用户的话指向的图不在本轮附件里时，先用 find_history_images 在本会话历史里找，找不到或分不清就简短地问。\n- 价格、积分、能导出的格式、模型是什么结果，一律照工具结果写（quote、estimated_credits、export_formats、capability、provider、model），不要自己估算或推测。说到服务时用供应商名和模型名，不写内部 ID。\n- 批准由服务端按批准方式和预算决定。工具结果说在等批准卡或计划卡时，告诉用户在卡片上决定，不要说已经提交或已经开始；approval 只会是 policy 或 human；policy 表示服务端按批准方式（含预算计划）自动批准，不是用户点的，此时 budget 对象说明所属计划与剩余额度，不要说\"你已批准\"。不要让用户去勾选任何设置或切换任何模式。用户拒绝后，说明这一步没有做、没有扣费，再给出替代方案让用户选。\n- 某一步失败时，如实说明是哪一步、哪个模型，以及工具给出的原因。余额不足或 Key 额度问题，请用户联系管理员，不要换模型重试。可能已经扣费的失败不要自动重新提交：先用 get_task 看 result_recovery，能免费取回就用 recover_task_result，否则说明原因，让用户决定是否重新付费。\n- 制作简报之外，用户和你敲定、需要在长对话里一直保持的创作设定（角色、风格、禁忌等），用 update_session_notes 整体更新设定摘要；不写尺寸和一次性要求。\n- 用户要把照片做成钥匙扣、手办、灯罩等可打印的 Creative Lab 作品时，用 create_creative_lab_design 从可用模板里选，满意后再用 build_creative_lab_item 做成品，两步不要连续自动提交。\n- 普通对话或只是看图提问时直接回答，不调用生成工具。\n- 不输出原始 URL、内部字段、工具诊断或上游错误原文。",
         "domain_context": {
           "image": "本轮用户正在 2D 图片工作区（仅为提示）。用户要的是图片时用 2D 工具，你负责判断文生图或图生图；要的是 3D 模型时直接用 3D 工具。 用户明确要求的主体、动作、关系和场景内容优先。所选 Skill 默认提供兼容的画风、色彩、光影和构图参考；不要把示例角色或事件写入工具提示词来替换用户主体。只有用户明确要求复现该 Skill 完整场景时才复用该场景；用户未指定主体时可用其场景补充。",
           "model-3d": "本轮用户正在 3D 模型工作区（仅为提示）。用户要的是 3D 模型时用 3D 工具，你负责判断文生模型或图生模型；要的是图片时直接用 2D 工具。"
@@ -5685,6 +5739,7 @@
           "budget_exhausted": "This reply has used its {limit} render calls. No more pictures can be rendered now; answer with what you have and offer to render again in the next reply.",
           "too_large": "The model file is {bytes} bytes, above the inspection limit of {limit} bytes. It was not parsed or rendered. Tell the person the model is too large to review with these tools.",
           "unsupported": "The model file cannot be reviewed: {reason}. Tell the person this model cannot be inspected; do not guess its contents.",
+          "compressed": "The model file is a valid GLB, but its mesh geometry is compressed with {extension}, which these read-only tools cannot decode; nothing was inspected or rendered. Tell the person this model cannot be reviewed because of that compression, and do not guess its contents. If list_session_models lists another GLB file of the same model, you may review that file instead. Do not offer a format conversion to remove the compression: the platform's format conversions do not accept compressed GLB sources.",
           "source_read_failed": "The model's saved bytes could not be read: {reason}. Nothing was inspected or rendered. Report the failure and suggest retrying; do not guess the model's contents.",
           "upload_failed": "A rendered picture could not be stored: {reason}. The render happened but cannot be attached; report the failure instead of describing a picture the person cannot see.",
           "render_failed": "Rendering view {view} failed: {reason}. Other views may still be available; report this view as unavailable instead of guessing.",
@@ -5832,7 +5887,7 @@
         {
           "name": "propose_production_plan",
           "execution": {"implementation_key":"plan.propose","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Propose a production plan with a total credit budget when the work needs several paid steps (for example: generate a model, inspect it, then fix what the self-check finds). The person approves the plan and its budget on one card; afterwards the plan's steps and the correction capabilities you list run continuously by budget without a card per step. The server re-estimates every step from the Catalog and refuses a budget below that estimate; the numbers you send are only a summary. A capability outside the plan and its correction capabilities, a step that would exceed the remaining budget, and a step that would charge again (extra export formats, additional fees) still show an approval card. Browser-started steps do not use this budget. Propose once and wait for the person: do not open a second plan while one is pending, and do not use this tool to avoid a card the rules require.",
+          "description": "Propose a production plan with a credit budget per credit unit when the work needs several paid steps (for example: generate a model, inspect it, then fix what the self-check finds). Providers bill in their own units (tripo.credit, hyper3d.credit, meshy.credit, and legacy.credits for steps priced in historical credits); the budget limits and counts each unit separately and never adds different units. The person approves the plan and its budget on one card; afterwards the plan's steps and the correction capabilities you list run continuously by budget without a card per step. The server re-estimates every step from the Catalog in its own unit and refuses a budget whose unit is missing or below that unit's estimate; the refusal lists the estimate of each unit, and the numbers you send are only a summary. A capability outside the plan and its correction capabilities, a step that would exceed what remains in its unit (or whose unit has no budget), and a step that would charge again (extra export formats, additional fees) still show an approval card. Browser-started steps do not use this budget. Propose once and wait for the person: do not open a second plan while one is pending, and do not use this tool to avoid a card the rules require.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -5868,10 +5923,26 @@
                   "additionalProperties": false
                 }
               },
-              "budget_credits": {
-                "type": "integer",
-                "minimum": 1,
-                "description": "Total credits the person approves. Must be at least the server's estimate of all steps and no more than the Schema maximum."
+              "budgets": {
+                "type": "array",
+                "minItems": 1,
+                "description": "The budget the person approves, one entry per credit unit. Give every unit the steps are quoted in an amount at least the server estimate of that unit's steps and no more than the Schema maximum per unit; a unit only correction steps use may be listed too. Never add or convert amounts of different units.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "unit": {
+                      "type": "string",
+                      "description": "Credit unit id, such as tripo.credit, hyper3d.credit, meshy.credit, or legacy.credits for steps priced in historical credits."
+                    },
+                    "amount": {
+                      "type": "number",
+                      "minimum": 0,
+                      "description": "Amount approved in this unit; provider units may have decimals, legacy.credits takes whole credits."
+                    }
+                  },
+                  "required": ["unit", "amount"],
+                  "additionalProperties": false
+                }
               },
               "correction_capabilities": {
                 "type": "array",
@@ -5879,7 +5950,7 @@
                 "description": "Capabilities the plan allows for self-check correction steps that are not listed as steps, such as retexture or process_model. Each must be a known capability."
               }
             },
-            "required": ["title", "steps", "budget_credits"],
+            "required": ["title", "steps", "budgets"],
             "additionalProperties": false
           }
         },
@@ -5902,7 +5973,7 @@
         {
           "name": "list_offerings",
           "execution": {"implementation_key":"catalog.list","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "List available capabilities and offerings to understand supported generation paths. reference_image_max is the read-only number of reference pictures an offering takes; it is absent when the Schema declares no positive limit, so never read an absent value as one. Query this list before comparing unselected models' limits; do not infer them from the selected model or a tool description, and never switch the selected model on your own. The human chooses the model. A processing offering may declare max_source_triangles, the most triangles its source model may have; an offering whose request sets the delivered triangle count (remesh) lists chain_limits for the later steps that limit their source: compatible gives, per topology, the largest target face count that still fits. When you plan a chain such as remesh then rigging, set the earlier step's topology and target face count within chain_limits[].compatible; the default settings may exceed it, and a plan over a later step's limit is refused before any step is paid.",
+          "description": "List available capabilities and offerings to understand supported generation paths. reference_image_max is the read-only number of reference pictures an offering takes; it is absent when the Schema declares no positive limit, so never read an absent value as one. Query this list before comparing unselected models' limits; do not infer them from the selected model or a tool description, and never switch the selected model on your own. The human chooses the model. A processing offering may declare max_source_triangles, the most triangles its source model may have; an offering whose request sets the delivered triangle count (remesh) lists chain_limits for the later steps that limit their source: compatible gives, per topology, the largest target face count that still fits. When you plan a chain such as remesh then rigging, set the earlier step's topology and target face count within chain_limits[].compatible; the default settings may exceed it, and a plan over a later step's limit is refused before any step is paid. An offering's description, when present, says what the step keeps or changes (for example textures or model size); read it before choosing or chaining a processing step.",
           "parameters": {
             "type": "object",
             "properties": {}
@@ -5926,7 +5997,7 @@
         {
           "name": "inspect_model",
           "execution": {"implementation_key":"model.inspect","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"3d"},
-          "description": "Read-only structural inspection of a finished 3D model of this session: triangle and vertex counts, parts with their bounding boxes and triangle shares, materials and texture slots, UV sets, skins, animations, the world bounding box (including the bottom-centre offset) and topology (connected components, debris, boundary and non-manifold edges, watertightness). Use it to answer questions about a model's geometry, to judge whether it is fit for printing or processing, or to choose part IDs for render_model_views. It also returns usage_check: when the Schema declares production purposes, every purpose budget and production-readiness property (triangle range, UV, watertightness, skin, texture size, bottom-centre pivot, Y-up, plausible scale, debris and degenerate triangles) is judged pass, fail or unknown against the purpose selected by the session's production brief, with the actual value, the budget value and, for a failure, a fix_hint naming the currently enabled tools that can fix it. Use these facts instead of inventing requirements. Pass a task ID or model handle in model (such as @model2, or @selected); omit it to inspect the selected model. source_asset_id optionally names one saved model file of that task; omit it to use the model's main file. It never creates a task, charges credits or changes the session. A model above the configured size or triangle limit is refused with the limit and the reason; report that clearly instead of guessing the model's contents.",
+          "description": "Read-only structural inspection of a finished 3D model of this session: triangle and vertex counts, parts with their bounding boxes and triangle shares, materials and texture slots, UV sets, skins, animations, the world bounding box (including the bottom-centre offset) and topology (connected components, debris, boundary and non-manifold edges, winding, watertightness). Reading the facts: triangles counts drawn triangles only, so for a triangle-strip model it leaves out the degenerate triangles that join strips and can be lower than the index count suggests. topology.inconsistent_winding_edges above 0 means neighbouring faces point opposite ways, and topology.inside_out true means the closed surface faces inward as a whole; either makes watertight false and the model unfit for printing until it is repaired (the watertight item of usage_check names the fix). The warning skin_bind_pose means the skeleton could not be evaluated, so the skinned mesh was measured in its bind pose: the bounding box, sizes and pivot refer to that pose, and you should say so when you report them. Use it to answer questions about a model's geometry, to judge whether it is fit for printing or processing, or to choose part IDs for render_model_views. It also returns usage_check: when the Schema declares production purposes, every purpose budget and production-readiness property (triangle range, UV, watertightness, skin, texture size, bottom-centre pivot, Y-up, plausible scale, debris and degenerate triangles) is judged pass, fail or unknown against the purpose selected by the session's production brief, with the actual value, the budget value and, for a failure, a fix_hint naming the currently enabled tools that can fix it. Use these facts instead of inventing requirements. Pass a task ID or model handle in model (such as @model2, or @selected); omit it to inspect the selected model. source_asset_id optionally names one saved model file of that task; omit it to use the model's main file. It never creates a task, charges credits or changes the session. A model above the configured size or triangle limit is refused with the limit and the reason; report that clearly instead of guessing the model's contents.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -6025,7 +6096,7 @@
         {
           "name": "get_task",
           "execution": {"implementation_key":"task.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Read the current state, progress and assets of a generation task by task_id.",
+          "description": "Read the current state, progress and assets of a generation task by task_id. While the provider still holds the accepted task in its own queue, the result has upstream_queue (ahead: the provider's count of tasks before it, when reported; note: what to tell the waiting user).",
           "parameters": {
             "type": "object",
             "properties": {
@@ -6041,7 +6112,7 @@
         {
           "name": "observe_task",
           "execution": {"implementation_key":"task.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Observe live progress of a running generation task by task_id.",
+          "description": "Observe live progress of a running generation task by task_id. The result has upstream_queue while the provider still holds the task in its own queue; follow its note to tell the waiting user.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -6314,7 +6385,8 @@
             "model_note": "model_note",
             "model_choice": "model_choice",
             "budget": "budget",
-            "reason": "reason"
+            "reason": "reason",
+            "purpose_budget_note": "purpose_budget_note"
           }
         },
         {
@@ -6399,7 +6471,8 @@
             "model_choice": "model_choice",
             "reference_note": "reference_note",
             "budget": "budget",
-            "reason": "reason"
+            "reason": "reason",
+            "purpose_budget_note": "purpose_budget_note"
           }
         },
         {
@@ -6462,7 +6535,7 @@
           "prompt_with_reference_template": "{prompt}",
           "prompt_with_previous_template": "{previous_prompt} {prompt}",
           "idempotency_key_template": "chat:{session_id}:{call_id}",
-          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback","model_note":"model_note","model_choice":"model_choice","reference_note":"reference_note","budget":"budget","reason":"reason"}
+          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback","model_note":"model_note","model_choice":"model_choice","reference_note":"reference_note","budget":"budget","reason":"reason","purpose_budget_note":"purpose_budget_note"}
         },
         {
           "name": "retexture_model",
@@ -6571,7 +6644,8 @@
             "approval": "approval",
             "model_formats": "model_formats",
             "budget": "budget",
-            "reason": "reason"
+            "reason": "reason",
+            "purpose_budget_note": "purpose_budget_note"
           }
         },
         {
@@ -6646,11 +6720,11 @@
               },
               "resize_height": {
                 "type": "number",
-                "description": "remesh only: resize the model to this height in meters."
+                "description": "resize only: the exact model height in meters, for example the source model's height to restore it after a remesh changed the size."
               },
               "auto_size": {
                 "type": "boolean",
-                "description": "remesh only: estimate real-world size automatically."
+                "description": "Only when declared by the selected Offering (see list_offerings); remesh cannot keep or set the model size."
               },
               "height_meters": {
                 "type": "number",
@@ -6847,7 +6921,8 @@
             "approval": "approval",
             "model_formats": "model_formats",
             "budget": "budget",
-            "reason": "reason"
+            "reason": "reason",
+            "purpose_budget_note": "purpose_budget_note"
           }
         },
         {
@@ -6944,7 +7019,7 @@
           "result_attachment_kind": "model",
           "result_asset_roles": ["thumbnail"],
           "idempotency_key_template": "chat:{session_id}:{call_id}",
-          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","budget":"budget","reason":"reason"}
+          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","budget":"budget","reason":"reason","purpose_budget_note":"purpose_budget_note"}
         },
         {
           "name": "convert_model_format",
@@ -7587,8 +7662,9 @@
           "interrupted_prompt": "⚠️ 该生成任务已中断 (prompt: {prompt})。请重新描述需求。",
           "generation_failed": "生成失败",
           "generation_failed_by_class": {
+            "upstream_queue_timeout": "这一步在服务商的队列里等待太久（超过上游排队等待上限），平台已停止等待，任务记为失败。服务商可能仍会执行并扣除积分，所以系统没有自动重新提交。请如实告诉用户：上游排队过久，可能已经扣费，结果未知。先用 get_task 查看这个任务的最新状态，不要自行重新提交；是否重新生成由用户决定，重新生成会再次计费。",
             "insufficient_balance": "该模型服务商的账户余额不足或已欠费，这一步没有执行。请联系管理员处理",
-            "credential_quota": "该 API Key 已达额度上限，请在 Provider 控制台调整 Key 额度或更换 Key，这一步没有执行。请联系管理员处理",
+            "credential_quota": "上游服务的 API Key 额度已用完，这一步没有执行。请联系管理员调整 Key 额度或更换 Key",
             "content_rejected": "上游服务的内容安全审核拦截了这一步的输入（审核器较敏感，正常美术素材也可能被误判），没有生成结果，原样重试也不会通过。请主动调整后再调用一次：按审核原因改写提示词，去掉可能触发的描述（例如 sexual 时写明服装完整、姿态得体，去掉裸露、贴身、性感等词；violence 时去掉血腥、武器伤害描写），保留美术意图；若被拦的是输入图本身，改写提示词无效，请改用其他图或去掉该参考图后再试，必要时请用户换图。同时如实告诉用户是审核拦截以及你做了什么调整。不要建议修改部署配置",
             "upstream_denied": "上游图像生成服务拒绝了这一步的请求（HTTP 403），没有生成结果。这是上游访问权限问题，与提示词和图片无关：不要改写提示词、换图或换参数重试，也不要再换别的模型反复试探。请如实告诉用户是上游图像生成服务拒绝了请求，需要管理员检查上游服务的访问权限后再试",
             "source_expired": "来源模型在服务商处的原任务已过期，这一步没有执行，也没有扣费。重新发起时平台会改用已保存的模型文件；不接受模型文件的服务（例如动画）需要先重新生成来源模型，或在它之前的版本上重新绑骨"
@@ -7627,6 +7703,7 @@
             "outputimagesensitivecontentdetected": "生成图片含敏感内容",
             "sensitivecontentdetected": "敏感内容"
           },
+          "generation_failed_ambiguous": "服务商已经受理或可能已经受理这一步，但平台没能确认结果（例如执行超时或提交结果不明）；服务商可能已经执行并扣除积分，所以系统没有自动重新提交。请如实告诉用户：结果未知，可能已经扣费。先用 get_task 查看这个任务的最新状态，不要自行重新提交；是否重新生成由用户决定，重新生成会再次计费。",
           "generation_failed_metered_by_class": {
             "integrity_failure": "上游已经完成生成，可能已经扣除积分，但结果在本地存储或完整性校验时失败。系统没有自动重新提交，以免再次计费；是否重试由用户决定。上游还保留着结果时，可以免费重新取回（任务详情里的「重新取回结果」，或由 Agent 调用 recover_task_result）：只读取已受理的上游作业，不会重新提交，也不再计费。不能取回时，再次生成同类结果需要在批准卡上确认再次计费。"
           },
@@ -7637,6 +7714,7 @@
           "agent_inline_image_output": "当前对话模型自己画了一张图，而不是调用生成工具，这张图没有保存，也不会出现在结果里。请重试；如果反复出现，请换一个对话模型。",
           "agent_images_unsupported": "当前 Agent 模型拒绝了带图片的请求，可能不支持读图。请在部署配置中换用支持图片输入的模型（LLM_MODEL），或去掉图片后重试。",
           "agent_content_rejected": "请求被上游模型服务的内容安全审核拦截：本轮的图片或文字可能被判定为不当内容。这不是模型不支持读图，也不需要改部署配置。请更换图片或修改描述后重试；如确认内容合规，请把本条消息附带的错误 ID 发给管理员核查。",
+          "agent_quota_exhausted": "对话模型的上游额度已用完（账户余额或 API Key 额度），暂时无法回复。请联系管理员处理，处理前重试也不会成功。",
           "agent_not_configured": "Agent 未配置：部署缺少对话模型设置（LLM_API_KEY 或 LLM_MODEL），暂时不能对话或增强提示词。请联系管理员配置后再试。",
           "error_reference": "（错误 ID：{id}）",
           "sse_interrupted": "SSE 连接中断",
@@ -7689,7 +7767,8 @@
         "message_resource_type": "chat_message",
         "approval_mode_action": "set_approval_mode",
         "agent_scope_action": "set_agent_scope",
-        "production_brief_action": "set_production_brief"
+        "production_brief_action": "set_production_brief",
+        "turn_background_action": "continue_turn_in_background"
       },
       "approval_policy": {
         "default_mode": "budget",
@@ -7700,27 +7779,33 @@
           "max_steps": 12,
           "max_title_characters": 80,
           "max_purpose_characters": 200,
-          "context_template": "\n\n【制作预算】本会话的批准方式是「预算（制作计划）」。当前制作计划：{state}；总预算 {limit} 积分，已扣费 {spent} 积分，执行中预留 {reserved} 积分，剩余 {remaining} 积分。计划：{plan}\n计划内的步骤由系统按预算自动批准，不出批准卡；计划外的能力、超出剩余预算、以及会再次扣费的步骤（例如额外导出格式、Tripo 的附加费用）仍会出批准卡，由用户决定。需要连续执行多个付费步骤时，先用 propose_production_plan 提交制作计划和总积分预算，等用户批准后再执行；在计划获批前，按严格（逐步批准）方式的规则执行。浏览器面板自己发起的步骤不消耗这份预算，仍由用户逐张批准。",
+          "context_template": "\n\n【制作预算】本会话的批准方式是「预算（制作计划）」。预算按积分单位分别计算，不同供应商的单位不相加。当前制作计划：{state}；各单位预算 {limit}；已扣费 {spent}；执行中预留 {reserved}；剩余 {remaining}。计划：{plan}\n计划内的步骤由系统按预算自动批准，不出批准卡；计划外的能力、超出该步骤所用单位的剩余预算（或计划没有该单位的预算）、以及会再次扣费的步骤（例如额外导出格式、Tripo 的附加费用）仍会出批准卡，由用户决定。需要连续执行多个付费步骤时，先用 propose_production_plan 提交制作计划和按单位的预算，等用户批准后再执行；在计划获批前，按严格（逐步批准）方式的规则执行。浏览器面板自己发起的步骤不消耗这份预算，仍由用户逐张批准。",
+          "legacy_unit_label": "历史积分估算",
+          "unit_separator": " · ",
           "no_plan_state": "尚未提交计划",
-          "no_plan_text": "无。如果这次制作需要多个付费步骤，先用 propose_production_plan 把制作计划和总积分预算提交给用户批准。",
+          "no_plan_text": "无。如果这次制作需要多个付费步骤，先用 propose_production_plan 把制作计划和按积分单位的预算提交给用户批准。",
           "states": [
-            {"id": "pending", "label": "待批准"},
-            {"id": "active", "label": "执行中"},
-            {"id": "exhausted", "label": "预算已用完"},
-            {"id": "closed", "label": "已结束"},
-            {"id": "denied", "label": "已拒绝"}
+            {"id": "pending", "label": "待批准", "role": "pending"},
+            {"id": "active", "label": "执行中", "role": "active"},
+            {"id": "exhausted", "label": "预算已用完", "role": "ended"},
+            {"id": "closed", "label": "已结束", "role": "ended"},
+            {"id": "denied", "label": "已拒绝", "role": "denied"}
           ],
           "messages": {
-            "approved": "制作计划「{title}」已批准，总预算 {limit} 积分，剩余 {remaining} 积分。计划内的步骤会按预算自动执行，不再逐张出批准卡。",
+            "approved": "制作计划「{title}」已批准，预算 {limit}，剩余 {remaining}。计划内的步骤会按预算自动执行，不再逐张出批准卡。",
             "denied": "制作计划「{title}」未获批准，未执行任何步骤。",
             "expired": "制作计划「{title}」等待批准超时，已失效；未执行任何步骤。",
-            "exhausted": "制作计划「{title}」的 {limit} 积分预算已用完，后续步骤需要重新提交计划并获得批准。"
+            "exhausted": "制作计划「{title}」的预算（{limit}）已用完，后续步骤需要重新提交计划并获得批准。"
           },
           "tool_messages": {
             "proposed": "制作计划已提交；等待用户批准或拒绝。在该计划被决定前不要再提交新计划。",
             "active": "制作计划已获批准；其步骤可在预算内执行。",
-            "exhausted": "制作计划已获批准，但积分预算已用完；超出预算的步骤需要用户批准。",
+            "exhausted": "制作计划已获批准，但各积分单位的预算都已用完；超出预算的步骤需要用户批准。",
             "closed": "该制作计划已不再等待批准。"
+          },
+          "continuation": {
+            "message": "已批准制作计划「{title}」，请按计划开始执行。",
+            "agent_template": "\n【计划已批准】用户刚在计划卡上批准了当前制作计划（计划与各单位的剩余预算见系统上下文的【制作预算】）。现在就按计划顺序执行它的步骤：不要再请用户确认，也不要再提交新的计划。计划内、且不超出所用单位剩余预算的步骤会由系统按预算自动批准；计划外的能力、超出所用单位剩余预算的步骤，以及会再次扣费的步骤仍会出批准卡，由用户决定。"
           }
         },
         "prompt": {
@@ -7734,7 +7819,7 @@
             {
               "id": "budget",
               "label": "预算（制作计划）",
-              "description": "预算方式下，Agent 先用 propose_production_plan 提交一份制作计划和总积分预算：title、steps（每步 capability、purpose，可用 model 指定用户已选的供给项，estimated_credits 只是你的估算）、budget_credits 和 correction_capabilities；服务端会按 Catalog 重新估算每一步，预算低于估算会被拒绝。用户在卡片上批准后，计划内的步骤按估算积分自动执行，不再逐步出批准卡；自检后的修正步骤只要在计划允许的修正能力内、且总积分不超预算，也自动执行。计划外的能力、超出剩余预算、以及会再次扣费的步骤仍会出批准卡。浏览器面板自己发起的步骤仍按严格（逐步批准）方式的规则逐张批准。没有已批准的计划时，按严格（逐步批准）方式的规则执行。"
+              "description": "预算方式下，Agent 先用 propose_production_plan 提交一份制作计划和按积分单位的预算：title、steps（每步 capability、purpose，可用 model 指定用户已选的供给项，estimated_credits 只是你的估算）、budgets（每个积分单位一项，如 tripo.credit、hyper3d.credit；按历史积分计价的步骤用 legacy.credits）和 correction_capabilities；不同供应商的单位分别限额、分别累计，从不相加。服务端会按 Catalog 重新估算每一步，某个单位的预算低于该单位步骤的估算会被拒绝。用户在卡片上批准后，计划内的步骤按估算积分自动执行，不再逐步出批准卡；自检后的修正步骤只要在计划允许的修正能力内、且不超出所用单位的剩余预算，也自动执行。计划外的能力、超出该单位剩余预算（或计划没有该单位的预算）、以及会再次扣费的步骤仍会出批准卡。浏览器面板自己发起的步骤仍按严格（逐步批准）方式的规则逐张批准。没有已批准的计划时，按严格（逐步批准）方式的规则执行。"
             },
             {
               "id": "manual",
@@ -8044,6 +8129,23 @@
             "out_of_range": "字段 “{field}” 必须在 {minimum} 与 {maximum} 之间",
             "unsupported_type": "字段 “{field}” 的类型 “{type}” 未实现"
           }
+        },
+        "budget_limits": [
+          {
+            "semantic": "polycount",
+            "bound": "max_triangles",
+            "item_template": "{model} 的「{parameter}」为 {value}（约 {amount} 个三角面），超过用途「{purpose}」的三角面上限 {maximum}"
+          },
+          {
+            "semantic": "texture-size",
+            "bound": "max_texture_size",
+            "option_values": {"2k": 2048, "4k": 4096, "8k": 8192},
+            "item_template": "{model} 的「{parameter}」为 {value}（贴图边长 {amount} 像素），超过用途「{purpose}」的贴图边长上限 {maximum} 像素"
+          }
+        ],
+        "budget_note": {
+          "template": "以下取值超出本会话用途「{purpose}」的预算，服务端照常提交、没有拒绝：{items}。请如实告诉用户哪些值超出预算以及可能的影响；用户没有明确要这些值时，建议改用预算内的取值。",
+          "separator": "；"
         }
       },
       "context_compaction": {
@@ -12222,6 +12324,10 @@
         "label": "设置制作简报"
       },
       {
+        "value": "continue_turn_in_background",
+        "label": "停止等待，任务后台继续"
+      },
+      {
         "value": "change_own_password",
         "label": "修改自己的密码"
       },
@@ -13201,6 +13307,7 @@
         "outcome_unauthorized": "鉴权失败，请检查密钥",
         "outcome_not_found": "地址或模型不存在",
         "outcome_rate_limited": "上游限流，请稍后再试",
+        "outcome_quota_exhausted": "上游额度已用完（账户余额或 API Key 额度），稍后重试无效，需充值或调整 Key 额度",
         "outcome_timeout": "请求超时",
         "outcome_unreachable": "无法连接上游",
         "outcome_upstream_error": "上游返回错误",
@@ -13246,6 +13353,7 @@
         "runtime.task_cancellation",
         "runtime.asset_delivery",
         "chat.agent.title_prompt",
+        "chat.agent.background_wait",
         "chat.agent.reply_language_template",
         "chat.agent.moderated_image_note",
         "chat.agent.mock_summary",
@@ -14174,7 +14282,7 @@
             "ui.workspace.approval.mode_budget": "Budget (production plan)",
             "ui.workspace.approval.mode_manual": "Strict (approve each step)",
             "ui.workspace.approval.tooltip_auto": "Auto: all paid steps are approved automatically, and each step shows the credits it uses.",
-            "ui.workspace.approval.tooltip_budget": "Budget: approve a production plan and its total credit budget first; planned steps then run continuously. A step outside the plan, over the budget, or charging again still needs your approval.",
+            "ui.workspace.approval.tooltip_budget": "Budget: approve a production plan and its budget for each credit unit first; planned steps then run continuously. A step outside the plan, over the budget, or charging again still needs your approval.",
             "ui.workspace.approval.tooltip_manual": "Strict (approve each step): text-to-3D, image-to-3D, Gaussian Splat, and retexture need your approval; other steps are approved automatically.",
             "ui.workspace.approval.step_credits": "This step uses {credits} credits",
             "ui.workspace.approval.step_credits_one": "This step uses {credits} credit",
@@ -14614,11 +14722,14 @@
             "failure.authentication": "Upstream authentication failed",
             "failure.rate_limited": "Too many upstream requests",
             "task.queue_reason.rate_limited": "Upstream rate limit reached; queued and will retry automatically without charging credits again",
+            "task.queue_reason.upstream_queued": "Queued at the provider",
+            "task.queue_reason.upstream_queued_ahead": "Queued at the provider (about {ahead} tasks ahead)",
             "failure.transport": "Unable to reach the upstream service",
             "failure.timed_out": "Upstream request timed out",
+            "failure.upstream_queue_timeout": "Waited too long in the provider's queue and stopped waiting; the provider may still run and bill the task",
             "failure.rejected": "The upstream rejected or canceled the task",
             "failure.insufficient_balance": "The model provider's account balance is insufficient or overdue, so generation is temporarily unavailable. Please contact an administrator",
-            "failure.credential_quota": "This API key has reached its credit limit. Raise the key limit in the provider console or switch to another key",
+            "failure.credential_quota": "The upstream service's API key has used up its quota, so generation is temporarily unavailable. Please contact an administrator to raise the key's quota or switch to another key",
             "failure.upstream_unavailable": "The upstream service is temporarily unavailable",
             "failure.submission_unknown": "Unable to confirm whether the upstream accepted the task",
             "failure.integrity_failure": "The generated asset failed the integrity check",
@@ -14825,10 +14936,9 @@
             "ui.studio.approval.card.adjustment_expand": "More",
             "ui.studio.approval.card.adjustment_collapse": "Less",
             "ui.studio.plan.title": "Production plan",
-            "ui.studio.plan.budget": "Total budget: {credits} credits",
-            "ui.studio.plan.budget_one": "Total budget: {credits} credit",
-            "ui.studio.plan.estimated": "About {credits} credits",
-            "ui.studio.plan.estimated_one": "About {credits} credit",
+            "ui.studio.plan.budget": "Budget: {amounts}",
+            "ui.studio.plan.estimated": "About {amount}",
+            "ui.studio.plan.unit_usage": "{spent} / {limit} {unit}",
             "ui.studio.plan.step": "Step",
             "ui.studio.plan.model": "Model",
             "ui.studio.plan.model_unspecified": "Chosen by the Agent",
@@ -14836,12 +14946,9 @@
             "ui.studio.plan.corrections_none": "No extra correction capabilities",
             "ui.studio.plan.approve": "Approve plan",
             "ui.studio.plan.deny": "Decline",
-            "ui.studio.plan.progress": "Used {spent} / {limit} credits",
-            "ui.studio.plan.progress_one": "Used {spent} / {limit} credit",
-            "ui.studio.plan.remaining": "{credits} credits left",
-            "ui.studio.plan.remaining_one": "{credits} credit left",
-            "ui.studio.plan.reserved": "{credits} credits reserved",
-            "ui.studio.plan.reserved_one": "{credits} credit reserved",
+            "ui.studio.plan.progress": "Used {amounts}",
+            "ui.studio.plan.remaining": "{amounts} left",
+            "ui.studio.plan.reserved": "{amounts} reserved",
             "ui.studio.plan.state.pending": "Waiting for approval",
             "ui.studio.plan.state.active": "In progress",
             "ui.studio.plan.state.exhausted": "Budget used up",
@@ -14868,8 +14975,7 @@
             "ui.studio.brief.load_failed": "Could not load the production brief",
             "ui.studio.brief.loading": "Loading the production brief…",
             "ui.studio.brief.notes_hint": "Record constraints, exclusions and references beyond the purpose.",
-            "ui.studio.budget.badge": "Budget {spent} / {limit}",
-            "ui.studio.budget.badge_one": "Budget {spent} / {limit}",
+            "ui.studio.budget.badge": "Budget {amounts}",
             "ui.studio.budget.title": "Session budget",
             "ui.studio.budget.plan_title": "Plan: {title}",
             "ui.studio.chat.queued": "Queued",
@@ -15196,6 +15302,9 @@
             "ui.studio.handle_badge.label": "Chat handle {handle}",
             "ui.studio.handle_preview.alt": "Preview of {handle}",
             "ui.studio.composer.stop_note": "Stop only ends this turn of the chat. Tasks already submitted upstream may still be billed; check task progress for details.",
+            "ui.studio.composer.stop_cancel_task": "Stop and cancel the task",
+            "ui.studio.composer.stop_background": "Stop waiting, keep the task running",
+            "ui.studio.composer.stop_background_hint": "The task keeps running in the background and may be charged; see the result in the task center when it finishes.",
             "ui.studio.lightbox.title": "Large view",
             "ui.studio.lightbox.close": "Close large view",
             "ui.studio.lightbox.previous": "Previous version",
@@ -16436,6 +16545,7 @@
             "llm_settings.ui.outcome_unauthorized": "Authentication failed; check the key",
             "llm_settings.ui.outcome_not_found": "Address or model not found",
             "llm_settings.ui.outcome_rate_limited": "Rate limited upstream; try again later",
+            "llm_settings.ui.outcome_quota_exhausted": "Upstream quota used up (account balance or API key quota); retrying later will not help until it is topped up or the key's quota is raised",
             "llm_settings.ui.outcome_timeout": "Timed out",
             "llm_settings.ui.outcome_unreachable": "Upstream unreachable",
             "llm_settings.ui.outcome_upstream_error": "The upstream returned an error",
@@ -16457,6 +16567,7 @@
             "audit_actions[value=set_approval_mode].label": "Set approval mode",
             "audit_actions[value=set_agent_scope].label": "Set Agent scope",
             "audit_actions[value=set_production_brief].label": "Set production brief",
+            "audit_actions[value=continue_turn_in_background].label": "Stop waiting, keep the task running",
             "audit_actions[value=change_own_password].label": "Change own password",
             "audit_actions[value=admin_read_users].label": "Administrator viewed users",
             "audit_actions[value=admin_read_audit_logs].label": "Administrator viewed audit logs",
@@ -16531,6 +16642,10 @@
             "chat.model3d_usage.brief.messages.text_too_long": "Field “{field}” cannot exceed {maximum} characters",
             "chat.model3d_usage.brief.messages.out_of_range": "Field “{field}” must be between {minimum} and {maximum}",
             "chat.model3d_usage.brief.messages.unsupported_type": "Field “{field}” has an unsupported type “{type}”",
+            "chat.model3d_usage.budget_limits[semantic=polycount].item_template": "{parameter} of {model} is {value} (about {amount} triangles), over the {maximum}-triangle limit of the purpose “{purpose}”",
+            "chat.model3d_usage.budget_limits[semantic=texture-size].item_template": "{parameter} of {model} is {value} (textures {amount} pixels on a side), over the {maximum}-pixel texture limit of the purpose “{purpose}”",
+            "chat.model3d_usage.budget_note.template": "These values are over the budget of this session's purpose “{purpose}”; the server submits them as given and refused nothing: {items}. Tell the user plainly which values are over the budget and what that may mean; unless the user explicitly asked for these values, suggest values within the budget.",
+            "chat.model3d_usage.budget_note.separator": "; ",
             "chat.presentation.messages.offering_choice_unavailable": "The selected option is not available right now, so nothing was submitted. Choose only from these available options: {choices}.",
             "chat.presentation.messages.source_offering_unpaired": "This source Task cannot be used with this tool, so nothing was submitted. The source must be a Task you completed successfully in this session that pairs with one of this tool's available functions (for example, a Creative Lab design preview of the same template).",
             "chat.presentation.messages.source_offering_canvas": "This turn's input is the artboard snapshot. The snapshot is not a source Task itself, and the artboard does not show exactly one design preview you completed successfully in this session that can pair, so nothing was submitted. Call again with the design preview's image handle or its Task ID; the user does not need to clear the artboard or select again.",
@@ -16538,8 +16653,10 @@
             "chat.presentation.messages.interrupted": "⚠️ This generation task was interrupted. Please describe your request again.",
             "chat.presentation.messages.interrupted_prompt": "⚠️ This generation task was interrupted (prompt: {prompt}). Please describe your request again.",
             "chat.presentation.messages.generation_failed": "Generation failed",
+            "chat.presentation.messages.generation_failed_ambiguous": "The provider accepted this step, or may have, but the platform could not confirm the result (for example the job timed out or the submission outcome is unknown); the provider may already have run it and charged credits, so it was not resubmitted automatically. Tell the user plainly that the result is unknown and that credits may already have been charged. Check the task's latest state with get_task first and do not resubmit on your own; whether to generate again is the user's decision, and generating again charges again.",
+            "chat.presentation.messages.generation_failed_by_class.upstream_queue_timeout": "This step waited too long in the provider's queue (past the upstream queue wait limit), so the platform stopped waiting and marked the task failed. The provider may still run it and charge credits, so it was not resubmitted automatically. Tell the user plainly that it waited too long in the provider's queue, that credits may already have been charged and that the result is unknown. Check the task's latest state with get_task first and do not resubmit on your own; whether to generate again is the user's decision, and generating again charges again.",
             "chat.presentation.messages.generation_failed_by_class.insufficient_balance": "This model provider's account balance is insufficient or overdue, so this step was not run. Please contact an administrator",
-            "chat.presentation.messages.generation_failed_by_class.credential_quota": "This API key has reached its credit limit. Raise the key limit in the provider console or switch to another key, so this step was not run. Please contact an administrator",
+            "chat.presentation.messages.generation_failed_by_class.credential_quota": "The upstream service's API key has used up its quota, so this step was not run. Please contact an administrator to raise the key's quota or switch to another key",
             "chat.presentation.messages.generation_failed_by_class.upstream_denied": "The upstream image generation service refused this step's request (HTTP 403); no result was produced. It is an access problem upstream, not about the prompt or pictures: do not rewrite the prompt, change pictures or parameters and retry, and do not keep probing other models. Tell the user plainly that the upstream image generation service refused the request and that an administrator needs to check access to the upstream service before trying again",
             "chat.presentation.messages.generation_failed_by_class.content_rejected": "The upstream service's content-safety review blocked this step's input (the classifier is sensitive and ordinary art material can be flagged by mistake); no result was produced, and retrying the same input will not pass. Adjust and call once more on your own: rewrite the prompt by the review's reason, dropping the descriptions that may trip it (for sexual, state that the clothing is complete and the pose is modest, and drop words such as nude, skin-tight or sexy; for violence, drop gore and weapon-injury descriptions) while keeping the art intent; if the input image itself was blocked, rewriting the prompt will not help, so use another image or drop that reference and try again, asking the user for another image when needed. Tell the user plainly it was a content-safety block and what you changed. Do not suggest changing the deployment configuration",
             "chat.presentation.messages.content_rejected_reasons": " (reason: {reasons})",
@@ -16582,7 +16699,8 @@
             "chat.presentation.messages.unknown_error": "Unknown error",
             "chat.presentation.messages.agent_inline_image_output": "The current conversation model drew a picture itself instead of calling a generation tool; the picture was not kept and will not appear in the results. Please retry; if it keeps happening, switch to another conversation model.",
             "chat.presentation.messages.agent_images_unsupported": "The current Agent model rejected the request with images; it may not support image input. In the deployment configuration, switch to a model that supports image input (LLM_MODEL), or remove the images and retry.",
-            "chat.presentation.messages.agent_content_rejected": "The request was blocked by the upstream model service's content-safety review: the images or text in this turn may have been judged inappropriate. The model does support images and no deployment change is needed. Change the image or rewrite the description and retry; if you are sure the content is fine, send this message's error ID to an administrator.",
+            "chat.presentation.messages.agent_quota_exhausted": "The chat model's upstream quota is used up (account balance or API key quota), so no reply can be given for now. Please contact an administrator; retrying will not help until then.",
+            "chat.presentation.messages.agent_content_rejected":"The request was blocked by the upstream model service's content-safety review: the images or text in this turn may have been judged inappropriate. The model does support images and no deployment change is needed. Change the image or rewrite the description and retry; if you are sure the content is fine, send this message's error ID to an administrator.",
             "chat.presentation.messages.agent_not_configured": "Agent is not configured: the deployment is missing chat model settings (LLM_API_KEY or LLM_MODEL), so chatting and prompt enhancement are unavailable. Please contact an administrator to configure it and try again.",
             "chat.presentation.messages.error_reference": " (Error ID: {id})",
             "chat.presentation.messages.sse_interrupted": "SSE connection interrupted",
@@ -16753,6 +16871,7 @@
             "runtime.generation_messages.input_source_task_unsupported": "Source {label} does not meet this step's source requirements. This step was not submitted and no credits were spent. Select another source.",
             "runtime.generation_messages.input_source_face_limit": "The source model has {faces} triangle faces, over this step's limit of {limit}. This step was not submitted and no credits were spent. Simplify the model (Remesh) to within the limit first, then retry.",
             "runtime.generation_messages.plan_source_face_limit": "In this plan, {source_service} with its current settings would deliver about {estimate} triangle faces, over the {limit} that the later step {service} accepts. The plan was not created and no credits were spent. Lower the target face count of {source_service} and plan again; compatible topology and maximum target face count: {choices}.",
+            "runtime.generation_messages.input_parameter_range": "{label} is {value}, but with the current combination of settings it must be between {minimum} and {maximum}. This step was not submitted and no credits were spent. Use a value in that range, or leave it out to use the default, then retry.",
             "runtime.task_cancellation.local_only": "Task canceled; it had not yet been submitted upstream",
             "runtime.task_cancellation.requesting": "Task canceled locally; requesting the upstream to stop. Execution and billing outcome are not yet confirmed",
             "runtime.task_cancellation.confirmed": "Task canceled; the upstream confirmed it stopped. The final cost is per the upstream bill",
@@ -16771,6 +16890,12 @@
             "chat.agent.mock_waiting_summary": "This step needs your approval; the approval card is below. It shows the base credits, any extra credits (such as extra export formats) and the total. Click “Approve” to accept this cost; “Deny” uses no credits. Nothing is charged before you approve, and you can keep chatting meanwhile.",
             "chat.agent.mock_denied_summary": "OK, this step was not run and no credits were used. You can reduce or drop the extra export formats and generate again (fewer credits without them), or switch to a model without extra charges. Tell me what you'd like to do.",
             "chat.agent.consent_waiting_status": "An approval card has been created; nothing has been submitted or started yet, and the step runs only after you approve it on that card.",
+            "chat.agent.upstream_queue_content": "the provider has accepted this task but it is still waiting in the provider's own queue to start (ahead is the number of the provider's tasks before it, present only when the provider reports one). This is not a failure, and nothing was submitted or charged twice. Tell the waiting user plainly that the task is queued at the provider (with about how many tasks are ahead when ahead is present), that they can keep waiting and the task moves on by itself once it starts, or stop: either stop waiting and let the task keep running in the background (this turn ends, the task is not cancelled, and the result shows in the task center when it finishes), or stop and cancel the task. Do not resubmit the generation, and do not switch to another service or model because of the queue unless the user explicitly asks",
+            "chat.agent.background_wait.turn_content": "Stopped waiting. The task keeps running in the background; when it finishes, see the result in the task center.",
+            "chat.agent.background_wait.unavailable_message": "This turn cannot continue in the background right now: that is only possible while a single generation step is queued at the provider or has been running for a while. Keep waiting, or stop and cancel the task.",
+            "chat.agent.background_wait.context_template": "This session has generation tasks that the user stopped waiting for and that still run in the background (task data only):\n{tasks}\nThese tasks were submitted and may already be charged; when they finish, the result appears in the task center and is not written back into the chat. When the user asks about their result or asks for the same generation, first check their latest state with get_task or observe_task, and do not submit the same generation again. If the user still wants to generate again, say that it charges again and let the user decide.",
+            "chat.agent.background_wait.task_line_template": "- task_id={task_id}, capability={capability}, model={model}, status={status}",
+            "chat.agent.background_wait.upstream_queued_status": " (queued at the provider)",
             "chat.agent.refetch_started_content": "the accepted upstream result of the failed task is being fetched again as task {task_id}: nothing was submitted for generation and nothing is charged. Tell the user so, follow {task_id} with observe_task, and when it succeeds present its result as the earlier generation recovered. Do not call recover_task_result again for the same task and do not resubmit the generation",
             "chat.agent.refetch_unavailable_content.not_applicable": "this task did not fail after its upstream result was accepted, so there is nothing to fetch again. Do not call recover_task_result for it",
             "chat.agent.refetch_unavailable_content.not_supported": "this model's provider handed over its result only once, so it cannot be fetched again. Tell the user plainly; a new generation would charge again and needs their explicit decision",
@@ -17071,7 +17196,7 @@
             "后空翻接勾拳 (Backflip_and_Hooks)": "Backflip and hooks",
             "后空翻起身 (Backflip_and_Rise)": "Backflip and rise",
             "后空翻跳 (Backflip_Jump)": "Backflip jump",
-            "后端固定为最高纹理分辨率 8K。": "The backend always uses the highest texture resolution, 8K.",
+            "默认使用最高纹理分辨率 8K；会话用途规定了更低的贴图上限时，Agent 发起的换贴图按上限取值。": "Defaults to the highest texture resolution, 8K; when the session's purpose sets a lower texture limit, a retexture the Agent starts uses that limit.",
             "后端固定从预览开始，预览完成后自动提交精细化，交付带贴图的最高质量模型。精细化阶段由适配器内部提交。": "The backend always starts with a preview and submits refinement automatically once the preview completes, delivering the highest-quality textured model. The refine stage is submitted internally by the adapter.",
             "后退射击 (Walk_Backward_While_Shooting)": "Walk backward while shooting",
             "后退射击·原地 (Walk_Backward_While_Shooting_inplace)": "Backward walk while shooting (in place)",
@@ -17463,6 +17588,8 @@
             "本服务固定交付所列全部附加格式；格式与额外费用在原生处理开始前一并批准。": "This service always delivers all the listed additional formats. The formats and extra fees are approved together before native processing starts.",
             "一次转换固定导出全部六种格式（共 1 积分）。Meshy Convert 只返回各格式的模型文件，不单独返回贴图或材质库：OBJ 文件里引用了一个材质库（如 temp.mtl），但这个文件不随结果提供；OBJ 的形状和贴图坐标（UV）完整，但没有材质和贴图。任一格式校验失败则任务失败。": "One run always exports all six formats (1 credit in total). Meshy Convert returns only the model file of each format, with no separate textures or material library: the OBJ references a material library (such as temp.mtl) that is not provided with the result; its shape and texture coordinates (UVs) are complete, but it has no materials or textures. The task fails if any format fails its check.",
             "本服务固定请求全部六种官方格式；任一格式校验失败则任务失败。": "This service always requests all six official formats; if any format fails validation, the task fails.",
+            "只重建网格几何（拓扑类型和目标面数），请按不保留贴图规划：上传或其他服务生成的模型重拓扑后实测是白模，Meshy 自己生成的模型也不保证贴图完好。重拓扑没有保持尺寸的选项，结果尺寸可能与源模型不同。需要贴图时，能用就先选带烘焙的减面；已重拓扑的模型要贴图就接换贴图，要原尺寸就接精确尺寸并按源模型高度设置。": "Rebuilds the mesh geometry only (topology type and target face count); plan for lost textures: uploaded models and models from other services came back untextured (white) after remesh in testing, and textures on Meshy's own models are not guaranteed either. Remesh has no option to keep the size, so the result may differ in size from the source. When textures matter, prefer a decimation that bakes textures when one is available; to texture a remeshed model, follow with retexture, and to restore its size, follow with exact resize set to the source model's height.",
+            "带烘焙的减面：固定把源模型的贴图烘焙到减面后的三角面模型上并同步展开 UV，用于把高细节模型降到用途面数预算内且保留贴图。来源只能是本人已成功的 Tripo H3 v3.1 文生或单图生 3D 模型，不接多视图结果、上传文件或其他服务的模型。": "Decimation with baking: always bakes the source model's textures onto the decimated triangle model and unwraps its UVs, to bring a high-detail model within the purpose's face budget while keeping its textures. The source must be your own successful Tripo H3 v3.1 text-to-3D or single-image-to-3D model; multiview results, uploaded files and models from other services are not accepted.",
             "本服务固定请求并保存全部六种官方格式，其中 3MF 必须显式请求。": "This service always requests and saves all six official formats; 3MF must be requested explicitly.",
             "本服务请求全部六种已验证转换格式；每种额外消耗 5 积分，由本次冻结输入的会话批准策略授权。": "This service requests all six verified conversion formats; each costs an extra 5 credits and is authorized by the session approval policy for this frozen input.",
             "本服务请求并保存全部六种官方格式。": "This service requests and saves all six official formats.",
@@ -17884,7 +18011,7 @@
             "默认优化参考图以改善生成质量；需要严格保留原图外观时可说明理由关闭。": "Reference images are optimized by default to improve generation quality. Turn this off, with a stated reason, when the original image's look must be strictly preserved.",
             "默认使用三角面输出。": "Triangle output is used by default.",
             "默认使用当前最新纹理模型；Agent 可基于明确需求调整为本端点支持的其他版本并说明理由。": "Defaults to the latest texture model; the Agent may switch to another version supported by this endpoint based on explicit needs and explain why.",
-            "默认使用最高 200 万面上限；需要控制面数时使用独立重拓扑。": "Defaults to the highest limit of 2 million faces; use a separate remesh when you need to control the face count.",
+            "默认使用最高 200 万面上限；标准几何质量最多 150 万面，四边面最多 15 万面，开启智能低模时三角面最多 20000、四边面最多 10000。未指定面数时默认值按当前组合收敛到范围内；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。": "Defaults to the highest limit of 2 million faces; standard geometry quality allows at most 1.5 million faces and a quad mesh at most 150,000, and with smart low poly a triangle mesh allows at most 20,000 and a quad mesh at most 10,000. Without a face count the default moves into the range of the chosen combination; when the session's purpose sets a lower triangle limit, a generation the Agent starts uses that limit.",
             "导出分辨率范围为 64–512，默认 512（最高档）；几何来自 512 像素深度图，更高网格不会增加细节。": "Export resolution ranges from 64 to 512, with a default of 512 (the highest); the geometry comes from a 512-pixel depth map, so a finer grid adds no detail.",
             "GLB 模型（可在 3D 舞台预览）": "GLB model (previewable on the 3D stage)",
             "完整文件包 ZIP（只能下载）": "Complete file bundle ZIP (download only)",
@@ -20682,7 +20809,7 @@
     },
     {
       "id": "meshy/meshy-7.1/text-to-3d",
-      "revision": "2026-10-22.329.1",
+      "revision": "2026-11-05.129.1",
       "provider_id": "meshy",
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
@@ -20857,6 +20984,16 @@
         },
         {
           "name": "should_remesh",
+          "forced_when": [
+            {
+              "when": {
+                "parameter": "target_polycount",
+                "operator": "not-equals",
+                "value": 300000
+              },
+              "value": true
+            }
+          ],
           "label": "自动重拓扑",
           "type": "boolean",
           "default": false,
@@ -20883,6 +21020,7 @@
           "name": "texture_resolution",
           "label": "纹理分辨率",
           "type": "select",
+          "semantic": "texture-size",
           "default": "8k",
           "options": [
             {
@@ -21288,6 +21426,7 @@
           "name": "texture_resolution",
           "label": "纹理分辨率",
           "type": "select",
+          "semantic": "texture-size",
           "default": "2k",
           "fixed": true,
           "options": [
@@ -21786,7 +21925,7 @@
     },
     {
       "id": "meshy/meshy-7.1/image-to-3d",
-      "revision": "2026-10-22.329.2",
+      "revision": "2026-11-05.129.1",
       "provider_id": "meshy",
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
@@ -21997,6 +22136,16 @@
         },
         {
           "name": "should_remesh",
+          "forced_when": [
+            {
+              "when": {
+                "parameter": "target_polycount",
+                "operator": "not-equals",
+                "value": 300000
+              },
+              "value": true
+            }
+          ],
           "label": "自动重拓扑",
           "type": "boolean",
           "default": false,
@@ -22035,6 +22184,7 @@
           "name": "texture_resolution",
           "label": "纹理分辨率",
           "type": "select",
+          "semantic": "texture-size",
           "default": "8k",
           "options": [
             {
@@ -22358,6 +22508,7 @@
           "name": "texture_resolution",
           "label": "纹理分辨率",
           "type": "select",
+          "semantic": "texture-size",
           "default": "8k",
           "options": [
             {
@@ -22485,7 +22636,7 @@
     },
     {
       "id": "tripo/tripo-v3.1-full/text-to-3d",
-      "revision": "2026-10-17.218.1",
+      "revision": "2026-11-06.139.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -22720,8 +22871,27 @@
           "type": "number",
           "minimum": 1000,
           "maximum": 2000000,
+          "maximum_when": [
+            {
+              "when": {"parameter": "geometry_quality", "operator": "equals", "value": "standard"},
+              "maximum": 1500000
+            },
+            {
+              "when": {"parameter": "quad", "operator": "truthy"},
+              "maximum": 150000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "maximum": 20000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "also_when": [{"parameter": "quad", "operator": "truthy"}],
+              "maximum": 10000
+            }
+          ],
           "default": 2000000,
-          "description": "默认使用最高 200 万面上限；需要控制面数时使用独立重拓扑。",
+          "description": "默认使用最高 200 万面上限；标准几何质量最多 150 万面，四边面最多 15 万面，开启智能低模时三角面最多 20000、四边面最多 10000。未指定面数时默认值按当前组合收敛到范围内；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
           "presentation": {
             "surface": "readonly",
             "control": "number",
@@ -23126,7 +23296,7 @@
     },
     {
       "id": "tripo/tripo-v3.1/text-to-3d",
-      "revision": "2026-10-17.218.1",
+      "revision": "2026-11-06.139.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -23360,8 +23530,27 @@
           "type": "number",
           "minimum": 1000,
           "maximum": 2000000,
+          "maximum_when": [
+            {
+              "when": {"parameter": "geometry_quality", "operator": "equals", "value": "standard"},
+              "maximum": 1500000
+            },
+            {
+              "when": {"parameter": "quad", "operator": "truthy"},
+              "maximum": 150000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "maximum": 20000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "also_when": [{"parameter": "quad", "operator": "truthy"}],
+              "maximum": 10000
+            }
+          ],
           "default": 2000000,
-          "description": "默认使用最高 200 万面上限；需要控制面数时使用独立重拓扑。",
+          "description": "默认使用最高 200 万面上限；标准几何质量最多 150 万面，四边面最多 15 万面，开启智能低模时三角面最多 20000、四边面最多 10000。未指定面数时默认值按当前组合收敛到范围内；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
           "presentation": {
             "surface": "readonly",
             "control": "number",
@@ -23736,7 +23925,7 @@
     },
     {
       "id": "tripo/tripo-v3.1-full/image-to-3d",
-      "revision": "2026-10-17.218.1",
+      "revision": "2026-11-06.139.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -24046,8 +24235,27 @@
           "type": "number",
           "minimum": 1000,
           "maximum": 2000000,
+          "maximum_when": [
+            {
+              "when": {"parameter": "geometry_quality", "operator": "equals", "value": "standard"},
+              "maximum": 1500000
+            },
+            {
+              "when": {"parameter": "quad", "operator": "truthy"},
+              "maximum": 150000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "maximum": 20000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "also_when": [{"parameter": "quad", "operator": "truthy"}],
+              "maximum": 10000
+            }
+          ],
           "default": 2000000,
-          "description": "默认使用最高 200 万面上限；需要控制面数时使用独立重拓扑。",
+          "description": "默认使用最高 200 万面上限；标准几何质量最多 150 万面，四边面最多 15 万面，开启智能低模时三角面最多 20000、四边面最多 10000。未指定面数时默认值按当前组合收敛到范围内；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
           "presentation": {
             "surface": "readonly",
             "control": "number",
@@ -24453,7 +24661,7 @@
     },
     {
       "id": "tripo/tripo-v3.1-multiview/image-to-3d",
-      "revision": "2026-11-02.27.1",
+      "revision": "2026-11-06.139.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -24767,8 +24975,27 @@
           "type": "number",
           "minimum": 1000,
           "maximum": 2000000,
+          "maximum_when": [
+            {
+              "when": {"parameter": "geometry_quality", "operator": "equals", "value": "standard"},
+              "maximum": 1500000
+            },
+            {
+              "when": {"parameter": "quad", "operator": "truthy"},
+              "maximum": 150000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "maximum": 20000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "also_when": [{"parameter": "quad", "operator": "truthy"}],
+              "maximum": 10000
+            }
+          ],
           "default": 2000000,
-          "description": "默认使用最高 200 万面上限；需要控制面数时使用独立重拓扑。",
+          "description": "默认使用最高 200 万面上限；标准几何质量最多 150 万面，四边面最多 15 万面，开启智能低模时三角面最多 20000、四边面最多 10000。未指定面数时默认值按当前组合收敛到范围内；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
           "presentation": {
             "surface": "readonly",
             "control": "number",
@@ -25176,7 +25403,7 @@
     },
     {
       "id": "tripo/tripo-v3.1/image-to-3d",
-      "revision": "2026-10-17.218.1",
+      "revision": "2026-11-06.139.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -25486,8 +25713,27 @@
           "type": "number",
           "minimum": 1000,
           "maximum": 2000000,
+          "maximum_when": [
+            {
+              "when": {"parameter": "geometry_quality", "operator": "equals", "value": "standard"},
+              "maximum": 1500000
+            },
+            {
+              "when": {"parameter": "quad", "operator": "truthy"},
+              "maximum": 150000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "maximum": 20000
+            },
+            {
+              "when": {"parameter": "smart_low_poly", "operator": "truthy"},
+              "also_when": [{"parameter": "quad", "operator": "truthy"}],
+              "maximum": 10000
+            }
+          ],
           "default": 2000000,
-          "description": "默认使用最高 200 万面上限；需要控制面数时使用独立重拓扑。",
+          "description": "默认使用最高 200 万面上限；标准几何质量最多 150 万面，四边面最多 15 万面，开启智能低模时三角面最多 20000、四边面最多 10000。未指定面数时默认值按当前组合收敛到范围内；会话用途规定了更低的三角面上限时，Agent 发起的生成按上限取值。",
           "presentation": {
             "surface": "readonly",
             "control": "number",
@@ -27094,6 +27340,7 @@
       "provider_short_label": "MESHY",
       "model_id": "meshy-processing",
       "model_name": "Meshy Remesh",
+      "description": "只重建网格几何（拓扑类型和目标面数），请按不保留贴图规划：上传或其他服务生成的模型重拓扑后实测是白模，Meshy 自己生成的模型也不保证贴图完好。重拓扑没有保持尺寸的选项，结果尺寸可能与源模型不同。需要贴图时，能用就先选带烘焙的减面；已重拓扑的模型要贴图就接换贴图，要原尺寸就接精确尺寸并按源模型高度设置。",
       "capability": "remesh",
       "adapter_key": "meshy.v2",
       "enabled": true,
@@ -27555,7 +27802,7 @@
     },
     {
       "id": "meshy/processing/retexture",
-      "revision": "2026-10-22.329.2",
+      "revision": "2026-11-05.129.1",
       "provider_id": "meshy",
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
@@ -27716,6 +27963,7 @@
           "name": "texture_resolution",
           "label": "纹理分辨率",
           "type": "select",
+          "semantic": "texture-size",
           "default": "8k",
           "options": [
             {
@@ -27731,12 +27979,11 @@
               "label": "8K"
             }
           ],
-          "description": "后端固定为最高纹理分辨率 8K。",
+          "description": "默认使用最高纹理分辨率 8K；会话用途规定了更低的贴图上限时，Agent 发起的换贴图按上限取值。",
           "presentation": {
-            "surface": "readonly",
+            "surface": "provider",
             "control": "select"
-          },
-          "fixed": true
+          }
         },
         {
           "name": "enable_pbr",
@@ -38736,6 +38983,7 @@
           "name": "texture_resolution",
           "label": "纹理分辨率",
           "type": "select",
+          "semantic": "texture-size",
           "default": "8k",
           "options": [
             {
@@ -39012,6 +39260,7 @@
       "provider_short_label": "TRIPO",
       "model_id": "tripo-decimate-triangle",
       "model_name": "Tripo Retopology Triangle",
+      "description": "带烘焙的减面：固定把源模型的贴图烘焙到减面后的三角面模型上并同步展开 UV，用于把高细节模型降到用途面数预算内且保留贴图。来源只能是本人已成功的 Tripo H3 v3.1 文生或单图生 3D 模型，不接多视图结果、上传文件或其他服务的模型。",
       "capability": "remesh",
       "domain": "processing",
       "adapter_key": "tripo.v3",
@@ -39088,6 +39337,7 @@
           "name": "face_limit",
           "label": "目标面数（留空为自适应）",
           "type": "number",
+          "semantic": "polycount",
           "integer": true,
           "minimum": 500,
           "maximum": 20000,
@@ -39394,6 +39644,7 @@
           "name": "face_limit",
           "label": "目标面数（留空为自适应）",
           "type": "number",
+          "semantic": "polycount",
           "integer": true,
           "minimum": 500,
           "maximum": 10000,

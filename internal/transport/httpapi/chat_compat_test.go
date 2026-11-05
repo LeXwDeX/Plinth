@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -520,13 +521,15 @@ func TestChatSessionListProjectsProductionBudgets(t *testing.T) {
 	}
 	defer db.Close()
 	stamp := "2026-01-01T00:00:00Z"
+	// A step stored before #120 (integer estimated_credits) reads as legacy credits.
 	planJSON := `{"title":"批量","steps":[{"capability":"text-to-image","estimated_credits":5}]}`
 	for index, sessionID := range sessionIDs {
 		budgetID := "pb-" + strconv.Itoa(index)
+		limits := `[{"unit":"legacy.credits","unit_label":"legacy.credits","amount":"` + strconv.Itoa(20+index*10) + `"}]`
 		if _, err := db.Exec(`INSERT INTO production_budgets
- (id, owner_id, session_id, plan_json, limit_credits, state, created_at, decided_at, decided_by)
+ (id, owner_id, session_id, plan_json, limits_json, state, created_at, decided_at, decided_by)
  VALUES (?, 'local-user', ?, ?, ?, 'active', ?, ?, 'human')`,
-			budgetID, sessionID, planJSON, 20+index*10, stamp, stamp); err != nil {
+			budgetID, sessionID, planJSON, limits, stamp, stamp); err != nil {
 			t.Fatal(err)
 		}
 		for _, reservation := range []struct {
@@ -538,9 +541,9 @@ func TestChatSessionListProjectsProductionBudgets(t *testing.T) {
 			{"reserved-" + strconv.Itoa(index), 2, "reserved"},
 		} {
 			if _, err := db.Exec(`INSERT INTO budget_reservations
- (grant_request_id, budget_id, task_id, credits, state, created_at)
- VALUES (?, ?, '', ?, ?, ?)`,
-				reservation.request, budgetID, reservation.credits, reservation.state, stamp); err != nil {
+ (grant_request_id, budget_id, task_id, unit, amount_micros, state, created_at)
+ VALUES (?, ?, '', 'legacy.credits', ?, ?, ?)`,
+				reservation.request, budgetID, reservation.credits*1000000, reservation.state, stamp); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -568,12 +571,12 @@ func TestChatSessionListProjectsProductionBudgets(t *testing.T) {
 		}
 		limit := 20 + position*10
 		spent := 3 + position
+		units, _ := budgetObject["units"].([]any)
+		want := map[string]any{"unit": "legacy.credits", "unit_label": "legacy.credits",
+			"limit": strconv.Itoa(limit), "spent": strconv.Itoa(spent), "reserved": "2",
+			"remaining": strconv.Itoa(limit - spent - 2)}
 		if budgetObject["id"] != "pb-"+strconv.Itoa(position) ||
-			budgetObject["state"] != "active" ||
-			budgetObject["limit_credits"] != float64(limit) ||
-			budgetObject["spent_credits"] != float64(spent) ||
-			budgetObject["reserved_credits"] != float64(2) ||
-			budgetObject["remaining_credits"] != float64(limit-spent-2) {
+			budgetObject["state"] != "active" || len(units) != 1 || !reflect.DeepEqual(units[0], want) {
 			t.Fatalf("session %s budget = %#v", sessionID, budgetObject)
 		}
 	}

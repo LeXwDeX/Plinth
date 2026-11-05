@@ -137,6 +137,11 @@ func (s *Server) requestTaskGrant(writer http.ResponseWriter, request *http.Requ
 	operationID := standaloneOperationID(prepared.ID)
 	planStepID := ""
 	binding := harness.Binding{}
+	// A plan step keeps the eligibility its plan gave it: the person approving
+	// an Agent-created plan's paused step re-prepares that step's own grant,
+	// it does not start a browser step (#120). A standalone step is never
+	// eligible.
+	budgetEligible := false
 	if body.PlanID != "" || body.PlanStepID != "" {
 		if body.PlanID == "" || body.PlanStepID == "" || s.processing == nil {
 			s.writeMessageProblem(writer, http.StatusBadRequest, "invalid_input", "error.invalid_input")
@@ -157,6 +162,7 @@ func (s *Server) requestTaskGrant(writer http.ResponseWriter, request *http.Requ
 		operationID = planIdentity.OperationID
 		planStepID = planIdentity.PlanStepID
 		binding = planIdentity.Harness
+		budgetEligible = planIdentity.BudgetEligible
 	}
 	grant, err := s.executionGrants.Prepare(request.Context(), executiongrant.PrepareCommand{
 		Harness:   binding,
@@ -166,6 +172,7 @@ func (s *Server) requestTaskGrant(writer http.ResponseWriter, request *http.Requ
 		IdempotencyKey: key,
 		OperationID:    operationID,
 		PlanStepID:     planStepID,
+		BudgetEligible: budgetEligible,
 	})
 	if err != nil {
 		s.writeTaskGrantError(writer, err)
@@ -178,12 +185,15 @@ func (s *Server) requestTaskGrant(writer http.ResponseWriter, request *http.Requ
 		s.writeTaskGrantError(writer, err)
 		return
 	}
+	// A step an approved production plan covered needs no click either (#135):
+	// the processing panel re-prepares an Agent plan's step with its budget
+	// eligibility (#120).
 	writeJSON(writer, http.StatusCreated, frozenQuoteWire(map[string]any{
 		"request_id":         grant.RequestID,
 		"status":             grant.Status,
 		"request_version":    grant.RequestVersion,
 		"prepared_input_id":  grant.PreparedInputID,
-		"approved_by_policy": grant.ApprovedByPolicy(),
+		"approved_by_policy": grant.ApprovedByPolicy() || grant.ApprovedByBudget(),
 	}, prepared.NativeQuote))
 }
 
@@ -197,14 +207,8 @@ func (s *Server) decideTaskGrant(writer http.ResponseWriter, request *http.Reque
 		s.writeMessageProblem(writer, http.StatusServiceUnavailable, "unavailable", "error.unavailable")
 		return
 	}
-	var body struct {
-		Decision executiongrant.Decision `json:"decision"`
-	}
-	if err := s.decodeJSON(writer, request, &body); err != nil {
-		return
-	}
-	if body.Decision != executiongrant.Approve && body.Decision != executiongrant.Deny {
-		s.writeMessageProblem(writer, http.StatusBadRequest, "invalid_input", "error.invalid_input")
+	decision, ok := s.decodeApprovalDecision(writer, request)
+	if !ok {
 		return
 	}
 	requestID := request.PathValue("requestID")
@@ -212,7 +216,7 @@ func (s *Server) decideTaskGrant(writer http.ResponseWriter, request *http.Reque
 		// An Agent approval whose turn already ended is decided, submitted once
 		// and reported into its session by the pending-approval service. Any
 		// other grant is not "handled" and is decided the ordinary way below.
-		outcome, handled, err := s.pendingApprovals.Decide(request.Context(), principal, requestID, body.Decision)
+		outcome, handled, err := s.pendingApprovals.Decide(request.Context(), principal, requestID, decision)
 		if err != nil {
 			s.writeTaskGrantError(writer, err)
 			return
@@ -222,7 +226,7 @@ func (s *Server) decideTaskGrant(writer http.ResponseWriter, request *http.Reque
 			return
 		}
 	}
-	grant, err := s.executionGrants.Decide(request.Context(), principal, requestID, body.Decision)
+	grant, err := s.executionGrants.Decide(request.Context(), principal, requestID, decision)
 	if err != nil {
 		s.writeTaskGrantError(writer, err)
 		return

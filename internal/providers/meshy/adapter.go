@@ -974,6 +974,9 @@ func (a *Adapter) observation(
 	switch rule.Phase {
 	case "accepted":
 		observation.Phase = generation.UpstreamAccepted
+		// PENDING: the job waits in Meshy's queue; preceding_tasks counts the
+		// jobs ahead of it (declared by status_mapping).
+		observation.Queue = httpjson.UpstreamQueue(a.statusMapping, rule, response.Raw)
 	case "running":
 		observation.Phase = generation.UpstreamRunning
 	case "completed":

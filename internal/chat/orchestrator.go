@@ -257,6 +257,11 @@ type Orchestrator struct {
 	// compacting serializes the context compactions of each session (#322).
 	compactMu  sync.Mutex
 	compacting map[string]*compactionLock
+
+	// backgroundWarned is when a failing background-availability read of
+	// each session was last logged as a warning (#137).
+	backgroundWarnMu sync.Mutex
+	backgroundWarned map[string]time.Time
 }
 
 type consentSuspend struct {
@@ -443,6 +448,15 @@ func (orchestrator *Orchestrator) CancelTurn(
 	if err != nil || !active {
 		return active, err
 	}
+	// #137: the person already chose to let this turn's Tasks keep running.
+	// That choice committed before this stop (it requires no stop intent), so
+	// the stop must not cancel them: the queued turn is finished by Process,
+	// which ends it without cancelling.
+	if stored, err := orchestrator.service.GetTurn(ctx, ownerID, sessionID, turn.AssistantMessageID); err != nil {
+		return true, err
+	} else if stored.Checkpoint.Background {
+		return true, nil
+	}
 	turnKey := orchestrator.turnKey(ownerID, sessionID)
 	orchestrator.activeMu.Lock()
 	cancel := orchestrator.activeCancel[turnKey]
@@ -596,6 +610,8 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		canceledTurn:  map[string]struct{}{},
 		consentWaits:  map[string]*consentSuspend{},
 		compacting:    map[string]*compactionLock{},
+
+		backgroundWarned: map[string]time.Time{},
 	}, nil
 }
 
@@ -1088,6 +1104,8 @@ func (orchestrator *Orchestrator) Process(
 	// Agent-named model would replace the person's pick.
 	command.Options.ProductionBrief = turn.Options.ProductionBrief
 	command.Options.ExplicitModel3D = turn.Options.ExplicitModel3D
+	// A plan continuation is the service's mark, never the caller's (#134).
+	command.Options.PlanContinuation = turn.Options.PlanContinuation
 	// DSML tool calls are read only for a model whose profile writes them.
 	dsmlSchema := orchestrator.dsmlSchema(command.Options)
 	command.Options.Harness = turn.Options.Harness
@@ -1133,6 +1151,9 @@ func (orchestrator *Orchestrator) Process(
 	// 收尾流与轮次，等唤醒方重新入队续跑。
 	suspended := false
 	stopFinalized := false
+	// backgroundFinalized means the turn ended with its Tasks still running
+	// (#137); a stop requested later must not cancel them.
+	backgroundFinalized := false
 	finalizeStop := func() error {
 		err := orchestrator.finalizeStoppedTurn(ctx, command, &assistant)
 		if err == nil {
@@ -1155,7 +1176,7 @@ func (orchestrator *Orchestrator) Process(
 			processErr = errors.Join(processErr, err)
 			return
 		}
-		if requested && !stopFinalized {
+		if requested && !stopFinalized && !backgroundFinalized {
 			if err := finalizeStop(); err != nil {
 				processErr = errors.Join(processErr, err)
 				return
@@ -1178,6 +1199,18 @@ func (orchestrator *Orchestrator) Process(
 			processErr = err
 		}
 	}()
+	// #137: the person stopped waiting and let the Tasks run on. This comes
+	// before the stop check: the choice committed before any later stop.
+	if turn.Checkpoint.Background {
+		if err := orchestrator.finalizeBackgroundTurn(ctx, command, turn, &assistant); err != nil {
+			// Keep the durable turn for restart recovery, like a stop whose
+			// reconciliation failed; it is never finished as failed.
+			suspended = true
+			return err
+		}
+		backgroundFinalized = true
+		return nil
+	}
 	requested, err := orchestrator.service.TurnStopRequested(
 		context.WithoutCancel(ctx), command.OwnerID, command.SessionID, command.AssistantMessageID)
 	if err != nil {
@@ -1400,6 +1433,9 @@ func (orchestrator *Orchestrator) Process(
 		startRound = turn.Checkpoint.Round
 		resumeRound = maxRoundFromCalls(assistant.ToolCalls) - startRound
 	}
+	// followUpErr is the follow-up request's failure that ended the loop, if
+	// any; a reply left empty by it is told from it.
+	var followUpErr error
 	for round := startRound; ; round++ {
 		effectiveRound := resumeRound + round
 		if !parsed {
@@ -1645,6 +1681,7 @@ func (orchestrator *Orchestrator) Process(
 			if len(assistant.ImageURLs) == 0 && toolErr == nil {
 				failed = true
 			}
+			followUpErr = streamErr
 			break
 		}
 		orchestrator.recordUsage(ctx, command, followUp.Model, next.Usage)
@@ -1668,6 +1705,11 @@ func (orchestrator *Orchestrator) Process(
 	}
 	if assistant.Content == "" && len(assistant.ImageURLs) == 0 {
 		assistant.Content = orchestrator.text(ctx, orchestrator.schema.Presentation.Messages.NoResult)
+		// #120: a follow-up refused for a used-up balance or quota says so
+		// instead of asking for a retry that cannot succeed.
+		if message, exhausted := orchestrator.agentQuotaExhaustedMessage(ctx, followUpErr); exhausted {
+			assistant.Content = message
+		}
 		if failed {
 			assistant.Content = orchestrator.withErrorReference(ctx, assistant.Content, assistant.ID)
 		}
@@ -1856,6 +1898,9 @@ func (orchestrator *Orchestrator) agentRequest(
 		choices, _ = orchestrator.service.ListChoices(ctx, ownerID, sessionID)
 	}
 	systemPrompt += orchestrator.pendingChoicePrompt(choices)
+	// Tasks the person stopped waiting for still run (#137): the Agent looks
+	// them up instead of submitting the same paid generation again.
+	systemPrompt += orchestrator.backgroundTasksPrompt(ctx, ownerID, sessionID, history)
 	systemPrompt += orchestrator.harnessPrompt(options.Harness, registry, scope)
 	systemPrompt += orchestrator.replyLanguagePrompt(ctx)
 	request := agents.Request{
@@ -1990,6 +2035,10 @@ func (orchestrator *Orchestrator) agentRequest(
 		if messageIndex == lastUserMessage && message.Role == orchestrator.schema.Roles.User {
 			// A card answered on the card: the Agent reads the exact next call (#321).
 			appendText(orchestrator.choiceAnswerText(choices, message.ID))
+			// A plan approved on its card: the Agent runs it now (#134).
+			if options.PlanContinuation != "" {
+				appendText(orchestrator.schema.ApprovalPolicy.Budget.Continuation.AgentTemplate)
+			}
 		}
 		if messageIndex == lastUserMessage &&
 			message.Role == orchestrator.schema.Roles.User &&
@@ -3090,6 +3139,7 @@ func mergeStoredToolCall(target *ToolCall, stored ToolCall) {
 	if len(target.Summary) == 0 {
 		target.Summary = stored.Summary
 	}
+	target.Background = target.Background || stored.Background
 }
 
 // streamAgent streams one Agent request. When the upstream's content-safety
@@ -3181,12 +3231,16 @@ func (orchestrator *Orchestrator) withErrorReference(ctx context.Context, text, 
 // a deployment without Agent settings says the Agent is not configured, a
 // refusal of a request with pictures says the model may not read images
 // (#253), an upstream content-safety refusal says the input tripped it (#35),
-// a picture the model drew itself says it was not kept;
+// a used-up upstream balance or key quota says so (#120), a picture the
+// model drew itself says it was not kept;
 // anything else stays the unknown error, whose ID is in the log.
 func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err error) string {
 	messages := orchestrator.schema.Presentation.Messages
 	if errors.Is(err, agents.ErrNotConfigured) && messages.AgentNotConfigured != "" {
 		return orchestrator.text(ctx, messages.AgentNotConfigured)
+	}
+	if message, exhausted := orchestrator.agentQuotaExhaustedMessage(ctx, err); exhausted {
+		return message
 	}
 	if errors.Is(err, agents.ErrContentRejected) && messages.AgentContentRejected != "" {
 		return orchestrator.text(ctx, messages.AgentContentRejected) + orchestrator.contentRejectedReasons(ctx, err)
@@ -3198,6 +3252,17 @@ func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err e
 		return orchestrator.text(ctx, messages.AgentInlineImageOutput)
 	}
 	return orchestrator.text(ctx, messages.UnknownError)
+}
+
+// agentQuotaExhaustedMessage is the Schema text for an Agent request the
+// upstream refused because the account balance or key quota is used up
+// (#120), and whether err is such a refusal.
+func (orchestrator *Orchestrator) agentQuotaExhaustedMessage(ctx context.Context, err error) (string, bool) {
+	text := orchestrator.schema.Presentation.Messages.AgentQuotaExhausted
+	if text == "" || !errors.Is(err, agents.ErrQuotaExhausted) {
+		return "", false
+	}
+	return orchestrator.text(ctx, text), true
 }
 
 // text is a Schema text in the UI locale of the turn or request in ctx.

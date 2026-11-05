@@ -24,7 +24,7 @@ var model3dUsageShapes = []string{"text-to-3d", "image-to-3d", "multiview-to-3d"
 func validateModel3DUsageShape(schema ChatSchema, capabilityPresentations []CapabilityPresentation) error {
 	usage := schema.Model3DUsage
 	if len(usage.Profiles) == 0 {
-		if strings.TrimSpace(usage.DefaultProfile) != "" || len(usage.Brief.Fields) > 0 {
+		if strings.TrimSpace(usage.DefaultProfile) != "" || len(usage.Brief.Fields) > 0 || len(usage.BudgetLimits) > 0 {
 			return fmt.Errorf("model3d_usage.profiles 不能为空")
 		}
 		return validateChoiceKinds(schema)
@@ -93,7 +93,49 @@ func validateModel3DUsageShape(schema ChatSchema, capabilityPresentations []Capa
 	if err := validateProductionBrief(usage.Brief); err != nil {
 		return err
 	}
+	if err := validateBudgetLimits(usage); err != nil {
+		return err
+	}
 	return validateChoiceKinds(schema)
+}
+
+// validateBudgetLimits checks the parameter semantics a purpose budget bounds
+// and the words of the note about a value over it (#129). A Catalog without
+// limits bounds nothing and needs no note.
+func validateBudgetLimits(usage ChatModel3DUsageSchema) error {
+	if len(usage.BudgetLimits) == 0 {
+		return nil
+	}
+	seen := map[schemacontract.ParameterSemantic]bool{}
+	for index, limit := range usage.BudgetLimits {
+		if !limit.Semantic.Valid() {
+			return fmt.Errorf("model3d_usage.budget_limits[%d].semantic %q 未声明", index, limit.Semantic)
+		}
+		if seen[limit.Semantic] {
+			return fmt.Errorf("model3d_usage.budget_limits 中 semantic %q 重复", limit.Semantic)
+		}
+		seen[limit.Semantic] = true
+		if limit.Bound != BudgetBoundMaxTriangles && limit.Bound != BudgetBoundMaxTextureSize {
+			return fmt.Errorf("model3d_usage.budget_limits[%d].bound %q 未实现", index, limit.Bound)
+		}
+		for option, amount := range limit.OptionValues {
+			if strings.TrimSpace(option) == "" || amount <= 0 {
+				return fmt.Errorf("model3d_usage.budget_limits[%d].option_values 的 %q 必须是大于 0 的数值", index, option)
+			}
+		}
+		for _, placeholder := range []string{"{model}", "{parameter}", "{value}", "{maximum}"} {
+			if !strings.Contains(limit.ItemTemplate, placeholder) {
+				return fmt.Errorf("model3d_usage.budget_limits[%d].item_template 必须包含 %s", index, placeholder)
+			}
+		}
+	}
+	if !strings.Contains(usage.BudgetNote.Template, "{items}") {
+		return fmt.Errorf("model3d_usage.budget_note.template 必须包含 {items}")
+	}
+	if strings.TrimSpace(usage.BudgetNote.Separator) == "" {
+		return fmt.Errorf("model3d_usage.budget_note.separator 不能为空")
+	}
+	return nil
 }
 
 // validateProductionBrief checks the brief field declarations and the words
@@ -342,6 +384,9 @@ func validateModel3DUsageOfferings(usage ChatModel3DUsageSchema, byID generation
 	if len(usage.Profiles) == 0 {
 		return nil
 	}
+	if err := validateBudgetLimitParameters(usage, byID); err != nil {
+		return err
+	}
 	for index, profile := range usage.Profiles {
 		shapes := make([]string, 0, len(profile.RecommendedOfferings))
 		for shape := range profile.RecommendedOfferings {
@@ -375,6 +420,9 @@ func validateModel3DUsageOfferings(usage ChatModel3DUsageSchema, byID generation
 			if err := simulateProfileParameters(offering, profile.ParameterOverrides[id]); err != nil {
 				return fmt.Errorf("model3d_usage.profiles[%d].parameter_overrides[%q]: %w", index, id, err)
 			}
+			if err := checkOverridesWithinBudget(usage, profile, offering, profile.ParameterOverrides[id]); err != nil {
+				return fmt.Errorf("model3d_usage.profiles[%d].parameter_overrides[%q]: %w", index, id, err)
+			}
 		}
 		for stepIndex, step := range profile.Pipeline {
 			if strings.TrimSpace(step.OfferingID) == "" {
@@ -393,6 +441,63 @@ func validateModel3DUsageOfferings(usage ChatModel3DUsageSchema, byID generation
 			if err := simulateProfileParameters(offering, step.Parameters); err != nil {
 				return fmt.Errorf("model3d_usage.profiles[%d].pipeline[%d]: %w", index, stepIndex, err)
 			}
+		}
+	}
+	return nil
+}
+
+// validateBudgetLimitParameters checks that every Offering parameter of a
+// bounded semantic can be measured (#129): a number, or a select whose every
+// option the limit gives an amount for. Otherwise the budget could neither
+// choose its value nor tell whether a chosen one is over it.
+func validateBudgetLimitParameters(usage ChatModel3DUsageSchema, byID generationMap) error {
+	ids := make([]string, 0, len(byID))
+	for id := range byID {
+		ids = append(ids, string(id))
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		offering := byID[schemacontract.OfferingID(id)]
+		for _, parameter := range offering.Parameters {
+			limit, bounded := usage.BudgetLimit(parameter.Semantic)
+			if !bounded {
+				continue
+			}
+			switch parameter.Type {
+			case "number":
+			case "select":
+				for _, option := range parameter.Options {
+					if _, declared := limit.OptionValues[option.Value]; !declared {
+						return fmt.Errorf("model3d_usage.budget_limits[%s].option_values 缺少 Offering %q 参数 %q 的选项 %q",
+							limit.Semantic, id, parameter.Name, option.Value)
+					}
+				}
+			default:
+				return fmt.Errorf("model3d_usage.budget_limits[%s] 不能约束 Offering %q 的 %s 参数 %q",
+					limit.Semantic, id, parameter.Type, parameter.Name)
+			}
+		}
+	}
+	return nil
+}
+
+// checkOverridesWithinBudget refuses a purpose override of a bounded parameter
+// that is over the purpose's own budget (#129): the purpose would otherwise
+// report its own value as over budget on every step.
+func checkOverridesWithinBudget(usage ChatModel3DUsageSchema, profile ChatModel3DUsageProfile,
+	offering schemacontract.Offering, overrides map[string]json.RawMessage) error {
+	for _, parameter := range offering.Parameters {
+		value, overridden := overrides[parameter.Name]
+		limit, bounded := usage.BudgetLimit(parameter.Semantic)
+		if !overridden || !bounded {
+			continue
+		}
+		maximum, declared := limit.Maximum(profile.Budget)
+		if !declared {
+			continue
+		}
+		if amount, measured := limit.Measure(offering, parameter, value, overrides); measured && amount > maximum {
+			return fmt.Errorf("参数 %q 的值 %s 超出用途预算 %s %v", parameter.Name, value, limit.Bound, maximum)
 		}
 	}
 	return nil

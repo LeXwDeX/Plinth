@@ -327,7 +327,26 @@ var unavailableNoticeMessages = map[string][]string{
 	"ui.workspace.processing.source_refused_face_limit":      {"service", "limit", "faces"},
 }
 
+// queueNoticeMessages are the upstream queue notice texts (#131); the server
+// fills {ahead}, so each copy carries exactly these placeholders.
+var queueNoticeMessages = map[string][]string{
+	"task.queue_reason.upstream_queued":       nil,
+	"task.queue_reason.upstream_queued_ahead": {"ahead"},
+}
+
 func validateUnavailableNotices(schema ApplicationSchema) error {
+	if err := validateMessagePlaceholders(schema, unavailableNoticeMessages); err != nil {
+		return err
+	}
+	if err := validateMessagePlaceholders(schema, queueNoticeMessages); err != nil {
+		return err
+	}
+	return validateUnavailableReasons(schema)
+}
+
+// validateMessagePlaceholders checks that each declared message of table, in
+// the default copy and every bundle, carries exactly its placeholders.
+func validateMessagePlaceholders(schema ApplicationSchema, table map[string][]string) error {
 	check := func(where, key, text string, want []string) error {
 		// Presence is the default Catalog's contract (its tests assert every
 		// key); a smaller custom Application may leave them out, but a declared
@@ -346,7 +365,7 @@ func validateUnavailableNotices(schema ApplicationSchema) error {
 		}
 		return nil
 	}
-	for key, want := range unavailableNoticeMessages {
+	for key, want := range table {
 		if err := check("content.messages", key, schema.Content.Messages[key], want); err != nil {
 			return err
 		}
@@ -359,7 +378,7 @@ func validateUnavailableNotices(schema ApplicationSchema) error {
 			}
 		}
 	}
-	return validateUnavailableReasons(schema)
+	return nil
 }
 
 // unavailableReasonPrefixes name the short reasons of the shared notice (#94):

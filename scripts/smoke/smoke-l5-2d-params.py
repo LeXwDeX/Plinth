@@ -42,8 +42,11 @@ def generate(live, report, session, offering, shape, value):
                  f"pixels={dimensions}")
     if dimensions and "x" in value:
         exact = dimensions == tuple(int(part) for part in value.split("x"))
-        report.record("PASS" if exact else "SKIP", f"{label} exact pixel size",
-                      "exact" if exact else f"provider delivered {dimensions} (informational; ratio is the contract)")
+        if exact:
+            report.passed(f"{label} exact pixel size", "exact")
+        else:
+            # The ratio is the contract; an exact pixel size is informational, not a skipped check.
+            print(f"INFO: {label} exact pixel size - provider delivered {dimensions}", flush=True)
     return images[0]
 
 

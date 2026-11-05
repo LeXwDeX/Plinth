@@ -5,7 +5,7 @@ import { completedPlanSteps, planStepProgress, type PlanTask } from '@/lib/chat/
 
 const plan = (...steps: Array<[string, string]>): ProductionPlan => ({
   title: '制作计划',
-  steps: steps.map(([capability, offeringId]) => ({ capability, offeringId, purpose: '', estimatedCredits: 10 })),
+  steps: steps.map(([capability, offeringId]) => ({ capability, offeringId, purpose: '', estimate: { unit: 'legacy.credits', unit_label: 'legacy.credits', amount: '10' }, purposeBudgetNote: '' })),
   correctionCapabilities: [],
 });
 

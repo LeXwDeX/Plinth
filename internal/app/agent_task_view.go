@@ -31,6 +31,17 @@ type agentTaskView struct {
 	// result can be fetched again at no charge with recover_task_result (#295).
 	// Absent for a Task that did not fail after its upstream result.
 	ResultRecovery *agentResultRecoveryView `json:"result_recovery,omitempty"`
+	// UpstreamQueue is present while the Provider holds the accepted job in
+	// its own queue (#131).
+	UpstreamQueue *agentUpstreamQueueView `json:"upstream_queue,omitempty"`
+}
+
+// agentUpstreamQueueView is a running Task's upstream queue: Ahead is the
+// Provider's count of jobs ahead, when it reports one; Note is the Schema
+// text on what to tell the person waiting.
+type agentUpstreamQueueView struct {
+	Ahead *int   `json:"ahead,omitempty"`
+	Note  string `json:"note,omitempty"`
 }
 
 type agentResultRecoveryView struct {
@@ -139,8 +150,9 @@ type agentFailureView struct {
 	Ambiguous bool   `json:"ambiguous,omitempty"`
 	// UserDecisionRequired marks a failure the Agent must not retry on its own: the
 	// Offering bills in credits and the Schema declares the class as one where the upstream
-	// may already have finished and charged. Retryable is then false for the Agent; the
-	// person can still retry from the task list. Reason is the Schema text to relay.
+	// may already have finished and charged, or the failure is ambiguous (the upstream may
+	// have run and charged, #136). Retryable is then false for the Agent; the person decides.
+	// Reason is the Schema text to relay.
 	UserDecisionRequired bool   `json:"user_decision_required,omitempty"`
 	Reason               string `json:"reason,omitempty"`
 }
@@ -196,6 +208,9 @@ func buildAgentTaskViewIn(task generation.Task, chatSchema catalog.ChatSchema,
 	if view.Failure != nil && view.Failure.Reason != "" && texts != nil {
 		view.Failure.Reason = texts.Text(locale, view.Failure.Reason)
 	}
+	if view.UpstreamQueue != nil && view.UpstreamQueue.Note != "" && texts != nil {
+		view.UpstreamQueue.Note = texts.Text(locale, view.UpstreamQueue.Note)
+	}
 	return view
 }
 
@@ -217,7 +232,12 @@ func buildAgentTaskView(task generation.Task, chatSchema catalog.ChatSchema) age
 			Retryable: task.Failure.Retryable,
 			Ambiguous: task.Failure.Ambiguous,
 		}
-		if reason := generationtool.MeteredFailureMessage(chatSchema, task.Offering.CreditsMetered, task.Failure); reason != "" {
+		reason := generationtool.MeteredFailureMessage(chatSchema, task.Offering.CreditsMetered, task.Failure)
+		if reason == "" {
+			// The upstream may already have run and charged (#136).
+			reason = generationtool.AmbiguousFailureMessage(chatSchema, task.Failure)
+		}
+		if reason != "" {
 			view.Failure.Retryable = false
 			view.Failure.UserDecisionRequired = true
 			view.Failure.Reason = reason
@@ -231,6 +251,13 @@ func buildAgentTaskView(task generation.Task, chatSchema catalog.ChatSchema) age
 			MediaType: asset.MediaType,
 			Size:      schema.SizeText(asset.Size, true),
 		})
+	}
+	if task.UpstreamQueue != nil && task.State == generation.TaskRunning {
+		view.UpstreamQueue = &agentUpstreamQueueView{Note: chatSchema.Agent.UpstreamQueueContent}
+		if task.UpstreamQueue.Ahead != nil {
+			ahead := *task.UpstreamQueue.Ahead
+			view.UpstreamQueue.Ahead = &ahead
+		}
 	}
 	slots := make([]string, 0, len(task.Resources))
 	for slot := range task.Resources {

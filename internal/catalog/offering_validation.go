@@ -239,32 +239,36 @@ func validateOffering(
 			}
 		}
 		for index, limit := range parameter.MaximumWhen {
-			target, exists := offeringParameter(offering.Parameters, limit.When.Parameter)
-			if !exists {
-				return fmt.Errorf(
-					"Offering %q 参数 %q 的 maximum_when[%d] 引用了未知参数 %q",
-					offering.ID,
-					parameter.Name,
-					index,
-					limit.When.Parameter,
-				)
-			}
-			if limit.When.Parameter == parameter.Name {
-				return fmt.Errorf(
-					"Offering %q 参数 %q 的 maximum_when[%d] 不能引用自身",
-					offering.ID,
-					parameter.Name,
-					index,
-				)
-			}
-			if err := validateParameterCondition(limit.When, target); err != nil {
-				return fmt.Errorf(
-					"Offering %q 参数 %q 的 maximum_when[%d]: %w",
-					offering.ID,
-					parameter.Name,
-					index,
-					err,
-				)
+			// #139: also_when conditions must all match too; each is checked
+			// like the entry's own condition.
+			for _, condition := range append([]schemacontract.ParameterCondition{limit.When}, limit.AlsoWhen...) {
+				target, exists := offeringParameter(offering.Parameters, condition.Parameter)
+				if !exists {
+					return fmt.Errorf(
+						"Offering %q 参数 %q 的 maximum_when[%d] 引用了未知参数 %q",
+						offering.ID,
+						parameter.Name,
+						index,
+						condition.Parameter,
+					)
+				}
+				if condition.Parameter == parameter.Name {
+					return fmt.Errorf(
+						"Offering %q 参数 %q 的 maximum_when[%d] 不能引用自身",
+						offering.ID,
+						parameter.Name,
+						index,
+					)
+				}
+				if err := validateParameterCondition(condition, target); err != nil {
+					return fmt.Errorf(
+						"Offering %q 参数 %q 的 maximum_when[%d]: %w",
+						offering.ID,
+						parameter.Name,
+						index,
+						err,
+					)
+				}
 			}
 		}
 		if parameter.AlphaFlatten != nil {
@@ -517,7 +521,7 @@ type offeringCopyField struct {
 // offeringUserFacingCopy lists the Offering strings a person reads. The
 // terminology guard and the internal-identifier guard share this scope.
 func offeringUserFacingCopy(offering schemacontract.Offering) []offeringCopyField {
-	copies := []offeringCopyField{{"model_name", offering.ModelName}}
+	copies := []offeringCopyField{{"model_name", offering.ModelName}, {"description", offering.Description}}
 	for parameterIndex, parameter := range offering.Parameters {
 		prefix := fmt.Sprintf("parameters[%d]", parameterIndex)
 		copies = append(copies,
@@ -1313,6 +1317,11 @@ func validateValueDefinition(schema schemacontract.Parameter) (schemacontract.Pa
 			}
 			if strings.TrimSpace(limit.When.Parameter) == "" {
 				return schema, fmt.Errorf("参数 %q 的 maximum_when[%d] 缺少条件参数", schema.Name, index)
+			}
+			for _, condition := range limit.AlsoWhen {
+				if strings.TrimSpace(condition.Parameter) == "" {
+					return schema, fmt.Errorf("参数 %q 的 maximum_when[%d].also_when 缺少条件参数", schema.Name, index)
+				}
 			}
 		}
 	}

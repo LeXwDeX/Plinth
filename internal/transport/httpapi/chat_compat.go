@@ -61,6 +61,16 @@ func (s *Server) registerLegacyChatContracts(
 		"POST "+routes.ChatTurnCancel,
 		s.withLegacyPrincipal(s.legacyCancelChatTurn),
 	)
+	if _, ok := s.chatScheduler.(ChatTurnBackgrounder); ok && routes.ChatTurnBackground != "" {
+		s.mux.HandleFunc(
+			"GET "+routes.ChatTurnBackground,
+			s.withLegacyPrincipal(s.legacyChatTurnBackgroundAvailable),
+		)
+		s.mux.HandleFunc(
+			"POST "+routes.ChatTurnBackground,
+			s.withLegacyPrincipal(s.legacyContinueChatTurnInBackground),
+		)
+	}
 }
 
 func (s *Server) withLegacyPrincipal(next principalHandler) http.HandlerFunc {
@@ -1090,6 +1100,72 @@ func (s *Server) legacyCancelChatTurn(
 	)
 	writeJSON(writer, http.StatusOK, map[string]any{
 		s.application.Chat.API.Fields.TurnCanceled: active,
+	})
+}
+
+// legacyChatTurnBackgroundAvailable tells the composer whether the session's
+// waiting turn may stop waiting while its Tasks keep running (#137). The
+// owner scope comes from the principal; another person's session reads false.
+// The composer polls it, so a read that fails is answered false: the
+// implementation logs the failure at a bounded rate instead of a 500 per poll.
+func (s *Server) legacyChatTurnBackgroundAvailable(
+	writer http.ResponseWriter,
+	request *http.Request,
+	principal access.Principal,
+) {
+	sessionID := configuredPathValue(request, s.application.Runtime.HTTP.LegacyRoutes.ChatTurnBackground, 0)
+	backgrounder, ok := s.chatScheduler.(ChatTurnBackgrounder)
+	if sessionID == "" || !ok {
+		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidParameters)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		s.application.Chat.API.Fields.TurnBackgroundAvailable: backgrounder.TurnBackgroundAvailable(
+			request.Context(), principal.ID(), sessionID),
+	})
+}
+
+// legacyContinueChatTurnInBackground ends the session's waiting turn without
+// cancelling its Tasks (#137). A turn that does not qualify (no single
+// generation step waiting, not queued upstream nor past the Schema threshold,
+// a SkillRun or a Processing Plan, or a stop already requested) is refused
+// with the Schema's reason and keeps waiting.
+func (s *Server) legacyContinueChatTurnInBackground(
+	writer http.ResponseWriter,
+	request *http.Request,
+	principal access.Principal,
+) {
+	sessionID := configuredPathValue(request, s.application.Runtime.HTTP.LegacyRoutes.ChatTurnBackground, 0)
+	backgrounder, ok := s.chatScheduler.(ChatTurnBackgrounder)
+	if sessionID == "" || !ok {
+		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidParameters)
+		return
+	}
+	err := backgrounder.ContinueTurnInBackground(request.Context(), principal.ID(), sessionID)
+	if errors.Is(err, chat.ErrTurnBackgroundUnavailable) {
+		noteCause(writer, err)
+		message := s.application.Chat.Presentation.Messages.InvalidParameters
+		if policy := s.application.Chat.Agent.BackgroundWait; policy != nil {
+			message = policy.UnavailableMessage
+		}
+		s.writeChatError(writer, http.StatusConflict, message)
+		return
+	}
+	if err != nil {
+		s.logger.ErrorContext(request.Context(), "停止等待并转入后台失败", "session_id", sessionID, "error", err)
+		s.writeChatInternalError(writer, err)
+		return
+	}
+	// Audited like the stop route: the action, the actor and the session.
+	s.logChatAudit(
+		request,
+		principal,
+		s.application.Chat.Audit.TurnBackgroundAction,
+		s.application.Chat.Audit.MessageResourceType,
+		sessionID,
+	)
+	writeJSON(writer, http.StatusOK, map[string]any{
+		s.application.Chat.API.Fields.TurnBackgrounded: true,
 	})
 }
 

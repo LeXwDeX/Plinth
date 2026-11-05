@@ -14,6 +14,7 @@ import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { unavailableLabel } from '@/lib/unavailable';
 import { useProductSchema } from '@/components/product-schema-provider';
+import { approvalDecisionBody, type ApprovalDecisionSchema } from '@/lib/approval-decision';
 import { safeAssetURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { fetchCapabilityOfferings, offeringShowsCredits, type OfferingWire } from '@/lib/agent-offerings';
@@ -214,16 +215,22 @@ export async function prepareDirectTask(
   };
 }
 
+/** The routes and the approval decision member a direct submission uses, all from the product Schema. */
+export interface DirectTaskSchema extends ApprovalDecisionSchema {
+  runtime: { http: { routes: { tasks: string; task_grant_decision: string } } };
+}
+
 export async function submitDirectTask(
-  routes: { tasks: string; task_grant_decision: string },
+  schema: DirectTaskSchema,
   pending: PendingDirectTask,
   isActive: () => boolean = () => true,
 ): Promise<string> {
   if (!isActive()) throw new Error('task submission inactive');
+  const routes = schema.runtime.http.routes;
   // 批准方式已经批准的步骤没有人工决定；对它再发批准会被服务端拒绝。
   if (!pending.approvedByPolicy && !pending.grantApproved) {
     await checkedJSON(routes.task_grant_decision.replace('{requestID}', encodeURIComponent(pending.requestId)),
-      'PUT', { decision: 'approve' });
+      'PUT', approvalDecisionBody(schema, true));
   }
   // An already-sent request may settle, but leaving the initiating UI cannot authorize the next write.
   if (!isActive()) throw new Error('task submission inactive');
@@ -350,7 +357,7 @@ export function InpaintDialog({
           clearPendingDirectTask(sessionID, sourceIdentity);
           throw new Error('prepared input changed');
         }
-        const taskId = await submitDirectTask(schema.runtime.http.routes, pending, stillActive);
+        const taskId = await submitDirectTask(schema, pending, stillActive);
         if (!taskId) throw new Error('task accepted without id');
         // The Task POST may already be accepted after the dialog closed. Keep the job and the tracked task
         // (the same id is never posted again), but a closed dialog must not clear a newer draft or dialog.
@@ -391,7 +398,7 @@ export function InpaintDialog({
       savePendingDirectTask(sessionID, sourceIdentity, prepared);
       if (prepared.approvedByPolicy) {
         // 批准方式已批准：没有第二次确认，直接提交这份冻结的输入。
-        const taskId = await submitDirectTask(schema.runtime.http.routes, prepared, stillActive);
+        const taskId = await submitDirectTask(schema, prepared, stillActive);
         if (!taskId) throw new Error('task accepted without id');
         rememberJob({ taskId, sessionId: sessionID, ...prepared.inpaint! });
         registerTask({ taskId, sessionId: sessionID, capability: 'image-to-image', prompt: prepared.prompt,
@@ -553,7 +560,7 @@ export function BackgroundRemovalDialog({
           clearPendingDirectTask(sessionID, sourceIdentity);
           throw new Error('prepared offering changed');
         }
-        const taskId = await submitDirectTask(schema.runtime.http.routes, pending);
+        const taskId = await submitDirectTask(schema, pending);
         if (!taskId) throw new Error('task accepted without id');
         registerTask({ taskId, sessionId: sessionID, capability: 'background-removal',
           progressMaximum: schema.runtime.frontend.percentage_multiplier, autoPreview: false });
@@ -580,7 +587,7 @@ export function BackgroundRemovalDialog({
       setPending(prepared);
       savePendingDirectTask(sessionID, sourceIdentity, prepared);
       if (prepared.approvedByPolicy) {
-        const taskId = await submitDirectTask(schema.runtime.http.routes, prepared);
+        const taskId = await submitDirectTask(schema, prepared);
         if (!taskId) throw new Error('task accepted without id');
         registerTask({ taskId, sessionId: sessionID, capability: 'background-removal',
           progressMaximum: schema.runtime.frontend.percentage_multiplier, autoPreview: false });

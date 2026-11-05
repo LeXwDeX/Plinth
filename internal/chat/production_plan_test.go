@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
@@ -20,7 +21,7 @@ type recordingProductionPlans struct {
 	created   []budget.ProductionBudget
 	keys      []string
 	plans     []budget.Plan
-	limits    []int
+	limits    [][]budget.Amount
 	ownerIDs  []string
 	sessions  []string
 	messageID []string
@@ -30,7 +31,7 @@ type recordingProductionPlans struct {
 }
 
 func (store *recordingProductionPlans) CreateProductionPlan(_ context.Context, ownerID, sessionID, requestKey,
-	messageID, callID string, plan budget.Plan, limitCredits int) (budget.ProductionBudget, error) {
+	messageID, callID string, plan budget.Plan, limits []budget.Amount) (budget.ProductionBudget, error) {
 	if store.err != nil {
 		return budget.ProductionBudget{}, store.err
 	}
@@ -39,11 +40,11 @@ func (store *recordingProductionPlans) CreateProductionPlan(_ context.Context, o
 		state = budget.StatePending
 	}
 	stored := budget.ProductionBudget{ID: "pb_" + requestKey, OwnerID: ownerID, SessionID: sessionID,
-		Plan: plan, LimitCredits: limitCredits, State: state, MessageID: messageID, CallID: callID}
+		Plan: plan, Limits: limits, State: state, MessageID: messageID, CallID: callID}
 	store.created = append(store.created, stored)
 	store.keys = append(store.keys, requestKey)
 	store.plans = append(store.plans, plan)
-	store.limits = append(store.limits, limitCredits)
+	store.limits = append(store.limits, limits)
 	store.ownerIDs = append(store.ownerIDs, ownerID)
 	store.sessions = append(store.sessions, sessionID)
 	store.messageID = append(store.messageID, messageID)
@@ -57,6 +58,15 @@ func (store *recordingProductionPlans) BudgetSummary(context.Context, string, st
 
 func (store *recordingProductionPlans) PendingBudgets(context.Context, string, string) ([]budget.ProductionBudget, error) {
 	return nil, nil
+}
+
+func (store *recordingProductionPlans) GetBudget(_ context.Context, _ string, budgetID string) (budget.ProductionBudget, error) {
+	for _, created := range store.created {
+		if created.ID == budgetID {
+			return created, nil
+		}
+	}
+	return budget.ProductionBudget{}, budget.ErrNotFound
 }
 
 func planOfferings() []generation.Offering {
@@ -112,7 +122,7 @@ func TestProposeProductionPlanQuotesEveryStepServerSide(t *testing.T) {
 			{"capability":"text-to-image","purpose":"生成概念图","estimated_credits":1},
 			{"capability":"image-to-3d","model":"three-pinned","purpose":"生成低模","estimated_credits":2}
 		],
-		"budget_credits":40,
+		"budgets":[{"unit":"legacy.credits","amount":40}],
 		"correction_capabilities":["retexture","retexture"]
 	}`))
 	if err != nil {
@@ -125,17 +135,17 @@ func TestProposeProductionPlanQuotesEveryStepServerSide(t *testing.T) {
 		t.Fatalf("stored plans = %d", len(store.created))
 	}
 	plan := store.plans[0]
-	if plan.Title != "从草图做骑士" || plan.EstimatedTotal() != 25 || len(plan.Steps) != 2 {
+	if totals := plan.EstimatedTotals(); plan.Title != "从草图做骑士" || len(totals) != 1 || totals[0] != budget.Legacy(25) || len(plan.Steps) != 2 {
 		t.Fatalf("stored plan = %+v", plan)
 	}
-	if plan.Steps[0].Capability != "text-to-image" || plan.Steps[0].OfferingID != "" || plan.Steps[0].EstimatedCredits != 5 ||
-		plan.Steps[1].Capability != "image-to-3d" || plan.Steps[1].OfferingID != "three-pinned" || plan.Steps[1].EstimatedCredits != 20 {
+	if plan.Steps[0].Capability != "text-to-image" || plan.Steps[0].OfferingID != "" || plan.Steps[0].Estimate != budget.Legacy(5) ||
+		plan.Steps[1].Capability != "image-to-3d" || plan.Steps[1].OfferingID != "three-pinned" || plan.Steps[1].Estimate != budget.Legacy(20) {
 		t.Fatalf("server quotes = %+v", plan.Steps)
 	}
 	if len(plan.CorrectionCapabilities) != 1 || plan.CorrectionCapabilities[0] != "retexture" {
 		t.Fatalf("correction capabilities = %v", plan.CorrectionCapabilities)
 	}
-	if store.limits[0] != 40 || store.ownerIDs[0] != "owner-a" || store.sessions[0] != "session-a" ||
+	if len(store.limits[0]) != 1 || store.limits[0][0] != budget.Legacy(40) || store.ownerIDs[0] != "owner-a" || store.sessions[0] != "session-a" ||
 		store.messageID[0] != "turn-a" || store.callIDs[0] != "call-a" || store.keys[0] == "" {
 		t.Fatalf("stored identity = %+v", store)
 	}
@@ -144,10 +154,15 @@ func TestProposeProductionPlanQuotesEveryStepServerSide(t *testing.T) {
 	if err := json.Unmarshal([]byte(result.AgentContent), &content); err != nil {
 		t.Fatalf("agent content %q: %v", result.AgentContent, err)
 	}
+	legacy := map[string]any{"unit": budget.LegacyUnit, "unit_label": budget.LegacyUnit, "amount": "40"}
 	if content["success"] != true || content["title"] != "从草图做骑士" ||
-		content["state"] != budget.StatePending || content["limit_credits"] != float64(40) ||
-		content["estimated_credits"] != float64(25) || content["budget_id"] != store.created[0].ID {
+		content["state"] != budget.StatePending || !reflect.DeepEqual(content["budgets"], []any{legacy}) ||
+		content["budget_id"] != store.created[0].ID {
 		t.Fatalf("proposal content = %v", content)
+	}
+	legacy["amount"] = "25"
+	if !reflect.DeepEqual(content["estimated_totals"], []any{legacy}) || content["limit_credits"] != nil || content["estimated_credits"] != nil {
+		t.Fatalf("proposal totals = %v", content)
 	}
 	steps, ok := content["steps"].([]any)
 	if !ok || len(steps) != 2 {
@@ -155,8 +170,8 @@ func TestProposeProductionPlanQuotesEveryStepServerSide(t *testing.T) {
 	}
 	first := steps[0].(map[string]any)
 	second := steps[1].(map[string]any)
-	if first["estimated_credits"] != float64(5) || second["estimated_credits"] != float64(20) ||
-		second["offering_id"] != "three-pinned" {
+	if first["estimate"].(map[string]any)["amount"] != "5" || second["estimate"].(map[string]any)["amount"] != "20" ||
+		second["estimate"].(map[string]any)["unit"] != budget.LegacyUnit || second["offering_id"] != "three-pinned" {
 		t.Fatalf("proposal step quotes = %v / %v", first, second)
 	}
 	if content["message"] != budgetSchema.ToolMessages.Proposed {
@@ -181,14 +196,14 @@ func TestProposeProductionPlanRefusesUnpricedMeteredSteps(t *testing.T) {
 		Store: store,
 	})
 	result, err := service.ProposeProductionPlan(context.Background(), planCommand(
-		`{"title":"p","steps":[{"capability":"text-to-image","model":"metered-unpriced","purpose":"a"}],"budget_credits":5}`))
+		`{"title":"p","steps":[{"capability":"text-to-image","model":"metered-unpriced","purpose":"a"}],"budgets":[{"unit":"legacy.credits","amount":5}]}`))
 	want := "step text-to-image has no server credit estimate and cannot be budgeted"
 	if err != nil || result.Error != want || len(store.created) != 0 {
 		t.Fatalf("unpriced metered step = %+v err=%v stored=%d", result, err, len(store.created))
 	}
 	result, err = service.ProposeProductionPlan(context.Background(), planCommand(
-		`{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budget_credits":5}`))
-	if err != nil || result.Error != "" || len(store.created) != 1 || store.plans[0].Steps[0].EstimatedCredits != 0 {
+		`{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budgets":[{"unit":"legacy.credits","amount":5}]}`))
+	if err != nil || result.Error != "" || len(store.created) != 1 || store.plans[0].Steps[0].Estimate.Micros != 0 {
 		t.Fatalf("free step = %+v err=%v stored=%d", result, err, len(store.created))
 	}
 }
@@ -203,63 +218,63 @@ func TestProposeProductionPlanRefusesInvalidPlansWithoutStoringThem(t *testing.T
 		want      string
 	}{
 		"budget below the server estimate": {
-			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"},{"capability":"text-to-image","purpose":"b"}],"budget_credits":9}`,
-			want:      "budget_credits must cover the server estimate of 10 credits",
+			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"},{"capability":"text-to-image","purpose":"b"}],"budgets":[{"unit":"legacy.credits","amount":9}]}`,
+			want:      "budgets must give every unit the steps are quoted in at least the server estimate of that unit (10 legacy.credits); missing or too low: 10 legacy.credits. Units are never added or converted",
 		},
 		"budget above the Schema maximum": {
-			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budget_credits":31}`,
+			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budgets":[{"unit":"legacy.credits","amount":31}]}`,
 			mutate:    func(schema *catalog.ChatApprovalBudgetSchema) { schema.MaxCredits = 30 },
-			want:      "budget_credits exceeds the Schema maximum of 30",
+			want:      "budget for unit legacy.credits exceeds the Schema maximum of 30",
 		},
 		"missing budget": {
 			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}]}`,
-			want:      "budget_credits is required",
+			want:      "budgets is required: one amount per credit unit",
 		},
 		"unknown correction capability": {
-			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budget_credits":5,"correction_capabilities":["paint"]}`,
+			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budgets":[{"unit":"legacy.credits","amount":5}],"correction_capabilities":["paint"]}`,
 			want:      "correction capability paint is unknown",
 		},
 		"no steps": {
-			arguments: `{"title":"p","steps":[],"budget_credits":5}`,
+			arguments: `{"title":"p","steps":[],"budgets":[{"unit":"legacy.credits","amount":5}]}`,
 			want:      "steps must be between 1 and 12",
 		},
 		"too many steps": {
-			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"},{"capability":"text-to-image","purpose":"b"},{"capability":"text-to-image","purpose":"c"}],"budget_credits":15}`,
+			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"},{"capability":"text-to-image","purpose":"b"},{"capability":"text-to-image","purpose":"c"}],"budgets":[{"unit":"legacy.credits","amount":15}]}`,
 			mutate:    func(schema *catalog.ChatApprovalBudgetSchema) { schema.MaxSteps = 2 },
 			want:      "steps must be between 1 and 2",
 		},
 		"step without purpose": {
-			arguments: `{"title":"p","steps":[{"capability":"text-to-image"}],"budget_credits":5}`,
+			arguments: `{"title":"p","steps":[{"capability":"text-to-image"}],"budgets":[{"unit":"legacy.credits","amount":5}]}`,
 			want:      "every step needs a purpose",
 		},
 		"step without capability": {
-			arguments: `{"title":"p","steps":[{"purpose":"a"}],"budget_credits":5}`,
+			arguments: `{"title":"p","steps":[{"purpose":"a"}],"budgets":[{"unit":"legacy.credits","amount":5}]}`,
 			want:      "every step needs a capability",
 		},
 		"offering not available": {
-			arguments: `{"title":"p","steps":[{"capability":"image-to-3d","model":"disabled","purpose":"a"}],"budget_credits":5}`,
+			arguments: `{"title":"p","steps":[{"capability":"image-to-3d","model":"disabled","purpose":"a"}],"budgets":[{"unit":"legacy.credits","amount":5}]}`,
 			want:      "no available offering for capability image-to-3d",
 		},
 		"capability without an available offering": {
-			arguments: `{"title":"p","steps":[{"capability":"text-to-3d","purpose":"a"}],"budget_credits":5}`,
+			arguments: `{"title":"p","steps":[{"capability":"text-to-3d","purpose":"a"}],"budgets":[{"unit":"legacy.credits","amount":5}]}`,
 			want:      "no available offering for capability text-to-3d",
 		},
 		"empty title": {
-			arguments: `{"title":"   ","steps":[{"capability":"text-to-image","purpose":"a"}],"budget_credits":5}`,
+			arguments: `{"title":"   ","steps":[{"capability":"text-to-image","purpose":"a"}],"budgets":[{"unit":"legacy.credits","amount":5}]}`,
 			want:      "title is required",
 		},
 		"title too long": {
-			arguments: `{"title":"knight","steps":[{"capability":"text-to-image","purpose":"a"}],"budget_credits":5}`,
+			arguments: `{"title":"knight","steps":[{"capability":"text-to-image","purpose":"a"}],"budgets":[{"unit":"legacy.credits","amount":5}]}`,
 			mutate:    func(schema *catalog.ChatApprovalBudgetSchema) { schema.MaxTitleCharacters = 5 },
 			want:      "title is too long",
 		},
 		"purpose too long": {
-			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"concept"}],"budget_credits":5}`,
+			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"concept"}],"budgets":[{"unit":"legacy.credits","amount":5}]}`,
 			mutate:    func(schema *catalog.ChatApprovalBudgetSchema) { schema.MaxPurposeCharacters = 3 },
 			want:      "step purpose is too long",
 		},
 		"unknown field": {
-			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budget_credits":5,"secret":true}`,
+			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budgets":[{"unit":"legacy.credits","amount":5}],"secret":true}`,
 			want:      "arguments must match the declared plan object",
 		},
 		"not an object": {
@@ -267,7 +282,7 @@ func TestProposeProductionPlanRefusesInvalidPlansWithoutStoringThem(t *testing.T
 			want:      "arguments must match the declared plan object",
 		},
 		"trailing json": {
-			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budget_credits":5} {}`,
+			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budgets":[{"unit":"legacy.credits","amount":5}]} {}`,
 			want:      "arguments must match the declared plan object",
 		},
 	} {
@@ -308,7 +323,7 @@ func TestProposeProductionPlanReportsStoreRefusals(t *testing.T) {
 			store := &recordingProductionPlans{err: testCase.err}
 			service := proposalService(t, store, shippedBudgetSchema(t))
 			result, err := service.ProposeProductionPlan(context.Background(), planCommand(
-				`{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budget_credits":5}`))
+				`{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budgets":[{"unit":"legacy.credits","amount":5}]}`))
 			if err != nil || result.Error != testCase.want {
 				t.Fatalf("store refusal = %+v err=%v want=%q", result, err, testCase.want)
 			}
@@ -321,7 +336,7 @@ func TestProposeProductionPlanReportsStoreRefusals(t *testing.T) {
 func TestProposeProductionPlanKeepsTheToolCallIdentity(t *testing.T) {
 	store := &recordingProductionPlans{}
 	service := proposalService(t, store, shippedBudgetSchema(t))
-	arguments := `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budget_credits":5}`
+	arguments := `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budgets":[{"unit":"legacy.credits","amount":5}]}`
 	first := planCommand(arguments)
 	second := planCommand(arguments)
 	second.Call.ID = "call-b"
@@ -362,7 +377,7 @@ func TestProposeProductionPlanPropagatesStorageFailure(t *testing.T) {
 	store := &recordingProductionPlans{err: errors.New("disk lost")}
 	service := proposalService(t, store, shippedBudgetSchema(t))
 	result, err := service.ProposeProductionPlan(context.Background(), planCommand(
-		`{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budget_credits":5}`))
+		`{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budgets":[{"unit":"legacy.credits","amount":5}]}`))
 	if err == nil || !result.NoSubmission || result.AgentContent != "" {
 		t.Fatalf("storage failure = %+v err=%v", result, err)
 	}

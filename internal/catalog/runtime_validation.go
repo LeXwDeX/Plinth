@@ -82,6 +82,7 @@ func validateRuntime(schema RuntimeSchema) error {
 		"input_source_task_expired":     {messages.InputSourceTaskExpired, []string{"{label}"}},
 		"input_source_task_unsupported": {messages.InputSourceTaskUnsupported, []string{"{label}"}},
 		"input_source_face_limit":       {messages.InputSourceFaceLimit, []string{"{faces}", "{limit}"}},
+		"input_parameter_range":         {messages.InputParameterRange, []string{"{label}", "{value}", "{minimum}", "{maximum}"}},
 	} {
 		if check.text == "" {
 			continue
@@ -416,6 +417,15 @@ func validateRuntime(schema RuntimeSchema) error {
 		httpRuntime.LegacyRoutes.AdminUserAssets,
 		httpRuntime.LegacyRoutes.AdminBackfillStatus,
 		httpRuntime.LegacyRoutes.MeshyProxyAsset,
+	}
+	// The background-continue route (#137) is optional; when declared it is
+	// a distinct route with the stop route's single session parameter.
+	if route := httpRuntime.LegacyRoutes.ChatTurnBackground; route != "" {
+		if route == httpRuntime.LegacyRoutes.ChatTurnCancel ||
+			len(configuredRouteParameters(route)) != 1 {
+			return errors.New("http legacy chat_turn_background route 必须与 chat_turn_cancel 不同且声明一个路径参数")
+		}
+		legacyRoutes = append(legacyRoutes, route)
 	}
 	seenLegacyRoutes := map[string]struct{}{}
 	for _, route := range legacyRoutes {

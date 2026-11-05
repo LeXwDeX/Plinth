@@ -44,6 +44,29 @@ func TestParseRejectsOversizedNodePath(t *testing.T) {
 	}
 }
 
+// A long name on a node with thousands of children is copied into every
+// child's path: 4500 children of a 16000-byte name would allocate about
+// 69 MiB of paths from a JSON chunk of about 100 KiB. Each path alone is
+// below maxPathBytes, so only the total ceiling stops it.
+func TestParseRejectsNodePathAmplification(t *testing.T) {
+	name := strings.Repeat("n", 16000)
+	data := emptyPrimitiveGLB(1, 4500, name)
+	_, err := Parse(bytes.NewReader(data), int64(len(data)), DefaultLimits())
+	if !errors.Is(err, ErrTooLarge) || !strings.Contains(err.Error(), "in total") {
+		t.Fatalf("Parse with %d bytes of node paths: err = %v", 4500*16008, err)
+	}
+	// The same hierarchy with 1000 children (about 16 MiB of paths) is
+	// within the ceiling.
+	data = emptyPrimitiveGLB(1, 1000, name)
+	model, err := Parse(bytes.NewReader(data), int64(len(data)), DefaultLimits())
+	if err != nil {
+		t.Fatalf("Parse with 1000 long paths: %v", err)
+	}
+	if len(model.parts) != 1000 {
+		t.Fatalf("parts = %d, want 1000", len(model.parts))
+	}
+}
+
 func TestParseKeepsModestEmptyPrimitives(t *testing.T) {
 	data := emptyPrimitiveGLB(4, 8, "root")
 	model, err := Parse(bytes.NewReader(data), int64(len(data)), DefaultLimits())

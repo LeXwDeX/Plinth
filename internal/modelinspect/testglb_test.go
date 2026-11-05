@@ -18,6 +18,9 @@ type testGLB struct {
 	doc       map[string]any
 	bin       bytes.Buffer
 	bufferURI string
+	// extraBuffers follow buffer 0 in the document, for example an
+	// EXT_meshopt_compression fallback buffer.
+	extraBuffers []any
 }
 
 func newTestGLB() *testGLB {
@@ -204,6 +207,9 @@ func (b *testGLB) finish() []byte {
 		}}
 	case b.bin.Len() > 0:
 		b.doc["buffers"] = []any{map[string]any{"byteLength": b.bin.Len()}}
+	}
+	if len(b.extraBuffers) > 0 {
+		b.doc["buffers"] = append(b.doc["buffers"].([]any), b.extraBuffers...)
 	}
 	jsonBytes, err := json.Marshal(b.doc)
 	if err != nil {

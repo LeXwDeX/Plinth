@@ -785,10 +785,21 @@ func (service *Service) StartTurn(
 	ctx context.Context,
 	command StartTurn,
 ) (Message, error) {
+	return service.startTurn(ctx, command, "")
+}
+
+// startTurn starts a turn; planContinuation names the approved production
+// plan a server-started continuation runs (#134), empty for a person's turn.
+func (service *Service) startTurn(
+	ctx context.Context,
+	command StartTurn,
+	planContinuation string,
+) (Message, error) {
 	// Client-supplied execution context never becomes a durable turn snapshot.
 	command.Options.Harness = nil
 	command.Options.Selection = nil
 	command.Options.SelectionPicked = false
+	command.Options.PlanContinuation = planContinuation
 	command.Content = strings.TrimSpace(command.Content)
 	if command.Content == "" && len(command.ImageURLs) == 0 {
 		return Message{}, ErrEmptyMessage
@@ -1004,6 +1015,23 @@ func (service *Service) TurnRunningState() string     { return service.turnRunni
 func (service *Service) RequestTurnStop(ctx context.Context, ownerID, sessionID string) (Turn, bool, error) {
 	return service.repository.RequestTurnStop(ctx, ownerID, sessionID,
 		[]string{service.turnQueued, service.turnRunning, service.turnWaitingTask}, service.clock())
+}
+
+// WaitingTurn returns the session's turn that is parked on its Tasks, if any
+// (#137). A session has at most one active turn; the newest one wins should
+// older data hold more.
+func (service *Service) WaitingTurn(ctx context.Context, ownerID, sessionID string) (Turn, bool, error) {
+	turns, err := service.repository.ListSessionTurns(ctx, ownerID, sessionID, []string{service.turnWaitingTask})
+	if err != nil || len(turns) == 0 {
+		return Turn{}, false, err
+	}
+	latest := turns[0]
+	for _, turn := range turns[1:] {
+		if turn.CreatedAt.After(latest.CreatedAt) {
+			latest = turn
+		}
+	}
+	return latest, true, nil
 }
 
 func (service *Service) TurnStopRequested(ctx context.Context, ownerID, sessionID, assistantMessageID string) (bool, error) {

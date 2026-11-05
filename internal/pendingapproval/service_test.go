@@ -161,6 +161,10 @@ type world struct {
 	// referenceSource is the source fact frozen with the next operation; zero
 	// means an operation from before the fact was kept.
 	referenceSource generationtool.ReferenceSourceFact
+	// budgetEligible issues the next approval's grant as an Agent step a
+	// production plan may approve (#103). Eligibility is fixed when the grant
+	// is first prepared; a later replay cannot change it (#120).
+	budgetEligible bool
 	// attachmentAsset is the session attachment's asset; the default is not
 	// the input copy, so no handle is claimed without an exact identity.
 	attachmentAsset  string
@@ -327,7 +331,8 @@ func (w *world) approval(callID string, detach bool) (generationtool.Operation, 
 		Principal: executiongrant.Principal{OwnerID: "owner-a", ActorID: "agent:" + turnID, Source: executiongrant.AgentPending},
 		SessionID: "session-a", OfferingID: string(prepared.OfferingID), OfferingRevision: prepared.OfferingRevision,
 		PreparedInputID: string(prepared.ID), PreparedInputHash: prepared.InputHash,
-		IdempotencyKey: operation.IdempotencyKey, OperationID: operation.OperationID, TriggerTurnID: turnID, Harness: w.binding})
+		IdempotencyKey: operation.IdempotencyKey, OperationID: operation.OperationID, TriggerTurnID: turnID, Harness: w.binding,
+		BudgetEligible: w.budgetEligible})
 	if err != nil {
 		w.t.Fatal(err)
 	}

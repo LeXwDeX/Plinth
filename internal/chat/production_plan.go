@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -18,24 +19,73 @@ import (
 )
 
 // The budget approval mode (#103): the Agent proposes one production plan with
-// a total credit budget, the person decides it once, and executiongrant then
-// approves the plan's steps inside the budget without a card per step. This
-// file owns the proposal tool's validation; the plan store, the reservation
-// and the decision stay in executiongrant.
+// a credit budget per unit, the person decides it once, and executiongrant then
+// approves the plan's steps inside the budget of their own unit without a card
+// per step. Different provider units are limited and counted separately and
+// never added (#120). This file owns the proposal tool's validation; the plan
+// store, the reservation and the decision stay in executiongrant.
 
 var (
 	// ErrProductionPlanUnavailable refuses a proposal when the Schema declares
 	// no budget configuration (a historical Catalog).
 	ErrProductionPlanUnavailable = errors.New("chat: production plans are not declared")
+	// ErrPlanNotActive refuses a continuation of a plan that is not the
+	// session's active plan.
+	ErrPlanNotActive = errors.New("chat: production plan is not the session's active plan")
 )
+
+// StartPlanContinuation starts the turn that runs a plan the person just
+// approved (#134), like the turn that carries a choice card's answer (#321):
+// its user message is the Schema's go-ahead, and the Agent's request follows
+// it with the Schema's continuation text. The turn is an ordinary one: the
+// service freezes the scope, brief, model lock and chat model as for any turn,
+// and it takes the workspace choices (domain, picked models) and the locale of
+// the turn that proposed the plan. Only the session's active plan continues;
+// an active turn of the session refuses it with ErrTurnActive. It returns the
+// assistant message and the options the caller schedules the turn with.
+func (service *Service) StartPlanContinuation(ctx context.Context, ownerID, sessionID, budgetID, locale string) (Message, TurnOptions, error) {
+	policy := service.productionPlans
+	if policy == nil || strings.TrimSpace(policy.Budget.Continuation.Message) == "" {
+		return Message{}, TurnOptions{}, ErrProductionPlanUnavailable
+	}
+	summary, found, err := policy.Store.BudgetSummary(ctx, ownerID, sessionID)
+	if err != nil {
+		return Message{}, TurnOptions{}, err
+	}
+	if !found || summary.ID != budgetID || summary.State != budget.StateActive {
+		return Message{}, TurnOptions{}, ErrPlanNotActive
+	}
+	options := TurnOptions{Locale: locale}
+	if production, err := policy.Store.GetBudget(ctx, ownerID, budgetID); err == nil && production.MessageID != "" {
+		if proposing, err := service.repository.GetTurn(ctx, ownerID, sessionID, production.MessageID); err == nil {
+			options.CreativeDomain = proposing.Options.CreativeDomain
+			options.AIModel = proposing.Options.AIModel
+			options.DomainModels = proposing.Options.DomainModels
+			if proposing.Options.Locale != "" {
+				options.Locale = proposing.Options.Locale
+			}
+		}
+	}
+	content := strings.ReplaceAll(policy.Budget.Continuation.Message, "{title}", summary.Plan.Title)
+	assistant, err := service.startTurn(ctx, StartTurn{OwnerID: ownerID, SessionID: sessionID,
+		Content: content, Options: options}, budgetID)
+	if err != nil {
+		return Message{}, TurnOptions{}, err
+	}
+	options.PlanContinuation = budgetID
+	return assistant, options, nil
+}
 
 // ProductionPlanStore is the part of executiongrant.Service the proposal tool
 // and the Agent's budget context read.
 type ProductionPlanStore interface {
 	CreateProductionPlan(ctx context.Context, ownerID, sessionID, requestKey, messageID, callID string,
-		plan budget.Plan, limitCredits int) (budget.ProductionBudget, error)
+		plan budget.Plan, limits []budget.Amount) (budget.ProductionBudget, error)
 	BudgetSummary(ctx context.Context, ownerID, sessionID string) (budget.Summary, bool, error)
 	PendingBudgets(ctx context.Context, ownerID, sessionID string) ([]budget.ProductionBudget, error)
+	// GetBudget reads one plan of the owner; the continuation turn takes the
+	// workspace choices of the turn that proposed it (#134).
+	GetBudget(ctx context.Context, ownerID, budgetID string) (budget.ProductionBudget, error)
 }
 
 // ProductionPlanPolicy wires the proposal tool: the Schema's bounds and texts,
@@ -45,6 +95,19 @@ type ProductionPlanPolicy struct {
 	Offerings         func() []generation.Offering
 	OfferingAvailable func(generation.OfferingID) bool
 	Store             ProductionPlanStore
+	// PurposeBudgetNote words the values a planned step would run with that
+	// are over the session purpose's budget (#129), or "" when they fit. It is
+	// optional: without it a plan carries no purpose budget note.
+	PurposeBudgetNote func(command ToolCommand, offering generation.Offering) string
+}
+
+// SetProductionPlanPurposeBudget installs the purpose budget check of planned
+// steps (#129). Application assembly calls it once the generation tools that
+// own the purpose budget exist; it does nothing without production plans.
+func (service *Service) SetProductionPlanPurposeBudget(note func(ToolCommand, generation.Offering) string) {
+	if service.productionPlans != nil {
+		service.productionPlans.PurposeBudgetNote = note
+	}
 }
 
 // SetProductionPlans installs the budget-mode proposal writer. It is called
@@ -82,12 +145,12 @@ func (service *Service) PendingProductionBudget(ctx context.Context, ownerID, se
 	if err != nil || len(pending) == 0 {
 		return budget.Summary{}, false, err
 	}
-	return budget.SummaryOf(pending[0], 0, 0), true, nil
+	return budget.SummaryOf(pending[0], nil), true, nil
 }
 
 // proposedPlanArguments is the tool's declared object. estimated_credits is
 // accepted because the Schema declares it, and deliberately ignored: the
-// server quotes every step itself.
+// server quotes every step itself. budgets holds one amount per credit unit.
 type proposedPlanArguments struct {
 	Title string `json:"title"`
 	Steps []struct {
@@ -96,7 +159,10 @@ type proposedPlanArguments struct {
 		Purpose          string `json:"purpose"`
 		EstimatedCredits *int   `json:"estimated_credits"`
 	} `json:"steps"`
-	BudgetCredits          int      `json:"budget_credits"`
+	Budgets []struct {
+		Unit   string      `json:"unit"`
+		Amount json.Number `json:"amount"`
+	} `json:"budgets"`
 	CorrectionCapabilities []string `json:"correction_capabilities"`
 }
 
@@ -115,13 +181,13 @@ func (service *Service) ProposeProductionPlan(ctx context.Context, command ToolC
 		decoder.Decode(new(any)) != io.EOF {
 		return planRefusal("arguments must match the declared plan object"), nil
 	}
-	plan, limit, refusal := policy.buildPlan(arguments)
+	plan, limits, refusal := policy.buildPlan(command, arguments)
 	if refusal != "" {
 		return planRefusal(refusal), nil
 	}
 	key := productionPlanRequestKey(command)
 	stored, err := policy.Store.CreateProductionPlan(ctx, command.OwnerID, command.SessionID, key,
-		command.AssistantMessageID, command.Call.ID, plan, limit)
+		command.AssistantMessageID, command.Call.ID, plan, limits)
 	if err != nil {
 		switch {
 		case errors.Is(err, executiongrant.ErrInvalid):
@@ -152,32 +218,32 @@ func productionPlanRequestKey(command ToolCommand) string {
 }
 
 // buildPlan validates the arguments against the Schema and quotes every step
-// from the runtime Catalog. A step's Agent-supplied estimate is never used.
-func (policy *ProductionPlanPolicy) buildPlan(arguments proposedPlanArguments) (budget.Plan, int, string) {
+// from the runtime Catalog in the step's own unit. A step's Agent-supplied
+// estimate is never used, and every unit the steps are quoted in needs its own
+// limit that covers them; units are never added or converted (#120).
+func (policy *ProductionPlanPolicy) buildPlan(command ToolCommand, arguments proposedPlanArguments) (budget.Plan, []budget.Amount, string) {
 	config := policy.Budget
 	title := strings.TrimSpace(arguments.Title)
 	if title == "" {
-		return budget.Plan{}, 0, "title is required"
+		return budget.Plan{}, nil, "title is required"
 	}
 	titleLimit := config.MaxTitleCharacters
 	if titleLimit <= 0 || titleLimit > budget.MaxTitleCharacters {
 		titleLimit = budget.MaxTitleCharacters
 	}
 	if utf8.RuneCountInString(title) > titleLimit {
-		return budget.Plan{}, 0, "title is too long"
+		return budget.Plan{}, nil, "title is too long"
 	}
 	maxSteps := config.MaxSteps
 	if maxSteps <= 0 {
 		maxSteps = len(arguments.Steps)
 	}
 	if len(arguments.Steps) == 0 || len(arguments.Steps) > maxSteps {
-		return budget.Plan{}, 0, "steps must be between 1 and " + strconv.Itoa(maxSteps)
+		return budget.Plan{}, nil, "steps must be between 1 and " + strconv.Itoa(maxSteps)
 	}
-	if arguments.BudgetCredits <= 0 {
-		return budget.Plan{}, 0, "budget_credits is required"
-	}
-	if arguments.BudgetCredits > config.MaxCredits {
-		return budget.Plan{}, 0, "budget_credits exceeds the Schema maximum of " + strconv.Itoa(config.MaxCredits)
+	limits, refusal := policy.planLimits(arguments)
+	if refusal != "" {
+		return budget.Plan{}, nil, refusal
 	}
 	plan := budget.Plan{Title: title}
 	seenCorrections := map[string]bool{}
@@ -187,7 +253,7 @@ func (policy *ProductionPlanPolicy) buildPlan(arguments proposedPlanArguments) (
 			continue
 		}
 		if !policy.capabilityKnown(capability) {
-			return budget.Plan{}, 0, "correction capability " + capability + " is unknown"
+			return budget.Plan{}, nil, "correction capability " + capability + " is unknown"
 		}
 		seenCorrections[capability] = true
 		plan.CorrectionCapabilities = append(plan.CorrectionCapabilities, capability)
@@ -196,38 +262,124 @@ func (policy *ProductionPlanPolicy) buildPlan(arguments proposedPlanArguments) (
 		capability := strings.TrimSpace(step.Capability)
 		purpose := strings.TrimSpace(step.Purpose)
 		if capability == "" {
-			return budget.Plan{}, 0, "every step needs a capability"
+			return budget.Plan{}, nil, "every step needs a capability"
 		}
 		if purpose == "" {
-			return budget.Plan{}, 0, "every step needs a purpose"
+			return budget.Plan{}, nil, "every step needs a purpose"
 		}
 		if config.MaxPurposeCharacters > 0 && utf8.RuneCountInString(purpose) > config.MaxPurposeCharacters {
-			return budget.Plan{}, 0, "step purpose is too long"
+			return budget.Plan{}, nil, "step purpose is too long"
 		}
 		offering, ok := policy.stepOffering(capability, strings.TrimSpace(step.Model))
 		if !ok {
-			return budget.Plan{}, 0, "no available offering for capability " + capability
+			return budget.Plan{}, nil, "no available offering for capability " + capability
 		}
 		estimated := budget.EstimateOffering(offering)
-		if offering.CreditsMetered && estimated <= 0 {
+		if offering.CreditsMetered && estimated.Micros <= 0 {
 			// A metered step the server cannot quote cannot be covered by a
-			// total budget: reserving zero would let it spend outside the plan
-			// (#103 review B1). The Agent must pick a priceable model or let the
+			// budget: reserving zero would let it spend outside the plan (#103
+			// review B1). The Agent must pick a priceable model or let the
 			// person approve the step directly.
-			return budget.Plan{}, 0, "step " + capability + " has no server credit estimate and cannot be budgeted"
+			return budget.Plan{}, nil, "step " + capability + " has no server credit estimate and cannot be budgeted"
 		}
-		plan.Steps = append(plan.Steps, budget.PlanStep{
-			Capability:       capability,
-			OfferingID:       strings.TrimSpace(step.Model),
-			Purpose:          purpose,
-			EstimatedCredits: estimated,
-		})
+		planned := budget.PlanStep{
+			Capability: capability,
+			OfferingID: strings.TrimSpace(step.Model),
+			Purpose:    purpose,
+			Estimate:   estimated,
+		}
+		if policy.PurposeBudgetNote != nil {
+			// A plan step names no parameters, so the check reads the values it
+			// would run with; the person sees an over-budget value on the card
+			// before approving the plan, not only after the step ran (#129).
+			planned.PurposeBudgetNote = policy.PurposeBudgetNote(command, offering)
+		}
+		plan.Steps = append(plan.Steps, planned)
 	}
-	estimated := plan.EstimatedTotal()
-	if arguments.BudgetCredits < estimated {
-		return budget.Plan{}, 0, "budget_credits must cover the server estimate of " + strconv.Itoa(estimated) + " credits"
+	if uncovered := plan.Uncovered(limits); len(uncovered) > 0 {
+		return budget.Plan{}, nil, "budgets must give every unit the steps are quoted in at least the server estimate of that unit (" +
+			unitAmountsText(plan.EstimatedTotals()) + "); missing or too low: " + unitAmountsText(uncovered) +
+			". Units are never added or converted"
 	}
-	return plan, arguments.BudgetCredits, ""
+	return plan, limits, ""
+}
+
+// planLimits reads the per-unit budgets the Agent proposed. A unit must be
+// the legacy bucket or a provider unit some Offering of the Catalog is priced
+// in; each appears once with a positive amount within the Schema maximum.
+func (policy *ProductionPlanPolicy) planLimits(arguments proposedPlanArguments) ([]budget.Amount, string) {
+	if len(arguments.Budgets) == 0 {
+		return nil, "budgets is required: one amount per credit unit"
+	}
+	labels := policy.unitLabels()
+	maximum := strconv.Itoa(policy.Budget.MaxCredits)
+	limits := make([]budget.Amount, 0, len(arguments.Budgets))
+	seen := map[string]bool{}
+	for _, entry := range arguments.Budgets {
+		unit := strings.TrimSpace(entry.Unit)
+		label, known := labels[unit]
+		if !known {
+			return nil, "budget unit " + unit + " is unknown; use the unit of a step quote (" + unitList(labels) + ")"
+		}
+		if seen[unit] {
+			return nil, "budget unit " + unit + " is listed twice"
+		}
+		seen[unit] = true
+		limit, err := budget.ParseAmount(unit, label, entry.Amount.String())
+		if err != nil || limit.Micros <= 0 {
+			return nil, "budget for unit " + unit + " must be a positive decimal amount" + legacyWholeHint(unit)
+		}
+		ceiling, err := budget.ParseAmount(unit, label, maximum)
+		if err == nil && limit.Micros > ceiling.Micros {
+			return nil, "budget for unit " + unit + " exceeds the Schema maximum of " + maximum
+		}
+		limits = append(limits, limit)
+	}
+	normalized, err := budget.NormalizeLimits(limits)
+	if err != nil {
+		return nil, "budgets are invalid"
+	}
+	return normalized, ""
+}
+
+// unitLabels are the units a plan may budget: the legacy bucket and every
+// provider unit an Offering of the Catalog declares, with its label.
+func (policy *ProductionPlanPolicy) unitLabels() map[string]string {
+	labels := map[string]string{budget.LegacyUnit: budget.LegacyUnit}
+	for _, offering := range policy.Offerings() {
+		if pricing := offering.NativePricing; pricing != nil && pricing.Unit != "" {
+			if _, seen := labels[pricing.Unit]; !seen {
+				labels[pricing.Unit] = pricing.UnitLabel
+			}
+		}
+	}
+	return labels
+}
+
+func unitList(labels map[string]string) string {
+	units := make([]string, 0, len(labels))
+	for unit := range labels {
+		units = append(units, unit)
+	}
+	sort.Strings(units)
+	return strings.Join(units, ", ")
+}
+
+func legacyWholeHint(unit string) string {
+	if unit == budget.LegacyUnit {
+		return " in whole credits"
+	}
+	return ""
+}
+
+// unitAmountsText lists amounts as "<amount> <unit>" for a tool refusal the
+// Agent reads; the unit ids are what it sends back in budgets.
+func unitAmountsText(amounts []budget.Amount) string {
+	parts := make([]string, 0, len(amounts))
+	for _, amount := range amounts {
+		parts = append(parts, amount.Decimal()+" "+amount.Unit)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // stepOffering finds the runtime Offering a step is quoted at: the pinned one
@@ -283,12 +435,15 @@ func planProposedContent(stored budget.ProductionBudget, messages catalog.ChatAp
 	steps := make([]map[string]any, 0, len(stored.Plan.Steps))
 	for _, step := range stored.Plan.Steps {
 		item := map[string]any{
-			"capability":        step.Capability,
-			"purpose":           step.Purpose,
-			"estimated_credits": step.EstimatedCredits,
+			"capability": step.Capability,
+			"purpose":    step.Purpose,
+			"estimate":   step.Estimate,
 		}
 		if step.OfferingID != "" {
 			item["offering_id"] = step.OfferingID
+		}
+		if step.PurposeBudgetNote != "" {
+			item["purpose_budget_note"] = step.PurposeBudgetNote
 		}
 		steps = append(steps, item)
 	}
@@ -308,8 +463,8 @@ func planProposedContent(stored budget.ProductionBudget, messages catalog.ChatAp
 		"budget_id":               stored.ID,
 		"state":                   stored.State,
 		"title":                   stored.Plan.Title,
-		"limit_credits":           stored.LimitCredits,
-		"estimated_credits":       stored.Plan.EstimatedTotal(),
+		"budgets":                 stored.Limits,
+		"estimated_totals":        stored.Plan.EstimatedTotals(),
 		"steps":                   steps,
 		"correction_capabilities": stored.Plan.CorrectionCapabilities,
 		"message":                 message,

@@ -135,6 +135,8 @@ class Runner:
         self.catalog = json.loads(self.catalog_a.read_text())
         self.offerings = {o["id"]: o for o in self.catalog["offerings"]}
         schema = self.catalog["application"]
+        # The approval decision member is Schema data (chat.api.fields.decision, #120).
+        self.decision_member = schema["chat"]["api"]["fields"]["decision"]
         self.routes = dict(schema["runtime"]["http"]["routes"])
         self.routes.update({name:path for name,path in schema["runtime"]["http"]["legacy_routes"].items() if name not in self.routes})
         self.client, self.other = Client(self.base, self.owner), Client(self.base, self.owner)
@@ -319,7 +321,7 @@ class Runner:
         step = next(s for s in plan["steps"] if s.get("failure") == "plan_consent_required")
         _, grant = self.client.request("POST", self.routes["task_grants"], {"prepared_input_id": step["prepared_input_id"], "plan_id": plan["id"], "plan_step_id": step["plan_step_id"]}, (201,), step["idempotency_key"])
         if grant["status"] == "pending":
-            self.client.request("PUT", self.api_path("task_grant_decision", requestID=grant["request_id"]), {"decision": "approve"})
+            self.client.request("PUT", self.api_path("task_grant_decision", requestID=grant["request_id"]), {self.decision_member: "approve"})
         body = {"expected_plan_version": plan["version"], "expected_offering_revision": step["revision"], "authorization_request_id": grant["request_id"]}
         self.client.request("POST", self.api_path("processing_plan_resume", planID=plan["id"]), body, (202,))
 
@@ -571,7 +573,7 @@ class Runner:
         _, prepared = self.client.request("POST", self.routes["task_prepare"], {"session_id": source["session_id"], "offering_id": offering["id"], "capability": offering["capability"], "input": {"prompt": "isolated wire quota acceptance"}}, (201,))
         _, grant = self.client.request("POST", self.routes["task_grants"], {"prepared_input_id": prepared["prepared_input_id"]}, (201,), key)
         if grant["status"] == "pending":
-            self.client.request("PUT", self.api_path("task_grant_decision", requestID=grant["request_id"]), {"decision": "approve"})
+            self.client.request("PUT", self.api_path("task_grant_decision", requestID=grant["request_id"]), {self.decision_member: "approve"})
         _, accepted = self.client.request("POST", self.routes["tasks"], {"prepared_input_id": prepared["prepared_input_id"], "authorization_request_id": grant["request_id"]}, (202,), key)
         deadline = time.monotonic() + 40
         while time.monotonic() < deadline:

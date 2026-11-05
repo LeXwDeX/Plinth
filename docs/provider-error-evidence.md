@@ -47,7 +47,7 @@ docker logs <container> 2>&1 | grep 'generation attempt finished failed'
 | `timed_out` | 第三方 | 408/504、Meshy `task_error.type=timeout` |
 | `upstream_unavailable` | 第三方 | 5xx（非提交）、Meshy `service_unavailable`/`server_error`、Tripo 1000/1001 |
 | `insufficient_balance` | 第三方账户（余额不足、欠费） | OpenAI 兼容 `error.code=insufficient_quota`（OpenAI 与 Gemini 图片连接都声明）、Gemini `payment_required` 与 402（Gemini、OpenAI 图片连接）、方舟/即梦 `AccountOverdueError`、Meshy 402、Tripo 2010、Rodin `API_INSUFFICIENT_FUNDS`，以及图片连接上消息含 insufficient balance / account in arrears 的错误；不可重试 |
-| `credential_quota` | 第三方 Key 额度（账户有余额，但该 API Key 达到服务商控制台设置的额度上限） | Gemini `quota_exceeded`（429，日额度用尽，等额度重置）、方舟/即梦 `QuotaExceeded` 与 `SetLimitExceeded`（429，试用额度用尽或用户设定的用量上限，等待分钟级限流窗口无用，不可重试，#139）；Meshy 402 且消息含 `credit limit`（连接 `message_matchers` 声明 `before_status_ranges` 与 `http_status: {min: 402, max: 402}`，先于 402 状态区间匹配，别的状态不匹配；#93、#121，待 dev-test 验收） |
+| `credential_quota` | 第三方 Key 额度（账户有余额，但该 API Key 达到服务商控制台设置的额度上限） | Gemini `quota_exceeded`（429，日额度用尽，等额度重置）、OpenAI 图片连接 `quota_exceeded`（LLMs 网关的调用方配额用尽，429，网关直接拒绝；#120，按 dev-test 记录的错误码声明，信封按网关的 OpenAI 兼容 `error.code` 构造，待 dev-test 验收）、方舟/即梦 `QuotaExceeded` 与 `SetLimitExceeded`（429，试用额度用尽或用户设定的用量上限，等待分钟级限流窗口无用，不可重试，#139）；Meshy 402 且消息含 `credit limit`（连接 `message_matchers` 声明 `before_status_ranges` 与 `http_status: {min: 402, max: 402}`，先于 402 状态区间匹配，别的状态不匹配；#93、#121，待 dev-test 验收） |
 | `rejected` | 上游业务拒绝 | Meshy 404/409、Tripo 2001/2005-2008/2011/2012/2014/2018/2019、任务被取消 |
 | `submission_unknown` | 歧义保护 | 创建类 408/5xx：无法证明上游拒收，禁止自动重发 |
 | `protocol` / `integrity_failure` / `internal` | 我方代码 | 无效 JSON、资产校验失败、内部状态错误 |
@@ -81,6 +81,22 @@ docker logs <container> 2>&1 | grep 'generation attempt finished failed'
   避免上游回显用户提示词时误判；遇到新的网关措辞，在连接的 `message_matchers`
   里补一条即可。该类不可重试，创建类请求的 402/403/429 不是歧义提交。
   各家的码来自其公开错误文档，真实环境的取证样本待 dev-test 补充。
+- 额度耗尽优先于状态区间（#120，源码已实现，待 dev-test 验收）：上一条的“先看声明”
+  同样适用于 `credential_quota`。`httpjson.matchExhaustionEvidence` 先查被声明为
+  `insufficient_balance` 或 `credential_quota` 的错误码与消息匹配，再看 HTTP 状态区间，
+  所以连接即使声明了 `429 → rate_limited`，声明过的额度码仍按额度耗尽结束，
+  不会进入限流排队（`internal/generation` 的排队只接受可重试的 `rate_limited`）。
+  起因：dev-test 的 LLMs 网关在调用方配额用尽时返回 429 `quota_exceeded`，
+  OpenAI 图片连接没有声明这个码，它被读成可重试限流，任务排队重发到 Offering
+  超时（gpt-image-2 为 1800 秒），十分钟内被拒 200 多次。普通 429（无码或
+  `rate_limit_exceeded` 等未声明的码）仍按限流排队。
+  真实样本（dev-test 网关，周额度用尽）：`error.code` 与 `error.type` 都是
+  `quota_exceeded`，另带 `error.quota`（`dimension`、`limit_usd`、`used_usd`、
+  `resets_at`、`scope`）；当时取证为 `upstream_code=quota_exceeded`、
+  `class=rate_limited`、`retryable=true`。样本作为回归用例保存在
+  `httpjson/quota_test.go`（`gatewayWeeklyQuotaSample`），现判为 `credential_quota`。
+  对话模型（`chat-llm` 连接）在 Schema 声明同样的两个码，Agent 请求遇到时回复
+  Schema `agent_quota_exhausted`，见 `docs/architecture.md`「Adapter 路由」。
 - Meshy 任务错误：`internal/providers/meshy/adapter.go`（`task_error.type`
   决定 class 与可重试性：timeout/service_unavailable/server_error 可重试）。
 - 即梦/火山 Ark：走通用分类 + OpenAI 兼容信封 `error.code` 提取；`QuotaExceeded`、`SetLimitExceeded`（均 429）声明为 `credential_quota`，否则会按 429 读成可重试的限流（#139，码表来自 <https://docs.volcengine.com/docs/82379/1299023>，2026-10-29 核对）。

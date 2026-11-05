@@ -159,6 +159,7 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		"presentation.empty_message":            schema.Presentation.Messages.EmptyMessage,
 		"presentation.agent_images_unsupported": schema.Presentation.Messages.AgentImagesUnsupported,
 		"presentation.agent_content_rejected":   schema.Presentation.Messages.AgentContentRejected,
+		"presentation.agent_quota_exhausted":    schema.Presentation.Messages.AgentQuotaExhausted,
 		"presentation.agent_not_configured":     schema.Presentation.Messages.AgentNotConfigured,
 		"presentation.invalid_parameters":       schema.Presentation.Messages.InvalidParameters,
 		"presentation.model_choice_conflict":    schema.Presentation.Messages.ModelChoiceConflict,
@@ -404,6 +405,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		return errors.New("agent 的 consent_recharge_content 必须包含 {task_id}")
 	}
 	if err := validateToolCallBudget(schema.Agent, runtime); err != nil {
+		return err
+	}
+	if err := validateBackgroundWait(schema, runtime); err != nil {
 		return err
 	}
 	if limit := runtime.HTTP.TaskAdmission.PerOwnerMaxInflightTasks; schema.Agent.MaxParallelGenerationSubmissions < 1 ||
@@ -926,21 +930,37 @@ func validateApprovalBudget(budget ChatApprovalBudgetSchema) error {
 		strings.TrimSpace(budget.NoPlanText) == "" {
 		return errors.New("approval_policy.budget 的上下文文案不能为空")
 	}
+	// #120: amounts are listed per unit; the legacy bucket's name and the
+	// separator between units are product copy, not code.
+	if strings.TrimSpace(budget.LegacyUnitLabel) == "" || strings.TrimSpace(budget.UnitSeparator) == "" {
+		return errors.New("approval_policy.budget 的 legacy_unit_label 与 unit_separator 不能为空")
+	}
 	for _, field := range []string{"{state}", "{limit}", "{spent}", "{reserved}", "{remaining}", "{plan}"} {
 		if !strings.Contains(budget.ContextTemplate, field) {
 			return fmt.Errorf("approval_policy.budget.context_template 缺少占位符 %s", field)
 		}
 	}
-	knownStates := map[string]bool{
-		"pending": true, "active": true, "exhausted": true, "closed": true, "denied": true,
+	// The role of each state follows what the server does with it (#120): a
+	// role the browser acts on must not contradict the state machine, or an
+	// active budget could be hidden or a refused plan shown as spendable.
+	knownStates := map[string]string{
+		"pending":   ChatApprovalBudgetRolePending,
+		"active":    ChatApprovalBudgetRoleActive,
+		"exhausted": ChatApprovalBudgetRoleEnded,
+		"closed":    ChatApprovalBudgetRoleEnded,
+		"denied":    ChatApprovalBudgetRoleDenied,
 	}
 	seen := make(map[string]bool, len(budget.States))
 	for _, state := range budget.States {
-		if !knownStates[state.ID] || seen[state.ID] {
+		role, known := knownStates[state.ID]
+		if !known || seen[state.ID] {
 			return fmt.Errorf("approval_policy.budget.states 含未知或重复的状态 %q", state.ID)
 		}
 		if strings.TrimSpace(state.Label) == "" {
 			return fmt.Errorf("approval_policy.budget.states[%s] 缺少 label", state.ID)
+		}
+		if state.Role != role {
+			return fmt.Errorf("approval_policy.budget.states[%s] 的 role 必须是 %q", state.ID, role)
 		}
 		seen[state.ID] = true
 	}
@@ -961,6 +981,10 @@ func validateApprovalBudget(budget ChatApprovalBudgetSchema) error {
 		if !strings.Contains(budget.Messages.Approved, field) {
 			return fmt.Errorf("approval_policy.budget.messages.approved 缺少占位符 %s", field)
 		}
+	}
+	// #134: approving a plan starts the turn that runs it.
+	if strings.TrimSpace(budget.Continuation.Message) == "" || strings.TrimSpace(budget.Continuation.AgentTemplate) == "" {
+		return errors.New("approval_policy.budget.continuation 的 message 与 agent_template 不能为空")
 	}
 	return nil
 }
@@ -2227,6 +2251,7 @@ func validateModelReview(schema ChatSchema, capabilityPresentations []Capability
 		{"budget_exhausted", review.Texts.BudgetExhausted, []string{"{limit}"}},
 		{"too_large", review.Texts.TooLarge, []string{"{bytes}", "{limit}"}},
 		{"unsupported", review.Texts.Unsupported, []string{"{reason}"}},
+		{"compressed", review.Texts.Compressed, []string{"{extension}"}},
 		{"source_read_failed", review.Texts.SourceReadFailed, []string{"{reason}"}},
 		{"upload_failed", review.Texts.UploadFailed, []string{"{reason}"}},
 		{"render_failed", review.Texts.RenderFailed, []string{"{view}", "{reason}"}},

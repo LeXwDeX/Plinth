@@ -622,6 +622,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
+	// A planned step is checked against the session purpose's budget by the
+	// generation tools that own it (#129).
+	chatService.SetProductionPlanPurposeBudget(toolExecutor.PlanStepPurposeBudgetNote)
 	// B10：agent 状态（参数/绑定/同意）写穿透 SQLite——重启后同意
 	// 门禁仍然生效；会话删除时级联清理（chat_repository.DeleteSession）。
 	agentStateStore := agentparams.NewPersistentStore(repository, logger)

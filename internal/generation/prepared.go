@@ -150,7 +150,7 @@ func estimatePreparedCredits(offering Offering, normalized json.RawMessage, quot
 		estimated = budget.EstimateNativeTotal(quote)
 	}
 	if offering.CreditsMetered && estimated <= 0 {
-		estimated = budget.EstimateOffering(offering)
+		estimated = budget.EstimateOfferingCredits(offering)
 	}
 	return estimated
 }

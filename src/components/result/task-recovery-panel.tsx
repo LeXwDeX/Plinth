@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { Action } from '@/components/ui/button';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { submitDirectTask, type PendingDirectTask } from '@/components/workspace/canvas-image-actions';
+import { approvalDecisionBody } from '@/lib/approval-decision';
 import { fetchRecoveryEligibility, prepareRecovery, type RecoveryEligibility, type RecoveryGrant } from '@/lib/workspace/task-recovery';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import type { ProductSchema } from '@/lib/product-schema';
@@ -86,7 +87,7 @@ function ScopedRecoveryPanel({ taskId, sessionId, capability, prompt, onOpenTask
       sessionId: grant.sessionId, offeringId: grant.offeringId, prompt: grant.prompt,
       grantApproved: grant.grantApproved, approvedByPolicy: grant.approvedByPolicy,
     };
-    const newTaskId = await submitDirectTask(schema.runtime.http.routes, pendingTask, isActive);
+    const newTaskId = await submitDirectTask(schema, pendingTask, isActive);
     if (!isActive()) return;
     if (!newTaskId) throw new Error('recovery task response malformed');
     savePending(sessionId, taskId, null);
@@ -135,7 +136,7 @@ function ScopedRecoveryPanel({ taskId, sessionId, capability, prompt, onOpenTask
     try {
       if (decision === 'deny') {
         const response = await fetch(schema.runtime.http.routes.task_grant_decision.replace('{requestID}', encodeURIComponent(pending.requestId)), {
-          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision: 'deny' }),
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(approvalDecisionBody(schema, false)),
         });
         if (!isActive()) return;
         if (!response.ok) throw new Error(`grant decision ${response.status}`);

@@ -316,12 +316,8 @@ func (m *Module) observeAttempt(ctx context.Context, lease Lease) error {
 		return m.finishFailed(ctx, lease, attempt, failure, "attempt.job_missing", nil)
 	}
 
-	if m.jobTimeout(task) > 0 && m.clock.Now().Sub(attempt.StartedAt) > m.jobTimeout(task) {
-		return m.handleAttemptFailure(ctx, lease, attempt, &Failure{
-			Class:      FailureTimedOut,
-			Retryable:  true,
-			SafeDetail: "上游任务超过供给项允许的最长执行时间",
-		}, nil)
+	if failure := m.acceptedJobTimeout(task, attempt, m.clock.Now()); failure != nil {
+		return m.finishFailed(ctx, lease, attempt, failure, "attempt.failed", nil)
 	}
 
 	port, ok := m.providers.Provider(task.Offering)
@@ -426,9 +422,11 @@ func (m *Module) applyObservation(
 		if lease.Token == "" {
 			return nil
 		}
+		refreshUpstreamQueue(lease.Task, attempt, obs, m.clock.Now())
 		return m.rescheduleDuplicateObservation(ctx, lease, attempt, Observation{}, settlement)
 	}
 	if obs.DedupeKey != "" && obs.DedupeKey == attempt.LastObservationKey {
+		refreshUpstreamQueue(lease.Task, attempt, obs, m.clock.Now())
 		return m.rescheduleDuplicateObservation(ctx, lease, attempt, obs, settlement)
 	}
 	if obs.Phase == UpstreamPreparing {
@@ -450,6 +448,11 @@ func (m *Module) applyObservation(
 	}
 	attempt.LastObservationPhase = obs.Phase
 	attempt.ObservationFailures = 0
+	var queue *UpstreamQueue
+	if obs.Phase == UpstreamAccepted || obs.Phase == UpstreamRunning {
+		queue = normalizeUpstreamQueue(obs.Queue)
+	}
+	trackUpstreamQueue(attempt, queue, now)
 	if obs.Job != nil {
 		attempt.UpstreamJob = obs.Job
 	}
@@ -610,6 +613,7 @@ func (m *Module) applyPrivateCheckpointUpdate(ctx context.Context, lease Lease, 
 	updated.Opaque = append(json.RawMessage(nil), obs.Opaque...)
 	updated.LastObservationKey = obs.DedupeKey
 	updated.UpdatedAt = now
+	refreshUpstreamQueue(lease.Task, &updated, obs, now)
 	return mapRepositoryError("update_private_checkpoint", m.repository.Commit(ctx, Commit{
 		LeaseToken:      lease.Token,
 		ExpectedVersion: lease.Task.Version,
@@ -617,6 +621,54 @@ func (m *Module) applyPrivateCheckpointUpdate(ctx context.Context, lease Lease, 
 		Attempt:         &updated,
 		ClearLease:      true,
 	}))
+}
+
+// refreshUpstreamQueue lets a poll that cannot advance the Attempt still record
+// the upstream queue it reports (#131): the same job, in the recorded
+// accepted/running phase at the recorded progress, and not older than the
+// recorded source order. It changes nothing else.
+func refreshUpstreamQueue(task Task, attempt *Attempt, obs Observation, now time.Time) {
+	if attempt == nil || task.State != TaskRunning || attempt.State != AttemptRunning ||
+		(obs.Phase != UpstreamAccepted && obs.Phase != UpstreamRunning) ||
+		obs.Phase != attempt.LastObservationPhase || obs.Progress != task.Progress ||
+		(obs.Job != nil && (attempt.UpstreamJob == nil || *obs.Job != *attempt.UpstreamJob)) ||
+		(obs.Sequence > 0 && obs.Sequence < attempt.LastObservationSequence) ||
+		(!obs.ObservedAt.IsZero() && obs.ObservedAt.Before(attempt.LastObservationAt)) {
+		return
+	}
+	trackUpstreamQueue(attempt, normalizeUpstreamQueue(obs.Queue), now)
+}
+
+// acceptedJobTimeout is the failure of an accepted upstream job that ran out
+// of time (#136), or nil. Time the job spends in the upstream queue does not
+// count toward the job timeout while the Offering bounds it with its queue
+// wait limit; past that limit the job fails as upstream_queue_timeout. The
+// upstream may still run and bill the job, so either failure is ambiguous and
+// final: it is never resubmitted, retried by hand or released from a budget.
+// It keeps its own class instead of becoming submission_unknown, because the
+// submission itself is known.
+func (m *Module) acceptedJobTimeout(task Task, attempt *Attempt, now time.Time) *Failure {
+	queued := attempt.UpstreamQueuedAt(now)
+	limit := task.Offering.UpstreamQueueTimeout
+	if limit > 0 && queued > limit {
+		return &Failure{
+			Class:      FailureUpstreamQueueTimeout,
+			Ambiguous:  true,
+			SafeDetail: "上游排队超过供给项允许的最长等待时间",
+		}
+	}
+	elapsed := now.Sub(attempt.StartedAt)
+	if limit > 0 {
+		elapsed -= queued
+	}
+	if timeout := m.jobTimeout(task); timeout > 0 && elapsed > timeout {
+		return &Failure{
+			Class:      FailureTimedOut,
+			Ambiguous:  true,
+			SafeDetail: "上游任务超过供给项允许的最长执行时间",
+		}
+	}
+	return nil
 }
 
 // Events are durable and may feed future projections. Persist only the public

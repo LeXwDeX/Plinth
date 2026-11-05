@@ -142,13 +142,15 @@ def case_manual_approval(live, report, models):
     deadline = time.time() + 600
     while time.time() < deadline and not pending:
         time.sleep(10)
+        # #103: before the paid step the Agent may stop at the usage card; a person answers it.
+        live.answer_pending_choices(session)
         pending = live.pending_approvals(session)
     report.check("manual-approval: a pending approval card appears", bool(pending), f"{len(pending)} card(s)")
     report.check("manual-approval: no task before approval", not live.tasks(session))
     denied = []
     for card in pending:
         request_id = card.get("request_id") or card.get("requestId") or card.get("id")
-        status, _ = live.client.call("PUT", f"/api/v1/tasks/grants/{request_id}", {"decision": "deny"})
+        status, _ = live.decide_grant(request_id, approve=False)
         denied.append(status)
     report.check("manual-approval: every deny returned 2xx", bool(denied) and all(200 <= s < 300 for s in denied),
                  str(denied))

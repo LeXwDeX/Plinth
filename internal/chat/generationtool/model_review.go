@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
@@ -43,8 +44,10 @@ type ModelRenderStore interface {
 }
 
 // modelReviewState is the process-wide state of the read-only model review
-// tools: the parsed-model cache and the render concurrency bound. Both are
-// declared in application.chat.model_review.
+// tools: the parsed-model cache and the concurrency bound. Both are declared
+// in application.chat.model_review. The render.max_concurrent_renders slots
+// bound renders and inspections alike, because an inspection's topology pass
+// allocates in proportion to the model just as a render does.
 type modelReviewState struct {
 	cache *modelReviewCache
 	slots chan struct{}
@@ -68,6 +71,7 @@ func newModelReviewState(review catalog.ChatModelReviewSchema) *modelReviewState
 			maxModels: maxModels,
 			maxBytes:  maxBytes,
 			entries:   map[string]*modelReviewEntry{},
+			loads:     map[string]*modelReviewLoad{},
 		},
 		slots: make(chan struct{}, concurrent),
 	}
@@ -88,23 +92,73 @@ func (state *modelReviewState) release() { <-state.slots }
 // so a reply that inspects and then renders the same file walks the geometry
 // once. modelinspect documents Model as safe for concurrent Inspect/Render.
 type modelReviewEntry struct {
+	key   string
 	model *modelinspect.Model
-	size  int64
+	// fileBytes is the saved file the model reads from; the entry keeps it in
+	// memory for the model's lifetime.
+	fileBytes int64
 
-	reportOnce sync.Once
-	report     modelinspect.Report
+	// inspecting is a one-slot semaphore that guards report. Unlike a
+	// sync.Once, a call waiting for another call's inspection can give up
+	// with its own context, and an inspection cancelled half way leaves no
+	// result behind, so the next call computes it.
+	inspecting  chan struct{}
+	report      *modelinspect.Report
+	reportBytes atomic.Int64
+
+	// accounted is the size the cache last charged for the entry; the
+	// cache's mutex guards it.
+	accounted int64
 }
 
-func (entry *modelReviewEntry) inspect(options modelinspect.InspectOptions) modelinspect.Report {
-	entry.reportOnce.Do(func() {
-		entry.report = modelinspect.Inspect(entry.model, options)
-	})
-	return entry.report
+func newModelReviewEntry(key string, model *modelinspect.Model, fileBytes int64) *modelReviewEntry {
+	return &modelReviewEntry{key: key, model: model, fileBytes: fileBytes, inspecting: make(chan struct{}, 1)}
 }
 
-// modelReviewCache is a small LRU bounded by entry count and source bytes,
-// whichever binds first. The key is the asset's SHA-256, so the same bytes
-// reused under another Task or asset share one parse.
+// retainedBytes is the memory the entry holds now: the saved file, the
+// model's parsed structure and decoded caches (accessors expand to four
+// bytes per component, textures to four bytes per pixel) and the report.
+func (entry *modelReviewEntry) retainedBytes() int64 {
+	return entry.fileBytes + entry.model.RetainedBytes() + entry.reportBytes.Load()
+}
+
+// inspect returns the entry's report, computing it once under one of the
+// state's slots. The topology pass allocates in proportion to the model, so
+// it waits for a slot like a render does and stops when ctx is done.
+func (entry *modelReviewEntry) inspect(
+	ctx context.Context,
+	state *modelReviewState,
+	options modelinspect.InspectOptions,
+) (modelinspect.Report, error) {
+	select {
+	case entry.inspecting <- struct{}{}:
+	case <-ctx.Done():
+		return modelinspect.Report{}, ctx.Err()
+	}
+	defer func() { <-entry.inspecting }()
+	if entry.report != nil {
+		return *entry.report, nil
+	}
+	if err := state.acquire(ctx); err != nil {
+		return modelinspect.Report{}, err
+	}
+	report, err := modelinspect.InspectContext(ctx, entry.model, options)
+	state.release()
+	if err != nil {
+		return modelinspect.Report{}, err
+	}
+	entry.report = &report
+	entry.reportBytes.Store(report.RetainedBytes())
+	state.cache.refresh(entry)
+	return report, nil
+}
+
+// modelReviewCache is a small LRU bounded by entry count and retained bytes,
+// whichever binds first. An entry is charged what it actually holds (the
+// saved file plus decoded data and report), not just the file size, and is
+// recharged after Inspect and Render grow it. The key is the asset's
+// SHA-256, so the same bytes reused under another Task or asset share one
+// parse; concurrent first loads of one key share one parse too.
 type modelReviewCache struct {
 	mu        sync.Mutex
 	maxModels int
@@ -112,6 +166,16 @@ type modelReviewCache struct {
 	bytes     int64
 	entries   map[string]*modelReviewEntry
 	order     []string // least recently used first
+	loads     map[string]*modelReviewLoad
+}
+
+// modelReviewLoad is one in-flight first load of a key. done closes when
+// it ends; entry or parseErr then hold its outcome. A load that ended with
+// neither could not read the file, and a waiting call loads it itself.
+type modelReviewLoad struct {
+	done     chan struct{}
+	entry    *modelReviewEntry
+	parseErr error
 }
 
 func (cache *modelReviewCache) get(key string) *modelReviewEntry {
@@ -125,25 +189,98 @@ func (cache *modelReviewCache) get(key string) *modelReviewEntry {
 	return entry
 }
 
+// begin returns the cached entry for key, or the load already running for
+// it, or a new load the caller must end with finish.
+func (cache *modelReviewCache) begin(key string) (*modelReviewEntry, *modelReviewLoad, *modelReviewLoad) {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if entry, found := cache.entries[key]; found {
+		cache.touch(key)
+		return entry, nil, nil
+	}
+	if running, found := cache.loads[key]; found {
+		return nil, running, nil
+	}
+	started := &modelReviewLoad{done: make(chan struct{})}
+	if cache.loads == nil {
+		cache.loads = map[string]*modelReviewLoad{}
+	}
+	cache.loads[key] = started
+	return nil, nil, started
+}
+
+// finish publishes a load's outcome, caches a parsed entry and releases the
+// calls waiting for the load.
+func (cache *modelReviewCache) finish(key string, load *modelReviewLoad, entry *modelReviewEntry, parseErr error) {
+	cache.mu.Lock()
+	delete(cache.loads, key)
+	load.entry, load.parseErr = entry, parseErr
+	if entry != nil {
+		cache.insertLocked(key, entry)
+	}
+	cache.mu.Unlock()
+	close(load.done)
+}
+
 func (cache *modelReviewCache) put(key string, entry *modelReviewEntry) {
-	if key == "" || entry == nil || entry.size > cache.maxBytes {
+	if key == "" || entry == nil {
 		return
 	}
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
+	cache.insertLocked(key, entry)
+}
+
+// insertLocked charges entry its current retained size. An entry larger
+// than the whole budget is not cached.
+func (cache *modelReviewCache) insertLocked(key string, entry *modelReviewEntry) {
+	size := entry.retainedBytes()
+	if size > cache.maxBytes {
+		return
+	}
 	if existing, found := cache.entries[key]; found {
-		cache.bytes -= existing.size
+		cache.bytes -= existing.accounted
 		delete(cache.entries, key)
 		cache.removeOrder(key)
 	}
+	entry.accounted = size
 	cache.entries[key] = entry
-	cache.bytes += entry.size
+	cache.bytes += size
 	cache.order = append(cache.order, key)
-	for len(cache.order) > cache.maxModels || cache.bytes > cache.maxBytes {
+	cache.evictLocked()
+}
+
+// refresh recharges a cached entry at its current retained size, evicting
+// least recently used entries to stay within the budget. An entry that
+// alone outgrows the budget leaves the cache; calls holding it keep using
+// it until they return.
+func (cache *modelReviewCache) refresh(entry *modelReviewEntry) {
+	if entry == nil {
+		return
+	}
+	size := entry.retainedBytes()
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if cache.entries[entry.key] != entry {
+		return
+	}
+	cache.bytes += size - entry.accounted
+	entry.accounted = size
+	if size > cache.maxBytes {
+		cache.bytes -= size
+		delete(cache.entries, entry.key)
+		cache.removeOrder(entry.key)
+		return
+	}
+	cache.evictLocked()
+}
+
+func (cache *modelReviewCache) evictLocked() {
+	for len(cache.order) > 0 && (len(cache.order) > cache.maxModels || cache.bytes > cache.maxBytes) {
 		oldest := cache.order[0]
 		cache.order = cache.order[1:]
 		if evicted, found := cache.entries[oldest]; found {
-			cache.bytes -= evicted.size
+			cache.bytes -= evicted.accounted
 			delete(cache.entries, oldest)
 		}
 	}
@@ -197,7 +334,10 @@ func (executor *Executor) InspectModel(ctx context.Context, command chat.ToolCom
 		return *refusal, nil
 	}
 	options := modelReviewInspectOptions(review)
-	report := entry.inspect(options)
+	report, err := entry.inspect(ctx, executor.modelReview, options)
+	if err != nil {
+		return chat.ToolResult{}, err
+	}
 	total := len(report.Parts)
 	truncated := false
 	if review.Inspect.MaxListedParts > 0 && total > review.Inspect.MaxListedParts {
@@ -297,7 +437,10 @@ func (executor *Executor) RenderModelViews(ctx context.Context, command chat.Too
 	if refusal != nil {
 		return *refusal, nil
 	}
-	report := entry.inspect(modelReviewInspectOptions(review))
+	report, err := entry.inspect(ctx, executor.modelReview, modelReviewInspectOptions(review))
+	if err != nil {
+		return chat.ToolResult{}, err
+	}
 	if refusal := executor.modelReviewPartsRefusal(command, review, report, parts); refusal != nil {
 		return *refusal, nil
 	}
@@ -412,9 +555,13 @@ func (executor *Executor) CompareModels(ctx context.Context, command chat.ToolCo
 		entries = append(entries, entry)
 	}
 	options := modelReviewInspectOptions(review)
-	reports := []modelinspect.Report{
-		entries[0].inspect(options),
-		entries[1].inspect(options),
+	reports := make([]modelinspect.Report, 0, len(entries))
+	for _, entry := range entries {
+		report, err := entry.inspect(ctx, executor.modelReview, options)
+		if err != nil {
+			return chat.ToolResult{}, err
+		}
+		reports = append(reports, report)
 	}
 	if mode == modelinspect.ModeWireframe {
 		for _, report := range reports {
@@ -587,45 +734,117 @@ func (executor *Executor) loadReviewedModel(
 	// A known digest answers from the cache without reading the saved bytes;
 	// the body was still opened above, so the owner check always ran
 	// (#103 review C7).
-	if key != "" {
-		if entry := executor.modelReview.cache.get(key); entry != nil {
-			return entry, nil, nil
-		}
-	}
-	data, err := io.ReadAll(io.LimitReader(content.Body, limits.MaxBytes+1))
-	if err != nil {
-		executor.logger.Warn("model review asset read failed",
-			"task_id", source.task.ID, "asset_id", source.asset.ID, "error", err)
-		refusal := executor.modelReviewRefusal(command, executor.fillText(command, review.Texts.SourceReadFailed,
-			"{reason}", "the asset bytes could not be read"))
-		return nil, &refusal, nil
-	}
-	if int64(len(data)) > limits.MaxBytes {
-		refusal := executor.modelReviewRefusal(command, executor.fillText(command, review.Texts.TooLarge,
-			"{bytes}", strconv.FormatInt(int64(len(data)), 10),
-			"{limit}", strconv.FormatInt(limits.MaxBytes, 10)))
-		return nil, &refusal, nil
-	}
+	var data []byte
 	if key == "" {
+		// The digest is only known once the bytes are read.
+		var refusal *chat.ToolResult
+		if data, refusal = executor.readReviewedModel(command, review, source, content.Body, limits); refusal != nil {
+			return nil, refusal, nil
+		}
 		digest := sha256.Sum256(data)
 		key = hex.EncodeToString(digest[:])
-		// The digest is only known now; another call may have cached the same
-		// bytes while this one read them.
-		if entry := executor.modelReview.cache.get(key); entry != nil {
+	}
+	cache := executor.modelReview.cache
+	for {
+		entry, running, started := cache.begin(key)
+		if entry != nil {
 			return entry, nil, nil
+		}
+		if running != nil {
+			// Another call is parsing the same bytes; share its result
+			// instead of parsing a second copy.
+			select {
+			case <-running.done:
+			case <-ctx.Done():
+				return nil, nil, ctx.Err()
+			}
+			if running.entry != nil {
+				return running.entry, nil, nil
+			}
+			if running.parseErr != nil {
+				return nil, executor.modelReviewParseRefusal(command, review, running.parseErr), nil
+			}
+			// That call could not read the file; load it here.
+			continue
+		}
+		entry, refusal := executor.parseReviewedModel(command, review, source, content.Body, limits, data, key, started)
+		return entry, refusal, nil
+	}
+}
+
+// parseReviewedModel runs the load this call started: it reads the file
+// unless data already holds it, parses it and always ends the load, so
+// waiting calls are never left blocked.
+func (executor *Executor) parseReviewedModel(
+	command chat.ToolCommand,
+	review catalog.ChatModelReviewSchema,
+	source reviewedModel,
+	body io.Reader,
+	limits modelinspect.Limits,
+	data []byte,
+	key string,
+	load *modelReviewLoad,
+) (entry *modelReviewEntry, refusal *chat.ToolResult) {
+	var parseErr error
+	defer func() { executor.modelReview.cache.finish(key, load, entry, parseErr) }()
+	if data == nil {
+		if data, refusal = executor.readReviewedModel(command, review, source, body, limits); refusal != nil {
+			return nil, refusal
 		}
 	}
 	model, err := modelinspect.Parse(bytes.NewReader(data), int64(len(data)), limits)
 	if err != nil {
 		executor.logger.Warn("model review parse failed",
 			"task_id", source.task.ID, "asset_id", source.asset.ID, "error", err)
-		refusal := executor.modelReviewRefusal(command, executor.fillText(command, review.Texts.Unsupported,
-			"{reason}", modelReviewErrorReason(err)))
-		return nil, &refusal, nil
+		parseErr = err
+		return nil, executor.modelReviewParseRefusal(command, review, err)
 	}
-	entry := &modelReviewEntry{model: model, size: int64(len(data))}
-	executor.modelReview.cache.put(key, entry)
-	return entry, nil, nil
+	return newModelReviewEntry(key, model, int64(len(data))), nil
+}
+
+// readReviewedModel reads the opened file within the Schema's byte limit.
+func (executor *Executor) readReviewedModel(
+	command chat.ToolCommand,
+	review catalog.ChatModelReviewSchema,
+	source reviewedModel,
+	body io.Reader,
+	limits modelinspect.Limits,
+) ([]byte, *chat.ToolResult) {
+	data, err := io.ReadAll(io.LimitReader(body, limits.MaxBytes+1))
+	if err != nil {
+		executor.logger.Warn("model review asset read failed",
+			"task_id", source.task.ID, "asset_id", source.asset.ID, "error", err)
+		refusal := executor.modelReviewRefusal(command, executor.fillText(command, review.Texts.SourceReadFailed,
+			"{reason}", "the asset bytes could not be read"))
+		return nil, &refusal
+	}
+	if int64(len(data)) > limits.MaxBytes {
+		refusal := executor.modelReviewRefusal(command, executor.fillText(command, review.Texts.TooLarge,
+			"{bytes}", strconv.FormatInt(int64(len(data)), 10),
+			"{limit}", strconv.FormatInt(limits.MaxBytes, 10)))
+		return nil, &refusal
+	}
+	return data, nil
+}
+
+// modelReviewParseRefusal explains why Parse rejected a file. A required
+// mesh compression extension gets its own Schema text, because the file is
+// valid but compressed and the Agent should say so instead of calling it
+// broken.
+func (executor *Executor) modelReviewParseRefusal(
+	command chat.ToolCommand,
+	review catalog.ChatModelReviewSchema,
+	err error,
+) *chat.ToolResult {
+	var compressed *modelinspect.CompressionError
+	if errors.As(err, &compressed) {
+		refusal := executor.modelReviewRefusal(command, executor.fillText(command, review.Texts.Compressed,
+			"{extension}", compressed.Extension))
+		return &refusal
+	}
+	refusal := executor.modelReviewRefusal(command, executor.fillText(command, review.Texts.Unsupported,
+		"{reason}", modelReviewErrorReason(err)))
+	return &refusal
 }
 
 // renderReviewedView draws one view through the review state's concurrency
@@ -660,6 +879,9 @@ func (executor *Executor) renderReviewedView(
 		WireframeMaxTriangles: int(review.Render.WireframeMaxTriangles),
 		Context:               ctx,
 	})
+	// Rendering decodes normals, texture coordinates, colours and textures
+	// into the model's caches, so the entry is recharged even on failure.
+	executor.modelReview.cache.refresh(entry)
 	if err != nil {
 		return nil, err
 	}

@@ -729,19 +729,31 @@ type stepInfo struct {
 	// artboard or which nearest legal size was used (#272); else that it
 	// followed the one reference picture (#296).
 	SizeNote string
+	// PurposeBudgetNote names the step's values over the session purpose's
+	// budget (#129). Empty when every bounded value fits.
+	PurposeBudgetNote string
 	// Budget is the production plan that authorized the step (#103); nil when
 	// no plan did (another mode, or a browser-started step).
 	Budget *budget.Summary
 }
 
-// budgetResult is the budget part of a paid tool result: the plan's identity
-// and what it still holds after this step. The Agent uses it to decide whether
-// the next planned step fits, without guessing from earlier numbers.
+// budgetResult is the budget part of a paid tool result: the plan the step
+// belongs to (its ID and title) and what it still holds after this step, per
+// credit unit (#120, #135). The Agent uses it to decide whether the next
+// planned step fits in its own unit, without guessing from earlier numbers or
+// adding different units.
 func budgetResult(summary budget.Summary) map[string]any {
+	remaining := make([]budget.Amount, 0, len(summary.Units))
+	reserved := make([]budget.Amount, 0, len(summary.Units))
+	for _, unit := range summary.Units {
+		remaining = append(remaining, unit.Amount(unit.Remaining))
+		reserved = append(reserved, unit.Amount(unit.Reserved))
+	}
 	return map[string]any{
 		"id":        summary.ID,
-		"remaining": summary.RemainingCredits,
-		"reserved":  summary.ReservedCredits,
+		"title":     summary.Plan.Title,
+		"remaining": remaining,
+		"reserved":  reserved,
 	}
 }
 
@@ -751,12 +763,15 @@ const (
 )
 
 // approvalSource names who approved a grant. An empty grant (recovery paths
-// that never loaded one) has no known source.
+// that never loaded one) has no known source. A step an approved production
+// plan approved (actor budget:<id>) was approved by the session's approval
+// policy, not by a person clicking its card (#135); its result also carries
+// the plan's budget object.
 func approvalSource(grant executiongrant.Grant) string {
 	switch {
 	case grant.RequestID == "":
 		return ""
-	case grant.ApprovedByPolicy():
+	case grant.ApprovedByPolicy(), grant.ApprovedByBudget():
 		return approvalByPolicy
 	default:
 		return approvalByHuman
@@ -1426,6 +1441,15 @@ func (executor *Executor) buildInput(
 		input[parameter] = value
 		chosen[parameter] = true
 	}
+	// #139: the purpose's values were chosen before the later layers set the
+	// step's combination (Tripo's smart low poly or quad). A purpose value no
+	// later layer replaced is chosen again against the final input; one the
+	// purpose no longer needs is left to normalization's default.
+	if len(profileValues) > 0 {
+		if err := executor.refreshPurposeValues(command, offering, input, profileValues, chosen); err != nil {
+			return nil, nil, err
+		}
+	}
 	// #296: outside a canvas turn, one reference picture sets the output size
 	// that nobody chose.
 	executor.applyReferenceOutputSize(ctx, command, offering, input, chosen, referenceAssets)
@@ -1514,6 +1538,10 @@ func (executor *Executor) taskWaitDeadline(command chat.ToolCommand, offering ge
 		// A historical Task may be unreadable before its Offering can be read.
 		// Give that read a bounded recovery window using the Schema timeout.
 		timeout = time.Duration(executor.chat.Agent.RequestTimeoutSeconds) * time.Second
+	} else {
+		// Upstream queue time does not count toward the job timeout (#136),
+		// so the Task may run that much longer.
+		timeout += offering.UpstreamQueueTimeout
 	}
 	return executor.clock().Add(timeout)
 }
@@ -1553,6 +1581,7 @@ func (executor *Executor) wait(
 			return executor.awaitTask(command, taskID, deadline, err)
 		}
 		info.ModelChoice = executor.modelChoiceOf(command, task.Offering, task.Input)
+		info.PurposeBudgetNote = executor.purposeBudgetNote(command, task.Offering, task.Input)
 		status := executor.publicStates[task.State]
 		observation := chat.ToolObservation{
 			TaskID:   string(taskID),
@@ -1661,6 +1690,9 @@ func (executor *Executor) success(
 	}
 	if key := tool.ResultFields.ModelNote; key != "" && info.ModelNote != "" {
 		result[key] = info.ModelNote
+	}
+	if key := tool.ResultFields.PurposeBudgetNote; key != "" && info.PurposeBudgetNote != "" {
+		result[key] = info.PurposeBudgetNote
 	}
 	if info.Budget != nil {
 		if key := tool.ResultFields.Budget; key != "" {

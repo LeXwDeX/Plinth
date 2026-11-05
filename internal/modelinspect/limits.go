@@ -9,7 +9,10 @@ package modelinspect
 // node hierarchy is walked, MaxBytes before any data is read, and the triangle
 // and vertex caps while primitives are indexed.
 type Limits struct {
-	// MaxBytes is the largest GLB file accepted by Parse.
+	// MaxBytes is the largest GLB file accepted by Parse. It also caps the
+	// total decoded size of EXT_meshopt_compression views, which stay cached:
+	// a compressed model may not unpack to more than an uncompressed GLB the
+	// caller would accept.
 	MaxBytes int64
 	// MaxTriangles is the total number of triangles across all rendered parts.
 	MaxTriangles int64
@@ -36,10 +39,14 @@ type Limits struct {
 // Fixed ceilings that apply whatever Limits a caller passes. Zero-triangle
 // primitives pass MaxTriangles and MaxVertices, so instancing them across many
 // nodes could otherwise multiply into millions of parts, and long node names
-// are copied into every descendant's path.
+// are copied into every descendant's path. maxPathBytes bounds one path;
+// maxTotalPathBytes bounds the paths of all walked nodes together, because a
+// long name on a node with thousands of children is copied into each child's
+// path and a few kilobytes of JSON could otherwise allocate a gigabyte.
 const (
-	maxParts     = 1 << 17
-	maxPathBytes = 16 << 10
+	maxParts          = 1 << 17
+	maxPathBytes      = 16 << 10
+	maxTotalPathBytes = 64 << 20
 )
 
 // DefaultLimits returns limits suitable for tests and for the model sizes this

@@ -555,6 +555,9 @@ func buildChatAgentWithTransport(
 					},
 					StreamIncludeUsage: schema.Chat.Agent.StreamIncludeUsage,
 					ParallelToolCalls:  schema.Chat.Agent.ParallelToolCalls,
+					// Every chat connection speaks the declared connection's
+					// protocol, so its error_mapping reads their refusals.
+					ExhaustedQuota: chatExhaustedQuota(connection.ErrorMapping),
 				},
 			)
 			if err != nil {
@@ -591,6 +594,20 @@ func buildChatAgentWithTransport(
 		)
 	}
 	return selected, nil
+}
+
+// chatExhaustedQuota reads a chat model refusal through the chat
+// connection's Schema error_mapping with the same algorithm as the generation
+// adapters (#120). A connection that declares none reads no refusal as a
+// used-up quota.
+func chatExhaustedQuota(mapping *generation.ErrorMapping) func(int, []byte) (string, bool) {
+	if mapping == nil {
+		return nil
+	}
+	return func(status int, body []byte) (string, bool) {
+		class, exhausted := httpjson.DeclaredExhaustion(mapping, status, body)
+		return string(class), exhausted
+	}
 }
 
 func chatAgentConnection(

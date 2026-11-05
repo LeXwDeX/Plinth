@@ -3,9 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { SessionBudget } from '@/lib/chat/budget';
 import { reloadSessionBudget } from '@/lib/chat/session-budget';
 
-const plan = { title: 'p', steps: [{ capability: 'a', offeringId: '', purpose: '', estimatedCredits: 1 }], correctionCapabilities: [] };
+const plan = { title: 'p', steps: [{ capability: 'a', offeringId: '', purpose: '', estimate: null, purposeBudgetNote: '' }], correctionCapabilities: [] };
 const budget: SessionBudget = {
-  id: 'b1', state: 'active', limitCredits: 10, spentCredits: 2, reservedCredits: 0, remainingCredits: 8,
+  id: 'b1', state: 'active',
+  units: [{ unit: 'legacy.credits', unitLabel: 'legacy.credits', limit: '10', spent: '2', reserved: '0', remaining: '8' }],
   plan, createdAt: '', decidedAt: '2026-10-01T00:00:00Z',
 };
 

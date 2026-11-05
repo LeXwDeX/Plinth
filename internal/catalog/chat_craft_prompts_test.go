@@ -66,6 +66,47 @@ func TestShippedCraftPromptCoversThe3DToolbox(t *testing.T) {
 	}
 }
 
+// The facts #120 added to inspect_model reach the Agent: the winding and
+// inside-out topology fields, the bind-pose warning and the strip triangle
+// count are explained both in the tool description and in the 3D craft
+// brief. Field names come from modelinspect's report, so a rename there
+// breaks this test instead of leaving a stale explanation.
+func TestInspectFactsAreExplainedToTheAgent(t *testing.T) {
+	c, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := c.Application()
+	topology := reflect.TypeOf(modelinspect.TopologyReport{})
+	var fields []string
+	for _, name := range []string{"InconsistentWindingEdges", "InsideOut"} {
+		field, ok := topology.FieldByName(name)
+		if !ok {
+			t.Fatalf("modelinspect.TopologyReport has no field %s", name)
+		}
+		tag, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		fields = append(fields, "topology."+tag)
+	}
+	var description string
+	for _, tool := range app.Chat.AgentTools {
+		if tool.Name == app.Chat.ModelReview.Tools.Inspect {
+			description = tool.Description
+		}
+	}
+	if description == "" {
+		t.Fatal("inspect_model is not declared")
+	}
+	craft := app.Chat.Agent.CraftPrompts[0].Text
+	for _, want := range append(fields, "skin_bind_pose", "strip") {
+		if !strings.Contains(description, want) {
+			t.Fatalf("inspect_model description omits %q", want)
+		}
+		if !strings.Contains(craft, want) {
+			t.Fatalf("model3d craft brief omits %q", want)
+		}
+	}
+}
+
 func TestCraftPromptDeclarationsAreValidated(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -156,7 +197,7 @@ func TestApprovalPromptKeepsTheBudgetFieldsAndDropsTheAgentScope(t *testing.T) {
 	}
 	for _, want := range []string{
 		"propose_production_plan", "title", "steps", "capability", "purpose", "model",
-		"estimated_credits", "budget_credits", "correction_capabilities", "重新估算",
+		"estimated_credits", "budgets", "legacy.credits", "correction_capabilities", "重新估算", "从不相加",
 	} {
 		if !strings.Contains(budget, want) {
 			t.Errorf("budget description omits %q", want)
@@ -204,5 +245,24 @@ func TestAgentScopeTextsNoLongerPointAtARemovedSelector(t *testing.T) {
 	if !strings.Contains(english, "currently unavailable") || strings.Contains(english, "bottom right") ||
 		strings.Contains(english, "Switch the mode") {
 		t.Errorf("english mock refusal = %q", english)
+	}
+}
+
+// #130: the craft brief used to say remesh keeps texture detail by baking.
+// Only the baked decimation does; remesh loses textures and may change size,
+// and the brief sends the Agent to the Offering descriptions for the details.
+func TestCraftPromptDoesNotPromiseThatRemeshKeepsTextures(t *testing.T) {
+	c, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := c.Application().Chat.Agent.CraftPrompts[0].Text
+	if strings.Contains(text, "重拓扑（烘焙保留贴图") {
+		t.Fatal("craft brief still says remesh keeps textures by baking")
+	}
+	for _, want := range []string{"list_offerings", "description", "带烘焙的减面", "重拓扑（如 Meshy 重拓扑）不保留贴图", "尺寸也可能改变", "换贴图", "精确尺寸", "不要再叠加重拓扑"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("craft brief omits %q", want)
+		}
 	}
 }

@@ -70,6 +70,22 @@ def request(opener, method, path, payload=None, headers=None, binary=False):
         fail(f"{method} {path}: HTTP {error.code}")
 
 
+_DECISION_MEMBER = []
+
+
+def decision_body(opener, decision):
+    """The approval decision body with the public Schema's member (chat.api.fields.decision, #120):
+    the server reads the same declaration, as the browser does."""
+    if not _DECISION_MEMBER:
+        schema = request(opener, "GET", "/api/v1/schema")
+        schema = schema.get("schema", schema) if isinstance(schema, dict) else {}
+        member = (((schema.get("chat") or {}).get("api") or {}).get("fields") or {}).get("decision")
+        if not member:
+            fail("the public Schema declares no chat.api.fields.decision")
+        _DECISION_MEMBER.append(member)
+    return {_DECISION_MEMBER[0]: decision}
+
+
 def assert_private_response(payload):
     serialized = json.dumps(payload, ensure_ascii=False).lower()
     if re.search(r"https?://|https?%3a%2f%2f", serialized):
@@ -102,7 +118,7 @@ def submit(opener, provider, existing_session=None):
     # grant would be refused (409).
     status = grant.get("status", "")
     if status == "pending":
-        request(opener, "PUT", f"/api/v1/tasks/grants/{grant_id}", {"decision": "approve"})
+        request(opener, "PUT", f"/api/v1/tasks/grants/{grant_id}", decision_body(opener, "approve"))
         print(f"{provider} grant {grant_id}: approved by the test operator", flush=True)
     elif status in ("approved", "claimed", "bound"):
         source = "policy" if grant.get("approved_by_policy") else "an earlier decision"

@@ -2378,8 +2378,9 @@ type ChatModelRenderSchema struct {
 	WireframeMaxTriangles int64 `json:"wireframe_max_triangles"`
 	// Workers caps the rasteriser's goroutines per view.
 	Workers int `json:"workers"`
-	// MaxConcurrentRenders bounds renders running at the same time in the
-	// process; MaxViewsPerCall bounds one call and MaxRenderCallsPerTurn
+	// MaxConcurrentRenders bounds renders and inspections running at the same
+	// time in the process (an inspection's topology pass allocates like a
+	// render); MaxViewsPerCall bounds one call and MaxRenderCallsPerTurn
 	// bounds one Agent reply.
 	MaxConcurrentRenders  int `json:"max_concurrent_renders"`
 	MaxViewsPerCall       int `json:"max_views_per_call"`
@@ -2398,7 +2399,9 @@ type ChatModelCompareSchema struct {
 }
 
 // ChatModelReviewCacheSchema bounds the process-wide parsed-model cache: at
-// most MaxModels entries and MaxBytes of source files, whichever binds first.
+// most MaxModels entries and MaxBytes of retained memory, whichever binds
+// first. An entry is charged its source file plus the decoded accessors,
+// textures and report it holds, and is recharged as they grow.
 type ChatModelReviewCacheSchema struct {
 	MaxModels int   `json:"max_models"`
 	MaxBytes  int64 `json:"max_bytes"`
@@ -2449,6 +2452,9 @@ type ChatModelReviewTextsSchema struct {
 	// Unsupported explains a file that cannot be parsed ({reason}); it also
 	// carries a parse limit the file exceeded (size, triangles or vertices).
 	Unsupported string `json:"unsupported"`
+	// Compressed explains a valid GLB whose geometry uses a mesh compression
+	// the review tools cannot decode, such as Draco ({extension}).
+	Compressed string `json:"compressed"`
 	// SourceReadFailed refuses a model whose saved bytes could not be read
 	// ({reason}).
 	SourceReadFailed string `json:"source_read_failed"`
@@ -2637,6 +2643,36 @@ type ChatModel3DUsageSchema struct {
 	DefaultProfile string                    `json:"default_profile"`
 	Profiles       []ChatModel3DUsageProfile `json:"profiles"`
 	Brief          ChatProductionBriefSchema `json:"brief"`
+	// BudgetLimits declares which parameter semantics a purpose's budget
+	// bounds (#129). A bounded parameter nobody chose takes a value within the
+	// session purpose's budget; a chosen value over it is kept and reported
+	// with BudgetNote. Empty (historical Catalogs) bounds nothing.
+	BudgetLimits []ChatModel3DUsageBudgetLimit `json:"budget_limits,omitempty"`
+	BudgetNote   ChatModel3DUsageBudgetNote    `json:"budget_note"`
+}
+
+// ChatModel3DUsageBudgetLimit bounds the parameters of one semantic by one
+// field of the purpose budget (#129).
+type ChatModel3DUsageBudgetLimit struct {
+	Semantic schemacontract.ParameterSemantic `json:"semantic"`
+	// Bound names the budget field: max_triangles or max_texture_size.
+	Bound string `json:"bound"`
+	// OptionValues gives the amount, in the bound's unit, of each value of a
+	// select parameter ("2k": 2048 pixels). Every option of a bounded select
+	// parameter must be listed.
+	OptionValues map[string]float64 `json:"option_values,omitempty"`
+	// ItemTemplate words one value over the budget: {model}, {parameter},
+	// {value}, {amount} (the value in the bound's unit), {maximum} and
+	// {purpose}.
+	ItemTemplate string `json:"item_template"`
+}
+
+// ChatModel3DUsageBudgetNote is the tool-result note listing a step's values
+// over the session purpose's budget: Template wraps the items ({items},
+// {purpose}) joined by Separator.
+type ChatModel3DUsageBudgetNote struct {
+	Template  string `json:"template"`
+	Separator string `json:"separator"`
 }
 
 // ChatModel3DUsageProfile is one production purpose.
@@ -2965,32 +3001,57 @@ type ChatApprovalPolicySchema struct {
 }
 
 // ChatApprovalBudgetSchema is application.chat.approval_policy.budget. It
-// bounds a production plan the Agent proposes and the total credits a person
-// approves; the server re-estimates every step from the Catalog instead of
+// bounds a production plan the Agent proposes and the credits a person
+// approves per credit unit (#120: units are limited separately and never
+// added); the server re-estimates every step from the Catalog instead of
 // trusting the Agent's numbers.
 type ChatApprovalBudgetSchema struct {
+	// MaxCredits bounds the limit of each unit of a plan.
 	MaxCredits           int `json:"max_credits"`
 	MaxSteps             int `json:"max_steps"`
 	MaxTitleCharacters   int `json:"max_title_characters"`
 	MaxPurposeCharacters int `json:"max_purpose_characters"`
 	// ContextTemplate is appended to the Agent's system context in budget mode.
 	// Fields: {state} (the state's label), {limit}, {spent}, {reserved},
-	// {remaining}, {plan}.
+	// {remaining}, {plan}. The amounts are listed per unit, each with its
+	// label, joined by UnitSeparator.
 	ContextTemplate string `json:"context_template"`
+	// LegacyUnitLabel names the legacy bucket (historical integer credit
+	// estimates) in the Agent context and the session messages; a provider
+	// unit keeps its own label from the Offering's native pricing (#120).
+	LegacyUnitLabel string `json:"legacy_unit_label"`
+	// UnitSeparator joins the amounts of different units, which are listed
+	// side by side and never added.
+	UnitSeparator string `json:"unit_separator"`
 	// NoPlanState and NoPlanText render {state} and {plan} before the session
 	// has a plan at all.
 	NoPlanState string `json:"no_plan_state"`
 	NoPlanText  string `json:"no_plan_text"`
-	// States labels the plan states the runtime may report. The IDs are fixed
-	// by internal/budget.
+	// States labels the plan states the runtime may report and declares what
+	// each one means to the browser (its role). The IDs are fixed by
+	// internal/budget.
 	States []ChatApprovalBudgetState `json:"states"`
 	// Messages are the session messages posted when a plan card is decided or
-	// expires. Fields: {title}, {limit}, {remaining}.
+	// expires. Fields: {title}, {limit}, {remaining}, each listed per unit.
 	Messages ChatApprovalBudgetMessages `json:"messages"`
 	// ToolMessages are the Agent-facing tool result of propose_production_plan
 	// in each state, so the execution layer keeps no English copy (#103
 	// review B4).
 	ToolMessages ChatApprovalBudgetToolMessages `json:"tool_messages"`
+	// Continuation is the turn the server starts when the person approves a
+	// plan, so the Agent runs it without being told to start (#134).
+	Continuation ChatApprovalBudgetContinuation `json:"continuation"`
+}
+
+// ChatApprovalBudgetContinuation is the turn that follows a plan approval
+// (#134), like the turn that carries a choice card's answer (#321).
+type ChatApprovalBudgetContinuation struct {
+	// Message is the turn's user message, shown in the chat as the person's
+	// go-ahead. Field: {title}.
+	Message string `json:"message"`
+	// AgentTemplate follows that message in the Agent's request only: it says
+	// the plan was approved on its card and the steps run now.
+	AgentTemplate string `json:"agent_template"`
 }
 
 // ChatApprovalBudgetToolMessages is the Agent-facing result of the plan tool.
@@ -3001,10 +3062,31 @@ type ChatApprovalBudgetToolMessages struct {
 	Closed    string `json:"closed"`
 }
 
-// ChatApprovalBudgetState is the person-facing label of one plan state.
+// ChatApprovalBudgetState is the person-facing label of one plan state and
+// its role (#120): the meaning the browser acts on, so the UI never keeps its
+// own table of which state waits for a decision, spends, ended or was refused.
 type ChatApprovalBudgetState struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
+	// Role is one of the ChatApprovalBudgetRole* values.
+	Role string `json:"role"`
+}
+
+// Roles of a production plan state (#120). Pending waits for the person's
+// decision; active may spend; ended is decided and finished (used up or
+// replaced) but still shown; denied was refused and is not shown.
+const (
+	ChatApprovalBudgetRolePending = "pending"
+	ChatApprovalBudgetRoleActive  = "active"
+	ChatApprovalBudgetRoleEnded   = "ended"
+	ChatApprovalBudgetRoleDenied  = "denied"
+)
+
+// PublicChatApprovalBudgetState is one plan state the browser may see: its ID
+// and role. Labels reach the browser as ui.studio.plan.state.* messages.
+type PublicChatApprovalBudgetState struct {
+	ID   string `json:"id"`
+	Role string `json:"role"`
 }
 
 // ChatApprovalBudgetMessages are the texts posted to the session for a plan
@@ -3026,10 +3108,11 @@ type PublicChatApprovalPolicy struct {
 	DefaultMode                string                      `json:"default_mode"`
 	Modes                      []string                    `json:"modes"`
 	ManualApprovalCapabilities []schemacontract.Capability `json:"manual_approval_capabilities"`
-	// BudgetStates are the plan state ids the runtime may report, so the
-	// browser labels a state instead of keeping its own list (#103 review F7).
-	// Empty means the deployment declares no budget plan.
-	BudgetStates []string `json:"budget_states,omitempty"`
+	// BudgetStates are the plan states the runtime may report with their
+	// roles, so the browser labels a state and acts on its role instead of
+	// keeping its own list (#103 review F7, #120). Empty means the deployment
+	// declares no budget plan.
+	BudgetStates []PublicChatApprovalBudgetState `json:"budget_states,omitempty"`
 }
 
 // ChatApprovalPromptSchema is application.chat.approval_policy.prompt. The
@@ -3173,6 +3256,13 @@ type ChatAPIFields struct {
 	Multiview    string `json:"multiview,omitempty"`
 	FromID       string `json:"from_id"`
 	TurnCanceled string `json:"turn_canceled"`
+	// TurnBackgrounded is the response member of the background-continue
+	// request (#137): true once the waiting turn was set to end without
+	// cancelling its Tasks. TurnBackgroundAvailable is the member of the
+	// availability read of the same route. Both are declared with
+	// runtime.http.legacy_routes.chat_turn_background.
+	TurnBackgrounded        string `json:"turn_backgrounded,omitempty"`
+	TurnBackgroundAvailable string `json:"turn_background_available,omitempty"`
 	// ApprovalMode is the request field of the session approval-mode write.
 	ApprovalMode string `json:"approval_mode"`
 	// Notes is the request field of the session settings-summary write.
@@ -3355,6 +3445,12 @@ type ChatFrontendSchema struct {
 	// longer edge. The preview never takes pointer events.
 	HandlePreviewDelayMilliseconds int `json:"handle_preview_delay_milliseconds"`
 	HandlePreviewMaximumPixels     int `json:"handle_preview_maximum_pixels"`
+	// BackgroundWaitPollMilliseconds is how often the composer asks, while a
+	// turn streams and a Task of the session runs, whether the turn may stop
+	// waiting with its Task continuing in the background (#137). Zero, or a
+	// deployment without runtime.http.legacy_routes.chat_turn_background,
+	// keeps the single stop button.
+	BackgroundWaitPollMilliseconds int `json:"background_wait_poll_milliseconds,omitempty"`
 }
 
 type ChatThinkingSchema struct {
@@ -3468,6 +3564,14 @@ type ChatAgentSchema struct {
 	ConsentRequiredContent    string            `json:"consent_required_content"`
 	ConsentLimitContent       string            `json:"consent_limit_content"`
 	ConsentReconcileContent   string            `json:"consent_reconcile_content"`
+	// UpstreamQueueContent is the note get_task and observe_task attach while
+	// the Provider holds the accepted job in its own queue (#131): what the
+	// Agent tells the person waiting. Optional.
+	UpstreamQueueContent string `json:"upstream_queue_content,omitempty"`
+	// BackgroundWait lets a person stop waiting for a single generation step
+	// while its Task keeps running (#137). Nil offers no such choice and the
+	// server refuses it.
+	BackgroundWait *ChatBackgroundWaitSchema `json:"background_wait,omitempty"`
 	// MaxToolCallsPerReply 限定一次 Agent 回复内实际执行的工具调用数
 	// （>=1，#275，替代按 LLM 轮数计的 max_tool_rounds）。每次新回复从 0
 	// 起算；恢复与续跑时已执行的调用计入同一次回复。一批调用超出剩余
@@ -4101,6 +4205,10 @@ type ChatToolResultFields struct {
 	// person. Empty keys omit the values (#103 review B4).
 	Budget string `json:"budget,omitempty"`
 	Reason string `json:"reason,omitempty"`
+	// PurposeBudgetNote is the optional key of the model3d_usage.budget_note
+	// naming the step's values over the session purpose's budget (#129). It
+	// is present only when some value is over it.
+	PurposeBudgetNote string `json:"purpose_budget_note,omitempty"`
 }
 
 // ChatAgentToolSchema 声明非生成类 agent 控制工具（set_params /
@@ -4268,6 +4376,10 @@ type ChatMessageTexts struct {
 	// AgentContentRejected replaces UnknownError when the upstream's content
 	// moderation refused the request's pictures or text (#35).
 	AgentContentRejected string `json:"agent_content_rejected"`
+	// AgentQuotaExhausted replaces UnknownError when the chat connection's
+	// error_mapping reads the refusal as a used-up account balance or key
+	// quota (#120: the LLMs gateway's 429 quota_exceeded).
+	AgentQuotaExhausted string `json:"agent_quota_exhausted"`
 	// AgentInlineImageOutput replaces UnknownError when the Agent model drew
 	// a picture itself instead of answering or calling a generation tool.
 	AgentInlineImageOutput string `json:"agent_inline_image_output"`
@@ -4349,6 +4461,11 @@ type ChatMessageTexts struct {
 	// Agent must not resubmit on its own; the text states the cause and leaves
 	// the retry to the user. It wins over GenerationFailedByClass.
 	GenerationFailedMeteredByClass map[string]string `json:"generation_failed_metered_by_class,omitempty"`
+	// GenerationFailedAmbiguous is the text of a failure whose upstream may
+	// already have run and charged (an ambiguous failure: an unknown
+	// submission, an accepted job that timed out; #136) when no class text
+	// applies: the Agent does not resubmit and has the result checked first.
+	GenerationFailedAmbiguous string `json:"generation_failed_ambiguous,omitempty"`
 }
 
 type ChatStatusTexts struct {
@@ -4377,6 +4494,10 @@ type ChatAuditSchema struct {
 	AgentScopeAction string `json:"agent_scope_action"`
 	// ProductionBriefAction records a change of the session production brief.
 	ProductionBriefAction string `json:"production_brief_action"`
+	// TurnBackgroundAction records that a person stopped waiting for a turn
+	// whose Task keeps running (#137). It is required with
+	// runtime.http.legacy_routes.chat_turn_background.
+	TurnBackgroundAction string `json:"turn_background_action,omitempty"`
 }
 
 type RuntimeConfigurationSchema struct {
@@ -4630,6 +4751,10 @@ type LegacyHTTPRoutesSchema struct {
 	AdminUserAssets         string `json:"admin_user_assets"`
 	AdminBackfillStatus     string `json:"admin_backfill_status"`
 	MeshyProxyAsset         string `json:"meshy_proxy_asset"`
+	// ChatTurnBackground has the shape of chat_turn_cancel (#137): GET reads
+	// whether the session's waiting turn may stop waiting while its Task
+	// keeps running, POST does it. Empty disables both.
+	ChatTurnBackground string `json:"chat_turn_background,omitempty"`
 }
 
 type ProviderBalanceConsumptionEstimate struct {
@@ -5394,6 +5519,7 @@ type rawOffering struct {
 	ProviderOrder                 *int                            `json:"provider_order,omitempty"`
 	ModelID                       string                          `json:"model_id"`
 	ModelName                     string                          `json:"model_name"`
+	Description                   string                          `json:"description,omitempty"`
 	Capability                    schemacontract.Capability       `json:"capability"`
 	Domain                        schemacontract.CapabilityDomain `json:"domain"`
 	AdapterKey                    string                          `json:"adapter_key"`
@@ -5427,6 +5553,9 @@ type rawOffering struct {
 	Cost                *schemacontract.CostDeclaration        `json:"cost"`
 	CostPolicy          *schemacontract.CostPolicy             `json:"cost_policy"`
 	PostSuccess         *schemacontract.PostSuccessPolicy      `json:"post_success"`
+	// UpstreamQueueTimeoutSeconds overrides the connection's
+	// status_mapping.queue_timeout_seconds for this Offering (#136).
+	UpstreamQueueTimeoutSeconds int `json:"upstream_queue_timeout_seconds,omitempty"`
 }
 
 type rawRetry struct {

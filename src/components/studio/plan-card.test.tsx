@@ -7,9 +7,23 @@ import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import { PlanCard, PlanReloadNotice } from '@/components/studio/plan-card';
 import type { ProductionPlan, SessionBudget } from '@/lib/chat/budget';
 import type { PlanTask } from '@/lib/chat/plan-progress';
-import { formatSchemaText, schemaCountMessage, schemaText, taskStatePresentation, type ProductSchema } from '@/lib/product-schema';
+import { formatSchemaText, schemaText, taskStatePresentation, type ProductSchema } from '@/lib/product-schema';
 
-const schema = defaultCatalog.application as unknown as ProductSchema;
+function tripo(amount: string) {
+  return { unit: 'tripo.credit', unit_label: 'Tripo credits', amount };
+}
+
+function legacy(amount: string) {
+  return { unit: 'legacy.credits', unit_label: 'legacy.credits', amount };
+}
+
+const raw = defaultCatalog.application;
+// The public projection names each plan state with its role (#120); the raw Catalog keeps them under budget.states.
+const schema = {
+  ...raw,
+  chat: { ...raw.chat, approval_policy: { ...raw.chat.approval_policy,
+    budget_states: raw.chat.approval_policy.budget.states.map(({ id, role }) => ({ id, role })) } },
+} as unknown as ProductSchema;
 const messages = defaultCatalog.application.content.messages as Record<string, string>;
 
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema }) }));
@@ -23,25 +37,28 @@ vi.mock('swr', () => ({
 const plan: ProductionPlan = {
   title: '木椅',
   steps: [
-    { capability: 'text-to-3d', offeringId: 'tripo-v3', purpose: '主体', estimatedCredits: 80 },
-    { capability: 'retexture', offeringId: '', purpose: '材质', estimatedCredits: 20 },
+    { capability: 'text-to-3d', offeringId: 'tripo-v3', purpose: '主体', estimate: tripo('80'), purposeBudgetNote: '' },
+    { capability: 'retexture', offeringId: '', purpose: '材质', estimate: legacy('20'), purposeBudgetNote: '' },
   ],
   correctionCapabilities: ['remesh'],
 };
 const text = (key: string) => schemaText(schema, key);
-const count = (key: string, value: number, values: Record<string, number>) => schemaCountMessage(schema, key, value, values);
+const words = (key: string, values: Record<string, string>) => formatSchemaText(text(key), values);
+// #120: amounts keep their own unit; the legacy bucket reads as the historical-estimate label.
+const legacyLabel = text('ui.pricing.legacy_estimate');
+const budgets = [tripo('120'), legacy('40')];
 const capability = (id: string) => schema.capabilities.find((item) => item.id === id)!.label_cn!;
 
 afterEach(cleanup);
 
 describe('a production plan waiting for approval (#103)', () => {
   it('lists every step with its capability, model and quote, the corrections, and the total budget', () => {
-    const view = render(<PlanCard plan={plan} budgetCredits={120} tasks={[]} />);
+    const view = render(<PlanCard plan={plan} budgets={budgets} tasks={[]} />);
     const card = view.getByTestId('studio-plan-card');
     expect(card.getAttribute('data-state')).toBe('pending');
     expect(card.textContent).toContain('木椅');
     expect(view.getByTestId('studio-plan-budget').textContent).toBe(
-      count('ui.studio.plan.budget', 120, { credits: 120 }),
+      words('ui.studio.plan.budget', { amounts: `120 Tripo credits · 40 ${legacyLabel}` }),
     );
     const steps = view.getAllByTestId('studio-plan-step');
     expect(steps).toHaveLength(2);
@@ -49,10 +66,10 @@ describe('a production plan waiting for approval (#103)', () => {
     expect(steps[0].getAttribute('data-state')).toBe('pending');
     expect(steps[0].textContent).toContain(capability('text-to-3d'));
     expect(steps[0].textContent).toContain('Tripo v3');
-    expect(steps[0].textContent).toContain(count('ui.studio.plan.estimated', 80, { credits: 80 }));
+    expect(steps[0].textContent).toContain(words('ui.studio.plan.estimated', { amount: '80 Tripo credits' }));
     expect(steps[0].textContent).toContain(text('ui.studio.plan.step_pending'));
     expect(steps[1].textContent).toContain(text('ui.studio.plan.model_unspecified'));
-    expect(steps[1].textContent).toContain(count('ui.studio.plan.estimated', 20, { credits: 20 }));
+    expect(steps[1].textContent).toContain(words('ui.studio.plan.estimated', { amount: `20 ${legacyLabel}` }));
     const corrections = view.getByTestId('studio-plan-corrections');
     expect(corrections.textContent).toContain(text('ui.studio.plan.corrections'));
     expect(corrections.textContent).toContain(capability('remesh'));
@@ -61,17 +78,27 @@ describe('a production plan waiting for approval (#103)', () => {
     expect(view.queryByTestId('studio-plan-progress')).toBeNull();
   });
 
-  it('words the plan estimate when the server sends no separate budget, and says when no correction is allowed', () => {
-    const view = render(<PlanCard plan={{ ...plan, correctionCapabilities: [] }} budgetCredits={0} tasks={[]} />);
+  it('says the budget is unknown when the server sends none, never a sum of the steps, and says when no correction is allowed', () => {
+    const view = render(<PlanCard plan={{ ...plan, correctionCapabilities: [] }} tasks={[]} />);
     expect(view.getByTestId('studio-plan-budget').textContent).toBe(
-      count('ui.studio.plan.budget', 100, { credits: 100 }),
+      words('ui.studio.plan.budget', { amounts: text('ui.pricing.unknown') }),
     );
     expect(view.getByTestId('studio-plan-corrections').textContent).toContain(text('ui.studio.plan.corrections_none'));
   });
 
+  // #129: a step whose values would be over the session purpose's budget says so before the plan is approved.
+  it('shows the purpose budget note of a step and nothing for a step that fits', () => {
+    const noted = { ...plan, steps: [{ ...plan.steps[0], purposeBudgetNote: '面数上限 1000 超过用途预算 500' }, plan.steps[1]] };
+    const view = render(<PlanCard plan={noted} budgets={budgets} tasks={[]} />);
+    const notes = view.getAllByTestId('studio-plan-step-budget-note');
+    expect(notes).toHaveLength(1);
+    expect(notes[0].textContent).toBe('面数上限 1000 超过用途预算 500');
+    expect(within(view.getAllByTestId('studio-plan-step')[0]).getByTestId('studio-plan-step-budget-note')).toBeTruthy();
+  });
+
   it('approves and declines through the card, and disables both while a decision is on its way', () => {
     const decide = vi.fn();
-    const view = render(<PlanCard plan={plan} budgetCredits={120} tasks={[]} onDecide={decide} />);
+    const view = render(<PlanCard plan={plan} budgets={budgets} tasks={[]} onDecide={decide} />);
     view.getByTestId('studio-plan-approve').click();
     expect(decide).toHaveBeenLastCalledWith(true);
     view.getByTestId('studio-plan-deny').click();
@@ -80,14 +107,14 @@ describe('a production plan waiting for approval (#103)', () => {
     expect(view.getByTestId('studio-plan-deny').textContent).toBe(text('ui.studio.plan.deny'));
     cleanup();
 
-    const busy = render(<PlanCard plan={plan} budgetCredits={120} tasks={[]} onDecide={decide} busy />);
+    const busy = render(<PlanCard plan={plan} budgets={budgets} tasks={[]} onDecide={decide} busy />);
     expect(busy.getByTestId('studio-plan-approve').hasAttribute('disabled')).toBe(true);
     expect(busy.getByTestId('studio-plan-deny').hasAttribute('disabled')).toBe(true);
     expect(busy.getByTestId('studio-plan-approve').getAttribute('aria-busy')).toBe('true');
   });
 
   it('shows why the server refused a decision', () => {
-    const view = render(<PlanCard plan={plan} budgetCredits={120} tasks={[]} onDecide={vi.fn()} error="余额不足" />);
+    const view = render(<PlanCard plan={plan} budgets={budgets} tasks={[]} onDecide={vi.fn()} error="余额不足" />);
     expect(within(view.getByTestId('studio-plan-card')).getByRole('alert').textContent).toBe('余额不足');
   });
 });
@@ -121,7 +148,11 @@ describe('a plan that needs reloading (#103)', () => {
 
 describe('an approved production plan (#103)', () => {
   const progress: SessionBudget = {
-    id: 'budget-1', state: 'active', limitCredits: 300, spentCredits: 120, reservedCredits: 10, remainingCredits: 170,
+    id: 'budget-1', state: 'active',
+    units: [
+      { unit: 'tripo.credit', unitLabel: 'Tripo credits', limit: '300', spent: '120', reserved: '10', remaining: '170' },
+      { unit: 'legacy.credits', unitLabel: 'legacy.credits', limit: '40', spent: '0', reserved: '0', remaining: '40' },
+    ],
     plan, createdAt: '2026-10-01T00:00:00Z', decidedAt: '2026-10-01T00:01:00Z',
   };
   const tasks: PlanTask[] = [
@@ -130,16 +161,17 @@ describe('an approved production plan (#103)', () => {
   ];
 
   it('reads the live budget and each step state from the Task projection', () => {
-    const view = render(<PlanCard plan={plan} budgetCredits={120} tasks={tasks} progress={progress} />);
+    const view = render(<PlanCard plan={plan} budgets={budgets} tasks={tasks} progress={progress} />);
     const card = view.getByTestId('studio-plan-card');
     expect(card.getAttribute('data-state')).toBe('active');
     expect(view.getByTestId('studio-plan-state').textContent).toBe(text('ui.studio.plan.state.active'));
     expect(view.getByTestId('studio-plan-budget').textContent).toBe(
-      count('ui.studio.plan.progress', 120, { spent: 120, limit: 300 }),
+      words('ui.studio.plan.progress', { amounts: `120 / 300 Tripo credits · 0 / 40 ${legacyLabel}` }),
     );
     const summary = view.getByTestId('studio-plan-progress').textContent ?? '';
-    expect(summary).toContain(count('ui.studio.plan.remaining', 170, { credits: 170 }));
-    expect(summary).toContain(count('ui.studio.plan.reserved', 10, { credits: 10 }));
+    expect(summary).toContain(words('ui.studio.plan.remaining', { amounts: `170 Tripo credits · 40 ${legacyLabel}` }));
+    // Only a unit that holds a reservation is listed.
+    expect(summary).toContain(words('ui.studio.plan.reserved', { amounts: '10 Tripo credits' }));
     expect(summary).toContain(formatSchemaText(text('ui.studio.plan.steps_done'), { done: 1, total: 2 }));
     const steps = view.getAllByTestId('studio-plan-step');
     expect(steps[0].getAttribute('data-state')).toBe('SUCCEEDED');
@@ -155,7 +187,7 @@ describe('an approved production plan (#103)', () => {
       taskId: 'old', capability: 'text-to-3d', state: 'SUCCEEDED', offeringId: 'tripo-v3',
       startedAt: Date.parse('2026-10-01T00:00:30Z'),
     };
-    const view = render(<PlanCard plan={plan} budgetCredits={120} tasks={[historical]} progress={progress} />);
+    const view = render(<PlanCard plan={plan} budgets={budgets} tasks={[historical]} progress={progress} />);
     const steps = view.getAllByTestId('studio-plan-step');
     expect(steps[0].getAttribute('data-state')).toBe('pending');
     expect(steps[0].textContent).toContain(text('ui.studio.plan.step_pending'));
@@ -170,7 +202,7 @@ describe('an approved production plan (#103)', () => {
     const previous = messages[key];
     messages[key] = '未知状态';
     try {
-      const view = render(<PlanCard plan={plan} budgetCredits={120} tasks={[]} progress={{ ...progress, state: 'refunded' }} />);
+      const view = render(<PlanCard plan={plan} budgets={budgets} tasks={[]} progress={{ ...progress, state: 'refunded' }} />);
       expect(view.getByTestId('studio-plan-state').textContent).toBe('未知状态');
       expect(view.getByTestId('studio-plan-state').textContent).not.toBe(text('ui.studio.plan.state.pending'));
     } finally {
@@ -180,12 +212,13 @@ describe('an approved production plan (#103)', () => {
   });
 
   it('hides the reserved line when nothing is reserved and words every other budget state', () => {
-    const view = render(<PlanCard plan={plan} budgetCredits={120} tasks={[]}
-      progress={{ ...progress, reservedCredits: 0, state: 'exhausted', remainingCredits: 0 }} />);
-    expect(view.getByTestId('studio-plan-progress').textContent).not.toContain(text('ui.studio.plan.reserved').replace('{credits}', '0'));
+    const usedUp = progress.units.map((unit) => ({ ...unit, spent: unit.limit, reserved: '0', remaining: '0' }));
+    const view = render(<PlanCard plan={plan} budgets={budgets} tasks={[]}
+      progress={{ ...progress, units: usedUp, state: 'exhausted' }} />);
+    expect(view.getByTestId('studio-plan-progress').textContent).not.toContain(text('ui.studio.plan.reserved').split('{amounts}')[0]);
     expect(view.getByTestId('studio-plan-state').textContent).toBe(text('ui.studio.plan.state.exhausted'));
     cleanup();
-    const denied = render(<PlanCard plan={plan} budgetCredits={120} tasks={[]} progress={{ ...progress, state: 'denied' }} />);
+    const denied = render(<PlanCard plan={plan} budgets={budgets} tasks={[]} progress={{ ...progress, state: 'denied' }} />);
     expect(denied.getByTestId('studio-plan-state').textContent).toBe(text('ui.studio.plan.state.denied'));
   });
 });

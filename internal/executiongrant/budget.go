@@ -92,9 +92,9 @@ type ProductionBudgetStore interface {
 	ExpireProductionBudgets(context.Context, time.Time) ([]budget.ProductionBudget, error)
 	// SettleBudgetReservations marks reservations whose Task has ended as
 	// charged or released, releases reservations whose grant was denied, and
-	// marks an active plan exhausted once its charged total reaches the
-	// limit. It returns the plans that became exhausted and need their one
-	// notice posted.
+	// marks an active plan exhausted once its charged totals reach the limit
+	// of every unit. It returns the plans that became exhausted and need their
+	// one notice posted.
 	SettleBudgetReservations(context.Context, time.Time) ([]budget.ProductionBudget, error)
 }
 
@@ -103,10 +103,12 @@ type ProductionBudgetStore interface {
 type BudgetGrantStore interface {
 	PreparePendingWithBudget(ctx context.Context, identity Identity, source, triggerTurnID string, budgetEligible bool) (Grant, error)
 	// ApproveExecutionGrantWithBudget settles ended Tasks of the same plan,
-	// re-checks the remaining budget, inserts the reservation and approves the
-	// grant in one BEGIN IMMEDIATE transaction. ErrBudgetOver means the
-	// estimate does not fit; ErrBudgetGone means the plan is no longer active.
-	ApproveExecutionGrantWithBudget(ctx context.Context, owner, requestID, budgetID, actor string, credits int) (Grant, error)
+	// re-checks what remains in the amount's unit, inserts the reservation and
+	// approves the grant in one BEGIN IMMEDIATE transaction. ErrBudgetOver
+	// means the amount does not fit in its unit (or the plan has no limit in
+	// it); a zero amount fits any plan. ErrBudgetGone means the plan is no
+	// longer active.
+	ApproveExecutionGrantWithBudget(ctx context.Context, owner, requestID, budgetID, actor string, amount budget.Amount) (Grant, error)
 }
 
 // BudgetReservationReleaser is the optional data-layer part that gives back an
@@ -115,6 +117,14 @@ type BudgetGrantStore interface {
 // policy replay cannot spend the plan without a reservation (#103 review B2).
 type BudgetReservationReleaser interface {
 	ReleaseUnboundBudgetReservation(ctx context.Context, ownerID, requestID string) error
+}
+
+// BudgetAmount is the frozen quote a production plan reserves for this
+// prepared input, in the step's own unit (#120): the native quote's total when
+// the input carries one, else its legacy integer estimate. A plan compares it
+// only with what remains in the same unit.
+func (snapshot PreparedSnapshot) BudgetAmount() budget.Amount {
+	return budget.QuoteAmount(snapshot.NativeQuote, snapshot.EstimatedCredits)
 }
 
 // AbandonBudgetReservation releases the reservation of an approved grant whose
@@ -165,23 +175,25 @@ func (s Service) MarkProductionBudgetNoticeSent(ctx context.Context, ownerID, bu
 }
 
 // CreateProductionPlan stores a new pending plan for the owner's session.
-// The caller has validated the plan shape and its limit against the Schema.
+// The caller has validated the plan shape and its per-unit limits against the
+// Schema; every unit a step is quoted in must be covered by its own limit.
 // requestKey is the tool call's stable identity: the plan ID is derived from
 // it, so a replayed call returns the plan it already created instead of
 // opening a second card. messageID and callID anchor the pending card.
-func (s Service) CreateProductionPlan(ctx context.Context, ownerID, sessionID, requestKey, messageID, callID string, plan budget.Plan, limitCredits int) (budget.ProductionBudget, error) {
-	if s.Budgets == nil || ownerID == "" || sessionID == "" || requestKey == "" || limitCredits <= 0 {
+func (s Service) CreateProductionPlan(ctx context.Context, ownerID, sessionID, requestKey, messageID, callID string, plan budget.Plan, limits []budget.Amount) (budget.ProductionBudget, error) {
+	if s.Budgets == nil || ownerID == "" || sessionID == "" || requestKey == "" {
 		return budget.ProductionBudget{}, ErrInvalid
 	}
 	if strings.TrimSpace(plan.Title) == "" || len(plan.Steps) == 0 {
 		return budget.ProductionBudget{}, ErrInvalid
 	}
-	if limitCredits < plan.EstimatedTotal() {
+	normalized, err := budget.NormalizeLimits(limits)
+	if err != nil || len(plan.Uncovered(normalized)) > 0 {
 		return budget.ProductionBudget{}, ErrInvalid
 	}
 	return s.Budgets.CreateProductionBudget(ctx, budget.ProductionBudget{
 		ID: productionBudgetID(ownerID, sessionID, requestKey), OwnerID: ownerID,
-		SessionID: sessionID, Plan: plan, LimitCredits: limitCredits,
+		SessionID: sessionID, Plan: plan, Limits: normalized,
 		State: budget.StatePending, CreatedAt: s.now(),
 		MessageID: messageID, CallID: callID,
 	})
@@ -363,7 +375,8 @@ func (s Service) applyBudgetPolicy(ctx context.Context, grant Grant, snapshot Pr
 		// person approved a total, and going past it needs a new decision.
 		return PolicyResult{Grant: grant, Outcome: PolicyOutcomeHuman, Reason: BudgetReasonOver, Budget: &summary}, true, nil
 	}
-	if snapshot.CreditsMetered && snapshot.EstimatedCredits <= 0 {
+	amount := snapshot.BudgetAmount()
+	if snapshot.CreditsMetered && amount.Micros <= 0 {
 		// A metered step without a server quote cannot be reserved: approving it
 		// at zero would spend the plan without covering the step, so the person
 		// decides it like any other unpriced charge (#103 review B1).
@@ -377,7 +390,7 @@ func (s Service) applyBudgetPolicy(ctx context.Context, grant Grant, snapshot Pr
 	}
 	actor := BudgetActorPrefix + summary.ID
 	approved, err := approver.ApproveExecutionGrantWithBudget(ctx, grant.OwnerID, grant.RequestID,
-		summary.ID, actor, snapshot.EstimatedCredits)
+		summary.ID, actor, amount)
 	if err == nil {
 		after, _, summaryErr := s.Budgets.ProductionBudgetSummary(ctx, grant.OwnerID, grant.SessionID)
 		if summaryErr != nil {

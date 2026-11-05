@@ -4,8 +4,11 @@ package catalog
 import (
 	"errors"
 	"fmt"
-	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
+	"regexp"
 	"strings"
+	"time"
+
+	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 // ProviderProtocolEnum 是受支持的连接协议封闭枚举；工厂只按 protocol
@@ -330,6 +333,7 @@ func validateStatusMapping(connectionID string, mapping *schemacontract.StatusMa
 	if mapping == nil {
 		return nil
 	}
+	queued := false
 	for status, rule := range mapping.UpstreamStatus {
 		if strings.TrimSpace(status) == "" {
 			return fmt.Errorf(
@@ -364,8 +368,73 @@ func validateStatusMapping(connectionID string, mapping *schemacontract.StatusMa
 				status,
 			)
 		}
+		if rule.Queued && (rule.Phase != "accepted" || rule.Class != "" || rule.MaxConsecutive != 0) {
+			return fmt.Errorf(
+				"连接 %q 的 status_mapping[%q] 的 queued 只能用于不带失败分类与轮询上限的 accepted 相位",
+				connectionID,
+				status,
+			)
+		}
+		if rule.Queued {
+			queued = true
+		}
+	}
+	if mapping.QueueTimeoutSeconds < 0 || (mapping.QueueTimeoutSeconds > 0 && !queued) {
+		return fmt.Errorf("连接 %q 的 status_mapping.queue_timeout_seconds 不能为负数，且需要至少一个 queued 状态词", connectionID)
+	}
+	if field := mapping.QueueAheadField; field != "" {
+		if !queued {
+			return fmt.Errorf("连接 %q 的 status_mapping.queue_ahead_field 需要至少一个 queued 状态词", connectionID)
+		}
+		for _, segment := range strings.Split(field, ".") {
+			if !queueAheadSegment.MatchString(segment) {
+				return fmt.Errorf("连接 %q 的 status_mapping.queue_ahead_field %q 不是点分字段路径", connectionID, field)
+			}
+		}
 	}
 	return nil
+}
+
+// queueAheadSegment is one segment of a status_mapping.queue_ahead_field path.
+var queueAheadSegment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// upstreamQueueTimeout is the upstream queue wait limit an Offering freezes
+// (#136): its own upstream_queue_timeout_seconds, else the
+// status_mapping.queue_timeout_seconds of the connection serving its adapter
+// key. A limit only applies to a connection that declares queued status words.
+func upstreamQueueTimeout(declared int, connections []ProviderConnectionSchema, adapterKey string) (time.Duration, error) {
+	if declared < 0 {
+		return 0, errors.New("upstream_queue_timeout_seconds 不能为负数")
+	}
+	var mapping *schemacontract.StatusMapping
+	for _, connection := range connections {
+		if connection.AdapterKey == adapterKey {
+			mapping = connection.StatusMapping
+			break
+		}
+	}
+	if declared == 0 {
+		if mapping == nil {
+			return 0, nil
+		}
+		return time.Duration(mapping.QueueTimeoutSeconds) * time.Second, nil
+	}
+	if !declaresQueuedStatus(mapping) {
+		return 0, fmt.Errorf("upstream_queue_timeout_seconds 需要连接 %q 声明 queued 状态词", adapterKey)
+	}
+	return time.Duration(declared) * time.Second, nil
+}
+
+func declaresQueuedStatus(mapping *schemacontract.StatusMapping) bool {
+	if mapping == nil {
+		return false
+	}
+	for _, rule := range mapping.UpstreamStatus {
+		if rule.Queued {
+			return true
+		}
+	}
+	return false
 }
 
 // validateProviderEnvironmentNames holds the Provider configuration contract

@@ -50,6 +50,11 @@ const (
 	// InputRefusalFaceLimit: the 3D source has more triangle faces than the
 	// step's declared limit; Faces is the counted value, FaceLimit the maximum.
 	InputRefusalFaceLimit InputRefusalReason = "input_source_face_limit"
+	// InputRefusalParameterRange: a number the caller gave is outside the
+	// range its maximum_when entries allow for the chosen combination (#139);
+	// Label is the parameter's public label, Value the given number and
+	// RangeMinimum/RangeMaximum the legal range.
+	InputRefusalParameterRange InputRefusalReason = "input_parameter_range"
 )
 
 // InputRefusalValues are the facts a refusal template fills in. Only the
@@ -68,6 +73,10 @@ type InputRefusalValues struct {
 	MaxPixels int64
 	Faces     int64
 	FaceLimit int64
+	// Value, RangeMinimum and RangeMaximum are already formatted numbers.
+	Value        string
+	RangeMinimum string
+	RangeMaximum string
 }
 
 // InputRefusal returns the Offering's Schema refusal for a synchronous input
@@ -151,6 +160,13 @@ func (messages ExecutionMessages) InputRefusal(reason InputRefusalReason, values
 		pairs = []string{
 			"{faces}", strconv.FormatInt(values.Faces, 10), "{limit}", strconv.FormatInt(values.FaceLimit, 10),
 		}
+	case InputRefusalParameterRange:
+		template = messages.InputParameterRange
+		if values.Label == "" || values.Value == "" || values.RangeMinimum == "" || values.RangeMaximum == "" {
+			return nil
+		}
+		pairs = []string{"{label}", values.Label, "{value}", values.Value,
+			"{minimum}", values.RangeMinimum, "{maximum}", values.RangeMaximum}
 	default:
 		return nil
 	}

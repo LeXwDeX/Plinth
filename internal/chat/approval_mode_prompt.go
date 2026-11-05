@@ -2,10 +2,10 @@ package chat
 
 import (
 	"context"
-	"strconv"
 	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
+	"github.com/LeXwDeX/Plinth/internal/budget"
 )
 
 // approvalModePrompt tells the Agent the session's real paid-step approval
@@ -53,22 +53,27 @@ func (orchestrator *Orchestrator) approvalModePrompt(ctx context.Context, ownerI
 // Schema's context_template. It shows the active (or exhausted) plan; a plan
 // that is still waiting for the person is shown instead, with no spending yet.
 // Without either, the Schema's no-plan state and text tell the Agent to
-// propose a plan before a multi-step paid job.
+// propose a plan before a multi-step paid job. Every amount is listed per
+// credit unit with its label; different units are never added (#120).
 func (orchestrator *Orchestrator) productionBudgetPrompt(ctx context.Context, ownerID, sessionID string) string {
 	config := orchestrator.schema.ApprovalPolicy.Budget
 	if orchestrator.service == nil || strings.TrimSpace(config.ContextTemplate) == "" {
 		return ""
 	}
-	state, limit, spent, reserved, remaining := config.NoPlanState, 0, 0, 0, 0
+	format := budget.AmountFormat{LegacyLabel: config.LegacyUnitLabel, Separator: config.UnitSeparator}
+	state, limit, spent, reserved, remaining := config.NoPlanState, "0", "0", "0", "0"
 	planText := config.NoPlanText
-	if summary, found, err := orchestrator.service.ProductionBudgetSummary(ctx, ownerID, sessionID); err == nil && found {
+	summary, found, err := orchestrator.service.ProductionBudgetSummary(ctx, ownerID, sessionID)
+	if err != nil || !found {
+		summary, found, err = orchestrator.service.PendingProductionBudget(ctx, ownerID, sessionID)
+	}
+	if err == nil && found {
 		state = summary.State
-		limit, spent, reserved, remaining = summary.LimitCredits, summary.SpentCredits, summary.ReservedCredits, summary.RemainingCredits
-		planText = summary.Plan.PromptLine()
-	} else if pending, found, err := orchestrator.service.PendingProductionBudget(ctx, ownerID, sessionID); err == nil && found {
-		state = pending.State
-		limit, remaining = pending.LimitCredits, pending.RemainingCredits
-		planText = pending.Plan.PromptLine()
+		limit = format.Units(summary.Units, budget.LimitOf)
+		spent = format.Units(summary.Units, budget.SpentOf)
+		reserved = format.Units(summary.Units, budget.ReservedOf)
+		remaining = format.Units(summary.Units, budget.RemainingOf)
+		planText = summary.Plan.PromptLine(format)
 	}
 	label := state
 	for _, declared := range config.States {
@@ -79,10 +84,10 @@ func (orchestrator *Orchestrator) productionBudgetPrompt(ctx context.Context, ow
 	}
 	return strings.NewReplacer(
 		"{state}", label,
-		"{limit}", strconv.Itoa(limit),
-		"{spent}", strconv.Itoa(spent),
-		"{reserved}", strconv.Itoa(reserved),
-		"{remaining}", strconv.Itoa(remaining),
+		"{limit}", limit,
+		"{spent}", spent,
+		"{reserved}", reserved,
+		"{remaining}", remaining,
 		"{plan}", planText,
 	).Replace(config.ContextTemplate)
 }

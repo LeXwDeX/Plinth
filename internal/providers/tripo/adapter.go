@@ -672,6 +672,9 @@ func (a *Adapter) observation(
 	switch rule.Phase {
 	case "accepted":
 		observation.Phase = generation.UpstreamAccepted
+		// The Tripo task object reports no queue position, so a queued
+		// status word yields a queue without a count.
+		observation.Queue = httpjson.UpstreamQueue(a.statusMapping, rule, nil)
 	case "running":
 		observation.Phase = generation.UpstreamRunning
 	case "completed":

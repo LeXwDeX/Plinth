@@ -147,6 +147,11 @@ export interface ProductSchema {
         chat_message: string;
         chat_stream: string;
         chat_turn_cancel: string;
+        /**
+         * #137: GET reads whether the waiting turn may stop waiting while its Task keeps running,
+         * POST does it. Absent: the composer keeps the single stop button.
+         */
+        chat_turn_background?: string;
         provider_balance: string;
         canvas_projects: string;
         canvas_project: string;
@@ -1374,6 +1379,9 @@ export interface ChatProductSchema {
       input_source: string;
       from_id: string;
       turn_canceled: string;
+      /** #137: the background-continue response and availability members. */
+      turn_backgrounded?: string;
+      turn_background_available?: string;
       approval_mode: string;
       /** 会话设定摘要的请求成员。 */
       notes: string;
@@ -1545,6 +1553,11 @@ export interface ChatProductSchema {
     handle_preview_delay_milliseconds: number;
     /** The longer edge of that preview; it never takes pointer events. */
     handle_preview_maximum_pixels: number;
+    /**
+     * #137: how often the composer asks, while a turn streams and a Task of the session runs, whether
+     * the turn may stop waiting with its Task continuing in the background. Absent or 0: never asks.
+     */
+    background_wait_poll_milliseconds?: number;
   };
   context: { image_index_base: number; maximum_session_notes_characters: number; canvas_input_source: string; reference_filename: string };
   /** Paid-step approval modes the Schema offers, and which capabilities a person still decides in manual mode. */
@@ -1552,8 +1565,11 @@ export interface ChatProductSchema {
     default_mode: string;
     modes: string[];
     manual_approval_capabilities: string[];
-    /** #103: the budget states the Schema declares, in display order. */
-    budget_states?: string[];
+    /**
+     * #103 / #120: the budget states the Schema declares, in display order, each with
+     * its role (`pending`, `active`, `ended` or `denied`) the browser acts on.
+     */
+    budget_states?: Array<{ id: string; role: string }>;
   };
   /**
    * Agent 范围（2D 模式 / 3D 模式 / 自动模式）：有哪些模式，以及每个模式让哪些领域的

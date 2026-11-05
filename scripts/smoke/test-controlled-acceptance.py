@@ -63,14 +63,19 @@ class ControlledAcceptanceTests(unittest.TestCase):
         # asserting a literal in the implementation source.
         subject = object.__new__(runner.Runner)
         subject.routes = {"task_grants": "/grants", "task_grant_decision": "/grants/{requestID}", "processing_plan_resume": "/plans/{planID}/resume"}
+        subject.decision_member = "verdict"
         calls = []
+        bodies = []
         class Client:
             def request(self, method, path, body, statuses=(200,), key=None):
                 calls.append((method, path))
+                bodies.append(body)
                 return 201, {"request_id": "grant", "status": "pending"}
         subject.client = Client()
         subject.approve_plan({"id": "plan", "version": 2, "steps": [{"failure": "plan_consent_required", "prepared_input_id": "frozen", "plan_step_id": "0:0", "idempotency_key": "same-key", "revision": "A"}]})
         self.assertEqual(calls, [("POST", "/grants"), ("PUT", "/grants/grant"), ("POST", "/plans/plan/resume")])
+        # #120: the decision member is the Schema's, here renamed.
+        self.assertEqual(bodies[1], {"verdict": "approve"})
 
     def test_missing_completion_formats_come_only_from_the_completion_offering(self):
         coverage = {"steps": [

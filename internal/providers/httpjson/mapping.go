@@ -51,11 +51,13 @@ func matchErrorMapping(
 	status int,
 	payload []byte,
 ) (generation.ErrorClassRule, bool) {
-	// An out-of-balance refusal arrives under whatever status the provider
-	// picks (402, 403, 429), and a broad status range such as 403 -> invalid
-	// input would otherwise hide it. Evidence the connection declares as
-	// "insufficient balance" therefore outranks the status ranges.
-	if rule, ok := matchBalanceEvidence(mapping, status, payload); ok {
+	// An out-of-balance or used-up quota refusal arrives under whatever
+	// status the provider picks (402, 403, 429), and a broad status range
+	// such as 403 -> upstream denied or 429 -> rate limited would otherwise
+	// hide it (#120: a gateway's 429 quota_exceeded was queued and resent as
+	// a rate limit). Evidence the connection declares as an exhausted balance
+	// or key quota therefore outranks the status ranges.
+	if rule, ok := matchExhaustionEvidence(mapping, status, payload); ok {
 		return rule, true
 	}
 	if rule, ok := matchSpecificMessage(mapping, payload, status); ok {
@@ -93,21 +95,53 @@ func matchSpecificMessage(
 	})
 }
 
-func matchBalanceEvidence(
+// matchExhaustionEvidence returns a declared code or message whose class says
+// the account balance or the key's quota is used up. Waiting does not bring
+// either back, so these classes are definite refusals that must not read as
+// the retryable rate limit or upstream error a status range declares.
+func matchExhaustionEvidence(
 	mapping *generation.ErrorMapping,
 	status int,
 	payload []byte,
 ) (generation.ErrorClassRule, bool) {
-	balance := string(generation.FailureInsufficientBalance)
 	_, code := declaredErrorEvidence(mapping, payload)
 	if code != "" {
-		if rule, ok := mapping.UpstreamCodeMap[code]; ok && rule.Class == balance {
+		if rule, ok := mapping.UpstreamCodeMap[code]; ok && exhaustionClass(rule.Class) {
 			return rule, true
 		}
 	}
 	return matchDeclaredMessage(mapping, payload, status, func(matcher generation.ErrorMessageMatcher) bool {
-		return matcher.Class == balance
+		return exhaustionClass(matcher.Class)
 	})
+}
+
+// DeclaredExhaustion reports whether the connection's mapping classifies an
+// upstream refusal (HTTP status and body) as a used-up account balance or key
+// quota, and which of the two. Callers outside this client, such as the chat
+// model adapter, use it so one Schema declaration and one matching algorithm
+// decide for every upstream call (#120).
+func DeclaredExhaustion(
+	mapping *generation.ErrorMapping,
+	status int,
+	payload []byte,
+) (generation.FailureClass, bool) {
+	if mapping == nil {
+		return "", false
+	}
+	rule, ok := matchErrorMapping(mapping, status, payload)
+	if !ok || !exhaustionClass(rule.Class) {
+		return "", false
+	}
+	return generation.FailureClass(rule.Class), true
+}
+
+func exhaustionClass(class string) bool {
+	switch generation.FailureClass(class) {
+	case generation.FailureInsufficientBalance, generation.FailureCredentialQuota:
+		return true
+	default:
+		return false
+	}
 }
 
 // matchDeclaredMessage is the one loop over a connection's message matchers:

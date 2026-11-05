@@ -110,6 +110,14 @@ describe('ResultDetail', () => {
     expect(renderToStaticMarkup(<ResultDetail target={{ ...target, url: '', status: 'pending' }} />)).not.toContain('result-detail-queue-notice');
   });
 
+  it('shows the provider queue of a running task whose accepted job waits upstream (#131)', () => {
+    state.task = ready({ state: 'RUNNING', progress: 0, finished_at: undefined, assets: [],
+      queue_notice: { reason: 'upstream_queued', ahead: 1313, detail: '上游排队中（前方约 1313 个任务）' } });
+    const html = renderToStaticMarkup(<ResultDetail target={{ ...target, url: '', status: 'running' }} />);
+    expect(html).toContain('data-testid="result-detail-queue-notice"');
+    expect(html).toContain('上游排队中（前方约 1313 个任务）');
+  });
+
   it('shows the failure reason of a failed task', () => {
     state.task = ready({ state: 'FAILED', session_id: 's1', assets: [], failure: { class: 'x', retryable: false, detail: '上游拒绝了请求' } });
     const html = renderToStaticMarkup(<ResultDetail target={{ ...target, url: '', status: 'failed' }} />);

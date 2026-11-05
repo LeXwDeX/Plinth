@@ -18,7 +18,7 @@ import type { ProductSchema } from '@/lib/product-schema';
 
 function approval(requestId: string, expiresAt: string, status: PendingApproval['status'] = 'pending'): PendingApproval {
   return {
-    requestId, status, kind: 'step', plan: null, budgetCredits: 0,
+    requestId, status, kind: 'step', plan: null, budgets: [],
     tool: 'create_model_3d', capability: 'text-to-3d', model: 'meshy-7.1', provider: 'Meshy AI', providerId: 'meshy',
     estimatedCredits: 20, baseCredits: 0, extraCredits: 0, extraLabel: '', extraItems: [], prompt: 'a chair', inputs: [], messageId: '', createdAt: '', expiresAt,
   };
@@ -66,7 +66,7 @@ describe('expired approval cards', () => {
 describe('a card kind this client does not render yet (#103)', () => {
   it('skips a production plan card instead of showing it as a step', () => {
     const items = parsePendingApprovals({ items: [
-      { request_id: 'plan-1', status: 'pending', kind: 'plan', budget_credits: 100, estimated_credits: 80 },
+      { request_id: 'plan-1', status: 'pending', kind: 'plan', budgets: [{ unit: 'tripo.credit', unit_label: 'Tripo credits', amount: '100' }] },
       { request_id: 'step-1', status: 'pending', capability: 'text-to-3d' },
     ] });
     expect(items.map((item) => item.requestId)).toEqual(['step-1']);
@@ -219,6 +219,13 @@ describe('deciding an approval through the Schema-declared decision member (#103
     expect(call[0]).toBe('/api/v1/chat/sessions/s%201/budgets/b%2F1');
     expectBody(call, { verdict: 'deny' });
     expect(outcome).toEqual({ requestId: 'b1', status: 'denied', taskId: '', messageId: 'm2' });
+  });
+
+  // #134: an approved plan runs in a turn the server started; the outcome names its reply.
+  it('reads the turn the server started to run an approved plan', async () => {
+    const fetcher = vi.fn(async () => response({ budget_id: 'b1', state: 'active', message_id: 'm3', turn_message_id: 'a9' }));
+    const outcome = await decideSessionBudget(approvalSchema('decision'), 's1', 'b1', true, fetcher as unknown as typeof fetch);
+    expect(outcome).toEqual({ requestId: 'b1', status: 'active', taskId: '', messageId: 'm3', turnMessageId: 'a9' });
   });
 
   it('refuses to send an empty decision member when the Schema declares none', async () => {

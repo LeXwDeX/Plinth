@@ -165,6 +165,10 @@ func (executor *Executor) awaitingApproval(ctx context.Context, command chat.Too
 						content[key] = note
 					}
 				}
+				// #129: the card's frozen values over the purpose's budget.
+				if note := executor.purposeBudgetNote(command, offering, prepared.NormalizedInput); note != "" {
+					content[tool.ResultFields.PurposeBudgetNote] = note
+				}
 				switch quote := quoteOf(offering, prepared.NormalizedInput, prepared.NativeQuote, executor.localizeText(command)).(type) {
 				case creditQuote:
 					content["quote"] = quote

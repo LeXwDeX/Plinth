@@ -110,6 +110,9 @@ const (
 	FailureInternal            = schema.FailureInternal
 	FailureSourceExpired       = schema.FailureSourceExpired
 	FailureContentRejected     = schema.FailureContentRejected
+	// FailureUpstreamQueueTimeout: an accepted job waited in the upstream
+	// queue past the Offering's queue wait limit (#136).
+	FailureUpstreamQueueTimeout = schema.FailureUpstreamQueueTimeout
 )
 
 type Failure struct {
@@ -175,6 +178,7 @@ const (
 	SemanticPolycount      = schema.SemanticPolycount
 	SemanticOutputSize     = schema.SemanticOutputSize
 	SemanticQuality        = schema.SemanticQuality
+	SemanticTextureSize    = schema.SemanticTextureSize
 
 	SemanticSourceTask  = schema.SemanticSourceTask
 	SemanticSourceAsset = schema.SemanticSourceAsset
@@ -339,6 +343,58 @@ type Task struct {
 	// queued again without spending a retry. Read only, derived from the
 	// current Attempt's failure; the public state stays QUEUED.
 	RateLimitQueued bool `json:"-"`
+	// UpstreamQueue is the upstream queue the running Attempt's last
+	// observation reported (#131). Read only, derived from the current
+	// Attempt; nil when the Task is not running or the upstream reports no
+	// queue.
+	UpstreamQueue *UpstreamQueue `json:"-"`
+}
+
+// UpstreamQueuedReason is the public queue reason of a running Task whose
+// accepted upstream job waits in the Provider's own queue (#131).
+const UpstreamQueuedReason = "upstream_queued"
+
+// UpstreamQueue reports that the upstream accepted a job but holds it in its
+// own queue (#131). Ahead is how many upstream jobs are ahead of it, when the
+// upstream says so.
+type UpstreamQueue struct {
+	Ahead *int `json:"ahead,omitempty"`
+}
+
+// UpstreamQueuedAt is the Attempt's upstream queue time up to now (#136).
+func (a Attempt) UpstreamQueuedAt(now time.Time) time.Duration {
+	queued := a.UpstreamQueuedFor
+	if !a.UpstreamQueuedSince.IsZero() && now.After(a.UpstreamQueuedSince) {
+		queued += now.Sub(a.UpstreamQueuedSince)
+	}
+	return queued
+}
+
+// trackUpstreamQueue records the queue an observation reports and keeps the
+// Attempt's queue clock (#136): a stretch opens when the job is first
+// reported queued and closes, adding to UpstreamQueuedFor, when it is not.
+func trackUpstreamQueue(attempt *Attempt, queue *UpstreamQueue, now time.Time) {
+	attempt.UpstreamQueue = queue
+	switch {
+	case queue != nil && attempt.UpstreamQueuedSince.IsZero():
+		attempt.UpstreamQueuedSince = now
+	case queue == nil && !attempt.UpstreamQueuedSince.IsZero():
+		attempt.UpstreamQueuedFor = attempt.UpstreamQueuedAt(now)
+		attempt.UpstreamQueuedSince = time.Time{}
+	}
+}
+
+// normalizeUpstreamQueue drops a negative count; a queue without a valid
+// count still reports that the job is queued.
+func normalizeUpstreamQueue(queue *UpstreamQueue) *UpstreamQueue {
+	if queue == nil {
+		return nil
+	}
+	if queue.Ahead == nil || *queue.Ahead < 0 {
+		return &UpstreamQueue{}
+	}
+	ahead := *queue.Ahead
+	return &UpstreamQueue{Ahead: &ahead}
 }
 
 // UpstreamJobFacts are the read-only facts about a Task's upstream job that
@@ -379,6 +435,14 @@ type Attempt struct {
 	StartedAt               time.Time     `json:"started_at"`
 	UpdatedAt               time.Time     `json:"updated_at"`
 	FinishedAt              *time.Time    `json:"finished_at,omitempty"`
+	// UpstreamQueue is the upstream queue the last accepted/running
+	// observation reported (#131); nil when it reported none.
+	UpstreamQueue *UpstreamQueue `json:"-"`
+	// UpstreamQueuedSince is when the current stretch of upstream queueing
+	// began (zero while the job is not queued); UpstreamQueuedFor is the
+	// queue time of this Attempt's earlier stretches (#136).
+	UpstreamQueuedSince time.Time     `json:"-"`
+	UpstreamQueuedFor   time.Duration `json:"-"`
 	// DeliveryCompletion is the provenance of a local terminal Attempt that
 	// completed a failed conversion from an exactly related delivered Task.
 	// Ordinary Attempts leave it nil.
@@ -497,6 +561,9 @@ type Observation struct {
 	//（§6.2 触点 3 的唯一 Provider → 资源态通道；W6）。内核不解释
 	// 内容，只校验声明匹配与 pending → 终态的单向转移。
 	ResourceUpdates []ResourceUpdate `json:"resources,omitempty"`
+	// Queue reports that the upstream holds the accepted job in its own
+	// queue (#131). The kernel records it only for accepted/running phases.
+	Queue *UpstreamQueue `json:"queue,omitempty"`
 }
 
 type SubmitCommand struct {

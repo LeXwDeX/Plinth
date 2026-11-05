@@ -131,6 +131,11 @@ type Offering struct {
 	CapabilityOrder  int              `json:"capability_order"`
 	Priority         int              `json:"priority,omitempty"`
 	EstimatedCredits int              `json:"estimated_credits,omitempty"`
+	// Description states what the step does and what it does not keep (for
+	// example textures or size), so the Agent can choose and chain steps from
+	// list_offerings (#130). It is Offering copy: the copy guards and the
+	// English offering_texts apply to it.
+	Description string `json:"description,omitempty"`
 	// CreditsMetered 声明该 Offering 的 Provider 按积分计费；未声明的
 	// Offering 不向用户展示积分（estimated_credits 仍用于内部审批与预估）。
 	CreditsMetered bool `json:"credits_metered,omitempty"`
@@ -169,6 +174,11 @@ type Offering struct {
 	CostPolicy *CostPolicy `json:"cost_policy,omitempty"`
 	// PostSuccess 声明成功后观察（§6.1，W6）；nil = 现状（零观察）。
 	PostSuccess *PostSuccessPolicy `json:"post_success,omitempty"`
+	// UpstreamQueueTimeout is the upstream queue wait limit (#136): the
+	// Offering's upstream_queue_timeout_seconds, else its connection's
+	// status_mapping.queue_timeout_seconds. Queue time is excluded from the
+	// job timeout only while this limit bounds it; 0 counts it as before.
+	UpstreamQueueTimeout time.Duration `json:"upstream_queue_timeout_ns,omitempty"`
 }
 
 // CostDeclaration 是 Offering 级成本声明（§5.2）：基础积分 + 额外积分
@@ -292,6 +302,11 @@ type ExecutionMessages struct {
 	// count is over the step's declared limit (#103); {faces} is the counted
 	// value and {limit} the declared maximum.
 	InputSourceFaceLimit string `json:"input_source_face_limit,omitempty"`
+	// InputParameterRange is the refusal for a number the caller gave outside
+	// the range the parameter's maximum_when entries allow for the chosen
+	// combination (#139: Tripo's face limit with smart low poly); {label},
+	// {value}, {minimum} and {maximum}. Nothing is sent upstream.
+	InputParameterRange string `json:"input_parameter_range,omitempty"`
 	// PlanSourceFaceLimit is the refusal of a whole Processing Plan before any
 	// step is paid (#121): an earlier step's declared output (Offering.
 	// OutputTriangles) is estimated over the SourceModelLimit of a later step.

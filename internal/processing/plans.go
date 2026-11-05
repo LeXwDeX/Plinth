@@ -603,6 +603,11 @@ type GrantIdentity struct {
 	OperationID    string
 	PlanStepID     string
 	IdempotencyKey string
+	// BudgetEligible is the step grant's production-plan eligibility, fixed
+	// by who started the plan: an Agent-created plan's steps are eligible. A
+	// person approving the paused step re-prepares the same grant and must
+	// keep it; changing it is an identity conflict (#120).
+	BudgetEligible bool
 }
 
 func (s *Service) ExecutionGrantIdentity(ctx context.Context, owner generation.OwnerID, planID, preparedID, planStepID string) (GrantIdentity, error) {
@@ -621,7 +626,8 @@ func (s *Service) ExecutionGrantIdentity(ctx context.Context, owner generation.O
 			step.State == Paused && step.Failure == ReasonConsentRequired &&
 			step.OperationID == plan.ID && step.IdempotencyKey != "" {
 			return GrantIdentity{Harness: plan.Harness, SessionID: plan.SessionID, OperationID: step.OperationID,
-				PlanStepID: step.PlanStepID, IdempotencyKey: step.IdempotencyKey}, nil
+				PlanStepID: step.PlanStepID, IdempotencyKey: step.IdempotencyKey,
+				BudgetEligible: plan.Origin == OriginAgent}, nil
 		}
 	}
 	return GrantIdentity{}, ErrMissing

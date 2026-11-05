@@ -332,10 +332,10 @@ func (m *Model) buildRenderParts(req RenderRequest, mode RenderMode, highlight m
 		if source.material >= 0 {
 			material = &m.Materials[source.material]
 		}
+		pose := m.pose(source)
 		worldPositions := make([]float32, source.vertexCount*3)
-		partBounds := bounds{}
 		for vertex := 0; vertex < source.vertexCount; vertex++ {
-			point := source.world.transformPoint(
+			point := pose.point(vertex,
 				float64(positions[vertex*3]),
 				float64(positions[vertex*3+1]),
 				float64(positions[vertex*3+2]),
@@ -343,16 +343,15 @@ func (m *Model) buildRenderParts(req RenderRequest, mode RenderMode, highlight m
 			worldPositions[vertex*3] = float32(point[0])
 			worldPositions[vertex*3+1] = float32(point[1])
 			worldPositions[vertex*3+2] = float32(point[2])
-			partBounds.add(point)
 		}
 		renderPart := &renderPart{
 			source: source, material: material,
 			positions: worldPositions, indices: indices,
 			highlighted:   len(highlight) == 0 || highlight[source.id],
-			mirrored:      source.world.determinant3() < 0,
-			bounds:        partBounds,
+			mirrored:      pose.mirrored,
 			triangleCount: source.partTriangles(indices),
 		}
+		renderPart.bounds = renderPart.referencedBounds()
 		totalTriangles += int64(renderPart.triangleCount)
 
 		normals, err := m.normals(source)
@@ -360,12 +359,11 @@ func (m *Model) buildRenderParts(req RenderRequest, mode RenderMode, highlight m
 			return nil, 0, err
 		}
 		if normals != nil {
-			normalMatrix := source.world.normalMatrix()
 			renderPart.normals = make([]float32, len(normals))
 			for i := 0; i < len(normals); i += 3 {
-				normal := normalMatrix.transform(vec3{
+				normal := pose.normal(i/3, vec3{
 					float64(normals[i]), float64(normals[i+1]), float64(normals[i+2]),
-				}).normalized()
+				})
 				renderPart.normals[i] = float32(normal[0])
 				renderPart.normals[i+1] = float32(normal[1])
 				renderPart.normals[i+2] = float32(normal[2])
@@ -382,7 +380,7 @@ func (m *Model) buildRenderParts(req RenderRequest, mode RenderMode, highlight m
 					if err != nil {
 						return nil, 0, err
 					}
-					renderPart.uvs = uvs
+					renderPart.uvs = transformTexCoords(uvs, material.BaseColorTexture.Transform)
 					renderPart.texture = texture
 				}
 			}
@@ -398,6 +396,45 @@ func (m *Model) buildRenderParts(req RenderRequest, mode RenderMode, highlight m
 		parts = append(parts, renderPart)
 	}
 	return parts, totalTriangles, nil
+}
+
+// referencedBounds frames only the vertices the part's triangles use, so an
+// unreferenced vertex far from the mesh cannot shrink the model in the view.
+// Indices were validated against the position count by the caller.
+func (p *renderPart) referencedBounds() bounds {
+	var box bounds
+	add := func(vertex uint32) {
+		offset := int(vertex) * 3
+		box.add(vec3{
+			float64(p.positions[offset]),
+			float64(p.positions[offset+1]),
+			float64(p.positions[offset+2]),
+		})
+	}
+	if p.indices == nil {
+		for vertex := 0; vertex < usedElements(p.source.mode, p.source.vertexCount); vertex++ {
+			add(uint32(vertex))
+		}
+		return box
+	}
+	for _, vertex := range p.indices[:usedElements(p.source.mode, len(p.indices))] {
+		add(vertex)
+	}
+	return box
+}
+
+// transformTexCoords applies a KHR_texture_transform. The decoded accessor
+// is shared through the cache, so a transform returns a new slice.
+func transformTexCoords(uvs []float32, transform *TextureTransform) []float32 {
+	if transform == nil {
+		return uvs
+	}
+	out := make([]float32, len(uvs))
+	for i := 0; i+1 < len(uvs); i += 2 {
+		u, v := transform.apply(float64(uvs[i]), float64(uvs[i+1]))
+		out[i], out[i+1] = float32(u), float32(v)
+	}
+	return out
 }
 
 // camera is a look-at camera with either an orthographic or a perspective

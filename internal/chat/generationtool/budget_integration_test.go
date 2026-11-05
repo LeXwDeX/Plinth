@@ -19,12 +19,12 @@ func createActiveBudgetPlan(t *testing.T, repo *sqlite.Repository, id string, li
 	ctx := context.Background()
 	steps := make([]budget.PlanStep, 0, len(capabilities))
 	for _, capability := range capabilities {
-		steps = append(steps, budget.PlanStep{Capability: capability, Purpose: capability, EstimatedCredits: 7})
+		steps = append(steps, budget.PlanStep{Capability: capability, Purpose: capability, Estimate: budget.Legacy(7)})
 	}
 	now := time.Now().UTC()
 	stored, err := repo.CreateProductionBudget(ctx, budget.ProductionBudget{
 		ID: id, OwnerID: "owner-a", SessionID: "session-a",
-		Plan: budget.Plan{Title: "制作计划", Steps: steps}, LimitCredits: limit,
+		Plan: budget.Plan{Title: "制作计划", Steps: steps}, Limits: []budget.Amount{budget.Legacy(limit)},
 		State: budget.StatePending, CreatedAt: now,
 	})
 	if err != nil {
@@ -67,13 +67,27 @@ func budgetContent(t *testing.T, result chat.ToolResult) map[string]any {
 	return content
 }
 
-func budgetNumbers(t *testing.T, content map[string]any, key string) (remaining, reserved float64) {
+// budgetNumbers reads the legacy-credit bucket of the budget in a tool result:
+// these plans budget historical credits only. The result lists every unit
+// apart as {unit, unit_label, amount} and never sums them (#120).
+func budgetNumbers(t *testing.T, content map[string]any, key string) (remaining, reserved string) {
 	t.Helper()
 	value, ok := content[key].(map[string]any)
 	if !ok {
 		t.Fatalf("tool result carries no budget under %q: %v", key, content)
 	}
-	return value["remaining"].(float64), value["reserved"].(float64)
+	legacy := func(figure string) string {
+		units, _ := value[figure].([]any)
+		if len(units) != 1 {
+			t.Fatalf("budget %s = %v, want the one legacy bucket", figure, value[figure])
+		}
+		unit := units[0].(map[string]any)
+		if unit["unit"] != budget.LegacyUnit {
+			t.Fatalf("budget %s unit = %v", figure, unit)
+		}
+		return unit["amount"].(string)
+	}
+	return legacy("remaining"), legacy("reserved")
 }
 
 // Two planned Agent steps run one after the other inside the approved plan
@@ -88,7 +102,7 @@ func TestBudgetModeRunsPlannedStepsInsideTheLimitWithoutCards(t *testing.T) {
 	}
 	content := budgetContent(t, first)
 	remaining, reserved := budgetNumbers(t, content, command.Tool.ResultFields.Budget)
-	if remaining != 8 || reserved != 7 {
+	if remaining != "8" || reserved != "7" {
 		t.Fatalf("first step budget = remaining %v reserved %v", remaining, reserved)
 	}
 
@@ -98,7 +112,7 @@ func TestBudgetModeRunsPlannedStepsInsideTheLimitWithoutCards(t *testing.T) {
 	}
 	content = budgetContent(t, second)
 	remaining, reserved = budgetNumbers(t, content, command.Tool.ResultFields.Budget)
-	if remaining != 1 || reserved != 14 {
+	if remaining != "1" || reserved != "14" {
 		t.Fatalf("second step budget = remaining %v reserved %v", remaining, reserved)
 	}
 	ops := []string{"call-a", "call-b"}
@@ -114,6 +128,47 @@ func TestBudgetModeRunsPlannedStepsInsideTheLimitWithoutCards(t *testing.T) {
 		if grant.DecidedBy != executiongrant.BudgetActorPrefix+"pb-run" || !grant.BudgetEligible {
 			t.Fatalf("%s grant = %+v", callID, grant)
 		}
+	}
+}
+
+// #135: a step the approved plan approved was approved by the session's
+// approval policy, not by the person: the tool result and the step shown in
+// the chat say policy, and the result names the plan and what it holds.
+func TestBudgetApprovedStepReportsPolicyApprovalAndItsPlan(t *testing.T) {
+	executor, command, gateway, repo := budgetHarness(t, "refine_image", "text-to-image")
+	createActiveBudgetPlan(t, repo, "pb-source", 15, "text-to-image")
+	command.Call.ID = "call-source"
+	command.ConsentWaitDeadline = time.Time{}
+	var observed []chat.ToolObservation
+	result, err := executor.Execute(context.Background(), command, func(observation chat.ToolObservation) error {
+		observed = append(observed, observation)
+		return nil
+	})
+	if err != nil || result.NoSubmission || gateway.submitCount != 1 {
+		t.Fatalf("planned step = %+v err=%v submits=%d", result, err, gateway.submitCount)
+	}
+	content := budgetContent(t, result)
+	if content[command.Tool.ResultFields.Approval] != "policy" {
+		t.Fatalf("approval = %v, want policy: %v", content[command.Tool.ResultFields.Approval], content)
+	}
+	plan, ok := content[command.Tool.ResultFields.Budget].(map[string]any)
+	if !ok || plan["id"] != "pb-source" || plan["title"] != "制作计划" {
+		t.Fatalf("budget object = %v", content[command.Tool.ResultFields.Budget])
+	}
+	if remaining, reserved := budgetNumbers(t, content, command.Tool.ResultFields.Budget); remaining != "8" || reserved != "7" {
+		t.Fatalf("budget figures = remaining %s reserved %s", remaining, reserved)
+	}
+	registered := false
+	for _, observation := range observed {
+		if observation.Registered {
+			registered = true
+			if observation.ApprovalSource != "policy" {
+				t.Fatalf("registered step approval source = %q, want policy", observation.ApprovalSource)
+			}
+		}
+	}
+	if !registered {
+		t.Fatal("the step was never registered")
 	}
 }
 
@@ -136,7 +191,7 @@ func TestBudgetModeSendsAStepBeyondTheLimitToItsCard(t *testing.T) {
 		t.Fatalf("third step content = %v", content)
 	}
 	remaining, reserved := budgetNumbers(t, content, command.Tool.ResultFields.Budget)
-	if remaining != 1 || reserved != 14 {
+	if remaining != "1" || reserved != "14" {
 		t.Fatalf("third step budget = remaining %v reserved %v", remaining, reserved)
 	}
 }
@@ -248,8 +303,8 @@ func TestBudgetModeReleasesTheReservationOfARefusedSubmit(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("plan summary: found=%v err=%v", found, err)
 	}
-	if summary.ReservedCredits != 0 || summary.RemainingCredits != 15 {
-		t.Fatalf("after a refused submit: reserved %d remaining %d", summary.ReservedCredits, summary.RemainingCredits)
+	if legacy, _ := summary.Unit(budget.LegacyUnit); legacy.Reserved != 0 || legacy.Remaining != 15000000 {
+		t.Fatalf("after a refused submit: %+v", summary.Units)
 	}
 
 	gateway.submitErr = nil

@@ -250,6 +250,16 @@ export interface ChatBrowserClient {
   // cancelTurn 请求服务端停止当前轮次（中断 LLM 与工具执行并尽力
   // 取消已绑定的生成任务），返回是否有轮次被中断。
   cancelTurn(sessionID: string, signal?: AbortSignal): Promise<boolean>;
+  /**
+   * #137: whether the session's waiting turn may stop waiting while its Task keeps running. False
+   * when the deployment does not declare the route, or the read fails.
+   */
+  turnBackgroundAvailable(sessionID: string, signal?: AbortSignal): Promise<boolean>;
+  /**
+   * #137: end the waiting turn without cancelling its Task. A refusal throws ChatBrowserError with
+   * the server's Schema reason; the turn then keeps waiting.
+   */
+  continueTurnInBackground(sessionID: string, signal?: AbortSignal): Promise<void>;
   getApproval(sessionID: string, signal?: AbortSignal): Promise<ChatApproval>;
   setApprovalMode(sessionID: string, mode: ApprovalMode): Promise<ChatApproval>;
   /** #103: the session's production brief (an empty object when none is stored). */
@@ -1167,6 +1177,36 @@ export function createChatBrowserClient(
       if (!response.ok) return false;
       const payload = await responseObject(response);
       return payload[fields.turn_canceled] === true;
+    },
+    async turnBackgroundAvailable(sessionID, signal) {
+      const path = schema.runtime.http.legacy_routes.chat_turn_background;
+      const member = fields.turn_background_available;
+      if (!path || !member) return false;
+      try {
+        const response = await fetcher(route(path, { sessionID }), { signal });
+        if (!response.ok) return false;
+        const payload = await responseObject(response);
+        return payload[member] === true;
+      } catch {
+        return false;
+      }
+    },
+    async continueTurnInBackground(sessionID, signal) {
+      const path = schema.runtime.http.legacy_routes.chat_turn_background;
+      const member = fields.turn_backgrounded;
+      if (!path || !member) {
+        throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, 0);
+      }
+      const response = await fetcher(route(path, { sessionID }), { method: 'POST', signal });
+      const payload = await responseObject(response);
+      if (!response.ok || payload[member] !== true) {
+        const message = payload[responseFields.error];
+        throw new ChatBrowserError(
+          typeof message === 'string' ? message : schema.chat.presentation.messages.internal_error,
+          response.status,
+          responseRequestId(response, payload),
+        );
+      }
     },
     async getApproval(sessionID, signal) {
       const response = await fetcher(

@@ -42,6 +42,7 @@ import { useSessionChoices } from '@/hooks/use-session-choices';
 import { useSessionPick } from '@/hooks/use-session-pick';
 import { useSessionState } from '@/hooks/use-session-state';
 import { useThreeViews } from '@/hooks/use-three-views';
+import { asksTurnBackground, useTurnBackground } from '@/hooks/use-turn-background';
 import { interleaveGroups } from '@/lib/workspace/three-view';
 import { ThreeViewCard } from '@/components/studio/three-view-card';
 import { tileOfObject, useSessionVersions } from '@/hooks/use-session-versions';
@@ -78,6 +79,7 @@ import { withSessionSendLock } from '@/lib/chat/send-preparation';
 import { InFlightGuard } from '@/lib/chat/in-flight-guard';
 import { flushExplicitModel3D } from '@/lib/chat/explicit-model';
 import { reloadSessionBudget } from '@/lib/chat/session-budget';
+import { budgetAwaitsDecision, budgetIsShown } from '@/lib/chat/budget';
 import { PendingApprovalError, type PendingApprovalInput } from '@/lib/chat/pending-approvals';
 import { cancelQueuedTurn, enqueueTurn, queuedFor, takeQueuedTurn, type QueueBySession } from '@/lib/chat/send-queue';
 import { ChatHistorySkeleton } from '@/components/chat/chat-history-skeleton';
@@ -329,6 +331,9 @@ export function ChatColumn() {
   });
   // Back from offline: the event stream of the open session is joined again.
   const reconnectTick = useConnectivityStore((state) => state.reconnectTick);
+  // #134: bumped when the server starts a turn on its own (an approved plan runs), so the
+  // session recovery reads the newest messages again and attaches to that turn's stream.
+  const [serverTurnTick, setServerTurnTick] = useState(0);
   const [uploading, setUploading] = useSessionState(false);
   // Synchronous send guard for pictures that are still being read or prepared; state alone is one render late.
   const attachmentReads = useRef<PendingAttachmentReads>({ scope: captureSessionScope(), count: 0 });
@@ -726,6 +731,7 @@ export function ChatColumn() {
   useEffect(() => {
     if (!activeSessionId) return;
     void reconnectTick;
+    void serverTurnTick;
     setHistoryLoading(!(activeSessionId in useChatStore.getState().messagesBySession));
     return recoverChatSession({
       sessionId: activeSessionId,
@@ -739,6 +745,7 @@ export function ChatColumn() {
   }, [
     activeSessionId,
     reconnectTick,
+    serverTurnTick,
     chatClient,
     connectEventSource,
     messagePageSize,
@@ -1528,6 +1535,10 @@ export function ChatColumn() {
         const reloaded = await refreshSessionBudget(sessionId);
         if (!reloaded) toast.error(schemaText(schema, 'ui.studio.plan.reload_failed'));
         void refreshApproval();
+        // #134: an approved plan runs in a turn the server started; follow its stream like any reply.
+        if (result.turnMessageId && useChatStore.getState().activeSessionId === sessionId) {
+          setServerTurnTick((tick) => tick + 1);
+        }
       } catch (error) {
         const detail = error instanceof PendingApprovalError ? schemaText(schema, error.detail) : '';
         setDecisionError((current) => ({
@@ -1628,6 +1639,9 @@ export function ChatColumn() {
     ...pending.items.filter((item) => item.kind === 'step').map((item) => cardFromPending(item, labelOfInput)),
   ];
   const sessionBudget = useChatStore((state) => state.sessions.find((session) => session.id === activeSessionId)?.budget ?? null);
+  // #120: whether the plan is shown or still waits for a decision is the Schema role of its state.
+  const budgetShown = budgetIsShown(schema, sessionBudget);
+  const budgetAwaiting = budgetAwaitsDecision(schema, sessionBudget);
 
   // Tasks of this session that the page saw running. When one of them ends outside a turn (a late
   // approval), the result message, the version strip and the session credits catch up by themselves.
@@ -1792,6 +1806,27 @@ export function ChatColumn() {
       controllers.current.get(activeSessionId)?.abort();
     }
   };
+  // #137: while a Task of the streaming turn runs, ask the server whether the turn may stop waiting
+  // with its Task running on; only then does the stop offer that choice. The SSE stays open: the
+  // server ends the turn with its note and the done event, and the Task stays in the task tray.
+  const backgroundPollMilliseconds = schema.chat.frontend.background_wait_poll_milliseconds;
+  const asksBackground = asksTurnBackground({
+    sessionId: activeSessionId,
+    streaming: isStreaming,
+    taskRunning: sessionTasks.some((task) => !task.terminal),
+    route: schema.runtime.http.legacy_routes.chat_turn_background,
+    member: schema.chat.api.fields.turn_background_available,
+    intervalMilliseconds: backgroundPollMilliseconds,
+  });
+  const backgroundAvailable = useTurnBackground(chatClient, activeSessionId, asksBackground, backgroundPollMilliseconds);
+  const stopInBackground = () => {
+    if (!activeSessionId) return;
+    void chatClient.continueTurnInBackground(activeSessionId).catch((error: unknown) => {
+      toast.error(error instanceof Error && error.message !== ''
+        ? withErrorReference(error.message, error)
+        : schema.chat.presentation.messages.internal_error);
+    });
+  };
 
   const title = schemaText(schema, 'ui.studio.chat.title');
   const collapseLabel = schemaText(schema, 'ui.studio.chat.collapse');
@@ -1880,7 +1915,7 @@ export function ChatColumn() {
           >
             {historyLoading && displayMessages.length === 0 ? (
               <ChatHistorySkeleton label={schemaText(schema, 'ui.chat.loading')} />
-            ) : displayMessages.length === 0 && threeViews.length === 0 && !isStreaming && approvalCards.length === 0 && planCards.length === 0 && !(sessionBudget && sessionBudget.state !== 'denied') && queuedTurns.length === 0 ? (
+            ) : displayMessages.length === 0 && threeViews.length === 0 && !isStreaming && approvalCards.length === 0 && planCards.length === 0 && !budgetShown && queuedTurns.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
                 <div className="rounded-xl bg-primary/15 p-3 text-primary"><ImagePlus className="size-6" /></div>
                 <p className="max-w-xs text-sm leading-6 text-muted-foreground">{schemaText(schema, 'ui.workspace.agent.empty')}</p>
@@ -1942,29 +1977,28 @@ export function ChatColumn() {
                 {choicePlacement.loose.map(renderChoiceCard)}
               </div>
             ) : null}
-            {(planCards.length > 0 || (sessionBudget && sessionBudget.state !== 'denied') || planReloadError) ? (
+            {(planCards.length > 0 || budgetShown || planReloadError) ? (
               <div className="mt-2 flex flex-col gap-2 px-1" data-testid="chat-plan-cards">
                 {planCards.map((item) => item.plan ? (
                   <PlanCard
                     key={item.requestId}
                     plan={item.plan}
-                    budgetCredits={item.budgetCredits}
+                    budgets={item.budgets}
                     tasks={sessionTasks}
                     busy={decisionBusy.has(item.requestId)}
                     error={decisionError[item.requestId] ?? null}
                     onDecide={(approved) => { void decidePlan(item.requestId, approved); }}
                   />
                 ) : null)}
-                {planCards.length === 0 && (planReloadError || sessionBudget?.state === 'pending') ? (
+                {planCards.length === 0 && (planReloadError || budgetAwaiting) ? (
                   <PlanReloadNotice
                     message={planReloadError ?? schemaText(schema, 'ui.studio.plan.reload_failed')}
                     busy={planReloading}
                     onReload={reloadPlans}
                   />
-                ) : planCards.length === 0 && sessionBudget && sessionBudget.state !== 'denied' ? (
+                ) : planCards.length === 0 && budgetShown && sessionBudget ? (
                   <PlanCard
                     plan={sessionBudget.plan}
-                    budgetCredits={sessionBudget.limitCredits}
                     tasks={sessionTasks}
                     progress={sessionBudget}
                   />
@@ -2029,6 +2063,7 @@ export function ChatColumn() {
             onChange={setInput}
             onSend={() => { void send(input, undefined, undefined, editing?.deleteIds); }}
             onStop={stopTurn}
+            onStopInBackground={backgroundAvailable ? stopInBackground : null}
             streaming={isStreaming}
             locked={uploading || preparing}
             canSend={(input.trim() !== '' || attachedImages.length > 0 || hasCanvasReference || Boolean(currentSkill?.tool)) && Boolean(activeSessionId)}

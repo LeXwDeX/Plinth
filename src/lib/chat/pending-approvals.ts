@@ -1,7 +1,8 @@
 import type { ProductSchema } from '@/lib/product-schema';
-import type { NativeQuote } from '@/lib/pricing';
-import { parseNativeQuote } from '@/lib/pricing';
+import type { NativeQuote, PriceTotal } from '@/lib/pricing';
+import { parseNativeQuote, parsePriceTotals } from '@/lib/pricing';
 import { parseProductionPlan, type ProductionPlan } from '@/lib/chat/budget';
+import { approvalDecisionBody } from '@/lib/approval-decision';
 
 /**
  * 脱离轮次仍待决的付费步骤（服务端保存，默认 24 小时有效）。
@@ -48,8 +49,11 @@ export interface PendingApproval {
   kind: 'step' | 'plan';
   /** The plan a plan card asks to approve; null on a step card. */
   plan: ProductionPlan | null;
-  /** The total credit limit the person approves (plan cards only; 0 on a step card). */
-  budgetCredits: number;
+  /**
+   * #120: the limits the person approves, one per credit unit and never summed
+   * (plan cards only; empty on a step card).
+   */
+  budgets: PriceTotal[];
   tool: string;
   capability: string;
   model: string;
@@ -81,6 +85,11 @@ export interface PendingApprovalDecision {
   taskId: string;
   /** 提交后服务端插入的结果消息；有值时需要重新读取消息列表。 */
   messageId: string;
+  /**
+   * #134: the assistant message of the turn the server started to run an
+   * approved plan; the chat attaches to its stream. Absent when none started.
+   */
+  turnMessageId?: string;
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -116,7 +125,7 @@ export function parsePendingApprovals(payload: unknown): PendingApproval[] {
     });
     result.push({
       requestId, status, kind, plan,
-      budgetCredits: typeof item.budget_credits === 'number' ? item.budget_credits : 0,
+      budgets: kind === 'plan' ? parsePriceTotals(item.budgets) ?? [] : [],
       tool: text(item.tool), capability: text(item.capability), model: text(item.model), provider: text(item.provider), providerId: text(item.provider_id),
       priceMode: text(item.price_mode) || (item.native_quote !== undefined ? 'native' : ''),
       nativeQuote: parseNativeQuote(item.native_quote),
@@ -248,15 +257,9 @@ export class PendingApprovalError extends Error {
   }
 }
 
-/**
- * #103: the request member that carries an approval decision is Schema data. A
- * response that lacks it cannot be decided safely: refuse before sending an
- * empty key the server would not understand.
- */
+/** #103: the decision member is Schema data; see `approvalDecisionBody`. */
 function decisionBody(schema: ProductSchema, approve: boolean): Record<string, string> {
-  const member = schema.chat.api.fields.decision;
-  if (!member) throw new Error('chat.api.fields.decision is required to decide an approval');
-  return { [member]: approve ? 'approve' : 'deny' };
+  return approvalDecisionBody(schema, approve);
 }
 
 /**
@@ -316,6 +319,7 @@ export async function decideSessionBudget(
     status: text(payload.state),
     taskId: '',
     messageId: text(payload.message_id),
+    ...(text(payload.turn_message_id) ? { turnMessageId: text(payload.turn_message_id) } : {}),
   };
 }
 

@@ -143,16 +143,20 @@ describe('ChatBrowserClient', () => {
         id: 's1', title: 'Session', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:01Z',
         'configured-brief': { purpose: 'game_prop', style: 'low poly' },
         'configured-budget': {
-          id: 'b1', state: 'active', limit_credits: 300, spent_credits: 120, reserved_credits: 10, remaining_credits: 170,
-          plan: { title: '制作计划', steps: [{ capability: 'text-to-3d', offering_id: 'tripo-v3', estimated_credits: 100 }] },
+          id: 'b1', state: 'active',
+          units: [{ unit: 'tripo.credit', unit_label: 'Tripo credits', limit: '300', spent: '120', reserved: '10', remaining: '170' }],
+          plan: { title: '制作计划', steps: [{ capability: 'text-to-3d', offering_id: 'tripo-v3',
+            estimate: { unit: 'tripo.credit', unit_label: 'Tripo credits', amount: '100' } }] },
         },
       }),
     });
     const session = await client.createSession();
     expect(session.brief).toEqual({ purpose: 'game_prop', style: 'low poly' });
     expect(session.budget).toMatchObject({
-      id: 'b1', state: 'active', limitCredits: 300, spentCredits: 120, reservedCredits: 10, remainingCredits: 170,
-      plan: { steps: [{ capability: 'text-to-3d', offeringId: 'tripo-v3', estimatedCredits: 100 }] },
+      id: 'b1', state: 'active',
+      units: [{ unit: 'tripo.credit', unitLabel: 'Tripo credits', limit: '300', spent: '120', reserved: '10', remaining: '170' }],
+      plan: { steps: [{ capability: 'text-to-3d', offeringId: 'tripo-v3',
+        estimate: { unit: 'tripo.credit', unit_label: 'Tripo credits', amount: '100' } }] },
     });
   });
 
