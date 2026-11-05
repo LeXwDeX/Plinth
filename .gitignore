@@ -94,3 +94,7 @@ graphify-out/
 /.serena/
 /.playwright-mcp/
 /handoff.md
+
+# SpecGit 与本地 Agent 生成的本地资产（不追踪）
+/.specgit.yaml
+/.agents/skills/specgit-native/
