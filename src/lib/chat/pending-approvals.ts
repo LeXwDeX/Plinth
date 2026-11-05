@@ -2,6 +2,7 @@ import type { ProductSchema } from '@/lib/product-schema';
 import type { NativeQuote } from '@/lib/pricing';
 import { parseNativeQuote } from '@/lib/pricing';
 import { parseProductionPlan, type ProductionPlan } from '@/lib/chat/budget';
+import { approvalDecisionBody } from '@/lib/approval-decision';
 
 /**
  * 脱离轮次仍待决的付费步骤（服务端保存，默认 24 小时有效）。
@@ -248,15 +249,9 @@ export class PendingApprovalError extends Error {
   }
 }
 
-/**
- * #103: the request member that carries an approval decision is Schema data. A
- * response that lacks it cannot be decided safely: refuse before sending an
- * empty key the server would not understand.
- */
+/** #103: the decision member is Schema data; see `approvalDecisionBody`. */
 function decisionBody(schema: ProductSchema, approve: boolean): Record<string, string> {
-  const member = schema.chat.api.fields.decision;
-  if (!member) throw new Error('chat.api.fields.decision is required to decide an approval');
-  return { [member]: approve ? 'approve' : 'deny' };
+  return approvalDecisionBody(schema, approve);
 }
 
 /**

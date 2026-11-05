@@ -7,6 +7,8 @@ const routes = {
   task_grant_decision: '/api/v1/tasks/grants/{requestID}',
   tasks: '/api/v1/tasks',
 };
+// #120: the approval body follows the Schema's decision member, here renamed.
+const directSchema = { runtime: { http: { routes } }, chat: { api: { fields: { decision: 'verdict' } } } };
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -94,11 +96,11 @@ describe('canvas paid submission', () => {
     expect(JSON.parse(String(requests[0].init.body))).toEqual(body);
     expect(JSON.parse(String(requests[1].init.body))).toEqual({ prepared_input_id: 'prepared-a' });
 
-    expect(await submitDirectTask(routes, pending)).toBe('task-a');
+    expect(await submitDirectTask(directSchema, pending)).toBe('task-a');
     expect(requests.map(({ url }) => url)).toEqual([
       routes.task_prepare, routes.task_grants, '/api/v1/tasks/grants/request-a', routes.tasks,
     ]);
-    expect(JSON.parse(String(requests[2].init.body))).toEqual({ decision: 'approve' });
+    expect(JSON.parse(String(requests[2].init.body))).toEqual({ verdict: 'approve' });
     expect(JSON.parse(String(requests[3].init.body))).toEqual({
       prepared_input_id: 'prepared-a', authorization_request_id: 'request-a',
     });
@@ -121,7 +123,7 @@ describe('canvas paid submission', () => {
     const pending = await prepareDirectTask(routes, body, 'session-a', 'model-a', 'blue robot');
     expect(pending.approvedByPolicy).toBe(true);
 
-    expect(await submitDirectTask(routes, pending)).toBe('task-a');
+    expect(await submitDirectTask(directSchema, pending)).toBe('task-a');
     expect(requests.map(({ url }) => url)).toEqual([routes.task_prepare, routes.task_grants, routes.tasks]);
     expect(requests.some(({ init }) => init.method === 'PUT')).toBe(false);
     expect(JSON.parse(String(requests[2].init.body))).toEqual({
@@ -142,7 +144,7 @@ describe('canvas paid submission', () => {
     }));
     const pending = await prepareDirectTask(routes, { session_id: 'session-a' }, 'session-a', 'model-a');
     expect(pending.grantApproved).toBe(true);
-    expect(await submitDirectTask(routes, pending)).toBe('task-a');
+    expect(await submitDirectTask(directSchema, pending)).toBe('task-a');
     expect(requests.map(({ url }) => url)).toEqual([routes.task_prepare, routes.task_grants, routes.tasks]);
   });
 
@@ -202,10 +204,10 @@ describe('optional submission authority', () => {
       return { ok: true, json: async () => ({ status: 'approved' }) };
     });
     vi.stubGlobal('fetch', fetch);
-    await expect(submitDirectTask(routes, pending, () => active)).rejects.toThrow('inactive');
+    await expect(submitDirectTask(directSchema, pending, () => active)).rejects.toThrow('inactive');
     expect(fetch).not.toHaveBeenCalled();
     active = true;
-    await expect(submitDirectTask(routes, pending, () => active)).rejects.toThrow('inactive');
+    await expect(submitDirectTask(directSchema, pending, () => active)).rejects.toThrow('inactive');
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0][0]).toBe('/api/v1/tasks/grants/r');
   });
@@ -216,7 +218,7 @@ describe('optional submission authority', () => {
       return { ok: true, json: async () => ({ task_id: 'accepted-task' }) };
     });
     vi.stubGlobal('fetch', fetch);
-    await expect(submitDirectTask(routes, { ...pending, grantApproved: true }, () => active)).resolves.toBe('accepted-task');
+    await expect(submitDirectTask(directSchema, { ...pending, grantApproved: true }, () => active)).resolves.toBe('accepted-task');
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 });

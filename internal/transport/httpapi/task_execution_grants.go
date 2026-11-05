@@ -204,14 +204,8 @@ func (s *Server) decideTaskGrant(writer http.ResponseWriter, request *http.Reque
 		s.writeMessageProblem(writer, http.StatusServiceUnavailable, "unavailable", "error.unavailable")
 		return
 	}
-	var body struct {
-		Decision executiongrant.Decision `json:"decision"`
-	}
-	if err := s.decodeJSON(writer, request, &body); err != nil {
-		return
-	}
-	if body.Decision != executiongrant.Approve && body.Decision != executiongrant.Deny {
-		s.writeMessageProblem(writer, http.StatusBadRequest, "invalid_input", "error.invalid_input")
+	decision, ok := s.decodeApprovalDecision(writer, request)
+	if !ok {
 		return
 	}
 	requestID := request.PathValue("requestID")
@@ -219,7 +213,7 @@ func (s *Server) decideTaskGrant(writer http.ResponseWriter, request *http.Reque
 		// An Agent approval whose turn already ended is decided, submitted once
 		// and reported into its session by the pending-approval service. Any
 		// other grant is not "handled" and is decided the ordinary way below.
-		outcome, handled, err := s.pendingApprovals.Decide(request.Context(), principal, requestID, body.Decision)
+		outcome, handled, err := s.pendingApprovals.Decide(request.Context(), principal, requestID, decision)
 		if err != nil {
 			s.writeTaskGrantError(writer, err)
 			return
@@ -229,7 +223,7 @@ func (s *Server) decideTaskGrant(writer http.ResponseWriter, request *http.Reque
 			return
 		}
 	}
-	grant, err := s.executionGrants.Decide(request.Context(), principal, requestID, body.Decision)
+	grant, err := s.executionGrants.Decide(request.Context(), principal, requestID, decision)
 	if err != nil {
 		s.writeTaskGrantError(writer, err)
 		return
