@@ -155,6 +155,11 @@ type TurnCheckpoint struct {
 	WaitingCallID string    `json:"waiting_call_id,omitempty"`
 	WaitDeadline  time.Time `json:"wait_deadline,omitempty"`
 	HadToolError  bool      `json:"had_tool_error,omitempty"`
+	// Background records that the person chose to stop waiting while the
+	// Tasks of Waiting keep running (#137). The next Process of the turn ends
+	// it without cancelling them, also after a restart, and a stop that comes
+	// later no longer cancels them.
+	Background bool `json:"background,omitempty"`
 }
 
 // WaitingCall is one call of a tool round that still lacks its receipt.
@@ -278,6 +283,10 @@ type ToolCall struct {
 	// It is stored with the call and projected as the call's summary member; a
 	// nil summary leaves the member out.
 	Summary json.RawMessage
+	// Background means the person stopped waiting for this call's Task and the
+	// Task kept running after the turn ended (#137). A later turn lists such a
+	// Task to the Agent while it still runs.
+	Background bool
 }
 
 type Message struct {

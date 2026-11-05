@@ -3242,6 +3242,13 @@ type ChatAPIFields struct {
 	Multiview    string `json:"multiview,omitempty"`
 	FromID       string `json:"from_id"`
 	TurnCanceled string `json:"turn_canceled"`
+	// TurnBackgrounded is the response member of the background-continue
+	// request (#137): true once the waiting turn was set to end without
+	// cancelling its Tasks. TurnBackgroundAvailable is the member of the
+	// availability read of the same route. Both are declared with
+	// runtime.http.legacy_routes.chat_turn_background.
+	TurnBackgrounded        string `json:"turn_backgrounded,omitempty"`
+	TurnBackgroundAvailable string `json:"turn_background_available,omitempty"`
 	// ApprovalMode is the request field of the session approval-mode write.
 	ApprovalMode string `json:"approval_mode"`
 	// Notes is the request field of the session settings-summary write.
@@ -3424,6 +3431,12 @@ type ChatFrontendSchema struct {
 	// longer edge. The preview never takes pointer events.
 	HandlePreviewDelayMilliseconds int `json:"handle_preview_delay_milliseconds"`
 	HandlePreviewMaximumPixels     int `json:"handle_preview_maximum_pixels"`
+	// BackgroundWaitPollMilliseconds is how often the composer asks, while a
+	// turn streams and a Task of the session runs, whether the turn may stop
+	// waiting with its Task continuing in the background (#137). Zero, or a
+	// deployment without runtime.http.legacy_routes.chat_turn_background,
+	// keeps the single stop button.
+	BackgroundWaitPollMilliseconds int `json:"background_wait_poll_milliseconds,omitempty"`
 }
 
 type ChatThinkingSchema struct {
@@ -3541,6 +3554,10 @@ type ChatAgentSchema struct {
 	// the Provider holds the accepted job in its own queue (#131): what the
 	// Agent tells the person waiting. Optional.
 	UpstreamQueueContent string `json:"upstream_queue_content,omitempty"`
+	// BackgroundWait lets a person stop waiting for a single generation step
+	// while its Task keeps running (#137). Nil offers no such choice and the
+	// server refuses it.
+	BackgroundWait *ChatBackgroundWaitSchema `json:"background_wait,omitempty"`
 	// MaxToolCallsPerReply 限定一次 Agent 回复内实际执行的工具调用数
 	// （>=1，#275，替代按 LLM 轮数计的 max_tool_rounds）。每次新回复从 0
 	// 起算；恢复与续跑时已执行的调用计入同一次回复。一批调用超出剩余
@@ -4716,6 +4733,10 @@ type LegacyHTTPRoutesSchema struct {
 	AdminUserAssets         string `json:"admin_user_assets"`
 	AdminBackfillStatus     string `json:"admin_backfill_status"`
 	MeshyProxyAsset         string `json:"meshy_proxy_asset"`
+	// ChatTurnBackground has the shape of chat_turn_cancel (#137): GET reads
+	// whether the session's waiting turn may stop waiting while its Task
+	// keeps running, POST does it. Empty disables both.
+	ChatTurnBackground string `json:"chat_turn_background,omitempty"`
 }
 
 type ProviderBalanceConsumptionEstimate struct {

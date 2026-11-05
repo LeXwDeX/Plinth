@@ -443,6 +443,15 @@ func (orchestrator *Orchestrator) CancelTurn(
 	if err != nil || !active {
 		return active, err
 	}
+	// #137: the person already chose to let this turn's Tasks keep running.
+	// That choice committed before this stop (it requires no stop intent), so
+	// the stop must not cancel them: the queued turn is finished by Process,
+	// which ends it without cancelling.
+	if stored, err := orchestrator.service.GetTurn(ctx, ownerID, sessionID, turn.AssistantMessageID); err != nil {
+		return true, err
+	} else if stored.Checkpoint.Background {
+		return true, nil
+	}
 	turnKey := orchestrator.turnKey(ownerID, sessionID)
 	orchestrator.activeMu.Lock()
 	cancel := orchestrator.activeCancel[turnKey]
@@ -1133,6 +1142,9 @@ func (orchestrator *Orchestrator) Process(
 	// 收尾流与轮次，等唤醒方重新入队续跑。
 	suspended := false
 	stopFinalized := false
+	// backgroundFinalized means the turn ended with its Tasks still running
+	// (#137); a stop requested later must not cancel them.
+	backgroundFinalized := false
 	finalizeStop := func() error {
 		err := orchestrator.finalizeStoppedTurn(ctx, command, &assistant)
 		if err == nil {
@@ -1155,7 +1167,7 @@ func (orchestrator *Orchestrator) Process(
 			processErr = errors.Join(processErr, err)
 			return
 		}
-		if requested && !stopFinalized {
+		if requested && !stopFinalized && !backgroundFinalized {
 			if err := finalizeStop(); err != nil {
 				processErr = errors.Join(processErr, err)
 				return
@@ -1178,6 +1190,18 @@ func (orchestrator *Orchestrator) Process(
 			processErr = err
 		}
 	}()
+	// #137: the person stopped waiting and let the Tasks run on. This comes
+	// before the stop check: the choice committed before any later stop.
+	if turn.Checkpoint.Background {
+		if err := orchestrator.finalizeBackgroundTurn(ctx, command, turn, &assistant); err != nil {
+			// Keep the durable turn for restart recovery, like a stop whose
+			// reconciliation failed; it is never finished as failed.
+			suspended = true
+			return err
+		}
+		backgroundFinalized = true
+		return nil
+	}
 	requested, err := orchestrator.service.TurnStopRequested(
 		context.WithoutCancel(ctx), command.OwnerID, command.SessionID, command.AssistantMessageID)
 	if err != nil {
@@ -1865,6 +1889,9 @@ func (orchestrator *Orchestrator) agentRequest(
 		choices, _ = orchestrator.service.ListChoices(ctx, ownerID, sessionID)
 	}
 	systemPrompt += orchestrator.pendingChoicePrompt(choices)
+	// Tasks the person stopped waiting for still run (#137): the Agent looks
+	// them up instead of submitting the same paid generation again.
+	systemPrompt += orchestrator.backgroundTasksPrompt(ctx, ownerID, sessionID, history)
 	systemPrompt += orchestrator.harnessPrompt(options.Harness, registry, scope)
 	systemPrompt += orchestrator.replyLanguagePrompt(ctx)
 	request := agents.Request{
@@ -3099,6 +3126,7 @@ func mergeStoredToolCall(target *ToolCall, stored ToolCall) {
 	if len(target.Summary) == 0 {
 		target.Summary = stored.Summary
 	}
+	target.Background = target.Background || stored.Background
 }
 
 // streamAgent streams one Agent request. When the upstream's content-safety

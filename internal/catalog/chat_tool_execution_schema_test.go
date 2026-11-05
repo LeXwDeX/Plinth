@@ -39,6 +39,19 @@ func TestDefaultChatToolsDeclareRuntimeExecutionContracts(t *testing.T) {
 	}
 }
 
+// renameBackgroundWaitTool follows a tool rename into chat.agent.background_wait
+// (#137), which names its eligible tools.
+func renameBackgroundWaitTool(policy *catalog.ChatBackgroundWaitSchema, from, to string) {
+	if policy == nil {
+		return
+	}
+	for index, name := range policy.Tools {
+		if name == from {
+			policy.Tools[index] = to
+		}
+	}
+}
+
 func TestCatalogAllowsNewGenerationToolNameWithRegisteredCapability(t *testing.T) {
 	payload, err := os.ReadFile("default_catalog.json")
 	if err != nil {
@@ -71,6 +84,7 @@ func TestCatalogAllowsNewGenerationToolNameWithRegisteredCapability(t *testing.T
 			}
 		}
 	}
+	renameBackgroundWaitTool(app.Chat.Agent.BackgroundWait, "create_model_3d", "generate_model_3d_variant")
 	if !renamed {
 		t.Fatal("create_model_3d is not declared")
 	}
@@ -101,6 +115,7 @@ func TestCatalogAllowsImageToolForProcessingClassifiedCapability(t *testing.T) {
 	if err := json.Unmarshal(document["application"], &app); err != nil {
 		t.Fatal(err)
 	}
+	renameBackgroundWaitTool(app.Chat.Agent.BackgroundWait, app.Chat.Tools[1].Name, "cutout_assets")
 	app.Chat.Tools[1].Name = "cutout_assets"
 	encoded, err := json.Marshal(app)
 	if err != nil {

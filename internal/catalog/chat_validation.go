@@ -407,6 +407,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateToolCallBudget(schema.Agent, runtime); err != nil {
 		return err
 	}
+	if err := validateBackgroundWait(schema, runtime); err != nil {
+		return err
+	}
 	if limit := runtime.HTTP.TaskAdmission.PerOwnerMaxInflightTasks; schema.Agent.MaxParallelGenerationSubmissions < 1 ||
 		schema.Agent.MaxParallelGenerationSubmissions > limit {
 		return fmt.Errorf(

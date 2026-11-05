@@ -138,6 +138,14 @@ type ChatTurnScheduler interface {
 	ResumeConsentWait(ownerID, sessionID string) bool
 }
 
+// ChatTurnBackgrounder lets a person stop waiting for a turn's single
+// generation steps while their Tasks keep running (#137). The orchestrator
+// implements it; a scheduler without it leaves the route unregistered.
+type ChatTurnBackgrounder interface {
+	TurnBackgroundAvailable(ctx context.Context, ownerID, sessionID string) (bool, error)
+	ContinueTurnInBackground(ctx context.Context, ownerID, sessionID string) error
+}
+
 type ProviderWebhookIngestor interface {
 	IngestProviderWebhook(
 		context.Context,
