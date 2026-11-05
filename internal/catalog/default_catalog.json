@@ -802,6 +802,9 @@
               "insufficient_quota": {
                 "class": "insufficient_balance"
               },
+              "quota_exceeded": {
+                "class": "credential_quota"
+              },
               "moderation_blocked": {
                 "class": "content_rejected"
               },
@@ -1333,7 +1336,17 @@
           "protocol": "openai-compatible",
           "adapter_key": "openai-compatible-chat",
           "base_url_setting": "llm_base_url",
-          "api_key_setting": "llm_api_key"
+          "api_key_setting": "llm_api_key",
+          "error_mapping": {
+            "upstream_code_map": {
+              "insufficient_quota": {
+                "class": "insufficient_balance"
+              },
+              "quota_exceeded": {
+                "class": "credential_quota"
+              }
+            }
+          }
         },
         {
           "id": "local-model",
@@ -3956,7 +3969,7 @@
         "failure.timed_out": "上游请求超时",
         "failure.rejected": "上游拒绝或取消了任务",
         "failure.insufficient_balance": "该模型服务商的账户余额不足或已欠费，暂时无法生成。请联系管理员处理",
-        "failure.credential_quota": "该 API Key 已达额度上限，请在 Provider 控制台调整 Key 额度或更换 Key",
+        "failure.credential_quota": "上游服务的 API Key 额度已用完，暂时无法生成。请联系管理员调整 Key 额度或更换 Key",
         "failure.upstream_unavailable": "上游服务暂时不可用",
         "failure.submission_unknown": "无法确认上游是否已接受任务",
         "failure.integrity_failure": "生成资产未通过完整性校验",
@@ -7589,7 +7602,7 @@
           "generation_failed": "生成失败",
           "generation_failed_by_class": {
             "insufficient_balance": "该模型服务商的账户余额不足或已欠费，这一步没有执行。请联系管理员处理",
-            "credential_quota": "该 API Key 已达额度上限，请在 Provider 控制台调整 Key 额度或更换 Key，这一步没有执行。请联系管理员处理",
+            "credential_quota": "上游服务的 API Key 额度已用完，这一步没有执行。请联系管理员调整 Key 额度或更换 Key",
             "content_rejected": "上游服务的内容安全审核拦截了这一步的输入（审核器较敏感，正常美术素材也可能被误判），没有生成结果，原样重试也不会通过。请主动调整后再调用一次：按审核原因改写提示词，去掉可能触发的描述（例如 sexual 时写明服装完整、姿态得体，去掉裸露、贴身、性感等词；violence 时去掉血腥、武器伤害描写），保留美术意图；若被拦的是输入图本身，改写提示词无效，请改用其他图或去掉该参考图后再试，必要时请用户换图。同时如实告诉用户是审核拦截以及你做了什么调整。不要建议修改部署配置",
             "upstream_denied": "上游图像生成服务拒绝了这一步的请求（HTTP 403），没有生成结果。这是上游访问权限问题，与提示词和图片无关：不要改写提示词、换图或换参数重试，也不要再换别的模型反复试探。请如实告诉用户是上游图像生成服务拒绝了请求，需要管理员检查上游服务的访问权限后再试",
             "source_expired": "来源模型在服务商处的原任务已过期，这一步没有执行，也没有扣费。重新发起时平台会改用已保存的模型文件；不接受模型文件的服务（例如动画）需要先重新生成来源模型，或在它之前的版本上重新绑骨"
@@ -7638,6 +7651,7 @@
           "agent_inline_image_output": "当前对话模型自己画了一张图，而不是调用生成工具，这张图没有保存，也不会出现在结果里。请重试；如果反复出现，请换一个对话模型。",
           "agent_images_unsupported": "当前 Agent 模型拒绝了带图片的请求，可能不支持读图。请在部署配置中换用支持图片输入的模型（LLM_MODEL），或去掉图片后重试。",
           "agent_content_rejected": "请求被上游模型服务的内容安全审核拦截：本轮的图片或文字可能被判定为不当内容。这不是模型不支持读图，也不需要改部署配置。请更换图片或修改描述后重试；如确认内容合规，请把本条消息附带的错误 ID 发给管理员核查。",
+          "agent_quota_exhausted": "对话模型的上游额度已用完（账户余额或 API Key 额度），暂时无法回复。请联系管理员处理，处理前重试也不会成功。",
           "agent_not_configured": "Agent 未配置：部署缺少对话模型设置（LLM_API_KEY 或 LLM_MODEL），暂时不能对话或增强提示词。请联系管理员配置后再试。",
           "error_reference": "（错误 ID：{id}）",
           "sse_interrupted": "SSE 连接中断",
@@ -13202,6 +13216,7 @@
         "outcome_unauthorized": "鉴权失败，请检查密钥",
         "outcome_not_found": "地址或模型不存在",
         "outcome_rate_limited": "上游限流，请稍后再试",
+        "outcome_quota_exhausted": "上游额度已用完（账户余额或 API Key 额度），稍后重试无效，需充值或调整 Key 额度",
         "outcome_timeout": "请求超时",
         "outcome_unreachable": "无法连接上游",
         "outcome_upstream_error": "上游返回错误",
@@ -14619,7 +14634,7 @@
             "failure.timed_out": "Upstream request timed out",
             "failure.rejected": "The upstream rejected or canceled the task",
             "failure.insufficient_balance": "The model provider's account balance is insufficient or overdue, so generation is temporarily unavailable. Please contact an administrator",
-            "failure.credential_quota": "This API key has reached its credit limit. Raise the key limit in the provider console or switch to another key",
+            "failure.credential_quota": "The upstream service's API key has used up its quota, so generation is temporarily unavailable. Please contact an administrator to raise the key's quota or switch to another key",
             "failure.upstream_unavailable": "The upstream service is temporarily unavailable",
             "failure.submission_unknown": "Unable to confirm whether the upstream accepted the task",
             "failure.integrity_failure": "The generated asset failed the integrity check",
@@ -16437,6 +16452,7 @@
             "llm_settings.ui.outcome_unauthorized": "Authentication failed; check the key",
             "llm_settings.ui.outcome_not_found": "Address or model not found",
             "llm_settings.ui.outcome_rate_limited": "Rate limited upstream; try again later",
+            "llm_settings.ui.outcome_quota_exhausted": "Upstream quota used up (account balance or API key quota); retrying later will not help until it is topped up or the key's quota is raised",
             "llm_settings.ui.outcome_timeout": "Timed out",
             "llm_settings.ui.outcome_unreachable": "Upstream unreachable",
             "llm_settings.ui.outcome_upstream_error": "The upstream returned an error",
@@ -16540,7 +16556,7 @@
             "chat.presentation.messages.interrupted_prompt": "⚠️ This generation task was interrupted (prompt: {prompt}). Please describe your request again.",
             "chat.presentation.messages.generation_failed": "Generation failed",
             "chat.presentation.messages.generation_failed_by_class.insufficient_balance": "This model provider's account balance is insufficient or overdue, so this step was not run. Please contact an administrator",
-            "chat.presentation.messages.generation_failed_by_class.credential_quota": "This API key has reached its credit limit. Raise the key limit in the provider console or switch to another key, so this step was not run. Please contact an administrator",
+            "chat.presentation.messages.generation_failed_by_class.credential_quota": "The upstream service's API key has used up its quota, so this step was not run. Please contact an administrator to raise the key's quota or switch to another key",
             "chat.presentation.messages.generation_failed_by_class.upstream_denied": "The upstream image generation service refused this step's request (HTTP 403); no result was produced. It is an access problem upstream, not about the prompt or pictures: do not rewrite the prompt, change pictures or parameters and retry, and do not keep probing other models. Tell the user plainly that the upstream image generation service refused the request and that an administrator needs to check access to the upstream service before trying again",
             "chat.presentation.messages.generation_failed_by_class.content_rejected": "The upstream service's content-safety review blocked this step's input (the classifier is sensitive and ordinary art material can be flagged by mistake); no result was produced, and retrying the same input will not pass. Adjust and call once more on your own: rewrite the prompt by the review's reason, dropping the descriptions that may trip it (for sexual, state that the clothing is complete and the pose is modest, and drop words such as nude, skin-tight or sexy; for violence, drop gore and weapon-injury descriptions) while keeping the art intent; if the input image itself was blocked, rewriting the prompt will not help, so use another image or drop that reference and try again, asking the user for another image when needed. Tell the user plainly it was a content-safety block and what you changed. Do not suggest changing the deployment configuration",
             "chat.presentation.messages.content_rejected_reasons": " (reason: {reasons})",
@@ -16583,7 +16599,8 @@
             "chat.presentation.messages.unknown_error": "Unknown error",
             "chat.presentation.messages.agent_inline_image_output": "The current conversation model drew a picture itself instead of calling a generation tool; the picture was not kept and will not appear in the results. Please retry; if it keeps happening, switch to another conversation model.",
             "chat.presentation.messages.agent_images_unsupported": "The current Agent model rejected the request with images; it may not support image input. In the deployment configuration, switch to a model that supports image input (LLM_MODEL), or remove the images and retry.",
-            "chat.presentation.messages.agent_content_rejected": "The request was blocked by the upstream model service's content-safety review: the images or text in this turn may have been judged inappropriate. The model does support images and no deployment change is needed. Change the image or rewrite the description and retry; if you are sure the content is fine, send this message's error ID to an administrator.",
+            "chat.presentation.messages.agent_quota_exhausted": "The chat model's upstream quota is used up (account balance or API key quota), so no reply can be given for now. Please contact an administrator; retrying will not help until then.",
+            "chat.presentation.messages.agent_content_rejected":"The request was blocked by the upstream model service's content-safety review: the images or text in this turn may have been judged inappropriate. The model does support images and no deployment change is needed. Change the image or rewrite the description and retry; if you are sure the content is fine, send this message's error ID to an administrator.",
             "chat.presentation.messages.agent_not_configured": "Agent is not configured: the deployment is missing chat model settings (LLM_API_KEY or LLM_MODEL), so chatting and prompt enhancement are unavailable. Please contact an administrator to configure it and try again.",
             "chat.presentation.messages.error_reference": " (Error ID: {id})",
             "chat.presentation.messages.sse_interrupted": "SSE connection interrupted",

@@ -69,6 +69,11 @@ type Config struct {
 	// tools, so the model may emit independent calls in one reply
 	// (chat.agent.parallel_tool_calls).
 	ParallelToolCalls bool
+	// ExhaustedQuota, when set, reports whether a refusal (HTTP status and
+	// body) is a used-up account balance or key quota and names its failure
+	// class. The application derives it from the chat connection's Schema
+	// error_mapping (#120); nil: no refusal is read as one.
+	ExhaustedQuota func(status int, body []byte) (class string, exhausted bool)
 }
 
 type Adapter struct {
@@ -83,6 +88,7 @@ type Adapter struct {
 	thinkingFor       func(model string) *ThinkingOptions
 	includeUsage      bool
 	parallelToolCalls bool
+	exhaustedQuota    func(status int, body []byte) (string, bool)
 }
 
 func New(config Config) (*Adapter, error) {
@@ -120,6 +126,7 @@ func New(config Config) (*Adapter, error) {
 		thinkingFor:       config.ThinkingFor,
 		includeUsage:      config.StreamIncludeUsage,
 		parallelToolCalls: config.ParallelToolCalls,
+		exhaustedQuota:    config.ExhaustedQuota,
 	}, nil
 }
 
@@ -372,6 +379,14 @@ func (adapter *Adapter) requireSuccess(response *http.Response, request agents.R
 		}
 		return errors.Join(&agents.ContentRejection{Reasons: reasons}, err)
 	}
+	// #120: a refusal the chat connection's Schema declares as a used-up
+	// balance or key quota (the LLMs gateway's 429 quota_exceeded) is told
+	// as such, not as an unknown error; no other refusal changes.
+	if adapter.exhaustedQuota != nil {
+		if class, exhausted := adapter.exhaustedQuota(response.StatusCode, refusalJSON(body)); exhausted {
+			return errors.Join(&agents.QuotaExhaustion{Class: class}, err)
+		}
+	}
 	// #253: a request with pictures refused as invalid input, whose error
 	// names image/vision/multimodal content, is a model without image input;
 	// the caller can say so instead of an unknown error. Any other refusal
@@ -397,8 +412,7 @@ var moderationCodes = map[string]bool{
 // plain JSON object or one SSE "data:" line as a streamed refusal sends it;
 // "" for any other refusal.
 func moderationRefusal(body []byte) string {
-	text := strings.TrimSpace(string(body))
-	text = strings.TrimSpace(strings.TrimPrefix(text, "data:"))
+	text := refusalJSON(body)
 	var payload struct {
 		Code  any `json:"code"`
 		Error *struct {
@@ -406,7 +420,7 @@ func moderationRefusal(body []byte) string {
 			Type string `json:"type"`
 		} `json:"error"`
 	}
-	if json.Unmarshal([]byte(text), &payload) != nil {
+	if json.Unmarshal(text, &payload) != nil {
 		return ""
 	}
 	codes := []any{payload.Code}
@@ -419,6 +433,13 @@ func moderationRefusal(body []byte) string {
 		}
 	}
 	return ""
+}
+
+// refusalJSON is the JSON of an error body, either a plain JSON object or
+// one SSE "data:" line as a streamed refusal sends it.
+func refusalJSON(body []byte) []byte {
+	text := strings.TrimSpace(string(body))
+	return []byte(strings.TrimSpace(strings.TrimPrefix(text, "data:")))
 }
 
 func imageRefusalStatus(status int) bool {

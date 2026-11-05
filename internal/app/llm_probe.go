@@ -89,6 +89,10 @@ func probeOutcome(err error) string {
 		return llmsettings.OutcomeNotConfigured
 	case errors.Is(err, context.DeadlineExceeded):
 		return llmsettings.OutcomeTimeout
+	case errors.Is(err, agents.ErrQuotaExhausted):
+		// The adapter read the refusal through the chat connection's
+		// Schema error_mapping (#120); it comes before the 429 below.
+		return llmsettings.OutcomeQuotaExhausted
 	case errors.As(err, &refused):
 		switch refused.Status {
 		case http.StatusUnauthorized, http.StatusForbidden:

@@ -1400,6 +1400,9 @@ func (orchestrator *Orchestrator) Process(
 		startRound = turn.Checkpoint.Round
 		resumeRound = maxRoundFromCalls(assistant.ToolCalls) - startRound
 	}
+	// followUpErr is the follow-up request's failure that ended the loop, if
+	// any; a reply left empty by it is told from it.
+	var followUpErr error
 	for round := startRound; ; round++ {
 		effectiveRound := resumeRound + round
 		if !parsed {
@@ -1645,6 +1648,7 @@ func (orchestrator *Orchestrator) Process(
 			if len(assistant.ImageURLs) == 0 && toolErr == nil {
 				failed = true
 			}
+			followUpErr = streamErr
 			break
 		}
 		orchestrator.recordUsage(ctx, command, followUp.Model, next.Usage)
@@ -1668,6 +1672,11 @@ func (orchestrator *Orchestrator) Process(
 	}
 	if assistant.Content == "" && len(assistant.ImageURLs) == 0 {
 		assistant.Content = orchestrator.text(ctx, orchestrator.schema.Presentation.Messages.NoResult)
+		// #120: a follow-up refused for a used-up balance or quota says so
+		// instead of asking for a retry that cannot succeed.
+		if message, exhausted := orchestrator.agentQuotaExhaustedMessage(ctx, followUpErr); exhausted {
+			assistant.Content = message
+		}
 		if failed {
 			assistant.Content = orchestrator.withErrorReference(ctx, assistant.Content, assistant.ID)
 		}
@@ -3181,12 +3190,16 @@ func (orchestrator *Orchestrator) withErrorReference(ctx context.Context, text, 
 // a deployment without Agent settings says the Agent is not configured, a
 // refusal of a request with pictures says the model may not read images
 // (#253), an upstream content-safety refusal says the input tripped it (#35),
-// a picture the model drew itself says it was not kept;
+// a used-up upstream balance or key quota says so (#120), a picture the
+// model drew itself says it was not kept;
 // anything else stays the unknown error, whose ID is in the log.
 func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err error) string {
 	messages := orchestrator.schema.Presentation.Messages
 	if errors.Is(err, agents.ErrNotConfigured) && messages.AgentNotConfigured != "" {
 		return orchestrator.text(ctx, messages.AgentNotConfigured)
+	}
+	if message, exhausted := orchestrator.agentQuotaExhaustedMessage(ctx, err); exhausted {
+		return message
 	}
 	if errors.Is(err, agents.ErrContentRejected) && messages.AgentContentRejected != "" {
 		return orchestrator.text(ctx, messages.AgentContentRejected) + orchestrator.contentRejectedReasons(ctx, err)
@@ -3198,6 +3211,17 @@ func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err e
 		return orchestrator.text(ctx, messages.AgentInlineImageOutput)
 	}
 	return orchestrator.text(ctx, messages.UnknownError)
+}
+
+// agentQuotaExhaustedMessage is the Schema text for an Agent request the
+// upstream refused because the account balance or key quota is used up
+// (#120), and whether err is such a refusal.
+func (orchestrator *Orchestrator) agentQuotaExhaustedMessage(ctx context.Context, err error) (string, bool) {
+	text := orchestrator.schema.Presentation.Messages.AgentQuotaExhausted
+	if text == "" || !errors.Is(err, agents.ErrQuotaExhausted) {
+		return "", false
+	}
+	return orchestrator.text(ctx, text), true
 }
 
 // text is a Schema text in the UI locale of the turn or request in ctx.

@@ -47,9 +47,13 @@ const (
 	OutcomeUnauthorized  = "unauthorized"
 	OutcomeNotFound      = "not_found"
 	OutcomeRateLimited   = "rate_limited"
-	OutcomeTimeout       = "timeout"
-	OutcomeUnreachable   = "unreachable"
-	OutcomeUpstreamError = "upstream_error"
+	// OutcomeQuotaExhausted: the connection's Schema error_mapping reads the
+	// refusal as a used-up account balance or key quota (#120), which a
+	// retry later does not fix, unlike a rate limit.
+	OutcomeQuotaExhausted = "quota_exhausted"
+	OutcomeTimeout        = "timeout"
+	OutcomeUnreachable    = "unreachable"
+	OutcomeUpstreamError  = "upstream_error"
 )
 
 // Connection is one chat model connection as the environment declares it.
