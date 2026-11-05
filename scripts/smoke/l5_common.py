@@ -713,6 +713,12 @@ class Live:
         require_ok(status, "lock 3D model")
         return data
 
+    def set_brief(self, session_id, brief):
+        """Fill the session's production brief, as a person does in the brief panel (#103)."""
+        status, data = self.client.call("PUT", f"/api/v1/chat/sessions/{session_id}/brief", {"brief": brief})
+        require_ok(status, "set production brief")
+        return data
+
     def session(self, session_id):
         status, data = self.client.call("GET", f"/api/chat/sessions/{session_id}")
         return data if status == 200 else None
