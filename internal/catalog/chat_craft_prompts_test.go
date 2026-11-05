@@ -66,6 +66,47 @@ func TestShippedCraftPromptCoversThe3DToolbox(t *testing.T) {
 	}
 }
 
+// The facts #120 added to inspect_model reach the Agent: the winding and
+// inside-out topology fields, the bind-pose warning and the strip triangle
+// count are explained both in the tool description and in the 3D craft
+// brief. Field names come from modelinspect's report, so a rename there
+// breaks this test instead of leaving a stale explanation.
+func TestInspectFactsAreExplainedToTheAgent(t *testing.T) {
+	c, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := c.Application()
+	topology := reflect.TypeOf(modelinspect.TopologyReport{})
+	var fields []string
+	for _, name := range []string{"InconsistentWindingEdges", "InsideOut"} {
+		field, ok := topology.FieldByName(name)
+		if !ok {
+			t.Fatalf("modelinspect.TopologyReport has no field %s", name)
+		}
+		tag, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		fields = append(fields, "topology."+tag)
+	}
+	var description string
+	for _, tool := range app.Chat.AgentTools {
+		if tool.Name == app.Chat.ModelReview.Tools.Inspect {
+			description = tool.Description
+		}
+	}
+	if description == "" {
+		t.Fatal("inspect_model is not declared")
+	}
+	craft := app.Chat.Agent.CraftPrompts[0].Text
+	for _, want := range append(fields, "skin_bind_pose", "strip") {
+		if !strings.Contains(description, want) {
+			t.Fatalf("inspect_model description omits %q", want)
+		}
+		if !strings.Contains(craft, want) {
+			t.Fatalf("model3d craft brief omits %q", want)
+		}
+	}
+}
+
 func TestCraftPromptDeclarationsAreValidated(t *testing.T) {
 	tests := []struct {
 		name   string
