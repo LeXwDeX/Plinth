@@ -89,25 +89,26 @@ class ToolCalls(unittest.TestCase):
 class ChoiceClient:
     """Records calls; answers the choices list with the given cards and the stream as done."""
 
-    def __init__(self, cards):
+    def __init__(self, cards, post_statuses=()):
         self.cards = cards
         self.calls = []
+        self.post_statuses = list(post_statuses)
 
     def call(self, method, path, body=None, **_):
         self.calls.append((method, path, body))
         if path.endswith("/choices"):
             return 200, {"choices": self.cards}
-        return 202, {}
+        return (self.post_statuses.pop(0) if self.post_statuses else 202), {}
 
     def read_chat_stream(self, session_id, timeout):
         return "done"
 
 
 class ChoiceCards(unittest.TestCase):
-    def live(self, cards):
-        client = ChoiceClient(cards)
+    def live(self, cards, post_statuses=()):
+        client = ChoiceClient(cards, post_statuses)
         live = c.Live(client, report=None, arguments=None)
-        live._last_send["s1"] = ("model-3d", "m1")
+        live._last_send["s1"] = ("model-3d", "m1", {"parameters": {"texture": True}})
         return live, client
 
     def posted(self, client):
@@ -123,6 +124,22 @@ class ChoiceCards(unittest.TestCase):
         self.assertEqual(len(posted), 1)
         self.assertEqual(posted[0]["choiceAnswer"], {"choice_id": "ch1", "use_default": True})
         self.assertEqual((posted[0]["creative_domain"], posted[0]["ai_model"]), ("model-3d", "m1"))
+        # The answer turn keeps the original request's structured parameters.
+        self.assertEqual(posted[0]["parameters"], {"texture": True})
+
+    def test_retries_an_answer_the_server_did_not_accept(self):
+        card = {"id": "ch4", "state": "pending", "allow_default": True, "default_option_id": "a",
+                "options": [{"id": "a"}]}
+        live, client = self.live([card], post_statuses=[503])
+        self.assertFalse(live.answer_pending_choices("s1"))
+        self.assertTrue(live.answer_pending_choices("s1"))
+        self.assertEqual(len(self.posted(client)), 2)
+
+    def test_send_remembers_the_request_but_not_an_answer(self):
+        live, client = self.live([])
+        live.send("s2", "make a model", "model-3d", "m2", parameters={"faces": 8000})
+        live.send("s2", "继续", "model-3d", "m2", choiceAnswer={"choice_id": "x", "use_default": True})
+        self.assertEqual(live._last_send["s2"], ("model-3d", "m2", {"parameters": {"faces": 8000}}))
 
     def test_picks_the_recommended_option_without_a_default(self):
         card = {"id": "ch2", "state": "pending", "allow_default": False,
