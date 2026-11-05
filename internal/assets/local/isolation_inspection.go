@@ -224,7 +224,7 @@ func normalizeInspectionPlan(plan *inspectionPlan, size int64) error {
 	if size < 0 {
 		return errors.New("内容检查大小无效")
 	}
-	if len(plan.fields) > maxArchiveFiles {
+	if len(plan.fields) > maxModelStructureEntries {
 		return errors.New("内容数值字段数量超出限制")
 	}
 	if plan.floatBytes != 0 && plan.floatBytes != 4 && plan.floatBytes != 8 {
@@ -276,7 +276,7 @@ func normalizeInspectionPlan(plan *inspectionPlan, size int64) error {
 	plan.index = newInspectionFieldIndex(plan.fields)
 	for _, target := range []*[]inspectionSpan{&plan.numeric, &plan.allowed} {
 		spans := *target
-		if len(spans) > maxArchiveFiles {
+		if len(spans) > maxModelStructureEntries {
 			return errors.New("内容检查范围数量超出限制")
 		}
 		for _, span := range spans {

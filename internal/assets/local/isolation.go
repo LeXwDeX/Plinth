@@ -32,7 +32,13 @@ const (
 	maxArchiveXMLHeldBytes = 4 << 20
 	maxArchiveXMLDepth     = 256
 	maxArchiveFiles        = 10000
-	maxArchiveBytes        = 1 << 30
+	// Structure counts that grow with the model (USDC tables, glTF arrays and
+	// numeric fields, inspection plan fields and spans) are not archive members:
+	// a multi-part Tripo segmentation carried 10640 USDC field sets (#111, #114).
+	// Decoded bytes and CPU stay bound by the delivered-size limits and the
+	// inspection work budget.
+	maxModelStructureEntries = 1 << 20
+	maxArchiveBytes          = 1 << 30
 	// Matches the largest base64 image response (max_response_bytes, 256 MiB);
 	// 8K PBR textures can exceed 64 MiB. A URL-downloaded texture is bounded
 	// only by its role's max_bytes (1 GiB) and is rejected above this limit.
