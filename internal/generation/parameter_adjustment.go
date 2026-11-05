@@ -45,6 +45,9 @@ func freezeParameterAdjustments(o Offering, normalized json.RawMessage, reasons 
 		if json.Unmarshal(p.Default, &defaultValue) == nil {
 			baseline[p.Name] = defaultValue
 			schema.ApplyForcedValues(o.Parameters, baseline)
+			// #139: the recommendation is the default normalization would
+			// give this combination, moved into its conditional range.
+			schema.ConvergeDefaults(o.Parameters, baseline, func(name string) bool { return name == p.Name })
 			recommended, _ = json.Marshal(baseline[p.Name])
 		}
 		if !exists || sameParameterValue(value, recommended) {

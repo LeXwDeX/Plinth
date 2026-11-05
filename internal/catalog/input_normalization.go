@@ -35,6 +35,7 @@ func normalizeInput(offering schemacontract.Offering, raw json.RawMessage) (json
 			return nil, fmt.Errorf("供给项 %q 不接受参数 %q", offering.ID, name)
 		}
 	}
+	defaulted := map[string]bool{}
 	for _, schema := range offering.Parameters {
 		// fixed 参数由后端固定：调用方取值一律以默认值覆盖。
 		if _, exists := values[schema.Name]; (!exists || schema.Fixed) && len(schema.Default) > 0 {
@@ -45,11 +46,15 @@ func normalizeInput(offering schemacontract.Offering, raw json.RawMessage) (json
 				return nil, fmt.Errorf("参数 %q 默认值无效", schema.Name)
 			}
 			values[schema.Name] = defaultValue
+			defaulted[schema.Name] = true
 		}
 	}
 	// forced_when 是服务端最终裁决：在默认值就位后、逐参数校验前应用，
 	// 用户输入与后续 input_rules 都看到强制后的取值。
 	schemacontract.ApplyForcedValues(offering.Parameters, values)
+	// #139: a default follows the range maximum_when gives the chosen
+	// combination; a value the caller gave is validated below instead.
+	schemacontract.ConvergeDefaults(offering.Parameters, values, func(name string) bool { return defaulted[name] })
 	for _, schema := range offering.Parameters {
 		value, exists := values[schema.Name]
 		if !exists {
@@ -137,9 +142,10 @@ func normalizeInput(offering schemacontract.Offering, raw json.RawMessage) (json
 }
 
 // validateConditionalMaximums applies maximum_when after every value is
-// normalized: each matching entry narrows the parameter's upper bound, and the
-// static maximum checked by validateValue still holds. The value is never
-// rewritten; a combination above a matching bound is refused.
+// normalized: each matching entry narrows the parameter's range, and the
+// static range checked by validateValue still holds. The value is never
+// rewritten; a combination outside the matching range is refused before
+// anything is sent, with the Schema's text naming the legal range (#139).
 func validateConditionalMaximums(offering schemacontract.Offering, values map[string]any) error {
 	for _, schema := range offering.Parameters {
 		if len(schema.MaximumWhen) == 0 {
@@ -153,18 +159,24 @@ func validateConditionalMaximums(offering schemacontract.Offering, values map[st
 		if !ok {
 			continue
 		}
-		for _, limit := range schema.MaximumWhen {
-			if !schemacontract.ConditionMatches(limit.When, values) {
-				continue
-			}
-			if number > limit.Maximum {
-				return fmt.Errorf(
-					"参数 %q 在当前组合下最多为 %s",
-					schema.Name,
-					strconv.FormatFloat(limit.Maximum, 'f', -1, 64),
-				)
-			}
+		minimum, maximum := schema.NumberRange(values)
+		if (maximum == nil || number <= *maximum) && (minimum == nil || number >= *minimum) {
+			continue
 		}
+		low, high := "", ""
+		if minimum != nil {
+			low = strconv.FormatFloat(*minimum, 'f', -1, 64)
+		}
+		if maximum != nil {
+			high = strconv.FormatFloat(*maximum, 'f', -1, 64)
+		}
+		if refusal := offering.ExecutionMessages.InputRefusal(schemacontract.InputRefusalParameterRange,
+			schemacontract.InputRefusalValues{Label: schema.Label, Value: strconv.FormatFloat(number, 'f', -1, 64),
+				RangeMinimum: low, RangeMaximum: high}); refusal != nil {
+			refusal.Operation = "normalize_input"
+			return refusal
+		}
+		return fmt.Errorf("参数 %q 在当前组合下须在 %s 与 %s 之间", schema.Name, low, high)
 	}
 	return nil
 }

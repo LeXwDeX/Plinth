@@ -37,14 +37,10 @@ func (e *Executor) parameterReasons(command chat.ToolCommand, o generation.Offer
 	}
 	// #103: the session production purpose explains the values it contributed,
 	// unless the Agent gave its own reason for the same parameter. The frozen
-	// adjustment then reads "profile:<id>" instead of "agent". A processing
-	// step measured its budget values against its own input (#129), so the
+	// adjustment then reads "profile:<id>" instead of "agent". Every step
+	// chose its budget values against its own final input (#129, #139), so the
 	// same input decides them here.
-	var current map[string]json.RawMessage
-	if command.Tool.Processing != nil {
-		current = values
-	}
-	if profile, overrides := e.purposeParameterValues(command, o, current); profile.ID != "" {
+	if profile, overrides := e.purposeParameterValues(command, o, values); profile.ID != "" {
 		// A value a layer above the purpose set in this call stays that layer's
 		// even when it happens to equal the purpose value (#103).
 		overridden := e.laterParameterNames(command, o)
