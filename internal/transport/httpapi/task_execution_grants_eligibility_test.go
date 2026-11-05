@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
 	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -28,12 +30,13 @@ func (r *hookedGrantRepository) ApproveExecutionGrantWithBudget(ctx context.Cont
 	return r.Repository.(executiongrant.BudgetGrantStore).ApproveExecutionGrantWithBudget(ctx, owner, requestID, budgetID, actor, amount)
 }
 
-// #120 item 9: the processing panel approving a paused step of an
-// Agent-created plan re-prepares that step's budget-eligible grant. The
-// request replays the same grant with its eligibility intact; it neither
-// conflicts nor silently turns the Agent's step into a browser step.
-func TestProcessingPanelGrantKeepsAgentPlanStepEligibility(t *testing.T) {
-	t.Parallel()
+// panelGrantOfAgentPlanStep sets up a paused step of an Agent-created
+// processing plan whose grant the plan worker already issued as an Agent step,
+// optionally under an active production plan of the session, and sends the
+// processing panel's grant request for it. It returns the first grant, the
+// panel's response and the repository.
+func panelGrantOfAgentPlanStep(t *testing.T, planLimits []budget.Amount) (executiongrant.Grant, *httptest.ResponseRecorder, *sqlite.Repository) {
+	t.Helper()
 	module, handler, cookie, sessionID := grantTestBrowserWithApplication(t, nil, []string{"user"})
 	ctx := context.Background()
 	state, ok := fixtureExecutions.Load(module)
@@ -58,6 +61,20 @@ func TestProcessingPanelGrantKeepsAgentPlanStepEligibility(t *testing.T) {
 	}
 	binding := harness.DefaultSelection("owner-a", sessionID).Binding
 	now := time.Now().UTC()
+	if len(planLimits) > 0 {
+		production, err := repository.CreateProductionBudget(ctx, budget.ProductionBudget{
+			ID: "pb-panel", OwnerID: "owner-a", SessionID: sessionID,
+			Plan: budget.Plan{Title: "加工", Steps: []budget.PlanStep{{Capability: string(prepared.Capability), Purpose: "主体",
+				Estimate: budget.Legacy(prepared.EstimatedCredits)}}},
+			Limits: planLimits, State: budget.StatePending, CreatedAt: now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repository.DecideProductionBudget(ctx, "owner-a", production.ID, "owner-a", true, now); err != nil {
+			t.Fatal(err)
+		}
+	}
 	plan := processing.Plan{
 		ID: "agent-eligible-plan", OwnerID: "owner-a", SessionID: sessionID, Harness: binding,
 		Origin:       processing.OriginAgent,
@@ -85,14 +102,45 @@ func TestProcessingPanelGrantKeepsAgentPlanStepEligibility(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("panel grant request: %d %s", response.Code, response.Body.String())
 	}
+	return first, response, repository
+}
+
+// #120 item 9: the processing panel approving a paused step of an
+// Agent-created plan re-prepares that step's budget-eligible grant. The
+// request replays the same grant with its eligibility intact; it neither
+// conflicts nor silently turns the Agent's step into a browser step.
+func TestProcessingPanelGrantKeepsAgentPlanStepEligibility(t *testing.T) {
+	t.Parallel()
+	first, response, repository := panelGrantOfAgentPlanStep(t, nil)
 	var requested struct {
 		ID string `json:"request_id"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &requested); err != nil || requested.ID != first.RequestID {
 		t.Fatalf("panel grant = %s err=%v, want replay of %s", response.Body.String(), err, first.RequestID)
 	}
-	grant, err := repository.GetExecutionGrant(ctx, "owner-a", requested.ID)
+	grant, err := repository.GetExecutionGrant(context.Background(), "owner-a", requested.ID)
 	if err != nil || !grant.BudgetEligible {
 		t.Fatalf("panel request changed the Agent step's eligibility: %+v err=%v", grant, err)
+	}
+}
+
+// #135: when the session's approved production plan covers that step, the
+// panel's request is approved by the plan, and the response says it was the
+// policy's approval, so the panel does not ask the person to confirm it again.
+func TestProcessingPanelGrantCoveredByThePlanIsApprovedByPolicy(t *testing.T) {
+	t.Parallel()
+	first, response, repository := panelGrantOfAgentPlanStep(t, []budget.Amount{budget.Legacy(10000)})
+	var requested struct {
+		ID               string `json:"request_id"`
+		Status           string `json:"status"`
+		ApprovedByPolicy bool   `json:"approved_by_policy"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &requested); err != nil || requested.ID != first.RequestID ||
+		requested.Status != string(executiongrant.Approved) || !requested.ApprovedByPolicy {
+		t.Fatalf("panel grant = %s err=%v", response.Body.String(), err)
+	}
+	grant, err := repository.GetExecutionGrant(context.Background(), "owner-a", requested.ID)
+	if err != nil || !grant.ApprovedByBudget() {
+		t.Fatalf("plan-approved grant = %+v err=%v", grant, err)
 	}
 }

@@ -131,6 +131,47 @@ func TestBudgetModeRunsPlannedStepsInsideTheLimitWithoutCards(t *testing.T) {
 	}
 }
 
+// #135: a step the approved plan approved was approved by the session's
+// approval policy, not by the person: the tool result and the step shown in
+// the chat say policy, and the result names the plan and what it holds.
+func TestBudgetApprovedStepReportsPolicyApprovalAndItsPlan(t *testing.T) {
+	executor, command, gateway, repo := budgetHarness(t, "refine_image", "text-to-image")
+	createActiveBudgetPlan(t, repo, "pb-source", 15, "text-to-image")
+	command.Call.ID = "call-source"
+	command.ConsentWaitDeadline = time.Time{}
+	var observed []chat.ToolObservation
+	result, err := executor.Execute(context.Background(), command, func(observation chat.ToolObservation) error {
+		observed = append(observed, observation)
+		return nil
+	})
+	if err != nil || result.NoSubmission || gateway.submitCount != 1 {
+		t.Fatalf("planned step = %+v err=%v submits=%d", result, err, gateway.submitCount)
+	}
+	content := budgetContent(t, result)
+	if content[command.Tool.ResultFields.Approval] != "policy" {
+		t.Fatalf("approval = %v, want policy: %v", content[command.Tool.ResultFields.Approval], content)
+	}
+	plan, ok := content[command.Tool.ResultFields.Budget].(map[string]any)
+	if !ok || plan["id"] != "pb-source" || plan["title"] != "制作计划" {
+		t.Fatalf("budget object = %v", content[command.Tool.ResultFields.Budget])
+	}
+	if remaining, reserved := budgetNumbers(t, content, command.Tool.ResultFields.Budget); remaining != "8" || reserved != "7" {
+		t.Fatalf("budget figures = remaining %s reserved %s", remaining, reserved)
+	}
+	registered := false
+	for _, observation := range observed {
+		if observation.Registered {
+			registered = true
+			if observation.ApprovalSource != "policy" {
+				t.Fatalf("registered step approval source = %q, want policy", observation.ApprovalSource)
+			}
+		}
+	}
+	if !registered {
+		t.Fatal("the step was never registered")
+	}
+}
+
 // The third planned step that does not fit the limit stops at its card, and the
 // Agent is told the reason and the remaining credits.
 func TestBudgetModeSendsAStepBeyondTheLimitToItsCard(t *testing.T) {

@@ -272,7 +272,8 @@ func (e *Executor) observeThreeView(ctx context.Context, command chat.ToolComman
 	}
 	if observe != nil {
 		source := "human"
-		if grant.ApprovedByPolicy() {
+		// A production plan's approval is the session policy's too (#135).
+		if grant.ApprovedByPolicy() || grant.ApprovedByBudget() {
 			source = "policy"
 		}
 		if err := observe(chat.ToolObservation{Registered: true, TaskID: grant.TaskID,
@@ -283,7 +284,7 @@ func (e *Executor) observeThreeView(ctx context.Context, command chat.ToolComman
 	}
 	messages := e.threeView.Messages
 	approval := messages.ApprovalHuman
-	if grant.ApprovedByPolicy() {
+	if grant.ApprovedByPolicy() || grant.ApprovedByBudget() {
 		approval = messages.ApprovalPolicy
 	}
 	return chat.ToolResult{TaskID: grant.TaskID, AgentContent: strings.NewReplacer(

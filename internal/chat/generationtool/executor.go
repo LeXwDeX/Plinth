@@ -737,10 +737,11 @@ type stepInfo struct {
 	Budget *budget.Summary
 }
 
-// budgetResult is the budget part of a paid tool result: the plan's identity
-// and what it still holds after this step, per credit unit (#120). The Agent
-// uses it to decide whether the next planned step fits in its own unit,
-// without guessing from earlier numbers or adding different units.
+// budgetResult is the budget part of a paid tool result: the plan the step
+// belongs to (its ID and title) and what it still holds after this step, per
+// credit unit (#120, #135). The Agent uses it to decide whether the next
+// planned step fits in its own unit, without guessing from earlier numbers or
+// adding different units.
 func budgetResult(summary budget.Summary) map[string]any {
 	remaining := make([]budget.Amount, 0, len(summary.Units))
 	reserved := make([]budget.Amount, 0, len(summary.Units))
@@ -750,6 +751,7 @@ func budgetResult(summary budget.Summary) map[string]any {
 	}
 	return map[string]any{
 		"id":        summary.ID,
+		"title":     summary.Plan.Title,
 		"remaining": remaining,
 		"reserved":  reserved,
 	}
@@ -761,12 +763,15 @@ const (
 )
 
 // approvalSource names who approved a grant. An empty grant (recovery paths
-// that never loaded one) has no known source.
+// that never loaded one) has no known source. A step an approved production
+// plan approved (actor budget:<id>) was approved by the session's approval
+// policy, not by a person clicking its card (#135); its result also carries
+// the plan's budget object.
 func approvalSource(grant executiongrant.Grant) string {
 	switch {
 	case grant.RequestID == "":
 		return ""
-	case grant.ApprovedByPolicy():
+	case grant.ApprovedByPolicy(), grant.ApprovedByBudget():
 		return approvalByPolicy
 	default:
 		return approvalByHuman
