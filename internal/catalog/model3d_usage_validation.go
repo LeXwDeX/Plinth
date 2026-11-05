@@ -528,7 +528,8 @@ func simulateProfileParameters(offering schemacontract.Offering, overrides map[s
 		}
 		values[name] = normalized
 	}
-	simulated := make(map[string]json.RawMessage, len(values)+len(offering.Parameters))
+	// Every overridden name is one of the Offering's parameters.
+	simulated := make(map[string]json.RawMessage, len(offering.Parameters))
 	for name, raw := range values {
 		simulated[name] = raw
 	}

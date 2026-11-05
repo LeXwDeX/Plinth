@@ -93,7 +93,7 @@ func (service *Service) UpdateProductionBrief(
 		if err != nil {
 			return nil, err
 		}
-		merged := make(ProductionBrief, len(previous)+len(normalized))
+		merged := make(ProductionBrief, len(previous))
 		for name, value := range previous {
 			merged[name] = value
 		}
