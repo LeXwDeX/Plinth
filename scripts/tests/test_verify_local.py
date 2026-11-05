@@ -406,7 +406,9 @@ class FingerprintTests(VerificationTests):
             return str(self.clang).encode()
         return b'test version'
     def fingerprint(self, identity=None):
-        with patch.object(v, 'capture', self.capture), patch.object(v.shutil, 'which', side_effect=lambda name, path=None: '/usr/bin/' + name if name in ('cc', 'c++') else str(self.tool)), patch.object(v.sys, 'platform', 'darwin'), patch.object(v.Path, 'home', return_value=self.external):
+        # Git exports GIT_EXEC_PATH to hooks; the fake capture reports its own exec directory.
+        hermetic = {key: value for key, value in v.os.environ.items() if key != 'GIT_EXEC_PATH'}
+        with patch.dict(v.os.environ, hermetic, clear=True), patch.object(v, 'capture', self.capture), patch.object(v.shutil, 'which', side_effect=lambda name, path=None: '/usr/bin/' + name if name in ('cc', 'c++') else str(self.tool)), patch.object(v.sys, 'platform', 'darwin'), patch.object(v.Path, 'home', return_value=self.external):
             return (identity or v.identity)(self.root)
     def test_dependency_modules_sdk_toolchain_and_user_config_bytes_bound(self):
         paths = [self.root / 'node_modules/.pnpm/package/code.js', self.module / 'code.go',
