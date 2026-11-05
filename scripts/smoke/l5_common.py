@@ -1082,6 +1082,15 @@ class Live:
         if reply is None:
             self.report.failed("final reply", "timed out waiting for the turn to finish")
             return None, self.tasks(session_id), False
+        # A turn that stopped at a choice card (for example the #103 usage card) has not done the
+        # request yet, even when no task is expected; answer it and wait for the turn it starts.
+        for _ in range(3):
+            if not self.answer_pending_choices(session_id):
+                break
+            reply = self.wait_reply(session_id)
+            if reply is None:
+                self.report.failed("final reply", "timed out waiting for the turn after the choice answer")
+                return None, self.tasks(session_id), False
         answered = len(self._answered_choices)
         tasks, settled = self.wait_tasks(session_id, expected, watch=watch)
         if len(self._answered_choices) > answered:

@@ -19,7 +19,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import l5_common as common  # noqa: E402
 
-PROMPT = "生成一个简单的低多边形陶罐 3D 模型，带盖子和两个把手。"
+PROMPT = "生成一个简单的陶罐 3D 模型，带盖子和两个把手。"
 FORMAT_REQUEST = "这个模型没有 STL 格式，请帮我转换并导出一份 STL。"
 FORMAT_PARAMETERS = ("output_formats", "target_formats")
 
@@ -65,6 +65,11 @@ def run_provider(live, report, provider, offering):
     parameters, notes, asks = plan_parameters(offering)
     label = f"{provider} ({', '.join(notes) or 'defaults'})"
     session = live.new_session()
+    # The chain checks that this provider's model takes the requested parameters, so pick the model
+    # and a display purpose the way a person does; a real-time purpose would let the Agent pick
+    # another model or change the parameters for the budget (#103).
+    live.lock_model_3d(session, offering["model_id"])
+    live.set_brief(session, {"purpose": "render"})
     prompt = PROMPT + ("请求：" + "；".join(asks) + "。" if asks else "")
     reply, tasks, settled = live.run_turn(session, prompt, "model-3d", offering["model_id"],
                                           {"text-to-3d": 1}, parameters=parameters)
