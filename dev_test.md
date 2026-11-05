@@ -72,7 +72,7 @@ CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check
   静态测试不证明 GitHub 的实际路由、runner 隔离或网络访问。增删、改写或改变执行位置时，同一提交里改这几处，测试才会通过。
 - **Action 版本**：工作流中的 Action 固定到发布标签对应的完整提交 SHA，行尾注释写标签；升级时在官方仓库核对标签与 SHA 再一起改。
 - **CI 与内部验收的分工**：三个门禁作业都在 GitHub 托管的 `ubuntu-latest` 上运行。PR 仍可修改工作流，合并前须审查工作流改动；工作流以 `persist-credentials: false` 检出。零 Key 的 Mock 自部署冒烟 `scripts/smoke/smoke-public-mock.sh` 要求环境文件显式写 `PROVIDER_MODE=mock`、`AGENT_MODE=mock`，保留为本地手动验收（自部署后运行，覆盖登录、健康、一次 Mock 图片与一次 Mock 3D 任务的全部产物下载核对、restart 与 down/up 持久化及 `down -v` 清理）。维护者内部环境（`dev-test`、`formal-test`）的部署与 L0/L1/L1 Agent 冒烟经 `scripts/release-env.py release`/`smoke` 走 `scripts/smoke/` 的脚本，真实模型付费验收也只由维护者在内部测试环境执行（§3、§11），都不进 CI，也不是外部 PR 的合并条件。
-- **分支保护**：不设置。仓库为私有、免费套餐不支持分支保护；合并前的门禁由本节与「交付硬门禁」的本机预检保证。
+- **分支保护**：`main` 要求 GitHub 检查 `frontend`、`go check`、`go test race` 通过才能合并；合并前的门禁另由本节与「交付硬门禁」的本机预检和主机 CI 保证。
 
 ### 主机自检替代 CI（#79）
 
@@ -183,7 +183,9 @@ python3 scripts/host-ci/run.py HEAD          # 或任一提交 / 完整 SHA
 ### 交付硬门禁
 
 - 合并前以本机门禁为准：每个分支推送时照常跑 pre-push（本地八项）；合并到 `main` 前，在待合并的 head 上跑一次 `python3 scripts/verify-local.py --race`，结果写进 PR。
-- 交付任何改动到 `dev-test` 前，最终待发布的精确 `main` SHA 应有一次完整的 GitHub Actions `CI` 运行且所有作业 success。托管 runner 因计费墙不可用时，按上节先对同一 SHA 做本机初检，再以该 SHA 的完整隔离主机自检作为 CI 替代，并在 PR 或 Issue 记录实际结果。作业因代码原因失败时不得放行；主机自检不能冒称 Actions success。旧 SHA、其他提交的结果、缺项或 skip 都不算。
+- 开发阶段以主机 CI 为准：交付任何改动到 `dev-test` 前，最终待发布的精确 `main` SHA 须先过本机初检，再在 `dev-test` 主机 `<发布根>/ci` 的一次性 Docker 容器里通过完整主机 CI（`host-ci/gates` success），并在 PR 或 Issue 记录实际结果。GitHub runner 配置较低，不作开发期验证依据。
+- 晋级 `formal-test` 前，本轮所有问题已在主机 CI 与 `dev-test` 解决后，待晋级的精确 `main` SHA 须再有一次完整的 GitHub Actions `CI` 运行（全部测试与门禁，不按 diff 缩减）且所有作业 success；之后发布 `formal-test` 交人工 review，review 通过才打 tag 并发布 GitHub Release。
+- 作业因代码原因失败时不得放行；主机 CI 不能冒称 Actions success。旧 SHA、其他提交的结果、缺项或 skip 都不算。
 - 发布到 `dev-test` 前，还要在同一个待发布 `main` revision 上再跑一次本机 `--race` 全量；发布后照常做 L0、L1、L1 Agent 和相关验收。每次 `dev-test` 发布后还必须运行 L5 真实能力回归的全部脚本（`scripts/smoke/smoke-l5-*.py`，入口 `smoke-l5-all.sh`，用法与费用见 `scripts/smoke/README.md`），验收报告逐项列出每个脚本的 PASS/FAIL/SKIP 结果；完整 L5 运行计入 `AGENTS.md` 的付费验收次数上限，超出部分须在当前对话取得用户批准。CI 只作门禁，不承担部署。
 
 ### 本地统一入口与 pre-push 复用

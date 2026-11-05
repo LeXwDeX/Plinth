@@ -47,12 +47,14 @@ Plinth 是开源的多模型创作平台：Go 后端（`cmd/`、`internal/`）�
 功能实现或修复按以下顺序连续完成，无需用户逐步催办或再次确认：
 
 1. **写清预期**：修改行为前写清预期、边界和验证路径。Schema/共享接口变更须检查 Catalog 校验、公开投影、扩展 discovery、兼容 API、前端消费者、fixture/快照与运行时可用性；跨 Provider 链需测成功、失败、跨用户、同/异 Provider、格式不兼容及重试/同意路径。代码保持语义明确、可维护。
-2. **本机门禁**：按 `dev_test.md` §2 运行（见「验收要求」）。
+2. **本机门禁与主机 CI**：按 `dev_test.md` §2 运行本机门禁，再用 `python3 scripts/host-ci/run.py <sha>` 在 `dev-test` 主机 `<发布根>/ci` 的一次性 Docker 容器里对精确提交跑门禁（见「验收要求」）。开发阶段以主机 CI 为验证依据，不依赖 GitHub runner。
 3. **Git 交付**：提交、推送、创建 PR 并在门禁通过后正常合并到 `main`（见「Git 与协作」）。
 4. **发布到 `dev-test`**：用 `scripts/release-env.py release dev-test` 发布已推送的 `origin/main`，发布后核对镜像 revision 与目标完整 SHA 一致。CI 只执行自动化门禁，不承担发布。
 5. **部署后回归**：执行每次发布必跑的 L0 浏览器启动检查、L1 免费冒烟，以及本次功能涉及的页面、API 和直接影响链回归；每次 `dev-test` 发布后必须运行 L5 全部脚本（`scripts/smoke/smoke-l5-all.sh`，需显式设置 `ART_AI_LIVE_ACK=1`），验收报告逐项列出每个脚本的结果；完整 L5 运行计入下文「付费验收是正常交付流程」的每版本、每 Provider 10 次上限，超出部分须按该规则在当前对话取得用户批准；涉及 Agent、生成或同意链路时，按 `scripts/smoke/README.md` 执行 L2 等相关真实模型验收（遵守「付费验收」）。
 6. **失败处置**：发布脚本构建或 preflight 失败时中止，旧实例不动；容器更新或健康检查失败由脚本回滚并留报告。L0/L1 及后续回归失败不在脚本自动回滚范围内，必须记录证据、按部署协议恢复已验证版本，再修复并重跑受影响检查和发布验收；回滚失败或环境阻塞须明确报告，不能降级验收或跳过失败项。发布和测试协议以 `docs/deployment.md`、`dev_ops.md`「Agent 全自动发布协议」与 `scripts/smoke/README.md` 为准。
-7. **晋级到 `formal-test`**（需要时）：开发测试环境（包括 Agent 测试）全部稳定通过以后，才发布到正式测试环境。`formal-test` 只接收已在 `dev-test` 发布成功、并且 L0、L1、L1 Agent 及本次相关浏览器/Agent 验收全部 PASS（无 skip、无 soft-fail）的精确 `main` revision；验收报告以本仓库原生 Issue comment 记录，`release-env.py` 读取并核对该报告与 `dev-test` 成功发布清单，缺任一项即拒绝。晋级回执记在 #2 的 comment。
+7. **最终 GitHub CI**：本轮所有问题在主机 CI 与 `dev-test` 上解决后，对准备晋级的精确 `main` revision 跑一次 GitHub runner 的完整 TDD/CI（全部测试与门禁，不按 diff 缩减），全部通过才可晋级。
+8. **晋级到 `formal-test` 做人工 review**（需要时）：开发测试环境（包括 Agent 测试）全部稳定通过、最终 GitHub CI 通过以后，才发布到正式测试环境，交由人工 review。`formal-test` 只接收已在 `dev-test` 发布成功、并且 L0、L1、L1 Agent 及本次相关浏览器/Agent 验收全部 PASS（无 skip、无 soft-fail）的精确 `main` revision；验收报告以本仓库原生 Issue comment 记录，`release-env.py` 读取并核对该报告与 `dev-test` 成功发布清单，缺任一项即拒绝。晋级回执记在 #2 的 comment。
+9. **Tag 与 GitHub Release**：人工 review 确认 `formal-test` 版本无问题后，才对该精确 revision 打 tag 并发布 GitHub Release；review 未通过时修复后从第 1 步重走。
 
 纯文档或 AGENTS 规则修改且不影响运行产物时，只做第 1–3 步并校验文档，不必重建运行镜像或发布。
 
@@ -60,7 +62,8 @@ Plinth 是开源的多模型创作平台：Go 后端（`cmd/`、`internal/`）�
 
 - **完成的定义**：影响产品运行的修改（代码、Schema、配置或前端产物），只有发布到已定义测试环境并验证相关页面、API 和直接影响链后才能报告“完成”；不得只停在本机实现、构建通过或健康检查通过，也不得把未部署的改动记作完成。
 - **按公开交付契约验收**：Provider 返回 `SUCCEEDED`、模型能打开、服务健康或局部测试通过，不等于公开任务完整交付成功。按 `docs/architecture.md` 核对必需产物槽位、实际字节、资产状态及鉴权交付。不得用放松安全校验、把必需产物改成可选、盲目付费重试或仅增大超时来掩盖原因；契约变更须有独立依据并遵循既有授权与验收规则。
-- **自动化门禁**：`dev_test.md` §2 是本地与 CI 自动化门禁的唯一真源；按最终 diff 和影响链运行，合并前的 CI 门禁按其「交付硬门禁」执行。前端构建使用 pnpm；Go 验证使用 go 命令。不要把远端 CI 当本机可复现问题的首次测试环境。需要干净环境复现门禁时，用 `python3 scripts/host-ci/run.py <sha|HEAD>` 在 `dev-test` 主机的一次性容器里对精确提交跑同一套门禁；GitHub Actions 不可用期间它也是项目的 CI 替代（#79），规则见 `dev_test.md` §2「主机 CI」。
+- **自动化门禁**：`dev_test.md` §2 是本地与 CI 自动化门禁的唯一真源；按最终 diff 和影响链运行，合并前的 CI 门禁按其「交付硬门禁」执行。前端构建使用 pnpm；Go 验证使用 go 命令。
+- **CI 分工**：开发阶段的 CI 是主机 CI：`python3 scripts/host-ci/run.py <sha|HEAD>` 在 `dev-test` 主机 `<发布根>/ci` 的一次性 Docker 容器里对精确提交跑同一套门禁，结果写回提交状态 `host-ci/gates`，规则见 `dev_test.md` §2「主机 CI」（#79）。GitHub runner 配置较低，只作晋级 `formal-test` 前的最终完整 CI，不作开发期排查与首次验证环境。
 - **验收数据**：`dev-test` 的每次冒烟与相关验收都从全新数据开始，按真实用户流程创建自己的会话与数据（例如 #25：全新数据 → 模拟用户沟通 → Agent 先 2D 后 3D，真实请求），不依赖历史任务或会话。账号只有两类：运行环境 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 引导的管理员测试账号 suntao341（#28），以及下文「Agent 测试开发账号」。
 - **付费验收**：真实模型/付费验收是产品落地与功能验收的正常组成部分；是否需要按 Issue 范围与 `scripts/smoke/README.md` 判定，并以下达任务的用户最新指示为准。活动中某条「停止/暂停付费验收」的阶段性记录不构成长期规则。发起前核对当前官方协议、价格与余额，只做小额单次请求，绝不重放已消费的 intent。
   - 在 `dev-test` 做真实生成验收时，Agent 以「人」的身份代为点击/调用同意批准，不再逐次向用户请示。这只是 `dev-test` 的测试期操作授权，不适用于 `formal-test` 或正式生产；产品的批准规则见 `docs/product.md`。
