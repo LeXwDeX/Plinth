@@ -802,6 +802,9 @@
               "insufficient_quota": {
                 "class": "insufficient_balance"
               },
+              "quota_exceeded": {
+                "class": "credential_quota"
+              },
               "moderation_blocked": {
                 "class": "content_rejected"
               },
@@ -3956,7 +3959,7 @@
         "failure.timed_out": "上游请求超时",
         "failure.rejected": "上游拒绝或取消了任务",
         "failure.insufficient_balance": "该模型服务商的账户余额不足或已欠费，暂时无法生成。请联系管理员处理",
-        "failure.credential_quota": "该 API Key 已达额度上限，请在 Provider 控制台调整 Key 额度或更换 Key",
+        "failure.credential_quota": "上游服务的 API Key 额度已用完，暂时无法生成。请联系管理员调整 Key 额度或更换 Key",
         "failure.upstream_unavailable": "上游服务暂时不可用",
         "failure.submission_unknown": "无法确认上游是否已接受任务",
         "failure.integrity_failure": "生成资产未通过完整性校验",
@@ -7588,7 +7591,7 @@
           "generation_failed": "生成失败",
           "generation_failed_by_class": {
             "insufficient_balance": "该模型服务商的账户余额不足或已欠费，这一步没有执行。请联系管理员处理",
-            "credential_quota": "该 API Key 已达额度上限，请在 Provider 控制台调整 Key 额度或更换 Key，这一步没有执行。请联系管理员处理",
+            "credential_quota": "上游服务的 API Key 额度已用完，这一步没有执行。请联系管理员调整 Key 额度或更换 Key",
             "content_rejected": "上游服务的内容安全审核拦截了这一步的输入（审核器较敏感，正常美术素材也可能被误判），没有生成结果，原样重试也不会通过。请主动调整后再调用一次：按审核原因改写提示词，去掉可能触发的描述（例如 sexual 时写明服装完整、姿态得体，去掉裸露、贴身、性感等词；violence 时去掉血腥、武器伤害描写），保留美术意图；若被拦的是输入图本身，改写提示词无效，请改用其他图或去掉该参考图后再试，必要时请用户换图。同时如实告诉用户是审核拦截以及你做了什么调整。不要建议修改部署配置",
             "upstream_denied": "上游图像生成服务拒绝了这一步的请求（HTTP 403），没有生成结果。这是上游访问权限问题，与提示词和图片无关：不要改写提示词、换图或换参数重试，也不要再换别的模型反复试探。请如实告诉用户是上游图像生成服务拒绝了请求，需要管理员检查上游服务的访问权限后再试",
             "source_expired": "来源模型在服务商处的原任务已过期，这一步没有执行，也没有扣费。重新发起时平台会改用已保存的模型文件；不接受模型文件的服务（例如动画）需要先重新生成来源模型，或在它之前的版本上重新绑骨"
@@ -14618,7 +14621,7 @@
             "failure.timed_out": "Upstream request timed out",
             "failure.rejected": "The upstream rejected or canceled the task",
             "failure.insufficient_balance": "The model provider's account balance is insufficient or overdue, so generation is temporarily unavailable. Please contact an administrator",
-            "failure.credential_quota": "This API key has reached its credit limit. Raise the key limit in the provider console or switch to another key",
+            "failure.credential_quota": "The upstream service's API key has used up its quota, so generation is temporarily unavailable. Please contact an administrator to raise the key's quota or switch to another key",
             "failure.upstream_unavailable": "The upstream service is temporarily unavailable",
             "failure.submission_unknown": "Unable to confirm whether the upstream accepted the task",
             "failure.integrity_failure": "The generated asset failed the integrity check",
@@ -16539,7 +16542,7 @@
             "chat.presentation.messages.interrupted_prompt": "⚠️ This generation task was interrupted (prompt: {prompt}). Please describe your request again.",
             "chat.presentation.messages.generation_failed": "Generation failed",
             "chat.presentation.messages.generation_failed_by_class.insufficient_balance": "This model provider's account balance is insufficient or overdue, so this step was not run. Please contact an administrator",
-            "chat.presentation.messages.generation_failed_by_class.credential_quota": "This API key has reached its credit limit. Raise the key limit in the provider console or switch to another key, so this step was not run. Please contact an administrator",
+            "chat.presentation.messages.generation_failed_by_class.credential_quota": "The upstream service's API key has used up its quota, so this step was not run. Please contact an administrator to raise the key's quota or switch to another key",
             "chat.presentation.messages.generation_failed_by_class.upstream_denied": "The upstream image generation service refused this step's request (HTTP 403); no result was produced. It is an access problem upstream, not about the prompt or pictures: do not rewrite the prompt, change pictures or parameters and retry, and do not keep probing other models. Tell the user plainly that the upstream image generation service refused the request and that an administrator needs to check access to the upstream service before trying again",
             "chat.presentation.messages.generation_failed_by_class.content_rejected": "The upstream service's content-safety review blocked this step's input (the classifier is sensitive and ordinary art material can be flagged by mistake); no result was produced, and retrying the same input will not pass. Adjust and call once more on your own: rewrite the prompt by the review's reason, dropping the descriptions that may trip it (for sexual, state that the clothing is complete and the pose is modest, and drop words such as nude, skin-tight or sexy; for violence, drop gore and weapon-injury descriptions) while keeping the art intent; if the input image itself was blocked, rewriting the prompt will not help, so use another image or drop that reference and try again, asking the user for another image when needed. Tell the user plainly it was a content-safety block and what you changed. Do not suggest changing the deployment configuration",
             "chat.presentation.messages.content_rejected_reasons": " (reason: {reasons})",
