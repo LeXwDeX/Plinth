@@ -173,7 +173,13 @@ print(offs[0]["id"] if offs else "")
   case "$code" in 200|201) ;; *) bad "$tag grant ($code)"; return 1 ;; esac
   if [ "$gstatus" = pending ]; then
     # A pending approval card (manual mode: text-to-3d needs a person); the smoke approves it.
-    code=$(req "$WORK/decide.json" -b "$JAR" -X PUT "$BASE/api/v1/tasks/grants/$rid" "${JSONH[@]}" "${ORIGIN[@]}" -d '{"decision":"approve"}')
+    # The decision member is Schema data (chat.api.fields.decision, #120), read like the browser.
+    [ -s "$WORK/schema.json" ] || req "$WORK/schema.json" -b "$JAR" "$BASE/api/v1/schema" >/dev/null
+    code=$(req "$WORK/decide.json" -b "$JAR" -X PUT "$BASE/api/v1/tasks/grants/$rid" "${JSONH[@]}" "${ORIGIN[@]}" \
+      -d "$(py 'import json,sys
+d=json.load(open(sys.argv[1])); d=d.get("schema", d)
+m=((d.get("chat") or {}).get("api") or {}).get("fields",{}).get("decision")
+sys.exit(1) if not m else print(json.dumps({m: sys.argv[2]}))' "$WORK/schema.json" approve)")
     [ "$code" = 200 ] && ok "$tag approval card approved" || { bad "$tag approve ($code)"; return 1; }
   fi
   code=$(req "$WORK/submit.json" -b "$JAR" -X POST "$BASE/api/v1/tasks" "${JSONH[@]}" "${ORIGIN[@]}" \

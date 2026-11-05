@@ -176,6 +176,15 @@ class ChoiceCards(unittest.TestCase):
         reply, _, _ = self.run_turn(set())
         self.assertEqual(reply, "请先选用途")
 
+    def test_follow_turn_waits_for_a_turn_the_server_started_without_sending(self):
+        # #134: an approved plan runs in a turn the server started; nothing is sent.
+        live, client = self.live([])
+        live.wait_reply = lambda session_id: "按计划生成了模型"
+        live.wait_tasks = lambda session_id, expected, watch=None: ([{"id": "t1"}], True)
+        reply, tasks, settled = live.follow_turn("s1", {"text-to-3d": 1})
+        self.assertEqual((reply, [item["id"] for item in tasks], settled), ("按计划生成了模型", ["t1"], True))
+        self.assertEqual(self.posted(client), [])
+
 
 class Waiting(unittest.TestCase):
     def test_reply_final(self):
@@ -297,13 +306,33 @@ SCHEMA = {"schema": {"runtime": {"http": {"routes": {"chat_session_budget": BUDG
                      "chat": {"api": {"fields": {"decision": "decision"}}}}}
 
 
-def plan_card(budget_id="b1", limit=60, quote=40, steps=None):
-    """A pending plan card as GET pending-approvals lists it (pendingapproval.Item, kind plan)."""
-    steps = steps if steps is not None else [{"capability": "text-to-3d", "estimated_credits": 30},
-                                             {"capability": "remesh", "estimated_credits": 10}]
+def amounts(**by_unit):
+    """A per-unit list as the server writes it: {unit, unit_label, amount} with decimal strings."""
+    return [{"unit": unit.replace("_", "."), "unit_label": unit, "amount": amount} for unit, amount in by_unit.items()]
+
+
+def plan_card(budget_id="b1", budgets=None, quotes=None, steps=None):
+    """A pending plan card as GET pending-approvals lists it (pendingapproval.Item, kind plan, #120)."""
+    tripo = lambda amount: {"unit": "tripo.credit", "unit_label": "Tripo credits", "amount": amount}  # noqa: E731
+    steps = steps if steps is not None else [{"capability": "text-to-3d", "estimate": tripo("30")},
+                                             {"capability": "remesh", "estimate": {"unit": "legacy.credits",
+                                                                                   "unit_label": "legacy.credits",
+                                                                                   "amount": "10"}}]
     return {"kind": "plan", "request_id": budget_id, "status": "pending", "tool": "propose_production_plan",
-            "budget_credits": limit, "estimated_credits": quote, "plan": {"title": "宝箱", "steps": steps},
-            "inputs": [], "message_id": "m1"}
+            "budgets": amounts(tripo_credit="40", legacy_credits="20") if budgets is None else budgets,
+            "estimated_totals": amounts(tripo_credit="30", legacy_credits="10") if quotes is None else quotes,
+            "plan": {"title": "宝箱", "steps": steps}, "inputs": [], "message_id": "m1"}
+
+
+def session_budget(**units):
+    """A session's current plan as the session read carries it: units[{unit, unit_label, limit, spent,
+    reserved, remaining}] (#120). units maps a unit to (limit, spent, reserved)."""
+    rows = []
+    for unit, (limit, spent, reserved) in units.items():
+        name = unit.replace("_", ".")
+        rows.append({"unit": name, "unit_label": name, "limit": limit, "spent": spent, "reserved": reserved,
+                     "remaining": "0"})
+    return {"id": "b1", "state": "active", "units": rows}
 
 
 def step_card(request_id="g1", capability="text-to-3d"):
@@ -321,13 +350,20 @@ class BudgetCards(unittest.TestCase):
     def test_plan_card_problems(self):
         self.assertEqual(c.plan_card_problems(plan_card()), [])
         self.assertEqual(c.plan_capabilities(plan_card()), ["text-to-3d", "remesh"])
-        cases = {"no budget id": plan_card(budget_id=""), "budget_credits 0": plan_card(limit=0),
+        cases = {"no budget id": plan_card(budget_id=""), "budgets []": plan_card(budgets=[]),
                  "no steps": plan_card(steps=[]), "a step without capability": plan_card(steps=[{"purpose": "x"}]),
-                 "limit 30 below the quote 40": plan_card(limit=30)}
+                 # Units are compared one by one: 100 legacy credits never cover 30 Tripo credits.
+                 "tripo.credit limit None below the quote 30": plan_card(budgets=amounts(legacy_credits="100")),
+                 "tripo.credit limit 29 below the quote 30": plan_card(budgets=amounts(tripo_credit="29",
+                                                                                      legacy_credits="20"))}
         for problem, card in cases.items():
             self.assertIn(problem, c.plan_card_problems(card), card)
         self.assertEqual(c.plan_card_problems(None), ["no plan card"])
-        self.assertTrue(c.plan_card_problems({**plan_card(), "budget_credits": True}))
+        self.assertTrue(c.plan_card_problems({**plan_card(), "budgets": amounts(tripo_credit="x")}))
+        zero = c.plan_card_problems(plan_card(budgets=amounts(tripo_credit="0", legacy_credits="20")))
+        self.assertTrue(any(problem.startswith("budgets ") for problem in zero), zero)
+        # A unit named twice is unreadable rather than summed.
+        self.assertTrue(c.plan_card_problems(plan_card(budgets=amounts(tripo_credit="40") * 2)))
 
     def test_budget_route_fills_both_placeholders(self):
         self.assertEqual(c.budget_route(BUDGET_ROUTE, "s1", "b1"), "/api/v1/chat/sessions/s1/budgets/b1")
@@ -411,21 +447,15 @@ class BudgetPrices(unittest.TestCase):
         self.assertTrue(c.may_be_charged(task("text-to-3d", "FAILED", failure={"ambiguous": True})))
         self.assertFalse(c.may_be_charged(task("text-to-3d", "CANCELED")))
 
-    def test_limits_single_and_per_unit(self):
-        self.assertEqual(c.budget_limits({"limit_credits": 60}), {c.ANY_UNIT: self.D(60)})
-        self.assertEqual(c.budget_limits(plan_card(limit=45)), {c.ANY_UNIT: self.D(45)})
-        per_unit = {"limit_credits": 60, "limit_totals": [{"unit": "tripo.credit", "amount": "40"},
-                                                          {"unit": "hyper3d.credit", "amount": "1.5"}]}
-        self.assertEqual(c.budget_limits(per_unit), {"tripo.credit": self.D(40), "hyper3d.credit": self.D("1.5")})
-        self.assertEqual(c.budget_limits({"limits": [{"unit": "tripo.credit"}]}), {})
-        self.assertEqual(c.budget_limits({"limit_credits": 0}), {})
+    def test_limits_per_unit_of_a_card_and_a_session_budget(self):
+        self.assertEqual(c.budget_limits(plan_card()), {"tripo.credit": self.D(40), c.LEGACY_UNIT: self.D(20)})
+        session = session_budget(tripo_credit=("40", "10", "5"), hyper3d_credit=("1.5", "0", "0"))
+        self.assertEqual(c.budget_limits(session), {"tripo.credit": self.D(40), "hyper3d.credit": self.D("1.5")})
+        self.assertEqual(c.budget_limits({"budgets": [{"unit": "tripo.credit"}]}), {})
+        self.assertEqual(c.budget_limits({"units": []}), {})
+        # The single total of the pre-#120 wire is not read.
+        self.assertEqual(c.budget_limits({"limit_credits": 60, "budget_credits": 60}), {})
         self.assertEqual(c.budget_limits(None), {})
-
-    def test_single_limit_bounds_the_sum_with_steps_rounded_up(self):
-        prices = [("tripo.credit", self.D("10.5")), (c.LEGACY_UNIT, self.D(5))]
-        self.assertEqual(c.budget_overruns(prices, {c.ANY_UNIT: self.D(16)}), [])
-        # 10.5 reserves 11 whole credits: 11 + 5 > 15.
-        self.assertEqual(c.budget_overruns(prices, {c.ANY_UNIT: self.D(15)}), [(c.ANY_UNIT, self.D(16), self.D(15))])
 
     def test_per_unit_limits_are_not_summed_across_units(self):
         prices = [("tripo.credit", self.D(20)), ("tripo.credit", self.D(20)), ("hyper3d.credit", self.D("0.5"))]
@@ -439,21 +469,27 @@ class BudgetPrices(unittest.TestCase):
         self.assertEqual(c.spend_by_unit(prices), {"tripo.credit": self.D(40), "hyper3d.credit": self.D("0.5")})
 
     def test_no_readable_limit_fails_closed(self):
-        self.assertEqual(c.budget_overruns([], {}), [(c.ANY_UNIT, self.D(0), None)])
+        self.assertEqual(c.budget_overruns([], {}), [("*", self.D(0), None)])
+        self.assertEqual(c.budget_overruns([("tripo.credit", self.D(5))], {}), [("tripo.credit", self.D(5), None)])
 
-    def test_ledger(self):
-        self.assertIsNone(c.ledger_overrun({"limit_credits": 60, "spent_credits": 40, "reserved_credits": 20}))
-        self.assertIn("> limit 60", c.ledger_overrun({"limit_credits": 60, "spent_credits": 50, "reserved_credits": 11}))
-        self.assertEqual(c.ledger_overrun({"limit_totals": []}), "")
+    def test_ledger_per_unit(self):
+        self.assertIsNone(c.ledger_overrun(session_budget(tripo_credit=("60", "40", "20"),
+                                                          legacy_credits=("10", "0", "0"))))
+        over = c.ledger_overrun(session_budget(tripo_credit=("60", "50", "11"), legacy_credits=("10", "0", "0")))
+        self.assertIn("tripo.credit: spent 50 + reserved 11 > limit 60", over)
+        self.assertNotIn("legacy.credits", over)
+        self.assertEqual(c.ledger_overrun({"units": []}), "")
+        self.assertEqual(c.ledger_overrun({"limit_credits": 60, "spent_credits": 70}), "")
         self.assertEqual(c.ledger_overrun(None), "")
 
     def test_session_charges(self):
         self.assertEqual(c.session_charges({"estimatedCredits": 0}), [])
-        self.assertEqual(c.session_charges({"estimatedCredits": 0, "budget": {"spent_credits": 0}}), [])
+        self.assertEqual(c.session_charges({"estimatedCredits": 0, "budget": session_budget(tripo_credit=("40", "0", "0"))}), [])
         self.assertEqual(c.session_charges({"estimatedCredits": 25}), ["estimatedCredits 25"])
         self.assertEqual(c.session_charges({"price_totals": [{"unit": "tripo.credit", "amount": "10"},
                                                              {"unit": "x", "amount": "0"}]}), ["tripo.credit 10"])
-        self.assertEqual(c.session_charges({"budget": {"reserved_credits": 30}}), ["budget reserved_credits 30"])
+        self.assertEqual(c.session_charges({"budget": session_budget(tripo_credit=("40", "0", "30"))}),
+                         ["budget tripo.credit reserved 30"])
         self.assertEqual(c.session_charges(None), [])
 
 
@@ -482,7 +518,10 @@ class BudgetClient:
         if method == "PUT" and "/budgets/" in path:
             budget_id = urllib.parse.unquote(path.rsplit("/", 1)[1])
             state = "active" if body == {"decision": "approve"} else "denied"
-            return self.decision_status, {"budget_id": budget_id, "state": state, "message_id": "pa_" + budget_id}
+            decided = {"budget_id": budget_id, "state": state, "message_id": "pa_" + budget_id}
+            if state == "active":
+                decided["turn_message_id"] = "turn-" + budget_id  # #134: the server runs the plan
+            return self.decision_status, decided
         if method == "GET" and path.endswith("/messages?limit=100"):
             return 200, {"messages": [{"role": "assistant", "content": "请批准制作计划。"}]}
         if path.endswith("/tasks?session_id=s1&limit=50"):
@@ -512,14 +551,28 @@ class BudgetLive(unittest.TestCase):
         client = BudgetClient()
         live = self.live(client)
         status, data = live.decide_plan("s 1", "b/1", approve=True)
-        self.assertEqual((status, data["state"], data["budget_id"]), (200, "active", "b/1"))
+        self.assertEqual((status, data["state"], data["budget_id"], data["turn_message_id"]), (200, "active", "b/1", "turn-b/1"))
         status, data = live.decide_plan("s 1", "b/1", approve=False)
         self.assertEqual(data["state"], "denied")
+        self.assertNotIn("turn_message_id", data)
         self.assertEqual(client.sent("PUT"), [
             ("/api/v1/chat/sessions/s%201/budgets/b%2F1", {"decision": "approve"}),
             ("/api/v1/chat/sessions/s%201/budgets/b%2F1", {"decision": "deny"})])
         # The Schema is read once.
         self.assertEqual(sum(1 for _, path, _ in client.calls if path == "/api/v1/schema"), 1)
+
+    def test_decides_a_step_card_with_the_schema_member_and_route(self):
+        # #120: the decision member is Schema data; a renamed member is what the server reads.
+        schema = {"schema": {"runtime": {"http": {"routes": {"task_grant_decision": "/api/v1/tasks/grants/{requestID}"}}},
+                             "chat": {"api": {"fields": {"decision": "verdict"}}}}}
+        client = BudgetClient(schema=schema)
+        self.live(client).decide_grant("g/1", approve=False)
+        self.assertEqual(client.sent("PUT"), [("/api/v1/tasks/grants/g%2F1", {"verdict": "deny"})])
+        for missing in ({"schema": {"chat": {"api": {"fields": {"decision": "verdict"}}}}},
+                        {"schema": {"runtime": schema["schema"]["runtime"]}}):
+            client = BudgetClient(schema=missing)
+            self.assertEqual(self.live(client).decide_grant("g1", approve=True), (0, {}))
+            self.assertEqual(client.sent("PUT"), [])
 
     def test_refuses_to_decide_without_the_route_or_the_decision_member(self):
         for schema in ({"schema": {"chat": {"api": {"fields": {"decision": "decision"}}}}},

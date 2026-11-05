@@ -328,6 +328,17 @@ def new_session(api):
     return api.json("POST", "/api/chat/sessions", {"title": ""})[1]["id"]
 
 
+def decision_body(api, decision):
+    """The approval decision body with the public Schema's member (chat.api.fields.decision, #120),
+    read once like the browser reads it. Without the declaration the body is empty, so the server
+    refuses the decision and the step reports it instead of guessing a member name."""
+    if not hasattr(api, "decision_member"):
+        status, schema = api.json("GET", "/api/v1/schema")
+        schema = schema.get("schema", schema) if status == 200 and isinstance(schema, dict) else {}
+        api.decision_member = (((schema.get("chat") or {}).get("api") or {}).get("fields") or {}).get("decision")
+    return {api.decision_member: decision} if api.decision_member else {}
+
+
 def submit(api, offering, capability, payload, session):
     """prepare -> grant (-> human approval) -> submit. Returns (task_id, why)."""
     status, prepared = api.json("POST", "/api/v1/tasks/prepare", {
@@ -341,7 +352,7 @@ def submit(api, offering, capability, payload, session):
         return None, f"grant {status} {grant}"
     request_id = grant.get("request_id")
     if grant.get("status") == "pending":
-        status, decided = api.json("PUT", f"/api/v1/tasks/grants/{request_id}", {"decision": "approve"})
+        status, decided = api.json("PUT", f"/api/v1/tasks/grants/{request_id}", decision_body(api, "approve"))
         if status != 200:
             return None, f"approve {status} {decided}"
     status, task = api.json("POST", "/api/v1/tasks", {"prepared_input_id": pid, "authorization_request_id": request_id}, headers=key)
@@ -587,7 +598,7 @@ def scenario_agent(api, offerings):
     if not pending:
         record("agent turn", False, "the tool call produced no approval card")
         return
-    status, decision = api.json("PUT", f"/api/v1/tasks/grants/{pending[0]['request_id']}", {"decision": "approve"})
+    status, decision = api.json("PUT", f"/api/v1/tasks/grants/{pending[0]['request_id']}", decision_body(api, "approve"))
     task_id = decision.get("task_id")
     if status != 200 or not task_id:
         record("agent turn", False, f"approve {status} {decision}")
