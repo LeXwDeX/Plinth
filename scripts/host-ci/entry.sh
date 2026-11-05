@@ -151,19 +151,33 @@ phase pnpm-install pnpm install --offline --frozen-lockfile --store-dir "$SCRATC
 phase go-deps bash -c 'go list -deps -test ./... >/dev/null' || fail dependencies_missing 22 go-deps
 mkdir -p build/go-web
 
+# Prints the source identity and keeps the snapshot entries in $1 so a change can be explained.
 source_identity() {
-  python3 -c 'import importlib.util; from pathlib import Path
+  python3 -c 'import importlib.util, json, sys; from pathlib import Path
 spec = importlib.util.spec_from_file_location("verify_local", "scripts/verify-local.py")
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-print(module.source_identity(Path.cwd()))'
+snapshot = module.Snapshot()
+module.source_snapshot(Path.cwd(), snapshot)
+keys = set(snapshot.entries) | set(snapshot.signatures)
+Path(sys.argv[1]).write_text(json.dumps({key: [snapshot.entries.get(key), snapshot.signatures.get(key)] for key in keys}, default=str))
+print(snapshot.digest())' "$1"
+}
+identity_changes() {
+  python3 -c 'import json, sys
+before, after = (json.load(open(path)) for path in sys.argv[1:3])
+changed = sorted(key for key in before.keys() | after.keys() if before.get(key) != after.get(key))
+for key in changed[:50]:
+    print(" ", key, before.get(key), "->", after.get(key))
+if len(changed) > 50:
+    print("  ...", len(changed) - 50, "more")' "$SCRATCH/identity-before.json" "$SCRATCH/identity-after.json"
 }
 EXPECTED_GATES=$(python3 -c 'import importlib.util
 spec = importlib.util.spec_from_file_location("verify_local", "scripts/verify-local.py")
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 print("|".join(name for name, _, _ in module.selected_gates(race=True)))') || fail toolchain_mismatch 22 gate-list
-BEFORE=$(source_identity)
+BEFORE=$(source_identity "$SCRATCH/identity-before.json")
 [[ $BEFORE =~ ^[0-9a-f]{64}$ ]] || fail source_changed 21 source-identity
 
 phase gates bash -c 'python3 scripts/verify-local.py --race --force 2>&1 | tee /out/verify.log; exit "${PIPESTATUS[0]}"'
@@ -175,10 +189,15 @@ else
   LINKS_RC=1
 fi
 
-AFTER=$(source_identity)
+AFTER=$(source_identity "$SCRATCH/identity-after.json")
 unchanged() {
-  [[ $AFTER == "$BEFORE" && $(git rev-parse HEAD) == "$SHA" && $(git rev-parse 'HEAD^{tree}') == "$TREE" ]] &&
-    [[ -z $(git status --porcelain --untracked-files=all) ]]
+  local dirty ok=0
+  [[ $AFTER == "$BEFORE" ]] || { echo '[host-ci] source identity changed during the gates:'; identity_changes; ok=1; }
+  [[ $(git rev-parse HEAD) == "$SHA" && $(git rev-parse 'HEAD^{tree}') == "$TREE" ]] ||
+    { echo '[host-ci] HEAD or tree changed during the gates'; ok=1; }
+  dirty=$(git status --porcelain --untracked-files=all)
+  [[ -z $dirty ]] || { echo '[host-ci] worktree not clean after the gates:'; head -50 <<<"$dirty"; ok=1; }
+  return $ok
 }
 phase source-unchanged unchanged || fail source_changed 21 source-unchanged
 if [[ $GATES_RC -ne 0 ]]; then fail failed 1 gates; fi

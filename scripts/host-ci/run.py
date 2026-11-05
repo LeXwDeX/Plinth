@@ -117,14 +117,17 @@ def load_environment(name):
     ci_dir = host_ci.get('dir', DEFAULT_CI_DIR)
     if not SAFE_PATH.fullmatch(ci_dir) or '..' in ci_dir or ci_dir.rstrip('/') != ci_dir:
         raise UsageError(f'environment {name}: host_ci.dir must be a plain absolute path')
-    # The CI root must stay clear of every release root and protected path of every environment. The one
-    # exception is the dedicated `ci` directory inside this environment's own release root (a host that only
-    # allows writes under the project directory); the release steps never touch `<root>/ci`.
+    # The CI root must stay clear of every release root and protected path of every environment on the same
+    # host; environments on other hosts may reuse the same path. The one exception is the dedicated `ci`
+    # directory inside this environment's own release root (a host that only allows writes under the project
+    # directory); the release steps never touch `<root>/ci`.
+    own_host = ssh.split('@', 1)[1]
     own_root = (environment.get('root') or '').rstrip('/')
-    taken = [other.get('root') for other in document['environments'].values()
-             if isinstance(other, dict) and not (other is environment and own_root and ci_dir == own_root + '/ci')]
-    taken += [path for other in document['environments'].values() if isinstance(other, dict)
-              for path in other.get('protected_paths') or []]
+    same_host = [other for other in document['environments'].values() if isinstance(other, dict)
+                 and (other is environment or str(other.get('ssh') or '').split('@')[-1] == own_host)]
+    taken = [other.get('root') for other in same_host
+             if not (other is environment and own_root and ci_dir == own_root + '/ci')]
+    taken += [path for other in same_host for path in other.get('protected_paths') or []]
     for used in filter(None, taken):
         used = used.rstrip('/')
         if ci_dir == used or ci_dir.startswith(used + '/') or used.startswith(ci_dir + '/'):
