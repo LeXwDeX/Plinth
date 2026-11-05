@@ -141,8 +141,10 @@ type ChatTurnScheduler interface {
 // ChatTurnBackgrounder lets a person stop waiting for a turn's single
 // generation steps while their Tasks keep running (#137). The orchestrator
 // implements it; a scheduler without it leaves the route unregistered.
+// TurnBackgroundAvailable is polled by the composer: a read that fails reads
+// false, and the implementation logs it at a bounded rate.
 type ChatTurnBackgrounder interface {
-	TurnBackgroundAvailable(ctx context.Context, ownerID, sessionID string) (bool, error)
+	TurnBackgroundAvailable(ctx context.Context, ownerID, sessionID string) bool
 	ContinueTurnInBackground(ctx context.Context, ownerID, sessionID string) error
 }
 

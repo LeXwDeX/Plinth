@@ -1106,6 +1106,8 @@ func (s *Server) legacyCancelChatTurn(
 // legacyChatTurnBackgroundAvailable tells the composer whether the session's
 // waiting turn may stop waiting while its Tasks keep running (#137). The
 // owner scope comes from the principal; another person's session reads false.
+// The composer polls it, so a read that fails is answered false: the
+// implementation logs the failure at a bounded rate instead of a 500 per poll.
 func (s *Server) legacyChatTurnBackgroundAvailable(
 	writer http.ResponseWriter,
 	request *http.Request,
@@ -1117,14 +1119,9 @@ func (s *Server) legacyChatTurnBackgroundAvailable(
 		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidParameters)
 		return
 	}
-	available, err := backgrounder.TurnBackgroundAvailable(request.Context(), principal.ID(), sessionID)
-	if err != nil {
-		s.logger.ErrorContext(request.Context(), "读取后台继续条件失败", "session_id", sessionID, "error", err)
-		s.writeChatInternalError(writer, err)
-		return
-	}
 	writeJSON(writer, http.StatusOK, map[string]any{
-		s.application.Chat.API.Fields.TurnBackgroundAvailable: available,
+		s.application.Chat.API.Fields.TurnBackgroundAvailable: backgrounder.TurnBackgroundAvailable(
+			request.Context(), principal.ID(), sessionID),
 	})
 }
 
@@ -1159,6 +1156,14 @@ func (s *Server) legacyContinueChatTurnInBackground(
 		s.writeChatInternalError(writer, err)
 		return
 	}
+	// Audited like the stop route: the action, the actor and the session.
+	s.logChatAudit(
+		request,
+		principal,
+		s.application.Chat.Audit.TurnBackgroundAction,
+		s.application.Chat.Audit.MessageResourceType,
+		sessionID,
+	)
 	writeJSON(writer, http.StatusOK, map[string]any{
 		s.application.Chat.API.Fields.TurnBackgrounded: true,
 	})

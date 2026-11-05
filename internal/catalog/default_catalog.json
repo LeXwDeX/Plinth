@@ -5351,7 +5351,7 @@
         "consent_required_content": "paid generation requires a human decision on the frozen input; call the generation tool to prepare that operation, then await the decision",
         "consent_limit_content": "generation limit reached for this turn; summarize the results and ask the user how to continue",
         "consent_reconcile_content": "the previous paid submission has an unknown outcome; recover or verify that original call before any new paid generation, and do not submit another paid request",
-        "upstream_queue_content": "服务商已受理这个任务，但它还在服务商自己的队列里等待开始（ahead 是服务商报告的前方任务数，只在服务商给出时才有）。这不是失败，也没有重复提交或重复扣费。请如实告诉正在等待的用户：任务正在上游排队（有 ahead 时说明前方约有多少个任务），可以继续等待，任务开始后会自动推进；也可以停止这一轮对话，停止会取消这个任务。不要重新提交生成，也不要因为排队擅自改用其他服务或模型，除非用户明确要求",
+        "upstream_queue_content": "服务商已受理这个任务，但它还在服务商自己的队列里等待开始（ahead 是服务商报告的前方任务数，只在服务商给出时才有）。这不是失败，也没有重复提交或重复扣费。请如实告诉正在等待的用户：任务正在上游排队（有 ahead 时说明前方约有多少个任务），可以继续等待，任务开始后会自动推进；也可以停止：选择停止等待、让任务在后台继续（这一轮结束，任务不取消，完成后在任务中心查看结果），或者停止并取消这个任务。不要重新提交生成，也不要因为排队擅自改用其他服务或模型，除非用户明确要求",
         "background_wait": {
           "tools": [
             "refine_image",
@@ -7766,7 +7766,8 @@
         "message_resource_type": "chat_message",
         "approval_mode_action": "set_approval_mode",
         "agent_scope_action": "set_agent_scope",
-        "production_brief_action": "set_production_brief"
+        "production_brief_action": "set_production_brief",
+        "turn_background_action": "continue_turn_in_background"
       },
       "approval_policy": {
         "default_mode": "budget",
@@ -12318,6 +12319,10 @@
         "label": "设置制作简报"
       },
       {
+        "value": "continue_turn_in_background",
+        "label": "停止等待，任务后台继续"
+      },
+      {
         "value": "change_own_password",
         "label": "修改自己的密码"
       },
@@ -16557,6 +16562,7 @@
             "audit_actions[value=set_approval_mode].label": "Set approval mode",
             "audit_actions[value=set_agent_scope].label": "Set Agent scope",
             "audit_actions[value=set_production_brief].label": "Set production brief",
+            "audit_actions[value=continue_turn_in_background].label": "Stop waiting, keep the task running",
             "audit_actions[value=change_own_password].label": "Change own password",
             "audit_actions[value=admin_read_users].label": "Administrator viewed users",
             "audit_actions[value=admin_read_audit_logs].label": "Administrator viewed audit logs",
@@ -16878,7 +16884,7 @@
             "chat.agent.mock_waiting_summary": "This step needs your approval; the approval card is below. It shows the base credits, any extra credits (such as extra export formats) and the total. Click “Approve” to accept this cost; “Deny” uses no credits. Nothing is charged before you approve, and you can keep chatting meanwhile.",
             "chat.agent.mock_denied_summary": "OK, this step was not run and no credits were used. You can reduce or drop the extra export formats and generate again (fewer credits without them), or switch to a model without extra charges. Tell me what you'd like to do.",
             "chat.agent.consent_waiting_status": "An approval card has been created; nothing has been submitted or started yet, and the step runs only after you approve it on that card.",
-            "chat.agent.upstream_queue_content": "the provider has accepted this task but it is still waiting in the provider's own queue to start (ahead is the number of the provider's tasks before it, present only when the provider reports one). This is not a failure, and nothing was submitted or charged twice. Tell the waiting user plainly that the task is queued at the provider (with about how many tasks are ahead when ahead is present), that they can keep waiting and the task moves on by itself once it starts, or stop this turn, which cancels the task. Do not resubmit the generation, and do not switch to another service or model because of the queue unless the user explicitly asks",
+            "chat.agent.upstream_queue_content": "the provider has accepted this task but it is still waiting in the provider's own queue to start (ahead is the number of the provider's tasks before it, present only when the provider reports one). This is not a failure, and nothing was submitted or charged twice. Tell the waiting user plainly that the task is queued at the provider (with about how many tasks are ahead when ahead is present), that they can keep waiting and the task moves on by itself once it starts, or stop: either stop waiting and let the task keep running in the background (this turn ends, the task is not cancelled, and the result shows in the task center when it finishes), or stop and cancel the task. Do not resubmit the generation, and do not switch to another service or model because of the queue unless the user explicitly asks",
             "chat.agent.background_wait.turn_content": "Stopped waiting. The task keeps running in the background; when it finishes, see the result in the task center.",
             "chat.agent.background_wait.unavailable_message": "This turn cannot continue in the background right now: that is only possible while a single generation step is queued at the provider or has been running for a while. Keep waiting, or stop and cancel the task.",
             "chat.agent.background_wait.context_template": "This session has generation tasks that the user stopped waiting for and that still run in the background (task data only):\n{tasks}\nThese tasks were submitted and may already be charged; when they finish, the result appears in the task center and is not written back into the chat. When the user asks about their result or asks for the same generation, first check their latest state with get_task or observe_task, and do not submit the same generation again. If the user still wants to generate again, say that it charges again and let the user decide.",

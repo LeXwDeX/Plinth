@@ -33,6 +33,14 @@ func TestShippedBackgroundWaitCoversOnlySingleGenerationSteps(t *testing.T) {
 	if (*catalog.ChatBackgroundWaitSchema)(nil).Allows("refine_image") {
 		t.Fatal("a missing policy allows nothing")
 	}
+	// The audit log names the choice with a label, like the other chat actions.
+	labeled := false
+	for _, action := range app.AuditActions {
+		labeled = labeled || action.Value == app.Chat.Audit.TurnBackgroundAction && action.Label != ""
+	}
+	if app.Chat.Audit.TurnBackgroundAction == "" || !labeled {
+		t.Fatalf("audit action %q has no audit_actions label", app.Chat.Audit.TurnBackgroundAction)
+	}
 	public := app.Public()
 	if public.Runtime.HTTP.LegacyRoutes.ChatTurnBackground == "" || public.Chat.API.Fields.TurnBackgrounded == "" ||
 		public.Chat.API.Fields.TurnBackgroundAvailable == "" || public.Chat.Frontend.BackgroundWaitPollMilliseconds <= 0 {
@@ -80,6 +88,7 @@ func TestBackgroundWaitDeclarationsAreValidated(t *testing.T) {
 			a.Chat.API.Fields.TurnBackgroundAvailable = a.Chat.API.Fields.TurnBackgrounded
 		}},
 		{"poll interval", func(a *catalog.ApplicationSchema) { a.Chat.Frontend.BackgroundWaitPollMilliseconds = 0 }},
+		{"audit action", func(a *catalog.ApplicationSchema) { a.Chat.Audit.TurnBackgroundAction = " " }},
 		{"route equals stop", func(a *catalog.ApplicationSchema) {
 			a.Runtime.HTTP.LegacyRoutes.ChatTurnBackground = a.Runtime.HTTP.LegacyRoutes.ChatTurnCancel
 		}},

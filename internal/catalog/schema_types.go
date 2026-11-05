@@ -4480,6 +4480,10 @@ type ChatAuditSchema struct {
 	AgentScopeAction string `json:"agent_scope_action"`
 	// ProductionBriefAction records a change of the session production brief.
 	ProductionBriefAction string `json:"production_brief_action"`
+	// TurnBackgroundAction records that a person stopped waiting for a turn
+	// whose Task keeps running (#137). It is required with
+	// runtime.http.legacy_routes.chat_turn_background.
+	TurnBackgroundAction string `json:"turn_background_action,omitempty"`
 }
 
 type RuntimeConfigurationSchema struct {

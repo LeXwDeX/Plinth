@@ -257,6 +257,11 @@ type Orchestrator struct {
 	// compacting serializes the context compactions of each session (#322).
 	compactMu  sync.Mutex
 	compacting map[string]*compactionLock
+
+	// backgroundWarned is when a failing background-availability read of
+	// each session was last logged as a warning (#137).
+	backgroundWarnMu sync.Mutex
+	backgroundWarned map[string]time.Time
 }
 
 type consentSuspend struct {
@@ -605,6 +610,8 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		canceledTurn:  map[string]struct{}{},
 		consentWaits:  map[string]*consentSuspend{},
 		compacting:    map[string]*compactionLock{},
+
+		backgroundWarned: map[string]time.Time{},
 	}, nil
 }
 

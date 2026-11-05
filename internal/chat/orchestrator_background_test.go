@@ -3,6 +3,7 @@ package chat_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +24,9 @@ type backgroundFacts struct {
 	queued   map[string]bool
 	canceled []string
 	settled  []string
+	// readErr fails every Task read; logger receives the orchestrator's log.
+	readErr error
+	logger  *slog.Logger
 }
 
 func newBackgroundFacts() *backgroundFacts {
@@ -84,8 +88,14 @@ func backgroundOrchestrator(t *testing.T, service *chat.Service, schema catalog.
 		agent = waitingAgent{control: "set_params", generate: "refine_image"}
 	}
 	o, err := chat.NewOrchestrator(chat.OrchestratorConfig{Service: service, Schema: schema, Model: "model",
-		Agent: agent, Tools: e,
+		Agent: agent, Tools: e, Logger: facts.logger,
 		TaskGet: func(ctx context.Context, ownerID, taskID string) (generation.Task, error) {
+			facts.mu.Lock()
+			readErr := facts.readErr
+			facts.mu.Unlock()
+			if readErr != nil {
+				return generation.Task{}, readErr
+			}
 			task, err := e.get(ctx, ownerID, taskID)
 			if err != nil {
 				return task, err
@@ -175,17 +185,17 @@ func TestContinueInBackgroundKeepsTheTaskRunningAndTellsTheNextTurn(t *testing.T
 	o := backgroundOrchestrator(t, service, schema, executor, facts, nil)
 	command, taskID := waitingTurn(t, service, o, "background")
 
-	if available, err := o.TurnBackgroundAvailable(ctx, "owner-a", command.SessionID); err != nil || available {
-		t.Fatalf("a fresh unqueued Task must not qualify yet: %v %v", available, err)
+	if available := o.TurnBackgroundAvailable(ctx, "owner-a", command.SessionID); available {
+		t.Fatalf("a fresh unqueued Task must not qualify yet: %v", available)
 	}
 	facts.mu.Lock()
 	facts.queued[taskID] = true
 	facts.mu.Unlock()
-	if available, err := o.TurnBackgroundAvailable(ctx, "owner-b", command.SessionID); err != nil || available {
-		t.Fatalf("another owner must read false: %v %v", available, err)
+	if available := o.TurnBackgroundAvailable(ctx, "owner-b", command.SessionID); available {
+		t.Fatalf("another owner must read false: %v", available)
 	}
-	if available, err := o.TurnBackgroundAvailable(ctx, "owner-a", command.SessionID); err != nil || !available {
-		t.Fatalf("an upstream-queued Task qualifies: %v %v", available, err)
+	if available := o.TurnBackgroundAvailable(ctx, "owner-a", command.SessionID); !available {
+		t.Fatalf("an upstream-queued Task qualifies: %v", available)
 	}
 	if err := o.ContinueTurnInBackground(ctx, "owner-a", command.SessionID); err != nil {
 		t.Fatal(err)
@@ -287,8 +297,8 @@ func TestContinueInBackgroundAfterTheThreshold(t *testing.T) {
 	facts.mu.Lock()
 	facts.created[taskID] = time.Now().Add(-threshold + time.Minute)
 	facts.mu.Unlock()
-	if available, err := o.TurnBackgroundAvailable(ctx, "owner-a", command.SessionID); err != nil || available {
-		t.Fatalf("before the threshold: %v %v", available, err)
+	if available := o.TurnBackgroundAvailable(ctx, "owner-a", command.SessionID); available {
+		t.Fatalf("before the threshold: %v", available)
 	}
 	facts.mu.Lock()
 	facts.created[taskID] = time.Now().Add(-threshold - time.Second)
@@ -372,8 +382,8 @@ func TestContinueInBackgroundRefusesWhatDoesNotQualify(t *testing.T) {
 					t.Fatalf("stop = %v %v", active, err)
 				}
 			}
-			if available, err := o.TurnBackgroundAvailable(ctx, "owner-a", command.SessionID); err != nil || available {
-				t.Fatalf("available = %v %v", available, err)
+			if available := o.TurnBackgroundAvailable(ctx, "owner-a", command.SessionID); available {
+				t.Fatalf("available = %v", available)
 			}
 			if err := o.ContinueTurnInBackground(ctx, "owner-a", command.SessionID); !errors.Is(err, chat.ErrTurnBackgroundUnavailable) {
 				t.Fatalf("err = %v", err)
@@ -473,5 +483,71 @@ func TestBackgroundTurnFinishesThroughTheWorkers(t *testing.T) {
 	}
 	if _, submissions := executor.counts(command.SessionID); submissions != 1 {
 		t.Fatalf("submissions = %d", submissions)
+	}
+}
+
+// countingLogHandler counts the records of each level.
+type countingLogHandler struct {
+	mu     sync.Mutex
+	levels map[slog.Level]int
+}
+
+func (h *countingLogHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *countingLogHandler) Handle(_ context.Context, record slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.levels[record.Level]++
+	return nil
+}
+func (h *countingLogHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *countingLogHandler) WithGroup(string) slog.Handler      { return h }
+func (h *countingLogHandler) count(level slog.Level) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.levels[level]
+}
+
+// The composer polls the availability every few seconds. A Task that cannot
+// be read answers false, never an error, and is warned about once per
+// interval and session; the repeats go to debug.
+func TestBackgroundAvailabilityReadFailureAnswersFalseAndWarnsOnce(t *testing.T) {
+	ctx := context.Background()
+	service := newChatService(t, newMemoryChatRepository())
+	executor := newWaitingExecutor()
+	facts := newBackgroundFacts()
+	handler := &countingLogHandler{levels: map[slog.Level]int{}}
+	facts.logger = slog.New(handler)
+	o := backgroundOrchestrator(t, service, backgroundSchema(t), executor, facts, nil)
+	command, taskID := waitingTurn(t, service, o, "unreadable")
+	facts.mu.Lock()
+	facts.queued[taskID] = true
+	facts.readErr = &generation.Error{Code: generation.ErrUnavailable}
+	facts.mu.Unlock()
+	warnings := handler.count(slog.LevelWarn)
+	for range 5 {
+		if o.TurnBackgroundAvailable(ctx, "owner-a", command.SessionID) {
+			t.Fatal("an unreadable Task must read as unavailable")
+		}
+	}
+	if got := handler.count(slog.LevelWarn) - warnings; got != 1 {
+		t.Fatalf("warnings = %d, want 1", got)
+	}
+	if handler.count(slog.LevelDebug) < 4 {
+		t.Fatalf("repeats must still be logged at debug: %d", handler.count(slog.LevelDebug))
+	}
+	// The read recovers: the same turn qualifies again.
+	facts.mu.Lock()
+	facts.readErr = nil
+	facts.mu.Unlock()
+	if !o.TurnBackgroundAvailable(ctx, "owner-a", command.SessionID) {
+		t.Fatal("a readable queued Task qualifies")
+	}
+	// The explicit request still reports the failure.
+	facts.mu.Lock()
+	facts.readErr = &generation.Error{Code: generation.ErrUnavailable}
+	facts.mu.Unlock()
+	if err := o.ContinueTurnInBackground(ctx, "owner-a", command.SessionID); err == nil ||
+		errors.Is(err, chat.ErrTurnBackgroundUnavailable) {
+		t.Fatalf("err = %v", err)
 	}
 }

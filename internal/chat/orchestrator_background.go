@@ -14,14 +14,48 @@ import (
 // stop waiting while its Tasks keep running (#137).
 var ErrTurnBackgroundUnavailable = errors.New("chat orchestrator: turn cannot continue in the background")
 
+// backgroundReadWarnInterval bounds how often a failing availability read of
+// one session is logged as a warning: the composer asks every few seconds.
+const backgroundReadWarnInterval = time.Minute
+
 // TurnBackgroundAvailable reports whether the session's waiting turn may stop
-// waiting while its Tasks keep running (#137). It changes nothing.
-func (orchestrator *Orchestrator) TurnBackgroundAvailable(ctx context.Context, ownerID, sessionID string) (bool, error) {
+// waiting while its Tasks keep running (#137). It changes nothing. The
+// composer polls it, so a failed read (the turn or one of its Tasks) answers
+// false and is logged as a warning at most once per interval and session;
+// the other failures of that interval are logged at debug level.
+func (orchestrator *Orchestrator) TurnBackgroundAvailable(ctx context.Context, ownerID, sessionID string) bool {
 	turn, waiting, err := orchestrator.service.WaitingTurn(ctx, ownerID, sessionID)
-	if err != nil || !waiting {
-		return false, err
+	available := false
+	if err == nil && waiting {
+		available, err = orchestrator.backgroundEligible(ctx, turn)
 	}
-	return orchestrator.backgroundEligible(ctx, turn)
+	if err != nil {
+		orchestrator.noteBackgroundReadFailure(ownerID, sessionID, err)
+		return false
+	}
+	return available
+}
+
+func (orchestrator *Orchestrator) noteBackgroundReadFailure(ownerID, sessionID string, err error) {
+	key := orchestrator.turnKey(ownerID, sessionID)
+	now := time.Now()
+	orchestrator.backgroundWarnMu.Lock()
+	last, warned := orchestrator.backgroundWarned[key]
+	warn := !warned || now.Sub(last) >= backgroundReadWarnInterval
+	if warn {
+		for other, at := range orchestrator.backgroundWarned {
+			if now.Sub(at) >= backgroundReadWarnInterval {
+				delete(orchestrator.backgroundWarned, other)
+			}
+		}
+		orchestrator.backgroundWarned[key] = now
+	}
+	orchestrator.backgroundWarnMu.Unlock()
+	if warn {
+		orchestrator.logger.Warn("读取后台继续条件失败，按不可用回答", "session_id", sessionID, "error", err)
+		return
+	}
+	orchestrator.logger.Debug("读取后台继续条件失败，按不可用回答", "session_id", sessionID, "error", err)
 }
 
 // ContinueTurnInBackground ends the session's waiting turn without cancelling

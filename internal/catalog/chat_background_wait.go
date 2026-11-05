@@ -125,5 +125,8 @@ func validateBackgroundWait(schema ChatSchema, runtime RuntimeSchema) error {
 	if schema.Frontend.BackgroundWaitPollMilliseconds <= 0 {
 		return errors.New("http.legacy_routes.chat_turn_background 需要正数的 chat.frontend.background_wait_poll_milliseconds")
 	}
+	if strings.TrimSpace(schema.Audit.TurnBackgroundAction) == "" {
+		return errors.New("http.legacy_routes.chat_turn_background 需要 chat.audit.turn_background_action")
+	}
 	return nil
 }
