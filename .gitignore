@@ -94,3 +94,11 @@ graphify-out/
 /.serena/
 /.playwright-mcp/
 /handoff.md
+
+# SpecGit 生成的全部本地文件（specgit init/setup 在各工作树生成，不追踪）
+/.specgit.yaml
+/.agents/
+/.claude/settings.json
+/.claude/skills/specgit-native/
+/.codex/hooks.json
+/.opencode/hooks.json
