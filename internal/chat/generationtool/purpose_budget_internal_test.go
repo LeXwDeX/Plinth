@@ -9,6 +9,46 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
+// #129: a bounded parameter without a default is decided by the upstream
+// (Tripo P2's adaptive low-poly face count, Tripo decimation left empty). The
+// purpose budget keeps it that way, even with a brief triangle budget below
+// the parameter's range; a parameter with a default over the budget is bounded.
+func TestBudgetLeavesParametersWithoutADefaultAdaptive(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &Executor{chat: product.Application().Chat}
+	command := chat.ToolCommand{Tool: catalog.ChatToolSchema{Name: "create_model_3d"}}
+	brief := func(fields string) chat.ProductionBrief {
+		var value chat.ProductionBrief
+		if err := json.Unmarshal([]byte(fields), &value); err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	for _, test := range []struct {
+		offering generation.OfferingID
+		brief    string
+		want     string
+	}{
+		{"tripo/tripo-p2/text-to-3d", `{"purpose":"game_prop"}`, ""},
+		{"tripo/tripo-p2/image-to-3d", `{"purpose":"game_prop","triangle_budget":5000}`, ""},
+		{"tripo/geometry/decimate-triangle", `{"purpose":"game_prop","triangle_budget":5000}`, ""},
+		{"tripo/tripo-v3.1-full/text-to-3d", `{"purpose":"game_prop"}`, "20000"},
+	} {
+		offering, found := product.Get(test.offering)
+		if !found {
+			t.Fatalf("%s missing", test.offering)
+		}
+		command.Options.ProductionBrief = brief(test.brief)
+		_, values := executor.profileParameterValues(command, offering)
+		if got := string(values["face_limit"]); got != test.want {
+			t.Fatalf("%s with %s: face_limit = %q, want %q", test.offering, test.brief, got, test.want)
+		}
+	}
+}
+
 // #129: a value the purpose budget gives a bounded parameter belongs to the
 // purpose's layer, so it follows the same provenance rules as an override: it
 // is credited to the purpose only when the purpose supplied the final value.

@@ -63,12 +63,13 @@ func TestBudgetLimitFitsAParameterNobodyChose(t *testing.T) {
 			parameter: faceLimit("2000000", usageNumber(1000), usageNumber(2000000)), baseline: "2000000", maximum: 20000, want: "20000"},
 		{name: "a default within the budget stays", limit: budgetTriangleLimit(), offering: usageOffering(),
 			parameter: faceLimit("15000", nil, usageNumber(30000)), baseline: "15000", maximum: 20000},
-		{name: "without a default the declared maximum counts", limit: budgetTriangleLimit(), offering: usageOffering(),
-			parameter: faceLimit("", usageNumber(48), usageNumber(50000)), maximum: 20000, want: "20000"},
-		{name: "a declared maximum within the budget leaves the parameter open", limit: budgetTriangleLimit(), offering: usageOffering(),
-			parameter: faceLimit("", usageNumber(500), usageNumber(20000)), maximum: 20000},
-		{name: "an unbounded parameter takes the budget", limit: budgetTriangleLimit(), offering: usageOffering(),
-			parameter: faceLimit("", nil, nil), maximum: 5000, want: "5000"},
+		// Without a default the upstream decides adaptively (Tripo P2's
+		// low-poly face count): the budget leaves the parameter unset even when
+		// its declared range goes past the budget.
+		{name: "a parameter without a default stays adaptive", limit: budgetTriangleLimit(), offering: usageOffering(),
+			parameter: faceLimit("", usageNumber(48), usageNumber(50000)), maximum: 20000},
+		{name: "an unbounded parameter without a default stays adaptive", limit: budgetTriangleLimit(), offering: usageOffering(),
+			parameter: faceLimit("", nil, nil), maximum: 5000},
 		{name: "a budget below the minimum takes the minimum", limit: budgetTriangleLimit(), offering: usageOffering(),
 			parameter: faceLimit("2000000", usageNumber(1000), usageNumber(2000000)), baseline: "2000000", maximum: 500, want: "1000"},
 		{name: "a quad counts as two triangles", limit: budgetTriangleLimit(), offering: remesh,
@@ -82,8 +83,8 @@ func TestBudgetLimitFitsAParameterNobodyChose(t *testing.T) {
 			parameter: budgetTextureParameter("2k"), baseline: `"2k"`, maximum: 2048},
 		{name: "a select with no option within the budget takes the smallest", limit: budgetTextureLimit(), offering: usageOffering(),
 			parameter: budgetTextureParameter("8k"), baseline: `"8k"`, maximum: 1024, want: `"2k"`},
-		{name: "a select without a default counts its largest option", limit: budgetTextureLimit(), offering: usageOffering(),
-			parameter: budgetTextureParameter(""), maximum: 2048, want: `"2k"`},
+		{name: "a select without a default stays open", limit: budgetTextureLimit(), offering: usageOffering(),
+			parameter: budgetTextureParameter(""), maximum: 2048},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

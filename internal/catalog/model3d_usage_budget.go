@@ -79,9 +79,10 @@ func (limit ChatModel3DUsageBudgetLimit) Measure(
 
 // Fit is the value a bounded parameter nobody chose takes under maximum.
 // baseline is the value it would otherwise have (the purpose's override, the
-// tool's or the Offering's default); without one the parameter counts at the
-// most it may deliver: its declared maximum or, for a select, its largest
-// option. ok is false when that already fits or the parameter cannot be
+// tool's or the Offering's default). A parameter without one is left unset:
+// the upstream then decides it adaptively (Tripo P2's low-poly face count,
+// Tripo decimation), which is the Offering's own design. ok is false for such
+// a parameter, for a baseline that already fits and for one that cannot be
 // measured. Otherwise the result is the largest legal value within maximum, or
 // the smallest legal value when none is; the step's note then reports it.
 func (limit ChatModel3DUsageBudgetLimit) Fit(
@@ -91,22 +92,16 @@ func (limit ChatModel3DUsageBudgetLimit) Fit(
 	values map[string]json.RawMessage,
 	maximum float64,
 ) (json.RawMessage, bool) {
+	if len(baseline) == 0 {
+		return nil, false
+	}
+	current, measured := limit.Measure(offering, parameter, baseline, values)
+	if !measured || current <= maximum {
+		return nil, false
+	}
 	switch parameter.Type {
 	case "number":
 		factor := float64(limit.trianglesPerFace(offering, parameter, values))
-		current := math.Inf(1)
-		if len(baseline) > 0 {
-			amount, measured := limit.Measure(offering, parameter, baseline, values)
-			if !measured {
-				return nil, false
-			}
-			current = amount
-		} else if parameter.Maximum != nil {
-			current = *parameter.Maximum * factor
-		}
-		if current <= maximum {
-			return nil, false
-		}
 		target := math.Floor(maximum / factor)
 		if parameter.Maximum != nil && target > *parameter.Maximum {
 			target = *parameter.Maximum
@@ -117,23 +112,6 @@ func (limit ChatModel3DUsageBudgetLimit) Fit(
 		encoded, err := json.Marshal(target)
 		return encoded, err == nil
 	case "select":
-		current := math.Inf(-1)
-		if len(baseline) > 0 {
-			amount, measured := limit.Measure(offering, parameter, baseline, values)
-			if !measured {
-				return nil, false
-			}
-			current = amount
-		} else {
-			for _, option := range parameter.Options {
-				if amount, declared := limit.OptionValues[option.Value]; declared && amount > current {
-					current = amount
-				}
-			}
-		}
-		if current <= maximum {
-			return nil, false
-		}
 		best, smallest := "", ""
 		bestAmount, smallestAmount := math.Inf(-1), math.Inf(1)
 		for _, option := range parameter.Options {
