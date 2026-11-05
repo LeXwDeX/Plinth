@@ -142,6 +142,8 @@ def case_manual_approval(live, report, models):
     deadline = time.time() + 600
     while time.time() < deadline and not pending:
         time.sleep(10)
+        # #103: before the paid step the Agent may stop at the usage card; a person answers it.
+        live.answer_pending_choices(session)
         pending = live.pending_approvals(session)
     report.check("manual-approval: a pending approval card appears", bool(pending), f"{len(pending)} card(s)")
     report.check("manual-approval: no task before approval", not live.tasks(session))
