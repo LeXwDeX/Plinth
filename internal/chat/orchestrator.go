@@ -1083,6 +1083,11 @@ func (orchestrator *Orchestrator) Process(
 	command.Options.Model = turn.Options.Model
 	command.Options.ModelConnection = turn.Options.ModelConnection
 	command.Options.ReasoningEffort = turn.Options.ReasoningEffort
+	// So are the production brief and the explicitly picked 3D model (#103):
+	// the first run of a turn must honor the lock the service froze, or an
+	// Agent-named model would replace the person's pick.
+	command.Options.ProductionBrief = turn.Options.ProductionBrief
+	command.Options.ExplicitModel3D = turn.Options.ExplicitModel3D
 	// DSML tool calls are read only for a model whose profile writes them.
 	dsmlSchema := orchestrator.dsmlSchema(command.Options)
 	command.Options.Harness = turn.Options.Harness
