@@ -75,6 +75,12 @@ func Load(reader io.Reader) (*Catalog, error) {
 			return nil, fmt.Errorf("offerings[%d]: 缺少 capability_order", index)
 		}
 		offering := raw.toOffering()
+		queueTimeout, err := upstreamQueueTimeout(raw.UpstreamQueueTimeoutSeconds,
+			doc.Application.Runtime.ProviderConnections, offering.AdapterKey)
+		if err != nil {
+			return nil, fmt.Errorf("offerings[%d]: %w", index, err)
+		}
+		offering.UpstreamQueueTimeout = queueTimeout
 		offering.ExecutionMessages = doc.Application.Runtime.GenerationMessages
 		offering.Cancellation = doc.Application.Runtime.TaskCancellation
 		offering.Cancellation.Supported = raw.CancellationSupported

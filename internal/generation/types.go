@@ -110,6 +110,9 @@ const (
 	FailureInternal            = schema.FailureInternal
 	FailureSourceExpired       = schema.FailureSourceExpired
 	FailureContentRejected     = schema.FailureContentRejected
+	// FailureUpstreamQueueTimeout: an accepted job waited in the upstream
+	// queue past the Offering's queue wait limit (#136).
+	FailureUpstreamQueueTimeout = schema.FailureUpstreamQueueTimeout
 )
 
 type Failure struct {
@@ -357,6 +360,29 @@ type UpstreamQueue struct {
 	Ahead *int `json:"ahead,omitempty"`
 }
 
+// UpstreamQueuedAt is the Attempt's upstream queue time up to now (#136).
+func (a Attempt) UpstreamQueuedAt(now time.Time) time.Duration {
+	queued := a.UpstreamQueuedFor
+	if !a.UpstreamQueuedSince.IsZero() && now.After(a.UpstreamQueuedSince) {
+		queued += now.Sub(a.UpstreamQueuedSince)
+	}
+	return queued
+}
+
+// trackUpstreamQueue records the queue an observation reports and keeps the
+// Attempt's queue clock (#136): a stretch opens when the job is first
+// reported queued and closes, adding to UpstreamQueuedFor, when it is not.
+func trackUpstreamQueue(attempt *Attempt, queue *UpstreamQueue, now time.Time) {
+	attempt.UpstreamQueue = queue
+	switch {
+	case queue != nil && attempt.UpstreamQueuedSince.IsZero():
+		attempt.UpstreamQueuedSince = now
+	case queue == nil && !attempt.UpstreamQueuedSince.IsZero():
+		attempt.UpstreamQueuedFor = attempt.UpstreamQueuedAt(now)
+		attempt.UpstreamQueuedSince = time.Time{}
+	}
+}
+
 // normalizeUpstreamQueue drops a negative count; a queue without a valid
 // count still reports that the job is queued.
 func normalizeUpstreamQueue(queue *UpstreamQueue) *UpstreamQueue {
@@ -411,6 +437,11 @@ type Attempt struct {
 	// UpstreamQueue is the upstream queue the last accepted/running
 	// observation reported (#131); nil when it reported none.
 	UpstreamQueue *UpstreamQueue `json:"-"`
+	// UpstreamQueuedSince is when the current stretch of upstream queueing
+	// began (zero while the job is not queued); UpstreamQueuedFor is the
+	// queue time of this Attempt's earlier stretches (#136).
+	UpstreamQueuedSince time.Time     `json:"-"`
+	UpstreamQueuedFor   time.Duration `json:"-"`
 	// DeliveryCompletion is the provenance of a local terminal Attempt that
 	// completed a failed conversion from an exactly related delivered Task.
 	// Ordinary Attempts leave it nil.

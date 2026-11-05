@@ -1180,6 +1180,19 @@ Provider 对创建请求明确返回限流（`Class == rate_limited`、可重试
 - **限制。** Agent 的生成工具在等待任务时会挂起该轮（`AwaitTask`），这期间 Agent 不运行、会话内发新消息返回 409，所以等待中真正可见的提示是进度卡上的排队文案；Agent 只有在调用 `get_task`/`observe_task` 时才看得到排队信息。“长时间排队时允许停止等待、任务在后台继续”本次只做了评估，没有实现：现在停止这一轮会取消该轮绑定的任务。
 - **验证范围。** 单元/集成测试覆盖：Meshy 适配器（构造的 `PENDING` + `preceding_tasks` fixture `internal/providers/meshy/testdata/meshy-text-to-3d-pending.json`，status/progress/preceding_tasks/started_at 取自 dev-test 实际查询，其余字段沿用采集的 IN_PROGRESS 样本）、Tripo、Hyper3D、内核记录与清除（真实 SQLite 仓储）、HTTP 投影（中英文、无数字、0）、Agent 视图、Catalog 校验、前端渲染。未部署 dev-test，未做浏览器实测，没有用真实上游复现排队。
 
+### 上游排队不计入执行超时（#136，本机测试，未部署验收）
+
+#131 的实测中，Meshy 文生 3D 在上游排队 35 分钟以上（前方 1313 个任务）。Meshy 文生 3D 的作业超时是 3600 秒，且 `timed_out` 不在它的重试列表里，所以排队加执行超过 1 小时，任务就会以超时失败，而上游作业可能还在跑。另外，原先已受理作业的超时失败是 `Retryable: true`、非含糊：任务列表可以手动重试，SkillRun 与加工计划步骤可以重启，预算预留会被释放，用量统计也不计入，这与“上游可能仍会执行并扣费”不符。本节处理这两件事：排队时间不再消耗执行超时，另设排队等待上限；已受理作业的超时按“可能已扣费”结算。
+
+- **排队等待上限（Schema）。** 连接级 `status_mapping.queue_timeout_seconds` 由 Provider 声明排队最长等多久，需要至少一个 `queued` 状态词，不能为负。Offering 可用 `upstream_queue_timeout_seconds` 覆盖，只允许用于声明了 `queued` 状态词的连接，同样不能为负。Catalog 加载时把生效值冻结进 Offering 的 `UpstreamQueueTimeout`，任务快照随之冻结；旧快照或没有声明的 Provider 为 0。
+- **默认值。** Meshy、Tripo、Hyper3D 都是 7200 秒（2 小时）。理由：dev-test 实测单段排队已超过 35 分钟（前方 1313 个任务）且仍未开始；Meshy 文生 3D 先预览后精细化，会排队两段；2 小时约是两段实测排队的余量（3 倍以上），同时限制上游卡住时会话被挂起（新消息返回 409）的最长时间。用户期间一直能看到排队提示并可以随时停止。Tripo 与 Hyper3D 没有实测排队数据，沿用同一值。
+- **内核计时。** Attempt 新增排队时钟：`UpstreamQueuedSince`（当前这段排队的开始时间）与 `UpstreamQueuedFor`（之前各段排队累计）。观察到排队时开段，观察到不再排队时把这段累加并清空开始时间；轮询失败时这段保持开启。`acceptedJobTimeout` 在每次观察前（调用上游之前）判定：排队累计超过上限，失败分类为 `upstream_queue_timeout`；否则执行时长 = 距 Attempt 开始的时间 − 排队累计（只有声明了上限时才扣除排队时间），超过作业超时（`job_timeout` 或 `timeout`）则为 `timed_out`。没有排队时行为与原来相同。
+- **持久化。** 同一个迁移 0078 再加两列：`generation_attempts.upstream_queued_since`（TEXT，可空）与 `upstream_queued_ms`（INTEGER，默认 0）。与 `last_observation_queue_json` 一样，它们排除在资产恢复的来源摘要之外。
+- **超时结算（“可能已扣费”）。** 已受理作业（有上游 job id）的两种超时都写成 `Ambiguous: true`、`Retryable: false`，经 `finishFailed` 直接终止（事件 `attempt.failed`），保留各自的分类，不改写成 `submission_unknown`（提交本身是确定的）。因此：内核不自动重提，即使 Offering 的重试列表包含该分类；任务列表手动重试、SkillRun 步骤重启、加工计划步骤重试都按既有的 ambiguous 规则拒绝；预算预留按 `taskMayBeChargedSQL` 记为 charged、不释放；用量统计计入。上游作业保持不动，Plinth 不发上游取消。Preparing 阶段（尚无上游作业）的超时不变。
+- **文案。** 新失败分类 `upstream_queue_timeout` 的公开文案是 `messages["failure.upstream_queue_timeout"]`（“上游排队过久，已停止等待；服务商可能仍会执行并扣费”，中英文），与 `failure.timed_out`（“上游请求超时”）区分。Agent 侧：`chat.presentation.messages.generation_failed_by_class.upstream_queue_timeout` 是排队超时专用文案；新增 `chat.presentation.messages.generation_failed_ambiguous`，用于其他 ambiguous 失败（已受理作业的执行超时、提交结果不明）。两条都要求 Agent 如实告诉用户结果未知、可能已扣费，先用 `get_task` 查看任务最新状态，不要自行重新提交，是否重新生成由用户决定。生成工具的失败结果按“计费类文案 > 分类文案 > ambiguous 文案 > 通用文案”取；`get_task` 对 ambiguous 失败返回 `user_decision_required: true`、`retryable: false` 和上述文案。
+- **对话等待期限。** 生成工具、三视图工具和旧检查点修复计算对话等待期限时，在 `Offering.Timeout` 之上加 `UpstreamQueueTimeout`，避免内核仍在等上游排队时对话先判“生成失败”。
+- **验证范围。** 内核测试（真实 SQLite）：排队期间越过原作业超时不失败；超过排队上限才以 `upstream_queue_timeout` 失败，且判定先于轮询；离开排队后只按排队外时间计执行超时；无排队时超时时点不变；未声明上限时排队时间照旧计入；以上失败都是 ambiguous、不可重试，且即使 Offering 重试列表包含该分类也不产生第二个 Attempt。另有：预算预留 charged/released 的 SQLite 测试、`get_task` 与生成工具文案（中英文）测试、HTTP 公开失败文案测试、Catalog 声明与校验测试、对话等待期限测试。未部署 dev-test，没有用真实上游复现长时间排队；“停止等待、任务转后台”（#137）未做。
+
 ### 失败任务重试（已作独立Task正常UI验收）
 
 `00dea7c5` 部署：原FAILED任务通过正常Retry、人工Grant和唯一新Task成功，12产物各两次实际GET/hash/size匹配，原任务保持FAILED。该独立Retry不覆盖#162计划中间失败恢复或lost-acceptance reconcile；平台计价40不是实际上游结算。 详细回执见 [验收记录](acceptance-2026-10-13-processing162-166.md)。

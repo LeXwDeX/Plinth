@@ -82,6 +82,12 @@ type StatusMapping struct {
 	// status word, of the count of upstream jobs ahead of a queued job
 	// (#131). Optional; read only for a status word declared queued.
 	QueueAheadField string `json:"queue_ahead_field,omitempty"`
+	// QueueTimeoutSeconds is the Provider's upstream queue wait limit (#136):
+	// time an accepted job spends queued does not count toward the job
+	// timeout, and an Attempt queued longer than this fails. Each Offering of
+	// the connection inherits it unless the Offering declares its own. Zero
+	// leaves queue time counted toward the job timeout.
+	QueueTimeoutSeconds int `json:"queue_timeout_seconds,omitempty"`
 }
 
 // ResponseAlias 声明一类产物在上游响应 output 中的候选字段名：

@@ -116,12 +116,14 @@ func readRecoverySource(ctx context.Context, q queryer, owner generation.OwnerID
 	// Local delivery completion provenance does not describe the provider
 	// bytes or the recovery receipt's source snapshot; keep 0054 receipts
 	// bound across 0069 by omitting this local-only attempt column. The 0071
-	// rate-limit queue counter and the 0078 upstream queue report are
-	// likewise local scheduling state, not provider evidence, so they never
-	// enter the source digest.
+	// rate-limit queue counter and the 0078 upstream queue report and clock
+	// are likewise local scheduling state, not provider evidence, so they
+	// never enter the source digest.
 	attemptSnapshot := make(map[string]any, len(attempts[0]))
 	for key, value := range attempts[0] {
-		if key == "delivery_completion_json" || key == "rate_limit_queued" || key == "last_observation_queue_json" {
+		switch key {
+		case "delivery_completion_json", "rate_limit_queued",
+			"last_observation_queue_json", "upstream_queued_since", "upstream_queued_ms":
 			continue
 		}
 		attemptSnapshot[key] = value

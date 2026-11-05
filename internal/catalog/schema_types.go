@@ -4353,6 +4353,11 @@ type ChatMessageTexts struct {
 	// Agent must not resubmit on its own; the text states the cause and leaves
 	// the retry to the user. It wins over GenerationFailedByClass.
 	GenerationFailedMeteredByClass map[string]string `json:"generation_failed_metered_by_class,omitempty"`
+	// GenerationFailedAmbiguous is the text of a failure whose upstream may
+	// already have run and charged (an ambiguous failure: an unknown
+	// submission, an accepted job that timed out; #136) when no class text
+	// applies: the Agent does not resubmit and has the result checked first.
+	GenerationFailedAmbiguous string `json:"generation_failed_ambiguous,omitempty"`
 }
 
 type ChatStatusTexts struct {
@@ -5431,6 +5436,9 @@ type rawOffering struct {
 	Cost                *schemacontract.CostDeclaration        `json:"cost"`
 	CostPolicy          *schemacontract.CostPolicy             `json:"cost_policy"`
 	PostSuccess         *schemacontract.PostSuccessPolicy      `json:"post_success"`
+	// UpstreamQueueTimeoutSeconds overrides the connection's
+	// status_mapping.queue_timeout_seconds for this Offering (#136).
+	UpstreamQueueTimeoutSeconds int `json:"upstream_queue_timeout_seconds,omitempty"`
 }
 
 type rawRetry struct {

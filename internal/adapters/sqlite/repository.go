@@ -2407,6 +2407,8 @@ func loadAttempt(
 	var opaqueJSON sql.NullString
 	var deliveryCompletionJSON sql.NullString
 	var upstreamQueueJSON sql.NullString
+	var upstreamQueuedSince sql.NullString
+	var upstreamQueuedMS int64
 	var startedAt string
 	var updatedAt string
 	var finishedAt sql.NullString
@@ -2415,7 +2417,8 @@ func loadAttempt(
 		SELECT id, task_id, ordinal, offering_json, state, submission_key,
 		       upstream_provider_id, upstream_job_id, failure_json, opaque_json,
 		       last_observation_key, last_observation_sequence, observation_failures, last_observation_at, last_observation_phase,
-		       started_at, updated_at, finished_at, delivery_completion_json, rate_limit_queued, last_observation_queue_json
+		       started_at, updated_at, finished_at, delivery_completion_json, rate_limit_queued, last_observation_queue_json,
+		       upstream_queued_since, upstream_queued_ms
 		FROM generation_attempts WHERE id = ?`,
 		id,
 	).Scan(
@@ -2440,6 +2443,8 @@ func loadAttempt(
 		&deliveryCompletionJSON,
 		&attempt.RateLimitQueued,
 		&upstreamQueueJSON,
+		&upstreamQueuedSince,
+		&upstreamQueuedMS,
 	)
 	if err != nil {
 		return generation.Attempt{}, err
@@ -2447,6 +2452,12 @@ func loadAttempt(
 	if attempt.UpstreamQueue, err = decodeUpstreamQueue(upstreamQueueJSON); err != nil {
 		return generation.Attempt{}, err
 	}
+	if upstreamQueuedSince.Valid {
+		if attempt.UpstreamQueuedSince, err = parseTime(upstreamQueuedSince.String); err != nil {
+			return generation.Attempt{}, err
+		}
+	}
+	attempt.UpstreamQueuedFor = time.Duration(upstreamQueuedMS) * time.Millisecond
 	if err := json.Unmarshal([]byte(offeringJSON), &attempt.Offering); err != nil {
 		return generation.Attempt{}, err
 	}
@@ -2588,8 +2599,9 @@ func upsertAttempt(ctx context.Context, tx *sql.Tx, attempt generation.Attempt) 
 		INSERT INTO generation_attempts (
 			id, task_id, ordinal, offering_json, state, submission_key,
 			upstream_provider_id, upstream_job_id, failure_json, opaque_json,
-			last_observation_key, last_observation_sequence, observation_failures, last_observation_at, last_observation_phase, started_at, updated_at, finished_at, delivery_completion_json, rate_limit_queued, last_observation_queue_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			last_observation_key, last_observation_sequence, observation_failures, last_observation_at, last_observation_phase, started_at, updated_at, finished_at, delivery_completion_json, rate_limit_queued, last_observation_queue_json,
+			upstream_queued_since, upstream_queued_ms
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			state = excluded.state,
 			upstream_provider_id = excluded.upstream_provider_id,
@@ -2605,7 +2617,9 @@ func upsertAttempt(ctx context.Context, tx *sql.Tx, attempt generation.Attempt) 
 			finished_at = excluded.finished_at,
 			delivery_completion_json = COALESCE(excluded.delivery_completion_json, generation_attempts.delivery_completion_json),
 			rate_limit_queued = excluded.rate_limit_queued,
-			last_observation_queue_json = excluded.last_observation_queue_json`,
+			last_observation_queue_json = excluded.last_observation_queue_json,
+			upstream_queued_since = excluded.upstream_queued_since,
+			upstream_queued_ms = excluded.upstream_queued_ms`,
 		attempt.ID,
 		attempt.TaskID,
 		attempt.Ordinal,
@@ -2627,6 +2641,8 @@ func upsertAttempt(ctx context.Context, tx *sql.Tx, attempt generation.Attempt) 
 		deliveryCompletion,
 		attempt.RateLimitQueued,
 		upstreamQueue,
+		nullTime(attempt.UpstreamQueuedSince),
+		attempt.UpstreamQueuedFor.Milliseconds(),
 	)
 	if err != nil && isUpstreamJobConflict(err) {
 		return fmt.Errorf("%w: %v", generation.RepositoryUpstreamJobConflict, err)

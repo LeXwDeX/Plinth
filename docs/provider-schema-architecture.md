@@ -680,3 +680,11 @@ Adapter 只需把明确的限流拒绝映射为 `FailureRateLimited`（`Retryabl
 - 提示文案是只读 `messages["task.queue_reason.upstream_queued"]` 与 `messages["task.queue_reason.upstream_queued_ahead"]`（后者含 `{ahead}`）；Agent 说明是 `chat.agent.upstream_queue_content`。默认 Catalog 提供中英文；Catalog 加载时校验已声明文案（含各语言 bundle）的占位符。没有新增 Offering 字段。
 
 当前接线：Meshy（`preceding_tasks`）、Tripo（无数字）、Hyper3D（`queue_length`，按子作业读取；含义为推断，未经官方文档确认）。机制、持久化与公开面见 `docs/architecture.md` 的“上游排队提示（#131，本机测试，未部署验收）”。
+
+**排队等待上限与超时失败（#136）。** 上游排队时间不计入作业执行超时，另由 Schema 声明排队最长等多久，超过后以新的失败分类终止。上面“没有新增 Offering 字段”只对 #131 的提示文案成立；#136 新增了一个可选的 Offering 覆盖字段：
+
+- 连接级 `status_mapping.queue_timeout_seconds` 由 Provider 声明排队等待上限（秒），需要至少一个 `queued` 状态词，不能为负。Offering 可用 `upstream_queue_timeout_seconds` 覆盖，只允许用于声明了 `queued` 状态词的连接，不能为负。Catalog 加载时校验，并把生效值冻结进 Offering 的 `UpstreamQueueTimeout`；没有声明的 Provider 为 0，此时排队时间照旧计入作业超时。默认 Catalog 里 Meshy、Tripo、Hyper3D 都是 7200 秒。
+- 排队超过上限的失败分类是 `upstream_queue_timeout`，与已受理作业执行超时的 `timed_out` 一样是 ambiguous、不可重试（上游可能仍会执行并扣费），Adapter 不参与判定；即使 Offering 的重试列表包含该分类，内核也不会自动重提。
+- 公开文案是只读 `messages["failure.upstream_queue_timeout"]`；Agent 侧是 `chat.presentation.messages.generation_failed_by_class.upstream_queue_timeout`，以及用于其他 ambiguous 失败的 `chat.presentation.messages.generation_failed_ambiguous`。默认 Catalog 提供中英文。
+
+机制、持久化、结算语义与验证范围见 `docs/architecture.md` 的“上游排队不计入执行超时（#136，本机测试，未部署验收）”。

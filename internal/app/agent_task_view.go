@@ -150,8 +150,9 @@ type agentFailureView struct {
 	Ambiguous bool   `json:"ambiguous,omitempty"`
 	// UserDecisionRequired marks a failure the Agent must not retry on its own: the
 	// Offering bills in credits and the Schema declares the class as one where the upstream
-	// may already have finished and charged. Retryable is then false for the Agent; the
-	// person can still retry from the task list. Reason is the Schema text to relay.
+	// may already have finished and charged, or the failure is ambiguous (the upstream may
+	// have run and charged, #136). Retryable is then false for the Agent; the person decides.
+	// Reason is the Schema text to relay.
 	UserDecisionRequired bool   `json:"user_decision_required,omitempty"`
 	Reason               string `json:"reason,omitempty"`
 }
@@ -231,7 +232,12 @@ func buildAgentTaskView(task generation.Task, chatSchema catalog.ChatSchema) age
 			Retryable: task.Failure.Retryable,
 			Ambiguous: task.Failure.Ambiguous,
 		}
-		if reason := generationtool.MeteredFailureMessage(chatSchema, task.Offering.CreditsMetered, task.Failure); reason != "" {
+		reason := generationtool.MeteredFailureMessage(chatSchema, task.Offering.CreditsMetered, task.Failure)
+		if reason == "" {
+			// The upstream may already have run and charged (#136).
+			reason = generationtool.AmbiguousFailureMessage(chatSchema, task.Failure)
+		}
+		if reason != "" {
 			view.Failure.Retryable = false
 			view.Failure.UserDecisionRequired = true
 			view.Failure.Reason = reason

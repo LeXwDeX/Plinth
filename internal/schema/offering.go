@@ -169,6 +169,11 @@ type Offering struct {
 	CostPolicy *CostPolicy `json:"cost_policy,omitempty"`
 	// PostSuccess 声明成功后观察（§6.1，W6）；nil = 现状（零观察）。
 	PostSuccess *PostSuccessPolicy `json:"post_success,omitempty"`
+	// UpstreamQueueTimeout is the upstream queue wait limit (#136): the
+	// Offering's upstream_queue_timeout_seconds, else its connection's
+	// status_mapping.queue_timeout_seconds. Queue time is excluded from the
+	// job timeout only while this limit bounds it; 0 counts it as before.
+	UpstreamQueueTimeout time.Duration `json:"upstream_queue_timeout_ns,omitempty"`
 }
 
 // CostDeclaration 是 Offering 级成本声明（§5.2）：基础积分 + 额外积分

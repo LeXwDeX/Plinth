@@ -67,3 +67,33 @@ func TestTaskResponseCarriesTheUpstreamQueue(t *testing.T) {
 		})
 	}
 }
+
+// #136: a queue timeout has its own public text, distinct from an ordinary
+// timeout, and both timeouts of an accepted job say the result is ambiguous.
+func TestTaskResponseNamesTheUpstreamQueueTimeout(t *testing.T) {
+	t.Parallel()
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := product.Application()
+	texts, err := catalog.NewTextLocalizer(application)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{generation: &generation.Module{}, application: application, texts: texts}
+	for _, test := range []struct {
+		locale, want string
+		failure      generation.Failure
+	}{
+		{"", "上游排队过久，已停止等待；服务商可能仍会执行并扣费", generation.Failure{Class: generation.FailureUpstreamQueueTimeout, Ambiguous: true}},
+		{"en", "Waited too long in the provider's queue and stopped waiting; the provider may still run and bill the task", generation.Failure{Class: generation.FailureUpstreamQueueTimeout, Ambiguous: true}},
+		{"", "上游请求超时", generation.Failure{Class: generation.FailureTimedOut, Ambiguous: true}},
+	} {
+		failure := test.failure
+		response := s.newTaskResponse(test.locale, generation.Task{ID: "task", State: generation.TaskFailed, Failure: &failure})
+		if response.Failure == nil || response.Failure.Detail != test.want || !response.Failure.Ambiguous || response.Failure.Retryable {
+			t.Fatalf("%s %q: failure = %+v", failure.Class, test.locale, response.Failure)
+		}
+	}
+}
