@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.parse
 
 sys.dont_write_bytecode = True
 SMOKE = pathlib.Path(__file__).resolve().parents[1] / "smoke"
@@ -57,7 +58,7 @@ class AckAndArguments(unittest.TestCase):
         env = {"PATH": "/usr/bin:/bin", "BASE": "https://example.test", "ADMIN_USERNAME": "u", "ADMIN_PASSWORD": "p",
                "PYTHONDONTWRITEBYTECODE": "1"}
         for name in ("chat-models", "2d-to-3d", "parallel", "three-view", "split", "2d-params", "canvas", "3d-params",
-                     "2d-split", "agent-hard"):
+                     "2d-split", "agent-hard", "budget"):
             result = subprocess.run([sys.executable, str(SMOKE / f"smoke-l5-{name}.py")], env=env,
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 2, name)
@@ -159,7 +160,7 @@ class ChoiceCards(unittest.TestCase):
         replies = iter(["请先选用途", "已生成并检查了模型"])
         live.wait_reply = lambda session_id: next(replies)
 
-        def wait_tasks(session_id, expected):
+        def wait_tasks(session_id, expected, watch=None):
             live._answered_choices.update(answers)
             return [{"id": "t1"}], True
         live.wait_tasks = wait_tasks
@@ -289,6 +290,277 @@ class LiveStatus(unittest.TestCase):
                          lambda: live.pending_approvals("s")):
                 with self.assertRaises(RuntimeError):
                     call()
+
+
+BUDGET_ROUTE = "/api/v1/chat/sessions/{sessionID}/budgets/{budgetID}"
+SCHEMA = {"schema": {"runtime": {"http": {"routes": {"chat_session_budget": BUDGET_ROUTE}}},
+                     "chat": {"api": {"fields": {"decision": "decision"}}}}}
+
+
+def plan_card(budget_id="b1", limit=60, quote=40, steps=None):
+    """A pending plan card as GET pending-approvals lists it (pendingapproval.Item, kind plan)."""
+    steps = steps if steps is not None else [{"capability": "text-to-3d", "estimated_credits": 30},
+                                             {"capability": "remesh", "estimated_credits": 10}]
+    return {"kind": "plan", "request_id": budget_id, "status": "pending", "tool": "propose_production_plan",
+            "budget_credits": limit, "estimated_credits": quote, "plan": {"title": "宝箱", "steps": steps},
+            "inputs": [], "message_id": "m1"}
+
+
+def step_card(request_id="g1", capability="text-to-3d"):
+    return {"request_id": request_id, "status": "pending", "tool": "generate_model_3d", "capability": capability,
+            "estimated_credits": 30, "inputs": []}
+
+
+class BudgetCards(unittest.TestCase):
+    def test_plan_and_step_cards_are_told_apart_by_kind(self):
+        items = [plan_card(), step_card(), {"kind": "", "request_id": "g2"}, "garbage"]
+        self.assertEqual([item["request_id"] for item in c.plan_cards(items)], ["b1"])
+        self.assertEqual([item["request_id"] for item in c.step_cards(items)], ["g1", "g2"])
+        self.assertEqual((c.plan_cards(None), c.step_cards(None)), ([], []))
+
+    def test_plan_card_problems(self):
+        self.assertEqual(c.plan_card_problems(plan_card()), [])
+        self.assertEqual(c.plan_capabilities(plan_card()), ["text-to-3d", "remesh"])
+        cases = {"no budget id": plan_card(budget_id=""), "budget_credits 0": plan_card(limit=0),
+                 "no steps": plan_card(steps=[]), "a step without capability": plan_card(steps=[{"purpose": "x"}]),
+                 "limit 30 below the quote 40": plan_card(limit=30)}
+        for problem, card in cases.items():
+            self.assertIn(problem, c.plan_card_problems(card), card)
+        self.assertEqual(c.plan_card_problems(None), ["no plan card"])
+        self.assertTrue(c.plan_card_problems({**plan_card(), "budget_credits": True}))
+
+    def test_budget_route_fills_both_placeholders(self):
+        self.assertEqual(c.budget_route(BUDGET_ROUTE, "s1", "b1"), "/api/v1/chat/sessions/s1/budgets/b1")
+        self.assertEqual(c.budget_route(BUDGET_ROUTE, "s/1", "b 1"), "/api/v1/chat/sessions/s%2F1/budgets/b%201")
+
+    def test_budget_route_refuses_a_left_placeholder(self):
+        # The #105 review: the card route was sent with a placeholder still in it.
+        self.assertIsNone(c.budget_route("/api/v1/chat/sessions/{sessionID}/budgets/{budgetId}", "s1", "b1"))
+        self.assertIsNone(c.budget_route("/api/v1/chat/sessions/{id}/budgets/{budgetID}", "s1", "b1"))
+        self.assertIsNone(c.budget_route("", "s1", "b1"))
+        self.assertIsNone(c.budget_route(BUDGET_ROUTE, "s1", ""))
+
+    def test_decision_body_uses_the_schema_member(self):
+        self.assertEqual(c.decision_body({"decision": "decision"}, True), {"decision": "approve"})
+        self.assertEqual(c.decision_body({"decision": "verdict"}, False), {"verdict": "deny"})
+        self.assertIsNone(c.decision_body({}, True))
+        self.assertIsNone(c.decision_body(None, True))
+
+    def test_not_executed_matches_the_denied_notice(self):
+        self.assertTrue(c.NOT_EXECUTED.search("制作计划「宝箱」未获批准，未执行任何步骤。"))
+        self.assertTrue(c.NOT_EXECUTED.search("The plan was not approved; nothing was run."))
+        self.assertFalse(c.NOT_EXECUTED.search("模型已生成，正在检查。"))
+
+
+class BudgetModel(unittest.TestCase):
+    P2 = {"id": "tripo/tripo-p2/text-to-3d", "model_id": "tripo-p2-text", "available": True, "credits_metered": True}
+    V31 = {"id": "tripo/tripo-v3.1/text-to-3d", "model_id": "tripo-v3.1", "available": True, "credits_metered": True,
+           "price_mode": "native", "default_native_quote": {"unit": "tripo.credit", "total_amount": "10"}}
+    MESHY = {"id": "meshy/meshy-7/text-to-3d", "model_id": "meshy-7", "available": True, "credits_metered": True,
+             "estimated_credits": 25}
+
+    def test_priced(self):
+        self.assertFalse(c.offering_priced(self.P2))
+        self.assertTrue(c.offering_priced(self.V31))
+        self.assertTrue(c.offering_priced(self.MESHY))
+        self.assertTrue(c.offering_priced({"id": "x", "credits_metered": False}))
+        self.assertFalse(c.offering_priced({**self.V31, "default_native_quote": {"unit": "u", "total_amount": "0"}}))
+
+    def test_prefers_a_priced_tripo_p2(self):
+        priced_p2 = {**self.P2, "estimated_credits": 20}
+        self.assertEqual(c.budget_model([self.MESHY, self.V31, priced_p2]), "tripo-p2-text")
+        # P2 without a quote cannot enter a plan: the next Tripo Offering is used.
+        self.assertEqual(c.budget_model([self.MESHY, self.P2, self.V31]), "tripo-v3.1")
+        self.assertEqual(c.budget_model([self.MESHY, self.P2]), "meshy-7")
+        self.assertIsNone(c.budget_model([self.P2, {**self.V31, "available": False}]))
+
+    def test_wanted_model_must_be_available_and_priced(self):
+        self.assertEqual(c.budget_model([self.MESHY, self.V31], "meshy-7"), "meshy-7")
+        self.assertIsNone(c.budget_model([self.MESHY, self.P2], "tripo-p2-text"))
+        self.assertIsNone(c.budget_model([self.MESHY], "unknown"))
+
+
+class BudgetPrices(unittest.TestCase):
+    D = staticmethod(lambda value: c.decimal.Decimal(str(value)))
+
+    def messages(self):
+        calls = [{"name": "generate_model_3d", "taskId": "t1",
+                  "native_quote": {"unit": "tripo.credit", "unit_label": "Tripo", "total_amount": "10.5"}},
+                 {"name": "generate_image", "taskId": "t2", "estimatedCredits": 5},
+                 {"name": "inspect_model"},
+                 {"name": "generate_model_3d", "taskId": "t1", "estimatedCredits": 99}]
+        return [{"role": "assistant", "toolCalls": json.dumps(calls)}, {"role": "user", "toolCalls": "bad"}]
+
+    def test_call_prices_by_unit(self):
+        self.assertEqual(c.call_prices(self.messages()),
+                         {"t1": ("tripo.credit", self.D("10.5")), "t2": (c.LEGACY_UNIT, self.D(5))})
+        self.assertEqual(c.call_prices([]), {})
+
+    def test_task_price_falls_back_to_the_task(self):
+        prices = c.call_prices(self.messages())
+        self.assertEqual(c.task_price({"id": "t1"}, prices), ("tripo.credit", self.D("10.5")))
+        native = {"id": "t3", "native_quote": {"unit": "hyper3d.credit", "total_amount": "0.5"}}
+        self.assertEqual(c.task_price(native, prices), ("hyper3d.credit", self.D("0.5")))
+        self.assertEqual(c.task_price({"id": "t4"}, prices, {"credits_charged": 8}), (c.LEGACY_UNIT, self.D(8)))
+        self.assertIsNone(c.task_price({"id": "t5"}, prices, {}))
+
+    def test_may_be_charged(self):
+        self.assertTrue(c.may_be_charged(task("text-to-3d", "SUCCEEDED")))
+        self.assertTrue(c.may_be_charged(task("text-to-3d", "RUNNING")))
+        self.assertFalse(c.may_be_charged(task("text-to-3d", "FAILED", failure={"class": "upstream"})))
+        self.assertTrue(c.may_be_charged(task("text-to-3d", "FAILED", failure={"ambiguous": True})))
+        self.assertFalse(c.may_be_charged(task("text-to-3d", "CANCELED")))
+
+    def test_limits_single_and_per_unit(self):
+        self.assertEqual(c.budget_limits({"limit_credits": 60}), {c.ANY_UNIT: self.D(60)})
+        self.assertEqual(c.budget_limits(plan_card(limit=45)), {c.ANY_UNIT: self.D(45)})
+        per_unit = {"limit_credits": 60, "limit_totals": [{"unit": "tripo.credit", "amount": "40"},
+                                                          {"unit": "hyper3d.credit", "amount": "1.5"}]}
+        self.assertEqual(c.budget_limits(per_unit), {"tripo.credit": self.D(40), "hyper3d.credit": self.D("1.5")})
+        self.assertEqual(c.budget_limits({"limits": [{"unit": "tripo.credit"}]}), {})
+        self.assertEqual(c.budget_limits({"limit_credits": 0}), {})
+        self.assertEqual(c.budget_limits(None), {})
+
+    def test_single_limit_bounds_the_sum_with_steps_rounded_up(self):
+        prices = [("tripo.credit", self.D("10.5")), (c.LEGACY_UNIT, self.D(5))]
+        self.assertEqual(c.budget_overruns(prices, {c.ANY_UNIT: self.D(16)}), [])
+        # 10.5 reserves 11 whole credits: 11 + 5 > 15.
+        self.assertEqual(c.budget_overruns(prices, {c.ANY_UNIT: self.D(15)}), [(c.ANY_UNIT, self.D(16), self.D(15))])
+
+    def test_per_unit_limits_are_not_summed_across_units(self):
+        prices = [("tripo.credit", self.D(20)), ("tripo.credit", self.D(20)), ("hyper3d.credit", self.D("0.5"))]
+        limits = {"tripo.credit": self.D(40), "hyper3d.credit": self.D(1)}
+        self.assertEqual(c.budget_overruns(prices, limits), [])
+        over = c.budget_overruns(prices + [("hyper3d.credit", self.D(1))], limits)
+        self.assertEqual(over, [("hyper3d.credit", self.D("1.5"), self.D(1))])
+        # A unit that spent with no limit of its own is over; a unit that spent nothing is not.
+        self.assertEqual(c.budget_overruns(prices + [("meshy.credit", self.D(1)), ("free", self.D(0))], limits),
+                         [("meshy.credit", self.D(1), None)])
+        self.assertEqual(c.spend_by_unit(prices), {"tripo.credit": self.D(40), "hyper3d.credit": self.D("0.5")})
+
+    def test_no_readable_limit_fails_closed(self):
+        self.assertEqual(c.budget_overruns([], {}), [(c.ANY_UNIT, self.D(0), None)])
+
+    def test_ledger(self):
+        self.assertIsNone(c.ledger_overrun({"limit_credits": 60, "spent_credits": 40, "reserved_credits": 20}))
+        self.assertIn("> limit 60", c.ledger_overrun({"limit_credits": 60, "spent_credits": 50, "reserved_credits": 11}))
+        self.assertEqual(c.ledger_overrun({"limit_totals": []}), "")
+        self.assertEqual(c.ledger_overrun(None), "")
+
+    def test_session_charges(self):
+        self.assertEqual(c.session_charges({"estimatedCredits": 0}), [])
+        self.assertEqual(c.session_charges({"estimatedCredits": 0, "budget": {"spent_credits": 0}}), [])
+        self.assertEqual(c.session_charges({"estimatedCredits": 25}), ["estimatedCredits 25"])
+        self.assertEqual(c.session_charges({"price_totals": [{"unit": "tripo.credit", "amount": "10"},
+                                                             {"unit": "x", "amount": "0"}]}), ["tripo.credit 10"])
+        self.assertEqual(c.session_charges({"budget": {"reserved_credits": 30}}), ["budget reserved_credits 30"])
+        self.assertEqual(c.session_charges(None), [])
+
+
+class BudgetClient:
+    """Answers the budget-mode routes like the server: the Schema, pending approvals (one list per
+    read, the last one repeating), choices, the approval mode, plan decisions and messages."""
+
+    def __init__(self, pending=(), choices=(), schema=None, decision_status=200):
+        self.pending = [list(items) for items in pending] or [[]]
+        self.choices = list(choices)
+        self.schema = SCHEMA if schema is None else schema
+        self.decision_status = decision_status
+        self.calls = []
+
+    def call(self, method, path, body=None, **_):
+        self.calls.append((method, path, body))
+        if path == "/api/v1/schema":
+            return 200, self.schema
+        if path.endswith("/pending-approvals"):
+            items = self.pending.pop(0) if len(self.pending) > 1 else self.pending[0]
+            return 200, {"items": items}
+        if path.endswith("/choices"):
+            return 200, {"choices": self.choices}
+        if path.endswith("/approval"):
+            return 200, {"id": "s1", "approvalMode": "budget", "estimatedCredits": 0}
+        if method == "PUT" and "/budgets/" in path:
+            budget_id = urllib.parse.unquote(path.rsplit("/", 1)[1])
+            state = "active" if body == {"decision": "approve"} else "denied"
+            return self.decision_status, {"budget_id": budget_id, "state": state, "message_id": "pa_" + budget_id}
+        if method == "GET" and path.endswith("/messages?limit=100"):
+            return 200, {"messages": [{"role": "assistant", "content": "请批准制作计划。"}]}
+        if path.endswith("/tasks?session_id=s1&limit=50"):
+            return 200, {"tasks": [task("text-to-3d", "RUNNING", id="t1")]}
+        return 202, {}
+
+    def read_chat_stream(self, session_id, timeout):
+        return "done"
+
+    def sent(self, method):
+        return [(path, body) for verb, path, body in self.calls if verb == method]
+
+
+class BudgetLive(unittest.TestCase):
+    def live(self, client):
+        arguments = type("Arguments", (), {"turn_timeout": 60, "task_timeout": 60})()
+        live = c.Live(client, report=None, arguments=arguments)
+        live._last_send["s1"] = ("model-3d", "m1", {})
+        return live
+
+    def test_reads_the_session_approval_mode(self):
+        self.assertEqual(self.live(BudgetClient()).approval_mode("s1"), "budget")
+        with self.assertRaises(RuntimeError):
+            c.Live(FakeClient(404, {}), None, None).approval_mode("s1")
+
+    def test_decides_a_plan_on_the_schema_route_like_the_browser(self):
+        client = BudgetClient()
+        live = self.live(client)
+        status, data = live.decide_plan("s 1", "b/1", approve=True)
+        self.assertEqual((status, data["state"], data["budget_id"]), (200, "active", "b/1"))
+        status, data = live.decide_plan("s 1", "b/1", approve=False)
+        self.assertEqual(data["state"], "denied")
+        self.assertEqual(client.sent("PUT"), [
+            ("/api/v1/chat/sessions/s%201/budgets/b%2F1", {"decision": "approve"}),
+            ("/api/v1/chat/sessions/s%201/budgets/b%2F1", {"decision": "deny"})])
+        # The Schema is read once.
+        self.assertEqual(sum(1 for _, path, _ in client.calls if path == "/api/v1/schema"), 1)
+
+    def test_refuses_to_decide_without_the_route_or_the_decision_member(self):
+        for schema in ({"schema": {"chat": {"api": {"fields": {"decision": "decision"}}}}},
+                       {"schema": {"runtime": {"http": {"routes": {"chat_session_budget": BUDGET_ROUTE}}}}},
+                       {"schema": {"runtime": {"http": {"routes": {"chat_session_budget": "/x/{sessionID}/{id}"}}},
+                                   "chat": {"api": {"fields": {"decision": "decision"}}}}}):
+            client = BudgetClient(schema=schema)
+            self.assertEqual(self.live(client).decide_plan("s1", "b1", approve=True), (0, {}))
+            self.assertEqual(client.sent("PUT"), [])
+
+    def test_waits_for_the_plan_card_answering_a_choice_card_first(self):
+        choice = {"id": "ch1", "state": "pending", "allow_default": True, "default_option_id": "game",
+                  "options": [{"id": "game"}]}
+        client = BudgetClient(pending=[[], [], [plan_card()]], choices=[choice])
+        card, steps = self.live(client).wait_plan_card("s1", poll=0)
+        self.assertEqual((card["request_id"], steps), ("b1", []))
+        answers = [body for path, body in client.sent("POST") if body and "choiceAnswer" in body]
+        self.assertEqual([body["choiceAnswer"] for body in answers], [{"choice_id": "ch1", "use_default": True}])
+
+    def test_reports_step_cards_that_came_instead_of_a_plan(self):
+        card, steps = self.live(BudgetClient(pending=[[step_card()]])).wait_plan_card("s1", poll=0)
+        self.assertIsNone(card)
+        self.assertEqual([item["request_id"] for item in steps], ["g1"])
+
+    def test_gives_up_when_the_turn_ended_without_any_card(self):
+        client = BudgetClient(pending=[[]])
+        self.assertEqual(self.live(client).wait_plan_card("s1", poll=0, quiet=2), (None, []))
+        self.assertEqual(len([1 for _, path, _ in client.calls if path.endswith("/pending-approvals")]), 2)
+
+    def test_wait_tasks_stops_when_the_watch_says_so(self):
+        client = BudgetClient(pending=[[step_card()]])
+        live = self.live(client)
+        seen = []
+
+        def watch(session_id):
+            seen.extend(c.step_cards(live.pending_approvals(session_id)))
+            return bool(seen)
+        tasks, settled = live.wait_tasks("s1", {"text-to-3d": 1}, poll=0, watch=watch)
+        self.assertEqual((settled, [t["id"] for t in tasks], [s["request_id"] for s in seen]), (False, ["t1"], ["g1"]))
+        # Stopped before answering choices or polling again.
+        self.assertEqual(len([1 for _, path, _ in client.calls if path.endswith("/tasks?session_id=s1&limit=50")]), 1)
 
 
 class References(unittest.TestCase):

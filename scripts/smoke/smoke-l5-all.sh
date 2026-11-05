@@ -13,7 +13,7 @@ fi
 REPORT_ARGS=()
 if [ "${1:-}" = "--report" ] && [ -n "${2:-}" ]; then REPORT_ARGS=(--report "$2"); fi
 
-scripts=(chat-models 2d-to-3d parallel three-view split 2d-params canvas 3d-params 2d-split agent-hard)
+scripts=(chat-models 2d-to-3d parallel three-view split 2d-params canvas 3d-params 2d-split agent-hard budget)
 status=0
 declare -a lines
 for name in "${scripts[@]}"; do

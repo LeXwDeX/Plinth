@@ -110,6 +110,7 @@ ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- bash scripts/
 | `smoke-l5-3d-params.py` | 每个可用 3D Provider 一条：分部件或贴图开关、全部声明格式须交付、参数进入冻结输入；再核对一次格式补齐请求 | 每个 Provider 一次 3D 生成 |
 | `smoke-l5-2d-split.py` | 2D 拆分：角色图拆成部件图（至少三张，且以角色图为参考）、部件抠图、部件图转 3D | 约 6 张图加一次 3D |
 | `smoke-l5-agent-hard.py` | 刁钻对话：一句话多步、中途改主意、按序号引用、前后矛盾、不支持的能力、超限尺寸、手工批准卡片、模糊指代、英文与中英混合、口语三视图；`L5_AGENT_HARD_ONLY=用例名,…` 可只跑部分 | 约 10 张图和两到三次 3D |
+| `smoke-l5-budget.py` | 预算（制作计划）批准方式，即 #103 起新会话的默认批准方式；两条链各用一个新会话，不改批准方式。批准链：读回的批准方式须为 `budget`，锁定一个有报价的文生 3D 模型（`L5_BUDGET_MODEL=<model_id>` 可指定，否则优先 Tripo P2，其次其他 Tripo 模型），发多步请求（生成游戏道具、检查、必要时优化）后须出现待批准的制作计划卡（预算 ID、限额、步骤），按 Schema 的 `chat_session_budget` 路由像浏览器一样批准，再发消息让 Agent 开始；计划执行期间不出现逐步付费批准卡，任务价格按单位不超过计划限额（当前单一的 `limit_credits` 约束各单位合计），服务端账本的已扣费加预留也不超过限额，至少一个 3D 任务 SUCCEEDED 且必需产物 READY。拒绝链：同样请求，拒绝计划卡，零任务、零扣费、没有遗留的待批准卡，回复说明没有执行；`L5_BUDGET_ONLY=approve,deny` 可只跑部分链路 | 一次 3D 生成，加计划内可能的检查或优化步骤；拒绝链不生成 |
 
 测试数据按协议保留在 `dev-test`。纯逻辑的离线单元测试：`python3 -m unittest scripts.tests.test_l5_common`。
 
