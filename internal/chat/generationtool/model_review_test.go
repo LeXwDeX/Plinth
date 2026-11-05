@@ -11,9 +11,12 @@ import (
 	"image/png"
 	"io"
 	"math"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
@@ -1138,5 +1141,204 @@ func TestLoadReviewedModelCacheHitSkipsReadingBytes(t *testing.T) {
 	}
 	if assets.bodies[1].reads != 0 {
 		t.Fatalf("the cache hit read the asset %d times", assets.bodies[1].reads)
+	}
+}
+
+// gatedReviewAssets serves one GLB to concurrent calls. The first opened
+// body announces its first Read on entered and then blocks until gate
+// closes, so the other calls start while that first load is still running.
+type gatedReviewAssets struct {
+	data    []byte
+	gate    chan struct{}
+	entered chan struct{}
+
+	mu     sync.Mutex
+	opens  int
+	bodies []*countingAssetBody
+}
+
+type gatedAssetBody struct {
+	*countingAssetBody
+	gate    chan struct{}
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (body *gatedAssetBody) Read(p []byte) (int, error) {
+	body.once.Do(func() {
+		close(body.entered)
+		<-body.gate
+	})
+	return body.countingAssetBody.Read(p)
+}
+
+func (assets *gatedReviewAssets) OpenAsset(
+	context.Context, generation.OwnerID, generation.TaskID, generation.AssetID,
+) (generation.AssetContent, error) {
+	assets.mu.Lock()
+	defer assets.mu.Unlock()
+	assets.opens++
+	counting := &countingAssetBody{reader: bytes.NewReader(assets.data)}
+	assets.bodies = append(assets.bodies, counting)
+	var body io.ReadCloser = counting
+	if assets.opens == 1 {
+		body = &gatedAssetBody{countingAssetBody: counting, gate: assets.gate, entered: assets.entered}
+	}
+	return generation.AssetContent{
+		Body: body, MediaType: "model/gltf-binary", Size: int64(len(assets.data)),
+		SHA256: reviewDigest(assets.data),
+	}, nil
+}
+
+func (assets *gatedReviewAssets) openCount() int {
+	assets.mu.Lock()
+	defer assets.mu.Unlock()
+	return assets.opens
+}
+
+func (assets *gatedReviewAssets) UploadAsset(
+	context.Context, generation.OwnerID, generation.InputAssetUpload,
+) (generation.InputAsset, error) {
+	return generation.InputAsset{}, errors.New("inspect must not upload")
+}
+
+// Concurrent first inspections of one file read and parse it once: the
+// calls that start while the first is still loading wait for its result
+// instead of reading their own copy (#120 item 2).
+func TestLoadReviewedModelSharesConcurrentFirstLoad(t *testing.T) {
+	glb := reviewModelGLB(t, 1, 1)
+	gateway := newReviewGateway(reviewTask("task-a", "owner-a", "session-a", glb, generation.TaskSucceeded))
+	assets := &gatedReviewAssets{data: glb, gate: make(chan struct{}), entered: make(chan struct{})}
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := product.Application()
+	executor, err := generationtool.New(generationtool.Config{
+		Gateway: gateway, References: &fakeReferences{}, Chat: app.Chat,
+		TaskStates: app.TaskStates, ModelAssets: assets, InputAssets: assets,
+		InputAssetRoute: app.Runtime.HTTP.Routes.AssetItem,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const callers = 4
+	results := make([]chat.ToolResult, callers)
+	errs := make([]error, callers)
+	var wait sync.WaitGroup
+	call := func(index int) {
+		defer wait.Done()
+		results[index], errs[index] = executor.InspectModel(context.Background(),
+			reviewCommand("inspect_model", `{"model":"task-a"}`))
+	}
+	wait.Add(1)
+	go call(0)
+	<-assets.entered
+	for index := 1; index < callers; index++ {
+		wait.Add(1)
+		go call(index)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for assets.openCount() < callers && time.Now().Before(deadline) {
+		runtime.Gosched()
+	}
+	close(assets.gate)
+	wait.Wait()
+	for index := range results {
+		if errs[index] != nil || results[index].Error != "" {
+			t.Fatalf("call %d = %+v, %v", index, results[index], errs[index])
+		}
+	}
+	if assets.opens != callers {
+		t.Fatalf("OpenAsset calls = %d, want %d (owner check on every call)", assets.opens, callers)
+	}
+	for index, body := range assets.bodies {
+		if index == 0 && body.reads == 0 {
+			t.Fatal("the first call did not read the file")
+		}
+		if index > 0 && body.reads != 0 {
+			t.Fatalf("call %d read its own copy %d times instead of sharing the first load", index, body.reads)
+		}
+	}
+}
+
+// The cache charges what a model holds after inspection and rendering, not
+// just its file size (#120 item 2).
+func TestModelReviewCacheChargesDecodedData(t *testing.T) {
+	glb := reviewModelGLB(t, 1, 1)
+	gateway := newReviewGateway(reviewTask("task-a", "owner-a", "session-a", glb, generation.TaskSucceeded))
+	assets := newReviewAssets(map[generation.AssetID][]byte{"task-a-glb": glb})
+	executor, _ := reviewExecutor(t, gateway, assets, nil)
+	if result, err := executor.InspectModel(context.Background(),
+		reviewCommand("inspect_model", `{"model":"task-a"}`)); err != nil || result.Error != "" {
+		t.Fatalf("inspect = %+v, %v", result, err)
+	}
+	inspected, entries := executor.ModelReviewCacheForTest()
+	// The file, its parsed structure, 4 decoded positions and 6 indices
+	// and the report.
+	if entries != 1 || inspected <= int64(len(glb))+4*3*4+6*4 {
+		t.Fatalf("after inspect: %d entries charged %d bytes for a %d-byte file", entries, inspected, len(glb))
+	}
+	if result, err := executor.RenderModelViews(context.Background(),
+		reviewCommand("render_model_views", `{"model":"task-a","views":["front"]}`)); err != nil || result.Error != "" {
+		t.Fatalf("render = %+v, %v", result, err)
+	}
+	if rendered, _ := executor.ModelReviewCacheForTest(); rendered < inspected {
+		t.Fatalf("after render the cache charges %d bytes, less than %d", rendered, inspected)
+	}
+}
+
+// reviewRequiredExtensionGLB is a GLB whose JSON requires one extension and
+// holds nothing else; Parse stops at the extension check.
+func reviewRequiredExtensionGLB(t testing.TB, extension string) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(map[string]any{
+		"asset":              map[string]any{"version": "2.0"},
+		"extensionsUsed":     []string{extension},
+		"extensionsRequired": []string{extension},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for len(encoded)%4 != 0 {
+		encoded = append(encoded, ' ')
+	}
+	out := make([]byte, 20, 20+len(encoded))
+	binary.LittleEndian.PutUint32(out[0:], 0x46546C67) // glTF
+	binary.LittleEndian.PutUint32(out[4:], 2)
+	binary.LittleEndian.PutUint32(out[8:], uint32(20+len(encoded)))
+	binary.LittleEndian.PutUint32(out[12:], uint32(len(encoded)))
+	binary.LittleEndian.PutUint32(out[16:], 0x4E4F534A) // JSON
+	return append(out, encoded...)
+}
+
+// A Draco-compressed GLB is refused with the Schema's compression text that
+// names the extension, not with the generic "cannot be reviewed" text
+// (#120 item 8).
+func TestModelReviewRefusesCompressedModelWithItsOwnText(t *testing.T) {
+	glb := reviewRequiredExtensionGLB(t, "KHR_draco_mesh_compression")
+	gateway := newReviewGateway(reviewTask("task-a", "owner-a", "session-a", glb, generation.TaskSucceeded))
+	assets := newReviewAssets(map[generation.AssetID][]byte{"task-a-glb": glb})
+	executor, schema := reviewExecutor(t, gateway, assets, nil)
+	result, err := executor.InspectModel(context.Background(), reviewCommand("inspect_model", `{"model":"task-a"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.ReplaceAll(schema.ModelReview.Texts.Compressed, "{extension}", "KHR_draco_mesh_compression")
+	if result.Error != want || !result.NoSubmission {
+		t.Fatalf("refusal = %q, want %q", result.Error, want)
+	}
+	// Another unsupported extension keeps the generic text.
+	glb = reviewRequiredExtensionGLB(t, "KHR_texture_basisu")
+	gateway = newReviewGateway(reviewTask("task-b", "owner-a", "session-a", glb, generation.TaskSucceeded))
+	assets = newReviewAssets(map[generation.AssetID][]byte{"task-b-glb": glb})
+	executor, schema = reviewExecutor(t, gateway, assets, nil)
+	result, err = executor.InspectModel(context.Background(), reviewCommand("inspect_model", `{"model":"task-b"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := schema.ModelReview.Texts.Unsupported[:strings.Index(schema.ModelReview.Texts.Unsupported, "{reason}")]
+	if !strings.HasPrefix(result.Error, prefix) || !strings.Contains(result.Error, "KHR_texture_basisu") {
+		t.Fatalf("refusal = %q, want the unsupported text naming the extension", result.Error)
 	}
 }

@@ -1,6 +1,7 @@
 package modelinspect
 
 import (
+	"context"
 	"math"
 	"slices"
 )
@@ -11,17 +12,27 @@ type topologyIssues struct {
 	invalidPositions bool
 }
 
+// maxWeldedVertices bounds welded vertex IDs so an edge key can hold two IDs
+// and a direction bit in 64 bits.
+const maxWeldedVertices = 1 << 31
+
 // computeTopology welds positions per the option tolerance, then counts
 // connected components and edge use. Edges are collected as 64-bit keys and
 // sorted, which keeps memory linear and is faster than a map for the ~2M
 // triangle models this package targets (see BenchmarkTopologyEdgeCounting).
-func (m *Model) computeTopology(readOK []bool, worldBox bounds, opts InspectOptions) (TopologyReport, topologyIssues) {
+//
+// Only vertices a triangle references are welded, and strip or fan
+// triangles that repeat an index (stitching) are skipped entirely. The pass
+// checks ctx regularly and returns ctx.Err() once it is done.
+func (m *Model) computeTopology(
+	ctx context.Context, analyses []*partAnalysis, worldBox bounds, opts InspectOptions,
+) (TopologyReport, topologyIssues, error) {
 	// Watertight stays false until every triangle has been analysed and the
-	// edge counts prove a closed surface.
+	// edge counts prove a closed, consistently oriented surface.
 	var report TopologyReport
 	var issues topologyIssues
 	if !worldBox.valid || len(m.parts) == 0 {
-		return report, issues
+		return report, issues, nil
 	}
 	epsilon := worldBox.diagonal() * opts.WeldEpsilonRatio
 	if epsilon < 0 || !finite(epsilon) {
@@ -37,14 +48,11 @@ func (m *Model) computeTopology(readOK []bool, worldBox bounds, opts InspectOpti
 	overflow := false
 
 	for index, p := range m.parts {
-		if !readOK[index] || p.triangleCount == 0 {
+		analysis := analyses[index]
+		if analysis == nil || p.mode < 4 || analysis.triangles == 0 {
 			continue
 		}
-		positions, err := m.positions(p)
-		if err != nil {
-			continue
-		}
-		if _, ok := m.validatedIndices(p); !ok {
+		if !analysis.indicesOK {
 			issues.invalidIndices = true
 			continue
 		}
@@ -52,10 +60,19 @@ func (m *Model) computeTopology(readOK []bool, worldBox bounds, opts InspectOpti
 		if count < 0 || count > maxIntValue/3 {
 			continue
 		}
+		positions := analysis.positions
 		world := make([]float32, count*3)
 		ids := make([]uint32, count)
 		for vertex := 0; vertex < count; vertex++ {
-			point := p.world.transformPoint(
+			if vertex%inspectCheckInterval == 0 {
+				if err := ctx.Err(); err != nil {
+					return TopologyReport{}, topologyIssues{}, err
+				}
+			}
+			if !analysis.uses(vertex) {
+				continue
+			}
+			point := analysis.pose.point(vertex,
 				float64(positions[vertex*3]),
 				float64(positions[vertex*3+1]),
 				float64(positions[vertex*3+2]),
@@ -69,7 +86,7 @@ func (m *Model) computeTopology(readOK []bool, worldBox bounds, opts InspectOpti
 			key := weldKey(point, epsilon)
 			id, found := weld[key]
 			if !found {
-				if nextID == ^uint32(0) {
+				if nextID == maxWeldedVertices {
 					overflow = true
 					break
 				}
@@ -86,21 +103,23 @@ func (m *Model) computeTopology(readOK []bool, worldBox bounds, opts InspectOpti
 		vertexIDs[index] = ids
 	}
 	if overflow {
-		// A model with more than 2^32 welded vertices is far outside every
+		// A model with more than 2^31 welded vertices is far outside every
 		// supported target; report the facts gathered so far rather than
-		// allocating a wider index representation.
+		// allocating a wider key representation.
 		issues.invalidIndices = true
-		return report, issues
+		return report, issues, nil
 	}
 
 	weldCount := int(nextID)
 	if weldCount == 0 {
-		return report, issues
+		return report, issues, nil
 	}
 	union := newUnionFind(weldCount)
 	totalTriangles := int64(0)
-	for _, p := range m.parts {
-		totalTriangles += p.triangleCount
+	for index := range m.parts {
+		if analyses[index] != nil {
+			totalTriangles += analyses[index].triangles
+		}
 	}
 	capacity := totalTriangles * 3
 	if capacity < 0 || capacity > int64(maxIntValue/8) {
@@ -108,22 +127,35 @@ func (m *Model) computeTopology(readOK []bool, worldBox bounds, opts InspectOpti
 	}
 	edges := make([]uint64, 0, int(capacity))
 	representatives := make([]uint32, 0, int(minInt64(capacity/3, int64(maxIntValue))))
+	// Six times the signed volume the triangles enclose, measured from the
+	// box centre: a closed surface encloses the same volume from any point,
+	// and a nearby one keeps the float error small.
+	origin := worldBox.center()
+	signedVolume := 0.0
 
+	checked := 0
 	for index, p := range m.parts {
 		ids := vertexIDs[index]
 		world := worldPositions[index]
-		if ids == nil || !readOK[index] {
+		if ids == nil {
 			continue
 		}
-		indices, ok := m.validatedIndices(p)
-		if !ok {
-			issues.invalidIndices = true
-			continue
-		}
-		count := p.partTriangles(indices)
+		analysis := analyses[index]
+		mirrored := analysis.pose.mirrored
+		count := p.partTriangles(analysis.indices)
 		for triangle := 0; triangle < count; triangle++ {
-			a, b, c, ok := p.triangle(triangle, indices)
+			checked++
+			if checked%inspectCheckInterval == 0 {
+				if err := ctx.Err(); err != nil {
+					return TopologyReport{}, topologyIssues{}, err
+				}
+			}
+			a, b, c, ok := p.triangle(triangle, analysis.indices)
 			if !ok {
+				continue
+			}
+			if p.mode != 4 && (a == b || b == c || a == c) {
+				// Strip stitching or restart, not a face.
 				continue
 			}
 			wa, wb, wc := ids[a], ids[b], ids[c]
@@ -152,6 +184,16 @@ func (m *Model) computeTopology(readOK []bool, worldBox bounds, opts InspectOpti
 			}
 			union.union(wa, wb)
 			union.union(wa, wc)
+			pa := vec3{float64(ax) - origin[0], float64(ay) - origin[1], float64(az) - origin[2]}
+			pb := vec3{float64(bx) - origin[0], float64(by) - origin[1], float64(bz) - origin[2]}
+			pc := vec3{float64(cx) - origin[0], float64(cy) - origin[1], float64(cz) - origin[2]}
+			if mirrored {
+				// A mirroring transform reverses the winding glTF assigns to
+				// the front face, so the world-space orientation is flipped.
+				wb, wc = wc, wb
+				pb, pc = pc, pb
+			}
+			signedVolume += pa.dot(pb.cross(pc))
 			edges = append(edges,
 				edgeKey(wa, wb), edgeKey(wb, wc), edgeKey(wc, wa),
 			)
@@ -160,7 +202,7 @@ func (m *Model) computeTopology(readOK []bool, worldBox bounds, opts InspectOpti
 	}
 
 	if len(representatives) == 0 {
-		return report, issues
+		return report, issues, nil
 	}
 
 	componentTriangles := make(map[uint32]int64, 16)
@@ -185,10 +227,17 @@ func (m *Model) computeTopology(readOK []bool, worldBox bounds, opts InspectOpti
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return TopologyReport{}, topologyIssues{}, err
+	}
 	slices.Sort(edges)
 	for start := 0; start < len(edges); {
-		end := start + 1
-		for end < len(edges) && edges[end] == edges[start] {
+		edge := edges[start] >> 1
+		end, forward := start, 0
+		for end < len(edges) && edges[end]>>1 == edge {
+			if edges[end]&1 == 0 {
+				forward++
+			}
 			end++
 		}
 		switch used := end - start; {
@@ -196,15 +245,31 @@ func (m *Model) computeTopology(readOK []bool, worldBox bounds, opts InspectOpti
 			report.BoundaryEdges++
 		case used > 2:
 			report.NonManifoldEdges++
+		case forward != 1:
+			// Both triangles walk the edge the same way: one of them faces
+			// the opposite side of the surface.
+			report.InconsistentWindingEdges++
 		}
 		start = end
 	}
 	// Parts skipped for invalid indices or positions were never counted, so a
 	// closed remainder does not prove the whole model is closed.
-	report.Watertight = report.BoundaryEdges == 0 && report.NonManifoldEdges == 0 &&
+	closed := report.BoundaryEdges == 0 && report.NonManifoldEdges == 0 &&
+		report.InconsistentWindingEdges == 0 &&
 		!issues.invalidIndices && !issues.invalidPositions
-	return report, issues
+	// Only a closed, consistently wound surface has a meaningful signed
+	// volume; a negative one means every face points inward. Shells nested
+	// as cavities subtract from the outer shell, so a hollow model stays
+	// positive. The tolerance ignores volumes lost to float rounding.
+	diagonal := worldBox.diagonal()
+	report.InsideOut = closed && signedVolume/6 < -insideOutTolerance*diagonal*diagonal*diagonal
+	report.Watertight = closed && !report.InsideOut
+	return report, issues, nil
 }
+
+// insideOutTolerance is the share of the bounding-box diagonal cubed below
+// which a negative enclosed volume is treated as zero.
+const insideOutTolerance = 1e-9
 
 // weldKey quantizes a world position to the welding tolerance. Coordinates
 // that would overflow the int64 grid fall back to exact float bits, which only
@@ -228,11 +293,15 @@ func weldKey(point vec3, epsilon float64) [3]int64 {
 	return key
 }
 
-func edgeKey(a, b uint32) uint64 {
-	if a > b {
-		a, b = b, a
+// edgeKey packs the edge from -> to so both directions of one undirected
+// edge sort next to each other: the smaller ID in bits 33-63, the larger in
+// bits 1-32 and bit 0 set when the edge runs from the larger ID to the
+// smaller. IDs stay below maxWeldedVertices, so nothing overlaps.
+func edgeKey(from, to uint32) uint64 {
+	if from < to {
+		return uint64(from)<<33 | uint64(to)<<1
 	}
-	return uint64(a)<<32 | uint64(b)
+	return uint64(to)<<33 | uint64(from)<<1 | 1
 }
 
 func minInt64(a, b int64) int64 {

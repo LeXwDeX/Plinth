@@ -2378,8 +2378,9 @@ type ChatModelRenderSchema struct {
 	WireframeMaxTriangles int64 `json:"wireframe_max_triangles"`
 	// Workers caps the rasteriser's goroutines per view.
 	Workers int `json:"workers"`
-	// MaxConcurrentRenders bounds renders running at the same time in the
-	// process; MaxViewsPerCall bounds one call and MaxRenderCallsPerTurn
+	// MaxConcurrentRenders bounds renders and inspections running at the same
+	// time in the process (an inspection's topology pass allocates like a
+	// render); MaxViewsPerCall bounds one call and MaxRenderCallsPerTurn
 	// bounds one Agent reply.
 	MaxConcurrentRenders  int `json:"max_concurrent_renders"`
 	MaxViewsPerCall       int `json:"max_views_per_call"`
@@ -2398,7 +2399,9 @@ type ChatModelCompareSchema struct {
 }
 
 // ChatModelReviewCacheSchema bounds the process-wide parsed-model cache: at
-// most MaxModels entries and MaxBytes of source files, whichever binds first.
+// most MaxModels entries and MaxBytes of retained memory, whichever binds
+// first. An entry is charged its source file plus the decoded accessors,
+// textures and report it holds, and is recharged as they grow.
 type ChatModelReviewCacheSchema struct {
 	MaxModels int   `json:"max_models"`
 	MaxBytes  int64 `json:"max_bytes"`
@@ -2449,6 +2452,9 @@ type ChatModelReviewTextsSchema struct {
 	// Unsupported explains a file that cannot be parsed ({reason}); it also
 	// carries a parse limit the file exceeded (size, triangles or vertices).
 	Unsupported string `json:"unsupported"`
+	// Compressed explains a valid GLB whose geometry uses a mesh compression
+	// the review tools cannot decode, such as Draco ({extension}).
+	Compressed string `json:"compressed"`
 	// SourceReadFailed refuses a model whose saved bytes could not be read
 	// ({reason}).
 	SourceReadFailed string `json:"source_read_failed"`

@@ -2227,6 +2227,7 @@ func validateModelReview(schema ChatSchema, capabilityPresentations []Capability
 		{"budget_exhausted", review.Texts.BudgetExhausted, []string{"{limit}"}},
 		{"too_large", review.Texts.TooLarge, []string{"{bytes}", "{limit}"}},
 		{"unsupported", review.Texts.Unsupported, []string{"{reason}"}},
+		{"compressed", review.Texts.Compressed, []string{"{extension}"}},
 		{"source_read_failed", review.Texts.SourceReadFailed, []string{"{reason}"}},
 		{"upload_failed", review.Texts.UploadFailed, []string{"{reason}"}},
 		{"render_failed", review.Texts.RenderFailed, []string{"{view}", "{reason}"}},

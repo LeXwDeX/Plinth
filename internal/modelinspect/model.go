@@ -3,6 +3,7 @@ package modelinspect
 import (
 	"io"
 	"sync"
+	"sync/atomic"
 )
 
 // Model is a parsed GLB asset. Parse fills the exported metadata; accessor
@@ -39,9 +40,19 @@ type Model struct {
 	accessors   []accessor
 	samplers    []sampler
 	parts       []*part
+	// jointWorld holds the world matrix of every skin joint the active scene
+	// reaches; skinned parts are posed from it.
+	jointWorld map[int]mat4
+
+	// metadataBytes estimates the parsed structure Parse keeps; decodedBytes
+	// is the size of every cache that grows afterwards (decoded accessors,
+	// meshopt views and textures). RetainedBytes reports their sum.
+	metadataBytes int64
+	decodedBytes  atomic.Int64
 
 	cache        accessorCache
 	textureCache textureCache
+	skinCache    skinCache
 }
 
 // Scene is one glTF scene.
@@ -73,7 +84,9 @@ type Mesh struct {
 
 // Primitive is one drawable primitive. Attributes maps glTF attribute names to
 // accessor indices. Material and Indices are -1 when absent. Triangles is the
-// number of triangles after converting the primitive mode.
+// number of triangles the primitive mode declares for its element count; for
+// strips and fans it includes stitching triangles, which Inspect excludes
+// once it has read the indices.
 type Primitive struct {
 	Mode         int            `json:"mode"`
 	Material     int            `json:"material"`
@@ -85,10 +98,22 @@ type Primitive struct {
 	hasTexCoords []int // sorted TEXCOORD_n set numbers
 }
 
-// TextureRef identifies a texture slot and the UV set it uses.
+// TextureRef identifies a texture slot and the UV set it uses. TexCoord
+// already reflects a KHR_texture_transform texCoord override. Transform is
+// nil when the slot has no KHR_texture_transform.
 type TextureRef struct {
-	Texture  int
-	TexCoord int
+	Texture   int
+	TexCoord  int
+	Transform *TextureTransform
+}
+
+// TextureTransform is a KHR_texture_transform: texture coordinates are
+// scaled, rotated by Rotation radians and then offset, as the extension
+// defines.
+type TextureTransform struct {
+	Offset   [2]float64
+	Rotation float64
+	Scale    [2]float64
 }
 
 // NormalTexture is the normalTexture material slot.
@@ -140,10 +165,13 @@ type Image struct {
 	ByteLength int    `json:"byte_length"`
 }
 
-// Skin is one glTF skin. Only the joint count is needed for inspection.
+// Skin is one glTF skin. Joints lists the joint node indices; the inverse
+// bind matrices are decoded on demand to pose skinned parts.
 type Skin struct {
 	Name   string `json:"name,omitempty"`
 	Joints []int  `json:"joints"`
+
+	inverseBind int // accessor index, -1 when every matrix is the identity
 }
 
 // Animation summarizes one glTF animation. Channel counts are grouped by the
@@ -158,17 +186,25 @@ type Animation struct {
 	Duration     float64 `json:"duration"`
 }
 
-// bufferView is a validated view into the embedded BIN chunk.
+// bufferView is a validated view. An uncompressed view addresses the
+// embedded BIN chunk directly: offset is relative to the start of the
+// ReaderAt. A view with meshopt set has no stored bytes of its own; its
+// length bytes are decoded from the compressed copy.
 type bufferView struct {
-	offset int64
-	length int64
-	stride int
+	offset  int64
+	length  int64
+	stride  int
+	meshopt *meshoptSource
 }
 
 // accessor is a validated accessor. srcOffset is relative to the start of the
-// ReaderAt; stride and components describe how one element is laid out.
+// ReaderAt; stride and components describe how one element is laid out. view
+// and viewOffset locate the same bytes in their bufferView, which a
+// compressed view needs because it has no position in the reader.
 type accessor struct {
 	srcOffset     int64
+	view          int // -1 without a bufferView
+	viewOffset    int64
 	count         int
 	components    int
 	componentType int
@@ -198,12 +234,25 @@ type part struct {
 	colorComponents int
 	index           int
 	uv              map[int]int
+	// skin is the node's skin, -1 when the part is not skinned. A skinned
+	// part ignores world: glTF poses it from its joints instead.
+	skin int
 }
 
+// accessorCache holds decoded accessors and, for EXT_meshopt_compression,
+// decoded bufferViews. One mutex guards all three maps.
 type accessorCache struct {
-	mu  sync.Mutex
-	f32 map[int][]float32
-	u32 map[int][]uint32
+	mu      sync.Mutex
+	f32     map[int][]float32
+	u32     map[int][]uint32
+	meshopt map[int][]byte
+}
+
+// skinCache holds each skin's joint matrices so every part of a skin poses
+// from the same result.
+type skinCache struct {
+	mu       sync.Mutex
+	matrices map[int][]mat4
 }
 
 type textureCache struct {

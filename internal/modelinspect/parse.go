@@ -26,10 +26,30 @@ const (
 	chunkHeaderLen = 8
 )
 
-// supportedExtensions is intentionally empty. Every extension listed in
-// extensionsRequired changes semantics this package cannot reproduce, so the
-// safe answer is ErrUnsupported rather than a silently wrong report.
-var supportedExtensions = map[string]bool{}
+// supportedExtensions lists the required extensions this package
+// reproduces. Every other extension listed in extensionsRequired changes
+// semantics this package cannot reproduce, so the safe answer is
+// ErrUnsupported rather than a silently wrong report.
+//
+//   - KHR_mesh_quantization only widens the component types attributes may
+//     use; every accessor is already decoded through decodeComponentF32.
+//   - EXT_meshopt_compression views are decoded by meshopt.go.
+//   - KHR_texture_transform is applied when Render samples a texture.
+var supportedExtensions = map[string]bool{
+	"KHR_mesh_quantization":   true,
+	"EXT_meshopt_compression": true,
+	"KHR_texture_transform":   true,
+}
+
+// compressionExtensions are required mesh compression extensions Parse
+// cannot decode. They are reported as a CompressionError so a caller can
+// explain that the file is compressed rather than malformed. Draco has no
+// mature pure-Go decoder; KHR_meshopt_compression adds a vertex codec
+// version and filter that meshopt.go does not implement.
+var compressionExtensions = map[string]bool{
+	"KHR_draco_mesh_compression": true,
+	"KHR_meshopt_compression":    true,
+}
 
 // Parse reads and validates a GLB v2 container.
 //
@@ -87,9 +107,12 @@ func Parse(r io.ReaderAt, size int64, limits Limits) (*Model, error) {
 		binStart:           binStart,
 		binLen:             binLen,
 		cache: accessorCache{
-			f32: make(map[int][]float32),
-			u32: make(map[int][]uint32),
+			f32:     make(map[int][]float32),
+			u32:     make(map[int][]uint32),
+			meshopt: make(map[int][]byte),
 		},
+		skinCache:  skinCache{matrices: make(map[int][]mat4)},
+		jointWorld: make(map[int]mat4),
 		textureCache: textureCache{
 			images:  make(map[int]*decodedTexture),
 			decoded: make(map[int]*decodedImage),
@@ -125,10 +148,20 @@ func Parse(r io.ReaderAt, size int64, limits Limits) (*Model, error) {
 	if err := m.loadScenes(doc.Scenes, doc.Scene, limits); err != nil {
 		return nil, err
 	}
+	m.metadataBytes = m.estimateMetadataBytes()
 	return m, nil
 }
 
+// checkRequiredExtensions rejects required extensions this package does not
+// reproduce. A compression extension is reported first, because "the file
+// is compressed" is the actionable reason even when other extensions are
+// missing too.
 func checkRequiredExtensions(required []string) error {
+	for _, name := range required {
+		if compressionExtensions[name] {
+			return &CompressionError{Extension: name}
+		}
+	}
 	for _, name := range required {
 		if supportedExtensions[name] {
 			continue
@@ -223,16 +256,29 @@ func (m *Model) loadBuffersAndViews(buffers []gltfBuffer, views []gltfBufferView
 	if m.binLen-int64(first.ByteLength) > 3 {
 		return invalidf("BIN chunk has more than 3 padding bytes")
 	}
+	// GLB embeds only buffer 0. A later buffer is acceptable only as an
+	// EXT_meshopt_compression fallback, whose bytes this package never reads:
+	// every view on it is decoded from its compressed copy instead.
+	lengths := make([]int64, len(buffers))
+	lengths[0] = int64(first.ByteLength)
 	for i := 1; i < len(buffers); i++ {
-		if buffers[i].URI != "" {
-			return unsupportedf("external buffer URI is not supported")
+		buffer := buffers[i]
+		if buffer.Extensions == nil || buffer.Extensions.Meshopt == nil || !buffer.Extensions.Meshopt.Fallback {
+			if buffer.URI != "" {
+				return unsupportedf("external buffer URI is not supported")
+			}
+			return invalidf("only buffer 0 may be embedded")
 		}
-		return invalidf("only buffer 0 may be embedded")
+		if buffer.ByteLength < 0 {
+			return invalidf("buffer %d has a negative byteLength", i)
+		}
+		lengths[i] = int64(buffer.ByteLength)
 	}
 
 	m.bufferViews = make([]bufferView, len(views))
+	decoded := int64(0)
 	for i, view := range views {
-		if view.Buffer != 0 {
+		if view.Buffer < 0 || view.Buffer >= len(buffers) {
 			return invalidf("bufferView %d references buffer %d", i, view.Buffer)
 		}
 		if view.ByteOffset < 0 || view.ByteLength < 0 || view.ByteStride < 0 {
@@ -242,16 +288,74 @@ func (m *Model) loadBuffersAndViews(buffers []gltfBuffer, views []gltfBufferView
 			return invalidf("bufferView %d has an invalid byteStride", i)
 		}
 		end := int64(view.ByteOffset) + int64(view.ByteLength)
-		if end < int64(view.ByteOffset) || end > int64(first.ByteLength) {
+		if end < int64(view.ByteOffset) || end > lengths[view.Buffer] {
 			return invalidf("bufferView %d is out of buffer bounds", i)
 		}
-		m.bufferViews[i] = bufferView{
-			offset: m.binStart + int64(view.ByteOffset),
-			length: int64(view.ByteLength),
-			stride: view.ByteStride,
+		parsed := bufferView{length: int64(view.ByteLength), stride: view.ByteStride}
+		if view.Buffer == 0 {
+			// Stored bytes are read directly even when a compressed copy
+			// exists; both must hold the same data.
+			parsed.offset = m.binStart + int64(view.ByteOffset)
+			m.bufferViews[i] = parsed
+			continue
 		}
+		var extension *gltfMeshoptView
+		if view.Extensions != nil {
+			extension = view.Extensions.Meshopt
+		}
+		if extension == nil {
+			return unsupportedf("bufferView %d is in a fallback buffer without EXT_meshopt_compression", i)
+		}
+		source, err := m.meshoptSourceFor(i, view, extension, lengths[0])
+		if err != nil {
+			return err
+		}
+		// The decoded views stay cached, so they are bounded like the file:
+		// a compressed model may not unpack to more than an uncompressed
+		// GLB the caller would accept.
+		decoded += source.decodedBytes()
+		if m.limits.MaxBytes > 0 && decoded > m.limits.MaxBytes {
+			return toolargef("decoded EXT_meshopt_compression data exceeds MaxBytes")
+		}
+		parsed.meshopt = source
+		m.bufferViews[i] = parsed
 	}
 	return nil
+}
+
+// meshoptSourceFor validates the EXT_meshopt_compression extension of view
+// index. The compressed bytes must lie in buffer 0, the GLB BIN chunk.
+func (m *Model) meshoptSourceFor(index int, view gltfBufferView, extension *gltfMeshoptView, binBufferLength int64) (*meshoptSource, error) {
+	if extension.Buffer == nil || extension.ByteLength == nil || extension.ByteStride == nil || extension.Count == nil {
+		return nil, invalidf("bufferView %d EXT_meshopt_compression is incomplete", index)
+	}
+	if *extension.Buffer != 0 {
+		return nil, unsupportedf("bufferView %d compressed data is outside the GLB BIN chunk", index)
+	}
+	offset, length := int64(extension.ByteOffset), int64(*extension.ByteLength)
+	if offset < 0 || length < 0 || offset+length > binBufferLength {
+		return nil, invalidf("bufferView %d compressed data is out of buffer bounds", index)
+	}
+	mode, ok := parseMeshoptMode(extension.Mode)
+	if !ok {
+		return nil, invalidf("bufferView %d EXT_meshopt_compression mode %q", index, extension.Mode)
+	}
+	filter, ok := parseMeshoptFilter(extension.Filter)
+	if !ok {
+		return nil, invalidf("bufferView %d EXT_meshopt_compression filter %q", index, extension.Filter)
+	}
+	source := &meshoptSource{
+		offset: m.binStart + offset, length: length,
+		stride: *extension.ByteStride, count: *extension.Count,
+		mode: mode, filter: filter,
+	}
+	if problem := source.problem(); problem != "" {
+		return nil, invalidf("bufferView %d EXT_meshopt_compression: %s", index, problem)
+	}
+	if source.decodedBytes() < int64(view.ByteLength) {
+		return nil, invalidf("bufferView %d is longer than its decoded data", index)
+	}
+	return source, nil
 }
 
 func (m *Model) loadAccessors(defs []gltfAccessor) error {
@@ -283,6 +387,7 @@ func (m *Model) loadAccessors(defs []gltfAccessor) error {
 				return unsupportedf("accessor %d without a bufferView", i)
 			}
 			m.accessors[i] = accessor{
+				view:  -1,
 				count: def.Count, components: components, elemSize: elemSize,
 				componentType: def.ComponentType, componentSize: componentSize,
 				normalized: def.Normalized, stride: elemSize,
@@ -326,6 +431,8 @@ func (m *Model) loadAccessors(defs []gltfAccessor) error {
 		}
 		m.accessors[i] = accessor{
 			srcOffset:     view.offset + int64(def.ByteOffset),
+			view:          viewIndex,
+			viewOffset:    int64(def.ByteOffset),
 			count:         def.Count,
 			components:    components,
 			componentType: def.ComponentType,
@@ -433,6 +540,11 @@ func (m *Model) loadImages(defs []gltfImage) error {
 			return unsupportedf("image %d mimeType %q", i, def.MIMEType)
 		}
 		view := m.bufferViews[viewIndex]
+		if view.meshopt != nil {
+			// EXT_meshopt_compression only defines geometry and animation
+			// streams; an image has no compressed form to decode.
+			return unsupportedf("image %d is stored in a meshopt-compressed bufferView", i)
+		}
 		config, format, err := image.DecodeConfig(io.NewSectionReader(m.src, view.offset, view.length))
 		if err != nil {
 			return invalidf("image %d cannot be decoded", i)
@@ -539,7 +651,8 @@ func (m *Model) loadMaterials(defs []gltfMaterial) error {
 			material.MetallicRoughnessTexture = ref
 		}
 		if def.NormalTexture != nil {
-			ref, err := m.textureRefIndex(i, "normalTexture", def.NormalTexture.Index, def.NormalTexture.TexCoord)
+			ref, err := m.textureRefIndex(i, "normalTexture", def.NormalTexture.Index, def.NormalTexture.TexCoord,
+				def.NormalTexture.Extensions)
 			if err != nil {
 				return err
 			}
@@ -553,7 +666,8 @@ func (m *Model) loadMaterials(defs []gltfMaterial) error {
 			material.NormalTexture = &NormalTexture{TextureRef: *ref, Scale: scale}
 		}
 		if def.OcclusionTexture != nil {
-			ref, err := m.textureRefIndex(i, "occlusionTexture", def.OcclusionTexture.Index, def.OcclusionTexture.TexCoord)
+			ref, err := m.textureRefIndex(i, "occlusionTexture", def.OcclusionTexture.Index, def.OcclusionTexture.TexCoord,
+				def.OcclusionTexture.Extensions)
 			if err != nil {
 				return err
 			}
@@ -609,10 +723,12 @@ func (m *Model) textureRef(material int, slot string, info *gltfTextureInfo) (*T
 	if info == nil {
 		return nil, nil
 	}
-	return m.textureRefIndex(material, slot, info.Index, info.TexCoord)
+	return m.textureRefIndex(material, slot, info.Index, info.TexCoord, info.Extensions)
 }
 
-func (m *Model) textureRefIndex(material int, slot string, indexPointer, texCoordPointer *int) (*TextureRef, error) {
+func (m *Model) textureRefIndex(
+	material int, slot string, indexPointer, texCoordPointer *int, extensions *gltfTextureInfoExtensions,
+) (*TextureRef, error) {
 	if indexPointer == nil {
 		return nil, nil
 	}
@@ -624,10 +740,46 @@ func (m *Model) textureRefIndex(material int, slot string, indexPointer, texCoor
 	if texCoordPointer != nil {
 		texCoord = *texCoordPointer
 	}
-	if texCoord < 0 {
+	ref := &TextureRef{Texture: index, TexCoord: texCoord}
+	if extensions != nil && extensions.Transform != nil {
+		transform, ok := textureTransform(extensions.Transform)
+		if !ok {
+			return nil, invalidf("material %d %s has an invalid KHR_texture_transform", material, slot)
+		}
+		ref.Transform = transform
+		if extensions.Transform.TexCoord != nil {
+			ref.TexCoord = *extensions.Transform.TexCoord
+		}
+	}
+	if ref.TexCoord < 0 {
 		return nil, invalidf("material %d %s has a negative texCoord", material, slot)
 	}
-	return &TextureRef{Texture: index, TexCoord: texCoord}, nil
+	return ref, nil
+}
+
+// textureTransform applies the KHR_texture_transform defaults: no offset, no
+// rotation and unit scale.
+func textureTransform(def *gltfTextureTransform) (*TextureTransform, bool) {
+	transform := &TextureTransform{Scale: [2]float64{1, 1}}
+	if def.Offset != nil {
+		if len(def.Offset) != 2 {
+			return nil, false
+		}
+		copy(transform.Offset[:], def.Offset)
+	}
+	if def.Scale != nil {
+		if len(def.Scale) != 2 {
+			return nil, false
+		}
+		copy(transform.Scale[:], def.Scale)
+	}
+	if def.Rotation != nil {
+		transform.Rotation = *def.Rotation
+	}
+	if !vectorFinite(transform.Offset[:]) || !vectorFinite(transform.Scale[:]) || !finite(transform.Rotation) {
+		return nil, false
+	}
+	return transform, true
 }
 
 func (m *Model) loadMeshes(defs []gltfMesh) error {
@@ -787,13 +939,14 @@ func (m *Model) loadSkins(defs []gltfSkin) error {
 				return invalidf("skin %d references joint node %d", i, joint)
 			}
 		}
+		inverseBind := -1
 		if def.InverseBindMatrices != nil {
-			index := *def.InverseBindMatrices
-			if index < 0 || index >= len(m.accessors) {
-				return invalidf("skin %d references accessor %d", i, index)
+			inverseBind = *def.InverseBindMatrices
+			if inverseBind < 0 || inverseBind >= len(m.accessors) {
+				return invalidf("skin %d references accessor %d", i, inverseBind)
 			}
 		}
-		m.Skins[i] = Skin{Name: def.Name, Joints: append([]int(nil), def.Joints...)}
+		m.Skins[i] = Skin{Name: def.Name, Joints: append([]int(nil), def.Joints...), inverseBind: inverseBind}
 	}
 	for i := range m.Nodes {
 		skin := m.Nodes[i].Skin
@@ -974,6 +1127,13 @@ func (m *Model) loadScenes(sceneDefs []gltfScene, active *int, limits Limits) er
 		}
 	}
 
+	joints := make([]bool, len(m.Nodes))
+	for _, skin := range m.Skins {
+		for _, joint := range skin.Joints {
+			joints[joint] = true
+		}
+	}
+
 	type walkItem struct {
 		node   int
 		parent mat4
@@ -983,6 +1143,7 @@ func (m *Model) loadScenes(sceneDefs []gltfScene, active *int, limits Limits) er
 	state := make([]uint8, len(m.Nodes))
 	totalTriangles := int64(0)
 	totalVertices := int64(0)
+	totalPathBytes := int64(0)
 	stack := make([]walkItem, 0, len(roots))
 	for i := len(roots) - 1; i >= 0; i-- {
 		stack = append(stack, walkItem{node: roots[i], parent: identity4(), depth: 1})
@@ -1009,15 +1170,29 @@ func (m *Model) loadScenes(sceneDefs []gltfScene, active *int, limits Limits) er
 		if !world.finite() {
 			return invalidf("node %d world transform is not finite", item.node)
 		}
-		path := node.Name
-		if path == "" {
-			path = "node_" + strconv.Itoa(item.node)
+		if joints[item.node] {
+			m.jointWorld[item.node] = world
 		}
+		name := node.Name
+		if name == "" {
+			name = "node_" + strconv.Itoa(item.node)
+		}
+		// Both ceilings are checked before the path is built, so a rejected
+		// hierarchy never allocates the string that exceeded them.
+		pathBytes := len(name)
 		if item.path != "" {
-			path = item.path + "/" + path
+			pathBytes += len(item.path) + 1
 		}
-		if len(path) > maxPathBytes {
+		if pathBytes > maxPathBytes {
 			return toolargef("node path exceeds %d bytes", maxPathBytes)
+		}
+		totalPathBytes += int64(pathBytes)
+		if totalPathBytes > maxTotalPathBytes {
+			return toolargef("node paths exceed %d bytes in total", maxTotalPathBytes)
+		}
+		path := name
+		if item.path != "" {
+			path = item.path + "/" + name
 		}
 		if node.Mesh >= 0 {
 			mesh := &m.Meshes[node.Mesh]
@@ -1034,7 +1209,7 @@ func (m *Model) loadScenes(sceneDefs []gltfScene, active *int, limits Limits) er
 				if len(m.parts) >= maxParts {
 					return toolargef("part count exceeds %d", maxParts)
 				}
-				m.parts = append(m.parts, m.makePart(item.node, node.Mesh, primitiveIndex, path, world, *primitive))
+				m.parts = append(m.parts, m.makePart(item.node, node.Mesh, primitiveIndex, path, world, *primitive, node.Skin))
 			}
 		}
 		state[item.node] = 2
@@ -1047,7 +1222,7 @@ func (m *Model) loadScenes(sceneDefs []gltfScene, active *int, limits Limits) er
 	return nil
 }
 
-func (m *Model) makePart(node, mesh, primitive int, path string, world mat4, def Primitive) *part {
+func (m *Model) makePart(node, mesh, primitive int, path string, world mat4, def Primitive, skin int) *part {
 	position := def.Attributes["POSITION"]
 	normal, hasNormal := def.Attributes["NORMAL"]
 	if !hasNormal {
@@ -1086,6 +1261,7 @@ func (m *Model) makePart(node, mesh, primitive int, path string, world mat4, def
 		colorComponents: colorComponents,
 		index:           def.Indices,
 		uv:              uv,
+		skin:            skin,
 	}
 }
 

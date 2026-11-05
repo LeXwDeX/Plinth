@@ -116,7 +116,16 @@ func (m *Model) decodeImage(imageIndex int) (*decodedImage, error) {
 	}
 	m.textureCache.pixels += pixels
 	m.textureCache.bytes += decodedBytes
+	m.decodedBytes.Add(int64(cap(nrgba.Pix)))
 	return &decodedImage{width: info.Width, height: info.Height, pixels: nrgba.Pix}, nil
+}
+
+// apply maps a texture coordinate as KHR_texture_transform defines: scale,
+// then rotate, then offset.
+func (t *TextureTransform) apply(u, v float64) (float64, float64) {
+	u, v = u*t.Scale[0], v*t.Scale[1]
+	cos, sin := math.Cos(t.Rotation), math.Sin(t.Rotation)
+	return cos*u + sin*v + t.Offset[0], -sin*u + cos*v + t.Offset[1]
 }
 
 // withinBudget reports whether add still fits under limit. A non-positive
