@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-05.issue103-prompts.6",
+    "revision": "2026-11-05.issue131-upstream-queue.1",
     "terminology": {
       "user_facing": [
         {
@@ -1072,15 +1072,19 @@
             ]
           },
           "status_mapping": {
+            "queue_ahead_field": "preceding_tasks",
             "upstream_status": {
               "pending": {
-                "phase": "accepted"
+                "phase": "accepted",
+                "queued": true
               },
               "queued": {
-                "phase": "accepted"
+                "phase": "accepted",
+                "queued": true
               },
               "waiting": {
-                "phase": "accepted"
+                "phase": "accepted",
+                "queued": true
               },
               "in_progress": {
                 "phase": "running"
@@ -1237,7 +1241,8 @@
           "status_mapping": {
             "upstream_status": {
               "queued": {
-                "phase": "accepted"
+                "phase": "accepted",
+                "queued": true
               },
               "running": {
                 "phase": "running"
@@ -1308,8 +1313,9 @@
             }
           },
           "status_mapping": {
+            "queue_ahead_field": "queue_length",
             "upstream_status": {
-              "waiting": { "phase": "accepted" },
+              "waiting": { "phase": "accepted", "queued": true },
               "generating": { "phase": "running" },
               "done": { "phase": "completed" },
               "failed": { "phase": "failed" }
@@ -3952,6 +3958,8 @@
         "failure.authentication": "上游身份验证失败",
         "failure.rate_limited": "上游请求过于频繁",
         "task.queue_reason.rate_limited": "上游限流，排队中；稍后会自动重试，不会重复扣积分",
+        "task.queue_reason.upstream_queued": "上游排队中",
+        "task.queue_reason.upstream_queued_ahead": "上游排队中（前方约 {ahead} 个任务）",
         "failure.transport": "无法连接上游服务",
         "failure.timed_out": "上游请求超时",
         "failure.rejected": "上游拒绝或取消了任务",
@@ -5324,6 +5332,7 @@
         "consent_required_content": "paid generation requires a human decision on the frozen input; call the generation tool to prepare that operation, then await the decision",
         "consent_limit_content": "generation limit reached for this turn; summarize the results and ask the user how to continue",
         "consent_reconcile_content": "the previous paid submission has an unknown outcome; recover or verify that original call before any new paid generation, and do not submit another paid request",
+        "upstream_queue_content": "服务商已受理这个任务，但它还在服务商自己的队列里等待开始（ahead 是服务商报告的前方任务数，只在服务商给出时才有）。这不是失败，也没有重复提交或重复扣费。请如实告诉正在等待的用户：任务正在上游排队（有 ahead 时说明前方约有多少个任务），可以继续等待，任务开始后会自动推进；也可以停止这一轮对话，停止会取消这个任务。不要重新提交生成，也不要因为排队擅自改用其他服务或模型，除非用户明确要求",
         "scanner_max_bytes": 1048576,
         "error_body_max_bytes": 65536,
         "prompt_sections": [
@@ -6025,7 +6034,7 @@
         {
           "name": "get_task",
           "execution": {"implementation_key":"task.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Read the current state, progress and assets of a generation task by task_id.",
+          "description": "Read the current state, progress and assets of a generation task by task_id. While the provider still holds the accepted task in its own queue, the result has upstream_queue (ahead: the provider's count of tasks before it, when reported; note: what to tell the waiting user).",
           "parameters": {
             "type": "object",
             "properties": {
@@ -6041,7 +6050,7 @@
         {
           "name": "observe_task",
           "execution": {"implementation_key":"task.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Observe live progress of a running generation task by task_id.",
+          "description": "Observe live progress of a running generation task by task_id. The result has upstream_queue while the provider still holds the task in its own queue; follow its note to tell the waiting user.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -14614,6 +14623,8 @@
             "failure.authentication": "Upstream authentication failed",
             "failure.rate_limited": "Too many upstream requests",
             "task.queue_reason.rate_limited": "Upstream rate limit reached; queued and will retry automatically without charging credits again",
+            "task.queue_reason.upstream_queued": "Queued at the provider",
+            "task.queue_reason.upstream_queued_ahead": "Queued at the provider (about {ahead} tasks ahead)",
             "failure.transport": "Unable to reach the upstream service",
             "failure.timed_out": "Upstream request timed out",
             "failure.rejected": "The upstream rejected or canceled the task",
@@ -16771,6 +16782,7 @@
             "chat.agent.mock_waiting_summary": "This step needs your approval; the approval card is below. It shows the base credits, any extra credits (such as extra export formats) and the total. Click “Approve” to accept this cost; “Deny” uses no credits. Nothing is charged before you approve, and you can keep chatting meanwhile.",
             "chat.agent.mock_denied_summary": "OK, this step was not run and no credits were used. You can reduce or drop the extra export formats and generate again (fewer credits without them), or switch to a model without extra charges. Tell me what you'd like to do.",
             "chat.agent.consent_waiting_status": "An approval card has been created; nothing has been submitted or started yet, and the step runs only after you approve it on that card.",
+            "chat.agent.upstream_queue_content": "the provider has accepted this task but it is still waiting in the provider's own queue to start (ahead is the number of the provider's tasks before it, present only when the provider reports one). This is not a failure, and nothing was submitted or charged twice. Tell the waiting user plainly that the task is queued at the provider (with about how many tasks are ahead when ahead is present), that they can keep waiting and the task moves on by itself once it starts, or stop this turn, which cancels the task. Do not resubmit the generation, and do not switch to another service or model because of the queue unless the user explicitly asks",
             "chat.agent.refetch_started_content": "the accepted upstream result of the failed task is being fetched again as task {task_id}: nothing was submitted for generation and nothing is charged. Tell the user so, follow {task_id} with observe_task, and when it succeeds present its result as the earlier generation recovered. Do not call recover_task_result again for the same task and do not resubmit the generation",
             "chat.agent.refetch_unavailable_content.not_applicable": "this task did not fail after its upstream result was accepted, so there is nothing to fetch again. Do not call recover_task_result for it",
             "chat.agent.refetch_unavailable_content.not_supported": "this model's provider handed over its result only once, so it cannot be fetched again. Tell the user plainly; a new generation would charge again and needs their explicit decision",

@@ -31,6 +31,17 @@ type agentTaskView struct {
 	// result can be fetched again at no charge with recover_task_result (#295).
 	// Absent for a Task that did not fail after its upstream result.
 	ResultRecovery *agentResultRecoveryView `json:"result_recovery,omitempty"`
+	// UpstreamQueue is present while the Provider holds the accepted job in
+	// its own queue (#131).
+	UpstreamQueue *agentUpstreamQueueView `json:"upstream_queue,omitempty"`
+}
+
+// agentUpstreamQueueView is a running Task's upstream queue: Ahead is the
+// Provider's count of jobs ahead, when it reports one; Note is the Schema
+// text on what to tell the person waiting.
+type agentUpstreamQueueView struct {
+	Ahead *int   `json:"ahead,omitempty"`
+	Note  string `json:"note,omitempty"`
 }
 
 type agentResultRecoveryView struct {
@@ -196,6 +207,9 @@ func buildAgentTaskViewIn(task generation.Task, chatSchema catalog.ChatSchema,
 	if view.Failure != nil && view.Failure.Reason != "" && texts != nil {
 		view.Failure.Reason = texts.Text(locale, view.Failure.Reason)
 	}
+	if view.UpstreamQueue != nil && view.UpstreamQueue.Note != "" && texts != nil {
+		view.UpstreamQueue.Note = texts.Text(locale, view.UpstreamQueue.Note)
+	}
 	return view
 }
 
@@ -231,6 +245,13 @@ func buildAgentTaskView(task generation.Task, chatSchema catalog.ChatSchema) age
 			MediaType: asset.MediaType,
 			Size:      schema.SizeText(asset.Size, true),
 		})
+	}
+	if task.UpstreamQueue != nil && task.State == generation.TaskRunning {
+		view.UpstreamQueue = &agentUpstreamQueueView{Note: chatSchema.Agent.UpstreamQueueContent}
+		if task.UpstreamQueue.Ahead != nil {
+			ahead := *task.UpstreamQueue.Ahead
+			view.UpstreamQueue.Ahead = &ahead
+		}
 	}
 	slots := make([]string, 0, len(task.Resources))
 	for slot := range task.Resources {

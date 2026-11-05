@@ -169,9 +169,22 @@ func numericEvidence(raw json.RawMessage) json.RawMessage {
 
 type statusResponse struct {
 	rodinError
-	Jobs []struct {
-		Status string `json:"status"`
-	} `json:"jobs"`
+	Jobs []statusJob `json:"jobs"`
+}
+
+// statusJob is one sub-job of a status response. Raw keeps the whole object
+// for the fields the connection declares (status_mapping.queue_ahead_field).
+type statusJob struct {
+	Status string                     `json:"status"`
+	Raw    map[string]json.RawMessage `json:"-"`
+}
+
+func (job *statusJob) UnmarshalJSON(data []byte) error {
+	type wireJob statusJob
+	if err := json.Unmarshal(data, (*wireJob)(job)); err != nil {
+		return err
+	}
+	return json.Unmarshal(data, &job.Raw)
 }
 
 type downloadResponse struct {
@@ -426,6 +439,10 @@ func (a *Adapter) Observe(ctx context.Context, request generation.ObserveRequest
 	phase, failed := generation.UpstreamAccepted, false
 	failure := &generation.Failure{Class: generation.FailureRejected, SafeDetail: "上游子作业生成失败"}
 	allDone, anyRunning := true, false
+	// The task waits in the upstream queue while every unfinished sub-job has
+	// a queued status word; the first one that reports a count gives it.
+	allQueued := true
+	var queue *generation.UpstreamQueue
 	for _, job := range status.Jobs {
 		word := strings.ToLower(strings.TrimSpace(job.Status))
 		rule, ok := a.statusMapping.UpstreamStatus[word]
@@ -435,6 +452,11 @@ func (a *Adapter) Observe(ctx context.Context, request generation.ObserveRequest
 		switch rule.Phase {
 		case "accepted":
 			allDone = false
+			if jobQueue := httpjson.UpstreamQueue(a.statusMapping, rule, job.Raw); jobQueue == nil {
+				allQueued = false
+			} else if queue == nil || (queue.Ahead == nil && jobQueue.Ahead != nil) {
+				queue = jobQueue
+			}
 		case "running":
 			allDone, anyRunning = false, true
 		case "completed":
@@ -459,11 +481,15 @@ func (a *Adapter) Observe(ctx context.Context, request generation.ObserveRequest
 		if anyRunning {
 			phase = generation.UpstreamRunning
 		}
-		return generation.Observation{
+		observation := generation.Observation{
 			Phase: phase, Job: &request.Job, Opaque: encoded,
 			PollAfter: pollDelay(request.Offering.PollInterval, state.PollCount),
 			DedupeKey: fmt.Sprintf("%s:%s:%d", state.TaskUUID, phase, state.PollCount),
-		}, nil
+		}
+		if phase == generation.UpstreamAccepted && allQueued {
+			observation.Queue = queue
+		}
+		return observation, nil
 	}
 	var downloads downloadResponse
 	if err := a.client.DoJSON(ctx, http.MethodPost, options.DownloadEndpoint,

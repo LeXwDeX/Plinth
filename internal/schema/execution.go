@@ -69,12 +69,19 @@ type StatusRule struct {
 	// word (accepted/running phases only). The poll after the bound ends the
 	// attempt as a failure of Class. Zero means no bound.
 	MaxConsecutive int `json:"max_consecutive,omitempty"`
+	// Queued marks a status word (accepted phase only) that means the
+	// upstream accepted the job but holds it in its own queue (#131).
+	Queued bool `json:"queued,omitempty"`
 }
 
 // StatusMapping 是连接级任务状态词表：键为上游状态词（小写），
 // 值为内核观察相位。未声明的状态词按未知状态协议错误处理。
 type StatusMapping struct {
 	UpstreamStatus map[string]StatusRule `json:"upstream_status,omitempty"`
+	// QueueAheadField is the dot path, within the object that carries the
+	// status word, of the count of upstream jobs ahead of a queued job
+	// (#131). Optional; read only for a status word declared queued.
+	QueueAheadField string `json:"queue_ahead_field,omitempty"`
 }
 
 // ResponseAlias 声明一类产物在上游响应 output 中的候选字段名：

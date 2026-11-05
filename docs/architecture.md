@@ -1166,6 +1166,20 @@ Provider 对创建请求明确返回限流（`Class == rate_limited`、可重试
 - **前端消费（#57）。** 任务详情投影 `projectQueueNotice`（`src/lib/workspace/task-projection.ts`，另在 `task-detail.ts` 的详情读取里同样投影）只接受带非空 `detail` 的对象，形状不对一律忽略，不显示空白提示；投影结果写进 workspace store 的 `TrackedTask.queueNotice`。三个展示入口读它，各显示一行弱化说明：生成结果详情 `result-detail.tsx`（仅 pending / running 状态）、工作区任务中心 `task-center.tsx`（仅非终态）、对话里的任务状态卡 `task-status-cards.tsx`。清除不靠前端计时：新 Attempt 开始后服务端不再返回 `queue_notice`，下一次详情刷新时 store 用新投影覆盖，字段变为空，三处提示随之消失；任务进入终态同理。
 - **验证范围。** 投影的正反例（有效、缺 `detail`、形状错误）有单元测试，`result-detail` 有渲染测试；任务中心与状态卡的显示条件没有单独的组件测试，也没有做浏览器实测。后端 429 排队到成功的端到端路径另见 `internal/app/rate_limit_queue_e2e_test.go`（#58，假上游）。
 
+### 上游排队提示（#131，本机测试，未部署验收）
+
+上游已受理作业、但作业还在上游自己的队列里等待开始时，Plinth 侧的 Attempt 停在 `ACCEPTED`、进度为 0，用户看不到任何说明。dev-test 实测过一次：Meshy 文生 3D 任务在上游 `PENDING` 排队超过 35 分钟（`preceding_tasks` 为 1313、`started_at` 为 0），期间没有任何排队提示。这与上一节的限流排队不同：上游已经受理作业，生命周期、重试与计费规则都不变，只多一份只读的排队信息，经内核、持久化和公开任务响应带到界面与 Agent：
+
+- **Schema 声明（上游字段 → 通用字段）。** `status_mapping.upstream_status.<状态词>` 新增可选 `queued: true`，表示上游已受理、作业在上游自己的队列里；只允许用于 `accepted` 相位，且不能同时带 `class` 或 `max_consecutive`。`status_mapping` 新增可选 `queue_ahead_field`：在携带状态词的那个 JSON 对象里，“前方任务数”的点分字段路径；声明它时必须至少有一个 `queued` 状态词。以上在 Catalog 加载时校验。通用读取函数是 `internal/providers/httpjson/queue.go` 的 `httpjson.UpstreamQueue`：只接受非负整数，字段缺失或非法时保留“排队中”但不带数字。
+- **各 Provider 接线。** Meshy：`pending`/`queued`/`waiting` 声明为 queued，`queue_ahead_field: preceding_tasks`；预览阶段和私有精细化（refine）阶段都会带上排队信息，refine 排队时公开相位仍是 running、进度 50。Tripo：`queued` 声明为 queued，没有前方任务数（仓库里采集的 v3 真实样本在 queued 时没有排队位置字段）。Hyper3D（Rodin）：`waiting` 声明为 queued，`queue_ahead_field: queue_length`，按子作业对象读取；只有整体相位是 accepted 且所有未完成子作业都是 waiting 时才算排队，取第一个带数字的子作业。`queue_length` 只在采集的 bang 状态样本里出现过一次（值 0，出现在下一个 Waiting 子作业上），“前方任务数”的含义是推断，未经官方文档确认。
+- **内核。** `generation.Observation` 新增 `Queue *UpstreamQueue`（`UpstreamQueue{Ahead *int}`）。`applyObservation` 只在 accepted/running 相位记录它，其他相位清空；负数前方任务数被丢弃。同相位、同进度的轮询会被判为陈旧/重复观察而丢弃，排队数字因此刷新不到，所以新增 `refreshUpstreamQueue`：持有租约的轮询在“同一上游作业、与已记录相位相同、进度相同、来源顺序不更旧”时，只更新排队信息，不推进生命周期、进度或顺序；私有检查点更新路径同样适用。Webhook（无租约）的陈旧观察不更新。
+- **持久化。** 迁移 0078 新增 `generation_attempts.last_observation_queue_json`：`NULL` 表示最近一次观察没有报告排队，`{}` 表示排队但没有数字，`{"ahead":N}` 表示带前方任务数。资产恢复的来源摘要与 0069/0071 的本地列一样排除该列。没有新增任务列：仓储读取任务时，仅当任务为 `RUNNING` 且当前 Attempt 为 `RUNNING` 时，从该列派生只读的 `Task.UpstreamQueue`（完整读取 `taskSelect` 和任务摘要投影都派生）；上游开始执行或 Attempt 结束后自然消失。每次排队刷新都会经重复观察重排路径让任务 version 递增，轮询客户端能看到变化。
+- **公开面。** 沿用已有的 `queue_notice`：`RUNNING` 且有上游排队的任务返回 `queue_notice {reason: "upstream_queued", detail, ahead?}`。`detail` 是服务端按请求语言解析的 Schema 文案：有 `ahead > 0` 时用 `messages["task.queue_reason.upstream_queued_ahead"]`（含 `{ahead}`，中文“上游排队中（前方约 {ahead} 个任务）”），否则用 `messages["task.queue_reason.upstream_queued"]`（“上游排队中”）；中英文都有，Catalog 加载校验两条文案的占位符。`ahead` 原样给出上游数字（包括 0）。限流排队（`rate_limited`，`QUEUED` 状态）的 `queue_notice` 不变。
+- **前端。** 前端代码没有改动：既有的三处展示入口（结果详情 `result-detail.tsx` 的 pending/running、任务中心 `task-center.tsx` 的非终态、对话进度卡 `task-status-cards.tsx`）原样显示服务端给的 `detail`，前端轮询任务详情时随之更新或清除。新增 `task-status-cards.test.tsx` 组件测试和 `result-detail.test.tsx` 的 running 用例。
+- **Agent。** `get_task`/`observe_task` 的结果多一个 `upstream_queue {ahead?, note}`，`note` 是 Schema `chat.agent.upstream_queue_content`（中英文），告诉 Agent 如实告知用户：任务在上游排队，可以继续等，也可以停止这一轮（停止会取消该任务），不要重新提交或擅自换服务。两个工具的 Schema 描述也提到该字段。
+- **限制。** Agent 的生成工具在等待任务时会挂起该轮（`AwaitTask`），这期间 Agent 不运行、会话内发新消息返回 409，所以等待中真正可见的提示是进度卡上的排队文案；Agent 只有在调用 `get_task`/`observe_task` 时才看得到排队信息。“长时间排队时允许停止等待、任务在后台继续”本次只做了评估，没有实现：现在停止这一轮会取消该轮绑定的任务。
+- **验证范围。** 单元/集成测试覆盖：Meshy 适配器（构造的 `PENDING` + `preceding_tasks` fixture `internal/providers/meshy/testdata/meshy-text-to-3d-pending.json`，status/progress/preceding_tasks/started_at 取自 dev-test 实际查询，其余字段沿用采集的 IN_PROGRESS 样本）、Tripo、Hyper3D、内核记录与清除（真实 SQLite 仓储）、HTTP 投影（中英文、无数字、0）、Agent 视图、Catalog 校验、前端渲染。未部署 dev-test，未做浏览器实测，没有用真实上游复现排队。
+
 ### 失败任务重试（已作独立Task正常UI验收）
 
 `00dea7c5` 部署：原FAILED任务通过正常Retry、人工Grant和唯一新Task成功，12产物各两次实际GET/hash/size匹配，原任务保持FAILED。该独立Retry不覆盖#162计划中间失败恢复或lost-acceptance reconcile；平台计价40不是实际上游结算。 详细回执见 [验收记录](acceptance-2026-10-13-processing162-166.md)。

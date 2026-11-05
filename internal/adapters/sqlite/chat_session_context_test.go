@@ -49,6 +49,7 @@ func TestMigration0065UpgradesExistingSessionsWithoutContext(t *testing.T) {
 		`DROP INDEX IF EXISTS generation_attempts_delivery_completion`,
 		`ALTER TABLE generation_attempts DROP COLUMN delivery_completion_json`,
 		`ALTER TABLE generation_attempts DROP COLUMN rate_limit_queued`,
+		`ALTER TABLE generation_attempts DROP COLUMN last_observation_queue_json`,
 		`ALTER TABLE skill_run_steps DROP COLUMN replacement_asset_id`,
 		`ALTER TABLE go_chat_messages DROP COLUMN multiview`,
 	} {

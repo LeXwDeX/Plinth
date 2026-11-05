@@ -426,9 +426,11 @@ func (m *Module) applyObservation(
 		if lease.Token == "" {
 			return nil
 		}
+		refreshUpstreamQueue(lease.Task, attempt, obs)
 		return m.rescheduleDuplicateObservation(ctx, lease, attempt, Observation{}, settlement)
 	}
 	if obs.DedupeKey != "" && obs.DedupeKey == attempt.LastObservationKey {
+		refreshUpstreamQueue(lease.Task, attempt, obs)
 		return m.rescheduleDuplicateObservation(ctx, lease, attempt, obs, settlement)
 	}
 	if obs.Phase == UpstreamPreparing {
@@ -450,6 +452,10 @@ func (m *Module) applyObservation(
 	}
 	attempt.LastObservationPhase = obs.Phase
 	attempt.ObservationFailures = 0
+	attempt.UpstreamQueue = nil
+	if obs.Phase == UpstreamAccepted || obs.Phase == UpstreamRunning {
+		attempt.UpstreamQueue = normalizeUpstreamQueue(obs.Queue)
+	}
 	if obs.Job != nil {
 		attempt.UpstreamJob = obs.Job
 	}
@@ -610,6 +616,7 @@ func (m *Module) applyPrivateCheckpointUpdate(ctx context.Context, lease Lease, 
 	updated.Opaque = append(json.RawMessage(nil), obs.Opaque...)
 	updated.LastObservationKey = obs.DedupeKey
 	updated.UpdatedAt = now
+	refreshUpstreamQueue(lease.Task, &updated, obs)
 	return mapRepositoryError("update_private_checkpoint", m.repository.Commit(ctx, Commit{
 		LeaseToken:      lease.Token,
 		ExpectedVersion: lease.Task.Version,
@@ -617,6 +624,22 @@ func (m *Module) applyPrivateCheckpointUpdate(ctx context.Context, lease Lease, 
 		Attempt:         &updated,
 		ClearLease:      true,
 	}))
+}
+
+// refreshUpstreamQueue lets a poll that cannot advance the Attempt still record
+// the upstream queue it reports (#131): the same job, in the recorded
+// accepted/running phase at the recorded progress, and not older than the
+// recorded source order. It changes nothing else.
+func refreshUpstreamQueue(task Task, attempt *Attempt, obs Observation) {
+	if attempt == nil || task.State != TaskRunning || attempt.State != AttemptRunning ||
+		(obs.Phase != UpstreamAccepted && obs.Phase != UpstreamRunning) ||
+		obs.Phase != attempt.LastObservationPhase || obs.Progress != task.Progress ||
+		(obs.Job != nil && (attempt.UpstreamJob == nil || *obs.Job != *attempt.UpstreamJob)) ||
+		(obs.Sequence > 0 && obs.Sequence < attempt.LastObservationSequence) ||
+		(!obs.ObservedAt.IsZero() && obs.ObservedAt.Before(attempt.LastObservationAt)) {
+		return
+	}
+	attempt.UpstreamQueue = normalizeUpstreamQueue(obs.Queue)
 }
 
 // Events are durable and may feed future projections. Persist only the public
