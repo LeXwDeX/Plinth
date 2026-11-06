@@ -448,6 +448,27 @@ func (executor *Executor) Execute(
 			return result, err
 		}
 	}
+	if command.Tool.ReferencePurposesArgument != "" {
+		for handle, purpose := range command.Options.AttachmentPurposes {
+			if purpose != "input" {
+				continue
+			}
+			resolved, resolveErr := executor.handlePolicy().ResolveHandles(command.ReferenceHistory(), command.Options.Selection, []string{handle}, chat.AttachmentKindImage)
+			position := -1
+			if resolveErr == nil && len(resolved) == 1 && resolved[0].URL != "" {
+				position = slices.Index(referenceURLs, resolved[0].URL)
+			}
+			if position < 0 || slices.Contains(referenceURLs[position+1:], resolved[0].URL) || (executor.canvasTurn(command) && position != 0) {
+				message := strings.ReplaceAll(executor.chat.Context.ReferencePurposeInvalidTemplate, "{handle}", handle)
+				result := executor.failure(command, "", message)
+				result.NoSubmission = true
+				return result, nil
+			}
+			input := referenceURLs[position]
+			copy(referenceURLs[1:position+1], referenceURLs[:position])
+			referenceURLs[0] = input
+		}
+	}
 	capability := command.Tool.FallbackCapability
 	if len(referenceURLs) > 0 {
 		capability = command.Tool.Capability

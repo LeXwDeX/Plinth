@@ -8,6 +8,23 @@ function memory() {
 }
 
 describe('composer draft', () => {
+  it('preserves distinct per-image purposes, drops removed or local entries, and migrates legacy purpose', () => {
+    const storage = memory();
+    const draft = draftFromState({ text: '', images: ['/a', '/b', 'data:x'], sources: {}, purpose: 'input',
+      purposes: { '/a': 'style', '/b': 'input', '/removed': 'layout', 'data:x': 'layout' } });
+    saveDraft('s', draft, storage);
+    expect(loadDraft('s', storage)?.purposes).toEqual({ '/a': 'style', '/b': 'input' });
+    storage.data.set(draftKey('legacy'), JSON.stringify({ text: '', images: ['/a', '/b'], purpose: 'layout' }));
+    expect(loadDraft('legacy', storage)).toMatchObject({ purpose: 'layout', purposes: { '/a': 'layout', '/b': 'layout' } });
+    storage.data.set(draftKey('untrusted'), JSON.stringify({ images: ['/a', '/b'], purpose: 'style', purposes: { '/a': 'invalid', '/b': null, '/foreign': 'input' } }));
+    expect(loadDraft('untrusted', storage)?.purposes).toEqual({ '/b': null });
+  });
+
+  it('keeps the last choice when there are no images', () => {
+    const storage = memory();
+    saveDraft('s', draftFromState({ text: '', images: [], sources: {}, purpose: 'style' }), storage);
+    expect(loadDraft('s', storage)?.purpose).toBe('style');
+  });
   it('keeps text and server pictures, drops local ones and counts them', () => {
     const draft = draftFromState({
       text: 'hi', images: ['/api/v1/tasks/t/assets/a', 'data:image/png;base64,xx'],

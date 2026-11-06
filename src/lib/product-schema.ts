@@ -1374,6 +1374,7 @@ export interface ChatProductSchema {
       reference_image_indices: string;
       /** 对本条消息图片的结构化声明（截图来源等）与工作区当前选中对象。 */
       attachments: string;
+      attachment_purposes: string;
       selection: string;
       mentions: string;
       input_source: string;
@@ -1478,6 +1479,7 @@ export interface ChatProductSchema {
       task_id: string;
       capture_id: string;
       image_slot: string;
+      purpose: string;
       url: string;
       /** Request-only: the text of a mention. */
       token: string;

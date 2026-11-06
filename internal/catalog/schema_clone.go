@@ -411,6 +411,12 @@ func cloneApplication(source ApplicationSchema) ApplicationSchema {
 	for profileID, profile := range source.Chat.API.PromptEnhance.Profiles {
 		result.Chat.API.PromptEnhance.Profiles[profileID] = profile
 	}
+	if source.Chat.AttachmentPurposes != nil {
+		result.Chat.AttachmentPurposes = make(map[string]ChatAttachmentPurposeSchema, len(source.Chat.AttachmentPurposes))
+		for name, purpose := range source.Chat.AttachmentPurposes {
+			result.Chat.AttachmentPurposes[name] = purpose
+		}
+	}
 	result.Chat.Context.HandlePrefixes = cloneStringMap(source.Chat.Context.HandlePrefixes)
 	result.Chat.Context.AttachmentLabelTemplates = cloneStringMap(source.Chat.Context.AttachmentLabelTemplates)
 	result.Chat.Context.KindLabels = cloneStringMap(source.Chat.Context.KindLabels)

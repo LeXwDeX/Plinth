@@ -2744,6 +2744,8 @@
         "error.legacy_generated_image_not_found": "文件不存在",
         "error.invalid_capability": "能力名称无效",
         "error.invalid_input": "请求参数无效",
+        "error.attachment_purpose_invalid": "附图用途无效，请检查图片和用途选择",
+        "error.attachment_purpose_attachment_invalid": "无法使用该附图，请重新选择图片",
         "error.unknown_offering": "指定的模型不存在",
         "error.no_offering": "当前没有可用模型",
         "error.idempotency_conflict": "幂等键与已有请求冲突",
@@ -3370,6 +3372,7 @@
         "ui.unavailable.reason.admin.llm_default_unavailable": "默认模型不可用",
         "ui.unavailable.reason.stage.board_empty": "画布为空",
         "ui.unavailable.reason.composer.reference_unused": "部分图片不会使用",
+        "ui.unavailable.reason.composer.attachment_purpose_single_input": "每轮最多一张图可设为「当作输入图」",
         "ui.unavailable.reason.composer.agent_not_configured": "Agent 尚未配置",
         "ui.unavailable.reason.stage.no_session": "没有会话",
         "ui.unavailable.reason.stage.compare_file_missing": "没有可比较的文件",
@@ -4979,6 +4982,11 @@
       }
     },
     "chat": {
+      "attachment_purposes": {
+        "style": {"agent_text": "Use this image as a visual style reference."},
+        "layout": {"agent_text": "Use this image as a composition reference."},
+        "input": {"agent_text": "Use this image as the main image to edit."}
+      },
       "api": {
         "fields": {
           "title": "title",
@@ -4996,6 +5004,7 @@
           "skill_name": "name",
           "reference_image_indices": "reference_image_indices",
           "attachments": "attachments",
+          "attachment_purposes": "attachmentPurposes",
           "selection": "selection",
           "mentions": "mentions",
           "input_source": "inputSource",
@@ -5074,6 +5083,7 @@
           "task_id": "taskId",
           "capture_id": "captureId",
           "image_slot": "imageSlot",
+          "purpose": "purpose",
           "url": "url",
           "token": "token",
           "canvas_layers": "canvasLayers",
@@ -13485,6 +13495,8 @@
             "error.legacy_generated_image_not_found": "File not found",
             "error.invalid_capability": "Invalid capability name",
             "error.invalid_input": "Invalid request parameters",
+            "error.attachment_purpose_invalid": "Invalid attachment purpose. Check the images and purposes.",
+            "error.attachment_purpose_attachment_invalid": "The attachment cannot be used. Select it again.",
             "error.unknown_offering": "The specified model doesn't exist",
             "error.no_offering": "No models are currently available",
             "error.idempotency_conflict": "The idempotency key conflicts with an existing request",
@@ -14111,6 +14123,7 @@
             "ui.unavailable.reason.admin.llm_default_unavailable": "Default model unavailable",
             "ui.unavailable.reason.stage.board_empty": "Canvas is empty",
             "ui.unavailable.reason.composer.reference_unused": "Some pictures unused",
+            "ui.unavailable.reason.composer.attachment_purpose_single_input": "Only one picture per turn can be the image to edit",
             "ui.unavailable.reason.composer.agent_not_configured": "Agent not configured",
             "ui.unavailable.reason.stage.no_session": "No session",
             "ui.unavailable.reason.stage.compare_file_missing": "No file to compare",

@@ -56,7 +56,7 @@ describe('chat copy and composer paste (#281)', () => {
   });
 
   it('attaches the same picture once', () => {
-    expect(read('./chat-column.tsx')).toContain('[...new Set([...current, ...prepared])]');
+    expect(read('./chat-column.tsx')).toContain('[...new Set([...attachedImages, ...prepared])]');
   });
 
   it('keeps card labels, handle overlays and step notes out of copied chat text', () => {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { cleanup, render, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
@@ -94,6 +94,47 @@ afterEach(() => {
   cleanup();
   useChatStore.setState({ activeSessionId: null, streamingBuffers: {} });
   useSessionContextStore.setState({ context: {}, compacting: {} });
+});
+
+describe('per-attachment purpose controls', () => {
+  it('shows separate purposes, toggles one, sets all, and keeps a pinned choice separate', () => {
+    const onSend = vi.fn();
+    function Controlled() {
+      const [purposes, setPurposes] = React.useState<('style' | 'layout' | 'input' | null)[]>(['style', 'layout']);
+      const [pinned, setPinned] = React.useState<'style' | 'layout' | 'input' | null>('input');
+      return <Composer {...props} onSend={onSend} images={['/a.png', '/b.png']} pinnedImage="/board.png"
+        attachmentPurposes={purposes} pinnedPurpose={pinned}
+        onAttachmentPurposeAt={(index, purpose) => setPurposes((items) => items.map((item, i) => i === index ? purpose : item))}
+        onPinnedPurpose={setPinned} onAttachmentPurpose={(purpose) => setPurposes([purpose, purpose])} />;
+    }
+    const view = render(<Controlled />);
+    const chips = view.getAllByTestId('composer-attachment-chip');
+    expect(chips[0].textContent).toContain(schema.content.messages['ui.studio.composer.attachment.purpose_style']);
+    expect(chips[1].textContent).toContain(schema.content.messages['ui.studio.composer.attachment.purpose_layout']);
+    expect(chips[2].textContent).toContain(schema.content.messages['ui.studio.composer.attachment.purpose_input']);
+    const rows = within(view.getByTestId('composer-attachment-purposes')).getAllByTestId('composer-attachment-purpose-row');
+    const label = (purpose: string) => schema.content.messages[`ui.studio.composer.attachment.purpose_${purpose}`];
+    expect(rows.every((row) => row.classList.contains('flex-wrap'))).toBe(true);
+    fireEvent.click(within(rows[1]).getByRole('button', { name: label('input') }));
+    expect(chips[0].textContent).toContain(label('style'));
+    expect(chips[1].textContent).toContain(label('input'));
+    fireEvent.click(within(rows[1]).getByRole('button', { name: label('input') }));
+    expect(chips[1].textContent).not.toContain(label('input'));
+    fireEvent.click(within(view.getByTestId('composer-attachment-purpose')).getByRole('radio', { name: label('layout') }));
+    expect(chips[0].textContent).toContain(label('layout'));
+    expect(chips[1].textContent).toContain(label('layout'));
+    expect(chips[2].textContent).toContain(label('input'));
+    fireEvent.click(within(rows[2]).getByRole('button', { name: label('input') }));
+    expect(chips[2].textContent).not.toContain(label('input'));
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('disables controls that have no corresponding change handler', () => {
+    const view = render(<Composer {...props} images={['/a.png']} pinnedImage="/board.png" />);
+    for (const button of within(view.getByTestId('composer-attachment-purposes')).getAllByRole('button')) {
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+    }
+  });
 });
 
 describe('the composer picker grid (#99)', () => {

@@ -14,8 +14,8 @@ import (
 // referencePurposes renders what each reference picture is for (#279), from
 // the tool's purposes argument, as the {purposes} text of the Schema template.
 // Each key is a handle; it must name one of the pictures the call really
-// sends, after the canvas snapshot is put first and the Offering's limit is
-// applied, so the numbering in the prompt matches the order of the frozen
+// sends, after input ordering and the Offering's limit are applied, so the
+// numbering in the prompt matches the order of the frozen
 // references. Anything else is refused before submission with the Schema's
 // wording. An absent or empty argument yields no text.
 func (executor *Executor) referencePurposes(
@@ -25,15 +25,28 @@ func (executor *Executor) referencePurposes(
 ) (string, string) {
 	argument := command.Tool.ReferencePurposesArgument
 	raw, present := arguments[argument]
-	if argument == "" || !present || string(raw) == "null" {
+	if argument == "" {
 		return "", ""
 	}
 	refuse := func(handle string) (string, string) {
 		return "", strings.ReplaceAll(executor.chat.Context.ReferencePurposeInvalidTemplate, "{handle}", handle)
 	}
-	var purposes map[string]string
-	if err := json.Unmarshal(raw, &purposes); err != nil {
-		return refuse(argument)
+	purposes := map[string]string{}
+	for handle, purpose := range command.Options.AttachmentPurposes {
+		text := executor.chat.AttachmentPurposes[purpose].AgentText
+		if text == "" {
+			return refuse(handle)
+		}
+		purposes[handle] = text
+	}
+	if present && string(raw) != "null" {
+		var explicit map[string]string
+		if err := json.Unmarshal(raw, &explicit); err != nil {
+			return refuse(argument)
+		}
+		for handle, text := range explicit {
+			purposes[handle] = text
+		}
 	}
 	type item struct {
 		position int
@@ -60,7 +73,7 @@ func (executor *Executor) referencePurposes(
 			return refuse(handle)
 		}
 		position := slices.Index(referenceURLs, resolved[0].URL)
-		if position < 0 || resolved[0].URL == "" {
+		if position < 0 || resolved[0].URL == "" || slices.Contains(referenceURLs[position+1:], resolved[0].URL) {
 			return refuse(handle)
 		}
 		items = append(items, item{position: position + 1, handle: resolved[0].Attachment.Handle, purpose: purpose})
