@@ -191,6 +191,17 @@ describe('batch B wiring', () => {
     // The crop rectangle is a draggable shape too: while Space is held it must not take the drag.
     expect(board).toMatch(/id="crop-rect"[\s\S]*?draggable=\{!spaceDown\}/);
   });
+
+  // #148: a press on the frame or a handle bubbles to the stage; it must not restart the frame, and each drag or
+  // resize records the frame it started from so Ctrl+Z steps back through the adjustments.
+  // Konva gesture and undo/redo behavior cannot be exercised by this source-wiring test; frame presses have pure-function coverage in canvas-pick.test.ts.
+  it('keeps the crop frame being adjusted and records each adjustment for undo', () => {
+    const board = withoutComments(read('canvas-board.tsx'));
+    expect(board).toContain("const onFrame = target.id() === 'crop-rect' || target.getParent()?.getClassName() === 'Transformer';");
+    expect(board).toContain('cropFrameOnPress(cropDraft, cropTargetAt(sorted, world), onFrame)');
+    expect(board).toMatch(/id="crop-rect"[\s\S]*?onDragStart=\{rememberCrop\}/);
+    expect(board).toMatch(/<Transformer\s+ref=\{cropTransformerRef\}[\s\S]*?onTransformStart=\{rememberCrop\}/);
+  });
 });
 
 describe('the mask on the board (#310)', () => {

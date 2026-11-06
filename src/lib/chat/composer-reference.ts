@@ -70,7 +70,7 @@ export function handleReferences(
 /** A piece of message text: plain words, or a handle written in it. */
 export type HandleSegment = { text: string; handle?: string };
 
-const TEXT_HANDLE = /(^|[\s,，。.、(（])(@(?:img|model)\d+)(?![A-Za-z0-9_])/g;
+const TEXT_HANDLE = /(^|[^A-Za-z0-9_])(@(?:img|model)\d+)(?![A-Za-z0-9_])/g;
 
 /** Split text around the picture handles it names that `known` accepts; other text stays as written. */
 export function splitHandles(text: string, known: (handle: string) => boolean): HandleSegment[] {
