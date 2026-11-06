@@ -197,6 +197,14 @@ export interface ChatApproval {
   priceTotals?: import('@/lib/pricing').PriceTotal[];
 }
 
+/** #154: the owner-scoped style lock stored on one chat session. */
+export interface ChatStyleLock {
+  enabled: boolean;
+  text: string;
+  /** Input or generated image asset IDs, kept in the user's order. */
+  references: string[];
+}
+
 export interface ChatSubscriptionOptions {
   fromID?: number;
   onEvent(event: ChatSemanticEvent): void;
@@ -289,6 +297,9 @@ export interface ChatBrowserClient {
   /** 会话设定摘要：Agent 每轮都能看到，用户可查看和修改。 */
   getNotes(sessionID: string, signal?: AbortSignal): Promise<string>;
   setNotes(sessionID: string, notes: string): Promise<string>;
+  /** #154: the session-level style lock and its ordered image asset IDs. */
+  getStyleLock(sessionID: string, signal?: AbortSignal): Promise<ChatStyleLock>;
+  setStyleLock(sessionID: string, lock: ChatStyleLock): Promise<ChatStyleLock>;
   /** 会话选用的候选图（后续步骤默认以它为准）；没有则为 null。 */
   getPick(sessionID: string, signal?: AbortSignal): Promise<ChatAttachment | null>;
   setPick(sessionID: string, claim: ChatAttachmentClaim): Promise<ChatAttachment | null>;
@@ -443,6 +454,34 @@ function notesRoute(schema: ProductSchema, sessionID: string): string {
 function notesOf(schema: ProductSchema, payload: unknown): string {
   const value = record(payload)[schema.chat.api.response_fields.notes];
   return typeof value === 'string' ? value : '';
+}
+
+function styleLockRoute(schema: ProductSchema, sessionID: string): string {
+  return sessionRoute(schema, schema.runtime.http.routes.chat_session_style_lock, sessionID);
+}
+
+function styleLockOf(schema: ProductSchema, payload: unknown): ChatStyleLock {
+  const response = record(payload);
+  const member = schema.chat.api.response_fields.style_lock;
+  const nested = member ? record(response[member]) : {};
+  const source = Object.keys(nested).length > 0 ? nested : response;
+  const fields = schema.chat.api.style_lock;
+  return {
+    enabled: source[fields.enabled] === true,
+    text: typeof source[fields.text] === 'string' ? source[fields.text] as string : '',
+    references: array(source[fields.references]).filter((item): item is string => typeof item === 'string' && item !== ''),
+  };
+}
+
+function styleLockError(schema: ProductSchema, response: Response, payload: unknown): ChatBrowserError {
+  const source = record(payload);
+  const detail = source.detail;
+  const error = source[schema.chat.api.response_fields.error];
+  return new ChatBrowserError(
+    typeof detail === 'string' && detail ? detail : typeof error === 'string' ? error : schema.chat.presentation.messages.internal_error,
+    response.status,
+    responseRequestId(response, payload),
+  );
 }
 
 function pickRoute(schema: ProductSchema, sessionID: string): string {
@@ -1363,6 +1402,27 @@ export function createChatBrowserClient(
       const payload = await responseValue(response);
       if (!response.ok) throw approvalError(schema, payload, response.status);
       return notesOf(schema, payload);
+    },
+    async getStyleLock(sessionID, signal) {
+      const response = await fetcher(styleLockRoute(schema, sessionID), { signal });
+      const payload = await responseValue(response);
+      if (!response.ok) throw styleLockError(schema, response, payload);
+      return styleLockOf(schema, payload);
+    },
+    async setStyleLock(sessionID, lock) {
+      const names = schema.chat.api.style_lock;
+      const response = await fetcher(styleLockRoute(schema, sessionID), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          [names.enabled]: lock.enabled,
+          [names.text]: lock.text,
+          [names.references]: lock.references,
+        }),
+      });
+      const payload = await responseValue(response);
+      if (!response.ok) throw styleLockError(schema, response, payload);
+      return styleLockOf(schema, payload);
     },
     async getPick(sessionID, signal) {
       const response = await fetcher(pickRoute(schema, sessionID), { signal });
