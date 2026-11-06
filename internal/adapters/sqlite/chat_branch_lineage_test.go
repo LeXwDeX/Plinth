@@ -22,16 +22,23 @@ func TestMigration0080PreservesExistingSessions(t *testing.T) {
 	}
 	r := &Repository{db: db}
 	all := migrations()
-	if len(all) == 0 || all[len(all)-1].version != 80 {
+	branch := -1
+	for index, item := range all {
+		if item.version == 80 {
+			branch = index
+			break
+		}
+	}
+	if branch < 0 {
 		t.Fatal("missing migration 0080")
 	}
-	if err := r.runMigrations(ctx, all[:len(all)-1]); err != nil {
+	if err := r.runMigrations(ctx, all[:branch]); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO go_chat_sessions (id,owner_id,owner_name,title,created_at,updated_at) VALUES ('old','owner','owner','Original','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.runMigrations(ctx, all[len(all)-1:]); err != nil {
+	if err := r.runMigrations(ctx, all[branch:]); err != nil {
 		t.Fatal(err)
 	}
 	session, found, err := r.Session(ctx, "owner", "old")
