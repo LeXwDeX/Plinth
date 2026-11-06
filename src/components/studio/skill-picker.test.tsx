@@ -90,6 +90,7 @@ describe('skillPickerRows', () => {
 
   it('offers delete on personal Skills only, never on system Skills or "none"', () => {
     const deleted: string[] = [];
+    const edited: string[] = [];
     const rows = skillPickerRows({
       catalog: { revision: 'r', skills: [
         { id: 'system-three-view', displayName: '三视图', prompt: 'p', recommendedSize: '' },
@@ -100,12 +101,19 @@ describe('skillPickerRows', () => {
       noneLabel: '不使用',
       noneHint: '默认',
       deleteLabel: (name) => '删除 Skill「' + name + '」',
+      editLabel: (name) => '编辑 Skill「' + name + '」',
+      onEdit: (skill) => edited.push(skill.id),
       deleting: new Set(),
       onDelete: (id) => deleted.push(id),
     });
     expect(rows.map((row) => row.key)).toEqual(['system-three-view', 'personal-a', '']);
     expect(rows[0].action).toBeUndefined();
     expect(rows[2].action).toBeUndefined();
+    expect(rows[0].actions).toBeUndefined();
+    expect(rows[2].actions).toBeUndefined();
+    expect(rows[1].actions?.[0].label).toBe('编辑 Skill「我的水彩」');
+    rows[1].actions?.[0].onClick();
+    expect(edited).toEqual(['personal-a']);
     expect(rows[1].action?.label).toBe('删除 Skill「我的水彩」');
     rows[1].action?.onClick();
     expect(deleted).toEqual(['personal-a']);

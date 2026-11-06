@@ -34,6 +34,25 @@ func (r *Repository) InsertPersonalSkill(ctx context.Context, owner string, skil
 	return nil
 }
 
+func (r *Repository) UpdatePersonalSkill(ctx context.Context, owner string, skill catalog.SkillSchema) error {
+	encoded, err := json.Marshal(skill)
+	if err != nil {
+		return err
+	}
+	result, err := r.db.ExecContext(ctx, `UPDATE personal_skills SET skill_json=? WHERE owner_id=? AND id=?`, string(encoded), owner, skill.ID)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return agentconfiguration.ErrPersonalSkillNotFound
+	}
+	return nil
+}
+
 // DeletePersonalSkill removes one Skill only when the owner created it.
 // Turns that already froze the Skill keep their own snapshot.
 func (r *Repository) DeletePersonalSkill(ctx context.Context, owner, id string) error {

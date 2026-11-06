@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Pencil, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import useSWR from 'swr';
 
@@ -9,7 +9,7 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { TablePopover, type TableRow } from '@/components/studio/table-popover';
 import { SkillCreator } from '@/components/workspace/skill-creator';
 import type { AgentEffectiveConfiguration } from '@/lib/agent-configuration';
-import type { ChatSkillCatalog } from '@/lib/chat/browser-client';
+import type { ChatSkill, ChatSkillCatalog } from '@/lib/chat/browser-client';
 import { deletePersonalSkill, listPersonalSkillIds } from '@/lib/personal-skills';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
@@ -24,7 +24,7 @@ const NO_SKILL = '';
  * 只有本人的个人 Skill 带删除操作（#238）；“不使用”与系统/共享 Skill 都没有。
  */
 export function skillPickerRows({
-  catalog, effective, personalIds, noneLabel, noneHint, deleteLabel, deleting, onDelete, notEnabledReason,
+  catalog, effective, personalIds, noneLabel, noneHint, deleteLabel, editLabel, deleting, onDelete, onEdit, notEnabledReason,
 }: {
   catalog: ChatSkillCatalog | null;
   effective: AgentEffectiveConfiguration | null;
@@ -32,8 +32,10 @@ export function skillPickerRows({
   noneLabel: string;
   noneHint: string;
   deleteLabel: (name: string) => string;
+  editLabel?: (name: string) => string;
   deleting: ReadonlySet<string>;
   onDelete: (id: string) => void;
+  onEdit?: (skill: ChatSkill) => void;
   /** Why a row the effective configuration leaves out is dimmed (#94); no hint when omitted. */
   notEnabledReason?: string;
 }): TableRow[] {
@@ -49,6 +51,9 @@ export function skillPickerRows({
       ],
       action: personalIds.has(skill.id)
         ? { label: deleteLabel(skill.displayName), onClick: () => onDelete(skill.id), busy: deleting.has(skill.id), testId: 'skill-delete' }
+        : undefined,
+      actions: personalIds.has(skill.id) && onEdit && editLabel
+        ? [{ label: editLabel(skill.displayName), onClick: () => onEdit(skill), icon: <Pencil aria-hidden className="size-3.5" />, testId: 'skill-edit', closeOnClick: true }]
         : undefined,
     })),
     { key: NO_SKILL, cells: [{ text: noneLabel, strong: true, kind: 'name' as const }, { text: noneHint, muted: true }, { text: '—', muted: true }] },
@@ -66,16 +71,18 @@ export interface SkillPickerProps {
   disabled: boolean;
   onSelect: (id: string | null) => void;
   onCreated: (id: string) => void;
+  onUpdated?: () => void;
   /** 本人删除了一个个人 Skill（#238）；调用方刷新目录并把指向它的选择改为“不使用”。 */
   onDeleted?: (id: string) => void;
 }
 
 /** Skill 选择：与模型选择同样的小表格；Skill 不可用于当前模型时该行变暗。 */
 export function SkillPicker({
-  sessionId, catalog, effective, selectedId, unavailable, loading, failed, disabled, onSelect, onCreated, onDeleted,
+  sessionId, catalog, effective, selectedId, unavailable, loading, failed, disabled, onSelect, onCreated, onUpdated, onDeleted,
 }: SkillPickerProps) {
   const { schema } = useProductSchema();
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<ChatSkill | null>(null);
   const [deleting, setDeleting] = useState<ReadonlySet<string>>(() => new Set());
   // Deleted here: hidden at once, before the refreshed catalog arrives (#238).
   const [removed, setRemoved] = useState<ReadonlySet<string>>(() => new Set());
@@ -136,6 +143,8 @@ export function SkillPicker({
     noneLabel: schemaText(schema, 'ui.studio.skill.none'),
     noneHint: schemaText(schema, 'ui.studio.skill.none_hint'),
     deleteLabel: (name) => formatSchemaText(schemaText(schema, 'ui.workspace.skills.delete_label'), { name }),
+    editLabel: (name) => formatSchemaText(schemaText(schema, 'ui.workspace.skills.edit_label'), { name }),
+    onEdit: (skill) => { setEditing(skill); setCreating(true); },
     deleting, onDelete: (id) => { void remove(id); },
     notEnabledReason: schemaText(schema, 'ui.unavailable.reason.picker.skill_not_enabled'),
   });
@@ -174,7 +183,7 @@ export function SkillPicker({
                 : null}
               <button
                 type="button"
-                onClick={() => { close(); setCreating(true); }}
+                onClick={() => { close(); setEditing(null); setCreating(true); }}
                 className="flex h-6 items-center gap-1 self-start rounded-md px-1.5 text-[11px] text-muted-foreground hover:bg-panel-raised hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
               >
                 <Plus aria-hidden className="size-3" />
@@ -188,6 +197,9 @@ export function SkillPicker({
         sessionId={sessionId}
         disabled={disabled}
         onCreated={onCreated}
+        onUpdated={onUpdated}
+        onGone={() => { if (editing) onDeleted?.(editing.id); void personal.mutate(); }}
+        editing={editing}
         control={{ open: creating, onOpenChange: setCreating }}
       />
     </>

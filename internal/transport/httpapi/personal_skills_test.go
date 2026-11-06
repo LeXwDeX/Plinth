@@ -192,3 +192,101 @@ func TestPersonalSkillDeleteIsOwnerScoped(t *testing.T) {
 		t.Fatalf("catalog after delete: %s", catalogA.Body.String())
 	}
 }
+
+func TestPersonalSkillUpdateIsOwnerScoped(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaults, err := catalog.LoadDefaultSkillCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := OpenMigratedTestRepository(filepath.Join(t.TempDir(), "personal-update.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	schema := product.Application()
+	service, err := agentconfiguration.New(repo, schema, defaults, product.List(""), agentconfiguration.WithPersonalSkills(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := access.NewPolicy(access.PolicyConfig{DefaultRole: "user", AdminRole: "admin", Roles: []access.RoleDefinition{{Key: "user"}, {Key: "admin"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := DevelopmentIdentity{DefaultClaims: access.Claims{ID: "owner-a", Roles: []string{"user"}}, Policy: policy}
+	server := &Server{identity: identity, application: schema, agentConfiguration: service, logger: slog.New(slog.NewTextHandler(io.Discard, nil)), mux: http.NewServeMux()}
+	server.registerAgentConfigurationContracts()
+	send := func(method, path, body string) *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		server.mux.ServeHTTP(response, httptest.NewRequest(method, path, strings.NewReader(body)))
+		return response
+	}
+	route := schema.Chat.Skills.Creation.Route
+	created := send(http.MethodPost, route, `{"name":"Old","prompt":"old prompt","recommended_size":"1536x1024"}`)
+	var result struct {
+		Skill catalog.SkillSchema `json:"skill"`
+	}
+	if created.Code != http.StatusCreated || json.Unmarshal(created.Body.Bytes(), &result) != nil {
+		t.Fatalf("create: %d %s", created.Code, created.Body.String())
+	}
+	id := result.Skill.ID
+	item := strings.Replace(schema.Chat.Skills.Creation.ItemRoute, "{skillID}", id, 1)
+	before, err := service.SnapshotForOwner(context.Background(), "owner-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := `{"name":"New","prompt":"new prompt","recommended_size":"1536x1024"}`
+	identity.DefaultClaims.ID = ""
+	server.identity = identity
+	if response := send(http.MethodPut, item, valid); response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated: %d", response.Code)
+	}
+	identity.DefaultClaims.ID = "owner-b"
+	server.identity = identity
+	if response := send(http.MethodPut, item, valid); response.Code != http.StatusNotFound {
+		t.Fatalf("cross-owner: %d", response.Code)
+	}
+	identity.DefaultClaims.ID = "owner-a"
+	server.identity = identity
+	for _, other := range []string{"system-three-view", "personal-missing"} {
+		path := strings.Replace(schema.Chat.Skills.Creation.ItemRoute, "{skillID}", other, 1)
+		if response := send(http.MethodPut, path, valid); response.Code != http.StatusNotFound {
+			t.Fatalf("missing %s: %d", other, response.Code)
+		}
+	}
+	for _, body := range []string{
+		`{"name":"","prompt":"p","recommended_size":"1536x1024"}`,
+		`{"name":"x","prompt":"","recommended_size":"1536x1024"}`,
+		`{"name":"x","prompt":"p","recommended_size":"1536x1024","extra":true}`,
+		`{"name":"x","prompt":"p","recommended_size":"1536x1024"}{}`,
+		`{"name":"` + strings.Repeat("x", schema.Chat.Skills.Creation.MaxNameCharacters+1) + `","prompt":"p","recommended_size":"1536x1024"}`,
+		`{"name":"x","prompt":"` + strings.Repeat("p", schema.AgentConfiguration.Limits.MaxSkillPromptCharacters+1) + `","recommended_size":"1536x1024"}`,
+	} {
+		if response := send(http.MethodPut, item, body); response.Code != http.StatusBadRequest {
+			t.Fatalf("invalid update: %d %s", response.Code, response.Body.String())
+		}
+	}
+	unchanged, err := service.SnapshotForOwner(context.Background(), "owner-a")
+	if err != nil || unchanged.Revision != before.Revision {
+		t.Fatalf("invalid update changed snapshot: %v", err)
+	}
+	omitted := `{"name":"No size","prompt":"keep the stored size"}`
+	if response := send(http.MethodPut, item, omitted); response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"recommended_size":"1536x1024"`)) {
+		t.Fatalf("update without a size: %d %s", response.Code, response.Body.String())
+	}
+	response := send(http.MethodPut, item, valid)
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &result) != nil || result.Skill.ID != id || result.Skill.Name != "New" || result.Skill.Prompt != "new prompt" || result.Skill.Category != "" || result.Skill.RecommendedSize != "1536x1024" {
+		t.Fatalf("update: %d %s", response.Code, response.Body.String())
+	}
+	after, err := service.SnapshotForOwner(context.Background(), "owner-a")
+	if err != nil || after.Revision == before.Revision || before.Configuration.Skills[len(before.Configuration.Skills)-1].Prompt != "old prompt" || after.Configuration.Skills[len(after.Configuration.Skills)-1].Prompt != "new prompt" {
+		t.Fatalf("snapshot: %v", err)
+	}
+	listed := send(http.MethodGet, route, "")
+	if listed.Code != http.StatusOK || !bytes.Contains(listed.Body.Bytes(), []byte(`"name":"New"`)) || !bytes.Contains(listed.Body.Bytes(), []byte(`"prompt":"new prompt"`)) {
+		t.Fatalf("updated list: %d %s", listed.Code, listed.Body.String())
+	}
+}

@@ -22,6 +22,7 @@ var ErrPersonalSkillNotFound = errors.New("personal Skill not found")
 // write by the authenticated owner. It never changes shared configuration.
 type PersonalSkillStore interface {
 	InsertPersonalSkill(context.Context, string, catalog.SkillSchema, int) error
+	UpdatePersonalSkill(context.Context, string, catalog.SkillSchema) error
 	ListPersonalSkills(context.Context, string) ([]catalog.SkillSchema, error)
 	DeletePersonalSkill(context.Context, string, string) error
 }
@@ -44,27 +45,66 @@ func (s *Service) CreatePersonalSkill(ctx context.Context, owner string, input C
 	if strings.TrimSpace(owner) == "" {
 		return catalog.SkillSchema{}, errors.New("personal Skill owner is empty")
 	}
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return catalog.SkillSchema{}, err
+	}
+	skill, err := s.personalSkill("personal-"+hex.EncodeToString(random[:]), input)
+	if err != nil {
+		return catalog.SkillSchema{}, err
+	}
+	if err := s.personalSkills.InsertPersonalSkill(ctx, owner, skill, s.schema.AgentConfiguration.Limits.MaxSkillCount); err != nil {
+		return catalog.SkillSchema{}, err
+	}
+	return skill, nil
+}
+
+func (s *Service) personalSkill(id string, input CreatePersonalSkillInput) (catalog.SkillSchema, error) {
 	input.Name = strings.TrimSpace(input.Name)
 	input.Prompt = strings.TrimSpace(input.Prompt)
 	if input.Name == "" || utf8.RuneCountInString(input.Name) > s.schema.Chat.Skills.Creation.MaxNameCharacters ||
 		input.Prompt == "" || utf8.RuneCountInString(input.Prompt) > s.schema.AgentConfiguration.Limits.MaxSkillPromptCharacters {
 		return catalog.SkillSchema{}, fmt.Errorf("%w: name or prompt", ErrInvalidPersonalSkill)
 	}
-	var random [16]byte
-	if _, err := rand.Read(random[:]); err != nil {
-		return catalog.SkillSchema{}, err
-	}
-	skill := catalog.SkillSchema{
-		ID:   "personal-" + hex.EncodeToString(random[:]),
-		Name: input.Name, Category: input.Category,
-		RecommendedSize: input.RecommendedSize, Prompt: input.Prompt,
-	}
+	skill := catalog.SkillSchema{ID: id, Name: input.Name, Category: input.Category, RecommendedSize: input.RecommendedSize, Prompt: input.Prompt}
 	candidate := clone(s.defaults)
 	candidate.Skills = []catalog.SkillSchema{skill}
 	if err := s.Validate(candidate); err != nil {
 		return catalog.SkillSchema{}, fmt.Errorf("%w: %v", ErrInvalidPersonalSkill, err)
 	}
-	if err := s.personalSkills.InsertPersonalSkill(ctx, owner, skill, s.schema.AgentConfiguration.Limits.MaxSkillCount); err != nil {
+	return skill, nil
+}
+
+func (s *Service) UpdatePersonalSkill(ctx context.Context, owner, id string, input CreatePersonalSkillInput) (catalog.SkillSchema, error) {
+	if s.personalSkills == nil || strings.TrimSpace(owner) == "" || strings.TrimSpace(id) == "" {
+		return catalog.SkillSchema{}, ErrPersonalSkillNotFound
+	}
+	skills, err := s.personalSkills.ListPersonalSkills(ctx, owner)
+	if err != nil {
+		return catalog.SkillSchema{}, err
+	}
+	found := false
+	var existing catalog.SkillSchema
+	for _, current := range skills {
+		if current.ID == id {
+			existing = current
+			found = true
+			break
+		}
+	}
+	if !found {
+		return catalog.SkillSchema{}, ErrPersonalSkillNotFound
+	}
+	// The update is a whole replacement, but an omitted size keeps the stored one; a creation
+	// request always names it (the form sends the Schema default), and Validate rejects an empty size.
+	if strings.TrimSpace(input.RecommendedSize) == "" {
+		input.RecommendedSize = existing.RecommendedSize
+	}
+	skill, err := s.personalSkill(id, input)
+	if err != nil {
+		return catalog.SkillSchema{}, err
+	}
+	if err := s.personalSkills.UpdatePersonalSkill(ctx, owner, skill); err != nil {
 		return catalog.SkillSchema{}, err
 	}
 	return skill, nil

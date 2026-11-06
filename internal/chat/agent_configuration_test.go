@@ -3,9 +3,12 @@ package chat_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
+	"github.com/LeXwDeX/Plinth/internal/agentconfiguration"
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -36,14 +39,37 @@ func TestSuspendedTurnKeepsConfigurationAcrossNewOrchestrator(t *testing.T) {
 	assistant := startTurnFor(t, service, "owner-config", session.ID, "draw")
 	tool := &configurationSuspendExecutor{}
 	calls := 0
-	revision := "1"
-	style := "original personal style"
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaults, err := catalog.LoadDefaultSkillCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := sqlitetest.Open(filepath.Join(t.TempDir(), "personal.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	config, err := agentconfiguration.New(repo, product.Application(), defaults, product.List(""), agentconfiguration.WithPersonalSkills(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	skill, err := config.CreatePersonalSkill(ctx, "owner-config", agentconfiguration.CreatePersonalSkillInput{Name: "Style", Prompt: "original personal style", RecommendedSize: "1536x1024"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	configured := func(_ context.Context, owner string) (chat.AgentConfigurationSnapshot, error) {
 		if owner != "owner-config" {
 			t.Fatalf("configuration owner = %q", owner)
 		}
 		calls++
-		return chat.AgentConfigurationSnapshot{Revision: revision, SystemPrompt: "prompt-" + revision, DomainContext: map[string]string{}, Skills: []catalog.SkillSchema{{ID: "personal-style", Prompt: style}}, AgentTools: []catalog.ChatAgentToolSchema{schema.AgentTools[0]}}, nil
+		snapshot, err := config.SnapshotForOwner(ctx, owner)
+		if err != nil {
+			return chat.AgentConfigurationSnapshot{}, err
+		}
+		return chat.AgentConfigurationSnapshot{Revision: snapshot.Revision, SystemPrompt: "prompt", DomainContext: map[string]string{}, Skills: snapshot.Configuration.Skills, AgentTools: []catalog.ChatAgentToolSchema{schema.AgentTools[0]}}, nil
 	}
 	name := schema.AgentTools[0].Name
 	agent := &scriptedSuspendAgent{initial: agents.Completion{ToolCalls: []agents.ToolCall{{ID: "frozen-call", Name: name, Arguments: json.RawMessage(`{}`)}}}, resume: []agents.Completion{{Content: "finished"}}}
@@ -62,21 +88,36 @@ func TestSuspendedTurnKeepsConfigurationAcrossNewOrchestrator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if turn.Checkpoint.Configuration == nil || turn.Checkpoint.Configuration.Revision != "1" ||
-		turn.Checkpoint.Configuration.Skills[0].Prompt != "original personal style" {
+	if turn.Checkpoint.Configuration == nil || turn.Checkpoint.Configuration.Skills[len(turn.Checkpoint.Configuration.Skills)-1].Prompt != "original personal style" {
 		t.Fatal("missing durable snapshot")
 	}
-	revision = "2"
-	style = "changed personal style"
+	frozenRevision := turn.Checkpoint.Configuration.Revision
+	queuedSession, err := service.CreateSession(ctx, "owner-config", "C", "queued")
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued := startTurnFor(t, service, "owner-config", queuedSession.ID, "draw later")
+	_, err = config.UpdatePersonalSkill(ctx, "owner-config", skill.ID, agentconfiguration.CreatePersonalSkillInput{Name: "Style", Prompt: "changed personal style", RecommendedSize: "1536x1024"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	command.ConsentWaitDeadline = time.Now().Add(time.Minute)
 	if err := makeOrchestrator().Process(ctx, command); err != nil {
 		t.Fatal(err)
 	}
-	if calls != 1 || len(tool.revisions) != 2 || tool.revisions[1] != "1" {
+	if calls != 1 || len(tool.revisions) != 2 || tool.revisions[1] != frozenRevision {
 		t.Fatalf("resume replaced config: reads=%d tools=%v", calls, tool.revisions)
 	}
 	turn, err = service.GetTurn(ctx, command.OwnerID, command.SessionID, assistant)
-	if err != nil || turn.Checkpoint.Configuration.Skills[0].Prompt != "original personal style" {
+	if err != nil || turn.Checkpoint.Configuration.Skills[len(turn.Checkpoint.Configuration.Skills)-1].Prompt != "original personal style" {
 		t.Fatalf("resumed turn changed frozen Skill: %#v %v", turn.Checkpoint.Configuration, err)
+	}
+	queuedCommand := chat.ProcessTurn{OwnerID: "owner-config", SessionID: queuedSession.ID, AssistantMessageID: queued, Options: chat.TurnOptions{CreativeDomain: "image"}}
+	if err := makeOrchestrator().Process(ctx, queuedCommand); err != nil {
+		t.Fatal(err)
+	}
+	queuedTurn, err := service.GetTurn(ctx, queuedCommand.OwnerID, queuedCommand.SessionID, queued)
+	if err != nil || queuedTurn.Checkpoint.Configuration == nil || queuedTurn.Checkpoint.Configuration.Revision == frozenRevision || queuedTurn.Checkpoint.Configuration.Skills[len(queuedTurn.Checkpoint.Configuration.Skills)-1].Prompt != "changed personal style" {
+		t.Fatalf("queued turn did not freeze updated Skill: %#v %v", queuedTurn.Checkpoint.Configuration, err)
 	}
 }

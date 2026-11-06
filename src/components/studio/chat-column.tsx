@@ -2120,6 +2120,7 @@ export function ChatColumn() {
                 }
                 setSkillRefreshVersion((version) => version + 1);
               },
+              onUpdated: () => setSkillRefreshVersion((version) => version + 1),
             }}
             params={{
               params: generation,

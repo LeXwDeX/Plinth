@@ -22,6 +22,21 @@ export async function createPersonalSkill(schema: ProductSchema, input: Personal
   return body.skill;
 }
 
+export async function updatePersonalSkill(schema: ProductSchema, id: string, input: PersonalSkillInput, signal: AbortSignal) {
+  const template = sameOriginRoute(schema.chat.skills.creation.item_route);
+  if (!template.includes('{skillID}')) throw new Error('Invalid Skill route');
+  const response = await fetch(template.replace('{skillID}', encodeURIComponent(id)), {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal,
+  });
+  if (response.status === 404) throw new PersonalSkillGone();
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const body: { skill?: AgentSkillConfiguration } = await response.json();
+  if (!body.skill || body.skill.id !== id) throw new Error('Invalid Skill response');
+  return body.skill;
+}
+
+export class PersonalSkillGone extends Error {}
+
 function sameOriginRoute(route: string | undefined): string {
   if (!route || !route.startsWith('/') || route.startsWith('//')) throw new Error('Invalid Skill route');
   return route;

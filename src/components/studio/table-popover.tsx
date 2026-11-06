@@ -45,7 +45,8 @@ export interface TableRow {
    * 行尾的独立操作（如删除，#238）。它是行按钮旁的兄弟按钮，不嵌在行里：
    * 点击不会选中该行，键盘可单独聚焦。
    */
-  action?: { label: string; onClick: () => void; busy?: boolean; testId?: string };
+  action?: { label: string; onClick: () => void; busy?: boolean; testId?: string; icon?: ReactNode; closeOnClick?: boolean };
+  actions?: Array<NonNullable<TableRow['action']>>;
 }
 
 /** 弹层里的一张小表格：一组单选行。模型选择把 2D 和 3D 两张并排放，Skill 和 Agent 模式各一张。 */
@@ -195,9 +196,10 @@ function Section({ section, close, closeOnPick }: { section: TableSection; close
     disabledReason, disabledLabel, testId, onPick,
   } = section;
   const items = useRef<Array<HTMLButtonElement | null>>([]);
-  const hasActions = rows.some((row) => row.action);
+  const actionCount = Math.max(0, ...rows.map((row) => (row.action ? 1 : 0) + (row.actions?.length ?? 0)));
+  const hasActions = actionCount > 0;
   // 有行尾操作时多留一列给它（操作按钮浮在这一列上），勾选标记仍在最右。
-  const template = hasActions ? `${columns} 20px 16px` : `${columns} 16px`;
+  const template = hasActions ? `${columns} ${actionCount * 20}px 16px` : `${columns} 16px`;
   const off = Boolean(disabledReason);
 
   const navigate = (event: KeyboardEvent, index: number) => {
@@ -285,20 +287,22 @@ function Section({ section, close, closeOnPick }: { section: TableSection; close
             {row.disabled && row.disabledReason && !off ? (
               <HintTooltip name={row.cells[0]?.text ?? ''} reason={row.disabledReason} className="w-full min-w-0">{rowButton}</HintTooltip>
             ) : rowButton}
-            {row.action ? (
-              <HintTooltip name={row.action.label} className="absolute right-8 top-1/2 -translate-y-1/2">
+            <div className="absolute right-8 top-1/2 flex -translate-y-1/2">
+            {[...(row.actions ?? []), ...(row.action ? [row.action] : [])].map((action) => (
+              <HintTooltip key={action.label} name={action.label}>
                 <button
                   type="button"
-                  aria-label={row.action.label}
-                  disabled={off || row.action.busy}
-                  onClick={row.action.onClick}
-                  data-testid={row.action.testId}
+                  aria-label={action.label}
+                  disabled={off || action.busy}
+                  onClick={() => { if (action.closeOnClick) close(); action.onClick(); }}
+                  data-testid={action.testId}
                   className="flex size-5 items-center justify-center rounded-sm text-muted-foreground transition-colors duration-150 hover:bg-destructive/15 hover:text-destructive focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
                 >
-                  <Trash2 aria-hidden className="size-3.5" />
+                  {action.icon ?? <Trash2 aria-hidden className="size-3.5" />}
                 </button>
               </HintTooltip>
-            ) : null}
+            ))}
+            </div>
             </div>
           );
         })}
