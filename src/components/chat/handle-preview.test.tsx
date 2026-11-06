@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import { HandleTag } from '@/components/chat/handle-tag';
-import { previewPlacement } from '@/components/chat/handle-preview';
+import { previewPlacement, previewBesideList } from '@/components/chat/handle-preview';
 
 const schema = defaultCatalog.application;
 const refer = vi.hoisted(() => vi.fn());
@@ -75,5 +75,20 @@ describe('previewPlacement', () => {
   it('goes to the left when the right has no room, and stays inside the window', () => {
     expect(previewPlacement({ left: 1300, right: 1350, top: 10, bottom: 30 }, 360, window)).toEqual({ left: 928, top: 12 });
     expect(previewPlacement({ left: 100, right: 150, top: 880, bottom: 895 }, 360, window).top).toBe(900 - 360 - 12);
+  });
+});
+
+describe('preview beside a mention list (#157)', () => {
+  const list = { left: 300, right: 700, top: 100, bottom: 400 };
+  const row = { left: 300, right: 700, top: 200, bottom: 240 };
+  it('uses the list boundary and shrinks instead of covering it', () => {
+    const result = previewBesideList(row, list, 360, { width: 850, height: 500 })!;
+    expect(result.left + result.size).toBeLessThanOrEqual(list.left);
+    expect(result.size).toBeLessThan(360);
+    expect(result.top).toBeGreaterThanOrEqual(0);
+    expect(result.top + result.size).toBeLessThanOrEqual(500);
+  });
+  it('hides when neither side has usable space', () => {
+    expect(previewBesideList(row, { ...list, left: 10, right: 840 }, 360, { width: 850, height: 500 })).toBeNull();
   });
 });
