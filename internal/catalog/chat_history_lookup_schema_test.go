@@ -30,15 +30,17 @@ func TestHistoryLookupAndReferencePurposesAreValidatedSchemaDeclarations(t *test
 		t.Fatalf("refine_image must declare reference purposes: %+v", refine.Name)
 	}
 	for name, breakIt := range map[string]func(*catalog.ApplicationSchema){
-		"no bound":                   func(app *catalog.ApplicationSchema) { app.Chat.Context.HistoryImageLookupLimit = 0 },
-		"budget text without limit":  func(app *catalog.ApplicationSchema) { app.Chat.Context.HistoryImageBudgetTemplate = "full" },
-		"label without handle":       func(app *catalog.ApplicationSchema) { app.Chat.Context.HistoryImageViewLabelTemplate = "picture" },
-		"unreadable without handle":  func(app *catalog.ApplicationSchema) { app.Chat.Context.HistoryImageUnreadableTemplate = "gone" },
-		"no intro":                   func(app *catalog.ApplicationSchema) { app.Chat.Context.HistoryImageViewIntro = " " },
-		"no vision-off text":         func(app *catalog.ApplicationSchema) { app.Chat.Context.HistoryImageVisionOffMessage = "" },
-		"purpose refusal w/o handle": func(app *catalog.ApplicationSchema) { app.Chat.Context.ReferencePurposeInvalidTemplate = "no" },
-		"purpose not a parameter":    func(app *catalog.ApplicationSchema) { app.Chat.Tools[0].ReferencePurposesArgument = "roles" },
-		"item without position":      func(app *catalog.ApplicationSchema) { app.Chat.Tools[0].ReferencePurposeItemTemplate = "{purpose}" },
+		"attachment purpose text missing":  func(app *catalog.ApplicationSchema) { delete(app.Chat.AttachmentPurposes, "input") },
+		"attachment purpose field missing": func(app *catalog.ApplicationSchema) { app.Chat.API.Attachment.Purpose = "" },
+		"no bound":                         func(app *catalog.ApplicationSchema) { app.Chat.Context.HistoryImageLookupLimit = 0 },
+		"budget text without limit":        func(app *catalog.ApplicationSchema) { app.Chat.Context.HistoryImageBudgetTemplate = "full" },
+		"label without handle":             func(app *catalog.ApplicationSchema) { app.Chat.Context.HistoryImageViewLabelTemplate = "picture" },
+		"unreadable without handle":        func(app *catalog.ApplicationSchema) { app.Chat.Context.HistoryImageUnreadableTemplate = "gone" },
+		"no intro":                         func(app *catalog.ApplicationSchema) { app.Chat.Context.HistoryImageViewIntro = " " },
+		"no vision-off text":               func(app *catalog.ApplicationSchema) { app.Chat.Context.HistoryImageVisionOffMessage = "" },
+		"purpose refusal w/o handle":       func(app *catalog.ApplicationSchema) { app.Chat.Context.ReferencePurposeInvalidTemplate = "no" },
+		"purpose not a parameter":          func(app *catalog.ApplicationSchema) { app.Chat.Tools[0].ReferencePurposesArgument = "roles" },
+		"item without position":            func(app *catalog.ApplicationSchema) { app.Chat.Tools[0].ReferencePurposeItemTemplate = "{purpose}" },
 		"prompt without purposes": func(app *catalog.ApplicationSchema) {
 			app.Chat.Tools[0].PromptWithReferencePurposesTemplate = "{prompt}"
 		},

@@ -94,9 +94,13 @@ export interface ComposerProps {
   mask?: ComposerMask | null;
   /** Set while the next result continues from an older version; null otherwise. */
   branch?: ComposerBranch | null;
-  /** What the attached pictures are for; null until the person says. Written into the message. */
+  /** Bulk purpose selection. */
   attachmentPurpose?: AttachmentPurpose | null;
   onAttachmentPurpose?: (purpose: AttachmentPurpose | null) => void;
+  attachmentPurposes?: readonly (AttachmentPurpose | null)[];
+  onAttachmentPurposeAt?: (index: number, purpose: AttachmentPurpose | null) => void;
+  pinnedPurpose?: AttachmentPurpose | null;
+  onPinnedPurpose?: (purpose: AttachmentPurpose | null) => void;
   images: readonly string[];
   onRemoveImage: (index: number) => void;
   /** A canvas image pinned as the next turn's reference. */
@@ -136,7 +140,7 @@ function polylinePoints(flat: readonly number[]): string {
  */
 export function Composer({
   value, onChange, onSend, onStop, onStopInBackground = null, streaming, locked, canSend, chip, chipSkipped, onToggleChip, mask = null, branch = null,
-  attachmentPurpose = null, onAttachmentPurpose,
+  attachmentPurpose = null, onAttachmentPurpose, attachmentPurposes, onAttachmentPurposeAt, pinnedPurpose = null, onPinnedPurpose,
   images, onRemoveImage, pinnedImage, onUnpin, acceptedImages, onFiles, onPasteImages, editing, onCancelEdit,
   skill, params, sendCredits: generationSendCredits, mentions, onMentionPicked, referenceLimit = null,
 }: ComposerProps) {
@@ -543,33 +547,59 @@ export function Composer({
       {hasAttachments ? (
         <div className="flex flex-col gap-1.5" data-testid="composer-attachments">
           <div className="flex flex-wrap items-center gap-1.5" data-testid="composer-attachment-list">
-          {attachments.map((item) => (
-            <ContextChip
-              key={`${item.index}-${item.url.slice(0, 32)}`}
-              testId="composer-attachment-chip"
-              flash={item.url === flashUrl}
-              onDragStart={item.pinned ? undefined : (event) => dragAttachment(event, item.url, item.number)}
-              open={{
-                label: schemaMessage(schema, 'ui.studio.composer.attachment.preview', { index: item.number }),
-                onClick: () => previewAttachment(item.url, item.number),
-                testId: 'composer-attachment-open',
-              }}
-              square={(
-                <AttachmentThumb url={item.url} alt={schemaMessage(schema, 'ui.chat.input.attachment_alt', { index: item.number })} />
-              )}
-              title={item.pinned
-                ? schemaText(schema, 'ui.studio.composer.attachment.pinned')
-                : formatSchemaText(schemaText(schema, 'ui.studio.composer.attachment.title'), { index: item.number })}
-              subtitle={[
-                schemaText(schema, item.pinned ? 'ui.studio.composer.attachment.from_board' : 'ui.studio.composer.attachment.upload'),
-                attachmentPurpose ? schemaText(schema, `ui.studio.composer.attachment.purpose_${attachmentPurpose}`) : '',
-              ].filter(Boolean).join(' · ')}
-              remove={{
-                label: schemaMessage(schema, 'ui.chat.input.remove_attachment', { index: item.number }),
-                onClick: item.pinned ? onUnpin : () => onRemoveImage(item.index),
-              }}
-            />
-          ))}
+            {attachments.map((item) => {
+              const purpose = item.pinned ? pinnedPurpose : attachmentPurposes?.[item.index] ?? null;
+              return (
+                <ContextChip
+                  key={`${item.index}-${item.url.slice(0, 32)}`}
+                  testId="composer-attachment-chip"
+                  flash={item.url === flashUrl}
+                  onDragStart={item.pinned ? undefined : (event) => dragAttachment(event, item.url, item.number)}
+                  open={{
+                    label: schemaMessage(schema, 'ui.studio.composer.attachment.preview', { index: item.number }),
+                    onClick: () => previewAttachment(item.url, item.number),
+                    testId: 'composer-attachment-open',
+                  }}
+                  square={(
+                    <AttachmentThumb url={item.url} alt={schemaMessage(schema, 'ui.chat.input.attachment_alt', { index: item.number })} />
+                  )}
+                  title={item.pinned
+                    ? schemaText(schema, 'ui.studio.composer.attachment.pinned')
+                    : formatSchemaText(schemaText(schema, 'ui.studio.composer.attachment.title'), { index: item.number })}
+                  subtitle={[
+                    schemaText(schema, item.pinned ? 'ui.studio.composer.attachment.from_board' : 'ui.studio.composer.attachment.upload'),
+                    purpose ? schemaText(schema, `ui.studio.composer.attachment.purpose_${purpose}`) : '',
+                  ].filter(Boolean).join(' · ')}
+                  remove={{
+                    label: schemaMessage(schema, 'ui.chat.input.remove_attachment', { index: item.number }),
+                    onClick: item.pinned ? onUnpin : () => onRemoveImage(item.index),
+                  }}
+                />
+              );
+            })}
+          </div>
+          <div className="flex flex-col gap-1.5" data-testid="composer-attachment-purposes">
+            {attachments.map((item) => {
+              const selected = item.pinned ? pinnedPurpose : attachmentPurposes?.[item.index] ?? null;
+              const change = item.pinned ? onPinnedPurpose : onAttachmentPurposeAt && ((purpose: AttachmentPurpose | null) => onAttachmentPurposeAt(item.index, purpose));
+              const label = item.pinned ? schemaText(schema, 'ui.studio.composer.attachment.pinned')
+                : formatSchemaText(schemaText(schema, 'ui.studio.composer.attachment.title'), { index: item.number });
+              return (
+                <div key={`${item.index}-${item.url}`} className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground" data-testid="composer-attachment-purpose-row">
+                  <span>{label}</span>
+                  <div role="group" aria-label={`${label} ${schemaText(schema, 'ui.studio.composer.attachment.purpose')}`} className="flex flex-wrap items-center rounded-md border border-border bg-surface p-0.5">
+                    {ATTACHMENT_PURPOSES.map((purpose) => (
+                      <button key={purpose} type="button" aria-pressed={selected === purpose} disabled={disabled || !change}
+                        onClick={() => change?.(selected === purpose ? null : purpose)}
+                        className={cn('h-6 rounded px-2 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50',
+                          selected === purpose ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+                        {schemaText(schema, `ui.studio.composer.attachment.purpose_${purpose}`)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
           {/* #296: what an edit of the one attached picture outputs when no size was chosen. */}
           <ReferenceSizeNotice delivery={params.canvas?.delivery} />

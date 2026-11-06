@@ -12,7 +12,8 @@ import (
 // owner and session, before handles are given out.
 type verifiedAttachments struct {
 	// images has one entry per message image, in order.
-	images []Attachment
+	images        []Attachment
+	imageVerified []bool
 	// selection holds the verified selected objects, without handles.
 	selection []Attachment
 	// mentions has one entry per mention that names a verified object.
@@ -58,6 +59,7 @@ func (service *Service) verifyTurnAttachments(ctx context.Context, command Start
 			ref.AssetID, ref.TaskID, ref.CaptureID = "", "", ""
 		}
 		attachment, err := service.attachments.VerifyAttachment(ctx, command.OwnerID, command.SessionID, ref)
+		result.imageVerified = append(result.imageVerified, err == nil)
 		if err != nil {
 			attachment = Attachment{Kind: AttachmentKindImage, Role: AttachmentRoleUpload}
 		}
@@ -278,6 +280,12 @@ func (service *Service) applyTurnAttachments(
 	}
 	assigned := policy.Assign(history, pending)
 	user.Attachments = assigned
+	if len(command.AttachmentPurposes) > 0 {
+		options.AttachmentPurposes = make(map[string]string, len(command.AttachmentPurposes))
+		for _, purpose := range command.AttachmentPurposes {
+			options.AttachmentPurposes[assigned[purpose.ImageSlot-1].Handle] = purpose.Purpose
+		}
+	}
 	options.Selection = nil
 	options.SelectionPicked = verified.picked
 	for index, slot := range slots {

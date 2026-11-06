@@ -1084,6 +1084,7 @@ func (orchestrator *Orchestrator) Process(
 	// The selection is only ever the one the service verified and stored with
 	// the turn; whatever the caller put in the command is not trusted.
 	command.Options.Selection = turn.Options.Selection
+	command.Options.AttachmentPurposes = turn.Options.AttachmentPurposes
 	command.Options.SelectionPicked = turn.Options.SelectionPicked
 	command.Options.InputSource = turn.Options.InputSource
 	command.Options.Multiview = turn.Options.Multiview
