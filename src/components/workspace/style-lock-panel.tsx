@@ -70,8 +70,8 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
   const { previewAssetUrl } = useAssetURLRewriter();
   const messages = useChatStore((state) => (sessionId ? state.messagesBySession?.[sessionId] ?? [] : []));
   const nodes = useCanvasStore((state) => (sessionId ? state.nodesBySession[sessionId] ?? NO_NODES : NO_NODES));
-  const maximumText = schema.chat.style_lock.maximum_text_characters;
-  const maximumReferences = schema.chat.style_lock.maximum_reference_images;
+  const maximumText = schema.chat.style_lock?.maximum_text_characters ?? 0;
+  const maximumReferences = schema.chat.style_lock?.maximum_reference_images ?? 0;
   const [draftState, setDraftState] = useState<StyleLockDraft>(() => ({ draft: EMPTY_STYLE_LOCK, base: EMPTY_STYLE_LOCK }));
   const [chooserOpen, setChooserOpen] = useState(false);
   const [layerChooserOpen, setLayerChooserOpen] = useState(false);

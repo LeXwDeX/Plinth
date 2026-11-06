@@ -1288,6 +1288,16 @@ type PublicChatSchema struct {
 	// parameter overrides, reasons, budgets and brief prompt templates stay
 	// server-only.
 	Model3DUsage *PublicChatModel3DUsageSchema `json:"model3d_usage,omitempty"`
+	// StyleLock publishes the bounds the browser needs (#154); the prompt and
+	// edit-scope templates stay server-only.
+	StyleLock PublicChatStyleLockSchema `json:"style_lock"`
+}
+
+// PublicChatStyleLockSchema is the browser contract of the session style lock
+// (#154).
+type PublicChatStyleLockSchema struct {
+	MaximumTextCharacters  int `json:"maximum_text_characters"`
+	MaximumReferenceImages int `json:"maximum_reference_images"`
 }
 
 // PublicChatModelReviewSchema is the browser contract of the read-only model
