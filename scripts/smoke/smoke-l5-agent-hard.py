@@ -16,7 +16,8 @@ text is checked for a keyword at most (LLM wording varies). Cases:
   manual-approval manual mode + 3D request -> a pending approval card, zero tasks;
                   denying it returns 2xx, leaves no pending card, the turn finishes and zero tasks exist.
   ambiguous       "convert it to 3D" with two images -> either a clarifying reply
-                  with no 3D task, or exactly one 3D task SUCCEEDED; never several.
+                  or a choice card (left unanswered) with no 3D task, or exactly one
+                  3D task SUCCEEDED; never several.
   english / mixed English and Chinese requests each yield one SUCCEEDED image task.
   oral-three-view "give me front, side and back, then model it" -> a three-view
                   group with front/left/back SUCCEEDED, then an image-to-3d task.
@@ -165,12 +166,23 @@ def case_ambiguous(live, report, models):
     if not report.check("ambiguous: two source images", ready):
         return
     before = ids(live, session)
-    reply, tasks, settled = live.run_turn(session, "把它转 3D。", "model-3d", models["3d"], {})
+    # #145: a question is what this case looks for, so a choice card is left for the person. Answering
+    # it with its default (as run_turn does) agrees to whatever scope the card states, both images too.
+    status, _ = live.send(session, "把它转 3D。", "model-3d", models["3d"])
+    if not report.check("ambiguous: message accepted", status in (200, 201, 202), f"HTTP {status}"):
+        return
+    reply = live.wait_reply(session)
     threed = [t for t in new_tasks(live, session, before) if t.get("capability") == "image-to-3d"]
-    asked = len(threed) == 0 and common.reply_is_clean(reply)
+    cards = live.pending_choices(session)
+    if threed:
+        live.wait_tasks(session, {}, watch=lambda sid: bool(live.pending_choices(sid)))
+        threed = [t for t in new_tasks(live, session, before) if t.get("capability") == "image-to-3d"]
+    asked = not threed and reply is not None and (bool(cards) or common.reply_is_clean(reply))
     chosen = len(threed) == 1 and threed[0].get("state") == SUCCESS
+    how = (f"asked with a {cards[0].get('kind') or cards[0].get('tool') or 'choice'} card: {common.one_line(cards[0].get('question'), 60)}"
+           if asked and cards else "asked" if asked else "converted" if chosen else "other")
     report.check("ambiguous: asked first, or converted exactly one image", asked or chosen,
-                 f"{len(threed)} 3D task(s), {'asked' if asked else 'converted' if chosen else 'other'}")
+                 f"{len(threed)} 3D task(s), {how}; reply={common.one_line((reply or {}).get('content'), 60)}")
 
 
 def case_languages(live, report, models):
