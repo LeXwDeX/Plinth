@@ -126,9 +126,12 @@ for (const name of browsers) {
     });
     page.on('pageerror', (error) => pageErrors.push(error.message));
     page.on('console', (message) => {
-      if (message.type() === 'error') {
-        consoleErrors.push(message.text());
-      }
+      if (message.type() !== 'error') return;
+      // #153: a missing scene snapshot is the normal "no scene yet" answer; the
+      // browser still logs the 404 as a console error, so ignore only that URL.
+      const location = message.location();
+      if (message.text().includes('404') && /\/scenes\/[^/]+\/snapshot(?:\?|$)/.test(location?.url ?? '')) return;
+      consoleErrors.push(message.text());
     });
 
     if (username && password) {
