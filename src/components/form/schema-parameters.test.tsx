@@ -159,6 +159,17 @@ it('renders a boolean with false/true options as two chips and writes a real boo
   expect(html.match(/type="checkbox"/g)).toHaveLength(1);
 });
 
+// #112: the parameter source of a plain checkbox no longer sits inside the control row; it follows the label.
+it('shows the parameter source of a plain boolean after its checkbox and label, before its help', () => {
+  vi.stubGlobal('React', React);
+  const flag: ParamSchema = { name: 'auto_size', label: '自动真实尺寸', type: 'boolean', default: false, description: '自动缩放至真实世界尺寸' };
+  const html = renderToStaticMarkup(<SchemaParameters parameters={[flag]} values={{ auto_size: false }} onChange={() => {}} parameterMeta={() => <span data-testid="meta" />} />);
+  const meta = html.indexOf('data-testid="meta"');
+  expect(meta).toBeGreaterThan(html.indexOf('type="checkbox"'));
+  expect(meta).toBeGreaterThan(html.indexOf('<label'));
+  expect(meta).toBeLessThan(html.indexOf('自动缩放至真实世界尺寸'));
+});
+
 // #329 follow-up B: the Meshy Retexture style picture allows 20,000,000 bytes; the upload hint states it the way
 // every size is written (decimal MB, #327), not as an unrounded MiB figure ("19.073486328125MB").
 it('states the Retexture style picture limit as 20 MB', () => {

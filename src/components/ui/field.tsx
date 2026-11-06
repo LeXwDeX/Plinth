@@ -16,6 +16,8 @@ interface FieldProps {
   label: ReactNode
   children: (controlProps: FieldControlProps) => ReactNode
   help?: ReactNode
+  /** Shown between the label and the control (stacked), or on its own line under the label (inline). */
+  meta?: ReactNode
   error?: ReactNode
   group?: boolean
   required?: boolean
@@ -24,7 +26,7 @@ interface FieldProps {
   className?: string
 }
 
-function Field({ id, label, children, help, error, group = false, required = false, labelHidden = false, layout = "stacked", className }: FieldProps) {
+function Field({ id, label, children, help, meta, error, group = false, required = false, labelHidden = false, layout = "stacked", className }: FieldProps) {
   const helpId = help ? `${id}-help` : undefined
   const errorId = error ? `${id}-error` : undefined
   const describedBy = [helpId, errorId].filter(Boolean).join(" ") || undefined
@@ -35,15 +37,30 @@ function Field({ id, label, children, help, error, group = false, required = fal
     "aria-required": required ? true : undefined,
   }
   const labelContent = <>{label}{required ? <span aria-hidden="true" className="ml-1 text-destructive">*</span> : null}</>
+  const inline = layout === "inline" && !group
   const labelNode = group
       ? <legend className={cn("text-sm font-medium", labelHidden && "sr-only")}>{labelContent}</legend>
-      : <label htmlFor={id} className={cn("text-sm font-medium", labelHidden && "sr-only")}>{labelContent}</label>
+      : <label htmlFor={id} className={cn("text-sm font-medium", inline && "whitespace-nowrap", labelHidden && "sr-only")}>{labelContent}</label>
   const controlNode = children(controlProps)
+  const helpNode = help && <div id={helpId} className="space-y-1 text-xs text-muted-foreground">{help}</div>
+  const errorNode = error && <p id={errorId} role="alert" className="text-xs text-destructive">{error}</p>
+
+  // #112: an inline field (a plain checkbox) keeps the control and its label on one row; what
+  // follows sits on its own lines, indented to the label (16px checkbox + 8px gap). Squeezed into
+  // the row before, the parameter source came out one character per line.
+  if (inline) {
+    return <div data-slot="field" className={cn("flex flex-col gap-1", className)}>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">{controlNode}{labelNode}</div>
+      {meta ? <div className="pl-6">{meta}</div> : null}
+      {helpNode || errorNode ? <div className="space-y-1 pl-6">{helpNode}{errorNode}</div> : null}
+    </div>
+  }
   const content = <>
-    {layout === "inline" && !group ? controlNode : labelNode}
-    {layout === "inline" && !group ? labelNode : controlNode}
-    {help && <div id={helpId} className="space-y-1 text-xs text-muted-foreground">{help}</div>}
-    {error && <p id={errorId} role="alert" className="text-xs text-destructive">{error}</p>}
+    {labelNode}
+    {meta}
+    {controlNode}
+    {helpNode}
+    {errorNode}
   </>
 
   // A stacked field is a flex column: the gap separates label, control, help and error
@@ -52,7 +69,7 @@ function Field({ id, label, children, help, error, group = false, required = fal
   // so a Select field came out taller than its neighbours (#268).
   return group
     ? <fieldset data-slot="field" aria-describedby={describedBy} aria-invalid={controlProps["aria-invalid"]} aria-required={controlProps["aria-required"]} className={cn("space-y-2", className)}>{content}</fieldset>
-    : <div data-slot="field" className={cn(layout === "inline" ? "flex items-center gap-2" : "flex flex-col gap-2", className)}>{content}</div>
+    : <div data-slot="field" className={cn("flex flex-col gap-2", className)}>{content}</div>
 }
 
 export { Field }
