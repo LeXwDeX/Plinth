@@ -153,6 +153,17 @@ describe('canvas reference and chat attachment queue', () => {
       expect(useWorkspaceStore.getState().pendingResult).toBeNull();
     });
 
+    it.each([
+      ['no current object', null],
+      ['the same task', { ...other, taskId: 'pic' }],
+    ])('takes a new result while painting with %s', (_label, currentObject) => {
+      useWorkspaceStore.setState({ currentObject, paintToolActive: true, pendingResult: null });
+      useWorkspaceStore.getState().registerTask({ taskId: 'pic', sessionId: 'session-a', capability: 'text-to-image', progressMaximum: 100 });
+      useWorkspaceStore.getState().applyTaskDetail('pic', imageResult, 'session-a');
+      expect(useWorkspaceStore.getState().currentObject).toMatchObject({ taskId: 'pic' });
+      expect(useWorkspaceStore.getState().pendingResult).toBeNull();
+    });
+
     it('keeps the mask when the pill opens the new result: it belongs to the canvas', () => {
       useMaskStore.setState({ draft: null, question: null });
       useCanvasStore.getState().setActiveTool('mask');

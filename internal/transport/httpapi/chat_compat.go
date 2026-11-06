@@ -405,6 +405,38 @@ func (s *Server) legacySendChatMessage(
 		0,
 	)
 	requestFields := s.application.Chat.API.Fields
+	purposes, purposesOK := s.chatAttachmentPurposes(body, requestFields.AttachmentPurposes)
+	if !purposesOK {
+		writeProblem(writer, http.StatusBadRequest, "attachment_purpose_invalid", s.application.Content.Messages["error.attachment_purpose_invalid"])
+		return
+	}
+	if len(purposes) > 0 {
+		if raw, present := body[requestFields.Attachments]; present {
+			var claims []map[string]json.RawMessage
+			limit := s.application.Chat.Context.MaximumAttachmentsPerMessage + s.application.Chat.Context.MaximumSelection
+			if string(raw) == "null" || json.Unmarshal(raw, &claims) != nil || (limit > 0 && len(claims) > limit) {
+				writeProblem(writer, http.StatusBadRequest, "attachment_purpose_attachment_invalid", s.application.Content.Messages["error.attachment_purpose_attachment_invalid"])
+				return
+			}
+			for _, claim := range claims {
+				var slot int
+				if claim == nil || json.Unmarshal(claim[s.application.Chat.API.Attachment.ImageSlot], &slot) != nil || slot < 1 {
+					writeProblem(writer, http.StatusBadRequest, "attachment_purpose_attachment_invalid", s.application.Content.Messages["error.attachment_purpose_attachment_invalid"])
+					return
+				}
+				names := s.application.Chat.API.Attachment
+				for _, name := range []string{names.Kind, names.URL, names.AssetID, names.TaskID, names.CaptureID} {
+					if value, exists := claim[name]; exists {
+						var text string
+						if string(value) == "null" || json.Unmarshal(value, &text) != nil {
+							writeProblem(writer, http.StatusBadRequest, "attachment_purpose_attachment_invalid", s.application.Content.Messages["error.attachment_purpose_attachment_invalid"])
+							return
+						}
+					}
+				}
+			}
+		}
+	}
 	skill := map[string]json.RawMessage{}
 	_ = json.Unmarshal(body[requestFields.Skill], &skill)
 	choiceAnswer, choiceOK := chatChoiceAnswer(body, requestFields.ChoiceAnswer)
@@ -455,9 +487,10 @@ func (s *Server) legacySendChatMessage(
 		Options:   options,
 		// Claims only: the service verifies every one against the owner and
 		// session before it can reach the Agent.
-		Attachments: s.chatAttachmentRefs(body, requestFields.Attachments),
-		Selection:   s.chatAttachmentRefs(body, requestFields.Selection),
-		Mentions:    s.chatMentions(body, requestFields.Mentions),
+		Attachments:        s.chatAttachmentRefs(body, requestFields.Attachments),
+		AttachmentPurposes: purposes,
+		Selection:          s.chatAttachmentRefs(body, requestFields.Selection),
+		Mentions:           s.chatMentions(body, requestFields.Mentions),
 		OnMentionsDropped: func(tokens []string) {
 			s.logger.InfoContext(request.Context(), "Chat 提及未采用，保持原文", "session_id", sessionID, "count", len(tokens))
 		},
@@ -467,6 +500,10 @@ func (s *Server) legacySendChatMessage(
 		return
 	}
 	switch {
+	case errors.Is(err, chat.ErrInvalidAttachmentPurpose):
+		writeProblem(writer, http.StatusBadRequest, "attachment_purpose_invalid", s.application.Content.Messages["error.attachment_purpose_invalid"])
+	case errors.Is(err, chat.ErrAttachmentPurposeAttachmentInvalid):
+		writeProblem(writer, http.StatusBadRequest, "attachment_purpose_attachment_invalid", s.application.Content.Messages["error.attachment_purpose_attachment_invalid"])
 	case errors.Is(err, chat.ErrSessionNotFound):
 		s.writeChatError(
 			writer,
@@ -879,6 +916,28 @@ const maximumCanvasSourceClaims = 64
 // chatAttachmentRefs reads untrusted attachment claims. Only the Schema's
 // member names are read, every value is bounded, and unknown members are
 // ignored; the service decides what is true.
+func (s *Server) chatAttachmentPurposes(body map[string]json.RawMessage, field string) ([]chat.AttachmentPurpose, bool) {
+	raw, present := body[field]
+	if field == "" || !present {
+		return nil, true
+	}
+	var items []map[string]json.RawMessage
+	if string(raw) == "null" || json.Unmarshal(raw, &items) != nil {
+		return nil, false
+	}
+	names := s.application.Chat.API.Attachment
+	result := make([]chat.AttachmentPurpose, 0, len(items))
+	for _, item := range items {
+		var purpose chat.AttachmentPurpose
+		if len(item) != 2 || names.ImageSlot == "" || names.Purpose == "" || names.ImageSlot == names.Purpose ||
+			json.Unmarshal(item[names.ImageSlot], &purpose.ImageSlot) != nil || json.Unmarshal(item[names.Purpose], &purpose.Purpose) != nil {
+			return nil, false
+		}
+		result = append(result, purpose)
+	}
+	return result, true
+}
+
 func (s *Server) chatAttachmentRefs(body map[string]json.RawMessage, field string) []chat.AttachmentRef {
 	if field == "" {
 		return nil

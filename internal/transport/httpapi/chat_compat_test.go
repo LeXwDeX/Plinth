@@ -152,6 +152,59 @@ func TestLegacyChatCarriesVerifiedAttachmentsUnderSchemaNames(t *testing.T) {
 	}
 }
 
+func TestChatAttachmentPurposeRequests(t *testing.T) {
+	for name, tc := range map[string]struct {
+		purposes string
+		status   int
+	}{
+		"valid":          {`[{"imageSlot":1,"purpose":"style"}]`, http.StatusAccepted},
+		"bad slot":       {`[{"imageSlot":3,"purpose":"style"}]`, http.StatusBadRequest},
+		"bad purpose":    {`[{"imageSlot":1,"purpose":"unknown"}]`, http.StatusBadRequest},
+		"duplicate":      {`[{"imageSlot":1,"purpose":"style"},{"imageSlot":1,"purpose":"layout"}]`, http.StatusBadRequest},
+		"two inputs":     {`[{"imageSlot":1,"purpose":"input"},{"imageSlot":2,"purpose":"input"}]`, http.StatusBadRequest},
+		"foreign claim":  {`[{"imageSlot":2,"purpose":"style"}]`, http.StatusBadRequest},
+		"unknown member": {`[{"imageSlot":1,"purpose":"style","extra":1}]`, http.StatusBadRequest},
+		"malformed":      {`{}`, http.StatusBadRequest},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, handler, _ := newHTTPHarnessWithChatScheduler(t, &recordingChatScheduler{}, nil)
+			var session map[string]any
+			decodeChatRecorder(t, performChatRequest(handler, http.MethodPost, "/api/chat/sessions", `{}`), &session)
+			body := `{"content":"edit","image_urls":["/api/v1/assets/shot","/api/v1/assets/foreign"],"attachments":[{"kind":"image","imageSlot":1,"captureId":"own-capture","taskId":"own-model","assetId":"own-shot"},{"kind":"image","imageSlot":2,"taskId":"someone-elses-task"}],"attachmentPurposes":` + tc.purposes + `}`
+			response := performChatRequest(handler, http.MethodPost, "/api/chat/sessions/"+session["id"].(string)+"/messages", body)
+			if response.Code != tc.status {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body)
+			}
+			if tc.status == http.StatusBadRequest {
+				var body map[string]any
+				decodeChatRecorder(t, response, &body)
+				code := "attachment_purpose_invalid"
+				if name == "foreign claim" {
+					code = "attachment_purpose_attachment_invalid"
+				}
+				if body["code"] != code || body["detail"] == "" {
+					t.Fatalf("problem = %#v", body)
+				}
+			}
+		})
+	}
+}
+
+func TestChatAttachmentPurposeUsesSchemaNames(t *testing.T) {
+	_, handler, _ := newHTTPHarnessWithChatScheduler(t, &recordingChatScheduler{}, func(app *catalog.ApplicationSchema) {
+		app.Chat.API.Fields.AttachmentPurposes = "roles"
+		app.Chat.API.Attachment.ImageSlot = "slot"
+		app.Chat.API.Attachment.Purpose = "role"
+	})
+	var session map[string]any
+	decodeChatRecorder(t, performChatRequest(handler, http.MethodPost, "/api/chat/sessions", `{}`), &session)
+	body := `{"content":"edit","image_urls":["/api/v1/assets/shot"],"attachments":[{"kind":"image","slot":1,"captureId":"own-capture","taskId":"own-model","assetId":"own-shot"}],"roles":[{"slot":1,"role":"input"}]}`
+	response := performChatRequest(handler, http.MethodPost, "/api/chat/sessions/"+session["id"].(string)+"/messages", body)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+}
+
 func messagesBody(messages []map[string]any) string {
 	encoded, _ := json.Marshal(messages)
 	return string(encoded)

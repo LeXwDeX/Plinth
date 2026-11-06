@@ -770,8 +770,9 @@ type StartTurn struct {
 	// lineage, asset and task IDs) and Selection the objects selected on the
 	// workspace. Both are untrusted: the service verifies each against the
 	// owner and session and drops what does not hold.
-	Attachments []AttachmentRef
-	Selection   []AttachmentRef
+	Attachments        []AttachmentRef
+	AttachmentPurposes []AttachmentPurpose
+	Selection          []AttachmentRef
 	// Mentions are the `@` references the person wrote in Content. Each names a
 	// picture without a handle yet (a picture waiting in the message, a
 	// generated version, a canvas layer); the service verifies the claim like
@@ -804,6 +805,7 @@ func (service *Service) startTurn(
 	// Client-supplied execution context never becomes a durable turn snapshot.
 	command.Options.Harness = nil
 	command.Options.Selection = nil
+	command.Options.AttachmentPurposes = nil
 	command.Options.SelectionPicked = false
 	command.Options.PlanContinuation = planContinuation
 	command.Content = strings.TrimSpace(command.Content)
@@ -859,7 +861,27 @@ func (service *Service) startTurn(
 	if command.Options.Multiview != nil && !command.Options.Multiview.Valid() {
 		return Message{}, ErrInvalidMultiview
 	}
+	if err := validateAttachmentPurposes(command.AttachmentPurposes, len(command.ImageURLs)); err != nil {
+		return Message{}, err
+	}
+	for _, purpose := range command.AttachmentPurposes {
+		claims := 0
+		for index, claim := range command.Attachments {
+			if claim.ImageSlot != purpose.ImageSlot {
+				continue
+			}
+			claims++
+			if claims > 1 || (service.handles.MaximumAttachments > 0 && index >= service.handles.MaximumAttachments) {
+				return Message{}, ErrAttachmentPurposeAttachmentInvalid
+			}
+		}
+	}
 	verified := service.verifyTurnAttachments(ctx, command)
+	for _, purpose := range command.AttachmentPurposes {
+		if purpose.ImageSlot > len(verified.imageVerified) || !verified.imageVerified[purpose.ImageSlot-1] {
+			return Message{}, ErrAttachmentPurposeAttachmentInvalid
+		}
+	}
 	if command.OnMentionsDropped != nil && len(verified.droppedMentions) > 0 {
 		command.OnMentionsDropped(verified.droppedMentions)
 	}

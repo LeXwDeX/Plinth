@@ -10,6 +10,7 @@ import {
   type ChatAttachmentClaim,
   type ChatMentionClaim,
 } from '@/lib/chat/attachments';
+import type { AttachmentPurpose } from '@/lib/chat/attachment-purpose';
 import type {
   ApprovalMode,
   ChatImage,
@@ -53,6 +54,8 @@ export interface ChatTurnOptions {
   referenceImageIndices?: number[];
   /** 对 imageURLs 中图片的声明（截图来源等），服务端逐项校验。 */
   attachments?: ChatAttachmentClaim[];
+  /** Per-image roles; slots match the 1-based imageURLs positions. */
+  attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[];
   /** 本轮发送时工作区正选中的图片或 3D 模型，服务端逐项校验。 */
   selection?: ChatAttachmentClaim[];
   /** Schema `chat.context.canvas_input_source` when `selection` is the artboard snapshot the person sent (#266). */
@@ -1133,6 +1136,12 @@ export function createChatBrowserClient(
       if (options.attachments && options.attachments.length > 0) {
         body[fields.attachments] = encodeAttachmentClaims(schema, options.attachments);
       }
+      if (options.attachmentPurposes?.length) {
+        const names = schema.chat.api.attachment;
+        body[fields.attachment_purposes] = options.attachmentPurposes.map(({ imageSlot, purpose }) => ({
+          [names.image_slot]: imageSlot, [names.purpose]: purpose,
+        }));
+      }
       if (options.selection && options.selection.length > 0) {
         body[fields.selection] = encodeAttachmentClaims(schema, options.selection);
       }
@@ -1171,7 +1180,8 @@ export function createChatBrowserClient(
       );
       const payload = await responseObject(response);
       if (!response.ok) {
-        const message = payload[responseFields.error];
+        const purposeError = payload.code === 'attachment_purpose_invalid' || payload.code === 'attachment_purpose_attachment_invalid';
+        const message = purposeError ? payload.detail : payload[responseFields.error];
         throw new ChatBrowserError(
           typeof message === 'string'
             ? message

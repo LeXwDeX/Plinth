@@ -215,6 +215,16 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 			return fmt.Errorf("%s 不能为空", name)
 		}
 	}
+	if schema.API.Fields.AttachmentPurposes != "" {
+		if strings.TrimSpace(schema.API.Attachment.Purpose) == "" || schema.API.Attachment.Purpose == schema.API.Attachment.ImageSlot {
+			return fmt.Errorf("api.attachment.purpose 无效")
+		}
+		for _, name := range []string{"style", "layout", "input"} {
+			if strings.TrimSpace(schema.AttachmentPurposes[name].AgentText) == "" {
+				return fmt.Errorf("attachment_purposes.%s.agent_text 不能为空", name)
+			}
+		}
+	}
 	if err := validateApprovalPolicy(schema.ApprovalPolicy, capabilityPresentations); err != nil {
 		return err
 	}

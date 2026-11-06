@@ -27,13 +27,14 @@ describe('chat copy and composer paste (#281)', () => {
   it('splits a composer paste into words and attachments, and the parent locks the send while the pictures are read', () => {
     const composer = read('./composer.tsx');
     const column = read('./chat-column.tsx');
-    const paste = composer.slice(composer.indexOf('onPaste={(event) => {'), composer.indexOf('onKeyUp='));
+    const paste = composer.slice(composer.indexOf('onPaste: (event) => {'), composer.indexOf('onKeyUp:'));
     expect(paste).toContain('planComposerPaste({');
     expect(paste).toContain("getData('text/html')");
     expect(paste).toContain('insertPastedText(value');
     expect(paste).toContain('onFiles(paste.files)');
     // HTML pictures are read by the parent, which holds the send lock from this call until they are attached.
     expect(paste).toContain('onPasteImages(paste.imageUrls)');
+    expect(composer.match(/\.\.\.inputEvents/g)).toHaveLength(2);
     expect(column).toContain('readPastedImages(urls)');
     expect(column).toContain('beginAttachmentRead(attachmentReads, scope)');
     expect(column).toContain('attachmentsPending(attachmentReads, scope)');
@@ -56,7 +57,7 @@ describe('chat copy and composer paste (#281)', () => {
   });
 
   it('attaches the same picture once', () => {
-    expect(read('./chat-column.tsx')).toContain('[...new Set([...current, ...prepared])]');
+    expect(read('./chat-column.tsx')).toContain('[...new Set([...attachedImages, ...prepared])]');
   });
 
   it('keeps card labels, handle overlays and step notes out of copied chat text', () => {

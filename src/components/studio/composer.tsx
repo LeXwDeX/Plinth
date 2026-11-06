@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useId, useRef, useState, type DragEvent } from 'react';
-import { Ban, Box, Frame, GitBranch, Image as ImageIcon, ImagePlus, Paintbrush, RotateCcw, Send, Square, Zap } from 'lucide-react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type DragEvent, type TextareaHTMLAttributes } from 'react';
+import { Ban, Box, Frame, GitBranch, Image as ImageIcon, ImagePlus, Maximize2, Paintbrush, RotateCcw, Send, Square, Zap } from 'lucide-react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { HarnessSummary } from '@/components/workspace/harness-summary';
@@ -37,6 +37,8 @@ import { useChatStore } from '@/store/chat-store';
 import { cn } from '@/lib/utils';
 import { referenceLimitNote, type ReferenceLimit } from '@/lib/workspace/reference-limit';
 import { focusWhenUnblocked } from '@/components/ui/focus-handoff';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { HandlePreview } from '@/components/chat/handle-preview';
 
 /** The object on the stage, as the composer shows it. */
 export interface ComposerChip {
@@ -73,6 +75,7 @@ export interface ComposerMention extends MentionCandidate {
 export interface ComposerProps {
   value: string;
   onChange: (value: string) => void;
+  /** No acceptance result is exposed; the expanded editor stays open rather than guessing whether sending succeeded. */
   onSend: () => void;
   onStop: () => void;
   /**
@@ -91,9 +94,13 @@ export interface ComposerProps {
   mask?: ComposerMask | null;
   /** Set while the next result continues from an older version; null otherwise. */
   branch?: ComposerBranch | null;
-  /** What the attached pictures are for; null until the person says. Written into the message. */
+  /** Bulk purpose selection. */
   attachmentPurpose?: AttachmentPurpose | null;
   onAttachmentPurpose?: (purpose: AttachmentPurpose | null) => void;
+  attachmentPurposes?: readonly (AttachmentPurpose | null)[];
+  onAttachmentPurposeAt?: (index: number, purpose: AttachmentPurpose | null) => void;
+  pinnedPurpose?: AttachmentPurpose | null;
+  onPinnedPurpose?: (purpose: AttachmentPurpose | null) => void;
   images: readonly string[];
   onRemoveImage: (index: number) => void;
   /** A canvas image pinned as the next turn's reference. */
@@ -133,7 +140,7 @@ function polylinePoints(flat: readonly number[]): string {
  */
 export function Composer({
   value, onChange, onSend, onStop, onStopInBackground = null, streaming, locked, canSend, chip, chipSkipped, onToggleChip, mask = null, branch = null,
-  attachmentPurpose = null, onAttachmentPurpose,
+  attachmentPurpose = null, onAttachmentPurpose, attachmentPurposes, onAttachmentPurposeAt, pinnedPurpose = null, onPinnedPurpose,
   images, onRemoveImage, pinnedImage, onUnpin, acceptedImages, onFiles, onPasteImages, editing, onCancelEdit,
   skill, params, sendCredits: generationSendCredits, mentions, onMentionPicked, referenceLimit = null,
 }: ComposerProps) {
@@ -167,10 +174,17 @@ export function Composer({
   const sendLabel = schemaText(schema, 'ui.workspace.agent.send');
   const uploadLabel = schemaText(schema, 'ui.chat.input.upload_title');
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const expandedTextarea = useRef<HTMLTextAreaElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const activeTextarea = () => expanded ? expandedTextarea.current : textarea.current;
   const [caret, setCaret] = useState(0);
   const [focused, setFocused] = useState(false);
   const [dismissed, setDismissed] = useState<number | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const previewFromPointer = useRef(false);
+  const mentionListRef = useRef<HTMLUListElement>(null);
+  const [mentionPlacement, setMentionPlacement] = useState<{ side: 'above' | 'below'; offset: number; space: number } | null>(null);
   const pendingCaret = useRef<number | null>(null);
   const [flashUrl, setFlashUrl] = useState<string | null>(null);
   const reference = useComposerReferenceStore((state) => state.request);
@@ -194,11 +208,53 @@ export function Composer({
 
   // After a pick the text changes under the caret; put the caret back once it has rendered.
   useEffect(() => {
-    if (pendingCaret.current === null || !textarea.current) return;
-    textarea.current.setSelectionRange(pendingCaret.current, pendingCaret.current);
+    const field = activeTextarea();
+    if (pendingCaret.current === null || !field) return;
+    field.setSelectionRange(pendingCaret.current, pendingCaret.current);
     setCaret(pendingCaret.current);
     pendingCaret.current = null;
-  }, [value]);
+  }, [value, expanded]);
+
+  useLayoutEffect(() => {
+    const field = textarea.current;
+    if (!field) return;
+    field.style.height = '0px';
+    field.style.height = `${Math.min(field.scrollHeight, schema.chat.frontend.textarea_maximum_height_pixels)}px`;
+    field.style.overflowY = field.scrollHeight > schema.chat.frontend.textarea_maximum_height_pixels ? 'auto' : 'hidden';
+  }, [value, schema.chat.frontend.textarea_maximum_height_pixels]);
+
+  useLayoutEffect(() => {
+    if (!expanded || !listOpen) return;
+    let popup: HTMLElement | null = null;
+    const place = () => {
+      const field = expandedTextarea.current;
+      const list = mentionListRef.current;
+      const dialog = field?.closest<HTMLElement>('[data-slot="dialog-content"]');
+      if (!field || !list || !dialog) return;
+      if (popup !== dialog) {
+        popup?.removeEventListener('animationend', place);
+        popup = dialog;
+        popup.addEventListener('animationend', place);
+      }
+      const box = field.getBoundingClientRect();
+      const modal = dialog.getBoundingClientRect();
+      const gap = 6;
+      const margin = 8;
+      const above = Math.max(0, modal.top - gap - margin);
+      const below = Math.max(0, window.innerHeight - modal.bottom - gap - margin);
+      const side = below >= list.scrollHeight || below >= above ? 'below' : 'above';
+      // shortcut: textarea caret pixels are unavailable; anchor outside the editor until a caret measurement is available.
+      setMentionPlacement({ side, offset: gap + Math.max(0, side === 'above' ? box.top - modal.top : modal.bottom - box.bottom), space: side === 'above' ? above : below });
+    };
+    place();
+    const frame = window.requestAnimationFrame(place);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('resize', place);
+      popup?.removeEventListener('animationend', place);
+      window.cancelAnimationFrame(frame);
+    };
+  }, [expanded, listOpen, matches.length]);
 
   // A click on a picture's handle tag in the chat: attach the picture to the next message (or flash the
   // attachment that already is it) and write its handle at the caret.
@@ -220,7 +276,7 @@ export function Composer({
         ...(request.captureId ? { captureId: request.captureId } : {}),
       }]);
     }
-    const field = textarea.current;
+    const field = activeTextarea();
     if (!namesHandle(valueRef.current, request.handle)) {
       const at = field ? field.selectionStart ?? valueRef.current.length : valueRef.current.length;
       const next = insertReference(valueRef.current, at, request.handle);
@@ -228,8 +284,8 @@ export function Composer({
       onChange(next.value);
     }
     // 引用请求常来自正在关闭的对话框：关闭前外面仍被隐藏，交给对话框关闭时聚焦。
-    window.requestAnimationFrame(() => focusWhenUnblocked(() => textarea.current));
-  }, [reference, clearReference, disabled, onChange]);
+    window.requestAnimationFrame(() => focusWhenUnblocked(activeTextarea));
+  }, [reference, clearReference, disabled, onChange, expanded]);
   useEffect(() => {
     if (flashUrl === null) return undefined;
     const timer = window.setTimeout(() => setFlashUrl(null), 1200);
@@ -274,9 +330,82 @@ export function Composer({
     onMentionPicked?.(candidate);
     pendingCaret.current = next.caret;
     setDismissed(null);
+    setPreviewIndex(null);
     onChange(next.value);
-    window.requestAnimationFrame(() => textarea.current?.focus());
+    window.requestAnimationFrame(() => activeTextarea()?.focus());
   };
+
+  const inputEvents: TextareaHTMLAttributes<HTMLTextAreaElement> = {
+    value, disabled,
+    onFocus: () => setFocused(true),
+    onBlur: () => setFocused(false),
+    onChange: (event) => {
+      setCaret(event.currentTarget.selectionStart ?? event.currentTarget.value.length);
+      setActiveIndex(0);
+      setPreviewIndex(null);
+      setDismissed(null);
+      onChange(event.currentTarget.value);
+    },
+    onPaste: (event) => {
+      const data = event.clipboardData;
+      const paste = planComposerPaste({
+        files: data?.files, text: data?.getData('text/plain') ?? '', html: data?.getData('text/html') ?? '', baseURL: document.baseURI,
+      });
+      if (!paste.handled) return;
+      event.preventDefault();
+      if (paste.text) {
+        const field = event.currentTarget;
+        const next = insertPastedText(value, field.selectionStart ?? value.length, field.selectionEnd ?? value.length, paste.text);
+        pendingCaret.current = next.caret;
+        onChange(next.value);
+      }
+      if (paste.files.length > 0) onFiles(paste.files);
+      if (paste.imageUrls.length > 0) onPasteImages(paste.imageUrls);
+    },
+    onKeyUp: (event) => setCaret(event.currentTarget.selectionStart ?? 0),
+    onClick: (event) => setCaret(event.currentTarget.selectionStart ?? 0),
+    onKeyDown: (event) => {
+      if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+      if (listOpen) {
+        if (event.key === 'ArrowDown') { event.preventDefault(); const next = (highlighted + 1) % matches.length; previewFromPointer.current = false; setActiveIndex(next); setPreviewIndex(next); return; }
+        if (event.key === 'ArrowUp') { event.preventDefault(); const next = (highlighted - 1 + matches.length) % matches.length; previewFromPointer.current = false; setActiveIndex(next); setPreviewIndex(next); return; }
+        if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); pickMention(matches[highlighted]); return; }
+        if (event.key === 'Escape' && mention) { event.preventDefault(); event.stopPropagation(); setDismissed(mention.start); return; }
+      }
+      if (event.key !== 'Enter' || event.shiftKey) return;
+      event.preventDefault();
+      if (agentUnavailable || disabled) return;
+      onSend();
+    },
+  };
+
+  const mentionList = listOpen ? (
+    <ul ref={mentionListRef} role="listbox" aria-label={schemaText(schema, 'ui.studio.composer.mention.title')} data-testid="composer-mention-list"
+      className={cn('absolute inset-x-0 z-float max-h-52 overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-xl ring-1 ring-foreground/10', !expanded && 'bottom-full mb-1.5')}
+      style={expanded ? mentionPlacement ? {
+        [mentionPlacement.side === 'above' ? 'bottom' : 'top']: `calc(100% + ${mentionPlacement.offset}px)`,
+        maxHeight: `min(13rem, ${mentionPlacement.space}px)`,
+      } : { visibility: 'hidden' } : undefined}>
+      {matches.map((candidate, index) => (
+        <li key={candidate.handle} role="option" aria-selected={index === highlighted} data-testid="composer-mention-option" data-handle={candidate.handle}
+          onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => { previewFromPointer.current = true; setActiveIndex(index); setPreviewIndex(index); }} onMouseLeave={() => { if (previewFromPointer.current) setPreviewIndex((current) => current === index ? null : current); }} onClick={() => pickMention(candidate)}
+          className={cn('flex h-9 cursor-pointer items-center gap-2 rounded-md px-1.5 text-xs', index === highlighted && 'bg-primary/15')}>
+          <HandlePreview handle={candidate.handle} url={candidate.kind === 'image' && !candidate.board ? candidate.url || candidate.thumbnail : ''} open={previewIndex === index} avoidRef={mentionListRef}>
+            <span className="relative flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-sm bg-muted">
+              {candidate.thumbnail ? <img src={candidate.thumbnail} alt={candidate.handle} className="size-full object-cover" />
+                : candidate.kind === 'model' ? <Box aria-hidden className="size-3.5 text-muted-foreground" />
+                  : candidate.board ? <Frame aria-hidden className="size-3.5 text-muted-foreground" /> : <ImageIcon aria-hidden className="size-3.5 text-muted-foreground" />}
+            </span>
+          </HandlePreview>
+          <span className="min-w-0 flex-1 truncate font-medium">{candidate.name ?? candidate.handle}</span>
+          {candidate.name ? <span className="shrink-0 text-muted-foreground">{candidate.handle}</span> : null}
+          <span className="shrink-0 rounded-sm bg-panel-raised px-1 text-[10px] leading-4 text-muted-foreground" data-testid="composer-mention-source">
+            {schemaText(schema, `ui.studio.composer.mention.source_${candidate.source ?? 'history'}`)}
+          </span>
+        </li>
+      ))}
+    </ul>
+  ) : null;
 
   return (
     <div
@@ -418,33 +547,59 @@ export function Composer({
       {hasAttachments ? (
         <div className="flex flex-col gap-1.5" data-testid="composer-attachments">
           <div className="flex flex-wrap items-center gap-1.5" data-testid="composer-attachment-list">
-          {attachments.map((item) => (
-            <ContextChip
-              key={`${item.index}-${item.url.slice(0, 32)}`}
-              testId="composer-attachment-chip"
-              flash={item.url === flashUrl}
-              onDragStart={item.pinned ? undefined : (event) => dragAttachment(event, item.url, item.number)}
-              open={{
-                label: schemaMessage(schema, 'ui.studio.composer.attachment.preview', { index: item.number }),
-                onClick: () => previewAttachment(item.url, item.number),
-                testId: 'composer-attachment-open',
-              }}
-              square={(
-                <AttachmentThumb url={item.url} alt={schemaMessage(schema, 'ui.chat.input.attachment_alt', { index: item.number })} />
-              )}
-              title={item.pinned
-                ? schemaText(schema, 'ui.studio.composer.attachment.pinned')
-                : formatSchemaText(schemaText(schema, 'ui.studio.composer.attachment.title'), { index: item.number })}
-              subtitle={[
-                schemaText(schema, item.pinned ? 'ui.studio.composer.attachment.from_board' : 'ui.studio.composer.attachment.upload'),
-                attachmentPurpose ? schemaText(schema, `ui.studio.composer.attachment.purpose_${attachmentPurpose}`) : '',
-              ].filter(Boolean).join(' · ')}
-              remove={{
-                label: schemaMessage(schema, 'ui.chat.input.remove_attachment', { index: item.number }),
-                onClick: item.pinned ? onUnpin : () => onRemoveImage(item.index),
-              }}
-            />
-          ))}
+            {attachments.map((item) => {
+              const purpose = item.pinned ? pinnedPurpose : attachmentPurposes?.[item.index] ?? null;
+              return (
+                <ContextChip
+                  key={`${item.index}-${item.url.slice(0, 32)}`}
+                  testId="composer-attachment-chip"
+                  flash={item.url === flashUrl}
+                  onDragStart={item.pinned ? undefined : (event) => dragAttachment(event, item.url, item.number)}
+                  open={{
+                    label: schemaMessage(schema, 'ui.studio.composer.attachment.preview', { index: item.number }),
+                    onClick: () => previewAttachment(item.url, item.number),
+                    testId: 'composer-attachment-open',
+                  }}
+                  square={(
+                    <AttachmentThumb url={item.url} alt={schemaMessage(schema, 'ui.chat.input.attachment_alt', { index: item.number })} />
+                  )}
+                  title={item.pinned
+                    ? schemaText(schema, 'ui.studio.composer.attachment.pinned')
+                    : formatSchemaText(schemaText(schema, 'ui.studio.composer.attachment.title'), { index: item.number })}
+                  subtitle={[
+                    schemaText(schema, item.pinned ? 'ui.studio.composer.attachment.from_board' : 'ui.studio.composer.attachment.upload'),
+                    purpose ? schemaText(schema, `ui.studio.composer.attachment.purpose_${purpose}`) : '',
+                  ].filter(Boolean).join(' · ')}
+                  remove={{
+                    label: schemaMessage(schema, 'ui.chat.input.remove_attachment', { index: item.number }),
+                    onClick: item.pinned ? onUnpin : () => onRemoveImage(item.index),
+                  }}
+                />
+              );
+            })}
+          </div>
+          <div className="flex flex-col gap-1.5" data-testid="composer-attachment-purposes">
+            {attachments.map((item) => {
+              const selected = item.pinned ? pinnedPurpose : attachmentPurposes?.[item.index] ?? null;
+              const change = item.pinned ? onPinnedPurpose : onAttachmentPurposeAt && ((purpose: AttachmentPurpose | null) => onAttachmentPurposeAt(item.index, purpose));
+              const label = item.pinned ? schemaText(schema, 'ui.studio.composer.attachment.pinned')
+                : formatSchemaText(schemaText(schema, 'ui.studio.composer.attachment.title'), { index: item.number });
+              return (
+                <div key={`${item.index}-${item.url}`} className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground" data-testid="composer-attachment-purpose-row">
+                  <span>{label}</span>
+                  <div role="group" aria-label={`${label} ${schemaText(schema, 'ui.studio.composer.attachment.purpose')}`} className="flex flex-wrap items-center rounded-md border border-border bg-surface p-0.5">
+                    {ATTACHMENT_PURPOSES.map((purpose) => (
+                      <button key={purpose} type="button" aria-pressed={selected === purpose} disabled={disabled || !change}
+                        onClick={() => change?.(selected === purpose ? null : purpose)}
+                        className={cn('h-6 rounded px-2 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50',
+                          selected === purpose ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+                        {schemaText(schema, `ui.studio.composer.attachment.purpose_${purpose}`)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
           {/* #296: what an edit of the one attached picture outputs when no size was chosen. */}
           <ReferenceSizeNotice delivery={params.canvas?.delivery} />
@@ -497,109 +652,21 @@ export function Composer({
       />
       <HarnessSummary sessionId={activeSessionId} />
       <div className="relative rounded-lg border border-border bg-surface transition-colors focus-within:border-ring/60">
-        {listOpen ? (
-          <ul
-            role="listbox"
-            aria-label={schemaText(schema, 'ui.studio.composer.mention.title')}
-            data-testid="composer-mention-list"
-            className="absolute inset-x-0 bottom-full z-float mb-1.5 max-h-52 overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-xl ring-1 ring-foreground/10"
-          >
-            {matches.map((candidate, index) => (
-              <li
-                key={candidate.handle}
-                role="option"
-                aria-selected={index === highlighted}
-                data-testid="composer-mention-option"
-                data-handle={candidate.handle}
-                onMouseDown={(event) => event.preventDefault()}
-                onMouseEnter={() => setActiveIndex(index)}
-                onClick={() => pickMention(candidate)}
-                className={cn('flex h-9 cursor-pointer items-center gap-2 rounded-md px-1.5 text-xs', index === highlighted && 'bg-primary/15')}
-              >
-                <span className="relative flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-sm bg-muted">
-                  {candidate.thumbnail
-                    ? <img src={candidate.thumbnail} alt={candidate.handle} className="size-full object-cover" />
-                    : candidate.kind === 'model'
-                      ? <Box aria-hidden className="size-3.5 text-muted-foreground" />
-                      : candidate.board
-                        ? <Frame aria-hidden className="size-3.5 text-muted-foreground" />
-                        : <ImageIcon aria-hidden className="size-3.5 text-muted-foreground" />}
-                </span>
-                <span className="min-w-0 flex-1 truncate font-medium">{candidate.name ?? candidate.handle}</span>
-                {candidate.name ? <span className="shrink-0 text-muted-foreground">{candidate.handle}</span> : null}
-                <span className="shrink-0 rounded-sm bg-panel-raised px-1 text-[10px] leading-4 text-muted-foreground" data-testid="composer-mention-source">
-                  {schemaText(schema, `ui.studio.composer.mention.source_${candidate.source ?? 'history'}`)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        ) : null}
+        {!expanded ? mentionList : null}
         <Field id={CHAT_COMPOSER_ELEMENT_ID} label={schemaText(schema, 'ui.workspace.agent.placeholder')} labelHidden>
           {(control) => (
             <textarea
               {...control}
               ref={textarea}
               aria-autocomplete="list"
-              className="max-h-32 min-h-11 w-full resize-none bg-transparent px-3 pt-2.5 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50"
+              className="min-h-11 w-full resize-none bg-transparent px-3 pt-2.5 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50"
               rows={2}
               // The key hint sits in the placeholder: a text box carries no hover hint of its own.
               placeholder={formatSchemaText(schemaText(schema, 'ui.studio.composer.placeholder_with_keys'), {
                 placeholder: schemaText(schema, 'ui.workspace.agent.placeholder'),
                 keys: schemaText(schema, 'ui.studio.composer.hint'),
               })}
-              value={value}
-              disabled={disabled}
-              onFocus={() => setFocused(true)}
-              onBlur={() => setFocused(false)}
-              onChange={(event) => {
-                setCaret(event.target.selectionStart ?? event.target.value.length);
-                setActiveIndex(0);
-                setDismissed(null);
-                onChange(event.target.value);
-              }}
-              onPaste={(event) => {
-                // Plain text pastes as usual. With pictures (a screenshot, or chat text and pictures copied
-                // together) the words go in at the caret and each picture becomes an attachment through the
-                // upload path; a canvas marker is never written as words (#281). The parent reads HTML pictures
-                // and keeps the send locked until they are attached; files still go straight to that path. The
-                // canvas handles Ctrl+V itself only when this box is not the target (it skips text fields).
-                const data = event.clipboardData;
-                const paste = planComposerPaste({
-                  files: data?.files,
-                  text: data?.getData('text/plain') ?? '',
-                  html: data?.getData('text/html') ?? '',
-                  baseURL: document.baseURI,
-                });
-                if (!paste.handled) return;
-                event.preventDefault();
-                if (paste.text) {
-                  const field = event.currentTarget;
-                  const next = insertPastedText(value, field.selectionStart ?? value.length, field.selectionEnd ?? value.length, paste.text);
-                  pendingCaret.current = next.caret;
-                  onChange(next.value);
-                }
-                if (paste.files.length > 0) onFiles(paste.files);
-                // The parent starts reading before this event returns and holds the send lock until every
-                // picture is attached (or the read failed), so Enter and the button cannot send first.
-                if (paste.imageUrls.length > 0) onPasteImages(paste.imageUrls);
-              }}
-              onKeyUp={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
-              onClick={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
-              onKeyDown={(event) => {
-                // The Enter that confirms an IME candidate is not a send: it reports
-                // isComposing, or keyCode 229 on browsers that clear the flag first.
-                if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-                if (listOpen) {
-                  if (event.key === 'ArrowDown') { event.preventDefault(); setActiveIndex((highlighted + 1) % matches.length); return; }
-                  if (event.key === 'ArrowUp') { event.preventDefault(); setActiveIndex((highlighted - 1 + matches.length) % matches.length); return; }
-                  if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); pickMention(matches[highlighted]); return; }
-                  if (event.key === 'Escape' && mention) { event.preventDefault(); setDismissed(mention.start); return; }
-                }
-                if (event.key !== 'Enter' || event.shiftKey) return;
-                event.preventDefault();
-                if (agentUnavailable || disabled) return;
-                onSend();
-              }}
+              {...inputEvents}
             />
           )}
         </Field>
@@ -618,6 +685,11 @@ export function Composer({
             </Action>
           </HintTooltip>
           <span className="flex-1" />
+          <HintTooltip name={schemaText(schema, 'ui.studio.composer.expand_editor')}>
+            <Action type="button" variant="ghost" size="icon-sm" aria-label={schemaText(schema, 'ui.studio.composer.expand_editor')} disabled={disabled} onClick={() => setExpanded(true)}>
+              <Maximize2 aria-hidden className="size-4" />
+            </Action>
+          </HintTooltip>
           {streaming && onStopInBackground ? (
             <StopChoices label={stopLabel} onCancel={onStop} onBackground={onStopInBackground} />
           ) : streaming ? (
@@ -649,6 +721,23 @@ export function Composer({
           </HintTooltip>
         </div>
       </div>
+      <Dialog open={expanded} onOpenChange={setExpanded}>
+        <DialogContent closeLabel={schemaText(schema, 'ui.studio.composer.close_editor')} finalFocus={textarea} initialFocus={expandedTextarea} className="sm:max-w-3xl">
+          <DialogTitle>{schemaText(schema, 'ui.studio.composer.expand_editor')}</DialogTitle>
+          <div className="relative">
+            {expanded ? mentionList : null}
+            <textarea ref={expandedTextarea} aria-label={schemaText(schema, 'ui.workspace.agent.placeholder')} aria-autocomplete="list"
+              className="h-[min(60vh,32rem)] min-h-44 w-full resize-none rounded-md border border-border bg-surface p-3 text-sm outline-none focus:border-ring"
+              {...inputEvents} />
+          </div>
+          <div className="flex justify-end">
+            <Action type="button" variant="send" size="sm" aria-label={sendTitle} disabled={!canSend || locked || agentUnavailable !== null} onClick={onSend}>
+              <Send aria-hidden className="size-4" />
+              {sendCredits === null ? sendLabel : formatSchemaText(schemaText(schema, 'ui.studio.composer.send_cost'), { credits: sendCredits })}
+            </Action>
+          </div>
+        </DialogContent>
+      </Dialog>
       {streaming ? (
         <p role="note" className="text-[11px] leading-4 text-muted-foreground" data-testid="composer-stop-note">{schemaText(schema, 'ui.studio.composer.stop_note')}</p>
       ) : null}

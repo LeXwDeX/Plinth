@@ -1,9 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { objectFitStep, type ObjectFitState } from './object-fit';
+import { canApplyObjectFit, objectFitStep, type ObjectFitState } from './object-fit';
 
 const none: ObjectFitState = { key: '', quiet: false };
 
 describe('fitting the stage to the current object (#262)', () => {
+  it('does not let a delayed fit overwrite a later manual pan, zoom or layer choice', () => {
+    const scheduled = { zoom: 1, panX: 10, panY: 20 };
+    expect(canApplyObjectFit(scheduled, scheduled, false)).toBe(true);
+    expect(canApplyObjectFit({ ...scheduled, panX: 30 }, scheduled, false)).toBe(false);
+    expect(canApplyObjectFit({ ...scheduled, zoom: 2 }, scheduled, false)).toBe(false);
+    expect(canApplyObjectFit(scheduled, scheduled, true)).toBe(false);
+    const applied = { zoom: 0.5, panX: -20, panY: -10 };
+    expect(canApplyObjectFit(applied, applied, false)).toBe(true);
+    expect(canApplyObjectFit({ ...applied, panY: 0 }, applied, false)).toBe(false);
+  });
   it('selects and fits a newly opened object', () => {
     expect(objectFitStep(none, { key: 'a', quiet: false, othersOnBoard: true })).toBe('fresh');
     // An automatic pick on an empty board still fits: there is nothing to keep the view on.

@@ -2488,20 +2488,21 @@ type ChatModelReviewTextsSchema struct {
 // 和浏览器展示内容。Go 代码只实现稳定算法，不拥有产品字段名、状态字面量、
 // Prompt 或可见文本。
 type ChatSchema struct {
-	API          ChatAPISchema          `json:"api"`
-	Defaults     ChatDefaultsSchema     `json:"defaults"`
-	Roles        ChatRolesSchema        `json:"roles"`
-	State        ChatStateSchema        `json:"state"`
-	Frontend     ChatFrontendSchema     `json:"frontend"`
-	Agent        ChatAgentSchema        `json:"agent"`
-	Context      ChatContextSchema      `json:"context"`
-	DSML         ChatDSMLSchema         `json:"dsml"`
-	Stream       ChatStreamSchema       `json:"stream"`
-	Tools        []ChatToolSchema       `json:"tools"`
-	AgentTools   []ChatAgentToolSchema  `json:"agent_tools,omitempty"`
-	Skills       ChatSkillsSchema       `json:"skills"`
-	Presentation ChatPresentationSchema `json:"presentation"`
-	Audit        ChatAuditSchema        `json:"audit"`
+	AttachmentPurposes map[string]ChatAttachmentPurposeSchema `json:"attachment_purposes"`
+	API                ChatAPISchema                          `json:"api"`
+	Defaults           ChatDefaultsSchema                     `json:"defaults"`
+	Roles              ChatRolesSchema                        `json:"roles"`
+	State              ChatStateSchema                        `json:"state"`
+	Frontend           ChatFrontendSchema                     `json:"frontend"`
+	Agent              ChatAgentSchema                        `json:"agent"`
+	Context            ChatContextSchema                      `json:"context"`
+	DSML               ChatDSMLSchema                         `json:"dsml"`
+	Stream             ChatStreamSchema                       `json:"stream"`
+	Tools              []ChatToolSchema                       `json:"tools"`
+	AgentTools         []ChatAgentToolSchema                  `json:"agent_tools,omitempty"`
+	Skills             ChatSkillsSchema                       `json:"skills"`
+	Presentation       ChatPresentationSchema                 `json:"presentation"`
+	Audit              ChatAuditSchema                        `json:"audit"`
 	// ApprovalPolicy declares the per-session paid-step approval modes and
 	// which capabilities still need a human in manual mode.
 	ApprovalPolicy ChatApprovalPolicySchema `json:"approval_policy"`
@@ -2541,6 +2542,10 @@ type ChatSchema struct {
 	// the application sets it at startup when the live Agent has no API key
 	// or no model, and the public projection reports the Agent unavailable.
 	AgentNotConfigured bool `json:"-"`
+}
+
+type ChatAttachmentPurposeSchema struct {
+	AgentText string `json:"agent_text"`
 }
 
 // ChatContextCompactionSchema is application.chat.context_compaction (#322).
@@ -3183,6 +3188,7 @@ type ChatAttachmentAPIFields struct {
 	TaskID    string `json:"task_id"`
 	CaptureID string `json:"capture_id"`
 	ImageSlot string `json:"image_slot"`
+	Purpose   string `json:"purpose"`
 	URL       string `json:"url"`
 	// Token is the member of a mention that holds the text the person wrote
 	// (a request-only member of the `mentions` field).
@@ -3242,8 +3248,9 @@ type ChatAPIFields struct {
 	// Attachments carries structured claims about the images of the message
 	// (capture lineage); Selection carries the objects selected on the
 	// workspace. Both are verified server-side before use.
-	Attachments string `json:"attachments"`
-	Selection   string `json:"selection"`
+	Attachments        string `json:"attachments"`
+	AttachmentPurposes string `json:"attachment_purposes"`
+	Selection          string `json:"selection"`
 	// Mentions carries the `@` references written in the message text; the
 	// server verifies them, gives their objects handles and rewrites the text.
 	Mentions string `json:"mentions"`

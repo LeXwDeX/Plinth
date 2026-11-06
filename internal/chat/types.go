@@ -78,6 +78,8 @@ type TurnOptions struct {
 	// turn was sent. The server verified each one for the owner and session
 	// and gave it a handle; the Agent reads it as the "current selection".
 	Selection []Attachment `json:"Selection,omitempty"`
+	// AttachmentPurposes maps server-assigned image handles to the requested roles.
+	AttachmentPurposes map[string]string `json:"AttachmentPurposes,omitempty"`
 	// SelectionPicked marks a Selection that is the session's picked candidate
 	// ("选用") rather than something the client selected on the workspace.
 	SelectionPicked bool `json:"SelectionPicked,omitempty"`

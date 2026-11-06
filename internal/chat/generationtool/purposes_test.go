@@ -190,3 +190,62 @@ func TestReferencePurposesAreOptional(t *testing.T) {
 		t.Fatalf("prompt = %q", got)
 	}
 }
+
+func TestTurnPurposesReorderInputBeforeTruncation(t *testing.T) {
+	rig := newPurposeRig(t, 1)
+	result := rig.run(t, chat.ToolCommand{Options: chat.TurnOptions{AttachmentPurposes: map[string]string{"@img7": "input"}}},
+		`{"prompt":"p","reference_handles":["@img3","@img7"]}`)
+	if result.NoSubmission || !slices.Equal(rig.resolver.urls, []string{"/api/v1/input-assets/outfit"}) {
+		t.Fatalf("result = %+v, references = %v", result, rig.resolver.urls)
+	}
+	if !strings.Contains(rig.submittedPrompt(t), rig.schema.AttachmentPurposes["input"].AgentText) {
+		t.Fatalf("purpose missing from prompt: %s", rig.submittedPrompt(t))
+	}
+}
+
+func TestTurnPurposesRefuseTruncatedPurpose(t *testing.T) {
+	rig := newPurposeRig(t, 1)
+	result := rig.run(t, chat.ToolCommand{Options: chat.TurnOptions{AttachmentPurposes: map[string]string{"@img3": "style", "@img7": "input"}}},
+		`{"prompt":"p","reference_handles":["@img3","@img7"]}`)
+	if !result.NoSubmission || rig.gateway.submitted.OfferingID != "" {
+		t.Fatalf("expected refusal, got %+v", result)
+	}
+}
+
+func TestTurnPurposeRefusesMissingInputAndCanvasConflict(t *testing.T) {
+	for _, canvas := range []bool{false, true} {
+		rig := newPurposeRig(t, 4)
+		options := chat.TurnOptions{AttachmentPurposes: map[string]string{"@img7": "input"}}
+		args := `{"prompt":"p","reference_handles":["@img3"]}`
+		if canvas {
+			options.InputSource = rig.schema.Context.CanvasInputSource
+			options.Selection = []chat.Attachment{{Handle: "@img9", Kind: chat.AttachmentKindImage, Role: chat.AttachmentRoleCanvas,
+				AssetID: "board", URL: "/api/v1/input-assets/board", Canvas: &chat.CanvasLayout{Width: 1024, Height: 1024}}}
+			args = `{"prompt":"p","reference_handles":["@img7"]}`
+		}
+		result := rig.run(t, chat.ToolCommand{Options: options}, args)
+		if !result.NoSubmission || rig.gateway.submitted.OfferingID != "" {
+			t.Fatalf("canvas=%v: expected refusal, got %+v", canvas, result)
+		}
+	}
+}
+
+func TestUnsupportedToolDoesNotApplyTurnPurposes(t *testing.T) {
+	rig := newPurposeRig(t, 4)
+	rig.tool.ReferencePurposesArgument = ""
+	rig.run(t, chat.ToolCommand{Options: chat.TurnOptions{AttachmentPurposes: map[string]string{"@img7": "input"}}},
+		`{"prompt":"p","reference_handles":["@img3","@img7"]}`)
+	if got := rig.resolver.urls; !slices.Equal(got, []string{"/api/v1/tasks/task-pose/assets/pose", "/api/v1/input-assets/outfit"}) {
+		t.Fatalf("unsupported tool reordered references: %v", got)
+	}
+}
+
+func TestTurnPurposeRejectsAmbiguousDuplicateURL(t *testing.T) {
+	rig := newPurposeRig(t, 4)
+	history := []chat.Message{{Role: rig.schema.Roles.User, Content: "edit", ImageURLs: []string{"/same", "/same"},
+		Attachments: []chat.Attachment{{Handle: "@img1", Kind: chat.AttachmentKindImage, ImageSlot: 1}, {Handle: "@img2", Kind: chat.AttachmentKindImage, ImageSlot: 2}}}}
+	result := rig.run(t, chat.ToolCommand{History: history, Options: chat.TurnOptions{AttachmentPurposes: map[string]string{"@img2": "input"}}}, `{"prompt":"p"}`)
+	if !result.NoSubmission || rig.gateway.submitted.OfferingID != "" {
+		t.Fatalf("expected ambiguous references to be refused: %+v", result)
+	}
+}

@@ -65,8 +65,9 @@ import { inpaintParameters } from '@/lib/workspace/model-picker';
 import { uploadWorkspaceInputAsset } from '@/lib/workspace/input-asset-upload';
 import { formatSizeLimit } from '@/lib/size-text';
 import { captureSessionScope, isCurrentSessionScope } from '@/lib/workspace/session-scope';
-import { fitRectViewport, viewportUnchanged, type FitRect } from '@/lib/canvas/viewport';
-import { objectFitStep, type ObjectFitState } from '@/lib/canvas/object-fit';
+import { fitRectViewport, type FitRect } from '@/lib/canvas/viewport';
+import { bindLayerFollow } from '@/lib/canvas/layer-follow';
+import { canApplyObjectFit, objectFitStep, type ObjectFitState } from '@/lib/canvas/object-fit';
 import { stageFitInsets } from '@/lib/workspace/tool-rail-layout';
 import { useCanvasStore, generateId, type CanvasNode, type CanvasViewport } from '@/store/canvas-store';
 import { useChatStore } from '@/store/chat-store';
@@ -952,13 +953,31 @@ export function WorkspaceCanvasBoard() {
   objectGeometry.current = objectNode
     ? { x: objectNode.x, y: objectNode.y, width: objectNode.width, height: objectNode.height }
     : null;
-  const fitState = useRef<ObjectFitState & { applied: CanvasViewport | null }>({ key: '', quiet: false, applied: null });
+  const fitState = useRef<ObjectFitState & { applied: CanvasViewport | null; blocked?: boolean }>({ key: '', quiet: false, applied: null });
   const objectNodeId = objectNode?.id;
   const objectKey = `${sessionID}:${selection?.taskId}:${selection?.url}:${objectNodeId}`;
   const viewportConfig = schema.canvas.frontend.viewport;
   const railExpanded = useStudioStore((state) => state.railExpanded);
   const selectionQuiet = selection?.quiet === true;
   const selectionRestored = selection?.restored === true;
+  useEffect(() => {
+    if (!sessionID || loadedSessionID !== sessionID) return;
+    return bindLayerFollow(sessionID, (nodeId) => {
+      const area = drawingArea.current;
+      if (!area) return null;
+      const store = useCanvasStore.getState();
+      return {
+        node: store.getNodes(sessionID).find((node) => node.id === nodeId),
+        viewport: store.getViewport(sessionID),
+        size: { width: area.clientWidth, height: area.clientHeight },
+        config: viewportConfig,
+        insets: stageFitInsets(railExpanded),
+      };
+    }, (view) => {
+      fitState.current.blocked = true;
+      if (view) useCanvasStore.getState().setViewport(sessionID, view);
+    });
+  }, [loadedSessionID, railExpanded, sessionID, viewportConfig]);
   useEffect(() => {
     if (!sessionID || loadedSessionID !== sessionID || !objectNodeId) return;
     // #262: a result picked automatically while the board already holds other work joins quietly: the
@@ -988,7 +1007,7 @@ export function WorkspaceCanvasBoard() {
       return;
     }
     if (step === 'fresh') {
-      fitState.current = { key: objectKey, quiet: false, applied: null };
+      fitState.current = { key: objectKey, quiet: false, applied: useCanvasStore.getState().getViewport(sessionID) };
       useCanvasStore.getState().selectNode(objectNodeId);
     }
     // Fit the picture into the visible stage. Until the user pans or zooms it
@@ -1000,7 +1019,7 @@ export function WorkspaceCanvasBoard() {
       if (!area || !rect) return;
       const state = fitState.current;
       const store = useCanvasStore.getState();
-      if (state.applied && !viewportUnchanged(store.viewportBySession[sessionID], state.applied)) return;
+      if (!canApplyObjectFit(store.getViewport(sessionID), state.applied, state.blocked === true)) return;
       // The fit centres in what the floating controls leave (`stageFitInsets`), so the picture clears the rail.
       const insets = stageFitInsets(railExpanded);
       const next = fitRectViewport(rect, { width: area.clientWidth, height: area.clientHeight }, viewportConfig, insets);

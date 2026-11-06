@@ -1,5 +1,6 @@
 import type { ChatAttachmentClaim, ChatMentionClaim } from '@/lib/chat/attachments';
 import type { MultiviewTurnRequest } from '@/lib/chat/browser-client';
+import type { AttachmentPurpose } from '@/lib/chat/attachment-purpose';
 
 /**
  * A message the person sent while the Agent was still on the previous turn.
@@ -16,6 +17,8 @@ export interface QueuedTurn {
   selection: ChatAttachmentClaim[];
   /** The `@` references of the text, resolved by the server when the turn runs. */
   mentions?: ChatMentionClaim[];
+  /** The per-picture purposes the person set before the turn was queued. */
+  attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[];
   /** The source the person chose when the turn was queued (#266): the canvas when `selection` is its snapshot. */
   inputSource?: string;
   /** #65: the structured multiview request the turn was queued with. */

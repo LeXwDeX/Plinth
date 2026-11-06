@@ -46,7 +46,8 @@ describe('handle tag to composer', () => {
     expect(composer).toContain('setFlashUrl(imagesRef.current[existing])');
     expect(composer).toContain('workspace.queueChatAttachments([{');
     expect(composer).toContain('insertReference(valueRef.current, at, request.handle)');
-    expect(composer).toContain('textarea.current?.focus()');
+    expect(composer).toContain('focusWhenUnblocked(activeTextarea)');
+    expect(composer).toContain('expanded ? expandedTextarea.current : textarea.current');
     expect(composer).toContain('flash={item.url === flashUrl}');
   });
 
