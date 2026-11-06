@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, ImagePlus, Layers, Upload, X } from 'lucide-react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
@@ -90,7 +90,11 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
     [nodes],
   );
   const followed = followSavedStyleLock(draftState, lockState.lock);
-  if (followed !== draftState) setDraftState(followed);
+  // State updates belong in an effect: setting the draft during render can loop
+  // forever when the saved lock arrives as a new object (React error #185).
+  useEffect(() => {
+    setDraftState((current) => followSavedStyleLock(current, lockState.lock));
+  }, [lockState.lock]);
   if (!sessionId) return null;
   const draft = followed.draft;
   const state = {
