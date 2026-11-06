@@ -1,17 +1,23 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, ImagePlus, Upload, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ImagePlus, Layers, Upload, X } from 'lucide-react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { useStyleLock, EMPTY_STYLE_LOCK } from '@/hooks/use-style-lock';
 import { createChatBrowserClient, type ChatStyleLock } from '@/lib/chat/browser-client';
+import { exportCanvasToBlob } from '@/lib/canvas/export-canvas';
+import { flushPendingEdits } from '@/lib/canvas/pending-edits';
+import { exportAndUploadSnapshot, snapshotFilename } from '@/lib/canvas/send-snapshot';
 import { prepareImageUploadBlob } from '@/lib/image-upload';
 import { uploadWorkspaceInputAssetResult } from '@/lib/workspace/input-asset-upload';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-schema';
+import { useCanvasStore, type CanvasNode } from '@/store/canvas-store';
 import { useChatStore, type ChatMessage } from '@/store/chat-store';
+
+const NO_NODES: readonly CanvasNode[] = [];
 
 export interface StyleLockDraft {
   draft: ChatStyleLock;
@@ -63,10 +69,13 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
   const lockState = useStyleLock(client, sessionId);
   const { previewAssetUrl } = useAssetURLRewriter();
   const messages = useChatStore((state) => (sessionId ? state.messagesBySession?.[sessionId] ?? [] : []));
+  const nodes = useCanvasStore((state) => (sessionId ? state.nodesBySession[sessionId] ?? NO_NODES : NO_NODES));
   const maximumText = schema.chat.style_lock.maximum_text_characters;
   const maximumReferences = schema.chat.style_lock.maximum_reference_images;
   const [draftState, setDraftState] = useState<StyleLockDraft>(() => ({ draft: EMPTY_STYLE_LOCK, base: EMPTY_STYLE_LOCK }));
   const [chooserOpen, setChooserOpen] = useState(false);
+  const [layerChooserOpen, setLayerChooserOpen] = useState(false);
+  const [layerBusy, setLayerBusy] = useState<string | null>(null);
   const [localURLs, setLocalURLs] = useState<Record<string, string>>({});
   const [saveState, setSaveState] = useState<'idle' | 'saved' | 'failed'>('idle');
   const [uploadFailed, setUploadFailed] = useState(false);
@@ -74,6 +83,12 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
   const text = (key: string) => schemaText(schema, `ui.studio.style_lock.${key}`);
   const labelOf = (index: number) => formatSchemaText(schemaText(schema, 'ui.studio.strip.candidate_n'), { index });
   const choices = useMemo(() => sessionReferences(messages, labelOf), [labelOf, messages]);
+  // Canvas layers the person can turn into a style reference: visible, non-guide nodes, top layer first.
+  const layers = useMemo(
+    () => nodes.filter((node) => node.type !== 'frame' && node.visible !== false && !(node.blank && !node.imageUrl))
+      .sort((left, right) => right.zIndex - left.zIndex),
+    [nodes],
+  );
   const followed = followSavedStyleLock(draftState, lockState.lock);
   if (followed !== draftState) setDraftState(followed);
   if (!sessionId) return null;
@@ -120,6 +135,38 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
     updateDraft({ ...draft, references: [...draft.references, reference.assetId] });
     setChooserOpen(false);
     setSaveState('idle');
+  };
+  // A canvas layer is rasterised through the shared export path, then uploaded; the reference is the
+  // uploaded input asset, never a canvas URL.
+  const chooseLayer = async (node: CanvasNode) => {
+    if (refsAtLimit || layerBusy) return;
+    setUploadFailed(false);
+    setLayerBusy(node.id);
+    try {
+      const captured: { value: { id: string; url: string } | null } = { value: null };
+      await exportAndUploadSnapshot({
+        flush: () => flushPendingEdits(sessionId),
+        exportPicture: () => exportCanvasToBlob([node], schema.canvas, {
+          backgroundColor: schema.canvas.frontend.export.artboard_background_color,
+        }),
+        upload: async (picture) => {
+          captured.value = await uploadWorkspaceInputAssetResult(schema, picture, snapshotFilename(schema));
+          return captured.value.url;
+        },
+        maximumBytes: schema.runtime.input_assets.upload_max_bytes,
+      });
+      if (!captured.value) throw new Error('layer upload returned no asset');
+      const uploaded = captured.value;
+      setLocalURLs((current) => ({ ...current, [uploaded.id]: uploaded.url }));
+      updateDraft({ ...draft, references: [...draft.references, uploaded.id] });
+      setLayerChooserOpen(false);
+      setSaveState('idle');
+    } catch {
+      setUploadFailed(true);
+      setSaveState('failed');
+    } finally {
+      setLayerBusy(null);
+    }
   };
   const remove = (index: number) => updateDraft({ ...draft, references: draft.references.filter((_, current) => current !== index) });
   const move = (index: number, delta: -1 | 1) => {
@@ -197,6 +244,9 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
         <button type="button" disabled={refsAtLimit || lockState.busy} onClick={() => setChooserOpen((open) => !open)} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50">
           <ImagePlus className="size-3.5" aria-hidden="true" />{text('choose_session_reference')}
         </button>
+        <button type="button" disabled={refsAtLimit || lockState.busy} onClick={() => setLayerChooserOpen((open) => !open)} aria-expanded={layerChooserOpen} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50">
+          <Layers className="size-3.5" aria-hidden="true" />{text('canvas_layers')}
+        </button>
       </div>
       {chooserOpen ? (
         <div className="mt-2 rounded-md border border-border p-1.5" data-testid="style-lock-session-choices">
@@ -206,6 +256,23 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
                 <li key={choice.assetId}>
                   <button type="button" disabled={draft.references.includes(choice.assetId)} onClick={() => choose(choice)} className="size-12 overflow-hidden rounded border border-border disabled:opacity-40" aria-label={choice.label} data-testid={`style-lock-session-reference-${choice.assetId}`}>
                     <img src={previewAssetUrl(choice.url) || safePreviewURL(choice.url)} alt={text('references_label')} className="size-full object-cover" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+      {layerChooserOpen ? (
+        <div className="mt-2 rounded-md border border-border p-1.5" data-testid="style-lock-canvas-choices">
+          {layers.length === 0 ? <p className="px-1 py-1 text-xs text-muted-foreground">{text('no_canvas_layers')}</p> : (
+            <ul className="flex flex-col gap-1">
+              {layers.map((layer) => (
+                <li key={layer.id}>
+                  <button type="button" disabled={layerBusy !== null} onClick={() => void chooseLayer(layer)} data-testid={`style-lock-canvas-layer-${layer.id}`}
+                    className="flex w-full items-center justify-between gap-2 rounded px-1 py-1 text-left text-xs hover:bg-muted disabled:opacity-50">
+                    <span className="truncate">{layer.name || schemaText(schema, `ui.canvas.layers.type_${layer.type}`)}</span>
+                    {layerBusy === layer.id ? <span className="shrink-0 text-muted-foreground">{text('upload_reference')}…</span> : null}
                   </button>
                 </li>
               ))}

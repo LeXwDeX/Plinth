@@ -1393,6 +1393,7 @@ export interface ChatProductSchema {
        style_lock_enabled?: string;
        style_lock_text?: string;
        style_lock_references?: string;
+       style_lock_skipped?: string;
        /** #103: 会话制作简报与明确选定的 3D 模型。 */
       brief?: string;
       explicit_model_3d?: string;

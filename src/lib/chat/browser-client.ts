@@ -41,6 +41,8 @@ export interface ChatTurnOptions {
   /** 其他工作区域各自已选的模型；Agent 工具跨域调用时按域取用。 */
   domainModels?: Record<string, string>;
   imageURLs?: string[];
+  /** #154: the person's one-turn style-lock exemption; frozen with the turn. */
+  styleLockSkipped?: boolean;
   aspectRatio?: string;
   poseMode?: string;
   model?: string;
@@ -1157,6 +1159,7 @@ export function createChatBrowserClient(
         [fields.content]: content,
       };
       assignIfDefined(body, fields.image_urls, options.imageURLs);
+      if (fields.style_lock_skipped) assignIfDefined(body, fields.style_lock_skipped, options.styleLockSkipped);
       assignIfDefined(body, fields.aspect_ratio, options.aspectRatio);
       assignIfDefined(body, fields.pose_mode, options.poseMode);
       assignIfDefined(body, fields.ai_model, options.model);

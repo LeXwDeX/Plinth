@@ -48,4 +48,13 @@ describe('useStyleLock', () => {
     await act(async () => { resolvers[0]?.(lock({ text: 'old' })); });
     expect(result.current.lock).toEqual({ enabled: false, text: '', references: [] });
   });
+
+  it('publishes a save to every mounted editor of the same session', async () => {
+    const api = client();
+    const first = renderHook(() => useStyleLock(api, 's1'));
+    const second = renderHook(() => useStyleLock(api, 's1'));
+    await waitFor(() => expect(first.result.current.lock.text).toBe('ink'));
+    await act(async () => { expect(await first.result.current.save(lock({ text: 'watercolor' }))).toBe(true); });
+    await waitFor(() => expect(second.result.current.lock.text).toBe('watercolor'));
+  });
 });

@@ -6,6 +6,14 @@ import type { ChatBrowserClient, ChatStyleLock } from '@/lib/chat/browser-client
 
 export const EMPTY_STYLE_LOCK: ChatStyleLock = { enabled: false, text: '', references: [] };
 
+type StyleLockListener = (sessionId: string, lock: ChatStyleLock) => void;
+const listeners = new Set<StyleLockListener>();
+
+/** Saved locks reach every mounted editor and the composer label without a second read. */
+function publishStyleLock(sessionId: string, lock: ChatStyleLock): void {
+  for (const listener of listeners) listener(sessionId, lock);
+}
+
 function copyLock(lock: ChatStyleLock): ChatStyleLock {
   return { enabled: lock.enabled === true, text: typeof lock.text === 'string' ? lock.text : '', references: Array.isArray(lock.references) ? [...lock.references] : [] };
 }
@@ -39,13 +47,24 @@ export function useStyleLock(client: ChatBrowserClient, sessionId: string | null
     return () => controller.abort();
   }, [refresh, sessionId]);
 
+  useEffect(() => {
+    if (!sessionId) return;
+    const listener: StyleLockListener = (savedSession, lock) => {
+      if (savedSession === sessionId) setState({ sessionId, lock: copyLock(lock) });
+    };
+    listeners.add(listener);
+    return () => { listeners.delete(listener); };
+  }, [sessionId]);
+
   const save = useCallback(async (lock: ChatStyleLock) => {
     if (!sessionId) return false;
     setBusy(true);
     setSaveError(null);
     try {
       const stored = await client.setStyleLock(sessionId, lock);
-      setState({ sessionId, lock: copyLock(stored ?? lock) });
+      const saved = copyLock(stored ?? lock);
+      setState({ sessionId, lock: saved });
+      publishStyleLock(sessionId, saved);
       return true;
     } catch (error) {
       setSaveError(error instanceof Error ? error : new Error(String(error)));

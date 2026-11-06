@@ -23,6 +23,8 @@ export interface QueuedTurn {
   inputSource?: string;
   /** #65: the structured multiview request the turn was queued with. */
   multiview?: MultiviewTurnRequest;
+  /** #154: the one-turn style-lock exemption the turn was queued with. */
+  styleLockSkipped?: boolean;
 }
 
 export type QueueBySession = Readonly<Record<string, readonly QueuedTurn[]>>;

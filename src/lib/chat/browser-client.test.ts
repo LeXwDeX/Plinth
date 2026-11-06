@@ -522,6 +522,7 @@ describe('ChatBrowserClient', () => {
         parameters: { configuredQuality: 'xhigh' },
         skill: { id: 'skill-a', name: 'Configured Skill' },
         referenceImageIndices: [2, 4],
+        styleLockSkipped: true,
       },
       new AbortController().signal,
     );
@@ -541,6 +542,7 @@ describe('ChatBrowserClient', () => {
         'configured-skill-name': 'Configured Skill',
       },
       'configured-references': [2, 4],
+      styleLockSkipped: true,
     });
     expect(accepted).toEqual({
       assistantMessageID: 'assistant-a',

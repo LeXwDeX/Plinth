@@ -14,6 +14,8 @@ const mock = vi.hoisted(() => ({
   get: vi.fn(async () => ({ enabled: true, text: 'ink', references: [] as string[] })),
   set: vi.fn(async (_session: string, value: { enabled: boolean; text: string; references: string[] }) => value),
   upload: vi.fn(async () => ({ id: 'upload-1', url: '/api/v1/assets/upload-1' })),
+  exportPicture: vi.fn(async () => new Blob(['layer'], { type: 'image/png' })),
+  nodes: [] as Array<{ id: string; type: string; imageUrl: string; taskId: string; x: number; y: number; width: number; height: number; zIndex: number; name?: string; visible?: boolean }>,
 }));
 
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema }) }));
@@ -24,6 +26,25 @@ vi.mock('@/lib/chat/browser-client', async (importOriginal) => {
 });
 vi.mock('@/lib/workspace/input-asset-upload', () => ({ uploadWorkspaceInputAssetResult: mock.upload }));
 vi.mock('@/lib/image-upload', () => ({ prepareImageUploadBlob: vi.fn(async () => new Blob(['image'], { type: 'image/png' })) }));
+vi.mock('@/store/canvas-store', () => ({
+  useCanvasStore: (selector: (state: { nodesBySession: Record<string, unknown[]> }) => unknown) => selector({ nodesBySession: { s1: mock.nodes } }),
+}));
+vi.mock('@/lib/canvas/pending-edits', () => ({ flushPendingEdits: vi.fn(async () => true) }));
+vi.mock('@/lib/canvas/export-canvas', () => ({ exportCanvasToBlob: mock.exportPicture }));
+vi.mock('@/lib/canvas/send-snapshot', () => ({
+  snapshotFilename: () => 'canvas.png',
+  exportAndUploadSnapshot: async (steps: {
+    flush?: () => Promise<boolean>;
+    exportPicture: () => Promise<Blob>;
+    upload: (picture: Blob) => Promise<string>;
+    maximumBytes: number;
+  }) => {
+    if (steps.flush) await steps.flush();
+    const picture = await steps.exportPicture();
+    if (steps.maximumBytes > 0 && picture.size > steps.maximumBytes) throw new Error('too large');
+    return { picture, url: await steps.upload(picture) };
+  },
+}));
 vi.mock('@/store/chat-store', () => ({
   useChatStore: (selector: (state: object) => unknown) => selector({
     messagesBySession: {
@@ -41,9 +62,11 @@ vi.mock('@/store/chat-store', () => ({
 
 afterEach(cleanup);
 beforeEach(() => {
+  mock.nodes = [];
   mock.get.mockResolvedValue({ enabled: true, text: 'ink', references: [] });
   mock.set.mockImplementation(async (_session, value) => value);
   mock.upload.mockClear();
+  mock.exportPicture.mockClear();
 });
 
 describe('StyleLockPanel', () => {
@@ -86,5 +109,28 @@ describe('StyleLockPanel', () => {
     await waitFor(() => expect(mock.set).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('server detail'));
     expect(screen.getAllByRole('img')).toHaveLength(1);
+  });
+
+  it('offers the session canvas layers and says when there are none', async () => {
+    render(<StyleLockPanel sessionId="s1" />);
+    await screen.findByTestId('style-lock-text');
+    fireEvent.click(screen.getByRole('button', { name: messages['ui.studio.style_lock.canvas_layers'] }));
+    expect(screen.getByTestId('style-lock-canvas-choices').textContent).toContain(messages['ui.studio.style_lock.no_canvas_layers']);
+  });
+
+  it('rasterises a chosen canvas layer, uploads it and adds the input asset as a reference', async () => {
+    mock.nodes = [{
+      id: 'layer-1', type: 'image', imageUrl: '/api/v1/assets/source', taskId: 't1',
+      x: 0, y: 0, width: 64, height: 64, zIndex: 1, name: 'Ink layer',
+    }];
+    render(<StyleLockPanel sessionId="s1" />);
+    await screen.findByTestId('style-lock-text');
+    fireEvent.click(screen.getByRole('button', { name: messages['ui.studio.style_lock.canvas_layers'] }));
+    fireEvent.click(screen.getByTestId('style-lock-canvas-layer-layer-1'));
+    await waitFor(() => expect(mock.exportPicture).toHaveBeenCalledOnce());
+    await waitFor(() => expect(mock.upload).toHaveBeenCalledOnce());
+    expect(screen.getAllByRole('img')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: messages['ui.studio.style_lock.save'] }));
+    await waitFor(() => expect(mock.set).toHaveBeenCalledWith('s1', { enabled: true, text: 'ink', references: ['upload-1'] }));
   });
 });

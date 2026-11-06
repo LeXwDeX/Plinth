@@ -146,7 +146,7 @@ describe('regenerate and edit-and-resend wiring', () => {
     expect(agentDialog).toContain('onRegenerate={regenerate?.assistantId === item.message.id ? regenerateReply : undefined}');
     expect(agentDialog).toContain('onEdit={editable?.userId === item.message.id ? editLastMessage : undefined}');
     expect(agentDialog).toMatch(/void send\(payload\.text, payload\.images, payload\.claims, regenerate\.deleteIds, undefined, undefined, undefined,\s+payload\.multiview \? \{ multiview: payload\.multiview \} : undefined\);/);
-    expect(agentDialog).toContain('void send(input, undefined, undefined, editing?.deleteIds)');
+    expect(agentDialog).toContain('void send(input, undefined, undefined, editing?.deleteIds, undefined, undefined, undefined, styleLockSkipped ? { styleLockSkipped: true } : undefined)');
   });
 
   it('replaces the old round only after validation and keeps the text if the new turn never starts', () => {

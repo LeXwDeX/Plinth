@@ -31,4 +31,9 @@ describe('send queue', () => {
     expect(cancelQueuedTurn(cancelQueuedTurn(queue, 'a', '1'), 'a', '2')).toEqual({});
     expect(cancelQueuedTurn(queue, 'a', 'missing')).toEqual(queue);
   });
+
+  it('keeps the one-turn style-lock exemption the message was queued with (#154)', () => {
+    const queue = enqueueTurn({}, 'a', { ...turn('1'), styleLockSkipped: true });
+    expect(takeQueuedTurn(queue, 'a').turn?.styleLockSkipped).toBe(true);
+  });
 });
