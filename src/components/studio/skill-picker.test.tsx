@@ -3,7 +3,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import { SkillPicker, skillPickerRows, focusWasLost } from '@/components/studio/skill-picker';
+import { SkillPicker, skillPickerRows, focusWasLost, skillUnavailableReason } from '@/components/studio/skill-picker';
 import { PICKER_UPPERCASE_CLASS } from '@/components/studio/table-popover';
 import type { ProductSchema } from '@/lib/product-schema';
 
@@ -23,6 +23,8 @@ const schema = {
     'ui.workspace.skills.load_failed': '加载失败',
     'ui.workspace.skills.empty': '没有 Skill',
     'ui.workspace.skills.unavailable': '当前不可用',
+    'ui.unavailable.reason.picker.skill_not_enabled': '未启用',
+    'ui.workspace.skills.execution_unavailable': '模型和配置不支持，请检查：{models}',
     'ui.workspace.skills.create': '新建 Skill',
   } },
 } as unknown as ProductSchema;
@@ -68,7 +70,7 @@ describe('SkillPicker selected trigger label', () => {
     ['missing from catalog', { catalog: { skills: [] } as never }],
   ])('uses a neutral label when selection is %s', (_state, overrides) => {
     const html = render(overrides);
-    expect(html).toContain('>Skills</span>');
+    expect(html).toContain(_state === 'unavailable' || _state === 'failed' ? '>Skills !</span>' : '>Skills</span>');
     expect(html.match(/<button[^>]*data-testid="workspace-skill-picker"[^>]*>/)?.[0]).toContain(PICKER_UPPERCASE_CLASS);
     expect(html).not.toContain('SKILL：三视图');
     expect(html).not.toContain('aria-label="我的 Skill: three-view"');
@@ -77,6 +79,24 @@ describe('SkillPicker selected trigger label', () => {
 
 // #238: only the owner's personal Skills carry a delete action.
 describe('skillPickerRows', () => {
+  it('uses the Schema execution reason only when supporting models are known, and preserves other reasons', () => {
+    const plain = { id: 'personal', prompt: '' } as never;
+    const tool = { id: 'tool', tool: 'some-tool', prompt: '' } as never;
+    expect(skillUnavailableReason(schema, plain, ['Alpha', 'Beta'])).toBe('模型和配置不支持，请检查：Alpha, Beta');
+    expect(skillUnavailableReason(schema, plain, [])).toBe('当前不可用');
+    expect(skillUnavailableReason(schema, tool, ['Alpha'])).toBe('未启用');
+  });
+
+  it('exposes per-row reasons for keyboard access', () => {
+    const rows = skillPickerRows({
+      catalog: { skills: [{ id: 'personal', displayName: 'P', prompt: '', recommendedSize: '' }] } as never,
+      effective: { skills: [] } as never,
+      personalIds: new Set(), noneLabel: 'n', noneHint: 'h', deleteLabel: () => '', deleting: new Set(), onDelete: () => undefined,
+      reasonForSkill: () => 'schema reason',
+    });
+    expect(rows[0]).toMatchObject({ disabled: true, disabledReason: 'schema reason', focusableDisabled: true });
+  });
+
   it('gives a row the effective configuration leaves out a short reason (#94)', () => {
     const rows = skillPickerRows({
       catalog: { revision: 'r', skills: [{ id: 'a', displayName: 'A', prompt: 'p', recommendedSize: '' }] } as never,
@@ -135,7 +155,7 @@ describe('focus after deleting a personal Skill', () => {
     const source = readFileSync('src/components/studio/skill-picker.tsx', 'utf8');
     expect(source).toContain('skills: catalog.skills.filter((skill) => !removed.has(skill.id))');
     expect(source).toContain('}, [removed]);');
-    expect(source).toContain("panel.querySelector<HTMLElement>('[role=\"menuitemradio\"]:not([disabled])')?.focus()");
+    expect(source).toContain("panel.querySelector<HTMLElement>('[role=\"menuitemradio\"]:not([disabled]):not([aria-disabled=\"true\"])')?.focus()");
     expect(source).not.toContain('requestAnimationFrame');
   });
 });
