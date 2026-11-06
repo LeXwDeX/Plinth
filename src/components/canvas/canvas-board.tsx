@@ -72,7 +72,7 @@ import { brushCursorRadius, drawMaskOverlay, maskOverlaySteps, overlayTintKind, 
 import { sampleColor } from '@/lib/canvas/eyedropper';
 import { brushTargetAt, type BrushTargetState } from '@/lib/canvas/brush-target';
 import { blankLayerFill, brushCreatesCanvasLayer, canvasLayerNode, isBlankLayer } from '@/lib/canvas/initial-layer';
-import { cropTargetAt, marqueeSelection } from '@/lib/canvas/canvas-pick';
+import { cropFrameOnPress, cropTargetAt, marqueeSelection } from '@/lib/canvas/canvas-pick';
 import { artboardBackdrop, checkerTile } from '@/lib/canvas/artboard-backdrop';
 import { nodeBox, unionRect, type AlignMode } from '@/lib/canvas/align';
 import { useStudioStore } from '@/store/studio-store';
@@ -780,21 +780,17 @@ export function CanvasBoard({
         return;
       }
       if (activeTool === 'crop') {
-        // An unpainted initial layer (#246) is not a picture to crop.
-        const target = cropTargetAt(sorted, world);
-        if (target) {
+        // An unpainted initial layer (#246) is not a picture to crop. #148: a press on the frame or a handle of its
+        // Transformer bubbles up to the stage too; it adjusts the frame and must not restart it.
+        const onFrame = target.id() === 'crop-rect' || target.getParent()?.getClassName() === 'Transformer';
+        const frame = cropFrameOnPress(cropDraft, cropTargetAt(sorted, world), onFrame);
+        if (frame) {
           cropHistory.current = { past: [], future: [] };
-          setCropDraft({
-            nodeId: target.id,
-            x: target.x,
-            y: target.y,
-            width: target.width,
-            height: target.height,
-          });
+          setCropDraft(frame);
         }
       }
     },
-    [activeShapeType, activeTool, artboard, brush, brushBitmapReady, canvasSchema.frontend, canvasSchema.frontend.style.default_font_size, editing, explainBrushTarget, images, lastStyle, nodes, size, onToolChange, palette.ink, schema, sessionId, sorted, spaceDown, store, textSchema.default_color, toWorld],
+    [activeShapeType, activeTool, artboard, brush, brushBitmapReady, canvasSchema.frontend, cropDraft, canvasSchema.frontend.style.default_font_size, editing, explainBrushTarget, images, lastStyle, nodes, size, onToolChange, palette.ink, schema, sessionId, sorted, spaceDown, store, textSchema.default_color, toWorld],
   );
 
   const handleStageMouseMove = useCallback(
@@ -2046,6 +2042,7 @@ export function CanvasBoard({
               strokeWidth={1.5 / viewport.zoom}
               dash={[6 / viewport.zoom, 4 / viewport.zoom]}
               draggable={!spaceDown}
+              onDragStart={rememberCrop}
               onDragMove={(event) =>
                 setCropDraft((current) =>
                   current
@@ -2065,6 +2062,7 @@ export function CanvasBoard({
               borderStroke={palette.primary}
               anchorStroke={palette.primary}
               anchorFill={palette.canvasBackground}
+              onTransformStart={rememberCrop}
               onTransformEnd={(event) => {
                 const target = event.target;
                 const scaleX = target.scaleX();

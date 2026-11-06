@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CanvasNode } from '@/store/canvas-store';
-import { cropTargetAt, marqueeSelection, pickableOnCanvas } from './canvas-pick';
+import { cropFrameOnPress, cropTargetAt, marqueeSelection, pickableOnCanvas } from './canvas-pick';
 import { selectableNodeIds } from './context-menu';
 import { initialLayerNode } from './initial-layer';
 
@@ -26,5 +26,28 @@ describe('canvas picking leaves the unpainted initial layer to the layers panel 
     expect(pickableOnCanvas(painted)).toBe(true);
     expect(selectableNodeIds([painted])).toEqual(['canvas-layer']);
     expect(marqueeSelection([painted], { left: 0, top: 0, right: 10, bottom: 10 })).toEqual(['canvas-layer']);
+  });
+});
+
+// #148: adjusting the crop frame pressed it, and every press inside the picture restarted it as the whole picture.
+describe('a press of the crop tool keeps the frame being adjusted', () => {
+  const second: CanvasNode = { ...picture, id: 'second', x: 600 };
+  const frameOnPicture = { nodeId: 'picture', x: 50, y: 60, width: 100, height: 120 };
+
+  it('starts a whole-picture frame on a picture with no frame yet', () => {
+    expect(cropFrameOnPress(null, picture, false)).toEqual({ nodeId: 'picture', x: 0, y: 0, width: 400, height: 400 });
+  });
+
+  it('keeps the frame when the press is on the frame or one of its handles', () => {
+    expect(cropFrameOnPress(frameOnPicture, picture, true)).toBeNull();
+  });
+
+  it('keeps the frame when the press is elsewhere on the picture being cropped', () => {
+    expect(cropFrameOnPress(frameOnPicture, picture, false)).toBeNull();
+  });
+
+  it('moves to another picture pressed outside the frame, and ignores a press on nothing', () => {
+    expect(cropFrameOnPress(frameOnPicture, second, false)).toEqual({ nodeId: 'second', x: 600, y: 0, width: 400, height: 400 });
+    expect(cropFrameOnPress(frameOnPicture, undefined, false)).toBeNull();
   });
 });

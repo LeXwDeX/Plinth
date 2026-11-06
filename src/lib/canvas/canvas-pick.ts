@@ -33,3 +33,20 @@ export function cropTargetAt(nodesBottomToTop: readonly CanvasNode[], point: { x
     .reverse()
     .find((node) => point.x >= node.x && point.x <= node.x + node.width && point.y >= node.y && point.y <= node.y + node.height);
 }
+
+/** The crop frame: the picture it crops and the kept rectangle in canvas coordinates. */
+export interface CropFrame { nodeId: string; x: number; y: number; width: number; height: number }
+
+/**
+ * The crop frame a press of the crop tool starts, or null to keep the current one (#148). A press on the frame or
+ * one of its handles adjusts it, so it never restarts it; nor does a press elsewhere on the picture being cropped.
+ * Only a press on a picture with no frame yet, or on another picture, starts a frame over the whole picture.
+ */
+export function cropFrameOnPress(
+  current: CropFrame | null,
+  target: Pick<CanvasNode, 'id' | 'x' | 'y' | 'width' | 'height'> | undefined,
+  onFrame: boolean,
+): CropFrame | null {
+  if (onFrame || !target || current?.nodeId === target.id) return null;
+  return { nodeId: target.id, x: target.x, y: target.y, width: target.width, height: target.height };
+}
