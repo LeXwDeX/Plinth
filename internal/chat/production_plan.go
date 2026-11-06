@@ -270,9 +270,9 @@ func (policy *ProductionPlanPolicy) buildPlan(command ToolCommand, arguments pro
 		if config.MaxPurposeCharacters > 0 && utf8.RuneCountInString(purpose) > config.MaxPurposeCharacters {
 			return budget.Plan{}, nil, "step purpose is too long"
 		}
-		offering, ok := policy.stepOffering(capability, strings.TrimSpace(step.Model))
-		if !ok {
-			return budget.Plan{}, nil, "no available offering for capability " + capability
+		offering, locked, refusal := policy.stepOffering(capability, strings.TrimSpace(step.Model), strings.TrimSpace(command.Options.ExplicitModel3D))
+		if refusal != "" {
+			return budget.Plan{}, nil, refusal
 		}
 		estimated := budget.EstimateOffering(offering)
 		if offering.CreditsMetered && estimated.Micros <= 0 {
@@ -282,9 +282,13 @@ func (policy *ProductionPlanPolicy) buildPlan(command ToolCommand, arguments pro
 			// person approve the step directly.
 			return budget.Plan{}, nil, "step " + capability + " has no server credit estimate and cannot be budgeted"
 		}
+		offeringID := strings.TrimSpace(step.Model)
+		if locked {
+			offeringID = string(offering.ID)
+		}
 		planned := budget.PlanStep{
 			Capability: capability,
-			OfferingID: strings.TrimSpace(step.Model),
+			OfferingID: offeringID,
 			Purpose:    purpose,
 			Estimate:   estimated,
 		}
@@ -382,10 +386,16 @@ func unitAmountsText(amounts []budget.Amount) string {
 	return strings.Join(parts, ", ")
 }
 
-// stepOffering finds the runtime Offering a step is quoted at: the pinned one
-// when the person chose a model, else the capability's default available
-// Offering. A capability without an available Offering cannot be planned.
-func (policy *ProductionPlanPolicy) stepOffering(capability, pinned string) (generation.Offering, bool) {
+// stepOffering finds the runtime Offering a step is quoted at, in the order a
+// 3D tool chooses its model. The person's explicit 3D model comes first when
+// an Offering of the capability is that model: it is what will run, so the
+// step is quoted at it and pinned to it (locked), and a step naming another
+// model is refused, as the tool would refuse it (#144). Otherwise the pinned
+// Offering when the Agent named a model, else the capability's default
+// available Offering. A capability without an available Offering cannot be
+// planned.
+func (policy *ProductionPlanPolicy) stepOffering(capability, pinned, lockedModel string) (offering generation.Offering, locked bool, refusal string) {
+	unavailable := "no available offering for capability " + capability
 	var candidates []generation.Offering
 	for _, offering := range policy.Offerings() {
 		if !offering.Enabled || string(offering.Capability) != capability {
@@ -397,24 +407,42 @@ func (policy *ProductionPlanPolicy) stepOffering(capability, pinned string) (gen
 		candidates = append(candidates, offering)
 	}
 	if len(candidates) == 0 {
-		return generation.Offering{}, false
+		return generation.Offering{}, false, unavailable
 	}
-	chosen := candidates[0]
+	if lockedModel != "" {
+		for _, offering := range candidates {
+			if !offeringIsModel(offering, lockedModel) {
+				continue
+			}
+			if pinned != "" && !offeringIsModel(offering, pinned) {
+				return generation.Offering{}, false, "the person locked the 3D model to " + lockedModel + "; step " + capability + " must use it, not " + pinned
+			}
+			return offering, true, ""
+		}
+	}
 	if pinned == "" {
+		chosen := candidates[0]
 		for _, offering := range candidates {
 			if offering.Default {
 				chosen = offering
 				break
 			}
 		}
-		return chosen, true
+		return chosen, false, ""
 	}
 	for _, offering := range candidates {
 		if string(offering.ID) == pinned {
-			return offering, true
+			return offering, false, ""
 		}
 	}
-	return generation.Offering{}, false
+	return generation.Offering{}, false, unavailable
+}
+
+// offeringIsModel reports whether name names the Offering's model the ways a
+// 3D tool accepts it: the model ID, the Offering ID or provider/model.
+func offeringIsModel(offering generation.Offering, name string) bool {
+	return name == offering.ModelID || name == string(offering.ID) ||
+		(offering.ModelID != "" && offering.ProviderID != "" && name == offering.ProviderID+"/"+offering.ModelID)
 }
 
 // capabilityKnown reports whether the runtime Catalog declares the capability

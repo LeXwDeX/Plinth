@@ -146,3 +146,80 @@ func TestProposeProductionPlanCarriesThePurposeBudgetNoteOfEachStep(t *testing.T
 		t.Fatalf("a fitting step was noted: %v", receipt[1])
 	}
 }
+
+// lockedOfferings price the default text-to-3d model in historical credits and
+// the Tripo model the person can lock in Tripo credits, as the Catalog does.
+func lockedOfferings() []generation.Offering {
+	return []generation.Offering{
+		{ID: "meshy/meshy-7.1/text-to-3d", Revision: "v1", Capability: "text-to-3d", ProviderID: "meshy", ModelID: "meshy-7.1",
+			Enabled: true, Default: true, EstimatedCredits: 40},
+		{ID: "tripo/tripo-v3.1-full/text-to-3d", Revision: "v1", Capability: "text-to-3d", ProviderID: "tripo", ModelID: "tripo-v3.1-full",
+			Enabled: true, CreditsMetered: true,
+			NativePricing: &schema.NativePricing{Version: 1, Unit: "tripo.credit", UnitLabel: "Tripo credits", BaseAmount: "10"}},
+		{ID: "retexture-default", Revision: "v1", Capability: "retexture", Enabled: true, Default: true, EstimatedCredits: 15},
+	}
+}
+
+func lockedPlanCommand(arguments string) chat.ToolCommand {
+	command := planCommand(arguments)
+	command.Options.ExplicitModel3D = "tripo-v3.1-full"
+	return command
+}
+
+// #144: the person's explicit 3D model runs the 3D step (it outranks the
+// default and the Agent's model), so the plan quotes that model and pins the
+// step to it. Quoted at the default instead, the plan budgeted another unit
+// and the approved plan could not cover the step that actually ran.
+func TestProposeProductionPlanQuotesTheLockedModel3D(t *testing.T) {
+	proposal := func(command chat.ToolCommand) (*recordingProductionPlans, chat.ToolResult) {
+		t.Helper()
+		store := &recordingProductionPlans{}
+		service := &chat.Service{}
+		service.SetProductionPlans(chat.ProductionPlanPolicy{Budget: shippedBudgetSchema(t), Offerings: lockedOfferings, Store: store})
+		result, err := service.ProposeProductionPlan(context.Background(), command)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store, result
+	}
+	steps := `"steps":[{"capability":"text-to-3d","purpose":"主体"},{"capability":"retexture","purpose":"贴图"}]`
+
+	store, result := proposal(lockedPlanCommand(`{"title":"锁定模型",` + steps + `,
+		"budgets":[{"unit":"tripo.credit","amount":20},{"unit":"legacy.credits","amount":15}]}`))
+	if result.Error != "" || len(store.created) != 1 {
+		t.Fatalf("proposal = %+v", result)
+	}
+	planned := store.plans[0].Steps
+	tripo := budget.Amount{Unit: "tripo.credit", UnitLabel: "Tripo credits", Micros: 10000000}
+	if planned[0].OfferingID != "tripo/tripo-v3.1-full/text-to-3d" || planned[0].Estimate != tripo {
+		t.Fatalf("locked step = %+v, want the Tripo Offering quoted at %+v", planned[0], tripo)
+	}
+	if planned[1].OfferingID != "" || planned[1].Estimate != budget.Legacy(15) {
+		t.Fatalf("retexture step = %+v, want the unlocked default", planned[1])
+	}
+	if !store.plans[0].Allows("text-to-3d", "tripo/tripo-v3.1-full/text-to-3d") {
+		t.Fatal("the approved plan must allow the locked model's step")
+	}
+
+	store, result = proposal(lockedPlanCommand(`{"title":"锁定模型",` + steps + `,"budgets":[{"unit":"legacy.credits","amount":80}]}`))
+	if want := "budgets must give every unit the steps are quoted in at least the server estimate of that unit (15 legacy.credits, 10 tripo.credit); missing or too low: 10 tripo.credit. Units are never added or converted"; result.Error != want || len(store.created) != 0 {
+		t.Fatalf("legacy-only budget: refusal = %q stored=%d, want %q", result.Error, len(store.created), want)
+	}
+
+	store, result = proposal(lockedPlanCommand(`{"title":"锁定模型","steps":[{"capability":"text-to-3d","model":"meshy-7.1","purpose":"主体"}],
+		"budgets":[{"unit":"legacy.credits","amount":40}]}`))
+	if want := "the person locked the 3D model to tripo-v3.1-full; step text-to-3d must use it, not meshy-7.1"; result.Error != want || len(store.created) != 0 {
+		t.Fatalf("another model: refusal = %q stored=%d, want %q", result.Error, len(store.created), want)
+	}
+
+	store, result = proposal(lockedPlanCommand(`{"title":"锁定模型","steps":[{"capability":"text-to-3d","model":"tripo/tripo-v3.1-full","purpose":"主体"}],
+		"budgets":[{"unit":"tripo.credit","amount":10}]}`))
+	if result.Error != "" || store.plans[0].Steps[0].OfferingID != "tripo/tripo-v3.1-full/text-to-3d" {
+		t.Fatalf("the locked model by its provider/model name: %+v %+v", result, store.plans)
+	}
+
+	store, result = proposal(planCommand(`{"title":"未锁定",` + steps + `,"budgets":[{"unit":"legacy.credits","amount":55}]}`))
+	if result.Error != "" || store.plans[0].Steps[0].OfferingID != "" || store.plans[0].Steps[0].Estimate != budget.Legacy(40) {
+		t.Fatalf("without a lock the default still quotes the step: %+v %+v", result, store.plans)
+	}
+}
