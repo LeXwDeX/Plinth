@@ -35,4 +35,17 @@ describe('chat store session list revision', () => {
     useChatStore.getState().updateSessionTitle('elsewhere', 'title');
     expect(revision()).toBe(1);
   });
+
+  it('marks surviving branches after deleting their source', () => {
+    useChatStore.setState({ sessions: [session('a'), { ...session('branch'), parentSessionId: 'a', parentTitle: 'a', parentDeleted: false }] });
+    useChatStore.getState().removeSession('a');
+    expect(useChatStore.getState().sessions).toEqual([{ ...session('branch'), parentSessionId: 'a', parentTitle: 'a', parentDeleted: true }]);
+  });
+
+  it('remembers a late-created branch without switching away from the current session', () => {
+    useChatStore.getState().rememberSession(session('branch'));
+    expect(useChatStore.getState().activeSessionId).toBe('a');
+    expect(useChatStore.getState().sessions[0].id).toBe('branch');
+    expect(revision()).toBe(1);
+  });
 });

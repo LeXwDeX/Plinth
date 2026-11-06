@@ -13,6 +13,20 @@ describe('ChatBrowserClient', () => {
     vi.unstubAllGlobals();
   });
 
+  it('branches through the configured route and keeps lineage and the canvas notice', async () => {
+    const schema = schemaFixture();
+    schema.runtime.http.routes.chat_session_branch = '/configured/{sessionID}/branch';
+    const fetcher = vi.fn(async (_input, _init) => Response.json({ session: { id: 'new', title: 'New', createdAt: '', updatedAt: '', parent_session_id: 'old', parent_message_id: 'm', parent_title: 'Old', parent_deleted: false }, canvas_copied: true }, { status: 201 }));
+    const client = createChatBrowserClient(schema, { fetcher });
+    expect(await client.branchSession('old/1', 'm')).toMatchObject({ session: { id: 'new', parentSessionId: 'old', parentMessageId: 'm', parentTitle: 'Old', parentDeleted: false }, canvasCopied: true });
+    expect(fetcher).toHaveBeenCalledWith('/configured/old%2F1/branch', expect.objectContaining({ method: 'POST', body: '{"messageId":"m"}' }));
+  });
+
+  it('returns the server branch refusal without creating a session', async () => {
+    const client = createChatBrowserClient(schemaFixture(), { fetcher: async () => Response.json({ detail: 'not ready' }, { status: 409 }) });
+    await expect(client.branchSession('s', 'm')).rejects.toMatchObject({ status: 409, message: 'not ready' });
+  });
+
   it('preserves Gemini ratio and resolution from the Chat or Canvas controls', async () => {
     const schema = schemaFixture();
     let sent: Record<string, unknown> = {};

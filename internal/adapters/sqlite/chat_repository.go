@@ -24,7 +24,7 @@ func (r *Repository) ListSessions(
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
-		       s.brief, s.explicit_model_3d
+		       s.brief, s.explicit_model_3d, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE s.owner_id = ?
@@ -91,7 +91,7 @@ func (r *Repository) ListSessionsPage(
 	rows, err := tx.QueryContext(ctx, `
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
-		       s.brief, s.explicit_model_3d
+		       s.brief, s.explicit_model_3d, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE `+where+`
@@ -158,8 +158,9 @@ func (r *Repository) CreateSession(
 ) (chat.Session, error) {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO go_chat_sessions (
-			id, owner_id, owner_name, title, created_at, updated_at, approval_mode, agent_scope, title_source
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, owner_id, owner_name, title, created_at, updated_at, approval_mode, agent_scope, title_source,
+			parent_session_id, parent_message_id, parent_title, parent_deleted
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		session.ID,
 		session.OwnerID,
 		session.OwnerName,
@@ -169,6 +170,10 @@ func (r *Repository) CreateSession(
 		sessionApprovalModeOrManual(session.ApprovalMode),
 		sessionAgentScopeOrAuto(session.AgentScope),
 		sessionTitleSourceOrUser(session.TitleSource),
+		session.ParentSessionID,
+		session.ParentMessageID,
+		session.ParentTitle,
+		session.ParentDeleted,
 	)
 	if err != nil {
 		return chat.Session{}, fmt.Errorf("create chat session: %w", err)
@@ -658,6 +663,11 @@ func deleteSessionAndDependents(
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return false, fmt.Errorf("chat session deletion rows: %w", err)
+	}
+	if affected > 0 {
+		if _, err := tx.ExecContext(ctx, `UPDATE go_chat_sessions SET parent_deleted = 1 WHERE owner_id = ? AND parent_session_id = ?`, ownerID, sessionID); err != nil {
+			return false, fmt.Errorf("mark chat branch parent deleted: %w", err)
+		}
 	}
 	return affected > 0, nil
 }
@@ -1429,6 +1439,20 @@ func (r *Repository) FinishStream(
 	return nil
 }
 
+// ParentSession returns the session this one was branched from (#153); empty
+// when it has no parent or does not belong to the owner.
+func (r *Repository) ParentSession(ctx context.Context, ownerID, sessionID string) (string, error) {
+	var parent sql.NullString
+	err := r.db.QueryRowContext(ctx, `SELECT parent_session_id FROM go_chat_sessions WHERE id = ? AND owner_id = ?`, sessionID, ownerID).Scan(&parent)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return parent.String, nil
+}
+
 // Session 读取 owner 自己的单个会话（B16 标题限流用，
 // 替代旧的 ListSessions 全量扫描）。
 func (r *Repository) Session(
@@ -1439,7 +1463,7 @@ func (r *Repository) Session(
 	row := r.db.QueryRowContext(ctx, `
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
-		       s.brief, s.explicit_model_3d
+		       s.brief, s.explicit_model_3d, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE s.id = ? AND s.owner_id = ?
@@ -1465,7 +1489,7 @@ func (r *Repository) getChatSession(
 	row := r.db.QueryRowContext(ctx, `
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
-		       s.brief, s.explicit_model_3d
+		       s.brief, s.explicit_model_3d, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE s.id = ? AND s.owner_id = ?
@@ -1498,6 +1522,10 @@ func scanChatSession(scanner chatSessionScanner) (chat.Session, error) {
 		&session.TitleSource,
 		&brief,
 		&session.ExplicitModel3D,
+		&session.ParentSessionID,
+		&session.ParentMessageID,
+		&session.ParentTitle,
+		&session.ParentDeleted,
 	); err != nil {
 		return chat.Session{}, err
 	}

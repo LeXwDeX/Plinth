@@ -109,11 +109,9 @@ export function SessionTitle({ session }: { session: ChatSession }) {
   return (
     <span className="flex w-72 max-w-full min-w-0 items-center gap-1">
       <HintTooltip name={session.title} className="min-w-0 flex-1">
-        <span
-          data-testid="studio-session-name"
-          className="block h-7 w-full truncate rounded-md px-2 text-[13px] font-medium leading-7 text-foreground"
-        >
-          {session.title}
+        <span className="flex h-7 min-w-0 flex-col justify-center px-2">
+          <span data-testid="studio-session-name" className="block truncate text-[13px] font-medium leading-4 text-foreground">{session.title}</span>
+          <SessionBranchSource session={session} />
         </span>
       </HintTooltip>
       <HintTooltip name={label} className="shrink-0">
@@ -129,6 +127,15 @@ export function SessionTitle({ session }: { session: ChatSession }) {
       </HintTooltip>
     </span>
   );
+}
+
+function SessionBranchSource({ session }: { session: ChatSession }) {
+  const { schema } = useProductSchema();
+  if (!session.parentSessionId) return null;
+  const label = session.parentDeleted
+    ? schemaText(schema, 'ui.studio.session.branched_from_deleted')
+    : formatSchemaText(schemaText(schema, 'ui.studio.session.branched_from'), { title: session.parentTitle ?? '' });
+  return <span className="block truncate text-[11px] leading-3 text-muted-foreground" data-testid="studio-session-branch-source">{label}</span>;
 }
 
 /** The newest output of a session as a small cover; a placeholder until it loads or when there is none. */
@@ -178,6 +185,14 @@ function SessionList({ onClose }: { onClose: () => void }) {
     { revalidateOnFocus: false, revalidateFirstPage: false },
   );
   const sessions = useMemo(() => mergeSessionPages(data), [data]);
+  useEffect(() => {
+    const current = sessions.find((item) => item.id === activeSessionId);
+    const state = useChatStore.getState();
+    const local = state.sessions.find((item) => item.id === activeSessionId);
+    if (current && local && (current.parentDeleted !== local.parentDeleted || current.parentTitle !== local.parentTitle || current.parentSessionId !== local.parentSessionId)) {
+      state.setSessions(state.sessions.map((item) => item.id === current.id ? { ...item, ...current } : item));
+    }
+  }, [sessions, activeSessionId]);
   const view = sessionPageView(data, page);
   const paging = sessionPageStatus(data, page, pageSize);
   const failed = error !== undefined;
@@ -240,7 +255,11 @@ function SessionList({ onClose }: { onClose: () => void }) {
   const open = (session: ChatSession) => {
     if (session.id !== activeSessionId) {
       useWorkspaceStore.getState().clearTrackedTasks();
-      if (localSessions.some((item) => item.id === session.id)) useChatStore.getState().setActiveSession(session.id);
+      if (localSessions.some((item) => item.id === session.id)) {
+        const state = useChatStore.getState();
+        state.setSessions(state.sessions.map((item) => item.id === session.id ? { ...item, ...session } : item));
+        state.setActiveSession(session.id);
+      }
       else useChatStore.getState().addSession(session);
     }
     onClose();
@@ -327,6 +346,7 @@ function SessionList({ onClose }: { onClose: () => void }) {
                   <SessionCover session={session} />
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className={cn('truncate', active && 'font-medium')}>{session.title}</span>
+                    <SessionBranchSource session={session} />
                     <HintTooltip name={new Date(session.updatedAt).toLocaleString(activeLocale(schema))} className="min-w-0">
                       <span className="truncate text-[11px] text-muted-foreground" data-testid="studio-session-time">
                         {relativeTime(schema.canvas, session.updatedAt)}

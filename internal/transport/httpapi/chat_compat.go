@@ -781,6 +781,20 @@ func (s *Server) chatSessionWireWithBudgets(
 		fields.AgentScope:       s.chat.NormalizeAgentScope(session.AgentScope),
 		fields.EstimatedCredits: session.EstimatedCredits,
 	}
+	if session.ParentSessionID != "" {
+		if fields.ParentSessionID != "" {
+			result[fields.ParentSessionID] = session.ParentSessionID
+		}
+		if fields.ParentMessageID != "" {
+			result[fields.ParentMessageID] = session.ParentMessageID
+		}
+		if fields.ParentTitle != "" {
+			result[fields.ParentTitle] = session.ParentTitle
+		}
+		if fields.ParentDeleted != "" {
+			result[fields.ParentDeleted] = session.ParentDeleted
+		}
+	}
 	if fields.Brief != "" {
 		result[fields.Brief] = productionBriefWire(session.Brief)
 	}

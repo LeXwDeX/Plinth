@@ -4,7 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
-import { Bot, Trash2, RefreshCw, Pencil, Ellipsis, CornerDownLeft } from 'lucide-react';
+import { Bot, Trash2, RefreshCw, Pencil, Ellipsis, CornerDownLeft, GitBranch, TriangleAlert } from 'lucide-react';
 import { type ChatAttachment, type ChatMessage as ChatMessageType, type ChatImage } from '@/store/chat-store';
 import type { ChatAttachmentClaim } from '@/lib/chat/attachments';
 import { BrailleSpinner } from '@/components/ui/braille-spinner';
@@ -40,6 +40,8 @@ interface ChatMessageProps {
   regenerateCredits?: number;
   /** 只给最后一条用户消息：把它放回输入框，改完再发。 */
   onEdit?: (msg: ChatMessageType) => void;
+  onBranch?: (msg: ChatMessageType) => void;
+  branchDisabledReason?: string;
   onImageClick?: (messageId: string, localIndex: number) => void;
   /** 会话当前选用的候选图；点击候选图上的“选用”时调用 onPick。 */
   pick?: ChatAttachment | null;
@@ -87,7 +89,7 @@ function stripDelimitedContent(
 
 /** A user message beyond the last one; its text and pictures can go back to the input. */
 function MessageActions({
-  message, onCopyToInput, onEdit, onRegenerate, regenerateCredits, onDelete,
+  message, onCopyToInput, onEdit, onRegenerate, regenerateCredits, onDelete, onBranch, branchDisabledReason,
 }: {
   message: ChatMessageType;
   onCopyToInput?: (msg: ChatMessageType) => void;
@@ -95,6 +97,8 @@ function MessageActions({
   onRegenerate?: (msg: ChatMessageType) => void;
   regenerateCredits?: number;
   onDelete?: (msgId: string) => void;
+  onBranch?: (msg: ChatMessageType) => void;
+  branchDisabledReason?: string;
 }) {
   const { schema } = useProductSchema();
   const [confirming, setConfirming] = useState(false);
@@ -129,7 +133,7 @@ function MessageActions({
             : text('ui.chat.message.regenerate')}
         </Action>
       ) : null}
-      {onDelete ? (
+      {onDelete || onBranch ? (
         <DropdownMenu>
           <HintTooltip name={text('ui.studio.message.more')}>
             <DropdownMenuTrigger
@@ -140,10 +144,13 @@ function MessageActions({
               <Ellipsis className="size-3.5" aria-hidden />
             </DropdownMenuTrigger>
           </HintTooltip>
-          <DropdownMenuContent align={isUser ? 'end' : 'start'} className="w-36">
-            <DropdownMenuItem variant="destructive" onClick={() => setConfirming(true)}>
+          <DropdownMenuContent align={isUser ? 'end' : 'start'} className="w-64">
+            {onBranch ? <DropdownMenuItem disabled={Boolean(branchDisabledReason)} onClick={() => onBranch(message)} data-testid="chat-branch" aria-label={branchDisabledReason ? formatSchemaText(text('ui.common.label_value'), { label: text('ui.studio.message.branch'), value: unavailableLabel(schema, branchDisabledReason) }) : undefined}>
+              <GitBranch /><span className="min-w-0"><span className="block">{text('ui.studio.message.branch')}</span><span className={cn('flex items-start gap-1 text-xs', branchDisabledReason ? 'text-warning' : 'text-muted-foreground')}>{branchDisabledReason ? <><TriangleAlert aria-hidden className="mt-0.5 size-3" />{unavailableLabel(schema, branchDisabledReason)}</> : text('ui.studio.message.branch_hint')}</span></span>
+            </DropdownMenuItem> : null}
+            {onDelete ? <DropdownMenuItem variant="destructive" onClick={() => setConfirming(true)}>
               <Trash2 />{text('ui.chat.message.delete')}
-            </DropdownMenuItem>
+            </DropdownMenuItem> : null}
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
@@ -174,7 +181,7 @@ function ChatModelCards({ cards, sessionId }: { cards: ModelCardModel[]; session
  * chunk, and only the streaming message (and a message whose own tasks changed) receives new props.
  */
 export const ChatMessage = memo(function ChatMessage({
-  message, sessionId, onDelete, onCopyToInput, onRegenerate, regenerateCredits, onEdit, onImageClick, pick, pickBusy, onPick, handleReferences,
+  message, sessionId, onDelete, onCopyToInput, onRegenerate, regenerateCredits, onEdit, onBranch, branchDisabledReason, onImageClick, pick, pickBusy, onPick, handleReferences,
 }: ChatMessageProps) {
   const { schema } = useProductSchema();
   const isUser = message.role === 'user';
@@ -333,7 +340,7 @@ export const ChatMessage = memo(function ChatMessage({
         />
       )}
 
-      {settled && (onDelete || onCopyToInput || onEdit || (onRegenerate && !regenerateBlocked)) ? (
+      {settled && (onDelete || onBranch || onCopyToInput || onEdit || (onRegenerate && !regenerateBlocked)) ? (
         <MessageActions
           message={message}
           onCopyToInput={onCopyToInput}
@@ -341,6 +348,8 @@ export const ChatMessage = memo(function ChatMessage({
           onRegenerate={onRegenerate && !regenerateBlocked ? (msg) => void checkedRegenerate(msg) : undefined}
           regenerateCredits={regenerateCredits ?? (stepCredits > 0 ? stepCredits : undefined)}
           onDelete={onDelete}
+          onBranch={onBranch}
+          branchDisabledReason={branchDisabledReason}
         />
       ) : null}
     </div>
