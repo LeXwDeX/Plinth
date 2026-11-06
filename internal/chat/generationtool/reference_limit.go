@@ -52,8 +52,15 @@ func referenceImageLimit(offering generation.Offering) int {
 }
 
 // referenceUse is how many reference pictures a step uses of the ones the
-// turn gave, set only when it uses fewer (#329 E).
-type referenceUse struct{ Used, Given int }
+// turn gave, set only when it uses fewer (#329 E). StyleTrimmed is transient
+// evidence for the approval/result note; the persisted operation still keeps
+// the ordinary total counts for backward compatibility.
+type referenceUse struct {
+	Used, Given  int
+	StyleGiven   int
+	StyleUsed    int
+	StyleTrimmed bool
+}
 
 // ReferenceLimitNote writes the reference-limit note for a step of tool that
 // used count of the total pictures given on offering; "" when the tool names

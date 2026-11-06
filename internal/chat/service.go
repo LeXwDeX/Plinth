@@ -67,6 +67,10 @@ type Repository interface {
 	// foreign session. Writing does not touch updated_at.
 	SessionNotes(ctx context.Context, owner, session string) (string, bool, error)
 	SetSessionNotes(ctx context.Context, owner, session, notes string) (bool, error)
+	// StyleLock and SetStyleLock read and replace the owner's session-level
+	// style lock. References are stored in request order.
+	StyleLock(ctx context.Context, owner, session string) (StyleLock, bool, error)
+	SetStyleLock(ctx context.Context, owner, session string, lock StyleLock) (bool, error)
 	// SessionBrief and ReplaceSessionBrief read and conditionally replace the
 	// session's structured production brief (#103). Both are scoped to the
 	// owner; found is false for a missing or foreign session. Writing does not
@@ -203,6 +207,10 @@ type ServiceConfig struct {
 	// MaximumSessionNotes bounds the session settings summary, in characters
 	// (chat.context.maximum_session_notes_characters). Zero disables notes.
 	MaximumSessionNotes int
+	// MaximumStyleLockText and MaximumStyleLockReferences are the Schema bounds
+	// for the session style lock.
+	MaximumStyleLockText       int
+	MaximumStyleLockReferences int
 	// CanvasInputSource is chat.context.canvas_input_source (#266). Empty: the
 	// service accepts no input source.
 	CanvasInputSource string
@@ -229,38 +237,40 @@ type ServiceConfig struct {
 }
 
 type Service struct {
-	repository           Repository
-	clock                func() time.Time
-	newID                func(string) string
-	defaultTitle         string
-	userRole             string
-	assistantRole        string
-	pendingContent       string
-	eventFields          EventFieldPolicy
-	eventTypes           EventTypePolicy
-	streamActive         string
-	streamDone           string
-	streamError          string
-	turnQueued           string
-	turnRunning          string
-	turnWaitingTask      string
-	turnDone             string
-	turnError            string
-	placeholderHealing   PlaceholderHealingPolicy
-	streamCleanupTTL     time.Duration
-	subscriberBufferSize int
-	streamMu             sync.Mutex
-	streamOperations     map[string]*streamOperation
-	subscribers          map[string]map[chan Event]struct{}
-	approvalPolicy       approvalpolicy.Policy
-	agentScope           agentscope.Policy
-	handles              HandlePolicy
-	attachments          AttachmentVerifier
-	maximumNotes         int
-	canvasInputSource    string
-	retiredModels        map[string]catalog.RetiredModelSuccessor
-	model3DUsage         catalog.ChatModel3DUsageSchema
-	explicitModel3DValid func(string) bool
+	repository                 Repository
+	clock                      func() time.Time
+	newID                      func(string) string
+	defaultTitle               string
+	userRole                   string
+	assistantRole              string
+	pendingContent             string
+	eventFields                EventFieldPolicy
+	eventTypes                 EventTypePolicy
+	streamActive               string
+	streamDone                 string
+	streamError                string
+	turnQueued                 string
+	turnRunning                string
+	turnWaitingTask            string
+	turnDone                   string
+	turnError                  string
+	placeholderHealing         PlaceholderHealingPolicy
+	streamCleanupTTL           time.Duration
+	subscriberBufferSize       int
+	streamMu                   sync.Mutex
+	streamOperations           map[string]*streamOperation
+	subscribers                map[string]map[chan Event]struct{}
+	approvalPolicy             approvalpolicy.Policy
+	agentScope                 agentscope.Policy
+	handles                    HandlePolicy
+	attachments                AttachmentVerifier
+	maximumNotes               int
+	maximumStyleLockText       int
+	maximumStyleLockReferences int
+	canvasInputSource          string
+	retiredModels              map[string]catalog.RetiredModelSuccessor
+	model3DUsage               catalog.ChatModel3DUsageSchema
+	explicitModel3DValid       func(string) bool
 	// usageProfileKind is the declared card the brief write settles; its ID and
 	// argument name come from the Schema, not from code (#103).
 	usageProfileKind *catalog.ChatChoiceKindSchema
@@ -338,38 +348,40 @@ func NewService(config ServiceConfig) (*Service, error) {
 		)
 	}
 	return &Service{
-		repository:           config.Repository,
-		clock:                config.Clock,
-		newID:                config.NewID,
-		defaultTitle:         config.DefaultTitle,
-		userRole:             config.UserRole,
-		assistantRole:        config.AssistantRole,
-		pendingContent:       config.PendingContent,
-		eventFields:          config.EventFields,
-		eventTypes:           config.EventTypes,
-		streamActive:         config.StreamActive,
-		streamDone:           config.StreamDone,
-		streamError:          config.StreamError,
-		turnQueued:           config.TurnQueued,
-		turnRunning:          config.TurnRunning,
-		turnWaitingTask:      config.TurnWaitingTask,
-		turnDone:             config.TurnDone,
-		turnError:            config.TurnError,
-		placeholderHealing:   config.PlaceholderHealing,
-		streamCleanupTTL:     config.StreamCleanupTTL,
-		subscriberBufferSize: config.SubscriberBufferSize,
-		subscribers:          map[string]map[chan Event]struct{}{},
-		approvalPolicy:       config.ApprovalPolicy,
-		agentScope:           config.AgentScope,
-		handles:              config.Handles,
-		attachments:          config.Attachments,
-		maximumNotes:         config.MaximumSessionNotes,
-		canvasInputSource:    config.CanvasInputSource,
-		retiredModels:        retiredModelIndex(config.RetiredModels),
-		model3DUsage:         config.Model3DUsage,
-		explicitModel3DValid: config.ExplicitModel3DValid,
-		usageProfileKind:     usageProfileKindOf(config.ChoiceKinds),
-		models:               config.Models,
+		repository:                 config.Repository,
+		clock:                      config.Clock,
+		newID:                      config.NewID,
+		defaultTitle:               config.DefaultTitle,
+		userRole:                   config.UserRole,
+		assistantRole:              config.AssistantRole,
+		pendingContent:             config.PendingContent,
+		eventFields:                config.EventFields,
+		eventTypes:                 config.EventTypes,
+		streamActive:               config.StreamActive,
+		streamDone:                 config.StreamDone,
+		streamError:                config.StreamError,
+		turnQueued:                 config.TurnQueued,
+		turnRunning:                config.TurnRunning,
+		turnWaitingTask:            config.TurnWaitingTask,
+		turnDone:                   config.TurnDone,
+		turnError:                  config.TurnError,
+		placeholderHealing:         config.PlaceholderHealing,
+		streamCleanupTTL:           config.StreamCleanupTTL,
+		subscriberBufferSize:       config.SubscriberBufferSize,
+		subscribers:                map[string]map[chan Event]struct{}{},
+		approvalPolicy:             config.ApprovalPolicy,
+		agentScope:                 config.AgentScope,
+		handles:                    config.Handles,
+		attachments:                config.Attachments,
+		maximumNotes:               config.MaximumSessionNotes,
+		maximumStyleLockText:       config.MaximumStyleLockText,
+		maximumStyleLockReferences: config.MaximumStyleLockReferences,
+		canvasInputSource:          config.CanvasInputSource,
+		retiredModels:              retiredModelIndex(config.RetiredModels),
+		model3DUsage:               config.Model3DUsage,
+		explicitModel3DValid:       config.ExplicitModel3DValid,
+		usageProfileKind:           usageProfileKindOf(config.ChoiceKinds),
+		models:                     config.Models,
 	}, nil
 }
 
@@ -834,6 +846,17 @@ func (service *Service) startTurn(
 		return Message{}, ErrSessionNotFound
 	}
 	command.Options.ExplicitModel3D = explicitModel
+	// The style lock is a session setting, but generation must use the snapshot
+	// taken with this turn so later edits do not change a frozen task.
+	styleLock, found, err := service.repository.StyleLock(ctx, command.OwnerID, command.SessionID)
+	if err != nil {
+		return Message{}, err
+	}
+	if !found {
+		return Message{}, ErrSessionNotFound
+	}
+	styleLock.References = append([]string(nil), styleLock.References...)
+	command.Options.StyleLock = styleLock
 	// A pick of a retired generation model runs on its successor; the turn
 	// records the switch (#329 follow-up).
 	service.moveRetiredModels(&command.Options)

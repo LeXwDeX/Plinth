@@ -1286,15 +1286,17 @@ func newHTTPHarnessWithCatalogAndProviders(
 	}
 	approvalPolicy := harnessApprovalPolicy(applicationSchema)
 	chatService, err := chat.NewService(chat.ServiceConfig{
-		Repository:          repository,
-		ApprovalPolicy:      approvalPolicy,
-		AgentScope:          agentscope.FromSchema(applicationSchema.Chat.AgentScope),
-		Handles:             chat.NewHandlePolicy(applicationSchema.Chat.Context),
-		MaximumSessionNotes: applicationSchema.Chat.Context.MaximumSessionNotesCharacters,
-		Attachments:         harnessAttachmentVerifier{},
-		Model3DUsage:        applicationSchema.Chat.Model3DUsage,
-		ChoiceKinds:         applicationSchema.Chat.Choice.Kinds,
-		RetiredModels:       taskCatalog.RetiredModelSuccessors(),
+		Repository:                 repository,
+		ApprovalPolicy:             approvalPolicy,
+		AgentScope:                 agentscope.FromSchema(applicationSchema.Chat.AgentScope),
+		Handles:                    chat.NewHandlePolicy(applicationSchema.Chat.Context),
+		MaximumSessionNotes:        applicationSchema.Chat.Context.MaximumSessionNotesCharacters,
+		MaximumStyleLockText:       applicationSchema.Chat.StyleLock.MaximumTextCharacters,
+		MaximumStyleLockReferences: applicationSchema.Chat.StyleLock.MaximumReferenceImages,
+		Attachments:                harnessAttachmentVerifier{},
+		Model3DUsage:               applicationSchema.Chat.Model3DUsage,
+		ChoiceKinds:                applicationSchema.Chat.Choice.Kinds,
+		RetiredModels:              taskCatalog.RetiredModelSuccessors(),
 		// The harness deployment chats with the DeepSeek profile (#322).
 		Models:          chat.ModelPolicy{Model: "deepseek", Thinking: applicationSchema.Chat.Agent.Thinking},
 		DefaultTitle:    applicationSchema.Chat.Defaults.Title,

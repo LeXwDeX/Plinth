@@ -24,7 +24,8 @@ func (r *Repository) ListSessions(
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
-		       s.brief, s.explicit_model_3d
+		       s.brief, s.explicit_model_3d, s.style_lock_enabled, s.style_lock_text,
+		       s.style_lock_references
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE s.owner_id = ?
@@ -91,7 +92,8 @@ func (r *Repository) ListSessionsPage(
 	rows, err := tx.QueryContext(ctx, `
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
-		       s.brief, s.explicit_model_3d
+		       s.brief, s.explicit_model_3d, s.style_lock_enabled, s.style_lock_text,
+		       s.style_lock_references
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE `+where+`
@@ -266,6 +268,55 @@ func (r *Repository) SetSessionNotes(ctx context.Context, ownerID, sessionID, no
 		return false, err
 	}
 	return affected > 0, nil
+}
+
+// StyleLock reads the session-level style lock of the owner's session.
+func (r *Repository) StyleLock(ctx context.Context, ownerID, sessionID string) (chat.StyleLock, bool, error) {
+	var enabled int
+	var text, rawReferences string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT style_lock_enabled, style_lock_text, style_lock_references
+		FROM go_chat_sessions WHERE id = ? AND owner_id = ?`, sessionID, ownerID).
+		Scan(&enabled, &text, &rawReferences)
+	if errors.Is(err, sql.ErrNoRows) {
+		return chat.StyleLock{}, false, nil
+	}
+	if err != nil {
+		return chat.StyleLock{}, false, fmt.Errorf("read chat session style lock: %w", err)
+	}
+	return chat.StyleLock{Enabled: enabled != 0, Text: text, References: chat.DecodeStyleLockReferences(rawReferences)}, true, nil
+}
+
+// SetStyleLock replaces the session-level style lock in one transaction. It
+// keeps updated_at unchanged so editing the setting does not reorder history.
+func (r *Repository) SetStyleLock(ctx context.Context, ownerID, sessionID string, lock chat.StyleLock) (bool, error) {
+	rawReferences, err := chat.EncodeStyleLockReferences(lock.References)
+	if err != nil {
+		return false, err
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin set chat session style lock: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `
+		UPDATE go_chat_sessions
+		SET style_lock_enabled = ?, style_lock_text = ?, style_lock_references = ?
+		WHERE id = ? AND owner_id = ?`, lock.Enabled, lock.Text, rawReferences, sessionID, ownerID)
+	if err != nil {
+		return false, fmt.Errorf("set chat session style lock: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if affected == 0 {
+		return false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit chat session style lock: %w", err)
+	}
+	return true, nil
 }
 
 // SessionBrief reads the production brief of the owner's own session (#103).
@@ -1439,7 +1490,8 @@ func (r *Repository) Session(
 	row := r.db.QueryRowContext(ctx, `
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
-		       s.brief, s.explicit_model_3d
+		       s.brief, s.explicit_model_3d, s.style_lock_enabled, s.style_lock_text,
+		       s.style_lock_references
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE s.id = ? AND s.owner_id = ?
@@ -1465,7 +1517,8 @@ func (r *Repository) getChatSession(
 	row := r.db.QueryRowContext(ctx, `
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
-		       s.brief, s.explicit_model_3d
+		       s.brief, s.explicit_model_3d, s.style_lock_enabled, s.style_lock_text,
+		       s.style_lock_references
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE s.id = ? AND s.owner_id = ?
@@ -1485,6 +1538,8 @@ func scanChatSession(scanner chatSessionScanner) (chat.Session, error) {
 	var createdAt string
 	var updatedAt string
 	var brief string
+	var styleLockEnabled int
+	var styleLockText, styleLockReferences string
 	if err := scanner.Scan(
 		&session.ID,
 		&session.OwnerID,
@@ -1498,10 +1553,18 @@ func scanChatSession(scanner chatSessionScanner) (chat.Session, error) {
 		&session.TitleSource,
 		&brief,
 		&session.ExplicitModel3D,
+		&styleLockEnabled,
+		&styleLockText,
+		&styleLockReferences,
 	); err != nil {
 		return chat.Session{}, err
 	}
 	session.Brief = chat.DecodeProductionBrief(brief)
+	session.StyleLock = chat.StyleLock{
+		Enabled:    styleLockEnabled != 0,
+		Text:       styleLockText,
+		References: chat.DecodeStyleLockReferences(styleLockReferences),
+	}
 	var err error
 	session.CreatedAt, err = parseTime(createdAt)
 	if err != nil {

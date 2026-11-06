@@ -592,6 +592,10 @@ func (s *Server) routes() {
 		s.mux.HandleFunc("GET "+routes.ChatSessionNotes, s.withIdentity(s.getChatSessionNotes))
 		s.mux.HandleFunc("PUT "+routes.ChatSessionNotes, s.withIdentity(s.putChatSessionNotes))
 	}
+	if routes.ChatSessionStyleLock != "" {
+		s.mux.HandleFunc("GET "+routes.ChatSessionStyleLock, s.withIdentity(s.getChatSessionStyleLock))
+		s.mux.HandleFunc("PUT "+routes.ChatSessionStyleLock, s.withIdentity(s.putChatSessionStyleLock))
+	}
 	if routes.ChatSessionBrief != "" {
 		s.mux.HandleFunc("GET "+routes.ChatSessionBrief, s.withIdentity(s.getChatSessionBrief))
 		s.mux.HandleFunc("PUT "+routes.ChatSessionBrief, s.withPrincipal(s.putChatSessionBrief))

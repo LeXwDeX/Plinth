@@ -2086,6 +2086,7 @@
           "client_errors": "/api/v1/client-errors",
           "chat_session_approval": "/api/v1/chat/sessions/{sessionID}/approval",
           "chat_session_notes": "/api/v1/chat/sessions/{sessionID}/notes",
+          "chat_session_style_lock": "/api/v1/chat/sessions/{sessionID}/style-lock",
           "chat_session_brief": "/api/v1/chat/sessions/{sessionID}/brief",
           "chat_session_model3d": "/api/v1/chat/sessions/{sessionID}/model3d",
           "chat_session_pick": "/api/v1/chat/sessions/{sessionID}/pick",
@@ -4990,6 +4991,12 @@
         "layout": {"agent_text": "Use this image as a composition reference."},
         "input": {"agent_text": "Use this image as the main image to edit."}
       },
+      "style_lock": {
+        "maximum_text_characters": 500,
+        "maximum_reference_images": 3,
+        "prompt_template": "\n\nStyle lock: Apply this visual style to the image while preserving the user's requested subject, composition and changes. Style description: {style}",
+        "edit_scope_template": "\n\nEdit scope: Change only what the user requested. Preserve all other content, composition, colors and details."
+      },
       "api": {
         "fields": {
           "title": "title",
@@ -5025,7 +5032,16 @@
           "agent_scope": "agentScope",
           "choice_answer": "choiceAnswer",
           "reasoning_effort": "reasoningEffort",
-          "chat_model": "chatModel"
+          "chat_model": "chatModel",
+           "style_lock_enabled": "enabled",
+           "style_lock_text": "text",
+           "style_lock_references": "references",
+           "style_lock_skipped": "styleLockSkipped"
+        },
+        "style_lock": {
+          "enabled": "enabled",
+          "text": "text",
+          "references": "references"
         },
         "response_fields": {
           "id": "id",
@@ -5076,7 +5092,8 @@
           "chat_model_default": "chatModelDefault",
           "chat_model_fallback": "chatModelFallback",
           "chat_models": "chatModels",
-          "chat_model_name": "model"
+          "chat_model_name": "model",
+          "style_lock": "styleLock"
         },
         "attachment": {
           "handle": "handle",
@@ -7665,6 +7682,11 @@
           "model_choice_conflict": "这次调用指定的模型与用户在本会话明确选定的模型（{locked}）不一致，没有提交任务。用户明确选择的模型优先；要改用 {requested}，请先让用户在本会话里重新选择模型。",
           "model_choice_workspace_conflict": "工作区当前选择的模型是 {workspace}，但用途「{profile}」推荐 {recommended}。请先与用户确认保留哪个模型，再继续准备，不要静默替换用户的选择。",
           "production_brief_conflict": "制作简报已被其他修改更新，请重新读取后再保存。",
+          "style_lock_text_too_long": "风格锁定说明没有保存：当前 {length} 个字符，上限 {maximum} 个字符。",
+          "style_lock_reference_limit": "风格锁定参考图没有保存：最多允许 {maximum} 张。",
+          "style_lock_reference_invalid": "风格锁定参考图无效，或不属于当前用户。",
+          "style_lock_reference_unavailable": "当前模型无法使用风格锁定参考图，本次没有提交。请改用支持参考图的 2D 模型，或移除风格参考图。",
+          "style_lock_references_trimmed": "当前模型最多使用 {maximum} 张参考图；已优先保留本轮指定图片，风格锁定参考图按顺序截断。",
           "model_choice_unavailable": "这次调用指定的模型 {model} 当前不可用，或不能接受本次输入，没有提交任务。可用选项：{choices}。请改用其中一个，或按用途推荐继续。",
           "offering_choice_unavailable": "所选项当前不可用，没有提交任务。只能从这些可用项中选择：{choices}。",
           "source_offering_unpaired": "这个来源任务不能用于本工具，没有提交任务。来源必须是本人在本会话中成功完成、且与本工具某个可用功能配对的任务（例如同一模板的 Creative Lab 设计预览）。",
@@ -16607,6 +16629,11 @@
             "chat.presentation.messages.model_choice_conflict": "This call named a model that differs from the model the user explicitly picked in this session ({locked}), so nothing was submitted. The user's explicit choice wins; to use {requested}, first have the user pick the model again in this session.",
             "chat.presentation.messages.model_choice_workspace_conflict": "The workspace currently uses model {workspace}, but purpose “{profile}” recommends {recommended}. Confirm with the user which model to keep before continuing; do not silently replace their choice.",
             "chat.presentation.messages.production_brief_conflict": "The production brief was changed by another writer. Read it again and retry the save.",
+          "chat.presentation.messages.style_lock_text_too_long": "The style lock text was not saved: it has {length} characters, the maximum is {maximum}.",
+          "chat.presentation.messages.style_lock_reference_limit": "The style lock references were not saved: at most {maximum} images are allowed.",
+          "chat.presentation.messages.style_lock_reference_invalid": "A style lock reference is invalid or does not belong to the current user.",
+          "chat.presentation.messages.style_lock_reference_unavailable": "The current model cannot use style-lock reference images, so this request was not submitted. Pick a 2D model that accepts references or remove the style references.",
+          "chat.presentation.messages.style_lock_references_trimmed": "The current model accepts at most {maximum} reference images. The images from this request were kept first, and style-lock references were trimmed in order.",
             "chat.presentation.messages.model_choice_unavailable": "The model named by this call ({model}) is not available right now, or cannot accept this input, so nothing was submitted. Available options: {choices}. Use one of them, or continue with the purpose's recommendation.",
             "chat.choice.kinds[id=usage_profile].question": "What is this 3D model mainly for?",
             "chat.choice.kinds[id=usage_profile].message": "Choose the purpose of this 3D work. The purpose decides the default model, triangle budget and UV requirements; after you choose, I will continue with that purpose.",

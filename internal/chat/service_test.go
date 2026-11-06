@@ -768,6 +768,40 @@ func (r *memoryChatRepository) SetSessionNotes(
 	return true, nil
 }
 
+func (r *memoryChatRepository) StyleLock(
+	_ context.Context,
+	ownerID string,
+	sessionID string,
+) (chat.StyleLock, bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	session, found := r.sessions[sessionID]
+	if !found || session.OwnerID != ownerID {
+		return chat.StyleLock{}, false, nil
+	}
+	lock := session.StyleLock
+	lock.References = append([]string(nil), lock.References...)
+	return lock, true, nil
+}
+
+func (r *memoryChatRepository) SetStyleLock(
+	_ context.Context,
+	ownerID string,
+	sessionID string,
+	lock chat.StyleLock,
+) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	session, found := r.sessions[sessionID]
+	if !found || session.OwnerID != ownerID {
+		return false, nil
+	}
+	lock.References = append([]string(nil), lock.References...)
+	session.StyleLock = lock
+	r.sessions[sessionID] = session
+	return true, nil
+}
+
 func (r *memoryChatRepository) SessionPick(
 	_ context.Context,
 	ownerID string,

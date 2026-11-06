@@ -471,6 +471,14 @@ func (s *Server) legacySendChatMessage(
 		DomainModels: chatDomainModels(body, requestFields.DomainModels),
 		InputSource:  chatString(body, requestFields.InputSource),
 	}
+	if requestFields.StyleLockSkipped != "" {
+		if raw, present := body[requestFields.StyleLockSkipped]; present {
+			if string(raw) == "null" || json.Unmarshal(raw, &options.StyleLockSkipped) != nil {
+				s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidParameters)
+				return
+			}
+		}
+	}
 	if raw, present := body[requestFields.Multiview]; present && requestFields.Multiview != "" && string(raw) != "null" {
 		var multiview chat.MultiviewRequest
 		if err := json.Unmarshal(raw, &multiview); err != nil || !multiview.Valid() {
@@ -783,6 +791,13 @@ func (s *Server) chatSessionWireWithBudgets(
 	}
 	if fields.Brief != "" {
 		result[fields.Brief] = productionBriefWire(session.Brief)
+	}
+	if fields.StyleLock != "" {
+		result[fields.StyleLock] = map[string]any{
+			s.application.Chat.API.StyleLock.Enabled:    session.StyleLock.Enabled,
+			s.application.Chat.API.StyleLock.Text:       session.StyleLock.Text,
+			s.application.Chat.API.StyleLock.References: append([]string(nil), session.StyleLock.References...),
+		}
 	}
 	if fields.ExplicitModel3D != "" && session.ExplicitModel3D != "" {
 		result[fields.ExplicitModel3D] = session.ExplicitModel3D

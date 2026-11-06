@@ -77,6 +77,7 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 	publicChat.API.Fields = cloned.Chat.API.Fields
 	publicChat.API.ResponseFields = cloned.Chat.API.ResponseFields
 	publicChat.API.Attachment = cloned.Chat.API.Attachment
+	publicChat.API.StyleLock = cloned.Chat.API.StyleLock
 	publicChat.API.PromptEnhance.PromptField = cloned.Chat.API.PromptEnhance.PromptField
 	publicChat.API.PromptEnhance.CapabilityField = cloned.Chat.API.PromptEnhance.CapabilityField
 	publicChat.API.PromptEnhance.ModelField = cloned.Chat.API.PromptEnhance.ModelField

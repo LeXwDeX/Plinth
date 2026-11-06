@@ -55,7 +55,13 @@ type TurnOptions struct {
 	// Harness is read from the authenticated session when a new turn starts.
 	// It stays frozen across restarts. Nil denotes a historical turn or a
 	// service without Harness assembly; recovery must never replace it.
-	Harness               *resolve.Snapshot `json:"Harness,omitempty"`
+	Harness *resolve.Snapshot `json:"Harness,omitempty"`
+	// StyleLock is the session lock snapshot frozen when the turn starts. The
+	// generation tool never reads the mutable session row for a running turn.
+	StyleLock StyleLock
+	// StyleLockSkipped is the person's one-turn exemption. It is frozen with
+	// the turn and is never inferred from the Agent's request.
+	StyleLockSkipped      bool `json:"StyleLockSkipped,omitempty"`
 	CreativeDomain        string
 	AspectRatio           string
 	PoseMode              string
@@ -225,6 +231,9 @@ type Session struct {
 	AgentScope string
 	// Brief is the session's structured production brief (#103).
 	Brief ProductionBrief
+	// StyleLock is the session-level style lock. It is owner-scoped and is
+	// projected only when the Catalog declares its session DTO field.
+	StyleLock StyleLock
 	// ExplicitModel3D is the 3D model the person explicitly picked in this
 	// session (#103); empty means no explicit pick.
 	ExplicitModel3D string
