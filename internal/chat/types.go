@@ -214,10 +214,16 @@ type TurnPageCursor struct {
 }
 
 type Session struct {
-	ID        string
-	OwnerID   string
-	OwnerName string
-	Title     string
+	ID              string
+	OwnerID         string
+	OwnerName       string
+	Title           string
+	ParentSessionID string
+	ParentMessageID string
+	ParentTitle     string
+	ParentDeleted   bool
+	// BranchCanvasCopied is set only on the immediate branch creation result.
+	BranchCanvasCopied bool
 	// TitleSource is TitleSourcePending, TitleSourceAuto or TitleSourceUser.
 	// It is storage state for the automatic summary and is not projected.
 	TitleSource string

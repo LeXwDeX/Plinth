@@ -336,19 +336,21 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			Thinking:       applicationSchema.Chat.Agent.Thinking,
 			WindowOverride: config.ContextWindowTokens,
 		},
-		Repository:      repository,
-		DefaultTitle:    applicationSchema.Chat.Defaults.Title,
-		UserRole:        applicationSchema.Chat.Roles.User,
-		AssistantRole:   applicationSchema.Chat.Roles.Assistant,
-		PendingContent:  applicationSchema.Chat.State.PendingContent,
-		StreamActive:    applicationSchema.Chat.State.Active,
-		StreamDone:      applicationSchema.Chat.State.Done,
-		StreamError:     applicationSchema.Chat.State.Error,
-		TurnQueued:      applicationSchema.Chat.State.TurnQueued,
-		TurnRunning:     applicationSchema.Chat.State.TurnRunning,
-		TurnWaitingTask: applicationSchema.Chat.State.TurnWaitingTask,
-		TurnDone:        applicationSchema.Chat.State.TurnDone,
-		TurnError:       applicationSchema.Chat.State.TurnError,
+		Repository:            repository,
+		DefaultTitle:          applicationSchema.Chat.Defaults.Title,
+		BranchTitleTemplate:   applicationSchema.Chat.Defaults.BranchTitleTemplate,
+		CanvasProjectIDPrefix: applicationSchema.Canvas.Defaults.ProjectIDPrefix,
+		UserRole:              applicationSchema.Chat.Roles.User,
+		AssistantRole:         applicationSchema.Chat.Roles.Assistant,
+		PendingContent:        applicationSchema.Chat.State.PendingContent,
+		StreamActive:          applicationSchema.Chat.State.Active,
+		StreamDone:            applicationSchema.Chat.State.Done,
+		StreamError:           applicationSchema.Chat.State.Error,
+		TurnQueued:            applicationSchema.Chat.State.TurnQueued,
+		TurnRunning:           applicationSchema.Chat.State.TurnRunning,
+		TurnWaitingTask:       applicationSchema.Chat.State.TurnWaitingTask,
+		TurnDone:              applicationSchema.Chat.State.TurnDone,
+		TurnError:             applicationSchema.Chat.State.TurnError,
 		PlaceholderHealing: chat.PlaceholderHealingPolicy{
 			StaleAfter: time.Duration(
 				applicationSchema.Chat.State.PlaceholderStaleMilliseconds,
@@ -512,6 +514,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Captures:         captureStore,
 		ModelAssetRole:   generationtool.ModelAssetRole,
 		RenderAssetType:  applicationSchema.Chat.ModelReview.Render.AssetType,
+		ParentSession: func(ctx context.Context, owner generation.OwnerID, sessionID string) (string, error) {
+			return repository.ParentSession(ctx, string(owner), sessionID)
+		},
 	})
 	if err != nil {
 		return nil, err

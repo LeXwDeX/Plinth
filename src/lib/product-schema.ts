@@ -60,6 +60,7 @@ export interface ProductSchema {
         chat_skills: string;
         client_errors?: string;
         chat_session_approval: string;
+        chat_session_branch?: string;
         chat_session_notes?: string;
         /** #103: the session's production brief (GET/PUT). Absent on older servers. */
         chat_session_brief?: string;
@@ -1430,6 +1431,11 @@ export interface ChatProductSchema {
       task_id: string;
       approval_mode: string;
       estimated_credits: string;
+      parent_session_id?: string;
+      parent_message_id?: string;
+      parent_title?: string;
+      parent_deleted?: string;
+      branch_canvas_copied?: string;
       approval_source: string;
       notes: string;
       /** #103: 会话制作简报成员。 */

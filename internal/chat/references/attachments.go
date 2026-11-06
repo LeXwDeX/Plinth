@@ -133,11 +133,20 @@ func (resolver *Resolver) ownedSessionTask(
 	if err != nil {
 		return generation.Task{}, err
 	}
-	if task.ID != id || task.OwnerID != owner ||
-		(task.SessionID != sessionID && !(allowUnscoped && task.SessionID == "")) {
+	if task.ID != id || task.OwnerID != owner {
 		return generation.Task{}, chat.ErrAttachmentRejected
 	}
-	return task, nil
+	if task.SessionID == sessionID || (allowUnscoped && task.SessionID == "") {
+		return task, nil
+	}
+	// A branch session may use its direct parent's Task (#153): the copy keeps
+	// the picked object usable without loosening the owner check for others.
+	if resolver.parentSession != nil && task.SessionID != "" {
+		if parent, err := resolver.parentSession(ctx, owner, sessionID); err == nil && parent != "" && task.SessionID == parent {
+			return task, nil
+		}
+	}
+	return generation.Task{}, chat.ErrAttachmentRejected
 }
 
 func (resolver *Resolver) verifyTaskAsset(

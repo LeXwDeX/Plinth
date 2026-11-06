@@ -173,26 +173,28 @@ type PlaceholderHealingPolicy struct {
 }
 
 type ServiceConfig struct {
-	Repository           Repository
-	Clock                func() time.Time
-	NewID                func(string) string
-	DefaultTitle         string
-	UserRole             string
-	AssistantRole        string
-	PendingContent       string
-	StreamActive         string
-	StreamDone           string
-	StreamError          string
-	TurnQueued           string
-	TurnRunning          string
-	TurnWaitingTask      string
-	TurnDone             string
-	TurnError            string
-	PlaceholderHealing   PlaceholderHealingPolicy
-	StreamCleanupTTL     time.Duration
-	SubscriberBufferSize int
-	EventFields          EventFieldPolicy
-	EventTypes           EventTypePolicy
+	Repository            Repository
+	Clock                 func() time.Time
+	NewID                 func(string) string
+	DefaultTitle          string
+	BranchTitleTemplate   string
+	CanvasProjectIDPrefix string
+	UserRole              string
+	AssistantRole         string
+	PendingContent        string
+	StreamActive          string
+	StreamDone            string
+	StreamError           string
+	TurnQueued            string
+	TurnRunning           string
+	TurnWaitingTask       string
+	TurnDone              string
+	TurnError             string
+	PlaceholderHealing    PlaceholderHealingPolicy
+	StreamCleanupTTL      time.Duration
+	SubscriberBufferSize  int
+	EventFields           EventFieldPolicy
+	EventTypes            EventTypePolicy
 	// ApprovalPolicy comes from application.chat.approval_policy. A zero
 	// policy offers only manual mode.
 	ApprovalPolicy approvalpolicy.Policy
@@ -241,6 +243,8 @@ type Service struct {
 	clock                      func() time.Time
 	newID                      func(string) string
 	defaultTitle               string
+	branchTitleTemplate        string
+	canvasProjectIDPrefix      string
 	userRole                   string
 	assistantRole              string
 	pendingContent             string
@@ -352,6 +356,8 @@ func NewService(config ServiceConfig) (*Service, error) {
 		clock:                      config.Clock,
 		newID:                      config.NewID,
 		defaultTitle:               config.DefaultTitle,
+		branchTitleTemplate:        config.BranchTitleTemplate,
+		canvasProjectIDPrefix:      config.CanvasProjectIDPrefix,
 		userRole:                   config.UserRole,
 		assistantRole:              config.AssistantRole,
 		pendingContent:             config.PendingContent,
