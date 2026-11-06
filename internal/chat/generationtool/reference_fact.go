@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
@@ -425,6 +427,15 @@ func (executor *Executor) operationReferenceNote(command chat.ToolCommand, op Op
 // was made from (#65), else the source or limit note.
 func (executor *Executor) stepReferenceNote(command chat.ToolCommand, offering generation.Offering,
 	fact *ReferenceSourceFact, counts referenceUse, input json.RawMessage) string {
+	if counts.StyleTrimmed && command.Tool.ResultFields.ReferenceNote != "" {
+		template := executor.chat.Presentation.Messages.StyleLockReferencesTrimmed
+		if template != "" {
+			if text := executor.localizeText(command); text != nil {
+				template = text(template)
+			}
+			return strings.ReplaceAll(template, "{maximum}", strconv.Itoa(referenceImageLimit(offering)))
+		}
+	}
 	if note := ReferenceViewsNote(command.Tool, offering, executor.chat.ThreeView.Multiview, input,
 		executor.localizeText(command)); note != "" {
 		return note

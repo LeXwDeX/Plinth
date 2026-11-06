@@ -1366,6 +1366,7 @@ type PublicChatAPISchema struct {
 	Fields         ChatAPIFields           `json:"fields"`
 	ResponseFields ChatAPIResponseFields   `json:"response_fields"`
 	Attachment     ChatAttachmentAPIFields `json:"attachment"`
+	StyleLock      ChatStyleLockAPIFields  `json:"style_lock"`
 	PromptEnhance  struct {
 		PromptField               string `json:"prompt_field"`
 		CapabilityField           string `json:"capability_field"`
@@ -2496,6 +2497,7 @@ type ChatSchema struct {
 	Frontend           ChatFrontendSchema                     `json:"frontend"`
 	Agent              ChatAgentSchema                        `json:"agent"`
 	Context            ChatContextSchema                      `json:"context"`
+	StyleLock          ChatStyleLockSchema                    `json:"style_lock"`
 	DSML               ChatDSMLSchema                         `json:"dsml"`
 	Stream             ChatStreamSchema                       `json:"stream"`
 	Tools              []ChatToolSchema                       `json:"tools"`
@@ -3154,11 +3156,27 @@ type ChatAPISchema struct {
 	Fields         ChatAPIFields              `json:"fields"`
 	ResponseFields ChatAPIResponseFields      `json:"response_fields"`
 	Attachment     ChatAttachmentAPIFields    `json:"attachment"`
+	StyleLock      ChatStyleLockAPIFields     `json:"style_lock"`
 	PromptEnhance  ChatPromptEnhanceAPISchema `json:"prompt_enhance"`
 	// SessionList bounds the paged session list (server side only).
 	SessionList ChatSessionListSchema `json:"session_list"`
 	// MessageList bounds a paged read of one conversation (server side only).
 	MessageList ChatMessageListSchema `json:"message_list"`
+}
+
+type ChatStyleLockSchema struct {
+	MaximumTextCharacters  int `json:"maximum_text_characters"`
+	MaximumReferenceImages int `json:"maximum_reference_images"`
+	// PromptTemplate and EditScopeTemplate are English provider-prompt copy;
+	// the generation tool fills them only for image-domain Offerings.
+	PromptTemplate    string `json:"prompt_template,omitempty"`
+	EditScopeTemplate string `json:"edit_scope_template,omitempty"`
+}
+
+type ChatStyleLockAPIFields struct {
+	Enabled    string `json:"enabled"`
+	Text       string `json:"text"`
+	References string `json:"references"`
 }
 
 // ChatMessageListSchema is the paging contract of a conversation's messages:
@@ -3293,7 +3311,11 @@ type ChatAPIFields struct {
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// ChatModel is the request field of the session chat-model write (#322
 	// Scope 5): the ID of an available model, or "" to follow the default.
-	ChatModel string `json:"chat_model,omitempty"`
+	ChatModel           string `json:"chat_model,omitempty"`
+	StyleLockEnabled    string `json:"style_lock_enabled,omitempty"`
+	StyleLockText       string `json:"style_lock_text,omitempty"`
+	StyleLockReferences string `json:"style_lock_references,omitempty"`
+	StyleLockSkipped    string `json:"style_lock_skipped,omitempty"`
 }
 
 type ChatAPIResponseFields struct {
@@ -3390,6 +3412,8 @@ type ChatAPIResponseFields struct {
 	ChatModelFallback string `json:"chat_model_fallback,omitempty"`
 	ChatModels        string `json:"chat_models,omitempty"`
 	ChatModelName     string `json:"chat_model_name,omitempty"`
+	// StyleLock is the session DTO member carrying the session style lock.
+	StyleLock string `json:"style_lock,omitempty"`
 }
 
 type ChatDefaultsSchema struct {
@@ -4338,6 +4362,11 @@ type ChatMessageTexts struct {
 	// every bounded retry to a concurrent writer, so the caller retries instead
 	// of overwriting the other change (#103 review C5).
 	ProductionBriefConflict          string `json:"production_brief_conflict,omitempty"`
+	StyleLockTextTooLong             string `json:"style_lock_text_too_long,omitempty"`
+	StyleLockReferenceLimit          string `json:"style_lock_reference_limit,omitempty"`
+	StyleLockReferenceInvalid        string `json:"style_lock_reference_invalid,omitempty"`
+	StyleLockReferenceUnavailable    string `json:"style_lock_reference_unavailable,omitempty"`
+	StyleLockReferencesTrimmed       string `json:"style_lock_references_trimmed,omitempty"`
 	InvalidReferenceIndices          string `json:"invalid_reference_indices"`
 	ReferenceIndexOutOfRangeTemplate string `json:"reference_index_out_of_range_template"`
 	// InvalidInputSource rejects an undeclared input_source; CanvasSourceMissing
@@ -4658,11 +4687,12 @@ type CoreHTTPRoutesSchema struct {
 	AccountResources string `json:"account_resources"`
 	ChatSkills       string `json:"chat_skills"`
 	// ClientErrors receives browser error reports for the server log (#233).
-	ClientErrors        string `json:"client_errors,omitempty"`
-	ChatSessionApproval string `json:"chat_session_approval"`
-	ChatSessionBranch   string `json:"chat_session_branch,omitempty"`
-	ChatSessionNotes    string `json:"chat_session_notes"`
-	ChatSessionBrief    string `json:"chat_session_brief,omitempty"`
+	ClientErrors         string `json:"client_errors,omitempty"`
+	ChatSessionApproval  string `json:"chat_session_approval"`
+	ChatSessionBranch    string `json:"chat_session_branch,omitempty"`
+	ChatSessionNotes     string `json:"chat_session_notes"`
+	ChatSessionStyleLock string `json:"chat_session_style_lock,omitempty"`
+	ChatSessionBrief     string `json:"chat_session_brief,omitempty"`
 	// ChatSessionModel3D writes the 3D model the person explicitly picked in
 	// the session (#103); it is a lock for the generation tools and submits
 	// nothing. Empty (historical Catalogs) disables the write.

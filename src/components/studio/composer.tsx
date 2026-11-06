@@ -72,6 +72,18 @@ export interface ComposerMention extends MentionCandidate {
   thumbnail: string;
 }
 
+/** #154: the session style lock as the box shows it, and this turn's exemption. */
+export interface ComposerStyleLock {
+  /** The session has an enabled lock with text or reference images. */
+  active: boolean;
+  /** This turn goes out without the lock. */
+  skipped: boolean;
+  /** Why the lock's references may not all be used before this send; null when they will. */
+  notice: { kind: 'unavailable' | 'trimmed'; text: string } | null;
+  onToggleSkip: () => void;
+  onOpen: () => void;
+}
+
 export interface ComposerProps {
   value: string;
   onChange: (value: string) => void;
@@ -123,6 +135,8 @@ export interface ComposerProps {
   mentions: readonly ComposerMention[];
   /** Called when a candidate is picked from the `@` list, so the send can keep its meaning if names are renumbered. */
   onMentionPicked?: (candidate: MentionCandidate) => void;
+  /** #154: the style-lock label and one-turn exemption; null when the session has no lock. */
+  styleLock?: ComposerStyleLock | null;
 }
 
 /** Flat [x0, y0, x1, y1, ...] as the points of an SVG polyline. */
@@ -143,6 +157,7 @@ export function Composer({
   attachmentPurpose = null, onAttachmentPurpose, attachmentPurposes, onAttachmentPurposeAt, pinnedPurpose = null, onPinnedPurpose,
   images, onRemoveImage, pinnedImage, onUnpin, acceptedImages, onFiles, onPasteImages, editing, onCancelEdit,
   skill, params, sendCredits: generationSendCredits, mentions, onMentionPicked, referenceLimit = null,
+  styleLock = null,
 }: ComposerProps) {
   const { schema } = useProductSchema();
   const activeSessionId = useChatStore((state) => state.activeSessionId);
@@ -447,6 +462,38 @@ export function Composer({
           <Action type="button" variant="ghost" size="xs" onClick={onCancelEdit}>
             {schemaText(schema, 'ui.chat.message.edit_cancel')}
           </Action>
+        </div>
+      ) : null}
+      {styleLock?.active ? (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1" data-testid="composer-style-lock">
+          <button
+            type="button"
+            onClick={styleLock.onOpen}
+            data-testid="composer-style-lock-chip"
+            className="inline-flex min-w-0 items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary outline-none focus-visible:ring-1 focus-visible:ring-primary"
+          >
+            <Paintbrush aria-hidden className="size-3.5 shrink-0" />
+            <span className="truncate">{schemaText(schema, 'ui.studio.style_lock.chip')}</span>
+          </button>
+          <label className={cn('inline-flex min-w-0 items-center gap-1.5 text-xs', styleLock.skipped ? 'text-foreground' : 'text-muted-foreground')}>
+            <input
+              type="checkbox"
+              checked={styleLock.skipped}
+              onChange={styleLock.onToggleSkip}
+              data-testid="composer-style-lock-skip"
+              className="size-3.5 shrink-0"
+            />
+            <span className="min-w-0">{schemaText(schema, 'ui.studio.style_lock.skip_once')}</span>
+          </label>
+          {styleLock.notice?.kind === 'unavailable' ? (
+            <UnavailableNotice
+              testId="composer-style-lock-notice"
+              className="text-[11px] leading-4"
+              label={unavailableLabel(schema, styleLock.notice.text)}
+            />
+          ) : styleLock.notice ? (
+            <p role="status" data-testid="composer-style-lock-notice" className="min-w-0 text-[11px] leading-4 text-warning">{styleLock.notice.text}</p>
+          ) : null}
         </div>
       ) : null}
       {hasContextChips ? (

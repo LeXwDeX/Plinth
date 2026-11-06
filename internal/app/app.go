@@ -308,11 +308,13 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	}
 	approvalPolicy := approvalPolicyFromSchema(applicationSchema)
 	chatService, err := chat.NewService(chat.ServiceConfig{
-		ApprovalPolicy:      approvalPolicy,
-		AgentScope:          agentscope.FromSchema(applicationSchema.Chat.AgentScope),
-		Handles:             chat.NewHandlePolicy(applicationSchema.Chat.Context),
-		MaximumSessionNotes: applicationSchema.Chat.Context.MaximumSessionNotesCharacters,
-		CanvasInputSource:   applicationSchema.Chat.Context.CanvasInputSource,
+		ApprovalPolicy:             approvalPolicy,
+		AgentScope:                 agentscope.FromSchema(applicationSchema.Chat.AgentScope),
+		Handles:                    chat.NewHandlePolicy(applicationSchema.Chat.Context),
+		MaximumSessionNotes:        applicationSchema.Chat.Context.MaximumSessionNotesCharacters,
+		MaximumStyleLockText:       applicationSchema.Chat.StyleLock.MaximumTextCharacters,
+		MaximumStyleLockReferences: applicationSchema.Chat.StyleLock.MaximumReferenceImages,
+		CanvasInputSource:          applicationSchema.Chat.Context.CanvasInputSource,
 		// A turn's pick of a retired generation model runs on its successor
 		// (#329 follow-up).
 		RetiredModels: taskCatalog.RetiredModelSuccessors(),

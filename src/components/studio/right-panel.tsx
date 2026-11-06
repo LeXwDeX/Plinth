@@ -15,6 +15,7 @@ import { iconByName } from '@/components/ui/icon-map';
 import { ModelArchiveLink, ModelFormatsPanel } from '@/components/workspace/model-formats';
 import { ModelProcessingPanel } from '@/components/workspace/model-processing-panel';
 import { HarnessPanel } from '@/components/workspace/harness-panel';
+import { StyleLockPanel } from '@/components/workspace/style-lock-panel';
 import { useModelProcessingCapabilities } from '@/hooks/use-model-processing-capabilities';
 import { schemaText } from '@/lib/product-schema';
 import {
@@ -163,9 +164,10 @@ function PanelFrame({ context, object, sessionId, availability }: PanelFrameProp
       ? remembered
       : null;
     const active = requested ?? defaultPanelTab(schema, 'board', { unavailable: disabled }) ?? 'operations';
-    return (
-      <aside aria-label={title} data-testid="right-panel" data-kind="none" data-tab={active} style={width} className={aside}>
-        <PanelTabBar
+      return (
+        <aside aria-label={title} data-testid="right-panel" data-kind="none" data-tab={active} style={width} className={aside}>
+          <StyleLockPanel sessionId={sessionId} />
+          <PanelTabBar
           views={views}
           active={active}
           onSelect={(id) => setPanelTab('board', id)}
@@ -193,6 +195,7 @@ function PanelFrame({ context, object, sessionId, availability }: PanelFrameProp
   const active = activePanelTab(schema, context, remembered, availability);
   return (
     <aside aria-label={title} data-testid="right-panel" data-kind={context} data-tab={active ?? undefined} style={width} className={aside}>
+      <StyleLockPanel sessionId={sessionId} />
       <PanelTabBar
         views={views}
         active={active}

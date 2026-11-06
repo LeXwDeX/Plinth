@@ -1105,6 +1105,8 @@ func (orchestrator *Orchestrator) Process(
 	// Agent-named model would replace the person's pick.
 	command.Options.ProductionBrief = turn.Options.ProductionBrief
 	command.Options.ExplicitModel3D = turn.Options.ExplicitModel3D
+	command.Options.StyleLock = turn.Options.StyleLock
+	command.Options.StyleLockSkipped = turn.Options.StyleLockSkipped
 	// A plan continuation is the service's mark, never the caller's (#134).
 	command.Options.PlanContinuation = turn.Options.PlanContinuation
 	// DSML tool calls are read only for a model whose profile writes them.

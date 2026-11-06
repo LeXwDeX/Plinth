@@ -448,6 +448,14 @@ func (executor *Executor) Execute(
 			return result, err
 		}
 	}
+	styleReferenceURLs, styleReferenceErr := executor.styleLockReferenceURLs(command)
+	if styleReferenceErr != nil {
+		result := executor.failure(command, "", executor.styleLockUnavailableMessage(command))
+		result.NoSubmission = true
+		return result, nil
+	}
+	styleReferenceCount := len(styleReferenceURLs)
+	referenceURLs = append(referenceURLs, styleReferenceURLs...)
 	if command.Tool.ReferencePurposesArgument != "" {
 		for handle, purpose := range command.Options.AttachmentPurposes {
 			if purpose != "input" {
@@ -530,7 +538,14 @@ func (executor *Executor) Execute(
 		}
 		views, _ := json.Marshal(multiview.Views)
 		arguments[executor.chat.ThreeView.Multiview.ViewsArgument] = views
-		referenceURLs = multiview.URLs
+		referenceURLs = append(multiview.URLs, styleReferenceURLs...)
+	}
+	if styleReferenceCount > 0 {
+		if _, supported := semanticParameter(offering, generation.SemanticReferenceImage); !supported {
+			result := executor.failure(command, "", executor.styleLockUnavailableMessage(command))
+			result.NoSubmission = true
+			return result, nil
+		}
 	}
 	// references records a cut of the pictures to fewer than the turn gave.
 	var references referenceUse
@@ -573,6 +588,14 @@ func (executor *Executor) Execute(
 		referenceURLs = truncateReferences(referenceURLs, offering)
 		if len(referenceURLs) < given {
 			references = referenceUse{Used: len(referenceURLs), Given: given}
+			if styleReferenceCount > 0 {
+				references.StyleGiven = styleReferenceCount
+				// Agent references are always the prefix. Count the retained style
+				// suffix without allowing a model limit to evict them.
+				agentCount := given - styleReferenceCount
+				references.StyleUsed = min(styleReferenceCount, max(0, len(referenceURLs)-agentCount))
+				references.StyleTrimmed = references.StyleUsed < styleReferenceCount
+			}
 		}
 		if capability == generation.ImageTo3D {
 			if len(selection.Candidates) < len(referenceURLs) {
@@ -631,6 +654,7 @@ func (executor *Executor) Execute(
 			skillOverrides = skillExecution.ParameterOverrides
 		}
 	}
+	prompt = executor.applyStyleLockPrompt(command, offering, prompt)
 	for _, parameter := range offering.Parameters {
 		if parameter.Semantic != generation.SemanticPrompt ||
 			parameter.MaxLength <= 0 {

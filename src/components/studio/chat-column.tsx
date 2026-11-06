@@ -96,7 +96,9 @@ import { useSessionCompactions } from '@/hooks/use-session-context';
 import { imageUploadAccept, ImageUploadError, prepareImageUpload } from '@/lib/image-upload';
 import { agentUnavailableReason, formatSchemaText, schemaCountMessage, schemaMessage, schemaText } from '@/lib/product-schema';
 import { taskAssetRoute } from '@/lib/workspace/model-formats';
-import { skillSizeDefault } from '@/lib/workspace/generation-params';
+import { offeringForTurn, skillSizeDefault } from '@/lib/workspace/generation-params';
+import { styleLockCapability } from '@/lib/workspace/style-lock-capability';
+import { useStyleLock } from '@/hooks/use-style-lock';
 import { hydrateSessionTasks } from '@/lib/workspace/task-hydration';
 import { projectNativeTaskDetail } from '@/lib/workspace/task-projection';
 import { handleOfObject } from '@/lib/workspace/object-handle';
@@ -376,6 +378,10 @@ export function ChatColumn() {
   const [queue, setQueue] = useState<QueueBySession>({});
   const queuedTurns = queuedFor(queue, activeSessionId);
   const [drainTick, setDrainTick] = useState(0);
+  // #154: the session's saved style lock and this turn's exemption. The exemption never outlives its turn.
+  const styleLock = useStyleLock(chatClient, activeSessionId);
+  const [styleLockSkipped, setStyleLockSkipped] = useState(false);
+  useEffect(() => { setStyleLockSkipped(false); }, [activeSessionId]);
   const drainingRef = useRef(false);
   const startedTurnsRef = useRef(0);
   // The turn whose start the server has not answered yet: the box still holds its words.
@@ -420,6 +426,19 @@ export function ChatColumn() {
       multiviewOffered && !hasCanvasReference ? multiviewTarget?.offering.model_name ?? '' : '',
     )
     : null;
+  // #154: the label shows while the session has a saved lock; its notice follows this turn's exemption.
+  const styleLockActive = styleLock.lock.enabled && (styleLock.lock.text.trim() !== '' || styleLock.lock.references.length > 0);
+  // Style-lock references make the turn a reference turn, so this is the Offering the server prepares.
+  const styleLockOffering = offeringForTurn(imageGeneration.offerings.filter((item) => item.available), true);
+  const styleLockNoticeKind = styleLockActive && !styleLockSkipped
+    ? styleLockCapability(styleLockOffering, styleLock.lock.references.length + attachedImages.length + (hasCanvasReference ? 1 : 0))
+    : null;
+  const styleLockNotice = styleLockNoticeKind === null ? null : {
+    kind: styleLockNoticeKind === 'model_no_reference' ? 'unavailable' as const : 'trimmed' as const,
+    text: schemaText(schema, styleLockNoticeKind === 'model_no_reference'
+      ? 'ui.unavailable.reason.style_lock.model_no_reference'
+      : 'ui.studio.style_lock.references_trimmed'),
+  };
   const { consent, awaiting: consentAwaiting, busy: consentBusy, decide: decideConsent } =
     useSessionAgentConsent(activeSessionId, harness, schema.chat.frontend.fallback_poll_milliseconds);
   const { proxyAssetUrl, previewAssetUrl } = useAssetURLRewriter();
@@ -837,7 +856,7 @@ export function ChatColumn() {
       queuedSelection?: ChatAttachmentClaim[],
       queuedMentions?: ChatMentionClaim[],
       queuedInputSource?: string,
-      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[] },
+      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[]; styleLockSkipped?: boolean },
     ) => {
       const scope = captureSessionScope();
       // #321: a choice-card answer is a plain turn of its own: no Skill, no draft, never queued.
@@ -1002,8 +1021,11 @@ export function ChatColumn() {
           text, images, claims, selection, mentions, ...(purposes.length > 0 ? { attachmentPurposes: purposes } : {}),
           ...(inputSource ? { inputSource } : {}),
           ...(multiview ? { multiview } : {}),
+          ...(styleLockSkipped ? { styleLockSkipped: true } : {}),
         }));
         useWorkspaceStore.getState().forgetAttachmentSources(images);
+        // The queued turn carries the exemption; the box starts the next message without it.
+        setStyleLockSkipped(false);
         // The draft is spent with the turn, even when the person has moved to another session meanwhile
         // (the scoped setters below are then no-ops and could not empty the stored draft). Only a send
         // accepted in this visit spends this visit's reads; a visit begun since has its own draft.
@@ -1122,6 +1144,7 @@ export function ChatColumn() {
                 ...(inputSource ? { inputSource } : {}),
                 ...(choiceAnswer ? { choiceAnswer } : {}),
                 ...(multiview ? { multiview } : {}),
+                ...(extra?.styleLockSkipped ? { styleLockSkipped: true } : {}),
               },
               controller.signal,
             );
@@ -1131,6 +1154,8 @@ export function ChatColumn() {
             if (selectedSkill?.oneShot && sessionSkillId(skillBySessionRef.current, sessionId) === selectedSkill.id) {
               selectSkill(sessionId, null);
             }
+            // The exemption belongs to the turn that just went out.
+            if (extra?.styleLockSkipped) setStyleLockSkipped(false);
             if (startingRef.current === starting) startingRef.current = null;
             useWorkspaceStore.getState().forgetAttachmentSources(images);
             // The draft is spent with the turn, even when the person has moved to another session meanwhile
@@ -1286,7 +1311,7 @@ export function ChatColumn() {
     drainingRef.current = true;
     setQueue((current) => cancelQueuedTurn(current, sessionId, turn.id));
     const started = startedTurnsRef.current;
-    void sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, ...(turn.multiview ? { multiview: turn.multiview } : {}) }).finally(() => {
+    void sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}) }).finally(() => {
       drainingRef.current = false;
       if (startedTurnsRef.current === started) {
         if (useChatStore.getState().activeSessionId === sessionId) {
@@ -1294,6 +1319,7 @@ export function ChatColumn() {
           useWorkspaceStore.getState().queueChatAttachments(restoreAttachments(turn.images, turn.claims));
           setAttachmentPurposes(Array.from({ length: turn.images.length }, (_, index) =>
             turn.attachmentPurposes?.find((item) => item.imageSlot === index + 1)?.purpose ?? null));
+          setStyleLockSkipped(turn.styleLockSkipped === true);
         }
         toast.error(schemaText(schema, 'ui.studio.chat.queued_restored'));
       }
@@ -2151,7 +2177,7 @@ export function ChatColumn() {
           <Composer
             value={input}
             onChange={setInput}
-            onSend={() => { void send(input, undefined, undefined, editing?.deleteIds); }}
+            onSend={() => { void send(input, undefined, undefined, editing?.deleteIds, undefined, undefined, undefined, styleLockSkipped ? { styleLockSkipped: true } : undefined); }}
             onStop={stopTurn}
             onStopInBackground={backgroundAvailable ? stopInBackground : null}
             streaming={isStreaming}
@@ -2230,6 +2256,17 @@ export function ChatColumn() {
             }}
             sendCredits={generation.nextTurn.estimate.total}
             referenceLimit={composerReferenceLimit}
+            styleLock={styleLockActive ? {
+              active: true,
+              skipped: styleLockSkipped,
+              notice: styleLockNotice,
+              onToggleSkip: () => setStyleLockSkipped((current) => !current),
+              onOpen: () => {
+                const panel = document.querySelector<HTMLElement>('[data-testid="style-lock-panel"]');
+                panel?.scrollIntoView({ block: 'nearest' });
+                panel?.querySelector<HTMLInputElement>('[data-testid="style-lock-enabled"]')?.focus();
+              },
+            } : null}
             mentions={mentions}
             onMentionPicked={(candidate) => {
               const scope = captureSessionScope();

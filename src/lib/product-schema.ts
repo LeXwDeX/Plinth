@@ -60,9 +60,11 @@ export interface ProductSchema {
         chat_skills: string;
         client_errors?: string;
         chat_session_approval: string;
-        chat_session_branch?: string;
-        chat_session_notes?: string;
-        /** #103: the session's production brief (GET/PUT). Absent on older servers. */
+         chat_session_branch?: string;
+         chat_session_notes?: string;
+         /** #154: the session's style lock (GET/PUT). */
+         chat_session_style_lock?: string;
+         /** #103: the session's production brief (GET/PUT). Absent on older servers. */
         chat_session_brief?: string;
         /** #103: decide one production plan budget (PUT approve/deny). Absent on older servers. */
         chat_session_budget?: string;
@@ -1385,9 +1387,14 @@ export interface ChatProductSchema {
       turn_backgrounded?: string;
       turn_background_available?: string;
       approval_mode: string;
-      /** 会话设定摘要的请求成员。 */
-      notes: string;
-      /** #103: 会话制作简报与明确选定的 3D 模型。 */
+       /** 会话设定摘要的请求成员。 */
+       notes: string;
+       /** #154: the session style lock request members. */
+       style_lock_enabled?: string;
+       style_lock_text?: string;
+       style_lock_references?: string;
+       style_lock_skipped?: string;
+       /** #103: 会话制作简报与明确选定的 3D 模型。 */
       brief?: string;
       explicit_model_3d?: string;
       /** #103: the request member that carries an approval decision. */
@@ -1437,8 +1444,10 @@ export interface ChatProductSchema {
       parent_deleted?: string;
       branch_canvas_copied?: string;
       approval_source: string;
-      notes: string;
-      /** #103: 会话制作简报成员。 */
+       notes: string;
+       /** #154: the response member carrying the session style lock object. */
+       style_lock?: string;
+       /** #103: 会话制作简报成员。 */
       brief?: string;
       /** #103: 会话当前制作计划预算成员；没有计划时省略。 */
       budget?: string;
@@ -1491,9 +1500,15 @@ export interface ChatProductSchema {
       token: string;
       /** Request-only: the visible layer count of the artboard snapshot claim (#272). */
       canvas_layers: string;
-      /** Request-only, optional: the picture URLs of the layers the artboard snapshot flattens (#189). */
-      canvas_sources?: string;
-    };
+       /** Request-only, optional: the picture URLs of the layers the artboard snapshot flattens (#189). */
+       canvas_sources?: string;
+     };
+     /** #154: members of the session style lock object. */
+     style_lock: {
+       enabled: string;
+       text: string;
+       references: string;
+     };
     prompt_enhance: {
       prompt_field: string;
       capability_field: string;
@@ -1568,6 +1583,8 @@ export interface ChatProductSchema {
     background_wait_poll_milliseconds?: number;
   };
   context: { image_index_base: number; maximum_session_notes_characters: number; canvas_input_source: string; reference_filename: string };
+  /** #154: bounds for the session-level style lock editor. */
+  style_lock: { maximum_text_characters: number; maximum_reference_images: number };
   /** Paid-step approval modes the Schema offers, and which capabilities a person still decides in manual mode. */
   approval_policy: {
     default_mode: string;

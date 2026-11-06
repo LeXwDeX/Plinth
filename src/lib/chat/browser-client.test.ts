@@ -71,6 +71,34 @@ describe('ChatBrowserClient', () => {
     await expect(createChatBrowserClient(schema).getNotes('s')).rejects.toBeInstanceOf(Error);
   });
 
+  it('reads and replaces the session style lock through Schema fields and keeps server detail', async () => {
+    const schema = schemaFixture();
+    schema.runtime.http.routes.chat_session_style_lock = '/configured/{sessionID}/style';
+    schema.chat.api.response_fields.style_lock = 'configured-style-lock';
+    schema.chat.api.style_lock.enabled = 'configured-enabled';
+    schema.chat.api.style_lock.text = 'configured-text';
+    schema.chat.api.style_lock.references = 'configured-references';
+    const calls: Array<{ url: string; method: string; body?: unknown }> = [];
+    const client = createChatBrowserClient(schema, {
+      fetcher: async (input, init) => {
+        const method = init?.method ?? 'GET';
+        calls.push({ url: String(input), method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+        if (method === 'PUT') {
+          return Response.json({ configuredStyle: 'ignored', 'configured-style-lock': { 'configured-enabled': true, 'configured-text': 'saved', 'configured-references': ['a2', 'a1'] } });
+        }
+        return Response.json({ 'configured-style-lock': { 'configured-enabled': true, 'configured-text': 'ink', 'configured-references': ['a1', 'a2'] } });
+      },
+    });
+    expect(await client.getStyleLock('s/1')).toEqual({ enabled: true, text: 'ink', references: ['a1', 'a2'] });
+    expect(await client.setStyleLock('s/1', { enabled: false, text: 'new', references: ['a2'] })).toEqual({ enabled: true, text: 'saved', references: ['a2', 'a1'] });
+    expect(calls).toEqual([
+      { url: '/configured/s%2F1/style', method: 'GET' },
+      { url: '/configured/s%2F1/style', method: 'PUT', body: { 'configured-enabled': false, 'configured-text': 'new', 'configured-references': ['a2'] } },
+    ]);
+    const failed = createChatBrowserClient(schema, { fetcher: async () => Response.json({ detail: 'reference rejected' }, { status: 400 }) });
+    await expect(failed.setStyleLock('s', { enabled: true, text: '', references: ['bad'] })).rejects.toMatchObject({ status: 400, message: 'reference rejected' });
+  });
+
   it('reads, sets and clears the session pick through the Schema route and member names', async () => {
     const schema = schemaFixture();
     schema.runtime.http.routes.chat_session_pick = '/configured/{sessionID}/chosen';
@@ -494,6 +522,7 @@ describe('ChatBrowserClient', () => {
         parameters: { configuredQuality: 'xhigh' },
         skill: { id: 'skill-a', name: 'Configured Skill' },
         referenceImageIndices: [2, 4],
+        styleLockSkipped: true,
       },
       new AbortController().signal,
     );
@@ -513,6 +542,7 @@ describe('ChatBrowserClient', () => {
         'configured-skill-name': 'Configured Skill',
       },
       'configured-references': [2, 4],
+      styleLockSkipped: true,
     });
     expect(accepted).toEqual({
       assistantMessageID: 'assistant-a',

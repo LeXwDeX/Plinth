@@ -246,6 +246,25 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateChatAttachments(schema.Context); err != nil {
 		return err
 	}
+	styleLockDeclared := runtime.HTTP.Routes.ChatSessionStyleLock != "" ||
+		schema.StyleLock.MaximumTextCharacters > 0 || schema.StyleLock.MaximumReferenceImages > 0 ||
+		schema.API.StyleLock.Enabled != "" || schema.API.StyleLock.Text != "" || schema.API.StyleLock.References != "" ||
+		schema.API.ResponseFields.StyleLock != ""
+	if styleLockDeclared && (schema.StyleLock.MaximumTextCharacters <= 0 || schema.StyleLock.MaximumReferenceImages <= 0 ||
+		strings.TrimSpace(schema.StyleLock.PromptTemplate) == "" || !strings.Contains(schema.StyleLock.PromptTemplate, "{style}") ||
+		strings.TrimSpace(schema.StyleLock.EditScopeTemplate) == "" ||
+		strings.TrimSpace(schema.API.StyleLock.Enabled) == "" ||
+		strings.TrimSpace(schema.API.StyleLock.Text) == "" ||
+		strings.TrimSpace(schema.API.StyleLock.References) == "" ||
+		strings.TrimSpace(schema.API.Fields.StyleLockSkipped) == "" ||
+		strings.TrimSpace(schema.API.ResponseFields.StyleLock) == "" ||
+		strings.TrimSpace(schema.Presentation.Messages.StyleLockTextTooLong) == "" ||
+		strings.TrimSpace(schema.Presentation.Messages.StyleLockReferenceLimit) == "" ||
+		strings.TrimSpace(schema.Presentation.Messages.StyleLockReferenceInvalid) == "" ||
+		strings.TrimSpace(schema.Presentation.Messages.StyleLockReferenceUnavailable) == "" ||
+		strings.TrimSpace(schema.Presentation.Messages.StyleLockReferencesTrimmed) == "") {
+		return errors.New("style_lock 的上限、字段与错误文案必须完整")
+	}
 	if err := validatePendingApprovals(schema.PendingApprovals); err != nil {
 		return err
 	}
