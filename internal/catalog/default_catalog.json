@@ -4229,7 +4229,7 @@
          "ui.studio.style_lock.enabled": "锁定风格",
          "ui.studio.style_lock.text_label": "风格说明",
          "ui.studio.style_lock.text_placeholder": "描述要保持的视觉风格、配色、材质和笔触…",
-         "ui.studio.style_lock.references_label": "风格参考图",
+         "ui.studio.style_lock.references_label": "风格参考图片",
          "ui.studio.style_lock.add_reference": "添加参考图",
          "ui.studio.style_lock.upload_reference": "上传图片",
          "ui.studio.style_lock.choose_session_reference": "从当前会话选择",
