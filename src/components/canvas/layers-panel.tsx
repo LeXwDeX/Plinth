@@ -33,6 +33,7 @@ import { inpaintMaskURL, isInpaintSource, type InpaintSource } from '@/lib/canva
 import { safeAssetURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { renderSelectionPreview } from '@/lib/canvas/selection-preview';
 import { layerName } from '@/lib/canvas/layer-name';
+import { requestLayerFollow } from '@/lib/canvas/layer-follow';
 import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-schema';
 import { cn } from '@/lib/utils';
 import { useNodeHandles } from '@/hooks/use-picture-handles';
@@ -386,7 +387,7 @@ export function CanvasLayersPanel({
                 <GripVertical className="size-3 shrink-0 cursor-grab opacity-50" aria-hidden />
                 <HintTooltip name={label} className="min-w-0 flex-1">
                   <Action variant="ghost" size="xs" type="button" className="w-full justify-start" aria-pressed={selectedIds.includes(node.id)}
-                    onClick={() => selectNodes([node.id])}>
+                    onClick={() => { selectNodes([node.id]); requestLayerFollow(sessionId, node.id); }}>
                     {typeIcon(node)}
                     <span className="truncate">{label}</span>
                   </Action>
@@ -447,4 +448,3 @@ export function CanvasLayersPanel({
     </>
   );
 }
-
