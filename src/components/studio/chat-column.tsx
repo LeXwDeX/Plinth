@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { ArrowDown, Bot, ChevronsLeft, ChevronsRight, ImagePlus } from 'lucide-react';
 import { toast } from 'sonner';
+import useSWR from 'swr';
 
 import {
   ChatMessage,
@@ -30,6 +31,8 @@ import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { useAgentEffectiveConfiguration } from '@/hooks/use-agent-effective-configuration';
 import { useAgentSkillCatalog } from '@/hooks/use-agent-skill-catalog';
+import { useAuth } from '@/hooks/use-auth';
+import { useSessionSkillSelection } from '@/hooks/use-session-skill-selection';
 import { useGenerationParams } from '@/hooks/use-generation-params';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { stageDomainOf } from '@/hooks/use-stage-domain';
@@ -230,12 +233,9 @@ export function ChatColumn() {
   const currentObject = useWorkspaceStore((state) => state.currentObject);
   const stageDomain = stageDomainOf(currentObject);
   const selectedGenerationModel = useWorkspaceStore((state) => state.modelByDomain[stageDomain]);
-  const [skillBySession, setSkillBySession] = useState<Record<string, string | null>>({});
   const [skillRefreshVersion, setSkillRefreshVersion] = useState(0);
   const preflightRef = useRef<{ sessionId: string; controller: AbortController } | null>(null);
   const [preparingSession, setPreparingSession] = useState<string | null>(null);
-  const skillBySessionRef = useRef(skillBySession);
-  skillBySessionRef.current = skillBySession;
   const { modelChoices, isLoading: modelsLoading, error: modelsError } =
     useWorkspaceOfferings(schema, stageDomain);
   // Several uploaded pictures may be views of one object when a 3D Offering takes them (found by its Schema parameter).
@@ -291,6 +291,31 @@ export function ChatColumn() {
 
   const effective = useAgentEffectiveConfiguration(schema, activeSessionId, stageDomain, selectedGenerationModel, skillRefreshVersion);
   const skillCatalog = useAgentSkillCatalog(schema, effective.data?.revision, skillRefreshVersion);
+  const { user } = useAuth();
+  const { data: supportingModels, error: supportingModelsError } = useSWR(
+    user?.id && activeSessionId && modelChoices.length
+      ? ['skill-supporting-models', schema.revision, user.id, activeSessionId, stageDomain, skillRefreshVersion,
+        effective.data?.revision, modelChoices.map((model) => [model.model_id, model.model_name])] : null,
+    async () => {
+      const results = await Promise.all(modelChoices.map(async (model) => ({
+        name: model.model_name,
+        configuration: await configurationClient.effective(stageDomain, model.model_id, activeSessionId),
+      })));
+      const models: Record<string, string[]> = {};
+      for (const result of results) {
+        for (const skill of result.configuration.skills) {
+          const names = models[skill.id] ??= [];
+          if (result.name && !names.includes(result.name)) names.push(result.name);
+        }
+      }
+      return models;
+    },
+    { revalidateOnFocus: false, shouldRetryOnError: false },
+  );
+  const { selection: skillBySession, selectionRef: skillBySessionRef, select: selectSkill } = useSessionSkillSelection(
+    user?.id ?? null, activeSessionId,
+    !skillCatalog.loading && !skillCatalog.failed ? skillCatalog.catalog?.skills ?? null : null,
+  );
   const selectedSkillId = sessionSkillId(skillBySession, activeSessionId);
   const skillSelection = resolveSessionSkill(selectedSkillId, skillCatalog.catalog?.skills ?? null, effective.data);
   const currentSkill = skillCatalog.catalog?.skills.find((item) => item.id === selectedSkillId) ?? null;
@@ -1082,9 +1107,7 @@ export function ChatColumn() {
             extra?.onSent?.();
             // A one-shot Skill (declared in the Schema) is spent once the server has the turn; a failed send keeps it.
             if (selectedSkill?.oneShot && sessionSkillId(skillBySessionRef.current, sessionId) === selectedSkill.id) {
-              const next = { ...skillBySessionRef.current, [sessionId]: null };
-              skillBySessionRef.current = next;
-              setSkillBySession(next);
+              selectSkill(sessionId, null);
             }
             if (startingRef.current === starting) startingRef.current = null;
             useWorkspaceStore.getState().forgetAttachmentSources(images);
@@ -1185,6 +1208,7 @@ export function ChatColumn() {
       modelsLoading,
       schema,
       skillBySession,
+      selectSkill,
       skillCatalog.catalog,
       configurationClient,
       setMessages,
@@ -2090,15 +2114,14 @@ export function ChatColumn() {
               catalog: skillCatalog.catalog,
               effective: effective.data,
               selectedId: selectedSkillId,
+              supportingModels: supportingModelsError ? undefined : supportingModels,
               unavailable: skillSelection.unavailable,
               loading: skillCatalog.loading || effective.loading,
               failed: skillCatalog.failed || effective.failed,
               disabled: isStreaming || preparing,
               onSelect: (id) => {
                 if (!activeSessionId) return;
-                const next = { ...skillBySessionRef.current, [activeSessionId]: id };
-                skillBySessionRef.current = next;
-                setSkillBySession(next);
+                selectSkill(activeSessionId, id);
                 // A Skill's recommended size becomes the size default when the model offers it.
                 const chosen = skillCatalog.catalog?.skills.find((item) => item.id === id);
                 const size = chosen ? skillSizeDefault(generation.nextTurn.model.sizeParams, chosen.recommendedSize) : null;
@@ -2106,17 +2129,14 @@ export function ChatColumn() {
               },
               onDeleted: (id) => {
                 // 指向被删 Skill 的会话选择改为“不使用”，不保留失效 ID（#238）。
-                const next = Object.fromEntries(Object.entries(skillBySessionRef.current)
-                  .map(([session, selected]) => [session, selected === id ? null : selected]));
-                skillBySessionRef.current = next;
-                setSkillBySession(next);
+                Object.entries(skillBySessionRef.current).forEach(([session, selected]) => {
+                  if (selected === id) selectSkill(session, null);
+                });
                 setSkillRefreshVersion((version) => version + 1);
               },
               onCreated: (id) => {
                 if (activeSessionId) {
-                  const next = { ...skillBySessionRef.current, [activeSessionId]: id };
-                  skillBySessionRef.current = next;
-                  setSkillBySession(next);
+                  selectSkill(activeSessionId, id);
                 }
                 setSkillRefreshVersion((version) => version + 1);
               },
