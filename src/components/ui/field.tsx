@@ -46,11 +46,13 @@ function Field({ id, label, children, help, meta, error, group = false, required
   const errorNode = error && <p id={errorId} role="alert" className="text-xs text-destructive">{error}</p>
 
   // #112: an inline field (a plain checkbox) keeps the control and its label on one row; what
-  // follows sits on its own lines, indented to the label (16px checkbox + 8px gap). Squeezed into
-  // the row before, the parameter source came out one character per line.
+  // follows sits on its own lines, indented to the label. Squeezed into the row before, the
+  // parameter source came out one character per line. #147: the control sits in a 16px slot, so
+  // the label starts at 16px + 8px gap = pl-6 whatever size the browser draws a checkbox (13px in
+  // Chromium left the indented lines 3px right of the label).
   if (inline) {
     return <div data-slot="field" className={cn("flex flex-col gap-1", className)}>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">{controlNode}{labelNode}</div>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1"><span className="flex w-4 shrink-0">{controlNode}</span>{labelNode}</div>
       {meta ? <div className="pl-6">{meta}</div> : null}
       {helpNode || errorNode ? <div className="space-y-1 pl-6">{helpNode}{errorNode}</div> : null}
     </div>
