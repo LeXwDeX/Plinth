@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OfferingWire } from '@/lib/agent-offerings';
 import { actionParameter, chooseProcessingSource, faceBudgetDefaults, chooseProjectedProcessingSource, prerequisiteRefusal, processingPrerequisite, processingSourceSteps, sourceRefusals, inputImageParameter, isActionParameter, isSourceParameter, sourceParameterRole, consentField, panelFields, visibleOfferingFields, type ProcessingSourceTask } from './processing-source';
 
@@ -397,6 +397,10 @@ describe('Meshy extension steps: task ID first, local file as fallback, Remesh b
   const capabilities = [{ id: 'remesh' }, { id: 'retexture' }, { id: 'uv-unwrap' }];
   const offerings = { remesh: [remesh], retexture: [retexture], 'uv-unwrap': [uv] };
   const now = Date.parse('2026-11-04T01:00:00Z');
+  // #142: processingSourceSteps and processingPrerequisite read the clock themselves; pinned here, the
+  // Meshy task stays inside its 48-hour retention whatever day the suite runs.
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(now); });
+  afterEach(() => { vi.useRealTimers(); });
 
   it('names a same-connection Meshy task by its ID, whatever the file size', () => {
     expect(chooseProcessingSource(uv, meshyTask, big, now)).toEqual({ sourceRole: 'source_task', value: 'task-a' });
