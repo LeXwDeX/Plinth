@@ -55,6 +55,8 @@ it('keeps the inline control and label on one row, with the source and help on l
   expect(row?.[2]).toContain('<input');
   expect(row?.[2]).toContain('<label for="enabled"');
   expect(row![2].indexOf('<input')).toBeLessThan(row![2].indexOf('<label for="enabled"'));
+  // #147: a fixed 16px slot puts the label at pl-6 whatever size the browser draws the checkbox.
+  expect(row![2]).toMatch(/^<span class="flex w-4 shrink-0"><input/);
   expect(row![2]).not.toContain('data-testid="meta"');
   expect(row![2]).not.toContain('id="enabled-help"');
   expect(html).toMatch(/<label for="enabled" class="[^"]*whitespace-nowrap/);
