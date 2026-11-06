@@ -1,3 +1,10 @@
+import type { CanvasViewport } from '@/store/canvas-store';
+import { viewportUnchanged } from './viewport';
+
+export function canApplyObjectFit(current: CanvasViewport, applied: CanvasViewport | null, blocked: boolean): boolean {
+  return !blocked && (!applied || viewportUnchanged(current, applied));
+}
+
 /** What the board last did for the current object: its key, and whether it joined quietly (#262). */
 export interface ObjectFitState {
   key: string;
