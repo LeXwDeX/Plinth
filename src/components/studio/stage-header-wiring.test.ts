@@ -62,7 +62,7 @@ describe('stage header wiring', () => {
     expect(chat).toMatch(/toolSkill\?\.requiresImage[\s\S]{0,400}claim\.kind === 'image'/);
     expect(chat).toContain('Boolean(currentSkill?.tool)');
     // One-shot comes from the Schema flag and is spent only after startTurn resolved (`sent = true`).
-    expect(chat).toMatch(/sent = true;[\s\S]{0,200}selectedSkill\?\.oneShot[\s\S]{0,300}\[sessionId\]: null/);
+    expect(chat).toMatch(/sent = true;[\s\S]{0,200}selectedSkill\?\.oneShot[\s\S]{0,300}selectSkill\(sessionId, null\)/);
     expect(chat).not.toMatch(/selectedSkill\?\.tool[^\n]*\[sessionId\]: null/);
   });
 });

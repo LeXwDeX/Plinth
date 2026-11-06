@@ -41,6 +41,8 @@ export interface TableRow {
   disabled?: boolean;
   /** 行停用时的短原因（#94）：写在该行的悬停提示第一行（「无法使用，…」）；缺省则无提示。 */
   disabledReason?: string;
+  /** Let keyboard users focus an unavailable row to read its reason, without allowing selection. */
+  focusableDisabled?: boolean;
   /**
    * 行尾的独立操作（如删除，#238）。它是行按钮旁的兄弟按钮，不嵌在行里：
    * 点击不会选中该行，键盘可单独聚焦。
@@ -201,7 +203,7 @@ function Section({ section, close, closeOnPick }: { section: TableSection; close
   const off = Boolean(disabledReason);
 
   const navigate = (event: KeyboardEvent, index: number) => {
-    const enabled = rows.map((row, position) => (row.disabled ? -1 : position)).filter((position) => position >= 0);
+    const enabled = rows.map((row, position) => (row.disabled && !row.focusableDisabled ? -1 : position)).filter((position) => position >= 0);
     if (enabled.length === 0) return;
     const at = enabled.indexOf(index);
     let next: number | undefined;
@@ -252,11 +254,13 @@ function Section({ section, close, closeOnPick }: { section: TableSection; close
               type="button"
               role="menuitemradio"
               aria-checked={selected}
-              disabled={off || row.disabled}
+              aria-disabled={row.disabled && row.focusableDisabled ? true : undefined}
+              aria-label={row.disabled && row.focusableDisabled ? `${row.cells[0]?.text ?? ''}: ${row.disabledReason ?? ''}` : undefined}
+              disabled={off || (row.disabled && !row.focusableDisabled)}
               onKeyDown={(event) => navigate(event, index)}
-              onClick={() => { onPick(row.key); if (closeOnPick) close(); }}
+              onClick={() => { if (row.disabled) return; onPick(row.key); if (closeOnPick) close(); }}
               style={{ gridTemplateColumns: template }}
-              className={pickerRowClass(selected)}
+              className={cn(pickerRowClass(selected), row.disabled && row.focusableDisabled && 'cursor-not-allowed opacity-40 hover:bg-transparent')}
             >
               {row.cells.map((cell, position) => (
                 cell.tag ? (

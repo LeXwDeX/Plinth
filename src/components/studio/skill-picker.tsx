@@ -9,7 +9,8 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { TablePopover, type TableRow } from '@/components/studio/table-popover';
 import { SkillCreator } from '@/components/workspace/skill-creator';
 import type { AgentEffectiveConfiguration } from '@/lib/agent-configuration';
-import type { ChatSkillCatalog } from '@/lib/chat/browser-client';
+import type { ChatSkill, ChatSkillCatalog } from '@/lib/chat/browser-client';
+import type { ProductSchema } from '@/lib/product-schema';
 import { deletePersonalSkill, listPersonalSkillIds } from '@/lib/personal-skills';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
@@ -19,12 +20,19 @@ import { withErrorReference } from '@/lib/problem-reference';
 /** The row id of "use no Skill"; it cannot collide with a catalog skill id. */
 const NO_SKILL = '';
 
+export function skillUnavailableReason(schema: ProductSchema, skill: ChatSkill, models: string[]): string {
+  if (skill.tool) return schemaText(schema, 'ui.unavailable.reason.picker.skill_not_enabled');
+  return models.length
+    ? formatSchemaText(schemaText(schema, 'ui.workspace.skills.execution_unavailable'), { models: models.join(', ') })
+    : schemaText(schema, 'ui.workspace.skills.unavailable');
+}
+
 /**
  * Skill 表格的行：目录里的每个 Skill 一行（当前模型不可用的变暗），末尾是“不使用”。
  * 只有本人的个人 Skill 带删除操作（#238）；“不使用”与系统/共享 Skill 都没有。
  */
 export function skillPickerRows({
-  catalog, effective, personalIds, noneLabel, noneHint, deleteLabel, deleting, onDelete, notEnabledReason,
+  catalog, effective, personalIds, noneLabel, noneHint, deleteLabel, deleting, onDelete, notEnabledReason, reasonForSkill,
 }: {
   catalog: ChatSkillCatalog | null;
   effective: AgentEffectiveConfiguration | null;
@@ -36,12 +44,14 @@ export function skillPickerRows({
   onDelete: (id: string) => void;
   /** Why a row the effective configuration leaves out is dimmed (#94); no hint when omitted. */
   notEnabledReason?: string;
+  reasonForSkill?: (skill: ChatSkill) => string;
 }): TableRow[] {
   return [
     ...(catalog?.skills ?? []).map((skill) => ({
       key: skill.id,
       disabled: !effective?.skills.some((item) => item.id === skill.id),
-      ...(notEnabledReason && !effective?.skills.some((item) => item.id === skill.id) ? { disabledReason: notEnabledReason } : {}),
+      ...(!effective?.skills.some((item) => item.id === skill.id) && (reasonForSkill || notEnabledReason)
+        ? { disabledReason: reasonForSkill?.(skill) ?? notEnabledReason, focusableDisabled: Boolean(reasonForSkill) } : {}),
       cells: [
         { text: skill.displayName, strong: true, kind: 'name' as const },
         { text: skill.prompt.replace(/\s+/g, ' '), muted: true },
@@ -66,13 +76,14 @@ export interface SkillPickerProps {
   disabled: boolean;
   onSelect: (id: string | null) => void;
   onCreated: (id: string) => void;
+  supportingModels?: Record<string, string[]>;
   /** 本人删除了一个个人 Skill（#238）；调用方刷新目录并把指向它的选择改为“不使用”。 */
   onDeleted?: (id: string) => void;
 }
 
 /** Skill 选择：与模型选择同样的小表格；Skill 不可用于当前模型时该行变暗。 */
 export function SkillPicker({
-  sessionId, catalog, effective, selectedId, unavailable, loading, failed, disabled, onSelect, onCreated, onDeleted,
+  sessionId, catalog, effective, selectedId, unavailable, loading, failed, disabled, onSelect, onCreated, onDeleted, supportingModels,
 }: SkillPickerProps) {
   const { schema } = useProductSchema();
   const [creating, setCreating] = useState(false);
@@ -119,13 +130,18 @@ export function SkillPicker({
     if (!panel || !focusWasLost(document.activeElement, panel)) return;
     // The first row can be disabled (三视图 on a 3D stage); focus() on it does nothing, so take the first usable
     // row ("不使用" always is).
-    panel.querySelector<HTMLElement>('[role="menuitemradio"]:not([disabled])')?.focus();
+    panel.querySelector<HTMLElement>('[role="menuitemradio"]:not([disabled]):not([aria-disabled="true"])')?.focus();
   }, [removed]);
   const selected = catalog?.skills.find((skill) => skill.id === selectedId);
   const resolvedSelection = selected && !loading && !failed && !unavailable ? selected : null;
+  const selectedReason = selectedId && !loading && (failed || unavailable)
+    ? failed ? schemaText(schema, 'ui.workspace.skills.load_failed')
+      : selected ? skillUnavailableReason(schema, selected, supportingModels?.[selected.id] ?? [])
+        : schemaText(schema, 'ui.workspace.skills.unavailable')
+    : undefined;
   const value = resolvedSelection
     ? formatSchemaText(schemaText(schema, 'ui.studio.skill.selected'), { name: resolvedSelection.displayName })
-    : schemaText(schema, 'ui.studio.skill.short');
+    : `${schemaText(schema, 'ui.studio.skill.short')}${selectedReason ? ' !' : ''}`;
   const fullValue = resolvedSelection?.displayName ?? schemaText(schema, 'ui.studio.skill.label');
 
   const visibleCatalog = catalog && removed.size > 0
@@ -137,7 +153,7 @@ export function SkillPicker({
     noneHint: schemaText(schema, 'ui.studio.skill.none_hint'),
     deleteLabel: (name) => formatSchemaText(schemaText(schema, 'ui.workspace.skills.delete_label'), { name }),
     deleting, onDelete: (id) => { void remove(id); },
-    notEnabledReason: schemaText(schema, 'ui.unavailable.reason.picker.skill_not_enabled'),
+    reasonForSkill: (skill) => skillUnavailableReason(schema, skill, supportingModels?.[skill.id] ?? []),
   });
 
   return (
@@ -147,6 +163,7 @@ export function SkillPicker({
         label={schemaText(schema, 'ui.studio.skill.title')}
         value={value}
         fullValue={fullValue}
+        hint={selectedReason}
         triggerDisabledReason={!sessionId ? schemaText(schema, 'ui.unavailable.reason.picker.no_session') : undefined}
         disabled={disabled || !sessionId}
         sections={[{
@@ -172,6 +189,8 @@ export function SkillPicker({
                   />
                 )
                 : null}
+              {selectedReason && !failed && selectedReason !== schemaText(schema, 'ui.workspace.skills.unavailable')
+                ? <p>{selectedReason}</p> : null}
               <button
                 type="button"
                 onClick={() => { close(); setCreating(true); }}
