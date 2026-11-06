@@ -14,6 +14,16 @@ import (
 )
 
 func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentations []CapabilityPresentation, maxPromptCharacters int) error {
+	if runtime.HTTP.Routes.ChatSessionBranch != "" {
+		if strings.Count(schema.Defaults.BranchTitleTemplate, "{title}") != 1 ||
+			strings.TrimSpace(schema.Presentation.Messages.BranchTurnActive) == "" ||
+			strings.TrimSpace(schema.Presentation.Messages.BranchPendingApproval) == "" ||
+			strings.TrimSpace(schema.Presentation.Messages.BranchScene) == "" ||
+			schema.API.ResponseFields.ParentSessionID == "" || schema.API.ResponseFields.ParentMessageID == "" ||
+			schema.API.ResponseFields.ParentTitle == "" || schema.API.ResponseFields.ParentDeleted == "" || schema.API.ResponseFields.BranchCanvasCopied == "" {
+			return errors.New("chat: branch route requires title template, errors and parent fields")
+		}
+	}
 	capabilityDomains := make(map[schemacontract.Capability]schemacontract.CapabilityDomain, len(capabilityPresentations))
 	for _, capability := range capabilityPresentations {
 		capabilityDomains[capability.ID] = capability.Domain

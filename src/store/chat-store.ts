@@ -77,6 +77,10 @@ export interface ChatSession {
   title: string;
   createdAt: string;
   updatedAt: string;
+  parentSessionId?: string;
+  parentMessageId?: string;
+  parentTitle?: string;
+  parentDeleted?: boolean;
   /** 会话的批准方式；服务端未给出时按手工处理。 */
   approvalMode?: ApprovalMode;
   /** 本会话累计估算积分（估算值，不是结算值）。 */
@@ -152,6 +156,7 @@ interface ChatStore {
   setSessions: (sessions: ChatSession[]) => void;
   setActiveSession: (id: string | null) => void;
   addSession: (session: ChatSession) => void;
+  rememberSession: (session: ChatSession) => void;
   removeSession: (id: string) => void;
   updateSessionTitle: (id: string, title: string) => void;
   /** 只更新批准方式与累计积分，不改动其它会话字段。 */
@@ -219,6 +224,10 @@ export const useChatStore = create<ChatStore>((set) => ({
         sessionListRevision: s.sessionListRevision + 1,
       };
     }),
+  rememberSession: (session) => set((state) => ({
+    sessions: [session, ...state.sessions.filter((item) => item.id !== session.id)],
+    sessionListRevision: state.sessionListRevision + 1,
+  })),
   removeSession: (id) =>
     set((s) => {
       const { [id]: _m, ...restMessages } = s.messagesBySession;
@@ -227,7 +236,7 @@ export const useChatStore = create<ChatStore>((set) => ({
       const { [id]: _t, ...restCounts } = s.toolCallCounts;
       if (s.activeSessionId === id) useWorkspaceStore.getState().clearSessionContext();
       return {
-        sessions: s.sessions.filter((ss) => ss.id !== id),
+        sessions: s.sessions.filter((ss) => ss.id !== id).map((ss) => ss.parentSessionId === id ? { ...ss, parentDeleted: true } : ss),
         activeSessionId: s.activeSessionId === id ? null : s.activeSessionId,
         activeSessionRevision: s.activeSessionRevision + (s.activeSessionId === id ? 1 : 0),
         sessionListRevision: s.sessionListRevision + 1,

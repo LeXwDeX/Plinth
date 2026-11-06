@@ -169,26 +169,28 @@ type PlaceholderHealingPolicy struct {
 }
 
 type ServiceConfig struct {
-	Repository           Repository
-	Clock                func() time.Time
-	NewID                func(string) string
-	DefaultTitle         string
-	UserRole             string
-	AssistantRole        string
-	PendingContent       string
-	StreamActive         string
-	StreamDone           string
-	StreamError          string
-	TurnQueued           string
-	TurnRunning          string
-	TurnWaitingTask      string
-	TurnDone             string
-	TurnError            string
-	PlaceholderHealing   PlaceholderHealingPolicy
-	StreamCleanupTTL     time.Duration
-	SubscriberBufferSize int
-	EventFields          EventFieldPolicy
-	EventTypes           EventTypePolicy
+	Repository            Repository
+	Clock                 func() time.Time
+	NewID                 func(string) string
+	DefaultTitle          string
+	BranchTitleTemplate   string
+	CanvasProjectIDPrefix string
+	UserRole              string
+	AssistantRole         string
+	PendingContent        string
+	StreamActive          string
+	StreamDone            string
+	StreamError           string
+	TurnQueued            string
+	TurnRunning           string
+	TurnWaitingTask       string
+	TurnDone              string
+	TurnError             string
+	PlaceholderHealing    PlaceholderHealingPolicy
+	StreamCleanupTTL      time.Duration
+	SubscriberBufferSize  int
+	EventFields           EventFieldPolicy
+	EventTypes            EventTypePolicy
 	// ApprovalPolicy comes from application.chat.approval_policy. A zero
 	// policy offers only manual mode.
 	ApprovalPolicy approvalpolicy.Policy
@@ -229,38 +231,40 @@ type ServiceConfig struct {
 }
 
 type Service struct {
-	repository           Repository
-	clock                func() time.Time
-	newID                func(string) string
-	defaultTitle         string
-	userRole             string
-	assistantRole        string
-	pendingContent       string
-	eventFields          EventFieldPolicy
-	eventTypes           EventTypePolicy
-	streamActive         string
-	streamDone           string
-	streamError          string
-	turnQueued           string
-	turnRunning          string
-	turnWaitingTask      string
-	turnDone             string
-	turnError            string
-	placeholderHealing   PlaceholderHealingPolicy
-	streamCleanupTTL     time.Duration
-	subscriberBufferSize int
-	streamMu             sync.Mutex
-	streamOperations     map[string]*streamOperation
-	subscribers          map[string]map[chan Event]struct{}
-	approvalPolicy       approvalpolicy.Policy
-	agentScope           agentscope.Policy
-	handles              HandlePolicy
-	attachments          AttachmentVerifier
-	maximumNotes         int
-	canvasInputSource    string
-	retiredModels        map[string]catalog.RetiredModelSuccessor
-	model3DUsage         catalog.ChatModel3DUsageSchema
-	explicitModel3DValid func(string) bool
+	repository            Repository
+	clock                 func() time.Time
+	newID                 func(string) string
+	defaultTitle          string
+	branchTitleTemplate   string
+	canvasProjectIDPrefix string
+	userRole              string
+	assistantRole         string
+	pendingContent        string
+	eventFields           EventFieldPolicy
+	eventTypes            EventTypePolicy
+	streamActive          string
+	streamDone            string
+	streamError           string
+	turnQueued            string
+	turnRunning           string
+	turnWaitingTask       string
+	turnDone              string
+	turnError             string
+	placeholderHealing    PlaceholderHealingPolicy
+	streamCleanupTTL      time.Duration
+	subscriberBufferSize  int
+	streamMu              sync.Mutex
+	streamOperations      map[string]*streamOperation
+	subscribers           map[string]map[chan Event]struct{}
+	approvalPolicy        approvalpolicy.Policy
+	agentScope            agentscope.Policy
+	handles               HandlePolicy
+	attachments           AttachmentVerifier
+	maximumNotes          int
+	canvasInputSource     string
+	retiredModels         map[string]catalog.RetiredModelSuccessor
+	model3DUsage          catalog.ChatModel3DUsageSchema
+	explicitModel3DValid  func(string) bool
 	// usageProfileKind is the declared card the brief write settles; its ID and
 	// argument name come from the Schema, not from code (#103).
 	usageProfileKind *catalog.ChatChoiceKindSchema
@@ -338,38 +342,40 @@ func NewService(config ServiceConfig) (*Service, error) {
 		)
 	}
 	return &Service{
-		repository:           config.Repository,
-		clock:                config.Clock,
-		newID:                config.NewID,
-		defaultTitle:         config.DefaultTitle,
-		userRole:             config.UserRole,
-		assistantRole:        config.AssistantRole,
-		pendingContent:       config.PendingContent,
-		eventFields:          config.EventFields,
-		eventTypes:           config.EventTypes,
-		streamActive:         config.StreamActive,
-		streamDone:           config.StreamDone,
-		streamError:          config.StreamError,
-		turnQueued:           config.TurnQueued,
-		turnRunning:          config.TurnRunning,
-		turnWaitingTask:      config.TurnWaitingTask,
-		turnDone:             config.TurnDone,
-		turnError:            config.TurnError,
-		placeholderHealing:   config.PlaceholderHealing,
-		streamCleanupTTL:     config.StreamCleanupTTL,
-		subscriberBufferSize: config.SubscriberBufferSize,
-		subscribers:          map[string]map[chan Event]struct{}{},
-		approvalPolicy:       config.ApprovalPolicy,
-		agentScope:           config.AgentScope,
-		handles:              config.Handles,
-		attachments:          config.Attachments,
-		maximumNotes:         config.MaximumSessionNotes,
-		canvasInputSource:    config.CanvasInputSource,
-		retiredModels:        retiredModelIndex(config.RetiredModels),
-		model3DUsage:         config.Model3DUsage,
-		explicitModel3DValid: config.ExplicitModel3DValid,
-		usageProfileKind:     usageProfileKindOf(config.ChoiceKinds),
-		models:               config.Models,
+		repository:            config.Repository,
+		clock:                 config.Clock,
+		newID:                 config.NewID,
+		defaultTitle:          config.DefaultTitle,
+		branchTitleTemplate:   config.BranchTitleTemplate,
+		canvasProjectIDPrefix: config.CanvasProjectIDPrefix,
+		userRole:              config.UserRole,
+		assistantRole:         config.AssistantRole,
+		pendingContent:        config.PendingContent,
+		eventFields:           config.EventFields,
+		eventTypes:            config.EventTypes,
+		streamActive:          config.StreamActive,
+		streamDone:            config.StreamDone,
+		streamError:           config.StreamError,
+		turnQueued:            config.TurnQueued,
+		turnRunning:           config.TurnRunning,
+		turnWaitingTask:       config.TurnWaitingTask,
+		turnDone:              config.TurnDone,
+		turnError:             config.TurnError,
+		placeholderHealing:    config.PlaceholderHealing,
+		streamCleanupTTL:      config.StreamCleanupTTL,
+		subscriberBufferSize:  config.SubscriberBufferSize,
+		subscribers:           map[string]map[chan Event]struct{}{},
+		approvalPolicy:        config.ApprovalPolicy,
+		agentScope:            config.AgentScope,
+		handles:               config.Handles,
+		attachments:           config.Attachments,
+		maximumNotes:          config.MaximumSessionNotes,
+		canvasInputSource:     config.CanvasInputSource,
+		retiredModels:         retiredModelIndex(config.RetiredModels),
+		model3DUsage:          config.Model3DUsage,
+		explicitModel3DValid:  config.ExplicitModel3DValid,
+		usageProfileKind:      usageProfileKindOf(config.ChoiceKinds),
+		models:                config.Models,
 	}, nil
 }
 

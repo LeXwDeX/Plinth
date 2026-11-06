@@ -223,6 +223,7 @@ export interface ChatBrowserClient {
   ): Promise<PromptEnhanceResult>;
   listSkills(signal?: AbortSignal): Promise<ChatSkillCatalog>;
   createSession(title?: string): Promise<ChatSession>;
+  branchSession(sessionID: string, messageID: string): Promise<{ session: ChatSession; canvasCopied: boolean }>;
   renameSession(sessionID: string, title: string): Promise<ChatSession>;
   deleteSession(sessionID: string): Promise<boolean>;
   getSession(sessionID: string, signal?: AbortSignal): Promise<ChatSession>;
@@ -659,7 +660,11 @@ function normalizeSession(
   const budgetField = fields.budget;
   const brief = briefField && Object.hasOwn(source, briefField) ? parseProductionBrief(source[briefField]) : null;
   const budget = budgetField ? parseSessionBudget(schema, source[budgetField]) : null;
+  const parentSessionId = fields.parent_session_id ? optionalString(source, fields.parent_session_id) : undefined;
+  const parentMessageId = fields.parent_message_id ? optionalString(source, fields.parent_message_id) : undefined;
+  const parentTitle = fields.parent_title ? optionalString(source, fields.parent_title) : undefined;
   return {
+    ...(parentSessionId ? { parentSessionId, parentMessageId, parentTitle, parentDeleted: fields.parent_deleted ? source[fields.parent_deleted] === true : false } : {}),
     ...(generationModels ? { generationModels } : {}),
     ...(generationModels && generationModelsRetired ? { generationModelsRetired } : {}),
     ...(brief ? { brief } : {}),
@@ -933,6 +938,21 @@ export function createChatBrowserClient(
     },
     // An empty title lets the server apply the Schema default and keep the
     // session waiting for its automatic title, whatever the UI locale.
+    async branchSession(sessionID, messageID) {
+      const response = await fetcher(sessionRoute(schema, schema.runtime.http.routes.chat_session_branch, sessionID), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messageId: messageID }),
+      });
+      const payload = record(await responseValue(response));
+      if (!response.ok) {
+        const error = payload[responseFields.error];
+        const detail = payload.detail;
+        throw new ChatBrowserError(typeof detail === 'string' && detail ? detail : typeof error === 'string' ? error : '', response.status, responseRequestId(response, payload));
+      }
+      const session = normalizeSession(schema, payload.session);
+      if (!session.id) throw new ChatBrowserError('', response.status);
+      const canvasField = responseFields.branch_canvas_copied;
+      return { session, canvasCopied: Boolean(canvasField && payload[canvasField] === true) };
+    },
     async createSession(title = '') {
       const response = await fetcher(
         schema.runtime.http.legacy_routes.chat_sessions,

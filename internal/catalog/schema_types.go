@@ -3321,8 +3321,13 @@ type ChatAPIResponseFields struct {
 	// ApprovalMode and EstimatedCredits carry the session approval mode and
 	// the estimated credits of accepted tasks (session DTO) or of one step
 	// (tool call DTO).
-	ApprovalMode     string `json:"approval_mode"`
-	EstimatedCredits string `json:"estimated_credits"`
+	ApprovalMode       string `json:"approval_mode"`
+	EstimatedCredits   string `json:"estimated_credits"`
+	ParentSessionID    string `json:"parent_session_id,omitempty"`
+	ParentMessageID    string `json:"parent_message_id,omitempty"`
+	ParentTitle        string `json:"parent_title,omitempty"`
+	ParentDeleted      string `json:"parent_deleted,omitempty"`
+	BranchCanvasCopied string `json:"branch_canvas_copied,omitempty"`
 	// Notes is the member carrying the session settings summary.
 	Notes string `json:"notes"`
 	// Brief is the member carrying the session production brief (#103).
@@ -3381,7 +3386,8 @@ type ChatAPIResponseFields struct {
 }
 
 type ChatDefaultsSchema struct {
-	Title string `json:"title"`
+	Title               string `json:"title"`
+	BranchTitleTemplate string `json:"branch_title_template,omitempty"`
 }
 
 type ChatRolesSchema struct {
@@ -4399,6 +4405,9 @@ type ChatMessageTexts struct {
 	CompactionNothing     string `json:"compaction_nothing,omitempty"`
 	CompactionFailed      string `json:"compaction_failed,omitempty"`
 	CompactionUnavailable string `json:"compaction_unavailable,omitempty"`
+	BranchTurnActive      string `json:"branch_turn_active,omitempty"`
+	BranchPendingApproval string `json:"branch_pending_approval,omitempty"`
+	BranchScene           string `json:"branch_scene,omitempty"`
 	// ChatModelUnavailable refuses a chat-model write while the deployment
 	// keeps no per-session choice; ChatModelInvalid one naming a model that
 	// is not available (#322 Scope 5).
@@ -4644,6 +4653,7 @@ type CoreHTTPRoutesSchema struct {
 	// ClientErrors receives browser error reports for the server log (#233).
 	ClientErrors        string `json:"client_errors,omitempty"`
 	ChatSessionApproval string `json:"chat_session_approval"`
+	ChatSessionBranch   string `json:"chat_session_branch,omitempty"`
 	ChatSessionNotes    string `json:"chat_session_notes"`
 	ChatSessionBrief    string `json:"chat_session_brief,omitempty"`
 	// ChatSessionModel3D writes the 3D model the person explicitly picked in

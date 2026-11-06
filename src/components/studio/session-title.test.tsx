@@ -30,6 +30,11 @@ describe('session title', () => {
     const name = source.slice(source.indexOf('data-testid="studio-session-name"') - 200, source.indexOf('data-testid="studio-session-name"'));
     expect(name).not.toContain('onClick');
   });
+
+  it('shows the source title or the deleted source notice', () => {
+    expect(renderToStaticMarkup(<SessionTitle session={{ ...session, parentSessionId: 'old', parentTitle: '原对话' }} />)).toContain('分支自：原对话');
+    expect(renderToStaticMarkup(<SessionTitle session={{ ...session, parentSessionId: 'old', parentTitle: '原对话', parentDeleted: true }} />)).toContain('分支自一个已删除的对话');
+  });
 });
 
 describe('rename keys', () => {
