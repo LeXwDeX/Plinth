@@ -205,7 +205,7 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
               {choices.map((choice) => (
                 <li key={choice.assetId}>
                   <button type="button" disabled={draft.references.includes(choice.assetId)} onClick={() => choose(choice)} className="size-12 overflow-hidden rounded border border-border disabled:opacity-40" aria-label={choice.label} data-testid={`style-lock-session-reference-${choice.assetId}`}>
-                    <img src={previewAssetUrl(choice.url) || safePreviewURL(choice.url)} alt="" className="size-full object-cover" />
+                    <img src={previewAssetUrl(choice.url) || safePreviewURL(choice.url)} alt={text('references_label')} className="size-full object-cover" />
                   </button>
                 </li>
               ))}
