@@ -66,10 +66,8 @@ export function SchemaParameters({ parameters, values, onChange, disabled, param
     const group = parameter.type === 'string-array' || parameter.type === 'multi-select';
     const choice = isBooleanChoice(parameter);
 
-    return <Field key={parameter.name} id={fieldId} label={parameter.label} help={help} group={group} required={parameter.required} layout={parameter.type === 'boolean' && !choice ? 'inline' : 'stacked'}>
-      {control => <>
-        {parameterMeta?.(parameter)}
-        {choice
+    return <Field key={parameter.name} id={fieldId} label={parameter.label} help={help} group={group} required={parameter.required} meta={parameterMeta?.(parameter)} layout={parameter.type === 'boolean' && !choice ? 'inline' : 'stacked'}>
+      {control => choice
         ? <ChoiceChips id={control.id} describedBy={control['aria-describedby']} label={parameter.label} options={parameter.options ?? []} current={String(Boolean(value ?? parameter.default))} disabled={locked} onChange={selected => onChange(parameter.name, selected === 'true')} />
         : parameter.type === 'boolean'
         ? <input {...control} type="checkbox" checked={Boolean(value)} disabled={locked} onChange={event => onChange(parameter.name, event.target.checked)} />
@@ -90,7 +88,6 @@ export function SchemaParameters({ parameters, values, onChange, disabled, param
                     <input {...control} className="w-full rounded-md border bg-background px-3 py-2" type={parameter.type === 'number' ? 'number' : 'text'} value={String(value ?? '')} onChange={event => onChange(parameter.name, event.target.value === '' ? '' : parameter.type === 'number' ? Number(event.target.value) : event.target.value)} disabled={locked} required={parameter.required} min={parameter.min} max={parameter.max} step={parameter.step ?? (validation?.integer ? 1 : 'any')} maxLength={validation?.max_length} list={parameter.options?.length ? `${fieldId}-options` : undefined} />
                     {parameter.options?.length ? <datalist id={`${fieldId}-options`}>{parameter.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</datalist> : null}
                   </>}
-      </>}
     </Field>;
   })}</>;
 }

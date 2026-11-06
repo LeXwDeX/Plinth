@@ -8,7 +8,7 @@ import { schemaText, type ProductSchema } from '@/lib/product-schema';
 import { buildGenerationParams, effectiveOfferingValues, estimateCredits } from '@/lib/workspace/generation-params';
 const schema = catalog.application as unknown as ProductSchema;
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema, text: (key: string) => schemaText(schema, key) }) }));
-import { ParamsDomainSection } from './params-popover';
+import { ParameterOrigin, ParamsDomainSection } from './params-popover';
 const offering = (domain: string): OfferingWire => ({ id: `${domain}/selected`, revision: 'changed', provider_id: 'fixture', provider_name: 'Fixture', model_id: domain, model_name: `Selected ${domain}`, capability: domain === 'image' ? 'text-to-image' : 'text-to-3d', available: true, parameters: [
   { name: 'count', label: `${domain} count`, type: 'number', default: 1, minimum: 1, maximum: 5 },
   { name: 'quality', label: `${domain} definition`, type: 'select', fixed: true, default: 'ultra', options: [{ value: 'ultra', label: `${domain} exact maximum` }], presentation: { surface: 'readonly', visible_when: [{ parameter: 'count', operator: 'equals', value: 1 }] } },
@@ -78,6 +78,42 @@ it('shows the Agent source and reason on an advised readonly value without enabl
   expect(html).not.toContain('parameter-reset-auto');
   expect(html).not.toMatch(/<(?:input|select)/);
   expect(html).not.toContain('DO_NOT_EXPOSE');
+});
+
+// #112: one state word per source, on one line, and a reset only once something moved the value off its default.
+describe('parameter origin of a plain boolean', () => {
+  const wire = offering('model');
+  wire.parameters = [{ name: 'auto_size', label: '自动真实尺寸', type: 'boolean', default: false }];
+  const origin = (state: NonNullable<GenerationParams['parameterStates']>[string]) => {
+    const context = params(wire, state.source === 'default' ? {} : { auto_size: true });
+    context.parameterStates = { auto_size: state };
+    return renderToStaticMarkup(<ParameterOrigin params={context} name="auto_size" />);
+  };
+  const retired = ['自动', '后端默认', '手动固定', '恢复自动'];
+
+  it('says 默认 without a reset while the Schema default applies', () => {
+    const html = origin({ value: false, source: 'default' });
+    expect(html).toContain(schemaText(schema, 'ui.studio.params.state_default'));
+    expect(html).not.toContain('parameter-reset-auto');
+    expect(html).toMatch(/<span class="whitespace-nowrap">/);
+    for (const word of retired) expect(html).not.toContain(word);
+  });
+
+  it('names the Agent and its reason, and offers 恢复默认', () => {
+    const html = origin({ value: true, source: 'agent', reason: 'Needs real-world scale' });
+    expect(html).toContain(schemaText(schema, 'ui.studio.params.source_agent'));
+    expect(html).toContain('Needs real-world scale');
+    expect(html).toMatch(new RegExp(`data-testid="parameter-reset-auto"[^>]*>${schemaText(schema, 'ui.studio.params.reset_default')}</button>`));
+    for (const word of retired) expect(html).not.toContain(word);
+  });
+
+  it('marks a user pin as 已手动设置 and offers 恢复默认', () => {
+    const html = origin({ value: true, source: 'user' });
+    expect(html).toContain(schemaText(schema, 'ui.studio.params.state_user'));
+    expect(html).toMatch(/<span class="whitespace-nowrap font-medium text-foreground">/);
+    expect(html).toMatch(new RegExp(`data-testid="parameter-reset-auto"[^>]*>${schemaText(schema, 'ui.studio.params.reset_default')}</button>`));
+    for (const word of retired) expect(html).not.toContain(word);
+  });
 });
 
 // #243: the panel opens above its trigger; a content-sized height moved its top

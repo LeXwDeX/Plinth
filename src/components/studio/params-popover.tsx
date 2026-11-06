@@ -70,20 +70,21 @@ function Row({ label, note, children }: { label: string; note?: string; children
 }
 
 /** Source is projected by the server; a control interaction alone creates a user pin. */
-function ParameterOrigin({ params, name, disabled = false, readonly = false, size = false, onReset }: { params: GenerationParams; name: string; disabled?: boolean; readonly?: boolean; size?: boolean; onReset?: () => void }) {
+export function ParameterOrigin({ params, name, disabled = false, readonly = false, size = false, onReset }: { params: GenerationParams; name: string; disabled?: boolean; readonly?: boolean; size?: boolean; onReset?: () => void }) {
   const { schema } = useProductSchema();
   const text = (key: string) => schemaText(schema, key);
   const state = params.parameterStates?.[name] ?? { source: 'default' as const };
   const manual = state.source === 'user';
-  // #267: an output size always names a target (the canvas matches it), so it is never "自动";
-  // without a choice it is the Schema default, and resetting returns to that default.
-  const unpinned = size ? 'ui.studio.params.size_default' : 'ui.studio.params.auto';
-  const reset = size ? 'ui.studio.params.reset_size_default' : 'ui.studio.params.reset_auto';
-  return <div className="flex flex-col gap-1 text-[11px] leading-4 text-muted-foreground" data-testid="parameter-origin" data-parameter={name} data-source={state.source}>
-    <div className="flex items-baseline gap-2">
-      <span className={manual ? 'font-medium text-foreground' : ''}>{text(manual ? 'ui.studio.params.explicit' : unpinned)}</span>
-      {!manual ? <span>{text(state.source === 'agent' ? 'ui.studio.params.source_agent' : 'ui.studio.params.source_default')}</span> : null}
-      {!readonly && state.source !== 'default' ? <button type="button" disabled={disabled} onClick={() => { params.setValue(name, null); onReset?.(); }} className="ml-auto shrink-0 rounded text-primary underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" data-testid="parameter-reset-auto">{text(reset)}</button> : null}
+  // #112: one state word per source. #267: an output size always names a target (the canvas
+  // matches it), so without a choice it is the Schema default size, and resetting returns to it.
+  const label = manual ? 'ui.studio.params.state_user'
+    : state.source === 'agent' ? 'ui.studio.params.source_agent'
+    : size ? 'ui.studio.params.size_default' : 'ui.studio.params.state_default';
+  const reset = size ? 'ui.studio.params.reset_size_default' : 'ui.studio.params.reset_default';
+  return <div className="flex w-full min-w-0 flex-col gap-1 text-[11px] leading-4 text-muted-foreground" data-testid="parameter-origin" data-parameter={name} data-source={state.source}>
+    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+      <span className={manual ? 'whitespace-nowrap font-medium text-foreground' : 'whitespace-nowrap'}>{text(label)}</span>
+      {!readonly && state.source !== 'default' ? <button type="button" disabled={disabled} onClick={() => { params.setValue(name, null); onReset?.(); }} className="ml-auto shrink-0 whitespace-nowrap rounded text-primary underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" data-testid="parameter-reset-auto">{text(reset)}</button> : null}
     </div>
     {state.source === 'agent' && state.reason ? <p className="[overflow-wrap:anywhere]" data-testid="parameter-agent-reason">{state.reason}</p> : null}
   </div>;
