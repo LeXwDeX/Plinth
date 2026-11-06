@@ -202,7 +202,7 @@ function escapeRegExp(text: string): string {
 
 /** Whether the text names this token as a whole word. */
 export function mentionsToken(text: string, token: string): boolean {
-  return new RegExp(`(^|[\\s,，。.、(（])${escapeRegExp(token)}(?![A-Za-z0-9_])`).test(text);
+  return new RegExp(`(^|[^A-Za-z0-9_])${escapeRegExp(token)}(?![A-Za-z0-9_])`).test(text);
 }
 
 /**
@@ -255,10 +255,11 @@ export interface ActiveMention {
 }
 
 const TRIGGER = '@';
+const MENTION_WORD = /[A-Za-z0-9_]/;
 
 /**
- * The `@` word the caret is in: it starts at the beginning of the text or after
- * whitespace and has no whitespace between it and the caret.
+ * The `@` word the caret is in: `@` starts the text or follows a character other than an ASCII
+ * letter, digit or underscore (so an email like `a@b` stays plain text). No whitespace follows it before the caret.
  */
 export function activeMention(value: string, caret: number): ActiveMention | null {
   if (caret < 1 || caret > value.length) return null;
@@ -266,7 +267,9 @@ export function activeMention(value: string, caret: number): ActiveMention | nul
     const char = value[index];
     if (/\s/.test(char)) return null;
     if (char === TRIGGER) {
-      if (index > 0 && !/\s/.test(value[index - 1])) return null;
+      // #149: Chinese is written without a space before @ ("改成@img1"); only an ASCII word character right
+      // before it (an e-mail address, "a@b") keeps it plain text. Same rule as mentionsToken and the server.
+      if (index > 0 && MENTION_WORD.test(value[index - 1])) return null;
       return { start: index, query: value.slice(index + 1, caret) };
     }
   }
@@ -289,7 +292,7 @@ export function insertMention(value: string, mention: ActiveMention, caret: numb
   return { value: `${before}${inserted}${after}`, caret: before.length + handle.length + 1 };
 }
 
-const HANDLE_PATTERN = /(^|[\s,，。.、(（])(@(?:img|model|ref)\d+)(?![A-Za-z0-9])/g;
+const HANDLE_PATTERN = /(^|[^A-Za-z0-9_])(@(?:img|model|ref)\d+)(?![A-Za-z0-9_])/g;
 
 /** Every handle the text names, in the order written. */
 export function typedHandles(text: string): string[] {

@@ -5,7 +5,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 )
 
@@ -474,8 +473,12 @@ func (service *Service) verifyMentions(ctx context.Context, command StartTurn, r
 	}
 }
 
+// isMentionBoundary reports whether a mention may start right after r. Chinese is written without a space
+// before "@" ("改成@版本1"), so anything but an ASCII letter, digit or underscore will do (#149); those keep
+// an e-mail address or "a@b" plain text. Keep in step with activeMention and mentionsToken in
+// src/lib/chat/mentions.ts.
 func isMentionBoundary(r rune) bool {
-	return unicode.IsSpace(r) || strings.ContainsRune(",，。.、(（", r)
+	return !isMentionWordRune(r)
 }
 
 // isMentionWordRune reports whether r continues a token. Only ASCII letters, digits and underscore do, so
@@ -486,7 +489,7 @@ func isMentionWordRune(r rune) bool {
 }
 
 // mentionSpans finds the whole-word occurrences of token in text: it starts at
-// the beginning or after a space or punctuation mark, and is not followed by an
+// the beginning or after anything but an ASCII word character, and is not followed by an
 // ASCII letter, digit or underscore.
 func mentionSpans(text, token string) [][2]int {
 	var spans [][2]int

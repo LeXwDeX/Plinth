@@ -26,8 +26,17 @@ describe('activeMention', () => {
     expect(activeMention('做成 @model1', 10)).toEqual({ start: 3, query: 'model1' });
   });
 
+  it('opens right after Chinese text or punctuation, with no space before the @ (#149)', () => {
+    expect(activeMention('改成@im', 5)).toEqual({ start: 2, query: 'im' });
+    expect(activeMention('参考（@', 4)).toEqual({ start: 3, query: '' });
+    expect(activeMention('文字@', 3)).toEqual({ start: 2, query: '' });
+    expect(activeMention('第一行\n@', 5)).toEqual({ start: 4, query: '' });
+    expect(activeMention('😀@', 3)).toEqual({ start: 2, query: '' });
+  });
+
   it('ignores an @ inside a word or after a space has ended the word', () => {
     expect(activeMention('a@b', 3)).toBeNull();
+    expect(activeMention('x_@b', 4)).toBeNull();
     expect(activeMention('@img1 然后', 8)).toBeNull();
     expect(activeMention('没有', 2)).toBeNull();
     expect(activeMention('@x', 0)).toBeNull();
@@ -56,6 +65,8 @@ describe('typedHandles and overridingHandle', () => {
     expect(typedHandles('用 @img1 去背景，参考 @model2')).toEqual(['@img1', '@model2']);
     expect(typedHandles('@img3\n再来')).toEqual(['@img3']);
     expect(typedHandles('邮箱 a@img1.com 和 @image 不算')).toEqual([]);
+    expect(typedHandles('把文字@img1改成蓝色')).toEqual(['@img1']);
+    expect(typedHandles('@img1_x')).toEqual([]);
   });
 
   it('names the handle that takes the turn from the current object', () => {
@@ -68,6 +79,7 @@ describe('typedHandles and overridingHandle', () => {
     expect(overridingHandle('把 @img5 和 @img1 合起来', '@img5')).toBe('');
     expect(overridingHandle('换成红黑配色', '@img5')).toBe('');
     expect(overridingHandle('用 @img1 去背景', '')).toBe('');
+    expect(overridingHandle('@img1_x', '@model1')).toBe('');
   });
 
   it('does not mistake a longer number for the current handle', () => {
@@ -82,6 +94,11 @@ describe('mentionsToken', () => {
     expect(mentionsToken('@img1x', '@img1')).toBe(false);
     expect(mentionsToken('@img1_', '@img1')).toBe(false);
     expect(mentionsToken('a@img1', '@img1')).toBe(false);
+    expect(mentionsToken('img1@img2', '@img2')).toBe(false);
+    expect(mentionsToken('name@example.com', '@example')).toBe(false);
+    // #149: no space is needed after Chinese text.
+    expect(mentionsToken('把文字@img1改成蓝色', '@img1')).toBe(true);
+    expect(mentionsToken('参考：@画布', '@画布')).toBe(true);
   });
 });
 

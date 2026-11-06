@@ -94,6 +94,57 @@ func TestMentionNotWrittenInTheTextOrInsideAWordIsDropped(t *testing.T) {
 	}
 }
 
+// #149: Chinese is written without a space before "@"; such a mention is verified like any other, while an ASCII
+// word character right before "@" still keeps it plain text.
+func TestMentionRightAfterChineseTextNeedsNoSpace(t *testing.T) {
+	held := map[string]bool{"task-1": true, "asset-1": true}
+	ref := chat.AttachmentRef{Kind: chat.AttachmentKindImage, TaskID: "task-1", AssetID: "asset-1"}
+	_, attachments, dropped := startMentionTurn(t, held, chat.StartTurn{
+		Content:  "把@版本1改成蓝色",
+		Mentions: []chat.MentionRef{{Token: "@版本1", Ref: ref}},
+	})
+	if len(attachments) != 1 || len(dropped) != 0 {
+		t.Fatalf("attachments = %+v, dropped = %v", attachments, dropped)
+	}
+	_, attachments, dropped = startMentionTurn(t, held, chat.StartTurn{
+		Content:  "mail x_@版本1",
+		Mentions: []chat.MentionRef{{Token: "@版本1", Ref: ref}},
+	})
+	if len(attachments) != 0 || len(dropped) != 1 {
+		t.Fatalf("after an ASCII word character: attachments = %+v, dropped = %v", attachments, dropped)
+	}
+}
+
+func TestMentionWordBoundaries(t *testing.T) {
+	held := map[string]bool{"task-1": true, "asset-1": true}
+	ref := chat.AttachmentRef{Kind: chat.AttachmentKindImage, TaskID: "task-1", AssetID: "asset-1"}
+	for _, tc := range []struct {
+		content string
+		token   string
+		keep    bool
+	}{
+		{"@img1_", "@img1", false},
+		{"x@img1.com", "@img1", false},
+		{"img1@img2", "@img2", false},
+		{"line\n@img1", "@img1", true},
+		{"参考：@img1", "@img1", true},
+		{"see (@img1)", "@img1", true},
+	} {
+		t.Run(tc.content, func(t *testing.T) {
+			content, attachments, dropped := startMentionTurn(t, held, chat.StartTurn{
+				Content: tc.content, Mentions: []chat.MentionRef{{Token: tc.token, Ref: ref}},
+			})
+			if tc.keep {
+				if content != strings.ReplaceAll(tc.content, tc.token, "@img1") || len(attachments) != 1 || len(dropped) != 0 {
+					t.Fatalf("content = %q, attachments = %+v, dropped = %v", content, attachments, dropped)
+				}
+			} else if content != tc.content || len(attachments) != 0 || !reflect.DeepEqual(dropped, []string{tc.token}) {
+				t.Fatalf("content = %q, attachments = %+v, dropped = %v", content, attachments, dropped)
+			}
+		})
+	}
+}
+
 func TestMentionOfAHistoryHandlePassesThroughUnchanged(t *testing.T) {
 	verifier := &recordingVerifier{held: map[string]map[string]bool{}}
 	service, _, _ := newHandleService(t, verifier)

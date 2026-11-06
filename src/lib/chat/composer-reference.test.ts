@@ -24,6 +24,8 @@ describe('handle references', () => {
       { text: '把 ' }, { text: '@img1', handle: '@img1' }, { text: ' 的雾调淡，@img2 不变' },
     ]);
     expect(splitHandles('@img1。', known)).toEqual([{ text: '@img1', handle: '@img1' }, { text: '。' }]);
+    expect(splitHandles('文字@img1', known)).toEqual([{ text: '文字' }, { text: '@img1', handle: '@img1' }]);
+    expect(splitHandles('a@img1', known)).toEqual([{ text: 'a@img1' }]);
     expect(splitHandles('a@img1 @img10 @img1x', known)).toEqual([{ text: 'a@img1 @img10 @img1x' }]);
     expect(splitHandles('把 @model1 换贴图', (handle) => handle === '@model1')).toEqual([
       { text: '把 ' }, { text: '@model1', handle: '@model1' }, { text: ' 换贴图' },
