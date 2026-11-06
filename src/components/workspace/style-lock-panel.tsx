@@ -18,6 +18,7 @@ import { useCanvasStore, type CanvasNode } from '@/store/canvas-store';
 import { useChatStore, type ChatMessage } from '@/store/chat-store';
 
 const NO_NODES: readonly CanvasNode[] = [];
+const NO_MESSAGES: readonly ChatMessage[] = [];
 
 export interface StyleLockDraft {
   draft: ChatStyleLock;
@@ -68,7 +69,7 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
   const client = useMemo(() => createChatBrowserClient(schema), [schema]);
   const lockState = useStyleLock(client, sessionId);
   const { previewAssetUrl } = useAssetURLRewriter();
-  const messages = useChatStore((state) => (sessionId ? state.messagesBySession?.[sessionId] ?? [] : []));
+  const messages = useChatStore((state) => (sessionId ? state.messagesBySession?.[sessionId] ?? NO_MESSAGES : NO_MESSAGES));
   const nodes = useCanvasStore((state) => (sessionId ? state.nodesBySession[sessionId] ?? NO_NODES : NO_NODES));
   const maximumText = schema.chat.style_lock?.maximum_text_characters ?? 0;
   const maximumReferences = schema.chat.style_lock?.maximum_reference_images ?? 0;
