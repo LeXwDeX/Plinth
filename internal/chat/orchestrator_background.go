@@ -237,6 +237,22 @@ func (orchestrator *Orchestrator) finalizeBackgroundTurn(ctx context.Context, co
 	})
 }
 
+// backgroundTaskVisible reports whether a background Task belongs in the next
+// prompt: running Tasks always do; a failed Task only when it finished after
+// the Agent's last reply (otherwise that reply already had the failure).
+func backgroundTaskVisible(task generation.Task, lastAssistantAt time.Time) bool {
+	if !task.State.Terminal() {
+		return true
+	}
+	if task.State != generation.TaskFailed || task.Failure == nil {
+		return false
+	}
+	if task.FinishedAt == nil || lastAssistantAt.IsZero() {
+		return true
+	}
+	return task.FinishedAt.After(lastAssistantAt)
+}
+
 // backgroundTasksPrompt lists, for the Agent, the Tasks of this session that
 // the person stopped waiting for and that still run (#137), so a later turn
 // looks them up instead of submitting the same paid generation again. Only the
@@ -247,6 +263,15 @@ func (orchestrator *Orchestrator) backgroundTasksPrompt(ctx context.Context, own
 	policy := orchestrator.schema.Agent.BackgroundWait
 	if policy == nil || orchestrator.taskGet == nil || ownerID == "" || sessionID == "" {
 		return ""
+	}
+	// A background Task that failed after the Agent's last reply is news the Agent has not had a chance to
+	// report; failed Tasks from before that reply were already available to it and are not repeated.
+	lastAssistantAt := time.Time{}
+	for index := len(history) - 1; index >= 0; index-- {
+		if history[index].Role == "assistant" {
+			lastAssistantAt = history[index].CreatedAt
+			break
+		}
 	}
 	var lines []string
 	read := map[string]bool{}
@@ -260,11 +285,19 @@ func (orchestrator *Orchestrator) backgroundTasksPrompt(ctx context.Context, own
 			read[call.TaskID] = true
 			task, err := orchestrator.taskGet(ctx, ownerID, call.TaskID)
 			if err != nil || task.ID != generation.TaskID(call.TaskID) ||
-				task.OwnerID != generation.OwnerID(ownerID) || task.SessionID != sessionID || task.State.Terminal() {
+				task.OwnerID != generation.OwnerID(ownerID) || task.SessionID != sessionID {
+				continue
+			}
+			if !backgroundTaskVisible(task, lastAssistantAt) {
 				continue
 			}
 			status := string(task.State)
-			if task.UpstreamQueue != nil {
+			if task.State.Terminal() {
+				status += " (" + string(task.Failure.Class) + ")"
+				if task.Failure.SafeDetail != "" {
+					status += ": " + task.Failure.SafeDetail
+				}
+			} else if task.UpstreamQueue != nil {
 				status += orchestrator.text(ctx, policy.UpstreamQueuedStatus)
 			}
 			model := task.Offering.ModelName

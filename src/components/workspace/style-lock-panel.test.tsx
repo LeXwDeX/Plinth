@@ -158,7 +158,10 @@ describe('style-lock draft persistence', () => {
   it('keeps an unsaved draft across a tab switch (unmount and remount)', async () => {
     const first = render(<StyleLockPanel sessionId="s1" />);
     const textarea = await screen.findByTestId('style-lock-text');
+    // Type after the saved lock has loaded: this covers the draft, not a race with the first read.
+    await waitFor(() => expect((textarea as HTMLTextAreaElement).value).toBe('ink'));
     fireEvent.change(textarea, { target: { value: 'draft text' } });
+    await waitFor(() => expect((textarea as HTMLTextAreaElement).value).toBe('draft text'));
     first.unmount();
     render(<StyleLockPanel sessionId="s1" />);
     await waitFor(() => expect((screen.getByTestId('style-lock-text') as HTMLTextAreaElement).value).toBe('draft text'));

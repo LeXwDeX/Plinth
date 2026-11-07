@@ -23,6 +23,8 @@ const englishApplication = {
 };
 
 const schemaState = vi.hoisted(() => ({ current: null as unknown }));
+const toastError = vi.hoisted(() => vi.fn());
+vi.mock('sonner', () => ({ toast: { error: toastError, success: vi.fn() } }));
 vi.mock('@/components/product-schema-provider', () => ({
   useProductSchema: () => ({
     schema: schemaState.current,
@@ -78,6 +80,7 @@ const finish = (taskId: string, outcome: 'done' | 'failed') => useWorkspaceStore
 
 beforeEach(() => {
   schemaState.current = application;
+  toastError.mockClear();
   FakeNotification.permission = 'granted'; FakeNotification.requested = 0; FakeNotification.created = [];
   storage.clear(); listeners.clear(); doc.title = '画板'; doc.visibilityState = 'hidden';
   useWorkspaceStore.setState({ trackedTasks: [] });
@@ -109,13 +112,24 @@ describe('task completion notice', () => {
     expect(doc.title).toBe('(1) Task finished · 画板');
   });
 
-  it('says nothing while the tab is in view', () => {    install(true);
+  it('shows one manual-dismiss toast for a failure while the tab is in view', () => {
+    install(true);
     doc.visibilityState = 'visible';
     useTaskCompletionNotice();
     register('t1');
     finish('t1', 'failed');
     expect(doc.title).toBe('画板');
     expect(FakeNotification.created).toHaveLength(0);
+    expect(toastError).toHaveBeenCalledTimes(1);
+    const [title, options] = toastError.mock.calls[0];
+    expect(title).toBe(application.content.messages['ui.workspace.notice.failed']);
+    expect(options).toMatchObject({
+      id: 'task-failed-t1',
+      duration: Infinity,
+      closeButton: true,
+      description: 'prompt t1 · x',
+    });
+    expect(options.action.label).toBe(application.content.messages['ui.workspace.tasks.open']);
   });
 
   it('never asks for permission when a task starts or finishes', () => {
