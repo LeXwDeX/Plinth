@@ -167,6 +167,63 @@ func BenchmarkModelPipeline(b *testing.B) {
 	})
 }
 
+// BenchmarkRenderTexturedPBR compares the legacy base-color path with the
+// approximate PBR path at the render size used by the review pipeline. The PBR
+// fixture uses base color, metallic-roughness and normal textures; both render
+// the same 2x2-unit quad so geometry and coverage are identical. Warm-up runs
+// keep decode and accessor costs out of the measured loop.
+func BenchmarkRenderTexturedPBR(b *testing.B) {
+	build := func(pbr bool) *Model {
+		builder := newTestGLB()
+		base := addSolidTexture(b, builder, 256, 256, color.NRGBA{R: 210, G: 180, B: 140, A: 255})
+		var fields map[string]any
+		if pbr {
+			mr := addSolidTexture(b, builder, 256, 256, color.NRGBA{R: 255, G: 90, B: 255, A: 255})
+			normal := addSolidTexture(b, builder, 256, 256, color.NRGBA{R: 128, G: 160, B: 255, A: 255})
+			fields = pbrFactorFields(0.85, 0.35)
+			fields["pbrMetallicRoughness"].(map[string]any)["baseColorTexture"] =
+				map[string]any{"index": base}
+			fields["pbrMetallicRoughness"].(map[string]any)["metallicRoughnessTexture"] =
+				map[string]any{"index": mr}
+			fields["normalTexture"] = map[string]any{"index": normal}
+		} else {
+			fields = texturedQuadFields([4]float64{1, 1, 1, 1})
+			fields["pbrMetallicRoughness"].(map[string]any)["baseColorTexture"] =
+				map[string]any{"index": base}
+		}
+		material := builder.addMaterial(fields)
+		addTexturedQuad(builder, material, true, nil)
+		return mustParseModel(b, builder.finish(), DefaultLimits())
+	}
+	request := RenderRequest{
+		Width: 768, Height: 768, View: ViewFront, Mode: ModeTextured, Workers: 1,
+	}
+	for _, test := range []struct {
+		name  string
+		model *Model
+	}{
+		{name: "Legacy", model: build(false)},
+		{name: "PBRThreeTextures", model: build(true)},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			b.ReportAllocs()
+			if _, err := Render(test.model, request); err != nil {
+				b.Fatalf("warm-up Render: %v", err)
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				img, err := Render(test.model, request)
+				if err != nil {
+					b.Fatalf("Render: %v", err)
+				}
+				benchmarkRenderSink = img.Bounds().Dx()
+			}
+		})
+	}
+}
+
+var benchmarkRenderSink int
+
 // BenchmarkTopologyEdgeCounting compares the two candidate edge-counting
 // implementations. The package uses the sorted variant because it allocates
 // less while remaining close in speed for multi-million-edge meshes.

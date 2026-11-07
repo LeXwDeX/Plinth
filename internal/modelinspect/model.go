@@ -145,6 +145,14 @@ type Material struct {
 	// AlphaCutoff is the MASK threshold; the glTF default is 0.5.
 	AlphaCutoff float64
 	DoubleSided bool
+
+	// pbrDeclared records that the source material explicitly declared a
+	// metallic factor, a roughness factor or a metallic-roughness texture.
+	// Only such materials use the approximate metallic-roughness renderer;
+	// materials that set only base color or a normal texture keep the legacy
+	// lighting, because glTF defaults an undeclared metallicFactor to 1 and
+	// applying it would turn ordinary assets into dark metals.
+	pbrDeclared bool
 }
 
 // Texture is one glTF texture. Sampler is -1 when the default sampler is used.

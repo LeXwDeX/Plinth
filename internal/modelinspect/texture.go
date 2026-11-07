@@ -8,8 +8,9 @@ import (
 )
 
 // decodedTexture is a texture decoded to non-premultiplied 8-bit RGBA plus
-// the sampler wrap modes. RGB samples are converted to linear light with a
-// lookup table because the renderer works in linear space.
+// the sampler wrap modes. Callers choose the transfer function: base color and
+// emissive data are sampled as sRGB, while metallic-roughness, normal and
+// occlusion data are linear.
 type decodedTexture struct {
 	width, height int
 	pixels        []uint8
@@ -23,11 +24,11 @@ type decodedImage struct {
 	pixels        []uint8
 }
 
-// decodeTexture decodes the base-color texture identified by textureIndex.
-// A nil result with a nil error means the image exceeds MaxTexturePixels and
-// the caller must fall back to material factors. Exceeding either cumulative
-// budget is an ErrTooLarge error so decoding stops before more pixels are
-// allocated.
+// decodeTexture decodes the texture identified by textureIndex. A nil result
+// with a nil error means the image exceeds MaxTexturePixels and the caller must
+// fall back to material factors. Exceeding either cumulative budget is an
+// ErrTooLarge error so decoding stops before more pixels are allocated;
+// optional material slots catch it and degrade instead of failing the render.
 func (m *Model) decodeTexture(textureIndex int) (*decodedTexture, error) {
 	m.textureCache.mu.Lock()
 	defer m.textureCache.mu.Unlock()
@@ -140,10 +141,10 @@ func withinBudget(used, add, limit int64) bool {
 	return used <= limit-add
 }
 
-// sample returns bilinearly interpolated linear RGBA at (u, v). glTF UVs use
-// a top-left origin, which matches image.NRGBA's row order, so v is not
-// flipped here.
-func (t *decodedTexture) sample(u, v float64) [4]float64 {
+// sampleSRGB returns bilinearly interpolated linear RGBA at (u, v), decoding
+// RGB through the sRGB transfer function before filtering. Base color and
+// emissive textures use it.
+func (t *decodedTexture) sampleSRGB(u, v float64) [4]float64 {
 	if !finite(u) || !finite(v) {
 		return [4]float64{0, 0, 0, 0}
 	}
@@ -157,32 +158,76 @@ func (t *decodedTexture) sample(u, v float64) [4]float64 {
 	fy := y - float64(y0)
 	x0Index := t.index(x0, t.wrapS, t.width)
 	x1Index := t.index(x0+1, t.wrapS, t.width)
-	y0Index := t.index(y0, t.wrapT, t.height)
-	y1Index := t.index(y0+1, t.wrapT, t.height)
-	topLeft := t.texel(x0Index, y0Index)
-	topRight := t.texel(x1Index, y0Index)
-	bottomLeft := t.texel(x0Index, y1Index)
-	bottomRight := t.texel(x1Index, y1Index)
+	topRow := t.index(y0, t.wrapT, t.height) * t.width
+	bottomRow := t.index(y0+1, t.wrapT, t.height) * t.width
+	o0 := (topRow + x0Index) * 4
+	o1 := (topRow + x1Index) * 4
+	o2 := (bottomRow + x0Index) * 4
+	o3 := (bottomRow + x1Index) * 4
+
+	var out [4]float64
+	for channel := 0; channel < 3; channel++ {
+		topLeft := srgbToLinear[t.pixels[o0+channel]]
+		topRight := srgbToLinear[t.pixels[o1+channel]]
+		bottomLeft := srgbToLinear[t.pixels[o2+channel]]
+		bottomRight := srgbToLinear[t.pixels[o3+channel]]
+		top := topLeft + (topRight-topLeft)*fx
+		bottom := bottomLeft + (bottomRight-bottomLeft)*fx
+		out[channel] = top + (bottom-top)*fy
+	}
+	topAlpha := linearByte[t.pixels[o0+3]]
+	topAlphaRight := linearByte[t.pixels[o1+3]]
+	bottomAlpha := linearByte[t.pixels[o2+3]]
+	bottomAlphaRight := linearByte[t.pixels[o3+3]]
+	top := topAlpha + (topAlphaRight-topAlpha)*fx
+	bottom := bottomAlpha + (bottomAlphaRight-bottomAlpha)*fx
+	out[3] = top + (bottom-top)*fy
+	return out
+}
+
+// sampleLinear returns bilinearly interpolated RGBA at (u, v) without a
+// transfer function. Metallic-roughness, normal and occlusion textures store
+// linear data. Because the transfer is a plain scale, filtering happens in raw
+// byte space and the result is scaled once, which avoids four lookups per
+// channel in the per-pixel path.
+func (t *decodedTexture) sampleLinear(u, v float64) [4]float64 {
+	if !finite(u) || !finite(v) {
+		return [4]float64{0, 0, 0, 0}
+	}
+	u = wrapCoordinate(u, t.wrapS)
+	v = wrapCoordinate(v, t.wrapT)
+	x := u*float64(t.width) - 0.5
+	y := v*float64(t.height) - 0.5
+	x0 := int(math.Floor(x))
+	y0 := int(math.Floor(y))
+	fx := x - float64(x0)
+	fy := y - float64(y0)
+	x0Index := t.index(x0, t.wrapS, t.width)
+	x1Index := t.index(x0+1, t.wrapS, t.width)
+	topRow := t.index(y0, t.wrapT, t.height) * t.width
+	bottomRow := t.index(y0+1, t.wrapT, t.height) * t.width
+	o0 := (topRow + x0Index) * 4
+	o1 := (topRow + x1Index) * 4
+	o2 := (bottomRow + x0Index) * 4
+	o3 := (bottomRow + x1Index) * 4
+
+	const inverse255 = 1.0 / 255.0
 	var out [4]float64
 	for channel := 0; channel < 4; channel++ {
-		top := topLeft[channel] + (topRight[channel]-topLeft[channel])*fx
-		bottom := bottomLeft[channel] + (bottomRight[channel]-bottomLeft[channel])*fx
-		out[channel] = top + (bottom-top)*fy
+		topLeft := float64(t.pixels[o0+channel])
+		topRight := float64(t.pixels[o1+channel])
+		bottomLeft := float64(t.pixels[o2+channel])
+		bottomRight := float64(t.pixels[o3+channel])
+		top := topLeft + (topRight-topLeft)*fx
+		bottom := bottomLeft + (bottomRight-bottomLeft)*fx
+		out[channel] = (top + (bottom-top)*fy) * inverse255
 	}
 	return out
 }
 
-func (t *decodedTexture) texel(x, y int) [4]float64 {
-	offset := (y*t.width + x) * 4
-	if offset < 0 || offset+4 > len(t.pixels) {
-		return [4]float64{}
-	}
-	return [4]float64{
-		srgbToLinear[t.pixels[offset]],
-		srgbToLinear[t.pixels[offset+1]],
-		srgbToLinear[t.pixels[offset+2]],
-		float64(t.pixels[offset+3]) / 255,
-	}
+// sample keeps the original sRGB entry point for existing callers.
+func (t *decodedTexture) sample(u, v float64) [4]float64 {
+	return t.sampleSRGB(u, v)
 }
 
 func wrapCoordinate(value float64, wrap int) float64 {
@@ -199,6 +244,9 @@ func wrapCoordinate(value float64, wrap int) float64 {
 		}
 		return value
 	default: // REPEAT
+		if value >= 0 && value < 1 {
+			return value
+		}
 		value -= math.Floor(value)
 		return value
 	}
@@ -210,6 +258,9 @@ func (t *decodedTexture) index(value int, wrap, size int) int {
 	}
 	switch wrap {
 	case 10497: // REPEAT
+		if value >= 0 && value < size {
+			return value
+		}
 		value %= size
 		if value < 0 {
 			value += size
@@ -219,6 +270,15 @@ func (t *decodedTexture) index(value int, wrap, size int) int {
 		return min(max(value, 0), size-1)
 	}
 }
+
+// linearByte maps an 8-bit linear channel to [0, 1] without a division in
+// the per-pixel sampling path.
+var linearByte = func() (table [256]float64) {
+	for i := range table {
+		table[i] = float64(i) / 255
+	}
+	return table
+}()
 
 // srgbToLinear maps an 8-bit sRGB channel to linear light.
 var srgbToLinear = func() (table [256]float64) {

@@ -626,6 +626,14 @@ func (m *Model) loadMaterials(defs []gltfMaterial) error {
 			DoubleSided:     def.DoubleSided,
 		}
 		if def.PBR != nil {
+			// Only an explicit metallic-roughness declaration switches the
+			// renderer to the PBR path. The glTF defaults otherwise make every
+			// base-color-only material fully metallic, which would change the
+			// appearance of existing assets.
+			if def.PBR.MetallicFactor != nil || def.PBR.RoughnessFactor != nil ||
+				def.PBR.MetallicRoughnessTexture != nil {
+				material.pbrDeclared = true
+			}
 			if def.PBR.BaseColorFactor != nil {
 				factor, err := factor4(def.PBR.BaseColorFactor)
 				if err != nil {
