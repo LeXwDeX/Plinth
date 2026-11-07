@@ -98,6 +98,13 @@ interface StudioState extends StudioPrefs {
    */
   panelTab2d: PanelTabId | null;
   panelTab3d: PanelTabId | null;
+  /** 输入区的风格锁定标签：请右侧栏切到「功能」并展开该段；seq 让重复点击也能再次触发。 */
+  styleLockRequest: { seq: number } | null;
+  /** 「功能」标签里的风格锁定段是否展开；放在这里，输入区的标签与右侧栏共用一个状态。 */
+  styleLockOpen: boolean;
+  requestStyleLock: () => void;
+  consumeStyleLockRequest: (seq: number) => void;
+  setStyleLockOpen: (open: boolean) => void;
   taskDrawerOpen: boolean;
   allOutputsOpen: boolean;
   /** The shared 任务详情 dialog (ResultDetail): what it is open on; null when closed. */
@@ -198,6 +205,8 @@ export const useStudioStore = create<StudioState>()((set, get) => {
     ...readStudioPrefs(),
     panelTab2d: null,
     panelTab3d: null,
+    styleLockRequest: null,
+    styleLockOpen: false,
     taskDrawerOpen: false,
     allOutputsOpen: false,
     resultDetail: null,
@@ -234,6 +243,9 @@ export const useStudioStore = create<StudioState>()((set, get) => {
       persist({ railExpanded });
     },
     setPanelTab: (kind, tab) => set(panelFamilyOf(kind) === '3d' ? { panelTab3d: tab } : { panelTab2d: tab }),
+    requestStyleLock: () => set((state) => ({ styleLockRequest: { seq: (state.styleLockRequest?.seq ?? 0) + 1 }, styleLockOpen: true })),
+    consumeStyleLockRequest: (seq) => set((state) => (state.styleLockRequest?.seq === seq ? { styleLockRequest: null } : {})),
+    setStyleLockOpen: (styleLockOpen) => set({ styleLockOpen }),
     setTaskDrawerOpen: (taskDrawerOpen) => set({ taskDrawerOpen }),
     setAllOutputsOpen: (allOutputsOpen) => set({ allOutputsOpen }),
     setGenerationReferenceContext: (generationReferenceContext) => set({ generationReferenceContext }),

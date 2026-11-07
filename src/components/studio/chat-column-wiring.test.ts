@@ -29,6 +29,11 @@ describe('workspace chat message wiring', () => {
     expect(block).not.toContain('selectSkill');
   });
 
+  it('opens the style lock through the panel store instead of reaching into the DOM (#180)', () => {
+    expect(agentDialog).toContain('useStudioStore.getState().requestStyleLock();');
+    expect(agentDialog).not.toContain("document.querySelector<HTMLElement>('[data-testid=\"style-lock-panel\"]')");
+  });
+
   it('sends no Agent turn while the deployment has no Agent settings (#253)', () => {
     // Stage actions and queued turns go through send() too, not only the composer button.
     expect(agentDialog).toMatch(/const send = useCallback\([\s\S]*?if \(agentUnavailableReason\(schema\) !== null\) return;/);

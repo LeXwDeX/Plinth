@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, type KeyboardEvent } from 'react';
 
 import { CanvasHistoryPanel } from '@/components/canvas/history-panel';
 import { CanvasLayersPanel } from '@/components/canvas/layers-panel';
@@ -15,7 +15,7 @@ import { iconByName } from '@/components/ui/icon-map';
 import { ModelArchiveLink, ModelFormatsPanel } from '@/components/workspace/model-formats';
 import { ModelProcessingPanel } from '@/components/workspace/model-processing-panel';
 import { HarnessPanel } from '@/components/workspace/harness-panel';
-import { StyleLockPanel } from '@/components/workspace/style-lock-panel';
+import { StyleLockSection } from '@/components/workspace/style-lock-panel';
 import { useModelProcessingCapabilities } from '@/hooks/use-model-processing-capabilities';
 import { schemaText } from '@/lib/product-schema';
 import {
@@ -109,7 +109,12 @@ interface PanelBodyProps {
 function PanelBody({ tab, object, sessionId }: PanelBodyProps) {
   switch (tab) {
     case 'operations':
-      return <HarnessPanel sessionId={sessionId} object={object} />;
+      return (
+        <div className="flex min-h-0 flex-1 flex-col" data-testid="right-panel-operations">
+          <StyleLockSection sessionId={sessionId} />
+          <div className="min-h-0 flex-1"><HarnessPanel sessionId={sessionId} object={object} /></div>
+        </div>
+      );
     case 'layers':
       return sessionId ? <CanvasLayersPanel sessionId={sessionId} /> : null;
     case 'history':
@@ -151,6 +156,22 @@ function PanelFrame({ context, object, sessionId, availability }: PanelFrameProp
   const { schema } = useProductSchema();
   const remembered = useStudioStore((state) => (context === 'model' ? state.panelTab3d : state.panelTab2d));
   const setPanelTab = useStudioStore((state) => state.setPanelTab);
+  const styleLockRequest = useStudioStore((state) => state.styleLockRequest);
+  const consumeStyleLockRequest = useStudioStore((state) => state.consumeStyleLockRequest);
+  // The composer's style-lock chip asks the panel to open 功能 and the section it holds. Consuming the request
+  // keeps a later tab choice from being overwritten; the focus runs after that render.
+  useEffect(() => {
+    if (!styleLockRequest) return;
+    setPanelTab(context === 'none' ? 'board' : context, 'operations');
+    consumeStyleLockRequest(styleLockRequest.seq);
+    requestAnimationFrame(() => {
+      const enabled = document.querySelector<HTMLInputElement>('[data-testid="style-lock-enabled"]');
+      enabled?.scrollIntoView({ block: 'nearest' });
+      enabled?.focus();
+    });
+    // No cleanup: consuming the request re-runs this effect with null, and the frame must still land after
+    // the 功能 tab and its open section have rendered.
+  }, [styleLockRequest, context, setPanelTab, consumeStyleLockRequest]);
   const aside = 'flex min-h-0 shrink-0 flex-col border-l border-border bg-card';
   const width = { width: panelWidth(schema) };
   const title = schemaText(schema, 'ui.studio.panel.title');
@@ -166,7 +187,6 @@ function PanelFrame({ context, object, sessionId, availability }: PanelFrameProp
     const active = requested ?? defaultPanelTab(schema, 'board', { unavailable: disabled }) ?? 'operations';
       return (
         <aside aria-label={title} data-testid="right-panel" data-kind="none" data-tab={active} style={width} className={aside}>
-          <StyleLockPanel sessionId={sessionId} />
           <PanelTabBar
           views={views}
           active={active}
@@ -195,7 +215,6 @@ function PanelFrame({ context, object, sessionId, availability }: PanelFrameProp
   const active = activePanelTab(schema, context, remembered, availability);
   return (
     <aside aria-label={title} data-testid="right-panel" data-kind={context} data-tab={active ?? undefined} style={width} className={aside}>
-      <StyleLockPanel sessionId={sessionId} />
       <PanelTabBar
         views={views}
         active={active}
