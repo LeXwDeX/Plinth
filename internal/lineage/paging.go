@@ -59,7 +59,7 @@ func (s *Service) SessionPage(ctx context.Context, owner, session, cursor string
 	scope := generation.OwnTasks(generation.OwnerID(owner))
 	// Paging includes public attempts as well as succeeded versions. Legacy
 	// Session remains succeeded-only, with its original response shape.
-	page, err := s.tasks.List(ctx, scope, generation.ListQuery{SessionID: session, Cursor: before, Limit: limit})
+	page, err := s.tasks.List(ctx, scope, generation.ListQuery{SessionID: session, IncludeBranchRefs: true, Cursor: before, Limit: limit})
 	if err != nil {
 		// Generation may wrap a repository's invalid-input error as unavailable.
 		// Keep the repository cursor opaque, but retain its input-error contract.
@@ -73,7 +73,11 @@ func (s *Service) SessionPage(ctx context.Context, owner, session, cursor string
 	var full []generation.Task
 	selected := map[string]bool{}
 	for _, summary := range page.Tasks {
-		if string(summary.OwnerID) != owner || summary.SessionID != session {
+		allowed, err := s.taskInSession(ctx, owner, session, summary)
+		if err != nil {
+			return Graph{}, err
+		}
+		if string(summary.OwnerID) != owner || !allowed {
 			continue
 		}
 		task, err := s.tasks.GetScoped(ctx, scope, summary.ID)
@@ -83,7 +87,9 @@ func (s *Service) SessionPage(ctx context.Context, owner, session, cursor string
 		if err != nil {
 			return Graph{}, err
 		}
-		if string(task.OwnerID) == owner && task.SessionID == session {
+		if allowed, err = s.taskInSession(ctx, owner, session, task); err != nil {
+			return Graph{}, err
+		} else if allowed {
 			full = append(full, task)
 			selected[string(task.ID)] = true
 		}
@@ -191,12 +197,16 @@ func (s *Service) sessionSummaries(ctx context.Context, owner, session string) (
 	var result []generation.Task
 	cursor := ""
 	for {
-		page, err := s.tasks.List(ctx, generation.OwnTasks(generation.OwnerID(owner)), generation.ListQuery{SessionID: session, Cursor: cursor, Limit: s.config.MaxTasks, States: []generation.TaskState{generation.TaskSucceeded}})
+		page, err := s.tasks.List(ctx, generation.OwnTasks(generation.OwnerID(owner)), generation.ListQuery{SessionID: session, IncludeBranchRefs: true, Cursor: cursor, Limit: s.config.MaxTasks, States: []generation.TaskState{generation.TaskSucceeded}})
 		if err != nil {
 			return nil, err
 		}
 		for _, task := range page.Tasks {
-			if string(task.OwnerID) != owner || task.SessionID != session || task.State != generation.TaskSucceeded {
+			allowed, err := s.taskInSession(ctx, owner, session, task)
+			if err != nil {
+				return nil, err
+			}
+			if string(task.OwnerID) != owner || !allowed || task.State != generation.TaskSucceeded {
 				continue
 			}
 			// A summary has no frozen input; a possible format conversion is
@@ -209,7 +219,11 @@ func (s *Service) sessionSummaries(ctx context.Context, owner, session string) (
 				if err != nil {
 					return nil, err
 				}
-				if string(full.OwnerID) != owner || full.SessionID != session {
+				allowed, err := s.taskInSession(ctx, owner, session, full)
+				if err != nil {
+					return nil, err
+				}
+				if string(full.OwnerID) != owner || !allowed {
 					continue
 				}
 				task = full

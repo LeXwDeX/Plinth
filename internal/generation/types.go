@@ -607,9 +607,13 @@ type Accepted struct {
 }
 
 type ListQuery struct {
-	SessionID      string
-	States         []TaskState
-	ExcludedStates []TaskState
+	SessionID string
+	// IncludeBranchRefs widens a SessionID query to Tasks a branch may read
+	// from its ancestors (chat_branch_task_refs). It is read-only scope, never
+	// an execution grant; callers still require the Task's own state checks.
+	IncludeBranchRefs bool
+	States            []TaskState
+	ExcludedStates    []TaskState
 	// OfferingIDs restricts the page to Tasks whose frozen Offering is one of
 	// these. The format projection reads only declared conversions, so a long
 	// session is not scanned Task by Task.
@@ -647,6 +651,15 @@ func (scope TaskListScope) OwnerID() OwnerID {
 
 func (scope TaskListScope) AllOwners() bool {
 	return scope.allOwners
+}
+
+// SessionTaskScope answers whether a Task is readable as a source of a chat
+// session. It is the one place that knows about branch ancestry: the Task
+// belongs to the session itself, or a branch ref copied from an ancestor
+// session names it. It never widens owner checks and never grants execution,
+// budget or approval.
+type SessionTaskScope interface {
+	TaskInSession(context.Context, OwnerID, string, TaskID) (bool, error)
 }
 
 type Event struct {

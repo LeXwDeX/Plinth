@@ -236,7 +236,7 @@ export interface ChatBrowserClient {
   ): Promise<PromptEnhanceResult>;
   listSkills(signal?: AbortSignal): Promise<ChatSkillCatalog>;
   createSession(title?: string): Promise<ChatSession>;
-  branchSession(sessionID: string, messageID: string): Promise<{ session: ChatSession; canvasCopied: boolean }>;
+  branchSession(sessionID: string, messageID: string): Promise<{ session: ChatSession; canvasCopied: boolean; sceneCopied: boolean; capturesCopied: boolean }>;
   renameSession(sessionID: string, title: string): Promise<ChatSession>;
   deleteSession(sessionID: string): Promise<boolean>;
   getSession(sessionID: string, signal?: AbortSignal): Promise<ChatSession>;
@@ -995,7 +995,14 @@ export function createChatBrowserClient(
       const session = normalizeSession(schema, payload.session);
       if (!session.id) throw new ChatBrowserError('', response.status);
       const canvasField = responseFields.branch_canvas_copied;
-      return { session, canvasCopied: Boolean(canvasField && payload[canvasField] === true) };
+      const sceneField = responseFields.branch_scene_copied;
+      const capturesField = responseFields.branch_captures_copied;
+      return {
+        session,
+        canvasCopied: Boolean(canvasField && payload[canvasField] === true),
+        sceneCopied: Boolean(sceneField && payload[sceneField] === true),
+        capturesCopied: Boolean(capturesField && payload[capturesField] === true),
+      };
     },
     async createSession(title = '') {
       const response = await fetcher(

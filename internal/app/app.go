@@ -514,8 +514,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Captures:         captureStore,
 		ModelAssetRole:   generationtool.ModelAssetRole,
 		RenderAssetType:  applicationSchema.Chat.ModelReview.Render.AssetType,
-		ParentSession: func(ctx context.Context, owner generation.OwnerID, sessionID string) (string, error) {
-			return repository.ParentSession(ctx, string(owner), sessionID)
+		TaskInSession: func(ctx context.Context, owner generation.OwnerID, sessionID string, taskID generation.TaskID) (bool, error) {
+			return module.TaskInSession(ctx, owner, sessionID, taskID)
 		},
 	})
 	if err != nil {

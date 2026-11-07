@@ -268,10 +268,23 @@ func (m *Module) startAttempt(ctx context.Context, lease Lease) error {
 // The lease supplies the persisted Task and its frozen Offering. No caller
 // preparing a new execution can opt into this compatibility boundary.
 func (m *Module) resolveAcceptedInputAssets(ctx context.Context, task Task) (map[string][]InputAsset, error) {
+	var assets map[string][]InputAsset
+	var err error
 	if resolver, ok := m.inputs.(AcceptedTaskInputResolver); ok {
-		return resolver.ResolveAccepted(ctx, task)
+		assets, err = resolver.ResolveAccepted(ctx, task)
+	} else {
+		assets, err = m.inputs.Resolve(ctx, task.OwnerID, task.Offering, task.Input)
 	}
-	return m.inputs.Resolve(ctx, task.OwnerID, task.Offering, task.Input)
+	if err != nil {
+		return nil, err
+	}
+	// A Task accepted in a branch may read a model asset its ancestor Task
+	// produced. At dispatch the Provider sees the branch as the effective
+	// session; the stored Task and asset keep their original session.
+	if err := m.normalizeInputAssetSessions(ctx, task.OwnerID, task.SessionID, assets); err != nil {
+		return nil, err
+	}
+	return assets, nil
 }
 
 func (m *Module) verifyAdmittedDependencies(ctx context.Context, task Task, dependencies map[string]TaskDependency) error {

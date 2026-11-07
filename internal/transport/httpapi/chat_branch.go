@@ -41,6 +41,11 @@ func (s *Server) branchChatSession(w http.ResponseWriter, r *http.Request, princ
 		s.writeChatInternalError(w, err)
 	default:
 		w.Header().Set("Cache-Control", s.application.Runtime.HTTP.PrivateCacheControl)
-		writeJSON(w, http.StatusCreated, map[string]any{"session": s.chatSessionWire(r.Context(), w, session, true), s.application.Chat.API.ResponseFields.BranchCanvasCopied: session.BranchCanvasCopied})
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"session": s.chatSessionWire(r.Context(), w, session, true),
+			s.application.Chat.API.ResponseFields.BranchCanvasCopied:   session.BranchCanvasCopied,
+			s.application.Chat.API.ResponseFields.BranchSceneCopied:    session.BranchSceneCopied,
+			s.application.Chat.API.ResponseFields.BranchCapturesCopied: session.BranchCapturesCopied,
+		})
 	}
 }

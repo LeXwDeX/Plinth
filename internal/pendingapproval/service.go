@@ -569,6 +569,21 @@ func modelSourceParameter(offering generation.Offering, asset generation.Prepare
 // maximumContentMatches bounds how many model attachments one approval examines.
 const maximumContentMatches = 24
 
+// taskInSession accepts a model Task from the session itself or, in a branch,
+// from an ancestor session (#186). Approval cards for a branch step must find
+// the copied message attachment that names the ancestor model.
+func (s *Service) taskInSession(ctx context.Context, owner, session string, task generation.Task) bool {
+	if task.SessionID == session {
+		return true
+	}
+	scope, ok := s.gateway.(generation.SessionTaskScope)
+	if !ok {
+		return false
+	}
+	allowed, err := scope.TaskInSession(ctx, generation.OwnerID(owner), session, task.ID)
+	return err == nil && allowed
+}
+
 // modelWithAssetID names a model only when the frozen asset and its handle identify one Task.
 func (s *Service) modelWithAssetID(ctx context.Context, owner, session string, messages []chat.Message, assetID generation.AssetID) (chat.Attachment, string, bool) {
 	if assetID == "" {
@@ -590,7 +605,8 @@ func (s *Service) modelWithAssetID(ctx context.Context, owner, session string, m
 			if !ok {
 				var err error
 				task, err = s.gateway.Get(ctx, generation.OwnerID(owner), generation.TaskID(attachment.TaskID))
-				if err != nil || task.OwnerID != generation.OwnerID(owner) || task.SessionID != session || string(task.ID) != attachment.TaskID {
+				if err != nil || task.OwnerID != generation.OwnerID(owner) ||
+					!s.taskInSession(ctx, owner, session, task) || string(task.ID) != attachment.TaskID {
 					return chat.Attachment{}, "", false
 				}
 				seen[attachment.TaskID] = task

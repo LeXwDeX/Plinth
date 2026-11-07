@@ -703,6 +703,13 @@ func deleteSessionAndDependents(
 			return false, fmt.Errorf("delete chat session %s: %w", dependent.label, err)
 		}
 	}
+	// Immutable 3D evidence (scene, capture, render manifest) is deleted in
+	// the same transaction behind the session_evidence_deletions control row
+	// (#186). Without this an owner could never delete a session that has a
+	// scene or a capture, and every copied branch would be undeletable.
+	if err := deleteSessionEvidence(ctx, tx, ownerID, sessionID); err != nil {
+		return false, err
+	}
 	result, err := tx.ExecContext(ctx, `
 		DELETE FROM go_chat_sessions WHERE id = ? AND owner_id = ?`,
 		sessionID,
@@ -720,7 +727,50 @@ func deleteSessionAndDependents(
 			return false, fmt.Errorf("mark chat branch parent deleted: %w", err)
 		}
 	}
+	// The control row is transaction-local: it exists only while evidence of
+	// this session is being deleted, so a later UNDO or a bug cannot delete
+	// evidence outside a session deletion.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM session_evidence_deletions WHERE session_id = ? AND owner_id = ?`, sessionID, ownerID); err != nil {
+		return false, fmt.Errorf("clear chat session evidence deletion: %w", err)
+	}
 	return affected > 0, nil
+}
+
+// deleteSessionEvidence removes the immutable evidence rows that reference a
+// session with ON DELETE RESTRICT. session_evidence_deletions is inserted
+// first so the immutable-delete triggers allow exactly these rows, then
+// removed by the caller's transaction. defer_foreign_keys resolves the
+// scene_representations self-reference in one batch (all rows are gone at
+// commit).
+func deleteSessionEvidence(ctx context.Context, tx *sql.Tx, ownerID, sessionID string) error {
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO session_evidence_deletions (session_id, owner_id, created_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT(session_id) DO UPDATE SET owner_id = excluded.owner_id, created_at = excluded.created_at`,
+		sessionID, ownerID, formatTime(time.Now().UTC()),
+	); err != nil {
+		return fmt.Errorf("record chat session evidence deletion: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `PRAGMA defer_foreign_keys = ON`); err != nil {
+		return fmt.Errorf("defer chat session evidence foreign keys: %w", err)
+	}
+	statements := []struct {
+		label string
+		query string
+	}{
+		{"scene representations", `DELETE FROM scene_representations WHERE object_id IN (
+			SELECT id FROM scene_objects WHERE owner_id = ? AND session_id = ?)`},
+		{"scene objects", `DELETE FROM scene_objects WHERE owner_id = ? AND session_id = ?`},
+		{"scene revision", `DELETE FROM scene_revisions WHERE owner_id = ? AND session_id = ?`},
+		{"model captures", `DELETE FROM model_captures WHERE owner_id = ? AND session_id = ?`},
+		{"render manifests", `DELETE FROM render_manifests WHERE owner_id = ? AND session_id = ?`},
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement.query, ownerID, sessionID); err != nil {
+			return fmt.Errorf("delete chat session %s: %w", statement.label, err)
+		}
+	}
+	return nil
 }
 
 func (r *Repository) OwnsSession(

@@ -31,8 +31,27 @@ const (
 	sessionTaskMaxPages = 4
 )
 
+// taskInSession reports whether a Task is readable as a source of this chat
+// session: its own Task or one inherited by a branch from an ancestor (#186).
+// Ownership and the exact Task identity are always the caller's.
+func (executor *Executor) taskInSession(ctx context.Context, owner, session string, task generation.Task) bool {
+	if task.OwnerID != generation.OwnerID(owner) || task.ID == "" {
+		return false
+	}
+	if task.SessionID == session {
+		return true
+	}
+	scope, ok := executor.gateway.(generation.SessionTaskScope)
+	if !ok {
+		return false
+	}
+	allowed, err := scope.TaskInSession(ctx, generation.OwnerID(owner), session, task.ID)
+	return err == nil && allowed
+}
+
 // sessionModelTasks returns the owner's succeeded tasks of this session that
-// delivered a saved model file, newest first, at most limit of them.
+// delivered a saved model file, newest first, at most limit of them. A branch
+// additionally lists the models its ancestors produced.
 func (executor *Executor) sessionModelTasks(ctx context.Context, owner, session string, limit int) ([]generation.Task, error) {
 	lister, ok := executor.gateway.(taskLister)
 	if !ok || owner == "" || session == "" {
@@ -42,14 +61,15 @@ func (executor *Executor) sessionModelTasks(ctx context.Context, owner, session 
 	cursor := ""
 	for page := 0; page < sessionTaskMaxPages && len(found) < limit; page++ {
 		result, err := lister.List(ctx, generation.OwnTasks(generation.OwnerID(owner)), generation.ListQuery{
-			SessionID: session, States: []generation.TaskState{generation.TaskSucceeded},
+			SessionID: session, IncludeBranchRefs: true,
+			States: []generation.TaskState{generation.TaskSucceeded},
 			Cursor: cursor, Limit: sessionTaskPageSize,
 		})
 		if err != nil {
 			return nil, err
 		}
 		for _, task := range result.Tasks {
-			if string(task.OwnerID) != owner || task.SessionID != session ||
+			if !executor.taskInSession(ctx, owner, session, task) ||
 				task.State != generation.TaskSucceeded || !hasSavedModel(task) {
 				continue
 			}
@@ -1193,7 +1213,7 @@ func (executor *Executor) resolveModelSource(
 		if err != nil {
 			return generation.Task{}, "", nil, err
 		}
-		if string(task.OwnerID) != command.OwnerID || task.SessionID != command.SessionID || task.ID != generation.TaskID(taskID) {
+		if string(task.OwnerID) != command.OwnerID || !executor.taskInSession(ctx, command.OwnerID, command.SessionID, task) || task.ID != generation.TaskID(taskID) {
 			return generation.Task{}, "", notFound, nil
 		}
 	}

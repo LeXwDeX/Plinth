@@ -304,6 +304,24 @@ func PlanID(owner generation.OwnerID, idempotencyKey string) string {
 	return hex.EncodeToString(digest[:])
 }
 
+// sourceInSession accepts the plan's source Task from the session itself or
+// from an ancestor a branch was created from (#186). Ownership is always the
+// plan owner; a sibling session or another owner is refused.
+func (s *Service) sourceInSession(ctx context.Context, owner generation.OwnerID, session string, source generation.Task) bool {
+	if source.OwnerID != owner || source.ID == "" {
+		return false
+	}
+	if source.SessionID == session {
+		return true
+	}
+	scope, ok := s.gateway.(generation.SessionTaskScope)
+	if !ok {
+		return false
+	}
+	allowed, err := scope.TaskInSession(ctx, owner, session, source.ID)
+	return err == nil && allowed
+}
+
 func (s *Service) Create(ctx context.Context, command CreateCommand) (Plan, error) {
 	if !command.Harness.Valid() || command.OwnerID == "" || command.SessionID == "" || command.SourceTaskID == "" || command.SourceAssetID == "" || len(command.IdempotencyKey) < 16 || len(command.IdempotencyKey) > 200 || len(command.Steps) == 0 || len(command.Steps) > MaxPlanSteps {
 		return Plan{}, ErrInvalid
@@ -332,7 +350,8 @@ func (s *Service) Create(ctx context.Context, command CreateCommand) (Plan, erro
 		return Plan{}, err
 	}
 	source, err := s.gateway.Get(ctx, command.OwnerID, command.SourceTaskID)
-	if err != nil || source.SessionID != command.SessionID || source.State != generation.TaskSucceeded || !hasAsset(source, command.SourceAssetID) {
+	if err != nil || !s.sourceInSession(ctx, command.OwnerID, command.SessionID, source) ||
+		source.State != generation.TaskSucceeded || !hasAsset(source, command.SourceAssetID) {
 		return Plan{}, ErrInvalid
 	}
 	steps := make([]Step, 0, len(command.Steps))

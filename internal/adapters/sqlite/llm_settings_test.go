@@ -26,6 +26,7 @@ func TestMigration0066UpgradesExistingSessionsToFollowTheDefaultModel(t *testing
 	}
 	for _, statement := range []string{
 		`DELETE FROM go_schema_migrations WHERE version >= 66`,
+		`DROP TABLE IF EXISTS chat_branch_task_refs`,
 		`DROP TABLE llm_settings_versions`,
 		`DROP TABLE llm_connection_checks`,
 		`ALTER TABLE go_chat_sessions DROP COLUMN chat_model`,

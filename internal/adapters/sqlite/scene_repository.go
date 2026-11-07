@@ -55,27 +55,64 @@ func (SQLiteSceneEvidence) SessionOwned(ctx context.Context, q SceneReader, owne
 func (SQLiteSceneEvidence) AssetReady(ctx context.Context, q SceneReader, owner, session, asset string) (bool, error) {
 	// Input assets have already been materialized when their immutable storage
 	// identity and digest exist. Output assets additionally require a terminal
-	// task in the same session; a remote claim or URL is not a READY asset.
+	// Task this session may read (its own or an inherited ancestor Task,
+	// #186); a remote claim or URL is not a READY asset.
 	// Gaussian Splat is a separate preview-only representation. It cannot be
 	// admitted under any existing Scene kind, even with a forged kind label.
-	return sceneExists(ctx, q, `SELECT 1 FROM generation_input_assets WHERE id=? AND owner_id=? AND storage_key<>'' AND sha256<>'' AND media_type<>?
-		UNION ALL SELECT 1 FROM generation_assets a JOIN generation_tasks t ON t.id=a.task_id
-		WHERE a.id=? AND t.owner_id=? AND t.session_id=? AND t.state='SUCCEEDED'
+	inputReady, err := sceneExists(ctx, q, `SELECT 1 FROM generation_input_assets WHERE id=? AND owner_id=? AND storage_key<>'' AND sha256<>'' AND media_type<>?`,
+		asset, owner, schema.GaussianSplatMediaType)
+	if err != nil || inputReady {
+		return inputReady, err
+	}
+	var task string
+	err = q.QueryRowContext(ctx, `SELECT t.id FROM generation_assets a JOIN generation_tasks t ON t.id=a.task_id
+		WHERE a.id=? AND t.owner_id=? AND t.state='SUCCEEDED'
 		AND a.storage_key<>'' AND a.sha256<>'' AND a.delivery_profile<>? AND a.role<>? AND a.media_type<>?`,
-		asset, owner, schema.GaussianSplatMediaType, asset, owner, session,
-		schema.DeliveryProfileGaussianSplat32V1, schema.GaussianSplatRole, schema.GaussianSplatMediaType)
+		asset, owner, schema.DeliveryProfileGaussianSplat32V1, schema.GaussianSplatRole, schema.GaussianSplatMediaType,
+	).Scan(&task)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return taskInSession(ctx, q, owner, session, task)
 }
 func (SQLiteSceneEvidence) TaskSource(ctx context.Context, q SceneReader, owner, session, task, asset string) (bool, error) {
+	allowed, err := taskInSession(ctx, q, owner, session, task)
+	if err != nil || !allowed {
+		return false, err
+	}
 	return sceneExists(ctx, q, `SELECT 1 FROM generation_tasks t JOIN generation_assets a ON a.task_id=t.id
-		WHERE t.id=? AND t.owner_id=? AND t.session_id=? AND t.state='SUCCEEDED' AND a.id=?`, task, owner, session, asset)
+		WHERE t.id=? AND t.owner_id=? AND t.state='SUCCEEDED' AND a.id=?`, task, owner, asset)
 }
 func (SQLiteSceneEvidence) PreparedInputOwned(ctx context.Context, q SceneReader, owner, session, prepared, task string) (bool, error) {
+	// A copied branch scene keeps the historical prepared_input_id of an
+	// ancestor. It is readable only when that prepared input belongs to this
+	// session or one of its recorded ancestors.
+	var preparedSession string
+	err := q.QueryRowContext(ctx, `SELECT session_id FROM generation_prepared_inputs WHERE id=? AND owner_id=?`,
+		prepared, owner).Scan(&preparedSession)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	allowed, err := sessionInAncestry(ctx, q, owner, session, preparedSession)
+	if err != nil || !allowed {
+		return false, err
+	}
 	if task == "" {
-		return sceneExists(ctx, q, `SELECT 1 FROM generation_prepared_inputs WHERE id=? AND owner_id=? AND session_id=?`, prepared, owner, session)
+		return true, nil
+	}
+	taskAllowed, err := taskInSession(ctx, q, owner, session, task)
+	if err != nil || !taskAllowed {
+		return false, err
 	}
 	return sceneExists(ctx, q, `SELECT 1 FROM generation_prepared_inputs p JOIN execution_grants g ON g.prepared_input_id=p.id
 		JOIN generation_tasks t ON t.id=g.task_id WHERE p.id=? AND p.owner_id=? AND p.session_id=?
-		AND g.status='bound' AND g.prepared_input_hash=p.input_hash AND t.id=? AND t.owner_id=? AND t.session_id=?`, prepared, owner, session, task, owner, session)
+		AND g.status='bound' AND g.prepared_input_hash=p.input_hash AND t.id=? AND t.owner_id=?`, prepared, owner, preparedSession, task, owner)
 }
 func sceneExists(ctx context.Context, q SceneReader, query string, args ...any) (bool, error) {
 	var one int

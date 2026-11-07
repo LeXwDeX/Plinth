@@ -3360,13 +3360,18 @@ type ChatAPIResponseFields struct {
 	// ApprovalMode and EstimatedCredits carry the session approval mode and
 	// the estimated credits of accepted tasks (session DTO) or of one step
 	// (tool call DTO).
-	ApprovalMode       string `json:"approval_mode"`
-	EstimatedCredits   string `json:"estimated_credits"`
-	ParentSessionID    string `json:"parent_session_id,omitempty"`
-	ParentMessageID    string `json:"parent_message_id,omitempty"`
-	ParentTitle        string `json:"parent_title,omitempty"`
-	ParentDeleted      string `json:"parent_deleted,omitempty"`
-	BranchCanvasCopied string `json:"branch_canvas_copied,omitempty"`
+	ApprovalMode     string `json:"approval_mode"`
+	EstimatedCredits string `json:"estimated_credits"`
+	ParentSessionID  string `json:"parent_session_id,omitempty"`
+	ParentMessageID  string `json:"parent_message_id,omitempty"`
+	ParentTitle      string `json:"parent_title,omitempty"`
+	ParentDeleted    string `json:"parent_deleted,omitempty"`
+	// BranchCanvasCopied, BranchSceneCopied and BranchCapturesCopied are the
+	// immediate branch creation result flags (#186). The 3D ones name whether
+	// the current scene / captures were copied, never a point-in-time state.
+	BranchCanvasCopied   string `json:"branch_canvas_copied,omitempty"`
+	BranchSceneCopied    string `json:"branch_scene_copied,omitempty"`
+	BranchCapturesCopied string `json:"branch_captures_copied,omitempty"`
 	// Notes is the member carrying the session settings summary.
 	Notes string `json:"notes"`
 	// Brief is the member carrying the session production brief (#103).

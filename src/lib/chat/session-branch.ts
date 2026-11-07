@@ -1,28 +1,33 @@
 import type { ChatSession } from '@/store/chat-store';
 
-export async function branchSceneExists(template: string, sessionId: string, fetcher: typeof fetch = fetch): Promise<boolean> {
-  const response = await fetcher(template.replace('{sessionID}', encodeURIComponent(sessionId)));
-  if (response.status === 404) return false;
-  if (!response.ok) throw new Error('scene unavailable');
-  // A scene revision exists only after an object was created, even if it was later deleted.
-  return true;
-}
-
-export function branchUnavailableReason(state: { busy?: boolean; compacting?: boolean; approval?: boolean; running?: boolean; scene?: boolean; sceneUnknown?: boolean }): string {
+/**
+ * Why a conversation cannot be branched right now. 3D state is no longer a
+ * reason: the branch copies the current stage/versions/captures (#186). Only
+ * work that is still in flight or needs a decision blocks the snapshot.
+ */
+export function branchUnavailableReason(state: { busy?: boolean; compacting?: boolean; approval?: boolean; running?: boolean }): string {
   if (state.busy) return 'ui.unavailable.reason.branch.busy';
   if (state.compacting) return 'ui.unavailable.reason.branch.compacting';
   if (state.approval) return 'ui.unavailable.reason.branch.approval';
   if (state.running) return 'ui.unavailable.reason.branch.running';
-  if (state.scene) return 'ui.unavailable.reason.branch.scene';
-  if (state.sceneUnknown) return 'ui.unavailable.reason.branch.scene_unknown';
   return '';
 }
 
+export type BranchCopyResult = {
+  canvasCopied: boolean;
+  sceneCopied: boolean;
+  capturesCopied: boolean;
+};
+
+export function branchCopiedCurrentState(result: BranchCopyResult): boolean {
+  return result.canvasCopied || result.sceneCopied || result.capturesCopied;
+}
+
 export async function branchConversation(
-  branch: (sessionId: string, messageId: string) => Promise<{ session: ChatSession; canvasCopied: boolean }>,
+  branch: (sessionId: string, messageId: string) => Promise<{ session: ChatSession } & BranchCopyResult>,
   sessionId: string,
   messageId: string,
-  actions: { flush: () => Promise<boolean>; isCurrent: () => boolean; clear: () => void; select: (session: ChatSession) => void; remember: (session: ChatSession) => void; done: (canvasCopied: boolean) => void; failed: (error: unknown) => void },
+  actions: { flush: () => Promise<boolean>; isCurrent: () => boolean; clear: () => void; select: (session: ChatSession) => void; remember: (session: ChatSession) => void; done: (result: BranchCopyResult) => void; failed: (error: unknown) => void },
 ): Promise<void> {
   try {
     if (!await actions.flush()) throw new Error('');
@@ -32,7 +37,7 @@ export async function branchConversation(
       actions.clear();
       actions.select(result.session);
     } else actions.remember(result.session);
-    actions.done(result.canvasCopied);
+    actions.done({ canvasCopied: result.canvasCopied, sceneCopied: result.sceneCopied, capturesCopied: result.capturesCopied });
   } catch (error) {
     actions.failed(error);
   }
