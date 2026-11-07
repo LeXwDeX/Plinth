@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React, { useState } from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import { Composer, type ComposerProps } from './composer';
@@ -77,7 +77,10 @@ describe('composer expanded editor (#156)', () => {
     expect(send).not.toHaveBeenCalled();
     fireEvent.keyDown(expanded, { key: 'Enter' });
     expect(send).toHaveBeenCalledTimes(1);
+    // #188: the send is only accepted when the parent says so; this mock does not, so the editor stays open.
+    expect(typeof send.mock.calls[0][0]).toBe('function');
     expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(expanded.value).toBe('draft changed');
     fireEvent.keyDown(expanded, { key: 'Escape' });
     await act(async () => {});
     expect(input.value).toBe('draft changed');
@@ -141,6 +144,64 @@ describe('composer expanded editor (#156)', () => {
     const dialog = await screen.findByRole('dialog');
     await waitFor(() => expect(document.activeElement).toBe(dialog.querySelector('textarea')));
     await waitFor(() => expect(screen.getByRole('listbox').style.maxHeight).not.toBe(''));
+  });
+});
+
+describe('the expanded editor closes when the send is accepted (#188)', () => {
+  const sendLabel = schema.content.messages['ui.workspace.agent.send'];
+
+  it('closes from the dialog send button, returns focus to the collapsed box, and clears nothing on its own', async () => {
+    const onSend = vi.fn((onAccepted: () => void) => onAccepted());
+    render(<Editor onSend={onSend} />);
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'sent from the dialog' } });
+    fireEvent.click(screen.getByRole('button', { name: '展开编辑' }));
+    const dialog = await screen.findByRole('dialog');
+    const expanded = dialog.querySelector('textarea')!;
+    await waitFor(() => expect(document.activeElement).toBe(expanded));
+    fireEvent.click(within(dialog).getByRole('button', { name: sendLabel }));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    // The button's click event is never the acceptance callback.
+    expect(typeof onSend.mock.calls[0][0]).toBe('function');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    // The harness parent does not clear the value: the send itself clears nothing.
+    expect(input.value).toBe('sent from the dialog');
+    // Reopening after an accepted send works as before.
+    fireEvent.click(screen.getByRole('button', { name: '展开编辑' }));
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+  });
+
+  it('closes on an accepted Enter and stays open with its text until that acceptance', async () => {
+    let accept: (() => void) | null = null;
+    const onSend = vi.fn((onAccepted: () => void) => { accept = onAccepted; });
+    render(<Editor onSend={onSend} />);
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'enter text' } });
+    fireEvent.click(screen.getByRole('button', { name: '展开编辑' }));
+    const dialog = await screen.findByRole('dialog');
+    const expanded = dialog.querySelector('textarea')!;
+    await waitFor(() => expect(document.activeElement).toBe(expanded));
+    fireEvent.keyDown(expanded, { key: 'Enter' });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(typeof accept).toBe('function');
+    // Not accepted yet: open, with the draft intact.
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(expanded.value).toBe('enter text');
+    act(() => { accept!(); });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    expect(input.value).toBe('enter text');
+  });
+
+  it('routes the collapsed send button through the same submit wrapper, never the click event', () => {
+    // Calling the received value throws if React handed over the button's MouseEvent instead of the callback.
+    const onSend = vi.fn((onAccepted: () => void) => onAccepted());
+    render(<Editor onSend={onSend} />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'collapsed' } });
+    fireEvent.click(screen.getByTestId('composer-send'));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(typeof onSend.mock.calls[0][0]).toBe('function');
   });
 });
 

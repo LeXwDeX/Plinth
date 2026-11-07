@@ -876,6 +876,7 @@ export function ChatColumn() {
       queuedSelection?: ChatAttachmentClaim[],
       queuedMentions?: ChatMentionClaim[],
       queuedInputSource?: string,
+      // `onSent` runs once the turn left the box: queued, or taken by the server. A refused or failed send never calls it.
       extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[]; styleLockSkipped?: boolean },
     ) => {
       const scope = captureSessionScope();
@@ -1059,6 +1060,8 @@ export function ChatColumn() {
           setAttachmentPurpose(null);
           setBranchFrom(null);
         }
+        // Queued is accepted: the box and the draft are already spent.
+        extra?.onSent?.();
         return;
       }
       const skillId = choiceAnswer ? null : sessionSkillId(skillBySession, sessionId);
@@ -2211,7 +2214,15 @@ export function ChatColumn() {
           <Composer
             value={input}
             onChange={setInput}
-            onSend={() => { void send(input, undefined, undefined, editing?.deleteIds, undefined, undefined, undefined, styleLockSkipped ? { styleLockSkipped: true } : undefined); }}
+            onSend={(onAccepted) => {
+              // Only the editor that sent the turn closes it: a send accepted after the person switched
+              // sessions must not collapse the new session's editor.
+              const session = activeSessionId;
+              void send(input, undefined, undefined, editing?.deleteIds, undefined, undefined, undefined, {
+                ...(styleLockSkipped ? { styleLockSkipped: true } : {}),
+                onSent: () => { if (useChatStore.getState().activeSessionId === session) onAccepted(); },
+              });
+            }}
             onStop={stopTurn}
             onStopInBackground={backgroundAvailable ? stopInBackground : null}
             streaming={isStreaming}
