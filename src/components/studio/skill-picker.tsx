@@ -7,7 +7,7 @@ import useSWR from 'swr';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { TablePopover, type TableRow } from '@/components/studio/table-popover';
-import { SkillCreator } from '@/components/workspace/skill-creator';
+import { SkillCreator, type SkillEditTarget } from '@/components/workspace/skill-creator';
 import type { AgentEffectiveConfiguration } from '@/lib/agent-configuration';
 import type { ChatSkill, ChatSkillCatalog } from '@/lib/chat/browser-client';
 import type { ProductSchema } from '@/lib/product-schema';
@@ -32,15 +32,17 @@ export function skillUnavailableReason(schema: ProductSchema, skill: ChatSkill, 
  * 只有本人的个人 Skill 带删除操作（#238）；“不使用”与系统/共享 Skill 都没有。
  */
 export function skillPickerRows({
-  catalog, effective, personalIds, noneLabel, noneHint, deleteLabel, deleting, onDelete, notEnabledReason, reasonForSkill,
+  catalog, effective, personalIds, noneLabel, noneHint, editLabel, deleteLabel, deleting, onEdit, onDelete, notEnabledReason, reasonForSkill,
 }: {
   catalog: ChatSkillCatalog | null;
   effective: AgentEffectiveConfiguration | null;
   personalIds: ReadonlySet<string>;
   noneLabel: string;
   noneHint: string;
+  editLabel: (name: string) => string;
   deleteLabel: (name: string) => string;
   deleting: ReadonlySet<string>;
+  onEdit: (id: string) => void;
   onDelete: (id: string) => void;
   /** Why a row the effective configuration leaves out is dimmed (#94); no hint when omitted. */
   notEnabledReason?: string;
@@ -57,8 +59,11 @@ export function skillPickerRows({
         { text: skill.prompt.replace(/\s+/g, ' '), muted: true },
         { text: skill.recommendedSize || '—', muted: true },
       ],
-      action: personalIds.has(skill.id)
-        ? { label: deleteLabel(skill.displayName), onClick: () => onDelete(skill.id), busy: deleting.has(skill.id), testId: 'skill-delete' }
+      actions: personalIds.has(skill.id)
+        ? [
+          { label: editLabel(skill.displayName), onClick: () => onEdit(skill.id), testId: 'skill-edit', kind: 'edit' as const, closeOnClick: true },
+          { label: deleteLabel(skill.displayName), onClick: () => onDelete(skill.id), busy: deleting.has(skill.id), testId: 'skill-delete', kind: 'delete' as const },
+        ]
         : undefined,
     })),
     { key: NO_SKILL, cells: [{ text: noneLabel, strong: true, kind: 'name' as const }, { text: noneHint, muted: true }, { text: '—', muted: true }] },
@@ -76,6 +81,8 @@ export interface SkillPickerProps {
   disabled: boolean;
   onSelect: (id: string | null) => void;
   onCreated: (id: string) => void;
+  /** 个人 Skill 编辑成功或已不可访问：刷新目录与有效配置，不改变当前选择。 */
+  onUpdated?: (id: string) => void;
   supportingModels?: Record<string, string[]>;
   /** 本人删除了一个个人 Skill（#238）；调用方刷新目录并把指向它的选择改为“不使用”。 */
   onDeleted?: (id: string) => void;
@@ -83,19 +90,21 @@ export interface SkillPickerProps {
 
 /** Skill 选择：与模型选择同样的小表格；Skill 不可用于当前模型时该行变暗。 */
 export function SkillPicker({
-  sessionId, catalog, effective, selectedId, unavailable, loading, failed, disabled, onSelect, onCreated, onDeleted, supportingModels,
+  sessionId, catalog, effective, selectedId, unavailable, loading, failed, disabled, onSelect, onCreated, onUpdated, onDeleted, supportingModels,
 }: SkillPickerProps) {
   const { schema } = useProductSchema();
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<SkillEditTarget | null>(null);
+  const [editingOpen, setEditingOpen] = useState(false);
   const [deleting, setDeleting] = useState<ReadonlySet<string>>(() => new Set());
   // Deleted here: hidden at once, before the refreshed catalog arrives (#238).
   const [removed, setRemoved] = useState<ReadonlySet<string>>(() => new Set());
   // Set when a delete succeeded while the keyboard was in the list; consumed once the row has left the page.
   const refocus = useRef(false);
-  // 只有本人的个人 Skill 可删；系统与共享 Skill 不出现删除按钮（#238）。
-  const canDelete = Boolean(onDeleted && schema.chat.skills.creation.item_route);
+  // 只有本人的个人 Skill 可编辑与删除；系统与共享 Skill 不出现行尾操作（#152/#238）。
+  const canManagePersonal = Boolean((onUpdated || onDeleted) && schema.chat.skills.creation.item_route);
   const personal = useSWR(
-    canDelete ? ['personal-skills', schema.chat.skills.creation.route, catalog?.revision ?? ''] : null,
+    canManagePersonal ? ['personal-skills', schema.chat.skills.creation.route, catalog?.revision ?? ''] : null,
     () => listPersonalSkillIds(schema),
     // The key follows the catalog revision; keep the old ids while the new revision loads, or every
     // personal row would lose its trash button for a moment and remount, dropping focus (#238).
@@ -147,12 +156,20 @@ export function SkillPicker({
   const visibleCatalog = catalog && removed.size > 0
     ? { ...catalog, skills: catalog.skills.filter((skill) => !removed.has(skill.id)) }
     : catalog;
+  // 编辑预填当前内容；ID 保持不变，保存后由调用方刷新目录与有效配置。
+  const edit = (id: string) => {
+    const skill = visibleCatalog?.skills.find((item) => item.id === id);
+    if (!skill) return;
+    setEditing({ id: skill.id, name: skill.name, prompt: skill.prompt, recommendedSize: skill.recommendedSize });
+    setEditingOpen(true);
+  };
   const rows = skillPickerRows({
-    catalog: visibleCatalog, effective, personalIds: canDelete ? personalIds : new Set(),
+    catalog: visibleCatalog, effective, personalIds: canManagePersonal ? personalIds : new Set(),
     noneLabel: schemaText(schema, 'ui.studio.skill.none'),
     noneHint: schemaText(schema, 'ui.studio.skill.none_hint'),
+    editLabel: (name) => formatSchemaText(schemaText(schema, 'ui.workspace.skills.edit_label'), { name }),
     deleteLabel: (name) => formatSchemaText(schemaText(schema, 'ui.workspace.skills.delete_label'), { name }),
-    deleting, onDelete: (id) => { void remove(id); },
+    deleting, onEdit: edit, onDelete: (id) => { void remove(id); },
     reasonForSkill: (skill) => skillUnavailableReason(schema, skill, supportingModels?.[skill.id] ?? []),
   });
 
@@ -208,6 +225,14 @@ export function SkillPicker({
         disabled={disabled}
         onCreated={onCreated}
         control={{ open: creating, onOpenChange: setCreating }}
+      />
+      <SkillCreator
+        sessionId={sessionId}
+        disabled={disabled}
+        editing={editing}
+        onUpdated={(skill) => onUpdated?.(skill.id)}
+        onMissing={() => { if (editing) onUpdated?.(editing.id); }}
+        control={{ open: editingOpen, onOpenChange: (next) => { setEditingOpen(next); if (!next) setEditing(null); } }}
       />
     </>
   );

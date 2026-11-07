@@ -4288,8 +4288,8 @@ type ChatSkillsSchema struct {
 
 type ChatSkillCreationSchema struct {
 	Route string `json:"route"`
-	// ItemRoute deletes one of the caller's own personal Skills; it is Route
-	// followed by "/{skillID}".
+	// ItemRoute reads, replaces and deletes one of the caller's own personal
+	// Skills; it is Route followed by "/{skillID}".
 	ItemRoute         string `json:"item_route,omitempty"`
 	MaxNameCharacters int    `json:"max_name_characters"`
 	RecommendedSize   string `json:"recommended_size"`

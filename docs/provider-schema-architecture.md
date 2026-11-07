@@ -318,7 +318,7 @@ Start 的文件上传和 PreparationResumer 的转换提交各自申请一个派
 
 工作区的模型面板按 `(provider_id, model_id)` 合并 Offering。聚合输入只包括运行时 `available` Offering；每个模型保留完整 Offering 列表，并从每个 Offering 的 `capability` 去重得到能力标签。相同模型名不能代替能力声明。图生图也不能自动解释为局部蒙版编辑；只有目标 Offering 实际声明 mask 参数时，UI 才展示对应标签。执行时仍要使用具体目标 Capability 和 Offering，不能用模型卡的聚合列表替代提交选择。
 
-公开 Product Schema 提供 capability 显示标签、旧 Skill 类别元数据和个人 Skill 创建契约。`chat.skills.creation` 声明同源路由、`max_name_characters` 和 `recommended_size` 默认值；类别由同级 `chat.skills.categories` 声明。当前默认值为 `auto`；Catalog 校验它属于声明 Skill feature 的 Offering 所支持的尺寸。创建界面不提供尺寸选择控件。该元数据不覆盖用户后续生成时的执行参数。Skill 创建 DTO 没有图片上传或资源 URL 字段。
+公开 Product Schema 提供 capability 显示标签、旧 Skill 类别元数据和个人 Skill 创建契约。`chat.skills.creation` 声明同源路由、`max_name_characters` 和 `recommended_size` 默认值；类别由同级 `chat.skills.categories` 声明。当前默认值为 `2048x2048`；Catalog 校验它属于声明 Skill feature 的 Offering 所支持的尺寸。同一 `item_route` 由服务端注册 `PUT` 整体替换与 `DELETE`；`PUT` 与创建共用请求体，并沿用同一套名称、提示词和推荐尺寸校验。创建界面不提供尺寸选择控件。该元数据不覆盖用户后续生成时的执行参数。Skill 创建 DTO 没有图片上传或资源 URL 字段。
 
 默认 Skill Catalog 为空。旧内建条目只保留 ID、完整内容 fingerprint 与同源缩略图路径，用于启动迁移兼容。默认目录模式下，AgentConfiguration 服务逐条按 fingerprint 比较最新持久配置；仅完整匹配的未修改内建 Skill 被从新版本中剔除。修改或克隆内容保留。迁移通过追加配置 revision 完成，不改写旧版本或已冻结的 Chat checkpoint。外部 `SKILL_CATALOG_FILE` 不运行内建退役迁移。
 

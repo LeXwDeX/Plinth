@@ -35,6 +35,27 @@ export async function listPersonalSkillIds(schema: ProductSchema, signal?: Abort
   return (body.skills ?? []).flatMap((skill) => (typeof skill.id === 'string' && skill.id ? [skill.id] : []));
 }
 
+/** 个人 Skill 不可访问（不存在或不属于当前用户）；服务端不区分两者。 */
+export class PersonalSkillNotFound extends Error {}
+
+/** 整体替换本人的一个个人 Skill，ID 不变；返回更新后的对象。 */
+export async function updatePersonalSkill(schema: ProductSchema, id: string, input: PersonalSkillInput, signal?: AbortSignal) {
+  const template = sameOriginRoute(schema.chat.skills.creation.item_route);
+  if (!template.includes('{skillID}')) throw new Error('Invalid Skill route');
+  const response = await fetch(template.replace('{skillID}', encodeURIComponent(id)), {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input), signal,
+  });
+  if (response.status === 404) throw new PersonalSkillNotFound(`HTTP ${response.status}`);
+  if (!response.ok) {
+    const problem: unknown = await response.json().catch(() => ({}));
+    throw new RequestFailure(`HTTP ${response.status}`, responseRequestId(response, problem));
+  }
+  const body: { skill?: AgentSkillConfiguration } = await response.json();
+  if (!body.skill || typeof body.skill.id !== 'string' || !body.skill.id) throw new Error('Invalid Skill response');
+  return body.skill;
+}
+
 /** 删除本人的一个个人 Skill；失败时抛出，调用方保留列表与选择。 */
 export async function deletePersonalSkill(schema: ProductSchema, id: string): Promise<void> {
   const template = sameOriginRoute(schema.chat.skills.creation.item_route);

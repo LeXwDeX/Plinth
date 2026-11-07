@@ -2245,6 +2245,10 @@ export function ChatColumn() {
                 }
                 setSkillRefreshVersion((version) => version + 1);
               },
+              onUpdated: () => {
+                // 编辑保持当前选择（ID 未变），只刷新目录与有效配置。
+                setSkillRefreshVersion((version) => version + 1);
+              },
             }}
             params={{
               params: generation,

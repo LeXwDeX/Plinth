@@ -21,6 +21,14 @@ describe('workspace chat message wiring', () => {
     expect(composer).toContain('<SkillPicker');
   });
 
+  it('refreshes after editing a personal Skill without changing the selection (#152)', () => {
+    const start = agentDialog.indexOf('onUpdated: () => {');
+    const block = agentDialog.slice(start, start + 240);
+    expect(start).toBeGreaterThan(0);
+    expect(block).toContain('setSkillRefreshVersion((version) => version + 1);');
+    expect(block).not.toContain('selectSkill');
+  });
+
   it('sends no Agent turn while the deployment has no Agent settings (#253)', () => {
     // Stage actions and queued turns go through send() too, not only the composer button.
     expect(agentDialog).toMatch(/const send = useCallback\([\s\S]*?if \(agentUnavailableReason\(schema\) !== null\) return;/);
