@@ -182,32 +182,43 @@ func (c *Client) Do(
 	// then prove that no upstream task was created, without buffering images in RAM.
 	spooledBytes := int64(-1)
 	if submitting && body != nil && strings.HasPrefix(contentType, "multipart/") {
-		if closer, ok := body.(io.Closer); ok {
-			closed := make(chan struct{})
-			stop := context.AfterFunc(ctx, func() { _ = closer.Close(); close(closed) })
-			defer func() {
-				if !stop() {
-					<-closed
-				}
-				_ = closer.Close()
-			}()
+		if size, ok := reusableMultipartFile(body); ok {
+			// The provider already spooled the finished body to a regular file
+			// (Hyper3D submitMultipart): send it directly instead of copying it
+			// into a second scratch file. The caller keeps ownership of the file
+			// and closes/removes it after Do returns.
+			spooledBytes = size
+			// net/http would take over an io.ReadCloser body and close the
+			// caller's file; the plain reader keeps that lifecycle caller-owned.
+			body = readerOnly{body}
+		} else {
+			if closer, ok := body.(io.Closer); ok {
+				closed := make(chan struct{})
+				stop := context.AfterFunc(ctx, func() { _ = closer.Close(); close(closed) })
+				defer func() {
+					if !stop() {
+						<-closed
+					}
+					_ = closer.Close()
+				}()
+			}
+			file, err := os.CreateTemp(c.spoolDir, ScratchFilePrefix+"upload-*")
+			if err != nil {
+				return providerError(generation.FailureTransport, true, false, "准备上传文件失败", err)
+			}
+			defer os.Remove(file.Name())
+			defer file.Close()
+			if _, err := io.Copy(file, requestBodyReader{ctx: ctx, Reader: body}); err != nil {
+				return providerError(generation.FailureTransport, true, false, "读取本地上传文件失败，尚未向上游提交", err)
+			}
+			if _, err := file.Seek(0, io.SeekStart); err != nil {
+				return providerError(generation.FailureTransport, true, false, "读取本地上传文件失败，尚未向上游提交", err)
+			}
+			if info, statErr := file.Stat(); statErr == nil {
+				spooledBytes = info.Size()
+			}
+			body = file
 		}
-		file, err := os.CreateTemp(c.spoolDir, ScratchFilePrefix+"upload-*")
-		if err != nil {
-			return providerError(generation.FailureTransport, true, false, "准备上传文件失败", err)
-		}
-		defer os.Remove(file.Name())
-		defer file.Close()
-		if _, err := io.Copy(file, requestBodyReader{ctx: ctx, Reader: body}); err != nil {
-			return providerError(generation.FailureTransport, true, false, "读取本地上传文件失败，尚未向上游提交", err)
-		}
-		if _, err := file.Seek(0, io.SeekStart); err != nil {
-			return providerError(generation.FailureTransport, true, false, "读取本地上传文件失败，尚未向上游提交", err)
-		}
-		if info, statErr := file.Stat(); statErr == nil {
-			spooledBytes = info.Size()
-		}
-		body = file
 	}
 	endpoint, err := c.resolve(path)
 	if err != nil {
@@ -493,6 +504,30 @@ func definitelyNotSent(err error) bool {
 	}
 	var urlErr *url.Error
 	return errors.As(err, &urlErr) && strings.Contains(strings.ToLower(urlErr.Error()), "unsupported protocol scheme")
+}
+
+// reusableMultipartFile reports body as an already-spooled seekable regular
+// file and rewinds it. A provider that preflights the complete multipart body on
+// disk can hand that file over instead of paying for a second spool copy.
+func reusableMultipartFile(body io.Reader) (int64, bool) {
+	file, ok := body.(*os.File)
+	if !ok {
+		return 0, false
+	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return 0, false
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return 0, false
+	}
+	return info.Size(), true
+}
+
+// readerOnly hides an io.ReadCloser so net/http wraps it in io.NopCloser and
+// leaves the caller's file open after the request.
+type readerOnly struct {
+	io.Reader
 }
 
 // Real multipart bodies are pipes; the cancellation hook above closes the pipe

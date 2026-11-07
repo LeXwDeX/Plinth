@@ -370,6 +370,8 @@ func (a *Adapter) submitMultipart(ctx context.Context, request generation.StartR
 	if closer, ok := body.(io.Closer); ok {
 		defer closer.Close()
 	}
+	// The finished multipart body is spooled once here; httpjson reuses this
+	// seekable regular file instead of copying it again (#191).
 	file, err := os.CreateTemp(a.scratchDir, httpjson.ScratchFilePrefix+"hyper3d-*")
 	if err != nil {
 		return generation.Observation{}, fail(generation.FailureTransport, true, "无法准备上游上传")

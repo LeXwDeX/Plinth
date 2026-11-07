@@ -204,6 +204,33 @@ func TestTinyTextureModelEndsFailed(t *testing.T) {
 	}
 }
 
+// The official Rodin page documents 1-5 reference images; the upper bound is
+// constructed from those docs (#191), while 0 images without a prompt reuses
+// the observed INVALID_REQUEST shape.
+func TestRodinImageCountBoundary(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	fields := map[string]string{"tier": "Gen-2.5-Extreme-Low", "geometry_file_format": "glb", "material": "PBR"}
+	images := func(count int) []string {
+		names := make([]string, count)
+		for index := range names {
+			names[index] = "images"
+		}
+		return names
+	}
+	for _, count := range []int{1, 5} {
+		status, _, body := f.Do("POST", Prefix+"/rodin", key, form(fields, images(count)...))
+		if status != http.StatusCreated || body["error"] != nil {
+			t.Fatalf("%d images = %d %v", count, status, body)
+		}
+	}
+	if status, _, body := f.Do("POST", Prefix+"/rodin", key, form(fields, images(6)...)); status != http.StatusCreated || body["error"] != "INVALID_REQUEST" {
+		t.Fatalf("6 images = %d %v", status, body)
+	}
+	if status, _, body := f.Do("POST", Prefix+"/rodin", key, form(fields)); status != http.StatusCreated || body["error"] != "INVALID_REQUEST" {
+		t.Fatalf("0 images without a prompt = %d %v", status, body)
+	}
+}
+
 func TestRequestValidation(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	for name, tc := range map[string]struct {
