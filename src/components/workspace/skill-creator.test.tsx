@@ -86,6 +86,9 @@ describe('SkillCreator edit mode (#152)', () => {
     expect(onOpenChange).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: messages['ui.workspace.skills.keep_editing'] }));
     expect(screen.queryByText(messages['ui.workspace.skills.unsaved'])).toBeNull();
+    // 按钮常驻：真实点击时目标不能被自己的 click 事件卸载，否则对话框会被外部点击检测关掉。
+    expect(screen.getByTestId('skill-unsaved-keep-editing')).toBeTruthy();
+    expect(screen.getByTestId('skill-edit-actions').className).not.toContain('hidden');
     fireEvent.click(screen.getByRole('button', { name: messages['ui.workspace.skills.cancel'] }));
     fireEvent.click(await screen.findByTestId('skill-unsaved-discard'));
     expect(onOpenChange).toHaveBeenCalledWith(false);
