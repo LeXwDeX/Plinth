@@ -22,6 +22,8 @@ type backgroundFacts struct {
 	mu       sync.Mutex
 	created  map[string]time.Time
 	queued   map[string]bool
+	finished map[string]time.Time
+	failures map[string]*generation.Failure
 	canceled []string
 	settled  []string
 	// readErr fails every Task read; logger receives the orchestrator's log.
@@ -30,7 +32,7 @@ type backgroundFacts struct {
 }
 
 func newBackgroundFacts() *backgroundFacts {
-	return &backgroundFacts{created: map[string]time.Time{}, queued: map[string]bool{}}
+	return &backgroundFacts{created: map[string]time.Time{}, queued: map[string]bool{}, finished: map[string]time.Time{}, failures: map[string]*generation.Failure{}}
 }
 
 func (f *backgroundFacts) cancellations() []string {
@@ -108,6 +110,12 @@ func backgroundOrchestrator(t *testing.T, service *chat.Service, schema catalog.
 			}
 			if facts.queued[taskID] {
 				task.UpstreamQueue = &generation.UpstreamQueue{}
+			}
+			if finishedAt, ok := facts.finished[taskID]; ok {
+				task.FinishedAt = &finishedAt
+			}
+			if failure, ok := facts.failures[taskID]; ok {
+				task.Failure = failure
 			}
 			task.Capability = "text-to-image"
 			task.Offering.ModelID = "configured-image-model"
@@ -551,3 +559,51 @@ func TestBackgroundAvailabilityReadFailureAnswersFalseAndWarnsOnce(t *testing.T)
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// A background Task that fails after the Agent's last reply is listed once, so
+// the next turn can tell the person what failed and why; a later turn does not
+// repeat it.
+func TestBackgroundPromptListsAFailedTaskAfterTheLastReply(t *testing.T) {
+	ctx := context.Background()
+	service := newChatService(t, newMemoryChatRepository())
+	executor := newWaitingExecutor()
+	facts := newBackgroundFacts()
+	schema := backgroundSchema(t)
+	o := backgroundOrchestrator(t, service, schema, executor, facts, nil)
+	command, taskID := waitingTurn(t, service, o, "failure")
+	facts.mu.Lock()
+	facts.queued[taskID] = true
+	facts.mu.Unlock()
+	if err := o.ContinueTurnInBackground(ctx, "owner-a", command.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Process(ctx, command); err != nil {
+		t.Fatal(err)
+	}
+	executor.set(taskID, generation.TaskFailed)
+	facts.mu.Lock()
+	facts.finished[taskID] = time.Now()
+	facts.failures[taskID] = &generation.Failure{Class: generation.FailureRejected, SafeDetail: "upstream rejected"}
+	facts.mu.Unlock()
+
+	agent := &backgroundContextAgent{}
+	next := backgroundOrchestrator(t, service, schema, executor, facts, agent)
+	second, err := service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: command.SessionID, Content: "did it work?"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := next.Process(ctx, chat.ProcessTurn{OwnerID: "owner-a", SessionID: command.SessionID, AssistantMessageID: second.ID}); err != nil {
+		t.Fatal(err)
+	}
+	system := agent.lastSystem()
+	want := strings.NewReplacer("{task_id}", taskID, "{capability}", "text-to-image", "{model}", "configured-image-model",
+		"{status}", string(generation.TaskFailed)+" ("+string(generation.FailureRejected)+"): upstream rejected").
+		Replace(schema.Agent.BackgroundWait.TaskLineTemplate)
+	if !strings.Contains(system, want) {
+		t.Fatalf("the Agent was not told about the failed Task:\n%s", system)
+	}
+}
+
+// The time ordering that decides whether a failed Task is news is covered by
+// TestBackgroundTaskVisible: this service's test clock is fixed, so every
+// message here carries the same time.

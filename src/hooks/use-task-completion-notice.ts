@@ -7,6 +7,7 @@
  */
 
 import { useEffect } from 'react';
+import { toast } from 'sonner';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-schema';
@@ -17,6 +18,8 @@ import {
   scanTasks,
   type NoticeOutcome,
 } from '@/lib/workspace/completion-notice';
+import { resolveErrorText } from '@/lib/workspace/task-projection';
+import { useStudioStore } from '@/store/studio-store';
 import { useWorkspaceStore } from '@/store/workspace-store';
 
 export function useTaskCompletionNotice(): void {
@@ -43,8 +46,27 @@ export function useTaskCompletionNotice(): void {
     const unsubscribe = useWorkspaceStore.subscribe((state) => {
       const scan = scanTasks(previousActive, state.trackedTasks);
       previousActive = scan.active;
+      if (scan.finished.length === 0) return;
+      // In view: failures surface once as a manual-dismiss toast. Hidden: the tab title and, when allowed,
+      // the browser notification below — never both for the same failure.
+      if (document.visibilityState === 'visible') {
+        for (const { task, outcome } of scan.finished) {
+          if (outcome !== 'failed') continue;
+          const failure = (task as { failure?: { detail?: string } | null }).failure;
+          const liveError = (task as { liveError?: string }).liveError;
+          const reason = resolveErrorText(schema.content.messages, failure?.detail || liveError || '', text('ui.workspace.tasks.error_title'));
+          const capability = capabilityLabels.get(task.capability) ?? task.capability;
+          toast.error(text('ui.workspace.notice.failed'), {
+            id: `task-failed-${task.taskId}`,
+            description: task.prompt ? `${task.prompt} · ${reason}` : `${capability} · ${reason}`,
+            duration: Infinity,
+            closeButton: true,
+            action: { label: text('ui.workspace.tasks.open'), onClick: () => useStudioStore.getState().setTaskDrawerOpen(true) },
+          });
+        }
+        return;
+      }
       const desktop = desktopQuery.matches;
-      if (scan.finished.length === 0 || document.visibilityState === 'visible') return;
       if (unseen === 0) baseTitle = document.title;
       unseen += scan.finished.length;
       document.title = schemaCountMessage(schema, 'ui.workspace.notice.tab_title', unseen, { count: unseen, title: baseTitle });

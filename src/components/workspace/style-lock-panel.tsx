@@ -111,9 +111,12 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
   // forever when the saved lock arrives as a new object (React error #185).
   useEffect(() => {
     setDraftState((current) => {
-      const next = followSavedStyleLock(current, lockState.lock);
-      if (sessionId && next !== current) draftCache.set(sessionId, next);
-      return next;
+      // The cache holds the newest committed draft. A passive effect can still see the render from
+      // before a keystroke; computing from `current` then wrote that value back over the draft.
+      const latest = cachedDraft(sessionId);
+      const next = followSavedStyleLock(latest, lockState.lock);
+      if (sessionId && next !== latest) draftCache.set(sessionId, next);
+      return next === current ? current : next;
     });
   }, [lockState.lock, sessionId]);
   useEffect(() => { setDraftState(cachedDraft(sessionId)); }, [sessionId]);
