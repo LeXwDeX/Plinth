@@ -67,9 +67,16 @@ export function SkillCreator({ sessionId, disabled, onCreated, onUpdated, onMiss
     setError('');
     setConfirmDiscard(false);
   }, [open, editing?.id, editing?.name, editing?.prompt]);
-  // 关闭确认出现时把焦点移到"继续编辑"，键盘用户不会掉出对话框。
+  // 关闭确认出现时把焦点移到"继续编辑"；回到编辑时移到"取消"，键盘用户不会掉出对话框。
+  const wasConfirming = useRef(false);
   useEffect(() => {
-    if (confirmDiscard) document.querySelector<HTMLElement>('[data-testid="skill-unsaved-keep-editing"]')?.focus();
+    if (confirmDiscard) {
+      wasConfirming.current = true;
+      document.querySelector<HTMLElement>('[data-testid="skill-unsaved-keep-editing"]')?.focus();
+    } else if (wasConfirming.current) {
+      wasConfirming.current = false;
+      document.querySelector<HTMLElement>('[data-testid="skill-edit-cancel"]')?.focus();
+    }
   }, [confirmDiscard]);
   const requestClose = () => {
     if (saving) return;
@@ -79,7 +86,7 @@ export function SkillCreator({ sessionId, disabled, onCreated, onUpdated, onMiss
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (request.current || !user?.id || !sessionId) return;
+    if (request.current || !user?.id || !sessionId || confirmDiscard) return;
     if (!name.trim() || !prompt.trim()) {
       setError(text('content_invalid')); return;
     }
@@ -131,14 +138,17 @@ export function SkillCreator({ sessionId, disabled, onCreated, onUpdated, onMiss
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t px-5 py-4">
             <div className="min-w-0">{error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}</div>
             <div className="ml-auto flex gap-2">
-              {confirmDiscard ? <>
-                <p role="alert" className="self-center text-xs text-destructive">{text('unsaved')}</p>
+              {/* 两个操作组常驻：点击"继续编辑"时按钮不能在自己的 click 事件里被卸载，
+                  否则 Base UI 的外部点击检测会把它当成外部目标并关闭对话框。 */}
+              <div className={confirmDiscard ? 'hidden' : 'flex gap-2'} data-testid="skill-edit-actions">
+                <Action type="button" variant="ghost" data-testid="skill-edit-cancel" disabled={saving} onClick={requestClose}>{text('cancel')}</Action>
+                <Action type="submit" disabled={saving}>{text(saving ? 'saving' : editing ? 'save_changes' : 'save')}</Action>
+              </div>
+              <div className={confirmDiscard ? 'flex gap-2' : 'hidden'} data-testid="skill-unsaved-actions">
+                {confirmDiscard ? <p role="alert" className="self-center text-xs text-destructive">{text('unsaved')}</p> : null}
                 <Action type="button" variant="ghost" data-testid="skill-unsaved-keep-editing" onClick={() => setConfirmDiscard(false)}>{text('keep_editing')}</Action>
                 <Action type="button" variant="destructive" data-testid="skill-unsaved-discard" onClick={() => { setConfirmDiscard(false); setOpen(false); }}>{text('discard')}</Action>
-              </> : <>
-                <Action type="button" variant="ghost" disabled={saving} onClick={requestClose}>{text('cancel')}</Action>
-                <Action type="submit" disabled={saving}>{text(saving ? 'saving' : editing ? 'save_changes' : 'save')}</Action>
-              </>}
+              </div>
             </div>
           </div>
         </form>
