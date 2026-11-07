@@ -4,9 +4,11 @@ package tripo_test
 // https://developers.tripo3d.ai/en/docs/generation-image-to-model/p
 // https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/p
 // https://developers.tripo3d.ai/en/docs/generation-text-to-model/p
-// No real P2 sample exists yet. The Offering therefore stays disabled and this
-// test sends the documented field set through the shared Tripo v3 adapter:
-// model P2-20260801, the same endpoints and the same upload/observe wire.
+// The Offering is enabled with the official P Series price read 2026-11-08.
+// No real P2 sample exists yet, so this test sends the documented field set
+// through the shared Tripo v3 adapter: model P2-20260801, the same endpoints
+// and the same upload/observe wire. The hidden extra-credit consent is frozen
+// into the input the way the approval card authorizes it.
 
 import (
 	"context"
@@ -24,7 +26,7 @@ import (
 
 func p2FrozenInput(t *testing.T, offering generation.Offering, input map[string]any) json.RawMessage {
 	t.Helper()
-	values := map[string]any{}
+	values := map[string]any{"authorize_extra_credits": true}
 	for _, parameter := range offering.Parameters {
 		if len(parameter.Default) == 0 {
 			continue
@@ -86,7 +88,7 @@ func TestTripoP2ConstructedInputReachesTheSharedV3Wire(t *testing.T) {
 			wantBody: map[string]any{
 				"model": "P2-20260801", "input": "file-token-one",
 				"texture": true, "pbr": true, "export_uv": true, "delight": true,
-				"texture_quality": "extreme", "texture_version": "v3.5-20260815",
+				"texture_quality": "standard", "texture_version": "v3.5-20260815",
 				"texture_alignment": "original_image", "orientation": "default",
 				"quad": true, "face_limit": float64(150),
 			},

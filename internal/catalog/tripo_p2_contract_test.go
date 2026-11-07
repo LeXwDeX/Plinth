@@ -1,13 +1,16 @@
 package catalog_test
 
 // Tripo P2 contract fixture, constructed from the official P pages read
-// 2026-11-04:
+// 2026-11-04 and the official P Series price read 2026-11-08:
 // https://developers.tripo3d.ai/en/docs/generation-image-to-model/p
 // https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/p
 // https://developers.tripo3d.ai/en/docs/generation-text-to-model/p
 // https://developers.tripo3d.ai/en/pricing
-// The offering stays disabled until a real paid sample and the P2 price are
-// verified; these tests lock the declared contract, not a live response.
+// Only officially listed prices are declared: base 100 credits and the
+// standard texture +10 credits. The detailed and extreme texture tiers stay
+// disabled because the official page does not list their surcharge separately.
+// The wire is still constructed from the docs: no real P2 paid sample (quad
+// output format, actual credits_consumed) has been verified.
 
 import (
 	"encoding/json"
@@ -19,19 +22,20 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
-func TestTripoP2OfferingsDeclareConstructedLowPolyContract(t *testing.T) {
+func TestTripoP2OfferingsPublishTheListedNativePriceAndLowPolyContract(t *testing.T) {
 	c, err := catalog.LoadDefault()
 	if err != nil {
 		t.Fatal(err)
 	}
 	cases := []struct {
-		id         string
-		capability schema.Capability
-		endpoint   string
+		id             string
+		capability     schema.Capability
+		endpoint       string
+		contractSource string
 	}{
-		{"tripo/tripo-p2/image-to-3d", schema.ImageTo3D, "generation/image-to-model"},
-		{"tripo/tripo-p2-multiview/image-to-3d", schema.ImageTo3D, "generation/multiview-to-model"},
-		{"tripo/tripo-p2/text-to-3d", schema.TextTo3D, "generation/text-to-model"},
+		{"tripo/tripo-p2/image-to-3d", schema.ImageTo3D, "generation/image-to-model", "generation-image-to-model/p"},
+		{"tripo/tripo-p2-multiview/image-to-3d", schema.ImageTo3D, "generation/multiview-to-model", "generation-multiview-to-model/p"},
+		{"tripo/tripo-p2/text-to-3d", schema.TextTo3D, "generation/text-to-model", "generation-text-to-model/p"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.id, func(t *testing.T) {
@@ -39,20 +43,43 @@ func TestTripoP2OfferingsDeclareConstructedLowPolyContract(t *testing.T) {
 			if !ok {
 				t.Fatal("missing Offering")
 			}
-			if o.Enabled {
-				t.Fatal("P2 must stay disabled until a real sample and the price are verified")
+			if !o.Enabled || o.Revision != "2026-11-08.192.1" {
+				t.Fatalf("P2 must be enabled at the priced revision: enabled=%v revision=%q", o.Enabled, o.Revision)
 			}
 			if o.Capability != tc.capability {
 				t.Fatalf("capability = %q, want %q", o.Capability, tc.capability)
 			}
-			if o.NativePricing != nil || o.Cost != nil || o.EstimatedCredits != 0 {
-				t.Fatalf("pending price must not publish a quote: native=%v cost=%v estimated=%d",
+			if o.NativePricing == nil || o.Cost != nil || o.EstimatedCredits != 0 {
+				t.Fatalf("P2 must carry only a native quote: native=%v cost=%v estimated=%d",
 					o.NativePricing != nil, o.Cost != nil, o.EstimatedCredits)
+			}
+			price := o.NativePricing
+			if price.Version != 1 || price.Unit != "tripo.credit" || price.UnitLabel != "Tripo credits" || price.BaseAmount != "100" {
+				t.Fatalf("P2 native price identity = %+v", price)
+			}
+			if len(price.Components) != 1 {
+				t.Fatalf("only the officially listed standard texture surcharge belongs here: %+v", price.Components)
+			}
+			component := price.Components[0]
+			if component.ID != "standard_texture" || component.Amount != "10" ||
+				component.When == nil || component.When.Parameter != "texture" || component.When.Operator != "truthy" {
+				t.Fatalf("standard texture component = %+v", component)
+			}
+			if price.ConsentParameter != "authorize_extra_credits" || price.MaxAuthorizedExtraAmount != "10" {
+				t.Fatalf("extra-credit consent bound = %q/%q", price.ConsentParameter, price.MaxAuthorizedExtraAmount)
+			}
+			quote, err := o.DefaultNativeQuote(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if quote == nil || quote.BaseAmount != "100" || quote.ExtraAmount != "10" || quote.TotalAmount != "110" {
+				t.Fatalf("default P2 quote = %+v", quote)
 			}
 			var options struct {
 				Model             string `json:"model"`
 				Endpoint          string `json:"endpoint"`
 				PricingStatus     string `json:"pricing_status"`
+				PricingCheckedAt  string `json:"pricing_checked_at"`
 				ContractScope     string `json:"contract_scope"`
 				ContractSource    string `json:"contract_source"`
 				ContractCheckedAt string `json:"contract_checked_at"`
@@ -63,16 +90,22 @@ func TestTripoP2OfferingsDeclareConstructedLowPolyContract(t *testing.T) {
 			if options.Model != "P2-20260801" || options.Endpoint != tc.endpoint {
 				t.Fatalf("P2 wire identity missing: %+v", options)
 			}
-			if options.PricingStatus != "pending-verification" || options.ContractScope != "constructed-from-docs" ||
-				!strings.Contains(options.ContractSource, "developers.tripo3d.ai") || options.ContractCheckedAt != "2026-11-04" {
+			if options.PricingStatus != "published" || options.PricingCheckedAt != "2026-11-08" ||
+				options.ContractScope != "constructed-from-docs" ||
+				!strings.Contains(options.ContractSource, tc.contractSource) || options.ContractCheckedAt != "2026-11-08" {
 				t.Fatalf("P2 source/pricing marker missing: %+v", options)
 			}
 			defaults := map[string]any{}
-			var faceLimit *schema.Parameter
+			var faceLimit, textureQuality, consent *schema.Parameter
 			for index := range o.Parameters {
 				parameter := &o.Parameters[index]
-				if parameter.Name == "face_limit" {
+				switch parameter.Name {
+				case "face_limit":
 					faceLimit = parameter
+				case "texture_quality":
+					textureQuality = parameter
+				case "authorize_extra_credits":
+					consent = parameter
 				}
 				if len(parameter.Default) == 0 {
 					continue
@@ -83,9 +116,19 @@ func TestTripoP2OfferingsDeclareConstructedLowPolyContract(t *testing.T) {
 				}
 				defaults[parameter.Name] = value
 			}
-			if defaults["texture_quality"] != "extreme" || defaults["texture_version"] != "v3.5-20260815" ||
+			if defaults["texture_quality"] != "standard" || defaults["texture_version"] != "v3.5-20260815" ||
 				defaults["pbr"] != true || defaults["texture"] != true || defaults["export_uv"] != true || defaults["delight"] != true {
-				t.Fatalf("highest-quality defaults missing: %+v", defaults)
+				t.Fatalf("default P2 input missing: %+v", defaults)
+			}
+			if textureQuality == nil || len(textureQuality.Options) != 2 {
+				t.Fatalf("detail/extreme tiers must not be offered in this batch: %+v", textureQuality)
+			}
+			if values := []string{textureQuality.Options[0].Value, textureQuality.Options[1].Value}; !slices.Equal(values, []string{"fast", "standard"}) {
+				t.Fatalf("texture_quality options = %v", values)
+			}
+			if consent == nil || consent.Type != "boolean" || len(consent.Default) != 0 ||
+				consent.Presentation == nil || consent.Presentation.Surface != "hidden" || consent.WireName != "" {
+				t.Fatalf("hidden authorize_extra_credits parameter missing: %+v", consent)
 			}
 			if faceLimit == nil || faceLimit.Minimum == nil || *faceLimit.Minimum != 48 ||
 				faceLimit.Maximum == nil || *faceLimit.Maximum != 50000 {
@@ -117,6 +160,88 @@ func TestTripoP2OfferingsDeclareConstructedLowPolyContract(t *testing.T) {
 	}
 }
 
+func TestTripoP2NativeQuoteUsesOnlyTheOfficiallyListedPrices(t *testing.T) {
+	c, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name  string
+		input string
+		total string
+	}{
+		{"default standard texture", "", "110"},
+		{"standard texture", `{"texture":true,"texture_quality":"standard"}`, "110"},
+		{"fast texture costs the same as standard", `{"texture":true,"texture_quality":"fast"}`, "110"},
+		{"texture off", `{"texture":false}`, "100"},
+		{"quad output has no separately listed surcharge", `{"quad":true}`, "110"},
+	}
+	for _, id := range []string{
+		"tripo/tripo-p2/image-to-3d",
+		"tripo/tripo-p2-multiview/image-to-3d",
+		"tripo/tripo-p2/text-to-3d",
+	} {
+		o, ok := c.Get(schema.OfferingID(id))
+		if !ok {
+			t.Fatalf("%s missing", id)
+		}
+		for _, tc := range cases {
+			t.Run(id+"/"+tc.name, func(t *testing.T) {
+				var input json.RawMessage
+				if tc.input != "" {
+					input = json.RawMessage(tc.input)
+				}
+				quote, err := o.DefaultNativeQuote(input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if quote == nil || quote.TotalAmount != tc.total || quote.Unit != "tripo.credit" {
+					t.Fatalf("quote = %+v, want total %s tripo.credit", quote, tc.total)
+				}
+			})
+		}
+	}
+}
+
+func TestTripoP2ExtraCreditsNeedExplicitConsent(t *testing.T) {
+	c, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{
+		"tripo/tripo-p2/image-to-3d",
+		"tripo/tripo-p2-multiview/image-to-3d",
+		"tripo/tripo-p2/text-to-3d",
+	} {
+		o, ok := c.Get(schema.OfferingID(id))
+		if !ok {
+			t.Fatalf("%s missing", id)
+		}
+		if _, err := catalog.AuthorizeExtraCredits(o, json.RawMessage(`{"texture":true}`)); err == nil ||
+			!strings.Contains(err.Error(), "额外积分") {
+			t.Fatalf("%s accepted extra credits without consent: %v", id, err)
+		}
+		if _, err := catalog.AuthorizeExtraCredits(o, json.RawMessage(`{"texture":true,"authorize_extra_credits":false}`)); err == nil {
+			t.Fatalf("%s accepted an explicit refusal", id)
+		}
+		authorized, err := catalog.AuthorizeExtraCredits(o, json.RawMessage(`{"texture":true,"authorize_extra_credits":true}`))
+		if err != nil {
+			t.Fatalf("%s refused explicit consent: %v", id, err)
+		}
+		if authorized.NativeQuote == nil || authorized.NativeQuote.TotalAmount != "110" {
+			t.Fatalf("%s consented quote = %+v", id, authorized.NativeQuote)
+		}
+		// No extra credits means no consent: an untextured model is the base price.
+		base, err := catalog.AuthorizeExtraCredits(o, json.RawMessage(`{"texture":false}`))
+		if err != nil {
+			t.Fatalf("%s refused an untextured model without consent: %v", id, err)
+		}
+		if base.NativeQuote == nil || base.NativeQuote.TotalAmount != "100" {
+			t.Fatalf("%s untextured quote = %+v", id, base.NativeQuote)
+		}
+	}
+}
+
 func TestTripoP2FaceLimitRequiresAnAdjustmentReason(t *testing.T) {
 	c, err := catalog.LoadDefault()
 	if err != nil {
@@ -133,7 +258,7 @@ func TestTripoP2FaceLimitRequiresAnAdjustmentReason(t *testing.T) {
 	if _, err := catalog.ValidateParameterPatch(o, values, true, map[string]string{"face_limit": "game budget caps the mesh at 150 faces"}); err != nil {
 		t.Fatalf("face_limit change with a reason refused: %v", err)
 	}
-	if _, err := catalog.ValidateParameterPatch(o, map[string]json.RawMessage{"texture_quality": json.RawMessage(`"extreme"`)}, true, nil); err != nil {
+	if _, err := catalog.ValidateParameterPatch(o, map[string]json.RawMessage{"texture_quality": json.RawMessage(`"standard"`)}, true, nil); err != nil {
 		t.Fatalf("recommended default still demands a reason: %v", err)
 	}
 }

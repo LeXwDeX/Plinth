@@ -25,6 +25,9 @@ same HTTP API the browser uses:
   * the Tripo picture and model-upload endpoints (image-to-3D, splat, multiview and its
     edit, Smart Segmentation of a picture and of a model) and the triangle decimation run
     to SUCCEEDED too (the "tripo" group);
+  * the three Tripo P2 low-poly endpoints expose the official P Series quote (100
+    credits, standard texture +10), require the hidden extra-credit consent, and run
+    text/image/multiview to SUCCEEDED with delivery checks (the "p2" group);
   * each fault scenario, selected by a fake test API key, ends the public Task of
     every provider in the expected state and error class; artifact-expired (the
     first signed URLs have expired) heals on the next read of the job, and
@@ -33,8 +36,8 @@ same HTTP API the browser uses:
     Meshy and Hyper3D delivers it.
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
-(NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, agent, faults;
-"agent" runs both agent scenarios, "hyper3d-agent" the Hyper3D chain alone)
+(NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, p2, agent, faults;
+"agent" runs both agent scenarios, "hyper3d-agent" the Hyper3D chain alone, "p2" the Tripo P2 quote/chain)
 Needs `go`. Exit 0 = every selected check passed.
 
 The stack runs inside the internal/app test binary (TestFakeUpstreamStack, built with -tags fakestack), not
@@ -94,6 +97,9 @@ ANIMATION = "tripo/processing/animation"
 TRIPO_TEXTURE = "tripo/processing/texture"
 TRIPO_IMAGE_TO_3D = "tripo/tripo-v3.1-full/image-to-3d"
 TRIPO_MULTIVIEW_TO_3D = "tripo/tripo-v3.1-multiview/image-to-3d"
+TRIPO_P2_TEXT_TO_3D = "tripo/tripo-p2/text-to-3d"
+TRIPO_P2_IMAGE_TO_3D = "tripo/tripo-p2/image-to-3d"
+TRIPO_P2_MULTIVIEW_TO_3D = "tripo/tripo-p2-multiview/image-to-3d"
 TRIPO_SPLAT = "tripo/image-to-splat"
 TRIPO_MULTIVIEW = "tripo/image-to-multiview"
 TRIPO_EDIT_MULTIVIEW = "tripo/edit-multiview"
@@ -529,6 +535,78 @@ def scenario_tripo_images(api, offerings):
                    f"could not prepare the model upload (download {status}, upload {upload_status} {json.dumps(uploaded, ensure_ascii=False)[:200]}, {len(raw)} bytes starting {raw[:4]!r})")
 
 
+def p2_prepare(api, session, offering, capability, payload):
+    return api.json("POST", "/api/v1/tasks/prepare", {
+        "session_id": session, "capability": capability, "offering_id": offering, "input": payload})
+
+
+def scenario_p2(api, offerings):
+    """Tripo P2: the official P Series price is public (base 100 credits, standard
+    texture +10); prepare quotes 110 for a textured model, the hidden consent is
+    required above the base price, the Agent path freezes 100/110 for the
+    untextured and fast variants, and the text, image and multiview endpoints run
+    to SUCCEEDED with the same delivery checks as the rest."""
+    ids = (TRIPO_P2_TEXT_TO_3D, TRIPO_P2_IMAGE_TO_3D, TRIPO_P2_MULTIVIEW_TO_3D)
+    missing = [name for name in ids if name not in offerings]
+    if missing:
+        record("tripo P2: Offerings listed", False, f"missing {missing}")
+        return
+    public = []
+    for name in ids:
+        offering = offerings[name]
+        quote = offering.get("default_native_quote") or {}
+        ok = (offering.get("price_mode") == "native" and quote.get("unit") == "tripo.credit"
+              and quote.get("total_amount") == "110" and "estimated_credits" not in offering
+              and "native_pricing" not in offering)
+        public.append(ok)
+        record(f"tripo P2: {name} public quote", ok,
+               f"price_mode {offering.get('price_mode')}, unit {quote.get('unit')}, total {quote.get('total_amount')}, "
+               f"estimated_credits {'present' if 'estimated_credits' in offering else 'absent'}")
+    if not all(public):
+        return
+    session = new_session(api)
+    picture = upload_asset(api, "p2-reference.png", make_png(), "image/png")
+    if not picture:
+        record("tripo P2: upload the reference picture", False, "the library upload was refused")
+        return
+    cases = {
+        TRIPO_P2_TEXT_TO_3D: ("text-to-3d", {"prompt": "a game-ready wooden crate"}),
+        TRIPO_P2_IMAGE_TO_3D: ("image-to-3d", {"reference_assets": [picture]}),
+        TRIPO_P2_MULTIVIEW_TO_3D: ("image-to-3d",
+                                   {"reference_assets": [picture, picture], "reference_views": ["front", "back"]}),
+    }
+    for name, (capability, base) in cases.items():
+        short = name.split("/")[1]
+        payload = payload_for(offerings[name], base)
+        status, prepared = p2_prepare(api, session, name, capability, payload)
+        quote = prepared.get("native_quote") or {}
+        record(f"tripo P2 {short}: prepare with consent quotes 110", status == 201 and quote.get("total_amount") == "110",
+               f"status {status}, native_quote {quote}")
+        refused = dict(payload)
+        refused.pop("authorize_extra_credits", None)
+        status, body = p2_prepare(api, session, name, capability, refused)
+        record(f"tripo P2 {short}: prepare without consent is refused", status == 400,
+               f"status {status} {json.dumps(body, ensure_ascii=False)[:200]}")
+        standard = dict(payload, texture_quality="standard")
+        status, prepared = p2_prepare(api, session, name, capability, standard)
+        quote = prepared.get("native_quote") or {}
+        record(f"tripo P2 {short}: standard texture quotes 110", status == 201 and quote.get("total_amount") == "110",
+               f"status {status}, native_quote {quote}")
+    # The 100 (texture=false) and fast-tier quotes cannot be reached through the
+    # public prepare body: changing an advised parameter there needs a reason, and
+    # the public body carries none. TestTripoP2NativeQuoteUsesOnlyTheOfficiallyListedPrices
+    # covers that matrix at the Catalog layer.
+    for name, (capability, base) in cases.items():
+        short = name.split("/")[1]
+        task = run_step(api, offerings, f"tripo P2 {short}: submit and deliver", name, capability,
+                        payload_for(offerings[name], base), session)
+        if task and task.get("state") == "SUCCEEDED":
+            quote = task.get("native_quote") or {}
+            record(f"tripo P2 {short}: task keeps the frozen 110 quote",
+                   quote.get("unit") == "tripo.credit" and quote.get("total_amount") == "110",
+                   f"native_quote {quote}")
+
+
 def step(api, offerings, label, offering, capability, base, session):
     return run_step(api, offerings, label, offering, capability, payload_for(offerings[offering], base), session)
 
@@ -870,12 +948,12 @@ def scenario_fault(api, offerings, scenario):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,agent,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,faults")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "tripo", "agent", "faults"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "tripo", "p2", "agent", "faults"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -891,7 +969,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "agent"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -906,6 +984,8 @@ def main():
                 scenario_images(api, offerings)
             if "tripo" in selected:
                 scenario_tripo_images(api, offerings)
+            if "p2" in selected:
+                scenario_p2(api, offerings)
             if "agent" in selected:
                 scenario_agent(api, offerings)
             if "agent" in selected or "hyper3d-agent" in selected:
