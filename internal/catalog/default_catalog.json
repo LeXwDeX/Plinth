@@ -4235,7 +4235,7 @@
          "ui.studio.brief.title": "制作简报",
          "ui.studio.brief.empty": "还没有制作简报，开始 3D 制作时 Agent 会先和你确认用途。",
          "ui.studio.style_lock.title": "风格锁定",
-         "ui.studio.style_lock.description": "整场对话每次生成和修改都会带上这份风格说明和参考图。",
+         "ui.studio.style_lock.description": "整场对话的 2D 生成与改图、以及画布局部重绘都会带上这份风格说明和参考图；去背景和 3D 生成不使用。",
          "ui.studio.style_lock.enabled": "锁定风格",
          "ui.studio.style_lock.text_label": "风格说明",
          "ui.studio.style_lock.text_placeholder": "描述要保持的视觉风格、配色、材质和笔触…",
@@ -5052,6 +5052,10 @@
       "style_lock": {
         "maximum_text_characters": 500,
         "maximum_reference_images": 3,
+        "direct_task_capabilities": [
+          "text-to-image",
+          "image-to-image"
+        ],
         "prompt_template": "\n\nStyle lock: Apply this visual style to the image while preserving the user's requested subject, composition and changes. Style description: {style}",
         "edit_scope_template": "\n\nEdit scope: Change only what the user requested. Preserve all other content, composition, colors and details."
       },
@@ -15104,7 +15108,7 @@
              "ui.studio.brief.title": "Production brief",
              "ui.studio.brief.empty": "There is no production brief yet. When 3D work starts, the Agent will first confirm the purpose with you.",
              "ui.studio.style_lock.title": "Style lock",
-             "ui.studio.style_lock.description": "Every generation and edit in this conversation carries this style description and these reference images.",
+             "ui.studio.style_lock.description": "Every 2D generation and edit in this conversation, and canvas inpainting, carries this style description and these reference images. Background removal and 3D generation do not use it.",
              "ui.studio.style_lock.enabled": "Lock style",
              "ui.studio.style_lock.text_label": "Style description",
              "ui.studio.style_lock.text_placeholder": "Describe the visual style, palette, materials and brushwork to keep…",

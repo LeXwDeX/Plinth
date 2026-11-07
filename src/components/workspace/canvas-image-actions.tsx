@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { toast } from 'sonner';
-import { AlertTriangle, CopyPlus, Download, Trash2 } from 'lucide-react';
+import { AlertTriangle, CopyPlus, Download, Paintbrush, Trash2 } from 'lucide-react';
 
 import { Surface } from '@/components/ui/surface';
 import { Field } from '@/components/ui/field';
@@ -34,6 +34,9 @@ import { saveInpaintJob, type InpaintFrame, type InpaintJob } from '@/lib/canvas
 import { useWorkspaceStore } from '@/store/workspace-store';
 import { RequestFailure, problemReason, reasonOf, responseRequestId, withErrorReference } from '@/lib/problem-reference';
 import { captureSessionScope, isCurrentSessionScope } from '@/lib/workspace/session-scope';
+import { useStyleLock } from '@/hooks/use-style-lock';
+import { createChatBrowserClient } from '@/lib/chat/browser-client';
+import { styleLockCapability } from '@/lib/workspace/style-lock-capability';
 
 /** The whole artboard rasterised into one uploaded picture, and the mask of the same pixel size and origin. */
 export interface InpaintRequest {
@@ -78,6 +81,28 @@ export async function resolveReferenceAssetId(
   return decodeURIComponent(match[1]);
 }
 
+/** #187: the session style lock a direct request belongs to, with this request's exemption. */
+export interface DirectStyleLockSnapshot {
+  enabled: boolean;
+  skipped: boolean;
+  text: string;
+  references: readonly string[];
+}
+
+function normalizedStyleLockSnapshot(snapshot?: DirectStyleLockSnapshot): DirectStyleLockSnapshot {
+  return {
+    enabled: snapshot?.enabled === true,
+    skipped: snapshot?.skipped === true,
+    text: (snapshot?.text ?? '').trim(),
+    references: snapshot?.references ?? [],
+  };
+}
+
+/** The frozen direct request belongs to its lock snapshot; a changed lock must prepare again. */
+export function sameStyleLockSnapshot(a?: DirectStyleLockSnapshot, b?: DirectStyleLockSnapshot): boolean {
+  return JSON.stringify(normalizedStyleLockSnapshot(a)) === JSON.stringify(normalizedStyleLockSnapshot(b));
+}
+
 export type PendingDirectTask = {
   preparedInputId: string;
   requestId: string;
@@ -85,6 +110,10 @@ export type PendingDirectTask = {
   sessionId: string;
   offeringId: string;
   prompt?: string;
+  /** #187: the lock snapshot the input was prepared under. */
+  styleLock?: DirectStyleLockSnapshot;
+  /** The prepare answer's note about reference pictures it had to cut. */
+  referenceNote?: string;
   /** 服务端已按会话批准方式批准这一步：不需要、也不能再点一次人工批准。 */
   approvedByPolicy?: boolean;
   nativeQuote?: NativeQuote | null;
@@ -130,10 +159,29 @@ export function inpaintSourceIdentity(input: {
   frame: InpaintFrame;
   size: { width: number; height: number };
   target: string;
+  styleLock?: DirectStyleLockSnapshot;
 }): string {
   const { x, y, width, height } = input.frame;
+  const snapshot = normalizedStyleLockSnapshot(input.styleLock);
   return `inpaint:${input.offeringId}:${input.sourceFingerprint}:${input.maskFingerprint}`
-    + `:${x},${y},${width},${height}:${input.size.width}x${input.size.height}:${input.target}`;
+    + `:${x},${y},${width},${height}:${input.size.width}x${input.size.height}:${input.target}`
+    + `:style:${JSON.stringify({ enabled: snapshot.enabled, skipped: snapshot.skipped, text: snapshot.text, references: snapshot.references })}`;
+}
+
+/** The direct prepare body of the inpaint dialog; only it carries a one-turn lock exemption (#187). */
+export function inpaintDirectPrepareBody(
+  offeringId: string,
+  sessionId: string,
+  input: Record<string, unknown>,
+  styleLockSkipped: boolean,
+): Record<string, unknown> {
+  return {
+    capability: 'image-to-image',
+    offering_id: offeringId,
+    session_id: sessionId,
+    input,
+    ...(styleLockSkipped ? { style_lock_skipped: true } : {}),
+  };
 }
 
 export function readPendingDirectTask(sessionId: string | null, sourceIdentity: string): PendingDirectTask | null {
@@ -199,7 +247,7 @@ export async function prepareDirectTask(
   isActive: () => boolean = () => true,
 ): Promise<PendingDirectTask> {
   if (!isActive()) throw new Error('task preparation inactive');
-  const prepared = await checkedJSON<{ prepared_input_id: string }>(routes.task_prepare, 'POST', body);
+  const prepared = await checkedJSON<{ prepared_input_id: string; reference_note?: unknown }>(routes.task_prepare, 'POST', body);
   // The dialog may have been cancelled while preparation was in flight; do not create a grant then.
   if (!isActive()) throw new Error('task preparation inactive');
   const key = randomExecutionKey();
@@ -209,6 +257,7 @@ export async function prepareDirectTask(
   if (priceMode === 'native' && !nativeQuote) throw new Error('Native price quote is unavailable');
   return {
     preparedInputId: prepared.prepared_input_id, requestId: grant.request_id, key, sessionId, offeringId, prompt,
+    ...(typeof prepared.reference_note === 'string' && prepared.reference_note ? { referenceNote: prepared.reference_note } : {}),
     ...(priceMode === 'native' ? { priceMode, nativeQuote: nativeQuote ?? null } : {}),
     ...(grant.approved_by_policy === true && grant.status === 'approved' ? { approvedByPolicy: true } : {}),
     ...(grant.status === 'approved' ? { grantApproved: true } : {}),
@@ -257,6 +306,20 @@ export function InpaintDialog({
   const { schema, text } = useProductSchema();
   const registerTask = useWorkspaceStore((state) => state.registerTask);
   const sessionID = useChatStore((state) => state.activeSessionId);
+  // #187: the session's lock reaches canvas inpainting; this dialog owns its
+  // one-turn exemption and never passes it to any other canvas action.
+  const chatClient = useMemo(() => createChatBrowserClient(schema), [schema]);
+  const styleLock = useStyleLock(chatClient, sessionID);
+  const [styleLockSkipped, setStyleLockSkipped] = useState(false);
+  useEffect(() => { setStyleLockSkipped(false); }, [sessionID]);
+  const styleLockActive = styleLock.lock.enabled
+    && (styleLock.lock.text.trim() !== '' || styleLock.lock.references.length > 0);
+  const styleLockSnapshot = useMemo<DirectStyleLockSnapshot>(() => ({
+    enabled: styleLock.lock.enabled,
+    skipped: styleLockSkipped,
+    text: styleLock.lock.text,
+    references: styleLock.lock.references,
+  }), [styleLock.lock.enabled, styleLock.lock.text, styleLock.lock.references, styleLockSkipped]);
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -268,7 +331,7 @@ export function InpaintDialog({
   // A new identity object is issued on every change (never reissued on A-B-A), and the captured session
   // revision makes a session round trip stale even when the id string is the same again.
   const activeRef = useRef(true);
-  const submissionIdentity = useMemo(() => ({}), [request, modelId, sessionID]);
+  const submissionIdentity = useMemo(() => ({}), [request, modelId, sessionID, styleLockSnapshot]);
   // Read the identity of the latest render: a closing closure keeps the identity it started with.
   const identityRef = useRef(submissionIdentity);
   identityRef.current = submissionIdentity;
@@ -321,6 +384,16 @@ export function InpaintDialog({
   );
   const targetExact = Boolean(target?.pixels && samePixels(target.pixels, request.size));
   const targetBlocks = !targetExact;
+  // The same pre-send notice as the composer: this model may not take the
+  // lock's pictures, or may take fewer than the turn picture plus the lock.
+  const styleLockNoticeKind = styleLockActive && !styleLockSkipped && styleLock.lock.references.length > 0
+    ? styleLockCapability(offering, styleLock.lock.references.length + 1)
+    : null;
+  const styleLockNotice = styleLockNoticeKind === null ? null : text(
+    styleLockNoticeKind === 'model_no_reference'
+      ? 'ui.unavailable.reason.style_lock.model_no_reference'
+      : 'ui.studio.style_lock.references_trimmed',
+  );
   const canvasLabel = `${request.size.width}×${request.size.height}`;
   const targetLabel = target?.pixels ? `${target.pixels.width}×${target.pixels.height}` : target?.value ?? '';
   const sourceIdentity = hashes && offering
@@ -331,15 +404,24 @@ export function InpaintDialog({
         frame: request.frame,
         size: request.size,
         target: target?.value ?? 'model-default',
+        styleLock: styleLockSnapshot,
       })
     : null;
+  const previousSourceIdentity = useRef<{ sessionId: string | null; identity: string } | null>(null);
   useEffect(() => {
+    const previous = previousSourceIdentity.current;
+    if (previous && previous.identity !== sourceIdentity) {
+      // A changed lock, exemption, mask, frame, size or model no longer owns the old draft.
+      clearPendingDirectTask(previous.sessionId, previous.identity);
+    }
+    previousSourceIdentity.current = sourceIdentity ? { sessionId: sessionID, identity: sourceIdentity } : null;
     if (!sourceIdentity) { setPending(null); return; }
     const restored = readPendingDirectTask(sessionID, sourceIdentity);
-    const matched = restored && samePixels(restored.inpaint?.size, request.size) ? restored : null;
+    const matched = restored && samePixels(restored.inpaint?.size, request.size)
+      && sameStyleLockSnapshot(restored.styleLock, styleLockSnapshot) ? restored : null;
     setPending(matched);
     if (matched?.prompt) setPrompt(matched.prompt);
-  }, [sessionID, sourceIdentity, request.size.height, request.size.width]);
+  }, [sessionID, sourceIdentity, request.size.height, request.size.width, styleLockSnapshot]);
 
   const submit = async () => {
     if (!offering || !sessionID || !sourceIdentity || prompt.trim() === '' || targetBlocks) return;
@@ -352,7 +434,8 @@ export function InpaintDialog({
     try {
       if (pending) {
         if (pending.offeringId !== offering.id || pending.sessionId !== sessionID || pending.prompt !== prompt.trim()
-          || !samePixels(pending.inpaint?.size, request.size)) {
+          || !samePixels(pending.inpaint?.size, request.size)
+          || !sameStyleLockSnapshot(pending.styleLock, styleLockSnapshot)) {
           setPending(null);
           clearPendingDirectTask(sessionID, sourceIdentity);
           throw new Error('prepared input changed');
@@ -382,13 +465,11 @@ export function InpaintDialog({
       // The explicit size is frozen with the input and the grant; the picture and mask are both request.size.
       const input = buildInpaintInput(offering, prompt, referenceId, maskId, request.size);
       const prepared: PendingDirectTask = {
-        ...(await prepareDirectTask(schema.runtime.http.routes, {
-          capability: 'image-to-image',
-          offering_id: offering.id,
-          session_id: sessionID,
-          input,
-        }, sessionID, offering.id, prompt.trim(), offering.price_mode === 'native' ? 'native' : undefined, stillActive)),
+        ...(await prepareDirectTask(schema.runtime.http.routes,
+          inpaintDirectPrepareBody(offering.id, sessionID, input, styleLockActive && styleLockSkipped),
+          sessionID, offering.id, prompt.trim(), offering.price_mode === 'native' ? 'native' : undefined, stillActive)),
         inpaint: { maskUrl, maskAssetId: maskId, frame: request.frame, size: request.size },
+        styleLock: styleLockSnapshot,
       };
       if (!stillActive()) return;
       // Persist the whole prepared request before any Task POST. When the POST is accepted and its response
@@ -418,6 +499,11 @@ export function InpaintDialog({
     } finally {
       if (activeRef.current) setBusy(false);
     }
+  };
+  const toggleStyleLockSkip = () => {
+    setStyleLockSkipped((current) => !current);
+    setPending(null);
+    if (sourceIdentity) clearPendingDirectTask(sessionID, sourceIdentity);
   };
 
   return (
@@ -463,6 +549,31 @@ export function InpaintDialog({
                 </p>
               </div>
             </div>
+            {styleLockActive ? (
+              <div className="mb-3 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1" data-testid="inpaint-style-lock">
+                <span className="inline-flex min-w-0 items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                  <Paintbrush aria-hidden className="size-3.5 shrink-0" />
+                  <span className="truncate">{text('ui.studio.style_lock.chip')}</span>
+                </span>
+                <label className={styleLockSkipped
+                  ? 'inline-flex min-w-0 items-center gap-1.5 text-xs text-foreground'
+                  : 'inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'}>
+                  <input
+                    type="checkbox"
+                    checked={styleLockSkipped}
+                    onChange={toggleStyleLockSkip}
+                    data-testid="inpaint-style-lock-skip"
+                    className="size-3.5 shrink-0"
+                  />
+                  <span className="min-w-0">{text('ui.studio.style_lock.skip_once')}</span>
+                </label>
+                {styleLockNotice ? (
+                  <p role="status" data-testid="inpaint-style-lock-notice" className="min-w-0 text-[11px] leading-4 text-warning">
+                    {styleLockNotice}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             <Field id="inpaint-prompt" label={text('ui.canvas.inpaint.prompt_label')} help={offering.price_mode === 'native'
                 ? nativeEstimate(schema, offering)
                 : !offeringShowsCredits(offering)
@@ -480,6 +591,9 @@ export function InpaintDialog({
               className="min-h-20 resize-none"
             />)}
             </Field>
+            {pending?.referenceNote ? (
+              <p className="mt-2 text-xs text-muted-foreground" data-testid="inpaint-reference-note">{pending.referenceNote}</p>
+            ) : null}
             {pending && <p className="mt-2 text-xs text-warning">{text('ui.canvas.inpaint.confirm_prepared')}</p>}
             {error ? (
               <p role="alert" className="mt-2 flex items-start gap-2 text-xs text-destructive">

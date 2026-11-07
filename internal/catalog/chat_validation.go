@@ -248,11 +248,22 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateChatAttachments(schema.Context); err != nil {
 		return err
 	}
+	directStyleLockCapabilities := make(map[schemacontract.Capability]bool, len(schema.StyleLock.DirectTaskCapabilities))
+	for _, capability := range schema.StyleLock.DirectTaskCapabilities {
+		if !capability.Valid() || capabilityDomains[capability] != schemacontract.DomainImage {
+			return errors.New("style_lock.direct_task_capabilities 只能声明图片域能力")
+		}
+		if directStyleLockCapabilities[capability] {
+			return errors.New("style_lock.direct_task_capabilities 不能重复声明同一能力")
+		}
+		directStyleLockCapabilities[capability] = true
+	}
 	styleLockDeclared := runtime.HTTP.Routes.ChatSessionStyleLock != "" ||
 		schema.StyleLock.MaximumTextCharacters > 0 || schema.StyleLock.MaximumReferenceImages > 0 ||
 		schema.API.StyleLock.Enabled != "" || schema.API.StyleLock.Text != "" || schema.API.StyleLock.References != "" ||
 		schema.API.ResponseFields.StyleLock != ""
 	if styleLockDeclared && (schema.StyleLock.MaximumTextCharacters <= 0 || schema.StyleLock.MaximumReferenceImages <= 0 ||
+		len(schema.StyleLock.DirectTaskCapabilities) == 0 ||
 		strings.TrimSpace(schema.StyleLock.PromptTemplate) == "" || !strings.Contains(schema.StyleLock.PromptTemplate, "{style}") ||
 		strings.TrimSpace(schema.StyleLock.EditScopeTemplate) == "" ||
 		strings.TrimSpace(schema.API.StyleLock.Enabled) == "" ||

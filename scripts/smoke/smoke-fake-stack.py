@@ -351,10 +351,13 @@ def decision_body(api, decision):
     return {api.decision_member: decision} if api.decision_member else {}
 
 
-def submit(api, offering, capability, payload, session):
-    """prepare -> grant (-> human approval) -> submit. Returns (task_id, why)."""
-    status, prepared = api.json("POST", "/api/v1/tasks/prepare", {
-        "session_id": session, "capability": capability, "offering_id": offering, "input": payload})
+def submit(api, offering, capability, payload, session, style_lock_skipped=False):
+    """prepare -> grant (-> human approval) -> submit. Returns (task_id, why).
+    style_lock_skipped is the direct prepare's one-turn exemption (#187)."""
+    body = {"session_id": session, "capability": capability, "offering_id": offering, "input": payload}
+    if style_lock_skipped:
+        body["style_lock_skipped"] = True
+    status, prepared = api.json("POST", "/api/v1/tasks/prepare", body)
     if status not in (200, 201):
         return None, f"prepare {status} {prepared}"
     pid = prepared["prepared_input_id"]
@@ -420,8 +423,8 @@ def check_delivery(api, task, offering, submitted=None):
     return problems, len(task.get("assets") or [])
 
 
-def run_step(api, offerings, label, offering, capability, payload, session, expect_state="SUCCEEDED"):
-    task_id, why = submit(api, offering, capability, payload, session)
+def run_step(api, offerings, label, offering, capability, payload, session, expect_state="SUCCEEDED", style_lock_skipped=False):
+    task_id, why = submit(api, offering, capability, payload, session, style_lock_skipped=style_lock_skipped)
     if not task_id:
         record(label, False, why)
         return None
@@ -607,8 +610,11 @@ def scenario_p2(api, offerings):
                    f"native_quote {quote}")
 
 
-def step(api, offerings, label, offering, capability, base, session):
-    return run_step(api, offerings, label, offering, capability, payload_for(offerings[offering], base), session)
+def step(api, offerings, label, offering, capability, base, session, style_lock_skipped=False):
+    return run_step(api, offerings, label, offering, capability, payload_for(offerings[offering], base), session,
+                    style_lock_skipped=style_lock_skipped)
+
+
 
 
 def scenario_meshy(api, offerings):
@@ -658,6 +664,50 @@ def scenario_hyper3d(api, offerings):
                  {"source_asset": model_id, "reference_image": picture_id, "prompt": "plain matte red"}, session)
 
 
+def task_prompt(task):
+    return ((task or {}).get("input") or {}).get("prompt") or ""
+
+
+def scenario_style_lock_direct(api, offerings):
+    """#187: canvas direct prepare carries the session lock, the one-turn
+    exemption removes it, and matting/3D stay outside the lock."""
+    session = new_session(api)
+    source = upload_asset(api, "style-source.png", make_png(), "image/png")
+    style = upload_asset(api, "style-reference.png", make_png(32), "image/png")
+    if not source or not style:
+        record("style lock: upload the pictures", False, "the library upload was refused")
+        return
+    status, body = api.json("PUT", f"/api/v1/chat/sessions/{session}/style-lock",
+                            {"enabled": True, "text": "ink and paper", "references": [style]})
+    record("style lock: save the session lock",
+           status == 200 and (body.get("styleLock") or {}).get("enabled") is True,
+           f"status {status} {json.dumps(body, ensure_ascii=False)[:200]}")
+    locked = step(api, offerings, "style lock: image-to-image carries the lock", IMAGE_OFFERINGS["openai"][1],
+                  "image-to-image", {"prompt": "make the cube blue", "reference_assets": [source]}, session)
+    locked_prompt = task_prompt(locked)
+    record("style lock: the frozen task prompt carries the style",
+           "Style lock:" in locked_prompt and "ink and paper" in locked_prompt,
+           f"prompt {locked_prompt[-160:]!r}")
+    skipped = step(api, offerings, "style lock: one-turn exemption", IMAGE_OFFERINGS["openai"][1],
+                   "image-to-image", {"prompt": "make the cube blue", "reference_assets": [source]}, session,
+                   style_lock_skipped=True)
+    skipped_prompt = task_prompt(skipped)
+    record("style lock: the exempt task prompt stays clean",
+           "Style lock" not in skipped_prompt and "ink and paper" not in skipped_prompt,
+           f"prompt {skipped_prompt!r}")
+    matting = step(api, offerings, "style lock: matting stays outside", MATTING, "background-removal",
+                   {"source_assets": [source]}, session)
+    matting_input = json.dumps((matting or {}).get("input") or {}, ensure_ascii=False)
+    record("style lock: matting input has no style text",
+           "ink and paper" not in matting_input and "Style lock" not in matting_input, matting_input[:160])
+    three_d = step(api, offerings, "style lock: 3D stays outside", TEXT_TO_3D, "text-to-3d",
+                   {"prompt": "a plain cube"}, session)
+    three_d_prompt = task_prompt(three_d)
+    record("style lock: 3D prompt has no style text",
+           "Style lock" not in three_d_prompt and "ink and paper" not in three_d_prompt,
+           f"prompt {three_d_prompt!r}")
+
+
 def scenario_images(api, offerings):
     """The image Offerings (OpenAI, Gemini, Jimeng) and the matting service: each
     runs to SUCCEEDED with its required image delivered, intact and sandboxed."""
@@ -671,6 +721,7 @@ def scenario_images(api, offerings):
         step(api, offerings, f"{provider} image-to-image", image_to_image, "image-to-image",
              {"prompt": "make the cube blue", "reference_assets": [picture]}, session)
     step(api, offerings, "matting background-removal", MATTING, "background-removal", {"source_assets": [picture]}, session)
+    scenario_style_lock_direct(api, offerings)
 
 
 def scenario_agent(api, offerings):
