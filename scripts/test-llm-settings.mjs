@@ -208,8 +208,11 @@ async function checks(engine, browser, [width, height]) {
 
   let sessionID = '';
   const chatPicker = userPage.locator('[data-testid=workspace-chat-model-picker]');
-  const reasoningPicker = userPage.locator('[data-testid=workspace-reasoning-picker]');
   const meter = userPage.locator('[data-testid=composer-context-meter]');
+  const showsCombined = (locator, ...parts) => waitFor(async () => {
+    const text = (await locator.innerText().catch(() => '')).trim();
+    return parts.every((part) => text.includes(part));
+  }, `shows ${parts.join(' + ')}`).catch(async () => assert.fail(`shows "${(await chatPicker.innerText().catch(() => '')).trim()}", want ${parts.join(' + ')}`));
   const openSession = async () => {
     await userPage.goto(`${BASE}/?session=${encodeURIComponent(sessionID)}`);
     await userPage.waitForSelector('[data-testid=studio-shell]', { timeout: 30000 });
@@ -221,8 +224,7 @@ async function checks(engine, browser, [width, height]) {
     current = userPage;
     sessionID = (await ok(userContext, 'POST', legacy.chat_sessions, { title: `#322 B ${engine} ${viewport}` })).id;
     await openSession();
-    await shows(chatPicker, 'deepseek', 'the default model');
-    await shows(reasoningPicker, 'low', 'DeepSeek default level');
+    await showsCombined(chatPicker, 'deepseek', 'low');
     await meterShows('1M', 'DeepSeek window');
     await chatPicker.click();
     const panel = userPage.locator('[data-testid=workspace-chat-model-picker-panel]');
@@ -231,19 +233,16 @@ async function checks(engine, browser, [width, height]) {
     assert.equal(rows.length, 2, `rows ${rows.join(' | ')}`);
     assert(rows[0].startsWith('deepseek') && rows[0].includes(text('ui.studio.chat_model.default_tag')), `default tag: ${rows[0]}`);
     await panel.getByText(GLM_MODEL, { exact: true }).click();
-    await shows(chatPicker, GLM_MODEL, 'after picking GLM');
-    await shows(reasoningPicker, 'high', 'GLM default level');
+    await showsCombined(chatPicker, GLM_MODEL, 'high');
     await meterShows('200K', 'GLM window');
-    await reasoningPicker.click();
-    const levels = userPage.locator('[data-testid=workspace-reasoning-picker-panel]');
+    const levels = userPage.locator('[data-testid=workspace-reasoning-section]');
     await levels.waitFor({ timeout: 5000 });
     const offered = await levels.locator('button').filter({ hasText: /^(low|high|max)/ }).allInnerTexts();
     assert.deepEqual(offered.map((row) => row.split(/\s/)[0]), ['high', 'max'], `levels ${offered.join(' | ')}`);
     await userPage.keyboard.press('Escape');
     await userPage.screenshot({ path: path.join(OUT, `${engine}-${viewport}-2-glm.png`) });
     await openSession();
-    await shows(chatPicker, GLM_MODEL, 'GLM after a reload');
-    await shows(reasoningPicker, 'high', 'level after a reload');
+    await showsCombined(chatPicker, GLM_MODEL, 'high');
     await meterShows('200K', 'window after a reload');
     const stored = await ok(userContext, 'GET', sessionRoute(routes.chat_session_model, sessionID));
     assert.equal(stored[fields.chat_model], 'GLM');

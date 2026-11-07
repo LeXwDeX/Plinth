@@ -1,14 +1,11 @@
 'use client';
 
-import { toast } from 'sonner';
 
 import { useProductSchema } from '@/components/product-schema-provider';
-import { TablePopover, type TableSection } from '@/components/studio/table-popover';
-import { useSessionReasoning } from '@/hooks/use-session-reasoning';
+import type { TableSection } from '@/components/studio/table-popover';
 import type { ChatReasoning } from '@/lib/chat/browser-client';
 import { schemaText, type ProductSchema } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
-import { useChatStore } from '@/store/chat-store';
 
 /**
  * #322: the table of the chat model's thinking levels. The rows are the model's own level values,
@@ -44,36 +41,4 @@ export function reasoningSection(
     } : {}),
     onPick,
   };
-}
-
-/**
- * 输入区底部的思考强度选择，与 Agent 模式并列：选项就是当前对话模型官方的档位值。档位按会话
- * 保存在服务端，只影响之后发出的消息；模型没有档位时停用并说明原因。思考内容本身不展示。
- */
-export function ReasoningPicker() {
-  const { schema } = useProductSchema();
-  const activeSessionId = useChatStore((state) => state.activeSessionId);
-  const { supported, reasoning, busy, setLevel } = useSessionReasoning(activeSessionId);
-  if (!supported) return null;
-  const label = schemaText(schema, 'ui.studio.reasoning.label');
-  const noLevels = reasoning !== null && reasoning.levels.length === 0;
-  const value = reasoning?.effort || schemaText(schema, 'ui.studio.context.unknown');
-  const section = reasoningSection(schema, reasoning, (level) => {
-    if (level === reasoning?.effort) return;
-    void setLevel(level).then((ok) => {
-      if (!ok) toast.error(schemaText(schema, 'ui.studio.reasoning.change_failed'));
-    });
-  });
-
-  return (
-    <TablePopover
-      testId="workspace-reasoning-picker"
-      label={label}
-      value={value}
-      hint={schemaText(schema, 'ui.studio.reasoning.hint')}
-      triggerDisabledReason={!activeSessionId ? schemaText(schema, 'ui.unavailable.reason.picker.no_session') : noLevels ? schemaText(schema, 'ui.unavailable.reason.picker.reasoning_none') : undefined}
-      disabled={!activeSessionId || busy || reasoning === null || noLevels}
-      sections={[section]}
-    />
-  );
 }

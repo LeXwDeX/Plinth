@@ -266,36 +266,38 @@ async function checks(engine, browser, [width, height]) {
       .catch(async () => assert.fail(`${message}: picker shows "${(await locator.innerText()).trim()}", want "${level}"`));
   const window = tokens(1000000);
   const unknown = text('ui.studio.context.unknown');
-  const picker = page.locator('[data-testid=workspace-reasoning-picker]');
+  const picker = page.locator('[data-testid=workspace-chat-model-picker]');
+  const pickerHas = (locator, level) => waitFor(async () => (await locator.innerText().catch(() => '')).includes(level), `level ${level}`);
 
   await step('the thinking picker lists the model\'s own levels; high persists across a reload and another device', async () => {
     await picker.waitFor({ timeout: 20000 });
-    await pickerShows(picker, 'low', 'default level');
+    await pickerHas(picker, 'low');
     await picker.hover();
     await page.getByText(text('ui.studio.reasoning.hint'), { exact: true }).first().waitFor({ timeout: 5000 });
     await picker.click();
-    const panel = page.locator('[data-testid=workspace-reasoning-picker-panel]');
+    const panel = page.locator('[data-testid=workspace-chat-model-picker-panel]');
     await panel.waitFor({ timeout: 5000 });
-    const rows = await panel.locator('[role=option], [role=menuitemradio], button').filter({ hasText: /^(low|high|max)/ }).allInnerTexts();
+    const levels = panel.locator('[data-testid=workspace-reasoning-section]');
+    const rows = await levels.locator('[role=option], [role=menuitemradio], button').filter({ hasText: /^(low|high|max)/ }).allInnerTexts();
     assert.deepEqual(rows.map((row) => row.split(/\s/)[0]), ['low', 'high', 'max'], `rows ${rows.join(' | ')}`);
     assert(rows[0].includes(text('ui.studio.reasoning.default_tag')), `default tag on low: ${rows[0]}`);
-    await panel.getByText('high', { exact: true }).click();
-    await pickerShows(picker, 'high', 'after choosing high');
+    await levels.getByText('high', { exact: true }).click();
+    await pickerHas(picker, 'high');
     await page.screenshot({ path: path.join(OUT, `${engine}-${viewport}-1-reasoning.png`) });
     const stored = await ok(context, 'GET', sessionRoute(routes.chat_session_reasoning, source.sessionID));
     assert.equal(stored[fields.reasoning_effort], 'high');
     assert.deepEqual(stored[fields.reasoning_levels], ['low', 'high', 'max']);
     await page.reload();
     await page.waitForSelector('[data-testid=studio-shell]', { timeout: 30000 });
-    await pickerShows(picker, 'high', 'after a reload');
+    await pickerHas(picker, 'high');
     const { cookies } = await context.storageState();
     const other = await guardedContext(browser, { width, height }, outside);
     await other.addCookies(cookies);
     const second = await other.newPage();
     await second.goto(`${BASE}/?session=${encodeURIComponent(source.sessionID)}`);
-    const otherPicker = second.locator('[data-testid=workspace-reasoning-picker]');
+    const otherPicker = second.locator('[data-testid=workspace-chat-model-picker]');
     await otherPicker.waitFor({ timeout: 30000 });
-    await pickerShows(otherPicker, 'high', 'on another device');
+    await waitFor(async () => (await otherPicker.innerText()).includes('high'), 'level on another device');
     await other.close();
   });
 
@@ -443,8 +445,8 @@ async function checks(engine, browser, [width, height]) {
     for (let attempt = 1; ; attempt += 1) {
       await page.goto(`${BASE}/?session=${encodeURIComponent(session.id)}`);
       await page.waitForSelector('[data-testid=studio-shell]', { timeout: 30000 });
-      const levelShown = page.locator('[data-testid=workspace-reasoning-picker]');
-      const opened = await waitFor(async () => (await levelShown.innerText().catch(() => '')).trim() === 'low', 'level', 15000)
+      const levelShown = page.locator('[data-testid=workspace-chat-model-picker]');
+      const opened = await waitFor(async () => (await levelShown.innerText().catch(() => '')).includes('low'), 'level', 15000)
         .then(() => true, () => false);
       if (opened) break;
       assert(attempt < 4, 'the failure session never opened');

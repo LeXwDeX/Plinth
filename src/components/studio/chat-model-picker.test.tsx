@@ -31,9 +31,16 @@ const two: ChatModelChoice = {
   options: [{ id: 'LLM', model: 'deepseek' }, { id: 'GLM', model: 'glm-5.3' }],
 };
 
-function open(session: string | null, choice?: ChatModelChoice) {
+const reasoning = { effort: 'high', levels: ['low', 'high', 'max'], defaultLevel: 'high' };
+
+function open(session: string | null, choice?: ChatModelChoice, levels = false) {
   useChatStore.setState({ activeSessionId: session });
-  useSessionContextStore.setState({ chatModel: session && choice ? { [session]: choice } : {}, chatModelBusy: {} });
+  useSessionContextStore.setState({
+    chatModel: session && choice ? { [session]: choice } : {},
+    chatModelBusy: {},
+    reasoning: session && levels ? { [session]: reasoning } : {},
+    reasoningBusy: {},
+  });
 }
 
 beforeEach(() => { mock.schema = catalog; });
@@ -55,6 +62,18 @@ describe('the chat model picker (#322)', () => {
     open('s1', two);
     mock.schema = { ...catalog, runtime: { ...catalog.runtime, http: { ...catalog.runtime.http, routes: { ...catalog.runtime.http.routes, chat_session_model: undefined } } } };
     expect(renderToStaticMarkup(<ChatModelPicker />)).toBe('');
+  });
+
+  it('shows the model and its level in one entry when both are available', () => {
+    open('s1', two, true);
+    const html = renderToStaticMarkup(<ChatModelPicker />);
+    expect(html).toContain(`aria-label="${messages['ui.studio.chat_model.combined_label']}: glm-5.3 · high"`);
+  });
+
+  it('uses the thinking label with a single chat model and levels', () => {
+    open('s1', { ...two, selected: 'LLM', options: [two.options[0]] }, true);
+    const html = renderToStaticMarkup(<ChatModelPicker />);
+    expect(html).toContain(`aria-label="${messages['ui.studio.reasoning.label']}: deepseek · high"`);
   });
 
   it('lists the offered models with the default tagged and the session model selected', () => {

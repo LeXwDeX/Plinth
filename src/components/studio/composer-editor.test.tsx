@@ -15,7 +15,6 @@ vi.mock('@/components/ui/hint-tooltip', () => ({ HintTooltip: ({ children }: { c
 vi.mock('@/components/studio/model-picker', () => ({ ModelPicker: () => null, GenerationModelNotice: () => null }));
 vi.mock('@/components/studio/skill-picker', () => ({ SkillPicker: () => null }));
 vi.mock('@/components/studio/chat-model-picker', () => ({ ChatModelPicker: () => null, ChatModelNotice: () => null }));
-vi.mock('@/components/studio/reasoning-picker', () => ({ ReasoningPicker: () => null }));
 vi.mock('@/components/studio/params-popover', () => ({ ParamsPopover: () => null }));
 vi.mock('@/hooks/use-asset-url-rewriter', () => ({ useAssetURLRewriter: () => ({ previewAssetUrl: (url: string) => url }) }));
 

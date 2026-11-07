@@ -5,15 +5,17 @@ import { toast } from 'sonner';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { TablePopover, type TableSection } from '@/components/studio/table-popover';
 import { useSessionChatModel } from '@/hooks/use-session-chat-model';
+import { useSessionReasoning } from '@/hooks/use-session-reasoning';
 import type { ChatModelChoice } from '@/lib/chat/browser-client';
 import { formatSchemaText, schemaText, type ProductSchema } from '@/lib/product-schema';
+import { reasoningSection } from '@/components/studio/reasoning-picker';
 import { unavailableLabel } from '@/lib/unavailable';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { useChatStore } from '@/store/chat-store';
 import { useSessionContextStore } from '@/store/session-context-store';
 
 /** The model name of an offered model id; the id itself when it is not offered (any more). */
-function modelName(choice: ChatModelChoice | null, id: string): string {
+export function modelName(choice: ChatModelChoice | null, id: string): string {
   return choice?.options.find((option) => option.id === id)?.model ?? id;
 }
 
@@ -47,30 +49,69 @@ export function chatModelSection(
 }
 
 /**
- * 输入区底部的对话模型选择，与思考强度、token 数并列。管理员开放两个以上模型时才出现；选择按会话保存在
- * 服务端，切换后思考档位和上下文窗口随新模型变化，只影响之后的消息。
+ * #176: one entry for the chat model and its thinking level. The popover stacks the model table over the
+ * current model's level table; picking a model keeps it open so the level can follow, and picking a level
+ * closes it. Neither choice changes the server protocol: the two existing per-session PUTs run in order.
  */
 export function ChatModelPicker() {
   const { schema } = useProductSchema();
   const activeSessionId = useChatStore((state) => state.activeSessionId);
-  const { supported, choice, busy, setModel } = useSessionChatModel(activeSessionId);
-  if (!supported || !choice || choice.options.length < 2) return null;
-  const label = schemaText(schema, 'ui.studio.chat_model.label');
-  const section = chatModelSection(schema, choice, (id) => {
-    if (id === choice.selected) return;
-    void setModel(id).then((ok) => {
-      if (!ok) toast.error(schemaText(schema, 'ui.studio.chat_model.change_failed'));
+  const chatModel = useSessionChatModel(activeSessionId);
+  const reasoning = useSessionReasoning(activeSessionId);
+  const models = chatModel.choice?.options ?? [];
+  const multipleModels = Boolean(chatModel.supported && chatModel.choice && models.length >= 2);
+  const levelsAvailable = Boolean(reasoning.supported && reasoning.reasoning);
+  if (!multipleModels && !levelsAvailable) return null;
+  const soloModel = models.length === 1 ? models[0].model : '';
+  const selectedModel = modelName(chatModel.choice, chatModel.choice?.selected ?? '') || soloModel;
+  const level = levelsAvailable ? reasoning.reasoning?.effort ?? '' : '';
+  const label = schemaText(schema, multipleModels && levelsAvailable
+    ? 'ui.studio.chat_model.combined_label'
+    : levelsAvailable ? 'ui.studio.reasoning.label' : 'ui.studio.chat_model.label');
+  const hint = schemaText(schema, multipleModels && levelsAvailable
+    ? 'ui.studio.chat_model.combined_hint'
+    : levelsAvailable ? 'ui.studio.reasoning.hint' : 'ui.studio.chat_model.hint');
+  const sections: TableSection[] = [];
+  if (multipleModels) {
+    sections.push({
+      ...chatModelSection(schema, chatModel.choice, (id) => {
+        if (id === chatModel.choice?.selected) return;
+        void chatModel.setModel(id).then((ok) => {
+          if (!ok) toast.error(schemaText(schema, 'ui.studio.chat_model.change_failed'));
+        });
+      }),
+      closeOnPick: false,
+      testId: 'workspace-chat-model-section',
     });
-  });
+  }
+  if (levelsAvailable) {
+    sections.push({
+      ...reasoningSection(schema, reasoning.reasoning, (next) => {
+        if (next === reasoning.reasoning?.effort) return;
+        void reasoning.setLevel(next).then((ok) => {
+          if (!ok) toast.error(schemaText(schema, 'ui.studio.reasoning.change_failed'));
+        });
+      }),
+      closeOnPick: true,
+      loading: chatModel.busy || reasoning.busy,
+      testId: 'workspace-reasoning-section',
+    });
+  }
+  if (sections.length === 0) return null;
+  const value = level ? `${selectedModel} · ${level}` : selectedModel;
+  const valueParts = level && selectedModel ? { parts: [selectedModel, level], separator: ' · ' } : undefined;
   return (
     <TablePopover
       testId="workspace-chat-model-picker"
       label={label}
-      value={modelName(choice, choice.selected)}
-      hint={schemaText(schema, 'ui.studio.chat_model.hint')}
+      value={value}
+      valueParts={valueParts}
+      fullValue={value}
+      hint={hint}
       triggerDisabledReason={!activeSessionId ? schemaText(schema, 'ui.unavailable.reason.picker.no_session') : undefined}
-      disabled={!activeSessionId || busy}
-      sections={[section]}
+      disabled={!activeSessionId || chatModel.busy || reasoning.busy}
+      sections={sections}
+      stacked
     />
   );
 }

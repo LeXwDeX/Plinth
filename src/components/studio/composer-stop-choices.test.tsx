@@ -21,7 +21,6 @@ vi.mock('@/components/ui/hint-tooltip', () => ({ HintTooltip: ({ children }: { c
 vi.mock('@/components/studio/model-picker', () => ({ ModelPicker: () => null, GenerationModelNotice: () => null }));
 vi.mock('@/components/studio/skill-picker', () => ({ SkillPicker: () => null }));
 vi.mock('@/components/studio/chat-model-picker', () => ({ ChatModelPicker: () => null, ChatModelNotice: () => null }));
-vi.mock('@/components/studio/reasoning-picker', () => ({ ReasoningPicker: () => null }));
 vi.mock('@/components/studio/params-popover', () => ({ ParamsPopover: () => null }));
 
 const noop = () => undefined;

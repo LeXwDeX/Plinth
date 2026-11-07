@@ -84,6 +84,8 @@ export interface TableSection {
   disabledReason?: string;
   disabledLabel?: string;
   testId?: string;
+  /** 选中后是否收起弹层；缺省：单表收起，多表保持打开。 */
+  closeOnPick?: boolean;
   onPick: (key: string) => void;
 }
 
@@ -108,6 +110,8 @@ export interface TablePopoverProps {
   testId?: string;
   /** 一张表时选中即关闭；多张表并排时弹层保持打开，方便每张各选一项。 */
   sections: TableSection[];
+  /** 多张表也上下堆叠而不是并排，宽度仍按单表；用于一个入口里的两步选择。 */
+  stacked?: boolean;
 }
 
 /**
@@ -115,7 +119,7 @@ export interface TablePopoverProps {
  * 不可用的行变暗且不可点。模型选择（2D、3D 两列）、Skill 选择和 Agent 模式共用。
  */
 export function TablePopover({
-  label, value, valueParts, fullValue, icon, disabled = false, hint, triggerDisabledReason, testId, sections,
+  label, value, valueParts, fullValue, icon, disabled = false, hint, triggerDisabledReason, testId, sections, stacked = false,
 }: TablePopoverProps) {
   const layer = useAnchoredPositioner();
   const descriptionId = useId();
@@ -137,6 +141,7 @@ export function TablePopover({
   const releaseHint = () => { if (!openRef.current) setHintHeld(false); };
   const close = () => changeOpen(false);
   const paired = sections.length > 1;
+  const sideBySide = paired && !stacked;
 
   return (
     <Popover.Root open={open} onOpenChange={changeOpen}>
@@ -177,13 +182,14 @@ export function TablePopover({
             aria-label={label}
             className={cn(
               '@container flex max-h-(--available-height) max-w-(--available-width) flex-col overflow-y-auto rounded-lg bg-popover p-1.5 text-popover-foreground shadow-xl outline-none ring-1 ring-foreground/10',
-              paired ? 'w-[59rem]' : 'w-[36rem]',
+              sideBySide ? 'w-[59rem]' : 'w-[36rem]',
             )}
           >
             {/* Side by side when the panel is wide enough, otherwise one table under the other. */}
-            <div className={cn('grid gap-x-3 gap-y-2', paired && '@[52rem]:grid-cols-2')}>
+            <div className={cn('grid gap-x-3 gap-y-2', sideBySide && '@[52rem]:grid-cols-2')}>
               {sections.map((section) => (
-                <Section key={section.testId ?? section.title} section={section} close={close} closeOnPick={!paired} />
+                <Section key={section.testId ?? section.title} section={section} close={close}
+                  closeOnPick={section.closeOnPick ?? !paired} />
               ))}
             </div>
           </Popover.Popup>
