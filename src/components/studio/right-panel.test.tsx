@@ -49,6 +49,9 @@ vi.mock('@/store/studio-store', async (importOriginal) => {
 vi.mock('@/components/workspace/harness-panel', () => ({
   HarnessPanel: ({ sessionId, object }: { sessionId: string | null; object: { taskId: string } | null }) => <div data-testid="stub-operations" data-session={sessionId ?? ''} data-task={object?.taskId ?? ''} />,
 }));
+vi.mock('@/components/workspace/style-lock-panel', () => ({
+  StyleLockSection: ({ sessionId }: { sessionId: string | null }) => <div data-testid="stub-style-lock" data-session={sessionId ?? ''} />,
+}));
 vi.mock('@/components/canvas/layers-panel', () => ({
   CanvasLayersPanel: ({ sessionId }: { sessionId: string }) => <div data-testid="stub-layers" data-session={sessionId} />,
 }));
@@ -87,10 +90,10 @@ beforeEach(() => {
   mock.object = null;
   mock.nodes = 0;
   mock.processing = { available: [{ id: 'retexture_model' }], offerings: {}, error: undefined };
-  useStudioStore.setState({ panelTab2d: null, panelTab3d: null });
+  useStudioStore.setState({ panelTab2d: null, panelTab3d: null, styleLockRequest: null, styleLockOpen: false });
 });
 afterEach(() => {
-  useStudioStore.setState({ panelTab2d: null, panelTab3d: null });
+  useStudioStore.setState({ panelTab2d: null, panelTab3d: null, styleLockRequest: null, styleLockOpen: false });
 });
 
 describe('nothing on the stage and an empty board', () => {
@@ -99,6 +102,8 @@ describe('nothing on the stage and an empty board', () => {
     expect(html).toContain('data-testid="right-panel"');
     expect(html).toContain('data-kind="none"');
     expect(html).toContain('data-testid="stub-operations" data-session="s1" data-task=""');
+    expect(html).toContain('data-testid="stub-style-lock" data-session="s1"');
+    expect(html.indexOf('right-panel-tabs')).toBeLessThan(html.indexOf('stub-style-lock'));
     expect(html).toContain('role="tablist"');
     expect(html).toContain('data-tab="operations"');
     expect(html).toMatch(/id="right-panel-tab-layers"[^>]*aria-disabled="true"/);
@@ -211,6 +216,7 @@ describe('a 3D model on the stage', () => {
     expect(tabIds(html)).toEqual(['operations', 'process', 'formats', 'parts', 'details']);
     expect(selectedTab(html)).toEqual(['operations']);
     expect(html).toContain('data-testid="stub-operations" data-session="s1" data-task="t-3d"');
+    expect(html).toContain('data-testid="stub-style-lock" data-session="s1"');
   });
 
   it('keeps function settings open while no processing step can run', () => {

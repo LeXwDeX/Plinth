@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import type { ProductSchema } from '@/lib/product-schema';
-import { StyleLockPanel } from './style-lock-panel';
+import { useStudioStore } from '@/store/studio-store';
+import { StyleLockPanel, StyleLockSection, clearStyleLockDraftCache } from './style-lock-panel';
 
 const schema = defaultCatalog.application as unknown as ProductSchema;
 const messages = schema.content.messages;
@@ -62,6 +63,8 @@ vi.mock('@/store/chat-store', () => ({
 
 afterEach(cleanup);
 beforeEach(() => {
+  clearStyleLockDraftCache();
+  useStudioStore.setState({ styleLockRequest: null, styleLockOpen: false });
   mock.nodes = [];
   mock.get.mockResolvedValue({ enabled: true, text: 'ink', references: [] });
   mock.set.mockImplementation(async (_session, value) => value);
@@ -132,5 +135,32 @@ describe('StyleLockPanel', () => {
     expect(screen.getAllByRole('img')).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: messages['ui.studio.style_lock.save'] }));
     await waitFor(() => expect(mock.set).toHaveBeenCalledWith('s1', { enabled: true, text: 'ink', references: ['upload-1'] }));
+  });
+});
+
+describe('StyleLockSection', () => {
+  it('starts collapsed inside the 功能 tab and expands from its title', () => {
+    render(<StyleLockSection sessionId="s1" />);
+    const body = document.getElementById('style-lock-body');
+    expect(body?.hidden).toBe(true);
+    const toggle = screen.getByRole('button', { name: messages['ui.studio.style_lock.title'] });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle);
+    expect(body?.hidden).toBe(false);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByTestId('style-lock-panel')).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(body?.hidden).toBe(true);
+  });
+});
+
+describe('style-lock draft persistence', () => {
+  it('keeps an unsaved draft across a tab switch (unmount and remount)', async () => {
+    const first = render(<StyleLockPanel sessionId="s1" />);
+    const textarea = await screen.findByTestId('style-lock-text');
+    fireEvent.change(textarea, { target: { value: 'draft text' } });
+    first.unmount();
+    render(<StyleLockPanel sessionId="s1" />);
+    await waitFor(() => expect((screen.getByTestId('style-lock-text') as HTMLTextAreaElement).value).toBe('draft text'));
   });
 });

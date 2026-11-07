@@ -2266,9 +2266,8 @@ export function ChatColumn() {
               notice: styleLockNotice,
               onToggleSkip: () => setStyleLockSkipped((current) => !current),
               onOpen: () => {
-                const panel = document.querySelector<HTMLElement>('[data-testid="style-lock-panel"]');
-                panel?.scrollIntoView({ block: 'nearest' });
-                panel?.querySelector<HTMLInputElement>('[data-testid="style-lock-enabled"]')?.focus();
+                // The panel lives in the 功能 tab now; the right panel switches the tab and opens the section.
+                useStudioStore.getState().requestStyleLock();
               },
             } : null}
             mentions={mentions}

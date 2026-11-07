@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, ImagePlus, Layers, Upload, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, ImagePlus, Layers, Upload, X } from 'lucide-react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
@@ -14,8 +14,10 @@ import { prepareImageUploadBlob } from '@/lib/image-upload';
 import { uploadWorkspaceInputAssetResult } from '@/lib/workspace/input-asset-upload';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-schema';
+import { cn } from '@/lib/utils';
 import { useCanvasStore, type CanvasNode } from '@/store/canvas-store';
 import { useChatStore, type ChatMessage } from '@/store/chat-store';
+import { useStudioStore } from '@/store/studio-store';
 
 const NO_NODES: readonly CanvasNode[] = [];
 const NO_MESSAGES: readonly ChatMessage[] = [];
@@ -23,6 +25,20 @@ const NO_MESSAGES: readonly ChatMessage[] = [];
 export interface StyleLockDraft {
   draft: ChatStyleLock;
   base: ChatStyleLock;
+}
+
+// The section lives in the 功能 tab, so switching tabs unmounts it. Keeping the unsaved draft per session here
+// means a tab switch or a collapsed section does not throw away what the person typed.
+const draftCache = new Map<string, StyleLockDraft>();
+
+/** Test helper: forget cached drafts between cases. */
+export function clearStyleLockDraftCache(): void {
+  draftCache.clear();
+}
+
+function cachedDraft(sessionId: string | null): StyleLockDraft {
+  if (!sessionId) return { draft: EMPTY_STYLE_LOCK, base: EMPTY_STYLE_LOCK };
+  return draftCache.get(sessionId) ?? { draft: EMPTY_STYLE_LOCK, base: EMPTY_STYLE_LOCK };
 }
 
 function sameLock(left: ChatStyleLock, right: ChatStyleLock): boolean {
@@ -73,7 +89,7 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
   const nodes = useCanvasStore((state) => (sessionId ? state.nodesBySession[sessionId] ?? NO_NODES : NO_NODES));
   const maximumText = schema.chat.style_lock?.maximum_text_characters ?? 0;
   const maximumReferences = schema.chat.style_lock?.maximum_reference_images ?? 0;
-  const [draftState, setDraftState] = useState<StyleLockDraft>(() => ({ draft: EMPTY_STYLE_LOCK, base: EMPTY_STYLE_LOCK }));
+  const [draftState, setDraftState] = useState<StyleLockDraft>(() => cachedDraft(sessionId));
   const [chooserOpen, setChooserOpen] = useState(false);
   const [layerChooserOpen, setLayerChooserOpen] = useState(false);
   const [layerBusy, setLayerBusy] = useState<string | null>(null);
@@ -94,8 +110,13 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
   // State updates belong in an effect: setting the draft during render can loop
   // forever when the saved lock arrives as a new object (React error #185).
   useEffect(() => {
-    setDraftState((current) => followSavedStyleLock(current, lockState.lock));
-  }, [lockState.lock]);
+    setDraftState((current) => {
+      const next = followSavedStyleLock(current, lockState.lock);
+      if (sessionId && next !== current) draftCache.set(sessionId, next);
+      return next;
+    });
+  }, [lockState.lock, sessionId]);
+  useEffect(() => { setDraftState(cachedDraft(sessionId)); }, [sessionId]);
   if (!sessionId) return null;
   const draft = followed.draft;
   const state = {
@@ -104,7 +125,11 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
   };
   const overLimit = state.count > maximumText;
   const refsAtLimit = draft.references.length >= maximumReferences;
-  const updateDraft = (next: ChatStyleLock) => setDraftState({ draft: { ...next, references: [...next.references] }, base: followed.base });
+  const commitDraft = (next: StyleLockDraft) => {
+    setDraftState(next);
+    if (sessionId) draftCache.set(sessionId, next);
+  };
+  const updateDraft = (next: ChatStyleLock) => commitDraft({ draft: { ...next, references: [...next.references] }, base: followed.base });
   const previewFor = (assetId: string) => {
     const raw = localURLs[assetId] ?? choices.find((item) => item.assetId === assetId)?.url ?? assetURL(schema, assetId);
     return previewAssetUrl(raw) || safePreviewURL(raw);
@@ -112,6 +137,7 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
   const save = async () => {
     if (!state.dirty || overLimit || draft.references.length > maximumReferences || lockState.busy) return;
     const ok = await lockState.save({ ...draft, text: draft.text.trim() });
+    if (ok && sessionId) draftCache.delete(sessionId);
     setSaveState(ok ? 'saved' : 'failed');
   };
   const upload = async (file: File) => {
@@ -288,8 +314,34 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
       <p className="mt-2 text-[11px] leading-4 text-muted-foreground">{text('cost_note')}</p>
       {lockState.saveError || saveState === 'failed' || uploadFailed ? <p className="mt-2 text-xs text-destructive" role="alert">{uploadFailed ? text('upload_failed') : lockState.saveError?.message || text('save_failed')}</p> : null}
       <div className="mt-3 flex justify-end gap-1.5">
-        <button type="button" disabled={lockState.busy || !state.dirty} onClick={() => setDraftState({ draft: { ...followed.base, references: [...followed.base.references] }, base: followed.base })} className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50">{text('revert')}</button>
+        <button type="button" disabled={lockState.busy || !state.dirty} onClick={() => commitDraft({ draft: { ...followed.base, references: [...followed.base.references] }, base: followed.base })} className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50">{text('revert')}</button>
         <button type="button" disabled={lockState.busy || !state.dirty || overLimit} onClick={() => void save()} className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground disabled:opacity-50">{text('save')}</button>
+      </div>
+    </section>
+  );
+}
+
+/** Collapsible host for the style lock inside the 功能 tab; the body stays mounted while collapsed. */
+export function StyleLockSection({ sessionId }: { sessionId: string | null }) {
+  const { schema } = useProductSchema();
+  const text = (key: string) => schemaText(schema, `ui.studio.style_lock.${key}`);
+  const open = useStudioStore((state) => state.styleLockOpen);
+  const setOpen = useStudioStore((state) => state.setStyleLockOpen);
+  if (!sessionId) return null;
+  return (
+    <section className="shrink-0 border-b border-border" data-testid="style-lock-section">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls="style-lock-body"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-1.5 px-3 py-2.5 text-left text-sm font-semibold text-foreground hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring"
+      >
+        <ChevronDown aria-hidden className={cn('size-4 shrink-0 transition-transform', !open && '-rotate-90')} />
+        {text('title')}
+      </button>
+      <div id="style-lock-body" hidden={!open} className="max-h-[min(60vh,520px)] overflow-y-auto border-t border-border">
+        <StyleLockPanel sessionId={sessionId} />
       </div>
     </section>
   );
