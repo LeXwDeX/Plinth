@@ -77,7 +77,8 @@ func validateBackgroundWait(schema ChatSchema, runtime RuntimeSchema) error {
 		processingPlan bool
 		agentTool      bool
 	}
-	tools := make(map[string]waitTool, len(schema.Tools)+len(schema.AgentTools))
+	// No capacity hint: the two Schema lists are merged by name and their sum is not a safe allocation size.
+	tools := make(map[string]waitTool)
 	for _, tool := range schema.Tools {
 		if _, duplicate := tools[tool.Name]; duplicate {
 			return fmt.Errorf("chat.agent.background_wait 引用的工具 %q 在 chat.tools 中重复", tool.Name)
