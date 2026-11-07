@@ -159,7 +159,9 @@ describe('regenerate and edit-and-resend wiring', () => {
     expect(agentDialog).toContain('onRegenerate={regenerate?.assistantId === item.message.id ? regenerateReply : undefined}');
     expect(agentDialog).toContain('onEdit={editable?.userId === item.message.id ? editLastMessage : undefined}');
     expect(agentDialog).toMatch(/void send\(payload\.text, payload\.images, payload\.claims, regenerate\.deleteIds, undefined, undefined, undefined,\s+payload\.multiview \? \{ multiview: payload\.multiview \} : undefined\);/);
-    expect(agentDialog).toContain('void send(input, undefined, undefined, editing?.deleteIds, undefined, undefined, undefined, styleLockSkipped ? { styleLockSkipped: true } : undefined)');
+    expect(agentDialog).toContain('onSend={(onAccepted) => {');
+    expect(agentDialog).toContain('void send(input, undefined, undefined, editing?.deleteIds, undefined, undefined, undefined,');
+    expect(agentDialog).toContain('onSent: () => { if (useChatStore.getState().activeSessionId === session) onAccepted(); }');
   });
 
   it('replaces the old round only after validation and keeps the text if the new turn never starts', () => {
@@ -187,6 +189,31 @@ describe('composer and approvals wiring', () => {
 
   it('turns an expired approval into a prefilled composer instead of a silent re-request', () => {
     expect(agentDialog).toContain('prefillComposer(formatSchemaText(schemaText(schema, \'ui.studio.approval.card.rerequest_prefill\')');
+  });
+});
+
+describe('the expanded editor closes once the send is accepted (#188)', () => {
+  it('exposes one acceptance callback from the composer and uses it at all three send entrances', () => {
+    expect(composer).toContain('onSend: (onAccepted: () => void) => void;');
+    expect(composer).toContain('const submit = () => onSend(() => setExpanded(false));');
+    expect(composer.match(/onClick=\{submit\}/g)).toHaveLength(2);
+    // Handing `onSend` straight to a click would pass the MouseEvent as the acceptance callback.
+    expect(composer).not.toContain('onClick={onSend}');
+    expect(composer).toMatch(/event\.preventDefault\(\);\s*if \(agentUnavailable \|\| disabled\) return;\s*submit\(\);/);
+  });
+
+  it('passes the callback to send as extra.onSent and treats a queued turn as accepted', () => {
+    expect(agentDialog).toContain('const session = activeSessionId;');
+    expect(agentDialog).toContain('onSent: () => { if (useChatStore.getState().activeSessionId === session) onAccepted(); }');
+    const send = agentDialog.slice(agentDialog.indexOf('const send = useCallback('), agentDialog.indexOf('const sendRef = useRef(send);'));
+    // The server taking the turn is acceptance.
+    expect(send).toMatch(/sent = true;\s*extra\?\.onSent\?\.\(\);/);
+    const queued = send.slice(send.indexOf('if (turnRunning) {'), send.indexOf('const skillId = choiceAnswer'));
+    // The queue spends the box and the draft before it reports acceptance; a refused or failed send never does.
+    expect(queued.indexOf('clearDraft(sessionId)')).toBeGreaterThan(0);
+    expect(queued.indexOf("setInput('')")).toBeGreaterThan(0);
+    expect(queued.indexOf('extra?.onSent?.()')).toBeGreaterThan(queued.indexOf("setInput('')"));
+    expect(queued.indexOf('extra?.onSent?.()')).toBeLessThan(queued.indexOf('return;'));
   });
 });
 

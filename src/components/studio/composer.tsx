@@ -86,8 +86,11 @@ export interface ComposerStyleLock {
 export interface ComposerProps {
   value: string;
   onChange: (value: string) => void;
-  /** No acceptance result is exposed; the expanded editor stays open rather than guessing whether sending succeeded. */
-  onSend: () => void;
+  /**
+   * Sends what the box holds. `onAccepted` runs once the send is accepted (queued, or taken by the server);
+   * a refused or failed send never calls it, so the expanded editor stays open with its text (#188).
+   */
+  onSend: (onAccepted: () => void) => void;
   onStop: () => void;
   /**
    * #137: set while the server says the waiting turn may stop waiting with its Task running on; the
@@ -190,6 +193,9 @@ export function Composer({
   const textarea = useRef<HTMLTextAreaElement>(null);
   const expandedTextarea = useRef<HTMLTextAreaElement>(null);
   const [expanded, setExpanded] = useState(false);
+  // Every way out of the box goes through one submit, so the expanded editor closes only once the parent
+  // accepts the send. Never hand `onSend` itself to an event: the MouseEvent would arrive as the callback.
+  const submit = () => onSend(() => setExpanded(false));
   const activeTextarea = () => expanded ? expandedTextarea.current : textarea.current;
   const [caret, setCaret] = useState(0);
   const [focused, setFocused] = useState(false);
@@ -389,7 +395,7 @@ export function Composer({
       if (event.key !== 'Enter' || event.shiftKey) return;
       event.preventDefault();
       if (agentUnavailable || disabled) return;
-      onSend();
+      submit();
     },
   };
 
@@ -758,7 +764,7 @@ export function Composer({
               size={sendCredits === null ? 'icon-sm' : 'sm'}
               aria-label={sendTitle}
               disabled={!canSend || locked || agentUnavailable !== null}
-              onClick={onSend}
+              onClick={submit}
               data-testid="composer-send"
             >
               <Send className="size-4" />
@@ -777,7 +783,7 @@ export function Composer({
               {...inputEvents} />
           </div>
           <div className="flex justify-end">
-            <Action type="button" variant="send" size="sm" aria-label={sendTitle} disabled={!canSend || locked || agentUnavailable !== null} onClick={onSend}>
+            <Action type="button" variant="send" size="sm" aria-label={sendTitle} disabled={!canSend || locked || agentUnavailable !== null} onClick={submit}>
               <Send aria-hidden className="size-4" />
               {sendCredits === null ? sendLabel : formatSchemaText(schemaText(schema, 'ui.studio.composer.send_cost'), { credits: sendCredits })}
             </Action>
