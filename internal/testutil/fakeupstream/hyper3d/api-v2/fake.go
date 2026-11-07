@@ -359,6 +359,14 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 		}
 		switch k.Need {
 		case "prompt-or-images":
+			// The official Rodin page documents 1-5 reference images. The upper
+			// bound is constructed from those docs: no live rejection sample
+			// exists for it. Zero images stays valid for text-to-3D when the
+			// form carries a prompt.
+			if files["images"] > 5 {
+				h.reject(w, "INVALID_REQUEST", "Please upload between 1 and 5 images.")
+				return
+			}
 			if strings.TrimSpace(fields["prompt"]) == "" && files["images"] == 0 {
 				h.reject(w, "INVALID_REQUEST", "Please upload at least one image or give a prompt.")
 				return

@@ -7,14 +7,18 @@ same HTTP API the browser uses:
 
   * the Tripo, Meshy and Hyper3D balances show up in the provider balance panel;
   * Meshy text-to-3d (preview + refine) -> remesh -> rigging -> animation, and
-    text-to-3d -> retexture / convert, and Hyper3D Rodin text-to-3d -> Bang, run to
-    SUCCEEDED with the same file checks as the Tripo chains;
+    text-to-3d -> retexture / convert, and Hyper3D Rodin text-to-3d -> Bang and
+    Rodin image-to-3d with five pictures, run to SUCCEEDED with the same file
+    checks as the Tripo chains;
   * Tripo text-to-3d -> rig-check -> rigging -> animation, and
     segmentation -> part completion, run to SUCCEEDED with every required output
     slot present, every file's size and SHA-256 matching, and authenticated
     delivery (no cookie, no bytes);
   * the Agent turn (fake OpenAI-compatible LLM -> tool call -> approval -> 3D
-    task -> final reply) completes, the L1 Agent equivalent;
+    task -> final reply) completes, the L1 Agent equivalent; the Hyper3D Agent
+    chain (create_model_3d on Rodin -> process_model Bang rodin-task ->
+    retexture_model Texture local-model with a picture attached to the chat) is
+    approved step by step and delivers every step's files;
   * Hyper3D texture (a local model + a reference picture), the OpenAI, Gemini and Jimeng
     image Offerings (text-to-image and image-to-image) and the matting service run to
     SUCCEEDED with the same delivery checks;
@@ -29,7 +33,8 @@ same HTTP API the browser uses:
     Meshy and Hyper3D delivers it.
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
-(NAME: balance, chain, meshy, hyper3d, images, tripo, agent, faults)
+(NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, agent, faults;
+"agent" runs both agent scenarios, "hyper3d-agent" the Hyper3D chain alone)
 Needs `go`. Exit 0 = every selected check passed.
 
 The stack runs inside the internal/app test binary (TestFakeUpstreamStack, built with -tags fakestack), not
@@ -69,6 +74,7 @@ MESHY_CONVERT = "meshy/processing/convert"
 MESHY_RIGGING = "meshy/processing/rigging"
 MESHY_ANIMATION = "meshy/processing/animation"
 HYPER3D_TEXT_TO_3D = "hyper3d/rodin-gen-2.5/text-to-3d"
+HYPER3D_IMAGE_TO_3D = "hyper3d/rodin-gen-2.5/image-to-3d"
 HYPER3D_BANG = "hyper3d/bang/rodin-task"
 HYPER3D_TEXTURE = "hyper3d/texture/local-model"
 # provider -> (text-to-image, image-to-image); the matting service has one Offering.
@@ -551,6 +557,14 @@ def scenario_hyper3d(api, offerings):
     session = new_session(api)
     gen = step(api, offerings, "hyper3d rodin text-to-3d", HYPER3D_TEXT_TO_3D, "text-to-3d",
                {"prompt": "a plain cube"}, session)
+    # Rodin documents 1-5 reference images; the fake enforces that bound (#191), so
+    # five images exercise the widest multipart body the Offering accepts.
+    pictures = [upload_asset(api, f"view-{index}.png", make_png(32 + index), "image/png") for index in range(5)]
+    if all(pictures):
+        step(api, offerings, "hyper3d rodin image-to-3d (5 images)", HYPER3D_IMAGE_TO_3D, "image-to-3d",
+             {"reference_assets": pictures}, session)
+    else:
+        record("hyper3d rodin image-to-3d (5 images)", False, "the library refused one of the five pictures")
     if gen and gen.get("state") == "SUCCEEDED":
         step(api, offerings, "hyper3d bang", HYPER3D_BANG, "mesh-segmentation", {"source_task": gen["id"]}, session)
         # Texture takes a local model and a reference picture, both library assets: the
@@ -619,6 +633,139 @@ def scenario_agent(api, offerings):
     record("agent turn: chat -> tool call -> approval -> 3D task -> reply", ok,
            f"{used} task {task.get('state')}, {count} assets verified, assistant reply present={'Fake upstream reply' in reply}"
            + ("" if not problems else "; " + "; ".join(problems)))
+
+
+def assistant_reply_count(api, session):
+    messages = api.json("GET", f"/api/chat/sessions/{session}/messages")[1]
+    messages = messages if isinstance(messages, list) else messages.get("messages", [])
+    return sum(1 for message in messages
+               if message.get("role") == "assistant" and "Fake upstream reply" in str(message.get("content")))
+
+
+def session_tool_calls(api, session):
+    """The session's accepted tool-call results as task_id -> approval source."""
+    messages = api.json("GET", f"/api/chat/sessions/{session}/messages")[1]
+    messages = messages if isinstance(messages, list) else messages.get("messages", [])
+    found = {}
+    for message in messages:
+        raw = message.get("toolCalls")
+        if not raw:
+            continue
+        try:
+            calls = json.loads(raw) if isinstance(raw, str) else raw
+        except ValueError:
+            continue
+        for call in calls if isinstance(calls, list) else []:
+            task_id = call.get("taskId")
+            if task_id:
+                found[task_id] = call.get("approvalSource") or ""
+    return found
+
+
+def agent_tool_turn(api, session, content, image_urls=None, creative_domain=None):
+    """One chat turn whose fake LLM answer is the tool call embedded in content.
+    A paid step that asks for a card is approved once; a step the session's
+    approval policy grants automatically (manual mode leaves mesh-segmentation
+    to policy) is followed through its tool-call result instead. Waits for the
+    Task, then returns (task, why, approval source)."""
+    body = {"content": content}
+    if image_urls:
+        body["image_urls"] = image_urls
+    if creative_domain:
+        body["creative_domain"] = creative_domain
+    replies = assistant_reply_count(api, session)
+    known = set(session_tool_calls(api, session))
+    # The approved continuation may still own the session for a moment after its
+    # Task ends; a 409 means another turn is active, so retry briefly.
+    end = time.time() + 30
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+    while status == 409 and time.time() < end:
+        time.sleep(0.5)
+        status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+    if status not in (200, 201, 202):
+        return None, f"send {status}", ""
+    task_id, source = None, ""
+    end = time.time() + 30
+    while time.time() < end:
+        pending = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items", [])
+        if pending:
+            status, decision = api.json("PUT", f"/api/v1/tasks/grants/{pending[0]['request_id']}", decision_body(api, "approve"))
+            task_id = decision.get("task_id")
+            if status != 200 or not task_id:
+                return None, f"approve {status} {decision}", ""
+            source = "human"
+            break
+        granted = session_tool_calls(api, session)
+        fresh = set(granted) - known
+        if fresh:
+            task_id = sorted(fresh)[0]
+            source = granted[task_id] or "policy"
+            break
+        time.sleep(0.5)
+    if not task_id:
+        return None, "the tool call produced no approval card or task", ""
+    task = wait_task(api, task_id)
+    end = time.time() + 60
+    while time.time() < end and assistant_reply_count(api, session) <= replies:
+        time.sleep(0.5)
+    return task, "", source
+
+
+def scenario_hyper3d_agent(api, offerings):
+    """The Agent's Hyper3D chain (#191): create_model_3d on Rodin, process_model
+    mesh-segmentation on the Hyper3D Bang (rodin-task), then retexture_model on
+    Hyper3D Texture (local-model) with a picture attached to the chat. Every card
+    the policy raises is approved (mesh-segmentation itself is granted by the
+    shipped manual policy), and every step must deliver its required files."""
+    session = new_session(api)
+    # Strict (manual) approval, so every step of the chain waits for its own card
+    # instead of a budget policy approving the cheaper steps automatically.
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "manual"})
+    if status != 200:
+        record("hyper3d agent: switch the session to manual approval", False, f"approval mode {status}")
+        return
+    status, uploaded = api.upload("/api/v1/assets", "file", "reference.png", make_png(), "image/png")
+    picture_id = uploaded.get("id") if status in (200, 201) else None
+    if not picture_id:
+        record("hyper3d agent: upload the reference picture", False, f"the library upload was refused ({status})")
+        return
+    picture_url = uploaded.get("url") or f"/api/v1/assets/{picture_id}"
+
+    def check(label, task, why, approval, offering):
+        if not task or why:
+            record(label, False, why or "no task")
+            return None
+        if task.get("state") != "SUCCEEDED":
+            record(label, False, f"state {task.get('state')} failure {json.dumps(task.get('failure'), ensure_ascii=False)}")
+            return None
+        used = task.get("offering_id")
+        if used != offering:
+            record(label, False, f"ran {used}, want {offering}")
+            return None
+        problems, count = check_delivery(api, task, offerings[used])
+        detail = f"{used} {task['state']}, {approval or 'unknown'} approval, {count} assets verified (size, SHA-256, sandboxed delivery headers)"
+        if problems:
+            detail += "; " + "; ".join(problems)
+        record(label, not problems, detail)
+        return task if not problems else None
+
+    create = '[[fake:tool:create_model_3d {"prompt":"a plain cube","model":"rodin-gen-2.5"}]]'
+    model, why, approval = agent_tool_turn(api, session, "make a cube " + create, creative_domain="3d")
+    model = check("hyper3d agent: create_model_3d -> Rodin", model, why, approval, HYPER3D_TEXT_TO_3D)
+    if not model:
+        return
+    process = ('[[fake:tool:process_model {"step":"mesh-segmentation","source_task_id":"'
+               + model["id"] + '","offering_id":"' + HYPER3D_BANG + '"}]]')
+    bang, why, approval = agent_tool_turn(api, session, "split the cube " + process)
+    bang = check("hyper3d agent: process_model -> Bang rodin-task", bang, why, approval, HYPER3D_BANG)
+    if not bang:
+        return
+    texture = ('[[fake:tool:retexture_model {"offering_id":"' + HYPER3D_TEXTURE
+               + '","source_task_id":"' + bang["id"]
+               + '","prompt":"plain matte red","reference_handles":["@img1"]}]]')
+    texture_task, why, approval = agent_tool_turn(api, session, "retexture it " + texture, image_urls=[picture_url])
+    check("hyper3d agent: retexture_model -> Texture local-model with the chat picture",
+          texture_task, why, approval, HYPER3D_TEXTURE)
 
 
 # scenario -> provider -> (expected state, expected failure class). The fault is
@@ -723,7 +870,7 @@ def scenario_fault(api, offerings, scenario):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,images,tripo,agent,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,agent,faults")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
@@ -744,7 +891,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "images", "tripo", "agent"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "agent"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -761,6 +908,8 @@ def main():
                 scenario_tripo_images(api, offerings)
             if "agent" in selected:
                 scenario_agent(api, offerings)
+            if "agent" in selected or "hyper3d-agent" in selected:
+                scenario_hyper3d_agent(api, offerings)
             processes.stop(child)
         if "faults" in selected:
             for scenario in [name for name in FAULTS if not args.faults or name in args.faults.split(",")]:
