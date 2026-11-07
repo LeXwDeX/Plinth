@@ -38,6 +38,15 @@ export interface ChoiceCardModel {
   id: string;
   assistantMessageId: string;
   tool: string;
+  /** #103: the generic choice kind (for example usage_profile); empty on a provider-choice card. */
+  kind: string;
+  /** The Schema-declared question of a generic card; empty on older servers and provider-choice cards. */
+  question: string;
+  /**
+   * The step a provider-choice card chooses for (#321). A generic card (#103)
+   * stores its choice kind here for the server-side continuation, so this is
+   * not a capability on that card; see choiceCardOfferingCapability.
+   */
   capability: string;
   options: ChoiceOptionModel[];
   defaultOptionId: string;
@@ -86,6 +95,8 @@ function parseCard(value: unknown): ChoiceCardModel | null {
     id: text(item.id),
     assistantMessageId: text(item.assistant_message_id),
     tool: text(item.tool),
+    kind: text(item.kind),
+    question: text(item.question),
     capability: text(item.capability),
     options,
     defaultOptionId: text(item.default_option_id),
@@ -96,6 +107,20 @@ function parseCard(value: unknown): ChoiceCardModel | null {
       : null,
     createdAt: text(item.created_at),
   };
+}
+
+/**
+ * The Offering capability whose prices a card asks for, or null when it has
+ * none. A generic card (#103) stores its choice kind in `capability`; fetching
+ * it as an Offering capability sends an invalid name and the browser logs the
+ * 400. An unknown capability is left alone too, matching the public Schema.
+ */
+export function choiceCardOfferingCapability(
+  schema: ProductSchema,
+  card: Pick<ChoiceCardModel, 'kind' | 'capability'>,
+): string | null {
+  if (card.kind) return null;
+  return schema.capabilities.some((item) => item.id === card.capability) ? card.capability : null;
 }
 
 /** The cards of a list response; a malformed card is left out. */

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 )
 
@@ -45,6 +46,10 @@ func TestChatChoiceCardsAreOwnerScopedAndAnsweredOnce(t *testing.T) {
 	read := grantTestRequest(t, handler, cookie, http.MethodGet, choicesPath(sessionID), "", "")
 	if read.Code != http.StatusOK || strings.Contains(read.Body.String(), "arguments") || strings.Contains(read.Body.String(), "secret_next") {
 		t.Fatalf("list = %d %s", read.Code, read.Body.String())
+	}
+	// A provider-choice card has no generic kind, so it carries no question.
+	if strings.Contains(read.Body.String(), `"question"`) {
+		t.Fatalf("provider-choice card carries a generic question: %s", read.Body.String())
 	}
 	var listed struct {
 		Choices []struct {
@@ -99,5 +104,62 @@ func TestChatChoiceCardsAreOwnerScopedAndAnsweredOnce(t *testing.T) {
 	if listed.Choices[0].State != "answered" || listed.Choices[0].Answer == nil || listed.Choices[0].Answer.OptionID != "hyper3d/bang/rodin-task" ||
 		listed.Choices[0].Answer.Source != "card" {
 		t.Fatalf("answered card = %s", reread.Body.String())
+	}
+}
+
+// #171: a generic card stores its choice kind in `capability`, so the wire
+// must mark the kind and carry the Schema's question for the card's title.
+func TestGenericChoiceCardsCarryTheSchemaQuestion(t *testing.T) {
+	t.Parallel()
+	module, handler, cookie, sessionID := grantTestBrowserWithApplication(t, nil, []string{"user"})
+	value, ok := fixtureExecutions.Load(module)
+	if !ok {
+		t.Fatal("missing fixture repository")
+	}
+	repository := value.(*fixtureExecutionState).repository
+	now := time.Now().UTC()
+	options := []chat.ChoiceOption{
+		{ID: "game_character", Label: "游戏/实时·角色", Description: "控制面数并保留 UV", Recommended: true,
+			Arguments: json.RawMessage(`{"purpose":"game_character"}`)},
+		{ID: "display", Label: "展示/渲染", Arguments: json.RawMessage(`{"purpose":"display"}`)},
+	}
+	if _, err := repository.CreateChoice(context.Background(), chat.Choice{
+		OwnerID: "owner-a", SessionID: sessionID, AssistantMessageID: "turn-2", CallID: "call-2",
+		ToolName: "update_production_brief", Kind: "usage_profile", Capability: "usage_profile", StepIndex: -1,
+		Options: options, DefaultOptionID: "game_character", AllowDefault: false,
+		DefaultArguments: json.RawMessage(`{"purpose":"game_character"}`), CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defaultCatalog, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantQuestion := ""
+	for _, kind := range defaultCatalog.Application().Chat.Choice.Kinds {
+		if kind.ID == "usage_profile" {
+			wantQuestion = kind.Question
+		}
+	}
+	if wantQuestion == "" {
+		t.Fatal("the default Catalog declares no usage_profile question")
+	}
+	read := grantTestRequest(t, handler, cookie, http.MethodGet, choicesPath(sessionID), "", "")
+	if read.Code != http.StatusOK {
+		t.Fatalf("list = %d %s", read.Code, read.Body.String())
+	}
+	var listed struct {
+		Choices []struct {
+			Kind       string `json:"kind"`
+			Question   string `json:"question"`
+			Capability string `json:"capability"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(read.Body.Bytes(), &listed); err != nil || len(listed.Choices) != 1 {
+		t.Fatalf("listed = %s err=%v", read.Body.String(), err)
+	}
+	card := listed.Choices[0]
+	if card.Kind != "usage_profile" || card.Capability != "usage_profile" || card.Question != wantQuestion {
+		t.Fatalf("generic card = %+v, want question %q", card, wantQuestion)
 	}
 }
