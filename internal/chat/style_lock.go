@@ -254,7 +254,8 @@ func mergeDirectStyleLockReferences(
 				return nil
 			}
 		}
-		seen := make(map[string]bool, len(pictures)+len(references))
+		// No capacity hint: both lengths come from request JSON and their sum is not a safe allocation size.
+		seen := make(map[string]bool)
 		for _, picture := range pictures {
 			seen[picture] = true
 		}
