@@ -17,6 +17,115 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
 
+func TestPersonalSkillUpdateReplacesContentWithoutLeakingOwnership(t *testing.T) {
+	t.Parallel()
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := product.Application()
+	defaults, err := catalog.LoadDefaultSkillCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := OpenMigratedTestRepository(filepath.Join(t.TempDir(), "personal-update.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	service, err := agentconfiguration.New(repo, schema, defaults, product.List(""), agentconfiguration.WithPersonalSkills(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := access.NewPolicy(access.PolicyConfig{DefaultRole: "user", AdminRole: "admin", Roles: []access.RoleDefinition{{Key: "user"}, {Key: "admin"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := DevelopmentIdentity{DefaultClaims: access.Claims{ID: "owner-a", Roles: []string{"user"}}, Policy: policy}
+	server := &Server{identity: identity, application: schema, agentConfiguration: service, logger: slog.New(slog.NewTextHandler(io.Discard, nil)), mux: http.NewServeMux()}
+	server.registerAgentConfigurationContracts()
+	send := func(method, path, body string) *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		server.mux.ServeHTTP(response, httptest.NewRequest(method, path, strings.NewReader(body)))
+		return response
+	}
+	route := schema.Chat.Skills.Creation.Route
+	created := send(http.MethodPost, route, `{"name":"My watercolor","prompt":"soft light","recommended_size":"1536x1024"}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", created.Code, created.Body.String())
+	}
+	var creation struct {
+		Skill catalog.SkillSchema `json:"skill"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &creation); err != nil {
+		t.Fatal(err)
+	}
+	item := strings.ReplaceAll(schema.Chat.Skills.Creation.ItemRoute, "{skillID}", creation.Skill.ID)
+	valid := `{"name":"Renamed","prompt":"warm light","recommended_size":"1536x1024"}`
+	updated := send(http.MethodPut, item, valid)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("update: %d %s", updated.Code, updated.Body.String())
+	}
+	var update struct {
+		Skill catalog.SkillSchema `json:"skill"`
+	}
+	if err := json.Unmarshal(updated.Body.Bytes(), &update); err != nil {
+		t.Fatal(err)
+	}
+	if update.Skill.ID != creation.Skill.ID || update.Skill.Name != "Renamed" || update.Skill.Prompt != "warm light" || update.Skill.Category != "" {
+		t.Fatalf("update result: %#v", update.Skill)
+	}
+	listed := send(http.MethodGet, route, "")
+	if listed.Code != http.StatusOK || !bytes.Contains(listed.Body.Bytes(), []byte(`"name":"Renamed"`)) || bytes.Contains(listed.Body.Bytes(), []byte(`"name":"My watercolor"`)) {
+		t.Fatalf("list after update: %d %s", listed.Code, listed.Body.String())
+	}
+	for _, body := range []string{
+		`{"name":"","prompt":"p","recommended_size":"1536x1024"}`,
+		`{"name":"x","prompt":"p","category":"unknown","recommended_size":"1536x1024"}`,
+		`{"name":"x","prompt":"p","recommended_size":"invalid"}`,
+		`{"name":"x","prompt":"p","recommended_size":"1536x1024","tool_grant":"all"}`,
+		valid + `{}`,
+	} {
+		if response := send(http.MethodPut, item, body); response.Code != http.StatusBadRequest {
+			t.Fatalf("invalid update accepted: %s, %d", body, response.Code)
+		} else if strings.Contains(response.Body.String(), "tool_grant") || strings.Contains(response.Body.String(), "SQL") {
+			t.Fatalf("invalid update leaked parser or storage detail: %s", response.Body.String())
+		}
+	}
+	afterInvalid := send(http.MethodGet, route, "")
+	if !bytes.Contains(afterInvalid.Body.Bytes(), []byte(`"name":"Renamed"`)) {
+		t.Fatalf("invalid update changed the row: %s", afterInvalid.Body.String())
+	}
+	// A non-owner and an unknown ID get the same answer, so neither leaks whether the Skill exists.
+	identity.DefaultClaims.ID = "owner-b"
+	server.identity = identity
+	crossOwner := send(http.MethodPut, item, valid)
+	unknown := send(http.MethodPut, strings.ReplaceAll(schema.Chat.Skills.Creation.ItemRoute, "{skillID}", "personal-00000000000000000000000000000000"), valid)
+	if crossOwner.Code != http.StatusNotFound || unknown.Code != http.StatusNotFound || crossOwner.Body.String() != unknown.Body.String() {
+		t.Fatalf("ownership leak: cross=%d %s unknown=%d %s", crossOwner.Code, crossOwner.Body.String(), unknown.Code, unknown.Body.String())
+	}
+	// System Skill IDs are not personal rows: 404 even when the content would be invalid.
+	if len(schema.Chat.Skills.SystemSkills) > 0 {
+		systemItem := strings.ReplaceAll(schema.Chat.Skills.Creation.ItemRoute, "{skillID}", schema.Chat.Skills.SystemSkills[0].ID)
+		system := send(http.MethodPut, systemItem, valid)
+		systemInvalid := send(http.MethodPut, systemItem, `{"name":"","prompt":"p","recommended_size":"1536x1024"}`)
+		if system.Code != http.StatusNotFound || systemInvalid.Code != http.StatusNotFound {
+			t.Fatalf("system Skill IDs leaked: valid=%d %s invalid=%d %s", system.Code, system.Body.String(), systemInvalid.Code, systemInvalid.Body.String())
+		}
+	}
+	server.identity = DevelopmentIdentity{DefaultClaims: access.Claims{}, Policy: policy}
+	if response := send(http.MethodPut, item, valid); response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated update: %d %s", response.Code, response.Body.String())
+	}
+	server.identity = identity
+	identity.DefaultClaims.ID = "owner-a"
+	server.identity = identity
+	final := send(http.MethodGet, route, "")
+	if final.Code != http.StatusOK || !bytes.Contains(final.Body.Bytes(), []byte(`"name":"Renamed"`)) {
+		t.Fatalf("owner row changed by rejected updates: %d %s", final.Code, final.Body.String())
+	}
+}
+
 func TestPersonalSkillRoutesScopeContentAndRejectInvalidWrites(t *testing.T) {
 	t.Parallel()
 	product, err := catalog.LoadDefault()

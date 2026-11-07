@@ -22,6 +22,7 @@ var ErrPersonalSkillNotFound = errors.New("personal Skill not found")
 // write by the authenticated owner. It never changes shared configuration.
 type PersonalSkillStore interface {
 	InsertPersonalSkill(context.Context, string, catalog.SkillSchema, int) error
+	UpdatePersonalSkill(context.Context, string, string, catalog.SkillSchema) error
 	ListPersonalSkills(context.Context, string) ([]catalog.SkillSchema, error)
 	DeletePersonalSkill(context.Context, string, string) error
 }
@@ -44,11 +45,9 @@ func (s *Service) CreatePersonalSkill(ctx context.Context, owner string, input C
 	if strings.TrimSpace(owner) == "" {
 		return catalog.SkillSchema{}, errors.New("personal Skill owner is empty")
 	}
-	input.Name = strings.TrimSpace(input.Name)
-	input.Prompt = strings.TrimSpace(input.Prompt)
-	if input.Name == "" || utf8.RuneCountInString(input.Name) > s.schema.Chat.Skills.Creation.MaxNameCharacters ||
-		input.Prompt == "" || utf8.RuneCountInString(input.Prompt) > s.schema.AgentConfiguration.Limits.MaxSkillPromptCharacters {
-		return catalog.SkillSchema{}, fmt.Errorf("%w: name or prompt", ErrInvalidPersonalSkill)
+	content, err := s.personalSkillContent(input)
+	if err != nil {
+		return catalog.SkillSchema{}, err
 	}
 	var random [16]byte
 	if _, err := rand.Read(random[:]); err != nil {
@@ -56,18 +55,74 @@ func (s *Service) CreatePersonalSkill(ctx context.Context, owner string, input C
 	}
 	skill := catalog.SkillSchema{
 		ID:   "personal-" + hex.EncodeToString(random[:]),
-		Name: input.Name, Category: input.Category,
-		RecommendedSize: input.RecommendedSize, Prompt: input.Prompt,
+		Name: content.Name, Category: content.Category,
+		RecommendedSize: content.RecommendedSize, Prompt: content.Prompt,
 	}
-	candidate := clone(s.defaults)
-	candidate.Skills = []catalog.SkillSchema{skill}
-	if err := s.Validate(candidate); err != nil {
-		return catalog.SkillSchema{}, fmt.Errorf("%w: %v", ErrInvalidPersonalSkill, err)
+	if err := s.validatePersonalSkill(skill); err != nil {
+		return catalog.SkillSchema{}, err
 	}
 	if err := s.personalSkills.InsertPersonalSkill(ctx, owner, skill, s.schema.AgentConfiguration.Limits.MaxSkillCount); err != nil {
 		return catalog.SkillSchema{}, err
 	}
 	return skill, nil
+}
+
+// UpdatePersonalSkill replaces the owner's own Skill content in place. The ID
+// and creation order stay; system, shared and other owners' Skills are not
+// rows here, so they are reported as not found.
+func (s *Service) UpdatePersonalSkill(ctx context.Context, owner, id string, input CreatePersonalSkillInput) (catalog.SkillSchema, error) {
+	if s.personalSkills == nil || strings.TrimSpace(owner) == "" || !validPersonalSkillID(id) {
+		return catalog.SkillSchema{}, ErrPersonalSkillNotFound
+	}
+	content, err := s.personalSkillContent(input)
+	if err != nil {
+		return catalog.SkillSchema{}, err
+	}
+	skill := catalog.SkillSchema{
+		ID:   id,
+		Name: content.Name, Category: content.Category,
+		RecommendedSize: content.RecommendedSize, Prompt: content.Prompt,
+	}
+	if err := s.validatePersonalSkill(skill); err != nil {
+		return catalog.SkillSchema{}, err
+	}
+	if err := s.personalSkills.UpdatePersonalSkill(ctx, owner, id, skill); err != nil {
+		return catalog.SkillSchema{}, err
+	}
+	return skill, nil
+}
+
+// validPersonalSkillID accepts only the IDs the server generates. System and
+// shared Skill IDs can never name a personal row, so update reports them as
+// not found before any content validation.
+func validPersonalSkillID(id string) bool {
+	const prefix = "personal-"
+	if !strings.HasPrefix(id, prefix) || len(id) != len(prefix)+32 {
+		return false
+	}
+	_, err := hex.DecodeString(id[len(prefix):])
+	return err == nil
+}
+
+// personalSkillContent trims and validates the fields shared by creation and
+// whole-object update, so both accept exactly the same text.
+func (s *Service) personalSkillContent(input CreatePersonalSkillInput) (CreatePersonalSkillInput, error) {
+	input.Name = strings.TrimSpace(input.Name)
+	input.Prompt = strings.TrimSpace(input.Prompt)
+	if input.Name == "" || utf8.RuneCountInString(input.Name) > s.schema.Chat.Skills.Creation.MaxNameCharacters ||
+		input.Prompt == "" || utf8.RuneCountInString(input.Prompt) > s.schema.AgentConfiguration.Limits.MaxSkillPromptCharacters {
+		return CreatePersonalSkillInput{}, fmt.Errorf("%w: name or prompt", ErrInvalidPersonalSkill)
+	}
+	return input, nil
+}
+
+func (s *Service) validatePersonalSkill(skill catalog.SkillSchema) error {
+	candidate := clone(s.defaults)
+	candidate.Skills = []catalog.SkillSchema{skill}
+	if err := s.Validate(candidate); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidPersonalSkill, err)
+	}
+	return nil
 }
 
 // DeletePersonalSkill removes the owner's own Skill. System and shared Skills

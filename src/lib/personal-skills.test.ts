@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { deletePersonalSkill, listPersonalSkillIds } from '@/lib/personal-skills';
+import { deletePersonalSkill, listPersonalSkillIds, PersonalSkillNotFound, updatePersonalSkill } from '@/lib/personal-skills';
 import type { ProductSchema } from '@/lib/product-schema';
 
 const creation = {
@@ -35,5 +35,37 @@ describe('personal Skill client (#238)', () => {
   it('refuses a cross-origin item route', async () => {
     const broken = { chat: { skills: { creation: { ...creation, item_route: '//evil.test/{skillID}' } } } } as unknown as ProductSchema;
     await expect(deletePersonalSkill(broken, 'x')).rejects.toThrow('Invalid Skill route');
+  });
+});
+
+describe('personal Skill update (#152)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('replaces the Skill through the item route with PUT and returns the updated object', async () => {
+    const updated = { id: 'personal-a', name: 'Renamed', prompt: 'warm light' };
+    const fetchMock = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ skill: updated }), { status: 200 })));
+    vi.stubGlobal('fetch', fetchMock);
+    const input = { name: 'Renamed', prompt: 'warm light', recommended_size: '2048x2048' };
+    await expect(updatePersonalSkill(schema, 'personal-a/b', input)).resolves.toEqual(updated);
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/chat/skills/personal/personal-a%2Fb', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal: undefined,
+    });
+  });
+
+  it('reports a 404 as PersonalSkillNotFound so the caller refreshes without leaking ownership', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('{}', { status: 404 }))));
+    await expect(updatePersonalSkill(schema, 'personal-a', { name: 'x', prompt: 'p', recommended_size: 'auto' })).rejects.toBeInstanceOf(PersonalSkillNotFound);
+  });
+
+  it('rejects a failed update and an invalid response body', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('{}', { status: 400 }))));
+    await expect(updatePersonalSkill(schema, 'personal-a', { name: 'x', prompt: 'p', recommended_size: 'auto' })).rejects.toThrow('HTTP 400');
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({ skill: {} }), { status: 200 }))));
+    await expect(updatePersonalSkill(schema, 'personal-a', { name: 'x', prompt: 'p', recommended_size: 'auto' })).rejects.toThrow('Invalid Skill response');
+  });
+
+  it('refuses a cross-origin item route', async () => {
+    const broken = { chat: { skills: { creation: { ...creation, item_route: '//evil.test/{skillID}' } } } } as unknown as ProductSchema;
+    await expect(updatePersonalSkill(broken, 'x', { name: 'x', prompt: 'p', recommended_size: 'auto' })).rejects.toThrow('Invalid Skill route');
   });
 });

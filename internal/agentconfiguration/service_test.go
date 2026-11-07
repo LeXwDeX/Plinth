@@ -10,6 +10,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -81,6 +82,123 @@ func TestPersonalSkillsPersistAndKeepSharedRevisionIndependent(t *testing.T) {
 	latest, err := service.SnapshotForOwner(ctx, "owner-a")
 	if err != nil || latest.Revision == reopened.Revision || len(latest.Configuration.Skills) != 3 {
 		t.Fatalf("creation did not change effective revision: %#v %v", latest, err)
+	}
+}
+
+func TestPersonalSkillUpdateKeepsIdentityAndOnlyNewSnapshotsSeeIt(t *testing.T) {
+	ctx := context.Background()
+	repo, err := sqlitetest.Open(filepath.Join(t.TempDir(), "personal-update.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaults, err := catalog.LoadDefaultSkillCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := agentconfiguration.New(repo, product.Application(), defaults, product.List(""), agentconfiguration.WithPersonalSkills(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.CreatePersonalSkill(ctx, "owner-a", agentconfiguration.CreatePersonalSkillInput{Name: "My style", Prompt: "soft light", RecommendedSize: "1536x1024"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A turn that already froze keeps the snapshot it captured, so the update cannot rewrite it.
+	frozen, err := service.SnapshotForOwner(ctx, "owner-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := service.UpdatePersonalSkill(ctx, "owner-a", first.ID, agentconfiguration.CreatePersonalSkillInput{Name: "Renamed style", Prompt: "warm light and blue ink", RecommendedSize: "1536x1024"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != first.ID || updated.Name != "Renamed style" || updated.Prompt != "warm light and blue ink" || updated.Category != "" {
+		t.Fatalf("update changed identity or content: %#v", updated)
+	}
+	list, err := service.PersonalSkills(ctx, "owner-a")
+	if err != nil || len(list) != 1 || !reflect.DeepEqual(list[0], updated) {
+		t.Fatalf("updated Skill not listed: %#v %v", list, err)
+	}
+	after, err := service.SnapshotForOwner(ctx, "owner-a")
+	if err != nil || after.Revision == frozen.Revision {
+		t.Fatalf("update did not change the effective revision: %#v %v", after, err)
+	}
+	if frozen.Configuration.Skills[len(frozen.Configuration.Skills)-1].Prompt != "soft light" {
+		t.Fatalf("a frozen snapshot was rewritten: %#v", frozen.Configuration.Skills)
+	}
+	last := after.Configuration.Skills[len(after.Configuration.Skills)-1]
+	if last.ID != first.ID || last.Prompt != "warm light and blue ink" {
+		t.Fatalf("new snapshot lacks the update: %#v", last)
+	}
+	// Owner scoping and unknown IDs are indistinguishable, and invalid content leaves the row intact.
+	if _, err := service.UpdatePersonalSkill(ctx, "owner-b", first.ID, agentconfiguration.CreatePersonalSkillInput{Name: "Hijack", Prompt: "p", RecommendedSize: "1536x1024"}); !errors.Is(err, agentconfiguration.ErrPersonalSkillNotFound) {
+		t.Fatalf("cross-owner update error = %v", err)
+	}
+	if _, err := service.UpdatePersonalSkill(ctx, "owner-a", "personal-unknown", agentconfiguration.CreatePersonalSkillInput{Name: "X", Prompt: "p", RecommendedSize: "1536x1024"}); !errors.Is(err, agentconfiguration.ErrPersonalSkillNotFound) {
+		t.Fatalf("unknown update error = %v", err)
+	}
+	if _, err := service.UpdatePersonalSkill(ctx, "owner-a", first.ID, agentconfiguration.CreatePersonalSkillInput{Name: "", Prompt: "p", RecommendedSize: "1536x1024"}); !errors.Is(err, agentconfiguration.ErrInvalidPersonalSkill) {
+		t.Fatalf("invalid update error = %v", err)
+	}
+	unchanged, err := service.PersonalSkills(ctx, "owner-a")
+	if err != nil || len(unchanged) != 1 || !reflect.DeepEqual(unchanged[0], updated) {
+		t.Fatalf("invalid update changed the row: %#v %v", unchanged, err)
+	}
+}
+
+func TestPersonalSkillStoreUpdateIsOwnerScopedAndKeepsOrder(t *testing.T) {
+	ctx := context.Background()
+	repo, err := sqlitetest.Open(filepath.Join(t.TempDir(), "personal-update-store.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	one := catalog.SkillSchema{ID: "personal-one", Name: "One", RecommendedSize: "1536x1024", Prompt: "one"}
+	two := catalog.SkillSchema{ID: "personal-two", Name: "Two", RecommendedSize: "1536x1024", Prompt: "two"}
+	if err := repo.InsertPersonalSkill(ctx, "owner-a", one, 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.InsertPersonalSkill(ctx, "owner-a", two, 10); err != nil {
+		t.Fatal(err)
+	}
+	renamed := catalog.SkillSchema{ID: "personal-one", Name: "Renamed", RecommendedSize: "1536x1024", Prompt: "changed"}
+	if err := repo.UpdatePersonalSkill(ctx, "owner-b", "personal-one", renamed); !errors.Is(err, agentconfiguration.ErrPersonalSkillNotFound) {
+		t.Fatalf("cross-owner update error = %v", err)
+	}
+	missing := renamed
+	missing.ID = "personal-missing"
+	if err := repo.UpdatePersonalSkill(ctx, "owner-a", "personal-missing", missing); !errors.Is(err, agentconfiguration.ErrPersonalSkillNotFound) {
+		t.Fatalf("unknown update error = %v", err)
+	}
+	if err := repo.UpdatePersonalSkill(ctx, "owner-a", "personal-one", renamed); err != nil {
+		t.Fatal(err)
+	}
+	mine, err := repo.ListPersonalSkills(ctx, "owner-a")
+	if err != nil || len(mine) != 2 || mine[0].ID != "personal-one" || mine[0].Name != "Renamed" || mine[1].ID != "personal-two" {
+		t.Fatalf("owner rows after update: %#v %v", mine, err)
+	}
+	other, err := repo.ListPersonalSkills(ctx, "owner-b")
+	if err != nil || len(other) != 0 {
+		t.Fatalf("cross-owner rows changed: %#v %v", other, err)
+	}
+	// An update does not consume the per-owner creation quota.
+	limited := catalog.SkillSchema{ID: "personal-limited", Name: "Limited", RecommendedSize: "1536x1024", Prompt: "p"}
+	if err := repo.InsertPersonalSkill(ctx, "owner-limit", limited, 1); err != nil {
+		t.Fatal(err)
+	}
+	limited.Name = "Limited renamed"
+	if err := repo.UpdatePersonalSkill(ctx, "owner-limit", "personal-limited", limited); err != nil {
+		t.Fatal(err)
+	}
+	second := limited
+	second.ID = "personal-second"
+	if err := repo.InsertPersonalSkill(ctx, "owner-limit", second, 1); !errors.Is(err, agentconfiguration.ErrPersonalSkillLimit) {
+		t.Fatalf("update changed the creation quota: %v", err)
 	}
 }
 

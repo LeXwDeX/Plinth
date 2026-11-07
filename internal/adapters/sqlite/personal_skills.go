@@ -34,6 +34,33 @@ func (r *Repository) InsertPersonalSkill(ctx context.Context, owner string, skil
 	return nil
 }
 
+// UpdatePersonalSkill replaces one row only when the owner created it. The
+// created_at column is untouched, so list order and identity stay stable.
+func (r *Repository) UpdatePersonalSkill(ctx context.Context, owner, id string, skill catalog.SkillSchema) error {
+	if owner == "" || id == "" {
+		return agentconfiguration.ErrPersonalSkillNotFound
+	}
+	if skill.ID != id {
+		return errors.New("personal Skill update ID mismatch")
+	}
+	encoded, err := json.Marshal(skill)
+	if err != nil {
+		return err
+	}
+	result, err := r.db.ExecContext(ctx, `UPDATE personal_skills SET skill_json=? WHERE owner_id=? AND id=?`, string(encoded), owner, id)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return agentconfiguration.ErrPersonalSkillNotFound
+	}
+	return nil
+}
+
 // DeletePersonalSkill removes one Skill only when the owner created it.
 // Turns that already froze the Skill keep their own snapshot.
 func (r *Repository) DeletePersonalSkill(ctx context.Context, owner, id string) error {

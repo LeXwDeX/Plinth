@@ -29,6 +29,7 @@ func (s *Server) registerAgentConfigurationContracts() {
 		s.mux.HandleFunc("POST "+creation, s.personalSkills)
 	}
 	if item := s.application.Chat.Skills.Creation.ItemRoute; item != "" {
+		s.mux.HandleFunc("PUT "+item, s.updatePersonalSkill)
 		s.mux.HandleFunc("DELETE "+item, s.deletePersonalSkill)
 	}
 }

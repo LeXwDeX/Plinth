@@ -91,7 +91,7 @@ describe('skillPickerRows', () => {
     const rows = skillPickerRows({
       catalog: { skills: [{ id: 'personal', displayName: 'P', prompt: '', recommendedSize: '' }] } as never,
       effective: { skills: [] } as never,
-      personalIds: new Set(), noneLabel: 'n', noneHint: 'h', deleteLabel: () => '', deleting: new Set(), onDelete: () => undefined,
+      personalIds: new Set(), noneLabel: 'n', noneHint: 'h', editLabel: () => '', deleteLabel: () => '', deleting: new Set(), onEdit: () => undefined, onDelete: () => undefined,
       reasonForSkill: () => 'schema reason',
     });
     expect(rows[0]).toMatchObject({ disabled: true, disabledReason: 'schema reason', focusableDisabled: true });
@@ -101,15 +101,16 @@ describe('skillPickerRows', () => {
     const rows = skillPickerRows({
       catalog: { revision: 'r', skills: [{ id: 'a', displayName: 'A', prompt: 'p', recommendedSize: '' }] } as never,
       effective: { skills: [] } as never,
-      personalIds: new Set(), noneLabel: 'n', noneHint: 'h', deleteLabel: () => '', deleting: new Set(), onDelete: () => undefined,
+      personalIds: new Set(), noneLabel: 'n', noneHint: 'h', editLabel: () => '', deleteLabel: () => '', deleting: new Set(), onEdit: () => undefined, onDelete: () => undefined,
       notEnabledReason: 'not enabled',
     });
     expect(rows[0]).toMatchObject({ key: 'a', disabled: true, disabledReason: 'not enabled' });
     expect(rows[1].disabledReason).toBeUndefined();
   });
 
-  it('offers delete on personal Skills only, never on system Skills or "none"', () => {
+  it('offers edit and delete on personal Skills only, never on system Skills or "none"', () => {
     const deleted: string[] = [];
+    const edited: string[] = [];
     const rows = skillPickerRows({
       catalog: { revision: 'r', skills: [
         { id: 'system-three-view', displayName: '三视图', prompt: 'p', recommendedSize: '' },
@@ -119,15 +120,21 @@ describe('skillPickerRows', () => {
       personalIds: new Set(['personal-a']),
       noneLabel: '不使用',
       noneHint: '默认',
+      editLabel: (name) => '编辑 Skill「' + name + '」',
       deleteLabel: (name) => '删除 Skill「' + name + '」',
       deleting: new Set(),
+      onEdit: (id) => edited.push(id),
       onDelete: (id) => deleted.push(id),
     });
     expect(rows.map((row) => row.key)).toEqual(['system-three-view', 'personal-a', '']);
-    expect(rows[0].action).toBeUndefined();
-    expect(rows[2].action).toBeUndefined();
-    expect(rows[1].action?.label).toBe('删除 Skill「我的水彩」');
-    rows[1].action?.onClick();
+    expect(rows[0].actions).toBeUndefined();
+    expect(rows[2].actions).toBeUndefined();
+    expect(rows[1].actions?.map((action) => action.kind)).toEqual(['edit', 'delete']);
+    expect(rows[1].actions?.[0]).toMatchObject({ label: '编辑 Skill「我的水彩」', closeOnClick: true });
+    expect(rows[1].actions?.[1]?.label).toBe('删除 Skill「我的水彩」');
+    rows[1].actions?.[0].onClick();
+    rows[1].actions?.[1].onClick();
+    expect(edited).toEqual(['personal-a']);
     expect(deleted).toEqual(['personal-a']);
   });
 });

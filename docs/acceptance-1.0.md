@@ -177,6 +177,7 @@ Agent LLM 只用 OpenAI chat completions 兼容 API，模型必须能读图。�
 | SKL-01 | M | 新用户打开 Skill 选择器 | 只有系统三视图 Skill（英文界面显示英文名称和说明）和“不使用”；没有其他内置 Skill 和分类 |
 | SKL-02 | M | 新建个人 Skill（名称、提示词、推荐尺寸）并选用 | 推荐尺寸成为尺寸默认值并标出“来自 Skill” |
 | SKL-03 | M | 删除当前选中的 Skill 和另一个 Skill | 选中的被删后回到“不使用”；删除其他的不改变选择 |
+| SKL-04 | M | 编辑本人的个人 Skill（名称与创作要求）；另用他人身份、系统 Skill ID 和不存在的 ID 调 `PUT /api/v1/chat/skills/personal/{skillID}`；提交空名称和非法推荐尺寸 | ID 与创建顺序不变；列表与有效配置刷新；当前选择保持，原本未选中的不自动选中；非本人/系统/不存在均为不泄露存在性的 404；非法内容 400 且原记录不变；已冻结轮次仍用旧提示词 |
 
 ### Administration（管理后台）
 

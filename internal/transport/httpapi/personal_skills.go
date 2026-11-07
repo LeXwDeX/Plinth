@@ -55,6 +55,38 @@ func (s *Server) personalSkills(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"skill": skill})
 }
 
+func (s *Server) updatePersonalSkill(w http.ResponseWriter, r *http.Request) {
+	principal, err := s.identity.Identify(r)
+	if err != nil {
+		writeProblem(w, http.StatusUnauthorized, "unauthenticated", s.application.Authentication.Messages.Unauthenticated)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	var input agentconfiguration.CreatePersonalSkillInput
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeProblem(w, http.StatusBadRequest, "invalid_personal_skill", s.application.Content.Messages["ui.workspace.skills.content_invalid"])
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeProblem(w, http.StatusBadRequest, "invalid_personal_skill", s.application.Content.Messages["ui.workspace.skills.content_invalid"])
+		return
+	}
+	skill, err := s.agentConfiguration.UpdatePersonalSkill(r.Context(), principal.ID(), r.PathValue("skillID"), input)
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]any{"skill": skill})
+	case errors.Is(err, agentconfiguration.ErrInvalidPersonalSkill):
+		writeProblem(w, http.StatusBadRequest, "invalid_personal_skill", s.application.Content.Messages["ui.workspace.skills.content_invalid"])
+	case errors.Is(err, agentconfiguration.ErrPersonalSkillNotFound):
+		writeProblem(w, http.StatusNotFound, "personal_skill_not_found", s.application.Content.Messages["ui.workspace.skills.not_found"])
+	default:
+		s.logger.Error("更新个人 Skill 失败", "owner_id", principal.ID(), "error", err)
+		writeProblem(w, http.StatusInternalServerError, "personal_skill_update_failed", s.application.Content.Messages["ui.workspace.skills.save_failed"])
+	}
+}
+
 func (s *Server) deletePersonalSkill(w http.ResponseWriter, r *http.Request) {
 	principal, err := s.identity.Identify(r)
 	if err != nil {
