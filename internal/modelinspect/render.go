@@ -2,6 +2,7 @@ package modelinspect
 
 import (
 	"context"
+	"errors"
 	"image"
 	"image/color"
 	"math"
@@ -52,8 +53,10 @@ const (
 type RenderMode string
 
 const (
-	// ModeTextured shades the base-color texture and COLOR_0, lit by a
-	// headlight, one fixed main light and ambient light.
+	// ModeTextured shades base color, COLOR_0, normal maps and, when the
+	// material explicitly declares metallic-roughness factors or a texture, an
+	// approximate metallic-roughness model lit by a headlight, one fixed main
+	// light and an analytic environment.
 	ModeTextured RenderMode = "textured"
 	// ModeClay draws uniform mid-grey geometry for shape inspection.
 	ModeClay RenderMode = "clay"
@@ -117,9 +120,15 @@ const renderCoverageFactor = 256
 // NRGBA image. It uses a z-buffer, 2x supersampling and bilinear texture
 // sampling with the sampler's wrap modes.
 //
-// Render decodes only the base-color texture and only for textured mode; the
-// limits passed to Parse decide which textures are eligible. Over-limit
-// textures are replaced by material factors, which Inspect reports.
+// In textured mode Render decodes base color, normal and, for materials that
+// explicitly declare them, metallic-roughness textures. Each slot uses its own
+// texCoord and KHR_texture_transform. The limits passed to Parse decide which
+// textures are eligible: an image over MaxTexturePixels is replaced by material
+// factors, and an optional metallic-roughness or normal texture that exhausts a
+// cumulative budget is skipped rather than failing the render. Documentation
+// and callers should treat the metallic-roughness path as an approximation: it
+// has no image-based environment lighting, prefiltered environment map, BRDF
+// lookup table or shadows.
 func Render(m *Model, req RenderRequest) (*image.NRGBA, error) {
 	if m == nil {
 		return nil, invalidf("nil model")
@@ -288,11 +297,16 @@ type renderPart struct {
 	material        *Material
 	positions       []float32 // world space, three per vertex
 	normals         []float32 // world space, three per vertex; may be nil
-	uvs             []float32 // two per vertex; may be nil
+	uvs             []float32 // base-color UVs, two per vertex; may be nil
 	colors          []float32 // linear, colorComponents per vertex; may be nil
 	colorComponents int
-	indices         []uint32 // nil for non-indexed primitives
-	texture         *decodedTexture
+	indices         []uint32        // nil for non-indexed primitives
+	texture         *decodedTexture // base color; sampled as sRGB
+	mrTexture       *decodedTexture // G is roughness, B is metallic; sampled linear
+	mrUVs           []float32
+	normalTexture   *decodedTexture // tangent-space normal map; sampled linear
+	normalUVs       []float32
+	normalScale     float64
 	highlighted     bool
 	// mirrored marks a negative-determinant world transform, which reverses
 	// the winding of every triangle.
@@ -313,6 +327,11 @@ func (m *Model) buildRenderParts(req RenderRequest, mode RenderMode, highlight m
 	parts := make([]*renderPart, 0, len(m.parts))
 	totalTriangles := int64(0)
 	for _, source := range m.parts {
+		if req.Context != nil {
+			if err := req.Context.Err(); err != nil {
+				return nil, 0, err
+			}
+		}
 		if source.triangleCount == 0 || source.mode < 4 || source.mode > 6 {
 			continue
 		}
@@ -371,18 +390,28 @@ func (m *Model) buildRenderParts(req RenderRequest, mode RenderMode, highlight m
 		}
 		if mode == ModeTextured {
 			if material.BaseColorTexture != nil {
-				uvs, err := m.texCoords(source, material.BaseColorTexture.TexCoord)
+				texture, uvs, err := m.renderTextureSlot(source, material.BaseColorTexture, false)
 				if err != nil {
 					return nil, 0, err
 				}
-				if uvs != nil {
-					texture, err := m.decodeTexture(material.BaseColorTexture.Texture)
-					if err != nil {
-						return nil, 0, err
-					}
-					renderPart.uvs = transformTexCoords(uvs, material.BaseColorTexture.Transform)
-					renderPart.texture = texture
+				renderPart.texture, renderPart.uvs = texture, uvs
+			}
+			if material.MetallicRoughnessTexture != nil {
+				texture, uvs, err := m.renderTextureSlot(source, material.MetallicRoughnessTexture, true)
+				if err != nil {
+					return nil, 0, err
 				}
+				renderPart.mrTexture, renderPart.mrUVs = texture, uvs
+			}
+			if material.NormalTexture != nil && material.NormalTexture.Scale != 0 {
+				// A zero scale maps every texel to the unperturbed normal, so
+				// the texture is equivalent to no normal map and is not decoded.
+				texture, uvs, err := m.renderTextureSlot(source, &material.NormalTexture.TextureRef, true)
+				if err != nil {
+					return nil, 0, err
+				}
+				renderPart.normalTexture, renderPart.normalUVs = texture, uvs
+				renderPart.normalScale = material.NormalTexture.Scale
 			}
 			if source.color >= 0 {
 				colors, err := m.colors(source)
@@ -396,6 +425,32 @@ func (m *Model) buildRenderParts(req RenderRequest, mode RenderMode, highlight m
 		parts = append(parts, renderPart)
 	}
 	return parts, totalTriangles, nil
+}
+
+// renderTextureSlot decodes one textured material slot, applying that slot's
+// own texCoord set and KHR_texture_transform. A missing TEXCOORD_n skips the
+// slot. When optional is set, exhausting a cumulative texture budget degrades
+// the slot to material factors instead of failing the render; base color keeps
+// its historical error semantics.
+func (m *Model) renderTextureSlot(source *part, ref *TextureRef, optional bool) (*decodedTexture, []float32, error) {
+	uvs, err := m.texCoords(source, ref.TexCoord)
+	if err != nil {
+		return nil, nil, err
+	}
+	if uvs == nil {
+		return nil, nil, nil
+	}
+	texture, err := m.decodeTexture(ref.Texture)
+	if err != nil {
+		if optional && errors.Is(err, ErrTooLarge) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+	if texture == nil {
+		return nil, nil, nil
+	}
+	return texture, transformTexCoords(uvs, ref.Transform), nil
 }
 
 // referencedBounds frames only the vertices the part's triangles use, so an
@@ -649,9 +704,15 @@ func (r *renderer) renderBand(pixels []float32, depth []float64, startY, endY in
 	}
 }
 
-const mainLightX = 0.4499 // normalized (0.45, 1, 0.6)
+// Fixed main-light direction components, normalized once into
+// mainLightDirection.
+const mainLightX = 0.4499
 const mainLightY = 0.9998
 const mainLightZ = 0.5999
+
+// mainLightDirection is the normalized fixed main light direction. Allocate
+// it once because shading is per pixel.
+var mainLightDirection = vec3{mainLightX, mainLightY, mainLightZ}.normalized()
 
 func (r *renderer) drawPartBand(part *renderPart, pixels []float32, depth []float64, startY, endY int) {
 	for triangle := 0; triangle < part.triangleCount; triangle++ {
@@ -695,6 +756,27 @@ func (r *renderer) drawPartBand(part *renderPart, pixels []float32, depth []floa
 				continue
 			}
 		}
+		// The normal map's tangent frame comes from the triangle's world-space
+		// positions and its own UV set, so no TANGENT attribute is required.
+		// A degenerate UV mapping gets an arbitrary frame; the bump direction
+		// is then meaningless but the surface still renders.
+		var tangent, bitangent vec3
+		useNormalMap := part.normalTexture != nil
+		if useNormalMap {
+			uv0 := textureUV(part.normalUVs, a)
+			uv1 := textureUV(part.normalUVs, b)
+			uv2 := textureUV(part.normalUVs, c)
+			var basisOK bool
+			tangent, bitangent, basisOK = triangleTangentBasis(p0, p1, p2, uv0, uv1, uv2)
+			if !basisOK {
+				tangent = perpendicularTo(faceNormal)
+				bitangent = faceNormal.cross(tangent)
+			}
+			// Orthogonalise once per triangle. Per-pixel normals are then
+			// mapped with this frame; the interpolated vertex normal still
+			// varies per pixel, so a smooth surface keeps its shading normal.
+			tangent, bitangent = orthonormalTangentBasis(tangent, bitangent, faceNormal)
+		}
 		area := edgeFunction(x0, y0, x1, y1, x2, y2)
 		if math.Abs(area) < 1e-12 {
 			continue
@@ -735,10 +817,30 @@ func (r *renderer) drawPartBand(part *renderPart, pixels []float32, depth []floa
 				if denominator == 0 {
 					continue
 				}
-				uv, hasUV := interpolateUV(part, b0, b1, b2, invZ0, invZ1, invZ2, denominator, a, b, c)
-				normal := interpolateNormal(part, b0, b1, b2, invZ0, invZ1, invZ2, denominator, a, b, c)
-				vertexColor := interpolateColor(part, b0, b1, b2, invZ0, invZ1, invZ2, denominator, a, b, c)
-				color, discard := r.shade(part, normal, faceNormal, toEye, uv, hasUV, vertexColor)
+				inverseDenominator := 1 / denominator
+				weights := [3]float64{
+					b0 * invZ0 * inverseDenominator,
+					b1 * invZ1 * inverseDenominator,
+					b2 * invZ2 * inverseDenominator,
+				}
+				uv, hasUV := interpolateUVs(part.uvs, weights, a, b, c)
+				mrUV, hasMRUV := interpolateUVs(part.mrUVs, weights, a, b, c)
+				normal := interpolateNormal(part, weights, a, b, c, !useNormalMap)
+				if useNormalMap {
+					normalUV, hasNormalUV := interpolateUVs(part.normalUVs, weights, a, b, c)
+					if hasNormalUV {
+						texel := part.normalTexture.sampleLinear(normalUV[0], normalUV[1])
+						normal = applyNormalMap(texel, part.normalScale, normal, faceNormal, tangent, bitangent)
+					} else {
+						normal = normal.normalized()
+					}
+				}
+				vertexColor := interpolateColor(part, weights, a, b, c)
+				color, discard := r.shade(part, surface{
+					normal: normal, faceNormal: faceNormal, toEye: toEye,
+					uv: uv, hasUV: hasUV, mrUV: mrUV, hasMRUV: hasMRUV,
+					vertexColor: vertexColor,
+				})
 				if discard {
 					continue
 				}
@@ -758,35 +860,34 @@ func (p *renderPart) vertex(index uint32) (x, y, z float64) {
 		float64(p.positions[offset+2])
 }
 
-func interpolateUV(part *renderPart, b0, b1, b2, invZ0, invZ1, invZ2, denominator float64, a, b, c uint32) ([2]float64, bool) {
-	if part.uvs == nil {
+// textureUV returns one vertex's texture coordinates from a decoded UV slice.
+func textureUV(uvs []float32, vertex uint32) [2]float64 {
+	offset := int(vertex) * 2
+	return [2]float64{float64(uvs[offset]), float64(uvs[offset+1])}
+}
+
+func interpolateUVs(uvs []float32, weights [3]float64, a, b, c uint32) ([2]float64, bool) {
+	if uvs == nil {
 		return [2]float64{}, false
 	}
 	indices := [3]uint32{a, b, c}
-	weights := [3]float64{
-		b0 * invZ0 / denominator,
-		b1 * invZ1 / denominator,
-		b2 * invZ2 / denominator,
-	}
 	var uv [2]float64
 	for k := 0; k < 3; k++ {
 		offset := int(indices[k]) * 2
-		uv[0] += weights[k] * float64(part.uvs[offset])
-		uv[1] += weights[k] * float64(part.uvs[offset+1])
+		uv[0] += weights[k] * float64(uvs[offset])
+		uv[1] += weights[k] * float64(uvs[offset+1])
 	}
 	return uv, true
 }
 
-func interpolateNormal(part *renderPart, b0, b1, b2, invZ0, invZ1, invZ2, denominator float64, a, b, c uint32) vec3 {
+// interpolateNormal returns the perspective-correct normal. A normal-mapped
+// surface skips the normalisation because applyNormalMap normalises the mapped
+// result, saving one square root per pixel.
+func interpolateNormal(part *renderPart, weights [3]float64, a, b, c uint32, normalize bool) vec3 {
 	if part.normals == nil {
 		return vec3{}
 	}
 	indices := [3]uint32{a, b, c}
-	weights := [3]float64{
-		b0 * invZ0 / denominator,
-		b1 * invZ1 / denominator,
-		b2 * invZ2 / denominator,
-	}
 	var normal vec3
 	for k := 0; k < 3; k++ {
 		offset := int(indices[k]) * 3
@@ -794,20 +895,18 @@ func interpolateNormal(part *renderPart, b0, b1, b2, invZ0, invZ1, invZ2, denomi
 		normal[1] += weights[k] * float64(part.normals[offset+1])
 		normal[2] += weights[k] * float64(part.normals[offset+2])
 	}
+	if !normalize {
+		return normal
+	}
 	return normal.normalized()
 }
 
-func interpolateColor(part *renderPart, b0, b1, b2, invZ0, invZ1, invZ2, denominator float64, a, b, c uint32) [4]float64 {
+func interpolateColor(part *renderPart, weights [3]float64, a, b, c uint32) [4]float64 {
 	if part.colors == nil {
 		return [4]float64{1, 1, 1, 1}
 	}
 	color := [4]float64{0, 0, 0, 1}
 	indices := [3]uint32{a, b, c}
-	weights := [3]float64{
-		b0 * invZ0 / denominator,
-		b1 * invZ1 / denominator,
-		b2 * invZ2 / denominator,
-	}
 	components := part.colorComponents
 	for k := 0; k < 3; k++ {
 		offset := int(indices[k]) * components
@@ -826,20 +925,33 @@ func interpolateColor(part *renderPart, b0, b1, b2, invZ0, invZ1, invZ2, denomin
 	return color
 }
 
+// surface holds the interpolated per-pixel shading inputs. normal is already
+// perturbed by the normal map when the part has one.
+type surface struct {
+	normal      vec3
+	faceNormal  vec3
+	toEye       vec3
+	uv          [2]float64
+	hasUV       bool
+	mrUV        [2]float64
+	hasMRUV     bool
+	vertexColor [4]float64
+}
+
 // shade returns linear RGB. The normal passed in may be zero, in which case
 // the triangle's geometric normal is used for lighting.
-func (r *renderer) shade(part *renderPart, normal, faceNormal, toEye vec3, uv [2]float64, hasUV bool, vertexColor [4]float64) ([3]float64, bool) {
+func (r *renderer) shade(part *renderPart, s surface) ([3]float64, bool) {
 	material := part.material
 	var result [3]float64
 	alpha := 1.0
 	switch r.mode {
 	case ModeNormals:
-		n := normal
+		n := s.normal
 		if n.length() == 0 {
-			n = faceNormal
+			n = s.faceNormal
 		}
 		if n.length() == 0 {
-			n = toEye
+			n = s.toEye
 		}
 		result = [3]float64{n[0]*0.5 + 0.5, n[1]*0.5 + 0.5, n[2]*0.5 + 0.5}
 	case ModeTextured:
@@ -847,23 +959,35 @@ func (r *renderer) shade(part *renderPart, normal, faceNormal, toEye vec3, uv [2
 			material.BaseColorFactor[0], material.BaseColorFactor[1], material.BaseColorFactor[2],
 		}
 		alpha = material.BaseColorFactor[3]
-		if part.texture != nil && hasUV {
-			texel := part.texture.sample(uv[0], uv[1])
+		if part.texture != nil && s.hasUV {
+			texel := part.texture.sampleSRGB(s.uv[0], s.uv[1])
 			result[0] *= texel[0]
 			result[1] *= texel[1]
 			result[2] *= texel[2]
 			alpha *= texel[3]
 		}
-		result[0] *= vertexColor[0]
-		result[1] *= vertexColor[1]
-		result[2] *= vertexColor[2]
-		alpha *= vertexColor[3]
+		result[0] *= s.vertexColor[0]
+		result[1] *= s.vertexColor[1]
+		result[2] *= s.vertexColor[2]
+		alpha *= s.vertexColor[3]
 		if material.AlphaMode == "MASK" && alpha < material.AlphaCutoff {
 			return [3]float64{}, true
 		}
-		result = applyLighting(result, normal, faceNormal, toEye)
+		if material.pbrDeclared {
+			metallic := material.MetallicFactor
+			roughness := material.RoughnessFactor
+			if part.mrTexture != nil && s.hasMRUV {
+				texel := part.mrTexture.sampleLinear(s.mrUV[0], s.mrUV[1])
+				roughness *= texel[1]
+				metallic *= texel[2]
+			}
+			result = pbrLighting(result, clampUnit(metallic), clampUnit(roughness),
+				s.normal, s.faceNormal, s.toEye)
+		} else {
+			result = applyLighting(result, s.normal, s.faceNormal, s.toEye)
+		}
 	default: // clay and wireframe
-		result = applyLighting([3]float64{0.5, 0.5, 0.5}, normal, faceNormal, toEye)
+		result = applyLighting([3]float64{0.5, 0.5, 0.5}, s.normal, s.faceNormal, s.toEye)
 	}
 	if !part.highlighted {
 		result[0] *= 0.35
@@ -874,9 +998,204 @@ func (r *renderer) shade(part *renderPart, normal, faceNormal, toEye vec3, uv [2
 		if !finite(result[i]) {
 			result[i] = 0
 		}
-		result[i] = math.Min(math.Max(result[i], 0), 1)
+		result[i] = min(max(result[i], 0), 1)
 	}
 	return result, false
+}
+
+// triangleTangentBasis derives world-space tangent and bitangent vectors from
+// a triangle's positions and its normal-map UVs. The vectors are not
+// normalised: the caller orthogonalises them once against the triangle's
+// geometric normal. A degenerate UV mapping returns ok=false.
+func triangleTangentBasis(p0, p1, p2 vec3, uv0, uv1, uv2 [2]float64) (vec3, vec3, bool) {
+	edge1 := p1.sub(p0)
+	edge2 := p2.sub(p0)
+	du1, dv1 := uv1[0]-uv0[0], uv1[1]-uv0[1]
+	du2, dv2 := uv2[0]-uv0[0], uv2[1]-uv0[1]
+	determinant := du1*dv2 - du2*dv1
+	if math.Abs(determinant) < 1e-12 {
+		return vec3{}, vec3{}, false
+	}
+	inverse := 1 / determinant
+	tangent := edge1.scale(dv2).sub(edge2.scale(dv1)).scale(inverse)
+	bitangent := edge2.scale(du1).sub(edge1.scale(du2)).scale(inverse)
+	if !tangent.finite() || !bitangent.finite() ||
+		tangent.length() == 0 || bitangent.length() == 0 {
+		return vec3{}, vec3{}, false
+	}
+	return tangent, bitangent, true
+}
+
+// perpendicularTo returns a unit vector perpendicular to n.
+func perpendicularTo(n vec3) vec3 {
+	axis := vec3{0, 1, 0}
+	if math.Abs(n[1]) > 0.9 {
+		axis = vec3{1, 0, 0}
+	}
+	tangent := n.cross(axis).normalized()
+	if tangent.length() == 0 {
+		return vec3{1, 0, 0}
+	}
+	return tangent
+}
+
+// orthonormalTangentBasis projects a triangle's tangent frame onto the plane
+// perpendicular to n and returns unit tangent and bitangent vectors. It runs
+// once per triangle, not once per pixel.
+func orthonormalTangentBasis(tangent, bitangent, n vec3) (vec3, vec3) {
+	n = n.normalized()
+	if n.length() == 0 {
+		return vec3{1, 0, 0}, vec3{0, 1, 0}
+	}
+	t := tangent.sub(n.scale(n.dot(tangent)))
+	if t.length() == 0 {
+		t = perpendicularTo(n)
+	}
+	t = t.normalized()
+	b := bitangent.sub(n.scale(n.dot(bitangent))).sub(t.scale(t.dot(bitangent)))
+	if b.length() == 0 {
+		b = n.cross(t)
+	}
+	return t, b.normalized()
+}
+
+// applyNormalMap maps a tangent-space normal sample to world space with the
+// triangle's orthonormal frame. The frame is orthogonalised per triangle, so
+// this costs one normalisation per pixel.
+func applyNormalMap(texel [4]float64, scale float64, normal, faceNormal, tangent, bitangent vec3) vec3 {
+	if scale == 0 {
+		return normal
+	}
+	n := normal
+	if n == (vec3{}) {
+		n = faceNormal
+	}
+	if n == (vec3{}) {
+		n = vec3{0, 0, 1}
+	}
+	tangentX := (texel[0]*2 - 1) * scale
+	tangentY := (texel[1]*2 - 1) * scale
+	tangentZ := texel[2]*2 - 1
+	mapped := tangent.scale(tangentX).add(bitangent.scale(tangentY)).add(n.scale(tangentZ))
+	length := mapped.length()
+	if length == 0 {
+		return n
+	}
+	return mapped.scale(1 / length)
+}
+
+func clampUnit(value float64) float64 {
+	return min(max(value, 0), 1)
+}
+
+// pbrLighting approximates a metallic-roughness BRDF. It reuses the headlight
+// and fixed main light of applyLighting, adds a GGX specular lobe and a cheap
+// analytic hemisphere environment so metals are not black away from
+// highlights. It is not image-based lighting: there is no environment map,
+// prefiltered radiance or BRDF lookup table, and there are no shadows.
+func pbrLighting(baseColor [3]float64, metallic, roughness float64, normal, faceNormal, toEye vec3) [3]float64 {
+	if normal == (vec3{}) {
+		normal = faceNormal
+	}
+	if normal == (vec3{}) {
+		normal = toEye
+	}
+	if normal.dot(toEye) < 0 {
+		normal = normal.scale(-1)
+	}
+	// Interpolated and normal-mapped normals arrive normalised, and the camera
+	// directions are unit vectors, so the hot path avoids extra square roots.
+	n := normal
+	v := toEye
+	if v == (vec3{}) {
+		v = vec3{0, 0, 1}
+	}
+	ndv := max(n.dot(v), 1e-4)
+	invFourNdv := 0.25 / ndv
+
+	// Keep roughness above a tiny floor so the GGX denominator stays finite.
+	roughness = min(max(roughness, 0.04), 1)
+	alpha := roughness * roughness
+	alpha2 := alpha * alpha
+
+	nonMetal := 1 - metallic
+	f0 := [3]float64{
+		0.04 + (baseColor[0]-0.04)*metallic,
+		0.04 + (baseColor[1]-0.04)*metallic,
+		0.04 + (baseColor[2]-0.04)*metallic,
+	}
+	diffuse := [3]float64{
+		baseColor[0] * nonMetal * (1 - f0[0]),
+		baseColor[1] * nonMetal * (1 - f0[1]),
+		baseColor[2] * nonMetal * (1 - f0[2]),
+	}
+
+	// The Smith k and the view denominator are shared by both lights.
+	k := (roughness + 1) * (roughness + 1) / 8
+	oneMinusK := 1 - k
+	viewDenominator := ndv*oneMinusK + k
+	alpha2MinusOne := alpha2 - 1
+
+	var result [3]float64
+	// Headlight: the light direction equals the view direction, so the half
+	// vector equals both and the Fresnel term is exactly F0.
+	distribution := ggxDistribution(ndv, alpha2, alpha2MinusOne)
+	geometry := ndv * ndv / (viewDenominator * viewDenominator)
+	specular := min(distribution*geometry*invFourNdv, 4) * 0.55
+	diffuseScale := ndv * 0.55
+	result[0] = diffuse[0]*diffuseScale + f0[0]*specular
+	result[1] = diffuse[1]*diffuseScale + f0[1]*specular
+	result[2] = diffuse[2]*diffuseScale + f0[2]*specular
+	// Fixed main light, matching applyLighting's direction and weight.
+	if ndl := max(n.dot(mainLightDirection), 0); ndl > 0 {
+		half := mainLightDirection.add(v).normalized()
+		ndh := max(n.dot(half), 0)
+		vdh := max(v.dot(half), 0)
+		distribution := ggxDistribution(ndh, alpha2, alpha2MinusOne)
+		geometry := ndv * ndl / (viewDenominator * (ndl*oneMinusK + k))
+		fresnel := fresnelSchlick(vdh, f0)
+		// D*G*F/(4*NdotV*NdotL) times NdotL and the light intensity. The
+		// specular cap keeps a near-mirror highlight from producing extreme
+		// fireflies in this unfiltered approximation.
+		specular := min(distribution*geometry*invFourNdv, 4) * 0.65
+		diffuseScale := ndl * 0.65
+		result[0] += diffuse[0]*diffuseScale + fresnel[0]*specular
+		result[1] += diffuse[1]*diffuseScale + fresnel[1]*specular
+		result[2] += diffuse[2]*diffuseScale + fresnel[2]*specular
+	}
+
+	// A dim sky above and ground below stand in for an environment probe. The
+	// diffuse ambient matches the legacy 0.22 constant; the specular part
+	// gives metals a coloured reflection that sharpens as roughness drops.
+	const ambientStrength = 0.22
+	horizon := 0.5 + 0.5*n[1]
+	environment := [3]float64{
+		0.10 + 0.30*horizon,
+		0.09 + 0.36*horizon,
+		0.08 + 0.47*horizon,
+	}
+	environmentSpecular := 0.30 + 0.45*(1-roughness)
+	ambientFresnel := fresnelSchlick(ndv, f0)
+	result[0] += diffuse[0]*ambientStrength + ambientFresnel[0]*environment[0]*environmentSpecular
+	result[1] += diffuse[1]*ambientStrength + ambientFresnel[1]*environment[1]*environmentSpecular
+	result[2] += diffuse[2]*ambientStrength + ambientFresnel[2]*environment[2]*environmentSpecular
+	return result
+}
+
+func ggxDistribution(ndh, alpha2, alpha2MinusOne float64) float64 {
+	denominator := ndh*ndh*alpha2MinusOne + 1
+	return alpha2 / (math.Pi * denominator * denominator)
+}
+
+func fresnelSchlick(cosTheta float64, f0 [3]float64) [3]float64 {
+	oneMinus := 1 - min(max(cosTheta, 0), 1)
+	squared := oneMinus * oneMinus
+	factor := squared * squared * oneMinus
+	return [3]float64{
+		f0[0] + (1-f0[0])*factor,
+		f0[1] + (1-f0[1])*factor,
+		f0[2] + (1-f0[2])*factor,
+	}
 }
 
 func applyLighting(base [3]float64, normal, faceNormal, toEye vec3) [3]float64 {
@@ -889,8 +1208,8 @@ func applyLighting(base [3]float64, normal, faceNormal, toEye vec3) [3]float64 {
 	if normal.dot(toEye) < 0 {
 		normal = normal.scale(-1)
 	}
-	headlight := math.Max(normal.dot(toEye.normalized()), 0)
-	mainLight := math.Max(normal.dot(vec3{mainLightX, mainLightY, mainLightZ}.normalized()), 0)
+	headlight := max(normal.dot(toEye), 0)
+	mainLight := max(normal.dot(mainLightDirection), 0)
 	light := 0.22 + 0.55*headlight + 0.65*mainLight
 	light = math.Min(light, 1.0)
 	return [3]float64{base[0] * light, base[1] * light, base[2] * light}
