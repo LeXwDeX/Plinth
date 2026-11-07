@@ -11,6 +11,7 @@ import { fetchCapabilityOfferings } from '@/lib/agent-offerings';
 import {
   choiceAnswerText,
   choiceCardHasDetails,
+  choiceCardOfferingCapability,
   choiceOptionQuote,
   choiceOptionTitle,
   choiceStatusText,
@@ -44,9 +45,13 @@ export function ChoiceCard({ card, busy, disabled, waiting = false, error, onAns
   const { schema } = useProductSchema();
   const questionId = useId();
   const open = card.state === 'pending';
+  // A generic card (#103) stores its choice kind in `capability`; reading it as
+  // an Offering capability sends an invalid name (the browser logs a 400), and
+  // its options are purposes, not services, so there is nothing to price.
+  const offeringCapability = choiceCardOfferingCapability(schema, card);
   const { data: offerings } = useSWR(
-    card.capability ? ['choice-card-offerings', schema.revision, card.capability] : null,
-    () => fetchCapabilityOfferings(schema, card.capability),
+    offeringCapability ? ['choice-card-offerings', schema.revision, offeringCapability] : null,
+    () => fetchCapabilityOfferings(schema, offeringCapability as string),
     { revalidateOnFocus: false },
   );
   const initial = card.options.some((option) => option.id === card.defaultOptionId) ? card.defaultOptionId : card.options[0]?.id ?? '';
@@ -54,8 +59,11 @@ export function ChoiceCard({ card, busy, disabled, waiting = false, error, onAns
   const optionRefs = useRef<Array<HTMLDivElement | null>>([]);
   const checkedId = open ? selected : card.answer?.optionId ?? '';
   const locked = busy || disabled || waiting;
-  const capability = schema.capabilities.find((item) => item.id === card.capability);
-  const step = capability?.label_cn || capability?.label || card.capability;
+  const capability = schema.capabilities.find((item) => item.id === offeringCapability);
+  const step = capability?.label_cn || capability?.label || offeringCapability || '';
+  const question = card.kind
+    ? card.question || schemaText(schema, 'ui.chat.choice.label')
+    : formatSchemaText(schemaText(schema, 'ui.chat.choice.offering_question'), { step });
   const defaultOption = card.options.find((option) => option.id === card.defaultOptionId);
   const defaultLabel = defaultOption
     ? formatSchemaText(schemaText(schema, 'ui.chat.choice.use_default'), { title: choiceOptionTitle(defaultOption, offerings) })
@@ -99,7 +107,7 @@ export function ChoiceCard({ card, busy, disabled, waiting = false, error, onAns
       <header className="flex items-center gap-2">
         <ListChecks aria-hidden className={cn('size-4 shrink-0', open ? 'text-primary' : 'text-muted-foreground')} />
         <span id={questionId} className="text-[13px] font-semibold [overflow-wrap:anywhere]">
-          {formatSchemaText(schemaText(schema, 'ui.chat.choice.offering_question'), { step })}
+          {question}
         </span>
       </header>
       <div
@@ -154,7 +162,9 @@ export function ChoiceCard({ card, busy, disabled, waiting = false, error, onAns
                 {detailed && option.description ? (
                   <span className="line-clamp-2 text-[11px] leading-snug text-muted-foreground" data-testid="chat-choice-description">{option.description}</span>
                 ) : null}
-                <span className="text-muted-foreground tabular-nums" data-testid="chat-choice-quote">{choiceOptionQuote(schema, option, offerings)}</span>
+                {card.kind ? null : (
+                  <span className="text-muted-foreground tabular-nums" data-testid="chat-choice-quote">{choiceOptionQuote(schema, option, offerings)}</span>
+                )}
               </span>
             </div>
           );

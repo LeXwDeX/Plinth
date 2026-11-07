@@ -37,22 +37,25 @@ type choiceAnswerWire struct {
 }
 
 type choiceWire struct {
-	ID                 string             `json:"id"`
-	AssistantMessageID string             `json:"assistant_message_id"`
-	Tool               string             `json:"tool"`
-	Kind               string             `json:"kind,omitempty"`
-	Capability         string             `json:"capability"`
-	Options            []choiceOptionWire `json:"options"`
-	DefaultOptionID    string             `json:"default_option_id"`
-	AllowDefault       bool               `json:"allow_default"`
-	State              string             `json:"state"`
-	Answer             *choiceAnswerWire  `json:"answer,omitempty"`
-	CreatedAt          string             `json:"created_at"`
+	ID                 string `json:"id"`
+	AssistantMessageID string `json:"assistant_message_id"`
+	Tool               string `json:"tool"`
+	Kind               string `json:"kind,omitempty"`
+	// Question is the Schema question of a generic card (#103); a
+	// provider-choice card has none.
+	Question        string             `json:"question,omitempty"`
+	Capability      string             `json:"capability"`
+	Options         []choiceOptionWire `json:"options"`
+	DefaultOptionID string             `json:"default_option_id"`
+	AllowDefault    bool               `json:"allow_default"`
+	State           string             `json:"state"`
+	Answer          *choiceAnswerWire  `json:"answer,omitempty"`
+	CreatedAt       string             `json:"created_at"`
 }
 
-func choiceToWire(choice chat.Choice) choiceWire {
+func choiceToWire(choice chat.Choice, question string) choiceWire {
 	wire := choiceWire{ID: choice.ID, AssistantMessageID: choice.AssistantMessageID, Tool: choice.ToolName,
-		Kind: choice.Kind, Capability: choice.Capability, DefaultOptionID: choice.DefaultOptionID, AllowDefault: choice.AllowDefault,
+		Kind: choice.Kind, Question: question, Capability: choice.Capability, DefaultOptionID: choice.DefaultOptionID, AllowDefault: choice.AllowDefault,
 		State: string(choice.State), CreatedAt: choice.CreatedAt.UTC().Format(time.RFC3339), Options: []choiceOptionWire{}}
 	for _, option := range choice.Options {
 		view := choiceOptionWire{ID: option.ID, ProviderName: option.ProviderName, ModelName: option.ModelName,
@@ -71,6 +74,18 @@ func choiceToWire(choice chat.Choice) choiceWire {
 	return wire
 }
 
+// choiceKindQuestion is the Schema-declared default question of a generic
+// card's kind. The Agent's per-card question is not persisted with the card,
+// so the card shows this declared one.
+func (s *Server) choiceKindQuestion(kind string) string {
+	for _, declared := range s.application.Chat.Choice.Kinds {
+		if declared.ID == kind {
+			return declared.Question
+		}
+	}
+	return ""
+}
+
 // listChatSessionChoices returns the caller's own cards of the session,
 // newest first. A foreign or missing session is the same 404.
 func (s *Server) listChatSessionChoices(writer http.ResponseWriter, request *http.Request, owner generation.OwnerID) {
@@ -86,7 +101,11 @@ func (s *Server) listChatSessionChoices(writer http.ResponseWriter, request *htt
 	}
 	wires := make([]choiceWire, 0, len(choices))
 	for _, choice := range choices {
-		wires = append(wires, choiceToWire(choice))
+		question := ""
+		if choice.Kind != "" {
+			question = s.choiceKindQuestion(choice.Kind)
+		}
+		wires = append(wires, choiceToWire(choice, question))
 	}
 	writer.Header().Set("Cache-Control", s.application.Runtime.HTTP.PrivateCacheControl)
 	writeJSON(writer, http.StatusOK, map[string]any{"choices": wires})

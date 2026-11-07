@@ -7,8 +7,9 @@ import { ChoiceCard } from '@/components/studio/choice-card';
 import { parseChoiceCards, type ChoiceCardModel } from '@/lib/chat/choice-cards';
 
 const messages = defaultCatalog.application.content.messages as Record<string, string>;
+const swrKeys = vi.hoisted(() => [] as unknown[]);
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema: defaultCatalog.application }) }));
-vi.mock('swr', () => ({ default: () => ({ data: undefined, isLoading: false }) }));
+vi.mock('swr', () => ({ default: (key: unknown) => { swrKeys.push(key); return { data: undefined, isLoading: false }; } }));
 
 const base = parseChoiceCards({ choices: [{
   id: 'choice_1', assistant_message_id: 'a1', tool: 'process_model', capability: 'mesh-segmentation',
@@ -77,6 +78,29 @@ describe('ChoiceCard (#321)', () => {
     expect(recommendedOnly).toMatch(/data-testid="chat-choice-options"[^>]*data-layout="grid"/);
     expect(recommendedOnly).not.toContain('data-testid="chat-choice-description"');
     expect(recommendedOnly).toContain('Hyper3D · Bang Rodin');
+  });
+
+  // #103/#171: a generic card's `capability` stores its kind, so pricing it as
+  // an Offering capability sent an invalid request (400) and its title read
+  // "usage_profile". It shows the Schema question and no service quote instead.
+  it('shows the generic card question, no quote, and asks for no offerings', () => {
+    const generic = parseChoiceCards({ choices: [{
+      id: 'choice_usage', assistant_message_id: 'a2', tool: 'update_production_brief',
+      kind: 'usage_profile', question: '这个 3D 模型主要用来做什么？', capability: 'usage_profile',
+      options: [
+        { id: 'game_character', label: '游戏/实时·角色', description: '控制面数并保留 UV，便于绑骨与动画。', recommended: true },
+        { id: 'display', label: '展示/渲染' },
+      ],
+      default_option_id: 'game_character', allow_default: false, state: 'pending', created_at: '2026-11-07T00:00:00Z',
+    }] })[0];
+    swrKeys.length = 0;
+    const html = render(generic);
+    expect(html).toContain('这个 3D 模型主要用来做什么？');
+    expect(html).not.toContain('usage_profile');
+    expect(html).not.toContain('data-testid="chat-choice-quote"');
+    expect(html).toContain('游戏/实时·角色');
+    expect(html).toContain('控制面数并保留 UV，便于绑骨与动画。');
+    expect(swrKeys.at(-1)).toBeNull();
   });
 
   it('keeps the familiar single-column list for an older card without rich option fields (#103)', () => {

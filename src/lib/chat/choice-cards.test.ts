@@ -6,6 +6,7 @@ import type { ProductSchema } from '@/lib/product-schema';
 import {
   choiceAnswerText,
   choiceCardHasDetails,
+  choiceCardOfferingCapability,
   choiceCardPlacement,
   choiceOptionQuote,
   choiceOptionTitle,
@@ -39,12 +40,30 @@ describe('choice cards (#321)', () => {
     const parsed = parseChoiceCards({ choices: [wire, { id: '' }, { ...wire, id: 'choice_2', options: [] }, 'x',
       { ...wire, id: 'choice_3', state: 'answered', answer: { option_id: 'hyper3d/bang/local-model', use_default: false, source: 'card', answered_at: 'now' } }] });
     expect(parsed.map((item) => item.id)).toEqual(['choice_1', 'choice_3']);
-    expect(parsed[0]).toMatchObject({ assistantMessageId: 'assistant-1', capability: 'mesh-segmentation', defaultOptionId: wire.default_option_id, allowDefault: true, state: 'pending', answer: null });
+    expect(parsed[0]).toMatchObject({ assistantMessageId: 'assistant-1', kind: '', question: '', capability: 'mesh-segmentation', defaultOptionId: wire.default_option_id, allowDefault: true, state: 'pending', answer: null });
     expect(parsed[0].options[1].nativeQuote?.total_amount).toBe('0.5');
     expect(parsed[1].answer).toEqual({ optionId: 'hyper3d/bang/local-model', useDefault: false, source: 'card' });
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ choices: [wire] }), { status: 200 }));
     expect((await fetchChoiceCards(schema, 's1', undefined, fetcher as unknown as typeof fetch))[0].id).toBe('choice_1');
     expect(fetcher).toHaveBeenCalledWith('/api/v1/chat/sessions/s1/choices', expect.anything());
+  });
+
+  // #103/#171: a generic card stores its choice kind in `capability`; it is not
+  // an Offering capability and must never be fetched as one (the 400 L0 saw).
+  it('reads a generic card kind and question and never prices its kind as a capability', () => {
+    const generic = parseChoiceCards({ choices: [{
+      id: 'choice_usage', assistant_message_id: 'a2', tool: 'update_production_brief',
+      kind: 'usage_profile', question: '这个 3D 模型主要用来做什么？', capability: 'usage_profile',
+      options: [
+        { id: 'game_character', label: '游戏/实时·角色', description: '控制面数并保留 UV', recommended: true },
+        { id: 'display', label: '展示/渲染' },
+      ],
+      default_option_id: 'game_character', allow_default: false, state: 'pending', created_at: '2026-11-07T00:00:00Z',
+    }] })[0];
+    expect(generic).toMatchObject({ kind: 'usage_profile', question: '这个 3D 模型主要用来做什么？', capability: 'usage_profile' });
+    expect(choiceCardOfferingCapability(schema, generic)).toBeNull();
+    expect(choiceCardOfferingCapability(schema, card())).toBe('mesh-segmentation');
+    expect(choiceCardOfferingCapability(schema, card({ capability: 'not-a-capability' }))).toBeNull();
   });
 
   it('names and prices each option from the public Offering list, falling back to the stored card', () => {
