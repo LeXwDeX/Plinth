@@ -13,7 +13,7 @@ import (
 
 const pendingCard = `{"choice_id":"choice_1","tool":"process_model","step":"mesh-segmentation","options":[` +
 	`{"id":"tripo/geometry/smartsegment-model","title":"Tripo3D · Tripo Smart Segmentation","arguments":{"step":"mesh-segmentation","source_task_id":"@model1","offering_id":"tripo/geometry/smartsegment-model"}},` +
-	`{"id":"hyper3d/bang/local-model","title":"Hyper3D · Bang 部件拆分与重建（本地模型）","arguments":{"step":"mesh-segmentation","source_task_id":"@model1","offering_id":"hyper3d/bang/local-model"}},` +
+	`{"id":"hyper3d/bang/local-model","title":"Hyper3D · Bang 部件拆分与重建（模型文件）","arguments":{"step":"mesh-segmentation","source_task_id":"@model1","offering_id":"hyper3d/bang/local-model"}},` +
 	`{"id":"hyper3d/bang/rodin-task","title":"Hyper3D · Bang 部件拆分与重建（Rodin 来源）","arguments":{"step":"mesh-segmentation","source_task_id":"@model1","offering_id":"hyper3d/bang/rodin-task"}}],` +
 	`"default":{"id":"tripo/geometry/smartsegment-model","title":"Tripo3D · Tripo Smart Segmentation","arguments":{"step":"mesh-segmentation","source_task_id":"@model1","use_default_offering":true}}}`
 
@@ -104,7 +104,7 @@ func TestMockMapsATypedReplyToTheOpenCard(t *testing.T) {
 		"用 Rodin 来源那个":  {"offering_id": "hyper3d/bang/rodin-task"},
 		"第二个":           {"offering_id": "hyper3d/bang/local-model"},
 		"随便，用默认的吧":      {"use_default_offering": true},
-		"本地模型的 Bang 就行": {"offering_id": "hyper3d/bang/local-model"},
+		"模型文件的 Bang 就行": {"offering_id": "hyper3d/bang/local-model"},
 	}
 	for text, want := range cases {
 		name, arguments := call(t, []agents.Message{system, {Role: "user", Content: text}})

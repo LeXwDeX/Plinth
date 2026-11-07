@@ -198,7 +198,7 @@ func TestHyper3DProcessingCandidatesDeclareQualifiedOutputContract(t *testing.T)
 		if strings.HasPrefix(id, "hyper3d/bang/") {
 			wantName, wantEnglish := "Bang 部件拆分与重建（Rodin 来源）", "Bang part splitting and reconstruction (Rodin source)"
 			if strings.HasSuffix(id, "/local-model") {
-				wantName, wantEnglish = "Bang 部件拆分与重建（本地模型）", "Bang part splitting and reconstruction (local model)"
+				wantName, wantEnglish = "Bang 部件拆分与重建（模型文件）", "Bang part splitting and reconstruction (model file)"
 			}
 			if o.ModelName != wantName || c.Application().Localization.Bundles["en"].OfferingTexts[wantName] != wantEnglish {
 				t.Fatalf("%s localized name mismatch: %q / %q", id, o.ModelName, c.Application().Localization.Bundles["en"].OfferingTexts[wantName])

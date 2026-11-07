@@ -12,7 +12,7 @@
  *
  * The script ages the Meshy source Tasks by rewriting generation_tasks.created_at in that SQLite file
  * (sqlite3 CLI), the only way to get an old Task without waiting days. Per engine and viewport:
- *  P. 加工 panel, 重贴图 on the aged model: Meshy Retexture shows 输入方式 本地模型资产（… 原任务已超过保留期）,
+ *  P. 加工 panel, 重贴图 on the aged model: Meshy Retexture shows 输入方式 平台模型资产（… 原任务已超过保留期）,
  *     the plan runs, and the frozen input names source_asset, never source_task;
  *  N. the same on a fresh Meshy model keeps 同服务商任务 (source_task);
  *  A. Agent 重贴图 on the aged model (choice card → Meshy, approval card) succeeds with source_asset;

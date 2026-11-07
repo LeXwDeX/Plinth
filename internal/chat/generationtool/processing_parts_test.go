@@ -69,7 +69,7 @@ func splitTask(id string, manifest []byte) generation.Task {
 		ID: taskID, OwnerID: "owner-a", SessionID: "session-a",
 		Capability: generation.ModelSplit, State: generation.TaskSucceeded,
 		Offering: generation.Offering{ID: "local/model-parts/split", ProviderID: "local",
-			ProviderName: "本地模型处理", ModelName: "拆解模型（本地）"},
+			ProviderName: "平台处理", ModelName: "拆解模型"},
 		CreatedAt: time.Now().UTC().Add(-time.Hour).Truncate(time.Second),
 	}
 	for ordinal := 1; ordinal <= 3; ordinal++ {

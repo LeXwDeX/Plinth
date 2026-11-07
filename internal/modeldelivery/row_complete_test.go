@@ -91,7 +91,7 @@ func TestCoverageCarriesTheProviderShortLabel(t *testing.T) {
 		t.Fatal(err)
 	}
 	gltf := formatByID(t, coverage, "gltf")
-	if gltf.Conversion == nil || gltf.Conversion.ProviderID != "local" || gltf.Conversion.ProviderShortLabel != "本地" || gltf.Conversion.CreditsMetered {
+	if gltf.Conversion == nil || gltf.Conversion.ProviderID != "local" || gltf.Conversion.ProviderShortLabel != "平台处理" || gltf.Conversion.CreditsMetered {
 		t.Fatalf("gltf conversion = %#v", gltf.Conversion)
 	}
 	fbx := formatByID(t, coverage, "fbx")

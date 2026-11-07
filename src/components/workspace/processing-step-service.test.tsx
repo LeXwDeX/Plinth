@@ -15,7 +15,7 @@ vi.mock('@/components/ui/option-select', () => ({
   </ul>,
 }));
 
-const local: OfferingWire = { id: 'hyper3d/bang/local-model', revision: '1', provider_id: 'hyper3d', provider_name: 'Hyper3D', model_id: 'bang', model_name: 'Bang（本地模型）',
+const local: OfferingWire = { id: 'hyper3d/bang/local-model', revision: '1', provider_id: 'hyper3d', provider_name: 'Hyper3D', model_id: 'bang', model_name: 'Bang（模型文件）',
   capability: 'mesh-segmentation', available: true, parameters: [], price_mode: 'native',
   default_native_quote: { version: 1, unit: 'hyper3d.credits', unit_label: 'Hyper3D credits', base_amount: '0.5', extra_amount: '0', total_amount: '0.5' } };
 const rodin: OfferingWire = { ...local, id: 'hyper3d/bang/rodin-task', model_name: 'Bang（Rodin 来源）',
@@ -27,7 +27,7 @@ describe('ProcessingStepService (#321)', () => {
   it('names the only compatible service in gray text, as before, without a selector', () => {
     const html = render(step(local, [local]));
     expect(html).toContain('data-testid="processing-provider-mesh-segmentation"');
-    expect(html).toContain('Hyper3D · Bang（本地模型）');
+    expect(html).toContain('Hyper3D · Bang（模型文件）');
     expect(html).not.toContain(messages['ui.workspace.processing.offering']);
     expect(html).not.toContain('data-option');
   });
@@ -37,13 +37,13 @@ describe('ProcessingStepService (#321)', () => {
     expect(html).toContain(`<label for="field" class="text-sm font-medium">${messages['ui.workspace.processing.offering']}</label>`);
     expect(html).toContain('data-value="hyper3d/bang/rodin-task"');
     const estimate = (amount: string) => messages['ui.pricing.default_estimate'].replace('{amount}', amount);
-    expect(html).toContain(`<li data-option="hyper3d/bang/local-model">Hyper3D · Bang（本地模型） · ${estimate('0.5 Hyper3D credits')}</li>`);
+    expect(html).toContain(`<li data-option="hyper3d/bang/local-model">Hyper3D · Bang（模型文件） · ${estimate('0.5 Hyper3D credits')}</li>`);
     expect(html).toContain(`<li data-option="hyper3d/bang/rodin-task">Hyper3D · Bang（Rodin 来源） · ${estimate('1 Hyper3D credits')}</li>`);
   });
 
   it('still names the shown service when no Offering accepts the source', () => {
     const html = render({ ...step(local, []), route: null });
-    expect(html).toContain('Hyper3D · Bang（本地模型）');
+    expect(html).toContain('Hyper3D · Bang（模型文件）');
     expect(html).not.toContain('data-option');
   });
 });

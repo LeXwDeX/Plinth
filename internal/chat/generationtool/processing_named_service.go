@@ -30,7 +30,7 @@ import (
 //     or more characters ("Bang", "Tripo", "Meshy", "Hyper3D"). Chinese
 //     descriptive names ("格式转换") are not brand names and never match.
 //   - when the message also contains the text in an Offering's model-name
-//     parentheses ("本地模型" in "Bang 部件拆分与重建（本地模型）"), only those
+//     parentheses ("模型文件" in "Bang 部件拆分与重建（模型文件）"), only those
 //     Offerings of that brand count;
 //   - a name preceded, in the same clause, by one of chat.choice
 //     mention_negations ("不要 Tripo") is a service the person declined.
@@ -97,7 +97,7 @@ func (executor *Executor) mentionsIn(ctx context.Context, command chat.ToolComma
 		}
 	}
 	for _, candidate := range named {
-		// "Bang 本地模型": a qualifier written next to the brand keeps only
+		// "Bang 模型文件": a qualifier written next to the brand keeps only
 		// the Offerings of that brand whose qualifier it is.
 		keep := true
 		if qualifier := modelQualifier(candidate.offering); qualifier == "" || !strings.Contains(text, asciiLower(qualifier)) {
