@@ -1,9 +1,8 @@
 package catalog
 
-// The P2 offerings stay disabled until a paid sample and the price are
-// verified, and Catalog.Normalize refuses disabled offerings. These tests call
-// the same normalization the kernel uses so the declared low-poly contract is
-// exercised without pretending the offering is live.
+// The P2 offerings are enabled with the officially listed native price. These
+// tests call the same normalization the kernel uses so the declared low-poly
+// contract and the extra-credit consent are exercised through Normalize.
 
 import (
 	"encoding/json"
@@ -28,7 +27,7 @@ func loadP2Offering(t *testing.T, id string) schema.Offering {
 
 func normalizeP2(t *testing.T, offering schema.Offering, changes map[string]any) (map[string]any, error) {
 	t.Helper()
-	input := map[string]any{}
+	input := map[string]any{"authorize_extra_credits": true}
 	switch offering.Capability {
 	case schema.TextTo3D:
 		input["prompt"] = "a game-ready wooden crate"
@@ -68,9 +67,12 @@ func TestTripoP2NormalizeEnforcesFaceLimitAndFastTextureRules(t *testing.T) {
 	if _, present := values["face_limit"]; present {
 		t.Fatalf("adaptive face_limit was injected: %+v", values["face_limit"])
 	}
-	if values["texture_quality"] != "extreme" || values["texture_version"] != "v3.5-20260815" ||
+	if values["texture_quality"] != "standard" || values["texture_version"] != "v3.5-20260815" ||
 		values["texture"] != true || values["pbr"] != true || values["export_uv"] != true || values["delight"] != true {
-		t.Fatalf("highest-quality defaults missing: %+v", values)
+		t.Fatalf("default P2 input missing: %+v", values)
+	}
+	if values["authorize_extra_credits"] != true {
+		t.Fatalf("the injected extra-credit consent was lost: %+v", values["authorize_extra_credits"])
 	}
 
 	if values, err = normalizeP2(t, offering, map[string]any{"face_limit": 50000}); err != nil {
@@ -139,5 +141,42 @@ func TestTripoP2TextNormalizesTheLowPolyContract(t *testing.T) {
 	}
 	if _, err := normalizeP2(t, offering, map[string]any{"quad": true, "face_limit": 25001}); err == nil {
 		t.Fatal("text P2 accepted a quad face_limit above 25000")
+	}
+}
+
+func TestTripoP2NormalizeRequiresExtraCreditConsent(t *testing.T) {
+	offering := loadP2Offering(t, "tripo/tripo-p2/text-to-3d")
+	input := map[string]any{"prompt": "a game-ready wooden crate"}
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := normalizeInput(offering, encoded); err == nil || !strings.Contains(err.Error(), "额外积分") {
+		t.Fatalf("normalize accepted extra credits without consent: %v", err)
+	}
+	input["authorize_extra_credits"] = true
+	encoded, err = json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := normalizeInput(offering, encoded); err != nil {
+		t.Fatalf("normalize refused explicit consent: %v", err)
+	}
+	input["authorize_extra_credits"] = false
+	encoded, err = json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := normalizeInput(offering, encoded); err == nil {
+		t.Fatal("normalize accepted an explicit refusal")
+	}
+	// The base price has no extra component, so an untextured model needs no consent.
+	untextured := map[string]any{"prompt": "a game-ready wooden crate", "texture": false}
+	encoded, err = json.Marshal(untextured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := normalizeInput(offering, encoded); err != nil {
+		t.Fatalf("normalize refused an untextured model without consent: %v", err)
 	}
 }

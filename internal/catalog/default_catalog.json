@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-06.v1-4-1-batch.2",
+    "revision": "2026-11-08.192-p2-pricing.1",
     "terminology": {
       "user_facing": [
         {
@@ -7987,23 +7987,29 @@
             "description": "游戏或实时应用中的角色；控制面数并保留 UV，便于绑骨、动画与引擎导入。",
             "recommended_offerings": {
               "text-to-3d": [
-                "tripo/tripo-p2/text-to-3d",
-                "meshy/meshy-t2.5/text-to-3d"
+                "meshy/meshy-t2.5/text-to-3d",
+                "tripo/tripo-p2/text-to-3d"
               ],
               "image-to-3d": [
-                "tripo/tripo-p2/image-to-3d",
-                "meshy/meshy-t2.5/image-to-3d"
+                "meshy/meshy-t2.5/image-to-3d",
+                "tripo/tripo-p2/image-to-3d"
               ],
               "multiview-to-3d": [
+                "tripo/tripo-v3.1-multiview/image-to-3d",
                 "tripo/tripo-p2-multiview/image-to-3d"
               ]
             },
             "parameter_overrides": {
               "tripo/tripo-p2/text-to-3d": {
-                "face_limit": 20000
+                "face_limit": 20000,
+                "texture_quality": "standard"
               },
               "tripo/tripo-p2/image-to-3d": {
-                "face_limit": 20000
+                "face_limit": 20000,
+                "texture_quality": "standard"
+              },
+              "tripo/tripo-p2-multiview/image-to-3d": {
+                "texture_quality": "standard"
               },
               "meshy/meshy-t2.5/text-to-3d": {
                 "target_polycount": 20000,
@@ -8014,7 +8020,7 @@
                 "pose_mode": "a-pose"
               }
             },
-            "reason": "角色用于实时渲染，需要受控面数与 UV；优先可设置低面数的 Tripo P2，其次使用智能拓扑的 Meshy T2.5。",
+            "reason": "角色用于实时渲染，需要受控面数与 UV；先用成本更低的 Meshy T2.5，P2 作为可设置低面数的备选。",
             "pipeline": [
               {
                 "capability": "rigging"
@@ -8039,18 +8045,28 @@
             "description": "游戏或实时应用中的道具、场景小件；面数更低，保留 UV。",
             "recommended_offerings": {
               "text-to-3d": [
-                "tripo/tripo-p2/text-to-3d",
-                "meshy/meshy-t2.5/text-to-3d"
+                "meshy/meshy-t2.5/text-to-3d",
+                "tripo/tripo-p2/text-to-3d"
               ],
               "image-to-3d": [
-                "tripo/tripo-p2/image-to-3d",
-                "meshy/meshy-t2.5/image-to-3d"
+                "meshy/meshy-t2.5/image-to-3d",
+                "tripo/tripo-p2/image-to-3d"
               ],
               "multiview-to-3d": [
+                "tripo/tripo-v3.1-multiview/image-to-3d",
                 "tripo/tripo-p2-multiview/image-to-3d"
               ]
             },
             "parameter_overrides": {
+              "tripo/tripo-p2/text-to-3d": {
+                "texture_quality": "standard"
+              },
+              "tripo/tripo-p2/image-to-3d": {
+                "texture_quality": "standard"
+              },
+              "tripo/tripo-p2-multiview/image-to-3d": {
+                "texture_quality": "standard"
+              },
               "meshy/meshy-t2.5/text-to-3d": {
                 "target_polycount": 8000
               },
@@ -8058,7 +8074,7 @@
                 "target_polycount": 8000
               }
             },
-            "reason": "道具与场景件的面数预算更低；优先 P2 的自适应低模，其次 Meshy T2.5。",
+            "reason": "道具与场景件的面数预算更低；先用 Meshy T2.5，P2 作为自适应低模的备选。",
             "pipeline": [
               {
                 "capability": "mesh-segmentation"
@@ -8080,23 +8096,29 @@
             "description": "网页或 AR 中实时展示的模型；控制面数并保留 UV。",
             "recommended_offerings": {
               "text-to-3d": [
-                "tripo/tripo-p2/text-to-3d",
-                "meshy/meshy-7.1/text-to-3d"
+                "meshy/meshy-7.1/text-to-3d",
+                "tripo/tripo-p2/text-to-3d"
               ],
               "image-to-3d": [
-                "tripo/tripo-p2/image-to-3d",
-                "meshy/meshy-7.1/image-to-3d"
+                "meshy/meshy-7.1/image-to-3d",
+                "tripo/tripo-p2/image-to-3d"
               ],
               "multiview-to-3d": [
+                "tripo/tripo-v3.1-multiview/image-to-3d",
                 "tripo/tripo-p2-multiview/image-to-3d"
               ]
             },
             "parameter_overrides": {
               "tripo/tripo-p2/text-to-3d": {
-                "face_limit": 40000
+                "face_limit": 40000,
+                "texture_quality": "standard"
               },
               "tripo/tripo-p2/image-to-3d": {
-                "face_limit": 40000
+                "face_limit": 40000,
+                "texture_quality": "standard"
+              },
+              "tripo/tripo-p2-multiview/image-to-3d": {
+                "texture_quality": "standard"
               },
               "meshy/meshy-7.1/text-to-3d": {
                 "target_polycount": 50000,
@@ -8109,7 +8131,7 @@
                 "texture_resolution": "2k"
               }
             },
-            "reason": "Web 与 AR 需要更小的面数和纹理；优先 Tripo P2，其次 Meshy 7.1 的低面数与 2K 纹理。",
+            "reason": "Web 与 AR 需要更小的面数和纹理；先用 Meshy 7.1 的低面数与 2K 纹理，P2 作为备选。",
             "budget": {
               "max_triangles": 100000,
               "max_texture_size": 2048,
@@ -16772,13 +16794,13 @@
             "chat.model3d_usage.profiles[id=render].reason": "Display does not limit the triangle count; prefer full detail and looks, and use the available high-fidelity models.",
             "chat.model3d_usage.profiles[id=game_character].label": "Game / real-time · character",
             "chat.model3d_usage.profiles[id=game_character].description": "A character for a game or real-time app; the triangle count is controlled and UVs are kept for rigging, animation and engine import.",
-            "chat.model3d_usage.profiles[id=game_character].reason": "A character rendered in real time needs a controlled triangle count and UVs; prefer Tripo P2, which can set a low face limit, then Meshy T2.5 with smart topology.",
+            "chat.model3d_usage.profiles[id=game_character].reason": "A character rendered in real time needs a controlled triangle count and UVs; Meshy T2.5 comes first for its lower cost, with P2 as the alternative that can set a low face limit.",
             "chat.model3d_usage.profiles[id=game_prop].label": "Game / real-time · prop and scene piece",
             "chat.model3d_usage.profiles[id=game_prop].description": "A prop or scene piece for a game or real-time app; a lower triangle count, with UVs kept.",
-            "chat.model3d_usage.profiles[id=game_prop].reason": "Props and scene pieces have a lower triangle budget; prefer P2's adaptive low-poly output, then Meshy T2.5.",
+            "chat.model3d_usage.profiles[id=game_prop].reason": "Props and scene pieces have a lower triangle budget; Meshy T2.5 comes first, with P2 as the adaptive low-poly alternative.",
             "chat.model3d_usage.profiles[id=web_ar].label": "Web / AR display",
             "chat.model3d_usage.profiles[id=web_ar].description": "A model shown live on the web or in AR; the triangle count is controlled and UVs are kept.",
-            "chat.model3d_usage.profiles[id=web_ar].reason": "Web and AR need fewer triangles and smaller textures; prefer Tripo P2, then Meshy 7.1 with its low triangle count and 2K textures.",
+            "chat.model3d_usage.profiles[id=web_ar].reason": "Web and AR need fewer triangles and smaller textures; Meshy 7.1's low triangle count and 2K textures come first, with P2 as an alternative.",
             "chat.model3d_usage.profiles[id=print].label": "3D printing",
             "chat.model3d_usage.profiles[id=print].description": "A solid model for 3D printing; full detail is kept and a watertight mesh is required so it can be sliced.",
             "chat.model3d_usage.profiles[id=print].reason": "Printing needs full detail and a watertight mesh; prefer Meshy 7.1's high-detail output, then Tripo v3.1.",
@@ -18221,7 +18243,7 @@
             "网格类型": "Mesh type",
             "鼓劲欢呼 (Motivational_Cheer)": "Motivational cheer",
             "P 系列官方默认 v3.0；本服务明确使用最新 v3.5，以启用 delight 与 fast 纹理质量。版本与纹理质量不匹配时上游返回错误 1004。": "The P series defaults to v3.0; this service explicitly uses the latest v3.5 to enable delight and fast texture quality. A version/texture-quality mismatch makes the upstream return error 1004.",
-            "P2 独有的四边面拓扑输出，适合游戏与实时资产后处理。官方 P 页面未写明开启四边面输出时的文件格式；本服务仍要求交付可预览的 GLB 主模型，启用前须用真实样本核对。": "P2-only quad topology for game and real-time asset post-processing. The official P page does not state the output file format when quad output is enabled; this service still requires a previewable GLB as the main model, so a real sample must confirm it before enabling.",
+            "P2 独有的四边面拓扑输出，适合游戏与实时资产后处理。官方 P 页面的示例在开启四边面输出时仍返回 .glb；本服务仍要求交付可预览的 GLB 主模型，真实四边面样本尚未核对。": "P2-only quad topology for game and real-time asset post-processing. The official P page example still returns .glb with quad output enabled; this service still requires a previewable GLB as the main model, and a real quad sample has not been verified yet.",
             "Tripo P2 低模 (P2-20260801)": "Tripo P2 low-poly (P2-20260801)",
             "Tripo P2 多视图低模 (P2-20260801)": "Tripo P2 multiview low-poly (P2-20260801)",
             "Tripo P2 文生低模 (P2-20260801)": "Tripo P2 text-to-3D low-poly (P2-20260801)",
@@ -18231,14 +18253,13 @@
             "光照去除": "Delight",
             "去除输入图片中的光照影响，只有 v3.5 纹理模型读取该参数；默认开启。": "Removes lighting from the input image. Only the v3.5 texture model reads this parameter; on by default.",
             "快速 (fast，需 v3.5 纹理模型，与标准同价)": "Fast (requires the v3.5 texture model; same price as standard)",
-            "极致 (extreme，最高纹理档)": "Extreme (highest texture tier)",
             "纹理质量 fast 仅支持纹理模型版本 v3.5-20260815": "Fast texture quality requires texture model version v3.5-20260815",
             "自动换算到真实世界的米制尺寸。": "Converts the model to real-world metric size.",
             "默认三角面；Agent 可在需要四边面拓扑（例如后续细分或手动重拓扑）时说明理由并开启，同时遵守四边面 25000 面数上限。": "Triangles by default; the Agent may enable quad output with a stated reason (for later subdivision or manual retopology) and must stay within the 25,000-quad limit.",
             "P2 面向游戏与实时资产，输出低多边形、拓扑干净的模型。默认不设置面数，由上游自适应；官方建议简单模型约从 150 起步、复杂模型约从 250 起步。三角面 48–50000；四边面输出开启时 48–25000。Agent 指定具体面数时须说明理由。": "P2 targets game and real-time assets with a low-polygon, clean-topology model. The face count is not set by default and the upstream chooses it adaptively; the official guidance starts around 150 for simple models and 250 for complex ones. It supports 48–50,000 triangles, or 48–25,000 when quad output is on. The Agent must state a reason when setting a specific count.",
             "默认使用最新纹理模型；Agent 可基于兼容性需求说明理由并改用其他受支持版本。": "Uses the latest texture model by default; the Agent may switch to another supported version with a stated compatibility reason.",
-            "默认使用最高的 extreme 纹理档。快速档仅支持纹理模型版本 v3.5-20260815；官方说明 fast 与 standard 同价，extreme 高于 detailed。P2 价格待核实。": "Uses the highest extreme texture tier by default. Fast requires texture model version v3.5-20260815; the official notes say fast costs the same as standard and extreme costs more than detailed. P2 pricing is pending verification.",
-            "默认使用最高纹理档；Agent 可在实时资产或草稿用途下说明理由并降低档位。": "Uses the highest texture tier by default; the Agent may lower it with a stated reason for real-time assets or drafts.",
+            "默认使用标准纹理档。快速档仅支持纹理模型版本 v3.5-20260815；官方说明 fast 与 standard 同价。detailed 与 extreme 档的官方加价未单列，本批暂不启用。": "Uses the standard texture tier by default. Fast requires texture model version v3.5-20260815; the official notes say fast costs the same as standard. The official surcharge for the detailed and extreme tiers is not listed separately, so this batch does not enable them.",
+            "默认使用标准纹理档；Agent 可在实时资产或草稿用途下说明理由并降低到快速档。": "Uses the standard texture tier by default; the Agent may lower it to fast with a stated reason for real-time assets or drafts.",
             "默认关闭，避免把残缺主体补全成完整物体；Agent 可基于输入质量的明确理由开启。": "Off by default so partial subjects are not completed into whole objects; the Agent may turn it on with a clear reason about input quality.",
             "默认启用 PBR 材质以交付完整材质；Agent 可基于只需要基础贴图的用途说明理由并关闭。": "PBR materials are on by default to deliver complete materials; the Agent may turn them off with a stated reason when only basic textures are needed.",
             "默认启用 PBR 材质；PBR 需要纹理，关闭纹理时自动关闭。": "PBR materials are on by default; PBR requires textures and is turned off automatically when textures are off.",
@@ -26282,7 +26303,7 @@
     },
     {
       "id": "tripo/tripo-p2/image-to-3d",
-      "revision": "2026-11-04.103.1",
+      "revision": "2026-11-08.192.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -26291,7 +26312,7 @@
       "model_name": "Tripo P2 低模 (P2-20260801)",
       "capability": "image-to-3d",
       "adapter_key": "tripo.v3",
-      "enabled": false,
+      "enabled": true,
       "features": [
         "advanced-model-form"
       ],
@@ -26396,7 +26417,7 @@
           "name": "texture_quality",
           "label": "纹理质量",
           "type": "select",
-          "default": "extreme",
+          "default": "standard",
           "options": [
             {
               "value": "fast",
@@ -26405,23 +26426,15 @@
             {
               "value": "standard",
               "label": "标准 (standard)"
-            },
-            {
-              "value": "detailed",
-              "label": "精细 (detailed)"
-            },
-            {
-              "value": "extreme",
-              "label": "极致 (extreme，最高纹理档)"
             }
           ],
-          "description": "默认使用最高的 extreme 纹理档。快速档仅支持纹理模型版本 v3.5-20260815；官方说明 fast 与 standard 同价，extreme 高于 detailed。P2 价格待核实。",
+          "description": "默认使用标准纹理档。快速档仅支持纹理模型版本 v3.5-20260815；官方说明 fast 与 standard 同价。detailed 与 extreme 档的官方加价未单列，本批暂不启用。",
           "presentation": {
             "surface": "readonly",
             "control": "select"
           },
           "adjustment_policy": "advised",
-          "adjustment_reason": "默认使用最高纹理档；Agent 可在实时资产或草稿用途下说明理由并降低档位。"
+          "adjustment_reason": "默认使用标准纹理档；Agent 可在实时资产或草稿用途下说明理由并降低到快速档。"
         },
         {
           "name": "texture_version",
@@ -26534,7 +26547,7 @@
           "label": "四边面输出",
           "type": "boolean",
           "default": false,
-          "description": "P2 独有的四边面拓扑输出，适合游戏与实时资产后处理。官方 P 页面未写明开启四边面输出时的文件格式；本服务仍要求交付可预览的 GLB 主模型，启用前须用真实样本核对。",
+          "description": "P2 独有的四边面拓扑输出，适合游戏与实时资产后处理。官方 P 页面的示例在开启四边面输出时仍返回 .glb；本服务仍要求交付可预览的 GLB 主模型，真实四边面样本尚未核对。",
           "presentation": {
             "surface": "readonly",
             "control": "boolean"
@@ -26598,6 +26611,16 @@
           },
           "adjustment_policy": "advised",
           "adjustment_reason": "默认生成 UV 展开以支持后续贴图编辑；Agent 可基于不需要 UV 的用途说明理由并关闭。"
+        },
+        {
+          "name": "authorize_extra_credits",
+          "label": "同意完整 Tripo 原生积分报价",
+          "type": "boolean",
+          "description": "同意冻结报价中的生成质量附加项及所选格式转换；由执行批准卡片表达，不作为设置项展示。",
+          "presentation": {
+            "surface": "hidden",
+            "control": "boolean"
+          }
         }
       ],
       "input_rules": [
@@ -26634,6 +26657,25 @@
         "observe": true,
         "interval_seconds": 60,
         "deadline_seconds": 86400
+      },
+      "native_pricing": {
+        "version": 1,
+        "unit": "tripo.credit",
+        "unit_label": "Tripo credits",
+        "base_amount": "100",
+        "components": [
+          {
+            "id": "standard_texture",
+            "label": "标准纹理",
+            "amount": "10",
+            "when": {
+              "parameter": "texture",
+              "operator": "truthy"
+            }
+          }
+        ],
+        "consent_parameter": "authorize_extra_credits",
+        "max_authorized_extra_amount": "10"
       },
       "asset_hosts": [
         "tripo3d.com",
@@ -26693,11 +26735,13 @@
             ]
           }
         ],
-        "pricing_status": "pending-verification",
+        "pricing_status": "published",
         "pricing_source": "https://developers.tripo3d.ai/en/pricing",
+        "pricing_checked_at": "2026-11-08",
+        "pricing_note": "Official P Series pricing checked 2026-11-08: base 100 credits, standard texture +10 credits. The detailed and extreme texture tiers are not enabled because their surcharge is not listed separately.",
         "contract_scope": "constructed-from-docs",
         "contract_source": "https://developers.tripo3d.ai/en/docs/generation-image-to-model/p",
-        "contract_checked_at": "2026-11-04"
+        "contract_checked_at": "2026-11-08"
       },
       "default": false,
       "domain": "model-3d",
@@ -26706,7 +26750,7 @@
     },
     {
       "id": "tripo/tripo-p2-multiview/image-to-3d",
-      "revision": "2026-11-04.103.1",
+      "revision": "2026-11-08.192.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -26715,7 +26759,7 @@
       "model_name": "Tripo P2 多视图低模 (P2-20260801)",
       "capability": "image-to-3d",
       "adapter_key": "tripo.v3",
-      "enabled": false,
+      "enabled": true,
       "features": [
         "advanced-model-form"
       ],
@@ -26839,7 +26883,7 @@
           "name": "texture_quality",
           "label": "纹理质量",
           "type": "select",
-          "default": "extreme",
+          "default": "standard",
           "options": [
             {
               "value": "fast",
@@ -26848,23 +26892,15 @@
             {
               "value": "standard",
               "label": "标准 (standard)"
-            },
-            {
-              "value": "detailed",
-              "label": "精细 (detailed)"
-            },
-            {
-              "value": "extreme",
-              "label": "极致 (extreme，最高纹理档)"
             }
           ],
-          "description": "默认使用最高的 extreme 纹理档。快速档仅支持纹理模型版本 v3.5-20260815；官方说明 fast 与 standard 同价，extreme 高于 detailed。P2 价格待核实。",
+          "description": "默认使用标准纹理档。快速档仅支持纹理模型版本 v3.5-20260815；官方说明 fast 与 standard 同价。detailed 与 extreme 档的官方加价未单列，本批暂不启用。",
           "presentation": {
             "surface": "readonly",
             "control": "select"
           },
           "adjustment_policy": "advised",
-          "adjustment_reason": "默认使用最高纹理档；Agent 可在实时资产或草稿用途下说明理由并降低档位。"
+          "adjustment_reason": "默认使用标准纹理档；Agent 可在实时资产或草稿用途下说明理由并降低到快速档。"
         },
         {
           "name": "texture_version",
@@ -26977,7 +27013,7 @@
           "label": "四边面输出",
           "type": "boolean",
           "default": false,
-          "description": "P2 独有的四边面拓扑输出，适合游戏与实时资产后处理。官方 P 页面未写明开启四边面输出时的文件格式；本服务仍要求交付可预览的 GLB 主模型，启用前须用真实样本核对。",
+          "description": "P2 独有的四边面拓扑输出，适合游戏与实时资产后处理。官方 P 页面的示例在开启四边面输出时仍返回 .glb；本服务仍要求交付可预览的 GLB 主模型，真实四边面样本尚未核对。",
           "presentation": {
             "surface": "readonly",
             "control": "boolean"
@@ -27041,6 +27077,16 @@
           },
           "adjustment_policy": "advised",
           "adjustment_reason": "默认生成 UV 展开以支持后续贴图编辑；Agent 可基于不需要 UV 的用途说明理由并关闭。"
+        },
+        {
+          "name": "authorize_extra_credits",
+          "label": "同意完整 Tripo 原生积分报价",
+          "type": "boolean",
+          "description": "同意冻结报价中的生成质量附加项及所选格式转换；由执行批准卡片表达，不作为设置项展示。",
+          "presentation": {
+            "surface": "hidden",
+            "control": "boolean"
+          }
         }
       ],
       "input_rules": [
@@ -27077,6 +27123,25 @@
         "observe": true,
         "interval_seconds": 60,
         "deadline_seconds": 86400
+      },
+      "native_pricing": {
+        "version": 1,
+        "unit": "tripo.credit",
+        "unit_label": "Tripo credits",
+        "base_amount": "100",
+        "components": [
+          {
+            "id": "standard_texture",
+            "label": "标准纹理",
+            "amount": "10",
+            "when": {
+              "parameter": "texture",
+              "operator": "truthy"
+            }
+          }
+        ],
+        "consent_parameter": "authorize_extra_credits",
+        "max_authorized_extra_amount": "10"
       },
       "asset_hosts": [
         "tripo3d.com",
@@ -27137,11 +27202,13 @@
           }
         ],
         "reference_wire": "multiview_inputs",
-        "pricing_status": "pending-verification",
+        "pricing_status": "published",
         "pricing_source": "https://developers.tripo3d.ai/en/pricing",
+        "pricing_checked_at": "2026-11-08",
+        "pricing_note": "Official P Series pricing checked 2026-11-08: base 100 credits, standard texture +10 credits. The detailed and extreme texture tiers are not enabled because their surcharge is not listed separately.",
         "contract_scope": "constructed-from-docs",
         "contract_source": "https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/p",
-        "contract_checked_at": "2026-11-04"
+        "contract_checked_at": "2026-11-08"
       },
       "default": false,
       "domain": "model-3d",
@@ -27151,7 +27218,7 @@
     },
     {
       "id": "tripo/tripo-p2/text-to-3d",
-      "revision": "2026-11-04.103.1",
+      "revision": "2026-11-08.192.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -27160,7 +27227,7 @@
       "model_name": "Tripo P2 文生低模 (P2-20260801)",
       "capability": "text-to-3d",
       "adapter_key": "tripo.v3",
-      "enabled": false,
+      "enabled": true,
       "features": [
         "advanced-model-form"
       ],
@@ -27251,7 +27318,7 @@
           "name": "texture_quality",
           "label": "纹理质量",
           "type": "select",
-          "default": "extreme",
+          "default": "standard",
           "options": [
             {
               "value": "fast",
@@ -27260,23 +27327,15 @@
             {
               "value": "standard",
               "label": "标准 (standard)"
-            },
-            {
-              "value": "detailed",
-              "label": "精细 (detailed)"
-            },
-            {
-              "value": "extreme",
-              "label": "极致 (extreme，最高纹理档)"
             }
           ],
-          "description": "默认使用最高的 extreme 纹理档。快速档仅支持纹理模型版本 v3.5-20260815；官方说明 fast 与 standard 同价，extreme 高于 detailed。P2 价格待核实。",
+          "description": "默认使用标准纹理档。快速档仅支持纹理模型版本 v3.5-20260815；官方说明 fast 与 standard 同价。detailed 与 extreme 档的官方加价未单列，本批暂不启用。",
           "presentation": {
             "surface": "readonly",
             "control": "select"
           },
           "adjustment_policy": "advised",
-          "adjustment_reason": "默认使用最高纹理档；Agent 可在实时资产或草稿用途下说明理由并降低档位。"
+          "adjustment_reason": "默认使用标准纹理档；Agent 可在实时资产或草稿用途下说明理由并降低到快速档。"
         },
         {
           "name": "texture_version",
@@ -27336,7 +27395,7 @@
           "label": "四边面输出",
           "type": "boolean",
           "default": false,
-          "description": "P2 独有的四边面拓扑输出，适合游戏与实时资产后处理。官方 P 页面未写明开启四边面输出时的文件格式；本服务仍要求交付可预览的 GLB 主模型，启用前须用真实样本核对。",
+          "description": "P2 独有的四边面拓扑输出，适合游戏与实时资产后处理。官方 P 页面的示例在开启四边面输出时仍返回 .glb；本服务仍要求交付可预览的 GLB 主模型，真实四边面样本尚未核对。",
           "presentation": {
             "surface": "readonly",
             "control": "boolean"
@@ -27400,6 +27459,16 @@
           },
           "adjustment_policy": "advised",
           "adjustment_reason": "默认生成 UV 展开以支持后续贴图编辑；Agent 可基于不需要 UV 的用途说明理由并关闭。"
+        },
+        {
+          "name": "authorize_extra_credits",
+          "label": "同意完整 Tripo 原生积分报价",
+          "type": "boolean",
+          "description": "同意冻结报价中的生成质量附加项及所选格式转换；由执行批准卡片表达，不作为设置项展示。",
+          "presentation": {
+            "surface": "hidden",
+            "control": "boolean"
+          }
         }
       ],
       "input_rules": [
@@ -27436,6 +27505,25 @@
         "observe": true,
         "interval_seconds": 60,
         "deadline_seconds": 86400
+      },
+      "native_pricing": {
+        "version": 1,
+        "unit": "tripo.credit",
+        "unit_label": "Tripo credits",
+        "base_amount": "100",
+        "components": [
+          {
+            "id": "standard_texture",
+            "label": "标准纹理",
+            "amount": "10",
+            "when": {
+              "parameter": "texture",
+              "operator": "truthy"
+            }
+          }
+        ],
+        "consent_parameter": "authorize_extra_credits",
+        "max_authorized_extra_amount": "10"
       },
       "asset_hosts": [
         "tripo3d.com",
@@ -27494,11 +27582,13 @@
             ]
           }
         ],
-        "pricing_status": "pending-verification",
+        "pricing_status": "published",
         "pricing_source": "https://developers.tripo3d.ai/en/pricing",
+        "pricing_checked_at": "2026-11-08",
+        "pricing_note": "Official P Series pricing checked 2026-11-08: base 100 credits, standard texture +10 credits. The detailed and extreme texture tiers are not enabled because their surcharge is not listed separately.",
         "contract_scope": "constructed-from-docs",
         "contract_source": "https://developers.tripo3d.ai/en/docs/generation-text-to-model/p",
-        "contract_checked_at": "2026-11-04"
+        "contract_checked_at": "2026-11-08"
       },
       "default": false,
       "domain": "model-3d",

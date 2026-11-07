@@ -369,6 +369,10 @@ func TestDefaultCatalogKeepsOtherOfferingsLegacy(t *testing.T) {
 		"tripo/tripo-v3.1-full/text-to-3d":       true,
 		"tripo/tripo-v3.1-full/image-to-3d":      true,
 		"tripo/tripo-v3.1-multiview/image-to-3d": true,
+		// #192 Tripo P2: one required model plus the background preview.
+		"tripo/tripo-p2/image-to-3d":           true,
+		"tripo/tripo-p2-multiview/image-to-3d": true,
+		"tripo/tripo-p2/text-to-3d":            true,
 		// #188 Rodin: one required PBR GLB plus the background preview.
 		"hyper3d/rodin-gen-2.5/text-to-3d":  true,
 		"hyper3d/rodin-gen-2.5/image-to-3d": true,

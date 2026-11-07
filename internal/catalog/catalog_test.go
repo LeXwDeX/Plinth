@@ -1949,9 +1949,10 @@ func TestDefaultCatalogCoversCurrentProviderInventory(t *testing.T) {
 	// Smart Segmentation image/model); Decimate quad stays disabled. #329 adds
 	// Meshy T2.5 (Smart Topology) text and image to 3D. #330 adds Meshy Convert.
 	// #100: the 17 Meshy Creative Lab Offerings stay defined but are not offered
-	// (enabled=false), so only the other 55 are listed. #103 adds the two free
-	// local model-parts Offerings (split and merge).
-	if len(offerings) != 55 {
+	// (enabled=false), so only the other 58 are listed. #103 adds the two free
+	// local model-parts Offerings (split and merge). #192 enables the three
+	// Tripo P2 low-poly Offerings with the official P Series price.
+	if len(offerings) != 58 {
 		t.Fatalf("offering count = %d", len(offerings))
 	}
 	for _, id := range []generation.OfferingID{

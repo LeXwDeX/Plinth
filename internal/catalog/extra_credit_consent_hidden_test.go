@@ -64,8 +64,9 @@ func TestExtraCreditConsentParameterIsHiddenOnEveryOffering(t *testing.T) {
 		}
 	}
 	// #185 2026-10-21: both Smart Segmentation candidates now freeze their
-	// five private exports behind the same hidden consent parameter.
-	if declared != 20 {
-		t.Fatalf("%d Offerings declare a consent parameter, twenty priced offerings are expected", declared)
+	// five private exports behind the same hidden consent parameter. #192 adds
+	// the three priced Tripo P2 Offerings.
+	if declared != 23 {
+		t.Fatalf("%d Offerings declare a consent parameter, twenty-three priced offerings are expected", declared)
 	}
 }
