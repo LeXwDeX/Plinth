@@ -129,6 +129,8 @@ import { sameData } from '@/lib/core/keep-unchanged';
 
 const RESIZE_KEY_STEP = 16;
 const SCROLL_SETTLE_MILLISECONDS = 400;
+/** A stored turn that cannot be read back must not keep the live buffer and the stop button forever. */
+const STREAM_SETTLE_FALLBACK_MILLISECONDS = 5000;
 const APPROVAL_CLOCK_MILLISECONDS = 30_000;
 // A late approval whose task id is not in the answer yet: look the task up again after these delays.
 const LATE_TASK_HYDRATE_MILLISECONDS = [1_500, 4_000, 8_000];
@@ -266,6 +268,7 @@ export function ChatColumn() {
     setActiveSession,
     setMessages,
     applyNewestMessagePage,
+    settleStreaming,
     applyOlderMessagePage,
     updateSessionTitle,
     initStreaming,
@@ -812,13 +815,30 @@ export function ChatColumn() {
   const pendingCount = pending.pendingCount + (consentAwaiting && consent.pending ? 1 : 0);
   const lastDisplayed = displayMessages[displayMessages.length - 1];
   const [floatingRef, floatingHeight] = useElementHeight<HTMLDivElement>();
-  const { containerRef: messagesRef, endRef: messagesEndRef, showLatest, jumpToLatest, onScroll: onMessagesScroll } = useChatScrollFollow({
+  const {
+    containerRef: messagesRef, endRef: messagesEndRef, showLatest, jumpToLatest, keepPinned, onScroll: onMessagesScroll,
+  } = useChatScrollFollow({
     // The newest message, not the count: earlier pages put in front must not move the reader.
-    changeKey: [lastDisplayed?.id ?? '', threeViews.length, statusText, pendingCount, collapsed, queuedTurns.length].join('|'),
+    // #177: streamed text and pictures grow the last message without changing its id; a reader at the
+    // end must keep seeing it, otherwise the whole drift is corrected at once when the turn settles.
+    changeKey: [
+      lastDisplayed?.id ?? '', threeViews.length, pendingCount, collapsed, queuedTurns.length,
+      streamBuf?.textContent.length ?? 0, streamBuf?.images.length ?? 0,
+    ].join('|'),
+    // #177: the status line appears and goes away without animation; only real content is followed smoothly.
+    pinKey: statusText,
     ownMessage: lastDisplayed?.role === 'user',
     resetKey: activeSessionId,
     settleMilliseconds: SCROLL_SETTLE_MILLISECONDS,
   });
+  // #177: the floating task cards are absolutely positioned; the list pads by their measured height.
+  // Re-pin in the same layout pass so that padding change never shows as a jump.
+  const lastFloatingHeight = useRef(floatingHeight);
+  useLayoutEffect(() => {
+    if (lastFloatingHeight.current === floatingHeight) return;
+    lastFloatingHeight.current = floatingHeight;
+    keepPinned();
+  }, [floatingHeight, keepPinned]);
 
   // Earlier messages are read only when asked for; the view stays on the message the reader was looking at.
   const [earlierState, setEarlierState] = useState<'idle' | 'loading' | 'failed'>('idle');
@@ -1217,12 +1237,25 @@ export function ChatColumn() {
             if (startingRef.current === starting) startingRef.current = null;
             closeEventSource?.();
             removeAbortListener?.();
-            finishStreaming(sessionId);
             if (controllers.current.get(sessionId) === controller) controllers.current.delete(sessionId);
+            // #177: read the stored turn first and swap it in place of the buffer in one update. Clearing
+            // the buffer first dropped the whole turn for a frame, shrinking the list and jumping the view.
+            let settled = false;
+            const settleFallback = window.setTimeout(() => {
+              if (!settled) finishStreaming(sessionId);
+            }, STREAM_SETTLE_FALLBACK_MILLISECONDS);
             chatClient
               .listMessagePage(sessionId, { limit: messagePageSize })
-              .then((page) => applyNewestMessagePage(sessionId, page))
-              .catch(() => {});
+              .then((page) => {
+                settled = true;
+                window.clearTimeout(settleFallback);
+                settleStreaming(sessionId, page);
+              })
+              .catch(() => {
+                settled = true;
+                window.clearTimeout(settleFallback);
+                finishStreaming(sessionId);
+              });
             void refreshApproval();
             void pending.refresh();
             // The Agent may have opened, or answered from a typed reply, a choice card (#321).
@@ -1254,6 +1287,7 @@ export function ChatColumn() {
       chatClient,
       connectEventSource,
       finishStreaming,
+      settleStreaming,
       initStreaming,
       modelChoices,
       modelsError,

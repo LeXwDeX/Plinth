@@ -202,7 +202,28 @@ describe('the conversation is read a page at a time', () => {
     expect(column).toContain('applyOlderMessagePage(sessionId, page);');
     expect(column).toContain('container.scrollTop = container.scrollHeight - keepDistanceFromEnd.current;');
     // Following the newest message keys on its id, so a page put in front does not count as new content.
-    expect(column).toContain("changeKey: [lastDisplayed?.id ?? '', threeViews.length");
+    expect(column).toMatch(/changeKey: \[\s*lastDisplayed\?\.id \?\? '', threeViews\.length/);
+  });
+
+  it('pins status and floating-card height changes without animating them (#177)', () => {
+    const keys = column.match(/changeKey: \[[^;]*?\]\.join/)?.[0] ?? '';
+    expect(keys).not.toContain('statusText');
+    // Streamed text grows the last message without a new id; the end follows it instead of catching up once.
+    expect(keys).toContain('streamBuf?.textContent.length ?? 0');
+    expect(keys).toContain('streamBuf?.images.length ?? 0');
+    expect(column).toContain('pinKey: statusText,');
+    // The floating task cards set the list's bottom padding, so their measured height re-pins in layout.
+    expect(column).toContain('lastFloatingHeight.current === floatingHeight');
+    expect(column).toContain('keepPinned();');
+  });
+
+  it('swaps the stored turn in before ending the live buffer (#177)', () => {
+    // Clearing the buffer first dropped the whole turn for a frame: the list shrank and the view jumped.
+    expect(column).toContain('let settled = false;');
+    expect(column).toContain('settleStreaming(sessionId, page);');
+    expect(column).toContain('STREAM_SETTLE_FALLBACK_MILLISECONDS');
+    const settle = column.slice(column.indexOf('let settled = false;'), column.indexOf('void refreshApproval();', column.indexOf('let settled = false;')));
+    expect(settle).not.toContain('finishStreaming(sessionId);\n            chatClient');
   });
 
   it('routes every stream event through the one status slot and marks the thinking status (#285)', () => {

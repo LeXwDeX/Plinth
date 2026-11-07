@@ -43,6 +43,29 @@ export function recoverChatSession(options: SessionRecoveryOptions): () => void 
     }, pollMilliseconds);
   };
 
+  // #177: a reconnected stream also ends by swapping the stored page in place of its buffer, so the
+  // replayed turn never disappears for a frame.
+  const settleOwnedStream = async () => {
+    if (!current()) return;
+    try {
+      const page = await client.listMessagePage(sessionId, { limit: pageSize }, controller.signal);
+      if (!current()) return;
+      if (ownedBuffer && useChatStore.getState().streamingBuffers[sessionId]) {
+        useChatStore.getState().settleStreaming(sessionId, page);
+        ownedBuffer = undefined;
+      } else {
+        useChatStore.getState().applyNewestMessagePage(sessionId, page);
+      }
+      if (page.messages.some((message) => message.isPending)) schedulePoll();
+    } catch {
+      if (!current()) return;
+      finishOwnedStream();
+      schedulePoll();
+    } finally {
+      if (current()) onLoading(false);
+    }
+  };
+
   const reconnect = () => {
     if (!current() || streaming()) return;
     useChatStore.getState().initStreaming(sessionId, { content: '' });
@@ -51,8 +74,7 @@ export function recoverChatSession(options: SessionRecoveryOptions): () => void 
       fromId: 0,
       onDone: () => {
         if (!current()) return;
-        finishOwnedStream();
-        void load(false);
+        void settleOwnedStream();
       },
       onError: () => {
         if (!current()) return;
