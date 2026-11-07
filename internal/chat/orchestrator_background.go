@@ -99,10 +99,13 @@ func (orchestrator *Orchestrator) ContinueTurnInBackground(ctx context.Context, 
 }
 
 // backgroundEligible reports whether a turn qualifies: it waits on Tasks, no
-// stop was requested, every call it waits for is a single generation step the
-// Schema allows (never a SkillRun or a Processing Plan) with its Task already
-// submitted, and at least one of those Tasks still runs and either sits in the
-// Provider's own queue or has run past the Schema threshold.
+// stop was requested, every call it waits for is a paid-task tool the Schema
+// allows with its Task already submitted, and at least one of those Tasks
+// still runs and either sits in the Provider's own queue or has run past the
+// Schema threshold. The allowed calls are generation steps and, when it shares
+// the batch with one, the three-view SkillRun submitter; a lone SkillRun call
+// returns its receipt without waiting, so it never reaches this check. A
+// Processing Plan is always refused.
 func (orchestrator *Orchestrator) backgroundEligible(ctx context.Context, turn Turn) (bool, error) {
 	policy := orchestrator.schema.Agent.BackgroundWait
 	if policy == nil || orchestrator.taskGet == nil || turn.State != orchestrator.service.TurnWaitingTaskState() ||

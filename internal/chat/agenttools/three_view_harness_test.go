@@ -19,6 +19,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/harness"
 	"github.com/LeXwDeX/Plinth/internal/harness/resolve"
 	"github.com/LeXwDeX/Plinth/internal/skillrun"
+	"github.com/LeXwDeX/Plinth/internal/threeview"
 )
 
 type harnessThreeRecipe struct{}
@@ -39,6 +40,10 @@ type harnessThreeGateway struct {
 	prepares, submits, replays int
 	// submitErr, when set, refuses the next submissions before any Task is written.
 	submitErr error
+	// state, when set, is what Get reports for every Task: the three-view
+	// projection reads the Task through the gateway, so a test can advance it
+	// without the generation kernel.
+	state generation.TaskState
 }
 
 func (g *harnessThreeGateway) Offerings(generation.Capability) []generation.Offering {
@@ -81,7 +86,14 @@ func (g *harnessThreeGateway) VerifyPreparedTaskReplay(ctx context.Context, cmd 
 	return task, err
 }
 func (g *harnessThreeGateway) Get(ctx context.Context, owner generation.OwnerID, id generation.TaskID) (generation.Task, error) {
-	return g.repo.Get(ctx, owner, id)
+	task, err := g.repo.Get(ctx, owner, id)
+	if err != nil {
+		return task, err
+	}
+	if g.state != "" {
+		task.State = g.state
+	}
+	return task, nil
 }
 
 func threeViewHarnessFixture(t *testing.T) (*Executor, *harnessThreeGateway, *harnessThreeReferences, chat.ToolCommand, string) {
@@ -184,6 +196,61 @@ func TestThreeViewNonzeroHarnessActualAdmissionAndRestartObservation(t *testing.
 	}
 	if restartedGateway.submits != 0 || restartedGateway.prepares != 0 {
 		t.Fatal("rejected recovery created work")
+	}
+}
+
+// #189: the three-view group is only a projection of the SkillRun step, its
+// grant and the Task. Letting the chat turn stop waiting changes none of them:
+// the front view projects running and then succeeded while the execution grant
+// stays Bound, so the reservation and the step identity survive until the
+// kernel settles the Task.
+func TestThreeViewGroupProjectsRunningToSucceededWithoutReleasingTheGrant(t *testing.T) {
+	ctx := context.Background()
+	executor, gateway, _, command, _ := threeViewHarnessFixture(t)
+	if result, err := executor.Execute(ctx, command, nil); err != nil || !result.Suspend {
+		t.Fatalf("prepare %+v %v", result, err)
+	}
+	run, _, grant, err := executor.existingThreeView(ctx, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gateway.repo.DecideExecutionGrant(ctx, "owner", grant.RequestID, "human", executiongrant.Approve); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := executor.Execute(ctx, command, nil); err != nil || result.TaskID != "accepted-three-view" {
+		t.Fatalf("submit %+v %v", result, err)
+	}
+	runs, err := skillrun.NewService(gateway.repo, harnessThreeRecipe{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := skillrun.NewRuntime(runs, gateway, &executiongrant.Service{Grants: gateway.repo, Prepared: gateway.repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := threeview.New(threeview.Config{Runtime: runtime, Sessions: gateway.repo,
+		Schema: catalog.ChatThreeViewSchema{RecipeID: threeViewRecipeID, ModelSourceStepKey: "front",
+			MaximumListed: 10, Label: "three-view"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups, err := service.List(ctx, "owner", "session")
+	if err != nil || len(groups) != 1 || groups[0].RunID != run.ID || len(groups[0].Slots) == 0 ||
+		groups[0].Slots[0].Status != threeview.Running || groups[0].Slots[0].TaskID != "accepted-three-view" {
+		t.Fatalf("running projection = %+v %v", groups, err)
+	}
+	_, _, grant, err = executor.existingThreeView(ctx, command)
+	if err != nil || grant.Status != executiongrant.Bound {
+		t.Fatalf("grant before the Task ended = %+v %v", grant, err)
+	}
+	gateway.state = generation.TaskSucceeded
+	groups, err = service.List(ctx, "owner", "session")
+	if err != nil || len(groups) != 1 || len(groups[0].Slots) == 0 || groups[0].Slots[0].Status != threeview.Succeeded {
+		t.Fatalf("succeeded projection = %+v %v", groups, err)
+	}
+	_, _, grant, err = executor.existingThreeView(ctx, command)
+	if err != nil || grant.Status != executiongrant.Bound || grant.TaskID != "accepted-three-view" {
+		t.Fatalf("the Task ending released the grant: %+v %v", grant, err)
 	}
 }
 

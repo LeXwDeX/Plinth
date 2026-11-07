@@ -247,6 +247,59 @@ func TestStreaming(t *testing.T) {
 	}
 }
 
+// A last user message may carry several markers: the reply names the offered
+// calls in order, with unique IDs, both in one body and in the stream. A stack
+// uses this to put two paid calls in one assistant completion (#189).
+func TestSeveralMarkersBecomeOrderedToolCalls(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	marker := ToolMarkerFor("lookup_note", `{"topic":"one"}`) + " " + ToolMarkerFor("lookup_note", `{"topic":"two"}`)
+	status, body := f.chat(map[string]any{"model": "m", "messages": user(marker), "tools": lookupTools})
+	calls, _ := dig(t, body, "choices", 0, "message", "tool_calls").([]any)
+	if status != http.StatusOK || len(calls) != 2 ||
+		dig(t, calls, 0, "function", "arguments") != `{"topic":"one"}` ||
+		dig(t, calls, 1, "function", "arguments") != `{"topic":"two"}` ||
+		dig(t, calls, 0, "id") == dig(t, calls, 1, "id") {
+		t.Fatalf("non-stream calls = %d %v", status, body)
+	}
+	response, raw := f.send("POST", "/chat/completions", "test-key", map[string]any{
+		"model": "m", "messages": user(marker), "tools": lookupTools, "stream": true})
+	chunks, done := sseEvents(t, raw)
+	names, arguments := map[int]string{}, map[int]string{}
+	for _, chunk := range chunks {
+		found, ok := fakeupstream.Dig(chunk, "choices", 0, "delta", "tool_calls")
+		if !ok {
+			continue
+		}
+		for _, item := range found.([]any) {
+			entry, _ := item.(map[string]any)
+			index, _ := entry["index"].(float64)
+			function, _ := entry["function"].(map[string]any)
+			if name, _ := function["name"].(string); name != "" {
+				names[int(index)] = name
+			}
+			if value, _ := function["arguments"].(string); value != "" {
+				arguments[int(index)] += value
+			}
+		}
+	}
+	if response.StatusCode != http.StatusOK || !done || len(names) != 2 ||
+		names[0] != "lookup_note" || names[1] != "lookup_note" ||
+		arguments[0] != `{"topic":"one"}` || arguments[1] != `{"topic":"two"}` {
+		t.Fatalf("stream calls = %d names=%v arguments=%v done=%v", response.StatusCode, names, arguments, done)
+	}
+}
+
+// A marker naming a tool that is not offered is still ignored.
+func TestSeveralMarkersSkipUnavailableTools(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	marker := ToolMarkerFor("other", "") + " " + ToolMarkerFor("lookup_note", `{"topic":"kept"}`)
+	_, body := f.chat(map[string]any{"model": "m", "messages": user(marker), "tools": lookupTools})
+	calls, _ := dig(t, body, "choices", 0, "message", "tool_calls").([]any)
+	if len(calls) != 1 || dig(t, calls, 0, "function", "name") != "lookup_note" {
+		t.Fatalf("calls = %v", body)
+	}
+}
+
 func TestFaultScenarios(t *testing.T) {
 	short := fakeupstream.Config{TimeoutHold: 50 * time.Millisecond}
 	chat := func(f *fixture, scenario string) (*http.Response, map[string]any) {

@@ -1214,10 +1214,11 @@ func (s *Server) legacyChatTurnBackgroundAvailable(
 }
 
 // legacyContinueChatTurnInBackground ends the session's waiting turn without
-// cancelling its Tasks (#137). A turn that does not qualify (no single
-// generation step waiting, not queued upstream nor past the Schema threshold,
-// a SkillRun or a Processing Plan, or a stop already requested) is refused
-// with the Schema's reason and keeps waiting.
+// cancelling its Tasks (#137). A turn that does not qualify (no paid-task step
+// the Schema allows waiting, not queued upstream nor past the Schema threshold,
+// or a stop already requested) is refused with the Schema's reason and keeps
+// waiting. A SkillRun's Task joins that wait only in a batch behind a waiting
+// generation step.
 func (s *Server) legacyContinueChatTurnInBackground(
 	writer http.ResponseWriter,
 	request *http.Request,

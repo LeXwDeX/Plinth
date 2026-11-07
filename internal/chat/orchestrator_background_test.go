@@ -89,8 +89,24 @@ func backgroundOrchestrator(t *testing.T, service *chat.Service, schema catalog.
 	if agent == nil {
 		agent = waitingAgent{control: "set_params", generate: "refine_image"}
 	}
+	return backgroundOrchestratorWith(t, service, schema, e, e.get, func(_ context.Context, ownerID, taskID string) error {
+		facts.mu.Lock()
+		facts.canceled = append(facts.canceled, taskID)
+		facts.mu.Unlock()
+		e.set(taskID, generation.TaskCanceled)
+		return nil
+	}, facts, agent)
+}
+
+// backgroundOrchestratorWith builds the orchestrator around any tool executor,
+// so a test can play the exact receipts the real executors return.
+func backgroundOrchestratorWith(t *testing.T, service *chat.Service, schema catalog.ChatSchema,
+	tools chat.ToolExecutor, get func(context.Context, string, string) (generation.Task, error),
+	cancel func(context.Context, string, string) error, facts *backgroundFacts, agent agents.Adapter,
+) *chat.Orchestrator {
+	t.Helper()
 	o, err := chat.NewOrchestrator(chat.OrchestratorConfig{Service: service, Schema: schema, Model: "model",
-		Agent: agent, Tools: e, Logger: facts.logger,
+		Agent: agent, Tools: tools, Logger: facts.logger,
 		TaskGet: func(ctx context.Context, ownerID, taskID string) (generation.Task, error) {
 			facts.mu.Lock()
 			readErr := facts.readErr
@@ -98,7 +114,7 @@ func backgroundOrchestrator(t *testing.T, service *chat.Service, schema catalog.
 			if readErr != nil {
 				return generation.Task{}, readErr
 			}
-			task, err := e.get(ctx, ownerID, taskID)
+			task, err := get(ctx, ownerID, taskID)
 			if err != nil {
 				return task, err
 			}
@@ -121,13 +137,7 @@ func backgroundOrchestrator(t *testing.T, service *chat.Service, schema catalog.
 			task.Offering.ModelID = "configured-image-model"
 			return task, nil
 		},
-		TaskCanceler: func(_ context.Context, ownerID, taskID string) error {
-			facts.mu.Lock()
-			facts.canceled = append(facts.canceled, taskID)
-			facts.mu.Unlock()
-			e.set(taskID, generation.TaskCanceled)
-			return nil
-		},
+		TaskCanceler: cancel,
 		StopConsent: func(_, _, callID, _, taskID string) error {
 			facts.mu.Lock()
 			defer facts.mu.Unlock()
@@ -323,12 +333,14 @@ func TestContinueInBackgroundAfterTheThreshold(t *testing.T) {
 }
 
 // The server refuses what does not qualify, and the turn keeps waiting with
-// the existing stop behaviour: a SkillRun or a call the Schema does not name, a
-// submission still queued for admission, a stop already requested, or no
-// waiting turn at all.
+// the existing stop behaviour: a call the Schema does not name, a submission
+// still queued for admission, a stop already requested, or no waiting turn at
+// all. A SkillRun call that waits in a batch is covered separately
+// (orchestrator_background_skillrun_test.go); a lone create_three_view call
+// never waits at all.
 func TestContinueInBackgroundRefusesWhatDoesNotQualify(t *testing.T) {
 	ctx := context.Background()
-	for _, mode := range []string{"no turn", "skill run", "tool not named", "admission retry", "stopped first", "no policy"} {
+	for _, mode := range []string{"no turn", "tool not named", "admission retry", "stopped first", "no policy"} {
 		t.Run(mode, func(t *testing.T) {
 			service := newChatService(t, newMemoryChatRepository())
 			executor := newWaitingExecutor()
@@ -362,25 +374,13 @@ func TestContinueInBackgroundRefusesWhatDoesNotQualify(t *testing.T) {
 				t.Fatal(err)
 			}
 			switch mode {
-			case "skill run":
-				// The waited call is the three-view SkillRun, not a single step.
-				for index := range turn.Checkpoint.Assistant.ToolCalls {
-					if turn.Checkpoint.Assistant.ToolCalls[index].TaskID == taskID || turn.Checkpoint.Assistant.ToolCalls[index].Name == "refine_image" {
-						turn.Checkpoint.Assistant.ToolCalls[index].Name = "create_three_view"
-					}
-				}
-				for index := range turn.Checkpoint.Completion.ToolCalls {
-					if turn.Checkpoint.Completion.ToolCalls[index].Name == "refine_image" {
-						turn.Checkpoint.Completion.ToolCalls[index].Name = "create_three_view"
-					}
-				}
 			case "admission retry":
 				waiting := turn.Checkpoint.WaitingCalls()
 				waiting = append(waiting, chat.WaitingCall{CallID: "queued-call", Deadline: time.Now().Add(time.Hour),
 					RetryAt: time.Now().Add(time.Hour), QueuedSince: time.Now()})
 				turn.Checkpoint.SetWaiting(waiting)
 			}
-			if mode == "skill run" || mode == "admission retry" {
+			if mode == "admission retry" {
 				if _, err := service.SaveTurnCheckpoint(ctx, turn, turn.State, turn.Checkpoint, false); err != nil {
 					t.Fatal(err)
 				}
@@ -400,7 +400,7 @@ func TestContinueInBackgroundRefusesWhatDoesNotQualify(t *testing.T) {
 			if err != nil || after.Checkpoint.Background || after.State != service.TurnWaitingTaskState() {
 				t.Fatalf("refusal changed the turn: %+v %v", after, err)
 			}
-			if mode == "admission retry" || mode == "skill run" {
+			if mode == "admission retry" {
 				return
 			}
 			// The existing stop still cancels the Task.

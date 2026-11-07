@@ -8,9 +8,10 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
 
-// #137: the shipped Schema declares which single generation steps may keep
-// running in the background, never a Processing Plan or a SkillRun tool.
-func TestShippedBackgroundWaitCoversOnlySingleGenerationSteps(t *testing.T) {
+// #137/#189: the shipped Schema declares which paid-task tools may keep
+// running in the background. A generation step and the three-view SkillRun
+// submitter qualify; a Processing Plan or a read-only agent tool never does.
+func TestShippedBackgroundWaitCoversGenerationAndSkillRunSteps(t *testing.T) {
 	c, err := catalog.LoadDefault()
 	if err != nil {
 		t.Fatal(err)
@@ -20,12 +21,12 @@ func TestShippedBackgroundWaitCoversOnlySingleGenerationSteps(t *testing.T) {
 	if policy == nil || app.Runtime.HTTP.LegacyRoutes.ChatTurnBackground == "" {
 		t.Fatal("the shipped Schema declares the background wait and its route")
 	}
-	for _, name := range []string{"refine_image", "create_model_3d"} {
+	for _, name := range []string{"refine_image", "create_model_3d", "create_three_view"} {
 		if !policy.Allows(name) {
-			t.Fatalf("%s is a single generation step and must be eligible", name)
+			t.Fatalf("%s is a paid-task step and must be eligible", name)
 		}
 	}
-	for _, name := range []string{"plan_model_processing", "create_three_view", "get_task"} {
+	for _, name := range []string{"plan_model_processing", "get_task"} {
 		if policy.Allows(name) {
 			t.Fatalf("%s must never continue in the background", name)
 		}
@@ -55,6 +56,40 @@ func TestShippedBackgroundWaitCoversOnlySingleGenerationSteps(t *testing.T) {
 	}
 }
 
+// An agent tool qualifies only as a paid SkillRun submitter: it must prepare a
+// Skill (skill.prepare) and declare the PAID_TASK effect.
+func TestBackgroundWaitRequiresPaidSkillRunAgentTools(t *testing.T) {
+	for name, test := range map[string]struct {
+		mutate func(*catalog.ChatAgentToolSchema)
+		want   string
+	}{
+		"not a skill prepare tool": {func(tool *catalog.ChatAgentToolSchema) { tool.Execution.ImplementationKey = "task.read" }, "skill.prepare"},
+		"not a paid task":          {func(tool *catalog.ChatAgentToolSchema) { tool.Execution.Effects = []string{"READ"} }, "不是付费任务工具"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, err := catalog.LoadDefault()
+			if err != nil {
+				t.Fatal(err)
+			}
+			app := c.Application()
+			mutated := false
+			for index := range app.Chat.AgentTools {
+				if app.Chat.AgentTools[index].Name == "create_three_view" {
+					test.mutate(&app.Chat.AgentTools[index])
+					mutated = true
+				}
+			}
+			if !mutated {
+				t.Fatal("create_three_view is not declared")
+			}
+			if err := catalog.ValidateApplicationSchema(app); err == nil ||
+				!strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ValidateApplicationSchema err = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestBackgroundWaitDeclarationsAreValidated(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -65,11 +100,14 @@ func TestBackgroundWaitDeclarationsAreValidated(t *testing.T) {
 		{"unknown tool", func(a *catalog.ApplicationSchema) {
 			a.Chat.Agent.BackgroundWait.Tools = append(a.Chat.Agent.BackgroundWait.Tools, "missing_tool")
 		}},
-		{"skill run tool", func(a *catalog.ApplicationSchema) {
-			a.Chat.Agent.BackgroundWait.Tools = append(a.Chat.Agent.BackgroundWait.Tools, "create_three_view")
+		{"read-only agent tool", func(a *catalog.ApplicationSchema) {
+			a.Chat.Agent.BackgroundWait.Tools = append(a.Chat.Agent.BackgroundWait.Tools, "get_task")
 		}},
 		{"processing plan tool", func(a *catalog.ApplicationSchema) {
 			a.Chat.Agent.BackgroundWait.Tools = append(a.Chat.Agent.BackgroundWait.Tools, "plan_model_processing")
+		}},
+		{"cross-list duplicate name", func(a *catalog.ApplicationSchema) {
+			a.Chat.AgentTools[0].Name = a.Chat.Tools[0].Name
 		}},
 		{"duplicate tool", func(a *catalog.ApplicationSchema) {
 			a.Chat.Agent.BackgroundWait.Tools = append(a.Chat.Agent.BackgroundWait.Tools, a.Chat.Agent.BackgroundWait.Tools[0])

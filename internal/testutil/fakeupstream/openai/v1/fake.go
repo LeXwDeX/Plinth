@@ -247,20 +247,31 @@ func (r chatRequest) hasTool(name string) bool {
 	return false
 }
 
-// call decides the reply: a tool call (name, arguments) or "" for text.
-func (r chatRequest) call() (name, arguments string) {
+// toolCall is one marker parsed from the last user message.
+type toolCall struct {
+	name, arguments string
+}
+
+// calls decides the reply: one call per marker the request offers, in order.
+// A marker naming a tool the request does not offer is ignored, so a request
+// without a usable marker is answered with the fixed text.
+func (r chatRequest) calls() []toolCall {
 	if len(r.Messages) == 0 || r.Messages[len(r.Messages)-1].Role != "user" || len(r.Tools) == 0 {
-		return "", ""
+		return nil
 	}
-	match := toolMarker.FindStringSubmatch(r.lastText())
-	if match == nil || !r.hasTool(match[1]) {
-		return "", ""
+	matches := toolMarker.FindAllStringSubmatch(r.lastText(), -1)
+	calls := make([]toolCall, 0, len(matches))
+	for _, match := range matches {
+		if !r.hasTool(match[1]) {
+			continue
+		}
+		arguments := match[2]
+		if arguments == "" || !json.Valid([]byte(arguments)) {
+			arguments = "{}"
+		}
+		calls = append(calls, toolCall{name: match[1], arguments: arguments})
 	}
-	arguments = match[2]
-	if arguments == "" || !json.Valid([]byte(arguments)) {
-		arguments = "{}"
-	}
-	return match[1], arguments
+	return calls
 }
 
 func (r chatRequest) thinking() bool {
@@ -298,31 +309,45 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 		fakeupstream.AbortConnection(w) // the completion ran; its response is lost
 		return
 	}
-	name, arguments := request.call()
+	calls := request.calls()
 	reasoning := ""
 	if request.thinking() {
 		reasoning = FixedReasoning
 	}
 	if request.Stream {
-		h.writeStream(w, request, name, arguments, reasoning)
+		h.writeStream(w, request, calls, reasoning)
 		return
 	}
 	body := fakeupstream.Clone(h.text)
-	if name != "" {
+	if len(calls) > 0 {
 		body = fakeupstream.Clone(h.tool)
 	}
 	body["model"] = request.Model
 	if message, ok := fakeupstream.DigMap(body, "choices", 0, "message"); ok {
 		message["reasoning_content"] = reasoning
-		if name == "" {
+		if len(calls) == 0 {
 			message["content"] = FixedReply
-		} else if calls, _ := message["tool_calls"].([]any); len(calls) > 0 {
-			call, _ := calls[0].(map[string]any)
-			function, _ := call["function"].(map[string]any)
-			function["name"], function["arguments"] = name, arguments
+		} else if sample, _ := message["tool_calls"].([]any); len(sample) > 0 {
+			template, _ := sample[0].(map[string]any)
+			rendered := make([]any, 0, len(calls))
+			for index, call := range calls {
+				rendered = append(rendered, renderToolCall(template, index, call))
+			}
+			message["tool_calls"] = rendered
 		}
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// renderToolCall clones the sample's first call for one parsed marker. The
+// single-call reply keeps the sample's shape; later calls get unique IDs.
+func renderToolCall(template map[string]any, index int, call toolCall) map[string]any {
+	clone := fakeupstream.Clone(template)
+	clone["id"] = fmt.Sprintf("call_fake_%d", index)
+	if function, ok := clone["function"].(map[string]any); ok {
+		function["name"], function["arguments"] = call.name, call.arguments
+	}
+	return clone
 }
 
 // writeStream emits the chunk pattern the official gateway streams (observed
@@ -330,9 +355,9 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 // a tool call split into its header and its arguments, and a final chunk
 // carrying finish_reason and usage. The envelope fields and the final usage
 // object come from the committed sample.
-func (h *handler) writeStream(w http.ResponseWriter, request chatRequest, name, arguments, reasoning string) {
+func (h *handler) writeStream(w http.ResponseWriter, request chatRequest, calls []toolCall, reasoning string) {
 	sample := h.stream
-	if name != "" {
+	if len(calls) > 0 {
 		sample = h.toolSSE
 	}
 	envelope, last := sample[0], sample[len(sample)-1]
@@ -354,17 +379,23 @@ func (h *handler) writeStream(w http.ResponseWriter, request chatRequest, name, 
 		chunk(map[string]any{"content": nil, "reasoning_content": reasoning}, nil, nil),
 	}
 	finish := "stop"
-	if name == "" {
+	if len(calls) == 0 {
 		events = append(events, chunk(map[string]any{"content": FixedReply, "reasoning_content": nil}, nil, nil))
 	} else {
 		finish = "tool_calls"
-		events = append(events,
-			chunk(map[string]any{"tool_calls": []any{map[string]any{
-				"index": 0, "id": "call_fake_0", "type": "function", "function": map[string]any{"name": name, "arguments": ""},
-			}}}, nil, nil),
-			chunk(map[string]any{"tool_calls": []any{map[string]any{
-				"index": 0, "function": map[string]any{"arguments": arguments},
-			}}}, nil, nil))
+		for index, call := range calls {
+			events = append(events,
+				chunk(map[string]any{"tool_calls": []any{map[string]any{
+					"index": index, "id": fmt.Sprintf("call_fake_%d", index), "type": "function",
+					"function": map[string]any{"name": call.name, "arguments": ""},
+				}}}, nil, nil))
+		}
+		for index, call := range calls {
+			events = append(events,
+				chunk(map[string]any{"tool_calls": []any{map[string]any{
+					"index": index, "function": map[string]any{"arguments": call.arguments},
+				}}}, nil, nil))
+		}
 	}
 	events = append(events, chunk(map[string]any{"content": "", "reasoning_content": nil}, finish, usage))
 	w.Header().Set("Content-Type", "text/event-stream")
