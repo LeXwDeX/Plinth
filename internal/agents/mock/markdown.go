@@ -44,8 +44,10 @@ func streamMarkdown(ctx context.Context, prompt string, emit func(agents.Delta) 
 		pieces = append(pieces, line)
 	}
 	var content strings.Builder
-	for index, piece := range pieces {
-		if index > 0 && emit != nil {
+	for _, piece := range pieces {
+		// The pause before the first piece also lets the thinking status show, so a browser can see the
+		// status→text transition the chat has to follow (#177).
+		if emit != nil {
 			select {
 			case <-ctx.Done():
 				return agents.Completion{}, ctx.Err()

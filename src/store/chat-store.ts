@@ -171,6 +171,11 @@ interface ChatStore {
   setMessages: (sessionId: string, msgs: ChatMessage[]) => void;
   /** The newest page read again: replaces the end of the loaded messages, keeping earlier pages already read. */
   applyNewestMessagePage: (sessionId: string, page: { messages: ChatMessage[]; nextCursor: string }) => void;
+  /**
+   * Ends a streaming reply by putting the stored newest page in place of the live buffer in one update
+   * (#177): clearing the buffer first would drop the whole turn for a frame and make the list jump.
+   */
+  settleStreaming: (sessionId: string, page: { messages: ChatMessage[]; nextCursor: string }) => void;
   /** An earlier page the person asked for: goes in front of the loaded messages. */
   applyOlderMessagePage: (sessionId: string, page: { messages: ChatMessage[]; nextCursor: string }) => void;
   deleteMessage: (sessionId: string, id: string) => void;
@@ -291,6 +296,21 @@ export const useChatStore = create<ChatStore>((set) => ({
         messagesBySession: { ...s.messagesBySession, [sessionId]: next.messages },
         olderCursorBySession: { ...s.olderCursorBySession, [sessionId]: next.olderCursor },
         toolCallCounts: countsAfterRead(s, sessionId, next.messages),
+      };
+    }),
+  settleStreaming: (sessionId, page) =>
+    set((s) => {
+      const loaded = sessionId in s.messagesBySession
+        ? { messages: s.messagesBySession[sessionId], olderCursor: s.olderCursorBySession[sessionId] ?? '' }
+        : undefined;
+      const next = mergeNewestPage(loaded, page);
+      const { [sessionId]: _b, ...restBuffers } = s.streamingBuffers;
+      return {
+        messagesBySession: { ...s.messagesBySession, [sessionId]: next.messages },
+        olderCursorBySession: { ...s.olderCursorBySession, [sessionId]: next.olderCursor },
+        streamingBuffers: restBuffers,
+        toolCallCounts: countsAfterRead({ ...s, streamingBuffers: restBuffers }, sessionId, next.messages),
+        sessionListRevision: s.sessionListRevision + 1,
       };
     }),
   applyOlderMessagePage: (sessionId, page) =>
