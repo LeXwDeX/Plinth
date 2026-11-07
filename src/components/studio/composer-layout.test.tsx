@@ -32,10 +32,9 @@ vi.mock('@/components/studio/model-picker', () => ({
 }));
 vi.mock('@/components/studio/skill-picker', () => ({ SkillPicker: () => <button type="button" data-testid="picker-skill" /> }));
 vi.mock('@/components/studio/chat-model-picker', () => ({
-  ChatModelPicker: () => (mock.chatModelPicker ? <button type="button" data-testid="picker-chat-model" /> : null),
+  ChatModelPicker: () => <button type="button" data-testid="picker-chat-model-reasoning" />,
   ChatModelNotice: () => null,
 }));
-vi.mock('@/components/studio/reasoning-picker', () => ({ ReasoningPicker: () => <button type="button" data-testid="picker-reasoning" /> }));
 vi.mock('@/components/studio/params-popover', () => ({ ParamsPopover: () => <button type="button" data-testid="picker-params" /> }));
 
 const noop = () => undefined;
@@ -149,7 +148,7 @@ describe('the composer picker grid (#99)', () => {
   it('renders the pickers in reading order, once each, with the context row last', () => {
     const grid = open({ chatModelPicker: true });
     const order = [...grid.children].map((child) => child.getAttribute('data-testid'));
-    expect(order).toEqual(['picker-model', 'picker-skill', 'composer-params-slot', 'picker-chat-model', 'picker-reasoning', 'composer-context']);
+    expect(order).toEqual(['picker-model', 'picker-skill', 'composer-params-slot', 'picker-chat-model-reasoning', 'composer-context']);
     expect(within(grid).getByTestId('composer-params-slot').querySelector('[data-testid="picker-params"]')).not.toBeNull();
   });
 
@@ -157,13 +156,12 @@ describe('the composer picker grid (#99)', () => {
     const grid = open({ chatModelPicker: true });
     expect(rows(grid, false)).toEqual([
       ['picker-model', 'picker-skill'],
-      ['composer-params-slot', 'picker-chat-model'],
-      ['picker-reasoning'],
+      ['composer-params-slot', 'picker-chat-model-reasoning'],
       ['composer-context'],
     ]);
     expect(rows(grid, true)).toEqual([
       ['picker-model', 'picker-skill', 'composer-params-slot'],
-      ['picker-chat-model', 'picker-reasoning', 'composer-context'],
+      ['picker-chat-model-reasoning', 'composer-context'],
     ]);
   });
 
@@ -182,17 +180,16 @@ describe('the composer picker grid (#99)', () => {
     expect(follows(compact, counter)).toBe(true);
   });
 
-  it('moves the thinking level up into the chat model slot when only one chat model is offered, leaving no hole before a picker', () => {
+  it('keeps the combined model-and-thinking entry with a single chat model, leaving no hole before a picker', () => {
     const grid = open({ chatModelPicker: false });
-    expect([...grid.children].map((child) => child.getAttribute('data-testid'))).not.toContain('picker-chat-model');
     expect(rows(grid, false)).toEqual([
       ['picker-model', 'picker-skill'],
-      ['composer-params-slot', 'picker-reasoning'],
+      ['composer-params-slot', 'picker-chat-model-reasoning'],
       ['composer-context'],
     ]);
     expect(rows(grid, true)).toEqual([
       ['picker-model', 'picker-skill', 'composer-params-slot'],
-      ['picker-reasoning', 'composer-context'],
+      ['picker-chat-model-reasoning', 'composer-context'],
     ]);
   });
 

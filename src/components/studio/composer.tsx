@@ -9,7 +9,6 @@ import { useAuth } from '@/hooks/use-auth';
 import { useSessionHarness } from '@/hooks/use-session-harness';
 import { ContextMeter } from '@/components/studio/context-meter';
 import { ChatModelNotice, ChatModelPicker } from '@/components/studio/chat-model-picker';
-import { ReasoningPicker } from '@/components/studio/reasoning-picker';
 import { AttachmentThumb } from '@/components/studio/attachment-thumb';
 import { ReferenceSizeNotice } from '@/components/canvas/canvas-size-notice';
 import { ChipSquare, ContextChip } from '@/components/studio/composer-chips';
@@ -809,7 +808,6 @@ export function Composer({
             <ParamsPopover {...params} disabled={disabled} />
           </div>
           <ChatModelPicker />
-          <ReasoningPicker />
           <ContextMeter />
         </div>
       </div>
