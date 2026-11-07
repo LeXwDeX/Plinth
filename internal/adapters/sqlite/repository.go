@@ -367,6 +367,12 @@ var chatBranchLineageMigration string
 //go:embed migrations/0081_chat_session_style_lock.sql
 var chatSessionStyleLockMigration string
 
+//go:embed migrations/0082_chat_branch_task_refs.sql
+var chatBranchTaskRefsMigration string
+
+//go:embed migrations/0083_session_evidence_deletions.sql
+var sessionEvidenceDeletionsMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -439,7 +445,9 @@ func migrations() []migration {
 	all := migrationsBeforeStyleLock()
 	return append(all,
 		migration{version: 80, name: "chat_branch_lineage", sql: chatBranchLineageMigration},
-		migration{version: 81, name: "chat_session_style_lock", sql: chatSessionStyleLockMigration})
+		migration{version: 81, name: "chat_session_style_lock", sql: chatSessionStyleLockMigration},
+		migration{version: 82, name: "chat_branch_task_refs", sql: chatBranchTaskRefsMigration},
+		migration{version: 83, name: "session_evidence_deletions", sql: sessionEvidenceDeletionsMigration})
 }
 
 type migration struct {
@@ -1034,8 +1042,21 @@ func (r *Repository) List(
 		args = append(args, scope.OwnerID())
 	}
 	if query.SessionID != "" {
-		clauses = append(clauses, "session_id = ?")
-		args = append(args, query.SessionID)
+		if query.IncludeBranchRefs {
+			// A branch session additionally reads the Tasks its ancestor
+			// sessions produced (#186). The refs table is written only at
+			// branch creation and never holds grants, budgets or approvals.
+			clauses = append(clauses, `(session_id = ? OR EXISTS (
+				SELECT 1 FROM chat_branch_task_refs AS branch_ref
+				WHERE branch_ref.owner_id = generation_tasks.owner_id
+				  AND branch_ref.branch_session_id = ?
+				  AND branch_ref.task_id = generation_tasks.id
+			))`)
+			args = append(args, query.SessionID, query.SessionID)
+		} else {
+			clauses = append(clauses, "session_id = ?")
+			args = append(args, query.SessionID)
+		}
 	}
 	if query.Capability != "" {
 		clauses = append(clauses, "capability = ?")

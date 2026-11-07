@@ -222,8 +222,16 @@ type Session struct {
 	ParentMessageID string
 	ParentTitle     string
 	ParentDeleted   bool
-	// BranchCanvasCopied is set only on the immediate branch creation result.
-	BranchCanvasCopied bool
+	// BranchCanvasCopied, BranchSceneCopied and BranchCapturesCopied are set
+	// only on the immediate branch creation result. They describe the current
+	// state copied at creation time, not a point-in-time snapshot of the
+	// selected message.
+	//
+	// BranchCanvasCopied is a bool; the 3D flags name whether a scene or a
+	// capture was copied (a branch with neither remains a plain 2D branch).
+	BranchCanvasCopied   bool
+	BranchSceneCopied    bool
+	BranchCapturesCopied bool
 	// TitleSource is TitleSourcePending, TitleSourceAuto or TitleSourceUser.
 	// It is storage state for the automatic summary and is not projected.
 	TitleSource string

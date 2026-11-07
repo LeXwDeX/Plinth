@@ -1443,6 +1443,9 @@ export interface ChatProductSchema {
       parent_title?: string;
       parent_deleted?: string;
       branch_canvas_copied?: string;
+      /** #186: 分支创建响应中的 3D 场景 / capture 复制标记。 */
+      branch_scene_copied?: string;
+      branch_captures_copied?: string;
       approval_source: string;
        notes: string;
        /** #154: the response member carrying the session style lock object. */

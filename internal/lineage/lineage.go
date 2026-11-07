@@ -113,6 +113,24 @@ type Service struct {
 	inputs   InputAssets
 	config   Config
 	groups   GroupSource
+	// scope knows that a branch may read an ancestor Task. Nil keeps exact
+	// session filtering, so an old or foreign Task source never widens.
+	scope generation.SessionTaskScope
+}
+
+// taskInSession accepts a Task of the session itself or, for a branch, of any
+// ancestor session recorded in its refs. Owner is rechecked by TaskInSession.
+func (s *Service) taskInSession(ctx context.Context, owner, session string, task generation.Task) (bool, error) {
+	if task.OwnerID != generation.OwnerID(owner) {
+		return false, nil
+	}
+	if task.SessionID == session {
+		return true, nil
+	}
+	if s.scope == nil || task.SessionID == "" {
+		return false, nil
+	}
+	return s.scope.TaskInSession(ctx, generation.OwnerID(owner), session, task.ID)
 }
 
 // SetGroups wires the source of task groups. Without one the graph lists none.
@@ -124,7 +142,13 @@ func New(tasks Tasks, captures Captures, inputs InputAssets, config Config) (*Se
 	if tasks == nil || inputs == nil || config.MaxTasks < 1 {
 		return nil, ErrInvalid
 	}
-	return &Service{tasks: tasks, captures: captures, inputs: inputs, config: config}, nil
+	service := &Service{tasks: tasks, captures: captures, inputs: inputs, config: config}
+	// The Task source may also know branch ancestry (#186). Without it the
+	// projection stays exact-session, which is the pre-branch behaviour.
+	if scope, ok := tasks.(generation.SessionTaskScope); ok {
+		service.scope = scope
+	}
+	return service, nil
 }
 
 type Asset struct {
@@ -308,7 +332,7 @@ func (s *Service) readTasks(ctx context.Context, owner, session string) ([]gener
 			limit = remaining
 		}
 		page, err := s.tasks.List(ctx, scope, generation.ListQuery{
-			SessionID: session, Cursor: cursor, Limit: limit,
+			SessionID: session, IncludeBranchRefs: true, Cursor: cursor, Limit: limit,
 			States: []generation.TaskState{generation.TaskSucceeded},
 		})
 		if err != nil {
@@ -317,7 +341,11 @@ func (s *Service) readTasks(ctx context.Context, owner, session string) ([]gener
 		for _, summary := range page.Tasks {
 			// The query already filters; these checks keep a sloppy
 			// Repository from leaking another owner's or session's task.
-			if string(summary.OwnerID) != owner || summary.SessionID != session {
+			allowed, err := s.taskInSession(ctx, owner, session, summary)
+			if err != nil {
+				return nil, false, err
+			}
+			if string(summary.OwnerID) != owner || !allowed {
 				continue
 			}
 			task, err := s.tasks.GetScoped(ctx, scope, summary.ID)
@@ -328,7 +356,9 @@ func (s *Service) readTasks(ctx context.Context, owner, session string) ([]gener
 				}
 				return nil, false, err
 			}
-			if string(task.OwnerID) == owner && task.SessionID == session {
+			if allowed, err = s.taskInSession(ctx, owner, session, task); err != nil {
+				return nil, false, err
+			} else if allowed {
 				tasks = append(tasks, task)
 			}
 		}

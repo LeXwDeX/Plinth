@@ -18,7 +18,7 @@ it.each(['user', 'assistant'] as const)('offers a branch from a settled %s messa
   fireEvent.click(view.getByTestId('chat-more'));
   const item = await view.findByTestId('chat-branch');
   expect(item.textContent).toContain('分支到新对话');
-  expect(item.textContent).toContain('当前已保存状态');
+  expect(item.textContent).toContain('创建分支时的当前状态');
   fireEvent.click(item);
   expect(branch).toHaveBeenCalledWith(message);
 });

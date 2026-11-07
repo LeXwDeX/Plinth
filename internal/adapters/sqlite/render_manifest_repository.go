@@ -56,14 +56,25 @@ func (SQLiteRenderManifestEvidence) ReadyAsset(ctx context.Context, q RenderMani
 	var size int64
 	var digest string
 	err := q.QueryRowContext(ctx, `SELECT size_bytes,sha256 FROM generation_input_assets
-		WHERE id=? AND owner_id=? AND storage_key<>'' AND size_bytes>0 AND sha256<>''
-		UNION ALL SELECT a.size_bytes,a.sha256 FROM generation_assets a JOIN generation_tasks t ON t.id=a.task_id
-		WHERE a.id=? AND t.owner_id=? AND t.session_id=? AND t.state='SUCCEEDED'
-		AND a.storage_key<>'' AND a.size_bytes>0 AND a.sha256<>''`, id, owner, id, owner, session).Scan(&size, &digest)
+		WHERE id=? AND owner_id=? AND storage_key<>'' AND size_bytes>0 AND sha256<>''`, id, owner).Scan(&size, &digest)
+	if err == nil {
+		return size, digest, true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, "", false, err
+	}
+	var task string
+	err = q.QueryRowContext(ctx, `SELECT a.size_bytes,a.sha256,t.id FROM generation_assets a JOIN generation_tasks t ON t.id=a.task_id
+		WHERE a.id=? AND t.owner_id=? AND t.state='SUCCEEDED'
+		AND a.storage_key<>'' AND a.size_bytes>0 AND a.sha256<>''`, id, owner).Scan(&size, &digest, &task)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, "", false, nil
 	}
 	if err != nil {
+		return 0, "", false, err
+	}
+	allowed, err := taskInSession(ctx, q, owner, session, task)
+	if err != nil || !allowed {
 		return 0, "", false, err
 	}
 	return size, digest, true, nil

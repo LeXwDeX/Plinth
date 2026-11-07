@@ -87,6 +87,9 @@ func (m *Module) PrepareInput(ctx context.Context, cmd PrepareInputCommand) (Pre
 	if err != nil {
 		return PreparedInput{}, err
 	}
+	if err := m.normalizeInputAssetSessions(ctx, cmd.OwnerID, cmd.SessionID, resolved); err != nil {
+		return PreparedInput{}, err
+	}
 	assets, err := m.snapshotPreparedAssets(ctx, cmd.OwnerID, resolved)
 	if err != nil {
 		return PreparedInput{}, err
@@ -293,6 +296,9 @@ func (m *Module) SubmitPrepared(ctx context.Context, cmd SubmitPreparedCommand) 
 	}
 	resolved, err := m.inputs.Resolve(ctx, prepared.OwnerID, offering, prepared.NormalizedInput)
 	if err != nil {
+		return Accepted{}, err
+	}
+	if err := m.normalizeInputAssetSessions(ctx, prepared.OwnerID, prepared.SessionID, resolved); err != nil {
 		return Accepted{}, err
 	}
 	assets, err := m.snapshotPreparedAssets(ctx, prepared.OwnerID, resolved)

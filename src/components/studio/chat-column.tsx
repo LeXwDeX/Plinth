@@ -118,8 +118,7 @@ import { maskStrokeCount, useMaskStore } from '@/store/mask-store';
 import { CHAT_RAIL_WIDTH, CHAT_WIDTH_MAX, CHAT_WIDTH_MIN, useStudioStore } from '@/store/studio-store';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import { useSessionContextStore } from '@/store/session-context-store';
-import { domainOfCapability } from '@/lib/workspace/versions';
-import { branchConversation, branchSceneExists, branchUnavailableReason } from '@/lib/chat/session-branch';
+import { branchConversation, branchCopiedCurrentState, branchUnavailableReason } from '@/lib/chat/session-branch';
 import { MultiviewUploadPanel } from '@/components/studio/multiview-upload-panel';
 import { buildMultiviewRequest, chosenViewLabels, multiviewOffering } from '@/lib/workspace/multiview-upload';
 import { withErrorReference } from '@/lib/problem-reference';
@@ -1767,20 +1766,15 @@ export function ChatColumn() {
     () => trackedTasks.filter((task) => task.sessionId === activeSessionId && !task.notFound),
     [trackedTasks, activeSessionId],
   );
-  const sceneRoute = schema.runtime.http.routes.scene_snapshot;
-  const { data: branchScene, error: branchSceneError } = useSWR(
-    schema.runtime.http.routes.chat_session_branch && sceneRoute && activeSessionId ? ['branch-scene', sceneRoute, activeSessionId] : null,
-    ([, route, sessionId]: [string, string, string]) => branchSceneExists(route, sessionId),
-    { revalidateOnFocus: true, refreshInterval: 5_000, keepPreviousData: false },
-  );
   const compacting = useSessionContextStore((state) => Boolean(activeSessionId && state.compacting[activeSessionId]));
   const [branchBusy, setBranchBusy] = useState(false);
   const branchBusyRef = useRef(false);
+  // 3D is no longer a reason to disable branching (#186): the branch copies
+  // the current stage, versions and captures. Only live work and decisions
+  // still block, because the copy must be a stable current state.
   const branchReasonKey = branchUnavailableReason({
     busy: branchBusy, compacting, approval: pendingCount > 0 || budgetAwaiting,
     running: isStreaming || preparing || uploading || sessionTasks.some((task) => !task.terminal),
-    scene: branchScene === true || sessionSelection?.kind === 'model' || sessionTasks.some((task) => domainOfCapability(schema, task.capability) === 'model'),
-    sceneUnknown: Boolean(sceneRoute && activeSessionId && (branchScene === undefined || branchSceneError)),
   });
   const branchFromMessage = useCallback(async (message: ChatMessageType) => {
     const sessionId = activeSessionId;
@@ -1791,7 +1785,7 @@ export function ChatColumn() {
       await branchConversation(chatClient.branchSession, sessionId, message.id, {
         flush: () => flushPendingEdits(sessionId), isCurrent: () => useChatStore.getState().activeSessionId === sessionId,
         clear: clearTrackedTasks, select: addSession, remember: useChatStore.getState().rememberSession,
-        done: (canvasCopied) => toast.success(schemaText(schema, 'ui.studio.message.branch_done'), canvasCopied ? { description: schemaText(schema, 'ui.chat.branch_canvas_current') } : undefined),
+        done: (copied) => toast.success(schemaText(schema, 'ui.studio.message.branch_done'), branchCopiedCurrentState(copied) ? { description: schemaText(schema, 'ui.chat.branch_canvas_current') } : undefined),
         failed: (error) => toast.error(error instanceof Error && error.message ? withErrorReference(error.message, error) : schemaText(schema, 'ui.studio.message.branch_failed')),
       });
     } finally {

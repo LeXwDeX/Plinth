@@ -18,6 +18,12 @@ import (
 
 type fakeAgentTaskReader struct {
 	task generation.Task
+	// scopeSessions lists sessions whose branch refs include this Task (#186).
+	scopeSessions map[string]bool
+}
+
+func (reader fakeAgentTaskReader) TaskInSession(_ context.Context, owner generation.OwnerID, session string, id generation.TaskID) (bool, error) {
+	return reader.scopeSessions[session] && owner == reader.task.OwnerID && id == reader.task.ID, nil
 }
 
 func (reader fakeAgentTaskReader) Get(

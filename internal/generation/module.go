@@ -206,6 +206,9 @@ func (m *Module) Submit(ctx context.Context, cmd SubmitCommand) (Accepted, error
 	if err != nil {
 		return Accepted{}, err
 	}
+	if err := m.normalizeInputAssetSessions(ctx, cmd.OwnerID, cmd.SessionID, resolved); err != nil {
+		return Accepted{}, err
+	}
 	dependencies, err := m.resolveTaskDependencies(
 		ctx,
 		cmd.OwnerID,
@@ -384,8 +387,19 @@ func (m *Module) resolveTaskDependencies(
 		attemptStateAllowed := aggregate.CurrentAttempt != nil &&
 			(aggregate.CurrentAttempt.State == "" || aggregate.CurrentAttempt.State == AttemptUpstreamSucceeded ||
 				(parameter.TaskSourceKind == schema.TaskSourceAssets && aggregate.CurrentAttempt.State == AttemptDeliveryCompleted))
+		// A branch may use an ancestor Task as its source. The Task stays in
+		// its own session; only the dependency the Provider sees is bound to
+		// the requesting (effective) session.
+		inSession := aggregate.Task.SessionID == session
+		if parameter.SameSession && session != "" && !inSession {
+			allowed, scopeErr := m.TaskInSession(ctx, owner, session, aggregate.Task.ID)
+			if scopeErr != nil {
+				return nil, mapRepositoryError("resolve_task_dependencies", scopeErr)
+			}
+			inSession = allowed
+		}
 		if aggregate.Task.ID != TaskID(text) || aggregate.Task.OwnerID != owner ||
-			(parameter.SameSession && (session == "" || aggregate.Task.SessionID != session)) ||
+			(parameter.SameSession && !inSession) ||
 			aggregate.Task.State != TaskSucceeded ||
 			aggregate.CurrentAttempt == nil || !attemptStateAllowed ||
 			!taskCapabilityAllowed(parameter.TaskCapabilities, aggregate.Task.Capability) ||
@@ -403,7 +417,9 @@ func (m *Module) resolveTaskDependencies(
 		}
 		boundSession := ""
 		if parameter.SameSession {
-			boundSession = aggregate.Task.SessionID
+			// Providers compare this with the Task they run; a branch Task
+			// must name the branch, not the ancestor that produced the source.
+			boundSession = session
 		}
 		if parameter.TaskSourceKind == schema.TaskSourceAssets {
 			if aggregate.Task.ID != TaskID(text) ||
@@ -609,6 +625,49 @@ func (m *Module) Exists(ctx context.Context, id TaskID) (bool, error) {
 		return existed, mapRepositoryError("exists", err)
 	}
 	return existed, nil
+}
+
+// TaskInSession reports whether a Task is readable from a chat session. The
+// session itself is the caller's exact check; this method answers the
+// additional branch-ancestry scope. A repository without the refs table
+// answers false, which is the pre-#186 fail-closed behaviour.
+func (m *Module) TaskInSession(ctx context.Context, owner OwnerID, session string, id TaskID) (bool, error) {
+	if owner == "" || session == "" || id == "" {
+		return false, nil
+	}
+	scope, ok := m.repository.(SessionTaskScope)
+	if !ok {
+		return false, nil
+	}
+	return scope.TaskInSession(ctx, owner, session, id)
+}
+
+// normalizeInputAssetSessions makes a branch Task see its ancestor's Task
+// assets under the branch's effective session. Providers validate an
+// InputAsset's SessionID against the Task they run (Meshy/Tripo/localparts
+// same_session); the stored Task and its assets are not changed. A Task that
+// is not in session scope is left alone, so the provider still refuses it.
+func (m *Module) normalizeInputAssetSessions(ctx context.Context, owner OwnerID, session string, assets map[string][]InputAsset) error {
+	if session == "" || len(assets) == 0 {
+		return nil
+	}
+	for role, list := range assets {
+		for index := range list {
+			asset := &list[index]
+			if asset.SessionID == "" || asset.SessionID == session || asset.TaskID == "" {
+				continue
+			}
+			allowed, err := m.TaskInSession(ctx, owner, session, asset.TaskID)
+			if err != nil {
+				return mapRepositoryError("normalize_input_session", err)
+			}
+			if allowed {
+				asset.SessionID = session
+			}
+		}
+		assets[role] = list
+	}
+	return nil
 }
 
 // GetScoped 与 List/Delete 共用 TaskListScope 语义：持有 tasks.read.any

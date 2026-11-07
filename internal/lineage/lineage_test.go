@@ -18,6 +18,17 @@ type fakeTasks struct {
 	tasks []generation.Task
 	err   error
 	pages int
+	// refs is the branch read scope: branch session -> inherited Task IDs.
+	refs map[string]map[generation.TaskID]bool
+}
+
+func (f *fakeTasks) TaskInSession(_ context.Context, owner generation.OwnerID, session string, id generation.TaskID) (bool, error) {
+	for _, task := range f.tasks {
+		if task.ID == id && task.OwnerID == owner && task.SessionID == session {
+			return true, nil
+		}
+	}
+	return f.refs[session][id], nil
 }
 
 func (f *fakeTasks) List(_ context.Context, scope generation.TaskListScope, query generation.ListQuery) (generation.TaskPage, error) {
@@ -27,7 +38,9 @@ func (f *fakeTasks) List(_ context.Context, scope generation.TaskListScope, quer
 	}
 	var matched []generation.Task
 	for _, task := range f.tasks {
-		if task.OwnerID == scope.OwnerID() && task.SessionID == query.SessionID &&
+		inScope := task.SessionID == query.SessionID ||
+			(query.IncludeBranchRefs && f.refs[query.SessionID][task.ID])
+		if task.OwnerID == scope.OwnerID() && inScope &&
 			(len(query.States) == 0 || task.State == query.States[0]) {
 			matched = append(matched, task)
 		}

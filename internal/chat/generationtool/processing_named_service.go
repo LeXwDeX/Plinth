@@ -594,7 +594,8 @@ func (executor *Executor) parentModel(ctx context.Context, command chat.ToolComm
 			}
 		}
 		if parent.ID != "" && parent.ID != task.ID && string(parent.OwnerID) == command.OwnerID &&
-			parent.SessionID == command.SessionID && parent.State == generation.TaskSucceeded && hasSavedModel(parent) {
+			executor.taskInSession(ctx, command.OwnerID, command.SessionID, parent) &&
+			parent.State == generation.TaskSucceeded && hasSavedModel(parent) {
 			return parent, true
 		}
 	}
@@ -876,7 +877,7 @@ func (executor *Executor) proposalAnswered(ctx context.Context, command chat.Too
 				continue
 			}
 			task, err := executor.gateway.Get(ctx, generation.OwnerID(command.OwnerID), generation.TaskID(earlierSource))
-			if err != nil || task.SessionID != command.SessionID {
+			if err != nil || !executor.taskInSession(ctx, command.OwnerID, command.SessionID, task) {
 				continue
 			}
 			wanted := executor.wantedServices(step, requested, executor.mentionsIn(ctx, command, step, asked))

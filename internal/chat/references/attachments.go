@@ -120,8 +120,8 @@ func (resolver *Resolver) verifyInputAsset(
 
 // ownedSessionTask loads a Task of the owner that belongs to this session. A
 // picture may also come from a Task made outside any chat (allowUnscoped); a
-// model is always a Task of this very session, like the processing tools
-// require. A Task of another session is never accepted.
+// model is always a Task this session may read, like the processing tools
+// require. A sibling session or another owner is never accepted.
 func (resolver *Resolver) ownedSessionTask(
 	ctx context.Context,
 	owner generation.OwnerID,
@@ -139,10 +139,12 @@ func (resolver *Resolver) ownedSessionTask(
 	if task.SessionID == sessionID || (allowUnscoped && task.SessionID == "") {
 		return task, nil
 	}
-	// A branch session may use its direct parent's Task (#153): the copy keeps
-	// the picked object usable without loosening the owner check for others.
-	if resolver.parentSession != nil && task.SessionID != "" {
-		if parent, err := resolver.parentSession(ctx, owner, sessionID); err == nil && parent != "" && task.SessionID == parent {
+	// A branch session may reuse a Task of any ancestor session (#186), not
+	// just its direct parent. The scope is the branch's own refs; the owner
+	// check above is never loosened for another owner or a sibling session.
+	if resolver.taskInSession != nil && task.SessionID != "" {
+		allowed, err := resolver.taskInSession(ctx, owner, sessionID, id)
+		if err == nil && allowed {
 			return task, nil
 		}
 	}

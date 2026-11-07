@@ -38,6 +38,11 @@ func TestBranchSessionHTTP(t *testing.T) {
 	if copied, ok := body["canvas_copied"].(bool); !ok || copied {
 		t.Fatalf("no canvas: %s", response.Body.String())
 	}
+	for _, field := range []string{"scene_copied", "captures_copied"} {
+		if copied, ok := body[field].(bool); !ok || copied {
+			t.Fatalf("%s without 3D state: %s", field, response.Body.String())
+		}
+	}
 	session, ok := body["session"].(map[string]any)
 	if !ok || session["parent_session_id"] != sessionID || session["parent_message_id"] != "branch-source" {
 		t.Fatalf("branch body: %s", response.Body.String())

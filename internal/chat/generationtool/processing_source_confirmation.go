@@ -134,7 +134,7 @@ func (executor *Executor) sourceConfirmation(ctx context.Context, command chat.T
 		return localize(value)
 	}
 	selectedModel, err := executor.gateway.Get(ctx, generation.OwnerID(command.OwnerID), generation.TaskID(selectedTask))
-	if err != nil || selectedModel.SessionID != command.SessionID {
+	if err != nil || !executor.taskInSession(ctx, command.OwnerID, command.SessionID, selectedModel) {
 		reason = text(processing.Messages.SelectedSourceIncompatible)
 	} else {
 		asset := generation.AssetID(selectedAsset)

@@ -17,26 +17,33 @@ func (gateway *parentTaskGateway) OpenAsset(context.Context, generation.OwnerID,
 	return generation.AssetContent{}, nil
 }
 
-func TestOwnedSessionTaskAcceptsOnlyTheDirectParentTask(t *testing.T) {
-	tasks := &parentTaskGateway{task: generation.Task{ID: "task", OwnerID: "owner", SessionID: "parent"}}
-	resolver := &Resolver{tasks: tasks, parentSession: func(_ context.Context, _ generation.OwnerID, sessionID string) (string, error) {
-		if sessionID == "branch" {
-			return "parent", nil
-		}
-		return "", nil
-	}}
-	if _, err := resolver.ownedSessionTask(context.Background(), "owner", "branch", "task", false); err != nil {
-		t.Fatalf("direct parent task: %v", err)
+// TestOwnedSessionTaskUsesTheBranchScope: a branch may read an ancestor Task
+// (parent or grandparent) through its refs, and a sibling session sharing the
+// same ancestor must not. This is the same helper the generation kernel uses,
+// so the attachment verifier cannot drift from source_task admission.
+func TestOwnedSessionTaskUsesTheBranchScope(t *testing.T) {
+	tasks := &parentTaskGateway{task: generation.Task{ID: "task", OwnerID: "owner", SessionID: "grandparent"}}
+	scope := func(_ context.Context, owner generation.OwnerID, sessionID string, taskID generation.TaskID) (bool, error) {
+		return owner == "owner" && taskID == "task" && (sessionID == "parent" || sessionID == "branch"), nil
 	}
-	if _, err := resolver.ownedSessionTask(context.Background(), "owner", "other", "task", false); err == nil {
-		t.Fatal("a non-child session must reject the parent's task")
+	resolver := &Resolver{tasks: tasks, taskInSession: scope}
+	for _, session := range []string{"parent", "branch"} {
+		if _, err := resolver.ownedSessionTask(context.Background(), "owner", session, "task", false); err != nil {
+			t.Fatalf("%s may read its ancestor task: %v", session, err)
+		}
+	}
+	if _, err := resolver.ownedSessionTask(context.Background(), "owner", "sibling", "task", false); err == nil {
+		t.Fatal("a sibling session must reject the ancestor task")
+	}
+	if _, err := resolver.ownedSessionTask(context.Background(), "other", "branch", "task", false); err == nil {
+		t.Fatal("another owner must reject the task")
 	}
 }
 
-func TestOwnedSessionTaskRejectsTheParentTaskWithoutAParentReader(t *testing.T) {
+func TestOwnedSessionTaskRejectsTheParentTaskWithoutAScope(t *testing.T) {
 	tasks := &parentTaskGateway{task: generation.Task{ID: "task", OwnerID: "owner", SessionID: "parent"}}
 	resolver := &Resolver{tasks: tasks}
 	if _, err := resolver.ownedSessionTask(context.Background(), "owner", "branch", "task", false); err == nil {
-		t.Fatal("a branch without a parent reader must not reuse the task")
+		t.Fatal("a branch without a scope must not reuse the task")
 	}
 }

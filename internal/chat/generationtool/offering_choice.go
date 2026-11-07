@@ -139,7 +139,8 @@ func (executor *Executor) pairedOffering(
 	id generation.TaskID,
 ) (generation.Offering, bool) {
 	source, err := executor.gateway.Get(ctx, generation.OwnerID(command.OwnerID), id)
-	if err != nil || source.OwnerID != generation.OwnerID(command.OwnerID) || source.SessionID != command.SessionID ||
+	if err != nil || source.OwnerID != generation.OwnerID(command.OwnerID) ||
+		!executor.taskInSession(ctx, command.OwnerID, command.SessionID, source) ||
 		source.State != generation.TaskSucceeded {
 		return generation.Offering{}, false
 	}

@@ -36,6 +36,13 @@ type processingGateway struct {
 	// listAll makes List ignore the state filter, standing in for a lister
 	// that does not apply it.
 	listAll bool
+	// branchRefs is the read-only ancestor scope a branch inherits (#186).
+	branchRefs map[string]map[generation.TaskID]bool
+}
+
+func (g *processingGateway) TaskInSession(_ context.Context, owner generation.OwnerID, session string, task generation.TaskID) (bool, error) {
+	source, found := g.tasks[task]
+	return found && source.OwnerID == owner && g.branchRefs[session][task], nil
 }
 
 func (g *processingGateway) SubmitPrepared(ctx context.Context, cmd generation.SubmitPreparedCommand) (generation.Accepted, error) {
@@ -95,7 +102,9 @@ func (g *processingGateway) Get(_ context.Context, owner generation.OwnerID, id 
 func (g *processingGateway) List(_ context.Context, scope generation.TaskListScope, query generation.ListQuery) (generation.TaskPage, error) {
 	var page generation.TaskPage
 	for _, task := range g.tasks {
-		if task.OwnerID != scope.OwnerID() || (query.SessionID != "" && task.SessionID != query.SessionID) ||
+		inScope := task.SessionID == query.SessionID ||
+			(query.IncludeBranchRefs && g.branchRefs[query.SessionID][task.ID])
+		if task.OwnerID != scope.OwnerID() || (query.SessionID != "" && !inScope) ||
 			(!g.listAll && task.State != generation.TaskSucceeded) {
 			continue
 		}

@@ -20,7 +20,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 			strings.TrimSpace(schema.Presentation.Messages.BranchPendingApproval) == "" ||
 			strings.TrimSpace(schema.Presentation.Messages.BranchScene) == "" ||
 			schema.API.ResponseFields.ParentSessionID == "" || schema.API.ResponseFields.ParentMessageID == "" ||
-			schema.API.ResponseFields.ParentTitle == "" || schema.API.ResponseFields.ParentDeleted == "" || schema.API.ResponseFields.BranchCanvasCopied == "" {
+			schema.API.ResponseFields.ParentTitle == "" || schema.API.ResponseFields.ParentDeleted == "" ||
+			schema.API.ResponseFields.BranchCanvasCopied == "" || schema.API.ResponseFields.BranchSceneCopied == "" ||
+			schema.API.ResponseFields.BranchCapturesCopied == "" {
 			return errors.New("chat: branch route requires title template, errors and parent fields")
 		}
 	}

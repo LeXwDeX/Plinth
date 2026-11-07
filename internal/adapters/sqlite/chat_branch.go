@@ -43,35 +43,46 @@ func (r *Repository) BranchSession(ctx context.Context, request chat.BranchReque
 	if exists != 0 {
 		return chat.Session{}, chat.ErrBranchPendingApproval
 	}
-	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM scene_objects WHERE session_id=?)`, request.SessionID).Scan(&exists)
-	if err != nil {
-		return chat.Session{}, err
-	}
-	if exists != 0 {
-		return chat.Session{}, chat.ErrBranchScene
-	}
 	if request.NewID == nil || request.NewSessionID == "" || !strings.Contains(request.TitleTemplate, "{title}") {
 		return chat.Session{}, chat.ErrBranchUnavailable
 	}
 	branchTitle := strings.ReplaceAll(request.TitleTemplate, "{title}", title)
-	// 分支可复用直接父会话的 Task（references.Resolve 的有界授权）；压缩记录不复制，后续从完整原始消息重新压缩。
+	// 分支可读直接父会话及更早祖先的 Task（只读 source_task/lineage 授权）。
+	// 压缩记录不复制，后续从完整原始消息重新压缩。
 	_, err = tx.ExecContext(ctx, `INSERT INTO go_chat_sessions (id,owner_id,owner_name,title,created_at,updated_at,approval_mode,agent_scope,title_source,notes,brief,chat_model,reasoning_effort,picked,style_lock_enabled,style_lock_text,style_lock_references,parent_session_id,parent_message_id,parent_title,parent_deleted)
 		SELECT ?,owner_id,owner_name,?,?,?,approval_mode,agent_scope,?,notes,brief,chat_model,reasoning_effort,picked,style_lock_enabled,style_lock_text,style_lock_references,id,?,title,0 FROM go_chat_sessions WHERE id=? AND owner_id=?`, request.NewSessionID, branchTitle, formatTime(request.At), formatTime(request.At), chat.TitleSourceAuto, request.MessageID, request.SessionID, request.OwnerID)
 	if err != nil {
 		return chat.Session{}, fmt.Errorf("insert branch session: %w", err)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM go_chat_messages WHERE session_id=? AND (created_at<? OR (created_at=? AND rowid<=?)) ORDER BY created_at,rowid`, request.SessionID, created, created, rowID)
+	if err := insertBranchTaskRefs(ctx, tx, request.OwnerID, request.SessionID, request.NewSessionID, formatTime(request.At)); err != nil {
+		return chat.Session{}, err
+	}
+	// The current 3D stage and its captures are copied with fresh IDs. Both
+	// are fail-closed: evidence the owner or the source session cannot read
+	// refuses the whole branch with ErrBranchScene instead of dropping rows.
+	captureRemap, capturesCopied, err := branchCaptureCopy(ctx, tx, request)
 	if err != nil {
 		return chat.Session{}, err
 	}
-	var ids []string
+	sceneCopied, err := branchSceneCopy(ctx, tx, request)
+	if err != nil {
+		return chat.Session{}, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id,attachments FROM go_chat_messages WHERE session_id=? AND (created_at<? OR (created_at=? AND rowid<=?)) ORDER BY created_at,rowid`, request.SessionID, created, created, rowID)
+	if err != nil {
+		return chat.Session{}, err
+	}
+	type sourceMessage struct {
+		id, attachments string
+	}
+	var messages []sourceMessage
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var message sourceMessage
+		if err := rows.Scan(&message.id, &message.attachments); err != nil {
 			rows.Close()
 			return chat.Session{}, err
 		}
-		ids = append(ids, id)
+		messages = append(messages, message)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -80,8 +91,12 @@ func (r *Repository) BranchSession(ctx context.Context, request chat.BranchReque
 	if err := rows.Close(); err != nil {
 		return chat.Session{}, err
 	}
-	for _, id := range ids {
-		_, err = tx.ExecContext(ctx, `INSERT INTO go_chat_messages(id,session_id,role,content,image_urls,tool_calls,attachments,multiview,created_at) SELECT ?,?,role,content,image_urls,tool_calls,attachments,multiview,created_at FROM go_chat_messages WHERE id=? AND session_id=?`, request.NewID("message"), request.NewSessionID, id, request.SessionID)
+	for _, message := range messages {
+		attachments, err := remapCaptureIDs(message.attachments, captureRemap)
+		if err != nil {
+			return chat.Session{}, err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO go_chat_messages(id,session_id,role,content,image_urls,tool_calls,attachments,multiview,created_at) SELECT ?,?,role,content,image_urls,tool_calls,?,multiview,created_at FROM go_chat_messages WHERE id=? AND session_id=?`, request.NewID("message"), request.NewSessionID, attachments, message.id, request.SessionID)
 		if err != nil {
 			return chat.Session{}, fmt.Errorf("copy branch message: %w", err)
 		}
@@ -117,6 +132,8 @@ func (r *Repository) BranchSession(ctx context.Context, request chat.BranchReque
 		return chat.Session{}, err
 	}
 	session.BranchCanvasCopied = canvasCopied
+	session.BranchSceneCopied = sceneCopied
+	session.BranchCapturesCopied = capturesCopied > 0
 	if err := tx.Commit(); err != nil {
 		return chat.Session{}, err
 	}

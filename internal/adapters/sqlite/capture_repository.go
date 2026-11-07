@@ -180,8 +180,12 @@ func (r *CaptureRepository) Record(ctx context.Context, cmd capture.Command) (ca
 	err = conn.QueryRowContext(ctx, `SELECT a.media_type,a.role,a.variant,t.offering_json FROM generation_assets a
 		JOIN generation_tasks t ON t.id=a.task_id
 		WHERE a.id=? AND a.task_id=? AND a.storage_key<>'' AND a.sha256<>''
-		AND t.owner_id=? AND t.session_id=? AND t.state='SUCCEEDED'`, cmd.ModelAssetID,
-		cmd.SourceTaskID, cmd.OwnerID, cmd.SessionID).Scan(&modelMediaType, &modelRole, &modelVariant, &offeringJSON)
+		AND t.owner_id=? AND t.state='SUCCEEDED'
+		AND (t.session_id=? OR EXISTS (
+			SELECT 1 FROM chat_branch_task_refs AS ref
+			WHERE ref.owner_id=t.owner_id AND ref.branch_session_id=? AND ref.task_id=t.id
+		))`, cmd.ModelAssetID,
+		cmd.SourceTaskID, cmd.OwnerID, cmd.SessionID, cmd.SessionID).Scan(&modelMediaType, &modelRole, &modelVariant, &offeringJSON)
 	if err != nil || (modelMediaType != "model/gltf-binary" && modelMediaType != "model/gltf+json" && modelMediaType != "application/octet-stream") {
 		return capture.Record{}, capture.ErrNotFound
 	}

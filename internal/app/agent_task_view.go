@@ -112,8 +112,24 @@ func newAgentTaskRecoverer(tasks interface {
 		if err != nil {
 			return nil, err
 		}
-		if sessionID == "" || task.SessionID != sessionID {
+		if sessionID == "" {
 			return nil, &generation.Error{Code: generation.ErrNotFound, Operation: "upstream_refetch"}
+		}
+		// recover_task_result reads a Task of this session or, in a branch, of
+		// an ancestor session (#186). The same scope helper guards source_task
+		// admission, so the Agent cannot refetch a sibling's failed result.
+		if task.SessionID != sessionID {
+			scope, ok := tasks.(generation.SessionTaskScope)
+			allowed := false
+			if ok {
+				allowed, err = scope.TaskInSession(ctx, owner, sessionID, id)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if !allowed {
+				return nil, &generation.Error{Code: generation.ErrNotFound, Operation: "upstream_refetch"}
+			}
 		}
 		result, err := tasks.RefetchUpstreamResult(ctx, owner, id, generation.RefetchByAgent)
 		if err != nil && !generation.IsCode(err, generation.ErrConflict) {

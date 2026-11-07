@@ -94,9 +94,10 @@ type Config struct {
 	// role instead of upload, so the conversation does not show it as an
 	// ordinary result picture.
 	RenderAssetType string
-	// ParentSession returns the session this one was branched from (#153), or
-	// "" when it has no parent. A branch may reuse its direct parent's Task.
-	ParentSession func(ctx context.Context, owner generation.OwnerID, sessionID string) (string, error)
+	// TaskInSession reports whether a Task is readable as a source of this
+	// chat session (#186). It is true for the session's own Tasks and for a
+	// branch's inherited ancestor Tasks; ownership is always checked.
+	TaskInSession func(ctx context.Context, owner generation.OwnerID, sessionID string, taskID generation.TaskID) (bool, error)
 }
 
 type Resolver struct {
@@ -122,7 +123,7 @@ type Resolver struct {
 	captures                CaptureReader
 	modelAssetRole          string
 	renderAssetType         string
-	parentSession           func(ctx context.Context, owner generation.OwnerID, sessionID string) (string, error)
+	taskInSession           func(ctx context.Context, owner generation.OwnerID, sessionID string, taskID generation.TaskID) (bool, error)
 }
 
 func New(config Config) (*Resolver, error) {
@@ -161,7 +162,7 @@ func New(config Config) (*Resolver, error) {
 		captures:                config.Captures,
 		modelAssetRole:          config.ModelAssetRole,
 		renderAssetType:         config.RenderAssetType,
-		parentSession:           config.ParentSession,
+		taskInSession:           config.TaskInSession,
 	}, nil
 }
 
