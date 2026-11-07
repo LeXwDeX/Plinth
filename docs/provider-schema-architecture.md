@@ -626,7 +626,7 @@ Bang 的两个独立候选均为原生 0.5：`rodin-task` 只接受精确 Rodin 
 | 用例 | 扣费 | 下载列表 | 必需 GLB | 结构 |
 |---|---|---|---|---|
 | Bang `asset_id`（来源为 #188 文生 Rodin 任务） | 0.5 | 仅 `base_high_pbr.glb` | 213,315,892 B，SHA-256 `433dce281425…` | 6 个部件，200 万三角面；base color 12288²，另两张 4096² |
-| Bang 本地模型（1.8 MB 无贴图静态 GLB + 一张参考图） | 0.5 | 仅 `base_high_pbr.glb` | 86,902,156 B，`dee4c67f0786…` | 8 个部件，200 万三角面；三张 4096² |
+| Bang（模型文件，1.8 MB 无贴图静态 GLB + 一张参考图） | 0.5 | 仅 `base_high_pbr.glb` | 86,902,156 B，`dee4c67f0786…` | 8 个部件，200 万三角面；三张 4096² |
 | Texture（同一模型和参考图） | 2 | 仅 `base_basic_pbr.glb` | 23,913,940 B，`580d6eed9658…` | 1 个 mesh，三角面不变（76,412）；base color 6144²，另两张 2048² |
 
 三份文件都在 `file.hyper3d.com` 的 HTTPS 签名 URL 下，直接 200、`Content-Type: model/gltf-binary`、没有重定向，没有预览图；GLB 2.0、`extensionsRequired` 为空，用当前 main 的 `Store.Put/Open` 离线检查都通过且读回字节一致。`*_pbr.glb` 规则同时挡住 `material=All` 之类设置可能多出的 shaded 包或预览图被填进模型槽位。Bang `asset_id` 结果的 base color 是 12K、整份 213 MB：超出 `generated-glb-v1` 的 128 MiB 与单图上限，glTF 免费补齐和 Meshy Convert（70 MiB）都不可用，只交付 GLB；Bang 端点的 `resolution` 只有 Basic（2K）/High（4K）两档（与 Texture 端点按 `texture_mode` 分档的表不同），这张 12K 贴图不由它决定，本次没有为压低体积再付费试 Basic。
@@ -635,7 +635,7 @@ Bang 的两个独立候选均为原生 0.5：`rodin-task` 只接受精确 Rodin 
 
 | Offering（修订） | 输入 | 冻结报价 / 回执 `consumed` / 用量记录 | 必需 GLB | 结构 |
 |---|---|---|---|---|
-| Bang 本地模型（187.2） | 1,832,284 B 静态 GLB（76,412 三角面）+ 一张 PNG 参考图 | 0.5 / 0.5 / 0.5 | 84,339,612 B，`069a40a4077a…` | 7 个 mesh/材质，200 万三角面，三张 4096² |
+| Bang（模型文件，187.2） | 1,832,284 B 静态 GLB（76,412 三角面）+ 一张 PNG 参考图 | 0.5 / 0.5 / 0.5 | 84,339,612 B，`069a40a4077a…` | 7 个 mesh/材质，200 万三角面，三张 4096² |
 | Bang Rodin 来源（187.3） | #188 文生 Task（同会话） | 0.5 / 0.5 / 0.5 | 188,047,300 B，`8f4ed8b92c5d…` | 7 个 mesh/材质，200 万三角面，base color 12288² |
 | Texture（187.2） | 同一 GLB 与参考图 | 2 / 2 / 2 | 77,176,140 B，`52e82983b54b…` | 1 个 mesh，三角面不变，base color 12288² |
 

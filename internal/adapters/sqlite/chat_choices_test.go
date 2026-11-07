@@ -38,7 +38,7 @@ func sampleChoice(call string) chat.Choice {
 	return chat.Choice{OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-1", CallID: call,
 		ToolName: "process_model", Capability: "mesh-segmentation", StepIndex: -1,
 		Options: []chat.ChoiceOption{
-			{ID: "hyper3d/bang/local-model", ProviderName: "Hyper3D", ModelName: "Bang（本地模型）", Arguments: json.RawMessage(`{"offering_id":"hyper3d/bang/local-model"}`)},
+			{ID: "hyper3d/bang/local-model", ProviderName: "Hyper3D", ModelName: "Bang（模型文件）", Arguments: json.RawMessage(`{"offering_id":"hyper3d/bang/local-model"}`)},
 			{ID: "hyper3d/bang/rodin-task", ProviderName: "Hyper3D", ModelName: "Bang（Rodin 来源）", Arguments: json.RawMessage(`{"offering_id":"hyper3d/bang/rodin-task"}`)},
 		},
 		DefaultOptionID: "hyper3d/bang/local-model", AllowDefault: true, DefaultArguments: json.RawMessage(`{"use_default_offering":true}`),

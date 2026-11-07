@@ -73,7 +73,7 @@ func registerProvidersWithTransport(
 			}
 		}
 		if assets == nil || (connection.Protocol == "local-model" || connection.Protocol == "local-model-parts") && inputs == nil || connection.Protocol == "local-recovery" && (len(recoveryStores) != 1 || recoveryStores[0] == nil) {
-			logger.Warn("本地模型处理缺少输入或资产存储，路由不可用", "connection", connection.ID)
+			logger.Warn("平台处理缺少输入或资产存储，路由不可用", "connection", connection.ID)
 			continue
 		}
 		adapter, err := buildProviderAdapterWithTransport(offerings, connection, "", "", 0, "", inputs, assets, httpTransport, recoveryStores...)

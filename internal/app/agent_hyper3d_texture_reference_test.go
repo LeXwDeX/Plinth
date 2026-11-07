@@ -150,7 +150,7 @@ func TestAgentToolSubmitsHyper3DTextureWithTheChatImageAndModel(t *testing.T) {
 	if pictureURL == "" {
 		pictureURL = "/api/v1/assets/" + uploaded.ID
 	}
-	message, _ := json.Marshal(map[string]any{"content": "给 @model1 换贴图：选 Hyper3D 纹理生成（本地模型），附上的是参考图 @img1", "image_urls": []string{pictureURL}})
+	message, _ := json.Marshal(map[string]any{"content": "给 @model1 换贴图：选 Hyper3D 纹理生成（模型文件），附上的是参考图 @img1", "image_urls": []string{pictureURL}})
 	if response := appChatRequest(handler, http.MethodPost, "/api/chat/sessions/"+session.ID+"/messages", string(message)); response.Code != http.StatusAccepted {
 		t.Fatalf("send retexture request %d %s", response.Code, response.Body)
 	}
