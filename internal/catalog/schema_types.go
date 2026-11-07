@@ -3177,8 +3177,13 @@ type ChatAPISchema struct {
 type ChatStyleLockSchema struct {
 	MaximumTextCharacters  int `json:"maximum_text_characters"`
 	MaximumReferenceImages int `json:"maximum_reference_images"`
+	// DirectTaskCapabilities names the capabilities whose direct prepare
+	// requests (POST /api/v1/tasks/prepare) carry the lock. It is server-only:
+	// the public projection keeps publishing the two bounds above.
+	DirectTaskCapabilities []schemacontract.Capability `json:"direct_task_capabilities,omitempty"`
 	// PromptTemplate and EditScopeTemplate are English provider-prompt copy;
-	// the generation tool fills them only for image-domain Offerings.
+	// the generation tool and direct prepare fill them only for the declared
+	// image capabilities.
 	PromptTemplate    string `json:"prompt_template,omitempty"`
 	EditScopeTemplate string `json:"edit_scope_template,omitempty"`
 }

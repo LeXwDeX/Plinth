@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clearPendingDirectTask, contentFingerprint, inpaintSourceIdentity, prepareDirectTask, readPendingDirectTask, savePendingDirectTask, submitDirectTask } from './canvas-image-actions';
+import { clearPendingDirectTask, contentFingerprint, inpaintDirectPrepareBody, inpaintSourceIdentity, prepareDirectTask, readPendingDirectTask, sameStyleLockSnapshot, savePendingDirectTask, submitDirectTask } from './canvas-image-actions';
 
 const routes = {
   task_prepare: '/api/v1/tasks/prepare',
@@ -63,6 +63,35 @@ describe('canvas paid submission', () => {
     expect(inpaintSourceIdentity({ ...request, sourceFingerprint: first })).not.toContain('/api/v1/assets');
   });
 
+  it('belongs a frozen inpaint request to the style lock and its one-turn exemption (#187)', () => {
+    const base = {
+      offeringId: 'model-a', sourceFingerprint: 'source-a', maskFingerprint: 'mask-a',
+      frame: { x: 10, y: 20, width: 30, height: 40 }, size: { width: 30, height: 40 }, target: '30x40',
+      styleLock: { enabled: true, skipped: false, text: ' ink ', references: ['style-a'] },
+    };
+    const identity = inpaintSourceIdentity(base);
+    // The snapshot stores the trimmed text, so surrounding spaces do not prepare again.
+    expect(inpaintSourceIdentity({ ...base, styleLock: { ...base.styleLock, text: 'ink' } })).toBe(identity);
+    expect(inpaintSourceIdentity({ ...base, styleLock: { ...base.styleLock, enabled: false } })).not.toBe(identity);
+    expect(inpaintSourceIdentity({ ...base, styleLock: { ...base.styleLock, skipped: true } })).not.toBe(identity);
+    expect(inpaintSourceIdentity({ ...base, styleLock: { ...base.styleLock, text: 'paint' } })).not.toBe(identity);
+    expect(inpaintSourceIdentity({ ...base, styleLock: { ...base.styleLock, references: ['style-b'] } })).not.toBe(identity);
+    expect(inpaintSourceIdentity({ ...base, styleLock: { ...base.styleLock, references: ['style-a', 'style-b'] } })).not.toBe(identity);
+    expect(sameStyleLockSnapshot(base.styleLock, { ...base.styleLock, text: ' ink ' })).toBe(true);
+    expect(sameStyleLockSnapshot(base.styleLock, { ...base.styleLock, skipped: true })).toBe(false);
+  });
+
+  it('sends the lock exemption only in the inpaint dialog body (#187)', () => {
+    const input = { prompt: 'blue robot', reference_assets: ['asset-a'], mask: 'mask-a' };
+    expect(inpaintDirectPrepareBody('model-a', 'session-a', input, false)).toEqual({
+      capability: 'image-to-image', offering_id: 'model-a', session_id: 'session-a', input,
+    });
+    expect(inpaintDirectPrepareBody('model-a', 'session-a', input, true)).toEqual({
+      capability: 'image-to-image', offering_id: 'model-a', session_id: 'session-a', input,
+      style_lock_skipped: true,
+    });
+  });
+
   it('does not reuse a request when the source bytes, mask, frame, size, target or offering changed', async () => {
     const base = {
       offeringId: 'model-a', sourceFingerprint: 'source-a', maskFingerprint: 'mask-a',
@@ -106,6 +135,16 @@ describe('canvas paid submission', () => {
     });
     expect((requests[1].init.headers as Record<string, string>)['Idempotency-Key'])
       .toBe((requests[3].init.headers as Record<string, string>)['Idempotency-Key']);
+  });
+
+  it('keeps the prepare answer reference note for the dialog (#187)', async () => {
+    const responses = [
+      { prepared_input_id: 'prepared-a', reference_note: '已优先保留本轮图片，风格参考图按顺序截断。' },
+      { request_id: 'request-a' },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => responses.shift() })));
+    const pending = await prepareDirectTask(routes, { session_id: 'session-a' }, 'session-a', 'model-a');
+    expect(pending.referenceNote).toBe('已优先保留本轮图片，风格参考图按顺序截断。');
   });
   it('skips the human decision when the session approval mode already approved the step', async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];

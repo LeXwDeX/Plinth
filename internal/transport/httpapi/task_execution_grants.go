@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness"
@@ -68,6 +69,10 @@ func (s *Server) prepareTask(writer http.ResponseWriter, request *http.Request, 
 		ManifestHash        string                `json:"manifest_hash,omitempty"`
 		SourceSceneObjectID string                `json:"source_scene_object_id,omitempty"`
 		SourceSceneRevision int64                 `json:"source_scene_revision,omitempty"`
+		// StyleLockSkipped is this request's one-turn exemption (#187). The
+		// direct prepare body uses DisallowUnknownFields, so the field ships
+		// with the frontend that reads it.
+		StyleLockSkipped bool `json:"style_lock_skipped,omitempty"`
 	}
 	if err := s.decodeJSON(writer, request, &body); err != nil {
 		return
@@ -75,9 +80,47 @@ func (s *Server) prepareTask(writer http.ResponseWriter, request *http.Request, 
 	if !s.taskSessionOwned(writer, request, owner, body.SessionID) {
 		return
 	}
+	input := body.Input
+	if !body.StyleLockSkipped {
+		style := s.application.Chat.StyleLock
+		if s.chat != nil && chat.StyleLockAppliesToDirect(style, body.Capability) {
+			offeringID := body.OfferingID
+			if offeringID == "" {
+				// The same default the preparation below would select.
+				if resolved, resolveErr := s.generation.DefaultOfferingID(body.Capability); resolveErr == nil {
+					offeringID = resolved
+				}
+			}
+			if offering, found := s.generation.Offering(offeringID); found &&
+				chat.StyleLockAppliesToDirect(style, offering.Capability) {
+				lock, lockErr := s.chat.StyleLock(request.Context(), string(owner), body.SessionID)
+				if lockErr != nil {
+					// The session was just proved owned, so this is a read failure.
+					noteCause(writer, lockErr)
+					s.writeMessageProblem(writer, http.StatusInternalServerError, "internal", "error.internal")
+					return
+				}
+				merged, mergeErr := chat.ApplyStyleLockToDirectInput(lock, body.StyleLockSkipped,
+					body.Capability, offering, style, input)
+				if mergeErr != nil {
+					if errors.Is(mergeErr, chat.ErrStyleLockReferenceUnavailable) {
+						detail := s.application.Chat.Presentation.Messages.StyleLockReferenceUnavailable
+						if s.texts != nil {
+							detail = s.texts.TextIn(request.Context(), detail)
+						}
+						writeProblem(writer, http.StatusBadRequest, "invalid_input", detail)
+						return
+					}
+					s.writeDomainError(writer, mergeErr)
+					return
+				}
+				input = merged
+			}
+		}
+	}
 	prepared, err := s.generation.PrepareInput(request.Context(), generation.PrepareInputCommand{
 		OwnerID: owner, SessionID: body.SessionID, Capability: body.Capability,
-		OfferingID: body.OfferingID, Input: body.Input, SceneID: body.SceneID,
+		OfferingID: body.OfferingID, Input: input, SceneID: body.SceneID,
 		ManifestID: body.ManifestID, ManifestHash: body.ManifestHash,
 		SourceSceneObjectID: body.SourceSceneObjectID, SourceSceneRevision: body.SourceSceneRevision,
 		// A direct request keeps the first reference pictures a single-picture
