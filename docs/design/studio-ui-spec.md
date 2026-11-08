@@ -294,4 +294,4 @@ model: [process, formats, details]  默认 process；无可用步骤时 details
 
 ### 生成参数的数量与禁用状态
 
-生成数量及输入区完整参数摘要显示当前 Offering 的有效参数值，不取报价乘数。步进器具有可辨认边框、hover 和键盘焦点；达到 Schema 最小或最大值时，仅对应方向的按钮禁用，悬停与辅助说明给出边界原因。缺少会话、参数未就绪、Offering 不可用及 Schema 条件禁用时，控件整体显示为不可编辑并说明原因；条件禁用不篡改已保存值。比例、依赖项和“更多参数”同样解释条件禁用。建议只读项保留“不建议更改”及 Schema 理由，不渲染可交互控件。所有文案取 Product Schema `ui.studio.params.*`。
+生成数量及输入区完整参数摘要显示当前 Offering 的有效参数值，不取报价乘数。步进器具有可辨认边框、hover 和键盘焦点；达到 Schema 最小或最大值时，仅对应方向的按钮禁用，悬停与辅助说明给出边界原因。缺少会话、参数未就绪、Offering 不可用、Schema 条件禁用、参数已委派给 Agent 及保存/处理中的短暂锁定时，控件整体显示为不可编辑：只渲染当前有效值的纯文本，不渲染 input、select、checkbox、range、radiogroup、上传区等可交互控件。值文本规则：选项类（含声明了 false/true 两个选项的布尔）显示选中项 label，多选按 `ui.studio.list_separator` 连接；普通布尔显示“开/关”；空值显示“未设置”；已委派给 Agent 的参数显示“由 Agent 结合对话补充”；文件类显示“已选择 N 个文件”。文案取自 Product Schema `ui.studio.params.on`、`ui.studio.params.off`、`ui.studio.params.not_set`、`ui.studio.params.files_selected` 与 `ui.harness.agent_supplement`。条件禁用不篡改已保存值；禁用原因（UnavailableNotice）继续显示。比例、依赖项和“更多参数”同样解释条件禁用。所有文案取 Product Schema `ui.studio.params.*`。

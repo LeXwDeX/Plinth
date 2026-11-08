@@ -6,6 +6,7 @@ import useSWR from 'swr';
 import { SchemaParameters, schemaParameterValues } from '@/components/form/schema-parameters';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
+import { CollapsibleSection } from '@/components/ui/collapsible-section';
 import { Field } from '@/components/ui/field';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { OptionSelect } from '@/components/ui/option-select';
@@ -111,6 +112,9 @@ function HarnessEditor({ sessionId, ownerId, object, harness, initial, message, 
   const id = useId();
   const [draft, setDraft] = useState<HarnessSelectionInput>(() => ({ ...initial, sources: [...initial.sources], fixed_parameters: { ...initial.fixed_parameters }, fillable_parameters: [...initial.fillable_parameters] }));
   const [automatic, setAutomatic] = useState<{ operation: string; offering: string; revision: string } | null>(null);
+  // The 功能 tab is a stack of collapsible groups (the same UE as 风格锁定); the core choice starts open.
+  const [openSections, setOpenSections] = useState({ operations: true, offering: false, source: false, parameters: false });
+  const toggleSection = (section: keyof typeof openSections) => (open: boolean) => setOpenSections(current => ({ ...current, [section]: open }));
   const models = useWorkspaceStore(state => state.modelByDomain);
   const capabilities = useMemo(() => [...new Set(declarations.operations.map(operation => operation.capability))], [declarations]);
   const { data: offerings, error: offeringsError, mutate: refreshOfferings } = useSWR<Record<string, OfferingWire[]>>(['harness-offerings', ownerId, schema.revision], async () => Object.fromEntries(await Promise.all(capabilities.map(async capability => [capability, await fetchCapabilityOfferings(schema, capability)]))), { revalidateOnFocus: true });
@@ -157,46 +161,61 @@ function HarnessEditor({ sessionId, ownerId, object, harness, initial, message, 
   const saveButton = <Action className="flex-1" disabled={harness.busy || !dirty || saveBlocked} loading={harness.busy} onClick={() => void save(harnessSelectionInput(draft, offering))}>{text('ui.harness.save')}</Action>;
   const savedOffering = Object.values(offerings ?? {}).flat().find(item => item.id === initial.offering_id && item.revision === initial.offering_revision);
   return <section className="flex h-full min-h-0 flex-col text-xs" aria-label={text('ui.harness.title')} data-testid="harness-panel">
-    <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-3 [scrollbar-gutter:stable]">
-      <div><h3 className="text-sm font-semibold">{text('ui.harness.title')}</h3><p className="mt-1 leading-5 text-muted-foreground">{text('ui.harness.description')}</p></div>
-      {declarations.groups.map(group => {
-        const operations = harnessOperationsForModel(declarations.operations, group.id, [models.image, models['model-3d']]);
-        return <fieldset key={group.id} className="space-y-2"><legend className="mb-2 font-medium">{group.label}</legend>
-          {operations.length ? operations.map(item => <label key={item.id} className={cn('flex cursor-pointer items-start gap-2 rounded-md px-2 py-2 hover:bg-muted focus-within:outline-2 focus-within:outline-ring', draft.operation_id === item.id && 'bg-primary/10')}>
-            <input type="radio" name={`${id}-operation`} value={item.id} checked={draft.operation_id === item.id} disabled={harness.busy || Boolean(item.unavailable_reason)} onChange={() => selectOperation(item.id)} className="mt-0.5" />
-            <span className="min-w-0"><span className="font-medium">{item.label}</span>{item.badge ? <span className="ml-1.5 text-[11px] font-normal text-muted-foreground" data-testid="harness-operation-badge">{item.badge}</span> : null}<span className="mt-0.5 block leading-4 text-muted-foreground">{item.unavailable_reason ? notice('operation_unavailable', item.unavailable_reason, `harness-operation-unavailable-${item.id}`) : item.description}</span></span>
-          </label>) : <p className="leading-5 text-muted-foreground">{group.empty_message}</p>}
-        </fieldset>;
-      })}
-      {draft.operation_id ? <div className="space-y-4 border-t border-border pt-4">
-        {!operation ? notice('selection_gone', text('ui.harness.selection_unavailable'), 'harness-selection-gone') : null}
-        <Field id={`${id}-offering`} label={text('ui.harness.offering')}>
-          {control => <OptionSelect {...control} value={offering?.id ?? ''} placeholder={draft.offering_id ? unavailableLabel(schema, text('ui.unavailable.reason.harness.selection_gone')) : text('ui.harness.choose_offering')} options={choices.map(item => ({ value: item.id, label: `${item.provider_name} · ${item.model_name}`, disabled: !item.available }))} disabled={harness.busy || !choices.some(item => item.available)} onValueChange={selectOffering} />}
-        </Field>
-        {automatic?.operation === draft.operation_id && automatic?.offering === draft.offering_id && automatic?.revision === draft.offering_revision ? <p role="status" className="leading-5 text-muted-foreground">{text('ui.harness.auto_selected_service')}</p> : null}
-        {offeringsError ? <div role="alert" className="space-y-2"><p>{text('ui.harness.offerings_failed')}</p><Action size="sm" variant="outline" onClick={() => void refreshOfferings().catch(() => undefined)}>{text('ui.harness.reload')}</Action></div> : !offerings ? <p role="status" className="text-muted-foreground">{text('ui.harness.loading')}</p> : !choices.some(item => item.available) ? notice('no_service', text('ui.harness.not_connected'), 'harness-no-service') : null}
-        {unavailable && operation ? notice('offering_unavailable', text('ui.harness.selection_unavailable'), 'harness-offering-unavailable') : null}
-        {sourceParameters.length || draft.sources.length ? <HarnessModelSourcePicker ownerId={ownerId} sessionId={sessionId} object={object} offering={offering} source={draft.sources[0]} sourceViews={harness.view?.source_views ?? []} unavailableReason={operation?.uploaded_source_unavailable_reason} disabled={harness.busy} onChange={sources => setDraft(current => ({ ...current, sources }))} /> : null}
-        {fields.length ? <div className="space-y-4"><div><h4 className="font-medium">{text('ui.harness.parameters')}</h4><p className="mt-1 leading-5 text-muted-foreground">{text('ui.harness.parameter_help')}</p></div>
-          {fields.map(field => {
-            const fillable = draft.fillable_parameters.includes(field.name);
-            return <div key={field.name} className="space-y-2"><SchemaParameters parameters={[field]} values={values} disabled={harness.busy || fillable} onChange={(name, value) => setDraft(current => ({ ...current, fixed_parameters: { ...current.fixed_parameters, [name]: value } }))} />
-              <label className="flex items-center gap-2 text-muted-foreground"><input type="checkbox" checked={fillable} disabled={harness.busy} onChange={event => setDraft(current => {
-                const fixed = { ...current.fixed_parameters };
-                if (event.target.checked) delete fixed[field.name];
-                else if (values[field.name] !== undefined) fixed[field.name] = values[field.name];
-                return { ...current, fixed_parameters: fixed, fillable_parameters: event.target.checked ? [...current.fillable_parameters, field.name] : current.fillable_parameters.filter(name => name !== field.name) };
-              })} />{text(fillable ? 'ui.harness.agent_fills' : 'ui.harness.fixed')}</label>
-            </div>;
-          })}
-        </div> : null}
-        {conversationFields.length ? <div className="space-y-1 leading-5" data-testid="harness-conversation-inputs">
-          {conversationFields.map(field => <p key={field.name} className="font-medium">{formatSchemaText(text(field.required ? 'ui.harness.conversation_input_required' : 'ui.harness.conversation_input'), { parameter: field.label })}</p>)}
-          <p className="text-muted-foreground">{text('ui.harness.conversation_input_help')}</p>
-        </div> : null}
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable]">
+      <div className="p-3"><h3 className="text-sm font-semibold">{text('ui.harness.title')}</h3><p className="mt-1 leading-5 text-muted-foreground">{text('ui.harness.description')}</p></div>
+      <CollapsibleSection id={`${id}-section-operations`} title={text('ui.studio.panel.tab.operations')} summary={operation?.label}
+        open={openSections.operations} onOpenChange={toggleSection('operations')} data-testid="harness-section-operations" bodyClassName="space-y-4 p-3">
+        {declarations.groups.map(group => {
+          const operations = harnessOperationsForModel(declarations.operations, group.id, [models.image, models['model-3d']]);
+          return <fieldset key={group.id} className="space-y-2"><legend className="mb-2 font-medium">{group.label}</legend>
+            {operations.length ? operations.map(item => <label key={item.id} className={cn('flex cursor-pointer items-start gap-2 rounded-md px-2 py-2 hover:bg-muted focus-within:outline-2 focus-within:outline-ring', draft.operation_id === item.id && 'bg-primary/10')}>
+              <input type="radio" name={`${id}-operation`} value={item.id} checked={draft.operation_id === item.id} disabled={harness.busy || Boolean(item.unavailable_reason)} onChange={() => selectOperation(item.id)} className="mt-0.5" />
+              <span className="min-w-0"><span className="font-medium">{item.label}</span>{item.badge ? <span className="ml-1.5 text-[11px] font-normal text-muted-foreground" data-testid="harness-operation-badge">{item.badge}</span> : null}<span className="mt-0.5 block leading-4 text-muted-foreground">{item.unavailable_reason ? notice('operation_unavailable', item.unavailable_reason, `harness-operation-unavailable-${item.id}`) : item.description}</span></span>
+            </label>) : <p className="leading-5 text-muted-foreground">{group.empty_message}</p>}
+          </fieldset>;
+        })}
         {operation?.prerequisites?.length ? <label className="flex items-start gap-2 leading-5"><input type="checkbox" checked={draft.allow_prerequisites} disabled={harness.busy} onChange={event => setDraft(current => ({ ...current, allow_prerequisites: event.target.checked }))} className="mt-1" /><span>{text('ui.harness.allow_prerequisites')}</span></label> : null}
-      </div> : null}
-      <div role="status" className="space-y-1 leading-5 text-muted-foreground" data-testid="harness-status"><h4 className="font-medium text-foreground">{text('ui.harness.saved_status')}</h4>{status.status === 'unavailable' || status.status === 'needs_input'
+      </CollapsibleSection>
+      {draft.operation_id ? <>
+        {!operation ? <div className="border-b border-border p-3">{notice('selection_gone', text('ui.harness.selection_unavailable'), 'harness-selection-gone')}</div> : null}
+        <CollapsibleSection id={`${id}-section-offering`} title={text('ui.harness.offering')}
+          summary={offering ? `${offering.provider_name} · ${offering.model_name}` : undefined}
+          open={openSections.offering} onOpenChange={toggleSection('offering')} data-testid="harness-section-offering" bodyClassName="space-y-3 p-3">
+          <Field id={`${id}-offering`} label={text('ui.harness.offering')} labelHidden>
+            {control => <OptionSelect {...control} value={offering?.id ?? ''} placeholder={draft.offering_id ? unavailableLabel(schema, text('ui.unavailable.reason.harness.selection_gone')) : text('ui.harness.choose_offering')} options={choices.map(item => ({ value: item.id, label: `${item.provider_name} · ${item.model_name}`, disabled: !item.available }))} disabled={harness.busy || !choices.some(item => item.available)} onValueChange={selectOffering} />}
+          </Field>
+          {automatic?.operation === draft.operation_id && automatic?.offering === draft.offering_id && automatic?.revision === draft.offering_revision ? <p role="status" className="leading-5 text-muted-foreground">{text('ui.harness.auto_selected_service')}</p> : null}
+          {offeringsError ? <div role="alert" className="space-y-2"><p>{text('ui.harness.offerings_failed')}</p><Action size="sm" variant="outline" onClick={() => void refreshOfferings().catch(() => undefined)}>{text('ui.harness.reload')}</Action></div> : !offerings ? <p role="status" className="text-muted-foreground">{text('ui.harness.loading')}</p> : !choices.some(item => item.available) ? notice('no_service', text('ui.harness.not_connected'), 'harness-no-service') : null}
+          {unavailable && operation ? notice('offering_unavailable', text('ui.harness.selection_unavailable'), 'harness-offering-unavailable') : null}
+        </CollapsibleSection>
+        {sourceParameters.length || draft.sources.length ? <CollapsibleSection id={`${id}-section-source`} title={text('ui.harness.source_kind')}
+          open={openSections.source} onOpenChange={toggleSection('source')} data-testid="harness-section-source" bodyClassName="p-3">
+          <HarnessModelSourcePicker ownerId={ownerId} sessionId={sessionId} object={object} offering={offering} source={draft.sources[0]} sourceViews={harness.view?.source_views ?? []} unavailableReason={operation?.uploaded_source_unavailable_reason} disabled={harness.busy} onChange={sources => setDraft(current => ({ ...current, sources }))} />
+        </CollapsibleSection> : null}
+        {fields.length || conversationFields.length ? <CollapsibleSection id={`${id}-section-parameters`} title={text('ui.harness.parameters')}
+          summary={fields.length ? fields.map(field => field.label).join(text('ui.studio.list_separator')) : undefined}
+          open={openSections.parameters} onOpenChange={toggleSection('parameters')} data-testid="harness-section-parameters" bodyClassName="space-y-4 p-3">
+          {fields.length ? <div className="space-y-4">
+            <p className="leading-5 text-muted-foreground">{text('ui.harness.parameter_help')}</p>
+            {fields.map(field => {
+              const fillable = draft.fillable_parameters.includes(field.name);
+              return <div key={field.name} className="space-y-2"><SchemaParameters parameters={[field]} values={values} disabled={harness.busy} readOnly={fillable} lockedHint={fillable ? text('ui.harness.agent_supplement') : undefined} onChange={(name, value) => setDraft(current => ({ ...current, fixed_parameters: { ...current.fixed_parameters, [name]: value } }))} />
+                <label className="flex items-center gap-2 text-muted-foreground"><input type="checkbox" checked={fillable} disabled={harness.busy} onChange={event => setDraft(current => {
+                  const fixed = { ...current.fixed_parameters };
+                  if (event.target.checked) delete fixed[field.name];
+                  else if (values[field.name] !== undefined) fixed[field.name] = values[field.name];
+                  return { ...current, fixed_parameters: fixed, fillable_parameters: event.target.checked ? [...current.fillable_parameters, field.name] : current.fillable_parameters.filter(name => name !== field.name) };
+                })} />{text(fillable ? 'ui.harness.agent_fills' : 'ui.harness.fixed')}</label>
+              </div>;
+            })}
+          </div> : null}
+          {conversationFields.length ? <div className="space-y-1 leading-5" data-testid="harness-conversation-inputs">
+            {conversationFields.map(field => <p key={field.name} className="font-medium">{formatSchemaText(text(field.required ? 'ui.harness.conversation_input_required' : 'ui.harness.conversation_input'), { parameter: field.label })}</p>)}
+            <p className="text-muted-foreground">{text('ui.harness.conversation_input_help')}</p>
+          </div> : null}
+        </CollapsibleSection> : null}
+      </> : null}
+      <div role="status" className="space-y-1 p-3 leading-5 text-muted-foreground" data-testid="harness-status"><h4 className="font-medium text-foreground">{text('ui.harness.saved_status')}</h4>{status.status === 'unavailable' || status.status === 'needs_input'
         ? notice(`status_${status.status}`, [text(`ui.harness.status_${status.status}`), status.reason ? schemaText(schema, status.reason) || status.reason : ''].filter(Boolean).join(' '), 'harness-status-unavailable')
         : <p>{text(`ui.harness.status_${status.status}`)}</p>}{status.reason && status.status !== 'unavailable' && status.status !== 'needs_input' ? <p>{schemaText(schema, status.reason) || status.reason}</p> : null}{status.price_mode === 'native' || savedOffering?.price_mode === 'native' ? <p>{parseNativeQuote(status.native_quote) ? formatSchemaText(schemaText(schema, 'ui.pricing.default_estimate'), { amount: formatNativePrice(parseNativeQuote(status.native_quote)!.total_amount, parseNativeQuote(status.native_quote)!.unit_label) ?? schemaText(schema, 'ui.pricing.unknown') }) : schemaText(schema, 'ui.pricing.unknown')}</p> : savedOffering?.credits_metered ? <p>{schemaCountMessage(schema, 'ui.harness.estimated_credits', status.estimated_credits ?? 0, { credits: status.estimated_credits ?? 0 })}</p> : null}{status.can_propose ? <p>{text('ui.harness.can_propose')}</p> : null}{status.missing_parameters.length ? <p>{formatSchemaText(text('ui.harness.missing'), { parameters: status.missing_parameters.map(name => savedOffering?.parameters.find(parameter => parameter.name === name)?.label ?? text('ui.harness.required_input')).join(text('ui.harness.separator')) })}</p> : null}</div>
     </div>
