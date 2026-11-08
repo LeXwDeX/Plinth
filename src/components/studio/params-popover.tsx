@@ -396,7 +396,7 @@ export function ParamsDomainSection({ params, hasSession, disabled, skill, canva
           </button>
           {showMore ? (
             <div className="flex flex-col gap-3 text-xs" data-testid="params-more">
-              <SchemaParameters parameters={model.moreParams} values={values} disabled={!hasSession || disabled} onChange={setValue} parameterMeta={(param) => <><ParameterOrigin params={params} name={param.name} disabled={!hasSession || disabled || parameterDisabled(param, values)} />{conditionNotice(param)}</>} />
+              <SchemaParameters parameters={model.moreParams} values={values} disabled={!hasSession || disabled} onChange={setValue} parameterMeta={(param) => <><ParameterOrigin params={params} name={param.name} disabled={!hasSession || disabled || parameterDisabled(param, values)} readonly={!hasSession || disabled || parameterDisabled(param, values)} />{conditionNotice(param)}</>} />
             </div>
           ) : null}
         </div>
