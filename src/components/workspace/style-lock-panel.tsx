@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, ChevronDown, ImagePlus, Layers, Upload, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ImagePlus, Layers, Upload, X } from 'lucide-react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
+import { CollapsibleSection } from '@/components/ui/collapsible-section';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { useStyleLock, EMPTY_STYLE_LOCK } from '@/hooks/use-style-lock';
 import { createChatBrowserClient, type ChatStyleLock } from '@/lib/chat/browser-client';
@@ -14,7 +15,6 @@ import { prepareImageUploadBlob } from '@/lib/image-upload';
 import { uploadWorkspaceInputAssetResult } from '@/lib/workspace/input-asset-upload';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-schema';
-import { cn } from '@/lib/utils';
 import { useCanvasStore, type CanvasNode } from '@/store/canvas-store';
 import { useChatStore, type ChatMessage } from '@/store/chat-store';
 import { useStudioStore } from '@/store/studio-store';
@@ -332,20 +332,15 @@ export function StyleLockSection({ sessionId }: { sessionId: string | null }) {
   const setOpen = useStudioStore((state) => state.setStyleLockOpen);
   if (!sessionId) return null;
   return (
-    <section className="shrink-0 border-b border-border" data-testid="style-lock-section">
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls="style-lock-body"
-        onClick={() => setOpen(!open)}
-        className="flex w-full items-center gap-1.5 px-3 py-2.5 text-left text-sm font-semibold text-foreground hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring"
-      >
-        <ChevronDown aria-hidden className={cn('size-4 shrink-0 transition-transform', !open && '-rotate-90')} />
-        {text('title')}
-      </button>
-      <div id="style-lock-body" hidden={!open} className="max-h-[min(60vh,520px)] overflow-y-auto border-t border-border">
-        <StyleLockPanel sessionId={sessionId} />
-      </div>
-    </section>
+    <CollapsibleSection
+      id="style-lock-body"
+      title={text('title')}
+      open={open}
+      onOpenChange={setOpen}
+      data-testid="style-lock-section"
+      bodyClassName="max-h-[min(60vh,520px)] overflow-y-auto"
+    >
+      <StyleLockPanel sessionId={sessionId} />
+    </CollapsibleSection>
   );
 }

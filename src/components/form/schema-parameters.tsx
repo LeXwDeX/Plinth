@@ -2,7 +2,7 @@
 
 import { useId, type ReactNode } from 'react';
 import type { ParamSchema } from '@/lib/providers/types';
-import { formatSchemaText, parameterConditionMatches, parameterDisabled, parameterNotices, parameterVisible, schemaText } from '@/lib/product-schema';
+import { formatSchemaText, parameterConditionMatches, parameterDisabled, parameterNotices, parameterVisible, schemaCountMessage, schemaText } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { useProductSchema } from '@/components/product-schema-provider';
@@ -29,19 +29,48 @@ export function isBooleanChoice(parameter: ParamSchema): boolean {
   return parameter.type === 'boolean' && values.length === 2 && values[0] === 'false' && values[1] === 'true';
 }
 
-export function SchemaParameters({ parameters, values, onChange, disabled, parameterMeta }: {
+/**
+ * The value a locked parameter shows instead of a control: the same effective value the
+ * control edits (a missing value falls back to the Schema default), written as text.
+ */
+export function parameterLockedText(
+  parameter: ParamSchema,
+  value: unknown,
+  separator: string,
+  words: { on: string; off: string },
+): string {
+  const current = value === undefined || value === null || value === '' ? parameter.default : value;
+  const label = (entry: unknown) => parameter.options?.find(option => String(option.value) === String(entry))?.label ?? String(entry ?? '');
+  if (parameter.type === 'boolean') {
+    return parameter.options?.length ? label(String(Boolean(current))) : Boolean(current) ? words.on : words.off;
+  }
+  if (parameter.type === 'string-array' || parameter.type === 'multi-select') {
+    return Array.isArray(current) ? current.map(label).join(separator) : '';
+  }
+  if (parameter.type === 'select') return label(current);
+  return current === undefined || current === null ? '' : String(current);
+}
+
+export function SchemaParameters({ parameters, values, onChange, disabled, readOnly, lockedHint, parameterMeta }: {
   parameters: ParamSchema[];
   values: Record<string, unknown>;
   onChange: (name: string, value: unknown) => void;
+  /** A temporary lock (saving, processing): the value stays visible, but no control renders. */
   disabled?: boolean;
+  /** The person delegated this parameter (to the Agent): it is never a control they can set. */
+  readOnly?: boolean;
+  /** What a read-only parameter says instead of its value, such as "由 Agent 结合对话补充". */
+  lockedHint?: string;
   parameterMeta?: (parameter: ParamSchema) => ReactNode;
 }) {
   const { text, schema } = useProductSchema();
+  const separator = schemaText(schema, 'ui.studio.list_separator');
   const id = useId();
   return <>{parameters.map(parameter => {
     if (!parameterVisible(parameter, values)) return null;
     const value = values[parameter.name];
-    const locked = disabled || parameterDisabled(parameter, values);
+    // A locked parameter is not a control: it shows its value (or why it has none) as plain text (#94, #180).
+    const locked = disabled || readOnly || parameterDisabled(parameter, values);
     const fieldId = `${id}-${parameter.name}`;
     const validation = parameter.validation;
     const notices = parameterNotices(parameter, values);
@@ -65,9 +94,17 @@ export function SchemaParameters({ parameters, values, onChange, disabled, param
       : undefined;
     const group = parameter.type === 'string-array' || parameter.type === 'multi-select';
     const choice = isBooleanChoice(parameter);
+    const assetCount = Array.isArray(value) ? value.length : value ? 1 : 0;
+    const lockedDisplay = !locked ? '' : (readOnly && lockedHint)
+      || (parameter.type === 'asset'
+        ? assetCount > 0 ? schemaCountMessage(schema, 'ui.studio.params.files_selected', assetCount, { count: assetCount }) : ''
+        : parameterLockedText(parameter, value, separator, { on: schemaText(schema, 'ui.studio.params.on'), off: schemaText(schema, 'ui.studio.params.off') }))
+      || schemaText(schema, 'ui.studio.params.not_set');
 
-    return <Field key={parameter.name} id={fieldId} label={parameter.label} help={help} group={group} required={parameter.required} meta={parameterMeta?.(parameter)} layout={parameter.type === 'boolean' && !choice ? 'inline' : 'stacked'}>
-      {control => choice
+    return <Field key={parameter.name} id={fieldId} label={parameter.label} help={help} group={group} required={parameter.required} meta={parameterMeta?.(parameter)} layout={parameter.type === 'boolean' && !choice && !locked ? 'inline' : 'stacked'}>
+      {control => locked
+        ? <output id={control.id} aria-describedby={control['aria-describedby']} className="text-sm text-muted-foreground" data-testid="parameter-locked-value">{lockedDisplay}</output>
+        : choice
         ? <ChoiceChips id={control.id} describedBy={control['aria-describedby']} label={parameter.label} options={parameter.options ?? []} current={String(Boolean(value ?? parameter.default))} disabled={locked} onChange={selected => onChange(parameter.name, selected === 'true')} />
         : parameter.type === 'boolean'
         ? <input {...control} type="checkbox" checked={Boolean(value)} disabled={locked} onChange={event => onChange(parameter.name, event.target.checked)} />

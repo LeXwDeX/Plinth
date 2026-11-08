@@ -443,19 +443,33 @@ Skill 文案统一用动态 key：`schemaText(schema, \`ui.workspace.skills.${ke
 
 #### 3.9.9 请求参数面板（HarnessPanel）
 
-来源：src/components/workspace/harness-panel.tsx（111 行）。
+来源：src/components/workspace/harness-panel.tsx（230 行）；风格锁定分组来自 src/components/workspace/style-lock-panel.tsx 的 `StyleLockSection`（328-346）；折叠分组共用 src/components/ui/collapsible-section.tsx。
 
 | 操作 | Schema key | 中文文案 | 文件:行 |
 |---|---|---|---|
-| 标题 | `ui.workspace.harness.title` | 请求参数 | 57 |
-| 说明 | `ui.workspace.harness.agent_decides` | 你选择模型与可选参数，Agent 判断输入方式并执行任务。 | 58 |
-| 加载中 | `ui.workspace.harness.loading` | 参数加载中… | 59 |
-| 空态 | `ui.workspace.harness.empty` | 选择模型后可设置参数 | 60 |
-| 会话未就绪 | `ui.workspace.harness.session_pending` | Agent 会话就绪后可编辑参数 | 61 |
-| 同步 | `ui.workspace.harness.synced` | 与 Agent 共享 · 双向同步 | 62 |
+| 标题 | `ui.harness.title` | 功能设置 | 163、165 |
+| 说明 | `ui.harness.description` | 选择这次想做的功能、来源模型和参数，Agent 会在这些设置内协助你。 | 165 |
+| 会话未打开 | `ui.harness.select_session` | 先打开一个对话，再设置功能。 | 95；style-lock-panel.tsx:333 |
+| 未接入 | `ui.harness.not_connected` | 这项功能暂未接入可用服务。 | 94 |
+| 加载中 | `ui.harness.loading` | 正在读取功能设置… | 97-98 |
+| 风格锁定分组 | `ui.studio.style_lock.title` | 风格锁定 | style-lock-panel.tsx:336 |
+| 功能分组 | `ui.studio.panel.tab.operations` | 功能 | 166 |
+| 前置步骤 | `ui.harness.allow_prerequisites` | 允许 Agent 提出必要的前置加工步骤 | 177 |
+| 执行服务分组 | `ui.harness.offering` | 执行服务 | 181 |
+| 来源分组 | `ui.harness.source_kind` | 模型来源 | 191 |
+| 参数设置分组 | `ui.harness.parameters` | 参数设置 | 195 |
+| 参数说明 | `ui.harness.parameter_help` | 固定的参数会保持你的选择；勾选允许补充的参数，由 Agent 结合对话填写。 | 199 |
+| Agent 补充提示 | `ui.harness.agent_supplement` | 由 Agent 结合对话补充 | 202 |
+| 允许 Agent 补充 / 参数已固定 | `ui.harness.agent_fills` / `ui.harness.fixed` | 允许 Agent 补充 / 参数已固定 | 208 |
+| 保存 | `ui.harness.save` | 保存设置 | 161、226 |
+| 清空 | `ui.harness.clear` | 清空选择 | 226 |
+| 状态 | `ui.harness.saved_status` | 已保存的功能状态 | 218 |
 
-- 生效配置区（75-83）读取 `agent_configuration.ui` 的键，并列出原始工具名和描述（81）。
-- 参数控件由 `SchemaParameters` 渲染。
+- 「功能」TAB 统一为一组可折叠分组（`CollapsibleSection`）：每项是 chevron 行加展开体。功能分组默认展开，其余默认收起，行尾摘要分别显示所选操作 label（166）、「provider · model」（182）和参数 label 列表（196）。执行服务、来源、参数设置只在选择操作后出现（179）。
+- 参数控件由 `SchemaParameters`（src/components/form/schema-parameters.tsx）渲染；锁定参数显示当前有效值的纯文本（规则见 studio-ui-spec「生成参数的数量与禁用状态」），允许 Agent 补充的参数显示 `ui.harness.agent_supplement`（202）。
+- 「允许 Agent 补充 / 参数已固定」勾选行仍在每个参数下方（203-208）。
+- 会话未打开时不渲染风格锁定与功能面板，只显示 `ui.harness.select_session`（95）。
+- 标题与说明在面板顶部（165）；保存、清空与状态区仍在面板底部（218-228）。
 
 #### 3.9.10 聊天消息中的图片与模型结果
 

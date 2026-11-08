@@ -124,8 +124,45 @@ it('required 属性透传 select 控件；隐藏/禁用值不进入提交', () =
   expect(html).toContain('required=""');
   expect(html).not.toContain('隐藏项');
   expect(html).toContain('禁用项');
-  expect(html).toContain('disabled=""');
+  // 锁定参数不再渲染可操作控件：值直接以文本显示（用户反馈的空心复选框问题）。
+  expect(html).not.toContain('disabled=""');
+  expect(html).toContain('data-testid="parameter-locked-value">y<');
   expect(schemaParameterValues(parameters, { style: 'a', hidden_field: 'x', disabled_field: 'y' })).toEqual({ style: 'a' });
+});
+
+it('shows every locked parameter type as plain values instead of controls', () => {
+  vi.stubGlobal('React', React);
+  const parameters: ParamSchema[] = [
+    { name: 'views', label: '参考图视角', type: 'string-array', options: [{ value: 'front', label: '正面' }, { value: 'back', label: '背面' }] },
+    { name: 'flag', label: '生成纹理', type: 'boolean', default: true },
+    { name: 'mode', label: '模式', type: 'select', options: [{ value: 'a', label: '甲' }, { value: 'b', label: '乙' }] },
+    { name: 'strength', label: '强度', type: 'slider', min: 0, max: 1, step: 0.1, default: 0.3 },
+    { name: 'empty', label: '附加', type: 'multi-select', options: [{ value: 'x', label: ' X ' }] },
+  ];
+  const html = renderToStaticMarkup(
+    <SchemaParameters parameters={parameters} values={{ views: ['front', 'back'], mode: 'b' }} onChange={() => {}} disabled />,
+  );
+  expect(html).not.toContain('type="checkbox"');
+  expect(html).not.toContain('type="range"');
+  expect(html).not.toContain('role="combobox"');
+  expect(html).toContain('正面、背面');
+  expect(html).toContain('>开<');
+  expect(html).toContain('>乙<');
+  expect(html).toContain('0.3');
+  expect(html).toContain('未设置');
+});
+
+it('says a delegated parameter is filled by the Agent instead of showing an empty control', () => {
+  vi.stubGlobal('React', React);
+  const views: ParamSchema = {
+    name: 'reference_views', label: '参考图视角', type: 'string-array',
+    options: [{ value: 'front', label: '正面' }, { value: 'left', label: '左侧' }, { value: 'back', label: '背面' }, { value: 'right', label: '右侧' }],
+  };
+  const html = renderToStaticMarkup(
+    <SchemaParameters parameters={[views]} values={{}} onChange={() => {}} readOnly lockedHint="由 Agent 结合对话补充" />,
+  );
+  expect(html).not.toContain('type="checkbox"');
+  expect(html).toContain('由 Agent 结合对话补充');
 });
 
 it('connects Schema help to a control and groups multiple options', () => {

@@ -111,6 +111,13 @@ describe('Harness panel', () => {
     expect(input.fixed_parameters).toEqual({ target: 120 });
     expect(input.fillable_parameters).toEqual(['topology']);
   });
+  it('shows a parameter the Agent fills as a note instead of a disabled control', () => {
+    const html = render();
+    expect(html).toContain('ui.harness.agent_supplement');
+    expect(html).toMatch(/data-testid="parameter-locked-value"[^>]*>ui\.harness\.agent_supplement</);
+    // 固定的参数仍是可编辑控件。
+    expect(html).toMatch(/type="number"[^>]*value="120"/);
+  });
   it('names the reference images that come from the conversation instead of leaving them unfillable (#187 D)', () => {
     expect(harnessConversationFields(offering).map(field => field.name)).toEqual(['reference']);
     const raw = catalog.offerings.find(row => row.id === 'hyper3d/texture/local-model')!;
