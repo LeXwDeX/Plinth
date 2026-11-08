@@ -103,8 +103,9 @@ func (orchestrator *Orchestrator) ContinueTurnInBackground(ctx context.Context, 
 // allows with its Task already submitted, and at least one of those Tasks
 // still runs and either sits in the Provider's own queue or has run past the
 // Schema threshold. The allowed calls are generation steps and, when it shares
-// the batch with one, the three-view SkillRun submitter; a lone SkillRun call
-// returns its receipt without waiting, so it never reaches this check. A
+// the batch with one, the three-view SkillRun submitter; a successful lone
+// SkillRun receipt does not wait, so it reaches this check only when verifying
+// or binding that receipt failed and the call waits on its submitted Task. A
 // Processing Plan is always refused.
 func (orchestrator *Orchestrator) backgroundEligible(ctx context.Context, turn Turn) (bool, error) {
 	policy := orchestrator.schema.Agent.BackgroundWait

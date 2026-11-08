@@ -200,10 +200,10 @@ func TestThreeViewNonzeroHarnessActualAdmissionAndRestartObservation(t *testing.
 }
 
 // #189: the three-view group is only a projection of the SkillRun step, its
-// grant and the Task. Letting the chat turn stop waiting changes none of them:
-// the front view projects running and then succeeded while the execution grant
-// stays Bound, so the reservation and the step identity survive until the
-// kernel settles the Task.
+// grant and the Task. This test fixes that the projection moves running ->
+// succeeded while the execution grant stays Bound; it does not drive the chat
+// turn's stop-waiting transfer, which orchestrator_background_skillrun_test.go
+// covers with the executor fixture.
 func TestThreeViewGroupProjectsRunningToSucceededWithoutReleasingTheGrant(t *testing.T) {
 	ctx := context.Background()
 	executor, gateway, _, command, _ := threeViewHarnessFixture(t)

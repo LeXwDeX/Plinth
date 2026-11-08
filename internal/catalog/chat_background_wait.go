@@ -15,9 +15,11 @@ type ChatBackgroundWaitSchema struct {
 	// background. A generation step comes from chat.tools; an agent tool comes
 	// from chat.agent_tools and is eligible only as a SkillRun prepare tool
 	// (implementation_key "skill.prepare", the three-view create_three_view).
-	// A Processing Plan tool is never eligible. A SkillRun call only joins a
-	// turn's wait when it shares one batch with a waiting generation step; a
-	// lone create_three_view call returns its receipt without waiting.
+	// A Processing Plan tool is never eligible. A SkillRun call normally joins
+	// a turn's wait only when it shares one batch with a waiting generation
+	// step: a successful lone create_three_view receipt does not wait. When
+	// that receipt cannot be verified or bound, the call waits on its already
+	// submitted Task and is eligible like any other wait.
 	Tools []string `json:"tools"`
 	// AfterSeconds is how long a submitted Task must have run before its
 	// wait qualifies; a Task the Provider holds in its own queue qualifies at

@@ -358,15 +358,6 @@ def decision_body(api, decision):
     return {api.decision_member: decision} if api.decision_member else {}
 
 
-def submit(api, offering, capability, payload, session, style_lock_skipped=False):
-    """prepare -> grant (-> human approval) -> submit. Returns (task_id, why).
-    style_lock_skipped is the direct prepare's one-turn exemption (#187)."""
-    body = {"session_id": session, "capability": capability, "offering_id": offering, "input": payload}
-    if style_lock_skipped:
-        body["style_lock_skipped"] = True
-    status, prepared = api.json("POST", "/api/v1/tasks/prepare", body)
-
-
 def chat_schema_facts(api):
     """The public Schema's chat field names and the turn-background route, read once
     like the browser reads them. Without them the background choice is not offered."""
@@ -379,10 +370,13 @@ def chat_schema_facts(api):
     return api.chat_schema_facts
 
 
-def submit(api, offering, capability, payload, session):
-    """prepare -> grant (-> human approval) -> submit. Returns (task_id, why)."""
-    status, prepared = api.json("POST", "/api/v1/tasks/prepare", {
-        "session_id": session, "capability": capability, "offering_id": offering, "input": payload})
+def submit(api, offering, capability, payload, session, style_lock_skipped=False):
+    """prepare -> grant (-> human approval) -> submit. Returns (task_id, why).
+    style_lock_skipped is the direct prepare's one-turn exemption (#187)."""
+    body = {"session_id": session, "capability": capability, "offering_id": offering, "input": payload}
+    if style_lock_skipped:
+        body["style_lock_skipped"] = True
+    status, prepared = api.json("POST", "/api/v1/tasks/prepare", body)
     if status not in (200, 201):
         return None, f"prepare {status} {prepared}"
     pid = prepared["prepared_input_id"]
@@ -988,7 +982,7 @@ def scenario_agent_background(api, offerings):
             available = True
             break
         time.sleep(0.2)
-    record("agent background: batched turn becomes background-ready", available,
+    record("agent background: batched turn becomes background-ready", available and bool(three_view_task),
            f"available={available}, 3D task {generation_task or 'none'}, three-view task {three_view_task or 'none'}")
     if not available or not three_view_task:
         return
