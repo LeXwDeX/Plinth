@@ -39,6 +39,10 @@ func main() {
 	}
 	slog.SetDefault(logger)
 	logger.Info("日志已配置", "log_level", config.Logging.Level.String(), "directory", config.Logging.Directory)
+	// The release script verifies this marker in the mounted log file after the
+	// candidate is healthy: DEBUG content must reach the disk (see
+	// docs/deployment.md).
+	logger.Debug("调试日志已启用", "marker", "debug-log-ready")
 	for _, alias := range config.DeprecatedEnvironment {
 		logger.Warn("环境变量使用了已弃用的别名，请改用规范名（#252）", "alias", alias)
 	}

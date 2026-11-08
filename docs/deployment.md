@@ -87,10 +87,10 @@
 两个环境走同一套脚本，`release-env.py` 只把环境参数交给 `scripts/release-go-testenv.sh`，服务器段为 `scripts/release-server-steps.sh`：
 
 1. 源码：远端旧 `app/` 移为 `app.prev-<时间>`，`git archive <revision>` 解到新 `app/`。
-2. 服务器段（`release-server-steps.sh` 与镜像保留 helper 先上传到发布根的 `tmp/`，不写主机 `/tmp`）：获取发布根锁 → 容量检查 → 以 `Dockerfile.go-runtime` 的 `runtime-with-migration-tools` 目标构建 `art-ai-go-production:<短SHA>-<时间>`（npm 缺省公共源，环境文件设 `build.npm_registry` 时用该源；按环境文件传 `GOPROXY`/`--add-host`）→ 日志目录以镜像运行身份写删验证 → `cutover-go-production.sh preflight`（回环端口、临时目录；临时目录放在发布根的 `tmp/` 下，不写主机 `/tmp`）→ 停旧服务做一致性备份（`backups/release-<tag>/`；默认备份 `data`、`storage-go`、`web-data`，只有 `dev-test` 可配置 `backup.scope=database` 仅备份 `production/data`，`backup.keep` 控制成功后清理）→ Compose 更新唯一 `art-ai-go` 服务 → healthz/readyz → 写成功清单 → 镜像保留与（仅设置了 `backup.keep` 的环境的）备份保留。
+2. 服务器段（`release-server-steps.sh` 与镜像保留 helper 先上传到发布根的 `tmp/`，不写主机 `/tmp`）：获取发布根锁 → 容量检查 → 以 `Dockerfile.go-runtime` 的 `runtime-with-migration-tools` 目标构建 `art-ai-go-production:<短SHA>-<时间>`（npm 缺省公共源，环境文件设 `build.npm_registry` 时用该源；按环境文件传 `GOPROXY`/`--add-host`）→ 日志目录以镜像运行身份写删验证 → `cutover-go-production.sh preflight`（回环端口、临时目录；临时目录放在发布根的 `tmp/` 下，不写主机 `/tmp`）→ 停旧服务做一致性备份（`backups/release-<tag>/`；默认备份 `data`、`storage-go`、`web-data`，只有 `dev-test` 可配置 `backup.scope=database` 仅备份 `production/data`，`backup.keep` 控制成功后清理）→ Compose 更新唯一 `art-ai-go` 服务 → healthz/readyz → 写成功清单 → 镜像保留与（仅设置了 `backup.keep` 的环境的）备份保留。发布脚本固定 `GO_LOG_LEVEL=debug`，测试与生产一致且不提供关闭入口；该值写入 `production/compose.env`，手工 Compose 也一致。
 3. 失败：构建/预检失败不动旧实例；更新后健康失败先按备份范围恢复数据，再以发布前实际运行的镜像拉起，报告在 `production/reports/release-failures/`；失败路径不清理镜像和快照。整个服务器段持有发布根锁；清理 helper 继承并校验该描述符。`database` 模式只恢复数据库，候选写入的 `storage-go`/`web-data` 字节保持不动，因此不是完整回滚。
 
-仓库不写死任何主机、地址、服务器路径或环境的 Compose 项目名（#249、#261）：`release-go-testenv.sh` 的 `RELEASE_HOST`/`RELEASE_ROOT`、服务器段的发布根与 `RELEASE_COMPOSE_PROJECT`（`release-env.py` 总是按 `compose_project` 传入）、镜像保留的 `--root`/`--project`、预检的 `GO_PROD_PROJECT` 和 `docker-compose.go-production.yml` 的 8 个主机路径都没有缺省值，一律来自环境文件。`layout` 中的键作为进程环境传给每次 Compose 与预检；设置了 `layout` 的环境成功后写出 `production/compose.env`（`0600`，无密钥：当前 `GO_IMAGE_TAG`、`GO_SOURCE_COMMIT`、`GO_RUNTIME_ENV_FILE` 与布局键），供手工 Compose 使用。
+仓库不写死任何主机、地址、服务器路径或环境的 Compose 项目名（#249、#261）：`release-go-testenv.sh` 的 `RELEASE_HOST`/`RELEASE_ROOT`、服务器段的发布根与 `RELEASE_COMPOSE_PROJECT`（`release-env.py` 总是按 `compose_project` 传入）、镜像保留的 `--root`/`--project`、预检的 `GO_PROD_PROJECT` 和 `docker-compose.go-production.yml` 的 8 个主机路径都没有缺省值，一律来自环境文件。`layout` 中的键作为进程环境传给每次 Compose 与预检；设置了 `layout` 的环境成功后写出 `production/compose.env`（`0600`，无密钥：当前 `GO_IMAGE_TAG`、`GO_SOURCE_COMMIT`、`GO_RUNTIME_ENV_FILE`、`GO_LOG_LEVEL` 与布局键），供手工 Compose 使用。
 
 `single_stack` 环境的差异（服务器段收到 `RELEASE_SINGLE_STACK=1`）：
 
@@ -135,6 +135,8 @@
 运行模式由 Compose 变量 `GO_APP_ENV` 决定：`docker-compose.go-production.yml` 写的是 `APP_ENV: ${GO_APP_ENV:-production}`，会覆盖运行环境文件里的 `APP_ENV`。`dev-test` 的运行环境文件设 `GO_APP_ENV='test'`；`formal-test` 已接入 HTTPS 域名（#2），`APP_ENV` 与 `GO_APP_ENV` 都设为 `production`。只改 `APP_ENV` 不生效。生产模式启动即校验：拒绝 `AUTH_MODE=development`、`DEV_MOCK_AUTH`、空 `SESSION_SECRET` 与非 HTTPS 的 `PUBLIC_BASE_URL`，并要求持久会话存储。HTTPS 下会话 Cookie 带 `Secure`，冒烟的 `base_url` 必须是 HTTPS 地址，否则登录后被重定向回登录页。
 
 中转按来源 IP 放行。容器访问同机中转时来源是 Compose 项目网络中的容器地址，因此 `formal-test` 用 `extra_compose_file` 固定项目网络子网与容器地址，供中转放行；是否放行及放行范围由用户在中转侧决定。改变网络配置后须对本项目执行一次 `down`/`up` 让网络按新配置重建（只操作本项目）。
+
+**日志（#206）**：`GO_LOG_LEVEL=debug` 由发布脚本固定并写入 `production/compose.env`，测试与生产一致且不提供关闭入口。候选实例启动前记录 `production/logs/art-ai.log` 的行数；healthz/readyz 通过后校验本次启动新增的行包含应用写入的 DEBUG 标记（`marker=debug-log-ready`），文件在发布期间滚动时退化为检查末尾。校验失败按发布失败处理：`ephemeral` 走 `ephemeral_rollback`，持久数据走 `rollback_after_update`，与健康检查失败同级。应用在日志配置完成后写入该标记（`cmd/art-ai/main.go`）；日志滚动仍由运行设置 `LOG_FILE_MAX_MEGABYTES`、`LOG_FILE_MAX_FILES`、`LOG_RETENTION_DAYS` 控制。
 
 冒烟（`smoke` 从目标环境的 `runtime.env` 读取管理员登录，并设置 `BASE`、`EXPECT_SHA`（容器 OCI revision）`RELEASE_CONTAINER` 与 `RELEASE_ENV`（环境名，验收脚本据此读取同一部署的日志）；不打印密码）：
 

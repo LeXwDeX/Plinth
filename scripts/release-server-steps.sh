@@ -186,6 +186,10 @@ export GO_PROD_STORAGE_DIR="${GO_PROD_STORAGE_DIR:-$ROOT/production/storage-go}"
 export GO_PROD_WEB_DATA_DIR="${GO_PROD_WEB_DATA_DIR:-$ROOT/production/web-data}"
 export GO_PROD_LOG_DIR="${GO_PROD_LOG_DIR:-$ROOT/production/logs}"
 export GO_PROD_ROOT="$ROOT/production"
+# #206：测试与生产都必须以 DEBUG 级别把日志写到 production/logs。级别由部署
+# 脚本固定，不提供关闭入口；write_compose_env 把它记入手工 compose 的插值文件，
+# 候选健康后 verify_debug_log 校验本次启动的 DEBUG 标记确实落盘。
+export GO_LOG_LEVEL=debug
 
 # 手工 compose 用的插值文件（不含密钥）：docker compose --env-file production/runtime.env
 #   --env-file production/compose.env -p <项目> -f app/docker-compose.go-production.yml
@@ -198,6 +202,7 @@ write_compose_env() {
     echo "# Written by release-server-steps.sh after the last successful release; no secrets."
     echo "GO_IMAGE_TAG=$TAG"
     echo "GO_SOURCE_COMMIT=$SHA"
+    echo "GO_LOG_LEVEL=$GO_LOG_LEVEL"
     echo "GO_RUNTIME_ENV_FILE=$RUNTIME_ENV"
     if [ "$DATA_MODE" = ephemeral ]; then
       echo "RELEASE_DATA_MODE=ephemeral"
@@ -458,6 +463,27 @@ for directory in "${GO_LEGACY_GENERATED_IMAGES_DIR:-}" "${GO_LEGACY_ASSET_CACHE_
   fi
 done
 
+# #206：本次启动写入的 DEBUG 标记必须出现在挂载的日志文件中，旧日志里的残留
+# 标记不算。每次启动前记录行数；文件在发布期间滚动时退化为检查末尾。
+LOG_FILE="$LOG_DIR_HOST/art-ai.log"
+LOG_LINES_BEFORE=0
+record_log_position() {
+  LOG_LINES_BEFORE=0
+  [ ! -f "$LOG_FILE" ] || LOG_LINES_BEFORE=$(wc -l <"$LOG_FILE" 2>/dev/null || echo 0)
+}
+verify_debug_log() {
+  local file="$LOG_FILE" before="$LOG_LINES_BEFORE" current
+  [ -f "$file" ] || { echo "[server] DEBUG log file is missing: $file" >&2; return 1; }
+  current=$(wc -l <"$file" 2>/dev/null || echo 0)
+  if [ "$current" -ge "$before" ]; then
+    tail -n "+$((before + 1))" "$file" | grep -q '"marker":"debug-log-ready"' && return 0
+  else
+    tail -n 200 "$file" | grep -q '"marker":"debug-log-ready"' && return 0
+  fi
+  echo "[server] DEBUG content is missing from $file (LOG_LEVEL=debug must write to disk)" >&2
+  return 1
+}
+
 echo "[server] preflight"
 # 预检的临时目录放在发布根下，不在主机 /tmp 留文件（主机只允许项目目录内写入）。
 PREFLIGHT_TMP="$ROOT/tmp"
@@ -480,11 +506,15 @@ if [ "$DATA_MODE" = ephemeral ]; then
 fi
 if [ "$BOOTSTRAP" = 1 ]; then
   echo "[server] bootstrap: no previous $COMPOSE_PROJECT instance, first start of $TAG"
+  record_log_position
   if ! compose "$TAG" up -d --no-deps ${BOOTSTRAP_UP_FLAGS[@]+"${BOOTSTRAP_UP_FLAGS[@]}"} "$COMPOSE_SERVICE" 2>&1 | tail -1; then
     bootstrap_failed candidate-up-failed
   fi
   if ! wait_healthy 30; then
     bootstrap_failed unhealthy-after-up
+  fi
+  if ! verify_debug_log; then
+    bootstrap_failed debug-log-missing
   fi
   if ! record_manifest; then
     bootstrap_failed manifest-write-failed
@@ -531,11 +561,15 @@ if [ "$DATA_MODE" = ephemeral ]; then
   }
 
   echo "[server] up $TAG (data_mode=ephemeral)"
+  record_log_position
   if ! compose "$TAG" up -d --no-deps --renew-anon-volumes "$COMPOSE_SERVICE" 2>&1 | tail -1; then
     ephemeral_rollback "candidate-up-failed"
   fi
   if ! wait_healthy 30; then
     ephemeral_rollback "unhealthy-after-up"
+  fi
+  if ! verify_debug_log; then
+    ephemeral_rollback "debug-log-missing"
   fi
   if ! record_manifest; then
     ephemeral_rollback "manifest-write-failed"
@@ -662,11 +696,15 @@ if ! release_capacity_check before-up; then
 fi
 
 echo "[server] up $TAG"
+record_log_position
 if ! compose "$TAG" up -d --no-deps "$COMPOSE_SERVICE" 2>&1 | tail -1; then
   rollback_after_update "candidate-up-failed"
 fi
 
 if wait_healthy 30; then
+  if ! verify_debug_log; then
+    rollback_after_update "debug-log-missing"
+  fi
   if ! record_manifest; then
     rollback_after_update "manifest-write-failed"
   fi
