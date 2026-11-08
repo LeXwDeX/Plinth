@@ -52,7 +52,8 @@ func Profile() align.Profile {
 			"网关是 Gemini 图片模型的 OpenAI 兼容中转（Plinth 的 GEMINI_BASE_URL）；每个付费请求只发一次，取 1K 分辨率与 1:1：Plinth 默认 4K，响应结构相同。",
 			"文生图的真实响应是 JPEG data URI，图生图是 PNG data URI（网关按模型输出而定）；fake 一律返回 PNG data URI，Plinth 按字节判断类型。",
 			"图生图响应多出顶层 service_tier 与 usage.prompt_tokens_details.image_tokens，fake 对带参考图的请求使用图生图样本的结构。",
-			"内容审核拒绝、402、429、5xx 没有在官方网关上触发，fake 沿用真实 400 信封并换成合理的 code 与 message。",
+			"内容审核拒绝、内容过滤、402/403/404/429/5xx 没有在官方网关上触发；fake 按 Gemini 公开 API 错误页与网关信封构造（constructed-from-docs，核对日期见端点表），内容过滤沿用成功信封并把 finish_reason 设为 content_filter。",
+			"网关契约没有公开官方文档（供应商文档页需登录并跳转到模型目录）；端点结构唯一依据是已提交的网关真实样本。",
 		},
 		Notes: align.Notes{},
 	}

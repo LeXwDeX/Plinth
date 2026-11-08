@@ -50,7 +50,7 @@ func Profile() align.Profile {
 			"官方服务是运营方自己的 GPU 服务，通过明文 HTTP 访问；wirefixture 只接受 https，提交的样本把请求 URL 规范为 https 并把主机别名成 example.test，响应字节不变。",
 			"服务没有按次计价，所有步骤都不计为付费；提交只发一次，轮询约 30 次直到批次 SUCCESS。",
 			"批次与任务 id（batch_xxx、task_xxx）与 download_path 在样本里是占位，fake 自行生成同形态的 id 和 `/api/v1/tasks/<id>/download` 路径。",
-			"没有观测到 FAILED 批次、未知任务的下载 404：fake 按已观测的字段结构构造（端点表标明）。",
+			"没有观测到多文件批次、FAILED/PARTIAL_SUCCESS/CANCELED 批次、REJECTED 任务，也没有观测到未知任务的下载 404：fake 按已观测的字段结构与官方内部服务 FastAPI /docs 的 BatchStatus/TaskStatus 枚举（2026-11-08 核对）构造（端点表标明）。",
 		},
 		Notes: align.Notes{},
 	}

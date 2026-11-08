@@ -31,9 +31,16 @@ const (
 	// completion.
 	FixedReply     = "Fake upstream reply."
 	FixedReasoning = "Fake upstream reasoning."
-	// FixedModel is reported when a request names no model the fake knows.
+	// unauthorizedBody is the gateway's plain-text 401 (a real sample).
 	unauthorizedBody = "unauthorized\n"
 )
+
+// StreamErrorMarker in the last message of a streaming request makes the fake
+// answer HTTP 200 and then end the started stream with an error frame instead
+// of a completion chunk, as the official 200 description allows. The shared
+// scenario table has no stream-error word, so, like the tool marker, this is a
+// fake-only request convention.
+const StreamErrorMarker = "[[fake:stream-error]]"
 
 // ToolMarker triggers a tool call: a request that offers tools and whose last
 // message is a user message containing [[fake:tool:NAME {json args}]] is
@@ -49,16 +56,24 @@ func ToolMarkerFor(name string, arguments string) string {
 	return "[[fake:tool:" + name + " " + arguments + "]]"
 }
 
+// docsCheckedAt is the day the constructed fault answers below were checked
+// against the official documents; docsErrors is the error-code guide they use.
+const (
+	docsCheckedAt = "2026-11-08"
+	docsErrors    = "https://developers.openai.com/api/docs/guides/error-codes"
+)
+
 // endpoints is the version's endpoint table. CheckedAt is the day the fake was
 // compared with the live gateway (the samples' capture day); DocURL names the
 // protocol reference the gateway claims compatibility with and was not
 // re-read for this alignment.
 var endpoints = []fakeupstream.Endpoint{
 	{Method: "GET", Path: "/models", Evidence: fakeupstream.EvidenceReal, Sample: "GET /v1/models",
-		DocURL: "https://platform.openai.com/docs/api-reference/models/list", CheckedAt: "2026-10-29"},
+		DocURL: "https://platform.openai.com/docs/api-reference/models/list", CheckedAt: "2026-10-29",
+		Note: "the model list and the gateway's text/plain 401 are real samples; the invalid-key 401 ErrorResponse is a constructed-from-docs answer built from the OpenAPI ErrorResponse and the error-code guide (" + docsCheckedAt + ")"},
 	{Method: "POST", Path: "/chat/completions", Evidence: fakeupstream.EvidenceReal, Sample: "POST /v1/chat/completions",
 		DocURL: "https://platform.openai.com/docs/api-reference/chat/create", CheckedAt: "2026-10-29",
-		Note: "non-streaming, SSE streaming, tool_calls, reasoning_content and the model_required error are all real samples"},
+		Note: "non-streaming, SSE streaming, tool_calls, reasoning_content and the model_required error are all real samples. The fault scenarios are constructed-from-docs answers (no committed sample) built from the OpenAPI and " + docsErrors + " (" + docsCheckedAt + "): invalid-key 401 ErrorResponse, forbidden 403 (text/plain JSON error text), model-not-found 404, service-unavailable 503 with Retry-After, quota-exceeded 429 with error.quota, and " + StreamErrorMarker + " ending a started stream with an error frame; the messages 400 follows the request schema's required/minItems 1. The gateway error envelope lacks the official param and carries path instead (see doc.go)"},
 }
 
 // Version is the OpenAI-compatible /v1 fake.
@@ -155,13 +170,17 @@ func hasToolCall(events []map[string]any) bool {
 	return false
 }
 
+// render answers the scenarios the shared Env.Intercept owns (balance, key
+// quota, rate limit and server error). Both quota answers are 429: the official
+// Chat Completions API has no 402, and the recorded gateway answers its quota
+// refusals with 429. The envelope stays the gateway's real one (see doc.go).
 func (h *handler) render(w http.ResponseWriter, r *http.Request, scenario fakeupstream.Scenario) {
 	status, kind, code, message := http.StatusInternalServerError, "server_error", "internal_error", "internal server error"
 	switch scenario {
 	case fakeupstream.ScenarioInsufficientBalance:
-		status, kind, code, message = http.StatusPaymentRequired, "insufficient_quota", "insufficient_quota", "insufficient balance"
+		status, kind, code, message = http.StatusTooManyRequests, "insufficient_quota", "insufficient_quota", "You exceeded your current quota, please check your plan and billing details."
 	case fakeupstream.ScenarioKeyQuota:
-		status, kind, code, message = http.StatusPaymentRequired, "insufficient_quota", "key_credit_limit_reached", "API key credit limit reached"
+		status, kind, code, message = http.StatusTooManyRequests, "insufficient_quota", "quota_exceeded", "API key credit limit reached"
 	case fakeupstream.ScenarioRateLimit:
 		status, kind, code, message = http.StatusTooManyRequests, "rate_limit_error", "rate_limit_exceeded", "rate limit exceeded"
 		w.Header().Set("Retry-After", h.env.RetryAfterSeconds())
@@ -171,6 +190,56 @@ func (h *handler) render(w http.ResponseWriter, r *http.Request, scenario fakeup
 		errorObject["message"], errorObject["type"], errorObject["code"], errorObject["path"] = message, kind, code, samplePrefix+r.URL.Path
 	}
 	writeJSON(w, status, body)
+}
+
+// officialErrorBody is the ErrorResponse the official OpenAPI declares: the
+// error object's required fields are type, message, param and code, and param
+// and code may be null. The gateway's real envelope instead carries path and
+// no param (see doc.go).
+func officialErrorBody(message, kind string, param, code any) map[string]any {
+	return map[string]any{"error": map[string]any{
+		"message": message, "type": kind, "param": param, "code": code,
+	}}
+}
+
+// quotaExceededBody is the weekly-quota refusal the dev-test gateway was
+// observed to answer (the same body is recorded in
+// internal/providers/httpjson/quota_test.go): HTTP 429 with error.code and
+// error.type quota_exceeded and a nested error.quota object.
+func quotaExceededBody() map[string]any {
+	return map[string]any{"error": map[string]any{
+		"code": "quota_exceeded", "type": "quota_exceeded",
+		"message": "Quota exceeded (weekly). Limit: $100.00, used: $101.21. Resets at 2026-11-09T00:00:00Z",
+		"quota": map[string]any{
+			"dimension": "weekly", "group_name": "API", "limit_usd": 100,
+			"resets_at": "2026-11-09T00:00:00Z", "scope": "model_group", "used_usd": 101.20632699999999,
+		},
+	}}
+}
+
+// documentedFault answers the fault scenarios the shared Intercept table does
+// not cover, all opt-in through X-Fake-Scenario or a fake-<scenario> key. The
+// bodies are constructed from the official OpenAPI and error-code guide named
+// in the endpoint table.
+func (h *handler) documentedFault(w http.ResponseWriter, scenario fakeupstream.Scenario) bool {
+	switch scenario {
+	case fakeupstream.ScenarioInvalidKey:
+		writeJSON(w, http.StatusUnauthorized, officialErrorBody("Incorrect API key provided", "invalid_request_error", nil, "invalid_api_key"))
+	case fakeupstream.ScenarioForbidden:
+		// The official 403 carries text/plain JSON-encoded error text.
+		raw, _ := json.Marshal(officialErrorBody("Access to a personal API organization is blocked by the organization policy.", "invalid_request_error", nil, nil))
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write(append(raw, '\n'))
+	case fakeupstream.ScenarioServiceUnavailable:
+		w.Header().Set("Retry-After", h.env.RetryAfterSeconds())
+		writeJSON(w, http.StatusServiceUnavailable, officialErrorBody("The model is temporarily overloaded. Please retry your request after a brief delay.", "service_unavailable_error", nil, "server_is_overloaded"))
+	case fakeupstream.ScenarioQuotaExceeded:
+		writeJSON(w, http.StatusTooManyRequests, quotaExceededBody())
+	default:
+		return false
+	}
+	return true
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -189,6 +258,10 @@ func unauthorized(w http.ResponseWriter) {
 func (h *handler) listModels(w http.ResponseWriter, r *http.Request) {
 	if fakeupstream.BearerKey(r) == "" {
 		unauthorized(w)
+		return
+	}
+	if fakeupstream.ScenarioOf(r) == fakeupstream.ScenarioInvalidKey {
+		h.documentedFault(w, fakeupstream.ScenarioInvalidKey)
 		return
 	}
 	if h.env.Intercept(w, r, fakeupstream.PhaseRead, h.render) {
@@ -292,12 +365,20 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 		unauthorized(w)
 		return
 	}
+	scenario := fakeupstream.ScenarioOf(r)
+	if h.documentedFault(w, scenario) {
+		return
+	}
 	if h.env.Intercept(w, r, fakeupstream.PhaseCreate, h.render) {
 		return
 	}
 	var request chatRequest
 	decoder := json.NewDecoder(io.LimitReader(r.Body, 8<<20))
-	if err := decoder.Decode(&request); err != nil || strings.TrimSpace(request.Model) == "" {
+	if err := decoder.Decode(&request); err != nil {
+		writeJSON(w, http.StatusBadRequest, officialErrorBody("We could not parse the JSON body of your request. The body may be malformed or contain unsupported characters.", "invalid_request_error", nil, nil))
+		return
+	}
+	if strings.TrimSpace(request.Model) == "" {
 		body := fakeupstream.Clone(h.invalid)
 		if errorObject, ok := body["error"].(map[string]any); ok {
 			errorObject["path"] = samplePrefix + r.URL.Path
@@ -305,8 +386,21 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, body)
 		return
 	}
-	if fakeupstream.ScenarioOf(r) == fakeupstream.ScenarioLostResponse {
+	if len(request.Messages) == 0 {
+		// The official request schema requires messages with at least one item.
+		writeJSON(w, http.StatusBadRequest, officialErrorBody("Missing required parameter: 'messages'.", "invalid_request_error", "messages", "missing_required_parameter"))
+		return
+	}
+	if scenario == fakeupstream.ScenarioModelNotFound {
+		writeJSON(w, http.StatusNotFound, officialErrorBody(fmt.Sprintf("The model %q does not exist or you do not have access to it.", request.Model), "invalid_request_error", "model", "model_not_found"))
+		return
+	}
+	if scenario == fakeupstream.ScenarioLostResponse {
 		fakeupstream.AbortConnection(w) // the completion ran; its response is lost
+		return
+	}
+	if request.Stream && strings.Contains(request.lastText(), StreamErrorMarker) {
+		h.writeStreamError(w, request)
 		return
 	}
 	calls := request.calls()
@@ -348,6 +442,32 @@ func renderToolCall(template map[string]any, index int, call toolCall) map[strin
 		function["name"], function["arguments"] = call.name, call.arguments
 	}
 	return clone
+}
+
+// writeStreamError starts a normal 200 stream (one opening role chunk) and
+// then sends a data frame carrying an error object instead of a completion
+// chunk, as the official 200 description allows. The interrupted stream ends
+// without [DONE].
+func (h *handler) writeStreamError(w http.ResponseWriter, request chatRequest) {
+	opening := fakeupstream.Clone(h.stream[0])
+	opening["model"] = request.Model
+	if choice, ok := fakeupstream.DigMap(opening, "choices", 0); ok {
+		choice["delta"] = map[string]any{"role": "assistant", "content": nil, "reasoning_content": ""}
+		choice["finish_reason"] = nil
+	}
+	opening["usage"] = nil
+	frame := officialErrorBody("The model is temporarily overloaded. Please retry your request after a brief delay.", "service_unavailable_error", nil, "server_is_overloaded")
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	flusher, _ := w.(http.Flusher)
+	for _, event := range []map[string]any{opening, frame} {
+		raw, _ := json.Marshal(event)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", raw)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
 }
 
 // writeStream emits the chunk pattern the official gateway streams (observed

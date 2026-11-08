@@ -37,6 +37,10 @@ const samplePrefix = "/v1"
 const (
 	docsRoot = "https://platform.openai.com/docs/api-reference/images/"
 	captured = "2026-10-29"
+	// docsCheckedAt is the day the constructed fault answers were checked
+	// against the official documents; docsErrors is the error-code guide.
+	docsCheckedAt = "2026-11-08"
+	docsErrors    = "https://developers.openai.com/api/docs/guides/error-codes"
 )
 
 // unauthorizedBody is the gateway's plain-text 401 (observed).
@@ -45,10 +49,10 @@ const unauthorizedBody = "unauthorized\n"
 var endpoints = []fakeupstream.Endpoint{
 	{Method: "POST", Path: "/images/generations", Evidence: fakeupstream.EvidenceReal, Sample: "POST /v1/images/generations",
 		DocURL: docsRoot + "create", CheckedAt: captured,
-		Note: "JSON request, one inline base64 picture per request; 400 missing_required_parameter and 401 text/plain are real samples. A content-policy refusal (400 moderation_blocked) and 402/429/5xx are not observed: they reuse the real 400 envelope with the documented code or message"},
+		Note: "JSON request, one inline base64 picture per request; 400 missing_required_parameter and 401 text/plain are real samples. A content-policy refusal (400 moderation_blocked) and the 402/500 faults are not observed: they reuse the real 400 envelope with the documented code or message. The quota-exceeded 429 (the gateway's error.quota body), forbidden 403 (the gateway's eca_access_denied) and service-unavailable 503 (documented service_unavailable_error/server_is_overloaded) are constructed-from-docs answers built from the recorded gateway refusals and the error-code guide (" + docsErrors + ", checked " + docsCheckedAt + ")"},
 	{Method: "POST", Path: "/images/edits", Evidence: fakeupstream.EvidenceReal, Sample: "POST /v1/images/edits",
 		DocURL: docsRoot + "createEdit", CheckedAt: captured,
-		Note: "multipart request with the reference picture in the image part (Plinth sends image[], the committed sample says image because the sample key rule rejects brackets; the fake accepts both)"},
+		Note: "multipart request with the reference picture in the image part (Plinth sends image[], the committed sample says image because the sample key rule rejects brackets; the fake accepts both). model is optional on this route, per the official Create image edit reference (default gpt-image-2.5-sunburst, checked " + docsCheckedAt + "); the same constructed-from-docs 403/429/503 faults as generations apply"},
 }
 
 // Version is the OpenAI-compatible images /v1 fake.
@@ -111,6 +115,51 @@ func (h *handler) errorBody(endpoint, kind, code, message, param string) map[str
 		object["type"], object["code"], object["message"], object["param"] = kind, code, message, param
 	}
 	return body
+}
+
+// officialErrorBody is the ErrorResponse the official OpenAPI declares: the
+// error object's required fields are type, message, param and code, and param
+// and code may be null.
+func officialErrorBody(message, kind string, param, code any) map[string]any {
+	return map[string]any{"error": map[string]any{
+		"message": message, "type": kind, "param": param, "code": code,
+	}}
+}
+
+// gatewayQuotaBody is the weekly-quota refusal the dev-test gateway was
+// observed to answer (the same body is recorded in
+// internal/providers/httpjson/quota_test.go): HTTP 429 with error.code and
+// error.type quota_exceeded and a nested error.quota object.
+func gatewayQuotaBody() map[string]any {
+	return map[string]any{"error": map[string]any{
+		"code": "quota_exceeded", "type": "quota_exceeded",
+		"message": "Quota exceeded (weekly). Limit: $100.00, used: $101.21. Resets at 2026-11-09T00:00:00Z",
+		"quota": map[string]any{
+			"dimension": "weekly", "group_name": "API", "limit_usd": 100,
+			"resets_at": "2026-11-09T00:00:00Z", "scope": "model_group", "used_usd": 101.20632699999999,
+		},
+	}}
+}
+
+// documentedFault answers the fault scenarios the shared Intercept table does
+// not cover, all opt-in through X-Fake-Scenario or a fake-<scenario> key. The
+// 403 and 429 bodies are the gateway refusals recorded in the repository; the
+// 503 body is constructed from the official error-code guide.
+func (h *handler) documentedFault(w http.ResponseWriter, scenario fakeupstream.Scenario) bool {
+	switch scenario {
+	case fakeupstream.ScenarioQuotaExceeded:
+		writeJSON(w, http.StatusTooManyRequests, gatewayQuotaBody())
+	case fakeupstream.ScenarioForbidden:
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": map[string]any{
+			"code": "eca_access_denied", "message": "Eca IP not in whitelist",
+		}})
+	case fakeupstream.ScenarioServiceUnavailable:
+		w.Header().Set("Retry-After", h.env.RetryAfterSeconds())
+		writeJSON(w, http.StatusServiceUnavailable, officialErrorBody("The model is temporarily overloaded. Please retry your request after a brief delay.", "service_unavailable_error", nil, "server_is_overloaded"))
+	default:
+		return false
+	}
+	return true
 }
 
 func (h *handler) render(endpoint string) fakeupstream.ErrorRenderer {
@@ -180,12 +229,16 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request, endpoint string
 		_, _ = io.WriteString(w, unauthorizedBody)
 		return
 	}
+	if h.documentedFault(w, fakeupstream.ScenarioOf(r)) {
+		return
+	}
 	if h.env.Intercept(w, r, fakeupstream.PhaseCreate, h.render(endpoint)) {
 		return
 	}
 	req, parsed := readRequest(r, endpoint)
 	switch {
-	case !parsed || req.model == "":
+	case !parsed || (endpoint == "/images/generations" && req.model == ""):
+		// The official Create image edit reference makes model optional there.
 		writeJSON(w, http.StatusBadRequest, h.errorBody(endpoint, "invalid_request_error", "missing_required_parameter", "Missing required parameter: 'model'.", "model"))
 		return
 	case endpoint == "/images/edits" && !req.hasImg:

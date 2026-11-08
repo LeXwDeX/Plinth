@@ -57,6 +57,58 @@ const (
 	// task kinds ignore it. Constructed: the official API has not been seen to
 	// omit a requested format.
 	ScenarioPartialFormats Scenario = "partial-formats"
+	// ScenarioInvalidKey answers HTTP 401 for an incorrect API key. The
+	// default fake accepts any non-empty key, so this is opt-in.
+	ScenarioInvalidKey Scenario = "invalid-key"
+	// ScenarioForbidden answers the provider's documented HTTP 403 refusal
+	// (moderation, plan/permission or region block).
+	ScenarioForbidden Scenario = "forbidden"
+	// ScenarioModelNotFound answers HTTP 404 for an unknown model.
+	ScenarioModelNotFound Scenario = "model-not-found"
+	// ScenarioServiceUnavailable answers the provider's overloaded/unavailable
+	// answer (HTTP 503).
+	ScenarioServiceUnavailable Scenario = "service-unavailable"
+	// ScenarioQuotaExceeded answers the gateway's quota_exceeded answer
+	// (HTTP 429 with an error.quota object), distinct from a plain rate limit.
+	ScenarioQuotaExceeded Scenario = "quota-exceeded"
+	// ScenarioTaskCanceled makes the created task end in the provider's
+	// canceled state.
+	ScenarioTaskCanceled Scenario = "task-canceled"
+	// ScenarioTaskUnknown makes the created task report the provider's
+	// "unknown" status: not a success or failure signal, keep polling within a
+	// timeout.
+	ScenarioTaskUnknown Scenario = "task-unknown"
+	// ScenarioContentFiltered answers a successful completion whose output was
+	// filtered: HTTP 200 without an image (Gemini gateway).
+	ScenarioContentFiltered Scenario = "content-filtered"
+	// ScenarioPartialImages answers HTTP 200 with a mix of successful and
+	// failed items in a sequence or batch (Jimeng image sequences, matting
+	// batches).
+	ScenarioPartialImages Scenario = "partial-images"
+	// ScenarioConcurrencyLimit answers HTTP 429 for a full provider concurrency
+	// pool (Tripo code 2000), distinct from request rate limiting.
+	ScenarioConcurrencyLimit Scenario = "concurrency-limit"
+	// ScenarioRigNonHumanoid answers the documented 422 pose-estimation refusal
+	// for rigging.
+	ScenarioRigNonHumanoid Scenario = "rig-non-humanoid"
+	// ScenarioPermissionDenied answers the provider's 403 permission_denied
+	// gateway envelope (Gemini).
+	ScenarioPermissionDenied Scenario = "permission-denied"
+	// ScenarioNoActiveSubscription answers the provider's submission error for
+	// an account without an active subscription (Hyper3D).
+	ScenarioNoActiveSubscription Scenario = "no-active-subscription"
+	// ScenarioPlanTooLow answers the provider's submission error for a
+	// subscription plan that does not include the operation (Hyper3D).
+	ScenarioPlanTooLow Scenario = "plan-too-low"
+	// ScenarioObjectNotFoundOnImage answers the provider's submission error
+	// for a referenced object missing on the uploaded image (Hyper3D).
+	ScenarioObjectNotFoundOnImage Scenario = "object-not-found-on-image"
+	// ScenarioContentViolation answers the provider's submission error for
+	// content that violates the image policy (Hyper3D).
+	ScenarioContentViolation Scenario = "content-violation"
+	// ScenarioAPIUnknown answers the provider's catch-all API_UNKNOWN
+	// submission error (Hyper3D).
+	ScenarioAPIUnknown Scenario = "api-unknown"
 )
 
 // Scenarios lists every injectable scenario.
@@ -64,6 +116,10 @@ var Scenarios = []Scenario{
 	ScenarioInsufficientBalance, ScenarioKeyQuota, ScenarioRateLimit, ScenarioServerError,
 	ScenarioTimeout, ScenarioLostResponse, ScenarioTaskFailed, ScenarioArtifactNotFound, ScenarioArtifactCorrupt,
 	ScenarioArtifactExpired, ScenarioPartialFormats,
+	ScenarioInvalidKey, ScenarioForbidden, ScenarioModelNotFound, ScenarioServiceUnavailable,
+	ScenarioQuotaExceeded, ScenarioTaskCanceled, ScenarioTaskUnknown, ScenarioContentFiltered, ScenarioPartialImages,
+	ScenarioConcurrencyLimit, ScenarioRigNonHumanoid, ScenarioPermissionDenied,
+	ScenarioNoActiveSubscription, ScenarioPlanTooLow, ScenarioObjectNotFoundOnImage, ScenarioContentViolation, ScenarioAPIUnknown,
 }
 
 const (

@@ -3,6 +3,7 @@ package meshyopenapiv2
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -35,7 +36,7 @@ func finish(t *testing.T, f *testkit.Fixture, id string) ([]string, map[string]a
 		_, _, body := f.Do("GET", Prefix+"/text-to-3d/"+id, key, nil)
 		state := body["status"].(string)
 		seen = append(seen, state)
-		if state == core.StatusSucceeded || state == core.StatusFailed {
+		if state == core.StatusSucceeded || state == core.StatusFailed || state == core.StatusCanceled {
 			return seen, body
 		}
 	}
@@ -62,8 +63,182 @@ func TestPreviewThenRefineDeliversTheFiles(t *testing.T) {
 	if err := testkit.DeliveryErr(t, data, "model", "glb", "model/gltf-binary"); err != nil {
 		t.Fatalf("GLB rejected: %v", err)
 	}
-	if _, ok := testkit.Field(t, body, "model_urls").(map[string]any)["mtl"]; !ok {
-		t.Fatalf("an OBJ request must come with its material library: %v", body["model_urls"])
+	// The preview is mesh-only: an OBJ comes without a material library, while
+	// the textured refine carries one (finding #203, captured exchange 36 vs 55).
+	if _, has := testkit.Field(t, body, "model_urls").(map[string]any)["mtl"]; has {
+		t.Fatalf("a preview OBJ carries an MTL: %v", body["model_urls"])
+	}
+	refinedWithOBJ := create(t, f, map[string]any{
+		"mode": "refine", "preview_task_id": preview, "target_formats": []string{"obj"},
+	})
+	_, refinedOBJ := finish(t, f, refinedWithOBJ)
+	mtl := testkit.Field(t, refinedOBJ, "model_urls", "mtl").(string)
+	if status, contentType, data := f.Download(mtl); status != http.StatusOK || contentType != "text/plain" || len(data) == 0 {
+		t.Fatalf("refine mtl = %d %q %d bytes", status, contentType, len(data))
+	}
+}
+
+// The documented terminal status and the documented 403 refusal (finding #203).
+func TestCanceledAndForbiddenAnswers(t *testing.T) {
+	f := newFixture(t)
+	id := create(t, f, map[string]any{"mode": "preview", "prompt": "p"}, "X-Fake-Scenario", "task-canceled")
+	statuses, body := finish(t, f, id)
+	if got := strings.Join(statuses, ","); got != "PENDING,IN_PROGRESS,CANCELED" {
+		t.Fatalf("flow = %s", got)
+	}
+	if body["status"] != core.StatusCanceled || body["progress"].(float64) != 100 {
+		t.Fatalf("canceled body = %v", body)
+	}
+	if models, _ := body["model_urls"].(map[string]any); len(models) != 0 {
+		t.Fatalf("a canceled task offers models: %v", models)
+	}
+	status, _, failure := f.Do("POST", Prefix+"/text-to-3d", key, map[string]any{"mode": "preview", "prompt": "p"}, "X-Fake-Scenario", "forbidden")
+	if status != http.StatusForbidden || len(failure) != 1 || failure["message"] == "" {
+		t.Fatalf("forbidden = %d %v", status, failure)
+	}
+}
+
+// PENDING carries the queue fields the official text-to-3d schema documents;
+// the dev-test answer committed with the provider holds the same fields
+// (finding #203). It is a single observed GET, not a wire sample.
+func TestPendingBodyCarriesTheObservedQueueFields(t *testing.T) {
+	f := newFixture(t)
+	id := create(t, f, map[string]any{"mode": "preview", "prompt": "p"})
+	_, _, pending := f.Do("GET", Prefix+"/text-to-3d/"+id, key, nil)
+	if pending["status"] != core.StatusPending || pending["progress"].(float64) != 0 {
+		t.Fatalf("PENDING = %v", pending)
+	}
+	if pending["preceding_tasks"].(float64) != 3 {
+		t.Fatalf("preceding_tasks = %v", pending["preceding_tasks"])
+	}
+	if pending["started_at"].(float64) != 0 || pending["finished_at"].(float64) != 0 {
+		t.Fatalf("PENDING timestamps = %v %v", pending["started_at"], pending["finished_at"])
+	}
+	raw, err := os.ReadFile("../../../../providers/meshy/testdata/meshy-text-to-3d-pending.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var observed map[string]any
+	if err := json.Unmarshal(raw, &observed); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"preceding_tasks", "started_at", "finished_at"} {
+		if _, has := observed[field]; !has {
+			t.Fatalf("the observed pending answer lacks %s", field)
+		}
+		if _, has := pending[field]; !has {
+			t.Errorf("the fake PENDING body lacks %s", field)
+		}
+	}
+}
+
+// A refine with enable_pbr=true must carry the PBR maps the captured default
+// offering request received (finding #203; the committed provider sample is
+// captured, and the fake's own sample used the cheapest texture options).
+func TestPBRRefineMatchesTheCapturedDefaultRequest(t *testing.T) {
+	raw, err := os.ReadFile("../../../../providers/meshy/testdata/meshy-text-to-3d.candidate.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exchanges []wirefixture.Exchange
+	if err := json.Unmarshal(raw, &exchanges); err != nil {
+		t.Fatal(err)
+	}
+	var captured map[string]any
+	for _, exchange := range exchanges {
+		body, err := fakeupstream.JSONBody(exchange)
+		if err != nil || body["type"] != "text-to-3d-refine" || body["status"] != "SUCCEEDED" {
+			continue
+		}
+		entries, _ := body["texture_urls"].([]any)
+		if len(entries) == 0 {
+			continue
+		}
+		if entry, _ := entries[0].(map[string]any); entry["metallic"] != nil {
+			captured = body
+			break
+		}
+	}
+	if captured == nil {
+		t.Fatal("the captured sample holds no PBR refine poll")
+	}
+	f := newFixture(t)
+	preview := create(t, f, map[string]any{"mode": "preview", "prompt": "p"})
+	finish(t, f, preview)
+	formats := []string{"glb", "obj", "fbx", "stl", "usdz", "3mf"}
+	refine := create(t, f, map[string]any{
+		"mode": "refine", "preview_task_id": preview, "ai_model": "meshy-7.1",
+		"enable_pbr": true, "texture_resolution": "8k", "target_formats": formats,
+	})
+	_, body := finish(t, f, refine)
+	shapeOf := func(value any) fakeupstream.Shape {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		shape, err := fakeupstream.ShapeOf(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return shape
+	}
+	textureOf := func(body map[string]any) any {
+		entries, _ := body["texture_urls"].([]any)
+		if len(entries) == 0 {
+			t.Fatalf("texture_urls = %v", body["texture_urls"])
+		}
+		return entries[0]
+	}
+	if diff := fakeupstream.DiffShape(shapeOf(textureOf(captured)), shapeOf(textureOf(body))); !diff.Empty() {
+		t.Errorf("refine texture_urls drifted from the captured PBR poll: %s", diff)
+	}
+	wantModels, _ := captured["model_urls"].(map[string]any)
+	gotModels, _ := body["model_urls"].(map[string]any)
+	if len(wantModels) != len(gotModels) {
+		t.Fatalf("model_urls = %v, want the captured keys %v", gotModels, wantModels)
+	}
+	for key := range wantModels {
+		if _, has := gotModels[key]; !has {
+			t.Errorf("model_urls lacks %s: %v", key, gotModels)
+		}
+	}
+}
+
+// Every model format the Catalog's default offering requires downloads with
+// the CDN content type recorded on the same host (finding #203).
+func TestEveryRequestedFormatUsesTheCDNContentType(t *testing.T) {
+	f := newFixture(t)
+	formats := []string{"glb", "obj", "fbx", "stl", "usdz", "3mf"}
+	id := create(t, f, map[string]any{"mode": "preview", "prompt": "p", "target_formats": formats})
+	_, body := finish(t, f, id)
+	models, _ := body["model_urls"].(map[string]any)
+	for _, format := range formats {
+		url, _ := models[format].(string)
+		if url == "" {
+			t.Fatalf("model_urls lacks %s: %v", format, models)
+		}
+		status, contentType, data := f.Download(url)
+		if want := ContentTypes["."+format]; status != http.StatusOK || contentType != want || len(data) == 0 {
+			t.Errorf("%s = %d %q (%d bytes), want %q", format, status, contentType, len(data), want)
+		}
+	}
+}
+
+// The documented task_error types are reachable on the v2 object too, and its
+// object has no expires_at (finding #203).
+func TestTaskErrorSelectorWorksOnTheV2Shape(t *testing.T) {
+	f := newFixture(t)
+	id := create(t, f, map[string]any{"mode": "preview", "prompt": "p"}, core.TaskErrorHeader, "service_unavailable")
+	_, body := finish(t, f, id)
+	failure, _ := body["task_error"].(map[string]any)
+	if body["status"] != core.StatusFailed || failure["type"] != "service_unavailable" || failure["message"] == "" {
+		t.Fatalf("task_error = %v", body)
+	}
+	if _, has := failure["code"]; has {
+		t.Errorf("service_unavailable has no documented code: %v", failure)
+	}
+	if _, has := body["expires_at"]; has {
+		t.Errorf("the v2 object has no expires_at: %v", body)
 	}
 }
 

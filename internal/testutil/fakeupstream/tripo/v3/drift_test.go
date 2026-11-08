@@ -165,6 +165,62 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 	assertSameShape(t, "failed poll", sampleShape(t, *real), shapeOfBody(t, failed))
 }
 
+// cancelled and unknown have no real sample: their structure is the real
+// failed poll of the same task type without the failure fields (see doc.go).
+func TestCancelledAndUnknownPollsDeriveFromTheRealFailedPoll(t *testing.T) {
+	samples := loadSamples(t)
+	f := newFixture(t, fakeupstream.Config{})
+	real := realPoll(samples, "animate_retarget", statusFailed)
+	if real == nil {
+		t.Fatal("no real failed poll sample")
+	}
+	wantBody, err := fakeupstream.JSONBody(*real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, ok := fakeupstream.DigMap(wantBody, "data"); ok {
+		delete(data, "error_code")
+		delete(data, "error_message")
+	}
+	want := shapeOfBody(t, wantBody)
+	for _, tc := range []struct{ scenario, status string }{
+		{"task-canceled", statusCancelled},
+		{"task-unknown", statusUnknown},
+	} {
+		id := f.create("/generation/text-to-model", textBody(), key, "X-Fake-Scenario", tc.scenario)
+		var body map[string]any
+		for i := 0; i < 3; i++ {
+			_, _, body = f.do("GET", "/tasks/"+id, key, nil)
+		}
+		if got := field(t, body, "data", "status"); got != tc.status {
+			t.Fatalf("%s poll returned %v", tc.scenario, got)
+		}
+		assertSameShape(t, tc.status+" poll", want, shapeOfBody(t, body))
+	}
+}
+
+// A malformed body keeps the real create 400 envelope structure; only the code
+// and message differ (1003 instead of the sampled 1004).
+func TestMalformedBodyKeepsTheRealErrorEnvelope(t *testing.T) {
+	samples := loadSamples(t)
+	f := newFixture(t, fakeupstream.Config{})
+	var sample *wirefixture.Exchange
+	for _, exchange := range samples.Find("POST /v3/generation/text-to-model", "") {
+		if exchange.Response.Status == http.StatusBadRequest {
+			sample = &exchange
+			break
+		}
+	}
+	if sample == nil {
+		t.Fatal("no real create 400 sample")
+	}
+	status, _, body := f.doRaw("POST", "/generation/text-to-model", key, `{"model":`)
+	if status != http.StatusBadRequest {
+		t.Fatalf("malformed body = %d %v", status, body)
+	}
+	assertSameShape(t, "malformed body", sampleShape(t, *sample), shapeOfBody(t, body))
+}
+
 // Smart Segmentation reports smartsegment_model for seg_type model and failed
 // once on a plain picture (both captured): the fake keeps both structures.
 func TestSmartSegmentationTypesAndFailureMatchTheRealSamples(t *testing.T) {

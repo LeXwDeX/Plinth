@@ -33,10 +33,10 @@
 
 | 端点 | 证据 | 样本 | 官方文档 | 核对日期 | 说明 |
 |---|---|---|---|---|---|
-| `POST /text-to-3d` | real | POST /openapi/v2/text-to-3d | https://docs.meshy.ai/en/api/text-to-3d | 2026-10-29 | preview and refine are one route; the task type follows mode |
-| `GET /text-to-3d/{id}` | real | GET /openapi/v2/text-to-3d/{id} | https://docs.meshy.ai/en/api/text-to-3d | 2026-10-29 | IN_PROGRESS and SUCCEEDED polls are real for both types; PENDING and FAILED reuse the in-progress structure (a failed one carries the task_error object observed on a failed rigging task) |
+| `POST /text-to-3d` | real | POST /openapi/v2/text-to-3d | https://docs.meshy.ai/en/api/text-to-3d | 2026-10-29 | preview and refine are one route; the task type follows mode; the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked 2026-11-08) |
+| `GET /text-to-3d/{id}` | real | GET /openapi/v2/text-to-3d/{id} | https://docs.meshy.ai/en/api/text-to-3d | 2026-10-29 | IN_PROGRESS and SUCCEEDED polls are real for both types; PENDING is constructed from the field docs (started_at/finished_at 0, preceding_tasks while queued); FAILED is constructed from the in-progress structure (a failed one carries the task_error object and no expires_at); CANCELED is constructed (task-canceled scenario); texture_urls follow the request's enable_pbr in a refine (constructed from docs); geometry_resolution/ultra_mode are not echoed because the Adapter does not read them (side evidence of #203) |
 | `DELETE /text-to-3d/{id}` | real | DELETE /openapi/v2/text-to-3d/{id} | https://docs.meshy.ai/en/api/text-to-3d | 2026-10-29 |  |
-| `GET /assets/{task_id}/{name}` | constructed-from-docs |  | https://docs.meshy.ai/en/api/text-to-3d | 2026-10-29 | the official CDN host is not part of the API; this route serves the fixed files the task's model_urls and thumbnail_url name (content types as observed) |
+| `GET /assets/{task_id}/{name}` | constructed-from-docs |  | https://docs.meshy.ai/en/api/text-to-3d | 2026-10-29 | the official CDN host is not part of the API; this route serves the fixed files the task's model_urls and thumbnail_url name. The content types of the six Catalog formats follow the v1 alignment's CDN observations and the Meshy adapter's notes (the v2 run requested glb only) |
 
 ## 差异
 

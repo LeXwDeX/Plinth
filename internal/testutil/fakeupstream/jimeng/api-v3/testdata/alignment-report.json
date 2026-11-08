@@ -79,8 +79,8 @@
       "evidence": "real",
       "sample": "POST /api/v3/images/generations",
       "doc_url": "https://www.volcengine.com/docs/82379/1541523",
-      "checked_at": "2026-10-29",
-      "note": "response_format b64_json answers an inline picture, url a signed TOS URL (both real samples); 401 AuthenticationError and 400 MissingParameter are real samples. A content-policy refusal, 402/429/5xx are not observed and reuse the real error envelope"
+      "checked_at": "2026-11-08",
+      "note": "response_format b64_json answers an inline picture, url a signed TOS URL (both real samples); 401 AuthenticationError and 400 MissingParameter are real samples. The sequential generation fields (sequential_image_generation, sequential_image_generation_options.max_images, usage.generated_images) and the per-picture data[].error follow https://www.volcengine.com/docs/82379/1541523 (checked 2026-11-08); a content-policy refusal, the 403/404/408/429/5xx answers and the documented-code channel (X-Fake-Upstream-Code) are constructed from https://docs.volcengine.com/docs/82379/1299023 (checked 2026-11-08) and reuse the real error envelope"
     },
     {
       "endpoint": "GET /files/{name}",

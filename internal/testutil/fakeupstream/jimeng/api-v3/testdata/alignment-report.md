@@ -30,7 +30,7 @@
 
 | 端点 | 证据 | 样本 | 官方文档 | 核对日期 | 说明 |
 |---|---|---|---|---|---|
-| `POST /images/generations` | real | POST /api/v3/images/generations | https://www.volcengine.com/docs/82379/1541523 | 2026-10-29 | response_format b64_json answers an inline picture, url a signed TOS URL (both real samples); 401 AuthenticationError and 400 MissingParameter are real samples. A content-policy refusal, 402/429/5xx are not observed and reuse the real error envelope |
+| `POST /images/generations` | real | POST /api/v3/images/generations | https://www.volcengine.com/docs/82379/1541523 | 2026-11-08 | response_format b64_json answers an inline picture, url a signed TOS URL (both real samples); 401 AuthenticationError and 400 MissingParameter are real samples. The sequential generation fields (sequential_image_generation, sequential_image_generation_options.max_images, usage.generated_images) and the per-picture data[].error follow https://www.volcengine.com/docs/82379/1541523 (checked 2026-11-08); a content-policy refusal, the 403/404/408/429/5xx answers and the documented-code channel (X-Fake-Upstream-Code) are constructed from https://docs.volcengine.com/docs/82379/1299023 (checked 2026-11-08) and reuse the real error envelope |
 | `GET /files/{name}` | constructed-from-docs |  | https://www.volcengine.com/docs/82379/1541523 | 2026-10-29 | the signed picture host is not part of the API; this route serves the fixed JPEG a response_format=url answer names. An expired URL answers the 403 JSON body the official TOS host returned for a URL past its X-Tos-Expires (observed 2026-10-29 by moving X-Tos-Date into the past) |
 
 ## 差异

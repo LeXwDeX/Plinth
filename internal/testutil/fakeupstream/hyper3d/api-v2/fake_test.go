@@ -25,10 +25,18 @@ func newFixture(t *testing.T, config fakeupstream.Config) *testkit.Fixture {
 // form builds a multipart body: text fields plus empty files under the names
 // listed in files.
 func form(fields map[string]string, files ...string) testkit.Body {
+	return labeledForm(fields, 0, files...)
+}
+
+// labeledForm is form plus count image_label text fields.
+func labeledForm(fields map[string]string, labels int, files ...string) testkit.Body {
 	var buffer bytes.Buffer
 	writer := multipart.NewWriter(&buffer)
 	for name, value := range fields {
 		_ = writer.WriteField(name, value)
+	}
+	for i := 0; i < labels; i++ {
+		_ = writer.WriteField("image_label", "label")
 	}
 	for _, name := range files {
 		header := textproto.MIMEHeader{}
@@ -151,8 +159,11 @@ func TestGenerationCompletesAndDeliversValidFiles(t *testing.T) {
 
 func TestBangAndTextureNeedTheirInputs(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
+	// A task id that names no task is the documented NO_SUCH_TASK; only an
+	// existing task whose state does not allow the operation is
+	// ASSET_NOT_AVAILABLE.
 	status, _, body := f.Do("POST", Prefix+"/bang", key, form(map[string]string{"asset_id": "00000000-0000-4000-8000-000000000001"}))
-	if status != http.StatusCreated || body["error"] != "ASSET_NOT_AVAILABLE" {
+	if status != http.StatusCreated || body["error"] != "NO_SUCH_TASK" {
 		t.Fatalf("bang of an unknown asset = %d %v", status, body)
 	}
 	gen := submit(t, f, "/rodin", textForm())
@@ -244,8 +255,9 @@ func TestRequestValidation(t *testing.T) {
 		"no prompt or image": {"POST", "/rodin", key, form(map[string]string{"tier": "Gen-2.5-Extreme-Low"}), http.StatusCreated, "error", "INVALID_REQUEST"},
 		"not multipart":      {"POST", "/rodin", key, map[string]any{"prompt": "p"}, http.StatusBadRequest, "error", "Bad Request"},
 		"status no key":      {"POST", "/status", key, map[string]any{}, http.StatusBadRequest, "error", "Bad Request"},
-		"status bad key":     {"POST", "/status", key, map[string]any{"subscription_key": "nope"}, http.StatusBadRequest, "error", "Bad Request"},
+		"status unknown key": {"POST", "/status", key, map[string]any{"subscription_key": "nope"}, http.StatusCreated, "error", "NO_SUCH_TASK"},
 		"download no uuid":   {"POST", "/download", key, map[string]any{}, http.StatusBadRequest, "error", "Bad Request"},
+		"download unknown":   {"POST", "/download", key, map[string]any{"task_uuid": "nope"}, http.StatusCreated, "error", "NO_SUCH_TASK"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			status, _, body := f.Do(tc.method, Prefix+tc.path, tc.key, tc.body)
@@ -260,6 +272,61 @@ func TestRequestValidation(t *testing.T) {
 	}
 }
 
+// #203: an unknown subscription_key or task_uuid is the documented application
+// error (HTTP 201, {"error":"NO_SUCH_TASK"}), as observed on 2026-10-21
+// (internal/providers/hyper3d/charge_evidence_test.go), not the 400
+// malformed-body envelope the committed sample shows for a missing field.
+func TestUnknownTaskReferencesAnswerNoSuchTask(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	for name, tc := range map[string]struct {
+		path string
+		body map[string]any
+	}{
+		"status":   {"/status", map[string]any{"subscription_key": "fake-subscription-unknown"}},
+		"download": {"/download", map[string]any{"task_uuid": "00000000-0000-4000-8000-000000000000"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, _, body := f.Do("POST", Prefix+tc.path, key, tc.body)
+			if status != http.StatusCreated || body["error"] != "NO_SUCH_TASK" {
+				t.Fatalf("%s = %d %v", tc.path, status, body)
+			}
+			if len(body) != 1 {
+				t.Fatalf("the observed body carries only error: %v", body)
+			}
+		})
+	}
+	// A missing or non-string field stays a malformed body: HTTP 400 with the
+	// validator envelope of the committed sample.
+	status, _, body := f.Do("POST", Prefix+"/status", key, map[string]any{"subscription_key": json.Number("1")})
+	if status != http.StatusBadRequest || body["error"] != "Bad Request" {
+		t.Fatalf("non-string subscription_key = %d %v", status, body)
+	}
+	status, _, body = f.Do("POST", Prefix+"/download", key, map[string]any{"task_uuid": json.Number("1")})
+	if status != http.StatusBadRequest || body["error"] != "Bad Request" {
+		t.Fatalf("non-string task_uuid = %d %v", status, body)
+	}
+}
+
+// IMAGE_LABEL_LENGTH_TOO_LONG is documented as more image_label entries than
+// uploaded images (https://docs.hyper3d.ai/en/api-specification/errors,
+// checked 2026-11-08); the rejection is constructed from the docs and no wire
+// sample covers it.
+func TestImageLabelCountIsValidated(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	fields := map[string]string{"tier": "Gen-2.5-Extreme-Low", "geometry_file_format": "glb", "material": "PBR"}
+	for _, tc := range []struct {
+		labels int
+		code   string
+	}{
+		{0, ""}, {2, ""}, {3, "IMAGE_LABEL_LENGTH_TOO_LONG"},
+	} {
+		status, _, body := f.Do("POST", Prefix+"/rodin", key, labeledForm(fields, tc.labels, "images", "images"))
+		if status != http.StatusCreated || (tc.code == "" && body["error"] != nil) || (tc.code != "" && body["error"] != tc.code) {
+			t.Fatalf("%d labels for 2 images = %d %v", tc.labels, status, body)
+		}
+	}
+}
+
 func TestFaultScenarios(t *testing.T) {
 	short := fakeupstream.Config{TimeoutHold: 50 * time.Millisecond}
 	post := func(f *testkit.Fixture, scenario string) (int, http.Header, map[string]any) {
@@ -269,6 +336,55 @@ func TestFaultScenarios(t *testing.T) {
 		status, _, body := post(newFixture(t, short), "insufficient-balance")
 		if status != http.StatusCreated || body["error"] != "API_INSUFFICIENT_FUNDS" {
 			t.Fatalf("%d %v", status, body)
+		}
+	})
+	t.Run("key quota maps to insufficient funds", func(t *testing.T) {
+		// The documented table has no per-key quota code; a key's credit limit
+		// is the insufficient-funds case.
+		status, _, body := post(newFixture(t, short), "key-quota")
+		if status != http.StatusCreated || body["error"] != "API_INSUFFICIENT_FUNDS" {
+			t.Fatalf("%d %v", status, body)
+		}
+	})
+	// The documented submission errors are application failures: HTTP 201 with
+	// the documented code in the body (errors page checked 2026-11-08).
+	for scenario, code := range map[string]string{
+		"concurrency-limit":         "API_PARALLELISM_LIMIT_REACHED",
+		"permission-denied":         "PERMISSION_DENIED",
+		"no-active-subscription":    "API_NO_ACTIVE_SUBSCRIPTION",
+		"plan-too-low":              "API_SUBSCRIPTION_PLAN_TOO_LOW",
+		"object-not-found-on-image": "API_OBJECT_NOT_FOUND_ON_IMAGE",
+		"content-violation":         "IMAGE_CONTENT_VIOLATION",
+		"api-unknown":               "API_UNKNOWN",
+	} {
+		t.Run(scenario+" is an application error", func(t *testing.T) {
+			f := newFixture(t, short)
+			for _, route := range []string{"/rodin", "/bang", "/rodin_texture_only"} {
+				status, _, body := f.Do("POST", Prefix+route, key, textForm(), "X-Fake-Scenario", scenario)
+				if status != http.StatusCreated || body["error"] != code {
+					t.Errorf("%s = %d %v", route, status, body)
+				}
+				if message, _ := body["message"].(string); message == "" {
+					t.Errorf("%s: a documented application error carries a message: %v", route, body)
+				}
+			}
+		})
+	}
+	t.Run("invalid key answers 401", func(t *testing.T) {
+		f := newFixture(t, short)
+		for _, request := range []struct {
+			method, path string
+			body         any
+		}{
+			{"GET", "/check_balance", nil},
+			{"POST", "/rodin", textForm()},
+			{"POST", "/status", map[string]any{"subscription_key": "some-key"}},
+			{"POST", "/download", map[string]any{"task_uuid": "some-id"}},
+		} {
+			status, _, body := f.Do(request.method, Prefix+request.path, "fake-invalid-key", request.body)
+			if status != http.StatusUnauthorized || body["error"] != "UNAUTHORIZED" {
+				t.Errorf("%s %s = %d %v", request.method, request.path, status, body)
+			}
 		}
 	})
 	t.Run("rate limit has Retry-After", func(t *testing.T) {

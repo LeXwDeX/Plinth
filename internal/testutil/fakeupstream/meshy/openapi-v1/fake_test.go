@@ -49,7 +49,7 @@ func (f *fixture) finish(path, id, apiKey string) ([]string, map[string]any) {
 		}
 		state := testkit.Field(f.T, body, "status").(string)
 		seen = append(seen, state)
-		if state == core.StatusSucceeded || state == core.StatusFailed {
+		if state == core.StatusSucceeded || state == core.StatusFailed || state == core.StatusCanceled {
 			return seen, body
 		}
 	}
@@ -188,6 +188,203 @@ func TestRiggingOfAnOversizedModelFailsTheTask(t *testing.T) {
 	ok := f.create("/rigging", map[string]any{"input_task_id": small})
 	if statuses, _ := f.finish("/rigging", ok, key); statuses[len(statuses)-1] != core.StatusSucceeded {
 		t.Fatalf("small model flow = %v", statuses)
+	}
+}
+
+// The documented terminal status the samples do not hold: a canceled task
+// stops without artifacts and can be deleted.
+func TestCanceledTaskStopsWithoutArtifacts(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	id := f.create("/image-to-3d", map[string]any{"image_url": "x"}, "X-Fake-Scenario", "task-canceled")
+	statuses, body := f.finish("/image-to-3d", id, key)
+	if got := strings.Join(statuses, ","); got != "PENDING,IN_PROGRESS,CANCELED" {
+		t.Fatalf("flow = %s", got)
+	}
+	if body["status"] != core.StatusCanceled || body["progress"].(float64) != 100 {
+		t.Fatalf("canceled body = %v", body)
+	}
+	if got := urls(body, "", map[string]string{}); len(got) != 0 {
+		t.Fatalf("a canceled task offers artifacts: %v", got)
+	}
+	if _, has := body["task_error"].(map[string]any); has {
+		t.Fatalf("a canceled task carries a task_error: %v", body["task_error"])
+	}
+	if status, _, _ := f.Do("DELETE", f.v1("/image-to-3d/"+id), key, nil); status != http.StatusOK {
+		t.Fatalf("delete of a canceled task = %d", status)
+	}
+}
+
+// The documented 403 refusal (moderation, plan or IP restriction).
+func TestForbiddenScenarioAnswersTheDocumentedRefusal(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	status, _, body := f.Do("POST", f.v1("/image-to-3d"), key, map[string]any{"image_url": "x"}, "X-Fake-Scenario", "forbidden")
+	if status != http.StatusForbidden || len(body) != 1 || body["message"] == "" {
+		t.Fatalf("forbidden = %d %v", status, body)
+	}
+}
+
+// The rigging page's 422 pose-estimation refusal; other kinds ignore it.
+func TestRiggingNonHumanoidAnswers422(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	source := f.source()
+	status, _, body := f.Do("POST", f.v1("/rigging"), key, map[string]any{"input_task_id": source}, "X-Fake-Scenario", "rig-non-humanoid")
+	if status != http.StatusUnprocessableEntity || len(body) != 1 || body["message"] == "" {
+		t.Fatalf("rig-non-humanoid = %d %v", status, body)
+	}
+	f.create("/remesh", map[string]any{"input_task_id": source}, "X-Fake-Scenario", "rig-non-humanoid")
+}
+
+// Every documented task_error.type is reachable; a code, when present, brings
+// its doc_url.
+func TestTaskErrorTypesFollowTheDocumentation(t *testing.T) {
+	for _, testCase := range []struct {
+		typ, code string
+	}{
+		{"invalid_input", ""},
+		{"timeout", "timeout"},
+		{"service_unavailable", ""},
+		{"server_error", ""},
+	} {
+		t.Run(testCase.typ, func(t *testing.T) {
+			f := newFixture(t, fakeupstream.Config{})
+			id := f.create("/image-to-3d", map[string]any{"image_url": "x"}, core.TaskErrorHeader, testCase.typ)
+			_, body := f.finish("/image-to-3d", id, key)
+			if body["status"] != core.StatusFailed {
+				t.Fatalf("status = %v", body["status"])
+			}
+			failure, _ := body["task_error"].(map[string]any)
+			if failure["type"] != testCase.typ || failure["message"] == "" {
+				t.Fatalf("task_error = %v", failure)
+			}
+			code, hasCode := failure["code"]
+			_, hasDoc := failure["doc_url"]
+			if testCase.code == "" && (hasCode || hasDoc) {
+				t.Fatalf("%s must carry no code/doc_url: %v", testCase.typ, failure)
+			}
+			if testCase.code != "" && (code != testCase.code || !hasDoc) {
+				t.Fatalf("%s code/doc_url = %v %v", testCase.typ, code, hasDoc)
+			}
+		})
+	}
+}
+
+// The PENDING body leaves the start/finish timestamps out, and a FAILED body
+// derived from the running sample gains the terminal ones (finding #203).
+func TestPollBodiesFollowTheDocumentedStateFields(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	pending := f.create("/text-to-image", map[string]any{"prompt": "p"})
+	status, _, body := f.Do("GET", f.v1("/text-to-image/"+pending), key, nil)
+	if status != http.StatusOK || body["status"] != core.StatusPending {
+		t.Fatalf("first poll = %d %v", status, body)
+	}
+	if body["progress"].(float64) != 0 {
+		t.Fatalf("PENDING progress = %v", body["progress"])
+	}
+	if ahead, _ := body["preceding_tasks"].(float64); ahead != 3 {
+		t.Errorf("PENDING preceding_tasks = %v", body["preceding_tasks"])
+	}
+	for _, field := range []string{"started_at", "finished_at", "expires_at"} {
+		if _, has := body[field]; has {
+			t.Errorf("PENDING body carries %s: %v", field, body)
+		}
+	}
+	failed := f.create("/text-to-image", map[string]any{"prompt": "p"}, core.TaskErrorHeader, "timeout")
+	_, body = f.finish("/text-to-image", failed, key)
+	if body["status"] != core.StatusFailed {
+		t.Fatalf("status = %v", body["status"])
+	}
+	for _, field := range []string{"started_at", "finished_at", "expires_at"} {
+		if _, has := body[field]; !has {
+			t.Errorf("FAILED body lacks %s: %v", field, body)
+		}
+	}
+}
+
+// textureMaps returns the first texture_urls object after checking every URL
+// it carries is a downloadable PNG.
+func textureMaps(t *testing.T, f *fixture, body map[string]any) map[string]any {
+	t.Helper()
+	entries, _ := body["texture_urls"].([]any)
+	if len(entries) == 0 {
+		t.Fatalf("texture_urls = %v", body["texture_urls"])
+	}
+	entry, _ := entries[0].(map[string]any)
+	for field, value := range entry {
+		url, _ := value.(string)
+		status, contentType, data := f.Download(url)
+		if status != http.StatusOK || contentType != "image/png" || len(data) == 0 {
+			t.Errorf("texture %s = %d %q %d bytes", field, status, contentType, len(data))
+		}
+	}
+	return entry
+}
+
+// The committed samples were captured with the cheapest texture options; a
+// default Catalog request (should_texture/enable_pbr true) must still receive
+// the documented maps (finding #203).
+func TestTextureOptionsShapeTheSuccessBody(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	textured := f.create("/image-to-3d", map[string]any{
+		"image_url": "https://example.test/a.png", "ai_model": "meshy-7.1",
+		"should_texture": true, "enable_pbr": true, "texture_resolution": "8k",
+		"target_formats": []string{"glb"},
+	})
+	_, body := f.finish("/image-to-3d", textured, key)
+	entry := textureMaps(t, f, body)
+	for _, field := range []string{"base_color", "metallic", "normal", "roughness"} {
+		if _, has := entry[field]; !has {
+			t.Errorf("image-to-3d texture lacks %s: %v", field, entry)
+		}
+	}
+	// meshy-7.1 at 8k documents no emission map.
+	if _, has := entry["emission"]; has {
+		t.Errorf("image-to-3d texture carries an emission map: %v", entry)
+	}
+
+	plain := f.create("/image-to-3d", map[string]any{"image_url": "https://example.test/a.png", "should_texture": false})
+	_, plainBody := f.finish("/image-to-3d", plain, key)
+	if entries, _ := plainBody["texture_urls"].([]any); len(entries) != 0 {
+		t.Errorf("an untextured task returns texture_urls: %v", entries)
+	}
+
+	multi := f.create("/multi-image-to-3d", map[string]any{
+		"image_urls": []string{"https://example.test/a.png"}, "should_texture": true, "enable_pbr": true,
+	})
+	_, multiBody := f.finish("/multi-image-to-3d", multi, key)
+	multiEntry := textureMaps(t, f, multiBody)
+	for _, field := range []string{"base_color", "metallic", "normal", "roughness"} {
+		if _, has := multiEntry[field]; !has {
+			t.Errorf("multi-image-to-3d texture lacks %s: %v", field, multiEntry)
+		}
+	}
+
+	retextured := f.create("/retexture", map[string]any{"input_task_id": f.source(), "enable_pbr": true})
+	_, retextureBody := f.finish("/retexture", retextured, key)
+	retextureEntry := textureMaps(t, f, retextureBody)
+	for _, field := range []string{"base_color", "metallic", "normal", "roughness"} {
+		if _, has := retextureEntry[field]; !has {
+			t.Errorf("retexture texture lacks %s: %v", field, retextureEntry)
+		}
+	}
+}
+
+// The recorded DocURLs must name pages that document the route (finding #203).
+func TestEndpointDocURLsNameTheRoutePages(t *testing.T) {
+	want := map[string]string{
+		"/rigging":           docsRoot + "rigging",
+		"/animations":        docsRoot + "animation",
+		"/print/analyze":     docsRoot + "analyze-printability",
+		"/print/multi-color": docsRoot + "multi-color-print",
+	}
+	for _, endpoint := range endpoints {
+		for path, url := range want {
+			if endpoint.Path != path && !strings.HasPrefix(endpoint.Path, path+"/") {
+				continue
+			}
+			if endpoint.DocURL != url || endpoint.CheckedAt != docsChecked {
+				t.Errorf("%s: DocURL %q checked %q, want %q at %s", endpoint.Key(), endpoint.DocURL, endpoint.CheckedAt, url, docsChecked)
+			}
+		}
 	}
 }
 

@@ -30,9 +30,17 @@ func generate(f *testkit.Fixture, body map[string]any, headers ...string) (int, 
 
 func editBody(t *testing.T, partName string, withImage bool) testkit.Body {
 	t.Helper()
+	return editForm(t, partName, withImage, true)
+}
+
+// editForm builds an edit request; withModel false omits the optional model.
+func editForm(t *testing.T, partName string, withImage, withModel bool) testkit.Body {
+	t.Helper()
 	var buffer bytes.Buffer
 	writer := multipart.NewWriter(&buffer)
-	_ = writer.WriteField("model", Model)
+	if withModel {
+		_ = writer.WriteField("model", Model)
+	}
 	_ = writer.WriteField("prompt", "make the cube blue")
 	if withImage {
 		header := make(textproto.MIMEHeader)
@@ -107,6 +115,14 @@ func TestRequestValidationAndAuthentication(t *testing.T) {
 	if status, body := edit(f, editBody(t, "image", false)); status != http.StatusBadRequest || testkit.Field(t, body, "error", "param") != "image" {
 		t.Fatalf("edit without a picture: %d %v", status, body)
 	}
+	// model is optional on POST /images/edits (official Create image edit
+	// reference); generations still requires it.
+	if status, body := edit(f, editForm(t, "image", true, false)); status != http.StatusOK {
+		t.Fatalf("edit without model: %d %v", status, body)
+	}
+	if status, body := generate(f, map[string]any{"prompt": "x"}); status != http.StatusBadRequest || testkit.Field(t, body, "error", "param") != "model" {
+		t.Fatalf("generation without model: %d %v", status, body)
+	}
 }
 
 func TestFaultScenarios(t *testing.T) {
@@ -118,6 +134,9 @@ func TestFaultScenarios(t *testing.T) {
 	}{
 		"insufficient-balance": {http.StatusPaymentRequired, "insufficient_quota"},
 		"key-quota":            {http.StatusPaymentRequired, "insufficient_quota"},
+		"quota-exceeded":       {http.StatusTooManyRequests, "quota_exceeded"},
+		"forbidden":            {http.StatusForbidden, "eca_access_denied"},
+		"service-unavailable":  {http.StatusServiceUnavailable, "server_is_overloaded"},
 		"rate-limit":           {http.StatusTooManyRequests, "rate_limit_exceeded"},
 		"server-error":         {http.StatusInternalServerError, "internal_error"},
 		"task-failed":          {http.StatusBadRequest, "moderation_blocked"},
@@ -134,6 +153,18 @@ func TestFaultScenarios(t *testing.T) {
 			}
 		})
 	}
+	t.Run("quota exceeded carries the gateway quota object", func(t *testing.T) {
+		_, body := generate(newFixture(t, short), request, "X-Fake-Scenario", "quota-exceeded")
+		if testkit.Field(t, body, "error", "type") != "quota_exceeded" || testkit.Field(t, body, "error", "quota", "dimension") != "weekly" {
+			t.Fatalf("%v", body)
+		}
+	})
+	t.Run("service unavailable carries Retry-After", func(t *testing.T) {
+		_, header, _ := newFixture(t, short).Raw("POST", Prefix+"/images/generations", key, request, "X-Fake-Scenario", "service-unavailable")
+		if header.Get("Retry-After") != "1" {
+			t.Fatalf("Retry-After = %q", header.Get("Retry-After"))
+		}
+	})
 	t.Run("rate limit has Retry-After", func(t *testing.T) {
 		_, header, _ := newFixture(t, short).Raw("POST", Prefix+"/images/generations", key, request, "X-Fake-Scenario", "rate-limit")
 		if header.Get("Retry-After") != "1" {

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -98,11 +99,16 @@ func TestFaultScenarios(t *testing.T) {
 		status int
 		code   string
 	}{
-		"insufficient-balance": {http.StatusPaymentRequired, "insufficient_quota"},
+		"insufficient-balance": {http.StatusPaymentRequired, "payment_required"},
 		"key-quota":            {http.StatusPaymentRequired, "insufficient_quota"},
 		"rate-limit":           {http.StatusTooManyRequests, "rate_limit_exceeded"},
-		"server-error":         {http.StatusInternalServerError, "internal_error"},
+		"server-error":         {http.StatusInternalServerError, "api_error"},
 		"task-failed":          {http.StatusBadRequest, "content_policy_violation"},
+		"forbidden":            {http.StatusForbidden, "forbidden"},
+		"permission-denied":    {http.StatusForbidden, "permission_denied"},
+		"model-not-found":      {http.StatusNotFound, "model_not_found"},
+		"service-unavailable":  {http.StatusServiceUnavailable, "service_unavailable"},
+		"quota-exceeded":       {http.StatusTooManyRequests, "quota_exceeded"},
 	} {
 		t.Run(scenario, func(t *testing.T) {
 			status, body := complete(newFixture(t, short), textRequest(), "X-Fake-Scenario", scenario)
@@ -115,6 +121,46 @@ func TestFaultScenarios(t *testing.T) {
 		_, header, _ := newFixture(t, short).Raw("POST", Prefix+"/chat/completions", key, textRequest(), "X-Fake-Scenario", "rate-limit")
 		if header.Get("Retry-After") != "1" {
 			t.Fatalf("Retry-After = %q", header.Get("Retry-After"))
+		}
+	})
+	t.Run("the quota answer is not a rate limit", func(t *testing.T) {
+		status, header, body := newFixture(t, short).Do("POST", Prefix+"/chat/completions", key, textRequest(), "X-Fake-Scenario", "quota-exceeded")
+		if status != http.StatusTooManyRequests || testkit.Field(t, body, "error", "type") != "quota_exceeded" {
+			t.Fatalf("%d %v", status, body)
+		}
+		for _, field := range []string{"dimension", "group_name", "limit_usd", "resets_at", "scope", "used_usd"} {
+			if _, ok := fakeupstream.Dig(body, "error", "quota", field); !ok {
+				t.Errorf("the quota answer has no error.quota.%s: %v", field, body)
+			}
+		}
+		if header.Get("Retry-After") != "" {
+			t.Fatalf("a quota answer must not ask for a retry: %q", header.Get("Retry-After"))
+		}
+	})
+	t.Run("invalid-key refuses a non-empty key", func(t *testing.T) {
+		status, header, body := newFixture(t, short).Raw("POST", Prefix+"/chat/completions", key, textRequest(), "X-Fake-Scenario", "invalid-key")
+		if status != http.StatusUnauthorized || !strings.HasPrefix(header.Get("Content-Type"), "text/plain") || string(body) != unauthorizedBody {
+			t.Fatalf("%d %s %q", status, header.Get("Content-Type"), body)
+		}
+	})
+	t.Run("content-filtered is a 200 without a picture", func(t *testing.T) {
+		status, _, raw := newFixture(t, short).Raw("POST", Prefix+"/chat/completions", key, textRequest(), "X-Fake-Scenario", "content-filtered")
+		if status != http.StatusOK {
+			t.Fatalf("%d %s", status, raw)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatal(err)
+		}
+		if testkit.Field(t, body, "choices", 0, "finish_reason") != "content_filter" {
+			t.Fatalf("finish_reason: %v", body)
+		}
+		content, ok := testkit.Field(t, body, "choices", 0, "message", "content").([]any)
+		if !ok || len(content) != 0 {
+			t.Fatalf("a filtered answer must have no content part: %v", body)
+		}
+		if bytes.Contains(raw, []byte(`"image_url"`)) {
+			t.Fatalf("a filtered answer carries a picture: %s", raw)
 		}
 	})
 	t.Run("timeout and lost response drop the connection", func(t *testing.T) {
@@ -147,6 +193,93 @@ func TestFaultScenarios(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestDocumentedErrorCodeOverride covers the documented request-level codes a
+// scenario does not name, and the statuses the class must not depend on. The
+// codes and statuses follow https://ai.google.dev/gemini-api/docs/api-errors
+// (checked 2026-11-08); the answers are constructed, not observed.
+func TestDocumentedErrorCodeOverride(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	answers := []struct {
+		code   string
+		status int
+	}{
+		{"payment_required", http.StatusPaymentRequired},
+		{"failed_precondition", http.StatusBadRequest},
+		{"out_of_range", http.StatusRequestedRangeNotSatisfiable},
+		{"not_found", http.StatusNotFound},
+		{"model_not_found", http.StatusNotFound},
+		{"already_exists", http.StatusConflict},
+		{"aborted", http.StatusConflict},
+		{"cancelled", 499},
+		{"unimplemented", http.StatusNotImplemented},
+		{"api_error", http.StatusInternalServerError},
+		{"service_unavailable", http.StatusServiceUnavailable},
+		{"deadline_exceeded", http.StatusGatewayTimeout},
+	}
+	for _, answer := range answers {
+		t.Run(answer.code, func(t *testing.T) {
+			status, body := complete(f, textRequest(), ErrorCodeHeader, answer.code, ErrorStatusHeader, strconv.Itoa(answer.status))
+			if status != answer.status || testkit.Field(t, body, "error", "code") != answer.code {
+				t.Fatalf("%d %v", status, body)
+			}
+		})
+	}
+	t.Run("without a status the answer is 400", func(t *testing.T) {
+		status, body := complete(f, textRequest(), ErrorCodeHeader, "safety")
+		if status != http.StatusBadRequest || testkit.Field(t, body, "error", "code") != "safety" {
+			t.Fatalf("%d %v", status, body)
+		}
+	})
+	t.Run("an unusable status falls back to 400", func(t *testing.T) {
+		status, body := complete(f, textRequest(), ErrorCodeHeader, "safety", ErrorStatusHeader, "nonsense")
+		if status != http.StatusBadRequest || testkit.Field(t, body, "error", "code") != "safety" {
+			t.Fatalf("%d %v", status, body)
+		}
+	})
+}
+
+// TestGenerationBlockedCodesAreInjectable covers every generation-blocked code
+// the Gemini image connection declares, at the 400 and 409 statuses the
+// connection's class must ignore (the public page gives them no status).
+func TestGenerationBlockedCodesAreInjectable(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	codes := []string{"safety", "prohibited_content", "spii", "blocklist", "image_safety",
+		"image_prohibited_content", "image_recitation", "image_other", "content_blocked",
+		"recitation", "language", "content_policy_violation"}
+	for _, code := range codes {
+		for _, status := range []int{http.StatusBadRequest, http.StatusConflict} {
+			t.Run(code+"/"+strconv.Itoa(status), func(t *testing.T) {
+				got, body := complete(f, textRequest(), ErrorCodeHeader, code, ErrorStatusHeader, strconv.Itoa(status))
+				if got != status || testkit.Field(t, body, "error", "code") != code {
+					t.Fatalf("%d %v", got, body)
+				}
+			})
+		}
+	}
+}
+
+// TestErrorSelectorWorksThroughTheAPIKey covers the stacks whose requests
+// cannot carry the selector headers (Plinth's Adapter only takes a base URL and
+// a key).
+func TestErrorSelectorWorksThroughTheAPIKey(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	for name, want := range map[string]struct {
+		status int
+		code   string
+	}{
+		"fake-error-image_safety":     {http.StatusBadRequest, "image_safety"},
+		"fake-error-409-image_safety": {http.StatusConflict, "image_safety"},
+		"fake-error-416-out_of_range": {http.StatusRequestedRangeNotSatisfiable, "out_of_range"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, _, body := f.Do("POST", Prefix+"/chat/completions", name, textRequest())
+			if status != want.status || testkit.Field(t, body, "error", "code") != want.code {
+				t.Fatalf("%d %v", status, body)
+			}
+		})
+	}
 }
 
 func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {

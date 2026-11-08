@@ -774,7 +774,8 @@
       "evidence": "real",
       "sample": "POST /openapi/v1/text-to-image",
       "doc_url": "https://docs.meshy.ai/en/api/text-to-image",
-      "checked_at": "2026-10-29"
+      "checked_at": "2026-10-29",
+      "note": "the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked 2026-11-08)"
     },
     {
       "endpoint": "GET /text-to-image/{id}",
@@ -782,7 +783,7 @@
       "sample": "GET /openapi/v1/text-to-image/{id}",
       "doc_url": "https://docs.meshy.ai/en/api/text-to-image",
       "checked_at": "2026-10-29",
-      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"
     },
     {
       "endpoint": "DELETE /text-to-image/{id}",
@@ -797,7 +798,8 @@
       "evidence": "real",
       "sample": "POST /openapi/v1/image-to-image",
       "doc_url": "https://docs.meshy.ai/en/api/image-to-image",
-      "checked_at": "2026-10-29"
+      "checked_at": "2026-10-29",
+      "note": "the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked 2026-11-08)"
     },
     {
       "endpoint": "GET /image-to-image/{id}",
@@ -805,7 +807,7 @@
       "sample": "GET /openapi/v1/image-to-image/{id}",
       "doc_url": "https://docs.meshy.ai/en/api/image-to-image",
       "checked_at": "2026-10-29",
-      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"
     },
     {
       "endpoint": "DELETE /image-to-image/{id}",
@@ -820,7 +822,8 @@
       "evidence": "real",
       "sample": "POST /openapi/v1/image-to-3d",
       "doc_url": "https://docs.meshy.ai/en/api/image-to-3d",
-      "checked_at": "2026-10-29"
+      "checked_at": "2026-10-29",
+      "note": "the samples were captured with the cheapest texture options; texture_urls and the PBR maps a default Catalog request asks for are constructed from the documented texture fields (docs checked 2026-11-08); the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked 2026-11-08)"
     },
     {
       "endpoint": "GET /image-to-3d/{id}",
@@ -828,7 +831,7 @@
       "sample": "GET /openapi/v1/image-to-3d/{id}",
       "doc_url": "https://docs.meshy.ai/en/api/image-to-3d",
       "checked_at": "2026-10-29",
-      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"
     },
     {
       "endpoint": "DELETE /image-to-3d/{id}",
@@ -843,7 +846,8 @@
       "evidence": "real",
       "sample": "POST /openapi/v1/multi-image-to-3d",
       "doc_url": "https://docs.meshy.ai/en/api/multi-image-to-3d",
-      "checked_at": "2026-10-29"
+      "checked_at": "2026-10-29",
+      "note": "the samples were captured with the cheapest texture options; texture_urls and the PBR maps a default Catalog request asks for are constructed from the documented texture fields (docs checked 2026-11-08); the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked 2026-11-08)"
     },
     {
       "endpoint": "GET /multi-image-to-3d/{id}",
@@ -851,7 +855,7 @@
       "sample": "GET /openapi/v1/multi-image-to-3d/{id}",
       "doc_url": "https://docs.meshy.ai/en/api/multi-image-to-3d",
       "checked_at": "2026-10-29",
-      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"
     },
     {
       "endpoint": "DELETE /multi-image-to-3d/{id}",
@@ -866,7 +870,8 @@
       "evidence": "real",
       "sample": "POST /openapi/v1/remesh",
       "doc_url": "https://docs.meshy.ai/en/api/remesh",
-      "checked_at": "2026-10-29"
+      "checked_at": "2026-10-29",
+      "note": "the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked 2026-11-08)"
     },
     {
       "endpoint": "GET /remesh/{id}",
@@ -874,7 +879,7 @@
       "sample": "GET /openapi/v1/remesh/{id}",
       "doc_url": "https://docs.meshy.ai/en/api/remesh",
       "checked_at": "2026-10-29",
-      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"
     },
     {
       "endpoint": "DELETE /remesh/{id}",
@@ -889,7 +894,8 @@
       "evidence": "real",
       "sample": "POST /openapi/v1/convert",
       "doc_url": "https://docs.meshy.ai/en/api/convert",
-      "checked_at": "2026-10-29"
+      "checked_at": "2026-10-29",
+      "note": "the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked 2026-11-08)"
     },
     {
       "endpoint": "GET /convert/{id}",
@@ -897,7 +903,7 @@
       "sample": "GET /openapi/v1/convert/{id}",
       "doc_url": "https://docs.meshy.ai/en/api/convert",
       "checked_at": "2026-10-29",
-      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"
     },
     {
       "endpoint": "DELETE /convert/{id}",
@@ -912,7 +918,8 @@
       "evidence": "real",
       "sample": "POST /openapi/v1/retexture",
       "doc_url": "https://docs.meshy.ai/en/api/retexture",
-      "checked_at": "2026-10-29"
+      "checked_at": "2026-10-29",
+      "note": "the samples were captured with the cheapest texture options; texture_urls and the PBR maps a default Catalog request asks for are constructed from the documented texture fields (docs checked 2026-11-08); the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked 2026-11-08)"
     },
     {
       "endpoint": "GET /retexture/{id}",
@@ -920,7 +927,7 @@
       "sample": "GET /openapi/v1/retexture/{id}",
       "doc_url": "https://docs.meshy.ai/en/api/retexture",
       "checked_at": "2026-10-29",
-      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"
     },
     {
       "endpoint": "DELETE /retexture/{id}",
@@ -934,47 +941,48 @@
       "endpoint": "POST /rigging",
       "evidence": "real",
       "sample": "POST /openapi/v1/rigging",
-      "doc_url": "https://docs.meshy.ai/en/api/rigging-and-animation",
-      "checked_at": "2026-10-29",
-      "note": "an input over 320000 faces is accepted (202) and the task ends FAILED with an invalid_input task_error (observed with a 300000-face quad remesh); the documentation says 400, the official API did not answer it at submit"
+      "doc_url": "https://docs.meshy.ai/en/api/rigging",
+      "checked_at": "2026-11-08",
+      "note": "an input over 320000 faces is accepted (202) and the task ends FAILED with an invalid_input task_error (observed with a 300000-face quad remesh); the documentation says 400, the official API did not answer it at submit; the rig-non-humanoid scenario answers the documented 422 (constructed from docs); the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked 2026-11-08)"
     },
     {
       "endpoint": "GET /rigging/{id}",
       "evidence": "real",
       "sample": "GET /openapi/v1/rigging/{id}",
-      "doc_url": "https://docs.meshy.ai/en/api/rigging-and-animation",
-      "checked_at": "2026-10-29",
-      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+      "doc_url": "https://docs.meshy.ai/en/api/rigging",
+      "checked_at": "2026-11-08",
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"
     },
     {
       "endpoint": "DELETE /rigging/{id}",
       "evidence": "real",
       "sample": "DELETE /openapi/v1/rigging/{id}",
-      "doc_url": "https://docs.meshy.ai/en/api/rigging-and-animation",
-      "checked_at": "2026-10-29",
+      "doc_url": "https://docs.meshy.ai/en/api/rigging",
+      "checked_at": "2026-11-08",
       "note": "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"
     },
     {
       "endpoint": "POST /animations",
       "evidence": "real",
       "sample": "POST /openapi/v1/animations",
-      "doc_url": "https://docs.meshy.ai/en/api/rigging-and-animation",
-      "checked_at": "2026-10-29"
+      "doc_url": "https://docs.meshy.ai/en/api/animation",
+      "checked_at": "2026-11-08",
+      "note": "the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked 2026-11-08)"
     },
     {
       "endpoint": "GET /animations/{id}",
       "evidence": "real",
       "sample": "GET /openapi/v1/animations/{id}",
-      "doc_url": "https://docs.meshy.ai/en/api/rigging-and-animation",
-      "checked_at": "2026-10-29",
-      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+      "doc_url": "https://docs.meshy.ai/en/api/animation",
+      "checked_at": "2026-11-08",
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"
     },
     {
       "endpoint": "DELETE /animations/{id}",
       "evidence": "real",
       "sample": "DELETE /openapi/v1/animations/{id}",
-      "doc_url": "https://docs.meshy.ai/en/api/rigging-and-animation",
-      "checked_at": "2026-10-29",
+      "doc_url": "https://docs.meshy.ai/en/api/animation",
+      "checked_at": "2026-11-08",
       "note": "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"
     },
     {
@@ -982,7 +990,8 @@
       "evidence": "real",
       "sample": "POST /openapi/v1/uv-unwrap",
       "doc_url": "https://docs.meshy.ai/en/api/uv-unwrap",
-      "checked_at": "2026-10-29"
+      "checked_at": "2026-10-29",
+      "note": "the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked 2026-11-08)"
     },
     {
       "endpoint": "GET /uv-unwrap/{id}",
@@ -990,7 +999,7 @@
       "sample": "GET /openapi/v1/uv-unwrap/{id}",
       "doc_url": "https://docs.meshy.ai/en/api/uv-unwrap",
       "checked_at": "2026-10-29",
-      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"
     },
     {
       "endpoint": "DELETE /uv-unwrap/{id}",
@@ -1005,7 +1014,8 @@
       "evidence": "real",
       "sample": "POST /openapi/v1/resize",
       "doc_url": "https://docs.meshy.ai/en/api/resize",
-      "checked_at": "2026-10-29"
+      "checked_at": "2026-10-29",
+      "note": "the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked 2026-11-08)"
     },
     {
       "endpoint": "GET /resize/{id}",
@@ -1013,7 +1023,7 @@
       "sample": "GET /openapi/v1/resize/{id}",
       "doc_url": "https://docs.meshy.ai/en/api/resize",
       "checked_at": "2026-10-29",
-      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"
     },
     {
       "endpoint": "DELETE /resize/{id}",
@@ -1027,47 +1037,48 @@
       "endpoint": "POST /print/analyze",
       "evidence": "real",
       "sample": "POST /openapi/v1/print/analyze",
-      "doc_url": "https://docs.meshy.ai/en/api/print",
-      "checked_at": "2026-10-29",
-      "note": "the report's printability._version key cannot be held by the sample sanitizer; the fake adds it back"
+      "doc_url": "https://docs.meshy.ai/en/api/analyze-printability",
+      "checked_at": "2026-11-08",
+      "note": "the report's printability._version key cannot be held by the sample sanitizer; the fake adds it back; the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked 2026-11-08)"
     },
     {
       "endpoint": "GET /print/analyze/{id}",
       "evidence": "real",
       "sample": "GET /openapi/v1/print/analyze/{id}",
-      "doc_url": "https://docs.meshy.ai/en/api/print",
-      "checked_at": "2026-10-29",
-      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+      "doc_url": "https://docs.meshy.ai/en/api/analyze-printability",
+      "checked_at": "2026-11-08",
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"
     },
     {
       "endpoint": "DELETE /print/analyze/{id}",
       "evidence": "real",
       "sample": "DELETE /openapi/v1/print/analyze/{id}",
-      "doc_url": "https://docs.meshy.ai/en/api/print",
-      "checked_at": "2026-10-29",
+      "doc_url": "https://docs.meshy.ai/en/api/analyze-printability",
+      "checked_at": "2026-11-08",
       "note": "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"
     },
     {
       "endpoint": "POST /print/multi-color",
       "evidence": "real",
       "sample": "POST /openapi/v1/print/multi-color",
-      "doc_url": "https://docs.meshy.ai/en/api/print",
-      "checked_at": "2026-10-29"
+      "doc_url": "https://docs.meshy.ai/en/api/multi-color-print",
+      "checked_at": "2026-11-08",
+      "note": "the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked 2026-11-08)"
     },
     {
       "endpoint": "GET /print/multi-color/{id}",
       "evidence": "real",
       "sample": "GET /openapi/v1/print/multi-color/{id}",
-      "doc_url": "https://docs.meshy.ai/en/api/print",
-      "checked_at": "2026-10-29",
-      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+      "doc_url": "https://docs.meshy.ai/en/api/multi-color-print",
+      "checked_at": "2026-11-08",
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"
     },
     {
       "endpoint": "DELETE /print/multi-color/{id}",
       "evidence": "real",
       "sample": "DELETE /openapi/v1/print/multi-color/{id}",
-      "doc_url": "https://docs.meshy.ai/en/api/print",
-      "checked_at": "2026-10-29",
+      "doc_url": "https://docs.meshy.ai/en/api/multi-color-print",
+      "checked_at": "2026-11-08",
       "note": "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"
     },
     {
@@ -1075,7 +1086,8 @@
       "evidence": "real",
       "sample": "POST /openapi/v1/text-to-motion",
       "doc_url": "https://docs.meshy.ai/en/api/text-to-motion",
-      "checked_at": "2026-10-29"
+      "checked_at": "2026-10-29",
+      "note": "the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked 2026-11-08)"
     },
     {
       "endpoint": "GET /text-to-motion/{id}",
@@ -1083,7 +1095,7 @@
       "sample": "GET /openapi/v1/text-to-motion/{id}",
       "doc_url": "https://docs.meshy.ai/en/api/text-to-motion",
       "checked_at": "2026-10-29",
-      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"
+      "note": "IN_PROGRESS and SUCCEEDED polls are real; PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"
     },
     {
       "endpoint": "DELETE /text-to-motion/{id}",

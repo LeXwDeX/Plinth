@@ -37,7 +37,7 @@
       "official_status": 401,
       "fake_status": 401,
       "official_fields": 0,
-      "diffs": 0,
+      "diffs": 1,
       "unexplained": 0
     },
     {
@@ -48,7 +48,7 @@
       "official_status": 400,
       "fake_status": 400,
       "official_fields": 6,
-      "diffs": 0,
+      "diffs": 1,
       "unexplained": 0
     },
     {
@@ -96,7 +96,20 @@
       "unexplained": 0
     }
   ],
-  "diffs": null,
+  "diffs": [
+    {
+      "step": "chat-invalid",
+      "aspect": "gateway-vs-official-error-envelope",
+      "detail": "the gateway error object is {code,message,path,type}; the official Error requires type,message,param,code and has no path",
+      "note": "有意对齐网关：fake 的 400 与已提交真实样本一致（漂移测试固定该结构）。官方 OpenAPI components.schemas.Error（https://github.com/openai/openai-openapi/blob/master/openapi.yaml，2026-11-08 核对）的 required 是 type/message/param/code，字段为 code/message/param/type，没有 path。构造的文档故障响应（invalid-key 401、forbidden 403、model-not-found 404、service-unavailable 503）改用官方 ErrorResponse；若要让样本派生的错误也严格对齐官方，需重新捕获样本并同步 policy 与漂移断言。"
+    },
+    {
+      "step": "chat-no-auth",
+      "aspect": "gateway-vs-official-401-body",
+      "detail": "the gateway 401 is bare text/plain unauthorized; the official 401 declares a JSON ErrorResponse or text/plain JSON-encoded error text",
+      "note": "有意对齐网关：未带 key 的 401 是已提交真实样本（text/plain \"unauthorized\"）。invalid-key 场景另给构造的官方 JSON ErrorResponse，依据 OpenAPI 的 401 响应声明（2026-11-08 核对）。"
+    }
+  ],
   "request_notes": [
     "工具调用步骤（chat-tool-call、chat-tool-call-stream）：发给 fake 的请求在最后一条 user 消息末尾多了 fake 专用的工具标记 `[[fake:tool:lookup_note {\"topic\":\"cube\"}]]`，其余字节相同；官方模型自行决定调用工具，fake 只在标记出现时返回工具调用。",
     "fake 的流式分片按官方 2026-10-29 实测的分片模式生成（角色、推理、正文或工具调用头与参数、结束分片）；已提交样本经 wirefixture 规范化后合并了中间分片，字段集合一致、中间分片的 null 类型不保留，所以漂移测试对 SSE 只比字段集合。"
@@ -107,7 +120,8 @@
       "evidence": "real",
       "sample": "GET /v1/models",
       "doc_url": "https://platform.openai.com/docs/api-reference/models/list",
-      "checked_at": "2026-10-29"
+      "checked_at": "2026-10-29",
+      "note": "the model list and the gateway's text/plain 401 are real samples; the invalid-key 401 ErrorResponse is a constructed-from-docs answer built from the OpenAPI ErrorResponse and the error-code guide (2026-11-08)"
     },
     {
       "endpoint": "POST /chat/completions",
@@ -115,7 +129,7 @@
       "sample": "POST /v1/chat/completions",
       "doc_url": "https://platform.openai.com/docs/api-reference/chat/create",
       "checked_at": "2026-10-29",
-      "note": "non-streaming, SSE streaming, tool_calls, reasoning_content and the model_required error are all real samples"
+      "note": "non-streaming, SSE streaming, tool_calls, reasoning_content and the model_required error are all real samples. The fault scenarios are constructed-from-docs answers (no committed sample) built from the OpenAPI and https://developers.openai.com/api/docs/guides/error-codes (2026-11-08): invalid-key 401 ErrorResponse, forbidden 403 (text/plain JSON error text), model-not-found 404, service-unavailable 503 with Retry-After, quota-exceeded 429 with error.quota, and [[fake:stream-error]] ending a started stream with an error frame; the messages 400 follows the request schema's required/minItems 1. The gateway error envelope lacks the official param and carries path instead (see doc.go)"
     }
   ]
 }

@@ -82,6 +82,71 @@ func field(t *testing.T, body map[string]any, path ...any) any {
 	return value
 }
 
+// doRaw sends one request whose body is sent verbatim, for malformed JSON.
+func (f *fixture) doRaw(method, path, key, raw string, headers ...string) (int, http.Header, map[string]any) {
+	f.t.Helper()
+	request, err := http.NewRequest(method, f.base()+path, strings.NewReader(raw))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if key != "" {
+		request.Header.Set("Authorization", "Bearer "+key)
+	}
+	for i := 0; i+1 < len(headers); i += 2 {
+		request.Header.Set(headers[i], headers[i+1])
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		f.t.Fatalf("%s %s: %v", method, path, err)
+	}
+	defer response.Body.Close()
+	rawResponse, _ := io.ReadAll(response.Body)
+	var decoded map[string]any
+	_ = json.Unmarshal(rawResponse, &decoded)
+	return response.StatusCode, response.Header, decoded
+}
+
+// upload posts one multipart file to /files.
+func (f *fixture) upload(filename, mediaType string, data []byte, key string, headers ...string) (int, http.Header, map[string]any) {
+	f.t.Helper()
+	var buffer bytes.Buffer
+	writer := multipart.NewWriter(&buffer)
+	header := textproto.MIMEHeader{}
+	header.Set("Content-Disposition", `form-data; name="file"; filename="`+filename+`"`)
+	header.Set("Content-Type", mediaType)
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if _, err := part.Write(data); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		f.t.Fatal(err)
+	}
+	request, err := http.NewRequest(http.MethodPost, f.base()+"/files", &buffer)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	if key != "" {
+		request.Header.Set("Authorization", "Bearer "+key)
+	}
+	for i := 0; i+1 < len(headers); i += 2 {
+		request.Header.Set(headers[i], headers[i+1])
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	defer response.Body.Close()
+	raw, _ := io.ReadAll(response.Body)
+	var decoded map[string]any
+	_ = json.Unmarshal(raw, &decoded)
+	return response.StatusCode, response.Header, decoded
+}
+
 func (f *fixture) create(path string, body any, key string, headers ...string) string {
 	f.t.Helper()
 	status, _, response := f.do(http.MethodPost, path, key, body, headers...)
@@ -252,29 +317,70 @@ func TestRequestValidation(t *testing.T) {
 
 func TestUploadReturnsAFileToken(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
-	var buffer bytes.Buffer
-	writer := multipart.NewWriter(&buffer)
-	header := textproto.MIMEHeader{}
-	header.Set("Content-Disposition", `form-data; name="file"; filename="a.png"`)
-	header.Set("Content-Type", "image/png")
-	part, _ := writer.CreatePart(header)
-	_, _ = part.Write([]byte("png"))
-	_ = writer.Close()
-	request, _ := http.NewRequest(http.MethodPost, f.base()+"/files", &buffer)
-	request.Header.Set("Content-Type", writer.FormDataContentType())
-	request.Header.Set("Authorization", "Bearer "+key)
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	var body map[string]any
-	_ = json.NewDecoder(response.Body).Decode(&body)
-	if response.StatusCode != http.StatusOK || !strings.HasPrefix(field(t, body, "data", "file_token").(string), "file_") {
-		t.Fatalf("upload = %d %v", response.StatusCode, body)
+	status, _, body := f.upload("a.png", "image/png", []byte("png"), key)
+	if status != http.StatusOK || !strings.HasPrefix(field(t, body, "data", "file_token").(string), "file_") {
+		t.Fatalf("upload = %d %v", status, body)
 	}
 	if status, _, _ := f.do("POST", "/files", key, map[string]any{}); status != http.StatusBadRequest {
 		t.Fatalf("JSON upload = %d", status)
+	}
+}
+
+// The upload endpoint takes the documented picture and model types and refuses
+// an empty part (2003) or an undocumented type (2004); both refusals are
+// constructed from the files and error-handling pages because the samples only
+// hold a success.
+func TestUploadValidatesEmptyAndUnsupportedFiles(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	for name, tc := range map[string]struct {
+		filename, mediaType string
+		data                []byte
+		status              int
+		code                float64
+	}{
+		"empty picture":  {"a.png", "image/png", nil, http.StatusBadRequest, 2003},
+		"empty model":    {"a.glb", "model/gltf-binary", nil, http.StatusBadRequest, 2003},
+		"text file":      {"notes.txt", "text/plain", []byte("x"), http.StatusBadRequest, 2004},
+		"unknown binary": {"a.exe", "application/octet-stream", []byte("x"), http.StatusBadRequest, 2004},
+		"png picture":    {"a.png", "image/png", []byte("png"), http.StatusOK, 0},
+		"webp picture":   {"a.webp", "image/webp", []byte("webp"), http.StatusOK, 0},
+		"glb model":      {"a.glb", "model/gltf-binary", []byte("glb"), http.StatusOK, 0},
+		"obj model":      {"a.obj", "application/octet-stream", []byte("obj"), http.StatusOK, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, _, body := f.upload(tc.filename, tc.mediaType, tc.data, key)
+			if status != tc.status {
+				t.Fatalf("upload = %d %v", status, body)
+			}
+			if tc.status != http.StatusOK {
+				if field(t, body, "code").(float64) != tc.code || field(t, body, "status") != "error" {
+					t.Fatalf("refusal = %v", body)
+				}
+			}
+		})
+	}
+}
+
+// An upload consumes no credits: the credit scenarios answer task creation but
+// leave the upload on the same key untouched, while request-level failures
+// still apply.
+func TestUploadIgnoresCreditScenarios(t *testing.T) {
+	for _, scenarioKey := range []string{"fake-insufficient-balance", "fake-key-quota"} {
+		t.Run(scenarioKey, func(t *testing.T) {
+			f := newFixture(t, fakeupstream.Config{})
+			status, _, body := f.upload("a.png", "image/png", []byte("png"), scenarioKey)
+			if status != http.StatusOK || !strings.HasPrefix(field(t, body, "data", "file_token").(string), "file_") {
+				t.Fatalf("upload = %d %v", status, body)
+			}
+			status, _, createBody := f.do("POST", "/generation/text-to-model", scenarioKey, textBody())
+			if status != http.StatusForbidden || field(t, createBody, "code").(float64) != 2010 {
+				t.Fatalf("create = %d %v", status, createBody)
+			}
+		})
+	}
+	f := newFixture(t, fakeupstream.Config{})
+	if status, _, body := f.upload("a.png", "image/png", []byte("png"), "fake-rate-limit"); status != http.StatusTooManyRequests || field(t, body, "code").(float64) != 1007 {
+		t.Fatalf("rate-limited upload = %d %v", status, body)
 	}
 }
 
@@ -417,10 +523,29 @@ func TestFaultScenarios(t *testing.T) {
 			t.Fatalf("%d %v", status, body)
 		}
 	})
-	t.Run("rate limit has Retry-After", func(t *testing.T) {
+	t.Run("rate limit is code 1007 with the rate headers", func(t *testing.T) {
 		status, header, body := post(newFixture(t, short), "rate-limit")
-		if status != http.StatusTooManyRequests || header.Get("Retry-After") != "1" || field(t, body, "code").(float64) != 2000 {
+		if status != http.StatusTooManyRequests || header.Get("Retry-After") != "1" || field(t, body, "code").(float64) != 1007 {
 			t.Fatalf("%d %v %v", status, header, body)
+		}
+		if header.Get("X-RateLimit-Limit") == "" || header.Get("X-RateLimit-Remaining") == "" || header.Get("X-RateLimit-Reset") == "" {
+			t.Fatalf("rate headers = %v", header)
+		}
+	})
+	t.Run("concurrency limit is code 2000 with Retry-After and creation only", func(t *testing.T) {
+		f := newFixture(t, short)
+		status, header, body := post(f, "concurrency-limit")
+		if status != http.StatusTooManyRequests || header.Get("Retry-After") != "1" || field(t, body, "code").(float64) != 2000 ||
+			!strings.Contains(field(t, body, "message").(string), "limit of generation") {
+			t.Fatalf("%d %v %v", status, header, body)
+		}
+		// The pool is full for task creation; an upload is not a task.
+		if status, _, uploadBody := f.upload("a.png", "image/png", []byte("png"), "fake-concurrency-limit"); status != http.StatusOK {
+			t.Fatalf("upload under a full pool = %d %v", status, uploadBody)
+		}
+		// Polling and the balance read are not task creation either.
+		if status, _, _ := f.do("GET", "/account/balance", "fake-concurrency-limit", nil); status != http.StatusOK {
+			t.Fatalf("balance under a full pool = %d", status)
 		}
 	})
 	t.Run("server error", func(t *testing.T) {
@@ -524,6 +649,101 @@ func TestFaultScenarios(t *testing.T) {
 			t.Fatalf("status = %d", status)
 		}
 	})
+}
+
+// The official task-query page lists cancelled and says an unknown value may
+// occur; neither was captured. The fake injects both from the real failed poll
+// structure, without the failure fields (doc.go), through the shared
+// task-canceled scenario and the Tripo-local task-unknown word.
+func TestTaskTerminalStatusScenarios(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	for name, tc := range map[string]struct {
+		key     string
+		headers []string
+		want    string
+	}{
+		"cancelled by header": {key, []string{"X-Fake-Scenario", "task-canceled"}, statusCancelled},
+		"cancelled by key":    {"fake-task-canceled", nil, statusCancelled},
+		"unknown by header":   {key, []string{"X-Fake-Scenario", "task-unknown"}, statusUnknown},
+		"unknown by key":      {"fake-task-unknown", nil, statusUnknown},
+	} {
+		t.Run(name, func(t *testing.T) {
+			id := f.create("/generation/text-to-model", textBody(), tc.key, tc.headers...)
+			var data map[string]any
+			for i := 0; i < 3; i++ {
+				status, _, body := f.do("GET", "/tasks/"+id, tc.key, nil)
+				if status != http.StatusOK {
+					t.Fatalf("poll = %d %v", status, body)
+				}
+				data, _ = fakeupstream.DigMap(body, "data")
+			}
+			if data["status"] != tc.want || data["type"] != "text_to_model" {
+				t.Fatalf("terminal poll = %v", data)
+			}
+			if _, has := data["error_code"]; has {
+				t.Fatalf("a %s task carries error_code: %v", tc.want, data)
+			}
+			if _, has := data["error_message"]; has {
+				t.Fatalf("a %s task carries error_message: %v", tc.want, data)
+			}
+			// unknown is not a signal and cancelled is terminal: reading again
+			// answers the same status instead of moving to success.
+			_, _, again := f.do("GET", "/tasks/"+id, tc.key, nil)
+			if got := field(t, again, "data", "status"); got != tc.want {
+				t.Fatalf("second read = %v, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// A body that is not JSON is 1003; an empty body or a missing parameter keeps
+// 1004. An input that names an unknown task is 2001; a file token or a public
+// URL passes through.
+func TestCreateReportsMalformedBodiesUnknownTasksAndPassThroughInputs(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	for name, tc := range map[string]struct {
+		raw  string
+		code float64
+	}{
+		"broken JSON":    {`{"model":`, 1003},
+		"array body":     {`[]`, 1003},
+		"null body":      {`null`, 1003},
+		"empty body":     {"", 1004},
+		"missing params": {`{}`, 1004},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, _, body := f.doRaw("POST", "/generation/text-to-model", key, tc.raw)
+			if status != http.StatusBadRequest || field(t, body, "code").(float64) != tc.code || field(t, body, "status") != "error" {
+				t.Fatalf("status %d body %v", status, body)
+			}
+			if tc.code == 1003 && field(t, body, "message") != "The request body is malformed" {
+				t.Fatalf("message = %v", field(t, body, "message"))
+			}
+		})
+	}
+	for _, tc := range []struct {
+		path string
+		body map[string]any
+	}{
+		{"/animations/rig-check", map[string]any{"input": "123e4567-e89b-42d3-a456-426614174000"}},
+		{"/models/texture", map[string]any{"input": "not-a-fake-task"}},
+	} {
+		status, _, body := f.do("POST", tc.path, key, tc.body)
+		if status != http.StatusNotFound || field(t, body, "code").(float64) != 2001 {
+			t.Fatalf("%s unknown input = %d %v", tc.path, status, body)
+		}
+	}
+	for name, tc := range map[string]struct {
+		path string
+		body map[string]any
+	}{
+		"file token": {"/generation/image-to-model", map[string]any{"model": "v3.1-20260211", "input": "file_x"}},
+		"public URL": {"/models/texture", map[string]any{"input": "https://example.test/model.glb"}},
+	} {
+		if status, _, body := f.do("POST", tc.path, key, tc.body); status != http.StatusOK {
+			t.Fatalf("%s %s = %d %v", name, tc.path, status, body)
+		}
+	}
 }
 
 // multiview-to-model is constructed from the documentation: inputs is a list of
