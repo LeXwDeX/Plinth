@@ -309,6 +309,11 @@ case "$1" in
     case " $* " in
       *' up '*)
         echo "$GO_IMAGE_TAG" >"$S_STATE"
+        # #206：候选启动必须把 DEBUG 标记写进挂载的日志文件，供发布脚本校验。
+        if [ -n "${GO_PROD_LOG_DIR:-}" ]; then
+          mkdir -p "$GO_PROD_LOG_DIR"
+          printf '{"level":"DEBUG","msg":"调试日志已启用","marker":"debug-log-ready"}\n' >>"$GO_PROD_LOG_DIR/art-ai.log"
+        fi
         if [ "$GO_IMAGE_TAG" = candidate ] && [ "${S_CANDIDATE_WRITE:-0}" = 1 ]; then
           for directory in "$GO_PROD_DB_DIR" "$GO_PROD_STORAGE_DIR" "$GO_PROD_WEB_DATA_DIR"; do
             printf candidate >"$directory/candidate-marker"
@@ -420,6 +425,7 @@ for name in generated cache thumbnails assets; do
 done
 grep -qx "GO_IMAGE_TAG=candidate" "$root/production/compose.env" &&
   grep -qx "GO_SOURCE_COMMIT=$SECOND" "$root/production/compose.env" &&
+  grep -qx "GO_LOG_LEVEL=debug" "$root/production/compose.env" &&
   grep -qx "GO_RUNTIME_ENV_FILE=$root/production/runtime.env" "$root/production/compose.env" &&
   grep -qx "GO_LEGACY_ASSET_CACHE_DIR=$root/production/legacy-cache" "$root/production/compose.env" || fail "compose.env content"
 [ "$(mode_of "$root/production/compose.env")" = 600 ] || fail "compose.env mode"
