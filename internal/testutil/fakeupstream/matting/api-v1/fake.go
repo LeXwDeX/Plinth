@@ -30,6 +30,11 @@ const samplePrefix = "/api/v1"
 
 const captured = "2026-10-29"
 
+// statusesChecked is the date the internal FastAPI OpenAPI enums were read.
+// PARTIAL_SUCCESS, CANCELED and REJECTED are constructed from them: the
+// committed samples only carry READY, RUNNING, SUCCESS and SUCCEEDED.
+const statusesChecked = "2026-11-08"
+
 // docs: the service is the operator's own and publishes no documentation; its
 // FastAPI OpenAPI page is the reference.
 const docs = "internal matting service (FastAPI /docs)"
@@ -37,13 +42,13 @@ const docs = "internal matting service (FastAPI /docs)"
 var endpoints = []fakeupstream.Endpoint{
 	{Method: "POST", Path: "/jobs", Evidence: fakeupstream.EvidenceReal, Sample: "POST /api/v1/jobs",
 		DocURL: docs, CheckedAt: captured,
-		Note: "multipart request (files + pipeline_params_json); 401 {detail}, 422 validation list and the READY batch envelope are real samples"},
+		Note: "multipart request (files + pipeline_params_json); 401 {detail}, 422 validation list and the READY batch envelope are real samples. One task per uploaded files part, the REJECTED task and the PARTIAL_SUCCESS/all-rejected batches are constructed from the " + docs + " SubmitBatchResponse/TaskStatusItem/BatchStatus enums checked " + statusesChecked + ": the samples carry one accepted file per batch and no rejected one"},
 	{Method: "GET", Path: "/batches/{batch_id}", Evidence: fakeupstream.EvidenceReal, Sample: "GET /api/v1/batches/{id}",
 		DocURL: docs, CheckedAt: captured,
-		Note: "READY, RUNNING and SUCCESS polls and the 404 {detail} are real. The FAILED batch (task FAILED with error_message) was never observed: it is built from the SUCCESS poll with the task failed and not downloadable"},
+		Note: "READY, RUNNING and SUCCESS polls and the 404 {detail} are real. The FAILED batch (task FAILED with error_message), the PARTIAL_SUCCESS batch (some files REJECTED), the completed batch with no artifact (every file REJECTED) and the CANCELED batch (batch and its tasks CANCELED) were never observed: they are built from the SUCCESS poll with the " + docs + " BatchStatus/TaskStatus enums checked " + statusesChecked + ". RECEIVED/STORED are accepted states the service's samples never showed (the create route answers READY) and the Adapter treats them like READY, so the fake does not produce them"},
 	{Method: "GET", Path: "/tasks/{task_id}/download", Evidence: fakeupstream.EvidenceReal, Sample: "GET /api/v1/tasks/{id}/download",
 		DocURL: docs, CheckedAt: captured,
-		Note: "authenticated download of the PNG result (image/png); 401 {detail} without a key. The service has no signed URLs, so an expired-URL scenario does not apply to it"},
+		Note: "authenticated download of the PNG result (image/png); 401 {detail} without a key. The service has no signed URLs, so an expired-URL scenario does not apply to it. Request-phase faults (429/500/timeout) answer here like on the other routes; a REJECTED task has no artifact and answers 404 (constructed from the TaskStatus enum checked " + statusesChecked + ")"},
 }
 
 // Version is the matting service api/v1 fake.
@@ -56,9 +61,17 @@ func Version() fakeupstream.Version {
 
 type batch struct {
 	id       string
-	taskID   string
+	tasks    []batchTask
 	scenario fakeupstream.Scenario
 	polls    int
+}
+
+// batchTask is one uploaded file's task. rejected records that the service's
+// input validation refused the file; such a task has no artifact.
+type batchTask struct {
+	id       string
+	name     string
+	rejected bool
 }
 
 type handler struct {
@@ -150,16 +163,37 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, h.invalid)
 		return
 	}
+	scenario := fakeupstream.ScenarioOf(r)
 	h.mu.Lock()
-	id := fmt.Sprintf("batch_fake%04d", len(h.batches)+1)
-	b := &batch{id: id, taskID: fmt.Sprintf("task_fake%04d", len(h.batches)+1), scenario: fakeupstream.ScenarioOf(r)}
-	h.batches[id], h.byTask[b.taskID] = b, b
+	number := len(h.batches) + 1
+	b := &batch{id: fmt.Sprintf("batch_fake%04d", number), scenario: scenario}
+	for index, name := range names {
+		b.tasks = append(b.tasks, batchTask{
+			id:       fmt.Sprintf("task_fake%04d_%02d", number, index+1),
+			name:     name,
+			rejected: rejectedBy(scenario, index, len(names)),
+		})
+	}
+	h.batches[b.id] = b
+	for _, task := range b.tasks {
+		h.byTask[task.id] = b
+	}
 	h.mu.Unlock()
 	if b.scenario == fakeupstream.ScenarioLostResponse {
 		fakeupstream.AbortConnection(w) // the batch exists; the response is lost
 		return
 	}
-	writeJSON(w, http.StatusOK, h.envelope(h.ready, b, "READY", "READY", names))
+	writeJSON(w, http.StatusOK, h.envelope(h.ready, b, "READY", "READY"))
+}
+
+// rejectedBy says whether the service's input validation refuses the file at
+// index of a batch of total files. Under ScenarioPartialImages the fake
+// rejects every file but the first; a single-file batch is rejected whole, so
+// a completed batch with no artifact is reachable too (the Adapter's
+// no_artifacts branch). Constructed: the committed samples carry no rejected
+// file.
+func rejectedBy(scenario fakeupstream.Scenario, index, total int) bool {
+	return scenario == fakeupstream.ScenarioPartialImages && (index > 0 || total == 1)
 }
 
 // uploadedNames reads the file names of the uploaded parts; the request is
@@ -184,22 +218,42 @@ func uploadedNames(r *http.Request) ([]string, bool) {
 	return names, len(names) > 0
 }
 
-// envelope clones a sample batch and fills the dynamic fields: the ids, the
-// statuses and the download flag of its one task.
-func (h *handler) envelope(template map[string]any, b *batch, batchStatus, taskStatus string, names []string) map[string]any {
+// envelope fills a sample batch with this batch's tasks: the ids, the uploaded
+// names with their indexes, the per-task status and the counts. The sample's
+// task object supplies the field structure; every task is a clone of it.
+func (h *handler) envelope(template map[string]any, b *batch, batchStatus, taskStatus string) map[string]any {
 	body := fakeupstream.Clone(template)
 	body["batch_id"], body["batch_status"] = b.id, batchStatus
-	tasks, _ := body["tasks"].([]any)
-	if len(tasks) == 0 {
-		return body
+	templateTasks, _ := template["tasks"].([]any)
+	taskTemplate, _ := templateTasks[0].(map[string]any)
+	if taskTemplate == nil {
+		taskTemplate = map[string]any{}
 	}
-	task, _ := tasks[0].(map[string]any)
-	task["task_id"], task["status"] = b.taskID, taskStatus
-	task["download_path"] = samplePrefix + "/tasks/" + b.taskID + "/download"
-	task["downloadable"] = taskStatus == "SUCCEEDED"
-	if len(names) > 0 {
-		task["source_name"] = names[0]
+	tasks := make([]any, 0, len(b.tasks))
+	accepted, rejected := 0, 0
+	for index, entry := range b.tasks {
+		task := fakeupstream.Clone(taskTemplate)
+		task["task_id"], task["source_index"], task["source_name"] = entry.id, index, entry.name
+		if entry.rejected {
+			rejected++
+			task["status"], task["downloadable"] = "REJECTED", false
+			task["error_message"], task["invalid_reason"] = nil, "Fake matting rejection."
+			task["download_path"] = ""
+			tasks = append(tasks, task)
+			continue
+		}
+		accepted++
+		task["status"] = taskStatus
+		task["downloadable"] = taskStatus == "SUCCEEDED"
+		task["download_path"] = samplePrefix + "/tasks/" + entry.id + "/download"
+		task["error_message"], task["invalid_reason"] = nil, nil
+		if taskStatus == "FAILED" {
+			task["error_message"] = "Fake matting failure."
+		}
+		tasks = append(tasks, task)
 	}
+	body["tasks"] = tasks
+	body["total_count"], body["accepted_count"], body["rejected_count"] = len(b.tasks), accepted, rejected
 	return body
 }
 
@@ -225,19 +279,32 @@ func (h *handler) read(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case n <= h.env.QueuedPolls:
-		writeJSON(w, http.StatusOK, h.envelope(h.ready, b, "READY", "READY", nil))
+		writeJSON(w, http.StatusOK, h.envelope(h.ready, b, "READY", "READY"))
 	case n <= h.env.QueuedPolls+h.env.RunningPolls:
-		writeJSON(w, http.StatusOK, h.envelope(h.running, b, "RUNNING", "RUNNING", nil))
+		writeJSON(w, http.StatusOK, h.envelope(h.running, b, "RUNNING", "RUNNING"))
 	case b.scenario == fakeupstream.ScenarioTaskFailed:
-		body := h.envelope(h.success, b, "FAILED", "FAILED", nil)
-		if tasks, _ := body["tasks"].([]any); len(tasks) > 0 {
-			task, _ := tasks[0].(map[string]any)
-			task["error_message"] = "Fake matting failure."
-		}
-		writeJSON(w, http.StatusOK, body)
+		writeJSON(w, http.StatusOK, h.envelope(h.success, b, "FAILED", "FAILED"))
+	case b.scenario == fakeupstream.ScenarioTaskCanceled:
+		writeJSON(w, http.StatusOK, h.envelope(h.success, b, "CANCELED", "CANCELED"))
+	case b.scenario == fakeupstream.ScenarioPartialImages:
+		// every accepted file succeeds and every rejected one stays REJECTED,
+		// so a batch with at least one accepted file ends PARTIAL_SUCCESS and
+		// an all-rejected one ends completed with no artifact.
+		writeJSON(w, http.StatusOK, h.envelope(h.success, b, "PARTIAL_SUCCESS", "SUCCEEDED"))
 	default:
-		writeJSON(w, http.StatusOK, h.envelope(h.success, b, "SUCCESS", "SUCCEEDED", nil))
+		writeJSON(w, http.StatusOK, h.envelope(h.success, b, "SUCCESS", "SUCCEEDED"))
 	}
+}
+
+// rejects reports whether the task of this batch was refused by the service's
+// input validation; such a task never has an artifact.
+func (b *batch) rejects(taskID string) bool {
+	for _, task := range b.tasks {
+		if task.id == taskID {
+			return task.rejected
+		}
+	}
+	return false
 }
 
 func (h *handler) download(w http.ResponseWriter, r *http.Request) {
@@ -245,10 +312,15 @@ func (h *handler) download(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, h.denied)
 		return
 	}
+	if h.env.Intercept(w, r, fakeupstream.PhaseRead, h.render) {
+		return
+	}
+	taskID := r.PathValue("task_id")
 	h.mu.Lock()
-	b := h.byTask[r.PathValue("task_id")]
+	b := h.byTask[taskID]
+	rejected := b != nil && b.rejects(taskID)
 	h.mu.Unlock()
-	if b == nil || b.scenario == fakeupstream.ScenarioArtifactNotFound {
+	if b == nil || rejected || b.scenario == fakeupstream.ScenarioArtifactNotFound {
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": "Task not found"})
 		return
 	}

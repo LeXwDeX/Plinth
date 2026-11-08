@@ -23,12 +23,21 @@ func newFixture(t *testing.T, config fakeupstream.Config) *testkit.Fixture {
 
 func jobForm(t *testing.T, withFile bool) testkit.Body {
 	t.Helper()
+	if !withFile {
+		return jobFormWithFiles(t)
+	}
+	return jobFormWithFiles(t, "input_1.png")
+}
+
+// jobFormWithFiles sends one files part per name.
+func jobFormWithFiles(t *testing.T, names ...string) testkit.Body {
+	t.Helper()
 	var buffer bytes.Buffer
 	writer := multipart.NewWriter(&buffer)
 	_ = writer.WriteField("pipeline_params_json", pipeline)
-	if withFile {
+	for _, name := range names {
 		header := make(textproto.MIMEHeader)
-		header.Set("Content-Disposition", `form-data; name="files"; filename="input_1.png"`)
+		header.Set("Content-Disposition", `form-data; name="files"; filename="`+name+`"`)
 		header.Set("Content-Type", "image/png")
 		part, _ := writer.CreatePart(header)
 		_, _ = part.Write([]byte("png bytes"))
@@ -41,8 +50,24 @@ func jobForm(t *testing.T, withFile bool) testkit.Body {
 
 func submit(f *testkit.Fixture, t *testing.T, headers ...string) (int, map[string]any) {
 	t.Helper()
-	status, _, body := f.Do("POST", Prefix+"/jobs", key, jobForm(t, true), headers...)
+	return submitFiles(f, t, []string{"input_1.png"}, headers...)
+}
+
+// submitFiles creates a batch carrying one file per name.
+func submitFiles(f *testkit.Fixture, t *testing.T, names []string, headers ...string) (int, map[string]any) {
+	t.Helper()
+	status, _, body := f.Do("POST", Prefix+"/jobs", key, jobFormWithFiles(t, names...), headers...)
 	return status, body
+}
+
+// count reads a numeric field of a decoded response.
+func count(t *testing.T, body map[string]any, name string) float64 {
+	t.Helper()
+	value, ok := body[name].(float64)
+	if !ok {
+		t.Fatalf("%s is not a number: %v", name, body[name])
+	}
+	return value
 }
 
 func poll(f *testkit.Fixture, t *testing.T, batchID string) map[string]any {
@@ -52,6 +77,17 @@ func poll(f *testkit.Fixture, t *testing.T, batchID string) map[string]any {
 		t.Fatalf("poll: %d %v", status, body)
 	}
 	return body
+}
+
+func pollUntil(f *testkit.Fixture, t *testing.T, batchID, want string) map[string]any {
+	t.Helper()
+	for i := 0; i < 6; i++ {
+		if final := poll(f, t, batchID); final["batch_status"] == want {
+			return final
+		}
+	}
+	t.Fatalf("batch %s never reached %s", batchID, want)
+	return nil
 }
 
 func TestBatchRunsReadyRunningSuccessAndDownloadsAValidPicture(t *testing.T) {
@@ -105,6 +141,125 @@ func TestRequestValidationAndAuthentication(t *testing.T) {
 	task := testkit.Field(t, created, "tasks", 0, "task_id").(string)
 	if status, _, _ := f.Raw("GET", Prefix+"/tasks/"+task+"/download", "", nil); status != http.StatusUnauthorized {
 		t.Fatalf("download without a key = %d", status)
+	}
+}
+
+func TestABatchCarriesEveryUploadedFile(t *testing.T) {
+	samples, err := fakeupstream.LoadSamples(sampleFS, sampleFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sampleCreate []byte
+	for _, exchange := range samples.Find("POST "+samplePrefix+"/jobs", "") {
+		if exchange.Response.Status == http.StatusOK {
+			sampleCreate = exchange.Response.Body.JSON
+		}
+	}
+	f := newFixture(t, fakeupstream.Config{})
+	names := []string{"first.png", "second.jpg", "third.webp"}
+	status, _, raw := f.Raw("POST", Prefix+"/jobs", key, jobFormWithFiles(t, names...))
+	if status != http.StatusOK {
+		t.Fatalf("create with three files: %d %s", status, raw)
+	}
+	testkit.AssertSameShape(t, "multi-file create", sampleCreate, raw)
+	var created map[string]any
+	_ = bytesToJSON(raw, &created)
+	if count(t, created, "total_count") != 3 || count(t, created, "accepted_count") != 3 || count(t, created, "rejected_count") != 0 {
+		t.Fatalf("counts = %v", created)
+	}
+	ids := map[string]bool{}
+	for index, name := range names {
+		task := testkit.Field(t, created, "tasks", index).(map[string]any)
+		if task["status"] != "READY" || task["source_index"] != float64(index) || task["source_name"] != name {
+			t.Fatalf("task %d = %v", index, task)
+		}
+		id := task["task_id"].(string)
+		if ids[id] {
+			t.Fatalf("duplicate task id %q", id)
+		}
+		ids[id] = true
+	}
+	final := pollUntil(f, t, created["batch_id"].(string), "SUCCESS")
+	for index := range names {
+		task := testkit.Field(t, final, "tasks", index).(map[string]any)
+		if task["status"] != "SUCCEEDED" || task["downloadable"] != true {
+			t.Fatalf("final task %d = %v", index, task)
+		}
+		id := task["task_id"].(string)
+		status, header, data := f.Raw("GET", Prefix+"/tasks/"+id+"/download", key, nil)
+		if status != http.StatusOK || header.Get("Content-Type") != "image/png" {
+			t.Fatalf("download %s: %d %s", id, status, header.Get("Content-Type"))
+		}
+		if err := testkit.DeliveryErr(t, data, "image", "", "image/png"); err != nil {
+			t.Fatalf("downloaded picture invalid: %v", err)
+		}
+	}
+}
+
+func TestPartialImagesRejectsTheExtraFilesAndEndsPartialSuccess(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	status, created := submitFiles(f, t, []string{"accepted.png", "rejected.png"}, "X-Fake-Scenario", "partial-images")
+	if status != http.StatusOK {
+		t.Fatalf("create: %d %v", status, created)
+	}
+	if count(t, created, "total_count") != 2 || count(t, created, "accepted_count") != 1 || count(t, created, "rejected_count") != 1 {
+		t.Fatalf("counts = %v", created)
+	}
+	accepted := testkit.Field(t, created, "tasks", 0).(map[string]any)
+	if accepted["status"] != "READY" || accepted["source_name"] != "accepted.png" || accepted["source_index"] != float64(0) {
+		t.Fatalf("accepted task = %v", accepted)
+	}
+	rejected := testkit.Field(t, created, "tasks", 1).(map[string]any)
+	if rejected["status"] != "REJECTED" || rejected["downloadable"] != false ||
+		rejected["invalid_reason"] == nil || rejected["source_name"] != "rejected.png" || rejected["source_index"] != float64(1) {
+		t.Fatalf("rejected task = %v", rejected)
+	}
+	final := pollUntil(f, t, created["batch_id"].(string), "PARTIAL_SUCCESS")
+	if count(t, final, "accepted_count") != 1 || count(t, final, "rejected_count") != 1 {
+		t.Fatalf("final counts = %v", final)
+	}
+	accepted = testkit.Field(t, final, "tasks", 0).(map[string]any)
+	if accepted["status"] != "SUCCEEDED" || accepted["downloadable"] != true {
+		t.Fatalf("final accepted task = %v", accepted)
+	}
+	rejected = testkit.Field(t, final, "tasks", 1).(map[string]any)
+	if rejected["status"] != "REJECTED" || rejected["downloadable"] != false {
+		t.Fatalf("final rejected task = %v", rejected)
+	}
+	acceptedID := accepted["task_id"].(string)
+	if status, _, _ := f.Raw("GET", Prefix+"/tasks/"+acceptedID+"/download", key, nil); status != http.StatusOK {
+		t.Fatalf("download of the accepted task = %d", status)
+	}
+	rejectedID := rejected["task_id"].(string)
+	if status, _, _ := f.Raw("GET", Prefix+"/tasks/"+rejectedID+"/download", key, nil); status != http.StatusNotFound {
+		t.Fatalf("download of a rejected task = %d", status)
+	}
+}
+
+func TestPartialImagesWithOneFileEndsCompletedWithoutArtifacts(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	_, created := submitFiles(f, t, []string{"only.png"}, "X-Fake-Scenario", "partial-images")
+	if count(t, created, "total_count") != 1 || count(t, created, "accepted_count") != 0 || count(t, created, "rejected_count") != 1 {
+		t.Fatalf("counts = %v", created)
+	}
+	final := pollUntil(f, t, created["batch_id"].(string), "PARTIAL_SUCCESS")
+	task := testkit.Field(t, final, "tasks", 0).(map[string]any)
+	if task["status"] != "REJECTED" || task["downloadable"] != false {
+		t.Fatalf("task = %v", task)
+	}
+	// A completed batch that claims no artifact is the Adapter's no_artifacts branch.
+}
+
+func TestTaskCanceledScenarioEndsTheBatchCanceled(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	_, created := submit(f, t, "X-Fake-Scenario", "task-canceled")
+	final := pollUntil(f, t, created["batch_id"].(string), "CANCELED")
+	task := testkit.Field(t, final, "tasks", 0).(map[string]any)
+	if task["status"] != "CANCELED" || task["downloadable"] != false {
+		t.Fatalf("task = %v", task)
+	}
+	if count(t, final, "accepted_count") != 1 || count(t, final, "rejected_count") != 0 {
+		t.Fatalf("counts = %v", final)
 	}
 }
 
@@ -167,6 +322,24 @@ func TestFaultScenarios(t *testing.T) {
 		}
 		if status, _, _ := f.Do("GET", Prefix+"/batches/batch_fake0001", key, nil); status != http.StatusOK {
 			t.Fatalf("the batch must exist: %d", status)
+		}
+	})
+	t.Run("download answers the request faults", func(t *testing.T) {
+		f := newFixture(t, short)
+		_, created := submit(f, t)
+		path := Prefix + "/tasks/" + testkit.Field(t, created, "tasks", 0, "task_id").(string) + "/download"
+		if status, header, _ := f.Raw("GET", path, key, nil, "X-Fake-Scenario", "rate-limit"); status != http.StatusTooManyRequests || header.Get("Retry-After") != "1" {
+			t.Fatalf("rate limit: %d %s", status, header.Get("Retry-After"))
+		}
+		if status, _, _ := f.Raw("GET", path, key, nil, "X-Fake-Scenario", "server-error"); status != http.StatusInternalServerError {
+			t.Fatalf("server error: %d", status)
+		}
+		request, _ := http.NewRequest("GET", f.Server.URL+path, nil)
+		request.Header.Set("Authorization", "Bearer "+key)
+		request.Header.Set("X-Fake-Scenario", "timeout")
+		if response, err := http.DefaultClient.Do(request); err == nil {
+			response.Body.Close()
+			t.Fatalf("the timeout response should be dropped, got %d", response.StatusCode)
 		}
 	})
 }
