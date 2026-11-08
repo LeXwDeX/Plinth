@@ -291,9 +291,11 @@ func (h *handler) generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// ScenarioPartialImages fails one picture of a sequential answer; a request
-	// for fewer than two pictures still answers them whole.
+	// for fewer than two pictures still answers them whole. The slice capacity
+	// is the documented maximum, never the request value, so the allocation
+	// cannot scale with user input (CodeQL go/overflowing-allocation).
 	count := imageCount(request)
-	items := make([]any, 0, count)
+	items := make([]any, 0, maxImagesLimit)
 	generated := 0
 	for index := 0; index < count; index++ {
 		if scenario == fakeupstream.ScenarioPartialImages && index == 1 {
