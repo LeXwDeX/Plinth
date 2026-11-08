@@ -3,6 +3,7 @@ package tripov3
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -52,14 +53,31 @@ const (
 	researched = "2026-09-30"
 )
 
-// Task statuses of the official API (observed: queued, running, success and
-// failed; the Catalog's status_mapping also knows cancelled, banned, expired).
+// Task statuses of the official API. queued, running, success and failed are
+// observed in the committed samples. The task-query page also lists cancelled
+// and says an unknown value may occur; the task-lifecycle page reports the
+// internal banned and expired outcomes as failed, so the fake never emits
+// them. cancelled and unknown have no real sample and are constructed (see
+// doc.go).
 const (
-	statusQueued  = "queued"
-	statusRunning = "running"
-	statusSuccess = "success"
-	statusFailed  = "failed"
+	statusQueued    = "queued"
+	statusRunning   = "running"
+	statusSuccess   = "success"
+	statusFailed    = "failed"
+	statusCancelled = "cancelled"
+	statusUnknown   = "unknown"
 )
+
+// scenarioTaskUnknown is the Tripo-local scenario word for the documented
+// unknown poll status. fakeupstream.Scenario has no task-unknown yet (only
+// task-canceled), so the word is parsed here from the same X-Fake-Scenario
+// header and "fake-" key prefix; it moves to the shared list once another
+// version needs it.
+const scenarioTaskUnknown = "task-unknown"
+
+// docsChecked is when the official error, status and upload pages behind the
+// constructed responses were read.
+const docsChecked = "2026-11-08"
 
 // Fixed values. The fake promises structure, not realism.
 const (
@@ -135,10 +153,10 @@ func buildEndpoints() []fakeupstream.Endpoint {
 			DocURL: docsRoot + "introduction", CheckedAt: captured},
 		{Method: "POST", Path: "/files", Evidence: fakeupstream.EvidenceReal, Sample: "POST /v3/files",
 			DocURL: docsRoot + "files", CheckedAt: captured,
-			Note: "the sample's multipart reference picture is replaced by a fixed recipe; the response is real"},
+			Note: "the sample's multipart reference picture is replaced by a fixed recipe; the response is real; the 400/code 2003 (empty file) and 400/code 2004 (unsupported type) refusals have no sample and are constructed from " + docsRoot + "files and " + docsRoot + "error-handling (read " + docsChecked + "); uploads never carry the credit scenarios, which the error page defines for task creation only"},
 		{Method: "GET", Path: "/tasks/{task_id}", Evidence: fakeupstream.EvidenceReal, Sample: "GET /v3/tasks/{id}",
 			DocURL: docsRoot + "task-query", CheckedAt: captured,
-			Note: "queued, running, success and failed poll bodies are real for the real kinds"},
+			Note: "queued, running, success and failed poll bodies are real for the real kinds; the cancelled (task-canceled) and unknown (task-unknown) terminals have no sample and are constructed from " + docsRoot + "task-lifecycle and " + docsRoot + "task-query (read " + docsChecked + ") by deriving the real failed poll without error_code/error_message; the legacy banned/expired words are never emitted because the lifecycle page reports them as failed"},
 		{Method: "GET", Path: "/artifacts/{task_id}/{name}", Evidence: fakeupstream.EvidenceConstructed,
 			DocURL: docsRoot + "task-query", CheckedAt: researched,
 			Note: "the official artifact CDN host is not part of the API; this route serves the fixed files its task output URLs name (content type binary/octet-stream as observed)"},
@@ -196,6 +214,9 @@ type task struct {
 	// failCode and failMessage are set when the task ends in "failed".
 	failCode    int
 	failMessage string
+	// terminal is the non-failure terminal status a scenario forces (cancelled
+	// or unknown); a failed task is described by failCode instead.
+	terminal string
 	// sourceFidelity is the fidelity an export inherits from the task whose
 	// artifact URL it was asked to convert.
 	sourceFidelity string
@@ -343,7 +364,15 @@ func (h *handler) render(w http.ResponseWriter, _ *http.Request, scenario fakeup
 	case fakeupstream.ScenarioKeyQuota:
 		status, code, message = http.StatusForbidden, 2010, "API key credit limit reached"
 	case fakeupstream.ScenarioRateLimit:
-		status, code, message = http.StatusTooManyRequests, 2000, "Too many requests"
+		// Request-rate limiting is 1007; a full concurrency pool is the separate
+		// 2000 answer (rate-limits and error-handling pages, read docsChecked).
+		status, code, message = http.StatusTooManyRequests, 1007, "Rate limit exceeded, you've generated too many requests in a short amount of time"
+		w.Header().Set("Retry-After", h.env.RetryAfterSeconds())
+		w.Header().Set("X-RateLimit-Limit", "100")
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("X-RateLimit-Reset", h.env.RetryAfterSeconds())
+	case fakeupstream.ScenarioConcurrencyLimit:
+		status, code, message = http.StatusTooManyRequests, 2000, "You have exceeded the limit of generation"
 		w.Header().Set("Retry-After", h.env.RetryAfterSeconds())
 	}
 	writeJSON(w, status, h.envelope(h.taskError, code, message, "Retry later or check the account"))
@@ -373,7 +402,11 @@ func (h *handler) getBalance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) postFile(w http.ResponseWriter, r *http.Request) {
-	if !h.auth(w, r) || h.env.Intercept(w, r, fakeupstream.PhaseCreate, h.render) {
+	// An upload consumes no credits and the files page defines no credit
+	// refusal: it is a read-phase request, so insufficient-balance and
+	// key-quota stay with task creation (architecture.md). Request-level
+	// failures (rate limit, server error, timeout) still apply.
+	if !h.auth(w, r) || h.env.Intercept(w, r, fakeupstream.PhaseRead, h.render) {
 		return
 	}
 	mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
@@ -389,11 +422,27 @@ func (h *handler) postFile(w http.ResponseWriter, r *http.Request) {
 				err = nextErr
 				break
 			}
-			if part.FormName() == "file" && part.FileName() != "" {
-				_, _ = io.Copy(io.Discard, io.LimitReader(part, 64<<20))
-				err = nil
+			if part.FormName() != "file" || part.FileName() == "" {
+				continue
+			}
+			if !uploadTypeAllowed(part.Header.Get("Content-Type"), part.FileName()) {
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 2004, "The file type is unsupported", "Refer to the API documentation for the supported file types"))
+				return
+			}
+			// Drain the whole part: the official limit for a model is 150 MB, so a
+			// fixed read cap would truncate a valid upload. The fake only checks
+			// emptiness, not the per-type size limits (20 MB pictures, 150 MB models).
+			written, copyErr := io.Copy(io.Discard, part)
+			if copyErr != nil {
+				err = copyErr
 				break
 			}
+			if written == 0 {
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 2003, "The image file is empty", "Please check if you passed the file, or it may be rejected by our firewall"))
+				return
+			}
+			err = nil
+			break
 		}
 	}
 	if err != nil {
@@ -411,6 +460,36 @@ func (h *handler) postFile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, body)
 }
 
+// uploadExtensions and uploadMediaTypes are the file types the official upload
+// endpoint takes (files page, read docsChecked): JPEG or PNG pictures and GLB,
+// GLTF, FBX, OBJ or STL models. WebP pictures are included because the presign
+// page lists them and Plinth uploads WebP references; the other presign-only
+// types (BMP, TIFF, 3MF, USDZ) are not, because the multipart endpoint does
+// not document them.
+var (
+	uploadExtensions = map[string]bool{
+		".png": true, ".jpg": true, ".jpeg": true, ".webp": true,
+		".glb": true, ".gltf": true, ".fbx": true, ".obj": true, ".stl": true,
+	}
+	uploadMediaTypes = map[string]bool{
+		"image/png": true, "image/jpeg": true, "image/webp": true,
+		"model/gltf-binary": true, "model/gltf+json": true, "model/fbx": true, "model/stl": true,
+	}
+)
+
+// uploadTypeAllowed accepts a part when either its filename extension or its
+// declared media type is one the official upload documents.
+func uploadTypeAllowed(mediaType, filename string) bool {
+	if uploadExtensions[strings.ToLower(path.Ext(filename))] {
+		return true
+	}
+	parsed, _, err := mime.ParseMediaType(mediaType)
+	if err != nil {
+		return false
+	}
+	return uploadMediaTypes[strings.ToLower(parsed)]
+}
+
 func (h *handler) newID() string {
 	return fmt.Sprintf("%s-0000-4000-8000-%012d", h.nonce, h.counter.Add(1))
 }
@@ -420,11 +499,27 @@ func (h *handler) create(k kind) http.HandlerFunc {
 		if !h.auth(w, r) || h.env.Intercept(w, r, fakeupstream.PhaseCreate, h.render) {
 			return
 		}
+		// A full concurrency pool refuses task creation only; the shared
+		// Intercept does not know this scenario yet, so it is applied here.
+		if fakeupstream.ScenarioOf(r) == fakeupstream.ScenarioConcurrencyLimit {
+			h.render(w, r, fakeupstream.ScenarioConcurrencyLimit)
+			return
+		}
 		var body map[string]any
 		decoder := json.NewDecoder(io.LimitReader(r.Body, 8<<20))
 		decoder.UseNumber()
-		if err := decoder.Decode(&body); err != nil || body == nil {
-			writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, "request body must be a JSON object", "Refer to the API documentation for parameter requirements"))
+		if err := decoder.Decode(&body); err != nil {
+			// A broken body is 1003; an empty body names no parameter and stays
+			// 1004 (error-handling page, read docsChecked).
+			if errors.Is(err, io.EOF) {
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, "request body must be a JSON object", "Refer to the API documentation for parameter requirements"))
+			} else {
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1003, "The request body is malformed", "Refer to the API documentation for request schema"))
+			}
+			return
+		}
+		if body == nil {
+			writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1003, "The request body is malformed", "Refer to the API documentation for request schema"))
 			return
 		}
 		for _, field := range k.Required {
@@ -440,6 +535,7 @@ func (h *handler) create(k kind) http.HandlerFunc {
 			}
 		}
 		t := &task{id: h.newID(), kind: k, typ: k.Type, scenario: fakeupstream.ScenarioOf(r), expiredIssues: fakeupstream.ExpiredIssues(r)}
+		t.terminal = terminalStatus(r)
 		if k.Path == "/mesh/smartsegment" {
 			switch segType, _ := body["seg_type"].(string); segType {
 			case "image":
@@ -472,10 +568,20 @@ func (h *handler) create(k kind) http.HandlerFunc {
 			t.sourceFidelity = h.urlFidelity(source)
 		}
 		// input is a task id, except for the kinds that take an uploaded file (image-to-*,
-		// Smart Segmentation) and Convert, which takes a URL.
-		if parent, _ := body["input"].(string); parent != "" && k.Path != "/models/convert" && !strings.HasPrefix(parent, "file_") {
-			t.parent = parent
-			if source := h.lookup(parent); source != nil {
+		// Smart Segmentation) and Convert, which takes a URL. A file token and a public
+		// URL pass through; any other value names a task and must exist, or the official
+		// API answers 2001 (error-handling page: the task does not exist or is not the
+		// caller's; checked docsChecked).
+		if parent, _ := body["input"].(string); parent != "" && k.Path != "/models/convert" {
+			switch {
+			case strings.HasPrefix(parent, "file_"), isHTTP(parent):
+			default:
+				t.parent = parent
+				source := h.lookup(parent)
+				if source == nil {
+					writeJSON(w, http.StatusNotFound, h.envelope(h.taskError, 2001, "The task is not found", "Check if the task is committed by you or whether the format is correct"))
+					return
+				}
 				if !h.acceptsSource(k, source) {
 					writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, "Invalid input parameter", "Refer to the API documentation for parameter requirements"))
 					return
@@ -485,9 +591,6 @@ func (h *handler) create(k kind) http.HandlerFunc {
 				if k.Type == "animate_retarget" && strings.HasPrefix(source.model, "v2") {
 					t.failCode, t.failMessage = 1004, "Invalid input parameter"
 				}
-			} else if strings.Contains(parent, "-0000-4000-8000-") {
-				writeJSON(w, http.StatusNotFound, h.envelope(h.taskError, 2001, "The task is not found", "Check if the task is committed by you or whether the format is correct"))
-				return
 			}
 		}
 		if t.scenario == fakeupstream.ScenarioTaskFailed && t.failCode == 0 {
@@ -506,6 +609,38 @@ func (h *handler) create(k kind) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, response)
 	}
+}
+
+// terminalStatus is the non-failure terminal status the creating request asks
+// for: the shared task-canceled scenario or the Tripo-local task-unknown word.
+func terminalStatus(r *http.Request) string {
+	switch {
+	case requestedScenario(r, string(fakeupstream.ScenarioTaskCanceled)):
+		return statusCancelled
+	case requestedScenario(r, scenarioTaskUnknown):
+		return statusUnknown
+	}
+	return ""
+}
+
+// requestedScenario answers whether r selects a scenario by the shared
+// X-Fake-Scenario header or by a "fake-<name>[-suffix]" API key. It mirrors
+// fakeupstream.ScenarioOf for a word the shared scenario list may not hold.
+func requestedScenario(r *http.Request, name string) bool {
+	if value := strings.TrimSpace(r.Header.Get(fakeupstream.ScenarioHeader)); value != "" {
+		return value == name
+	}
+	rest, ok := strings.CutPrefix(fakeupstream.BearerKey(r), fakeupstream.KeyPrefix)
+	if !ok {
+		return false
+	}
+	return rest == name || strings.HasPrefix(rest, name+"-") || strings.HasPrefix(rest, name+"_")
+}
+
+// isHTTP reports whether raw is a public http(s) URL, which the create
+// endpoints take as an input in place of a task id or file token.
+func isHTTP(raw string) bool {
+	return strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "http://")
 }
 
 // urlFidelity reads which task one of this fake's artifact URLs belongs to.
@@ -562,6 +697,8 @@ func (h *handler) getTask(w http.ResponseWriter, r *http.Request) {
 		status = statusQueued
 	case n <= h.env.QueuedPolls+h.env.RunningPolls:
 		status = statusRunning
+	case t.terminal != "":
+		status = t.terminal
 	case t.failCode != 0:
 		status = statusFailed
 	}
@@ -571,7 +708,14 @@ func (h *handler) getTask(w http.ResponseWriter, r *http.Request) {
 func (h *handler) pollBody(r *http.Request, t *task, status string) map[string]any {
 	template := t.kind
 	template.Type, template.Base = t.typ, t.typ // the sample of the task's own type (seg_type picks one of two)
-	body := fakeupstream.Clone(h.pollTemplate(template, status))
+	// cancelled and unknown have no real poll sample: their structure is the
+	// real failed poll of the same task type without the failure fields (see
+	// doc.go). The status word in the body is set below.
+	templateStatus := status
+	if status == statusCancelled || status == statusUnknown {
+		templateStatus = statusFailed
+	}
+	body := fakeupstream.Clone(h.pollTemplate(template, templateStatus))
 	data, _ := fakeupstream.DigMap(body, "data")
 	data["task_id"], data["type"], data["status"] = t.id, t.typ, status
 	for _, key := range []string{"created_at", "completed_at"} {
@@ -603,6 +747,13 @@ func (h *handler) pollBody(r *http.Request, t *task, status string) map[string]a
 	}
 	if status == statusFailed {
 		data["error_code"], data["error_message"] = json.Number(fmt.Sprint(t.failCode)), t.failMessage
+		return body
+	}
+	if status == statusCancelled || status == statusUnknown {
+		// The failed template carries the failure fields; a cancelled or unknown
+		// task has none (task-lifecycle and task-query pages, read docsChecked).
+		delete(data, "error_code")
+		delete(data, "error_message")
 		return body
 	}
 	if output, ok := fakeupstream.DigMap(data, "output"); ok && status == statusSuccess {
