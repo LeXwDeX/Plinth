@@ -3,7 +3,7 @@
 - 官方 API：`dev-test OpenAI-compatible LLM gateway /v1`
 - 核对日期：2026-10-29
 - 官方请求数：8（其中付费：4）；fake 请求数：8
-- 差异：0 项，其中未说明：0 项
+- 差异：2 项，其中未说明：0 项
 
 只比对结构：方法、路径、鉴权头、状态码、响应 JSON 的字段集合、类型与嵌套、任务状态枚举与流转、产物 content-type 与格式；不比对值。
 
@@ -13,8 +13,8 @@
 |---|---|---|---|---|---|---|---|
 | models | `GET /models` | Authorization: Bearer <key> | 200/200 | 16 |  |  | 0 (0) |
 | models-no-auth | `GET /models` | none | 401/401 | 0 |  |  | 0 (0) |
-| chat-no-auth | `POST /chat/completions` | none | 401/401 | 0 |  |  | 0 (0) |
-| chat-invalid | `POST /chat/completions` | Authorization: Bearer <key> | 400/400 | 6 |  |  | 0 (0) |
+| chat-no-auth | `POST /chat/completions` | none | 401/401 | 0 |  |  | 1 (0) |
+| chat-invalid | `POST /chat/completions` | Authorization: Bearer <key> | 400/400 | 6 |  |  | 1 (0) |
 | chat-completion | `POST /chat/completions` | Authorization: Bearer <key> | 200/200 | 25 |  |  | 0 (0) |
 | chat-stream | `POST /chat/completions` | Authorization: Bearer <key> | 200/200 | 25 |  |  | 0 (0) |
 | chat-tool-call | `POST /chat/completions` | Authorization: Bearer <key> | 200/200 | 33 |  |  | 0 (0) |
@@ -31,9 +31,10 @@
 
 | 端点 | 证据 | 样本 | 官方文档 | 核对日期 | 说明 |
 |---|---|---|---|---|---|
-| `GET /models` | real | GET /v1/models | https://platform.openai.com/docs/api-reference/models/list | 2026-10-29 |  |
-| `POST /chat/completions` | real | POST /v1/chat/completions | https://platform.openai.com/docs/api-reference/chat/create | 2026-10-29 | non-streaming, SSE streaming, tool_calls, reasoning_content and the model_required error are all real samples |
+| `GET /models` | real | GET /v1/models | https://platform.openai.com/docs/api-reference/models/list | 2026-10-29 | the model list and the gateway's text/plain 401 are real samples; the invalid-key 401 ErrorResponse is a constructed-from-docs answer built from the OpenAPI ErrorResponse and the error-code guide (2026-11-08) |
+| `POST /chat/completions` | real | POST /v1/chat/completions | https://platform.openai.com/docs/api-reference/chat/create | 2026-10-29 | non-streaming, SSE streaming, tool_calls, reasoning_content and the model_required error are all real samples. The fault scenarios are constructed-from-docs answers (no committed sample) built from the OpenAPI and https://developers.openai.com/api/docs/guides/error-codes (2026-11-08): invalid-key 401 ErrorResponse, forbidden 403 (text/plain JSON error text), model-not-found 404, service-unavailable 503 with Retry-After, quota-exceeded 429 with error.quota, and [[fake:stream-error]] ending a started stream with an error frame; the messages 400 follows the request schema's required/minItems 1. The gateway error envelope lacks the official param and carries path instead (see doc.go) |
 
 ## 差异
 
-无。
+- `chat-invalid` / gateway-vs-official-error-envelope / the gateway error object is {code,message,path,type}; the official Error requires type,message,param,code and has no path：有意对齐网关：fake 的 400 与已提交真实样本一致（漂移测试固定该结构）。官方 OpenAPI components.schemas.Error（https://github.com/openai/openai-openapi/blob/master/openapi.yaml，2026-11-08 核对）的 required 是 type/message/param/code，字段为 code/message/param/type，没有 path。构造的文档故障响应（invalid-key 401、forbidden 403、model-not-found 404、service-unavailable 503）改用官方 ErrorResponse；若要让样本派生的错误也严格对齐官方，需重新捕获样本并同步 policy 与漂移断言。
+- `chat-no-auth` / gateway-vs-official-401-body / the gateway 401 is bare text/plain unauthorized; the official 401 declares a JSON ErrorResponse or text/plain JSON-encoded error text：有意对齐网关：未带 key 的 401 是已提交真实样本（text/plain "unauthorized"）。invalid-key 场景另给构造的官方 JSON ErrorResponse，依据 OpenAPI 的 401 响应声明（2026-11-08 核对）。

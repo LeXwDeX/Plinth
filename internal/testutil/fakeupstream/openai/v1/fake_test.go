@@ -155,6 +155,21 @@ func TestChatRequestValidation(t *testing.T) {
 			t.Errorf("%s: %d %v", name, status, response)
 		}
 	}
+	// messages is required and must hold at least one item.
+	for name, body := range map[string]map[string]any{"no messages": {"model": "m"}, "empty messages": {"model": "m", "messages": []map[string]any{}}} {
+		status, response := f.chat(body)
+		if status != http.StatusBadRequest || dig(t, response, "error", "param") != "messages" || dig(t, response, "error", "code") != "missing_required_parameter" {
+			t.Errorf("%s: %d %v", name, status, response)
+		}
+	}
+	// Malformed JSON is its own 400, not the model_required answer.
+	response, raw := f.send("POST", "/chat/completions", "test-key", json.RawMessage(`{"model":`))
+	var body map[string]any
+	_ = json.Unmarshal(raw, &body)
+	if response.StatusCode != http.StatusBadRequest || dig(t, body, "error", "type") != "invalid_request_error" ||
+		!strings.Contains(dig(t, body, "error", "message").(string), "parse") || dig(t, body, "error", "param") != nil {
+		t.Errorf("malformed JSON: %d %s", response.StatusCode, raw)
+	}
 }
 
 func TestToolCallsFollowTheMarkerAndToolResultsEndTheTurn(t *testing.T) {
@@ -300,6 +315,32 @@ func TestSeveralMarkersSkipUnavailableTools(t *testing.T) {
 	}
 }
 
+// A streaming request whose last message carries StreamErrorMarker answers 200
+// and then ends the started stream with an error frame instead of a completion
+// chunk, without [DONE] (the official 200 description allows an interrupted
+// stream without the marker).
+func TestStreamedErrorFrame(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	response, raw := f.send("POST", "/chat/completions", "k", map[string]any{
+		"model": "deepseek", "messages": user("hi " + StreamErrorMarker), "stream": true,
+	})
+	chunks, done := sseEvents(t, raw)
+	if response.StatusCode != http.StatusOK || !strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") || done {
+		t.Fatalf("%d %q done=%t", response.StatusCode, response.Header.Get("Content-Type"), done)
+	}
+	if len(chunks) != 2 || dig(t, chunks[0], "choices", 0, "delta", "role") != "assistant" {
+		t.Fatalf("opening chunks: %v", chunks)
+	}
+	if dig(t, chunks[1], "error", "type") != "service_unavailable_error" || dig(t, chunks[1], "error", "code") != "server_is_overloaded" {
+		t.Fatalf("error frame: %v", chunks[1])
+	}
+	// Without stream=true the marker changes nothing.
+	status, body := f.chat(map[string]any{"model": "m", "messages": user("hi " + StreamErrorMarker)})
+	if status != http.StatusOK || dig(t, body, "choices", 0, "message", "content") != FixedReply {
+		t.Fatalf("non-stream: %d %v", status, body)
+	}
+}
+
 func TestFaultScenarios(t *testing.T) {
 	short := fakeupstream.Config{TimeoutHold: 50 * time.Millisecond}
 	chat := func(f *fixture, scenario string) (*http.Response, map[string]any) {
@@ -310,13 +351,20 @@ func TestFaultScenarios(t *testing.T) {
 	}
 	t.Run("insufficient balance", func(t *testing.T) {
 		response, body := chat(newFixture(t, short), "insufficient-balance")
-		if response.StatusCode != http.StatusPaymentRequired || dig(t, body, "error", "code") != "insufficient_quota" || dig(t, body, "error", "type") != "insufficient_quota" {
+		if response.StatusCode != http.StatusTooManyRequests || dig(t, body, "error", "code") != "insufficient_quota" || dig(t, body, "error", "type") != "insufficient_quota" {
 			t.Fatalf("%d %v", response.StatusCode, body)
 		}
 	})
 	t.Run("key quota", func(t *testing.T) {
 		response, body := chat(newFixture(t, short), "key-quota")
-		if response.StatusCode != http.StatusPaymentRequired || dig(t, body, "error", "code") != "key_credit_limit_reached" {
+		if response.StatusCode != http.StatusTooManyRequests || dig(t, body, "error", "code") != "quota_exceeded" || dig(t, body, "error", "type") != "insufficient_quota" {
+			t.Fatalf("%d %v", response.StatusCode, body)
+		}
+	})
+	t.Run("quota exceeded carries the gateway quota object", func(t *testing.T) {
+		response, body := chat(newFixture(t, short), "quota-exceeded")
+		if response.StatusCode != http.StatusTooManyRequests || dig(t, body, "error", "code") != "quota_exceeded" ||
+			dig(t, body, "error", "type") != "quota_exceeded" || dig(t, body, "error", "quota", "dimension") != "weekly" {
 			t.Fatalf("%d %v", response.StatusCode, body)
 		}
 	})
@@ -329,6 +377,45 @@ func TestFaultScenarios(t *testing.T) {
 	t.Run("server error", func(t *testing.T) {
 		response, body := chat(newFixture(t, short), "server-error")
 		if response.StatusCode != http.StatusInternalServerError || dig(t, body, "error", "type") != "server_error" {
+			t.Fatalf("%d %v", response.StatusCode, body)
+		}
+	})
+	t.Run("invalid key answers the official 401 ErrorResponse", func(t *testing.T) {
+		f := newFixture(t, short)
+		response, body := chat(f, "invalid-key")
+		if response.StatusCode != http.StatusUnauthorized || dig(t, body, "error", "code") != "invalid_api_key" ||
+			dig(t, body, "error", "type") != "invalid_request_error" {
+			t.Fatalf("%d %v", response.StatusCode, body)
+		}
+		// A key prefix selects it too, and the read route answers alike.
+		response, raw := f.send("GET", "/models", "fake-invalid-key-1", nil)
+		var models map[string]any
+		_ = json.Unmarshal(raw, &models)
+		if response.StatusCode != http.StatusUnauthorized || dig(t, models, "error", "code") != "invalid_api_key" {
+			t.Fatalf("models: %d %s", response.StatusCode, raw)
+		}
+	})
+	t.Run("forbidden is the official text/plain JSON error text", func(t *testing.T) {
+		response, body := chat(newFixture(t, short), "forbidden")
+		if response.StatusCode != http.StatusForbidden || !strings.HasPrefix(response.Header.Get("Content-Type"), "text/plain") ||
+			dig(t, body, "error", "type") != "invalid_request_error" || dig(t, body, "error", "param") != nil {
+			t.Fatalf("%d %q %v", response.StatusCode, response.Header.Get("Content-Type"), body)
+		}
+	})
+	t.Run("model not found names the model", func(t *testing.T) {
+		f := newFixture(t, short)
+		response, raw := f.send("POST", "/chat/completions", "test-key", map[string]any{"model": "no-such-model", "messages": user("x")}, "X-Fake-Scenario", "model-not-found")
+		var body map[string]any
+		_ = json.Unmarshal(raw, &body)
+		if response.StatusCode != http.StatusNotFound || dig(t, body, "error", "code") != "model_not_found" ||
+			dig(t, body, "error", "param") != "model" || !strings.Contains(dig(t, body, "error", "message").(string), "no-such-model") {
+			t.Fatalf("%d %v", response.StatusCode, body)
+		}
+	})
+	t.Run("service unavailable carries the official body and Retry-After", func(t *testing.T) {
+		response, body := chat(newFixture(t, short), "service-unavailable")
+		if response.StatusCode != http.StatusServiceUnavailable || response.Header.Get("Retry-After") != "1" ||
+			dig(t, body, "error", "type") != "service_unavailable_error" || dig(t, body, "error", "code") != "server_is_overloaded" {
 			t.Fatalf("%d %v", response.StatusCode, body)
 		}
 	})
