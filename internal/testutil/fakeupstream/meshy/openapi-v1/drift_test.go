@@ -91,13 +91,17 @@ func realPoll(samples *fakeupstream.Samples, typ, status string) *wirefixture.Ex
 
 func kindRequests(source, rig string) map[string]map[string]any {
 	return map[string]map[string]any{
-		"/text-to-image":     {"prompt": "p"},
-		"/image-to-image":    {"prompt": "p", "reference_image_urls": []string{"https://example.test/a.png"}},
-		"/image-to-3d":       {"image_url": "https://example.test/a.png"},
-		"/multi-image-to-3d": {"image_urls": []string{"https://example.test/a.png"}},
+		"/text-to-image":  {"prompt": "p"},
+		"/image-to-image": {"prompt": "p", "reference_image_urls": []string{"https://example.test/a.png"}},
+		// The captured image-to-3d and multi-image-to-3d samples were taken with
+		// the cheapest texture options; ask for the same, so the drift comparison
+		// checks the sample's structure rather than the request-driven texture
+		// shaping (see TestTextureOptionsShapeTheSuccessBody).
+		"/image-to-3d":       {"image_url": "https://example.test/a.png", "should_texture": true, "enable_pbr": false},
+		"/multi-image-to-3d": {"image_urls": []string{"https://example.test/a.png"}, "should_texture": false, "enable_pbr": false},
 		"/remesh":            {"input_task_id": source},
 		"/convert":           {"input_task_id": source, "target_formats": []string{"glb", "stl"}},
-		"/retexture":         {"input_task_id": source, "text_style_prompt": "p"},
+		"/retexture":         {"input_task_id": source, "text_style_prompt": "p", "enable_pbr": false},
 		"/rigging":           {"input_task_id": source},
 		"/animations":        {"rig_task_id": rig, "action_id": 0},
 		"/uv-unwrap":         {"input_task_id": source},

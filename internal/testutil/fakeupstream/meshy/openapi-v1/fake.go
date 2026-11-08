@@ -35,18 +35,30 @@ const (
 	docsRoot = "https://docs.meshy.ai/en/api/"
 	// captured is the date the real samples were taken from the official API.
 	captured = "2026-10-29"
+	// docsChecked is the date the corrected documentation links and the
+	// constructed fault answers were checked.
+	docsChecked = "2026-11-08"
 )
+
+// texturedUnlessDisabled follows the should_texture default (true).
+func texturedUnlessDisabled(request map[string]any) bool {
+	enabled, ok := request["should_texture"].(bool)
+	return !ok || enabled
+}
 
 // kinds are the task routes of this version, in the order of the Catalog's
 // Offerings. Every one has a captured sample of its own.
 var kinds = []core.Kind{
 	{Path: "/text-to-image", Type: "text-to-image", Need: [][]string{{"prompt"}}, Real: true},
 	{Path: "/image-to-image", Type: "image-to-image", Need: [][]string{{"prompt"}, {"reference_image_urls"}}, Real: true},
-	{Path: "/image-to-3d", Type: "image-to-3d", Need: [][]string{{"image_url", "input_task_id"}}, Sources: []string{"input_task_id"}, Real: true},
-	{Path: "/multi-image-to-3d", Type: "multi-image-to-3d", Need: [][]string{{"image_urls", "input_task_id"}}, Sources: []string{"input_task_id"}, Real: true},
+	{Path: "/image-to-3d", Type: "image-to-3d", Need: [][]string{{"image_url", "input_task_id"}}, Sources: []string{"input_task_id"}, Real: true,
+		Textured: texturedUnlessDisabled},
+	{Path: "/multi-image-to-3d", Type: "multi-image-to-3d", Need: [][]string{{"image_urls", "input_task_id"}}, Sources: []string{"input_task_id"}, Real: true,
+		Textured: texturedUnlessDisabled},
 	{Path: "/remesh", Type: "remesh", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true},
 	{Path: "/convert", Type: "convert", Need: [][]string{{"input_task_id", "model_url"}, {"target_formats"}}, Sources: []string{"input_task_id"}, Real: true},
-	{Path: "/retexture", Type: "retexture", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true},
+	{Path: "/retexture", Type: "retexture", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true,
+		Textured: func(map[string]any) bool { return true }},
 	{Path: "/rigging", Type: "rig", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Fidelity: "skeleton", Real: true},
 	{Path: "/animations", Type: "animate", Need: [][]string{{"rig_task_id"}, {"action_id", "action_ids", "motion_task_id"}}, Sources: []string{"rig_task_id", "motion_task_id"}, Fidelity: "animation", Real: true},
 	{Path: "/uv-unwrap", Type: "uv-unwrap", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true},
@@ -78,26 +90,42 @@ func buildEndpoints() []fakeupstream.Endpoint {
 	for _, kind := range kinds {
 		page := docsRoot + kind.Path[1:]
 		switch kind.Path {
-		case "/rigging", "/animations":
-			page = docsRoot + "rigging-and-animation"
-		case "/print/analyze", "/print/multi-color":
-			page = docsRoot + "print"
+		case "/rigging":
+			page = docsRoot + "rigging"
+		case "/animations":
+			page = docsRoot + "animation"
+		case "/print/analyze":
+			page = docsRoot + "analyze-printability"
+		case "/print/multi-color":
+			page = docsRoot + "multi-color-print"
+		}
+		checkedAt := captured
+		switch kind.Path {
+		case "/rigging", "/animations", "/print/analyze", "/print/multi-color":
+			checkedAt = docsChecked
 		}
 		note := ""
 		switch kind.Path {
 		case "/rigging":
-			note = "an input over 320000 faces is accepted (202) and the task ends FAILED with an invalid_input task_error (observed with a 300000-face quad remesh); the documentation says 400, the official API did not answer it at submit"
+			note = "an input over 320000 faces is accepted (202) and the task ends FAILED with an invalid_input task_error (observed with a 300000-face quad remesh); the documentation says 400, the official API did not answer it at submit; the rig-non-humanoid scenario answers the documented 422 (constructed from docs)"
 		case "/print/analyze":
 			note = "the report's printability._version key cannot be held by the sample sanitizer; the fake adds it back"
+		case "/image-to-3d", "/multi-image-to-3d", "/retexture":
+			note = "the samples were captured with the cheapest texture options; texture_urls and the PBR maps a default Catalog request asks for are constructed from the documented texture fields (docs checked " + docsChecked + ")"
 		}
+		if note != "" {
+			note += "; "
+		}
+		note += "the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked " + docsChecked + ")"
 		out = append(out,
 			fakeupstream.Endpoint{Method: "POST", Path: kind.Path, Evidence: fakeupstream.EvidenceReal,
-				Sample: "POST " + samplePrefix + kind.Path, DocURL: page, CheckedAt: captured, Note: note},
+				Sample: "POST " + samplePrefix + kind.Path, DocURL: page, CheckedAt: checkedAt,
+				Note: note},
 			fakeupstream.Endpoint{Method: "GET", Path: kind.Path + "/{id}", Evidence: fakeupstream.EvidenceReal,
-				Sample: "GET " + samplePrefix + kind.Path + "/{id}", DocURL: page, CheckedAt: captured,
-				Note: "IN_PROGRESS and SUCCEEDED polls are real; PENDING reuses the in-progress structure; FAILED is real for rigging and reuses it elsewhere"},
+				Sample: "GET " + samplePrefix + kind.Path + "/{id}", DocURL: page, CheckedAt: checkedAt,
+				Note: "IN_PROGRESS and SUCCEEDED polls are real; PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"},
 			fakeupstream.Endpoint{Method: "DELETE", Path: kind.Path + "/{id}", Evidence: fakeupstream.EvidenceReal,
-				Sample: "DELETE " + samplePrefix + kind.Path + "/{id}", DocURL: page, CheckedAt: captured,
+				Sample: "DELETE " + samplePrefix + kind.Path + "/{id}", DocURL: page, CheckedAt: checkedAt,
 				Note: "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"},
 		)
 	}
