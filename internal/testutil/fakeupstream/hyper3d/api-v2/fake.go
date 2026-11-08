@@ -39,6 +39,14 @@ const samplePrefix = "/api/v2"
 const (
 	docsRoot = "https://docs.hyper3d.ai/en/api-specification/"
 	captured = "2026-10-29"
+	// errorDocs is when the error bodies without a wire sample were last
+	// checked against docsRoot+"errors". They are constructed from that page:
+	// application failures are HTTP 201 with the reason in error and the
+	// detail in message, while 400, 401 and 429 are transport failures. The
+	// status and download NO_SUCH_TASK bodies ({error} only) also match the
+	// real observation recorded in
+	// internal/providers/hyper3d/charge_evidence_test.go (2026-10-21).
+	errorDocs = "2026-11-08"
 )
 
 // Job statuses of the official API.
@@ -84,10 +92,10 @@ func buildEndpoints() []fakeupstream.Endpoint {
 			DocURL: docsRoot + "check-balance", CheckedAt: captured},
 		{Method: "POST", Path: "/status", Evidence: fakeupstream.EvidenceReal, Sample: "POST /api/v2/status",
 			DocURL: docsRoot + "check-status", CheckedAt: captured,
-			Note: "Waiting, Generating, Done and Failed polls are real samples. The Failed poll was captured twice (2026-10-29, phase 3): a texture request whose model is the 400-byte one-triangle fixture GLB is accepted and every job is Failed on the first poll with the top-level message \"Invalid input.\" (the fake walks its normal poll cycle first, then answers that Failed body)"},
+			Note: "Waiting, Generating, Done and Failed polls are real samples. The Failed poll was captured twice (2026-10-29, phase 3): a texture request whose model is the 400-byte one-triangle fixture GLB is accepted and every job is Failed on the first poll with the top-level message \"Invalid input.\" (the fake walks its normal poll cycle first, then answers that Failed body). An unknown subscription_key answers HTTP 201 {\"error\":\"NO_SUCH_TASK\"} (real observation 2026-10-21, charge_evidence_test.go, not committed as a sample); a malformed body keeps the 400 envelope"},
 		{Method: "POST", Path: "/download", Evidence: fakeupstream.EvidenceReal, Sample: "POST /api/v2/download",
 			DocURL: docsRoot + "download-results", CheckedAt: captured,
-			Note: "a download asked before the jobs finished answers an empty list (observed)"},
+			Note: "a download asked before the jobs finished answers an empty list (observed); an unknown task_uuid answers HTTP 201 {\"error\":\"NO_SUCH_TASK\"} (real observation 2026-10-21, charge_evidence_test.go, not committed as a sample)"},
 		{Method: "GET", Path: "/files/{task_uuid}/{name}", Evidence: fakeupstream.EvidenceConstructed,
 			DocURL: docsRoot + "download-results", CheckedAt: captured,
 			Note: "the official file host is not part of the API; this route serves the fixed files the download list names (content types as observed)"},
@@ -96,7 +104,7 @@ func buildEndpoints() []fakeupstream.Endpoint {
 		out = append(out, fakeupstream.Endpoint{
 			Method: "POST", Path: k.Path, Evidence: fakeupstream.EvidenceReal, Sample: "POST " + samplePrefix + k.Path,
 			DocURL: docsRoot + k.DocPage, CheckedAt: captured,
-			Note: "multipart request, HTTP 201 for a handled request; a rejected request is HTTP 201 with an error body (observed)",
+			Note: "multipart request, HTTP 201 for a handled request; a rejected request is HTTP 201 with an error body (observed). The documented submission codes without a wire sample — API_PARALLELISM_LIMIT_REACHED, PERMISSION_DENIED, API_NO_ACTIVE_SUBSCRIPTION, API_SUBSCRIPTION_PLAN_TOO_LOW, API_OBJECT_NOT_FOUND_ON_IMAGE, IMAGE_CONTENT_VIOLATION, IMAGE_LABEL_LENGTH_TOO_LONG, API_UNKNOWN and the unknown-asset NO_SUCH_TASK — are constructed from " + docsRoot + "errors (checked 2026-11-08)",
 		})
 	}
 	return out
@@ -267,13 +275,15 @@ func (h *handler) newUUID() string {
 	return fmt.Sprintf("%s-0000-4000-8000-%012d", h.nonce, h.counter.Add(1))
 }
 
-// auth answers 401 unless the request carries a bearer key.
+// auth answers 401 unless the request carries a bearer key. ScenarioInvalidKey
+// rejects even a supplied key: 401 is the documented transport-level failure
+// for missing or invalid authentication (docsRoot+"errors", checked errorDocs).
 func (h *handler) auth(w http.ResponseWriter, r *http.Request) bool {
-	if fakeupstream.BearerKey(r) != "" {
-		return true
+	if fakeupstream.BearerKey(r) == "" || fakeupstream.ScenarioOf(r) == fakeupstream.ScenarioInvalidKey {
+		writeJSON(w, http.StatusUnauthorized, h.authError)
+		return false
 	}
-	writeJSON(w, http.StatusUnauthorized, h.authError)
-	return false
+	return true
 }
 
 // render writes the Hyper3D-shaped error of an injected scenario. Rodin reports
@@ -282,6 +292,8 @@ func (h *handler) auth(w http.ResponseWriter, r *http.Request) bool {
 func (h *handler) render(w http.ResponseWriter, _ *http.Request, scenario fakeupstream.Scenario) {
 	switch scenario {
 	case fakeupstream.ScenarioInsufficientBalance, fakeupstream.ScenarioKeyQuota:
+		// A per-key credit limit surfaces as the documented insufficient-funds
+		// code: the table has no separate per-key quota code.
 		body := fakeupstream.Clone(h.invalid)
 		body["error"], body["message"] = "API_INSUFFICIENT_FUNDS", "Insufficient credits."
 		writeJSON(w, http.StatusCreated, body)
@@ -297,6 +309,33 @@ func (h *handler) render(w http.ResponseWriter, _ *http.Request, scenario fakeup
 	}
 }
 
+// renderSubmissionScenario writes the documented submission errors that
+// Env.Intercept does not route. Their bodies are constructed from
+// docsRoot+"errors" (checked errorDocs): HTTP 201 with the documented
+// description as message. No wire sample covers them, and the FailTimes counter
+// that Env.Intercept applies to its own scenarios does not reach these codes.
+func (h *handler) renderSubmissionScenario(w http.ResponseWriter, r *http.Request) bool {
+	switch fakeupstream.ScenarioOf(r) {
+	case fakeupstream.ScenarioConcurrencyLimit:
+		h.reject(w, "API_PARALLELISM_LIMIT_REACHED", "Too many of the account's tasks are already running. Retry once one finishes.")
+	case fakeupstream.ScenarioPermissionDenied:
+		h.reject(w, "PERMISSION_DENIED", "The account may not perform this action.")
+	case fakeupstream.ScenarioNoActiveSubscription:
+		h.reject(w, "API_NO_ACTIVE_SUBSCRIPTION", "The account lacks the API access required by the endpoint or Rodin tier.")
+	case fakeupstream.ScenarioPlanTooLow:
+		h.reject(w, "API_SUBSCRIPTION_PLAN_TOO_LOW", "The subscription plan does not allow API access.")
+	case fakeupstream.ScenarioObjectNotFoundOnImage:
+		h.reject(w, "API_OBJECT_NOT_FOUND_ON_IMAGE", "No object was detected in the input image, or the image is unsupported.")
+	case fakeupstream.ScenarioContentViolation:
+		h.reject(w, "IMAGE_CONTENT_VIOLATION", "The input image is not allowed in your region. Try another image.")
+	case fakeupstream.ScenarioAPIUnknown:
+		h.reject(w, "API_UNKNOWN", "Unexpected server-side error.")
+	default:
+		return false
+	}
+	return true
+}
+
 // ---- endpoints ----
 
 func (h *handler) getBalance(w http.ResponseWriter, r *http.Request) {
@@ -308,34 +347,53 @@ func (h *handler) getBalance(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, body)
 }
 
-func formFields(r *http.Request) (fields map[string]string, files map[string]int, sizes map[string]int, err error) {
+// formData is a parsed multipart submission.
+type formData struct {
+	fields map[string]string
+	files  map[string]int
+	sizes  map[string]int
+	// labels counts the image_label fields: the documented
+	// IMAGE_LABEL_LENGTH_TOO_LONG rejection compares them with the uploaded
+	// images.
+	labels int
+}
+
+func readForm(r *http.Request) (formData, error) {
 	mediaType, params, parseErr := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if parseErr != nil || mediaType != "multipart/form-data" || params["boundary"] == "" {
-		return nil, nil, nil, fmt.Errorf("not multipart")
+		return formData{}, fmt.Errorf("not multipart")
 	}
 	reader, err := r.MultipartReader()
 	if err != nil {
-		return nil, nil, nil, err
+		return formData{}, err
 	}
-	fields, files, sizes = map[string]string{}, map[string]int{}, map[string]int{}
+	parsed := formData{fields: map[string]string{}, files: map[string]int{}, sizes: map[string]int{}}
 	for {
 		part, nextErr := reader.NextPart()
 		if nextErr == io.EOF {
-			return fields, files, sizes, nil
+			return parsed, nil
 		}
 		if nextErr != nil {
-			return nil, nil, nil, nextErr
+			return formData{}, nextErr
 		}
-		data, _ := io.ReadAll(io.LimitReader(part, 128<<20))
+		raw, _ := io.ReadAll(io.LimitReader(part, 128<<20))
+		name := part.FormName()
 		if part.FileName() != "" {
-			files[part.FormName()]++
-			sizes[part.FormName()] = len(data)
-		} else {
-			fields[part.FormName()] = string(data)
+			parsed.files[name]++
+			parsed.sizes[name] = len(raw)
+			continue
 		}
+		if name == "image_label" {
+			parsed.labels++
+		}
+		parsed.fields[name] = string(raw)
 	}
 }
 
+// reject writes a documented application-level error as HTTP 201 with
+// {"error": code} and, when not empty, the message (docsRoot+"errors", checked
+// errorDocs). An empty message leaves only error, which is the observed shape
+// of the status and download NO_SUCH_TASK bodies.
 func (h *handler) reject(w http.ResponseWriter, code, message string) {
 	body := fakeupstream.Clone(h.invalid)
 	body["error"] = code
@@ -352,42 +410,60 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 		if !h.auth(w, r) || h.env.Intercept(w, r, fakeupstream.PhaseCreate, h.render) {
 			return
 		}
-		fields, files, sizes, err := formFields(r)
+		if h.renderSubmissionScenario(w, r) {
+			return
+		}
+		form, err := readForm(r)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, h.badBody)
 			return
 		}
 		switch k.Need {
 		case "prompt-or-images":
+			// IMAGE_LABEL_LENGTH_TOO_LONG is documented as more image_label
+			// entries than uploaded images (docsRoot+"errors", checked
+			// errorDocs); constructed, no wire sample covers the rejection.
+			if form.labels > form.files["images"] {
+				h.reject(w, "IMAGE_LABEL_LENGTH_TOO_LONG", "More image_label entries were sent than uploaded images.")
+				return
+			}
 			// The official Rodin page documents 1-5 reference images. The upper
 			// bound is constructed from those docs: no live rejection sample
 			// exists for it. Zero images stays valid for text-to-3D when the
 			// form carries a prompt.
-			if files["images"] > 5 {
+			if form.files["images"] > 5 {
 				h.reject(w, "INVALID_REQUEST", "Please upload between 1 and 5 images.")
 				return
 			}
-			if strings.TrimSpace(fields["prompt"]) == "" && files["images"] == 0 {
+			if strings.TrimSpace(form.fields["prompt"]) == "" && form.files["images"] == 0 {
 				h.reject(w, "INVALID_REQUEST", "Please upload at least one image or give a prompt.")
 				return
 			}
 		case "asset":
-			if id := fields["asset_id"]; id != "" {
-				// The asset must be a finished task of this fake (observed: an
-				// unfinished one answers ASSET_NOT_AVAILABLE).
+			if id := form.fields["asset_id"]; id != "" {
+				// A task id that names no task is the documented NO_SUCH_TASK
+				// ("The referenced task does not exist or has expired"); only an
+				// existing task whose state does not allow the operation is
+				// ASSET_NOT_AVAILABLE (observed: an unfinished one). The unknown
+				// branch is constructed from docsRoot+"errors" (checked
+				// errorDocs), no wire sample covers it.
 				h.mu.Lock()
 				source := h.tasks[id]
 				h.mu.Unlock()
-				if source == nil || !h.finished(source) {
+				if source == nil {
+					h.reject(w, "NO_SUCH_TASK", "The referenced task does not exist or has expired.")
+					return
+				}
+				if !h.finished(source) {
 					h.reject(w, "ASSET_NOT_AVAILABLE", "")
 					return
 				}
-			} else if files["model"] == 0 {
+			} else if form.files["model"] == 0 {
 				h.reject(w, "INVALID_REQUEST", "Please upload a model or give an asset id.")
 				return
 			}
 		case "model-and-image":
-			if files["model"] == 0 || files["image"] == 0 {
+			if form.files["model"] == 0 || form.files["image"] == 0 {
 				h.reject(w, "INVALID_REQUEST", "Please upload one model and one image.")
 				return
 			}
@@ -399,14 +475,14 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 		// Observed on the official service: a texture request whose model is the tiny
 		// one-triangle fixture GLB is accepted and then ends with every job Failed
 		// ("Invalid input."), twice in a row (see the alignment report).
-		if k.Need == "model-and-image" && sizes["model"] < tinyModelBytes && t.scenario == fakeupstream.ScenarioNone {
+		if k.Need == "model-and-image" && form.sizes["model"] < tinyModelBytes && t.scenario == fakeupstream.ScenarioNone {
 			t.scenario = fakeupstream.ScenarioTaskFailed
 		}
 		t.key = "fake-subscription-" + t.uuid
 		for i := 0; i < count; i++ {
 			t.jobs = append(t.jobs, h.newUUID())
 		}
-		t.names = h.downloadNames(k, fields)
+		t.names = h.downloadNames(k, form.fields)
 		h.mu.Lock()
 		h.tasks[t.uuid], h.byKey[t.key] = t, t
 		h.mu.Unlock()
@@ -416,9 +492,9 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 		}
 		body := fakeupstream.Clone(sample)
 		body["uuid"], body["submit_time"], body["consumed"] = t.uuid, fixedTimestamp, 0.5
-		if prompt, has := body["prompt"]; has && fields["prompt"] != "" {
+		if prompt, has := body["prompt"]; has && form.fields["prompt"] != "" {
 			_ = prompt
-			body["prompt"] = fields["prompt"]
+			body["prompt"] = form.fields["prompt"]
 		}
 		jobs, _ := fakeupstream.DigMap(body, "jobs")
 		list := make([]any, len(t.jobs))
@@ -488,9 +564,10 @@ func (h *handler) postStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	h.mu.Unlock()
 	if t == nil {
-		body := fakeupstream.Clone(h.badBody)
-		body["message"] = []any{"subscription_key is not valid"}
-		writeJSON(w, http.StatusBadRequest, body)
+		// A supplied key that names no task is an application error with HTTP
+		// 201, not the 400 malformed-body envelope: real observation 2026-10-21
+		// (charge_evidence_test.go), docsRoot+"errors" checked errorDocs.
+		h.reject(w, "NO_SUCH_TASK", "")
 		return
 	}
 	body := fakeupstream.Clone(h.status)
@@ -559,14 +636,21 @@ func (h *handler) postDownload(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	t := h.tasks[id]
 	h.mu.Unlock()
-	template := h.download["/rodin"]
-	if t != nil {
-		template = h.download[t.kind.Path]
+	if t == nil {
+		// An unknown, expired or unowned task_uuid is an application error with
+		// HTTP 201: real observation 2026-10-21 (charge_evidence_test.go),
+		// docsRoot+"errors" checked errorDocs. An existing task that has no
+		// files yet (unfinished or failed) keeps the observed empty list: the
+		// real texture-failed sample answers {"list":[]}, so the documented
+		// no-files INVALID_REQUEST has no distinguishable trigger here.
+		h.reject(w, "NO_SUCH_TASK", "")
+		return
 	}
+	template := h.download[t.kind.Path]
 	body := fakeupstream.Clone(template)
 	list := []any{}
 	// Asked before the jobs finish, the official API answers an empty list.
-	if t != nil && h.finished(t) {
+	if h.finished(t) {
 		issue := h.env.IssueArtifactURLs(t.uuid)
 		for _, name := range t.names {
 			list = append(list, map[string]any{
