@@ -3625,9 +3625,10 @@ type ChatAgentSchema struct {
 	// the Provider holds the accepted job in its own queue (#131): what the
 	// Agent tells the person waiting. Optional.
 	UpstreamQueueContent string `json:"upstream_queue_content,omitempty"`
-	// BackgroundWait lets a person stop waiting for a single generation step
-	// while its Task keeps running (#137). Nil offers no such choice and the
-	// server refuses it.
+	// BackgroundWait lets a person stop waiting for the Tasks a turn waits on
+	// (a single generation step, or a SkillRun submit batched after one) while
+	// they keep running (#137). Nil offers no such choice and the server
+	// refuses it.
 	BackgroundWait *ChatBackgroundWaitSchema `json:"background_wait,omitempty"`
 	// MaxToolCallsPerReply 限定一次 Agent 回复内实际执行的工具调用数
 	// （>=1，#275，替代按 LLM 轮数计的 max_tool_rounds）。每次新回复从 0

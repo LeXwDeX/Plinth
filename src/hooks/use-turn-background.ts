@@ -8,8 +8,9 @@ import { startSerialPoller } from '@/lib/workspace/serial-poller';
 /**
  * Whether the composer asks the server about "stop waiting, keep the task running" (#137): only while
  * the session's turn streams, a Task of the session runs and the Schema declares the route, its member
- * and a poll interval. The rules themselves (a single generation step queued upstream or past the
- * Schema threshold, never a SkillRun or a Processing Plan) stay on the server.
+ * and a poll interval. The rules themselves (an eligible paid task queued upstream or past the
+ * Schema threshold; a SkillRun's task only when it waits in a batch, never a Processing Plan) stay
+ * on the server.
  */
 export function asksTurnBackground(input: {
   sessionId: string | null;

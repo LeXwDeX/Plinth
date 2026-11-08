@@ -19,6 +19,9 @@ same HTTP API the browser uses:
     chain (create_model_3d on Rodin -> process_model Bang rodin-task ->
     retexture_model Texture local-model with a picture attached to the chat) is
     approved step by step and delivers every step's files;
+  * a batched Agent turn (a generation step and the three-view SkillRun in one
+    completion) stops waiting, keeps both Tasks running, ends with the Schema
+    note and finishes the three-view group in the background;
   * Hyper3D texture (a local model + a reference picture), the OpenAI, Gemini and Jimeng
     image Offerings (text-to-image and image-to-image) and the matting service run to
     SUCCEEDED with the same delivery checks;
@@ -36,8 +39,9 @@ same HTTP API the browser uses:
     Meshy and Hyper3D delivers it.
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
-(NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, p2, agent, faults;
-"agent" runs both agent scenarios, "hyper3d-agent" the Hyper3D chain alone, "p2" the Tripo P2 quote/chain)
+(NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, p2, agent, agent-background, faults;
+"agent" runs both agent scenarios, "hyper3d-agent" the Hyper3D chain alone,
+"p2" the Tripo P2 quote/chain, "agent-background" the batched wait that keeps both Tasks running)
 Needs `go`. Exit 0 = every selected check passed.
 
 The stack runs inside the internal/app test binary (TestFakeUpstreamStack, built with -tags fakestack), not
@@ -251,16 +255,19 @@ def build(work):
 
 
 def private_catalog(work, jimeng_urls=False):
-    """The default Catalog with three changes for Tripo, Meshy and Hyper3D: the fake
+    """The default Catalog with four changes for Tripo, Meshy and Hyper3D: the fake
     artifact host is an allowed asset host, they poll once a second, and a failing
     materialization is retried once. The matting service polls once a second too,
     and the Jimeng Offerings accept the fake artifact host. With jimeng_urls the
     Jimeng Offerings also ask for a signed picture URL instead of an inline picture
     (the Schema fixes response_format to b64_json, so a URL, and with it a
     missing, corrupt or expired URL, never occurs in production); the fault runs
-    use that catalog. The default Catalog file and its base URLs stay untouched."""
+    use that catalog. The background-wait threshold drops to one second so a test
+    Task reaches it while the fake still polls; the shipped value stays untouched.
+    The default Catalog file and its base URLs stay untouched."""
     with open(os.path.join(REPO, "internal/catalog/default_catalog.json"), encoding="utf-8") as handle:
         catalog = json.load(handle)
+    catalog["application"]["chat"]["agent"]["background_wait"]["after_seconds"] = 1
     for offering in catalog["offerings"]:
         provider = offering.get("provider_id")
         if provider in PROVIDER_HOSTS:
@@ -349,6 +356,18 @@ def decision_body(api, decision):
         schema = schema.get("schema", schema) if status == 200 and isinstance(schema, dict) else {}
         api.decision_member = (((schema.get("chat") or {}).get("api") or {}).get("fields") or {}).get("decision")
     return {api.decision_member: decision} if api.decision_member else {}
+
+
+def chat_schema_facts(api):
+    """The public Schema's chat field names and the turn-background route, read once
+    like the browser reads them. Without them the background choice is not offered."""
+    if not hasattr(api, "chat_schema_facts"):
+        status, schema = api.json("GET", "/api/v1/schema")
+        schema = schema.get("schema", schema) if status == 200 and isinstance(schema, dict) else {}
+        fields = ((schema.get("chat") or {}).get("api") or {}).get("fields") or {}
+        routes = ((schema.get("runtime") or {}).get("http") or {}).get("legacy_routes") or {}
+        api.chat_schema_facts = (fields, routes.get("chat_turn_background") or "")
+    return api.chat_schema_facts
 
 
 def submit(api, offering, capability, payload, session, style_lock_skipped=False):
@@ -897,6 +916,113 @@ def scenario_hyper3d_agent(api, offerings):
           texture_task, why, approval, HYPER3D_TEXTURE)
 
 
+def session_tasks(api, session):
+    """The session's Tasks (the browser's task list)."""
+    status, body = api.json("GET", f"/api/v1/tasks?session_id={session}&limit=50")
+    if status != 200:
+        return []
+    return body.get("tasks") or body.get("data") or []
+
+
+def scenario_agent_background(api, offerings):
+    """#189: one assistant completion submits a generation step and the
+    three-view SkillRun. With the session in auto mode both submit in that one
+    pass, the SkillRun Task joins the generation wait, and stopping the wait
+    keeps both running; the turn ends with the Schema note and the three-view
+    group finishes in the background."""
+    session = new_session(api)
+    picture = upload_asset(api, "reference.png", make_png(), "image/png")
+    fields, route = chat_schema_facts(api)
+    available_member = fields.get("turn_background_available", "")
+    backgrounded_member = fields.get("turn_backgrounded", "")
+    if not picture or not route or not available_member or not backgrounded_member:
+        record("agent background: Schema and picture available", False,
+               f"picture={picture} route={route!r} fields={available_member!r}/{backgrounded_member!r}")
+        return
+    # Auto mode submits both paid steps inside the turn; budget mode would move
+    # the 3D approval to a card, so that call would never wait in the batch.
+    approval_field = fields.get("approval_mode", "approvalMode")
+    status, body = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {approval_field: "auto"})
+    if status != 200:
+        record("agent background: session switches to auto mode", False, f"approval {status} {body}")
+        return
+    background_path = route.replace("{sessionID}", session)
+    markers = ('[[fake:tool:create_model_3d {"prompt":"a plain cube"}]] '
+               '[[fake:tool:create_three_view {"reference_image_indices":[1]}]]')
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", {
+        "content": "make a cube and three views of this picture " + markers,
+        "creative_domain": "image",
+        "ai_model": IMAGE_OFFERINGS["meshy"][1],
+        "domainModels": {"model-3d": MESHY_TEXT_TO_3D},
+        "image_urls": [f"/api/v1/assets/{picture}"],
+    })
+    if status not in (200, 201, 202):
+        record("agent background: send the batched turn", False, f"send {status}")
+        return
+
+    # Wait for the batch: the generation call submits and waits, so the
+    # three-view receipt joins the same wait. The three-view group is read
+    # here too, while its front Task still runs.
+    generation_task, three_view_task, front_status = "", "", ""
+    available = False
+    deadline = time.time() + 45
+    while time.time() < deadline:
+        if not generation_task:
+            for task in session_tasks(api, session):
+                if task.get("capability") == "text-to-3d" and task.get("state") != "CANCELED":
+                    generation_task = task.get("task_id") or task.get("id") or ""
+                    break
+        if not three_view_task:
+            items = api.json("GET", f"/api/v1/chat/sessions/{session}/three-views")[1].get("items", [])
+            if items:
+                front = next((slot for slot in items[0].get("slots", []) if slot.get("key") == "front"), {})
+                three_view_task, front_status = front.get("task_id", ""), front.get("status", "")
+        status, body = api.json("GET", background_path)
+        if status == 200 and body.get(available_member):
+            available = True
+            break
+        time.sleep(0.2)
+    record("agent background: batched turn becomes background-ready", available and bool(three_view_task),
+           f"available={available}, 3D task {generation_task or 'none'}, three-view task {three_view_task or 'none'}")
+    if not available or not three_view_task:
+        return
+    record("agent background: three-view front waits in its group", front_status == "running",
+           f"front status {front_status!r}, task {three_view_task}")
+
+    status, body = api.json("POST", background_path)
+    record("agent background: POST ends the wait", status == 200 and body.get(backgrounded_member) is True,
+           f"POST {status} {body}")
+    second_status, _ = api.json("POST", background_path)
+    record("agent background: the second POST is refused", second_status == 409, f"second POST {second_status}")
+
+    three_view = wait_task(api, three_view_task)
+    items = api.json("GET", f"/api/v1/chat/sessions/{session}/three-views")[1].get("items", [])
+    front = next((slot for slot in items[0].get("slots", []) if slot.get("key") == "front"), {}) if items else {}
+    record("agent background: three-view front finishes in the background",
+           three_view.get("state") == "SUCCEEDED" and front.get("status") == "succeeded" and len(items) == 1,
+           f"task {three_view.get('state')}, group front {front.get('status')!r}, groups {len(items)}")
+
+    generation = wait_task(api, generation_task) if generation_task else {}
+    used = generation.get("offering_id")
+    problems, count = check_delivery(api, generation, offerings[used]) if generation.get("state") == "SUCCEEDED" and used in offerings else (["task not SUCCEEDED"], 0)
+    record("agent background: the generation task keeps running",
+           generation.get("state") == "SUCCEEDED" and not problems,
+           f"{used} task {generation.get('state')}, {count} assets verified" + ("" if not problems else "; " + "; ".join(problems)))
+    record("agent background: neither task was cancelled",
+           three_view.get("state") != "CANCELED" and generation.get("state") != "CANCELED",
+           f"three-view {three_view.get('state')}, generation {generation.get('state')}")
+
+    reply = ""
+    deadline = time.time() + 30
+    while time.time() < deadline and "已停止等待" not in reply:
+        time.sleep(0.3)
+        messages = api.json("GET", f"/api/chat/sessions/{session}/messages")[1]
+        messages = messages if isinstance(messages, list) else messages.get("messages", [])
+        reply = " ".join(str(m.get("content")) for m in messages if m.get("role") == "assistant")
+    record("agent background: the ended turn names the background Task",
+           "已停止等待" in reply and "三视图卡片" in reply, reply[:160])
+
+
 # scenario -> provider -> (expected state, expected failure class). The fault is
 # chosen by the stack's API key, so one stack per scenario exercises every provider.
 # provider -> (Offering, capability, input); "$picture" is the uploaded reference picture.
@@ -999,12 +1125,12 @@ def scenario_fault(api, offerings, scenario):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,faults")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "tripo", "p2", "agent", "faults"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "tripo", "p2", "agent", "agent-background", "faults"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -1020,7 +1146,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -1041,6 +1167,8 @@ def main():
                 scenario_agent(api, offerings)
             if "agent" in selected or "hyper3d-agent" in selected:
                 scenario_hyper3d_agent(api, offerings)
+            if "agent-background" in selected:
+                scenario_agent_background(api, offerings)
             processes.stop(child)
         if "faults" in selected:
             for scenario in [name for name in FAULTS if not args.faults or name in args.faults.split(",")]:

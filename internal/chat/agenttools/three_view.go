@@ -244,6 +244,10 @@ func (e *Executor) awaitThreeView(command chat.ToolCommand, taskID string, offer
 	return chat.ToolResult{TaskID: taskID, AwaitTask: true, WaitUntil: deadline}, err
 }
 
+// observeThreeView returns the started-view receipt. It deliberately does not
+// return AwaitTask: a lone create_three_view call ends its chat turn instead of
+// waiting for the front view. The Task joins a turn's wait only when the call
+// shares one assistant batch with a generation step that does wait (#189).
 func (e *Executor) observeThreeView(ctx context.Context, command chat.ToolCommand, run skillrun.Run,
 	execution skillrun.Execution, grant executiongrant.Grant, observe func(chat.ToolObservation) error,
 ) (chat.ToolResult, error) {

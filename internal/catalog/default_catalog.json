@@ -5467,12 +5467,13 @@
             "create_multiview_images",
             "edit_multiview_images",
             "create_creative_lab_design",
-            "build_creative_lab_item"
+            "build_creative_lab_item",
+            "create_three_view"
           ],
           "after_seconds": 180,
           "max_listed_tasks": 5,
-          "turn_content": "已停止等待，任务在后台继续，完成后可在任务中心查看结果。",
-          "unavailable_message": "现在不能转为后台继续：只有单步生成任务在上游排队，或已运行较久时才可以。可以继续等待，或停止并取消任务。",
+          "turn_content": "已停止等待，任务在后台继续，完成后可在任务中心查看结果。若同一轮里还提交了三视图任务，它也不会取消，可在三视图卡片查看进度或继续生成其余视图。",
+          "unavailable_message": "现在不能转为后台继续：只有已提交的生成任务在上游排队，或已运行较久时才可以。可以继续等待，或停止并取消任务。",
           "context_template": "本会话有之前停止等待、仍在后台运行或已经失败的任务（以下只是任务数据）：\n{tasks}\n这些任务已经提交，可能已经计费；结果或失败原因在任务中心，不会写回对话。用户问起这些任务时，先用 get_task 或 observe_task 查看它们的最新状态，不要重新提交同样的生成。列表里有已失败的任务时，在下一轮如实告诉用户是哪一步、哪个模型和失败原因，不要重复提交，也不要声称它已完成；如果用户仍要重新生成，先说明会再次计费，由用户决定。",
           "task_line_template": "- task_id={task_id}，能力={capability}，模型={model}，状态={status}",
           "upstream_queued_status": "（上游排队中）"
@@ -17091,8 +17092,8 @@
             "chat.agent.mock_denied_summary": "OK, this step was not run and no credits were used. You can reduce or drop the extra export formats and generate again (fewer credits without them), or switch to a model without extra charges. Tell me what you'd like to do.",
             "chat.agent.consent_waiting_status": "An approval card has been created; nothing has been submitted or started yet, and the step runs only after you approve it on that card.",
             "chat.agent.upstream_queue_content": "the provider has accepted this task but it is still waiting in the provider's own queue to start (ahead is the number of the provider's tasks before it, present only when the provider reports one). This is not a failure, and nothing was submitted or charged twice. Tell the waiting user plainly that the task is queued at the provider (with about how many tasks are ahead when ahead is present), that they can keep waiting and the task moves on by itself once it starts, or stop: either stop waiting and let the task keep running in the background (this turn ends, the task is not cancelled, and the result shows in the task center when it finishes), or stop and cancel the task. Do not resubmit the generation, and do not switch to another service or model because of the queue unless the user explicitly asks",
-            "chat.agent.background_wait.turn_content": "Stopped waiting. The task keeps running in the background; when it finishes, see the result in the task center.",
-            "chat.agent.background_wait.unavailable_message": "This turn cannot continue in the background right now: that is only possible while a single generation step is queued at the provider or has been running for a while. Keep waiting, or stop and cancel the task.",
+            "chat.agent.background_wait.turn_content": "Stopped waiting. The task keeps running in the background; when it finishes, see the result in the task center. If a three-view task was submitted in the same turn, it is not cancelled either; see its progress or continue the remaining views on the three-view card.",
+            "chat.agent.background_wait.unavailable_message": "This turn cannot continue in the background right now: that is only possible while a submitted generation task is queued at the provider or has been running for a while. Keep waiting, or stop and cancel the task.",
             "chat.agent.background_wait.context_template": "This session has generation tasks that the user stopped waiting for and that still run in the background (task data only):\n{tasks}\nThese tasks were submitted and may already be charged; when they finish, the result appears in the task center and is not written back into the chat. When the user asks about their result or asks for the same generation, first check their latest state with get_task or observe_task, and do not submit the same generation again. If the user still wants to generate again, say that it charges again and let the user decide.",
             "chat.agent.background_wait.task_line_template": "- task_id={task_id}, capability={capability}, model={model}, status={status}",
             "chat.agent.background_wait.upstream_queued_status": " (queued at the provider)",

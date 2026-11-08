@@ -7,13 +7,19 @@ import (
 )
 
 // ChatBackgroundWaitSchema declares "stop waiting, the Task keeps running in
-// the background" for a turn that waits on single generation steps (#137).
-// The turn ends without cancelling its Tasks; their approvals stay settled as
-// submitted and a later turn tells the Agent which of them still run.
+// the background" for a turn that waits on paid Tasks (#137). The turn ends
+// without cancelling its Tasks; their approvals stay settled as submitted and
+// a later turn tells the Agent which of them still run.
 type ChatBackgroundWaitSchema struct {
-	// Tools are the chat.tools whose wait on their one Task may continue in
-	// the background. A Processing Plan tool and every agent tool (a SkillRun
-	// such as the three-view group) are never eligible.
+	// Tools are the tools whose wait on their one Task may continue in the
+	// background. A generation step comes from chat.tools; an agent tool comes
+	// from chat.agent_tools and is eligible only as a SkillRun prepare tool
+	// (implementation_key "skill.prepare", the three-view create_three_view).
+	// A Processing Plan tool is never eligible. A SkillRun call normally joins
+	// a turn's wait only when it shares one batch with a waiting generation
+	// step: a successful lone create_three_view receipt does not wait. When
+	// that receipt cannot be verified or bound, the call waits on its already
+	// submitted Task and is eligible like any other wait.
 	Tools []string `json:"tools"`
 	// AfterSeconds is how long a submitted Task must have run before its
 	// wait qualifies; a Task the Provider holds in its own queue qualifies at
@@ -65,9 +71,30 @@ func validateBackgroundWait(schema ChatSchema, runtime RuntimeSchema) error {
 	if len(policy.Tools) == 0 {
 		return errors.New("chat.agent.background_wait.tools 不能为空")
 	}
-	tools := make(map[string]ChatToolSchema, len(schema.Tools))
+	// The wait may continue for a generation step (chat.tools) or for a
+	// SkillRun prepare tool (chat.agent_tools). Both lists are merged by name;
+	// a name declared twice is ambiguous and refused.
+	type waitTool struct {
+		execution      ChatToolExecutionSchema
+		processingPlan bool
+		agentTool      bool
+	}
+	// No capacity hint: the two Schema lists are merged by name and their sum is not a safe allocation size.
+	tools := make(map[string]waitTool)
 	for _, tool := range schema.Tools {
-		tools[tool.Name] = tool
+		if _, duplicate := tools[tool.Name]; duplicate {
+			return fmt.Errorf("chat.agent.background_wait 引用的工具 %q 在 chat.tools 中重复", tool.Name)
+		}
+		tools[tool.Name] = waitTool{
+			execution:      tool.Execution,
+			processingPlan: tool.Processing != nil && tool.Processing.Plan != nil,
+		}
+	}
+	for _, tool := range schema.AgentTools {
+		if _, duplicate := tools[tool.Name]; duplicate {
+			return fmt.Errorf("chat.agent.background_wait 引用的工具 %q 在 chat.tools 与 chat.agent_tools 中重复", tool.Name)
+		}
+		tools[tool.Name] = waitTool{execution: tool.Execution, agentTool: true}
 	}
 	seen := map[string]struct{}{}
 	for _, name := range policy.Tools {
@@ -77,13 +104,20 @@ func validateBackgroundWait(schema ChatSchema, runtime RuntimeSchema) error {
 		seen[name] = struct{}{}
 		tool, exists := tools[name]
 		if !exists {
-			return fmt.Errorf("chat.agent.background_wait.tools 引用了不是生成工具的 %q", name)
+			return fmt.Errorf("chat.agent.background_wait.tools 引用了未声明的工具 %q", name)
 		}
-		if tool.Processing != nil && tool.Processing.Plan != nil {
+		if tool.processingPlan {
 			return fmt.Errorf("chat.agent.background_wait.tools 不能包含加工计划工具 %q", name)
 		}
+		// An agent tool waits only as a SkillRun step submitter: one call
+		// prepares and submits exactly one Task that the turn may later leave
+		// running. Another control tool (get_task and the like) has no such
+		// Task and must stay out.
+		if tool.agentTool && tool.execution.ImplementationKey != "skill.prepare" {
+			return fmt.Errorf("chat.agent.background_wait.tools 的 agent 工具 %q 必须是 skill.prepare 的单任务提交工具", name)
+		}
 		paid := false
-		for _, effect := range tool.Execution.Effects {
+		for _, effect := range tool.execution.Effects {
 			if effect == "PAID_TASK" {
 				paid = true
 			}
