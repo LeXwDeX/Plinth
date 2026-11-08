@@ -21,7 +21,8 @@
 - 网关是 Gemini 图片模型的 OpenAI 兼容中转（Plinth 的 GEMINI_BASE_URL）；每个付费请求只发一次，取 1K 分辨率与 1:1：Plinth 默认 4K，响应结构相同。
 - 文生图的真实响应是 JPEG data URI，图生图是 PNG data URI（网关按模型输出而定）；fake 一律返回 PNG data URI，Plinth 按字节判断类型。
 - 图生图响应多出顶层 service_tier 与 usage.prompt_tokens_details.image_tokens，fake 对带参考图的请求使用图生图样本的结构。
-- 内容审核拒绝、402、429、5xx 没有在官方网关上触发，fake 沿用真实 400 信封并换成合理的 code 与 message。
+- 内容审核拒绝、内容过滤、402/403/404/429/5xx 没有在官方网关上触发；fake 按 Gemini 公开 API 错误页与网关信封构造（constructed-from-docs，核对日期见端点表），内容过滤沿用成功信封并把 finish_reason 设为 content_filter。
+- 网关契约没有公开官方文档（供应商文档页需登录并跳转到模型目录）；端点结构唯一依据是已提交的网关真实样本。
 
 ## 端点证据
 
@@ -29,7 +30,7 @@
 
 | 端点 | 证据 | 样本 | 官方文档 | 核对日期 | 说明 |
 |---|---|---|---|---|---|
-| `POST /chat/completions` | real | POST /v1/chat/completions | https://ai.google.dev/gemini-api/docs/image-generation | 2026-10-29 | the gateway's OpenAI-compatible chat completion with modalities [text,image]: the picture comes back as a data URI in choices[0].message.content[].image_url.url. The real text-to-image sample is a JPEG, the image-to-image one a PNG; the fake always sends a PNG. 400 invalid_text_request and 401 text/plain are real samples; a content-policy refusal and 402/429/5xx are not observed and reuse the real 400 envelope |
+| `POST /chat/completions` | real | POST /v1/chat/completions | https://doc.model-store.ai/ai-gateway/model/api-detail?code=api-chat-completions1 | 2026-11-08 | the gateway's OpenAI-compatible chat completion with modalities [text,image]: the picture comes back as a data URI in choices[0].message.content[].image_url.url. The real text-to-image sample is a JPEG, the image-to-image one a PNG; the fake always sends a PNG. 400 invalid_text_request and 401 text/plain are real samples. No public official documentation exists for this gateway contract (the vendor page at DocURL is login-gated and redirects to its catalog); the only structural evidence is the committed real gateway samples. The fault answers (quota-exceeded, forbidden, permission-denied, model-not-found, service-unavailable, content-filtered, the 402/500 vocabulary and the X-Fake-Error-Code/X-Fake-Error-Status override) are constructed-from-docs from https://ai.google.dev/gemini-api/docs/api-errors (checked 2026-11-08) and the real gateway envelope; none was observed on the gateway |
 
 ## 差异
 
