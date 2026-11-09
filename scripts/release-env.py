@@ -9,7 +9,7 @@ secrets. deploy/environments.example.json is its template.
   release-env.py list
   release-env.py show <env>
   release-env.py release <env> [--revision SHA] [--acceptance-note ID]
-  release-env.py smoke <env> -- <command...>      # BASE, ADMIN_*, EXPECT_SHA, RELEASE_ENV set
+  release-env.py smoke <env> -- <command...>      # BASE, ADMIN_*, AGENT_TEST_*, EXPECT_SHA, RELEASE_ENV set
   release-env.py compose-env <env>                # GO_* layout for manual compose and
                                                   # ART_AI_PROTECTED_PATHS for the migration tools
 
@@ -293,25 +293,68 @@ def release(document, name, args):
         raise EnvironmentError_(f"{name} always releases the pushed origin/main; --revision is for promotions")
     print(f"[release-env] {name}: {environment['base_url']}" + (f" revision={revision}" if revision else " origin/main"))
     environment_variables = {**os.environ, **release_variables(environment, revision)}
-    return subprocess.run(["bash", str(SCRIPTS / "release-go-testenv.sh")], env=environment_variables).returncode
+    code = subprocess.run(["bash", str(SCRIPTS / "release-go-testenv.sh")], env=environment_variables).returncode
+    if code:
+        return code
+    return ensure_agent_account(document, name)
+
+
+# Reads the asked KEY=value lines of one env file on the host as JSON; a missing file yields {}.
+HOST_ENV_READER = ("import json,os,sys\nvalues={}\npath,keys=sys.argv[1],set(sys.argv[2:])\n"
+                   "if os.path.exists(path):\n for line in open(path):\n  k,s,v=line.rstrip('\\n').partition('=')\n"
+                   "  if s and k in keys:\n   values[k]=v[1:-1] if len(v)>1 and v[0]==v[-1] and v[0] in \"'\\\"\" else v\n"
+                   "print(json.dumps(values))\n")
+ADMIN_KEYS = ("ADMIN_USERNAME", "ADMIN_PASSWORD")
+AGENT_KEYS = ("AGENT_TEST_USERNAME", "AGENT_TEST_PASSWORD")
+AGENT_ACCOUNT_SCRIPT = SCRIPTS / "smoke" / "ensure-agent-account.sh"
+
+
+def host_env(environment, filename, keys):
+    command = f"python3 - {environment['root']}/production/{filename} {' '.join(keys)}"
+    return json.loads(run("ssh", environment["ssh"], command, input=HOST_ENV_READER.encode()))
 
 
 def admin_credentials(environment):
-    reader = ("import json,sys\nvalues={}\nfor line in open(sys.argv[1]):\n k,s,v=line.rstrip('\\n').partition('=')\n"
-              " if s and k in ('ADMIN_USERNAME','ADMIN_PASSWORD'):\n  values[k]=v[1:-1] if len(v)>1 and v[0]==v[-1] and v[0] in \"'\\\"\" else v\n"
-              "print(json.dumps(values))\n")
-    output = run("ssh", environment["ssh"], f"python3 - {environment['root']}/production/runtime.env", input=reader.encode())
-    values = json.loads(output)
-    if not values.get("ADMIN_USERNAME") or not values.get("ADMIN_PASSWORD"):
+    values = host_env(environment, "runtime.env", ADMIN_KEYS)
+    if not all(values.get(key) for key in ADMIN_KEYS):
         raise EnvironmentError_("the environment runtime.env has no admin login for smoke runs")
     return values
+
+
+def agent_credentials(environment):
+    """The Agent's own account (#215), kept in the untracked production/agent-test.env of the release root."""
+    values = host_env(environment, "agent-test.env", AGENT_KEYS)
+    return values if all(values.get(key) for key in AGENT_KEYS) else {}
+
+
+def ensure_agent_account(document, name):
+    """After a successful release, make sure the Agent's account exists and logs in (#215).
+
+    dev-test starts from empty data on every release and gets it recreated; a kept database
+    (formal-test) answers 409 and is only checked. The release itself is already deployed
+    when this runs, so a failure here says so instead of looking like a refused release.
+    """
+    environment = document["environments"][name]
+    try:
+        if not agent_credentials(environment):
+            print(f"[release-env] {name}: no production/agent-test.env on the host; the Agent account was not checked")
+            return 0
+        print(f"[release-env] {name}: ensuring the Agent account from production/agent-test.env")
+        code = smoke(document, name, ["bash", str(AGENT_ACCOUNT_SCRIPT)])
+    except EnvironmentError_ as error:
+        print(f"[release-env] {name}: the release is deployed, but the Agent account step failed: {error}", file=sys.stderr)
+        return 1
+    if code:
+        print(f"[release-env] {name}: the release is deployed, but the Agent account step failed (exit {code})", file=sys.stderr)
+    return code
 
 
 def smoke(document, name, command):
     environment = document["environments"][name]
     if not command:
         raise EnvironmentError_("smoke needs a command after --")
-    variables = {**os.environ, **admin_credentials(environment), "BASE": environment["base_url"],
+    variables = {**os.environ, **admin_credentials(environment), **agent_credentials(environment),
+                 "BASE": environment["base_url"],
                  "EXPECT_SHA": running_revision(environment), "RELEASE_CONTAINER": container(environment),
                  "RELEASE_ENV": name}
     return subprocess.run(command, env=variables).returncode

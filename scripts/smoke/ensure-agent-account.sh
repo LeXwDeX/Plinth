@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Recreates the Agent's own dev-test account after a release (dev-test data is fresh on every release).
-# Run through the release wrapper, which sets BASE and ADMIN_* from the stack's runtime env:
-#   python3 scripts/release-env.py smoke dev-test -- bash scripts/smoke/ensure-agent-account.sh
-# AGENT_TEST_USERNAME / AGENT_TEST_PASSWORD come from `<release root>/production/agent-test.env` on the
-# dev-test host (mode 0600, never in Git); export them before calling. Nothing secret is printed.
+# Makes sure the Agent's own account exists and logs in (#215). `release-env.py release <env>` runs it after
+# every successful release: dev-test data is fresh each time, so the account is recreated; an environment
+# that keeps its data (formal-test) answers 409 and the login is only checked. Manual run:
+#   python3 scripts/release-env.py smoke <env> -- bash scripts/smoke/ensure-agent-account.sh
+# The wrapper sets BASE and ADMIN_* from the stack's runtime env and AGENT_TEST_USERNAME /
+# AGENT_TEST_PASSWORD from `<release root>/production/agent-test.env` on the host (mode 0600, never in Git).
+# Nothing secret is printed.
 set -u
 : "${BASE:?}" "${ADMIN_USERNAME:?}" "${ADMIN_PASSWORD:?}" "${AGENT_TEST_USERNAME:?}" "${AGENT_TEST_PASSWORD:?}"
 D=$(mktemp -d "${TMPDIR:-/tmp}/agent-account.XXXXXX"); trap 'rm -rf "$D"' EXIT
