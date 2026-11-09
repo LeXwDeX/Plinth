@@ -32,6 +32,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/align"
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/registry"
+	"github.com/LeXwDeX/Plinth/internal/testutil/wirefixture"
 )
 
 func main() {
@@ -43,9 +44,12 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: official|export|fake|compare -version provider/api ...")
+		return errors.New("usage: official|export|fake|compare -version provider/api ... | draft -records dir -out dir -name stem")
 	}
 	command := args[0]
+	if command == "draft" {
+		return runDraft(args[1:])
+	}
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	version := flags.String("version", "", "provider/api, for example tripo/v3")
 	private := flags.String("private", "", "private working directory outside the worktree (mode 0700)")
@@ -105,7 +109,7 @@ func run(args []string) error {
 			}
 			vars = seeded
 		}
-		return runOfficial(profile, *private, stem+tagSuffix(*tags), *keyEnv, *baseURL, *confirm, vars)
+		return runOfficial(profile, *private, stem+tagSuffix(*tags), *keyEnv, *baseURL, *worktree, *confirm, vars)
 	case "export":
 		return runExport(profile, allSteps, *private, stem+tagSuffix(*tags), *out, *name, *worktree, *seed, *offering, *resume)
 	case "fake":
@@ -174,7 +178,7 @@ func captureConfig(profile align.Profile, worktree, baseURL string) (align.Captu
 	return config, nil
 }
 
-func runOfficial(profile align.Profile, private, stem, keyEnv, baseURL string, confirm bool, vars map[string]string) error {
+func runOfficial(profile align.Profile, private, stem, keyEnv, baseURL, worktree string, confirm bool, vars map[string]string) error {
 	if !confirm {
 		paid := 0
 		for _, step := range profile.Steps {
@@ -193,9 +197,26 @@ func runOfficial(profile align.Profile, private, stem, keyEnv, baseURL string, c
 	}
 	tee := align.NewTee(nil)
 	defer func() { _ = tee.Save(filepath.Join(private, stem+".official.raw.json")) }()
+	// Opt-in (#220): with ART_AI_UPSTREAM_RECORD_DIR and _ACK=1 set, every
+	// official exchange is also written, already sanitized, as a record that
+	// `draft` turns into a candidate. Off by default; half-set switches fail.
+	recorder, connection, err := officialRecorder(profile, worktree, baseURL)
+	if err != nil {
+		return err
+	}
+	var transport http.RoundTripper = tee
+	if recorder != nil {
+		transport = recorder.Wrap(connection, tee)
+		defer func() {
+			fmt.Printf("upstream records: %d written, %d skipped\n", recorder.Written(), recorder.Skipped())
+			if writeErr := recorder.WriteError(); writeErr != nil {
+				fmt.Fprintln(os.Stderr, "fake-upstream-align: upstream record:", writeErr)
+			}
+		}()
+	}
 	bundle, runErr := align.Run(context.Background(), profile.Provider, profile.API, align.Target{
 		Name: "official", BaseURL: baseURL, Key: key,
-		Client:   &http.Client{Transport: tee, Timeout: 5 * time.Minute},
+		Client:   &http.Client{Transport: transport, Timeout: 5 * time.Minute},
 		Download: &http.Client{Timeout: 5 * time.Minute},
 	}, profile.Steps, nil, vars)
 	if bundle != nil {
@@ -278,6 +299,76 @@ func runExport(profile align.Profile, allSteps []align.Step, private, stem, out,
 		return err
 	}
 	fmt.Println("exported", filepath.Base(candidate))
+	return nil
+}
+
+// officialRecorder builds the opt-in upstream recorder from the environment,
+// or nil when it is off.
+func officialRecorder(profile align.Profile, worktree, baseURL string) (*wirefixture.UpstreamRecorder, string, error) {
+	if os.Getenv(wirefixture.EnvUpstreamRecordDir) == "" && os.Getenv(wirefixture.EnvUpstreamRecordAck) == "" {
+		return nil, "", nil
+	}
+	config, err := captureConfig(profile, worktree, baseURL)
+	if err != nil {
+		return nil, "", err
+	}
+	connection := config.Connection
+	if connection == "" {
+		connection = strings.ReplaceAll(profile.Provider+"-"+profile.API, "/", "-")
+	}
+	defaults := wirefixture.Metadata{
+		Scenario: "upstream-record", APIVersion: config.APIVersion, AppRevision: config.AppRevision,
+		CatalogRevision: config.CatalogRevision, Environment: config.Environment, CapturedAt: config.CapturedAt,
+	}
+	recorder, err := wirefixture.UpstreamRecorderFromEnv(os.Getenv, worktree, defaults)
+	return recorder, connection, err
+}
+
+// runDraft converts sanitized upstream records into a candidate draft
+// (<name>.candidate.json, .policy.json, .meta.json) in a 0700 directory
+// outside the worktree. It reads only local files and sends no request.
+func runDraft(args []string) error {
+	flags := flag.NewFlagSet("draft", flag.ContinueOnError)
+	records := flags.String("records", "", "0700 directory written by the upstream recorder")
+	out := flags.String("out", "", "existing 0700 directory outside the worktree for the draft")
+	name := flags.String("name", "", "draft file name stem")
+	connection := flags.String("connection", "", "only keep records of this connection")
+	offering := flags.String("offering", "", "Catalog Offering id recorded in the meta")
+	worktree := flags.String("worktree", ".", "repository checkout")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *records == "" || *out == "" || *name == "" {
+		return errors.New("-records, -out and -name are required")
+	}
+	for _, path := range []*string{records, out, worktree} {
+		absolute, err := filepath.Abs(*path)
+		if err != nil {
+			return err
+		}
+		*path = absolute
+	}
+	if info, err := os.Stat(*records); err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
+		return errors.New("-records must be an existing directory with mode 0700")
+	}
+	exchanges, skipped, err := wirefixture.LoadUpstreamRecords(*records)
+	if err != nil {
+		return err
+	}
+	if *connection != "" {
+		kept := exchanges[:0]
+		for _, exchange := range exchanges {
+			if exchange.Metadata.Connection == *connection {
+				kept = append(kept, exchange)
+			}
+		}
+		exchanges = kept
+	}
+	draft, err := wirefixture.WriteDraftCandidate(*worktree, *out, *name, *offering, exchanges)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("draft: %d exchange(s), %d skipped record(s) -> %s\n", draft.Exchanges, skipped, filepath.Base(draft.Candidate))
 	return nil
 }
 
