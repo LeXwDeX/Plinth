@@ -22,7 +22,7 @@ export interface UnavailableNoticeContent {
 export function UnavailableNotice({ label, detail, className, testId }: UnavailableNoticeContent & { className?: string; testId?: string }) {
   const line = (
     <span role="status" tabIndex={detail ? 0 : undefined} data-testid={testId ?? "unavailable-notice"}
-      className={cn("inline-flex min-w-0 items-center gap-1.5 text-warning", detail && "cursor-help", className)}>
+      className={cn("relative inline-flex min-w-0 items-center gap-1.5 text-warning", detail && "cursor-help", className)}>
       <TriangleAlert aria-hidden="true" className="size-3.5 shrink-0" data-testid="unavailable-icon" />
       <span className="min-w-0" data-testid="unavailable-label">{label}</span>
       {detail ? <span className="sr-only" data-testid="unavailable-detail">{detail}</span> : null}

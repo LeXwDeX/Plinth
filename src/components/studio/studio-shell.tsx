@@ -23,7 +23,7 @@ import { useTaskTracker } from '@/hooks/use-task-tracker';
  */
 export function StudioShell() {
   return (
-    <Surface variant="base" radius="none" className="flex h-dvh min-h-0 flex-col overflow-hidden text-foreground" data-testid="studio-shell">
+    <Surface variant="base" radius="none" className="flex h-dvh min-h-0 flex-col overflow-clip text-foreground" data-testid="studio-shell">
       <StudioEffects />
       <ConnectivityBanner />
       <StudioTopbar />

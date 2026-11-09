@@ -66,7 +66,7 @@ export function MainLayout({ children, sidebar = true }: MainLayoutProps) {
   );
 
   return (
-    <Surface variant="base" radius="none" className="flex h-dvh flex-col overflow-hidden">
+    <Surface variant="base" radius="none" className="flex h-dvh flex-col overflow-clip">
       <ConnectivityBanner />
       <AppTopbar start={menuToggle} leading={backToWorkspace} actions={<CacheActivityIndicator />} />
       <div className="flex min-h-0 flex-1 overflow-hidden">

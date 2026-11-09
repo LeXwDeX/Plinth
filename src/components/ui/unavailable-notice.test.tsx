@@ -25,3 +25,10 @@ it('without a known reason it is the line alone, with no hint', () => {
   expect(screen.getByTestId('unavailable-notice').getAttribute('tabindex')).toBeNull();
   expect(screen.queryByTestId('unavailable-detail')).toBeNull();
 });
+
+it('keeps the screen-reader detail inside the notice so it cannot stretch an outer shell (#210)', () => {
+  // sr-only is position:absolute. Without a positioned notice it attaches to the nearest positioned ancestor,
+  // escapes the scroll container it sits in and makes the page shell scrollable (the shell then slides away).
+  render(<UnavailableNotice label="无法使用，当前未启用" detail="该候选尚待验收，当前未启用。" testId="notice" />);
+  expect(screen.getByTestId('notice').className.split(/\s+/)).toContain('relative');
+});
