@@ -77,3 +77,26 @@ class ZeroRealUpstream(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WebAssetsRootTest(unittest.TestCase):
+    """CI's go check job builds no frontend: the stack must still start (#218)."""
+
+    def test_without_any_frontend_build_a_minimal_shell_is_served(self):
+        import tempfile
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as work, tempfile.TemporaryDirectory() as empty:
+            with mock.patch.dict(os.environ, {"WEB_ASSETS_ROOT": os.path.join(empty, "missing")}), \
+                    mock.patch.object(fs.subprocess, "run", return_value=mock.Mock(stdout=os.path.join(empty, ".git"))):
+                web = fs.web_assets_root(work)
+            self.assertEqual(web, os.path.join(work, "web-shell"))
+            with open(os.path.join(web, "index.html"), encoding="utf-8") as handle:
+                self.assertIn("<title>", handle.read())
+
+    def test_an_existing_build_is_used_as_is(self):
+        import tempfile
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as work, tempfile.TemporaryDirectory() as build:
+            open(os.path.join(build, "index.html"), "w").close()
+            with mock.patch.dict(os.environ, {"WEB_ASSETS_ROOT": build}):
+                self.assertEqual(fs.web_assets_root(work), build)

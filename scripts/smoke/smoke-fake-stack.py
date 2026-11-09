@@ -292,17 +292,31 @@ def private_catalog(work, jimeng_urls=False):
     return path
 
 
+def web_assets_root(work):
+    """The static shell the stack serves. The API under test does not depend on it, so a
+    checkout without a frontend build (a worktree, or the CI job that does not build the
+    frontend) falls back to the common checkout's build and then to a minimal shell."""
+    web = os.environ.get("WEB_ASSETS_ROOT") or os.path.join(REPO, "build", "go-web")
+    if os.path.isfile(os.path.join(web, "index.html")):
+        return web
+    common = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=REPO,
+                            capture_output=True, text=True).stdout.strip()
+    if common:
+        shared = os.path.join(os.path.dirname(common), "build", "go-web")
+        if os.path.isfile(os.path.join(shared, "index.html")):
+            return shared
+    shell = os.path.join(work, "web-shell")
+    os.makedirs(shell, exist_ok=True)
+    with open(os.path.join(shell, "index.html"), "w", encoding="utf-8") as handle:
+        handle.write("<!doctype html><meta charset=\"utf-8\"><title>fake stack</title>\n")
+    return shell
+
+
 def stack_env(work, name, catalog, key):
     root = os.path.join(work, name)
     for sub in ("storage", "logs"):
         os.makedirs(os.path.join(root, sub), exist_ok=True)
-    web = os.environ.get("WEB_ASSETS_ROOT") or os.path.join(REPO, "build", "go-web")
-    if not os.path.isdir(web):
-        # A worktree without a frontend build: the common checkout's build serves
-        # the static shell; the API under test does not depend on it.
-        common = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=REPO,
-                                capture_output=True, text=True).stdout.strip()
-        web = os.path.join(os.path.dirname(common), "build", "go-web")
+    web = web_assets_root(work)
     env = {
         "HOME": os.environ.get("HOME", ""), "PATH": os.environ["PATH"],
         "APP_ENV": "development", "PROVIDER_MODE": "live", "AGENT_MODE": "live", "AUTH_MODE": "development",
@@ -335,7 +349,14 @@ def start_stack(processes, stack_binary, work, name, catalog, key):
     child = processes.start([stack_binary, "-test.run", "^TestFakeUpstreamStack$", "-test.timeout", "0"], env,
                             os.path.join(root, "stack.log"))
     if not wait_http(f"http://127.0.0.1:{STACK_PORT}/healthz", child):
-        raise RuntimeError(f"stack {name} did not become healthy (exited={child.poll() is not None}); see {root}/stack.log")
+        tail = ""
+        try:
+            with open(os.path.join(root, "stack.log"), encoding="utf-8", errors="replace") as handle:
+                tail = "".join(handle.readlines()[-20:])
+        except OSError:
+            pass
+        raise RuntimeError(f"stack {name} did not become healthy (exited={child.poll() is not None}); "
+                           f"see {root}/stack.log; last lines:\n{tail}")
     api = Api(f"http://127.0.0.1:{STACK_PORT}")
     api.login()
     return child, api
