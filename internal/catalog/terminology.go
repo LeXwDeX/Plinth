@@ -184,7 +184,7 @@ func validateLocalizedOfferingTerminology(
 }
 
 func applicationTerminologyCopy(schema ApplicationSchema) []terminologyCopy {
-	copies := make([]terminologyCopy, 0, len(schema.Content.Messages)+32)
+	copies := make([]terminologyCopy, 0, len(schema.Content.Messages))
 	for _, key := range sortedStringMapKeys(schema.Content.Messages) {
 		copies = append(copies, terminologyCopy{
 			path: fmt.Sprintf("content.messages[%q]", key),
