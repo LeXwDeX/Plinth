@@ -115,29 +115,22 @@ func validateFakeUpstreamWiring(shape upstreamShape, config Config, schema catal
 	if !shape.fake() {
 		return nil
 	}
-	type pair struct{ baseURL, apiKey string }
-	pairs := []pair{{schema.Chat.Agent.BaseURLSetting, schema.Chat.Agent.APIKeySetting}}
+	// Errors name the connection by its id, never by its setting names: the
+	// setting values are secrets and the names need not reach a log line.
+	type pair struct{ connection, baseURL, apiKey string }
+	pairs := []pair{{schema.Chat.Agent.ConnectionID, schema.Chat.Agent.BaseURLSetting, schema.Chat.Agent.APIKeySetting}}
 	for _, connection := range schema.Runtime.ProviderConnections {
-		pairs = append(pairs, pair{connection.BaseURLSetting, connection.APIKeySetting})
+		pairs = append(pairs, pair{connection.ID, connection.BaseURLSetting, connection.APIKeySetting})
 	}
 	for _, account := range schema.Runtime.ProviderAccounts {
-		pairs = append(pairs, pair{account.BaseURLSetting, account.APIKeySetting})
+		pairs = append(pairs, pair{account.ProviderID, account.BaseURLSetting, account.APIKeySetting})
 	}
 	for _, p := range pairs {
-		if p.baseURL != "" {
-			if value := strings.TrimSpace(config.RuntimeSettings[p.baseURL]); value != "" {
-				parsed, err := url.Parse(value)
-				if err != nil || !strings.EqualFold(parsed.Scheme, shape.origin.Scheme) ||
-					!strings.EqualFold(parsed.Host, shape.origin.Host) {
-					return fmt.Errorf("UPSTREAM_SHAPE=fake: 运行设置 %s 未指向 FAKE_UPSTREAM_ORIGIN", p.baseURL)
-				}
-			}
+		if !fakeWiringBaseURLAllowed(shape, config.RuntimeSettings, p.baseURL) {
+			return fmt.Errorf("UPSTREAM_SHAPE=fake: 连接 %s 的上游地址未指向 FAKE_UPSTREAM_ORIGIN", p.connection)
 		}
-		if p.apiKey != "" {
-			if value := strings.TrimSpace(config.RuntimeSettings[p.apiKey]); value != "" &&
-				!strings.HasPrefix(value, fakeUpstreamKeyPrefix) {
-				return fmt.Errorf("UPSTREAM_SHAPE=fake: 运行设置 %s 必须为空或 fake 上游密钥", p.apiKey)
-			}
+		if !fakeWiringKeyAllowed(config.RuntimeSettings, p.apiKey) {
+			return fmt.Errorf("UPSTREAM_SHAPE=fake: 连接 %s 的密钥必须为空或 fake 上游密钥", p.connection)
 		}
 	}
 	if len(config.ExtraChatConnections) > 0 {
@@ -230,4 +223,27 @@ func fakeShapeHTTPTransport(fake *url.URL) func(string, http.RoundTripper) http.
 			return direct.RoundTrip(routed)
 		})
 	}
+}
+
+// fakeWiringBaseURLAllowed reports whether the named base URL setting is empty
+// (connection off) or on the fake origin.
+func fakeWiringBaseURLAllowed(shape upstreamShape, settings map[string]string, setting string) bool {
+	if setting == "" {
+		return true
+	}
+	value := strings.TrimSpace(settings[setting])
+	if value == "" {
+		return true
+	}
+	parsed, err := url.Parse(value)
+	return err == nil && strings.EqualFold(parsed.Scheme, shape.origin.Scheme) && strings.EqualFold(parsed.Host, shape.origin.Host)
+}
+
+// fakeWiringKeyAllowed reports whether the named key setting is empty or a fake key.
+func fakeWiringKeyAllowed(settings map[string]string, setting string) bool {
+	if setting == "" {
+		return true
+	}
+	value := strings.TrimSpace(settings[setting])
+	return value == "" || strings.HasPrefix(value, fakeUpstreamKeyPrefix)
 }

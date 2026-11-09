@@ -212,8 +212,9 @@ func TestApplicationRefusesFakeShapeWithRealKey(t *testing.T) {
 	config := shapeConfig(t, schema, environment)
 	config.DatabasePath = t.TempDir() + "/never.db"
 	if _, err := newWithDependencies(config, nil, assemblyOverrides{}); err == nil ||
-		!strings.Contains(err.Error(), "tripo_api_key") {
-		t.Fatalf("err = %v, want the tripo_api_key refusal", err)
+		!strings.Contains(err.Error(), "连接 tripo 的密钥") || strings.Contains(err.Error(), "tsk-real") {
+		// The refusal names the connection, never the key value (CodeQL clear-text logging).
+		t.Fatalf("err = %v, want the tripo key refusal without the value", err)
 	}
 }
 

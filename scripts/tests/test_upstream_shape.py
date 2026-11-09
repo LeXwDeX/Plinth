@@ -91,6 +91,8 @@ class ScriptDefaultsTest(unittest.TestCase):
 
     def run_script(self, argv, extra=None):
         environ = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", ""), "ART_AI_UPSTREAM_SHAPE": "live",
+                   # host CI checks the checkout is unchanged after the gates: no __pycache__ (#219).
+                   "PYTHONDONTWRITEBYTECODE": "1",
                    "BASE": "http://127.0.0.1:9", "ADMIN_USERNAME": "u", "ADMIN_PASSWORD": "p", **(extra or {})}
         return subprocess.run(argv, env=environ, capture_output=True, text=True, timeout=30, cwd=ROOT)
 
