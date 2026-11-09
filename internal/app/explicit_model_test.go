@@ -21,7 +21,7 @@ func TestExplicitModel3DValidNamesAnEnabled3DOfferingOnly(t *testing.T) {
 		},
 		{
 			ID: "openai/gpt-image-2/text-to-image", ProviderID: "openai",
-			ModelID: "gpt-image-2.5-sunburst", Domain: generation.DomainImage, Enabled: true,
+			ModelID: "gpt-image-2.6-sunburst", Domain: generation.DomainImage, Enabled: true,
 		},
 	}
 	for _, model := range []string{
@@ -37,7 +37,7 @@ func TestExplicitModel3DValidNamesAnEnabled3DOfferingOnly(t *testing.T) {
 		"",
 		"   ",
 		"unknown-model",
-		"gpt-image-2.5-sunburst",
+		"gpt-image-2.6-sunburst",
 		"openai/gpt-image-2/text-to-image",
 		"tripo-v3.1",
 	} {

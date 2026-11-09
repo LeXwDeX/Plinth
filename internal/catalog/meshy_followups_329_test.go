@@ -42,8 +42,12 @@ func TestRetiredModelOfferingIsRefusedWithSuccessor(t *testing.T) {
 // Catalog to normalize a turn's model picks (#329 follow-up C).
 func TestRetiredModelSuccessorsNameBothModels(t *testing.T) {
 	successors := meshy329Catalog(t).RetiredModelSuccessors()
-	if len(successors) != 1 {
+	if len(successors) != 2 {
 		t.Fatalf("successors = %+v", successors)
+	}
+	if gpt := successors[1]; gpt.ModelID != "gpt-image-2.5-sunburst" || gpt.SuccessorModelID != "gpt-image-2.6-sunburst" ||
+		gpt.SuccessorModelName != "GPT Image 2.6 Sunburst (OpenAI)" {
+		t.Fatalf("gpt image successor = %+v (#224)", gpt)
 	}
 	got := successors[0]
 	if got.ModelID != "meshy-7" || got.ModelName != "Meshy 7" || got.SuccessorModelID != "meshy-7.1" || got.SuccessorModelName != "Meshy 7.1" {

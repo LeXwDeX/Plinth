@@ -172,7 +172,7 @@ func TestOpenAIImageToImagePostsDeclaredMultipartEdit(t *testing.T) {
 			if len(obs.Artifacts) != 1 {
 				t.Fatalf("claims=%#v", obs.Artifacts)
 			}
-			if model != "gpt-image-2.5-sunburst" || prompt != "edit" || size != "1536x1024" || quality != tc.quality || outputFormat != "png" {
+			if model != "gpt-image-2.6-sunburst" || prompt != "edit" || size != "1536x1024" || quality != tc.quality || outputFormat != "png" {
 				t.Errorf("form fields: model=%q prompt=%q size=%q quality=%q format=%q", model, prompt, size, quality, outputFormat)
 			}
 			if !bytes.Equal(imageBody, png) || imageType != "image/png" || imageName == "" {

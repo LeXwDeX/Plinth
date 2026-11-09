@@ -20,7 +20,7 @@ func TestLegacyPromptEnhanceContract(t *testing.T) {
 		bytes.NewBufferString(`{
 			"prompt":"a castle",
 			"capability":"text-to-image",
-			"model":"gpt-image-2.5-sunburst"
+			"model":"gpt-image-2.6-sunburst"
 		}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
@@ -73,7 +73,7 @@ func TestLegacyPromptEnhanceWireAndTextComeFromProductSchema(t *testing.T) {
 		bytes.NewBufferString(`{
 			"configuredInput":"configured input",
 			"configuredCapability":"text-to-image",
-			"configuredModel":"gpt-image-2.5-sunburst"
+			"configuredModel":"gpt-image-2.6-sunburst"
 		}`),
 	)
 	valid.Header.Set("Content-Type", "application/json")

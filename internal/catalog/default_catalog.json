@@ -2510,6 +2510,12 @@
             "model_id": "meshy-7",
             "model_name": "Meshy 7",
             "successor_model_id": "meshy-7.1"
+          },
+          {
+            "provider_id": "openai",
+            "model_id": "gpt-image-2.5-sunburst",
+            "model_name": "GPT Image 2.5 Sunburst (OpenAI)",
+            "successor_model_id": "gpt-image-2.6-sunburst"
           }
         ]
       }
@@ -9988,7 +9994,7 @@
           "recommended": false
         },
         {
-          "model_id": "gpt-image-2.5-sunburst",
+          "model_id": "gpt-image-2.6-sunburst",
           "provider_key": "openai",
           "recommended": true
         },
@@ -19122,13 +19128,13 @@
     {
       "id": "openai/gpt-image-2/text-to-image",
       "estimated_credits_unit_parameter": "n",
-      "revision": "2026-10-16.213.1",
+      "revision": "2026-11-09.224.1",
       "provider_id": "openai",
       "provider_name": "OpenAI",
       "provider_short_label": "GPT",
       "provider_order": 2,
-      "model_id": "gpt-image-2.5-sunburst",
-      "model_name": "GPT Image 2.5 Sunburst (OpenAI)",
+      "model_id": "gpt-image-2.6-sunburst",
+      "model_name": "GPT Image 2.6 Sunburst (OpenAI)",
       "capability": "text-to-image",
       "adapter_key": "openai-images.v1",
       "enabled": true,
@@ -19424,15 +19430,320 @@
       "display_order": 3,
       "capability_order": 0
     },
-    {
-      "id": "openai/gpt-image-2/image-to-image",
+      {
+      "id": "openai/gpt-image-2.5-sunburst/text-to-image",
       "estimated_credits_unit_parameter": "n",
       "revision": "2026-10-16.213.1",
       "provider_id": "openai",
       "provider_name": "OpenAI",
       "provider_short_label": "GPT",
+      "provider_order": 2,
       "model_id": "gpt-image-2.5-sunburst",
       "model_name": "GPT Image 2.5 Sunburst (OpenAI)",
+      "capability": "text-to-image",
+      "adapter_key": "openai-images.v1",
+      "enabled": false,
+      "features": [
+        "skills"
+      ],
+      "recommended": false,
+      "priority": 100,
+      "estimated_credits": 6,
+      "cancellation_supported": false,
+      "idempotent_submission": false,
+      "timeout_seconds": 1800,
+      "poll_interval_seconds": 5,
+      "retry": {
+        "max_attempts": 1,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 30,
+        "retryable": []
+      },
+      "materialize_attempts": 5,
+      "parameters": [
+        {
+          "name": "prompt",
+          "label": "提示词",
+          "type": "text",
+          "required": true,
+          "max_length": 32000,
+          "semantic": "prompt"
+        },
+        {
+          "name": "size",
+          "label": "输出尺寸",
+          "type": "text",
+          "options": [
+            {
+              "value": "1024x1024",
+              "label": "1024x1024"
+            },
+            {
+              "value": "1536x1024",
+              "label": "1536x1024"
+            },
+            {
+              "value": "1024x1536",
+              "label": "1024x1536"
+            },
+            {
+              "value": "1536x1152",
+              "label": "1536x1152"
+            },
+            {
+              "value": "1152x1536",
+              "label": "1152x1536"
+            },
+            {
+              "value": "2048x1152",
+              "label": "2048x1152"
+            },
+            {
+              "value": "1152x2048",
+              "label": "1152x2048"
+            },
+            {
+              "value": "2048x2048",
+              "label": "2048x2048"
+            },
+            {
+              "value": "3840x2160",
+              "label": "3840x2160"
+            },
+            {
+              "value": "2160x3840",
+              "label": "2160x3840"
+            }
+          ],
+          "presentation": {
+            "surface": "provider",
+            "control": "text"
+          },
+          "semantic": "output-size",
+          "image_size": {
+            "min_pixels": 655360,
+            "max_pixels": 8294400,
+            "max_edge": 3840,
+            "multiple": 16,
+            "max_ratio": 3
+          },
+          "default": "2048x2048",
+          "description": "明确的输出宽x高，画布按它的比例对齐（#267）。可选择预设或输入宽x高：边长须为16的倍数，最大3840，长短边不超过3:1；超过2560x1440的输出属于实验性能力。",
+          "legacy_values": {
+            "auto": "2048x2048"
+          }
+        },
+        {
+          "name": "quality",
+          "label": "生成质量",
+          "type": "select",
+          "options": [
+            {
+              "value": "auto",
+              "label": "自动"
+            },
+            {
+              "value": "low",
+              "label": "快速"
+            },
+            {
+              "value": "medium",
+              "label": "标准"
+            },
+            {
+              "value": "high",
+              "label": "高质量"
+            },
+            {
+              "value": "xhigh",
+              "label": "超高"
+            },
+            {
+              "value": "max",
+              "label": "最高"
+            }
+          ],
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "semantic": "quality",
+          "default": "max",
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "n",
+          "label": "生成数量",
+          "type": "number",
+          "minimum": 1,
+          "maximum": 10,
+          "integer": true,
+          "presentation": {
+            "surface": "provider",
+            "control": "number",
+            "step": 1
+          },
+          "default": 1
+        },
+        {
+          "name": "output_format",
+          "label": "图片格式",
+          "type": "select",
+          "options": [
+            {
+              "value": "png",
+              "label": "PNG"
+            },
+            {
+              "value": "jpeg",
+              "label": "JPEG"
+            },
+            {
+              "value": "webp",
+              "label": "WebP"
+            }
+          ],
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "default": "png",
+          "forced_when": [
+            {
+              "when": {
+                "parameter": "background",
+                "operator": "equals",
+                "value": "transparent"
+              },
+              "value": "png"
+            },
+            {
+              "when": {
+                "parameter": "background",
+                "operator": "not-equals",
+                "value": "transparent"
+              },
+              "value": "png"
+            }
+          ],
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "output_compression",
+          "label": "压缩质量",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "integer": true,
+          "presentation": {
+            "surface": "readonly",
+            "control": "number",
+            "step": 1,
+            "disabled_when": [
+              {
+                "parameter": "output_format",
+                "operator": "equals",
+                "value": "png"
+              }
+            ]
+          },
+          "default": 100,
+          "omit_when": [
+            {
+              "parameter": "output_format",
+              "operator": "equals",
+              "value": "png"
+            }
+          ],
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "background",
+          "label": "背景",
+          "type": "select",
+          "options": [
+            {
+              "value": "auto",
+              "label": "自动"
+            },
+            {
+              "value": "opaque",
+              "label": "不透明"
+            },
+            {
+              "value": "transparent",
+              "label": "透明"
+            }
+          ],
+          "presentation": {
+            "surface": "provider",
+            "control": "select"
+          },
+          "default": "auto"
+        },
+        {
+          "name": "moderation",
+          "label": "内容过滤",
+          "type": "select",
+          "options": [
+            {
+              "value": "auto",
+              "label": "自动"
+            },
+            {
+              "value": "low",
+              "label": "快速"
+            }
+          ],
+          "presentation": {
+            "surface": "hidden",
+            "control": "select"
+          },
+          "default": "auto"
+        }
+      ],
+      "outputs": [
+        {
+          "role": "image",
+          "minimum": 1,
+          "media_types": [
+            "image/*"
+          ],
+          "max_bytes": 52428800
+        }
+      ],
+      "asset_hosts": [],
+      "provider_options": {
+        "endpoint": "images/generations",
+        "request_template": {
+          "model": "$model"
+        },
+        "response": {
+          "images_path": "data.*",
+          "base64_field": "b64_json",
+          "media_type_field": "mime_type",
+          "role": "image",
+          "default_media_type": "image/png"
+        },
+        "max_response_bytes": 268435456
+      },
+      "default": false,
+      "domain": "image",
+      "display_order": 999,
+      "capability_order": 0
+    },
+    {
+      "id": "openai/gpt-image-2/image-to-image",
+      "estimated_credits_unit_parameter": "n",
+      "revision": "2026-11-09.224.1",
+      "provider_id": "openai",
+      "provider_name": "OpenAI",
+      "provider_short_label": "GPT",
+      "model_id": "gpt-image-2.6-sunburst",
+      "model_name": "GPT Image 2.6 Sunburst (OpenAI)",
       "capability": "image-to-image",
       "adapter_key": "openai-images.v1",
       "enabled": true,
@@ -19779,6 +20090,363 @@
       "default": false,
       "domain": "image",
       "display_order": 3,
+      "capability_order": 1
+    },
+      {
+      "id": "openai/gpt-image-2.5-sunburst/image-to-image",
+      "estimated_credits_unit_parameter": "n",
+      "revision": "2026-10-16.213.1",
+      "provider_id": "openai",
+      "provider_name": "OpenAI",
+      "provider_short_label": "GPT",
+      "model_id": "gpt-image-2.5-sunburst",
+      "model_name": "GPT Image 2.5 Sunburst (OpenAI)",
+      "capability": "image-to-image",
+      "adapter_key": "openai-images.v1",
+      "enabled": false,
+      "features": [
+        "skills"
+      ],
+      "recommended": false,
+      "priority": 100,
+      "estimated_credits": 6,
+      "cancellation_supported": false,
+      "idempotent_submission": false,
+      "timeout_seconds": 1800,
+      "poll_interval_seconds": 5,
+      "retry": {
+        "max_attempts": 1,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 30,
+        "retryable": []
+      },
+      "materialize_attempts": 5,
+      "parameters": [
+        {
+          "name": "prompt",
+          "label": "提示词",
+          "type": "text",
+          "required": true,
+          "max_length": 32000,
+          "semantic": "prompt"
+        },
+        {
+          "name": "reference_assets",
+          "label": "参考图",
+          "type": "asset-array",
+          "required": true,
+          "min_items": 1,
+          "max_items": 16,
+          "media_types": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ],
+          "max_bytes": 52428800,
+          "alpha_flatten": {
+            "background_color": "#ffffff",
+            "max_pixels": 16777216,
+            "keep_when": [
+              {
+                "parameter": "background",
+                "operator": "equals",
+                "value": "transparent"
+              }
+            ]
+          },
+          "semantic": "reference-image",
+          "extensions": [
+            "png",
+            "jpg",
+            "jpeg",
+            "webp"
+          ],
+          "wire_name": "image[]"
+        },
+        {
+          "name": "size",
+          "label": "输出尺寸",
+          "type": "text",
+          "options": [
+            {
+              "value": "1024x1024",
+              "label": "1024x1024"
+            },
+            {
+              "value": "1536x1024",
+              "label": "1536x1024"
+            },
+            {
+              "value": "1024x1536",
+              "label": "1024x1536"
+            },
+            {
+              "value": "1536x1152",
+              "label": "1536x1152"
+            },
+            {
+              "value": "1152x1536",
+              "label": "1152x1536"
+            },
+            {
+              "value": "2048x1152",
+              "label": "2048x1152"
+            },
+            {
+              "value": "1152x2048",
+              "label": "1152x2048"
+            },
+            {
+              "value": "2048x2048",
+              "label": "2048x2048"
+            },
+            {
+              "value": "3840x2160",
+              "label": "3840x2160"
+            },
+            {
+              "value": "2160x3840",
+              "label": "2160x3840"
+            }
+          ],
+          "presentation": {
+            "surface": "provider",
+            "control": "text"
+          },
+          "semantic": "output-size",
+          "image_size": {
+            "min_pixels": 655360,
+            "max_pixels": 8294400,
+            "max_edge": 3840,
+            "multiple": 16,
+            "max_ratio": 3
+          },
+          "default": "2048x2048",
+          "description": "明确的输出宽x高，画布按它的比例对齐（#267）。可选择预设或输入宽x高：边长须为16的倍数，最大3840，长短边不超过3:1；超过2560x1440的输出属于实验性能力。",
+          "legacy_values": {
+            "auto": "2048x2048"
+          }
+        },
+        {
+          "name": "quality",
+          "label": "生成质量",
+          "type": "select",
+          "options": [
+            {
+              "value": "auto",
+              "label": "自动"
+            },
+            {
+              "value": "low",
+              "label": "快速"
+            },
+            {
+              "value": "medium",
+              "label": "标准"
+            },
+            {
+              "value": "high",
+              "label": "高质量"
+            },
+            {
+              "value": "xhigh",
+              "label": "超高"
+            },
+            {
+              "value": "max",
+              "label": "最高"
+            }
+          ],
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "semantic": "quality",
+          "default": "max",
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "n",
+          "label": "生成数量",
+          "type": "number",
+          "minimum": 1,
+          "maximum": 10,
+          "integer": true,
+          "presentation": {
+            "surface": "provider",
+            "control": "number",
+            "step": 1
+          },
+          "default": 1
+        },
+        {
+          "name": "output_format",
+          "label": "图片格式",
+          "type": "select",
+          "options": [
+            {
+              "value": "png",
+              "label": "PNG"
+            },
+            {
+              "value": "jpeg",
+              "label": "JPEG"
+            },
+            {
+              "value": "webp",
+              "label": "WebP"
+            }
+          ],
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "default": "png",
+          "forced_when": [
+            {
+              "when": {
+                "parameter": "background",
+                "operator": "equals",
+                "value": "transparent"
+              },
+              "value": "png"
+            },
+            {
+              "when": {
+                "parameter": "background",
+                "operator": "not-equals",
+                "value": "transparent"
+              },
+              "value": "png"
+            }
+          ],
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "output_compression",
+          "label": "压缩质量",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "integer": true,
+          "presentation": {
+            "surface": "readonly",
+            "control": "number",
+            "step": 1,
+            "disabled_when": [
+              {
+                "parameter": "output_format",
+                "operator": "equals",
+                "value": "png"
+              }
+            ]
+          },
+          "default": 100,
+          "omit_when": [
+            {
+              "parameter": "output_format",
+              "operator": "equals",
+              "value": "png"
+            }
+          ],
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "background",
+          "label": "背景",
+          "type": "select",
+          "options": [
+            {
+              "value": "auto",
+              "label": "自动"
+            },
+            {
+              "value": "opaque",
+              "label": "不透明"
+            },
+            {
+              "value": "transparent",
+              "label": "透明"
+            }
+          ],
+          "presentation": {
+            "surface": "provider",
+            "control": "select"
+          },
+          "default": "auto"
+        },
+        {
+          "name": "moderation",
+          "label": "内容过滤",
+          "type": "select",
+          "options": [
+            {
+              "value": "auto",
+              "label": "自动"
+            },
+            {
+              "value": "low",
+              "label": "快速"
+            }
+          ],
+          "presentation": {
+            "surface": "hidden",
+            "control": "select"
+          },
+          "default": "auto"
+        },
+        {
+          "name": "mask",
+          "semantic": "mask",
+          "label": "局部编辑蒙版",
+          "description": "透明区域为编辑区域；尺寸须与第一张参考图一致。",
+          "type": "asset",
+          "max_bytes": 4194304,
+          "media_types": [
+            "image/png"
+          ],
+          "extensions": [
+            "png"
+          ],
+          "wire_name": "mask",
+          "presentation": {
+            "surface": "provider",
+            "control": "asset"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "role": "image",
+          "minimum": 1,
+          "media_types": [
+            "image/*"
+          ],
+          "max_bytes": 52428800
+        }
+      ],
+      "asset_hosts": [],
+      "provider_options": {
+        "endpoint": "images/edits",
+        "request_encoding": "multipart",
+        "request_template": {
+          "model": "$model"
+        },
+        "response": {
+          "images_path": "data.*",
+          "base64_field": "b64_json",
+          "media_type_field": "mime_type",
+          "role": "image",
+          "default_media_type": "image/png"
+        },
+        "max_response_bytes": 268435456
+      },
+      "default": false,
+      "domain": "image",
+      "display_order": 999,
       "capability_order": 1
     },
     {

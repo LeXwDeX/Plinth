@@ -3433,7 +3433,7 @@ func TestDefaultOpenAIImageIdentityAndParametersFollowDeclaration(t *testing.T) 
 		if !exists {
 			t.Fatalf("missing offering %q", id)
 		}
-		if offering.ModelID != "gpt-image-2.5-sunburst" {
+		if offering.ModelID != "gpt-image-2.6-sunburst" {
 			t.Errorf("%s model_id = %q", id, offering.ModelID)
 		}
 		var quality generation.Parameter

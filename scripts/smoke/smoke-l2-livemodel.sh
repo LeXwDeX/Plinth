@@ -16,13 +16,13 @@
 # LLM 噪声兜底：同意/任务未出现时重发消息最多两次再等。
 # 用法（服务器上）: ART_AI_SERVER_ROOT=<发布根> bash smoke-l2-livemodel.sh
 #                   L2_APPROVE_3D=1 bash smoke-l2-livemodel.sh   # 含付费 3D 生成
-# 可选环境变量: BASE、IMAGE_MODEL（默认 gpt-image-2.5-sunburst）、
+# 可选环境变量: BASE、IMAGE_MODEL（默认 gpt-image-2.6-sunburst）、
 #   SMOKE_3D_MODEL（默认取 /api/v1/offerings 中第一个可用推荐的文生 3D 模型）、
 #   ART_AI_DB（SQLite 路径，用于核对 decided_by；服务器上缺省为 $ART_AI_SERVER_ROOT/production/data/art-ai.db）。
 # 凭据：服务器上读 production/runtime.env；本地用 ADMIN_* 环境变量。数据保留不清理。
 set -u
 BASE="${BASE:-http://127.0.0.1:13333}"
-IMAGE_MODEL="${IMAGE_MODEL:-gpt-image-2.5-sunburst}"
+IMAGE_MODEL="${IMAGE_MODEL:-gpt-image-2.6-sunburst}"
 ART_AI_DB="${ART_AI_DB:-${ART_AI_SERVER_ROOT:+$ART_AI_SERVER_ROOT/production/data/art-ai.db}}"
 PASS=0; FAIL=0
 ok()  { echo "PASS: $1"; PASS=$((PASS+1)); }

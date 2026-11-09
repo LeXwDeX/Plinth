@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 candidate_web_base_url="${CANDIDATE_WEB_BASE_URL:-http://127.0.0.1:13335}"
 candidate_owner="${CANDIDATE_OWNER:-candidate-admin}"
-candidate_model="${CANDIDATE_MODEL:-gpt-image-2.5-sunburst}"
+candidate_model="${CANDIDATE_MODEL:-gpt-image-2.6-sunburst}"
 candidate_admin_username="${CANDIDATE_ADMIN_USERNAME:-candidate-admin}"
 candidate_admin_password="${CANDIDATE_ADMIN_PASSWORD:-candidate-only-password}"
 candidate_allow_generation="${CANDIDATE_ALLOW_GENERATION:-false}"

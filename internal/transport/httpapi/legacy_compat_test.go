@@ -167,12 +167,12 @@ func TestLegacyProviderDiscoveryIsProjectedFromUnifiedSchema(t *testing.T) {
 	}
 	var skillProviderFound bool
 	for _, provider := range discovered.Providers {
-		if provider.ID == "gpt-image-2.5-sunburst" {
+		if provider.ID == "gpt-image-2.6-sunburst" {
 			skillProviderFound = slices.Contains(provider.Features, "skills")
 		}
 	}
 	if !skillProviderFound {
-		t.Fatalf("gpt-image-2.5-sunburst skills feature missing: %#v", discovered.Providers)
+		t.Fatalf("gpt-image-2.6-sunburst skills feature missing: %#v", discovered.Providers)
 	}
 }
 
@@ -200,7 +200,7 @@ func TestLegacyProviderDiscoveryPreservesDefaultProjectionAndOptInExtensions(
 	}{
 		{"nano-banana-pro", "meshy"},
 		{"nano-banana-2", "meshy"},
-		{"gpt-image-2.5-sunburst", "openai"},
+		{"gpt-image-2.6-sunburst", "openai"},
 		{"doubao-seedream-4-5-251128", "jimeng"},
 		{"gemini-3-pro-image", "gemini"},
 		{"meshy-7.1", "meshy-3d"},
@@ -451,7 +451,7 @@ func TestLegacyTextToImageWriteRequiresApprovedExecution(t *testing.T) {
 		"/api/meshy/text-to-image",
 		strings.NewReader(`{
 			"prompt":"a brass hummingbird",
-			"ai_model":"gpt-image-2.5-sunburst",
+			"ai_model":"gpt-image-2.6-sunburst",
 			"size":"1024x1024",
 			"quality":"high"
 		}`),
@@ -566,7 +566,7 @@ func TestLegacyImageToImageWriteRequiresApprovedExecution(t *testing.T) {
 			"reference_image_urls":[
 				"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 			],
-			"ai_model":"gpt-image-2.5-sunburst",
+			"ai_model":"gpt-image-2.6-sunburst",
 			"size":"1024x1024",
 			"quality":"high"
 		}`),
@@ -606,9 +606,9 @@ func TestLegacyProviderDiscoveryAppliesConfiguredWireCompatibility(t *testing.T)
 		t,
 		serveLegacyRequest(handler, http.MethodGet, "/api/providers", nil),
 	)
-	gptImage := legacyProviderByID(t, allProviders, "gpt-image-2.5-sunburst")
+	gptImage := legacyProviderByID(t, allProviders, "gpt-image-2.6-sunburst")
 	if gptImage["recommended"] != true {
-		t.Fatalf("gpt-image-2.5-sunburst recommended = %#v", gptImage["recommended"])
+		t.Fatalf("gpt-image-2.6-sunburst recommended = %#v", gptImage["recommended"])
 	}
 	meshyAll := legacyProviderByID(t, allProviders, "meshy-7.1")
 	if _, exists := meshyAll["constraints"]; exists {
@@ -971,17 +971,17 @@ func TestImageExtendedDiscoveryPreservesNewParameterControls(t *testing.T) {
 	for _, provider := range discovered.Providers {
 		for _, p := range provider.ParamSchemas["image-to-image"] {
 			switch provider.ID + ":" + p.Name {
-			case "gpt-image-2.5-sunburst:size":
+			case "gpt-image-2.6-sunburst:size":
 				if p.Type != "text" || p.Validation.ImageSize == nil {
 					t.Fatalf("size projection=%#v", p)
 				}
 				found["size"] = true
-			case "gpt-image-2.5-sunburst:n":
+			case "gpt-image-2.6-sunburst:n":
 				if p.Type != "number" || !p.Validation.Integer {
 					t.Fatalf("n projection=%#v", p)
 				}
 				found["n"] = true
-			case "gpt-image-2.5-sunburst:mask":
+			case "gpt-image-2.6-sunburst:mask":
 				if p.Type != "asset" || p.Validation.MaxBytes <= 0 {
 					t.Fatalf("mask projection=%#v", p)
 				}

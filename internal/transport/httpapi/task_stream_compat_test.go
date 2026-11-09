@@ -308,7 +308,7 @@ func submitTextToImageForTaskStream(
 		"/api/meshy/text-to-image",
 		strings.NewReader(`{
 			"prompt":"a schema-driven stream",
-			"ai_model":"gpt-image-2.5-sunburst",
+			"ai_model":"gpt-image-2.6-sunburst",
 			"size":"1024x1024",
 			"quality":"max"
 		}`),

@@ -389,7 +389,7 @@ Catalog 加载时校验：`options` 必须恰为 `"false"` 与 `"true"` 两项�
 
 | Provider / Offering | 模型与路由 | 后端固定的最高质量 |
 |---|---|---|
-| OpenAI GPT Image | `gpt-image-2.5-sunburst`（官方建议的 2.5 高精度档） | `quality=max`，`output_format=png`（无损，不输出 WebP）。按背景强制格式的 `forced_when` 保留：透明背景仍为 png，非透明背景的值为 png；`output_compression` 的 `step`、`disabled_when` 保留 |
+| OpenAI GPT Image | `gpt-image-2.6-sunburst`（2026-11-09 上游由 2.5 升级，#224） | `quality=max`，`output_format=png`（无损，不输出 WebP）。按背景强制格式的 `forced_when` 保留：透明背景仍为 png，非透明背景的值为 png；`output_compression` 的 `step`、`disabled_when` 保留 |
 | Google Gemini 图片 | `gemini-3-pro-image`（Nano Banana Pro，官方定位最高质量） | `image_size=4K` |
 | 即梦 Seedream | `doubao-seedream-4-5-251128` | `size` 可见，用户选画面比例，默认 `4096x4096`（只发明确宽×高，旧 `2K`/`4K` 经 `legacy_values` 落到 `4096x4096`，#267）。每个比例都按最高分辨率出图：低档选项由 `forced_when` 换成同比例最高档（`2048x2048`→`4096x4096`、`2560x1440`→`5504x3040`、`1440x2560`→`3040x5504`、`2304x1728`→`4704x3520`、`1728x2304`→`3520x4704`）。选项与 `min_pixels=3686400` 原样保留，删掉这几条 `forced_when` 即回到原选择范围。Schema 仍逐项声明全部选项；参数面板（`agent-offerings.ts` 的 `selectableOptions`）不列出被本参数 `forced_when` 无条件替换掉的低档，所以每个比例只出现最高档那一项，与画布尺寸提示一致，旧会话里保存的低档值经 `forced_when` 显示为同比例最高档；自定义宽x高（API/Agent）仍按像素约束校验，不自动升档 |
 | Meshy 文生图/图生图 | `nano-banana-pro`、`nano-banana-2` 都启用（上游没有质量参数，不因质量策略停用模型选项；旧版兼容 API 的 `legacy_models` 和 `legacy_constraint_option_labels`，Catalog 校验要求这两处与启用模型一一对应） | 上游无质量参数 |

@@ -42,7 +42,7 @@ func TestLegacyAndBareTaskCreationRoutesFailClosedWithoutTask(t *testing.T) {
 		path string
 		body string
 	}{
-		{"text-to-image", "/api/meshy/text-to-image", `{"prompt":"test","ai_model":"gpt-image-2.5-sunburst"}`},
+		{"text-to-image", "/api/meshy/text-to-image", `{"prompt":"test","ai_model":"gpt-image-2.6-sunburst"}`},
 		{"image-to-image", "/api/meshy/image-to-image", `{"prompt":"test","reference_image_urls":["https://assets.test/ref.png"]}`},
 		{"text-to-3d", "/api/meshy/text-to-3d", `{"mode":"preview","prompt":"test","ai_model":"meshy-7"}`},
 		{"image-to-3d", "/api/meshy/image-to-3d", `{"image_url":"https://assets.test/ref.png","ai_model":"meshy-7"}`},
