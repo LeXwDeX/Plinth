@@ -82,6 +82,7 @@ class SmokeInjectionTest(unittest.TestCase):
 
         document = load(BASE)
         with mock.patch.object(release_env, "admin_credentials", return_value={"ADMIN_USERNAME": "u", "ADMIN_PASSWORD": "p"}), \
+                mock.patch.object(release_env, "agent_credentials", return_value={}), \
                 mock.patch.object(release_env, "running_revision", return_value="0" * 40), \
                 mock.patch.object(release_env, "container", return_value="c"), \
                 mock.patch.object(release_env.subprocess, "run", fake_run):
@@ -89,6 +90,79 @@ class SmokeInjectionTest(unittest.TestCase):
             self.assertEqual(release_env.smoke(document, name, ["true"]), 0)
         self.assertEqual(seen["RELEASE_ENV"], name)
         self.assertEqual(seen["BASE"], document["environments"][name]["base_url"])
+
+
+class AgentAccountTest(unittest.TestCase):
+    """#215: every release keeps the Agent's own account, read from production/agent-test.env on the host."""
+
+    class Done:
+        def __init__(self, code):
+            self.returncode = code
+
+    def release(self, release_code, agent, smoke_code=0, name="alone"):
+        document = load(BASE)
+        calls = []
+
+        def fake_smoke(doc, env_name, command):
+            calls.append((env_name, command))
+            return smoke_code
+
+        output = io.StringIO()
+        with mock.patch.object(release_env.subprocess, "run", return_value=self.Done(release_code)), \
+                mock.patch.object(release_env, "agent_credentials", return_value=agent), \
+                mock.patch.object(release_env, "smoke", fake_smoke), \
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            args = mock.Mock(revision=None, acceptance_note=None)
+            code = release_env.release(document, name, args)
+        return code, calls, output.getvalue()
+
+    def test_a_successful_release_ensures_the_agent_account(self):
+        code, calls, _ = self.release(0, {"AGENT_TEST_USERNAME": "a", "AGENT_TEST_PASSWORD": "b"})
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, [("alone", ["bash", str(release_env.AGENT_ACCOUNT_SCRIPT)])])
+
+    def test_a_failed_release_does_not_touch_the_account(self):
+        code, calls, _ = self.release(3, {"AGENT_TEST_USERNAME": "a", "AGENT_TEST_PASSWORD": "b"})
+        self.assertEqual((code, calls), (3, []))
+
+    def test_without_the_account_file_the_release_only_says_so(self):
+        code, calls, output = self.release(0, {})
+        self.assertEqual((code, calls), (0, []))
+        self.assertIn("agent-test.env", output)
+
+    def test_an_account_failure_is_reported_after_the_release_is_deployed(self):
+        code, calls, output = self.release(0, {"AGENT_TEST_USERNAME": "a", "AGENT_TEST_PASSWORD": "b"}, smoke_code=1)
+        self.assertEqual(code, 1)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("deployed", output)
+
+    def test_smoke_injects_the_agent_account(self):
+        seen = {}
+
+        def fake_run(command, env):
+            seen.update(env)
+            return self.Done(0)
+
+        document = load(BASE)
+        with mock.patch.object(release_env, "admin_credentials", return_value={"ADMIN_USERNAME": "u", "ADMIN_PASSWORD": "p"}), \
+                mock.patch.object(release_env, "agent_credentials", return_value={"AGENT_TEST_USERNAME": "a", "AGENT_TEST_PASSWORD": "b"}), \
+                mock.patch.object(release_env, "running_revision", return_value="0" * 40), \
+                mock.patch.object(release_env, "container", return_value="c"), \
+                mock.patch.object(release_env.subprocess, "run", fake_run):
+            self.assertEqual(release_env.smoke(document, "alone", ["true"]), 0)
+        self.assertEqual((seen["AGENT_TEST_USERNAME"], seen["AGENT_TEST_PASSWORD"]), ("a", "b"))
+
+    def test_the_host_reader_returns_only_asked_keys_and_tolerates_a_missing_file(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "agent-test.env"
+            path.write_text("AGENT_TEST_USERNAME='agent'\nAGENT_TEST_PASSWORD=\"secret\"\nOTHER=x\n")
+            def read(target):
+                result = subprocess.run(["python3", "-", str(target), *release_env.AGENT_KEYS],
+                                        input=release_env.HOST_ENV_READER.encode(), capture_output=True, check=True)
+                return json.loads(result.stdout)
+            self.assertEqual(read(path), {"AGENT_TEST_USERNAME": "agent", "AGENT_TEST_PASSWORD": "secret"})
+            self.assertEqual(read(Path(directory) / "missing.env"), {})
 
 
 class EnvironmentRulesTest(unittest.TestCase):
