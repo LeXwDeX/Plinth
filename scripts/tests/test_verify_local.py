@@ -102,7 +102,7 @@ class ReceiptTests(VerificationTests):
         self.assertNotIn('go test race', self.ran)
         self.verify(force=True, race=True)
         self.assertEqual(self.ran, ['frontend typecheck', 'frontend test', 'frontend build', 'go vet',
-                                    'go test', 'go test race', 'go build', 'public tree', 'scripts tests'])
+                                    'go test', 'go test race', 'go build', 'public tree', 'scripts tests', 'fake stack'])
         self.assertEqual(v.selected_gates(True)[5], v.RACE_GATE)
         self.assertEqual(v.RACE_GATE[2], {'CGO_ENABLED': '1'})
     def test_fast_receipt_never_covers_race(self):
