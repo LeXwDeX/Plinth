@@ -5318,7 +5318,15 @@
                 "gpt-astra"
               ],
               "effort_field": "reasoning_effort",
-              "effort_levels": ["low", "medium", "high"],
+              "effort_levels": ["low", "medium", "high", "xhigh", "max"],
+              "default_effort": "high"
+            },
+            {
+              "model_prefixes": [
+                "gpt-6-astra"
+              ],
+              "effort_field": "reasoning_effort",
+              "effort_levels": ["low", "medium", "high", "xhigh", "max"],
               "default_effort": "high"
             },
             {
