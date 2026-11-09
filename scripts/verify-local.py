@@ -22,6 +22,11 @@ import sys
 import tempfile
 import time
 
+# The fake-stack gate's scenarios (dev_test.md §2 item 10): every provider family, the Agent
+# chains and two fault scenarios; the rest (Tripo chains, Hyper3D direct, five more faults)
+# stay in the full `smoke-fake-stack.py` run, which takes about 15 minutes.
+FAKE_STACK_SCENARIOS = 'balance,meshy,images,p2,agent,agent-background,faults'
+FAKE_STACK_FAULTS = 'task-failed,artifact-expired-stuck'
 # The gates dev_test.md §2 marks local, in §2 order; the default and pre-push run.
 GATES = [
     ('frontend typecheck', ['pnpm', 'exec', 'tsc', '--noEmit', '--incremental', 'false'], {}),
@@ -36,6 +41,11 @@ GATES = [
     ('public tree', ['bash', 'scripts/check-public-tree.sh'], {}),
     # #86: the release/gate scripts' own unit tests (no bytecode: the gate must not write into the tree it fingerprints).
     ('scripts tests', ['python3', '-m', 'unittest', 'discover', '-s', 'scripts/tests', '-p', 'test_*.py'], {'PYTHONDONTWRITEBYTECODE': '1'}),
+    # #218: the full-stack smoke on the fake upstream, a stable subset (about 5 minutes); loopback
+    # only and offline, so it also runs in the no-network host CI container. Fails on any check or
+    # on a single request the stack's loopback guard refused.
+    ('fake stack', ['python3', 'scripts/smoke/smoke-fake-stack.py', '--only', FAKE_STACK_SCENARIOS,
+                    '--faults', FAKE_STACK_FAULTS], {}),
 ]
 # CI-only in dev_test.md §2: the slow gate, running the same tests as go test.
 # --race opts in locally; it then runs right after go test, as in §2.

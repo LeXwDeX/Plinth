@@ -110,8 +110,11 @@ export interface TablePopoverProps {
   testId?: string;
   /** 一张表时选中即关闭；多张表并排时弹层保持打开，方便每张各选一项。 */
   sections: TableSection[];
-  /** 多张表也上下堆叠而不是并排，宽度仍按单表；用于一个入口里的两步选择。 */
-  stacked?: boolean;
+  /**
+   * 一个入口里的两步选择（#223，对话模型与思考档位）：两张表左右两栏，左右方向键在两栏之间移动焦点
+   * （落到该栏当前选中行，没有则第一行）；弹层放不下两栏时退化为上下堆叠。
+   */
+  columns?: boolean;
 }
 
 /**
@@ -119,7 +122,7 @@ export interface TablePopoverProps {
  * 不可用的行变暗且不可点。模型选择（2D、3D 两列）、Skill 选择和 Agent 模式共用。
  */
 export function TablePopover({
-  label, value, valueParts, fullValue, icon, disabled = false, hint, triggerDisabledReason, testId, sections, stacked = false,
+  label, value, valueParts, fullValue, icon, disabled = false, hint, triggerDisabledReason, testId, sections, columns = false,
 }: TablePopoverProps) {
   const layer = useAnchoredPositioner();
   const descriptionId = useId();
@@ -141,7 +144,17 @@ export function TablePopover({
   const releaseHint = () => { if (!openRef.current) setHintHeld(false); };
   const close = () => changeOpen(false);
   const paired = sections.length > 1;
-  const sideBySide = paired && !stacked;
+  const sideBySide = paired && !columns;
+  const twoColumns = paired && columns;
+  const sectionsRef = useRef<HTMLDivElement>(null);
+  // #223: move focus into the neighbouring column, onto its current choice or else its first usable row.
+  const focusSection = (index: number): boolean => {
+    const root = sectionsRef.current?.querySelector(`[data-picker-section="${index}"]`);
+    const rows = Array.from(root?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? []).filter((row) => !row.disabled);
+    const target = rows.find((row) => row.getAttribute('aria-checked') === 'true') ?? rows[0];
+    target?.focus();
+    return Boolean(target);
+  };
 
   return (
     <Popover.Root open={open} onOpenChange={changeOpen}>
@@ -179,17 +192,19 @@ export function TablePopover({
         <Popover.Positioner positionMethod={anchoredPositionMethod} side="top" align="start" sideOffset={8} collisionPadding={12} className={layer}>
           <Popover.Popup
             data-testid={testId ? `${testId}-panel` : undefined}
+            data-layout={twoColumns ? 'columns' : undefined}
             aria-label={label}
             className={cn(
               '@container flex max-h-(--available-height) max-w-(--available-width) flex-col overflow-y-auto rounded-lg bg-popover p-1.5 text-popover-foreground shadow-xl outline-none ring-1 ring-foreground/10',
-              sideBySide ? 'w-[59rem]' : 'w-[36rem]',
+              sideBySide ? 'w-[59rem]' : twoColumns ? 'w-[40rem]' : 'w-[36rem]',
             )}
           >
             {/* Side by side when the panel is wide enough, otherwise one table under the other. */}
-            <div className={cn('grid gap-x-3 gap-y-2', sideBySide && '@[52rem]:grid-cols-2')}>
-              {sections.map((section) => (
-                <Section key={section.testId ?? section.title} section={section} close={close}
-                  closeOnPick={section.closeOnPick ?? !paired} />
+            <div ref={sectionsRef} className={cn('grid gap-x-3 gap-y-2', sideBySide && '@[52rem]:grid-cols-2', twoColumns && '@[30rem]:grid-cols-2')}>
+              {sections.map((section, index) => (
+                <Section key={section.testId ?? section.title} section={section} close={close} index={index}
+                  closeOnPick={section.closeOnPick ?? !paired}
+                  onCross={twoColumns ? (direction) => focusSection(index + direction) : undefined} />
               ))}
             </div>
           </Popover.Popup>
@@ -210,7 +225,14 @@ export function pickerRowClass(selected: boolean): string {
   );
 }
 
-function Section({ section, close, closeOnPick }: { section: TableSection; close: () => void; closeOnPick: boolean }) {
+function Section({ section, close, closeOnPick, index, onCross }: {
+  section: TableSection;
+  close: () => void;
+  closeOnPick: boolean;
+  index: number;
+  /** Two-column layout only: the left and right arrows move focus to the neighbouring column. */
+  onCross?: (direction: -1 | 1) => boolean;
+}) {
   const {
     title, hint, head, columns, rows, selectedKey, foot, emptyText, loadingText, loading = false, failedText,
     disabledReason, disabledLabel, testId, onPick,
@@ -225,6 +247,11 @@ function Section({ section, close, closeOnPick }: { section: TableSection; close
   const off = Boolean(disabledReason);
 
   const navigate = (event: KeyboardEvent, index: number) => {
+    if (onCross && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+      event.preventDefault();
+      onCross(event.key === 'ArrowLeft' ? -1 : 1);
+      return;
+    }
     const enabled = rows.map((row, position) => (row.disabled && !row.focusableDisabled ? -1 : position)).filter((position) => position >= 0);
     if (enabled.length === 0) return;
     const at = enabled.indexOf(index);
@@ -239,7 +266,7 @@ function Section({ section, close, closeOnPick }: { section: TableSection; close
   };
 
   return (
-    <div className="flex min-w-0 flex-col" data-testid={testId}>
+    <div className="flex min-w-0 flex-col" data-testid={testId} data-picker-section={index}>
       <div className="flex items-center justify-between gap-2 px-2 pb-1.5 pt-0.5">
         <span className="text-xs font-semibold">{title}</span>
         {off
