@@ -596,7 +596,7 @@ func offeringUserFacingCopy(offering schemacontract.Offering) []offeringCopyFiel
 // parameterCopyIdentifiers returns the Schema names and wire names of the
 // parameters. Callers filter them to machine-only identifiers.
 func parameterCopyIdentifiers(parameters []schemacontract.Parameter) []string {
-	identifiers := make([]string, 0, len(parameters)*2)
+	identifiers := make([]string, 0, len(parameters))
 	for _, parameter := range parameters {
 		identifiers = append(identifiers, parameter.Name, parameter.WireName)
 	}

@@ -45,6 +45,8 @@ case "$command" in
   *'docker inspect -f'*) printf '%s\n' "$MOCK_RUNNING" ;;
   *'/releases/manifest.txt'*) printf '%s\n' "$MOCK_MANIFEST" ;;
   *'python3 - '*'/production/runtime.env'*) cat >/dev/null; printf '{"ADMIN_USERNAME":"u","ADMIN_PASSWORD":"p"}\n' ;;
+  # Any other host env file (agent-test.env #215, compose.env #219) is absent on the mock host.
+  *'python3 - '*'/production/'*) cat >/dev/null; printf '{}\n' ;;
   *'release-steps.sh'*) [ "${MOCK_SERVER_FAIL:-0}" = 0 ] || exit 1 ;;
 esac
 MOCK
@@ -152,7 +154,8 @@ export MOCK_MANIFEST="$TAG2 $SECOND 2026-10-19T00:00:00Z"
 (cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" release dev-test) >/dev/null
 sed "s#^ssh \\([^ ]*\\) RETENTION_SCRIPT=#ssh \\1 RELEASE_COMPOSE_PROJECT=dev_project RELEASE_PROTECT_PROJECTS=candidate_project,other_project RELEASE_BACKUP_SCOPE=database RELEASE_BACKUP_KEEP=2 ART_AI_PROTECTED_PATHS=$DEFAULT_ROOT:/srv/legacy-app RETENTION_SCRIPT=#" \
   "$WORK/expected-default" >"$WORK/expected-dev-test"
-diff -u "$WORK/expected-dev-test" "$MOCK_TRACE" || fail "dev-test via release-env.py differs from the plain entry"
+# The Agent account check after a release (#215) reads production/agent-test.env; compare the release itself.
+diff -u "$WORK/expected-dev-test" <(grep -v " python3 - .*/production/agent-test.env " "$MOCK_TRACE") || fail "dev-test via release-env.py differs from the plain entry"
 if (cd "$WORK/repo" && python3 "$SCRIPTS/release-env.py" release dev-test --revision "$FIRST") >/dev/null 2>&1; then
   fail "dev-test accepted a pinned revision"
 fi
@@ -175,7 +178,7 @@ scp -q $SCRIPTS/retain-art-ai-images.py root@formal.example.invalid:/srv/formal/
 ssh root@formal.example.invalid RELEASE_COMPOSE_PROJECT=formal-project RELEASE_SINGLE_STACK=1 RELEASE_IMAGE_KEEP=1 RELEASE_ALLOW_BOOTSTRAP=1 GO_WEB_BIND_IP=10.0.0.9 GO_WEB_HOST_PORT=13333 GO_PROD_DB_DIR=/srv/formal/production/data GO_LEGACY_INPUT_ASSETS_DIR=/srv/formal/production/legacy-assets RELEASE_EXTRA_COMPOSE_FILE=/srv/formal/production/compose.network.yml RELEASE_BUILD_NETWORK=host RELEASE_GOPROXY=https://proxy.example.invalid/go/ RELEASE_BUILD_ADD_HOSTS=npm.example.invalid:10.0.0.5,proxy.example.invalid:10.0.0.6 ART_AI_PROTECTED_PATHS=/srv/formal RETENTION_SCRIPT=/srv/formal/tmp/art-ai-retain-images.py bash /srv/formal/tmp/art-ai-release-steps.sh '$SHORT-20261020T010203Z' '$SECOND' '/srv/formal'
 ssh root@formal.example.invalid cd /srv/formal && ls -1d app.prev-[0-9]*T[0-9]*Z 2>/dev/null | sort | head -n -1 | xargs -r rm -rf --
 EOF
-diff -u "$WORK/expected" "$MOCK_TRACE" || fail "formal-test release commands differ"
+diff -u "$WORK/expected" <(grep -v " python3 - .*/production/agent-test.env " "$MOCK_TRACE") || fail "formal-test release commands differ"
 [ -z "$(ls -A "$WORK/tmp")" ] || fail "local source archive left behind"
 echo "PASS env/formal-test-promotes-accepted-revision"
 
@@ -266,6 +269,17 @@ ART_AI_ENVIRONMENTS_FILE="$WORK/ephemeral.json" python3 "$SCRIPTS/release-env.py
 : >"$MOCK_TRACE"
 (cd "$WORK/repo" && ART_AI_ENVIRONMENTS_FILE="$WORK/ephemeral.json" python3 "$SCRIPTS/release-env.py" release dev-test) >/dev/null
 grep -q 'RELEASE_DATA_MODE=ephemeral' "$MOCK_TRACE" && ! grep -q 'RELEASE_BACKUP_' "$MOCK_TRACE" || fail "ephemeral mode not passed to the server"
+# #219: the ephemeral stack releases against the fake upstream unless both live switches are set.
+grep -q 'RELEASE_DATA_MODE=ephemeral RELEASE_UPSTREAM_SHAPE=fake' "$MOCK_TRACE" || fail "ephemeral release did not default to the fake upstream"
+: >"$MOCK_TRACE"
+if (cd "$WORK/repo" && env -u ART_AI_LIVE_ACK ART_AI_ENVIRONMENTS_FILE="$WORK/ephemeral.json" \
+  python3 "$SCRIPTS/release-env.py" release dev-test --live-upstream) >/dev/null 2>&1; then
+  fail "live dev-test release ran without ART_AI_LIVE_ACK=1"
+fi
+[ ! -s "$MOCK_TRACE" ] || fail "refused live release contacted the host"
+(cd "$WORK/repo" && ART_AI_LIVE_ACK=1 ART_AI_ENVIRONMENTS_FILE="$WORK/ephemeral.json" \
+  python3 "$SCRIPTS/release-env.py" release dev-test --live-upstream) >/dev/null
+grep -q 'RELEASE_DATA_MODE=ephemeral' "$MOCK_TRACE" && ! grep -q 'RELEASE_UPSTREAM_SHAPE' "$MOCK_TRACE" || fail "live dev-test release still fake"
 python3 - "$WORK/ephemeral.json" "$WORK/ephemeral-both.json" <<'PY'
 import json, sys
 document = json.load(open(sys.argv[1]))
@@ -295,11 +309,14 @@ case "$1" in
       *) exit 1 ;;
     esac ;;
   inspect)
+    case "$*" in *Health.Status*) echo "inspect-health ${*: -1}" >>"$S_TRACE"; echo "${S_FAKE_HEALTH:-healthy}"; exit 0 ;; esac
     [ "${S_CONTAINERS:-0}" = 1 ] || exit 1
     case "$*" in
       *Mounts*) [ -z "${S_OLD_VOLUMES:-}" ] || printf '%s\n' $S_OLD_VOLUMES | paste -d' ' - - ;;  # "name destination" word pairs, as the template prints
       *) echo 'art-ai-go-production:previous' ;;
     esac ;;
+  images) echo "images $*" >>"$S_TRACE"; [ -z "${S_FAKE_IMAGES:-}" ] || printf '%s\n' $S_FAKE_IMAGES ;;
+  rmi | rm) echo "$*" >>"$S_TRACE" ;;
   volume)
     echo "volume $*" >>"$S_TRACE"
     [ "${S_VOLUME_RM_FAIL:-0}" = 0 ] || exit 1 ;;
@@ -307,6 +324,7 @@ case "$1" in
     printf 'compose %s | bind=%s port=%s db=%s legacy=%s\n' "$*" "${GO_WEB_BIND_IP:-}" "${GO_WEB_HOST_PORT:-}" \
       "${GO_PROD_DB_DIR:-}" "${GO_LEGACY_INPUT_ASSETS_DIR:-}" >>"$S_TRACE"
     case " $* " in
+      *' up '*' fake-upstream '*) ;;
       *' up '*)
         echo "$GO_IMAGE_TAG" >"$S_STATE"
         # #206：候选启动必须把 DEBUG 标记写进挂载的日志文件，供发布脚本校验。
@@ -745,6 +763,65 @@ root=$(new_root ephemeral-no-overlay)
 run_steps "$root" S_CONTAINERS=1 "${SHARED[@]}" $(layout "$root") RELEASE_DATA_MODE=ephemeral
 [ "$RESULT" = 1 ] && ! grep -q '^build\|^compose' "$S_TRACE" || fail "ephemeral ran without the overlay file"
 echo "PASS server/ephemeral-refused-before-side-effects"
+
+# 2i3. Fake upstream shape (#219): its own image, the overlay after the ephemeral
+#      file, the fake service healthy before the application is replaced, the
+#      shape recorded for smoke runs, and only this release's fake image kept.
+froot() { # $1=name; a root that carries the ephemeral and fake upstream overlays
+  local root
+  root=$(eroot "$1")
+  touch "$root/app/docker-compose.go-fake-upstream.yml" "$root/app/Dockerfile.fake-upstream"
+  printf '%s\n' "$root"
+}
+root=$(froot fake); echo previous >"$S_STATE"
+# shellcheck disable=SC2046
+run_steps "$root" S_CONTAINERS=1 "S_FAKE_IMAGES=art-ai-go-fake-upstream:old art-ai-go-fake-upstream:candidate" \
+  "${SHARED[@]}" $(layout "$root") RELEASE_DATA_MODE=ephemeral RELEASE_UPSTREAM_SHAPE=fake
+[ "$RESULT" = 0 ] || { cat "$root/out.log" >&2; fail "fake upstream release failed"; }
+files="-f $root/app/docker-compose.go-production.yml -f $root/app/docker-compose.go-ephemeral.yml -f $root/app/docker-compose.go-fake-upstream.yml"
+grep -q -- "^build build .*-f $root/app/Dockerfile.fake-upstream -t art-ai-go-fake-upstream:candidate" "$S_TRACE" || fail "fake upstream image not built"
+grep -q -- "-p dev_project $files up -d --no-deps fake-upstream" "$S_TRACE" || fail "fake upstream service not started with the overlay"
+grep -q -- "-p dev_project $files up -d --no-deps --renew-anon-volumes art-ai-go" "$S_TRACE" || fail "application not started with the fake overlay"
+fake_line=$(grep -n -- 'up -d --no-deps fake-upstream' "$S_TRACE" | cut -d: -f1)
+health_line=$(grep -n -- '^inspect-health dev_project-fake-upstream-1' "$S_TRACE" | head -1 | cut -d: -f1)
+app_line=$(grep -n -- 'renew-anon-volumes art-ai-go' "$S_TRACE" | cut -d: -f1)
+[ "$fake_line" -lt "$health_line" ] && [ "$health_line" -lt "$app_line" ] || fail "fake upstream was not healthy before the application update"
+grep -qx 'RELEASE_UPSTREAM_SHAPE=fake' "$root/production/compose.env" || fail "compose.env lacks the fake shape"
+grep -qx 'rmi art-ai-go-fake-upstream:old' "$S_TRACE" && ! grep -q 'rmi art-ai-go-fake-upstream:candidate' "$S_TRACE" ||
+  fail "fake image retention did not keep exactly this release"
+! grep -q '^ps \|^rm ' "$S_TRACE" || fail "fake release removed containers"
+echo "PASS server/fake-upstream-success"
+
+root=$(froot fake-unhealthy); echo previous >"$S_STATE"
+# shellcheck disable=SC2046
+run_steps "$root" S_CONTAINERS=1 S_FAKE_HEALTH=starting "${SHARED[@]}" $(layout "$root") RELEASE_DATA_MODE=ephemeral RELEASE_UPSTREAM_SHAPE=fake
+[ "$RESULT" = 1 ] || fail "unhealthy fake upstream accepted"
+! grep -q -- 'renew-anon-volumes art-ai-go' "$S_TRACE" || fail "application replaced although the fake upstream was unhealthy"
+[ "$(cat "$S_STATE")" = previous ] || fail "previous application not left running"
+grep -qx 'upstream_shape=fake' "$root/production/reports/release-failures/candidate-fake-upstream-failed.txt" || fail "fake failure report"
+echo "PASS server/fake-upstream-unhealthy-keeps-previous"
+
+# Live release of the ephemeral stack removes the leftover fake service.
+root=$(eroot ephemeral-live-cleanup); echo previous >"$S_STATE"
+# shellcheck disable=SC2046
+run_steps "$root" S_CONTAINERS=1 "S_FAKE_IMAGES=art-ai-go-fake-upstream:old" "${SHARED[@]}" $(layout "$root") RELEASE_DATA_MODE=ephemeral
+[ "$RESULT" = 0 ] || { cat "$root/out.log" >&2; fail "live ephemeral release failed"; }
+grep -q -- '^ps ps -aq --filter label=com.docker.compose.project=dev_project --filter label=com.docker.compose.service=fake-upstream' "$S_TRACE" &&
+  grep -qx 'rm -f abc123' "$S_TRACE" && grep -qx 'rmi art-ai-go-fake-upstream:old' "$S_TRACE" || fail "leftover fake service not removed"
+! grep -q 'fake-upstream.yml\|Dockerfile.fake-upstream' "$S_TRACE" || fail "live release used the fake overlay"
+grep -qx 'RELEASE_UPSTREAM_SHAPE=live' "$root/production/compose.env" || fail "compose.env lacks the live shape"
+echo "PASS server/live-ephemeral-removes-fake"
+
+# Refusals before any side effect: fake without ephemeral data, unknown shape, missing overlay.
+root=$(froot fake-bad)
+run_steps "$root" S_CONTAINERS=1 "${SHARED[@]}" $(layout "$root") RELEASE_UPSTREAM_SHAPE=fake
+[ "$RESULT" = 1 ] && ! grep -q '^build\|^compose' "$S_TRACE" || fail "fake upstream accepted on persistent data"
+run_steps "$root" S_CONTAINERS=1 "${SHARED[@]}" $(layout "$root") RELEASE_DATA_MODE=ephemeral RELEASE_UPSTREAM_SHAPE=mock
+[ "$RESULT" = 1 ] && ! grep -q '^build\|^compose' "$S_TRACE" || fail "unknown upstream shape accepted"
+root=$(eroot fake-no-overlay)
+run_steps "$root" S_CONTAINERS=1 "${SHARED[@]}" $(layout "$root") RELEASE_DATA_MODE=ephemeral RELEASE_UPSTREAM_SHAPE=fake
+[ "$RESULT" = 1 ] && ! grep -q '^build\|^compose' "$S_TRACE" || fail "fake upstream ran without its overlay"
+echo "PASS server/fake-upstream-refused-before-side-effects"
 
 # 2j. Real helper compatibility: the caller writes a single-line scope file;
 #     the shipped helper must read it, and legacy full snapshots stay 3 archives.

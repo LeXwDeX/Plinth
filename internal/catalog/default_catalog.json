@@ -253,6 +253,28 @@
               "live"
             ]
           },
+          "upstream_shape": {
+            "type": "string",
+            "environment": [
+              {
+                "name": "UPSTREAM_SHAPE"
+              }
+            ],
+            "default": "live",
+            "allowed_values": [
+              "live",
+              "fake"
+            ]
+          },
+          "fake_upstream_origin": {
+            "type": "string",
+            "environment": [
+              {
+                "name": "FAKE_UPSTREAM_ORIGIN"
+              }
+            ],
+            "default": ""
+          },
           "agent_mode": {
             "type": "string",
             "environment": [

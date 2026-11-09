@@ -3,8 +3,11 @@
 #
 # 覆盖：会话批准方式（迁移 0043）、会话设定摘要（0045）、选定对象（0046）、版本链、
 # 任务重试 / 格式清单 / 格式补齐 / 打包 ZIP 的错误路径，以及已有 3D 任务的只读验收
-# 和已发布 Agent 配置里的新工具。全程不提交任何生成：不创建 Task，不批准同意，
+# 和已发布 Agent 配置里的新工具。live 形态全程不提交任何生成：不创建 Task，不批准同意，
 # 不调用 LLM，不扣积分。会写入的只有新建空会话上的批准方式、设定摘要和选定对象。
+# fake 上游形态（#219，dev-test 缺省）另用 fake 3D 结果补一个 SUCCEEDED 3D 任务
+# （seed-fake-3d-task.py，零费用），供第 9 节验收；在服务器上运行时 upstream_shape.py
+# 与 seed-fake-3d-task.py 须与本脚本同目录。
 #
 # 何时跑：涉及本功能集（批准方式、Agent 3D 工具、格式补齐/ZIP、设定摘要、选定、
 # 版本链、重试）的每次发布后都要跑，与 smoke-l1-free.sh 一起跑。
@@ -295,6 +298,17 @@ if type(d.get("archive_available")) is not bool:
 print("available" if d["archive_available"] else "oversized")
 PYEOF
 }
+# #219：fake 上游形态（dev-test 缺省）每次发布都是全新数据，先用 fake 3D 结果补一个本用户的
+# SUCCEEDED 3D 任务（零费用；seed-fake-3d-task.py 只在 fake 形态运行），本段因此不再 SKIP。
+# live 形态不提交任何生成，保持只读。
+UPSTREAM_SHAPE=$(python3 "$HERE/upstream_shape.py" shape 2>/dev/null || echo live)
+if [ "$UPSTREAM_SHAPE" = fake ]; then
+  if BASE="$BASE" python3 "$HERE/seed-fake-3d-task.py" > "$T/seed.txt" 2>&1; then
+    ok "fake upstream: seeded a SUCCEEDED 3D task ($(head -n 1 "$T/seed.txt"))"
+  else
+    bad "fake upstream: seeding a SUCCEEDED 3D task failed ($(tail -n 1 "$T/seed.txt"))"
+  fi
+fi
 LIST_ERROR=0
 : > "$T/sessions.txt"
 CURSOR=""

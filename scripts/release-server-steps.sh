@@ -35,6 +35,12 @@
 #                            docker-compose.go-ephemeral.yml，数据/资产/缓存用匿名卷，每次发布
 #                            --renew-anon-volumes 得到全新数据；不做发布备份（与 RELEASE_BACKUP_* 互斥），
 #                            失败时旧镜像同样以全新数据拉起，成功后清理旧匿名卷
+#   RELEASE_UPSTREAM_SHAPE   空（缺省，真实上游）或 fake（仅与 RELEASE_DATA_MODE=ephemeral 同用，#219）：
+#                            另以 Dockerfile.fake-upstream 构建 art-ai-go-fake-upstream:<tag>，叠加
+#                            docker-compose.go-fake-upstream.yml，先启动并等待 fake-upstream 健康，再更新
+#                            art-ai-go；全部 Provider 与对话模型连接指向 fake，运行设置换成 fake 密钥。
+#                            成功后只保留本次 fake 镜像。空值发布到 ephemeral 栈时，成功后移除本项目
+#                            遗留的 fake-upstream 容器与镜像（非强制 docker rmi）
 #   RELEASE_ALLOW_BOOTSTRAP  =1 时允许空栈首次启动（无旧容器、无数据库）
 #   GO_PROD_*_DIR / GO_LEGACY_*_DIR / GO_WEB_BIND_IP / GO_WEB_HOST_PORT
 #                            Compose 主机路径与绑定地址，导出给每次 compose 与预检；
@@ -119,8 +125,26 @@ case "$DATA_MODE" in
     exit 1
     ;;
 esac
+# #219: upstream shape. fake only rides on the disposable ephemeral stack.
+UPSTREAM_SHAPE=${RELEASE_UPSTREAM_SHAPE:-}
+case "$UPSTREAM_SHAPE" in
+  "") ;;
+  fake)
+    if [ "$DATA_MODE" != ephemeral ]; then
+      echo "[server] RELEASE_UPSTREAM_SHAPE=fake requires RELEASE_DATA_MODE=ephemeral; nothing was changed" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "[server] RELEASE_UPSTREAM_SHAPE must be empty or fake; nothing was changed" >&2
+    exit 1
+    ;;
+esac
 COMPOSE_SERVICE=art-ai-go
 CONTAINER="${COMPOSE_PROJECT}-${COMPOSE_SERVICE}-1"
+FAKE_SERVICE=fake-upstream
+FAKE_CONTAINER="${COMPOSE_PROJECT}-${FAKE_SERVICE}-1"
+FAKE_IMAGE_REPOSITORY=art-ai-go-fake-upstream
 MANIFEST="$ROOT/releases/manifest.txt"
 REPORT_DIR="$ROOT/production/reports/release-failures"
 BACKUP_DIR="$ROOT/backups"
@@ -206,6 +230,7 @@ write_compose_env() {
     echo "GO_RUNTIME_ENV_FILE=$RUNTIME_ENV"
     if [ "$DATA_MODE" = ephemeral ]; then
       echo "RELEASE_DATA_MODE=ephemeral"
+      echo "RELEASE_UPSTREAM_SHAPE=${UPSTREAM_SHAPE:-live}"
     else
       echo "RELEASE_BACKUP_SCOPE=$BACKUP_SCOPE"
       echo "RELEASE_BACKUP_TARGETS=$BACKUP_TARGETS_CSV"
@@ -258,6 +283,15 @@ if [ "$DATA_MODE" = ephemeral ]; then
   fi
   # After the main file, before the host-local override.
   COMPOSE_FILES=(-f "$COMPOSE_FILE" -f "$EPHEMERAL_COMPOSE_FILE")
+  if [ "$UPSTREAM_SHAPE" = fake ]; then
+    FAKE_COMPOSE_FILE="$APP/docker-compose.go-fake-upstream.yml"
+    if [ -L "$FAKE_COMPOSE_FILE" ] || [ ! -f "$FAKE_COMPOSE_FILE" ] ||
+      [ -L "$APP/Dockerfile.fake-upstream" ] || [ ! -f "$APP/Dockerfile.fake-upstream" ]; then
+      echo "[server] the fake upstream overlay or Dockerfile.fake-upstream is missing; nothing was changed" >&2
+      exit 1
+    fi
+    COMPOSE_FILES+=(-f "$FAKE_COMPOSE_FILE")
+  fi
   if [ -n "$EXTRA_COMPOSE_FILE" ]; then
     COMPOSE_FILES+=(-f "$EXTRA_COMPOSE_FILE")
   fi
@@ -330,6 +364,7 @@ fail_report() { # $1=阶段 $2=旧镜像标签
     echo "tag=$TAG sha=$SHA stage=$1 previous_image_tag=${2:-none}"
     if [ "$DATA_MODE" = ephemeral ]; then
       echo "data_mode=ephemeral"
+      echo "upstream_shape=${UPSTREAM_SHAPE:-live}"
     else
       echo "backup_scope=$BACKUP_SCOPE"
       echo "backup_targets=$BACKUP_TARGETS_CSV"
@@ -401,6 +436,45 @@ retain_release_backups() {
   fi
 }
 
+# #219: the fake upstream service of the fake shape. It starts before the
+# application, so a refused or unhealthy fake stops the release before the
+# running instance is replaced.
+start_fake_upstream() {
+  local attempt status
+  [ "$UPSTREAM_SHAPE" = fake ] || return 0
+  echo "[server] fake upstream $TAG"
+  if ! compose "$TAG" up -d --no-deps "$FAKE_SERVICE" 2>&1 | tail -1; then
+    echo "[server] fake upstream did not start; the application was not replaced" >&2
+    return 1
+  fi
+  for ((attempt = 0; attempt < 30; attempt++)); do
+    status=$(docker inspect -f '{{.State.Health.Status}}' "$FAKE_CONTAINER" 2>/dev/null || true)
+    [ "$status" = healthy ] && return 0
+    sleep 2
+  done
+  echo "[server] fake upstream is not healthy; the application was not replaced" >&2
+  return 1
+}
+
+# After success only: the fake shape keeps this release's fake image; a live
+# release of the ephemeral stack removes this project's leftover fake service.
+# Non-forced docker rmi only; failures warn and the release stays successful.
+retain_fake_upstream() {
+  local image
+  [ "$DATA_MODE" = ephemeral ] || return 0
+  if [ "$UPSTREAM_SHAPE" != fake ]; then
+    for image in $(docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+      --filter "label=com.docker.compose.service=$FAKE_SERVICE" 2>/dev/null || true); do
+      docker rm -f "$image" >/dev/null 2>&1 ||
+        echo "[server] WARNING: leftover fake upstream container $image was not removed" >&2
+    done
+  fi
+  for image in $(docker images --format '{{.Repository}}:{{.Tag}}' "$FAKE_IMAGE_REPOSITORY" 2>/dev/null || true); do
+    [ "$UPSTREAM_SHAPE" = fake ] && [ "$image" = "$FAKE_IMAGE_REPOSITORY:$TAG" ] && continue
+    docker rmi "$image" >/dev/null 2>&1 || echo "[server] WARNING: fake upstream image $image was not removed" >&2
+  done
+}
+
 # Measurements fail closed. They are not a reservation against other services.
 if [ "$DATA_MODE" = ephemeral ]; then
   # The capacity helper expects the (empty) backups directory to exist.
@@ -429,6 +503,13 @@ docker build ${BUILD_OPTIONS[@]+"${BUILD_OPTIONS[@]}"} \
   --build-arg GO_IMAGE_TAG="$TAG" --build-arg GO_SOURCE_COMMIT="$SHA" \
   -f "$APP/Dockerfile.go-runtime" -t "art-ai-go-production:$TAG" \
   "$APP" 2>&1 | tail -1
+if [ "$UPSTREAM_SHAPE" = fake ]; then
+  echo "[server] build fake upstream $TAG"
+  docker build ${BUILD_OPTIONS[@]+"${BUILD_OPTIONS[@]}"} \
+    --build-arg GO_IMAGE_TAG="$TAG" --build-arg GO_SOURCE_COMMIT="$SHA" \
+    -f "$APP/Dockerfile.fake-upstream" -t "$FAKE_IMAGE_REPOSITORY:$TAG" \
+    "$APP" 2>&1 | tail -1
+fi
 
 # #233：应用日志写入 production/logs。目录归镜像运行用户所有；在预检和停旧实例之前
 # 用候选镜像以运行身份实际写删一次，不可写就中止，旧实例不动。
@@ -506,6 +587,9 @@ if [ "$DATA_MODE" = ephemeral ]; then
 fi
 if [ "$BOOTSTRAP" = 1 ]; then
   echo "[server] bootstrap: no previous $COMPOSE_PROJECT instance, first start of $TAG"
+  if ! start_fake_upstream; then
+    bootstrap_failed fake-upstream-failed
+  fi
   record_log_position
   if ! compose "$TAG" up -d --no-deps ${BOOTSTRAP_UP_FLAGS[@]+"${BOOTSTRAP_UP_FLAGS[@]}"} "$COMPOSE_SERVICE" 2>&1 | tail -1; then
     bootstrap_failed candidate-up-failed
@@ -520,6 +604,7 @@ if [ "$BOOTSTRAP" = 1 ]; then
     bootstrap_failed manifest-write-failed
   fi
   write_compose_env || echo "[server] WARNING: compose.env not written" >&2
+  retain_fake_upstream
   echo "[server] healthy — bootstrapped $TAG, manifest updated"
   exit 0
 fi
@@ -560,7 +645,11 @@ if [ "$DATA_MODE" = ephemeral ]; then
     exit 1
   }
 
-  echo "[server] up $TAG (data_mode=ephemeral)"
+  if ! start_fake_upstream; then
+    fail_report "fake-upstream-failed" "$OLD_TAG" || true
+    exit 1
+  fi
+  echo "[server] up $TAG (data_mode=ephemeral, upstream=${UPSTREAM_SHAPE:-live})"
   record_log_position
   if ! compose "$TAG" up -d --no-deps --renew-anon-volumes "$COMPOSE_SERVICE" 2>&1 | tail -1; then
     ephemeral_rollback "candidate-up-failed"
@@ -576,6 +665,7 @@ if [ "$DATA_MODE" = ephemeral ]; then
   fi
   write_compose_env || echo "[server] WARNING: compose.env not written" >&2
   retain_test_images
+  retain_fake_upstream
   for volume in ${OLD_VOLUMES[@]+"${OLD_VOLUMES[@]}"}; do
     if ! docker volume rm "$volume" >/dev/null 2>&1; then
       echo "[server] WARNING: old data volume $volume was not removed; release remains successful" >&2

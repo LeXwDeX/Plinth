@@ -376,6 +376,18 @@ func newAcmeHarness(
 	settings map[string]string,
 ) *acmeHarness {
 	t.Helper()
+	return newAcmeHarnessWithTransport(t, taskCatalog, settings, nil)
+}
+
+// newAcmeHarnessWithTransport is newAcmeHarness with a connection transport
+// decorator (the fake upstream shape's artifact routing, #219).
+func newAcmeHarnessWithTransport(
+	t *testing.T,
+	taskCatalog *catalog.Catalog,
+	settings map[string]string,
+	transport func(string, http.RoundTripper) http.RoundTripper,
+) *acmeHarness {
+	t.Helper()
 	root := t.TempDir()
 	repository, err := sqlitetest.Open(filepath.Join(root, "test.db"))
 	if err != nil {
@@ -388,12 +400,13 @@ func newAcmeHarness(
 	}
 	t.Cleanup(func() { _ = assetStore.Close() })
 	registry := providers.NewRegistry()
-	if err := registerProviders(
+	if err := registerProvidersWithTransport(
 		Config{ProviderMode: "live", RuntimeSettings: settings},
 		taskCatalog,
 		registry,
 		nil, nil,
 		discardLogger(),
+		transport,
 	); err != nil {
 		t.Fatal(err)
 	}

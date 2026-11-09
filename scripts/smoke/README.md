@@ -23,6 +23,17 @@ python3 scripts/release-env.py release dev-test   # 同步→构建→preflight�
 - 失败快照可能有零字节或缺失归档，只有在独立失败报告存在时才可清理；成功备份仍要求完整且非空的归档。删除资格不代表可作为恢复点。
 - 发布合同回归：`python3 scripts/tests/test_release_env.py`、`python3 scripts/tests/test_release_lock.py`、`python3 scripts/smoke/test-release-backup-retention.py`、`bash scripts/smoke/test-release-stack.sh`、`bash scripts/smoke/test-release-rollback.sh`。这些是本机 mock 合同测试，不代替真实部署或远端清理验收。
 
+## 上游形态与真实开关（#219）
+
+`dev-test` 缺省以 fake 上游形态发布（`docs/deployment.md`「fake 上游形态」）：所有 Provider 与对话模型连接指向同栈的 fake 服务。脚本默认针对 fake 形态，真实上游需要 `--live` 参数与 `ART_AI_LIVE_ACK=1` 两个开关同时给出，缺省或只给一个即拒绝（退出码 2），每次真实运行前还须在当前对话取得用户同意。判定逻辑在 `upstream_shape.py`：目标形态取 `ART_AI_UPSTREAM_SHAPE`（`release-env.py smoke` 按该环境 `production/compose.env` 的 `RELEASE_UPSTREAM_SHAPE` 设置），否则读 `$ART_AI_SERVER_ROOT/production/compose.env`；读不到按真实形态处理。复制脚本到服务器运行时，`upstream_shape.py`（以及 L1 Agent 用的 `seed-fake-3d-task.py`）须与脚本同目录。
+
+| 脚本 | fake 形态 | 真实形态 |
+|---|---|---|
+| L0 `smoke-l0-browser-boot.sh` | 直接运行（不涉及上游） | 直接运行 |
+| L1 `smoke-l1-free.sh` | 直接运行：3D 请求带 fake 对话模型的工具标记 `[[fake:tool:create_model_3d …]]`，确定地得到待批准卡片 | 会调用真实对话模型：需 `--live` + `ART_AI_LIVE_ACK=1` |
+| L1 Agent `smoke-l1-agent-mode.sh` | 先用 `seed-fake-3d-task.py` 经 fake 生成一个本用户 SUCCEEDED 3D 任务（零费用），第 9 节格式/归档验收不再 SKIP | 不提交生成，保持只读 |
+| L2、L3、L4、L5 | 拒绝（需要真实上游；先以 `--live-upstream` 发布真实形态） | 需 `--live` + `ART_AI_LIVE_ACK=1` |
+
 ## 全新数据起点（#28）
 
 `dev-test` 每次发布都是全新数据（环境文件 `"data": "ephemeral"`，匿名卷，不含历史任务、会话或老账号）。因此每次冒烟与相关验收都从空库开始：只有运行环境 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 引导的管理员测试账号可登录，脚本和手工验收按真实用户流程创建自己的会话与数据，不依赖历史任务（例如 L1 Agent 的“已有 3D 任务”检查在空库上走其文档化的 SKIP 路径；需要产物时先走真实流程，如 #25：模拟用户沟通 → Agent 先 2D 后 3D）。`formal-test` 不适用。
@@ -34,15 +45,15 @@ python3 scripts/release-env.py release dev-test   # 同步→构建→preflight�
 | L0 浏览器启动 | `smoke-l0-browser-boot.sh` | **每次发布后必跑** | 零（不产生任何生成任务） |
 | L1 免费冒烟 | `smoke-l1-free.sh` | **每次发布后必跑** | 零（先把会话设为手工方式，再用 3D 请求取得待批准卡片，停止本轮后确认卡片仍待批准，再拒绝；无任务、无真实生成） |
 | L1 Agent 批准方式验收 | `smoke-l1-agent-mode.sh` | **每次发布本功能集（批准方式、Agent 3D 工具、格式补齐/ZIP、设定摘要、选定、版本链、重试）后必跑**；与 L1 一起跑 | 零（不提交任何生成，只读已有 3D 任务） |
-| L2 真实模型链路 | `smoke-l2-livemodel.sh` | 涉及 Agent/生成/同意链路的发布后跑 | 一张小额文生图（约 6 积分）；设 `L2_APPROVE_3D=1` 再加一次 3D 生成（约 25 积分） |
-| L3 批量回归 | `smoke-l3-batch.sh` | 涉及生成/同意/资产链路的发布后跑（按需） | 每模型 5 张小额文生图 |
+| L2 真实模型链路 | `smoke-l2-livemodel.sh` | 只在用户当次同意后、对真实形态发布的 dev-test 跑（`--live` + `ART_AI_LIVE_ACK=1`，#219） | 一张小额文生图（约 6 积分）；设 `L2_APPROVE_3D=1` 再加一次 3D 生成（约 25 积分） |
+| L3 批量回归 | `smoke-l3-batch.sh` | 只在用户当次同意后、对真实形态发布的 dev-test 跑（`--live` + `ART_AI_LIVE_ACK=1`，#219） | 每模型 5 张小额文生图 |
 | L4 3D 格式与隔离 | `smoke-l4-3d-isolation.py` | 3D Provider、格式或缓存边界变更后跑 | Meshy 一次生成；Tripo 一次生成及六次转换；`ART_AI_3D_PROVIDERS=hyper3d` 时一次 Rodin 文生 3D（3 Hyper3D credits，只核必需 GLB） |
-| L5 真实能力回归 | `smoke-l5-*.py`，入口 `smoke-l5-all.sh` | 只在用户当次同意后运行（`AGENTS.md`「上游接口与 Fake」），结果回灌 fake | 真实付费，必须设 `ART_AI_LIVE_ACK=1`；见下文 L5 一节 |
+| L5 真实能力回归 | `smoke-l5-*.py`，入口 `smoke-l5-all.sh` | 只在用户当次同意后运行（`AGENTS.md`「上游接口与 Fake」），结果回灌 fake | 真实付费，必须同时给 `--live` 与 `ART_AI_LIVE_ACK=1`，目标须为真实形态；见下文 L5 一节 |
 | 公共 Mock 自部署冒烟 | `smoke-public-mock.sh` | 自部署后本地手动运行（`SMOKE_ENV_FILE=.env bash scripts/smoke/smoke-public-mock.sh`）；不再由公共 CI 运行（#257：CI 不构建镜像） | 零（环境文件须显式写 `PROVIDER_MODE=mock`、`AGENT_MODE=mock`，只接受 Mock Provider/Agent、全部 `*_API_KEY` 为空的回环地址栈）；不用于内部环境 |
 
 L0–L4 各层在 `dev-test` 主机上执行时用 `ART_AI_SERVER_ROOT=<root> bash scripts/smoke/<脚本>`（`<root>` 为该环境发布根，读取本栈 `runtime.env`；L1 Agent 要核对容器 revision 时另设 `RELEASE_CONTAINER=<release-env.py show 的 container>`，脚本不再带缺省容器名，#261）；在本地执行时用 `python3 scripts/release-env.py smoke dev-test -- bash scripts/smoke/<脚本>`（自动设置 `BASE`、`ADMIN_*`、`EXPECT_SHA`、`RELEASE_CONTAINER`）。
 
-L5 脚本是 `.py`，不读取 `runtime.env`，只在本地通过 `release-env.py smoke` 运行：单个脚本 `ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- python3 scripts/smoke/smoke-l5-<名称>.py`，全部脚本 `ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- bash scripts/smoke/smoke-l5-all.sh`。每次运行前须在当前对话说明范围与预计费用并取得用户同意（`AGENTS.md`「上游接口与 Fake」），不再有自行发起的次数额度；运行后把真实结果中 fake 未覆盖的部分回灌 fake。
+L5 脚本是 `.py`，不读取 `runtime.env`，只在本地通过 `release-env.py smoke` 运行：单个脚本 `ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- python3 scripts/smoke/smoke-l5-<名称>.py --live`，全部脚本 `ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- bash scripts/smoke/smoke-l5-all.sh --live`（目标须为以 `--live-upstream` 发布的真实形态，#219）。每次运行前须在当前对话说明范围与预计费用并取得用户同意（`AGENTS.md`「上游接口与 Fake」），不再有自行发起的次数额度；运行后把真实结果中 fake 未覆盖的部分回灌 fake。
 
 ### 批准方式对冒烟的影响（会话级，迁移 0043）
 
@@ -52,7 +63,7 @@ L5 脚本是 `.py`，不读取 `runtime.env`，只在本地通过 `release-env.p
 
 - L2/L3 都通过已登录 Cookie 写会话、发消息和批准/拒绝时携带同源 `Origin: $BASE`。L2/L3 必须先让 Agent 调用实际生成工具（L2 的 3D 部分 `create_model_3d`，L2 的 2D 部分和 L3 每张图 `refine_image`），以生成工具建立的 exact prepared execution 作为待批准对象；不依赖旧 `request_consent` 流程。批准卡片独立于轮次保存，旧的 `/api/v1/agent/consent` 不再反映它；脚本先 `GET /api/v1/chat/sessions/{id}/pending-approvals` 读取状态为 pending 的卡片及其 `request_id`、`capability`，再 `PUT /api/v1/tasks/grants/{request_id}` 提交 `{"<成员名>":"approve"}` 或 `{"<成员名>":"deny"}`；成员名与浏览器一样，按公开 Schema（`GET /api/v1/schema`）的 `chat.api.fields.decision` 读取，默认成员名为 `decision`（#120）。L2 停止 A 后和拒绝 B 后会拒绝会话里剩下的待批准卡片；L3 只批准 2D 图片步骤，其他卡片一律拒绝。批准动作只发生在产品外 smoke 脚本，产品本身仍要求明确人工批准。
 - L3 协议：每模型每轮 `IMAGES_PER_MODEL` 张（默认 5，**协议上限 5**），满一轮即止不循环；零人工（脚本代批同意仅限产品外 smoke 操作，属测试操作授权）；断言 = 终态 SUCCEEDED + required 资产 READY + URL 200 + media_type 魔数一致 + sha256/size 与服务端声明字节级一致 + 连续回合必须出现**新 task id** + 跨用户任务/资产 403/404；报告缺省落服务器 `$ART_AI_SERVER_ROOT/production/reports/smoke-l3/`（`L3_REPORT_DIR` 可覆盖）。
-  - 用法：`ART_AI_SERVER_ROOT=<root> MODELS=gpt-image-2.6-sunburst bash smoke-l3-batch.sh`（`MODELS` 缺省 = schema 全部可用 text-to-image 模型；`IMAGES_PER_MODEL` 缺省 5）。
+  - 用法：`ART_AI_SERVER_ROOT=<root> ART_AI_LIVE_ACK=1 MODELS=gpt-image-2.6-sunburst bash smoke-l3-batch.sh --live`（`MODELS` 缺省 = schema 全部可用 text-to-image 模型；`IMAGES_PER_MODEL` 缺省 5）。
   - L3 不再等待同意：每个会话先设为手工方式；2D 由策略批准，脚本直接等新任务出现。若同意恰好待批准，仍由脚本按 pending-approvals → grants 批准后继续；两种情况都继续断言终态与字节。
   - 满一轮无问题 → **暂停分析**，不继续加图（dev_test.md §11.3 口径）。
   - 红证已做：`MODELS=nonexistent-model` → FAIL（EXIT=1），失败可被检测。
@@ -80,18 +91,18 @@ L5 脚本是 `.py`，不读取 `runtime.env`，只在本地通过 `release-env.p
   - Agent 配置离线自测（不调用网络）：`python3 scripts/smoke/test-agent-mode-configuration.py`。直接执行冒烟脚本中的配置检查块，用 stub 响应覆盖旧四工具配置拒绝、六工具配置通过、非管理员生效配置回退、分别缺失两个 Processing Plan 工具、已知工具目录不匹配或为空、配置接口不可读，以及 JSON 损坏、必需字段缺失和类型错误；另覆盖按实际可用性要求转换工具、全部不可用不追加、Schema 工具改名和路由映射、管理员/effective 两条分支，以及 discovery/Schema 的 HTTP、JSON、字段和类型错误；共 73 个响应场景，并核对只请求声明的只读端点、错误不泄露响应内容。
 - L2 覆盖两部分。第一部分：2D 手工方式 = 策略批准——一张小额文生图，不出现待批准同意，任务 SUCCEEDED，批准来源为 `policy`，显示本步和会话累计积分；脚本能读到 SQLite（`ART_AI_DB`，服务器上缺省 `$ART_AI_SERVER_ROOT/production/data/art-ai.db`）时再核对 `grant.decided_by = policy:manual`，读不到打印 SKIP。第二部分：3D 手工方式 = 人工批准——A/B 双会话分别触发确切的 3D 生成待批准执行、不冻结 C；拒绝 B 并断言零任务；A 默认停止本轮并断言零任务，只有设了 `L2_APPROVE_3D=1` 才批准 A（一次真实 3D 生成，约 25 积分）并断言 SUCCEEDED。从 GET 读取对应 request ID 后才发送决策，未读到当前 request ID 时不发送。
 - 测试数据按协议**保留**在 `dev-test`，不清理；发布备份快照是另一类数据，按 #364 的保留规则处理。
-- L4 在 `dev-test` 主机的 Plinth 测试栈运行：先从 `<root>/production/runtime.env` 导出管理员登录环境变量，再以 `ART_AI_LIVE_3D_ACK=1 python3 scripts/smoke/smoke-l4-3d-isolation.py` 执行。脚本作为测试操作员批准处于 `pending` 的冻结任务（会话批准方式已批准的授权不再重复决定），等待公开 Task 成功，核对 Meshy 六格式与 Tripo 六格式的本地 URL、两次下载字节、大小和 SHA-256；不会输出密钥或原始上游响应。`ART_AI_3D_SESSION_ID` 可让第一个 3D 任务接在已有 2D 生成会话中，用于工作区往返验收。它不代替真实浏览器网络检查与离线依赖检查。
+- L4 在 `dev-test` 主机的 Plinth 测试栈运行：先从 `<root>/production/runtime.env` 导出管理员登录环境变量，再以 `ART_AI_LIVE_ACK=1 python3 scripts/smoke/smoke-l4-3d-isolation.py --live` 执行（#219：双重开关，目标须为真实形态；原 `ART_AI_LIVE_3D_ACK` 不再使用）。脚本作为测试操作员批准处于 `pending` 的冻结任务（会话批准方式已批准的授权不再重复决定），等待公开 Task 成功，核对 Meshy 六格式与 Tripo 六格式的本地 URL、两次下载字节、大小和 SHA-256；不会输出密钥或原始上游响应。`ART_AI_3D_SESSION_ID` 可让第一个 3D 任务接在已有 2D 生成会话中，用于工作区往返验收。它不代替真实浏览器网络检查与离线依赖检查。
 - **2D 成品图的抽样口径见 `dev_test.md` §11.3**（每轮随机 1–5 张、不超过 5 张；
   满 5 张仍无问题就暂停先分析，不要继续加图）。本目录不另定标准。
 - 单元/集成/竞态门禁由本地门禁与 CI 覆盖（各项在哪里执行见 `dev_test.md` §2），不属于本目录职责。
 
 ## L5 真实能力回归
 
-L5 用真实请求回归关键能力链路，每个脚本只测一个能力范围，共用 `l5_common.py`（登录、会话、发消息、等待判定、`toolCalls` 解析、报告）。脚本会产生真实费用，没有设置 `ART_AI_LIVE_ACK=1` 时直接拒绝执行（退出码 2）。
+L5 用真实请求回归关键能力链路，每个脚本只测一个能力范围，共用 `l5_common.py`（登录、会话、发消息、等待判定、`toolCalls` 解析、报告）。脚本会产生真实费用，没有同时给出 `--live` 与 `ART_AI_LIVE_ACK=1`，或目标是 fake 形态时直接拒绝执行（退出码 2，#219）。
 
 ```
-ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- python3 scripts/smoke/smoke-l5-<名称>.py --report <目录>
-ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- bash scripts/smoke/smoke-l5-all.sh --report <目录>
+ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- python3 scripts/smoke/smoke-l5-<名称>.py --live --report <目录>
+ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- bash scripts/smoke/smoke-l5-all.sh --live --report <目录>
 ```
 
 `release-env.py smoke` 提供 `BASE`、`ADMIN_*`、`EXPECT_SHA`；L5 只通过它在本地运行。输出 `PASS` / `FAIL` / `SKIP` 计数，有 FAIL 时退出码为 1；`--report <目录>` 写每个脚本的 JSON 报告（三视图脚本还保存各视图图片）。脚本不输出凭据、Cookie、签名 URL 的 query 或提示词全文。生成模型参数一律传 Offering 的 `model_id`，模型与参数选项从 Schema 读取，不写死厂商。

@@ -1,0 +1,67 @@
+# dev-test fake 上游叠加文件（#219）：与 docker-compose.go-production.yml、
+# docker-compose.go-ephemeral.yml 并用（release-server-steps.sh 在
+# RELEASE_UPSTREAM_SHAPE=fake 时追加，只允许与 RELEASE_DATA_MODE=ephemeral 同用）。
+#
+# - fake-upstream：Dockerfile.fake-upstream 构建的独立镜像（只含 cmd/fake-upstream），只在
+#   本 Compose 项目网络内监听，不发布主机端口，不读运行环境文件，不持有任何密钥。
+# - art-ai-go：environment 覆盖运行环境文件里的同名变量，把全部 Provider 与对话模型
+#   连接指向 fake 上游、密钥换成 fake 密钥；废弃别名清空，LLM_CONNECTIONS 清空。
+#   UPSTREAM_SHAPE=fake 时服务启动前校验每个连接都指向 FAKE_UPSTREAM_ORIGIN、每个
+#   密钥都是 fake 密钥，否则拒绝启动（internal/app/upstream_shape.go）。
+# formal-test 与自部署入口从不使用本文件。
+services:
+  fake-upstream:
+    image: art-ai-go-fake-upstream:${GO_IMAGE_TAG:?GO_IMAGE_TAG is required}
+    # 镜像由 release-server-steps.sh 在本机构建，从不拉取。
+    pull_policy: never
+    command:
+      - "-addr"
+      - "0.0.0.0:19000"
+      - "-allow-non-loopback"
+      - "-artifact-origin"
+      - "https://fake-assets.example.test"
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:19000/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+  art-ai-go:
+    depends_on:
+      - fake-upstream
+    environment:
+      UPSTREAM_SHAPE: fake
+      FAKE_UPSTREAM_ORIGIN: http://fake-upstream:19000
+      TRIPO_BASE_URL: http://fake-upstream:19000/tripo/v3
+      TRIPO_API_KEY: fake-test-key
+      TRIPO_API_BASE_URL: ""
+      MESHY_BASE_URL: http://fake-upstream:19000/meshy
+      MESHY_API_KEY: fake-test-key
+      MESHY_API_BASE_URL: ""
+      MESHY_WEBHOOK_KEY: ""
+      HYPER3D_BASE_URL: http://fake-upstream:19000/hyper3d/api/v2
+      HYPER3D_API_KEY: fake-test-key
+      OPENAI_BASE_URL: http://fake-upstream:19000/openai/images/v1
+      OPENAI_API_KEY: fake-test-key
+      GEMINI_BASE_URL: http://fake-upstream:19000/gemini/images/v1
+      GEMINI_API_KEY: fake-test-key
+      JIMENG_BASE_URL: http://fake-upstream:19000/jimeng
+      JIMENG_API_KEY: fake-test-key
+      MATTING_BASE_URL: http://fake-upstream:19000/matting
+      MATTING_API_KEY: fake-test-key
+      MATTING_API_URL: ""
+      MATTING_API_TOKEN: ""
+      LLM_BASE_URL: http://fake-upstream:19000/openai/v1
+      LLM_API_KEY: fake-test-key
+      LLM_CONNECTIONS: ""

@@ -8,7 +8,7 @@
 
 | 环境名 | 用途 | 接收的 revision | 数据 | 发布后验收 | 付费生成 |
 |---|---|---|---|---|---|
-| `dev-test` | 开发测试环境 | 每次已推送的 `origin/main` | 每次发布全新数据（`"data": "ephemeral"`，#28）：不含历史迁移数据，只有运行环境引导的管理员测试账号 | L0、L1、L1 Agent 必跑；涉及 Agent/生成/同意链路时按 `scripts/smoke/README.md` 跑 L2 等真实模型验收 | 常设小额授权（见 `AGENTS.md`） |
+| `dev-test` | 开发测试环境 | 每次已推送的 `origin/main` | 每次发布全新数据（`"data": "ephemeral"`，#28）：不含历史迁移数据，只有运行环境引导的管理员测试账号；缺省为 fake 上游形态（#219，见下文「fake 上游形态」） | L0、L1、L1 Agent 必跑（fake 形态，零费用）；L2 等真实模型验收只在用户当次同意后以真实形态发布再跑 | 真实形态与付费验收须当次同意（见 `AGENTS.md`） |
 | `formal-test` | 正式测试环境（测试版本中的稳定版）：单版本、不留残余 | 只接收按 §4 晋级规则通过的精确 revision | 本栈独立，不跨主机复制 | L0、L1、L1 Agent | 不做；测试期付费同意授权不适用 |
 
 只有上表两个环境可部署（#270）。`legacy-formal` 已下线，环境名不再可用（存档 #74）；环境沿革见 [`history.md`](history.md)。
@@ -44,7 +44,7 @@
 
 **部署到开发测试环境（`dev-test`）**
 
-1. `python3 scripts/release-env.py release dev-test`（同步 → 构建 → preflight → 备份 → Compose 更新 → 健康 → 失败自动回滚；`data: ephemeral` 时无备份，见下文「全新数据发布」）。
+1. `python3 scripts/release-env.py release dev-test`（同步 → 构建 → preflight → 备份 → Compose 更新 → 健康 → 失败自动回滚；`data: ephemeral` 时无备份，见下文「全新数据发布」；缺省为 fake 上游形态，真实形态加 `--live-upstream` 并设 `ART_AI_LIVE_ACK=1`，见下文「fake 上游形态」）。
 2. 核对容器 OCI revision 等于 `origin/main` 完整 SHA（`release-env.py smoke` 设置的 `EXPECT_SHA` 即读自容器标签，L1 Agent 冒烟同时比对 `/api/version`）。
 3. 冒烟（§6），以及本次改动相关的页面、API 与 Agent/生成链路验收。
 4. 全部 PASS 后，在 `acceptance.issue` 写入一条 §4 格式的验收报告 note；记下 note ID。
@@ -101,6 +101,16 @@
 与是否单栈无关、按环境文件设置的选项：`extra_compose_file` 加到每条本栈 Compose 命令的主文件之后（文件须已在服务器上，越界、缺失或符号链接即在构建前拒绝）；`build` 的 `network`、`goproxy`、`npm_registry` 与 `add_hosts` 只改变 `docker build` 参数，未设 `npm_registry` 时 npm 源为公共 `registry.npmjs.org`（#257），镜像目标仍为 `runtime-with-migration-tools`；`source_transfer: scp` 只改变源码同步方式。`compose.env` 记录 `ART_AI_PROTECTED_PATHS`（#334）与布局变量。
 
 `dev-test` 没有 `single_stack`：它在共享主机上，环境文件用 `protect_projects` 列出同机其他 Plinth Compose 项目（候选栈等），`release-env.py` 以 `RELEASE_PROTECT_PROJECTS` 传给服务器段，镜像保留对每个项目加 `--protect-project`，这些项目容器引用的镜像不被清理；环境文件还为它给出 `build`（Go 代理与 `--add-host`）和 `layout` 中的 4 个 legacy 目录。源码同步与服务器段命令序列与参数化之前相同，只多了上述项目参数（`scripts/smoke/test-release-stack.sh` 断言）。
+
+### fake 上游形态（`data: ephemeral` 缺省，#219）
+
+`dev-test`（`"data": "ephemeral"`）的发布缺省是 fake 上游形态，所有上游请求打到同一 Compose 项目里的 fake 服务，真实 Provider 零请求、零扣费：
+
+- `release-env.py release dev-test` 向服务器段传 `RELEASE_UPSTREAM_SHAPE=fake`；`--live-upstream` 与 `ART_AI_LIVE_ACK=1` 同时给出才发布真实形态（只给一个即拒绝，且发起前须在当次对话取得用户同意）。其他环境给 `--live-upstream` 即拒绝；`formal-test` 永远是真实形态，不构建也不运行 fake。
+- 服务器段（`RELEASE_UPSTREAM_SHAPE=fake` 只能与 `RELEASE_DATA_MODE=ephemeral` 同用，否则构建前拒绝）：另以 `Dockerfile.fake-upstream` 构建 `art-ai-go-fake-upstream:<tag>`（运行镜像不含 fake），在 `docker-compose.go-ephemeral.yml` 之后、`extra_compose_file` 之前叠加 `docker-compose.go-fake-upstream.yml`；先 `up -d --no-deps fake-upstream` 并等容器健康，再更新 `art-ai-go`。fake 启动失败或不健康时旧实例不动，失败报告阶段为 `fake-upstream-failed`。
+- 叠加文件的 `environment` 覆盖运行环境文件的同名变量：全部 `*_BASE_URL` 指向 `http://fake-upstream:19000/...`，全部 Provider 与对话模型密钥换成 `fake-test-key`，废弃别名与 `LLM_CONNECTIONS` 清空，并设 `UPSTREAM_SHAPE=fake`、`FAKE_UPSTREAM_ORIGIN=http://fake-upstream:19000`。服务启动时 fail-closed 校验（任一连接未指向 fake、任一密钥不是 `fake-` 密钥、`LLM_CONNECTIONS` 非空即拒绝启动）；`LLM_MODEL` 沿用运行环境文件。
+- 成功后 `production/compose.env` 记 `RELEASE_UPSTREAM_SHAPE=fake|live`，`release-env.py smoke` 据此向脚本设 `ART_AI_UPSTREAM_SHAPE`；fake 镜像只保留本次（非强制 `docker rmi`）。以真实形态发布 ephemeral 栈时，成功后移除本项目遗留的 `fake-upstream` 容器与镜像，失败只警告。
+- 运行环境文件里的真实密钥只在真实形态读取；fake 形态的容器环境里同名变量已被 fake 值覆盖，但未被覆盖的其他变量仍随 `env_file` 进入容器，不需要真实形态时可以从 `dev-test` 的运行环境文件移除真实密钥。
 
 ### 全新数据发布（`data: ephemeral`，#28）
 
