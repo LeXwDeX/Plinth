@@ -1483,7 +1483,8 @@ profile 声明 `reasoning_passback` 时，Adapter 从流式 `delta.reasoning_con
 |---|---|---|---|
 | `deepseek` | `low`、`high`、`max` / `low` | 1000000 | [Create Chat Completion](https://api-docs.deepseek.com/api/create-chat-completion)：`reasoning_effort` 取 `none`/`low`/`high`/`max`（`none` 关闭思考，不作为档位提供）；[Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing)：当前 `deepseek-flash`（DeepSeek-V4.1-Flash）与 `deepseek-v4-pro` 共用 “CONTEXT LENGTH 1M”，官方未给精确 token 数，取 1000000 |
 | `qwen-omni-flash` | `low`、`medium`、`xhigh` / `xhigh` | 1000000 | 无版本别名（#64）：网关当前解析为 qwen3.8-omni-flash，窗口与档位沿用其官方值；别名让上游网关升级版本时下游配置无需改动；是 `llm_model` 默认值；排在最前以免被 `qwen` 类前缀覆盖 |
-| `gpt-astra` | `low`、`medium`、`high` / `high` | 未声明 | 无版本别名（#64）：测试栈第二连接 `GPT_MODEL=gpt-astra`，网关当前解析为 gpt-6-astra；只声明 `reasoning_effort` 档位，不发送私有 `request_fields` |
+| `gpt-astra` | `low`、`medium`、`high`、`xhigh`、`max` / `high` | 未声明 | 无版本别名（#64）：测试栈第二连接 `GPT_MODEL=gpt-astra`，网关当前解析为 gpt-6-astra；只声明 `reasoning_effort` 档位，不发送私有 `request_fields`；五档依据 OpenAI 模型页与 2026-11-09 代理实测（#213） |
+| `gpt-6-astra` | `low`、`medium`、`high`、`xhigh`、`max` / `high` | 未声明 | 版本名直连时命中，排在 `gpt-6` 之前；档位同 `gpt-astra`（#213） |
 | `gpt-6` | `low`、`medium`、`high` / `high` | 未声明 | 2026-11-04 在 dev-test LLM 代理 `/models` 实测：`gpt-6-astra`、`gpt-6-luna`、`gpt-6.1-sol`、`gpt-6.1-terra` 都以 `gpt-6` 开头；`reasoning_effort=high` 的请求返回 `reasoning_tokens`；`gpt-astra` 是 `gpt-6-astra` 的别名，两者并列声明（#103） |
 | `gpt-terra` | `low`、`medium`、`high` / `high` | 未声明 | 2026-11-04 同一代理 `/models` 实测的模型前缀；档位依据同 `gpt-6`，只声明 `reasoning_effort`（#103） |
 | `gpt-sol` | `low`、`medium`、`high` / `high` | 未声明 | 2026-11-04 同一代理 `/models` 实测的模型前缀；档位依据同 `gpt-6`，只声明 `reasoning_effort`（#103） |

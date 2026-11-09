@@ -2686,7 +2686,7 @@
       "error.unsupported_model_input": "此模型不符合当前支持的上传格式或功能条件，请查看格式说明。",
       "error.model_input_limit": "模型内容超过当前处理限制，请减小文件、几何或贴图规模后重试。",
       "ui.harness.title": "功能设置",
-        "ui.harness.description": "选择这次想做的功能、来源模型和参数，Agent 会在这些设置内协助你。",
+        "ui.harness.operation_section": "选择功能",
         "ui.harness.not_connected": "这项功能暂未接入可用服务。",
         "ui.harness.select_session": "先打开一个对话，再设置功能。",
         "ui.harness.load_failed": "功能设置读取失败，请重新加载。",
@@ -4951,6 +4951,9 @@
         "ui.studio.composer.attachment.note_style": "（附图用途：参考风格）",
         "ui.studio.composer.attachment.note_layout": "（附图用途：参考构图）",
         "ui.studio.composer.attachment.note_input": "（附图用途：当作输入图）",
+        "ui.studio.composer.attachment.note_mixed": "（附图用途：{items}）",
+        "ui.studio.composer.attachment.note_item": "第 {index} 张{purpose}",
+        "ui.studio.composer.attachment.note_separator": "；",
         "ui.studio.mask.chip_title": "蒙版：{handle}",
         "ui.studio.mask.chip_title_hint": "局部重绘只改蒙版圈出的区域",
         "ui.studio.params.default_ratio": "1:1",
@@ -5315,7 +5318,15 @@
                 "gpt-astra"
               ],
               "effort_field": "reasoning_effort",
-              "effort_levels": ["low", "medium", "high"],
+              "effort_levels": ["low", "medium", "high", "xhigh", "max"],
+              "default_effort": "high"
+            },
+            {
+              "model_prefixes": [
+                "gpt-6-astra"
+              ],
+              "effort_field": "reasoning_effort",
+              "effort_levels": ["low", "medium", "high", "xhigh", "max"],
               "default_effort": "high"
             },
             {
@@ -13562,7 +13573,7 @@
             "error.unsupported_model_input": "This model doesn't meet the currently supported upload format or feature requirements. See the format notes.",
             "error.model_input_limit": "The model content exceeds the current processing limit. Reduce the file, geometry, or texture size and try again.",
             "ui.harness.title": "Feature settings",
-            "ui.harness.description": "Choose the feature, source model, and parameters for this task. The Agent will help you within these settings.",
+            "ui.harness.operation_section": "Choose a feature",
             "ui.harness.not_connected": "No service is available for this feature yet.",
             "ui.harness.select_session": "Open a chat first, then set up a feature.",
             "ui.harness.load_failed": "Failed to load feature settings. Please reload.",
@@ -15831,6 +15842,9 @@
             "ui.studio.composer.attachment.note_style": "(Attachment purpose: style reference)",
             "ui.studio.composer.attachment.note_layout": "(Attachment purpose: composition reference)",
             "ui.studio.composer.attachment.note_input": "(Attachment purpose: use as input image)",
+            "ui.studio.composer.attachment.note_mixed": "(Attachment purposes: {items})",
+            "ui.studio.composer.attachment.note_item": "image {index}: {purpose}",
+            "ui.studio.composer.attachment.note_separator": "; ",
             "ui.studio.mask.chip_title": "Mask: {handle}",
             "ui.studio.mask.chip_title_hint": "Inpainting only changes the area outlined by the mask",
             "ui.studio.params.default_ratio": "1:1",

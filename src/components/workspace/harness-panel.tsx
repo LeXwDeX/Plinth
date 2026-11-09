@@ -162,8 +162,7 @@ function HarnessEditor({ sessionId, ownerId, object, harness, initial, message, 
   const savedOffering = Object.values(offerings ?? {}).flat().find(item => item.id === initial.offering_id && item.revision === initial.offering_revision);
   return <section className="flex h-full min-h-0 flex-col text-xs" aria-label={text('ui.harness.title')} data-testid="harness-panel">
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable]">
-      <div className="p-3"><h3 className="text-sm font-semibold">{text('ui.harness.title')}</h3><p className="mt-1 leading-5 text-muted-foreground">{text('ui.harness.description')}</p></div>
-      <CollapsibleSection id={`${id}-section-operations`} title={text('ui.studio.panel.tab.operations')} summary={operation?.label}
+      <CollapsibleSection id={`${id}-section-operations`} title={text('ui.harness.operation_section')} summary={operation?.label}
         open={openSections.operations} onOpenChange={toggleSection('operations')} data-testid="harness-section-operations" bodyClassName="space-y-4 p-3">
         {declarations.groups.map(group => {
           const operations = harnessOperationsForModel(declarations.operations, group.id, [models.image, models['model-3d']]);

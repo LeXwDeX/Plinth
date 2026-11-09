@@ -43,9 +43,14 @@ func TestDefaultCatalogDeclaresThinkingLevelsAndContextWindows(t *testing.T) {
 		usage    *bool
 	}
 	no := false
+	// gpt-6-astra (alias gpt-astra): OpenAI's model page lists low/medium/high/xhigh/max, and on
+	// 2026-11-09 the dev-test proxy rejected "minimal" with "valid levels: low, medium, high, xhigh,
+	// max" and accepted xhigh and max. The rest of the gpt-6 family is not re-verified (#213).
+	astra := []string{"low", "medium", "high", "xhigh", "max"}
 	wants := []want{
 		{prefix: "qwen-omni-flash", levels: []string{"low", "medium", "xhigh"}, fallback: "xhigh", window: 1000000},
-		{prefix: "gpt-astra", levels: []string{"low", "medium", "high"}, fallback: "high"},
+		{prefix: "gpt-astra", levels: astra, fallback: "high"},
+		{prefix: "gpt-6-astra", levels: astra, fallback: "high"},
 		{prefix: "gpt-6", levels: []string{"low", "medium", "high"}, fallback: "high"},
 		{prefix: "gpt-terra", levels: []string{"low", "medium", "high"}, fallback: "high"},
 		{prefix: "gpt-sol", levels: []string{"low", "medium", "high"}, fallback: "high"},
@@ -81,13 +86,13 @@ func TestDefaultCatalogDeclaresThinkingLevelsAndContextWindows(t *testing.T) {
 		t.Fatalf("qwen-omni-flash profile = %#v %v", profile, ok)
 	}
 	if profile, ok := thinking.ProfileFor("gpt-astra"); !ok || profile.DefaultEffort != "high" ||
-		!slices.Equal(profile.EffortLevels, []string{"low", "medium", "high"}) {
+		!slices.Equal(profile.EffortLevels, astra) {
 		t.Fatalf("gpt-astra profile = %#v %v", profile, ok)
 	}
 	// gpt-6 covers the versioned family; the bare aliases and Claude match
 	// their own prefixes, and the first matching profile wins.
 	for model, prefix := range map[string]string{
-		"gpt-6-astra": "gpt-6", "gpt-6-luna": "gpt-6", "gpt-6.1-sol": "gpt-6", "gpt-6.1-terra": "gpt-6",
+		"gpt-6-astra": "gpt-6-astra", "gpt-6-luna": "gpt-6", "gpt-6.1-sol": "gpt-6", "gpt-6.1-terra": "gpt-6",
 		"gpt-terra": "gpt-terra", "gpt-sol": "gpt-sol", "gpt-luna": "gpt-luna",
 		"claude-sonnet-4": "claude",
 	} {

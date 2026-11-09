@@ -157,7 +157,7 @@ docker compose up -d --wait
   免 Key 体验需要显式设置 `PROVIDER_MODE=mock`、`AGENT_MODE=mock`，仅用于本地测试，计划淘汰。
   `AGENT_MODE=live` 必须设置
   `LLM_BASE_URL` 与 `LLM_API_KEY`，缺少地址或 key 时 Agent 显示“未配置”。`LLM_MODEL`
-  留空使用 Schema 默认值 `qwen-omni-flash`（无版本别名，强多模态模型；网关当前解析为 qwen3.8-omni-flash，思考档位 low/medium/xhigh，默认 xhigh；第二连接可用 `LLM_CONNECTIONS=GPT`、`GPT_MODEL=gpt-astra`，档位 low/medium/high，默认 high；别名让上游网关升级版本时下游配置无需改动，#64），请按实际端点支持的模型名设置。`LLM_BASE_URL`
+  留空使用 Schema 默认值 `qwen-omni-flash`（无版本别名，强多模态模型；网关当前解析为 qwen3.8-omni-flash，思考档位 low/medium/xhigh，默认 xhigh；第二连接可用 `LLM_CONNECTIONS=GPT`、`GPT_MODEL=gpt-astra`，档位 low/medium/high/xhigh/max，默认 high；别名让上游网关升级版本时下游配置无需改动，#64），请按实际端点支持的模型名设置。`LLM_BASE_URL`
   只供 Agent 对话使用，图像 Provider 各读自己的
   `<ID>_BASE_URL`：启用 Gemini 时必须设置 `GEMINI_BASE_URL`（没有默认值）；所有模型
   经同一网关时，把 `LLM_BASE_URL`、`OPENAI_BASE_URL`、`GEMINI_BASE_URL` 都设为网关地址。

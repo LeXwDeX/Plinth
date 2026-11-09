@@ -447,13 +447,12 @@ Skill 文案统一用动态 key：`schemaText(schema, \`ui.workspace.skills.${ke
 
 | 操作 | Schema key | 中文文案 | 文件:行 |
 |---|---|---|---|
-| 标题 | `ui.harness.title` | 功能设置 | 163、165 |
-| 说明 | `ui.harness.description` | 选择这次想做的功能、来源模型和参数，Agent 会在这些设置内协助你。 | 165 |
+| 区域名称（仅 aria-label） | `ui.harness.title` | 功能设置 | 163 |
 | 会话未打开 | `ui.harness.select_session` | 先打开一个对话，再设置功能。 | 95；style-lock-panel.tsx:333 |
 | 未接入 | `ui.harness.not_connected` | 这项功能暂未接入可用服务。 | 94 |
 | 加载中 | `ui.harness.loading` | 正在读取功能设置… | 97-98 |
 | 风格锁定分组 | `ui.studio.style_lock.title` | 风格锁定 | style-lock-panel.tsx:336 |
-| 功能分组 | `ui.studio.panel.tab.operations` | 功能 | 166 |
+| 功能分组 | `ui.harness.operation_section` | 选择功能 | 165 |
 | 前置步骤 | `ui.harness.allow_prerequisites` | 允许 Agent 提出必要的前置加工步骤 | 177 |
 | 执行服务分组 | `ui.harness.offering` | 执行服务 | 181 |
 | 来源分组 | `ui.harness.source_kind` | 模型来源 | 191 |

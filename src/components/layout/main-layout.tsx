@@ -66,7 +66,7 @@ export function MainLayout({ children, sidebar = true }: MainLayoutProps) {
   );
 
   return (
-    <Surface variant="base" radius="none" className="flex h-dvh flex-col overflow-hidden">
+    <Surface variant="base" radius="none" className="flex h-dvh flex-col overflow-clip">
       <ConnectivityBanner />
       <AppTopbar start={menuToggle} leading={backToWorkspace} actions={<CacheActivityIndicator />} />
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -75,7 +75,8 @@ export function MainLayout({ children, sidebar = true }: MainLayoutProps) {
             <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} isAdmin={isAdmin} />
           </Suspense>
         ) : null}
-        <main className="flex-1 min-h-0 overflow-y-auto p-6">
+        {/* relative：让 sr-only 等绝对定位后代留在 main 的滚动区内，否则会撑高整个文档、外壳被滚走露出底色 */}
+        <main className="relative flex-1 min-h-0 overflow-y-auto p-6">
           {children}
         </main>
       </div>

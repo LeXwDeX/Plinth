@@ -67,7 +67,7 @@ import { inlineImageFilename, isInlineImage, reportInlineImageFailure, uploadInl
 import { buildChatSelection, type ChatAttachmentClaim, type ChatMentionClaim } from '@/lib/chat/attachments';
 import { formatSizeLimit } from '@/lib/size-text';
 import { cardFromConsent, cardFromPending, type ApprovalCardModel } from '@/lib/chat/approval-card';
-import { attachmentPurposesForTurn, hasMultipleInputPurposes, withPurposeNote, type AttachmentPurpose } from '@/lib/chat/attachment-purpose';
+import { attachmentPurposesForTurn, hasMultipleInputPurposes, purposeNote, withPurposeNote, type AttachmentPurpose } from '@/lib/chat/attachment-purpose';
 import { handleReferences } from '@/lib/chat/composer-reference';
 import { boardMentionCandidate, buildMentionCandidates, mentionsBoard, mentionsForTurn, overridingHandle, mentionCandidates, withBoardMention, type MentionCandidate } from '@/lib/chat/mentions';
 import { useComposerDraft } from '@/hooks/use-composer-draft';
@@ -929,11 +929,12 @@ export function ChatColumn() {
         ),
       );
       const sessionId = activeSessionId;
-      // Pictures attached now (not a replayed turn) say what they are for.
-      const purposeNote = !reuseImages && attachmentPurpose && images.length > 0
-        ? schemaText(schema, `ui.studio.composer.attachment.note_${attachmentPurpose}`)
+      // Pictures attached now (not a replayed turn) say what they are for, each its own purpose:
+      // the last choice alone would mislabel the others when they differ (#212).
+      const purposeLine = !reuseImages && images.length > 0
+        ? purposeNote(attachedImages.map((_, index) => attachmentPurposes[index] ?? null), (key) => schemaText(schema, key))
         : '';
-      const notedText = withPurposeNote(written, purposeNote);
+      const notedText = withPurposeNote(written, purposeLine);
       // What the person sees and selects travels with the turn as claims; the
       // server verifies every ID for this owner and session before use.
       let claims: ChatAttachmentClaim[] = reuseClaims ?? images.flatMap((url, index): ChatAttachmentClaim[] => {

@@ -14,7 +14,7 @@
   的 `LLM_BASE_URL`、`OPENAI_BASE_URL` 为准；均指向 llms 正式服务器
   网关的 `/v1`（地址在 dev-test 运行环境文件 `LLM_BASE_URL`），不使用同机代理测试端口或历史 llms-proxy 端口。
   链路是「测试客户端 → `dev-test` Plinth 测试栈 → llms 正式服务器」，后者
-  不限制客户端与模型；测试栈使用无版本别名：默认连接 `LLM_MODEL=qwen-omni-flash`（网关当前解析为 qwen3.8-omni-flash；思考档位 low/medium/xhigh，默认 xhigh）；第二连接 `LLM_CONNECTIONS=GPT`、`GPT_MODEL=gpt-astra`（当前解析为 gpt-6-astra；思考档位 low/medium/high，默认 high）。别名让上游网关升级版本时下游配置无需改动（#64）。请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，`qwen-omni-flash` 命中同名 profile（`enable_thinking=true`、`reasoning_effort` 默认 `xhigh`，上下文窗口 1000000），`gpt-astra` 命中同名 profile（`reasoning_effort` 低到高三档，默认 `high`）；其他中国大陆模型仍用官方最高档。
+  不限制客户端与模型；测试栈使用无版本别名：默认连接 `LLM_MODEL=qwen-omni-flash`（网关当前解析为 qwen3.8-omni-flash；思考档位 low/medium/xhigh，默认 xhigh）；第二连接 `LLM_CONNECTIONS=GPT`、`GPT_MODEL=gpt-astra`（当前解析为 gpt-6-astra；思考档位 low/medium/high/xhigh/max，默认 high）。别名让上游网关升级版本时下游配置无需改动（#64）。请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，`qwen-omni-flash` 命中同名 profile（`enable_thinking=true`、`reasoning_effort` 默认 `xhigh`，上下文窗口 1000000），`gpt-astra` 命中同名 profile（`reasoning_effort` low/medium/high/xhigh/max 五档，默认 `high`）；其他中国大陆模型仍用官方最高档。
   测试凭据仅从该测试栈已授权的运行环境读取，不用于正式生产；
 - 真实大模型流量测试从测试栈 `production/runtime.env` 读取接线；正式
   生产凭据不在测试脚本、日志或报告中写出。模型列表 200 只能证明鉴权和
@@ -232,7 +232,7 @@ SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-h
    `formal-test` 不做付费生成；写 Key、付费生成、导入数据及 nginx/域名变更须用户明确决定；
 7. 若依赖服务异常，先修复依赖服务并重新部署，再继续验收。LLM/生图依赖
    走 llms 正式服务器网关的 `/v1`（地址在 dev-test 运行环境文件 `LLM_BASE_URL`；不得使用历史 llms-proxy 端口），不限制客户端与
-   模型；测试栈使用无版本别名：默认连接 `LLM_MODEL=qwen-omni-flash`（网关当前解析为 qwen3.8-omni-flash；思考档位 low/medium/xhigh，默认 xhigh）；第二连接 `LLM_CONNECTIONS=GPT`、`GPT_MODEL=gpt-astra`（当前解析为 gpt-6-astra；思考档位 low/medium/high，默认 high）。别名让上游网关升级版本时下游配置无需改动（#64）。请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，`qwen-omni-flash` 命中同名 profile（`enable_thinking=true`、`reasoning_effort` 默认 `xhigh`，上下文窗口 1000000），`gpt-astra` 命中同名 profile（`reasoning_effort` 低到高三档，默认 `high`）；其他中国大陆模型仍用官方最高档；上游
+   模型；测试栈使用无版本别名：默认连接 `LLM_MODEL=qwen-omni-flash`（网关当前解析为 qwen3.8-omni-flash；思考档位 low/medium/xhigh，默认 xhigh）；第二连接 `LLM_CONNECTIONS=GPT`、`GPT_MODEL=gpt-astra`（当前解析为 gpt-6-astra；思考档位 low/medium/high/xhigh/max，默认 high）。别名让上游网关升级版本时下游配置无需改动（#64）。请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，`qwen-omni-flash` 命中同名 profile（`enable_thinking=true`、`reasoning_effort` 默认 `xhigh`，上下文窗口 1000000），`gpt-astra` 命中同名 profile（`reasoning_effort` low/medium/high/xhigh/max 五档，默认 `high`）；其他中国大陆模型仍用官方最高档；上游
    测试凭据只从 `dev-test` 测试栈已授权的运行环境读取，不写入文档；抠图依赖为背景去除（matting）服务（接线地址见 dev-test 运行环境文件 `MATTING_*`）。
 
 ### 可控恢复与读屏验收

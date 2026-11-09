@@ -77,8 +77,10 @@ describe('every chip above the composer is one component of one size', () => {
 
   it('writes the purpose chosen for an attachment into the message', () => {
     const chat = source('./chat-column.tsx');
-    expect(chat).toContain('withPurposeNote(written, purposeNote)');
-    expect(chat).toContain('`ui.studio.composer.attachment.note_${attachmentPurpose}`');
+    // Each picture's own purpose, not the last choice for all of them (#212).
+    expect(chat).toContain('withPurposeNote(written, purposeLine)');
+    expect(chat).toContain('purposeNote(attachedImages.map((_, index) => attachmentPurposes[index] ?? null)');
+    expect(chat).not.toContain('`ui.studio.composer.attachment.note_${attachmentPurpose}`');
     expect(chat).toContain('setAttachmentPurpose(null)');
     expect(composer).toContain('data-testid="composer-attachment-purpose"');
   });
