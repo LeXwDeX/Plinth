@@ -11,6 +11,11 @@
 #   MODELS 缺省 = schema 全部可用 text-to-image 模型（逗号分隔可过滤）。
 # 凭据：读 production/runtime.env。数据保留不清理。
 set -u
+# #219：真实上游，需 --live 与 ART_AI_LIVE_ACK=1 双重开关，且目标须为 live 形态发布；
+# 缺省或只设一半时拒绝（退出码 2）。upstream_shape.py 与本脚本同目录。
+LIVE_ARG=""
+for argument in "$@"; do [ "$argument" = --live ] && LIVE_ARG=--live; done
+python3 "$(cd "$(dirname "$0")" && pwd)/upstream_shape.py" live-only $LIVE_ARG >/dev/null || exit 2
 BASE="${BASE:-http://127.0.0.1:13333}"
 PASS=0; FAIL=0
 ok()  { echo "PASS: $1"; PASS=$((PASS+1)); }

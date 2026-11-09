@@ -4,7 +4,9 @@ Everything that decides something (waiting rules, tool-call parsing, argument
 validation, redaction) is a plain function so scripts/tests/test_l5_common.py
 can cover it without a server. The HTTP client and the report writer are thin.
 
-The scripts spend real money, so main() refuses to run without ART_AI_LIVE_ACK=1.
+The scripts spend real money, so execute() refuses to run without both live
+switches, --live and ART_AI_LIVE_ACK=1, and refuses a target released in the
+fake upstream shape (upstream_shape.py, #219).
 They never print credentials, cookies, signed-URL queries or full prompts.
 """
 
@@ -19,6 +21,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import upstream_shape  # noqa: E402  (sibling module; the scripts run from any directory)
 
 ACK_VARIABLE = "ART_AI_LIVE_ACK"
 TERMINAL_TASK_STATES = ("SUCCEEDED", "FAILED", "CANCELED", "CANCELLED")
@@ -53,6 +58,8 @@ def validate_base(base):
 def parse_arguments(argv, description=""):
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--report", help="directory for the report and downloaded artifacts")
+    parser.add_argument("--live", action="store_true",
+                        help="confirm real, paid upstream requests (also needs ART_AI_LIVE_ACK=1)")
     parser.add_argument("--turn-timeout", type=int, default=1800, help="seconds to wait for one chat turn")
     parser.add_argument("--task-timeout", type=int, default=2400, help="seconds to wait for expected tasks")
     arguments = parser.parse_args(argv)
@@ -1243,7 +1250,7 @@ def common_dimensions(data):
 
 def execute(name, body, description=""):
     """Entry point shared by every script: ACK gate, environment, login, body(live, report), summary."""
-    refusal = ack_error(os.environ)
+    _shape, refusal = upstream_shape.resolve("live-only", upstream_shape.LIVE_FLAG in sys.argv[1:], os.environ)
     if refusal:
         print(refusal, file=sys.stderr)
         return 2

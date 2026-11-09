@@ -374,5 +374,86 @@ class EnvironmentRulesTest(unittest.TestCase):
             load(changed(set_keep))
 
 
+def ephemeral_document():
+    def mutate(environments):
+        environments["dev-test"].pop("backup")
+        environments["dev-test"]["data"] = "ephemeral"
+    return load(changed(mutate))
+
+
+class UpstreamShapeTest(unittest.TestCase):
+    """#219: the ephemeral dev-test stack defaults to the fake upstream; live needs two switches."""
+
+    def test_ephemeral_release_defaults_to_the_fake_upstream(self):
+        environment = ephemeral_document()["environments"]["dev-test"]
+        shape = release_env.upstream_shape(environment, False, {})
+        self.assertEqual(shape, "fake")
+        words = release_env.release_variables(environment, None, shape)["RELEASE_SERVER_ENV"].split()
+        self.assertIn("RELEASE_UPSTREAM_SHAPE=fake", words)
+        self.assertIn("RELEASE_DATA_MODE=ephemeral", words)
+
+    def test_live_dev_test_needs_both_switches(self):
+        environment = ephemeral_document()["environments"]["dev-test"]
+        for environ in ({}, {"ART_AI_LIVE_ACK": "0"}, {"ART_AI_LIVE_ACK": "yes"}):
+            with self.subTest(environ=environ), self.assertRaisesRegex(release_env.EnvironmentError_, "ART_AI_LIVE_ACK=1"):
+                release_env.upstream_shape(environment, True, environ)
+        # The acknowledgement alone keeps the fake default.
+        self.assertEqual(release_env.upstream_shape(environment, False, {"ART_AI_LIVE_ACK": "1"}), "fake")
+        shape = release_env.upstream_shape(environment, True, {"ART_AI_LIVE_ACK": "1"})
+        self.assertEqual(shape, "live")
+        words = release_env.release_variables(environment, None, shape)["RELEASE_SERVER_ENV"]
+        self.assertNotIn("RELEASE_UPSTREAM_SHAPE", words)
+
+    def test_persistent_environments_are_always_live(self):
+        document = load(BASE)
+        for name, environment in document["environments"].items():
+            with self.subTest(name=name):
+                self.assertEqual(release_env.upstream_shape(environment, False, {}), "live")
+                words = release_env.release_variables(environment, None)["RELEASE_SERVER_ENV"]
+                self.assertNotIn("RELEASE_UPSTREAM_SHAPE", words)
+                with self.assertRaisesRegex(release_env.EnvironmentError_, "always live"):
+                    release_env.upstream_shape(environment, True, {"ART_AI_LIVE_ACK": "1"})
+
+    def test_release_refuses_live_without_acknowledgement_before_any_release(self):
+        document = ephemeral_document()
+        args = release_env.argparse.Namespace(revision=None, acceptance_note=None, live_upstream=True)
+        with mock.patch.dict(release_env.os.environ, {}, clear=False), \
+                mock.patch.object(release_env.subprocess, "run") as run:
+            release_env.os.environ.pop("ART_AI_LIVE_ACK", None)
+            with self.assertRaises(release_env.EnvironmentError_):
+                release_env.release(document, "dev-test", args)
+        run.assert_not_called()
+
+    def test_smoke_reports_the_running_shape(self):
+        document = ephemeral_document()
+        environment = document["environments"]["dev-test"]
+        for values, want in (({"RELEASE_UPSTREAM_SHAPE": "fake"}, "fake"), ({"RELEASE_UPSTREAM_SHAPE": "live"}, "live"),
+                             ({}, "live")):
+            with self.subTest(values=values), mock.patch.object(release_env, "host_env", return_value=values):
+                self.assertEqual(release_env.running_upstream_shape(environment), want)
+        with mock.patch.object(release_env, "host_env", side_effect=release_env.EnvironmentError_("ssh failed")):
+            self.assertEqual(release_env.running_upstream_shape(environment), "live")
+        with mock.patch.object(release_env, "host_env") as host_env:
+            self.assertEqual(release_env.running_upstream_shape(load(BASE)["environments"]["alone"]), "live")
+        host_env.assert_not_called()
+
+        seen = {}
+
+        class Done:
+            returncode = 0
+
+        def fake_run(command, env):
+            seen.update(env)
+            return Done()
+
+        with mock.patch.object(release_env, "admin_credentials", return_value={"ADMIN_USERNAME": "u", "ADMIN_PASSWORD": "p"}), \
+                mock.patch.object(release_env, "agent_credentials", return_value={}), \
+                mock.patch.object(release_env, "running_revision", return_value="0" * 40), \
+                mock.patch.object(release_env, "running_upstream_shape", return_value="fake"), \
+                mock.patch.object(release_env.subprocess, "run", fake_run):
+            self.assertEqual(release_env.smoke(document, "dev-test", ["true"]), 0)
+        self.assertEqual(seen["ART_AI_UPSTREAM_SHAPE"], "fake")
+
+
 if __name__ == "__main__":
     unittest.main()

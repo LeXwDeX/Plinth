@@ -204,8 +204,13 @@ def check_assets(opener, provider, task):
 
 
 def main():
-    if os.environ.get("ART_AI_LIVE_3D_ACK") != "1":
-        fail("set ART_AI_LIVE_3D_ACK=1 to run approved paid test operations")
+    # #219: real 3D generation needs both live switches and a target released live.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import upstream_shape
+    _shape, refusal = upstream_shape.resolve("live-only", upstream_shape.LIVE_FLAG in sys.argv[1:], os.environ)
+    if refusal:
+        print(refusal, file=sys.stderr)
+        sys.exit(2)
     username = os.environ.get("ADMIN_USERNAME")
     password = os.environ.get("ADMIN_PASSWORD")
     if not username or not password:

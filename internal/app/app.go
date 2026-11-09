@@ -173,7 +173,11 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if logger == nil {
 		logger = slog.Default()
 	}
-	taskCatalog, err := loadCatalog(config.CatalogFile)
+	shape, err := resolveUpstreamShape(config)
+	if err != nil {
+		return nil, err
+	}
+	taskCatalog, err := loadCatalogForShape(config.CatalogFile, shape)
 	if err != nil {
 		return nil, err
 	}
@@ -182,6 +186,16 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		return nil, err
 	}
 	applicationSchema := taskCatalog.Application()
+	if err := validateFakeUpstreamWiring(shape, config, applicationSchema); err != nil {
+		return nil, err
+	}
+	if shape.fake() {
+		if overrides.httpTransport == nil {
+			overrides.httpTransport = fakeShapeHTTPTransport(shape.origin)
+		}
+		logger.Warn("上游形态为 fake：全部 Provider 与对话模型连接指向 fake 上游，不发起真实上游请求",
+			"upstream_shape", upstreamShapeFake, "fake_upstream_origin", shape.origin.String())
+	}
 	// The per-reply tool call budget in force (#275) is one value for the
 	// orchestrator and the public Schema, so the composer's counter shows the
 	// limit the Agent is held to rather than the Schema default.

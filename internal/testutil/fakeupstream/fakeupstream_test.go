@@ -329,3 +329,20 @@ func TestRuntimeImageBuildsOnlyListedCommands(t *testing.T) {
 		t.Fatal("Dockerfile.go-runtime no longer builds cmd/art-ai")
 	}
 }
+
+// The dev-test fake upstream image (#219) builds cmd/fake-upstream and nothing
+// that ships, so it can never stand in for the runtime image.
+func TestFakeUpstreamImageBuildsOnlyTheFake(t *testing.T) {
+	root := moduleRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "Dockerfile.fake-upstream"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, "./cmd/fake-upstream\n") {
+		t.Fatal("Dockerfile.fake-upstream no longer builds cmd/fake-upstream")
+	}
+	if strings.Count(text, "go build") != 1 || strings.Contains(text, "./...") || strings.Contains(text, "./cmd/art-ai") {
+		t.Fatal("Dockerfile.fake-upstream must build cmd/fake-upstream only")
+	}
+}

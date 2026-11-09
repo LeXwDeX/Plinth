@@ -3,7 +3,7 @@
 // can run against Tripo, Meshy, Hyper3D, an OpenAI-compatible LLM gateway, the
 // image providers (OpenAI images, Gemini images, Jimeng) and the matting
 // service at zero cost
-// (issue #96). Test tooling only: it is not built into any image.
+// (issue #96). Test tooling only: no shipping binary or runtime image contains it.
 //
 //	fake-upstream -addr 127.0.0.1:19000
 //
@@ -13,7 +13,12 @@
 // <origin>/openai/images/v1 (OPENAI_BASE_URL), <origin>/gemini/images/v1
 // (GEMINI_BASE_URL), <origin>/jimeng (JIMENG_BASE_URL; the adapter appends
 // api/v3) and <origin>/matting (MATTING_BASE_URL; it appends api/v1). Any API key is accepted; a key or an X-Fake-Scenario header
-// selects a fault (see -help).
+// selects a fault (see -help). GET /healthz answers 200 for container health
+// checks.
+//
+// Dockerfile.fake-upstream packages it as its own image for the dev-test fake
+// upstream shape (#219, docker-compose.go-fake-upstream.yml); the runtime image
+// never contains it.
 package main
 
 import (
@@ -77,9 +82,9 @@ func run(args []string) error {
 		fmt.Printf("%s/%s  %s%s\n", version.Provider, version.API, origin, version.Prefix)
 	}
 	fmt.Printf("listening %s\n", origin)
-	var handler http.Handler = server
+	var handler http.Handler = withHealth(server)
 	if *verbose {
-		handler = logRequests(server)
+		handler = logRequests(handler)
 	}
 	httpServer := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -130,5 +135,17 @@ func logRequests(next http.Handler) http.Handler {
 			}
 		}()
 		next.ServeHTTP(wrapped, r)
+	})
+}
+
+// withHealth answers GET /healthz itself; every other path is the fake's.
+func withHealth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			_, _ = w.Write([]byte("ok" + "\n"))
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }

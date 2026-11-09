@@ -8,7 +8,18 @@
 # 手工方式下由策略直接批准，会产生真实付费任务，不能用于免费冒烟）。
 # 若 Agent 误调用 2D 工具而产生了任务，脚本无法阻止，但会停止本轮并以
 # PAID-TASK-ALERT + FAIL 报告（退出码 1），不会当成 SOFT-FAIL 放过。
+# 上游形态（#219）：缺省针对 fake 形态的 dev-test，3D 请求带 fake 对话模型的工具标记
+# （[[fake:tool:create_model_3d …]]），由 fake LLM 确定地给出 create_model_3d 调用；
+# 目标为 live 形态时会调用真实对话模型，需 --live 与 ART_AI_LIVE_ACK=1 双重开关，否则拒绝。
 set -u
+UPSTREAM_ARG=""
+for argument in "$@"; do [ "$argument" = --live ] && UPSTREAM_ARG=--live; done
+UPSTREAM_SHAPE=$(python3 "$(cd "$(dirname "$0")" && pwd)/upstream_shape.py" fake-default $UPSTREAM_ARG) || exit 2
+FAKE_TOOL_MARKER=""
+if [ "$UPSTREAM_SHAPE" = fake ]; then
+  FAKE_TOOL_MARKER=' [[fake:tool:create_model_3d {\"prompt\":\"a simple wooden stool\"}]]'
+  echo "INFO: upstream shape fake (fake LLM tool marker in the 3D request)"
+fi
 BASE="${BASE:-http://127.0.0.1:13333}"
 PASS=0; FAIL=0
 ok()  { echo "PASS: $1"; PASS=$((PASS+1)); }
@@ -118,7 +129,7 @@ if [ -z "$M3D" ]; then
 else
   C=$(req /tmp/s1-m.json -X POST "$BASE/api/chat/sessions/$SID/messages" \
     -H 'Content-Type: application/json' -H "Origin: $BASE" -b /tmp/s1-cookies.txt \
-    -d "{\"content\":\"做一个简单的木凳 3D 模型\",\"creative_domain\":\"model-3d\",\"ai_model\":\"$M3D\"}")
+    -d "{\"content\":\"做一个简单的木凳 3D 模型$FAKE_TOOL_MARKER\",\"creative_domain\":\"model-3d\",\"ai_model\":\"$M3D\"}")
   if [ "$C" = 202 ]; then
     ok "agent message accepted (3D model=$M3D)"
     # 本脚本承诺零费用：会话里出现任何任务都是意外。手工方式下 2D 由策略直接批准，
@@ -169,7 +180,7 @@ for i in (json.load(open('/tmp/s1-pa.json')) or {}).get('items') or []:
     retry_nudge() {
       req /tmp/s1-m.json -X POST "$BASE/api/chat/sessions/$SID/messages" \
         -H 'Content-Type: application/json' -H "Origin: $BASE" -b /tmp/s1-cookies.txt \
-        -d "{\"content\":\"请使用已选择的 $M3D 模型调用 create_model_3d 生成一个简单的木凳，准备确切输入并等待同意；不要调用 request_consent，不要调用任何 2D 图片工具，也不要在批准前提交生成。\",\"creative_domain\":\"model-3d\",\"ai_model\":\"$M3D\"}" >/dev/null
+        -d "{\"content\":\"请使用已选择的 $M3D 模型调用 create_model_3d 生成一个简单的木凳，准备确切输入并等待同意；不要调用 request_consent，不要调用任何 2D 图片工具，也不要在批准前提交生成。$FAKE_TOOL_MARKER\",\"creative_domain\":\"model-3d\",\"ai_model\":\"$M3D\"}" >/dev/null
     }
     # LLM 噪声兜底：超时则重发一次再等，最多两次；出现任务时立即停止等待
     pend; WRC=$?

@@ -14,13 +14,19 @@
 #             产生一次真实 3D 生成（约 25 积分）并断言 SUCCEEDED。
 #
 # LLM 噪声兜底：同意/任务未出现时重发消息最多两次再等。
-# 用法（服务器上）: ART_AI_SERVER_ROOT=<发布根> bash smoke-l2-livemodel.sh
-#                   L2_APPROVE_3D=1 bash smoke-l2-livemodel.sh   # 含付费 3D 生成
+# 用法（服务器上）: ART_AI_LIVE_ACK=1 ART_AI_SERVER_ROOT=<发布根> bash smoke-l2-livemodel.sh --live
+#                   ART_AI_LIVE_ACK=1 L2_APPROVE_3D=1 bash smoke-l2-livemodel.sh --live   # 含付费 3D 生成
+# 只能打到以 --live-upstream 发布的 dev-test（fake 形态拒绝，#219）。
 # 可选环境变量: BASE、IMAGE_MODEL（默认 gpt-image-2.6-sunburst）、
 #   SMOKE_3D_MODEL（默认取 /api/v1/offerings 中第一个可用推荐的文生 3D 模型）、
 #   ART_AI_DB（SQLite 路径，用于核对 decided_by；服务器上缺省为 $ART_AI_SERVER_ROOT/production/data/art-ai.db）。
 # 凭据：服务器上读 production/runtime.env；本地用 ADMIN_* 环境变量。数据保留不清理。
 set -u
+# #219：真实上游，需 --live 与 ART_AI_LIVE_ACK=1 双重开关，且目标须为 live 形态发布；
+# 缺省或只设一半时拒绝（退出码 2）。upstream_shape.py 与本脚本同目录。
+LIVE_ARG=""
+for argument in "$@"; do [ "$argument" = --live ] && LIVE_ARG=--live; done
+python3 "$(cd "$(dirname "$0")" && pwd)/upstream_shape.py" live-only $LIVE_ARG >/dev/null || exit 2
 BASE="${BASE:-http://127.0.0.1:13333}"
 IMAGE_MODEL="${IMAGE_MODEL:-gpt-image-2.6-sunburst}"
 ART_AI_DB="${ART_AI_DB:-${ART_AI_SERVER_ROOT:+$ART_AI_SERVER_ROOT/production/data/art-ai.db}}"

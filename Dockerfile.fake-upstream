@@ -1,0 +1,35 @@
+# dev-test fake 上游镜像（#219）：只含 cmd/fake-upstream，零费用模拟 Tripo、Meshy、
+# Hyper3D、OpenAI 兼容对话模型、OpenAI/Gemini/即梦图像与抠图服务。
+# 只由 release-server-steps.sh 在 RELEASE_UPSTREAM_SHAPE=fake（仅 dev-test 全新数据形态）时
+# 构建，并由 docker-compose.go-fake-upstream.yml 作为独立服务运行；运行镜像
+# Dockerfile.go-runtime 不含 fake 上游，formal-test 与自部署从不构建本镜像。
+# 构建前缀与 Dockerfile.go-runtime 的 build 阶段一致，可复用其依赖缓存层。
+FROM golang:1.27 AS build
+
+WORKDIR /src
+COPY go.mod go.sum ./
+ARG GOPROXY=https://proxy.golang.org,direct
+RUN GOPROXY="${GOPROXY}" go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /out/fake-upstream \
+    ./cmd/fake-upstream
+
+FROM alpine:3.23
+
+ARG GO_IMAGE_TAG=local
+ARG GO_SOURCE_COMMIT=unknown
+LABEL org.opencontainers.image.version="${GO_IMAGE_TAG}" \
+      org.opencontainers.image.revision="${GO_SOURCE_COMMIT}"
+
+RUN addgroup -S fake && adduser -S -G fake fake
+COPY --from=build /out/fake-upstream /usr/local/bin/fake-upstream
+USER fake
+
+EXPOSE 19000
+ENTRYPOINT ["/usr/local/bin/fake-upstream"]
+CMD ["-addr", "0.0.0.0:19000", "-allow-non-loopback", "-artifact-origin", "https://fake-assets.example.test"]

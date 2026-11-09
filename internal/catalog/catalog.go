@@ -28,6 +28,13 @@ func LoadDefault() (*Catalog, error) {
 	return loadDefault()
 }
 
+// DefaultDocument returns a copy of the built-in Catalog document, for callers
+// that derive a deployment-shaped Catalog from it (the fake upstream shape,
+// #219) and load the result with Load.
+func DefaultDocument() []byte {
+	return bytes.Clone(defaultCatalog)
+}
+
 func Load(reader io.Reader) (*Catalog, error) {
 	decoder := json.NewDecoder(reader)
 	decoder.DisallowUnknownFields()
