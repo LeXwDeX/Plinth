@@ -6,10 +6,13 @@ a view that was not requested may be absent. Offline: no stack, no network.
 """
 import importlib.util
 import os
+import sys
 import unittest
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-spec = importlib.util.spec_from_file_location("fakestack", os.path.join(HERE, "smoke-fake-stack.py"))
+sys.dont_write_bytecode = True
+
+SMOKE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "smoke")
+spec = importlib.util.spec_from_file_location("fakestack", os.path.join(SMOKE, "smoke-fake-stack.py"))
 fs = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fs)
 
@@ -45,6 +48,31 @@ class ConditionalSlots(unittest.TestCase):
         offering = {"outputs": [{"role": "model", "variant": "glb", "delivery": "required", "minimum": 1}]}
         problems, _ = fs.check_delivery(NoAssetsApi(), task_with([]), offering, {})
         self.assertEqual(problems, ["missing required slot ('model', 'glb')"])
+
+
+class ZeroRealUpstream(unittest.TestCase):
+    """#218: one refusal line of the stack's loopback guard in any stack log fails the run."""
+
+    def run_check(self, logs):
+        import tempfile
+        with tempfile.TemporaryDirectory() as work:
+            for name, text in logs.items():
+                os.makedirs(os.path.join(work, name))
+                with open(os.path.join(work, name, "stack.log"), "w", encoding="utf-8") as handle:
+                    handle.write(text)
+            fs.results.clear()
+            fs.check_no_real_upstream(work)
+            return fs.results[-1][1]
+
+    def test_clean_logs_pass(self):
+        self.assertTrue(self.run_check({"main": "level=INFO msg=started\n", "fault-task-failed": ""}))
+
+    def test_a_refused_request_fails(self):
+        line = fs.REFUSAL_MARKER + ": connection tripo host api.example.com\n"
+        self.assertFalse(self.run_check({"main": "ok\n", "fault-key-quota": line}))
+
+    def test_no_stack_log_fails(self):
+        self.assertFalse(self.run_check({}))
 
 
 if __name__ == "__main__":

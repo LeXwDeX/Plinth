@@ -24,6 +24,7 @@ import (
 // The test, not cmd/art-ai, hosts the stack because Tripo's native processing
 // refuses non-public hosts and plain HTTP by design; the override maps one
 // reserved ".test" host onto the loopback fake instead of loosening that rule.
+// Every connection is also limited to loopback (fakeStackLoopbackOnly, #218).
 func TestFakeUpstreamStack(t *testing.T) {
 	raw := os.Getenv("FAKE_UPSTREAM_STACK_URL")
 	if raw == "" {
@@ -41,7 +42,7 @@ func TestFakeUpstreamStack(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	application, err := newWithDependencies(config, logger, assemblyOverrides{httpTransport: fakeStackHTTPTransport(fake)})
+	application, err := newWithDependencies(config, logger, assemblyOverrides{httpTransport: fakeStackLoopbackOnly(fakeStackHTTPTransport(fake), os.Stderr)})
 	if err != nil {
 		t.Fatal(err)
 	}

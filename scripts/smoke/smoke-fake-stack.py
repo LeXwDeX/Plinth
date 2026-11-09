@@ -1123,6 +1123,24 @@ def scenario_fault(api, offerings, scenario):
                        f"refetch {status} reason {(body.get('refetch') or {}).get('reason')}")
 
 
+# Written by the stack's loopback guard (fakeStackLoopbackOnly in internal/app) for every
+# request to a host that is neither loopback nor the fake artifact host (#218).
+REFUSAL_MARKER = "fake-stack: refused non-loopback request"
+
+
+def check_no_real_upstream(work):
+    """Every stack this run started must have stayed on loopback: the guard refuses and
+    logs any other destination, so one marker line in any stack log fails the run."""
+    logs, refused = 0, []
+    for root, _dirs, files in os.walk(work):
+        if "stack.log" in files:
+            logs += 1
+            with open(os.path.join(root, "stack.log"), encoding="utf-8", errors="replace") as handle:
+                refused += [line.strip() for line in handle if REFUSAL_MARKER in line]
+    record("zero real upstream requests", logs > 0 and not refused,
+           f"{logs} stack logs, {len(refused)} refused" + ("; " + "; ".join(refused[:5]) if refused else ""))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,faults")
@@ -1176,6 +1194,7 @@ def main():
                 offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
                 scenario_fault(api, offerings, scenario)
                 processes.stop(child)
+        check_no_real_upstream(work)
     finally:
         processes.stop_all()
         if not args.keep and not args.work:
