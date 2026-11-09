@@ -197,7 +197,7 @@ async function closeParams(page) {
 }
 
 /**
- * Sets size or ratio and count in the parameter panel. GPT Image 2.5 lists pixel sizes in a
+ * Sets size or ratio and count in the parameter panel. GPT Image 2.6 lists pixel sizes in a
  * select (no ratio chips), Gemini and Nano Banana list ratio chips and have no count.
  * The store saves 500 ms after the last edit, so wait before the next send.
  */
@@ -396,7 +396,7 @@ async function pictureTopOnBoard(page) {
 
 /** Sends a text brief with one picture per request (size 1024x1024, count 1) and waits for the result. */
 async function generateOneImage(page, text) {
-  await ensureModel(page, 'image', 'GPT Image 2.5 Sunburst');
+  await ensureModel(page, 'image', 'GPT Image 2.6 Sunburst');
   await setParams(page, { size: '1024x1024', count: 1 });
   const before = await page.locator('[data-testid=chat-image-result]').count();
   await send(page, text);
@@ -550,7 +550,7 @@ scenarios.s1 = async (page) => {
     if ((await sessionCredits(page)) !== credits0) problems.push('点起步卡后积分变了');
     const before = await paramsChip(page);
     // The chip only has a value once a 2D model is chosen.
-    await pickModel(page, 'image', 'GPT Image 2.5 Sunburst');
+    await pickModel(page, 'image', 'GPT Image 2.6 Sunburst');
     const afterPick = await paramsChip(page);
     if (!/\d:\d|\d+x\d+/.test(before)) friction('新会话没选模型时，参数芯片只显示“参数”，没有比例和数量；选了模型才出现。起步卡不会替用户选模型，用户得自己先去模型选择器。');
     if (!(/1:1/.test(afterPick) && /4/.test(afterPick))) problems.push(`选模型后参数芯片是“${afterPick}”，不是 1:1 · 4 张（选模型前是“${before}”）`);
@@ -562,7 +562,7 @@ scenarios.s1 = async (page) => {
     await setParams(page, { size: '1024x1536', count: 6 });
     const chip = await paramsChip(page);
     expect(/1024x1536/.test(chip) && /6/.test(chip), `芯片是“${chip}”`);
-    if (!/2:3/.test(chip)) friction('GPT Image 2.5 的参数面板只有“输出尺寸”下拉里的像素尺寸（1024x1536），没有 2:3 这样的比例；要出 6 张只有这类模型能选数量（Gemini、Nano Banana 只出 1 张，没有数量）。');
+    if (!/2:3/.test(chip)) friction('GPT Image 2.6 的参数面板只有“输出尺寸”下拉里的像素尺寸（1024x1536），没有 2:3 这样的比例；要出 6 张只有这类模型能选数量（Gemini、Nano Banana 只出 1 张，没有数量）。');
     const cost = (await page.locator('[data-testid=composer-send-cost]').innerText().catch(() => '')).trim();
     expect(/36/.test(cost), `发送按钮旁显示“${cost || '空'}”，不是 36 积分`);
     return `芯片：${chip}；发送旁：${cost}`;
@@ -853,7 +853,7 @@ scenarios.s1 = async (page) => {
 scenarios.s2 = async (page) => {
   const S = 's2';
   await newSession(page);
-  await ensureModel(page, 'image', 'GPT Image 2.5 Sunburst');
+  await ensureModel(page, 'image', 'GPT Image 2.6 Sunburst');
 
   await step(page, S, '1', '参数选 16:9 · 4 张，输入“黄昏雨后的废墟街角”', '4 张都是 16:9', async () => {
     await setParams(page, { size: '2048x1152', count: 4 });
@@ -1062,7 +1062,7 @@ scenarios.s2 = async (page) => {
 scenarios.s3 = async (page) => {
   const S = 's3';
   await newSession(page);
-  await ensureModel(page, 'image', 'GPT Image 2.5 Sunburst');
+  await ensureModel(page, 'image', 'GPT Image 2.6 Sunburst');
 
   await step(page, S, '0', '准备：生成一张图并做出三视图（同场景一的做法）', '三视图卡片三张全部完成', async () => {
     await generateOneImage(page, '赛博朋克女刺客，全身立绘');
@@ -1363,7 +1363,7 @@ async function setApprovalMode(page, label) {
 scenarios.s4 = async (page) => {
   const S = 's4';
   await newSession(page);
-  await ensureModel(page, 'image', 'GPT Image 2.5 Sunburst');
+  await ensureModel(page, 'image', 'GPT Image 2.6 Sunburst');
   let imageHandle = '';
   let mergedLabel = '';
 

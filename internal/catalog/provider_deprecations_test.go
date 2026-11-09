@@ -155,8 +155,12 @@ func TestRetiredGenerationModelsNameAnOfferedSuccessor(t *testing.T) {
 	}
 	if err := mutateDefaultCatalog(t, func(document map[string]any) {
 		entries := retired(document)
-		if len(entries) != 1 {
+		// meshy-7 → meshy-7.1 (#329) and gpt-image-2.5-sunburst → 2.6 (#224).
+		if len(entries) != 2 {
 			t.Fatalf("retired models = %v", entries)
+		}
+		if gpt := entries[1].(map[string]any); gpt["provider_id"] != "openai" || gpt["model_id"] != "gpt-image-2.5-sunburst" || gpt["successor_model_id"] != "gpt-image-2.6-sunburst" {
+			t.Fatalf("gpt image retirement = %v", gpt)
 		}
 		entry := entries[0].(map[string]any)
 		if entry["provider_id"] != "meshy" || entry["model_id"] != "meshy-7" || entry["successor_model_id"] != "meshy-7.1" {

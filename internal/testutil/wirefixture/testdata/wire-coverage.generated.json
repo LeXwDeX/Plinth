@@ -1,7 +1,7 @@
 {
   "version": 2,
   "catalog": "internal/catalog/default_catalog.json",
-  "catalog_sha256": "e424bfb180fad75d9a4799d1285ecf6479c5274667e3f66ce9317cb1efd201c1",
+  "catalog_sha256": "e162bf41100261bf9c3f4229c7653528be206df2c47d4590562d9903d9fb2f23",
   "samples": [
     "internal/app/testdata/agent-flow/agent-flow.candidate.json",
     "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
@@ -59,21 +59,21 @@
   ],
   "counts": {
     "offerings": {
-      "disabled": 24,
-      "disabled-zero-egress": 24,
+      "disabled": 26,
+      "disabled-zero-egress": 26,
       "enabled": 58,
       "local-no-wire": 6,
       "partial": 7,
       "real": 45,
-      "total": 82
+      "total": 84
     },
     "units": {
       "derived": 17,
-      "disabled-zero-egress": 9,
+      "disabled-zero-egress": 11,
       "local-no-wire": 4,
       "missing": 1,
       "real": 108,
-      "total": 139
+      "total": 141
     }
   },
   "incomplete": [
@@ -2318,6 +2318,20 @@
     {
       "adapter_key": "openai-images.v1",
       "capability": "image-to-image",
+      "endpoint": "(disabled)",
+      "evidence": "disabled-zero-egress",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "openai/gpt-image-2.5-sunburst/image-to-image",
+          "model_id": "gpt-image-2.5-sunburst",
+          "enabled": false
+        }
+      ]
+    },
+    {
+      "adapter_key": "openai-images.v1",
+      "capability": "image-to-image",
       "endpoint": "POST /v1/images/edits",
       "hosts": [
         "example.test"
@@ -2332,8 +2346,22 @@
       "offerings": [
         {
           "id": "openai/gpt-image-2/image-to-image",
-          "model_id": "gpt-image-2.5-sunburst",
+          "model_id": "gpt-image-2.6-sunburst",
           "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "openai-images.v1",
+      "capability": "text-to-image",
+      "endpoint": "(disabled)",
+      "evidence": "disabled-zero-egress",
+      "evidence_files": [],
+      "offerings": [
+        {
+          "id": "openai/gpt-image-2.5-sunburst/text-to-image",
+          "model_id": "gpt-image-2.5-sunburst",
+          "enabled": false
         }
       ]
     },
@@ -2355,7 +2383,7 @@
       "offerings": [
         {
           "id": "openai/gpt-image-2/text-to-image",
-          "model_id": "gpt-image-2.5-sunburst",
+          "model_id": "gpt-image-2.6-sunburst",
           "enabled": true
         }
       ]
@@ -3833,8 +3861,28 @@
       ]
     },
     {
-      "id": "openai/gpt-image-2/image-to-image",
+      "id": "openai/gpt-image-2.5-sunburst/image-to-image",
       "model_id": "gpt-image-2.5-sunburst",
+      "adapter_key": "openai-images.v1",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
+      "units": [
+        "openai-images.v1|image-to-image|(disabled)"
+      ]
+    },
+    {
+      "id": "openai/gpt-image-2.5-sunburst/text-to-image",
+      "model_id": "gpt-image-2.5-sunburst",
+      "adapter_key": "openai-images.v1",
+      "enabled": false,
+      "evidence": "disabled-zero-egress",
+      "units": [
+        "openai-images.v1|text-to-image|(disabled)"
+      ]
+    },
+    {
+      "id": "openai/gpt-image-2/image-to-image",
+      "model_id": "gpt-image-2.6-sunburst",
       "adapter_key": "openai-images.v1",
       "enabled": true,
       "evidence": "real",
@@ -3844,7 +3892,7 @@
     },
     {
       "id": "openai/gpt-image-2/text-to-image",
-      "model_id": "gpt-image-2.5-sunburst",
+      "model_id": "gpt-image-2.6-sunburst",
       "adapter_key": "openai-images.v1",
       "enabled": true,
       "evidence": "real",

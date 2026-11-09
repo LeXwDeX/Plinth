@@ -85,7 +85,7 @@ func TestMockChatAgentRunsHTTPTaskAndSSEToCompletion(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/api/chat/sessions/"+sessionID+"/messages",
-		`{"content":"configured picture request","ai_model":"gpt-image-2.5-sunburst","creative_domain":"image"}`,
+		`{"content":"configured picture request","ai_model":"gpt-image-2.6-sunburst","creative_domain":"image"}`,
 	)
 	if send.Code != http.StatusAccepted {
 		t.Fatalf("send status=%d body=%s", send.Code, send.Body)
@@ -280,7 +280,7 @@ func TestMockChatAgentAppliesSelectedSkillFromRuntimeCatalog(t *testing.T) {
 		"/api/chat/sessions/"+sessionID+"/messages",
 		`{
 			"content":"a girl holding a sword",
-			"ai_model":"gpt-image-2.5-sunburst",
+			"ai_model":"gpt-image-2.6-sunburst",
 			"_skill":{
 				"id":"configured-runtime-skill",
 				"name":"untrusted client name"

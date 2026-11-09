@@ -7,7 +7,7 @@
 #   - 批准方式：每个会话先显式设为手工方式。2D 在手工方式下由策略直接批准，不再出现待批准同意，
 #     脚本因此不等待同意：若同意恰好待批准，仍由脚本 GET pending-approvals 取得 request_id 后产品外 PUT /api/v1/tasks/grants/{id} 批准
 #     （产品内严禁自动批准）；否则直接等待任务。
-# 用法（服务器上）: ART_AI_SERVER_ROOT=<发布根> MODELS=gpt-image-2.5-sunburst bash smoke-l3-batch.sh
+# 用法（服务器上）: ART_AI_SERVER_ROOT=<发布根> MODELS=gpt-image-2.6-sunburst bash smoke-l3-batch.sh
 #   MODELS 缺省 = schema 全部可用 text-to-image 模型（逗号分隔可过滤）。
 # 凭据：读 production/runtime.env。数据保留不清理。
 set -u

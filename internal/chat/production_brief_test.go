@@ -527,7 +527,7 @@ func TestSetExplicitModel3DRefusesAModelTheValidatorRejects(t *testing.T) {
 	service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) {
 		config.ExplicitModel3DValid = func(model string) bool { return model == "meshy-7.1" }
 	})
-	if _, err := service.SetExplicitModel3D(ctx, "owner-a", "session-a", "gpt-image-2.5-sunburst"); !errors.Is(err, chat.ErrInvalidExplicitModel3D) {
+	if _, err := service.SetExplicitModel3D(ctx, "owner-a", "session-a", "gpt-image-2.6-sunburst"); !errors.Is(err, chat.ErrInvalidExplicitModel3D) {
 		t.Fatalf("a 2D model was accepted: %v", err)
 	}
 	stored, err := service.SessionExplicitModel3D(ctx, "owner-a", "session-a")

@@ -11,7 +11,7 @@ import (
 const OfficialBase = "dev-test OpenAI-compatible image gateway /v1"
 
 // Model is the image model the Catalog's gpt-image-2 Offerings send.
-const Model = "gpt-image-2.5-sunburst"
+const Model = "gpt-image-2.6-sunburst"
 
 const prompt = "a plain red cube on a white background"
 

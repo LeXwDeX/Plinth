@@ -171,7 +171,7 @@ func TestOpenAIImagesGenerationMatchesOfficialContract(t *testing.T) {
 			http.Error(w, "decode body", http.StatusBadRequest)
 			return
 		}
-		if body["model"] != "gpt-image-2.5-sunburst" {
+		if body["model"] != "gpt-image-2.6-sunburst" {
 			t.Errorf("model = %#v", body["model"])
 		}
 		if body["prompt"] != "a red fox in snow" {

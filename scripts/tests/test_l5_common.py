@@ -680,21 +680,21 @@ class Artifacts(unittest.TestCase):
 
 class Models(unittest.TestCase):
     OFFERINGS = [
-        {"id": "openai/gpt-image-2/text-to-image", "model_id": "gpt-image-2.5-sunburst", "available": True},
+        {"id": "openai/gpt-image-2/text-to-image", "model_id": "gpt-image-2.6-sunburst", "available": True},
         {"id": "meshy/nano-banana-pro/text-to-image", "model_id": "nano-banana-pro", "available": False},
         {"id": "gemini/x/text-to-image", "model_id": "gemini-3", "available": True},
     ]
 
     def test_model_id_not_offering_id(self):
-        self.assertEqual(c.pick_model_id(self.OFFERINGS), "gpt-image-2.5-sunburst")
+        self.assertEqual(c.pick_model_id(self.OFFERINGS), "gpt-image-2.6-sunburst")
         self.assertEqual(c.pick_model_id(self.OFFERINGS, ("gemini",)), "gemini-3")
-        self.assertEqual(c.pick_model_id(self.OFFERINGS, ("nano-banana-pro",)), "gpt-image-2.5-sunburst")
+        self.assertEqual(c.pick_model_id(self.OFFERINGS, ("nano-banana-pro",)), "gpt-image-2.6-sunburst")
         self.assertIsNone(c.pick_model_id([]))
         self.assertIsNone(c.pick_model_id([{"id": "a", "available": True}]))
 
     def test_offering_model_ids(self):
         self.assertEqual(c.offering_model_ids(self.OFFERINGS),
-                         {"openai/gpt-image-2/text-to-image": "gpt-image-2.5-sunburst",
+                         {"openai/gpt-image-2/text-to-image": "gpt-image-2.6-sunburst",
                           "gemini/x/text-to-image": "gemini-3"})
 
     def test_multiview_request(self):

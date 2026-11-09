@@ -6,7 +6,7 @@
 
 当前启用身份（OpenAI 与 Google 在两类能力上各只有一个活跃模型；Meshy 两类能力仍各有两个活跃身份）：
 
-- OpenAI：`gpt-image-2.5-sunburst`（官方指南中的高精度编辑档位；`gpt-image-2` 仅保留在历史任务快照与展示映射中）。
+- OpenAI：`gpt-image-2.6-sunburst`（2026-11-09 上游网关由 2.5 升级为 2.6，2.5 已不可用，#224；`gpt-image-2`、`gpt-image-2.5-sunburst` 仅保留在历史任务快照与展示映射中，会话中保存的 2.5 选择经 `retired_generation_models` 自动改用 2.6）。
 - Google：仅 `gemini-3-pro-image`。`gemini-3.1-flash-image` 不在目录中：内网 llms 网关对该模型名返回 `model not supported by any target`（2026-09-27 用 gemini 密钥逐名实测），不保留禁用占位。
 - Offering ID 保持不变（如 `openai/gpt-image-2/image-to-image`），是历史任务与既有客户端提交的稳定路由键；模型身份来自 `model_id`。
 
@@ -15,7 +15,7 @@
 | 系列 | 当前协议 | 尺寸 / 比例 | 其他生成参数 |
 | --- | --- | --- | --- |
 | Meshy Nano Banana Pro / 2 | OpenAPI v1 text-to-image / image-to-image | 1:1、4:3、3:4、16:9、9:16；多视图时省略比例 | 多视图、去背景、文生图姿态、最多 5 张参考图 |
-| GPT Image 2.5 Sunburst | 文生图 JSON `images/generations`；图生图 multipart `images/edits` | auto、预设与自定义 WxH；边长为 16 倍数、最长 3840、比例至 3:1、总像素 655360–8294400 | quality（含 xhigh / max）、n、PNG/JPEG/WebP、压缩、背景、moderation、16 张参考图、PNG 蒙版 |
+| GPT Image 2.6 Sunburst | 文生图 JSON `images/generations`；图生图 multipart `images/edits` | auto、预设与自定义 WxH；边长为 16 倍数、最长 3840、比例至 3:1、总像素 655360–8294400 | quality（含 xhigh / max）、n、PNG/JPEG/WebP、压缩、背景、moderation、16 张参考图、PNG 蒙版 |
 | Gemini 3 Pro Image | 网宿 Chat Completions | 10 种比例；1K / 2K / 4K；已实测 9:16 / 2K | messages 文生图/参考图输入、data URI 图片返回；最多 14 张参考图 |
 | Gemini 3.1 Flash Image | 网宿 Chat Completions | 渠道声明 10 种比例；1K / 2K / 4K | 同上；保持禁用状态，未做该模型的付费验收 |
 | Seedream 4.5 | Ark v3 images/generations | 2K / 4K 与自定义 WxH；总像素 3686400–16777216 | 连续组图、max_images、水印、URL/base64 响应、standard 提示优化、14 张参考图；参考图与输出图合计不超过 15 |
@@ -47,6 +47,8 @@
 - E2 图生图 multipart + **16 张参考图** → 200（声明上限 16 张被代理接受）。
 
 App 端到端抽查（dev-test 生产同构测试环境，镜像 `a5e941e`）：原生 `POST /api/v1/tasks` 提交 `{size:1024x640, quality:low, output_format:webp, background:transparent}` → SUCCEEDED（12.3s），产物 VP8L WebP 实际解码 1024×640 与请求一致（任务 `task_b0909958e9da1209299bd224ebf82610`）。探针脚本与结果位于 dev-test `/tmp/probe2d/`（未入库；driver 不落盘密钥）。
+
+2026-11-09 `gpt-image-2.6-sunburst` 实测（#224，用户当次同意，dev-test `OPENAI_API_KEY`，5 次请求全部 200）：`quality=max`、`quality=xhigh`（1024×1024）、`3840x2160`（quality=low）、`background=transparent`（png）、`images/edits` 带 `image[]` 与 `mask`。响应 `data[]` 为 `b64_json` 与新增的 `generation_id`，仍无 `mime_type`；顶层返回 `size`、`quality`、`background`、`output_format`、`usage`。结论：2.6 接受 2.5 的全部声明参数取值，Catalog 只切换模型 ID 与显示名；官方新增的 `complexity`、`markup`、GIF/SVG 输出未接入（SVG 见 #222）。同日经用户同意用 `fake-upstream-align official` 采集（5 个请求，其中付费 2 次）：`images/generations` 成功响应入库为新的文生图样本，`data[]` 含 `generation_id`、顶层新增 `safety_identifier`，缺 prompt 时网关返回 400 `empty_string`；fake 的文生图响应随样本更新。`images/edits` 的付费请求网关返回 503、缺图请求返回 500 `convert_request_failed`（同日手工以 `image[]`+`mask` 直测为 200），图生图样本暂保留 2.5 版本，待网关稳定后经同意重采。
 
 结论（GPT Image 2.5 Sunburst 全声明参数）：
 
@@ -89,7 +91,7 @@ GPT Image 2 文生图和图生图、Seedream 4.5、Meshy Nano Banana Pro/2 已�
 - **Offering ID 不含模型名变更**：`openai/gpt-image-2/text-to-image` / `image-to-image` 是历史沿用的供给项 ID（非模型名），升级前后保持不变；以 offering_id 提交的调用方不受影响。
 - **`ai_model` 提交旧名的实际行为（dev-test 实测）**：chat 消息带 `ai_model=gpt-image-2` 返回 202；agent 解析不到该模型时**不报错、不静默换模型**，而是回退到「未选模型」引导路径——`list_offerings` 列出有效模型并请用户选择，同时正常进入积分同意流程。生图不会被旧模型名触发。
 - **历史任务展示不受影响**：任务快照保留创建时的模型身份，旧任务仍显示原名（`legacy_task_snapshot_compat_test` 覆盖）。
-- **provider 发现**：legacy 投影与 extended 投影均只声明 `gpt-image-2.5-sunburst`。
+- **provider 发现**：legacy 投影与 extended 投影均只声明当前模型（2026-11-09 起为 `gpt-image-2.6-sunburst`，#224）。
 - **对外说明**：如有第三方脚本以 `ai_model=gpt-image-2` 提交，需改为 `gpt-image-2.5-sunburst`；不改则只会得到模型选择引导而不会生成。若未来收到真实集成方的兼容诉求，再评估是否在 `legacy_models` 加带兼容规则的别名，当前不做。
 
 ## 接口依据

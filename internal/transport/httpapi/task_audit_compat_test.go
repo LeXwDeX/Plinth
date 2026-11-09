@@ -71,7 +71,7 @@ func TestLegacyTaskCreateRequiresApprovedExecution(t *testing.T) {
 		"/api/meshy/text-to-image",
 		strings.NewReader(`{
 			"prompt":"legacy audit task",
-			"ai_model":"gpt-image-2.5-sunburst",
+			"ai_model":"gpt-image-2.6-sunburst",
 			"size":"1024x1024",
 			"quality":"high"
 		}`),

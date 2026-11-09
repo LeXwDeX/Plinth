@@ -32,7 +32,7 @@ func TestOpenAICurrentProtocolThroughApplication(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Errorf("decode: %v", err)
 			}
-			if body["model"] != "gpt-image-2.5-sunburst" || body["prompt"] != "fox" {
+			if body["model"] != "gpt-image-2.6-sunburst" || body["prompt"] != "fox" {
 				t.Errorf("generation body: %#v", body)
 			}
 		case "/v1/images/edits":
@@ -44,7 +44,7 @@ func TestOpenAICurrentProtocolThroughApplication(t *testing.T) {
 				http.Error(w, "bad form", 400)
 				return
 			}
-			if r.FormValue("model") != "gpt-image-2.5-sunburst" || r.FormValue("prompt") != "fox" {
+			if r.FormValue("model") != "gpt-image-2.6-sunburst" || r.FormValue("prompt") != "fox" {
 				t.Errorf("edit fields: model=%q prompt=%q", r.FormValue("model"), r.FormValue("prompt"))
 			}
 			if file, _, err := r.FormFile("image[]"); err != nil {

@@ -52,7 +52,7 @@ L5 脚本是 `.py`，不读取 `runtime.env`，只在本地通过 `release-env.p
 
 - L2/L3 都通过已登录 Cookie 写会话、发消息和批准/拒绝时携带同源 `Origin: $BASE`。L2/L3 必须先让 Agent 调用实际生成工具（L2 的 3D 部分 `create_model_3d`，L2 的 2D 部分和 L3 每张图 `refine_image`），以生成工具建立的 exact prepared execution 作为待批准对象；不依赖旧 `request_consent` 流程。批准卡片独立于轮次保存，旧的 `/api/v1/agent/consent` 不再反映它；脚本先 `GET /api/v1/chat/sessions/{id}/pending-approvals` 读取状态为 pending 的卡片及其 `request_id`、`capability`，再 `PUT /api/v1/tasks/grants/{request_id}` 提交 `{"<成员名>":"approve"}` 或 `{"<成员名>":"deny"}`；成员名与浏览器一样，按公开 Schema（`GET /api/v1/schema`）的 `chat.api.fields.decision` 读取，默认成员名为 `decision`（#120）。L2 停止 A 后和拒绝 B 后会拒绝会话里剩下的待批准卡片；L3 只批准 2D 图片步骤，其他卡片一律拒绝。批准动作只发生在产品外 smoke 脚本，产品本身仍要求明确人工批准。
 - L3 协议：每模型每轮 `IMAGES_PER_MODEL` 张（默认 5，**协议上限 5**），满一轮即止不循环；零人工（脚本代批同意仅限产品外 smoke 操作，属测试操作授权）；断言 = 终态 SUCCEEDED + required 资产 READY + URL 200 + media_type 魔数一致 + sha256/size 与服务端声明字节级一致 + 连续回合必须出现**新 task id** + 跨用户任务/资产 403/404；报告缺省落服务器 `$ART_AI_SERVER_ROOT/production/reports/smoke-l3/`（`L3_REPORT_DIR` 可覆盖）。
-  - 用法：`ART_AI_SERVER_ROOT=<root> MODELS=gpt-image-2.5-sunburst bash smoke-l3-batch.sh`（`MODELS` 缺省 = schema 全部可用 text-to-image 模型；`IMAGES_PER_MODEL` 缺省 5）。
+  - 用法：`ART_AI_SERVER_ROOT=<root> MODELS=gpt-image-2.6-sunburst bash smoke-l3-batch.sh`（`MODELS` 缺省 = schema 全部可用 text-to-image 模型；`IMAGES_PER_MODEL` 缺省 5）。
   - L3 不再等待同意：每个会话先设为手工方式；2D 由策略批准，脚本直接等新任务出现。若同意恰好待批准，仍由脚本按 pending-approvals → grants 批准后继续；两种情况都继续断言终态与字节。
   - 满一轮无问题 → **暂停分析**，不继续加图（dev_test.md §11.3 口径）。
   - 红证已做：`MODELS=nonexistent-model` → FAIL（EXIT=1），失败可被检测。
