@@ -57,3 +57,46 @@ describe('unavailable picker rows', () => {
     expect(screen.getByTestId('skill-delete')).toBeTruthy();
   });
 });
+
+describe('the two-column picker (#223)', () => {
+  const section = (title: string, keys: string[], selectedKey: string) => ({
+    title, head: ['Name'], columns: '1fr', selectedKey, onPick: vi.fn(), closeOnPick: false,
+    rows: keys.map((key) => ({ key, cells: [{ text: key }] })),
+  });
+
+  it('lays the tables out as columns and moves between them with the left and right arrows', async () => {
+    render(<TablePopover label="Model" value="b · y" testId="picker" columns sections={[
+      section('Models', ['a', 'b'], 'b'),
+      section('Levels', ['x', 'y', 'z'], 'y'),
+    ]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Model: b · y' }));
+    const panel = await screen.findByTestId('picker-panel');
+    expect(panel.getAttribute('data-layout')).toBe('columns');
+    expect(screen.getByRole('menu', { name: 'Models' })).toBeTruthy();
+    expect(screen.getByRole('menu', { name: 'Levels' })).toBeTruthy();
+    const a = screen.getByRole('menuitemradio', { name: 'a' });
+    a.focus();
+    // To the other column: its current choice takes focus.
+    fireEvent.keyDown(a, { key: 'ArrowRight' });
+    expect(document.activeElement?.textContent).toContain('y');
+    fireEvent.keyDown(document.activeElement as Element, { key: 'ArrowDown' });
+    expect(document.activeElement?.textContent).toContain('z');
+    fireEvent.keyDown(document.activeElement as Element, { key: 'ArrowLeft' });
+    expect(document.activeElement?.textContent).toContain('b');
+    // No column further left: focus stays.
+    fireEvent.keyDown(document.activeElement as Element, { key: 'ArrowLeft' });
+    expect(document.activeElement?.textContent).toContain('b');
+  });
+
+  it('focuses the first row of a column without a current choice', async () => {
+    render(<TablePopover label="Model" value="a" columns sections={[
+      section('Models', ['a', 'b'], 'a'),
+      section('Levels', ['x', 'y'], ''),
+    ]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Model: a' }));
+    const a = await screen.findByRole('menuitemradio', { name: 'a' });
+    a.focus();
+    fireEvent.keyDown(a, { key: 'ArrowRight' });
+    expect(document.activeElement?.textContent).toContain('x');
+  });
+});

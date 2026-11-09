@@ -49,9 +49,11 @@ export function chatModelSection(
 }
 
 /**
- * #176: one entry for the chat model and its thinking level. The popover stacks the model table over the
- * current model's level table; picking a model keeps it open so the level can follow, and picking a level
- * closes it. Neither choice changes the server protocol: the two existing per-session PUTs run in order.
+ * #176: one entry for the chat model and its thinking level. #223: the popover shows them in two columns,
+ * the offered models on the left and the levels of the highlighted (session) model on the right. Picking a
+ * model keeps it open and the right column follows once the server answers with that model's levels (a level
+ * the new model lacks falls back to its default there); picking a level closes it. Neither choice changes the
+ * server protocol: the two existing per-session PUTs run in order. A narrow panel stacks the two columns.
  */
 export function ChatModelPicker() {
   const { schema } = useProductSchema();
@@ -72,26 +74,44 @@ export function ChatModelPicker() {
     ? 'ui.studio.chat_model.combined_hint'
     : levelsAvailable ? 'ui.studio.reasoning.hint' : 'ui.studio.chat_model.hint');
   const sections: TableSection[] = [];
+  const offline = chatModel.choice?.fallback
+    ? (
+      <UnavailableNotice
+        className="text-[11px] leading-4"
+        label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.picker.chat_model_offline'))}
+        detail={formatSchemaText(schemaText(schema, 'ui.studio.chat_model.fallback'), { model: selectedModel })}
+      />
+    )
+    : null;
   if (multipleModels) {
-    sections.push({
-      ...chatModelSection(schema, chatModel.choice, (id) => {
+    const section = chatModelSection(schema, chatModel.choice, (id) => {
         if (id === chatModel.choice?.selected) return;
         void chatModel.setModel(id).then((ok) => {
           if (!ok) toast.error(schemaText(schema, 'ui.studio.chat_model.change_failed'));
         });
-      }),
+    });
+    sections.push({
+      ...section,
+      ...(offline ? { foot: <div className="flex flex-col gap-1">{offline}<span>{schemaText(schema, 'ui.studio.chat_model.note')}</span></div> } : {}),
       closeOnPick: false,
       testId: 'workspace-chat-model-section',
     });
   }
   if (levelsAvailable) {
+    const section = reasoningSection(schema, reasoning.reasoning, (next) => {
+      if (next === reasoning.reasoning?.effort) return;
+      void reasoning.setLevel(next).then((ok) => {
+        if (!ok) toast.error(schemaText(schema, 'ui.studio.reasoning.change_failed'));
+      });
+    });
     sections.push({
-      ...reasoningSection(schema, reasoning.reasoning, (next) => {
-        if (next === reasoning.reasoning?.effort) return;
-        void reasoning.setLevel(next).then((ok) => {
-          if (!ok) toast.error(schemaText(schema, 'ui.studio.reasoning.change_failed'));
-        });
-      }),
+      ...section,
+      // #223: beside the model column the levels name the model they belong to and explain an empty list.
+      ...(multipleModels ? {
+        title: formatSchemaText(schemaText(schema, 'ui.studio.chat_model.levels_title'), { model: selectedModel }),
+        emptyText: formatSchemaText(schemaText(schema, 'ui.studio.chat_model.levels_none'), { model: selectedModel }),
+        loadingText: schemaText(schema, 'ui.studio.chat_model.levels_loading'),
+      } : {}),
       closeOnPick: true,
       loading: chatModel.busy || reasoning.busy,
       testId: 'workspace-reasoning-section',
@@ -111,7 +131,7 @@ export function ChatModelPicker() {
       triggerDisabledReason={!activeSessionId ? schemaText(schema, 'ui.unavailable.reason.picker.no_session') : undefined}
       disabled={!activeSessionId || chatModel.busy || reasoning.busy}
       sections={sections}
-      stacked
+      columns
     />
   );
 }
