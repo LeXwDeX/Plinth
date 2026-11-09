@@ -36,7 +36,7 @@ const samplePrefix = "/v1"
 
 const (
 	docsRoot = "https://platform.openai.com/docs/api-reference/images/"
-	captured = "2026-10-29"
+	captured = "2026-11-09"
 	// docsCheckedAt is the day the constructed fault answers were checked
 	// against the official documents; docsErrors is the error-code guide.
 	docsCheckedAt = "2026-11-08"

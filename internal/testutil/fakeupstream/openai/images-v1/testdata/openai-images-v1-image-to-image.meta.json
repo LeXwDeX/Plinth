@@ -1,7 +1,7 @@
 {
   "api_version": "v1",
-  "candidate_sha256": "39fa5a33b817825046b49d62803893d60e616d9ecf4314dde768b892eb2a33b1",
-  "captured_at_utc": "2026-10-29",
+  "candidate_sha256": "281b133e01364cf4a6fe8f89fbc34a11531e54eb33c9f4bf94bb39b629b9ac1e",
+  "captured_at_utc": "2026-11-09",
   "exchanges": 2,
   "offering": "openai/gpt-image-2/image-to-image",
   "provenance": "captured",
