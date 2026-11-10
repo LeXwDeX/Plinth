@@ -680,6 +680,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateImageReview(schema); err != nil {
 		return err
 	}
+	if err := validateImageMask(schema); err != nil {
+		return err
+	}
 	if err := validateWorkLedger(schema); err != nil {
 		return err
 	}
@@ -720,6 +723,23 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		}
 		// #296: a reference sets the output size only for a generation tool
 		// that sends reference pictures, and its note needs both templates.
+		// #244: every tool says what it does with the frozen selection mask of
+		// a canvas turn. Only a generation tool that declares the mask mapping
+		// and its tool argument can bind it; anything else must ignore it.
+		switch tool.SelectionMask {
+		case "bind":
+			if !acceptReferences || tool.Processing != nil ||
+				tool.ArgumentMappings["mask"] != "mask" || tool.OverrideMappings["mask"] != "mask" ||
+				!toolSchemaDeclaresParameter(tool, "mask") {
+				return fmt.Errorf("tools[%d] selection_mask bind 需要读取参考图、声明 mask 参数映射且不加工模型的生成工具", index)
+			}
+		case "", "ignore":
+			// A Catalog written before #244 declares no mask binding; it
+			// keeps its old whole-image behavior. The shipped Catalog declares
+			// one on every tool (checked by its own tests).
+		default:
+			return fmt.Errorf("tools[%d] selection_mask 必须是 bind 或 ignore: %q", index, tool.SelectionMask)
+		}
 		switch tool.ReferenceSize {
 		case "":
 		case "single":
@@ -841,6 +861,7 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"find_history_images":     {"history.images", "READ", []string{"image", "model-3d"}},
 		"recover_task_result":     {"task.refetch", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"inspect_image":           {"image.inspect", "READ", []string{"image", "model-3d"}},
+		"create_selection_mask":   {"image.mask", "READ", []string{"image"}},
 		"inspect_model":           {"model.inspect", "READ", []string{"model-3d"}},
 		"render_model_views":      {"model.render", "READ", []string{"model-3d"}},
 		"compare_models":          {"model.compare", "READ", []string{"model-3d"}},
@@ -1414,6 +1435,9 @@ func validateChatAttachments(schema ChatSchema) error {
 	if err := validateCanvasLayout(context); err != nil {
 		return err
 	}
+	if err := validateSelectionMask(context); err != nil {
+		return err
+	}
 	for _, kind := range []string{"image", "model"} {
 		if !strings.Contains(context.UnpicturedAttachmentTemplates[kind], "{handle}") {
 			return fmt.Errorf("context.unpictured_attachment_templates 缺少含 {handle} 的 %s 模板", kind)
@@ -1485,6 +1509,106 @@ func validateCanvasLayout(context ChatContextSchema) error {
 		}
 	}
 	return nil
+}
+
+// validateSelectionMask checks the texts and bounds of the frozen selection
+// mask of a canvas turn (#244). They are required whenever the Schema declares
+// a canvas input source: the mask only rides with a canvas turn.
+func validateSelectionMask(context ChatContextSchema) error {
+	if strings.TrimSpace(context.CanvasInputSource) == "" {
+		return nil
+	}
+	// A minimal Catalog may declare a canvas source without selection masks
+	// (#244); the feature is complete only when one of its texts or the preview
+	// style is declared, and then every part is required.
+	preview := context.SelectionMaskPreview
+	if strings.TrimSpace(context.SelectionMaskItemTemplate) == "" &&
+		strings.TrimSpace(context.SelectionMaskNote) == "" &&
+		strings.TrimSpace(context.SelectionMaskPreviewLabel) == "" &&
+		preview.MaxPixels == 0 && strings.TrimSpace(preview.MediaType) == "" {
+		return nil
+	}
+	if !strings.Contains(context.SelectionMaskItemTemplate, "{handle}") ||
+		!strings.Contains(context.SelectionMaskItemTemplate, "{bbox}") ||
+		!strings.Contains(context.SelectionMaskItemTemplate, "{coverage}") ||
+		strings.TrimSpace(context.SelectionMaskNote) == "" ||
+		strings.TrimSpace(context.SelectionMaskPreviewLabel) == "" {
+		return errors.New("context 的选区蒙版文案缺少占位符或为空（selection_mask_item_template 需要 {handle} {bbox} {coverage}，selection_mask_note 与 selection_mask_preview_label 不能为空）")
+	}
+	if preview.MaxPixels <= 0 || strings.TrimSpace(preview.MediaType) == "" ||
+		preview.DimOpacity < 0 || preview.DimOpacity > 1 ||
+		preview.TintOpacity < 0 || preview.TintOpacity > 1 ||
+		!visionFlattenColour.MatchString(preview.TintColor) {
+		return errors.New("context.selection_mask_preview 的上限必须为正数，dim_opacity 与 tint_opacity 在 0..1，tint_color 为 #rrggbb，media_type 不能为空")
+	}
+	return nil
+}
+
+// validateImageMask checks the read-only create_selection_mask declaration
+// (#244): the tool it names exists as the declared control tool, its bounds
+// and modes are usable and its Agent-facing texts are present.
+func validateImageMask(schema ChatSchema) error {
+	mask := schema.ImageMask
+	if strings.TrimSpace(mask.Tool) == "" {
+		return nil
+	}
+	declared := false
+	for _, tool := range schema.AgentTools {
+		if tool.Name == mask.Tool && tool.Execution.ImplementationKey == "image.mask" &&
+			len(tool.Execution.Effects) == 1 && tool.Execution.Effects[0] == "READ" {
+			declared = true
+			break
+		}
+	}
+	if !declared {
+		return fmt.Errorf("chat.image_mask.tool 必须指向声明为 image.mask/READ 的控制工具: %q", mask.Tool)
+	}
+	if mask.Limits.MaxBytes <= 0 || mask.Limits.MaxPixels <= 0 || mask.Preview.MaxPixels <= 0 ||
+		strings.TrimSpace(mask.Preview.MediaType) == "" {
+		return errors.New("chat.image_mask 的 limits 与 preview.max_pixels 必须为正数，preview.media_type 不能为空")
+	}
+	seen := map[string]bool{}
+	for _, mode := range mask.Modes {
+		if mode != "subject" && mode != "region" && mode != "invert" {
+			return fmt.Errorf("chat.image_mask.modes 包含未知模式 %q", mode)
+		}
+		if seen[mode] {
+			return fmt.Errorf("chat.image_mask.modes 重复: %q", mode)
+		}
+		seen[mode] = true
+	}
+	if !seen["subject"] || !seen["region"] {
+		return errors.New("chat.image_mask.modes 必须包含 subject 与 region")
+	}
+	for name, text := range map[string]string{
+		"unreadable_template": mask.Texts.UnreadableTemplate,
+		"invalid_region":      mask.Texts.InvalidRegion,
+		"no_subject":          mask.Texts.NoSubject,
+		"result_note":         mask.Texts.ResultNote,
+	} {
+		if strings.TrimSpace(text) == "" {
+			return fmt.Errorf("chat.image_mask.texts.%s 不能为空", name)
+		}
+	}
+	for _, placeholder := range []string{"{url}", "{width}", "{height}", "{coverage}"} {
+		if !strings.Contains(mask.Texts.ResultNote, placeholder) {
+			return fmt.Errorf("chat.image_mask.texts.result_note 必须包含 %s", placeholder)
+		}
+	}
+	return nil
+}
+
+// toolSchemaDeclaresParameter reports whether the tool's parameter object
+// declares a property with the given name.
+func toolSchemaDeclaresParameter(tool ChatToolSchema, name string) bool {
+	var parameters struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(tool.Parameters, &parameters); err != nil {
+		return false
+	}
+	_, exists := parameters.Properties[name]
+	return exists
 }
 
 // notesFrameOrdered reports whether the session-notes template frames {notes}

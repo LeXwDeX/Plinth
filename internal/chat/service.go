@@ -24,15 +24,23 @@ var (
 	ErrInvalidInputSource = errors.New("chat: invalid input source")
 	// ErrInvalidMultiview rejects a multiview request without a model or with
 	// fewer than two, more than four or repeated views (#65).
-	ErrInvalidMultiview       = errors.New("chat: invalid multiview request")
-	ErrCanvasSourceMissing    = errors.New("chat: canvas input source without a snapshot")
-	ErrTurnActive             = errors.New("chat: turn already active")
-	ErrStreamNotFound         = errors.New("chat: stream not found")
-	ErrInvalidSessionPage     = errors.New("chat: invalid session page query")
-	ErrInvalidMessagePage     = errors.New("chat: invalid message page query")
-	ErrTurnCheckpointConflict = errors.New("chat: turn checkpoint conflict")
-	ErrInvalidApprovalMode    = errors.New("chat: invalid approval mode")
-	ErrInvalidAgentScope      = errors.New("chat: invalid agent scope")
+	ErrInvalidMultiview    = errors.New("chat: invalid multiview request")
+	ErrCanvasSourceMissing = errors.New("chat: canvas input source without a snapshot")
+	// ErrSelectionMaskWithoutCanvas rejects a selection mask on a turn that is
+	// not a canvas turn or whose snapshots did not verify; ErrSelectionMaskInvalid
+	// a mask asset that cannot be read or is not owned; ErrSelectionMaskSizeMismatch
+	// one whose size differs from the artboard snapshot (#244). A mask never
+	// degrades into a whole-image redraw.
+	ErrSelectionMaskWithoutCanvas = errors.New("chat: selection mask without a canvas snapshot")
+	ErrSelectionMaskInvalid       = errors.New("chat: selection mask invalid")
+	ErrSelectionMaskSizeMismatch  = errors.New("chat: selection mask size mismatch")
+	ErrTurnActive                 = errors.New("chat: turn already active")
+	ErrStreamNotFound             = errors.New("chat: stream not found")
+	ErrInvalidSessionPage         = errors.New("chat: invalid session page query")
+	ErrInvalidMessagePage         = errors.New("chat: invalid message page query")
+	ErrTurnCheckpointConflict     = errors.New("chat: turn checkpoint conflict")
+	ErrInvalidApprovalMode        = errors.New("chat: invalid approval mode")
+	ErrInvalidAgentScope          = errors.New("chat: invalid agent scope")
 )
 
 type Repository interface {
@@ -841,6 +849,11 @@ type StartTurn struct {
 	// any other, gives its object a handle in the usual order and rewrites the
 	// token in the stored text to that handle. Untrusted like the claims.
 	Mentions []MentionRef
+	// SelectionMask is the client's claim about this canvas turn's selection
+	// mask (#244). Unlike an attachment it is never dropped: a mask that does
+	// not verify for the owner, does not match the snapshot size or arrives
+	// without a canvas turn refuses the whole turn.
+	SelectionMask *SelectionMaskRef
 	// OnMentionsDropped, when set, receives the tokens that were left as plain
 	// text because they were not written in Content or their claim did not hold.
 	OnMentionsDropped func(tokens []string)
@@ -1003,6 +1016,9 @@ func (service *Service) startTurn(
 		// The person chose the canvas: without its verified snapshot the turn
 		// does not run, rather than continue from another picture or none.
 		return Message{}, ErrCanvasSourceMissing
+	}
+	if err := service.freezeSelectionMask(ctx, command, &command.Options); err != nil {
+		return Message{}, err
 	}
 	command.Options.Harness, err = service.freezeHarnessSnapshot(ctx, command.OwnerID, command.SessionID, command.Options.Selection)
 	if err != nil {

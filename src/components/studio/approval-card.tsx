@@ -478,7 +478,9 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
               : uploadedURL ? previewAssetUrl(uploadedURL) || safePreviewURL(uploadedURL) : '';
             return (
               <li key={`${input.handle}-${index}`} className="flex items-center gap-1.5 rounded-md border border-border bg-surface p-0.5 pr-1.5" data-testid="studio-approval-input" data-kind={input.kind}>
-                <InputThumbnail src={src} handle={input.handle || label || role} model={input.kind === 'task' || input.previewable === false} />
+                <InputThumbnail src={src} handle={input.handle || label || role} model={input.kind === 'task' || input.previewable === false}
+                  // A mask is mostly transparent: a checkerboard behind it shows its shape instead of a blank square (#244).
+                  checkerboard={input.parameter === 'mask'} />
                 <span className="text-[11px]">
                   {role || label ? <span className="font-medium text-foreground" data-testid="studio-approval-input-label">{[role, label].filter(Boolean).join(' · ')}</span> : null}
                   {input.viewLabel ? <span className="ml-1 rounded-sm bg-muted px-1 text-muted-foreground" data-testid="studio-approval-input-view">{formatSchemaText(schemaText(schema, 'ui.pending_approval.view_label'), { view: input.viewLabel })}</span> : null}
@@ -490,6 +492,9 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
             );
           })}
         </ul>
+      ) : null}
+      {model.maskNote ? (
+        <p className="text-muted-foreground [overflow-wrap:anywhere]" data-testid="studio-approval-mask-note">{model.maskNote}</p>
       ) : null}
       {model.referenceNote ? (
         // The server's reference note is the step's source note (which views or source model it is made from), or the
@@ -539,10 +544,12 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
 }
 
 /** Platform asset thumbnail; a neutral placeholder (a cube for a model) stands in when there is none or it fails to load. */
-function InputThumbnail({ src, handle, model }: { src: string; handle: string; model: boolean }) {
+function InputThumbnail({ src, handle, model, checkerboard = false }: { src: string; handle: string; model: boolean; checkerboard?: boolean }) {
   const [failed, setFailed] = useState(false);
   return (
-    <span className="flex size-8 items-center justify-center overflow-hidden rounded-sm bg-muted" data-testid="studio-approval-thumb" data-state={src && !failed ? 'image' : 'placeholder'}>
+    <span className="flex size-8 items-center justify-center overflow-hidden rounded-sm bg-muted" data-testid="studio-approval-thumb" data-state={src && !failed ? 'image' : 'placeholder'}
+      data-checkerboard={checkerboard || undefined}
+      style={checkerboard ? { backgroundImage: 'repeating-conic-gradient(#d4d4d4 0% 25%, #ffffff 0% 50%)', backgroundSize: '8px 8px' } : undefined}>
       {src && !failed
         ? <img src={src} alt={handle} onError={() => setFailed(true)} className="size-full object-cover" />
         : model ? <Box aria-hidden className="size-3.5 text-muted-foreground" /> : <ImageIcon aria-hidden className="size-3.5 text-muted-foreground" />}

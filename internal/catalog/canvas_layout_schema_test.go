@@ -67,6 +67,7 @@ func TestCanvasLayoutTextsAreRequired(t *testing.T) {
 	// it, #296) has its size set and reported.
 	changed = bytes.Replace(source, []byte(`"name": "refine_image",
           "canvas_source": "bind",
+          "selection_mask": "bind",
           "reference_size": "single",`), []byte(`"name": "refine_image",
           "canvas_source": "refuse",`), 1)
 	if bytes.Equal(changed, source) {

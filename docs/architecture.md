@@ -1647,6 +1647,20 @@ Chat Agent 通过三个只读工具直接查看本会话（分支会话含祖先
 
 图生 3D（`create_model_3d_from_image`、`create_model_3d_from_views`）提交前，`generationtool` 对最终参考图运行 `image_review.input_3d` 清单；不通过时返回 `refused_template` 并 `NoSubmission`，不提交、不扣费。工具参数 `input_override_reason` 允许 Agent 在用户明确要求照原图做时带理由放行；理由写入服务端日志并留在会话的工具调用参数中。输入图字节不可读时按 unknown 处理，不阻塞提交。
 
+### 选区作为冻结输入与带蒙版的局部修改（#244）
+
+**源码契约；本机测试与 fake 栈验证，未部署验收；真实上游 deferred。**
+
+用户在画布上圈选后直接对 Agent 说话是一条独立通路，不再依赖局部重绘弹窗。请求新增顶层成员 `chat.api.fields.selection_mask`（`selectionMask`），对象形状由 `chat.api.selection_mask.mask_asset_id`（`maskAssetId`）声明。与普通附件声明不同，蒙版不是可丢弃的 claim：`chat.Service.freezeSelectionMask`（`internal/chat/service_selection_mask.go`）在轮次开始时要求 `input_source` 等于 `chat.context.canvas_input_source`、本轮存在经校验的画板快照、蒙版属于该 owner 且可读、尺寸与快照逐像素相同、至少选中一个像素；任一失败返回 `ErrSelectionMaskWithoutCanvas` / `ErrSelectionMaskInvalid` / `ErrSelectionMaskSizeMismatch`，HTTP 映射 400 并拒绝本轮（不存消息、不建轮次）。蒙版像素事实由 `chat.SelectionMaskMeasurer` 读取：`internal/chat/references` 的 `MeasureMask` 经 input asset store 的 `OpenOwned` 打开 owner 的 PNG，`internal/imageinspect.MeasureMask` 报告宽高、透明（可编辑）区域的包围盒与覆盖率；`TurnOptions.SelectionMask`（JSON，无迁移）冻结 asset ID、宽高、包围盒与覆盖率，恢复轮次沿用同一份冻结值，客户端后续改画不会改变已发出的轮次。
+
+Agent 上下文在选中块后追加 `chat.context.selection_mask_item_template`（目标快照句柄、包围盒、覆盖率）与 `selection_mask_note`（透明=重画、不透明=保持、refine_image 自动带上、不要整图重画），并在最新用户消息后附一张服务端合成的选区预览图：`references.OpenSelectionPreview` 读取 owner 的快照与蒙版，`internal/imaging.RenderSelectionPreview` 按 `chat.context.selection_mask_preview` 把选区外压暗、选区内着色、缩放到像素上限并以 data URI 交给视觉上下文；合成失败只保留文字说明，不阻断轮次。`OrchestratorConfig.SelectionPreview` 由 `app.go` 接到该解析器。
+
+生成工具新增 `chat.tools[].selection_mask`（`bind` / `ignore`），refine_image 为 `bind`。`internal/chat/generationtool` 在选定 Offering 后检查：本轮回合带冻结蒙版而 Offering 未声明 mask 语义参数时，用户明确选定（会话 2D 锁、工作区模型或 Agent 的 model 参数）的模型不被替换，返回 `mask_unsupported_template` 并列出支持蒙版的可用模型（没有则用 `mask_no_supported_model`），`NoSubmission`；只有 userModel 为空且无人命名模型时，才改选第一个接受本轮输入、声明 mask 的 Offering，并在结果 `model_note` 写入 `mask_model_switch_note`。`buildInput` 在全部参数层之后由 Schema 绑定把冻结蒙版的 asset ID 写入 Offering 的 mask 语义参数（Agent 自己传入的 mask 参数若已生效则优先，非 bind 工具绝不写入）；冻结蒙版进入 prepared input 的 assets 与哈希，因此批准绑定的正是这份蒙版字节。仅 Agent 自造 mask、本轮没有冻结蒙版时维持 R1-7 丢弃，并由 `mask_not_applied_note` 写入结果 `mask_note`，不再静默。批准卡从 prepared input 的 assets 生成 mask 输入（棋盘底透明图），并在 `item.mask_note` 写入 `mask_approval_note`（只改选区），前端批准卡显示该说明。
+
+范围 3 新增只读控制工具 `create_selection_mask`（`application.chat.agent_tools`，`implementation_key: image.mask`、`effects: ["READ"]`、`domains: ["image"]`、`agent_scope: utility`）。`internal/chat/imagemask` 按与其他工具相同的 `HandlePolicy` 解析图片句柄、按 owner 读取 input asset 或 Task asset，`internal/imageinspect.RenderSubjectMask` / `RenderRegionMask` / `InvertMask` 在本地生成 PNG 蒙版（透明=重画），上传为该 owner 的 input asset，结果返回 `mask_url` 与宽高/包围盒/覆盖率，并把蒙版作为回复图片附上，用户先看到；该 URL 随后可直接作为 refine_image 的 mask 参数。工具不建 Task、不扣费、不改会话；`application.chat.image_mask` 声明字节/像素上限、模式、预览上限与 Agent 文案，Catalog 校验工具声明与文案占位符。所有新中文文案同时补英文 `localization.bundles.en.fields`（`chat.presentation.messages.mask_*`）与 content 文案（`ui.studio.mask.chip_selection`）。
+
+验证：`internal/catalog/chat_selection_mask_schema_test.go`（默认 Catalog 的 bind/ignore 声明、模板占位符、预览与工具声明、反例）；`internal/chat/references/mask_test.go`（owner、宽高/包围盒/覆盖率、非 PNG、跨 owner、预览合成）；`internal/chat/mask_selection_test.go`（冻结、非画布、无快照、尺寸不符、不可读、空选区均拒绝且不落消息）；`internal/chat/mask_prompt_internal_test.go`（选中块文案与预览 part、合成失败降级）；`internal/chat/generationtool/mask_selection_test.go`（绑定、Agent mask 优先、无蒙版模型拒绝且不提交、自动改选与 note、ignore 工具、R1-7 丢弃与 mask_note）；`internal/imageinspect/mask_test.go` 与 `internal/imaging/selection_test.go`（确定性蒙版与预览，选区外像素逐字节保持）；`internal/chat/imagemask/service_test.go`（region/subject、owner 校验、上传、拒绝、TaskID+AssetID 的生成产物按 Task 读取）；`internal/transport/httpapi/chat_mask_claim_test.go`（成员解码与 400，Schema 改名）；前端 vitest（请求编码、队列保留、批准卡说明、芯片副标题）；fake 上游 `openai/images-v1` 的 `/images/edits` 带 mask 时按蒙版合成，fake 栈 `--only mask-selection` 覆盖冻结、批准卡蒙版输入、产物蒙版外逐字节不变、无蒙版模型拒绝且不建 Task、create_selection_mask 以生成产物为 @selected 目标产出与复用（场景在独立私有 Catalog 中把 2D 编辑列入人工批准能力，端口用 `FAKE_STACK_FAKE_PORT=19580 FAKE_STACK_PORT=19581`）。真实上游未验收。
+
 ### 会话生产账本与一致性锚（#248）
 
 **源码与测试已实现；本机 fake 栈验证，未部署验收。**

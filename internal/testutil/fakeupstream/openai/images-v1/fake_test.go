@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/png"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -288,5 +291,79 @@ func TestGenerationReturnsEveryRequestedCandidate(t *testing.T) {
 		if err != nil || len(bytes) == 0 {
 			t.Fatalf("candidate %d does not decode: %v", index, err)
 		}
+	}
+}
+
+// #244: an edit with a mask copies the reference picture and repaints only the
+// mask's transparent pixels, so the bytes outside the mask stay identical.
+func TestMaskedEditChangesOnlyTheMaskedPixels(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	source := image.NewNRGBA(image.Rect(0, 0, 16, 16))
+	for y := 0; y < 16; y++ {
+		for x := 0; x < 16; x++ {
+			source.SetNRGBA(x, y, color.NRGBA{R: 200, G: 40, B: 30, A: 255})
+		}
+	}
+	mask := image.NewNRGBA(image.Rect(0, 0, 16, 16))
+	for y := 0; y < 16; y++ {
+		for x := 0; x < 16; x++ {
+			if x >= 4 && x < 12 && y >= 4 && y < 12 {
+				continue
+			}
+			mask.SetNRGBA(x, y, color.NRGBA{R: 255, G: 255, B: 255, A: 255})
+		}
+	}
+	encode := func(picture image.Image) []byte {
+		var buffer bytes.Buffer
+		if err := png.Encode(&buffer, picture); err != nil {
+			t.Fatal(err)
+		}
+		return buffer.Bytes()
+	}
+	build := func(maskBytes []byte) testkit.Body {
+		var buffer bytes.Buffer
+		writer := multipart.NewWriter(&buffer)
+		_ = writer.WriteField("model", Model)
+		_ = writer.WriteField("prompt", "replace the middle")
+		for name, data := range map[string][]byte{"image": encode(source), "mask": maskBytes} {
+			header := make(textproto.MIMEHeader)
+			header.Set("Content-Disposition", `form-data; name="`+name+`"; filename="`+name+`.png"`)
+			header.Set("Content-Type", "image/png")
+			part, err := writer.CreatePart(header)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = part.Write(data)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return testkit.Body{ContentType: writer.FormDataContentType(), Data: buffer.Bytes()}
+	}
+	status, body := edit(f, build(encode(mask)))
+	if status != http.StatusOK {
+		t.Fatalf("masked edit: %d %v", status, body)
+	}
+	outputBytes := picture(t, body)
+	output, _, err := image.Decode(bytes.NewReader(outputBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for y := 0; y < 16; y++ {
+		for x := 0; x < 16; x++ {
+			want := color.NRGBAModel.Convert(source.At(x, y)).(color.NRGBA)
+			got := color.NRGBAModel.Convert(output.At(x, y)).(color.NRGBA)
+			inside := x >= 4 && x < 12 && y >= 4 && y < 12
+			if !inside && got != want {
+				t.Fatalf("pixel %d,%d outside the mask changed: %+v -> %+v", x, y, want, got)
+			}
+			if inside && got == want {
+				t.Fatalf("pixel %d,%d inside the mask did not change", x, y)
+			}
+		}
+	}
+	status, body = edit(f, build([]byte("not a mask")))
+	if status != http.StatusBadRequest {
+		t.Fatalf("corrupt mask status = %d %v", status, body)
 	}
 }

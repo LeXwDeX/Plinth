@@ -45,6 +45,8 @@ it('carries the note that only the first pictures are used to the card (#329 E)'
   };
   expect(cardFromPending({ ...base, referenceNote: 'only the first of 2' }).referenceNote).toBe('only the first of 2');
   expect(cardFromPending(base).referenceNote).toBeUndefined();
+  expect(cardFromPending({ ...base, maskNote: 'only the selected area changes' }).maskNote).toBe('only the selected area changes');
+  expect(cardFromPending(base).maskNote).toBeUndefined();
 });
 
 it('carries the extra credits and what they pay for from either source, and none when there are none', () => {

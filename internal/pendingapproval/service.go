@@ -283,11 +283,15 @@ type Item struct {
 	// ReferenceNote says, in the reader's language, that the step uses only
 	// the first of the reference pictures the turn gave because the model
 	// takes fewer (#329 E); the inputs list only the pictures it uses.
-	ReferenceNote string    `json:"reference_note,omitempty"`
-	Inputs        []Input   `json:"inputs"`
-	MessageID     string    `json:"message_id"`
-	CreatedAt     time.Time `json:"created_at"`
-	ExpiresAt     time.Time `json:"expires_at"`
+	ReferenceNote string `json:"reference_note,omitempty"`
+	// MaskNote says the step changes only the region the person selected
+	// (#244). The mask itself appears among Inputs with parameter=mask; this
+	// note explains the transparency meaning in the reader's language.
+	MaskNote  string    `json:"mask_note,omitempty"`
+	Inputs    []Input   `json:"inputs"`
+	MessageID string    `json:"message_id"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
 
 	// Kind is ItemKindPlan for a production plan card and empty for a step
 	// approval (#103). RequestID of a plan card is its budget ID, decided
@@ -456,6 +460,9 @@ func (s *Service) item(ctx context.Context, owner string, op generationtool.Oper
 			prepared.NormalizedInput, func(text string) string { return s.text(ctx, text) }); note != "" {
 			item.ReferenceNote = note
 		}
+		if name := maskParameter(offering); name != "" && preparedUsesParameter(prepared, name) {
+			item.MaskNote = s.text(ctx, s.schema.Presentation.Messages.MaskApprovalNote)
+		}
 		if prepared.NativeQuote == nil {
 			item.EstimatedCredits = offering.EstimateTotalCredits(prepared.NormalizedInput)
 		}
@@ -525,6 +532,27 @@ func (s *Service) item(ctx context.Context, owner string, op generationtool.Oper
 		item.Inputs = append(item.Inputs, input)
 	}
 	return item
+}
+
+// preparedUsesParameter reports whether the frozen input carries an asset of
+// the named parameter.
+func preparedUsesParameter(prepared generation.PreparedInput, parameter string) bool {
+	for _, asset := range prepared.Assets {
+		if asset.Parameter == parameter {
+			return true
+		}
+	}
+	return false
+}
+
+// maskParameter names the Offering's mask-semantic parameter, or "".
+func maskParameter(offering generation.Offering) string {
+	for _, parameter := range offering.Parameters {
+		if parameter.Semantic == generation.SemanticMask {
+			return parameter.Name
+		}
+	}
+	return ""
 }
 
 // referenceNote says which pictures a step uses, in the locale ctx carries.

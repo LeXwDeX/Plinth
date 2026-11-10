@@ -191,6 +191,11 @@ type request struct {
 	model  string
 	form   map[string]string
 	hasImg bool
+	// imageData and maskData keep the first reference picture and the mask of
+	// an edit request (#244), so the fake can compose only the masked region
+	// and leave every other pixel of the picture byte for byte equal.
+	imageData []byte
+	maskData  []byte
 	// count is the requested candidate count (n): 1..10. The recorded samples
 	// only ever ask for one, so n>1 is a constructed-from-docs behavior.
 	count int
@@ -227,7 +232,14 @@ func readRequest(r *http.Request, endpoint string) (request, bool) {
 			data, _ := io.ReadAll(part)
 			switch name := part.FormName(); {
 			case name == "image" || name == "image[]":
-				out.hasImg = out.hasImg || len(data) > 0
+				if len(data) > 0 {
+					out.hasImg = true
+					if out.imageData == nil {
+						out.imageData = data
+					}
+				}
+			case name == "mask":
+				out.maskData = data
 			case part.FileName() == "":
 				out.form[name] = string(data)
 			}
@@ -278,12 +290,25 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request, endpoint string
 			"Your request was rejected by the safety system. If you believe this is an error, contact us.", ""))
 		return
 	}
-	file, err := fakeupstream.ImageFile("png")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	var data []byte
+	if endpoint == "/images/edits" && len(req.maskData) > 0 {
+		// #244: an edit with a mask changes only the mask's transparent pixels
+		// and copies every other pixel of the reference picture byte for byte.
+		composed, err := composeMaskedEdit(req.imageData, req.maskData)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, h.errorBody(endpoint, "invalid_request_error", "invalid_image",
+				"The reference image or the mask could not be decoded.", "mask"))
+			return
+		}
+		data = composed
+	} else {
+		file, err := fakeupstream.ImageFile("png")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		data = file.Data
 	}
-	data := file.Data
 	if scenario == fakeupstream.ScenarioArtifactCorrupt {
 		data = fakeupstream.Corrupt(data)
 	}
@@ -328,6 +353,51 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request, endpoint string
 		}
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// composeMaskedEdit copies the reference picture and repaints only the pixels
+// whose mask alpha is below 128 (the editable region, #244). The repaint is a
+// deterministic diagonal gradient, so a test can compare every pixel outside
+// the mask with the source and see that the inside changed. The output keeps
+// the reference picture's dimensions.
+func composeMaskedEdit(reference, mask []byte) ([]byte, error) {
+	source, _, err := image.Decode(bytes.NewReader(reference))
+	if err != nil {
+		return nil, err
+	}
+	decodedMask, _, err := image.Decode(bytes.NewReader(mask))
+	if err != nil {
+		return nil, err
+	}
+	bounds := source.Bounds()
+	width, height := bounds.Dx(), bounds.Dy()
+	if width <= 0 || height <= 0 {
+		return nil, errors.New("reference has no pixels")
+	}
+	out := image.NewRGBA(image.Rect(0, 0, width, height))
+	draw.Draw(out, out.Bounds(), source, bounds.Min, draw.Src)
+	maskBounds := decodedMask.Bounds()
+	for y := 0; y < height; y++ {
+		maskY := maskBounds.Min.Y + y*maskBounds.Dy()/height
+		for x := 0; x < width; x++ {
+			maskX := maskBounds.Min.X + x*maskBounds.Dx()/width
+			_, _, _, alpha := decodedMask.At(maskX, maskY).RGBA()
+			if alpha>>8 >= 128 {
+				continue
+			}
+			out.SetRGBA(x, y, color.RGBA{
+				R: uint8((x * 7) % 256),
+				G: uint8((y * 11) % 256),
+				B: uint8((x + y) % 256),
+				A: 255,
+			})
+		}
+	}
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, out); err != nil {
+		return nil, err
+	}
+	return encoded.Bytes(), nil
 }
 
 // candidatePNG returns a deterministic solid-colour picture whose bytes differ
