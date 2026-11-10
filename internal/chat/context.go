@@ -42,13 +42,18 @@ var (
 
 // ContextUsage is the token usage the upstream reported for the newest model
 // request of the session. The context in use is PromptTokens plus
-// CompletionTokens: what that request sent and what its reply added. It is
-// never estimated.
+// CompletionTokens: what that request sent and what its reply added. Those two
+// are never estimated. VisionTokens is separate: the Schema's declared
+// estimate of the request's pictures (#247), never mixed into the upstream count.
 type ContextUsage struct {
 	PromptTokens     int
 	CompletionTokens int
-	Model            string
-	UpdatedAt        time.Time
+	// VisionTokens is the Schema's declared estimate of the request's vision
+	// pictures (#247). It is deliberately separate from the upstream-reported
+	// prompt tokens, which already include the provider's own accounting.
+	VisionTokens int
+	Model        string
+	UpdatedAt    time.Time
 }
 
 // Tokens is the context the request left in use.

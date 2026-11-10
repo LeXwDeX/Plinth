@@ -373,6 +373,9 @@ func TestOrchestratorBuildsSchemaDrivenVisionContextOnlyForUserImages(
 	schema := configuredChatSchema(t)
 	schema.Context.TextPartKind = "configured-text-part"
 	schema.Context.ImagePartKind = "configured-image-part"
+	// This test pins the legacy Schema-driven behavior: no purpose-based
+	// vision block, so image_detail governs every picture (#247).
+	schema.Context.Vision = nil
 	schema.Context.ImageDetail = "configured-detail"
 	schema.Context.UserImageLabelTemplate = "\nconfigured-user-{index}"
 	schema.Context.AIImageLabelTemplate = "\nconfigured-ai-{index}"
@@ -1272,6 +1275,9 @@ func TestOrchestratorInlinesOwnedAssetURLsIntoVisionParts(t *testing.T) {
 	schema := configuredChatSchema(t)
 	schema.Context.TextPartKind = "configured-text-part"
 	schema.Context.ImagePartKind = "configured-image-part"
+	// This test pins the legacy Schema-driven behavior: no purpose-based
+	// vision block, so image_detail governs every picture (#247).
+	schema.Context.Vision = nil
 	schema.Context.ImageDetail = "configured-detail"
 	schema.Context.UserImageLabelTemplate = "\nconfigured-user-{index}"
 	schema.Context.AIImageLabelTemplate = "\nconfigured-ai-{index}"

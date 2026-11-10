@@ -199,6 +199,9 @@ type Env struct {
 	failures map[string]int
 	issued   map[string]int
 	epoch    int
+	// chatRequests keeps the bounded chat request record (#247). It is test
+	// fixture data, never an upstream contract.
+	chatRequests []ChatRequestRecord
 }
 
 // NewEnv applies the defaults to a Config.

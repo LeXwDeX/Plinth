@@ -219,6 +219,12 @@ type ServiceConfig struct {
 	// Models names the sessions' chat model and reads its thinking profile
 	// and context window (#322). A zero policy offers no level and no window.
 	Models ModelPolicy
+	// VisionBudget resolves the effective vision image budget for a model
+	// (#247); nil leaves the context view without a budget.
+	VisionBudget func(model string) int
+	// VisionTokenBudget resolves the effective per-request vision token bound
+	// for a model (#247); nil leaves the context view without a token bound.
+	VisionTokenBudget func(model string) int
 	// RetiredModels are the generation models no longer offered and the model
 	// that replaces each (Schema runtime.frontend.retired_generation_models,
 	// #329 follow-up). A turn's pick of a retired model is moved to its
@@ -293,6 +299,8 @@ type Service struct {
 	// models and contextStore serve the thinking level, the context usage
 	// and the compactions of sessions (#322).
 	models              ModelPolicy
+	visionBudget        func(model string) int
+	visionTokenBudget   func(model string) int
 	contextStore        ContextStore
 	compactionListLimit int
 }
@@ -388,6 +396,8 @@ func NewService(config ServiceConfig) (*Service, error) {
 		explicitModel3DValid:       config.ExplicitModel3DValid,
 		usageProfileKind:           usageProfileKindOf(config.ChoiceKinds),
 		models:                     config.Models,
+		visionBudget:               config.VisionBudget,
+		visionTokenBudget:          config.VisionTokenBudget,
 	}, nil
 }
 

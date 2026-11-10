@@ -351,6 +351,12 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			Thinking:       applicationSchema.Chat.Agent.Thinking,
 			WindowOverride: config.ContextWindowTokens,
 		},
+		VisionBudget: func(model string) int {
+			return chat.EffectiveVisionImages(applicationSchema.Chat, model)
+		},
+		VisionTokenBudget: func(model string) int {
+			return chat.EffectiveVisionTokens(applicationSchema.Chat, model)
+		},
 		Repository:            repository,
 		DefaultTitle:          applicationSchema.Chat.Defaults.Title,
 		BranchTitleTemplate:   applicationSchema.Chat.Defaults.BranchTitleTemplate,
@@ -853,6 +859,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Tools:        mcpagent.Wrap(agentToolExecutor, mcpService),
 		Logger:       logger,
 		VisionInline: visionInline,
+		VisionAssetInline: func(ctx context.Context, owner generation.OwnerID, assetID string) (string, bool) {
+			return referenceResolver.OpenVisionAsset(ctx, owner, generation.AssetID(assetID))
+		},
 		ToolAllowed: func(capability, _ string) bool {
 			// ToolExecution.domains is the creative workspace (image/model).
 			// CapabilityPresentation.domain is a product category, where
