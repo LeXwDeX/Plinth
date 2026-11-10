@@ -71,6 +71,15 @@ type Message struct {
 	Parts      []ContentPart
 	ToolCalls  []ToolCall
 	ToolCallID string
+	// FreshPictures marks a tool reply whose Parts carry pictures this turn's
+	// generation just produced (#245). The orchestrator uses it to frame the
+	// following picture message as fresh results, not a history lookup; it is
+	// never sent to an adapter.
+	FreshPictures bool `json:"-"`
+	// PicturesOnly marks the synthetic user message that carries tool pictures:
+	// it is not a new person message. Text-only test adapters skip it when they
+	// look for the latest request; real adapters ignore the flag.
+	PicturesOnly bool `json:"-"`
 	// ReasoningContent is the model's private reasoning for an assistant
 	// message. It is never shown to users; adapters whose vendor contract
 	// requires it send it back within the same tool loop.

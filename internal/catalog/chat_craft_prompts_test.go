@@ -21,8 +21,20 @@ func TestShippedCraftPromptCoversThe3DToolbox(t *testing.T) {
 	}
 	app := c.Application()
 	prompts := app.Chat.Agent.CraftPrompts
-	if len(prompts) != 1 || prompts[0].ID != "model3d" {
+	var model3d, image2d *catalog.ChatAgentCraftPrompt
+	for index := range prompts {
+		switch prompts[index].ID {
+		case "model3d":
+			model3d = &prompts[index]
+		case "image2d":
+			image2d = &prompts[index]
+		}
+	}
+	if model3d == nil || image2d == nil {
 		t.Fatalf("craft prompts = %#v", prompts)
+	}
+	if len(image2d.WhenToolsAny) == 0 || !strings.Contains(image2d.Text, "inspect_image") {
+		t.Fatalf("image2d = %#v", image2d)
 	}
 	var declared []string
 	for _, tool := range app.Chat.Tools {
@@ -35,14 +47,14 @@ func TestShippedCraftPromptCoversThe3DToolbox(t *testing.T) {
 			declared = append(declared, tool.Name)
 		}
 	}
-	triggers := slices.Clone(prompts[0].WhenToolsAny)
+	triggers := slices.Clone(model3d.WhenToolsAny)
 	slices.Sort(declared)
 	slices.Sort(triggers)
 	if !slices.Equal(triggers, declared) {
 		t.Fatalf("model3d triggers = %v, 3d tools = %v", triggers, declared)
 	}
-	if !strings.HasPrefix(prompts[0].Text, "【3D 制作要领】") || !strings.Contains(prompts[0].Text, "自检要点") {
-		t.Fatalf("model3d text = %q", prompts[0].Text)
+	if !strings.HasPrefix(model3d.Text, "【3D 制作要领】") || !strings.Contains(model3d.Text, "自检要点") {
+		t.Fatalf("model3d text = %q", model3d.Text)
 	}
 	// The brief names the fields inspect_model really returns, not a summary
 	// that the Agent would have to map by hand. The actual JSON names come from
@@ -57,11 +69,11 @@ func TestShippedCraftPromptCoversThe3DToolbox(t *testing.T) {
 		if _, ok := jsonFields[field]; !ok {
 			t.Fatalf("modelinspect.TopologyReport no longer returns %q", field)
 		}
-		if !strings.Contains(prompts[0].Text, field) {
+		if !strings.Contains(model3d.Text, field) {
 			t.Fatalf("model3d text omits inspect field %q", field)
 		}
 	}
-	if strings.Contains(prompts[0].Text, "connected_components 和 debris") {
+	if strings.Contains(model3d.Text, "connected_components 和 debris") {
 		t.Fatal("model3d text still uses the old debris field summary")
 	}
 }

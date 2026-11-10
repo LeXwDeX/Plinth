@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
 
 // The shipped model3d brief is part of the system context only when the turn
@@ -13,10 +14,16 @@ func TestCraftPromptIsInjectedOnlyWhenA3DToolIsOffered(t *testing.T) {
 	for scope, want := range map[string]bool{"3d": true, "auto": true, "2d": false} {
 		t.Run(scope, func(t *testing.T) {
 			rig := newScopeRig(t, agents.Completion{Content: "ok"})
-			if len(rig.schema.Agent.CraftPrompts) != 1 {
-				t.Fatalf("test setup: craft prompts = %#v", rig.schema.Agent.CraftPrompts)
+			var craft catalog.ChatAgentCraftPrompt
+			found := false
+			for _, prompt := range rig.schema.Agent.CraftPrompts {
+				if prompt.ID == "model3d" {
+					craft, found = prompt, true
+				}
 			}
-			craft := rig.schema.Agent.CraftPrompts[0]
+			if !found {
+				t.Fatalf("test setup: no model3d craft prompt in %#v", rig.schema.Agent.CraftPrompts)
+			}
 			rig.turn(t, scope)
 			system := rig.agent.requests[0].Messages[0].Content
 			if got := strings.Contains(system, craft.Text); got != want {
@@ -38,7 +45,15 @@ func TestCraftPromptSitsBetweenDomainContextAndScope(t *testing.T) {
 	rig := newScopeRig(t, agents.Completion{Content: "ok"})
 	rig.turn(t, "3d")
 	system := rig.agent.requests[0].Messages[0].Content
-	craft := rig.schema.Agent.CraftPrompts[0].Text
+	craft := ""
+	for _, prompt := range rig.schema.Agent.CraftPrompts {
+		if prompt.ID == "model3d" {
+			craft = prompt.Text
+		}
+	}
+	if craft == "" {
+		t.Fatal("no model3d craft prompt")
+	}
 	const domainContext = "Use configured 2D tools"
 	start := strings.Index(system, domainContext)
 	end := strings.Index(system, "【Agent 范围】")

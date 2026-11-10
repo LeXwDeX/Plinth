@@ -130,10 +130,11 @@ type ToolResult struct {
 	Suspend   bool
 	AwaitTask bool
 	WaitUntil time.Time
-	// Pictures are session pictures a read-only tool asks to show the Agent
-	// (#279). The orchestrator reads each for the turn's owner and, when the
-	// Agent reads images, shows it after the tool results; a picture it cannot
-	// read is named as unreadable instead.
+	// Pictures are session pictures a tool asks to show the Agent (#279): a
+	// read-only lookup, or a generation result the Agent should inspect in the
+	// same turn (#245). The orchestrator reads each for the turn's owner and,
+	// when the Agent reads images, shows it after the tool results; a picture it
+	// cannot read is named as unreadable instead.
 	Pictures []ToolPicture `json:"-"`
 	// Summary is a compact result the frontend can show as one line (#103).
 	// It is persisted with the tool call and never sent to the Agent.
@@ -141,9 +142,12 @@ type ToolResult struct {
 }
 
 // ToolPicture is one picture a tool shows the Agent, by handle and platform URL.
+// Fresh marks a picture this turn's generation just produced (#245): it is
+// framed as a result to inspect, not as a historical lookup.
 type ToolPicture struct {
 	Handle string
 	URL    string
+	Fresh  bool
 }
 
 // ToolTaskIdentity contains only a server-verified paid-step binding. Skill

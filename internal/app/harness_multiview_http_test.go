@@ -127,9 +127,16 @@ func (f *multiviewHTTP) waitTurns(want int) {
 func (f *multiviewHTTP) upload(name string, shade uint8) (string, string) {
 	f.t.Helper()
 	canvas := image.NewRGBA(image.Rect(0, 0, 64, 64))
+	// A plain studio background with one centred subject: this fixture is a
+	// valid image-to-3D input, so the #245 gate does not refuse it.
 	for x := 0; x < 64; x++ {
 		for y := 0; y < 64; y++ {
-			canvas.Set(x, y, color.RGBA{R: shade, G: uint8(x * 4), B: uint8(y * 4), A: 255})
+			canvas.Set(x, y, color.RGBA{R: 250, G: 250, B: 250, A: 255})
+		}
+	}
+	for x := 20; x < 44; x++ {
+		for y := 16; y < 48; y++ {
+			canvas.Set(x, y, color.RGBA{R: shade, G: uint8(x * 6), B: uint8(y * 6), A: 255})
 		}
 	}
 	var picture bytes.Buffer

@@ -137,8 +137,17 @@ func (adapter *Adapter) stream(
 ) (agents.Completion, error) {
 	// Follow-up requests keep tool definitions available. A tool result in the
 	// conversation is the mock's signal to summarize this operation instead
-	// of planning an unrelated second paid generation.
-	if len(request.Tools) > 0 && (len(request.Messages) == 0 || request.Messages[len(request.Messages)-1].Role != adapter.toolRole) {
+	// of planning an unrelated second paid generation. The synthetic message
+	// that carries tool pictures is not a new person turn, so it is ignored
+	// here (#245).
+	lastRole := ""
+	for index := len(request.Messages) - 1; index >= 0; index-- {
+		if !request.Messages[index].PicturesOnly {
+			lastRole = request.Messages[index].Role
+			break
+		}
+	}
+	if len(request.Tools) > 0 && lastRole != adapter.toolRole {
 		prompt := adapter.latestUserText(request.Messages)
 		if markdownTurn(prompt) {
 			return streamMarkdown(ctx, prompt, emit)
@@ -479,7 +488,7 @@ func (adapter *Adapter) summarize(request agents.Request) (agents.Completion, er
 func (adapter *Adapter) latestUserContent(messages []agents.Message) string {
 	for index := len(messages) - 1; index >= 0; index-- {
 		message := messages[index]
-		if message.Role != adapter.userRole {
+		if message.Role != adapter.userRole || message.PicturesOnly {
 			continue
 		}
 		if strings.TrimSpace(message.Content) != "" {
@@ -501,7 +510,7 @@ func (adapter *Adapter) latestUserContent(messages []agents.Message) string {
 func (adapter *Adapter) latestUserText(messages []agents.Message) string {
 	for index := len(messages) - 1; index >= 0; index-- {
 		message := messages[index]
-		if message.Role != adapter.userRole {
+		if message.Role != adapter.userRole || message.PicturesOnly {
 			continue
 		}
 		if strings.TrimSpace(message.Content) != "" || len(message.Parts) == 0 {

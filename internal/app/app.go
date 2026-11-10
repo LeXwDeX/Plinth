@@ -41,6 +41,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat/agentparams"
 	"github.com/LeXwDeX/Plinth/internal/chat/agenttools"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
+	"github.com/LeXwDeX/Plinth/internal/chat/imagereview"
 	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -595,6 +596,15 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
+	imageReview, err := imagereview.New(imagereview.Config{
+		Context: applicationSchema.Chat.Context,
+		Review:  applicationSchema.Chat.ImageReview,
+		Inputs:  inputAssetService,
+		Tasks:   module,
+	})
+	if err != nil {
+		return nil, err
+	}
 	toolExecutor, err := generationtool.New(generationtool.Config{
 		Logger:          logger,
 		Choices:         repository,
@@ -633,6 +643,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		References:      referenceResolver,
 		ModelAssets:     module,
 		InputAssets:     inputAssetService,
+		ImageReview:     imageReview,
 		InputAssetRoute: applicationSchema.Runtime.HTTP.Routes.AssetItem,
 		Chat:            applicationSchema.Chat,
 		CanvasArtboard:  applicationSchema.Canvas.Frontend.Artboard,
@@ -669,6 +680,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		RecoverTask:        newAgentTaskRecoverer(module, applicationSchema.Chat, applicationSchema.Content.Messages, texts),
 		ListModels:         toolExecutor.ListSessionModels,
 		ReadProcessingPlan: toolExecutor.ReadProcessingPlan,
+		InspectImage:       imageReview.Inspect,
 		InspectModel:       toolExecutor.InspectModel,
 		RenderModelViews:   toolExecutor.RenderModelViews,
 		CompareModels:      toolExecutor.CompareModels,
