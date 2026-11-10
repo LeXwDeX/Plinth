@@ -263,6 +263,13 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		if !capability.Valid() {
 			return errors.New("style_lock.reference_capabilities 只能声明已知能力")
 		}
+		// Style pictures are reference inputs: a 3D geometry or motion
+		// capability has no style reference slot, so only image and
+		// processing steps may declare one (#250).
+		if domain, known := capabilityDomains[capability]; !known ||
+			(domain != schemacontract.DomainImage && domain != schemacontract.DomainProcessing) {
+			return errors.New("style_lock.reference_capabilities 只能声明图片或处理能力")
+		}
 		if referenceCapabilities[capability] {
 			return errors.New("style_lock.reference_capabilities 不能重复声明同一能力")
 		}

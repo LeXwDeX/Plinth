@@ -49,8 +49,8 @@ func (r *Repository) BranchSession(ctx context.Context, request chat.BranchReque
 	branchTitle := strings.ReplaceAll(request.TitleTemplate, "{title}", title)
 	// 分支可读直接父会话及更早祖先的 Task（只读 source_task/lineage 授权）。
 	// 压缩记录不复制，后续从完整原始消息重新压缩。
-	_, err = tx.ExecContext(ctx, `INSERT INTO go_chat_sessions (id,owner_id,owner_name,title,created_at,updated_at,approval_mode,agent_scope,title_source,notes,brief,chat_model,reasoning_effort,picked,style_lock_enabled,style_lock_text,style_lock_references,parent_session_id,parent_message_id,parent_title,parent_deleted)
-		SELECT ?,owner_id,owner_name,?,?,?,approval_mode,agent_scope,?,notes,brief,chat_model,reasoning_effort,picked,style_lock_enabled,style_lock_text,style_lock_references,id,?,title,0 FROM go_chat_sessions WHERE id=? AND owner_id=?`, request.NewSessionID, branchTitle, formatTime(request.At), formatTime(request.At), chat.TitleSourceAuto, request.MessageID, request.SessionID, request.OwnerID)
+	_, err = tx.ExecContext(ctx, `INSERT INTO go_chat_sessions (id,owner_id,owner_name,title,created_at,updated_at,approval_mode,agent_scope,title_source,notes,brief,chat_model,reasoning_effort,picked,style_lock_enabled,style_lock_text,style_lock_references,visual_anchors,parent_session_id,parent_message_id,parent_title,parent_deleted)
+		SELECT ?,owner_id,owner_name,?,?,?,approval_mode,agent_scope,?,notes,brief,chat_model,reasoning_effort,picked,style_lock_enabled,style_lock_text,style_lock_references,visual_anchors,id,?,title,0 FROM go_chat_sessions WHERE id=? AND owner_id=?`, request.NewSessionID, branchTitle, formatTime(request.At), formatTime(request.At), chat.TitleSourceAuto, request.MessageID, request.SessionID, request.OwnerID)
 	if err != nil {
 		return chat.Session{}, fmt.Errorf("insert branch session: %w", err)
 	}

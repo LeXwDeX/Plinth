@@ -132,6 +132,24 @@ func TestVisualAnchorsRejectBoundsForeignReferencesAndUserWrites(t *testing.T) {
 	}
 }
 
+func TestVisualAnchorWritesNeverTouchThePersonStyleLock(t *testing.T) {
+	service, repository := newAnchorService(t)
+	ctx := context.Background()
+	session, _ := service.CreateSession(ctx, "owner-a", "Owner", "anchors")
+	lock := chat.StyleLock{Enabled: true, Text: "ink wash", References: []string{"asset-a"}}
+	if found, err := repository.SetStyleLock(ctx, "owner-a", session.ID, lock); err != nil || !found {
+		t.Fatalf("set style lock = %v, %v", found, err)
+	}
+	writeAnchor(t, service, "owner-a", session.ID, `{"action":"create","name":"hero","kind":"identity","references":["asset-b"]}`)
+	writeAnchor(t, service, "owner-a", session.ID, `{"action":"update","name":"hero","description":"blue"}`)
+	writeAnchor(t, service, "owner-a", session.ID, `{"action":"delete","name":"hero"}`)
+	stored, found, err := repository.StyleLock(ctx, "owner-a", session.ID)
+	if err != nil || !found || !stored.Enabled || stored.Text != "ink wash" ||
+		len(stored.References) != 1 || stored.References[0] != "asset-a" {
+		t.Fatalf("the person's style lock changed: %+v, %v", stored, err)
+	}
+}
+
 func TestStartTurnFreezesVisualAnchors(t *testing.T) {
 	service, repository := newAnchorService(t)
 	ctx := context.Background()

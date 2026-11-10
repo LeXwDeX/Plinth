@@ -414,6 +414,9 @@ func (executor *Executor) samePreparedOperation(
 // source claim.
 func (executor *Executor) operationReferenceNote(command chat.ToolCommand, op Operation,
 	prepared generation.PreparedInput, offering generation.Offering) string {
+	if op.ReferenceNote != "" {
+		return op.ReferenceNote
+	}
 	var fact *ReferenceSourceFact
 	if prepared.Capability == generation.ImageTo3D && op.ReferenceSource.known() {
 		value := op.ReferenceSource

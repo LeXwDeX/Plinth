@@ -191,8 +191,9 @@ func newProcessingHarness(t *testing.T, mode string, seed func(h *processingHarn
 	}
 	harness.config = generationtool.Config{Gateway: harness.gateway, References: &fakeReferences{},
 		Operations: repo, Grants: service, Chat: application.Chat, ModelDelivery: application.ModelDelivery,
-		Texts:         texts,
-		StopRequested: func(context.Context, string, string, string) (bool, error) { return false, nil }}
+		InputAssetRoute: "/api/v1/input-assets/{assetID}",
+		Texts:           texts,
+		StopRequested:   func(context.Context, string, string, string) (bool, error) { return false, nil }}
 	harness.executor, err = generationtool.New(harness.config)
 	if err != nil {
 		t.Fatal(err)

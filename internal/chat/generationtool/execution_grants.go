@@ -143,6 +143,10 @@ func (executor *Executor) prepareAgentOperation(
 	if fact != nil {
 		sourceFact = *fact
 	}
+	// The note is rendered once, while the priority counts and the dropped
+	// handles are known (#250); the approval card and the finished step reuse
+	// this exact text instead of the counts-only fallback.
+	referenceNote := executor.stepReferenceNote(command, offering, fact, references, prepared.NormalizedInput)
 	// cardSettled releases the session's approval lock, if this call took it.
 	cardSettled := func() {}
 	extraSpend, priceErr := prepared.HasExtraSpend()
@@ -180,6 +184,7 @@ func (executor *Executor) prepareAgentOperation(
 		PreparedInputID: prepared.ID, PreparedInputHash: prepared.InputHash,
 		OfferingID: prepared.OfferingID, OfferingRevision: prepared.OfferingRevision, Harness: turnHarnessBinding(command),
 		RechargeTaskID: rechargeTaskID, ReferenceCount: references.Used, ReferenceTotal: references.Given,
+		ReferenceNote:   referenceNote,
 		ReferenceSource: sourceFact,
 	})
 	if errors.Is(err, ErrOperationConflict) {

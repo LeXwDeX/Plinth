@@ -213,6 +213,43 @@ func TestToolCallsFollowTheMarkerAndToolResultsEndTheTurn(t *testing.T) {
 	}
 }
 
+// #250: the fake-only system-contains marker answers whether the system prompt
+// carries the requested text, in both plain and streamed replies.
+func TestSystemContainsMarkerAnswersFromTheSystemPrompt(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	ask := func(system, needle string) map[string]any {
+		messages := []map[string]any{
+			{"role": "system", "content": system},
+			{"role": "user", "content": "check " + SystemContainsMarkerPrefix + needle + "]]"},
+		}
+		return map[string]any{"model": "m", "messages": messages}
+	}
+	status, present := f.chat(ask("<<<VISUAL_ANCHORS>>> 用户风格锁：ink and paper", "用户风格锁"))
+	if status != http.StatusOK || dig(t, present, "choices", 0, "message", "content") != "present: 用户风格锁" {
+		t.Fatalf("present: %d %v", status, present)
+	}
+	_, absent := f.chat(ask("<<<VISUAL_ANCHORS>>> 用户风格锁：关闭", "身份锚「hero」"))
+	if dig(t, absent, "choices", 0, "message", "content") != "absent: 身份锚「hero」" {
+		t.Fatalf("absent: %v", absent)
+	}
+	body := ask("system text", "system")
+	body["stream"] = true
+	response, raw := f.send("POST", "/chat/completions", "k", body)
+	chunks, done := sseEvents(t, raw)
+	if response.StatusCode != http.StatusOK || !done || len(chunks) == 0 {
+		t.Fatalf("stream: %d done=%t chunks=%d", response.StatusCode, done, len(chunks))
+	}
+	found := false
+	for _, chunk := range chunks {
+		if dig(t, chunk, "choices", 0, "delta", "content") == "present: system" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("streamed system-contains reply missing: %v", chunks)
+	}
+}
+
 func TestStreaming(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	stream := func(body map[string]any) ([]map[string]any, bool, string) {

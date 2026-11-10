@@ -40,6 +40,13 @@ func (executor *Executor) processingStyleReference(
 	if current, exists := input[parameter.Name]; exists && current != nil && current != "" {
 		return executor.styleNote(command, executor.chat.StyleLock.SkipNote), nil
 	}
+	// Some services take either a prompt or a reference picture for one style
+	// input (Meshy retexture). The Schema's input rule already groups the
+	// alternatives; when the step filled another member, the style picture
+	// would make the frozen input invalid, so it is skipped and reported.
+	if executor.processingStyleInputOccupied(offering, parameter.Name, input) {
+		return executor.styleNote(command, executor.chat.StyleLock.SkipNote), nil
+	}
 	owner := generation.OwnerID(command.OwnerID)
 	assets, resolveErr := executor.references.Resolve(ctx, owner, urls[:1])
 	if resolveErr != nil {
@@ -50,6 +57,49 @@ func (executor *Executor) processingStyleReference(
 	}
 	input[parameter.Name] = assets[0]
 	return "", nil
+}
+
+// processingStyleInputOccupied reports whether another parameter of the same
+// declared input rule already fills the style input. The rule is the Offering's
+// own contract (for example "prompt or style_asset, exactly one"), so no
+// service name is hard-coded here.
+func (executor *Executor) processingStyleInputOccupied(offering generation.Offering, referenceParameter string, input map[string]any) bool {
+	for _, rule := range offering.InputRules {
+		named := false
+		for _, name := range rule.Parameters {
+			if name == referenceParameter {
+				named = true
+				break
+			}
+		}
+		if !named {
+			continue
+		}
+		for _, name := range rule.Parameters {
+			if name == referenceParameter {
+				continue
+			}
+			if value, exists := input[name]; exists && processingInputPresent(value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func processingInputPresent(value any) bool {
+	switch typed := value.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(typed) != ""
+	case []string:
+		return len(typed) > 0
+	case []any:
+		return len(typed) > 0
+	default:
+		return true
+	}
 }
 
 func (executor *Executor) styleExtendsTo(capability generation.Capability) bool {

@@ -479,19 +479,15 @@ func (executor *Executor) Execute(
 		result.NoSubmission = true
 		return result, nil
 	}
-	styleReferenceCount := len(styleReferenceURLs)
-	identityReferenceCount := len(identityReferenceURLs)
 	serverPurposes := mergeReferencePurposes(identityPurposes, stylePurposes)
 	// Without an identity anchor the historical reference list is preserved
 	// byte for byte (a duplicate URL stays ambiguous, a three-view selection
 	// keeps its repeats). With one, the priority groups are de-duplicated so
-	// the same picture is not sent twice.
-	var referenceURLs []string
-	if identityReferenceCount > 0 {
-		referenceURLs = uniqueReferenceGroups(identityReferenceURLs, styleReferenceURLs, turnReferenceURLs)
-	} else {
-		referenceURLs = append(append([]string(nil), styleReferenceURLs...), turnReferenceURLs...)
-	}
+	// the same picture is not sent twice, and the counts follow the final list
+	// so a trimmed suffix is reported by the right class.
+	groups := assembleReferenceGroups(identityReferenceURLs, styleReferenceURLs, turnReferenceURLs)
+	referenceURLs := groups.URLs
+	identityReferenceCount, styleReferenceCount, turnReferenceCount := groups.Identity, groups.Style, groups.Turn
 	if command.Tool.ReferencePurposesArgument != "" && identityReferenceCount+styleReferenceCount == 0 {
 		for handle, purpose := range command.Options.AttachmentPurposes {
 			if purpose != "input" {
@@ -574,8 +570,9 @@ func (executor *Executor) Execute(
 		}
 		views, _ := json.Marshal(multiview.Views)
 		arguments[executor.chat.ThreeView.Multiview.ViewsArgument] = views
-		referenceURLs = append(uniqueReferenceURLs(identityReferenceURLs), styleReferenceURLs...)
-		referenceURLs = append(referenceURLs, multiview.URLs...)
+		groups = assembleReferenceGroups(identityReferenceURLs, styleReferenceURLs, multiview.URLs)
+		referenceURLs = groups.URLs
+		identityReferenceCount, styleReferenceCount, turnReferenceCount = groups.Identity, groups.Style, groups.Turn
 	}
 	if identityReferenceCount+styleReferenceCount > 0 {
 		if _, supported := semanticParameter(offering, generation.SemanticReferenceImage); !supported {
@@ -622,27 +619,24 @@ func (executor *Executor) Execute(
 			referenceURLs = selection.urls()
 		}
 		given := len(referenceURLs)
-		combinedReferences := referenceURLs
 		referenceURLs = truncateReferences(referenceURLs, offering)
 		if len(referenceURLs) < given {
 			identityUsed := min(identityReferenceCount, len(referenceURLs))
 			styleUsed := min(styleReferenceCount, max(0, len(referenceURLs)-identityUsed))
-			turnGiven := max(0, given-identityReferenceCount-styleReferenceCount)
 			turnUsed := max(0, len(referenceURLs)-identityUsed-styleUsed)
 			references = referenceUse{
 				Used: len(referenceURLs), Given: given,
 				IdentityGiven: identityReferenceCount, IdentityUsed: identityUsed,
 				StyleGiven: styleReferenceCount, StyleUsed: styleUsed,
-				TurnGiven: turnGiven, TurnUsed: turnUsed,
+				TurnGiven: turnReferenceCount, TurnUsed: turnUsed,
 			}
 			references.StyleTrimmed = styleUsed < styleReferenceCount
 			// Anchors are the prefix; the ordinary references are the suffix.
 			// Everything the limit cut from that suffix is reported to the
 			// Agent by handle (#250).
-			turnReferences := combinedReferences[min(len(combinedReferences), identityReferenceCount+styleReferenceCount):]
-			if turnUsed < len(turnReferences) {
-				references.DroppedTurn = executor.referenceHandleLabels(command, turnReferences[turnUsed:])
-				references.DroppedTurnCount = len(turnReferences) - turnUsed
+			if turnUsed < len(groups.TurnURLs) {
+				references.DroppedTurn = executor.referenceHandleLabels(command, groups.TurnURLs[turnUsed:])
+				references.DroppedTurnCount = len(groups.TurnURLs) - turnUsed
 			}
 		}
 		if capability == generation.ImageTo3D {

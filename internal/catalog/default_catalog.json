@@ -6907,6 +6907,11 @@
                 },
                 "description": "Optional 1-indexed historical image references; UI selection has priority."
               },
+              "anchors": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Optional names of this session's identity anchors (for example a character's standard look). The server adds each named anchor's reference pictures before the turn's own references, so this needs no handle. When the selected model takes fewer pictures, the anchor pictures are kept and ordinary references are dropped first; a result's reference_note states what was dropped."
+              },
               "input_override_reason": {
                 "type": "string",
                 "maxLength": 300,
@@ -6918,6 +6923,7 @@
             ],
             "additionalProperties": false
           },
+          "anchor_argument": "anchors",
           "argument_mappings": {
             "prompt": "prompt",
             "reference_image_indices": "reference-indices"

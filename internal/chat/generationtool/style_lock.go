@@ -30,6 +30,9 @@ func styleLockImageOffering(offering generation.Offering) bool {
 // belongs to the image domain. This keeps style-lock input out of 3D tools
 // without maintaining a second capability list in chat.
 func (executor *Executor) styleLockImageTool(command chat.ToolCommand) bool {
+	if executor.gateway == nil {
+		return false
+	}
 	for _, capability := range []generation.Capability{
 		command.Tool.Capability,
 		command.Tool.FallbackCapability,
@@ -68,24 +71,6 @@ func (executor *Executor) styleLockReferenceURLs(command chat.ToolCommand) ([]st
 	return urls, nil
 }
 
-// styleLockPromptApplies reports whether the selected Offering takes the
-// lock's text and edit-scope copy. Reference capabilities that name image
-// capabilities keep the historical behavior for those; retexture takes only
-// the picture (#250).
-func (executor *Executor) styleLockPromptApplies(offering generation.Offering) bool {
-	if offering.Domain == "" || offering.Domain == generation.DomainImage {
-		if len(executor.chat.StyleLock.ReferenceCapabilities) == 0 {
-			return true
-		}
-		for _, declared := range executor.chat.StyleLock.ReferenceCapabilities {
-			if declared == offering.Capability {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func (executor *Executor) styleLockUnavailableMessage(command chat.ToolCommand) string {
 	message := executor.chat.Presentation.Messages.StyleLockReferenceUnavailable
 	if message == "" {
@@ -98,7 +83,7 @@ func (executor *Executor) styleLockUnavailableMessage(command chat.ToolCommand) 
 // existing reference, previous-prompt and Skill templates have been applied.
 func (executor *Executor) applyStyleLockPrompt(command chat.ToolCommand, offering generation.Offering, prompt string) string {
 	lock := command.Options.StyleLock
-	if command.Options.StyleLockSkipped || !lock.Enabled || !executor.styleLockPromptApplies(offering) {
+	if command.Options.StyleLockSkipped || !lock.Enabled || !styleLockImageOffering(offering) {
 		return prompt
 	}
 	if text := strings.TrimSpace(lock.Text); text != "" {

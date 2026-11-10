@@ -23,9 +23,9 @@ import tempfile
 import time
 
 # The fake-stack gate's scenarios (dev_test.md §2 item 10): every provider family, the Agent
-# chains and two fault scenarios; the rest (Tripo chains, Hyper3D direct, five more faults)
+# chains, the visual-anchor flow and two fault scenarios; the rest (Tripo chains, Hyper3D direct, five more faults)
 # stay in the full `smoke-fake-stack.py` run, which takes about 15 minutes.
-FAKE_STACK_SCENARIOS = 'balance,meshy,images,p2,agent,agent-background,vision-budget,faults'
+FAKE_STACK_SCENARIOS = 'balance,meshy,images,p2,agent,agent-background,vision-budget,visual-anchors,faults'
 FAKE_STACK_FAULTS = 'task-failed,artifact-expired-stuck'
 # The gates dev_test.md §2 marks local, in §2 order; the default and pre-push run.
 GATES = [

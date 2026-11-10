@@ -3,6 +3,7 @@ package generationtool
 import (
 	"encoding/json"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -192,7 +193,8 @@ func (executor *Executor) styleReferenceURLs(command chat.ToolCommand) ([]string
 // styleReferencesApply reports whether a step may carry style pictures. A
 // Catalog that declares reference_capabilities gates by the tool's own
 // capabilities; a historical Catalog keeps the image-domain rule. The
-// processing path applies its own capability gate (#250 retexture).
+// processing path calls this only after its own capability and Offering
+// checks, so a declared retexture can carry the lock's picture (#250).
 func (executor *Executor) styleReferencesApply(command chat.ToolCommand) bool {
 	declared := executor.chat.StyleLock.ReferenceCapabilities
 	if len(declared) == 0 {
@@ -203,13 +205,8 @@ func (executor *Executor) styleReferencesApply(command chat.ToolCommand) bool {
 			continue
 		}
 		for _, wanted := range declared {
-			if wanted != capability {
-				continue
-			}
-			for _, offering := range executor.gateway.Offerings(capability) {
-				if offering.Domain == "" || offering.Domain == generation.DomainImage {
-					return true
-				}
+			if wanted == capability {
+				return true
 			}
 		}
 	}
@@ -276,13 +273,51 @@ func uniqueReferenceURLs(urls []string) []string {
 	return unique
 }
 
-// uniqueReferenceGroups concatenates URL groups in priority order and drops
-// repeats. The first occurrence keeps its class and position, so an identity
-// anchor shared with an ordinary reference remains an anchor.
-func uniqueReferenceGroups(groups ...[]string) []string {
-	var all []string
-	for _, group := range groups {
-		all = append(all, group...)
+// referenceGroups is the priority-ordered reference list and how many
+// pictures each class contributes to it. TurnURLs keeps the ordinary pictures
+// in their final order, so a model limit can name exactly the ones it cut.
+type referenceGroups struct {
+	URLs     []string
+	Identity int
+	Style    int
+	Turn     int
+	TurnURLs []string
+}
+
+// assembleReferenceGroups orders identity anchors, style pictures and the
+// turn's own references (#250). Without an identity anchor the historical
+// list is preserved byte for byte; with one, repeats are dropped and the first
+// occurrence keeps its class and position, so an identity picture shared with
+// an ordinary reference stays an anchor.
+func assembleReferenceGroups(identity, style, turn []string) referenceGroups {
+	identity = uniqueReferenceURLs(identity)
+	style = uniqueReferenceURLs(style)
+	if len(identity) == 0 {
+		urls := append(append([]string(nil), style...), turn...)
+		return referenceGroups{
+			URLs: urls, Style: len(style), Turn: len(turn),
+			TurnURLs: append([]string(nil), turn...),
+		}
 	}
-	return uniqueReferenceURLs(all)
+	urls := append([]string(nil), identity...)
+	styleKept := 0
+	for _, reference := range style {
+		if slices.Contains(urls, reference) {
+			continue
+		}
+		urls = append(urls, reference)
+		styleKept++
+	}
+	var turnKept []string
+	for _, reference := range turn {
+		if slices.Contains(urls, reference) {
+			continue
+		}
+		urls = append(urls, reference)
+		turnKept = append(turnKept, reference)
+	}
+	return referenceGroups{
+		URLs: urls, Identity: len(identity), Style: styleKept,
+		Turn: len(turnKept), TurnURLs: turnKept,
+	}
 }
