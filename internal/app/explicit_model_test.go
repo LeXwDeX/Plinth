@@ -46,3 +46,43 @@ func TestExplicitModel3DValidNamesAnEnabled3DOfferingOnly(t *testing.T) {
 		}
 	}
 }
+
+// #239: an explicit 2D model lock may only name an enabled Offering of the
+// image domain; a 3D model is refused so the image tools do not all fail.
+func TestExplicitModelImageValidNamesAnEnabledImageOfferingOnly(t *testing.T) {
+	offerings := []generation.Offering{
+		{
+			ID: "meshy/nano-banana-pro/text-to-image", ProviderID: "meshy",
+			ModelID: "nano-banana-pro", Domain: generation.DomainImage, Enabled: true,
+		},
+		{
+			ID: "openai/gpt-image-2/text-to-image", ProviderID: "openai",
+			ModelID: "gpt-image-2.6-sunburst", Domain: generation.DomainImage, Enabled: false,
+		},
+		{
+			ID: "meshy/meshy-7.1/text-to-3d", ProviderID: "meshy",
+			ModelID: "meshy-7.1", Domain: generation.DomainModel3D, Enabled: true,
+		},
+	}
+	for _, model := range []string{
+		"nano-banana-pro",
+		"meshy/nano-banana-pro/text-to-image",
+		"meshy/nano-banana-pro",
+	} {
+		if !explicitModelImageValid(offerings, model) {
+			t.Fatalf("a valid image pick %q was refused", model)
+		}
+	}
+	for _, model := range []string{
+		"",
+		"   ",
+		"unknown-model",
+		"meshy-7.1",
+		"meshy/meshy-7.1/text-to-3d",
+		"gpt-image-2.6-sunburst",
+	} {
+		if explicitModelImageValid(offerings, model) {
+			t.Fatalf("an invalid image pick %q was accepted", model)
+		}
+	}
+}

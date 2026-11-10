@@ -129,3 +129,28 @@ func (resolver *Resolver) inlineVision(
 func dataURI(mediaType string, data []byte) string {
 	return "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
+
+// OpenVisionAsset 把会话风格锁引用的输入资产（按资产 ID）转成模型可直接
+// 读取的 data URI（#247）。与 OpenVisionImage 一样只读打开并走 #292 的
+// 缩小重编码；所有权按 owner 校验。
+func (resolver *Resolver) OpenVisionAsset(
+	ctx context.Context,
+	owner generation.OwnerID,
+	assetID generation.AssetID,
+) (string, bool) {
+	if resolver.visionInlineMaxBytes <= 0 || owner == "" || assetID == "" {
+		return "", false
+	}
+	asset, body, err := resolver.inputs.OpenOwned(ctx, owner, assetID)
+	if err != nil {
+		return "", false
+	}
+	defer body.Close()
+	return resolver.inlineVision(
+		ctx,
+		body,
+		resolver.visionMediaType(asset.MediaType),
+		asset.Size,
+		asset.SHA256,
+	)
+}

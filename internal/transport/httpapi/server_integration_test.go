@@ -1295,10 +1295,20 @@ func newHTTPHarnessWithCatalogAndProviders(
 		MaximumStyleLockReferences: applicationSchema.Chat.StyleLock.MaximumReferenceImages,
 		Attachments:                harnessAttachmentVerifier{},
 		Model3DUsage:               applicationSchema.Chat.Model3DUsage,
-		ChoiceKinds:                applicationSchema.Chat.Choice.Kinds,
-		RetiredModels:              taskCatalog.RetiredModelSuccessors(),
+		Image2DUsage:               applicationSchema.Chat.Image2DUsage,
+		ExplicitModel3DValid: func(model string) bool {
+			return httpExplicitModelValid(taskCatalog.List(""), model, generation.DomainModel3D)
+		},
+		ExplicitModelImageValid: func(model string) bool {
+			return httpExplicitModelValid(taskCatalog.List(""), model, generation.DomainImage)
+		},
+		ChoiceKinds:      applicationSchema.Chat.Choice.Kinds,
+		ChoiceMaxOptions: applicationSchema.Chat.Choice.MaxOptions,
+		RetiredModels:    taskCatalog.RetiredModelSuccessors(),
 		// The harness deployment chats with the DeepSeek profile (#322).
 		Models:                chat.ModelPolicy{Model: "deepseek", Thinking: applicationSchema.Chat.Agent.Thinking},
+		VisionBudget:          func(model string) int { return chat.EffectiveVisionImages(applicationSchema.Chat, model) },
+		VisionTokenBudget:     func(model string) int { return chat.EffectiveVisionTokens(applicationSchema.Chat, model) },
 		DefaultTitle:          applicationSchema.Chat.Defaults.Title,
 		BranchTitleTemplate:   applicationSchema.Chat.Defaults.BranchTitleTemplate,
 		CanvasProjectIDPrefix: applicationSchema.Canvas.Defaults.ProjectIDPrefix,

@@ -1,6 +1,7 @@
 package fakeupstream
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -50,6 +51,21 @@ func New(config Config, versions ...Version) (*Server, error) {
 	server.mux.HandleFunc("POST "+RenewPath, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprintf(w, `{"epoch":%d}`+"\n", server.env.RenewArtifactURLs())
+	})
+	// #247: the recorded chat requests are readable and clearable from tests
+	// and the fake stack without touching a real upstream.
+	server.mux.HandleFunc("GET "+ChatRequestsPath, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body, err := json.Marshal(map[string]any{"requests": server.env.ChatRequests()})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write(append(body, '\n'))
+	})
+	server.mux.HandleFunc("DELETE "+ChatRequestsPath, func(w http.ResponseWriter, _ *http.Request) {
+		server.env.ResetChatRequests()
+		w.WriteHeader(http.StatusNoContent)
 	})
 	return server, nil
 }

@@ -291,6 +291,12 @@ func Load(reader io.Reader) (*Catalog, error) {
 	); err != nil {
 		return nil, fmt.Errorf("application.chat.model3d_usage: %w", err)
 	}
+	if err := validateImage2DUsageOfferings(
+		result.application.Chat.Image2DUsage,
+		result.byID,
+	); err != nil {
+		return nil, fmt.Errorf("application.chat.image2d_usage: %w", err)
+	}
 	if err := validateModelReviewProductionOfferings(
 		result.application.Chat.ModelReview,
 		result.byID,

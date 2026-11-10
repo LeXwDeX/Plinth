@@ -40,7 +40,7 @@ func (e *Executor) parameterReasons(command chat.ToolCommand, o generation.Offer
 	// adjustment then reads "profile:<id>" instead of "agent". Every step
 	// chose its budget values against its own final input (#129, #139), so the
 	// same input decides them here.
-	if profile, overrides := e.purposeParameterValues(command, o, values); profile.ID != "" {
+	if profile, overrides := e.purposeParameterValues(command, o, values); profile.ID != "" && len(overrides) > 0 {
 		// A value a layer above the purpose set in this call stays that layer's
 		// even when it happens to equal the purpose value (#103).
 		overridden := e.laterParameterNames(command, o)

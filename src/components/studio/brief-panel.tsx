@@ -30,12 +30,19 @@ function purposeLabel(schema: ReturnType<typeof useProductSchema>['schema'], val
   return schema.chat.model3d_usage?.profiles?.find((profile) => profile.id === value)?.label ?? value;
 }
 
+/** #239: the 2D purpose labels come from the public image2d_usage projection. */
+function imagePurposeLabel(schema: ReturnType<typeof useProductSchema>['schema'], value: unknown): string {
+  if (typeof value !== 'string' || value === '') return '';
+  return schema.chat.image2d_usage?.profiles?.find((profile) => profile.id === value)?.label ?? value;
+}
+
 function valueText(
   schema: ReturnType<typeof useProductSchema>['schema'],
   field: ProductionBriefField,
   value: unknown,
 ): string {
   if (field.type === 'profile') return purposeLabel(schema, value);
+  if (field.type === 'image_profile') return imagePurposeLabel(schema, value);
   return briefValueText(value, schemaText(schema, 'ui.studio.brief.yes'), schemaText(schema, 'ui.studio.brief.no'));
 }
 
@@ -62,7 +69,10 @@ function BriefFieldInput({
       />
     );
   }
-  if (field.type === 'profile') {
+  if (field.type === 'profile' || field.type === 'image_profile') {
+    const profiles = field.type === 'image_profile'
+      ? schema.chat.image2d_usage?.profiles ?? []
+      : schema.chat.model3d_usage?.profiles ?? [];
     return (
       <select
         id={id}
@@ -72,7 +82,7 @@ function BriefFieldInput({
         data-testid={`studio-brief-field-${field.name}`}
       >
         <option value="">{schemaText(schema, 'ui.studio.brief.none')}</option>
-        {(schema.chat.model3d_usage?.profiles ?? []).map((profile) => (
+        {profiles.map((profile) => (
           <option key={profile.id} value={profile.id}>{profile.label}</option>
         ))}
       </select>

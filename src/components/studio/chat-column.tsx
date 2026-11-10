@@ -80,7 +80,7 @@ import { choiceCardPlacement, heldChoiceRelease, type ChoiceCardModel, type Choi
 import { readPastedImages } from '@/lib/chat/composer-input';
 import { withSessionSendLock } from '@/lib/chat/send-preparation';
 import { InFlightGuard } from '@/lib/chat/in-flight-guard';
-import { flushExplicitModel3D } from '@/lib/chat/explicit-model';
+import { flushExplicitModel3D, flushExplicitModelImage } from '@/lib/chat/explicit-model';
 import { reloadSessionBudget } from '@/lib/chat/session-budget';
 import { budgetAwaitsDecision, budgetIsShown } from '@/lib/chat/budget';
 import { PendingApprovalError, type PendingApprovalInput } from '@/lib/chat/pending-approvals';
@@ -1102,13 +1102,24 @@ export function ChatColumn() {
           }
           if (!isCurrentSessionScope(scope) || useWorkspaceStore.getState().modelByDomain[domain] !== selectedModel ||
               useChatStore.getState().streamingBuffers[sessionId] || startingRef.current?.sessionId === sessionId) return;
-          // #103: the session's explicit 3D lock is written before the turn that
-          // may use it. The pick's write is already in flight (or was made before
-          // this session existed); wait for it. A failed write was rolled back and
-          // toasted, and this turn must not start under a lock the server lacks.
+          // #103/#239: the session's explicit 2D and 3D locks are written before the
+          // turn that may use them. Each pick's write is already in flight (or
+          // was made before this session existed); wait for it. A failed write
+          // was rolled back and toasted, and this turn must not start under a
+          // lock the server lacks.
           if (schema.runtime.http.routes.chat_session_model3d) {
             try {
               await flushExplicitModel3D(sessionId, (id, model) => chatClient.setExplicitModel3D(id, model));
+            } catch {
+              if (isCurrentSessionScope(scope)) toast.error(schemaText(schema, 'ui.studio.picker.lock_failed'));
+              return;
+            }
+            if (!isCurrentSessionScope(scope) || useWorkspaceStore.getState().modelByDomain[domain] !== selectedModel ||
+                useChatStore.getState().streamingBuffers[sessionId] || startingRef.current?.sessionId === sessionId) return;
+          }
+          if (schema.runtime.http.routes.chat_session_model2d) {
+            try {
+              await flushExplicitModelImage(sessionId, (id, model) => chatClient.setExplicitModelImage(id, model));
             } catch {
               if (isCurrentSessionScope(scope)) toast.error(schemaText(schema, 'ui.studio.picker.lock_failed'));
               return;

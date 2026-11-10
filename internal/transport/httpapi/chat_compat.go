@@ -816,6 +816,9 @@ func (s *Server) chatSessionWireWithBudgets(
 	if fields.ExplicitModel3D != "" && session.ExplicitModel3D != "" {
 		result[fields.ExplicitModel3D] = session.ExplicitModel3D
 	}
+	if fields.ExplicitModelImage != "" && session.ExplicitModelImage != "" {
+		result[fields.ExplicitModelImage] = session.ExplicitModelImage
+	}
 	if len(session.PriceTotals) > 0 {
 		delete(result, fields.EstimatedCredits)
 		result["price_totals"] = session.PriceTotals

@@ -61,6 +61,29 @@ describe('the context meter (#322)', () => {
     expect(hintOf(html, 'composer-context-meter')).toContain(`data-hint="${formatSchemaText(messages['ui.studio.context.hint_window'], { used: '356K', window: '1M', threshold: 80 })}"`);
   });
 
+  it('names the vision token estimate against its declared token budget and the picture places (#247)', () => {
+    open({ tokens: 356_000, visionTokens: 1_105, visionTokenBudget: 12_000, visionBudget: 10, window: 1_000_000, compactions: [] });
+    const html = renderToStaticMarkup(<ContextMeter />);
+    const hint = hintOf(html, 'composer-context-meter');
+    expect(hint).toContain(`data-hint="${formatSchemaText(messages['ui.studio.context.hint_window'], { used: '356K', window: '1M', threshold: 80 })} · ${formatSchemaText(messages['ui.studio.context.hint_vision'], { vision: '1.1K', token_budget: '12K', images: 10 })}"`);
+    // The picture places are a count, never the token budget.
+    expect(hint).toContain('图片名额上限 10 张');
+    expect(hint).not.toContain('上限 10 token');
+    // No declared vision estimate leaves the hint unchanged.
+    open({ tokens: 356_000, window: 1_000_000, compactions: [] });
+    expect(hintOf(renderToStaticMarkup(<ContextMeter />), 'composer-context-meter'))
+      .not.toContain(messages['ui.studio.context.hint_vision']);
+  });
+
+  it('never presents the picture places as a token budget (#247 regression)', () => {
+    // The legacy fallback declares image places but no vision token bound: the hint must stay silent
+    // rather than call the places a "10-token budget".
+    open({ tokens: 356_000, visionTokens: 1_105, visionBudget: 10, window: 1_000_000, compactions: [] });
+    const hint = hintOf(renderToStaticMarkup(<ContextMeter />), 'composer-context-meter');
+    expect(hint).not.toContain(messages['ui.studio.context.hint_vision']);
+    expect(hint).not.toContain('10 token');
+  });
+
   it('shows only the count when no window is declared', () => {
     open({ tokens: 12_345, window: null, compactions: [] });
     const html = renderToStaticMarkup(<ContextMeter />);

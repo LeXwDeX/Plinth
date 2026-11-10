@@ -18,6 +18,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/imageinspect"
+	"github.com/LeXwDeX/Plinth/internal/visionview"
 )
 
 // InputAssetReader opens an input asset (an upload or a render) for its owner.
@@ -53,12 +54,36 @@ func New(config Config) (*Service, error) {
 
 // Inspect executes one inspect_image call.
 func (service *Service) Inspect(ctx context.Context, command chat.ToolCommand) (chat.ToolResult, error) {
-	var arguments struct {
-		Image     string `json:"image"`
-		Checklist string `json:"checklist"`
-	}
-	if err := json.Unmarshal(command.Call.Arguments, &arguments); err != nil || strings.TrimSpace(arguments.Image) == "" {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(command.Call.Arguments, &raw); err != nil {
 		return chat.ToolResult{Error: "invalid image", NoSubmission: true}, nil
+	}
+	var arguments struct {
+		Image     string
+		Checklist string
+	}
+	_ = json.Unmarshal(raw["image"], &arguments.Image)
+	_ = json.Unmarshal(raw["checklist"], &arguments.Checklist)
+	if strings.TrimSpace(arguments.Image) == "" {
+		return chat.ToolResult{Error: "invalid image", NoSubmission: true}, nil
+	}
+	crop := catalog.ChatVisionCropSchema{}
+	if vision := service.context.Vision; vision != nil && vision.Crop.Enabled {
+		crop = vision.Crop
+	}
+	var region visionview.Region
+	regionRequested := false
+	if crop.Enabled && crop.RegionArgument != "" {
+		if value, exists := raw[crop.RegionArgument]; exists && !jsonEqualNull(value) {
+			if json.Unmarshal(value, &region) != nil {
+				return chat.ToolResult{Error: "invalid region", NoSubmission: true}, nil
+			}
+			regionRequested = true
+		}
+	}
+	showPicture := false
+	if crop.Enabled && crop.ShowPictureArgument != "" {
+		_ = json.Unmarshal(raw[crop.ShowPictureArgument], &showPicture)
 	}
 	checklistName := arguments.Checklist
 	if checklistName == "" {
@@ -102,6 +127,61 @@ func (service *Service) Inspect(ctx context.Context, command chat.ToolCommand) (
 			Replace(service.review.UnreadableTemplate)
 		return chat.ToolResult{Error: message, NoSubmission: true}, nil
 	}
+	var pictures []chat.ToolPicture
+	imageFacts := map[string]any{
+		"handle": picture.Attachment.Handle, "task_id": picture.Attachment.TaskID,
+		"asset_id": picture.Attachment.AssetID,
+	}
+	// The whole picture's size, which show_picture describes beside a crop; a
+	// region crop's own bytes only exist inside the region branch.
+	originalWidth, originalHeight := 0, 0
+	if regionRequested {
+		decoded, decodeErr := visionview.Decode(data)
+		if decodeErr != nil {
+			return chat.ToolResult{Error: service.unreadable(picture, decodeErr), NoSubmission: true}, nil
+		}
+		source := decoded.Bounds()
+		originalWidth, originalHeight = source.Dx(), source.Dy()
+		cropped, rect, cropErr := visionview.CropRegion(decoded, region,
+			crop.MaximumPixels, crop.MinimumSidePixels)
+		if cropErr != nil {
+			if tooLarge, ok := cropErr.(*visionview.RegionTooLargeError); ok {
+				message := strings.NewReplacer(
+					"{width}", fmt.Sprint(tooLarge.Width),
+					"{height}", fmt.Sprint(tooLarge.Height),
+					"{maximum}", fmt.Sprint(tooLarge.Maximum),
+				).Replace(crop.TooLargeTemplate)
+				return chat.ToolResult{Error: message, NoSubmission: true}, nil
+			}
+			return chat.ToolResult{Error: "invalid region", NoSubmission: true}, nil
+		}
+		maxBytes := service.context.VisionInlineMaxBytes
+		encoded, encodeErr := visionview.EncodeJPEG(cropped, maxBytes,
+			service.context.VisionDerivative.JPEGQualities)
+		if encodeErr != nil {
+			message := strings.NewReplacer("{handle}", picture.Attachment.Handle, "{reason}", encodeErr.Error()).
+				Replace(service.review.UnreadableTemplate)
+			return chat.ToolResult{Error: message, NoSubmission: true}, nil
+		}
+		data = encoded
+		imageFacts["source_width"], imageFacts["source_height"] = source.Dx(), source.Dy()
+		imageFacts["region"] = rect
+		imageFacts["crop_width"], imageFacts["crop_height"] = rect.Width, rect.Height
+		if showPicture {
+			label := crop.PictureLabelTemplate
+			label = strings.NewReplacer(
+				"{handle}", picture.Attachment.Handle,
+				"{region}", rect.String(),
+				"{width}", fmt.Sprint(rect.Width),
+				"{height}", fmt.Sprint(rect.Height),
+			).Replace(label)
+			pictures = append(pictures, chat.ToolPicture{
+				Handle: picture.Attachment.Handle, Purpose: chat.ToolPictureCrop,
+				Detail: crop.Detail, Label: label,
+				URL: "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(encoded),
+			})
+		}
+	}
 	report, err := imageinspect.Inspect(data, imageinspect.Limits{
 		MaxBytes:  service.review.Limits.MaxBytes,
 		MaxPixels: service.review.Limits.MaxPixels,
@@ -111,13 +191,30 @@ func (service *Service) Inspect(ctx context.Context, command chat.ToolCommand) (
 			Replace(service.review.UnreadableTemplate)
 		return chat.ToolResult{Error: message, NoSubmission: true}, nil
 	}
+	imageFacts["width"], imageFacts["height"] = report.Width, report.Height
+	if originalWidth <= 0 || originalHeight <= 0 {
+		// No crop asked: report is the original picture's own inspection.
+		originalWidth, originalHeight = report.Width, report.Height
+	}
+	if showPicture {
+		// The whole picture first, so the Agent can place the crop in it. It
+		// has its own label and its own size: it is not a crop and must not
+		// carry the crop region or the crop's dimensions.
+		original := chat.ToolPicture{
+			Handle: picture.Attachment.Handle, URL: picture.URL,
+			Purpose: chat.ToolPictureCrop, Detail: crop.Detail,
+			Label: strings.NewReplacer(
+				"{handle}", picture.Attachment.Handle,
+				"{width}", fmt.Sprint(originalWidth),
+				"{height}", fmt.Sprint(originalHeight),
+			).Replace(crop.OriginalPictureLabelTemplate),
+		}
+		pictures = append([]chat.ToolPicture{original}, pictures...)
+	}
 	checks := report.Review(checklist)
 	result := map[string]any{
-		"ok": true,
-		"image": map[string]any{
-			"handle": picture.Attachment.Handle, "task_id": picture.Attachment.TaskID,
-			"asset_id": picture.Attachment.AssetID, "width": report.Width, "height": report.Height,
-		},
+		"ok":     true,
+		"image":  imageFacts,
 		"report": report,
 		"usage_check": map[string]any{
 			"checklist": checklistName, "checklist_text": checklistText, "checks": checks,
@@ -141,7 +238,10 @@ func (service *Service) Inspect(ctx context.Context, command chat.ToolCommand) (
 		"width": report.Width, "height": report.Height,
 		"checks": map[string]int{"passed": passed, "failed": failed},
 	})
-	return chat.ToolResult{AgentContent: string(content), Summary: summary, NoSubmission: true}, nil
+	return chat.ToolResult{
+		AgentContent: string(content), Summary: summary, Pictures: pictures,
+		NoSubmission: true,
+	}, nil
 }
 
 // ReviewAttachment inspects one already-resolved attachment with a named
@@ -227,4 +327,16 @@ func readLimited(reader io.Reader, limit int64) ([]byte, error) {
 		return nil, fmt.Errorf("picture is over the %d-byte limit", limit)
 	}
 	return data, nil
+}
+
+// unreadable is the Schema refusal naming a picture that cannot be decoded.
+func (service *Service) unreadable(picture chat.ResolvedAttachment, err error) string {
+	return strings.NewReplacer(
+		"{handle}", picture.Attachment.Handle,
+		"{reason}", err.Error(),
+	).Replace(service.review.UnreadableTemplate)
+}
+
+func jsonEqualNull(value json.RawMessage) bool {
+	return strings.TrimSpace(string(value)) == "null" || len(strings.TrimSpace(string(value))) == 0
 }

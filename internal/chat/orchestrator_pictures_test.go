@@ -35,8 +35,10 @@ func freshPictureOrchestrator() *Orchestrator {
 func TestFreshPicturesUseTheResultCopy(t *testing.T) {
 	orchestrator := freshPictureOrchestrator()
 	reply := agents.Message{Role: "tool", Content: "result"}
+	budget := orchestrator.visionBudget(TurnOptions{})
+	spend := visionSpend{}
 	orchestrator.attachToolPictures(context.Background(), "owner", &reply,
-		[]ToolPicture{{Handle: "@img1", URL: "/api/v1/tasks/t/assets/a", Fresh: true}})
+		[]ToolPicture{{Handle: "@img1", URL: "/api/v1/tasks/t/assets/a", Fresh: true}}, budget, &spend)
 	if !reply.FreshPictures {
 		t.Fatal("a fresh picture did not mark the reply")
 	}
@@ -56,8 +58,10 @@ func TestFreshPicturesUseTheResultCopy(t *testing.T) {
 func TestHistoryPicturesKeepTheHistoryCopy(t *testing.T) {
 	orchestrator := freshPictureOrchestrator()
 	reply := agents.Message{Role: "tool", Content: "lookup"}
+	budget := orchestrator.visionBudget(TurnOptions{})
+	spend := visionSpend{}
 	orchestrator.attachToolPictures(context.Background(), "owner", &reply,
-		[]ToolPicture{{Handle: "@img2", URL: "/api/v1/tasks/t/assets/b"}})
+		[]ToolPicture{{Handle: "@img2", URL: "/api/v1/tasks/t/assets/b"}}, budget, &spend)
 	if reply.FreshPictures {
 		t.Fatal("a history picture was marked fresh")
 	}

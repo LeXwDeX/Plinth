@@ -7,12 +7,14 @@ import (
 )
 
 // craftPrompt is the domain-brief block of the system context. Every Schema
-// craft prompt whose WhenToolsAny names at least one tool offered this turn is
-// appended in Schema order, so the Agent receives the 3D craft only on a turn
-// that can actually model in 3D. The offered list is the same describe() list
-// the model gets, so a tool withheld by the session's Agent scope, a disabled
-// Offering or a bound harness never triggers its brief.
-func (orchestrator *Orchestrator) craftPrompt(registry *toolRegistry, scope string) string {
+// craft prompt whose WhenToolsAny names at least one tool offered this turn,
+// and whose optional WhenDomain matches the turn's workspace domain, is
+// appended in Schema order, so the Agent receives the 3D craft only on a 3D
+// turn and the 2D craft only on a 2D turn even when auto scope offers both tool
+// sets (#239). The offered list is the same describe() list the model gets, so
+// a tool withheld by the session's Agent scope, a disabled Offering or a bound
+// harness never triggers its brief.
+func (orchestrator *Orchestrator) craftPrompt(registry *toolRegistry, scope, domain string) string {
 	prompts := orchestrator.schema.Agent.CraftPrompts
 	if len(prompts) == 0 || registry == nil {
 		return ""
@@ -24,6 +26,9 @@ func (orchestrator *Orchestrator) craftPrompt(registry *toolRegistry, scope stri
 	var block strings.Builder
 	for _, prompt := range prompts {
 		if strings.TrimSpace(prompt.Text) == "" {
+			continue
+		}
+		if prompt.WhenDomain != "" && domain != "" && prompt.WhenDomain != domain {
 			continue
 		}
 		matched := false

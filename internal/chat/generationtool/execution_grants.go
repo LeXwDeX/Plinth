@@ -112,10 +112,19 @@ func (executor *Executor) prepareAgentOperation(
 		return chat.ToolResult{NoSubmission: true}, err
 	}
 	preparedGateway := executor.gateway.(preparedGateway)
+	// #239: the approval card names who chose the model, with the purpose and
+	// its reason when the purpose did. The evidence never enters InputHash.
+	modelChoice := executor.modelChoiceOf(command, offering, input)
+	var approvalModelChoice *generation.ModelChoice
+	if modelChoice != nil {
+		approvalModelChoice = &generation.ModelChoice{
+			Source: modelChoice.Source, Profile: modelChoice.Profile, Reason: modelChoice.Reason,
+		}
+	}
 	prepared, err := preparedGateway.PrepareInput(ctx, generation.PrepareInputCommand{
 		OwnerID: generation.OwnerID(command.OwnerID), SessionID: command.SessionID,
 		Capability: capability, OfferingID: offering.ID, Input: input, ParameterReasons: reasons,
-		ParameterSources: sources,
+		ParameterSources: sources, ModelChoice: approvalModelChoice,
 	})
 	if err != nil {
 		// An input the Schema refuses (a count out of range, extra credits over

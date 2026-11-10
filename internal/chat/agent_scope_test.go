@@ -63,6 +63,10 @@ func newScopeRig(t *testing.T, responses ...agents.Completion) *scopeRig {
 // turn creates a session in the scope, starts a turn and runs it. The options
 // the "client" sends deliberately name another scope: the server must ignore it.
 func (rig *scopeRig) turn(t *testing.T, scope string) string {
+	return rig.turnDomain(t, scope, "image")
+}
+
+func (rig *scopeRig) turnDomain(t *testing.T, scope, domain string) string {
 	t.Helper()
 	ctx := context.Background()
 	session, err := rig.service.CreateSession(ctx, "owner-a", "Owner", "chat")
@@ -73,12 +77,12 @@ func (rig *scopeRig) turn(t *testing.T, scope string) string {
 		rig.seedScope(t, "owner-a", session.ID, scope)
 	}
 	assistant, err := rig.service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID, Content: "hello",
-		Options: chat.TurnOptions{CreativeDomain: "image", AgentScope: "forged"}})
+		Options: chat.TurnOptions{CreativeDomain: domain, AgentScope: "forged"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := rig.orchestrator.Process(ctx, chat.ProcessTurn{OwnerID: "owner-a", SessionID: session.ID, AssistantMessageID: assistant.ID,
-		Options: chat.TurnOptions{CreativeDomain: "image", AgentScope: "forged"}}); err != nil {
+		Options: chat.TurnOptions{CreativeDomain: domain, AgentScope: "forged"}}); err != nil {
 		t.Fatal(err)
 	}
 	return session.ID
@@ -106,7 +110,7 @@ func toolNames(request agents.Request) []string {
 var (
 	twoDTools      = []string{"create_multiview_images", "create_three_view", "edit_multiview_images", "refine_image", "remove_background"}
 	threeDTools    = []string{"build_creative_lab_item", "compare_models", "create_creative_lab_design", "convert_model_format", "create_gaussian_splat", "create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views", "create_motion_clip", "get_processing_plan", "inspect_model", "list_session_models", "plan_model_processing", "process_model", "render_model_views", "retexture_model"}
-	utilityToolSet = []string{"ask_choice", "find_history_images", "get_task", "inspect_image", "list_offerings", "observe_task", "propose_production_plan", "recover_task_result", "request_consent", "set_params", "update_production_brief", "update_session_notes"}
+	utilityToolSet = []string{"ask_choice", "find_history_images", "get_production_step", "get_task", "inspect_image", "list_offerings", "observe_task", "propose_production_plan", "recover_task_result", "request_consent", "set_params", "update_production_brief", "update_session_notes"}
 )
 
 func union(sets ...[]string) []string {

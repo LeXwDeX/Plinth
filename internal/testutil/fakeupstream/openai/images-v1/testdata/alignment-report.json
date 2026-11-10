@@ -76,7 +76,7 @@
       "sample": "POST /v1/images/generations",
       "doc_url": "https://platform.openai.com/docs/api-reference/images/create",
       "checked_at": "2026-10-29",
-      "note": "JSON request, one inline base64 picture per request; 400 missing_required_parameter and 401 text/plain are real samples. A content-policy refusal (400 moderation_blocked) and the 402/500 faults are not observed: they reuse the real 400 envelope with the documented code or message. The quota-exceeded 429 (the gateway's error.quota body), forbidden 403 (the gateway's eca_access_denied) and service-unavailable 503 (documented service_unavailable_error/server_is_overloaded) are constructed-from-docs answers built from the recorded gateway refusals and the error-code guide (https://developers.openai.com/api/docs/guides/error-codes, checked 2026-11-08)"
+      "note": "JSON request with inline base64 pictures; n is documented by the official Create image reference (1–10) and returns that many distinct inline candidates; the committed samples ask for n=1, so n>1 is constructed-from-docs. 400 missing_required_parameter and 401 text/plain are real samples. A content-policy refusal (400 moderation_blocked) and the 402/500 faults are not observed: they reuse the real 400 envelope with the documented code or message. The quota-exceeded 429 (the gateway's error.quota body), forbidden 403 (the gateway's eca_access_denied) and service-unavailable 503 (documented service_unavailable_error/server_is_overloaded) are constructed-from-docs answers built from the recorded gateway refusals and the error-code guide (https://developers.openai.com/api/docs/guides/error-codes, checked 2026-11-08)"
     },
     {
       "endpoint": "POST /images/edits",

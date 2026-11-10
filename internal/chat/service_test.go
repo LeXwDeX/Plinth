@@ -735,6 +735,37 @@ func (r *memoryChatRepository) SetSessionExplicitModel3D(
 	return true, nil
 }
 
+func (r *memoryChatRepository) SessionExplicitModelImage(
+	_ context.Context,
+	ownerID string,
+	sessionID string,
+) (string, bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	session, found := r.sessions[sessionID]
+	if !found || session.OwnerID != ownerID {
+		return "", false, nil
+	}
+	return session.ExplicitModelImage, true, nil
+}
+
+func (r *memoryChatRepository) SetSessionExplicitModelImage(
+	_ context.Context,
+	ownerID string,
+	sessionID string,
+	model string,
+) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	session, found := r.sessions[sessionID]
+	if !found || session.OwnerID != ownerID {
+		return false, nil
+	}
+	session.ExplicitModelImage = model
+	r.sessions[sessionID] = session
+	return true, nil
+}
+
 func (r *memoryChatRepository) SessionNotes(
 	_ context.Context,
 	ownerID string,

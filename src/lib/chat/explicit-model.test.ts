@@ -3,9 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ExplicitModelLockError,
   explicitModel3DPending,
+  explicitModelImagePending,
   flushExplicitModel3D,
+  flushExplicitModelImage,
   pickExplicitModel3D,
-  resetExplicitModel3D,
+  pickExplicitModelImage,
+  resetExplicitModel,
 } from '@/lib/chat/explicit-model';
 
 function deferred<T = void>() {
@@ -26,7 +29,7 @@ async function until(check: () => boolean): Promise<void> {
   throw new Error('condition did not become true');
 }
 
-beforeEach(() => resetExplicitModel3D());
+beforeEach(() => resetExplicitModel());
 
 describe('the explicit 3D model lock (#103)', () => {
   it('serializes per-session writes and keeps the newest pick', async () => {
@@ -137,5 +140,41 @@ describe('the explicit 3D model lock (#103)', () => {
     pickExplicitModel3D({ sessionId: 's1', model: 'chosen', previous: 'old', write });
     await flushExplicitModel3D('s1', write);
     expect(write).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('the explicit 2D model lock (#239)', () => {
+  it('keeps the 2D and 3D locks of one session independent', async () => {
+    const image = deferred();
+    const model = deferred();
+    const imageWrite = vi.fn(() => image.promise);
+    const modelWrite = vi.fn(() => model.promise);
+    pickExplicitModelImage({ sessionId: 's1', model: 'nano-banana-pro', previous: null, write: imageWrite });
+    pickExplicitModel3D({ sessionId: 's1', model: 'meshy-7.1', previous: null, write: modelWrite });
+    expect(explicitModelImagePending('s1')).toBe(true);
+    expect(explicitModel3DPending('s1')).toBe(true);
+    const flushingImage = flushExplicitModelImage('s1', imageWrite);
+    image.resolve();
+    await flushingImage;
+    expect(explicitModelImagePending('s1')).toBe(false);
+    expect(explicitModel3DPending('s1')).toBe(true);
+    const flushingModel = flushExplicitModel3D('s1', modelWrite);
+    model.resolve();
+    await flushingModel;
+    expect(explicitModel3DPending('s1')).toBe(false);
+    expect(imageWrite).toHaveBeenCalledWith('s1', 'nano-banana-pro');
+    expect(modelWrite).toHaveBeenCalledWith('s1', 'meshy-7.1');
+  });
+
+  it('adopts a 2D and a 3D pick made before the session exists, each on its own domain', async () => {
+    const write = vi.fn(async () => undefined);
+    pickExplicitModelImage({ sessionId: null, model: 'image-model', previous: null, write });
+    pickExplicitModel3D({ sessionId: null, model: 'model-3d-model', previous: null, write });
+    await flushExplicitModelImage('new-session', write);
+    await flushExplicitModel3D('new-session', write);
+    expect(write).toHaveBeenCalledWith('new-session', 'image-model');
+    expect(write).toHaveBeenCalledWith('new-session', 'model-3d-model');
+    expect(explicitModelImagePending('new-session')).toBe(false);
+    expect(explicitModel3DPending('new-session')).toBe(false);
   });
 });

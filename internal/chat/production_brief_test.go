@@ -46,6 +46,7 @@ func testModel3DUsage() catalog.ChatModel3DUsageSchema {
 		Brief: catalog.ChatProductionBriefSchema{
 			Fields: []catalog.ChatProductionBriefField{
 				{Name: "purpose", Type: "profile", Label: "用途"},
+				{Name: "image_use", Type: "image_profile", Label: "2D 用途"},
 				{Name: "style", Type: "text", Label: "风格", MaximumCharacters: 20},
 				{Name: "needs_rig", Type: "boolean", Label: "需要绑骨"},
 				{Name: "triangle_budget", Type: "integer", Label: "三角面预算", Minimum: 100, Maximum: 2000000},
@@ -59,6 +60,60 @@ func usageProfileKind() catalog.ChatChoiceKindSchema {
 		ID: "usage_profile", OptionSource: "usage_profiles",
 		ToolName: "update_production_brief", Argument: "purpose",
 		Question: "这次模型主要用来做什么？", Message: "请在下方卡片中选择用途。",
+	}
+}
+
+// testImage2DUsage is a small 2D purpose table in the shipped shape (#239).
+func testImage2DUsage() catalog.ChatImage2DUsageSchema {
+	return catalog.ChatImage2DUsageSchema{
+		DefaultProfile: "concept_art",
+		Profiles: []catalog.ChatImage2DUsageProfile{
+			{
+				ID: "concept_art", Label: "概念设定图", Description: "多主体概念图。",
+				Reason: "概念图优先构图与氛围。",
+				RecommendedOfferings: map[string][]string{
+					"text-to-image":  {"meshy/nano-banana-pro/text-to-image"},
+					"image-to-image": {"meshy/nano-banana-pro/image-to-image"},
+				},
+				Requirements: catalog.ChatImage2DRequirements{
+					AspectRatio: "16:9", MinimumShortEdge: 1024, Background: "any", Subjects: "multiple",
+				},
+			},
+			{
+				ID: "illustration", Label: "角色立绘", Description: "单角色立绘。",
+				Reason: "立绘需要稳定的身份与竖画幅。",
+				RecommendedOfferings: map[string][]string{
+					"text-to-image": {"meshy/nano-banana-pro/text-to-image"},
+				},
+				Requirements: catalog.ChatImage2DRequirements{
+					AspectRatio: "2:3", MinimumShortEdge: 1536, Background: "any", Subjects: "single",
+				},
+			},
+		},
+		RequirementsNote: catalog.ChatImage2DRequirementsNote{
+			Template: "{items}", Separator: "；",
+			AspectRatioTemplate: "画幅 {value}", MinimumShortEdgeTemplate: "短边至少 {value} 像素",
+			BackgroundTemplate: "背景{value}", SubjectsTemplate: "主体{value}", PoseTemplate: "姿势 {value}",
+			BackgroundTexts: map[string]string{"any": "不限", "solid": "纯色", "transparent": "透明", "solid_or_transparent": "纯色或透明"},
+			SubjectsTexts:   map[string]string{"single": "单个", "multiple": "可多个"},
+			PoseTexts:       map[string]string{"a-pose": "A-pose", "t-pose": "T-pose"},
+		},
+	}
+}
+
+func imageUsageProfileKind() catalog.ChatChoiceKindSchema {
+	return catalog.ChatChoiceKindSchema{
+		ID: "image_usage_profile", OptionSource: "image_usage_profiles",
+		ToolName: "update_production_brief", Argument: "image_use",
+		Question: "这张图主要用来做什么？", Message: "请选择 2D 用途。",
+	}
+}
+
+func directionChoiceKind() catalog.ChatChoiceKindSchema {
+	return catalog.ChatChoiceKindSchema{
+		ID: "direction", OptionSource: "agent",
+		ToolName: "update_production_brief", Argument: "style",
+		Question: "想要哪个方向？", Message: "请选择方向。",
 	}
 }
 
@@ -419,7 +474,7 @@ func TestValidateProductionBriefUsesTheSchemaMessages(t *testing.T) {
 			want: `"triangle_budget" must be 100-2000000`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := chat.ValidateProductionBrief(usage.Brief, usage.Profiles, test.raw)
+			_, err := chat.ValidateProductionBrief(usage.Brief, usage.Profiles, nil, test.raw)
 			var invalid *chat.BriefError
 			if !errors.As(err, &invalid) || invalid.Reason != test.want {
 				t.Fatalf("error = %v, want %q", err, test.want)
@@ -466,7 +521,7 @@ func TestValidateProductionBriefNormalizesAndBounds(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := chat.ValidateProductionBrief(usage.Brief, usage.Profiles, test.raw)
+			_, err := chat.ValidateProductionBrief(usage.Brief, usage.Profiles, nil, test.raw)
 			if test.success {
 				if err != nil {
 					t.Fatalf("valid brief refused: %v", err)
@@ -479,7 +534,7 @@ func TestValidateProductionBriefNormalizesAndBounds(t *testing.T) {
 			}
 		})
 	}
-	brief, err := chat.ValidateProductionBrief(usage.Brief, usage.Profiles, map[string]json.RawMessage{
+	brief, err := chat.ValidateProductionBrief(usage.Brief, usage.Profiles, nil, map[string]json.RawMessage{
 		"purpose":         json.RawMessage(`" game_character "`),
 		"style":           json.RawMessage(`" 写实 "`),
 		"needs_rig":       json.RawMessage(`true`),
@@ -540,5 +595,177 @@ func TestSetExplicitModel3DRefusesAModelTheValidatorRejects(t *testing.T) {
 	}
 	if stored, err := service.SessionExplicitModel3D(ctx, "owner-a", "session-a"); err != nil || stored != "meshy-7.1" {
 		t.Fatalf("stored lock = %q %v", stored, err)
+	}
+}
+
+// #239: the 2D purpose card is built from image2d_usage.profiles and its
+// answer writes image_use; a brief write settles only the card whose argument
+// matches the written field.
+func TestImageUsageProfileCardAndBriefSettlement(t *testing.T) {
+	ctx := context.Background()
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "chat.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repository.Close() })
+	now := time.Now().UTC()
+	for _, session := range []chat.Session{
+		{ID: "session-a", OwnerID: "owner-a", OwnerName: "A", Title: "a", CreatedAt: now, UpdatedAt: now},
+		{ID: "session-b", OwnerID: "owner-a", OwnerName: "A", Title: "b", CreatedAt: now, UpdatedAt: now},
+	} {
+		if _, err := repository.CreateSession(ctx, session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) {
+		config.Model3DUsage = testModel3DUsage()
+		config.Image2DUsage = testImage2DUsage()
+		config.ChoiceKinds = []catalog.ChatChoiceKindSchema{usageProfileKind(), imageUsageProfileKind()}
+		config.ChoiceMaxOptions = 8
+	})
+	service.SetChoices(repository, 20)
+	commandFor := func(session, call string) chat.ToolCommand {
+		return chat.ToolCommand{
+			OwnerID: "owner-a", SessionID: session, AssistantMessageID: "turn-1",
+			Call: agents.ToolCall{ID: call, Name: "ask_choice"},
+		}
+	}
+	// A 3D card on one session and a 2D card on another are open at once.
+	if _, err := service.AskChoice(ctx, commandFor("session-a", "call-3d"), usageProfileKind(),
+		chat.AskChoiceArguments{Kind: "usage_profile"}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.AskChoice(ctx, commandFor("session-b", "call-2d"), imageUsageProfileKind(),
+		chat.AskChoiceArguments{Kind: "image_usage_profile", Recommended: "illustration"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var opened struct {
+		Kind        string `json:"kind"`
+		Recommended string `json:"recommended"`
+		Options     []struct {
+			ID          string `json:"id"`
+			Label       string `json:"label"`
+			Description string `json:"description"`
+		} `json:"options"`
+	}
+	if err := json.Unmarshal([]byte(result.AgentContent), &opened); err != nil {
+		t.Fatal(err)
+	}
+	if opened.Kind != "image_usage_profile" || opened.Recommended != "illustration" || len(opened.Options) != 2 ||
+		opened.Options[1].ID != "illustration" || opened.Options[1].Label != "角色立绘" {
+		t.Fatalf("2D card = %+v", opened)
+	}
+	choices, err := service.ListChoices(ctx, "owner-a", "session-b")
+	if err != nil || len(choices) != 1 {
+		t.Fatalf("stored 2D cards = %+v %v", choices, err)
+	}
+	var arguments map[string]string
+	if err := json.Unmarshal(choices[0].Options[1].Arguments, &arguments); err != nil || arguments["image_use"] != "illustration" {
+		t.Fatalf("2D option arguments = %s %v", choices[0].Options[1].Arguments, err)
+	}
+	// Writing the 2D purpose answers the 2D card; the 3D card is untouched.
+	if _, _, err := service.SetProductionBrief(ctx, "owner-a", "session-b", map[string]json.RawMessage{
+		"image_use": json.RawMessage(`"illustration"`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	choices, err = service.ListChoices(ctx, "owner-a", "session-b")
+	if err != nil || len(choices) != 1 || choices[0].State != chat.ChoiceAnswered ||
+		choices[0].AnswerOptionID != "illustration" || choices[0].AnswerSource != chat.ChoiceAnsweredByAgent {
+		t.Fatalf("settled 2D card = %+v %v", choices, err)
+	}
+	choices, err = service.ListChoices(ctx, "owner-a", "session-a")
+	if err != nil || len(choices) != 1 || choices[0].State != chat.ChoicePending {
+		t.Fatalf("3D card was settled by a 2D write: %+v %v", choices, err)
+	}
+	// Writing the 3D purpose settles the 3D card.
+	if _, _, err := service.SetProductionBrief(ctx, "owner-a", "session-a", map[string]json.RawMessage{
+		"purpose": json.RawMessage(`"game_character"`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	choices, err = service.ListChoices(ctx, "owner-a", "session-a")
+	if err != nil || len(choices) != 1 || choices[0].State != chat.ChoiceAnswered ||
+		choices[0].AnswerOptionID != "game_character" {
+		t.Fatalf("settled 3D card = %+v %v", choices, err)
+	}
+	// An undeclared 2D purpose is refused.
+	var invalid *chat.BriefError
+	if _, _, err := service.SetProductionBrief(ctx, "owner-a", "session-b", map[string]json.RawMessage{
+		"image_use": json.RawMessage(`"missing"`),
+	}); !errors.As(err, &invalid) || !strings.Contains(invalid.Reason, "未声明") {
+		t.Fatalf("unknown 2D purpose = %v", err)
+	}
+}
+
+// #239: a direction card carries Agent-supplied options; only bounded tokens
+// reach the answer, a recommended id outside the list is ignored, and the
+// option count is bounded.
+func TestDirectionCardTakesBoundedAgentOptions(t *testing.T) {
+	ctx := context.Background()
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "chat.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repository.Close() })
+	now := time.Now().UTC()
+	if _, err := repository.CreateSession(ctx, chat.Session{
+		ID: "session-a", OwnerID: "owner-a", OwnerName: "A", Title: "a", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) {
+		config.ChoiceKinds = []catalog.ChatChoiceKindSchema{directionChoiceKind()}
+		config.ChoiceMaxOptions = 3
+	})
+	service.SetChoices(repository, 20)
+	command := chat.ToolCommand{
+		OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-1",
+		Call: agents.ToolCall{ID: "call-1", Name: "ask_choice"},
+	}
+	result, err := service.AskChoice(ctx, command, directionChoiceKind(), chat.AskChoiceArguments{
+		Kind: "direction", Recommended: "missing-id",
+		Options: []chat.ChoiceOptionInput{
+			{ID: "watercolor", Label: "水彩"},
+			{ID: "ink-2", Label: "水墨", Description: "淡墨与留白"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var opened struct {
+		Recommended string `json:"recommended"`
+		Options     []struct {
+			ID    string `json:"id"`
+			Label string `json:"label"`
+		} `json:"options"`
+	}
+	if err := json.Unmarshal([]byte(result.AgentContent), &opened); err != nil {
+		t.Fatal(err)
+	}
+	if opened.Recommended != "" || len(opened.Options) != 2 || opened.Options[0].ID != "watercolor" {
+		t.Fatalf("direction card = %+v", opened)
+	}
+	choices, err := service.ListChoices(ctx, "owner-a", "session-a")
+	if err != nil || len(choices) != 1 {
+		t.Fatalf("stored cards = %+v %v", choices, err)
+	}
+	var arguments map[string]string
+	if err := json.Unmarshal(choices[0].Options[0].Arguments, &arguments); err != nil || arguments["style"] != "watercolor" {
+		t.Fatalf("direction answer = %s %v", choices[0].Options[0].Arguments, err)
+	}
+	for _, bad := range [][]chat.ChoiceOptionInput{
+		{{ID: "only-one", Label: "一个"}},
+		{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}, {ID: "c", Label: "C"}, {ID: "d", Label: "D"}},
+		{{ID: "free text", Label: "带空格"}},
+		{{ID: "ok", Label: "好的"}, {ID: "x", Label: ""}},
+	} {
+		refused, err := service.AskChoice(ctx, command, directionChoiceKind(), chat.AskChoiceArguments{
+			Kind: "direction", Options: bad,
+		})
+		if err != nil || !refused.NoSubmission || refused.Error == "" {
+			t.Fatalf("bad direction options accepted: %+v %v", refused, err)
+		}
 	}
 }

@@ -87,6 +87,12 @@ type Repository interface {
 	// updated_at.
 	SessionExplicitModel3D(ctx context.Context, owner, session string) (string, bool, error)
 	SetSessionExplicitModel3D(ctx context.Context, owner, session, model string) (bool, error)
+	// SessionExplicitModelImage and SetSessionExplicitModelImage read and
+	// replace the 2D model the person explicitly picked in the session (#239).
+	// An empty model clears the pick; both are owner scoped and writing does
+	// not touch updated_at.
+	SessionExplicitModelImage(ctx context.Context, owner, session string) (string, bool, error)
+	SetSessionExplicitModelImage(ctx context.Context, owner, session, model string) (bool, error)
 	// SessionPick and SetSessionPick read and replace the candidate the user
 	// picked as the session's current object (platform IDs only; a zero
 	// Attachment clears it). Both are scoped to the owner; found is false for a
@@ -219,6 +225,12 @@ type ServiceConfig struct {
 	// Models names the sessions' chat model and reads its thinking profile
 	// and context window (#322). A zero policy offers no level and no window.
 	Models ModelPolicy
+	// VisionBudget resolves the effective vision image budget for a model
+	// (#247); nil leaves the context view without a budget.
+	VisionBudget func(model string) int
+	// VisionTokenBudget resolves the effective per-request vision token bound
+	// for a model (#247); nil leaves the context view without a token bound.
+	VisionTokenBudget func(model string) int
 	// RetiredModels are the generation models no longer offered and the model
 	// that replaces each (Schema runtime.frontend.retired_generation_models,
 	// #329 follow-up). A turn's pick of a retired model is moved to its
@@ -228,14 +240,27 @@ type ServiceConfig struct {
 	// production brief may name, their parameter overrides and the brief's
 	// field declarations. Zero disables the brief API and the purpose card.
 	Model3DUsage catalog.ChatModel3DUsageSchema
+	// Image2DUsage is application.chat.image2d_usage (#239): the 2D purposes a
+	// production brief may name, their recommended offerings, parameter
+	// overrides and delivery requirements. Zero disables the 2D purpose card.
+	Image2DUsage catalog.ChatImage2DUsageSchema
 	// ExplicitModel3DValid reports whether a pick names an enabled 3D
 	// generation Offering (#103 review C4). Nil accepts any well-formed token,
 	// for assemblies that do not load a Catalog.
 	ExplicitModel3DValid func(model string) bool
-	// ChoiceKinds are application.chat.choice.kinds (#103). The brief write
-	// settles the kind whose option_source is usage_profiles; without it no
-	// card is settled.
+	// ExplicitModelImageValid reports whether a 2D pick names an enabled image
+	// Offering (#239). Nil accepts any well-formed token.
+	ExplicitModelImageValid func(model string) bool
+	// ChoiceKinds are application.chat.choice.kinds (#103, #239). The brief
+	// write settles the kinds whose option source is a purpose table; without
+	// them no card is settled.
 	ChoiceKinds []catalog.ChatChoiceKindSchema
+	// ChoiceMaxOptions bounds the options of an Agent-supplied direction card
+	// (#239); zero accepts any non-empty list.
+	ChoiceMaxOptions int
+	// WorkLedger is application.chat.work_ledger (#248). A zero value leaves
+	// the ledger and the get_production_step tool unavailable.
+	WorkLedger catalog.ChatWorkLedgerSchema
 }
 
 type Service struct {
@@ -274,10 +299,15 @@ type Service struct {
 	canvasInputSource          string
 	retiredModels              map[string]catalog.RetiredModelSuccessor
 	model3DUsage               catalog.ChatModel3DUsageSchema
+	image2DUsage               catalog.ChatImage2DUsageSchema
 	explicitModel3DValid       func(string) bool
-	// usageProfileKind is the declared card the brief write settles; its ID and
-	// argument name come from the Schema, not from code (#103).
-	usageProfileKind *catalog.ChatChoiceKindSchema
+	explicitModelImageValid    func(string) bool
+	// usageProfileKind and imageUsageProfileKind are the declared cards the
+	// brief write settles; their IDs and argument names come from the Schema,
+	// not from code (#103, #239).
+	usageProfileKind      *catalog.ChatChoiceKindSchema
+	imageUsageProfileKind *catalog.ChatChoiceKindSchema
+	choiceMaxOptions      int
 
 	harnessSnapshotResolver HarnessSnapshotResolver
 
@@ -293,8 +323,21 @@ type Service struct {
 	// models and contextStore serve the thinking level, the context usage
 	// and the compactions of sessions (#322).
 	models              ModelPolicy
+	visionBudget        func(model string) int
+	visionTokenBudget   func(model string) int
 	contextStore        ContextStore
 	compactionListLimit int
+
+	// workLedger is application.chat.work_ledger (#248); workLedgerTasks is
+	// the public-Task page source, workLedgerDetail the full single-Task read,
+	// workDecisions the rejected-direction source and workParameterSource the
+	// existing parameter store's last-writer state. All are set during
+	// application assembly.
+	workLedger          catalog.ChatWorkLedgerSchema
+	workLedgerTasks     SessionTaskSource
+	workLedgerDetail    SessionTaskDetail
+	workDecisions       WorkDecisionReader
+	workParameterSource WorkParameterSource
 }
 
 func NewService(config ServiceConfig) (*Service, error) {
@@ -385,9 +428,16 @@ func NewService(config ServiceConfig) (*Service, error) {
 		canvasInputSource:          config.CanvasInputSource,
 		retiredModels:              retiredModelIndex(config.RetiredModels),
 		model3DUsage:               config.Model3DUsage,
+		image2DUsage:               config.Image2DUsage,
 		explicitModel3DValid:       config.ExplicitModel3DValid,
-		usageProfileKind:           usageProfileKindOf(config.ChoiceKinds),
+		explicitModelImageValid:    config.ExplicitModelImageValid,
+		usageProfileKind:           choiceKindOf(config.ChoiceKinds, "usage_profiles"),
+		imageUsageProfileKind:      choiceKindOf(config.ChoiceKinds, "image_usage_profiles"),
+		choiceMaxOptions:           config.ChoiceMaxOptions,
 		models:                     config.Models,
+		workLedger:                 config.WorkLedger,
+		visionBudget:               config.VisionBudget,
+		visionTokenBudget:          config.VisionTokenBudget,
 	}, nil
 }
 
@@ -852,6 +902,14 @@ func (service *Service) startTurn(
 		return Message{}, ErrSessionNotFound
 	}
 	command.Options.ExplicitModel3D = explicitModel
+	explicitImage, found, err := service.repository.SessionExplicitModelImage(ctx, command.OwnerID, command.SessionID)
+	if err != nil {
+		return Message{}, err
+	}
+	if !found {
+		return Message{}, ErrSessionNotFound
+	}
+	command.Options.ExplicitModelImage = explicitImage
 	// The style lock is a session setting, but generation must use the snapshot
 	// taken with this turn so later edits do not change a frozen task.
 	styleLock, found, err := service.repository.StyleLock(ctx, command.OwnerID, command.SessionID)

@@ -236,6 +236,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateModel3DUsageShape(schema, capabilityPresentations); err != nil {
 		return err
 	}
+	if err := validateImage2DUsageShape(schema); err != nil {
+		return err
+	}
 	if err := validateHarness(schema, capabilityPresentations); err != nil {
 		return err
 	}
@@ -245,7 +248,7 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validatePromptSections(schema, capabilityDomains); err != nil {
 		return err
 	}
-	if err := validateChatAttachments(schema.Context); err != nil {
+	if err := validateChatAttachments(schema); err != nil {
 		return err
 	}
 	directStyleLockCapabilities := make(map[schemacontract.Capability]bool, len(schema.StyleLock.DirectTaskCapabilities))
@@ -677,14 +680,18 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateImageReview(schema); err != nil {
 		return err
 	}
+	if err := validateWorkLedger(schema); err != nil {
+		return err
+	}
 	for index, tool := range schema.Tools {
 		if tool.RequireUniqueOffering && (!tool.IgnoreUserModel || tool.RequireUserModel || tool.CrossDomainModelFallback) {
 			return fmt.Errorf("tools[%d] require_unique_offering requires independent model selection", index)
 		}
 		if tool.CrossDomainModelFallback {
-			if !tool.RequireUserModel || len(tool.Execution.Domains) != 1 ||
+			selectsModel := tool.RequireUserModel || tool.ModelArgument != ""
+			if !selectsModel || len(tool.Execution.Domains) != 1 ||
 				strings.TrimSpace(tool.ResultFields.Model) == "" || strings.TrimSpace(tool.ResultFields.ModelFallback) == "" {
-				return fmt.Errorf("tools[%d] cross_domain_model_fallback 需要 require_user_model、单一 domain 与 result_fields.model/model_fallback", index)
+				return fmt.Errorf("tools[%d] cross_domain_model_fallback 需要 require_user_model 或 model_argument、单一 domain 与 result_fields.model/model_fallback", index)
 			}
 		}
 		switch tool.ResultAttachmentKind {
@@ -837,6 +844,7 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"inspect_model":           {"model.inspect", "READ", []string{"model-3d"}},
 		"render_model_views":      {"model.render", "READ", []string{"model-3d"}},
 		"compare_models":          {"model.compare", "READ", []string{"model-3d"}},
+		"get_production_step":     {"ledger.read", "READ", []string{"image", "model-3d"}},
 	}
 	var controlDomains []string
 	var expectedEffect string
@@ -1352,7 +1360,8 @@ func validateServiceMessages(service ChatToolServiceMessages) error {
 
 // validateChatAttachments rejects handle syntax and prompt templates that
 // could make two objects share a handle or leave a placeholder unfilled.
-func validateChatAttachments(context ChatContextSchema) error {
+func validateChatAttachments(schema ChatSchema) error {
+	context := schema.Context
 	if len(context.HandlePrefixes) == 0 {
 		return errors.New("context.handle_prefixes 不能为空")
 	}
@@ -1433,6 +1442,9 @@ func validateChatAttachments(context ChatContextSchema) error {
 	}
 	if context.MaxResultPictures < 0 || context.MaxResultPictures > context.MaximumVisionImages {
 		return errors.New("context.max_result_pictures 必须在 0 与 maximum_vision_images 之间")
+	}
+	if err := validateChatVision(schema); err != nil {
+		return err
 	}
 	if context.MaximumSessionNotesCharacters <= 0 ||
 		!strings.Contains(context.SessionNotesTemplate, "{notes}") ||
@@ -2456,6 +2468,147 @@ func validateImageReview(schema ChatSchema) error {
 	return nil
 }
 
+// validateWorkLedger checks application.chat.work_ledger (#248) once the
+// get_production_step tool is declared. Every bound must be positive, every
+// Agent-facing template must carry the placeholders the renderer fills, the
+// block markers must differ, and the step handle prefix must not collide with
+// the attachment handle prefixes or the selection alias. A Catalog without the
+// tool stays valid.
+func validateWorkLedger(schema ChatSchema) error {
+	used := false
+	for _, tool := range schema.AgentTools {
+		if tool.Execution.ImplementationKey == "ledger.read" {
+			used = true
+			break
+		}
+	}
+	if !used {
+		return nil
+	}
+	ledger := schema.WorkLedger
+	for name, value := range map[string]int{
+		"maximum_steps":              ledger.MaximumSteps,
+		"summary_maximum_characters": ledger.SummaryMaximumCharacters,
+		"prompt_preview_characters":  ledger.PromptPreviewCharacters,
+		"entry_maximum_characters":   ledger.EntryMaximumCharacters,
+	} {
+		if value <= 0 {
+			return fmt.Errorf("chat.work_ledger.%s 必须为正数", name)
+		}
+	}
+	// generation.Module.List caps one page at 100; a larger bound would be
+	// silently truncated.
+	if ledger.MaximumSteps > 100 {
+		return errors.New("chat.work_ledger.maximum_steps 不能超过 100")
+	}
+	for _, template := range []struct {
+		name         string
+		text         string
+		placeholders []string
+	}{
+		{"summary_template", ledger.SummaryTemplate, []string{"{open}", "{steps}", "{rejected}", "{omissions}", "{close}"}},
+		{"step_line_template", ledger.StepLineTemplate, []string{"{step}", "{task_id}", "{capability}", "{model}", "{status}", "{prompt}", "{self_check}", "{decision}"}},
+		{"prompt_line_template", ledger.PromptLineTemplate, []string{"{preview}"}},
+		{"self_check_line_template", ledger.SelfCheckLineTemplate, []string{"{tool}", "{passed}", "{unknown}", "{failed}", "{leftovers}"}},
+		{"leftover_template", ledger.LeftoverTemplate, []string{"{checks}"}},
+		{"unknown_step_template", ledger.UnknownStepTemplate, []string{"{step}"}},
+	} {
+		if strings.TrimSpace(template.text) == "" {
+			return fmt.Errorf("chat.work_ledger.%s 不能为空", template.name)
+		}
+		for _, placeholder := range template.placeholders {
+			if !strings.Contains(template.text, placeholder) {
+				return fmt.Errorf("chat.work_ledger.%s 须含 %s", template.name, placeholder)
+			}
+		}
+	}
+	for name, text := range map[string]string{
+		"empty_text":            ledger.EmptyText,
+		"not_readable_template": ledger.NotReadableTemplate,
+		"none_text":             ledger.NoneText,
+		"prompt_omitted_text":   ledger.PromptOmittedText,
+		"omissions_note":        ledger.OmissionsNote,
+	} {
+		if strings.TrimSpace(text) == "" {
+			return fmt.Errorf("chat.work_ledger.%s 不能为空", name)
+		}
+	}
+	if !strings.Contains(ledger.OmissionsNote, "{count}") {
+		return errors.New("chat.work_ledger.omissions_note 须含 {count}")
+	}
+	if !strings.Contains(ledger.FailedViewsTemplate, "{views}") {
+		return errors.New("chat.work_ledger.failed_views_template 须含 {views}")
+	}
+	if ledger.TruncatedNote != "" && !strings.Contains(ledger.TruncatedNote, "{count}") {
+		return errors.New("chat.work_ledger.truncated_note 须含 {count}")
+	}
+	open, close := strings.TrimSpace(ledger.OpenMarker), strings.TrimSpace(ledger.CloseMarker)
+	if open == "" || close == "" || open == close {
+		return errors.New("chat.work_ledger 的 open_marker 与 close_marker 须为两个不同的非空标记")
+	}
+	prefix := strings.ToLower(strings.TrimSpace(ledger.StepPrefix))
+	if prefix == "" {
+		return errors.New("chat.work_ledger.step_prefix 不能为空")
+	}
+	alias := strings.ToLower(strings.TrimSpace(schema.Context.SelectionAlias))
+	if alias != "" && (strings.HasPrefix(alias, prefix) || strings.HasPrefix(prefix, alias)) {
+		return errors.New("chat.work_ledger.step_prefix 不能与 selection_alias 冲突")
+	}
+	for _, handlePrefix := range schema.Context.HandlePrefixes {
+		lowered := strings.ToLower(strings.TrimSpace(handlePrefix))
+		if lowered != "" && (strings.HasPrefix(lowered, prefix) || strings.HasPrefix(prefix, lowered)) {
+			return errors.New("chat.work_ledger.step_prefix 不能与 handle_prefixes 冲突")
+		}
+	}
+	rejected := ledger.Rejected
+	if rejected.MaximumItems <= 0 {
+		return errors.New("chat.work_ledger.rejected.maximum_items 必须为正数")
+	}
+	if !strings.Contains(rejected.ContextTemplate, "{items}") {
+		return errors.New("chat.work_ledger.rejected.context_template 须含 {items}")
+	}
+	for _, placeholder := range []string{"{step}", "{reason}"} {
+		if !strings.Contains(rejected.LineTemplate, placeholder) {
+			return fmt.Errorf("chat.work_ledger.rejected.line_template 须含 %s", placeholder)
+		}
+	}
+	if strings.TrimSpace(rejected.SupersededReason) == "" {
+		return errors.New("chat.work_ledger.rejected.superseded_reason 不能为空")
+	}
+	anchors := ledger.Anchors
+	if anchors.MaximumTextCharacters <= 0 || strings.TrimSpace(anchors.StyleLabel) == "" {
+		return errors.New("chat.work_ledger.anchors 的样本文本上限与 style_label 必须声明")
+	}
+	for _, template := range []struct {
+		name         string
+		text         string
+		placeholders []string
+	}{
+		{"context_template", anchors.ContextTemplate, []string{"{open}", "{anchors}", "{close}"}},
+		{"entry_template", anchors.EntryTemplate, []string{"{label}", "{text}", "{references}"}},
+		{"reference_template", anchors.ReferenceTemplate, []string{"{handles}"}},
+	} {
+		for _, placeholder := range template.placeholders {
+			if !strings.Contains(template.text, placeholder) {
+				return fmt.Errorf("chat.work_ledger.anchors.%s 须含 %s", template.name, placeholder)
+			}
+		}
+	}
+	if !strings.Contains(anchors.MissingReferencesTemplate, "{count}") {
+		return errors.New("chat.work_ledger.anchors.missing_references_template 须含 {count}")
+	}
+	anchorOpen, anchorClose := strings.TrimSpace(anchors.OpenMarker), strings.TrimSpace(anchors.CloseMarker)
+	if anchorOpen == "" || anchorClose == "" || anchorOpen == anchorClose {
+		return errors.New("chat.work_ledger.anchors 的 open_marker 与 close_marker 须为两个不同的非空标记")
+	}
+	// The style anchor is the session style lock injected verbatim; a smaller
+	// anchor bound would cut the lock the person wrote.
+	if schema.StyleLock.MaximumTextCharacters > anchors.MaximumTextCharacters {
+		return errors.New("chat.work_ledger.anchors.maximum_text_characters 不能小于 style_lock.maximum_text_characters")
+	}
+	return nil
+}
+
 // validateModelReview checks application.chat.model_review (#103) once any
 // model review tool is declared: every bound positive, the render vocabulary
 // renderable, defaults inside their enumerations, and every Agent-facing text
@@ -2705,4 +2858,181 @@ func validateModelInspectProduction(
 		}
 	}
 	return nil
+}
+
+// validateChatVision checks the purpose-based vision budget (#247). The whole
+// block is optional: a Catalog without it keeps the legacy behavior.
+func validateChatVision(schema ChatSchema) error {
+	vision := schema.Context.Vision
+	if vision == nil {
+		return nil
+	}
+	if vision.MaximumImages <= 0 || vision.MaximumTokens <= 0 || vision.MaximumBytes <= 0 {
+		return errors.New("context.vision 的 maximum_images、maximum_tokens 与 maximum_bytes 必须为正数")
+	}
+	if len(vision.Roles) == 0 {
+		return errors.New("context.vision.roles 不能为空")
+	}
+	roleIDs := map[string]bool{}
+	seenSources := map[string]bool{}
+	for index, role := range vision.Roles {
+		if strings.TrimSpace(role.ID) == "" || roleIDs[role.ID] {
+			return fmt.Errorf("context.vision.roles[%d] 的 id 为空或重复", index)
+		}
+		roleIDs[role.ID] = true
+		if len(role.Sources) == 0 {
+			return fmt.Errorf("context.vision.roles[%d] 没有 sources", index)
+		}
+		for _, source := range role.Sources {
+			switch source {
+			case ChatVisionSourceCanvas, ChatVisionSourceTurn, ChatVisionSourceStyle,
+				ChatVisionSourceRender, ChatVisionSourceGenerated, ChatVisionSourceHistory:
+			default:
+				return fmt.Errorf("context.vision.roles[%d] 的 source %q 无效", index, source)
+			}
+			if seenSources[source] {
+				return fmt.Errorf("context.vision 的 source %q 被多个角色声明", source)
+			}
+			seenSources[source] = true
+		}
+		if role.MaximumImages <= 0 {
+			return fmt.Errorf("context.vision.roles[%d].maximum_images 必须为正数", index)
+		}
+		if !validVisionDetail(role.Detail) {
+			return fmt.Errorf("context.vision.roles[%d].detail %q 无效", index, role.Detail)
+		}
+		if role.TokenCost <= 0 {
+			return fmt.Errorf("context.vision.roles[%d].token_cost 必须为正数", index)
+		}
+	}
+	if !seenSources[ChatVisionSourceGenerated] || !seenSources[ChatVisionSourceHistory] {
+		return errors.New("context.vision.roles 必须声明 generated 与 history 角色")
+	}
+	for name, template := range map[string]string{
+		"overflow_template":             vision.OverflowTemplate,
+		"vision_off_note":               vision.VisionOffNote,
+		"style_anchor_intro":            vision.StyleAnchorIntro,
+		"style_anchor_label_template":   vision.StyleAnchorLabelTemplate,
+		"style_anchor_dropped_template": vision.StyleAnchorDroppedTemplate,
+		"unnamed_picture_label":         vision.UnnamedPictureLabel,
+	} {
+		if strings.TrimSpace(template) == "" {
+			return fmt.Errorf("context.vision.%s 不能为空", name)
+		}
+	}
+	if !strings.Contains(vision.OverflowTemplate, "{handles}") {
+		return errors.New("context.vision.overflow_template 必须包含 {handles}")
+	}
+	if !strings.Contains(vision.StyleAnchorLabelTemplate, "{index}") {
+		return errors.New("context.vision.style_anchor_label_template 必须包含 {index}")
+	}
+	if !strings.Contains(vision.StyleAnchorDroppedTemplate, "{index}") {
+		return errors.New("context.vision.style_anchor_dropped_template 必须包含 {index}")
+	}
+	if err := validateVisionContactSheet(vision.ContactSheet); err != nil {
+		return err
+	}
+	if err := validateVisionCrop(schema, vision.Crop); err != nil {
+		return err
+	}
+	prefixes := map[string]bool{}
+	for index, profile := range vision.ModelProfiles {
+		if len(profile.ModelPrefixes) == 0 {
+			return fmt.Errorf("context.vision.model_profiles[%d] 没有 model_prefixes", index)
+		}
+		for _, prefix := range profile.ModelPrefixes {
+			prefix = strings.ToLower(strings.TrimSpace(prefix))
+			if prefix == "" || prefixes[prefix] {
+				return fmt.Errorf("context.vision.model_profiles[%d] 的 model_prefixes 为空或重复", index)
+			}
+			prefixes[prefix] = true
+		}
+		if profile.MaximumImages < 0 || profile.MaximumImages > vision.MaximumImages {
+			return fmt.Errorf("context.vision.model_profiles[%d].maximum_images 必须在 0 与 maximum_images 之间", index)
+		}
+		if profile.MaximumTokens < 0 || profile.MaximumTokens > vision.MaximumTokens {
+			return fmt.Errorf("context.vision.model_profiles[%d].maximum_tokens 必须在 0 与 maximum_tokens 之间", index)
+		}
+	}
+	return nil
+}
+
+func validVisionDetail(detail string) bool {
+	switch detail {
+	case "low", "high", "auto":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateVisionContactSheet(sheet ChatVisionContactSheetSchema) error {
+	if !sheet.Enabled {
+		return nil
+	}
+	if sheet.MaximumTiles <= 0 || sheet.Columns <= 0 || sheet.TilePixels <= 0 || sheet.LabelHeight <= 0 ||
+		sheet.MaximumBytes <= 0 || !validVisionDetail(sheet.Detail) || sheet.TokenCost <= 0 {
+		return errors.New("context.vision.contact_sheet 的启用配置无效")
+	}
+	if len(sheet.JPEGQualities) == 0 || strings.TrimSpace(sheet.Intro) == "" {
+		return errors.New("context.vision.contact_sheet 的 jpeg_qualities 与 intro 不能为空")
+	}
+	for _, quality := range sheet.JPEGQualities {
+		if quality <= 0 || quality > 100 {
+			return errors.New("context.vision.contact_sheet.jpeg_qualities 必须在 1 与 100 之间")
+		}
+	}
+	if !strings.Contains(sheet.LabelTemplate, "{handle}") {
+		return errors.New("context.vision.contact_sheet.label_template 必须包含 {handle}")
+	}
+	return nil
+}
+
+func validateVisionCrop(schema ChatSchema, crop ChatVisionCropSchema) error {
+	if !crop.Enabled {
+		return nil
+	}
+	if !validVisionDetail(crop.Detail) || crop.TokenCost <= 0 ||
+		strings.TrimSpace(crop.RegionArgument) == "" || strings.TrimSpace(crop.ShowPictureArgument) == "" ||
+		crop.RegionArgument == crop.ShowPictureArgument ||
+		crop.MinimumSidePixels <= 0 || crop.MaximumPixels <= 0 {
+		return errors.New("context.vision.crop 的启用配置无效")
+	}
+	if !strings.Contains(crop.TooLargeTemplate, "{maximum}") {
+		return errors.New("context.vision.crop.too_large_template 必须包含 {maximum}")
+	}
+	if !strings.Contains(crop.PictureLabelTemplate, "{handle}") ||
+		!strings.Contains(crop.PictureLabelTemplate, "{region}") {
+		return errors.New("context.vision.crop.picture_label_template 必须包含 {handle} 与 {region}")
+	}
+	if !strings.Contains(crop.OriginalPictureLabelTemplate, "{handle}") ||
+		!strings.Contains(crop.OriginalPictureLabelTemplate, "{width}") ||
+		!strings.Contains(crop.OriginalPictureLabelTemplate, "{height}") {
+		return errors.New("context.vision.crop.original_picture_label_template 必须包含 {handle}、{width} 与 {height}")
+	}
+	check := func(parameters json.RawMessage) error {
+		var declared struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if len(parameters) == 0 || json.Unmarshal(parameters, &declared) != nil {
+			return errors.New("context.vision.crop 启用时 inspect_image 必须声明参数")
+		}
+		for _, name := range []string{crop.RegionArgument, crop.ShowPictureArgument} {
+			if _, exists := declared.Properties[name]; !exists {
+				return fmt.Errorf("context.vision.crop 启用时 inspect_image 必须声明参数 %q", name)
+			}
+		}
+		return nil
+	}
+	for _, tool := range schema.Tools {
+		if tool.Name == "inspect_image" {
+			return check(tool.Parameters)
+		}
+	}
+	for _, tool := range schema.AgentTools {
+		if tool.Name == "inspect_image" {
+			return check(tool.Parameters)
+		}
+	}
+	return errors.New("context.vision.crop 启用时必须声明 inspect_image 工具")
 }
