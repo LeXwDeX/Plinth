@@ -2,13 +2,13 @@
   "schema_version": 1,
   "kind": "agent-quality",
   "mode": "trajectory-fake",
-  "generated_at": "2026-11-10T02:01:14Z",
-  "revision": "eb92242cfee7f7abbecb7ea1a8bd9b41bf2a06e9",
+  "generated_at": "2026-11-10T16:34:58Z",
+  "revision": "77fc6878512db44e8abef1c90c0b22389e9faf83",
   "dirty": false,
   "request_set": {
     "path": "scripts/smoke/agent-quality/requests.json",
-    "version": 1,
-    "sha256": "118eacc992f5b54546df3e8bf1f1a3321f76a18be6175cc44098cd4d69ca2036"
+    "version": 2,
+    "sha256": "5e1c346c873245437408792dcb6fec2202ae93cf84af0c9adb3458791e253a6c"
   },
   "cases": [
     {
@@ -17,7 +17,7 @@
       "modality": "3d",
       "category": "humanoid_character",
       "purpose": "game_character",
-      "session_id": "session_kW58m1aAqHe6idZ0Ab8OdK6k",
+      "session_id": "session_kQzqb0JwRVhUF2El4C7hzjJW",
       "turns": 5,
       "tool_calls": [
         {
@@ -44,18 +44,19 @@
           "arguments": {
             "prompt": "cyberpunk female assassin, full body, A-pose, game character, dark techwear jacket, neon accents, detailed face, realistic stylized"
           },
-          "task_id": "task_6c4367715af2b3296d29fab45eb9d571",
+          "task_id": "task_ac3406edb669f1d239a29e41b48739e5",
           "summary": null
         },
         {
           "name": "inspect_model",
           "arguments": {
-            "model": "task_6c4367715af2b3296d29fab45eb9d571"
+            "model": "task_ac3406edb669f1d239a29e41b48739e5"
           },
           "task_id": null,
           "summary": {
             "tool": "inspect",
-            "model": "task_6c4367715af2b3296d29fab45eb9d571",
+            "model": "task_ac3406edb669f1d239a29e41b48739e5",
+            "task_id": "task_ac3406edb669f1d239a29e41b48739e5",
             "triangles": 72,
             "has_uv": true,
             "watertight": true,
@@ -158,7 +159,7 @@
         {
           "name": "render_model_views",
           "arguments": {
-            "model": "task_6c4367715af2b3296d29fab45eb9d571",
+            "model": "task_ac3406edb669f1d239a29e41b48739e5",
             "views": [
               "front",
               "back",
@@ -172,8 +173,9 @@
               "@img2",
               "@img3"
             ],
-            "model": "task_6c4367715af2b3296d29fab45eb9d571",
+            "model": "task_ac3406edb669f1d239a29e41b48739e5",
             "render_calls_remaining": 5,
+            "task_id": "task_ac3406edb669f1d239a29e41b48739e5",
             "tool": "render",
             "views": [
               "front",
@@ -186,14 +188,14 @@
       "cards": [
         {
           "kind": "choice",
-          "id": "choice_506389cb0b3a825343a15b3e",
+          "id": "choice_c653de9b9cc99cfdf1e259e0",
           "tool": "update_production_brief",
           "card_kind": "usage_profile",
           "state": "answered"
         },
         {
           "kind": "approval",
-          "id": "eg_492aedd5dfbfa08bc29824a8bf0925ff53a91864d2a897cf",
+          "id": "eg_233e7ca80deee5f19644e4f7670556195f3c4dcdb2fa1ab8",
           "tool": "create_model_3d",
           "capability": "text-to-3d",
           "state": "approved"
@@ -201,7 +203,7 @@
       ],
       "tasks": [
         {
-          "id": "task_6c4367715af2b3296d29fab45eb9d571",
+          "id": "task_ac3406edb669f1d239a29e41b48739e5",
           "capability": "text-to-3d",
           "model_id": "meshy-7.1",
           "offering_id": "meshy/meshy-7.1/text-to-3d",
@@ -233,11 +235,15 @@
         },
         "self_inspection": {
           "inspect_model": 1,
-          "render_model_views": 1
+          "render_model_views": 1,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
         },
         "image_count": 3,
         "final_reply_chars": 20,
-        "elapsed_ms": 7126
+        "elapsed_ms": 7179
       },
       "checks": [
         {
@@ -298,7 +304,7 @@
       "modality": "3d",
       "category": "hard_surface_prop",
       "purpose": "game_prop",
-      "session_id": "session_mH3Ylk1zU_gQgFaZlYiwyD5R",
+      "session_id": "session__GHyWFHl0scj9UA8gjfHsYBL",
       "turns": 5,
       "tool_calls": [
         {
@@ -324,18 +330,19 @@
           "arguments": {
             "prompt": "low-poly sci-fi energy rifle, hard surface, chunky angular silhouette, game prop, dark metal with cyan energy cell"
           },
-          "task_id": "task_b286fef3d7987a03f606cb4166c9245b",
+          "task_id": "task_1ba18c38851e6c1fac4d68a9470bfce5",
           "summary": null
         },
         {
           "name": "inspect_model",
           "arguments": {
-            "model": "task_b286fef3d7987a03f606cb4166c9245b"
+            "model": "task_1ba18c38851e6c1fac4d68a9470bfce5"
           },
           "task_id": null,
           "summary": {
             "tool": "inspect",
-            "model": "task_b286fef3d7987a03f606cb4166c9245b",
+            "model": "task_1ba18c38851e6c1fac4d68a9470bfce5",
+            "task_id": "task_1ba18c38851e6c1fac4d68a9470bfce5",
             "triangles": 72,
             "has_uv": true,
             "watertight": true,
@@ -438,7 +445,7 @@
         {
           "name": "render_model_views",
           "arguments": {
-            "model": "task_b286fef3d7987a03f606cb4166c9245b",
+            "model": "task_1ba18c38851e6c1fac4d68a9470bfce5",
             "views": [
               "front",
               "back",
@@ -452,8 +459,9 @@
               "@img2",
               "@img3"
             ],
-            "model": "task_b286fef3d7987a03f606cb4166c9245b",
+            "model": "task_1ba18c38851e6c1fac4d68a9470bfce5",
             "render_calls_remaining": 5,
+            "task_id": "task_1ba18c38851e6c1fac4d68a9470bfce5",
             "tool": "render",
             "views": [
               "front",
@@ -466,14 +474,14 @@
       "cards": [
         {
           "kind": "choice",
-          "id": "choice_c50a1f8ddbcbbd8a7b7bec7e",
+          "id": "choice_8c7b9a590fef59465e10cce3",
           "tool": "update_production_brief",
           "card_kind": "usage_profile",
           "state": "answered"
         },
         {
           "kind": "approval",
-          "id": "eg_efc97e38c1a826027892058464e4a748d521011764f79e6f",
+          "id": "eg_2ef439c03d8682a451dcec1284c3d342b06515dcfbb9d938",
           "tool": "create_model_3d",
           "capability": "text-to-3d",
           "state": "approved"
@@ -481,7 +489,7 @@
       ],
       "tasks": [
         {
-          "id": "task_b286fef3d7987a03f606cb4166c9245b",
+          "id": "task_1ba18c38851e6c1fac4d68a9470bfce5",
           "capability": "text-to-3d",
           "model_id": "meshy-7.1",
           "offering_id": "meshy/meshy-7.1/text-to-3d",
@@ -513,11 +521,15 @@
         },
         "self_inspection": {
           "inspect_model": 1,
-          "render_model_views": 1
+          "render_model_views": 1,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
         },
         "image_count": 3,
         "final_reply_chars": 20,
-        "elapsed_ms": 7120
+        "elapsed_ms": 7136
       },
       "checks": [
         {
@@ -578,7 +590,7 @@
       "modality": "3d",
       "category": "scene_piece",
       "purpose": "game_prop",
-      "session_id": "session_syFXwoMHqvClXVE7lLIdzqqd",
+      "session_id": "session_6Qxla4WsFNNWhddfYY_Gqw4A",
       "turns": 5,
       "tool_calls": [
         {
@@ -604,18 +616,19 @@
           "arguments": {
             "prompt": "stylized stone well, scene prop, chunky masonry, wooden roof and bucket, hand-painted game art style"
           },
-          "task_id": "task_896714ede0c219d60ae3de441be17753",
+          "task_id": "task_820206ac13e204e0121bb76222d33f7e",
           "summary": null
         },
         {
           "name": "inspect_model",
           "arguments": {
-            "model": "task_896714ede0c219d60ae3de441be17753"
+            "model": "task_820206ac13e204e0121bb76222d33f7e"
           },
           "task_id": null,
           "summary": {
             "tool": "inspect",
-            "model": "task_896714ede0c219d60ae3de441be17753",
+            "model": "task_820206ac13e204e0121bb76222d33f7e",
+            "task_id": "task_820206ac13e204e0121bb76222d33f7e",
             "triangles": 72,
             "has_uv": true,
             "watertight": true,
@@ -718,7 +731,7 @@
         {
           "name": "render_model_views",
           "arguments": {
-            "model": "task_896714ede0c219d60ae3de441be17753",
+            "model": "task_820206ac13e204e0121bb76222d33f7e",
             "views": [
               "front",
               "back",
@@ -732,8 +745,9 @@
               "@img2",
               "@img3"
             ],
-            "model": "task_896714ede0c219d60ae3de441be17753",
+            "model": "task_820206ac13e204e0121bb76222d33f7e",
             "render_calls_remaining": 5,
+            "task_id": "task_820206ac13e204e0121bb76222d33f7e",
             "tool": "render",
             "views": [
               "front",
@@ -746,14 +760,14 @@
       "cards": [
         {
           "kind": "choice",
-          "id": "choice_cc5970a5b5276f868ab65f8a",
+          "id": "choice_2ad536eac88da5bbf529a847",
           "tool": "update_production_brief",
           "card_kind": "usage_profile",
           "state": "answered"
         },
         {
           "kind": "approval",
-          "id": "eg_3af0817b5d1b3068b6abf9deb763c263f46c7d10705229b5",
+          "id": "eg_4ca4b20ba2f9a9f0d2116424abc7b5e0dc7d8377438beb6a",
           "tool": "create_model_3d",
           "capability": "text-to-3d",
           "state": "approved"
@@ -761,7 +775,7 @@
       ],
       "tasks": [
         {
-          "id": "task_896714ede0c219d60ae3de441be17753",
+          "id": "task_820206ac13e204e0121bb76222d33f7e",
           "capability": "text-to-3d",
           "model_id": "meshy-7.1",
           "offering_id": "meshy/meshy-7.1/text-to-3d",
@@ -793,11 +807,15 @@
         },
         "self_inspection": {
           "inspect_model": 1,
-          "render_model_views": 1
+          "render_model_views": 1,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
         },
         "image_count": 3,
         "final_reply_chars": 20,
-        "elapsed_ms": 7083
+        "elapsed_ms": 7175
       },
       "checks": [
         {
@@ -858,7 +876,7 @@
       "modality": "3d",
       "category": "creature",
       "purpose": "render",
-      "session_id": "session_dt1R63LxXLw0PGVYz-V0qunI",
+      "session_id": "session_U7obUTW4BVKbCOr9R-0TgsbH",
       "turns": 5,
       "tool_calls": [
         {
@@ -884,18 +902,19 @@
           "arguments": {
             "prompt": "bioluminescent deep-sea jellyfish creature, translucent bell, glowing tentacles, organic sci-fi, display model, detailed"
           },
-          "task_id": "task_5f7fbbfa41c391ff65fe87c4663eac55",
+          "task_id": "task_323c9a3fcfb63769c4136f5112cf285c",
           "summary": null
         },
         {
           "name": "inspect_model",
           "arguments": {
-            "model": "task_5f7fbbfa41c391ff65fe87c4663eac55"
+            "model": "task_323c9a3fcfb63769c4136f5112cf285c"
           },
           "task_id": null,
           "summary": {
             "tool": "inspect",
-            "model": "task_5f7fbbfa41c391ff65fe87c4663eac55",
+            "model": "task_323c9a3fcfb63769c4136f5112cf285c",
+            "task_id": "task_323c9a3fcfb63769c4136f5112cf285c",
             "triangles": 72,
             "has_uv": true,
             "watertight": true,
@@ -992,7 +1011,7 @@
         {
           "name": "render_model_views",
           "arguments": {
-            "model": "task_5f7fbbfa41c391ff65fe87c4663eac55",
+            "model": "task_323c9a3fcfb63769c4136f5112cf285c",
             "views": [
               "front",
               "back",
@@ -1006,8 +1025,9 @@
               "@img2",
               "@img3"
             ],
-            "model": "task_5f7fbbfa41c391ff65fe87c4663eac55",
+            "model": "task_323c9a3fcfb63769c4136f5112cf285c",
             "render_calls_remaining": 5,
+            "task_id": "task_323c9a3fcfb63769c4136f5112cf285c",
             "tool": "render",
             "views": [
               "front",
@@ -1020,14 +1040,14 @@
       "cards": [
         {
           "kind": "choice",
-          "id": "choice_a48250b9022f0e6e3f6682c3",
+          "id": "choice_be769230373cfc21842fd2d9",
           "tool": "update_production_brief",
           "card_kind": "usage_profile",
           "state": "answered"
         },
         {
           "kind": "approval",
-          "id": "eg_446bd1a5ecd868d88a3b10f9cde06a0552a2f766295bf0b1",
+          "id": "eg_0552d5c5bfbdc53d5b4ca4a4d6f0cfc8bd555440010ac7e7",
           "tool": "create_model_3d",
           "capability": "text-to-3d",
           "state": "approved"
@@ -1035,7 +1055,7 @@
       ],
       "tasks": [
         {
-          "id": "task_5f7fbbfa41c391ff65fe87c4663eac55",
+          "id": "task_323c9a3fcfb63769c4136f5112cf285c",
           "capability": "text-to-3d",
           "model_id": "meshy-7.1",
           "offering_id": "meshy/meshy-7.1/text-to-3d",
@@ -1067,11 +1087,15 @@
         },
         "self_inspection": {
           "inspect_model": 1,
-          "render_model_views": 1
+          "render_model_views": 1,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
         },
         "image_count": 3,
         "final_reply_chars": 20,
-        "elapsed_ms": 7117
+        "elapsed_ms": 7151
       },
       "checks": [
         {
@@ -1132,7 +1156,7 @@
       "modality": "3d",
       "category": "print_figurine",
       "purpose": "print",
-      "session_id": "session_00O9b4lKDU4tqTLecwpbMWbr",
+      "session_id": "session_uADMp4cJrMpEnvB3ON16hN8L",
       "turns": 6,
       "tool_calls": [
         {
@@ -1158,7 +1182,7 @@
           "arguments": {
             "prompt": "concept art of a tabletop miniature knight, full body, neutral A-pose, plain light background, front view, clean silhouette, printable details, realistic stylized"
           },
-          "task_id": "task_d5f8693b1777f51cb1582926bbfebb58",
+          "task_id": "task_21575e81f9f67e52e44e1c0ddb635a6e",
           "summary": null
         },
         {
@@ -1167,20 +1191,22 @@
             "prompt": "tabletop miniature knight, full body, watertight solid mesh, 15 cm tall, detailed armor",
             "reference_image_indices": [
               1
-            ]
+            ],
+            "input_override_reason": "the fake upstream image is a placeholder, not a real 3D input"
           },
-          "task_id": "task_94750e1b5a24a4b8eaade8592756e6a5",
+          "task_id": "task_d876099051d7cef22c663a982b62902b",
           "summary": null
         },
         {
           "name": "inspect_model",
           "arguments": {
-            "model": "task_94750e1b5a24a4b8eaade8592756e6a5"
+            "model": "task_d876099051d7cef22c663a982b62902b"
           },
           "task_id": null,
           "summary": {
             "tool": "inspect",
-            "model": "task_94750e1b5a24a4b8eaade8592756e6a5",
+            "model": "task_d876099051d7cef22c663a982b62902b",
+            "task_id": "task_d876099051d7cef22c663a982b62902b",
             "triangles": 72,
             "has_uv": true,
             "watertight": true,
@@ -1281,7 +1307,7 @@
         {
           "name": "render_model_views",
           "arguments": {
-            "model": "task_94750e1b5a24a4b8eaade8592756e6a5",
+            "model": "task_d876099051d7cef22c663a982b62902b",
             "views": [
               "front",
               "back",
@@ -1295,8 +1321,9 @@
               "@img3",
               "@img4"
             ],
-            "model": "task_94750e1b5a24a4b8eaade8592756e6a5",
+            "model": "task_d876099051d7cef22c663a982b62902b",
             "render_calls_remaining": 5,
+            "task_id": "task_d876099051d7cef22c663a982b62902b",
             "tool": "render",
             "views": [
               "front",
@@ -1309,14 +1336,14 @@
       "cards": [
         {
           "kind": "choice",
-          "id": "choice_3d38b608a0ef0c8eaf88b31d",
+          "id": "choice_bd6b5252a4d70eb906f3caee",
           "tool": "update_production_brief",
           "card_kind": "usage_profile",
           "state": "answered"
         },
         {
           "kind": "approval",
-          "id": "eg_aad38fe3f5ca2e4fffe3f2777b5827eac03669b256ff84d4",
+          "id": "eg_a35bd5553fe193c150544903b8976241869e977de282d4c4",
           "tool": "create_model_3d_from_image",
           "capability": "image-to-3d",
           "state": "approved"
@@ -1324,7 +1351,7 @@
       ],
       "tasks": [
         {
-          "id": "task_94750e1b5a24a4b8eaade8592756e6a5",
+          "id": "task_d876099051d7cef22c663a982b62902b",
           "capability": "image-to-3d",
           "model_id": "meshy-7.1",
           "offering_id": "meshy/meshy-7.1/image-to-3d",
@@ -1332,7 +1359,7 @@
           "credits_charged": null
         },
         {
-          "id": "task_d5f8693b1777f51cb1582926bbfebb58",
+          "id": "task_21575e81f9f67e52e44e1c0ddb635a6e",
           "capability": "text-to-image",
           "model_id": "nano-banana-pro",
           "offering_id": "meshy/nano-banana-pro/text-to-image",
@@ -1365,11 +1392,15 @@
         },
         "self_inspection": {
           "inspect_model": 1,
-          "render_model_views": 1
+          "render_model_views": 1,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
         },
         "image_count": 4,
         "final_reply_chars": 20,
-        "elapsed_ms": 7392
+        "elapsed_ms": 7568
       },
       "checks": [
         {
@@ -1445,7 +1476,7 @@
       "modality": "3d",
       "category": "ar_product",
       "purpose": "web_ar",
-      "session_id": "session_fvEUs3dGD9iK7xhnBFd7ydyV",
+      "session_id": "session_BXAo7jThTRtZXMshXoMWWgTP",
       "turns": 6,
       "tool_calls": [
         {
@@ -1471,7 +1502,7 @@
           "arguments": {
             "prompt": "product photo of a stainless steel sports water bottle, front view, plain white background, soft studio lighting, clean reflections, centered"
           },
-          "task_id": "task_2bea6e8fa4c688ce63358d4792e63422",
+          "task_id": "task_23b1625ee576a7459f85b5af0e95e678",
           "summary": null
         },
         {
@@ -1480,20 +1511,22 @@
             "prompt": "stainless steel sports water bottle, product model, clean topology, compact for web and AR",
             "reference_image_indices": [
               1
-            ]
+            ],
+            "input_override_reason": "the fake upstream image is a placeholder, not a real 3D input"
           },
-          "task_id": "task_1d99a329175ab28dac6d5581a963caf5",
+          "task_id": "task_55c27a54569ba4d33537d77bda747e3f",
           "summary": null
         },
         {
           "name": "inspect_model",
           "arguments": {
-            "model": "task_1d99a329175ab28dac6d5581a963caf5"
+            "model": "task_55c27a54569ba4d33537d77bda747e3f"
           },
           "task_id": null,
           "summary": {
             "tool": "inspect",
-            "model": "task_1d99a329175ab28dac6d5581a963caf5",
+            "model": "task_55c27a54569ba4d33537d77bda747e3f",
+            "task_id": "task_55c27a54569ba4d33537d77bda747e3f",
             "triangles": 72,
             "has_uv": true,
             "watertight": true,
@@ -1594,7 +1627,7 @@
         {
           "name": "render_model_views",
           "arguments": {
-            "model": "task_1d99a329175ab28dac6d5581a963caf5",
+            "model": "task_55c27a54569ba4d33537d77bda747e3f",
             "views": [
               "front",
               "back",
@@ -1608,8 +1641,9 @@
               "@img3",
               "@img4"
             ],
-            "model": "task_1d99a329175ab28dac6d5581a963caf5",
+            "model": "task_55c27a54569ba4d33537d77bda747e3f",
             "render_calls_remaining": 5,
+            "task_id": "task_55c27a54569ba4d33537d77bda747e3f",
             "tool": "render",
             "views": [
               "front",
@@ -1622,14 +1656,14 @@
       "cards": [
         {
           "kind": "choice",
-          "id": "choice_8af0d17036fdbaaab904325c",
+          "id": "choice_712bbbd9d0e07356654b6a8e",
           "tool": "update_production_brief",
           "card_kind": "usage_profile",
           "state": "answered"
         },
         {
           "kind": "approval",
-          "id": "eg_451a4995d8db6b62ab62bb787175edd2165276d53feddb41",
+          "id": "eg_c78df8aebaeadbe2afbb0ce4cd8bd776f88c2e04a91b9bcd",
           "tool": "create_model_3d_from_image",
           "capability": "image-to-3d",
           "state": "approved"
@@ -1637,7 +1671,7 @@
       ],
       "tasks": [
         {
-          "id": "task_1d99a329175ab28dac6d5581a963caf5",
+          "id": "task_55c27a54569ba4d33537d77bda747e3f",
           "capability": "image-to-3d",
           "model_id": "meshy-7.1",
           "offering_id": "meshy/meshy-7.1/image-to-3d",
@@ -1645,7 +1679,7 @@
           "credits_charged": null
         },
         {
-          "id": "task_2bea6e8fa4c688ce63358d4792e63422",
+          "id": "task_23b1625ee576a7459f85b5af0e95e678",
           "capability": "text-to-image",
           "model_id": "nano-banana-pro",
           "offering_id": "meshy/nano-banana-pro/text-to-image",
@@ -1678,11 +1712,15 @@
         },
         "self_inspection": {
           "inspect_model": 1,
-          "render_model_views": 1
+          "render_model_views": 1,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
         },
         "image_count": 4,
         "final_reply_chars": 20,
-        "elapsed_ms": 7492
+        "elapsed_ms": 7509
       },
       "checks": [
         {
@@ -1758,7 +1796,7 @@
       "modality": "2d",
       "category": "character_illustration",
       "purpose": null,
-      "session_id": "session_34y5i2KYaRL5GouqLL4dFu3m",
+      "session_id": "session_89jKH4pbOkx0fTgxsi_CzXDa",
       "turns": 1,
       "tool_calls": [
         {
@@ -1766,14 +1804,14 @@
           "arguments": {
             "prompt": "full-body cyberpunk female assassin, clean digital illustration, confident pose, neon accents, transparent background, sharp silhouette, no text, no watermark"
           },
-          "task_id": "task_9cb25d76cbcb116e702784667900463f",
+          "task_id": "task_73d6808f6e89496c5e9d26d93733375a",
           "summary": null
         }
       ],
       "cards": [],
       "tasks": [
         {
-          "id": "task_9cb25d76cbcb116e702784667900463f",
+          "id": "task_73d6808f6e89496c5e9d26d93733375a",
           "capability": "text-to-image",
           "model_id": "gpt-image-2.6-sunburst",
           "offering_id": "openai/gpt-image-2/text-to-image",
@@ -1801,11 +1839,15 @@
         },
         "self_inspection": {
           "inspect_model": 0,
-          "render_model_views": 0
+          "render_model_views": 0,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
         },
         "image_count": 1,
         "final_reply_chars": 20,
-        "elapsed_ms": 472
+        "elapsed_ms": 161
       },
       "checks": [
         {
@@ -1851,7 +1893,7 @@
       "modality": "2d",
       "category": "icon_prop",
       "purpose": null,
-      "session_id": "session_9PWSgxdqrcbnEHfB_mxfwjUA",
+      "session_id": "session_f4hrgQzdlPv3aoHgBs1DztPo",
       "turns": 1,
       "tool_calls": [
         {
@@ -1859,14 +1901,14 @@
           "arguments": {
             "prompt": "set of three potion bottle icons, red blue and green liquid, matching stylized game icon style, thick clean outlines, transparent background, no text, no watermark"
           },
-          "task_id": "task_b577eb5079b2591beee77a9b907ade69",
+          "task_id": "task_a151cb4eec0f8ae3575f249bfed41e8f",
           "summary": null
         }
       ],
       "cards": [],
       "tasks": [
         {
-          "id": "task_b577eb5079b2591beee77a9b907ade69",
+          "id": "task_a151cb4eec0f8ae3575f249bfed41e8f",
           "capability": "text-to-image",
           "model_id": "gpt-image-2.6-sunburst",
           "offering_id": "openai/gpt-image-2/text-to-image",
@@ -1894,11 +1936,15 @@
         },
         "self_inspection": {
           "inspect_model": 0,
-          "render_model_views": 0
+          "render_model_views": 0,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
         },
         "image_count": 1,
         "final_reply_chars": 20,
-        "elapsed_ms": 233
+        "elapsed_ms": 269
       },
       "checks": [
         {
@@ -1944,7 +1990,7 @@
       "modality": "2d",
       "category": "series_consistency",
       "purpose": null,
-      "session_id": "session_5Z0pdU9VuxiB73VUsaDMW1BL",
+      "session_id": "session_KTSDD10leAJ6wKcn9xcGSLkd",
       "turns": 3,
       "tool_calls": [
         {
@@ -1952,7 +1998,7 @@
           "arguments": {
             "prompt": "full-body portrait of a young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"
           },
-          "task_id": "task_8085e6b8f23e127f19cc368d59374a45",
+          "task_id": "task_fcdd678ce930292c2a3569b95f4078ff",
           "summary": null
         },
         {
@@ -1960,7 +2006,7 @@
           "arguments": {
             "prompt": "half-body portrait of the same young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"
           },
-          "task_id": "task_f32aa12b9385ea65c573f1b1b75b6228",
+          "task_id": "task_19f7e6532bfe709b82c908be3d596bce",
           "summary": null
         },
         {
@@ -1968,14 +2014,14 @@
           "arguments": {
             "prompt": "side profile of the same young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"
           },
-          "task_id": "task_56b6142bf08c1619656ecee2d457babf",
+          "task_id": "task_8f2161cbe2f25708d9fb78066d117f72",
           "summary": null
         }
       ],
       "cards": [],
       "tasks": [
         {
-          "id": "task_56b6142bf08c1619656ecee2d457babf",
+          "id": "task_8f2161cbe2f25708d9fb78066d117f72",
           "capability": "text-to-image",
           "model_id": "gpt-image-2.6-sunburst",
           "offering_id": "openai/gpt-image-2/text-to-image",
@@ -1983,7 +2029,7 @@
           "credits_charged": null
         },
         {
-          "id": "task_f32aa12b9385ea65c573f1b1b75b6228",
+          "id": "task_19f7e6532bfe709b82c908be3d596bce",
           "capability": "text-to-image",
           "model_id": "gpt-image-2.6-sunburst",
           "offering_id": "openai/gpt-image-2/text-to-image",
@@ -1991,7 +2037,7 @@
           "credits_charged": null
         },
         {
-          "id": "task_8085e6b8f23e127f19cc368d59374a45",
+          "id": "task_fcdd678ce930292c2a3569b95f4078ff",
           "capability": "text-to-image",
           "model_id": "gpt-image-2.6-sunburst",
           "offering_id": "openai/gpt-image-2/text-to-image",
@@ -2019,11 +2065,15 @@
         },
         "self_inspection": {
           "inspect_model": 0,
-          "render_model_views": 0
+          "render_model_views": 0,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
         },
         "image_count": 3,
         "final_reply_chars": 20,
-        "elapsed_ms": 750
+        "elapsed_ms": 753
       },
       "checks": [
         {
@@ -2062,22 +2112,296 @@
           "detail": "0 card(s)"
         }
       ]
+    },
+    {
+      "id": "3d-image-reference",
+      "title": "参考图贴合：图生 3D 的并排对照与自检记录",
+      "modality": "3d",
+      "category": "reference_fidelity",
+      "purpose": "game_prop",
+      "session_id": "session_LNeaYLTENpV_3DTdRLG962t5",
+      "turns": 4,
+      "tool_calls": [
+        {
+          "name": "create_model_3d_from_image",
+          "arguments": {
+            "prompt": "stylized red cargo crate, plain background, game prop",
+            "reference_handles": [
+              "@img1"
+            ],
+            "input_override_reason": "the fake upstream image is a placeholder, not a real 3D input"
+          },
+          "task_id": "task_12aece61c42ceb5f5a05da0545ae4731",
+          "summary": null
+        },
+        {
+          "name": "inspect_model",
+          "arguments": {
+            "model": "task_12aece61c42ceb5f5a05da0545ae4731"
+          },
+          "task_id": null,
+          "summary": {
+            "tool": "inspect",
+            "model": "task_12aece61c42ceb5f5a05da0545ae4731",
+            "task_id": "task_12aece61c42ceb5f5a05da0545ae4731",
+            "triangles": 72,
+            "has_uv": true,
+            "watertight": true,
+            "has_skin": false,
+            "usage": {
+              "purpose": "render",
+              "purpose_label": "展示/渲染",
+              "purpose_source": "default_profile",
+              "note": "会话没有可用的制作简报用途，按默认用途「展示/渲染」判定。",
+              "checks": [
+                {
+                  "check": "triangles",
+                  "status": "pass",
+                  "actual": 72,
+                  "budget": {
+                    "maximum": 2000000
+                  }
+                },
+                {
+                  "check": "uv",
+                  "status": "unknown",
+                  "actual": true,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "watertight",
+                  "status": "unknown",
+                  "actual": true,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "skin",
+                  "status": "unknown",
+                  "actual": 0,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "texture_size",
+                  "status": "pass",
+                  "actual": 64,
+                  "budget": {
+                    "maximum": 8192
+                  }
+                },
+                {
+                  "check": "pivot_bottom_center",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.01
+                  }
+                },
+                {
+                  "check": "y_up",
+                  "status": "pass",
+                  "actual": "y",
+                  "budget": {
+                    "axis": "y",
+                    "flat_ratio": 0.05
+                  }
+                },
+                {
+                  "check": "plausible_scale",
+                  "status": "unknown",
+                  "actual": 1.612406849861145,
+                  "budget": {}
+                },
+                {
+                  "check": "debris",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.01
+                  }
+                },
+                {
+                  "check": "degenerate",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.001
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "compare_model_reference",
+          "arguments": {
+            "model": "task_12aece61c42ceb5f5a05da0545ae4731"
+          },
+          "task_id": null,
+          "summary": {
+            "handles": [
+              "@img2"
+            ],
+            "model": "task_12aece61c42ceb5f5a05da0545ae4731",
+            "render_calls_remaining": 5,
+            "task_id": "task_12aece61c42ceb5f5a05da0545ae4731",
+            "tool": "reference",
+            "views": [
+              "front"
+            ]
+          }
+        },
+        {
+          "name": "record_self_check",
+          "arguments": {
+            "model": "task_12aece61c42ceb5f5a05da0545ae4731",
+            "status": "passed",
+            "summary": "the silhouette and colour match the reference",
+            "findings": [
+              "silhouette matches the reference"
+            ],
+            "fixes": [],
+            "remaining": []
+          },
+          "task_id": null,
+          "summary": {
+            "corrections_used": 0,
+            "rounds_used": 1,
+            "status": "passed",
+            "status_role": "passed",
+            "task_id": "task_12aece61c42ceb5f5a05da0545ae4731",
+            "tool": "record_self_check"
+          }
+        }
+      ],
+      "cards": [
+        {
+          "kind": "approval",
+          "id": "eg_9423b5effc6d4b99ea9de2722f760c92723b3ca5ff7e7f62",
+          "tool": "create_model_3d_from_image",
+          "capability": "image-to-3d",
+          "state": "approved"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task_12aece61c42ceb5f5a05da0545ae4731",
+          "capability": "image-to-3d",
+          "model_id": "meshy-7.1",
+          "offering_id": "meshy/meshy-7.1/image-to-3d",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        }
+      ],
+      "final_reply": {
+        "content": "Fake upstream reply.",
+        "failed": false
+      },
+      "assets": [],
+      "metrics": {
+        "tool_call_count": 4,
+        "credits": {
+          "legacy.credits": "40"
+        },
+        "paid_call_count": 1,
+        "interruption_count": 1,
+        "choice_card_count": 0,
+        "approval_card_count": 1,
+        "plan_card_count": 0,
+        "tool_counts": {
+          "create_model_3d_from_image": 1,
+          "inspect_model": 1,
+          "compare_model_reference": 1,
+          "record_self_check": 1
+        },
+        "self_inspection": {
+          "inspect_model": 1,
+          "render_model_views": 0,
+          "compare_model_reference": 1,
+          "self_check_records": 1,
+          "self_check_passed": 1,
+          "self_check_issues": 0
+        },
+        "image_count": 2,
+        "final_reply_chars": 20,
+        "elapsed_ms": 3858
+      },
+      "checks": [
+        {
+          "id": "final_reply",
+          "status": "pass",
+          "detail": "20 chars"
+        },
+        {
+          "id": "capability:image-to-3d",
+          "status": "pass",
+          "detail": "1/1 succeeded; succeeded=['image-to-3d']; tasks=['image-to-3d']"
+        },
+        {
+          "id": "no_failed_tasks",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "tool_group:generate_3d",
+          "status": "pass",
+          "detail": "any of ['create_model_3d_from_image']; called=['create_model_3d_from_image', 'inspect_model', 'compare_model_reference', 'record_self_check']"
+        },
+        {
+          "id": "tool_group:reference",
+          "status": "pass",
+          "detail": "any of ['compare_model_reference']; called=['create_model_3d_from_image', 'inspect_model', 'compare_model_reference', 'record_self_check']"
+        },
+        {
+          "id": "tool_group:record",
+          "status": "pass",
+          "detail": "any of ['record_self_check']; called=['create_model_3d_from_image', 'inspect_model', 'compare_model_reference', 'record_self_check']"
+        },
+        {
+          "id": "order:create_model_3d_from_image<compare_model_reference+record_self_check",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "budget:paid_calls",
+          "status": "pass",
+          "detail": "1 task(s)"
+        },
+        {
+          "id": "budget:tool_calls",
+          "status": "pass",
+          "detail": "4 call(s)"
+        },
+        {
+          "id": "budget:interruptions",
+          "status": "pass",
+          "detail": "1 card(s)"
+        }
+      ]
     }
   ],
   "summary": {
-    "cases": 9,
+    "cases": 10,
     "hard_failures": 0,
     "failed_cases": [],
     "metrics": {
-      "tool_calls": 37,
-      "paid_calls": 13,
-      "interruptions": 12,
-      "inspect_model": 6,
+      "tool_calls": 41,
+      "paid_calls": 14,
+      "interruptions": 13,
+      "inspect_model": 7,
       "render_model_views": 6,
+      "compare_model_reference": 1,
+      "self_check_records": 1,
+      "self_check_passed": 1,
       "credits": {
-        "legacy.credits": "288"
+        "legacy.credits": "328"
       },
-      "elapsed_ms": 44785
+      "elapsed_ms": 48759
     }
   }
 }
