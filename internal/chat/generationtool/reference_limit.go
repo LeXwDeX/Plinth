@@ -56,10 +56,19 @@ func referenceImageLimit(offering generation.Offering) int {
 // evidence for the approval/result note; the persisted operation still keeps
 // the ordinary total counts for backward compatibility.
 type referenceUse struct {
-	Used, Given  int
-	StyleGiven   int
-	StyleUsed    int
-	StyleTrimmed bool
+	Used, Given int
+	// The classes are counted in final reference order (#250): identity
+	// anchors, style pictures (the lock and style anchors), then the turn's
+	// ordinary references. The ordinary ones are cut first.
+	IdentityGiven, IdentityUsed int
+	StyleGiven, StyleUsed       int
+	TurnGiven, TurnUsed         int
+	StyleTrimmed                bool
+	// DroppedTurn names the ordinary pictures the model limit cut, by the
+	// handle the session gave each one. DroppedTurnCount keeps the number
+	// when a handle is unknown.
+	DroppedTurn      []string
+	DroppedTurnCount int
 }
 
 // ReferenceLimitNote writes the reference-limit note for a step of tool that

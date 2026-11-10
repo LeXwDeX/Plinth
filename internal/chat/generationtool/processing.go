@@ -791,6 +791,13 @@ func (executor *Executor) executeProcessing(
 	if rejection := executor.applyProcessingParameterArguments(command, chosen, processing, arguments, input, allFormats); rejection != nil {
 		return executor.reject(command, rejection.message)
 	}
+	// #250: retexture may carry the session's style picture when it accepts a
+	// reference image and the step did not name one. The style text never goes
+	// into a 3D prompt; a skipped picture is reported in the result's warning.
+	styleNote, styleErr := executor.processingStyleReference(ctx, command, capability, chosen.offering, input)
+	if styleErr != nil {
+		return executor.reject(command, executor.chat.StyleLock.UnsupportedNote)
+	}
 	// #129: the session purpose's budget fills the bounded parameters this
 	// call left unset, as it does for the generation tools.
 	current, err := rawInput(input)
@@ -829,6 +836,7 @@ func (executor *Executor) executeProcessing(
 	}
 	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, prompt,
 		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, observe, promptTrace)
+	result = executor.attachProcessingReferenceNote(command.Tool, styleNote, result)
 	return executor.processingOutcome(command, result, err, executor.inputShape(command, input))
 }
 

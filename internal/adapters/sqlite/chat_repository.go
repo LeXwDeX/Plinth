@@ -25,7 +25,7 @@ func (r *Repository) ListSessions(
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
 		       s.brief, s.explicit_model_3d, s.style_lock_enabled, s.style_lock_text,
-		       s.style_lock_references, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
+		       s.style_lock_references, s.visual_anchors, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE s.owner_id = ?
@@ -93,7 +93,7 @@ func (r *Repository) ListSessionsPage(
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
 		       s.brief, s.explicit_model_3d, s.style_lock_enabled, s.style_lock_text,
-		       s.style_lock_references, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
+		       s.style_lock_references, s.visual_anchors, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE `+where+`
@@ -320,6 +320,55 @@ func (r *Repository) SetStyleLock(ctx context.Context, ownerID, sessionID string
 	}
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("commit chat session style lock: %w", err)
+	}
+	return true, nil
+}
+
+// VisualAnchors reads the session-level visual anchors of the owner's session
+// (#250).
+func (r *Repository) VisualAnchors(ctx context.Context, ownerID, sessionID string) ([]chat.VisualAnchor, bool, error) {
+	var stored string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT visual_anchors FROM go_chat_sessions WHERE id = ? AND owner_id = ?`,
+		sessionID, ownerID).Scan(&stored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("read chat session visual anchors: %w", err)
+	}
+	return chat.DecodeVisualAnchors(stored), true, nil
+}
+
+// SetVisualAnchors replaces the session-level visual anchors in one
+// transaction. It keeps updated_at unchanged so editing an anchor does not
+// reorder history.
+func (r *Repository) SetVisualAnchors(ctx context.Context, ownerID, sessionID string, anchors []chat.VisualAnchor) (bool, error) {
+	encoded, err := chat.EncodeVisualAnchors(anchors)
+	if err != nil {
+		return false, err
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin set chat session visual anchors: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `
+		UPDATE go_chat_sessions
+		SET visual_anchors = ?
+		WHERE id = ? AND owner_id = ?`, encoded, sessionID, ownerID)
+	if err != nil {
+		return false, fmt.Errorf("set chat session visual anchors: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if affected == 0 {
+		return false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit chat session visual anchors: %w", err)
 	}
 	return true, nil
 }
@@ -1565,7 +1614,7 @@ func (r *Repository) Session(
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
 		       s.brief, s.explicit_model_3d, s.style_lock_enabled, s.style_lock_text,
-		       s.style_lock_references, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
+		       s.style_lock_references, s.visual_anchors, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE s.id = ? AND s.owner_id = ?
@@ -1592,7 +1641,7 @@ func (r *Repository) getChatSession(
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
 		       s.brief, s.explicit_model_3d, s.style_lock_enabled, s.style_lock_text,
-		       s.style_lock_references, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
+		       s.style_lock_references, s.visual_anchors, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE s.id = ? AND s.owner_id = ?
@@ -1613,7 +1662,7 @@ func scanChatSession(scanner chatSessionScanner) (chat.Session, error) {
 	var updatedAt string
 	var brief string
 	var styleLockEnabled int
-	var styleLockText, styleLockReferences string
+	var styleLockText, styleLockReferences, visualAnchors string
 	if err := scanner.Scan(
 		&session.ID,
 		&session.OwnerID,
@@ -1630,6 +1679,7 @@ func scanChatSession(scanner chatSessionScanner) (chat.Session, error) {
 		&styleLockEnabled,
 		&styleLockText,
 		&styleLockReferences,
+		&visualAnchors,
 		&session.ParentSessionID,
 		&session.ParentMessageID,
 		&session.ParentTitle,
@@ -1643,6 +1693,7 @@ func scanChatSession(scanner chatSessionScanner) (chat.Session, error) {
 		Text:       styleLockText,
 		References: chat.DecodeStyleLockReferences(styleLockReferences),
 	}
+	session.VisualAnchors = chat.DecodeVisualAnchors(visualAnchors)
 	var err error
 	session.CreatedAt, err = parseTime(createdAt)
 	if err != nil {

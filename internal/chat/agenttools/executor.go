@@ -62,6 +62,9 @@ const (
 	// ToolProposeProductionPlan proposes the budget-mode production plan the
 	// person approves once (#103).
 	ToolProposeProductionPlan = "propose_production_plan"
+	// ToolSetVisualAnchor writes a session visual anchor after the person
+	// confirmed it on a choice card (#250).
+	ToolSetVisualAnchor = "set_visual_anchor"
 )
 
 // 同意状态键与决定值（agent 状态 store 与 harness consent 端点共用词汇）。
@@ -132,6 +135,10 @@ type Config struct {
 	// re-quotes every step from the runtime Catalog and stores one pending
 	// plan card (#103).
 	ProposePlan func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	// WriteVisualAnchor applies one explicitly confirmed visual-anchor write
+	// (#250). The service owns the owner/session checks and the bounds; this
+	// tool cannot touch the user's style lock.
+	WriteVisualAnchor func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	// ChoiceKinds are chat.choice.kinds from the Product Schema; the Agent
 	// names one by id and never supplies options of its own.
 	ChoiceKinds []catalog.ChatChoiceKindSchema
@@ -204,6 +211,7 @@ type Executor struct {
 	askChoice          func(ctx context.Context, command chat.ToolCommand, kind catalog.ChatChoiceKindSchema,
 		arguments chat.AskChoiceArguments) (chat.ToolResult, error)
 	proposePlan            func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	writeVisualAnchor      func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	choiceKinds            map[string]catalog.ChatChoiceKindSchema
 	briefSavedMessage      string
 	briefInvalidTemplate   string
@@ -338,6 +346,7 @@ func New(config Config) (*Executor, error) {
 		updateBrief:            config.UpdateBrief,
 		askChoice:              config.AskChoice,
 		proposePlan:            config.ProposePlan,
+		writeVisualAnchor:      config.WriteVisualAnchor,
 		consent:                config.Consent,
 		consentState:           config.ConsentState,
 		consentClear:           config.ConsentClear,
@@ -387,6 +396,11 @@ func (e *Executor) Execute(
 		return e.updateProductionBrief(ctx, command), nil
 	case ToolAskChoice:
 		return e.askChoiceCard(ctx, command), nil
+	case ToolSetVisualAnchor:
+		if e.writeVisualAnchor == nil {
+			return chat.ToolResult{Error: "visual anchors unavailable", NoSubmission: true}, nil
+		}
+		return e.writeVisualAnchor(ctx, command)
 	case ToolProposeProductionPlan:
 		if e.proposePlan == nil {
 			return chat.ToolResult{Error: "production plans unavailable", NoSubmission: true}, nil
@@ -640,6 +654,9 @@ func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) 
 		Kind        string `json:"kind"`
 		Question    string `json:"question"`
 		Recommended string `json:"recommended"`
+		Proposal    struct {
+			Arguments json.RawMessage `json:"arguments"`
+		} `json:"proposal"`
 	}
 	if err := json.Unmarshal(command.Call.Arguments, &arguments); err != nil || arguments.Kind == "" {
 		return chat.ToolResult{Error: "invalid choice arguments", NoSubmission: true}
@@ -653,6 +670,7 @@ func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) 
 	}
 	result, err := e.askChoice(ctx, command, kind, chat.AskChoiceArguments{
 		Kind: arguments.Kind, Question: arguments.Question, Recommended: arguments.Recommended,
+		Proposal: arguments.Proposal.Arguments,
 	})
 	if err != nil {
 		if errors.Is(err, chat.ErrSessionNotFound) {

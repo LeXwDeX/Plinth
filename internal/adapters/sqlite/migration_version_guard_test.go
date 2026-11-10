@@ -112,11 +112,14 @@ func TestAppendOnlyMigrationsShape(t *testing.T) {
 		files[version] = entry.Name()
 	}
 	head := sqlite.MigrationHead()
-	if len(files) != head {
-		t.Fatalf("migration files = %d; want %d (versions 1..%d)", len(files), head, head)
+	if len(files) != sqlite.MigrationCount() {
+		t.Fatalf("migration files = %d; want %d (head %d)", len(files), sqlite.MigrationCount(), head)
 	}
+	// 0085 is reserved by #239, which has not merged into this branch; #250
+	// keeps its planned 0086 so the two branches never register one version.
+	reserved := map[int]bool{85: true}
 	for version := 1; version <= head; version++ {
-		if files[version] == "" {
+		if files[version] == "" && !reserved[version] {
 			t.Fatalf("migration version %d missing on disk", version)
 		}
 	}

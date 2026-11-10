@@ -59,6 +59,10 @@ type TurnOptions struct {
 	// StyleLock is the session lock snapshot frozen when the turn starts. The
 	// generation tool never reads the mutable session row for a running turn.
 	StyleLock StyleLock
+	// VisualAnchors is the session's reference-backed identity and style anchor
+	// snapshot frozen when the turn starts (#250). A running turn never reads
+	// the mutable session row, so an anchor edit cannot change a frozen task.
+	VisualAnchors []VisualAnchor `json:"VisualAnchors,omitempty"`
 	// StyleLockSkipped is the person's one-turn exemption. It is frozen with
 	// the turn and is never inferred from the Agent's request.
 	StyleLockSkipped      bool `json:"StyleLockSkipped,omitempty"`
@@ -248,6 +252,10 @@ type Session struct {
 	// StyleLock is the session-level style lock. It is owner-scoped and is
 	// projected only when the Catalog declares its session DTO field.
 	StyleLock StyleLock
+	// VisualAnchors are the session's reference-backed identity and style
+	// anchors (#250). They are server-side only; the browser reads no anchor
+	// projection.
+	VisualAnchors []VisualAnchor
 	// ExplicitModel3D is the 3D model the person explicitly picked in this
 	// session (#103); empty means no explicit pick.
 	ExplicitModel3D string

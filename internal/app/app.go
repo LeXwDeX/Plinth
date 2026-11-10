@@ -329,6 +329,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		MaximumSessionNotes:        applicationSchema.Chat.Context.MaximumSessionNotesCharacters,
 		MaximumStyleLockText:       applicationSchema.Chat.StyleLock.MaximumTextCharacters,
 		MaximumStyleLockReferences: applicationSchema.Chat.StyleLock.MaximumReferenceImages,
+		VisualAnchors:              applicationSchema.Chat.VisualAnchors,
 		CanvasInputSource:          applicationSchema.Chat.Context.CanvasInputSource,
 		// A turn's pick of a retired generation model runs on its successor
 		// (#329 follow-up).
@@ -746,6 +747,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		},
 		AskChoice:            chatService.AskChoice,
 		ProposePlan:          chatService.ProposeProductionPlan,
+		WriteVisualAnchor:    chatService.WriteVisualAnchor,
 		ChoiceKinds:          applicationSchema.Chat.Choice.Kinds,
 		BriefSavedMessage:    applicationSchema.Chat.Model3DUsage.Brief.SavedMessage,
 		BriefInvalidTemplate: applicationSchema.Chat.Model3DUsage.Brief.InvalidTemplate,

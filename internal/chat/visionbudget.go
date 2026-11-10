@@ -564,6 +564,34 @@ func (orchestrator *Orchestrator) roleVisionCandidates(
 			add(source, orchestrator.assistantCandidate(message, image, source))
 		}
 	}
+	// The session's visual anchors are reference pictures too (#250). They
+	// spend the style role's places before the style lock's own pictures, so an
+	// identity anchor is seen before any style hint, and both are seen before
+	// history pictures. The label names the anchor; an unreadable picture is
+	// named by the same Schema text as a refused style reference.
+	anchors := orchestrator.schema.VisualAnchors
+	for _, anchor := range options.VisualAnchors {
+		kindLabel := anchor.Kind
+		for _, kind := range anchors.Kinds {
+			if kind.ID == anchor.Kind {
+				kindLabel = kind.Label
+				break
+			}
+		}
+		for index, assetID := range anchor.References {
+			if strings.TrimSpace(assetID) == "" {
+				continue
+			}
+			values := []string{"{name}", anchor.Name, "{index}", strconv.Itoa(index + 1), "{kind}", kindLabel}
+			add(catalog.ChatVisionSourceStyle, visionCandidate{
+				source:  catalog.ChatVisionSourceStyle,
+				url:     assetID,
+				label:   strings.NewReplacer(values...).Replace(anchors.ReferenceLabelTemplate),
+				dropped: strings.NewReplacer(values...).Replace(anchors.DroppedLabelTemplate),
+				style:   true,
+			})
+		}
+	}
 	lock := options.StyleLock
 	if lock.Enabled {
 		vision := orchestrator.schema.Context.Vision

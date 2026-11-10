@@ -298,7 +298,9 @@ func validateChoiceKinds(schema ChatSchema) error {
 		}
 		seen[kind.ID] = true
 		ids = append(ids, kind.ID)
-		if kind.OptionSource != "usage_profiles" {
+		switch kind.OptionSource {
+		case "usage_profiles", "agent_proposal":
+		default:
 			return fmt.Errorf("choice.kinds[%d].option_source %q 未实现", index, kind.OptionSource)
 		}
 		for name, value := range map[string]string{
@@ -314,6 +316,12 @@ func validateChoiceKinds(schema ChatSchema) error {
 		parameters, found := declaredToolParameters(schema, kind.ToolName)
 		if !found {
 			return fmt.Errorf("choice.kinds[%d].tool_name %q 不是已声明的工具", index, kind.ToolName)
+		}
+		if kind.OptionSource == "agent_proposal" {
+			// The Agent's own proposal fills the options; the argument still
+			// names the target tool's parameter that receives the chosen
+			// action, and the kind needs a declared target tool.
+			continue
 		}
 		properties, ok := parameters["properties"].(map[string]any)
 		if !ok {

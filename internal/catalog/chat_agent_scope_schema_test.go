@@ -40,6 +40,7 @@ var shippedToolScopes = map[string]string{
 	"find_history_images":        "utility",
 	"inspect_image":              "utility",
 	"get_production_step":        "utility",
+	"set_visual_anchor":          "utility",
 	"recover_task_result":        "utility",
 	"list_offerings":             "utility",
 	"get_task":                   "utility",

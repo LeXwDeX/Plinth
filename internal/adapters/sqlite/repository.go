@@ -286,6 +286,11 @@ func MigrationHead() int {
 	return all[len(all)-1].version
 }
 
+// MigrationCount is how many migrations this binary registers. A reserved
+// version another branch has not merged yet leaves a gap in the file names,
+// so the count is the honest identity of the ledger, not the highest version.
+func MigrationCount() int { return len(migrations()) }
+
 //go:embed migrations/0055_native_pricing.sql
 var nativePricingMigration string
 
@@ -376,6 +381,9 @@ var sessionEvidenceDeletionsMigration string
 //go:embed migrations/0084_chat_session_vision_usage.sql
 var chatSessionVisionUsageMigration string
 
+//go:embed migrations/0086_chat_session_visual_anchors.sql
+var chatSessionVisualAnchorsMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -451,7 +459,10 @@ func migrations() []migration {
 		migration{version: 81, name: "chat_session_style_lock", sql: chatSessionStyleLockMigration},
 		migration{version: 82, name: "chat_branch_task_refs", sql: chatBranchTaskRefsMigration},
 		migration{version: 83, name: "session_evidence_deletions", sql: sessionEvidenceDeletionsMigration},
-		migration{version: 84, name: "chat_session_vision_usage", sql: chatSessionVisionUsageMigration})
+		migration{version: 84, name: "chat_session_vision_usage", sql: chatSessionVisionUsageMigration},
+		// 0085 belongs to #239; #250 carries the next number so the two
+		// branches never register the same migration.
+		migration{version: 86, name: "chat_session_visual_anchors", sql: chatSessionVisualAnchorsMigration})
 }
 
 type migration struct {

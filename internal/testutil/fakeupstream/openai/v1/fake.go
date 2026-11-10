@@ -49,6 +49,39 @@ const StreamErrorMarker = "[[fake:stream-error]]"
 // the fixed text; a request whose last message is a tool result always is.
 var toolMarker = regexp.MustCompile(`\[\[fake:tool:([A-Za-z0-9_.\-]+)(?:\s+(\{.*?\}))?\]\]`)
 
+// SystemContainsMarkerPrefix starts a fake-only request convention: a request
+// whose last user message contains [[fake:system-contains TEXT]] is answered
+// with "present: TEXT" when any system message contains TEXT, else
+// "absent: TEXT". The official model has no such behavior; the marker exists
+// so a smoke scenario can assert what the Agent was told without reading the
+// server's private prompt.
+const SystemContainsMarkerPrefix = "[[fake:system-contains "
+
+var systemContainsMarker = regexp.MustCompile(`\[\[fake:system-contains ([^\]\n]+)\]\]`)
+
+// systemContainsAsk returns the text a marker asks about.
+func (r chatRequest) systemContainsAsk() (string, bool) {
+	matches := systemContainsMarker.FindAllStringSubmatch(r.lastText(), -1)
+	if len(matches) == 0 {
+		return "", false
+	}
+	return strings.TrimSpace(matches[0][1]), true
+}
+
+// systemContains reports whether any system message carries the text.
+func (r chatRequest) systemContains(text string) bool {
+	for _, message := range r.Messages {
+		if message.Role != "system" || text == "" {
+			continue
+		}
+		var content string
+		if json.Unmarshal(message.Content, &content) == nil && strings.Contains(content, text) {
+			return true
+		}
+	}
+	return false
+}
+
 // ToolMarkerFor builds the marker a test or script puts in a user message.
 func ToolMarkerFor(name string, arguments string) string {
 	if arguments == "" {
@@ -410,8 +443,15 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 	if request.thinking() {
 		reasoning = FixedReasoning
 	}
+	reply := FixedReply
+	if needle, asked := request.systemContainsAsk(); asked {
+		reply = "absent: " + needle
+		if request.systemContains(needle) {
+			reply = "present: " + needle
+		}
+	}
 	if request.Stream {
-		h.writeStream(w, request, calls, reasoning)
+		h.writeStream(w, request, calls, reasoning, reply)
 		return
 	}
 	body := fakeupstream.Clone(h.text)
@@ -422,7 +462,7 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 	if message, ok := fakeupstream.DigMap(body, "choices", 0, "message"); ok {
 		message["reasoning_content"] = reasoning
 		if len(calls) == 0 {
-			message["content"] = FixedReply
+			message["content"] = reply
 		} else if sample, _ := message["tool_calls"].([]any); len(sample) > 0 {
 			template, _ := sample[0].(map[string]any)
 			rendered := make([]any, 0, len(calls))
@@ -548,7 +588,7 @@ func (h *handler) writeStreamError(w http.ResponseWriter, request chatRequest) {
 // a tool call split into its header and its arguments, and a final chunk
 // carrying finish_reason and usage. The envelope fields and the final usage
 // object come from the committed sample.
-func (h *handler) writeStream(w http.ResponseWriter, request chatRequest, calls []toolCall, reasoning string) {
+func (h *handler) writeStream(w http.ResponseWriter, request chatRequest, calls []toolCall, reasoning, reply string) {
 	sample := h.stream
 	if len(calls) > 0 {
 		sample = h.toolSSE
@@ -573,7 +613,7 @@ func (h *handler) writeStream(w http.ResponseWriter, request chatRequest, calls 
 	}
 	finish := "stop"
 	if len(calls) == 0 {
-		events = append(events, chunk(map[string]any{"content": FixedReply, "reasoning_content": nil}, nil, nil))
+		events = append(events, chunk(map[string]any{"content": reply, "reasoning_content": nil}, nil, nil))
 	} else {
 		finish = "tool_calls"
 		for index, call := range calls {

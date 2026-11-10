@@ -388,7 +388,7 @@ func (executor *Executor) replayPromptTrace(
 		if !ok {
 			return nil
 		}
-		purposes, refusal := executor.referencePurposes(command, arguments, referenceURLs)
+		purposes, refusal := executor.referencePurposes(command, arguments, referenceURLs, nil)
 		if refusal != "" {
 			return nil
 		}

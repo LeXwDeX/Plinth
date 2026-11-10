@@ -71,6 +71,11 @@ type Repository interface {
 	// style lock. References are stored in request order.
 	StyleLock(ctx context.Context, owner, session string) (StyleLock, bool, error)
 	SetStyleLock(ctx context.Context, owner, session string, lock StyleLock) (bool, error)
+	// VisualAnchors and SetVisualAnchors read and replace the owner's session
+	// visual anchors (#250). A missing or foreign session reports found=false.
+	// Writing does not touch updated_at.
+	VisualAnchors(ctx context.Context, owner, session string) ([]VisualAnchor, bool, error)
+	SetVisualAnchors(ctx context.Context, owner, session string, anchors []VisualAnchor) (bool, error)
 	// SessionBrief and ReplaceSessionBrief read and conditionally replace the
 	// session's structured production brief (#103). Both are scoped to the
 	// owner; found is false for a missing or foreign session. Writing does not
@@ -245,6 +250,10 @@ type ServiceConfig struct {
 	// WorkLedger is application.chat.work_ledger (#248). A zero value leaves
 	// the ledger and the get_production_step tool unavailable.
 	WorkLedger catalog.ChatWorkLedgerSchema
+	// VisualAnchors is application.chat.visual_anchors (#250): the bounds,
+	// declared kinds and Agent-facing copy of the session anchor settings. A
+	// zero value leaves the anchor tool unavailable.
+	VisualAnchors catalog.ChatVisualAnchorsSchema
 }
 
 type Service struct {
@@ -306,6 +315,10 @@ type Service struct {
 	visionTokenBudget   func(model string) int
 	contextStore        ContextStore
 	compactionListLimit int
+
+	// visualAnchors is application.chat.visual_anchors (#250): the Schema bounds,
+	// declared kinds and result copy of the session anchor settings.
+	visualAnchors catalog.ChatVisualAnchorsSchema
 
 	// workLedger is application.chat.work_ledger (#248); workLedgerTasks is
 	// the public-Task page source, workLedgerDetail the full single-Task read,
@@ -410,6 +423,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 		explicitModel3DValid:       config.ExplicitModel3DValid,
 		usageProfileKind:           usageProfileKindOf(config.ChoiceKinds),
 		models:                     config.Models,
+		visualAnchors:              config.VisualAnchors,
 		workLedger:                 config.WorkLedger,
 		visionBudget:               config.VisionBudget,
 		visionTokenBudget:          config.VisionTokenBudget,
@@ -888,6 +902,17 @@ func (service *Service) startTurn(
 	}
 	styleLock.References = append([]string(nil), styleLock.References...)
 	command.Options.StyleLock = styleLock
+	// The visual anchors are frozen with the turn for the same reason: an edit
+	// by the person or a later Agent write must not change a running turn or a
+	// recovered one (#250).
+	visualAnchors, found, err := service.repository.VisualAnchors(ctx, command.OwnerID, command.SessionID)
+	if err != nil {
+		return Message{}, err
+	}
+	if !found {
+		return Message{}, ErrSessionNotFound
+	}
+	command.Options.VisualAnchors = cloneVisualAnchors(visualAnchors)
 	// A pick of a retired generation model runs on its successor; the turn
 	// records the switch (#329 follow-up).
 	service.moveRetiredModels(&command.Options)

@@ -1149,6 +1149,7 @@ func (orchestrator *Orchestrator) Process(
 	command.Options.ExplicitModel3D = turn.Options.ExplicitModel3D
 	command.Options.StyleLock = turn.Options.StyleLock
 	command.Options.StyleLockSkipped = turn.Options.StyleLockSkipped
+	command.Options.VisualAnchors = cloneVisualAnchors(turn.Options.VisualAnchors)
 	// A plan continuation is the service's mark, never the caller's (#134).
 	command.Options.PlanContinuation = turn.Options.PlanContinuation
 	// DSML tool calls are read only for a model whose profile writes them.
@@ -1951,6 +1952,7 @@ func (orchestrator *Orchestrator) agentRequest(
 	// the message window, so compaction never changes them (#248).
 	sections.add("work_ledger", orchestrator.workLedgerPrompt(ctx, ownerID, sessionID, history))
 	sections.add("work_anchors", orchestrator.workAnchorsPrompt(ctx, ownerID, sessionID))
+	sections.add("visual_anchors", orchestrator.visualAnchorsPrompt(options))
 	sections.add("selection", orchestrator.selectionPrompt(options))
 	sections.add("brief", orchestrator.briefPrompt(options))
 	sections.add("notes", orchestrator.notesPrompt(ctx, ownerID, sessionID))

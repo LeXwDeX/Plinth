@@ -426,7 +426,7 @@ func (executor *Executor) Execute(
 		result.NoSubmission = true
 		return result, nil
 	}
-	var referenceURLs []string
+	var turnReferenceURLs []string
 	// A multiview step (#65) takes its pictures and views from the person's
 	// structured request or the named three-view group, never from handles.
 	multiview, refusal, err := executor.multiviewSelection(ctx, command, arguments)
@@ -449,9 +449,9 @@ func (executor *Executor) Execute(
 			model, _ := json.Marshal(executor.multiviewModelID(command, multiview.model))
 			arguments[command.Tool.ModelArgument] = model
 		}
-		referenceURLs = multiview.URLs
+		turnReferenceURLs = multiview.URLs
 	} else if command.Tool.AcceptReferenceImages == nil || *command.Tool.AcceptReferenceImages {
-		referenceURLs, err = executor.selectReferences(command, arguments)
+		turnReferenceURLs, err = executor.selectReferences(command, arguments)
 		if err != nil {
 			if result, refused := executor.refuseReference(command, err); refused {
 				return result, nil
@@ -461,15 +461,38 @@ func (executor *Executor) Execute(
 			return result, err
 		}
 	}
-	styleReferenceURLs, styleReferenceErr := executor.styleLockReferenceURLs(command)
+	// #250: the identity anchors this call named precede the style pictures,
+	// which precede the turn's own ordinary references. The order is also the
+	// trimming priority.
+	identityReferenceURLs, identityPurposes, anchorRefusal, anchorErr := executor.anchorReferenceURLs(command, arguments)
+	if anchorErr != nil && anchorRefusal == "" {
+		anchorRefusal = executor.anchorInvalid(command, "锚点参考图不可用")
+	}
+	if anchorRefusal != "" {
+		result := executor.failure(command, "", anchorRefusal)
+		result.NoSubmission = true
+		return result, nil
+	}
+	styleReferenceURLs, stylePurposes, styleReferenceErr := executor.styleReferenceURLs(command)
 	if styleReferenceErr != nil {
 		result := executor.failure(command, "", executor.styleLockUnavailableMessage(command))
 		result.NoSubmission = true
 		return result, nil
 	}
 	styleReferenceCount := len(styleReferenceURLs)
-	referenceURLs = append(referenceURLs, styleReferenceURLs...)
-	if command.Tool.ReferencePurposesArgument != "" {
+	identityReferenceCount := len(identityReferenceURLs)
+	serverPurposes := mergeReferencePurposes(identityPurposes, stylePurposes)
+	// Without an identity anchor the historical reference list is preserved
+	// byte for byte (a duplicate URL stays ambiguous, a three-view selection
+	// keeps its repeats). With one, the priority groups are de-duplicated so
+	// the same picture is not sent twice.
+	var referenceURLs []string
+	if identityReferenceCount > 0 {
+		referenceURLs = uniqueReferenceGroups(identityReferenceURLs, styleReferenceURLs, turnReferenceURLs)
+	} else {
+		referenceURLs = append(append([]string(nil), styleReferenceURLs...), turnReferenceURLs...)
+	}
+	if command.Tool.ReferencePurposesArgument != "" && identityReferenceCount+styleReferenceCount == 0 {
 		for handle, purpose := range command.Options.AttachmentPurposes {
 			if purpose != "input" {
 				continue
@@ -551,9 +574,10 @@ func (executor *Executor) Execute(
 		}
 		views, _ := json.Marshal(multiview.Views)
 		arguments[executor.chat.ThreeView.Multiview.ViewsArgument] = views
-		referenceURLs = append(multiview.URLs, styleReferenceURLs...)
+		referenceURLs = append(uniqueReferenceURLs(identityReferenceURLs), styleReferenceURLs...)
+		referenceURLs = append(referenceURLs, multiview.URLs...)
 	}
-	if styleReferenceCount > 0 {
+	if identityReferenceCount+styleReferenceCount > 0 {
 		if _, supported := semanticParameter(offering, generation.SemanticReferenceImage); !supported {
 			result := executor.failure(command, "", executor.styleLockUnavailableMessage(command))
 			result.NoSubmission = true
@@ -598,16 +622,27 @@ func (executor *Executor) Execute(
 			referenceURLs = selection.urls()
 		}
 		given := len(referenceURLs)
+		combinedReferences := referenceURLs
 		referenceURLs = truncateReferences(referenceURLs, offering)
 		if len(referenceURLs) < given {
-			references = referenceUse{Used: len(referenceURLs), Given: given}
-			if styleReferenceCount > 0 {
-				references.StyleGiven = styleReferenceCount
-				// Agent references are always the prefix. Count the retained style
-				// suffix without allowing a model limit to evict them.
-				agentCount := given - styleReferenceCount
-				references.StyleUsed = min(styleReferenceCount, max(0, len(referenceURLs)-agentCount))
-				references.StyleTrimmed = references.StyleUsed < styleReferenceCount
+			identityUsed := min(identityReferenceCount, len(referenceURLs))
+			styleUsed := min(styleReferenceCount, max(0, len(referenceURLs)-identityUsed))
+			turnGiven := max(0, given-identityReferenceCount-styleReferenceCount)
+			turnUsed := max(0, len(referenceURLs)-identityUsed-styleUsed)
+			references = referenceUse{
+				Used: len(referenceURLs), Given: given,
+				IdentityGiven: identityReferenceCount, IdentityUsed: identityUsed,
+				StyleGiven: styleReferenceCount, StyleUsed: styleUsed,
+				TurnGiven: turnGiven, TurnUsed: turnUsed,
+			}
+			references.StyleTrimmed = styleUsed < styleReferenceCount
+			// Anchors are the prefix; the ordinary references are the suffix.
+			// Everything the limit cut from that suffix is reported to the
+			// Agent by handle (#250).
+			turnReferences := combinedReferences[min(len(combinedReferences), identityReferenceCount+styleReferenceCount):]
+			if turnUsed < len(turnReferences) {
+				references.DroppedTurn = executor.referenceHandleLabels(command, turnReferences[turnUsed:])
+				references.DroppedTurnCount = len(turnReferences) - turnUsed
 			}
 		}
 		if capability == generation.ImageTo3D {
@@ -641,7 +676,7 @@ func (executor *Executor) Execute(
 		}
 	}
 
-	purposes, refusal := executor.referencePurposes(command, arguments, referenceURLs)
+	purposes, refusal := executor.referencePurposes(command, arguments, referenceURLs, serverPurposes)
 	if refusal != "" {
 		result := executor.failure(command, "", refusal)
 		result.NoSubmission = true

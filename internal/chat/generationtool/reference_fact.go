@@ -427,6 +427,28 @@ func (executor *Executor) operationReferenceNote(command chat.ToolCommand, op Op
 // was made from (#65), else the source or limit note.
 func (executor *Executor) stepReferenceNote(command chat.ToolCommand, offering generation.Offering,
 	fact *ReferenceSourceFact, counts referenceUse, input json.RawMessage) string {
+	if counts.DroppedTurnCount > 0 && counts.IdentityUsed+counts.StyleUsed > 0 &&
+		command.Tool.ResultFields.ReferenceNote != "" {
+		// #250: the anchors and style pictures were kept; the model limit cut
+		// ordinary references. Name what was dropped so the Agent can ask for
+		// a smaller selection instead of silently losing pictures.
+		template := executor.chat.Presentation.Messages.ReferencePriorityTrimmed
+		if template != "" {
+			if text := executor.localizeText(command); text != nil {
+				template = text(template)
+			}
+			anchors := counts.IdentityUsed + counts.StyleUsed
+			dropped := strings.Join(counts.DroppedTurn, "、")
+			if dropped == "" {
+				dropped = strconv.Itoa(counts.DroppedTurnCount) + " 张"
+			}
+			return strings.NewReplacer(
+				"{maximum}", strconv.Itoa(referenceImageLimit(offering)),
+				"{anchors}", strconv.Itoa(anchors),
+				"{dropped}", dropped,
+			).Replace(template)
+		}
+	}
 	if counts.StyleTrimmed && command.Tool.ResultFields.ReferenceNote != "" {
 		template := executor.chat.Presentation.Messages.StyleLockReferencesTrimmed
 		if template != "" {

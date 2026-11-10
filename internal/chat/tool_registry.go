@@ -277,5 +277,10 @@ func (orchestrator *Orchestrator) noteTools(registry *toolRegistry, tools []agen
 		if note := orchestrator.toolNote(*registered.generation, options); note != "" {
 			tools[index].Description += " " + note
 		}
+		// #250: name the session's identity anchors and the argument that
+		// selects one. The tool note is about the frozen turn options only.
+		if note := orchestrator.anchorToolNote(*registered.generation, options); note != "" {
+			tools[index].Description += " " + note
+		}
 	}
 }

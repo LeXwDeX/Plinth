@@ -213,6 +213,9 @@ type AskChoiceArguments struct {
 	Kind        string
 	Question    string
 	Recommended string
+	// Proposal is the Agent's exact proposal whose confirmation an
+	// agent_proposal card offers. It is the target tool's arguments object.
+	Proposal json.RawMessage
 }
 
 // AskChoice opens a generic card of a kind the Schema declares. The usage
@@ -229,35 +232,61 @@ func (service *Service) AskChoice(
 	if service.choices == nil {
 		return ToolResult{Error: "choice cards unavailable", NoSubmission: true}, nil
 	}
-	if kind.OptionSource != "usage_profiles" {
-		return ToolResult{Error: "choice kind unavailable", NoSubmission: true}, nil
-	}
-	profiles := service.model3DUsage.Profiles
-	if len(profiles) == 0 {
-		return ToolResult{Error: "choice kind unavailable", NoSubmission: true}, nil
-	}
 	recommended := strings.TrimSpace(arguments.Recommended)
-	options := make([]ChoiceOption, 0, len(profiles))
-	seenRecommended := false
-	for _, profile := range profiles {
-		optionArguments, err := json.Marshal(map[string]string{kind.Argument: profile.ID})
+	var options []ChoiceOption
+	switch kind.OptionSource {
+	case "usage_profiles":
+		profiles := service.model3DUsage.Profiles
+		if len(profiles) == 0 {
+			return ToolResult{Error: "choice kind unavailable", NoSubmission: true}, nil
+		}
+		seenRecommended := false
+		for _, profile := range profiles {
+			optionArguments, err := json.Marshal(map[string]string{kind.Argument: profile.ID})
+			if err != nil {
+				return ToolResult{Error: "choice card unavailable", NoSubmission: true}, nil
+			}
+			option := ChoiceOption{
+				ID:          profile.ID,
+				Label:       profile.Label,
+				Description: profile.Description,
+				Arguments:   optionArguments,
+			}
+			if recommended != "" && profile.ID == recommended {
+				option.Recommended = true
+				seenRecommended = true
+			}
+			options = append(options, option)
+		}
+		if !seenRecommended {
+			recommended = ""
+		}
+	case "agent_proposal":
+		proposal := arguments.Proposal
+		var values map[string]json.RawMessage
+		if len(proposal) == 0 || json.Unmarshal(proposal, &values) != nil || values == nil {
+			return ToolResult{Error: "choice card unavailable", NoSubmission: true}, nil
+		}
+		declined, err := json.Marshal(map[string]string{kind.Argument: "decline"})
 		if err != nil {
 			return ToolResult{Error: "choice card unavailable", NoSubmission: true}, nil
 		}
-		option := ChoiceOption{
-			ID:          profile.ID,
-			Label:       profile.Label,
-			Description: profile.Description,
-			Arguments:   optionArguments,
+		accept := ChoiceOption{ID: "accept", Label: kind.AcceptLabel,
+			Description: kind.Question, Arguments: append(json.RawMessage(nil), proposal...)}
+		decline := ChoiceOption{ID: "decline", Label: kind.DeclineLabel, Arguments: declined}
+		if recommended == "accept" {
+			accept.Recommended = true
+		} else if recommended == "decline" {
+			decline.Recommended = true
+		} else {
+			recommended = ""
 		}
-		if recommended != "" && profile.ID == recommended {
-			option.Recommended = true
-			seenRecommended = true
-		}
-		options = append(options, option)
+		options = []ChoiceOption{accept, decline}
+	default:
+		return ToolResult{Error: "choice kind unavailable", NoSubmission: true}, nil
 	}
-	if !seenRecommended {
-		recommended = ""
+	if len(options) == 0 {
+		return ToolResult{Error: "choice kind unavailable", NoSubmission: true}, nil
 	}
 	question := strings.TrimSpace(arguments.Question)
 	if question == "" {

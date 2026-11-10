@@ -72,6 +72,7 @@ func Profile() align.Profile {
 		FakeBodyHook: markToolCall,
 		RequestNotes: []string{
 			"工具调用步骤（chat-tool-call、chat-tool-call-stream）：发给 fake 的请求在最后一条 user 消息末尾多了 fake 专用的工具标记 `[[fake:tool:lookup_note {\"topic\":\"cube\"}]]`，其余字节相同；官方模型自行决定调用工具，fake 只在标记出现时返回工具调用。",
+			"fake 专用约定 `[[fake:system-contains TEXT]]`（#250）：最后一条 user 消息带该标记时，fake 检查自己的 system 消息是否含 TEXT，并只回复 present: TEXT 或 absent: TEXT；官方模型没有该行为，它只用于冒烟断言系统提示内容。",
 			"fake 的流式分片按官方 2026-10-29 实测的分片模式生成（角色、推理、正文或工具调用头与参数、结束分片）；已提交样本经 wirefixture 规范化后合并了中间分片，字段集合一致、中间分片的 null 类型不保留，所以漂移测试对 SSE 只比字段集合。",
 		},
 		Notes: align.Notes{},
