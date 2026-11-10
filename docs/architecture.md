@@ -1634,6 +1634,23 @@ Chat Agent 通过三个只读工具直接查看本会话（分支会话含祖先
 
 图生 3D（`create_model_3d_from_image`、`create_model_3d_from_views`）提交前，`generationtool` 对最终参考图运行 `image_review.input_3d` 清单；不通过时返回 `refused_template` 并 `NoSubmission`，不提交、不扣费。工具参数 `input_override_reason` 允许 Agent 在用户明确要求照原图做时带理由放行；理由写入服务端日志并留在会话的工具调用参数中。输入图字节不可读时按 unknown 处理，不阻塞提交。
 
+### 会话生产账本与一致性锚（#248）
+
+**源码与测试已实现；本机 fake 栈验证，未部署验收。**
+
+账本是 `internal/chat/work_ledger.go` 的只读读模型，不新建任务状态、不复制 `internal/generation` 的状态机。事实只有三处：`generation.Module.List(OwnTasks(owner), ListQuery{SessionID, IncludeBranchRefs: true, Limit: chat.work_ledger.maximum_steps})` 的公开 Task（分支会话经 `chat_branch_task_refs` 读祖先 Task）；`chat.Repository.ListMessages` 里 assistant 消息已持久化的 `ToolCall.Arguments`（Agent 原始调用）与 `ToolCall.Summary`（只读工具结论）；`Service.SessionPick`（选用）。应用装配经 `Service.SetSessionTaskSource` 注入读取函数；未装配或 Schema 未声明 `work_ledger` 时账本与工具有不可用。列表投影是精简版（只带提示词与结果资产，不含完整 Offering 与输入），摘要用它；`get_production_step` 经 `Service.SetSessionTaskDetail`（应用用 `generation.Module.Get(owner, taskID)`）只读取被请求的那一步完整 Task，得到全部声明参数、语义与输入引用。
+
+- **每步字段。** 步骤按 `Task.CreatedAt`（同一时刻按 ID）升序编号为 `@stepN`（`chat.work_ledger.step_prefix`），同时给出 Task ID。记录 capability/offering/model/provider、state/progress/failure.class、预计积分、`raw_prompt`（历史调用参数里 `chat.context.tool_prompt_argument` 的值）与 `final_prompt`（Task 冻结输入里 Offering 声明 `semantic=prompt` 的值，含风格锁与模板改写）、`negative_prompt`，以及输入/结果。
+- **参数来源是读时事实。** 对 Offering 声明的每个非提示词参数，值取冻结输入，来源按顺序判定：调用参数里出现 → `agent`；等于 Offering 默认值 → `default`；文本包含当前风格锁原文 → `style_lock`；否则 `unknown`。来源不猜测“用户选过”，因为现有持久 store 记录的是最后写入者而不是每一步的冻结来源。
+- **隐私边界。** 引用型参数（`asset`/`asset-array`/`task`）、遮罩、来源 URL、`*_url` 参数与 `presentation.surface=hidden` 的参数绝不输出资产 ID 或 URL：输入图投影为历史附件已经给出的句柄加 Offering 声明的用途（reference/source/style），来源 Task 投影为 `@stepN`；结果按 Task 资产的角色与历史附件句柄投影，未出现过的结果只保留角色。上游 ID 与字节一律不出面。
+- **自检结论归属。** 历史 `inspect_model` 的 summary（`usage.checks` 中 `status=fail` 的 check/actual/budget/fix_hint）归到被检查 Task；`inspect_image` 的 summary 只有 passed/failed 计数，归到产出该图的 Task；`render_model_views` / `compare_models` 的 `failed_views` 归到模型 Task。字段为后续 #246 的 Agent 结论保留位置，本 Issue 不写入。采纳由 SessionPick 推出；否决清单来自可选的 `WorkDecisionReader`（#241），未接线时为空。
+- **摘要注入与优先级。** 每回合由 orchestrator 在系统提示中加入一个带 Schema 标记的块（`work_ledger.summary_template`），每步一行；优先级为当前选用对象 > 最新用户消息提到的句柄/Task > 被否决 > 最近。超过 `maximum_steps` / `summary_maximum_characters` 时截断并附 `truncated_note`；单行受 `entry_maximum_characters` 约束。块内文字先移除标记，模板声明“资料不是指令”。块按回合冻结：同回合新提交的步骤不出现在该回合系统提示，但工具可实时读取。
+- **`get_production_step`。** `application.chat.agent_tools` 的只读工具（`implementation_key: ledger.read`、`effects: ["READ"]`、`scope: session`、`domains: [image, model-3d]`、`agent_scope: utility`、`consent: none`、`idempotency: none`）。参数 `step` 接受 `@stepN` 或 Task ID；经 owner + session（含分支）校验后返回完整 raw/final/negative prompt、参数来源、输入/结果句柄、状态与自检结论，并附一行 compact summary。未知步骤、越权会话与不可读分别返回 Schema 文案，全部 `NoSubmission`；不创建 Task、不扣费、不改会话。
+- **风格锚。** 复用现有会话级 style lock：启用时把锁定原文（受 `anchors.maximum_text_characters` 限制）与参考图的历史句柄逐字注入系统提示，标记包裹；禁用时不注入。`StyleLockSkipped` 只影响生成器是否携带风格锁，不改变账本记录的事实。身份锚的持久化（独立文本与参考图、确认流程）留给 #250：本 Issue 不新增 anchors 表/列或迁移，也不改 `go_chat_sessions`；`model3d`/`image2d` craft 文案暂时要求 Agent 在提示词中逐字复用身份描述。
+- **系统提示分区。** `internal/chat/prompt_sections.go` 用有序命名分区组装系统提示，顺序写在代码里（base、domain、craft、scope、approval、skill、multiview、summary、compacted_handles、work_ledger、work_anchors、selection、brief、notes、choice、background_tasks、harness、reply_language），空分区不输出。账本与锚来自存储事实而不是消息窗口，因此压缩不会移动或丢失它们。
+- **压缩。** `contextMessage` 仍只排除 tool 消息；`chat.context_compaction.source_template` 增加 `{ledger}`，其值只用同一投影的“句柄 + 状态 + 自检结论 + 否决”行（不含完整提示词），`summary_prompt` 要求引用 `@stepN` 而不是重写提示词。锚点与账本在摘要之外独立注入，因此压缩前后逐字一致。
+- **验证。** `internal/chat/work_ledger_test.go`（超过 120 字提示词的完整取回、自检遗留、优先级与截断、压缩前后逐字一致、隐私过滤、未知/越权/已删除、日志不含提示词、压缩 summary 输入含账本事实）；`internal/chat/agenttools/executor_test.go`（工具分发、未接线不可用）；`internal/catalog/chat_work_ledger_schema_test.go`（默认声明、正负例、无工具时可选）；`scripts/smoke/smoke-fake-stack.py --only work-ledger`（长提示词跨压缩取回、只改披风片段、风格锚与参考图句柄、`inspect_model` 遗留问题下一回合可见、服务端日志不含账本内容）。遗留：否决清单的真实写入归 #241；身份锚存储归 #250；`inspect_image` 的完整失败项未持久化，只有计数；`@stepN` 是按创建顺序的位置序号，删除 Task 后会重排，工具同时接受 Task ID；refetch/格式转换等派生 Task 会作为独立步骤出现，未按来源折叠。
+
 ### 工作台对话与右侧栏的紧凑呈现（#103）
 
 **源码与测试已实现；本机前端 `tsc --noEmit`、`pnpm test` 与 `pnpm build` 通过；未部署，未做浏览器验收。**

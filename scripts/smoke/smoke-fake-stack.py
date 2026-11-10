@@ -39,9 +39,11 @@ same HTTP API the browser uses:
     Meshy and Hyper3D delivers it.
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
-(NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, p2, agent, agent-background, faults;
+(NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, p2, agent, agent-background,
+agent-quality, image-self-check, work-ledger, faults;
 "agent" runs both agent scenarios, "hyper3d-agent" the Hyper3D chain alone,
-"p2" the Tripo P2 quote/chain, "agent-background" the batched wait that keeps both Tasks running)
+"p2" the Tripo P2 quote/chain, "agent-background" the batched wait that keeps both Tasks running,
+"work-ledger" the #248 frozen prompts, compaction, style anchor and self-check leftovers)
 Needs `go`. Exit 0 = every selected check passed.
 
 The stack runs inside the internal/app test binary (TestFakeUpstreamStack, built with -tags fakestack), not
@@ -852,7 +854,7 @@ def session_tool_calls(api, session):
     return found
 
 
-def agent_tool_turn(api, session, content, image_urls=None, creative_domain=None):
+def agent_tool_turn(api, session, content, image_urls=None, creative_domain=None, ai_model=None):
     """One chat turn whose fake LLM answer is the tool call embedded in content.
     A paid step that asks for a card is approved once; a step the session's
     approval policy grants automatically (manual mode leaves mesh-segmentation
@@ -863,6 +865,8 @@ def agent_tool_turn(api, session, content, image_urls=None, creative_domain=None
         body["image_urls"] = image_urls
     if creative_domain:
         body["creative_domain"] = creative_domain
+    if ai_model:
+        body["ai_model"] = ai_model
     replies = assistant_reply_count(api, session)
     known = set(session_tool_calls(api, session))
     # The approved continuation may still own the session for a moment after its
@@ -1537,9 +1541,254 @@ def scenario_image_self_check(api, offerings, work):
            f"task={task.get('id') if task else None} state={task.get('state') if task else None}")
 
 
+def _work_ledger_checkpoint(work, session):
+    """The newest turn checkpoint of the session: the request the model got and
+    this round's tool receipts. The checkpoint stores Go field names; older
+    records may carry lowercase keys, so both spellings are accepted."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/main/app.db?mode=ro", uri=True)
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT checkpoint_json FROM go_chat_turns WHERE session_id=? ORDER BY updated_at DESC LIMIT 1",
+                         (session,)).fetchone()
+        db.close()
+    except sqlite3.Error:
+        return {}
+    if not row or not row["checkpoint_json"]:
+        return {}
+    try:
+        return json.loads(row["checkpoint_json"])
+    except ValueError:
+        return {}
+
+
+def _work_ledger_wait_system(work, session, needle, seconds=20):
+    """Wait until the newest checkpoint's system prompt carries a marker; the
+    turn's checkpoint may land a moment after its reply."""
+    end = time.time() + seconds
+    system = ""
+    while time.time() < end:
+        system = _work_ledger_system_prompt(_work_ledger_checkpoint(work, session))
+        if needle in system:
+            return system
+        time.sleep(0.5)
+    return system
+
+
+def _work_ledger_system_prompt(checkpoint):
+    request = checkpoint.get("Request") or checkpoint.get("request") or {}
+    messages = request.get("Messages") or request.get("messages") or []
+    if not messages:
+        return ""
+    first = messages[0] or {}
+    return str(first.get("Content") or first.get("content") or "")
+
+
+def _work_ledger_completed(checkpoint):
+    for key in ("Completed", "completed"):
+        value = checkpoint.get(key)
+        if isinstance(value, list):
+            return value
+    return []
+
+
+def _work_ledger_tool_contents(checkpoint):
+    contents = []
+    for message in _work_ledger_completed(checkpoint):
+        content = message.get("Content") if "Content" in message else message.get("content")
+        if content:
+            contents.append(str(content))
+    return contents
+
+
+def _work_ledger_plain_turn(api, session, content, creative_domain="image", image_urls=None, ai_model=None):
+    """Send one turn whose reply needs no Task and wait for the final answer."""
+    replies = assistant_reply_count(api, session)
+    body = {"content": content}
+    if creative_domain:
+        body["creative_domain"] = creative_domain
+    if image_urls:
+        body["image_urls"] = image_urls
+    if ai_model:
+        body["ai_model"] = ai_model
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+    if status not in (200, 201, 202):
+        return False
+    end = time.time() + 60
+    while time.time() < end:
+        if assistant_reply_count(api, session) > replies:
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def _work_ledger_marker(tool, arguments):
+    return "[[fake:tool:" + tool + " " + json.dumps(arguments, ensure_ascii=False, separators=(",", ":")) + "]]"
+
+
+def _work_ledger_log_text(work):
+    text = ""
+    for root, dirs, files in os.walk(work):
+        for name in files:
+            if os.path.basename(root) != "logs" and name != "stack.log":
+                continue
+            try:
+                with open(os.path.join(root, name), encoding="utf-8", errors="replace") as handle:
+                    text += handle.read()
+            except OSError:
+                pass
+    return text
+
+
+def scenario_work_ledger(api, offerings, work):
+    """#248: the frozen production ledger survives history truncation and
+    context compaction, the read-only get_production_step tool returns the
+    full prompts and sources, the style anchor is injected verbatim, and the
+    inspect_model leftovers reach the next turn. Fake only."""
+    secret = "LEDGER-PROMPT-SECRET-9c41"
+    long_prompt = ("a full-body concept art of a wandering ranger with a black cloak and a silver clasp, "
+                   "standing in a misty pine forest, painted in warm gouache with visible brush strokes, "
+                   "soft rim light, detailed leather boots and gloves, calm expression, muted earth palette, "
+                   "centered composition, no text, no watermark, " + secret)
+    if len(long_prompt) <= 120:
+        record("#248 long prompt", False, f"{len(long_prompt)} characters")
+        return
+    session = new_session(api)
+    status, body = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "auto"})
+    if status != 200:
+        record("#248 auto approval", False, f"{status} {body}")
+        return
+    marker = _work_ledger_marker("refine_image", {"prompt": long_prompt})
+    task, why, _approval = agent_tool_turn(api, session, "make the ranger " + marker, creative_domain="image",
+                                               ai_model=IMAGE_OFFERINGS["openai"][0])
+    if not task or why or task.get("state") != "SUCCEEDED":
+        record("#248 first generation", False, why or f"state {(task or {}).get('state')}")
+        return
+    first_task_id = task["id"]
+    first_prompt = ((task.get("input") or {}).get("prompt") or "")
+    record("#248 first generation froze the long prompt", first_prompt == long_prompt,
+           f"task={first_task_id} prompt_chars={len(first_prompt)}")
+    if first_prompt != long_prompt:
+        return
+    # More than keep_recent_rounds user rounds so a manual compaction has work.
+    for index in range(5):
+        if not _work_ledger_plain_turn(api, session, f"keep thinking {index}", creative_domain="image"):
+            record(f"#248 filler round {index}", False, "turn did not finish")
+            return
+    status, body = api.json("POST", f"/api/v1/chat/sessions/{session}/context/compaction")
+    compactions = body.get("compactions") or []
+    record("#248 manual compaction after the long prompt", status == 200 and bool(compactions),
+           f"status={status} compactions={len(compactions)} body={body if status != 200 else ''}")
+    if status != 200:
+        return
+    # Retrieve the full step through the read-only tool after compaction.
+    read = _work_ledger_marker("get_production_step", {"step": first_task_id})
+    if not _work_ledger_plain_turn(api, session, "show me the exact frozen step " + read, creative_domain="image"):
+        record("#248 get_production_step turn", False, "turn did not finish")
+        return
+    checkpoint = _work_ledger_checkpoint(work, session)
+    payload = None
+    for content in _work_ledger_tool_contents(checkpoint):
+        if '"raw_prompt"' in content:
+            try:
+                candidate = json.loads(content)
+            except ValueError:
+                continue
+            if (candidate.get("step") or {}).get("task_id") == first_task_id:
+                payload = candidate
+                break
+    step = (payload or {}).get("step") or {}
+    ok = (step.get("raw_prompt") == long_prompt and step.get("final_prompt") == long_prompt
+          and bool(step.get("parameters")) and "source" in (step.get("parameters") or [{}])[0])
+    record("#248 get_production_step returns the full prompt and sources after compaction", ok,
+           f"raw_chars={len(str(step.get('raw_prompt') or ''))} final_chars={len(str(step.get('final_prompt') or ''))} "
+           f"parameters={len(step.get('parameters') or [])}")
+    system = _work_ledger_system_prompt(checkpoint)
+    record("#248 ledger summary is in the next turn's system prompt",
+           bool(step.get("step")) and step.get("step") in system and first_task_id in system
+           and "<<<WORK_LEDGER>>>" in system,
+           f"step={step.get('step')} ledger={'yes' if '<<<WORK_LEDGER>>>' in system else 'no'}")
+    if not ok:
+        return
+    # The next generation changes only the cloak, keeping every other byte.
+    changed = step["final_prompt"].replace("black cloak", "red cloak")
+    marker = _work_ledger_marker("refine_image", {"prompt": changed})
+    second, why, _approval = agent_tool_turn(api, session, "only change the cloak to red " + marker, creative_domain="image",
+                                             ai_model=IMAGE_OFFERINGS["openai"][0])
+    new_prompt = ((second or {}).get("input") or {}).get("prompt") or ""
+    record("#248 the edited prompt differs only in the cloak fragment",
+           bool(second) and second.get("state") == "SUCCEEDED" and new_prompt == changed
+           and "black cloak" not in new_prompt and new_prompt != first_prompt,
+           f"state={(second or {}).get('state')} new_chars={len(new_prompt)}")
+    # The style anchor is the existing session style lock, injected verbatim.
+    status, uploaded = api.upload("/api/v1/assets", "file", "style-ref.png", make_png(), "image/png")
+    asset_id = uploaded.get("id") if status in (200, 201) else None
+    if not asset_id:
+        record("#248 style reference upload", False, f"{status}")
+        return
+    reference_url = uploaded.get("url") or f"/api/v1/assets/{asset_id}"
+    if not _work_ledger_plain_turn(api, session, "here is the style reference", creative_domain="image",
+                                   image_urls=[reference_url]):
+        record("#248 style reference turn", False, "turn did not finish")
+        return
+    status, messages = api.json("GET", f"/api/chat/sessions/{session}/messages")
+    messages = messages if isinstance(messages, list) else messages.get("messages", [])
+    handle = ""
+    for message in messages:
+        for attachment in message.get("attachments") or []:
+            if attachment.get("asset_id") == asset_id or attachment.get("assetId") == asset_id:
+                if attachment.get("handle"):
+                    handle = attachment["handle"]
+    anchor_text = "印象派笔触、暖金色光线、厚涂质感、低饱和土色与冷灰阴影；" * 14
+    status, body = api.json("PUT", f"/api/v1/chat/sessions/{session}/style-lock",
+                            {"enabled": True, "text": anchor_text, "references": [asset_id]})
+    record("#248 style lock is saved", status == 200 and bool(handle),
+           f"status={status} handle={handle or 'missing'}")
+    status, body = api.json("POST", f"/api/v1/chat/sessions/{session}/context/compaction")
+    record("#248 second compaction with anchors", status == 200, f"status={status}")
+    anchor_read = _work_ledger_marker("get_production_step", {"step": first_task_id})
+    if not _work_ledger_plain_turn(api, session, "show the step again " + anchor_read, creative_domain="image"):
+        record("#248 anchor assertion turn", False, "turn did not finish")
+        return
+    system = _work_ledger_wait_system(work, session, "WORK_ANCHORS")
+    record("#248 style anchor text and reference survive compaction verbatim",
+           anchor_text in system and bool(handle) and handle in system and "<<<WORK_ANCHORS>>>" in system,
+           f"text={'yes' if anchor_text in system else 'no'} handle={'yes' if handle and handle in system else 'no'}")
+    # A 3D self-check leftover is attributed to the step and read next turn.
+    brief = _work_ledger_marker("update_production_brief", {"purpose": "game_character"})
+    if not _work_ledger_plain_turn(api, session, "it is a game character " + brief, creative_domain="model-3d",
+                                   ai_model=TEXT_TO_3D):
+        record("#248 production brief turn", False, "turn did not finish")
+        return
+    model_marker = _work_ledger_marker("create_model_3d", {"prompt": "a stylized game character"})
+    model, why, _approval = agent_tool_turn(api, session, "make the character " + model_marker, creative_domain="model-3d",
+                                            ai_model="meshy/meshy-t2.5/text-to-3d")
+    if not model or model.get("state") != "SUCCEEDED":
+        record("#248 3D model for the self-check", False, why or f"state={(model or {}).get('state')}")
+        return
+    inspect = _work_ledger_marker("inspect_model", {"model": model["id"]})
+    if not _work_ledger_plain_turn(api, session, "inspect the model " + inspect, creative_domain="model-3d",
+                                   ai_model=TEXT_TO_3D):
+        record("#248 inspect_model turn", False, "turn did not finish")
+        return
+    leftover_read = _work_ledger_marker("get_production_step", {"step": model["id"]})
+    if not _work_ledger_plain_turn(api, session, "read the inspected step " + leftover_read, creative_domain="model-3d",
+                                   ai_model=TEXT_TO_3D):
+        record("#248 leftover visibility turn", False, "turn did not finish")
+        return
+    system = _work_ledger_wait_system(work, session, "inspect_model")
+    record("#248 inspect_model leftovers reach the next turn",
+           "triangles" in system and "inspect_model" in system and ("遗留" in system or "fail" in system.lower()),
+           f"triangles={'yes' if 'triangles' in system else 'no'} inspect={'yes' if 'inspect_model' in system else 'no'}")
+    # Ledger content never reaches a server log.
+    logs = _work_ledger_log_text(work)
+    record("#248 ledger content is absent from server logs", secret not in logs and long_prompt not in logs,
+           f"logs={len(logs)} bytes, secret={'present' if secret in logs else 'absent'}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,work-ledger,faults")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
@@ -1561,7 +1810,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality", "image-self-check"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality", "image-self-check", "work-ledger"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -1588,6 +1837,8 @@ def main():
                 scenario_agent_quality(api, offerings, args.report or os.path.join(work, "agent-quality"))
             if "image-self-check" in selected:
                 scenario_image_self_check(api, offerings, work)
+            if "work-ledger" in selected:
+                scenario_work_ledger(api, offerings, work)
             processes.stop(child)
         if "faults" in selected:
             for scenario in [name for name in FAULTS if not args.faults or name in args.faults.split(",")]:

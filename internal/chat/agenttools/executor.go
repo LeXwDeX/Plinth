@@ -56,6 +56,9 @@ const (
 	ToolRenderModelViews = "render_model_views"
 	// ToolCompareModels renders two finished 3D models side by side (#103).
 	ToolCompareModels = "compare_models"
+	// ToolGetProductionStep reads one step of the session's work ledger in
+	// full by @stepN or Task ID (#248).
+	ToolGetProductionStep = "get_production_step"
 	// ToolProposeProductionPlan proposes the budget-mode production plan the
 	// person approves once (#103).
 	ToolProposeProductionPlan = "propose_production_plan"
@@ -109,6 +112,10 @@ type Config struct {
 	InspectModel     func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	RenderModelViews func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	CompareModels    func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	// ReadProductionStep reads one step of the session's work ledger (#248).
+	// It is read-only: no Task is created, no credit is spent and the session
+	// is not changed.
+	ReadProductionStep func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	// UpdateNotes replaces the settings summary of the command's own session
 	// (owner and session come from the server-held command, never from the
 	// arguments) and returns the stored text. It fails with
@@ -191,6 +198,7 @@ type Executor struct {
 	inspectModel       func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	renderModelViews   func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	compareModels      func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	readProductionStep func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	updateNotes        func(ctx context.Context, ownerID, sessionID, notes string) (string, error)
 	updateBrief        func(ctx context.Context, ownerID, sessionID string, brief map[string]json.RawMessage) error
 	askChoice          func(ctx context.Context, command chat.ToolCommand, kind catalog.ChatChoiceKindSchema,
@@ -325,6 +333,7 @@ func New(config Config) (*Executor, error) {
 		inspectModel:           config.InspectModel,
 		renderModelViews:       config.RenderModelViews,
 		compareModels:          config.CompareModels,
+		readProductionStep:     config.ReadProductionStep,
 		updateNotes:            config.UpdateNotes,
 		updateBrief:            config.UpdateBrief,
 		askChoice:              config.AskChoice,
@@ -390,6 +399,11 @@ func (e *Executor) Execute(
 			return chat.ToolResult{Error: "image inspection unavailable", NoSubmission: true}, nil
 		}
 		return e.inspectImage(ctx, command)
+	case ToolGetProductionStep:
+		if e.readProductionStep == nil {
+			return chat.ToolResult{Error: "production ledger unavailable", NoSubmission: true}, nil
+		}
+		return e.readProductionStep(ctx, command)
 	case ToolInspectModel, ToolRenderModelViews, ToolCompareModels:
 		reader := e.inspectModel
 		if command.Call.Name == ToolRenderModelViews {

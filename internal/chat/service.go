@@ -236,6 +236,9 @@ type ServiceConfig struct {
 	// settles the kind whose option_source is usage_profiles; without it no
 	// card is settled.
 	ChoiceKinds []catalog.ChatChoiceKindSchema
+	// WorkLedger is application.chat.work_ledger (#248). A zero value leaves
+	// the ledger and the get_production_step tool unavailable.
+	WorkLedger catalog.ChatWorkLedgerSchema
 }
 
 type Service struct {
@@ -295,6 +298,14 @@ type Service struct {
 	models              ModelPolicy
 	contextStore        ContextStore
 	compactionListLimit int
+
+	// workLedger is application.chat.work_ledger (#248); workLedgerTasks is
+	// the public-Task read source and workDecisions the optional rejected
+	// direction source (#241). Both are set during application assembly.
+	workLedger       catalog.ChatWorkLedgerSchema
+	workLedgerTasks  SessionTaskSource
+	workLedgerDetail SessionTaskDetail
+	workDecisions    WorkDecisionReader
 }
 
 func NewService(config ServiceConfig) (*Service, error) {
@@ -388,6 +399,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 		explicitModel3DValid:       config.ExplicitModel3DValid,
 		usageProfileKind:           usageProfileKindOf(config.ChoiceKinds),
 		models:                     config.Models,
+		workLedger:                 config.WorkLedger,
 	}, nil
 }
 

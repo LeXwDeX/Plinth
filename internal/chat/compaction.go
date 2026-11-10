@@ -274,9 +274,17 @@ func (orchestrator *Orchestrator) compactHistory(
 		previousID = state.Latest.ID
 		previous = strings.ReplaceAll(compaction.PreviousSummaryTemplate, "{summary}", state.Latest.Summary)
 	}
+	// The ledger is material for the summary, not the transcript: it keeps the
+	// step handles, states, self-check conclusions and rejected directions even
+	// when their messages are summarized away. It carries no full prompt.
+	ledger := ""
+	if orchestrator.service != nil {
+		ledger = orchestrator.service.workLedgerSummary(ctx, ownerID, sessionID, "", false)
+	}
 	source := strings.NewReplacer(
 		"{previous_summary}", previous,
 		"{transcript}", orchestrator.transcript(history, start, through),
+		"{ledger}", ledger,
 	).Replace(compaction.SourceTemplate)
 	request := agents.Request{
 		Model:           model.name,

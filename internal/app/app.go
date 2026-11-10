@@ -344,6 +344,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// The declared generic cards; the brief write settles the usage-profile
 		// kind by its Schema id and argument name (#103).
 		ChoiceKinds: applicationSchema.Chat.Choice.Kinds,
+		// The session production ledger and its summary bounds (#248).
+		WorkLedger: applicationSchema.Chat.WorkLedger,
 		// The deployment's chat model, its thinking profile and context
 		// window (#322).
 		Models: chat.ModelPolicy{
@@ -537,6 +539,22 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		return nil, err
 	}
 	chatService.SetAttachmentVerifier(referenceResolver)
+	// The session production ledger (#248) reads its steps from the public
+	// Tasks of the session; a branch additionally reads its ancestors' Tasks
+	// through the refs table. The read is bounded by the Schema and is not an
+	// execution grant.
+	chatService.SetSessionTaskSource(func(ctx context.Context, ownerID, sessionID string) (generation.TaskPage, error) {
+		return module.List(ctx, generation.OwnTasks(generation.OwnerID(ownerID)), generation.ListQuery{
+			SessionID:         sessionID,
+			IncludeBranchRefs: true,
+			Limit:             applicationSchema.Chat.WorkLedger.MaximumSteps,
+		})
+	})
+	// get_production_step reads the one requested step in full; the list
+	// projection carries only its prompt.
+	chatService.SetSessionTaskDetail(func(ctx context.Context, ownerID, sessionID, taskID string) (generation.Task, error) {
+		return module.Get(ctx, generation.OwnerID(ownerID), generation.TaskID(taskID))
+	})
 	// In-chat choice cards (#321): processing tools ask the person which service to use.
 	chatService.SetChoices(repository, applicationSchema.Chat.Choice.ListLimit)
 	// Session thinking level, context usage and compactions (#322).
@@ -684,6 +702,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		InspectModel:       toolExecutor.InspectModel,
 		RenderModelViews:   toolExecutor.RenderModelViews,
 		CompareModels:      toolExecutor.CompareModels,
+		ReadProductionStep: chatService.ReadProductionStep,
 		UpdateNotes:        chatService.SetSessionNotes,
 		UpdateBrief: func(ctx context.Context, ownerID, sessionID string, brief map[string]json.RawMessage) error {
 			return updateProductionBriefAudited(

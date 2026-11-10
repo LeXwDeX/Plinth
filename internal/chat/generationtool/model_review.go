@@ -379,6 +379,7 @@ func (executor *Executor) InspectModel(ctx context.Context, command chat.ToolCom
 	hasUV, watertight, hasSkin := report.UV.AllHaveUV, report.Topology.Watertight, len(report.Skins) > 0
 	summary := modelReviewSummaryJSON(modelReviewMessageSummary{
 		Tool: "inspect", Model: rawString(arguments[review.Source.TaskArgument]),
+		TaskID:    string(source.task.ID),
 		Triangles: report.Triangles, HasUV: &hasUV, Watertight: &watertight, HasSkin: &hasSkin,
 		Usage: usageCheck,
 	})
@@ -493,7 +494,8 @@ func (executor *Executor) RenderModelViews(ctx context.Context, command chat.Too
 		Pictures:     result.Pictures,
 		Summary: modelReviewSummaryJSON(modelReviewMessageSummary{
 			Tool: "render", Model: rawString(arguments[review.Source.TaskArgument]),
-			Views: modelReviewSummaryViews(result.Views), FailedViews: modelReviewSummaryFailedViews(result.FailedViews),
+			TaskID: string(source.task.ID),
+			Views:  modelReviewSummaryViews(result.Views), FailedViews: modelReviewSummaryFailedViews(result.FailedViews),
 			RenderCallsRemaining: result.RenderCallsRemaining,
 		}),
 	}, nil
@@ -642,7 +644,8 @@ func (executor *Executor) CompareModels(ctx context.Context, command chat.ToolCo
 		Pictures:     result.Pictures,
 		Summary: modelReviewSummaryJSON(modelReviewMessageSummary{
 			Tool: "compare", Models: models,
-			Views: modelReviewSummaryCompareViews(result.Views), FailedViews: modelReviewSummaryFailedViews(result.FailedViews),
+			TaskIDs: []string{string(sources[0].task.ID), string(sources[1].task.ID)},
+			Views:   modelReviewSummaryCompareViews(result.Views), FailedViews: modelReviewSummaryFailedViews(result.FailedViews),
 			RenderCallsRemaining: result.RenderCallsRemaining,
 		}),
 	}, nil
@@ -1466,6 +1469,11 @@ type modelReviewMessageSummary struct {
 	// person recognises the object; empty means the selected model.
 	Model  string   `json:"model,omitempty"`
 	Models []string `json:"models,omitempty"`
+	// TaskID and TaskIDs are the resolved Tasks of the reviewed model(s), so
+	// the session work ledger can attribute the conclusions to their steps
+	// even when the call named the selected model (#248).
+	TaskID  string   `json:"task_id,omitempty"`
+	TaskIDs []string `json:"task_ids,omitempty"`
 	// Views and FailedViews name the Schema view keys.
 	Views                []string `json:"views,omitempty"`
 	FailedViews          []string `json:"failed_views,omitempty"`
