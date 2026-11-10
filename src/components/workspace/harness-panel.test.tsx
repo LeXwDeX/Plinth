@@ -257,4 +257,22 @@ describe('Unique service selection', () => {
     expect(render()).toContain('class="min-h-5 space-y-1" data-testid="harness-feedback"');
     expect(render()).toContain('ui.harness.unsaved');
   });
+
+  // #254: the 功能 tab body owns the single scrollport, so the panel must not scroll itself. The save bar
+  // sticks to the bottom of that scrollport, which keeps 保存/清空 reachable in a 600px-high window.
+  it('leaves vertical scrolling to the 功能 tab and sticks the save bar inside that scrollport', () => {
+    const html = render();
+    const panel = html.match(/<section[^>]*data-testid="harness-panel"[\s\S]*<\/section>/)?.[0] ?? '';
+    expect(panel).not.toBe('');
+    expect(panel).not.toContain('overflow-y-auto');
+    expect(panel).not.toContain('[scrollbar-gutter:stable]');
+    expect(panel).not.toContain('h-full');
+    expect(panel).toMatch(/<section class="flex shrink-0 flex-col text-xs"/);
+    const footer = panel.match(/<footer[^>]*>/)?.[0] ?? '';
+    expect(footer).toContain('sticky');
+    expect(footer).toContain('bottom-0');
+    expect(footer).toContain('bg-card');
+    // The footer is last, so it can settle at the end of the content once scrolled down.
+    expect(panel.lastIndexOf('<footer')).toBeGreaterThan(panel.lastIndexOf('data-testid="harness-status"'));
+  });
 });
