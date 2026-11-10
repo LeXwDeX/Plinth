@@ -696,6 +696,49 @@ func imageTestArguments(model string) map[string]json.RawMessage {
 	return map[string]json.RawMessage{"model": encoded}
 }
 
+// #239 review: the image_use description and the system prompt promise that an
+// omitted or empty image_use lets the default 2D purpose apply. The default
+// purpose must therefore choose the model and freeze its overrides even when
+// the brief is empty or carries only other fields.
+func TestChooseOfferingFallsBackToTheDefault2DPurpose(t *testing.T) {
+	gateway := &choiceTestGateway{offerings: []generation.Offering{
+		imageTestOffering(imageProTextID, string(generation.TextToImage)),
+		imageTestOffering(imageGptTextID, string(generation.TextToImage)),
+	}}
+	executor := imageTestExecutor(gateway)
+	briefs := map[string]chat.ProductionBrief{
+		"no brief":                {},
+		"brief without image_use": {"style": json.RawMessage(`"写实"`)},
+		"stale image_use":         imageTestBrief("undeclared_purpose"),
+	}
+	for name, brief := range briefs {
+		t.Run(name, func(t *testing.T) {
+			command := imageTestCommand(brief, "", "", "")
+			choice, err := executor.chooseOffering(command, generation.TextToImage, nil, modelInput{})
+			if err != nil || choice.Refusal != "" || choice.Offering.ID != imageProTextID ||
+				choice.Source != "profile" || choice.Profile != "concept_art" || choice.Reason == "" {
+				t.Fatalf("default purpose choice = %+v %v", choice, err)
+			}
+			profile, values := executor.purposeParameterValues(command, choice.Offering, nil)
+			if profile.ID != "concept_art" || string(values["aspect_ratio"]) != `"1:1"` {
+				t.Fatalf("default purpose values = %+v %+v", profile, values)
+			}
+			input := json.RawMessage(`{"prompt":"x","aspect_ratio":"1:1"}`)
+			if named := executor.modelChoiceOf(command, choice.Offering, input); named == nil ||
+				named.Source != "profile" || named.Profile != "concept_art" || named.Reason == "" {
+				t.Fatalf("default purpose model choice = %+v", named)
+			}
+		})
+	}
+	// A declared image_use still wins over the default.
+	choice, err := executor.chooseOffering(
+		imageTestCommand(imageTestBrief("illustration"), "", "", ""),
+		generation.TextToImage, nil, modelInput{})
+	if err != nil || choice.Refusal != "" || choice.Profile != "illustration" || choice.Source != "profile" {
+		t.Fatalf("declared purpose choice = %+v %v", choice, err)
+	}
+}
+
 func TestImagePurposeOverridesFreezeIntoTheInput(t *testing.T) {
 	executor := imageTestExecutor(&choiceTestGateway{})
 	command := imageTestCommand(imageTestBrief("illustration"), "", "", "")

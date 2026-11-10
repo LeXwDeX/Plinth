@@ -8645,11 +8645,11 @@
             "parameter_overrides": {
               "meshy/nano-banana-pro/text-to-image": {"aspect_ratio": "3:4"},
               "meshy/nano-banana-pro/image-to-image": {"aspect_ratio": "3:4"},
-              "gemini/gemini-3-pro-image/text-to-image": {"aspect_ratio": "2:3"},
-              "gemini/gemini-3-pro-image/image-to-image": {"aspect_ratio": "2:3"}
+              "gemini/gemini-3-pro-image/text-to-image": {"aspect_ratio": "3:4"},
+              "gemini/gemini-3-pro-image/image-to-image": {"aspect_ratio": "3:4"}
             },
             "requirements": {
-              "aspect_ratio": "2:3",
+              "aspect_ratio": "3:4",
               "minimum_short_edge": 1536,
               "background": "any",
               "subjects": "single",

@@ -84,24 +84,39 @@ func (executor *Executor) briefPurpose(command chat.ToolCommand) (catalog.ChatMo
 	return catalog.ChatModel3DUsageProfile{}, false
 }
 
-// imageBriefPurpose returns the 2D purpose the session's production brief
-// selects (#239). The purpose belongs to the brief's image_profile field.
+// imageBriefPurpose returns the 2D purpose the session follows (#239). The
+// brief's image_profile field selects it; when that field is absent the
+// Schema's default_profile applies, as the image_use description and the
+// system prompt promise ("omit or leave empty to let the default 2D purpose
+// apply"). A purpose a stale brief names but the Schema no longer declares is
+// ignored the same way a session without one, matching the 3D usage check.
 func (executor *Executor) imageBriefPurpose(command chat.ToolCommand) (purposeProfile, bool) {
 	usage := executor.chat.Image2DUsage
-	if len(usage.Profiles) == 0 || command.Options.ProductionBrief.Empty() {
+	if len(usage.Profiles) == 0 {
 		return purposeProfile{}, false
 	}
 	id := command.Options.ProductionBrief.Text(briefFieldOfType(executor.chat.Model3DUsage.Brief, "image_profile"))
 	for _, profile := range usage.Profiles {
-		if profile.ID == id {
-			return purposeProfile{
-				ID: profile.ID, Label: profile.Label, Reason: profile.Reason,
-				RecommendedOfferings: profile.RecommendedOfferings,
-				ParameterOverrides:   profile.ParameterOverrides,
-			}, true
+		if id != "" && profile.ID == id {
+			return purposeProfileOf(profile), true
+		}
+	}
+	for _, profile := range usage.Profiles {
+		if profile.ID == usage.DefaultProfile {
+			return purposeProfileOf(profile), true
 		}
 	}
 	return purposeProfile{}, false
+}
+
+// purposeProfileOf narrows a declared 2D purpose to the fields the model-choice
+// layers read.
+func purposeProfileOf(profile catalog.ChatImage2DUsageProfile) purposeProfile {
+	return purposeProfile{
+		ID: profile.ID, Label: profile.Label, Reason: profile.Reason,
+		RecommendedOfferings: profile.RecommendedOfferings,
+		ParameterOverrides:   profile.ParameterOverrides,
+	}
 }
 
 // purposeOf is the purpose of this call's workspace domain: the 2D table for

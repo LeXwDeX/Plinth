@@ -3,7 +3,9 @@ package catalog_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -73,6 +75,85 @@ func TestShippedImage2DUsageDeclaresFivePurposes(t *testing.T) {
 	}
 }
 
+// #239 review: every purpose's frame requirement must be the frame its
+// recommended Offerings actually freeze. The illustration purpose once required
+// 2:3 while its first recommendation froze 3:4, so the brief and the generated
+// frame disagreed.
+func TestShippedImage2DPurposesFreezeTheirRequiredFrame(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage := product.Application().Chat.Image2DUsage
+	for _, profile := range usage.Profiles {
+		for shape, ids := range profile.RecommendedOfferings {
+			for _, id := range ids {
+				offering, found := product.Get(generation.OfferingID(id))
+				if !found {
+					t.Fatalf("purpose %q shape %q names missing offering %q", profile.ID, shape, id)
+				}
+				name, value, effective := shippedOutputSize(offering, profile.ParameterOverrides[id])
+				if !effective {
+					t.Fatalf("purpose %q shape %q offering %q has no effective output-size value", profile.ID, shape, id)
+				}
+				ratio, measured := shippedFrameRatio(value)
+				if !measured || ratio != profile.Requirements.AspectRatio {
+					t.Fatalf("purpose %q shape %q offering %q freezes %s=%q (ratio %q), brief requires %q",
+						profile.ID, shape, id, name, value, ratio, profile.Requirements.AspectRatio)
+				}
+			}
+		}
+	}
+}
+
+// shippedOutputSize reads the frame an Offering would freeze with the purpose's
+// overrides applied: the override when declared, else the parameter default.
+func shippedOutputSize(offering generation.Offering, overrides map[string]json.RawMessage) (string, string, bool) {
+	for _, parameter := range offering.Parameters {
+		if parameter.Semantic != "output-size" {
+			continue
+		}
+		raw, overridden := overrides[parameter.Name]
+		if !overridden {
+			raw = parameter.Default
+		}
+		var value string
+		if len(bytes.TrimSpace(raw)) == 0 || json.Unmarshal(raw, &value) != nil {
+			continue
+		}
+		if _, measured := shippedFrameRatio(value); measured {
+			return parameter.Name, value, true
+		}
+	}
+	return "", "", false
+}
+
+// shippedFrameRatio reduces "3:4" or "1152x1536" to "3:4".
+func shippedFrameRatio(value string) (string, bool) {
+	width, height, sized := strings.Cut(strings.TrimSpace(value), "x")
+	if sized {
+		w, widthErr := strconv.Atoi(strings.TrimSpace(width))
+		h, heightErr := strconv.Atoi(strings.TrimSpace(height))
+		if widthErr != nil || heightErr != nil || w <= 0 || h <= 0 {
+			return "", false
+		}
+		return reduceFrame(w, h), true
+	}
+	var w, h int
+	if _, err := fmt.Sscanf(strings.TrimSpace(value), "%d:%d", &w, &h); err != nil || w <= 0 || h <= 0 {
+		return "", false
+	}
+	return reduceFrame(w, h), true
+}
+
+func reduceFrame(width, height int) string {
+	a, b := width, height
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return fmt.Sprintf("%d:%d", width/a, height/a)
+}
+
 // loadMutatedImage2D loads the shipped Catalog after changing its raw
 // document, because Offering and localization checks run in Load, not in
 // ValidateApplicationSchema.
@@ -133,9 +214,10 @@ func TestImage2DUsageValidationRefusesUnsafeDeclarations(t *testing.T) {
 				[]any{"meshy/nano-banana-pro/image-to-image"}
 		}, "不是"},
 		{"override of a hidden parameter", func(chat map[string]any, _ map[string]any) {
-			profile(chat, 0)["parameter_overrides"] = map[string]any{
-				"openai/gpt-image-2/text-to-image": map[string]any{"moderation": "low"},
-			}
+			// The size keeps the concept-art frame requirement satisfied, so the
+			// hidden parameter is the only problem the loader reports.
+			profile(chat, 0)["parameter_overrides"].(map[string]any)["openai/gpt-image-2/text-to-image"] =
+				map[string]any{"moderation": "low", "size": "3840x2160"}
 			profile(chat, 0)["recommended_offerings"].(map[string]any)["text-to-image"] =
 				[]any{"openai/gpt-image-2/text-to-image"}
 		}, "可公开调整"},
@@ -156,6 +238,15 @@ func TestImage2DUsageValidationRefusesUnsafeDeclarations(t *testing.T) {
 		{"an undeclared requirement value", func(chat map[string]any, _ map[string]any) {
 			requirements(chat, 0)["aspect_ratio"] = "5:7"
 		}, "aspect_ratio"},
+		{"a frame requirement the recommendations do not freeze", func(chat map[string]any, _ map[string]any) {
+			// The concept-art overrides freeze 16:9; a 9:16 requirement would make
+			// the brief and the generated frame disagree (#239 review).
+			requirements(chat, 0)["aspect_ratio"] = "9:16"
+		}, "画幅"},
+		{"a frame requirement only the default misses", func(chat map[string]any, _ map[string]any) {
+			delete(profile(chat, 0)["parameter_overrides"].(map[string]any),
+				"meshy/nano-banana-pro/text-to-image")
+		}, "画幅"},
 		{"a missing requirement translation", func(chat map[string]any, document map[string]any) {
 			localization := document["application"].(map[string]any)["localization"].(map[string]any)
 			fields := localization["bundles"].(map[string]any)["en"].(map[string]any)["fields"].(map[string]any)

@@ -1300,6 +1300,37 @@ def scenario_image_purpose(api, offerings, work):
     record("#239 3D input checklist", summary is not None and failed == 0,
            f"handle={handle} failed={failed} summary={summary}")
 
+    # (f) without image_use the default 2D purpose applies: an empty brief still
+    # gets the default recommendation and its frame override (#239 review).
+    default_session = new_session(api)
+    api.json("PUT", f"/api/v1/chat/sessions/{default_session}/approval", {"approvalMode": "auto"})
+    default_draw = ('[[fake:tool:refine_image {"prompt":"a lone lighthouse on a cliff at dusk, '
+                    'clean digital concept art, no text, no watermark"}]]')
+    before_tasks = {item.get("id") for item in session_tasks(api, default_session)}
+    if not _image_message(api, default_session, "随便画一张概念图 " + default_draw):
+        record("#239 default 2D purpose applies", False, "turn did not finish")
+    else:
+        task = {}
+        deadline = time.time() + 90
+        while time.time() < deadline:
+            fresh = [item for item in session_tasks(api, default_session) if item.get("id") not in before_tasks]
+            if fresh:
+                task = wait_task(api, fresh[0]["id"], 90)
+                break
+            time.sleep(0.5)
+        task = task or {}
+        prepared = _latest_prepared_input(work, "main", default_session)
+        normalized = prepared.get("normalized_input") or {}
+        model_choice = prepared.get("model_choice") or {}
+        ok = (task.get("state") == "SUCCEEDED"
+              and task.get("offering_id") == "meshy/nano-banana-pro/text-to-image"
+              and normalized.get("aspect_ratio") == "16:9"
+              and model_choice.get("source") == "profile"
+              and model_choice.get("profile") == "concept_art")
+        record("#239 default 2D purpose applies", ok,
+               f"offering={task.get('offering_id')} state={task.get('state')} "
+               f"aspect_ratio={normalized.get('aspect_ratio')} model_choice={model_choice}")
+
 
 def scenario_fault(api, offerings, scenario):
     session = new_session(api)
@@ -1472,6 +1503,15 @@ def run_quality_case(api, request, domain, model, model_3d=""):
     if request.get("modality") == "3d" and model_3d:
         # #103: only an explicit pick in the session's model picker binds the 3D tools.
         api.json("PUT", f"/api/v1/chat/sessions/{session}/model3d", {"explicit_model_3d": model_3d})
+    elif request.get("modality") == "2d" and model:
+        # #239: the same explicit pick binds the 2D tool above the purpose
+        # recommendation. A request that names a model in a step leaves that
+        # choice to the Agent, so the purpose can still recommend one.
+        named = any((step.get("tool", {}).get("arguments") or {}).get("model")
+                    for step in request.get("steps") or []
+                    if step.get("tool", {}).get("name") == "refine_image")
+        if not named:
+            api.json("PUT", f"/api/v1/chat/sessions/{session}/model2d", {"explicit_model_2d": model})
     cards, seen = [], set()
     turns = 0
     for step in request["steps"]:
@@ -1833,13 +1873,14 @@ def scenario_offering_knowledge(work, stack_binary, processes, catalog):
         if not picture:
             record("#249 final_prompt", False, "reference picture generation failed")
         else:
-            image_model = next((item["model_id"] for item in offerings.values()
-                                if item.get("available") and item.get("capability") == "image-to-image"), "")
             marker = '[[fake:tool:refine_image {"prompt":"make the cube blue"}]]'
             before = assistant_reply_count(api, session2)
+            # No workspace picker model: the session's default 2D purpose
+            # recommends the image-to-image offering (#239), so the prompt
+            # layers are the only thing this scenario varies.
             status, _ = api.json("POST", f"/api/chat/sessions/{session2}/messages",
                                  {"content": "改成蓝色 " + marker, "image_urls": [picture],
-                                  "creative_domain": "image", "ai_model": image_model})
+                                  "creative_domain": "image"})
             end = time.time() + 60
             while status in (200, 201, 202) and time.time() < end and assistant_reply_count(api, session2) <= before:
                 time.sleep(0.5)

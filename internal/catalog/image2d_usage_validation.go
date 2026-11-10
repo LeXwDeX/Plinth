@@ -1,8 +1,11 @@
 package catalog
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
@@ -178,7 +181,7 @@ func validateImage2DUsageOfferings(usage ChatImage2DUsageSchema, byID generation
 				if err := checkImage2DRecommendedShape(offering, shape); err != nil {
 					return fmt.Errorf("image2d_usage.profiles[%d].recommended_offerings[%q]: %w", index, shape, err)
 				}
-				if err := checkImage2DRequirementsExpressible(offering, profile.Requirements); err != nil {
+				if err := checkImage2DRequirementsExpressible(offering, profile.Requirements, profile.ParameterOverrides[id]); err != nil {
 					return fmt.Errorf("image2d_usage.profiles[%d].recommended_offerings[%q] 的 Offering %q: %w", index, shape, id, err)
 				}
 			}
@@ -217,11 +220,19 @@ func checkImage2DRecommendedShape(offering schemacontract.Offering, shape string
 }
 
 // checkImage2DRequirementsExpressible checks that an Offering can deliver the
-// purpose's background and pose requirements: it either declares a transparent
-// background option / a remove_background switch, or a pose_mode with the
-// required pose. A purpose that required something no recommended Offering can
-// express would be a promise the Catalog cannot keep.
-func checkImage2DRequirementsExpressible(offering schemacontract.Offering, requirements ChatImage2DRequirements) error {
+// purpose's requirements: its output-size parameter freezes the required aspect
+// ratio, it either declares a transparent background option / a
+// remove_background switch, and it has a pose_mode with the required pose. A
+// purpose that required something no recommended Offering can express would be
+// a promise the Catalog cannot keep.
+func checkImage2DRequirementsExpressible(
+	offering schemacontract.Offering,
+	requirements ChatImage2DRequirements,
+	overrides map[string]json.RawMessage,
+) error {
+	if err := checkImage2DAspectRatio(offering, requirements.AspectRatio, overrides); err != nil {
+		return err
+	}
 	if requirements.Background != "any" {
 		background, hasBackground := offeringParameter(offering.Parameters, "background")
 		transparent := false
@@ -251,4 +262,82 @@ func checkImage2DRequirementsExpressible(offering schemacontract.Offering, requi
 		}
 	}
 	return fmt.Errorf("要求姿势 %q，但 Offering 的 pose_mode 没有该选项", requirements.Pose)
+}
+
+// checkImage2DAspectRatio checks that the Offering's frame actually matches the
+// purpose's required aspect ratio when the purpose applies its overrides: the
+// brief renders the requirement, so a recommendation freezing another ratio
+// would generate something the brief does not describe (#239 review).
+func checkImage2DAspectRatio(
+	offering schemacontract.Offering,
+	required string,
+	overrides map[string]json.RawMessage,
+) error {
+	if required == "" {
+		return nil
+	}
+	name, value, found := image2DOutputSize(offering, overrides)
+	if !found {
+		return fmt.Errorf("要求画幅 %q，但 Offering 没有可冻结的 output-size 参数", required)
+	}
+	ratio, measured := image2DRatio(value)
+	if !measured || ratio != required {
+		return fmt.Errorf("要求画幅 %q，但 %s 会冻结为 %q（比例 %q）", required, name, value, ratio)
+	}
+	return nil
+}
+
+// image2DOutputSize returns the effective value of the parameter that decides
+// the output frame: the purpose's override when it sets one, else the
+// declaration's default. Values that do not read as a frame are skipped so a
+// second output-size parameter can still express the ratio.
+func image2DOutputSize(
+	offering schemacontract.Offering,
+	overrides map[string]json.RawMessage,
+) (string, string, bool) {
+	for _, parameter := range offering.Parameters {
+		if parameter.Semantic != schemacontract.SemanticOutputSize {
+			continue
+		}
+		raw, overridden := overrides[parameter.Name]
+		if !overridden {
+			raw = parameter.Default
+		}
+		var value string
+		if len(bytes.TrimSpace(raw)) == 0 || json.Unmarshal(raw, &value) != nil {
+			continue
+		}
+		if _, measured := image2DRatio(value); measured {
+			return parameter.Name, value, true
+		}
+	}
+	return "", "", false
+}
+
+// image2DRatio renders an output-size value as a reduced aspect ratio: "3:4"
+// and "1152x1536" both read as "3:4". A value that names neither shape is not
+// measured, so it cannot accidentally satisfy a requirement.
+func image2DRatio(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	width, height, separated := strings.Cut(value, "x")
+	if !separated {
+		width, height, separated = strings.Cut(value, ":")
+	}
+	if !separated {
+		return "", false
+	}
+	parsedWidth, widthErr := strconv.Atoi(strings.TrimSpace(width))
+	parsedHeight, heightErr := strconv.Atoi(strings.TrimSpace(height))
+	if widthErr != nil || heightErr != nil || parsedWidth <= 0 || parsedHeight <= 0 {
+		return "", false
+	}
+	divisor := image2DGCD(parsedWidth, parsedHeight)
+	return fmt.Sprintf("%d:%d", parsedWidth/divisor, parsedHeight/divisor), true
+}
+
+func image2DGCD(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
 }
