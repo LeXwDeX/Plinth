@@ -617,7 +617,17 @@ func (executor *Executor) Execute(
 		}
 	}
 	if capability == generation.ImageTo3D {
-		override, refusal := executor.review3DInput(ctx, command, referenceURLs)
+		// Style-lock pictures guide the look, not the geometry: they are not
+		// 3D inputs and must not be judged by the input checklist.
+		gateReferences := referenceURLs
+		styleUsed := styleReferenceCount
+		if references.StyleTrimmed {
+			styleUsed = references.StyleUsed
+		}
+		if styleUsed > 0 && styleUsed <= len(gateReferences) {
+			gateReferences = gateReferences[:len(gateReferences)-styleUsed]
+		}
+		override, refusal := executor.review3DInput(ctx, command, gateReferences)
 		if refusal != "" {
 			result := executor.failure(command, "", refusal)
 			result.NoSubmission = true
