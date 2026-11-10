@@ -42,6 +42,25 @@ export function parseParameterAdjustments(raw: unknown): ParameterAdjustment[] {
   });
 }
 
+/** #103/#239: who chose the step's model, with the purpose and reason when the purpose did. */
+export interface ModelChoice {
+  source: 'user' | 'agent' | 'profile' | 'default' | string;
+  profile?: string;
+  reason?: string;
+}
+
+/** A frozen model-choice record; an unknown or empty source reads as the default. */
+export function parseModelChoice(raw: unknown): ModelChoice | undefined {
+  const value = record(raw);
+  const source = text(value.source);
+  if (source === '') return undefined;
+  return {
+    source,
+    ...(text(value.profile) ? { profile: text(value.profile) } : {}),
+    ...(text(value.reason) ? { reason: text(value.reason) } : {}),
+  };
+}
+
 export interface PendingApproval {
   requestId: string;
   status: PendingApprovalStatus;
@@ -72,8 +91,12 @@ export interface PendingApproval {
   rechargeTaskId?: string;
   /** The server's sentence (in the reader's language) that the step uses only the first of the pictures given (#329 E). */
   referenceNote?: string;
+  /** #244: the server's sentence that the step changes only the masked region; present only with a mask input. */
+  maskNote?: string;
   inputs: PendingApprovalInput[];
   parameterAdjustments?: ParameterAdjustment[];
+  /** #239: who chose the model and why; absent when the server did not report it. */
+  modelChoice?: ModelChoice;
   messageId: string;
   createdAt: string;
   expiresAt: string;
@@ -123,6 +146,7 @@ export function parsePendingApprovals(payload: unknown): PendingApproval[] {
         ...(text(input.view_label) ? { viewLabel: text(input.view_label) } : {}),
       };
     });
+    const modelChoice = parseModelChoice(item.model_choice);
     result.push({
       requestId, status, kind, plan,
       budgets: kind === 'plan' ? parsePriceTotals(item.budgets) ?? [] : [],
@@ -135,9 +159,11 @@ export function parsePendingApprovals(payload: unknown): PendingApproval[] {
       extraLabel: text(item.extra_label),
       extraItems: (Array.isArray(item.extra_items) ? item.extra_items : []).filter((value): value is string => typeof value === 'string' && value !== ''),
       ...(Array.isArray(item.parameter_adjustments) ? { parameterAdjustments: parseParameterAdjustments(item.parameter_adjustments) } : {}),
+      ...(modelChoice ? { modelChoice } : {}),
       prompt: text(item.prompt), inputs, messageId: text(item.message_id),
       ...(text(item.recharge_task_id) ? { rechargeTaskId: text(item.recharge_task_id) } : {}),
       ...(text(item.reference_note) ? { referenceNote: text(item.reference_note) } : {}),
+      ...(text(item.mask_note) ? { maskNote: text(item.mask_note) } : {}),
       createdAt: text(item.created_at), expiresAt: text(item.expires_at),
     });
   }

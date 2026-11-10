@@ -17,6 +17,8 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/capture"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/imageinspect"
+	"github.com/LeXwDeX/Plinth/internal/imaging"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
@@ -98,6 +100,11 @@ type Config struct {
 	// chat session (#186). It is true for the session's own Tasks and for a
 	// branch's inherited ancestor Tasks; ownership is always checked.
 	TaskInSession func(ctx context.Context, owner generation.OwnerID, sessionID string, taskID generation.TaskID) (bool, error)
+	// SelectionMaskLimits bound the mask MeasureMask reads and decodes (#244).
+	SelectionMaskLimits imageinspect.Limits
+	// SelectionPreview bounds and styles the server-composed selection preview
+	// of a canvas turn (#244).
+	SelectionPreview imaging.SelectionPreviewStyle
 }
 
 type Resolver struct {
@@ -124,6 +131,8 @@ type Resolver struct {
 	modelAssetRole          string
 	renderAssetType         string
 	taskInSession           func(ctx context.Context, owner generation.OwnerID, sessionID string, taskID generation.TaskID) (bool, error)
+	selectionMaskLimits     imageinspect.Limits
+	selectionPreview        imaging.SelectionPreviewStyle
 }
 
 func New(config Config) (*Resolver, error) {
@@ -163,6 +172,8 @@ func New(config Config) (*Resolver, error) {
 		modelAssetRole:          config.ModelAssetRole,
 		renderAssetType:         config.RenderAssetType,
 		taskInSession:           config.TaskInSession,
+		selectionMaskLimits:     config.SelectionMaskLimits,
+		selectionPreview:        config.SelectionPreview,
 	}, nil
 }
 

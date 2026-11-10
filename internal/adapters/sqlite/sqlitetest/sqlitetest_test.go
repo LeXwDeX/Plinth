@@ -103,13 +103,8 @@ func TestOpenMigratedSchemaMatchesFreshOpen(t *testing.T) {
 	}
 
 	freshLedger := readLedger(t, freshPath)
-	// Versions 85 and 86 are reserved by parallel migrations (#239, #250); a
-	// single-issue branch may leave those slots empty. The ledger must still
-	// end at the binary's head and never reach past it.
-	if len(freshLedger) == 0 || len(freshLedger) > sqlite.MigrationHead() ||
-		freshLedger[len(freshLedger)-1].Version != sqlite.MigrationHead() {
-		t.Fatalf("fresh ledger rows = %d, last = %+v, migration head = %d",
-			len(freshLedger), freshLedger[len(freshLedger)-1], sqlite.MigrationHead())
+	if len(freshLedger) != len(sqlite.MigrationVersions()) {
+		t.Fatalf("fresh ledger rows = %d, embedded migrations = %d", len(freshLedger), len(sqlite.MigrationVersions()))
 	}
 	if copiedLedger := readLedger(t, copiedPath); !reflect.DeepEqual(copiedLedger, freshLedger) {
 		t.Fatalf("copied ledger = %#v, fresh ledger = %#v", copiedLedger, freshLedger)

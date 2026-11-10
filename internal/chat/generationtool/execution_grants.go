@@ -112,10 +112,19 @@ func (executor *Executor) prepareAgentOperation(
 		return chat.ToolResult{NoSubmission: true}, err
 	}
 	preparedGateway := executor.gateway.(preparedGateway)
+	// #239: the approval card names who chose the model, with the purpose and
+	// its reason when the purpose did. The evidence never enters InputHash.
+	modelChoice := executor.modelChoiceOf(command, offering, input)
+	var approvalModelChoice *generation.ModelChoice
+	if modelChoice != nil {
+		approvalModelChoice = &generation.ModelChoice{
+			Source: modelChoice.Source, Profile: modelChoice.Profile, Reason: modelChoice.Reason,
+		}
+	}
 	prepared, err := preparedGateway.PrepareInput(ctx, generation.PrepareInputCommand{
 		OwnerID: generation.OwnerID(command.OwnerID), SessionID: command.SessionID,
 		Capability: capability, OfferingID: offering.ID, Input: input, ParameterReasons: reasons,
-		ParameterSources: sources,
+		ParameterSources: sources, ModelChoice: approvalModelChoice,
 	})
 	if err != nil {
 		// An input the Schema refuses (a count out of range, extra credits over
@@ -143,6 +152,10 @@ func (executor *Executor) prepareAgentOperation(
 	if fact != nil {
 		sourceFact = *fact
 	}
+	// The note is rendered once, while the priority counts and the dropped
+	// handles are known (#250); the approval card and the finished step reuse
+	// this exact text instead of the counts-only fallback.
+	referenceNote := executor.stepReferenceNote(command, offering, fact, references, prepared.NormalizedInput)
 	// cardSettled releases the session's approval lock, if this call took it.
 	cardSettled := func() {}
 	extraSpend, priceErr := prepared.HasExtraSpend()
@@ -181,6 +194,7 @@ func (executor *Executor) prepareAgentOperation(
 		OfferingID: prepared.OfferingID, OfferingRevision: prepared.OfferingRevision, Harness: turnHarnessBinding(command),
 		RechargeTaskID: rechargeTaskID, CorrectionTaskID: correctionTaskID,
 		ReferenceCount: references.Used, ReferenceTotal: references.Given,
+		ReferenceNote:   referenceNote,
 		ReferenceSource: sourceFact,
 	})
 	if errors.Is(err, ErrOperationConflict) {

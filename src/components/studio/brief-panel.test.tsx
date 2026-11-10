@@ -68,11 +68,14 @@ describe('the production brief panel (#103)', () => {
 
   it('shows the stored brief with the declared labels and the reader’s words for a profile and booleans', () => {
     swr.data = {
-      purpose: 'game_prop', style: '低模', target_platform: '手机', needs_parts: false, needs_rig: true,
+      purpose: 'game_prop', image_use: 'illustration', image_transparent: true,
+      style: '低模', target_platform: '手机', needs_parts: false, needs_rig: true,
       triangle_budget: 12000, notes: '不要圆角',
     };
     const view = render(<BriefPanel sessionId="s1" />);
     expect(view.getByTestId('studio-brief-value-purpose').textContent).toBe('游戏/实时·道具与场景件');
+    expect(view.getByTestId('studio-brief-value-image_use').textContent).toBe('角色立绘 / 宣传插画');
+    expect(view.getByTestId('studio-brief-value-image_transparent').textContent).toBe(text('ui.studio.brief.yes'));
     expect(view.getByTestId('studio-brief-value-style').textContent).toBe('低模');
     expect(view.getByTestId('studio-brief-value-target_platform').textContent).toBe('手机');
     expect(view.getByTestId('studio-brief-value-needs_parts').textContent).toBe(text('ui.studio.brief.no'));
@@ -95,6 +98,12 @@ describe('the production brief panel (#103)', () => {
     expect(purpose.options).toHaveLength(6);
     expect(purpose.options[0].textContent).toBe(text('ui.studio.brief.none'));
     expect([...purpose.options].map((option) => option.value)).toContain('game_prop');
+    // #239: the 2D purpose field lists the public image2d_usage profiles.
+    const imageUse = view.getByTestId('studio-brief-field-image_use') as HTMLSelectElement;
+    expect(imageUse.tagName).toBe('SELECT');
+    expect(imageUse.options).toHaveLength(6);
+    expect([...imageUse.options].map((option) => option.value)).toContain('illustration');
+    expect([...imageUse.options].find((option) => option.value === 'illustration')?.textContent).toBe('角色立绘 / 宣传插画');
     const styleField = schema.chat.model3d_usage!.brief!.fields!.find((field) => field.name === 'style')!;
     const style = view.getByTestId('studio-brief-field-style') as HTMLInputElement | HTMLTextAreaElement;
     expect(style.tagName).toBe(styleField.multiline === true ? 'TEXTAREA' : 'INPUT');

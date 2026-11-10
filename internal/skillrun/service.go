@@ -34,7 +34,7 @@ func (s *Service) Create(ctx context.Context, cmd CreateCommand) (Run, error) {
 		!validID(cmd.IdempotencyKey) {
 		return Run{}, ErrInvalid
 	}
-	recipe, ok, err := s.recipes.ResolveRecipe(ctx, cmd.RecipeID, cmd.SelectedOfferingID)
+	recipe, ok, err := s.recipes.ResolveRecipe(ctx, cmd.RecipeID, cmd.SelectedOfferingID, cmd.SubjectType)
 	if err != nil {
 		return Run{}, err
 	}
@@ -151,8 +151,18 @@ func (s *Service) RecordOutput(ctx context.Context, cmd OutputCommand) (Run, err
 	return s.store.RecordSkillOutput(ctx, cmd)
 }
 func (s *Service) RestartSkillStep(ctx context.Context, cmd RestartCommand) (Run, error) {
+	reasons := 0
+	if cmd.FailedTaskID != "" {
+		reasons++
+	}
+	if cmd.DeniedGrantID != "" {
+		reasons++
+	}
+	if cmd.RejectedReview {
+		reasons++
+	}
 	if !validID(string(cmd.OwnerID)) || !validID(cmd.RunID) || !validID(cmd.StepKey) || cmd.ExpectedAttempt < 0 ||
-		(cmd.FailedTaskID == "") == (cmd.DeniedGrantID == "") {
+		reasons != 1 {
 		return Run{}, ErrInvalid
 	}
 	return s.store.RestartSkillStep(ctx, cmd)
@@ -183,8 +193,16 @@ func (s *Service) ResolveExecution(ctx context.Context, owner generation.OwnerID
 		if step.Spec.SourceStepKey != "" {
 			found := false
 			for _, prior := range run.Steps {
-				if prior.Spec.Key == step.Spec.SourceStepKey && prior.Phase == OutputReady &&
-					prior.Review == Accepted && prior.OutputAssetID != "" {
+				if prior.Spec.Key != step.Spec.SourceStepKey {
+					continue
+				}
+				// A picture the person put in place of the source view is the
+				// source, whatever its own attempt did (#65, #243).
+				if prior.ReplacementAssetID != "" {
+					source, found = prior.ReplacementAssetID, true
+					break
+				}
+				if prior.Phase == OutputReady && prior.Review == Accepted && prior.OutputAssetID != "" {
 					source, found = prior.OutputAssetID, true
 					break
 				}

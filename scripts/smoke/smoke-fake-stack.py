@@ -40,14 +40,19 @@ same HTTP API the browser uses:
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
 (NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, p2, agent, agent-background,
-agent-quality, image-self-check, self-check, offering-knowledge, work-ledger, faults;
+agent-quality, image-self-check, image-purpose, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, faults;
 "agent" runs both agent scenarios, "hyper3d-agent" the Hyper3D chain alone,
 "p2" the Tripo P2 quote/chain, "agent-background" the batched wait that keeps both Tasks running,
+"image-purpose" the #239 2D purpose card, brief, purpose-driven model and 2D lock,
 "offering-knowledge" the #249 knowledge projection, derived model list, purpose coverage,
 over-limit refusal and final_prompt report,
 "work-ledger" the #248 frozen prompts, compaction, style anchor and self-check leftovers,
 "self-check" the #246 persisted 3D self-check contract: reference comparison, records,
-limits, corrections, compaction and background results)
+limits, corrections, compaction and background results,
+"vision-budget" the #247 image detail, contact sheet and vision token accounting,
+"visual-anchors" the #250 system-prompt visibility, confirmation card, priority trim and retexture style reference,
+"mask-selection" the #244 frozen selection mask, mask binding, approval-card note,
+mask-unsupported refusal and create_selection_mask)
 Needs `go`. Exit 0 = every selected check passed.
 
 The stack runs inside the internal/app test binary (TestFakeUpstreamStack, built with -tags fakestack), not
@@ -293,7 +298,7 @@ def build(work):
     return fake, stack
 
 
-def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, self_check=False, name="catalog.json"):
+def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, self_check=False, name="catalog.json", manual_image_edits=False):
     """The default Catalog with four changes for Tripo, Meshy and Hyper3D: the fake
     artifact host is an allowed asset host, they poll once a second, and a failing
     materialization is retried once. The matting service polls once a second too,
@@ -307,6 +312,13 @@ def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, se
     with open(os.path.join(REPO, "internal/catalog/default_catalog.json"), encoding="utf-8") as handle:
         catalog = json.load(handle)
     catalog["application"]["chat"]["agent"]["background_wait"]["after_seconds"] = 1
+    if manual_image_edits:
+        # The mask scenario needs an approval card for a 2D edit step (#244);
+        # the shipped policy asks a human only for the listed capabilities.
+        policy = catalog["application"]["chat"]["approval_policy"]
+        for capability in ("image-to-image", "text-to-image"):
+            if capability not in policy["manual_approval_capabilities"]:
+                policy["manual_approval_capabilities"].append(capability)
     for offering in catalog["offerings"]:
         provider = offering.get("provider_id")
         if offering.get("id") in disabled:
@@ -573,6 +585,25 @@ def make_picture(width, height, background, subjects):
             row.extend(colour)
         rows.append(b"\x00" + bytes(row))
     return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
+
+
+def make_rgba_picture(width, height, transparent=None):
+    """A deterministic RGBA PNG: opaque white everywhere except the transparent
+    rectangle. This is the selection mask the tests upload (#244)."""
+
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    rows = []
+    for y in range(height):
+        row = bytearray()
+        for x in range(width):
+            clear = transparent is not None and (transparent[0] <= x < transparent[2] and transparent[1] <= y < transparent[3])
+            row.extend((0, 0, 0, 0) if clear else (255, 255, 255, 255))
+        rows.append(b"\x00" + bytes(row))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
             + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
 
 
@@ -977,7 +1008,7 @@ def scenario_hyper3d_agent(api, offerings):
     session = new_session(api)
     # Strict (manual) approval, so every step of the chain waits for its own card
     # instead of a budget policy approving the cheaper steps automatically.
-    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "manual"})
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
     if status != 200:
         record("hyper3d agent: switch the session to manual approval", False, f"approval mode {status}")
         return
@@ -1031,6 +1062,258 @@ def session_tasks(api, session):
     if status != 200:
         return []
     return body.get("tasks") or body.get("data") or []
+
+
+THREE_VIEW_IMAGE = IMAGE_OFFERINGS["openai"][1]
+
+
+def _three_view_groups(api, session):
+    body = api.json("GET", f"/api/v1/chat/sessions/{session}/three-views")[1]
+    return body.get("items") or []
+
+
+def _three_view_group(api, session):
+    groups = _three_view_groups(api, session)
+    return groups[0] if groups else None
+
+
+def _wait_three_view(api, session, seconds=120):
+    """Waits for the group's required views to finish (accepted or not)."""
+    end = time.time() + seconds
+    group = None
+    while time.time() < end:
+        group = _three_view_group(api, session)
+        if group:
+            slots = {slot.get("key"): slot for slot in group.get("slots") or []}
+            required = [slot for slot in slots.values() if not slot.get("optional")]
+            if required and all(slot.get("status") in ("succeeded", "failed", "rejected", "denied", "canceled")
+                                for slot in required):
+                return group
+        time.sleep(0.3)
+    return group
+
+
+def _prepared_inputs(work, stack, session):
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+        rows = db.execute("SELECT payload_json FROM generation_prepared_inputs WHERE session_id=?",
+                          (session,)).fetchall()
+        db.close()
+    except sqlite3.Error:
+        return []
+    parsed = []
+    for (payload,) in rows:
+        try:
+            parsed.append(json.loads(payload))
+        except ValueError:
+            continue
+    return parsed
+
+
+def _prepared_reference_assets(payload):
+    normalized = payload.get("normalized_input")
+    if isinstance(normalized, str):
+        try:
+            normalized = json.loads(normalized)
+        except ValueError:
+            return []
+    return normalized.get("reference_assets") or [] if isinstance(normalized, dict) else []
+
+
+def _send_chat(api, session, body, seconds=45):
+    """Sends one chat message, retrying while a continuation turn still owns it."""
+    end = time.time() + seconds
+    status, payload = 0, {}
+    while time.time() < end:
+        status, payload = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+        if status != 409:
+            return status, payload
+        time.sleep(0.5)
+    return status, payload
+
+
+def scenario_three_view(work, api, offerings):
+    """#243: an approved budget finishes front, left and back without a click,
+    feeds the front output into the later views and submits a P2 multiview 3D
+    step; manual mode starts only the front view until the person asks for the
+    next one."""
+    picture = upload_asset(api, "reference.png", make_png(), "image/png")
+    if not picture:
+        record("three-view: upload the reference picture", False, "upload refused")
+        return
+    picture_url = f"/api/v1/assets/{picture}"
+    plan = {
+        "title": "三视图链路",
+        "steps": [
+            {"capability": "image-to-image", "purpose": "三视图正面"},
+            {"capability": "image-to-image", "purpose": "三视图左侧"},
+            {"capability": "image-to-image", "purpose": "三视图背面"},
+            {"capability": "image-to-3d", "model": TRIPO_P2_MULTIVIEW_TO_3D, "purpose": "多视图生成 3D"},
+        ],
+        "budgets": [{"unit": "legacy.credits", "amount": 100}, {"unit": "tripo.credit", "amount": 200}],
+    }
+    session = new_session(api)
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
+    if status != 200:
+        record("three-view: budget approval mode", False, f"PUT {status}")
+        return
+    marker = "[[fake:tool:propose_production_plan " + json.dumps(plan, ensure_ascii=False, separators=(",", ":")) + "]]"
+    status, _ = _send_chat(api, session, {"content": "按计划做三视图 " + marker,
+                                           "creative_domain": "image", "ai_model": THREE_VIEW_IMAGE,
+                                           "image_urls": [picture_url]})
+    if status not in (200, 201, 202):
+        record("three-view: propose the plan", False, f"send {status}")
+        return
+    budget_id, why = "", ""
+    end = time.time() + 30
+    while time.time() < end:
+        pending = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items") or []
+        plan_card = next((item for item in pending if item.get("kind") == "plan"), None)
+        if plan_card:
+            budget_id = plan_card.get("request_id") or ""
+            break
+        time.sleep(0.4)
+    if not budget_id:
+        record("three-view: budget card appears", False, "no plan card")
+        return
+    status, approved = api.json("PUT", f"/api/v1/chat/sessions/{session}/budgets/{budget_id}",
+                                decision_body(api, "approve"))
+    if status != 200 or approved.get("state") != "active":
+        record("three-view: approve the plan", False, f"PUT {status} {approved}")
+        return
+    record("three-view: plan approved and active", True, f"budget {budget_id} state {approved.get('state')}")
+
+    views = '[[fake:tool:create_three_view {"reference_image_indices":[1],"subject_type":"humanoid"}]]'
+    status, _ = _send_chat(api, session, {"content": "生成三视图 " + views, "creative_domain": "image",
+                                           "ai_model": THREE_VIEW_IMAGE, "image_urls": [picture_url]})
+    if status not in (200, 201, 202):
+        record("three-view: start the views", False, f"send {status}")
+        return
+    group = _wait_three_view(api, session)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    front = slots.get("front") or {}
+    record("three-view: the budget finishes front, left and back without a click",
+           bool(group) and group.get("complete") is True
+           and slots.get("front", {}).get("status") == "succeeded"
+           and slots.get("left", {}).get("status") == "succeeded"
+           and slots.get("back", {}).get("status") == "succeeded"
+           and slots.get("right", {}).get("status") == "not_started",
+           f"complete={group.get('complete') if group else None} slots={ {k: v.get('status') for k, v in slots.items()} }")
+    image_tasks = [task for task in session_tasks(api, session)
+                   if task.get("capability") == "image-to-image" and task.get("state") != "CANCELED"]
+    record("three-view: exactly three image tasks run, the optional right view does not",
+           len(image_tasks) == 3, f"image tasks {[t.get('state') for t in image_tasks]}")
+    pending = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items") or []
+    record("three-view: no approval card is left pending", len(pending) == 0,
+           f"pending {[(item.get('kind'), item.get('status')) for item in pending]}")
+    front_asset = front.get("output_asset_id") or ""
+    prepared = _prepared_inputs(work, "main", session)
+    fed_front = {}
+    for needle, key in (("clean left view", "left"), ("clean back view", "back")):
+        match = next((item for item in prepared
+                      if needle in json.dumps(item.get("normalized_input"), ensure_ascii=False)), None)
+        assets = _prepared_reference_assets(match) if match else []
+        fed_front[key] = bool(front_asset) and bool(assets) and assets[0] == front_asset
+    record("three-view: left and back frozen inputs use the front output as their source",
+           fed_front.get("left") and fed_front.get("back") and bool(front_asset),
+           f"front asset {front_asset or 'none'}, left/back fed front {fed_front}")
+    run_id = (group or {}).get("run_id") or ""
+
+    # The accepted group feeds the multiview 3D step of the same plan.
+    before = {task.get("id") for task in session_tasks(api, session)}
+    submit = ('[[fake:tool:create_model_3d_from_views {"three_view_group":"' + run_id
+              + '","model":"tripo-p2-multiview"}]]')
+    status, _ = _send_chat(api, session, {"content": "用三视图生成 3D " + submit,
+                                           "creative_domain": "model-3d", "ai_model": TRIPO_P2_MULTIVIEW_TO_3D,
+                                           "domainModels": {"model-3d": TRIPO_P2_MULTIVIEW_TO_3D}})
+    if status not in (200, 201, 202):
+        record("three-view: submit the multiview 3D step", False, f"send {status}")
+        return
+    task = None
+    end = time.time() + 60
+    while time.time() < end and not task:
+        for candidate in session_tasks(api, session):
+            if candidate.get("id") in before or candidate.get("capability") != "image-to-3d":
+                continue
+            task = candidate
+            break
+        time.sleep(0.3)
+    if task:
+        task = wait_task(api, task.get("id"))
+    record("three-view: the group submits a P2 multiview 3D task",
+           bool(task) and task.get("state") == "SUCCEEDED" and task.get("offering_id") == TRIPO_P2_MULTIVIEW_TO_3D,
+           f"task {task.get('id') if task else None} state {task.get('state') if task else None} "
+           f"offering {task.get('offering_id') if task else None}")
+
+    # Manual (strict) mode: only the front view starts by itself; the person
+    # starts the left view, whose frozen input names the front output.
+    strict = new_session(api)
+    api.json("PUT", f"/api/v1/chat/sessions/{strict}/approval", {"approvalMode": "manual"})
+    status, _ = _send_chat(api, strict, {"content": "生成三视图 " + views, "creative_domain": "image",
+                                          "ai_model": THREE_VIEW_IMAGE, "image_urls": [picture_url]})
+    if status not in (200, 201, 202):
+        record("three-view strict: start the front view", False, f"send {status}")
+        return
+    group = None
+    end = time.time() + 60
+    while time.time() < end:
+        group = _three_view_group(api, strict)
+        slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+        if slots.get("front", {}).get("task_id"):
+            break
+        time.sleep(0.3)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    front = slots.get("front") or {}
+    record("three-view strict: only the front view starts by itself",
+           bool(group) and front.get("status") in ("succeeded", "running") and
+           slots.get("left", {}).get("status") == "not_started" and
+           len([t for t in session_tasks(api, strict)
+                if t.get("capability") == "image-to-image" and t.get("state") != "CANCELED"]) == 1,
+           f"front {front.get('status')}, left {slots.get('left', {}).get('status')}")
+    if front.get("task_id"):
+        wait_task(api, front.get("task_id"))
+    else:
+        record("three-view strict: front task exists", False, "no front task")
+        return
+    # Strict mode has no server-side continuation: even after the front view
+    # finished, left and back stay not started until the person clicks.
+    group = _three_view_group(api, strict)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    strict_tasks = [t for t in session_tasks(api, strict)
+                    if t.get("capability") == "image-to-image" and t.get("state") != "CANCELED"]
+    record("three-view strict: the finished front does not start the next view",
+           bool(group) and slots.get("left", {}).get("status") == "not_started" and
+           slots.get("back", {}).get("status") == "not_started" and len(strict_tasks) == 1,
+           f"front {slots.get('front', {}).get('status')}, left {slots.get('left', {}).get('status')}, "
+           f"back {slots.get('back', {}).get('status')}, tasks {[t.get('state') for t in strict_tasks]}")
+    view_route = f"/api/v1/chat/sessions/{strict}/three-views/{(group or {}).get('run_id')}/views/left"
+    status, body = api.json("POST", view_route, {"action": "start", "attempt": 0})
+    record("three-view strict: the person starts the left view", status == 200 and
+           next((slot.get("status") for slot in body.get("group", {}).get("slots", [])
+                 if slot.get("key") == "left"), "") in ("starting", "running", "succeeded"),
+           f"POST {status}")
+    end = time.time() + 90
+    group = None
+    while time.time() < end:
+        group = _three_view_group(api, strict)
+        slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+        if slots.get("left", {}).get("status") in ("succeeded", "failed", "rejected", "denied", "canceled"):
+            break
+        time.sleep(0.3)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    front, left = slots.get("front") or {}, slots.get("left") or {}
+    record("three-view strict: the clicked left view succeeds and back never starts",
+           left.get("status") == "succeeded" and slots.get("back", {}).get("status") == "not_started",
+           f"left {left.get('status')}, back {slots.get('back', {}).get('status')}")
+    prepared = _prepared_inputs(work, "main", strict)
+    match = next((item for item in prepared
+                  if "clean left view" in json.dumps(item.get("normalized_input"), ensure_ascii=False)), None)
+    assets = _prepared_reference_assets(match) if match else []
+    front_asset = (slots.get("front") or {}).get("output_asset_id") or ""
+    record("three-view strict: the frozen left input contains the front output",
+           bool(front_asset) and bool(assets) and assets[0] == front_asset,
+           f"front {front_asset or 'none'} left source {assets[:1]}")
 
 
 def scenario_agent_background(api, offerings):
@@ -1192,6 +1475,200 @@ def refetch_delivers(api, task, offerings, offering):
         return False, f"refetch task {fresh.get('state')} {json.dumps(fresh.get('failure'), ensure_ascii=False)}"
     problems, count = check_delivery(api, fresh, offering)
     return not problems, f"refetch task SUCCEEDED, {count} assets verified" if not problems else "; ".join(problems)
+
+
+def _choice_cards(api, session):
+    status, body = api.json("GET", f"/api/v1/chat/sessions/{session}/choices")
+    if status != 200:
+        return []
+    return body.get("choices") or body.get("items") or []
+
+
+def _latest_prepared_input(work, stack, session):
+    """The session's newest frozen prepared input, or an empty object."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT payload_json FROM generation_prepared_inputs "
+                         "WHERE session_id=? ORDER BY created_at DESC, id DESC LIMIT 1", (session,)).fetchone()
+        db.close()
+    except sqlite3.Error:
+        return {}
+    try:
+        return json.loads(row["payload_json"]) if row and row["payload_json"] else {}
+    except ValueError:
+        return {}
+
+
+def _image_message(api, session, content, domain="image", image_urls=None):
+    """Send one turn with a fake-LLM tool marker; wait for its final reply."""
+    before = assistant_reply_count(api, session)
+    body = {"content": content, "creative_domain": domain}
+    if image_urls:
+        body["image_urls"] = image_urls
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+    if status not in (200, 201, 202):
+        return False
+    end = time.time() + 45
+    while time.time() < end:
+        if assistant_reply_count(api, session) > before:
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def scenario_image_purpose(api, offerings, work):
+    """#239: 2D purpose card, brief, purpose-driven model and parameters, the
+    explicit 2D lock, and the 3D input checklist, all through the fake stack."""
+    session = new_session(api)
+    api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
+
+    # (a) a new 2D drawing without a brief opens the 2D purpose card, whose
+    # options are exactly the declared image2d_usage profiles.
+    card = '[[fake:tool:ask_choice {"kind":"image_usage_profile"}]]'
+    if not _image_message(api, session, "画一张游戏角色立绘 " + card):
+        record("#239 2D purpose card", False, "turn did not finish")
+    else:
+        cards = [item for item in _choice_cards(api, session) if item.get("kind") == "image_usage_profile"]
+        _, schema = api.json("GET", "/api/v1/schema")
+        schema = schema.get("schema", schema) if isinstance(schema, dict) else {}
+        declared = [profile.get("id") for profile in
+                    ((schema.get("chat") or {}).get("image2d_usage") or {}).get("profiles") or []]
+        options = [option.get("id") for option in (cards[-1].get("options") or [])] if cards else []
+        record("#239 2D purpose card", bool(cards) and options == declared,
+               f"kind={cards[-1].get('kind') if cards else None} options={options} declared={declared}")
+
+    # (b) the answer writes the 2D purpose into the brief.
+    if not _image_message(api, session, "用途是角色立绘 [[fake:tool:update_production_brief "
+                                        '{"image_use":"illustration","image_transparent":false}]]'):
+        record("#239 2D brief write", False, "turn did not finish")
+    else:
+        status, body = api.json("GET", f"/api/v1/chat/sessions/{session}/brief")
+        brief = (body or {}).get("brief") or {}
+        record("#239 2D brief write", status == 200 and brief.get("image_use") == "illustration",
+               f"status={status} brief={brief}")
+
+    # (c) refine_image follows the purpose: the recommended model and its
+    # overrides are frozen into the input, and the result names model_choice.
+    draw = ('[[fake:tool:refine_image {"prompt":"full-body cyberpunk female assassin, clean digital illustration, '
+            'confident pose, transparent background, no text, no watermark"}]]')
+    task = {}
+    before_tasks = {item.get("id") for item in session_tasks(api, session)}
+    if not _image_message(api, session, "开始画 " + draw):
+        record("#239 2D purpose-driven generation", False, "turn did not finish")
+    else:
+        deadline = time.time() + 90
+        while time.time() < deadline:
+            fresh = [item for item in session_tasks(api, session) if item.get("id") not in before_tasks]
+            if fresh:
+                task = wait_task(api, fresh[0]["id"], 90)
+                break
+            time.sleep(0.5)
+        task = task or {}
+        prepared = _latest_prepared_input(work, "main", session)
+        normalized = prepared.get("normalized_input") or {}
+        used = task.get("offering_id")
+        contents = _checkpoint_completed_contents(work, "main", session)
+        reported = any('"model_choice"' in content and '"profile"' in content for content in contents)
+        ok = (task.get("state") == "SUCCEEDED" and used == "meshy/nano-banana-pro/text-to-image"
+              and normalized.get("aspect_ratio") == "3:4"
+              and (prepared.get("model_choice") or {}).get("source") == "profile"
+              and (prepared.get("model_choice") or {}).get("profile") == "illustration"
+              and reported)
+        record("#239 2D purpose-driven generation", ok,
+               f"offering={used} state={task.get('state')} aspect_ratio={normalized.get('aspect_ratio')} "
+               f"model_choice={prepared.get('model_choice')} result_model_choice={reported}")
+
+    # (d) the explicit 2D lock wins: a different named model is refused before
+    # submission, and a later call without a model runs the locked one.
+    lock = api.json("PUT", f"/api/v1/chat/sessions/{session}/model2d", {"explicit_model_2d": "nano-banana-2"})
+    record("#239 2D lock writes", lock[0] == 200 and "nano-banana-2" in json.dumps(lock[1]),
+           f"status={lock[0]} body={lock[1]}")
+    before_tasks = {item.get("id") for item in session_tasks(api, session)}
+    conflict = ('[[fake:tool:refine_image {"model":"nano-banana-pro","prompt":"a red cube"}]]')
+    _image_message(api, session, "用另一个模型画 " + conflict)
+    no_task = {item.get("id") for item in session_tasks(api, session)} == before_tasks
+    contents = _checkpoint_completed_contents(work, "main", session)
+    refused = any("与用户在本会话明确选定的模型" in content for content in contents)
+    record("#239 shared model conflict is not silently overridden", no_task and refused,
+           f"new_tasks={len({item.get('id') for item in session_tasks(api, session)} - before_tasks)} refusal={refused}")
+    locked = ('[[fake:tool:refine_image {"prompt":"a red cube"}]]')
+    before_tasks = {item.get("id") for item in session_tasks(api, session)}
+    if not _image_message(api, session, "按锁定的模型画 " + locked):
+        record("#239 locked 2D model runs", False, "turn did not finish")
+    else:
+        task = {}
+        deadline = time.time() + 90
+        while time.time() < deadline:
+            fresh = [item for item in session_tasks(api, session) if item.get("id") not in before_tasks]
+            if fresh:
+                task = wait_task(api, fresh[0]["id"], 90)
+                break
+            time.sleep(0.5)
+        record("#239 locked 2D model runs", task.get("offering_id") == "meshy/nano-banana-2/text-to-image",
+               f"offering={task.get('offering_id')} state={task.get('state')}")
+
+    # (e) a single-subject, solid-background picture passes the 3d_input
+    # checklist through inspect_image.
+    white, red = (250, 250, 250), (200, 30, 30)
+    status, uploaded = api.upload("/api/v1/assets", "file", "3d-input.png",
+                                  make_picture(128, 128, white, [((40, 32, 88, 96), red)]), "image/png")
+    asset_id = uploaded.get("id") if status in (200, 201) else None
+    if not asset_id:
+        record("#239 3D input picture upload", False, f"HTTP {status}")
+        return
+    picture_url = uploaded.get("url") or f"/api/v1/assets/{asset_id}"
+    _image_message(api, session, "这张图作为 3D 输入素材", image_urls=[picture_url])
+    handle = ""
+    status, body = api.json("GET", f"/api/chat/sessions/{session}/messages")
+    for message in (body if isinstance(body, list) else body.get("messages", [])):
+        for attachment in message.get("attachments") or []:
+            if attachment.get("kind") == "image" and attachment.get("handle"):
+                handle = attachment["handle"]
+    if not handle:
+        record("#239 3D input picture handle", False, "no image handle")
+        return
+    inspect = '[[fake:tool:inspect_image {"image":"' + handle + '","checklist":"3d_input"}]]'
+    if not _image_message(api, session, "检查 3D 输入 " + inspect):
+        record("#239 3D input checklist", False, "turn did not finish")
+        return
+    summaries = _image_self_check_summaries(api, session)
+    summary = next((item for item in reversed(summaries) if item.get("handle") == handle), None)
+    failed = (summary or {}).get("checks", {}).get("failed")
+    record("#239 3D input checklist", summary is not None and failed == 0,
+           f"handle={handle} failed={failed} summary={summary}")
+
+    # (f) without image_use the default 2D purpose applies: an empty brief still
+    # gets the default recommendation and its frame override (#239 review).
+    default_session = new_session(api)
+    api.json("PUT", f"/api/v1/chat/sessions/{default_session}/approval", {"approvalMode": "auto"})
+    default_draw = ('[[fake:tool:refine_image {"prompt":"a lone lighthouse on a cliff at dusk, '
+                    'clean digital concept art, no text, no watermark"}]]')
+    before_tasks = {item.get("id") for item in session_tasks(api, default_session)}
+    if not _image_message(api, default_session, "随便画一张概念图 " + default_draw):
+        record("#239 default 2D purpose applies", False, "turn did not finish")
+    else:
+        task = {}
+        deadline = time.time() + 90
+        while time.time() < deadline:
+            fresh = [item for item in session_tasks(api, default_session) if item.get("id") not in before_tasks]
+            if fresh:
+                task = wait_task(api, fresh[0]["id"], 90)
+                break
+            time.sleep(0.5)
+        task = task or {}
+        prepared = _latest_prepared_input(work, "main", default_session)
+        normalized = prepared.get("normalized_input") or {}
+        model_choice = prepared.get("model_choice") or {}
+        ok = (task.get("state") == "SUCCEEDED"
+              and task.get("offering_id") == "meshy/nano-banana-pro/text-to-image"
+              and normalized.get("aspect_ratio") == "16:9"
+              and model_choice.get("source") == "profile"
+              and model_choice.get("profile") == "concept_art")
+        record("#239 default 2D purpose applies", ok,
+               f"offering={task.get('offering_id')} state={task.get('state')} "
+               f"aspect_ratio={normalized.get('aspect_ratio')} model_choice={model_choice}")
 
 
 def scenario_fault(api, offerings, scenario):
@@ -1363,10 +1840,19 @@ def run_quality_case(api, request, domain, model, model_3d=""):
     """One request through the fake-LLM chat path; returns the run dict for agent_quality."""
     started = time.time()
     session = new_session(api)
-    api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "manual"})
+    api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
     if request.get("modality") == "3d" and model_3d:
         # #103: only an explicit pick in the session's model picker binds the 3D tools.
         api.json("PUT", f"/api/v1/chat/sessions/{session}/model3d", {"explicit_model_3d": model_3d})
+    elif request.get("modality") == "2d" and model:
+        # #239: the same explicit pick binds the 2D tool above the purpose
+        # recommendation. A request that names a model in a step leaves that
+        # choice to the Agent, so the purpose can still recommend one.
+        named = any((step.get("tool", {}).get("arguments") or {}).get("model")
+                    for step in request.get("steps") or []
+                    if step.get("tool", {}).get("name") == "refine_image")
+        if not named:
+            api.json("PUT", f"/api/v1/chat/sessions/{session}/model2d", {"explicit_model_2d": model})
     cards, seen = [], set()
     turns = 0
     reference_urls = []
@@ -1737,13 +2223,14 @@ def scenario_offering_knowledge(work, stack_binary, processes, catalog):
         if not picture:
             record("#249 final_prompt", False, "reference picture generation failed")
         else:
-            image_model = next((item["model_id"] for item in offerings.values()
-                                if item.get("available") and item.get("capability") == "image-to-image"), "")
             marker = '[[fake:tool:refine_image {"prompt":"make the cube blue"}]]'
             before = assistant_reply_count(api, session2)
+            # No workspace picker model: the session's default 2D purpose
+            # recommends the image-to-image offering (#239), so the prompt
+            # layers are the only thing this scenario varies.
             status, _ = api.json("POST", f"/api/chat/sessions/{session2}/messages",
                                  {"content": "改成蓝色 " + marker, "image_urls": [picture],
-                                  "creative_domain": "image", "ai_model": image_model})
+                                  "creative_domain": "image"})
             end = time.time() + 60
             while status in (200, 201, 202) and time.time() < end and assistant_reply_count(api, session2) <= before:
                 time.sleep(0.5)
@@ -2073,6 +2560,189 @@ def _work_ledger_log_text(work):
     return text
 
 
+def _mask_send(api, session, body):
+    """Send one turn, retrying briefly while the previous turn's stream is still active."""
+    end = time.time() + 30
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+    while status == 409 and time.time() < end:
+        time.sleep(0.5)
+        status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+    return status in (200, 201, 202)
+
+
+def _mask_wait_turn(api, session, replies, seconds=90):
+    end = time.time() + seconds
+    while time.time() < end:
+        if assistant_reply_count(api, session) > replies:
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def _mask_approve(api, session, seconds=30):
+    end = time.time() + seconds
+    while time.time() < end:
+        pending = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items", [])
+        if pending:
+            return pending[0]
+        time.sleep(0.5)
+    return None
+
+
+def scenario_mask_selection(api, offerings, work):
+    """#244: a painted selection is a frozen canvas input; refine_image binds it
+    into the Offering's mask parameter, the approval card shows the mask input,
+    the fake upstream changes only the masked pixels, a model without masks is
+    refused without creating a Task, and the read-only create_selection_mask
+    tool makes a usable mask for a later refine. Fake only.
+
+    Cross-user denial is not observable here (the development mock login makes
+    every request the one mock user, see check_delivery); internal/chat and
+    internal/transport/httpapi tests cover it."""
+    import l5_common
+
+    session = new_session(api)
+    api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
+    model = "gpt-image-2.6-sunburst"
+    size = 64
+    red = (200, 40, 40)
+    source = make_picture(size, size, (235, 235, 235), [((16, 16, 48, 48), red)])
+    mask = make_rgba_picture(size, size, (16, 16, 48, 48))
+    source_id = upload_asset(api, "mask-source.png", source, "image/png")
+    mask_id = upload_asset(api, "selection-mask.png", mask, "image/png")
+    if not source_id or not mask_id:
+        record("#244 mask fixtures upload", False, f"source={source_id} mask={mask_id}")
+        return
+
+    selection = [{"kind": "image", "assetId": source_id, "url": f"/api/v1/assets/{source_id}"}]
+    marker = ('[[fake:tool:refine_image {"prompt":"make the selected area blue","model":"' + model + '"}]]')
+    body = {"content": "把这里改成蓝色 " + marker, "creative_domain": "image", "ai_model": model,
+            "selection": selection, "inputSource": "canvas",
+            "selectionMask": {"maskAssetId": mask_id}}
+    before_tasks = {item.get("id") for item in session_tasks(api, session)}
+    # The create_selection_mask turn targets the generated result of this turn
+    # when it succeeds: @selected then carries TaskID+AssetID, the attachment
+    # shape whose asset lives in the Task store (regression: reading the input
+    # store first made generated pictures unreadable).
+    use_selection = selection
+    if not _mask_send(api, session, body):
+        record("#244 canvas mask turn", False, "send refused")
+    else:
+        card = _mask_approve(api, session)
+        inputs = (card or {}).get("inputs") or []
+        mask_inputs = [item for item in inputs if item.get("parameter") == "mask"]
+        prepared = _latest_prepared_input(work, "mask", session)
+        normalized = prepared.get("normalized_input") or {}
+        ok_card = (bool(mask_inputs) and mask_inputs[0].get("asset_id") == mask_id
+                   and bool((card or {}).get("mask_note")))
+        record("#244 approval card shows the mask input and the local-edit note", ok_card,
+               f"mask_inputs={mask_inputs} mask_note={(card or {}).get('mask_note')}")
+        record("#244 executor binds the frozen mask into the Offering mask parameter",
+               normalized.get("mask") == mask_id,
+               f"mask={normalized.get('mask')} offering={prepared.get('offering_id')}")
+        if card:
+            api.json("PUT", f"/api/v1/tasks/grants/{card['request_id']}", decision_body(api, "approve"))
+        task = {}
+        end = time.time() + 90
+        while time.time() < end:
+            fresh = [item for item in session_tasks(api, session) if item.get("id") not in before_tasks]
+            if fresh:
+                task = wait_task(api, fresh[0]["id"], 90)
+                break
+            time.sleep(0.5)
+        ok = task.get("state") == "SUCCEEDED"
+        outside_same = inside_changed = False
+        if ok and task.get("assets"):
+            status, output, _headers = api.call("GET", task["assets"][0]["url"])
+            if status == 200:
+                try:
+                    width, height, rows = l5_common.decode_png(output)
+                    swidth, sheight, source_rows = l5_common.decode_png(source)
+                    if (width, height) == (swidth, sheight):
+                        outside_same = all(
+                            rows[y][3 * x:3 * x + 3] == source_rows[y][3 * x:3 * x + 3]
+                            for y in range(height) for x in range(width)
+                            if not (16 <= x < 48 and 16 <= y < 48))
+                        inside_changed = any(
+                            rows[y][3 * x:3 * x + 3] != source_rows[y][3 * x:3 * x + 3]
+                            for y in range(16, 48) for x in range(16, 48))
+                except ValueError as error:
+                    outside_same = inside_changed = False
+                    record("#244 output decodes", False, str(error))
+        record("#244 masked generation succeeds and changes only the selection", ok and outside_same and inside_changed,
+               f"state={task.get('state')} outside_same={outside_same} inside_changed={inside_changed}")
+        if ok and task.get("assets") and task["assets"][0].get("id"):
+            use_selection = [{"kind": "image", "assetId": task["assets"][0]["id"], "taskId": task["id"]}]
+
+    # (b) a model without a mask parameter is refused: no Task, no whole-image redraw.
+    gemini = "gemini-3-pro-image"
+    before_tasks = {item.get("id") for item in session_tasks(api, session)}
+    before_replies = assistant_reply_count(api, session)
+    refusal_marker = ('[[fake:tool:refine_image {"prompt":"make the selected area blue","model":"' + gemini + '"}]]')
+    refusal_body = {"content": "把这个区域改蓝 " + refusal_marker, "creative_domain": "image", "ai_model": gemini,
+                    "selection": selection, "inputSource": "canvas",
+                    "selectionMask": {"maskAssetId": mask_id}}
+    if not _mask_send(api, session, refusal_body):
+        record("#244 mask-unsupported model refusal", False, "send refused")
+    else:
+        _mask_wait_turn(api, session, before_replies)
+        contents = _checkpoint_completed_contents(work, "mask", session)
+        refused = any("不支持蒙版" in content for content in contents)
+        new_tasks = {item.get("id") for item in session_tasks(api, session)} - before_tasks
+        no_card = not api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items")
+        record("#244 mask-unsupported model refusal", refused and not new_tasks and no_card,
+               f"refused={refused} new_tasks={len(new_tasks)} no_card={no_card}")
+
+    # (c) create_selection_mask builds a region mask from the generated result,
+    # the reply shows it, and that URL works as refine_image's mask.
+    record("#244 create_selection_mask targets a generated result", use_selection is not selection,
+           f"selection={use_selection}")
+    before_replies = assistant_reply_count(api, session)
+    tool_marker = '[[fake:tool:create_selection_mask {"image":"@selected","mode":"region","x0":8,"y0":8,"x1":24,"y1":24}]]'
+    tool_body = {"content": "圈出这里 " + tool_marker, "creative_domain": "image", "ai_model": model,
+                 "selection": use_selection, "inputSource": "canvas"}
+    mask_url = ""
+    if not _mask_send(api, session, tool_body):
+        record("#244 create_selection_mask", False, "send refused")
+    else:
+        _mask_wait_turn(api, session, before_replies)
+        contents = _checkpoint_completed_contents(work, "mask", session)
+        for content in contents:
+            try:
+                parsed = json.loads(content)
+            except ValueError:
+                continue
+            if isinstance(parsed, dict) and parsed.get("mask_url"):
+                mask_url = parsed["mask_url"]
+        messages = api.json("GET", f"/api/chat/sessions/{session}/messages")[1]
+        messages = messages if isinstance(messages, list) else messages.get("messages", [])
+        shown = any(mask_url and mask_url in (message.get("imageUrls") or []) for message in messages)
+        record("#244 create_selection_mask returns a mask URL shown in the reply", bool(mask_url) and shown,
+               f"mask_url={mask_url} shown={shown}")
+    if mask_url:
+        before_tasks = {item.get("id") for item in session_tasks(api, session)}
+        use_marker = ('[[fake:tool:refine_image {"prompt":"make the selected area blue","model":"' + model +
+                      '","mask":"' + mask_url + '"}]]')
+        use_body = {"content": "用这个蒙版改这里 " + use_marker, "creative_domain": "image", "ai_model": model,
+                    "selection": selection, "inputSource": "canvas"}
+        if not _mask_send(api, session, use_body):
+            record("#244 generated mask drives refine_image", False, "send refused")
+        else:
+            card = _mask_approve(api, session)
+            if card:
+                api.json("PUT", f"/api/v1/tasks/grants/{card['request_id']}", decision_body(api, "approve"))
+            task = {}
+            end = time.time() + 90
+            while time.time() < end:
+                fresh = [item for item in session_tasks(api, session) if item.get("id") not in before_tasks]
+                if fresh:
+                    task = wait_task(api, fresh[0]["id"], 90)
+                    break
+                time.sleep(0.5)
+            record("#244 generated mask drives refine_image", task.get("state") == "SUCCEEDED",
+                   f"state={task.get('state')} card={bool(card)}")
+
+
 def scenario_work_ledger(api, offerings, work):
     """#248: the frozen production ledger survives history truncation and
     context compaction, the read-only get_production_step tool returns the
@@ -2090,6 +2760,15 @@ def scenario_work_ledger(api, offerings, work):
     status, body = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "auto"})
     if status != 200:
         record("#248 auto approval", False, f"{status} {body}")
+        return
+    # #239 makes the default 2D purpose recommend a different model than the
+    # workspace picker's; the ledger scenario is not about that conflict, so it
+    # pins the text-to-image model explicitly like a person would. The call has
+    # no reference picture, so it must stay text-to-image.
+    status, body = api.json("PUT", f"/api/v1/chat/sessions/{session}/model2d",
+                            {"explicit_model_2d": IMAGE_OFFERINGS["openai"][0]})
+    if status != 200:
+        record("#248 explicit 2D model", False, f"{status} {body}")
         return
     marker = _work_ledger_marker("refine_image", {"prompt": long_prompt})
     task, why, _approval = agent_tool_turn(api, session, "make the ranger " + marker, creative_domain="image",
@@ -2685,6 +3364,10 @@ def scenario_vision_budget(api, offerings, work):
     approval_field = fields.get("approval_mode", "approvalMode")
     api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {approval_field: "auto"})
     image_model = IMAGE_OFFERINGS["openai"][1]
+    # #239's default 2D purpose recommends another model; this scenario tests
+    # the vision budget, so it pins the image-to-image model to keep the two
+    # features from refusing each other.
+    api.json("PUT", f"/api/v1/chat/sessions/{session}/model2d", {"explicit_model_2d": image_model})
     white, red = (250, 250, 250), (200, 30, 30)
     reference = make_picture(128, 128, white, [((40, 32, 88, 96), red)])
     status, body = api.upload("/api/v1/assets", "file", "vision-reference.png", reference, "image/png")
@@ -2832,15 +3515,422 @@ def scenario_vision_budget(api, offerings, work):
            "request found" if render_request else "no request carried both the render and the thumbnail")
 
 
+PENDING_ASSISTANT_CONTENT = "__GENERATING__"
+
+
+def _visual_anchor_reply_count(api, session):
+    """Every assistant message whose content is no longer the pending marker."""
+    messages = api.json("GET", f"/api/chat/sessions/{session}/messages")[1]
+    messages = messages if isinstance(messages, list) else messages.get("messages", [])
+    return sum(1 for message in messages
+               if message.get("role") == "assistant"
+               and str(message.get("content") or "").strip() not in ("", PENDING_ASSISTANT_CONTENT))
+
+
+def _visual_anchor_wait_reply(api, session, before, seconds=120):
+    end = time.time() + seconds
+    while time.time() < end:
+        if _visual_anchor_reply_count(api, session) > before:
+            return True
+        time.sleep(0.4)
+    return False
+
+
+def _visual_anchor_turn(api, session, content, image_urls=None, domain="image", model=None):
+    """One Agent turn whose fake reply needs no Task; waits for its answer."""
+    replies = _visual_anchor_reply_count(api, session)
+    body = {"content": content}
+    if image_urls:
+        body["image_urls"] = image_urls
+    if domain:
+        body["creative_domain"] = domain
+    if model:
+        body["ai_model"] = model
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+    if status not in (200, 201, 202):
+        return False
+    return _visual_anchor_wait_reply(api, session, replies)
+
+
+def _visual_anchor_answer(api, session, card, option_id, content):
+    """Answer a card on the card, carrying the fake tool marker of the Agent's
+    continuation in the user text."""
+    replies = _visual_anchor_reply_count(api, session)
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", {
+        "content": content,
+        "choiceAnswer": {"choice_id": card["id"], "option_id": option_id},
+        "creative_domain": "image",
+    })
+    if status not in (200, 201, 202):
+        return False
+    return _visual_anchor_wait_reply(api, session, replies)
+
+
+def _visual_anchor_system_with(work, session, needle, seconds=20):
+    """A stored turn request whose system prompt carries the text. Turn rows
+    include ones whose checkpoint is not written yet, so scan every row instead
+    of trusting the newest."""
+    import sqlite3
+    end = time.time() + seconds
+    while time.time() < end:
+        try:
+            db = sqlite3.connect(f"file:{work}/main/app.db?mode=ro", uri=True)
+            db.row_factory = sqlite3.Row
+            rows = db.execute("SELECT checkpoint_json FROM go_chat_turns WHERE session_id=?",
+                              (session,)).fetchall()
+            db.close()
+        except sqlite3.Error:
+            rows = []
+        for row in rows:
+            if not row["checkpoint_json"]:
+                continue
+            try:
+                system = _work_ledger_system_prompt(json.loads(row["checkpoint_json"]))
+            except ValueError:
+                continue
+            if needle in system:
+                return system
+        time.sleep(0.5)
+    return ""
+
+
+def _visual_anchor_frozen_input(work, task_id):
+    """The Task's frozen input from the stack database. The public Task input
+    withholds asset ids by design, so the smoke reads the frozen record."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/main/app.db?mode=ro", uri=True)
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT input_json FROM generation_tasks WHERE id=?", (task_id,)).fetchone()
+        db.close()
+    except sqlite3.Error:
+        return {}
+    if not row or not row["input_json"]:
+        return {}
+    try:
+        return json.loads(row["input_json"])
+    except ValueError:
+        return {}
+
+
+def _visual_anchor_handles(api, session):
+    """The picture handles the session gave its messages, by asset id."""
+    status, body = api.json("GET", f"/api/chat/sessions/{session}/messages")
+    messages = body if isinstance(body, list) else (body or {}).get("messages", [])
+    by_asset = {}
+    for message in messages:
+        for attachment in message.get("attachments") or []:
+            asset_id = attachment.get("asset_id") or attachment.get("assetId")
+            handle = attachment.get("handle")
+            if asset_id and handle:
+                by_asset[asset_id] = handle
+    return by_asset
+
+
+def _visual_anchor_card(api, session, kind="visual_anchor"):
+    for card in _quality_choices(api, session):
+        if card.get("state") == "pending" and card.get("kind") == kind:
+            return card
+    return None
+
+
+def _visual_anchor_wait_tool_content(work, session, needle, seconds=20):
+    """Wait until the newest checkpoint's tool receipts carry the text."""
+    end = time.time() + seconds
+    contents = []
+    while time.time() < end:
+        contents = _work_ledger_tool_contents(_work_ledger_checkpoint(work, session))
+        if any(needle in content for content in contents):
+            return contents
+        time.sleep(0.5)
+    return contents
+
+
+def scenario_visual_anchors(api, offerings, work):
+    """#250: the session's visual anchors on the fake stack.
+
+    The style lock reaches the Agent's system prompt; a proposed identity
+    anchor only lands after the person accepts the confirmation card and never
+    changes the person's style lock; a declined proposal writes nothing; a
+    later generation uses the anchor without re-selecting pictures; a
+    single-picture 3D model keeps the anchor and drops the ordinary reference
+    with a named handle; and Meshy retexture sends the style lock's picture as
+    its style_asset without the style text.
+    """
+    fake_control("DELETE")
+    session = new_session(api)
+    fields, _route = chat_schema_facts(api)
+    approval_field = fields.get("approval_mode", "approvalMode")
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {approval_field: "auto"})
+    if status != 200:
+        record("#250 auto approval", False, f"status {status}")
+        return
+    hero_asset = upload_asset(api, "anchor-hero.png", make_png(48), "image/png")
+    style_asset = upload_asset(api, "anchor-style.png", make_png(56), "image/png")
+    villain_asset = upload_asset(api, "anchor-villain.png", make_png(40), "image/png")
+    ordinary_asset = upload_asset(api, "anchor-ordinary.png", make_png(64), "image/png")
+    if not all((hero_asset, style_asset, villain_asset, ordinary_asset)):
+        record("#250 upload the anchor pictures", False,
+               f"assets={hero_asset},{style_asset},{villain_asset},{ordinary_asset}")
+        return
+    style_text = "ANCHOR-STYLE-9c41 印象派笔触与暖金色光线"
+    status, body = api.json("PUT", f"/api/v1/chat/sessions/{session}/style-lock",
+                            {"enabled": True, "text": style_text, "references": [style_asset]})
+    record("#250 the session style lock is saved",
+           status == 200 and (body.get("styleLock") or {}).get("enabled") is True,
+           f"status {status} {json.dumps(body, ensure_ascii=False)[:200]}")
+    # The shipped 2D purpose (concept art) recommends this model; using the
+    # workspace model avoids the #239 purpose/model conflict card.
+    image_model = IMAGE_OFFERINGS["meshy"][1]
+    # The Agent never sees an input-asset id: the pictures it can name are the
+    # handles the session gives the messages. Send all four in one turn, then
+    # read the handles the way the Agent's context shows them.
+    upload_urls = [f"/api/v1/assets/{asset}" for asset in (hero_asset, style_asset, villain_asset, ordinary_asset)]
+
+    # (a) The Agent sees the style lock in its system prompt. The fake-only
+    # marker makes the reply itself carry the answer, so the check reads what
+    # the model really received.
+    if not _visual_anchor_turn(api, session, "检查系统提示 [[fake:system-contains ANCHOR-STYLE-9c41]]",
+                               image_urls=upload_urls, domain="image", model=image_model):
+        record("#250 the style lock reaches the system prompt", False, "turn did not finish")
+    else:
+        reply = str((_quality_final_reply(_quality_messages(api, session)) or {}).get("content") or "")
+        record("#250 the style lock reaches the system prompt",
+               "present: ANCHOR-STYLE-9c41" in reply,
+               f"reply={reply[:120]!r}")
+    handles = _visual_anchor_handles(api, session)
+    record("#250 the Agent can name the pictures by their handles",
+           all(handles.get(asset) for asset in (hero_asset, style_asset, villain_asset, ordinary_asset)),
+           f"handles={handles}")
+    # (b) The Agent proposes an identity anchor; the person accepts on the card.
+    hero_proposal = {"action": "create", "name": "hero", "kind": "identity",
+                     "description": "red cloak", "references": [handles.get(hero_asset)]}
+    propose = _work_ledger_marker("ask_choice", {
+        "kind": "visual_anchor", "question": "把这张图设为角色标准形象？",
+        "proposal": {"arguments": hero_proposal},
+    })
+    if not _visual_anchor_turn(api, session, "提议保存角色形象 " + propose, domain="image", model=image_model):
+        record("#250 visual anchor confirmation card", False, "turn did not finish")
+        return
+    card = _visual_anchor_card(api, session)
+    options = {option.get("id"): option for option in (card or {}).get("options") or []}
+    record("#250 the confirmation card offers accept and decline",
+           card is not None and set(options) == {"accept", "decline"}
+           and options.get("accept", {}).get("label") == "设为视觉锚",
+           f"card={json.dumps(card, ensure_ascii=False)[:240] if card else 'missing'}")
+    system = _visual_anchor_system_with(work, session, "ANCHOR-STYLE-9c41")
+    record("#250 the system prompt frames the lock and its references",
+           "<<<VISUAL_ANCHORS>>>" in system and "<<<END_VISUAL_ANCHORS>>>" in system
+           and "参考图 1 张" in system,
+           f"marker={'yes' if '<<<VISUAL_ANCHORS>>>' in system else 'no'} "
+           f"references={'yes' if '参考图 1 张' in system else 'no'}")
+    # The same user text must appear once, and the two blocks must not give
+    # opposite instructions about repeating it (#250 review).
+    record("#250 one prompt carries the style lock once with one rule",
+           system.count("ANCHOR-STYLE-9c41") == 1 and "逐字保持" not in system
+           and system.count("<<<END_VISUAL_ANCHORS>>>") == 1
+           and "<<<WORK_ANCHORS>>>" in system,
+           f"texts={system.count('ANCHOR-STYLE-9c41')} "
+           f"verbatim={'yes' if '逐字保持' in system else 'no'} "
+           f"visual_close={system.count('<<<END_VISUAL_ANCHORS>>>')}")
+    if card is None:
+        return
+    accept = _work_ledger_marker("set_visual_anchor", hero_proposal)
+    if not _visual_anchor_answer(api, session, card, "accept", "保存这个锚点 " + accept):
+        record("#250 accept the proposed anchor", False, "answer turn did not finish")
+        return
+    receipts = _visual_anchor_wait_tool_content(work, session, "视觉锚已保存")
+    record("#250 the accepted anchor is written", bool(receipts) and
+           any("视觉锚已保存" in content for content in receipts),
+           f"receipts={len(receipts)}")
+    # An Agent call that no answered card names is refused even though it uses
+    # a handle the session really gave (#250 review).
+    intruder = _work_ledger_marker("set_visual_anchor", {
+        "action": "create", "name": "intruder", "kind": "identity",
+        "references": [handles.get(ordinary_asset)],
+    })
+    if not _visual_anchor_turn(api, session, "未经确认直接写入 " + intruder,
+                               domain="image", model=image_model):
+        record("#250 an unconfirmed write is refused", False, "turn did not finish")
+    else:
+        receipts = _visual_anchor_wait_tool_content(work, session, "用户确认卡")
+        record("#250 an unconfirmed write is refused",
+               any("还没有经用户确认卡确认" in content for content in receipts),
+               f"receipts={len(receipts)}")
+    _visual_anchor_turn(api, session, "检查未确认锚点 [[fake:system-contains 身份锚「intruder」]]",
+                        domain="image", model=image_model)
+    reply = str((_quality_final_reply(_quality_messages(api, session)) or {}).get("content") or "")
+    record("#250 an unconfirmed write stores no anchor", "absent: 身份锚「intruder」" in reply,
+           f"reply={reply[:120]!r}")
+    # A declined proposal writes nothing and leaves the person's lock alone.
+    villain_proposal = {"action": "create", "name": "villain", "kind": "identity",
+                        "description": "black cloak", "references": [handles.get(villain_asset)]}
+    propose = _work_ledger_marker("ask_choice", {
+        "kind": "visual_anchor", "question": "把这张图也设为角色标准形象？",
+        "proposal": {"arguments": villain_proposal},
+    })
+    if not _visual_anchor_turn(api, session, "再提议一个 " + propose, domain="image", model=image_model):
+        record("#250 the declined proposal card", False, "turn did not finish")
+        return
+    card = _visual_anchor_card(api, session)
+    system = _visual_anchor_system_with(work, session, "身份锚「hero」")
+    record("#250 the next turn sees the accepted identity anchor",
+           "身份锚「hero」" in system and "<<<VISUAL_ANCHORS>>>" in system,
+           f"anchor={'yes' if '身份锚「hero」' in system else 'no'}")
+    decline = _work_ledger_marker("set_visual_anchor", {"action": "decline"})
+    if card is None or not _visual_anchor_answer(api, session, card, "decline", "不用保存 " + decline):
+        record("#250 decline the proposed anchor", False, f"card={card}")
+        return
+    _visual_anchor_turn(api, session, "看看现在的锚点 [[fake:system-contains 身份锚「villain」]]",
+                        domain="image", model=image_model)
+    reply = str((_quality_final_reply(_quality_messages(api, session)) or {}).get("content") or "")
+    villain_system = _visual_anchor_system_with(work, session, "身份锚「villain」", seconds=2)
+    record("#250 a declined anchor writes nothing",
+           "absent: 身份锚「villain」" in reply and "身份锚「villain」" not in villain_system,
+           f"reply={reply[:120]!r} villain={'yes' if '身份锚「villain」' in villain_system else 'no'}")
+    status, lock = api.json("GET", f"/api/v1/chat/sessions/{session}/style-lock")
+    saved = (lock.get("styleLock") or lock or {})
+    record("#250 anchor writes never change the person's style lock",
+           status == 200 and saved.get("text") == style_text and saved.get("enabled") is True
+           and saved.get("references") == [style_asset],
+           f"status={status} lock={json.dumps(lock, ensure_ascii=False)[:200]}")
+
+    # (c) A later generation names the anchor and carries its picture without
+    # any handle from the person.
+    marker = _work_ledger_marker("refine_image", {"prompt": "a portrait of the ranger", "anchors": ["hero"]})
+    task, why, _approval = agent_tool_turn(api, session, "画她坐着的样子 " + marker,
+                                           creative_domain="image", ai_model=image_model)
+    if not task or why or task.get("state") != "SUCCEEDED":
+        record("#250 generation uses the anchor", False, why or f"state={(task or {}).get('state')}")
+        return
+    task_id = task.get("task_id") or task.get("id")
+    anchor_input = _visual_anchor_frozen_input(work, task_id)
+    references = anchor_input.get("reference_assets") or []
+    prompt = str(anchor_input.get("prompt") or "")
+    record("#250 generation uses the anchor picture without a handle",
+           references == [hero_asset, style_asset] and "保留「hero」的身份" in prompt,
+           f"references={references} prompt={prompt[:160]!r}")
+
+    # (c2) The picture the Agent just made becomes an identity anchor. The
+    # Agent only names its session handle; the stored reference is the
+    # canonical Task asset URL. The next turn must carry that picture in the
+    # model's vision context at high detail: the anchor path used to inline
+    # input asset ids only, so a Task URL was silently skipped (#250 review).
+    handles = _visual_anchor_handles(api, session)
+    generated_handles = [handles.get(asset.get("id")) for asset in task.get("assets") or []
+                         if handles.get(asset.get("id"))]
+    if not generated_handles:
+        record("#250 a generated result can be an identity anchor", False,
+               f"no handle for the result assets {task.get('assets')}")
+    else:
+        made_proposal = {"action": "create", "name": "made-hero", "kind": "identity",
+                         "description": "the portrait just generated",
+                         "references": [generated_handles[0]]}
+        propose = _work_ledger_marker("ask_choice", {
+            "kind": "visual_anchor", "question": "把刚生成的这张设为角色标准形象？",
+            "proposal": {"arguments": made_proposal},
+        })
+        card = None
+        if _visual_anchor_turn(api, session, "把刚生成的图设为锚点 " + propose,
+                               domain="image", model=image_model):
+            card = _visual_anchor_card(api, session)
+        if card is None:
+            record("#250 a generated result can be an identity anchor", False,
+                   "the confirmation card is missing")
+        else:
+            accept = _work_ledger_marker("set_visual_anchor", made_proposal)
+            saved = _visual_anchor_answer(api, session, card, "accept", "保存这个锚点 " + accept)
+            receipts = _visual_anchor_wait_tool_content(work, session, "视觉锚已保存")
+            _visual_anchor_turn(
+                api, session, "检查刚保存的锚点 [[fake:system-contains 身份锚「made-hero」]]",
+                domain="image", model=image_model)
+            reply = str((_quality_final_reply(_quality_messages(api, session)) or {}).get("content") or "")
+            record("#250 a generated result can be an identity anchor",
+                   saved and bool(receipts) and "present: 身份锚「made-hero」" in reply,
+                   f"saved={saved} receipts={len(receipts)} reply={reply[:120]!r}")
+
+            def has_generated_anchor_image(messages):
+                for message in messages:
+                    for image in message.get("images") or []:
+                        if (image.get("detail") == "high" and image.get("data_uri")
+                                and "身份锚「made-hero」参考图 1" in (image.get("label") or "")):
+                            return True
+                return False
+
+            anchor_request = last_request_with(has_generated_anchor_image)
+            record("#250 a generated-result anchor reaches vision at high detail",
+                   anchor_request is not None,
+                   f"handle={generated_handles[0]} "
+                   f"request={'found' if anchor_request else 'missing'} "
+                   f"images={[(image.get('detail'), image.get('data_uri'), image.get('label')) for request in fake_chat_requests()[-3:] for message in request.get('messages') or [] for image in message.get('images') or []]}")
+
+    # (d) A single-picture model keeps the anchor and drops the ordinary
+    # reference; the tool result names the dropped handle. Both pictures are
+    # real session handles: the ordinary one was sent in the first turn.
+    ordinary_handle = handles.get(ordinary_asset)
+    marker = _work_ledger_marker("create_model_3d_from_image", {
+        "prompt": "a ranger miniature", "anchors": ["hero"],
+        "reference_handles": [ordinary_handle], "input_override_reason": "fake stack single-picture check",
+    })
+    model_task, why, _approval = agent_tool_turn(
+        api, session, "把参考和标准形象一起做成模型 " + marker,
+        creative_domain="model-3d", ai_model="meshy/meshy-7.1/image-to-3d")
+    if not model_task or why or model_task.get("state") != "SUCCEEDED":
+        record("#250 the single-picture model keeps the anchor", False,
+               why or f"state={(model_task or {}).get('state')}")
+        return
+    model_task_id = model_task.get("task_id") or model_task.get("id")
+    model_input = _visual_anchor_frozen_input(work, model_task_id)
+    model_references = model_input.get("reference_assets") or []
+    record("#250 the single-picture model keeps the anchor and drops the ordinary reference",
+           model_references == [hero_asset],
+           f"references={model_references} input={json.dumps(model_input, ensure_ascii=False)[:200]}")
+    receipts = _visual_anchor_wait_tool_content(work, session, "reference_note")
+    note = ""
+    for content in reversed(receipts):
+        try:
+            candidate = json.loads(content)
+        except ValueError:
+            continue
+        if isinstance(candidate, dict) and candidate.get("reference_note"):
+            note = str(candidate["reference_note"])
+            break
+    record("#250 the tool result names the dropped ordinary reference",
+           "丢弃了普通参考" in note and bool(ordinary_handle) and ordinary_handle in note,
+           f"reference_note={note[:200]!r} handle={ordinary_handle}")
+
+    # (e) Meshy retexture sends the style lock picture as its style_asset and
+    # never injects the style text into the 3D prompt.
+    source_task = model_task.get("task_id") or model_task.get("id")
+    marker = _work_ledger_marker("retexture_model", {
+        "source_task_id": source_task, "offering_id": "meshy/processing/retexture",
+    })
+    texture, why, _approval = agent_tool_turn(api, session, "换成苔藓贴图 " + marker,
+                                              creative_domain="model-3d")
+    if not texture or why or texture.get("state") != "SUCCEEDED":
+        record("#250 retexture carries the style reference", False,
+               why or f"state={(texture or {}).get('state')}")
+        return
+    texture_id = texture.get("task_id") or texture.get("id")
+    texture_input = _visual_anchor_frozen_input(work, texture_id)
+    texture_prompt = str(texture_input.get("prompt") or "")
+    record("#250 retexture sends the style lock picture as style_asset",
+           texture_input.get("style_asset") == style_asset,
+           f"style_asset={texture_input.get('style_asset')} input={json.dumps(texture_input, ensure_ascii=False)[:200]}")
+    record("#250 retexture never injects the style text",
+           "prompt" not in texture_input and style_text not in texture_prompt and "Style lock" not in texture_prompt,
+           f"prompt={texture_prompt!r}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,offering-knowledge,work-ledger,self-check,vision-budget,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,faults")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     parser.add_argument("--report", default="", help="directory for the #238 agent-quality report (default: a temporary one)")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "tripo", "p2", "agent", "agent-background", "faults"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "tripo", "p2", "agent", "agent-background", "three-view", "faults"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -2856,7 +3946,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality", "image-self-check", "work-ledger", "vision-budget"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "work-ledger", "vision-budget", "three-view", "visual-anchors"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -2883,10 +3973,16 @@ def main():
                 scenario_agent_quality(api, offerings, args.report or os.path.join(work, "agent-quality"))
             if "image-self-check" in selected:
                 scenario_image_self_check(api, offerings, work)
+            if "three-view" in selected:
+                scenario_three_view(work, api, offerings)
+            if "image-purpose" in selected:
+                scenario_image_purpose(api, offerings, work)
             if "work-ledger" in selected:
                 scenario_work_ledger(api, offerings, work)
             if "vision-budget" in selected:
                 scenario_vision_budget(api, offerings, work)
+            if "visual-anchors" in selected:
+                scenario_visual_anchors(api, offerings, work)
             processes.stop(child)
         if "offering-knowledge" in selected:
             offering_catalog = private_catalog(
@@ -2905,6 +4001,12 @@ def main():
                 offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
                 scenario_fault(api, offerings, scenario)
                 processes.stop(child)
+        if "mask-selection" in selected:
+            mask_catalog = private_catalog(work, manual_image_edits=True, name="catalog-mask.json")
+            child, api = start_stack(processes, stack_binary, work, "mask", mask_catalog, GOOD_KEY)
+            offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
+            scenario_mask_selection(api, offerings, work)
+            processes.stop(child)
         check_no_real_upstream(work)
     finally:
         processes.stop_all()

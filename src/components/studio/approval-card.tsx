@@ -100,7 +100,8 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
   const adjustments = model.parameterAdjustments ?? [];
   const profileGroups = profileAdjustmentGroups(adjustments);
   const agentAdjustments = adjustments.filter((item) => !item.profile);
-  const profileLabel = (id: string) => schema.chat.model3d_usage?.profiles?.find((profile) => profile.id === id)?.label ?? id;
+  const profileLabel = (id: string) => schema.chat.model3d_usage?.profiles?.find((profile) => profile.id === id)?.label
+    ?? schema.chat.image2d_usage?.profiles?.find((profile) => profile.id === id)?.label ?? id;
   const profileSummary = (group: ProfileAdjustmentGroup) => schemaCountMessage(
     schema,
     'ui.studio.approval.card.parameter_summary',
@@ -147,6 +148,31 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
   const retexture = isRetextureCard(model);
   const invalidNativeQuote = nativePricing && model.nativeQuote == null;
   const extra = model.extra;
+  // #239: the card says who chose the model and, for a purpose, why. The
+  // server translated the reason; the source code maps to the Schema's words.
+  const modelChoiceSource = (choice: NonNullable<ApprovalCardModel['modelChoice']>): string => {
+    if (choice.source === 'profile') {
+      return formatSchemaText(schemaText(schema, 'ui.studio.approval.card.model_source_profile'), {
+        profile: profileLabel(choice.profile ?? ''),
+      });
+    }
+    const key = choice.source === 'user' || choice.source === 'agent' || choice.source === 'default'
+      ? choice.source
+      : 'default';
+    return schemaText(schema, `ui.studio.approval.card.model_source_${key}`);
+  };
+  const modelChoiceText = model.modelChoice
+    ? formatSchemaText(
+      schemaText(schema, model.modelChoice.reason
+        ? 'ui.studio.approval.card.model_choice_line'
+        : 'ui.studio.approval.card.model_choice_line_no_reason'),
+      {
+        model: names.modelName || model.model,
+        source: modelChoiceSource(model.modelChoice),
+        reason: model.modelChoice.reason ?? '',
+      },
+    )
+    : '';
   // What the extra credits pay for ("附加导出格式：FBX、USDZ，约 N 积分"), all from the Schema's words.
   const extraLine = extra
     ? schemaCountMessage(
@@ -205,6 +231,12 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
         ) : null}
         <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.model')}</dt>
         <dd className="truncate" data-testid="studio-approval-model">{[names.modelName, names.providerName].filter(Boolean).join(' · ')}</dd>
+        {modelChoiceText ? (
+          <>
+            <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.parameter_source')}</dt>
+            <dd className="text-muted-foreground" data-testid="studio-approval-model-choice">{modelChoiceText}</dd>
+          </>
+        ) : null}
         {model.nativeQuote ? (
           <>
             <dt className="text-muted-foreground">{formatSchemaText(schemaText(schema, 'ui.pricing.frozen_estimate'), { amount: formatNativePrice(model.nativeQuote.total_amount, model.nativeQuote.unit_label) ?? schemaText(schema, 'ui.pricing.unknown') })}</dt>
@@ -446,7 +478,9 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
               : uploadedURL ? previewAssetUrl(uploadedURL) || safePreviewURL(uploadedURL) : '';
             return (
               <li key={`${input.handle}-${index}`} className="flex items-center gap-1.5 rounded-md border border-border bg-surface p-0.5 pr-1.5" data-testid="studio-approval-input" data-kind={input.kind}>
-                <InputThumbnail src={src} handle={input.handle || label || role} model={input.kind === 'task' || input.previewable === false} />
+                <InputThumbnail src={src} handle={input.handle || label || role} model={input.kind === 'task' || input.previewable === false}
+                  // A mask is mostly transparent: a checkerboard behind it shows its shape instead of a blank square (#244).
+                  checkerboard={input.parameter === 'mask'} />
                 <span className="text-[11px]">
                   {role || label ? <span className="font-medium text-foreground" data-testid="studio-approval-input-label">{[role, label].filter(Boolean).join(' · ')}</span> : null}
                   {input.viewLabel ? <span className="ml-1 rounded-sm bg-muted px-1 text-muted-foreground" data-testid="studio-approval-input-view">{formatSchemaText(schemaText(schema, 'ui.pending_approval.view_label'), { view: input.viewLabel })}</span> : null}
@@ -458,6 +492,9 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
             );
           })}
         </ul>
+      ) : null}
+      {model.maskNote ? (
+        <p className="text-muted-foreground [overflow-wrap:anywhere]" data-testid="studio-approval-mask-note">{model.maskNote}</p>
       ) : null}
       {model.referenceNote ? (
         // The server's reference note is the step's source note (which views or source model it is made from), or the
@@ -507,10 +544,12 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
 }
 
 /** Platform asset thumbnail; a neutral placeholder (a cube for a model) stands in when there is none or it fails to load. */
-function InputThumbnail({ src, handle, model }: { src: string; handle: string; model: boolean }) {
+function InputThumbnail({ src, handle, model, checkerboard = false }: { src: string; handle: string; model: boolean; checkerboard?: boolean }) {
   const [failed, setFailed] = useState(false);
   return (
-    <span className="flex size-8 items-center justify-center overflow-hidden rounded-sm bg-muted" data-testid="studio-approval-thumb" data-state={src && !failed ? 'image' : 'placeholder'}>
+    <span className="flex size-8 items-center justify-center overflow-hidden rounded-sm bg-muted" data-testid="studio-approval-thumb" data-state={src && !failed ? 'image' : 'placeholder'}
+      data-checkerboard={checkerboard || undefined}
+      style={checkerboard ? { backgroundImage: 'repeating-conic-gradient(#d4d4d4 0% 25%, #ffffff 0% 50%)', backgroundSize: '8px 8px' } : undefined}>
       {src && !failed
         ? <img src={src} alt={handle} onError={() => setFailed(true)} className="size-full object-cover" />
         : model ? <Box aria-hidden className="size-3.5 text-muted-foreground" /> : <ImageIcon aria-hidden className="size-3.5 text-muted-foreground" />}

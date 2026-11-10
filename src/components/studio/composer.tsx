@@ -570,7 +570,7 @@ export function Composer({
               ? formatSchemaText(schemaText(schema, 'ui.studio.mask.chip_title'), { handle: mask.handle })
               : schemaText(schema, 'ui.studio.mask.chip')}
             subtitle={mask.strokes > 0
-              ? schemaCountMessage(schema, 'ui.studio.mask.chip_strokes', mask.strokes, { count: mask.strokes })
+              ? `${schemaCountMessage(schema, 'ui.studio.mask.chip_strokes', mask.strokes, { count: mask.strokes })} · ${schemaText(schema, 'ui.studio.mask.chip_selection')}`
               : schemaText(schema, 'ui.studio.mask.chip_idle')}
             remove={{ label: schemaText(schema, 'ui.studio.mask.chip_clear'), onClick: mask.onClear, testId: 'composer-mask-clear' }}
           />

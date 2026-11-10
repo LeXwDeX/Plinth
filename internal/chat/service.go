@@ -24,15 +24,23 @@ var (
 	ErrInvalidInputSource = errors.New("chat: invalid input source")
 	// ErrInvalidMultiview rejects a multiview request without a model or with
 	// fewer than two, more than four or repeated views (#65).
-	ErrInvalidMultiview       = errors.New("chat: invalid multiview request")
-	ErrCanvasSourceMissing    = errors.New("chat: canvas input source without a snapshot")
-	ErrTurnActive             = errors.New("chat: turn already active")
-	ErrStreamNotFound         = errors.New("chat: stream not found")
-	ErrInvalidSessionPage     = errors.New("chat: invalid session page query")
-	ErrInvalidMessagePage     = errors.New("chat: invalid message page query")
-	ErrTurnCheckpointConflict = errors.New("chat: turn checkpoint conflict")
-	ErrInvalidApprovalMode    = errors.New("chat: invalid approval mode")
-	ErrInvalidAgentScope      = errors.New("chat: invalid agent scope")
+	ErrInvalidMultiview    = errors.New("chat: invalid multiview request")
+	ErrCanvasSourceMissing = errors.New("chat: canvas input source without a snapshot")
+	// ErrSelectionMaskWithoutCanvas rejects a selection mask on a turn that is
+	// not a canvas turn or whose snapshots did not verify; ErrSelectionMaskInvalid
+	// a mask asset that cannot be read or is not owned; ErrSelectionMaskSizeMismatch
+	// one whose size differs from the artboard snapshot (#244). A mask never
+	// degrades into a whole-image redraw.
+	ErrSelectionMaskWithoutCanvas = errors.New("chat: selection mask without a canvas snapshot")
+	ErrSelectionMaskInvalid       = errors.New("chat: selection mask invalid")
+	ErrSelectionMaskSizeMismatch  = errors.New("chat: selection mask size mismatch")
+	ErrTurnActive                 = errors.New("chat: turn already active")
+	ErrStreamNotFound             = errors.New("chat: stream not found")
+	ErrInvalidSessionPage         = errors.New("chat: invalid session page query")
+	ErrInvalidMessagePage         = errors.New("chat: invalid message page query")
+	ErrTurnCheckpointConflict     = errors.New("chat: turn checkpoint conflict")
+	ErrInvalidApprovalMode        = errors.New("chat: invalid approval mode")
+	ErrInvalidAgentScope          = errors.New("chat: invalid agent scope")
 )
 
 type Repository interface {
@@ -71,6 +79,11 @@ type Repository interface {
 	// style lock. References are stored in request order.
 	StyleLock(ctx context.Context, owner, session string) (StyleLock, bool, error)
 	SetStyleLock(ctx context.Context, owner, session string, lock StyleLock) (bool, error)
+	// VisualAnchors and SetVisualAnchors read and replace the owner's session
+	// visual anchors (#250). A missing or foreign session reports found=false.
+	// Writing does not touch updated_at.
+	VisualAnchors(ctx context.Context, owner, session string) ([]VisualAnchor, bool, error)
+	SetVisualAnchors(ctx context.Context, owner, session string, anchors []VisualAnchor) (bool, error)
 	// SessionBrief and ReplaceSessionBrief read and conditionally replace the
 	// session's structured production brief (#103). Both are scoped to the
 	// owner; found is false for a missing or foreign session. Writing does not
@@ -87,6 +100,12 @@ type Repository interface {
 	// updated_at.
 	SessionExplicitModel3D(ctx context.Context, owner, session string) (string, bool, error)
 	SetSessionExplicitModel3D(ctx context.Context, owner, session, model string) (bool, error)
+	// SessionExplicitModelImage and SetSessionExplicitModelImage read and
+	// replace the 2D model the person explicitly picked in the session (#239).
+	// An empty model clears the pick; both are owner scoped and writing does
+	// not touch updated_at.
+	SessionExplicitModelImage(ctx context.Context, owner, session string) (string, bool, error)
+	SetSessionExplicitModelImage(ctx context.Context, owner, session, model string) (bool, error)
 	// SessionPick and SetSessionPick read and replace the candidate the user
 	// picked as the session's current object (platform IDs only; a zero
 	// Attachment clears it). Both are scoped to the owner; found is false for a
@@ -234,17 +253,31 @@ type ServiceConfig struct {
 	// production brief may name, their parameter overrides and the brief's
 	// field declarations. Zero disables the brief API and the purpose card.
 	Model3DUsage catalog.ChatModel3DUsageSchema
+	// Image2DUsage is application.chat.image2d_usage (#239): the 2D purposes a
+	// production brief may name, their recommended offerings, parameter
+	// overrides and delivery requirements. Zero disables the 2D purpose card.
+	Image2DUsage catalog.ChatImage2DUsageSchema
 	// ExplicitModel3DValid reports whether a pick names an enabled 3D
 	// generation Offering (#103 review C4). Nil accepts any well-formed token,
 	// for assemblies that do not load a Catalog.
 	ExplicitModel3DValid func(model string) bool
-	// ChoiceKinds are application.chat.choice.kinds (#103). The brief write
-	// settles the kind whose option_source is usage_profiles; without it no
-	// card is settled.
+	// ExplicitModelImageValid reports whether a 2D pick names an enabled image
+	// Offering (#239). Nil accepts any well-formed token.
+	ExplicitModelImageValid func(model string) bool
+	// ChoiceKinds are application.chat.choice.kinds (#103, #239). The brief
+	// write settles the kinds whose option source is a purpose table; without
+	// them no card is settled.
 	ChoiceKinds []catalog.ChatChoiceKindSchema
+	// ChoiceMaxOptions bounds the options of an Agent-supplied direction card
+	// (#239); zero accepts any non-empty list.
+	ChoiceMaxOptions int
 	// WorkLedger is application.chat.work_ledger (#248). A zero value leaves
 	// the ledger and the get_production_step tool unavailable.
 	WorkLedger catalog.ChatWorkLedgerSchema
+	// VisualAnchors is application.chat.visual_anchors (#250): the bounds,
+	// declared kinds and Agent-facing copy of the session anchor settings. A
+	// zero value leaves the anchor tool unavailable.
+	VisualAnchors catalog.ChatVisualAnchorsSchema
 }
 
 type Service struct {
@@ -283,10 +316,15 @@ type Service struct {
 	canvasInputSource          string
 	retiredModels              map[string]catalog.RetiredModelSuccessor
 	model3DUsage               catalog.ChatModel3DUsageSchema
+	image2DUsage               catalog.ChatImage2DUsageSchema
 	explicitModel3DValid       func(string) bool
-	// usageProfileKind is the declared card the brief write settles; its ID and
-	// argument name come from the Schema, not from code (#103).
-	usageProfileKind *catalog.ChatChoiceKindSchema
+	explicitModelImageValid    func(string) bool
+	// usageProfileKind and imageUsageProfileKind are the declared cards the
+	// brief write settles; their IDs and argument names come from the Schema,
+	// not from code (#103, #239).
+	usageProfileKind      *catalog.ChatChoiceKindSchema
+	imageUsageProfileKind *catalog.ChatChoiceKindSchema
+	choiceMaxOptions      int
 
 	harnessSnapshotResolver HarnessSnapshotResolver
 
@@ -310,6 +348,14 @@ type Service struct {
 	visionTokenBudget   func(model string) int
 	contextStore        ContextStore
 	compactionListLimit int
+
+	// visualAnchors is application.chat.visual_anchors (#250): the Schema bounds,
+	// declared kinds and result copy of the session anchor settings.
+	visualAnchors catalog.ChatVisualAnchorsSchema
+	// visualAnchorKind is the declared confirmation-card kind whose options
+	// come from an Agent proposal (#250). Without it no Agent anchor write is
+	// accepted: the gate must fail closed.
+	visualAnchorKind *catalog.ChatChoiceKindSchema
 
 	// workLedger is application.chat.work_ledger (#248); workLedgerTasks is
 	// the public-Task page source, workLedgerDetail the full single-Task read,
@@ -411,9 +457,15 @@ func NewService(config ServiceConfig) (*Service, error) {
 		canvasInputSource:          config.CanvasInputSource,
 		retiredModels:              retiredModelIndex(config.RetiredModels),
 		model3DUsage:               config.Model3DUsage,
+		image2DUsage:               config.Image2DUsage,
 		explicitModel3DValid:       config.ExplicitModel3DValid,
-		usageProfileKind:           usageProfileKindOf(config.ChoiceKinds),
+		explicitModelImageValid:    config.ExplicitModelImageValid,
+		usageProfileKind:           choiceKindOf(config.ChoiceKinds, "usage_profiles"),
+		imageUsageProfileKind:      choiceKindOf(config.ChoiceKinds, "image_usage_profiles"),
+		choiceMaxOptions:           config.ChoiceMaxOptions,
 		models:                     config.Models,
+		visualAnchors:              config.VisualAnchors,
+		visualAnchorKind:           choiceKindOf(config.ChoiceKinds, "agent_proposal"),
 		workLedger:                 config.WorkLedger,
 		visionBudget:               config.VisionBudget,
 		visionTokenBudget:          config.VisionTokenBudget,
@@ -820,6 +872,11 @@ type StartTurn struct {
 	// any other, gives its object a handle in the usual order and rewrites the
 	// token in the stored text to that handle. Untrusted like the claims.
 	Mentions []MentionRef
+	// SelectionMask is the client's claim about this canvas turn's selection
+	// mask (#244). Unlike an attachment it is never dropped: a mask that does
+	// not verify for the owner, does not match the snapshot size or arrives
+	// without a canvas turn refuses the whole turn.
+	SelectionMask *SelectionMaskRef
 	// OnMentionsDropped, when set, receives the tokens that were left as plain
 	// text because they were not written in Content or their claim did not hold.
 	OnMentionsDropped func(tokens []string)
@@ -881,6 +938,14 @@ func (service *Service) startTurn(
 		return Message{}, ErrSessionNotFound
 	}
 	command.Options.ExplicitModel3D = explicitModel
+	explicitImage, found, err := service.repository.SessionExplicitModelImage(ctx, command.OwnerID, command.SessionID)
+	if err != nil {
+		return Message{}, err
+	}
+	if !found {
+		return Message{}, ErrSessionNotFound
+	}
+	command.Options.ExplicitModelImage = explicitImage
 	// The style lock is a session setting, but generation must use the snapshot
 	// taken with this turn so later edits do not change a frozen task.
 	styleLock, found, err := service.repository.StyleLock(ctx, command.OwnerID, command.SessionID)
@@ -892,6 +957,17 @@ func (service *Service) startTurn(
 	}
 	styleLock.References = append([]string(nil), styleLock.References...)
 	command.Options.StyleLock = styleLock
+	// The visual anchors are frozen with the turn for the same reason: an edit
+	// by the person or a later Agent write must not change a running turn or a
+	// recovered one (#250).
+	visualAnchors, found, err := service.repository.VisualAnchors(ctx, command.OwnerID, command.SessionID)
+	if err != nil {
+		return Message{}, err
+	}
+	if !found {
+		return Message{}, ErrSessionNotFound
+	}
+	command.Options.VisualAnchors = cloneVisualAnchors(visualAnchors)
 	// A pick of a retired generation model runs on its successor; the turn
 	// records the switch (#329 follow-up).
 	service.moveRetiredModels(&command.Options)
@@ -974,6 +1050,9 @@ func (service *Service) startTurn(
 		// The person chose the canvas: without its verified snapshot the turn
 		// does not run, rather than continue from another picture or none.
 		return Message{}, ErrCanvasSourceMissing
+	}
+	if err := service.freezeSelectionMask(ctx, command, &command.Options); err != nil {
+		return Message{}, err
 	}
 	command.Options.Harness, err = service.freezeHarnessSnapshot(ctx, command.OwnerID, command.SessionID, command.Options.Selection)
 	if err != nil {

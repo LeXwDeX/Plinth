@@ -68,7 +68,7 @@ jobs:
       # 发布与门禁脚本的单测（#86）
       - run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_*.py'
       # fake 上游整栈冒烟稳定子集（#218）：只用回环地址，零真实上游请求
-      - run: python3 scripts/smoke/smoke-fake-stack.py --only balance,meshy,images,p2,agent,agent-background,vision-budget,faults --faults task-failed,artifact-expired-stuck
+      - run: python3 scripts/smoke/smoke-fake-stack.py --only balance,meshy,images,p2,agent,agent-background,three-view,image-purpose,mask-selection,vision-budget,visual-anchors,faults --faults task-failed,artifact-expired-stuck
 
   # 非 race 的 go test 不在 CI：race 跑同一批测试且更严格（dev_test.md §2）。
   go-test-race:

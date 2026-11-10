@@ -216,6 +216,26 @@ type OrchestratorConfig struct {
 		owner generation.OwnerID,
 		assetID string,
 	) (string, bool)
+	// VisionAnchorInline 把视觉锚的参考图转成 data URI（#250）。锚点参考图
+	// 可能是 input asset id、input asset URL 或生成结果的规范 Task 资产
+	// URL，校验按 owner 与会话进行；nil 时锚点图片只保留文字标签，并在溢出
+	// 说明里点名。
+	VisionAnchorInline func(
+		ctx context.Context,
+		owner generation.OwnerID,
+		sessionID string,
+		reference string,
+	) (string, bool)
+	// SelectionPreview composes the server-side preview of the turn's frozen
+	// selection mask (#244): the artboard snapshot dimmed outside the selected
+	// region and tinted inside it, as a data URI. It reports false when the
+	// pictures cannot be read; the turn keeps the mask's text description.
+	SelectionPreview func(
+		ctx context.Context,
+		ownerID string,
+		pictureURL string,
+		maskAssetID string,
+	) (string, bool)
 	// TaskCanceler 供停止轮次时取消该轮已绑定的生成任务（尽力而为，
 	// 失败只记录日志，不阻塞停止语义）。
 	TaskCanceler func(ctx context.Context, ownerID, taskID string) error
@@ -272,6 +292,20 @@ type Orchestrator struct {
 		ctx context.Context,
 		owner generation.OwnerID,
 		assetID string,
+	) (string, bool)
+	// visionAnchorInline 把视觉锚的参考图（资产 ID 或平台 URL）转成 data
+	// URI；nil 表示锚点图片只保留文字标签（#250）。
+	visionAnchorInline func(
+		ctx context.Context,
+		owner generation.OwnerID,
+		sessionID string,
+		reference string,
+	) (string, bool)
+	selectionPreview func(
+		ctx context.Context,
+		ownerID string,
+		pictureURL string,
+		maskAssetID string,
 	) (string, bool)
 	taskCanceler   func(ctx context.Context, ownerID, taskID string) error
 	toolNote       func(tool catalog.ChatToolSchema, options TurnOptions) string
@@ -632,31 +666,33 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 	registry.offeringAllowed = config.OfferingAllowed
 	registry.offerings = config.Offerings
 	return &Orchestrator{
-		service:           config.Service,
-		schema:            config.Schema,
-		model:             config.Model,
-		dsmlFor:           config.DSMLFor,
-		visionInline:      config.VisionInline,
-		visionAssetInline: config.VisionAssetInline,
-		agent:             config.Agent,
-		tools:             config.Tools,
-		logger:            config.Logger,
-		registry:          registry,
-		agentScope:        registry.scope,
-		configuration:     config.Configuration,
-		taskCanceler:      config.TaskCanceler,
-		toolNote:          config.ToolNote,
-		selfCheckTasks:    config.SelfCheckTasks,
-		taskLookup:        config.TaskLookup,
-		taskGet:           config.TaskGet,
-		stopConsent:       config.StopConsent,
-		texts:             config.Texts,
-		queue:             make(chan ProcessTurn, config.Schema.Agent.QueueSize),
-		queued:            map[string]struct{}{},
-		activeCancel:      map[string]context.CancelFunc{},
-		canceledTurn:      map[string]struct{}{},
-		consentWaits:      map[string]*consentSuspend{},
-		compacting:        map[string]*compactionLock{},
+		service:            config.Service,
+		schema:             config.Schema,
+		model:              config.Model,
+		dsmlFor:            config.DSMLFor,
+		visionInline:       config.VisionInline,
+		visionAssetInline:  config.VisionAssetInline,
+		visionAnchorInline: config.VisionAnchorInline,
+		selectionPreview:   config.SelectionPreview,
+		agent:              config.Agent,
+		tools:              config.Tools,
+		logger:             config.Logger,
+		registry:           registry,
+		agentScope:         registry.scope,
+		configuration:      config.Configuration,
+		taskCanceler:       config.TaskCanceler,
+		toolNote:           config.ToolNote,
+		selfCheckTasks:     config.SelfCheckTasks,
+		taskLookup:         config.TaskLookup,
+		taskGet:            config.TaskGet,
+		stopConsent:        config.StopConsent,
+		texts:              config.Texts,
+		queue:              make(chan ProcessTurn, config.Schema.Agent.QueueSize),
+		queued:             map[string]struct{}{},
+		activeCancel:       map[string]context.CancelFunc{},
+		canceledTurn:       map[string]struct{}{},
+		consentWaits:       map[string]*consentSuspend{},
+		compacting:         map[string]*compactionLock{},
 
 		backgroundWarned: map[string]time.Time{},
 	}, nil
@@ -1134,6 +1170,9 @@ func (orchestrator *Orchestrator) Process(
 	command.Options.AttachmentPurposes = turn.Options.AttachmentPurposes
 	command.Options.SelectionPicked = turn.Options.SelectionPicked
 	command.Options.InputSource = turn.Options.InputSource
+	// The mask is the one the service measured and froze with the turn (#244);
+	// a later paint on the stage never changes what this turn binds.
+	command.Options.SelectionMask = turn.Options.SelectionMask
 	command.Options.Multiview = turn.Options.Multiview
 	// So are the generation model picks: a retired model was moved to its
 	// successor when the turn started (#329 follow-up).
@@ -1152,8 +1191,10 @@ func (orchestrator *Orchestrator) Process(
 	// Agent-named model would replace the person's pick.
 	command.Options.ProductionBrief = turn.Options.ProductionBrief
 	command.Options.ExplicitModel3D = turn.Options.ExplicitModel3D
+	command.Options.ExplicitModelImage = turn.Options.ExplicitModelImage
 	command.Options.StyleLock = turn.Options.StyleLock
 	command.Options.StyleLockSkipped = turn.Options.StyleLockSkipped
+	command.Options.VisualAnchors = cloneVisualAnchors(turn.Options.VisualAnchors)
 	// A plan continuation is the service's mark, never the caller's (#134).
 	command.Options.PlanContinuation = turn.Options.PlanContinuation
 	// DSML tool calls are read only for a model whose profile writes them.
@@ -1930,7 +1971,7 @@ func (orchestrator *Orchestrator) agentRequest(
 		// A craft brief comes before the scope block: it teaches how to work in
 		// a domain, while the scope only says which tools this turn offers. The
 		// selection and the framed session notes stay at the end of the prompt.
-		sections.add("craft", orchestrator.craftPrompt(registry, scope))
+		sections.add("craft", orchestrator.craftPrompt(registry, scope, options.CreativeDomain))
 		sections.add("scope", orchestrator.scopePrompt(registry, scope))
 	}
 	// The session's real approval mode follows the scope it must not be mixed
@@ -1953,9 +1994,13 @@ func (orchestrator *Orchestrator) agentRequest(
 	sections.add("summary", orchestrator.summaryPrompt(latest))
 	sections.add("compacted_handles", orchestrator.compactedHandlePrompt(history, indexedByMessage, summarized, lastUserMessage))
 	// The ledger and the style anchor are projected from stored facts, not from
-	// the message window, so compaction never changes them (#248).
+	// the message window, so compaction never changes them (#248). The style
+	// lock text is read from the turn's frozen snapshot: the visual anchors
+	// block states its state and picture count only, so one prompt never shows
+	// two versions of the same user setting (#250).
 	sections.add("work_ledger", orchestrator.workLedgerPrompt(ctx, ownerID, sessionID, history))
-	sections.add("work_anchors", orchestrator.workAnchorsPrompt(ctx, ownerID, sessionID))
+	sections.add("work_anchors", orchestrator.workAnchorsPrompt(ctx, ownerID, sessionID, options.StyleLock))
+	sections.add("visual_anchors", orchestrator.visualAnchorsPrompt(options))
 	sections.add("selection", orchestrator.selectionPrompt(options))
 	sections.add("brief", orchestrator.briefPrompt(options))
 	// The self-check state is stored session data, not a message-window
@@ -2004,8 +2049,39 @@ func (orchestrator *Orchestrator) agentRequest(
 			}
 		}
 	}
+	// #244: the frozen selection mask travels with a server-composed preview
+	// picture, right after the newest user message, so the model sees exactly
+	// which region the person painted. A composition failure keeps the mask's
+	// text description and never blocks the turn.
+	var selectionParts []agents.ContentPart
+	if budget.Enabled && options.SelectionMask != nil && orchestrator.selectionPreview != nil &&
+		lastUserMessage > summarized && lastUserMessage >= 0 &&
+		history[lastUserMessage].Role == orchestrator.schema.Roles.User {
+		if snapshot, found := canvasSnapshotAttachment(options); found {
+			if url, ok := orchestrator.selectionPreview(ctx, ownerID, snapshot.URL,
+				options.SelectionMask.MaskAssetID); ok {
+				selectionParts = append(selectionParts,
+					agents.ContentPart{
+						Kind:   orchestrator.schema.Context.ImagePartKind,
+						URL:    url,
+						Detail: orchestrator.schema.Context.CanvasImageDetail,
+					},
+					agents.ContentPart{
+						Kind: orchestrator.schema.Context.TextPartKind,
+						Text: orchestrator.schema.Context.SelectionMaskPreviewLabel,
+					})
+				// The preview is one more picture of the canvas role: it spends
+				// the same role quota and the shared request budget as the
+				// snapshot, so the vision plan can drop the lowest priority
+				// pictures instead of silently exceeding the bound.
+				spend.Images++
+				spend.Tokens += budget.tokenCostFor(catalog.ChatVisionSourceCanvas)
+				spend.Bytes += int64(len(url))
+			}
+		}
+	}
 	plan := orchestrator.planVision(
-		ctx, ownerID, history, indexedByMessage, summarized, lastUserMessage,
+		ctx, ownerID, sessionID, history, indexedByMessage, summarized, lastUserMessage,
 		options, spend,
 	)
 	// The newest generated pictures (a 3D result's thumbnail included) are shown
@@ -2142,6 +2218,16 @@ func (orchestrator *Orchestrator) agentRequest(
 				content = ""
 			}
 			parts = append(parts, styleParts...)
+		}
+		if messageIndex == lastUserMessage && len(selectionParts) > 0 {
+			if len(parts) == 0 && content != "" {
+				parts = append(parts, agents.ContentPart{
+					Kind: orchestrator.schema.Context.TextPartKind,
+					Text: content,
+				})
+				content = ""
+			}
+			parts = append(parts, selectionParts...)
 		}
 		if messageIndex == lastUserMessage && message.Role == orchestrator.schema.Roles.User {
 			if overflowNote != "" {

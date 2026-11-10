@@ -66,7 +66,7 @@ func TestThreeViewSkillUsesPreparedGrantAndOnePaidTask(t *testing.T) {
 	_, handler, cookie, session := grantTestBrowserWithApplication(t, nil, []string{"user"})
 	asset := uploadSkillSource(t, handler, cookie)
 	createBody := `{"session_id":"` + session + `","recipe_id":"image-three-view",` +
-		`"recipe_revision":"2026-11-03.65.1","offering_id":"openai/gpt-image-2/image-to-image",` +
+		`"recipe_revision":"2026-11-10.243.1","offering_id":"openai/gpt-image-2/image-to-image",` +
 		`"source_asset_id":"` + asset + `"}`
 	create := grantTestRequest(t, handler, cookie, http.MethodPost, "/api/v1/skill-runs", createBody, "three-view-request")
 	if create.Code != http.StatusCreated {
@@ -156,6 +156,9 @@ func TestThreeViewRecipePublicationPreservesOldRunAndPreparedInputs(t *testing.T
 	}
 	for index := range legacy.Steps {
 		legacy.Steps[index].PromptTemplate = legacyPrompts[index]
+		// The legacy recipe rendered every view from the original image; the
+		// front-source chain arrived with #243.
+		legacy.Steps[index].SourceStepKey = ""
 	}
 	// Use a real older Catalog in the HTTP harness, not Application()'s
 	// defensive copy. Publishing below reassembles the resolver/runtime over
@@ -291,10 +294,29 @@ func TestThreeViewRecipePublicationPreservesOldRunAndPreparedInputs(t *testing.T
 	if newRun.RecipeRevision != revised.Revision || newRun.RecipeHash == oldRun.RecipeHash || newRun.SourceAssetID != oldRun.SourceAssetID {
 		t.Fatalf("new Run did not freeze revised recipe with same source: %+v", newRun)
 	}
+	threeView := source.Application().Chat.ThreeView
+	wantPrompt := func(raw string) string {
+		for _, subject := range threeView.SubjectTypes {
+			if subject.ID == threeView.DefaultSubjectType {
+				return strings.NewReplacer("{subject_front_constraints}", subject.FrontConstraints,
+					"{subject_view_constraints}", subject.ViewConstraints).Replace(raw)
+			}
+		}
+		return raw
+	}
 	for index, step := range newRun.Steps {
-		if step.Spec.PromptTemplate != revised.Steps[index].PromptTemplate || step.Spec.SourceStepKey != "" ||
-			step.TaskID != "" || step.GrantRequestID != "" {
+		wantSource := ""
+		if index > 0 {
+			wantSource = "front" // #243: every later view uses the accepted front view
+		}
+		if step.Spec.PromptTemplate != wantPrompt(revised.Steps[index].PromptTemplate) ||
+			step.Spec.SourceStepKey != wantSource || step.TaskID != "" || step.GrantRequestID != "" {
 			t.Fatalf("new %s template/source or execution changed: %+v", step.Spec.Key, step)
+		}
+		if index > 0 {
+			// #243: a later view prepares only from the accepted front output,
+			// which this publication test does not generate.
+			continue
 		}
 		prepared := prepare(newRun, index)
 		if strings.Contains(string(prepared.NormalizedInput), "reference character") ||

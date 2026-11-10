@@ -295,12 +295,16 @@
       "title": "2D 角色立绘：赛博朋克女刺客",
       "modality": "2d",
       "category": "character_illustration",
-      "purpose": null,
+      "purpose": "illustration",
       "prompt": "画一张赛博朋克女刺客的全身立绘，简洁数字插画，透明背景。",
       "output": {"background": "transparent"},
       "reference_images": [],
       "deliverables": ["透明背景的全身立绘（PNG）"],
       "steps": [
+        {
+          "user": "这张图主要用来做什么？",
+          "tool": {"name": "ask_choice", "arguments": {"kind": "image_usage_profile"}}
+        },
         {
           "user": "开始画。",
           "tool": {"name": "refine_image", "arguments": {"prompt": "full-body cyberpunk female assassin, clean digital illustration, confident pose, neon accents, transparent background, sharp silhouette, no text, no watermark"}}
@@ -310,11 +314,12 @@
       "expected": {
         "capabilities": ["text-to-image"],
         "required_tool_groups": [
+          {"id": "usage", "any": ["ask_choice"]},
           {"id": "generate_2d", "any": ["refine_image"]}
         ],
-        "order": [],
+        "order": [{"before": ["ask_choice"], "after": ["refine_image"]}],
         "soft_tools": [],
-        "budgets": {"max_paid_calls": 1, "max_tool_calls": 4, "max_interruptions": 1}
+        "budgets": {"max_paid_calls": 1, "max_tool_calls": 6, "max_interruptions": 2}
       }
     },
     {
@@ -322,12 +327,16 @@
       "title": "2D 图标/道具图：三色药水瓶图标",
       "modality": "2d",
       "category": "icon_prop",
-      "purpose": null,
+      "purpose": "icon_prop",
       "prompt": "画一套三个不同颜色的药水瓶图标，统一画风，透明背景。",
       "output": {"background": "transparent"},
       "reference_images": [],
       "deliverables": ["透明背景的三色药水瓶图标（PNG）"],
       "steps": [
+        {
+          "user": "这张图主要用来做什么？",
+          "tool": {"name": "ask_choice", "arguments": {"kind": "image_usage_profile"}}
+        },
         {
           "user": "开始画。",
           "tool": {"name": "refine_image", "arguments": {"prompt": "set of three potion bottle icons, red blue and green liquid, matching stylized game icon style, thick clean outlines, transparent background, no text, no watermark"}}
@@ -337,11 +346,12 @@
       "expected": {
         "capabilities": ["text-to-image"],
         "required_tool_groups": [
+          {"id": "usage", "any": ["ask_choice"]},
           {"id": "generate_2d", "any": ["refine_image"]}
         ],
-        "order": [],
+        "order": [{"before": ["ask_choice"], "after": ["refine_image"]}],
         "soft_tools": [],
-        "budgets": {"max_paid_calls": 1, "max_tool_calls": 4, "max_interruptions": 1}
+        "budgets": {"max_paid_calls": 1, "max_tool_calls": 6, "max_interruptions": 2}
       }
     },
     {
@@ -349,11 +359,15 @@
       "title": "2D 系列一致性：同一角色的立绘、半身像与侧面像",
       "modality": "2d",
       "category": "series_consistency",
-      "purpose": null,
+      "purpose": "illustration",
       "prompt": "先画主角的全身立绘，再画同一角色的半身像和侧面像，三张保持同一画风和身份特征。",
       "reference_images": [],
       "deliverables": ["同一角色的三张系列图（PNG）", "三张图共用风格锚与身份锚"],
       "steps": [
+        {
+          "user": "这张图主要用来做什么？",
+          "tool": {"name": "ask_choice", "arguments": {"kind": "image_usage_profile"}}
+        },
         {
           "user": "先画全身立绘。",
           "tool": {"name": "refine_image", "arguments": {"prompt": "full-body portrait of a young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"}}
@@ -372,11 +386,49 @@
         "capabilities": ["text-to-image"],
         "min_tasks": {"text-to-image": 3},
         "required_tool_groups": [
+          {"id": "usage", "any": ["ask_choice"]},
           {"id": "generate_2d", "any": ["refine_image"]}
         ],
-        "order": [],
+        "order": [{"before": ["ask_choice"], "after": ["refine_image"]}],
         "soft_tools": [],
-        "budgets": {"max_paid_calls": 3, "max_tool_calls": 6, "max_interruptions": 2}
+        "budgets": {"max_paid_calls": 3, "max_tool_calls": 8, "max_interruptions": 3}
+      }
+    },
+    {
+      "id": "2d-3d-input-concept",
+      "title": "2D 到 3D：单主体、纯色背景的概念图",
+      "modality": "2d",
+      "category": "model3d_input",
+      "purpose": "model3d_input",
+      "prompt": "画一张用来生成 3D 模型的概念图：单主体机械臂道具、A-pose、纯色背景、完整不裁切。",
+      "output": {"background": "solid", "single_subject": true, "pose": "a-pose"},
+      "reference_images": [],
+      "deliverables": ["单主体、纯色背景、可用于图生 3D 的概念图（PNG）"],
+      "steps": [
+        {
+          "user": "这张图要作为 3D 输入，用途是 3D 输入图。",
+          "tool": {"name": "ask_choice", "arguments": {"kind": "image_usage_profile"}}
+        },
+        {
+          "user": "按 3D 输入图的默认要求画。",
+          "tool": {"name": "update_production_brief", "arguments": {"image_use": "model3d_input", "image_for_3d": true, "image_transparent": false}}
+        },
+        {
+          "user": "开始画。",
+          "tool": {"name": "refine_image", "arguments": {"model": "nano-banana-pro", "prompt": "single mechanical arm prop, A-pose, full subject, solid neutral background, even studio lighting, product concept art, no text, no watermark"}}
+        }
+      ],
+      "live_followups": ["请画一张用于生成 3D 模型的单主体概念图，纯色背景、完整不裁切。"],
+      "expected": {
+        "capabilities": ["text-to-image"],
+        "required_tool_groups": [
+          {"id": "usage", "any": ["ask_choice"]},
+          {"id": "brief", "any": ["update_production_brief"]},
+          {"id": "generate_2d", "any": ["refine_image"]}
+        ],
+        "order": [{"before": ["ask_choice", "update_production_brief"], "after": ["refine_image"]}],
+        "soft_tools": [],
+        "budgets": {"max_paid_calls": 1, "max_tool_calls": 8, "max_interruptions": 2}
       }
     },
     {
@@ -421,5 +473,6 @@
         "budgets": {"max_paid_calls": 1, "max_tool_calls": 10, "max_interruptions": 2}
       }
     }
+
   ]
 }

@@ -43,8 +43,14 @@ def load_json(path):
         return json.load(handle)
 
 
-def validate_request_set(data):
-    """Problems that would make a report incomparable or a run meaningless."""
+def validate_request_set(data, purposes=None):
+    """Problems that would make a report incomparable or a run meaningless.
+
+    purposes optionally maps a modality to the purpose ids the Product Schema
+    declares ("2d" from chat.image2d_usage.profiles, "3d" from
+    chat.model3d_usage.profiles); a request whose purpose is outside that set
+    is refused.
+    """
     problems = []
     if not isinstance(data, dict):
         return ["the request set must be a JSON object"]
@@ -76,6 +82,11 @@ def validate_request_set(data):
         for reference in references or []:
             if not isinstance(reference, str) and not (isinstance(reference, dict) and reference.get("filename")):
                 problems.append(f"{request_id}: every reference image needs a filename")
+        if purposes is not None and request.get("purpose"):
+            allowed = purposes.get(request.get("modality")) or set()
+            if request["purpose"] not in allowed:
+                problems.append(
+                    f"{request_id}: purpose {request['purpose']} is not declared for {request.get('modality')} work")
         steps = request.get("steps") or []
         if not isinstance(steps, list) or not steps:
             problems.append(f"{request_id}: steps must be a non-empty list")
@@ -539,6 +550,16 @@ def image_metrics(data):
         if stats:
             metrics.update(stats)
     return metrics
+
+
+def schema_purposes(schema):
+    """The purpose ids each modality declares in a Product Schema document."""
+    application = schema.get("application", schema) if isinstance(schema, dict) else {}
+    chat = application.get("chat") or {}
+    return {
+        "2d": {profile.get("id") for profile in ((chat.get("image2d_usage") or {}).get("profiles") or [])},
+        "3d": {profile.get("id") for profile in ((chat.get("model3d_usage") or {}).get("profiles") or [])},
+    }
 
 
 def purpose_budget(schema, purpose):

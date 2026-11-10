@@ -94,7 +94,7 @@ func visionHistory() []Message {
 func planForTest(t *testing.T, orchestrator *Orchestrator, history []Message, options TurnOptions) visionPlan {
 	t.Helper()
 	indexed, lastUser := orchestrator.indexHistoryImages(history)
-	return orchestrator.planVision(context.Background(), "owner", history, indexed, -1, lastUser, options, visionSpend{})
+	return orchestrator.planVision(context.Background(), "owner", "session", history, indexed, -1, lastUser, options, visionSpend{})
 }
 
 func pickedDetails(plan visionPlan) map[string]string {
@@ -278,7 +278,7 @@ func TestSelectedVisionImagesStayOnTheirOwnRole(t *testing.T) {
 	orchestrator := visionTestOrchestrator(schema, nil)
 	history := visionHistory()
 	indexed, lastUser := orchestrator.indexHistoryImages(history)
-	plan := orchestrator.planVision(context.Background(), "owner", history, indexed, -1, lastUser,
+	plan := orchestrator.planVision(context.Background(), "owner", "session", history, indexed, -1, lastUser,
 		TurnOptions{ReferenceImageIndices: []int{1, 7}}, visionSpend{})
 	if len(plan.Picks[0]) != 1 || plan.Picks[0][0].URL != "data:image/png;base64,_a1" {
 		t.Fatalf("selected picks = %+v", plan.Picks)
@@ -371,7 +371,7 @@ func TestLegacyReferenceIndicesKeepTheGeneratedPictures(t *testing.T) {
 	orchestrator := visionTestOrchestrator(schema, nil)
 	history := visionHistory()
 	indexed, lastUser := orchestrator.indexHistoryImages(history)
-	plan := orchestrator.planVision(context.Background(), "owner", history, indexed, -1, lastUser,
+	plan := orchestrator.planVision(context.Background(), "owner", "session", history, indexed, -1, lastUser,
 		TurnOptions{ReferenceImageIndices: []int{1}}, visionSpend{})
 	if len(plan.Picks[3]) != 0 || plan.Picks[0][0].URL != "data:image/png;base64,_a1" {
 		t.Fatalf("user picks = %+v; only the named reference is shown", plan.Picks)
@@ -379,6 +379,109 @@ func TestLegacyReferenceIndicesKeepTheGeneratedPictures(t *testing.T) {
 	if len(plan.Generated) != 2 || plan.Generated[0].URL != "data:image/png;base64,_r1" ||
 		plan.Generated[1].URL != "data:image/png;base64,_r2" {
 		t.Fatalf("generated = %+v; the historical scan must survive reference indices", plan.Generated)
+	}
+}
+
+// #250: an identity anchor may store the canonical Task asset URL of a
+// generated result. VisionAnchorInline receives the owner, the session and that
+// exact reference; the picture enters at the role's detail. A reference that
+// cannot be read is named in the overflow note, never silently skipped.
+func TestVisualAnchorTaskAssetURLIsInlinedAtHighDetail(t *testing.T) {
+	roles := []catalog.ChatVisionRoleSchema{
+		visionRole("style_anchor", []string{"style"}, 2, 50, "high"),
+	}
+	schema := visionTestSchema(t, roles, 10, 10000)
+	reference := "/api/v1/tasks/task-1/assets/gen-1"
+	var gotOwner, gotSession, gotReference string
+	orchestrator := visionTestOrchestrator(schema, nil)
+	orchestrator.visionAnchorInline = func(_ context.Context, owner generation.OwnerID, sessionID, value string) (string, bool) {
+		gotOwner, gotSession, gotReference = string(owner), sessionID, value
+		return "data:image/png;base64,anchor-task", true
+	}
+	options := TurnOptions{VisualAnchors: []VisualAnchor{{
+		Name: "hero", Kind: "identity", References: []string{reference},
+	}}}
+	history := []Message{{Role: "user", Content: "draw"}}
+	indexed, lastUser := orchestrator.indexHistoryImages(history)
+	plan := orchestrator.planVision(context.Background(), "owner", "session", history, indexed, -1, lastUser,
+		options, visionSpend{})
+	if gotOwner != "owner" || gotSession != "session" || gotReference != reference {
+		t.Fatalf("anchor inline got owner=%q session=%q reference=%q", gotOwner, gotSession, gotReference)
+	}
+	if len(plan.Style) != 1 || plan.Style[0].URL != "data:image/png;base64,anchor-task" ||
+		plan.Style[0].Detail != "high" || !strings.Contains(plan.Style[0].Label, "hero") {
+		t.Fatalf("anchor style picks = %+v; want the Task URL inlined at high detail", plan.Style)
+	}
+	if len(plan.Dropped) != 0 {
+		t.Fatalf("a readable anchor must not be reported as dropped: %v", plan.Dropped)
+	}
+
+	orchestrator.visionAnchorInline = func(context.Context, generation.OwnerID, string, string) (string, bool) {
+		return "", false
+	}
+	plan = orchestrator.planVision(context.Background(), "owner", "session", history, indexed, -1, lastUser,
+		options, visionSpend{})
+	if len(plan.Style) != 0 {
+		t.Fatalf("an unreadable anchor must not spend a place: %+v", plan.Style)
+	}
+	if !slices.Contains(plan.Dropped, "身份锚「hero」参考图 #1") {
+		t.Fatalf("dropped = %v; the unreadable anchor must be named by its handle", plan.Dropped)
+	}
+}
+
+// #250: an anchor stored as an input asset ID keeps the #247 path; the anchor
+// inliner receives the raw ID and the session.
+func TestVisualAnchorInputAssetIDUsesTheAnchorInliner(t *testing.T) {
+	roles := []catalog.ChatVisionRoleSchema{
+		visionRole("style_anchor", []string{"style"}, 2, 50, "high"),
+	}
+	schema := visionTestSchema(t, roles, 10, 10000)
+	var gotReference, gotSession string
+	orchestrator := visionTestOrchestrator(schema, nil)
+	orchestrator.visionAnchorInline = func(_ context.Context, _ generation.OwnerID, sessionID, value string) (string, bool) {
+		gotReference, gotSession = value, sessionID
+		return "data:image/png;base64,anchor-asset", true
+	}
+	options := TurnOptions{VisualAnchors: []VisualAnchor{{
+		Name: "hero", Kind: "identity", References: []string{"asset-1"},
+	}}}
+	history := []Message{{Role: "user", Content: "draw"}}
+	indexed, lastUser := orchestrator.indexHistoryImages(history)
+	plan := orchestrator.planVision(context.Background(), "owner", "session", history, indexed, -1, lastUser,
+		options, visionSpend{})
+	if gotReference != "asset-1" || gotSession != "session" || len(plan.Style) != 1 ||
+		plan.Style[0].URL != "data:image/png;base64,anchor-asset" {
+		t.Fatalf("reference=%q session=%q style=%+v", gotReference, gotSession, plan.Style)
+	}
+}
+
+// #250: without the anchor inliner an anchor picture is still named in the
+// overflow note; the style lock's own silence is unchanged.
+func TestVisualAnchorWithoutInlinerIsNamedInTheOverflow(t *testing.T) {
+	roles := []catalog.ChatVisionRoleSchema{
+		visionRole("style_anchor", []string{"style"}, 2, 50, "high"),
+	}
+	schema := visionTestSchema(t, roles, 10, 10000)
+	orchestrator := visionTestOrchestrator(schema, nil)
+	orchestrator.visionAnchorInline = nil
+	options := TurnOptions{
+		StyleLock: StyleLock{Enabled: true, References: []string{"lock-1"}},
+		VisualAnchors: []VisualAnchor{{
+			Name: "hero", Kind: "identity", References: []string{"asset-1"},
+		}},
+	}
+	history := []Message{{Role: "user", Content: "draw"}}
+	indexed, lastUser := orchestrator.indexHistoryImages(history)
+	plan := orchestrator.planVision(context.Background(), "owner", "session", history, indexed, -1, lastUser,
+		options, visionSpend{})
+	if len(plan.Style) != 1 || plan.Style[0].URL != "data:image/png;base64,lock-1" {
+		t.Fatalf("style picks = %+v; the readable lock picture keeps its place", plan.Style)
+	}
+	if !slices.Contains(plan.Dropped, "身份锚「hero」参考图 #1") {
+		t.Fatalf("dropped = %v; the anchor must be named", plan.Dropped)
+	}
+	if slices.Contains(plan.Dropped, "[style dropped 1]") {
+		t.Fatalf("dropped = %v; the readable style lock is not dropped", plan.Dropped)
 	}
 }
 
@@ -399,7 +502,7 @@ func TestStyleAnchorRoleUsesItsQuotaDetailAndSchemaText(t *testing.T) {
 	}}
 	history := visionHistory()
 	indexed, lastUser := orchestrator.indexHistoryImages(history)
-	plan := orchestrator.planVision(context.Background(), "owner", history, indexed, -1, lastUser,
+	plan := orchestrator.planVision(context.Background(), "owner", "session", history, indexed, -1, lastUser,
 		options, visionSpend{})
 	if len(plan.Style) != 2 {
 		t.Fatalf("style picks = %+v; the role's two places bound the lock's three references", plan.Style)
@@ -425,7 +528,7 @@ func TestStyleAnchorRoleUsesItsQuotaDetailAndSchemaText(t *testing.T) {
 	// Without the asset inliner the lock cannot be read: the references are
 	// skipped without spending a place, and every other role keeps its own.
 	orchestrator.visionAssetInline = nil
-	plan = orchestrator.planVision(context.Background(), "owner", history, indexed, -1, lastUser,
+	plan = orchestrator.planVision(context.Background(), "owner", "session", history, indexed, -1, lastUser,
 		options, visionSpend{})
 	if len(plan.Style) != 0 || plan.Spend.Images != 3 {
 		t.Fatalf("plan without inliner = style %+v spend %+v", plan.Style, plan.Spend)

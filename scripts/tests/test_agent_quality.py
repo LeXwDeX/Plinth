@@ -20,6 +20,8 @@ def load(name):
 
 
 quality = load("agent_quality")
+CATALOG = json.loads((pathlib.Path(__file__).resolve().parents[2] / "internal" / "catalog" / "default_catalog.json").read_text(encoding="utf-8"))
+PURPOSES = quality.schema_purposes(CATALOG)
 
 
 def tool_call(name, arguments=None):
@@ -63,16 +65,25 @@ class RequestSetTest(unittest.TestCase):
     def test_the_shipped_request_set_is_valid(self):
         data, path, digest = quality.load_requests()
         self.assertEqual(data["version"], 2)
-        self.assertEqual(len(data["requests"]), 10)
+        self.assertEqual(len(data["requests"]), 11)
         self.assertTrue(path.endswith("requests.json"))
         self.assertEqual(len(digest), 64)
-        self.assertEqual(len({request["id"] for request in data["requests"]}), 10)
+        self.assertEqual(len({request["id"] for request in data["requests"]}), 11)
         reference = next(request for request in data["requests"] if request["id"] == "3d-image-reference")
         self.assertEqual(reference["modality"], "3d")
         self.assertEqual(reference["expected"]["capabilities"], ["image-to-3d"])
         self.assertEqual([step["tool"]["name"] for step in reference["steps"]],
                          ["create_model_3d_from_image", "inspect_model", "compare_model_reference", "record_self_check"])
+        concept = next(request for request in data["requests"] if request["id"] == "2d-3d-input-concept")
+        self.assertEqual(concept["modality"], "2d")
+        self.assertEqual(concept["expected"]["capabilities"], ["text-to-image"])
         self.assertEqual({request["modality"] for request in data["requests"]}, {"2d", "3d"})
+        self.assertEqual(quality.validate_request_set(data, PURPOSES), [])
+        for request in data["requests"]:
+            if request["modality"] == "2d":
+                self.assertIn(request["purpose"], PURPOSES["2d"])
+            else:
+                self.assertIn(request["purpose"], PURPOSES["3d"])
 
     def test_duplicate_ids_and_missing_fields_are_reported(self):
         data = {"version": 1, "requests": [base_request(), base_request()]}
@@ -85,6 +96,17 @@ class RequestSetTest(unittest.TestCase):
     def test_a_3d_request_needs_a_purpose(self):
         data = {"version": 1, "requests": [base_request(purpose=None)]}
         self.assertTrue(any("needs a purpose" in problem for problem in quality.validate_request_set(data)))
+
+    def test_a_2d_request_takes_a_2d_purpose_only(self):
+        request = base_request(modality="2d", purpose="icon_prop", expected={
+            "capabilities": ["text-to-image"],
+            "required_tool_groups": [{"id": "generate", "any": ["refine_image"]}],
+            "budgets": {"max_paid_calls": 1, "max_tool_calls": 4, "max_interruptions": 1},
+        })
+        self.assertEqual(quality.validate_request_set({"version": 2, "requests": [request]}, PURPOSES), [])
+        request["purpose"] = "game_character"
+        problems = quality.validate_request_set({"version": 2, "requests": [request]}, PURPOSES)
+        self.assertTrue(any("not declared for 2d" in problem for problem in problems))
 
 
 class TrajectoryTest(unittest.TestCase):

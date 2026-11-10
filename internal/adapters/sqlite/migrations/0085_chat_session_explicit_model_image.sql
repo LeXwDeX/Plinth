@@ -1,0 +1,1 @@
+ALTER TABLE go_chat_sessions ADD COLUMN explicit_model_image TEXT NOT NULL DEFAULT '';

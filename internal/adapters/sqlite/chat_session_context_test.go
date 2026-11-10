@@ -40,7 +40,7 @@ func TestMigration0065UpgradesExistingSessionsWithoutContext(t *testing.T) {
 		`ALTER TABLE go_chat_sessions DROP COLUMN context_updated_at`,
 		`ALTER TABLE go_chat_sessions DROP COLUMN context_vision_tokens`,
 		`ALTER TABLE go_chat_sessions DROP COLUMN brief`,
-		`ALTER TABLE go_chat_sessions DROP COLUMN explicit_model_3d`,
+		`ALTER TABLE go_chat_sessions DROP COLUMN explicit_model_3d`, `ALTER TABLE go_chat_sessions DROP COLUMN explicit_model_image`,
 		`ALTER TABLE chat_choices DROP COLUMN kind`,
 		`ALTER TABLE agent_generation_operations DROP COLUMN reference_count`,
 		`ALTER TABLE agent_generation_operations DROP COLUMN reference_total`,

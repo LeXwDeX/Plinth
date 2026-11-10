@@ -1597,11 +1597,11 @@ func (orchestrator *Orchestrator) workLedgerPrompt(
 }
 
 // workAnchorsPrompt is the per-turn style anchor block.
-func (orchestrator *Orchestrator) workAnchorsPrompt(ctx context.Context, ownerID, sessionID string) string {
+func (orchestrator *Orchestrator) workAnchorsPrompt(ctx context.Context, ownerID, sessionID string, lock StyleLock) string {
 	if orchestrator.service == nil || sessionID == "" {
 		return ""
 	}
-	return orchestrator.service.workAnchorsSummary(ctx, ownerID, sessionID)
+	return orchestrator.service.workAnchorsSummary(ctx, ownerID, sessionID, lock)
 }
 
 // ReadProductionStep backs get_production_step: it resolves one step by handle

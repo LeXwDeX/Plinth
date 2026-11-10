@@ -112,24 +112,37 @@ func TestAppendOnlyMigrationsShape(t *testing.T) {
 		files[version] = entry.Name()
 	}
 	head := sqlite.MigrationHead()
-	if len(files) > head {
-		t.Fatalf("migration files = %d; head is %d, no file may exceed it", len(files), head)
+	// The embedded migration list is the source of truth and must stay strictly
+	// contiguous 1..head: 84 is the vision usage (#247), 85 the explicit 2D model
+	// lock (#239), 86 the visual anchors (#250), 87 the persisted 3D self-check
+	// records and 88 the correction ownership of a paid step (#246). Every
+	// embedded version must exist on disk and no extra file may exist.
+	expected := sqlite.MigrationVersions()
+	if len(files) != len(expected) {
+		t.Fatalf("migration files = %d; want %d (embedded versions %v)", len(files), len(expected), expected)
 	}
-	// Versions 85 and 86 are in flight on their own branches (#239 and #250).
-	// An integration tree contains every version; a single-issue branch may
-	// temporarily leave those slots for the parallel migrations.
-	missingReserved := 0
-	for version := 1; version <= head; version++ {
+	for index, version := range expected {
+		if version != index+1 {
+			t.Fatalf("embedded migrations are not contiguous at index %d: version %d", index, version)
+		}
 		if files[version] == "" {
-			if version == 85 || version == 86 {
-				missingReserved++
-				continue
-			}
 			t.Fatalf("migration version %d missing on disk", version)
 		}
 	}
-	if len(files)+missingReserved != head {
-		t.Fatalf("migration files = %d plus %d reserved; want %d (versions 1..%d)", len(files), missingReserved, head, head)
+	for version := range files {
+		found := false
+		for _, declared := range expected {
+			if version == declared {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("migration file for undeclared version %d: %s", version, files[version])
+		}
+	}
+	if expected[len(expected)-1] != head {
+		t.Fatalf("migration head = %d, last embedded version = %d", head, expected[len(expected)-1])
 	}
 	// 0021/0022 必须保持纯追加形态：注释 + 单条 ADD COLUMN，无数据改写、
 	// 无 NOT NULL、无对既有行的回填。

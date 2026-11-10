@@ -76,6 +76,13 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 			Brief:    PublicChatProductionBriefSchema{Fields: append([]ChatProductionBriefField(nil), usage.Brief.Fields...)},
 		}
 	}
+	if usage := cloned.Chat.Image2DUsage; len(usage.Profiles) > 0 {
+		profiles := make([]PublicChatImage2DUsageProfile, 0, len(usage.Profiles))
+		for _, profile := range usage.Profiles {
+			profiles = append(profiles, PublicChatImage2DUsageProfile{ID: profile.ID, Label: profile.Label})
+		}
+		publicChat.Image2DUsage = &PublicChatImage2DUsageSchema{Profiles: profiles}
+	}
 	publicChat.ApprovalPolicy = PublicChatApprovalPolicy{
 		DefaultMode:                cloned.Chat.ApprovalPolicy.DefaultMode,
 		Modes:                      cloned.Chat.ApprovalPolicy.Modes,

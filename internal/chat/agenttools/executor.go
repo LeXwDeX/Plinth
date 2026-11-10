@@ -20,6 +20,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat/agentparams"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/skillrun"
+	"github.com/LeXwDeX/Plinth/internal/threeview"
 )
 
 const (
@@ -48,6 +49,9 @@ const (
 	// ToolInspectImage reports deterministic facts about one picture of the
 	// session without creating a Task (#245).
 	ToolInspectImage = "inspect_image"
+	// ToolCreateSelectionMask builds a local selection mask for one picture and
+	// stores it as the owner's input asset (#244).
+	ToolCreateSelectionMask = "create_selection_mask"
 	// ToolInspectModel reports the structure of a finished 3D model without
 	// creating a Task (#103).
 	ToolInspectModel = "inspect_model"
@@ -68,6 +72,9 @@ const (
 	// ToolProposeProductionPlan proposes the budget-mode production plan the
 	// person approves once (#103).
 	ToolProposeProductionPlan = "propose_production_plan"
+	// ToolSetVisualAnchor writes a session visual anchor after the person
+	// confirmed it on a choice card (#250).
+	ToolSetVisualAnchor = "set_visual_anchor"
 )
 
 // 同意状态键与决定值（agent 状态 store 与 harness consent 端点共用词汇）。
@@ -112,6 +119,10 @@ type Config struct {
 	// picture of the command's owner and session, never creates a Task and never
 	// spends credits.
 	InspectImage func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	// CreateSelectionMask is the read-only local mask tool (#244). It reads one
+	// picture of the command's owner and session, stores a PNG mask as that
+	// owner's input asset and never creates a Task or spends credits.
+	CreateSelectionMask func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	// InspectModel, RenderModelViews and CompareModels are the read-only model
 	// review tools (#103). They read only the command's owner and session,
 	// never create a Task and never spend credits.
@@ -143,9 +154,17 @@ type Config struct {
 	// re-quotes every step from the runtime Catalog and stores one pending
 	// plan card (#103).
 	ProposePlan func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	// WriteVisualAnchor applies one explicitly confirmed visual-anchor write
+	// (#250). The service owns the owner/session checks and the bounds; this
+	// tool cannot touch the user's style lock.
+	WriteVisualAnchor func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	// ChoiceKinds are chat.choice.kinds from the Product Schema; the Agent
-	// names one by id and never supplies options of its own.
+	// names one by id and supplies options only for a kind whose option source
+	// is agent (#239).
 	ChoiceKinds []catalog.ChatChoiceKindSchema
+	// ChoiceOptionInvalid words a refused direction-card option list
+	// (chat.presentation.messages.choice_option_invalid, #239).
+	ChoiceOptionInvalid string
 	// BriefSavedMessage and BriefInvalidTemplate word the update tool's result
 	// (model3d_usage.brief.saved_message / invalid_template); BriefMessages
 	// words its field refusals (model3d_usage.brief.messages).
@@ -196,6 +215,7 @@ type Executor struct {
 	skillRecipes          map[string]string
 	skillTurnStopped      func(context.Context, string, string, string) (bool, error)
 	threeView             catalog.ChatThreeViewSchema
+	threeViewService      *threeview.Service
 	params                *agentparams.Store
 	generate              chat.ToolExecutor
 	preflight             func(command chat.ToolCommand) string
@@ -206,6 +226,7 @@ type Executor struct {
 	listModels            func(ctx context.Context, ownerID, sessionID string) (json.RawMessage, error)
 	readProcessingPlan    func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	inspectImage          func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	createSelectionMask   func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	inspectModel          func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	renderModelViews      func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	compareModels         func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
@@ -217,7 +238,9 @@ type Executor struct {
 	askChoice             func(ctx context.Context, command chat.ToolCommand, kind catalog.ChatChoiceKindSchema,
 		arguments chat.AskChoiceArguments) (chat.ToolResult, error)
 	proposePlan            func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	writeVisualAnchor      func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	choiceKinds            map[string]catalog.ChatChoiceKindSchema
+	choiceOptionInvalid    string
 	briefSavedMessage      string
 	briefInvalidTemplate   string
 	briefMessages          catalog.ChatProductionBriefMessages
@@ -269,6 +292,11 @@ func (e *Executor) SetSkillRuntime(runtime *skillrun.Runtime, references SkillRe
 // SetThreeView gives the three-view tool the Schema's texts. It is called
 // during application assembly, like SetSkillRuntime.
 func (e *Executor) SetThreeView(schema catalog.ChatThreeViewSchema) { e.threeView = schema }
+
+// SetThreeViewService gives the three-view tool the budget continuation and
+// the automatic consistency check (#243). Without it the tool keeps the
+// per-view behavior: only the front view starts.
+func (e *Executor) SetThreeViewService(service *threeview.Service) { e.threeViewService = service }
 
 // BoundTaskForCall exposes only a server-verified historical binding for
 // recovery. It never asks the generator to prepare or submit a new Task.
@@ -328,6 +356,7 @@ func New(config Config) (*Executor, error) {
 	}
 	return &Executor{
 		choiceKinds:            choiceKinds,
+		choiceOptionInvalid:    config.ChoiceOptionInvalid,
 		briefSavedMessage:      config.BriefSavedMessage,
 		briefInvalidTemplate:   config.BriefInvalidTemplate,
 		briefMessages:          config.BriefMessages,
@@ -343,6 +372,7 @@ func New(config Config) (*Executor, error) {
 		listModels:             config.ListModels,
 		readProcessingPlan:     config.ReadProcessingPlan,
 		inspectImage:           config.InspectImage,
+		createSelectionMask:    config.CreateSelectionMask,
 		inspectModel:           config.InspectModel,
 		renderModelViews:       config.RenderModelViews,
 		compareModels:          config.CompareModels,
@@ -353,6 +383,7 @@ func New(config Config) (*Executor, error) {
 		updateBrief:            config.UpdateBrief,
 		askChoice:              config.AskChoice,
 		proposePlan:            config.ProposePlan,
+		writeVisualAnchor:      config.WriteVisualAnchor,
 		consent:                config.Consent,
 		consentState:           config.ConsentState,
 		consentClear:           config.ConsentClear,
@@ -402,6 +433,11 @@ func (e *Executor) Execute(
 		return e.updateProductionBrief(ctx, command), nil
 	case ToolAskChoice:
 		return e.askChoiceCard(ctx, command), nil
+	case ToolSetVisualAnchor:
+		if e.writeVisualAnchor == nil {
+			return chat.ToolResult{Error: "visual anchors unavailable", NoSubmission: true}, nil
+		}
+		return e.writeVisualAnchor(ctx, command)
 	case ToolProposeProductionPlan:
 		if e.proposePlan == nil {
 			return chat.ToolResult{Error: "production plans unavailable", NoSubmission: true}, nil
@@ -414,6 +450,11 @@ func (e *Executor) Execute(
 			return chat.ToolResult{Error: "image inspection unavailable", NoSubmission: true}, nil
 		}
 		return e.inspectImage(ctx, command)
+	case ToolCreateSelectionMask:
+		if e.createSelectionMask == nil {
+			return chat.ToolResult{Error: "selection mask unavailable", NoSubmission: true}, nil
+		}
+		return e.createSelectionMask(ctx, command)
 	case ToolGetProductionStep:
 		if e.readProductionStep == nil {
 			return chat.ToolResult{Error: "production ledger unavailable", NoSubmission: true}, nil
@@ -657,6 +698,25 @@ func (e *Executor) briefInvalid(reason string) string {
 // (#103). The Agent names the kind only; the options and their arguments come
 // from the Schema and the service. The card's answer would call its target
 // tool, so that tool must be registered and available in this turn's scope.
+// boundedChoiceToken reports whether an Agent-supplied direction option id is
+// a bounded token the answer can pass to a tool argument: a letter or digit
+// followed by at most 63 letters, digits, dots, underscores, colons, slashes
+// or hyphens. Free text never becomes an option id (#239).
+func boundedChoiceToken(id string) bool {
+	if id == "" || len(id) > 64 {
+		return false
+	}
+	for index, char := range id {
+		switch {
+		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
+		case index > 0 && (char == '.' || char == '_' || char == ':' || char == '/' || char == '-'):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) chat.ToolResult {
 	if e.askChoice == nil {
 		return chat.ToolResult{Error: "choice cards unavailable", NoSubmission: true}
@@ -665,6 +725,14 @@ func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) 
 		Kind        string `json:"kind"`
 		Question    string `json:"question"`
 		Recommended string `json:"recommended"`
+		Options     []struct {
+			ID          string `json:"id"`
+			Label       string `json:"label"`
+			Description string `json:"description"`
+		} `json:"options"`
+		Proposal struct {
+			Arguments json.RawMessage `json:"arguments"`
+		} `json:"proposal"`
 	}
 	if err := json.Unmarshal(command.Call.Arguments, &arguments); err != nil || arguments.Kind == "" {
 		return chat.ToolResult{Error: "invalid choice arguments", NoSubmission: true}
@@ -676,8 +744,22 @@ func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) 
 	if command.ToolAvailable != nil && !command.ToolAvailable(kind.ToolName) {
 		return chat.ToolResult{Error: "choice target tool unavailable", NoSubmission: true}
 	}
+	options := make([]chat.ChoiceOptionInput, 0, len(arguments.Options))
+	for _, option := range arguments.Options {
+		id := strings.TrimSpace(option.ID)
+		label := strings.TrimSpace(option.Label)
+		if !boundedChoiceToken(id) || label == "" || len([]rune(label)) > 120 || len([]rune(option.Description)) > 300 {
+			message := e.choiceOptionInvalid
+			if message == "" {
+				message = "invalid choice options"
+			}
+			return chat.ToolResult{Error: message, NoSubmission: true}
+		}
+		options = append(options, chat.ChoiceOptionInput{ID: id, Label: label, Description: strings.TrimSpace(option.Description)})
+	}
 	result, err := e.askChoice(ctx, command, kind, chat.AskChoiceArguments{
 		Kind: arguments.Kind, Question: arguments.Question, Recommended: arguments.Recommended,
+		Options: options, Proposal: arguments.Proposal.Arguments,
 	})
 	if err != nil {
 		if errors.Is(err, chat.ErrSessionNotFound) {

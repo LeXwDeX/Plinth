@@ -9,7 +9,7 @@ import { TablePopover, type TableCell, type TableSection } from '@/components/st
 import { useWorkspaceOfferings } from '@/hooks/use-workspace-offerings';
 import { fetchCapabilityOfferings, type OfferingWire } from '@/lib/agent-offerings';
 import { createChatBrowserClient } from '@/lib/chat/browser-client';
-import { pickExplicitModel3D } from '@/lib/chat/explicit-model';
+import { pickExplicitModel3D, pickExplicitModelImage } from '@/lib/chat/explicit-model';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
@@ -127,18 +127,26 @@ export function useDomainModelPick(domain: WorkspaceDomain): DomainPick {
       emptyText: schemaText(schema, 'ui.workspace.models.empty'),
       onPick: (key) => {
         setModel(domain, key);
-        // #103: a 3D pick is the person's explicit lock for this session. The
-        // restore and retired-successor paths above call setModel directly and
-        // do not mark it. A pick before the session exists waits for the first
-        // send; later picks are serialized per session and the newest wins.
-        if (domain === 'model-3d' && schema.runtime.http.routes.chat_session_model3d) {
-          pickExplicitModel3D({
+        // #103/#239: a 2D or 3D pick is the person's explicit lock for this
+        // session. The restore and retired-successor paths above call
+        // setModel directly and do not mark it. A pick before the session
+        // exists waits for the first send; later picks are serialized per
+        // session and the newest wins.
+        const route = domain === 'image'
+          ? schema.runtime.http.routes.chat_session_model2d
+          : schema.runtime.http.routes.chat_session_model3d;
+        if (route) {
+          const write = domain === 'image'
+            ? (sessionId: string, model: string) => client.setExplicitModelImage(sessionId, model)
+            : (sessionId: string, model: string) => client.setExplicitModel3D(sessionId, model);
+          const pick = domain === 'image' ? pickExplicitModelImage : pickExplicitModel3D;
+          pick({
             sessionId: activeSessionId,
             model: key,
             previous: selectedModel ?? null,
-            write: (sessionId, model) => client.setExplicitModel3D(sessionId, model),
+            write,
             onFailure: (previous) => {
-              setModel('model-3d', previous);
+              setModel(domain, previous);
               toast.error(schemaText(schema, 'ui.studio.picker.lock_failed'));
             },
           });

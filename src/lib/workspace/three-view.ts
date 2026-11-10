@@ -10,10 +10,12 @@ import { parseNativeQuote, type NativeQuote } from '@/lib/pricing';
  */
 
 export type ThreeViewStatus =
-  | 'not_started' | 'awaiting_approval' | 'denied' | 'starting' | 'running' | 'succeeded' | 'failed' | 'canceled' | 'unknown';
+  | 'not_started' | 'awaiting_approval' | 'denied' | 'starting' | 'running' | 'succeeded' | 'failed' | 'canceled'
+  /** A finished picture the automatic consistency check refused (#243); retryable alone. */
+  | 'rejected' | 'unknown';
 
 const STATUSES: readonly ThreeViewStatus[] = [
-  'not_started', 'awaiting_approval', 'denied', 'starting', 'running', 'succeeded', 'failed', 'canceled',
+  'not_started', 'awaiting_approval', 'denied', 'starting', 'running', 'succeeded', 'failed', 'canceled', 'rejected',
 ];
 
 export interface ThreeViewSlot {

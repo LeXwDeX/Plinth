@@ -212,8 +212,11 @@ func TestCrossDomainModelFallbackValidationRejectsUnsafeDeclarations(t *testing.
 	}{
 		// refine_image still uses the workspace model and its cross-domain
 		// fallback; the 3D generation tools moved to the model argument (#103).
-		{"fallback needs the user-model requirement", func(a *catalog.ApplicationSchema) {
-			find(a, "refine_image").RequireUserModel = false
+		{"fallback needs the user-model requirement or a model argument", func(a *catalog.ApplicationSchema) {
+			tool := find(a, "refine_image")
+			tool.RequireUserModel = false
+			tool.ModelArgument = ""
+			tool.ModelChoices = nil
 		}},
 		{"fallback needs exactly one domain", func(a *catalog.ApplicationSchema) {
 			find(a, "refine_image").Execution.Domains = []string{"image", "model-3d"}

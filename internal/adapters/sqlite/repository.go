@@ -376,6 +376,12 @@ var sessionEvidenceDeletionsMigration string
 //go:embed migrations/0084_chat_session_vision_usage.sql
 var chatSessionVisionUsageMigration string
 
+//go:embed migrations/0085_chat_session_explicit_model_image.sql
+var chatSessionExplicitModelImageMigration string
+
+//go:embed migrations/0086_chat_session_visual_anchors.sql
+var chatSessionVisualAnchorsMigration string
+
 //go:embed migrations/0087_chat_self_checks.sql
 var chatSelfChecksMigration string
 
@@ -458,8 +464,24 @@ func migrations() []migration {
 		migration{version: 82, name: "chat_branch_task_refs", sql: chatBranchTaskRefsMigration},
 		migration{version: 83, name: "session_evidence_deletions", sql: sessionEvidenceDeletionsMigration},
 		migration{version: 84, name: "chat_session_vision_usage", sql: chatSessionVisionUsageMigration},
+		migration{version: 85, name: "chat_session_explicit_model_image", sql: chatSessionExplicitModelImageMigration},
+		migration{version: 86, name: "chat_session_visual_anchors", sql: chatSessionVisualAnchorsMigration},
 		migration{version: 87, name: "chat_self_checks", sql: chatSelfChecksMigration},
 		migration{version: 88, name: "agent_operation_correction", sql: agentOperationCorrectionMigration})
+}
+
+// MigrationVersions is the version of every migration this binary embeds, in
+// apply order. There is no gap: 84 is the vision budget schema (#247), 85 the
+// explicit 2D model lock (#239), 86 the visual anchors (#250), 87 the persisted
+// 3D self-check records (#246) and 88 the correction ownership of a paid step
+// (#246).
+func MigrationVersions() []int {
+	all := migrations()
+	versions := make([]int, 0, len(all))
+	for _, migration := range all {
+		versions = append(versions, migration.version)
+	}
+	return versions
 }
 
 type migration struct {

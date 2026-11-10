@@ -32,7 +32,7 @@ func TestMigration0066UpgradesExistingSessionsToFollowTheDefaultModel(t *testing
 		`DROP TABLE llm_connection_checks`,
 		`ALTER TABLE go_chat_sessions DROP COLUMN chat_model`,
 		`ALTER TABLE go_chat_sessions DROP COLUMN brief`,
-		`ALTER TABLE go_chat_sessions DROP COLUMN explicit_model_3d`,
+		`ALTER TABLE go_chat_sessions DROP COLUMN explicit_model_3d`, `ALTER TABLE go_chat_sessions DROP COLUMN explicit_model_image`,
 		`ALTER TABLE chat_choices DROP COLUMN kind`,
 		`ALTER TABLE agent_generation_operations DROP COLUMN reference_count`,
 		`ALTER TABLE agent_generation_operations DROP COLUMN reference_total`,

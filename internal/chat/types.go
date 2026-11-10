@@ -59,6 +59,10 @@ type TurnOptions struct {
 	// StyleLock is the session lock snapshot frozen when the turn starts. The
 	// generation tool never reads the mutable session row for a running turn.
 	StyleLock StyleLock
+	// VisualAnchors is the session's reference-backed identity and style anchor
+	// snapshot frozen when the turn starts (#250). A running turn never reads
+	// the mutable session row, so an anchor edit cannot change a frozen task.
+	VisualAnchors []VisualAnchor `json:"VisualAnchors,omitempty"`
 	// StyleLockSkipped is the person's one-turn exemption. It is frozen with
 	// the turn and is never inferred from the Agent's request.
 	StyleLockSkipped      bool `json:"StyleLockSkipped,omitempty"`
@@ -89,6 +93,12 @@ type TurnOptions struct {
 	// SelectionPicked marks a Selection that is the session's picked candidate
 	// ("选用") rather than something the client selected on the workspace.
 	SelectionPicked bool `json:"SelectionPicked,omitempty"`
+	// SelectionMask is the selection mask of this canvas turn (#244), frozen
+	// when the turn starts after the service verified the mask asset for the
+	// owner, measured its pixel size, bounding box and coverage, and required
+	// the size to equal the artboard snapshot. A mask that does not hold
+	// refuses the turn; it is never dropped like an attachment claim.
+	SelectionMask *SelectionMask `json:"SelectionMask,omitempty"`
 	// Locale is the UI locale of the request that started the turn, frozen
 	// so the reply, the title and the server's own messages in the turn use
 	// it across restarts. Empty is the default locale.
@@ -126,10 +136,40 @@ type TurnOptions struct {
 	// session (#103). While set it is locked: a production purpose and an
 	// Agent-named model cannot replace it.
 	ExplicitModel3D string `json:"ExplicitModel3D,omitempty"`
+	// ExplicitModelImage is the 2D model the person explicitly picked in this
+	// session (#239). While set it is locked: a 2D purpose and an Agent-named
+	// model cannot replace it.
+	ExplicitModelImage string `json:"ExplicitModelImage,omitempty"`
 	// PlanContinuation is the production plan this turn runs: the server
 	// started it when the person approved the plan (#134). Only the service
 	// sets it; a request never does. Empty for an ordinary turn.
 	PlanContinuation string `json:"PlanContinuation,omitempty"`
+}
+
+// SelectionMaskRef is the client's claim about the selection mask of a canvas
+// turn (#244): one of its own input assets. It is untrusted until the service
+// measures it for the owner.
+type SelectionMaskRef struct {
+	MaskAssetID string
+}
+
+// SelectionMask is the frozen selection mask of a canvas turn (#244). The mask
+// is a picture the size of the artboard snapshot; its transparent pixels are
+// the region the person selected to redraw and its opaque pixels are kept.
+// Width and Height are the measured pixel size, BBox the inclusive pixel box
+// x0,y0,x1,y1 of the transparent region (all zero when nothing is selected)
+// and Coverage its share of the picture in [0,1].
+type SelectionMask struct {
+	MaskAssetID string  `json:"MaskAssetID"`
+	Width       int     `json:"Width"`
+	Height      int     `json:"Height"`
+	BBox        [4]int  `json:"BBox"`
+	Coverage    float64 `json:"Coverage"`
+}
+
+// Editable reports whether the mask selects any pixel at all.
+func (mask SelectionMask) Editable() bool {
+	return mask.BBox[2] >= mask.BBox[0] && mask.BBox[3] >= mask.BBox[1] && mask.Coverage > 0
 }
 
 type Turn struct {
@@ -248,9 +288,16 @@ type Session struct {
 	// StyleLock is the session-level style lock. It is owner-scoped and is
 	// projected only when the Catalog declares its session DTO field.
 	StyleLock StyleLock
+	// VisualAnchors are the session's reference-backed identity and style
+	// anchors (#250). They are server-side only; the browser reads no anchor
+	// projection.
+	VisualAnchors []VisualAnchor
 	// ExplicitModel3D is the 3D model the person explicitly picked in this
 	// session (#103); empty means no explicit pick.
 	ExplicitModel3D string
+	// ExplicitModelImage is the 2D model the person explicitly picked in this
+	// session (#239); empty means no explicit pick.
+	ExplicitModelImage string
 	// EstimatedCredits is the sum of the estimated credits of the tasks this
 	// session has accepted. It is an estimate, never a settled charge.
 	EstimatedCredits int
@@ -396,4 +443,13 @@ func (options TurnOptions) ModelFor(domain string) string {
 		return options.AIModel
 	}
 	return options.DomainModels[domain]
+}
+
+// ExplicitModelFor is the model the person explicitly locked for a workspace
+// domain: the 2D pick for the image workspace, the 3D pick otherwise (#239).
+func (options TurnOptions) ExplicitModelFor(domain string) string {
+	if domain == "image" {
+		return options.ExplicitModelImage
+	}
+	return options.ExplicitModel3D
 }

@@ -236,6 +236,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateModel3DUsageShape(schema, capabilityPresentations); err != nil {
 		return err
 	}
+	if err := validateImage2DUsageShape(schema); err != nil {
+		return err
+	}
 	if err := validateHarness(schema, capabilityPresentations); err != nil {
 		return err
 	}
@@ -258,6 +261,23 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		}
 		directStyleLockCapabilities[capability] = true
 	}
+	referenceCapabilities := make(map[schemacontract.Capability]bool, len(schema.StyleLock.ReferenceCapabilities))
+	for _, capability := range schema.StyleLock.ReferenceCapabilities {
+		if !capability.Valid() {
+			return errors.New("style_lock.reference_capabilities 只能声明已知能力")
+		}
+		// Style pictures are reference inputs: a 3D geometry or motion
+		// capability has no style reference slot, so only image and
+		// processing steps may declare one (#250).
+		if domain, known := capabilityDomains[capability]; !known ||
+			(domain != schemacontract.DomainImage && domain != schemacontract.DomainProcessing) {
+			return errors.New("style_lock.reference_capabilities 只能声明图片或处理能力")
+		}
+		if referenceCapabilities[capability] {
+			return errors.New("style_lock.reference_capabilities 不能重复声明同一能力")
+		}
+		referenceCapabilities[capability] = true
+	}
 	styleLockDeclared := runtime.HTTP.Routes.ChatSessionStyleLock != "" ||
 		schema.StyleLock.MaximumTextCharacters > 0 || schema.StyleLock.MaximumReferenceImages > 0 ||
 		schema.API.StyleLock.Enabled != "" || schema.API.StyleLock.Text != "" || schema.API.StyleLock.References != "" ||
@@ -275,13 +295,23 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		strings.TrimSpace(schema.Presentation.Messages.StyleLockReferenceLimit) == "" ||
 		strings.TrimSpace(schema.Presentation.Messages.StyleLockReferenceInvalid) == "" ||
 		strings.TrimSpace(schema.Presentation.Messages.StyleLockReferenceUnavailable) == "" ||
-		strings.TrimSpace(schema.Presentation.Messages.StyleLockReferencesTrimmed) == "") {
+		strings.TrimSpace(schema.Presentation.Messages.StyleLockReferencesTrimmed) == "" ||
+		len(schema.StyleLock.ReferenceCapabilities) == 0 ||
+		strings.TrimSpace(schema.StyleLock.AgentContextTemplate) == "" ||
+		!strings.Contains(schema.StyleLock.AgentContextTemplate, "{enabled}") ||
+		!strings.Contains(schema.StyleLock.AgentContextTemplate, "{text}") ||
+		!strings.Contains(schema.StyleLock.AgentContextTemplate, "{references}") ||
+		strings.TrimSpace(schema.StyleLock.EnabledText) == "" ||
+		strings.TrimSpace(schema.StyleLock.DisabledText) == "" ||
+		strings.TrimSpace(schema.StyleLock.ReferencePurposeTemplate) == "" ||
+		strings.TrimSpace(schema.StyleLock.SkipNote) == "" ||
+		strings.TrimSpace(schema.StyleLock.UnsupportedNote) == "") {
 		return errors.New("style_lock 的上限、字段与错误文案必须完整")
 	}
 	if err := validatePendingApprovals(schema.PendingApprovals); err != nil {
 		return err
 	}
-	if err := validateThreeView(schema.ThreeView, schema.Skills.Recipes, schema.Tools); err != nil {
+	if err := validateThreeView(schema.ThreeView, schema.Skills.Recipes, schema.Tools, schema.AgentTools); err != nil {
 		return err
 	}
 	if err := validateDSMLSpellings(schema.DSML); err != nil {
@@ -680,7 +710,13 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateSelfCheck(schema); err != nil {
 		return err
 	}
+	if err := validateImageMask(schema); err != nil {
+		return err
+	}
 	if err := validateWorkLedger(schema); err != nil {
+		return err
+	}
+	if err := validateVisualAnchors(schema); err != nil {
 		return err
 	}
 	for index, tool := range schema.Tools {
@@ -688,9 +724,10 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 			return fmt.Errorf("tools[%d] require_unique_offering requires independent model selection", index)
 		}
 		if tool.CrossDomainModelFallback {
-			if !tool.RequireUserModel || len(tool.Execution.Domains) != 1 ||
+			selectsModel := tool.RequireUserModel || tool.ModelArgument != ""
+			if !selectsModel || len(tool.Execution.Domains) != 1 ||
 				strings.TrimSpace(tool.ResultFields.Model) == "" || strings.TrimSpace(tool.ResultFields.ModelFallback) == "" {
-				return fmt.Errorf("tools[%d] cross_domain_model_fallback 需要 require_user_model、单一 domain 与 result_fields.model/model_fallback", index)
+				return fmt.Errorf("tools[%d] cross_domain_model_fallback 需要 require_user_model 或 model_argument、单一 domain 与 result_fields.model/model_fallback", index)
 			}
 		}
 		switch tool.ResultAttachmentKind {
@@ -719,6 +756,23 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		}
 		// #296: a reference sets the output size only for a generation tool
 		// that sends reference pictures, and its note needs both templates.
+		// #244: every tool says what it does with the frozen selection mask of
+		// a canvas turn. Only a generation tool that declares the mask mapping
+		// and its tool argument can bind it; anything else must ignore it.
+		switch tool.SelectionMask {
+		case "bind":
+			if !acceptReferences || tool.Processing != nil ||
+				tool.ArgumentMappings["mask"] != "mask" || tool.OverrideMappings["mask"] != "mask" ||
+				!toolSchemaDeclaresParameter(tool, "mask") {
+				return fmt.Errorf("tools[%d] selection_mask bind 需要读取参考图、声明 mask 参数映射且不加工模型的生成工具", index)
+			}
+		case "", "ignore":
+			// A Catalog written before #244 declares no mask binding; it
+			// keeps its old whole-image behavior. The shipped Catalog declares
+			// one on every tool (checked by its own tests).
+		default:
+			return fmt.Errorf("tools[%d] selection_mask 必须是 bind 或 ignore: %q", index, tool.SelectionMask)
+		}
 		switch tool.ReferenceSize {
 		case "":
 		case "single":
@@ -790,6 +844,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		if err := validateReferencePurposes(tool, acceptReferences, schema.Context); err != nil {
 			return fmt.Errorf("tools[%d]: %w", index, err)
 		}
+		if err := validateAnchorArgument(tool, acceptReferences); err != nil {
+			return fmt.Errorf("tools[%d]: %w", index, err)
+		}
 		if note := tool.ReferenceCapacityNote; note != (ChatToolReferenceCapacityNote{}) && (!acceptReferences ||
 			strings.TrimSpace(note.Single) == "" || !strings.Contains(note.Multiple, "{count}") ||
 			(note.NoPrompt != "" && strings.TrimSpace(note.NoPrompt) == "") ||
@@ -840,12 +897,14 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"find_history_images":     {"history.images", "READ", []string{"image", "model-3d"}},
 		"recover_task_result":     {"task.refetch", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"inspect_image":           {"image.inspect", "READ", []string{"image", "model-3d"}},
+		"create_selection_mask":   {"image.mask", "READ", []string{"image"}},
 		"inspect_model":           {"model.inspect", "READ", []string{"model-3d"}},
 		"render_model_views":      {"model.render", "READ", []string{"model-3d"}},
 		"compare_models":          {"model.compare", "READ", []string{"model-3d"}},
 		"compare_model_reference": {"model.compare_reference", "READ", []string{"model-3d"}},
 		"record_self_check":       {"self_check.record", "SESSION_WRITE", []string{"model-3d"}},
 		"get_production_step":     {"ledger.read", "READ", []string{"image", "model-3d"}},
+		"set_visual_anchor":       {"anchor.write", "SESSION_WRITE", []string{"image", "model-3d"}},
 	}
 	var controlDomains []string
 	var expectedEffect string
@@ -1415,6 +1474,9 @@ func validateChatAttachments(schema ChatSchema) error {
 	if err := validateCanvasLayout(context); err != nil {
 		return err
 	}
+	if err := validateSelectionMask(context); err != nil {
+		return err
+	}
 	for _, kind := range []string{"image", "model"} {
 		if !strings.Contains(context.UnpicturedAttachmentTemplates[kind], "{handle}") {
 			return fmt.Errorf("context.unpictured_attachment_templates 缺少含 {handle} 的 %s 模板", kind)
@@ -1488,6 +1550,106 @@ func validateCanvasLayout(context ChatContextSchema) error {
 	return nil
 }
 
+// validateSelectionMask checks the texts and bounds of the frozen selection
+// mask of a canvas turn (#244). They are required whenever the Schema declares
+// a canvas input source: the mask only rides with a canvas turn.
+func validateSelectionMask(context ChatContextSchema) error {
+	if strings.TrimSpace(context.CanvasInputSource) == "" {
+		return nil
+	}
+	// A minimal Catalog may declare a canvas source without selection masks
+	// (#244); the feature is complete only when one of its texts or the preview
+	// style is declared, and then every part is required.
+	preview := context.SelectionMaskPreview
+	if strings.TrimSpace(context.SelectionMaskItemTemplate) == "" &&
+		strings.TrimSpace(context.SelectionMaskNote) == "" &&
+		strings.TrimSpace(context.SelectionMaskPreviewLabel) == "" &&
+		preview.MaxPixels == 0 && strings.TrimSpace(preview.MediaType) == "" {
+		return nil
+	}
+	if !strings.Contains(context.SelectionMaskItemTemplate, "{handle}") ||
+		!strings.Contains(context.SelectionMaskItemTemplate, "{bbox}") ||
+		!strings.Contains(context.SelectionMaskItemTemplate, "{coverage}") ||
+		strings.TrimSpace(context.SelectionMaskNote) == "" ||
+		strings.TrimSpace(context.SelectionMaskPreviewLabel) == "" {
+		return errors.New("context 的选区蒙版文案缺少占位符或为空（selection_mask_item_template 需要 {handle} {bbox} {coverage}，selection_mask_note 与 selection_mask_preview_label 不能为空）")
+	}
+	if preview.MaxPixels <= 0 || strings.TrimSpace(preview.MediaType) == "" ||
+		preview.DimOpacity < 0 || preview.DimOpacity > 1 ||
+		preview.TintOpacity < 0 || preview.TintOpacity > 1 ||
+		!visionFlattenColour.MatchString(preview.TintColor) {
+		return errors.New("context.selection_mask_preview 的上限必须为正数，dim_opacity 与 tint_opacity 在 0..1，tint_color 为 #rrggbb，media_type 不能为空")
+	}
+	return nil
+}
+
+// validateImageMask checks the read-only create_selection_mask declaration
+// (#244): the tool it names exists as the declared control tool, its bounds
+// and modes are usable and its Agent-facing texts are present.
+func validateImageMask(schema ChatSchema) error {
+	mask := schema.ImageMask
+	if strings.TrimSpace(mask.Tool) == "" {
+		return nil
+	}
+	declared := false
+	for _, tool := range schema.AgentTools {
+		if tool.Name == mask.Tool && tool.Execution.ImplementationKey == "image.mask" &&
+			len(tool.Execution.Effects) == 1 && tool.Execution.Effects[0] == "READ" {
+			declared = true
+			break
+		}
+	}
+	if !declared {
+		return fmt.Errorf("chat.image_mask.tool 必须指向声明为 image.mask/READ 的控制工具: %q", mask.Tool)
+	}
+	if mask.Limits.MaxBytes <= 0 || mask.Limits.MaxPixels <= 0 || mask.Preview.MaxPixels <= 0 ||
+		strings.TrimSpace(mask.Preview.MediaType) == "" {
+		return errors.New("chat.image_mask 的 limits 与 preview.max_pixels 必须为正数，preview.media_type 不能为空")
+	}
+	seen := map[string]bool{}
+	for _, mode := range mask.Modes {
+		if mode != "subject" && mode != "region" && mode != "invert" {
+			return fmt.Errorf("chat.image_mask.modes 包含未知模式 %q", mode)
+		}
+		if seen[mode] {
+			return fmt.Errorf("chat.image_mask.modes 重复: %q", mode)
+		}
+		seen[mode] = true
+	}
+	if !seen["subject"] || !seen["region"] {
+		return errors.New("chat.image_mask.modes 必须包含 subject 与 region")
+	}
+	for name, text := range map[string]string{
+		"unreadable_template": mask.Texts.UnreadableTemplate,
+		"invalid_region":      mask.Texts.InvalidRegion,
+		"no_subject":          mask.Texts.NoSubject,
+		"result_note":         mask.Texts.ResultNote,
+	} {
+		if strings.TrimSpace(text) == "" {
+			return fmt.Errorf("chat.image_mask.texts.%s 不能为空", name)
+		}
+	}
+	for _, placeholder := range []string{"{url}", "{width}", "{height}", "{coverage}"} {
+		if !strings.Contains(mask.Texts.ResultNote, placeholder) {
+			return fmt.Errorf("chat.image_mask.texts.result_note 必须包含 %s", placeholder)
+		}
+	}
+	return nil
+}
+
+// toolSchemaDeclaresParameter reports whether the tool's parameter object
+// declares a property with the given name.
+func toolSchemaDeclaresParameter(tool ChatToolSchema, name string) bool {
+	var parameters struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(tool.Parameters, &parameters); err != nil {
+		return false
+	}
+	_, exists := parameters.Properties[name]
+	return exists
+}
+
 // notesFrameOrdered reports whether the session-notes template frames {notes}
 // between {open} and {close}, in that order, and the two markers are present
 // and differ. Without a closing marker a note could not be told from the
@@ -1544,8 +1706,10 @@ const threeViewQueueLimitMaximumSeconds = 86400
 
 // validateThreeView accepts an absent declaration and rejects a three-view declaration that names a recipe or a
 // model-source view the Schema does not have, or that leaves a text empty.
-func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSchema, tools []ChatToolSchema) error {
-	if schema == (ChatThreeViewSchema{}) {
+func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSchema, tools []ChatToolSchema,
+	agentTools []ChatAgentToolSchema) error {
+	if schema.RecipeID == "" && schema.Label == "" && schema.ModelSourceStepKey == "" &&
+		schema.MaximumListed == 0 && schema.QueueLimitSeconds == 0 {
 		return nil // a deployment without the three-view recipe declares none
 	}
 	if strings.TrimSpace(schema.Label) == "" || strings.TrimSpace(schema.ModelSourceNote) == "" ||
@@ -1564,25 +1728,48 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 	if recipe == nil || len(recipe.Steps) < 2 {
 		return fmt.Errorf("three_view.recipe_id %q 必须是至少有两步的已声明 skill recipe", schema.RecipeID)
 	}
+	// #243: the first view uses the original source; every later view uses the
+	// accepted model-source view (front) as its identity anchor. A historical
+	// recipe with neither subject templates nor a source chain keeps working.
 	source := false
-	for _, step := range recipe.Steps {
-		if step.SourceStepKey != "" {
-			return errors.New("three_view 的每个视图都必须直接取自原图，不能依赖前一步")
+	subjectTemplates := recipeUsesSubjectPlaceholders(*recipe)
+	sourceChain := recipeUsesSourceChain(*recipe)
+	for index, step := range recipe.Steps {
+		if step.Key == schema.ModelSourceStepKey {
+			source = true
 		}
-		source = source || step.Key == schema.ModelSourceStepKey
+		if !subjectTemplates && !sourceChain {
+			continue
+		}
+		if index == 0 {
+			if step.SourceStepKey != "" {
+				return errors.New("three_view 的第一个视图必须取自原图，不能依赖前一步")
+			}
+			continue
+		}
+		if step.SourceStepKey != schema.ModelSourceStepKey {
+			return fmt.Errorf("three_view 的后续视图 %q 必须以 %q 为 source_step_key", step.Key, schema.ModelSourceStepKey)
+		}
 	}
 	if !source {
 		return fmt.Errorf("three_view.model_source_step_key %q 不是该 recipe 的步骤", schema.ModelSourceStepKey)
 	}
 	messages := schema.Messages
-	for name, value := range map[string]string{
+	required := map[string]string{
 		"agent_started": messages.AgentStarted, "admission_full": messages.AdmissionFull,
 		"approval_human":  messages.ApprovalHuman,
 		"approval_policy": messages.ApprovalPolicy, "model_source_not_yet": messages.ModelSourceNotYet,
 		"reference_required": messages.ReferenceRequired, "group_not_found": messages.GroupNotFound,
 		"group_not_ready": messages.GroupNotReady, "views_changed": messages.ViewsChanged,
 		"views_invalid": messages.ViewsInvalid,
-	} {
+	}
+	if schema.Continuation.Enabled || subjectTemplates || len(schema.SubjectTypes) > 0 {
+		required["agent_completed"] = messages.AgentCompleted
+		required["agent_paused"] = messages.AgentPaused
+		required["consistency_retry"] = messages.ConsistencyRetry
+		required["consistency_failed"] = messages.ConsistencyFailed
+	}
+	for name, value := range required {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("three_view.messages.%s 不能为空", name)
 		}
@@ -1592,15 +1779,176 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 			return fmt.Errorf("three_view.messages.agent_started 必须包含 %s", field)
 		}
 	}
+	for _, required := range []struct {
+		name   string
+		text   string
+		fields string
+	}{
+		{"agent_completed", messages.AgentCompleted, "{run}{views}"},
+		{"agent_paused", messages.AgentPaused, "{run}{view}{reason}"},
+		{"consistency_retry", messages.ConsistencyRetry, "{view}{maximum}{reasons}"},
+		{"consistency_failed", messages.ConsistencyFailed, "{view}{reasons}"},
+	} {
+		for _, field := range splitPlaceholders(required.fields) {
+			if !strings.Contains(required.text, field) {
+				return fmt.Errorf("three_view.messages.%s 必须包含 %s", required.name, field)
+			}
+		}
+	}
 	if recipe.Steps[0].Optional || recipe.Steps[0].Key != schema.ModelSourceStepKey {
 		return errors.New("three_view 的第一个视图必须是 3D 来源视图，且不能是可选视图")
 	}
+	if err := validateThreeViewSubjectTypes(schema, *recipe, agentTools); err != nil {
+		return err
+	}
+	if err := validateThreeViewConsistency(schema); err != nil {
+		return err
+	}
 	return validateThreeViewMultiview(schema.Multiview, *recipe, tools)
+}
+
+// validateThreeViewSubjectTypes checks the subject constraint templates
+// (#243): the Agent argument and its enum match the declared types, and each
+// view's prompt carries the placeholder its role substitutes.
+func validateThreeViewSubjectTypes(schema ChatThreeViewSchema, recipe ChatSkillRecipeSchema,
+	agentTools []ChatAgentToolSchema) error {
+	if len(schema.SubjectTypes) == 0 {
+		// A historical declaration without subject templates keeps working;
+		// prompts then carry no subject placeholder.
+		for index, step := range recipe.Steps {
+			if strings.Contains(step.PromptTemplate, "{subject_front_constraints}") ||
+				strings.Contains(step.PromptTemplate, "{subject_view_constraints}") {
+				return fmt.Errorf("three_view 没有声明 subject_types，步骤 %q 不能使用主体占位符", step.Key)
+			}
+			if index == 0 && strings.Contains(step.PromptTemplate, "{subject_view_constraints}") {
+				return errors.New("three_view 的首视图不能使用后续视图约束")
+			}
+		}
+		return nil
+	}
+	if strings.TrimSpace(schema.SubjectArgument) == "" || strings.TrimSpace(schema.DefaultSubjectType) == "" {
+		return errors.New("three_view 声明 subject_types 时必须声明 subject_argument 与 default_subject_type")
+	}
+	if strings.TrimSpace(schema.Messages.SubjectInvalid) == "" ||
+		!strings.Contains(schema.Messages.SubjectInvalid, "{subject}") ||
+		!strings.Contains(schema.Messages.SubjectInvalid, "{choices}") {
+		return errors.New("three_view.messages.subject_invalid 必须包含 {subject} 与 {choices}")
+	}
+	seen := map[string]bool{}
+	for _, subject := range schema.SubjectTypes {
+		id := strings.TrimSpace(subject.ID)
+		if id == "" || seen[id] || strings.TrimSpace(subject.Label) == "" ||
+			strings.TrimSpace(subject.FrontConstraints) == "" || strings.TrimSpace(subject.ViewConstraints) == "" {
+			return fmt.Errorf("three_view.subject_types 含无效或重复的类型 %q", subject.ID)
+		}
+		seen[id] = true
+	}
+	if !seen[schema.DefaultSubjectType] {
+		return fmt.Errorf("three_view.default_subject_type %q 不在 subject_types 中", schema.DefaultSubjectType)
+	}
+	var subjectTool *ChatAgentToolSchema
+	for index := range agentTools {
+		if agentTools[index].Name == "create_three_view" {
+			subjectTool = &agentTools[index]
+			break
+		}
+	}
+	if subjectTool == nil {
+		return errors.New("three_view 需要已声明的 create_three_view 工具")
+	}
+	var parameters struct {
+		Properties map[string]struct {
+			Type string   `json:"type"`
+			Enum []string `json:"enum"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(subjectTool.Parameters, &parameters); err != nil {
+		return fmt.Errorf("three_view.subject_argument 的工具参数无法解析: %w", err)
+	}
+	property, declared := parameters.Properties[schema.SubjectArgument]
+	if !declared || property.Type != "string" {
+		return fmt.Errorf("create_three_view 缺少参数 %q", schema.SubjectArgument)
+	}
+	enumerated := map[string]bool{}
+	for _, value := range property.Enum {
+		enumerated[value] = true
+	}
+	if len(enumerated) != len(seen) {
+		return errors.New("create_three_view.subject_type 的 enum 必须与 three_view.subject_types 一致")
+	}
+	for id := range seen {
+		if !enumerated[id] {
+			return fmt.Errorf("create_three_view.subject_type 缺少类型 %q", id)
+		}
+	}
+	if !recipeUsesSubjectPlaceholders(recipe) {
+		// A historical recipe has no subject templates; its separately declared
+		// types and tool enum may still grow without rewriting old runs.
+		return nil
+	}
+	for index, step := range recipe.Steps {
+		if index == 0 {
+			if !strings.Contains(step.PromptTemplate, "{subject_front_constraints}") {
+				return errors.New("three_view 的首视图提示词必须包含 {subject_front_constraints}")
+			}
+			if strings.Contains(step.PromptTemplate, "{subject_view_constraints}") {
+				return errors.New("three_view 的首视图提示词不能使用 {subject_view_constraints}")
+			}
+			continue
+		}
+		if !strings.Contains(step.PromptTemplate, "{subject_view_constraints}") {
+			return fmt.Errorf("three_view 的视图 %q 提示词必须包含 {subject_view_constraints}", step.Key)
+		}
+	}
+	return nil
+}
+
+func recipeUsesSubjectPlaceholders(recipe ChatSkillRecipeSchema) bool {
+	for _, step := range recipe.Steps {
+		if strings.Contains(step.PromptTemplate, "{subject_front_constraints}") ||
+			strings.Contains(step.PromptTemplate, "{subject_view_constraints}") {
+			return true
+		}
+	}
+	return false
+}
+
+func recipeUsesSourceChain(recipe ChatSkillRecipeSchema) bool {
+	for _, step := range recipe.Steps {
+		if step.SourceStepKey != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// validateThreeViewConsistency checks the automatic check's bounds (#243).
+func validateThreeViewConsistency(schema ChatThreeViewSchema) error {
+	consistency := schema.Consistency
+	if consistency.MaxSubjectRatioDelta < 0 || consistency.MaxBackgroundSpread < 0 || consistency.MaxBBoxHeightDelta < 0 {
+		return errors.New("three_view.consistency 的阈值不能为负")
+	}
+	if schema.Continuation.Enabled && consistency.MaxAttemptsPerView < 1 {
+		return errors.New("three_view.consistency.max_attempts_per_view 必须为正")
+	}
+	return nil
 }
 
 // validateThreeViewMultiview checks the binding to the multiview tool (#65):
 // the tool takes the group and views arguments, and the required view is a
 // step of the recipe.
+// splitPlaceholders turns "{run}{views}" into its two field names.
+func splitPlaceholders(fields string) []string {
+	var result []string
+	for _, part := range strings.Split(fields, "}") {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		result = append(result, part+"}")
+	}
+	return result
+}
+
 func validateThreeViewMultiview(multiview ChatThreeViewMultiviewSchema, recipe ChatSkillRecipeSchema, tools []ChatToolSchema) error {
 	for name, value := range map[string]string{
 		"tool": multiview.Tool, "group_argument": multiview.GroupArgument, "views_argument": multiview.ViewsArgument,
@@ -1621,6 +1969,26 @@ func validateThreeViewMultiview(multiview ChatThreeViewMultiviewSchema, recipe C
 	}
 	if !required {
 		return fmt.Errorf("three_view.multiview.required_view %q 必须是该 recipe 的必需步骤", multiview.RequiredView)
+	}
+	// #243: an Offering without view labels receives the views in this order,
+	// as a contiguous prefix that starts with the required view. A historical
+	// recipe without subject templates keeps its old view keys; the order is
+	// only required for the new contract.
+	if recipeUsesSubjectPlaceholders(recipe) {
+		if len(multiview.ViewOrder) == 0 || multiview.ViewOrder[0] != multiview.RequiredView {
+			return fmt.Errorf("three_view.multiview.view_order 必须以 required_view %q 开头", multiview.RequiredView)
+		}
+		known := map[string]bool{}
+		for _, step := range recipe.Steps {
+			known[step.Key] = true
+		}
+		seenViews := map[string]bool{}
+		for _, view := range multiview.ViewOrder {
+			if !known[view] || seenViews[view] {
+				return fmt.Errorf("three_view.multiview.view_order 含未知或重复的视图 %q", view)
+			}
+			seenViews[view] = true
+		}
 	}
 	for field, text := range map[string]string{
 		"{tool}": multiview.GroupDirective, "{group}": multiview.GroupDirective, "{model}": multiview.GroupDirective,
@@ -2203,6 +2571,191 @@ func validateChatChoice(schema ChatSchema) error {
 	}
 	if schema.Choice.MaxOptions < 2 || schema.Choice.ListLimit < 1 {
 		return errors.New("choice.max_options 至少为 2，choice.list_limit 至少为 1")
+	}
+	return nil
+}
+
+// validateVisualAnchors checks application.chat.visual_anchors (#250) once the
+// set_visual_anchor tool is declared. Bounds are positive, every kind is
+// unique with a label and a purpose template, the Agent block carries the
+// placeholders its renderer fills, and the tool's parameters agree with the
+// declared kinds and action vocabulary. A Catalog without the tool stays
+// valid.
+func validateVisualAnchors(schema ChatSchema) error {
+	declared := false
+	for _, tool := range schema.AgentTools {
+		if tool.Execution.ImplementationKey == "anchor.write" {
+			declared = true
+			break
+		}
+	}
+	anchors := schema.VisualAnchors
+	if !declared {
+		if len(anchors.Kinds) > 0 || anchors.MaximumAnchors > 0 {
+			return errors.New("chat.visual_anchors 需要已声明的 set_visual_anchor 工具")
+		}
+		return nil
+	}
+	if anchors.MaximumAnchors <= 0 || anchors.MaximumReferences <= 0 ||
+		anchors.MaximumNameCharacters <= 0 || anchors.MaximumDescriptionCharacters <= 0 {
+		return errors.New("chat.visual_anchors 的上限必须为正数")
+	}
+	if len(anchors.Kinds) == 0 {
+		return errors.New("chat.visual_anchors.kinds 不能为空")
+	}
+	kindIDs := make([]string, 0, len(anchors.Kinds))
+	seen := map[string]bool{}
+	for index, kind := range anchors.Kinds {
+		switch kind.ID {
+		case "identity", "style":
+		default:
+			return fmt.Errorf("chat.visual_anchors.kinds[%d].id 无效: %q", index, kind.ID)
+		}
+		if seen[kind.ID] {
+			return fmt.Errorf("chat.visual_anchors.kinds[%d].id 重复: %q", index, kind.ID)
+		}
+		seen[kind.ID] = true
+		kindIDs = append(kindIDs, kind.ID)
+		if strings.TrimSpace(kind.Label) == "" || strings.TrimSpace(kind.ReferencePurposeTemplate) == "" ||
+			!strings.Contains(kind.ReferencePurposeTemplate, "{name}") {
+			return fmt.Errorf("chat.visual_anchors.kinds[%d] 的 label 与 reference_purpose_template 不完整", index)
+		}
+	}
+	for name, template := range map[string]string{
+		"context_template":               anchors.ContextTemplate,
+		"item_template":                  anchors.ItemTemplate,
+		"prompt_hint":                    anchors.PromptHint,
+		"note_template":                  anchors.NoteTemplate,
+		"invalid_template":               anchors.InvalidTemplate,
+		"precedence_note":                anchors.PrecedenceNote,
+		"reference_count_template":       anchors.ReferenceCountTemplate,
+		"reference_label_template":       anchors.ReferenceLabelTemplate,
+		"dropped_label_template":         anchors.DroppedLabelTemplate,
+		"reference_unavailable_template": anchors.ReferenceUnavailableTemplate,
+		"saved_message":                  anchors.SavedMessage,
+		"removed_message":                anchors.RemovedMessage,
+		"declined_message":               anchors.DeclinedMessage,
+	} {
+		if strings.TrimSpace(template) == "" {
+			return fmt.Errorf("chat.visual_anchors.%s 不能为空", name)
+		}
+	}
+	if !strings.Contains(anchors.ContextTemplate, "{open}") ||
+		!strings.Contains(anchors.ContextTemplate, "{anchors}") ||
+		!strings.Contains(anchors.ContextTemplate, "{style_lock}") ||
+		!strings.Contains(anchors.ContextTemplate, "{precedence}") ||
+		!strings.Contains(anchors.ContextTemplate, "{close}") {
+		return errors.New("chat.visual_anchors.context_template 缺少占位符")
+	}
+	if !strings.Contains(anchors.ItemTemplate, "{kind}") ||
+		!strings.Contains(anchors.ItemTemplate, "{name}") ||
+		!strings.Contains(anchors.ItemTemplate, "{description}") ||
+		!strings.Contains(anchors.ItemTemplate, "{references}") {
+		return errors.New("chat.visual_anchors.item_template 缺少占位符")
+	}
+	if !strings.Contains(anchors.PromptHint, "{argument}") || !strings.Contains(anchors.PromptHint, "{names}") ||
+		!strings.Contains(anchors.NoteTemplate, "{argument}") || !strings.Contains(anchors.NoteTemplate, "{names}") ||
+		!strings.Contains(anchors.InvalidTemplate, "{reason}") ||
+		!strings.Contains(anchors.ReferenceCountTemplate, "{count}") ||
+		!strings.Contains(anchors.ReferenceLabelTemplate, "{name}") ||
+		!strings.Contains(anchors.ReferenceLabelTemplate, "{index}") ||
+		!strings.Contains(anchors.DroppedLabelTemplate, "{name}") ||
+		!strings.Contains(anchors.DroppedLabelTemplate, "{index}") ||
+		!strings.Contains(anchors.ReferenceUnavailableTemplate, "{handle}") {
+		return errors.New("chat.visual_anchors 的模板缺少占位符")
+	}
+	if anchors.OpenMarker == "" || anchors.CloseMarker == "" || anchors.OpenMarker == anchors.CloseMarker {
+		return errors.New("chat.visual_anchors 的 open_marker 与 close_marker 须为两个不同的非空标记")
+	}
+	parameters, found := declaredToolParameters(schema, "set_visual_anchor")
+	if !found {
+		return errors.New("chat.visual_anchors 需要已声明的 set_visual_anchor 工具")
+	}
+	properties, _ := parameters["properties"].(map[string]any)
+	action, _ := properties["action"].(map[string]any)
+	if action == nil || action["type"] != "string" {
+		return errors.New("set_visual_anchor.action 必须是字符串参数")
+	}
+	values, _ := action["enum"].([]any)
+	wantActions := []string{"create", "update", "delete", "decline"}
+	if len(values) != len(wantActions) {
+		return errors.New("set_visual_anchor.action 的 enum 必须覆盖 create/update/delete/decline")
+	}
+	for index, value := range values {
+		if value != wantActions[index] {
+			return errors.New("set_visual_anchor.action 的 enum 必须覆盖 create/update/delete/decline")
+		}
+	}
+	kind, _ := properties["kind"].(map[string]any)
+	kindValues, _ := kind["enum"].([]any)
+	if kind == nil || len(kindValues) != len(kindIDs) {
+		return errors.New("set_visual_anchor.kind 的 enum 必须与 chat.visual_anchors.kinds 一致")
+	}
+	for index, value := range kindValues {
+		if value != kindIDs[index] {
+			return errors.New("set_visual_anchor.kind 的 enum 必须与 chat.visual_anchors.kinds 一致")
+		}
+	}
+	required, _ := parameters["required"].([]any)
+	if len(required) == 0 || required[0] != "action" {
+		return errors.New("set_visual_anchor.required 必须包含 action")
+	}
+	// The tool's target must be reachable by an Agent choice card: a
+	// visual_anchor kind whose options come from the Agent's proposal.
+	choiceKind := false
+	for _, declaredKind := range schema.Choice.Kinds {
+		if declaredKind.ID == "visual_anchor" && declaredKind.ToolName == "set_visual_anchor" &&
+			declaredKind.OptionSource == "agent_proposal" && declaredKind.Argument == "action" {
+			choiceKind = true
+		}
+	}
+	if !choiceKind {
+		return errors.New("chat.choice.kinds 必须声明 visual_anchor 确认卡")
+	}
+	for _, field := range []string{"reference_priority_trimmed", "visual_anchor_saved", "visual_anchor_removed", "visual_anchor_declined"} {
+		value := map[string]string{
+			"reference_priority_trimmed": schema.Presentation.Messages.ReferencePriorityTrimmed,
+			"visual_anchor_saved":        schema.Presentation.Messages.VisualAnchorSaved,
+			"visual_anchor_removed":      schema.Presentation.Messages.VisualAnchorRemoved,
+			"visual_anchor_declined":     schema.Presentation.Messages.VisualAnchorDeclined,
+		}[field]
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("chat.presentation.messages.%s 不能为空", field)
+		}
+	}
+	if !strings.Contains(schema.Presentation.Messages.ReferencePriorityTrimmed, "{maximum}") ||
+		!strings.Contains(schema.Presentation.Messages.ReferencePriorityTrimmed, "{anchors}") ||
+		!strings.Contains(schema.Presentation.Messages.ReferencePriorityTrimmed, "{dropped}") {
+		return errors.New("chat.presentation.messages.reference_priority_trimmed 缺少占位符")
+	}
+	return nil
+}
+
+// validateAnchorArgument checks a tool's anchor_argument (#250): only a
+// reference-reading generation tool may declare one, and it must be a declared
+// array-of-strings parameter.
+func validateAnchorArgument(tool ChatToolSchema, acceptReferences bool) error {
+	if tool.AnchorArgument == "" {
+		return nil
+	}
+	if !acceptReferences || tool.Processing != nil {
+		return errors.New("anchor_argument 只适用于读取参考图的生成工具")
+	}
+	var parameters struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if json.Unmarshal(tool.Parameters, &parameters) != nil || parameters.Properties[tool.AnchorArgument] == nil {
+		return fmt.Errorf("anchor_argument %q 不是工具参数", tool.AnchorArgument)
+	}
+	var property struct {
+		Type  string `json:"type"`
+		Items struct {
+			Type string `json:"type"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(parameters.Properties[tool.AnchorArgument], &property) != nil ||
+		property.Type != "array" || property.Items.Type != "string" {
+		return fmt.Errorf("anchor_argument %q 必须是字符串数组参数", tool.AnchorArgument)
 	}
 	return nil
 }

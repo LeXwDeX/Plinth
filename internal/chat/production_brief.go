@@ -23,6 +23,9 @@ var (
 	// ErrInvalidExplicitModel3D refuses a model id outside the stored form: a
 	// bounded token naming a model or Offering, never free text.
 	ErrInvalidExplicitModel3D = errors.New("chat: invalid explicit 3d model")
+	// ErrInvalidExplicitModelImage refuses a 2D model id outside the stored
+	// form, the same bounded token rule as the 3D lock (#239).
+	ErrInvalidExplicitModelImage = errors.New("chat: invalid explicit image model")
 	// ErrProductionBriefConflict means another writer changed the brief during
 	// every bounded retry of a read-merge-write (#103 review C5).
 	ErrProductionBriefConflict = errors.New("chat: production brief changed")
@@ -72,7 +75,7 @@ func (service *Service) SetProductionBrief(
 	raw map[string]json.RawMessage,
 ) (previous, stored ProductionBrief, err error) {
 	return service.writeProductionBrief(ctx, ownerID, sessionID, func(ProductionBrief) (ProductionBrief, error) {
-		return ValidateProductionBrief(service.model3DUsage.Brief, service.model3DUsage.Profiles, raw)
+		return ValidateProductionBrief(service.model3DUsage.Brief, service.model3DUsage.Profiles, service.image2DUsage.Profiles, raw)
 	})
 }
 
@@ -89,7 +92,7 @@ func (service *Service) UpdateProductionBrief(
 	patch map[string]json.RawMessage,
 ) (previous, stored ProductionBrief, err error) {
 	return service.writeProductionBrief(ctx, ownerID, sessionID, func(previous ProductionBrief) (ProductionBrief, error) {
-		normalized, err := ValidateProductionBrief(service.model3DUsage.Brief, service.model3DUsage.Profiles, patch)
+		normalized, err := ValidateProductionBrief(service.model3DUsage.Brief, service.model3DUsage.Profiles, service.image2DUsage.Profiles, patch)
 		if err != nil {
 			return nil, err
 		}
@@ -143,9 +146,13 @@ func (service *Service) writeProductionBrief(
 		}
 		// A purpose card the Agent opened before this write is now answered by
 		// the value the brief carries. Answering twice is harmless: a closed
-		// card is left as it is.
+		// card is left as it is. The 3D and 2D purposes settle their own card
+		// by the argument each kind writes (#239).
 		if purpose := next.Text(productionBriefPurposeField(service.model3DUsage.Brief)); purpose != "" {
-			service.settleUsageProfileChoice(ctx, ownerID, sessionID, purpose)
+			service.settleUsageProfileChoice(ctx, ownerID, sessionID, service.usageProfileKind, purpose)
+		}
+		if imageUse := next.Text(productionBriefImageUseField(service.model3DUsage.Brief)); imageUse != "" {
+			service.settleUsageProfileChoice(ctx, ownerID, sessionID, service.imageUsageProfileKind, imageUse)
 		}
 		return before, next, nil
 	}
@@ -164,6 +171,12 @@ func productionBriefPurposeField(brief catalog.ChatProductionBriefSchema) string
 // Schema field working without a code change (#103 review C3).
 func productionBriefIntegerField(brief catalog.ChatProductionBriefSchema) string {
 	return brief.FieldNameOfType("integer")
+}
+
+// productionBriefImageUseField is the declared image_profile field's name, the
+// one carrying the session's 2D purpose (#239).
+func productionBriefImageUseField(brief catalog.ChatProductionBriefSchema) string {
+	return brief.FieldNameOfType("image_profile")
 }
 
 func briefValueEmpty(value json.RawMessage) bool {
@@ -208,11 +221,60 @@ func (service *Service) SetExplicitModel3D(ctx context.Context, ownerID, session
 	return model, nil
 }
 
-// AskChoiceArguments is one generic choice card the Agent asks for (#103).
+// SessionExplicitModelImage reads the 2D model the person explicitly picked in
+// the session (#239). An empty string means no explicit pick.
+func (service *Service) SessionExplicitModelImage(ctx context.Context, ownerID, sessionID string) (string, error) {
+	model, found, err := service.repository.SessionExplicitModelImage(ctx, ownerID, sessionID)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", ErrSessionNotFound
+	}
+	return model, nil
+}
+
+// SetExplicitModelImage records the person's explicit 2D model pick for the
+// session; an empty model clears it. The pick is only a lock the image tools
+// honor; it submits nothing.
+func (service *Service) SetExplicitModelImage(ctx context.Context, ownerID, sessionID, model string) (string, error) {
+	model = strings.TrimSpace(model)
+	if model != "" && !explicitModel3DName.MatchString(model) {
+		return "", ErrInvalidExplicitModelImage
+	}
+	if model != "" && service.explicitModelImageValid != nil && !service.explicitModelImageValid(model) {
+		return "", ErrInvalidExplicitModelImage
+	}
+	found, err := service.repository.SetSessionExplicitModelImage(ctx, ownerID, sessionID, model)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", ErrSessionNotFound
+	}
+	return model, nil
+}
+
+// AskChoiceArguments is one generic choice card the Agent asks for (#103,
+// #239). Options is only read for a kind whose option_source is agent (the
+// direction card); the server builds the options of a purpose kind.
 type AskChoiceArguments struct {
 	Kind        string
 	Question    string
 	Recommended string
+	Options     []ChoiceOptionInput
+	// Proposal is the Agent's exact proposal whose confirmation an
+	// agent_proposal card offers. It is the target tool's arguments object.
+	Proposal json.RawMessage
+}
+
+// ChoiceOptionInput is one Agent-supplied option of a direction card. ID is
+// the bounded token the answer writes into the target tool's argument; Label
+// and Description are what the person reads.
+type ChoiceOptionInput struct {
+	ID          string
+	Label       string
+	Description string
 }
 
 // AskChoice opens a generic card of a kind the Schema declares. The usage
@@ -229,35 +291,92 @@ func (service *Service) AskChoice(
 	if service.choices == nil {
 		return ToolResult{Error: "choice cards unavailable", NoSubmission: true}, nil
 	}
-	if kind.OptionSource != "usage_profiles" {
-		return ToolResult{Error: "choice kind unavailable", NoSubmission: true}, nil
-	}
-	profiles := service.model3DUsage.Profiles
-	if len(profiles) == 0 {
-		return ToolResult{Error: "choice kind unavailable", NoSubmission: true}, nil
-	}
 	recommended := strings.TrimSpace(arguments.Recommended)
-	options := make([]ChoiceOption, 0, len(profiles))
-	seenRecommended := false
-	for _, profile := range profiles {
-		optionArguments, err := json.Marshal(map[string]string{kind.Argument: profile.ID})
+	type optionSpec struct {
+		id, label, description string
+	}
+	var specs []optionSpec
+	var proposalOptions []ChoiceOption
+	switch kind.OptionSource {
+	case "usage_profiles":
+		for _, profile := range service.model3DUsage.Profiles {
+			specs = append(specs, optionSpec{profile.ID, profile.Label, profile.Description})
+		}
+	case "image_usage_profiles":
+		for _, profile := range service.image2DUsage.Profiles {
+			specs = append(specs, optionSpec{profile.ID, profile.Label, profile.Description})
+		}
+	case "agent":
+		if len(arguments.Options) < 2 || (service.choiceMaxOptions > 0 && len(arguments.Options) > service.choiceMaxOptions) {
+			return ToolResult{Error: "choice options invalid", NoSubmission: true}, nil
+		}
+		for _, option := range arguments.Options {
+			id := strings.TrimSpace(option.ID)
+			label := strings.TrimSpace(option.Label)
+			if id == "" || label == "" || !explicitModel3DName.MatchString(id) {
+				return ToolResult{Error: "choice options invalid", NoSubmission: true}, nil
+			}
+			specs = append(specs, optionSpec{id, label, strings.TrimSpace(option.Description)})
+		}
+	case "agent_proposal":
+		// The Agent's confirmation card offers its exact proposal as accept
+		// and a decline that writes nothing (#250). Opening the card itself
+		// writes no anchor.
+		var values map[string]json.RawMessage
+		if len(arguments.Proposal) == 0 || json.Unmarshal(arguments.Proposal, &values) != nil || values == nil {
+			return ToolResult{Error: "choice card unavailable", NoSubmission: true}, nil
+		}
+		declined, err := json.Marshal(map[string]string{kind.Argument: visualAnchorActionDecline})
 		if err != nil {
 			return ToolResult{Error: "choice card unavailable", NoSubmission: true}, nil
 		}
-		option := ChoiceOption{
-			ID:          profile.ID,
-			Label:       profile.Label,
-			Description: profile.Description,
-			Arguments:   optionArguments,
+		accept := ChoiceOption{ID: visualAnchorAcceptOption, Label: kind.AcceptLabel, Description: kind.Question,
+			Arguments: append(json.RawMessage(nil), arguments.Proposal...)}
+		decline := ChoiceOption{ID: visualAnchorDeclineOption, Label: kind.DeclineLabel, Arguments: declined}
+		switch recommended {
+		case visualAnchorAcceptOption:
+			accept.Recommended = true
+		case visualAnchorDeclineOption:
+			decline.Recommended = true
+		default:
+			recommended = ""
 		}
-		if recommended != "" && profile.ID == recommended {
-			option.Recommended = true
-			seenRecommended = true
-		}
-		options = append(options, option)
+		proposalOptions = []ChoiceOption{accept, decline}
+	default:
+		return ToolResult{Error: "choice kind unavailable", NoSubmission: true}, nil
 	}
-	if !seenRecommended {
-		recommended = ""
+	var options []ChoiceOption
+	if proposalOptions != nil {
+		options = proposalOptions
+	} else {
+		if len(specs) == 0 {
+			return ToolResult{Error: "choice kind unavailable", NoSubmission: true}, nil
+		}
+		options = make([]ChoiceOption, 0, len(specs))
+		seenRecommended := false
+		for _, spec := range specs {
+			optionArguments, err := json.Marshal(map[string]string{kind.Argument: spec.id})
+			if err != nil {
+				return ToolResult{Error: "choice card unavailable", NoSubmission: true}, nil
+			}
+			option := ChoiceOption{
+				ID:          spec.id,
+				Label:       spec.label,
+				Description: spec.description,
+				Arguments:   optionArguments,
+			}
+			if recommended != "" && spec.id == recommended {
+				option.Recommended = true
+				seenRecommended = true
+			}
+			options = append(options, option)
+		}
+		if !seenRecommended {
+			recommended = ""
+		}
+	}
+	if len(options) == 0 {
+		return ToolResult{Error: "choice kind unavailable", NoSubmission: true}, nil
 	}
 	question := strings.TrimSpace(arguments.Question)
 	if question == "" {
@@ -307,13 +426,12 @@ func (service *Service) AskChoice(
 	return ToolResult{AgentContent: string(content), NoSubmission: true}, nil
 }
 
-// usageProfileKindOf finds the declared choice kind that a brief write settles:
-// the one whose options come from the purpose profiles. Its id and the argument
-// carrying the purpose are Schema values, so renaming either needs no code
-// change.
-func usageProfileKindOf(kinds []catalog.ChatChoiceKindSchema) *catalog.ChatChoiceKindSchema {
+// choiceKindOf finds the declared choice kind whose options come from one
+// option source. Its id and the argument carrying the answer are Schema
+// values, so renaming either needs no code change (#103, #239).
+func choiceKindOf(kinds []catalog.ChatChoiceKindSchema, source string) *catalog.ChatChoiceKindSchema {
 	for _, kind := range kinds {
-		if kind.OptionSource == "usage_profiles" {
+		if kind.OptionSource == source {
 			declared := kind
 			return &declared
 		}
@@ -347,9 +465,9 @@ func ChangedProductionBriefFields(previous, next ProductionBrief) []string {
 // settleUsageProfileChoice answers the session's open usage-profile card when
 // the brief now carries the purpose it offered. The answer is recorded with
 // the Agent source: the value came from the brief write, not from a click.
-func (service *Service) settleUsageProfileChoice(ctx context.Context, ownerID, sessionID, purpose string) {
-	kind := service.usageProfileKind
-	if service.choices == nil || purpose == "" || kind == nil || kind.Argument == "" {
+func (service *Service) settleUsageProfileChoice(ctx context.Context, ownerID, sessionID string,
+	kind *catalog.ChatChoiceKindSchema, value string) {
+	if service.choices == nil || value == "" || kind == nil || kind.Argument == "" {
 		return
 	}
 	choices, err := service.choices.ListChoices(ctx, ownerID, sessionID, service.choiceLimit)
@@ -363,9 +481,9 @@ func (service *Service) settleUsageProfileChoice(ctx context.Context, ownerID, s
 		}
 		for _, option := range choice.Options {
 			var arguments map[string]json.RawMessage
-			var value string
+			var chosen string
 			if json.Unmarshal(option.Arguments, &arguments) != nil ||
-				json.Unmarshal(arguments[kind.Argument], &value) != nil || value != purpose {
+				json.Unmarshal(arguments[kind.Argument], &chosen) != nil || chosen != value {
 				continue
 			}
 			_, _ = service.choices.AnswerChoice(ctx, ownerID, sessionID, choice.ID, ChoiceRecord{

@@ -83,6 +83,7 @@ func (err *BriefError) Error() string { return err.Reason }
 func ValidateProductionBrief(
 	schema catalog.ChatProductionBriefSchema,
 	profiles []catalog.ChatModel3DUsageProfile,
+	imageProfiles []catalog.ChatImage2DUsageProfile,
 	raw map[string]json.RawMessage,
 ) (ProductionBrief, error) {
 	declared := make(map[string]catalog.ChatProductionBriefField, len(schema.Fields))
@@ -92,6 +93,10 @@ func ValidateProductionBrief(
 	profileIDs := make(map[string]bool, len(profiles))
 	for _, profile := range profiles {
 		profileIDs[profile.ID] = true
+	}
+	imageProfileIDs := make(map[string]bool, len(imageProfiles))
+	for _, profile := range imageProfiles {
+		imageProfileIDs[profile.ID] = true
 	}
 	messages := schema.Messages
 	normalized := ProductionBrief{}
@@ -114,6 +119,19 @@ func ValidateProductionBrief(
 				continue
 			}
 			if !profileIDs[purpose] {
+				return nil, &BriefError{Reason: briefMessage(messages.ProfileUndeclared, `用途 "{value}" 未声明`, "{value}", purpose)}
+			}
+			normalized[name] = mustJSON(purpose)
+		case "image_profile":
+			var purpose string
+			if json.Unmarshal(value, &purpose) != nil {
+				return nil, &BriefError{Reason: briefMessage(messages.NotString, `字段 "{field}" 必须是字符串`, "{field}", name)}
+			}
+			purpose = strings.TrimSpace(purpose)
+			if purpose == "" {
+				continue
+			}
+			if !imageProfileIDs[purpose] {
 				return nil, &BriefError{Reason: briefMessage(messages.ProfileUndeclared, `用途 "{value}" 未声明`, "{value}", purpose)}
 			}
 			normalized[name] = mustJSON(purpose)

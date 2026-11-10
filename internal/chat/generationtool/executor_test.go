@@ -563,26 +563,39 @@ func TestExecutorUsesHumanSelectedModelInsteadOfAgentOffering(t *testing.T) {
 	}
 }
 
-func TestExecutorRequiresHumanModelBeforeGeneration(t *testing.T) {
+func TestExecutorRunsImageGenerationWithoutAUserModel(t *testing.T) {
 	taskCatalog, err := catalog.LoadDefault()
 	if err != nil {
 		t.Fatal(err)
 	}
 	application := taskCatalog.Application()
 	tool := application.Chat.Tools[0]
-	gateway := &fakeGateway{}
+	if tool.Name != "refine_image" {
+		t.Fatalf("first tool = %q, want refine_image", tool.Name)
+	}
+	gateway := &fakeGateway{
+		offerings: taskCatalog.List(""),
+		tasks:     []generation.Task{{ID: "configured-task", State: generation.TaskSucceeded}},
+	}
 	executor, err := generationtool.New(generationtool.Config{
 		Gateway: gateway, References: &fakeReferences{}, Chat: application.Chat,
+		TaskStates: application.TaskStates,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := executor.Execute(context.Background(), chat.ToolCommand{
-		Tool: tool,
-		Call: agents.ToolCall{Name: tool.Name, Arguments: json.RawMessage(`{"prompt":"paint"}`)},
-	}, nil)
-	if err != nil || result.Error != tool.ModelRequiredMessage || gateway.submitted.OfferingID != "" {
-		t.Fatalf("model requirement not enforced: result=%#v error=%v submit=%#v", result, err, gateway.submitted)
+	command := chat.ToolCommand{
+		OwnerID: "owner-a", SessionID: "session-a", Tool: tool,
+		Call: agents.ToolCall{ID: "call-a", Name: tool.Name, Arguments: json.RawMessage(`{"prompt":"paint"}`)},
+	}
+	// #239: the image tool no longer refuses a call without a user model; the
+	// purpose, the Agent or the default decides and the result names the source.
+	if message := executor.SelectionError(command); message != "" {
+		t.Fatalf("image tool still required a user model: %q", message)
+	}
+	result, err := executor.Execute(context.Background(), command, nil)
+	if err != nil || result.Error == tool.ModelRequiredMessage || gateway.submitted.OfferingID == "" {
+		t.Fatalf("image generation did not choose a model: result=%#v error=%v submit=%#v", result, err, gateway.submitted)
 	}
 }
 
@@ -795,6 +808,9 @@ func (gateway *fakeGateway) Get(
 
 type fakeReferences struct {
 	urls []string
+	// fail marks references the resolver cannot prove, like a deleted or
+	// expired picture.
+	fail map[string]bool
 }
 
 func (resolver *fakeReferences) Resolve(
@@ -803,6 +819,11 @@ func (resolver *fakeReferences) Resolve(
 	urls []string,
 ) ([]generation.AssetID, error) {
 	resolver.urls = append(resolver.urls, urls...)
+	for _, url := range urls {
+		if resolver.fail[url] {
+			return nil, errors.New("reference picture unavailable")
+		}
+	}
 	return []generation.AssetID{"configured-input-asset"}, nil
 }
 

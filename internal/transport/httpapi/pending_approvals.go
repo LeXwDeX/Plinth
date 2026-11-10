@@ -43,6 +43,13 @@ func (s *Server) listPendingApprovals(writer http.ResponseWriter, request *http.
 		item.Provider = s.textIn(locale, item.Provider)
 		item.ExtraLabel = s.textIn(locale, item.ExtraLabel)
 		item.ParameterAdjustments = s.parameterAdjustmentsIn(locale, item.ParameterAdjustments)
+		if item.ModelChoice != nil {
+			// The purpose reason is Schema copy; the source and purpose id stay
+			// machine identities the browser maps to its own words.
+			choice := *item.ModelChoice
+			choice.Reason = s.textIn(locale, choice.Reason)
+			item.ModelChoice = &choice
+		}
 		if item.ExtraItems != nil {
 			localizedItems := make([]string, len(item.ExtraItems))
 			for position, extra := range item.ExtraItems {

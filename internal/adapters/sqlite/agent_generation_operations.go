@@ -32,7 +32,22 @@ func scanAgentOperation(row interface{ Scan(...any) error }) (generationtool.Ope
 		return op, err
 	}
 	if referenceSource != "" {
-		if err := json.Unmarshal([]byte(referenceSource), &op.ReferenceSource); err != nil {
+		// The column keeps the source fact. #250 also freezes the rendered
+		// reference note beside it; operations written before that carry the
+		// bare fact and are read by the compatibility branch.
+		var payload struct {
+			Source *generationtool.ReferenceSourceFact `json:"source"`
+			Note   string                              `json:"note"`
+		}
+		if err := json.Unmarshal([]byte(referenceSource), &payload); err != nil {
+			return generationtool.Operation{}, err
+		}
+		if payload.Source != nil || payload.Note != "" {
+			if payload.Source != nil {
+				op.ReferenceSource = *payload.Source
+			}
+			op.ReferenceNote = payload.Note
+		} else if err := json.Unmarshal([]byte(referenceSource), &op.ReferenceSource); err != nil {
 			return generationtool.Operation{}, err
 		}
 	}
@@ -85,8 +100,17 @@ func (r *Repository) InsertAgentOperation(ctx context.Context, candidate generat
 	}
 	candidate.OperationID = "agent_" + hex.EncodeToString(nonce[:])
 	referenceSource := ""
-	if candidate.ReferenceSource != (generationtool.ReferenceSourceFact{}) {
-		encoded, err := json.Marshal(candidate.ReferenceSource)
+	if candidate.ReferenceSource != (generationtool.ReferenceSourceFact{}) || candidate.ReferenceNote != "" {
+		var source *generationtool.ReferenceSourceFact
+		if candidate.ReferenceSource != (generationtool.ReferenceSourceFact{}) {
+			copied := candidate.ReferenceSource
+			source = &copied
+		}
+		payload := struct {
+			Source *generationtool.ReferenceSourceFact `json:"source,omitempty"`
+			Note   string                              `json:"note,omitempty"`
+		}{Source: source, Note: candidate.ReferenceNote}
+		encoded, err := json.Marshal(payload)
 		if err != nil {
 			return generationtool.Operation{}, err
 		}

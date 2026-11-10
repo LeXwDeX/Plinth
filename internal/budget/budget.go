@@ -172,6 +172,26 @@ func (p Plan) Allows(capability, offeringID string) bool {
 	return len(pinned) == 0 || containsString(pinned, offeringID)
 }
 
+// Covers reports whether the plan explicitly reserves at least count steps of
+// the capability and, when a step pins an Offering, runs that same Offering
+// (#243). Correction capabilities do not promise a series and are not counted.
+func (p Plan) Covers(capability, offeringID string, count int) bool {
+	if capability == "" || count < 1 {
+		return false
+	}
+	matched := 0
+	for _, step := range p.Steps {
+		if step.Capability != capability {
+			continue
+		}
+		if step.OfferingID != "" && step.OfferingID != offeringID {
+			continue
+		}
+		matched++
+	}
+	return matched >= count
+}
+
 func (p Plan) capabilityPlanned(capability string) bool {
 	for _, step := range p.Steps {
 		if step.Capability == capability {

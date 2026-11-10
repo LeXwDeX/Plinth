@@ -22,6 +22,7 @@ func (executor *Executor) referencePurposes(
 	command chat.ToolCommand,
 	arguments map[string]json.RawMessage,
 	referenceURLs []string,
+	serverPurposes map[string]string,
 ) (string, string) {
 	argument := command.Tool.ReferencePurposesArgument
 	raw, present := arguments[argument]
@@ -53,7 +54,22 @@ func (executor *Executor) referencePurposes(
 		handle   string
 		purpose  string
 	}
-	var items []item
+	// Server-generated purposes (#250) name an identity or style picture the
+	// call did not select by handle. Their position is the final reference
+	// order, so the numbering matches the frozen pictures. A purpose the Agent
+	// states for the same picture replaces the server wording.
+	byPosition := map[int]item{}
+	for referenceURL, purpose := range serverPurposes {
+		purpose = strings.TrimSpace(purpose)
+		if purpose == "" {
+			continue
+		}
+		position := slices.Index(referenceURLs, referenceURL)
+		if position < 0 || slices.Contains(referenceURLs[position+1:], referenceURL) {
+			continue
+		}
+		byPosition[position] = item{position: position + 1, purpose: purpose}
+	}
 	policy := executor.handlePolicy()
 	for handle, purpose := range purposes {
 		purpose = strings.TrimSpace(purpose)
@@ -76,7 +92,12 @@ func (executor *Executor) referencePurposes(
 		if position < 0 || resolved[0].URL == "" || slices.Contains(referenceURLs[position+1:], resolved[0].URL) {
 			return refuse(handle)
 		}
-		items = append(items, item{position: position + 1, handle: resolved[0].Attachment.Handle, purpose: purpose})
+		entry := item{position: position + 1, handle: resolved[0].Attachment.Handle, purpose: purpose}
+		byPosition[position] = entry
+	}
+	items := make([]item, 0, len(byPosition))
+	for _, entry := range byPosition {
+		items = append(items, entry)
 	}
 	sort.Slice(items, func(left, right int) bool {
 		if items[left].position != items[right].position {

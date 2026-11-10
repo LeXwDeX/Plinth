@@ -1,5 +1,5 @@
 import { offeringShowsCredits, type OfferingWire } from '@/lib/agent-offerings';
-import { parseParameterAdjustments, type ParameterAdjustment, type PendingApproval, type PendingApprovalInput } from '@/lib/chat/pending-approvals';
+import { parseModelChoice, parseParameterAdjustments, type ModelChoice, type ParameterAdjustment, type PendingApproval, type PendingApprovalInput } from '@/lib/chat/pending-approvals';
 import { parseNativeQuote, type NativeQuote, type PriceTotal } from '@/lib/pricing';
 
 /**
@@ -45,11 +45,15 @@ export interface ApprovalCardModel {
   /** The extra credits the step also spends, what they pay for and the price without them; absent when there are none. */
   extra: ApprovalCardExtra | null;
   parameterAdjustments?: ParameterAdjustment[];
+  /** #239: who chose the model and why; absent when the server did not report it. */
+  modelChoice?: ModelChoice;
   prompt: string;
   /** The earlier same-kind task that was charged but whose result was not stored (#294); the card says approving charges again. */
   rechargeTaskId?: string;
   /** The server's sentence that the step uses only the first of the pictures given (#329 E); the inputs list only those. */
   referenceNote?: string;
+  /** #244: the server's sentence that the step changes only the masked region; present with a mask input. */
+  maskNote?: string;
   inputs: ApprovalCardInput[];
   /** 处理类步骤要处理的模型任务。 */
   sourceTaskId: string;
@@ -73,9 +77,11 @@ export function cardFromPending(
       ? { credits: item.extraCredits, baseCredits: item.baseCredits, label: item.extraLabel, items: item.extraItems }
       : null,
     parameterAdjustments: item.parameterAdjustments,
+    ...(item.modelChoice ? { modelChoice: item.modelChoice } : {}),
     prompt: item.prompt,
     ...(item.rechargeTaskId ? { rechargeTaskId: item.rechargeTaskId } : {}),
     ...(item.referenceNote ? { referenceNote: item.referenceNote } : {}),
+    ...(item.maskNote ? { maskNote: item.maskNote } : {}),
     inputs: item.inputs.map((input) => ({
       parameter: input.parameter, handle: input.handle, taskId: input.taskId, assetId: input.assetId,
       kind: input.kind === 'task' ? 'task' : input.kind === 'asset' ? 'asset' : '',
@@ -91,6 +97,7 @@ export function cardFromPending(
 export function cardFromConsent(pending: Record<string, unknown> | null, requestId: string | null): ApprovalCardModel | null {
   if (!pending || !requestId) return null;
   const refs = Array.isArray(pending.reference_assets) ? pending.reference_assets : [];
+  const modelChoice = parseModelChoice(pending.model_choice);
   return {
     requestId, source: 'turn', status: 'pending',
     capability: str(pending.capability), model: str(pending.model), provider: str(pending.provider), providerId: '',
@@ -106,8 +113,10 @@ export function cardFromConsent(pending: Record<string, unknown> | null, request
       }
       : null,
     parameterAdjustments: parseParameterAdjustments(pending.parameter_adjustments),
+    ...(modelChoice ? { modelChoice } : {}),
     prompt: str(pending.prompt),
     ...(str(pending.reference_note) ? { referenceNote: str(pending.reference_note) } : {}),
+    ...(str(pending.mask_note) ? { maskNote: str(pending.mask_note) } : {}),
     inputs: refs.flatMap((ref): ApprovalCardInput[] => {
       if (typeof ref === 'string') return ref ? [{ parameter: '', handle: ref, taskId: '', assetId: '', kind: '', label: '' }] : [];
       if (ref && typeof ref === 'object') {

@@ -38,6 +38,11 @@ type ChatAgentCraftPrompt struct {
 	ID           string   `json:"id"`
 	WhenToolsAny []string `json:"when_tools_any"`
 	Text         string   `json:"text"`
+	// WhenDomain, when non-empty, additionally requires the turn's workspace
+	// domain to equal it ("image" or "model-3d"), so two craft briefs whose
+	// tool sets are both offered in auto scope are not injected together
+	// (#239). Empty keeps the historical behavior.
+	WhenDomain string `json:"when_domain,omitempty"`
 	// OfferingCapabilities selects the Offerings whose knowledge fills
 	// {offering_tradeoffs} (#249). Empty keeps a historical CraftPrompt
 	// literal.
@@ -127,6 +132,11 @@ func validateCraftPrompts(prompts []ChatAgentCraftPrompt, toolNames map[string]s
 		seen[id] = true
 		if len(prompt.WhenToolsAny) == 0 {
 			return fmt.Errorf("chat.agent.craft_prompts %q 必须声明 when_tools_any", prompt.ID)
+		}
+		switch prompt.WhenDomain {
+		case "", "image", "model-3d":
+		default:
+			return fmt.Errorf("chat.agent.craft_prompts %q 的 when_domain %q 未实现", prompt.ID, prompt.WhenDomain)
 		}
 		for _, tool := range prompt.WhenToolsAny {
 			if _, known := toolNames[tool]; !known {

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
@@ -138,19 +139,23 @@ func (executor *Executor) fitMultiviewViews(command chat.ToolCommand, offering g
 	pictures *multiviewPictures, group bool) string {
 	multiview := executor.chat.ThreeView.Multiview
 	messages := executor.chat.ThreeView.Messages
-	var accepted []string
-	declared := false
-	for _, parameter := range offering.Parameters {
-		if parameter.Semantic != generation.SemanticReferenceViews {
-			continue
-		}
-		declared = true
-		for _, option := range parameter.Options {
-			accepted = append(accepted, option.Value)
-		}
-	}
+	accepted, ordered, declared := multiviewViewsOf(offering, multiview)
 	if !declared {
 		return executor.localized(command, messages.ViewsInvalid)
+	}
+	if ordered {
+		// An order-only Offering reads positions, so the pictures must be a
+		// contiguous front, left, back, right prefix starting at the required
+		// view (#243). Nothing is dropped, because dropping would shift every
+		// later picture into the wrong angle.
+		if !orderedViewPrefix(pictures.Views, accepted, multiview.RequiredView) ||
+			len(pictures.Views) < multiview.MinimumViews {
+			if group {
+				return executor.localized(command, messages.GroupNotReady)
+			}
+			return executor.localized(command, messages.ViewsInvalid)
+		}
+		return ""
 	}
 	urls, views := pictures.URLs[:0:0], pictures.Views[:0:0]
 	for index, view := range pictures.Views {
@@ -170,4 +175,63 @@ func (executor *Executor) fitMultiviewViews(command chat.ToolCommand, offering g
 		return executor.localized(command, messages.ViewsInvalid)
 	}
 	return ""
+}
+
+// defaultViewOrder is the platform's multiview key order used when the Schema
+// declares no view order (a historical Catalog).
+var defaultViewOrder = []string{"front", "left", "back", "right"}
+
+// multiviewViewsOf describes how an Offering takes several views: labelled
+// (its reference-views parameter says which view each picture is), or
+// order-only (the provider's multi-image endpoint reads the pictures in the
+// declared view order). A plain multi-reference Offering declares neither.
+func multiviewViewsOf(offering generation.Offering, multiview catalog.ChatThreeViewMultiviewSchema) (
+	views []string, ordered, declared bool,
+) {
+	for _, parameter := range offering.Parameters {
+		if parameter.Semantic != generation.SemanticReferenceViews {
+			continue
+		}
+		for _, option := range parameter.Options {
+			views = append(views, option.Value)
+		}
+		return views, false, true
+	}
+	var options struct {
+		Endpoint string `json:"endpoint"`
+	}
+	if len(offering.ProviderOptions) > 0 && json.Unmarshal(offering.ProviderOptions, &options) == nil &&
+		options.Endpoint == "multi-image-to-3d" {
+		order := multiview.ViewOrder
+		if len(order) == 0 {
+			order = defaultViewOrder
+		}
+		return append([]string(nil), order...), true, true
+	}
+	return nil, false, false
+}
+
+// orderedViewPrefix reports whether views is the contiguous prefix of order
+// that starts with the required view.
+func orderedViewPrefix(views, order []string, required string) bool {
+	if len(views) == 0 || len(views) > len(order) || (required != "" && views[0] != required) {
+		return false
+	}
+	for index, view := range views {
+		if view != order[index] {
+			return false
+		}
+	}
+	return true
+}
+
+// declaresReferenceViews reports whether an Offering labels each picture's
+// view. An order-only Offering takes no reference-views argument.
+func declaresReferenceViews(offering generation.Offering) bool {
+	for _, parameter := range offering.Parameters {
+		if parameter.Semantic == generation.SemanticReferenceViews {
+			return true
+		}
+	}
+	return false
 }

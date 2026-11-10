@@ -31,7 +31,7 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"runtime":      {"http", "input_assets", "cache", "asset_delivery", "frontend", "generation_messages"},
 		// #80: the composer's capacity text and the result limit pair.
 		"runtime.generation_messages": {"reference_capacity", "reference_capacity_multiview", "reference_limit", "reference_limit_one"},
-		"chat":                        {"api", "defaults", "roles", "state", "frontend", "context", "stream", "tools", "skills", "presentation", "approval_policy", "agent_scope", "harness", "agent_status", "agent_limits", "three_view_limits", "context_compaction", "model_review", "self_check", "model3d_usage", "style_lock"},
+		"chat":                        {"api", "defaults", "roles", "state", "frontend", "context", "stream", "tools", "skills", "presentation", "approval_policy", "agent_scope", "harness", "agent_status", "agent_limits", "three_view_limits", "context_compaction", "model_review", "self_check", "model3d_usage", "image2d_usage", "style_lock"},
 		"chat.style_lock":             {"maximum_text_characters", "maximum_reference_images"},
 		// #7: the Agent's approval-mode texts (approval_policy.prompt) stay on the server.
 		"chat.approval_policy": {"default_mode", "modes", "manual_approval_capabilities", "budget_states"},
@@ -47,6 +47,7 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"chat.self_check.limits":            {"max_rounds_per_result", "max_corrections_per_result", "max_renders_per_round"},
 		"chat.model3d_usage":                {"profiles", "brief"},
 		"chat.model3d_usage.brief":          {"fields"},
+		"chat.image2d_usage":                {"profiles"},
 		"canvas":                            {"api", "defaults", "limits", "frontend", "presentation"},
 		"task_stream":                       {"aliases"},
 		"administration":                    {"navigation", "users", "audit_logs", "generations", "usage", "user_assets"},

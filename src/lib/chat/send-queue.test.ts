@@ -36,4 +36,14 @@ describe('send queue', () => {
     const queue = enqueueTurn({}, 'a', { ...turn('1'), styleLockSkipped: true });
     expect(takeQueuedTurn(queue, 'a').turn?.styleLockSkipped).toBe(true);
   });
+
+  it('keeps the frozen selection mask of a queued canvas turn (#244)', () => {
+    const queue = enqueueTurn({}, 'a', {
+      ...turn('1'), inputSource: 'canvas',
+      selectionMask: { maskAssetId: 'mask-asset' },
+    });
+    const taken = takeQueuedTurn(queue, 'a').turn;
+    expect(taken?.inputSource).toBe('canvas');
+    expect(taken?.selectionMask).toEqual({ maskAssetId: 'mask-asset' });
+  });
 });

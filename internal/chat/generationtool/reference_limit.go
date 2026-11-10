@@ -56,10 +56,23 @@ func referenceImageLimit(offering generation.Offering) int {
 // evidence for the approval/result note; the persisted operation still keeps
 // the ordinary total counts for backward compatibility.
 type referenceUse struct {
-	Used, Given  int
-	StyleGiven   int
-	StyleUsed    int
-	StyleTrimmed bool
+	Used, Given int
+	// The classes are counted in final reference order (#250): identity
+	// anchors, style pictures (the lock and style anchors), then the turn's
+	// ordinary references. The ordinary ones are cut first.
+	IdentityGiven, IdentityUsed int
+	StyleGiven, StyleUsed       int
+	TurnGiven, TurnUsed         int
+	StyleTrimmed                bool
+	// DroppedTurn names the ordinary pictures the model limit cut, by the
+	// handle the session gave each one. DroppedTurnCount keeps the number
+	// when a handle is unknown.
+	DroppedTurn      []string
+	DroppedTurnCount int
+	// DroppedStyle names the style pictures (the lock or a style anchor) the
+	// model limit cut, by the label the server gave each one (#250).
+	DroppedStyle      []string
+	DroppedStyleCount int
 }
 
 // ReferenceLimitNote writes the reference-limit note for a step of tool that
@@ -137,7 +150,7 @@ func (executor *Executor) ToolDescriptionNote(tool catalog.ChatToolSchema, optio
 			// person's explicit session pick is known when tool descriptions are
 			// written, so the note names that model and stays silent otherwise;
 			// a purpose or default recommendation is not a pick.
-			if strings.TrimSpace(options.ExplicitModel3D) == "" {
+			if strings.TrimSpace(options.ExplicitModelFor(toolDomain(command))) == "" {
 				return ""
 			}
 			choice, err := executor.chooseOffering(command, tool.Capability, nil, modelInput{})

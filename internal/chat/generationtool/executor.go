@@ -443,7 +443,7 @@ func (executor *Executor) Execute(
 		result.NoSubmission = true
 		return result, nil
 	}
-	var referenceURLs []string
+	var turnReferenceURLs []string
 	// A multiview step (#65) takes its pictures and views from the person's
 	// structured request or the named three-view group, never from handles.
 	multiview, refusal, err := executor.multiviewSelection(ctx, command, arguments)
@@ -466,9 +466,9 @@ func (executor *Executor) Execute(
 			model, _ := json.Marshal(executor.multiviewModelID(command, multiview.model))
 			arguments[command.Tool.ModelArgument] = model
 		}
-		referenceURLs = multiview.URLs
+		turnReferenceURLs = multiview.URLs
 	} else if command.Tool.AcceptReferenceImages == nil || *command.Tool.AcceptReferenceImages {
-		referenceURLs, err = executor.selectReferences(command, arguments)
+		turnReferenceURLs, err = executor.selectReferences(command, arguments)
 		if err != nil {
 			if result, refused := executor.refuseReference(command, err); refused {
 				return result, nil
@@ -478,14 +478,37 @@ func (executor *Executor) Execute(
 			return result, err
 		}
 	}
-	styleReferenceURLs, styleReferenceErr := executor.styleLockReferenceURLs(command)
+	// #250: the required turn inputs lead the list (the artboard snapshot and
+	// the pictures marked "input"); identity anchors follow, then the style
+	// pictures, then the turn's other ordinary references. The order is also
+	// the trimming priority.
+	identityReferenceURLs, identityPurposes, anchorHandles, anchorRefusal, anchorErr := executor.anchorReferenceURLs(command, arguments)
+	if anchorErr != nil && anchorRefusal == "" {
+		anchorRefusal = executor.anchorInvalid(command, "锚点参考图不可用")
+	}
+	if anchorRefusal != "" {
+		result := executor.failure(command, "", anchorRefusal)
+		result.NoSubmission = true
+		return result, nil
+	}
+	styleReferenceURLs, stylePurposes, styleReferenceErr := executor.styleReferenceURLs(command)
 	if styleReferenceErr != nil {
 		result := executor.failure(command, "", executor.styleLockUnavailableMessage(command))
 		result.NoSubmission = true
 		return result, nil
 	}
-	styleReferenceCount := len(styleReferenceURLs)
-	referenceURLs = append(referenceURLs, styleReferenceURLs...)
+	// A style anchor is auto-attached without an argument, so its handles join
+	// the identity anchors' for the unavailable-picture refusal (#250). The
+	// person's style lock keeps its historical wording.
+	anchorHandles = mergeReferenceLabels(anchorHandles, executor.styleAnchorLabels(command))
+	serverPurposes := mergeReferencePurposes(identityPurposes, stylePurposes)
+	// A historical turn without anchors or a required input keeps its list
+	// byte for byte (a duplicate URL stays ambiguous, a three-view selection
+	// keeps its repeats). An anchored turn de-duplicates so the same picture is
+	// not sent twice, and the counts follow the final list so a trimmed suffix
+	// is reported by the right class.
+	groups := executor.referenceGroupsFor(command, identityReferenceURLs, styleReferenceURLs, turnReferenceURLs)
+	referenceURLs := groups.URLs
 	if command.Tool.ReferencePurposesArgument != "" {
 		for handle, purpose := range command.Options.AttachmentPurposes {
 			if purpose != "input" {
@@ -502,9 +525,6 @@ func (executor *Executor) Execute(
 				result.NoSubmission = true
 				return result, nil
 			}
-			input := referenceURLs[position]
-			copy(referenceURLs[1:position+1], referenceURLs[:position])
-			referenceURLs[0] = input
 		}
 	}
 	capability := command.Tool.FallbackCapability
@@ -559,6 +579,17 @@ func (executor *Executor) Execute(
 			return result, err
 		}
 	}
+	// #244: a frozen selection mask must be bound to a mask parameter, never
+	// quietly dropped into a whole-image redraw. A model the person or the
+	// Agent named is refused; only an unchosen model may move to a mask-capable
+	// Offering, and the result names that switch.
+	offering, maskRefusal := executor.ensureMaskOffering(command, capability,
+		modelInputFor(command, referenceURLs, multiview), offering)
+	if maskRefusal != "" {
+		result := executor.failure(command, "", maskRefusal)
+		result.NoSubmission = true
+		return result, nil
+	}
 	if multiview != nil {
 		group := !multiview.fromRequest || (command.Options.Multiview != nil && command.Options.Multiview.Group != "")
 		if refusal := executor.fitMultiviewViews(command, offering, multiview, group); refusal != "" {
@@ -566,11 +597,16 @@ func (executor *Executor) Execute(
 			result.NoSubmission = true
 			return result, nil
 		}
-		views, _ := json.Marshal(multiview.Views)
-		arguments[executor.chat.ThreeView.Multiview.ViewsArgument] = views
-		referenceURLs = append(multiview.URLs, styleReferenceURLs...)
+		if declaresReferenceViews(offering) {
+			// An order-only Offering has no view-label parameter: the pictures
+			// already arrive in the declared view order (#243).
+			views, _ := json.Marshal(multiview.Views)
+			arguments[executor.chat.ThreeView.Multiview.ViewsArgument] = views
+		}
+		groups = executor.referenceGroupsFor(command, identityReferenceURLs, styleReferenceURLs, multiview.URLs)
+		referenceURLs = groups.URLs
 	}
-	if styleReferenceCount > 0 {
+	if groups.Identity+groups.Style > 0 {
 		if _, supported := semanticParameter(offering, generation.SemanticReferenceImage); !supported {
 			result := executor.failure(command, "", executor.styleLockUnavailableMessage(command))
 			result.NoSubmission = true
@@ -617,14 +653,24 @@ func (executor *Executor) Execute(
 		given := len(referenceURLs)
 		referenceURLs = truncateReferences(referenceURLs, offering)
 		if len(referenceURLs) < given {
-			references = referenceUse{Used: len(referenceURLs), Given: given}
-			if styleReferenceCount > 0 {
-				references.StyleGiven = styleReferenceCount
-				// Agent references are always the prefix. Count the retained style
-				// suffix without allowing a model limit to evict them.
-				agentCount := given - styleReferenceCount
-				references.StyleUsed = min(styleReferenceCount, max(0, len(referenceURLs)-agentCount))
-				references.StyleTrimmed = references.StyleUsed < styleReferenceCount
+			identityUsed, styleUsed, turnUsed := groups.countClasses(len(referenceURLs))
+			references = referenceUse{
+				Used: len(referenceURLs), Given: given,
+				IdentityGiven: groups.Identity, IdentityUsed: identityUsed,
+				StyleGiven: groups.Style, StyleUsed: styleUsed,
+				TurnGiven: groups.Turn, TurnUsed: turnUsed,
+			}
+			references.StyleTrimmed = styleUsed < groups.Style
+			// The model limit cuts the tail: ordinary references first, then
+			// style pictures. Everything it cut is reported to the Agent by its
+			// server-visible handle (#250).
+			if dropped := groups.droppedTurnURLs(len(referenceURLs)); len(dropped) > 0 {
+				references.DroppedTurn = executor.referenceHandleLabels(command, dropped)
+				references.DroppedTurnCount = len(dropped)
+			}
+			if dropped := groups.droppedStyleURLs(len(referenceURLs)); len(dropped) > 0 {
+				references.DroppedStyle = executor.styleReferenceLabels(command, dropped)
+				references.DroppedStyleCount = len(dropped)
 			}
 		}
 		if capability == generation.ImageTo3D {
@@ -636,14 +682,15 @@ func (executor *Executor) Execute(
 	}
 	if capability == generation.ImageTo3D {
 		// Style-lock pictures guide the look, not the geometry: they are not
-		// 3D inputs and must not be judged by the input checklist.
-		gateReferences := referenceURLs
-		styleUsed := styleReferenceCount
-		if references.StyleTrimmed {
-			styleUsed = references.StyleUsed
-		}
-		if styleUsed > 0 && styleUsed <= len(gateReferences) {
-			gateReferences = gateReferences[:len(gateReferences)-styleUsed]
+		// 3D inputs and must not be judged by the input checklist. They sit
+		// between the identity anchors and the ordinary references, so filter
+		// by class instead of assuming a suffix.
+		gateReferences := make([]string, 0, len(referenceURLs))
+		for index, reference := range referenceURLs {
+			if index < len(groups.Classes) && groups.Classes[index] == referenceClassStyle {
+				continue
+			}
+			gateReferences = append(gateReferences, reference)
 		}
 		override, refusal := executor.review3DInput(ctx, command, gateReferences)
 		if refusal != "" {
@@ -658,7 +705,7 @@ func (executor *Executor) Execute(
 		}
 	}
 
-	purposes, refusal := executor.referencePurposes(command, arguments, referenceURLs)
+	purposes, refusal := executor.referencePurposes(command, arguments, referenceURLs, serverPurposes)
 	if refusal != "" {
 		result := executor.failure(command, "", refusal)
 		result.NoSubmission = true
@@ -728,6 +775,7 @@ func (executor *Executor) Execute(
 		prompt,
 		referenceURLs,
 		skillOverrides,
+		anchorHandles,
 	)
 	if err != nil {
 		if result, refused := executor.refuseReference(command, err); refused {
@@ -816,6 +864,9 @@ type stepInfo struct {
 	// ModelNote says the person's pick was a retired model and the step ran
 	// on its successor (#329 follow-up). Empty when it does not apply.
 	ModelNote string
+	// MaskNote says the Agent's own mask argument was dropped because the turn
+	// carried no frozen selection mask (#244). Empty when it does not apply.
+	MaskNote string
 	// ReferenceNote says which of the references a step really used, such as
 	// "only the front view of a three-view group". Empty when it does not apply.
 	ReferenceNote string
@@ -1310,6 +1361,7 @@ func (executor *Executor) buildInput(
 	prompt string,
 	referenceURLs []string,
 	skillOverrides map[generation.ParameterSemantic]json.RawMessage,
+	anchorHandles map[string]string,
 ) (json.RawMessage, []generation.AssetID, error) {
 	allowed := make(
 		map[string]generation.Parameter,
@@ -1430,6 +1482,12 @@ func (executor *Executor) buildInput(
 			referenceURLs,
 		)
 		if err != nil {
+			// A named anchor whose picture was deleted or expired is reported
+			// with that anchor's handle (#250) instead of a generic generation
+			// failure. Other reference failures keep their historical refusal.
+			if refusal := executor.anchorReferenceRefusal(ctx, command, referenceURLs, anchorHandles); refusal != nil {
+				return nil, nil, refusal
+			}
 			return nil, nil, err
 		}
 		referenceAssets = assets
@@ -1560,6 +1618,10 @@ func (executor *Executor) buildInput(
 	// #272: on a canvas turn the artboard is the output frame; it is applied
 	// last, over the turn's, the Agent's and a Skill's size settings.
 	executor.applyCanvasOutputSize(command, offering, input)
+	// #244: the frozen selection mask is the person's input, written into the
+	// Offering's mask parameter after every other layer. An Agent-supplied
+	// mask that reached the input above wins.
+	bindSelectionMask(command, offering, input, chosen)
 	encoded, err := json.Marshal(input)
 	return encoded, referenceAssets, err
 }
@@ -1675,6 +1737,10 @@ func (executor *Executor) wait(
 	}
 	info.Fallback = executor.usedFallbackModel(command)
 	info.ModelNote = executor.retiredModelNote(command, offering)
+	if switchNote := executor.maskModelSwitchNote(command, offering); switchNote != "" {
+		info.ModelNote = strings.TrimSpace(strings.Join([]string{info.ModelNote, switchNote}, "\n"))
+	}
+	info.MaskNote = executor.maskNotAppliedNote(command, offering)
 	{
 		task, err := executor.gateway.Get(
 			ctx,
@@ -1888,6 +1954,9 @@ func (executor *Executor) success(
 	}
 	if key := tool.ResultFields.ModelNote; key != "" && info.ModelNote != "" {
 		result[key] = info.ModelNote
+	}
+	if key := tool.ResultFields.MaskNote; key != "" && info.MaskNote != "" {
+		result[key] = info.MaskNote
 	}
 	if key := tool.ResultFields.PurposeBudgetNote; key != "" && info.PurposeBudgetNote != "" {
 		result[key] = info.PurposeBudgetNote

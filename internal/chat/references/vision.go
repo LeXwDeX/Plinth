@@ -130,6 +130,68 @@ func dataURI(mediaType string, data []byte) string {
 	return "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
+// OpenVisionReference 把会话视觉锚引用的图片转成模型可直接读取的 data URI
+// （#250）。锚点参考图可能是 input asset id、input asset URL，或生成结果
+// 的规范 Task 资产 URL；前两者按 owner 校验，Task 资产还必须属于该会话
+// （分支会话含其祖先，和附件校验用同一个范围）。只读打开，不新建资产。
+func (resolver *Resolver) OpenVisionReference(
+	ctx context.Context,
+	owner generation.OwnerID,
+	sessionID string,
+	reference string,
+) (string, bool) {
+	reference = strings.TrimSpace(reference)
+	if resolver.visionInlineMaxBytes <= 0 || owner == "" || reference == "" {
+		return "", false
+	}
+	if !strings.HasPrefix(reference, "/") &&
+		!strings.HasPrefix(reference, "http://") &&
+		!strings.HasPrefix(reference, "https://") {
+		return resolver.OpenVisionAsset(ctx, owner, generation.AssetID(reference))
+	}
+	referencePath, err := resolver.localPath(reference)
+	if err != nil {
+		return "", false
+	}
+	for _, route := range resolver.inputAssetRoutes {
+		values, matched := matchRoute(route, referencePath)
+		if !matched || len(values) != 1 {
+			continue
+		}
+		return resolver.OpenVisionAsset(ctx, owner, generation.AssetID(values[0]))
+	}
+	if values, matched := matchRoute(resolver.taskAssetRoute, referencePath); matched && len(values) == 2 {
+		task, err := resolver.ownedSessionTask(
+			ctx,
+			owner,
+			sessionID,
+			generation.TaskID(values[0]),
+			true,
+		)
+		if err != nil {
+			return "", false
+		}
+		content, err := resolver.tasks.OpenAsset(
+			ctx,
+			owner,
+			task.ID,
+			generation.AssetID(values[1]),
+		)
+		if err != nil {
+			return "", false
+		}
+		defer content.Body.Close()
+		return resolver.inlineVision(
+			ctx,
+			content.Body,
+			resolver.visionMediaType(content.MediaType),
+			content.Size,
+			content.SHA256,
+		)
+	}
+	return "", false
+}
+
 // OpenVisionAsset 把会话风格锁引用的输入资产（按资产 ID）转成模型可直接
 // 读取的 data URI（#247）。与 OpenVisionImage 一样只读打开并走 #292 的
 // 缩小重编码；所有权按 owner 校验。

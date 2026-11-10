@@ -115,6 +115,15 @@ type InputAssetDigester interface {
 // not belong to the session. The claimed IDs are never echoed back.
 var ErrAttachmentRejected = errors.New("chat: attachment rejected")
 
+// SelectionMaskMeasurer reads the pixel facts of an owned selection mask
+// (#244): its size, the inclusive pixel box of its transparent (redrawn)
+// region and that region's share of the picture. The attachment verifier
+// implements it so the service measures the mask instead of trusting a client
+// claim.
+type SelectionMaskMeasurer interface {
+	MeasureMask(ctx context.Context, ownerID, assetID string) (SelectionMask, error)
+}
+
 // AttachmentVerifier validates a client claim against owner and session scope
 // and returns the canonical facts. Handle and ImageSlot are left empty.
 type AttachmentVerifier interface {
