@@ -1265,3 +1265,41 @@ func TestScopedSetParamsAndExplicitProvenance(t *testing.T) {
 		t.Fatal("explicit snapshot aliases caller")
 	}
 }
+
+func TestGetProductionStepDispatchesToTheReadOnlyReader(t *testing.T) {
+	called := false
+	executor, err := New(Config{
+		Params: agentparams.NewStore(), Generate: &fakeGenerate{},
+		ReadProductionStep: func(_ context.Context, command chat.ToolCommand) (chat.ToolResult, error) {
+			called = true
+			if command.Call.Name != ToolGetProductionStep {
+				t.Fatalf("call name = %q", command.Call.Name)
+			}
+			return chat.ToolResult{AgentContent: `{"ok":true}`, NoSubmission: true}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := executor.Execute(context.Background(), chat.ToolCommand{
+		OwnerID: testOwner, SessionID: "s1",
+		Call: agents.ToolCall{ID: "read", Name: ToolGetProductionStep, Arguments: json.RawMessage(`{"step":"@step1"}`)},
+	}, nil)
+	if err != nil || !called || result.AgentContent != `{"ok":true}` || !result.NoSubmission {
+		t.Fatalf("dispatch: result=%+v called=%t err=%v", result, called, err)
+	}
+}
+
+func TestGetProductionStepWithoutAReaderIsUnavailable(t *testing.T) {
+	executor, err := New(Config{Params: agentparams.NewStore(), Generate: &fakeGenerate{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := executor.Execute(context.Background(), chat.ToolCommand{
+		OwnerID: testOwner, SessionID: "s1",
+		Call: agents.ToolCall{ID: "read", Name: ToolGetProductionStep, Arguments: json.RawMessage(`{"step":"@step1"}`)},
+	}, nil)
+	if err != nil || result.Error == "" || !result.NoSubmission {
+		t.Fatalf("unwired reader: result=%+v err=%v", result, err)
+	}
+}

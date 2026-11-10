@@ -225,6 +225,12 @@ type ServiceConfig struct {
 	// Models names the sessions' chat model and reads its thinking profile
 	// and context window (#322). A zero policy offers no level and no window.
 	Models ModelPolicy
+	// VisionBudget resolves the effective vision image budget for a model
+	// (#247); nil leaves the context view without a budget.
+	VisionBudget func(model string) int
+	// VisionTokenBudget resolves the effective per-request vision token bound
+	// for a model (#247); nil leaves the context view without a token bound.
+	VisionTokenBudget func(model string) int
 	// RetiredModels are the generation models no longer offered and the model
 	// that replaces each (Schema runtime.frontend.retired_generation_models,
 	// #329 follow-up). A turn's pick of a retired model is moved to its
@@ -252,6 +258,9 @@ type ServiceConfig struct {
 	// ChoiceMaxOptions bounds the options of an Agent-supplied direction card
 	// (#239); zero accepts any non-empty list.
 	ChoiceMaxOptions int
+	// WorkLedger is application.chat.work_ledger (#248). A zero value leaves
+	// the ledger and the get_production_step tool unavailable.
+	WorkLedger catalog.ChatWorkLedgerSchema
 }
 
 type Service struct {
@@ -314,8 +323,21 @@ type Service struct {
 	// models and contextStore serve the thinking level, the context usage
 	// and the compactions of sessions (#322).
 	models              ModelPolicy
+	visionBudget        func(model string) int
+	visionTokenBudget   func(model string) int
 	contextStore        ContextStore
 	compactionListLimit int
+
+	// workLedger is application.chat.work_ledger (#248); workLedgerTasks is
+	// the public-Task page source, workLedgerDetail the full single-Task read,
+	// workDecisions the rejected-direction source and workParameterSource the
+	// existing parameter store's last-writer state. All are set during
+	// application assembly.
+	workLedger          catalog.ChatWorkLedgerSchema
+	workLedgerTasks     SessionTaskSource
+	workLedgerDetail    SessionTaskDetail
+	workDecisions       WorkDecisionReader
+	workParameterSource WorkParameterSource
 }
 
 func NewService(config ServiceConfig) (*Service, error) {
@@ -413,6 +435,9 @@ func NewService(config ServiceConfig) (*Service, error) {
 		imageUsageProfileKind:      choiceKindOf(config.ChoiceKinds, "image_usage_profiles"),
 		choiceMaxOptions:           config.ChoiceMaxOptions,
 		models:                     config.Models,
+		workLedger:                 config.WorkLedger,
+		visionBudget:               config.VisionBudget,
+		visionTokenBudget:          config.VisionTokenBudget,
 	}, nil
 }
 

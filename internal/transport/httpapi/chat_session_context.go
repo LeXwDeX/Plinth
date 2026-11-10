@@ -50,18 +50,30 @@ func (s *Server) chatContextWire(sessionID string, view chat.ContextView) map[st
 			fields.ThroughMessageID:  compaction.ThroughMessageID,
 		})
 	}
-	var tokens, window any
+	var tokens, window, visionTokens, visionTokenBudget, visionBudget any
 	if view.Tokens != nil {
 		tokens = *view.Tokens
+	}
+	if view.VisionTokens != nil {
+		visionTokens = *view.VisionTokens
+	}
+	if view.VisionTokenBudget > 0 {
+		visionTokenBudget = view.VisionTokenBudget
+	}
+	if view.VisionBudget > 0 {
+		visionBudget = view.VisionBudget
 	}
 	if view.Window > 0 {
 		window = view.Window
 	}
 	return map[string]any{
-		fields.ID:            sessionID,
-		fields.ContextTokens: tokens,
-		fields.ContextWindow: window,
-		fields.Compactions:   compactions,
+		fields.ID:                       sessionID,
+		fields.ContextTokens:            tokens,
+		fields.ContextVisionTokens:      visionTokens,
+		fields.ContextVisionTokenBudget: visionTokenBudget,
+		fields.ContextVisionBudget:      visionBudget,
+		fields.ContextWindow:            window,
+		fields.Compactions:              compactions,
 	}
 }
 

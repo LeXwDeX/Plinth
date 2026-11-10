@@ -95,6 +95,9 @@ func TestChatSessionContextReportsUsageWindowAndCompactions(t *testing.T) {
 	read := grantTestRequest(t, handler, cookie, http.MethodGet, contextPath(sessionID), "", "")
 	if read.Code != http.StatusOK ||
 		!strings.Contains(read.Body.String(), `"contextTokens":null`) ||
+		!strings.Contains(read.Body.String(), `"contextVisionTokens":null`) ||
+		!strings.Contains(read.Body.String(), `"contextVisionTokenBudget":12000`) ||
+		!strings.Contains(read.Body.String(), `"contextVisionBudget":10`) ||
 		!strings.Contains(read.Body.String(), `"contextWindow":1000000`) ||
 		!strings.Contains(read.Body.String(), `"compactions":[]`) {
 		t.Fatalf("empty context: %d %s", read.Code, read.Body.String())
@@ -110,13 +113,15 @@ func TestChatSessionContextReportsUsageWindowAndCompactions(t *testing.T) {
 		Summary: "private summary text", ThroughMessageID: "message-9", Rounds: 4, CreatedAt: created}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.RecordContextUsage(ctx, "owner-a", sessionID, &chat.ContextUsage{PromptTokens: 2000, CompletionTokens: 345}); err != nil {
+	if err := repository.RecordContextUsage(ctx, "owner-a", sessionID, &chat.ContextUsage{PromptTokens: 2000, CompletionTokens: 345, VisionTokens: 2210}); err != nil {
 		t.Fatal(err)
 	}
 	read = grantTestRequest(t, handler, cookie, http.MethodGet, contextPath(sessionID), "", "")
 	body := decodeMap(t, read.Body.String())
 	compactions, _ := body["compactions"].([]any)
-	if read.Code != http.StatusOK || body["contextTokens"] != float64(2345) || len(compactions) != 1 {
+	if read.Code != http.StatusOK || body["contextTokens"] != float64(2345) || len(compactions) != 1 ||
+		body["contextVisionTokens"] != float64(2210) || body["contextVisionTokenBudget"] != float64(12000) ||
+		body["contextVisionBudget"] != float64(10) {
 		t.Fatalf("context: %d %s", read.Code, read.Body.String())
 	}
 	record, _ := compactions[0].(map[string]any)

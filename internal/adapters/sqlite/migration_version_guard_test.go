@@ -112,10 +112,9 @@ func TestAppendOnlyMigrationsShape(t *testing.T) {
 		files[version] = entry.Name()
 	}
 	head := sqlite.MigrationHead()
-	// The embedded migration list is the source of truth. Version 84 is
-	// reserved for the in-flight vision-budget schema (#247), so the file set
-	// may legitimately have a hole; every embedded version must exist and no
-	// extra file may exist.
+	// The embedded migration list is the source of truth: there is no hole now
+	// that #247 fills 84 (vision usage) and #239 adds 85 (explicit 2D model
+	// lock); every embedded version must exist and no extra file may exist.
 	expected := sqlite.MigrationVersions()
 	if len(files) != len(expected) {
 		t.Fatalf("migration files = %d; want %d (embedded versions %v)", len(files), len(expected), expected)

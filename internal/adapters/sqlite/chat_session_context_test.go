@@ -37,6 +37,7 @@ func TestMigration0065UpgradesExistingSessionsWithoutContext(t *testing.T) {
 		`ALTER TABLE go_chat_sessions DROP COLUMN context_completion_tokens`,
 		`ALTER TABLE go_chat_sessions DROP COLUMN context_model`,
 		`ALTER TABLE go_chat_sessions DROP COLUMN context_updated_at`,
+		`ALTER TABLE go_chat_sessions DROP COLUMN context_vision_tokens`,
 		`ALTER TABLE go_chat_sessions DROP COLUMN brief`,
 		`ALTER TABLE go_chat_sessions DROP COLUMN explicit_model_3d`, `ALTER TABLE go_chat_sessions DROP COLUMN explicit_model_image`,
 		`ALTER TABLE chat_choices DROP COLUMN kind`,
@@ -188,5 +189,45 @@ func TestCompactionsReplaceTheSummaryOnlyFromTheExpectedOne(t *testing.T) {
 	var left int
 	if err := r.db.QueryRow(`SELECT COUNT(*) FROM chat_context_compactions WHERE session_id = 's1'`).Scan(&left); err != nil || left != 0 {
 		t.Fatalf("compactions left after delete = %d err=%v", left, err)
+	}
+}
+
+// #247: the declared vision token estimate survives a reopen, separately from
+// the upstream-reported prompt tokens, and a compaction clears it.
+func TestSessionContextPersistsTheVisionEstimate(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "vision.db")
+	r, err := openTestRepository(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createApprovalSession(t, r, "s1", "owner-a", chat.Session{})
+	if err := r.RecordContextUsage(ctx, "owner-a", "s1", &chat.ContextUsage{
+		PromptTokens: 900, CompletionTokens: 30, VisionTokens: 2210, Model: "deepseek",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := openTestRepository(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reopened.Close() }()
+	state, found, err := reopened.SessionContext(ctx, "owner-a", "s1")
+	if err != nil || !found || state.Usage == nil ||
+		state.Usage.PromptTokens != 900 || state.Usage.VisionTokens != 2210 {
+		t.Fatalf("reopened usage = %+v found=%v err=%v", state.Usage, found, err)
+	}
+	if _, err := reopened.SaveCompaction(ctx, chat.Compaction{
+		OwnerID: "owner-a", SessionID: "s1", Trigger: chat.CompactionManual,
+		Summary: "summary", ThroughMessageID: "m1", Rounds: 1,
+	}, ""); err != nil {
+		t.Fatal(err)
+	}
+	state, found, err = reopened.SessionContext(ctx, "owner-a", "s1")
+	if err != nil || !found || state.Usage != nil {
+		t.Fatalf("usage after compaction = %+v found=%v err=%v", state.Usage, found, err)
 	}
 }

@@ -1888,7 +1888,7 @@ func (executor *Executor) success(
 		TaskID:       taskID,
 		ImageURLs:    imageURLs,
 		AgentContent: string(content),
-		Pictures:     resultPictures(tool, imageURLs, executor.chat.Context.MaxResultPictures),
+		Pictures:     resultPictures(tool, imageURLs),
 	}
 }
 
@@ -1897,21 +1897,20 @@ func (executor *Executor) success(
 // inspect_model and render_model_views, not by looking at thumbnails. When a
 // call produced more candidates than the Schema allows, evenly spaced ones are
 // shown; every produced picture still keeps its handle in the result.
-func resultPictures(tool catalog.ChatToolSchema, urls []string, limit int) []chat.ToolPicture {
+func resultPictures(tool catalog.ChatToolSchema, urls []string) []chat.ToolPicture {
 	if len(urls) == 0 || !imageResultCapability(string(tool.Capability)) {
 		return nil
 	}
-	if limit <= 0 {
-		limit = 4
-	}
-	picked := urls
-	if len(urls) > limit {
-		picked = evenlySpaced(urls, limit)
-	}
-	pictures := make([]chat.ToolPicture, 0, len(picked))
-	for _, url := range picked {
+	// Every produced picture travels to the orchestrator (#247): when there
+	// are more than the role's places, it composes a labelled contact sheet
+	// instead of silently dropping candidates. max_result_pictures stays the
+	// hard place cap.
+	pictures := make([]chat.ToolPicture, 0, len(urls))
+	for _, url := range urls {
 		if url != "" {
-			pictures = append(pictures, chat.ToolPicture{URL: url, Fresh: true})
+			pictures = append(pictures, chat.ToolPicture{
+				URL: url, Fresh: true, Purpose: chat.ToolPictureResult,
+			})
 		}
 	}
 	return pictures
@@ -1924,27 +1923,6 @@ func imageResultCapability(capability string) bool {
 	default:
 		return false
 	}
-}
-
-// evenlySpaced picks limit entries from urls, keeping the first and the last.
-func evenlySpaced(urls []string, limit int) []string {
-	if limit <= 0 || len(urls) <= limit {
-		return urls
-	}
-	if limit == 1 {
-		return []string{urls[len(urls)/2]}
-	}
-	picked := make([]string, 0, limit)
-	seen := make(map[int]bool, limit)
-	for index := 0; index < limit; index++ {
-		at := index * (len(urls) - 1) / (limit - 1)
-		if seen[at] {
-			continue
-		}
-		seen[at] = true
-		picked = append(picked, urls[at])
-	}
-	return picked
 }
 
 func (executor *Executor) executionFailure(

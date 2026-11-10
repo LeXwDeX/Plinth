@@ -274,9 +274,17 @@ func (orchestrator *Orchestrator) compactHistory(
 		previousID = state.Latest.ID
 		previous = strings.ReplaceAll(compaction.PreviousSummaryTemplate, "{summary}", state.Latest.Summary)
 	}
+	// The ledger is material for the summary, not the transcript: it keeps the
+	// step handles, states, self-check conclusions and rejected directions even
+	// when their messages are summarized away. It carries no full prompt.
+	ledger := ""
+	if orchestrator.service != nil {
+		ledger = orchestrator.service.workLedgerSummary(ctx, ownerID, sessionID, "", false)
+	}
 	source := strings.NewReplacer(
 		"{previous_summary}", previous,
 		"{transcript}", orchestrator.transcript(history, start, through),
+		"{ledger}", ledger,
 	).Replace(compaction.SourceTemplate)
 	request := agents.Request{
 		Model:           model.name,
@@ -463,11 +471,22 @@ func mentionsHandle(text, handle string) bool {
 }
 
 // recordUsage stores the usage the upstream reported for a turn's request;
-// the newest request of the turn wins. Best effort.
-func (orchestrator *Orchestrator) recordUsage(ctx context.Context, command ProcessTurn, model string, usage *agents.Usage) {
+// the newest request of the turn wins. The vision token count is the Schema's
+// declared estimate of the pictures that request carried (#247), never an
+// upstream-reported value. Best effort.
+func (orchestrator *Orchestrator) recordUsage(
+	ctx context.Context,
+	command ProcessTurn,
+	model string,
+	usage *agents.Usage,
+	request agents.Request,
+) {
 	var stored *ContextUsage
 	if usage != nil {
-		stored = &ContextUsage{PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens, Model: model}
+		stored = &ContextUsage{
+			PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens,
+			VisionTokens: orchestrator.requestVisionTokens(request, model), Model: model,
+		}
 	}
 	if err := orchestrator.service.RecordContextUsage(context.WithoutCancel(ctx), command.OwnerID, command.SessionID, stored); err != nil {
 		orchestrator.logger.Warn("记录对话上下文用量失败", "session_id", command.SessionID, "error", err)
