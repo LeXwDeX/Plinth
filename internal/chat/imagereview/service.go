@@ -244,6 +244,13 @@ func (service *Service) Inspect(ctx context.Context, command chat.ToolCommand) (
 	}, nil
 }
 
+// OpenPicture reads one already-resolved picture for the reference
+// comparison (#246), bounded by the image review byte limit. The owner check
+// is the same one Inspect applies to a handle or an asset id.
+func (service *Service) OpenPicture(ctx context.Context, owner string, attachment chat.Attachment, url string) ([]byte, error) {
+	return service.read(ctx, owner, chat.ResolvedAttachment{Attachment: attachment, URL: url})
+}
+
 // ReviewAttachment inspects one already-resolved attachment with a named
 // checklist. The 3D input gate calls it without going through a tool call.
 func (service *Service) ReviewAttachment(ctx context.Context, owner string, attachment chat.Attachment, url, checklistName string) (imageinspect.Report, []imageinspect.Check, error) {

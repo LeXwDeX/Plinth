@@ -223,6 +223,9 @@ type OrchestratorConfig struct {
 	// the turn's options (#329 E': how many reference pictures the picked model
 	// uses). Nil, or "", leaves the declared description as it is.
 	ToolNote func(tool catalog.ChatToolSchema, options TurnOptions) string
+	// SelfCheckTasks lists the session's finished 3D results for the
+	// self-check prompt (#246). Nil keeps the block out.
+	SelfCheckTasks func(context.Context, string, string) ([]SelfCheckTask, error)
 	// TaskLookup and TaskGet read kernel facts without current Catalog checks.
 	// They let a stopped turn find paid submissions whose response or binding
 	// was lost before the assistant message could be updated.
@@ -270,14 +273,15 @@ type Orchestrator struct {
 		owner generation.OwnerID,
 		assetID string,
 	) (string, bool)
-	taskCanceler func(ctx context.Context, ownerID, taskID string) error
-	toolNote     func(tool catalog.ChatToolSchema, options TurnOptions) string
-	taskLookup   func(ctx context.Context, ownerID, idempotencyKey string) (generation.Task, error)
-	taskGet      func(ctx context.Context, ownerID, taskID string) (generation.Task, error)
-	stopConsent  func(ownerID, sessionID, callID, idempotencyKey, taskID string) error
-	texts        *catalog.TextLocalizer
-	queue        chan ProcessTurn
-	queueMu      sync.Mutex
+	taskCanceler   func(ctx context.Context, ownerID, taskID string) error
+	toolNote       func(tool catalog.ChatToolSchema, options TurnOptions) string
+	selfCheckTasks func(context.Context, string, string) ([]SelfCheckTask, error)
+	taskLookup     func(ctx context.Context, ownerID, idempotencyKey string) (generation.Task, error)
+	taskGet        func(ctx context.Context, ownerID, taskID string) (generation.Task, error)
+	stopConsent    func(ownerID, sessionID, callID, idempotencyKey, taskID string) error
+	texts          *catalog.TextLocalizer
+	queue          chan ProcessTurn
+	queueMu        sync.Mutex
 	// titleWaiters counts background title summaries in flight.
 	titleWaiters sync.WaitGroup
 	queued       map[string]struct{}
@@ -642,6 +646,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		configuration:     config.Configuration,
 		taskCanceler:      config.TaskCanceler,
 		toolNote:          config.ToolNote,
+		selfCheckTasks:    config.SelfCheckTasks,
 		taskLookup:        config.TaskLookup,
 		taskGet:           config.TaskGet,
 		stopConsent:       config.StopConsent,
@@ -1953,6 +1958,10 @@ func (orchestrator *Orchestrator) agentRequest(
 	sections.add("work_anchors", orchestrator.workAnchorsPrompt(ctx, ownerID, sessionID))
 	sections.add("selection", orchestrator.selectionPrompt(options))
 	sections.add("brief", orchestrator.briefPrompt(options))
+	// The self-check state is stored session data, not a message-window
+	// projection, so context compaction never changes it (#246). It sits
+	// before the framed session notes, which stay the last settings block.
+	sections.add("self_check", orchestrator.selfCheckPrompt(ctx, ownerID, sessionID, history))
 	sections.add("notes", orchestrator.notesPrompt(ctx, ownerID, sessionID))
 	var choices []Choice
 	if orchestrator.service != nil && sessionID != "" {

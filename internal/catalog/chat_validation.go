@@ -677,6 +677,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateImageReview(schema); err != nil {
 		return err
 	}
+	if err := validateSelfCheck(schema); err != nil {
+		return err
+	}
 	if err := validateWorkLedger(schema); err != nil {
 		return err
 	}
@@ -840,6 +843,8 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"inspect_model":           {"model.inspect", "READ", []string{"model-3d"}},
 		"render_model_views":      {"model.render", "READ", []string{"model-3d"}},
 		"compare_models":          {"model.compare", "READ", []string{"model-3d"}},
+		"compare_model_reference": {"model.compare_reference", "READ", []string{"model-3d"}},
+		"record_self_check":       {"self_check.record", "SESSION_WRITE", []string{"model-3d"}},
 		"get_production_step":     {"ledger.read", "READ", []string{"image", "model-3d"}},
 	}
 	var controlDomains []string
@@ -2399,6 +2404,168 @@ func validateWorkLedger(schema ChatSchema) error {
 	return nil
 }
 
+// validateSelfCheck checks application.chat.self_check (#246) once the record
+// writer or the reference comparison tool is declared: the states and their
+// roles, the counters, the reference view subset and every Agent-facing text
+// with the placeholders the executor fills. A Catalog without either tool stays
+// valid.
+func validateSelfCheck(schema ChatSchema) error {
+	used := false
+	for _, tool := range schema.AgentTools {
+		switch tool.Execution.ImplementationKey {
+		case "model.compare_reference", "self_check.record":
+			used = true
+		}
+	}
+	if !used {
+		return nil
+	}
+	selfCheck := schema.SelfCheck
+	limits := selfCheck.Limits
+	if limits.MaxRoundsPerResult <= 0 || limits.MaxCorrectionsPerResult <= 0 || limits.MaxRendersPerRound <= 0 {
+		return errors.New("chat.self_check.limits 的轮次、修正与每轮渲染上限必须为正数")
+	}
+	roles := map[string]bool{}
+	ids := map[string]bool{}
+	for _, status := range selfCheck.Statuses {
+		if strings.TrimSpace(status.ID) == "" || strings.TrimSpace(status.Label) == "" {
+			return errors.New("chat.self_check.statuses 的 id 与 label 不能为空")
+		}
+		switch status.Role {
+		case "unchecked", "passed", "issues":
+		default:
+			return fmt.Errorf("chat.self_check.statuses 含未知 role %q", status.Role)
+		}
+		if ids[status.ID] {
+			return fmt.Errorf("chat.self_check.statuses 的 id %q 重复", status.ID)
+		}
+		if roles[status.Role] {
+			return fmt.Errorf("chat.self_check.statuses 的 role %q 重复", status.Role)
+		}
+		ids[status.ID] = true
+		roles[status.Role] = true
+	}
+	for _, role := range []string{"unchecked", "passed", "issues"} {
+		if !roles[role] {
+			return fmt.Errorf("chat.self_check.statuses 缺少 %s 状态", role)
+		}
+	}
+	if !selfCheck.RequiredChecks.Inspect || !selfCheck.RequiredChecks.RenderOrReference {
+		return errors.New("chat.self_check.required_checks 必须至少要求一次检查与一次渲染或对照")
+	}
+	conclusion := selfCheck.Conclusion
+	if conclusion.MaxItems <= 0 || conclusion.MaxItemCharacters <= 0 || conclusion.MaxSummaryCharacters <= 0 {
+		return errors.New("chat.self_check.conclusion 的上限必须为正数")
+	}
+	reference := selfCheck.Reference
+	render := schema.ModelReview.Render
+	if len(reference.Views) == 0 || strings.TrimSpace(reference.DefaultView) == "" ||
+		strings.TrimSpace(reference.Mode) == "" || reference.Size <= 0 || reference.Supersample <= 0 ||
+		reference.MaxPairsPerCall <= 0 || reference.SubjectThreshold <= 0 || reference.NormalizedSide <= 0 {
+		return errors.New("chat.self_check.reference 的视角、模式、尺寸与指标参数不能为空或非正数")
+	}
+	renderViews := map[string]bool{}
+	for _, view := range render.Views {
+		renderViews[view] = true
+	}
+	views := map[string]bool{}
+	for _, view := range reference.Views {
+		if !renderViews[view] || views[view] {
+			return fmt.Errorf("chat.self_check.reference.views 含未声明或重复的视角 %q", view)
+		}
+		views[view] = true
+	}
+	if !views[reference.DefaultView] {
+		return fmt.Errorf("chat.self_check.reference.default_view %q 未在 views 中声明", reference.DefaultView)
+	}
+	if !slices.Contains(render.Modes, reference.Mode) {
+		return fmt.Errorf("chat.self_check.reference.mode %q 未在 model_review.render.modes 中声明", reference.Mode)
+	}
+	if render.MaxSize > 0 && reference.Size > render.MaxSize {
+		return errors.New("chat.self_check.reference.size 不能超过 model_review.render.max_size")
+	}
+	if render.Supersample > 0 && reference.Supersample > render.Supersample {
+		return errors.New("chat.self_check.reference.supersample 不能超过 model_review.render.supersample")
+	}
+	if schema.ModelReview.Compare.MaxViewsPerCall > 0 &&
+		reference.MaxPairsPerCall > schema.ModelReview.Compare.MaxViewsPerCall {
+		return errors.New("chat.self_check.reference.max_pairs_per_call 不能超过 model_review.compare.max_views_per_call")
+	}
+	if reference.Layout != "side_by_side" {
+		return errors.New("chat.self_check.reference.layout 必须是 side_by_side")
+	}
+	if reference.AssetType == "" || reference.AssetType != render.AssetType {
+		return errors.New("chat.self_check.reference.asset_type 必须等于 model_review.render.asset_type")
+	}
+	context := selfCheck.Context
+	if context.MaxResults <= 0 || context.MaxCharacters <= 0 ||
+		!strings.Contains(context.ContextTemplate, "{results}") ||
+		!strings.Contains(context.ContextTemplate, "{rule}") ||
+		!strings.Contains(context.TaskLineTemplate, "{task_id}") ||
+		!strings.Contains(context.TaskLineTemplate, "{status}") ||
+		!strings.Contains(context.TaskLineTemplate, "{rounds_used}") ||
+		!strings.Contains(context.TaskLineTemplate, "{rounds_limit}") ||
+		!strings.Contains(context.TaskLineTemplate, "{renders_in_round}") ||
+		!strings.Contains(context.TaskLineTemplate, "{renders_limit}") ||
+		!strings.Contains(context.TaskLineTemplate, "{corrections_used}") ||
+		!strings.Contains(context.TaskLineTemplate, "{corrections_limit}") ||
+		!strings.Contains(context.TaskLineTemplate, "{background}") ||
+		!strings.Contains(context.TaskLineTemplate, "{summary}") ||
+		strings.TrimSpace(context.UncheckedRuleText) == "" || strings.TrimSpace(context.NoRecordsText) == "" ||
+		strings.TrimSpace(context.BackgroundText) == "" {
+		return errors.New("chat.self_check.context 的提示模板与文案不完整")
+	}
+	texts := []struct {
+		name     string
+		value    string
+		required []string
+	}{
+		{"check_recorded", selfCheck.Texts.CheckRecorded, []string{"{round}", "{kind}"}},
+		{"rounds_remaining", selfCheck.Texts.RoundsRemaining, []string{"{remaining}", "{limit}"}},
+		{"renders_remaining", selfCheck.Texts.RendersRemaining, []string{"{remaining}", "{limit}"}},
+		{"corrections_remaining", selfCheck.Texts.CorrectionsRemaining, []string{"{remaining}", "{limit}"}},
+		{"limit_reached", selfCheck.Texts.LimitReached, nil},
+		{"record_saved", selfCheck.Texts.RecordSaved, nil},
+		{"record_needs_check", selfCheck.Texts.RecordNeedsCheck, nil},
+		{"record_unknown_status", selfCheck.Texts.RecordUnknownStatus, []string{"{status}", "{statuses}"}},
+		{"record_not_writable", selfCheck.Texts.RecordNotWritable, []string{"{status}", "{statuses}"}},
+		{"record_remaining_required", selfCheck.Texts.RecordRemainingRequired, nil},
+		{"record_remaining_forbidden", selfCheck.Texts.RecordRemainingForbidden, nil},
+		{"record_too_long", selfCheck.Texts.RecordTooLong, []string{"{field}", "{length}", "{maximum}"}},
+		{"record_invalid_arguments", selfCheck.Texts.RecordInvalidArguments, []string{"{detail}"}},
+		{"record_unknown_task", selfCheck.Texts.RecordUnknownTask, []string{"{model}"}},
+		{"reference_ready", selfCheck.Texts.ReferenceReady, []string{"{model}", "{image}", "{view}", "{iou}"}},
+		{"reference_missing", selfCheck.Texts.ReferenceMissing, []string{"{view}"}},
+		{"reference_unreadable", selfCheck.Texts.ReferenceUnreadable, []string{"{handle}", "{reason}"}},
+		{"reference_no_reference", selfCheck.Texts.ReferenceNoReference, nil},
+		{"caveats", selfCheck.Texts.Caveats, nil},
+	}
+	for _, text := range texts {
+		if strings.TrimSpace(text.value) == "" {
+			return fmt.Errorf("chat.self_check.texts.%s 不能为空", text.name)
+		}
+		for _, placeholder := range text.required {
+			if !strings.Contains(text.value, placeholder) {
+				return fmt.Errorf("chat.self_check.texts.%s 必须包含 %s", text.name, placeholder)
+			}
+		}
+	}
+	if len(selfCheck.Checkpoints) == 0 {
+		return errors.New("chat.self_check.checkpoints 至少声明一个检查点")
+	}
+	checkpoints := map[string]bool{}
+	for _, checkpoint := range selfCheck.Checkpoints {
+		if strings.TrimSpace(checkpoint.ID) == "" || strings.TrimSpace(checkpoint.Label) == "" {
+			return errors.New("chat.self_check.checkpoints 的 id 与 label 不能为空")
+		}
+		if checkpoints[checkpoint.ID] {
+			return fmt.Errorf("chat.self_check.checkpoints 的 id %q 重复", checkpoint.ID)
+		}
+		checkpoints[checkpoint.ID] = true
+	}
+	return nil
+}
+
 // validateModelReview checks application.chat.model_review (#103) once any
 // model review tool is declared: every bound positive, the render vocabulary
 // renderable, defaults inside their enumerations, and every Agent-facing text
@@ -2408,7 +2575,7 @@ func validateModelReview(schema ChatSchema, capabilityPresentations []Capability
 	used := false
 	for _, tool := range schema.AgentTools {
 		switch tool.Execution.ImplementationKey {
-		case "model.inspect", "model.render", "model.compare":
+		case "model.inspect", "model.render", "model.compare", "model.compare_reference":
 			used = true
 		}
 	}

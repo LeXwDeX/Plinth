@@ -82,6 +82,10 @@ type PlanStep struct {
 	// the session purpose's budget (#129), in the turn's language; empty when
 	// they fit or the session has no purpose.
 	PurposeBudgetNote string `json:"purpose_budget_note,omitempty"`
+	// Check is an optional checkpoint declared after the step (#246). It is a
+	// Schema-declared id; self_check means the result must be inspected and
+	// its self-check conclusion recorded before the next step.
+	Check string `json:"check,omitempty"`
 }
 
 // UnmarshalJSON also reads a step stored before #120, whose integer
@@ -95,12 +99,13 @@ func (s *PlanStep) UnmarshalJSON(data []byte) error {
 		Estimate          json.RawMessage `json:"estimate"`
 		EstimatedCredits  int             `json:"estimated_credits"`
 		PurposeBudgetNote string          `json:"purpose_budget_note"`
+		Check             string          `json:"check"`
 	}
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
 	step := PlanStep{Capability: wire.Capability, OfferingID: wire.OfferingID, Purpose: wire.Purpose,
-		Estimate: Legacy(wire.EstimatedCredits), PurposeBudgetNote: wire.PurposeBudgetNote}
+		Estimate: Legacy(wire.EstimatedCredits), PurposeBudgetNote: wire.PurposeBudgetNote, Check: wire.Check}
 	if len(wire.Estimate) > 0 && string(wire.Estimate) != "null" {
 		if err := json.Unmarshal(wire.Estimate, &step.Estimate); err != nil {
 			return err
@@ -273,6 +278,9 @@ func (p Plan) PromptLine(format AmountFormat) string {
 			part += "：" + step.Purpose
 		}
 		part += "，约 " + format.One(step.Estimate)
+		if step.Check != "" {
+			part += "，检查点 " + step.Check
+		}
 		parts = append(parts, part)
 	}
 	return strings.TrimSpace(p.Title) + "；" + strings.Join(parts, "；")

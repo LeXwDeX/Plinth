@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -99,6 +100,9 @@ type ProductionPlanPolicy struct {
 	// are over the session purpose's budget (#129), or "" when they fit. It is
 	// optional: without it a plan carries no purpose budget note.
 	PurposeBudgetNote func(command ToolCommand, offering generation.Offering) string
+	// Checkpoints are the check ids a step may declare (#246), from
+	// application.chat.self_check.checkpoints. Empty accepts none.
+	Checkpoints []string
 }
 
 // SetProductionPlanPurposeBudget installs the purpose budget check of planned
@@ -158,6 +162,7 @@ type proposedPlanArguments struct {
 		Model            string `json:"model"`
 		Purpose          string `json:"purpose"`
 		EstimatedCredits *int   `json:"estimated_credits"`
+		Check            string `json:"check"`
 	} `json:"steps"`
 	Budgets []struct {
 		Unit   string      `json:"unit"`
@@ -270,6 +275,10 @@ func (policy *ProductionPlanPolicy) buildPlan(command ToolCommand, arguments pro
 		if config.MaxPurposeCharacters > 0 && utf8.RuneCountInString(purpose) > config.MaxPurposeCharacters {
 			return budget.Plan{}, nil, "step purpose is too long"
 		}
+		check := strings.TrimSpace(step.Check)
+		if check != "" && !slices.Contains(policy.Checkpoints, check) {
+			return budget.Plan{}, nil, "step checkpoint " + check + " is not declared"
+		}
 		offering, locked, refusal := policy.stepOffering(capability, strings.TrimSpace(step.Model), strings.TrimSpace(command.Options.ExplicitModel3D))
 		if refusal != "" {
 			return budget.Plan{}, nil, refusal
@@ -291,6 +300,7 @@ func (policy *ProductionPlanPolicy) buildPlan(command ToolCommand, arguments pro
 			OfferingID: offeringID,
 			Purpose:    purpose,
 			Estimate:   estimated,
+			Check:      check,
 		}
 		if policy.PurposeBudgetNote != nil {
 			// A plan step names no parameters, so the check reads the values it
@@ -472,6 +482,9 @@ func planProposedContent(stored budget.ProductionBudget, messages catalog.ChatAp
 		}
 		if step.PurposeBudgetNote != "" {
 			item["purpose_budget_note"] = step.PurposeBudgetNote
+		}
+		if step.Check != "" {
+			item["check"] = step.Check
 		}
 		steps = append(steps, item)
 	}

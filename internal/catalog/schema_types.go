@@ -1283,6 +1283,10 @@ type PublicChatSchema struct {
 	// recognise their calls (#103); the limits, prompts, cache and text
 	// templates stay server-only.
 	ModelReview *PublicChatModelReviewSchema `json:"model_review,omitempty"`
+	// SelfCheck publishes the persisted 3D self-check contract (#246): the tool
+	// names, the three delivery states and the display limits. Thresholds, the
+	// record wire shape and the prompt templates stay server-only.
+	SelfCheck *PublicChatSelfCheckSchema `json:"self_check,omitempty"`
 	// Model3DUsage publishes the purpose labels and brief field declarations
 	// the approval card and brief panel render (#103); recommendations,
 	// parameter overrides, reasons, budgets and brief prompt templates stay
@@ -1304,6 +1308,32 @@ type PublicChatStyleLockSchema struct {
 // review tools (#103).
 type PublicChatModelReviewSchema struct {
 	Tools ChatModelReviewToolsSchema `json:"tools"`
+}
+
+// PublicChatSelfCheckSchema is the browser contract of the persisted 3D
+// self-check contract (#246). The browser recognises the tools, renders the
+// delivery states by role and shows the limits; the record thresholds, metric
+// definitions and prompt templates stay server-only.
+type PublicChatSelfCheckSchema struct {
+	Tools    ChatSelfCheckToolsSchema    `json:"tools"`
+	Statuses []PublicChatSelfCheckStatus `json:"statuses"`
+	Limits   PublicChatSelfCheckLimits   `json:"limits"`
+}
+
+// PublicChatSelfCheckStatus is one declared delivery state. Role is the only
+// semantic the code depends on (unchecked, passed or issues); ID is the wire
+// value a conclusion stores.
+type PublicChatSelfCheckStatus struct {
+	ID    string `json:"id"`
+	Role  string `json:"role"`
+	Label string `json:"label"`
+}
+
+// PublicChatSelfCheckLimits are the display values of the counters.
+type PublicChatSelfCheckLimits struct {
+	MaxRoundsPerResult      int `json:"max_rounds_per_result"`
+	MaxCorrectionsPerResult int `json:"max_corrections_per_result"`
+	MaxRendersPerRound      int `json:"max_renders_per_round"`
 }
 
 // PublicChatModel3DUsageSchema is the public part of the 3D production
@@ -2256,6 +2286,142 @@ type ChatModelReviewToolsSchema struct {
 	Compare string `json:"compare"`
 }
 
+// ChatSelfCheckSchema is application.chat.self_check (#246): the persisted
+// self-check record of every 3D result, the tool that writes its conclusion,
+// the reference-comparison tool and the three delivery states. The record is
+// session data: it never rewrites the Task's terminal state and an unchecked
+// result stays downloadable.
+type ChatSelfCheckSchema struct {
+	// Tools names the two public Agent tools: the reference comparison and
+	// the conclusion writer.
+	Tools ChatSelfCheckToolsSchema `json:"tools"`
+	// Limits bound one result's self-check work. The server counts them; a
+	// read-only check at its limit is refused with the Schema's text.
+	Limits ChatSelfCheckLimitsSchema `json:"limits"`
+	// Statuses are the delivery states, declared by id and role. Role is the
+	// only semantic the code reads: unchecked, passed or issues.
+	Statuses []ChatSelfCheckStatusSchema `json:"statuses"`
+	// RequiredChecks say what a passed conclusion needs: at least one real
+	// inspect check and one render, compare or reference check.
+	RequiredChecks ChatSelfCheckRequiredSchema `json:"required_checks"`
+	// Conclusion bounds the Agent's written conclusion.
+	Conclusion ChatSelfCheckConclusionSchema `json:"conclusion"`
+	// Reference declares compare_model_reference: the views it may render, its
+	// output size and the deterministic subject-metric thresholds.
+	Reference ChatSelfCheckReferenceSchema `json:"reference"`
+	// Context declares the facts the system prompt injects every turn.
+	Context ChatSelfCheckContextSchema `json:"context"`
+	// Texts word the tools' results and refusals.
+	Texts ChatSelfCheckTextsSchema `json:"texts"`
+	// Checkpoints are the check ids a production plan step may declare. The
+	// interface is defined here and #251 owns revising plans.
+	Checkpoints []ChatSelfCheckCheckpointSchema `json:"checkpoints"`
+}
+
+// ChatSelfCheckToolsSchema names the public Agent tool of each self-check
+// capability.
+type ChatSelfCheckToolsSchema struct {
+	Record           string `json:"record"`
+	ReferenceCompare string `json:"reference_compare"`
+}
+
+// ChatSelfCheckLimitsSchema bounds one result's self-check work.
+type ChatSelfCheckLimitsSchema struct {
+	MaxRoundsPerResult      int `json:"max_rounds_per_result"`
+	MaxCorrectionsPerResult int `json:"max_corrections_per_result"`
+	MaxRendersPerRound      int `json:"max_renders_per_round"`
+}
+
+// ChatSelfCheckStatusSchema is one delivery state. Role is unchecked, passed
+// or issues; id is what a stored conclusion names.
+type ChatSelfCheckStatusSchema struct {
+	ID    string `json:"id"`
+	Role  string `json:"role"`
+	Label string `json:"label"`
+}
+
+// ChatSelfCheckRequiredSchema is what a passed conclusion requires.
+type ChatSelfCheckRequiredSchema struct {
+	Inspect           bool `json:"inspect"`
+	RenderOrReference bool `json:"render_or_reference"`
+}
+
+// ChatSelfCheckConclusionSchema bounds the written conclusion.
+type ChatSelfCheckConclusionSchema struct {
+	MaxItems             int `json:"max_items"`
+	MaxItemCharacters    int `json:"max_item_characters"`
+	MaxSummaryCharacters int `json:"max_summary_characters"`
+}
+
+// ChatSelfCheckReferenceSchema declares compare_model_reference.
+type ChatSelfCheckReferenceSchema struct {
+	// Views is a subset of model_review.render.views.
+	Views []string `json:"views"`
+	// DefaultView is used when the call names no view.
+	DefaultView string `json:"default_view"`
+	// Mode must be declared in model_review.render.modes.
+	Mode string `json:"mode"`
+	// Size is the output edge; never above model_review.render.max_size.
+	Size int `json:"size"`
+	// Supersample is the renderer's oversampling factor.
+	Supersample int `json:"supersample"`
+	// MaxPairsPerCall bounds one call's reference/render pairs.
+	MaxPairsPerCall int `json:"max_pairs_per_call"`
+	// Layout is side_by_side.
+	Layout string `json:"layout"`
+	// AssetType must equal model_review.render.asset_type, so the derived
+	// picture attaches with the render role.
+	AssetType string `json:"asset_type"`
+	// SubjectThreshold is the squared RGB distance from the background that
+	// makes a pixel part of the subject (the same meaning as imageinspect).
+	SubjectThreshold float64 `json:"subject_threshold"`
+	// NormalizedSide is the square edge the two silhouettes are scaled to
+	// before the intersection is measured.
+	NormalizedSide int `json:"normalized_side"`
+}
+
+// ChatSelfCheckContextSchema is the per-turn prompt injection.
+type ChatSelfCheckContextSchema struct {
+	MaxResults        int    `json:"max_results"`
+	MaxCharacters     int    `json:"max_characters"`
+	ContextTemplate   string `json:"context_template"`
+	TaskLineTemplate  string `json:"task_line_template"`
+	UncheckedRuleText string `json:"unchecked_rule_text"`
+	NoRecordsText     string `json:"no_records_text"`
+	// BackgroundText marks a result the person stopped waiting for; the
+	// prompt lists it as pending self-check on the next turn.
+	BackgroundText string `json:"background_text"`
+}
+
+// ChatSelfCheckTextsSchema words compare_model_reference and record_self_check.
+type ChatSelfCheckTextsSchema struct {
+	CheckRecorded            string `json:"check_recorded"`
+	RoundsRemaining          string `json:"rounds_remaining"`
+	RendersRemaining         string `json:"renders_remaining"`
+	CorrectionsRemaining     string `json:"corrections_remaining"`
+	LimitReached             string `json:"limit_reached"`
+	RecordSaved              string `json:"record_saved"`
+	RecordNeedsCheck         string `json:"record_needs_check"`
+	RecordUnknownStatus      string `json:"record_unknown_status"`
+	RecordNotWritable        string `json:"record_not_writable"`
+	RecordRemainingRequired  string `json:"record_remaining_required"`
+	RecordRemainingForbidden string `json:"record_remaining_forbidden"`
+	RecordTooLong            string `json:"record_too_long"`
+	RecordInvalidArguments   string `json:"record_invalid_arguments"`
+	RecordUnknownTask        string `json:"record_unknown_task"`
+	ReferenceReady           string `json:"reference_ready"`
+	ReferenceMissing         string `json:"reference_missing"`
+	ReferenceUnreadable      string `json:"reference_unreadable"`
+	ReferenceNoReference     string `json:"reference_no_reference"`
+	Caveats                  string `json:"caveats"`
+}
+
+// ChatSelfCheckCheckpointSchema is one checkpoint a plan step may declare.
+type ChatSelfCheckCheckpointSchema struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
 // ChatImageReviewSchema declares the read-only image inspection tool and the
 // image-to-3D input gate (#245). Server-side only, like the tool itself.
 type ChatImageReviewSchema struct {
@@ -2681,6 +2847,10 @@ type ChatSchema struct {
 	// comparison tools (#103): their bounds, enumerations and Agent-facing
 	// texts. Server-side only, like the tools themselves.
 	ModelReview ChatModelReviewSchema `json:"model_review"`
+	// SelfCheck declares the persisted 3D self-check contract (#246): the
+	// record writer, the reference-comparison tool, the three delivery states
+	// and the per-result limits. Server-side only.
+	SelfCheck ChatSelfCheckSchema `json:"self_check"`
 	// ImageReview declares the read-only image inspection tool and the
 	// image-to-3D input gate (#245).
 	ImageReview ChatImageReviewSchema `json:"image_review"`
@@ -3541,6 +3711,20 @@ type ChatAPIResponseFields struct {
 	BranchCapturesCopied string `json:"branch_captures_copied,omitempty"`
 	// Notes is the member carrying the session settings summary.
 	Notes string `json:"notes"`
+	// SelfCheck members (#246): the session's persisted 3D self-check records,
+	// and the fields of one record. Status is the derived delivery state;
+	// rounds/corrections are the server-side counters; checks and conclusion
+	// are the record's evidence and written conclusion.
+	SelfChecks       string `json:"self_checks,omitempty"`
+	Status           string `json:"status,omitempty"`
+	RoundsUsed       string `json:"rounds_used,omitempty"`
+	RoundsLimit      string `json:"rounds_limit,omitempty"`
+	RendersInRound   string `json:"renders_in_round,omitempty"`
+	RendersLimit     string `json:"renders_limit,omitempty"`
+	CorrectionsUsed  string `json:"corrections_used,omitempty"`
+	CorrectionsLimit string `json:"corrections_limit,omitempty"`
+	Checks           string `json:"checks,omitempty"`
+	Conclusion       string `json:"conclusion,omitempty"`
 	// Brief is the member carrying the session production brief (#103).
 	Brief string `json:"brief,omitempty"`
 	// Budget is the member carrying the session's current production budget:
@@ -4986,12 +5170,15 @@ type CoreHTTPRoutesSchema struct {
 	AccountResources string `json:"account_resources"`
 	ChatSkills       string `json:"chat_skills"`
 	// ClientErrors receives browser error reports for the server log (#233).
-	ClientErrors         string `json:"client_errors,omitempty"`
-	ChatSessionApproval  string `json:"chat_session_approval"`
-	ChatSessionBranch    string `json:"chat_session_branch,omitempty"`
-	ChatSessionNotes     string `json:"chat_session_notes"`
-	ChatSessionStyleLock string `json:"chat_session_style_lock,omitempty"`
-	ChatSessionBrief     string `json:"chat_session_brief,omitempty"`
+	ClientErrors        string `json:"client_errors,omitempty"`
+	ChatSessionApproval string `json:"chat_session_approval"`
+	ChatSessionBranch   string `json:"chat_session_branch,omitempty"`
+	ChatSessionNotes    string `json:"chat_session_notes"`
+	// ChatSessionSelfChecks reads the session's persisted 3D self-check
+	// records (#246); the record is session data, not a Task projection.
+	ChatSessionSelfChecks string `json:"chat_session_self_checks,omitempty"`
+	ChatSessionStyleLock  string `json:"chat_session_style_lock,omitempty"`
+	ChatSessionBrief      string `json:"chat_session_brief,omitempty"`
 	// ChatSessionModel3D writes the 3D model the person explicitly picked in
 	// the session (#103); it is a lock for the generation tools and submits
 	// nothing. Empty (historical Catalogs) disables the write.

@@ -299,6 +299,10 @@ type Service struct {
 	// (#103); nil leaves the tool and the budget context unavailable.
 	productionPlans *ProductionPlanPolicy
 
+	// selfChecks is the persisted 3D self-check record service (#246); nil
+	// leaves the record route, the tool and the prompt injection unavailable.
+	selfChecks *SelfCheckService
+
 	// models and contextStore serve the thinking level, the context usage
 	// and the compactions of sessions (#322).
 	models              ModelPolicy
@@ -1018,6 +1022,46 @@ func (service *Service) startTurn(
 // it a turn that carries an answer is refused.
 func (service *Service) SetChoices(store ChoiceStore, limit int) {
 	service.choices, service.choiceLimit = store, limit
+}
+
+// SetSelfChecks installs the persisted 3D self-check store (#246). Without it
+// the record route, record_self_check and the prompt injection stay
+// unavailable; the read-only review tools keep working.
+func (service *Service) SetSelfChecks(store SelfCheckStore, schema catalog.ChatSelfCheckSchema) {
+	if store == nil {
+		service.selfChecks = nil
+		return
+	}
+	service.selfChecks = NewSelfCheckService(store, schema)
+}
+
+// SelfCheckService returns the installed self-check record service, or nil.
+func (service *Service) SelfCheckService() *SelfCheckService {
+	return service.selfChecks
+}
+
+// ListSelfChecks returns the owner's self-check records of one session. A
+// missing or foreign session is ErrSessionNotFound.
+func (service *Service) ListSelfChecks(ctx context.Context, ownerID, sessionID string) ([]SelfCheckRecord, error) {
+	if service.selfChecks == nil {
+		return nil, nil
+	}
+	owned, err := service.repository.OwnsSession(ctx, ownerID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !owned {
+		return nil, ErrSessionNotFound
+	}
+	return service.selfChecks.List(ctx, ownerID, sessionID)
+}
+
+// SelfCheck returns one record of the owner's session, if any.
+func (service *Service) SelfCheck(ctx context.Context, ownerID, sessionID, taskID string) (SelfCheckRecord, bool, error) {
+	if service.selfChecks == nil {
+		return SelfCheckRecord{}, false, nil
+	}
+	return service.selfChecks.Get(ctx, ownerID, sessionID, taskID)
 }
 
 // ListChoices returns the session's cards, newest first. A missing or

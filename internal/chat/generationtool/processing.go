@@ -255,6 +255,38 @@ func (executor *Executor) ListSessionModels(ctx context.Context, ownerID, sessio
 	return json.Marshal(map[string]any{"models": views})
 }
 
+// SessionModelTasks lists this session's finished 3D results for the
+// self-check prompt (#246): platform Task IDs and public model names only. It
+// shares the listing rules of list_session_models, including branch ancestry.
+func (executor *Executor) SessionModelTasks(ctx context.Context, ownerID, sessionID string) ([]chat.SelfCheckTask, error) {
+	limit := executor.chat.Agent.MaxListedModels
+	if maximum := executor.chat.SelfCheck.Context.MaxResults; maximum > 0 && (limit <= 0 || maximum < limit) {
+		limit = maximum
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	tasks, err := executor.sessionModelTasks(ctx, ownerID, sessionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]chat.SelfCheckTask, 0, len(tasks))
+	for _, task := range tasks {
+		model := task.Offering.ModelName
+		if model == "" {
+			model = task.Offering.ModelID
+		}
+		finished := task.CreatedAt
+		if task.FinishedAt != nil {
+			finished = *task.FinishedAt
+		}
+		result = append(result, chat.SelfCheckTask{
+			TaskID: string(task.ID), Model: model, ResultAt: finished,
+		})
+	}
+	return result, nil
+}
+
 // modelParts reads a split result's parts_manifest and pairs each entry with
 // the saved model file of the same ordinal. A missing or unreadable manifest
 // leaves the list without parts; it never fails the model listing.
@@ -829,6 +861,9 @@ func (executor *Executor) executeProcessing(
 	}
 	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, prompt,
 		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, observe, promptTrace)
+	// #246: a paid correction counts against the result it changes and its
+	// result tells the Agent how many corrections remain.
+	result = executor.attachCorrection(ctx, command, source, result)
 	return executor.processingOutcome(command, result, err, executor.inputShape(command, input))
 }
 

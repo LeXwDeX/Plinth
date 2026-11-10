@@ -56,6 +56,12 @@ const (
 	ToolRenderModelViews = "render_model_views"
 	// ToolCompareModels renders two finished 3D models side by side (#103).
 	ToolCompareModels = "compare_models"
+	// ToolCompareModelReference renders a finished model beside its reference
+	// picture and reports deterministic subject metrics (#246).
+	ToolCompareModelReference = "compare_model_reference"
+	// ToolRecordSelfCheck writes the Agent's conclusion into a result's
+	// persisted self-check record (#246).
+	ToolRecordSelfCheck = "record_self_check"
 	// ToolGetProductionStep reads one step of the session's work ledger in
 	// full by @stepN or Task ID (#248).
 	ToolGetProductionStep = "get_production_step"
@@ -112,6 +118,11 @@ type Config struct {
 	InspectModel     func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	RenderModelViews func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	CompareModels    func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	// CompareModelReference and RecordSelfCheck are the persisted self-check
+	// contract tools (#246). Both are owner/session scoped and never create a
+	// Task or spend credits.
+	CompareModelReference func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	RecordSelfCheck       func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	// ReadProductionStep reads one step of the session's work ledger (#248).
 	// It is read-only: no Task is created, no credit is spent and the session
 	// is not changed.
@@ -177,31 +188,33 @@ type Config struct {
 }
 
 type Executor struct {
-	offerings          func() []generation.Offering
-	context            catalog.ChatContextSchema
-	skillRuntime       *skillrun.Runtime
-	skillReferences    SkillReferenceResolver
-	skillOfferings     SkillOfferingResolver
-	skillRecipes       map[string]string
-	skillTurnStopped   func(context.Context, string, string, string) (bool, error)
-	threeView          catalog.ChatThreeViewSchema
-	params             *agentparams.Store
-	generate           chat.ToolExecutor
-	preflight          func(command chat.ToolCommand) string
-	projection         func() json.RawMessage
-	historyLookup      chat.HistoryLookupPolicy
-	readTask           func(ctx context.Context, ownerID, taskID string) (json.RawMessage, error)
-	recoverTask        func(ctx context.Context, ownerID, sessionID, taskID string) (json.RawMessage, error)
-	listModels         func(ctx context.Context, ownerID, sessionID string) (json.RawMessage, error)
-	readProcessingPlan func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
-	inspectImage       func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
-	inspectModel       func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
-	renderModelViews   func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
-	compareModels      func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
-	readProductionStep func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
-	updateNotes        func(ctx context.Context, ownerID, sessionID, notes string) (string, error)
-	updateBrief        func(ctx context.Context, ownerID, sessionID string, brief map[string]json.RawMessage) error
-	askChoice          func(ctx context.Context, command chat.ToolCommand, kind catalog.ChatChoiceKindSchema,
+	offerings             func() []generation.Offering
+	context               catalog.ChatContextSchema
+	skillRuntime          *skillrun.Runtime
+	skillReferences       SkillReferenceResolver
+	skillOfferings        SkillOfferingResolver
+	skillRecipes          map[string]string
+	skillTurnStopped      func(context.Context, string, string, string) (bool, error)
+	threeView             catalog.ChatThreeViewSchema
+	params                *agentparams.Store
+	generate              chat.ToolExecutor
+	preflight             func(command chat.ToolCommand) string
+	projection            func() json.RawMessage
+	historyLookup         chat.HistoryLookupPolicy
+	readTask              func(ctx context.Context, ownerID, taskID string) (json.RawMessage, error)
+	recoverTask           func(ctx context.Context, ownerID, sessionID, taskID string) (json.RawMessage, error)
+	listModels            func(ctx context.Context, ownerID, sessionID string) (json.RawMessage, error)
+	readProcessingPlan    func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	inspectImage          func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	inspectModel          func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	renderModelViews      func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	compareModels         func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	compareModelReference func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	recordSelfCheck       func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	readProductionStep    func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	updateNotes           func(ctx context.Context, ownerID, sessionID, notes string) (string, error)
+	updateBrief           func(ctx context.Context, ownerID, sessionID string, brief map[string]json.RawMessage) error
+	askChoice             func(ctx context.Context, command chat.ToolCommand, kind catalog.ChatChoiceKindSchema,
 		arguments chat.AskChoiceArguments) (chat.ToolResult, error)
 	proposePlan            func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	choiceKinds            map[string]catalog.ChatChoiceKindSchema
@@ -333,6 +346,8 @@ func New(config Config) (*Executor, error) {
 		inspectModel:           config.InspectModel,
 		renderModelViews:       config.RenderModelViews,
 		compareModels:          config.CompareModels,
+		compareModelReference:  config.CompareModelReference,
+		recordSelfCheck:        config.RecordSelfCheck,
 		readProductionStep:     config.ReadProductionStep,
 		updateNotes:            config.UpdateNotes,
 		updateBrief:            config.UpdateBrief,
@@ -415,6 +430,16 @@ func (e *Executor) Execute(
 			return chat.ToolResult{Error: "model review unavailable", NoSubmission: true}, nil
 		}
 		return reader(ctx, command)
+	case ToolCompareModelReference:
+		if e.compareModelReference == nil {
+			return chat.ToolResult{Error: "reference comparison unavailable", NoSubmission: true}, nil
+		}
+		return e.compareModelReference(ctx, command)
+	case ToolRecordSelfCheck:
+		if e.recordSelfCheck == nil {
+			return chat.ToolResult{Error: "self-check record unavailable", NoSubmission: true}, nil
+		}
+		return e.recordSelfCheck(ctx, command)
 	case ToolRequestConsent:
 		return e.requestConsent(ctx, command), nil
 	case ToolCreateThreeView:

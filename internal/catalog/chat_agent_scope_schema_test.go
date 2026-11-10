@@ -30,6 +30,8 @@ var shippedToolScopes = map[string]string{
 	"inspect_model":              "3d",
 	"render_model_views":         "3d",
 	"compare_models":             "3d",
+	"compare_model_reference":    "3d",
+	"record_self_check":          "3d",
 	"set_params":                 "utility",
 	"create_creative_lab_design": "3d",
 	"build_creative_lab_item":    "3d",
