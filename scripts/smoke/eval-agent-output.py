@@ -284,11 +284,16 @@ def collect_outputs(live, request, tasks, messages, tools, directory, schema, re
                 images.extend(image_metrics_for_task(live, task, directory, report_root))
         output["images"] = images
         output["renders"] = [{"label": f"image-{index + 1}", "path": image["path"]} for index, image in enumerate(images)]
+        background = (request.get("output") or {}).get("background")
         for image in images:
             metrics = image["metrics"]
             checks.append({"id": f"output:image:{image['task_id']}", "status": quality.CHECK_PASS,
                            "detail": f"{metrics.get('width')}x{metrics.get('height')} {metrics.get('format')}"
                                      f", subject {metrics.get('opaque_ratio')}, edge {metrics.get('edge_contact')}"})
+            if background == "transparent":
+                ok = bool(metrics.get("alpha")) and bool(metrics.get("nonblank")) and (metrics.get("opaque_ratio") or 0) < 0.98
+                checks.append({"id": f"output:background:{image['task_id']}", "status": quality.CHECK_PASS if ok else quality.CHECK_FAIL,
+                               "detail": f"alpha={metrics.get('alpha')}, subject={metrics.get('opaque_ratio')}"})
         return output, checks, output["renders"]
     budget = quality.purpose_budget(schema, request.get("purpose")) or {}
     for task in tasks:

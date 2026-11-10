@@ -297,6 +297,7 @@
       "category": "character_illustration",
       "purpose": null,
       "prompt": "画一张赛博朋克女刺客的全身立绘，简洁数字插画，透明背景。",
+      "output": {"background": "transparent"},
       "reference_images": [],
       "deliverables": ["透明背景的全身立绘（PNG）"],
       "steps": [
@@ -323,6 +324,7 @@
       "category": "icon_prop",
       "purpose": null,
       "prompt": "画一套三个不同颜色的药水瓶图标，统一画风，透明背景。",
+      "output": {"background": "transparent"},
       "reference_images": [],
       "deliverables": ["透明背景的三色药水瓶图标（PNG）"],
       "steps": [
