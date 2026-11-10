@@ -2302,10 +2302,15 @@ func validateWorkLedger(schema ChatSchema) error {
 	for name, text := range map[string]string{
 		"empty_text":            ledger.EmptyText,
 		"not_readable_template": ledger.NotReadableTemplate,
+		"none_text":             ledger.NoneText,
+		"prompt_omitted_text":   ledger.PromptOmittedText,
 	} {
 		if strings.TrimSpace(text) == "" {
 			return fmt.Errorf("chat.work_ledger.%s 不能为空", name)
 		}
+	}
+	if !strings.Contains(ledger.FailedViewsTemplate, "{views}") {
+		return errors.New("chat.work_ledger.failed_views_template 须含 {views}")
 	}
 	if ledger.TruncatedNote != "" && !strings.Contains(ledger.TruncatedNote, "{count}") {
 		return errors.New("chat.work_ledger.truncated_note 须含 {count}")
@@ -2358,6 +2363,9 @@ func validateWorkLedger(schema ChatSchema) error {
 				return fmt.Errorf("chat.work_ledger.anchors.%s 须含 %s", template.name, placeholder)
 			}
 		}
+	}
+	if !strings.Contains(anchors.MissingReferencesTemplate, "{count}") {
+		return errors.New("chat.work_ledger.anchors.missing_references_template 须含 {count}")
 	}
 	anchorOpen, anchorClose := strings.TrimSpace(anchors.OpenMarker), strings.TrimSpace(anchors.CloseMarker)
 	if anchorOpen == "" || anchorClose == "" || anchorOpen == anchorClose {

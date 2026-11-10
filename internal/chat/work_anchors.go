@@ -2,7 +2,7 @@ package chat
 
 import (
 	"context"
-	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -89,7 +89,8 @@ func (service *Service) workAnchorReferences(
 	}
 	rendered := strings.Join(handles, "、")
 	if rendered == "" {
-		rendered = fmt.Sprintf("%d 张（会话中尚未出现句柄）", len(references))
+		rendered = strings.ReplaceAll(service.workLedger.Anchors.MissingReferencesTemplate,
+			"{count}", strconv.Itoa(len(references)))
 	}
 	return strings.ReplaceAll(template, "{handles}", rendered)
 }

@@ -2321,6 +2321,13 @@ type ChatWorkLedgerSchema struct {
 	PromptLineTemplate    string `json:"prompt_line_template"`
 	SelfCheckLineTemplate string `json:"self_check_line_template"`
 	LeftoverTemplate      string `json:"leftover_template"`
+	// NoneText fills an empty self-check or decision slot; PromptOmittedText
+	// fills the prompt slots of the compaction variant, which carries no full
+	// prompt; FailedViewsTemplate names a render/compare call's failed views
+	// ({views}).
+	NoneText            string `json:"none_text"`
+	PromptOmittedText   string `json:"prompt_omitted_text"`
+	FailedViewsTemplate string `json:"failed_views_template"`
 	// EmptyText, TruncatedNote, UnknownStepTemplate and NotReadableTemplate
 	// are the Agent-facing texts: an empty ledger, a summary that dropped steps
 	// ({count} dropped), a step the tool cannot find ({step}) and an unreadable
@@ -2359,8 +2366,11 @@ type ChatWorkLedgerAnchorsSchema struct {
 	ContextTemplate       string `json:"context_template"`
 	EntryTemplate         string `json:"entry_template"`
 	ReferenceTemplate     string `json:"reference_template"`
-	OpenMarker            string `json:"open_marker"`
-	CloseMarker           string `json:"close_marker"`
+	// MissingReferencesTemplate fills {references} when the session history
+	// has not shown a handle for the lock's pictures yet ({count}).
+	MissingReferencesTemplate string `json:"missing_references_template"`
+	OpenMarker                string `json:"open_marker"`
+	CloseMarker               string `json:"close_marker"`
 }
 
 // ImageInspectLimitsSchema bounds the bytes and pixels Inspect accepts.

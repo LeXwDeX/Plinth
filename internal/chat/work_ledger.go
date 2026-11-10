@@ -967,7 +967,7 @@ func (service *Service) workStepLine(step WorkStep, previews bool) string {
 	policy := service.workLedger
 	prompt := ""
 	if !previews {
-		prompt = "（用 get_production_step 取回）"
+		prompt = policy.PromptOmittedText
 	}
 	if previews && step.FinalPrompt != "" {
 		preview := step.FinalPrompt
@@ -982,7 +982,7 @@ func (service *Service) workStepLine(step WorkStep, previews bool) string {
 	selfCheck := service.workSelfCheckLine(step.SelfChecks)
 	decision := step.Decision
 	if decision == "" {
-		decision = "none"
+		decision = policy.NoneText
 	}
 	if step.DecisionReason != "" {
 		decision += ": " + step.DecisionReason
@@ -1003,7 +1003,7 @@ func (service *Service) workStepLine(step WorkStep, previews bool) string {
 func (service *Service) workSelfCheckLine(checks []WorkSelfCheck) string {
 	policy := service.workLedger
 	if len(checks) == 0 {
-		return "none"
+		return policy.NoneText
 	}
 	lines := make([]string, 0, len(checks))
 	for _, check := range checks {
@@ -1020,7 +1020,7 @@ func (service *Service) workSelfCheckLine(checks []WorkSelfCheck) string {
 			leftovers = strings.ReplaceAll(policy.LeftoverTemplate, "{checks}", strings.Join(items, "、"))
 		}
 		if len(check.FailedViews) > 0 {
-			leftovers += "（失败视角：" + strings.Join(check.FailedViews, "、") + "）"
+			leftovers += strings.ReplaceAll(policy.FailedViewsTemplate, "{views}", strings.Join(check.FailedViews, "、"))
 		}
 		line := strings.NewReplacer(
 			"{tool}", check.Tool,

@@ -55,6 +55,12 @@ func TestWorkLedgerDeclarationIsValidated(t *testing.T) {
 		{"a step line without self-check", func(app *catalog.ApplicationSchema) {
 			app.Chat.WorkLedger.StepLineTemplate = "{step} {task_id} {capability} {model} {status} {prompt} {decision}"
 		}, "{self_check}"},
+		{"an empty none text", func(app *catalog.ApplicationSchema) {
+			app.Chat.WorkLedger.NoneText = ""
+		}, "none_text"},
+		{"failed views without a placeholder", func(app *catalog.ApplicationSchema) {
+			app.Chat.WorkLedger.FailedViewsTemplate = "failed"
+		}, "{views}"},
 		{"the same frame markers", func(app *catalog.ApplicationSchema) {
 			app.Chat.WorkLedger.CloseMarker = app.Chat.WorkLedger.OpenMarker
 		}, "open_marker"},
@@ -73,6 +79,9 @@ func TestWorkLedgerDeclarationIsValidated(t *testing.T) {
 		{"an anchor entry without references", func(app *catalog.ApplicationSchema) {
 			app.Chat.WorkLedger.Anchors.EntryTemplate = "{label}: {text}"
 		}, "{references}"},
+		{"missing references without a count", func(app *catalog.ApplicationSchema) {
+			app.Chat.WorkLedger.Anchors.MissingReferencesTemplate = "no handles"
+		}, "{count}"},
 		{"an anchor bound below the style lock", func(app *catalog.ApplicationSchema) {
 			app.Chat.WorkLedger.Anchors.MaximumTextCharacters = app.Chat.StyleLock.MaximumTextCharacters - 1
 		}, "style_lock.maximum_text_characters"},
