@@ -2242,6 +2242,11 @@ def scenario_mask_selection(api, offerings, work):
             "selection": selection, "inputSource": "canvas",
             "selectionMask": {"maskAssetId": mask_id}}
     before_tasks = {item.get("id") for item in session_tasks(api, session)}
+    # The create_selection_mask turn targets the generated result of this turn
+    # when it succeeds: @selected then carries TaskID+AssetID, the attachment
+    # shape whose asset lives in the Task store (regression: reading the input
+    # store first made generated pictures unreadable).
+    use_selection = selection
     if not _mask_send(api, session, body):
         record("#244 canvas mask turn", False, "send refused")
     else:
@@ -2288,6 +2293,8 @@ def scenario_mask_selection(api, offerings, work):
                     record("#244 output decodes", False, str(error))
         record("#244 masked generation succeeds and changes only the selection", ok and outside_same and inside_changed,
                f"state={task.get('state')} outside_same={outside_same} inside_changed={inside_changed}")
+        if ok and task.get("assets") and task["assets"][0].get("id"):
+            use_selection = [{"kind": "image", "assetId": task["assets"][0]["id"], "taskId": task["id"]}]
 
     # (b) a model without a mask parameter is refused: no Task, no whole-image redraw.
     gemini = "gemini-3-pro-image"
@@ -2308,11 +2315,14 @@ def scenario_mask_selection(api, offerings, work):
         record("#244 mask-unsupported model refusal", refused and not new_tasks and no_card,
                f"refused={refused} new_tasks={len(new_tasks)} no_card={no_card}")
 
-    # (c) create_selection_mask builds a region mask, the reply shows it, and that URL works as refine_image's mask.
+    # (c) create_selection_mask builds a region mask from the generated result,
+    # the reply shows it, and that URL works as refine_image's mask.
+    record("#244 create_selection_mask targets a generated result", use_selection is not selection,
+           f"selection={use_selection}")
     before_replies = assistant_reply_count(api, session)
     tool_marker = '[[fake:tool:create_selection_mask {"image":"@selected","mode":"region","x0":8,"y0":8,"x1":24,"y1":24}]]'
     tool_body = {"content": "圈出这里 " + tool_marker, "creative_domain": "image", "ai_model": model,
-                 "selection": selection, "inputSource": "canvas"}
+                 "selection": use_selection, "inputSource": "canvas"}
     mask_url = ""
     if not _mask_send(api, session, tool_body):
         record("#244 create_selection_mask", False, "send refused")

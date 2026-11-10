@@ -188,14 +188,10 @@ func (service *Service) refusal(message string) chat.ToolResult {
 
 func (service *Service) read(ctx context.Context, ownerID string, picture chat.ResolvedAttachment) ([]byte, error) {
 	owner := generation.OwnerID(ownerID)
-	if picture.Attachment.AssetID != "" {
-		_, body, err := service.inputs.OpenOwned(ctx, owner, generation.AssetID(picture.Attachment.AssetID))
-		if err != nil {
-			return nil, err
-		}
-		defer body.Close()
-		return io.ReadAll(io.LimitReader(body, service.limit()+1))
-	}
+	// A generated picture carries both a TaskID and an AssetID, but its asset
+	// lives in the Task's outputs, not in the input-asset store: the Task is
+	// the source of truth whenever it is present (#244). Trying the input store
+	// first made every generated picture unreadable to create_selection_mask.
 	if picture.Attachment.TaskID != "" {
 		content, err := service.tasks.OpenAsset(ctx, owner, generation.TaskID(picture.Attachment.TaskID),
 			generation.AssetID(picture.Attachment.AssetID))
@@ -204,6 +200,14 @@ func (service *Service) read(ctx context.Context, ownerID string, picture chat.R
 		}
 		defer content.Body.Close()
 		return io.ReadAll(io.LimitReader(content.Body, service.limit()+1))
+	}
+	if picture.Attachment.AssetID != "" {
+		_, body, err := service.inputs.OpenOwned(ctx, owner, generation.AssetID(picture.Attachment.AssetID))
+		if err != nil {
+			return nil, err
+		}
+		defer body.Close()
+		return io.ReadAll(io.LimitReader(body, service.limit()+1))
 	}
 	if strings.HasPrefix(strings.TrimSpace(picture.URL), "data:") {
 		comma := strings.IndexByte(picture.URL, ',')
