@@ -16,7 +16,7 @@ func TestDefaultChatToolsDeclareRuntimeExecutionContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := c.Application()
-	if len(app.Chat.Tools) != 15 || len(app.Chat.AgentTools) != 20 {
+	if len(app.Chat.Tools) != 15 || len(app.Chat.AgentTools) != 21 {
 		t.Fatalf("chat tool inventory = generation:%d controls:%d", len(app.Chat.Tools), len(app.Chat.AgentTools))
 	}
 	if err := catalog.ValidateApplicationSchema(app); err != nil {

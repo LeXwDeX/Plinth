@@ -62,6 +62,11 @@ export interface ChatTurnOptions {
   selection?: ChatAttachmentClaim[];
   /** Schema `chat.context.canvas_input_source` when `selection` is the artboard snapshot the person sent (#266). */
   inputSource?: string;
+  /**
+   * #244: the selection mask painted on the artboard snapshot of this canvas turn. The server measures and freezes
+   * it with the turn; refine_image binds it into the Offering's mask parameter instead of redrawing the whole image.
+   */
+  selectionMask?: { maskAssetId: string };
   /** `@` references written in the text; the server verifies them, gives the pictures handles and rewrites the tokens. */
   mentions?: ChatMentionClaim[];
   /** #321: the answer to an in-chat choice card; the server checks it against the card. */
@@ -1209,6 +1214,9 @@ export function createChatBrowserClient(
         body[fields.mentions] = encodeMentions(schema, options.mentions);
       }
       assignIfDefined(body, fields.input_source, options.inputSource);
+      if (options.selectionMask && fields.selection_mask) {
+        body[fields.selection_mask] = { maskAssetId: options.selectionMask.maskAssetId };
+      }
       if (options.multiview && fields.multiview) {
         body[fields.multiview] = {
           ...(options.multiview.group ? { group: options.multiview.group } : {}),

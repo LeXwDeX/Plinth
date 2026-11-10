@@ -226,6 +226,16 @@ type OrchestratorConfig struct {
 		sessionID string,
 		reference string,
 	) (string, bool)
+	// SelectionPreview composes the server-side preview of the turn's frozen
+	// selection mask (#244): the artboard snapshot dimmed outside the selected
+	// region and tinted inside it, as a data URI. It reports false when the
+	// pictures cannot be read; the turn keeps the mask's text description.
+	SelectionPreview func(
+		ctx context.Context,
+		ownerID string,
+		pictureURL string,
+		maskAssetID string,
+	) (string, bool)
 	// TaskCanceler 供停止轮次时取消该轮已绑定的生成任务（尽力而为，
 	// 失败只记录日志，不阻塞停止语义）。
 	TaskCanceler func(ctx context.Context, ownerID, taskID string) error
@@ -287,6 +297,12 @@ type Orchestrator struct {
 		owner generation.OwnerID,
 		sessionID string,
 		reference string,
+	) (string, bool)
+	selectionPreview func(
+		ctx context.Context,
+		ownerID string,
+		pictureURL string,
+		maskAssetID string,
 	) (string, bool)
 	taskCanceler func(ctx context.Context, ownerID, taskID string) error
 	toolNote     func(tool catalog.ChatToolSchema, options TurnOptions) string
@@ -653,6 +669,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		visionInline:       config.VisionInline,
 		visionAssetInline:  config.VisionAssetInline,
 		visionAnchorInline: config.VisionAnchorInline,
+		selectionPreview:   config.SelectionPreview,
 		agent:              config.Agent,
 		tools:              config.Tools,
 		logger:             config.Logger,
@@ -671,8 +688,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		canceledTurn:       map[string]struct{}{},
 		consentWaits:       map[string]*consentSuspend{},
 		compacting:         map[string]*compactionLock{},
-
-		backgroundWarned: map[string]time.Time{},
+		backgroundWarned:   map[string]time.Time{},
 	}, nil
 }
 
@@ -1148,6 +1164,9 @@ func (orchestrator *Orchestrator) Process(
 	command.Options.AttachmentPurposes = turn.Options.AttachmentPurposes
 	command.Options.SelectionPicked = turn.Options.SelectionPicked
 	command.Options.InputSource = turn.Options.InputSource
+	// The mask is the one the service measured and froze with the turn (#244);
+	// a later paint on the stage never changes what this turn binds.
+	command.Options.SelectionMask = turn.Options.SelectionMask
 	command.Options.Multiview = turn.Options.Multiview
 	// So are the generation model picks: a retired model was moved to its
 	// successor when the turn started (#329 follow-up).
@@ -2020,6 +2039,37 @@ func (orchestrator *Orchestrator) agentRequest(
 			}
 		}
 	}
+	// #244: the frozen selection mask travels with a server-composed preview
+	// picture, right after the newest user message, so the model sees exactly
+	// which region the person painted. A composition failure keeps the mask's
+	// text description and never blocks the turn.
+	var selectionParts []agents.ContentPart
+	if budget.Enabled && options.SelectionMask != nil && orchestrator.selectionPreview != nil &&
+		lastUserMessage > summarized && lastUserMessage >= 0 &&
+		history[lastUserMessage].Role == orchestrator.schema.Roles.User {
+		if snapshot, found := canvasSnapshotAttachment(options); found {
+			if url, ok := orchestrator.selectionPreview(ctx, ownerID, snapshot.URL,
+				options.SelectionMask.MaskAssetID); ok {
+				selectionParts = append(selectionParts,
+					agents.ContentPart{
+						Kind:   orchestrator.schema.Context.ImagePartKind,
+						URL:    url,
+						Detail: orchestrator.schema.Context.CanvasImageDetail,
+					},
+					agents.ContentPart{
+						Kind: orchestrator.schema.Context.TextPartKind,
+						Text: orchestrator.schema.Context.SelectionMaskPreviewLabel,
+					})
+				// The preview is one more picture of the canvas role: it spends
+				// the same role quota and the shared request budget as the
+				// snapshot, so the vision plan can drop the lowest priority
+				// pictures instead of silently exceeding the bound.
+				spend.Images++
+				spend.Tokens += budget.tokenCostFor(catalog.ChatVisionSourceCanvas)
+				spend.Bytes += int64(len(url))
+			}
+		}
+	}
 	plan := orchestrator.planVision(
 		ctx, ownerID, sessionID, history, indexedByMessage, summarized, lastUserMessage,
 		options, spend,
@@ -2158,6 +2208,16 @@ func (orchestrator *Orchestrator) agentRequest(
 				content = ""
 			}
 			parts = append(parts, styleParts...)
+		}
+		if messageIndex == lastUserMessage && len(selectionParts) > 0 {
+			if len(parts) == 0 && content != "" {
+				parts = append(parts, agents.ContentPart{
+					Kind: orchestrator.schema.Context.TextPartKind,
+					Text: content,
+				})
+				content = ""
+			}
+			parts = append(parts, selectionParts...)
 		}
 		if messageIndex == lastUserMessage && message.Role == orchestrator.schema.Roles.User {
 			if overflowNote != "" {

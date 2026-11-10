@@ -48,7 +48,9 @@ agent-quality, image-self-check, image-purpose, offering-knowledge, work-ledger,
 over-limit refusal and final_prompt report,
 "work-ledger" the #248 frozen prompts, compaction, style anchor and self-check leftovers,
 "vision-budget" the #247 image detail, contact sheet and vision token accounting,
-"visual-anchors" the #250 system-prompt visibility, confirmation card, priority trim and retexture style reference)
+"visual-anchors" the #250 system-prompt visibility, confirmation card, priority trim and retexture style reference,
+"mask-selection" the #244 frozen selection mask, mask binding, approval-card note,
+mask-unsupported refusal and create_selection_mask)
 Needs `go`. Exit 0 = every selected check passed.
 
 The stack runs inside the internal/app test binary (TestFakeUpstreamStack, built with -tags fakestack), not
@@ -294,7 +296,7 @@ def build(work):
     return fake, stack
 
 
-def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, name="catalog.json"):
+def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, name="catalog.json", manual_image_edits=False):
     """The default Catalog with four changes for Tripo, Meshy and Hyper3D: the fake
     artifact host is an allowed asset host, they poll once a second, and a failing
     materialization is retried once. The matting service polls once a second too,
@@ -308,6 +310,13 @@ def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, na
     with open(os.path.join(REPO, "internal/catalog/default_catalog.json"), encoding="utf-8") as handle:
         catalog = json.load(handle)
     catalog["application"]["chat"]["agent"]["background_wait"]["after_seconds"] = 1
+    if manual_image_edits:
+        # The mask scenario needs an approval card for a 2D edit step (#244);
+        # the shipped policy asks a human only for the listed capabilities.
+        policy = catalog["application"]["chat"]["approval_policy"]
+        for capability in ("image-to-image", "text-to-image"):
+            if capability not in policy["manual_approval_capabilities"]:
+                policy["manual_approval_capabilities"].append(capability)
     for offering in catalog["offerings"]:
         provider = offering.get("provider_id")
         if offering.get("id") in disabled:
@@ -566,6 +575,25 @@ def make_picture(width, height, background, subjects):
             row.extend(colour)
         rows.append(b"\x00" + bytes(row))
     return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
+
+
+def make_rgba_picture(width, height, transparent=None):
+    """A deterministic RGBA PNG: opaque white everywhere except the transparent
+    rectangle. This is the selection mask the tests upload (#244)."""
+
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    rows = []
+    for y in range(height):
+        row = bytearray()
+        for x in range(width):
+            clear = transparent is not None and (transparent[0] <= x < transparent[2] and transparent[1] <= y < transparent[3])
+            row.extend((0, 0, 0, 0) if clear else (255, 255, 255, 255))
+        rows.append(b"\x00" + bytes(row))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
             + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
 
 
@@ -970,7 +998,7 @@ def scenario_hyper3d_agent(api, offerings):
     session = new_session(api)
     # Strict (manual) approval, so every step of the chain waits for its own card
     # instead of a budget policy approving the cheaper steps automatically.
-    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "manual"})
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
     if status != 200:
         record("hyper3d agent: switch the session to manual approval", False, f"approval mode {status}")
         return
@@ -1484,7 +1512,7 @@ def scenario_image_purpose(api, offerings, work):
     """#239: 2D purpose card, brief, purpose-driven model and parameters, the
     explicit 2D lock, and the 3D input checklist, all through the fake stack."""
     session = new_session(api)
-    api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "manual"})
+    api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
 
     # (a) a new 2D drawing without a brief opens the 2D purpose card, whose
     # options are exactly the declared image2d_usage profiles.
@@ -1800,7 +1828,7 @@ def run_quality_case(api, request, domain, model, model_3d=""):
     """One request through the fake-LLM chat path; returns the run dict for agent_quality."""
     started = time.time()
     session = new_session(api)
-    api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "manual"})
+    api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
     if request.get("modality") == "3d" and model_3d:
         # #103: only an explicit pick in the session's model picker binds the 3D tools.
         api.json("PUT", f"/api/v1/chat/sessions/{session}/model3d", {"explicit_model_3d": model_3d})
@@ -2405,6 +2433,189 @@ def _work_ledger_log_text(work):
             except OSError:
                 pass
     return text
+
+
+def _mask_send(api, session, body):
+    """Send one turn, retrying briefly while the previous turn's stream is still active."""
+    end = time.time() + 30
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+    while status == 409 and time.time() < end:
+        time.sleep(0.5)
+        status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+    return status in (200, 201, 202)
+
+
+def _mask_wait_turn(api, session, replies, seconds=90):
+    end = time.time() + seconds
+    while time.time() < end:
+        if assistant_reply_count(api, session) > replies:
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def _mask_approve(api, session, seconds=30):
+    end = time.time() + seconds
+    while time.time() < end:
+        pending = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items", [])
+        if pending:
+            return pending[0]
+        time.sleep(0.5)
+    return None
+
+
+def scenario_mask_selection(api, offerings, work):
+    """#244: a painted selection is a frozen canvas input; refine_image binds it
+    into the Offering's mask parameter, the approval card shows the mask input,
+    the fake upstream changes only the masked pixels, a model without masks is
+    refused without creating a Task, and the read-only create_selection_mask
+    tool makes a usable mask for a later refine. Fake only.
+
+    Cross-user denial is not observable here (the development mock login makes
+    every request the one mock user, see check_delivery); internal/chat and
+    internal/transport/httpapi tests cover it."""
+    import l5_common
+
+    session = new_session(api)
+    api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
+    model = "gpt-image-2.6-sunburst"
+    size = 64
+    red = (200, 40, 40)
+    source = make_picture(size, size, (235, 235, 235), [((16, 16, 48, 48), red)])
+    mask = make_rgba_picture(size, size, (16, 16, 48, 48))
+    source_id = upload_asset(api, "mask-source.png", source, "image/png")
+    mask_id = upload_asset(api, "selection-mask.png", mask, "image/png")
+    if not source_id or not mask_id:
+        record("#244 mask fixtures upload", False, f"source={source_id} mask={mask_id}")
+        return
+
+    selection = [{"kind": "image", "assetId": source_id, "url": f"/api/v1/assets/{source_id}"}]
+    marker = ('[[fake:tool:refine_image {"prompt":"make the selected area blue","model":"' + model + '"}]]')
+    body = {"content": "把这里改成蓝色 " + marker, "creative_domain": "image", "ai_model": model,
+            "selection": selection, "inputSource": "canvas",
+            "selectionMask": {"maskAssetId": mask_id}}
+    before_tasks = {item.get("id") for item in session_tasks(api, session)}
+    # The create_selection_mask turn targets the generated result of this turn
+    # when it succeeds: @selected then carries TaskID+AssetID, the attachment
+    # shape whose asset lives in the Task store (regression: reading the input
+    # store first made generated pictures unreadable).
+    use_selection = selection
+    if not _mask_send(api, session, body):
+        record("#244 canvas mask turn", False, "send refused")
+    else:
+        card = _mask_approve(api, session)
+        inputs = (card or {}).get("inputs") or []
+        mask_inputs = [item for item in inputs if item.get("parameter") == "mask"]
+        prepared = _latest_prepared_input(work, "mask", session)
+        normalized = prepared.get("normalized_input") or {}
+        ok_card = (bool(mask_inputs) and mask_inputs[0].get("asset_id") == mask_id
+                   and bool((card or {}).get("mask_note")))
+        record("#244 approval card shows the mask input and the local-edit note", ok_card,
+               f"mask_inputs={mask_inputs} mask_note={(card or {}).get('mask_note')}")
+        record("#244 executor binds the frozen mask into the Offering mask parameter",
+               normalized.get("mask") == mask_id,
+               f"mask={normalized.get('mask')} offering={prepared.get('offering_id')}")
+        if card:
+            api.json("PUT", f"/api/v1/tasks/grants/{card['request_id']}", decision_body(api, "approve"))
+        task = {}
+        end = time.time() + 90
+        while time.time() < end:
+            fresh = [item for item in session_tasks(api, session) if item.get("id") not in before_tasks]
+            if fresh:
+                task = wait_task(api, fresh[0]["id"], 90)
+                break
+            time.sleep(0.5)
+        ok = task.get("state") == "SUCCEEDED"
+        outside_same = inside_changed = False
+        if ok and task.get("assets"):
+            status, output, _headers = api.call("GET", task["assets"][0]["url"])
+            if status == 200:
+                try:
+                    width, height, rows = l5_common.decode_png(output)
+                    swidth, sheight, source_rows = l5_common.decode_png(source)
+                    if (width, height) == (swidth, sheight):
+                        outside_same = all(
+                            rows[y][3 * x:3 * x + 3] == source_rows[y][3 * x:3 * x + 3]
+                            for y in range(height) for x in range(width)
+                            if not (16 <= x < 48 and 16 <= y < 48))
+                        inside_changed = any(
+                            rows[y][3 * x:3 * x + 3] != source_rows[y][3 * x:3 * x + 3]
+                            for y in range(16, 48) for x in range(16, 48))
+                except ValueError as error:
+                    outside_same = inside_changed = False
+                    record("#244 output decodes", False, str(error))
+        record("#244 masked generation succeeds and changes only the selection", ok and outside_same and inside_changed,
+               f"state={task.get('state')} outside_same={outside_same} inside_changed={inside_changed}")
+        if ok and task.get("assets") and task["assets"][0].get("id"):
+            use_selection = [{"kind": "image", "assetId": task["assets"][0]["id"], "taskId": task["id"]}]
+
+    # (b) a model without a mask parameter is refused: no Task, no whole-image redraw.
+    gemini = "gemini-3-pro-image"
+    before_tasks = {item.get("id") for item in session_tasks(api, session)}
+    before_replies = assistant_reply_count(api, session)
+    refusal_marker = ('[[fake:tool:refine_image {"prompt":"make the selected area blue","model":"' + gemini + '"}]]')
+    refusal_body = {"content": "把这个区域改蓝 " + refusal_marker, "creative_domain": "image", "ai_model": gemini,
+                    "selection": selection, "inputSource": "canvas",
+                    "selectionMask": {"maskAssetId": mask_id}}
+    if not _mask_send(api, session, refusal_body):
+        record("#244 mask-unsupported model refusal", False, "send refused")
+    else:
+        _mask_wait_turn(api, session, before_replies)
+        contents = _checkpoint_completed_contents(work, "mask", session)
+        refused = any("不支持蒙版" in content for content in contents)
+        new_tasks = {item.get("id") for item in session_tasks(api, session)} - before_tasks
+        no_card = not api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items")
+        record("#244 mask-unsupported model refusal", refused and not new_tasks and no_card,
+               f"refused={refused} new_tasks={len(new_tasks)} no_card={no_card}")
+
+    # (c) create_selection_mask builds a region mask from the generated result,
+    # the reply shows it, and that URL works as refine_image's mask.
+    record("#244 create_selection_mask targets a generated result", use_selection is not selection,
+           f"selection={use_selection}")
+    before_replies = assistant_reply_count(api, session)
+    tool_marker = '[[fake:tool:create_selection_mask {"image":"@selected","mode":"region","x0":8,"y0":8,"x1":24,"y1":24}]]'
+    tool_body = {"content": "圈出这里 " + tool_marker, "creative_domain": "image", "ai_model": model,
+                 "selection": use_selection, "inputSource": "canvas"}
+    mask_url = ""
+    if not _mask_send(api, session, tool_body):
+        record("#244 create_selection_mask", False, "send refused")
+    else:
+        _mask_wait_turn(api, session, before_replies)
+        contents = _checkpoint_completed_contents(work, "mask", session)
+        for content in contents:
+            try:
+                parsed = json.loads(content)
+            except ValueError:
+                continue
+            if isinstance(parsed, dict) and parsed.get("mask_url"):
+                mask_url = parsed["mask_url"]
+        messages = api.json("GET", f"/api/chat/sessions/{session}/messages")[1]
+        messages = messages if isinstance(messages, list) else messages.get("messages", [])
+        shown = any(mask_url and mask_url in (message.get("imageUrls") or []) for message in messages)
+        record("#244 create_selection_mask returns a mask URL shown in the reply", bool(mask_url) and shown,
+               f"mask_url={mask_url} shown={shown}")
+    if mask_url:
+        before_tasks = {item.get("id") for item in session_tasks(api, session)}
+        use_marker = ('[[fake:tool:refine_image {"prompt":"make the selected area blue","model":"' + model +
+                      '","mask":"' + mask_url + '"}]]')
+        use_body = {"content": "用这个蒙版改这里 " + use_marker, "creative_domain": "image", "ai_model": model,
+                    "selection": selection, "inputSource": "canvas"}
+        if not _mask_send(api, session, use_body):
+            record("#244 generated mask drives refine_image", False, "send refused")
+        else:
+            card = _mask_approve(api, session)
+            if card:
+                api.json("PUT", f"/api/v1/tasks/grants/{card['request_id']}", decision_body(api, "approve"))
+            task = {}
+            end = time.time() + 90
+            while time.time() < end:
+                fresh = [item for item in session_tasks(api, session) if item.get("id") not in before_tasks]
+                if fresh:
+                    task = wait_task(api, fresh[0]["id"], 90)
+                    break
+                time.sleep(0.5)
+            record("#244 generated mask drives refine_image", task.get("state") == "SUCCEEDED",
+                   f"state={task.get('state')} card={bool(card)}")
 
 
 def scenario_work_ledger(api, offerings, work):
@@ -3227,7 +3438,7 @@ def scenario_visual_anchors(api, offerings, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,image-purpose,offering-knowledge,work-ledger,vision-budget,three-view,visual-anchors,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,vision-budget,three-view,visual-anchors,faults")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
@@ -3301,6 +3512,12 @@ def main():
                 offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
                 scenario_fault(api, offerings, scenario)
                 processes.stop(child)
+        if "mask-selection" in selected:
+            mask_catalog = private_catalog(work, manual_image_edits=True, name="catalog-mask.json")
+            child, api = start_stack(processes, stack_binary, work, "mask", mask_catalog, GOOD_KEY)
+            offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
+            scenario_mask_selection(api, offerings, work)
+            processes.stop(child)
         check_no_real_upstream(work)
     finally:
         processes.stop_all()

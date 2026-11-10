@@ -61,6 +61,7 @@ import { useReferenceSize } from '@/hooks/use-reference-size';
 import { canvasSnapshotClaim, currentObjectSource } from '@/lib/canvas/current-object';
 import { exportArtboardToBlob } from '@/lib/canvas/export-canvas';
 import { flushPendingEdits } from '@/lib/canvas/pending-edits';
+import { inpaintGeometry, paintMask } from '@/lib/canvas/inpaint-export';
 import { exportAndUploadSnapshot, reportSnapshotFailure, snapshotFilename } from '@/lib/canvas/send-snapshot';
 import { uploadWorkspaceInputAsset, uploadWorkspaceInputAssetResult } from '@/lib/workspace/input-asset-upload';
 import { inlineImageFilename, isInlineImage, reportInlineImageFailure, uploadInlineImages } from '@/lib/chat/inline-images';
@@ -114,7 +115,7 @@ import {
   type ChatMessage as ChatMessageType,
 } from '@/store/chat-store';
 import { useCanvasStore, type CanvasNode } from '@/store/canvas-store';
-import { maskStrokeCount, useMaskStore } from '@/store/mask-store';
+import { maskStrokeCount, sameMaskDraft, useMaskStore } from '@/store/mask-store';
 import { CHAT_RAIL_WIDTH, CHAT_WIDTH_MAX, CHAT_WIDTH_MIN, useStudioStore } from '@/store/studio-store';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import { useSessionContextStore } from '@/store/session-context-store';
@@ -876,7 +877,7 @@ export function ChatColumn() {
       queuedMentions?: ChatMentionClaim[],
       queuedInputSource?: string,
       // `onSent` runs once the turn left the box: queued, or taken by the server. A refused or failed send never calls it.
-      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[]; styleLockSkipped?: boolean },
+      extra?: { choiceAnswer?: ChatTurnOptions['choiceAnswer']; onSent?: () => void; queued?: boolean; multiview?: MultiviewTurnRequest; multiviewViews?: string[]; attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[]; styleLockSkipped?: boolean; selectionMask?: { maskAssetId: string } },
     ) => {
       const scope = captureSessionScope();
       // #321: a choice-card answer is a plain turn of its own: no Skill, no draft, never queued.
@@ -951,8 +952,12 @@ export function ChatColumn() {
       let canvasSelection: ChatAttachmentClaim[] | null = null;
       // Writing @画布 asks for the artboard itself: the same rasteriser, whatever the current object is.
       const namesBoard = reuseImages === undefined && mentionsBoard(written, mentionsRef.current);
-      if (!queuedSelection && (namesBoard || (!skipped && sessionObject?.kind !== 'model')) && artboard) {
-        const source = namesBoard ? 'canvas' : currentObjectSource(canvasState.getNodes(sessionId), artboard);
+      // #244: a painted mask belongs to the artboard snapshot and forces that snapshot to be the turn's source.
+      const maskDraftNow = reuseImages === undefined && queuedSelection === undefined ? useMaskStore.getState().draft : null;
+      const maskStrokesNow = maskDraftNow ? maskStrokeCount(maskDraftNow, sessionId) : 0;
+      const withMask = maskStrokesNow > 0 && artboard !== null;
+      if (!queuedSelection && (namesBoard || withMask || (!skipped && sessionObject?.kind !== 'model')) && artboard) {
+        const source = namesBoard || withMask ? 'canvas' : currentObjectSource(canvasState.getNodes(sessionId), artboard);
         if (source === 'canvas') {
           try {
             // #286: save brush edits, rasterise, upload: each failure keeps its step for the toast and the report.
@@ -976,6 +981,40 @@ export function ChatColumn() {
           }
           if (!isCurrentSessionScope(scope)) return;
         }
+      }
+      // #244: the mask is painted on the same artboard at the same delivery pixels, so a stroke lands on the
+      // same pixel of the snapshot and of the mask. Upload it as an input asset; the server measures and freezes it.
+      let selectionMask = extra?.selectionMask;
+      if (withMask && !selectionMask && artboard) {
+        const geometry = inpaintGeometry(artboard, deliveryPixels);
+        const maskCanvas = document.createElement('canvas');
+        maskCanvas.width = geometry.size.width;
+        maskCanvas.height = geometry.size.height;
+        const maskContext = maskCanvas.getContext('2d');
+        if (!maskContext || !maskDraftNow) return;
+        paintMask(maskContext, geometry, maskDraftNow.strokes, '#000000');
+        let maskAssetId = '';
+        try {
+          await exportAndUploadSnapshot({
+            exportPicture: () => new Promise<Blob>((resolve, reject) => {
+              maskCanvas.toBlob((picture) => picture ? resolve(picture) : reject(new Error('mask toBlob returned null')), 'image/png');
+            }),
+            upload: async (picture) => {
+              const uploaded = await uploadWorkspaceInputAssetResult(schema, picture,
+                `${schema.canvas.frontend.export_filename_fallback}-mask.png`);
+              maskAssetId = uploaded.id;
+              return uploaded.url;
+            },
+            maximumBytes: schema.runtime.input_assets.upload_max_bytes,
+          });
+        } catch (error) {
+          // Nothing is sent; the mask draft stays on the stage, like a failed snapshot.
+          const text = reportSnapshotFailure(schema, 'chat-send', error);
+          if (isCurrentSessionScope(scope)) toast.error(text);
+          return;
+        }
+        if (!isCurrentSessionScope(scope) || maskAssetId === '') return;
+        selectionMask = { maskAssetId };
       }
       // #266: a turn that sends the artboard says so; the server binds that snapshot as the turn's source
       // whatever the Agent names. A queued turn keeps the source it was queued with.
@@ -1041,10 +1080,15 @@ export function ChatColumn() {
           id: `queued-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
           text, images, claims, selection, mentions, ...(purposes.length > 0 ? { attachmentPurposes: purposes } : {}),
           ...(inputSource ? { inputSource } : {}),
+          ...(selectionMask ? { selectionMask } : {}),
           ...(multiview ? { multiview } : {}),
           ...(styleLockSkipped ? { styleLockSkipped: true } : {}),
         }));
         useWorkspaceStore.getState().forgetAttachmentSources(images);
+        // #244: the queued turn froze the uploaded mask; the stage draft is spent with it.
+        if (withMask && maskDraftNow && sameMaskDraft(useMaskStore.getState().draft, maskDraftNow)) {
+          useMaskStore.getState().clearDraft();
+        }
         // The queued turn carries the exemption; the box starts the next message without it.
         setStyleLockSkipped(false);
         // The draft is spent with the turn, even when the person has moved to another session meanwhile
@@ -1176,6 +1220,7 @@ export function ChatColumn() {
                 ...(mentions.length > 0 ? { mentions } : {}),
                 ...(purposes.length > 0 ? { attachmentPurposes: purposes } : {}),
                 ...(inputSource ? { inputSource } : {}),
+                ...(selectionMask ? { selectionMask } : {}),
                 ...(choiceAnswer ? { choiceAnswer } : {}),
                 ...(multiview ? { multiview } : {}),
                 ...(extra?.styleLockSkipped ? { styleLockSkipped: true } : {}),
@@ -1197,6 +1242,10 @@ export function ChatColumn() {
             // accepted in this visit spends this visit's reads; a visit begun since has its own draft.
             // A choice-card answer leaves whatever the person is writing in the box.
             if (!choiceAnswer) {
+              // #244: only a turn the server accepted spends the painted mask.
+              if (withMask && maskDraftNow && sameMaskDraft(useMaskStore.getState().draft, maskDraftNow)) {
+                useMaskStore.getState().clearDraft();
+              }
               if (isCurrentSessionScope(scope)) draftEpoch.current += 1;
               clearDraft(sessionId);
               if (isCurrentSessionScope(scope)) {
@@ -1359,7 +1408,7 @@ export function ChatColumn() {
     drainingRef.current = true;
     setQueue((current) => cancelQueuedTurn(current, sessionId, turn.id));
     const started = startedTurnsRef.current;
-    void sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}) }).finally(() => {
+    void sendRef.current(turn.text, turn.images, turn.claims, undefined, turn.selection, turn.mentions, turn.inputSource, { queued: true, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}), ...(turn.selectionMask ? { selectionMask: turn.selectionMask } : {}) }).finally(() => {
       drainingRef.current = false;
       if (startedTurnsRef.current === started) {
         if (useChatStore.getState().activeSessionId === sessionId) {

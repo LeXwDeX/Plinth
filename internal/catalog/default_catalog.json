@@ -4776,6 +4776,7 @@
         "ui.studio.mask.chip": "蒙版",
         "ui.studio.mask.chip_idle": "涂抹需要重绘的区域",
         "ui.studio.mask.chip_strokes": "已涂 {count} 笔",
+        "ui.studio.mask.chip_selection": "发送时这个选区会作为本轮输入，只改圈选区域",
         "ui.studio.mask.chip_strokes_one": "已涂 {count} 笔",
         "ui.studio.mask.chip_clear": "清掉蒙版",
         "ui.studio.mask.discard_title": "放弃涂好的蒙版？",
@@ -5174,6 +5175,7 @@
           "selection": "selection",
           "mentions": "mentions",
           "input_source": "inputSource",
+          "selection_mask": "selectionMask",
           "multiview": "multiview",
           "domain_models": "domainModels",
           "from_id": "fromId",
@@ -5195,6 +5197,7 @@
            "style_lock_references": "references",
            "style_lock_skipped": "styleLockSkipped"
         },
+        "selection_mask": {"mask_asset_id": "maskAssetId"},
         "style_lock": {
           "enabled": "enabled",
           "text": "text",
@@ -5848,7 +5851,11 @@
         "canvas_layers_template": "，含 {layers} 个可见图层",
         "selection_canvas_template": "，是用户在画板上摆好的版面（{layout}），发送时由画板上的可见图层拍平成这一张图",
         "selection_canvas_note": "\n（画板版面：标为画板版面的那张图就是用户在画板上摆好的构图，本轮读图的生成工具会自动把它作为第一张参考图。用户说“按摆放”“按结构”“按位置”“合并成一张”时，以这张版面为准整体合成：融合成一张自然完整的画面，同时保留每个图层在版面里的位置、大小、比例和主体，不要删掉、合并或重排某个图层的主体。版面已经包含各图层的画面，除非用户明确要求，不要再把这些图层的原图（历史图片句柄）作为额外参考传入。输出尺寸跟随画板；用户想换尺寸时，请其先调整画板尺寸。）",
-        "maximum_canvas_layers": 1000,
+
+        "selection_mask_item_template": "\n- 选区蒙版（目标图片 {handle}）：包围盒 {bbox}，覆盖 {coverage}；透明区域=要重画，不透明区域=保持原样",
+        "selection_mask_note": "\n（用户在这一轮圈选了上面这张图的一块区域。透明处=要改，不透明处=保持；refine_image 会自动带上这个蒙版，不要整图重画，也不要在提示词里另选区域。读图工具本轮已经看到选区预览。) ",
+        "selection_mask_preview_label": "\n[上图是用户圈选区域的预览：压暗的是保持区域，着色的是要重画的区域]",
+        "selection_mask_preview": {"max_pixels": 1048576, "dim_opacity": 0.55, "tint_color": "#ff8a00", "tint_opacity": 0.45, "media_type": "image/png"},        "maximum_canvas_layers": 1000,
         "canvas_output_size_template": "输出尺寸按画板设为 {size}（画板 {canvas}）。",
         "canvas_output_size_nearest_template": "所选模型给不了画板尺寸 {canvas}，本次改用最接近的合法尺寸 {size}。回复用户时请说明这一点，并告诉用户可以把画板改成这个尺寸，或换一个支持画板尺寸的模型。",
         "reference_output_size_template": "输出尺寸按参考图的比例设为 {size}（参考图 {reference}）。",
@@ -6125,6 +6132,18 @@
         "unreadable_template": "图片 {handle} 无法检查：{reason}。不要猜测它的内容。",
         "max_rounds": 3,
         "rounds_exhausted_template": "本回合的 inspect_image 次数已用完（{maximum} 次）；停止自检，直接如实汇报剩余问题。"
+      },
+      "image_mask": {
+        "tool": "create_selection_mask",
+        "limits": {"max_bytes": 33554432, "max_pixels": 40000000},
+        "modes": ["subject", "region", "invert"],
+        "preview": {"max_pixels": 1048576, "media_type": "image/png"},
+        "texts": {
+          "unreadable_template": "图片 {handle} 无法读取，未能生成蒙版：{reason}。不要猜测它的内容。",
+          "invalid_region": "矩形区域无效：需要 x0、y0、x1、y1，且在图片范围内且 x1>x0、y1>y0。请重新给一个有效区域。",
+          "no_subject": "这张图里没有可分离的主体，按主体生成蒙版失败。请改用 region 指定矩形区域，或让用户先提供主体清晰的图片。",
+          "result_note": "已生成选区蒙版（{url}），尺寸 {width}×{height}，覆盖 {coverage}。把它作为 refine_image 的 mask 参数即可只改这个区域；透明=重画，不透明=保持。先让用户确认蒙版无误再提交付费步骤。"
+        }
       },
       "work_ledger": {
         "maximum_steps": 40,
@@ -6464,6 +6483,32 @@
           }
         },
         {
+          "name": "create_selection_mask",
+          "execution": {"implementation_key":"image.mask","effects":["READ"],"scope":"session","domains":["image"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"utility"},
+          "description": "Build a selection mask for one picture of this session locally, without calling any model, creating a Task or charging credits. Use it when the person describes the area in words instead of painting it. mode=subject keeps the picture's opaque pixels (or its subject against a plain background) as the editable region; mode=region with x0,y0,x1,y1 selects a rectangle; add invert=true to swap kept and editable. The result is a PNG mask where transparent pixels are redrawn and opaque pixels are kept, stored as the owner's input asset. Pass the returned mask_url as the mask argument of refine_image (the server binds it), and show the mask to the person first; never submit a paid step before they confirm it. A picture that cannot be read or has no subject is refused with the reason.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "image": {
+                "type": "string",
+                "description": "Image handle (such as @img3) or @selected for the selected picture."
+              },
+              "mode": {
+                "type": "string",
+                "enum": ["subject", "region"],
+                "description": "subject splits the subject from its background; region selects the given rectangle."
+              },
+              "x0": {"type": "integer", "description": "region: left pixel, 0-based."},
+              "y0": {"type": "integer", "description": "region: top pixel, 0-based."},
+              "x1": {"type": "integer", "description": "region: right pixel, exclusive."},
+              "y1": {"type": "integer", "description": "region: bottom pixel, exclusive."},
+              "invert": {"type": "boolean", "description": "Swap the editable and kept areas after building the mask."}
+            },
+            "required": ["image", "mode"],
+            "additionalProperties": false
+          }
+        },
+        {
           "name": "get_production_step",
           "execution": {"implementation_key":"ledger.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"utility"},
           "description": "Read one production step of this session's work ledger in full. Pass the step handle shown in the ledger summary (such as @step3) or the Task ID. The result returns the step's capability, offering and model, state and progress, failure class, the exact prompt the Agent asked for and the final prompt that was frozen for the upstream (including the style lock and any template rewriting), the negative prompt, every declared parameter with its effective value and where it came from (agent, default, style_lock or unknown), input pictures by handle and purpose, result handles and roles, the read-only self-check conclusions (inspect_model leftovers with fix hints, inspect_image pass/fail counts, render/compare failed views) and the adopted or rejected decision. The ledger is a projection of the session's public Tasks and persisted tool calls: it never creates a Task, charges credits or changes the session.",
@@ -6739,6 +6784,7 @@
         {
           "name": "refine_image",
           "canvas_source": "bind",
+          "selection_mask": "bind",
           "reference_size": "single",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-image","text-to-image"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
           "description": "Generate or edit a 2D image. The model comes from the four layers: the person's explicit pick in this session, your model argument with a reason, the session's 2D purpose recommendation, and the Offering default. Use reference_handles (or reference_image_indices) for existing images; when several references serve different purposes (pose, outfit, style...), say which in reference_purposes. With exactly one reference picture and no output size set, the output keeps that picture's aspect ratio (the closest size the model supports); call set_params first only when the user asks for another size or shape.",
@@ -6829,6 +6875,7 @@
             "model": "model",
             "model_fallback": "model_fallback",
             "model_note": "model_note",
+            "mask_note": "mask_note",
             "model_choice": "model_choice",
             "size_note": "size_note",
             "budget": "budget",
@@ -6841,6 +6888,7 @@
         {
           "name": "remove_background",
           "canvas_source": "bind",
+          "selection_mask": "ignore",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["background-removal"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
           "description": "Remove the background of the referenced images using the background-removal offering. Use reference_handles (such as @img3, or @selected) or reference_image_indices for existing images; without either, the images selected on the workspace are used.",
           "ignore_user_model": true,
@@ -6894,6 +6942,7 @@
         {
           "name": "create_model_3d",
           "canvas_source": "refuse",
+          "selection_mask": "ignore",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["text-to-3d"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Generate a 3D model from an English text description.",
           "model_argument": "model",
@@ -6960,6 +7009,7 @@
         {
           "name": "create_model_3d_from_image",
           "canvas_source": "bind",
+          "selection_mask": "ignore",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["image-to-3d","text-to-3d"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Generate a 3D model from reference image(s). Without references the images selected on the workspace are used. How many pictures a model uses depends on the model picked for 3D (stated below when known): never say that pictures beyond that number are used, or that they are used as views of one object. When a result has reference_note, including while the step waits on its approval card, it states the facts about the pictures: which pictures are used, how many were given, and that using several pictures needs a model that takes several pictures. Your reply must state each of these facts; put them in your own words if you like. Several views of the same object (a front view plus left, back or right views) belong to create_model_3d_from_views instead.",
           "default_to_selection": true,
@@ -7058,6 +7108,7 @@
         {
           "name": "create_model_3d_from_views",
           "canvas_source": "bind",
+          "selection_mask": "ignore",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["image-to-3d"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Generate one 3D model from several views of the SAME object with a multiview image-to-3D model. The available models are derived from the Catalog's enabled multiview Offerings: those that label each picture's view (reference_views) and order-only models such as Meshy 7.1 multiview, whose pictures are read as front, left, back, right by position. For a three-view group of this chat, pass three_view_group (the group's run ID) and nothing else about the pictures: the server reads the finished views and their view keys from the group. Otherwise use it only when the user gives 2 to 4 views of one object (a front view plus left, back or right views, for example the four pictures of a four-view image group) and wants a 3D model: pass the handles in front, left, back, right order, or say which view each handle is in reference_views (front, left, back, right); a front view is required. An order-only model accepts only a contiguous front, left, back, right prefix, so never give it front plus back without left. Left and right are the object's own left and right sides. For one picture, or pictures of different objects, use create_model_3d_from_image instead. Use list_offerings for actual quotes; do not assume one multiview model costs the same as another.",
           "ignore_user_model": true,
@@ -7125,6 +7176,7 @@
         {
           "name": "retexture_model",
           "canvas_source": "ignore",
+          "selection_mask": "ignore",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["retexture"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Re-texture a finished 3D model of this session from an English text prompt, one reference image or both, as the selected service's inputs in list_offerings allow. An input with supply=chat_image is a picture from this chat, passed in reference_handles (such as @img1); when it has required=true the step cannot run without it, so ask the person to attach one image instead of trying other arguments. The service must accept the model as its source (see list_offerings). In manual approval mode the user must approve before it runs. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
@@ -7238,6 +7290,7 @@
         {
           "name": "process_model",
           "canvas_source": "ignore",
+          "selection_mask": "ignore",
           "execution": {
             "implementation_key": "generation.execute",
             "effects": ["PAID_TASK"],
@@ -7515,6 +7568,7 @@
         {
           "name": "plan_model_processing",
           "canvas_source": "ignore",
+          "selection_mask": "ignore",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":[
             "remesh",
             "rigging",
@@ -7611,6 +7665,7 @@
         {
           "name": "convert_model_format",
           "canvas_source": "ignore",
+          "selection_mask": "ignore",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["format-conversion"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Convert a finished 3D model of this session to another file format. A service that exports every format it supports in one run (Meshy Convert) bills once for all of them. Some options (for example a texture format) add extra credits; the estimate in the result includes them. A step with extra credits waits on an approval card in manual mode; the user approves it there, so never ask them to tick a consent box.",
           "ignore_user_model": true,
@@ -7684,6 +7739,7 @@
         {
           "name": "create_motion_clip",
           "canvas_source": "ignore",
+          "selection_mask": "ignore",
           "execution": {
             "implementation_key": "generation.execute",
             "effects": [
@@ -7773,6 +7829,7 @@
         {
           "name": "create_gaussian_splat",
           "canvas_source": "bind",
+          "selection_mask": "ignore",
           "execution": {
             "implementation_key": "generation.execute",
             "effects": [
@@ -7861,6 +7918,7 @@
         {
           "name": "create_multiview_images",
           "canvas_source": "bind",
+          "selection_mask": "ignore",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-multiview"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
           "description": "Create one Tripo four-view image Task from exactly one owned reference image. Keep the four returned views together in front, left, back, right order; do not substitute the older three-view recipe. The estimated native price is 10 Tripo credits.",
           "ignore_user_model": true,
@@ -7882,6 +7940,7 @@
         {
           "name": "edit_multiview_images",
           "canvas_source": "ignore",
+          "selection_mask": "ignore",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["edit-multiview"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
           "description": "Edit selected views of a successful Tripo four-view image Task from this same session. Give its public source Task ID and at least one view prompt. Only prompted views are generated, at 5 Tripo credits each; unedited views remain assets of the original Task.",
           "accept_reference_images": false,
@@ -7901,6 +7960,7 @@
         {
           "name": "create_creative_lab_design",
           "canvas_source": "bind",
+          "selection_mask": "ignore",
           "execution": {
             "implementation_key": "generation.execute",
             "effects": [
@@ -8023,6 +8083,7 @@
         {
           "name": "build_creative_lab_item",
           "canvas_source": "ignore",
+          "selection_mask": "ignore",
           "execution": {
             "implementation_key": "generation.execute",
             "effects": [
@@ -8241,6 +8302,16 @@
           "invalid_input_source": "消息的输入来源无效",
           "canvas_source_missing": "画布快照没有随消息送达，本轮未执行。请重试；若不需要画布，先移除输入框上方的当前引用再发送。",
           "canvas_source_tool_refused": "本轮的输入来源是用户发送时的画布区域快照，这个工具不读图片，不能用于本轮。请改用会读图片的工具（{tools}），画布快照会自动作为第一张输入图，无需填写引用。",
+          "selection_mask_without_canvas": "这条消息带了选区蒙版，但本轮不是画布来源或画布快照没有通过校验，本轮未执行。请让用户带上画板快照重新发送，或移除蒙版后再试。",
+          "selection_mask_invalid": "选区蒙版无效或无法读取，本轮未执行。请重新圈选后发送。",
+          "selection_mask_size_mismatch": "选区蒙版与画板快照尺寸不一致，本轮未执行。请重新画蒙版后发送。",
+          "mask_unreadable_template": "选区蒙版无法读取或不属于当前用户（{reason}），本轮未执行。请让用户重新圈选后发送。",
+          "mask_size_mismatch_template": "选区蒙版尺寸 {mask} 与画板快照 {canvas} 不一致，本轮未执行。请让用户重新画蒙版；蒙版必须与画板快照同尺寸。",
+          "mask_unsupported_template": "用户圈选了区域，但所选模型 {model} 不支持蒙版，因此没有提交任务，也不会退化成整图重画。请换成支持蒙版的模型（{choices}），或请用户改选模型后再试。",
+          "mask_no_supported_model": "用户圈选了区域，但当前没有支持蒙版的可用模型，因此没有提交任务，也不会退化成整图重画。请如实告诉用户：需要先接入或启用支持蒙版的模型。",
+          "mask_model_switch_note": "用户圈选了区域；因为用户没有锁定模型，这一步改用了支持蒙版的 {from} → {to}。请告诉用户这次用的模型，并说明只改选区。",
+          "mask_not_applied_note": "这次调用传了 mask 参数，但本轮没有用户圈选的冻结蒙版，蒙版未应用，实际按整图输入提交。如果用户只想改局部，请让用户先圈选区域再发送。",
+          "mask_approval_note": "本次只改用户圈选的区域：蒙版透明处会重画，不透明处保持原图。",
           "retired_model_fallback": "用户选的 {from} 已停用，这一步改用了 {to}。请如实告诉用户，并说明需要时可以在模型选择里改选。",
           "model_choice_conflict": "这次调用指定的模型与用户在本会话明确选定的模型（{locked}）不一致，没有提交任务。用户明确选择的模型优先；要改用 {requested}，请先让用户在本会话里重新选择模型。",
           "choice_option_invalid": "方向卡的选项无效：需要 2 到 8 个选项，每个 id 是简短的字母数字标记，每个 label 非空。请重新调用 ask_choice 并提供有效选项。",
@@ -16413,6 +16484,7 @@
             "ui.studio.mask.chip": "Mask",
             "ui.studio.mask.chip_idle": "Paint the area to redraw",
             "ui.studio.mask.chip_strokes": "{count} strokes painted",
+            "ui.studio.mask.chip_selection": "Sending turns this selection into the turn input, so only the selected area changes",
             "ui.studio.mask.chip_strokes_one": "{count} stroke painted",
             "ui.studio.mask.chip_clear": "Clear mask",
             "ui.studio.mask.discard_title": "Discard the painted mask?",
@@ -17594,6 +17666,16 @@
             "chat.presentation.messages.invalid_input_source": "The message's input source is invalid",
             "chat.presentation.messages.canvas_source_missing": "The canvas snapshot was not delivered with the message, so this turn was not run. Please retry; if you don't need the canvas, remove the current reference above the input box before sending.",
             "chat.presentation.messages.canvas_source_tool_refused": "The input source for this turn is the canvas region snapshot taken when the user sent the message. This tool does not read images, so it cannot be used for this turn. Use a tool that reads images ({tools}) instead; the canvas snapshot is automatically used as the first input image, so no reference is needed.",
+            "chat.presentation.messages.selection_mask_without_canvas": "This message carried a selection mask, but the turn was not a canvas turn or its artboard snapshot did not verify, so the turn was not run. Ask the person to send again with the artboard snapshot, or to remove the mask and retry.",
+            "chat.presentation.messages.selection_mask_invalid": "The selection mask is invalid or cannot be read, so the turn was not run. Ask the person to paint the selection again and resend.",
+            "chat.presentation.messages.selection_mask_size_mismatch": "The selection mask does not have the artboard snapshot size, so the turn was not run. Ask the person to repaint the mask and resend.",
+            "chat.presentation.messages.mask_unreadable_template": "The selection mask cannot be read or does not belong to this user ({reason}), so the turn was not run. Ask the person to paint the selection again and resend.",
+            "chat.presentation.messages.mask_size_mismatch_template": "The selection mask is {mask} but the artboard snapshot is {canvas}, so the turn was not run. Ask the person to repaint the mask; it must have the same size as the artboard snapshot.",
+            "chat.presentation.messages.mask_unsupported_template": "The person selected an area, but the chosen model {model} does not support masks, so nothing was submitted and it was not turned into a whole-image redraw. Switch to a model that supports masks ({choices}), or ask the person to choose another model and retry.",
+            "chat.presentation.messages.mask_no_supported_model": "The person selected an area, but no available model supports masks, so nothing was submitted and it was not turned into a whole-image redraw. Tell the person plainly that a mask-capable model must be enabled first.",
+            "chat.presentation.messages.mask_model_switch_note": "The person selected an area; because they had not locked a model, this step switched from {from} to {to}, which supports masks. Tell the person which model was used and that only the selected area changes.",
+            "chat.presentation.messages.mask_not_applied_note": "This call passed a mask argument, but the turn had no frozen selection mask from the person, so the mask was not applied and the whole image was submitted. If the person wanted a local edit, ask them to select the area first and send again.",
+            "chat.presentation.messages.mask_approval_note": "This step changes only the area the person selected: transparent mask pixels are redrawn and opaque pixels keep the original picture.",
             "chat.presentation.messages.retired_model_fallback": "The {from} model the user picked is no longer offered, so this step used {to}. Tell the user so, and that they can pick another model in the model menu.",
             "chat.presentation.messages.model_choice_conflict": "This call named a model that differs from the model the user explicitly picked in this session ({locked}), so nothing was submitted. The user's explicit choice wins; to use {requested}, first have the user pick the model again in this session.",
             "chat.presentation.messages.model_choice_workspace_conflict": "The workspace currently uses model {workspace}, but purpose “{profile}” recommends {recommended}. Confirm with the user which model to keep before continuing; do not silently replace their choice.",

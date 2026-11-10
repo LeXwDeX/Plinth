@@ -49,6 +49,9 @@ const (
 	// ToolInspectImage reports deterministic facts about one picture of the
 	// session without creating a Task (#245).
 	ToolInspectImage = "inspect_image"
+	// ToolCreateSelectionMask builds a local selection mask for one picture and
+	// stores it as the owner's input asset (#244).
+	ToolCreateSelectionMask = "create_selection_mask"
 	// ToolInspectModel reports the structure of a finished 3D model without
 	// creating a Task (#103).
 	ToolInspectModel = "inspect_model"
@@ -110,6 +113,10 @@ type Config struct {
 	// picture of the command's owner and session, never creates a Task and never
 	// spends credits.
 	InspectImage func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	// CreateSelectionMask is the read-only local mask tool (#244). It reads one
+	// picture of the command's owner and session, stores a PNG mask as that
+	// owner's input asset and never creates a Task or spends credits.
+	CreateSelectionMask func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	// InspectModel, RenderModelViews and CompareModels are the read-only model
 	// review tools (#103). They read only the command's owner and session,
 	// never create a Task and never spend credits.
@@ -189,32 +196,33 @@ type Config struct {
 }
 
 type Executor struct {
-	offerings          func() []generation.Offering
-	context            catalog.ChatContextSchema
-	skillRuntime       *skillrun.Runtime
-	skillReferences    SkillReferenceResolver
-	skillOfferings     SkillOfferingResolver
-	skillRecipes       map[string]string
-	skillTurnStopped   func(context.Context, string, string, string) (bool, error)
-	threeView          catalog.ChatThreeViewSchema
-	threeViewService   *threeview.Service
-	params             *agentparams.Store
-	generate           chat.ToolExecutor
-	preflight          func(command chat.ToolCommand) string
-	projection         func() json.RawMessage
-	historyLookup      chat.HistoryLookupPolicy
-	readTask           func(ctx context.Context, ownerID, taskID string) (json.RawMessage, error)
-	recoverTask        func(ctx context.Context, ownerID, sessionID, taskID string) (json.RawMessage, error)
-	listModels         func(ctx context.Context, ownerID, sessionID string) (json.RawMessage, error)
-	readProcessingPlan func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
-	inspectImage       func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
-	inspectModel       func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
-	renderModelViews   func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
-	compareModels      func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
-	readProductionStep func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
-	updateNotes        func(ctx context.Context, ownerID, sessionID, notes string) (string, error)
-	updateBrief        func(ctx context.Context, ownerID, sessionID string, brief map[string]json.RawMessage) error
-	askChoice          func(ctx context.Context, command chat.ToolCommand, kind catalog.ChatChoiceKindSchema,
+	offerings           func() []generation.Offering
+	context             catalog.ChatContextSchema
+	skillRuntime        *skillrun.Runtime
+	skillReferences     SkillReferenceResolver
+	skillOfferings      SkillOfferingResolver
+	skillRecipes        map[string]string
+	skillTurnStopped    func(context.Context, string, string, string) (bool, error)
+	threeView           catalog.ChatThreeViewSchema
+	threeViewService    *threeview.Service
+	params              *agentparams.Store
+	generate            chat.ToolExecutor
+	preflight           func(command chat.ToolCommand) string
+	projection          func() json.RawMessage
+	historyLookup       chat.HistoryLookupPolicy
+	readTask            func(ctx context.Context, ownerID, taskID string) (json.RawMessage, error)
+	recoverTask         func(ctx context.Context, ownerID, sessionID, taskID string) (json.RawMessage, error)
+	listModels          func(ctx context.Context, ownerID, sessionID string) (json.RawMessage, error)
+	readProcessingPlan  func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	inspectImage        func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	createSelectionMask func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	inspectModel        func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	renderModelViews    func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	compareModels       func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	readProductionStep  func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	updateNotes         func(ctx context.Context, ownerID, sessionID, notes string) (string, error)
+	updateBrief         func(ctx context.Context, ownerID, sessionID string, brief map[string]json.RawMessage) error
+	askChoice           func(ctx context.Context, command chat.ToolCommand, kind catalog.ChatChoiceKindSchema,
 		arguments chat.AskChoiceArguments) (chat.ToolResult, error)
 	proposePlan            func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	writeVisualAnchor      func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
@@ -351,6 +359,7 @@ func New(config Config) (*Executor, error) {
 		listModels:             config.ListModels,
 		readProcessingPlan:     config.ReadProcessingPlan,
 		inspectImage:           config.InspectImage,
+		createSelectionMask:    config.CreateSelectionMask,
 		inspectModel:           config.InspectModel,
 		renderModelViews:       config.RenderModelViews,
 		compareModels:          config.CompareModels,
@@ -426,6 +435,11 @@ func (e *Executor) Execute(
 			return chat.ToolResult{Error: "image inspection unavailable", NoSubmission: true}, nil
 		}
 		return e.inspectImage(ctx, command)
+	case ToolCreateSelectionMask:
+		if e.createSelectionMask == nil {
+			return chat.ToolResult{Error: "selection mask unavailable", NoSubmission: true}, nil
+		}
+		return e.createSelectionMask(ctx, command)
 	case ToolGetProductionStep:
 		if e.readProductionStep == nil {
 			return chat.ToolResult{Error: "production ledger unavailable", NoSubmission: true}, nil

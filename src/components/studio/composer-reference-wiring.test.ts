@@ -55,7 +55,7 @@ describe('handle tag to composer', () => {
     const chat = source('./chat-column.tsx');
     expect(chat).toContain('mentionsForTurn(text, mentionsRef.current, pickedMentions(scope))');
     expect(chat).toContain('...(mentions.length > 0 ? { mentions } : {})');
-    expect(chat).toContain('turn.selection, turn.mentions, turn.inputSource, { queued: true, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}) })');
+    expect(chat).toContain('turn.selection, turn.mentions, turn.inputSource, { queued: true, ...(turn.multiview ? { multiview: turn.multiview } : {}), ...(turn.styleLockSkipped ? { styleLockSkipped: true } : {}), ...(turn.selectionMask ? { selectionMask: turn.selectionMask } : {}) })');
     expect(chat).not.toContain('resolveMentions');
     expect(source('../../lib/chat/send-queue.ts')).toContain('mentions?: ChatMentionClaim[]');
   });

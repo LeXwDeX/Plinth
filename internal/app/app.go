@@ -41,11 +41,14 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat/agentparams"
 	"github.com/LeXwDeX/Plinth/internal/chat/agenttools"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
+	"github.com/LeXwDeX/Plinth/internal/chat/imagemask"
 	"github.com/LeXwDeX/Plinth/internal/chat/imagereview"
 	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness/resolve"
+	"github.com/LeXwDeX/Plinth/internal/imageinspect"
+	"github.com/LeXwDeX/Plinth/internal/imaging"
 	"github.com/LeXwDeX/Plinth/internal/legacythumbnail"
 	"github.com/LeXwDeX/Plinth/internal/lineage"
 	"github.com/LeXwDeX/Plinth/internal/llmsettings"
@@ -571,6 +574,17 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		TaskInSession: func(ctx context.Context, owner generation.OwnerID, sessionID string, taskID generation.TaskID) (bool, error) {
 			return module.TaskInSession(ctx, owner, sessionID, taskID)
 		},
+		// #244: the frozen selection mask and its server-composed preview.
+		SelectionMaskLimits: imageinspect.Limits{
+			MaxBytes:  applicationSchema.Chat.ImageMask.Limits.MaxBytes,
+			MaxPixels: applicationSchema.Chat.ImageMask.Limits.MaxPixels,
+		},
+		SelectionPreview: imaging.SelectionPreviewStyle{
+			MaxPixels:   applicationSchema.Chat.Context.SelectionMaskPreview.MaxPixels,
+			DimOpacity:  applicationSchema.Chat.Context.SelectionMaskPreview.DimOpacity,
+			TintColor:   applicationSchema.Chat.Context.SelectionMaskPreview.TintColor,
+			TintOpacity: applicationSchema.Chat.Context.SelectionMaskPreview.TintOpacity,
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -681,6 +695,19 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
+	// #244: the read-only create_selection_mask tool builds its mask locally and
+	// stores it as the owner's input asset; no upstream call, Task or credits.
+	imageMask, err := imagemask.New(imagemask.Config{
+		Context:          applicationSchema.Chat.Context,
+		Mask:             applicationSchema.Chat.ImageMask,
+		Inputs:           inputAssetService,
+		Tasks:            module,
+		AssetItemRoute:   applicationSchema.Runtime.HTTP.Routes.AssetItem,
+		DefaultAssetType: applicationSchema.Runtime.InputAssets.DefaultAssetType,
+	})
+	if err != nil {
+		return nil, err
+	}
 	toolExecutor, err := generationtool.New(generationtool.Config{
 		Logger:          logger,
 		Choices:         repository,
@@ -747,21 +774,22 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		)
 	}
 	agentToolsConfig := agenttools.Config{
-		Offerings:          func() []generation.Offering { return module.Offerings("") },
-		Context:            applicationSchema.Chat.Context,
-		HistoryLookup:      chat.NewHistoryLookupPolicy(applicationSchema.Chat),
-		Params:             paramsStore,
-		Generate:           toolExecutor,
-		ReadTask:           newAgentTaskReader(module, applicationSchema.Chat, applicationSchema.Content.Messages, texts),
-		RecoverTask:        newAgentTaskRecoverer(module, applicationSchema.Chat, applicationSchema.Content.Messages, texts),
-		ListModels:         toolExecutor.ListSessionModels,
-		ReadProcessingPlan: toolExecutor.ReadProcessingPlan,
-		InspectImage:       imageReview.Inspect,
-		InspectModel:       toolExecutor.InspectModel,
-		RenderModelViews:   toolExecutor.RenderModelViews,
-		CompareModels:      toolExecutor.CompareModels,
-		ReadProductionStep: chatService.ReadProductionStep,
-		UpdateNotes:        chatService.SetSessionNotes,
+		Offerings:           func() []generation.Offering { return module.Offerings("") },
+		Context:             applicationSchema.Chat.Context,
+		HistoryLookup:       chat.NewHistoryLookupPolicy(applicationSchema.Chat),
+		Params:              paramsStore,
+		Generate:            toolExecutor,
+		ReadTask:            newAgentTaskReader(module, applicationSchema.Chat, applicationSchema.Content.Messages, texts),
+		RecoverTask:         newAgentTaskRecoverer(module, applicationSchema.Chat, applicationSchema.Content.Messages, texts),
+		ListModels:          toolExecutor.ListSessionModels,
+		ReadProcessingPlan:  toolExecutor.ReadProcessingPlan,
+		InspectImage:        imageReview.Inspect,
+		CreateSelectionMask: imageMask.Execute,
+		InspectModel:        toolExecutor.InspectModel,
+		RenderModelViews:    toolExecutor.RenderModelViews,
+		CompareModels:       toolExecutor.CompareModels,
+		ReadProductionStep:  chatService.ReadProductionStep,
+		UpdateNotes:         chatService.SetSessionNotes,
 		UpdateBrief: func(ctx context.Context, ownerID, sessionID string, brief map[string]json.RawMessage) error {
 			return updateProductionBriefAudited(
 				ctx,
@@ -939,6 +967,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// Task asset URL of a generated result; the resolver proves the owner
 		// and the session (including a branch's ancestor Tasks).
 		VisionAnchorInline: referenceResolver.OpenVisionReference,
+		SelectionPreview:   referenceResolver.OpenSelectionPreview,
 		ToolAllowed: func(capability, _ string) bool {
 			// ToolExecution.domains is the creative workspace (image/model).
 			// CapabilityPresentation.domain is a product category, where

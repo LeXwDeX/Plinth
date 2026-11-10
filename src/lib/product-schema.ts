@@ -1383,6 +1383,8 @@ export interface ChatProductSchema {
       selection: string;
       mentions: string;
       input_source: string;
+      /** #244: the frozen selection mask object of a canvas turn (`selectionMask`). */
+      selection_mask?: string;
       from_id: string;
       turn_canceled: string;
       /** #137: the background-continue response and availability members. */

@@ -562,6 +562,17 @@ func (executor *Executor) Execute(
 			return result, err
 		}
 	}
+	// #244: a frozen selection mask must be bound to a mask parameter, never
+	// quietly dropped into a whole-image redraw. A model the person or the
+	// Agent named is refused; only an unchosen model may move to a mask-capable
+	// Offering, and the result names that switch.
+	offering, maskRefusal := executor.ensureMaskOffering(command, capability,
+		modelInputFor(command, referenceURLs, multiview), offering)
+	if maskRefusal != "" {
+		result := executor.failure(command, "", maskRefusal)
+		result.NoSubmission = true
+		return result, nil
+	}
 	if multiview != nil {
 		group := !multiview.fromRequest || (command.Options.Multiview != nil && command.Options.Multiview.Group != "")
 		if refusal := executor.fitMultiviewViews(command, offering, multiview, group); refusal != "" {
@@ -836,6 +847,9 @@ type stepInfo struct {
 	// ModelNote says the person's pick was a retired model and the step ran
 	// on its successor (#329 follow-up). Empty when it does not apply.
 	ModelNote string
+	// MaskNote says the Agent's own mask argument was dropped because the turn
+	// carried no frozen selection mask (#244). Empty when it does not apply.
+	MaskNote string
 	// ReferenceNote says which of the references a step really used, such as
 	// "only the front view of a three-view group". Empty when it does not apply.
 	ReferenceNote string
@@ -1584,6 +1598,10 @@ func (executor *Executor) buildInput(
 	// #272: on a canvas turn the artboard is the output frame; it is applied
 	// last, over the turn's, the Agent's and a Skill's size settings.
 	executor.applyCanvasOutputSize(command, offering, input)
+	// #244: the frozen selection mask is the person's input, written into the
+	// Offering's mask parameter after every other layer. An Agent-supplied
+	// mask that reached the input above wins.
+	bindSelectionMask(command, offering, input, chosen)
 	encoded, err := json.Marshal(input)
 	return encoded, referenceAssets, err
 }
@@ -1699,6 +1717,10 @@ func (executor *Executor) wait(
 	}
 	info.Fallback = executor.usedFallbackModel(command)
 	info.ModelNote = executor.retiredModelNote(command, offering)
+	if switchNote := executor.maskModelSwitchNote(command, offering); switchNote != "" {
+		info.ModelNote = strings.TrimSpace(strings.Join([]string{info.ModelNote, switchNote}, "\n"))
+	}
+	info.MaskNote = executor.maskNotAppliedNote(command, offering)
 	{
 		task, err := executor.gateway.Get(
 			ctx,
@@ -1912,6 +1934,9 @@ func (executor *Executor) success(
 	}
 	if key := tool.ResultFields.ModelNote; key != "" && info.ModelNote != "" {
 		result[key] = info.ModelNote
+	}
+	if key := tool.ResultFields.MaskNote; key != "" && info.MaskNote != "" {
+		result[key] = info.MaskNote
 	}
 	if key := tool.ResultFields.PurposeBudgetNote; key != "" && info.PurposeBudgetNote != "" {
 		result[key] = info.PurposeBudgetNote
