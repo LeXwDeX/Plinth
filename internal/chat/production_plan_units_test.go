@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/budget"
@@ -221,5 +222,71 @@ func TestProposeProductionPlanQuotesTheLockedModel3D(t *testing.T) {
 	store, result = proposal(planCommand(`{"title":"未锁定",` + steps + `,"budgets":[{"unit":"legacy.credits","amount":55}]}`))
 	if result.Error != "" || store.plans[0].Steps[0].OfferingID != "" || store.plans[0].Steps[0].Estimate != budget.Legacy(40) {
 		t.Fatalf("without a lock the default still quotes the step: %+v %+v", result, store.plans)
+	}
+}
+
+// #243: an image-domain plan step quotes the workspace's image model and pins
+// it, because create_three_view runs that Offering; a step naming another 2D
+// model is refused as the tool would refuse it.
+func TestProductionPlanPinsTheWorkspaceImageModel(t *testing.T) {
+	offerings := []generation.Offering{
+		{ID: "provider/openai-image/image-to-image", ModelID: "image-model-a", Capability: "image-to-image",
+			Domain: generation.DomainImage, Enabled: true, Default: true, EstimatedCredits: 6},
+		{ID: "provider/alt-image/image-to-image", ModelID: "image-model-b", Capability: "image-to-image",
+			Domain: generation.DomainImage, Enabled: true, EstimatedCredits: 9},
+	}
+	store := &recordingProductionPlans{}
+	service := &chat.Service{}
+	service.SetProductionPlans(chat.ProductionPlanPolicy{
+		Budget: shippedBudgetSchema(t), Offerings: func() []generation.Offering { return offerings },
+		Store: store,
+	})
+	steps := `"steps":[{"capability":"image-to-image","purpose":"正面"},{"capability":"image-to-image","purpose":"侧面"}]`
+	command := planCommand(`{"title":"三视图",` + steps + `,"budgets":[{"unit":"legacy.credits","amount":40}]}`)
+	command.Options = chat.TurnOptions{CreativeDomain: "model-3d",
+		DomainModels: map[string]string{"image": "image-model-a"}}
+	result, err := service.ProposeProductionPlan(context.Background(), command)
+	if err != nil || result.Error != "" {
+		t.Fatalf("proposal = %+v err=%v", result, err)
+	}
+	if len(store.plans) != 1 || len(store.plans[0].Steps) != 2 {
+		t.Fatalf("stored plan = %+v", store.plans)
+	}
+	for _, step := range store.plans[0].Steps {
+		if step.OfferingID != "provider/openai-image/image-to-image" || step.Estimate != budget.Legacy(6) {
+			t.Fatalf("image step = %+v", step)
+		}
+	}
+
+	// A different workspace pick pins the other Offering.
+	command = planCommand(`{"title":"三视图",` + steps + `,"budgets":[{"unit":"legacy.credits","amount":40}]}`)
+	command.Options = chat.TurnOptions{CreativeDomain: "model-3d",
+		DomainModels: map[string]string{"image": "image-model-b"}}
+	store = &recordingProductionPlans{}
+	service2 := &chat.Service{}
+	service2.SetProductionPlans(chat.ProductionPlanPolicy{
+		Budget: shippedBudgetSchema(t), Offerings: func() []generation.Offering { return offerings }, Store: store,
+	})
+	if result, err := service2.ProposeProductionPlan(context.Background(), command); err != nil || result.Error != "" {
+		t.Fatalf("second proposal = %+v err=%v", result, err)
+	}
+	if len(store.plans) != 1 || store.plans[0].Steps[0].OfferingID != "provider/alt-image/image-to-image" {
+		t.Fatalf("second plan = %+v", store.plans)
+	}
+
+	// The Agent naming another 2D model while the workspace model is visible is
+	// refused instead of silently planning a step the continuation cannot run.
+	conflict := planCommand(`{"title":"三视图","steps":[{"capability":"image-to-image","model":"image-model-b","purpose":"正面"}],` +
+		`"budgets":[{"unit":"legacy.credits","amount":40}]}`)
+	conflict.Options = chat.TurnOptions{CreativeDomain: "model-3d",
+		DomainModels: map[string]string{"image": "image-model-a"}}
+	store = &recordingProductionPlans{}
+	service3 := &chat.Service{}
+	service3.SetProductionPlans(chat.ProductionPlanPolicy{
+		Budget: shippedBudgetSchema(t), Offerings: func() []generation.Offering { return offerings }, Store: store,
+	})
+	result, err = service3.ProposeProductionPlan(context.Background(), conflict)
+	if err != nil || result.Error == "" || !strings.Contains(result.Error, "workspace image model is image-model-a") || len(store.created) != 0 {
+		t.Fatalf("conflicting model = %+v err=%v stored=%d", result, err, len(store.created))
 	}
 }

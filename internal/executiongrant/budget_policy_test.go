@@ -124,6 +124,48 @@ func runBudgetPolicy(t *testing.T, capability string, budgets *fakeProductionBud
 	return service.ApproveByPolicyDecision(context.Background(), "owner-a", "request-a", "budget")
 }
 
+// #243: only an active plan in budget mode that explicitly reserves the
+// requested number of steps at the same Offering continues the series.
+func TestBudgetContinuationRequiresAnActivePlanThatCoversEveryView(t *testing.T) {
+	summary := budget.Summary{ID: "pb-1", State: budget.StateActive, Plan: budget.Plan{Steps: []budget.PlanStep{
+		{Capability: "image-to-image", OfferingID: "image-offering", Estimate: budget.Legacy(4)},
+		{Capability: "image-to-image", OfferingID: "image-offering", Estimate: budget.Legacy(4)},
+		{Capability: "image-to-image", OfferingID: "image-offering", Estimate: budget.Legacy(4)},
+	}}}
+	budgets := &fakeProductionBudgets{summary: summary, found: true}
+	service := Service{Budgets: budgets, Policy: budgetPolicy(), Modes: &modeReader{mode: "budget"}}
+	for _, tc := range []struct {
+		name     string
+		mode     string
+		offering string
+		count    int
+		found    bool
+		state    string
+		want     bool
+	}{
+		{"covered", "budget", "image-offering", 3, true, budget.StateActive, true},
+		{"too many views", "budget", "image-offering", 4, true, budget.StateActive, false},
+		{"another Offering", "budget", "other", 3, true, budget.StateActive, false},
+		{"auto mode", "auto", "image-offering", 3, true, budget.StateActive, false},
+		{"strict mode", "manual", "image-offering", 3, true, budget.StateActive, false},
+		{"no plan", "budget", "image-offering", 3, false, budget.StateActive, false},
+		{"exhausted plan", "budget", "image-offering", 3, true, budget.StateExhausted, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			budgets.found, budgets.summary.State = tc.found, tc.state
+			service.Modes = &modeReader{mode: tc.mode}
+			got, err := service.BudgetContinuation(context.Background(), "owner-a", "session-a", "image-to-image", tc.offering, tc.count)
+			if err != nil || got != tc.want {
+				t.Fatalf("continuation = %v, %v; want %v", got, err, tc.want)
+			}
+		})
+	}
+	service.Modes = nil
+	if got, err := service.BudgetContinuation(context.Background(), "owner-a", "session-a", "image-to-image", "image-offering", 3); err != nil || got {
+		t.Fatalf("without a mode reader = %v, %v", got, err)
+	}
+}
+
 // Branch 2: without an active plan, manual's rules decide. A step manual leaves
 // to a person reports no_plan so the Agent proposes a plan first; a step manual
 // approves itself still runs, under the budget mode's actor.

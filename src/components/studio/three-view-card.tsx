@@ -58,7 +58,7 @@ function SlotThumb({ src, status, label, onDropPicture }: {
         ? <img src={src} alt={label} onError={() => setFailed(true)} className="size-full object-cover" />
         : <ImageIcon aria-hidden className="size-5 text-muted-foreground" />}
       {working ? <span className="absolute inset-0 animate-pulse bg-primary/10" aria-hidden /> : null}
-      {status === 'failed' || status === 'denied' ? (
+      {status === 'failed' || status === 'denied' || status === 'rejected' ? (
         <span className="absolute inset-0 flex items-center justify-center bg-destructive/15"><TriangleAlert aria-hidden className="size-4 text-destructive" /></span>
       ) : null}
     </span>
@@ -178,7 +178,7 @@ export function ThreeViewCardView({
               <span
                 className={cn(
                   'flex items-center gap-1 text-[11px]',
-                  slot.status === 'failed' || slot.status === 'denied' ? 'text-destructive'
+                  slot.status === 'failed' || slot.status === 'denied' || slot.status === 'rejected' ? 'text-destructive'
                     : slot.status === 'succeeded' ? 'text-success' : 'text-muted-foreground',
                 )}
                 data-testid="three-view-status"

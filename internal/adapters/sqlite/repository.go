@@ -381,6 +381,9 @@ var sessionEvidenceDeletionsMigration string
 //go:embed migrations/0084_chat_session_vision_usage.sql
 var chatSessionVisionUsageMigration string
 
+//go:embed migrations/0085_chat_session_explicit_model_image.sql
+var chatSessionExplicitModelImageMigration string
+
 //go:embed migrations/0086_chat_session_visual_anchors.sql
 var chatSessionVisualAnchorsMigration string
 
@@ -460,9 +463,20 @@ func migrations() []migration {
 		migration{version: 82, name: "chat_branch_task_refs", sql: chatBranchTaskRefsMigration},
 		migration{version: 83, name: "session_evidence_deletions", sql: sessionEvidenceDeletionsMigration},
 		migration{version: 84, name: "chat_session_vision_usage", sql: chatSessionVisionUsageMigration},
-		// 0085 belongs to #239; #250 carries the next number so the two
-		// branches never register the same migration.
+		migration{version: 85, name: "chat_session_explicit_model_image", sql: chatSessionExplicitModelImageMigration},
 		migration{version: 86, name: "chat_session_visual_anchors", sql: chatSessionVisualAnchorsMigration})
+}
+
+// MigrationVersions is the version of every migration this binary embeds, in
+// apply order. There is no gap: 84 is the vision budget schema (#247), 85 the
+// explicit 2D model lock (#239) and 86 the visual anchors (#250).
+func MigrationVersions() []int {
+	all := migrations()
+	versions := make([]int, 0, len(all))
+	for _, migration := range all {
+		versions = append(versions, migration.version)
+	}
+	return versions
 }
 
 type migration struct {

@@ -1147,6 +1147,7 @@ func (orchestrator *Orchestrator) Process(
 	// Agent-named model would replace the person's pick.
 	command.Options.ProductionBrief = turn.Options.ProductionBrief
 	command.Options.ExplicitModel3D = turn.Options.ExplicitModel3D
+	command.Options.ExplicitModelImage = turn.Options.ExplicitModelImage
 	command.Options.StyleLock = turn.Options.StyleLock
 	command.Options.StyleLockSkipped = turn.Options.StyleLockSkipped
 	command.Options.VisualAnchors = cloneVisualAnchors(turn.Options.VisualAnchors)
@@ -1926,7 +1927,7 @@ func (orchestrator *Orchestrator) agentRequest(
 		// A craft brief comes before the scope block: it teaches how to work in
 		// a domain, while the scope only says which tools this turn offers. The
 		// selection and the framed session notes stay at the end of the prompt.
-		sections.add("craft", orchestrator.craftPrompt(registry, scope))
+		sections.add("craft", orchestrator.craftPrompt(registry, scope, options.CreativeDomain))
 		sections.add("scope", orchestrator.scopePrompt(registry, scope))
 	}
 	// The session's real approval mode follows the scope it must not be mixed

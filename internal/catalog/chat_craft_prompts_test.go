@@ -278,3 +278,50 @@ func TestCraftPromptDoesNotPromiseThatRemeshKeepsTextures(t *testing.T) {
 		}
 	}
 }
+
+// #239: the shipped 2D production craft covers exactly the 2D toolbox and is
+// gated by when_domain, like the 3D craft.
+func TestShippedImage2DProductionCraftCoversThe2DToolbox(t *testing.T) {
+	c, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := c.Application()
+	var craft *catalog.ChatAgentCraftPrompt
+	for index := range app.Chat.Agent.CraftPrompts {
+		if app.Chat.Agent.CraftPrompts[index].ID == "image2d_production" {
+			craft = &app.Chat.Agent.CraftPrompts[index]
+		}
+	}
+	if craft == nil {
+		t.Fatal("no image2d_production craft prompt")
+	}
+	if craft.WhenDomain != "image" || !strings.HasPrefix(craft.Text, "【2D 制作要领】") {
+		t.Fatalf("image2d_production = %#v", craft)
+	}
+	var declared []string
+	for _, tool := range app.Chat.Tools {
+		if tool.Execution.AgentScope == "2d" {
+			declared = append(declared, tool.Name)
+		}
+	}
+	for _, tool := range app.Chat.AgentTools {
+		if tool.Execution.AgentScope == "2d" {
+			declared = append(declared, tool.Name)
+		}
+	}
+	triggers := slices.Clone(craft.WhenToolsAny)
+	slices.Sort(declared)
+	slices.Sort(triggers)
+	if !slices.Equal(triggers, declared) {
+		t.Fatalf("image2d_production triggers = %v, 2d tools = %v", triggers, declared)
+	}
+	for _, want := range []string{"单主体", "参考图", "model_choice", "inspect_image"} {
+		if !strings.Contains(craft.Text, want) {
+			t.Fatalf("image2d_production omits %q", want)
+		}
+	}
+	if domain := app.Chat.Agent.CraftPrompts[0].WhenDomain; domain != "model-3d" {
+		t.Fatalf("model3d when_domain = %q", domain)
+	}
+}

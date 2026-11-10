@@ -90,7 +90,7 @@ func validateModel3DUsageShape(schema ChatSchema, capabilityPresentations []Capa
 	if !profiles[usage.DefaultProfile] {
 		return fmt.Errorf("model3d_usage.default_profile %q 不存在", usage.DefaultProfile)
 	}
-	if err := validateProductionBrief(usage.Brief); err != nil {
+	if err := validateProductionBrief(usage.Brief, len(schema.Image2DUsage.Profiles) > 0); err != nil {
 		return err
 	}
 	if err := validateBudgetLimits(usage); err != nil {
@@ -142,13 +142,14 @@ func validateBudgetLimits(usage ChatModel3DUsageSchema) error {
 // the Agent reads in the system context. Fields are validated by their type,
 // not by a fixed name list: the service locates the purpose and the triangle
 // override by type, so a renamed Schema field needs no code change (#103
-// review C3).
-func validateProductionBrief(brief ChatProductionBriefSchema) error {
+// review C3). imageProfilesDeclared makes the 2D image_profile field required
+// when application.chat.image2d_usage declares purposes (#239).
+func validateProductionBrief(brief ChatProductionBriefSchema, imageProfilesDeclared bool) error {
 	if len(brief.Fields) == 0 {
 		return fmt.Errorf("model3d_usage.brief.fields 不能为空")
 	}
 	declared := map[string]ChatProductionBriefField{}
-	profiles, integers := 0, 0
+	profiles, imageProfiles, integers := 0, 0, 0
 	for index, field := range brief.Fields {
 		if _, exists := declared[field.Name]; exists {
 			return fmt.Errorf("model3d_usage.brief.fields 中 %q 重复", field.Name)
@@ -160,6 +161,8 @@ func validateProductionBrief(brief ChatProductionBriefSchema) error {
 		switch field.Type {
 		case "profile":
 			profiles++
+		case "image_profile":
+			imageProfiles++
 		case "boolean":
 			// A boolean field has no other declaration.
 		case "integer":
@@ -183,23 +186,35 @@ func validateProductionBrief(brief ChatProductionBriefSchema) error {
 	if integers != 1 {
 		return fmt.Errorf("model3d_usage.brief.fields 必须声明且只声明一个 integer 字段")
 	}
+	// The service reads exactly one 2D purpose field when image2d_usage
+	// declares purposes (#239); a Catalog without them keeps the historical
+	// brief unchanged.
+	if imageProfilesDeclared && imageProfiles != 1 {
+		return fmt.Errorf("model3d_usage.brief.fields 声明了 2D 用途时必须且只声明一个 image_profile 字段")
+	}
+	if !imageProfilesDeclared && imageProfiles > 1 {
+		return fmt.Errorf("model3d_usage.brief.fields 最多只能声明一个 image_profile 字段")
+	}
 	templates := map[string]string{
-		"context_template":         brief.ContextTemplate,
-		"empty_text":               brief.EmptyText,
-		"field_template":           brief.FieldTemplate,
-		"flag_template":            brief.FlagTemplate,
-		"separator":                brief.Separator,
-		"purpose_template":         brief.PurposeTemplate,
-		"budget_template":          brief.BudgetTemplate,
-		"open_budget_template":     brief.OpenBudgetTemplate,
-		"override_budget_template": brief.OverrideBudgetTemplate,
-		"requirements_template":    brief.RequirementsTemplate,
-		"requirement_separator":    brief.RequirementSeparator,
-		"uv_text":                  brief.UVText,
-		"watertight_text":          brief.WatertightText,
-		"skin_text":                brief.SkinText,
-		"saved_message":            brief.SavedMessage,
-		"invalid_template":         brief.InvalidTemplate,
+		"context_template":            brief.ContextTemplate,
+		"empty_text":                  brief.EmptyText,
+		"field_template":              brief.FieldTemplate,
+		"flag_template":               brief.FlagTemplate,
+		"separator":                   brief.Separator,
+		"purpose_template":            brief.PurposeTemplate,
+		"budget_template":             brief.BudgetTemplate,
+		"open_budget_template":        brief.OpenBudgetTemplate,
+		"override_budget_template":    brief.OverrideBudgetTemplate,
+		"requirements_template":       brief.RequirementsTemplate,
+		"requirement_separator":       brief.RequirementSeparator,
+		"image_purpose_template":      brief.ImagePurposeTemplate,
+		"image_requirements_template": brief.ImageRequirementsTemplate,
+		"image_requirement_separator": brief.ImageRequirementSeparator,
+		"uv_text":                     brief.UVText,
+		"watertight_text":             brief.WatertightText,
+		"skin_text":                   brief.SkinText,
+		"saved_message":               brief.SavedMessage,
+		"invalid_template":            brief.InvalidTemplate,
 	}
 	for name, value := range templates {
 		if strings.TrimSpace(value) == "" {
@@ -207,15 +222,17 @@ func validateProductionBrief(brief ChatProductionBriefSchema) error {
 		}
 	}
 	placeholders := map[string][]string{
-		"context_template":         {"{brief}"},
-		"field_template":           {"{label}", "{value}"},
-		"flag_template":            {"{label}"},
-		"purpose_template":         {"{label}", "{budget}"},
-		"budget_template":          {"{minimum}", "{maximum}", "{requirements}"},
-		"open_budget_template":     {"{maximum}", "{requirements}"},
-		"override_budget_template": {"{value}", "{requirements}"},
-		"requirements_template":    {"{items}"},
-		"invalid_template":         {"{reason}"},
+		"context_template":            {"{brief}"},
+		"field_template":              {"{label}", "{value}"},
+		"flag_template":               {"{label}"},
+		"purpose_template":            {"{label}", "{budget}"},
+		"budget_template":             {"{minimum}", "{maximum}", "{requirements}"},
+		"open_budget_template":        {"{maximum}", "{requirements}"},
+		"override_budget_template":    {"{value}", "{requirements}"},
+		"requirements_template":       {"{items}"},
+		"image_purpose_template":      {"{label}", "{requirements}"},
+		"image_requirements_template": {"{items}"},
+		"invalid_template":            {"{reason}"},
 	}
 	for name, required := range placeholders {
 		for _, placeholder := range required {
@@ -289,6 +306,7 @@ func validateChoiceKinds(schema ChatSchema) error {
 	}
 	ids := make([]string, 0, len(schema.Choice.Kinds))
 	seen := map[string]bool{}
+	agentOptions := false
 	for index, kind := range schema.Choice.Kinds {
 		if strings.TrimSpace(kind.ID) == "" {
 			return fmt.Errorf("choice.kinds[%d].id 不能为空", index)
@@ -299,7 +317,9 @@ func validateChoiceKinds(schema ChatSchema) error {
 		seen[kind.ID] = true
 		ids = append(ids, kind.ID)
 		switch kind.OptionSource {
-		case "usage_profiles", "agent_proposal":
+		case "usage_profiles", "image_usage_profiles", "agent_proposal":
+		case "agent":
+			agentOptions = true
 		default:
 			return fmt.Errorf("choice.kinds[%d].option_source %q 未实现", index, kind.OptionSource)
 		}
@@ -342,6 +362,12 @@ func validateChoiceKinds(schema ChatSchema) error {
 	properties, ok := parameters["properties"].(map[string]any)
 	if !ok {
 		return fmt.Errorf("ask_choice 没有参数声明")
+	}
+	if agentOptions {
+		options, declared := properties["options"].(map[string]any)
+		if !declared || options["type"] != "array" {
+			return fmt.Errorf("choice.kinds 含 option_source=agent 时必须声明 ask_choice.options 数组参数")
+		}
 	}
 	kindProperty, ok := properties["kind"].(map[string]any)
 	if !ok || kindProperty["type"] != "string" {

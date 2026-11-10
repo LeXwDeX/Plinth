@@ -103,8 +103,8 @@ func TestOpenMigratedSchemaMatchesFreshOpen(t *testing.T) {
 	}
 
 	freshLedger := readLedger(t, freshPath)
-	if len(freshLedger) != sqlite.MigrationCount() {
-		t.Fatalf("fresh ledger rows = %d, registered migrations = %d", len(freshLedger), sqlite.MigrationCount())
+	if len(freshLedger) != len(sqlite.MigrationVersions()) {
+		t.Fatalf("fresh ledger rows = %d, embedded migrations = %d", len(freshLedger), len(sqlite.MigrationVersions()))
 	}
 	if copiedLedger := readLedger(t, copiedPath); !reflect.DeepEqual(copiedLedger, freshLedger) {
 		t.Fatalf("copied ledger = %#v, fresh ledger = %#v", copiedLedger, freshLedger)

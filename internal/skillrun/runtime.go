@@ -51,6 +51,15 @@ func (r *Runtime) List(ctx context.Context, owner generation.OwnerID, session, a
 func (r *Runtime) ResolveAgentStep(ctx context.Context, owner generation.OwnerID,
 	session, runKey, turnID string,
 ) (Run, Execution, executiongrant.Grant, error) {
+	return r.ResolveAgentStepAt(ctx, owner, session, runKey, turnID, "")
+}
+
+// ResolveAgentStepAt is ResolveAgentStep for a call whose Task may belong to
+// any step of the run, not only the first (#243). An empty taskID keeps the
+// first-step behavior; a task no step of the run binds is ErrMissing.
+func (r *Runtime) ResolveAgentStepAt(ctx context.Context, owner generation.OwnerID,
+	session, runKey, turnID, taskID string,
+) (Run, Execution, executiongrant.Grant, error) {
 	if !validID(session) || !validID(turnID) {
 		return Run{}, Execution{}, executiongrant.Grant{}, ErrInvalid
 	}
@@ -61,7 +70,20 @@ func (r *Runtime) ResolveAgentStep(ctx context.Context, owner generation.OwnerID
 	if run.OwnerID != owner || run.SessionID != session || run.IdempotencyKey != runKey || len(run.Steps) == 0 {
 		return Run{}, Execution{}, executiongrant.Grant{}, ErrConflict
 	}
-	execution, err := r.Runs.ResolveExecution(ctx, owner, run.ID, run.Steps[0].Spec.Key)
+	stepKey := run.Steps[0].Spec.Key
+	if taskID != "" {
+		found := false
+		for _, step := range run.Steps {
+			if string(step.TaskID) == taskID {
+				stepKey, found = step.Spec.Key, true
+				break
+			}
+		}
+		if !found {
+			return Run{}, Execution{}, executiongrant.Grant{}, ErrMissing
+		}
+	}
+	execution, err := r.Runs.ResolveExecution(ctx, owner, run.ID, stepKey)
 	if err != nil {
 		return Run{}, Execution{}, executiongrant.Grant{}, err
 	}
@@ -97,6 +119,40 @@ func (r *Runtime) ResolveAgentStep(ctx context.Context, owner generation.OwnerID
 		return Run{}, Execution{}, executiongrant.Grant{}, ErrConflict
 	}
 	return run, execution, grant, nil
+}
+
+// ResolveAgentCurrentStep finds the run step whose Task is still in flight, so
+// stopping a turn cancels the view the Agent is actually waiting for rather
+// than only the first one (#243). When nothing is in flight it falls back to
+// the first step, which is what Stop used before continuations existed.
+func (r *Runtime) ResolveAgentCurrentStep(ctx context.Context, owner generation.OwnerID,
+	session, runKey, turnID string,
+) (Run, Execution, executiongrant.Grant, error) {
+	if !validID(session) || !validID(turnID) {
+		return Run{}, Execution{}, executiongrant.Grant{}, ErrInvalid
+	}
+	run, err := r.Runs.GetByIdempotency(ctx, owner, runKey)
+	if err != nil {
+		return Run{}, Execution{}, executiongrant.Grant{}, err
+	}
+	if run.OwnerID != owner || run.SessionID != session || run.IdempotencyKey != runKey {
+		return Run{}, Execution{}, executiongrant.Grant{}, ErrConflict
+	}
+	for _, step := range run.Steps {
+		if step.TaskID == "" {
+			continue
+		}
+		task, err := r.Generation.Get(ctx, owner, step.TaskID)
+		if err != nil {
+			return Run{}, Execution{}, executiongrant.Grant{}, err
+		}
+		switch task.State {
+		case generation.TaskSucceeded, generation.TaskFailed, generation.TaskCanceled:
+			continue
+		}
+		return r.ResolveAgentStepAt(ctx, owner, session, runKey, turnID, string(step.TaskID))
+	}
+	return r.ResolveAgentStep(ctx, owner, session, runKey, turnID)
 }
 
 // PrepareStep persists the frozen Generation input before any consent request.
@@ -207,7 +263,7 @@ func (r *Runtime) RequestGrant(ctx context.Context, principal executiongrant.Pri
 	if principal.Source != executiongrant.HumanBrowser || principal.OwnerID == "" || principal.ActorID == "" {
 		return Run{}, executiongrant.Grant{}, ErrInvalid
 	}
-	return r.requestGrant(ctx, principal, runID, stepKey, "")
+	return r.requestGrant(ctx, principal, runID, stepKey, "", false)
 }
 
 // RequestAgentGrant records a pending proposal from the planner. The Agent
@@ -219,11 +275,25 @@ func (r *Runtime) RequestAgentGrant(ctx context.Context, owner generation.OwnerI
 		return Run{}, executiongrant.Grant{}, ErrInvalid
 	}
 	return r.requestGrant(ctx, executiongrant.Principal{OwnerID: string(owner), ActorID: "chat-agent",
-		Source: executiongrant.AgentPending}, runID, stepKey, assistantMessageID)
+		Source: executiongrant.AgentPending}, runID, stepKey, assistantMessageID, false)
+}
+
+// RequestAgentGrantWithBudget is RequestAgentGrant for an Agent step a budget
+// continuation may run (#243): the grant records its budget eligibility, so
+// session budget policy can approve it from the active plan. The Agent still
+// never approves anything itself; a grant outside the plan stays pending.
+func (r *Runtime) RequestAgentGrantWithBudget(ctx context.Context, owner generation.OwnerID, runID, stepKey,
+	assistantMessageID string) (Run, executiongrant.Grant, error) {
+	if owner == "" || !validID(assistantMessageID) {
+		return Run{}, executiongrant.Grant{}, ErrInvalid
+	}
+	return r.requestGrant(ctx, executiongrant.Principal{OwnerID: string(owner), ActorID: "chat-agent",
+		Source: executiongrant.AgentPending}, runID, stepKey, assistantMessageID, true)
 }
 
 func (r *Runtime) requestGrant(ctx context.Context, principal executiongrant.Principal, runID, stepKey,
-	triggerTurnID string) (Run, executiongrant.Grant, error) {
+	triggerTurnID string, budgetEligible bool,
+) (Run, executiongrant.Grant, error) {
 	owner := generation.OwnerID(principal.OwnerID)
 	execution, err := r.Runs.ResolveExecution(ctx, owner, runID, stepKey)
 	if err != nil {
@@ -257,7 +327,7 @@ func (r *Runtime) requestGrant(ctx context.Context, principal executiongrant.Pri
 		PreparedInputHash: execution.Step.PreparedInputHash,
 		IdempotencyKey:    execution.IdempotencyKey,
 		OperationID:       execution.OperationID, PlanStepID: execution.PlanStepID,
-		TriggerTurnID: triggerTurnID,
+		TriggerTurnID: triggerTurnID, BudgetEligible: budgetEligible,
 	})
 	if err != nil {
 		return Run{}, executiongrant.Grant{}, err
@@ -411,6 +481,21 @@ func (r *Runtime) RestartStep(ctx context.Context, owner generation.OwnerID, run
 	}
 	command := RestartCommand{OwnerID: owner, RunID: runID, StepKey: stepKey, ExpectedAttempt: expectedAttempt}
 	switch {
+	case step.Review == Rejected:
+		// A finished picture the automatic consistency check rejected is made
+		// again as the next attempt (#243). Its Task succeeded, so the failure
+		// branches below do not apply.
+		if step.TaskID == "" || step.Phase != OutputReady {
+			return Run{}, ErrConflict
+		}
+		task, err := r.Generation.Get(ctx, owner, step.TaskID)
+		if err != nil {
+			return Run{}, err
+		}
+		if task.SessionID != run.SessionID || task.State != generation.TaskSucceeded {
+			return Run{}, ErrConflict
+		}
+		command.RejectedReview = true
 	case step.TaskID != "":
 		task, err := r.Generation.Get(ctx, owner, step.TaskID)
 		if err != nil {

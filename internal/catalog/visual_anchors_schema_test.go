@@ -122,7 +122,11 @@ func TestVisualAnchorsDeclarationIsValidated(t *testing.T) {
 		{"no confirmation card", func(app *catalog.ApplicationSchema) {
 			app.Chat.Choice.Kinds = withoutChoiceKind(app.Chat.Choice.Kinds, "visual_anchor")
 			ask := agentTool(app, "ask_choice")
-			ask.Parameters = replaceEnum(t, ask.Parameters, "kind", []string{"usage_profile"})
+			values := make([]string, 0, len(app.Chat.Choice.Kinds))
+			for _, kind := range app.Chat.Choice.Kinds {
+				values = append(values, kind.ID)
+			}
+			ask.Parameters = replaceEnum(t, ask.Parameters, "kind", values)
 		}, "必须声明 visual_anchor 确认卡"},
 		{"no trimmed message", func(app *catalog.ApplicationSchema) {
 			app.Chat.Presentation.Messages.ReferencePriorityTrimmed = ""

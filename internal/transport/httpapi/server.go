@@ -607,6 +607,10 @@ func (s *Server) routes() {
 		s.mux.HandleFunc("GET "+routes.ChatSessionModel3D, s.withIdentity(s.getChatSessionExplicitModel3D))
 		s.mux.HandleFunc("PUT "+routes.ChatSessionModel3D, s.withIdentity(s.putChatSessionExplicitModel3D))
 	}
+	if routes.ChatSessionModel2D != "" {
+		s.mux.HandleFunc("GET "+routes.ChatSessionModel2D, s.withIdentity(s.getChatSessionExplicitModelImage))
+		s.mux.HandleFunc("PUT "+routes.ChatSessionModel2D, s.withIdentity(s.putChatSessionExplicitModelImage))
+	}
 	if s.lineage != nil && routes.ChatSessionLineage != "" {
 		s.mux.HandleFunc("GET "+routes.ChatSessionLineage, s.withIdentity(s.getChatSessionLineage))
 	}

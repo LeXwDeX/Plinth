@@ -568,8 +568,12 @@ func (executor *Executor) Execute(
 			result.NoSubmission = true
 			return result, nil
 		}
-		views, _ := json.Marshal(multiview.Views)
-		arguments[executor.chat.ThreeView.Multiview.ViewsArgument] = views
+		if declaresReferenceViews(offering) {
+			// An order-only Offering has no view-label parameter: the pictures
+			// already arrive in the declared view order (#243).
+			views, _ := json.Marshal(multiview.Views)
+			arguments[executor.chat.ThreeView.Multiview.ViewsArgument] = views
+		}
 		groups = assembleReferenceGroups(identityReferenceURLs, styleReferenceURLs, multiview.URLs)
 		referenceURLs = groups.URLs
 		identityReferenceCount, styleReferenceCount, turnReferenceCount = groups.Identity, groups.Style, groups.Turn

@@ -40,12 +40,14 @@ same HTTP API the browser uses:
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
 (NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, p2, agent, agent-background,
-agent-quality, image-self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, faults;
+agent-quality, image-self-check, image-purpose, offering-knowledge, work-ledger, vision-budget, visual-anchors, faults;
 "agent" runs both agent scenarios, "hyper3d-agent" the Hyper3D chain alone,
 "p2" the Tripo P2 quote/chain, "agent-background" the batched wait that keeps both Tasks running,
+"image-purpose" the #239 2D purpose card, brief, purpose-driven model and 2D lock,
 "offering-knowledge" the #249 knowledge projection, derived model list, purpose coverage,
 over-limit refusal and final_prompt report,
 "work-ledger" the #248 frozen prompts, compaction, style anchor and self-check leftovers,
+"vision-budget" the #247 image detail, contact sheet and vision token accounting,
 "visual-anchors" the #250 system-prompt visibility, confirmation card, priority trim and retexture style reference)
 Needs `go`. Exit 0 = every selected check passed.
 
@@ -1024,6 +1026,258 @@ def session_tasks(api, session):
     return body.get("tasks") or body.get("data") or []
 
 
+THREE_VIEW_IMAGE = IMAGE_OFFERINGS["openai"][1]
+
+
+def _three_view_groups(api, session):
+    body = api.json("GET", f"/api/v1/chat/sessions/{session}/three-views")[1]
+    return body.get("items") or []
+
+
+def _three_view_group(api, session):
+    groups = _three_view_groups(api, session)
+    return groups[0] if groups else None
+
+
+def _wait_three_view(api, session, seconds=120):
+    """Waits for the group's required views to finish (accepted or not)."""
+    end = time.time() + seconds
+    group = None
+    while time.time() < end:
+        group = _three_view_group(api, session)
+        if group:
+            slots = {slot.get("key"): slot for slot in group.get("slots") or []}
+            required = [slot for slot in slots.values() if not slot.get("optional")]
+            if required and all(slot.get("status") in ("succeeded", "failed", "rejected", "denied", "canceled")
+                                for slot in required):
+                return group
+        time.sleep(0.3)
+    return group
+
+
+def _prepared_inputs(work, stack, session):
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+        rows = db.execute("SELECT payload_json FROM generation_prepared_inputs WHERE session_id=?",
+                          (session,)).fetchall()
+        db.close()
+    except sqlite3.Error:
+        return []
+    parsed = []
+    for (payload,) in rows:
+        try:
+            parsed.append(json.loads(payload))
+        except ValueError:
+            continue
+    return parsed
+
+
+def _prepared_reference_assets(payload):
+    normalized = payload.get("normalized_input")
+    if isinstance(normalized, str):
+        try:
+            normalized = json.loads(normalized)
+        except ValueError:
+            return []
+    return normalized.get("reference_assets") or [] if isinstance(normalized, dict) else []
+
+
+def _send_chat(api, session, body, seconds=45):
+    """Sends one chat message, retrying while a continuation turn still owns it."""
+    end = time.time() + seconds
+    status, payload = 0, {}
+    while time.time() < end:
+        status, payload = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+        if status != 409:
+            return status, payload
+        time.sleep(0.5)
+    return status, payload
+
+
+def scenario_three_view(work, api, offerings):
+    """#243: an approved budget finishes front, left and back without a click,
+    feeds the front output into the later views and submits a P2 multiview 3D
+    step; manual mode starts only the front view until the person asks for the
+    next one."""
+    picture = upload_asset(api, "reference.png", make_png(), "image/png")
+    if not picture:
+        record("three-view: upload the reference picture", False, "upload refused")
+        return
+    picture_url = f"/api/v1/assets/{picture}"
+    plan = {
+        "title": "三视图链路",
+        "steps": [
+            {"capability": "image-to-image", "purpose": "三视图正面"},
+            {"capability": "image-to-image", "purpose": "三视图左侧"},
+            {"capability": "image-to-image", "purpose": "三视图背面"},
+            {"capability": "image-to-3d", "model": TRIPO_P2_MULTIVIEW_TO_3D, "purpose": "多视图生成 3D"},
+        ],
+        "budgets": [{"unit": "legacy.credits", "amount": 100}, {"unit": "tripo.credit", "amount": 200}],
+    }
+    session = new_session(api)
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
+    if status != 200:
+        record("three-view: budget approval mode", False, f"PUT {status}")
+        return
+    marker = "[[fake:tool:propose_production_plan " + json.dumps(plan, ensure_ascii=False, separators=(",", ":")) + "]]"
+    status, _ = _send_chat(api, session, {"content": "按计划做三视图 " + marker,
+                                           "creative_domain": "image", "ai_model": THREE_VIEW_IMAGE,
+                                           "image_urls": [picture_url]})
+    if status not in (200, 201, 202):
+        record("three-view: propose the plan", False, f"send {status}")
+        return
+    budget_id, why = "", ""
+    end = time.time() + 30
+    while time.time() < end:
+        pending = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items") or []
+        plan_card = next((item for item in pending if item.get("kind") == "plan"), None)
+        if plan_card:
+            budget_id = plan_card.get("request_id") or ""
+            break
+        time.sleep(0.4)
+    if not budget_id:
+        record("three-view: budget card appears", False, "no plan card")
+        return
+    status, approved = api.json("PUT", f"/api/v1/chat/sessions/{session}/budgets/{budget_id}",
+                                decision_body(api, "approve"))
+    if status != 200 or approved.get("state") != "active":
+        record("three-view: approve the plan", False, f"PUT {status} {approved}")
+        return
+    record("three-view: plan approved and active", True, f"budget {budget_id} state {approved.get('state')}")
+
+    views = '[[fake:tool:create_three_view {"reference_image_indices":[1],"subject_type":"humanoid"}]]'
+    status, _ = _send_chat(api, session, {"content": "生成三视图 " + views, "creative_domain": "image",
+                                           "ai_model": THREE_VIEW_IMAGE, "image_urls": [picture_url]})
+    if status not in (200, 201, 202):
+        record("three-view: start the views", False, f"send {status}")
+        return
+    group = _wait_three_view(api, session)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    front = slots.get("front") or {}
+    record("three-view: the budget finishes front, left and back without a click",
+           bool(group) and group.get("complete") is True
+           and slots.get("front", {}).get("status") == "succeeded"
+           and slots.get("left", {}).get("status") == "succeeded"
+           and slots.get("back", {}).get("status") == "succeeded"
+           and slots.get("right", {}).get("status") == "not_started",
+           f"complete={group.get('complete') if group else None} slots={ {k: v.get('status') for k, v in slots.items()} }")
+    image_tasks = [task for task in session_tasks(api, session)
+                   if task.get("capability") == "image-to-image" and task.get("state") != "CANCELED"]
+    record("three-view: exactly three image tasks run, the optional right view does not",
+           len(image_tasks) == 3, f"image tasks {[t.get('state') for t in image_tasks]}")
+    pending = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items") or []
+    record("three-view: no approval card is left pending", len(pending) == 0,
+           f"pending {[(item.get('kind'), item.get('status')) for item in pending]}")
+    front_asset = front.get("output_asset_id") or ""
+    prepared = _prepared_inputs(work, "main", session)
+    fed_front = {}
+    for needle, key in (("clean left view", "left"), ("clean back view", "back")):
+        match = next((item for item in prepared
+                      if needle in json.dumps(item.get("normalized_input"), ensure_ascii=False)), None)
+        assets = _prepared_reference_assets(match) if match else []
+        fed_front[key] = bool(front_asset) and bool(assets) and assets[0] == front_asset
+    record("three-view: left and back frozen inputs use the front output as their source",
+           fed_front.get("left") and fed_front.get("back") and bool(front_asset),
+           f"front asset {front_asset or 'none'}, left/back fed front {fed_front}")
+    run_id = (group or {}).get("run_id") or ""
+
+    # The accepted group feeds the multiview 3D step of the same plan.
+    before = {task.get("id") for task in session_tasks(api, session)}
+    submit = ('[[fake:tool:create_model_3d_from_views {"three_view_group":"' + run_id
+              + '","model":"tripo-p2-multiview"}]]')
+    status, _ = _send_chat(api, session, {"content": "用三视图生成 3D " + submit,
+                                           "creative_domain": "model-3d", "ai_model": TRIPO_P2_MULTIVIEW_TO_3D,
+                                           "domainModels": {"model-3d": TRIPO_P2_MULTIVIEW_TO_3D}})
+    if status not in (200, 201, 202):
+        record("three-view: submit the multiview 3D step", False, f"send {status}")
+        return
+    task = None
+    end = time.time() + 60
+    while time.time() < end and not task:
+        for candidate in session_tasks(api, session):
+            if candidate.get("id") in before or candidate.get("capability") != "image-to-3d":
+                continue
+            task = candidate
+            break
+        time.sleep(0.3)
+    if task:
+        task = wait_task(api, task.get("id"))
+    record("three-view: the group submits a P2 multiview 3D task",
+           bool(task) and task.get("state") == "SUCCEEDED" and task.get("offering_id") == TRIPO_P2_MULTIVIEW_TO_3D,
+           f"task {task.get('id') if task else None} state {task.get('state') if task else None} "
+           f"offering {task.get('offering_id') if task else None}")
+
+    # Manual (strict) mode: only the front view starts by itself; the person
+    # starts the left view, whose frozen input names the front output.
+    strict = new_session(api)
+    api.json("PUT", f"/api/v1/chat/sessions/{strict}/approval", {"approvalMode": "manual"})
+    status, _ = _send_chat(api, strict, {"content": "生成三视图 " + views, "creative_domain": "image",
+                                          "ai_model": THREE_VIEW_IMAGE, "image_urls": [picture_url]})
+    if status not in (200, 201, 202):
+        record("three-view strict: start the front view", False, f"send {status}")
+        return
+    group = None
+    end = time.time() + 60
+    while time.time() < end:
+        group = _three_view_group(api, strict)
+        slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+        if slots.get("front", {}).get("task_id"):
+            break
+        time.sleep(0.3)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    front = slots.get("front") or {}
+    record("three-view strict: only the front view starts by itself",
+           bool(group) and front.get("status") in ("succeeded", "running") and
+           slots.get("left", {}).get("status") == "not_started" and
+           len([t for t in session_tasks(api, strict)
+                if t.get("capability") == "image-to-image" and t.get("state") != "CANCELED"]) == 1,
+           f"front {front.get('status')}, left {slots.get('left', {}).get('status')}")
+    if front.get("task_id"):
+        wait_task(api, front.get("task_id"))
+    else:
+        record("three-view strict: front task exists", False, "no front task")
+        return
+    # Strict mode has no server-side continuation: even after the front view
+    # finished, left and back stay not started until the person clicks.
+    group = _three_view_group(api, strict)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    strict_tasks = [t for t in session_tasks(api, strict)
+                    if t.get("capability") == "image-to-image" and t.get("state") != "CANCELED"]
+    record("three-view strict: the finished front does not start the next view",
+           bool(group) and slots.get("left", {}).get("status") == "not_started" and
+           slots.get("back", {}).get("status") == "not_started" and len(strict_tasks) == 1,
+           f"front {slots.get('front', {}).get('status')}, left {slots.get('left', {}).get('status')}, "
+           f"back {slots.get('back', {}).get('status')}, tasks {[t.get('state') for t in strict_tasks]}")
+    view_route = f"/api/v1/chat/sessions/{strict}/three-views/{(group or {}).get('run_id')}/views/left"
+    status, body = api.json("POST", view_route, {"action": "start", "attempt": 0})
+    record("three-view strict: the person starts the left view", status == 200 and
+           next((slot.get("status") for slot in body.get("group", {}).get("slots", [])
+                 if slot.get("key") == "left"), "") in ("starting", "running", "succeeded"),
+           f"POST {status}")
+    end = time.time() + 90
+    group = None
+    while time.time() < end:
+        group = _three_view_group(api, strict)
+        slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+        if slots.get("left", {}).get("status") in ("succeeded", "failed", "rejected", "denied", "canceled"):
+            break
+        time.sleep(0.3)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    front, left = slots.get("front") or {}, slots.get("left") or {}
+    record("three-view strict: the clicked left view succeeds and back never starts",
+           left.get("status") == "succeeded" and slots.get("back", {}).get("status") == "not_started",
+           f"left {left.get('status')}, back {slots.get('back', {}).get('status')}")
+    prepared = _prepared_inputs(work, "main", strict)
+    match = next((item for item in prepared
+                  if "clean left view" in json.dumps(item.get("normalized_input"), ensure_ascii=False)), None)
+    assets = _prepared_reference_assets(match) if match else []
+    front_asset = (slots.get("front") or {}).get("output_asset_id") or ""
+    record("three-view strict: the frozen left input contains the front output",
+           bool(front_asset) and bool(assets) and assets[0] == front_asset,
+           f"front {front_asset or 'none'} left source {assets[:1]}")
+
+
 def scenario_agent_background(api, offerings):
     """#189: one assistant completion submits a generation step and the
     three-view SkillRun. With the session in auto mode both submit in that one
@@ -1183,6 +1437,200 @@ def refetch_delivers(api, task, offerings, offering):
         return False, f"refetch task {fresh.get('state')} {json.dumps(fresh.get('failure'), ensure_ascii=False)}"
     problems, count = check_delivery(api, fresh, offering)
     return not problems, f"refetch task SUCCEEDED, {count} assets verified" if not problems else "; ".join(problems)
+
+
+def _choice_cards(api, session):
+    status, body = api.json("GET", f"/api/v1/chat/sessions/{session}/choices")
+    if status != 200:
+        return []
+    return body.get("choices") or body.get("items") or []
+
+
+def _latest_prepared_input(work, stack, session):
+    """The session's newest frozen prepared input, or an empty object."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT payload_json FROM generation_prepared_inputs "
+                         "WHERE session_id=? ORDER BY created_at DESC, id DESC LIMIT 1", (session,)).fetchone()
+        db.close()
+    except sqlite3.Error:
+        return {}
+    try:
+        return json.loads(row["payload_json"]) if row and row["payload_json"] else {}
+    except ValueError:
+        return {}
+
+
+def _image_message(api, session, content, domain="image", image_urls=None):
+    """Send one turn with a fake-LLM tool marker; wait for its final reply."""
+    before = assistant_reply_count(api, session)
+    body = {"content": content, "creative_domain": domain}
+    if image_urls:
+        body["image_urls"] = image_urls
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+    if status not in (200, 201, 202):
+        return False
+    end = time.time() + 45
+    while time.time() < end:
+        if assistant_reply_count(api, session) > before:
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def scenario_image_purpose(api, offerings, work):
+    """#239: 2D purpose card, brief, purpose-driven model and parameters, the
+    explicit 2D lock, and the 3D input checklist, all through the fake stack."""
+    session = new_session(api)
+    api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "manual"})
+
+    # (a) a new 2D drawing without a brief opens the 2D purpose card, whose
+    # options are exactly the declared image2d_usage profiles.
+    card = '[[fake:tool:ask_choice {"kind":"image_usage_profile"}]]'
+    if not _image_message(api, session, "画一张游戏角色立绘 " + card):
+        record("#239 2D purpose card", False, "turn did not finish")
+    else:
+        cards = [item for item in _choice_cards(api, session) if item.get("kind") == "image_usage_profile"]
+        _, schema = api.json("GET", "/api/v1/schema")
+        schema = schema.get("schema", schema) if isinstance(schema, dict) else {}
+        declared = [profile.get("id") for profile in
+                    ((schema.get("chat") or {}).get("image2d_usage") or {}).get("profiles") or []]
+        options = [option.get("id") for option in (cards[-1].get("options") or [])] if cards else []
+        record("#239 2D purpose card", bool(cards) and options == declared,
+               f"kind={cards[-1].get('kind') if cards else None} options={options} declared={declared}")
+
+    # (b) the answer writes the 2D purpose into the brief.
+    if not _image_message(api, session, "用途是角色立绘 [[fake:tool:update_production_brief "
+                                        '{"image_use":"illustration","image_transparent":false}]]'):
+        record("#239 2D brief write", False, "turn did not finish")
+    else:
+        status, body = api.json("GET", f"/api/v1/chat/sessions/{session}/brief")
+        brief = (body or {}).get("brief") or {}
+        record("#239 2D brief write", status == 200 and brief.get("image_use") == "illustration",
+               f"status={status} brief={brief}")
+
+    # (c) refine_image follows the purpose: the recommended model and its
+    # overrides are frozen into the input, and the result names model_choice.
+    draw = ('[[fake:tool:refine_image {"prompt":"full-body cyberpunk female assassin, clean digital illustration, '
+            'confident pose, transparent background, no text, no watermark"}]]')
+    task = {}
+    before_tasks = {item.get("id") for item in session_tasks(api, session)}
+    if not _image_message(api, session, "开始画 " + draw):
+        record("#239 2D purpose-driven generation", False, "turn did not finish")
+    else:
+        deadline = time.time() + 90
+        while time.time() < deadline:
+            fresh = [item for item in session_tasks(api, session) if item.get("id") not in before_tasks]
+            if fresh:
+                task = wait_task(api, fresh[0]["id"], 90)
+                break
+            time.sleep(0.5)
+        task = task or {}
+        prepared = _latest_prepared_input(work, "main", session)
+        normalized = prepared.get("normalized_input") or {}
+        used = task.get("offering_id")
+        contents = _checkpoint_completed_contents(work, "main", session)
+        reported = any('"model_choice"' in content and '"profile"' in content for content in contents)
+        ok = (task.get("state") == "SUCCEEDED" and used == "meshy/nano-banana-pro/text-to-image"
+              and normalized.get("aspect_ratio") == "3:4"
+              and (prepared.get("model_choice") or {}).get("source") == "profile"
+              and (prepared.get("model_choice") or {}).get("profile") == "illustration"
+              and reported)
+        record("#239 2D purpose-driven generation", ok,
+               f"offering={used} state={task.get('state')} aspect_ratio={normalized.get('aspect_ratio')} "
+               f"model_choice={prepared.get('model_choice')} result_model_choice={reported}")
+
+    # (d) the explicit 2D lock wins: a different named model is refused before
+    # submission, and a later call without a model runs the locked one.
+    lock = api.json("PUT", f"/api/v1/chat/sessions/{session}/model2d", {"explicit_model_2d": "nano-banana-2"})
+    record("#239 2D lock writes", lock[0] == 200 and "nano-banana-2" in json.dumps(lock[1]),
+           f"status={lock[0]} body={lock[1]}")
+    before_tasks = {item.get("id") for item in session_tasks(api, session)}
+    conflict = ('[[fake:tool:refine_image {"model":"nano-banana-pro","prompt":"a red cube"}]]')
+    _image_message(api, session, "用另一个模型画 " + conflict)
+    no_task = {item.get("id") for item in session_tasks(api, session)} == before_tasks
+    contents = _checkpoint_completed_contents(work, "main", session)
+    refused = any("与用户在本会话明确选定的模型" in content for content in contents)
+    record("#239 shared model conflict is not silently overridden", no_task and refused,
+           f"new_tasks={len({item.get('id') for item in session_tasks(api, session)} - before_tasks)} refusal={refused}")
+    locked = ('[[fake:tool:refine_image {"prompt":"a red cube"}]]')
+    before_tasks = {item.get("id") for item in session_tasks(api, session)}
+    if not _image_message(api, session, "按锁定的模型画 " + locked):
+        record("#239 locked 2D model runs", False, "turn did not finish")
+    else:
+        task = {}
+        deadline = time.time() + 90
+        while time.time() < deadline:
+            fresh = [item for item in session_tasks(api, session) if item.get("id") not in before_tasks]
+            if fresh:
+                task = wait_task(api, fresh[0]["id"], 90)
+                break
+            time.sleep(0.5)
+        record("#239 locked 2D model runs", task.get("offering_id") == "meshy/nano-banana-2/text-to-image",
+               f"offering={task.get('offering_id')} state={task.get('state')}")
+
+    # (e) a single-subject, solid-background picture passes the 3d_input
+    # checklist through inspect_image.
+    white, red = (250, 250, 250), (200, 30, 30)
+    status, uploaded = api.upload("/api/v1/assets", "file", "3d-input.png",
+                                  make_picture(128, 128, white, [((40, 32, 88, 96), red)]), "image/png")
+    asset_id = uploaded.get("id") if status in (200, 201) else None
+    if not asset_id:
+        record("#239 3D input picture upload", False, f"HTTP {status}")
+        return
+    picture_url = uploaded.get("url") or f"/api/v1/assets/{asset_id}"
+    _image_message(api, session, "这张图作为 3D 输入素材", image_urls=[picture_url])
+    handle = ""
+    status, body = api.json("GET", f"/api/chat/sessions/{session}/messages")
+    for message in (body if isinstance(body, list) else body.get("messages", [])):
+        for attachment in message.get("attachments") or []:
+            if attachment.get("kind") == "image" and attachment.get("handle"):
+                handle = attachment["handle"]
+    if not handle:
+        record("#239 3D input picture handle", False, "no image handle")
+        return
+    inspect = '[[fake:tool:inspect_image {"image":"' + handle + '","checklist":"3d_input"}]]'
+    if not _image_message(api, session, "检查 3D 输入 " + inspect):
+        record("#239 3D input checklist", False, "turn did not finish")
+        return
+    summaries = _image_self_check_summaries(api, session)
+    summary = next((item for item in reversed(summaries) if item.get("handle") == handle), None)
+    failed = (summary or {}).get("checks", {}).get("failed")
+    record("#239 3D input checklist", summary is not None and failed == 0,
+           f"handle={handle} failed={failed} summary={summary}")
+
+    # (f) without image_use the default 2D purpose applies: an empty brief still
+    # gets the default recommendation and its frame override (#239 review).
+    default_session = new_session(api)
+    api.json("PUT", f"/api/v1/chat/sessions/{default_session}/approval", {"approvalMode": "auto"})
+    default_draw = ('[[fake:tool:refine_image {"prompt":"a lone lighthouse on a cliff at dusk, '
+                    'clean digital concept art, no text, no watermark"}]]')
+    before_tasks = {item.get("id") for item in session_tasks(api, default_session)}
+    if not _image_message(api, default_session, "随便画一张概念图 " + default_draw):
+        record("#239 default 2D purpose applies", False, "turn did not finish")
+    else:
+        task = {}
+        deadline = time.time() + 90
+        while time.time() < deadline:
+            fresh = [item for item in session_tasks(api, default_session) if item.get("id") not in before_tasks]
+            if fresh:
+                task = wait_task(api, fresh[0]["id"], 90)
+                break
+            time.sleep(0.5)
+        task = task or {}
+        prepared = _latest_prepared_input(work, "main", default_session)
+        normalized = prepared.get("normalized_input") or {}
+        model_choice = prepared.get("model_choice") or {}
+        ok = (task.get("state") == "SUCCEEDED"
+              and task.get("offering_id") == "meshy/nano-banana-pro/text-to-image"
+              and normalized.get("aspect_ratio") == "16:9"
+              and model_choice.get("source") == "profile"
+              and model_choice.get("profile") == "concept_art")
+        record("#239 default 2D purpose applies", ok,
+               f"offering={task.get('offering_id')} state={task.get('state')} "
+               f"aspect_ratio={normalized.get('aspect_ratio')} model_choice={model_choice}")
 
 
 def scenario_fault(api, offerings, scenario):
@@ -1356,6 +1804,15 @@ def run_quality_case(api, request, domain, model, model_3d=""):
     if request.get("modality") == "3d" and model_3d:
         # #103: only an explicit pick in the session's model picker binds the 3D tools.
         api.json("PUT", f"/api/v1/chat/sessions/{session}/model3d", {"explicit_model_3d": model_3d})
+    elif request.get("modality") == "2d" and model:
+        # #239: the same explicit pick binds the 2D tool above the purpose
+        # recommendation. A request that names a model in a step leaves that
+        # choice to the Agent, so the purpose can still recommend one.
+        named = any((step.get("tool", {}).get("arguments") or {}).get("model")
+                    for step in request.get("steps") or []
+                    if step.get("tool", {}).get("name") == "refine_image")
+        if not named:
+            api.json("PUT", f"/api/v1/chat/sessions/{session}/model2d", {"explicit_model_2d": model})
     cards, seen = [], set()
     turns = 0
     for step in request["steps"]:
@@ -1717,13 +2174,14 @@ def scenario_offering_knowledge(work, stack_binary, processes, catalog):
         if not picture:
             record("#249 final_prompt", False, "reference picture generation failed")
         else:
-            image_model = next((item["model_id"] for item in offerings.values()
-                                if item.get("available") and item.get("capability") == "image-to-image"), "")
             marker = '[[fake:tool:refine_image {"prompt":"make the cube blue"}]]'
             before = assistant_reply_count(api, session2)
+            # No workspace picker model: the session's default 2D purpose
+            # recommends the image-to-image offering (#239), so the prompt
+            # layers are the only thing this scenario varies.
             status, _ = api.json("POST", f"/api/chat/sessions/{session2}/messages",
                                  {"content": "改成蓝色 " + marker, "image_urls": [picture],
-                                  "creative_domain": "image", "ai_model": image_model})
+                                  "creative_domain": "image"})
             end = time.time() + 60
             while status in (200, 201, 202) and time.time() < end and assistant_reply_count(api, session2) <= before:
                 time.sleep(0.5)
@@ -1967,6 +2425,15 @@ def scenario_work_ledger(api, offerings, work):
     if status != 200:
         record("#248 auto approval", False, f"{status} {body}")
         return
+    # #239 makes the default 2D purpose recommend a different model than the
+    # workspace picker's; the ledger scenario is not about that conflict, so it
+    # pins the text-to-image model explicitly like a person would. The call has
+    # no reference picture, so it must stay text-to-image.
+    status, body = api.json("PUT", f"/api/v1/chat/sessions/{session}/model2d",
+                            {"explicit_model_2d": IMAGE_OFFERINGS["openai"][0]})
+    if status != 200:
+        record("#248 explicit 2D model", False, f"{status} {body}")
+        return
     marker = _work_ledger_marker("refine_image", {"prompt": long_prompt})
     task, why, _approval = agent_tool_turn(api, session, "make the ranger " + marker, creative_domain="image",
                                                ai_model=IMAGE_OFFERINGS["openai"][0])
@@ -2200,6 +2667,10 @@ def scenario_vision_budget(api, offerings, work):
     approval_field = fields.get("approval_mode", "approvalMode")
     api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {approval_field: "auto"})
     image_model = IMAGE_OFFERINGS["openai"][1]
+    # #239's default 2D purpose recommends another model; this scenario tests
+    # the vision budget, so it pins the image-to-image model to keep the two
+    # features from refusing each other.
+    api.json("PUT", f"/api/v1/chat/sessions/{session}/model2d", {"explicit_model_2d": image_model})
     white, red = (250, 250, 250), (200, 30, 30)
     reference = make_picture(128, 128, white, [((40, 32, 88, 96), red)])
     status, body = api.upload("/api/v1/assets", "file", "vision-reference.png", reference, "image/png")
@@ -2497,7 +2968,9 @@ def scenario_visual_anchors(api, offerings, work):
     record("#250 the session style lock is saved",
            status == 200 and (body.get("styleLock") or {}).get("enabled") is True,
            f"status {status} {json.dumps(body, ensure_ascii=False)[:200]}")
-    image_model = IMAGE_OFFERINGS["openai"][1]
+    # The shipped 2D purpose (concept art) recommends this model; using the
+    # workspace model avoids the #239 purpose/model conflict card.
+    image_model = IMAGE_OFFERINGS["meshy"][1]
 
     # (a) The Agent sees the style lock in its system prompt. The fake-only
     # marker makes the reply itself carry the answer, so the check reads what
@@ -2650,13 +3123,13 @@ def scenario_visual_anchors(api, offerings, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,offering-knowledge,work-ledger,vision-budget,visual-anchors,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,image-purpose,offering-knowledge,work-ledger,vision-budget,three-view,visual-anchors,faults")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     parser.add_argument("--report", default="", help="directory for the #238 agent-quality report (default: a temporary one)")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "tripo", "p2", "agent", "agent-background", "faults"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "tripo", "p2", "agent", "agent-background", "three-view", "faults"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -2672,7 +3145,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality", "image-self-check", "work-ledger", "vision-budget", "visual-anchors"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "work-ledger", "vision-budget", "three-view", "visual-anchors"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -2699,6 +3172,10 @@ def main():
                 scenario_agent_quality(api, offerings, args.report or os.path.join(work, "agent-quality"))
             if "image-self-check" in selected:
                 scenario_image_self_check(api, offerings, work)
+            if "three-view" in selected:
+                scenario_three_view(work, api, offerings)
+            if "image-purpose" in selected:
+                scenario_image_purpose(api, offerings, work)
             if "work-ledger" in selected:
                 scenario_work_ledger(api, offerings, work)
             if "vision-budget" in selected:

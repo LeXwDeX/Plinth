@@ -24,7 +24,7 @@ func TestCraftPromptIsInjectedOnlyWhenA3DToolIsOffered(t *testing.T) {
 			if !found {
 				t.Fatalf("test setup: no model3d craft prompt in %#v", rig.schema.Agent.CraftPrompts)
 			}
-			rig.turn(t, scope)
+			rig.turnDomain(t, scope, "model-3d")
 			system := rig.agent.requests[0].Messages[0].Content
 			wantCraft := renderedCraftText(craft)
 			if got := strings.Contains(system, wantCraft); got != want {
@@ -35,6 +35,33 @@ func TestCraftPromptIsInjectedOnlyWhenA3DToolIsOffered(t *testing.T) {
 			}
 			if strings.Count(system, wantCraft) != 1 {
 				t.Fatalf("%s scope: craft brief appears %d times", scope, strings.Count(system, wantCraft))
+			}
+		})
+	}
+}
+
+// #239: auto scope offers both tool sets, so when_domain keeps the 3D craft
+// out of a 2D turn and the 2D craft out of a 3D turn.
+func TestCraftPromptWhenDomainSeparatesTheTwoCrafts(t *testing.T) {
+	prompts := map[string]string{}
+	rig := newScopeRig(t, agents.Completion{Content: "ok"})
+	for _, prompt := range rig.schema.Agent.CraftPrompts {
+		prompts[prompt.ID] = renderedCraftText(prompt)
+	}
+	for _, test := range []struct {
+		domain, wanted, unwanted string
+	}{
+		{"image", "image2d_production", "model3d"},
+		{"model-3d", "model3d", "image2d_production"},
+	} {
+		t.Run(test.domain, func(t *testing.T) {
+			rig.turnDomain(t, "auto", test.domain)
+			system := rig.agent.requests[len(rig.agent.requests)-1].Messages[0].Content
+			if !strings.Contains(system, prompts[test.wanted]) {
+				t.Fatalf("%s turn omits the %s craft brief", test.domain, test.wanted)
+			}
+			if strings.Contains(system, prompts[test.unwanted]) {
+				t.Fatalf("%s turn includes the %s craft brief", test.domain, test.unwanted)
 			}
 		})
 	}
@@ -64,29 +91,51 @@ func renderedCraftText(prompt catalog.ChatAgentCraftPrompt) string {
 
 func TestCraftPromptSitsBetweenDomainContextAndScope(t *testing.T) {
 	rig := newScopeRig(t, agents.Completion{Content: "ok"})
-	rig.turn(t, "3d")
+	rig.turn(t, "auto")
 	system := rig.agent.requests[0].Messages[0].Content
 	craft := ""
 	for _, prompt := range rig.schema.Agent.CraftPrompts {
-		if prompt.ID == "model3d" {
-			craft = prompt.Text
+		if prompt.ID == "image2d_production" {
+			craft = renderedCraftText(prompt)
 		}
 	}
 	if craft == "" {
-		t.Fatal("no model3d craft prompt")
+		t.Fatal("no image2d_production craft prompt")
 	}
-	craft = renderedCraftText(catalog.ChatAgentCraftPrompt{Text: craft})
+	expected := craft
 	const domainContext = "Use configured 2D tools"
 	start := strings.Index(system, domainContext)
+	craftStart := strings.Index(system, craft)
 	end := strings.Index(system, "【Agent 范围】")
-	if start < 0 || end < 0 || end < start {
-		t.Fatalf("domain context (%d) or scope block (%d) not found", start, end)
+	if start < 0 || craftStart < 0 || end < 0 || end < start || craftStart < start {
+		t.Fatalf("domain context (%d), craft (%d) or scope block (%d) not found in order", start, craftStart, end)
 	}
 	segment := system[start+len(domainContext) : end]
-	if segment != "\n\n"+craft+"\n\n" {
-		t.Fatalf("between domain context and scope = %q, want the craft brief with blank lines", segment)
+	if !strings.Contains(segment, expected) {
+		t.Fatalf("between domain context and scope = %q, want the 2D craft brief", segment)
 	}
 	if strings.Index(system, "【批准方式】") < end {
 		t.Fatal("the approval block does not follow the scope block")
+	}
+}
+
+// #243's three-view brief is domain-gated like the other crafts: an auto turn
+// in the 3D workspace must include it, while an image turn must not (#239).
+func TestThreeViewCraftIsInjectedOnAModel3DTurn(t *testing.T) {
+	rig := newScopeRig(t, agents.Completion{Content: "ok"})
+	rig.turnDomain(t, "auto", "model-3d")
+	system := rig.agent.requests[0].Messages[0].Content
+	found := false
+	for _, prompt := range rig.schema.Agent.CraftPrompts {
+		if prompt.ID != "three-view" {
+			continue
+		}
+		found = true
+		if !strings.Contains(system, renderedCraftText(prompt)) {
+			t.Fatal("the 3D turn omits the three-view craft brief")
+		}
+	}
+	if !found {
+		t.Fatal("test setup: no three-view craft prompt")
 	}
 }

@@ -270,7 +270,8 @@ func (policy *ProductionPlanPolicy) buildPlan(command ToolCommand, arguments pro
 		if config.MaxPurposeCharacters > 0 && utf8.RuneCountInString(purpose) > config.MaxPurposeCharacters {
 			return budget.Plan{}, nil, "step purpose is too long"
 		}
-		offering, locked, refusal := policy.stepOffering(capability, strings.TrimSpace(step.Model), strings.TrimSpace(command.Options.ExplicitModel3D))
+		offering, locked, refusal := policy.stepOffering(capability, strings.TrimSpace(step.Model),
+			strings.TrimSpace(command.Options.ExplicitModel3D), strings.TrimSpace(command.Options.ModelFor("image")))
 		if refusal != "" {
 			return budget.Plan{}, nil, refusal
 		}
@@ -390,11 +391,13 @@ func unitAmountsText(amounts []budget.Amount) string {
 // 3D tool chooses its model. The person's explicit 3D model comes first when
 // an Offering of the capability is that model: it is what will run, so the
 // step is quoted at it and pinned to it (locked), and a step naming another
-// model is refused, as the tool would refuse it (#144). Otherwise the pinned
-// Offering when the Agent named a model, else the capability's default
-// available Offering. A capability without an available Offering cannot be
-// planned.
-func (policy *ProductionPlanPolicy) stepOffering(capability, pinned, lockedModel string) (offering generation.Offering, locked bool, refusal string) {
+// model is refused, as the tool would refuse it (#144). An image-domain step
+// uses the workspace's image model for the same reason: create_three_view
+// selects it, so a plan that quoted another 2D Offering could never be
+// continued by the budget (#243). Otherwise the pinned Offering when the
+// Agent named a model, else the capability's default available Offering. A
+// capability without an available Offering cannot be planned.
+func (policy *ProductionPlanPolicy) stepOffering(capability, pinned, lockedModel, workspaceImageModel string) (offering generation.Offering, locked bool, refusal string) {
 	unavailable := "no available offering for capability " + capability
 	var candidates []generation.Offering
 	for _, offering := range policy.Offerings() {
@@ -409,6 +412,7 @@ func (policy *ProductionPlanPolicy) stepOffering(capability, pinned, lockedModel
 	if len(candidates) == 0 {
 		return generation.Offering{}, false, unavailable
 	}
+	imageDomain := candidates[0].Domain == generation.DomainImage
 	if lockedModel != "" {
 		for _, offering := range candidates {
 			if !offeringIsModel(offering, lockedModel) {
@@ -419,6 +423,28 @@ func (policy *ProductionPlanPolicy) stepOffering(capability, pinned, lockedModel
 			}
 			return offering, true, ""
 		}
+	}
+	if imageDomain && workspaceImageModel != "" {
+		workspace, matched := matchPlanCandidate(candidates, workspaceImageModel)
+		if !matched {
+			return generation.Offering{}, false, "the workspace image model " + workspaceImageModel +
+				" has no available Offering for capability " + capability
+		}
+		if pinned == "" {
+			// Quote and pin the model create_three_view will actually run.
+			return workspace, true, ""
+		}
+		pinnedOffering, pinnedMatched := matchPlanCandidate(candidates, pinned)
+		if !pinnedMatched {
+			return generation.Offering{}, false, unavailable
+		}
+		if !offeringIsModel(pinnedOffering, workspaceImageModel) {
+			return generation.Offering{}, false, "the workspace image model is " + workspaceImageModel +
+				"; step " + capability + " must use it, not " + pinned
+		}
+		// Pin the resolved Offering: the plan compares Offering IDs when it
+		// decides whether it covers a submitted step.
+		return pinnedOffering, true, ""
 	}
 	if pinned == "" {
 		chosen := candidates[0]
@@ -436,6 +462,17 @@ func (policy *ProductionPlanPolicy) stepOffering(capability, pinned, lockedModel
 		}
 	}
 	return generation.Offering{}, false, unavailable
+}
+
+// matchPlanCandidate finds an Offering by any name a tool accepts: model_id,
+// Offering ID or provider/model_id.
+func matchPlanCandidate(candidates []generation.Offering, name string) (generation.Offering, bool) {
+	for _, offering := range candidates {
+		if offeringIsModel(offering, name) {
+			return offering, true
+		}
+	}
+	return generation.Offering{}, false
 }
 
 // offeringIsModel reports whether name names the Offering's model the ways a

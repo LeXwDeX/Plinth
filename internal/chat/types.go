@@ -130,6 +130,10 @@ type TurnOptions struct {
 	// session (#103). While set it is locked: a production purpose and an
 	// Agent-named model cannot replace it.
 	ExplicitModel3D string `json:"ExplicitModel3D,omitempty"`
+	// ExplicitModelImage is the 2D model the person explicitly picked in this
+	// session (#239). While set it is locked: a 2D purpose and an Agent-named
+	// model cannot replace it.
+	ExplicitModelImage string `json:"ExplicitModelImage,omitempty"`
 	// PlanContinuation is the production plan this turn runs: the server
 	// started it when the person approved the plan (#134). Only the service
 	// sets it; a request never does. Empty for an ordinary turn.
@@ -259,6 +263,9 @@ type Session struct {
 	// ExplicitModel3D is the 3D model the person explicitly picked in this
 	// session (#103); empty means no explicit pick.
 	ExplicitModel3D string
+	// ExplicitModelImage is the 2D model the person explicitly picked in this
+	// session (#239); empty means no explicit pick.
+	ExplicitModelImage string
 	// EstimatedCredits is the sum of the estimated credits of the tasks this
 	// session has accepted. It is an estimate, never a settled charge.
 	EstimatedCredits int
@@ -404,4 +411,13 @@ func (options TurnOptions) ModelFor(domain string) string {
 		return options.AIModel
 	}
 	return options.DomainModels[domain]
+}
+
+// ExplicitModelFor is the model the person explicitly locked for a workspace
+// domain: the 2D pick for the image workspace, the 3D pick otherwise (#239).
+func (options TurnOptions) ExplicitModelFor(domain string) string {
+	if domain == "image" {
+		return options.ExplicitModelImage
+	}
+	return options.ExplicitModel3D
 }

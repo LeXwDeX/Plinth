@@ -287,6 +287,34 @@ func (s Service) ApproveByPolicyDecision(ctx context.Context, ownerID, requestID
 	return PolicyResult{Grant: approved, Outcome: PolicyOutcomeApproved}, nil
 }
 
+// BudgetContinuation reports whether the session's active, approved production
+// plan explicitly covers count steps of the capability at the given Offering.
+// Only the budget mode continues without a person: strict and auto modes keep
+// their per-step behavior (#243). A missing mode reader, plan store or plan, a
+// plan that is not active, or a mode that is not budget answers false.
+func (s Service) BudgetContinuation(ctx context.Context, ownerID, sessionID, capability, offeringID string,
+	count int,
+) (bool, error) {
+	if ownerID == "" || sessionID == "" || capability == "" || count < 1 || s.Modes == nil || s.Budgets == nil {
+		return false, nil
+	}
+	mode, err := s.Modes.SessionApprovalMode(ctx, ownerID, sessionID)
+	if err != nil {
+		return false, err
+	}
+	if s.Policy.NormalizeMode(mode) != approvalpolicy.ModeBudget {
+		return false, nil
+	}
+	summary, found, err := s.Budgets.ProductionBudgetSummary(ctx, ownerID, sessionID)
+	if err != nil || !found {
+		return false, err
+	}
+	if summary.State != budget.StateActive {
+		return false, nil
+	}
+	return summary.Plan.Covers(capability, offeringID, count), nil
+}
+
 // ApplyPolicy looks up the session approval mode and approves the grant by
 // policy when no human is required. Every grant creation site calls it right
 // after Prepare. A grant that is not pending, or that needs a human, is

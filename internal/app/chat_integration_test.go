@@ -85,7 +85,7 @@ func TestMockChatAgentRunsHTTPTaskAndSSEToCompletion(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/api/chat/sessions/"+sessionID+"/messages",
-		`{"content":"configured picture request","ai_model":"gpt-image-2.6-sunburst","creative_domain":"image"}`,
+		`{"content":"configured picture request","ai_model":"nano-banana-pro","creative_domain":"image"}`,
 	)
 	if send.Code != http.StatusAccepted {
 		t.Fatalf("send status=%d body=%s", send.Code, send.Body)
@@ -274,6 +274,13 @@ func TestMockChatAgentAppliesSelectedSkillFromRuntimeCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	sessionID, _ := session["id"].(string)
+	// The Skill needs an Offering that features skills, so lock that model
+	// explicitly: a session lock outranks the default 2D purpose recommendation.
+	lock := appChatRequest(handler, http.MethodPut, "/api/v1/chat/sessions/"+sessionID+"/model2d",
+		`{"explicit_model_2d":"gpt-image-2.6-sunburst"}`)
+	if lock.Code != http.StatusOK {
+		t.Fatalf("model2d lock status=%d body=%s", lock.Code, lock.Body)
+	}
 	send := appChatRequest(
 		handler,
 		http.MethodPost,

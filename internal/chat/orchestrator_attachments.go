@@ -488,6 +488,28 @@ func (orchestrator *Orchestrator) productionBriefText(
 				value = strings.NewReplacer("{label}", value, "{budget}", budget).Replace(briefSchema.PurposeTemplate)
 			}
 			parts = append(parts, strings.NewReplacer("{label}", label, "{value}", value).Replace(briefSchema.FieldTemplate))
+		case "image_profile":
+			imageUseField := productionBriefImageUseField(briefSchema)
+			if field.Name != imageUseField {
+				continue
+			}
+			imageUse := brief.Text(field.Name)
+			if imageUse == "" {
+				continue
+			}
+			value := imageUse
+			if profile, found := image2DUsageProfile(orchestrator.schema.Image2DUsage, imageUse); found {
+				value = profile.Label
+				if requirements := image2DRequirementsText(profile.Requirements, orchestrator.schema.Image2DUsage.RequirementsNote, briefSchema.ImageRequirementSeparator); requirements != "" {
+					if briefSchema.ImageRequirementsTemplate != "" {
+						requirements = strings.ReplaceAll(briefSchema.ImageRequirementsTemplate, "{items}", requirements)
+					}
+					value = strings.NewReplacer(
+						"{label}", value, "{requirements}", requirements,
+					).Replace(briefSchema.ImagePurposeTemplate)
+				}
+			}
+			parts = append(parts, strings.NewReplacer("{label}", label, "{value}", value).Replace(briefSchema.FieldTemplate))
 		case "text":
 			value := brief.Text(field.Name)
 			if value == "" {
@@ -511,6 +533,48 @@ func (orchestrator *Orchestrator) productionBriefText(
 		}
 	}
 	return strings.Join(parts, briefSchema.Separator)
+}
+
+// image2DUsageProfile finds a declared 2D purpose by id.
+func image2DUsageProfile(usage catalog.ChatImage2DUsageSchema, id string) (catalog.ChatImage2DUsageProfile, bool) {
+	for _, profile := range usage.Profiles {
+		if profile.ID == id {
+			return profile, true
+		}
+	}
+	return catalog.ChatImage2DUsageProfile{}, false
+}
+
+// image2DRequirementsText renders one 2D purpose's delivery requirements with
+// the Schema's own words, so no enum literal reaches the Agent (#239).
+func image2DRequirementsText(requirements catalog.ChatImage2DRequirements, note catalog.ChatImage2DRequirementsNote, separator string) string {
+	if strings.TrimSpace(note.Template) == "" {
+		return ""
+	}
+	if separator == "" {
+		separator = note.Separator
+	}
+	items := []string{
+		strings.ReplaceAll(note.AspectRatioTemplate, "{value}", requirements.AspectRatio),
+		strings.ReplaceAll(note.MinimumShortEdgeTemplate, "{value}", strconv.Itoa(requirements.MinimumShortEdge)),
+		strings.ReplaceAll(note.BackgroundTemplate, "{value}", note.BackgroundTexts[requirements.Background]),
+		strings.ReplaceAll(note.SubjectsTemplate, "{value}", note.SubjectsTexts[requirements.Subjects]),
+	}
+	if requirements.Pose != "" {
+		if text := note.PoseTexts[requirements.Pose]; text != "" {
+			items = append(items, strings.ReplaceAll(note.PoseTemplate, "{value}", text))
+		}
+	}
+	kept := items[:0]
+	for _, item := range items {
+		if strings.TrimSpace(item) != "" {
+			kept = append(kept, item)
+		}
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	return strings.ReplaceAll(note.Template, "{items}", strings.Join(kept, separator))
 }
 
 // productionBriefBudgetText renders the triangle budget of a purpose. A

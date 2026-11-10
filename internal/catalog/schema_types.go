@@ -1288,6 +1288,10 @@ type PublicChatSchema struct {
 	// parameter overrides, reasons, budgets and brief prompt templates stay
 	// server-only.
 	Model3DUsage *PublicChatModel3DUsageSchema `json:"model3d_usage,omitempty"`
+	// Image2DUsage publishes the 2D purpose labels the brief panel and the
+	// choice card render (#239); recommendations, parameter overrides,
+	// requirements and reasons stay server-only.
+	Image2DUsage *PublicChatImage2DUsageSchema `json:"image2d_usage,omitempty"`
 	// StyleLock publishes the bounds the browser needs (#154); the prompt and
 	// edit-scope templates stay server-only.
 	StyleLock PublicChatStyleLockSchema `json:"style_lock"`
@@ -1315,6 +1319,18 @@ type PublicChatModel3DUsageSchema struct {
 
 // PublicChatModel3DUsageProfile is one purpose the page can label.
 type PublicChatModel3DUsageProfile struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// PublicChatImage2DUsageSchema is the public part of the 2D production
+// purposes (#239): only the labels the brief panel and the choice card need.
+type PublicChatImage2DUsageSchema struct {
+	Profiles []PublicChatImage2DUsageProfile `json:"profiles"`
+}
+
+// PublicChatImage2DUsageProfile is one 2D purpose the page can label.
+type PublicChatImage2DUsageProfile struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 }
@@ -2703,6 +2719,11 @@ type ChatSchema struct {
 	// only: the browser reads a brief projection on the session, never the
 	// purpose table or its reasons.
 	Model3DUsage ChatModel3DUsageSchema `json:"model3d_usage"`
+	// Image2DUsage declares the production purposes of 2D work (#239): the
+	// recommended offerings and parameter overrides per purpose, the delivery
+	// requirements and the reason the Agent reads. Server side only: the
+	// browser reads their labels through the public projection.
+	Image2DUsage ChatImage2DUsageSchema `json:"image2d_usage"`
 	// ContextCompaction declares how a long conversation is summarized for
 	// the model (#322): the automatic threshold, how many recent rounds stay
 	// verbatim and the prompts. The visible words are content messages
@@ -2834,6 +2855,68 @@ type ChatModel3DUsageSchema struct {
 	OverrideCoverageRequired bool `json:"override_coverage_required,omitempty"`
 }
 
+// ChatImage2DUsageSchema is application.chat.image2d_usage (#239).
+type ChatImage2DUsageSchema struct {
+	// DefaultProfile is the 2D purpose used when the session has no brief
+	// image purpose; it is what the Agent falls back to for an open question.
+	DefaultProfile string                    `json:"default_profile"`
+	Profiles       []ChatImage2DUsageProfile `json:"profiles"`
+	// RequirementsNote renders one purpose's delivery requirements into the
+	// brief and the Agent's context.
+	RequirementsNote ChatImage2DRequirementsNote `json:"requirements_note"`
+}
+
+// ChatImage2DUsageProfile is one 2D production purpose.
+type ChatImage2DUsageProfile struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	// RecommendedOfferings maps an image input shape to Offering IDs in
+	// preference order. Keys: text-to-image and image-to-image.
+	RecommendedOfferings map[string][]string `json:"recommended_offerings"`
+	// ParameterOverrides maps an Offering ID to public parameter values the
+	// purpose applies. A value must pass the same normalization as a real
+	// submission; fixed, hidden, protocol, reference and extra-credit consent
+	// parameters are refused at load time.
+	ParameterOverrides map[string]map[string]json.RawMessage `json:"parameter_overrides,omitempty"`
+	Requirements       ChatImage2DRequirements               `json:"requirements"`
+	// Reason explains the purpose once; every adjusted parameter frozen from
+	// this purpose carries it and source "profile:<id>".
+	Reason string `json:"reason"`
+}
+
+// ChatImage2DRequirements is what the delivered image must satisfy for the
+// purpose. Background and subjects are enumerated; an empty Pose means the
+// purpose imposes no pose.
+type ChatImage2DRequirements struct {
+	// AspectRatio is one of 1:1, 2:3, 3:2, 3:4, 4:3, 16:9, 9:16.
+	AspectRatio string `json:"aspect_ratio"`
+	// MinimumShortEdge is the smallest accepted short edge in pixels.
+	MinimumShortEdge int `json:"minimum_short_edge"`
+	// Background is any, solid, transparent or solid_or_transparent.
+	Background string `json:"background"`
+	// Subjects is single or multiple.
+	Subjects string `json:"subjects"`
+	// Pose is empty, a-pose or t-pose.
+	Pose string `json:"pose"`
+}
+
+// ChatImage2DRequirementsNote renders the purpose requirements as one text
+// ({items} joined by Separator). Each requirement uses its own template, and a
+// select value (background, subjects, pose) is named by its declared text.
+type ChatImage2DRequirementsNote struct {
+	Template                 string            `json:"template"`
+	Separator                string            `json:"separator"`
+	AspectRatioTemplate      string            `json:"aspect_ratio_template"`
+	MinimumShortEdgeTemplate string            `json:"minimum_short_edge_template"`
+	BackgroundTemplate       string            `json:"background_template"`
+	SubjectsTemplate         string            `json:"subjects_template"`
+	PoseTemplate             string            `json:"pose_template"`
+	BackgroundTexts          map[string]string `json:"background_texts"`
+	SubjectsTexts            map[string]string `json:"subjects_texts"`
+	PoseTexts                map[string]string `json:"pose_texts"`
+}
+
 // ChatModel3DUsageBudgetLimit bounds the parameters of one semantic by one
 // field of the purpose budget (#129).
 type ChatModel3DUsageBudgetLimit struct {
@@ -2941,11 +3024,18 @@ type ChatProductionBriefSchema struct {
 	// RequirementSeparator.
 	RequirementsTemplate string `json:"requirements_template"`
 	RequirementSeparator string `json:"requirement_separator"`
-	UVText               string `json:"uv_text"`
-	WatertightText       string `json:"watertight_text"`
-	SkinText             string `json:"skin_text"`
-	SavedMessage         string `json:"saved_message"`
-	InvalidTemplate      string `json:"invalid_template"`
+	// ImagePurposeTemplate renders the 2D purpose label with its delivery
+	// requirements ({label}, {requirements}); ImageRequirementsTemplate wraps
+	// the requirement items ({items}) joined by ImageRequirementSeparator
+	// (#239).
+	ImagePurposeTemplate      string `json:"image_purpose_template"`
+	ImageRequirementsTemplate string `json:"image_requirements_template"`
+	ImageRequirementSeparator string `json:"image_requirement_separator"`
+	UVText                    string `json:"uv_text"`
+	WatertightText            string `json:"watertight_text"`
+	SkinText                  string `json:"skin_text"`
+	SavedMessage              string `json:"saved_message"`
+	InvalidTemplate           string `json:"invalid_template"`
 	// Messages are the Agent-facing refusal reasons; invalid_template wraps
 	// them (#103 review C3).
 	Messages ChatProductionBriefMessages `json:"messages"`
@@ -2967,7 +3057,8 @@ func (brief ChatProductionBriefSchema) FieldNameOfType(fieldType string) string 
 // ChatProductionBriefField declares one brief member and its bound.
 type ChatProductionBriefField struct {
 	Name string `json:"name"`
-	// Type is profile, text, boolean or integer.
+	// Type is profile, image_profile, text, boolean or integer. A profile names
+	// a 3D purpose and an image_profile a 2D purpose (#239).
 	Type  string `json:"type"`
 	Label string `json:"label"`
 	// MaximumCharacters bounds a text field; Minimum and Maximum bound an
@@ -3066,6 +3157,52 @@ type ChatThreeViewSchema struct {
 	// Multiview binds the groups, and pictures the person labelled with their
 	// views, to the multiview image-to-3D tool (#65).
 	Multiview ChatThreeViewMultiviewSchema `json:"multiview"`
+	// SubjectArgument names the create_three_view argument whose value picks
+	// one of SubjectTypes; an absent or empty value means DefaultSubjectType
+	// (#243). The recipe prompt is resolved with that type's constraints.
+	SubjectArgument    string `json:"subject_argument,omitempty"`
+	DefaultSubjectType string `json:"default_subject_type,omitempty"`
+	// SubjectTypes are the subject classes the recipe templates can express.
+	// Every type carries the constraint text substituted for the front view
+	// and for the other views.
+	SubjectTypes []ChatThreeViewSubjectType `json:"subject_types,omitempty"`
+	// Consistency bounds the automatic check of each later view against the
+	// accepted front view (#243).
+	Consistency ChatThreeViewConsistencySchema `json:"consistency,omitempty"`
+	// Continuation lets the server finish the required views of one group
+	// inside an approved budget plan, without a card per view (#243).
+	Continuation ChatThreeViewContinuationSchema `json:"continuation,omitempty"`
+}
+
+// ChatThreeViewSubjectType is one subject class of the three-view recipe. The
+// strings are substituted into the step prompts: FrontConstraints for the
+// front view and ViewConstraints for every later view.
+type ChatThreeViewSubjectType struct {
+	ID               string `json:"id"`
+	Label            string `json:"label"`
+	FrontConstraints string `json:"front_constraints"`
+	ViewConstraints  string `json:"view_constraints"`
+}
+
+// ChatThreeViewConsistencySchema declares how a finished later view is judged
+// against the accepted front view (#243). Zero thresholds disable the
+// corresponding comparison; MaxAttemptsPerView bounds the automatic redraws of
+// one rejected view before the group waits for a person.
+type ChatThreeViewConsistencySchema struct {
+	MaxSubjectRatioDelta float64 `json:"max_subject_ratio_delta"`
+	MaxBackgroundSpread  float64 `json:"max_background_spread"`
+	MaxBBoxHeightDelta   float64 `json:"max_bbox_height_delta"`
+	MaxAttemptsPerView   int     `json:"max_attempts_per_view"`
+}
+
+// ChatThreeViewContinuationSchema enables the budget continuation (#243).
+// Reasons word why a continuation stopped, keyed by the stable codes the
+// three-view service returns.
+type ChatThreeViewContinuationSchema struct {
+	Enabled bool `json:"enabled"`
+	// Reasons keys: budget_not_covered, view_not_finished,
+	// view_already_started, consistency_retries_exhausted.
+	Reasons map[string]string `json:"reasons,omitempty"`
 }
 
 // ChatThreeViewMultiviewSchema says how a group (or labelled uploads) becomes
@@ -3085,6 +3222,10 @@ type ChatThreeViewMultiviewSchema struct {
 	// views a step takes.
 	RequiredView string `json:"required_view"`
 	MinimumViews int    `json:"minimum_views"`
+	// ViewOrder is the recipe step order a multiview step uses. An Offering
+	// without reference-views semantics receives the views in this order as a
+	// contiguous prefix starting at RequiredView (#243).
+	ViewOrder []string `json:"view_order,omitempty"`
 	// GroupDirective is the turn's system block when the person pressed the
 	// group's button: {tool}, {group}, {model}, {views}. UploadDirective is the
 	// block for uploads the person labelled: {tool}, {model}, {views}.
@@ -3106,6 +3247,20 @@ type ChatThreeViewMessages struct {
 	ApprovalPolicy    string `json:"approval_policy"`
 	ModelSourceNotYet string `json:"model_source_not_yet"`
 	ReferenceRequired string `json:"reference_required"`
+	// AgentCompleted is the receipt once every required view of the group is
+	// accepted; {run}, {views}, {group} and {model_source} are filled (#243).
+	AgentCompleted string `json:"agent_completed,omitempty"`
+	// AgentPaused says the budget continuation stopped without finishing the
+	// group and what the person can do. Fields: {run}, {view}, {reason}.
+	AgentPaused string `json:"agent_paused,omitempty"`
+	// ConsistencyRetry reports one automatically redrawn view: {view},
+	// {attempt}, {maximum}, {reasons}.
+	ConsistencyRetry string `json:"consistency_retry,omitempty"`
+	// ConsistencyFailed reports a view that stayed inconsistent; the group
+	// waits for a person. Fields: {view}, {reasons}.
+	ConsistencyFailed string `json:"consistency_failed,omitempty"`
+	// SubjectInvalid refuses an unknown subject_type: {subject}, {choices}.
+	SubjectInvalid string `json:"subject_invalid,omitempty"`
 	// GroupNotFound, GroupNotReady, ViewsChanged and ViewsInvalid refuse a
 	// multiview step (#65) before anything is prepared.
 	GroupNotFound string `json:"group_not_found"`
@@ -3544,6 +3699,9 @@ type ChatAPIFields struct {
 	// ExplicitModel3D carries the 3D model the person explicitly picked for
 	// this session (#103), so a production purpose may not replace it.
 	ExplicitModel3D string `json:"explicit_model_3d,omitempty"`
+	// ExplicitModelImage carries the 2D model the person explicitly picked for
+	// this session (#239), so the Agent and a 2D purpose may not replace it.
+	ExplicitModelImage string `json:"explicit_model_2d,omitempty"`
 	// AgentScope is the request field of the session Agent-scope write.
 	AgentScope string `json:"agent_scope"`
 	// Decision is the request field of a pending-approval decision: approve,
@@ -3619,6 +3777,9 @@ type ChatAPIResponseFields struct {
 	// ExplicitModel3D is the member carrying the 3D model the person
 	// explicitly picked in the session (#103); empty leaves it out.
 	ExplicitModel3D string `json:"explicit_model_3d,omitempty"`
+	// ExplicitModelImage is the member carrying the 2D model the person
+	// explicitly picked in the session (#239); empty leaves it out.
+	ExplicitModelImage string `json:"explicit_model_2d,omitempty"`
 	// Pick is the member carrying the session's picked candidate.
 	Pick string `json:"pick"`
 	// AgentScope is the member carrying the session's Agent scope.
@@ -4361,6 +4522,11 @@ type ChatToolModelChoicesSchema struct {
 	// parameters match but whose role is different (a segmentation step that
 	// is technically image-to-3D). Each ID must exist.
 	ExcludeOfferings []string `json:"exclude_offerings,omitempty"`
+	// RequireMultiview keeps only Offerings that take several views of one
+	// object: one declaring the reference-views semantic, or an order-only
+	// provider endpoint ("multi-image-to-3d") whose pictures carry the views
+	// by their order (#243). A plain multi-reference Offering does not match.
+	RequireMultiview bool `json:"require_multiview,omitempty"`
 }
 
 // ChatToolProcessingSchema declares how a processing tool maps the model's
@@ -4774,6 +4940,9 @@ type ChatMessageTexts struct {
 	// their visible choice ({workspace}, {recommended}, {profile}; #103
 	// review C1).
 	ModelChoiceWorkspaceConflict string `json:"model_choice_workspace_conflict,omitempty"`
+	// ChoiceOptionInvalid refuses a direction card whose Agent-supplied
+	// options are too few, too many, or not bounded tokens (#239).
+	ChoiceOptionInvalid string `json:"choice_option_invalid,omitempty"`
 	// OfferingChoiceUnavailable tells the Agent that the Offering named by a
 	// tool's offering_argument is not enabled or available ({choices} lists
 	// the ones that are); SourceOfferingUnpaired that the source Task of an
@@ -5078,6 +5247,10 @@ type CoreHTTPRoutesSchema struct {
 	// the session (#103); it is a lock for the generation tools and submits
 	// nothing. Empty (historical Catalogs) disables the write.
 	ChatSessionModel3D string `json:"chat_session_model3d,omitempty"`
+	// ChatSessionModel2D writes the 2D model the person explicitly picked in
+	// the session (#239), the same kind of lock for the image tools. Empty
+	// (historical Catalogs) disables the write.
+	ChatSessionModel2D string `json:"chat_session_model2d,omitempty"`
 	// ChatSessionBudget decides one production plan card of the session (#103):
 	// PUT {sessionID, budgetID} with {"decision": "approve"|"deny"}.
 	ChatSessionBudget     string `json:"chat_session_budget,omitempty"`

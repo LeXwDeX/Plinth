@@ -113,6 +113,9 @@ type CreateCommand struct {
 	SourceTaskID          generation.TaskID
 	SourcePreparedInputID generation.PreparedInputID
 	IdempotencyKey        string
+	// SubjectType picks the recipe's subject constraint template (#243). An
+	// empty value lets the resolver use its declared default.
+	SubjectType string `json:"subject_type,omitempty"`
 }
 
 type StepCommand struct {
@@ -158,6 +161,10 @@ type RestartCommand struct {
 	ExpectedAttempt int
 	FailedTaskID    generation.TaskID
 	DeniedGrantID   string
+	// RejectedReview replaces a succeeded output the automatic consistency
+	// check rejected (#243). Exactly one of FailedTaskID, DeniedGrantID and
+	// this flag names why the attempt is replaced.
+	RejectedReview bool
 }
 
 // ReplaceCommand puts an input asset of the owner in place of one step's
@@ -207,10 +214,12 @@ type Execution struct {
 }
 
 type RecipeResolver interface {
-	// The resolver validates the human-selected Offering against the recipe's
-	// Product Schema contract, then materializes concrete step Offering IDs
-	// and revisions. This keeps recipes provider-independent until creation.
-	ResolveRecipe(context.Context, string, generation.OfferingID) (Recipe, bool, error)
+	// The resolver validates the human-selected Offering and the subject type
+	// against the recipe's Product Schema contract, then materializes concrete
+	// step Offering IDs, revisions and prompts. This keeps recipes
+	// provider-independent until creation. An empty subject type means the
+	// declaration's default; unknown types are refused.
+	ResolveRecipe(context.Context, string, generation.OfferingID, string) (Recipe, bool, error)
 }
 
 type Store interface {

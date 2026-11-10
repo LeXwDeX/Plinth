@@ -85,6 +85,29 @@ type Application struct {
 // the bytes (#49).
 var _ references.InputAssetRecords = (*inputassets.Service)(nil)
 
+// threeViewAssetStore lets the three-view consistency check open both kinds
+// of picture a view can have (#243): a generated Task output, or an input asset
+// the person put in its place.
+type threeViewAssetStore struct {
+	inputs *inputassets.Service
+	tasks  interface {
+		OpenAsset(context.Context, generation.OwnerID, generation.TaskID,
+			generation.AssetID) (generation.AssetContent, error)
+	}
+}
+
+func (s threeViewAssetStore) OpenOwned(ctx context.Context, owner generation.OwnerID,
+	id generation.AssetID,
+) (generation.InputAsset, io.ReadCloser, error) {
+	return s.inputs.OpenOwned(ctx, owner, id)
+}
+
+func (s threeViewAssetStore) OpenAsset(ctx context.Context, owner generation.OwnerID,
+	task generation.TaskID, id generation.AssetID,
+) (generation.AssetContent, error) {
+	return s.tasks.OpenAsset(ctx, owner, task, id)
+}
+
 type renderAssetStore struct {
 	inputs   *inputassets.Service
 	maxBytes int64
@@ -336,15 +359,22 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		RetiredModels: taskCatalog.RetiredModelSuccessors(),
 		// The production purposes and the brief fields (#103).
 		Model3DUsage: applicationSchema.Chat.Model3DUsage,
+		// The 2D production purposes and their requirements (#239).
+		Image2DUsage: applicationSchema.Chat.Image2DUsage,
 		// An explicit 3D model lock must name an enabled 3D Offering (#103
 		// review C4); the picker sends a model_id, and the tools also match the
 		// Offering id and provider/model pair.
 		ExplicitModel3DValid: func(model string) bool {
 			return explicitModel3DValid(taskCatalog.List(""), model)
 		},
-		// The declared generic cards; the brief write settles the usage-profile
-		// kind by its Schema id and argument name (#103).
-		ChoiceKinds: applicationSchema.Chat.Choice.Kinds,
+		// An explicit 2D model lock must name an enabled image Offering (#239).
+		ExplicitModelImageValid: func(model string) bool {
+			return explicitModelImageValid(taskCatalog.List(""), model)
+		},
+		// The declared generic cards; the brief write settles each purpose
+		// kind by its Schema option source (#103, #239).
+		ChoiceKinds:      applicationSchema.Chat.Choice.Kinds,
+		ChoiceMaxOptions: applicationSchema.Chat.Choice.MaxOptions,
 		// The session production ledger and its summary bounds (#248).
 		WorkLedger: applicationSchema.Chat.WorkLedger,
 		// The deployment's chat model, its thinking profile and context
@@ -749,6 +779,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		ProposePlan:          chatService.ProposeProductionPlan,
 		WriteVisualAnchor:    chatService.WriteVisualAnchor,
 		ChoiceKinds:          applicationSchema.Chat.Choice.Kinds,
+		ChoiceOptionInvalid:  applicationSchema.Chat.Presentation.Messages.ChoiceOptionInvalid,
 		BriefSavedMessage:    applicationSchema.Chat.Model3DUsage.Brief.SavedMessage,
 		BriefInvalidTemplate: applicationSchema.Chat.Model3DUsage.Brief.InvalidTemplate,
 		BriefMessages:        applicationSchema.Chat.Model3DUsage.Brief.Messages,
@@ -1525,10 +1556,13 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if applicationSchema.Chat.ThreeView.RecipeID != "" {
 		threeViewService, err = threeview.New(threeview.Config{
 			Runtime: skillRuntime, Sessions: chatService, Schema: applicationSchema.Chat.ThreeView,
+			Assets: threeViewAssetStore{inputs: inputAssetService, tasks: module},
+			Review: applicationSchema.Chat.ImageReview,
 		})
 		if err != nil {
 			return nil, err
 		}
+		agentToolExecutor.SetThreeViewService(threeViewService)
 		lineageService.SetGroups(threeViewService)
 		toolExecutor.SetThreeViews(threeview.ForGeneration{Service: threeViewService})
 	}

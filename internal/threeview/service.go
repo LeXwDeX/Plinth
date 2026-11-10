@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"hash/fnv"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -57,6 +58,9 @@ const (
 	Succeeded        Status = "succeeded"
 	Failed           Status = "failed"
 	Canceled         Status = "canceled"
+	// Rejected is a finished picture the automatic consistency check refused
+	// (#243). It can be retried alone; it does not complete the group.
+	Rejected Status = "rejected"
 )
 
 // Action is what the person asks of one view.
@@ -81,6 +85,9 @@ type Slot struct {
 	NativeQuote *generation.NativeQuote `json:"native_quote,omitempty"`
 	Key         string                  `json:"key"`
 	Label       string                  `json:"label"`
+	// Review is the automatic check's decision once the picture exists:
+	// accepted or rejected (#243).
+	Review string `json:"review,omitempty"`
 	// Optional: the group is complete without this view.
 	Optional bool `json:"optional,omitempty"`
 	// Replaced: OutputAssetID is an input asset the person put in place of
@@ -147,11 +154,23 @@ type Sessions interface {
 	OwnsSession(ctx context.Context, owner, session string) (bool, error)
 }
 
-// Config wires the service.
+// AssetReader opens the pictures the automatic consistency check compares: a
+// Task output (the generated view) or an input asset (a replacement the person
+// put in place of one view).
+type AssetReader interface {
+	OpenOwned(context.Context, generation.OwnerID, generation.AssetID) (generation.InputAsset, io.ReadCloser, error)
+	OpenAsset(context.Context, generation.OwnerID, generation.TaskID, generation.AssetID) (generation.AssetContent, error)
+}
+
+// Config wires the service. Assets and Review enable the automatic consistency
+// check (#243); without them a finished view is accepted as before and the
+// budget continuation cannot redraw it.
 type Config struct {
 	Runtime  *skillrun.Runtime
 	Sessions Sessions
 	Schema   catalog.ChatThreeViewSchema
+	Assets   AssetReader
+	Review   catalog.ChatImageReviewSchema
 }
 
 // Service projects and advances three-view groups.
@@ -159,6 +178,8 @@ type Service struct {
 	runtime  *skillrun.Runtime
 	sessions Sessions
 	schema   catalog.ChatThreeViewSchema
+	assets   AssetReader
+	review   catalog.ChatImageReviewSchema
 	// guards serialize requests for one view inside this process, so a double
 	// click waits for the first request and then finds the view started. The
 	// step identity and the ledger's compare-and-set keep it correct across
@@ -172,7 +193,8 @@ func New(config Config) (*Service, error) {
 		config.Schema.ModelSourceStepKey == "" || config.Schema.MaximumListed < 1 {
 		return nil, ErrInvalid
 	}
-	return &Service{runtime: config.Runtime, sessions: config.Sessions, schema: config.Schema}, nil
+	return &Service{runtime: config.Runtime, sessions: config.Sessions, schema: config.Schema,
+		assets: config.Assets, review: config.Review}, nil
 }
 
 // List projects the groups of one of the owner's sessions, newest first.
@@ -270,8 +292,38 @@ func (s *Service) project(ctx context.Context, run skillrun.Run) (Group, error) 
 			}
 		}
 	}
+	applyViewDependencies(run, group.Slots)
 	group.priceUnstartedViews()
 	return group, nil
+}
+
+// applyViewDependencies hides start and retry of a view whose source view is
+// not finally usable yet (#243). A source that finished with an unreviewed Task
+// still counts: starting the dependent view settles and reviews it first, and
+// refuses if the check rejects it. A rejected, failed, denied or canceled
+// source keeps every dependent view closed, unless the person replaced it with
+// an upload: a replacement stands for the view whatever the rejected attempt
+// did, and the execution path accepts it as the dependent view's source even
+// when its review stays rejected.
+func applyViewDependencies(run skillrun.Run, slots []Slot) {
+	byKey := make(map[string]*Slot, len(slots))
+	for index := range slots {
+		byKey[slots[index].Key] = &slots[index]
+	}
+	for index, step := range run.Steps {
+		if step.Spec.SourceStepKey == "" || index >= len(slots) {
+			continue
+		}
+		source, found := byKey[step.Spec.SourceStepKey]
+		if !found {
+			continue
+		}
+		if source.Status == Succeeded && (source.Replaced || source.Review != string(skillrun.Rejected)) {
+			continue
+		}
+		slots[index].Startable = false
+		slots[index].Retryable = false
+	}
 }
 
 // priceUnstartedViews prices a view that has no Task of its own yet like the
@@ -331,6 +383,9 @@ func inFlight(status Status) bool {
 func (s *Service) generatedSlot(ctx context.Context, run skillrun.Run, step skillrun.Step) (Slot, error) {
 	slot := Slot{Key: step.Spec.Key, Label: step.Spec.Label, Optional: step.Spec.Optional, Attempt: step.Attempt,
 		Status: NotStarted, Startable: true}
+	if step.Review != skillrun.Unreviewed {
+		slot.Review = string(step.Review)
+	}
 	owner := run.OwnerID
 	if step.GrantRequestID != "" {
 		grant, err := s.runtime.Grants.Grants.GetExecutionGrant(ctx, string(owner), step.GrantRequestID)
@@ -380,6 +435,11 @@ func (s *Service) generatedSlot(ctx context.Context, run skillrun.Run, step skil
 		if step.OutputAssetID != "" {
 			slot.OutputAssetID = string(step.OutputAssetID)
 		}
+		if step.Review == skillrun.Rejected {
+			// The picture exists, but the consistency check refused it; only
+			// this view may be made again (#243).
+			slot.Status, slot.Retryable = Rejected, true
+		}
 	case generation.TaskFailed:
 		slot.Status = Failed
 		slot.Retryable = task.Failure != nil && task.Failure.Retryable && !task.Failure.Ambiguous
@@ -423,6 +483,12 @@ func (s *Service) Advance(ctx context.Context, principal executiongrant.Principa
 		if step.Spec.Key == viewKey && step.ReplacementAssetID != "" {
 			return Group{}, ErrConflict
 		}
+	}
+	// A dependent view starts only from an accepted source view (#243). The
+	// page may still be reading the source's Task as succeeded; settle and
+	// review it first, and refuse the start when the check rejected it.
+	if run, err = s.settleSource(ctx, owner, run, viewKey); err != nil {
+		return Group{}, translate(err)
 	}
 
 	if action == Retry {
@@ -494,6 +560,12 @@ func (s *Service) Views(ctx context.Context, owner, session, runID string) ([]Vi
 	}
 	if run.OwnerID != generation.OwnerID(owner) || run.SessionID != session || run.RecipeID != s.schema.RecipeID {
 		return nil, ErrNotFound
+	}
+	// Views are handed to a multiview step only after the finished ones are
+	// settled and reviewed; a rejected view is never used (#243).
+	run, err = s.settleCompleted(ctx, generation.OwnerID(owner), run)
+	if err != nil {
+		return nil, translate(err)
 	}
 	group, err := s.project(ctx, run)
 	if err != nil {

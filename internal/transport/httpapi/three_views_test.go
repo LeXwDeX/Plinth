@@ -57,7 +57,7 @@ func newThreeViewWorld(t *testing.T) threeViewWorld {
 	world := pendingApprovalBrowsers(t, nil)
 	asset := uploadSkillSource(t, world.handler, world.cookie)
 	create := grantTestRequest(t, world.handler, world.cookie, http.MethodPost, "/api/v1/skill-runs",
-		`{"session_id":"`+world.sessionID+`","recipe_id":"image-three-view","recipe_revision":"2026-11-03.65.1",`+
+		`{"session_id":"`+world.sessionID+`","recipe_id":"image-three-view","recipe_revision":"2026-11-10.243.1",`+
 			`"offering_id":"openai/gpt-image-2/image-to-image","source_asset_id":"`+asset+`"}`, "three-view-group")
 	var run struct {
 		ID string `json:"id"`
@@ -111,10 +111,12 @@ func TestThreeViewGroupProducesAllThreeViewsOneAtATime(t *testing.T) {
 		t.Fatalf("fresh group = %+v", groups)
 	}
 	// The views are the multiview view keys; the right view is optional (#65).
+	// A later view waits until the front view is finally usable (#243).
 	for index, key := range []string{"front", "left", "back", "right"} {
 		slot := groups[0].Slots[index]
-		if slot.Key != key || slot.Status != "not_started" || !slot.Startable || slot.TaskID != "" || slot.Retryable ||
-			slot.Optional != (key == "right") {
+		wantStartable := key == "front"
+		if slot.Key != key || slot.Status != "not_started" || slot.Startable != wantStartable ||
+			slot.TaskID != "" || slot.Retryable || slot.Optional != (key == "right") {
 			t.Fatalf("fresh %s slot = %+v", key, slot)
 		}
 	}
@@ -137,7 +139,8 @@ func TestThreeViewGroupProducesAllThreeViewsOneAtATime(t *testing.T) {
 	if started.slot(t, "left").TaskID != "" || started.slot(t, "back").TaskID != "" {
 		t.Fatalf("starting the front started another view: %+v", started.Slots)
 	}
-
+	// The later views start once the front view finished and was accepted.
+	world.runTasksToCompletion(t, front.TaskID)
 	for _, key := range []string{"left", "back"} {
 		if status, group := world.advance(t, key, "start", 0); status != http.StatusOK || group.slot(t, key).TaskID == "" {
 			t.Fatalf("start %s: %d %+v", key, status, group.Slots)
@@ -222,8 +225,8 @@ func TestThreeViewFailedViewIsRetriedAlone(t *testing.T) {
 		tasks[key] = group.slot(t, key).TaskID
 	}
 	start("front")
-	start("back")
 	world.runTasksToCompletion(t, tasks["front"])
+	start("back")
 	world.runTasksToCompletion(t, tasks["back"])
 	start("left")
 
@@ -420,8 +423,14 @@ func TestReplacedThreeViewIsNotStartedOrRetriedFromAStalePage(t *testing.T) {
 			t.Fatalf("%s of a replaced view = %d", action, status)
 		}
 	}
+	// The front view completes first so the dependent back view may start (#243).
+	status, started := world.advance(t, "front", "start", 0)
+	if status != http.StatusOK {
+		t.Fatalf("start front: %d %+v", status, started.Slots)
+	}
+	world.runTasksToCompletion(t, started.slot(t, "front").TaskID)
 	// A view that failed and was then replaced is not retried either.
-	status, started := world.advance(t, "back", "start", 0)
+	status, started = world.advance(t, "back", "start", 0)
 	back := started.slot(t, "back")
 	if status != http.StatusOK || back.TaskID == "" {
 		t.Fatalf("start back: %d %+v", status, started.Slots)
@@ -436,7 +445,7 @@ func TestReplacedThreeViewIsNotStartedOrRetriedFromAStalePage(t *testing.T) {
 	if status, _ := world.advance(t, "back", "retry", 0); status != http.StatusConflict {
 		t.Fatalf("retry of a replaced canceled view = %d", status)
 	}
-	if world.tasks(t) != 1 {
+	if world.tasks(t) != 2 {
 		t.Fatalf("refused requests made %d tasks in all", world.tasks(t))
 	}
 	group := world.groups(t, world.sessionID)[0]
