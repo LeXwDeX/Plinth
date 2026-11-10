@@ -112,6 +112,41 @@ func TestSelfCheckPromptListsEveryFinishedResultAndTheUncheckedRule(t *testing.T
 	}
 }
 
+func TestSelfCheckPromptDropsThePendingBackgroundNoteAfterAConclusion(t *testing.T) {
+	schema := testCatalogChatSchema(t)
+	orchestrator, store := selfCheckPromptFixture(t, schema)
+	now := time.Now().UTC()
+	store.records["owner-a\x00session-a\x00task-a"] = SelfCheckRecord{
+		TaskID: "task-a", UpdatedAt: now,
+		Checks: []SelfCheckCheck{
+			{Kind: SelfCheckKindInspect, Tool: "inspect_model", OK: true},
+			{Kind: SelfCheckKindRender, Tool: "render_model_views", OK: true},
+		},
+		Conclusion: &SelfCheckConclusion{Status: "passed", Summary: "matches the reference"},
+	}
+	orchestrator.selfCheckTasks = func(context.Context, string, string) ([]SelfCheckTask, error) {
+		return []SelfCheckTask{
+			{TaskID: "task-a", Background: true},
+			{TaskID: "task-b", Background: true},
+		}, nil
+	}
+	prompt := orchestrator.selfCheckPrompt(context.Background(), "owner-a", "session-a", nil)
+	lineOf := func(taskID string) string {
+		for _, line := range strings.Split(prompt, "\n") {
+			if strings.Contains(line, taskID+"｜") {
+				return line
+			}
+		}
+		return ""
+	}
+	if line := lineOf("task-a"); strings.Contains(line, schema.SelfCheck.Context.BackgroundText) {
+		t.Fatalf("a checked background result still asks for a check: %q", line)
+	}
+	if line := lineOf("task-b"); !strings.Contains(line, schema.SelfCheck.Context.BackgroundText) {
+		t.Fatalf("an unchecked background result lost its pending note: %q", line)
+	}
+}
+
 func TestSelfCheckPromptKeepsUncheckedResultsWithinTheLimits(t *testing.T) {
 	schema := testCatalogChatSchema(t)
 	schema.SelfCheck.Context.MaxResults = 1

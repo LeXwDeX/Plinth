@@ -2353,7 +2353,9 @@ def scenario_self_check(work, stack_binary, processes, catalog):
     written conclusion, survives a context compaction, refuses more rounds and
     renders at the Schema limits, records a has-issues conclusion at the limit,
     counts paid corrections, and a background-finished result is listed as
-    unchecked on the next turn. Fake only: no real upstream, no paid call.
+    unchecked on the next turn, then inspected, compared against the reference
+    and given its own passed record by that next turn. Fake only: no real
+    upstream, no paid call.
     """
     child, api = start_stack(processes, stack_binary, work, "self-check", catalog, GOOD_KEY)
     try:
@@ -2582,6 +2584,41 @@ def scenario_self_check(work, stack_binary, processes, catalog):
                and _self_check_record(_self_check_records(api, session), task_id_background) is None
                and task_id_background in prompt and "后台完成，待自检" in prompt,
                f"task={background_task.get('state')} prompt={prompt[-300:]}")
+        # The next turn checks that background result for real: the model is
+        # resolved by its Task ID, an explicit reference is rendered beside it,
+        # and the conclusion is written against task_id_background, never the
+        # first task. This is the regression this scenario exists for: a
+        # background Task that resolveReviewedModel/inspect_model or
+        # record_self_check cannot reach would fail right here.
+        replies = assistant_reply_count(api, session)
+        background_evidence = (
+            _work_ledger_marker("inspect_model", {"model": task_id_background}) + " "
+            + _work_ledger_marker("compare_model_reference", {
+                "model": task_id_background, "image": handle, "view": "front"}))
+        if not _self_check_send(api, session, "自检后台完成的结果 " + background_evidence,
+                                model, replies_before=replies):
+            record("#246 background self-check turn", False, "turn did not finish")
+            return
+        background_record = _self_check_record(_self_check_records(api, session), task_id_background)
+        background_checks = [check for check in (background_record or {}).get("checks") or []
+                             if check.get("ok")]
+        background_kinds = [check.get("kind") for check in background_checks]
+        record("#246 the background result is inspected and compared against the reference",
+               background_record is not None
+               and "inspect" in background_kinds and "reference" in background_kinds,
+               f"record={background_record}")
+        replies = assistant_reply_count(api, session)
+        if not _self_check_send(api, session, "给后台结果写结论 " + _work_ledger_marker("record_self_check", {
+                "model": task_id_background, "status": "passed", "summary": "the background cube matches",
+                "findings": ["shape and colour match"], "fixes": [], "remaining": []}),
+                model, replies_before=replies):
+            record("#246 background conclusion turn", False, "turn did not finish")
+            return
+        background_record = _self_check_record(_self_check_records(api, session), task_id_background)
+        record("#246 the background result's conclusion is persisted",
+               (background_record or {}).get("status") == "passed"
+               and ((background_record or {}).get("conclusion") or {}).get("status") == "passed",
+               f"record={background_record}")
         time.sleep(1)
         compaction_status, compaction_body = 0, {}
         for _attempt in range(4):
@@ -2609,6 +2646,13 @@ def scenario_self_check(work, stack_binary, processes, catalog):
         record("#246 the compaction keeps the conclusion in the next prompt",
                task_id in prompt and "已自检有遗留问题" in prompt and "one seam remains" in prompt,
                prompt[-400:])
+        background_line = next(
+            (line for line in prompt.splitlines()
+             if task_id_background in line and "｜轮次" in line), "")
+        record("#246 a checked background result is no longer listed as pending",
+               "已自检通过" in background_line
+               and "后台完成，待自检" not in background_line,
+               background_line or prompt[-400:])
 
     finally:
         processes.stop(child)

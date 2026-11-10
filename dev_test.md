@@ -38,7 +38,7 @@
 10. **Fake 栈冒烟**「fake stack」（本地 + CI）：`python3 scripts/smoke/smoke-fake-stack.py --only balance,meshy,images,p2,agent,agent-background,vision-budget,faults --faults task-failed,artifact-expired-stuck` 必须通过（#218：在 fake 上游上跑整栈冒烟的稳定子集，任一检查失败即门禁失败；栈的每个连接都经回环守卫，非回环目标一律拒绝并记入栈日志，脚本发现任一拒绝即判失败，以此证明门禁零真实上游请求；离线、只用回环地址，不读取真实 Key；约 5 分钟，需要 go 与 python3，不需要前端构建产物）；
 
 
-#246 的 `self-check` 场景使用独立栈与调小上限的私有 Catalog，覆盖参考图比对、记录三态、压缩后读取、上限与后台结果，单独用 `python3 scripts/smoke/smoke-fake-stack.py --only self-check --work <目录> --keep` 运行，不并入上面的门禁子集以保持约 5 分钟预算。
+#246 的 `self-check` 场景使用独立栈与调小上限的私有 Catalog，覆盖参考图比对、记录三态、压缩后读取、上限与后台结果（后台结果在下一回合被 inspect/对照并写入结论），单独用 `python3 scripts/smoke/smoke-fake-stack.py --only self-check --work <目录> --keep` 运行，不并入上面的门禁子集以保持约 5 分钟预算。
 
 **为什么这样分**：第 5、6 项跑的是同一批 Go 测试，第 6 项多开 race detector，因而更严格也更慢（CI 约 21 分钟，本机 8–20 分钟，几个 worktree 同时 push 时还会因负载误报）。因此（决策背景见 `docs/history.md`）：
 

@@ -56,7 +56,10 @@ func (orchestrator *Orchestrator) selfCheckPrompt(ctx context.Context, ownerID, 
 			summary = "｜" + truncateRunes(record.Conclusion.Summary, policy.MaxCharacters/4)
 		}
 		backgroundText := ""
-		if task.Background || background[task.TaskID] {
+		// "后台完成，待自检" states a pending obligation: once a conclusion is
+		// written, the status label is the whole fact and the block must not
+		// keep asking for a check that already happened.
+		if (task.Background || background[task.TaskID]) && counters.StatusRole == SelfCheckRoleUnchecked {
 			backgroundText = "｜" + policy.BackgroundText
 		}
 		line := strings.NewReplacer(

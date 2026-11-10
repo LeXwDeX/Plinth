@@ -232,10 +232,11 @@ export const ChatMessage = memo(function ChatMessage({
   const collapsibleReply = !isUser && settled && replyNeedsCollapse(displayContent, collapseLines);
   const foldedReply = collapsibleReply && !replyOpen;
   const modelCards = modelCardsOf(message, previews, modelResults);
-  // #246: the persisted self-check records of this reply's tasks; they are
-  // read again when the reply settles because the turn's tools write them.
-  const { records: selfCheckRecords } = useSelfChecks(isUser ? null : sessionId, settled ? 'settled' : 'live',
-    !isUser && modelCards.length > 0);
+  // #246: the session's persisted self-check records. Every reply subscribes,
+  // not only one with a model card: a later turn may self-check an earlier
+  // reply's result, and that turn's settle re-reads the shared entry. The
+  // records shown here are still only this reply's cards' records.
+  const { records: selfCheckRecords } = useSelfChecks(isUser ? null : sessionId, settled);
   const selfChecksByTask = useMemo(() => selfCheckRecordsByTask(selfCheckRecords), [selfCheckRecords]);
   const messageSelfChecks = useMemo(
     () => modelCards.map((card) => selfChecksByTask.get(card.taskId)).filter((record): record is SelfCheckRecord => Boolean(record)),

@@ -73,7 +73,8 @@ describe('a failed card whose source original task is gone', () => {
     judged.tasks = [failedTask('step', 'rejected')];
     judged.data = { step: 'source_expired' };
     const html = render();
-    expect(judged.keys.every((key) => key === null)).toBe(true);
+    // The session's self-check records use their own key; this card asks nothing about retries.
+    expect(judged.keys.filter((key) => Array.isArray(key) && key[0] === 'chat-source-retry')).toHaveLength(0);
     expect(html).toContain(paidRegenerate());
     expect(html).not.toContain(messages['ui.studio.result.source_retry.source_expired']);
   });
