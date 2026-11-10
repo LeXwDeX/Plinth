@@ -177,6 +177,38 @@ class Api:
         return self.json("POST", "/api/auth/mock", {})
 
 
+FAKE_CONTROL = f"http://127.0.0.1:{FAKE_PORT}"
+
+
+def fake_control(method="GET", path="/fake/control/chat-requests"):
+    """Read or clear the fake's own control plane (never a real upstream)."""
+    request = urllib.request.Request(FAKE_CONTROL + path, method=method)
+    try:
+        response = urllib.request.urlopen(request, timeout=10)
+    except urllib.error.HTTPError as error:
+        response = error
+    raw = response.read()
+    return getattr(response, "status", None) or response.code, raw
+
+
+def fake_chat_requests():
+    status, raw = fake_control()
+    if status != 200:
+        return []
+    try:
+        return json.loads(raw).get("requests", [])
+    except ValueError:
+        return []
+
+
+def last_request_with(predicate):
+    """The newest recorded chat request whose messages satisfy predicate."""
+    for request in reversed(fake_chat_requests()):
+        if predicate(request.get("messages") or []):
+            return request
+    return None
+
+
 class Processes:
     """Owns the processes this script started and nothing else."""
 
@@ -1537,9 +1569,180 @@ def scenario_image_self_check(api, offerings, work):
            f"task={task.get('id') if task else None} state={task.get('state') if task else None}")
 
 
+def wait_agent_reply(api, session, replies_before, seconds=90):
+    end = time.time() + seconds
+    while time.time() < end:
+        if assistant_reply_count(api, session) > replies_before:
+            return True
+        time.sleep(0.4)
+    return False
+
+
+def image_handles(api, session):
+    """Every image handle of the session's messages, in order, unique."""
+    messages = api.json("GET", f"/api/chat/sessions/{session}/messages")[1]
+    messages = messages if isinstance(messages, list) else messages.get("messages", [])
+    handles = []
+    for message in messages:
+        for attachment in message.get("attachments") or []:
+            if attachment.get("kind") == "image" and attachment.get("handle"):
+                handles.append(attachment["handle"])
+    return list(dict.fromkeys(handles))
+
+
+def scenario_vision_budget(api, offerings, work):
+    """#247: purpose-based vision budget on the fake stack.
+
+    A reference picture plus six generated candidates: the reference stays a
+    high-detail picture of its own role, the candidates come back as one
+    labelled contact sheet whose handles the Agent can name. An inspect_image
+    region then returns a crop at the crop detail. A 3D turn shows that a
+    self-check render reaches the next request at high detail beside the
+    result thumbnail instead of taking its place.
+    """
+    fake_control("DELETE")
+    session = new_session(api)
+    fields, route = chat_schema_facts(api)
+    approval_field = fields.get("approval_mode", "approvalMode")
+    api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {approval_field: "auto"})
+    image_model = IMAGE_OFFERINGS["openai"][1]
+    white, red = (250, 250, 250), (200, 30, 30)
+    reference = make_picture(128, 128, white, [((40, 32, 88, 96), red)])
+    status, body = api.upload("/api/v1/assets", "file", "vision-reference.png", reference, "image/png")
+    asset_id = body.get("id") if status in (200, 201) else None
+    if not asset_id:
+        record("#247 reference upload", False, f"HTTP {status}")
+        return
+    replies_before = assistant_reply_count(api, session)
+    marker = ('[[fake:tool:set_params {"offering_id":"' + image_model + '","params":{"n":6}}]] '
+              '[[fake:tool:refine_image {"prompt":"a red cube on a white background","reference_handles":["@img1"]}]]')
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", {
+        "content": "按这张参考图出六个候选 " + marker,
+        "image_urls": [f"/api/v1/assets/{asset_id}"],
+        "creative_domain": "image", "ai_model": image_model,
+    })
+    if status not in (200, 201, 202) or not wait_agent_reply(api, session, replies_before, 120):
+        record("#247 candidate turn", False, f"send {status}")
+        return
+    handles = image_handles(api, session)
+    if len(handles) < 7:
+        record("#247 candidate handles", False, f"handles={handles}")
+        return
+
+    def has_reference(messages):
+        return any(image.get("detail") == "high" and "用户上传" in (image.get("label") or "")
+                   for message in messages for image in message.get("images") or [])
+
+    def has_contact_sheet(messages):
+        for message in messages:
+            for image in message.get("images") or []:
+                label = image.get("label") or ""
+                named = [handle for handle in handles if handle in label]
+                if image.get("detail") == "high" and len(named) >= 6:
+                    return True
+        return False
+
+    follow_up = last_request_with(lambda messages: has_reference(messages) and has_contact_sheet(messages))
+    record("#247 six candidates come back as a handle-labelled contact sheet", follow_up is not None,
+           f"handles={handles} request={'found' if follow_up else 'missing'}")
+    if follow_up is None:
+        return
+    # The same turn's reference picture is still there, at high detail, beside
+    # the one contact-sheet picture.
+    record("#247 the same-turn reference is not squeezed out", has_reference(follow_up["messages"]),
+           f"images={[(image.get('detail'), image.get('label')) for message in follow_up['messages'] for image in message.get('images') or []]}")
+
+    # Name one candidate and look closely: the crop must arrive at the crop
+    # detail with its handle and region in the label.
+    target = handles[2]
+    replies_before = assistant_reply_count(api, session)
+    inspect = ('[[fake:tool:inspect_image {"image":"' + target +
+               '","region":{"x":0.2,"y":0.2,"width":0.5,"height":0.5},"show_picture":true}]]')
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", {
+        "content": "放大看看这张 " + inspect, "creative_domain": "image", "ai_model": image_model,
+    })
+    if status not in (200, 201, 202) or not wait_agent_reply(api, session, replies_before, 90):
+        record("#247 inspect crop turn", False, f"send {status}")
+        return
+
+    def has_crop_picture(messages):
+        for message in messages:
+            for image in message.get("images") or []:
+                label = image.get("label") or ""
+                if image.get("detail") == "high" and target in label and "局部裁剪" in label and "×" in label:
+                    return True
+        return False
+
+    crop_request = last_request_with(has_crop_picture)
+    record("#247 the named original opens at its crop detail", crop_request is not None,
+           f"handle={target} request={'found' if crop_request else 'missing'}")
+
+    # 3D self-check: a render keeps its own place at high detail beside the
+    # result thumbnail on the next turn.
+    model3d = next((item["model_id"] for item in offerings.values()
+                    if item.get("available") and item.get("capability") == "text-to-3d"), "")
+    if not model3d:
+        record("#247 3D render section", False, "no text-to-3d offering")
+        return
+    render_session = new_session(api)
+    api.json("PUT", f"/api/v1/chat/sessions/{render_session}/approval", {approval_field: "auto"})
+    api.json("PUT", f"/api/v1/chat/sessions/{render_session}/model3d", {"explicit_model_3d": model3d})
+    replies_before = assistant_reply_count(api, render_session)
+    status, _ = api.json("POST", f"/api/chat/sessions/{render_session}/messages", {
+        "content": "做一个立方体 [[fake:tool:create_model_3d {\"prompt\":\"a plain cube\"}]]",
+        "creative_domain": "model-3d", "ai_model": model3d,
+    })
+    task = None
+    end = time.time() + 120
+    while time.time() < end and task is None:
+        for candidate in session_tasks(api, render_session):
+            if candidate.get("capability") == "text-to-3d" and candidate.get("state") == "SUCCEEDED":
+                task = candidate
+                break
+        time.sleep(0.5)
+    if task is not None:
+        task = wait_task(api, task.get("task_id") or task.get("id"), 120)
+    if status not in (200, 201, 202) or task is None or task.get("state") != "SUCCEEDED":
+        record("#247 3D render section", False, f"task={task}")
+        return
+    wait_agent_reply(api, render_session, replies_before, 90)
+    task_id = task.get("task_id") or task.get("id")
+    replies_before = assistant_reply_count(api, render_session)
+    render_marker = '[[fake:tool:render_model_views {"model":"' + task_id + '","views":["front"]}]]'
+    status, _ = api.json("POST", f"/api/chat/sessions/{render_session}/messages", {
+        "content": "渲染正视图自检 " + render_marker,
+        "creative_domain": "model-3d", "ai_model": model3d,
+    })
+    wait_agent_reply(api, render_session, replies_before, 120)
+    if status not in (200, 201, 202):
+        record("#247 3D render turn", False, f"send {status}")
+        return
+    # A plain next turn: the request's history must carry both pictures.
+    replies_before = assistant_reply_count(api, render_session)
+    api.json("POST", f"/api/chat/sessions/{render_session}/messages", {
+        "content": "这一版怎么样", "creative_domain": "model-3d", "ai_model": model3d,
+    })
+    wait_agent_reply(api, render_session, replies_before, 90)
+
+    def has_render_and_thumbnail(messages):
+        render = thumbnail = False
+        for message in messages:
+            for image in message.get("images") or []:
+                label = image.get("label") or ""
+                if image.get("detail") == "high" and "自检渲染图" in label:
+                    render = True
+                if image.get("detail") == "high" and "预览缩略图" in label:
+                    thumbnail = True
+        return render and thumbnail
+
+    render_request = last_request_with(has_render_and_thumbnail)
+    record("#247 a self-check render is high detail and keeps its own place", render_request is not None,
+           "request found" if render_request else "no request carried both the render and the thumbnail")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,vision-budget,faults")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
@@ -1561,7 +1764,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality", "image-self-check"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality", "image-self-check", "vision-budget"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -1588,6 +1791,8 @@ def main():
                 scenario_agent_quality(api, offerings, args.report or os.path.join(work, "agent-quality"))
             if "image-self-check" in selected:
                 scenario_image_self_check(api, offerings, work)
+            if "vision-budget" in selected:
+                scenario_vision_budget(api, offerings, work)
             processes.stop(child)
         if "faults" in selected:
             for scenario in [name for name in FAULTS if not args.faults or name in args.faults.split(",")]:
