@@ -735,15 +735,11 @@ func (executor *Executor) executeProcessing(
 	}
 	input := map[string]any{chosen.binding.Parameter: chosen.binding.Value}
 	if raw, present := arguments[processing.PromptArgument]; present && processing.PromptArgument != "" {
-		prompt := rawString(raw)
 		parameter, ok := semanticParameter(chosen.offering, generation.SemanticPrompt)
 		if !ok {
 			return executor.reject(command, executor.fillText(command, messages.ArgumentUnsupported, "{argument}", processing.PromptArgument))
 		}
-		if runes := []rune(prompt); parameter.MaxLength > 0 && len(runes) > parameter.MaxLength {
-			prompt = string(runes[:parameter.MaxLength])
-		}
-		input[parameter.Name] = prompt
+		input[parameter.Name] = rawString(raw)
 	}
 	// A style reference must be asked for (by index or by the UI selection):
 	// an image that merely sits in the current turn is not one, because it
@@ -812,6 +808,14 @@ func (executor *Executor) executeProcessing(
 		}
 		input[name] = decoded
 	}
+	// #249: a processing step follows the Schema's over-limit policy for its
+	// prompt, like every generation tool. The processing path must never cut
+	// the prompt itself and then submit: over_limit=refuse stops here, before
+	// PrepareInput, so no Task exists and nothing is charged.
+	promptTrace, refusal, refused := executor.applyProcessingPromptLength(command, chosen.offering, input)
+	if refused {
+		return refusal, nil
+	}
 	if gaps := executor.inputGaps(command, chosen.offering, input); len(gaps) > 0 {
 		return executor.reject(command, executor.fillText(command, messages.InvalidInput, "{detail}", strings.Join(gaps, "; ")))
 	}
@@ -819,8 +823,12 @@ func (executor *Executor) executeProcessing(
 	if err != nil {
 		return chat.ToolResult{NoSubmission: true}, err
 	}
-	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, "",
-		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, observe)
+	prompt := ""
+	if promptTrace != nil {
+		prompt = promptTrace.Final
+	}
+	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, prompt,
+		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, observe, promptTrace)
 	return executor.processingOutcome(command, result, err, executor.inputShape(command, input))
 }
 
@@ -1002,6 +1010,12 @@ func (executor *Executor) executeMultiSourceProcessing(
 	if rejection := executor.applyProcessingParameterArguments(command, chosen, processing, arguments, input, false); rejection != nil {
 		return executor.reject(command, rejection.message)
 	}
+	// #249: the same Schema over-limit policy applies to every processing
+	// path, including one whose prompt came from a mapped parameter argument.
+	promptTrace, refusal, refused := executor.applyProcessingPromptLength(command, chosen.offering, input)
+	if refused {
+		return refusal, nil
+	}
 	if gaps := executor.inputGaps(command, chosen.offering, input); len(gaps) > 0 {
 		return executor.reject(command, executor.fillText(command, messages.InvalidInput, "{detail}", strings.Join(gaps, "; ")))
 	}
@@ -1009,8 +1023,12 @@ func (executor *Executor) executeMultiSourceProcessing(
 	if err != nil {
 		return chat.ToolResult{NoSubmission: true}, err
 	}
-	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, "",
-		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, observe)
+	prompt := ""
+	if promptTrace != nil {
+		prompt = promptTrace.Final
+	}
+	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, prompt,
+		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, observe, promptTrace)
 	return executor.processingOutcome(command, result, err, executor.inputShape(command, input))
 }
 

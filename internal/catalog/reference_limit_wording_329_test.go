@@ -25,32 +25,49 @@ func TestReferenceCapacityNoPromptIsOptionalAndPrivate(t *testing.T) {
 	}
 	app := doc["application"].(map[string]any)
 	chat := app["chat"].(map[string]any)
+	historicalTool := ""
 	for _, item := range chat["tools"].([]any) {
 		tool := item.(map[string]any)
 		if tool["name"] == "create_model_3d_from_image" {
 			note := tool["reference_capacity_note"].(map[string]any)
-			if note["no_prompt"] == nil {
-				t.Fatal("default catalog has no no_prompt guidance")
+			if note["no_prompt"] != nil {
+				t.Fatal("default catalog still carries the legacy no_prompt copy; Offering knowledge states it")
 			}
-			delete(note, "no_prompt")
+			// A historical Catalog may still declare the per-tool copy; the
+			// loader must accept it as the fallback for an Offering without
+			// knowledge (#249).
+			note["no_prompt"] = "When this tool uses the selected model ({model}) for image-to-3D, the tool's text prompt is not sent to this service."
+			historicalTool = tool["name"].(string)
+		}
+	}
+	if historicalTool == "" {
+		t.Fatal("default catalog has no create_model_3d_from_image tool")
+	}
+	current, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range current.Application().Chat.Tools {
+		if tool.Name == "create_model_3d_from_image" && tool.ReferenceCapacityNote.NoPrompt != "" {
+			t.Fatal("default catalog still carries the legacy no_prompt copy")
 		}
 	}
 	old, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	product, err := catalog.Load(strings.NewReader(string(old)))
+	history, err := catalog.Load(strings.NewReader(string(old)))
 	if err != nil {
-		t.Fatalf("old catalog without no_prompt: %v", err)
+		t.Fatalf("historical catalog with no_prompt: %v", err)
 	}
-	for _, tool := range product.Application().Chat.Tools {
+	declared := false
+	for _, tool := range history.Application().Chat.Tools {
 		if tool.Name == "create_model_3d_from_image" && tool.ReferenceCapacityNote.NoPrompt != "" {
-			t.Fatal("omitted no_prompt did not remain empty")
+			declared = true
 		}
 	}
-	current, err := catalog.LoadDefault()
-	if err != nil {
-		t.Fatal(err)
+	if !declared {
+		t.Fatal("historical no_prompt did not stay declared")
 	}
 	public, err := json.Marshal(current.Application().Public())
 	if err != nil {

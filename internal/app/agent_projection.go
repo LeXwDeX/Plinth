@@ -18,6 +18,9 @@ type agentOfferingView struct {
 	// Description is the Offering's Schema description: what the step keeps
 	// or changes (for example textures or size, #130). Absent when undeclared.
 	Description string `json:"description,omitempty"`
+	// Knowledge is the Offering's own prompt craft and model-quality
+	// statements (#249). Sources stay maintainer-facing and are not projected.
+	Knowledge *agentOfferingKnowledgeView `json:"knowledge,omitempty"`
 	// An absent capacity is unknown, not a single-picture limit.
 	ReferenceImageMax int `json:"reference_image_max,omitempty"`
 	EstimatedCredits  int `json:"estimated_credits,omitempty"`
@@ -40,6 +43,57 @@ type agentOfferingView struct {
 	// refused before any step is paid, so the Agent picks compatible
 	// parameters up front (#121).
 	ChainLimits []agentChainLimitView `json:"chain_limits,omitempty"`
+}
+
+// agentOfferingKnowledgeView is the Agent-facing part of Offering knowledge:
+// what the model is good and bad at, how to write its prompt, and what a
+// reference picture controls. The public three statements are here as well;
+// sources and secrets are not.
+type agentOfferingKnowledgeView struct {
+	Strengths    []string                 `json:"strengths,omitempty"`
+	Weaknesses   []string                 `json:"weaknesses,omitempty"`
+	Limitations  []string                 `json:"limitations,omitempty"`
+	Prompt       *agentOfferingPromptView `json:"prompt,omitempty"`
+	ReferenceUse []string                 `json:"reference_use,omitempty"`
+}
+
+type agentOfferingPromptView struct {
+	Language       string `json:"language,omitempty"`
+	Form           string `json:"form,omitempty"`
+	Unit           string `json:"unit,omitempty"`
+	WordsMin       int    `json:"words_min,omitempty"`
+	WordsMax       int    `json:"words_max,omitempty"`
+	ReadsText      *bool  `json:"reads_text,omitempty"`
+	NegativePrompt *bool  `json:"negative_prompt,omitempty"`
+}
+
+func agentOfferingKnowledge(knowledge *schema.OfferingKnowledge) *agentOfferingKnowledgeView {
+	if knowledge == nil {
+		return nil
+	}
+	view := &agentOfferingKnowledgeView{
+		Strengths:    append([]string(nil), knowledge.Strengths...),
+		Weaknesses:   append([]string(nil), knowledge.Weaknesses...),
+		Limitations:  append([]string(nil), knowledge.Limitations...),
+		ReferenceUse: append([]string(nil), knowledge.ReferenceUse...),
+	}
+	if knowledge.Prompt != nil {
+		prompt := knowledge.Prompt
+		view.Prompt = &agentOfferingPromptView{
+			Language:       prompt.Language,
+			Form:           prompt.Form,
+			Unit:           prompt.Unit,
+			WordsMin:       prompt.WordsMin,
+			WordsMax:       prompt.WordsMax,
+			ReadsText:      prompt.ReadsText,
+			NegativePrompt: prompt.NegativePrompt,
+		}
+	}
+	if len(view.Strengths) == 0 && len(view.Weaknesses) == 0 && len(view.Limitations) == 0 &&
+		view.Prompt == nil && len(view.ReferenceUse) == 0 {
+		return nil
+	}
+	return view
 }
 
 // agentChainLimitView is one later step's source limit seen from the step that
@@ -178,6 +232,7 @@ func buildAgentOfferingsProjection(
 				OfferingID:  string(offering.ID),
 				ModelID:     offering.ModelID,
 				Description: offering.Description,
+				Knowledge:   agentOfferingKnowledge(offering.Knowledge),
 			}
 			for _, parameter := range offering.Parameters {
 				if parameter.Semantic == generation.SemanticReferenceImage && parameter.Type == "asset-array" && parameter.MaxItems > 0 {

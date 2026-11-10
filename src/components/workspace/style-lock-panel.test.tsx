@@ -152,6 +152,19 @@ describe('StyleLockSection', () => {
     fireEvent.click(toggle);
     expect(body?.hidden).toBe(true);
   });
+
+  // #254: the 功能 tab body owns the single scrollport; the style-lock body must not scroll or cap itself.
+  it('leaves vertical scrolling to the 功能 tab instead of its own body', () => {
+    const { container } = render(<StyleLockSection sessionId="s1" />);
+    const section = screen.getByTestId('style-lock-section');
+    expect(section.className).toContain('shrink-0');
+    expect(section.className).not.toMatch(/overflow-y-auto|max-h/);
+    const body = container.querySelector('#style-lock-body');
+    expect(body).not.toBeNull();
+    expect(body!.className).not.toMatch(/overflow-y-auto|max-h/);
+    // No hidden second scrollbar even in a short viewport: the whole body is plain content height.
+    expect(section.innerHTML).not.toContain('overflow-y-auto');
+  });
 });
 
 describe('style-lock draft persistence', () => {

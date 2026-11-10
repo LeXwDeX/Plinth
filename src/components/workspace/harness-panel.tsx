@@ -160,8 +160,10 @@ function HarnessEditor({ sessionId, ownerId, object, harness, initial, message, 
   const saveReason = !saveBlocked ? undefined : text(`ui.unavailable.reason.harness.${operation?.unavailable_reason ? 'operation_unavailable' : !offering && !draft.offering_id ? 'no_offering' : 'offering_unavailable'}`);
   const saveButton = <Action className="flex-1" disabled={harness.busy || !dirty || saveBlocked} loading={harness.busy} onClick={() => void save(harnessSelectionInput(draft, offering))}>{text('ui.harness.save')}</Action>;
   const savedOffering = Object.values(offerings ?? {}).flat().find(item => item.id === initial.offering_id && item.revision === initial.offering_revision);
-  return <section className="flex h-full min-h-0 flex-col text-xs" aria-label={text('ui.harness.title')} data-testid="harness-panel">
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable]">
+  // Content height only: the 功能 tab body owns the single vertical scroll container (#254). The footer
+  // sticks to the bottom of that scrollport instead of being pinned outside a second scroller.
+  return <section className="flex shrink-0 flex-col text-xs" aria-label={text('ui.harness.title')} data-testid="harness-panel">
+    <div className="flex flex-col">
       <CollapsibleSection id={`${id}-section-operations`} title={text('ui.harness.operation_section')} summary={operation?.label}
         open={openSections.operations} onOpenChange={toggleSection('operations')} data-testid="harness-section-operations" bodyClassName="space-y-4 p-3">
         {declarations.groups.map(group => {
@@ -218,7 +220,7 @@ function HarnessEditor({ sessionId, ownerId, object, harness, initial, message, 
         ? notice(`status_${status.status}`, [text(`ui.harness.status_${status.status}`), status.reason ? schemaText(schema, status.reason) || status.reason : ''].filter(Boolean).join(' '), 'harness-status-unavailable')
         : <p>{text(`ui.harness.status_${status.status}`)}</p>}{status.reason && status.status !== 'unavailable' && status.status !== 'needs_input' ? <p>{schemaText(schema, status.reason) || status.reason}</p> : null}{status.price_mode === 'native' || savedOffering?.price_mode === 'native' ? <p>{parseNativeQuote(status.native_quote) ? formatSchemaText(schemaText(schema, 'ui.pricing.default_estimate'), { amount: formatNativePrice(parseNativeQuote(status.native_quote)!.total_amount, parseNativeQuote(status.native_quote)!.unit_label) ?? schemaText(schema, 'ui.pricing.unknown') }) : schemaText(schema, 'ui.pricing.unknown')}</p> : savedOffering?.credits_metered ? <p>{schemaCountMessage(schema, 'ui.harness.estimated_credits', status.estimated_credits ?? 0, { credits: status.estimated_credits ?? 0 })}</p> : null}{status.can_propose ? <p>{text('ui.harness.can_propose')}</p> : null}{status.missing_parameters.length ? <p>{formatSchemaText(text('ui.harness.missing'), { parameters: status.missing_parameters.map(name => savedOffering?.parameters.find(parameter => parameter.name === name)?.label ?? text('ui.harness.required_input')).join(text('ui.harness.separator')) })}</p> : null}</div>
     </div>
-    <footer className="space-y-2 border-t border-border p-3">
+    <footer className="sticky bottom-0 space-y-2 border-t border-border bg-card p-3">
       <div className="min-h-5 space-y-1" data-testid="harness-feedback">
         {message && !(dirty && message === 'ui.harness.saved') ? <p role={message === 'ui.harness.saved' ? 'status' : 'alert'} className={cn('leading-5', message !== 'ui.harness.saved' && 'text-destructive')}>{text(message)}</p> : dirty ? <p role="status" className="leading-5 text-muted-foreground">{text('ui.harness.unsaved')}</p> : null}
       </div>

@@ -136,6 +136,14 @@ type Offering struct {
 	// list_offerings (#130). It is Offering copy: the copy guards and the
 	// English offering_texts apply to it.
 	Description string `json:"description,omitempty"`
+	// Knowledge is what the Offering says about itself (#249): its strengths,
+	// weaknesses, known limitations, prompt craft, how it uses reference
+	// pictures, and the sources that support the statements. It lets the
+	// Agent learn a model without a hand-written prompt and keeps the
+	// generated tool descriptions and the public model list derived from the
+	// same declaration. Missing statements render as unknown; they are not
+	// guessed.
+	Knowledge *OfferingKnowledge `json:"knowledge,omitempty"`
 	// CreditsMetered 声明该 Offering 的 Provider 按积分计费；未声明的
 	// Offering 不向用户展示积分（estimated_credits 仍用于内部审批与预估）。
 	CreditsMetered bool `json:"credits_metered,omitempty"`
@@ -486,4 +494,87 @@ type ImageProtocol struct {
 		MediaTypeField   string `json:"media_type_field"`
 		Role             string `json:"role"`
 	} `json:"response"`
+}
+
+// OfferingKnowledge is an Offering's self-description (#249). It is Schema
+// copy: Strengths, Weaknesses and Limitations are public and translated by
+// offering_texts; Prompt is Agent-facing prompt craft; ReferenceUse says what
+// a reference picture controls; Sources name the provider documents the
+// statements were checked against.
+type OfferingKnowledge struct {
+	Strengths    []string                  `json:"strengths,omitempty"`
+	Weaknesses   []string                  `json:"weaknesses,omitempty"`
+	Limitations  []string                  `json:"limitations,omitempty"`
+	Prompt       *OfferingPrompt           `json:"prompt,omitempty"`
+	ReferenceUse []string                  `json:"reference_use,omitempty"`
+	Sources      []OfferingKnowledgeSource `json:"sources,omitempty"`
+}
+
+// OfferingPrompt states how an Offering wants its text prompt written.
+// Language, Form and Unit are closed vocabularies; WordsMin/WordsMax bound the
+// advised length in Unit. ReadsText and NegativePrompt are pointers so an
+// undeclared value is unknown rather than false.
+type OfferingPrompt struct {
+	Language       string `json:"language,omitempty"`
+	Form           string `json:"form,omitempty"`
+	Unit           string `json:"unit,omitempty"`
+	WordsMin       int    `json:"words_min,omitempty"`
+	WordsMax       int    `json:"words_max,omitempty"`
+	ReadsText      *bool  `json:"reads_text,omitempty"`
+	NegativePrompt *bool  `json:"negative_prompt,omitempty"`
+}
+
+// OfferingKnowledgeSource is one provider document a knowledge statement was
+// checked against. CheckedAt is an ISO calendar date (YYYY-MM-DD).
+type OfferingKnowledgeSource struct {
+	Title     string `json:"title"`
+	URL       string `json:"url"`
+	CheckedAt string `json:"checked_at"`
+}
+
+// Prompt writing vocabularies.
+const (
+	PromptLanguageEnglish = "en"
+	PromptLanguageChinese = "zh"
+	PromptLanguageUnknown = "unknown"
+
+	PromptFormDescriptive = "descriptive"
+	PromptFormKeywords    = "keywords"
+	PromptFormUnknown     = "unknown"
+
+	PromptUnitWords      = "words"
+	PromptUnitCharacters = "characters"
+)
+
+// What a reference picture controls.
+const (
+	ReferenceUseNone        = "none"
+	ReferenceUseGeometry    = "geometry"
+	ReferenceUseTexture     = "texture"
+	ReferenceUseStyle       = "style"
+	ReferenceUseIdentity    = "identity"
+	ReferenceUseComposition = "composition"
+)
+
+// PublicOfferingKnowledge is the public projection of OfferingKnowledge: the
+// three model-quality statements a person reads. Prompt craft, reference use
+// and sources stay Agent- or maintainer-facing.
+type PublicOfferingKnowledge struct {
+	Strengths   []string `json:"strengths,omitempty"`
+	Weaknesses  []string `json:"weaknesses,omitempty"`
+	Limitations []string `json:"limitations,omitempty"`
+}
+
+// Public returns the public projection, or nil when nothing public is
+// declared (so an Offering without knowledge omits the field).
+func (knowledge *OfferingKnowledge) Public() *PublicOfferingKnowledge {
+	if knowledge == nil ||
+		(len(knowledge.Strengths) == 0 && len(knowledge.Weaknesses) == 0 && len(knowledge.Limitations) == 0) {
+		return nil
+	}
+	return &PublicOfferingKnowledge{
+		Strengths:   append([]string(nil), knowledge.Strengths...),
+		Weaknesses:  append([]string(nil), knowledge.Weaknesses...),
+		Limitations: append([]string(nil), knowledge.Limitations...),
+	}
 }

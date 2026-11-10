@@ -10,6 +10,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/promptenhance"
+	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 func TestServiceUsesSchemaProfileOfferingLimitAndConfiguredLLMFields(t *testing.T) {
@@ -184,4 +185,111 @@ func (agent *recordingAgent) Complete(
 ) (agents.Completion, error) {
 	agent.requests = append(agent.requests, request)
 	return agent.completion, nil
+}
+
+func boolPtr(value bool) *bool { return &value }
+
+func TestEnhancerSharesOfferingPromptGuidanceWithTheAgent(t *testing.T) {
+	taskCatalog, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := taskCatalog.Application().Chat
+	agent := &recordingAgent{completion: agents.Completion{Content: `{"prompt":"enhanced","negative_prompt":"negative"}`}}
+	english := generation.Offering{
+		ID: "a", ModelID: "english-model", Capability: generation.TextToImage,
+		Knowledge: &schemacontract.OfferingKnowledge{Prompt: &schemacontract.OfferingPrompt{
+			Language: "en", Form: "descriptive", Unit: "words", WordsMin: 30, WordsMax: 60,
+			ReadsText: boolPtr(true), NegativePrompt: boolPtr(false),
+		}},
+	}
+	chinese := generation.Offering{
+		ID: "b", ModelID: "chinese-model", Capability: generation.TextToImage,
+		Knowledge: &schemacontract.OfferingKnowledge{Prompt: &schemacontract.OfferingPrompt{
+			Language: "zh", Form: "keywords", Unit: "characters", WordsMin: 10, WordsMax: 40,
+			ReadsText: boolPtr(true), NegativePrompt: boolPtr(true),
+		}},
+	}
+	service, err := promptenhance.New(promptenhance.Config{
+		Offerings: offeringCatalog{english, chinese}, Schema: schema, Model: "llm", Agent: agent,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enhance := func(modelID string) promptenhance.Result {
+		t.Helper()
+		result, err := service.Enhance(context.Background(), promptenhance.Request{
+			Prompt: "a cat", Capability: generation.TextToImage, ModelID: modelID,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	englishResult := enhance("english-model")
+	englishPrompt := agent.requests[0].Messages[0].Content
+	chineseResult := enhance("chinese-model")
+	chinesePrompt := agent.requests[1].Messages[0].Content
+	if englishPrompt == chinesePrompt {
+		t.Fatal("two Offerings produced the same system prompt")
+	}
+	for _, needle := range []string{"write in English", "30-60 words", "not supported as a separate negative prompt"} {
+		if !strings.Contains(englishPrompt, needle) {
+			t.Fatalf("English guidance misses %q: %s", needle, englishPrompt)
+		}
+	}
+	for _, needle := range []string{"write in Chinese", "10-40 characters", "supported as a separate negative prompt"} {
+		if !strings.Contains(chinesePrompt, needle) {
+			t.Fatalf("Chinese guidance misses %q: %s", needle, chinesePrompt)
+		}
+	}
+	// The Offering without a negative-prompt input returns none, even when
+	// the model emitted one.
+	if englishResult.NegativePrompt != "" {
+		t.Fatalf("negative prompt = %q", englishResult.NegativePrompt)
+	}
+	if chineseResult.NegativePrompt != "negative" {
+		t.Fatalf("negative prompt = %q", chineseResult.NegativePrompt)
+	}
+
+	// An unknown model keeps the generic rules.
+	unknown, err := service.Enhance(context.Background(), promptenhance.Request{
+		Prompt: "a dog", Capability: generation.TextToImage, ModelID: "unknown-model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unknown.Prompt == "" || !strings.Contains(agent.requests[2].Messages[0].Content, schema.API.PromptEnhance.Profiles["image"].SystemPrompt[:20]) {
+		t.Fatalf("unknown model prompt = %q", agent.requests[2].Messages[0].Content)
+	}
+}
+
+func TestEnhancerExplainsAServiceThatDoesNotReadText(t *testing.T) {
+	taskCatalog, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := taskCatalog.Application().Chat
+	agent := &recordingAgent{completion: agents.Completion{Content: `{"prompt":"enhanced"}`}}
+	offering := generation.Offering{
+		ID: "image-only", ModelID: "image-only", Capability: generation.ImageToImage,
+		Knowledge: &schemacontract.OfferingKnowledge{Prompt: &schemacontract.OfferingPrompt{
+			ReadsText: boolPtr(false), NegativePrompt: boolPtr(false),
+		}},
+	}
+	service, err := promptenhance.New(promptenhance.Config{
+		Offerings: offeringCatalog{offering}, Schema: schema, Model: "llm", Agent: agent,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Enhance(context.Background(), promptenhance.Request{
+		Prompt: "change it", Capability: generation.ImageToImage, ModelID: "image-only",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	system := agent.requests[0].Messages[0].Content
+	if !strings.Contains(system, "does not read a text prompt") || !strings.Contains(system, "accepts no negative prompt") {
+		t.Fatalf("system prompt = %q", system)
+	}
 }

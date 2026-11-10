@@ -278,7 +278,10 @@ func Load(reader io.Reader) (*Catalog, error) {
 	if err := validateNativeBalanceUnits(result.application.Runtime, result.byID); err != nil {
 		return nil, err
 	}
-	if err := validateChatToolOfferingSelection(result.application.Chat.Tools, result.byID); err != nil {
+	if err := validateChatToolOfferingSelection(result.application.Chat, result.byID); err != nil {
+		return nil, fmt.Errorf("application.chat: %w", err)
+	}
+	if err := validateOfferingKnowledgeCoverage(result.application.Chat.Agent.OfferingKnowledge, result.byID); err != nil {
 		return nil, fmt.Errorf("application.chat: %w", err)
 	}
 	if err := validateModel3DUsageOfferings(
@@ -363,6 +366,7 @@ func (raw rawOffering) toOffering() schemacontract.Offering {
 		ModelID:                       raw.ModelID,
 		ModelName:                     raw.ModelName,
 		Description:                   raw.Description,
+		Knowledge:                     raw.Knowledge,
 		Capability:                    raw.Capability,
 		Domain:                        raw.Domain,
 		AdapterKey:                    raw.AdapterKey,

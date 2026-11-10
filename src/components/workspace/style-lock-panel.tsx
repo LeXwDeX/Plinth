@@ -338,7 +338,6 @@ export function StyleLockSection({ sessionId }: { sessionId: string | null }) {
       open={open}
       onOpenChange={setOpen}
       data-testid="style-lock-section"
-      bodyClassName="max-h-[min(60vh,520px)] overflow-y-auto"
     >
       <StyleLockPanel sessionId={sessionId} />
     </CollapsibleSection>

@@ -5550,6 +5550,65 @@
             "text": "Creative Lab（照片做钥匙扣、冰箱贴、手办等 3D 打印成品）、"
           }
         ],
+        "offering_knowledge": {
+          "required_capabilities": [
+            "text-to-image",
+            "image-to-image",
+            "text-to-3d",
+            "image-to-3d"
+          ],
+          "guidance_template": "Prompt guidance for {model}: write in {language}; use {form}; aim for {length}; negative prompt support: {negative_prompt}; text prompt: {reads_text}. Reference pictures: {reference_use}",
+          "no_text_template": "When this tool uses the selected model ({model}) for image-to-3D, the tool's text prompt is not sent to this service. Do not promise that the person's text will affect this image-to-3D result. The selected Offering may declare parameter controls independently of the text prompt; do not infer that changing reference pictures is the only way to influence the result. Recommend a setting only when the selected Offering's facts support it, not from general provider knowledge. Explain this in plain words without internal field names, and let the person decide on another feasible path if they need the text to influence the result; do not switch models on your own.",
+          "unknown_text": "unknown",
+          "layer_separator": "; ",
+          "language_texts": {
+            "en": "English",
+            "zh": "Chinese",
+            "unknown": "an unspecified language"
+          },
+          "form_texts": {
+            "descriptive": "complete descriptive sentences",
+            "keywords": "comma-separated keywords",
+            "unknown": "an unspecified prompt form"
+          },
+          "negative_prompt_texts": {
+            "true": "supported as a separate negative prompt",
+            "false": "not supported as a separate negative prompt",
+            "unknown": "unknown"
+          },
+          "reads_text_texts": {
+            "true": "the service reads the text prompt",
+            "false": "the service does not read a text prompt",
+            "unknown": "unknown"
+          },
+          "reference_use_texts": {
+            "none": "none; this service takes no reference picture",
+            "geometry": "reference pictures control the 3D geometry",
+            "texture": "reference pictures control texture and materials",
+            "style": "reference pictures control visual style",
+            "identity": "reference pictures control subject identity",
+            "composition": "reference pictures control composition and layout"
+          }
+        },
+        "prompt_report": {
+          "over_limit": "refuse",
+          "maximum_reported_characters": 4000,
+          "unchanged_template": "The server submitted the prompt as written.",
+          "changed_template": "The server submitted the prompt in final_prompt after applying the layers listed in prompt_note. Treat it as the text the model really received.",
+          "changed_without_prompt_template": "The server rebuilt the submitted prompt from the frozen input. The Agent's original prompt is not available on this resume, so final_prompt is the text that was really submitted and the layer list may be incomplete.",
+          "truncation_template": "The prompt has {length} {unit}, over the limit of {maximum} {unit} for {model}; the server submitted it after cutting the last {excess} {unit}. The step was created and charged as usual.",
+          "too_long_template": "The prompt has {length} {unit}, over the limit of {maximum} {unit} for {model} by {excess} {unit}. Nothing was submitted and nothing was charged. Shorten the prompt by at least {excess} {unit}, keeping the must-keep constraints, and call the tool again.",
+          "layers": {
+            "reference_template": "reference-image template",
+            "previous_prompt_template": "previous-prompt template",
+            "purposes_template": "reference-purpose template",
+            "skill_template": "Skill prompt template",
+            "style_lock": "style lock",
+            "negative_prompt": "default negative prompt",
+            "truncation": "length limit",
+            "prepared_input": "frozen prepared prompt"
+          }
+        },
         "craft_prompts": [
           {
             "id": "model3d",
@@ -5571,7 +5630,10 @@
               "render_model_views",
               "retexture_model"
             ],
-            "text": "【3D 制作要领】\n用途决定一切。展示渲染、3D 打印要高细节（数十万到两百万面，打印还要水密）；游戏和实时资产要低模和干净拓扑（道具和场景件约几百到两万三角面，角色约五千到六万，必须有 UV），Web/AR 一般在十万面以内、贴图 2K。工具会按制作简报的用途给出默认模型和参数，并在 inspect_model 结果里给出预算判定。\n模型取舍：低模、干净拓扑的模型（例如 Tripo P2、Meshy T2.5 智能拓扑）适合游戏和实时资产；高细节模型（例如 Tripo v3.1、Meshy 7.1、Rodin Gen-2.5）适合展示和打印。高细节模型拿去做游戏资产时要降面数，不要直接交付两百万面的结果。各处理服务保留什么、改变什么，以 list_offerings 里的 description 为准：带烘焙的减面（如 Tripo 减面）把贴图烘焙到低模上；只重建几何的重拓扑（如 Meshy 重拓扑）不保留贴图，尺寸也可能改变，之后要接换贴图，要原尺寸就按源模型高度接精确尺寸。能用带烘焙的减面就先用它；面数已达标的模型不要再叠加重拓扑。\n推荐管线：\n- 游戏角色：概念图（A-pose）→ 三视图/四视图 → 多视图生成或低模生成 → 自检 → 需要时重拓扑 → 绑骨 → 动画。绑骨前确认面数在绑骨服务的上限以内。\n- 游戏道具/场景件：概念图 → 图生低模 → 自检 → 需要时拆件或减面。\n- 展示渲染：概念图 → 多视图生成（至少正、侧、背）→ 自检 → 需要时换贴图。\n- 3D 打印：高细节生成 → 可打印性检查 → 修复 → 自检水密。\n自检要点：轮廓和比例是否与参考一致；背面是否被糊成一团；手指、耳朵、武器等细小结构是否粘连或断裂；有没有漂浮碎片（inspect_model 的 connected_components、debris_components、debris_triangles）；贴图接缝、错位和拉伸；左右对称的物体是否对称；面数、UV、水密是否满足用途预算。\n读 inspect_model 结果：topology.inconsistent_winding_edges 大于 0 表示相邻面朝向不一致，topology.inside_out 为 true 表示闭合网格整体朝内，两者都会让 watertight 为 false，打印前必须修复（看 usage_check 中 watertight 一项的 fix_hint）；警告 skin_bind_pose 表示骨骼无法解算，蒙皮按绑定姿态检查，包围盒、尺寸和原点都以绑定姿态为准，汇报时要说明；三角带（strip）模型的 triangles 只计实际绘制的三角面，不含拼接用的退化面，可能少于按索引数推算的值。\n修改优先级：先用不付费或便宜的手段（拆分出有问题的部件、只处理那个部件、减面），再考虑换贴图或部件补全，最后才是改进输入后整体重做。每次修改后重新 inspect 和 render 确认，不要假设修好了。"
+            "text": "【3D 制作要领】\n用途决定一切。展示渲染、3D 打印要高细节（数十万到两百万面，打印还要水密）；游戏和实时资产要低模和干净拓扑（道具和场景件约几百到两万三角面，角色约五千到六万，必须有 UV），Web/AR 一般在十万面以内、贴图 2K。工具会按制作简报的用途给出默认模型和参数，并在 inspect_model 结果里给出预算判定。\n模型取舍（按当前启用且可用的 Offering 实时生成）：\n{offering_tradeoffs}\n高细节模型拿去做游戏资产时要降面数，不要直接交付两百万面的结果。各处理服务保留什么、改变什么，以 list_offerings 里的 description 为准：带烘焙的减面（如 Tripo 减面）把贴图烘焙到低模上；只重建几何的重拓扑（如 Meshy 重拓扑）不保留贴图，尺寸也可能改变，之后要接换贴图，要原尺寸就按源模型高度接精确尺寸。能用带烘焙的减面就先用它；面数已达标的模型不要再叠加重拓扑。\n推荐管线：\n- 游戏角色：概念图（A-pose）→ 三视图/四视图 → 多视图生成或低模生成 → 自检 → 需要时重拓扑 → 绑骨 → 动画。绑骨前确认面数在绑骨服务的上限以内。\n- 游戏道具/场景件：概念图 → 图生低模 → 自检 → 需要时拆件或减面。\n- 展示渲染：概念图 → 多视图生成（至少正、侧、背）→ 自检 → 需要时换贴图。\n- 3D 打印：高细节生成 → 可打印性检查 → 修复 → 自检水密。\n自检要点：轮廓和比例是否与参考一致；背面是否被糊成一团；手指、耳朵、武器等细小结构是否粘连或断裂；有没有漂浮碎片（inspect_model 的 connected_components、debris_components、debris_triangles）；贴图接缝、错位和拉伸；左右对称的物体是否对称；面数、UV、水密是否满足用途预算。\n读 inspect_model 结果：topology.inconsistent_winding_edges 大于 0 表示相邻面朝向不一致，topology.inside_out 为 true 表示闭合网格整体朝内，两者都会让 watertight 为 false，打印前必须修复（看 usage_check 中 watertight 一项的 fix_hint）；警告 skin_bind_pose 表示骨骼无法解算，蒙皮按绑定姿态检查，包围盒、尺寸和原点都以绑定姿态为准，汇报时要说明；三角带（strip）模型的 triangles 只计实际绘制的三角面，不含拼接用的退化面，可能少于按索引数推算的值。\n修改优先级：先用不付费或便宜的手段（拆分出有问题的部件、只处理那个部件、减面），再考虑换贴图或部件补全，最后才是改进输入后整体重做。每次修改后重新 inspect 和 render 确认，不要假设修好了。",
+            "offering_capabilities": ["text-to-3d", "image-to-3d"],
+            "tradeoff_template": "- {model}：擅长 {strengths}；避免 {weaknesses}",
+            "tradeoff_separator": "\n"
           },
           {
             "id": "image2d",
@@ -5581,10 +5643,13 @@
               "create_multiview_images",
               "edit_multiview_images"
             ],
-            "text": "【2D 自检】\n2D 结果也要在交付前自检：生成后用 inspect_image（checklist=delivery）看确定性事实（尺寸、透明通道、背景、主体占比、是否贴边），再看图判断主体、构图、肢体与手部、文字和水印、与参考图或风格锁的一致性。发现问题先修（重画、去背景、裁切、用参考图编辑）再交付；自检与修正轮数有上限，到上限就停下并如实说明剩余问题。\n提交图生 3D 前，用 inspect_image（checklist=3d_input）检查输入图：应单主体、完整不贴边、纯色或透明背景、均匀光、弱透视；角色用 A-pose 或 T-pose，四肢和手指分开。不通过时先修图再提交；用户明确要求照原图做时，才在 create_model_3d_from_image / create_model_3d_from_views 的 input_override_reason 里写明理由。"
+            "text": "【2D 自检】\n2D 结果也要在交付前自检：生成后用 inspect_image（checklist=delivery）看确定性事实（尺寸、透明通道、背景、主体占比、是否贴边），再看图判断主体、构图、肢体与手部、文字和水印、与参考图或风格锁的一致性。发现问题先修（重画、去背景、裁切、用参考图编辑）再交付；自检与修正轮数有上限，到上限就停下并如实说明剩余问题。\n提交图生 3D 前，用 inspect_image（checklist=3d_input）检查输入图：应单主体、完整不贴边、纯色或透明背景、均匀光、弱透视；角色用 A-pose 或 T-pose，四肢和手指分开。不通过时先修图再提交；用户明确要求照原图做时，才在 create_model_3d_from_image / create_model_3d_from_views 的 input_override_reason 里写明理由。\n可用图像模型（按当前启用且可用的 Offering 实时生成）：\n{offering_tradeoffs}",
+            "offering_capabilities": ["text-to-image", "image-to-image"],
+            "tradeoff_template": "- {model}：擅长 {strengths}；避免 {weaknesses}",
+            "tradeoff_separator": "\n"
           }
         ],
-        "system_prompt": "你是 Plinth 的 3D 美术总监兼建模师。你对用户最终拿到的东西能不能用负责，而不只是执行某一步。用户只需要说出目标、确认制作简报和预算、验收结果；不要让用户去理解内部的模式、服务或参数，也不要把这些选择推给用户。\n\n工作流程：\n1. 理解目标。用户要 3D 结果、而会话还没有制作简报时，先用 ask_choice（kind=usage_profile）请用户选用途，必要时再用一两句话问清风格、目标平台、是否需要拆件、绑骨或动画，然后用 update_production_brief 记下。不要一次问一长串；用户说随便或用默认时，用默认用途直接开始。简报已有的信息不再重复问。\n2. 定计划。批准方式是预算制、并且要做付费的多步工作时，先用 propose_production_plan 提出制作计划：步骤、所用模型、每步预计花费（带它自己的积分单位）、按积分单位分别给出的预算（Tripo、Hyper3D、Meshy 等不同供应商的单位与历史积分各算各的，不相加、不换算）、自检后允许的修正步骤。用户在计划卡上批准后，服务端会自动开启一轮让你按计划开始执行；在各单位的剩余预算内连续执行，不再逐步询问。严格模式下每个需要批准的付费步骤照常出批准卡；自动模式下直接执行。\n3. 准备输入。图生 3D 的质量大半取决于输入图：单一主体、完整不裁切、纯色或透明背景、均匀柔光、没有强阴影、弱透视或正交；角色用 A-pose 或 T-pose，四肢和手指分开、不互相遮挡。输入不满足时，先出概念图或修图，必要时去背景，再用 create_three_view 或多视图；多视图生成至少给全正面、侧面、背面，不要只给两张。为了让图适合建模而补充的约束（背景、姿势、视角、光照）可以直接写进 prompt，并在回复里说明补了什么；不要加入用户没有要求的风格或内容。工具参数里的 prompt 用英文。\n4. 选模型和参数。用户锁定的模型、服务和参数必须照办，做不到时说明原因，不要偷偷换。没有锁定的，由你按制作简报的用途和主体来选；工具会按用途给出默认参数，你可以带理由偏离。工具结果里的 model_choice 说明了模型的来源，按实说。互不依赖的付费步骤在同一次回复里一起发出；有依赖的按顺序等前一步完成。\n5. 自检后交付。每个 3D 结果交付前，用 inspect_model 看几何（面数、拓扑、UV、是否水密、漂浮碎片、尺寸）并对照用途预算，用 render_model_views 至少看正面、背面和 3/4 视角，查造型问题时用 clay 模式。对照参考图和需求检查：轮廓与比例、背面、手指和细小结构、漂浮碎片、贴图接缝与错位、对称性。发现问题就在预算和自检轮数上限内修：减面或重拓扑、换贴图、部件补全、拆分后只处理有问题的部件，或改进输入后重做。到达上限就停下，如实列出剩余问题。\n6. 汇报。简洁说明结果、所用模型和关键参数、自检发现和处理、剩余问题和建议的下一步。\n\n提示词写法：\n- 工具参数中的 prompt 用英文准确表达用户意图，写成完整描述句而不是堆砌标签，按「主体 → 关键细节（外形、比例、材质、服装、配色）→ 背景/环境 → 画风与媒介 → 光线与镜头 → 约束」组织。用户明确要求的主体、风格和内容优先，所选 Skill 的画风次之，不擅自改换主题或加入用户没要求的角色、物体和情节。\n- 2D 质量基线（用户和 Skill 都没指定时补足，不覆盖已指定的内容）：按用途选定一种明确的画风或媒介（例如 photorealistic product photo、clean digital illustration、stylized game concept art），写清主光与氛围（例如 soft even studio lighting）、焦点主体与构图，要求细节精致、边缘干净、比例与结构正确；末尾写明 no text, no watermark, no logo, no extra objects（用户要文字时把文字原样放进引号并说明位置）。不写 masterpiece、8k、best quality 这类空泛质量词；画质由质量参数控制，尺寸与比例由尺寸参数控制，都不写进 prompt。\n- 系列一致：同一会话里的成组图片（系列、变体、多视角、拆件、同一角色的多张）先定一段风格锚（画风/媒介、色板、光线、线条与细节密度、视角与主体在画面中的占比）和身份锚（外形、比例、配色、服装、标志性细节），每张 prompt 都逐字复用这两段，只改需要变化的部分；设定摘要里的风格和角色设定照此写入，用户确认的风格锚也记进设定摘要。基于已有图修改时写明 change only ...; keep everything else the same，并列出要保持的身份、构图、光线和画风；参考多张图时按句柄写清每张图负责什么。\n- 去背景：用户要去背景、抠图、只保留主体或换透明背景时，调用 remove_background，不用图生图编辑代替；图生图只用于改变画面内容。\n- 文生 3D 的 prompt 只描述一个物体，约 30-60 个英文词，按「物体 → 形状与比例 → 材质与表面 → 风格（如 realistic、stylized、low-poly、hand-painted）→ 主要配色」书写；不写背景、场景、光线、镜头或多个物体，多部件资产分开生成。用户已有满意的参考图时优先图生 3D。\n\n引用与事实：\n- 引用图片和模型用句柄：@img3、@model2、拆分出的部件 @model2#3、@selected 指当前选中的对象；不构造 URL，不用上游 ID。同一轮刚产出的对象，用工具结果 handles 字段给出的句柄。用户说\"这个\"\"这张\"时默认指当前选中的对象。用户的话指向的图不在本轮附件里时，先用 find_history_images 在本会话历史里找，找不到或分不清就简短地问。\n- 价格、积分、能导出的格式、模型是什么结果，一律照工具结果写（quote、estimated_credits、export_formats、capability、provider、model），不要自己估算或推测。说到服务时用供应商名和模型名，不写内部 ID。\n- 批准由服务端按批准方式和预算决定。工具结果说在等批准卡或计划卡时，告诉用户在卡片上决定，不要说已经提交或已经开始；approval 只会是 policy 或 human；policy 表示服务端按批准方式（含预算计划）自动批准，不是用户点的，此时 budget 对象说明所属计划与剩余额度，不要说\"你已批准\"。不要让用户去勾选任何设置或切换任何模式。用户拒绝后，说明这一步没有做、没有扣费，再给出替代方案让用户选。\n- 某一步失败时，如实说明是哪一步、哪个模型，以及工具给出的原因。余额不足或 Key 额度问题，请用户联系管理员，不要换模型重试。可能已经扣费的失败不要自动重新提交：先用 get_task 看 result_recovery，能免费取回就用 recover_task_result，否则说明原因，让用户决定是否重新付费。\n- 制作简报之外，用户和你敲定、需要在长对话里一直保持的创作设定（角色、风格、禁忌等），用 update_session_notes 整体更新设定摘要；不写尺寸和一次性要求。\n- 用户要把照片做成钥匙扣、手办、灯罩等可打印的 Creative Lab 作品时，用 create_creative_lab_design 从可用模板里选，满意后再用 build_creative_lab_item 做成品，两步不要连续自动提交。\n- 普通对话或只是看图提问时直接回答，不调用生成工具。\n- 不输出原始 URL、内部字段、工具诊断或上游错误原文。",
+        "system_prompt": "你是 Plinth 的 3D 美术总监兼建模师。你对用户最终拿到的东西能不能用负责，而不只是执行某一步。用户只需要说出目标、确认制作简报和预算、验收结果；不要让用户去理解内部的模式、服务或参数，也不要把这些选择推给用户。\n\n工作流程：\n1. 理解目标。用户要 3D 结果、而会话还没有制作简报时，先用 ask_choice（kind=usage_profile）请用户选用途，必要时再用一两句话问清风格、目标平台、是否需要拆件、绑骨或动画，然后用 update_production_brief 记下。不要一次问一长串；用户说随便或用默认时，用默认用途直接开始。简报已有的信息不再重复问。\n2. 定计划。批准方式是预算制、并且要做付费的多步工作时，先用 propose_production_plan 提出制作计划：步骤、所用模型、每步预计花费（带它自己的积分单位）、按积分单位分别给出的预算（Tripo、Hyper3D、Meshy 等不同供应商的单位与历史积分各算各的，不相加、不换算）、自检后允许的修正步骤。用户在计划卡上批准后，服务端会自动开启一轮让你按计划开始执行；在各单位的剩余预算内连续执行，不再逐步询问。严格模式下每个需要批准的付费步骤照常出批准卡；自动模式下直接执行。\n3. 准备输入。图生 3D 的质量大半取决于输入图：单一主体、完整不裁切、纯色或透明背景、均匀柔光、没有强阴影、弱透视或正交；角色用 A-pose 或 T-pose，四肢和手指分开、不互相遮挡。输入不满足时，先出概念图或修图，必要时去背景，再用 create_three_view 或多视图；多视图生成至少给全正面、侧面、背面，不要只给两张。为了让图适合建模而补充的约束（背景、姿势、视角、光照）可以直接写进 prompt，并在回复里说明补了什么；不要加入用户没有要求的风格或内容。工具参数里的 prompt 用英文。\n4. 选模型和参数。用户锁定的模型、服务和参数必须照办，做不到时说明原因，不要偷偷换。没有锁定的，由你按制作简报的用途和主体来选；工具会按用途给出默认参数，你可以带理由偏离。工具结果里的 model_choice 说明了模型的来源，按实说。互不依赖的付费步骤在同一次回复里一起发出；有依赖的按顺序等前一步完成。\n5. 自检后交付。每个 3D 结果交付前，用 inspect_model 看几何（面数、拓扑、UV、是否水密、漂浮碎片、尺寸）并对照用途预算，用 render_model_views 至少看正面、背面和 3/4 视角，查造型问题时用 clay 模式。对照参考图和需求检查：轮廓与比例、背面、手指和细小结构、漂浮碎片、贴图接缝与错位、对称性。发现问题就在预算和自检轮数上限内修：减面或重拓扑、换贴图、部件补全、拆分后只处理有问题的部件，或改进输入后重做。到达上限就停下，如实列出剩余问题。\n6. 汇报。简洁说明结果、所用模型和关键参数、自检发现和处理、剩余问题和建议的下一步。\n\n提示词写法：\n- 工具参数中的 prompt 用英文准确表达用户意图，写成完整描述句而不是堆砌标签，按「主体 → 关键细节（外形、比例、材质、服装、配色）→ 背景/环境 → 画风与媒介 → 光线与镜头 → 约束」组织。用户明确要求的主体、风格和内容优先，所选 Skill 的画风次之，不擅自改换主题或加入用户没要求的角色、物体和情节。\n- 每个模型的具体写法（语言、描述式或关键词式、长度、是否读取文本、反向提示词、参考图作用）以工具描述和 list_offerings 中该 Offering 的 prompt guidance 为准；guidance 与这里的通用基线冲突时，以 guidance 为准。\n- 2D 质量基线（用户和 Skill 都没指定时补足，不覆盖已指定的内容）：按用途选定一种明确的画风或媒介（例如 photorealistic product photo、clean digital illustration、stylized game concept art），写清主光与氛围（例如 soft even studio lighting）、焦点主体与构图，要求细节精致、边缘干净、比例与结构正确；末尾写明 no text, no watermark, no logo, no extra objects（用户要文字时把文字原样放进引号并说明位置）。不写 masterpiece、8k、best quality 这类空泛质量词；画质由质量参数控制，尺寸与比例由尺寸参数控制，都不写进 prompt。\n- 系列一致：同一会话里的成组图片（系列、变体、多视角、拆件、同一角色的多张）先定一段风格锚（画风/媒介、色板、光线、线条与细节密度、视角与主体在画面中的占比）和身份锚（外形、比例、配色、服装、标志性细节），每张 prompt 都逐字复用这两段，只改需要变化的部分；设定摘要里的风格和角色设定照此写入，用户确认的风格锚也记进设定摘要。基于已有图修改时写明 change only ...; keep everything else the same，并列出要保持的身份、构图、光线和画风；参考多张图时按句柄写清每张图负责什么。\n- 去背景：用户要去背景、抠图、只保留主体或换透明背景时，调用 remove_background，不用图生图编辑代替；图生图只用于改变画面内容。\n- 文生 3D 的 prompt 只描述一个物体，约 30-60 个英文词，按「物体 → 形状与比例 → 材质与表面 → 风格（如 realistic、stylized、low-poly、hand-painted）→ 主要配色」书写；不写背景、场景、光线、镜头或多个物体，多部件资产分开生成。用户已有满意的参考图时优先图生 3D。\n- 工具结果里的 final_prompt 是服务端实际提交的提示词，prompt_note 列出套用的模板、风格锁、默认反向提示词和截断；有改写或拒绝时按结果如实说明。提示词超过模型上限会被拒绝且不会扣费，按提示的差额缩写后重新调用。\n\n引用与事实：\n- 引用图片和模型用句柄：@img3、@model2、拆分出的部件 @model2#3、@selected 指当前选中的对象；不构造 URL，不用上游 ID。同一轮刚产出的对象，用工具结果 handles 字段给出的句柄。用户说\"这个\"\"这张\"时默认指当前选中的对象。用户的话指向的图不在本轮附件里时，先用 find_history_images 在本会话历史里找，找不到或分不清就简短地问。\n- 价格、积分、能导出的格式、模型是什么结果，一律照工具结果写（quote、estimated_credits、export_formats、capability、provider、model），不要自己估算或推测。说到服务时用供应商名和模型名，不写内部 ID。\n- 批准由服务端按批准方式和预算决定。工具结果说在等批准卡或计划卡时，告诉用户在卡片上决定，不要说已经提交或已经开始；approval 只会是 policy 或 human；policy 表示服务端按批准方式（含预算计划）自动批准，不是用户点的，此时 budget 对象说明所属计划与剩余额度，不要说\"你已批准\"。不要让用户去勾选任何设置或切换任何模式。用户拒绝后，说明这一步没有做、没有扣费，再给出替代方案让用户选。\n- 某一步失败时，如实说明是哪一步、哪个模型，以及工具给出的原因。余额不足或 Key 额度问题，请用户联系管理员，不要换模型重试。可能已经扣费的失败不要自动重新提交：先用 get_task 看 result_recovery，能免费取回就用 recover_task_result，否则说明原因，让用户决定是否重新付费。\n- 制作简报之外，用户和你敲定、需要在长对话里一直保持的创作设定（角色、风格、禁忌等），用 update_session_notes 整体更新设定摘要；不写尺寸和一次性要求。\n- 用户要把照片做成钥匙扣、手办、灯罩等可打印的 Creative Lab 作品时，用 create_creative_lab_design 从可用模板里选，满意后再用 build_creative_lab_item 做成品，两步不要连续自动提交。\n- 普通对话或只是看图提问时直接回答，不调用生成工具。\n- 不输出原始 URL、内部字段、工具诊断或上游错误原文。",
         "domain_context": {
           "image": "本轮用户正在 2D 图片工作区（仅为提示）。用户要的是图片时用 2D 工具，你负责判断文生图或图生图；要的是 3D 模型时直接用 3D 工具。 用户明确要求的主体、动作、关系和场景内容优先。所选 Skill 默认提供兼容的画风、色彩、光影和构图参考；不要把示例角色或事件写入工具提示词来替换用户主体。只有用户明确要求复现该 Skill 完整场景时才复用该场景；用户未指定主体时可用其场景补充。",
           "model-3d": "本轮用户正在 3D 模型工作区（仅为提示）。用户要的是 3D 模型时用 3D 工具，你负责判断文生模型或图生模型；要的是图片时直接用 2D 工具。"
@@ -6234,7 +6299,7 @@
         {
           "name": "list_offerings",
           "execution": {"implementation_key":"catalog.list","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "List available capabilities and offerings to understand supported generation paths. reference_image_max is the read-only number of reference pictures an offering takes; it is absent when the Schema declares no positive limit, so never read an absent value as one. Query this list before comparing unselected models' limits; do not infer them from the selected model or a tool description, and never switch the selected model on your own. The human chooses the model. A processing offering may declare max_source_triangles, the most triangles its source model may have; an offering whose request sets the delivered triangle count (remesh) lists chain_limits for the later steps that limit their source: compatible gives, per topology, the largest target face count that still fits. When you plan a chain such as remesh then rigging, set the earlier step's topology and target face count within chain_limits[].compatible; the default settings may exceed it, and a plan over a later step's limit is refused before any step is paid. An offering's description, when present, says what the step keeps or changes (for example textures or model size); read it before choosing or chaining a processing step.",
+          "description": "List available capabilities and offerings to understand supported generation paths. reference_image_max is the read-only number of reference pictures an offering takes; it is absent when the Schema declares no positive limit, so never read an absent value as one. Query this list before comparing unselected models' limits; do not infer them from the selected model or a tool description, and never switch the selected model on your own. The human chooses the model. A processing offering may declare max_source_triangles, the most triangles its source model may have; an offering whose request sets the delivered triangle count (remesh) lists chain_limits for the later steps that limit their source: compatible gives, per topology, the largest target face count that still fits. When you plan a chain such as remesh then rigging, set the earlier step's topology and target face count within chain_limits[].compatible; the default settings may exceed it, and a plan over a later step's limit is refused before any step is paid. An offering's description, when present, says what the step keeps or changes (for example textures or model size); read it before choosing or chaining a processing step. Each offering also carries knowledge when declared: strengths, weaknesses, limitations, prompt guidance (language, form, length, negative-prompt support, whether it reads a text prompt) and reference_use (what a reference picture controls). Read the offering's prompt guidance before writing that model's prompt; never invent a value the knowledge leaves unknown.",
           "parameters": {
             "type": "object",
             "properties": {}
@@ -6530,7 +6595,9 @@
             "model_note": "model_note",
             "size_note": "size_note",
             "budget": "budget",
-            "reason": "reason"
+            "reason": "reason",
+            "final_prompt": "final_prompt",
+            "prompt_note": "prompt_note"
           }
         },
         {
@@ -6592,6 +6659,7 @@
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["text-to-3d"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Generate a 3D model from an English text description.",
           "model_argument": "model",
+          "model_choices": {"from": "available_offerings", "require_parameters": ["prompt"]},
           "capability": "text-to-3d",
           "fallback_capability": "text-to-3d",
           "pending_capability": "text-to-3d",
@@ -6604,7 +6672,6 @@
               },
               "model": {
                 "type": "string",
-                "enum": ["tripo-v3.1-full", "meshy-7.1", "rodin-gen-2.5", "meshy-t2.5"],
                 "description": "Optional 3D model to run, by model name. Omit to let the session's production brief pick the first available recommended model. The person's explicit model choice in this session always wins; if it conflicts with this value, nothing is submitted."
               }
             },
@@ -6647,7 +6714,9 @@
             "model_choice": "model_choice",
             "budget": "budget",
             "reason": "reason",
-            "purpose_budget_note": "purpose_budget_note"
+            "purpose_budget_note": "purpose_budget_note",
+            "final_prompt": "final_prompt",
+            "prompt_note": "prompt_note"
           }
         },
         {
@@ -6657,6 +6726,7 @@
           "description": "Generate a 3D model from reference image(s). Without references the images selected on the workspace are used. How many pictures a model uses depends on the model picked for 3D (stated below when known): never say that pictures beyond that number are used, or that they are used as views of one object. When a result has reference_note, including while the step waits on its approval card, it states the facts about the pictures: which pictures are used, how many were given, and that using several pictures needs a model that takes several pictures. Your reply must state each of these facts; put them in your own words if you like. Several views of the same object (a front view plus left, back or right views) belong to create_model_3d_from_views instead.",
           "default_to_selection": true,
           "model_argument": "model",
+          "model_choices": {"from": "available_offerings", "require_parameters": ["reference-image"], "exclude_parameters": ["reference-views"], "exclude_offerings": ["tripo/geometry/smartsegment-image", "meshy/meshy-7.1-multiview/image-to-3d"]},
           "capability": "image-to-3d",
           "fallback_capability": "text-to-3d",
           "pending_capability": "image-to-3d",
@@ -6669,7 +6739,6 @@
               },
               "model": {
                 "type": "string",
-                "enum": ["tripo-v3.1-full", "meshy-7.1", "rodin-gen-2.5", "meshy-t2.5"],
                 "description": "Optional 3D model to run, by model name. Omit to let the session's production brief pick the first available recommended model. The person's explicit model choice in this session always wins; if it conflicts with this value, nothing is submitted."
               },
               "reference_handles": {
@@ -6717,7 +6786,6 @@
           "reference_capacity_note": {
             "single": "The model picked for 3D ({model}) uses only one reference picture for image to 3D. Do not predict which picture will be used: a three-view view may be replaced by its group's front view and repeated pictures may be dropped before the limit is applied. When several pictures are given, tell the person only that this model takes one picture; do not say that the first is used unless a successful or pending result's reference_note states which picture was used. This needs no extra confirmation. To compare another model's limit, use list_offerings and read that offering's reference_image_max before saying another model takes fewer or more pictures; do not switch the selected model on your own. Only the person can change the selected generation model in the workspace selector. Chat confirmation does not let you switch it; you may recommend another model but must not promise to switch it. Compare costs only using actual quotes in the same currency and unit; different providers' credits are not interchangeable without a supported conversion. No task submission or a refused step does not establish that the conversation was free; only state what is known about that step. Recommend a later processing step only when declared input compatibility supports it, not from a provider name or assumed capability. Use list_offerings and reference_image_max only for your own lookup: never mention these tool or field names, or any other internal name, in a reply to the person; say another model's reference-picture limit in plain words.",
             "multiple": "The model picked for 3D ({model}) takes up to {count} reference pictures for image to 3D. This limit applies only to the selected model. Other models may have different limits; before claiming another model's limit, use list_offerings and read that offering's reference_image_max; do not infer it from this model or say that no model takes more, and do not switch the selected model on your own. If the person requires all the pictures and gives more than {count}, do not choose or drop any yourself: explain this limit and ask the person to reduce the pictures or switch the selected model. Only the person can change the selected generation model in the workspace selector. Chat confirmation does not let you switch it; you may recommend another model but must not promise to switch it. Compare costs only using actual quotes in the same currency and unit; different providers' credits are not interchangeable without a supported conversion. No task submission or a refused step does not establish that the conversation was free; only state what is known about that step. Recommend a later processing step only when declared input compatibility supports it, not from a provider name or assumed capability. A collage is one input picture; do not predict a definite loss or output from it. Do not claim that a collage sent as one picture is equivalent to sending each original picture separately unless the selected Offering's input contract explicitly supports it. A tool refusal is not a submission: do not describe refused pictures as submitted or truncated; only a successful or pending result's reference_note states which pictures were used. Use list_offerings, reference_image_max and reference_note only for your own lookup: never mention these tool or field names, or any other internal name, in a reply to the person; say another model's reference-picture limit and which pictures were used in plain words.",
-            "no_prompt": "When this tool uses the selected model ({model}) for image-to-3D, the tool's text prompt is not sent to this service. Do not promise that the person's text will affect this image-to-3D result. The selected Offering may declare parameter controls independently of the text prompt; do not infer that changing reference pictures is the only way to influence the result. Recommend a setting only when the selected Offering's facts support it, not from general provider knowledge. Explain this in plain words without internal field names, and let the person decide on another feasible path if they need the text to influence the result; do not switch models on your own.",
             "settings": "The selected model ({model}) offers only these settings for image to 3D: {settings}. When suggesting settings, mention only these; do not mention or recommend any setting that is not in this list, even if the provider offers it elsewhere."
           },
           "prompt_with_previous_template": "Refine the previous 3D model ({previous_prompt}) with: {prompt}",
@@ -6738,7 +6806,9 @@
             "reference_note": "reference_note",
             "budget": "budget",
             "reason": "reason",
-            "purpose_budget_note": "purpose_budget_note"
+            "purpose_budget_note": "purpose_budget_note",
+            "final_prompt": "final_prompt",
+            "prompt_note": "prompt_note"
           }
         },
         {
@@ -6748,6 +6818,7 @@
           "description": "Generate one 3D model from several views of the SAME object with a multiview image-to-3D model. For a three-view group of this chat, pass three_view_group (the group's run ID) and nothing else about the pictures: the server reads the finished views and their view keys from the group. Otherwise use it only when the user gives 2 to 4 views of one object (a front view plus left, back or right views, for example the four pictures of a four-view image group) and wants a 3D model: pass the handles in front, left, back, right order, or say which view each handle is in reference_views (front, left, back, right); a front view is required. Left and right are the object's own left and right sides. For one picture, or pictures of different objects, use create_model_3d_from_image instead. The estimated native price is the same as Tripo image to 3D.",
           "ignore_user_model": true,
           "model_argument": "model",
+          "model_choices": {"from": "available_offerings", "require_parameters": ["reference-views"]},
           "default_to_selection": true,
           "capability": "image-to-3d",
           "fallback_capability": "image-to-3d",
@@ -6757,7 +6828,6 @@
             "properties": {
               "model": {
                 "type": "string",
-                "enum": ["tripo-v3.1-multiview"],
                 "description": "Optional multiview image-to-3D model to run, by model name. The model comes from the person's structured three-view request; when that request names one, the server sets this argument from it and it cannot be overridden. Omit otherwise to let the session's production brief recommend one."
               },
               "three_view_group": {
@@ -6806,7 +6876,7 @@
           "prompt_with_reference_template": "{prompt}",
           "prompt_with_previous_template": "{previous_prompt} {prompt}",
           "idempotency_key_template": "chat:{session_id}:{call_id}",
-          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback","model_note":"model_note","model_choice":"model_choice","reference_note":"reference_note","budget":"budget","reason":"reason","purpose_budget_note":"purpose_budget_note"}
+          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback","model_note":"model_note","model_choice":"model_choice","reference_note":"reference_note","budget":"budget","reason":"reason","purpose_budget_note":"purpose_budget_note","final_prompt":"final_prompt","prompt_note":"prompt_note"}
         },
         {
           "name": "retexture_model",
@@ -6916,7 +6986,9 @@
             "model_formats": "model_formats",
             "budget": "budget",
             "reason": "reason",
-            "purpose_budget_note": "purpose_budget_note"
+            "purpose_budget_note": "purpose_budget_note",
+            "final_prompt": "final_prompt",
+            "prompt_note": "prompt_note"
           }
         },
         {
@@ -7443,7 +7515,9 @@
             "model": "model",
             "model_fallback": "model_fallback",
             "budget": "budget",
-            "reason": "reason"
+            "reason": "reason",
+            "final_prompt": "final_prompt",
+            "prompt_note": "prompt_note"
           },
           "ignore_user_model": true,
           "accept_reference_images": false,
@@ -8128,6 +8202,7 @@
       },
       "model3d_usage": {
         "default_profile": "render",
+        "override_coverage_required": true,
         "profiles": [
           {
             "id": "render",
@@ -8148,6 +8223,15 @@
                 "tripo/tripo-v3.1-multiview/image-to-3d"
               ]
             },
+            "overrides_not_needed": [
+              "tripo/tripo-v3.1-full/text-to-3d",
+              "meshy/meshy-7.1/text-to-3d",
+              "hyper3d/rodin-gen-2.5/text-to-3d",
+              "tripo/tripo-v3.1-full/image-to-3d",
+              "meshy/meshy-7.1/image-to-3d",
+              "hyper3d/rodin-gen-2.5/image-to-3d",
+              "tripo/tripo-v3.1-multiview/image-to-3d"
+            ],
             "reason": "展示用途不限制面数，优先完整细节与观感，并选用当前可用的高保真模型。",
             "budget": {
               "max_triangles": 2000000,
@@ -8185,6 +8269,12 @@
                 "texture_quality": "standard"
               },
               "tripo/tripo-p2-multiview/image-to-3d": {
+                "face_limit": 20000,
+                "texture_quality": "standard"
+              },
+              "tripo/tripo-v3.1-multiview/image-to-3d": {
+                "face_limit": 20000,
+                "smart_low_poly": true,
                 "texture_quality": "standard"
               },
               "meshy/meshy-t2.5/text-to-3d": {
@@ -8241,6 +8331,12 @@
                 "texture_quality": "standard"
               },
               "tripo/tripo-p2-multiview/image-to-3d": {
+                "face_limit": 20000,
+                "texture_quality": "standard"
+              },
+              "tripo/tripo-v3.1-multiview/image-to-3d": {
+                "face_limit": 20000,
+                "smart_low_poly": true,
                 "texture_quality": "standard"
               },
               "meshy/meshy-t2.5/text-to-3d": {
@@ -8294,6 +8390,12 @@
                 "texture_quality": "standard"
               },
               "tripo/tripo-p2-multiview/image-to-3d": {
+                "face_limit": 20000,
+                "texture_quality": "standard"
+              },
+              "tripo/tripo-v3.1-multiview/image-to-3d": {
+                "face_limit": 20000,
+                "smart_low_poly": true,
                 "texture_quality": "standard"
               },
               "meshy/meshy-7.1/text-to-3d": {
@@ -8331,6 +8433,12 @@
                 "tripo/tripo-v3.1-full/image-to-3d"
               ]
             },
+            "overrides_not_needed": [
+              "meshy/meshy-7.1/text-to-3d",
+              "tripo/tripo-v3.1-full/text-to-3d",
+              "meshy/meshy-7.1/image-to-3d",
+              "tripo/tripo-v3.1-full/image-to-3d"
+            ],
             "reason": "打印需要完整细节与水密网格；优先 Meshy 7.1 的高细节输出，其次 Tripo v3.1。",
             "pipeline": [
               {
@@ -18455,7 +18563,139 @@
             "默认开启，让纹理更接近材质本色；Agent 可基于需要保留原始光照说明理由并关闭。": "On by default so textures stay closer to the material's true colour; the Agent may turn it off with a stated reason when the original lighting must be kept.",
             "默认生成 UV 展开以支持后续贴图编辑；Agent 可基于不需要 UV 的用途说明理由并关闭。": "UV unwrapping is on by default to support later texture editing; the Agent may turn it off with a stated reason when UVs are not needed.",
             "默认生成纹理以交付完整材质；Agent 可基于只要白模的用途说明理由并关闭纹理。": "Textures are generated by default for complete materials; the Agent may turn them off with a stated reason when only an untextured model is needed.",
-            "默认自适应面数；Agent 可按游戏或实时资产的面数预算说明理由并指定上限。": "The face count is adaptive by default; the Agent may set a limit with a stated reason based on a game or real-time asset budget."
+            "默认自适应面数；Agent 可按游戏或实时资产的面数预算说明理由并指定上限。": "The face count is adaptive by default; the Agent may set a limit with a stated reason based on a game or real-time asset budget.",
+            "不提供独立反向提示词。": "No separate negative prompt is offered.",
+            "不支持多视图输入。": "Multi-view input is not supported.",
+            "不读取文本提示词。": "The text prompt is not read.",
+            "不读取文本提示词，文字不会影响结果。": "The text prompt is not read, so the text does not affect the result.",
+            "中文提示词理解好，适合中文创作需求。": "Understands Chinese prompts well and suits Chinese-language creative briefs.",
+            "中文编辑指令理解好。": "Understands Chinese editing instructions well.",
+            "人像与商品图的风格统一。": "Keeps portraits and product shots in one consistent style.",
+            "人像和商业摄影质感强。": "Strong portrait and commercial-photography look.",
+            "从单张图分割出指定部件并生成独立 3D 部件。": "Segments a named part from one image and produces it as a separate 3D part.",
+            "从参考图还原造型，比例稳定。": "Restores the shape from a reference image with stable proportions.",
+            "低成本快速生成，适合草稿和批量资产。": "Fast, low-cost generation that suits drafts and batch assets.",
+            "低模与干净拓扑，适合游戏和实时资产。": "Low-poly output with clean topology, suited to games and real-time assets.",
+            "低模多视图重建，背面和侧面更准确。": "Low-poly multiview reconstruction with more accurate back and side views.",
+            "依赖清晰的主体边界。": "Depends on a clear subject boundary.",
+            "依赖清晰的视角标注。": "Depends on clear view labels.",
+            "几何与纹理细节好，适合展示和打印。": "Good geometric and texture detail, suited to display and printing.",
+            "几何质量高，适合展示和打印。": "High geometric quality, suited to display and printing.",
+            "出图速度快、成本低。": "Fast and low-cost.",
+            "出图速度快、成本低，适合草稿和批量变体。": "Fast and low-cost, suited to drafts and batch variants.",
+            "出图速度较慢，单次成本较高。": "Slower generation at a higher cost per image.",
+            "单图输入，使用简单。": "Single-image input that is simple to use.",
+            "参考图必须属于同一物体并包含正面。": "Reference pictures must show the same object and include the front view.",
+            "参考图数量与体积有上限。": "Reference pictures have count and size limits.",
+            "参考图数量有上限。": "The number of reference pictures is limited.",
+            "参考图顺序会影响结果。": "The order of reference pictures affects the result.",
+            "只使用一张参考图。": "Uses only one reference picture.",
+            "只使用一张参考图，多视角信息无法利用。": "Uses only one reference picture, so multiview information is wasted.",
+            "只使用一张参考图，无法利用多视角信息。": "Uses only one reference picture and cannot use multiview information.",
+            "同一提示词不保证逐次可复现。": "The same prompt does not guarantee a reproducible result.",
+            "场景延展和元素替换自然。": "Extends scenes and replaces elements naturally.",
+            "复杂多物体场景容易失败。": "Complex multi-object scenes often fail.",
+            "复杂空间关系和精确文字容易出错。": "Complex spatial relations and precise text are error-prone.",
+            "复杂结构可能被过度简化。": "Complex structures may be over-simplified.",
+            "复杂结构容易简化。": "Complex structures tend to be simplified.",
+            "复杂结构容易被过度简化。": "Complex structures are easily over-simplified.",
+            "复杂编辑指令可能只完成一部分。": "Complex editing instructions may only be partly completed.",
+            "多主体编辑容易混淆对象。": "Multi-subject edits easily mix up objects.",
+            "多图参考下的角色与场景一致性好。": "Good character and scene consistency across multiple references.",
+            "多图参考仍以主体轮廓为主。": "Multiple references still mainly guide the subject silhouette.",
+            "多图输入提升多角度一致性。": "Multiple input pictures improve consistency across angles.",
+            "多模态理解强，场景叙事和元素关系一致。": "Strong multimodal understanding with coherent scene narrative and element relations.",
+            "多视角约束提升背面和侧面的准确性。": "Multiview constraints improve the accuracy of back and side views.",
+            "大幅改构图可能破坏主体身份。": "Large composition changes may damage the subject identity.",
+            "大幅改构图时可能保留不需要的原图元素。": "Large composition changes may keep unwanted elements of the source.",
+            "大范围重绘可能改变身份细节。": "Large redraws may change identity details.",
+            "对参考风格的理解较好。": "Understands the reference style well.",
+            "对复杂造型的还原度较高。": "Restores complex shapes with high fidelity.",
+            "对角色和道具的比例把握较好。": "Good at proportions for characters and props.",
+            "局部编辑精确，适合改文字、材质和小物件。": "Precise local edits, suited to changing text, materials and small objects.",
+            "强风格迁移偶尔过度修饰。": "Strong style transfer sometimes over-polishes.",
+            "成本低、速度快，适合草稿和批量资产。": "Low cost and fast, suited to drafts and batch assets.",
+            "指令遵循强，能处理多主体关系和空间约束。": "Strong instruction following for multi-subject relations and spatial constraints.",
+            "提示词与参考图数量有上限。": "Prompt and reference-picture counts are limited.",
+            "提示词应只描述一个物体。": "The prompt should describe a single object.",
+            "提示词应只描述一个物体，不擅长复杂场景。": "The prompt should describe a single object; complex scenes are not its strength.",
+            "提示词过长时靠后的约束可能被稀释。": "Very long prompts may dilute constraints near the end.",
+            "提示词遵循能力强，复杂构图和多主体关系较稳定。": "Strong prompt following with stable complex compositions and multi-subject relations.",
+            "提示词长度上限较短。": "The prompt length limit is short.",
+            "擅长文字排版、图解和信息图。": "Good at typography, diagrams and infographics.",
+            "支持 2K 几何与 PBR。": "Supports 2K geometry and PBR.",
+            "支持 A/T 姿势等角色设定。": "Supports A/T poses and other character settings.",
+            "支持 PBR 材质。": "Supports PBR materials.",
+            "支持 PBR 材质与多种导出格式。": "Supports PBR materials and several export formats.",
+            "支持多参考图合成，可保持版式与身份。": "Supports multi-reference composition while keeping layout and identity.",
+            "支持多张参考图。": "Supports multiple reference pictures.",
+            "支持多张参考图辅助主体轮廓。": "Supports several reference pictures to guide the subject silhouette.",
+            "支持多张参考图，可分别约束身份、风格和元素。": "Supports several reference pictures for identity, style and elements separately.",
+            "支持长提示词，适合细节密集的画面。": "Supports long prompts for detail-dense images.",
+            "支持面数控制。": "Supports face-count control.",
+            "支持面数控制与四边面输出。": "Supports face-count control and quad output.",
+            "文字和排版保持能力好。": "Keeps text and layout well.",
+            "文字渲染可用，适合带说明的图。": "Readable text rendering, suited to annotated images.",
+            "文字渲染清晰，适合带文字的二次编辑。": "Clear text rendering, suited to edits that keep text.",
+            "文本提示词长度有上限。": "The text prompt length is limited.",
+            "智能拓扑输出较干净。": "Smart topology output is relatively clean.",
+            "智能拓扑输出较干净，适合游戏和实时用途。": "Smart topology output is relatively clean, suited to games and real time.",
+            "最多四张参考图，且不支持 4K 几何。": "At most four reference pictures, and no 4K geometry.",
+            "未标注视角时可能混合错误角度。": "Without view labels the result may mix up angles.",
+            "极复杂的空间关系仍可能遗漏约束。": "Very complex spatial relations may still miss constraints.",
+            "构图稳定，风格范围较宽。": "Stable composition with a wide style range.",
+            "生成和物化耗时较长。": "Generation and materialization take longer.",
+            "生成时间较长。": "Generation takes longer.",
+            "生成速度快、成本低。": "Fast and low-cost generation.",
+            "画面文字渲染清晰，适合海报、包装和带文字的插图。": "Clear in-image text rendering, suited to posters, packaging and illustrated text.",
+            "精细局部修改可能需要多轮。": "Fine local edits may take several rounds.",
+            "精细风格控制不如专门艺术模型稳定。": "Fine style control is less stable than dedicated art models.",
+            "纹理与材质还原偶有偏差。": "Texture and material restoration sometimes deviates.",
+            "纹理和材质还原偶有偏差。": "Texture and material restoration occasionally deviates.",
+            "纹理质量高，支持 PBR。": "High texture quality with PBR support.",
+            "细节、文字和小结构弱于高质量模型。": "Detail, text and small structures are weaker than high-quality models.",
+            "细节与材质表现好，适合高质量商业图。": "Good detail and material rendering for high-quality commercial images.",
+            "细节与纹理一般。": "Average detail and texture.",
+            "细节与纹理质量一般。": "Average detail and texture quality.",
+            "细节与纹理质量低于高保真模型。": "Detail and texture quality are below high-fidelity models.",
+            "细节丰富。": "Rich detail.",
+            "细节丰富，几何质量好。": "Rich detail with good geometric quality.",
+            "细节保真和文字渲染弱于高质量模型。": "Detail fidelity and text rendering are weaker than high-quality models.",
+            "细节和纹理精细度低于高保真模型。": "Detail and texture fineness are below high-fidelity models.",
+            "细节密度过高时画面容易拥挤。": "Too much detail density can make the image crowded.",
+            "细节弱于高保真多视图模型。": "Detail is weaker than high-fidelity multiview models.",
+            "编辑速度快、成本低，适合快速试稿。": "Fast, low-cost editing for quick drafts.",
+            "能保持参考图的主体身份和构图，适合改风格、换背景。": "Keeps the subject identity and composition of the reference, suited to restyling and background changes.",
+            "能保持参考图的主要身份特征。": "Keeps the main identity features of the reference.",
+            "自然语言编辑指令理解好，适合逐步修改。": "Understands natural-language editing instructions for step-by-step changes.",
+            "至少需要正面和一个侧/背视角。": "Requires at least the front view plus one side or back view.",
+            "视角标注错误会直接扭曲几何。": "Wrong view labels directly distort the geometry.",
+            "输出尺寸受模型档位限制。": "Output size is limited by the model tier.",
+            "输出是分割出的部件，不是完整场景。": "The output is a segmented part, not a complete scene.",
+            "连续编辑偶有风格漂移。": "Consecutive edits occasionally drift in style.",
+            "适合拆件、局部处理和多部件制作流程。": "Suited to part separation, local processing and multi-part workflows.",
+            "适合游戏角色和道具。": "Suited to game characters and props.",
+            "适合角色、道具等需要完整外形的资产。": "Suited to assets that need a complete shape, such as characters and props.",
+            "速度较慢。": "Slower.",
+            "速度较慢，成本较高。": "Slower and more expensive.",
+            "造型与比例稳定，适合角色和产品。": "Stable shape and proportions, suited to characters and products.",
+            "遮挡或粘连的部件分割不稳定。": "Segmentation is unstable for occluded or merged parts.",
+            "长而复杂的指令容易只执行前几条。": "Long, complex instructions tend to execute only the first few items.",
+            "面数偏高，游戏用途需要后续减面。": "The face count is high; game use needs later decimation.",
+            "面数可控，支持四边面输出。": "Controllable face count with quad output.",
+            "面数高、生成时间长、成本较高。": "High face count, longer generation and a higher cost.",
+            "面数高，不适合直接用于游戏实时资产。": "The face count is high and not suited to direct game or real-time use.",
+            "面数高，游戏用途需要减面。": "The face count is high; game use needs decimation.",
+            "风格与媒介范围宽。": "Wide style and medium range.",
+            "风格偏干净规整，粗粝质感需要明确要求。": "The style is clean and tidy; gritty textures need explicit wording.",
+            "风格偏精致商业感，粗粝手绘或低饱和胶片感需要额外强调。": "The style is polished and commercial; gritty hand-drawn or low-saturation film looks need extra emphasis.",
+            "风格范围相对集中。": "The style range is relatively narrow.",
+            "高保真还原单张参考图的造型与材质。": "High-fidelity restoration of shape and material from a single reference.",
+            "高保真还原单张参考图的造型与纹理。": "High-fidelity restoration of shape and texture from a single reference.",
+            "高分辨率输出能力有限。": "High-resolution output is limited.",
+            "高精度几何与纹理，适合展示和打印。": "High-precision geometry and texture, suited to display and printing.",
+            "高细节几何与纹理，适合展示、预览和打印。": "High-detail geometry and texture, suited to display, preview and printing.",
+            "高细节几何与纹理，适合展示。": "High-detail geometry and texture, suited to display."
           }
         }
       }
@@ -18614,6 +18854,40 @@
       "provider_order": 1,
       "model_id": "nano-banana-pro",
       "model_name": "Nano Banana Pro (高质量)",
+      "knowledge": {
+        "strengths": [
+          "提示词遵循能力强，复杂构图和多主体关系较稳定。",
+          "画面文字渲染清晰，适合海报、包装和带文字的插图。",
+          "细节与材质表现好，适合高质量商业图。"
+        ],
+        "weaknesses": [
+          "风格偏精致商业感，粗粝手绘或低饱和胶片感需要额外强调。",
+          "极复杂的空间关系仍可能遗漏约束。"
+        ],
+        "limitations": [
+          "不提供独立反向提示词。",
+          "同一提示词不保证逐次可复现。"
+        ],
+        "prompt": {
+          "language": "en",
+          "form": "descriptive",
+          "unit": "words",
+          "words_min": 30,
+          "words_max": 120,
+          "reads_text": true,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "none"
+        ],
+        "sources": [
+          {
+            "title": "Gemini image generation",
+            "url": "https://ai.google.dev/gemini-api/docs/image-generation",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "text-to-image",
       "adapter_key": "meshy.v2",
       "enabled": true,
@@ -18775,6 +19049,39 @@
       "provider_short_label": "MESHY",
       "model_id": "nano-banana-2",
       "model_name": "Nano Banana 2 (新版)",
+      "knowledge": {
+        "strengths": [
+          "出图速度快、成本低，适合草稿和批量变体。",
+          "构图稳定，风格范围较宽。"
+        ],
+        "weaknesses": [
+          "细节、文字和小结构弱于高质量模型。",
+          "长而复杂的指令容易只执行前几条。"
+        ],
+        "limitations": [
+          "不提供独立反向提示词。",
+          "高分辨率输出能力有限。"
+        ],
+        "prompt": {
+          "language": "en",
+          "form": "descriptive",
+          "unit": "words",
+          "words_min": 20,
+          "words_max": 80,
+          "reads_text": true,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "none"
+        ],
+        "sources": [
+          {
+            "title": "Gemini image generation",
+            "url": "https://ai.google.dev/gemini-api/docs/image-generation",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "text-to-image",
       "adapter_key": "meshy.v2",
       "enabled": true,
@@ -18935,6 +19242,42 @@
       "provider_short_label": "MESHY",
       "model_id": "nano-banana-pro",
       "model_name": "Nano Banana Pro (高质量)",
+      "knowledge": {
+        "strengths": [
+          "能保持参考图的主体身份和构图，适合改风格、换背景。",
+          "支持多张参考图，可分别约束身份、风格和元素。",
+          "文字渲染清晰，适合带文字的二次编辑。"
+        ],
+        "weaknesses": [
+          "大幅改构图时可能保留不需要的原图元素。",
+          "强风格迁移偶尔过度修饰。"
+        ],
+        "limitations": [
+          "不提供独立反向提示词。",
+          "参考图数量有上限。"
+        ],
+        "prompt": {
+          "language": "en",
+          "form": "descriptive",
+          "unit": "words",
+          "words_min": 30,
+          "words_max": 120,
+          "reads_text": true,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "identity",
+          "composition",
+          "style"
+        ],
+        "sources": [
+          {
+            "title": "Gemini image generation",
+            "url": "https://ai.google.dev/gemini-api/docs/image-generation",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "image-to-image",
       "adapter_key": "meshy.v2",
       "enabled": true,
@@ -19110,6 +19453,40 @@
       "provider_short_label": "MESHY",
       "model_id": "nano-banana-2",
       "model_name": "Nano Banana 2 (新版)",
+      "knowledge": {
+        "strengths": [
+          "编辑速度快、成本低，适合快速试稿。",
+          "能保持参考图的主要身份特征。"
+        ],
+        "weaknesses": [
+          "细节保真和文字渲染弱于高质量模型。",
+          "复杂编辑指令可能只完成一部分。"
+        ],
+        "limitations": [
+          "不提供独立反向提示词。",
+          "参考图数量有上限。"
+        ],
+        "prompt": {
+          "language": "en",
+          "form": "descriptive",
+          "unit": "words",
+          "words_min": 20,
+          "words_max": 80,
+          "reads_text": true,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "identity",
+          "composition"
+        ],
+        "sources": [
+          {
+            "title": "Gemini image generation",
+            "url": "https://ai.google.dev/gemini-api/docs/image-generation",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "image-to-image",
       "adapter_key": "meshy.v2",
       "enabled": true,
@@ -19287,6 +19664,40 @@
       "provider_order": 2,
       "model_id": "gpt-image-2.6-sunburst",
       "model_name": "GPT Image 2.6 Sunburst (OpenAI)",
+      "knowledge": {
+        "strengths": [
+          "指令遵循强，能处理多主体关系和空间约束。",
+          "擅长文字排版、图解和信息图。",
+          "支持长提示词，适合细节密集的画面。"
+        ],
+        "weaknesses": [
+          "出图速度较慢，单次成本较高。",
+          "风格偏干净规整，粗粝质感需要明确要求。"
+        ],
+        "limitations": [
+          "不提供独立反向提示词。",
+          "提示词过长时靠后的约束可能被稀释。"
+        ],
+        "prompt": {
+          "language": "en",
+          "form": "descriptive",
+          "unit": "words",
+          "words_min": 40,
+          "words_max": 150,
+          "reads_text": true,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "none"
+        ],
+        "sources": [
+          {
+            "title": "OpenAI image generation API",
+            "url": "https://developers.openai.com/api/reference/resources/images/methods/generate",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "text-to-image",
       "adapter_key": "openai-images.v1",
       "enabled": true,
@@ -19592,6 +20003,39 @@
       "provider_order": 2,
       "model_id": "gpt-image-2.5-sunburst",
       "model_name": "GPT Image 2.5 Sunburst (OpenAI)",
+      "knowledge": {
+        "strengths": [
+          "指令遵循强，能处理多主体关系和空间约束。",
+          "擅长文字排版、图解和信息图。",
+          "支持长提示词，适合细节密集的画面。"
+        ],
+        "weaknesses": [
+          "出图速度较慢，单次成本较高。"
+        ],
+        "limitations": [
+          "不提供独立反向提示词。",
+          "提示词过长时靠后的约束可能被稀释。"
+        ],
+        "prompt": {
+          "language": "en",
+          "form": "descriptive",
+          "unit": "words",
+          "words_min": 40,
+          "words_max": 150,
+          "reads_text": true,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "none"
+        ],
+        "sources": [
+          {
+            "title": "OpenAI image generation API",
+            "url": "https://developers.openai.com/api/reference/resources/images/methods/generate",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "text-to-image",
       "adapter_key": "openai-images.v1",
       "enabled": false,
@@ -19896,6 +20340,43 @@
       "provider_short_label": "GPT",
       "model_id": "gpt-image-2.6-sunburst",
       "model_name": "GPT Image 2.6 Sunburst (OpenAI)",
+      "knowledge": {
+        "strengths": [
+          "局部编辑精确，适合改文字、材质和小物件。",
+          "支持多参考图合成，可保持版式与身份。",
+          "文字和排版保持能力好。"
+        ],
+        "weaknesses": [
+          "大范围重绘可能改变身份细节。",
+          "速度较慢，成本较高。"
+        ],
+        "limitations": [
+          "参考图数量与体积有上限。",
+          "不提供独立反向提示词。"
+        ],
+        "prompt": {
+          "language": "en",
+          "form": "descriptive",
+          "unit": "words",
+          "words_min": 40,
+          "words_max": 150,
+          "reads_text": true,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "identity",
+          "composition",
+          "style",
+          "texture"
+        ],
+        "sources": [
+          {
+            "title": "OpenAI image generation API",
+            "url": "https://developers.openai.com/api/reference/resources/images/methods/generate",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "image-to-image",
       "adapter_key": "openai-images.v1",
       "enabled": true,
@@ -20253,6 +20734,42 @@
       "provider_short_label": "GPT",
       "model_id": "gpt-image-2.5-sunburst",
       "model_name": "GPT Image 2.5 Sunburst (OpenAI)",
+      "knowledge": {
+        "strengths": [
+          "局部编辑精确，适合改文字、材质和小物件。",
+          "支持多参考图合成，可保持版式与身份。"
+        ],
+        "weaknesses": [
+          "大范围重绘可能改变身份细节。",
+          "速度较慢，成本较高。"
+        ],
+        "limitations": [
+          "参考图数量与体积有上限。",
+          "不提供独立反向提示词。"
+        ],
+        "prompt": {
+          "language": "en",
+          "form": "descriptive",
+          "unit": "words",
+          "words_min": 40,
+          "words_max": 150,
+          "reads_text": true,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "identity",
+          "composition",
+          "style",
+          "texture"
+        ],
+        "sources": [
+          {
+            "title": "OpenAI image generation API",
+            "url": "https://developers.openai.com/api/reference/resources/images/methods/generate",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "image-to-image",
       "adapter_key": "openai-images.v1",
       "enabled": false,
@@ -20610,6 +21127,40 @@
       "provider_order": 3,
       "model_id": "gemini-3-pro-image",
       "model_name": "Gemini 3 Pro (高质量)",
+      "knowledge": {
+        "strengths": [
+          "多模态理解强，场景叙事和元素关系一致。",
+          "文字渲染可用，适合带说明的图。",
+          "风格与媒介范围宽。"
+        ],
+        "weaknesses": [
+          "细节密度过高时画面容易拥挤。",
+          "精细风格控制不如专门艺术模型稳定。"
+        ],
+        "limitations": [
+          "不提供独立反向提示词。",
+          "输出尺寸受模型档位限制。"
+        ],
+        "prompt": {
+          "language": "en",
+          "form": "descriptive",
+          "unit": "words",
+          "words_min": 30,
+          "words_max": 120,
+          "reads_text": true,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "none"
+        ],
+        "sources": [
+          {
+            "title": "Gemini image generation",
+            "url": "https://ai.google.dev/gemini-api/docs/image-generation",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "text-to-image",
       "adapter_key": "gemini-images.v1",
       "enabled": true,
@@ -20774,6 +21325,42 @@
       "provider_short_label": "GEMINI",
       "model_id": "gemini-3-pro-image",
       "model_name": "Gemini 3 Pro (高质量)",
+      "knowledge": {
+        "strengths": [
+          "多图参考下的角色与场景一致性好。",
+          "自然语言编辑指令理解好，适合逐步修改。",
+          "场景延展和元素替换自然。"
+        ],
+        "weaknesses": [
+          "精细局部修改可能需要多轮。",
+          "连续编辑偶有风格漂移。"
+        ],
+        "limitations": [
+          "不提供独立反向提示词。",
+          "参考图数量有上限。"
+        ],
+        "prompt": {
+          "language": "en",
+          "form": "descriptive",
+          "unit": "words",
+          "words_min": 30,
+          "words_max": 120,
+          "reads_text": true,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "identity",
+          "composition",
+          "style"
+        ],
+        "sources": [
+          {
+            "title": "Gemini image generation",
+            "url": "https://ai.google.dev/gemini-api/docs/image-generation",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "image-to-image",
       "adapter_key": "gemini-images.v1",
       "enabled": true,
@@ -20965,6 +21552,40 @@
       "provider_order": 4,
       "model_id": "doubao-seedream-4-5-251128",
       "model_name": "即梦 Seedream 4.5 (高质量)",
+      "knowledge": {
+        "strengths": [
+          "中文提示词理解好，适合中文创作需求。",
+          "人像和商业摄影质感强。",
+          "出图速度快、成本低。"
+        ],
+        "weaknesses": [
+          "复杂空间关系和精确文字容易出错。",
+          "风格范围相对集中。"
+        ],
+        "limitations": [
+          "不提供独立反向提示词。",
+          "提示词长度上限较短。"
+        ],
+        "prompt": {
+          "language": "zh",
+          "form": "descriptive",
+          "unit": "characters",
+          "words_min": 20,
+          "words_max": 200,
+          "reads_text": true,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "none"
+        ],
+        "sources": [
+          {
+            "title": "Volcengine ModelArk image generation",
+            "url": "https://docs.volcengine.com/docs/82379/1299023",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "text-to-image",
       "adapter_key": "jimeng-images.v1",
       "enabled": true,
@@ -21252,6 +21873,41 @@
       "provider_short_label": "JIMENG",
       "model_id": "doubao-seedream-4-5-251128",
       "model_name": "即梦 Seedream 4.5 (高质量)",
+      "knowledge": {
+        "strengths": [
+          "中文编辑指令理解好。",
+          "人像与商品图的风格统一。",
+          "支持多张参考图。"
+        ],
+        "weaknesses": [
+          "多主体编辑容易混淆对象。",
+          "大幅改构图可能破坏主体身份。"
+        ],
+        "limitations": [
+          "不提供独立反向提示词。",
+          "提示词与参考图数量有上限。"
+        ],
+        "prompt": {
+          "language": "zh",
+          "form": "descriptive",
+          "unit": "characters",
+          "words_min": 20,
+          "words_max": 200,
+          "reads_text": true,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "identity",
+          "style"
+        ],
+        "sources": [
+          {
+            "title": "Volcengine ModelArk image generation",
+            "url": "https://docs.volcengine.com/docs/82379/1299023",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "image-to-image",
       "adapter_key": "jimeng-images.v1",
       "enabled": true,
@@ -21572,6 +22228,39 @@
       "provider_short_label": "MESHY",
       "model_id": "meshy-7",
       "model_name": "Meshy 7",
+      "knowledge": {
+        "strengths": [
+          "高细节几何与纹理，适合展示、预览和打印。",
+          "支持 PBR 材质与多种导出格式。"
+        ],
+        "weaknesses": [
+          "面数高，不适合直接用于游戏实时资产。",
+          "生成和物化耗时较长。"
+        ],
+        "limitations": [
+          "提示词应只描述一个物体，不擅长复杂场景。",
+          "文本提示词长度有上限。"
+        ],
+        "prompt": {
+          "language": "en",
+          "form": "descriptive",
+          "unit": "words",
+          "words_min": 30,
+          "words_max": 60,
+          "reads_text": true,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "none"
+        ],
+        "sources": [
+          {
+            "title": "Meshy API docs",
+            "url": "https://docs.meshy.ai/en/api/text-to-3d",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "text-to-3d",
       "adapter_key": "meshy.v2",
       "enabled": false,
@@ -21860,6 +22549,40 @@
       "provider_short_label": "MESHY",
       "model_id": "meshy-7.1",
       "model_name": "Meshy 7.1",
+      "knowledge": {
+        "strengths": [
+          "高细节几何与纹理，适合展示、预览和打印。",
+          "支持 PBR 材质与多种导出格式。",
+          "对复杂造型的还原度较高。"
+        ],
+        "weaknesses": [
+          "面数高，不适合直接用于游戏实时资产。",
+          "生成和物化耗时较长。"
+        ],
+        "limitations": [
+          "提示词应只描述一个物体，不擅长复杂场景。",
+          "文本提示词长度有上限。"
+        ],
+        "prompt": {
+          "language": "en",
+          "form": "descriptive",
+          "unit": "words",
+          "words_min": 30,
+          "words_max": 60,
+          "reads_text": true,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "none"
+        ],
+        "sources": [
+          {
+            "title": "Meshy API docs",
+            "url": "https://docs.meshy.ai/en/api/text-to-3d",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "text-to-3d",
       "adapter_key": "meshy.v2",
       "enabled": true,
@@ -22294,6 +23017,40 @@
       "provider_short_label": "MESHY",
       "model_id": "meshy-t2.5",
       "model_name": "Meshy T2.5 智能拓扑",
+      "knowledge": {
+        "strengths": [
+          "成本低、速度快，适合草稿和批量资产。",
+          "智能拓扑输出较干净，适合游戏和实时用途。",
+          "支持 A/T 姿势等角色设定。"
+        ],
+        "weaknesses": [
+          "细节与纹理质量低于高保真模型。",
+          "复杂结构容易被过度简化。"
+        ],
+        "limitations": [
+          "提示词应只描述一个物体。",
+          "文本提示词长度有上限。"
+        ],
+        "prompt": {
+          "language": "en",
+          "form": "descriptive",
+          "unit": "words",
+          "words_min": 30,
+          "words_max": 60,
+          "reads_text": true,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "none"
+        ],
+        "sources": [
+          {
+            "title": "Meshy API docs",
+            "url": "https://docs.meshy.ai/en/api/text-to-3d",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "text-to-3d",
       "adapter_key": "meshy.v2",
       "enabled": true,
@@ -22704,6 +23461,41 @@
       "provider_short_label": "MESHY",
       "model_id": "meshy-7",
       "model_name": "Meshy 7",
+      "knowledge": {
+        "strengths": [
+          "高保真还原单张参考图的造型与材质。",
+          "几何与纹理细节好，适合展示和打印。",
+          "单图输入，使用简单。"
+        ],
+        "weaknesses": [
+          "只使用一张参考图，无法利用多视角信息。",
+          "面数偏高，游戏用途需要后续减面。"
+        ],
+        "limitations": [
+          "不读取文本提示词，文字不会影响结果。",
+          "不支持多视图输入。"
+        ],
+        "prompt": {
+          "language": "unknown",
+          "form": "unknown",
+          "unit": "",
+          "words_min": 0,
+          "words_max": 0,
+          "reads_text": false,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "geometry",
+          "texture"
+        ],
+        "sources": [
+          {
+            "title": "Meshy Image to 3D API",
+            "url": "https://docs.meshy.ai/en/api/image-to-3d",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "image-to-3d",
       "adapter_key": "meshy.v2",
       "enabled": false,
@@ -22976,6 +23768,41 @@
       "provider_short_label": "MESHY",
       "model_id": "meshy-7.1",
       "model_name": "Meshy 7.1",
+      "knowledge": {
+        "strengths": [
+          "高保真还原单张参考图的造型与材质。",
+          "几何与纹理细节好，适合展示和打印。",
+          "单图输入，使用简单。"
+        ],
+        "weaknesses": [
+          "只使用一张参考图，无法利用多视角信息。",
+          "面数偏高，游戏用途需要后续减面。"
+        ],
+        "limitations": [
+          "不读取文本提示词，文字不会影响结果。",
+          "不支持多视图输入。"
+        ],
+        "prompt": {
+          "language": "unknown",
+          "form": "unknown",
+          "unit": "",
+          "words_min": 0,
+          "words_max": 0,
+          "reads_text": false,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "geometry",
+          "texture"
+        ],
+        "sources": [
+          {
+            "title": "Meshy Image to 3D API",
+            "url": "https://docs.meshy.ai/en/api/image-to-3d",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "image-to-3d",
       "adapter_key": "meshy.v2",
       "enabled": true,
@@ -23375,6 +24202,41 @@
       "provider_short_label": "MESHY",
       "model_id": "meshy-t2.5",
       "model_name": "Meshy T2.5 智能拓扑",
+      "knowledge": {
+        "strengths": [
+          "低成本快速生成，适合草稿和批量资产。",
+          "智能拓扑输出较干净。",
+          "单图输入，使用简单。"
+        ],
+        "weaknesses": [
+          "只使用一张参考图。",
+          "细节与纹理质量一般。"
+        ],
+        "limitations": [
+          "不读取文本提示词，文字不会影响结果。",
+          "不支持多视图输入。"
+        ],
+        "prompt": {
+          "language": "unknown",
+          "form": "unknown",
+          "unit": "",
+          "words_min": 0,
+          "words_max": 0,
+          "reads_text": false,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "geometry",
+          "texture"
+        ],
+        "sources": [
+          {
+            "title": "Meshy Image to 3D API",
+            "url": "https://docs.meshy.ai/en/api/image-to-3d",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "image-to-3d",
       "adapter_key": "meshy.v2",
       "enabled": true,
@@ -23688,6 +24550,40 @@
       "provider_order": 5,
       "model_id": "tripo-v3.1-full",
       "model_name": "Tripo H3 v3.1 (最新)",
+      "knowledge": {
+        "strengths": [
+          "高精度几何与纹理，适合展示和打印。",
+          "支持 PBR 材质与多种导出格式。",
+          "对角色和道具的比例把握较好。"
+        ],
+        "weaknesses": [
+          "面数高、生成时间长、成本较高。",
+          "复杂多物体场景容易失败。"
+        ],
+        "limitations": [
+          "提示词应只描述一个物体。",
+          "文本提示词长度有上限。"
+        ],
+        "prompt": {
+          "language": "en",
+          "form": "descriptive",
+          "unit": "words",
+          "words_min": 30,
+          "words_max": 60,
+          "reads_text": true,
+          "negative_prompt": true
+        },
+        "reference_use": [
+          "none"
+        ],
+        "sources": [
+          {
+            "title": "Tripo text-to-model API",
+            "url": "https://developers.tripo3d.ai/en/docs/generation-text-to-model/p",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "text-to-3d",
       "adapter_key": "tripo.v3",
       "enabled": true,
@@ -24347,6 +25243,39 @@
       "provider_short_label": "TRIPO",
       "model_id": "tripo-v3.1",
       "model_name": "Tripo H3 v3.1 (最新)",
+      "knowledge": {
+        "strengths": [
+          "高精度几何与纹理，适合展示和打印。",
+          "支持 PBR 材质与多种导出格式。"
+        ],
+        "weaknesses": [
+          "面数高、生成时间长、成本较高。",
+          "复杂多物体场景容易失败。"
+        ],
+        "limitations": [
+          "提示词应只描述一个物体。",
+          "文本提示词长度有上限。"
+        ],
+        "prompt": {
+          "language": "en",
+          "form": "descriptive",
+          "unit": "words",
+          "words_min": 30,
+          "words_max": 60,
+          "reads_text": true,
+          "negative_prompt": true
+        },
+        "reference_use": [
+          "none"
+        ],
+        "sources": [
+          {
+            "title": "Tripo text-to-model API",
+            "url": "https://developers.tripo3d.ai/en/docs/generation-text-to-model/p",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "text-to-3d",
       "adapter_key": "tripo.v3",
       "enabled": false,
@@ -24976,6 +25905,41 @@
       "provider_short_label": "TRIPO",
       "model_id": "tripo-v3.1-full",
       "model_name": "Tripo H3 v3.1 (最新)",
+      "knowledge": {
+        "strengths": [
+          "高保真还原单张参考图的造型与纹理。",
+          "几何质量高，适合展示和打印。",
+          "支持 PBR 材质。"
+        ],
+        "weaknesses": [
+          "只使用一张参考图，多视角信息无法利用。",
+          "面数高，游戏用途需要减面。"
+        ],
+        "limitations": [
+          "不读取文本提示词，文字不会影响结果。",
+          "不支持多视图输入。"
+        ],
+        "prompt": {
+          "language": "unknown",
+          "form": "unknown",
+          "unit": "",
+          "words_min": 0,
+          "words_max": 0,
+          "reads_text": false,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "geometry",
+          "texture"
+        ],
+        "sources": [
+          {
+            "title": "Tripo image-to-model API",
+            "url": "https://developers.tripo3d.ai/en/docs/generation-image-to-model/p",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "image-to-3d",
       "adapter_key": "tripo.v3",
       "enabled": true,
@@ -25712,6 +26676,41 @@
       "provider_short_label": "TRIPO",
       "model_id": "tripo-v3.1-multiview",
       "model_name": "Tripo H3 v3.1 多视图",
+      "knowledge": {
+        "strengths": [
+          "多视角约束提升背面和侧面的准确性。",
+          "适合角色、道具等需要完整外形的资产。",
+          "纹理质量高，支持 PBR。"
+        ],
+        "weaknesses": [
+          "至少需要正面和一个侧/背视角。",
+          "视角标注错误会直接扭曲几何。"
+        ],
+        "limitations": [
+          "不读取文本提示词，文字不会影响结果。",
+          "参考图必须属于同一物体并包含正面。"
+        ],
+        "prompt": {
+          "language": "unknown",
+          "form": "unknown",
+          "unit": "",
+          "words_min": 0,
+          "words_max": 0,
+          "reads_text": false,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "geometry",
+          "texture"
+        ],
+        "sources": [
+          {
+            "title": "Tripo multiview-to-model API",
+            "url": "https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/p",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "image-to-3d",
       "adapter_key": "tripo.v3",
       "enabled": true,
@@ -26454,6 +27453,41 @@
       "provider_short_label": "TRIPO",
       "model_id": "tripo-v3.1",
       "model_name": "Tripo H3 v3.1 (最新)",
+      "knowledge": {
+        "strengths": [
+          "高保真还原单张参考图的造型与纹理。",
+          "几何质量高，适合展示和打印。",
+          "支持 PBR 材质。"
+        ],
+        "weaknesses": [
+          "只使用一张参考图，多视角信息无法利用。",
+          "面数高，游戏用途需要减面。"
+        ],
+        "limitations": [
+          "不读取文本提示词，文字不会影响结果。",
+          "不支持多视图输入。"
+        ],
+        "prompt": {
+          "language": "unknown",
+          "form": "unknown",
+          "unit": "",
+          "words_min": 0,
+          "words_max": 0,
+          "reads_text": false,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "geometry",
+          "texture"
+        ],
+        "sources": [
+          {
+            "title": "Tripo image-to-model API",
+            "url": "https://developers.tripo3d.ai/en/docs/generation-image-to-model/p",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "image-to-3d",
       "adapter_key": "tripo.v3",
       "enabled": false,
@@ -27161,6 +28195,41 @@
       "provider_order": 5,
       "model_id": "tripo-p2",
       "model_name": "Tripo P2 低模 (P2-20260801)",
+      "knowledge": {
+        "strengths": [
+          "低模与干净拓扑，适合游戏和实时资产。",
+          "支持面数控制与四边面输出。",
+          "生成速度快、成本低。"
+        ],
+        "weaknesses": [
+          "细节和纹理精细度低于高保真模型。",
+          "复杂结构可能被过度简化。"
+        ],
+        "limitations": [
+          "不读取文本提示词，文字不会影响结果。",
+          "不支持多视图输入。"
+        ],
+        "prompt": {
+          "language": "unknown",
+          "form": "unknown",
+          "unit": "",
+          "words_min": 0,
+          "words_max": 0,
+          "reads_text": false,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "geometry",
+          "texture"
+        ],
+        "sources": [
+          {
+            "title": "Tripo image-to-model API",
+            "url": "https://developers.tripo3d.ai/en/docs/generation-image-to-model/p",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "image-to-3d",
       "adapter_key": "tripo.v3",
       "enabled": true,
@@ -27608,6 +28677,41 @@
       "provider_order": 5,
       "model_id": "tripo-p2-multiview",
       "model_name": "Tripo P2 多视图低模 (P2-20260801)",
+      "knowledge": {
+        "strengths": [
+          "低模多视图重建，背面和侧面更准确。",
+          "适合游戏角色和道具。",
+          "支持面数控制。"
+        ],
+        "weaknesses": [
+          "细节弱于高保真多视图模型。",
+          "依赖清晰的视角标注。"
+        ],
+        "limitations": [
+          "不读取文本提示词，文字不会影响结果。",
+          "参考图必须属于同一物体并包含正面。"
+        ],
+        "prompt": {
+          "language": "unknown",
+          "form": "unknown",
+          "unit": "",
+          "words_min": 0,
+          "words_max": 0,
+          "reads_text": false,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "geometry",
+          "texture"
+        ],
+        "sources": [
+          {
+            "title": "Tripo multiview-to-model API",
+            "url": "https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/p",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "image-to-3d",
       "adapter_key": "tripo.v3",
       "enabled": true,
@@ -28076,6 +29180,40 @@
       "provider_order": 5,
       "model_id": "tripo-p2-text",
       "model_name": "Tripo P2 文生低模 (P2-20260801)",
+      "knowledge": {
+        "strengths": [
+          "低模与干净拓扑，适合游戏和实时资产。",
+          "面数可控，支持四边面输出。",
+          "生成速度快、成本低。"
+        ],
+        "weaknesses": [
+          "细节与纹理一般。",
+          "复杂结构容易简化。"
+        ],
+        "limitations": [
+          "提示词应只描述一个物体。",
+          "文本提示词长度有上限。"
+        ],
+        "prompt": {
+          "language": "en",
+          "form": "descriptive",
+          "unit": "words",
+          "words_min": 30,
+          "words_max": 60,
+          "reads_text": true,
+          "negative_prompt": true
+        },
+        "reference_use": [
+          "none"
+        ],
+        "sources": [
+          {
+            "title": "Tripo text-to-model API",
+            "url": "https://developers.tripo3d.ai/en/docs/generation-text-to-model/p",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "text-to-3d",
       "adapter_key": "tripo.v3",
       "enabled": true,
@@ -33371,6 +34509,40 @@
       },
       "domain": "model-3d",
       "display_order": 2,
+      "knowledge": {
+        "strengths": [
+          "造型与比例稳定，适合角色和产品。",
+          "细节丰富，几何质量好。",
+          "对参考风格的理解较好。"
+        ],
+        "weaknesses": [
+          "纹理和材质还原偶有偏差。",
+          "生成时间较长。"
+        ],
+        "limitations": [
+          "不提供独立反向提示词。",
+          "提示词应只描述一个物体。"
+        ],
+        "prompt": {
+          "language": "en",
+          "form": "descriptive",
+          "unit": "words",
+          "words_min": 30,
+          "words_max": 80,
+          "reads_text": true,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "none"
+        ],
+        "sources": [
+          {
+            "title": "Hyper3D Rodin API",
+            "url": "https://docs.hyper3d.ai/en/api-specification/rodin-agentic",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "text-to-3d",
       "parameters": [
         {
@@ -33488,6 +34660,41 @@
       },
       "domain": "model-3d",
       "display_order": 2,
+      "knowledge": {
+        "strengths": [
+          "从参考图还原造型，比例稳定。",
+          "支持多张参考图辅助主体轮廓。",
+          "细节丰富。"
+        ],
+        "weaknesses": [
+          "纹理与材质还原偶有偏差。",
+          "速度较慢。"
+        ],
+        "limitations": [
+          "不提供独立反向提示词。",
+          "多图参考仍以主体轮廓为主。"
+        ],
+        "prompt": {
+          "language": "en",
+          "form": "descriptive",
+          "unit": "words",
+          "words_min": 30,
+          "words_max": 80,
+          "reads_text": true,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "geometry",
+          "identity"
+        ],
+        "sources": [
+          {
+            "title": "Hyper3D Rodin API",
+            "url": "https://docs.hyper3d.ai/en/api-specification/rodin-agentic",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "image-to-3d",
       "parameters": [
         {
@@ -39854,6 +41061,41 @@
       "provider_short_label": "MESHY",
       "model_id": "meshy-7.1-multiview",
       "model_name": "Meshy 7.1 多视图",
+      "knowledge": {
+        "strengths": [
+          "多图输入提升多角度一致性。",
+          "高细节几何与纹理，适合展示。",
+          "支持 2K 几何与 PBR。"
+        ],
+        "weaknesses": [
+          "参考图顺序会影响结果。",
+          "未标注视角时可能混合错误角度。"
+        ],
+        "limitations": [
+          "不读取文本提示词，文字不会影响结果。",
+          "最多四张参考图，且不支持 4K 几何。"
+        ],
+        "prompt": {
+          "language": "unknown",
+          "form": "unknown",
+          "unit": "",
+          "words_min": 0,
+          "words_max": 0,
+          "reads_text": false,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "geometry",
+          "texture"
+        ],
+        "sources": [
+          {
+            "title": "Meshy Multi-Image to 3D API",
+            "url": "https://docs.meshy.ai/en/api/multi-image-to-3d",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "image-to-3d",
       "adapter_key": "meshy.v2",
       "enabled": true,
@@ -41839,6 +43081,39 @@
       "provider_short_label": "TRIPO",
       "model_id": "tripo-smartsegment-image",
       "model_name": "Tripo Smart Segmentation · 图片",
+      "knowledge": {
+        "strengths": [
+          "从单张图分割出指定部件并生成独立 3D 部件。",
+          "适合拆件、局部处理和多部件制作流程。"
+        ],
+        "weaknesses": [
+          "依赖清晰的主体边界。",
+          "遮挡或粘连的部件分割不稳定。"
+        ],
+        "limitations": [
+          "不读取文本提示词。",
+          "输出是分割出的部件，不是完整场景。"
+        ],
+        "prompt": {
+          "language": "unknown",
+          "form": "unknown",
+          "unit": "",
+          "words_min": 0,
+          "words_max": 0,
+          "reads_text": false,
+          "negative_prompt": false
+        },
+        "reference_use": [
+          "geometry"
+        ],
+        "sources": [
+          {
+            "title": "Tripo smart segment API",
+            "url": "https://developers.tripo3d.ai/en/docs/mesh-smartsegment",
+            "checked_at": "2026-11-10"
+          }
+        ]
+      },
       "capability": "image-to-3d",
       "domain": "model-3d",
       "adapter_key": "tripo.v3",

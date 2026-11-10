@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -264,13 +265,29 @@ func (h *processingHarness) runInReply(owner, session, name, arguments string, h
 	command := chat.ToolCommand{OwnerID: owner, SessionID: session, AssistantMessageID: "turn-a",
 		Call: agents.ToolCall{ID: fmt.Sprintf("call-%d", h.calls), Name: name, Arguments: []byte(arguments)},
 		Tool: h.tool(name), History: history, Turn: turn, Options: options}
+	return h.execute(command)
+}
+
+// runCall executes a call with a fixed ID so a second run takes the stored
+// operation's resume path, as a restarted turn or a bound task does.
+func (h *processingHarness) runCall(callID, name, arguments string) chat.ToolResult {
+	h.t.Helper()
+	command := chat.ToolCommand{OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-a",
+		Call: agents.ToolCall{ID: callID, Name: name, Arguments: []byte(arguments)},
+		Tool: h.tool(name)}
+	result, _ := h.execute(command)
+	return result
+}
+
+func (h *processingHarness) execute(command chat.ToolCommand) (chat.ToolResult, []chat.ToolObservation) {
+	h.t.Helper()
 	var observed []chat.ToolObservation
 	result, err := h.executor.Execute(context.Background(), command, func(o chat.ToolObservation) error {
 		observed = append(observed, o)
 		return nil
 	})
 	if err != nil {
-		h.t.Fatalf("execute %s: %v", name, err)
+		h.t.Fatalf("execute %s: %v", command.Call.Name, err)
 	}
 	return result, observed
 }
@@ -309,6 +326,18 @@ func (h *processingHarness) expectRejected(result chat.ToolResult, want string) 
 	if strings.Contains(result.AgentContent, "UPSTREAM-SECRET") {
 		h.t.Fatalf("rejection leaked upstream data: %s", result.AgentContent)
 	}
+}
+
+// usePromptOverLimit rebuilds the executor with another over-limit policy. The
+// shipped Catalog refuses; the historical Catalogs cut the prompt instead.
+func (h *processingHarness) usePromptOverLimit(mode string) {
+	h.t.Helper()
+	h.config.Chat.Agent.PromptReport.OverLimit = mode
+	executor, err := generationtool.New(h.config)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.executor = executor
 }
 
 func meshyCatalogTasks(h *processingHarness) []generation.Task {
@@ -746,4 +775,112 @@ func TestProcessingDefaultsToTheSelectedModel(t *testing.T) {
 	h = newProcessingHarness(t, "auto", meshyCatalogTasks)
 	result, _ = h.runWith("owner-a", "session-z", "retexture_model", `{"prompt":"x"}`, nil, options)
 	h.expectRejected(result, "list_session_models")
+}
+
+// #249: retexture_model must use the Catalog's over_limit policy, not its own
+// silent cut. The shipped Catalog refuses an 801-character prompt against
+// Meshy Retexture's 800-character input: nothing may be frozen, submitted or
+// charged, and no Task may exist after the call.
+func TestRetexturePromptOverLimitRefusesBeforePaidSubmission(t *testing.T) {
+	h := newProcessingHarness(t, "auto", meshyCatalogTasks)
+	prompt := strings.Repeat("x", 801)
+	arguments, err := json.Marshal(map[string]any{"source_task_id": "model-1", "prompt": prompt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, observed := h.run("retexture_model", string(arguments))
+	if !result.NoSubmission || result.Suspend || result.TaskID != "" ||
+		h.gateway.submitCount != 0 || len(h.gateway.submitted) != 0 ||
+		len(h.gateway.frozen) != 0 || len(observed) != 0 {
+		t.Fatalf("over-limit prompt reached the paid path: %+v submits=%d frozen=%d observed=%d",
+			result, h.gateway.submitCount, len(h.gateway.frozen), len(observed))
+	}
+	content := h.content(result)
+	message, _ := content["error"].(string)
+	if content["success"] != false ||
+		!strings.Contains(message, "over the limit of 800 characters") ||
+		!strings.Contains(message, "Nothing was submitted and nothing was charged") {
+		t.Fatalf("refusal = %v", content)
+	}
+}
+
+// #249: a Catalog that declares over_limit=truncate still submits, but the
+// cut is reported: the frozen prompt is the 800-rune prefix and prompt_note
+// names the length-limit layer and the one dropped rune.
+func TestRetexturePromptOverLimitTruncatesAndReportsTheCut(t *testing.T) {
+	h := newProcessingHarness(t, "auto", meshyCatalogTasks)
+	h.usePromptOverLimit("truncate")
+	prompt := strings.Repeat("x", 801)
+	arguments, err := json.Marshal(map[string]any{"source_task_id": "model-1", "prompt": prompt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, observed := h.run("retexture_model", string(arguments))
+	if result.NoSubmission || h.gateway.submitCount != 1 || len(observed) == 0 || observed[0].EstimatedCredits != 15 {
+		t.Fatalf("truncated prompt was not submitted: %+v submits=%d observed=%d",
+			result, h.gateway.submitCount, len(observed))
+	}
+	cut := strings.Repeat("x", 800)
+	if frozen := h.frozenInput(0)["prompt"]; frozen != cut {
+		t.Fatalf("frozen prompt = %q (%d runes), want the 800-rune cut", frozen, len([]rune(frozen.(string))))
+	}
+	content := h.content(result)
+	if content["success"] != true || content["estimated_credits"] != float64(15) {
+		t.Fatalf("result = %v", content)
+	}
+	if content["final_prompt"] != cut {
+		t.Fatalf("final_prompt = %q, want the frozen prompt", content["final_prompt"])
+	}
+	note, _ := content["prompt_note"].(map[string]any)
+	if note["truncated_characters"] != float64(1) || note["maximum_length"] != float64(800) {
+		t.Fatalf("prompt_note = %#v", note)
+	}
+	rendered, _ := json.Marshal(note)
+	if !strings.Contains(string(rendered), "length limit") ||
+		!strings.Contains(string(rendered), "cutting the last 1 characters") {
+		t.Fatalf("prompt_note does not report the cut: %s", rendered)
+	}
+}
+
+// #249: a restarted turn that observes the already accepted retexture task
+// must report the same final prompt and cut note as the first submission, even
+// though it rebuilds them from the frozen PreparedInput.
+func TestRetexturePromptTruncationIsReportedTheSameOnResume(t *testing.T) {
+	h := newProcessingHarness(t, "auto", meshyCatalogTasks)
+	h.usePromptOverLimit("truncate")
+	prompt := strings.Repeat("x", 801)
+	arguments, err := json.Marshal(map[string]any{"source_task_id": "model-1", "prompt": prompt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := h.runCall("call-resume", "retexture_model", string(arguments))
+	if first.NoSubmission || h.gateway.submitCount != 1 {
+		t.Fatalf("first submission: %+v submits=%d", first, h.gateway.submitCount)
+	}
+	second := h.runCall("call-resume", "retexture_model", string(arguments))
+	// The fake kernel replays the same frozen submission instead of binding
+	// the grant, so the second call submits the same PreparedInput again: it
+	// must not freeze a new one.
+	if second.NoSubmission || h.gateway.preparedCount != 1 {
+		t.Fatalf("resume prepared a new input: %+v prepared=%d", second, h.gateway.preparedCount)
+	}
+	var firstContent, secondContent map[string]any
+	if err := json.Unmarshal([]byte(first.AgentContent), &firstContent); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(second.AgentContent), &secondContent); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(firstContent["final_prompt"], secondContent["final_prompt"]) {
+		t.Fatalf("final_prompt changed on resume: %q != %q",
+			firstContent["final_prompt"], secondContent["final_prompt"])
+	}
+	if !reflect.DeepEqual(firstContent["prompt_note"], secondContent["prompt_note"]) {
+		t.Fatalf("prompt_note changed on resume:\n%#v\n%#v",
+			firstContent["prompt_note"], secondContent["prompt_note"])
+	}
+	rendered, _ := json.Marshal(secondContent["prompt_note"])
+	if !strings.Contains(string(rendered), "length limit") {
+		t.Fatalf("resume lost the cut layer: %s", rendered)
+	}
 }
