@@ -1470,6 +1470,9 @@ export interface ChatProductSchema {
       reasoning_default?: string;
       /** #322: the session's context usage as the upstream reported it, the model's window and the compaction records. */
       context_tokens?: string;
+      /** #247: the declared vision token estimate and the effective image budget. */
+      context_vision_tokens?: string;
+      context_vision_budget?: string;
       context_window?: string;
       compactions?: string;
       /** #322: members of one compaction record. */

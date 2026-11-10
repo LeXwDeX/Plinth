@@ -187,6 +187,10 @@ export interface ChatContextCompaction {
 /** #322: the session's context usage as the upstream reported it; null while unknown, never estimated. */
 export interface ChatContextUsage {
   tokens: number | null;
+  /** #247: the declared estimate of the request's vision tokens; null while unknown, absent on older Schemas. */
+  visionTokens?: number | null;
+  /** #247: the effective vision image budget for the session's model; null when undeclared. */
+  visionBudget?: number | null;
   window: number | null;
   /** Oldest first. */
   compactions: ChatContextCompaction[];
@@ -442,6 +446,8 @@ function contextOf(schema: ProductSchema, payload: unknown): ChatContextUsage {
     });
   return {
     tokens: tokenCount(member(source, fields.context_tokens)),
+    visionTokens: tokenCount(member(source, fields.context_vision_tokens)),
+    visionBudget: tokenCount(member(source, fields.context_vision_budget)),
     window: tokenCount(member(source, fields.context_window)),
     compactions,
   };

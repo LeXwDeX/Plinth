@@ -37,7 +37,25 @@ export function toolCallLevel(used: number, limit: number): 'normal' | 'warning'
 
 const LEVEL_CLASS = { normal: 'text-muted-foreground', warning: 'text-warning', critical: 'text-destructive' } as const;
 
-function contextHint(schema: ProductSchema, tokens: number | null, window: number | null, settings: CompactionSettings): string {
+function contextHint(
+  schema: ProductSchema,
+  tokens: number | null,
+  window: number | null,
+  settings: CompactionSettings,
+  visionTokens: number | null = null,
+  visionBudget: number | null = null,
+): string {
+  const text = contextBaseHint(schema, tokens, window, settings);
+  // #247: the vision part is a declared estimate, separate from the upstream's count.
+  if (visionTokens === null || visionBudget === null || visionBudget <= 0) return text;
+  const vision = formatSchemaText(schemaText(schema, 'ui.studio.context.hint_vision'), {
+    vision: formatTokenCount(visionTokens),
+    budget: formatTokenCount(visionBudget),
+  });
+  return `${text}；${vision}`;
+}
+
+function contextBaseHint(schema: ProductSchema, tokens: number | null, window: number | null, settings: CompactionSettings): string {
   if (tokens === null) return schemaText(schema, 'ui.studio.context.hint_unknown');
   const used = formatTokenCount(tokens);
   if (window === null || window <= 0) return formatSchemaText(schemaText(schema, 'ui.studio.context.hint_used'), { used });
@@ -74,6 +92,8 @@ export function ContextMeter() {
   const label = schemaText(schema, 'ui.studio.context.label');
   const text = formatContextUsage(tokens, window, schemaText(schema, 'ui.studio.context.unknown'));
   const level = contextLevel(tokens, window, settings);
+  const visionTokens = context?.visionTokens ?? null;
+  const visionBudget = context?.visionBudget ?? null;
   const toolCallLimit = schema.chat.agent_limits?.max_tool_calls_per_reply ?? 0;
   const toolCallLabel = schemaText(schema, 'ui.studio.tool_calls.label');
   const toolCallText = `${toolCallLabel} ${toolCalls} / ${toolCallLimit}`;
@@ -96,7 +116,7 @@ export function ContextMeter() {
     // as the cells above: the figure and the compact action sit together on the left, the tool call counter
     // alone on the right edge. Only the figure and the counter give way (truncate) when the row is short.
     <div className="col-span-full flex h-7 min-w-0 items-center gap-1 @[40rem]:col-span-1" data-testid="composer-context">
-      <HintTooltip name={`${label}: ${text}`} hint={contextHint(schema, tokens, window, settings)} className="min-w-0 shrink">
+      <HintTooltip name={`${label}: ${text}`} hint={contextHint(schema, tokens, window, settings, visionTokens, visionBudget)} className="min-w-0 shrink">
         <span
           tabIndex={0}
           aria-label={`${label}: ${text}`}
