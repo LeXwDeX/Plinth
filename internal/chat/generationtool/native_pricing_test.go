@@ -1,6 +1,7 @@
 package generationtool
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -17,7 +18,7 @@ func TestNativePlanPriceProjectionKeepsPrivateFrozenFieldsPrivate(t *testing.T) 
 	executor := &Executor{}
 	config := &catalog.ChatToolProcessingSchema{Plan: &catalog.ChatToolProcessingPlanSchema{}}
 	command := chat.ToolCommand{Tool: catalog.ChatToolSchema{ResultFields: catalog.ChatToolResultFields{Success: "success"}}}
-	result, e := executor.processingPlanResult(command, config, plan)
+	result, e := executor.processingPlanResult(context.Background(), command, config, plan)
 	if e != nil {
 		t.Fatal(e)
 	}

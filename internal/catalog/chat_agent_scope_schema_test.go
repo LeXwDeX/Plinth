@@ -24,6 +24,7 @@ var shippedToolScopes = map[string]string{
 	"retexture_model":            "3d",
 	"process_model":              "3d",
 	"plan_model_processing":      "3d",
+	"revise_processing_plan":     "3d",
 	"get_processing_plan":        "3d",
 	"convert_model_format":       "3d",
 	"list_session_models":        "3d",

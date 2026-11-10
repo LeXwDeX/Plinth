@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -49,7 +50,7 @@ func (executor *Executor) executeProcessingPlan(ctx context.Context, command cha
 		if existing.SessionID != command.SessionID {
 			return executor.reject(command, config.Plan.NotFoundContent)
 		}
-		return executor.processingPlanResult(command, config, existing)
+		return executor.processingPlanResult(ctx, command, config, existing)
 	}
 	if !errors.Is(err, processing.ErrMissing) {
 		return chat.ToolResult{NoSubmission: true}, err
@@ -110,6 +111,11 @@ func (executor *Executor) executeProcessingPlan(ctx context.Context, command cha
 	}
 	create := processing.CreateCommand{Harness: turnHarnessBinding(command), OwnerID: owner, IdempotencyKey: key, SessionID: command.SessionID,
 		SourceTaskID: source.ID, SourceAssetID: asset, Origin: processing.OriginAgent}
+	// #251: the checkpoints and contingencies were approved in the session's
+	// production plan; the plan tool only inherits them, so the Agent can
+	// neither add a checkpoint nor loosen its thresholds here.
+	inherited := executor.inheritedCheckpoints(ctx, command)
+	connected := map[generation.Capability]bool{}
 	previous, chosenAsset := source, asset
 	type settled struct {
 		capability generation.Capability
@@ -122,22 +128,24 @@ func (executor *Executor) executeProcessingPlan(ctx context.Context, command cha
 			return executor.reject(command, executor.fillText(command, messages.StepUnknown, "{step}", string(step.Capability)))
 		}
 		var chosen selectedOffering
-		found, available, expired := false, false, false
+		found, available, expired, incomplete := false, false, false, false
 		var compatible []selectedOffering
 		for _, offering := range executor.gateway.Offerings(step.Capability) {
 			if !offering.Enabled || offering.Domain != generation.DomainProcessing || !executor.gateway.OfferingAvailable(offering.ID) {
 				continue
 			}
 			binding, bindErr := generation.BindModelSource(offering, previous, chosenAsset, config.SourceVariantPreference)
+			completable := bindErr == nil && planOfferingCompletable(step.Capability, offering, step.Parameters)
+			incomplete = incomplete || (bindErr == nil && !completable)
 			if step.OfferingID != "" && step.OfferingID != offering.ID {
-				if bindErr == nil {
+				if completable {
 					compatible = append(compatible, selectedOffering{offering: offering, binding: binding})
 				}
 				continue
 			}
 			available = true
 			expired = expired || errors.Is(bindErr, generation.ErrSourceExpired)
-			if bindErr == nil {
+			if completable {
 				compatible = append(compatible, selectedOffering{offering: offering, binding: binding})
 				if !found {
 					chosen, found = selectedOffering{offering: offering, binding: binding}, true
@@ -168,6 +176,15 @@ func (executor *Executor) executeProcessingPlan(ctx context.Context, command cha
 				return executor.serviceQuestion(ctx, command, step.Capability, previous, chosenAsset, wanted,
 					mentions.declined[chosen.offering.ID], &chosen.offering, compatible)
 			}
+		}
+		if step.OfferingID != "" && !found && incomplete {
+			// #251: a pinned Offering whose required input cannot come from the
+			// plan's source and parameters (a reference-image retexture) is
+			// refused with the tool that can run it instead.
+			if offeringRequiresConversationInput(step.OfferingID, step.Capability, executor.gateway.Offerings(step.Capability)) {
+				return executor.reject(command, messages.ReferenceUnsupported)
+			}
+			return executor.reject(command, executor.fillText(command, messages.InvalidInput, "{detail}", string(step.Capability)))
 		}
 		if choice != nil && step.OfferingID != "" && !found {
 			return executor.unknownService(command, executor.fillText(command, choice.UnknownOffering, "{step}", string(step.Capability)), step.OfferingID)
@@ -250,8 +267,15 @@ func (executor *Executor) executeProcessingPlan(ctx context.Context, command cha
 			}
 		}
 		parameters, _ := json.Marshal(input)
-		create.Steps = append(create.Steps, processing.StepRequest{OfferingID: chosen.offering.ID,
-			ExpectedOfferingRevision: chosen.offering.Revision, Input: parameters})
+		requestedStep := processing.StepRequest{OfferingID: chosen.offering.ID,
+			ExpectedOfferingRevision: chosen.offering.Revision, Input: parameters}
+		if !connected[step.Capability] {
+			if checkpoint, declared := inherited[step.Capability]; declared {
+				requestedStep.Checkpoint = &checkpoint
+				connected[step.Capability] = true
+			}
+		}
+		create.Steps = append(create.Steps, requestedStep)
 		previous = previewProcessingOutput(chosen.offering, owner, command.SessionID)
 		chosenAsset = ""
 	}
@@ -272,7 +296,7 @@ func (executor *Executor) executeProcessingPlan(ctx context.Context, command cha
 	for _, step := range answered {
 		executor.settleChoice(ctx, command, step.capability, step.index, step.offering, useDefault)
 	}
-	return executor.processingPlanResult(command, config, plan)
+	return executor.processingPlanResult(ctx, command, config, plan)
 }
 
 // Only input-contract preview data. No task is created here.
@@ -321,7 +345,7 @@ func (executor *Executor) ReadProcessingPlan(ctx context.Context, command chat.T
 	if err != nil {
 		return chat.ToolResult{NoSubmission: true}, err
 	}
-	return executor.processingPlanResult(command, config, plan)
+	return executor.processingPlanResult(ctx, command, config, plan)
 }
 
 type processingPriceStepView struct {
@@ -334,6 +358,15 @@ type processingPriceStepView struct {
 	State            string                  `json:"state"`
 	TaskID           generation.TaskID       `json:"task_id,omitempty"`
 	Failure          string                  `json:"failure,omitempty"`
+	// #251: the server-evaluated checkpoint, the revision provenance and the
+	// actionable failure classification.
+	Checkpoint        *processing.Checkpoint `json:"checkpoint,omitempty"`
+	ContingencyID     string                 `json:"contingency_id,omitempty"`
+	RevisionOperation string                 `json:"revision_operation,omitempty"`
+	RevisionReason    string                 `json:"revision_reason,omitempty"`
+	FailureCategory   string                 `json:"failure_category,omitempty"`
+	NextAction        string                 `json:"next_action,omitempty"`
+	FailureAdvice     string                 `json:"failure_advice,omitempty"`
 }
 
 func (v processingPriceStepView) MarshalJSON() ([]byte, error) {
@@ -341,12 +374,21 @@ func (v processingPriceStepView) MarshalJSON() ([]byte, error) {
 	return schema.MarshalPriceProjection(plain(v), v.NativeQuote != nil, "estimated_credits")
 }
 
-func (executor *Executor) processingPlanResult(command chat.ToolCommand, config *catalog.ChatToolProcessingSchema, plan processing.Plan) (chat.ToolResult, error) {
+func (executor *Executor) processingPlanResult(ctx context.Context, command chat.ToolCommand, config *catalog.ChatToolProcessingSchema, plan processing.Plan) (chat.ToolResult, error) {
 	steps := make([]processingPriceStepView, 0, len(plan.Steps))
 	var prices schema.PriceAccumulator
 	var overBudget []string
 	for _, step := range plan.Steps {
-		steps = append(steps, processingPriceStepView{Capability: step.Capability, OfferingID: step.OfferingID, Revision: step.Revision, Parameters: step.Input, EstimatedCredits: step.EstimatedCredits, NativeQuote: step.NativeQuote, State: step.State, TaskID: step.TaskID, Failure: step.Failure})
+		view := processingPriceStepView{Capability: step.Capability, OfferingID: step.OfferingID, Revision: step.Revision,
+			Parameters: step.Input, EstimatedCredits: step.EstimatedCredits, NativeQuote: step.NativeQuote,
+			State: step.State, TaskID: step.TaskID, Failure: step.Failure, Checkpoint: step.Checkpoint,
+			ContingencyID: step.ContingencyID, RevisionOperation: step.RevisionOperation, RevisionReason: step.RevisionReason}
+		if step.State == processing.Failed || step.State == processing.Paused || step.Failure != "" {
+			report := executor.stepFailureReport(ctx, command, step)
+			view.FailureCategory, view.NextAction = string(report.Category), string(report.Action)
+			view.FailureAdvice = executor.processingFailureAdvice(report)
+		}
+		steps = append(steps, view)
 		if e := prices.Add(step.EstimatedCredits, step.NativeQuote); e != nil {
 			return chat.ToolResult{NoSubmission: true}, e
 		}
@@ -381,6 +423,133 @@ func (executor *Executor) processingPlanResult(command chat.ToolCommand, config 
 	if note := executor.purposeBudgetText(command, overBudget); note != "" {
 		payload[command.Tool.ResultFields.PurposeBudgetNote] = note
 	}
+	// #251: the plan's failure is reported with its actionable category and a
+	// suggested next action, never with internal detail or upstream text.
+	if plan.Failure != "" {
+		index, failed := planFailureStep(plan)
+		report := executor.stepFailureReport(ctx, command, failed)
+		detail := map[string]any{
+			"code": plan.Failure, "step_index": index,
+			"category": string(report.Category), "next_action": string(report.Action),
+			"advice": executor.processingFailureAdvice(report), "retryable": report.Retryable,
+			"user_decision_required": report.UserDecisionRequired,
+		}
+		if failed.Checkpoint != nil {
+			detail["checkpoint"] = failed.Checkpoint
+		}
+		payload["failure_detail"] = detail
+	}
 	content, err := json.Marshal(payload)
 	return chat.ToolResult{AgentContent: string(content), NoSubmission: true}, err
+}
+
+// inheritedCheckpoints reads the session's approved production plan and maps
+// every declared checkpoint to its processing capability (#251). Without an
+// active approved plan the plan tool adds no checkpoint.
+func (executor *Executor) inheritedCheckpoints(ctx context.Context, command chat.ToolCommand) map[generation.Capability]processing.Checkpoint {
+	if executor.grants == nil {
+		return nil
+	}
+	summary, found, err := executor.grants.BudgetSummary(ctx, command.OwnerID, command.SessionID)
+	if err != nil || !found || summary.State != budget.StateActive {
+		return nil
+	}
+	inherited := make(map[generation.Capability]processing.Checkpoint, len(summary.Plan.Checkpoints))
+	for _, checkpoint := range summary.Plan.Checkpoints {
+		inherited[generation.Capability(checkpoint.AfterCapability)] = processing.Checkpoint{
+			Checks: checkpoint.Checks, State: processing.CheckpointPending,
+		}
+	}
+	return inherited
+}
+
+// planOfferingCompletable reports whether this plan tool can finish the
+// Offering from the source and the step's ordinary parameters: every required
+// input the Offering declares must be provided, fixed, defaulted or resolved
+// by the plan (the source). A required reference picture or uploaded asset
+// cannot be supplied by a processing plan.
+func planOfferingCompletable(capability generation.Capability, offering generation.Offering, parameters json.RawMessage) bool {
+	var input map[string]json.RawMessage
+	if len(parameters) > 0 && json.Unmarshal(parameters, &input) != nil {
+		return false
+	}
+	// The plan tool's reference image path belongs to retexture (#251): a
+	// retexture that needs a picture is left to retexture_model. Other
+	// capabilities keep their historical service choices.
+	if capability != "retexture" {
+		return true
+	}
+	for _, parameter := range offering.Parameters {
+		if _, source := schema.SourceParameterRole(parameter); source || !parameter.Required ||
+			parameter.Fixed || len(parameter.Default) > 0 {
+			continue
+		}
+		if parameter.Semantic == schema.SemanticReferenceImage || parameter.Type == "asset" || parameter.Type == "asset-array" {
+			return false
+		}
+		if _, provided := input[parameter.Name]; !provided {
+			return false
+		}
+	}
+	return true
+}
+
+// offeringRequiresConversationInput tells the refusal which tool can run a
+// pinned Offering the plan cannot: a retexture that needs a reference picture
+// goes through retexture_model.
+func offeringRequiresConversationInput(id generation.OfferingID, capability generation.Capability,
+	offerings []generation.Offering) bool {
+	for _, offering := range offerings {
+		if offering.ID != id || offering.Capability != capability {
+			continue
+		}
+		for _, parameter := range offering.Parameters {
+			if _, source := schema.SourceParameterRole(parameter); source || !parameter.Required {
+				continue
+			}
+			if parameter.Semantic == schema.SemanticReferenceImage || parameter.Name == "style_asset" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// stepFailureReport classifies one step's failure, reading the Task's class
+// when a Task exists. A read failure leaves the plan reason as the source.
+func (executor *Executor) stepFailureReport(ctx context.Context, command chat.ToolCommand, step processing.Step) generation.FailureReport {
+	var task *generation.Task
+	if step.TaskID != "" {
+		if failed, err := executor.gateway.Get(ctx, generation.OwnerID(command.OwnerID), step.TaskID); err == nil {
+			task = &failed
+		}
+	}
+	return processing.ClassifyStepFailure(step.Failure, task)
+}
+
+func (executor *Executor) processingFailureAdvice(report generation.FailureReport) string {
+	advice := executor.chat.Processing.Failures.Advice[string(report.Category)]
+	if advice == "" {
+		advice = string(report.Action)
+	}
+	if executor.texts != nil {
+		// Advice is server-only Agent text; an unknown key keeps it as is.
+		advice = executor.texts.Text("", advice)
+	}
+	return advice
+}
+
+// planFailureStep names the first step that carries the plan's failure.
+func planFailureStep(plan processing.Plan) (int, processing.Step) {
+	for index, step := range plan.Steps {
+		if step.Failure != "" {
+			return index, step
+		}
+	}
+	for index, step := range plan.Steps {
+		if step.Checkpoint != nil && step.Checkpoint.State == processing.CheckpointFailed {
+			return index, step
+		}
+	}
+	return -1, processing.Step{}
 }

@@ -235,3 +235,46 @@ describe('an approved production plan (#103)', () => {
     expect(denied.getByTestId('studio-plan-state').textContent).toBe(text('ui.studio.plan.state.denied'));
   });
 });
+
+// #251: acceptance criteria, checkpoints and contingencies are part of the
+// approved contract; the card shows them and never makes the usual route look
+// as expensive as the worst case.
+describe('a production plan with acceptance and contingencies (#251)', () => {
+  it('shows the acceptance criteria, the checkpoints and the separately estimated contingencies', () => {
+    const contracted: ProductionPlan = {
+      ...plan,
+      acceptance: [
+        { id: 'purpose', statement: '用途「游戏/实时·角色」的交付标准：', check: 'game_character' },
+        { id: 'triangles', statement: '三角面数不超过 60000', check: 'triangles' },
+      ],
+      checkpoints: [{ afterCapability: 'remesh', checks: [{ check: 'triangles', maximum: 60000 }, { check: 'pivot_bottom_center', maximumRatio: 0.01 }] }],
+      contingencies: [{
+        id: 'low_poly', trigger: ['triangles'], capability: 'remesh', offeringId: 'meshy/processing/remesh',
+        purpose: '再减面', estimate: legacy('5'),
+      }],
+    };
+    const view = render(<PlanCard plan={contracted} budgets={budgets} tasks={[]} />);
+    const acceptance = view.getByTestId('studio-plan-acceptance');
+    expect(acceptance.textContent).toContain(text('ui.studio.plan.acceptance'));
+    expect(acceptance.textContent).toContain('三角面数不超过 60000');
+    const checkpoints = view.getByTestId('studio-plan-checkpoints');
+    expect(checkpoints.textContent).toContain(words('ui.studio.plan.checkpoint_item', {
+      capability: capability('remesh'),
+      checks: `${text('ui.chat.review.check_names.triangles')}、${text('ui.chat.review.check_names.pivot_bottom_center')}`,
+    }));
+    const contingencies = view.getByTestId('studio-plan-contingencies');
+    expect(contingencies.textContent).toContain(words('ui.studio.plan.contingencies', { amounts: `5 ${legacyLabel}` }));
+    expect(contingencies.textContent).toContain(words('ui.studio.plan.contingency_item', {
+      trigger: text('ui.chat.review.check_names.triangles'),
+      capability: capability('remesh'),
+      amount: `5 ${legacyLabel}`,
+    }));
+  });
+
+  it('renders a plan from an older server without the new sections', () => {
+    const view = render(<PlanCard plan={plan} budgets={budgets} tasks={[]} />);
+    expect(view.queryByTestId('studio-plan-acceptance')).toBeNull();
+    expect(view.queryByTestId('studio-plan-checkpoints')).toBeNull();
+    expect(view.queryByTestId('studio-plan-contingencies')).toBeNull();
+  });
+});

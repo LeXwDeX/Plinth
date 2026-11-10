@@ -24,7 +24,7 @@ func TestPlanProposedContentUsesTheSchemasStateMessages(t *testing.T) {
 		budget.StateDenied: "schema-closed",
 		budget.StateClosed: "schema-closed",
 	} {
-		content := planProposedContent(budget.ProductionBudget{ID: "pb", State: state}, messages)
+		content := planProposedContent(budget.ProductionBudget{ID: "pb", State: state}, messages, "")
 		if content["message"] != want {
 			t.Fatalf("%s message = %v, want %q", state, content["message"], want)
 		}
@@ -40,7 +40,7 @@ func TestPlanProposedContentUsesTheSchemasStateMessages(t *testing.T) {
 		budget.StateClosed:    "no longer pending",
 	} {
 		content := planProposedContent(budget.ProductionBudget{ID: "pb", State: state},
-			catalog.ChatApprovalBudgetToolMessages{})
+			catalog.ChatApprovalBudgetToolMessages{}, "")
 		message, _ := content["message"].(string)
 		if !strings.Contains(message, want) {
 			t.Fatalf("%s fallback = %q, want %q", state, message, want)

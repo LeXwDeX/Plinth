@@ -311,6 +311,11 @@ type Item struct {
 	Plan            *budget.Plan    `json:"plan,omitempty"`
 	Budgets         []budget.Amount `json:"budgets,omitempty"`
 	EstimatedTotals []budget.Amount `json:"estimated_totals,omitempty"`
+	// StepTotals and ContingencyTotals split the worst-case estimate (#251),
+	// so the card never makes the usual route look as expensive as the
+	// declared repairs.
+	StepTotals        []budget.Amount `json:"step_totals,omitempty"`
+	ContingencyTotals []budget.Amount `json:"contingency_totals,omitempty"`
 }
 
 // Outcome is what a decision produced. TaskID and MessageID are empty while
@@ -417,6 +422,7 @@ func (s *Service) planItem(production budget.ProductionBudget) Item {
 	return Item{
 		Kind: ItemKindPlan, RequestID: production.ID, Status: StatusPending,
 		Tool: s.planToolName(), Budgets: production.Limits, EstimatedTotals: plan.EstimatedTotals(),
+		StepTotals: plan.StepTotals(), ContingencyTotals: plan.ContingencyTotals(),
 		Plan: &plan, Inputs: []Input{},
 		MessageID: production.MessageID, CreatedAt: production.CreatedAt,
 		ExpiresAt: s.grants.PendingBudgetExpiry(production),

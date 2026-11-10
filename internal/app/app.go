@@ -668,6 +668,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		OfferingAvailable: module.OfferingAvailable,
 		Store:             executionGrants,
 		Checkpoints:       selfCheckCheckpointIDs(applicationSchema.Chat.SelfCheck),
+		// #251: the server derives acceptance and checkpoint thresholds from
+		// the purpose budget and the production review settings.
+		Usage:      applicationSchema.Chat.Model3DUsage,
+		Production: applicationSchema.Chat.ModelReview.Inspect.Production,
 	})
 	paramsStore := agentparams.NewPersistentParameterStore(repository, logger)
 	// The ledger's parameter source is the existing parameter store's
@@ -687,6 +691,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
+	// #251: the acceptance wording is frozen in the proposal turn's language.
+	chatService.SetProductionPlanLocalizer(func(text string) string { return texts.Text("", text) })
 	imageReview, err := imagereview.New(imagereview.Config{
 		Context: applicationSchema.Chat.Context,
 		Review:  applicationSchema.Chat.ImageReview,
@@ -791,6 +797,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		RecoverTask:           newAgentTaskRecoverer(module, applicationSchema.Chat, applicationSchema.Content.Messages, texts),
 		ListModels:            toolExecutor.ListSessionModels,
 		ReadProcessingPlan:    toolExecutor.ReadProcessingPlan,
+		ReviseProcessingPlan:  toolExecutor.ReviseProcessingPlan,
 		InspectImage:          imageReview.Inspect,
 		CreateSelectionMask:   imageMask.Execute,
 		InspectModel:          toolExecutor.InspectModel,
@@ -1520,6 +1527,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	}
 	processingService.WithGrants(executionGrants)
 	processingService.WithSourcePreference(catalog.ProcessingSourcePreference(applicationSchema.Chat.Tools))
+	// #251: checkpoints read the saved model through the review tool's bounded,
+	// owner-scoped cache; a read failure is recorded as unknown, not a pass.
+	processingService.WithModelReport(toolExecutor.ModelReport)
 	toolExecutor.SetProcessing(processingService, processingCatalog{Catalog: taskCatalog, module: module})
 	var modelDeliveryService *modeldelivery.Service
 	if !applicationSchema.ModelDelivery.Disabled() {

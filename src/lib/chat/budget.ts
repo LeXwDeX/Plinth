@@ -38,10 +38,46 @@ export interface BudgetUnit {
 /** A figure of every budget unit. */
 export type BudgetFigure = 'limit' | 'spent' | 'reserved' | 'remaining';
 
+/** #251: one final-delivery condition the server derived from the purpose. */
+export interface AcceptanceCriterion {
+  id: string;
+  statement: string;
+  check: string;
+}
+
+/** #251: one frozen checkpoint check; thresholds are server-side values. */
+export interface PlanCheck {
+  check: string;
+  minimum?: number;
+  maximum?: number;
+  maximumRatio?: number;
+  required?: boolean;
+}
+
+/** #251: a checkpoint after one processing capability of the plan. */
+export interface PlanCheckpoint {
+  afterCapability: string;
+  checks: PlanCheck[];
+}
+
+/** #251: a declared repair step; its worst-case estimate is in the approved limit. */
+export interface PlanContingency {
+  id: string;
+  trigger: string[];
+  capability: string;
+  offeringId: string;
+  purpose: string;
+  estimate: PriceTotal | null;
+}
+
 export interface ProductionPlan {
   title: string;
   steps: ProductionPlanStep[];
   correctionCapabilities: string[];
+  /** #251: absent on a historical server. */
+  acceptance?: AcceptanceCriterion[];
+  checkpoints?: PlanCheckpoint[];
+  contingencies?: PlanContingency[];
 }
 
 /**
@@ -198,16 +234,79 @@ export function parseProductionPlanStep(value: unknown): ProductionPlanStep | nu
   };
 }
 
+function number(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function parsePlanCheck(value: unknown): PlanCheck | null {
+  const item = record(value);
+  const check = text(item.check);
+  if (!check) return null;
+  return {
+    check,
+    minimum: number(item.minimum),
+    maximum: number(item.maximum),
+    maximumRatio: number(item.maximum_ratio),
+    required: item.required === true ? true : undefined,
+  };
+}
+
+function parseAcceptance(value: unknown): AcceptanceCriterion[] {
+  return (Array.isArray(value) ? value : []).flatMap((entry) => {
+    const item = record(entry);
+    const statement = text(item.statement);
+    if (!statement) return [];
+    return [{ id: text(item.id), statement, check: text(item.check) }];
+  });
+}
+
+function parseCheckpoints(value: unknown): PlanCheckpoint[] {
+  return (Array.isArray(value) ? value : []).flatMap((entry) => {
+    const item = record(entry);
+    const afterCapability = text(item.after_capability);
+    const checks = (Array.isArray(item.checks) ? item.checks : [])
+      .map(parsePlanCheck)
+      .filter((check): check is PlanCheck => check !== null);
+    if (!afterCapability || checks.length === 0) return [];
+    return [{ afterCapability, checks }];
+  });
+}
+
+function parseContingencies(value: unknown): PlanContingency[] {
+  return (Array.isArray(value) ? value : []).flatMap((entry) => {
+    const item = record(entry);
+    const id = text(item.id);
+    const capability = text(item.capability);
+    if (!id || !capability) return [];
+    return [{
+      id,
+      trigger: strings(item.trigger),
+      capability,
+      offeringId: text(item.offering_id),
+      purpose: text(item.purpose),
+      estimate: priceTotal(item.estimate),
+    }];
+  });
+}
+
 export function parseProductionPlan(value: unknown): ProductionPlan | null {
   const item = record(value);
   const steps = (Array.isArray(item.steps) ? item.steps : [])
     .map(parseProductionPlanStep)
     .filter((step): step is ProductionPlanStep => step !== null);
   if (steps.length === 0 && !text(item.title)) return null;
+  const acceptance = parseAcceptance(item.acceptance);
+  const checkpoints = parseCheckpoints(item.checkpoints);
+  const contingencies = parseContingencies(item.contingencies);
   return {
     title: text(item.title),
     steps,
     correctionCapabilities: strings(item.correction_capabilities),
+    // #251: a historical server sends none, so the parsed plan keeps its old
+    // shape and the card renders no empty sections.
+    ...(acceptance.length > 0 ? { acceptance } : {}),
+    ...(checkpoints.length > 0 ? { checkpoints } : {}),
+    ...(contingencies.length > 0 ? { contingencies } : {}),
   };
 }
 

@@ -43,11 +43,14 @@ const (
 // fake-only request convention.
 const StreamErrorMarker = "[[fake:stream-error]]"
 
-// ToolMarker triggers a tool call: a request that offers tools and whose last
-// message is a user message containing [[fake:tool:NAME {json args}]] is
-// answered with a call of the tool NAME. Every other request is answered with
-// the fixed text; a request whose last message is a tool result always is.
-var toolMarker = regexp.MustCompile(`\[\[fake:tool:([A-Za-z0-9_.\-]+)(?:\s+(\{.*?\}))?\]\]`)
+// ToolMarkerPrefix triggers a tool call: a request that offers tools and whose
+// last message is a user message containing [[fake:tool:NAME {json args}]] is
+// answered with a call of the tool NAME. The JSON object is scanned by balanced
+// braces, so nested steps/contingencies/parameters work (#251); the arguments
+// are replaced with {} when they are not valid JSON. Every other request is
+// answered with the fixed text; a request whose last message is a tool result
+// always is.
+const ToolMarkerPrefix = "[[fake:tool:"
 
 // SystemContainsMarkerPrefix starts a fake-only request convention: a request
 // whose last user message contains [[fake:system-contains TEXT]] is answered
@@ -366,19 +369,117 @@ func (r chatRequest) calls() []toolCall {
 	if len(r.Messages) == 0 || r.Messages[len(r.Messages)-1].Role != "user" || len(r.Tools) == 0 {
 		return nil
 	}
-	matches := toolMarker.FindAllStringSubmatch(r.lastText(), -1)
-	calls := make([]toolCall, 0, len(matches))
-	for _, match := range matches {
-		if !r.hasTool(match[1]) {
+	markers := parseToolMarkers(r.lastText())
+	calls := make([]toolCall, 0, len(markers))
+	for _, marker := range markers {
+		if !r.hasTool(marker.name) {
 			continue
 		}
-		arguments := match[2]
+		arguments := marker.arguments
 		if arguments == "" || !json.Valid([]byte(arguments)) {
 			arguments = "{}"
 		}
-		calls = append(calls, toolCall{name: match[1], arguments: arguments})
+		calls = append(calls, toolCall{name: marker.name, arguments: arguments})
 	}
 	return calls
+}
+
+// parseToolMarkers finds every [[fake:tool:NAME ...]] marker in text. The
+// optional JSON object is read with a balanced-brace scanner that respects
+// strings, so nested objects and arrays are preserved. A malformed or
+// unbalanced object falls back to {} like the historical single-level form.
+func parseToolMarkers(text string) []toolCall {
+	const prefix = ToolMarkerPrefix
+	var markers []toolCall
+	for offset := 0; offset < len(text); {
+		start := strings.Index(text[offset:], prefix)
+		if start < 0 {
+			break
+		}
+		start += offset
+		nameStart := start + len(prefix)
+		nameEnd := nameStart
+		for nameEnd < len(text) && isToolMarkerNameChar(text[nameEnd]) {
+			nameEnd++
+		}
+		if nameEnd == nameStart {
+			offset = nameStart
+			continue
+		}
+		name := text[nameStart:nameEnd]
+		arguments := ""
+		position := nameEnd
+		if position < len(text) && text[position] == ' ' {
+			for position < len(text) && text[position] == ' ' {
+				position++
+			}
+			if position < len(text) && text[position] == '{' {
+				if end, ok := scanBalancedJSON(text, position); ok {
+					arguments = text[position:end]
+					closeAt := end
+					for closeAt < len(text) && text[closeAt] == ' ' {
+						closeAt++
+					}
+					if strings.HasPrefix(text[closeAt:], "]]") {
+						markers = append(markers, toolCall{name: name, arguments: arguments})
+						offset = closeAt + 2
+						continue
+					}
+				}
+			}
+			// No balanced JSON object closed by ]]: consume the marker up to
+			// the next ]] and answer with empty arguments, as before.
+			closeRel := strings.Index(text[position:], "]]")
+			if closeRel < 0 {
+				offset = position
+				continue
+			}
+			closeAt := position + closeRel
+			markers = append(markers, toolCall{name: name})
+			offset = closeAt + 2
+			continue
+		}
+		if strings.HasPrefix(text[position:], "]]") {
+			markers = append(markers, toolCall{name: name})
+			offset = position + 2
+			continue
+		}
+		offset = position
+	}
+	return markers
+}
+
+func isToolMarkerNameChar(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+		c == '_' || c == '.' || c == '-'
+}
+
+// scanBalancedJSON returns the end (exclusive) of the JSON object starting at
+// start, or false when it never closes. Braces inside strings are ignored.
+func scanBalancedJSON(text string, start int) (int, bool) {
+	depth := 0
+	inString, escaped := false, false
+	for index := start; index < len(text); index++ {
+		switch {
+		case inString && escaped:
+			escaped = false
+		case inString && text[index] == '\\':
+			escaped = true
+		case inString && text[index] == '"':
+			inString = false
+		case inString:
+		case text[index] == '"':
+			inString = true
+		case text[index] == '{':
+			depth++
+		case text[index] == '}':
+			depth--
+			if depth == 0 {
+				return index + 1, true
+			}
+		}
+	}
+	return 0, false
 }
 
 func (r chatRequest) thinking() bool {

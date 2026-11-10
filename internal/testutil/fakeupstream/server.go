@@ -67,6 +67,17 @@ func New(config Config, versions ...Version) (*Server, error) {
 		server.env.ResetChatRequests()
 		w.WriteHeader(http.StatusNoContent)
 	})
+	// #251: any fake stack can upload one small valid GLB as a model source,
+	// so a processing plan checkpoint can be exercised on every fault stack.
+	server.mux.HandleFunc("GET "+ModelFixturePath, func(w http.ResponseWriter, _ *http.Request) {
+		file, err := ModelFile("glb")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", file.MediaType)
+		_, _ = w.Write(file.Data)
+	})
 	return server, nil
 }
 
@@ -74,6 +85,10 @@ func New(config Config, versions ...Version) (*Server, error) {
 // artifact URL epoch: see Env.RenewArtifactURLs. It exists for tests and the
 // fake's own binary only, like the rest of the package.
 const RenewPath = "/fake/control/renew-artifacts"
+
+// ModelFixturePath serves one small valid GLB for tests and the fake stack.
+// It is public, read-only, and exists only in the fake upstream.
+const ModelFixturePath = "/fake/control/model-fixture"
 
 // Versions returns the registered versions.
 func (s *Server) Versions() []Version { return append([]Version(nil), s.versions...) }

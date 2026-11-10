@@ -600,3 +600,53 @@ func TestChatRequestsAreRecordedForTheVisionBudget(t *testing.T) {
 		t.Fatalf("clear: %d, records=%+v", deleted.StatusCode, fake.Env().ChatRequests())
 	}
 }
+
+// #251: nested steps/contingencies/parameters must survive the marker parser;
+// the historical single-level and multi-marker forms keep their meaning.
+func TestToolMarkerParsesNestedJSON(t *testing.T) {
+	nested := `{"source_task_id":"task-1","steps":[{"capability":"remesh","parameters":{"target_polycount":20000,"nested":{"a":[1,2]}}}]}`
+	markers := parseToolMarkers("do it [[fake:tool:plan_model_processing " + nested +
+		"]] then [[fake:tool:get_processing_plan {\"plan_id\":\"p1\"}]]")
+	if len(markers) != 2 {
+		t.Fatalf("markers = %+v", markers)
+	}
+	if markers[0].name != "plan_model_processing" || markers[0].arguments != nested {
+		t.Fatalf("nested arguments = %q", markers[0].arguments)
+	}
+	if markers[1].name != "get_processing_plan" || markers[1].arguments != `{"plan_id":"p1"}` {
+		t.Fatalf("second marker = %+v", markers[1])
+	}
+	// A brace inside a string does not end the object.
+	quoted := `{"prompt":"close } and { braces"}`
+	markers = parseToolMarkers("[[fake:tool:process_model " + quoted + "]]")
+	if len(markers) != 1 || markers[0].arguments != quoted {
+		t.Fatalf("quoted braces = %+v", markers)
+	}
+	// A malformed object falls back to empty arguments, not a lost marker.
+	markers = parseToolMarkers(`[[fake:tool:no_args]] [[fake:tool:bad {"x":}]]`)
+	if len(markers) != 2 || markers[0].name != "no_args" || markers[0].arguments != "" ||
+		markers[1].name != "bad" || markers[1].arguments != `{"x":}` {
+		t.Fatalf("fallback markers = %+v", markers)
+	}
+}
+
+func TestModelFixtureEndpointServesAGLB(t *testing.T) {
+	fake, err := fakeupstream.New(fakeupstream.Config{}, Version())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(fake)
+	defer server.Close()
+	response, err := http.Get(server.URL + fakeupstream.ModelFixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "model/gltf-binary" {
+		t.Fatalf("fixture response = %d %q", response.StatusCode, response.Header.Get("Content-Type"))
+	}
+	raw, _ := io.ReadAll(response.Body)
+	if len(raw) < 12 || string(raw[:4]) != "glTF" {
+		t.Fatalf("fixture is not a GLB: %d bytes %q", len(raw), raw[:min(4, len(raw))])
+	}
+}

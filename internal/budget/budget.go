@@ -115,20 +115,60 @@ func (s *PlanStep) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// PlanCheck is one acceptance threshold of a planned checkpoint (#251). The
+// server derives the thresholds from the purpose budget and the frozen brief;
+// the Agent only names the check. A check without a bound is judged unknown.
+type PlanCheck struct {
+	Check string `json:"check"`
+	// Minimum and Maximum bound a measured value in the check's own unit.
+	Minimum *float64 `json:"minimum,omitempty"`
+	Maximum *float64 `json:"maximum,omitempty"`
+	// MaximumRatio bounds a ratio of the measured value to a total (a
+	// distance over the bbox diagonal, a fraction of the triangles).
+	MaximumRatio *float64 `json:"maximum_ratio,omitempty"`
+	// Required makes a boolean property mandatory (UV, watertight, skin).
+	Required bool `json:"required,omitempty"`
+}
+
+// PlanCheckpoint is the declared check after one planned capability (#251).
+type PlanCheckpoint struct {
+	AfterCapability string      `json:"after_capability"`
+	Checks          []PlanCheck `json:"checks"`
+}
+
+// PlanContingency is a declared repair step (#251): it may run only when one
+// of its triggers failed at a checkpoint, and its estimate counts toward the
+// plan's approved limit even though it usually does not run.
+type PlanContingency struct {
+	ID      string   `json:"id"`
+	Trigger []string `json:"trigger"`
+	Step    PlanStep `json:"step"`
+}
+
+// AcceptanceCriterion is one final-delivery condition the person approves on
+// the plan card (#251). Statement is frozen in the proposal turn's language.
+type AcceptanceCriterion struct {
+	ID        string `json:"id"`
+	Statement string `json:"statement"`
+	Check     string `json:"check"`
+}
+
 // Plan is the frozen summary of what the person approved.
 type Plan struct {
-	Title                  string     `json:"title"`
-	Steps                  []PlanStep `json:"steps"`
-	CorrectionCapabilities []string   `json:"correction_capabilities,omitempty"`
+	Title                  string                `json:"title"`
+	Steps                  []PlanStep            `json:"steps"`
+	CorrectionCapabilities []string              `json:"correction_capabilities,omitempty"`
+	Acceptance             []AcceptanceCriterion `json:"acceptance,omitempty"`
+	Checkpoints            []PlanCheckpoint      `json:"checkpoints,omitempty"`
+	Contingencies          []PlanContingency     `json:"contingencies,omitempty"`
 }
 
 // MaxTitleCharacters bounds a plan title; it is a display string, not free
 // text the Agent may grow without limit.
 const MaxTitleCharacters = 120
 
-// EstimatedTotals are the plan's step quotes summed per unit, ordered by
-// unit. Different units are never added.
-func (p Plan) EstimatedTotals() []Amount {
+// StepTotals are the main steps' quotes summed per unit, ordered by unit.
+func (p Plan) StepTotals() []Amount {
 	amounts := make([]Amount, 0, len(p.Steps))
 	for _, step := range p.Steps {
 		amounts = append(amounts, step.Estimate)
@@ -136,9 +176,34 @@ func (p Plan) EstimatedTotals() []Amount {
 	return SumByUnit(amounts)
 }
 
+// ContingencyTotals are the declared contingency steps' quotes summed per
+// unit. They are part of the approved limit because a contingency that fires
+// must still fit (#251).
+func (p Plan) ContingencyTotals() []Amount {
+	amounts := make([]Amount, 0, len(p.Contingencies))
+	for _, contingency := range p.Contingencies {
+		amounts = append(amounts, contingency.Step.Estimate)
+	}
+	return SumByUnit(amounts)
+}
+
+// EstimatedTotals are the plan's worst-case quotes: the main steps plus every
+// declared contingency, summed per unit and ordered by unit. Different units
+// are never added.
+func (p Plan) EstimatedTotals() []Amount {
+	amounts := make([]Amount, 0, len(p.Steps)+len(p.Contingencies))
+	for _, step := range p.Steps {
+		amounts = append(amounts, step.Estimate)
+	}
+	for _, contingency := range p.Contingencies {
+		amounts = append(amounts, contingency.Step.Estimate)
+	}
+	return SumByUnit(amounts)
+}
+
 // Uncovered lists the plan's per-unit estimates that the limits do not cover:
-// a unit without a limit, or with a limit below the steps' quotes in it. Units
-// whose steps cost nothing need no limit.
+// a unit without a limit, or with a limit below the worst-case quote (steps
+// plus contingencies) in it. Units whose steps cost nothing need no limit.
 func (p Plan) Uncovered(limits []Amount) []Amount {
 	var missing []Amount
 	for _, total := range p.EstimatedTotals() {
@@ -153,20 +218,27 @@ func (p Plan) Uncovered(limits []Amount) []Amount {
 }
 
 // Allows reports whether a step of capability may run under this plan. The
-// capability must appear in the steps or in the correction capabilities. A
-// step whose capability is pinned to one or more Offerings must use one of
-// them; a capability with no pinned Offering accepts any Offering.
+// capability must appear in the steps, the declared contingencies or the
+// correction capabilities. A step whose capability is pinned to one or more
+// Offerings must use one of them; a capability with no pinned Offering accepts
+// any Offering.
 func (p Plan) Allows(capability, offeringID string) bool {
 	if capability == "" {
 		return false
 	}
-	if !p.capabilityPlanned(capability) && !containsString(p.CorrectionCapabilities, capability) {
+	if !p.capabilityPlanned(capability) && !p.capabilityContingent(capability) &&
+		!containsString(p.CorrectionCapabilities, capability) {
 		return false
 	}
 	var pinned []string
 	for _, step := range p.Steps {
 		if step.Capability == capability && step.OfferingID != "" {
 			pinned = append(pinned, step.OfferingID)
+		}
+	}
+	for _, contingency := range p.Contingencies {
+		if contingency.Step.Capability == capability && contingency.Step.OfferingID != "" {
+			pinned = append(pinned, contingency.Step.OfferingID)
 		}
 	}
 	return len(pinned) == 0 || containsString(pinned, offeringID)
@@ -199,6 +271,35 @@ func (p Plan) capabilityPlanned(capability string) bool {
 		}
 	}
 	return false
+}
+
+func (p Plan) capabilityContingent(capability string) bool {
+	for _, contingency := range p.Contingencies {
+		if contingency.Step.Capability == capability {
+			return true
+		}
+	}
+	return false
+}
+
+// Contingency finds a declared contingency by id.
+func (p Plan) Contingency(id string) (PlanContingency, bool) {
+	for _, contingency := range p.Contingencies {
+		if contingency.ID == id {
+			return contingency, true
+		}
+	}
+	return PlanContingency{}, false
+}
+
+// CheckpointAfter finds the declared checkpoint after one capability.
+func (p Plan) CheckpointAfter(capability string) (PlanCheckpoint, bool) {
+	for _, checkpoint := range p.Checkpoints {
+		if checkpoint.AfterCapability == capability {
+			return checkpoint, true
+		}
+	}
+	return PlanCheckpoint{}, false
 }
 
 // Summary is what the Agent, the session projection and the tool results read:
@@ -304,6 +405,42 @@ func (p Plan) PromptLine(format AmountFormat) string {
 		parts = append(parts, part)
 	}
 	return strings.TrimSpace(p.Title) + "；" + strings.Join(parts, "；")
+}
+
+// AcceptanceLine renders the final-delivery criteria for the Agent's context
+// and the plan card. Empty when the plan declares none (a historical plan).
+func (p Plan) AcceptanceLine() string {
+	parts := make([]string, 0, len(p.Acceptance))
+	for _, criterion := range p.Acceptance {
+		parts = append(parts, criterion.Statement)
+	}
+	return strings.Join(parts, "；")
+}
+
+// CheckpointLine renders the declared checkpoints with their checks.
+func (p Plan) CheckpointLine() string {
+	parts := make([]string, 0, len(p.Checkpoints))
+	for _, checkpoint := range p.Checkpoints {
+		checks := make([]string, 0, len(checkpoint.Checks))
+		for _, check := range checkpoint.Checks {
+			checks = append(checks, check.Check)
+		}
+		parts = append(parts, checkpoint.AfterCapability+": "+strings.Join(checks, ", "))
+	}
+	return strings.Join(parts, "；")
+}
+
+// ContingencyLine renders the declared contingency steps and their estimates,
+// separately from the main steps so the card never looks more expensive than
+// the usual route.
+func (p Plan) ContingencyLine(format AmountFormat) string {
+	parts := make([]string, 0, len(p.Contingencies))
+	for _, contingency := range p.Contingencies {
+		part := contingency.ID + "（触发 " + strings.Join(contingency.Trigger, "/") + "）：" +
+			contingency.Step.Capability + "，约 " + format.One(contingency.Step.Estimate)
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, "；")
 }
 
 // SortedCapabilities returns the plan's capabilities without duplicates, in

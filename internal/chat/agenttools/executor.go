@@ -29,8 +29,11 @@ const (
 	ToolGetTask           = "get_task"
 	ToolObserveTask       = "observe_task"
 	ToolGetProcessingPlan = "get_processing_plan"
-	ToolRequestConsent    = "request_consent"
-	ToolCreateThreeView   = "create_three_view"
+	// ToolReviseProcessingPlan applies one controlled revision to an
+	// existing processing plan within the approval already given (#251).
+	ToolReviseProcessingPlan = "revise_processing_plan"
+	ToolRequestConsent       = "request_consent"
+	ToolCreateThreeView      = "create_three_view"
 	// ToolListSessionModels lets the Agent find the session's finished 3D
 	// models that the processing tools can take as a source.
 	ToolListSessionModels = "list_session_models"
@@ -115,6 +118,9 @@ type Config struct {
 	// only, no upstream IDs or URLs).
 	ListModels         func(ctx context.Context, ownerID, sessionID string) (json.RawMessage, error)
 	ReadProcessingPlan func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	// ReviseProcessingPlan applies one controlled plan revision (#251); it
+	// never submits a paid step by itself.
+	ReviseProcessingPlan func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	// InspectImage is the read-only image inspection tool (#245). It reads one
 	// picture of the command's owner and session, never creates a Task and never
 	// spends credits.
@@ -225,6 +231,7 @@ type Executor struct {
 	recoverTask           func(ctx context.Context, ownerID, sessionID, taskID string) (json.RawMessage, error)
 	listModels            func(ctx context.Context, ownerID, sessionID string) (json.RawMessage, error)
 	readProcessingPlan    func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	reviseProcessingPlan  func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	inspectImage          func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	createSelectionMask   func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	inspectModel          func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
@@ -371,6 +378,7 @@ func New(config Config) (*Executor, error) {
 		recoverTask:            config.RecoverTask,
 		listModels:             config.ListModels,
 		readProcessingPlan:     config.ReadProcessingPlan,
+		reviseProcessingPlan:   config.ReviseProcessingPlan,
 		inspectImage:           config.InspectImage,
 		createSelectionMask:    config.CreateSelectionMask,
 		inspectModel:           config.InspectModel,
@@ -427,6 +435,11 @@ func (e *Executor) Execute(
 			return chat.ToolResult{Error: "processing plan reader unavailable", NoSubmission: true}, nil
 		}
 		return e.readProcessingPlan(ctx, command)
+	case ToolReviseProcessingPlan:
+		if e.reviseProcessingPlan == nil {
+			return chat.ToolResult{Error: "processing plan revision unavailable", NoSubmission: true}, nil
+		}
+		return e.reviseProcessingPlan(ctx, command)
 	case ToolUpdateSessionNotes:
 		return e.updateSessionNotes(ctx, command), nil
 	case ToolUpdateProductionBrief:

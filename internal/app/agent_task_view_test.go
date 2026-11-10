@@ -297,3 +297,58 @@ func TestRecoverTaskResultUsesTheTurnLocaleThroughTheTool(t *testing.T) {
 		})
 	}
 }
+
+// #251: the Agent gets one actionable category and next action; the internal
+// detail and upstream excerpt never appear.
+func TestAgentTaskViewCarriesAnActionableFailureWithoutDetail(t *testing.T) {
+	task := generation.Task{
+		ID: "task_1", OwnerID: "owner_a", SessionID: "session_1", Capability: "remesh",
+		Offering: generation.Offering{ID: "meshy/processing/remesh", CreditsMetered: false},
+		State:    generation.TaskFailed,
+		Failure: &generation.Failure{Class: generation.FailureRateLimited, Retryable: true,
+			SafeDetail: "upstream detail", UpstreamExcerpt: "raw upstream body"},
+	}
+	schema := catalog.ChatSchema{Processing: catalog.ChatProcessingSchema{Failures: catalog.ChatProcessingFailuresSchema{
+		Advice: map[string]string{"upstream_capacity": "Wait and retry later."},
+	}}}
+	raw, err := json.Marshal(buildAgentTaskView(task, schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var view struct {
+		Failure struct {
+			Category   string `json:"category"`
+			NextAction string `json:"next_action"`
+			Advice     string `json:"advice"`
+			Retryable  bool   `json:"retryable"`
+		} `json:"failure"`
+	}
+	if err := json.Unmarshal(raw, &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.Failure.Category != string(generation.CategoryUpstreamCapacity) ||
+		view.Failure.NextAction != string(generation.ActionRetryLater) ||
+		view.Failure.Advice != "Wait and retry later." || !view.Failure.Retryable {
+		t.Fatalf("failure view = %+v", view.Failure)
+	}
+	if strings.Contains(string(raw), "upstream detail") || strings.Contains(string(raw), "raw upstream body") {
+		t.Fatalf("internal failure detail leaked: %s", raw)
+	}
+
+	// An ambiguous failure always asks the person and offers no automatic retry.
+	task.Failure = &generation.Failure{Class: generation.FailureTransport, Retryable: true, Ambiguous: true,
+		SafeDetail: "internal detail"}
+	raw, _ = json.Marshal(buildAgentTaskView(task, schema))
+	view.Failure = struct {
+		Category   string `json:"category"`
+		NextAction string `json:"next_action"`
+		Advice     string `json:"advice"`
+		Retryable  bool   `json:"retryable"`
+	}{}
+	if err := json.Unmarshal(raw, &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.Failure.NextAction != string(generation.ActionAskUser) || view.Failure.Retryable {
+		t.Fatalf("ambiguous failure view = %+v", view.Failure)
+	}
+}

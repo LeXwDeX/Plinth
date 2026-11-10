@@ -233,6 +233,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateChatChoice(schema); err != nil {
 		return err
 	}
+	if err := validateChatProcessing(schema.Processing); err != nil {
+		return err
+	}
 	if err := validateModel3DUsageShape(schema, capabilityPresentations); err != nil {
 		return err
 	}
@@ -876,6 +879,43 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	return nil
 }
 
+// processingFailureCategories and processingFailureActions mirror the runtime
+// vocabulary in internal/generation (#251); a catalog test keeps them aligned.
+var (
+	processingFailureCategories = []string{"input_invalid", "parameter_invalid", "upstream_capacity", "upstream_refused", "internal"}
+	processingFailureActions    = []string{"retry", "retry_later", "fix_input", "fix_parameters", "ask_user", "contact_admin"}
+)
+
+// validateChatProcessing checks the server-only processing wording and the
+// revision bounds the Agent's tool relies on (#251). It never reaches the
+// browser, so it has no public projection to align.
+func validateChatProcessing(processing ChatProcessingSchema) error {
+	failures := processing.Failures
+	// A historical Catalog declares no processing block; it stays readable.
+	if len(failures.Categories) == 0 && len(failures.Actions) == 0 && len(failures.Advice) == 0 &&
+		strings.TrimSpace(failures.CheckpointFailed) == "" && strings.TrimSpace(failures.RevisionApplied) == "" &&
+		strings.TrimSpace(failures.ReasonRequired) == "" {
+		return nil
+	}
+	for _, category := range processingFailureCategories {
+		if strings.TrimSpace(failures.Categories[category]) == "" ||
+			strings.TrimSpace(failures.Advice[category]) == "" {
+			return fmt.Errorf("chat.processing.failures 缺少类别或建议动作 %q", category)
+		}
+	}
+	for _, action := range processingFailureActions {
+		if strings.TrimSpace(failures.Actions[action]) == "" {
+			return fmt.Errorf("chat.processing.failures.actions 缺少动作 %q", action)
+		}
+	}
+	if strings.TrimSpace(failures.CheckpointFailed) == "" ||
+		strings.TrimSpace(failures.RevisionApplied) == "" ||
+		strings.TrimSpace(failures.ReasonRequired) == "" {
+		return errors.New("chat.processing.failures 的检查点与修订文案不能为空")
+	}
+	return nil
+}
+
 func validateChatToolExecution(name string, execution ChatToolExecutionSchema, capability, fallback *schemacontract.Capability, capabilityDomains map[schemacontract.Capability]schemacontract.CapabilityDomain, stepCapabilities []schemacontract.Capability) error {
 	// domains lists the workspaces a control tool must be offered in.
 	knownControl := map[string]struct {
@@ -890,6 +930,7 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"create_three_view":       {"skill.prepare", "PAID_TASK", []string{"image"}},
 		"list_session_models":     {"model.list", "READ", []string{"model-3d"}},
 		"get_processing_plan":     {"processing.read", "READ", []string{"model-3d"}},
+		"revise_processing_plan":  {"processing.revise", "SESSION_WRITE", []string{"model-3d"}},
 		"update_session_notes":    {"session.notes", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"update_production_brief": {"session.brief", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"propose_production_plan": {"plan.propose", "SESSION_WRITE", []string{"image", "model-3d"}},
@@ -1059,6 +1100,21 @@ func validateApprovalBudget(budget ChatApprovalBudgetSchema) error {
 		budget.MaxTitleCharacters <= 0 || budget.MaxPurposeCharacters <= 0 {
 		return errors.New("approval_policy.budget 的上限必须为正数")
 	}
+	// #251: the plan's acceptance/checkpoint/contingency bounds and templates.
+	if budget.MaxAcceptanceCriteria <= 0 || budget.MaxChecksPerCheckpoint <= 0 ||
+		budget.MaxContingencies < 0 || budget.MaxWaivedCheckpoints < 0 {
+		return errors.New("approval_policy.budget 的验收/检查点/预案上限无效")
+	}
+	if strings.TrimSpace(budget.Acceptance.PurposeLine) == "" ||
+		!strings.Contains(budget.Acceptance.PurposeLine, "{purpose}") ||
+		strings.TrimSpace(budget.Acceptance.Report) == "" {
+		return errors.New("approval_policy.budget.acceptance 的用途文案与报告指令不能为空")
+	}
+	for check, template := range budget.Acceptance.Criteria {
+		if strings.TrimSpace(check) == "" || strings.TrimSpace(template) == "" {
+			return errors.New("approval_policy.budget.acceptance.criteria 含空项")
+		}
+	}
 	if strings.TrimSpace(budget.ContextTemplate) == "" || strings.TrimSpace(budget.NoPlanState) == "" ||
 		strings.TrimSpace(budget.NoPlanText) == "" {
 		return errors.New("approval_policy.budget 的上下文文案不能为空")
@@ -1068,7 +1124,8 @@ func validateApprovalBudget(budget ChatApprovalBudgetSchema) error {
 	if strings.TrimSpace(budget.LegacyUnitLabel) == "" || strings.TrimSpace(budget.UnitSeparator) == "" {
 		return errors.New("approval_policy.budget 的 legacy_unit_label 与 unit_separator 不能为空")
 	}
-	for _, field := range []string{"{state}", "{limit}", "{spent}", "{reserved}", "{remaining}", "{plan}"} {
+	for _, field := range []string{"{state}", "{limit}", "{spent}", "{reserved}", "{remaining}", "{plan}",
+		"{acceptance}", "{checkpoints}", "{contingencies}", "{report}"} {
 		if !strings.Contains(budget.ContextTemplate, field) {
 			return fmt.Errorf("approval_policy.budget.context_template 缺少占位符 %s", field)
 		}
@@ -1254,6 +1311,12 @@ func validateChatToolProcessing(tool ChatToolSchema, capabilityDomains map[schem
 		}
 		if strings.TrimSpace(plan.CreatedContent) == "" || strings.TrimSpace(plan.WaitingContent) == "" || strings.TrimSpace(plan.NotFoundContent) == "" {
 			return nil, errors.New("plan 结果文案不能为空")
+		}
+		// #251: the Agent revision's reason bound and waived-checkpoint limit.
+		// A historical plan tool without the block falls back to the runtime
+		// constants, so it stays readable.
+		if plan.Revision.MaxReasonCharacters < 0 || plan.Revision.MaxWaivedCheckpoints < 0 {
+			return nil, errors.New("plan.revision 的上限无效")
 		}
 		for step, capability := range processing.Steps {
 			if step != string(capability) || !capability.Valid() {
