@@ -245,7 +245,7 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validatePromptSections(schema, capabilityDomains); err != nil {
 		return err
 	}
-	if err := validateChatAttachments(schema.Context); err != nil {
+	if err := validateChatAttachments(schema); err != nil {
 		return err
 	}
 	directStyleLockCapabilities := make(map[schemacontract.Capability]bool, len(schema.StyleLock.DirectTaskCapabilities))
@@ -1343,7 +1343,8 @@ func validateServiceMessages(service ChatToolServiceMessages) error {
 
 // validateChatAttachments rejects handle syntax and prompt templates that
 // could make two objects share a handle or leave a placeholder unfilled.
-func validateChatAttachments(context ChatContextSchema) error {
+func validateChatAttachments(schema ChatSchema) error {
+	context := schema.Context
 	if len(context.HandlePrefixes) == 0 {
 		return errors.New("context.handle_prefixes 不能为空")
 	}
@@ -1424,6 +1425,9 @@ func validateChatAttachments(context ChatContextSchema) error {
 	}
 	if context.MaxResultPictures < 0 || context.MaxResultPictures > context.MaximumVisionImages {
 		return errors.New("context.max_result_pictures 必须在 0 与 maximum_vision_images 之间")
+	}
+	if err := validateChatVision(schema); err != nil {
+		return err
 	}
 	if context.MaximumSessionNotesCharacters <= 0 ||
 		!strings.Contains(context.SessionNotesTemplate, "{notes}") ||
@@ -2490,4 +2494,171 @@ func validateModelInspectProduction(
 		}
 	}
 	return nil
+}
+
+// validateChatVision checks the purpose-based vision budget (#247). The whole
+// block is optional: a Catalog without it keeps the legacy behavior.
+func validateChatVision(schema ChatSchema) error {
+	vision := schema.Context.Vision
+	if vision == nil {
+		return nil
+	}
+	if vision.MaximumImages <= 0 || vision.MaximumTokens <= 0 || vision.MaximumBytes <= 0 {
+		return errors.New("context.vision 的 maximum_images、maximum_tokens 与 maximum_bytes 必须为正数")
+	}
+	if len(vision.Roles) == 0 {
+		return errors.New("context.vision.roles 不能为空")
+	}
+	roleIDs := map[string]bool{}
+	seenSources := map[string]bool{}
+	for index, role := range vision.Roles {
+		if strings.TrimSpace(role.ID) == "" || roleIDs[role.ID] {
+			return fmt.Errorf("context.vision.roles[%d] 的 id 为空或重复", index)
+		}
+		roleIDs[role.ID] = true
+		if len(role.Sources) == 0 {
+			return fmt.Errorf("context.vision.roles[%d] 没有 sources", index)
+		}
+		for _, source := range role.Sources {
+			switch source {
+			case ChatVisionSourceCanvas, ChatVisionSourceTurn, ChatVisionSourceStyle,
+				ChatVisionSourceRender, ChatVisionSourceGenerated, ChatVisionSourceHistory:
+			default:
+				return fmt.Errorf("context.vision.roles[%d] 的 source %q 无效", index, source)
+			}
+			if seenSources[source] {
+				return fmt.Errorf("context.vision 的 source %q 被多个角色声明", source)
+			}
+			seenSources[source] = true
+		}
+		if role.MaximumImages <= 0 {
+			return fmt.Errorf("context.vision.roles[%d].maximum_images 必须为正数", index)
+		}
+		if !validVisionDetail(role.Detail) {
+			return fmt.Errorf("context.vision.roles[%d].detail %q 无效", index, role.Detail)
+		}
+		if role.TokenCost <= 0 {
+			return fmt.Errorf("context.vision.roles[%d].token_cost 必须为正数", index)
+		}
+	}
+	if !seenSources[ChatVisionSourceGenerated] || !seenSources[ChatVisionSourceHistory] {
+		return errors.New("context.vision.roles 必须声明 generated 与 history 角色")
+	}
+	for name, template := range map[string]string{
+		"overflow_template":           vision.OverflowTemplate,
+		"vision_off_note":             vision.VisionOffNote,
+		"style_anchor_intro":          vision.StyleAnchorIntro,
+		"style_anchor_label_template": vision.StyleAnchorLabelTemplate,
+	} {
+		if strings.TrimSpace(template) == "" {
+			return fmt.Errorf("context.vision.%s 不能为空", name)
+		}
+	}
+	if !strings.Contains(vision.OverflowTemplate, "{handles}") {
+		return errors.New("context.vision.overflow_template 必须包含 {handles}")
+	}
+	if !strings.Contains(vision.StyleAnchorLabelTemplate, "{index}") {
+		return errors.New("context.vision.style_anchor_label_template 必须包含 {index}")
+	}
+	if err := validateVisionContactSheet(vision.ContactSheet); err != nil {
+		return err
+	}
+	if err := validateVisionCrop(schema, vision.Crop); err != nil {
+		return err
+	}
+	prefixes := map[string]bool{}
+	for index, profile := range vision.ModelProfiles {
+		if len(profile.ModelPrefixes) == 0 {
+			return fmt.Errorf("context.vision.model_profiles[%d] 没有 model_prefixes", index)
+		}
+		for _, prefix := range profile.ModelPrefixes {
+			prefix = strings.ToLower(strings.TrimSpace(prefix))
+			if prefix == "" || prefixes[prefix] {
+				return fmt.Errorf("context.vision.model_profiles[%d] 的 model_prefixes 为空或重复", index)
+			}
+			prefixes[prefix] = true
+		}
+		if profile.MaximumImages < 0 || profile.MaximumImages > vision.MaximumImages {
+			return fmt.Errorf("context.vision.model_profiles[%d].maximum_images 必须在 0 与 maximum_images 之间", index)
+		}
+		if profile.MaximumTokens < 0 || profile.MaximumTokens > vision.MaximumTokens {
+			return fmt.Errorf("context.vision.model_profiles[%d].maximum_tokens 必须在 0 与 maximum_tokens 之间", index)
+		}
+	}
+	return nil
+}
+
+func validVisionDetail(detail string) bool {
+	switch detail {
+	case "low", "high", "auto":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateVisionContactSheet(sheet ChatVisionContactSheetSchema) error {
+	if !sheet.Enabled {
+		return nil
+	}
+	if sheet.MaximumTiles <= 0 || sheet.Columns <= 0 || sheet.TilePixels <= 0 || sheet.LabelHeight <= 0 ||
+		sheet.MaximumBytes <= 0 || !validVisionDetail(sheet.Detail) || sheet.TokenCost <= 0 {
+		return errors.New("context.vision.contact_sheet 的启用配置无效")
+	}
+	if len(sheet.JPEGQualities) == 0 || strings.TrimSpace(sheet.Intro) == "" {
+		return errors.New("context.vision.contact_sheet 的 jpeg_qualities 与 intro 不能为空")
+	}
+	for _, quality := range sheet.JPEGQualities {
+		if quality <= 0 || quality > 100 {
+			return errors.New("context.vision.contact_sheet.jpeg_qualities 必须在 1 与 100 之间")
+		}
+	}
+	if !strings.Contains(sheet.LabelTemplate, "{handle}") {
+		return errors.New("context.vision.contact_sheet.label_template 必须包含 {handle}")
+	}
+	return nil
+}
+
+func validateVisionCrop(schema ChatSchema, crop ChatVisionCropSchema) error {
+	if !crop.Enabled {
+		return nil
+	}
+	if !validVisionDetail(crop.Detail) || crop.TokenCost <= 0 ||
+		strings.TrimSpace(crop.RegionArgument) == "" || strings.TrimSpace(crop.ShowPictureArgument) == "" ||
+		crop.RegionArgument == crop.ShowPictureArgument ||
+		crop.MinimumSidePixels <= 0 || crop.MaximumPixels <= 0 {
+		return errors.New("context.vision.crop 的启用配置无效")
+	}
+	if !strings.Contains(crop.TooLargeTemplate, "{maximum}") {
+		return errors.New("context.vision.crop.too_large_template 必须包含 {maximum}")
+	}
+	if !strings.Contains(crop.PictureLabelTemplate, "{handle}") ||
+		!strings.Contains(crop.PictureLabelTemplate, "{region}") {
+		return errors.New("context.vision.crop.picture_label_template 必须包含 {handle} 与 {region}")
+	}
+	check := func(parameters json.RawMessage) error {
+		var declared struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if len(parameters) == 0 || json.Unmarshal(parameters, &declared) != nil {
+			return errors.New("context.vision.crop 启用时 inspect_image 必须声明参数")
+		}
+		for _, name := range []string{crop.RegionArgument, crop.ShowPictureArgument} {
+			if _, exists := declared.Properties[name]; !exists {
+				return fmt.Errorf("context.vision.crop 启用时 inspect_image 必须声明参数 %q", name)
+			}
+		}
+		return nil
+	}
+	for _, tool := range schema.Tools {
+		if tool.Name == "inspect_image" {
+			return check(tool.Parameters)
+		}
+	}
+	for _, tool := range schema.AgentTools {
+		if tool.Name == "inspect_image" {
+			return check(tool.Parameters)
+		}
+	}
+	return errors.New("context.vision.crop 启用时必须声明 inspect_image 工具")
 }

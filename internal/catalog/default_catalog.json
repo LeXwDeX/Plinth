@@ -4424,6 +4424,7 @@
         "ui.studio.context.unknown": "—",
         "ui.studio.context.hint_used": "本会话上下文：已用 {used} token（上游最近一次请求返回）",
         "ui.studio.context.hint_window": "本会话上下文：已用 {used} / 窗口 {window} token（上游最近一次请求返回），达到 {threshold}% 时自动压缩",
+        "ui.studio.context.hint_vision": "图片约 {vision} token / 上限 {budget} token（按产品 Schema 声明的成本估算，不是上游回报值）",
         "ui.studio.context.hint_unknown": "上游还没有返回本会话的用量；压缩后在下一轮回复结束时更新",
         "ui.studio.context.compact": "压缩上下文",
         "ui.studio.context.compact_hint": "把最近 {rounds} 轮以前的对话整理成摘要发给模型；聊天记录保持不变",
@@ -5191,6 +5192,8 @@
           "reasoning_levels": "reasoningLevels",
           "reasoning_default": "reasoningDefault",
           "context_tokens": "contextTokens",
+          "context_vision_tokens": "contextVisionTokens",
+          "context_vision_budget": "contextVisionBudget",
           "context_window": "contextWindow",
           "compactions": "compactions",
           "compaction_trigger": "trigger",
@@ -5601,8 +5604,8 @@
         "mock_denied_summary": "好的，这一步没有执行，也没有消耗积分。可以减少或取消附加导出格式后重新生成（不含这部分的积分更少），或换一个没有附加费用的模型；告诉我想怎么做。"
       },
       "context": {
-        "maximum_vision_images": 4,
-        "recent_image_limit": 4,
+        "maximum_vision_images": 10,
+        "recent_image_limit": 10,
         "asset_url_template": "/api/v1/tasks/{task_id}/assets/{asset_id}",
         "tool_prompt_argument": "prompt",
         "tool_reference_argument": "reference_image_indices",
@@ -5615,6 +5618,47 @@
         "image_part_kind": "image_url",
         "image_detail": "low",
         "canvas_image_detail": "high",
+        "vision": {
+          "roles": [
+            {"id": "canvas", "sources": ["canvas"], "maximum_images": 1, "detail": "high", "token_cost": 1105},
+            {"id": "turn_reference", "sources": ["turn"], "maximum_images": 6, "detail": "high", "token_cost": 1105},
+            {"id": "style_anchor", "sources": ["style"], "maximum_images": 2, "detail": "high", "token_cost": 1105},
+            {"id": "self_check_render", "sources": ["render"], "maximum_images": 4, "detail": "high", "token_cost": 1105},
+            {"id": "recent_result", "sources": ["generated"], "maximum_images": 2, "detail": "high", "token_cost": 1105},
+            {"id": "history", "sources": ["history"], "maximum_images": 4, "detail": "low", "token_cost": 85}
+          ],
+          "maximum_images": 10,
+          "maximum_tokens": 12000,
+          "maximum_bytes": 16777216,
+          "overflow_template": "\n[本轮视觉预算已满，下面这些图片只保留文字标签：{handles}。需要看画面时，用句柄调用 find_history_images 或 inspect_image 点名查看]",
+          "vision_off_note": "\n[当前对话模型不读图，本轮没有附上任何图片：只能根据文字线索判断；需要看画面时请如实告诉用户]",
+          "style_anchor_intro": "\n[以下是本会话风格锁的参考图，供你把握整体风格；它们不是用户这一轮附的图：]",
+          "style_anchor_label_template": "\n[风格锁参考图 {index}]",
+          "contact_sheet": {
+            "enabled": true,
+            "maximum_tiles": 10,
+            "columns": 3,
+            "tile_pixels": 512,
+            "label_height": 20,
+            "jpeg_qualities": [85, 75, 65],
+            "maximum_bytes": 2097152,
+            "detail": "high",
+            "token_cost": 1105,
+            "intro": "\n[候选较多，下面是把它们拼在一起、每格标了句柄的联系表：先整体比较，再按句柄用 inspect_image 或 find_history_images 点名查看原图]",
+            "label_template": "[{handle}]"
+          },
+          "crop": {
+            "enabled": true,
+            "detail": "high",
+            "token_cost": 1105,
+            "region_argument": "region",
+            "show_picture_argument": "show_picture",
+            "minimum_side_pixels": 64,
+            "maximum_pixels": 1048576,
+            "too_large_template": "裁剪区域过大（{width}×{height}，上限 {maximum} 像素）：请缩小 region 后重试。",
+            "picture_label_template": "\n[上图是 {handle} 的局部裁剪，区域 {region}，尺寸 {width}×{height}]"
+          }
+        },
         "user_image_label_template": "\n[历史图片 {index}：用户上传]",
         "canvas_input_source": "canvas",
         "ai_image_label_template": "\n[历史图片 {index}：AI 生成]",
@@ -5639,6 +5683,7 @@
           "image.upload": "\n[历史图片 {index}，句柄 {handle}：用户上传]",
           "image.generated": "\n[历史图片 {index}，句柄 {handle}：AI 生成，来源任务 {task_id}]",
           "image.capture": "\n[历史图片 {index}，句柄 {handle}：3D 视图截图，来源模型任务 {task_id}，截图记录 {capture_id}]",
+          "image.render": "\n[历史图片 {index}，句柄 {handle}：模型自检渲染图，来源模型任务 {task_id}]",
           "model.generated": "\n[历史图片 {index}，句柄 {handle}：3D 模型的预览缩略图（平台生成的结果，不是用户附的图），模型任务 {task_id}]"
         },
         "unpictured_attachment_templates": {
@@ -6160,6 +6205,22 @@
                 "type": "string",
                 "enum": ["delivery", "3d_input"],
                 "description": "Which deterministic checklist to apply. Omit for delivery; use 3d_input before submitting a picture to image-to-3D."
+              },
+              "region": {
+                "type": "object",
+                "description": "Optional part of the picture to inspect, in normalized coordinates (0..1 of the original width and height). The crop keeps the original pixels and is never scaled; it is shown to you as a picture when show_picture is true. Use it to look closely at hands, faces or texture seams.",
+                "properties": {
+                  "x": {"type": "number", "minimum": 0, "maximum": 1},
+                  "y": {"type": "number", "minimum": 0, "maximum": 1},
+                  "width": {"type": "number", "minimum": 0, "maximum": 1},
+                  "height": {"type": "number", "minimum": 0, "maximum": 1}
+                },
+                "required": ["x", "y", "width", "height"],
+                "additionalProperties": false
+              },
+              "show_picture": {
+                "type": "boolean",
+                "description": "When true, attach the named original picture (or the region crop) to the result so you can look at it. Omit to only read the deterministic report."
               }
             },
             "required": ["image"],
@@ -15376,6 +15437,7 @@
             "ui.studio.context.unknown": "—",
             "ui.studio.context.hint_used": "Session context: {used} tokens used (reported by the last upstream request)",
             "ui.studio.context.hint_window": "Session context: {used} of {window} tokens used (reported by the last upstream request); compacts automatically at {threshold}%",
+            "ui.studio.context.hint_vision": "Pictures about {vision} tokens of a {budget}-token budget (estimated from the Product Schema's declared costs, not reported by the upstream)",
             "ui.studio.context.hint_unknown": "The upstream has not reported this session's usage yet; after a compaction it updates when the next reply ends",
             "ui.studio.context.compact": "Compact context",
             "ui.studio.context.compact_hint": "Summarize the conversation before the last {rounds} rounds for the model; the chat history stays as it is",
