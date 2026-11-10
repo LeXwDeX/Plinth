@@ -461,6 +461,9 @@ func validateOffering(
 	if err := validateOfferingCopy(offering); err != nil {
 		return err
 	}
+	if err := validateOfferingKnowledge(offering); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -522,6 +525,17 @@ type offeringCopyField struct {
 // terminology guard and the internal-identifier guard share this scope.
 func offeringUserFacingCopy(offering schemacontract.Offering) []offeringCopyField {
 	copies := []offeringCopyField{{"model_name", offering.ModelName}, {"description", offering.Description}}
+	if knowledge := offering.Knowledge; knowledge != nil {
+		for index, text := range knowledge.Strengths {
+			copies = append(copies, offeringCopyField{fmt.Sprintf("knowledge.strengths[%d]", index), text})
+		}
+		for index, text := range knowledge.Weaknesses {
+			copies = append(copies, offeringCopyField{fmt.Sprintf("knowledge.weaknesses[%d]", index), text})
+		}
+		for index, text := range knowledge.Limitations {
+			copies = append(copies, offeringCopyField{fmt.Sprintf("knowledge.limitations[%d]", index), text})
+		}
+	}
 	for parameterIndex, parameter := range offering.Parameters {
 		prefix := fmt.Sprintf("parameters[%d]", parameterIndex)
 		copies = append(copies,

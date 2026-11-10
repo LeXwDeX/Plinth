@@ -15,8 +15,11 @@ func TestNoPromptNoteWithoutKnownReferenceLimit(t *testing.T) {
 	product := qualifiedMultiviewCatalog(t)
 	app := product.Application()
 	tool, _ := toolDescriptionNoteFixture(t)
-	// This test pins the no_prompt sentence; the settings sentence is covered
-	// by TestToolDescriptionListsOnlyDeclaredSettings.
+	// This test pins the historical per-tool no_prompt fallback (#249 moved
+	// the shipped statement into Offering knowledge; a historical Catalog may
+	// still declare the tool copy).
+	tool.ReferenceCapacityNote.NoPrompt = "When this tool uses the selected model ({model}) for image-to-3D, the tool's text prompt is not sent to this service."
+	// The settings sentence is covered by TestToolDescriptionListsOnlyDeclaredSettings.
 	tool.ReferenceCapacityNote.Settings = ""
 	scalar, ok := product.Get("tripo/geometry/smartsegment-image")
 	if !ok || !scalar.Enabled || scalar.ModelID != "tripo-smartsegment-image" {
@@ -50,6 +53,7 @@ func TestNoPromptNoteWithoutKnownReferenceLimit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			offering := scalar
 			offering.Parameters = tc.parameters
+			offering.Knowledge = nil
 			gateway := &fakeGateway{offerings: []generation.Offering{offering}}
 			executor, err := generationtool.New(generationtool.Config{Gateway: gateway, References: &fakeReferences{}, Chat: app.Chat, TaskStates: app.TaskStates})
 			if err != nil {

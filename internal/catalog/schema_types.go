@@ -2716,6 +2716,10 @@ type ChatModel3DUsageSchema struct {
 	// with BudgetNote. Empty (historical Catalogs) bounds nothing.
 	BudgetLimits []ChatModel3DUsageBudgetLimit `json:"budget_limits,omitempty"`
 	BudgetNote   ChatModel3DUsageBudgetNote    `json:"budget_note"`
+	// OverrideCoverageRequired makes every recommended Offering declare how
+	// the purpose adjusts it: parameters in ParameterOverrides or an explicit
+	// OverridesNotNeeded entry (#249). Off keeps historical Catalogs valid.
+	OverrideCoverageRequired bool `json:"override_coverage_required,omitempty"`
 }
 
 // ChatModel3DUsageBudgetLimit bounds the parameters of one semantic by one
@@ -2756,6 +2760,10 @@ type ChatModel3DUsageProfile struct {
 	// submission; fixed, hidden, protocol, reference and extra-credit consent
 	// parameters are refused at load time.
 	ParameterOverrides map[string]map[string]json.RawMessage `json:"parameter_overrides,omitempty"`
+	// OverridesNotNeeded lists recommended Offerings that fit the purpose
+	// without a parameter override. With OverrideCoverageRequired every
+	// recommendation must appear here or in ParameterOverrides, once (#249).
+	OverridesNotNeeded []string `json:"overrides_not_needed,omitempty"`
 	// Reason explains the purpose once; every adjusted parameter frozen from
 	// this purpose carries it and source "profile:<id>".
 	Reason string `json:"reason"`
@@ -3704,7 +3712,18 @@ type ChatAgentSchema struct {
 	// CraftPrompts are domain briefs appended to the system context only on a
 	// turn whose offered tools include one of their WhenToolsAny. See
 	// ChatAgentCraftPrompt.
-	CraftPrompts  []ChatAgentCraftPrompt `json:"craft_prompts,omitempty"`
+	CraftPrompts []ChatAgentCraftPrompt `json:"craft_prompts,omitempty"`
+	// OfferingKnowledge declares how the Agent reads an Offering's own
+	// prompt craft and the words that stand in for an undeclared fact
+	// (#249). RequiredCapabilities are the capabilities whose enabled
+	// Offerings must carry Knowledge; empty keeps a historical Catalog
+	// valid.
+	OfferingKnowledge ChatOfferingKnowledgeSchema `json:"offering_knowledge"`
+	// PromptReport declares how a generation tool result reports the prompt
+	// the server really submitted and what a prompt over the Offering's
+	// maximum length does (#249). An empty OverLimit keeps the historical
+	// silent truncation.
+	PromptReport  ChatPromptReportSchema `json:"prompt_report"`
 	TitlePrompt   string                 `json:"title_prompt"`
 	TitleMaxChars int                    `json:"title_max_characters"`
 	// TitleMaxCharsByLocale overrides title_max_characters for a UI locale
@@ -3734,6 +3753,61 @@ type ChatAgentSchema struct {
 	// the approval card while the turn was still attached: it says the step
 	// was not done and proposes an alternative.
 	MockDeniedSummary string `json:"mock_denied_summary,omitempty"`
+}
+
+// ChatOfferingKnowledgeSchema is application.chat.agent.offering_knowledge
+// (#249). It turns an Offering's Prompt declaration into Agent-facing words.
+// Every map is keyed by the declared value; "unknown" is used when the
+// Offering leaves a value undeclared, so the Agent is never told a guess.
+type ChatOfferingKnowledgeSchema struct {
+	RequiredCapabilities []schemacontract.Capability `json:"required_capabilities,omitempty"`
+	// GuidanceTemplate renders one Offering's prompt guidance. Placeholders:
+	// {model}, {language}, {form}, {length}, {negative_prompt}, {reads_text}
+	// and {reference_use}. Empty disables the projection.
+	GuidanceTemplate string `json:"guidance_template,omitempty"`
+	// NoTextTemplate replaces a tool's historical reference_capacity_note
+	// no_prompt: {model} is the Offering's model name. It is used when the
+	// Offering declares that it does not read a text prompt.
+	NoTextTemplate      string            `json:"no_text_template,omitempty"`
+	UnknownText         string            `json:"unknown_text"`
+	LayerSeparator      string            `json:"layer_separator,omitempty"`
+	LanguageTexts       map[string]string `json:"language_texts,omitempty"`
+	FormTexts           map[string]string `json:"form_texts,omitempty"`
+	NegativePromptTexts map[string]string `json:"negative_prompt_texts,omitempty"`
+	ReadsTextTexts      map[string]string `json:"reads_text_texts,omitempty"`
+	ReferenceUseTexts   map[string]string `json:"reference_use_texts,omitempty"`
+}
+
+// ChatPromptReportSchema is application.chat.agent.prompt_report (#249). It
+// tells the Agent what the server did to its prompt. OverLimit is "refuse"
+// (reject before submission) or "truncate" (the historical silent cut).
+type ChatPromptReportSchema struct {
+	OverLimit string `json:"over_limit,omitempty"`
+	// MaximumReportedCharacters bounds the final_prompt text in a tool
+	// result; above it only the layers and lengths are reported. Zero means
+	// no bound.
+	MaximumReportedCharacters int `json:"maximum_reported_characters,omitempty"`
+	// UnchangedTemplate is the prompt_note summary when no layer changed the
+	// prompt; with it the Agent still gets the note that the prompt was
+	// submitted as written. Empty keeps the historical empty result.
+	UnchangedTemplate string `json:"unchanged_template,omitempty"`
+	// ChangedTemplate is the prompt_note summary when layers changed the
+	// submitted prompt, and ChangedWithoutPromptTemplate is its variant for a
+	// resume that cannot recover the Agent's original prompt.
+	ChangedTemplate              string `json:"changed_template,omitempty"`
+	ChangedWithoutPromptTemplate string `json:"changed_without_prompt_template,omitempty"`
+	// TruncationTemplate is the prompt_note text for a prompt the Schema cut
+	// because OverLimit is not "refuse" (or the Catalog predates the policy).
+	// It says the step was submitted after the cut. Fields: {model},
+	// {length}, {maximum}, {excess}, {unit}. Empty uses a neutral fallback.
+	TruncationTemplate string `json:"truncation_template,omitempty"`
+	// TooLongTemplate is the refusal when OverLimit is "refuse". Fields:
+	// {model}, {length}, {maximum}, {excess}, {unit}.
+	TooLongTemplate string `json:"too_long_template"`
+	// Layers labels each layer id. The layer ids are reference_template,
+	// previous_prompt_template, purposes_template, skill_template,
+	// style_lock, negative_prompt, truncation and prepared_input.
+	Layers map[string]string `json:"layers,omitempty"`
 }
 
 type ChatContextSchema struct {
@@ -4014,19 +4088,25 @@ type ChatToolSchema struct {
 	// names the Offering to run, by model_id, provider/model_id or Offering
 	// ID, among the tool's capabilities (#103). The session's explicitly
 	// picked 3D model wins over the argument, and a usage profile may supply
-	// the default. The enum, when declared, names the models the tool tells
-	// the Agent about; execution accepts an enabled, runtime-available
-	// Offering of the call's capability, matched by any of those names.
-	ModelArgument        string                     `json:"model_argument,omitempty"`
-	ModelRequiredMessage string                     `json:"model_required_message"`
-	Capability           schemacontract.Capability  `json:"capability"`
-	FallbackCapability   schemacontract.Capability  `json:"fallback_capability"`
-	PendingCapability    string                     `json:"pending_capability"`
-	Parameters           json.RawMessage            `json:"parameters"`
-	ArgumentMappings     map[string]string          `json:"argument_mappings"`
-	OverrideMappings     map[string]string          `json:"override_mappings"`
-	DefaultParameters    map[string]json.RawMessage `json:"default_parameters"`
-	ResultAssetRoles     []string                   `json:"result_asset_roles"`
+	// the default. The enum is derived at runtime from the enabled,
+	// runtime-available Offerings that match ModelChoices (#249); it is never
+	// written into the Catalog. Execution accepts an enabled,
+	// runtime-available Offering of the call's capability, matched by any of
+	// those names.
+	ModelArgument string `json:"model_argument,omitempty"`
+	// ModelChoices declares how the Agent's model argument is narrowed
+	// (#249). Required for a ModelArgument tool in a Catalog whose
+	// chat.agent.offering_knowledge declares required capabilities.
+	ModelChoices         *ChatToolModelChoicesSchema `json:"model_choices,omitempty"`
+	ModelRequiredMessage string                      `json:"model_required_message"`
+	Capability           schemacontract.Capability   `json:"capability"`
+	FallbackCapability   schemacontract.Capability   `json:"fallback_capability"`
+	PendingCapability    string                      `json:"pending_capability"`
+	Parameters           json.RawMessage             `json:"parameters"`
+	ArgumentMappings     map[string]string           `json:"argument_mappings"`
+	OverrideMappings     map[string]string           `json:"override_mappings"`
+	DefaultParameters    map[string]json.RawMessage  `json:"default_parameters"`
+	ResultAssetRoles     []string                    `json:"result_asset_roles"`
 	// ResultAttachmentKind is "image" (the historical default), "model" (a
 	// model's thumbnail), or "none" (only the real Task handle). Only "none"
 	// permits an empty ResultAssetRoles list and never projects task files as images.
@@ -4076,6 +4156,23 @@ type ChatToolSchema struct {
 	// 3D model of the session instead of creating a new one. It is
 	// server-side only and omitted from public projections.
 	Processing *ChatToolProcessingSchema `json:"processing,omitempty"`
+}
+
+// ChatToolModelChoicesSchema derives a generation tool's model enum from the
+// Catalog at runtime (#249). From is the only supported source,
+// "available_offerings": Offerings of the tool's capabilities that are
+// enabled, runtime-available, and declare every RequireParameters semantic
+// while declaring none of ExcludeParameters. The model enum holds their
+// model_ids in Catalog order, without repeats. The parameter list never
+// carries a handwritten enum; a Catalog that declares both is refused.
+type ChatToolModelChoicesSchema struct {
+	From              string                             `json:"from"`
+	RequireParameters []schemacontract.ParameterSemantic `json:"require_parameters,omitempty"`
+	ExcludeParameters []schemacontract.ParameterSemantic `json:"exclude_parameters,omitempty"`
+	// ExcludeOfferings removes a declared Offering whose capability and
+	// parameters match but whose role is different (a segmentation step that
+	// is technically image-to-3D). Each ID must exist.
+	ExcludeOfferings []string `json:"exclude_offerings,omitempty"`
 }
 
 // ChatToolProcessingSchema declares how a processing tool maps the model's
@@ -4327,6 +4424,12 @@ type ChatToolResultFields struct {
 	// naming the step's values over the session purpose's budget (#129). It
 	// is present only when some value is over it.
 	PurposeBudgetNote string `json:"purpose_budget_note,omitempty"`
+	// FinalPrompt is the optional key of the exact text prompt the server
+	// submitted, present only when a layer changed it (#249). PromptNote is
+	// the optional key of the object naming the layers applied, the
+	// truncation and the length.
+	FinalPrompt string `json:"final_prompt,omitempty"`
+	PromptNote  string `json:"prompt_note,omitempty"`
 }
 
 // ChatAgentToolSchema 声明非生成类 agent 控制工具（set_params /
@@ -5638,33 +5741,34 @@ type LoginPresentation struct {
 }
 
 type rawOffering struct {
-	NativePricing                 *schemacontract.NativePricing   `json:"native_pricing,omitempty"`
-	ID                            schemacontract.OfferingID       `json:"id"`
-	Revision                      string                          `json:"revision"`
-	ProviderID                    string                          `json:"provider_id"`
-	ProviderName                  string                          `json:"provider_name"`
-	ProviderShortLabel            string                          `json:"provider_short_label"`
-	ProviderOrder                 *int                            `json:"provider_order,omitempty"`
-	ModelID                       string                          `json:"model_id"`
-	ModelName                     string                          `json:"model_name"`
-	Description                   string                          `json:"description,omitempty"`
-	Capability                    schemacontract.Capability       `json:"capability"`
-	Domain                        schemacontract.CapabilityDomain `json:"domain"`
-	AdapterKey                    string                          `json:"adapter_key"`
-	Enabled                       bool                            `json:"enabled"`
-	Features                      []string                        `json:"features"`
-	Default                       bool                            `json:"default"`
-	Recommended                   bool                            `json:"recommended"`
-	DisplayOrder                  *int                            `json:"display_order"`
-	CapabilityOrder               *int                            `json:"capability_order"`
-	Priority                      int                             `json:"priority"`
-	EstimatedCredits              int                             `json:"estimated_credits"`
-	CreditsMetered                bool                            `json:"credits_metered"`
-	EstimatedCreditsUnitParameter string                          `json:"estimated_credits_unit_parameter,omitempty"`
-	ReferenceSelectionPolicy      string                          `json:"reference_selection_policy,omitempty"`
-	IdempotentSubmission          bool                            `json:"idempotent_submission"`
-	CancellationSupported         bool                            `json:"cancellation_supported"`
-	TimeoutSeconds                int                             `json:"timeout_seconds"`
+	NativePricing                 *schemacontract.NativePricing     `json:"native_pricing,omitempty"`
+	ID                            schemacontract.OfferingID         `json:"id"`
+	Revision                      string                            `json:"revision"`
+	ProviderID                    string                            `json:"provider_id"`
+	ProviderName                  string                            `json:"provider_name"`
+	ProviderShortLabel            string                            `json:"provider_short_label"`
+	ProviderOrder                 *int                              `json:"provider_order,omitempty"`
+	ModelID                       string                            `json:"model_id"`
+	ModelName                     string                            `json:"model_name"`
+	Description                   string                            `json:"description,omitempty"`
+	Knowledge                     *schemacontract.OfferingKnowledge `json:"knowledge,omitempty"`
+	Capability                    schemacontract.Capability         `json:"capability"`
+	Domain                        schemacontract.CapabilityDomain   `json:"domain"`
+	AdapterKey                    string                            `json:"adapter_key"`
+	Enabled                       bool                              `json:"enabled"`
+	Features                      []string                          `json:"features"`
+	Default                       bool                              `json:"default"`
+	Recommended                   bool                              `json:"recommended"`
+	DisplayOrder                  *int                              `json:"display_order"`
+	CapabilityOrder               *int                              `json:"capability_order"`
+	Priority                      int                               `json:"priority"`
+	EstimatedCredits              int                               `json:"estimated_credits"`
+	CreditsMetered                bool                              `json:"credits_metered"`
+	EstimatedCreditsUnitParameter string                            `json:"estimated_credits_unit_parameter,omitempty"`
+	ReferenceSelectionPolicy      string                            `json:"reference_selection_policy,omitempty"`
+	IdempotentSubmission          bool                              `json:"idempotent_submission"`
+	CancellationSupported         bool                              `json:"cancellation_supported"`
+	TimeoutSeconds                int                               `json:"timeout_seconds"`
 	// JobTimeoutSeconds 声明作业级总时长（attempt 从启动起的上限）；
 	// 0 = 继承 timeout_seconds（B17：request/job 超时拆分）。
 	JobTimeoutSeconds   int                                    `json:"job_timeout_seconds,omitempty"`

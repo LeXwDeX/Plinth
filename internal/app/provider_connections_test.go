@@ -239,7 +239,17 @@ func acmeCatalogDocument(t *testing.T) map[string]any {
 		"type":       "text",
 		"required":   true,
 		"max_length": 600,
+		// #249: the cloned Offering knowledge declares that it reads a text
+		// prompt, so the fixture's prompt parameter must carry the semantic.
+		"semantic": "prompt",
 	}}
+	// The fixture replaced the parameter set, so the cloned knowledge must not
+	// claim a negative-prompt parameter it no longer declares.
+	if knowledge, ok := parts["knowledge"].(map[string]any); ok {
+		if prompt, ok := knowledge["prompt"].(map[string]any); ok {
+			prompt["negative_prompt"] = false
+		}
+	}
 	parts["retry"] = map[string]any{
 		"max_attempts":            2,
 		"initial_backoff_seconds": 1,

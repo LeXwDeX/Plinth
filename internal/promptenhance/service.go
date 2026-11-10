@@ -75,7 +75,11 @@ func (service *Service) Enhance(
 		request.Capability,
 		request.ModelID,
 	)
-	systemPrompt := buildSystemPrompt(profile, maxLength)
+	// #249: the enhancer and the Agent share the same Offering self-description.
+	// An Offering that declares its prompt craft yields a different system
+	// prompt; a historical Catalog or an unknown model keeps the generic rules.
+	offering, hasOffering := service.offering(request.Capability, request.ModelID)
+	profile, systemPrompt := buildSystemPrompt(profile, maxLength, service.schema.Agent.OfferingKnowledge, offering, hasOffering)
 	completion, err := service.agent.Complete(ctx, agents.Request{
 		Model:       service.model,
 		Temperature: service.schema.API.PromptEnhance.Temperature,
@@ -146,7 +150,10 @@ func (service *Service) promptMaxLength(
 func buildSystemPrompt(
 	profile catalog.ChatPromptEnhanceProfileSchema,
 	maxLength int,
-) string {
+	knowledge catalog.ChatOfferingKnowledgeSchema,
+	offering generation.Offering,
+	hasOffering bool,
+) (catalog.ChatPromptEnhanceProfileSchema, string) {
 	lengthRule := profile.UnboundedLengthRule
 	if maxLength > 0 {
 		lengthRule = strings.ReplaceAll(
@@ -155,11 +162,42 @@ func buildSystemPrompt(
 			fmt.Sprint(maxLength),
 		)
 	}
-	return strings.ReplaceAll(
+	prompt := strings.ReplaceAll(
 		profile.SystemPrompt,
 		profile.LengthRulePlaceholder,
 		lengthRule,
 	)
+	if !hasOffering || offering.Knowledge == nil || offering.Knowledge.Prompt == nil {
+		return profile, prompt
+	}
+	declared := offering.Knowledge.Prompt
+	if text := knowledge.RenderPromptGuidance(catalog.OfferingKnowledgeModelLabel(offering), offering.Knowledge); text != "" {
+		prompt += "\n\n" + text
+	}
+	if declared.ReadsText != nil && !*declared.ReadsText {
+		prompt += "\nThe selected service does not read a text prompt; say so in the result and do not promise that the text affects the result."
+	}
+	if declared.NegativePrompt != nil && !*declared.NegativePrompt {
+		// The service has no negative-prompt input: do not return one.
+		profile.NegativePromptField = ""
+		profile.DefaultNegativePrompt = ""
+		prompt += "\nThe selected service accepts no negative prompt; output only the prompt field."
+	}
+	return profile, prompt
+}
+
+// offering finds the Offering an enhancement targets. A request without a
+// model id keeps the generic rules.
+func (service *Service) offering(capability generation.Capability, modelID string) (generation.Offering, bool) {
+	if capability == "" || strings.TrimSpace(modelID) == "" {
+		return generation.Offering{}, false
+	}
+	for _, offering := range service.offerings.List(capability) {
+		if offering.ModelID == modelID {
+			return offering, true
+		}
+	}
+	return generation.Offering{}, false
 }
 
 func parseCompletion(

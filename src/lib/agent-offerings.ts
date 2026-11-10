@@ -69,11 +69,20 @@ export interface OfferingParameterWire {
   adjustment_reason?: string;
 }
 
+/** Public Offering self-description (#249): the three quality statements a person reads. */
+export interface OfferingKnowledgeWire {
+  strengths?: string[];
+  weaknesses?: string[];
+  limitations?: string[];
+}
+
 export interface OfferingWire {
   id: string;
   revision: string;
   provider_id: string;
   provider_name: string;
+  /** Schema `knowledge` public projection; prompt craft, reference use and sources stay private. */
+  knowledge?: OfferingKnowledgeWire;
   /** The vendor's short name declared by the Product Schema (such as "GPT"), for compact controls. */
   provider_short_label?: string;
   /** Schema `provider_order`: the vendor's rank in the model tables (ascending); absent when undeclared. */

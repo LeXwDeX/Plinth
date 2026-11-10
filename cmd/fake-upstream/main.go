@@ -23,16 +23,19 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
@@ -86,6 +89,12 @@ func run(args []string) error {
 	if *verbose {
 		handler = logRequests(handler)
 	}
+	// The smoke script asserts what the stack sent to the fake LLM (tool
+	// descriptions and prompt layers). Test tooling only: bodies stay in
+	// memory and are never logged.
+	archive := newRequestArchive()
+	handler = archive.record(handler)
+	handler = withRequestArchive(archive, handler)
 	httpServer := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -147,5 +156,72 @@ func withHealth(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// requestArchivePath is the one request the smoke script asserts on: the
+// OpenAI-compatible chat completions call, whose tools carry the Offering
+// guidance. Other provider bodies (pictures, models) are not archived.
+const requestArchivePath = "/openai/v1/chat/completions"
+
+// requestArchiveLimit bounds how many bodies that path keeps. The smoke script
+// scans the recent ones because a title summary or a second Agent step may
+// follow the request it needs.
+const requestArchiveLimit = 8
+
+// requestArchive keeps the recent POST bodies the fake served, keyed by path.
+// It lets the smoke script assert what the stack sent to the fake LLM: which
+// tool descriptions carried the Offering knowledge, and which prompt layers
+// the server applied. It exists for test tooling only and never logs a body.
+type requestArchive struct {
+	mu     sync.Mutex
+	bodies map[string][][]byte
+}
+
+func newRequestArchive() *requestArchive {
+	return &requestArchive{bodies: map[string][][]byte{}}
+}
+
+// record copies each POST body before the fake reads it, so the handler still
+// sees the original bytes.
+func (archive *requestArchive) record(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == requestArchivePath {
+			body, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			if err == nil {
+				archive.mu.Lock()
+				bodies := append(archive.bodies[r.URL.Path], body)
+				if len(bodies) > requestArchiveLimit {
+					bodies = bodies[len(bodies)-requestArchiveLimit:]
+				}
+				archive.bodies[r.URL.Path] = bodies
+				archive.mu.Unlock()
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// withRequestArchive serves GET /fake/control/requests?path=PATH with the
+// recent bodies of PATH as a JSON array, oldest first.
+func withRequestArchive(archive *requestArchive, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/fake/control/requests" || r.Method != http.MethodGet {
+			next.ServeHTTP(w, r)
+			return
+		}
+		archive.mu.Lock()
+		bodies := append([][]byte(nil), archive.bodies[r.URL.Query().Get("path")]...)
+		archive.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, "[")
+		for index, body := range bodies {
+			if index > 0 {
+				_, _ = io.WriteString(w, ",")
+			}
+			_, _ = w.Write(body)
+		}
+		_, _ = io.WriteString(w, "]")
 	})
 }

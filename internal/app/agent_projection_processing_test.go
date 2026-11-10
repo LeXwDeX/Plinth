@@ -213,9 +213,10 @@ func TestAgentProjectionCompactsLargeOptionLists(t *testing.T) {
 	// #189 enabled the 17 Creative Lab stages (about 9 KB of inputs: the relief,
 	// lampshade, keycap and pixel build options), so the budget moved from 64 to
 	// 80 KiB; the full default projection was 69,783 bytes on 2026-10-22.
-	// #192 enables the three Tripo P2 low-poly Offerings (the full projection was
-	// 92,373 bytes on 2026-11-08), so the budget moves to 96 KiB.
-	if len(raw) > 96*1024 {
+	// #192 enabled the three Tripo P2 low-poly Offerings (92,373 bytes on 2026-11-08).
+	// #249 projects Offering knowledge (104,876 bytes on 2026-11-10), so the
+	// budget moves to 112 KiB.
+	if len(raw) > 112*1024 {
 		t.Fatalf("agent list_offerings projection = %d bytes", len(raw))
 	}
 }
@@ -341,8 +342,8 @@ func TestAgentOfferingProjectionStatesReferenceImageCapacity(t *testing.T) {
 			t.Errorf("%s declares reference_image_max without a reference-image list: %s", id, offering["reference_image_max"])
 		}
 	}
-	// #192 moved the same budget to 96 KiB when Tripo P2 was enabled.
-	if len(raw) > 96*1024 {
+	// #249 moved the budget to 112 KiB when Offering knowledge joined the projection.
+	if len(raw) > 112*1024 {
 		t.Fatalf("agent list_offerings projection = %d bytes", len(raw))
 	}
 }

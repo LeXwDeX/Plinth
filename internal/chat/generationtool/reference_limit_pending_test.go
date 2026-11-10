@@ -274,6 +274,42 @@ func toolDescriptionNoteFixture(t *testing.T) (catalog.ChatToolSchema, *generati
 // a turn now states, in the Schema's words, how many pictures the model picked
 // for 3D uses: one for a single-picture model, up to its limit for a
 // multi-picture model.
+// knowledgeDescriptionNote is what the shipped Offering knowledge adds to a
+// model's tool description: the does-not-read-text statement and the prompt
+// guidance, in the Schema's words (#249).
+func knowledgeDescriptionNote(t *testing.T, modelID, modelLabel string) string {
+	t.Helper()
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var offering generation.Offering
+	for _, candidate := range product.List(generation.ImageTo3D) {
+		if candidate.ModelID == modelID {
+			offering = candidate
+			break
+		}
+	}
+	if offering.ID == "" {
+		t.Fatalf("no image-to-3D Offering with model %q", modelID)
+	}
+	knowledge := product.Application().Chat.Agent.OfferingKnowledge
+	var parts []string
+	hasPrompt := false
+	for _, parameter := range offering.Parameters {
+		hasPrompt = hasPrompt || parameter.Semantic == generation.SemanticPrompt
+	}
+	if !hasPrompt {
+		if text := knowledge.RenderNoTextGuidance(modelLabel, offering.Knowledge); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	if text := knowledge.RenderPromptGuidance(modelLabel, offering.Knowledge); text != "" {
+		parts = append(parts, text)
+	}
+	return strings.Join(parts, " ")
+}
+
 func TestTheToolDescriptionFollowsThePickedModelsPictureLimit(t *testing.T) {
 	tool, executor := toolDescriptionNoteFixture(t)
 	// The declared-settings sentence has its own test below.
@@ -306,30 +342,40 @@ func TestTheToolDescriptionFollowsThePickedModelsPictureLimit(t *testing.T) {
 		"workspace pick only":             {chat.TurnOptions{AIModel: "meshy-7.1", CreativeDomain: "model-3d"}, ""},
 		"a model of another domain":       {chat.TurnOptions{ExplicitModel3D: "gpt-image-2", CreativeDomain: "model-3d"}, ""},
 	} {
-		if strings.HasPrefix(name, "Meshy") {
+		if strings.HasPrefix(name, "Meshy") || strings.HasPrefix(name, "Rodin") {
 			model := "Meshy 7.1"
+			modelID := "meshy-7.1"
 			if strings.Contains(name, "multi-view") {
 				model = "Meshy 7.1 多视图"
+				modelID = "meshy-7.1-multiview"
 				if test.options.Locale == "en" {
 					model = "Meshy 7.1 multi-view"
 				}
 			}
-			test.want += " " + fill(notes.NoPrompt, model, 0)
+			if strings.HasPrefix(name, "Rodin") {
+				model = "Rodin Gen-2.5"
+				modelID = "rodin-gen-2.5"
+			}
+			test.want += " " + knowledgeDescriptionNote(t, modelID, model)
 		}
 		if got := executor.ToolDescriptionNote(tool, test.options); got != test.want {
 			t.Errorf("%s: note = %q, want %q", name, got, test.want)
 		}
 	}
-	// A tool without the declaration gets no note.
+	// A tool without reference-capacity words still carries the Offering's own
+	// prompt knowledge (#249).
 	plain := tool
 	plain.ReferenceCapacityNote = catalog.ChatToolReferenceCapacityNote{}
-	if got := executor.ToolDescriptionNote(plain, chat.TurnOptions{ExplicitModel3D: "meshy-7.1", CreativeDomain: "model-3d"}); got != "" {
-		t.Fatalf("undeclared note = %q", got)
+	if got, want := executor.ToolDescriptionNote(plain, chat.TurnOptions{ExplicitModel3D: "meshy-7.1", CreativeDomain: "model-3d"}),
+		knowledgeDescriptionNote(t, "meshy-7.1", "Meshy 7.1"); got != want {
+		t.Fatalf("undeclared note = %q, want %q", got, want)
 	}
 	old := tool
 	old.ReferenceCapacityNote.NoPrompt = ""
-	if got, want := executor.ToolDescriptionNote(old, chat.TurnOptions{ExplicitModel3D: "meshy-7.1", CreativeDomain: "model-3d"}), fill(old.ReferenceCapacityNote.Single, "Meshy 7.1", 1); got != want {
-		t.Fatalf("old note = %q, want %q", got, want)
+	wantOld := fill(old.ReferenceCapacityNote.Single, "Meshy 7.1", 1) + " " +
+		knowledgeDescriptionNote(t, "meshy-7.1", "Meshy 7.1")
+	if got := executor.ToolDescriptionNote(old, chat.TurnOptions{ExplicitModel3D: "meshy-7.1", CreativeDomain: "model-3d"}); got != wantOld {
+		t.Fatalf("old note = %q, want %q", got, wantOld)
 	}
 }
 

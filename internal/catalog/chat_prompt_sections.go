@@ -38,6 +38,14 @@ type ChatAgentCraftPrompt struct {
 	ID           string   `json:"id"`
 	WhenToolsAny []string `json:"when_tools_any"`
 	Text         string   `json:"text"`
+	// OfferingCapabilities selects the Offerings whose knowledge fills
+	// {offering_tradeoffs} (#249). Empty keeps a historical CraftPrompt
+	// literal.
+	OfferingCapabilities []schemacontract.Capability `json:"offering_capabilities,omitempty"`
+	// TradeoffTemplate renders one Offering: {model}, {strengths} and
+	// {weaknesses}. Entries are joined by TradeoffSeparator.
+	TradeoffTemplate  string `json:"tradeoff_template,omitempty"`
+	TradeoffSeparator string `json:"tradeoff_separator,omitempty"`
 }
 
 // CapabilityActive reports whether a capability currently has an enabled
@@ -130,6 +138,40 @@ func validateCraftPrompts(prompts []ChatAgentCraftPrompt, toolNames map[string]s
 		}
 		if maxPromptCharacters > 0 && utf8.RuneCountInString(prompt.Text) > maxPromptCharacters {
 			return fmt.Errorf("chat.agent.craft_prompts %q 的 text 超过 %d 字符", prompt.ID, maxPromptCharacters)
+		}
+	}
+	return nil
+}
+
+// validateCraftPromptOfferings checks the Offering knowledge projection of a
+// craft prompt (#249). A prompt may fill {offering_tradeoffs} at most once;
+// with it, the capabilities and the tradeoff template must be declared.
+func validateCraftPromptOfferings(prompts []ChatAgentCraftPrompt, capabilityDomains map[schemacontract.Capability]schemacontract.CapabilityDomain) error {
+	for _, prompt := range prompts {
+		placeholder := "{offering_tradeoffs}"
+		count := strings.Count(prompt.Text, placeholder)
+		if count > 1 {
+			return fmt.Errorf("chat.agent.craft_prompts %q 的 text 最多只能包含一次 %s", prompt.ID, placeholder)
+		}
+		if count == 0 {
+			if len(prompt.OfferingCapabilities) > 0 || prompt.TradeoffTemplate != "" || prompt.TradeoffSeparator != "" {
+				return fmt.Errorf("chat.agent.craft_prompts %q 声明了 offering_capabilities 或 tradeoff 模板却没有 %s", prompt.ID, placeholder)
+			}
+			continue
+		}
+		if len(prompt.OfferingCapabilities) == 0 {
+			return fmt.Errorf("chat.agent.craft_prompts %q 的 %s 需要 offering_capabilities", prompt.ID, placeholder)
+		}
+		for _, capability := range prompt.OfferingCapabilities {
+			if _, known := capabilityDomains[capability]; !known {
+				return fmt.Errorf("chat.agent.craft_prompts %q 的 offering_capabilities 含未知能力 %q", prompt.ID, capability)
+			}
+		}
+		if !strings.Contains(prompt.TradeoffTemplate, "{model}") || !strings.Contains(prompt.TradeoffTemplate, "{strengths}") {
+			return fmt.Errorf("chat.agent.craft_prompts %q 的 tradeoff_template 必须包含 {model} 与 {strengths}", prompt.ID)
+		}
+		if prompt.TradeoffSeparator == "" {
+			return fmt.Errorf("chat.agent.craft_prompts %q 的 tradeoff_separator 不能为空", prompt.ID)
 		}
 	}
 	return nil

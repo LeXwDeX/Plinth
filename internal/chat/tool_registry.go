@@ -7,6 +7,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/agentscope"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness/resolve"
 )
 
@@ -19,8 +20,16 @@ type toolRegistry struct {
 	allowed func(capability, domain string) bool
 	// offeringAllowed reports whether an enabled, runtime-available Offering
 	// with this model_id serves the capability. It narrows a tool's
-	// offering_argument choices (#189); nil leaves the declared enum as is.
+	// offering_argument choices (#189) and filters the model choices derived
+	// from Offering knowledge (#249); nil leaves the declared enum as is.
 	offeringAllowed func(capability, modelID string) bool
+	// offerings lists the runtime Offerings of a capability, in Catalog
+	// order. With a ModelChoices declaration it makes the model enum follow
+	// the enabled, available Offerings (#249); nil keeps the declared enum.
+	offerings func(capability string) []generation.Offering
+	// craftPromptUnknown is the Schema's word for an undeclared Offering
+	// knowledge fact in the craft brief (#249).
+	craftPromptUnknown string
 	// scope maps the session Agent scope to the tool classes it exposes. It
 	// is read from the same Schema as the tool declarations.
 	scope         agentscope.Policy
@@ -47,9 +56,10 @@ func paidTool(execution catalog.ChatToolExecutionSchema) bool {
 
 func compileToolRegistry(schema catalog.ChatSchema, allowed func(capability, domain string) bool) (*toolRegistry, error) {
 	registry := &toolRegistry{
-		byName:  make(map[string]registeredTool),
-		allowed: allowed,
-		scope:   agentscope.FromSchema(schema.AgentScope),
+		byName:             make(map[string]registeredTool),
+		allowed:            allowed,
+		scope:              agentscope.FromSchema(schema.AgentScope),
+		craftPromptUnknown: schema.Agent.OfferingKnowledge.UnknownText,
 	}
 	add := func(entry registeredTool) error {
 		if entry.name == "" || entry.execution.ImplementationKey == "" || len(entry.parameters) == 0 {
@@ -101,6 +111,9 @@ func (registry *toolRegistry) permits(tool registeredTool, bound bool) bool {
 	if choices, narrowed := registry.offeringChoices(tool); narrowed && len(choices) == 0 {
 		return false
 	}
+	if choices, narrowed := registry.modelChoices(tool); narrowed && len(choices) == 0 {
+		return false
+	}
 	// The gate asks about the tool's own workspace domain.
 	domain := ""
 	if len(tool.execution.Domains) > 0 {
@@ -138,7 +151,10 @@ func (registry *toolRegistry) describe(scope string) []agents.Tool {
 		}
 		parameters := append(json.RawMessage(nil), tool.parameters...)
 		if choices, narrowed := registry.offeringChoices(tool); narrowed {
-			parameters = narrowOfferingArgument(parameters, tool.generation.OfferingArgument, choices)
+			parameters = narrowArgumentEnum(parameters, tool.generation.OfferingArgument, choices)
+		}
+		if choices, narrowed := registry.modelChoices(tool); narrowed {
+			parameters = narrowArgumentEnum(parameters, tool.generation.ModelArgument, choices)
 		}
 		result = append(result, agents.Tool{Name: tool.name, Description: tool.description,
 			Parameters: parameters})
@@ -203,9 +219,32 @@ func (registry *toolRegistry) offeringChoices(tool registeredTool) ([]string, bo
 	return choices, true
 }
 
-// narrowOfferingArgument rewrites only the enum of the offering argument, so
-// the model is offered exactly the templates it can run this turn.
-func narrowOfferingArgument(parameters json.RawMessage, argument string, choices []string) json.RawMessage {
+// modelChoices lists the model ids an enabled, runtime-available Offering
+// gives a ModelArgument tool this turn (#249), in Catalog order. narrowed is
+// false for a historical Catalog whose tool still declares its enum.
+func (registry *toolRegistry) modelChoices(tool registeredTool) ([]string, bool) {
+	if tool.generation == nil || tool.generation.ModelArgument == "" ||
+		tool.generation.ModelChoices == nil || registry.offerings == nil {
+		return nil, false
+	}
+	var candidates []generation.Offering
+	for _, capability := range tool.execution.Capabilities {
+		for _, offering := range registry.offerings(string(capability)) {
+			if offering.Capability != capability {
+				continue
+			}
+			if registry.offeringAllowed != nil && !registry.offeringAllowed(string(capability), offering.ModelID) {
+				continue
+			}
+			candidates = append(candidates, offering)
+		}
+	}
+	return catalog.DerivedModelChoices(*tool.generation, candidates, nil), true
+}
+
+// narrowArgumentEnum rewrites only the enum of one string argument, so the
+// model is offered exactly the choices it can run this turn.
+func narrowArgumentEnum(parameters json.RawMessage, argument string, choices []string) json.RawMessage {
 	var document map[string]any
 	if err := json.Unmarshal(parameters, &document); err != nil {
 		return parameters
