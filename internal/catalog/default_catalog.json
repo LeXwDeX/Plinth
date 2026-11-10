@@ -6726,7 +6726,7 @@
               "references": {
                 "type": "array",
                 "items": { "type": "string" },
-                "description": "Input-asset ids of this session used as the anchor's pictures. Omit on update to keep the stored pictures."
+                "description": "Pictures this session can verify: picture handles (for example @img3 or @selected) or a picture URL shown in the chat. Input-asset ids are accepted for compatibility. Omit on update to keep the stored pictures."
               }
             },
             "required": ["action"],
