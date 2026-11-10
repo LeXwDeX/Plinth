@@ -190,6 +190,93 @@ func TestPromptReportUsesTheUnchangedAndChangedWithoutPromptTemplates(t *testing
 	}
 }
 
+// #249: a processing tool (retexture_model) never applies the reference or
+// Skill prompt layers: it fills the Offering's prompt parameter directly. A
+// replay must therefore not invent those layers; with a style reference in
+// the frozen input and one in the history, only the length cut is reported.
+func TestPromptTraceFromPreparedProcessingReplaysOnlyTheCut(t *testing.T) {
+	executor := promptReplayExecutor()
+	offering := promptReplayProcessingOffering()
+	command := promptReplayProcessingCommand()
+	command.History = []chat.Message{{Role: "user", ImageURLs: []string{"https://example.test/style.png"}}}
+	full := strings.Repeat("x", 801)
+	command.Call.Arguments = []byte(`{"prompt":"` + full + `","reference_image_indices":[1]}`)
+	input, _ := json.Marshal(map[string]any{
+		"prompt": strings.Repeat("x", 800), "style_asset": "asset-1",
+	})
+	trace := executor.promptTraceFromPrepared(context.Background(), command, offering, input)
+	if trace == nil || trace.Final != strings.Repeat("x", 800) || trace.Truncated != 1 {
+		t.Fatalf("trace = %#v", trace)
+	}
+	if len(trace.Layers) != 0 {
+		t.Fatalf("processing replay invented layers: %#v", trace.Layers)
+	}
+	finalPrompt, note := executor.promptReport(command, command.Tool, offering, trace)
+	if finalPrompt != strings.Repeat("x", 800) {
+		t.Fatalf("final_prompt length = %d", len([]rune(finalPrompt)))
+	}
+	rendered, _ := json.Marshal(note)
+	if !strings.Contains(string(rendered), "cut 1 of 801 to 800") {
+		t.Fatalf("prompt_note does not report the cut: %s", rendered)
+	}
+}
+
+// #249: when the reference state cannot be replayed (here the frozen input
+// carries two pictures, the history only one) the fallback must still explain
+// a frozen prompt that is exactly the original cut at the Offering limit,
+// instead of calling it an opaque prepared input.
+func TestPromptTraceFromPreparedFallbackStillReportsTheCut(t *testing.T) {
+	executor := promptReplayExecutor()
+	offering := promptReplayOffering(6)
+	command := promptReplayCommand()
+	input, _ := json.Marshal(map[string]any{
+		"prompt": "draw a", "reference_assets": []string{"asset-1", "asset-2"},
+	})
+	trace := executor.promptTraceFromPrepared(context.Background(), command, offering, input)
+	if trace == nil || trace.Final != "draw a" || trace.Original != "draw a cube" || trace.Truncated != 5 {
+		t.Fatalf("trace = %#v", trace)
+	}
+	for _, layer := range trace.Layers {
+		if layer.ID == promptLayerPreparedInput {
+			t.Fatalf("the cut was reported as an opaque prepared input: %#v", trace.Layers)
+		}
+	}
+	_, note := executor.promptReport(command, command.Tool, offering, trace)
+	rendered, _ := json.Marshal(note)
+	if !strings.Contains(string(rendered), "cut 5 of 11 to 6") {
+		t.Fatalf("prompt_note does not report the cut: %s", rendered)
+	}
+	if strings.Contains(string(rendered), "Nothing was submitted") {
+		t.Fatalf("the refusal copy leaked into a submitted step: %s", rendered)
+	}
+}
+
+// promptReplayProcessingOffering is Meshy Retexture's contract: one prompt
+// capped at 800 runes and one style reference asset.
+func promptReplayProcessingOffering() generation.Offering {
+	return generation.Offering{
+		ID: "meshy/processing/retexture", ModelID: "meshy-processing", ModelName: "Meshy Retexture",
+		Capability: generation.Retexture,
+		Parameters: []generation.Parameter{
+			{Name: "prompt", Type: "text", Semantic: generation.SemanticPrompt, MaxLength: 800},
+			{Name: "style_asset", Type: "asset", Semantic: generation.SemanticReferenceImage},
+		},
+	}
+}
+
+func promptReplayProcessingCommand() chat.ToolCommand {
+	return chat.ToolCommand{
+		Call: agents.ToolCall{Arguments: []byte(`{"prompt":"a prompt"}`)},
+		Tool: catalog.ChatToolSchema{
+			Name: "retexture_model", Capability: generation.Retexture, FallbackCapability: generation.Retexture,
+			Processing: &catalog.ChatToolProcessingSchema{
+				PromptArgument: "prompt", ReferenceArgument: "reference_image_indices",
+			},
+			ResultFields: catalog.ChatToolResultFields{FinalPrompt: "final_prompt", PromptNote: "prompt_note"},
+		},
+	}
+}
+
 // An unchanged prompt still reports nothing when the Catalog has no unchanged
 // template (historical Catalogs).
 func TestPromptReportWithoutTemplatesKeepsTheHistoricalResult(t *testing.T) {

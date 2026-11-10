@@ -294,7 +294,9 @@ func (executor *Executor) promptSkillApplication(
 // and the call's parameters. The replay reports its layers only when it ends
 // on exactly the frozen prompt; when the reference history, the multiview
 // group or the Skill changed since the first submission, it falls back to the
-// prepared_input layer rather than inventing which template ran.
+// prepared_input layer rather than inventing which template ran. A frozen
+// prompt that is exactly the original cut at the Offering's length limit is
+// still reported as that cut, never as an opaque prepared input.
 func (executor *Executor) promptTraceFromPrepared(
 	ctx context.Context,
 	command chat.ToolCommand,
@@ -325,7 +327,13 @@ func (executor *Executor) promptTraceFromPrepared(
 	}
 	original := ""
 	if arguments != nil {
-		original = rawString(arguments[executor.chat.Context.ToolPromptArgument])
+		argument := executor.chat.Context.ToolPromptArgument
+		if processing := command.Tool.Processing; processing != nil && processing.PromptArgument != "" {
+			// A processing tool names its own prompt argument; the generation
+			// tools use the chat context's.
+			argument = processing.PromptArgument
+		}
+		original = rawString(arguments[argument])
 	}
 	frozen, known := frozenReferenceCount(input, offering)
 	if trace := executor.replayPromptTrace(ctx, command, offering, arguments, original, final, frozen, known); trace != nil {
@@ -334,19 +342,29 @@ func (executor *Executor) promptTraceFromPrepared(
 	trace := &promptTrace{Original: original, Final: final, MaxLength: promptLengthLimit(offering)}
 	// The default negative prompt is deterministic from the frozen call and
 	// Offering, so it stays reportable even when the reference layers cannot
-	// be replayed.
-	if value, applied := defaultNegativePromptValue(command, offering); applied {
-		trace.add(promptLayerNegativePrompt, value)
+	// be replayed. Processing tools fill their negative prompt through a
+	// parameter argument, never through the tool default.
+	if command.Tool.Processing == nil {
+		if value, applied := defaultNegativePromptValue(command, offering); applied {
+			trace.add(promptLayerNegativePrompt, value)
+		}
 	}
 	if final != original {
-		trace.Layers = append(trace.Layers, promptLayer{ID: promptLayerPreparedInput})
+		// The frozen prompt is exactly the original cut at the Offering's
+		// limit: the cut is known even though the layer chain is not. Say so
+		// instead of hiding the loss behind an opaque prepared_input layer.
+		if trace.Truncated = promptTruncation(original, final, trace.MaxLength); trace.Truncated == 0 {
+			trace.Layers = append(trace.Layers, promptLayer{ID: promptLayerPreparedInput})
+		}
 	}
 	return trace
 }
 
 // replayPromptTrace applies the first submission's prompt chain again from
 // the call's arguments and the frozen Offering. It returns nil when any input
-// cannot be replayed exactly or the replayed prompt is not the frozen one.
+// cannot be replayed exactly or the replayed prompt is not the frozen one. A
+// processing tool's chain is the prompt parameter itself, so only the length
+// cut is replayed for it.
 func (executor *Executor) replayPromptTrace(
 	ctx context.Context,
 	command chat.ToolCommand,
@@ -359,55 +377,61 @@ func (executor *Executor) replayPromptTrace(
 	if arguments == nil {
 		return nil
 	}
-	referenceURLs, ok := executor.replayReferenceURLs(ctx, command, offering, arguments, frozenReferences, frozenKnown)
-	if !ok {
-		return nil
-	}
-	purposes, refusal := executor.referencePurposes(command, arguments, referenceURLs)
-	if refusal != "" {
-		return nil
-	}
 	trace := &promptTrace{Original: original, Final: original}
 	prompt := original
-	switch {
-	case purposes != "":
-		before := prompt
-		prompt = promptWithPurposes(command, purposes, prompt)
-		if prompt != before {
-			trace.add(promptLayerPurposesTemplate, command.Tool.PromptWithReferencePurposesTemplate)
+	// A processing tool fills the Offering's prompt parameter directly and
+	// never applies the reference, purpose, Skill or style-lock layers (#249).
+	// Replaying them would invent a prompt the first submission never sent;
+	// its only rewrite is the length cut below.
+	if command.Tool.Processing == nil {
+		referenceURLs, ok := executor.replayReferenceURLs(ctx, command, offering, arguments, frozenReferences, frozenKnown)
+		if !ok {
+			return nil
 		}
-	case len(referenceURLs) > 0:
-		before := prompt
-		prompt = executor.synthesizePrompt(command, prompt, referenceURLs)
-		if prompt != before {
-			layer := promptLayerReferenceTemplate
-			template := command.Tool.PromptWithReferenceTemplate
-			if executor.previousPrompt(command, referenceURLs[0]) != "" {
-				layer = promptLayerPreviousPromptTemplate
-				template = command.Tool.PromptWithPreviousTemplate
+		purposes, refusal := executor.referencePurposes(command, arguments, referenceURLs)
+		if refusal != "" {
+			return nil
+		}
+		switch {
+		case purposes != "":
+			before := prompt
+			prompt = promptWithPurposes(command, purposes, prompt)
+			if prompt != before {
+				trace.add(promptLayerPurposesTemplate, command.Tool.PromptWithReferencePurposesTemplate)
 			}
-			trace.add(layer, template)
+		case len(referenceURLs) > 0:
+			before := prompt
+			prompt = executor.synthesizePrompt(command, prompt, referenceURLs)
+			if prompt != before {
+				layer := promptLayerReferenceTemplate
+				template := command.Tool.PromptWithReferenceTemplate
+				if executor.previousPrompt(command, referenceURLs[0]) != "" {
+					layer = promptLayerPreviousPromptTemplate
+					template = command.Tool.PromptWithPreviousTemplate
+				}
+				trace.add(layer, template)
+			}
 		}
-	}
-	capability := command.Tool.FallbackCapability
-	if len(referenceURLs) > 0 {
-		capability = command.Tool.Capability
-	}
-	skills, skillExecution := executor.promptSkills(command)
-	if application, applied := executor.promptSkillApplication(command, offering, capability, skills, skillExecution); applied {
-		prompt = strings.NewReplacer(
-			application.Fields.UserInput, prompt,
-			application.Fields.SkillPrompt, application.Prompt,
-		).Replace(application.Template)
-		trace.add(promptLayerSkillTemplate, application.Template)
-	}
-	beforeStyleLock := prompt
-	prompt = executor.applyStyleLockPrompt(command, offering, prompt)
-	if prompt != beforeStyleLock {
-		trace.add(promptLayerStyleLock, strings.TrimPrefix(prompt, beforeStyleLock))
-	}
-	if value, applied := defaultNegativePromptValue(command, offering); applied {
-		trace.add(promptLayerNegativePrompt, value)
+		capability := command.Tool.FallbackCapability
+		if len(referenceURLs) > 0 {
+			capability = command.Tool.Capability
+		}
+		skills, skillExecution := executor.promptSkills(command)
+		if application, applied := executor.promptSkillApplication(command, offering, capability, skills, skillExecution); applied {
+			prompt = strings.NewReplacer(
+				application.Fields.UserInput, prompt,
+				application.Fields.SkillPrompt, application.Prompt,
+			).Replace(application.Template)
+			trace.add(promptLayerSkillTemplate, application.Template)
+		}
+		beforeStyleLock := prompt
+		prompt = executor.applyStyleLockPrompt(command, offering, prompt)
+		if prompt != beforeStyleLock {
+			trace.add(promptLayerStyleLock, strings.TrimPrefix(prompt, beforeStyleLock))
+		}
+		if value, applied := defaultNegativePromptValue(command, offering); applied {
+			trace.add(promptLayerNegativePrompt, value)
+		}
 	}
 	maximum := promptLengthLimit(offering)
 	truncated := 0
@@ -549,4 +573,53 @@ func (executor *Executor) applyPromptLength(
 	}
 	truncated := len(runes) - maximum
 	return string(runes[:maximum]), truncated, maximum, chat.ToolResult{}, false
+}
+
+// promptTruncation reports the runes a frozen final prompt lost to the
+// Offering's length limit, when it is exactly the original cut at that limit.
+// It returns 0 when the difference comes from any other prompt layer, so the
+// caller never invents a cut.
+func promptTruncation(original, final string, maximum int) int {
+	if maximum <= 0 {
+		return 0
+	}
+	runes := []rune(original)
+	if len(runes) <= maximum || string(runes[:maximum]) != final {
+		return 0
+	}
+	return len(runes) - maximum
+}
+
+// applyProcessingPromptLength applies the Schema's over-limit policy to the
+// prompt parameter of a processing step's built input. Every processing path
+// calls it before PrepareInput: over_limit=refuse returns the refusal result
+// (nothing is frozen, no Task exists and nothing is charged) while a
+// truncating Catalog returns the cut prompt and the trace reporting the cut
+// layer. The Offering's prompt max_length is the only length source.
+func (executor *Executor) applyProcessingPromptLength(
+	command chat.ToolCommand, offering generation.Offering, input map[string]any,
+) (*promptTrace, chat.ToolResult, bool) {
+	for _, parameter := range offering.Parameters {
+		if parameter.Semantic != generation.SemanticPrompt {
+			continue
+		}
+		value, present := input[parameter.Name]
+		if !present {
+			return nil, chat.ToolResult{}, false
+		}
+		prompt, ok := value.(string)
+		if !ok {
+			return nil, chat.ToolResult{}, false
+		}
+		final, truncated, maximum, refusal, refused := executor.applyPromptLength(command, offering, prompt)
+		if refused {
+			return nil, refusal, true
+		}
+		if truncated == 0 && final == prompt {
+			return nil, chat.ToolResult{}, false
+		}
+		input[parameter.Name] = final
+		return &promptTrace{Original: prompt, Final: final, Truncated: truncated, MaxLength: maximum}, chat.ToolResult{}, false
+	}
+	return nil, chat.ToolResult{}, false
 }
