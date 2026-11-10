@@ -1905,14 +1905,19 @@ func (orchestrator *Orchestrator) agentRequest(
 	if options.Harness != nil {
 		ctx = context.WithValue(ctx, harnessContextKey{}, options.Harness)
 	}
-	systemPrompt := orchestrator.schema.Agent.SystemPrompt
+	// Every block is a named, ordered section (#248): the order is code, and a
+	// block that renders nothing is left out, so the same facts produce the
+	// same prompt.
+	basePrompt := orchestrator.schema.Agent.SystemPrompt
 	domainContexts := orchestrator.schema.Agent.DomainContext
 	if snapshot := configurationFromContext(ctx); snapshot != nil {
-		systemPrompt = snapshot.SystemPrompt
+		basePrompt = snapshot.SystemPrompt
 		domainContexts = snapshot.DomainContext
 	}
+	sections := &promptSectionList{}
+	sections.add("base", basePrompt)
 	if domainContext := domainContexts[options.CreativeDomain]; domainContext != "" {
-		systemPrompt += "\n\n" + domainContext
+		sections.add("domain", "\n\n"+domainContext)
 	}
 	registry, registryErr := orchestrator.registryFor(ctx)
 	scope := orchestrator.agentScope.Normalize(options.AgentScope)
@@ -1920,15 +1925,15 @@ func (orchestrator *Orchestrator) agentRequest(
 		// A craft brief comes before the scope block: it teaches how to work in
 		// a domain, while the scope only says which tools this turn offers. The
 		// selection and the framed session notes stay at the end of the prompt.
-		systemPrompt += orchestrator.craftPrompt(registry, scope)
-		systemPrompt += orchestrator.scopePrompt(registry, scope)
+		sections.add("craft", orchestrator.craftPrompt(registry, scope))
+		sections.add("scope", orchestrator.scopePrompt(registry, scope))
 	}
 	// The session's real approval mode follows the scope it must not be mixed
 	// up with (#7).
-	systemPrompt += orchestrator.approvalModePrompt(ctx, ownerID, sessionID)
+	sections.add("approval", orchestrator.approvalModePrompt(ctx, ownerID, sessionID))
 	if registryErr == nil {
-		systemPrompt += orchestrator.skillToolDirective(ctx, registry, options)
-		systemPrompt += orchestrator.multiviewDirective(registry, options)
+		sections.add("skill", orchestrator.skillToolDirective(ctx, registry, options))
+		sections.add("multiview", orchestrator.multiviewDirective(registry, options))
 	}
 	// The session summary stands in for the messages it covers (#322). Image
 	// indices and handles are counted over the whole history either way.
@@ -1940,21 +1945,26 @@ func (orchestrator *Orchestrator) agentRequest(
 	}
 	summarized := summarizedThrough(history, latest)
 	indexedByMessage, lastUserMessage := orchestrator.indexHistoryImages(history)
-	systemPrompt += orchestrator.summaryPrompt(latest)
-	systemPrompt += orchestrator.compactedHandlePrompt(history, indexedByMessage, summarized, lastUserMessage)
-	systemPrompt += orchestrator.selectionPrompt(options)
-	systemPrompt += orchestrator.briefPrompt(options)
-	systemPrompt += orchestrator.notesPrompt(ctx, ownerID, sessionID)
+	sections.add("summary", orchestrator.summaryPrompt(latest))
+	sections.add("compacted_handles", orchestrator.compactedHandlePrompt(history, indexedByMessage, summarized, lastUserMessage))
+	// The ledger and the style anchor are projected from stored facts, not from
+	// the message window, so compaction never changes them (#248).
+	sections.add("work_ledger", orchestrator.workLedgerPrompt(ctx, ownerID, sessionID, history))
+	sections.add("work_anchors", orchestrator.workAnchorsPrompt(ctx, ownerID, sessionID))
+	sections.add("selection", orchestrator.selectionPrompt(options))
+	sections.add("brief", orchestrator.briefPrompt(options))
+	sections.add("notes", orchestrator.notesPrompt(ctx, ownerID, sessionID))
 	var choices []Choice
 	if orchestrator.service != nil && sessionID != "" {
 		choices, _ = orchestrator.service.ListChoices(ctx, ownerID, sessionID)
 	}
-	systemPrompt += orchestrator.pendingChoicePrompt(choices)
+	sections.add("choice", orchestrator.pendingChoicePrompt(choices))
 	// Tasks the person stopped waiting for still run (#137): the Agent looks
 	// them up instead of submitting the same paid generation again.
-	systemPrompt += orchestrator.backgroundTasksPrompt(ctx, ownerID, sessionID, history)
-	systemPrompt += orchestrator.harnessPrompt(options.Harness, registry, scope)
-	systemPrompt += orchestrator.replyLanguagePrompt(ctx)
+	sections.add("background_tasks", orchestrator.backgroundTasksPrompt(ctx, ownerID, sessionID, history))
+	sections.add("harness", orchestrator.harnessPrompt(options.Harness, registry, scope))
+	sections.add("reply_language", orchestrator.replyLanguagePrompt(ctx))
+	systemPrompt := sections.render()
 	request := agents.Request{
 		Model:           orchestrator.turnModel(options),
 		Connection:      orchestrator.turnChatModel(options).connection,

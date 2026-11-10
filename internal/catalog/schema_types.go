@@ -2285,6 +2285,105 @@ type ChatImageReviewSchema struct {
 	RoundsExhaustedTemplate string `json:"rounds_exhausted_template"`
 }
 
+// ChatWorkLedgerSchema is application.chat.work_ledger (#248). The ledger is a
+// read-only projection: every step is one public generation Task of the
+// session, its frozen input and result, the historical tool call that asked
+// for it, and the read-only self-check summaries stored with those calls. No
+// new task state is written. The summary is injected into the system prompt
+// every turn, outside context compaction; its length is bounded and the steps
+// kept are chosen by priority (the picked object, then steps the newest user
+// message mentions, then rejected directions, then the most recent).
+//
+// Markers frame the block and its texts state that the ledger is material, not
+// instructions; markers in the projected text are removed first, like the
+// session notes.
+type ChatWorkLedgerSchema struct {
+	// MaximumSteps bounds the Tasks one summary projection reads and the step
+	// lines the summary lists. The picked object and rejected directions outside
+	// that page are fetched individually, and get_production_step searches the
+	// complete session set.
+	MaximumSteps int `json:"maximum_steps"`
+	// SummaryMaximumCharacters bounds the rendered summary block.
+	SummaryMaximumCharacters int `json:"summary_maximum_characters"`
+	// PromptPreviewCharacters bounds the prompt preview of one summary line.
+	PromptPreviewCharacters int `json:"prompt_preview_characters"`
+	// EntryMaximumCharacters bounds one rendered step line in the summary.
+	EntryMaximumCharacters int `json:"entry_maximum_characters"`
+	// StepPrefix names the per-step handle ("@step3"); the tool accepts either
+	// the handle or the Task ID.
+	StepPrefix string `json:"step_prefix"`
+	// SummaryTemplate frames the whole block: {open}, {steps} and {rejected}
+	// (the rejected block or nothing). StepLineTemplate renders one step with
+	// {step}, {task_id}, {capability}, {model}, {status}, {prompt},
+	// {self_check} and {decision}. PromptLineTemplate fills {prompt} ({preview});
+	// SelfCheckLineTemplate fills {self_check} ({tool}, {passed}, {unknown},
+	// {failed} and {leftovers}); LeftoverTemplate fills {leftovers} ({checks}).
+	SummaryTemplate       string `json:"summary_template"`
+	StepLineTemplate      string `json:"step_line_template"`
+	PromptLineTemplate    string `json:"prompt_line_template"`
+	SelfCheckLineTemplate string `json:"self_check_line_template"`
+	LeftoverTemplate      string `json:"leftover_template"`
+	// NoneText fills an empty self-check or decision slot; PromptOmittedText
+	// fills the prompt slots of the compaction variant, which carries no full
+	// prompt; FailedViewsTemplate names a render/compare call's failed views
+	// ({views}).
+	NoneText            string `json:"none_text"`
+	PromptOmittedText   string `json:"prompt_omitted_text"`
+	FailedViewsTemplate string `json:"failed_views_template"`
+	// EmptyText, TruncatedNote, UnknownStepTemplate and NotReadableTemplate
+	// are the Agent-facing texts: an empty ledger, a summary that dropped steps
+	// ({count} dropped), a step the tool cannot find ({step}) and an unreadable
+	// session or Task. OmissionsNote names the facts the projection could not
+	// read or attribute ({count}); it makes a failed decision or parameter read
+	// visible instead of silently empty.
+	EmptyText           string `json:"empty_text"`
+	TruncatedNote       string `json:"truncated_note"`
+	UnknownStepTemplate string `json:"unknown_step_template"`
+	NotReadableTemplate string `json:"not_readable_template"`
+	OmissionsNote       string `json:"omissions_note"`
+	// OpenMarker and CloseMarker frame the summary block.
+	OpenMarker  string `json:"open_marker"`
+	CloseMarker string `json:"close_marker"`
+	// Rejected is the "do not do again" block. Its decisions come from the
+	// injected reader: explicit rejection writes belong to #241; until then the
+	// application projects results superseded by a later selection from the
+	// existing messages and pick. No record means the block is omitted.
+	Rejected ChatWorkLedgerRejectedSchema `json:"rejected"`
+	// Anchors declares the style anchor injection (#248). Identity anchors are
+	// not persisted yet; their storage is #250's scope.
+	Anchors ChatWorkLedgerAnchorsSchema `json:"anchors"`
+}
+
+// ChatWorkLedgerRejectedSchema renders the directions the person rejected.
+type ChatWorkLedgerRejectedSchema struct {
+	MaximumItems    int    `json:"maximum_items"`
+	ContextTemplate string `json:"context_template"`
+	LineTemplate    string `json:"line_template"`
+	// SupersededReason words a rejection the projection inferred from existing
+	// records (a chosen result replaced by a later selection). Explicit
+	// rejection writes and their reasons remain #241's scope.
+	SupersededReason string `json:"superseded_reason"`
+}
+
+// ChatWorkLedgerAnchorsSchema declares the style anchor block. The style
+// anchor is the session's existing style lock (text and reference pictures),
+// read verbatim every turn; it is not compacted. ContextTemplate frames the
+// entries ({open}, {anchors}, {close}); EntryTemplate renders one anchor
+// ({label}, {text}, {references}); ReferenceTemplate fills {references}
+// ({handles}). MaximumTextCharacters bounds the injected style text.
+type ChatWorkLedgerAnchorsSchema struct {
+	StyleLabel            string `json:"style_label"`
+	MaximumTextCharacters int    `json:"maximum_text_characters"`
+	ContextTemplate       string `json:"context_template"`
+	EntryTemplate         string `json:"entry_template"`
+	ReferenceTemplate     string `json:"reference_template"`
+	// MissingReferencesTemplate fills {references} when the session history
+	// has not shown a handle for the lock's pictures yet ({count}).
+	MissingReferencesTemplate string `json:"missing_references_template"`
+	OpenMarker                string `json:"open_marker"`
+	CloseMarker               string `json:"close_marker"`
+}
+
 // ImageInspectLimitsSchema bounds the bytes and pixels Inspect accepts.
 type ImageInspectLimitsSchema struct {
 	MaxBytes  int64 `json:"max_bytes"`
@@ -2585,6 +2684,11 @@ type ChatSchema struct {
 	// ImageReview declares the read-only image inspection tool and the
 	// image-to-3D input gate (#245).
 	ImageReview ChatImageReviewSchema `json:"image_review"`
+	// WorkLedger declares the session production ledger (#248): the read-only
+	// projection of the session's public Tasks, the summary it adds to the
+	// system prompt, the get_production_step tool's texts and the style anchor
+	// injection. Server side only; the browser reads no ledger.
+	WorkLedger ChatWorkLedgerSchema `json:"work_ledger"`
 	// Choice declares the in-chat choice card (#321): the Agent-facing texts of
 	// an answered or pending card and its bounds. Server side only; the card's
 	// visible words are content messages ui.chat.choice.*.

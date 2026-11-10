@@ -677,6 +677,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateImageReview(schema); err != nil {
 		return err
 	}
+	if err := validateWorkLedger(schema); err != nil {
+		return err
+	}
 	for index, tool := range schema.Tools {
 		if tool.RequireUniqueOffering && (!tool.IgnoreUserModel || tool.RequireUserModel || tool.CrossDomainModelFallback) {
 			return fmt.Errorf("tools[%d] require_unique_offering requires independent model selection", index)
@@ -837,6 +840,7 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"inspect_model":           {"model.inspect", "READ", []string{"model-3d"}},
 		"render_model_views":      {"model.render", "READ", []string{"model-3d"}},
 		"compare_models":          {"model.compare", "READ", []string{"model-3d"}},
+		"get_production_step":     {"ledger.read", "READ", []string{"image", "model-3d"}},
 	}
 	var controlDomains []string
 	var expectedEffect string
@@ -2250,6 +2254,147 @@ func validateImageReview(schema ChatSchema) error {
 		!strings.Contains(review.RoundsExhaustedTemplate, "{maximum}") ||
 		strings.TrimSpace(review.DeliveryChecklist) == "" || strings.TrimSpace(review.Input3DChecklist) == "" {
 		return errors.New("chat.image_review 的自检轮数、放行参数或文案不完整")
+	}
+	return nil
+}
+
+// validateWorkLedger checks application.chat.work_ledger (#248) once the
+// get_production_step tool is declared. Every bound must be positive, every
+// Agent-facing template must carry the placeholders the renderer fills, the
+// block markers must differ, and the step handle prefix must not collide with
+// the attachment handle prefixes or the selection alias. A Catalog without the
+// tool stays valid.
+func validateWorkLedger(schema ChatSchema) error {
+	used := false
+	for _, tool := range schema.AgentTools {
+		if tool.Execution.ImplementationKey == "ledger.read" {
+			used = true
+			break
+		}
+	}
+	if !used {
+		return nil
+	}
+	ledger := schema.WorkLedger
+	for name, value := range map[string]int{
+		"maximum_steps":              ledger.MaximumSteps,
+		"summary_maximum_characters": ledger.SummaryMaximumCharacters,
+		"prompt_preview_characters":  ledger.PromptPreviewCharacters,
+		"entry_maximum_characters":   ledger.EntryMaximumCharacters,
+	} {
+		if value <= 0 {
+			return fmt.Errorf("chat.work_ledger.%s 必须为正数", name)
+		}
+	}
+	// generation.Module.List caps one page at 100; a larger bound would be
+	// silently truncated.
+	if ledger.MaximumSteps > 100 {
+		return errors.New("chat.work_ledger.maximum_steps 不能超过 100")
+	}
+	for _, template := range []struct {
+		name         string
+		text         string
+		placeholders []string
+	}{
+		{"summary_template", ledger.SummaryTemplate, []string{"{open}", "{steps}", "{rejected}", "{omissions}", "{close}"}},
+		{"step_line_template", ledger.StepLineTemplate, []string{"{step}", "{task_id}", "{capability}", "{model}", "{status}", "{prompt}", "{self_check}", "{decision}"}},
+		{"prompt_line_template", ledger.PromptLineTemplate, []string{"{preview}"}},
+		{"self_check_line_template", ledger.SelfCheckLineTemplate, []string{"{tool}", "{passed}", "{unknown}", "{failed}", "{leftovers}"}},
+		{"leftover_template", ledger.LeftoverTemplate, []string{"{checks}"}},
+		{"unknown_step_template", ledger.UnknownStepTemplate, []string{"{step}"}},
+	} {
+		if strings.TrimSpace(template.text) == "" {
+			return fmt.Errorf("chat.work_ledger.%s 不能为空", template.name)
+		}
+		for _, placeholder := range template.placeholders {
+			if !strings.Contains(template.text, placeholder) {
+				return fmt.Errorf("chat.work_ledger.%s 须含 %s", template.name, placeholder)
+			}
+		}
+	}
+	for name, text := range map[string]string{
+		"empty_text":            ledger.EmptyText,
+		"not_readable_template": ledger.NotReadableTemplate,
+		"none_text":             ledger.NoneText,
+		"prompt_omitted_text":   ledger.PromptOmittedText,
+		"omissions_note":        ledger.OmissionsNote,
+	} {
+		if strings.TrimSpace(text) == "" {
+			return fmt.Errorf("chat.work_ledger.%s 不能为空", name)
+		}
+	}
+	if !strings.Contains(ledger.OmissionsNote, "{count}") {
+		return errors.New("chat.work_ledger.omissions_note 须含 {count}")
+	}
+	if !strings.Contains(ledger.FailedViewsTemplate, "{views}") {
+		return errors.New("chat.work_ledger.failed_views_template 须含 {views}")
+	}
+	if ledger.TruncatedNote != "" && !strings.Contains(ledger.TruncatedNote, "{count}") {
+		return errors.New("chat.work_ledger.truncated_note 须含 {count}")
+	}
+	open, close := strings.TrimSpace(ledger.OpenMarker), strings.TrimSpace(ledger.CloseMarker)
+	if open == "" || close == "" || open == close {
+		return errors.New("chat.work_ledger 的 open_marker 与 close_marker 须为两个不同的非空标记")
+	}
+	prefix := strings.ToLower(strings.TrimSpace(ledger.StepPrefix))
+	if prefix == "" {
+		return errors.New("chat.work_ledger.step_prefix 不能为空")
+	}
+	alias := strings.ToLower(strings.TrimSpace(schema.Context.SelectionAlias))
+	if alias != "" && (strings.HasPrefix(alias, prefix) || strings.HasPrefix(prefix, alias)) {
+		return errors.New("chat.work_ledger.step_prefix 不能与 selection_alias 冲突")
+	}
+	for _, handlePrefix := range schema.Context.HandlePrefixes {
+		lowered := strings.ToLower(strings.TrimSpace(handlePrefix))
+		if lowered != "" && (strings.HasPrefix(lowered, prefix) || strings.HasPrefix(prefix, lowered)) {
+			return errors.New("chat.work_ledger.step_prefix 不能与 handle_prefixes 冲突")
+		}
+	}
+	rejected := ledger.Rejected
+	if rejected.MaximumItems <= 0 {
+		return errors.New("chat.work_ledger.rejected.maximum_items 必须为正数")
+	}
+	if !strings.Contains(rejected.ContextTemplate, "{items}") {
+		return errors.New("chat.work_ledger.rejected.context_template 须含 {items}")
+	}
+	for _, placeholder := range []string{"{step}", "{reason}"} {
+		if !strings.Contains(rejected.LineTemplate, placeholder) {
+			return fmt.Errorf("chat.work_ledger.rejected.line_template 须含 %s", placeholder)
+		}
+	}
+	if strings.TrimSpace(rejected.SupersededReason) == "" {
+		return errors.New("chat.work_ledger.rejected.superseded_reason 不能为空")
+	}
+	anchors := ledger.Anchors
+	if anchors.MaximumTextCharacters <= 0 || strings.TrimSpace(anchors.StyleLabel) == "" {
+		return errors.New("chat.work_ledger.anchors 的样本文本上限与 style_label 必须声明")
+	}
+	for _, template := range []struct {
+		name         string
+		text         string
+		placeholders []string
+	}{
+		{"context_template", anchors.ContextTemplate, []string{"{open}", "{anchors}", "{close}"}},
+		{"entry_template", anchors.EntryTemplate, []string{"{label}", "{text}", "{references}"}},
+		{"reference_template", anchors.ReferenceTemplate, []string{"{handles}"}},
+	} {
+		for _, placeholder := range template.placeholders {
+			if !strings.Contains(template.text, placeholder) {
+				return fmt.Errorf("chat.work_ledger.anchors.%s 须含 %s", template.name, placeholder)
+			}
+		}
+	}
+	if !strings.Contains(anchors.MissingReferencesTemplate, "{count}") {
+		return errors.New("chat.work_ledger.anchors.missing_references_template 须含 {count}")
+	}
+	anchorOpen, anchorClose := strings.TrimSpace(anchors.OpenMarker), strings.TrimSpace(anchors.CloseMarker)
+	if anchorOpen == "" || anchorClose == "" || anchorOpen == anchorClose {
+		return errors.New("chat.work_ledger.anchors 的 open_marker 与 close_marker 须为两个不同的非空标记")
+	}
+	// The style anchor is the session style lock injected verbatim; a smaller
+	// anchor bound would cut the lock the person wrote.
+	if schema.StyleLock.MaximumTextCharacters > anchors.MaximumTextCharacters {
+		return errors.New("chat.work_ledger.anchors.maximum_text_characters 不能小于 style_lock.maximum_text_characters")
 	}
 	return nil
 }
