@@ -301,9 +301,14 @@ func (orchestrator *Orchestrator) planVision(
 	}
 	candidates := orchestrator.visionCandidates(history, indexed, summarized, lastUser, options, budget)
 	for _, role := range budget.Roles {
+		// The legacy fallback keeps the historical split (#247): generated and
+		// render pictures have their own recent_generated_image_limit and do
+		// not spend the user pictures' maximum_vision_images pool.
+		legacyAssistants := budget.Legacy && role.ID == visionRoleLegacyAI
 		picked := 0
 		for _, candidate := range visionRoleCandidates(candidates, role) {
-			if picked >= role.MaximumImages || plan.Spend.Images >= budget.MaximumImages {
+			if picked >= role.MaximumImages ||
+				(!legacyAssistants && plan.Spend.Images >= budget.MaximumImages) {
 				plan.Dropped = append(plan.Dropped, candidate.dropped)
 				continue
 			}
@@ -464,25 +469,26 @@ func (orchestrator *Orchestrator) legacyVisionCandidates(
 			add(visionRoleLegacyUsers, orchestrator.userCandidate(
 				history[entry.messageIndex], entry.image, entry.messageIndex, visionRoleLegacyUsers))
 		}
-		return
-	}
-	for messageIndex := len(history) - 1; messageIndex > summarized; messageIndex-- {
-		message := history[messageIndex]
-		if !orchestrator.contextMessage(message) ||
-			message.Role != orchestrator.schema.Roles.User {
-			continue
-		}
-		images := indexed[messageIndex]
-		for imageIndex := len(images) - 1; imageIndex >= 0; imageIndex-- {
-			image := images[imageIndex]
-			if !orchestrator.visionCandidate(image.url) {
+	} else {
+		for messageIndex := len(history) - 1; messageIndex > summarized; messageIndex-- {
+			message := history[messageIndex]
+			if !orchestrator.contextMessage(message) ||
+				message.Role != orchestrator.schema.Roles.User {
 				continue
 			}
-			add(visionRoleLegacyUsers, orchestrator.userCandidate(
-				history[messageIndex], image, messageIndex, visionRoleLegacyUsers))
+			images := indexed[messageIndex]
+			for imageIndex := len(images) - 1; imageIndex >= 0; imageIndex-- {
+				image := images[imageIndex]
+				if !orchestrator.visionCandidate(image.url) {
+					continue
+				}
+				add(visionRoleLegacyUsers, orchestrator.userCandidate(
+					history[messageIndex], image, messageIndex, visionRoleLegacyUsers))
+			}
 		}
 	}
-	// Generated pictures keep the historical scan over the whole history.
+	// Generated pictures keep the historical scan over the whole history, even
+	// when the turn names selected reference indices (#247 legacy behavior).
 	for messageIndex := len(history) - 1; messageIndex >= 0; messageIndex-- {
 		message := history[messageIndex]
 		if message.Role != orchestrator.schema.Roles.Assistant {
@@ -560,6 +566,7 @@ func (orchestrator *Orchestrator) roleVisionCandidates(
 	}
 	lock := options.StyleLock
 	if lock.Enabled {
+		vision := orchestrator.schema.Context.Vision
 		for index, assetID := range lock.References {
 			if strings.TrimSpace(assetID) == "" {
 				continue
@@ -567,8 +574,8 @@ func (orchestrator *Orchestrator) roleVisionCandidates(
 			add(catalog.ChatVisionSourceStyle, visionCandidate{
 				source:  catalog.ChatVisionSourceStyle,
 				url:     assetID,
-				label:   strings.ReplaceAll(orchestrator.schema.Context.Vision.StyleAnchorLabelTemplate, "{index}", strconv.Itoa(index+1)),
-				dropped: "风格锁参考图 #" + strconv.Itoa(index+1),
+				label:   strings.ReplaceAll(vision.StyleAnchorLabelTemplate, "{index}", strconv.Itoa(index+1)),
+				dropped: strings.ReplaceAll(vision.StyleAnchorDroppedTemplate, "{index}", strconv.Itoa(index+1)),
 				style:   true,
 			})
 		}
@@ -705,16 +712,27 @@ func visionDetailCosts(budget visionBudget) map[string]int {
 
 // EffectiveVisionImages is the effective per-request image budget of a model
 // under the Schema's purpose-based vision block (#247); the context view
-// shows it beside the estimated vision tokens.
+// shows it beside the estimated vision tokens. Vision that is off (the
+// Agent's switch or a matching supports_vision=false profile) reports no
+// budget at all: zero means "not applicable".
 func EffectiveVisionImages(schema catalog.ChatSchema, model string) int {
-	return effectiveVisionBudget(schema, model).MaximumImages
+	budget := effectiveVisionBudget(schema, model)
+	if !budget.Enabled {
+		return 0
+	}
+	return budget.MaximumImages
 }
 
 // EffectiveVisionTokens is the effective per-request vision token bound of a
 // model under the Schema's purpose-based vision block (#247), narrowed by a
-// matching model profile. Zero means the Catalog declares none (legacy).
+// matching model profile. Zero means the Catalog declares none (legacy) or
+// vision is off.
 func EffectiveVisionTokens(schema catalog.ChatSchema, model string) int {
-	return effectiveVisionBudget(schema, model).MaximumTokens
+	budget := effectiveVisionBudget(schema, model)
+	if !budget.Enabled {
+		return 0
+	}
+	return budget.MaximumTokens
 }
 
 // canSpend reports whether one more picture fits the request's budget. A zero

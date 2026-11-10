@@ -28,6 +28,12 @@ func TestDefaultCatalogDeclaresTheVisionBudget(t *testing.T) {
 		len(vision.Roles) == 0 || !vision.ContactSheet.Enabled || !vision.Crop.Enabled {
 		t.Fatalf("vision = %+v", vision)
 	}
+	// Every model-visible text lives in the Product Schema, including the
+	// style-anchor refusal and the unnamed tool picture (#247 review).
+	if vision.StyleAnchorDroppedTemplate == "" || vision.UnnamedPictureLabel == "" ||
+		vision.Crop.OriginalPictureLabelTemplate == "" {
+		t.Fatalf("vision texts = %+v", vision)
+	}
 	sources := map[string]bool{}
 	for _, role := range vision.Roles {
 		if role.Detail == "" || role.TokenCost <= 0 || role.MaximumImages <= 0 {
@@ -90,6 +96,18 @@ func TestVisionBudgetRejectsBrokenDeclarations(t *testing.T) {
 		"broken crop label": {
 			`{handle} 的局部裁剪`, `局部裁剪`,
 			"picture_label_template",
+		},
+		"broken original crop label": {
+			`的整图，尺寸 {width}×{height}`, `的整图`,
+			"original_picture_label_template",
+		},
+		"broken style anchor dropped template": {
+			`"style_anchor_dropped_template": "风格锁参考图 #{index}"`, `"style_anchor_dropped_template": "风格锁参考图"`,
+			"style_anchor_dropped_template",
+		},
+		"empty unnamed picture label": {
+			`"unnamed_picture_label": "图片"`, `"unnamed_picture_label": ""`,
+			"unnamed_picture_label",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

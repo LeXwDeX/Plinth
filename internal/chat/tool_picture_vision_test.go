@@ -191,6 +191,71 @@ func TestToolPicturesRespectTheRequestBudget(t *testing.T) {
 	}
 }
 
+// A legacy Catalog without context.vision keeps context.max_result_pictures
+// as the hard cap of a result's candidates and keeps #245's selection: six
+// candidates become four evenly spaced pictures, not all six (#247 review).
+func TestLegacyResultPicturesKeepMaxResultPictures(t *testing.T) {
+	for name, maximum := range map[string]int{"declared": 4, "undeclared default": 0} {
+		t.Run(name, func(t *testing.T) {
+			schema := visionTestSchema(t, nil, 10, 10000)
+			schema.Context.Vision = nil
+			schema.Context.ImageDetail = "low"
+			schema.Context.MaxResultPictures = maximum
+			orchestrator := visionTestOrchestrator(schema, nil)
+			budget := orchestrator.visionBudget(TurnOptions{})
+			spend := visionSpend{}
+			var pictures []ToolPicture
+			for _, suffix := range []string{"a", "b", "c", "d", "e", "f"} {
+				pictures = append(pictures, ToolPicture{
+					Handle: "@img" + suffix, URL: "/candidate/" + suffix,
+					Fresh: true, Purpose: ToolPictureResult,
+				})
+			}
+			reply := agents.Message{Role: "tool", Content: "six candidates"}
+			orchestrator.attachToolPictures(context.Background(), "owner", &reply, pictures, budget, &spend)
+			images := imagePartsOf(reply, schema.Context.ImagePartKind)
+			if len(images) != 4 {
+				t.Fatalf("image parts = %d; want the four places max_result_pictures allows", len(images))
+			}
+			want := []string{
+				"data:image/png;base64,_candidate_a", "data:image/png;base64,_candidate_b",
+				"data:image/png;base64,_candidate_d", "data:image/png;base64,_candidate_f",
+			}
+			for index, url := range want {
+				if images[index].URL != url || images[index].Detail != "low" {
+					t.Fatalf("picture %d = %+v; want %q at image_detail", index, images[index], url)
+				}
+			}
+			if strings.Contains(reply.Content, "data:image/jpeg") {
+				t.Fatalf("a legacy Catalog must not compose a contact sheet: %q", reply.Content)
+			}
+		})
+	}
+}
+
+// A picture without a handle is named by the Schema's unnamed_picture_label,
+// never by a hardcoded word (#247 review).
+func TestUnnamedToolPictureUsesTheSchemaLabel(t *testing.T) {
+	schema := visionTestSchema(t, []catalog.ChatVisionRoleSchema{
+		visionRole("history", []string{"history"}, 1, 10, "low"),
+	}, 10, 10000)
+	orchestrator := contactSheetOrchestrator(t, schema, []string{pngDataURI(t, 60)})
+	budget := orchestrator.visionBudget(TurnOptions{})
+	spend := visionSpend{}
+	reply := agents.Message{Role: "tool", Content: "lookup"}
+	orchestrator.attachToolPictures(context.Background(), "owner", &reply, []ToolPicture{
+		{URL: "broken", Purpose: ToolPictureHistory},
+		{URL: "broken", Purpose: ToolPictureHistory},
+	}, budget, &spend)
+	text := replyText(reply)
+	if !strings.Contains(text, "picture") {
+		t.Fatalf("an unnamed picture must use unnamed_picture_label: %q", text)
+	}
+	if !strings.Contains(reply.Content, "[dropped picture]") {
+		t.Fatalf("the refused unnamed picture must be named by the Schema text: %q", reply.Content)
+	}
+}
+
 func mustBase64(t *testing.T, dataURI string) []byte {
 	t.Helper()
 	comma := strings.Index(dataURI, ",")

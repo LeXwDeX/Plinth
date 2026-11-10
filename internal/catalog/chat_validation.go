@@ -2545,10 +2545,12 @@ func validateChatVision(schema ChatSchema) error {
 		return errors.New("context.vision.roles 必须声明 generated 与 history 角色")
 	}
 	for name, template := range map[string]string{
-		"overflow_template":           vision.OverflowTemplate,
-		"vision_off_note":             vision.VisionOffNote,
-		"style_anchor_intro":          vision.StyleAnchorIntro,
-		"style_anchor_label_template": vision.StyleAnchorLabelTemplate,
+		"overflow_template":             vision.OverflowTemplate,
+		"vision_off_note":               vision.VisionOffNote,
+		"style_anchor_intro":            vision.StyleAnchorIntro,
+		"style_anchor_label_template":   vision.StyleAnchorLabelTemplate,
+		"style_anchor_dropped_template": vision.StyleAnchorDroppedTemplate,
+		"unnamed_picture_label":         vision.UnnamedPictureLabel,
 	} {
 		if strings.TrimSpace(template) == "" {
 			return fmt.Errorf("context.vision.%s 不能为空", name)
@@ -2559,6 +2561,9 @@ func validateChatVision(schema ChatSchema) error {
 	}
 	if !strings.Contains(vision.StyleAnchorLabelTemplate, "{index}") {
 		return errors.New("context.vision.style_anchor_label_template 必须包含 {index}")
+	}
+	if !strings.Contains(vision.StyleAnchorDroppedTemplate, "{index}") {
+		return errors.New("context.vision.style_anchor_dropped_template 必须包含 {index}")
 	}
 	if err := validateVisionContactSheet(vision.ContactSheet); err != nil {
 		return err
@@ -2635,6 +2640,11 @@ func validateVisionCrop(schema ChatSchema, crop ChatVisionCropSchema) error {
 	if !strings.Contains(crop.PictureLabelTemplate, "{handle}") ||
 		!strings.Contains(crop.PictureLabelTemplate, "{region}") {
 		return errors.New("context.vision.crop.picture_label_template 必须包含 {handle} 与 {region}")
+	}
+	if !strings.Contains(crop.OriginalPictureLabelTemplate, "{handle}") ||
+		!strings.Contains(crop.OriginalPictureLabelTemplate, "{width}") ||
+		!strings.Contains(crop.OriginalPictureLabelTemplate, "{height}") {
+		return errors.New("context.vision.crop.original_picture_label_template 必须包含 {handle}、{width} 与 {height}")
 	}
 	check := func(parameters json.RawMessage) error {
 		var declared struct {

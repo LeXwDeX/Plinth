@@ -5746,8 +5746,13 @@ type ChatVisionSchema struct {
 	VisionOffNote string `json:"vision_off_note,omitempty"`
 	// StyleAnchorIntro and StyleAnchorLabelTemplate frame the session style
 	// lock's reference pictures ({index} is their 1-based position).
-	StyleAnchorIntro         string `json:"style_anchor_intro,omitempty"`
-	StyleAnchorLabelTemplate string `json:"style_anchor_label_template,omitempty"`
+	// StyleAnchorDroppedTemplate names one of them when the budget refuses it
+	// ({index}); UnnamedPictureLabel names a tool picture that carries no
+	// handle, so no model-visible word is hardcoded in the code.
+	StyleAnchorIntro           string `json:"style_anchor_intro,omitempty"`
+	StyleAnchorLabelTemplate   string `json:"style_anchor_label_template,omitempty"`
+	StyleAnchorDroppedTemplate string `json:"style_anchor_dropped_template,omitempty"`
+	UnnamedPictureLabel        string `json:"unnamed_picture_label,omitempty"`
 	// ContactSheet folds pictures of one tool result over their quota into one
 	// labelled sheet with every handle.
 	ContactSheet ChatVisionContactSheetSchema `json:"contact_sheet"`
@@ -5804,8 +5809,11 @@ type ChatVisionCropSchema struct {
 	MaximumPixels       int    `json:"maximum_pixels"`
 	TooLargeTemplate    string `json:"too_large_template,omitempty"`
 	// PictureLabelTemplate labels the shown crop ({handle} {region} {width}
-	// {height}).
-	PictureLabelTemplate string `json:"picture_label_template,omitempty"`
+	// {height}); OriginalPictureLabelTemplate labels the whole picture
+	// show_picture attaches beside it ({handle} {width} {height}), so the
+	// original is never described as a crop or with the crop's size.
+	PictureLabelTemplate         string `json:"picture_label_template,omitempty"`
+	OriginalPictureLabelTemplate string `json:"original_picture_label_template,omitempty"`
 }
 
 type ChatVisionModelProfileSchema struct {

@@ -210,8 +210,9 @@ func TestInspectImageCropKeepsOriginalPixelsAndOwnership(t *testing.T) {
 		Enabled: true, Detail: "high", TokenCost: 1105,
 		RegionArgument: "region", ShowPictureArgument: "show_picture",
 		MinimumSidePixels: 8, MaximumPixels: 1 << 20,
-		TooLargeTemplate:     "too large {maximum}",
-		PictureLabelTemplate: "[crop {handle} {region} {width}x{height}]",
+		TooLargeTemplate:             "too large {maximum}",
+		PictureLabelTemplate:         "[crop {handle} {region} {width}x{height}]",
+		OriginalPictureLabelTemplate: "[whole {handle} {width}x{height}]",
 	}
 	svc := cropService(t, fakeInputs{data: picture(t)}, crop)
 	result, err := svc.Inspect(context.Background(), cropCommand(
@@ -248,6 +249,14 @@ func TestInspectImageCropKeepsOriginalPixelsAndOwnership(t *testing.T) {
 	if original.URL != "/api/v1/assets/a1" || original.Purpose != chat.ToolPictureCrop ||
 		original.Detail != "high" {
 		t.Fatalf("original picture = %+v", original)
+	}
+	// The whole picture has its own label and the source size, never the crop
+	// region or the crop's dimensions (#247 review).
+	if original.Label != "[whole @img1 100x100]" {
+		t.Fatalf("original label = %q; want the whole-picture template and the source size", original.Label)
+	}
+	if strings.Contains(original.Label, "局部裁剪") || strings.Contains(original.Label, "40x40") {
+		t.Fatalf("the original was labelled as a crop: %q", original.Label)
 	}
 	if cropped.Handle != "@img1" || cropped.Detail != "high" ||
 		!strings.Contains(cropped.Label, "@img1") || !strings.Contains(cropped.Label, "30,30 40×40") ||
@@ -290,8 +299,9 @@ func TestInspectImageShowsTheNamedOriginal(t *testing.T) {
 		Enabled: true, Detail: "high", TokenCost: 1105,
 		RegionArgument: "region", ShowPictureArgument: "show_picture",
 		MinimumSidePixels: 8, MaximumPixels: 1 << 20,
-		TooLargeTemplate:     "too large {maximum}",
-		PictureLabelTemplate: "[crop {handle} {region}]",
+		TooLargeTemplate:             "too large {maximum}",
+		PictureLabelTemplate:         "[crop {handle} {region}]",
+		OriginalPictureLabelTemplate: "[whole {handle} {width}x{height}]",
 	}
 	svc := cropService(t, fakeInputs{data: picture(t)}, crop)
 	result, err := svc.Inspect(context.Background(), cropCommand(`{"image":"@img1","show_picture":true}`))
@@ -299,7 +309,7 @@ func TestInspectImageShowsTheNamedOriginal(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(result.Pictures) != 1 || result.Pictures[0].URL != "/api/v1/assets/a1" ||
-		!strings.Contains(result.Pictures[0].Label, "@img1") {
+		result.Pictures[0].Label != "[whole @img1 100x100]" {
 		t.Fatalf("pictures = %+v", result.Pictures)
 	}
 }

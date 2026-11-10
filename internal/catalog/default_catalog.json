@@ -5635,6 +5635,8 @@
           "vision_off_note": "\n[当前对话模型不读图，本轮没有附上任何图片：只能根据文字线索判断；需要看画面时请如实告诉用户]",
           "style_anchor_intro": "\n[以下是本会话风格锁的参考图，供你把握整体风格；它们不是用户这一轮附的图：]",
           "style_anchor_label_template": "\n[风格锁参考图 {index}]",
+          "style_anchor_dropped_template": "风格锁参考图 #{index}",
+          "unnamed_picture_label": "图片",
           "contact_sheet": {
             "enabled": true,
             "maximum_tiles": 10,
@@ -5657,7 +5659,8 @@
             "minimum_side_pixels": 64,
             "maximum_pixels": 1048576,
             "too_large_template": "裁剪区域过大（{width}×{height}，上限 {maximum} 像素）：请缩小 region 后重试。",
-            "picture_label_template": "\n[上图是 {handle} 的局部裁剪，区域 {region}，尺寸 {width}×{height}]"
+            "picture_label_template": "\n[上图是 {handle} 的局部裁剪，区域 {region}，尺寸 {width}×{height}]",
+            "original_picture_label_template": "\n[上图是 {handle} 的整图，尺寸 {width}×{height}]"
           }
         },
         "user_image_label_template": "\n[历史图片 {index}：用户上传]",

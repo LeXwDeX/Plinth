@@ -74,8 +74,8 @@ func (orchestrator *Orchestrator) attachToolPictures(
 	for _, group := range groupToolPictures(pictures) {
 		detail, tokenCost, quota := orchestrator.toolPicturePolicy(budget, group.purpose)
 		groupPictures := group.pictures
-		if budget.Vision != nil && quota >= 0 && len(groupPictures) > quota {
-			if quota > 0 && budget.Contact.Enabled {
+		if quota >= 0 && len(groupPictures) > quota {
+			if budget.Vision != nil && quota > 0 && budget.Contact.Enabled {
 				if sheet, ok := orchestrator.contactSheet(ctx, ownerID, group.pictures, budget, spend); ok {
 					parts = append(parts, sheet.parts...)
 					reply.FreshPictures = reply.FreshPictures || freshPurpose(group.purpose)
@@ -84,14 +84,14 @@ func (orchestrator *Orchestrator) attachToolPictures(
 			}
 			if quota <= 0 {
 				for _, picture := range groupPictures {
-					dropped = append(dropped, toolPictureHandle(picture))
+					dropped = append(dropped, orchestrator.toolPictureHandle(picture))
 				}
 				continue
 			}
 			// Composition failed (or is off): keep the evenly spaced pictures
 			// the place count allows and name the rest.
 			groupPictures = evenlySpacedPictures(groupPictures, quota)
-			dropped = append(dropped, droppedToolPictures(group.pictures, groupPictures)...)
+			dropped = append(dropped, orchestrator.droppedToolPictures(group.pictures, groupPictures)...)
 		}
 		for _, picture := range groupPictures {
 			if picture.Fresh {
@@ -117,11 +117,11 @@ func (orchestrator *Orchestrator) attachToolPictures(
 				}
 			}
 			if pictureURL == "" {
-				reply.Content += strings.ReplaceAll(pictureUnreadable, "{handle}", toolPictureHandle(picture))
+				reply.Content += strings.ReplaceAll(pictureUnreadable, "{handle}", orchestrator.toolPictureHandle(picture))
 				continue
 			}
 			if budget.Vision != nil && spend != nil && !budget.canSpend(*spend, tokenCost, int64(len(pictureURL))) {
-				dropped = append(dropped, toolPictureHandle(picture))
+				dropped = append(dropped, orchestrator.toolPictureHandle(picture))
 				continue
 			}
 			if spend != nil {
@@ -131,7 +131,7 @@ func (orchestrator *Orchestrator) attachToolPictures(
 			}
 			parts = append(parts,
 				agents.ContentPart{Kind: texts.ImagePartKind, URL: pictureURL, Detail: pictureDetail},
-				agents.ContentPart{Kind: texts.TextPartKind, Text: strings.ReplaceAll(pictureLabel, "{handle}", toolPictureHandle(picture))},
+				agents.ContentPart{Kind: texts.TextPartKind, Text: strings.ReplaceAll(pictureLabel, "{handle}", orchestrator.toolPictureHandle(picture))},
 			)
 		}
 	}
@@ -144,7 +144,7 @@ func (orchestrator *Orchestrator) attachToolPictures(
 }
 
 // droppedToolPictures names the pictures of all that picked does not keep.
-func droppedToolPictures(all, picked []ToolPicture) []string {
+func (orchestrator *Orchestrator) droppedToolPictures(all, picked []ToolPicture) []string {
 	remaining := map[string]int{}
 	for _, picture := range picked {
 		remaining[toolPictureKey(picture)]++
@@ -156,7 +156,7 @@ func droppedToolPictures(all, picked []ToolPicture) []string {
 			remaining[key]--
 			continue
 		}
-		dropped = append(dropped, toolPictureHandle(picture))
+		dropped = append(dropped, orchestrator.toolPictureHandle(picture))
 	}
 	return dropped
 }
@@ -205,6 +205,17 @@ func freshPurpose(purpose string) bool {
 // (the legacy Schema, or no role declared for the purpose).
 func (orchestrator *Orchestrator) toolPicturePolicy(budget visionBudget, purpose string) (string, int, int) {
 	if budget.Vision == nil {
+		// The legacy fallback keeps context.max_result_pictures as the hard cap
+		// of one result's candidates (#245): the caller still selects evenly
+		// spaced pictures when there are more, exactly like the pre-#247
+		// generation executor did.
+		if purpose == ToolPictureResult {
+			quota := orchestrator.schema.Context.MaxResultPictures
+			if quota <= 0 {
+				quota = 4
+			}
+			return orchestrator.schema.Context.ImageDetail, 0, quota
+		}
 		return orchestrator.schema.Context.ImageDetail, 0, -1
 	}
 	switch purpose {
@@ -251,11 +262,18 @@ func (orchestrator *Orchestrator) toolPictureTexts(purpose string) (string, stri
 	return label, unreadable
 }
 
-func toolPictureHandle(picture ToolPicture) string {
+// toolPictureHandle names a picture the Agent reads: its handle, or the
+// Schema's unnamed-picture label for old data without a structured attachment.
+// The label is Schema text, never a hardcoded word; the legacy fallback keeps
+// the empty name that the pre-#247 request produced.
+func (orchestrator *Orchestrator) toolPictureHandle(picture ToolPicture) string {
 	if picture.Handle != "" {
 		return picture.Handle
 	}
-	return "图片"
+	if vision := orchestrator.schema.Context.Vision; vision != nil {
+		return vision.UnnamedPictureLabel
+	}
+	return ""
 }
 
 // toolPictureSheet is the composed contact sheet's parts.
@@ -301,7 +319,7 @@ func (orchestrator *Orchestrator) contactSheet(
 			continue
 		}
 		label := sheet.LabelTemplate
-		label = strings.ReplaceAll(label, "{handle}", toolPictureHandle(picture))
+		label = strings.ReplaceAll(label, "{handle}", orchestrator.toolPictureHandle(picture))
 		label = strings.ReplaceAll(label, "{index}", itoa(index+1))
 		tiles = append(tiles, visionview.Tile{Picture: decoded, Label: label})
 		if picture.Handle != "" {

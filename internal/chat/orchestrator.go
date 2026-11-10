@@ -2188,56 +2188,6 @@ type indexedChatImage struct {
 	role string
 }
 
-func (orchestrator *Orchestrator) selectVisionImages(
-	images [][]indexedChatImage,
-	selected []int,
-) map[int]bool {
-	result := map[int]bool{}
-	if !orchestrator.schema.Agent.Vision {
-		return result
-	}
-	limit := min(
-		orchestrator.schema.Context.MaximumVisionImages,
-		orchestrator.schema.Context.RecentImageLimit,
-	)
-	byIndex := map[int]indexedChatImage{}
-	for _, messageImages := range images {
-		for _, image := range messageImages {
-			byIndex[image.index] = image
-		}
-	}
-	for _, index := range selected {
-		image, found := byIndex[index]
-		if !found ||
-			image.role != orchestrator.schema.Roles.User ||
-			!orchestrator.visionCandidate(image.url) {
-			continue
-		}
-		result[index] = true
-		if len(result) == limit {
-			return result
-		}
-	}
-	if len(selected) > 0 {
-		return result
-	}
-	for messageIndex := len(images) - 1; messageIndex >= 0; messageIndex-- {
-		messageImages := images[messageIndex]
-		for imageIndex := len(messageImages) - 1; imageIndex >= 0; imageIndex-- {
-			image := messageImages[imageIndex]
-			if image.role != orchestrator.schema.Roles.User ||
-				!orchestrator.visionCandidate(image.url) {
-				continue
-			}
-			result[image.index] = true
-			if len(result) == limit {
-				return result
-			}
-		}
-	}
-	return result
-}
-
 func (orchestrator *Orchestrator) contextText(message Message) string {
 	content := message.Content
 	for _, call := range message.ToolCalls {

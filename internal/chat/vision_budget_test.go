@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -23,14 +24,16 @@ func visionTestSchema(t *testing.T, roles []catalog.ChatVisionRoleSchema, maximu
 	schema.Context.RecentImageLimit = 100
 	schema.Context.RecentGeneratedImageLimit = 100
 	schema.Context.Vision = &catalog.ChatVisionSchema{
-		Roles:                    roles,
-		MaximumImages:            maximumImages,
-		MaximumTokens:            maximumTokens,
-		MaximumBytes:             1 << 30,
-		OverflowTemplate:         "\n[dropped {handles}]",
-		VisionOffNote:            "\n[vision off]",
-		StyleAnchorIntro:         "\n[style]",
-		StyleAnchorLabelTemplate: "\n[style {index}]",
+		Roles:                      roles,
+		MaximumImages:              maximumImages,
+		MaximumTokens:              maximumTokens,
+		MaximumBytes:               1 << 30,
+		OverflowTemplate:           "\n[dropped {handles}]",
+		VisionOffNote:              "\n[vision off]",
+		StyleAnchorIntro:           "\n[style]",
+		StyleAnchorLabelTemplate:   "\n[style {index}]",
+		StyleAnchorDroppedTemplate: "[style dropped {index}]",
+		UnnamedPictureLabel:        "picture",
 		ContactSheet: catalog.ChatVisionContactSheetSchema{
 			Enabled: true, MaximumTiles: 10, Columns: 3, TilePixels: 64, LabelHeight: 12,
 			JPEGQualities: []int{80}, MaximumBytes: 1 << 20, Detail: "high", TokenCost: 500,
@@ -40,8 +43,9 @@ func visionTestSchema(t *testing.T, roles []catalog.ChatVisionRoleSchema, maximu
 			Enabled: true, Detail: "high", TokenCost: 500,
 			RegionArgument: "region", ShowPictureArgument: "show_picture",
 			MinimumSidePixels: 8, MaximumPixels: 1 << 20,
-			TooLargeTemplate:     "too large {maximum}",
-			PictureLabelTemplate: "\n[crop {handle} {region} {width}x{height}]",
+			TooLargeTemplate:             "too large {maximum}",
+			PictureLabelTemplate:         "\n[crop {handle} {region} {width}x{height}]",
+			OriginalPictureLabelTemplate: "\n[whole {handle} {width}x{height}]",
 		},
 	}
 	return schema
@@ -307,5 +311,123 @@ func TestEffectiveVisionBoundsExposeTokensAndImages(t *testing.T) {
 	schema.Context.Vision = nil
 	if tokens := EffectiveVisionTokens(schema, "other-model"); tokens != 0 {
 		t.Fatalf("legacy token bound = %d; want 0", tokens)
+	}
+}
+
+// A model profile with supports_vision=false reports no budget at all: the
+// pictures and the vision tokens are not applicable, not merely narrowed (#247
+// review).
+func TestEffectiveVisionBoundsAreZeroWhenVisionIsOff(t *testing.T) {
+	off := false
+	roles := []catalog.ChatVisionRoleSchema{
+		visionRole("turn_reference", []string{"turn"}, 2, 100, "high"),
+		visionRole("recent_result", []string{"generated"}, 2, 100, "high"),
+		visionRole("history", []string{"history"}, 2, 10, "low"),
+	}
+	schema := visionTestSchema(t, roles, 6, 12000)
+	schema.Context.Vision.ModelProfiles = []catalog.ChatVisionModelProfileSchema{
+		{ModelPrefixes: []string{"text-only"}, SupportsVision: &off},
+	}
+	if images, tokens := EffectiveVisionImages(schema, "Text-Only-v2"), EffectiveVisionTokens(schema, "Text-Only-v2"); images != 0 || tokens != 0 {
+		t.Fatalf("vision-off bounds = images %d tokens %d; want 0 and 0", images, tokens)
+	}
+	// The Agent's own switch off reports the same.
+	schema.Agent.Vision = false
+	if images, tokens := EffectiveVisionImages(schema, "other-model"), EffectiveVisionTokens(schema, "other-model"); images != 0 || tokens != 0 {
+		t.Fatalf("agent vision-off bounds = images %d tokens %d; want 0 and 0", images, tokens)
+	}
+}
+
+// The legacy fallback keeps the historical split: the user pictures spend
+// maximum_vision_images while generated and render pictures keep their own
+// recent_generated_image_limit and never take an user place (#247 review).
+func TestLegacyGeneratedPicturesKeepTheirOwnQuota(t *testing.T) {
+	schema := visionTestSchema(t, nil, 10, 10000)
+	schema.Context.Vision = nil
+	schema.Context.ImageDetail = "low"
+	schema.Context.MaximumVisionImages = 3
+	schema.Context.RecentImageLimit = 3
+	schema.Context.RecentGeneratedImageLimit = 1
+	orchestrator := visionTestOrchestrator(schema, nil)
+	plan := planForTest(t, orchestrator, visionHistory(), TurnOptions{})
+	if len(plan.Picks[3]) != 3 || len(plan.Picks[0]) != 0 {
+		t.Fatalf("user picks = %+v; the three newest user pictures take maximum_vision_images", plan.Picks)
+	}
+	if len(plan.Generated) != 1 || plan.Generated[0].URL != "data:image/png;base64,_r2" {
+		t.Fatalf("generated = %+v; the newest render must keep its own recent place", plan.Generated)
+	}
+	if plan.Spend.Images != 4 {
+		t.Fatalf("spend = %+v; generated pictures do not spend the user pool", plan.Spend)
+	}
+}
+
+// Naming reference indices only narrows the user pictures, as before: the
+// generated pictures of the history are still shown (#247 review).
+func TestLegacyReferenceIndicesKeepTheGeneratedPictures(t *testing.T) {
+	schema := visionTestSchema(t, nil, 10, 10000)
+	schema.Context.Vision = nil
+	schema.Context.ImageDetail = "low"
+	schema.Context.RecentGeneratedImageLimit = 2
+	orchestrator := visionTestOrchestrator(schema, nil)
+	history := visionHistory()
+	indexed, lastUser := orchestrator.indexHistoryImages(history)
+	plan := orchestrator.planVision(context.Background(), "owner", history, indexed, -1, lastUser,
+		TurnOptions{ReferenceImageIndices: []int{1}}, visionSpend{})
+	if len(plan.Picks[3]) != 0 || plan.Picks[0][0].URL != "data:image/png;base64,_a1" {
+		t.Fatalf("user picks = %+v; only the named reference is shown", plan.Picks)
+	}
+	if len(plan.Generated) != 2 || plan.Generated[0].URL != "data:image/png;base64,_r1" ||
+		plan.Generated[1].URL != "data:image/png;base64,_r2" {
+		t.Fatalf("generated = %+v; the historical scan must survive reference indices", plan.Generated)
+	}
+}
+
+// The style anchor role spends its own places at its own detail, is inlined
+// through VisionAssetInline, and names a refused reference with the Schema's
+// style_anchor_dropped_template (#247 review).
+func TestStyleAnchorRoleUsesItsQuotaDetailAndSchemaText(t *testing.T) {
+	roles := []catalog.ChatVisionRoleSchema{
+		visionRole("turn_reference", []string{"turn"}, 1, 100, "high"),
+		visionRole("style_anchor", []string{"style"}, 2, 50, "low"),
+		visionRole("recent_result", []string{"generated"}, 1, 100, "high"),
+		visionRole("history", []string{"history"}, 1, 10, "low"),
+	}
+	schema := visionTestSchema(t, roles, 10, 10000)
+	orchestrator := visionTestOrchestrator(schema, nil)
+	options := TurnOptions{StyleLock: StyleLock{
+		Enabled: true, References: []string{"asset-1", "asset-2", "asset-3"},
+	}}
+	history := visionHistory()
+	indexed, lastUser := orchestrator.indexHistoryImages(history)
+	plan := orchestrator.planVision(context.Background(), "owner", history, indexed, -1, lastUser,
+		options, visionSpend{})
+	if len(plan.Style) != 2 {
+		t.Fatalf("style picks = %+v; the role's two places bound the lock's three references", plan.Style)
+	}
+	for index, wantURL := range []string{"data:image/png;base64,asset-1", "data:image/png;base64,asset-2"} {
+		pick := plan.Style[index]
+		if pick.URL != wantURL || pick.Detail != "low" || pick.RoleID != "style_anchor" {
+			t.Fatalf("style pick %d = %+v", index, pick)
+		}
+	}
+	if !slices.Contains(plan.Dropped, "[style dropped 3]") {
+		t.Fatalf("dropped = %v; the refused reference must use the Schema text", plan.Dropped)
+	}
+	for index, wantLabel := range []string{"\n[style 1]", "\n[style 2]"} {
+		if plan.Style[index].Label != wantLabel {
+			t.Fatalf("style label %d = %q; want %q", index, plan.Style[index].Label, wantLabel)
+		}
+	}
+	parts := orchestrator.plannedStyleParts(plan)
+	if len(parts) != 5 || parts[0].Text != "\n[style]" {
+		t.Fatalf("style parts = %+v; want an intro and two labelled pictures", parts)
+	}
+	// Without the asset inliner the lock cannot be read: the references are
+	// skipped without spending a place, and every other role keeps its own.
+	orchestrator.visionAssetInline = nil
+	plan = orchestrator.planVision(context.Background(), "owner", history, indexed, -1, lastUser,
+		options, visionSpend{})
+	if len(plan.Style) != 0 || plan.Spend.Images != 3 {
+		t.Fatalf("plan without inliner = style %+v spend %+v", plan.Style, plan.Spend)
 	}
 }

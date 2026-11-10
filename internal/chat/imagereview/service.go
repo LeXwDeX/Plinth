@@ -132,12 +132,16 @@ func (service *Service) Inspect(ctx context.Context, command chat.ToolCommand) (
 		"handle": picture.Attachment.Handle, "task_id": picture.Attachment.TaskID,
 		"asset_id": picture.Attachment.AssetID,
 	}
+	// The whole picture's size, which show_picture describes beside a crop; a
+	// region crop's own bytes only exist inside the region branch.
+	originalWidth, originalHeight := 0, 0
 	if regionRequested {
 		decoded, decodeErr := visionview.Decode(data)
 		if decodeErr != nil {
 			return chat.ToolResult{Error: service.unreadable(picture, decodeErr), NoSubmission: true}, nil
 		}
 		source := decoded.Bounds()
+		originalWidth, originalHeight = source.Dx(), source.Dy()
 		cropped, rect, cropErr := visionview.CropRegion(decoded, region,
 			crop.MaximumPixels, crop.MinimumSidePixels)
 		if cropErr != nil {
@@ -188,17 +192,22 @@ func (service *Service) Inspect(ctx context.Context, command chat.ToolCommand) (
 		return chat.ToolResult{Error: message, NoSubmission: true}, nil
 	}
 	imageFacts["width"], imageFacts["height"] = report.Width, report.Height
+	if originalWidth <= 0 || originalHeight <= 0 {
+		// No crop asked: report is the original picture's own inspection.
+		originalWidth, originalHeight = report.Width, report.Height
+	}
 	if showPicture {
-		// The whole picture first, so the Agent can place the crop in it.
+		// The whole picture first, so the Agent can place the crop in it. It
+		// has its own label and its own size: it is not a crop and must not
+		// carry the crop region or the crop's dimensions.
 		original := chat.ToolPicture{
 			Handle: picture.Attachment.Handle, URL: picture.URL,
 			Purpose: chat.ToolPictureCrop, Detail: crop.Detail,
 			Label: strings.NewReplacer(
 				"{handle}", picture.Attachment.Handle,
-				"{region}", "整图",
-				"{width}", fmt.Sprint(report.Width),
-				"{height}", fmt.Sprint(report.Height),
-			).Replace(crop.PictureLabelTemplate),
+				"{width}", fmt.Sprint(originalWidth),
+				"{height}", fmt.Sprint(originalHeight),
+			).Replace(crop.OriginalPictureLabelTemplate),
 		}
 		pictures = append([]chat.ToolPicture{original}, pictures...)
 	}
