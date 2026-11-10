@@ -84,7 +84,7 @@ func (executor *Executor) prepareAgentOperation(
 	ctx context.Context, command chat.ToolCommand, capability generation.Capability,
 	offering generation.Offering, input json.RawMessage, prompt, key string, references referenceUse,
 	selection referenceSelection, finalReferences []referenceCandidate, referenceIDs []generation.AssetID,
-	observe func(chat.ToolObservation) error,
+	observe func(chat.ToolObservation) error, trace *promptTrace,
 ) (chat.ToolResult, error) {
 	if command.OwnerID == "" || command.SessionID == "" || command.AssistantMessageID == "" ||
 		command.Call.ID == "" || key == "" {
@@ -203,7 +203,7 @@ func (executor *Executor) prepareAgentOperation(
 	} else if err != nil {
 		return chat.ToolResult{NoSubmission: true}, err
 	}
-	return executor.resumeAgentOperation(ctx, command, op, observe, cardSettled)
+	return executor.resumeAgentOperation(ctx, command, op, observe, cardSettled, trace)
 }
 
 // resumeAgentOperation drives a prepared operation. cardSettled, when not nil,
@@ -212,7 +212,7 @@ func (executor *Executor) prepareAgentOperation(
 // nothing needs the session's approval lock, and a task wait must not hold it.
 func (executor *Executor) resumeAgentOperation(
 	ctx context.Context, command chat.ToolCommand, op Operation,
-	observe func(chat.ToolObservation) error, cardSettled func(),
+	observe func(chat.ToolObservation) error, cardSettled func(), trace *promptTrace,
 ) (chat.ToolResult, error) {
 	if cardSettled == nil {
 		cardSettled = func() {}
@@ -421,6 +421,10 @@ func (executor *Executor) resumeAgentOperation(
 	if summary, found, err := executor.grants.BudgetForGrant(ctx, op.OwnerID, op.GrantRequestID); err == nil && found {
 		info.Budget = &summary
 	}
+	if trace == nil {
+		trace = executor.promptTraceFromPrepared(command, task.Offering, prepared.NormalizedInput)
+	}
+	info.PromptFinal, info.PromptNote = executor.promptReport(command, command.Tool, task.Offering, trace)
 	return executor.wait(ctx, command, task.Offering, task.ID, observe, info)
 }
 

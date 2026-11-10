@@ -424,6 +424,9 @@ func validateModel3DUsageOfferings(usage ChatModel3DUsageSchema, byID generation
 				return fmt.Errorf("model3d_usage.profiles[%d].parameter_overrides[%q]: %w", index, id, err)
 			}
 		}
+		if err := validatePurposeOverrideCoverage(usage, index, profile); err != nil {
+			return err
+		}
 		for stepIndex, step := range profile.Pipeline {
 			if strings.TrimSpace(step.OfferingID) == "" {
 				if len(step.Parameters) > 0 {
@@ -441,6 +444,51 @@ func validateModel3DUsageOfferings(usage ChatModel3DUsageSchema, byID generation
 			if err := simulateProfileParameters(offering, step.Parameters); err != nil {
 				return fmt.Errorf("model3d_usage.profiles[%d].pipeline[%d]: %w", index, stepIndex, err)
 			}
+		}
+	}
+	return nil
+}
+
+// validatePurposeOverrideCoverage checks that every Offering a purpose
+// recommends says how the purpose adjusts it (#249): either a non-empty
+// parameter override or an explicit overrides_not_needed entry, never both.
+// The shipped Catalog turns the check on; historical Catalogs keep only the
+// structural checks when they declare overrides_not_needed.
+func validatePurposeOverrideCoverage(usage ChatModel3DUsageSchema, index int, profile ChatModel3DUsageProfile) error {
+	recommended := map[string]bool{}
+	for _, ids := range profile.RecommendedOfferings {
+		for _, id := range ids {
+			recommended[id] = true
+		}
+	}
+	notNeeded := map[string]bool{}
+	for _, id := range profile.OverridesNotNeeded {
+		if strings.TrimSpace(id) == "" {
+			return fmt.Errorf("model3d_usage.profiles[%d].overrides_not_needed 含空 Offering ID", index)
+		}
+		if notNeeded[id] {
+			return fmt.Errorf("model3d_usage.profiles[%d].overrides_not_needed 中 %q 重复", index, id)
+		}
+		if !recommended[id] {
+			return fmt.Errorf("model3d_usage.profiles[%d].overrides_not_needed 的 Offering %q 不在推荐列表中", index, id)
+		}
+		if len(profile.ParameterOverrides[id]) > 0 {
+			return fmt.Errorf("model3d_usage.profiles[%d] 的 Offering %q 同时出现在 parameter_overrides 与 overrides_not_needed", index, id)
+		}
+		notNeeded[id] = true
+	}
+	ids := make([]string, 0, len(recommended))
+	for id := range recommended {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		hasOverride := len(profile.ParameterOverrides[id]) > 0
+		if hasOverride && notNeeded[id] {
+			return fmt.Errorf("model3d_usage.profiles[%d] 的 Offering %q 不能同时覆盖与声明不需要覆盖", index, id)
+		}
+		if usage.OverrideCoverageRequired && !hasOverride && !notNeeded[id] {
+			return fmt.Errorf("model3d_usage.profiles[%d] 的推荐 Offering %q 缺少 parameter_overrides 或 overrides_not_needed 声明", index, id)
 		}
 	}
 	return nil

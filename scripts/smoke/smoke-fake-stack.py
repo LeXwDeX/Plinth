@@ -39,9 +39,12 @@ same HTTP API the browser uses:
     Meshy and Hyper3D delivers it.
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
-(NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, p2, agent, agent-background, faults;
+(NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, p2, agent, agent-background,
+offering-knowledge, faults;
 "agent" runs both agent scenarios, "hyper3d-agent" the Hyper3D chain alone,
-"p2" the Tripo P2 quote/chain, "agent-background" the batched wait that keeps both Tasks running)
+"p2" the Tripo P2 quote/chain, "agent-background" the batched wait that keeps both Tasks running,
+"offering-knowledge" the #249 knowledge projection, derived model list, purpose coverage,
+over-limit refusal and final_prompt report)
 Needs `go`. Exit 0 = every selected check passed.
 
 The stack runs inside the internal/app test binary (TestFakeUpstreamStack, built with -tags fakestack), not
@@ -254,7 +257,7 @@ def build(work):
     return fake, stack
 
 
-def private_catalog(work, jimeng_urls=False):
+def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, name="catalog.json"):
     """The default Catalog with four changes for Tripo, Meshy and Hyper3D: the fake
     artifact host is an allowed asset host, they poll once a second, and a failing
     materialization is retried once. The matting service polls once a second too,
@@ -270,6 +273,12 @@ def private_catalog(work, jimeng_urls=False):
     catalog["application"]["chat"]["agent"]["background_wait"]["after_seconds"] = 1
     for offering in catalog["offerings"]:
         provider = offering.get("provider_id")
+        if offering.get("id") in disabled:
+            offering["enabled"] = False
+        if prompt_limits and offering.get("id") in prompt_limits:
+            for parameter in offering.get("parameters", []):
+                if parameter.get("semantic") == "prompt":
+                    parameter["max_length"] = prompt_limits[offering["id"]]
         if provider in PROVIDER_HOSTS:
             offering["asset_hosts"] = sorted(set(offering.get("asset_hosts", [])) | {ASSET_HOST})
             offering["poll_interval_seconds"] = 1
@@ -286,7 +295,7 @@ def private_catalog(work, jimeng_urls=False):
                     parameter["default"] = "url"
                     parameter.pop("forced_when", None)
                     parameter.pop("fixed", None)
-    path = os.path.join(work, "catalog-urls.json" if jimeng_urls else "catalog.json")
+    path = os.path.join(work, "catalog-urls.json" if jimeng_urls else name)
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(catalog, handle, ensure_ascii=False)
     return path
@@ -1454,6 +1463,164 @@ def _image_self_check_send(api, session, content, model, replies_before):
     return False
 
 
+def _checkpoint_completed_contents(work, stack, session):
+    """The turn checkpoint's completed tool messages, which the messages wire does
+    not carry (the #245 refusal helper reads the same store)."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT checkpoint_json FROM go_chat_turns WHERE session_id=? ORDER BY updated_at DESC LIMIT 1",
+                         (session,)).fetchone()
+        db.close()
+    except sqlite3.Error:
+        return []
+    if not row or not row["checkpoint_json"]:
+        return []
+    try:
+        checkpoint = json.loads(row["checkpoint_json"])
+    except ValueError:
+        return []
+    contents = []
+    for message in checkpoint.get("completed") or []:
+        content = message.get("Content") or message.get("content")
+        if content:
+            contents.append(str(content))
+    return contents
+
+
+def _checkpoint_content_with(work, stack, session, needle, start=""):
+    for content in reversed(_checkpoint_completed_contents(work, stack, session)):
+        if needle in content and (not start or content.startswith(start)):
+            return content
+    return ""
+
+
+def _offering_turn(api, session, content, domain, model):
+    before = assistant_reply_count(api, session)
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages",
+                         {"content": content, "creative_domain": domain, "ai_model": model})
+    if status not in (200, 201, 202):
+        return False
+    end = time.time() + 45
+    while time.time() < end:
+        if assistant_reply_count(api, session) > before:
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def scenario_offering_knowledge(work, stack_binary, processes, catalog):
+    """#249: shipped Offering knowledge, derived model choices, purpose coverage,
+    prompt transparency and the pre-submit refusal all on the fake stack."""
+    disabled_id = "tripo/tripo-p2/text-to-3d"
+    child, api = start_stack(processes, stack_binary, work, "offering-knowledge", catalog, GOOD_KEY)
+    try:
+        status, body = api.json("GET", "/api/v1/offerings")
+        offerings = {item["id"]: item for item in body.get("offerings", [])}
+        knowledge = (offerings.get("meshy/nano-banana-pro/text-to-image") or {}).get("knowledge") or {}
+        ok = (status == 200 and knowledge.get("strengths") and knowledge.get("weaknesses")
+              and knowledge.get("limitations")
+              and "prompt" not in knowledge and "reference_use" not in knowledge and "sources" not in knowledge)
+        record("#249 public Offering knowledge", bool(ok),
+               f"{len(offerings)} public offerings; knowledge keys={sorted(knowledge)}")
+        record("#249 a disabled Offering leaves the public list", disabled_id not in offerings,
+               f"disabled={disabled_id} present={disabled_id in offerings}")
+
+        # The catalog data promises purpose coverage and the low-poly multiview
+        # override; this is the loaded file, not a hand-written copy.
+        with open(catalog, encoding="utf-8") as handle:
+            document = json.load(handle)
+        usage = document["application"]["chat"]["model3d_usage"]
+        game = next(profile for profile in usage["profiles"] if profile["id"] == "game_character")
+        override = game.get("parameter_overrides", {}).get("tripo/tripo-v3.1-multiview/image-to-3d", {})
+        covered = usage.get("override_coverage_required") is True and override.get("face_limit") == 20000 \
+            and override.get("smart_low_poly") is True
+        record("#249 purpose override coverage", covered,
+               f"required={usage.get('override_coverage_required')} multiview={override}")
+
+        session = new_session(api)
+        api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "auto"})
+        model = next((item["model_id"] for item in offerings.values()
+                      if item.get("available") and item.get("capability") == "text-to-3d"), "")
+        if not _offering_turn(api, session, "列一下可用模型 [[fake:tool:list_offerings {}]]", "model-3d", model):
+            record("#249 list_offerings turn", False, "turn did not finish")
+        else:
+            content = _checkpoint_content_with(work, "offering-knowledge", session,
+                                               '"capabilities"', start='{"capabilities"')
+            projected = {}
+            try:
+                projected = json.loads(content) if content else {}
+            except ValueError:
+                projected = {}
+            by_id = {}
+            for capability in projected.get("capabilities") or []:
+                for offering in capability.get("offerings") or []:
+                    by_id[offering.get("offering_id")] = offering
+            sample = by_id.get("meshy/nano-banana-pro/text-to-image", {})
+            sample_knowledge = sample.get("knowledge") or {}
+            record("#249 list_offerings projects knowledge",
+                   bool(sample_knowledge.get("strengths")) and bool(sample_knowledge.get("prompt"))
+                   and "sources" not in sample_knowledge,
+                   f"projected={len(by_id)} knowledge keys={sorted(sample_knowledge)}")
+            record("#249 list_offerings follows the enabled Offerings", disabled_id not in by_id,
+                   f"disabled_id present={disabled_id in by_id}")
+
+        # A prompt over the variant's 20-character limit is refused before a
+        # Task exists: no card, no charge.
+        before_tasks = {task.get("id") for task in session_tasks(api, session)}
+        marker = ('[[fake:tool:create_model_3d {"prompt":"a very long prompt that exceeds the limit",'
+                  '"model":"meshy-7.1"}]]')
+        if not _offering_turn(api, session, "做一个模型 " + marker, "model-3d", "meshy-7.1"):
+            record("#249 over-limit prompt", False, "turn did not finish")
+        else:
+            content = _checkpoint_content_with(work, "offering-knowledge", session, "over the limit of 20 characters")
+            new_tasks = {task.get("id") for task in session_tasks(api, session)} - before_tasks
+            record("#249 over-limit prompt is refused before submission", bool(content) and not new_tasks,
+                   f"refusal={'yes' if content else 'no'} new_tasks={len(new_tasks)}")
+
+        # A reference-image prompt is rewritten by the reference template; the
+        # result names the exact text and the layer that changed it. The
+        # reference is a picture a Task really generated, so the chat reference
+        # policy accepts it.
+        session2 = new_session(api)
+        api.json("PUT", f"/api/v1/chat/sessions/{session2}/approval", {"approvalMode": "auto"})
+        generated = step(api, offerings, "#249 final_prompt reference picture",
+                         "openai/gpt-image-2/text-to-image", "text-to-image",
+                         {"prompt": "a red cube on a table"}, session2)
+        picture = ""
+        if generated and generated.get("state") == "SUCCEEDED":
+            picture = next((asset.get("url") for asset in generated.get("assets") or []
+                            if asset.get("role") == "image"), "")
+        if not picture:
+            record("#249 final_prompt", False, "reference picture generation failed")
+        else:
+            image_model = next((item["model_id"] for item in offerings.values()
+                                if item.get("available") and item.get("capability") == "image-to-image"), "")
+            marker = '[[fake:tool:refine_image {"prompt":"make the cube blue"}]]'
+            before = assistant_reply_count(api, session2)
+            status, _ = api.json("POST", f"/api/chat/sessions/{session2}/messages",
+                                 {"content": "改成蓝色 " + marker, "image_urls": [picture],
+                                  "creative_domain": "image", "ai_model": image_model})
+            end = time.time() + 60
+            while status in (200, 201, 202) and time.time() < end and assistant_reply_count(api, session2) <= before:
+                time.sleep(0.5)
+            content = _checkpoint_content_with(work, "offering-knowledge", session2, '"final_prompt"')
+            result = {}
+            try:
+                result = json.loads(content) if content else {}
+            except ValueError:
+                result = {}
+            note = result.get("prompt_note") or {}
+            layers = note.get("layers") or []
+            record("#249 final_prompt is the submitted text",
+                   isinstance(result.get("final_prompt"), str) and "make the cube blue" in result["final_prompt"]
+                   and bool(layers),
+                   f"final_prompt={str(result.get('final_prompt'))[:80]!r} layers={[l.get('layer') for l in layers]}")
+    finally:
+        processes.stop(child)
+
+
 def scenario_image_self_check(api, offerings, work):
     """#245: inspect_image checklists and the image-to-3D input gate on the fake stack."""
     session = new_session(api)
@@ -1539,7 +1706,7 @@ def scenario_image_self_check(api, offerings, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,offering-knowledge,faults")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
@@ -1589,6 +1756,14 @@ def main():
             if "image-self-check" in selected:
                 scenario_image_self_check(api, offerings, work)
             processes.stop(child)
+        if "offering-knowledge" in selected:
+            offering_catalog = private_catalog(
+                work,
+                disabled=("tripo/tripo-p2/text-to-3d",),
+                prompt_limits={"meshy/meshy-7.1/text-to-3d": 20},
+                name="catalog-offering-knowledge.json",
+            )
+            scenario_offering_knowledge(work, stack_binary, processes, offering_catalog)
         if "faults" in selected:
             for scenario in [name for name in FAULTS if not args.faults or name in args.faults.split(",")]:
                 child, api = start_stack(processes, stack_binary, work, "fault-" + scenario, url_catalog, FAULT_KEYS.get(scenario, f"fake-{scenario}"))

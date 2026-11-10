@@ -820,7 +820,7 @@ func (executor *Executor) executeProcessing(
 		return chat.ToolResult{NoSubmission: true}, err
 	}
 	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, "",
-		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, observe)
+		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, observe, nil)
 	return executor.processingOutcome(command, result, err, executor.inputShape(command, input))
 }
 
@@ -1010,7 +1010,7 @@ func (executor *Executor) executeMultiSourceProcessing(
 		return chat.ToolResult{NoSubmission: true}, err
 	}
 	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, "",
-		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, observe)
+		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, observe, nil)
 	return executor.processingOutcome(command, result, err, executor.inputShape(command, input))
 }
 

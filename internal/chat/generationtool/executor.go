@@ -395,7 +395,7 @@ func (executor *Executor) Execute(
 		stored, err := executor.operations.LoadAgentOperation(ctx, command.OwnerID, command.SessionID,
 			command.AssistantMessageID, command.Call.ID)
 		if err == nil {
-			return executor.resumeAgentOperation(ctx, command, stored, observe, nil)
+			return executor.resumeAgentOperation(ctx, command, stored, observe, nil, nil)
 		}
 		if !errors.Is(err, ErrOperationNotFound) {
 			// A failed read cannot prove an earlier submission did not commit.
@@ -418,6 +418,7 @@ func (executor *Executor) Execute(
 	prompt := rawString(
 		arguments[executor.chat.Context.ToolPromptArgument],
 	)
+	trace := &promptTrace{Original: prompt, Final: prompt}
 	if executor.canvasTurn(command) && command.Tool.CanvasSource == canvasSourceRefuse {
 		// The person chose the canvas; a tool that reads no image would drop
 		// it. Nothing is submitted and the Agent is told which tools fit.
@@ -648,9 +649,23 @@ func (executor *Executor) Execute(
 	}
 	switch {
 	case purposes != "":
+		before := prompt
 		prompt = promptWithPurposes(command, purposes, prompt)
+		if prompt != before {
+			trace.add(promptLayerPurposesTemplate, command.Tool.PromptWithReferencePurposesTemplate)
+		}
 	case len(referenceURLs) > 0:
+		before := prompt
 		prompt = executor.synthesizePrompt(command, prompt, referenceURLs)
+		if prompt != before {
+			layer := promptLayerReferenceTemplate
+			template := command.Tool.PromptWithReferenceTemplate
+			if executor.previousPrompt(command, referenceURLs[0]) != "" {
+				layer = promptLayerPreviousPromptTemplate
+				template = command.Tool.PromptWithPreviousTemplate
+			}
+			trace.add(layer, template)
+		}
 	}
 	skillExecution := executor.chat.Skills.Execution
 	if command.Configuration != nil && len(command.Configuration.SkillExecution.PromptTemplates) > 0 {
@@ -687,19 +702,23 @@ func (executor *Executor) Execute(
 				fields.SkillPrompt, skill.Prompt,
 			).Replace(template)
 			skillOverrides = skillExecution.ParameterOverrides
+			trace.add(promptLayerSkillTemplate, template)
 		}
 	}
+	beforeStyleLock := prompt
 	prompt = executor.applyStyleLockPrompt(command, offering, prompt)
-	for _, parameter := range offering.Parameters {
-		if parameter.Semantic != generation.SemanticPrompt ||
-			parameter.MaxLength <= 0 {
-			continue
-		}
-		runes := []rune(prompt)
-		if len(runes) > parameter.MaxLength {
-			prompt = string(runes[:parameter.MaxLength])
-		}
-		break
+	if prompt != beforeStyleLock {
+		trace.add(promptLayerStyleLock, strings.TrimPrefix(prompt, beforeStyleLock))
+	}
+	if value, applied := defaultNegativePromptValue(command, offering); applied {
+		trace.add(promptLayerNegativePrompt, value)
+	}
+	prompt, truncated, maximum, refusalResult, refused := executor.applyPromptLength(command, offering, prompt)
+	trace.Truncated = truncated
+	trace.MaxLength = maximum
+	trace.Final = prompt
+	if refused {
+		return refusalResult, nil
 	}
 	input, referenceIDs, err := executor.buildInput(
 		ctx,
@@ -724,7 +743,7 @@ func (executor *Executor) Execute(
 	idempotencyKey := command.IdempotencyKey()
 	if executor.UsesExecutionGrants() {
 		return executor.prepareAgentOperation(ctx, command, capability, offering, input, prompt, idempotencyKey,
-			references, selection, finalReferences, referenceIDs, observe)
+			references, selection, finalReferences, referenceIDs, observe, trace)
 	}
 	if offering.NativePricing != nil {
 		return chat.ToolResult{NoSubmission: true}, errors.New("native pricing requires prepared authorization")
@@ -767,16 +786,11 @@ func (executor *Executor) Execute(
 	if capability == generation.ImageTo3D && offering.ReferenceSelectionPolicy != "preserve" {
 		fact = referenceFact(selection, finalReferences)
 	}
-	return executor.wait(
-		ctx,
-		command,
-		offering,
-		accepted.TaskID,
-		observe,
-		stepInfo{Credits: offering.EstimateTotalCredits(input), CreditsMetered: offering.CreditsMetered,
-			ExtraCredits:  offering.ExtraCreditDetail(input).Credits,
-			ReferenceNote: executor.stepReferenceNote(command, offering, fact, references, input)},
-	)
+	info := stepInfo{Credits: offering.EstimateTotalCredits(input), CreditsMetered: offering.CreditsMetered,
+		ExtraCredits:  offering.ExtraCreditDetail(input).Credits,
+		ReferenceNote: executor.stepReferenceNote(command, offering, fact, references, input)}
+	info.PromptFinal, info.PromptNote = executor.promptReport(command, command.Tool, offering, trace)
+	return executor.wait(ctx, command, offering, accepted.TaskID, observe, info)
 }
 
 // stepInfo is what the Agent and the chat projection learn about one accepted
@@ -815,6 +829,11 @@ type stepInfo struct {
 	// Budget is the production plan that authorized the step (#103); nil when
 	// no plan did (another mode, or a browser-started step).
 	Budget *budget.Summary
+	// PromptFinal is the exact prompt the server submitted when a layer
+	// changed it (#249); PromptNote names the layers and any cut. Both are
+	// reported only through the tool's declared result keys.
+	PromptFinal string
+	PromptNote  map[string]any
 }
 
 // budgetResult is the budget part of a paid tool result: the plan the step
@@ -937,6 +956,8 @@ func (executor *Executor) observeBoundTask(
 			if prepared, err := executor.gateway.(preparedGateway).GetPreparedInput(ctx,
 				generation.OwnerID(op.OwnerID), op.PreparedInputID); err == nil {
 				info.ReferenceNote = executor.operationReferenceNote(command, op, prepared, task.Offering)
+				trace := executor.promptTraceFromPrepared(command, task.Offering, prepared.NormalizedInput)
+				info.PromptFinal, info.PromptNote = executor.promptReport(command, command.Tool, task.Offering, trace)
 			}
 			// The grant that admitted the Task still says who approved it; a
 			// read failure only leaves the source unknown, as before.
@@ -1867,6 +1888,12 @@ func (executor *Executor) success(
 	}
 	if key := tool.ResultFields.PurposeBudgetNote; key != "" && info.PurposeBudgetNote != "" {
 		result[key] = info.PurposeBudgetNote
+	}
+	if key := tool.ResultFields.FinalPrompt; key != "" && info.PromptFinal != "" {
+		result[key] = info.PromptFinal
+	}
+	if key := tool.ResultFields.PromptNote; key != "" && len(info.PromptNote) > 0 {
+		result[key] = info.PromptNote
 	}
 	if info.Budget != nil {
 		if key := tool.ResultFields.Budget; key != "" {

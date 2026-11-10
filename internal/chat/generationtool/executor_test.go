@@ -318,6 +318,9 @@ func TestExecutorKeepsCatalogAppliedPromptWithinOfferingLimit(t *testing.T) {
 	// This contract uses a short custom template so the 13-rune Offering limit
 	// exercises truncation without depending on the longer default style policy.
 	application.Chat.Skills.Execution.PromptTemplates[generation.TextToImage] = "{user_input}\n\n{skill_prompt}"
+	// This test pins the historical truncation behavior (#249 keeps it for a
+	// Catalog that does not adopt the refuse policy).
+	application.Chat.Agent.PromptReport.OverLimit = "truncate"
 	tool := application.Chat.Tools[0]
 	gateway := &fakeGateway{
 		offerings: []generation.Offering{{
@@ -1255,6 +1258,8 @@ func TestCustomSkillCompositionKeepsExplicitSubjectAndPriorityBeforeSceneReferen
 				t.Fatal(err)
 			}
 			app := product.Application()
+			// This test pins the historical truncation behavior (#249).
+			app.Chat.Agent.PromptReport.OverLimit = "truncate"
 			skill := catalog.SkillSchema{
 				ID:              "custom-scene-reference",
 				Name:            "Custom scene reference",
