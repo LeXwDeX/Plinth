@@ -667,18 +667,7 @@ func (executor *Executor) Execute(
 			trace.add(layer, template)
 		}
 	}
-	skillExecution := executor.chat.Skills.Execution
-	if command.Configuration != nil && len(command.Configuration.SkillExecution.PromptTemplates) > 0 {
-		skillExecution = command.Configuration.SkillExecution
-	}
-	skillOverrides := map[generation.ParameterSemantic]json.RawMessage(nil)
-	skills := executor.skills
-	if command.Configuration != nil {
-		skills = make(map[string]catalog.SkillSchema, len(command.Configuration.Skills))
-		for _, skill := range command.Configuration.Skills {
-			skills[skill.ID] = skill
-		}
-	}
+	skills, skillExecution := executor.promptSkills(command)
 	// A tool-binding Skill directs the Agent to its tool (see the orchestrator's
 	// directive); it carries no style prompt for a generation tool to apply.
 	if bound, exists := skills[command.Options.SkillID]; exists && bound.Tool != "" {
@@ -689,21 +678,15 @@ func (executor *Executor) Execute(
 			return chat.ToolResult{Error: "selected skill is unavailable", NoSubmission: true}, nil
 		}
 	}
-	if skill, exists := skills[command.Options.SkillID]; exists &&
-		slices.Contains(offering.Features, executor.chat.Skills.Feature) {
-		template := skillExecution.PromptTemplates[capability]
-		if capability == generation.ImageToImage && skill.ImageToImageTemplate != "" {
-			template = skill.ImageToImageTemplate
-		}
-		if template != "" {
-			fields := skillExecution.PromptTemplateFields
-			prompt = strings.NewReplacer(
-				fields.UserInput, prompt,
-				fields.SkillPrompt, skill.Prompt,
-			).Replace(template)
-			skillOverrides = skillExecution.ParameterOverrides
-			trace.add(promptLayerSkillTemplate, template)
-		}
+	skillOverrides := map[generation.ParameterSemantic]json.RawMessage(nil)
+	if application, applied := executor.promptSkillApplication(command, offering, capability, skills, skillExecution); applied {
+		fields := application.Fields
+		prompt = strings.NewReplacer(
+			fields.UserInput, prompt,
+			fields.SkillPrompt, application.Prompt,
+		).Replace(application.Template)
+		skillOverrides = application.Overrides
+		trace.add(promptLayerSkillTemplate, application.Template)
 	}
 	beforeStyleLock := prompt
 	prompt = executor.applyStyleLockPrompt(command, offering, prompt)
@@ -956,7 +939,7 @@ func (executor *Executor) observeBoundTask(
 			if prepared, err := executor.gateway.(preparedGateway).GetPreparedInput(ctx,
 				generation.OwnerID(op.OwnerID), op.PreparedInputID); err == nil {
 				info.ReferenceNote = executor.operationReferenceNote(command, op, prepared, task.Offering)
-				trace := executor.promptTraceFromPrepared(command, task.Offering, prepared.NormalizedInput)
+				trace := executor.promptTraceFromPrepared(ctx, command, task.Offering, prepared.NormalizedInput)
 				info.PromptFinal, info.PromptNote = executor.promptReport(command, command.Tool, task.Offering, trace)
 			}
 			// The grant that admitted the Task still says who approved it; a

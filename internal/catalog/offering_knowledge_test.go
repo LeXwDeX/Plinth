@@ -96,6 +96,16 @@ func TestOfferingKnowledgeInvalidDeclarationsFailLoading(t *testing.T) {
 			},
 			want: "缺少 knowledge 自述",
 		},
+		"only sources is not an Agent-visible self-description": {
+			change: func(knowledge map[string]any) {
+				knowledge["strengths"] = nil
+				knowledge["weaknesses"] = nil
+				knowledge["limitations"] = nil
+				knowledge["prompt"] = nil
+				knowledge["reference_use"] = nil
+			},
+			want: "缺少 knowledge 自述",
+		},
 		"reads_text disagrees": {
 			change: func(knowledge map[string]any) {
 				knowledge["prompt"].(map[string]any)["reads_text"] = false

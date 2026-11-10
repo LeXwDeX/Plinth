@@ -3,6 +3,7 @@ package generationtool_test
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -173,5 +174,66 @@ func TestPromptReportOmitsAnOverlongFinalPrompt(t *testing.T) {
 	note, _ := content["prompt_note"].(map[string]any)
 	if note["final_prompt_omitted"] != true || note["final_length"] == nil {
 		t.Fatalf("prompt_note = %#v", note)
+	}
+}
+
+// #249: a step that resumes after its grant was prepared must report the same
+// final prompt and layer note as the first submission. The first call keeps
+// its in-memory trace; the resume rebuilds the same layers from the frozen
+// PreparedInput, the call's arguments and the frozen Offering.
+func TestResumedAgentOperationReportsTheSamePromptAsTheFirstSubmission(t *testing.T) {
+	executor, command, gateway, _ := policyHarness(t, sessionMode{mode: "auto"}, "refine_image", "text-to-image")
+	offering := gateway.offerings[0]
+	offering.Capability = generation.ImageToImage
+	offering.Parameters = []generation.Parameter{
+		{Name: "prompt", Type: "string", Semantic: generation.SemanticPrompt},
+		{Name: "reference_assets", Type: "asset-array", Semantic: generation.SemanticReferenceImage},
+		{Name: "negative_prompt", Type: "string", Semantic: generation.SemanticNegativePrompt},
+	}
+	gateway.offerings[0] = offering
+	command.Call.Arguments = []byte(`{"prompt":"draw a cube"}`)
+	command.Tool.DefaultParameters = map[string]json.RawMessage{"negative_prompt": json.RawMessage(`"NEG"`)}
+	command.History = []chat.Message{{Role: "user", ImageURLs: []string{"https://example.test/one.png"}}}
+	command.Options.StyleLock = chat.StyleLock{Enabled: true, Text: "LOCK"}
+
+	first, err := executor.Execute(context.Background(), command, nil)
+	if err != nil || first.TaskID == "" {
+		t.Fatalf("first submission: %+v %v", first, err)
+	}
+	// The stored operation and its approved grant make the second call take
+	// the resume path; it must not prepare a new input.
+	second, err := executor.Execute(context.Background(), command, nil)
+	if err != nil || second.TaskID == "" {
+		t.Fatalf("resumed submission: %+v %v", second, err)
+	}
+	if gateway.preparedCount != 1 || gateway.submitCount != 2 {
+		t.Fatalf("resume prepared=%d submitted=%d", gateway.preparedCount, gateway.submitCount)
+	}
+	var firstContent, secondContent map[string]any
+	if err := json.Unmarshal([]byte(first.AgentContent), &firstContent); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(second.AgentContent), &secondContent); err != nil {
+		t.Fatal(err)
+	}
+	if firstContent["final_prompt"] == nil || firstContent["prompt_note"] == nil {
+		t.Fatalf("first result has no prompt report: %#v", firstContent)
+	}
+	if !reflect.DeepEqual(firstContent["final_prompt"], secondContent["final_prompt"]) {
+		t.Fatalf("final_prompt changed on resume: %q != %q",
+			firstContent["final_prompt"], secondContent["final_prompt"])
+	}
+	if !reflect.DeepEqual(firstContent["prompt_note"], secondContent["prompt_note"]) {
+		t.Fatalf("prompt_note changed on resume:\n%#v\n%#v",
+			firstContent["prompt_note"], secondContent["prompt_note"])
+	}
+	rendered, _ := json.Marshal(firstContent["prompt_note"])
+	for _, layer := range []string{"reference-image template", "style lock", "default negative prompt"} {
+		if !strings.Contains(string(rendered), layer) {
+			t.Fatalf("prompt_note lacks %q: %s", layer, rendered)
+		}
+	}
+	if summary, _ := firstContent["prompt_note"].(map[string]any)["summary"].(string); summary == "" {
+		t.Fatalf("prompt_note has no changed summary: %s", rendered)
 	}
 }

@@ -211,10 +211,13 @@ func validateOfferingKnowledgeCoverage(schema ChatOfferingKnowledgeSchema, offer
 	return nil
 }
 
+// offeringKnowledgeEmpty reports whether an Offering carries no Agent-visible
+// self-description. A sources-only object is maintainer evidence, not a
+// description the Agent can use, so it does not satisfy required_capabilities.
 func offeringKnowledgeEmpty(knowledge schemacontract.OfferingKnowledge) bool {
 	return len(knowledge.Strengths) == 0 && len(knowledge.Weaknesses) == 0 &&
 		len(knowledge.Limitations) == 0 && knowledge.Prompt == nil &&
-		len(knowledge.ReferenceUse) == 0 && len(knowledge.Sources) == 0
+		len(knowledge.ReferenceUse) == 0
 }
 
 // validateOfferingKnowledgeSchema checks the Agent-facing words that render an
@@ -296,6 +299,13 @@ func validatePromptReportSchema(schema ChatPromptReportSchema) error {
 		for _, placeholder := range []string{"{model}", "{length}", "{maximum}", "{excess}", "{unit}"} {
 			if !strings.Contains(schema.TooLongTemplate, placeholder) {
 				return fmt.Errorf("chat.agent.prompt_report.too_long_template 缺少占位符 %s", placeholder)
+			}
+		}
+	}
+	if schema.TruncationTemplate != "" {
+		for _, placeholder := range []string{"{length}", "{maximum}", "{excess}", "{unit}"} {
+			if !strings.Contains(schema.TruncationTemplate, placeholder) {
+				return fmt.Errorf("chat.agent.prompt_report.truncation_template 缺少占位符 %s", placeholder)
 			}
 		}
 	}

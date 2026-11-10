@@ -3787,11 +3787,20 @@ type ChatPromptReportSchema struct {
 	// result; above it only the layers and lengths are reported. Zero means
 	// no bound.
 	MaximumReportedCharacters int `json:"maximum_reported_characters,omitempty"`
-	// UnchangedTemplate is the note when no layer changed the prompt; it is
-	// normally omitted from the result for an unchanged prompt.
-	UnchangedTemplate            string `json:"unchanged_template,omitempty"`
+	// UnchangedTemplate is the prompt_note summary when no layer changed the
+	// prompt; with it the Agent still gets the note that the prompt was
+	// submitted as written. Empty keeps the historical empty result.
+	UnchangedTemplate string `json:"unchanged_template,omitempty"`
+	// ChangedTemplate is the prompt_note summary when layers changed the
+	// submitted prompt, and ChangedWithoutPromptTemplate is its variant for a
+	// resume that cannot recover the Agent's original prompt.
 	ChangedTemplate              string `json:"changed_template,omitempty"`
 	ChangedWithoutPromptTemplate string `json:"changed_without_prompt_template,omitempty"`
+	// TruncationTemplate is the prompt_note text for a prompt the Schema cut
+	// because OverLimit is not "refuse" (or the Catalog predates the policy).
+	// It says the step was submitted after the cut. Fields: {model},
+	// {length}, {maximum}, {excess}, {unit}. Empty uses a neutral fallback.
+	TruncationTemplate string `json:"truncation_template,omitempty"`
 	// TooLongTemplate is the refusal when OverLimit is "refuse". Fields:
 	// {model}, {length}, {maximum}, {excess}, {unit}.
 	TooLongTemplate string `json:"too_long_template"`

@@ -422,7 +422,7 @@ func (executor *Executor) resumeAgentOperation(
 		info.Budget = &summary
 	}
 	if trace == nil {
-		trace = executor.promptTraceFromPrepared(command, task.Offering, prepared.NormalizedInput)
+		trace = executor.promptTraceFromPrepared(ctx, command, task.Offering, prepared.NormalizedInput)
 	}
 	info.PromptFinal, info.PromptNote = executor.promptReport(command, command.Tool, task.Offering, trace)
 	return executor.wait(ctx, command, task.Offering, task.ID, observe, info)

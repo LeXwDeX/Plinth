@@ -104,6 +104,47 @@ func TestChatToolModelChoicesRejections(t *testing.T) {
 	}
 }
 
+// #249 follow-up: meshy-7.1-multiview is enabled and the Meshy adapter
+// supports its multi-image endpoint, but the Offering declares no
+// reference-views semantics. No 3D tool may select it until the Provider
+// adapter maps ordered multi-images to view labels (recorded as deferred in
+// docs/architecture.md); this test keeps that state explicit rather than a
+// silently unselectable model.
+func TestMeshyMultiviewStaysOutOfEvery3DToolUntilViewsAreMapped(t *testing.T) {
+	product, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var multiview schemacontract.Offering
+	for _, offering := range product.List("") {
+		if offering.ID == "meshy/meshy-7.1-multiview/image-to-3d" {
+			multiview = offering
+		}
+	}
+	if multiview.ID == "" || !multiview.Enabled {
+		t.Fatalf("meshy multiview fixture = %+v", multiview)
+	}
+	for _, parameter := range multiview.Parameters {
+		if parameter.Semantic == schemacontract.SemanticReferenceViews {
+			t.Fatalf("meshy multiview now declares reference-views: map it into the 3D tools and update the deferred note")
+		}
+	}
+	for _, name := range []string{"create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views"} {
+		var tool ChatToolSchema
+		for _, candidate := range product.Application().Chat.Tools {
+			if candidate.Name == name {
+				tool = candidate
+			}
+		}
+		if tool.Name == "" {
+			t.Fatalf("%s is not declared", name)
+		}
+		if slices.Contains(DerivedModelChoices(tool, product.List(""), nil), "meshy-7.1-multiview") {
+			t.Fatalf("%s selects meshy-7.1-multiview without a view mapping", name)
+		}
+	}
+}
+
 func TestDerivedModelChoicesFiltersEnabledAvailableAndSemantics(t *testing.T) {
 	tool := ChatToolSchema{
 		ModelArgument: "model",

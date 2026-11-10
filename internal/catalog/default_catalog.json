@@ -5591,7 +5591,8 @@
           "maximum_reported_characters": 4000,
           "unchanged_template": "The server submitted the prompt as written.",
           "changed_template": "The server submitted the prompt in final_prompt after applying the layers listed in prompt_note. Treat it as the text the model really received.",
-          "changed_without_prompt_template": "The server changed parameters other than the text prompt; no final prompt is reported.",
+          "changed_without_prompt_template": "The server rebuilt the submitted prompt from the frozen input. The Agent's original prompt is not available on this resume, so final_prompt is the text that was really submitted and the layer list may be incomplete.",
+          "truncation_template": "The prompt has {length} {unit}, over the limit of {maximum} {unit} for {model}; the server submitted it after cutting the last {excess} {unit}. The step was created and charged as usual.",
           "too_long_template": "The prompt has {length} {unit}, over the limit of {maximum} {unit} for {model} by {excess} {unit}. Nothing was submitted and nothing was charged. Shorten the prompt by at least {excess} {unit}, keeping the must-keep constraints, and call the tool again.",
           "layers": {
             "reference_template": "reference-image template",

@@ -67,6 +67,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zlib
 
@@ -1496,6 +1497,54 @@ def _checkpoint_content_with(work, stack, session, needle, start=""):
     return ""
 
 
+def fake_request_bodies(path):
+    """The recent POST bodies the fake upstream served for path, oldest first.
+    The fake exposes them only for this script (a test-only debug route), so
+    the scenario can assert the tool descriptions the Agent really received."""
+    url = (f"http://127.0.0.1:{FAKE_PORT}/fake/control/requests?path="
+           + urllib.parse.quote(path, safe=""))
+    try:
+        with urllib.request.urlopen(url, timeout=10) as response:
+            bodies = json.loads(response.read())
+    except (OSError, ValueError):
+        return []
+    return [body for body in bodies if isinstance(body, dict)]
+
+
+def _tool_descriptions(request_body):
+    tools = {}
+    for tool in request_body.get("tools") or []:
+        function = tool.get("function") or {}
+        name = function.get("name")
+        if name:
+            tools[name] = function.get("description") or ""
+    return tools
+
+
+def _prepared_prompt(work, stack, session, needle):
+    """The frozen prompt of the session's prepared input whose text carries
+    needle; the prepared input is what the server really submitted."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+        db.row_factory = sqlite3.Row
+        rows = db.execute("SELECT payload_json FROM generation_prepared_inputs "
+                          "WHERE session_id=? ORDER BY created_at DESC, id DESC", (session,)).fetchall()
+        db.close()
+    except sqlite3.Error:
+        return ""
+    for row in rows:
+        try:
+            payload = json.loads(row["payload_json"])
+        except ValueError:
+            continue
+        normalized = payload.get("normalized_input") or {}
+        prompt = normalized.get("prompt")
+        if isinstance(prompt, str) and needle in prompt:
+            return prompt
+    return ""
+
+
 def _offering_turn(api, session, content, domain, model):
     before = assistant_reply_count(api, session)
     status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages",
@@ -1524,6 +1573,14 @@ def scenario_offering_knowledge(work, stack_binary, processes, catalog):
               and "prompt" not in knowledge and "reference_use" not in knowledge and "sources" not in knowledge)
         record("#249 public Offering knowledge", bool(ok),
                f"{len(offerings)} public offerings; knowledge keys={sorted(knowledge)}")
+        status, english_body = api.json("GET", "/api/v1/offerings", headers={"Accept-Language": "en"})
+        english = {item["id"]: item for item in (english_body.get("offerings") or [])}
+        translated = (english.get("meshy/nano-banana-pro/text-to-image") or {}).get("knowledge") or {}
+        translated_strengths = translated.get("strengths") or []
+        record("#249 public Offering knowledge follows the request language",
+               status == 200 and translated_strengths[:1] ==
+               ["Strong prompt following with stable complex compositions and multi-subject relations."],
+               f"status={status} strengths={translated_strengths[:1]}")
         record("#249 a disabled Offering leaves the public list", disabled_id not in offerings,
                f"disabled={disabled_id} present={disabled_id in offerings}")
 
@@ -1567,7 +1624,9 @@ def scenario_offering_knowledge(work, stack_binary, processes, catalog):
                    f"disabled_id present={disabled_id in by_id}")
 
         # A prompt over the variant's 20-character limit is refused before a
-        # Task exists: no card, no charge.
+        # Task exists: no card, no charge. The session's explicit 3D model makes
+        # the tool descriptions carry that model's own writing guidance.
+        api.json("PUT", f"/api/v1/chat/sessions/{session}/model3d", {"explicit_model_3d": "meshy-7.1"})
         before_tasks = {task.get("id") for task in session_tasks(api, session)}
         marker = ('[[fake:tool:create_model_3d {"prompt":"a very long prompt that exceeds the limit",'
                   '"model":"meshy-7.1"}]]')
@@ -1578,6 +1637,21 @@ def scenario_offering_knowledge(work, stack_binary, processes, catalog):
             new_tasks = {task.get("id") for task in session_tasks(api, session)} - before_tasks
             record("#249 over-limit prompt is refused before submission", bool(content) and not new_tasks,
                    f"refusal={'yes' if content else 'no'} new_tasks={len(new_tasks)}")
+            descriptions = {}
+            for body in reversed(fake_request_bodies("/openai/v1/chat/completions")):
+                candidate = _tool_descriptions(body)
+                if "create_model_3d" in candidate and "create_model_3d_from_image" in candidate:
+                    descriptions = candidate
+                    break
+            guidance = descriptions.get("create_model_3d", "")
+            no_text = descriptions.get("create_model_3d_from_image", "")
+            record("#249 tool descriptions carry the selected model's writing guidance",
+                   "Prompt guidance for Meshy 7.1" in guidance
+                   and "text prompt: the service reads the text prompt" in guidance
+                   and "aim for 30-60 words" in guidance
+                   and "When this tool uses the selected model (Meshy 7.1)" in no_text
+                   and "not sent to this service" in no_text,
+                   f"guidance={guidance[:80]!r} no_text={no_text[:80]!r}")
 
         # A reference-image prompt is rewritten by the reference template; the
         # result names the exact text and the layer that changed it. The
@@ -1617,6 +1691,12 @@ def scenario_offering_knowledge(work, stack_binary, processes, catalog):
                    isinstance(result.get("final_prompt"), str) and "make the cube blue" in result["final_prompt"]
                    and bool(layers),
                    f"final_prompt={str(result.get('final_prompt'))[:80]!r} layers={[l.get('layer') for l in layers]}")
+            prepared_prompt = _prepared_prompt(work, "offering-knowledge", session2, "make the cube blue")
+            record("#249 final_prompt is the frozen prepared input",
+                   bool(prepared_prompt) and result.get("final_prompt") == prepared_prompt
+                   and any(layer.get("layer") == "reference-image template" for layer in layers),
+                   f"prepared={prepared_prompt[:80]!r} final={str(result.get('final_prompt'))[:80]!r} "
+                   f"layers={[l.get('layer') for l in layers]}")
     finally:
         processes.stop(child)
 

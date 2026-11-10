@@ -3,8 +3,10 @@ package generationtool
 // Prompt transparency (#249): the tool result tells the Agent the exact text
 // prompt the server submitted, every layer it applied, and any length cut.
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -61,6 +63,10 @@ func (trace *promptTrace) changed() bool {
 // maximum_reported_characters: FinalLength and the layers still say what
 // happened, and the full text is omitted.
 type promptNote struct {
+	// Summary is the Schema's sentence about the report itself: submitted as
+	// written, submitted after the listed layers, or rewritten without the
+	// original prompt being available on a resume.
+	Summary                   string            `json:"summary,omitempty"`
 	Layers                    []promptNoteLayer `json:"layers,omitempty"`
 	FinalLength               int               `json:"final_length"`
 	MaximumLength             int               `json:"maximum_length,omitempty"`
@@ -68,6 +74,11 @@ type promptNote struct {
 	FinalPromptOmitted        bool              `json:"final_prompt_omitted,omitempty"`
 	MaximumReportedCharacters int               `json:"maximum_reported_characters,omitempty"`
 }
+
+// promptTruncationFallback is the neutral truncation sentence a Catalog
+// without truncation_template gets. It says the step was submitted after the
+// cut, unlike the too_long_template refusal for over_limit=refuse.
+const promptTruncationFallback = "The prompt has {length} {unit}, over the limit of {maximum} {unit}; the server submitted it after cutting the last {excess} {unit}."
 
 type promptNoteLayer struct {
 	Layer string `json:"layer"`
@@ -83,10 +94,16 @@ func (executor *Executor) promptReport(
 	offering generation.Offering,
 	trace *promptTrace,
 ) (string, map[string]any) {
-	if trace == nil || !trace.changed() {
+	if trace == nil {
 		return "", nil
 	}
 	report := executor.chat.Agent.PromptReport
+	changed := trace.changed()
+	if !changed && report.UnchangedTemplate == "" {
+		// A Catalog without the unchanged note keeps the historical result:
+		// an untouched prompt reports nothing.
+		return "", nil
+	}
 	labels := report.Layers
 	note := promptNote{
 		FinalLength:         utf8.RuneCountInString(trace.Final),
@@ -100,23 +117,41 @@ func (executor *Executor) promptReport(
 		}
 		return id
 	}
-	for _, layer := range trace.Layers {
-		note.Layers = append(note.Layers, promptNoteLayer{
-			Layer: label(layer.ID),
-			Text:  executor.localized(command, layer.Text),
-		})
+	if changed {
+		for _, layer := range trace.Layers {
+			note.Layers = append(note.Layers, promptNoteLayer{
+				Layer: label(layer.ID),
+				Text:  executor.localized(command, layer.Text),
+			})
+		}
+		if trace.Truncated > 0 {
+			// The prompt was cut and submitted: say so with the truncation
+			// copy. The refusal copy belongs to over_limit=refuse, where
+			// nothing was submitted or charged.
+			template := report.TruncationTemplate
+			if strings.TrimSpace(template) == "" {
+				template = promptTruncationFallback
+			}
+			text := strings.NewReplacer(
+				"{model}", model,
+				"{length}", fmt.Sprint(utf8.RuneCountInString(trace.Final)+trace.Truncated),
+				"{maximum}", fmt.Sprint(trace.MaxLength),
+				"{excess}", fmt.Sprint(trace.Truncated),
+				"{unit}", "characters",
+			).Replace(executor.localized(command, template))
+			note.Layers = append(note.Layers, promptNoteLayer{Layer: label(promptLayerTruncation), Text: text})
+		}
+		note.Summary = executor.localized(command, report.ChangedTemplate)
+		if trace.Original == "" {
+			note.Summary = executor.localized(command, report.ChangedWithoutPromptTemplate)
+		}
+	} else {
+		note.Summary = executor.localized(command, report.UnchangedTemplate)
 	}
-	if trace.Truncated > 0 {
-		text := strings.NewReplacer(
-			"{model}", model,
-			"{length}", fmt.Sprint(utf8.RuneCountInString(trace.Final)+trace.Truncated),
-			"{maximum}", fmt.Sprint(trace.MaxLength),
-			"{excess}", fmt.Sprint(trace.Truncated),
-			"{unit}", "characters",
-		).Replace(executor.localized(command, report.TooLongTemplate))
-		note.Layers = append(note.Layers, promptNoteLayer{Layer: label(promptLayerTruncation), Text: text})
+	final := ""
+	if changed {
+		final = trace.Final
 	}
-	final := trace.Final
 	if maximum := report.MaximumReportedCharacters; maximum > 0 &&
 		utf8.RuneCountInString(final) > maximum {
 		final = ""
@@ -187,12 +222,81 @@ func defaultNegativePromptValue(command chat.ToolCommand, offering generation.Of
 	return "", false
 }
 
+// promptSkills is the Skill table and execution settings a call uses: the
+// turn's frozen configuration when present, else the Schema's. The same table
+// serves the first submission and a replay after a resume.
+func (executor *Executor) promptSkills(command chat.ToolCommand) (map[string]catalog.SkillSchema, catalog.ChatSkillExecutionSchema) {
+	skillExecution := executor.chat.Skills.Execution
+	if command.Configuration != nil && len(command.Configuration.SkillExecution.PromptTemplates) > 0 {
+		skillExecution = command.Configuration.SkillExecution
+	}
+	if command.Configuration == nil {
+		return executor.skills, skillExecution
+	}
+	skills := make(map[string]catalog.SkillSchema, len(command.Configuration.Skills))
+	for _, skill := range command.Configuration.Skills {
+		skills[skill.ID] = skill
+	}
+	return skills, skillExecution
+}
+
+// promptSkillApplication is the Skill template a generation tool applies to
+// the prompt: the template text, the Skill's own prompt, the placeholder
+// fields and the parameter overrides it adds.
+type promptSkillApplication struct {
+	Template  string
+	Prompt    string
+	Fields    catalog.ChatSkillPromptTemplateFields
+	Overrides map[generation.ParameterSemantic]json.RawMessage
+}
+
+// promptSkillApplication resolves the prompt layer of the selected Skill. A
+// tool-binding Skill has no template to apply, and a Skill the Offering does
+// not feature is never applied. It repeats no refusal: the caller owns the
+// "selected skill is unavailable" answer.
+func (executor *Executor) promptSkillApplication(
+	command chat.ToolCommand,
+	offering generation.Offering,
+	capability generation.Capability,
+	skills map[string]catalog.SkillSchema,
+	skillExecution catalog.ChatSkillExecutionSchema,
+) (promptSkillApplication, bool) {
+	skillID := command.Options.SkillID
+	if skillID == "" {
+		return promptSkillApplication{}, false
+	}
+	if bound, exists := skills[skillID]; exists && bound.Tool != "" {
+		return promptSkillApplication{}, false
+	}
+	skill, exists := skills[skillID]
+	if !exists || !slices.Contains(offering.Features, executor.chat.Skills.Feature) {
+		return promptSkillApplication{}, false
+	}
+	template := skillExecution.PromptTemplates[capability]
+	if capability == generation.ImageToImage && skill.ImageToImageTemplate != "" {
+		template = skill.ImageToImageTemplate
+	}
+	if template == "" {
+		return promptSkillApplication{}, false
+	}
+	return promptSkillApplication{
+		Template:  template,
+		Prompt:    skill.Prompt,
+		Fields:    skillExecution.PromptTemplateFields,
+		Overrides: skillExecution.ParameterOverrides,
+	}, true
+}
+
 // promptTraceFromPrepared rebuilds the reported prompt after an approval or a
 // turn resume, when the in-memory trace is gone. The frozen input carries the
-// exact prompt that was approved; the call's arguments carry what the Agent
-// wrote. No layer details are stored, so a changed prompt reports the
+// exact prompt that was approved and the call's arguments carry what the
+// Agent wrote, so the same layer chain is replayed from the frozen Offering
+// and the call's parameters. The replay reports its layers only when it ends
+// on exactly the frozen prompt; when the reference history, the multiview
+// group or the Skill changed since the first submission, it falls back to the
 // prepared_input layer rather than inventing which template ran.
 func (executor *Executor) promptTraceFromPrepared(
+	ctx context.Context,
 	command chat.ToolCommand,
 	offering generation.Offering,
 	input []byte,
@@ -215,18 +319,201 @@ func (executor *Executor) promptTraceFromPrepared(
 	if final == "" {
 		return nil
 	}
-	original := ""
+	var arguments map[string]json.RawMessage
 	if args := command.Call.Arguments; len(args) > 0 {
-		var arguments map[string]json.RawMessage
-		if json.Unmarshal(args, &arguments) == nil {
-			original = rawString(arguments[executor.chat.Context.ToolPromptArgument])
-		}
+		_ = json.Unmarshal(args, &arguments)
+	}
+	original := ""
+	if arguments != nil {
+		original = rawString(arguments[executor.chat.Context.ToolPromptArgument])
+	}
+	frozen, known := frozenReferenceCount(input, offering)
+	if trace := executor.replayPromptTrace(ctx, command, offering, arguments, original, final, frozen, known); trace != nil {
+		return trace
 	}
 	trace := &promptTrace{Original: original, Final: final, MaxLength: promptLengthLimit(offering)}
+	// The default negative prompt is deterministic from the frozen call and
+	// Offering, so it stays reportable even when the reference layers cannot
+	// be replayed.
+	if value, applied := defaultNegativePromptValue(command, offering); applied {
+		trace.add(promptLayerNegativePrompt, value)
+	}
 	if final != original {
 		trace.Layers = append(trace.Layers, promptLayer{ID: promptLayerPreparedInput})
 	}
 	return trace
+}
+
+// replayPromptTrace applies the first submission's prompt chain again from
+// the call's arguments and the frozen Offering. It returns nil when any input
+// cannot be replayed exactly or the replayed prompt is not the frozen one.
+func (executor *Executor) replayPromptTrace(
+	ctx context.Context,
+	command chat.ToolCommand,
+	offering generation.Offering,
+	arguments map[string]json.RawMessage,
+	original, final string,
+	frozenReferences int,
+	frozenKnown bool,
+) *promptTrace {
+	if arguments == nil {
+		return nil
+	}
+	referenceURLs, ok := executor.replayReferenceURLs(ctx, command, offering, arguments, frozenReferences, frozenKnown)
+	if !ok {
+		return nil
+	}
+	purposes, refusal := executor.referencePurposes(command, arguments, referenceURLs)
+	if refusal != "" {
+		return nil
+	}
+	trace := &promptTrace{Original: original, Final: original}
+	prompt := original
+	switch {
+	case purposes != "":
+		before := prompt
+		prompt = promptWithPurposes(command, purposes, prompt)
+		if prompt != before {
+			trace.add(promptLayerPurposesTemplate, command.Tool.PromptWithReferencePurposesTemplate)
+		}
+	case len(referenceURLs) > 0:
+		before := prompt
+		prompt = executor.synthesizePrompt(command, prompt, referenceURLs)
+		if prompt != before {
+			layer := promptLayerReferenceTemplate
+			template := command.Tool.PromptWithReferenceTemplate
+			if executor.previousPrompt(command, referenceURLs[0]) != "" {
+				layer = promptLayerPreviousPromptTemplate
+				template = command.Tool.PromptWithPreviousTemplate
+			}
+			trace.add(layer, template)
+		}
+	}
+	capability := command.Tool.FallbackCapability
+	if len(referenceURLs) > 0 {
+		capability = command.Tool.Capability
+	}
+	skills, skillExecution := executor.promptSkills(command)
+	if application, applied := executor.promptSkillApplication(command, offering, capability, skills, skillExecution); applied {
+		prompt = strings.NewReplacer(
+			application.Fields.UserInput, prompt,
+			application.Fields.SkillPrompt, application.Prompt,
+		).Replace(application.Template)
+		trace.add(promptLayerSkillTemplate, application.Template)
+	}
+	beforeStyleLock := prompt
+	prompt = executor.applyStyleLockPrompt(command, offering, prompt)
+	if prompt != beforeStyleLock {
+		trace.add(promptLayerStyleLock, strings.TrimPrefix(prompt, beforeStyleLock))
+	}
+	if value, applied := defaultNegativePromptValue(command, offering); applied {
+		trace.add(promptLayerNegativePrompt, value)
+	}
+	maximum := promptLengthLimit(offering)
+	truncated := 0
+	if runes := []rune(prompt); maximum > 0 && len(runes) > maximum {
+		truncated = len(runes) - maximum
+		prompt = string(runes[:maximum])
+	}
+	trace.Truncated = truncated
+	trace.MaxLength = maximum
+	trace.Final = prompt
+	if prompt != final {
+		return nil
+	}
+	return trace
+}
+
+// replayReferenceURLs rebuilds the reference list the first submission used.
+// It reports false whenever the result depends on state the frozen input did
+// not record: a 3D source-model selection, or a reference list that no longer
+// matches the frozen one.
+func (executor *Executor) replayReferenceURLs(
+	ctx context.Context,
+	command chat.ToolCommand,
+	offering generation.Offering,
+	arguments map[string]json.RawMessage,
+	frozenReferences int,
+	frozenKnown bool,
+) ([]string, bool) {
+	if !frozenKnown {
+		return nil, false
+	}
+	var referenceURLs []string
+	multiview, refusal, err := executor.multiviewSelection(ctx, command, arguments)
+	if err != nil || refusal != "" {
+		return nil, false
+	}
+	if multiview != nil {
+		for _, name := range []string{executor.chat.ThreeView.Multiview.ViewsArgument,
+			executor.chat.Context.ReferenceHandlesArgument, executor.chat.Context.ToolReferenceArgument} {
+			delete(arguments, name)
+		}
+		referenceURLs = multiview.URLs
+	} else if command.Tool.AcceptReferenceImages == nil || *command.Tool.AcceptReferenceImages {
+		urls, err := executor.selectReferences(command, arguments)
+		if err != nil {
+			return nil, false
+		}
+		referenceURLs = urls
+	}
+	style, err := executor.styleLockReferenceURLs(command)
+	if err != nil {
+		return nil, false
+	}
+	referenceURLs = append(referenceURLs, style...)
+	capability := command.Tool.FallbackCapability
+	if len(referenceURLs) > 0 {
+		capability = command.Tool.Capability
+	}
+	// The image-to-3D source-model selection rewrites the reference list from
+	// the chat history; the frozen input does not record that choice.
+	if capability == generation.ImageTo3D && offering.ReferenceSelectionPolicy != "preserve" {
+		return nil, false
+	}
+	effective := referenceURLs
+	if offering.ReferenceSelectionPolicy != "preserve" {
+		effective = truncateReferences(referenceURLs, offering)
+	}
+	if len(effective) != frozenReferences {
+		return nil, false
+	}
+	return referenceURLs, true
+}
+
+// frozenReferenceCount is how many reference pictures the frozen input
+// carries. It reports false when the input does not have the Offering's
+// reference parameter in a shape this replay understands.
+func frozenReferenceCount(input []byte, offering generation.Offering) (int, bool) {
+	var values map[string]json.RawMessage
+	if json.Unmarshal(input, &values) != nil {
+		return 0, false
+	}
+	for _, parameter := range offering.Parameters {
+		if parameter.Semantic != generation.SemanticReferenceImage {
+			continue
+		}
+		raw, present := values[parameter.Name]
+		if !present || len(raw) == 0 || string(raw) == "null" {
+			return 0, true
+		}
+		if parameter.Type == "asset-array" {
+			var list []json.RawMessage
+			if json.Unmarshal(raw, &list) != nil {
+				return 0, false
+			}
+			return len(list), true
+		}
+		var scalar string
+		if json.Unmarshal(raw, &scalar) != nil {
+			return 0, false
+		}
+		if strings.TrimSpace(scalar) == "" {
+			return 0, true
+		}
+		return 1, true
+	}
+	return 0, true
 }
 
 // promptLengthLimit returns the Offering's prompt max_length, if it declares
