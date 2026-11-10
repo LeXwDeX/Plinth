@@ -2433,24 +2433,6 @@ def scenario_self_check(work, stack_binary, processes, catalog):
                and (first or {}).get("roundsUsed") == 1 and (first or {}).get("rendersInRound") >= 1,
                f"record={first}")
 
-        # A manual compaction keeps the record readable in the next prompt.
-        # A manual compaction needs history older than the kept rounds.
-        for index in range(5):
-            _work_ledger_plain_turn(api, session, f"整理上下文 {index}", creative_domain="model-3d", ai_model=model)
-        time.sleep(1)
-        compaction_status, compaction_body = 0, {}
-        for _attempt in range(4):
-            compaction_status, compaction_body = api.json("POST", f"/api/v1/chat/sessions/{session}/context/compaction")
-            if compaction_status == 200:
-                break
-            time.sleep(1)
-        record("#246 the manual compaction completes",
-               compaction_status == 200 and bool(compaction_body.get("compactions")),
-               f"status={compaction_status} body={compaction_body}")
-        record("#246 the compaction leaves the persisted conclusion readable",
-               (_self_check_record(_self_check_records(api, session), task_id) or {}).get("status") == "passed",
-               f"record={_self_check_record(_self_check_records(api, session), task_id)}")
-
         # A second result that is never checked is listed as unchecked and has no
         # record; the result itself still downloads.
         second, why, _ = agent_tool_turn(
@@ -2466,17 +2448,9 @@ def scenario_self_check(work, stack_binary, processes, catalog):
         # The model listing reads the saved model file; let the finished Task
         # finish materializing its asset before the next prompt lists it.
         time.sleep(2.5)
+        # No separate plain turn: the next tool turn's prompt is the next-turn
+        # evidence, and it lists the unchecked result before the call runs.
         records = _self_check_records(api, session)
-        marker = "SECOND-MARKER"
-        _work_ledger_plain_turn(api, session, "这一版呢 " + marker, creative_domain="model-3d", ai_model=model)
-        prompt = _work_ledger_wait_system_all(work, session,
-                                              [second_id, "未自检", "不得说成已检查"],
-                                              seconds=300, stack="self-check")
-        record("#246 an unchecked result stays unchecked and is named in the prompt",
-               _self_check_record(records, second_id) is None
-               and second_id in prompt and "未自检" in prompt and "不得说成已检查" in prompt
-               and "已自检通过" in prompt,
-               f"records={records} prompt={prompt[-300:]}")
 
         # Round and render bounds are counted by the server; the record writer
         # stays available so the Agent can close the result truthfully.
@@ -2493,6 +2467,13 @@ def scenario_self_check(work, stack_binary, processes, catalog):
                 time.sleep(0.5)
         record("#246 the per-result round limit is refused with the Schema text",
                any("self-check limit declared" in text for text in texts), f"{texts}")
+        prompt = _work_ledger_wait_system_all(work, session,
+                                              [second_id, "未自检", "不得说成已检查"],
+                                              seconds=60, stack="self-check")
+        record("#246 an unchecked result stays unchecked and is named in the next prompt",
+               _self_check_record(records, second_id) is None
+               and second_id in prompt and "未自检" in prompt and "不得说成已检查" in prompt,
+               f"records={records} prompt={prompt[-300:]}")
         replies = assistant_reply_count(api, session)
         markers = " ".join(_work_ledger_marker("render_model_views", {"model": task_id, "views": ["front"]})
                            for _ in range(3))
@@ -2582,16 +2563,53 @@ def scenario_self_check(work, stack_binary, processes, catalog):
         status, body = api.json("POST", background_path)
         record("#246 background wait stops", status == 200 and body.get(backgrounded_member) is True, f"POST {status} {body}")
         background_task = wait_task(api, task_id_background, 120)
-        _quality_turn_done(api, session, 120)
         time.sleep(2.5)
-        _self_check_send(api, session, "后台好了吗", model)
-        _quality_turn_done(api, session, 120)
-        prompt = _work_ledger_wait_system(work, session, task_id_background, seconds=180, stack="self-check")
+        # A final conclusion survives the manual compaction, both in the store
+        # and in the next turn's prompt. The session already has enough rounds
+        # older than the kept window.
+        replies = assistant_reply_count(api, session)
+        if not _self_check_send(api, session, "最后记录一次结论 " + _work_ledger_marker("record_self_check", {
+                "model": task_id, "status": "has_issues", "summary": "one seam remains",
+                "findings": ["texture seam"], "fixes": ["re-rendered twice"], "remaining": ["seam on the back"]}),
+                model, replies_before=replies):
+            record("#246 final conclusion turn", False, "turn did not finish")
+            return
+        prompt = _work_ledger_wait_system_all(work, session,
+                                              [task_id_background, "后台完成，待自检"],
+                                              seconds=90, stack="self-check")
         record("#246 a background-finished result is listed as pending self-check",
                background_task.get("state") == "SUCCEEDED"
                and _self_check_record(_self_check_records(api, session), task_id_background) is None
                and task_id_background in prompt and "后台完成，待自检" in prompt,
                f"task={background_task.get('state')} prompt={prompt[-300:]}")
+        time.sleep(1)
+        compaction_status, compaction_body = 0, {}
+        for _attempt in range(4):
+            compaction_status, compaction_body = api.json("POST", f"/api/v1/chat/sessions/{session}/context/compaction")
+            if compaction_status == 200:
+                break
+            time.sleep(1)
+        record("#246 the manual compaction completes",
+               compaction_status == 200 and bool(compaction_body.get("compactions")),
+               f"status={compaction_status} body={compaction_body}")
+        record("#246 the compaction leaves the persisted conclusion readable",
+               (_self_check_record(_self_check_records(api, session), task_id) or {}).get("status") == "has_issues"
+               and (((_self_check_record(_self_check_records(api, session), task_id) or {}).get("conclusion") or {}).get("remaining") == ["seam on the back"]),
+               f"record={_self_check_record(_self_check_records(api, session), task_id)}")
+        replies = assistant_reply_count(api, session)
+        if not _self_check_send(api, session, "压缩后确认结论 " + _work_ledger_marker("record_self_check", {
+                "model": task_id, "status": "has_issues", "summary": "one seam remains",
+                "findings": ["texture seam"], "fixes": ["re-rendered twice"], "remaining": ["seam on the back"]}),
+                model, replies_before=replies):
+            record("#246 post-compaction conclusion turn", False, "turn did not finish")
+            return
+        prompt = _work_ledger_wait_system_all(work, session,
+                                              [task_id, "已自检有遗留问题", "one seam remains"],
+                                              seconds=90, stack="self-check")
+        record("#246 the compaction keeps the conclusion in the next prompt",
+               task_id in prompt and "已自检有遗留问题" in prompt and "one seam remains" in prompt,
+               prompt[-400:])
+
     finally:
         processes.stop(child)
 
