@@ -1188,6 +1188,17 @@ def scenario_three_view(work, api, offerings):
     else:
         record("three-view strict: front task exists", False, "no front task")
         return
+    # Strict mode has no server-side continuation: even after the front view
+    # finished, left and back stay not started until the person clicks.
+    group = _three_view_group(api, strict)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    strict_tasks = [t for t in session_tasks(api, strict)
+                    if t.get("capability") == "image-to-image" and t.get("state") != "CANCELED"]
+    record("three-view strict: the finished front does not start the next view",
+           bool(group) and slots.get("left", {}).get("status") == "not_started" and
+           slots.get("back", {}).get("status") == "not_started" and len(strict_tasks) == 1,
+           f"front {slots.get('front', {}).get('status')}, left {slots.get('left', {}).get('status')}, "
+           f"back {slots.get('back', {}).get('status')}, tasks {[t.get('state') for t in strict_tasks]}")
     view_route = f"/api/v1/chat/sessions/{strict}/three-views/{(group or {}).get('run_id')}/views/left"
     status, body = api.json("POST", view_route, {"action": "start", "attempt": 0})
     record("three-view strict: the person starts the left view", status == 200 and

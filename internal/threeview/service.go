@@ -301,7 +301,10 @@ func (s *Service) project(ctx context.Context, run skillrun.Run) (Group, error) 
 // not finally usable yet (#243). A source that finished with an unreviewed Task
 // still counts: starting the dependent view settles and reviews it first, and
 // refuses if the check rejects it. A rejected, failed, denied or canceled
-// source keeps every dependent view closed.
+// source keeps every dependent view closed, unless the person replaced it with
+// an upload: a replacement stands for the view whatever the rejected attempt
+// did, and the execution path accepts it as the dependent view's source even
+// when its review stays rejected.
 func applyViewDependencies(run skillrun.Run, slots []Slot) {
 	byKey := make(map[string]*Slot, len(slots))
 	for index := range slots {
@@ -315,7 +318,7 @@ func applyViewDependencies(run skillrun.Run, slots []Slot) {
 		if !found {
 			continue
 		}
-		if source.Status == Succeeded && source.Review != string(skillrun.Rejected) {
+		if source.Status == Succeeded && (source.Replaced || source.Review != string(skillrun.Rejected)) {
 			continue
 		}
 		slots[index].Startable = false

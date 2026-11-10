@@ -183,6 +183,11 @@ type continuationFixture struct {
 
 func newContinuationFixture(t *testing.T, withPlan bool) *continuationFixture {
 	t.Helper()
+	return newContinuationFixtureWithMode(t, withPlan, "budget")
+}
+
+func newContinuationFixtureWithMode(t *testing.T, withPlan bool, mode string) *continuationFixture {
+	t.Helper()
 	ctx := context.Background()
 	repo, _, _ := skillFixture(t)
 	insertGrantTurn(t, repo, "turn-a", "owner-a", "session-a")
@@ -206,7 +211,7 @@ func newContinuationFixture(t *testing.T, withPlan bool) *continuationFixture {
 	}
 	gateway := &continuationGateway{repo: repo}
 	grants := &executiongrant.Service{Grants: repo, Prepared: repo, Budgets: repo,
-		Policy: budgetContinuationPolicy(), Modes: fixedModes{mode: "budget"}}
+		Policy: budgetContinuationPolicy(), Modes: fixedModes{mode: mode}}
 	runtime, err := skillrun.NewRuntime(runs, gateway, grants)
 	if err != nil {
 		t.Fatal(err)
@@ -318,6 +323,30 @@ func (f *continuationFixture) finish(t *testing.T, taskID, assetID string) {
 	}
 }
 
+func (f *continuationFixture) group(t *testing.T) threeview.Group {
+	t.Helper()
+	groups, err := f.views.List(context.Background(), "owner-a", "session-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, group := range groups {
+		if group.RunID == f.run.ID {
+			return group
+		}
+	}
+	t.Fatalf("group %s missing from the listing", f.run.ID)
+	return threeview.Group{}
+}
+
+func slotOf(group threeview.Group, key string) threeview.Slot {
+	for _, slot := range group.Slots {
+		if slot.Key == key {
+			return slot
+		}
+	}
+	return threeview.Slot{}
+}
+
 func (f *continuationFixture) step(t *testing.T, key string) skillrun.Step {
 	t.Helper()
 	run, err := f.runtime.Get(context.Background(), "owner-a", f.run.ID)
@@ -424,6 +453,104 @@ func TestRejectedViewIsRedrawnAloneWithinTheAttemptLimit(t *testing.T) {
 	}
 	if result.FailedReasons == "" || !strings.Contains(result.FailedReasons, "subject_size_delta") {
 		t.Fatalf("failed reasons = %q", result.FailedReasons)
+	}
+}
+
+// Replacing a front view the consistency check rejected makes it stand for the
+// view, so the dependent views reopen: the projection must agree with the
+// execution path, which accepts a replacement whatever the rejected attempt
+// recorded (#243).
+func TestReplacingARejectedFrontViewReopensTheDependentViews(t *testing.T) {
+	f := newContinuationFixture(t, true)
+	ctx := context.Background()
+	frontTask := f.startFront(t)
+	f.finish(t, frontTask, "asset-front-rejected")
+	// A subject in the corner fails the front view's own checklist.
+	f.assets.bad["asset-front-rejected"] = continuationPicture(t, 64, 64, 0, 0, 8)
+	if _, err := f.runtime.SyncOutput(ctx, "owner-a", f.run.ID, "front"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.runtime.Review(ctx, skillrun.ReviewCommand{OwnerID: "owner-a", RunID: f.run.ID,
+		StepKey: "front", Decision: skillrun.Rejected}); err != nil {
+		t.Fatal(err)
+	}
+	group := f.group(t)
+	front, left, back := slotOf(group, "front"), slotOf(group, "left"), slotOf(group, "back")
+	if front.Review != string(skillrun.Rejected) || left.Startable || left.Retryable || back.Startable {
+		t.Fatalf("a rejected front must keep the dependent views closed: front=%+v left=%+v back=%+v",
+			front, left, back)
+	}
+
+	if _, err := f.repo.db.Exec(`INSERT INTO generation_input_assets
+		(id,owner_id,storage_key,media_type,size_bytes,sha256,created_at)
+		VALUES ('asset-front-upload','owner-a','blobs/asset-front-upload','image/png',4,'abcd',
+		'2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	group, err := f.views.Replace(ctx, executiongrant.Principal{OwnerID: "owner-a", ActorID: "owner-a",
+		Source: executiongrant.HumanBrowser}, "session-a", f.run.ID, "front", "asset-front-upload")
+	if err != nil {
+		t.Fatal(err)
+	}
+	front, left, back = slotOf(group, "front"), slotOf(group, "left"), slotOf(group, "back")
+	if front.Status != threeview.Succeeded || !front.Replaced ||
+		front.OutputAssetID != "asset-front-upload" || front.Startable || front.Retryable {
+		t.Fatalf("replaced front = %+v", front)
+	}
+	if !left.Startable || !back.Startable || left.Retryable || back.Retryable {
+		t.Fatalf("a replaced front must reopen left and back: left=%+v back=%+v", left, back)
+	}
+
+	// Starting left goes through the same execution path and really uses the
+	// uploaded picture as its source.
+	started, err := f.views.Advance(ctx, executiongrant.Principal{OwnerID: "owner-a", ActorID: "owner-a",
+		Source: executiongrant.HumanBrowser}, "session-a", f.run.ID, "left", threeview.Start, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if left = slotOf(started, "left"); left.TaskID == "" || left.Status != threeview.Running {
+		t.Fatalf("left after the start = %+v", left)
+	}
+	execution, err := f.runtime.Runs.ResolveExecution(ctx, "owner-a", f.run.ID, "left")
+	if err != nil || execution.SourceAssetID != "asset-front-upload" {
+		t.Fatalf("left source = %q err=%v", execution.SourceAssetID, err)
+	}
+	if f.gateway.submits != 2 {
+		t.Fatalf("submissions = %d, want front and the started left view", f.gateway.submits)
+	}
+}
+
+// Strict (manual) mode never continues the views from an approved plan, even
+// when the plan covers them: the person still starts each view. The front view
+// itself keeps the shipped 2D policy (an image step is auto-approved), so the
+// per-view human gate is the three-view card action, not a budget grant.
+func TestStrictModeNeverContinuesViewsByBudget(t *testing.T) {
+	f := newContinuationFixtureWithMode(t, true, "manual")
+	ctx := context.Background()
+	if ok, err := f.views.CanContinue(ctx, "owner-a", "session-a", f.run.ID); err != nil || ok {
+		t.Fatalf("strict mode reported a budget continuation: %v %v", ok, err)
+	}
+	if _, _, err := f.runtime.PrepareStep(ctx, "owner-a", f.run.ID, "front"); err != nil {
+		t.Fatal(err)
+	}
+	_, grant, err := f.runtime.RequestAgentGrant(ctx, "owner-a", f.run.ID, "front", "turn-a")
+	if err != nil || grant.Status != executiongrant.Approved || grant.ApprovedByBudget() {
+		t.Fatalf("front grant = %+v err=%v", grant, err)
+	}
+	_, accepted, err := f.runtime.SubmitStep(ctx, "owner-a", f.run.ID, "front")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.finish(t, string(accepted.TaskID), "asset-front")
+	result, err := f.views.Continue(ctx, "owner-a", "session-a", f.run.ID, string(accepted.TaskID), "turn-a")
+	if err != nil || !result.Paused || result.Reason != threeview.ReasonBudgetNotCovered || result.TaskID != "" {
+		t.Fatalf("strict continuation = %+v err=%v", result, err)
+	}
+	if left := f.step(t, "left"); left.TaskID != "" || left.Phase != skillrun.Planned {
+		t.Fatalf("strict mode submitted a later view without a person: %+v", left)
+	}
+	if f.gateway.submits != 1 {
+		t.Fatalf("submissions = %d, want only the front view", f.gateway.submits)
 	}
 }
 
