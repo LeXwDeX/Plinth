@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "description": "Agent 产出质量的视觉评分量表（#238）。评分者可以是人工或评审模型；提示词与量表一起入库，带版本号。",
+  "scale": {
+    "min": 1,
+    "max": 5,
+    "labels": {
+      "1": "明显不可用：主体错误、结构破碎或与需求冲突",
+      "2": "勉强可用：主体可辨，但比例、细节或用途适配有明显问题",
+      "3": "合格：满足主要需求，存在可见但可接受的瑕疵",
+      "4": "良好：需求贴合、结构完整，仅有轻微瑕疵",
+      "5": "优秀：需求贴合、结构准确、细节完整，可直接交付"
+    }
+  },
+  "axes": {
+    "reference_fidelity": {
+      "label": "需求贴合度",
+      "description": "与用户话术、制作简报和参考图（如有）的一致程度：主体、风格、配色、服装/材质、用途是否符合要求。"
+    },
+    "silhouette_anatomy": {
+      "label": "轮廓与结构",
+      "description": "轮廓是否清晰可读，比例与解剖/机械结构是否正确，正面与侧面是否自洽。"
+    },
+    "back_and_detail": {
+      "label": "背面与细节",
+      "description": "背面是否完整建模，手指、细小结构、接缝、漂浮碎片与对称性是否处理得当。"
+    },
+    "texture_and_material": {
+      "label": "贴图与材质",
+      "description": "贴图接缝、材质表现、配色与光照是否合理，是否存在拉伸、错位或明显低清。"
+    },
+    "series_consistency": {
+      "label": "系列一致性",
+      "description": "同一角色的多张图中，风格锚（画风、色板、光线、线条密度）与身份锚（外形、比例、配色、服装、标志性细节）是否保持一致。"
+    },
+    "purpose_fit": {
+      "label": "用途适配",
+      "description": "是否满足用途预算与可用性：游戏角色的面数/UV、打印件的水密与实体、AR 商品的尺寸与贴图预算、展示模型的细节。"
+    },
+    "craft": {
+      "label": "完成度",
+      "description": "整体完成度与精致度：构图、边缘、细节密度、是否有明显生成瑕疵。"
+    }
+  },
+  "per_request_axes": {
+    "3d-humanoid-character": ["reference_fidelity", "silhouette_anatomy", "back_and_detail", "texture_and_material", "purpose_fit"],
+    "3d-hard-surface-prop": ["reference_fidelity", "silhouette_anatomy", "back_and_detail", "texture_and_material", "purpose_fit"],
+    "3d-scene-piece": ["reference_fidelity", "silhouette_anatomy", "back_and_detail", "texture_and_material", "purpose_fit"],
+    "3d-creature": ["reference_fidelity", "silhouette_anatomy", "back_and_detail", "texture_and_material", "purpose_fit"],
+    "3d-print-figurine": ["reference_fidelity", "silhouette_anatomy", "back_and_detail", "texture_and_material", "purpose_fit"],
+    "3d-ar-product": ["reference_fidelity", "silhouette_anatomy", "back_and_detail", "texture_and_material", "purpose_fit"],
+    "2d-character-illustration": ["reference_fidelity", "craft"],
+    "2d-icon-set": ["reference_fidelity", "craft"],
+    "2d-series-consistency": ["reference_fidelity", "series_consistency", "craft"]
+  },
+  "prompt_template": "你是 Plinth 的 Agent 产出质量评审。请只依据给出的请求、参考图和渲染图评分，不要臆测未提供的信息。\n\n请求：{title}\n用户话术：{prompt}\n用途：{purpose}\n期望交付物：{deliverables}\n\n参考图（如有）：\n{reference_images}\n\n统一视角渲染图 / 产出图：\n{rendered_views}\n\n评分维度（每项 1-5 分，并写一句理由）：\n{axes}\n\n量表：\n{scale}\n\n输出严格的 JSON 对象，键为维度 id，值为 {{\"score\": 1-5, \"reason\": \"...\"}}。不要输出 JSON 以外的内容。",
+  "reference_view_policy": "3D 产出统一使用 render_model_views 的 front、back、three_quarter 视角；2D 产出直接使用生成图。参考图按请求给出；没有参考图时在提示词中写“无”。",
+  "reviewer_parameter_policy": "评审模型由运行者显式指定，调用次数上限与费用也由运行者显式给出；脚本不内置模型名、价格或自动重试。"
+}

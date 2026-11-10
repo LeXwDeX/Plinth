@@ -125,6 +125,35 @@ ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- bash scripts/
 
 测试数据按协议保留在 `dev-test`。纯逻辑的离线单元测试：`python3 -m unittest scripts.tests.test_l5_common`。
 
+## Agent 产出质量评测（#238）
+
+固定请求集在 `scripts/smoke/agent-quality/requests.json`（6 个 3D 用例：人形角色、硬表面道具、场景件、生物、打印手办、AR 商品；3 个 2D 用例：角色立绘、图标/道具图、系列一致性），视觉量表与评分提示词在 `scripts/smoke/agent-quality/rubric.json`，两者都带版本号。共用逻辑在 `agent_quality.py`，离线单测：`python3 -m unittest scripts.tests.test_agent_quality`。
+
+### 轨迹评测（fake，免费，可重复）
+
+```
+python3 scripts/smoke/smoke-fake-stack.py --only agent-quality --report <目录>
+```
+
+在 `smoke-fake-stack.py` 的隔离 fake 栈（真实 chat/编排/批准/Task/render 路径，fake LLM 只把请求集每个 step 的 tool 标记变成工具调用）上跑完整请求集。它评的是**系统对参考轨迹的实现**：用途卡、制作简报、付费批准、3D 任务、`inspect_model`、`render_model_views`、最终回复是否按请求集走通；不是模型自主选择的质量。硬断言是最终回复非失败、预期能力任务 SUCCEEDED、必需工具组与先后顺序、付费/工具/打断预算、无失败任务；`inspect_model` 与 `render_model_views` 次数作为软指标记录。零成本、离线、只用回环地址，结果稳定，可用于门禁（当前未接入 CI，需要时把 `agent-quality` 加进 `--only` 列表）。报告写 `agent-quality-trajectory.json` 与 `.md`；`main` 的基线放在 `scripts/smoke/agent-quality/baselines/`。
+
+### 产出评测（真实上游，按次同意）
+
+```
+BASE=... ADMIN_USERNAME=... ADMIN_PASSWORD=... ART_AI_LIVE_ACK=1 \
+  python3 scripts/smoke/eval-agent-output.py --live --report <目录>
+```
+
+只发送请求集的用户话术，由真实 Agent 自行决定轨迹；脚本自动回答用途卡、按 Schema 路由批准卡片（auto 批准方式下通常没有逐步卡），记录打断、工具调用、付费调用与任务。产出收集为 `artifacts/`：3D 模型用 `scripts/smoke/inspect_model_eval.go`（复用 `internal/modelinspect`，与 Agent 的 `inspect_model` 同一套事实）计算面数、拓扑、水密、UV、部件与用途预算判定；2D 记录尺寸、格式、背景/主体覆盖；`render_model_views` 的视图保存为评分图。报告写 `agent-quality-output.json` 与 `.md`，同时生成 `scoring-packet.json` 与 `scoring-sheet.md`：量表、提示词、参考图与渲染图都在里面，由人工或评审模型评分后写入 `scores.json`，再用 `--scores scores.json` 合并。评分文件形如 `{"<用例 id>": {"reference_fidelity": {"score": 4, "reason": "…"}, "craft": {"score": 3, "reason": "…"}}}`；维度取 `rubric.json` 的 `per_request_axes`。脚本不内置评审模型、调用次数或费用，也不自动重试真实上游。
+
+### 两次运行对比
+
+```
+python3 scripts/smoke/eval-agent-compare.py <基线.json> <候选.json> [--tolerance N] [--json 结果.json]
+```
+
+逐用例比较检查状态与汇总指标：检查 pass→fail、用例缺失、工具/付费/打断次数增加是回退；自检次数增加是改善。有回退时退出码 1，可直接用作门禁；`--no-fail` 只报告。
+
 ## Fake 上游整栈自检（#96）
 
 `python3 scripts/smoke/smoke-fake-stack.py`：先启动 `cmd/fake-upstream`，再以 live 模式启动本机隔离栈（Tripo、Meshy、Hyper3D、LLM、OpenAI/Gemini/Jimeng 图像与抠图的 base URL 指向 fake），核对三家余额面板、Tripo 生成 → rig-check → rigging → animation、segment → complete、Meshy 文生 3D → remesh → rigging → animation / retexture / convert、Hyper3D 文生 3D → Bang → texture、三家图像的文生图与图生图、抠图、Tripo 的图生 3D / splat / multiview 与 edit / 两种 Smart Segmentation / decimate、Agent 对话 → 工具调用 → 批准 → 任务 → 回复，以及各故障场景的 Task 终态与错误 class。零成本、离线，只用回环地址，不读取真实 Key，**不属于**发布验收（L0/L1/L2 仍按上文），也不替代真实付费验收。说明见 `dev_test.md`「Fake 上游自检」。`python3 scripts/smoke/replay-recovery-on-fake.py` 在同一个 fake 上重放受控验收的 chain、lost-response、formats（缺格式补齐）与 image（图片本地 wire 故障）（下节 Recovery Fixture 的同一套 runner 与种子工具），不依赖真实 Meshy 余额。
