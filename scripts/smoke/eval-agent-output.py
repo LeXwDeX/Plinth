@@ -274,6 +274,8 @@ def collect_renders(live, messages, directory, report_root):
 def collect_outputs(live, request, tasks, messages, tools, directory, schema, report_root):
     output = {"tasks": [], "renders": []}
     checks = []
+    # The final deliverable is the last image-producing Task; the API may list newest first.
+    tasks = sorted(tasks, key=lambda task: str(task.get("created_at") or ""))
     renders = collect_renders(live, messages, directory, report_root)
     output["renders"] = [{"label": render["label"], "path": render["path"]} for render in renders]
     inspect_summary = next((tool.get("summary") for tool in tools if tool["name"] == "inspect_model" and tool.get("summary")), None)
@@ -285,12 +287,13 @@ def collect_outputs(live, request, tasks, messages, tools, directory, schema, re
         output["images"] = images
         output["renders"] = [{"label": f"image-{index + 1}", "path": image["path"]} for index, image in enumerate(images)]
         background = (request.get("output") or {}).get("background")
-        for image in images:
+        for index, image in enumerate(images):
             metrics = image["metrics"]
             checks.append({"id": f"output:image:{image['task_id']}", "status": quality.CHECK_PASS,
                            "detail": f"{metrics.get('width')}x{metrics.get('height')} {metrics.get('format')}"
                                      f", subject {metrics.get('opaque_ratio')}, edge {metrics.get('edge_contact')}"})
-            if background == "transparent":
+            # The deliverable is the last image (a background-removal step may follow the generation).
+            if background == "transparent" and index == len(images) - 1:
                 ok = bool(metrics.get("alpha")) and bool(metrics.get("nonblank")) and (metrics.get("opaque_ratio") or 0) < 0.98
                 checks.append({"id": f"output:background:{image['task_id']}", "status": quality.CHECK_PASS if ok else quality.CHECK_FAIL,
                                "detail": f"alpha={metrics.get('alpha')}, subject={metrics.get('opaque_ratio')}"})

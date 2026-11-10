@@ -12,6 +12,7 @@ Everything that decides a result is a plain function so
 `scripts/tests/test_agent_quality.py` can cover it without a server.
 """
 
+import decimal
 import hashlib
 import json
 import os
@@ -241,8 +242,11 @@ def evaluate_case(request, run):
     counts = {}
     for name in names:
         counts[name] = counts.get(name, 0) + 1
+    prices = common.call_prices(run.get("messages") or [])
+    credits = common.spend_by_unit(prices.values())
     metrics = {
         "tool_call_count": len(names),
+        "credits": {unit: str(amount) for unit, amount in sorted(credits.items())},
         "paid_call_count": paid,
         "interruption_count": len(cards),
         "choice_card_count": sum(1 for card in cards if card.get("kind") == "choice"),
@@ -299,6 +303,10 @@ def summarize(cases, mode, revision, dirty, request_set, rubric=None, started_at
     total_tools = sum(case["metrics"]["tool_call_count"] for case in cases)
     inspect = sum(case["metrics"]["self_inspection"]["inspect_model"] for case in cases)
     renders = sum(case["metrics"]["self_inspection"]["render_model_views"] for case in cases)
+    credits = {}
+    for case in cases:
+        for unit, amount in (case["metrics"].get("credits") or {}).items():
+            credits[unit] = credits.get(unit, decimal.Decimal(0)) + decimal.Decimal(str(amount))
     report = {
         "schema_version": 1,
         "kind": "agent-quality",
@@ -318,6 +326,7 @@ def summarize(cases, mode, revision, dirty, request_set, rubric=None, started_at
                 "interruptions": total_cards,
                 "inspect_model": inspect,
                 "render_model_views": renders,
+                "credits": {unit: str(amount) for unit, amount in sorted(credits.items())},
                 "elapsed_ms": sum((case["metrics"].get("elapsed_ms") or 0) for case in cases),
             },
         },
@@ -355,7 +364,7 @@ def report_markdown(report):
         lines.append(f"- 量表: version {report['rubric'].get('version')}, sha256 `{report['rubric'].get('sha256')}`")
     lines += [
         f"- 用例: {summary.get('cases', 0)}；硬失败: {summary.get('hard_failures', 0)}",
-        f"- 合计: 工具调用 {metrics.get('tool_calls', 0)}，付费调用 {metrics.get('paid_calls', 0)}，打断 {metrics.get('interruptions', 0)}，inspect {metrics.get('inspect_model', 0)}，render {metrics.get('render_model_views', 0)}",
+        f"- 合计: 工具调用 {metrics.get('tool_calls', 0)}，付费调用 {metrics.get('paid_calls', 0)}，打断 {metrics.get('interruptions', 0)}，inspect {metrics.get('inspect_model', 0)}，render {metrics.get('render_model_views', 0)}，计费 {metrics.get('credits', {})}",
         "",
         "| 用例 | 结果 | 工具 | 付费 | 打断 | inspect | render | 耗时 |",
         "|---|---|---|---|---|---|---|---|",

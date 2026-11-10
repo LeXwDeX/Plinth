@@ -127,7 +127,7 @@ class TrajectoryTest(unittest.TestCase):
             "messages": [
                 message({"name": "ask_choice"}),
                 message({"name": "update_production_brief"}),
-                message({"name": "create_model_3d", "taskId": "t1"}),
+                message({"name": "create_model_3d", "taskId": "t1", "estimatedCredits": 40}),
                 message({"name": "inspect_model"}),
                 message({"name": "render_model_views"}),
             ],
@@ -143,6 +143,7 @@ class TrajectoryTest(unittest.TestCase):
         self.assertEqual(case["metrics"]["paid_call_count"], 1)
         self.assertEqual(case["metrics"]["interruption_count"], 2)
         self.assertEqual(case["metrics"]["self_inspection"], {"inspect_model": 1, "render_model_views": 1})
+        self.assertEqual(case["metrics"]["credits"], {"legacy.credits": "40"})
 
     def test_evaluate_case_reports_each_kind_of_failure(self):
         run = {
