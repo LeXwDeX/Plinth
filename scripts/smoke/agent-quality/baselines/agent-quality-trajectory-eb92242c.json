@@ -2,8 +2,8 @@
   "schema_version": 1,
   "kind": "agent-quality",
   "mode": "trajectory-fake",
-  "generated_at": "2026-11-10T01:48:56Z",
-  "revision": "1f01387c898165a62dc721a0167d22dd27c2e1f8",
+  "generated_at": "2026-11-10T02:01:14Z",
+  "revision": "eb92242cfee7f7abbecb7ea1a8bd9b41bf2a06e9",
   "dirty": false,
   "request_set": {
     "path": "scripts/smoke/agent-quality/requests.json",
@@ -17,7 +17,7 @@
       "modality": "3d",
       "category": "humanoid_character",
       "purpose": "game_character",
-      "session_id": "session_9NfeBkdJiAgAQh6mzxS_VwNi",
+      "session_id": "session_kW58m1aAqHe6idZ0Ab8OdK6k",
       "turns": 5,
       "tool_calls": [
         {
@@ -44,18 +44,18 @@
           "arguments": {
             "prompt": "cyberpunk female assassin, full body, A-pose, game character, dark techwear jacket, neon accents, detailed face, realistic stylized"
           },
-          "task_id": "task_05e669bab26ab099396a80628d18a253",
+          "task_id": "task_6c4367715af2b3296d29fab45eb9d571",
           "summary": null
         },
         {
           "name": "inspect_model",
           "arguments": {
-            "model": "task_05e669bab26ab099396a80628d18a253"
+            "model": "task_6c4367715af2b3296d29fab45eb9d571"
           },
           "task_id": null,
           "summary": {
             "tool": "inspect",
-            "model": "task_05e669bab26ab099396a80628d18a253",
+            "model": "task_6c4367715af2b3296d29fab45eb9d571",
             "triangles": 72,
             "has_uv": true,
             "watertight": true,
@@ -158,7 +158,7 @@
         {
           "name": "render_model_views",
           "arguments": {
-            "model": "task_05e669bab26ab099396a80628d18a253",
+            "model": "task_6c4367715af2b3296d29fab45eb9d571",
             "views": [
               "front",
               "back",
@@ -172,7 +172,7 @@
               "@img2",
               "@img3"
             ],
-            "model": "task_05e669bab26ab099396a80628d18a253",
+            "model": "task_6c4367715af2b3296d29fab45eb9d571",
             "render_calls_remaining": 5,
             "tool": "render",
             "views": [
@@ -186,14 +186,14 @@
       "cards": [
         {
           "kind": "choice",
-          "id": "choice_2803a122314aacaab23712a5",
+          "id": "choice_506389cb0b3a825343a15b3e",
           "tool": "update_production_brief",
           "card_kind": "usage_profile",
           "state": "answered"
         },
         {
           "kind": "approval",
-          "id": "eg_c11720c39c4c74369b91cd3b09937960e543a6d9a4e7b546",
+          "id": "eg_492aedd5dfbfa08bc29824a8bf0925ff53a91864d2a897cf",
           "tool": "create_model_3d",
           "capability": "text-to-3d",
           "state": "approved"
@@ -201,7 +201,7 @@
       ],
       "tasks": [
         {
-          "id": "task_05e669bab26ab099396a80628d18a253",
+          "id": "task_6c4367715af2b3296d29fab45eb9d571",
           "capability": "text-to-3d",
           "model_id": "meshy-7.1",
           "offering_id": "meshy/meshy-7.1/text-to-3d",
@@ -216,6 +216,9 @@
       "assets": [],
       "metrics": {
         "tool_call_count": 5,
+        "credits": {
+          "legacy.credits": "40"
+        },
         "paid_call_count": 1,
         "interruption_count": 2,
         "choice_card_count": 1,
@@ -234,7 +237,7 @@
         },
         "image_count": 3,
         "final_reply_chars": 20,
-        "elapsed_ms": 7136
+        "elapsed_ms": 7126
       },
       "checks": [
         {
@@ -295,7 +298,7 @@
       "modality": "3d",
       "category": "hard_surface_prop",
       "purpose": "game_prop",
-      "session_id": "session_bhE4QIryniR8M4HoNAsyzkyM",
+      "session_id": "session_mH3Ylk1zU_gQgFaZlYiwyD5R",
       "turns": 5,
       "tool_calls": [
         {
@@ -321,18 +324,18 @@
           "arguments": {
             "prompt": "low-poly sci-fi energy rifle, hard surface, chunky angular silhouette, game prop, dark metal with cyan energy cell"
           },
-          "task_id": "task_fa02c53cedd707353808cb1e1594cf03",
+          "task_id": "task_b286fef3d7987a03f606cb4166c9245b",
           "summary": null
         },
         {
           "name": "inspect_model",
           "arguments": {
-            "model": "task_fa02c53cedd707353808cb1e1594cf03"
+            "model": "task_b286fef3d7987a03f606cb4166c9245b"
           },
           "task_id": null,
           "summary": {
             "tool": "inspect",
-            "model": "task_fa02c53cedd707353808cb1e1594cf03",
+            "model": "task_b286fef3d7987a03f606cb4166c9245b",
             "triangles": 72,
             "has_uv": true,
             "watertight": true,
@@ -435,7 +438,7 @@
         {
           "name": "render_model_views",
           "arguments": {
-            "model": "task_fa02c53cedd707353808cb1e1594cf03",
+            "model": "task_b286fef3d7987a03f606cb4166c9245b",
             "views": [
               "front",
               "back",
@@ -449,7 +452,7 @@
               "@img2",
               "@img3"
             ],
-            "model": "task_fa02c53cedd707353808cb1e1594cf03",
+            "model": "task_b286fef3d7987a03f606cb4166c9245b",
             "render_calls_remaining": 5,
             "tool": "render",
             "views": [
@@ -463,14 +466,14 @@
       "cards": [
         {
           "kind": "choice",
-          "id": "choice_a882773925d39e13589ac879",
+          "id": "choice_c50a1f8ddbcbbd8a7b7bec7e",
           "tool": "update_production_brief",
           "card_kind": "usage_profile",
           "state": "answered"
         },
         {
           "kind": "approval",
-          "id": "eg_7d1d8f73a0bfb357dc1014a6fddc405d3be71fa18caa1ca8",
+          "id": "eg_efc97e38c1a826027892058464e4a748d521011764f79e6f",
           "tool": "create_model_3d",
           "capability": "text-to-3d",
           "state": "approved"
@@ -478,7 +481,7 @@
       ],
       "tasks": [
         {
-          "id": "task_fa02c53cedd707353808cb1e1594cf03",
+          "id": "task_b286fef3d7987a03f606cb4166c9245b",
           "capability": "text-to-3d",
           "model_id": "meshy-7.1",
           "offering_id": "meshy/meshy-7.1/text-to-3d",
@@ -493,6 +496,9 @@
       "assets": [],
       "metrics": {
         "tool_call_count": 5,
+        "credits": {
+          "legacy.credits": "40"
+        },
         "paid_call_count": 1,
         "interruption_count": 2,
         "choice_card_count": 1,
@@ -511,7 +517,7 @@
         },
         "image_count": 3,
         "final_reply_chars": 20,
-        "elapsed_ms": 7142
+        "elapsed_ms": 7120
       },
       "checks": [
         {
@@ -572,7 +578,7 @@
       "modality": "3d",
       "category": "scene_piece",
       "purpose": "game_prop",
-      "session_id": "session_d4N3qaAP7fdG52KOOmpKLYha",
+      "session_id": "session_syFXwoMHqvClXVE7lLIdzqqd",
       "turns": 5,
       "tool_calls": [
         {
@@ -598,18 +604,18 @@
           "arguments": {
             "prompt": "stylized stone well, scene prop, chunky masonry, wooden roof and bucket, hand-painted game art style"
           },
-          "task_id": "task_6cff7d438b2298e5eb4898ea3f49d242",
+          "task_id": "task_896714ede0c219d60ae3de441be17753",
           "summary": null
         },
         {
           "name": "inspect_model",
           "arguments": {
-            "model": "task_6cff7d438b2298e5eb4898ea3f49d242"
+            "model": "task_896714ede0c219d60ae3de441be17753"
           },
           "task_id": null,
           "summary": {
             "tool": "inspect",
-            "model": "task_6cff7d438b2298e5eb4898ea3f49d242",
+            "model": "task_896714ede0c219d60ae3de441be17753",
             "triangles": 72,
             "has_uv": true,
             "watertight": true,
@@ -712,7 +718,7 @@
         {
           "name": "render_model_views",
           "arguments": {
-            "model": "task_6cff7d438b2298e5eb4898ea3f49d242",
+            "model": "task_896714ede0c219d60ae3de441be17753",
             "views": [
               "front",
               "back",
@@ -726,7 +732,7 @@
               "@img2",
               "@img3"
             ],
-            "model": "task_6cff7d438b2298e5eb4898ea3f49d242",
+            "model": "task_896714ede0c219d60ae3de441be17753",
             "render_calls_remaining": 5,
             "tool": "render",
             "views": [
@@ -740,14 +746,14 @@
       "cards": [
         {
           "kind": "choice",
-          "id": "choice_f6bd1b8cd4e969fd67a51ed6",
+          "id": "choice_cc5970a5b5276f868ab65f8a",
           "tool": "update_production_brief",
           "card_kind": "usage_profile",
           "state": "answered"
         },
         {
           "kind": "approval",
-          "id": "eg_db55d9ed4217ebafc904e24907039605aa323387987ca7bb",
+          "id": "eg_3af0817b5d1b3068b6abf9deb763c263f46c7d10705229b5",
           "tool": "create_model_3d",
           "capability": "text-to-3d",
           "state": "approved"
@@ -755,7 +761,7 @@
       ],
       "tasks": [
         {
-          "id": "task_6cff7d438b2298e5eb4898ea3f49d242",
+          "id": "task_896714ede0c219d60ae3de441be17753",
           "capability": "text-to-3d",
           "model_id": "meshy-7.1",
           "offering_id": "meshy/meshy-7.1/text-to-3d",
@@ -770,6 +776,9 @@
       "assets": [],
       "metrics": {
         "tool_call_count": 5,
+        "credits": {
+          "legacy.credits": "40"
+        },
         "paid_call_count": 1,
         "interruption_count": 2,
         "choice_card_count": 1,
@@ -788,7 +797,7 @@
         },
         "image_count": 3,
         "final_reply_chars": 20,
-        "elapsed_ms": 7117
+        "elapsed_ms": 7083
       },
       "checks": [
         {
@@ -849,7 +858,7 @@
       "modality": "3d",
       "category": "creature",
       "purpose": "render",
-      "session_id": "session_dFKG0eM0qlnDwrWzv7JpPhvv",
+      "session_id": "session_dt1R63LxXLw0PGVYz-V0qunI",
       "turns": 5,
       "tool_calls": [
         {
@@ -875,18 +884,18 @@
           "arguments": {
             "prompt": "bioluminescent deep-sea jellyfish creature, translucent bell, glowing tentacles, organic sci-fi, display model, detailed"
           },
-          "task_id": "task_492687cbbd55791d6cef3c1e9a7fca44",
+          "task_id": "task_5f7fbbfa41c391ff65fe87c4663eac55",
           "summary": null
         },
         {
           "name": "inspect_model",
           "arguments": {
-            "model": "task_492687cbbd55791d6cef3c1e9a7fca44"
+            "model": "task_5f7fbbfa41c391ff65fe87c4663eac55"
           },
           "task_id": null,
           "summary": {
             "tool": "inspect",
-            "model": "task_492687cbbd55791d6cef3c1e9a7fca44",
+            "model": "task_5f7fbbfa41c391ff65fe87c4663eac55",
             "triangles": 72,
             "has_uv": true,
             "watertight": true,
@@ -983,7 +992,7 @@
         {
           "name": "render_model_views",
           "arguments": {
-            "model": "task_492687cbbd55791d6cef3c1e9a7fca44",
+            "model": "task_5f7fbbfa41c391ff65fe87c4663eac55",
             "views": [
               "front",
               "back",
@@ -997,7 +1006,7 @@
               "@img2",
               "@img3"
             ],
-            "model": "task_492687cbbd55791d6cef3c1e9a7fca44",
+            "model": "task_5f7fbbfa41c391ff65fe87c4663eac55",
             "render_calls_remaining": 5,
             "tool": "render",
             "views": [
@@ -1011,14 +1020,14 @@
       "cards": [
         {
           "kind": "choice",
-          "id": "choice_1c1335b12e9a4fa013ca39c2",
+          "id": "choice_a48250b9022f0e6e3f6682c3",
           "tool": "update_production_brief",
           "card_kind": "usage_profile",
           "state": "answered"
         },
         {
           "kind": "approval",
-          "id": "eg_0a8b62673dfb74cfa30daa88f42a1cda95f8d7df16e6c57d",
+          "id": "eg_446bd1a5ecd868d88a3b10f9cde06a0552a2f766295bf0b1",
           "tool": "create_model_3d",
           "capability": "text-to-3d",
           "state": "approved"
@@ -1026,7 +1035,7 @@
       ],
       "tasks": [
         {
-          "id": "task_492687cbbd55791d6cef3c1e9a7fca44",
+          "id": "task_5f7fbbfa41c391ff65fe87c4663eac55",
           "capability": "text-to-3d",
           "model_id": "meshy-7.1",
           "offering_id": "meshy/meshy-7.1/text-to-3d",
@@ -1041,6 +1050,9 @@
       "assets": [],
       "metrics": {
         "tool_call_count": 5,
+        "credits": {
+          "legacy.credits": "40"
+        },
         "paid_call_count": 1,
         "interruption_count": 2,
         "choice_card_count": 1,
@@ -1059,7 +1071,7 @@
         },
         "image_count": 3,
         "final_reply_chars": 20,
-        "elapsed_ms": 7116
+        "elapsed_ms": 7117
       },
       "checks": [
         {
@@ -1120,7 +1132,7 @@
       "modality": "3d",
       "category": "print_figurine",
       "purpose": "print",
-      "session_id": "session_o0CiNyN9q8t9_0DVjhZZviX9",
+      "session_id": "session_00O9b4lKDU4tqTLecwpbMWbr",
       "turns": 6,
       "tool_calls": [
         {
@@ -1146,7 +1158,7 @@
           "arguments": {
             "prompt": "concept art of a tabletop miniature knight, full body, neutral A-pose, plain light background, front view, clean silhouette, printable details, realistic stylized"
           },
-          "task_id": "task_04a1157a3129d6701ed19a569eb08b68",
+          "task_id": "task_d5f8693b1777f51cb1582926bbfebb58",
           "summary": null
         },
         {
@@ -1157,18 +1169,18 @@
               1
             ]
           },
-          "task_id": "task_796e61a18b9b15193775443411464622",
+          "task_id": "task_94750e1b5a24a4b8eaade8592756e6a5",
           "summary": null
         },
         {
           "name": "inspect_model",
           "arguments": {
-            "model": "task_796e61a18b9b15193775443411464622"
+            "model": "task_94750e1b5a24a4b8eaade8592756e6a5"
           },
           "task_id": null,
           "summary": {
             "tool": "inspect",
-            "model": "task_796e61a18b9b15193775443411464622",
+            "model": "task_94750e1b5a24a4b8eaade8592756e6a5",
             "triangles": 72,
             "has_uv": true,
             "watertight": true,
@@ -1269,7 +1281,7 @@
         {
           "name": "render_model_views",
           "arguments": {
-            "model": "task_796e61a18b9b15193775443411464622",
+            "model": "task_94750e1b5a24a4b8eaade8592756e6a5",
             "views": [
               "front",
               "back",
@@ -1283,7 +1295,7 @@
               "@img3",
               "@img4"
             ],
-            "model": "task_796e61a18b9b15193775443411464622",
+            "model": "task_94750e1b5a24a4b8eaade8592756e6a5",
             "render_calls_remaining": 5,
             "tool": "render",
             "views": [
@@ -1297,14 +1309,14 @@
       "cards": [
         {
           "kind": "choice",
-          "id": "choice_b439a73a29dc3e6720484aaf",
+          "id": "choice_3d38b608a0ef0c8eaf88b31d",
           "tool": "update_production_brief",
           "card_kind": "usage_profile",
           "state": "answered"
         },
         {
           "kind": "approval",
-          "id": "eg_da6dfda361ddbb8fe3a3811f67aa144f832a00fb2ab5981f",
+          "id": "eg_aad38fe3f5ca2e4fffe3f2777b5827eac03669b256ff84d4",
           "tool": "create_model_3d_from_image",
           "capability": "image-to-3d",
           "state": "approved"
@@ -1312,7 +1324,7 @@
       ],
       "tasks": [
         {
-          "id": "task_796e61a18b9b15193775443411464622",
+          "id": "task_94750e1b5a24a4b8eaade8592756e6a5",
           "capability": "image-to-3d",
           "model_id": "meshy-7.1",
           "offering_id": "meshy/meshy-7.1/image-to-3d",
@@ -1320,7 +1332,7 @@
           "credits_charged": null
         },
         {
-          "id": "task_04a1157a3129d6701ed19a569eb08b68",
+          "id": "task_d5f8693b1777f51cb1582926bbfebb58",
           "capability": "text-to-image",
           "model_id": "nano-banana-pro",
           "offering_id": "meshy/nano-banana-pro/text-to-image",
@@ -1335,6 +1347,9 @@
       "assets": [],
       "metrics": {
         "tool_call_count": 6,
+        "credits": {
+          "legacy.credits": "49"
+        },
         "paid_call_count": 2,
         "interruption_count": 2,
         "choice_card_count": 1,
@@ -1354,7 +1369,7 @@
         },
         "image_count": 4,
         "final_reply_chars": 20,
-        "elapsed_ms": 7435
+        "elapsed_ms": 7392
       },
       "checks": [
         {
@@ -1430,7 +1445,7 @@
       "modality": "3d",
       "category": "ar_product",
       "purpose": "web_ar",
-      "session_id": "session_qX9AccrWbtjHbyPI4tgHpN_q",
+      "session_id": "session_fvEUs3dGD9iK7xhnBFd7ydyV",
       "turns": 6,
       "tool_calls": [
         {
@@ -1456,7 +1471,7 @@
           "arguments": {
             "prompt": "product photo of a stainless steel sports water bottle, front view, plain white background, soft studio lighting, clean reflections, centered"
           },
-          "task_id": "task_9eed5a05d4d9ea2f3ea6228886af9dc6",
+          "task_id": "task_2bea6e8fa4c688ce63358d4792e63422",
           "summary": null
         },
         {
@@ -1467,18 +1482,18 @@
               1
             ]
           },
-          "task_id": "task_6715f19a1483f42f61fa558517688d92",
+          "task_id": "task_1d99a329175ab28dac6d5581a963caf5",
           "summary": null
         },
         {
           "name": "inspect_model",
           "arguments": {
-            "model": "task_6715f19a1483f42f61fa558517688d92"
+            "model": "task_1d99a329175ab28dac6d5581a963caf5"
           },
           "task_id": null,
           "summary": {
             "tool": "inspect",
-            "model": "task_6715f19a1483f42f61fa558517688d92",
+            "model": "task_1d99a329175ab28dac6d5581a963caf5",
             "triangles": 72,
             "has_uv": true,
             "watertight": true,
@@ -1579,7 +1594,7 @@
         {
           "name": "render_model_views",
           "arguments": {
-            "model": "task_6715f19a1483f42f61fa558517688d92",
+            "model": "task_1d99a329175ab28dac6d5581a963caf5",
             "views": [
               "front",
               "back",
@@ -1593,7 +1608,7 @@
               "@img3",
               "@img4"
             ],
-            "model": "task_6715f19a1483f42f61fa558517688d92",
+            "model": "task_1d99a329175ab28dac6d5581a963caf5",
             "render_calls_remaining": 5,
             "tool": "render",
             "views": [
@@ -1607,14 +1622,14 @@
       "cards": [
         {
           "kind": "choice",
-          "id": "choice_420b8c7f263976692928a612",
+          "id": "choice_8af0d17036fdbaaab904325c",
           "tool": "update_production_brief",
           "card_kind": "usage_profile",
           "state": "answered"
         },
         {
           "kind": "approval",
-          "id": "eg_7dc7b4d83d8f2fe4a86e2b5525bbae11c4351161b68c1db6",
+          "id": "eg_451a4995d8db6b62ab62bb787175edd2165276d53feddb41",
           "tool": "create_model_3d_from_image",
           "capability": "image-to-3d",
           "state": "approved"
@@ -1622,7 +1637,7 @@
       ],
       "tasks": [
         {
-          "id": "task_6715f19a1483f42f61fa558517688d92",
+          "id": "task_1d99a329175ab28dac6d5581a963caf5",
           "capability": "image-to-3d",
           "model_id": "meshy-7.1",
           "offering_id": "meshy/meshy-7.1/image-to-3d",
@@ -1630,7 +1645,7 @@
           "credits_charged": null
         },
         {
-          "id": "task_9eed5a05d4d9ea2f3ea6228886af9dc6",
+          "id": "task_2bea6e8fa4c688ce63358d4792e63422",
           "capability": "text-to-image",
           "model_id": "nano-banana-pro",
           "offering_id": "meshy/nano-banana-pro/text-to-image",
@@ -1645,6 +1660,9 @@
       "assets": [],
       "metrics": {
         "tool_call_count": 6,
+        "credits": {
+          "legacy.credits": "49"
+        },
         "paid_call_count": 2,
         "interruption_count": 2,
         "choice_card_count": 1,
@@ -1664,7 +1682,7 @@
         },
         "image_count": 4,
         "final_reply_chars": 20,
-        "elapsed_ms": 7497
+        "elapsed_ms": 7492
       },
       "checks": [
         {
@@ -1740,7 +1758,7 @@
       "modality": "2d",
       "category": "character_illustration",
       "purpose": null,
-      "session_id": "session_jVE9xcyW_S29KCV8hwLXu-eS",
+      "session_id": "session_34y5i2KYaRL5GouqLL4dFu3m",
       "turns": 1,
       "tool_calls": [
         {
@@ -1748,14 +1766,14 @@
           "arguments": {
             "prompt": "full-body cyberpunk female assassin, clean digital illustration, confident pose, neon accents, transparent background, sharp silhouette, no text, no watermark"
           },
-          "task_id": "task_40f0a1b965c390a1c7fcb2100d750745",
+          "task_id": "task_9cb25d76cbcb116e702784667900463f",
           "summary": null
         }
       ],
       "cards": [],
       "tasks": [
         {
-          "id": "task_40f0a1b965c390a1c7fcb2100d750745",
+          "id": "task_9cb25d76cbcb116e702784667900463f",
           "capability": "text-to-image",
           "model_id": "gpt-image-2.6-sunburst",
           "offering_id": "openai/gpt-image-2/text-to-image",
@@ -1770,6 +1788,9 @@
       "assets": [],
       "metrics": {
         "tool_call_count": 1,
+        "credits": {
+          "legacy.credits": "6"
+        },
         "paid_call_count": 1,
         "interruption_count": 0,
         "choice_card_count": 0,
@@ -1784,7 +1805,7 @@
         },
         "image_count": 1,
         "final_reply_chars": 20,
-        "elapsed_ms": 484
+        "elapsed_ms": 472
       },
       "checks": [
         {
@@ -1830,7 +1851,7 @@
       "modality": "2d",
       "category": "icon_prop",
       "purpose": null,
-      "session_id": "session_1oS83chmDjfgeIgUl89OSFEA",
+      "session_id": "session_9PWSgxdqrcbnEHfB_mxfwjUA",
       "turns": 1,
       "tool_calls": [
         {
@@ -1838,14 +1859,14 @@
           "arguments": {
             "prompt": "set of three potion bottle icons, red blue and green liquid, matching stylized game icon style, thick clean outlines, transparent background, no text, no watermark"
           },
-          "task_id": "task_e8ecbc507961217801113f3dcfd0c879",
+          "task_id": "task_b577eb5079b2591beee77a9b907ade69",
           "summary": null
         }
       ],
       "cards": [],
       "tasks": [
         {
-          "id": "task_e8ecbc507961217801113f3dcfd0c879",
+          "id": "task_b577eb5079b2591beee77a9b907ade69",
           "capability": "text-to-image",
           "model_id": "gpt-image-2.6-sunburst",
           "offering_id": "openai/gpt-image-2/text-to-image",
@@ -1860,6 +1881,9 @@
       "assets": [],
       "metrics": {
         "tool_call_count": 1,
+        "credits": {
+          "legacy.credits": "6"
+        },
         "paid_call_count": 1,
         "interruption_count": 0,
         "choice_card_count": 0,
@@ -1874,7 +1898,7 @@
         },
         "image_count": 1,
         "final_reply_chars": 20,
-        "elapsed_ms": 492
+        "elapsed_ms": 233
       },
       "checks": [
         {
@@ -1920,7 +1944,7 @@
       "modality": "2d",
       "category": "series_consistency",
       "purpose": null,
-      "session_id": "session_1dAPoqP4z3Eg0hVfVZ49YReb",
+      "session_id": "session_5Z0pdU9VuxiB73VUsaDMW1BL",
       "turns": 3,
       "tool_calls": [
         {
@@ -1928,7 +1952,7 @@
           "arguments": {
             "prompt": "full-body portrait of a young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"
           },
-          "task_id": "task_304ce170c35fbb3b83f9ba8835abba7d",
+          "task_id": "task_8085e6b8f23e127f19cc368d59374a45",
           "summary": null
         },
         {
@@ -1936,7 +1960,7 @@
           "arguments": {
             "prompt": "half-body portrait of the same young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"
           },
-          "task_id": "task_08e6beb0bf0b9583feacd6891c3476b9",
+          "task_id": "task_f32aa12b9385ea65c573f1b1b75b6228",
           "summary": null
         },
         {
@@ -1944,14 +1968,14 @@
           "arguments": {
             "prompt": "side profile of the same young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"
           },
-          "task_id": "task_e01bba4b1b83cb16d2c62be422b2c477",
+          "task_id": "task_56b6142bf08c1619656ecee2d457babf",
           "summary": null
         }
       ],
       "cards": [],
       "tasks": [
         {
-          "id": "task_e01bba4b1b83cb16d2c62be422b2c477",
+          "id": "task_56b6142bf08c1619656ecee2d457babf",
           "capability": "text-to-image",
           "model_id": "gpt-image-2.6-sunburst",
           "offering_id": "openai/gpt-image-2/text-to-image",
@@ -1959,7 +1983,7 @@
           "credits_charged": null
         },
         {
-          "id": "task_08e6beb0bf0b9583feacd6891c3476b9",
+          "id": "task_f32aa12b9385ea65c573f1b1b75b6228",
           "capability": "text-to-image",
           "model_id": "gpt-image-2.6-sunburst",
           "offering_id": "openai/gpt-image-2/text-to-image",
@@ -1967,7 +1991,7 @@
           "credits_charged": null
         },
         {
-          "id": "task_304ce170c35fbb3b83f9ba8835abba7d",
+          "id": "task_8085e6b8f23e127f19cc368d59374a45",
           "capability": "text-to-image",
           "model_id": "gpt-image-2.6-sunburst",
           "offering_id": "openai/gpt-image-2/text-to-image",
@@ -1982,6 +2006,9 @@
       "assets": [],
       "metrics": {
         "tool_call_count": 3,
+        "credits": {
+          "legacy.credits": "18"
+        },
         "paid_call_count": 3,
         "interruption_count": 0,
         "choice_card_count": 0,
@@ -1996,7 +2023,7 @@
         },
         "image_count": 3,
         "final_reply_chars": 20,
-        "elapsed_ms": 1505
+        "elapsed_ms": 750
       },
       "checks": [
         {
@@ -2047,7 +2074,10 @@
       "interruptions": 12,
       "inspect_model": 6,
       "render_model_views": 6,
-      "elapsed_ms": 45924
+      "credits": {
+        "legacy.credits": "288"
+      },
+      "elapsed_ms": 44785
     }
   }
 }

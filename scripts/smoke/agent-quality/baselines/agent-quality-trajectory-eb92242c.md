@@ -1,9 +1,9 @@
 # Agent 产出质量评测（trajectory-fake）
 
-- revision: `1f01387c898165a62dc721a0167d22dd27c2e1f8`
+- revision: `eb92242cfee7f7abbecb7ea1a8bd9b41bf2a06e9`
 - 请求集: version 1, sha256 `118eacc992f5b54546df3e8bf1f1a3321f76a18be6175cc44098cd4d69ca2036`
 - 用例: 9；硬失败: 0
-- 合计: 工具调用 37，付费调用 13，打断 12，inspect 6，render 6
+- 合计: 工具调用 37，付费调用 13，打断 12，inspect 6，render 6，计费 {'legacy.credits': '288'}
 
 | 用例 | 结果 | 工具 | 付费 | 打断 | inspect | render | 耗时 |
 |---|---|---|---|---|---|---|---|
@@ -14,8 +14,8 @@
 | 3d-print-figurine | PASS | 6 | 2 | 2 | 1 | 1 | 7.4s |
 | 3d-ar-product | PASS | 6 | 2 | 2 | 1 | 1 | 7.5s |
 | 2d-character-illustration | PASS | 1 | 1 | 0 | 0 | 0 | 0.5s |
-| 2d-icon-set | PASS | 1 | 1 | 0 | 0 | 0 | 0.5s |
-| 2d-series-consistency | PASS | 3 | 3 | 0 | 0 | 0 | 1.5s |
+| 2d-icon-set | PASS | 1 | 1 | 0 | 0 | 0 | 0.2s |
+| 2d-series-consistency | PASS | 3 | 3 | 0 | 0 | 0 | 0.8s |
 
 ## 各用例指标
 
