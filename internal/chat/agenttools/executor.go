@@ -20,6 +20,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat/agentparams"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/skillrun"
+	"github.com/LeXwDeX/Plinth/internal/threeview"
 )
 
 const (
@@ -178,6 +179,7 @@ type Executor struct {
 	skillRecipes       map[string]string
 	skillTurnStopped   func(context.Context, string, string, string) (bool, error)
 	threeView          catalog.ChatThreeViewSchema
+	threeViewService   *threeview.Service
 	params             *agentparams.Store
 	generate           chat.ToolExecutor
 	preflight          func(command chat.ToolCommand) string
@@ -248,6 +250,11 @@ func (e *Executor) SetSkillRuntime(runtime *skillrun.Runtime, references SkillRe
 // SetThreeView gives the three-view tool the Schema's texts. It is called
 // during application assembly, like SetSkillRuntime.
 func (e *Executor) SetThreeView(schema catalog.ChatThreeViewSchema) { e.threeView = schema }
+
+// SetThreeViewService gives the three-view tool the budget continuation and
+// the automatic consistency check (#243). Without it the tool keeps the
+// per-view behavior: only the front view starts.
+func (e *Executor) SetThreeViewService(service *threeview.Service) { e.threeViewService = service }
 
 // BoundTaskForCall exposes only a server-verified historical binding for
 // recovery. It never asks the generator to prepare or submit a new Task.

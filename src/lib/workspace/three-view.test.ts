@@ -56,6 +56,10 @@ describe('slotAction', () => {
     expect(stuck.slots.map(slotAction)).toEqual([null, null, null]);
     const denied = parse([['denied', { retryable: true }], ['canceled', { retryable: true }], ['starting', {}]]);
     expect(denied.slots.map(slotAction)).toEqual(['retry', 'retry', null]);
+    const rejected = parse([['rejected', { retryable: true }], ['rejected', { retryable: false }], ['succeeded', {}]]);
+    expect(rejected.slots.map((slot) => slot.status)).toEqual(['rejected', 'rejected', 'succeeded']);
+    expect(rejected.slots.map(slotAction)).toEqual(['retry', null, null]);
+    expect(groupIsActive(rejected)).toBe(false);
   });
 });
 

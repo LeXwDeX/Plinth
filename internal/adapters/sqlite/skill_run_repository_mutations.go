@@ -80,8 +80,15 @@ func expectedSkillSource(run skillrun.Run, step skillrun.Step) (generation.Asset
 		return run.SourceAssetID, nil
 	}
 	prior, ok := findSkillStep(run, step.Spec.SourceStepKey)
-	if !ok || prior.Phase != skillrun.OutputReady || prior.OutputAssetID == "" ||
-		prior.Review != skillrun.Accepted {
+	if !ok {
+		return "", skillrun.ErrConflict
+	}
+	// A picture the person put in place of the source view is the source,
+	// whatever its own attempt did (#65, #243).
+	if prior.ReplacementAssetID != "" {
+		return prior.ReplacementAssetID, nil
+	}
+	if prior.Phase != skillrun.OutputReady || prior.OutputAssetID == "" || prior.Review != skillrun.Accepted {
 		return "", skillrun.ErrConflict
 	}
 	return prior.OutputAssetID, nil
@@ -335,8 +342,13 @@ func (r *Repository) ReviewSkillOutput(ctx context.Context, cmd skillrun.ReviewC
 // waited on was denied) for this owner and session. The old task and grant
 // are left untouched; only the step's pointers and paid identity move on.
 func (r *Repository) RestartSkillStep(ctx context.Context, cmd skillrun.RestartCommand) (skillrun.Run, error) {
-	if cmd.OwnerID == "" || cmd.RunID == "" || cmd.StepKey == "" || cmd.ExpectedAttempt < 0 ||
-		(cmd.FailedTaskID == "") == (cmd.DeniedGrantID == "") {
+	reasons := 0
+	for _, named := range []bool{cmd.FailedTaskID != "", cmd.DeniedGrantID != "", cmd.RejectedReview} {
+		if named {
+			reasons++
+		}
+	}
+	if cmd.OwnerID == "" || cmd.RunID == "" || cmd.StepKey == "" || cmd.ExpectedAttempt < 0 || reasons != 1 {
 		return skillrun.Run{}, skillrun.ErrInvalid
 	}
 	return r.skillMutate(ctx, cmd.OwnerID, cmd.RunID, func(conn *sql.Conn, run skillrun.Run) error {
@@ -356,14 +368,24 @@ func (r *Repository) RestartSkillStep(ctx context.Context, cmd skillrun.RestartC
 		}
 		var one int
 		var err error
-		if cmd.FailedTaskID != "" {
+		switch {
+		case cmd.FailedTaskID != "":
 			if step.TaskID != cmd.FailedTaskID {
 				return skillrun.ErrConflict
 			}
 			err = conn.QueryRowContext(ctx, `SELECT 1 FROM generation_tasks
 				WHERE id=? AND owner_id=? AND session_id=? AND state IN ('FAILED','CANCELED')`,
 				cmd.FailedTaskID, run.OwnerID, run.SessionID).Scan(&one)
-		} else {
+		case cmd.RejectedReview:
+			// A succeeded picture the consistency check rejected may be made
+			// again (#243); its review is the only reason this attempt ends.
+			if step.Review != skillrun.Rejected || step.TaskID == "" || step.Phase != skillrun.OutputReady {
+				return skillrun.ErrConflict
+			}
+			err = conn.QueryRowContext(ctx, `SELECT 1 FROM generation_tasks
+				WHERE id=? AND owner_id=? AND session_id=? AND state='SUCCEEDED'`,
+				step.TaskID, run.OwnerID, run.SessionID).Scan(&one)
+		default:
 			if step.GrantRequestID != cmd.DeniedGrantID || step.TaskID != "" {
 				return skillrun.ErrConflict
 			}

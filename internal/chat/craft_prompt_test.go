@@ -66,16 +66,16 @@ func TestCraftPromptSitsBetweenDomainContextAndScope(t *testing.T) {
 	rig := newScopeRig(t, agents.Completion{Content: "ok"})
 	rig.turn(t, "3d")
 	system := rig.agent.requests[0].Messages[0].Content
-	craft := ""
+	craft := make([]string, 0, 2)
 	for _, prompt := range rig.schema.Agent.CraftPrompts {
-		if prompt.ID == "model3d" {
-			craft = prompt.Text
+		if prompt.ID == "model3d" || prompt.ID == "three-view" {
+			craft = append(craft, renderedCraftText(prompt))
 		}
 	}
-	if craft == "" {
-		t.Fatal("no model3d craft prompt")
+	if len(craft) == 0 {
+		t.Fatal("no 3D craft prompt")
 	}
-	craft = renderedCraftText(catalog.ChatAgentCraftPrompt{Text: craft})
+	expected := strings.Join(craft, "\n\n")
 	const domainContext = "Use configured 2D tools"
 	start := strings.Index(system, domainContext)
 	end := strings.Index(system, "【Agent 范围】")
@@ -83,8 +83,8 @@ func TestCraftPromptSitsBetweenDomainContextAndScope(t *testing.T) {
 		t.Fatalf("domain context (%d) or scope block (%d) not found", start, end)
 	}
 	segment := system[start+len(domainContext) : end]
-	if segment != "\n\n"+craft+"\n\n" {
-		t.Fatalf("between domain context and scope = %q, want the craft brief with blank lines", segment)
+	if segment != "\n\n"+expected+"\n\n" {
+		t.Fatalf("between domain context and scope = %q, want the craft briefs with blank lines", segment)
 	}
 	if strings.Index(system, "【批准方式】") < end {
 		t.Fatal("the approval block does not follow the scope block")
