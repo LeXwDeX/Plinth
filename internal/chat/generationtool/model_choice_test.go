@@ -543,3 +543,186 @@ func TestPurposeParametersKeepTheirProvenanceOnlyWhenTheySuppliedTheValue(t *tes
 		})
 	}
 }
+
+// #239: the same four layers choose a 2D model. The session's explicit 2D
+// pick wins, then the Agent's model argument, then the 2D purpose, then the
+// workspace pick and the Offering default.
+const (
+	imageProTextID  = "meshy/nano-banana-pro/text-to-image"
+	imageProImageID = "meshy/nano-banana-pro/image-to-image"
+	imageGptTextID  = "openai/gpt-image-2/text-to-image"
+)
+
+func imageTestOffering(id, capability string) generation.Offering {
+	provider, _, _ := strings.Cut(id, "/")
+	return generation.Offering{
+		ID: generation.OfferingID(id), ProviderID: provider, ModelID: strings.Split(id, "/")[1],
+		ModelName: strings.Split(id, "/")[1], Capability: generation.Capability(capability),
+		Domain: generation.DomainImage, Enabled: true,
+		Parameters: []generation.Parameter{
+			{Name: "prompt", Type: "text", Semantic: generation.SemanticPrompt},
+			{Name: "aspect_ratio", Type: "select", Semantic: generation.SemanticOutputSize,
+				Options: []generation.ParameterOption{{Value: "1:1"}, {Value: "3:4"}}, Default: json.RawMessage(`"1:1"`)},
+			{Name: "remove_background", Type: "boolean", Default: json.RawMessage(`false`)},
+		},
+	}
+}
+
+func imageTestUsage() catalog.ChatImage2DUsageSchema {
+	return catalog.ChatImage2DUsageSchema{
+		DefaultProfile: "concept_art",
+		Profiles: []catalog.ChatImage2DUsageProfile{
+			{
+				ID: "concept_art", Label: "概念设定图", Description: "概念图。", Reason: "概念图优先构图。",
+				RecommendedOfferings: map[string][]string{
+					shapeTextToImage: {imageProTextID},
+				},
+				ParameterOverrides: map[string]map[string]json.RawMessage{
+					imageProTextID: {"aspect_ratio": json.RawMessage(`"1:1"`)},
+				},
+			},
+			{
+				ID: "illustration", Label: "角色立绘", Description: "立绘。", Reason: "立绘需要竖画幅和稳定身份。",
+				RecommendedOfferings: map[string][]string{
+					shapeTextToImage: {imageProTextID},
+				},
+				ParameterOverrides: map[string]map[string]json.RawMessage{
+					imageProTextID: {"aspect_ratio": json.RawMessage(`"3:4"`), "remove_background": json.RawMessage(`true`)},
+				},
+			},
+		},
+	}
+}
+
+func imageTestExecutor(gateway Gateway) *Executor {
+	return &Executor{
+		gateway: gateway,
+		chat: catalog.ChatSchema{
+			Model3DUsage: catalog.ChatModel3DUsageSchema{
+				Brief: catalog.ChatProductionBriefSchema{Fields: []catalog.ChatProductionBriefField{
+					{Name: "purpose", Type: "profile", Label: "用途"},
+					{Name: "image_use", Type: "image_profile", Label: "2D 用途"},
+					{Name: "style", Type: "text", Label: "风格", MaximumCharacters: 200},
+				}},
+			},
+			Image2DUsage: imageTestUsage(),
+			Presentation: catalog.ChatPresentationSchema{Messages: catalog.ChatMessageTexts{
+				ModelChoiceConflict:          "模型已锁定为 {locked}，不能改为 {requested}",
+				ModelChoiceUnavailable:       "模型 {model} 不可用；可选：{choices}",
+				ModelChoiceWorkspaceConflict: "工作区当前选择 {workspace}，用途 {profile} 推荐 {recommended}；请先确认",
+			}},
+		},
+	}
+}
+
+func imageTestTool() catalog.ChatToolSchema {
+	return catalog.ChatToolSchema{
+		Name: "refine_image",
+		Execution: catalog.ChatToolExecutionSchema{
+			Capabilities: []generation.Capability{generation.ImageToImage, generation.TextToImage},
+			Domains:      []string{"image"},
+		},
+		ModelArgument: "model",
+		ResultFields:  catalog.ChatToolResultFields{ModelChoice: "model_choice"},
+	}
+}
+
+func imageTestCommand(brief chat.ProductionBrief, workspaceModel, explicitImage, named string) chat.ToolCommand {
+	return chat.ToolCommand{
+		OwnerID: "owner", SessionID: "session", Tool: imageTestTool(),
+		Options: chat.TurnOptions{
+			CreativeDomain:     "image",
+			AIModel:            workspaceModel,
+			ProductionBrief:    brief,
+			ExplicitModelImage: explicitImage,
+		},
+		Call: agents.ToolCall{ID: "call-1", Name: "refine_image"},
+	}
+}
+
+func imageTestBrief(imageUse string) chat.ProductionBrief {
+	encoded, _ := json.Marshal(imageUse)
+	return chat.ProductionBrief{"image_use": encoded}
+}
+
+func TestChooseOfferingFollowsThe2DModelChoiceLayers(t *testing.T) {
+	gateway := &choiceTestGateway{offerings: []generation.Offering{
+		imageTestOffering(imageProTextID, string(generation.TextToImage)),
+		imageTestOffering(imageProImageID, string(generation.ImageToImage)),
+		imageTestOffering(imageGptTextID, string(generation.TextToImage)),
+	}}
+	executor := imageTestExecutor(gateway)
+	// The purpose recommends the Pro model; the workspace pick is the same, so
+	// the purpose chooses and carries its reason.
+	choice, err := executor.chooseOffering(
+		imageTestCommand(imageTestBrief("illustration"), "nano-banana-pro", "", ""),
+		generation.TextToImage, nil, modelInput{})
+	if err != nil || choice.Refusal != "" || choice.Offering.ID != imageProTextID ||
+		choice.Source != "profile" || choice.Profile != "illustration" || choice.Reason == "" {
+		t.Fatalf("purpose choice = %+v %v", choice, err)
+	}
+	// A different visible workspace pick is confirmed, not silently replaced.
+	choice, err = executor.chooseOffering(
+		imageTestCommand(imageTestBrief("illustration"), "gpt-image-2", "", ""),
+		generation.TextToImage, nil, modelInput{})
+	if err != nil || choice.Refusal == "" {
+		t.Fatalf("workspace conflict = %+v %v", choice, err)
+	}
+	// The Agent's model argument sits above the purpose.
+	arguments := imageTestArguments("gpt-image-2")
+	choice, err = executor.chooseOffering(
+		imageTestCommand(imageTestBrief("illustration"), "", "", ""),
+		generation.TextToImage, arguments, modelInput{})
+	if err != nil || choice.Refusal != "" || choice.Offering.ID != imageGptTextID || choice.Source != "agent" {
+		t.Fatalf("agent choice = %+v %v", choice, err)
+	}
+	// The explicit 2D pick wins over the Agent and the purpose.
+	choice, err = executor.chooseOffering(
+		imageTestCommand(imageTestBrief("illustration"), "", "nano-banana-pro", "gpt-image-2"),
+		generation.TextToImage, arguments, modelInput{})
+	if err != nil || choice.Refusal == "" {
+		t.Fatalf("explicit conflict = %+v %v", choice, err)
+	}
+	choice, err = executor.chooseOffering(
+		imageTestCommand(imageTestBrief("illustration"), "", "nano-banana-pro", ""),
+		generation.TextToImage, nil, modelInput{})
+	if err != nil || choice.Refusal != "" || choice.Offering.ID != imageProTextID || choice.Source != "user" {
+		t.Fatalf("locked choice = %+v %v", choice, err)
+	}
+}
+
+func imageTestArguments(model string) map[string]json.RawMessage {
+	encoded, _ := json.Marshal(model)
+	return map[string]json.RawMessage{"model": encoded}
+}
+
+func TestImagePurposeOverridesFreezeIntoTheInput(t *testing.T) {
+	executor := imageTestExecutor(&choiceTestGateway{})
+	command := imageTestCommand(imageTestBrief("illustration"), "", "", "")
+	offering := imageTestOffering(imageProTextID, string(generation.TextToImage))
+	profile, values := executor.purposeParameterValues(command, offering, nil)
+	if profile.ID != "illustration" || string(values["aspect_ratio"]) != `"3:4"` || string(values["remove_background"]) != `true` {
+		t.Fatalf("purpose values = %+v %+v", profile, values)
+	}
+	// A 2D purpose never contributes a triangle budget.
+	if _, exists := values["face_limit"]; exists {
+		t.Fatalf("2D purpose contributed a 3D budget: %+v", values)
+	}
+}
+
+func TestModelChoiceOfNamesTheImageSource(t *testing.T) {
+	executor := imageTestExecutor(&choiceTestGateway{offerings: []generation.Offering{
+		imageTestOffering(imageProTextID, string(generation.TextToImage)),
+	}})
+	input := json.RawMessage(`{"prompt":"x","aspect_ratio":"3:4","remove_background":true}`)
+	offering := imageTestOffering(imageProTextID, string(generation.TextToImage))
+	command := imageTestCommand(imageTestBrief("illustration"), "", "", "")
+	choice := executor.modelChoiceOf(command, offering, input)
+	if choice == nil || choice.Source != "profile" || choice.Profile != "illustration" || choice.Reason == "" {
+		t.Fatalf("profile model choice = %+v", choice)
+	}
+	command.Options.ExplicitModelImage = "nano-banana-pro"
+	if choice := executor.modelChoiceOf(command, offering, input); choice == nil || choice.Source != "user" {
+		t.Fatalf("locked model choice = %+v", choice)
+	}
+}

@@ -236,6 +236,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateModel3DUsageShape(schema, capabilityPresentations); err != nil {
 		return err
 	}
+	if err := validateImage2DUsageShape(schema); err != nil {
+		return err
+	}
 	if err := validateHarness(schema, capabilityPresentations); err != nil {
 		return err
 	}
@@ -682,9 +685,10 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 			return fmt.Errorf("tools[%d] require_unique_offering requires independent model selection", index)
 		}
 		if tool.CrossDomainModelFallback {
-			if !tool.RequireUserModel || len(tool.Execution.Domains) != 1 ||
+			selectsModel := tool.RequireUserModel || tool.ModelArgument != ""
+			if !selectsModel || len(tool.Execution.Domains) != 1 ||
 				strings.TrimSpace(tool.ResultFields.Model) == "" || strings.TrimSpace(tool.ResultFields.ModelFallback) == "" {
-				return fmt.Errorf("tools[%d] cross_domain_model_fallback 需要 require_user_model、单一 domain 与 result_fields.model/model_fallback", index)
+				return fmt.Errorf("tools[%d] cross_domain_model_fallback 需要 require_user_model 或 model_argument、单一 domain 与 result_fields.model/model_fallback", index)
 			}
 		}
 		switch tool.ResultAttachmentKind {

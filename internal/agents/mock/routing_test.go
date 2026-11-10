@@ -544,3 +544,55 @@ func TestMultiviewDirectiveRoutesToTheMultiViewTool(t *testing.T) {
 		t.Fatalf("upload directive: got %s %#v, want %#v", tool, arguments, want)
 	}
 }
+
+// #239: a 2D drawing request without a brief asks the 2D purpose, but only
+// when the delivery requirements are still open; a request that already names
+// the frame, size or background goes straight to the image tool.
+func TestImageDrawingWithoutABriefAsksThe2DPurposeOnlyWhenSpecsAreOpen(t *testing.T) {
+	system := func(brief, domain string) []agents.Message {
+		return []agents.Message{{
+			Role:    "system",
+			Content: "你是 Agent。\n" + domain + "\n[Production brief]\n" + brief,
+		}}
+	}
+	missing := "尚未建立制作简报。开始 2D 或 3D 工作前，先用一两个简短的问题问清用途。"
+	image := "本轮用户正在 2D 图片工作区（仅为提示）。"
+	threeD := "本轮用户正在 3D 模型工作区（仅为提示）。"
+	tests := []struct {
+		name   string
+		system []agents.Message
+		text   string
+		tool   string
+		args   map[string]any
+	}{
+		{
+			name: "an open 2D request asks the 2D purpose", system: system(missing, image),
+			text: "画一张游戏角色立绘", tool: "ask_choice",
+			args: map[string]any{"kind": "image_usage_profile"},
+		},
+		{
+			name: "a request with specs does not ask", system: system(missing, image),
+			text: "画一张 4:3、透明背景的图标", tool: "refine_image",
+			args: map[string]any{"prompt": "画一张 4:3、透明背景的图标"},
+		},
+		{
+			name: "an existing brief does not ask", system: system("2D 用途：角色立绘", image),
+			text: "画一张游戏角色立绘", tool: "refine_image",
+			args: map[string]any{"prompt": "画一张游戏角色立绘"},
+		},
+		{
+			name: "a 3D workspace does not ask the 2D purpose", system: system(missing, threeD),
+			text: "画一张游戏角色立绘", tool: "refine_image",
+			args: map[string]any{"prompt": "画一张游戏角色立绘"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			messages := append(append([]agents.Message{}, test.system...), agents.Message{Role: "user", Content: test.text})
+			tool, arguments := plan(t, messages, allTools)
+			if tool != test.tool || !reflect.DeepEqual(arguments, test.args) {
+				t.Fatalf("got %s %#v, want %s %#v", tool, arguments, test.tool, test.args)
+			}
+		})
+	}
+}

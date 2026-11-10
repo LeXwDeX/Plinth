@@ -24,7 +24,7 @@ func (r *Repository) ListSessions(
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
-		       s.brief, s.explicit_model_3d, s.style_lock_enabled, s.style_lock_text,
+		       s.brief, s.explicit_model_3d, s.explicit_model_image, s.style_lock_enabled, s.style_lock_text,
 		       s.style_lock_references, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
@@ -92,7 +92,7 @@ func (r *Repository) ListSessionsPage(
 	rows, err := tx.QueryContext(ctx, `
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
-		       s.brief, s.explicit_model_3d, s.style_lock_enabled, s.style_lock_text,
+		       s.brief, s.explicit_model_3d, s.explicit_model_image, s.style_lock_enabled, s.style_lock_text,
 		       s.style_lock_references, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
@@ -408,6 +408,39 @@ func (r *Repository) SetSessionExplicitModel3D(ctx context.Context, ownerID, ses
 		model, sessionID, ownerID)
 	if err != nil {
 		return false, fmt.Errorf("set chat session explicit 3d model: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, nil
+}
+
+// SessionExplicitModelImage reads the explicitly picked 2D model of the
+// owner's own session (#239). An empty value means no explicit pick.
+func (r *Repository) SessionExplicitModelImage(ctx context.Context, ownerID, sessionID string) (string, bool, error) {
+	var model string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT explicit_model_image FROM go_chat_sessions WHERE id = ? AND owner_id = ?`,
+		sessionID, ownerID).Scan(&model)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read chat session explicit image model: %w", err)
+	}
+	return model, true, nil
+}
+
+// SetSessionExplicitModelImage replaces (or, for an empty model, clears) the 2D
+// model the person explicitly picked in the session. It keeps updated_at so
+// picking does not reorder the history list.
+func (r *Repository) SetSessionExplicitModelImage(ctx context.Context, ownerID, sessionID, model string) (bool, error) {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE go_chat_sessions SET explicit_model_image = ? WHERE id = ? AND owner_id = ?`,
+		model, sessionID, ownerID)
+	if err != nil {
+		return false, fmt.Errorf("set chat session explicit image model: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
@@ -1564,7 +1597,7 @@ func (r *Repository) Session(
 	row := r.db.QueryRowContext(ctx, `
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
-		       s.brief, s.explicit_model_3d, s.style_lock_enabled, s.style_lock_text,
+		       s.brief, s.explicit_model_3d, s.explicit_model_image, s.style_lock_enabled, s.style_lock_text,
 		       s.style_lock_references, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
@@ -1591,7 +1624,7 @@ func (r *Repository) getChatSession(
 	row := r.db.QueryRowContext(ctx, `
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
-		       s.brief, s.explicit_model_3d, s.style_lock_enabled, s.style_lock_text,
+		       s.brief, s.explicit_model_3d, s.explicit_model_image, s.style_lock_enabled, s.style_lock_text,
 		       s.style_lock_references, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
@@ -1627,6 +1660,7 @@ func scanChatSession(scanner chatSessionScanner) (chat.Session, error) {
 		&session.TitleSource,
 		&brief,
 		&session.ExplicitModel3D,
+		&session.ExplicitModelImage,
 		&styleLockEnabled,
 		&styleLockText,
 		&styleLockReferences,

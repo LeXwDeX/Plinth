@@ -22,6 +22,24 @@ const (
 	shapeMultiviewTo3D = "multiview-to-3d"
 )
 
+// Shapes of a 2D input, the keys of image2d_usage.recommended_offerings. They
+// are also the image Capability ids (#239).
+const (
+	shapeTextToImage  = "text-to-image"
+	shapeImageToImage = "image-to-image"
+)
+
+// purposeProfile is the part of a 3D or 2D purpose the model-choice layers
+// read: its identity, recommendations and public parameter overrides. Using
+// one shape lets the same four layers serve both domains (#103, #239).
+type purposeProfile struct {
+	ID                   string
+	Label                string
+	Reason               string
+	RecommendedOfferings map[string][]string
+	ParameterOverrides   map[string]map[string]json.RawMessage
+}
+
 // modelChoice is the public result object naming who chose the model of a
 // step; it carries the purpose id and reason only when the purpose chose.
 type modelChoice struct {
@@ -49,7 +67,7 @@ type modelInput struct {
 	Group      bool
 }
 
-// briefPurpose returns the purpose profile the session's production brief
+// briefPurpose returns the 3D purpose profile the session's production brief
 // selects. A session without a brief has none: nothing is recommended or
 // overridden by a purpose.
 func (executor *Executor) briefPurpose(command chat.ToolCommand) (catalog.ChatModel3DUsageProfile, bool) {
@@ -57,17 +75,7 @@ func (executor *Executor) briefPurpose(command chat.ToolCommand) (catalog.ChatMo
 	if len(usage.Profiles) == 0 || command.Options.ProductionBrief.Empty() {
 		return catalog.ChatModel3DUsageProfile{}, false
 	}
-	field := ""
-	for _, declared := range usage.Brief.Fields {
-		if declared.Type == "profile" {
-			field = declared.Name
-			break
-		}
-	}
-	if field == "" {
-		return catalog.ChatModel3DUsageProfile{}, false
-	}
-	id := command.Options.ProductionBrief.Text(field)
+	id := command.Options.ProductionBrief.Text(briefFieldOfType(usage.Brief, "profile"))
 	for _, profile := range usage.Profiles {
 		if profile.ID == id {
 			return profile, true
@@ -76,12 +84,61 @@ func (executor *Executor) briefPurpose(command chat.ToolCommand) (catalog.ChatMo
 	return catalog.ChatModel3DUsageProfile{}, false
 }
 
+// imageBriefPurpose returns the 2D purpose the session's production brief
+// selects (#239). The purpose belongs to the brief's image_profile field.
+func (executor *Executor) imageBriefPurpose(command chat.ToolCommand) (purposeProfile, bool) {
+	usage := executor.chat.Image2DUsage
+	if len(usage.Profiles) == 0 || command.Options.ProductionBrief.Empty() {
+		return purposeProfile{}, false
+	}
+	id := command.Options.ProductionBrief.Text(briefFieldOfType(executor.chat.Model3DUsage.Brief, "image_profile"))
+	for _, profile := range usage.Profiles {
+		if profile.ID == id {
+			return purposeProfile{
+				ID: profile.ID, Label: profile.Label, Reason: profile.Reason,
+				RecommendedOfferings: profile.RecommendedOfferings,
+				ParameterOverrides:   profile.ParameterOverrides,
+			}, true
+		}
+	}
+	return purposeProfile{}, false
+}
+
+// purposeOf is the purpose of this call's workspace domain: the 2D table for
+// the image workspace, the 3D table otherwise (#239).
+func (executor *Executor) purposeOf(command chat.ToolCommand) (purposeProfile, bool) {
+	domain := toolDomain(command)
+	if domain == string(generation.DomainImage) {
+		return executor.imageBriefPurpose(command)
+	}
+	profile, found := executor.briefPurpose(command)
+	if !found {
+		return purposeProfile{}, false
+	}
+	return purposeProfile{
+		ID: profile.ID, Label: profile.Label, Reason: profile.Reason,
+		RecommendedOfferings: profile.RecommendedOfferings,
+		ParameterOverrides:   profile.ParameterOverrides,
+	}, true
+}
+
+// briefFieldOfType locates the brief field carrying a purpose type. An absent
+// field means the Schema does not declare that domain's purpose.
+func briefFieldOfType(brief catalog.ChatProductionBriefSchema, fieldType string) string {
+	for _, declared := range brief.Fields {
+		if declared.Type == fieldType {
+			return declared.Name
+		}
+	}
+	return ""
+}
+
 // profileParameterValues are the values the brief's purpose applies to an
 // Offering: its parameter overrides and the values its budget gives the
 // bounded parameters (#129). The Catalog has already checked every override at
 // load time; this repeats the public-parameter rule so a hand-built Executor
 // cannot apply a value the Offering does not expose to the Agent.
-func (executor *Executor) profileParameterValues(command chat.ToolCommand, offering generation.Offering) (catalog.ChatModel3DUsageProfile, map[string]json.RawMessage) {
+func (executor *Executor) profileParameterValues(command chat.ToolCommand, offering generation.Offering) (purposeProfile, map[string]json.RawMessage) {
 	return executor.purposeParameterValues(command, offering, nil)
 }
 
@@ -89,10 +146,10 @@ func (executor *Executor) profileParameterValues(command chat.ToolCommand, offer
 // values are already known: current supplies them (a remesh topology) when
 // the budget measures a face count.
 func (executor *Executor) purposeParameterValues(command chat.ToolCommand, offering generation.Offering,
-	current map[string]json.RawMessage) (catalog.ChatModel3DUsageProfile, map[string]json.RawMessage) {
-	profile, found := executor.briefPurpose(command)
+	current map[string]json.RawMessage) (purposeProfile, map[string]json.RawMessage) {
+	profile, found := executor.purposeOf(command)
 	if !found {
-		return catalog.ChatModel3DUsageProfile{}, nil
+		return purposeProfile{}, nil
 	}
 	overrides := profile.ParameterOverrides[string(offering.ID)]
 	values := make(map[string]json.RawMessage, len(overrides))
@@ -109,8 +166,14 @@ func (executor *Executor) purposeParameterValues(command chat.ToolCommand, offer
 			values[name] = value
 		}
 	}
-	for name, value := range executor.budgetValues(command, profile, offering, values, current) {
-		values[name] = value
+	// The triangle and texture budget belongs to 3D purposes (#129); a 2D
+	// purpose contributes only its declared parameter overrides.
+	if toolDomain(command) != string(generation.DomainImage) {
+		if model3d, ok := executor.briefPurpose(command); ok {
+			for name, value := range executor.budgetValues(command, model3d, offering, values, current) {
+				values[name] = value
+			}
+		}
 	}
 	if len(values) == 0 {
 		return profile, nil
@@ -118,8 +181,16 @@ func (executor *Executor) purposeParameterValues(command chat.ToolCommand, offer
 	return profile, values
 }
 
-// modelShape is the recommended_offerings key of this call.
+// modelShape is the recommended_offerings key of this call. For an image call
+// it is the call's capability (text-to-image or image-to-image); for 3D it
+// names the input shape (#103, #239).
 func (executor *Executor) modelShape(command chat.ToolCommand, capability generation.Capability) string {
+	if toolDomain(command) == string(generation.DomainImage) {
+		if capability == generation.TextToImage {
+			return shapeTextToImage
+		}
+		return shapeImageToImage
+	}
 	if tool := executor.chat.ThreeView.Multiview.Tool; tool != "" && command.Tool.Name == tool {
 		return shapeMultiviewTo3D
 	}
@@ -226,10 +297,10 @@ func multiviewAccepts(offering generation.Offering, views []string, group bool, 
 
 // profileOffering is the first recommendation of the purpose that is
 // available and accepts this input, with the profile that named it.
-func (executor *Executor) profileOffering(command chat.ToolCommand, capability generation.Capability, input modelInput) (generation.Offering, catalog.ChatModel3DUsageProfile, bool) {
-	profile, found := executor.briefPurpose(command)
+func (executor *Executor) profileOffering(command chat.ToolCommand, capability generation.Capability, input modelInput) (generation.Offering, purposeProfile, bool) {
+	profile, found := executor.purposeOf(command)
 	if !found {
-		return generation.Offering{}, catalog.ChatModel3DUsageProfile{}, false
+		return generation.Offering{}, purposeProfile{}, false
 	}
 	candidates := executor.availableOfferings(capability)
 	for _, name := range profile.RecommendedOfferings[executor.modelShape(command, capability)] {
@@ -238,12 +309,15 @@ func (executor *Executor) profileOffering(command chat.ToolCommand, capability g
 			return offering, profile, true
 		}
 	}
-	return generation.Offering{}, catalog.ChatModel3DUsageProfile{}, false
+	return generation.Offering{}, purposeProfile{}, false
 }
 
-// chooseOffering selects the Offering of a 3D tool call by the model-choice
-// layers. It returns a Refusal when a named model conflicts with the person's
-// explicit pick or is unavailable; nothing is submitted in that case.
+// chooseOffering selects the Offering of a generation tool call by the
+// model-choice layers: the person's explicit pick for the tool's workspace
+// domain, the Agent's model argument, the purpose recommendation, the
+// workspace pick and the Offering default, in that order (#103, #239). It
+// returns a Refusal when a named model conflicts with the person's explicit
+// pick or is unavailable; nothing is submitted in that case.
 func (executor *Executor) chooseOffering(
 	command chat.ToolCommand,
 	capability generation.Capability,
@@ -260,10 +334,10 @@ func (executor *Executor) chooseOffering(
 	// Only the session marker is the person's explicit lock. The workspace's
 	// per-domain model is the picker's current value, which may merely be
 	// restored from another session or a previous visit, so it must not keep
-	// the purpose from choosing (#103). The lock applies to every 3D tool,
+	// the purpose from choosing. The lock applies to every tool of its domain,
 	// the multiview tool included: ignore_user_model only keeps the workspace
 	// picker out of its fallback.
-	locked := strings.TrimSpace(command.Options.ExplicitModel3D)
+	locked := strings.TrimSpace(command.Options.ExplicitModelFor(toolDomain(command)))
 	if locked != "" {
 		offering, matched := matchOffering(candidates, locked)
 		if !matched {
@@ -426,7 +500,7 @@ func (executor *Executor) modelWorkspaceConflictText(
 	command chat.ToolCommand,
 	workspace string,
 	recommended generation.Offering,
-	profile catalog.ChatModel3DUsageProfile,
+	profile purposeProfile,
 ) string {
 	template := executor.chat.Presentation.Messages.ModelChoiceWorkspaceConflict
 	if template == "" {
@@ -501,7 +575,7 @@ func (executor *Executor) modelChoiceOf(command chat.ToolCommand, offering gener
 	if request := command.Options.Multiview; request != nil && request.Model != "" && modelMatches(offering, request.Model) {
 		return &modelChoice{Source: "user"}
 	}
-	locked := strings.TrimSpace(command.Options.ExplicitModel3D)
+	locked := strings.TrimSpace(command.Options.ExplicitModelFor(toolDomain(command)))
 	if locked != "" && modelMatches(offering, locked) {
 		return &modelChoice{Source: "user"}
 	}

@@ -205,7 +205,8 @@ func (executor *Executor) purposeBudgetNote(command chat.ToolCommand, offering g
 // absent one at its default.
 func (executor *Executor) purposeBudgetItems(command chat.ToolCommand, offering generation.Offering, input json.RawMessage) []string {
 	usage := executor.chat.Model3DUsage
-	if len(usage.BudgetLimits) == 0 {
+	if len(usage.BudgetLimits) == 0 || toolDomain(command) == string(generation.DomainImage) {
+		// The triangle and texture budget belongs to 3D purposes (#239).
 		return nil
 	}
 	profile, found := executor.briefPurpose(command)
@@ -258,7 +259,7 @@ func (executor *Executor) purposeBudgetText(command chat.ToolCommand, items []st
 	}
 	note := executor.chat.Model3DUsage.BudgetNote
 	label := ""
-	if profile, found := executor.briefPurpose(command); found {
+	if profile, found := executor.purposeOf(command); found {
 		label = executor.localized(command, profile.Label)
 	}
 	return strings.NewReplacer(

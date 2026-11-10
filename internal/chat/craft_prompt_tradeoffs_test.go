@@ -72,7 +72,7 @@ func TestCraftPromptTradeoffsComeFromOfferingKnowledge(t *testing.T) {
 		t.Fatal("a disabled Offering appeared in the tradeoff lines")
 	}
 
-	block := orchestrator.craftPrompt(registry, "3d")
+	block := orchestrator.craftPrompt(registry, "3d", "model-3d")
 	if strings.Contains(block, "{offering_tradeoffs}") {
 		t.Fatal("craft prompt kept the unresolved placeholder")
 	}
@@ -85,7 +85,7 @@ func TestCraftPromptTradeoffsComeFromOfferingKnowledge(t *testing.T) {
 
 func TestCraftPromptDropsTheTradeoffBlockWhenNoOfferingSourceExists(t *testing.T) {
 	orchestrator, registry, _ := craftPromptFixture(t, nil, nil)
-	block := orchestrator.craftPrompt(registry, "3d")
+	block := orchestrator.craftPrompt(registry, "3d", "model-3d")
 	if strings.Contains(block, "{offering_tradeoffs}") {
 		t.Fatal("craft prompt kept the unresolved placeholder")
 	}

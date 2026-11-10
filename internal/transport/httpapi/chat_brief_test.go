@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
 func briefPath(sessionID string) string {
@@ -188,4 +189,84 @@ func TestChatSessionExplicitModel3DIsAValidatedPerSessionLock(t *testing.T) {
 	if foreign.Code != http.StatusNotFound {
 		t.Fatalf("missing session = %d %s", foreign.Code, foreign.Body.String())
 	}
+}
+
+func explicitModel2DPath(sessionID string) string {
+	return "/api/v1/chat/sessions/" + sessionID + "/model2d"
+}
+
+// #239: the explicit 2D model is a bounded lock: the owner stores and clears
+// it, only an enabled image Offering is accepted, and a foreign session is a
+// 404.
+func TestChatSessionExplicitModel2DIsAValidatedPerSessionLock(t *testing.T) {
+	t.Parallel()
+	handler, cookie, sessionID := grantTestBrowser(t)
+	path := explicitModel2DPath(sessionID)
+	read := grantTestRequest(t, handler, cookie, http.MethodGet, path, "", "")
+	if read.Code != http.StatusOK || !strings.Contains(read.Body.String(), `"explicit_model_2d":""`) {
+		t.Fatalf("a new session has no explicit 2D model: %d %s", read.Code, read.Body.String())
+	}
+	put := grantTestRequest(t, handler, cookie, http.MethodPut, path,
+		`{"explicit_model_2d":"meshy/nano-banana-pro/text-to-image"}`, "")
+	if put.Code != http.StatusOK || !strings.Contains(put.Body.String(), `"explicit_model_2d":"meshy/nano-banana-pro/text-to-image"`) {
+		t.Fatalf("lock: %d %s", put.Code, put.Body.String())
+	}
+	for _, body := range []string{
+		`{"explicit_model_2d":"has space"}`,
+		// A 3D Offering is not a 2D model.
+		`{"explicit_model_2d":"tripo/tripo-p2/text-to-3d"}`,
+		`{"explicit_model_2d":7}`,
+		`not json`,
+	} {
+		if response := grantTestRequest(t, handler, cookie, http.MethodPut, path, body, ""); response.Code != http.StatusBadRequest {
+			t.Fatalf("body %q status=%d %s", body, response.Code, response.Body.String())
+		}
+	}
+	cleared := grantTestRequest(t, handler, cookie, http.MethodPut, path, `{"explicit_model_2d":""}`, "")
+	if cleared.Code != http.StatusOK || !strings.Contains(cleared.Body.String(), `"explicit_model_2d":""`) {
+		t.Fatalf("clear: %d %s", cleared.Code, cleared.Body.String())
+	}
+	foreign := grantTestRequest(t, handler, cookie, http.MethodPut, explicitModel2DPath("no-such-session"),
+		`{"explicit_model_2d":"meshy/nano-banana-pro/text-to-image"}`, "")
+	if foreign.Code != http.StatusNotFound {
+		t.Fatalf("missing session = %d %s", foreign.Code, foreign.Body.String())
+	}
+}
+
+// #239: the brief accepts the 2D purpose and rejects one that is not declared.
+func TestChatSessionBriefAcceptsTheImagePurpose(t *testing.T) {
+	t.Parallel()
+	handler, cookie, sessionID := grantTestBrowser(t)
+	put := grantTestRequest(t, handler, cookie, http.MethodPut, briefPath(sessionID),
+		`{"brief":{"image_use":"illustration","image_transparent":true,"image_for_3d":false}}`, "")
+	if put.Code != http.StatusOK {
+		t.Fatalf("2D brief write: %d %s", put.Code, put.Body.String())
+	}
+	stored := decodeBrief(t, put.Body.String())
+	if string(stored["image_use"]) != `"illustration"` || string(stored["image_transparent"]) != "true" {
+		t.Fatalf("stored 2D brief = %v", stored)
+	}
+	if rejected := grantTestRequest(t, handler, cookie, http.MethodPut, briefPath(sessionID),
+		`{"brief":{"image_use":"render"}}`, ""); rejected.Code != http.StatusBadRequest {
+		t.Fatalf("a 3D purpose was accepted as a 2D purpose: %d %s", rejected.Code, rejected.Body.String())
+	}
+}
+
+// httpExplicitModelValid mirrors the application's explicit-model check for
+// the test harness: a pick must name an enabled Offering of the domain.
+func httpExplicitModelValid(offerings []generation.Offering, model string, domain generation.CapabilityDomain) bool {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+	for _, offering := range offerings {
+		if !offering.Enabled || offering.Domain != domain {
+			continue
+		}
+		if model == offering.ModelID || model == string(offering.ID) ||
+			(offering.ModelID != "" && offering.ProviderID != "" && model == offering.ProviderID+"/"+offering.ModelID) {
+			return true
+		}
+	}
+	return false
 }

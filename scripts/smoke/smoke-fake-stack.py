@@ -40,9 +40,10 @@ same HTTP API the browser uses:
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
 (NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, p2, agent, agent-background,
-offering-knowledge, faults;
+agent-quality, image-self-check, image-purpose, offering-knowledge, faults;
 "agent" runs both agent scenarios, "hyper3d-agent" the Hyper3D chain alone,
 "p2" the Tripo P2 quote/chain, "agent-background" the batched wait that keeps both Tasks running,
+"image-purpose" the #239 2D purpose card, brief, purpose-driven model and 2D lock,
 "offering-knowledge" the #249 knowledge projection, derived model list, purpose coverage,
 over-limit refusal and final_prompt report)
 Needs `go`. Exit 0 = every selected check passed.
@@ -1137,6 +1138,169 @@ def refetch_delivers(api, task, offerings, offering):
     return not problems, f"refetch task SUCCEEDED, {count} assets verified" if not problems else "; ".join(problems)
 
 
+def _choice_cards(api, session):
+    status, body = api.json("GET", f"/api/v1/chat/sessions/{session}/choices")
+    if status != 200:
+        return []
+    return body.get("choices") or body.get("items") or []
+
+
+def _latest_prepared_input(work, stack, session):
+    """The session's newest frozen prepared input, or an empty object."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT payload_json FROM generation_prepared_inputs "
+                         "WHERE session_id=? ORDER BY created_at DESC, id DESC LIMIT 1", (session,)).fetchone()
+        db.close()
+    except sqlite3.Error:
+        return {}
+    try:
+        return json.loads(row["payload_json"]) if row and row["payload_json"] else {}
+    except ValueError:
+        return {}
+
+
+def _image_message(api, session, content, domain="image", image_urls=None):
+    """Send one turn with a fake-LLM tool marker; wait for its final reply."""
+    before = assistant_reply_count(api, session)
+    body = {"content": content, "creative_domain": domain}
+    if image_urls:
+        body["image_urls"] = image_urls
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+    if status not in (200, 201, 202):
+        return False
+    end = time.time() + 45
+    while time.time() < end:
+        if assistant_reply_count(api, session) > before:
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def scenario_image_purpose(api, offerings, work):
+    """#239: 2D purpose card, brief, purpose-driven model and parameters, the
+    explicit 2D lock, and the 3D input checklist, all through the fake stack."""
+    session = new_session(api)
+    api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "manual"})
+
+    # (a) a new 2D drawing without a brief opens the 2D purpose card, whose
+    # options are exactly the declared image2d_usage profiles.
+    card = '[[fake:tool:ask_choice {"kind":"image_usage_profile"}]]'
+    if not _image_message(api, session, "画一张游戏角色立绘 " + card):
+        record("#239 2D purpose card", False, "turn did not finish")
+    else:
+        cards = [item for item in _choice_cards(api, session) if item.get("kind") == "image_usage_profile"]
+        _, schema = api.json("GET", "/api/v1/schema")
+        schema = schema.get("schema", schema) if isinstance(schema, dict) else {}
+        declared = [profile.get("id") for profile in
+                    ((schema.get("chat") or {}).get("image2d_usage") or {}).get("profiles") or []]
+        options = [option.get("id") for option in (cards[-1].get("options") or [])] if cards else []
+        record("#239 2D purpose card", bool(cards) and options == declared,
+               f"kind={cards[-1].get('kind') if cards else None} options={options} declared={declared}")
+
+    # (b) the answer writes the 2D purpose into the brief.
+    if not _image_message(api, session, "用途是角色立绘 [[fake:tool:update_production_brief "
+                                        '{"image_use":"illustration","image_transparent":false}]]'):
+        record("#239 2D brief write", False, "turn did not finish")
+    else:
+        status, body = api.json("GET", f"/api/v1/chat/sessions/{session}/brief")
+        brief = (body or {}).get("brief") or {}
+        record("#239 2D brief write", status == 200 and brief.get("image_use") == "illustration",
+               f"status={status} brief={brief}")
+
+    # (c) refine_image follows the purpose: the recommended model and its
+    # overrides are frozen into the input, and the result names model_choice.
+    draw = ('[[fake:tool:refine_image {"prompt":"full-body cyberpunk female assassin, clean digital illustration, '
+            'confident pose, transparent background, no text, no watermark"}]]')
+    task = {}
+    before_tasks = {item.get("id") for item in session_tasks(api, session)}
+    if not _image_message(api, session, "开始画 " + draw):
+        record("#239 2D purpose-driven generation", False, "turn did not finish")
+    else:
+        deadline = time.time() + 90
+        while time.time() < deadline:
+            fresh = [item for item in session_tasks(api, session) if item.get("id") not in before_tasks]
+            if fresh:
+                task = wait_task(api, fresh[0]["id"], 90)
+                break
+            time.sleep(0.5)
+        task = task or {}
+        prepared = _latest_prepared_input(work, "main", session)
+        normalized = prepared.get("normalized_input") or {}
+        used = task.get("offering_id")
+        contents = _checkpoint_completed_contents(work, "main", session)
+        reported = any('"model_choice"' in content and '"profile"' in content for content in contents)
+        ok = (task.get("state") == "SUCCEEDED" and used == "meshy/nano-banana-pro/text-to-image"
+              and normalized.get("aspect_ratio") == "3:4"
+              and (prepared.get("model_choice") or {}).get("source") == "profile"
+              and (prepared.get("model_choice") or {}).get("profile") == "illustration"
+              and reported)
+        record("#239 2D purpose-driven generation", ok,
+               f"offering={used} state={task.get('state')} aspect_ratio={normalized.get('aspect_ratio')} "
+               f"model_choice={prepared.get('model_choice')} result_model_choice={reported}")
+
+    # (d) the explicit 2D lock wins: a different named model is refused before
+    # submission, and a later call without a model runs the locked one.
+    lock = api.json("PUT", f"/api/v1/chat/sessions/{session}/model2d", {"explicit_model_2d": "nano-banana-2"})
+    record("#239 2D lock writes", lock[0] == 200 and "nano-banana-2" in json.dumps(lock[1]),
+           f"status={lock[0]} body={lock[1]}")
+    before_tasks = {item.get("id") for item in session_tasks(api, session)}
+    conflict = ('[[fake:tool:refine_image {"model":"nano-banana-pro","prompt":"a red cube"}]]')
+    _image_message(api, session, "用另一个模型画 " + conflict)
+    no_task = {item.get("id") for item in session_tasks(api, session)} == before_tasks
+    contents = _checkpoint_completed_contents(work, "main", session)
+    refused = any("与用户在本会话明确选定的模型" in content for content in contents)
+    record("#239 shared model conflict is not silently overridden", no_task and refused,
+           f"new_tasks={len({item.get('id') for item in session_tasks(api, session)} - before_tasks)} refusal={refused}")
+    locked = ('[[fake:tool:refine_image {"prompt":"a red cube"}]]')
+    before_tasks = {item.get("id") for item in session_tasks(api, session)}
+    if not _image_message(api, session, "按锁定的模型画 " + locked):
+        record("#239 locked 2D model runs", False, "turn did not finish")
+    else:
+        task = {}
+        deadline = time.time() + 90
+        while time.time() < deadline:
+            fresh = [item for item in session_tasks(api, session) if item.get("id") not in before_tasks]
+            if fresh:
+                task = wait_task(api, fresh[0]["id"], 90)
+                break
+            time.sleep(0.5)
+        record("#239 locked 2D model runs", task.get("offering_id") == "meshy/nano-banana-2/text-to-image",
+               f"offering={task.get('offering_id')} state={task.get('state')}")
+
+    # (e) a single-subject, solid-background picture passes the 3d_input
+    # checklist through inspect_image.
+    white, red = (250, 250, 250), (200, 30, 30)
+    status, uploaded = api.upload("/api/v1/assets", "file", "3d-input.png",
+                                  make_picture(128, 128, white, [((40, 32, 88, 96), red)]), "image/png")
+    asset_id = uploaded.get("id") if status in (200, 201) else None
+    if not asset_id:
+        record("#239 3D input picture upload", False, f"HTTP {status}")
+        return
+    picture_url = uploaded.get("url") or f"/api/v1/assets/{asset_id}"
+    _image_message(api, session, "这张图作为 3D 输入素材", image_urls=[picture_url])
+    handle = ""
+    status, body = api.json("GET", f"/api/chat/sessions/{session}/messages")
+    for message in (body if isinstance(body, list) else body.get("messages", [])):
+        for attachment in message.get("attachments") or []:
+            if attachment.get("kind") == "image" and attachment.get("handle"):
+                handle = attachment["handle"]
+    if not handle:
+        record("#239 3D input picture handle", False, "no image handle")
+        return
+    inspect = '[[fake:tool:inspect_image {"image":"' + handle + '","checklist":"3d_input"}]]'
+    if not _image_message(api, session, "检查 3D 输入 " + inspect):
+        record("#239 3D input checklist", False, "turn did not finish")
+        return
+    summaries = _image_self_check_summaries(api, session)
+    summary = next((item for item in reversed(summaries) if item.get("handle") == handle), None)
+    failed = (summary or {}).get("checks", {}).get("failed")
+    record("#239 3D input checklist", summary is not None and failed == 0,
+           f"handle={handle} failed={failed} summary={summary}")
+
+
 def scenario_fault(api, offerings, scenario):
     session = new_session(api)
     picture = upload_asset(api, "reference.png", make_png(), "image/png")
@@ -1786,7 +1950,7 @@ def scenario_image_self_check(api, offerings, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,offering-knowledge,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,image-purpose,offering-knowledge,faults")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
@@ -1808,7 +1972,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality", "image-self-check"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -1835,6 +1999,8 @@ def main():
                 scenario_agent_quality(api, offerings, args.report or os.path.join(work, "agent-quality"))
             if "image-self-check" in selected:
                 scenario_image_self_check(api, offerings, work)
+            if "image-purpose" in selected:
+                scenario_image_purpose(api, offerings, work)
             processes.stop(child)
         if "offering-knowledge" in selected:
             offering_catalog = private_catalog(

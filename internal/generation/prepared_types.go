@@ -19,7 +19,10 @@ type PrepareInputCommand struct {
 	// ParameterSources labels why an advised change happened, keyed by
 	// parameter name: "agent" (the default when unset) or "profile:<id>" for a
 	// usage-profile override (#103). The reason text is shared per profile.
-	ParameterSources    map[string]string
+	ParameterSources map[string]string
+	// ModelChoice is who chose the model, for the approval card (#239). It is
+	// evidence only: it never changes the frozen input or its hash.
+	ModelChoice         *ModelChoice
 	OwnerID             OwnerID
 	SessionID           string
 	Capability          Capability
@@ -110,7 +113,19 @@ func (limit ReferenceLimit) Note(template string) string {
 		"{total}", strconv.Itoa(limit.Total)).Replace(template)
 }
 
+// ModelChoice is the approval evidence of who chose the model of a step
+// (#103, #239): source user, agent, profile or default, the purpose id when the
+// purpose chose and its reason. It is product text, not part of InputHash.
+type ModelChoice struct {
+	Source  string `json:"source"`
+	Profile string `json:"profile,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+}
+
 type PreparedInput struct {
+	// ModelChoice names who chose the step's model, when the tool declares the
+	// result key. It is approval evidence only and is excluded from InputHash.
+	ModelChoice *ModelChoice `json:"model_choice,omitempty"`
 	// ReferenceLimit is set when a KeepFirstReferences preparation kept only
 	// the first reference pictures; ReferenceNote is its Schema note. Both are
 	// answered once and not stored.

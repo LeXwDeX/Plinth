@@ -127,3 +127,43 @@ func TestAskChoiceToolBuildsOnlyDeclaredKindsWithAnAvailableTarget(t *testing.T)
 		t.Fatalf("missing kind = %+v", result)
 	}
 }
+
+// #239: a direction card forwards Agent-supplied options after checking that
+// each id is a bounded token and each label is present.
+func TestAskChoiceToolForwardsBoundedDirectionOptions(t *testing.T) {
+	kind := catalog.ChatChoiceKindSchema{ID: "direction", OptionSource: "agent", ToolName: ToolUpdateProductionBrief}
+	var received chat.AskChoiceArguments
+	executor, err := New(Config{
+		Params: agentparams.NewStore(), Generate: &fakeGenerate{},
+		ChoiceKinds:         []catalog.ChatChoiceKindSchema{kind},
+		ChoiceOptionInvalid: "方向卡选项无效。",
+		AskChoice: func(_ context.Context, _ chat.ToolCommand, _ catalog.ChatChoiceKindSchema,
+			arguments chat.AskChoiceArguments,
+		) (chat.ToolResult, error) {
+			received = arguments
+			return chat.ToolResult{AgentContent: `{"choice_required":true}`, NoSubmission: true}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := func(arguments string) chat.ToolCommand {
+		return chat.ToolCommand{OwnerID: testOwner, SessionID: "s1",
+			Call:          agents.ToolCall{ID: "call-choice", Name: ToolAskChoice, Arguments: json.RawMessage(arguments)},
+			ToolAvailable: func(name string) bool { return name == ToolUpdateProductionBrief }}
+	}
+	result, err := executor.Execute(context.Background(), command(
+		`{"kind":"direction","options":[{"id":"watercolor","label":"水彩"},{"id":"ink-2","label":"水墨","description":"淡墨"}]}`), nil)
+	if err != nil || !result.NoSubmission || len(received.Options) != 2 ||
+		received.Options[0].ID != "watercolor" || received.Options[1].Description != "淡墨" {
+		t.Fatalf("direction options = %+v %+v %v", result, received, err)
+	}
+	for _, arguments := range []string{
+		`{"kind":"direction","options":[{"id":"free text","label":"带空格"},{"id":"b","label":"B"}]}`,
+		`{"kind":"direction","options":[{"id":"a","label":""},{"id":"b","label":"B"}]}`,
+	} {
+		if result, _ := executor.Execute(context.Background(), command(arguments), nil); result.Error != "方向卡选项无效。" || !result.NoSubmission {
+			t.Fatalf("invalid options = %+v", result)
+		}
+	}
+}

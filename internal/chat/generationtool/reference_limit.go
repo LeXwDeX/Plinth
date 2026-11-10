@@ -137,7 +137,7 @@ func (executor *Executor) ToolDescriptionNote(tool catalog.ChatToolSchema, optio
 			// person's explicit session pick is known when tool descriptions are
 			// written, so the note names that model and stays silent otherwise;
 			// a purpose or default recommendation is not a pick.
-			if strings.TrimSpace(options.ExplicitModel3D) == "" {
+			if strings.TrimSpace(options.ExplicitModelFor(toolDomain(command))) == "" {
 				return ""
 			}
 			choice, err := executor.chooseOffering(command, tool.Capability, nil, modelInput{})

@@ -373,6 +373,9 @@ var chatBranchTaskRefsMigration string
 //go:embed migrations/0083_session_evidence_deletions.sql
 var sessionEvidenceDeletionsMigration string
 
+//go:embed migrations/0085_chat_session_explicit_model_image.sql
+var chatSessionExplicitModelImageMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -447,7 +450,21 @@ func migrations() []migration {
 		migration{version: 80, name: "chat_branch_lineage", sql: chatBranchLineageMigration},
 		migration{version: 81, name: "chat_session_style_lock", sql: chatSessionStyleLockMigration},
 		migration{version: 82, name: "chat_branch_task_refs", sql: chatBranchTaskRefsMigration},
-		migration{version: 83, name: "session_evidence_deletions", sql: sessionEvidenceDeletionsMigration})
+		migration{version: 83, name: "session_evidence_deletions", sql: sessionEvidenceDeletionsMigration},
+		migration{version: 85, name: "chat_session_explicit_model_image", sql: chatSessionExplicitModelImageMigration})
+}
+
+// MigrationVersions is the version of every migration this binary embeds, in
+// apply order. Version 84 is deliberately reserved for the in-flight vision
+// budget schema (#247); a gap is allowed as long as the disk files and this
+// list agree.
+func MigrationVersions() []int {
+	all := migrations()
+	versions := make([]int, 0, len(all))
+	for _, migration := range all {
+		versions = append(versions, migration.version)
+	}
+	return versions
 }
 
 type migration struct {

@@ -112,13 +112,33 @@ func TestAppendOnlyMigrationsShape(t *testing.T) {
 		files[version] = entry.Name()
 	}
 	head := sqlite.MigrationHead()
-	if len(files) != head {
-		t.Fatalf("migration files = %d; want %d (versions 1..%d)", len(files), head, head)
+	// The embedded migration list is the source of truth. Version 84 is
+	// reserved for the in-flight vision-budget schema (#247), so the file set
+	// may legitimately have a hole; every embedded version must exist and no
+	// extra file may exist.
+	expected := sqlite.MigrationVersions()
+	if len(files) != len(expected) {
+		t.Fatalf("migration files = %d; want %d (embedded versions %v)", len(files), len(expected), expected)
 	}
-	for version := 1; version <= head; version++ {
+	for _, version := range expected {
 		if files[version] == "" {
 			t.Fatalf("migration version %d missing on disk", version)
 		}
+	}
+	for version := range files {
+		found := false
+		for _, declared := range expected {
+			if version == declared {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("migration file for undeclared version %d: %s", version, files[version])
+		}
+	}
+	if expected[len(expected)-1] != head {
+		t.Fatalf("migration head = %d, last embedded version = %d", head, expected[len(expected)-1])
 	}
 	// 0021/0022 必须保持纯追加形态：注释 + 单条 ADD COLUMN，无数据改写、
 	// 无 NOT NULL、无对既有行的回填。

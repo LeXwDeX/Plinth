@@ -127,7 +127,7 @@ ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- bash scripts/
 
 ## Agent 产出质量评测（#238）
 
-固定请求集在 `scripts/smoke/agent-quality/requests.json`（6 个 3D 用例：人形角色、硬表面道具、场景件、生物、打印手办、AR 商品；3 个 2D 用例：角色立绘、图标/道具图、系列一致性），视觉量表与评分提示词在 `scripts/smoke/agent-quality/rubric.json`，两者都带版本号。共用逻辑在 `agent_quality.py`，离线单测：`python3 -m unittest scripts.tests.test_agent_quality`。
+固定请求集在 `scripts/smoke/agent-quality/requests.json`（版本 2：6 个 3D 用例：人形角色、硬表面道具、场景件、生物、打印手办、AR 商品；4 个 2D 用例：角色立绘、图标/道具图、系列一致性、3D 输入图），视觉量表与评分提示词在 `scripts/smoke/agent-quality/rubric.json`，两者都带版本号。共用逻辑在 `agent_quality.py`，离线单测：`python3 -m unittest scripts.tests.test_agent_quality`。
 
 ### 轨迹评测（fake，免费，可重复）
 
@@ -156,7 +156,7 @@ python3 scripts/smoke/eval-agent-compare.py <基线.json> <候选.json> [--toler
 
 ## Fake 上游整栈自检（#96）
 
-`python3 scripts/smoke/smoke-fake-stack.py`：先启动 `cmd/fake-upstream`，再以 live 模式启动本机隔离栈（Tripo、Meshy、Hyper3D、LLM、OpenAI/Gemini/Jimeng 图像与抠图的 base URL 指向 fake），核对三家余额面板、Tripo 生成 → rig-check → rigging → animation、segment → complete、Meshy 文生 3D → remesh → rigging → animation / retexture / convert、Hyper3D 文生 3D → Bang → texture、三家图像的文生图与图生图、抠图、Tripo 的图生 3D / splat / multiview 与 edit / 两种 Smart Segmentation / decimate、Agent 对话 → 工具调用 → 批准 → 任务 → 回复，以及各故障场景的 Task 终态与错误 class。零成本、离线，只用回环地址，不读取真实 Key，**不属于**发布验收（L0/L1/L2 仍按上文），也不替代真实付费验收。说明见 `dev_test.md`「Fake 上游自检」。`python3 scripts/smoke/smoke-fake-stack.py --only image-self-check` 覆盖 #245：`inspect_image` 对合格、带背景、多主体、贴边裁切四类样例的判定，以及图生 3D 闸门对不合格输入图的拒绝与 `input_override_reason` 放行。`python3 scripts/smoke/smoke-fake-stack.py --only offering-knowledge` 覆盖 #249：公开 Offering 自述（只含三项、中文默认与英文译文）、禁用 Offering 后的公开/Agent 投影变化、`list_offerings` 的知识与可用模型过滤、生成工具描述里按所选模型的写作指导与 no-text 说明、用途覆盖数据、超限提示词在提交前拒绝且不建 Task，以及引用模板改写后的 `final_prompt`/`prompt_note` 与数据库里冻结 PreparedInput 的实际提交输入一致。`python3 scripts/smoke/replay-recovery-on-fake.py` 在同一个 fake 上重放受控验收的 chain、lost-response、formats（缺格式补齐）与 image（图片本地 wire 故障）（下节 Recovery Fixture 的同一套 runner 与种子工具），不依赖真实 Meshy 余额。
+`python3 scripts/smoke/smoke-fake-stack.py`：先启动 `cmd/fake-upstream`，再以 live 模式启动本机隔离栈（Tripo、Meshy、Hyper3D、LLM、OpenAI/Gemini/Jimeng 图像与抠图的 base URL 指向 fake），核对三家余额面板、Tripo 生成 → rig-check → rigging → animation、segment → complete、Meshy 文生 3D → remesh → rigging → animation / retexture / convert、Hyper3D 文生 3D → Bang → texture、三家图像的文生图与图生图、抠图、Tripo 的图生 3D / splat / multiview 与 edit / 两种 Smart Segmentation / decimate、Agent 对话 → 工具调用 → 批准 → 任务 → 回复，以及各故障场景的 Task 终态与错误 class。零成本、离线，只用回环地址，不读取真实 Key，**不属于**发布验收（L0/L1/L2 仍按上文），也不替代真实付费验收。说明见 `dev_test.md`「Fake 上游自检」。`python3 scripts/smoke/smoke-fake-stack.py --only image-purpose` 覆盖 #239：新 2D 请求出 2D 用途卡且选项等于公开的 `image2d_usage.profiles`，用途写入简报，`refine_image` 按用途推荐模型并把画幅覆盖冻结进输入、结果带 `model_choice`，显式 `model2d` 锁冲突不提交、无模型时照锁定模型执行，单主体纯色背景图通过 `inspect_image` 的 `3d_input` 清单。`python3 scripts/smoke/smoke-fake-stack.py --only image-self-check` 覆盖 #245：`inspect_image` 对合格、带背景、多主体、贴边裁切四类样例的判定，以及图生 3D 闸门对不合格输入图的拒绝与 `input_override_reason` 放行。`python3 scripts/smoke/smoke-fake-stack.py --only offering-knowledge` 覆盖 #249：公开 Offering 自述（只含三项、中文默认与英文译文）、禁用 Offering 后的公开/Agent 投影变化、`list_offerings` 的知识与可用模型过滤、生成工具描述里按所选模型的写作指导与 no-text 说明、用途覆盖数据、超限提示词在提交前拒绝且不建 Task，以及引用模板改写后的 `final_prompt`/`prompt_note` 与数据库里冻结 PreparedInput 的实际提交输入一致。`python3 scripts/smoke/replay-recovery-on-fake.py` 在同一个 fake 上重放受控验收的 chain、lost-response、formats（缺格式补齐）与 image（图片本地 wire 故障）（下节 Recovery Fixture 的同一套 runner 与种子工具），不依赖真实 Meshy 余额。
 
 ## 可控恢复验收夹具（隔离进程）
 

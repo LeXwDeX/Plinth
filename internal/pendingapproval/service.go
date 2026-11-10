@@ -258,7 +258,10 @@ type Item struct {
 	Tool                 string                           `json:"tool"`
 	Capability           string                           `json:"capability"`
 	Model                string                           `json:"model,omitempty"`
-	Provider             string                           `json:"provider,omitempty"`
+	// ModelChoice names who chose the model and, for a purpose, its reason
+	// (#239). Nil when the step did not report one.
+	ModelChoice *generation.ModelChoice `json:"model_choice,omitempty"`
+	Provider    string                  `json:"provider,omitempty"`
 	// ProviderID is the provider's account key, which the client matches to the
 	// provider's balance.
 	ProviderID string `json:"provider_id,omitempty"`
@@ -434,7 +437,8 @@ func (s *Service) item(ctx context.Context, owner string, op generationtool.Oper
 	}
 	item := Item{
 		NativeQuote: prepared.NativeQuote, ParameterAdjustments: prepared.ParameterAdjustments,
-		RequestID: grant.RequestID, Status: status, Tool: op.ToolName,
+		ModelChoice: prepared.ModelChoice,
+		RequestID:   grant.RequestID, Status: status, Tool: op.ToolName,
 		Capability: string(prepared.Capability), MessageID: op.AssistantMessageID,
 		CreatedAt: grant.PendingSince(), ExpiresAt: s.grants.ExpiresAt(grant),
 		RechargeTaskID: op.RechargeTaskID, Inputs: []Input{},
