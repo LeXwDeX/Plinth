@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"sort"
 
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
@@ -15,8 +16,11 @@ const sourceTaskFromImageHandle = "source-task-from-image-handle"
 // validateChatToolOfferingSelection checks the two argument-driven ways a
 // generation tool picks its Offering (#189). Both are independent of the
 // workspace model, name only declared Offerings of the tool's capabilities,
-// and leave the final enabled/available check to execution time.
-func validateChatToolOfferingSelection(tools []ChatToolSchema, offerings generationMap) error {
+// and leave the final enabled/available check to execution time. When the
+// Catalog declares Offering knowledge (#249), a ModelArgument tool must also
+// derive its enum from the Catalog instead of writing one.
+func validateChatToolOfferingSelection(schema ChatSchema, offerings generationMap) error {
+	tools := schema.Tools
 	for index, tool := range tools {
 		if tool.OfferingArgument == "" && tool.OfferingFromSource == "" {
 			continue
@@ -98,7 +102,8 @@ func validateChatToolOfferingSelection(tools []ChatToolSchema, offerings generat
 			return fmt.Errorf("chat.tools[%d] offering_from_source 没有可配对的 Offering", index)
 		}
 	}
-	return validateChatToolModelSelection(tools, offerings)
+	return validateChatToolModelSelection(tools, offerings,
+		len(schema.Agent.OfferingKnowledge.RequiredCapabilities) > 0)
 }
 
 // validateChatToolModelSelection checks the optional model argument of a tool
@@ -108,9 +113,12 @@ func validateChatToolOfferingSelection(tools []ChatToolSchema, offerings generat
 // picks within the call's capability, so a name shared by the text and image
 // Offering of one model is unambiguous; two matches in the same capability are
 // not. The Agent can therefore only name Offerings the tool can run.
-func validateChatToolModelSelection(tools []ChatToolSchema, offerings generationMap) error {
+func validateChatToolModelSelection(tools []ChatToolSchema, offerings generationMap, knowledgeDeclared bool) error {
 	for index, tool := range tools {
 		if tool.ModelArgument == "" {
+			if tool.ModelChoices != nil {
+				return fmt.Errorf("chat.tools[%d] 声明了 model_choices 却没有 model_argument", index)
+			}
 			continue
 		}
 		if tool.OfferingArgument != "" || tool.OfferingFromSource != "" {
@@ -132,34 +140,152 @@ func validateChatToolModelSelection(tools []ChatToolSchema, offerings generation
 		if _, mapped := tool.ArgumentMappings[tool.ModelArgument]; mapped {
 			return fmt.Errorf("chat.tools[%d] model_argument %q 不是 Offering 参数，不能映射", index, tool.ModelArgument)
 		}
+		if tool.ModelChoices == nil {
+			if knowledgeDeclared {
+				return fmt.Errorf("chat.tools[%d] 新式 Catalog 的 model_argument 必须声明 model_choices 而不是手写 enum", index)
+			}
+			return validateLegacyModelEnum(index, tool, property.Enum, offerings)
+		}
+		if len(property.Enum) > 0 {
+			return fmt.Errorf("chat.tools[%d] model_argument %q 声明了 model_choices 时参数不得再写 enum", index, tool.ModelArgument)
+		}
+		if tool.ModelChoices.From != "available_offerings" {
+			return fmt.Errorf("chat.tools[%d] model_choices.from 必须是 available_offerings: %q", index, tool.ModelChoices.From)
+		}
 		seen := map[string]bool{}
-		for _, value := range property.Enum {
-			if seen[value] {
-				return fmt.Errorf("chat.tools[%d] model_argument 选项重复: %q", index, value)
+		for _, semantic := range tool.ModelChoices.RequireParameters {
+			if !semantic.Valid() {
+				return fmt.Errorf("chat.tools[%d] model_choices.require_parameters 含未知语义 %q", index, semantic)
 			}
-			seen[value] = true
-			matched := false
-			for _, capability := range tool.Execution.Capabilities {
-				matches := 0
-				for _, offering := range offerings {
-					if offering.Capability != capability {
-						continue
-					}
-					if offering.ModelID == value || string(offering.ID) == value {
-						matches++
-					}
-				}
-				if matches > 1 {
-					return fmt.Errorf("chat.tools[%d] model_argument 选项 %q 在能力 %q 内对应 %d 个 Offering", index, value, capability, matches)
-				}
-				if matches == 1 {
-					matched = true
-				}
+			if seen[string(semantic)] {
+				return fmt.Errorf("chat.tools[%d] model_choices.require_parameters 重复: %q", index, semantic)
 			}
-			if !matched {
-				return fmt.Errorf("chat.tools[%d] model_argument 选项 %q 没有对应的 Offering", index, value)
+			seen[string(semantic)] = true
+		}
+		for _, semantic := range tool.ModelChoices.ExcludeParameters {
+			if !semantic.Valid() {
+				return fmt.Errorf("chat.tools[%d] model_choices.exclude_parameters 含未知语义 %q", index, semantic)
 			}
+			if seen[string(semantic)] {
+				return fmt.Errorf("chat.tools[%d] model_choices 的语义 %q 不能同时出现在 require 与 exclude", index, semantic)
+			}
+			seen[string(semantic)] = true
+		}
+		for _, id := range tool.ModelChoices.ExcludeOfferings {
+			if _, exists := offerings[schemacontract.OfferingID(id)]; !exists {
+				return fmt.Errorf("chat.tools[%d] model_choices.exclude_offerings 的 Offering %q 不存在", index, id)
+			}
+		}
+		if len(DerivedModelChoices(tool, offeringsList(offerings), nil)) == 0 {
+			return fmt.Errorf("chat.tools[%d] model_choices 没有任何已启用且匹配的 Offering", index)
 		}
 	}
 	return nil
+}
+
+// validateLegacyModelEnum keeps the historical handwritten enum valid for a
+// Catalog without Offering knowledge: every value names at most one Offering
+// per capability and at least one overall.
+func validateLegacyModelEnum(index int, tool ChatToolSchema, values []string, offerings generationMap) error {
+	seen := map[string]bool{}
+	for _, value := range values {
+		if seen[value] {
+			return fmt.Errorf("chat.tools[%d] model_argument 选项重复: %q", index, value)
+		}
+		seen[value] = true
+		matched := false
+		for _, capability := range tool.Execution.Capabilities {
+			matches := 0
+			for _, offering := range offerings {
+				if offering.Capability != capability {
+					continue
+				}
+				if offering.ModelID == value || string(offering.ID) == value {
+					matches++
+				}
+			}
+			if matches > 1 {
+				return fmt.Errorf("chat.tools[%d] model_argument 选项 %q 在能力 %q 内对应 %d 个 Offering", index, value, capability, matches)
+			}
+			if matches == 1 {
+				matched = true
+			}
+		}
+		if !matched {
+			return fmt.Errorf("chat.tools[%d] model_argument 选项 %q 没有对应的 Offering", index, value)
+		}
+	}
+	return nil
+}
+
+// DerivedModelChoices is the runtime enum of a ModelArgument tool (#249):
+// the model_ids of the Offerings that are enabled, available when a check is
+// given, serve one of the tool's capabilities, and declare every required
+// parameter semantic while declaring none excluded. Order follows the given
+// slice (the Catalog order), and duplicates are removed. A tool without
+// ModelChoices derives nothing; callers keep its declared enum.
+func DerivedModelChoices(
+	tool ChatToolSchema,
+	offerings []schemacontract.Offering,
+	available func(schemacontract.OfferingID) bool,
+) []string {
+	if tool.ModelChoices == nil {
+		return nil
+	}
+	choices := make([]string, 0, len(offerings))
+	seen := map[string]bool{}
+	for _, offering := range offerings {
+		if !offering.Enabled || offering.ModelID == "" {
+			continue
+		}
+		if available != nil && !available(offering.ID) {
+			continue
+		}
+		if !slices.Contains(tool.Execution.Capabilities, offering.Capability) {
+			continue
+		}
+		if slices.Contains(tool.ModelChoices.ExcludeOfferings, string(offering.ID)) {
+			continue
+		}
+		if !offeringMatchesModelChoices(offering, *tool.ModelChoices) {
+			continue
+		}
+		if seen[offering.ModelID] {
+			continue
+		}
+		seen[offering.ModelID] = true
+		choices = append(choices, offering.ModelID)
+	}
+	return choices
+}
+
+func offeringMatchesModelChoices(offering schemacontract.Offering, choices ChatToolModelChoicesSchema) bool {
+	declared := make(map[schemacontract.ParameterSemantic]bool, len(offering.Parameters))
+	for _, parameter := range offering.Parameters {
+		declared[parameter.Semantic] = true
+	}
+	for _, semantic := range choices.RequireParameters {
+		if !declared[semantic] {
+			return false
+		}
+	}
+	for _, semantic := range choices.ExcludeParameters {
+		if declared[semantic] {
+			return false
+		}
+	}
+	return true
+}
+
+func offeringsList(offerings generationMap) []schemacontract.Offering {
+	list := make([]schemacontract.Offering, 0, len(offerings))
+	ids := make([]string, 0, len(offerings))
+	for id := range offerings {
+		ids = append(ids, string(id))
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		list = append(list, offerings[schemacontract.OfferingID(id)])
+	}
+	return list
 }

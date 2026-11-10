@@ -26,14 +26,15 @@ func TestCraftPromptIsInjectedOnlyWhenA3DToolIsOffered(t *testing.T) {
 			}
 			rig.turn(t, scope)
 			system := rig.agent.requests[0].Messages[0].Content
-			if got := strings.Contains(system, craft.Text); got != want {
+			wantCraft := renderedCraftText(craft)
+			if got := strings.Contains(system, wantCraft); got != want {
 				t.Fatalf("%s scope: craft brief present = %v, want %v", scope, got, want)
 			}
 			if !want {
 				return
 			}
-			if strings.Count(system, craft.Text) != 1 {
-				t.Fatalf("%s scope: craft brief appears %d times", scope, strings.Count(system, craft.Text))
+			if strings.Count(system, wantCraft) != 1 {
+				t.Fatalf("%s scope: craft brief appears %d times", scope, strings.Count(system, wantCraft))
 			}
 		})
 	}
@@ -41,6 +42,26 @@ func TestCraftPromptIsInjectedOnlyWhenA3DToolIsOffered(t *testing.T) {
 
 // The brief sits after the domain context and before the Agent scope block, so
 // it is part of the craft instructions rather than a scope fact.
+// renderedCraftText is what craftPrompt sends for a test rig without an
+// Offering source: the knowledge placeholder becomes empty and the empty line
+// it leaves is dropped (#249).
+func renderedCraftText(prompt catalog.ChatAgentCraftPrompt) string {
+	text := prompt.Text
+	if !strings.Contains(text, "{offering_tradeoffs}") {
+		return text
+	}
+	text = strings.ReplaceAll(text, "{offering_tradeoffs}", "")
+	lines := strings.Split(text, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
 func TestCraftPromptSitsBetweenDomainContextAndScope(t *testing.T) {
 	rig := newScopeRig(t, agents.Completion{Content: "ok"})
 	rig.turn(t, "3d")
@@ -54,6 +75,7 @@ func TestCraftPromptSitsBetweenDomainContextAndScope(t *testing.T) {
 	if craft == "" {
 		t.Fatal("no model3d craft prompt")
 	}
+	craft = renderedCraftText(catalog.ChatAgentCraftPrompt{Text: craft})
 	const domainContext = "Use configured 2D tools"
 	start := strings.Index(system, domainContext)
 	end := strings.Index(system, "【Agent 范围】")

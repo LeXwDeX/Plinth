@@ -1895,6 +1895,7 @@ func (s *Server) listOfferings(
 			ProviderOrder:                 offering.ProviderOrder,
 			ModelID:                       offering.ModelID,
 			ModelName:                     offering.ModelName,
+			Knowledge:                     offering.Knowledge.Public(),
 			Capability:                    offering.Capability,
 			Available:                     s.generation.OfferingAvailable(offering.ID),
 			Recommended:                   offering.Recommended,
@@ -1927,11 +1928,14 @@ type offeringResponse struct {
 	ProviderOrder      int                     `json:"provider_order,omitempty"`
 	ModelID            string                  `json:"model_id"`
 	ModelName          string                  `json:"model_name"`
-	Capability         generation.Capability   `json:"capability"`
-	Available          bool                    `json:"available"`
-	Recommended        bool                    `json:"recommended,omitempty"`
-	Priority           int                     `json:"priority,omitempty"`
-	EstimatedCredits   int                     `json:"estimated_credits,omitempty"`
+	// Knowledge is the public self-description (#249): strengths, weaknesses
+	// and limitations. Prompt craft, reference use and sources stay private.
+	Knowledge        *schemacontract.PublicOfferingKnowledge `json:"knowledge,omitempty"`
+	Capability       generation.Capability                   `json:"capability"`
+	Available        bool                                    `json:"available"`
+	Recommended      bool                                    `json:"recommended,omitempty"`
+	Priority         int                                     `json:"priority,omitempty"`
+	EstimatedCredits int                                     `json:"estimated_credits,omitempty"`
 	// CreditsMetered marks offerings whose provider bills in credits; the UI
 	// shows no credits for the rest.
 	CreditsMetered bool `json:"credits_metered,omitempty"`

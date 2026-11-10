@@ -100,7 +100,15 @@ func OfferingModelName(offering generation.Offering) string {
 // text guidance is independent of the reference-picture limit.
 func (executor *Executor) ToolDescriptionNote(tool catalog.ChatToolSchema, options chat.TurnOptions) string {
 	notes := tool.ReferenceCapacityNote
-	if notes == (catalog.ChatToolReferenceCapacityNote{}) || tool.Capability == "" {
+	knowledge := executor.chat.Agent.OfferingKnowledge
+	// A tool without a capability has no Offering to describe. Without
+	// reference-capacity words and without an Offering-knowledge projection
+	// there is nothing to add, so skip the Offering lookup (#249 widened this
+	// early exit: refine_image declares no capacity note but does declare a
+	// model whose prompt craft the Agent needs).
+	if tool.Capability == "" ||
+		(notes == (catalog.ChatToolReferenceCapacityNote{}) &&
+			knowledge.GuidanceTemplate == "" && knowledge.NoTextTemplate == "") {
 		return ""
 	}
 	command := chat.ToolCommand{Tool: tool, Options: options}
@@ -153,27 +161,41 @@ func (executor *Executor) ToolDescriptionNote(tool catalog.ChatToolSchema, optio
 	// The Agent repeats this name in its reply, so use the turn's frozen
 	// locale as the reference-limit note does.
 	modelLabel := executor.localized(command, OfferingModelName(offering))
-	var note string
+	parts := make([]string, 0, 4)
 	switch {
 	case limit == 1:
-		note = strings.NewReplacer("{model}", modelLabel).Replace(notes.Single)
-	case limit > 1:
-		note = strings.NewReplacer("{model}", modelLabel, "{count}", strconv.Itoa(limit)).Replace(notes.Multiple)
-	}
-	if _, hasPrompt := semanticParameter(offering, generation.SemanticPrompt); notes.NoPrompt != "" && !hasPrompt {
-		if note != "" {
-			note += " "
+		if notes.Single != "" {
+			parts = append(parts, strings.NewReplacer("{model}", modelLabel).Replace(notes.Single))
 		}
-		note += strings.NewReplacer("{model}", modelLabel).Replace(notes.NoPrompt)
+	case limit > 1:
+		if notes.Multiple != "" {
+			parts = append(parts, strings.NewReplacer("{model}", modelLabel, "{count}", strconv.Itoa(limit)).Replace(notes.Multiple))
+		}
+	}
+	// #249: an Offering states whether it reads a text prompt. The statement
+	// replaces the historical per-tool no_prompt copy; a Catalog without
+	// knowledge keeps that field as the fallback.
+	if _, hasPrompt := semanticParameter(offering, generation.SemanticPrompt); !hasPrompt {
+		if text := knowledge.RenderNoTextGuidance(modelLabel, offering.Knowledge); text != "" {
+			parts = append(parts, executor.localized(command, text))
+		} else if notes.NoPrompt != "" {
+			parts = append(parts, strings.NewReplacer("{model}", modelLabel).Replace(notes.NoPrompt))
+		}
+	}
+	// The Offering's own prompt craft: language, form, length, negative
+	// prompt, reads-text and reference use. Undeclared facts render as
+	// unknown, never as a guess.
+	if text := knowledge.RenderPromptGuidance(modelLabel, offering.Knowledge); text != "" {
+		parts = append(parts, executor.localized(command, text))
 	}
 	// #65: name the settings the Offering declares, so the Agent recommends
 	// only from them instead of the provider's other knobs.
-	if notes.Settings != "" && note != "" {
+	if notes.Settings != "" {
 		if names := executor.declaredSettingNames(command, offering); names != "" {
-			note += " " + strings.NewReplacer("{model}", modelLabel, "{settings}", names).Replace(notes.Settings)
+			parts = append(parts, strings.NewReplacer("{model}", modelLabel, "{settings}", names).Replace(notes.Settings))
 		}
 	}
-	return note
+	return strings.Join(parts, " ")
 }
 
 // declaredSettingNames lists, in Schema order and without repeats, the labels

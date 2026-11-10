@@ -213,6 +213,11 @@ type OrchestratorConfig struct {
 	// model_id serves the capability; it narrows offering_argument choices
 	// (#189). Nil offers the declared choices (tests).
 	OfferingAllowed func(capability, modelID string) bool
+	// Offerings lists the runtime Offerings of a capability in Catalog order.
+	// With a tool's model_choices it derives the model enum from the enabled,
+	// available Offerings (#249), and the craft brief lists their knowledge.
+	// Nil keeps a historical Catalog's declared enum and literal brief.
+	Offerings func(capability string) []generation.Offering
 	// Texts gives the copy of the turn's UI locale. Nil keeps the Schema's
 	// default-locale copy.
 	Texts *catalog.TextLocalizer
@@ -590,6 +595,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		return nil, err
 	}
 	registry.offeringAllowed = config.OfferingAllowed
+	registry.offerings = config.Offerings
 	return &Orchestrator{
 		service:       config.Service,
 		schema:        config.Schema,

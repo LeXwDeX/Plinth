@@ -804,6 +804,15 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateCraftPrompts(schema.Agent.CraftPrompts, toolNames, maxPromptCharacters); err != nil {
 		return err
 	}
+	if err := validateCraftPromptOfferings(schema.Agent.CraftPrompts, capabilityDomains); err != nil {
+		return err
+	}
+	if err := validateOfferingKnowledgeSchema(schema.Agent.OfferingKnowledge); err != nil {
+		return err
+	}
+	if err := validatePromptReportSchema(schema.Agent.PromptReport); err != nil {
+		return err
+	}
 	return nil
 }
 

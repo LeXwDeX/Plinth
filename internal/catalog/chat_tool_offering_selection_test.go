@@ -93,25 +93,51 @@ func TestChatToolModelSelectionRejectsAmbiguousOrUnknownValues(t *testing.T) {
 		tools := slices.Clone(c.application.Chat.Tools)
 		tools[index] = tool
 		tools[index].ArgumentMappings = maps.Clone(tool.ArgumentMappings)
+		if tool.ModelChoices != nil {
+			choices := *tool.ModelChoices
+			choices.RequireParameters = slices.Clone(tool.ModelChoices.RequireParameters)
+			choices.ExcludeParameters = slices.Clone(tool.ModelChoices.ExcludeParameters)
+			choices.ExcludeOfferings = slices.Clone(tool.ModelChoices.ExcludeOfferings)
+			tools[index].ModelChoices = &choices
+		}
 		offerings := maps.Clone(c.byID)
 		mutate(tools, offerings)
-		err := validateChatToolModelSelection(tools, offerings)
+		err := validateChatToolModelSelection(tools, offerings, true)
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("error = %v, want %q", err, want)
 		}
 	}
-	t.Run("two image Offerings share one model name", func(t *testing.T) {
-		check(t, func(_ []ChatToolSchema, offerings generationMap) {
-			duplicate := offerings["meshy/meshy-7.1/image-to-3d"]
-			duplicate.ID = "meshy/meshy-7.1/image-to-3d-copy"
-			offerings[duplicate.ID] = duplicate
-		}, `能力 "image-to-3d" 内对应 2 个 Offering`)
-	})
-	t.Run("an unknown model name", func(t *testing.T) {
+	t.Run("a handwritten enum alongside model_choices", func(t *testing.T) {
 		check(t, func(tools []ChatToolSchema, _ generationMap) {
-			tools[index].Parameters = json.RawMessage(strings.Replace(
-				string(tools[index].Parameters), `"rodin-gen-2.5"`, `"rodin-gen-2.5","no-such-model"`, 1))
-		}, "没有对应的 Offering")
+			var parameters map[string]any
+			if err := json.Unmarshal(tools[index].Parameters, &parameters); err != nil {
+				t.Fatal(err)
+			}
+			properties := parameters["properties"].(map[string]any)
+			model := properties["model"].(map[string]any)
+			model["enum"] = []any{"rodin-gen-2.5"}
+			encoded, err := json.Marshal(parameters)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tools[index].Parameters = encoded
+		}, "不得再写 enum")
+	})
+	t.Run("an unknown excluded Offering", func(t *testing.T) {
+		check(t, func(tools []ChatToolSchema, _ generationMap) {
+			tools[index].ModelChoices.ExcludeOfferings = []string{"no/such/offering"}
+		}, "不存在")
+	})
+	t.Run("no Offering matches the required semantics", func(t *testing.T) {
+		check(t, func(tools []ChatToolSchema, _ generationMap) {
+			tools[index].ModelChoices.RequireParameters = []schemacontract.ParameterSemantic{schemacontract.SemanticMask}
+		}, "没有任何已启用且匹配")
+	})
+	t.Run("the same semantic required and excluded", func(t *testing.T) {
+		check(t, func(tools []ChatToolSchema, _ generationMap) {
+			tools[index].ModelChoices.RequireParameters = []schemacontract.ParameterSemantic{schemacontract.SemanticReferenceImage}
+			tools[index].ModelChoices.ExcludeParameters = []schemacontract.ParameterSemantic{schemacontract.SemanticReferenceImage}
+		}, "不能同时出现")
 	})
 	t.Run("a model argument mapped as an Offering parameter", func(t *testing.T) {
 		check(t, func(tools []ChatToolSchema, _ generationMap) {
@@ -140,7 +166,7 @@ func TestChatToolOfferingSelectionRejectsAmbiguousOrUnboundDeclarations(t *testi
 		tools[buildIndex].ArgumentMappings = maps.Clone(build.ArgumentMappings)
 		offerings := maps.Clone(c.byID)
 		mutate(tools, offerings)
-		err := validateChatToolOfferingSelection(tools, offerings)
+		err := validateChatToolOfferingSelection(ChatSchema{Tools: tools}, offerings)
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("error = %v, want %q", err, want)
 		}

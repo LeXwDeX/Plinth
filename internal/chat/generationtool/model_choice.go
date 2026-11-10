@@ -308,7 +308,7 @@ func (executor *Executor) chooseOffering(
 		// tool): its declared models are the names it can run, and only one
 		// that accepts this input may run. There is no first-available
 		// fallback, which could pick an Offering the input does not fit.
-		declared := declaredModelChoices(tool)
+		declared := executor.declaredModelChoices(tool)
 		for _, name := range declared {
 			offering, matched := matchOffering(candidates, name)
 			if matched && executor.acceptsModelInput(offering, input) {
@@ -336,7 +336,29 @@ func (executor *Executor) chooseOffering(
 	return offeringChoice{Offering: offering, Source: source}, nil
 }
 
-// declaredModelChoices is the enum of the tool's model argument, in order.
+// declaredModelChoices is the model choices of the tool's model argument, in
+// order. A tool that declares model_choices derives them from the enabled,
+// runtime-available Offerings (#249), so telling the Agent what it may run and
+// what it can run stay one set. A historical catalog keeps its handwritten
+// enum.
+func (executor *Executor) declaredModelChoices(tool catalog.ChatToolSchema) []string {
+	if tool.ModelChoices != nil {
+		var candidates []generation.Offering
+		for _, capability := range tool.Execution.Capabilities {
+			for _, offering := range executor.gateway.Offerings(capability) {
+				if offering.Capability == capability && offering.Enabled &&
+					executor.gateway.OfferingAvailable(offering.ID) {
+					candidates = append(candidates, offering)
+				}
+			}
+		}
+		return catalog.DerivedModelChoices(tool, candidates, nil)
+	}
+	return declaredModelChoices(tool)
+}
+
+// declaredModelChoices reads the enum of the tool's model argument, in order.
+// It serves Catalogs written before model_choices existed (#249).
 func declaredModelChoices(tool catalog.ChatToolSchema) []string {
 	if tool.ModelArgument == "" {
 		return nil

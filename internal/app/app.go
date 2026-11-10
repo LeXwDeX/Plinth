@@ -914,6 +914,11 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			}
 			return false
 		},
+		// #249: the model enum and the craft brief follow the Offerings the
+		// deployment can run now.
+		Offerings: func(capability string) []generation.Offering {
+			return module.Offerings(generation.Capability(capability))
+		},
 		// #329 E': a generation tool's description says how many reference
 		// pictures the turn's picked model uses.
 		ToolNote: toolExecutor.ToolDescriptionNote,
