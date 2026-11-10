@@ -207,6 +207,37 @@ describe('function settings on the bare board', () => {
   });
 });
 
+describe('the 功能 tab scroll container (#254)', () => {
+  beforeEach(() => {
+    mock.object = picture;
+    useStudioStore.getState().setPanelTab('image', 'operations');
+  });
+
+  it('makes the tab body the one vertical scroll element, covering 风格锁定 and 选择功能', () => {
+    const html = render();
+    const body = html.match(/<div class="([^"]*)" data-testid="right-panel-operations">/);
+    expect(body).not.toBeNull();
+    const classes = body![1].split(/\s+/);
+    expect(classes).toContain('flex');
+    expect(classes).toContain('min-h-0');
+    expect(classes).toContain('flex-1');
+    expect(classes).toContain('flex-col');
+    expect(classes).toContain('overflow-y-auto');
+    expect(classes).toContain('[scrollbar-gutter:stable]');
+    // Both sections scroll together, in order: 风格锁定 first, then the operation groups and save bar.
+    expect(html.indexOf('stub-style-lock')).toBeLessThan(html.indexOf('stub-operations'));
+    expect(html.match(/overflow-y-auto/g)).toHaveLength(1);
+    expect(html.match(/\[scrollbar-gutter:stable\]/g)).toHaveLength(1);
+  });
+
+  it('stays the only scrollport in a 600px-high window: the children keep their content height', () => {
+    const html = render();
+    // The section bodies must not add a second scrollbar when the window is short; the tab scrolls instead.
+    expect(html.match(/overflow-y-auto/g)).toHaveLength(1);
+    expect(html.match(/max-h-/g) ?? []).toHaveLength(0);
+  });
+});
+
 describe('a 3D model on the stage', () => {
   beforeEach(() => { mock.object = model; });
 

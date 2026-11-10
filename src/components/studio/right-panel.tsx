@@ -105,14 +105,16 @@ interface PanelBodyProps {
   sessionId: string | null;
 }
 
-/** What each tab shows. The panels keep their own scrolling and spacing (12px); this only binds an id to a body. */
+/** What each tab shows. The tab bodies own their scrolling and the panels keep their spacing (12px). */
 function PanelBody({ tab, object, sessionId }: PanelBodyProps) {
   switch (tab) {
     case 'operations':
+      // 功能 is one surface: 风格锁定, the operation groups and the save bar share this single TAB-level
+      // scroll container (#254). The sections below stay at their content height and never scroll themselves.
       return (
-        <div className="flex min-h-0 flex-1 flex-col" data-testid="right-panel-operations">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable]" data-testid="right-panel-operations">
           <StyleLockSection sessionId={sessionId} />
-          <div className="min-h-0 flex-1"><HarnessPanel sessionId={sessionId} object={object} /></div>
+          <HarnessPanel sessionId={sessionId} object={object} />
         </div>
       );
     case 'layers':
