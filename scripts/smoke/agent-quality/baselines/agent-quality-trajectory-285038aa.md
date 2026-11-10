@@ -1,6 +1,6 @@
 # Agent 产出质量评测（trajectory-fake）
 
-- revision: `8cbe29adbba72f71ce53bdc008916d6521e75281` (dirty)
+- revision: `285038aabd295185719c78055d72ebb8069e6427`
 - 请求集: version 2, sha256 `dd6513ebbaf7d46d8dc150c66e33823c80682d923b8c1f69ece0ed8805890f9f`
 - 用例: 10；硬失败: 0
 - 合计: 工具调用 43，付费调用 14，打断 16，inspect 6，render 6，计费 {'legacy.credits': '297'}
@@ -8,13 +8,13 @@
 | 用例 | 结果 | 工具 | 付费 | 打断 | inspect | render | 耗时 |
 |---|---|---|---|---|---|---|---|
 | 3d-humanoid-character | PASS | 5 | 1 | 2 | 1 | 1 | 7.1s |
-| 3d-hard-surface-prop | PASS | 5 | 1 | 2 | 1 | 1 | 7.2s |
+| 3d-hard-surface-prop | PASS | 5 | 1 | 2 | 1 | 1 | 7.1s |
 | 3d-scene-piece | PASS | 5 | 1 | 2 | 1 | 1 | 7.1s |
-| 3d-creature | PASS | 5 | 1 | 2 | 1 | 1 | 7.2s |
-| 3d-print-figurine | PASS | 6 | 2 | 2 | 1 | 1 | 7.4s |
+| 3d-creature | PASS | 5 | 1 | 2 | 1 | 1 | 7.1s |
+| 3d-print-figurine | PASS | 6 | 2 | 2 | 1 | 1 | 7.2s |
 | 3d-ar-product | PASS | 6 | 2 | 2 | 1 | 1 | 7.5s |
-| 2d-character-illustration | PASS | 2 | 1 | 1 | 0 | 0 | 0.4s |
-| 2d-icon-set | PASS | 2 | 1 | 1 | 0 | 0 | 0.3s |
+| 2d-character-illustration | PASS | 2 | 1 | 1 | 0 | 0 | 0.5s |
+| 2d-icon-set | PASS | 2 | 1 | 1 | 0 | 0 | 0.2s |
 | 2d-series-consistency | PASS | 4 | 3 | 1 | 0 | 0 | 0.8s |
 | 2d-3d-input-concept | PASS | 3 | 1 | 1 | 0 | 0 | 3.2s |
 
