@@ -216,6 +216,16 @@ type OrchestratorConfig struct {
 		owner generation.OwnerID,
 		assetID string,
 	) (string, bool)
+	// VisionAnchorInline 把视觉锚的参考图转成 data URI（#250）。锚点参考图
+	// 可能是 input asset id、input asset URL 或生成结果的规范 Task 资产
+	// URL，校验按 owner 与会话进行；nil 时锚点图片只保留文字标签，并在溢出
+	// 说明里点名。
+	VisionAnchorInline func(
+		ctx context.Context,
+		owner generation.OwnerID,
+		sessionID string,
+		reference string,
+	) (string, bool)
 	// TaskCanceler 供停止轮次时取消该轮已绑定的生成任务（尽力而为，
 	// 失败只记录日志，不阻塞停止语义）。
 	TaskCanceler func(ctx context.Context, ownerID, taskID string) error
@@ -269,6 +279,14 @@ type Orchestrator struct {
 		ctx context.Context,
 		owner generation.OwnerID,
 		assetID string,
+	) (string, bool)
+	// visionAnchorInline 把视觉锚的参考图（资产 ID 或平台 URL）转成 data
+	// URI；nil 表示锚点图片只保留文字标签（#250）。
+	visionAnchorInline func(
+		ctx context.Context,
+		owner generation.OwnerID,
+		sessionID string,
+		reference string,
 	) (string, bool)
 	taskCanceler func(ctx context.Context, ownerID, taskID string) error
 	toolNote     func(tool catalog.ChatToolSchema, options TurnOptions) string
@@ -628,30 +646,31 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 	registry.offeringAllowed = config.OfferingAllowed
 	registry.offerings = config.Offerings
 	return &Orchestrator{
-		service:           config.Service,
-		schema:            config.Schema,
-		model:             config.Model,
-		dsmlFor:           config.DSMLFor,
-		visionInline:      config.VisionInline,
-		visionAssetInline: config.VisionAssetInline,
-		agent:             config.Agent,
-		tools:             config.Tools,
-		logger:            config.Logger,
-		registry:          registry,
-		agentScope:        registry.scope,
-		configuration:     config.Configuration,
-		taskCanceler:      config.TaskCanceler,
-		toolNote:          config.ToolNote,
-		taskLookup:        config.TaskLookup,
-		taskGet:           config.TaskGet,
-		stopConsent:       config.StopConsent,
-		texts:             config.Texts,
-		queue:             make(chan ProcessTurn, config.Schema.Agent.QueueSize),
-		queued:            map[string]struct{}{},
-		activeCancel:      map[string]context.CancelFunc{},
-		canceledTurn:      map[string]struct{}{},
-		consentWaits:      map[string]*consentSuspend{},
-		compacting:        map[string]*compactionLock{},
+		service:            config.Service,
+		schema:             config.Schema,
+		model:              config.Model,
+		dsmlFor:            config.DSMLFor,
+		visionInline:       config.VisionInline,
+		visionAssetInline:  config.VisionAssetInline,
+		visionAnchorInline: config.VisionAnchorInline,
+		agent:              config.Agent,
+		tools:              config.Tools,
+		logger:             config.Logger,
+		registry:           registry,
+		agentScope:         registry.scope,
+		configuration:      config.Configuration,
+		taskCanceler:       config.TaskCanceler,
+		toolNote:           config.ToolNote,
+		taskLookup:         config.TaskLookup,
+		taskGet:            config.TaskGet,
+		stopConsent:        config.StopConsent,
+		texts:              config.Texts,
+		queue:              make(chan ProcessTurn, config.Schema.Agent.QueueSize),
+		queued:             map[string]struct{}{},
+		activeCancel:       map[string]context.CancelFunc{},
+		canceledTurn:       map[string]struct{}{},
+		consentWaits:       map[string]*consentSuspend{},
+		compacting:         map[string]*compactionLock{},
 
 		backgroundWarned: map[string]time.Time{},
 	}, nil
@@ -2002,7 +2021,7 @@ func (orchestrator *Orchestrator) agentRequest(
 		}
 	}
 	plan := orchestrator.planVision(
-		ctx, ownerID, history, indexedByMessage, summarized, lastUserMessage,
+		ctx, ownerID, sessionID, history, indexedByMessage, summarized, lastUserMessage,
 		options, spend,
 	)
 	// The newest generated pictures (a 3D result's thumbnail included) are shown

@@ -286,11 +286,6 @@ func MigrationHead() int {
 	return all[len(all)-1].version
 }
 
-// MigrationCount is how many migrations this binary registers. A reserved
-// version another branch has not merged yet leaves a gap in the file names,
-// so the count is the honest identity of the ledger, not the highest version.
-func MigrationCount() int { return len(migrations()) }
-
 //go:embed migrations/0055_native_pricing.sql
 var nativePricingMigration string
 

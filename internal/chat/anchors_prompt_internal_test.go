@@ -21,19 +21,20 @@ func anchorsTestSchema(t *testing.T) catalog.ChatSchema {
 			{ID: "identity", Label: "身份锚", ReferencePurposeTemplate: "保留「{name}」"},
 			{ID: "style", Label: "风格锚", ReferencePurposeTemplate: "沿用「{name}」"},
 		},
-		ContextTemplate:        "\n{open}\n以下是视觉锚：{style_lock}{anchors}{precedence}\n{close}",
-		OpenMarker:             "<<<VISUAL_ANCHORS>>>",
-		CloseMarker:            "<<<END_VISUAL_ANCHORS>>>",
-		EmptyText:              "无锚点",
-		ItemTemplate:           "- {kind}「{name}」：{description}（参考图 {references}）",
-		PrecedenceNote:         "\n优先级：身份锚→风格锚→普通参考。",
-		PromptHint:             "可用锚点：{names}；参数 {argument}。",
-		NoteTemplate:           "未使用 {names}。",
-		InvalidTemplate:        "无效：{reason}",
-		ReferenceCountTemplate: "{count} 张",
-		ReferenceLabelTemplate: "\n[{kind}「{name}」{index}]",
-		DroppedLabelTemplate:   "{kind}「{name}」#{index}",
-		SavedMessage:           "saved", RemovedMessage: "removed", DeclinedMessage: "declined",
+		ContextTemplate:              "\n{open}\n以下是视觉锚：{style_lock}{anchors}{precedence}\n{close}",
+		OpenMarker:                   "<<<VISUAL_ANCHORS>>>",
+		CloseMarker:                  "<<<END_VISUAL_ANCHORS>>>",
+		EmptyText:                    "无锚点",
+		ItemTemplate:                 "- {kind}「{name}」：{description}（参考图 {references}）",
+		PrecedenceNote:               "\n优先级：身份锚→风格锚→普通参考。",
+		PromptHint:                   "可用锚点：{names}；参数 {argument}。",
+		NoteTemplate:                 "未使用 {names}。",
+		InvalidTemplate:              "无效：{reason}",
+		ReferenceCountTemplate:       "{count} 张",
+		ReferenceLabelTemplate:       "\n[{kind}「{name}」{index}]",
+		DroppedLabelTemplate:         "{kind}「{name}」#{index}",
+		ReferenceUnavailableTemplate: "锚点参考图不可用：{handle}",
+		SavedMessage:                 "saved", RemovedMessage: "removed", DeclinedMessage: "declined",
 	}
 	// The shipped Catalog declares the #248 work anchors block; the visual
 	// block defers the lock text to it so one prompt carries one copy.
@@ -183,8 +184,11 @@ func TestVisualAnchorPicturesSpendTheStyleVisionRoleFirst(t *testing.T) {
 	schema := anchorsTestSchema(t)
 	orchestrator := &Orchestrator{
 		schema: schema,
-		visionAssetInline: func(_ context.Context, _ generation.OwnerID, assetID string) (string, bool) {
-			return "data:image/png;base64," + assetID, true
+		visionAnchorInline: func(_ context.Context, _ generation.OwnerID, sessionID, reference string) (string, bool) {
+			if sessionID != "session" {
+				return "", false
+			}
+			return "data:image/png;base64," + reference, true
 		},
 	}
 	options := TurnOptions{
@@ -195,7 +199,7 @@ func TestVisualAnchorPicturesSpendTheStyleVisionRoleFirst(t *testing.T) {
 	}
 	history := []Message{{Role: schema.Roles.User, Content: "draw"}}
 	indexed, lastUser := orchestrator.indexHistoryImages(history)
-	plan := orchestrator.planVision(context.Background(), "owner", history, indexed, -1, lastUser, options, visionSpend{})
+	plan := orchestrator.planVision(context.Background(), "owner", "session", history, indexed, -1, lastUser, options, visionSpend{})
 	if len(plan.Style) < 2 {
 		t.Fatalf("style picks = %+v", plan.Style)
 	}

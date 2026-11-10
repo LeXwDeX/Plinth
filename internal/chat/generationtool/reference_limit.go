@@ -69,6 +69,10 @@ type referenceUse struct {
 	// when a handle is unknown.
 	DroppedTurn      []string
 	DroppedTurnCount int
+	// DroppedStyle names the style pictures (the lock or a style anchor) the
+	// model limit cut, by the label the server gave each one (#250).
+	DroppedStyle      []string
+	DroppedStyleCount int
 }
 
 // ReferenceLimitNote writes the reference-limit note for a step of tool that

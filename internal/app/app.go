@@ -935,6 +935,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		VisionAssetInline: func(ctx context.Context, owner generation.OwnerID, assetID string) (string, bool) {
 			return referenceResolver.OpenVisionAsset(ctx, owner, generation.AssetID(assetID))
 		},
+		// #250: an anchor reference may be an input asset ID or the canonical
+		// Task asset URL of a generated result; the resolver proves the owner
+		// and the session (including a branch's ancestor Tasks).
+		VisionAnchorInline: referenceResolver.OpenVisionReference,
 		ToolAllowed: func(capability, _ string) bool {
 			// ToolExecution.domains is the creative workspace (image/model).
 			// CapabilityPresentation.domain is a product category, where

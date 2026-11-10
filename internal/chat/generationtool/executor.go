@@ -465,7 +465,7 @@ func (executor *Executor) Execute(
 	// the pictures marked "input"); identity anchors follow, then the style
 	// pictures, then the turn's other ordinary references. The order is also
 	// the trimming priority.
-	identityReferenceURLs, identityPurposes, anchorRefusal, anchorErr := executor.anchorReferenceURLs(command, arguments)
+	identityReferenceURLs, identityPurposes, anchorHandles, anchorRefusal, anchorErr := executor.anchorReferenceURLs(command, arguments)
 	if anchorErr != nil && anchorRefusal == "" {
 		anchorRefusal = executor.anchorInvalid(command, "锚点参考图不可用")
 	}
@@ -480,6 +480,10 @@ func (executor *Executor) Execute(
 		result.NoSubmission = true
 		return result, nil
 	}
+	// A style anchor is auto-attached without an argument, so its handles join
+	// the identity anchors' for the unavailable-picture refusal (#250). The
+	// person's style lock keeps its historical wording.
+	anchorHandles = mergeReferenceLabels(anchorHandles, executor.styleAnchorLabels(command))
 	serverPurposes := mergeReferencePurposes(identityPurposes, stylePurposes)
 	// A historical turn without anchors or a required input keeps its list
 	// byte for byte (a duplicate URL stays ambiguous, a three-view selection
@@ -630,11 +634,15 @@ func (executor *Executor) Execute(
 			}
 			references.StyleTrimmed = styleUsed < groups.Style
 			// The model limit cuts the tail: ordinary references first, then
-			// style pictures. Everything it cut from the turn's own list is
-			// reported to the Agent by handle (#250).
+			// style pictures. Everything it cut is reported to the Agent by its
+			// server-visible handle (#250).
 			if dropped := groups.droppedTurnURLs(len(referenceURLs)); len(dropped) > 0 {
 				references.DroppedTurn = executor.referenceHandleLabels(command, dropped)
 				references.DroppedTurnCount = len(dropped)
+			}
+			if dropped := groups.droppedStyleURLs(len(referenceURLs)); len(dropped) > 0 {
+				references.DroppedStyle = executor.styleReferenceLabels(command, dropped)
+				references.DroppedStyleCount = len(dropped)
 			}
 		}
 		if capability == generation.ImageTo3D {
@@ -739,6 +747,7 @@ func (executor *Executor) Execute(
 		prompt,
 		referenceURLs,
 		skillOverrides,
+		anchorHandles,
 	)
 	if err != nil {
 		if result, refused := executor.refuseReference(command, err); refused {
@@ -1318,6 +1327,7 @@ func (executor *Executor) buildInput(
 	prompt string,
 	referenceURLs []string,
 	skillOverrides map[generation.ParameterSemantic]json.RawMessage,
+	anchorHandles map[string]string,
 ) (json.RawMessage, []generation.AssetID, error) {
 	allowed := make(
 		map[string]generation.Parameter,
@@ -1438,6 +1448,12 @@ func (executor *Executor) buildInput(
 			referenceURLs,
 		)
 		if err != nil {
+			// A named anchor whose picture was deleted or expired is reported
+			// with that anchor's handle (#250) instead of a generic generation
+			// failure. Other reference failures keep their historical refusal.
+			if refusal := executor.anchorReferenceRefusal(ctx, command, referenceURLs, anchorHandles); refusal != nil {
+				return nil, nil, refusal
+			}
 			return nil, nil, err
 		}
 		referenceAssets = assets

@@ -2493,18 +2493,19 @@ func validateVisualAnchors(schema ChatSchema) error {
 		}
 	}
 	for name, template := range map[string]string{
-		"context_template":         anchors.ContextTemplate,
-		"item_template":            anchors.ItemTemplate,
-		"prompt_hint":              anchors.PromptHint,
-		"note_template":            anchors.NoteTemplate,
-		"invalid_template":         anchors.InvalidTemplate,
-		"precedence_note":          anchors.PrecedenceNote,
-		"reference_count_template": anchors.ReferenceCountTemplate,
-		"reference_label_template": anchors.ReferenceLabelTemplate,
-		"dropped_label_template":   anchors.DroppedLabelTemplate,
-		"saved_message":            anchors.SavedMessage,
-		"removed_message":          anchors.RemovedMessage,
-		"declined_message":         anchors.DeclinedMessage,
+		"context_template":               anchors.ContextTemplate,
+		"item_template":                  anchors.ItemTemplate,
+		"prompt_hint":                    anchors.PromptHint,
+		"note_template":                  anchors.NoteTemplate,
+		"invalid_template":               anchors.InvalidTemplate,
+		"precedence_note":                anchors.PrecedenceNote,
+		"reference_count_template":       anchors.ReferenceCountTemplate,
+		"reference_label_template":       anchors.ReferenceLabelTemplate,
+		"dropped_label_template":         anchors.DroppedLabelTemplate,
+		"reference_unavailable_template": anchors.ReferenceUnavailableTemplate,
+		"saved_message":                  anchors.SavedMessage,
+		"removed_message":                anchors.RemovedMessage,
+		"declined_message":               anchors.DeclinedMessage,
 	} {
 		if strings.TrimSpace(template) == "" {
 			return fmt.Errorf("chat.visual_anchors.%s 不能为空", name)
@@ -2530,7 +2531,8 @@ func validateVisualAnchors(schema ChatSchema) error {
 		!strings.Contains(anchors.ReferenceLabelTemplate, "{name}") ||
 		!strings.Contains(anchors.ReferenceLabelTemplate, "{index}") ||
 		!strings.Contains(anchors.DroppedLabelTemplate, "{name}") ||
-		!strings.Contains(anchors.DroppedLabelTemplate, "{index}") {
+		!strings.Contains(anchors.DroppedLabelTemplate, "{index}") ||
+		!strings.Contains(anchors.ReferenceUnavailableTemplate, "{handle}") {
 		return errors.New("chat.visual_anchors 的模板缺少占位符")
 	}
 	if anchors.OpenMarker == "" || anchors.CloseMarker == "" || anchors.OpenMarker == anchors.CloseMarker {

@@ -3559,6 +3559,10 @@ type ChatVisualAnchorsSchema struct {
 	// in the vision context ({name}, {index}, {kind}).
 	ReferenceLabelTemplate string `json:"reference_label_template"`
 	DroppedLabelTemplate   string `json:"dropped_label_template"`
+	// ReferenceUnavailableTemplate refuses a generation step whose anchor
+	// picture cannot be read any more (deleted or expired), naming the stored
+	// anchor handle ({handle}) instead of a generic generation failure (#250).
+	ReferenceUnavailableTemplate string `json:"reference_unavailable_template"`
 	// SavedMessage, RemovedMessage and DeclinedMessage word the anchor tool's
 	// result; the turn's locale translates them.
 	SavedMessage    string `json:"saved_message"`

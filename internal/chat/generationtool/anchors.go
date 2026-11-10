@@ -1,6 +1,7 @@
 package generationtool
 
 import (
+	"context"
 	"encoding/json"
 	"net/url"
 	"slices"
@@ -31,28 +32,31 @@ const (
 // The anchors' pictures are the stored references: an input asset becomes its
 // canonical input URL, a generated picture keeps the platform Task asset URL
 // that recordVisualAnchorReference stored. The owning resolver proves the
-// object again when the step is prepared.
+// object again when the step is prepared. handles names each resolved picture
+// by the anchor label the Agent saw, so an unavailable picture can be refused
+// with that handle instead of a generic failure (#250).
 func (executor *Executor) anchorReferenceURLs(
 	command chat.ToolCommand,
 	arguments map[string]json.RawMessage,
-) (urls []string, purposes map[string]string, refusal string, err error) {
+) (urls []string, purposes map[string]string, handles map[string]string, refusal string, err error) {
 	argument := command.Tool.AnchorArgument
 	if argument == "" {
-		return nil, nil, "", nil
+		return nil, nil, nil, "", nil
 	}
 	raw, present := arguments[argument]
 	if !present || string(raw) == "null" {
-		return nil, nil, "", nil
+		return nil, nil, nil, "", nil
 	}
 	var names []string
 	if json.Unmarshal(raw, &names) != nil {
-		return nil, nil, executor.anchorInvalid(command, "参数必须是锚点名字数组"), nil
+		return nil, nil, nil, executor.anchorInvalid(command, "参数必须是锚点名字数组"), nil
 	}
 	if len(names) == 0 {
-		return nil, nil, "", nil
+		return nil, nil, nil, "", nil
 	}
 	seen := map[string]bool{}
 	purposes = map[string]string{}
+	handles = map[string]string{}
 	localize := executor.localizeText(command)
 	for _, name := range names {
 		name = strings.TrimSpace(name)
@@ -69,15 +73,17 @@ func (executor *Executor) anchorReferenceURLs(
 			}
 		}
 		if !found {
-			return nil, nil, executor.anchorInvalid(command, "找不到名为「"+name+"」的锚点"), nil
+			return nil, nil, nil, executor.anchorInvalid(command, "找不到名为「"+name+"」的锚点"), nil
 		}
 		if anchor.Kind != chat.VisualAnchorKindIdentity {
-			return nil, nil, executor.anchorInvalid(command, "「"+name+"」不是身份锚"), nil
+			return nil, nil, nil, executor.anchorInvalid(command, "「"+name+"」不是身份锚"), nil
 		}
 		purpose := ""
+		kindLabel := anchor.Kind
 		for _, kind := range executor.chat.VisualAnchors.Kinds {
 			if kind.ID == anchor.Kind {
 				purpose = kind.ReferencePurposeTemplate
+				kindLabel = kind.Label
 				break
 			}
 		}
@@ -85,14 +91,14 @@ func (executor *Executor) anchorReferenceURLs(
 			purpose = localize(purpose)
 		}
 		purpose = strings.ReplaceAll(purpose, "{name}", anchor.Name)
-		for _, reference := range anchor.References {
+		for index, reference := range anchor.References {
 			reference = strings.TrimSpace(reference)
 			if reference == "" {
 				continue
 			}
 			referenceURL, ok := executor.storedReferenceURL(reference)
 			if !ok {
-				return nil, nil, executor.anchorInvalid(command, "锚点参考图无法转换为输入资产 URL"), ErrStyleLockReferenceURL
+				return nil, nil, nil, executor.anchorInvalid(command, "锚点参考图无法转换为输入资产 URL"), ErrStyleLockReferenceURL
 			}
 			urls = append(urls, referenceURL)
 			if purpose != "" {
@@ -100,9 +106,61 @@ func (executor *Executor) anchorReferenceURLs(
 					purposes[referenceURL] = purpose
 				}
 			}
+			if _, exists := handles[referenceURL]; !exists {
+				label := executor.chat.VisualAnchors.DroppedLabelTemplate
+				if localize != nil && label != "" {
+					label = localize(label)
+				}
+				if label == "" {
+					label = kindLabel + "「" + anchor.Name + "」参考图 #{index}"
+				}
+				handles[referenceURL] = strings.NewReplacer(
+					"{kind}", kindLabel,
+					"{name}", anchor.Name,
+					"{index}", strconv.Itoa(index+1),
+				).Replace(label)
+			}
 		}
 	}
-	return urls, purposes, "", nil
+	return urls, purposes, handles, "", nil
+}
+
+// anchorReferenceRefusal probes the named anchors' pictures after a reference
+// resolution failed and reports the first unreadable one by the anchor handle
+// the Agent saw (#250). A nil result means the named anchors were readable and
+// the failure belongs to an ordinary reference.
+func (executor *Executor) anchorReferenceRefusal(
+	ctx context.Context,
+	command chat.ToolCommand,
+	referenceURLs []string,
+	handles map[string]string,
+) error {
+	if len(handles) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	for _, referenceURL := range referenceURLs {
+		handle, named := handles[referenceURL]
+		if !named || seen[referenceURL] {
+			continue
+		}
+		seen[referenceURL] = true
+		if _, err := executor.references.Resolve(
+			ctx,
+			generation.OwnerID(command.OwnerID),
+			[]string{referenceURL},
+		); err != nil {
+			template := executor.chat.VisualAnchors.ReferenceUnavailableTemplate
+			if localize := executor.localizeText(command); localize != nil && template != "" {
+				template = localize(template)
+			}
+			if template == "" {
+				template = "视觉锚参考图不可用：{handle}。请让用户重新上传这张图，或更新/删除这个锚点后再试。"
+			}
+			return &referenceRefusal{message: strings.ReplaceAll(template, "{handle}", handle)}
+		}
+	}
+	return nil
 }
 
 func (executor *Executor) anchorInvalid(command chat.ToolCommand, reason string) string {
@@ -260,6 +318,83 @@ func (executor *Executor) referenceHandleLabels(command chat.ToolCommand, urls [
 	return labels
 }
 
+// styleReferenceLabels names dropped style pictures by the handle the server
+// already showed the Agent: the style lock's reference index, or a style
+// anchor's kind/name/index. A picture without either keeps a plain position.
+func (executor *Executor) styleReferenceLabels(command chat.ToolCommand, urls []string) []string {
+	labels := map[string]string{}
+	for referenceURL, label := range executor.styleAnchorLabels(command) {
+		labels[referenceURL] = label
+	}
+	localize := executor.localizeText(command)
+	lock := command.Options.StyleLock
+	if !command.Options.StyleLockSkipped && lock.Enabled {
+		template := "风格锁参考图 #{index}"
+		if vision := executor.chat.Context.Vision; vision != nil && strings.TrimSpace(vision.StyleAnchorDroppedTemplate) != "" {
+			template = vision.StyleAnchorDroppedTemplate
+		}
+		if localize != nil {
+			template = localize(template)
+		}
+		for index, assetID := range lock.References {
+			referenceURL, ok := executor.assetReferenceURL(strings.TrimSpace(assetID))
+			if !ok {
+				continue
+			}
+			labels[referenceURL] = strings.ReplaceAll(template, "{index}", strconv.Itoa(index+1))
+		}
+	}
+	result := make([]string, 0, len(urls))
+	for index, referenceURL := range urls {
+		if label := labels[referenceURL]; label != "" {
+			result = append(result, label)
+			continue
+		}
+		result = append(result, "#"+strconv.Itoa(index+1))
+	}
+	return result
+}
+
+// styleAnchorLabels maps each stored style-anchor picture to the label the
+// Agent saw. The lock's own pictures are deliberately absent: a refused lock
+// reference keeps the historical style-lock wording.
+func (executor *Executor) styleAnchorLabels(command chat.ToolCommand) map[string]string {
+	labels := map[string]string{}
+	schema := executor.chat.VisualAnchors
+	localize := executor.localizeText(command)
+	template := schema.DroppedLabelTemplate
+	if localize != nil && template != "" {
+		template = localize(template)
+	}
+	if template == "" {
+		template = "{kind}「{name}」参考图 #{index}"
+	}
+	for _, anchor := range command.Options.VisualAnchors {
+		if anchor.Kind != chat.VisualAnchorKindStyle {
+			continue
+		}
+		kindLabel := anchor.Kind
+		for _, kind := range schema.Kinds {
+			if kind.ID == anchor.Kind {
+				kindLabel = kind.Label
+				break
+			}
+		}
+		for index, reference := range anchor.References {
+			referenceURL, ok := executor.storedReferenceURL(strings.TrimSpace(reference))
+			if !ok {
+				continue
+			}
+			labels[referenceURL] = strings.NewReplacer(
+				"{kind}", kindLabel,
+				"{name}", anchor.Name,
+				"{index}", strconv.Itoa(index+1),
+			).Replace(template)
+		}
+	}
+	return labels
+}
+
 func mergeReferencePurposes(groups ...map[string]string) map[string]string {
 	merged := map[string]string{}
 	for _, group := range groups {
@@ -270,6 +405,10 @@ func mergeReferencePurposes(groups ...map[string]string) map[string]string {
 		}
 	}
 	return merged
+}
+
+func mergeReferenceLabels(groups ...map[string]string) map[string]string {
+	return mergeReferencePurposes(groups...)
 }
 
 func uniqueReferenceURLs(urls []string) []string {
@@ -301,6 +440,9 @@ type referenceGroups struct {
 	Style    int
 	Turn     int
 	TurnURLs []string
+	// StyleURLs keeps the style pictures in their own order, so a model limit
+	// can name exactly the style pictures it cut (#250).
+	StyleURLs []string
 }
 
 // countClasses reports how many kept pictures of each class the prefix of
@@ -335,6 +477,28 @@ func (groups referenceGroups) droppedTurnURLs(kept int) []string {
 	var dropped []string
 	seen := map[string]bool{}
 	for _, reference := range groups.TurnURLs {
+		if !cut[reference] || seen[reference] {
+			continue
+		}
+		seen[reference] = true
+		dropped = append(dropped, reference)
+	}
+	return dropped
+}
+
+// droppedStyleURLs names the style pictures the model limit cut, in their own
+// order. A picture that survives only once, shared with an identity anchor or
+// a turn input, is not dropped: it is still sent, in its earlier class.
+func (groups referenceGroups) droppedStyleURLs(kept int) []string {
+	cut := map[string]bool{}
+	for index := kept; index < len(groups.URLs); index++ {
+		if groups.Classes[index] == referenceClassStyle {
+			cut[groups.URLs[index]] = true
+		}
+	}
+	var dropped []string
+	seen := map[string]bool{}
+	for _, reference := range groups.StyleURLs {
 		if !cut[reference] || seen[reference] {
 			continue
 		}
@@ -439,7 +603,7 @@ func assembleReferenceGroups(identity, style, leading, turn []string) referenceG
 	for _, reference := range turn {
 		add(reference, referenceClassTurn)
 	}
-	groups := referenceGroups{URLs: urls, Classes: classes, TurnURLs: uniqueReferenceURLs(turn)}
+	groups := referenceGroups{URLs: urls, Classes: classes, TurnURLs: uniqueReferenceURLs(turn), StyleURLs: append([]string(nil), style...)}
 	for _, class := range classes {
 		switch class {
 		case referenceClassIdentity:

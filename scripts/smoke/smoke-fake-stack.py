@@ -3114,6 +3114,59 @@ def scenario_visual_anchors(api, offerings, work):
            references == [hero_asset, style_asset] and "保留「hero」的身份" in prompt,
            f"references={references} prompt={prompt[:160]!r}")
 
+    # (c2) The picture the Agent just made becomes an identity anchor. The
+    # Agent only names its session handle; the stored reference is the
+    # canonical Task asset URL. The next turn must carry that picture in the
+    # model's vision context at high detail: the anchor path used to inline
+    # input asset ids only, so a Task URL was silently skipped (#250 review).
+    handles = _visual_anchor_handles(api, session)
+    generated_handles = [handles.get(asset.get("id")) for asset in task.get("assets") or []
+                         if handles.get(asset.get("id"))]
+    if not generated_handles:
+        record("#250 a generated result can be an identity anchor", False,
+               f"no handle for the result assets {task.get('assets')}")
+    else:
+        made_proposal = {"action": "create", "name": "made-hero", "kind": "identity",
+                         "description": "the portrait just generated",
+                         "references": [generated_handles[0]]}
+        propose = _work_ledger_marker("ask_choice", {
+            "kind": "visual_anchor", "question": "把刚生成的这张设为角色标准形象？",
+            "proposal": {"arguments": made_proposal},
+        })
+        card = None
+        if _visual_anchor_turn(api, session, "把刚生成的图设为锚点 " + propose,
+                               domain="image", model=image_model):
+            card = _visual_anchor_card(api, session)
+        if card is None:
+            record("#250 a generated result can be an identity anchor", False,
+                   "the confirmation card is missing")
+        else:
+            accept = _work_ledger_marker("set_visual_anchor", made_proposal)
+            saved = _visual_anchor_answer(api, session, card, "accept", "保存这个锚点 " + accept)
+            receipts = _visual_anchor_wait_tool_content(work, session, "视觉锚已保存")
+            _visual_anchor_turn(
+                api, session, "检查刚保存的锚点 [[fake:system-contains 身份锚「made-hero」]]",
+                domain="image", model=image_model)
+            reply = str((_quality_final_reply(_quality_messages(api, session)) or {}).get("content") or "")
+            record("#250 a generated result can be an identity anchor",
+                   saved and bool(receipts) and "present: 身份锚「made-hero」" in reply,
+                   f"saved={saved} receipts={len(receipts)} reply={reply[:120]!r}")
+
+            def has_generated_anchor_image(messages):
+                for message in messages:
+                    for image in message.get("images") or []:
+                        if (image.get("detail") == "high" and image.get("data_uri")
+                                and "身份锚「made-hero」参考图 1" in (image.get("label") or "")):
+                            return True
+                return False
+
+            anchor_request = last_request_with(has_generated_anchor_image)
+            record("#250 a generated-result anchor reaches vision at high detail",
+                   anchor_request is not None,
+                   f"handle={generated_handles[0]} "
+                   f"request={'found' if anchor_request else 'missing'} "
+                   f"images={[(image.get('detail'), image.get('data_uri'), image.get('label')) for request in fake_chat_requests()[-3:] for message in request.get('messages') or [] for image in message.get('images') or []]}")
+
     # (d) A single-picture model keeps the anchor and drops the ordinary
     # reference; the tool result names the dropped handle. Both pictures are
     # real session handles: the ordinary one was sent in the first turn.

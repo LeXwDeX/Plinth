@@ -484,7 +484,7 @@ func (executor *Executor) replayReferenceURLs(
 	// #250: the reference list is rebuilt in the same priority order as the
 	// first submission, with the same server-generated purposes, so the
 	// replayed prompt can match the frozen one.
-	identity, identityPurposes, anchorRefusal, err := executor.anchorReferenceURLs(command, arguments)
+	identity, identityPurposes, _, anchorRefusal, err := executor.anchorReferenceURLs(command, arguments)
 	if err != nil || anchorRefusal != "" {
 		return nil, nil, false
 	}

@@ -104,6 +104,9 @@ func TestVisualAnchorsDeclarationIsValidated(t *testing.T) {
 		{"a prompt hint without the argument", func(app *catalog.ApplicationSchema) {
 			app.Chat.VisualAnchors.PromptHint = "anchors: {names}"
 		}, "模板缺少占位符"},
+		{"a reference-unavailable template without the handle", func(app *catalog.ApplicationSchema) {
+			app.Chat.VisualAnchors.ReferenceUnavailableTemplate = "锚点参考图不可用"
+		}, "模板缺少占位符"},
 		{"one marker", func(app *catalog.ApplicationSchema) {
 			app.Chat.VisualAnchors.CloseMarker = app.Chat.VisualAnchors.OpenMarker
 		}, "open_marker"},

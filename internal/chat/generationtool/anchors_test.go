@@ -165,6 +165,100 @@ func TestCanvasAndAnchorReferencesOutrankTheTurnLimit(t *testing.T) {
 	}
 }
 
+// #250: a style anchor is attached by the server without being named in the
+// anchor argument (the argument only accepts identity anchors), and it
+// outranks the turn's ordinary references when the model takes fewer pictures.
+func TestStyleAnchorReferencesAreAttachedWithoutBeingNamed(t *testing.T) {
+	rig := newStyleLockRig(t, 1)
+	options := styleLock(false, "")
+	options.VisualAnchors = []chat.VisualAnchor{anchor("mood", chat.VisualAnchorKindStyle, "mood-a", "mood-b")}
+	result, input := rig.run(t, options, imageHistory(),
+		`{"prompt":"portrait","reference_handles":["@img1"]}`)
+	if result.NoSubmission {
+		t.Fatalf("result=%+v error=%q", result, result.Error)
+	}
+	// The limit is one: the style anchor's first picture keeps it and the
+	// ordinary reference is dropped, named by its handle.
+	if got, want := rig.resolver.urls, []string{"/api/v1/input-assets/mood-a"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("reference order=%v, want %v", got, want)
+	}
+	prompt, _ := input["prompt"].(string)
+	if !strings.Contains(prompt, "沿用「mood」的画风、材质与笔触") {
+		t.Fatalf("the style anchor purpose is missing: %q", prompt)
+	}
+	if !strings.Contains(result.AgentContent, "丢弃了普通参考 @img1") {
+		t.Fatalf("dropped-reference note missing: %s", result.AgentContent)
+	}
+	if !strings.Contains(result.AgentContent, "风格参考 风格锚「mood」参考图 #2") {
+		t.Fatalf("the cut style picture is not named: %s", result.AgentContent)
+	}
+}
+
+// #250: a style anchor's pictures are attached without a name and both
+// precede the turn's own ordinary reference; the style lock keeps its
+// historical place at the front of the style class.
+func TestStyleAnchorReferencesPrecedeTheTurnReferences(t *testing.T) {
+	rig := newStyleLockRig(t, 4)
+	options := styleLock(true, "ink wash", "style-a")
+	options.VisualAnchors = []chat.VisualAnchor{anchor("mood", chat.VisualAnchorKindStyle, "mood-a", "mood-b")}
+	result, _ := rig.run(t, options, imageHistory(),
+		`{"prompt":"portrait","reference_handles":["@img1"]}`)
+	if result.NoSubmission {
+		t.Fatalf("result=%+v error=%q", result, result.Error)
+	}
+	want := []string{
+		"/api/v1/input-assets/style-a",
+		"/api/v1/input-assets/mood-a",
+		"/api/v1/input-assets/mood-b",
+		"/api/v1/input-assets/agent-image",
+	}
+	if strings.Join(rig.resolver.urls, ",") != strings.Join(want, ",") {
+		t.Fatalf("reference order=%v, want %v", rig.resolver.urls, want)
+	}
+}
+
+// #250 review: an anchor picture that was deleted or expired refuses this step
+// with the anchor's handle and the Schema wording, not a generic generation
+// failure, and nothing is submitted.
+func TestUnavailableAnchorReferenceIsRefusedWithItsHandle(t *testing.T) {
+	rig := newStyleLockRig(t, 3)
+	reference := "/api/v1/tasks/task-1/assets/gone-1"
+	rig.resolver.fail = map[string]bool{reference: true}
+	options := styleLock(false, "")
+	options.VisualAnchors = []chat.VisualAnchor{anchor("hero", chat.VisualAnchorKindIdentity, reference)}
+	result, _ := rig.run(t, options, imageHistory(), `{"prompt":"portrait","anchors":["hero"]}`)
+	if !result.NoSubmission || rig.gateway.submitted.OfferingID != "" {
+		t.Fatalf("result=%+v submitted=%#v", result, rig.gateway.submitted)
+	}
+	if !strings.Contains(result.Error, "视觉锚参考图不可用") ||
+		!strings.Contains(result.Error, "身份锚「hero」参考图 #1") {
+		t.Fatalf("refusal = %q; want the anchor handle and the Schema wording", result.Error)
+	}
+	if strings.Contains(result.Error, "生成失败") {
+		t.Fatalf("an unavailable anchor is not a generic generation failure: %q", result.Error)
+	}
+}
+
+// #250 review: an auto-attached style anchor whose picture is gone is named
+// by its handle too, without being written in the anchor argument.
+func TestUnavailableStyleAnchorReferenceIsRefusedWithItsHandle(t *testing.T) {
+	rig := newStyleLockRig(t, 3)
+	reference := "/api/v1/tasks/task-1/assets/gone-style"
+	rig.resolver.fail = map[string]bool{reference: true}
+	options := styleLock(false, "")
+	options.VisualAnchors = []chat.VisualAnchor{anchor("mood", chat.VisualAnchorKindStyle, reference)}
+	result, _ := rig.run(t, options, imageHistory(), `{"prompt":"portrait"}`)
+	if !result.NoSubmission || rig.gateway.submitted.OfferingID != "" {
+		t.Fatalf("result=%+v submitted=%#v", result, rig.gateway.submitted)
+	}
+	if !strings.Contains(result.Error, "风格锚「mood」参考图 #1") {
+		t.Fatalf("refusal = %q; want the style anchor handle", result.Error)
+	}
+	if strings.Contains(result.Error, "生成失败") {
+		t.Fatalf("an unavailable anchor is not a generic generation failure: %q", result.Error)
+	}
+}
+
 // #250 review: a generated picture is stored as its Task asset URL (the Agent
 // can anchor what it just made without ever seeing an input-asset ID). The
 // exact URL reaches the resolver, which verifies and copies it.

@@ -235,7 +235,9 @@ type visionPlan struct {
 	// newest user message, oldest first. Style are the style lock references.
 	Generated []visionPick
 	Style     []visionPick
-	// Dropped names the pictures the budget refused, in priority order.
+	// Dropped names the pictures the budget refused or could not read, in
+	// priority order. A visual anchor's unreadable picture is named here too
+	// (#250); the style lock keeps its historical silence.
 	Dropped []string
 	Spend   visionSpend
 	// Off says no picture at all is sent because vision is off.
@@ -269,6 +271,11 @@ type visionCandidate struct {
 	label        string
 	dropped      string
 	style        bool
+	// anchor marks a session visual anchor's picture (#250). Unlike a style
+	// lock picture it may be stored as an input asset ID or as the canonical
+	// Task asset URL of a generated result; a picture that cannot be read is
+	// named in the overflow note instead of disappearing silently.
+	anchor bool
 	// assistant marks a picture of an assistant message, whether the role is
 	// the declared generated/render one or the legacy combined pool.
 	assistant bool
@@ -287,6 +294,7 @@ func (orchestrator *Orchestrator) visionBudget(options TurnOptions) visionBudget
 func (orchestrator *Orchestrator) planVision(
 	ctx context.Context,
 	ownerID string,
+	sessionID string,
 	history []Message,
 	indexed [][]indexedChatImage,
 	summarized, lastUser int,
@@ -318,8 +326,14 @@ func (orchestrator *Orchestrator) planVision(
 				plan.Dropped = append(plan.Dropped, candidate.dropped)
 				continue
 			}
-			url, ok := orchestrator.inlineVisionURL(ctx, ownerID, candidate)
+			url, ok := orchestrator.inlineVisionURL(ctx, ownerID, sessionID, candidate)
 			if !ok {
+				// A visual anchor's picture that cannot be read is named in the
+				// overflow note (#250). A style lock picture keeps the historical
+				// silent skip: the lock is a hint, not a picture the turn asked for.
+				if candidate.anchor {
+					plan.Dropped = append(plan.Dropped, candidate.dropped)
+				}
 				continue
 			}
 			if budget.MaximumBytes > 0 && plan.Spend.Bytes+int64(len(url)) > budget.MaximumBytes {
@@ -413,8 +427,18 @@ func visionRoleCandidates(candidates map[string][]visionCandidate, role catalog.
 	return list
 }
 
-// inlineVisionURL turns a candidate into a data URI the model can read.
-func (orchestrator *Orchestrator) inlineVisionURL(ctx context.Context, ownerID string, candidate visionCandidate) (string, bool) {
+// inlineVisionURL turns a candidate into a data URI the model can read. A
+// visual anchor is resolved through VisionAnchorInline, which accepts an input
+// asset ID or a canonical Task asset URL and proves owner and session (#250);
+// the style lock only ever stores input asset IDs.
+func (orchestrator *Orchestrator) inlineVisionURL(ctx context.Context, ownerID, sessionID string, candidate visionCandidate) (string, bool) {
+	if candidate.anchor {
+		if orchestrator.visionAnchorInline == nil {
+			return "", false
+		}
+		return orchestrator.visionAnchorInline(
+			ctx, generation.OwnerID(ownerID), sessionID, candidate.url)
+	}
 	if candidate.style {
 		if orchestrator.visionAssetInline == nil {
 			return "", false
@@ -589,6 +613,7 @@ func (orchestrator *Orchestrator) roleVisionCandidates(
 				label:   strings.NewReplacer(values...).Replace(anchors.ReferenceLabelTemplate),
 				dropped: strings.NewReplacer(values...).Replace(anchors.DroppedLabelTemplate),
 				style:   true,
+				anchor:  true,
 			})
 		}
 	}
