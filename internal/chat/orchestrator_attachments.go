@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"unicode"
@@ -247,7 +248,33 @@ func (orchestrator *Orchestrator) selectionPrompt(options TurnOptions) string {
 	if canvasShown {
 		prompt += context.SelectionCanvasNote
 	}
+	prompt += selectionMaskText(context, options)
 	return prompt
+}
+
+// selectionMaskText names the frozen selection mask of a canvas turn (#244):
+// the picture it belongs to, the pixel box and coverage of the selected region
+// and the transparency meaning. It is appended after the selection block, so a
+// canvas turn's Agent reads the exact region the person painted instead of
+// guessing it from the snapshot.
+func selectionMaskText(context catalog.ChatContextSchema, options TurnOptions) string {
+	mask := options.SelectionMask
+	if mask == nil || context.SelectionMaskItemTemplate == "" {
+		return ""
+	}
+	handle := ""
+	if snapshot, found := canvasSnapshotAttachment(options); found {
+		handle = snapshot.Handle
+	}
+	if handle == "" {
+		return ""
+	}
+	item := strings.NewReplacer(
+		"{handle}", handle,
+		"{bbox}", fmt.Sprintf("%d,%d-%d,%d", mask.BBox[0], mask.BBox[1], mask.BBox[2], mask.BBox[3]),
+		"{coverage}", strconv.FormatFloat(mask.Coverage*100, 'f', 1, 64)+"%",
+	).Replace(context.SelectionMaskItemTemplate)
+	return item + context.SelectionMaskNote
 }
 
 // attachmentLabel names a message picture by its handle and lineage. It

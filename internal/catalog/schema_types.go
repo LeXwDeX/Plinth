@@ -2301,6 +2301,56 @@ type ChatImageReviewSchema struct {
 	RoundsExhaustedTemplate string `json:"rounds_exhausted_template"`
 }
 
+// ChatSelectionMaskPreviewSchema bounds and styles the server-composed
+// selection preview of a canvas turn (#244): the snapshot dimmed and the
+// selected region tinted. MaxPixels bounds the composed picture; a larger
+// snapshot is downscaled to it. DimOpacity (0..1) is how much the picture
+// outside the selection is darkened; TintColor (#rrggbb) and TintOpacity
+// (0..1) style the selected region.
+type ChatSelectionMaskPreviewSchema struct {
+	MaxPixels   int64   `json:"max_pixels"`
+	DimOpacity  float64 `json:"dim_opacity"`
+	TintColor   string  `json:"tint_color"`
+	TintOpacity float64 `json:"tint_opacity"`
+	MediaType   string  `json:"media_type"`
+}
+
+// ChatImageMaskSchema is application.chat.image_mask (#244): the read-only
+// create_selection_mask tool. It builds a mask locally from deterministic
+// pixels (a subject split, a rectangle, or a subject-inverted selection),
+// uploads it as the owner's input asset and names its URL, so refine_image can
+// take it as its mask argument. No upstream call, no Task, no credits.
+type ChatImageMaskSchema struct {
+	// Tool names the control tool that implements it.
+	Tool string `json:"tool"`
+	// Limits bound the picture read and its decoded pixels.
+	Limits ImageInspectLimitsSchema `json:"limits"`
+	// Modes are the supported mask modes: subject, region, invert.
+	Modes []string `json:"modes"`
+	// Preview bounds the picture handed back to the Agent and the user.
+	Preview ChatImageMaskPreviewSchema `json:"preview"`
+	// Texts are the Agent-facing refusal and result copy.
+	Texts ChatImageMaskTexts `json:"texts"`
+}
+
+type ChatImageMaskPreviewSchema struct {
+	MaxPixels int64  `json:"max_pixels"`
+	MediaType string `json:"media_type"`
+}
+
+type ChatImageMaskTexts struct {
+	// UnreadableTemplate words a picture that cannot be read or decoded
+	// ({handle} {reason}).
+	UnreadableTemplate string `json:"unreadable_template"`
+	// InvalidRegion words a rectangle that is empty or outside the picture.
+	InvalidRegion string `json:"invalid_region"`
+	// NoSubject words a subject split that found nothing (a blank picture).
+	NoSubject string `json:"no_subject"`
+	// ResultNote explains the produced mask and how to use it: {url}
+	// {width} {height} {coverage}. Transparent is the redrawn region.
+	ResultNote string `json:"result_note"`
+}
+
 // ChatWorkLedgerSchema is application.chat.work_ledger (#248). The ledger is a
 // read-only projection: every step is one public generation Task of the
 // session, its frozen input and result, the historical tool call that asked
@@ -2700,6 +2750,10 @@ type ChatSchema struct {
 	// ImageReview declares the read-only image inspection tool and the
 	// image-to-3D input gate (#245).
 	ImageReview ChatImageReviewSchema `json:"image_review"`
+	// ImageMask declares the read-only create_selection_mask tool (#244): the
+	// local deterministic region mask it builds and the texts the Agent reads.
+	// Server side only; the browser never reads it.
+	ImageMask ChatImageMaskSchema `json:"image_mask"`
 	// WorkLedger declares the session production ledger (#248): the read-only
 	// projection of the session's public Tasks, the summary it adds to the
 	// system prompt, the get_production_step tool's texts and the style anchor
@@ -3416,11 +3470,15 @@ func (prompt ChatApprovalPromptSchema) Mode(id string) (ChatApprovalPromptMode, 
 }
 
 type ChatAPISchema struct {
-	Fields         ChatAPIFields              `json:"fields"`
-	ResponseFields ChatAPIResponseFields      `json:"response_fields"`
-	Attachment     ChatAttachmentAPIFields    `json:"attachment"`
-	StyleLock      ChatStyleLockAPIFields     `json:"style_lock"`
-	PromptEnhance  ChatPromptEnhanceAPISchema `json:"prompt_enhance"`
+	Fields         ChatAPIFields           `json:"fields"`
+	ResponseFields ChatAPIResponseFields   `json:"response_fields"`
+	Attachment     ChatAttachmentAPIFields `json:"attachment"`
+	// SelectionMask names the members of the selectionMask request object
+	// (#244). It is server-side only; the public projection publishes the
+	// field name above.
+	SelectionMask ChatAPISelectionMaskSchema `json:"selection_mask"`
+	StyleLock     ChatStyleLockAPIFields     `json:"style_lock"`
+	PromptEnhance ChatPromptEnhanceAPISchema `json:"prompt_enhance"`
 	// SessionList bounds the paged session list (server side only).
 	SessionList ChatSessionListSchema `json:"session_list"`
 	// MessageList bounds a paged read of one conversation (server side only).
@@ -3488,6 +3546,14 @@ type ChatAttachmentAPIFields struct {
 	CanvasSources string `json:"canvas_sources"`
 }
 
+// ChatAPISelectionMaskSchema names the members of the selectionMask request
+// object of a canvas turn (#244): the mask asset the person painted. The
+// service verifies the asset for the owner, measures it and freezes the result
+// with the turn; a mask that does not hold refuses the turn.
+type ChatAPISelectionMaskSchema struct {
+	MaskAssetID string `json:"mask_asset_id"`
+}
+
 type ChatPromptEnhanceAPISchema struct {
 	PromptField               string                                    `json:"prompt_field"`
 	CapabilityField           string                                    `json:"capability_field"`
@@ -3544,6 +3610,10 @@ type ChatAPIFields struct {
 	// only declared value is context.canvas_input_source: the selection is the
 	// artboard snapshot taken at send time and the system binds it.
 	InputSource string `json:"input_source"`
+	// SelectionMask is the request member carrying the frozen selection mask
+	// of a canvas turn (#244): an object holding mask_asset_id. Its claims are
+	// verified by the service; a mask that does not hold refuses the turn.
+	SelectionMask string `json:"selection_mask"`
 	// Multiview carries the person's structured multiview request (#65):
 	// {"group", "model", "views": [{"view", "task_id", "asset_id"}]}.
 	Multiview    string `json:"multiview,omitempty"`
@@ -4098,6 +4168,17 @@ type ChatContextSchema struct {
 	// SelectionPickedTemplate is appended to the selection block when the
 	// selection is the candidate the user picked ("选用").
 	SelectionPickedTemplate string `json:"selection_picked_template"`
+	// The selection mask of a canvas turn (#244). SelectionMaskItemTemplate
+	// names the frozen mask beside the snapshot it belongs to ({handle}
+	// {bbox} {coverage}); SelectionMaskNote follows the selection block and
+	// states the transparency meaning (transparent redrawn, opaque kept) and
+	// that the turn's read tools already see it. SelectionMaskPreviewLabel
+	// labels the server-composed selection preview picture, and
+	// SelectionMaskPreview bounds and styles its composition.
+	SelectionMaskItemTemplate string                         `json:"selection_mask_item_template"`
+	SelectionMaskNote         string                         `json:"selection_mask_note"`
+	SelectionMaskPreviewLabel string                         `json:"selection_mask_preview_label"`
+	SelectionMaskPreview      ChatSelectionMaskPreviewSchema `json:"selection_mask_preview"`
 	// The artboard snapshot of a canvas turn (#272). CanvasLayoutTemplate
 	// names the layout ({width} {height} {layers}); CanvasLayersTemplate
 	// fills {layers} when the layer count is known ({layers}), else {layers}
@@ -4333,6 +4414,13 @@ type ChatToolSchema struct {
 	// before submission (the tool reads no image), "ignore" leaves the tool
 	// as it is (processing and motion tools). Every tool declares one.
 	CanvasSource string `json:"canvas_source"`
+	// SelectionMask is what the tool does with the frozen selection mask of a
+	// canvas turn (#244): "bind" writes it into the Offering's mask-semantic
+	// parameter whether or not the Agent named one (an Agent-named mask wins),
+	// "ignore" leaves the tool as it is. Every tool declares one; only a
+	// generation tool that declares a mask mapping may bind. Binding is what
+	// keeps a painted selection from silently becoming a whole-image redraw.
+	SelectionMask string `json:"selection_mask"`
 	// ReferenceSize is what sets the output size of a turn that is not a
 	// canvas turn (#296). "single": when the step sends exactly one reference
 	// picture and nobody chose a size (no turn, session, Agent or Skill value,
@@ -4613,6 +4701,11 @@ type ChatToolResultFields struct {
 	// retired_model_fallback: the model the person picked is retired and the
 	// step ran on its successor (#329 follow-up). Present only then.
 	ModelNote string `json:"model_note,omitempty"`
+	// MaskNote is the optional key of chat.presentation.messages
+	// mask_not_applied_note: the Agent passed a mask but this turn had no
+	// frozen selection mask, so the argument was dropped (#244). Present only
+	// then; it never replaces a refusal when a frozen mask could not be bound.
+	MaskNote string `json:"mask_note,omitempty"`
 	// ReferenceNote is the optional key of a note about the reference picture
 	// a step really used, such as "only the front view of a three-view group
 	// is used", or, when the turn gave more pictures than the Offering takes,
@@ -4772,6 +4865,36 @@ type ChatMessageTexts struct {
 	InvalidInputSource      string `json:"invalid_input_source"`
 	CanvasSourceMissing     string `json:"canvas_source_missing"`
 	CanvasSourceToolRefused string `json:"canvas_source_tool_refused"`
+	// SelectionMaskWithoutCanvas refuses a selection mask on a turn that is
+	// not a canvas turn or whose artboard snapshot did not verify (#244). The
+	// mask is an input, not a claim: unlike a stale attachment it is never
+	// dropped silently.
+	SelectionMaskWithoutCanvas string `json:"selection_mask_without_canvas,omitempty"`
+	// SelectionMaskInvalid and SelectionMaskSizeMismatch are the plain HTTP
+	// refusals of an unreadable mask and one whose size differs from the
+	// snapshot (#244); the Agent-facing templates below phrase the same
+	// failures with a reason.
+	SelectionMaskInvalid      string `json:"selection_mask_invalid,omitempty"`
+	SelectionMaskSizeMismatch string `json:"selection_mask_size_mismatch,omitempty"`
+	// MaskUnreadableTemplate, MaskSizeMismatchTemplate and MaskUnsupportedTemplate
+	// are the Agent-facing refusals of a selection mask (#244): the mask asset
+	// could not be read or is not owned ({reason}); its pixel size differs from
+	// the artboard snapshot ({mask} {canvas}); or the chosen model declares no
+	// mask parameter ({model} {choices} lists the models that do).
+	MaskUnreadableTemplate   string `json:"mask_unreadable_template,omitempty"`
+	MaskSizeMismatchTemplate string `json:"mask_size_mismatch_template,omitempty"`
+	MaskUnsupportedTemplate  string `json:"mask_unsupported_template,omitempty"`
+	// MaskNoSupportedModel refuses a frozen mask when no available Offering of
+	// the capability declares a mask parameter (#244).
+	MaskNoSupportedModel string `json:"mask_no_supported_model,omitempty"`
+	// MaskModelSwitchNote says a step moved to a mask-capable model because the
+	// person had not chosen one ({from} {to}); MaskNotAppliedNote explains that
+	// the Agent's own mask argument was dropped because the turn carried no
+	// frozen selection mask; MaskApprovalNote tells the approval card that only
+	// the selected region changes (#244).
+	MaskModelSwitchNote string `json:"mask_model_switch_note,omitempty"`
+	MaskNotAppliedNote  string `json:"mask_not_applied_note,omitempty"`
+	MaskApprovalNote    string `json:"mask_approval_note,omitempty"`
 	// RetiredModelFallback is the note a generation step's result carries
 	// (result_fields.model_note) when the turn named a retired model and the
 	// service ran its successor instead ({from}, {to}; #329 follow-up).

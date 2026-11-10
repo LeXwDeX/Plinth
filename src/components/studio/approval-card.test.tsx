@@ -219,6 +219,19 @@ describe('approval card', () => {
     expect(render({ ...card(null), referenceNote: note, status: 'expired' })).toContain('studio-approval-reference-note');
   });
 
+  it('shows the mask input note of a local edit (#244)', () => {
+    const note = '本次只改用户圈选的区域：蒙版透明处会重画，不透明处保持原图。';
+    const html = render({ ...card(null), maskNote: note, inputs: [
+      { parameter: 'mask', handle: '', taskId: '', assetId: 'mask-asset', kind: 'asset', label: '', previewable: true },
+    ] });
+    expect(html).toContain('data-testid="studio-approval-mask-note"');
+    expect(html).toContain(note);
+    // The mask thumbnail sits on a checkerboard so its transparent shape is visible.
+    expect(html).toContain('data-checkerboard="true"');
+    expect(render(card(null))).not.toContain('studio-approval-mask-note');
+    expect(render({ ...card(null), maskNote: note, status: 'expired' })).toContain('studio-approval-mask-note');
+  });
+
   it('words the remaining approval time with the count pair (#363)', () => {
     const now = Date.parse('2026-10-09T00:00:00Z');
     const validity = (milliseconds: number) => render({

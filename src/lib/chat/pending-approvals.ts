@@ -91,6 +91,8 @@ export interface PendingApproval {
   rechargeTaskId?: string;
   /** The server's sentence (in the reader's language) that the step uses only the first of the pictures given (#329 E). */
   referenceNote?: string;
+  /** #244: the server's sentence that the step changes only the masked region; present only with a mask input. */
+  maskNote?: string;
   inputs: PendingApprovalInput[];
   parameterAdjustments?: ParameterAdjustment[];
   /** #239: who chose the model and why; absent when the server did not report it. */
@@ -161,6 +163,7 @@ export function parsePendingApprovals(payload: unknown): PendingApproval[] {
       prompt: text(item.prompt), inputs, messageId: text(item.message_id),
       ...(text(item.recharge_task_id) ? { rechargeTaskId: text(item.recharge_task_id) } : {}),
       ...(text(item.reference_note) ? { referenceNote: text(item.reference_note) } : {}),
+      ...(text(item.mask_note) ? { maskNote: text(item.mask_note) } : {}),
       createdAt: text(item.created_at), expiresAt: text(item.expires_at),
     });
   }

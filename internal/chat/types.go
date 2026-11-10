@@ -89,6 +89,12 @@ type TurnOptions struct {
 	// SelectionPicked marks a Selection that is the session's picked candidate
 	// ("选用") rather than something the client selected on the workspace.
 	SelectionPicked bool `json:"SelectionPicked,omitempty"`
+	// SelectionMask is the selection mask of this canvas turn (#244), frozen
+	// when the turn starts after the service verified the mask asset for the
+	// owner, measured its pixel size, bounding box and coverage, and required
+	// the size to equal the artboard snapshot. A mask that does not hold
+	// refuses the turn; it is never dropped like an attachment claim.
+	SelectionMask *SelectionMask `json:"SelectionMask,omitempty"`
 	// Locale is the UI locale of the request that started the turn, frozen
 	// so the reply, the title and the server's own messages in the turn use
 	// it across restarts. Empty is the default locale.
@@ -134,6 +140,32 @@ type TurnOptions struct {
 	// started it when the person approved the plan (#134). Only the service
 	// sets it; a request never does. Empty for an ordinary turn.
 	PlanContinuation string `json:"PlanContinuation,omitempty"`
+}
+
+// SelectionMaskRef is the client's claim about the selection mask of a canvas
+// turn (#244): one of its own input assets. It is untrusted until the service
+// measures it for the owner.
+type SelectionMaskRef struct {
+	MaskAssetID string
+}
+
+// SelectionMask is the frozen selection mask of a canvas turn (#244). The mask
+// is a picture the size of the artboard snapshot; its transparent pixels are
+// the region the person selected to redraw and its opaque pixels are kept.
+// Width and Height are the measured pixel size, BBox the inclusive pixel box
+// x0,y0,x1,y1 of the transparent region (all zero when nothing is selected)
+// and Coverage its share of the picture in [0,1].
+type SelectionMask struct {
+	MaskAssetID string  `json:"MaskAssetID"`
+	Width       int     `json:"Width"`
+	Height      int     `json:"Height"`
+	BBox        [4]int  `json:"BBox"`
+	Coverage    float64 `json:"Coverage"`
+}
+
+// Editable reports whether the mask selects any pixel at all.
+func (mask SelectionMask) Editable() bool {
+	return mask.BBox[2] >= mask.BBox[0] && mask.BBox[3] >= mask.BBox[1] && mask.Coverage > 0
 }
 
 type Turn struct {

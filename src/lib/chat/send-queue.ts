@@ -21,6 +21,8 @@ export interface QueuedTurn {
   attachmentPurposes?: { imageSlot: number; purpose: AttachmentPurpose }[];
   /** The source the person chose when the turn was queued (#266): the canvas when `selection` is its snapshot. */
   inputSource?: string;
+  /** #244: the frozen selection mask that was uploaded with the queued canvas turn. */
+  selectionMask?: { maskAssetId: string };
   /** #65: the structured multiview request the turn was queued with. */
   multiview?: MultiviewTurnRequest;
   /** #154: the one-turn style-lock exemption the turn was queued with. */

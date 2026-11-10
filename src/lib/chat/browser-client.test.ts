@@ -247,6 +247,7 @@ describe('ChatBrowserClient', () => {
     schema.chat.api.fields.attachments = 'configured-claims';
     schema.chat.api.fields.selection = 'configured-selected';
     schema.chat.api.fields.input_source = 'configured-source';
+    schema.chat.api.fields.selection_mask = 'configured-mask-member';
     schema.chat.api.response_fields.attachments = 'configured-objects';
     schema.chat.api.attachment.asset_id = 'configured-asset';
     let sent: Record<string, unknown> = {};
@@ -268,6 +269,7 @@ describe('ChatBrowserClient', () => {
       attachments: [{ kind: 'image', imageSlot: 1, assetId: 'shot', captureId: 'capture-1', taskId: 'model-1' }],
       selection: [{ kind: 'model', taskId: 'model-1' }],
       inputSource: 'canvas',
+      selectionMask: { maskAssetId: 'mask-asset' },
     }, new AbortController().signal);
     // #266: the declared source travels under its Schema field name.
     expect(sent['configured-source']).toBe('canvas');
@@ -275,6 +277,8 @@ describe('ChatBrowserClient', () => {
       { kind: 'image', 'configured-asset': 'shot', taskId: 'model-1', captureId: 'capture-1', imageSlot: 1 },
     ]);
     expect(sent['configured-selected']).toEqual([{ kind: 'model', taskId: 'model-1' }]);
+    // #244: the mask asset travels as the frozen selectionMask member.
+    expect(sent['configured-mask-member']).toEqual({ maskAssetId: 'mask-asset' });
     const { messages } = await client.listMessagePage('session', { limit: 50 });
     expect(messages[0].attachments).toEqual([
       expect.objectContaining({ handle: '@img1', kind: 'image', role: 'capture', assetId: 'shot', captureId: 'capture-1', imageSlot: 1 }),
@@ -284,6 +288,7 @@ describe('ChatBrowserClient', () => {
     expect(sent).not.toHaveProperty('configured-claims');
     expect(sent).not.toHaveProperty('configured-selected');
     expect(sent).not.toHaveProperty('configured-source');
+    expect(sent).not.toHaveProperty('configured-mask-member');
   });
 
   it('sends the answer to a choice card under its Schema field (#321)', async () => {

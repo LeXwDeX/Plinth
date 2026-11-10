@@ -487,6 +487,7 @@ func (s *Server) legacySendChatMessage(
 		}
 		options.Multiview = &multiview
 	}
+	selectionMask := s.chatSelectionMask(body, requestFields.SelectionMask)
 	assistant, err := s.chat.StartTurn(request.Context(), chat.StartTurn{
 		OwnerID:   principal.ID(),
 		SessionID: sessionID,
@@ -498,6 +499,7 @@ func (s *Server) legacySendChatMessage(
 		Attachments:        s.chatAttachmentRefs(body, requestFields.Attachments),
 		AttachmentPurposes: purposes,
 		Selection:          s.chatAttachmentRefs(body, requestFields.Selection),
+		SelectionMask:      selectionMask,
 		Mentions:           s.chatMentions(body, requestFields.Mentions),
 		OnMentionsDropped: func(tokens []string) {
 			s.logger.InfoContext(request.Context(), "Chat 提及未采用，保持原文", "session_id", sessionID, "count", len(tokens))
@@ -532,6 +534,12 @@ func (s *Server) legacySendChatMessage(
 		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidInputSource)
 	case errors.Is(err, chat.ErrCanvasSourceMissing):
 		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.CanvasSourceMissing)
+	case errors.Is(err, chat.ErrSelectionMaskWithoutCanvas):
+		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.SelectionMaskWithoutCanvas)
+	case errors.Is(err, chat.ErrSelectionMaskInvalid):
+		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.SelectionMaskInvalid)
+	case errors.Is(err, chat.ErrSelectionMaskSizeMismatch):
+		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.SelectionMaskSizeMismatch)
 	case err != nil:
 		s.writeChatInternalError(writer, err)
 	default:
@@ -999,6 +1007,32 @@ func (s *Server) chatMentions(body map[string]json.RawMessage, field string) []c
 		mentions = append(mentions, chat.MentionRef{Token: token, Ref: s.chatAttachmentRef(item)})
 	}
 	return mentions
+}
+
+// chatSelectionMask reads the selection mask claim of a canvas turn (#244).
+// An absent or null member is no mask; an object without the declared asset
+// member is a mask with an empty ID and is refused by the service.
+func (s *Server) chatSelectionMask(body map[string]json.RawMessage, field string) *chat.SelectionMaskRef {
+	if field == "" {
+		return nil
+	}
+	raw, present := body[field]
+	if !present || len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &members); err != nil {
+		return &chat.SelectionMaskRef{}
+	}
+	nested := s.application.Chat.API.SelectionMask.MaskAssetID
+	var assetID string
+	if nested != "" {
+		_ = json.Unmarshal(members[nested], &assetID)
+	}
+	if len(assetID) > maximumAttachmentClaimLength {
+		assetID = ""
+	}
+	return &chat.SelectionMaskRef{MaskAssetID: assetID}
 }
 
 // chatAttachmentRef reads one untrusted claim with the Schema's member names.

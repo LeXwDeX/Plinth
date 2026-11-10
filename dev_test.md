@@ -35,7 +35,7 @@
 7. **Go 构建**「go build」（本地 + CI）：`CGO_ENABLED=0 go build -trimpath ./cmd/art-ai` 必须成功；
 8. **公开快照扫描**「public tree」（本地 + CI）：`bash scripts/check-public-tree.sh` 必须通过（#261：已跟踪文件不得含内网地址、内部域名、服务器路径、本机临时路径、内部 Compose 项目名或组织名称；#334 起还拒绝本机用户目录、私钥头与常见凭据前缀；本地另把未纳入 Git 的 `deploy/local/environments.json` 中的全部环境值作为禁用字面量；约 2 秒，需要 git 与 python3）；
 9. **脚本单测**「scripts tests」（本地 + CI）：`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_*.py'` 必须通过（#86：发布、门禁与公开快照脚本——`verify-local.py`、`release-env.py`、`make-public-snapshot.py`、hook 安装器、割接验收等——自己的单测，项目不用 pytest；约 2 分钟，需要 git、python3 与 sqlite3 命令行；`PYTHONDONTWRITEBYTECODE` 防止在被检出的源码树里留下 `__pycache__`，让主机 CI 的“源码未变”核对不被干扰）；
-10. **Fake 栈冒烟**「fake stack」（本地 + CI）：`python3 scripts/smoke/smoke-fake-stack.py --only balance,meshy,images,p2,agent,agent-background,image-purpose,vision-budget,faults --faults task-failed,artifact-expired-stuck` 必须通过（#218：在 fake 上游上跑整栈冒烟的稳定子集，任一检查失败即门禁失败；栈的每个连接都经回环守卫，非回环目标一律拒绝并记入栈日志，脚本发现任一拒绝即判失败，以此证明门禁零真实上游请求；离线、只用回环地址，不读取真实 Key；约 5 分钟，需要 go 与 python3，不需要前端构建产物）；
+10. **Fake 栈冒烟**「fake stack」（本地 + CI）：`python3 scripts/smoke/smoke-fake-stack.py --only balance,meshy,images,p2,agent,agent-background,image-purpose,mask-selection,vision-budget,faults --faults task-failed,artifact-expired-stuck` 必须通过（#218：在 fake 上游上跑整栈冒烟的稳定子集，任一检查失败即门禁失败；栈的每个连接都经回环守卫，非回环目标一律拒绝并记入栈日志，脚本发现任一拒绝即判失败，以此证明门禁零真实上游请求；离线、只用回环地址，不读取真实 Key；约 5 分钟，需要 go 与 python3，不需要前端构建产物）；
 
 **为什么这样分**：第 5、6 项跑的是同一批 Go 测试，第 6 项多开 race detector，因而更严格也更慢（CI 约 21 分钟，本机 8–20 分钟，几个 worktree 同时 push 时还会因负载误报）。因此（决策背景见 `docs/history.md`）：
 
