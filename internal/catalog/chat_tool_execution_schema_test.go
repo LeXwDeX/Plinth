@@ -16,7 +16,7 @@ func TestDefaultChatToolsDeclareRuntimeExecutionContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := c.Application()
-	if len(app.Chat.Tools) != 15 || len(app.Chat.AgentTools) != 17 {
+	if len(app.Chat.Tools) != 15 || len(app.Chat.AgentTools) != 18 {
 		t.Fatalf("chat tool inventory = generation:%d controls:%d", len(app.Chat.Tools), len(app.Chat.AgentTools))
 	}
 	if err := catalog.ValidateApplicationSchema(app); err != nil {
@@ -115,7 +115,15 @@ func TestCatalogAllowsImageToolForProcessingClassifiedCapability(t *testing.T) {
 	if err := json.Unmarshal(document["application"], &app); err != nil {
 		t.Fatal(err)
 	}
-	renameBackgroundWaitTool(app.Chat.Agent.BackgroundWait, app.Chat.Tools[1].Name, "cutout_assets")
+	oldName := app.Chat.Tools[1].Name
+	renameBackgroundWaitTool(app.Chat.Agent.BackgroundWait, oldName, "cutout_assets")
+	for index := range app.Chat.Agent.CraftPrompts {
+		for at, name := range app.Chat.Agent.CraftPrompts[index].WhenToolsAny {
+			if name == oldName {
+				app.Chat.Agent.CraftPrompts[index].WhenToolsAny[at] = "cutout_assets"
+			}
+		}
+	}
 	app.Chat.Tools[1].Name = "cutout_assets"
 	encoded, err := json.Marshal(app)
 	if err != nil {

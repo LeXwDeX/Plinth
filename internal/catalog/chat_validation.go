@@ -674,6 +674,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateModelReview(schema, capabilityPresentations); err != nil {
 		return err
 	}
+	if err := validateImageReview(schema); err != nil {
+		return err
+	}
 	for index, tool := range schema.Tools {
 		if tool.RequireUniqueOffering && (!tool.IgnoreUserModel || tool.RequireUserModel || tool.CrossDomainModelFallback) {
 			return fmt.Errorf("tools[%d] require_unique_offering requires independent model selection", index)
@@ -821,6 +824,7 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"ask_choice":              {"choice.ask", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"find_history_images":     {"history.images", "READ", []string{"image", "model-3d"}},
 		"recover_task_result":     {"task.refetch", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"inspect_image":           {"image.inspect", "READ", []string{"image", "model-3d"}},
 		"inspect_model":           {"model.inspect", "READ", []string{"model-3d"}},
 		"render_model_views":      {"model.render", "READ", []string{"model-3d"}},
 		"compare_models":          {"model.compare", "READ", []string{"model-3d"}},
@@ -1417,6 +1421,9 @@ func validateChatAttachments(context ChatContextSchema) error {
 	}
 	if context.RecentGeneratedImageLimit < 0 || context.RecentGeneratedImageLimit > context.MaximumVisionImages {
 		return errors.New("context.recent_generated_image_limit 必须在 0 与 maximum_vision_images 之间")
+	}
+	if context.MaxResultPictures < 0 || context.MaxResultPictures > context.MaximumVisionImages {
+		return errors.New("context.max_result_pictures 必须在 0 与 maximum_vision_images 之间")
 	}
 	if context.MaximumSessionNotesCharacters <= 0 ||
 		!strings.Contains(context.SessionNotesTemplate, "{notes}") ||
@@ -2193,6 +2200,46 @@ var (
 	// brace left in a template would reach the Agent verbatim.
 	modelReviewPlaceholder = regexp.MustCompile(`\{[a-z_]+\}`)
 )
+
+// validateImageReview checks application.chat.image_review (#245) once the
+// inspect_image tool is declared: bounds, checklist ranges and the texts the
+// executor fills. Schemas without the tool stay valid.
+func validateImageReview(schema ChatSchema) error {
+	used := false
+	for _, tool := range schema.AgentTools {
+		if tool.Execution.ImplementationKey == "image.inspect" {
+			used = true
+			break
+		}
+	}
+	if !used {
+		return nil
+	}
+	review := schema.ImageReview
+	if review.Limits.MaxBytes <= 0 || review.Limits.MaxPixels <= 0 {
+		return errors.New("chat.image_review.limits 的字节与像素上限必须为正数")
+	}
+	for name, checklist := range map[string]ChatImageChecklistSchema{"delivery": review.Delivery, "input_3d": review.Input3D} {
+		if checklist.MaxBackgroundSpread < 0 || checklist.MinSubjectRatio < 0 || checklist.MaxSubjectRatio < 0 ||
+			checklist.MinSubjectRatio > 1 || checklist.MaxSubjectRatio > 1 || checklist.MaxComponents < 0 {
+			return fmt.Errorf("chat.image_review.%s 的比例或范围不合法", name)
+		}
+		if checklist.MaxSubjectRatio > 0 && checklist.MinSubjectRatio > checklist.MaxSubjectRatio {
+			return fmt.Errorf("chat.image_review.%s 的主体占比下限高于上限", name)
+		}
+	}
+	if review.MaxRounds <= 0 || strings.TrimSpace(review.OverrideArgument) == "" ||
+		!strings.Contains(review.RefusedTemplate, "{reasons}") ||
+		!strings.Contains(review.RefusedTemplate, "{override_argument}") ||
+		!strings.Contains(review.OverrideNote, "{reason}") ||
+		!strings.Contains(review.UnreadableTemplate, "{handle}") ||
+		!strings.Contains(review.UnreadableTemplate, "{reason}") ||
+		!strings.Contains(review.RoundsExhaustedTemplate, "{maximum}") ||
+		strings.TrimSpace(review.DeliveryChecklist) == "" || strings.TrimSpace(review.Input3DChecklist) == "" {
+		return errors.New("chat.image_review 的自检轮数、放行参数或文案不完整")
+	}
+	return nil
+}
 
 // validateModelReview checks application.chat.model_review (#103) once any
 // model review tool is declared: every bound positive, the render vocabulary

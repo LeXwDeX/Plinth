@@ -2256,6 +2256,53 @@ type ChatModelReviewToolsSchema struct {
 	Compare string `json:"compare"`
 }
 
+// ChatImageReviewSchema declares the read-only image inspection tool and the
+// image-to-3D input gate (#245). Server-side only, like the tool itself.
+type ChatImageReviewSchema struct {
+	Limits ImageInspectLimitsSchema `json:"limits"`
+	// Delivery and Input3D are the deterministic requirements of the two
+	// checklists the Agent (and the 3D input gate) can ask for.
+	Delivery ChatImageChecklistSchema `json:"delivery"`
+	Input3D  ChatImageChecklistSchema `json:"input_3d"`
+	// DeliveryChecklist and Input3DChecklist are the Agent-facing checklists:
+	// what a person can see that the deterministic report cannot.
+	DeliveryChecklist string `json:"delivery_checklist"`
+	Input3DChecklist  string `json:"input_3d_checklist"`
+	// RefusedTemplate words a refused 3D input: {reasons} names the failed
+	// checks, {override_argument} is the argument that lets the Agent proceed
+	// when the person explicitly asked for that picture.
+	RefusedTemplate  string `json:"refused_template"`
+	OverrideArgument string `json:"override_argument"`
+	// OverrideNote is attached to the result when the Agent used that
+	// argument: {reason} is the reason it gave.
+	OverrideNote string `json:"override_note"`
+	// UnreadableTemplate words a picture whose bytes cannot be read or decoded:
+// {handle} and {reason}.
+	UnreadableTemplate string `json:"unreadable_template"`
+	// MaxRounds bounds inspect_image calls per reply; RoundsExhaustedTemplate
+	// is returned once the budget is spent.
+	MaxRounds               int    `json:"max_rounds"`
+	RoundsExhaustedTemplate string `json:"rounds_exhausted_template"`
+}
+
+// ImageInspectLimitsSchema bounds the bytes and pixels Inspect accepts.
+type ImageInspectLimitsSchema struct {
+	MaxBytes  int64 `json:"max_bytes"`
+	MaxPixels int64 `json:"max_pixels"`
+}
+
+// ChatImageChecklistSchema is one deterministic picture checklist. A zero
+// value disables that check, exactly like imageinspect.Checklist.
+type ChatImageChecklistSchema struct {
+	RequireAlpha           bool    `json:"require_alpha"`
+	RequirePlainBackground bool    `json:"require_plain_background"`
+	MaxBackgroundSpread    float64 `json:"max_background_spread"`
+	MinSubjectRatio        float64 `json:"min_subject_ratio"`
+	MaxSubjectRatio        float64 `json:"max_subject_ratio"`
+	RequireEdgeClear       bool    `json:"require_edge_clear"`
+	MaxComponents          int     `json:"max_components"`
+}
+
 // ChatModelReviewLimits bounds what Parse may accept before any topology is
 // computed. The values are those of modelinspect.Limits.
 type ChatModelReviewLimits struct {
@@ -2535,6 +2582,9 @@ type ChatSchema struct {
 	// comparison tools (#103): their bounds, enumerations and Agent-facing
 	// texts. Server-side only, like the tools themselves.
 	ModelReview ChatModelReviewSchema `json:"model_review"`
+	// ImageReview declares the read-only image inspection tool and the
+	// image-to-3D input gate (#245).
+	ImageReview ChatImageReviewSchema `json:"image_review"`
 	// Choice declares the in-chat choice card (#321): the Agent-facing texts of
 	// an answered or pending card and its bounds. Server side only; the card's
 	// visible words are content messages ui.chat.choice.*.
@@ -3802,6 +3852,16 @@ type ChatContextSchema struct {
 	// (for a 3D result its thumbnail) the Agent sees beside the user's own
 	// pictures. They are shown to a vision model, not just named.
 	RecentGeneratedImageLimit int `json:"recent_generated_image_limit"`
+	// MaxResultPictures bounds how many pictures of one generation result the
+	// Agent sees in the same turn (#245). The result still names every handle;
+	// this only bounds the vision parts sent back with the tool receipt.
+	MaxResultPictures int `json:"max_result_pictures"`
+	// ResultImageViewIntro and ResultImageViewLabelTemplate frame those
+	// pictures: they are this turn's results, not pictures looked up from
+	// history. Empty falls back to the history copy.
+	ResultImageViewIntro         string `json:"result_image_view_intro,omitempty"`
+	ResultImageViewLabelTemplate string `json:"result_image_view_label_template,omitempty"`
+	ResultImageUnreadableTemplate string `json:"result_image_unreadable_template,omitempty"`
 	// GeneratedVisionIntro precedes those pictures in the newest user message
 	// (#327): they are earlier results of the session (a model's preview
 	// among them), not pictures the person attached this turn. Empty adds

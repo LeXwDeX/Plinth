@@ -58,8 +58,22 @@ func (orchestrator *Orchestrator) attachToolPictures(
 		reply.Content += texts.HistoryImageVisionOffMessage
 		return
 	}
+	label := texts.HistoryImageViewLabelTemplate
+	unreadable := texts.HistoryImageUnreadableTemplate
 	var parts []agents.ContentPart
 	for _, picture := range pictures {
+		if picture.Fresh {
+			reply.FreshPictures = true
+		}
+		pictureLabel, pictureUnreadable := label, unreadable
+		if picture.Fresh {
+			if texts.ResultImageViewLabelTemplate != "" {
+				pictureLabel = texts.ResultImageViewLabelTemplate
+			}
+			if texts.ResultImageUnreadableTemplate != "" {
+				pictureUnreadable = texts.ResultImageUnreadableTemplate
+			}
+		}
 		pictureURL := picture.URL
 		if pictureURL != "" && !visionSafeImage(pictureURL) {
 			inlined, ok := "", false
@@ -72,12 +86,12 @@ func (orchestrator *Orchestrator) attachToolPictures(
 			}
 		}
 		if pictureURL == "" {
-			reply.Content += strings.ReplaceAll(texts.HistoryImageUnreadableTemplate, "{handle}", picture.Handle)
+			reply.Content += strings.ReplaceAll(pictureUnreadable, "{handle}", picture.Handle)
 			continue
 		}
 		parts = append(parts,
 			agents.ContentPart{Kind: texts.ImagePartKind, URL: pictureURL, Detail: texts.ImageDetail},
-			agents.ContentPart{Kind: texts.TextPartKind, Text: strings.ReplaceAll(texts.HistoryImageViewLabelTemplate, "{handle}", picture.Handle)},
+			agents.ContentPart{Kind: texts.TextPartKind, Text: strings.ReplaceAll(pictureLabel, "{handle}", picture.Handle)},
 		)
 	}
 	if len(parts) > 0 {
@@ -92,18 +106,25 @@ func (orchestrator *Orchestrator) attachToolPictures(
 func (orchestrator *Orchestrator) withToolPictures(toolResults []agents.Message) []agents.Message {
 	result := make([]agents.Message, 0, len(toolResults)+1)
 	var pictures []agents.ContentPart
+	fresh := false
 	for _, reply := range toolResults {
 		if reply.Role == orchestrator.schema.Roles.Tool && len(reply.Parts) > 1 {
 			pictures = append(pictures, reply.Parts[1:]...)
+			fresh = fresh || reply.FreshPictures
 			reply.Parts = nil
 		}
 		result = append(result, reply)
 	}
 	if len(pictures) > 0 {
 		texts := orchestrator.schema.Context
+		intro := texts.HistoryImageViewIntro
+		if fresh && texts.ResultImageViewIntro != "" {
+			intro = texts.ResultImageViewIntro
+		}
 		result = append(result, agents.Message{
-			Role:  orchestrator.schema.Roles.User,
-			Parts: append([]agents.ContentPart{{Kind: texts.TextPartKind, Text: texts.HistoryImageViewIntro}}, pictures...),
+			Role:         orchestrator.schema.Roles.User,
+			Parts:        append([]agents.ContentPart{{Kind: texts.TextPartKind, Text: intro}}, pictures...),
+			PicturesOnly: true,
 		})
 	}
 	return result

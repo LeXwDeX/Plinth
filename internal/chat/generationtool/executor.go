@@ -16,6 +16,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/imageinspect"
 	"github.com/LeXwDeX/Plinth/internal/harness"
 	"github.com/LeXwDeX/Plinth/internal/harness/resolve"
 	"github.com/LeXwDeX/Plinth/internal/processing"
@@ -41,6 +42,12 @@ type ReferenceResolver interface {
 		generation.OwnerID,
 		[]string,
 	) ([]generation.AssetID, error)
+}
+
+// ImageReviewer reviews one picture before it becomes an image-to-3D input
+// (#245). It reads only the owner's picture and returns deterministic checks.
+type ImageReviewer interface {
+	ReviewAttachment(context.Context, string, chat.Attachment, string, string) (imageinspect.Report, []imageinspect.Check, error)
 }
 
 // ModelSource is the view of a three-view group that a 3D model made from the
@@ -101,6 +108,9 @@ type Config struct {
 	// assets. Both stay nil when the tools are not configured.
 	ModelAssets ModelAssetGateway
 	InputAssets ModelRenderStore
+	// ImageReview checks an image-to-3D input before submission (#245). Nil
+	// disables the gate.
+	ImageReview ImageReviewer
 	// InputAssetRoute is the Schema's input-asset item route ({assetID}); a
 	// three-view view the person replaced with an upload is named by it (#65).
 	InputAssetRoute string
@@ -144,6 +154,7 @@ type Executor struct {
 	references    ReferenceResolver
 	modelAssets   ModelAssetGateway
 	inputAssets   ModelRenderStore
+	imageReview   ImageReviewer
 	inputAsset    string
 	chat          catalog.ChatSchema
 	texts         *catalog.TextLocalizer
@@ -208,6 +219,7 @@ func New(config Config) (*Executor, error) {
 		references:    config.References,
 		modelAssets:   config.ModelAssets,
 		inputAssets:   config.InputAssets,
+		imageReview:   config.ImageReview,
 		inputAsset:    config.InputAssetRoute,
 		chat:          config.Chat,
 		texts:         config.Texts,
@@ -602,6 +614,19 @@ func (executor *Executor) Execute(
 				return chat.ToolResult{NoSubmission: true}, errors.New("generation tool: reference selection does not match the frozen URLs")
 			}
 			finalReferences = selection.Candidates[:len(referenceURLs)]
+		}
+	}
+	if capability == generation.ImageTo3D {
+		override, refusal := executor.review3DInput(ctx, command, referenceURLs)
+		if refusal != "" {
+			result := executor.failure(command, "", refusal)
+			result.NoSubmission = true
+			return result, nil
+		}
+		if override != "" {
+			executor.logger.Info("image-to-3D input gate overridden",
+				"owner_id", command.OwnerID, "session_id", command.SessionID,
+				"call_id", command.Call.ID, "reason", override)
 		}
 	}
 
@@ -1691,6 +1716,100 @@ func (executor *Executor) assetURLs(
 	return ResultAssetURLs(executor.chat, tool, task)
 }
 
+// gateInput is one reference picture with the attachment that identifies its
+// stored bytes. An attachment with no IDs is still carried for a data URI.
+type gateInput struct {
+	attachment chat.Attachment
+	url        string
+}
+
+// review3DInput runs the deterministic 3D-input checklist over the final
+// reference pictures (#245). It returns the override reason (when the call
+// supplied one) and a refusal message. A picture whose bytes cannot be read is
+// treated as unknown and does not block the step.
+func (executor *Executor) review3DInput(ctx context.Context, command chat.ToolCommand, urls []string) (string, string) {
+	if executor.imageReview == nil {
+		return "", ""
+	}
+	override := inputOverrideReason(command.Call.Arguments, executor.chat.ImageReview.OverrideArgument)
+	var reasons []string
+	for _, item := range gateInputs(command, urls) {
+		_, checks, err := executor.imageReview.ReviewAttachment(ctx, command.OwnerID, item.attachment, item.url, "3d_input")
+		if err != nil {
+			continue
+		}
+		for _, check := range checks {
+			if check.Status != imageinspect.StatusFail {
+				continue
+			}
+			handle := item.attachment.Handle
+			if handle == "" {
+				handle = "input picture"
+			}
+			reasons = append(reasons, fmt.Sprintf("%s %s: %s", handle, check.Name, check.Actual))
+		}
+	}
+	if len(reasons) == 0 || strings.TrimSpace(override) != "" {
+		return override, ""
+	}
+	refusal := strings.NewReplacer(
+		"{reasons}", strings.Join(reasons, "; "),
+		"{override_argument}", executor.chat.ImageReview.OverrideArgument,
+	).Replace(executor.chat.ImageReview.RefusedTemplate)
+	return override, refusal
+}
+
+func inputOverrideReason(arguments json.RawMessage, name string) string {
+	if name == "" {
+		return ""
+	}
+	var values map[string]json.RawMessage
+	if json.Unmarshal(arguments, &values) != nil {
+		return ""
+	}
+	var reason string
+	if json.Unmarshal(values[name], &reason) != nil {
+		return ""
+	}
+	return strings.TrimSpace(reason)
+}
+
+// gateInputs pairs each final reference URL with the attachment that names its
+// stored asset. Pictures outside this session's verified attachments are still
+// listed; the reviewer then reports them as unreadable and the gate skips them.
+func gateInputs(command chat.ToolCommand, urls []string) []gateInput {
+	byURL := map[string]chat.Attachment{}
+	add := func(message chat.Message) {
+		for _, attachment := range message.Attachments {
+			if attachment.Kind != chat.AttachmentKindImage {
+				continue
+			}
+			if attachment.ImageSlot > 0 && attachment.ImageSlot <= len(message.ImageURLs) {
+				byURL[message.ImageURLs[attachment.ImageSlot-1]] = attachment
+			}
+			if attachment.URL != "" {
+				byURL[attachment.URL] = attachment
+			}
+		}
+	}
+	for _, message := range command.ReferenceHistory() {
+		add(message)
+	}
+	for _, attachment := range command.Options.Selection {
+		if attachment.Kind != chat.AttachmentKindImage {
+			continue
+		}
+		if attachment.URL != "" {
+			byURL[attachment.URL] = attachment
+		}
+	}
+	inputs := make([]gateInput, 0, len(urls))
+	for _, url := range urls {
+		inputs = append(inputs, gateInput{attachment: byURL[url], url: url})
+	}
+	return inputs
+}
+
 func (executor *Executor) success(
 	tool catalog.ChatToolSchema,
 	taskID string,
@@ -1749,7 +1868,63 @@ func (executor *Executor) success(
 		TaskID:       taskID,
 		ImageURLs:    imageURLs,
 		AgentContent: string(content),
+		Pictures:     resultPictures(tool, imageURLs, executor.chat.Context.MaxResultPictures),
 	}
+}
+
+// resultPictures returns the pictures of a 2D generation result the Agent
+// should see in the same turn (#245). 3D results are reviewed through
+// inspect_model and render_model_views, not by looking at thumbnails. When a
+// call produced more candidates than the Schema allows, evenly spaced ones are
+// shown; every produced picture still keeps its handle in the result.
+func resultPictures(tool catalog.ChatToolSchema, urls []string, limit int) []chat.ToolPicture {
+	if len(urls) == 0 || !imageResultCapability(string(tool.Capability)) {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 4
+	}
+	picked := urls
+	if len(urls) > limit {
+		picked = evenlySpaced(urls, limit)
+	}
+	pictures := make([]chat.ToolPicture, 0, len(picked))
+	for _, url := range picked {
+		if url != "" {
+			pictures = append(pictures, chat.ToolPicture{URL: url, Fresh: true})
+		}
+	}
+	return pictures
+}
+
+func imageResultCapability(capability string) bool {
+	switch capability {
+	case "image-to-image", "background-removal", "image-to-multiview", "edit-multiview":
+		return true
+	default:
+		return false
+	}
+}
+
+// evenlySpaced picks limit entries from urls, keeping the first and the last.
+func evenlySpaced(urls []string, limit int) []string {
+	if limit <= 0 || len(urls) <= limit {
+		return urls
+	}
+	if limit == 1 {
+		return []string{urls[len(urls)/2]}
+	}
+	picked := make([]string, 0, limit)
+	seen := make(map[int]bool, limit)
+	for index := 0; index < limit; index++ {
+		at := index * (len(urls) - 1) / (limit - 1)
+		if seen[at] {
+			continue
+		}
+		seen[at] = true
+		picked = append(picked, urls[at])
+	}
+	return picked
 }
 
 func (executor *Executor) executionFailure(

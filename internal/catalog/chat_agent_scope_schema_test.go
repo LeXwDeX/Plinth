@@ -38,6 +38,7 @@ var shippedToolScopes = map[string]string{
 	"propose_production_plan":    "utility",
 	"ask_choice":                 "utility",
 	"find_history_images":        "utility",
+	"inspect_image":              "utility",
 	"recover_task_result":        "utility",
 	"list_offerings":             "utility",
 	"get_task":                   "utility",
