@@ -64,11 +64,11 @@ def base_request(**overrides):
 class RequestSetTest(unittest.TestCase):
     def test_the_shipped_request_set_is_valid(self):
         data, path, digest = quality.load_requests()
-        self.assertEqual(data["version"], 2)
-        self.assertEqual(len(data["requests"]), 11)
+        self.assertEqual(data["version"], 3)
+        self.assertEqual(len(data["requests"]), 12)
         self.assertTrue(path.endswith("requests.json"))
         self.assertEqual(len(digest), 64)
-        self.assertEqual(len({request["id"] for request in data["requests"]}), 11)
+        self.assertEqual(len({request["id"] for request in data["requests"]}), 12)
         reference = next(request for request in data["requests"] if request["id"] == "3d-image-reference")
         self.assertEqual(reference["modality"], "3d")
         self.assertEqual(reference["expected"]["capabilities"], ["image-to-3d"])
@@ -77,6 +77,11 @@ class RequestSetTest(unittest.TestCase):
         concept = next(request for request in data["requests"] if request["id"] == "2d-3d-input-concept")
         self.assertEqual(concept["modality"], "2d")
         self.assertEqual(concept["expected"]["capabilities"], ["text-to-image"])
+        project = next(request for request in data["requests"] if request["id"] == "2d-series-project")
+        self.assertEqual(project["category"], "series_consistency")
+        self.assertEqual(project["project"]["name"], "红发剑士系列")
+        self.assertEqual([step.get("project_setup") for step in project["steps"] if step.get("project_setup")],
+                         ["promote_first_image", "new_session"])
         self.assertEqual({request["modality"] for request in data["requests"]}, {"2d", "3d"})
         self.assertEqual(quality.validate_request_set(data, PURPOSES), [])
         for request in data["requests"]:
@@ -107,6 +112,34 @@ class RequestSetTest(unittest.TestCase):
         request["purpose"] = "game_character"
         problems = quality.validate_request_set({"version": 2, "requests": [request]}, PURPOSES)
         self.assertTrue(any("not declared for 2d" in problem for problem in problems))
+
+    def test_project_setup_steps_are_accepted_but_never_both_tool_and_setup(self):
+        request = base_request(
+            modality="2d", purpose="illustration",
+            project={"name": "series", "conventions": {"image_use": "illustration"}},
+            steps=[
+                {"user": "go", "tool": {"name": "refine_image"}},
+                {"user": "promote", "project_setup": "promote_first_image", "asset": {"name": "role A"}},
+                {"user": "new session", "project_setup": "new_session"},
+            ],
+            expected={
+                "capabilities": ["text-to-image"],
+                "required_tool_groups": [{"id": "generate", "any": ["refine_image"]}],
+                "budgets": {"max_paid_calls": 1, "max_tool_calls": 4, "max_interruptions": 1},
+            },
+        )
+        self.assertEqual(quality.validate_request_set({"version": 3, "requests": [request]}, PURPOSES), [])
+        request["steps"][1]["tool"] = {"name": "refine_image"}
+        problems = quality.validate_request_set({"version": 3, "requests": [request]}, PURPOSES)
+        self.assertTrue(any("not both" in problem for problem in problems))
+        del request["steps"][1]["tool"]
+        request["steps"][2]["project_setup"] = "delete_everything"
+        problems = quality.validate_request_set({"version": 3, "requests": [request]}, PURPOSES)
+        self.assertTrue(any("unknown project_setup" in problem for problem in problems))
+        request["steps"][2]["project_setup"] = "new_session"
+        request["project"] = {"conventions": {}}
+        problems = quality.validate_request_set({"version": 3, "requests": [request]}, PURPOSES)
+        self.assertTrue(any("project needs a name" in problem for problem in problems))
 
 
 class TrajectoryTest(unittest.TestCase):
@@ -323,6 +356,37 @@ class ReportTest(unittest.TestCase):
         result = quality.compare_reports(self.report(), candidate)
         self.assertFalse(result["ok"])
         self.assertTrue(any("request-set" in problem for problem in result["problems"]))
+
+    def test_compare_accepts_an_explicit_new_request_set(self):
+        baseline = self.report()
+        candidate = self.report()
+        candidate["request_set"] = {"version": 2, "sha256": "y"}
+        added = json.loads(json.dumps(candidate["cases"][0]))
+        added["id"] = "new-case"
+        candidate["cases"].append(added)
+        result = quality.compare_reports(baseline, candidate, new_request_set=True)
+        self.assertTrue(result["ok"], result["problems"])
+        self.assertTrue(any(item.get("case") == "new-case" for item in result["improvements"]))
+        self.assertTrue(result["new_request_set"])
+        # Only the cases both reports ran feed the tail metrics.
+        self.assertEqual(result["metrics"]["tool_calls"]["before"], result["metrics"]["tool_calls"]["after"])
+
+    def test_a_new_request_set_reports_metric_growth_without_blocking(self):
+        baseline = self.report()
+        candidate = self.report(paid=2)
+        candidate["request_set"] = {"version": 2, "sha256": "y"}
+        result = quality.compare_reports(baseline, candidate, new_request_set=True)
+        self.assertTrue(result["ok"], result["regressions"])
+        self.assertEqual(result["metrics"]["paid_calls"]["delta"], 1)
+
+    def test_a_new_request_set_still_blocks_a_common_case_regression(self):
+        baseline = self.report()
+        candidate = self.report()
+        candidate["request_set"] = {"version": 2, "sha256": "y"}
+        candidate["cases"][0]["checks"][0]["status"] = "fail"
+        result = quality.compare_reports(baseline, candidate, new_request_set=True)
+        self.assertFalse(result["ok"])
+        self.assertTrue(any(item["check"] == "final_reply" for item in result["regressions"]))
 
 
 if __name__ == "__main__":

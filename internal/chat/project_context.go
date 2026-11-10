@@ -79,6 +79,45 @@ func (context *ProjectContext) ProjectAssetByHandle(handle string) *ProjectAsset
 	return nil
 }
 
+// copyFrozenProject puts the project scope stored with the turn into the
+// process command. The HTTP handler builds options from the request, so the
+// service-frozen ProjectID and snapshot must replace whatever it carried
+// (#240). A caller can never name a project scope.
+func copyFrozenProject(options *TurnOptions, stored TurnOptions) {
+	options.ProjectID = stored.ProjectID
+	options.ProjectContext = cloneProjectContext(stored.ProjectContext)
+}
+
+// cloneProjectContext copies a frozen project snapshot so a running turn
+// cannot observe another turn's mutation of the decoded options. The project
+// rows themselves are never read after the turn starts.
+func cloneProjectContext(context *ProjectContext) *ProjectContext {
+	if context == nil {
+		return nil
+	}
+	cloned := *context
+	cloned.StyleGuide.References = append([]string(nil), context.StyleGuide.References...)
+	if context.Conventions.Brief != nil {
+		cloned.Conventions.Brief = make(ProductionBrief, len(context.Conventions.Brief))
+		for name, value := range context.Conventions.Brief {
+			cloned.Conventions.Brief[name] = append([]byte(nil), value...)
+		}
+	}
+	if context.Conventions.Texts != nil {
+		cloned.Conventions.Texts = make(map[string]string, len(context.Conventions.Texts))
+		for name, value := range context.Conventions.Texts {
+			cloned.Conventions.Texts[name] = value
+		}
+	}
+	cloned.Assets = make([]ProjectAssetContext, len(context.Assets))
+	for index, asset := range context.Assets {
+		cloned.Assets[index] = asset
+		cloned.Assets[index].Images = append([]string(nil), asset.Images...)
+		cloned.Assets[index].Models = append([]ProjectModelContext(nil), asset.Models...)
+	}
+	return &cloned
+}
+
 // ProjectStylePictureURLs returns the project's style guide pictures, in
 // their stored order.
 func (lock StyleLock) ProjectStylePictureURLs() []string {

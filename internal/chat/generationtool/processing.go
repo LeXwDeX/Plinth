@@ -915,7 +915,7 @@ func (executor *Executor) executeProcessing(
 	// that really submits the step (the turn or a later detached approval),
 	// never when a bound grant is merely observed again.
 	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, prompt,
-		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, string(source.ID), observe, promptTrace)
+		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, string(source.ID), observe, promptTrace, nil)
 	result = executor.attachProcessingReferenceNote(command.Tool, styleNote, result)
 	return executor.processingOutcome(command, result, err, executor.inputShape(command, input))
 }
@@ -1116,7 +1116,7 @@ func (executor *Executor) executeMultiSourceProcessing(
 		prompt = promptTrace.Final
 	}
 	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, prompt,
-		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, "", observe, promptTrace)
+		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, "", observe, promptTrace, nil)
 	return executor.processingOutcome(command, result, err, executor.inputShape(command, input))
 }
 

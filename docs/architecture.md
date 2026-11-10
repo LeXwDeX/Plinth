@@ -1678,7 +1678,7 @@ Agent 上下文新增项目段（`application.project.agent.context_template`）
 
 项目里的 3D 模型引用本期只保存、展示并在 `list_project_assets` 中列出，不作为 `process_model` / `retexture_model` / `inspect_model` / lineage / pendingapproval 的来源；这些路径仍按会话校验来源 Task，跨会话放宽留独立 Issue。
 
-验证：`internal/catalog/project_validation_test.go` 与公开投影测试、`internal/project/service_test.go`、`internal/adapters/sqlite/project_repository_test.go`、`internal/chat/project_session_test.go`、`orchestrator_project_test.go`、`internal/chat/generationtool/project_style_test.go`、`internal/chat/references/project_test.go`、`internal/chat/agenttools/project_assets_test.go`、`internal/agents/mock/project_test.go`、`internal/app/project_source_test.go`、`internal/transport/httpapi/projects_test.go` 与前端 vitest；fake 栈项目场景和评测记录由后续切片补齐。
+验证：`internal/catalog/project_validation_test.go` 与公开投影测试、`internal/project/service_test.go`、`internal/adapters/sqlite/project_repository_test.go`、`internal/chat/project_session_test.go`、`orchestrator_project_test.go`、`internal/chat/generationtool/project_style_test.go`、`internal/chat/references/project_test.go`、`internal/chat/agenttools/project_assets_test.go`、`internal/agents/mock/project_test.go`、`internal/app/project_source_test.go`、`internal/transport/httpapi/projects_test.go` 与前端 vitest；fake 栈 `smoke-fake-stack.py --only project` 覆盖提升、同项目新会话继承、项目参考图进入冻结输入、`style_sources`/回复引用与删除资产后产物仍可下载；评测请求集 v3 的 `2d-series-project` 用 `eval-agent-compare.py --new-request-set` 对比 `scripts/smoke/agent-quality/baselines/agent-quality-trajectory-77fc6878.json` 与新基线记录改前后轨迹。
 
 ### 选区作为冻结输入与带蒙版的局部修改（#244）
 

@@ -39,10 +39,11 @@ same HTTP API the browser uses:
     Meshy and Hyper3D delivers it.
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
-(NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, p2, agent, agent-background,
+(NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, p2, project, agent, agent-background,
 agent-quality, image-self-check, image-purpose, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, faults;
 "agent" runs both agent scenarios, "hyper3d-agent" the Hyper3D chain alone,
 "p2" the Tripo P2 quote/chain, "agent-background" the batched wait that keeps both Tasks running,
+"project" the #240 project inheritance: promote a finished picture, new session, reused style reference,
 "image-purpose" the #239 2D purpose card, brief, purpose-driven model and 2D lock,
 "offering-knowledge" the #249 knowledge projection, derived model list, purpose coverage,
 over-limit refusal and final_prompt report,
@@ -429,8 +430,11 @@ def start_stack(processes, stack_binary, work, name, catalog, key):
 
 # ---- API helpers ----
 
-def new_session(api):
-    return api.json("POST", "/api/chat/sessions", {"title": ""})[1]["id"]
+def new_session(api, project_id=""):
+    body = {"title": ""}
+    if project_id:
+        body["project_id"] = project_id
+    return api.json("POST", "/api/chat/sessions", body)[1]["id"]
 
 
 def decision_body(api, decision):
@@ -1836,10 +1840,8 @@ def _quality_final_reply(messages):
     return {}
 
 
-def run_quality_case(api, request, domain, model, model_3d=""):
-    """One request through the fake-LLM chat path; returns the run dict for agent_quality."""
-    started = time.time()
-    session = new_session(api)
+def _quality_bind_session(api, session, request, domain, model, model_3d=""):
+    """The approval mode and explicit model picks a quality case's session needs."""
     api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
     if request.get("modality") == "3d" and model_3d:
         # #103: only an explicit pick in the session's model picker binds the 3D tools.
@@ -1853,6 +1855,78 @@ def run_quality_case(api, request, domain, model, model_3d=""):
                     if step.get("tool", {}).get("name") == "refine_image")
         if not named:
             api.json("PUT", f"/api/v1/chat/sessions/{session}/model2d", {"explicit_model_2d": model})
+
+
+def _quality_create_project(api, request):
+    """The project a #240 quality case runs in, or "" without one."""
+    config = request.get("project") or {}
+    if not config:
+        return ""
+    status, created = api.json("POST", "/api/v1/projects", {"name": config.get("name") or request["id"]})
+    if status != 201 or not created.get("id"):
+        return ""
+    project_id = created["id"]
+    conventions = config.get("conventions") or {}
+    if conventions:
+        api.json("PUT", f"/api/v1/projects/{project_id}/conventions", {"brief": conventions})
+    return project_id
+
+
+def _quality_image_task(tasks):
+    """The newest succeeded 2D Task and its first delivered picture."""
+    for task in reversed(tasks):
+        if task.get("capability") != "text-to-image" or task.get("state") != "SUCCEEDED":
+            continue
+        assets = task.get("assets") or []
+        picture = next((asset for asset in assets if asset.get("role") == "image"), assets[0] if assets else None)
+        if picture and picture.get("id"):
+            return task, picture
+    return None, None
+
+
+def _quality_promote_first_image(api, project_id, request, step, session):
+    """Promote the newest image Task's first picture and write the style guide.
+
+    Only the owner-verified reference is stored; the bytes stay with the Task.
+    """
+    task, picture = _quality_image_task(session_tasks(api, session))
+    if not task or not picture:
+        return False
+    spec = step.get("asset") or {}
+    source = {"task_id": task["id"], "asset_id": picture["id"]}
+    status, promoted = api.json("POST", f"/api/v1/projects/{project_id}/promote", {
+        "source": source,
+        "kind": spec.get("kind") or "character",
+        "name": spec.get("name") or "asset",
+        "description": spec.get("description") or "",
+    })
+    if status != 201:
+        return False
+    guide = (request.get("project") or {}).get("style_guide") or {}
+    if guide:
+        references = [source] if guide.get("reference_from_asset", True) else []
+        status, _saved = api.json("PUT", f"/api/v1/projects/{project_id}/style-guide", {
+            "enabled": guide.get("enabled", True),
+            "text": guide.get("text") or "",
+            "palette": list(guide.get("palette") or []),
+            "references": references,
+        })
+        if status != 200:
+            return False
+    return True
+
+
+def run_quality_case(api, request, domain, model, model_3d=""):
+    """One request through the fake-LLM chat path; returns the run dict for agent_quality.
+
+    A request with a project builds the #240 fixture first: project_setup steps
+    promote the first picture and open the project's next session; only tool
+    steps count as tool calls."""
+    started = time.time()
+    project_id = _quality_create_project(api, request)
+    session = new_session(api, project_id)
+    _quality_bind_session(api, session, request, domain, model, model_3d)
+    sessions = [session]
     cards, seen = [], set()
     turns = 0
     reference_urls = []
@@ -1864,6 +1938,18 @@ def run_quality_case(api, request, domain, model, model_3d=""):
         if asset_id:
             reference_urls = [f"/api/v1/assets/{asset_id}"]
     for step in request["steps"]:
+        setup = step.get("project_setup")
+        if setup == "new_session":
+            session = new_session(api, project_id)
+            _quality_bind_session(api, session, request, domain, model, model_3d)
+            sessions.append(session)
+            continue
+        if setup == "promote_first_image":
+            if not _quality_promote_first_image(api, project_id, request, step, session):
+                record(f"agent-quality {request['id']}: promote the first picture", False,
+                       f"project={project_id} session={session}")
+                break
+            continue
         arguments = dict(step["tool"].get("arguments") or {})
         if step["tool"]["name"] == "create_model_3d_from_image" and "input_override_reason" not in arguments:
             # The fake upstream's generated picture is a 1x1 placeholder, not a
@@ -1916,8 +2002,14 @@ def run_quality_case(api, request, domain, model, model_3d=""):
         for task in session_tasks(api, session):
             if task.get("id") not in before_tasks:
                 wait_task(api, task.get("id"))
-    messages = _quality_messages(api, session)
-    tasks = session_tasks(api, session)
+    messages = []
+    tasks, task_ids = [], set()
+    for quality_session in sessions:
+        messages.extend(_quality_messages(api, quality_session))
+        for task in session_tasks(api, quality_session):
+            if task.get("id") and task["id"] not in task_ids:
+                task_ids.add(task["id"])
+                tasks.append(task)
     images = sum(1 for message in messages for attachment in message.get("attachments") or []
                  if isinstance(attachment, dict) and attachment.get("kind") == "image")
     return {
@@ -1925,11 +2017,137 @@ def run_quality_case(api, request, domain, model, model_3d=""):
         "messages": messages,
         "tasks": tasks,
         "cards": cards,
-        "final_reply": _quality_final_reply(messages),
+        "final_reply": _quality_final_reply(_quality_messages(api, sessions[-1])),
         "image_count": images,
         "turns": turns,
         "elapsed_ms": int((time.time() - started) * 1000),
     }
+
+
+def scenario_project(api, offerings, work):
+    """#240: a project's first finished picture becomes its standard image and
+    style reference; a second session in the same project inherits the style
+    guide, reuses the picture without a user upload, and names the asset; a
+    deleted project asset leaves the finished Task's bytes downloadable."""
+    fake_control("DELETE")
+    status, project = api.json("POST", "/api/v1/projects", {"name": "红发剑士系列"})
+    project_id = project.get("id") or ""
+    record("#240 create the project", status == 201 and bool(project_id),
+           f"status {status} {json.dumps(project, ensure_ascii=False)[:200]}")
+    if not project_id:
+        return
+    status, session = api.json("POST", "/api/chat/sessions", {"title": "", "project_id": project_id})
+    session_id = session.get("id") or ""
+    record("#240 the new session belongs to the project",
+           status in (200, 201) and session.get("projectId") == project_id
+           and session.get("styleLockSource") == "project",
+           f"status {status} projectId={session.get('projectId')} source={session.get('styleLockSource')}")
+    if not session_id:
+        return
+
+    # The project's production default seeds the next session's empty brief.
+    status, conventions = api.json("PUT", f"/api/v1/projects/{project_id}/conventions", {
+        "brief": {"image_use": "illustration"},
+        "texts": {"naming": "role-<name>", "coordinates": "Y up, metres"},
+    })
+    record("#240 save the project conventions",
+           status == 200 and ((conventions.get("brief") or {}).get("image_use") == "illustration"),
+           f"status {status} {json.dumps(conventions, ensure_ascii=False)[:200]}")
+
+    # (a) The first picture is generated in the project session.
+    first = step(api, offerings, "#240 role A image", IMAGE_OFFERINGS["openai"][0], "text-to-image",
+                 {"prompt": "full-body red-haired swordswoman, cel-shaded illustration, plain background"}, session_id)
+    if not first or first.get("state") != "SUCCEEDED":
+        record("#240 promote the first picture", False, f"state={(first or {}).get('state')}")
+        return
+    picture = next((asset for asset in first.get("assets") or [] if asset.get("id")), None)
+    if not picture:
+        record("#240 promote the first picture", False, f"no picture asset in {first.get('assets')}")
+        return
+
+    # (b) The user confirms the promotion; only the reference is stored.
+    status, promoted = api.json("POST", f"/api/v1/projects/{project_id}/promote", {
+        "source": {"task_id": first["id"], "asset_id": picture["id"]},
+        "kind": "character", "name": "角色 A", "description": "红发剑士的标准全身立绘",
+    })
+    record("#240 promote the first picture as the standard image",
+           status == 201 and (promoted.get("images") or [{}])[0].get("task_id") == first["id"],
+           f"status {status} {json.dumps(promoted, ensure_ascii=False)[:240]}")
+    if status != 201:
+        return
+
+    style_text = "项目风格：赛璐璐平涂、暖色高光、干净轮廓（PROJECT-STYLE-240）"
+    status, guide = api.json("PUT", f"/api/v1/projects/{project_id}/style-guide", {
+        "enabled": True, "text": style_text, "palette": ["#c94f3d", "#f2d7b6"],
+        "references": [{"task_id": first["id"], "asset_id": picture["id"]}],
+    })
+    record("#240 save the project style guide",
+           status == 200 and guide.get("enabled") is True and len(guide.get("references") or []) == 1
+           and guide.get("text") == style_text,
+           f"status {status} {json.dumps(guide, ensure_ascii=False)[:240]}")
+
+    # (c) A new session in the same project inherits the guide and the default
+    # purpose; the second picture needs no project reference from the person.
+    status, second = api.json("POST", "/api/chat/sessions", {"title": "", "project_id": project_id})
+    second_id = second.get("id") or ""
+    record("#240 the project's next session inherits the style source",
+           status in (200, 201) and second.get("projectId") == project_id
+           and second.get("styleLockSource") == "project",
+           f"status {status} projectId={second.get('projectId')} source={second.get('styleLockSource')}")
+    if not second_id:
+        return
+    status, brief = api.json("GET", f"/api/v1/chat/sessions/{second_id}/brief")
+    record("#240 the empty brief inherits the project's default purpose",
+           status == 200 and (brief.get("brief") or {}).get("image_use") == "illustration",
+           f"status {status} brief={(brief or {}).get('brief')}")
+
+    base_picture = upload_asset(api, "role-b-base.png",
+                                make_picture(96, 96, (250, 250, 250), [((24, 24, 72, 72), (200, 60, 60))]), "image/png")
+    if not base_picture:
+        record("#240 the second picture reuses the project reference", False, "the base picture upload was refused")
+        return
+    marker = ('[[fake:tool:refine_image {"prompt":"same series as role A, cel-shaded flat colour, '
+              'warm highlights, plain background","reference_handles":["@img1"]}]]')
+    task, why, _approval = agent_tool_turn(
+        api, second_id, "画同系列的角色 B " + marker,
+        image_urls=[f"/api/v1/assets/{base_picture}"], creative_domain="image",
+        ai_model=IMAGE_OFFERINGS["meshy"][1])
+    task_id = (task or {}).get("task_id") or (task or {}).get("id")
+    if not task or why or task.get("state") != "SUCCEEDED":
+        record("#240 the second picture runs in the project", False, why or f"state={(task or {}).get('state')}")
+        return
+    record("#240 the second picture runs in the project", True, f"task {task_id} SUCCEEDED")
+
+    frozen = _visual_anchor_frozen_input(work, task_id)
+    references = frozen.get("reference_assets") or []
+    prompt = str(frozen.get("prompt") or "")
+    record("#240 the inherited project style text is frozen into the turn",
+           style_text in prompt and "Project style" in prompt,
+           f"prompt={prompt[-200:]!r}")
+    record("#240 the project style picture enters the frozen input",
+           len(references) == 2 and references[1] == base_picture,
+           f"references={references}")
+
+    contents = _visual_anchor_wait_tool_content(work, second_id, "style_sources")
+    sources = []
+    for content in reversed(contents):
+        try:
+            candidate = json.loads(content)
+        except ValueError:
+            continue
+        if isinstance(candidate, dict) and candidate.get("style_sources"):
+            sources = candidate["style_sources"]
+            break
+    record("#240 the tool result names the reused project asset", sources == ["角色 A"], f"style_sources={sources}")
+
+    # (d) Deleting the project asset removes only the reference row.
+    status, _raw, _headers = api.call("DELETE", f"/api/v1/projects/{project_id}/assets/{promoted['id']}")
+    record("#240 deleting the project asset succeeds", status == 204, f"status {status}")
+    status, raw, _headers = api.call("GET", picture["url"])
+    record("#240 the finished Task's product survives the deleted project asset",
+           status == 200 and len(raw) == picture["size"]
+           and hashlib.sha256(raw).hexdigest() == picture["sha256"],
+           f"status {status}, {len(raw)} bytes, want {picture['size']}")
 
 
 def scenario_agent_quality(api, offerings, report_dir=""):
@@ -3924,7 +4142,7 @@ def scenario_visual_anchors(api, offerings, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,faults")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
@@ -3946,7 +4164,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "work-ledger", "vision-budget", "three-view", "visual-anchors"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "work-ledger", "vision-budget", "three-view", "visual-anchors"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -3963,6 +4181,8 @@ def main():
                 scenario_tripo_images(api, offerings)
             if "p2" in selected:
                 scenario_p2(api, offerings)
+            if "project" in selected:
+                scenario_project(api, offerings, work)
             if "agent" in selected:
                 scenario_agent(api, offerings)
             if "agent" in selected or "hyper3d-agent" in selected:

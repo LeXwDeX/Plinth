@@ -1,6 +1,7 @@
 package generationtool
 
 import (
+	"context"
 	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/chat"
@@ -97,4 +98,25 @@ func (executor *Executor) projectStyleSources(command chat.ToolCommand, referenc
 		return nil
 	}
 	return names
+}
+
+// recoveredProjectStyleSources rebuilds the project citation for a path that
+// only observes an already accepted Task (a bound grant or a recovered call,
+// #240). The frozen turn options are deterministic, so the same style picture
+// list is rebuilt; a step whose reference list was cut reports nothing rather
+// than guessing which style pictures survived.
+func (executor *Executor) recoveredProjectStyleSources(ctx context.Context, command chat.ToolCommand) []string {
+	if executor.operations == nil || command.Options.ProjectContext == nil {
+		return nil
+	}
+	op, err := executor.operations.LoadAgentOperation(ctx, command.OwnerID, command.SessionID,
+		command.AssistantMessageID, command.Call.ID)
+	if err != nil || op.ReferenceCount != op.ReferenceTotal {
+		return nil
+	}
+	urls, _, err := executor.styleReferenceURLs(command)
+	if err != nil || len(urls) == 0 {
+		return nil
+	}
+	return executor.projectStyleSources(command, urls)
 }

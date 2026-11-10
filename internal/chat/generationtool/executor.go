@@ -412,13 +412,13 @@ func (executor *Executor) Execute(
 				return chat.ToolResult{NoSubmission: true}, ErrOperationConflict
 			}
 		}
-		return executor.observeBoundTask(ctx, command, observe)
+		return executor.observeBoundTask(ctx, command, observe, nil)
 	}
 	if executor.UsesExecutionGrants() {
 		stored, err := executor.operations.LoadAgentOperation(ctx, command.OwnerID, command.SessionID,
 			command.AssistantMessageID, command.Call.ID)
 		if err == nil {
-			return executor.resumeAgentOperation(ctx, command, stored, observe, nil, nil)
+			return executor.resumeAgentOperation(ctx, command, stored, observe, nil, nil, nil)
 		}
 		if !errors.Is(err, ErrOperationNotFound) {
 			// A failed read cannot prove an earlier submission did not commit.
@@ -794,10 +794,11 @@ func (executor *Executor) Execute(
 		result.NoSubmission = true
 		return result, err
 	}
+	styleSources := executor.projectStyleSources(command, referenceURLs)
 	idempotencyKey := command.IdempotencyKey()
 	if executor.UsesExecutionGrants() {
 		return executor.prepareAgentOperation(ctx, command, capability, offering, input, prompt, idempotencyKey,
-			references, selection, finalReferences, referenceIDs, "", observe, trace)
+			references, selection, finalReferences, referenceIDs, "", observe, trace, styleSources)
 	}
 	if offering.NativePricing != nil {
 		return chat.ToolResult{NoSubmission: true}, errors.New("native pricing requires prepared authorization")
@@ -843,7 +844,7 @@ func (executor *Executor) Execute(
 	info := stepInfo{Credits: offering.EstimateTotalCredits(input), CreditsMetered: offering.CreditsMetered,
 		ExtraCredits:  offering.ExtraCreditDetail(input).Credits,
 		ReferenceNote: executor.stepReferenceNote(command, offering, fact, references, input),
-		StyleSources:  executor.projectStyleSources(command, referenceURLs)}
+		StyleSources:  styleSources}
 	info.PromptFinal, info.PromptNote = executor.promptReport(command, command.Tool, offering, trace)
 	return executor.wait(ctx, command, offering, accepted.TaskID, observe, info)
 }
@@ -985,6 +986,7 @@ func (executor *Executor) observeBoundTask(
 	ctx context.Context,
 	command chat.ToolCommand,
 	observe func(chat.ToolObservation) error,
+	styleSources []string,
 ) (chat.ToolResult, error) {
 	task, err := executor.gateway.Get(
 		ctx, generation.OwnerID(command.OwnerID), generation.TaskID(command.BoundTaskID),
@@ -1010,6 +1012,10 @@ func (executor *Executor) observeBoundTask(
 		}
 	}
 	info := taskStep(task, "")
+	if len(styleSources) == 0 {
+		styleSources = executor.recoveredProjectStyleSources(ctx, command)
+	}
+	info.StyleSources = styleSources
 	if executor.UsesExecutionGrants() {
 		if op, err := executor.operations.LoadAgentOperation(ctx, command.OwnerID, command.SessionID,
 			command.AssistantMessageID, command.Call.ID); err == nil && op.ToolName == command.Call.Name &&

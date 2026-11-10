@@ -1200,6 +1200,10 @@ func (orchestrator *Orchestrator) Process(
 	command.Options.StyleLock = turn.Options.StyleLock
 	command.Options.StyleLockSkipped = turn.Options.StyleLockSkipped
 	command.Options.VisualAnchors = cloneVisualAnchors(turn.Options.VisualAnchors)
+	// The project scope and its frozen snapshot come from the stored turn too:
+	// they decide the project system prompt, @projectN handles and whether a
+	// registered Task picture outside this session is readable (#240).
+	copyFrozenProject(&command.Options, turn.Options)
 	// A plan continuation is the service's mark, never the caller's (#134).
 	command.Options.PlanContinuation = turn.Options.PlanContinuation
 	// DSML tool calls are read only for a model whose profile writes them.
