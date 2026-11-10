@@ -257,8 +257,30 @@ def evaluate_case(request, run):
     checks.extend(run.get("output_checks") or [])
 
     counts = {}
-    for name in names:
+    revision_operations = {}
+    for tool in tools:
+        name = tool.get("name")
         counts[name] = counts.get(name, 0) + 1
+        if name == "revise_processing_plan":
+            operation = str((tool.get("arguments") or {}).get("operation") or "unknown")
+            revision_operations[operation] = revision_operations.get(operation, 0) + 1
+    revision_count = counts.get("revise_processing_plan", 0)
+    # #251: rework is recorded, never used as a tail regression gate: a base
+    # without the feature may rework less simply because it does fewer steps.
+    rework_count = len(failures) + revision_count
+    checkpoint_states = []
+    for plan in run.get("plans") or []:
+        for step in plan.get("steps") or []:
+            checkpoint = step.get("checkpoint")
+            if isinstance(checkpoint, dict):
+                checkpoint_states.append(checkpoint.get("state") or "")
+    checkpoints = {
+        "total": len(checkpoint_states),
+        "passed": sum(1 for state in checkpoint_states if state == "passed"),
+        "failed": sum(1 for state in checkpoint_states if state == "failed"),
+        "waived": sum(1 for state in checkpoint_states if state == "waived"),
+        "unknown": sum(1 for state in checkpoint_states if state == "unknown"),
+    }
     self_check_records = 0
     self_check_status = {}
     for tool in tools:
@@ -281,6 +303,13 @@ def evaluate_case(request, run):
         "approval_card_count": sum(1 for card in cards if card.get("kind") == "approval"),
         "plan_card_count": sum(1 for card in cards if card.get("kind") == "plan"),
         "tool_counts": counts,
+        "rework": {
+            "count": rework_count,
+            "failed_tasks": len(failures),
+            "revision_count": revision_count,
+            "revision_operations": revision_operations,
+        },
+        "checkpoints": checkpoints,
         "self_inspection": {
             "inspect_model": counts.get("inspect_model", 0),
             "render_model_views": counts.get("render_model_views", 0),
@@ -338,6 +367,15 @@ def summarize(cases, mode, revision, dirty, request_set, rubric=None, started_at
     references = sum(case["metrics"]["self_inspection"].get("compare_model_reference", 0) for case in cases)
     self_check_records = sum(case["metrics"]["self_inspection"].get("self_check_records", 0) for case in cases)
     self_check_passed = sum(case["metrics"]["self_inspection"].get("self_check_passed", 0) for case in cases)
+    rework_count = sum((case["metrics"].get("rework") or {}).get("count", 0) for case in cases)
+    revision_count = sum((case["metrics"].get("rework") or {}).get("revision_count", 0) for case in cases)
+    checkpoint_totals = {"total": 0, "passed": 0, "failed": 0, "waived": 0, "unknown": 0}
+    for case in cases:
+        checkpoints = case["metrics"].get("checkpoints") or {}
+        for name in checkpoint_totals:
+            checkpoint_totals[name] += checkpoints.get(name, 0)
+    passed_cases = len(cases) - len({case["id"] for case in cases if case_hard_failures(case)})
+    success_rate = round(100.0 * passed_cases / len(cases), 1) if cases else 0.0
     credits = {}
     for case in cases:
         for unit, amount in (case["metrics"].get("credits") or {}).items():
@@ -364,6 +402,14 @@ def summarize(cases, mode, revision, dirty, request_set, rubric=None, started_at
                 "compare_model_reference": references,
                 "self_check_records": self_check_records,
                 "self_check_passed": self_check_passed,
+                "rework_count": rework_count,
+                "revision_count": revision_count,
+                "checkpoint_count": checkpoint_totals["total"],
+                "checkpoint_passed": checkpoint_totals["passed"],
+                "checkpoint_failed": checkpoint_totals["failed"],
+                "checkpoint_waived": checkpoint_totals["waived"],
+                "checkpoint_unknown": checkpoint_totals["unknown"],
+                "success_rate": success_rate,
                 "credits": {unit: str(amount) for unit, amount in sorted(credits.items())},
                 "elapsed_ms": sum((case["metrics"].get("elapsed_ms") or 0) for case in cases),
             },
@@ -401,18 +447,19 @@ def report_markdown(report):
     if report.get("rubric"):
         lines.append(f"- 量表: version {report['rubric'].get('version')}, sha256 `{report['rubric'].get('sha256')}`")
     lines += [
-        f"- 用例: {summary.get('cases', 0)}；硬失败: {summary.get('hard_failures', 0)}",
+        f"- 用例: {summary.get('cases', 0)}；硬失败: {summary.get('hard_failures', 0)}；成功率: {metrics.get('success_rate', 0)}%",
         f"- 合计: 工具调用 {metrics.get('tool_calls', 0)}，付费调用 {metrics.get('paid_calls', 0)}，打断 {metrics.get('interruptions', 0)}，inspect {metrics.get('inspect_model', 0)}，render {metrics.get('render_model_views', 0)}，对照 {metrics.get('compare_model_reference', 0)}，自检记录 {metrics.get('self_check_records', 0)}，计费 {metrics.get('credits', {})}",
+        f"- 返工: {metrics.get('rework_count', 0)}（修订 {metrics.get('revision_count', 0)}）；检查点 {metrics.get('checkpoint_count', 0)}（失败 {metrics.get('checkpoint_failed', 0)}，放弃 {metrics.get('checkpoint_waived', 0)}，无法判断 {metrics.get('checkpoint_unknown', 0)}）",
         "",
-        "| 用例 | 结果 | 工具 | 付费 | 打断 | inspect | render | 对照 | 自检 | 耗时 |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| 用例 | 结果 | 工具 | 付费 | 打断 | inspect | render | 对照 | 自检 | 返工 | 修订 | 检查点 | 耗时 |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for case in report.get("cases") or []:
         case_metrics = case.get("metrics") or {}
         status = "FAIL" if case_hard_failures(case) else "PASS"
         elapsed = case_metrics.get("elapsed_ms")
         lines.append(
-            "| {id} | {status} | {tools} | {paid} | {cards} | {inspect} | {render} | {reference} | {check} | {elapsed} |".format(
+            "| {id} | {status} | {tools} | {paid} | {cards} | {inspect} | {render} | {reference} | {check} | {rework} | {revisions} | {checkpoints} | {elapsed} |".format(
                 id=case.get("id"), status=status,
                 tools=case_metrics.get("tool_call_count", 0),
                 paid=case_metrics.get("paid_call_count", 0),
@@ -421,6 +468,9 @@ def report_markdown(report):
                 render=case_metrics.get("self_inspection", {}).get("render_model_views", 0),
                 reference=case_metrics.get("self_inspection", {}).get("compare_model_reference", 0),
                 check=case_metrics.get("self_inspection", {}).get("self_check_records", 0),
+                rework=(case_metrics.get("rework") or {}).get("count", 0),
+                revisions=(case_metrics.get("rework") or {}).get("revision_count", 0),
+                checkpoints=(case_metrics.get("checkpoints") or {}).get("total", 0),
                 elapsed=f"{elapsed / 1000:.1f}s" if isinstance(elapsed, (int, float)) else "-",
             )
         )
@@ -436,6 +486,8 @@ def report_markdown(report):
         lines.append("")
         lines.append(f"- 工具：{case_metrics.get('tool_counts')}")
         lines.append(f"- 自检：{case_metrics.get('self_inspection')}")
+        lines.append(f"- 返工：{case_metrics.get('rework')}")
+        lines.append(f"- 检查点：{case_metrics.get('checkpoints')}")
         lines.append(f"- 任务：{[(task.get('capability'), task.get('state')) for task in case.get('tasks') or []]}")
         lines.append(f"- 最终回复：{case_metrics.get('final_reply_chars', 0)} 字符")
         if case_metrics.get("output"):
@@ -713,4 +765,23 @@ def compare_markdown(baseline, candidate, problems, regressions, improvements, c
         lines += ["## 汇总指标", "", "| 指标 | 基线 | 候选 | 变化 |", "|---|---|---|---|"]
         for metric, delta in deltas.items():
             lines.append(f"| {metric} | {delta['before']} | {delta['after']} | {delta['delta']:+d} |")
+    base_summary = (baseline.get("summary") or {}).get("metrics") or {}
+    cand_summary = (candidate.get("summary") or {}).get("metrics") or {}
+    quality_metrics = ("success_rate", "rework_count", "revision_count", "checkpoint_count",
+                       "checkpoint_failed", "checkpoint_waived")
+    if any(name in base_summary or name in cand_summary for name in quality_metrics):
+        # #251: recorded for the #238 comparison. Rework is intentionally not
+        # a TAIL_METRICS regression gate: a base without checkpoints may rework
+        # less because it does fewer steps.
+        lines += ["", "## 质量指标（仅记录，不参与回退判定）", "",
+                  "| 指标 | 基线 | 候选 | 变化 |", "|---|---|---|---|"]
+        for metric in quality_metrics:
+            before = base_summary.get(metric, 0)
+            after = cand_summary.get(metric, 0)
+            try:
+                delta = round(after - before, 1)
+                shown = f"{delta:+}"
+            except TypeError:
+                delta, shown = "", ""
+            lines.append(f"| {metric} | {before} | {after} | {shown} |")
     return "\n".join(lines) + "\n"

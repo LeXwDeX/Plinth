@@ -51,7 +51,7 @@ func (policy *ProductionPlanPolicy) acceptanceFor(command ToolCommand) ([]budget
 			continue
 		}
 		planCheck, ok := policy.planCheck(check, profile)
-		if !ok {
+		if !ok || !acceptanceApplies(template, planCheck) {
 			continue
 		}
 		criteria = append(criteria, budget.AcceptanceCriterion{
@@ -60,6 +60,41 @@ func (policy *ProductionPlanPolicy) acceptanceFor(command ToolCommand) ([]budget
 		})
 	}
 	return criteria, ""
+}
+
+// acceptanceApplies reports whether a criterion is a condition the server
+// actually evaluates for this purpose. A boolean check the purpose does not
+// require is unknown, not pass, so promising "需要水密" would freeze a standard
+// nobody can meet. A threshold template without the value it interpolates
+// would show the literal "{minimum}–{maximum}" to the person, so it is left
+// out instead.
+func acceptanceApplies(template string, check budget.PlanCheck) bool {
+	switch check.Check {
+	case modelcheck.CheckUV, modelcheck.CheckWatertight, modelcheck.CheckSkin:
+		if !check.Required {
+			return false
+		}
+	case modelcheck.CheckTriangles, modelcheck.CheckTextureSize:
+		if check.Maximum == nil || *check.Maximum <= 0 {
+			return false
+		}
+	case modelcheck.CheckPlausibleScale:
+		if check.Minimum == nil && check.Maximum == nil {
+			return false
+		}
+	case modelcheck.CheckPivotBottomCenter, modelcheck.CheckYUp,
+		modelcheck.CheckDebris, modelcheck.CheckDegenerate:
+		if check.MaximumRatio == nil || *check.MaximumRatio <= 0 {
+			return false
+		}
+	}
+	if strings.Contains(template, "{minimum}") && check.Minimum == nil {
+		return false
+	}
+	if strings.Contains(template, "{maximum}") && check.Maximum == nil && check.MaximumRatio == nil {
+		return false
+	}
+	return true
 }
 
 // buildCheckpoints validates the Agent's checkpoint declarations and freezes

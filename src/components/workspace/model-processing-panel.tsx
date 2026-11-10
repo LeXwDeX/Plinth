@@ -16,7 +16,7 @@ import { processingUnavailableNotice } from '@/lib/workspace/processing-refusals
 import { offeringQuoteText } from '@/lib/workspace/processing-cost';
 import { inputRuleViolations, missingRequiredParameters, uploadAssetInputs } from '@/lib/workspace/processing-inputs';
 import { uploadWorkspaceInputAssetResult } from '@/lib/workspace/input-asset-upload';
-import { planHoldsModel, reconcileProcessingPlan, unreconciledStep, retryableFailedStep, stepCreditSuffix, type ProcessingPlan } from '@/lib/workspace/processing-plan';
+import { continuePastCheckpoint, failedCheckpointStep, planHoldsModel, reconcileProcessingPlan, unreconciledStep, retryableFailedStep, stepCreditSuffix, type ProcessingPlan } from '@/lib/workspace/processing-plan';
 import { projectNativeTaskDetail } from '@/lib/workspace/task-projection';
 import { useChatStore } from '@/store/chat-store';
 import { useStudioStore } from '@/store/studio-store';
@@ -209,6 +209,9 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
 
   const failedStep = retryableFailedStep(currentPlan);
   const needsReconciliation = unreconciledStep(currentPlan);
+  // #251: a failed checkpoint pauses the plan before the next step. The person
+  // can continue (the check is recorded as waived) or let the Agent revise it.
+  const checkpointStep = failedCheckpointStep(currentPlan);
   // 只对本面板核对出的那个原任务提示“已关联原任务”，它结束后或换成别的步骤任务时不再显示。
   const [linkedTaskID, setLinkedTaskID] = useState('');
   const reconcile = async () => {
@@ -227,6 +230,19 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
   const failedOffering = failedStep
     ? offerings?.[failedStep.capability]?.find((offering) => offering.id === failedStep.offering_id && offering.available)
     : undefined;
+
+  const continueCheckpoint = async () => {
+    if (!currentPlan || !checkpointStep || working) return;
+    setBusy(true); setError('');
+    try {
+      const updated = await continuePastCheckpoint(schema, currentPlan);
+      await reload((existing) => existing?.map((plan) => plan.id === updated.id ? updated : plan), { revalidate: false });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : schemaText(schema, 'ui.workspace.processing.plan_continue_checkpoint_failed'));
+      // A stale version may mean another tab already continued this plan.
+      void reload().catch(() => {});
+    } finally { setBusy(false); }
+  };
 
   const retry = async () => {
     if (!currentPlan || currentPlan.state !== 'FAILED' || !failedStep || !failedOffering) return;
@@ -263,12 +279,40 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
               : currentPlan.state === 'PAUSED' ? 'paused' : 'running'
           }`)}</p>
           <ol className="mt-2 space-y-1">
-            {currentPlan.steps.map((step, index) => <li key={`${step.offering_id}-${index}`} className="flex justify-between gap-2">
-              <span>{index + 1}. {schema.capabilities.find((item) => item.id === step.capability)?.label_cn ?? step.capability}</span>
-              <span>{schemaText(schema, `ui.workspace.processing.plan_step_${
-                step.state === 'SUCCEEDED' ? 'done' : step.state === 'FAILED' ? 'failed' : step.state === 'PAUSED' ? 'paused'
-                  : step.state === 'RUNNING' ? 'running' : step.queued_until ? 'queued' : 'pending'
-              }`)}</span>
+            {currentPlan.steps.map((step, index) => <li key={`${step.offering_id}-${index}`}
+              className="flex flex-col gap-0.5" data-testid={`processing-plan-step-${index}`} data-state={step.state}>
+              <div className="flex justify-between gap-2">
+                <span>{index + 1}. {schema.capabilities.find((item) => item.id === step.capability)?.label_cn ?? step.capability}</span>
+                <span>{schemaText(schema, `ui.workspace.processing.plan_step_${
+                  step.state === 'SUCCEEDED' ? 'done' : step.state === 'FAILED' ? 'failed' : step.state === 'PAUSED' ? 'paused'
+                    : step.state === 'RUNNING' ? 'running' : step.state === 'SKIPPED' ? 'skipped'
+                      : step.queued_until ? 'queued' : 'pending'
+                }`)}</span>
+              </div>
+              {step.checkpoint ? <div className="text-xs text-muted-foreground" data-testid={`processing-plan-checkpoint-${index}`}>
+                <span>{schemaText(schema, 'ui.workspace.processing.plan_checkpoint')}: {
+                  schemaText(schema, `ui.workspace.processing.plan_checkpoint_state.${step.checkpoint.state}`) || step.checkpoint.state
+                }</span>
+                {(step.checkpoint.results ?? []).length > 0 ? <ul className="pl-3">
+                  {step.checkpoint.results!.map((result) => {
+                    const label = schemaText(schema, `ui.chat.review.check_names.${result.check}`) || result.check;
+                    const status = schemaText(schema, `ui.chat.review.check_${result.status}`).replace('{label}', label)
+                      || `${label}: ${result.status}`;
+                    return <li key={result.check} data-testid={`processing-plan-checkpoint-result-${result.check}`}>
+                      {status}{result.actual !== undefined && result.actual !== null
+                        ? ` · ${formatSchemaText(schemaText(schema, 'ui.workspace.processing.plan_checkpoint_actual'), { actual: String(result.actual) })}` : ''}
+                    </li>;
+                  })}
+                </ul> : null}
+                {step.checkpoint.resolution ? <p>{formatSchemaText(schemaText(schema, 'ui.workspace.processing.plan_checkpoint_resolution'), { resolution: step.checkpoint.resolution })}</p> : null}
+              </div> : null}
+              {step.revision_operation ? <p className="text-xs text-muted-foreground" data-testid={`processing-plan-revision-${index}`}>
+                {formatSchemaText(schemaText(schema, 'ui.workspace.processing.plan_revision'), {
+                  operation: schemaText(schema, `ui.workspace.processing.plan_revision_op.${step.revision_operation}`) || step.revision_operation,
+                  contingency: step.contingency_id ? ` (${step.contingency_id})` : '',
+                  reason: step.revision_reason ?? '',
+                })}
+              </p> : null}
             </li>)}
           </ol>
           {currentPlan.failure && <div className="mt-2" data-testid="processing-plan-failure">
@@ -302,6 +346,16 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
           </ReasonHint>}
           {currentPlan.state === 'PAUSED' && !activePlan && <p className="mt-2 text-muted-foreground" data-testid="processing-plan-alternative">
             {schemaText(schema, 'ui.workspace.processing.plan_waiting_alternative')}
+          </p>}
+          {checkpointStep && <ReasonHint name={schemaText(schema, 'ui.workspace.processing.plan_continue_checkpoint')} className="mt-3"
+            reason={!working && !schema.runtime.http.routes.processing_plan_resume ? reasonText('unavailable') : undefined}>
+            <Action type="button"
+              loading={working} disabled={working || !schema.runtime.http.routes.processing_plan_resume} onClick={() => void continueCheckpoint()}>
+              {schemaText(schema, 'ui.workspace.processing.plan_continue_checkpoint')}
+            </Action>
+          </ReasonHint>}
+          {checkpointStep && <p className="mt-2 text-xs text-muted-foreground" data-testid="processing-plan-checkpoint-note">
+            {schemaText(schema, 'ui.workspace.processing.plan_continue_checkpoint_note')}
           </p>}
         </Surface>}
         <h3 className="font-medium">{schemaText(schema, 'ui.workspace.processing.plan_steps')}</h3>

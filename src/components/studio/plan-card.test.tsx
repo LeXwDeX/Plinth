@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import { PlanCard, PlanReloadNotice } from '@/components/studio/plan-card';
 import type { ProductionPlan, SessionBudget } from '@/lib/chat/budget';
+import { parseProductionPlan } from '@/lib/chat/budget';
 import type { PlanTask } from '@/lib/chat/plan-progress';
 import { formatSchemaText, schemaText, taskStatePresentation, type ProductSchema } from '@/lib/product-schema';
 
@@ -241,19 +242,24 @@ describe('an approved production plan (#103)', () => {
 // as expensive as the worst case.
 describe('a production plan with acceptance and contingencies (#251)', () => {
   it('shows the acceptance criteria, the checkpoints and the separately estimated contingencies', () => {
-    const contracted: ProductionPlan = {
-      ...plan,
+    // Read the card from the server's wire shape: a contingency nests its
+    // repair step, and the split totals live next to (not inside) the plan.
+    const contracted = parseProductionPlan({
+      title: '木椅',
+      steps: plan.steps.map((step) => ({ capability: step.capability, offering_id: step.offeringId, purpose: step.purpose, estimate: step.estimate })),
+      correction_capabilities: plan.correctionCapabilities,
       acceptance: [
         { id: 'purpose', statement: '用途「游戏/实时·角色」的交付标准：', check: 'game_character' },
         { id: 'triangles', statement: '三角面数不超过 60000', check: 'triangles' },
       ],
-      checkpoints: [{ afterCapability: 'remesh', checks: [{ check: 'triangles', maximum: 60000 }, { check: 'pivot_bottom_center', maximumRatio: 0.01 }] }],
+      checkpoints: [{ after_capability: 'remesh', checks: [{ check: 'triangles', maximum: 60000 }, { check: 'pivot_bottom_center', maximum_ratio: 0.01 }] }],
       contingencies: [{
-        id: 'low_poly', trigger: ['triangles'], capability: 'remesh', offeringId: 'meshy/processing/remesh',
-        purpose: '再减面', estimate: legacy('5'),
+        id: 'low_poly', trigger: ['triangles'],
+        step: { capability: 'remesh', offering_id: 'meshy/processing/remesh', purpose: '再减面', estimate: legacy('5') },
       }],
-    };
-    const view = render(<PlanCard plan={contracted} budgets={budgets} tasks={[]} />);
+    })!;
+    const view = render(<PlanCard plan={contracted} budgets={budgets} stepTotals={[tripo('80'), legacy('20')]}
+      contingencyTotals={[legacy('5')]} tasks={[]} />);
     const acceptance = view.getByTestId('studio-plan-acceptance');
     expect(acceptance.textContent).toContain(text('ui.studio.plan.acceptance'));
     expect(acceptance.textContent).toContain('三角面数不超过 60000');
@@ -263,6 +269,10 @@ describe('a production plan with acceptance and contingencies (#251)', () => {
       checks: `${text('ui.chat.review.check_names.triangles')}、${text('ui.chat.review.check_names.pivot_bottom_center')}`,
     }));
     const contingencies = view.getByTestId('studio-plan-contingencies');
+    // The split figures are the server's own totals, not a client-side sum.
+    const estimates = view.getByTestId('studio-plan-estimates');
+    expect(estimates.textContent).toContain(words('ui.studio.plan.step_total', { amounts: `80 Tripo credits · 20 ${legacyLabel}` }));
+    expect(estimates.textContent).toContain(words('ui.studio.plan.contingency_total', { amounts: `5 ${legacyLabel}` }));
     expect(contingencies.textContent).toContain(words('ui.studio.plan.contingencies', { amounts: `5 ${legacyLabel}` }));
     expect(contingencies.textContent).toContain(words('ui.studio.plan.contingency_item', {
       trigger: text('ui.chat.review.check_names.triangles'),

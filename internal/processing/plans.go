@@ -776,6 +776,13 @@ func (s *Service) Resume(ctx context.Context, command ResumeCommand) (Plan, erro
 	if plan.Version != command.ExpectedPlanVersion || plan.State != Paused {
 		return Plan{}, ErrConflict
 	}
+	// A checkpoint failure pauses the plan with no paused step. The person may
+	// continue past it: the check is waived (recorded with a resolution), and
+	// the next step starts under the approved plan. This is the panel's escape
+	// hatch when the Agent's turn ended without a revision.
+	if plan.Failure == ReasonCheckpointFailed {
+		return s.continuePastCheckpoint(ctx, &plan)
+	}
 	for index := range plan.Steps {
 		step := &plan.Steps[index]
 		if step.State != Paused {
@@ -889,6 +896,27 @@ func (s *Service) Resume(ctx context.Context, command ResumeCommand) (Plan, erro
 			return Plan{}, err
 		}
 		return plan, nil
+	}
+	return Plan{}, ErrConflict
+}
+
+// continuePastCheckpoint is the person's continue after a failed checkpoint.
+// The check is waived with a human resolution and the plan advances; the
+// failed result stays as the audit trail.
+func (s *Service) continuePastCheckpoint(ctx context.Context, plan *Plan) (Plan, error) {
+	for index := range plan.Steps {
+		step := &plan.Steps[index]
+		if step.Checkpoint == nil || step.Checkpoint.State != CheckpointFailed ||
+			step.Failure != ReasonCheckpointFailed {
+			continue
+		}
+		step.Checkpoint.State, step.Checkpoint.Resolution = CheckpointWaived, CheckpointResolutionUserContinue
+		step.Failure, step.Retryable = "", false
+		plan.State, plan.Failure, plan.UpdatedAt = Pending, "", time.Now().UTC()
+		if err := s.savePlan(ctx, plan); err != nil {
+			return Plan{}, err
+		}
+		return *plan, nil
 	}
 	return Plan{}, ErrConflict
 }

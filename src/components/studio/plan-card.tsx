@@ -68,6 +68,9 @@ export interface PlanCardProps {
   error?: string | null;
   /** The decided plan's live budget: the card shows spent/limit and each step's task state. */
   progress?: SessionBudget | null;
+  /** #251: the server's per-unit totals of the main steps and the declared contingencies. */
+  stepTotals?: readonly PriceTotal[];
+  contingencyTotals?: readonly PriceTotal[];
 }
 
 function capabilityLabel(schema: ReturnType<typeof useProductSchema>['schema'], id: string): string {
@@ -93,7 +96,8 @@ function planCheckLabel(schema: ProductSchema, id: string): string {
  * their models and quotes plus the correction capabilities it allows; once
  * approved the same card shows the live budget and each step's Task state.
  */
-export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, error = null, progress = null }: PlanCardProps) {
+export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, error = null, progress = null,
+  stepTotals = [], contingencyTotals = [] }: PlanCardProps) {
   const { schema } = useProductSchema();
   const text = (key: string) => schemaText(schema, key);
   const capabilities = useMemo(
@@ -150,6 +154,19 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
           <span>{formatSchemaText(text('ui.studio.plan.remaining'), { amounts: priceTotalsAmountsText(schema, budgetUnitTotals(progress.units, 'remaining')) })}</span>
           {reserved.length > 0 ? <span>{formatSchemaText(text('ui.studio.plan.reserved'), { amounts: priceTotalsAmountsText(schema, budgetUnitTotals(reserved, 'reserved')) })}</span> : null}
           <span>{formatSchemaText(schemaText(schema, 'ui.studio.plan.steps_done'), { done, total: plan.steps.length })}</span>
+        </p>
+      ) : null}
+      {stepTotals.length > 0 || contingencyTotals.length > 0 ? (
+        // #251: the approved limit is the worst case; the card separates the
+        // main steps from the declared repairs so the usual route never looks
+        // as expensive as the worst case.
+        <p className="flex flex-wrap gap-x-2 text-[11px] tabular-nums text-muted-foreground" data-testid="studio-plan-estimates">
+          {stepTotals.length > 0 ? (
+            <span>{formatSchemaText(text('ui.studio.plan.step_total'), { amounts: priceTotalsAmountsText(schema, stepTotals) })}</span>
+          ) : null}
+          {contingencyTotals.length > 0 ? (
+            <span>{formatSchemaText(text('ui.studio.plan.contingency_total'), { amounts: priceTotalsAmountsText(schema, contingencyTotals) })}</span>
+          ) : null}
         </p>
       ) : null}
       {plan.steps.length > 0 ? (
@@ -227,7 +244,8 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
         <section className="flex flex-col gap-0.5" data-testid="studio-plan-contingencies">
           <span className="text-[11px] text-foreground/70">
             {formatSchemaText(text('ui.studio.plan.contingencies'), {
-              amounts: priceTotalsAmountsText(schema, plan.contingencies!.map((item) => item.estimate).filter((item): item is PriceTotal => item !== null)),
+              amounts: priceTotalsAmountsText(schema, contingencyTotals.length > 0 ? contingencyTotals
+                : plan.contingencies!.map((item) => item.estimate).filter((item): item is PriceTotal => item !== null)),
             })}
           </span>
           <ul className="flex flex-col gap-0.5 text-[11px] text-muted-foreground">

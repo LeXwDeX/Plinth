@@ -24,6 +24,11 @@ const (
 	CheckpointUnknown = "unknown"
 )
 
+// CheckpointResolutionUserContinue is the resolution recorded when the person
+// continues past a failed checkpoint from the processing panel. The Agent's
+// waive records its own reason instead.
+const CheckpointResolutionUserContinue = "user_continue"
+
 // MaxCheckpointChecks bounds one checkpoint's checks; the Chat tool Schema's
 // maxItems for a checkpoint is aligned with it.
 const MaxCheckpointChecks = 8
@@ -118,7 +123,12 @@ func (s *Service) checkpointBlocked(ctx context.Context, plan *Plan, step *Step,
 		checkpoint.State = CheckpointPassed
 		return false, nil
 	}
+	// The step itself carries the failure reason (#251). get_processing_plan
+	// classifies a plan failure from planFailureStep; without a reason on the
+	// succeeded step it reported an internal error and told the Agent to
+	// contact an administrator instead of using the declared contingency.
 	checkpoint.State, checkpoint.Resolution = CheckpointFailed, ReasonCheckpointFailed
+	step.Failure, step.Retryable = ReasonCheckpointFailed, false
 	plan.State, plan.Failure = Paused, ReasonCheckpointFailed
 	return true, nil
 }

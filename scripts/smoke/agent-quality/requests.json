@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "description": "Agent 产出质量评测的固定请求集（#238）。轨迹评测用 steps 中的 tool 驱动 fake LLM；产出评测只发送 prompt，由真实 Agent 自行决定工具。用途取自 Product Schema chat.model3d_usage.profiles。",
   "requests": [
     {
@@ -472,7 +472,95 @@
         "soft_tools": ["inspect_model", "compare_model_reference", "record_self_check"],
         "budgets": {"max_paid_calls": 1, "max_tool_calls": 10, "max_interruptions": 2}
       }
+    },
+    {
+      "id": "3d-multistep-rig-checkpoint",
+      "title": "多步加工：角色底模→减面检查点→预案修正→绑骨",
+      "modality": "3d",
+      "category": "multistep_checkpoint",
+      "purpose": "game_character",
+      "model_3d": "meshy/meshy-7.1/text-to-3d",
+      "prompt": "做一个能绑骨的游戏角色：先出底模，减面后检查面数和原点，不合格就按已声明的预案修正，最后绑骨，整个过程在已经批准的预算内完成。",
+      "reference_images": [],
+      "deliverables": ["可导入引擎的 3D 模型（GLB）", "检查点结果与预案修订记录", "绑骨完成的模型"],
+      "steps": [
+        {
+          "user": "用途是游戏角色，先把用途记下来。",
+          "tool": {"name": "ask_choice", "arguments": {"kind": "usage_profile"}}
+        },
+        {
+          "user": "按游戏角色的默认设置继续，需要绑骨。",
+          "tool": {"name": "update_production_brief", "arguments": {"purpose": "game_character", "target_platform": "Unity", "needs_rig": true, "style": "stylized realistic"}}
+        },
+        {
+          "user": "先提交制作计划：生成、减面检查、绑骨，并声明减面未通过时的预案。",
+          "tool": {"name": "propose_production_plan", "arguments": {
+            "title": "游戏角色多步制作",
+            "steps": [
+              {"capability": "text-to-3d", "model": "meshy/meshy-7.1/text-to-3d", "purpose": "生成角色底模"},
+              {"capability": "remesh", "model": "meshy/processing/remesh", "purpose": "减面到游戏预算"},
+              {"capability": "rigging", "model": "meshy/processing/rigging", "purpose": "绑骨"}
+            ],
+            "budgets": [{"unit": "legacy.credits", "amount": 100}],
+            "checkpoints": [{"after_capability": "remesh", "checks": ["triangles", "pivot_bottom_center"]}],
+            "contingencies": [
+              {"id": "low_poly", "trigger": ["triangles"], "step": {"capability": "remesh", "model": "meshy/processing/remesh", "purpose": "按用途面数预算再减面"}},
+              {"id": "pivot", "trigger": ["pivot_bottom_center"], "step": {"capability": "resize", "model": "meshy/processing/resize", "purpose": "把原点移到底部中心"}}
+            ]
+          }}
+        },
+        {
+          "user": "按批准的计划生成底模。",
+          "tool": {"name": "create_model_3d", "arguments": {"prompt": "stylized game character, full body, A-pose, clean topology, rig-ready"}}
+        },
+        {
+          "user": "建立加工计划：先减面，再绑骨。",
+          "tool": {"name": "plan_model_processing", "arguments": {
+            "source_task_id": "@model1",
+            "steps": [
+              {"capability": "remesh", "offering_id": "meshy/processing/remesh", "parameters": {"topology": "triangle", "target_polycount": 100000}},
+              {"capability": "rigging", "offering_id": "meshy/processing/rigging", "parameters": {}}
+            ]
+          }}
+        },
+        {
+          "user": "检查点未通过，按已声明的预设插入再减面这一步，然后继续。",
+          "tool": {"name": "revise_processing_plan", "arguments": {
+            "plan_id": "@plan1",
+            "expected_plan_version": "@plan_version",
+            "operation": "insert",
+            "step_index": "@checkpoint_step",
+            "contingency_id": "low_poly",
+            "parameters": {"topology": "triangle", "target_polycount": 20000},
+            "reason": "检查点未通过：面数超过用途预算，按预案再减面"
+          }}
+        },
+        {
+          "user": "检查最终模型的面数和原点。",
+          "tool": {"name": "inspect_model", "arguments": {"model": "@model1"}}
+        }
+      ],
+      "live_followups": ["请按计划完成角色制作，检查点未通过时用已声明的预案修正。"],
+      "expected": {
+        "capabilities": ["text-to-3d", "remesh", "rigging"],
+        "min_tasks": {"text-to-3d": 1, "remesh": 2, "rigging": 1},
+        "required_tool_groups": [
+          {"id": "usage", "any": ["ask_choice"]},
+          {"id": "brief", "any": ["update_production_brief"]},
+          {"id": "plan", "any": ["propose_production_plan"]},
+          {"id": "generate_3d", "any": ["create_model_3d"]},
+          {"id": "processing_plan", "any": ["plan_model_processing"]},
+          {"id": "revise", "any": ["revise_processing_plan"]},
+          {"id": "inspect", "any": ["inspect_model"]}
+        ],
+        "order": [
+          {"before": ["propose_production_plan"], "after": ["create_model_3d"]},
+          {"before": ["plan_model_processing"], "after": ["revise_processing_plan"]},
+          {"before": ["revise_processing_plan"], "after": ["inspect_model"]}
+        ],
+        "soft_tools": ["inspect_model"],
+        "budgets": {"max_paid_calls": 5, "max_tool_calls": 16, "max_interruptions": 2}
+      }
     }
-
   ]
 }

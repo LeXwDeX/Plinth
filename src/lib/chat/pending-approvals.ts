@@ -73,6 +73,13 @@ export interface PendingApproval {
    * (plan cards only; empty on a step card).
    */
   budgets: PriceTotal[];
+  /**
+   * #251: the server's split of the worst-case estimate, one figure per credit
+   * unit. Step totals are the main route; contingency totals are the declared
+   * repairs already counted in the approved limit.
+   */
+  stepTotals?: PriceTotal[];
+  contingencyTotals?: PriceTotal[];
   tool: string;
   capability: string;
   model: string;
@@ -150,6 +157,8 @@ export function parsePendingApprovals(payload: unknown): PendingApproval[] {
     result.push({
       requestId, status, kind, plan,
       budgets: kind === 'plan' ? parsePriceTotals(item.budgets) ?? [] : [],
+      stepTotals: kind === 'plan' ? parsePriceTotals(item.step_totals) ?? [] : [],
+      contingencyTotals: kind === 'plan' ? parsePriceTotals(item.contingency_totals) ?? [] : [],
       tool: text(item.tool), capability: text(item.capability), model: text(item.model), provider: text(item.provider), providerId: text(item.provider_id),
       priceMode: text(item.price_mode) || (item.native_quote !== undefined ? 'native' : ''),
       nativeQuote: parseNativeQuote(item.native_quote),

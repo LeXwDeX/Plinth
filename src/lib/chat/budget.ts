@@ -276,15 +276,20 @@ function parseContingencies(value: unknown): PlanContingency[] {
   return (Array.isArray(value) ? value : []).flatMap((entry) => {
     const item = record(entry);
     const id = text(item.id);
-    const capability = text(item.capability);
+    // The public plan JSON nests the repair step as `step` (the same shape as
+    // a main step, #251); a flattened shape is also accepted for older or
+    // hand-written projections. Reading only the flat fields dropped every
+    // real server contingency.
+    const step = item.step !== undefined && item.step !== null ? record(item.step) : item;
+    const capability = text(step.capability) || text(item.capability);
     if (!id || !capability) return [];
     return [{
       id,
       trigger: strings(item.trigger),
       capability,
-      offeringId: text(item.offering_id),
-      purpose: text(item.purpose),
-      estimate: priceTotal(item.estimate),
+      offeringId: text(step.offering_id) || text(item.offering_id),
+      purpose: text(step.purpose) || text(item.purpose),
+      estimate: priceTotal(step.estimate ?? item.estimate),
     }];
   });
 }

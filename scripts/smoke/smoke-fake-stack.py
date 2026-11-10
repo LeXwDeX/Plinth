@@ -1837,8 +1837,14 @@ def _quality_final_reply(messages):
     return {}
 
 
-def run_quality_case(api, request, domain, model, model_3d=""):
-    """One request through the fake-LLM chat path; returns the run dict for agent_quality."""
+def run_quality_case(api, request, domain, model, model_3d="", work=""):
+    """One request through the fake-LLM chat path; returns the run dict for agent_quality.
+
+    work is the stack's work directory when the request exercises processing
+    plans: plan cards are approved through the budget route, and the revision
+    step reads the paused plan's id/version from the stack's own store (the
+    same values get_processing_plan now reports to the Agent).
+    """
     started = time.time()
     session = new_session(api)
     api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
@@ -1874,8 +1880,26 @@ def run_quality_case(api, request, domain, model, model_3d=""):
             arguments["input_override_reason"] = "the fake upstream image is a placeholder, not a real 3D input"
         tool = {"name": step["tool"]["name"], "arguments": arguments}
         model_task = _quality_model_task(api, session)
-        if model_task and tool["arguments"].get("model") == "@model1":
-            tool["arguments"]["model"] = model_task
+        if model_task:
+            for name in ("model", "source_task_id", "source"):
+                if tool["arguments"].get(name) == "@model1":
+                    tool["arguments"][name] = model_task
+        if tool["name"] == "revise_processing_plan" and work:
+            # The plan pauses on its checkpoint after the background step
+            # finishes; the Agent reads its id/version from get_processing_plan.
+            paused = _wait_processing_plan(
+                work, session,
+                lambda plan: plan["state"] == "PAUSED" and plan["failure"] == "plan_checkpoint_failed",
+                seconds=180)
+            if paused:
+                if tool["arguments"].get("plan_id") in (None, "", "@plan1"):
+                    tool["arguments"]["plan_id"] = paused["id"]
+                if tool["arguments"].get("expected_plan_version") in (None, 0, "@plan_version"):
+                    tool["arguments"]["expected_plan_version"] = paused["version"]
+                if tool["arguments"].get("step_index") == "@checkpoint_step":
+                    tool["arguments"]["step_index"] = next(
+                        (index for index, item in enumerate(paused["steps"])
+                         if (item.get("checkpoint") or {}).get("state") == "failed"), 0)
         content = f"{step['user']} {_quality_marker(tool)}"
         before_tasks = {task.get("id") for task in session_tasks(api, session)}
         if not _quality_send(api, session, content, domain, model,
@@ -1894,12 +1918,16 @@ def run_quality_case(api, request, domain, model, model_3d=""):
                 if not request_id or request_id in seen:
                     continue
                 seen.add(request_id)
-                cards.append({"kind": "approval", "id": request_id, "tool": card.get("tool"),
-                              "capability": card.get("capability"), "state": "approved"})
-                status, decision = api.json("PUT", f"/api/v1/tasks/grants/{request_id}", decision_body(api, "approve"))
-                task_id = decision.get("task_id")
-                if status == 200 and task_id:
-                    wait_task(api, task_id)
+                if card.get("kind") == "plan":
+                    cards.append({"kind": "plan", "id": request_id, "tool": card.get("tool"), "state": "approved"})
+                    api.json("PUT", f"/api/v1/chat/sessions/{session}/budgets/{request_id}", decision_body(api, "approve"))
+                else:
+                    cards.append({"kind": "approval", "id": request_id, "tool": card.get("tool"),
+                                  "capability": card.get("capability"), "state": "approved"})
+                    status, decision = api.json("PUT", f"/api/v1/tasks/grants/{request_id}", decision_body(api, "approve"))
+                    task_id = decision.get("task_id")
+                    if status == 200 and task_id:
+                        wait_task(api, task_id)
                 answered = True
             for card in _quality_choices(api, session):
                 card_id = card.get("id")
@@ -1917,6 +1945,17 @@ def run_quality_case(api, request, domain, model, model_3d=""):
         for task in session_tasks(api, session):
             if task.get("id") not in before_tasks:
                 wait_task(api, task.get("id"))
+        # A processing plan advances in the background: wait for its checkpoint
+        # pause or final state, then observe every Task it submitted.
+        if work and step["tool"]["name"] in ("plan_model_processing", "revise_processing_plan"):
+            _wait_processing_plan(
+                work, session,
+                lambda plan: plan["state"] in ("SUCCEEDED", "FAILED")
+                or (plan["state"] == "PAUSED" and plan["failure"] == "plan_checkpoint_failed"),
+                seconds=180)
+            for task in session_tasks(api, session):
+                if task.get("id") not in before_tasks:
+                    wait_task(api, task.get("id"))
     messages = _quality_messages(api, session)
     tasks = session_tasks(api, session)
     images = sum(1 for message in messages for attachment in message.get("attachments") or []
@@ -1925,6 +1964,7 @@ def run_quality_case(api, request, domain, model, model_3d=""):
         "session_id": session,
         "messages": messages,
         "tasks": tasks,
+        "plans": _processing_plans(work, "main", session) if work else [],
         "cards": cards,
         "final_reply": _quality_final_reply(messages),
         "image_count": images,
@@ -1933,7 +1973,7 @@ def run_quality_case(api, request, domain, model, model_3d=""):
     }
 
 
-def scenario_agent_quality(api, offerings, report_dir=""):
+def scenario_agent_quality(api, offerings, report_dir="", work=""):
     """Run the fixed request set (#238) and write a trajectory report."""
     import agent_quality as quality
 
@@ -1946,7 +1986,10 @@ def scenario_agent_quality(api, offerings, report_dir=""):
     for request in data["requests"]:
         domain = "image" if request.get("modality") == "2d" else "model-3d"
         model = image_model if request.get("modality") == "2d" else model_3d
-        run = run_quality_case(api, request, domain, model, model_3d)
+        # A request may pin the session's 3D model when its plan names one
+        # (for example the Meshy 7.1 checkpoint case).
+        session_model_3d = request.get("model_3d") or model_3d
+        run = run_quality_case(api, request, domain, model, session_model_3d, work)
         case = quality.evaluate_case(request, run)
         cases.append(case)
         failed = quality.case_hard_failures(case)
@@ -3946,6 +3989,46 @@ def _processing_plans(work, stack, session):
     return plans
 
 
+def _tool_results(work, stack, session, tool_name):
+    """JSON tool results the Agent received for one tool, oldest first.
+
+    They live in the persisted chat checkpoint's completed messages; the
+    public messages wire carries only the call summary. This reads the same
+    server-side copy the Agent sees, never the processing-plans table."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+        rows = db.execute(
+            "SELECT checkpoint_json FROM go_chat_turns WHERE session_id=? ORDER BY updated_at ASC",
+            (session,)).fetchall()
+        db.close()
+    except sqlite3.Error:
+        return []
+    results, seen = [], set()
+    for (checkpoint_json,) in rows:
+        try:
+            checkpoint = json.loads(checkpoint_json or "{}")
+        except ValueError:
+            continue
+        calls = {call.get("ID"): call.get("Name")
+                 for call in (checkpoint.get("assistant") or {}).get("ToolCalls") or []}
+        for message in checkpoint.get("completed") or []:
+            if message.get("Role") != "tool" or calls.get(message.get("ToolCallID")) != tool_name:
+                continue
+            content = message.get("Content") or ""
+            if content in seen:
+                continue
+            try:
+                payload = json.loads(content)
+            except ValueError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            seen.add(content)
+            results.append(payload)
+    return results
+
+
 def _wait_processing_plan(work, session, predicate, seconds=150):
     end = time.time() + seconds
     plan = None
@@ -4058,8 +4141,39 @@ def scenario_plan_checkpoint(work, api, offerings):
            len(processing_tasks) == 1 and not any(task.get("capability") == "rigging" for task in processing_tasks),
            f"processing tasks {[(t.get('capability'), t.get('state')) for t in processing_tasks]}")
 
+    # The Agent reads the paused plan through the tool surface: plan_id came
+    # from the plan result, and get_processing_plan must report the current
+    # version (otherwise revise can never match) and the actionable failure.
+    plan_results = _tool_results(work, "main", session, "plan_model_processing")
+    plan_id = plan_results[-1].get("plan_id") if plan_results else paused["id"]
+    marker = "[[fake:tool:get_processing_plan " + json.dumps({"plan_id": plan_id}, ensure_ascii=False) + "]]"
+    status, _ = _send_chat(api, session, {"content": "读取暂停的加工计划 " + marker,
+                                          "creative_domain": "model-3d",
+                                          "domainModels": {"model-3d": MESHY_TEXT_TO_3D}})
+    if status not in (200, 201, 202):
+        record("plan-checkpoint: get_processing_plan after the pause", False, f"send {status}")
+        return
+    _quality_turn_done(api, session, timeout=60)
+    observed = None
+    end = time.time() + 30
+    while time.time() < end and observed is None:
+        observed = next((result for result in reversed(_tool_results(work, "main", session, "get_processing_plan"))
+                         if result.get("plan_id") == plan_id), None)
+        if observed is None:
+            time.sleep(0.3)
+    observed_version = (observed or {}).get("version")
+    detail = (observed or {}).get("failure_detail") or {}
+    record("plan-checkpoint: the read-only plan tool reports the paused version",
+           observed is not None and observed.get("state") == "PAUSED" and
+           observed.get("failure") == "plan_checkpoint_failed" and
+           isinstance(observed_version, int) and observed_version == paused["version"],
+           f"observed={observed_version} paused={paused['version']} state={(observed or {}).get('state')}")
+    record("plan-checkpoint: a failed checkpoint is classified as an actionable parameter problem",
+           detail.get("category") == "parameter_invalid" and detail.get("next_action") == "fix_parameters",
+           f"failure_detail={detail}")
+
     revision = {
-        "plan_id": paused["id"], "expected_plan_version": paused["version"],
+        "plan_id": plan_id, "expected_plan_version": observed_version,
         "operation": "insert", "step_index": 0, "contingency_id": "low_poly",
         "parameters": {"topology": "triangle", "target_polycount": 20000},
         "reason": "检查点未通过：把原点移到底部中心",
@@ -4143,7 +4257,7 @@ def main():
             if "agent-background" in selected:
                 scenario_agent_background(api, offerings)
             if "agent-quality" in selected:
-                scenario_agent_quality(api, offerings, args.report or os.path.join(work, "agent-quality"))
+                scenario_agent_quality(api, offerings, args.report or os.path.join(work, "agent-quality"), work)
             if "image-self-check" in selected:
                 scenario_image_self_check(api, offerings, work)
             if "three-view" in selected:

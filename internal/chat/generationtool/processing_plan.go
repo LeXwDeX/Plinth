@@ -410,10 +410,13 @@ func (executor *Executor) processingPlanResult(ctx context.Context, command chat
 	if plan.Failure == processing.ReasonConsentRequired {
 		note = config.Plan.WaitingContent
 	}
+	// version is the optimistic-concurrency token revise_processing_plan needs
+	// (expected_plan_version). The Agent can only learn it from this result;
+	// the plan's step list and state alone cannot reconstruct it.
 	payload := map[string]any{command.Tool.ResultFields.Success: true,
 		"plan_id": plan.ID, "session_id": plan.SessionID, "source_task_id": plan.SourceTaskID,
 		"source_asset_id": plan.SourceAssetID, "state": plan.State, "failure": plan.Failure,
-		"steps": steps, "estimated_credits": total, "message": note}
+		"version": plan.Version, "steps": steps, "estimated_credits": total, "message": note}
 	if len(totals) > 0 {
 		delete(payload, "estimated_credits")
 		payload["price_totals"] = totals

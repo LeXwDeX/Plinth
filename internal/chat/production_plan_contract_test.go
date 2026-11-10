@@ -58,6 +58,53 @@ func TestProposeProductionPlanBuildsAcceptanceFromPurposeAndBrief(t *testing.T) 
 	}
 }
 
+// #251 fix: the acceptance list only names conditions the server actually
+// evaluates for the purpose. A boolean check the purpose does not require is
+// unknown (never pass), and a threshold without its bound would freeze a
+// literal placeholder as the standard the person approves.
+func TestAcceptanceOmitsUnrequiredAndUnboundedChecks(t *testing.T) {
+	store := &recordingProductionPlans{}
+	service := proposalService(t, store, shippedBudgetSchema(t))
+	brief := chat.ProductionBrief{"purpose": json.RawMessage(`"game_character"`)}
+	command := planCommandWithBrief(`{"title":"角色","steps":[{"capability":"image-to-3d","purpose":"生成角色"}],"budgets":[{"unit":"legacy.credits","amount":20}]}`, brief)
+	plan, _ := propose(t, service, store, command)
+	var statements []string
+	for _, criterion := range plan.Acceptance {
+		statements = append(statements, criterion.ID+"="+criterion.Statement)
+	}
+	text := strings.Join(statements, " | ")
+	if strings.Contains(text, "需要水密") || strings.Contains(text, "需要骨骼") {
+		t.Fatalf("unrequired checks were promised as acceptance: %s", text)
+	}
+	for _, wanted := range []string{"triangles=", "uv=", "plausible_scale=", "0.3–5"} {
+		if !strings.Contains(text, wanted) {
+			t.Fatalf("required acceptance %q missing from %s", wanted, text)
+		}
+	}
+
+	// The render purpose declares no scale range: the scale criterion has no
+	// bound and must be absent instead of reading "{minimum}–{maximum}".
+	store = &recordingProductionPlans{}
+	service = proposalService(t, store, shippedBudgetSchema(t))
+	brief = chat.ProductionBrief{"purpose": json.RawMessage(`"render"`)}
+	command = planCommandWithBrief(`{"title":"展示","steps":[{"capability":"image-to-3d","purpose":"生成展示模型"}],"budgets":[{"unit":"legacy.credits","amount":20}]}`, brief)
+	plan, _ = propose(t, service, store, command)
+	var render []string
+	for _, criterion := range plan.Acceptance {
+		render = append(render, criterion.ID+"="+criterion.Statement)
+	}
+	renderText := strings.Join(render, " | ")
+	if strings.Contains(renderText, "{minimum}") || strings.Contains(renderText, "{maximum}") {
+		t.Fatalf("an unfilled threshold was frozen: %s", renderText)
+	}
+	if strings.Contains(renderText, "plausible_scale=") {
+		t.Fatalf("a check without a purpose bound was promised: %s", renderText)
+	}
+	if !strings.Contains(renderText, "triangles=") {
+		t.Fatalf("bounded acceptance criteria are missing: %s", renderText)
+	}
+}
+
 func TestProposeProductionPlanFreezesCheckpointThresholdsAndContingencies(t *testing.T) {
 	store := &recordingProductionPlans{}
 	service := proposalService(t, store, shippedBudgetSchema(t))

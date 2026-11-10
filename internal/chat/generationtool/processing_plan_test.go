@@ -407,6 +407,28 @@ func TestAgentPlanObservationIsReadOnlyOwnerAndSessionScoped(t *testing.T) {
 	if err != nil || result.Error != "" || !strings.Contains(result.AgentContent, "「加工」") || strings.Contains(result.AgentContent, "prepared_input_hash") || strings.Contains(result.AgentContent, "authorization_request_id") {
 		t.Fatalf("observation=%+v err=%v", result, err)
 	}
+	// #251 fix: get_processing_plan exposes the plan version the revision tool
+	// requires. Without it the Agent has no observable source for
+	// expected_plan_version and every insert/replace/skip/retry/waive conflicts.
+	var observed map[string]any
+	if json.Unmarshal([]byte(result.AgentContent), &observed) != nil {
+		t.Fatalf("observation is not JSON: %s", result.AgentContent)
+	}
+	current := h.get(plan.ID)
+	version, ok := observed["version"].(float64)
+	if !ok || int64(version) != current.Version {
+		t.Fatalf("observed version = %v, plan version = %d", observed["version"], current.Version)
+	}
+	revise := `{"plan_id":"` + plan.ID + `","expected_plan_version":` + jsonNumber(int64(version)) +
+		`,"operation":"skip","step_index":2,"reason":"按观察到的版本跳过未开始的动画"}`
+	revised, err := h.executor.ReviseProcessingPlan(context.Background(), reviseCommand(revise))
+	if err != nil || strings.Contains(revised.AgentContent, `"success":false`) {
+		t.Fatalf("revision with the observed version failed: %+v err=%v", revised, err)
+	}
+	after := h.get(plan.ID)
+	if after.Steps[2].State != processing.Skipped || after.Version <= current.Version {
+		t.Fatalf("revision did not apply: %+v", after)
+	}
 	for _, scope := range [][2]string{{"owner-b", "session-a"}, {"owner-a", "session-b"}} {
 		command.OwnerID, command.SessionID = scope[0], scope[1]
 		result, err = h.executor.ReadProcessingPlan(context.Background(), command)

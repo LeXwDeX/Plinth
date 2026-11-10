@@ -180,3 +180,66 @@ describe('a paused plan judged again (#326)', () => {
     expect(html).not.toContain(messages['ui.workspace.processing.plan_waiting_alternative']);
   });
 });
+
+// #251: the panel shows the server-evaluated checkpoint, the revision
+// provenance and SKIPPED steps, and gives the person a way past a failed
+// checkpoint instead of a chat-only deadlock.
+describe('a processing plan stopped by a checkpoint (#251)', () => {
+  const stopped = (): ProcessingPlan => ({
+    id: 'plan', source_task_id: 'source', source_asset_id: 'asset', state: 'PAUSED', version: 8, failure: 'plan_checkpoint_failed',
+    steps: [
+      { capability: 'remesh', offering_id: 'remesh', revision: 'v2', estimated_credits: 5, state: 'SUCCEEDED', failure: 'plan_checkpoint_failed',
+        checkpoint: { state: 'failed', checks: [{ check: 'triangles', maximum: 60000 }, { check: 'pivot_bottom_center', maximum_ratio: 0.01 }],
+          results: [{ check: 'triangles', status: 'fail', actual: 100000 }, { check: 'pivot_bottom_center', status: 'pass', actual: 0.002 }] } },
+      { capability: 'rigging', offering_id: 'rigging', revision: 'v1', estimated_credits: 5, state: 'PENDING' },
+    ],
+  });
+  const failedTriangle = messages['ui.chat.review.check_fail'].replace('{label}', messages['ui.chat.review.check_names.triangles']);
+  const passedPivot = messages['ui.chat.review.check_pass'].replace('{label}', messages['ui.chat.review.check_names.pivot_bottom_center']);
+
+  it('shows the failed check, its measured value and the person continue action', () => {
+    mock.plan = stopped();
+    const html = render();
+    expect(html).toContain(messages['ui.workspace.processing.plan_checkpoint']);
+    expect(html).toContain(messages['ui.workspace.processing.plan_checkpoint_state.failed']);
+    expect(html).toContain(failedTriangle);
+    expect(html).toContain(passedPivot);
+    expect(html).toContain('100000');
+    expect(html).toContain(messages['ui.workspace.processing.plan_continue_checkpoint']);
+    expect(html).toContain(messages['ui.workspace.processing.plan_continue_checkpoint_note']);
+    expect(html).toContain(messages['ui.workspace.processing.plan_checkpoint_failed']);
+  });
+
+  it('continues past the failed checkpoint through the existing resume route', async () => {
+    mock.plan = stopped();
+    const updated: ProcessingPlan = { ...stopped(), state: 'PENDING', failure: undefined, version: 9,
+      steps: [{ ...stopped().steps[0], failure: undefined, checkpoint: { ...stopped().steps[0].checkpoint!, state: 'waived', resolution: 'user_continue' } }, stopped().steps[1]] };
+    mock.fetch.mockResolvedValue({ ok: true, json: async () => updated });
+    render();
+    mock.actions.get(messages['ui.workspace.processing.plan_continue_checkpoint'])!();
+    await vi.waitFor(() => expect(mock.plan?.version).toBe(9));
+    expect(mock.fetch).toHaveBeenCalledExactlyOnceWith(defaultCatalog.application.runtime.http.routes.processing_plan_resume.replace('{planID}', 'plan'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_plan_version: 8, expected_offering_revision: 'v2' }),
+    });
+    expect(render()).toContain(messages['ui.workspace.processing.plan_checkpoint_state.waived']);
+  });
+
+  it('shows an inserted repair and a skipped step with the revision reason', () => {
+    mock.plan = { id: 'plan', source_task_id: 'source', source_asset_id: 'asset', state: 'RUNNING', version: 11,
+      steps: [
+        { capability: 'remesh', offering_id: 'remesh', revision: 'v2', estimated_credits: 5, state: 'SUCCEEDED',
+          checkpoint: { state: 'failed', results: [{ check: 'triangles', status: 'fail', actual: 100000 }] } },
+        { capability: 'resize', offering_id: 'resize', revision: 'v1', estimated_credits: 3, state: 'SUCCEEDED',
+          contingency_id: 'low_poly', revision_operation: 'insert', revision_reason: '按预案再减面' },
+        { capability: 'rigging', offering_id: 'rigging', revision: 'v1', estimated_credits: 5, state: 'SKIPPED',
+          revision_operation: 'skip', revision_reason: '不需要绑骨' },
+      ] };
+    const html = render();
+    expect(html).toContain(messages['ui.workspace.processing.plan_step_skipped']);
+    expect(html).toContain(messages['ui.workspace.processing.plan_revision_op.insert']);
+    expect(html).toContain(messages['ui.workspace.processing.plan_revision_op.skip']);
+    expect(html).toContain('low_poly');
+    expect(html).toContain('按预案再减面');
+    expect(html).toContain('不需要绑骨');
+  });
+});

@@ -132,6 +132,7 @@ func (s *Service) reviseInsert(ctx context.Context, plan *Plan, command ReviseCo
 	}
 	plan.Steps = steps
 	plan.State, plan.Failure, plan.UpdatedAt = Pending, "", time.Now().UTC()
+	resolveCheckpointFailures(plan)
 	return s.finishRevision(ctx, plan, command.Operation, reason)
 }
 
@@ -167,6 +168,7 @@ func (s *Service) reviseReplace(ctx context.Context, plan *Plan, command ReviseC
 	plan.Steps = steps
 	if plan.State == Paused && plan.Failure == ReasonCheckpointFailed {
 		plan.State, plan.Failure = Pending, ""
+		resolveCheckpointFailures(plan)
 	}
 	plan.UpdatedAt = time.Now().UTC()
 	return s.finishRevision(ctx, plan, command.Operation, reason)
@@ -195,6 +197,9 @@ func (s *Service) reviseSkip(ctx context.Context, plan *Plan, command ReviseComm
 		plan.State, plan.Failure = Succeeded, ""
 	} else if plan.State == Paused && plan.Failure == ReasonCheckpointFailed {
 		plan.State, plan.Failure = Pending, ""
+	}
+	if plan.Failure == "" {
+		resolveCheckpointFailures(plan)
 	}
 	plan.UpdatedAt = time.Now().UTC()
 	return s.finishRevision(ctx, plan, command.Operation, reason)
@@ -227,6 +232,7 @@ func (s *Service) reviseWaive(ctx context.Context, plan *Plan, command ReviseCom
 	}
 	step.Checkpoint.State, step.Checkpoint.Resolution = CheckpointWaived, reason
 	step.RevisionOperation, step.RevisionReason = OperationWaiveCheckpoint, reason
+	step.Failure, step.Retryable = "", false
 	plan.State, plan.Failure, plan.UpdatedAt = Pending, "", time.Now().UTC()
 	return s.finishRevision(ctx, plan, command.Operation, reason)
 }
@@ -323,11 +329,26 @@ func unstarted(step Step) bool {
 
 func hasFailedCheckpoint(steps []Step) bool {
 	for _, step := range steps {
-		if step.Checkpoint != nil && step.Checkpoint.State == CheckpointFailed {
+		// A checkpoint that was already resolved (a contingency ran, a step
+		// was replaced or skipped, or it was waived) keeps its failed result as
+		// provenance but no longer blocks the plan.
+		if step.Failure == ReasonCheckpointFailed {
 			return true
 		}
 	}
 	return false
+}
+
+// resolveCheckpointFailures drops the blocking failure reason from steps whose
+// failed checkpoint the revision already handled. The checkpoint's failed
+// state, results and resolution stay as the audit trail.
+func resolveCheckpointFailures(plan *Plan) {
+	for index := range plan.Steps {
+		step := &plan.Steps[index]
+		if step.Failure == ReasonCheckpointFailed {
+			step.Failure, step.Retryable = "", false
+		}
+	}
 }
 
 func failedChecks(checkpoint *Checkpoint) []string {

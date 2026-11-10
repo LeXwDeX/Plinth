@@ -1342,15 +1342,20 @@ func TestExecutorTellsAnExhaustedProviderBalanceApartFromOtherFailures(t *testin
 		t.Fatalf("Schema must declare a distinct balance text: %q vs %q", balance, generic)
 	}
 	for name, tc := range map[string]struct {
-		failure generation.Failure
-		want    string
+		failure  generation.Failure
+		want     string
+		category string
+		action   string
 	}{
-		"balance":  {generation.Failure{Class: generation.FailureInsufficientBalance, SafeDetail: "upstream said: insufficient balance acct-123"}, balance},
-		"rejected": {generation.Failure{Class: generation.FailureRejected, SafeDetail: "upstream said no"}, generic},
+		"balance": {generation.Failure{Class: generation.FailureInsufficientBalance, SafeDetail: "upstream said: insufficient balance acct-123"}, balance,
+			string(generation.CategoryUpstreamRefused), string(generation.ActionAskUser)},
+		"rejected": {generation.Failure{Class: generation.FailureRejected, SafeDetail: "upstream said no"}, generic,
+			string(generation.CategoryUpstreamRefused), string(generation.ActionAskUser)},
 		// #326 N2: a source whose original task the provider no longer keeps
 		// is named as such, with the way forward, never the upstream 404.
 		"source expired": {generation.Failure{Class: generation.FailureSourceExpired, SafeDetail: "upstream said: Task not found acct-123"},
-			application.Chat.Presentation.Messages.GenerationFailedByClass[string(generation.FailureSourceExpired)]},
+			application.Chat.Presentation.Messages.GenerationFailedByClass[string(generation.FailureSourceExpired)],
+			string(generation.CategoryInputInvalid), string(generation.ActionFixInput)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			failure := tc.failure
@@ -1384,6 +1389,15 @@ func TestExecutorTellsAnExhaustedProviderBalanceApartFromOtherFailures(t *testin
 			var content map[string]any
 			if err := json.Unmarshal([]byte(result.AgentContent), &content); err != nil || content[tool.ResultFields.Error] != tc.want {
 				t.Fatalf("agent content = %s (%v)", result.AgentContent, err)
+			}
+			// #251: the primary failure result itself is actionable, not just
+			// the later plan/task views.
+			if content["failure_category"] != tc.category || content["next_action"] != tc.action {
+				t.Fatalf("failure classification = %v/%v, want %s/%s: %s",
+					content["failure_category"], content["next_action"], tc.category, tc.action, result.AgentContent)
+			}
+			if content["failure_advice"] == "" || content["failure_advice"] == nil {
+				t.Fatalf("failure result has no advice: %s", result.AgentContent)
 			}
 		})
 	}

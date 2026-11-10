@@ -2192,6 +2192,8 @@ export function ChatColumn() {
                     key={item.requestId}
                     plan={item.plan}
                     budgets={item.budgets}
+                    stepTotals={item.stepTotals}
+                    contingencyTotals={item.contingencyTotals}
                     tasks={sessionTasks}
                     busy={decisionBusy.has(item.requestId)}
                     error={decisionError[item.requestId] ?? null}

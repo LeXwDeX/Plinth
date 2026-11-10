@@ -6,6 +6,7 @@ import type { ProductSchema } from '@/lib/product-schema';
 import {
   fetchProcessingPlan, isSubmissionUnknown, needsStepConsent, pausedResumableStep, planHoldsModel, processingPlanRoute, resumeButtonLabel,
   resumeProcessingPlan, reconcileProcessingPlan, unreconciledStep, retryableFailedStep, StepChangedError, stepCreditSuffix,
+  checkpointStopsPlan, continuePastCheckpoint, failedCheckpointStep,
   type PendingStepGrant, type ProcessingPlan, type ProcessingPlanStep,
 } from './processing-plan';
 
@@ -303,5 +304,39 @@ describe('continuing a paused step', () => {
     await expect(resumeProcessingPlan(base({ fetcher: withReason.fetcher }))).rejects.toThrow('计划版本已变化');
     const bare = recorder({ [resumeUrl]: { ok: false, status: 500 } });
     await expect(resumeProcessingPlan(base({ fetcher: bare.fetcher }))).rejects.toThrow('HTTP 500');
+  });
+});
+
+// #251: a failed checkpoint pauses the plan before the next step. The panel
+// shows the check and lets the person continue; the server records a waiver.
+describe('a plan stopped by a failed checkpoint (#251)', () => {
+  const stopped = () => plan({ state: 'PAUSED', failure: 'plan_checkpoint_failed', version: 7 }, [
+    step({ capability: 'remesh', state: 'SUCCEEDED', failure: 'plan_checkpoint_failed', resumable: false,
+      checkpoint: { state: 'failed', checks: [{ check: 'triangles', maximum: 60000 }],
+        results: [{ check: 'triangles', status: 'fail', actual: 100000 }] } }),
+    step({ capability: 'rigging', state: 'PENDING', failure: undefined, resumable: false }),
+  ]);
+
+  it('names the failed checkpoint step and keeps the model held', () => {
+    expect(checkpointStopsPlan(stopped())).toBe(true);
+    expect(failedCheckpointStep(stopped())?.capability).toBe('remesh');
+    expect(checkpointStopsPlan(plan())).toBe(false);
+    expect(planHoldsModel(stopped())).toBe(true);
+  });
+
+  it('continues through the resume route with the displayed version and step revision', async () => {
+    const updated = { ...stopped(), state: 'PENDING', failure: undefined, version: 8 };
+    const api = recorder({ '/resume': { json: updated } });
+    await expect(continuePastCheckpoint(schema, stopped(), api.fetcher)).resolves.toEqual(updated);
+    expect(api.calls).toEqual([{
+      url: schema.runtime.http.routes.processing_plan_resume!.replace('{planID}', 'plan%201'),
+      method: 'POST', body: { expected_plan_version: 7, expected_offering_revision: 'r1' },
+    }]);
+  });
+
+  it('reports an actionable error when the continue is refused', async () => {
+    const api = recorder({ '/resume': { ok: false, status: 409, json: {} } });
+    await expect(continuePastCheckpoint(schema, stopped(), api.fetcher))
+      .rejects.toThrow(messages['ui.workspace.processing.plan_continue_checkpoint_failed']);
   });
 });

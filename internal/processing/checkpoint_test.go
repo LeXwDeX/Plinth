@@ -90,12 +90,51 @@ func TestCheckpointFailureStopsTheNextStep(t *testing.T) {
 	if step.State != Succeeded || step.Checkpoint == nil || step.Checkpoint.State != CheckpointFailed {
 		t.Fatalf("step checkpoint = %+v", step.Checkpoint)
 	}
+	// The succeeded step carries the blocking reason, so the plan failure is
+	// classified from it: a checkpoint failure is an actionable parameter
+	// problem, not an internal error that tells the Agent to contact an admin.
+	if step.Failure != ReasonCheckpointFailed {
+		t.Fatalf("step failure = %q, want %q", step.Failure, ReasonCheckpointFailed)
+	}
 	if len(step.Checkpoint.Results) != 1 || step.Checkpoint.Results[0].Status != "fail" {
 		t.Fatalf("checkpoint results = %+v", step.Checkpoint.Results)
 	}
-	report := ClassifyStepFailure(ReasonCheckpointFailed, nil)
+	report := ClassifyStepFailure(step.Failure, nil)
 	if report.Category != generation.CategoryParameterInvalid || report.Action != generation.ActionFixParameters {
 		t.Fatalf("checkpoint failure classification = %+v", report)
+	}
+}
+
+func TestPersonContinuesPastAFailedCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	service, store, gateway, plan := checkpointFixture(t)
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	succeedTask(gateway, "step-1")
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	paused := store.plans[plan.ID]
+	if paused.State != Paused || paused.Failure != ReasonCheckpointFailed {
+		t.Fatalf("paused plan = %s/%s", paused.State, paused.Failure)
+	}
+	continued, err := service.Resume(ctx, ResumeCommand{OwnerID: "owner", PlanID: plan.ID,
+		ExpectedPlanVersion: paused.Version, ExpectedOfferingRevision: paused.Steps[0].Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if continued.State != Pending || continued.Failure != "" ||
+		continued.Steps[0].Checkpoint.State != CheckpointWaived ||
+		continued.Steps[0].Checkpoint.Resolution != CheckpointResolutionUserContinue ||
+		continued.Steps[0].Failure != "" {
+		t.Fatalf("continued plan = %+v steps=%+v", continued, continued.Steps)
+	}
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	if len(gateway.commands) != 2 {
+		t.Fatalf("person's continue must start the next step: %d submissions", len(gateway.commands))
 	}
 }
 
