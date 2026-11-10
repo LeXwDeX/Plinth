@@ -15,7 +15,7 @@ import {
 import { priceTotalsAmountsText } from '@/lib/chat/approval-modes';
 import type { PriceTotal } from '@/lib/pricing';
 import { completedPlanSteps, planStepProgress, type PlanTask } from '@/lib/chat/plan-progress';
-import { formatSchemaText, schemaText, taskStatePresentation } from '@/lib/product-schema';
+import { formatSchemaText, schemaText, taskStatePresentation, type ProductSchema } from '@/lib/product-schema';
 import { cn } from '@/lib/utils';
 
 /**
@@ -73,6 +73,14 @@ export interface PlanCardProps {
 function capabilityLabel(schema: ReturnType<typeof useProductSchema>['schema'], id: string): string {
   const capability = schema.capabilities.find((item) => item.id === id);
   return capability?.label_cn || capability?.label || id;
+}
+
+/**
+ * #246: a plan step carries the checkpoint id the server validates; the card
+ * shows the label the Product Schema declares for it.
+ */
+function checkpointLabel(schema: ProductSchema, id: string): string {
+  return schema.chat.self_check?.checkpoints?.find((checkpoint) => checkpoint.id === id)?.label || id;
 }
 
 /**
@@ -177,7 +185,7 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
                   // #246: the Schema checkpoint after this step, repeated by the
                   // approved continuation before the next step or delivery.
                   <p className="col-start-2 col-end-4 text-[11px] text-muted-foreground" data-testid="studio-plan-step-check">
-                    {formatSchemaText(schemaText(schema, 'ui.studio.plan.checkpoint'), { check: entry.step.check })}
+                    {formatSchemaText(schemaText(schema, 'ui.studio.plan.checkpoint'), { check: checkpointLabel(schema, entry.step.check) })}
                   </p>
                 ) : null}
               </li>

@@ -84,7 +84,7 @@ func (executor *Executor) prepareAgentOperation(
 	ctx context.Context, command chat.ToolCommand, capability generation.Capability,
 	offering generation.Offering, input json.RawMessage, prompt, key string, references referenceUse,
 	selection referenceSelection, finalReferences []referenceCandidate, referenceIDs []generation.AssetID,
-	observe func(chat.ToolObservation) error, trace *promptTrace,
+	correctionTaskID string, observe func(chat.ToolObservation) error, trace *promptTrace,
 ) (chat.ToolResult, error) {
 	if command.OwnerID == "" || command.SessionID == "" || command.AssistantMessageID == "" ||
 		command.Call.ID == "" || key == "" {
@@ -179,7 +179,8 @@ func (executor *Executor) prepareAgentOperation(
 		ToolName: command.Call.Name, CommandHash: hash, IdempotencyKey: key,
 		PreparedInputID: prepared.ID, PreparedInputHash: prepared.InputHash,
 		OfferingID: prepared.OfferingID, OfferingRevision: prepared.OfferingRevision, Harness: turnHarnessBinding(command),
-		RechargeTaskID: rechargeTaskID, ReferenceCount: references.Used, ReferenceTotal: references.Given,
+		RechargeTaskID: rechargeTaskID, CorrectionTaskID: correctionTaskID,
+		ReferenceCount: references.Used, ReferenceTotal: references.Given,
 		ReferenceSource: sourceFact,
 	})
 	if errors.Is(err, ErrOperationConflict) {
@@ -213,7 +214,7 @@ func (executor *Executor) prepareAgentOperation(
 func (executor *Executor) resumeAgentOperation(
 	ctx context.Context, command chat.ToolCommand, op Operation,
 	observe func(chat.ToolObservation) error, cardSettled func(), trace *promptTrace,
-) (chat.ToolResult, error) {
+) (result chat.ToolResult, err error) {
 	if cardSettled == nil {
 		cardSettled = func() {}
 	}
@@ -231,7 +232,6 @@ func (executor *Executor) resumeAgentOperation(
 	// No second submission is possible on this branch.
 	var grant executiongrant.Grant
 	var decision executiongrant.PolicyResult
-	var err error
 	if op.GrantRequestID != "" {
 		grant, err = executor.grants.Grants.GetExecutionGrant(ctx, op.OwnerID, op.GrantRequestID)
 		if err != nil {
@@ -399,6 +399,13 @@ func (executor *Executor) resumeAgentOperation(
 		// its reservation stays.
 		return failure, err
 	}
+	// From here the step really accepted a paid Task. Every path below reports
+	// that submission, so the correction is counted exactly once for this
+	// operation (the same operation means the same correction, even when a
+	// restart replays the call).
+	defer func() {
+		result = executor.attachOperationCorrection(ctx, command, op, result)
+	}()
 	task, err := executor.gateway.Get(ctx, generation.OwnerID(op.OwnerID), accepted.TaskID)
 	if err != nil {
 		return executor.awaitTask(command, accepted.TaskID,

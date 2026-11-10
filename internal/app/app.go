@@ -1512,6 +1512,14 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			}
 			return toolExecutor.VerifyDetachedHarnessSource(ctx, turn, op, prepared)
 		},
+		// #246: an approval submitted in the background is still a paid
+		// correction of the result the operation froze. The callback is keyed
+		// by operation, so a retried sweep counts it once.
+		ProcessingCorrection: func(ctx context.Context, op generationtool.Operation) error {
+			_, _, err := selfCheckService.IncrementCorrectionsOnce(ctx,
+				op.OwnerID, op.SessionID, op.CorrectionTaskID, generationtool.CorrectionKey(op))
+			return err
+		},
 		Operations: repository, Grants: executionGrants, Gateway: module,
 		Chat: chatService, Schema: applicationSchema.Chat,
 		DefaultLocale: applicationSchema.Runtime.Frontend.DisplayLocale,

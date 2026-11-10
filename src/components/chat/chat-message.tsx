@@ -236,7 +236,7 @@ export const ChatMessage = memo(function ChatMessage({
   // not only one with a model card: a later turn may self-check an earlier
   // reply's result, and that turn's settle re-reads the shared entry. The
   // records shown here are still only this reply's cards' records.
-  const { records: selfCheckRecords } = useSelfChecks(isUser ? null : sessionId, settled);
+  const { records: selfCheckRecords, failed: selfChecksFailed } = useSelfChecks(isUser ? null : sessionId, settled);
   const selfChecksByTask = useMemo(() => selfCheckRecordsByTask(selfCheckRecords), [selfCheckRecords]);
   const messageSelfChecks = useMemo(
     () => modelCards.map((card) => selfChecksByTask.get(card.taskId)).filter((record): record is SelfCheckRecord => Boolean(record)),
@@ -341,6 +341,13 @@ export const ChatMessage = memo(function ChatMessage({
       )}
 
       {modelCards.length > 0 && <ChatModelCards cards={modelCards} sessionId={sessionId} selfChecks={selfChecksByTask} />}
+      {!isUser && selfChecksFailed && modelCards.length > 0 && (
+        // #246: a failed read never turns into a false "unchecked" claim; the
+        // model card's state stays unknown and this line says why.
+        <p className="text-[11px] text-muted-foreground" role="status" data-testid="chat-self-check-load-failed">
+          {schemaText(schema, 'ui.chat.self_check.load_failed')}
+        </p>
+      )}
       {!isUser && messageSelfChecks.length > 0 && <SelfCheckRecordCard records={messageSelfChecks} renders={renders} />}
       {splatResults.map((target) => <GaussianSplatResultCard key={target.taskId} target={target} />)}
 

@@ -2511,7 +2511,7 @@ func validateSelfCheck(schema ChatSchema) error {
 		!strings.Contains(context.TaskLineTemplate, "{corrections_limit}") ||
 		!strings.Contains(context.TaskLineTemplate, "{background}") ||
 		!strings.Contains(context.TaskLineTemplate, "{summary}") ||
-		strings.TrimSpace(context.UncheckedRuleText) == "" || strings.TrimSpace(context.NoRecordsText) == "" ||
+		strings.TrimSpace(context.UncheckedRuleText) == "" ||
 		strings.TrimSpace(context.BackgroundText) == "" {
 		return errors.New("chat.self_check.context 的提示模板与文案不完整")
 	}
@@ -2535,7 +2535,6 @@ func validateSelfCheck(schema ChatSchema) error {
 		{"record_invalid_arguments", selfCheck.Texts.RecordInvalidArguments, []string{"{detail}"}},
 		{"record_unknown_task", selfCheck.Texts.RecordUnknownTask, []string{"{model}"}},
 		{"reference_ready", selfCheck.Texts.ReferenceReady, []string{"{model}", "{image}", "{view}", "{iou}"}},
-		{"reference_missing", selfCheck.Texts.ReferenceMissing, []string{"{view}"}},
 		{"reference_unreadable", selfCheck.Texts.ReferenceUnreadable, []string{"{handle}", "{reason}"}},
 		{"reference_no_reference", selfCheck.Texts.ReferenceNoReference, nil},
 		{"caveats", selfCheck.Texts.Caveats, nil},

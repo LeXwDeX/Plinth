@@ -743,7 +743,7 @@ func (executor *Executor) Execute(
 	idempotencyKey := command.IdempotencyKey()
 	if executor.UsesExecutionGrants() {
 		return executor.prepareAgentOperation(ctx, command, capability, offering, input, prompt, idempotencyKey,
-			references, selection, finalReferences, referenceIDs, observe, trace)
+			references, selection, finalReferences, referenceIDs, "", observe, trace)
 	}
 	if offering.NativePricing != nil {
 		return chat.ToolResult{NoSubmission: true}, errors.New("native pricing requires prepared authorization")

@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/chat"
-	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
 // selfCheckStatusBlock is the counters every review tool result carries.
@@ -26,6 +25,9 @@ type selfCheckStatusBlock struct {
 	RendersLimit     int    `json:"renders_limit"`
 	CorrectionsUsed  int    `json:"corrections_used"`
 	CorrectionsLimit int    `json:"corrections_limit"`
+	// Message states the Schema's own fact about this call: which evidence
+	// was recorded and how many rounds, renders or corrections remain.
+	Message string `json:"message,omitempty"`
 }
 
 func (executor *Executor) selfCheckBlock(record chat.SelfCheckRecord) *selfCheckStatusBlock {
@@ -80,7 +82,35 @@ func (executor *Executor) appendSelfCheckCheck(ctx context.Context, command chat
 			"task_id", source.task.ID, "kind", check.Kind, "error", err)
 		return nil
 	}
-	return executor.selfCheckBlock(record)
+	block := executor.selfCheckBlock(record)
+	if block != nil {
+		block.Message = executor.checkRecordedMessage(command, record, check.Kind)
+	}
+	return block
+}
+
+// checkRecordedMessage words the stored evidence and the headroom the Schema
+// leaves after it. The remaining texts are the Schema's own copy, so the
+// Agent reads the limits from the same declaration that enforces them.
+func (executor *Executor) checkRecordedMessage(command chat.ToolCommand, record chat.SelfCheckRecord,
+	kind string) string {
+	texts := executor.selfChecks.Schema().Texts
+	counters := executor.selfChecks.Counts(record)
+	parts := []string{executor.fillText(command, texts.CheckRecorded,
+		"{kind}", kind, "{round}", strconv.Itoa(counters.RoundsUsed))}
+	switch kind {
+	case chat.SelfCheckKindInspect:
+		if remaining := counters.RoundsLimit - counters.RoundsUsed; remaining > 0 {
+			parts = append(parts, executor.fillText(command, texts.RoundsRemaining,
+				"{remaining}", strconv.Itoa(remaining), "{limit}", strconv.Itoa(counters.RoundsLimit)))
+		}
+	default:
+		if remaining := counters.RendersLimit - counters.RendersInRound; remaining > 0 {
+			parts = append(parts, executor.fillText(command, texts.RendersRemaining,
+				"{remaining}", strconv.Itoa(remaining), "{limit}", strconv.Itoa(counters.RendersLimit)))
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // selfCheckRoundRefusal refuses another inspect round above the Schema's
@@ -115,20 +145,6 @@ func (executor *Executor) selfCheckRenderRefusal(ctx context.Context, command ch
 	}
 	refusal := executor.modelReviewRefusal(command, executor.localized(command, executor.selfChecks.Schema().Texts.LimitReached))
 	return &refusal
-}
-
-// selfCheckKinds returns the check kind of a public tool, read from the Schema
-// tool names rather than repeated literals.
-func (executor *Executor) selfCheckKinds() (record, reference string) {
-	for _, tool := range executor.chat.AgentTools {
-		switch tool.Execution.ImplementationKey {
-		case "self_check.record":
-			record = tool.Name
-		case "model.compare_reference":
-			reference = tool.Name
-		}
-	}
-	return record, reference
 }
 
 // RecordSelfCheck executes record_self_check: it resolves the owner's finished
@@ -203,10 +219,17 @@ func (executor *Executor) RecordSelfCheck(ctx context.Context, command chat.Tool
 	if err != nil {
 		return chat.ToolResult{Error: "self-check record not readable", NoSubmission: true}, nil
 	}
+	// The persisted summary carries the conclusion's role and remaining items,
+	// so the session work ledger (#248) can project this claim onto its step.
+	var remaining []string
+	if record.Conclusion != nil {
+		remaining = record.Conclusion.Remaining
+	}
 	summary, _ := json.Marshal(map[string]any{
 		"tool": "record_self_check", "task_id": string(source.task.ID),
 		"status": counters.StatusID, "status_role": counters.StatusRole,
 		"rounds_used": counters.RoundsUsed, "corrections_used": counters.CorrectionsUsed,
+		"remaining": remaining,
 	})
 	return chat.ToolResult{AgentContent: string(encoded), NoSubmission: true, Summary: summary}, nil
 }
@@ -236,30 +259,51 @@ func (executor *Executor) selfCheckConclusionRefusal(command chat.ToolCommand,
 	}
 }
 
-// attachCorrection counts one paid processing step against the result it
-// changes and adds the self-check counters to the tool result. The step is
-// never refused by the correction limit: the Schema's text asks the Agent to
-// report the remaining issue truthfully instead.
-func (executor *Executor) attachCorrection(ctx context.Context, command chat.ToolCommand,
-	source generation.Task, result chat.ToolResult) chat.ToolResult {
-	if executor.selfChecks == nil || source.ID == "" || result.TaskID == "" {
+// attachOperationCorrection counts the paid processing step this operation
+// really submitted against the result it changes and adds the self-check
+// counters to the tool result. The operation is the idempotency key: a
+// restarted replay, a bound-grant observation or a detached approval that
+// settles the same operation can never count it twice. The step is never
+// refused by the correction limit: the Schema's text asks the Agent to report
+// the remaining issue truthfully instead.
+func (executor *Executor) attachOperationCorrection(ctx context.Context, command chat.ToolCommand,
+	op Operation, result chat.ToolResult) chat.ToolResult {
+	if executor.selfChecks == nil || op.CorrectionTaskID == "" {
 		return result
 	}
-	record, found, err := executor.selfChecks.IncrementCorrections(ctx, command.OwnerID, command.SessionID, string(source.ID))
+	// The Task is already accepted; a stopping turn must not lose its evidence.
+	record, found, err := executor.selfChecks.IncrementCorrectionsOnce(context.WithoutCancel(ctx),
+		command.OwnerID, command.SessionID, op.CorrectionTaskID, CorrectionKey(op))
 	if err != nil {
-		executor.logger.Warn("self-check correction not counted", "task_id", source.ID, "error", err)
+		executor.logger.Warn("self-check correction not counted", "task_id", op.CorrectionTaskID, "error", err)
 		return result
 	}
 	if !found {
 		return result
 	}
 	block := executor.selfCheckBlock(record)
-	counters := executor.selfChecks.Counts(record)
-	note := ""
-	if counters.CorrectionsLimit > 0 && counters.CorrectionsUsed >= counters.CorrectionsLimit {
-		note = executor.localized(command, executor.selfChecks.Schema().Texts.LimitReached)
+	note, remaining := executor.correctionNote(command, executor.selfChecks.Counts(record))
+	if block != nil {
+		block.Message = remaining
 	}
 	return executor.addSelfCheckBlock(result, block, note)
+}
+
+// correctionNote words what the correction counters leave: the Schema's limit
+// reached note when nothing remains, otherwise how many corrections remain.
+func (executor *Executor) correctionNote(command chat.ToolCommand,
+	counters chat.SelfCheckCounters) (note, remaining string) {
+	if counters.CorrectionsLimit <= 0 {
+		return "", ""
+	}
+	texts := executor.selfChecks.Schema().Texts
+	if counters.CorrectionsUsed >= counters.CorrectionsLimit {
+		return executor.localized(command, texts.LimitReached), ""
+	}
+	remaining = executor.fillText(command, texts.CorrectionsRemaining,
+		"{remaining}", strconv.Itoa(counters.CorrectionsLimit-counters.CorrectionsUsed),
+		"{limit}", strconv.Itoa(counters.CorrectionsLimit))
+	return "", remaining
 }
 
 // attachCorrectionReceipt adds the current self-check counters to the receipt
@@ -283,10 +327,9 @@ func (executor *Executor) attachCorrectionReceipt(ctx context.Context, command c
 		return result
 	}
 	block := executor.selfCheckBlock(record)
-	counters := executor.selfChecks.Counts(record)
-	note := ""
-	if counters.CorrectionsLimit > 0 && counters.CorrectionsUsed >= counters.CorrectionsLimit {
-		note = executor.localized(command, executor.selfChecks.Schema().Texts.LimitReached)
+	note, remaining := executor.correctionNote(command, executor.selfChecks.Counts(record))
+	if block != nil {
+		block.Message = remaining
 	}
 	return executor.addSelfCheckBlock(result, block, note)
 }

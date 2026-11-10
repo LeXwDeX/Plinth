@@ -45,10 +45,15 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 	// #246: the browser recognises the self-check tools and renders the three
 	// delivery states by role. Thresholds and prompt text stay server-only.
 	if selfCheck := cloned.Chat.SelfCheck; selfCheck.Tools != (ChatSelfCheckToolsSchema{}) ||
-		len(selfCheck.Statuses) > 0 || selfCheck.Limits != (ChatSelfCheckLimitsSchema{}) {
+		len(selfCheck.Statuses) > 0 || selfCheck.Limits != (ChatSelfCheckLimitsSchema{}) ||
+		len(selfCheck.Checkpoints) > 0 {
 		statuses := make([]PublicChatSelfCheckStatus, 0, len(selfCheck.Statuses))
 		for _, status := range selfCheck.Statuses {
 			statuses = append(statuses, PublicChatSelfCheckStatus{ID: status.ID, Role: status.Role, Label: status.Label})
+		}
+		checkpoints := make([]PublicChatSelfCheckCheckpoint, 0, len(selfCheck.Checkpoints))
+		for _, checkpoint := range selfCheck.Checkpoints {
+			checkpoints = append(checkpoints, PublicChatSelfCheckCheckpoint{ID: checkpoint.ID, Label: checkpoint.Label})
 		}
 		publicChat.SelfCheck = &PublicChatSelfCheckSchema{
 			Tools:    selfCheck.Tools,
@@ -58,6 +63,7 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 				MaxCorrectionsPerResult: selfCheck.Limits.MaxCorrectionsPerResult,
 				MaxRendersPerRound:      selfCheck.Limits.MaxRendersPerRound,
 			},
+			Checkpoints: checkpoints,
 		}
 	}
 	if usage := cloned.Chat.Model3DUsage; len(usage.Profiles) > 0 || len(usage.Brief.Fields) > 0 {

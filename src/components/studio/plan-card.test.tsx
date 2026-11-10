@@ -102,7 +102,10 @@ describe('a production plan waiting for approval (#103)', () => {
     const view = render(<PlanCard plan={checked} budgets={budgets} tasks={[]} />);
     const checks = view.getAllByTestId('studio-plan-step-check');
     expect(checks).toHaveLength(1);
-    expect(checks[0].textContent).toBe(words('ui.studio.plan.checkpoint', { check: 'self_check' }));
+    // The declared label, never the internal checkpoint id.
+    const label = schema.chat.self_check?.checkpoints?.find((checkpoint) => checkpoint.id === 'self_check')?.label;
+    expect(label).toBeTruthy();
+    expect(checks[0].textContent).toBe(words('ui.studio.plan.checkpoint', { check: label! }));
     expect(within(view.getAllByTestId('studio-plan-step')[0]).getByTestId('studio-plan-step-check')).toBeTruthy();
   });
 

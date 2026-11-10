@@ -983,12 +983,13 @@ func workResults(task generation.Task, attachments map[string][]Attachment) []Wo
 	return results
 }
 
-// workSelfChecks attributes the persisted read-only tool summaries to the
-// steps they inspected. inspect_model contributes its pass, unknown and fail
-// counts plus the failed checks' fix hints; inspect_image contributes
-// pass/fail counts; render and compare contribute their failed views. A summary
-// whose model token names no step handle, Task ID or attachment handle is not
-// attached to an invented Task: it is recorded as a diagnosable omission.
+// workSelfChecks attributes the persisted tool summaries to the steps they
+// inspected. inspect_model contributes its pass, unknown and fail counts plus
+// the failed checks' fix hints; inspect_image contributes pass/fail counts;
+// render, compare, compare_model_reference and record_self_check contribute
+// their failed views or the Agent's remaining issues. A summary whose model
+// token names no step handle, Task ID or attachment handle is not attached to
+// an invented Task: it is recorded as a diagnosable omission.
 func workSelfChecks(
 	history []Message,
 	assistantRole string,
@@ -1047,7 +1048,11 @@ func workSelfChecks(
 				TaskID  string   `json:"task_id"`
 				TaskIDs []string `json:"task_ids"`
 				Handle  string   `json:"handle"`
-				Checks  struct {
+				// status_role and remaining are the record_self_check summary:
+				// the Agent's own claim and the issues it left open.
+				StatusRole string   `json:"status_role"`
+				Remaining  []string `json:"remaining"`
+				Checks     struct {
 					Passed int `json:"passed"`
 					Failed int `json:"failed"`
 				} `json:"checks"`
@@ -1125,6 +1130,41 @@ func workSelfChecks(
 						Failed: len(summary.FailedViews), FailedViews: summary.FailedViews,
 					})
 				}
+			case "reference":
+				taskID := summary.TaskID
+				if taskID == "" {
+					taskID = resolve("compare_model_reference", summary.Model)
+				}
+				update(taskID, WorkSelfCheck{
+					Tool: "compare_model_reference", Passed: len(summary.Views),
+					Failed: len(summary.FailedViews), FailedViews: summary.FailedViews,
+				})
+			case "record_self_check":
+				// The Agent's own conclusion is a claim on the step, not a
+				// piece of evidence: a passed conclusion reads as one passed
+				// item, a conclusion with issues keeps what it left open, and
+				// an unchecked conclusion is not projected.
+				check := WorkSelfCheck{Tool: "record_self_check"}
+				switch summary.StatusRole {
+				case SelfCheckRolePassed:
+					check.Passed = 1
+				case SelfCheckRoleIssues:
+					check.Failed = 1
+					for _, item := range summary.Remaining {
+						if item = strings.TrimSpace(item); item != "" {
+							check.Leftovers = append(check.Leftovers, WorkLeftover{
+								Check: truncateRunes(item, 120),
+							})
+						}
+					}
+				default:
+					continue
+				}
+				taskID := summary.TaskID
+				if taskID == "" {
+					taskID = resolve("record_self_check", summary.Model)
+				}
+				update(taskID, check)
 			}
 		}
 	}

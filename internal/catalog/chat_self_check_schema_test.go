@@ -108,13 +108,19 @@ func TestPublicSelfCheckProjectionKeepsOnlyTheBrowserContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, hidden := range []string{"subject_threshold", "normalized_side", "context_template", "unchecked_rule_text",
-		"record_needs_check", "max_summary_characters", "checkpoints", "max_pairs_per_call"} {
+		"record_needs_check", "max_summary_characters", "max_pairs_per_call"} {
 		if strings.Contains(string(encoded), hidden) {
 			t.Fatalf("the public projection leaks %q: %s", hidden, encoded)
 		}
 	}
 	if len(public.Chat.SelfCheck.Statuses) != 3 || public.Chat.SelfCheck.Limits.MaxRoundsPerResult <= 0 {
 		t.Fatalf("public self_check = %+v", public.Chat.SelfCheck)
+	}
+	// #246: the plan card renders the declared label, so the checkpoint ids
+	// and labels are public even though the rest of the record stays hidden.
+	checkpoints := public.Chat.SelfCheck.Checkpoints
+	if len(checkpoints) == 0 || checkpoints[0].ID == "" || checkpoints[0].Label == "" {
+		t.Fatalf("public checkpoints = %+v", checkpoints)
 	}
 }
 

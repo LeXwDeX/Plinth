@@ -40,8 +40,9 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"chat.model_review":       {"tools"},
 		"chat.model_review.tools": {"inspect", "render", "compare"},
 		// #246: the browser sees the tool names, the three delivery states by
-		// role and the display limits; thresholds and prompts stay server-side.
-		"chat.self_check":                   {"tools", "statuses", "limits"},
+		// role, the display limits and the plan checkpoints' labels; thresholds
+		// and prompts stay server-side.
+		"chat.self_check":                   {"tools", "statuses", "limits", "checkpoints"},
 		"chat.self_check.tools":             {"record", "reference_compare"},
 		"chat.self_check.limits":            {"max_rounds_per_result", "max_corrections_per_result", "max_renders_per_round"},
 		"chat.model3d_usage":                {"profiles", "brief"},

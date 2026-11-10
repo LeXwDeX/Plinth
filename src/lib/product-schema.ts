@@ -1743,10 +1743,17 @@ export interface ChatSelfCheckLimitsSchema {
   max_renders_per_round: number;
 }
 
+/** A declared plan checkpoint; the card shows its label, never the id. */
+export interface ChatSelfCheckCheckpointSchema {
+  id: string;
+  label: string;
+}
+
 export interface ChatSelfCheckSchema {
   tools?: ChatSelfCheckToolsSchema;
   statuses?: ChatSelfCheckStatusSchema[];
   limits?: ChatSelfCheckLimitsSchema;
+  checkpoints?: ChatSelfCheckCheckpointSchema[];
 }
 
 export interface ChatModel3DProfileSchema {

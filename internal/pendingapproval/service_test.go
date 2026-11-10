@@ -155,6 +155,9 @@ type world struct {
 	// ones the turn gave (#329 E), 0 of 0 when nothing was left out.
 	tool                            string
 	referencesUsed, referencesGiven int
+	// correctionTaskID is the result a next approval changes (#246); empty
+	// for tools that do not correct a finished result.
+	correctionTaskID string
 	// capability is the capability frozen with the next prepared input. It is
 	// TextTo3D unless a test names another one.
 	capability generation.Capability
@@ -197,12 +200,20 @@ func chatService(t *testing.T, repo *sqlite.Repository, schema catalog.ChatSchem
 
 func openWorld(t *testing.T, path string, ttl time.Duration) *world {
 	t.Helper()
-	return openWorldWithChat(t, path, ttl, nil)
+	return openWorldWithConfig(t, path, ttl, nil, nil)
 }
 
 // openWorldWithChat additionally decorates the chat service the approval
 // service posts through; message assertions still read the real store.
 func openWorldWithChat(t *testing.T, path string, ttl time.Duration, wrap func(pendingapproval.Chat) pendingapproval.Chat) *world {
+	t.Helper()
+	return openWorldWithConfig(t, path, ttl, wrap, nil)
+}
+
+// openWorldWithConfig lets a test complete the service configuration, for
+// example with the self-check correction callback (#246).
+func openWorldWithConfig(t *testing.T, path string, ttl time.Duration,
+	wrap func(pendingapproval.Chat) pendingapproval.Chat, configure func(*pendingapproval.Config)) *world {
 	t.Helper()
 	repo, err := sqlitetest.Open(path)
 	if err != nil {
@@ -230,7 +241,7 @@ func openWorldWithChat(t *testing.T, path string, ttl time.Duration, wrap func(p
 	if wrap != nil {
 		approvalChat = wrap(chats)
 	}
-	service, err := pendingapproval.New(pendingapproval.Config{
+	config := pendingapproval.Config{
 		// This fixture supplies historical calls only. Agent-source submission is
 		// exercised through the production App verifier, never this legacy stub.
 		VerifyPreparedSource: func(ctx context.Context, op generationtool.Operation, p generation.PreparedInput) error {
@@ -245,7 +256,11 @@ func openWorldWithChat(t *testing.T, path string, ttl time.Duration, wrap func(p
 		},
 		Operations: repo, Grants: grants, Gateway: gateway, Chat: approvalChat, Schema: schema, Texts: texts,
 		DefaultLocale: product.Application().Runtime.Frontend.DisplayLocale,
-	})
+	}
+	if configure != nil {
+		configure(&config)
+	}
+	service, err := pendingapproval.New(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +337,8 @@ func (w *world) approval(callID string, detach bool) (generationtool.Operation, 
 		ToolName: w.toolName(), CommandHash: "hash-" + callID, IdempotencyKey: "key-" + callID,
 		PreparedInputID: prepared.ID, PreparedInputHash: prepared.InputHash,
 		OfferingID: prepared.OfferingID, OfferingRevision: prepared.OfferingRevision, Harness: w.binding,
-		RechargeTaskID: w.recharge, ReferenceCount: w.referencesUsed, ReferenceTotal: w.referencesGiven,
+		RechargeTaskID: w.recharge, CorrectionTaskID: w.correctionTaskID,
+		ReferenceCount: w.referencesUsed, ReferenceTotal: w.referencesGiven,
 		ReferenceSource: w.referenceSource})
 	if err != nil {
 		w.t.Fatal(err)

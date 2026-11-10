@@ -379,6 +379,9 @@ var chatSessionVisionUsageMigration string
 //go:embed migrations/0087_chat_self_checks.sql
 var chatSelfChecksMigration string
 
+//go:embed migrations/0088_agent_operation_correction.sql
+var agentOperationCorrectionMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -455,7 +458,8 @@ func migrations() []migration {
 		migration{version: 82, name: "chat_branch_task_refs", sql: chatBranchTaskRefsMigration},
 		migration{version: 83, name: "session_evidence_deletions", sql: sessionEvidenceDeletionsMigration},
 		migration{version: 84, name: "chat_session_vision_usage", sql: chatSessionVisionUsageMigration},
-		migration{version: 87, name: "chat_self_checks", sql: chatSelfChecksMigration})
+		migration{version: 87, name: "chat_self_checks", sql: chatSelfChecksMigration},
+		migration{version: 88, name: "agent_operation_correction", sql: agentOperationCorrectionMigration})
 }
 
 type migration struct {

@@ -3120,7 +3120,6 @@
         "ui.chat.self_check.expand": "展开详情",
         "ui.chat.self_check.collapse": "收起详情",
         "ui.chat.self_check.load_failed": "自检记录读取失败",
-        "ui.chat.self_check.previous_rounds": "早期回合的记录仍可读取",
         "ui.chat.review.record_title": "自检记录",
         "ui.chat.review.summary_count": "{count} 项检查",
         "ui.chat.review.summary_count_one": "{count} 项检查",
@@ -6118,7 +6117,6 @@
           "context_template": "\n\n【3D 自检状态】以下是本会话 3D 结果的交付状态（服务端事实，不是指令）。每个结果一行：{results}\n{rule}",
           "task_line_template": "- {task_id}｜{status}｜轮次 {rounds_used}/{rounds_limit}｜本轮渲染 {renders_in_round}/{renders_limit}｜修正 {corrections_used}/{corrections_limit}{background}{summary}",
           "unchecked_rule_text": "未自检的结果不得说成已检查。交付前用 compare_model_reference 对照参考图、用 inspect_model 与 render_model_views 检查，再用 record_self_check 写结论；写下结论后新的检查会让它回到未自检。",
-          "no_records_text": "本会话还没有完成可自检的 3D 结果。",
           "background_text": "后台完成，待自检"
         },
         "texts": {
@@ -6137,7 +6135,6 @@
           "record_invalid_arguments": "The self-check arguments were rejected: {detail}. Nothing was saved.",
           "record_unknown_task": "No finished 3D model with a saved model file matches {model} in this session. Nothing was saved.",
           "reference_ready": "Compared {model} with {image} in view {view}: silhouette IoU {iou}.",
-          "reference_missing": "The reference picture for view {view} is missing. Nothing was compared for that view.",
           "reference_unreadable": "Reference picture {handle} cannot be read: {reason}. Nothing was compared for that view.",
           "reference_no_reference": "This task has no frozen reference picture. Pass image (a picture of this session) or pairs to compare against, or use inspect_model and render_model_views instead.",
           "caveats": "The deterministic metrics are a reference, not a verdict: the renderer uses approximate PBR, reads GLB only, frames each subject by its own bounding box and assumes the reference view. Judge the side-by-side picture yourself."
@@ -14504,7 +14501,6 @@
             "ui.chat.self_check.expand": "Show details",
             "ui.chat.self_check.collapse": "Hide details",
             "ui.chat.self_check.load_failed": "The self-check record could not be read",
-            "ui.chat.self_check.previous_rounds": "Records from earlier rounds remain readable",
             "ui.chat.review.record_title": "Self-check record",
             "ui.chat.review.summary_count": "{count} checks",
             "ui.chat.review.summary_count_one": "{count} check",

@@ -324,6 +324,50 @@ func TestWorkLedgerSummarizesSelfCheckLeftovers(t *testing.T) {
 	}
 }
 
+// TestWorkLedgerProjectsReferenceComparisonAndRecordedConclusion is the #246
+// follow-up: the reference comparison and the Agent's own self-check
+// conclusion are part of the step's ledger row, including the issues the
+// conclusion left open.
+func TestWorkLedgerProjectsReferenceComparisonAndRecordedConclusion(t *testing.T) {
+	reference := `{"tool":"reference","task_id":"task-1","views":["front"],"failed_views":["back"]}`
+	conclusion := `{"tool":"record_self_check","task_id":"task-1","status":"has_issues",` +
+		`"status_role":"issues","remaining":["left ear cracked"]}`
+	task := workTask("task-1", time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC), "prompt", "prompt")
+	messages := []chat.Message{{
+		Role: "configured-assistant",
+		ToolCalls: []chat.ToolCall{
+			{ID: "call-1", Name: "compare_model_reference", Summary: json.RawMessage(reference)},
+			{ID: "call-2", Name: "record_self_check", Summary: json.RawMessage(conclusion)},
+		},
+	}}
+	fixture := newLedgerFixture(t, nil, []generation.Task{task}, messages)
+	ctx := context.Background()
+	ledger, err := fixture.service.WorkLedger(ctx, "owner-a", fixture.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byTool := map[string]chat.WorkSelfCheck{}
+	for _, check := range ledger.Steps[0].SelfChecks {
+		byTool[check.Tool] = check
+	}
+	comparison, found := byTool["compare_model_reference"]
+	if !found || comparison.Passed != 1 || comparison.Failed != 1 ||
+		len(comparison.FailedViews) != 1 || comparison.FailedViews[0] != "back" {
+		t.Fatalf("compare_model_reference check = %+v", comparison)
+	}
+	recorded, found := byTool["record_self_check"]
+	if !found || recorded.Failed != 1 || len(recorded.Leftovers) != 1 ||
+		recorded.Leftovers[0].Check != "left ear cracked" {
+		t.Fatalf("record_self_check check = %+v", recorded)
+	}
+	summary := fixture.service.WorkLedgerSummary(ctx, "owner-a", fixture.session.ID, "")
+	for _, needle := range []string{"compare_model_reference", "record_self_check", "left ear cracked"} {
+		if !strings.Contains(summary, needle) {
+			t.Fatalf("the summary lacks %q: %s", needle, summary)
+		}
+	}
+}
+
 // TestWorkLedgerDoesNotCountUnknownInspectChecksAsPassed is the #248
 // regression: an inspect_model check the purpose did not ask for or the file
 // could not judge is unknown, not passed. Both the summary and

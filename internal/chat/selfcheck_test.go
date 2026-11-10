@@ -297,3 +297,49 @@ func TestSelfCheckServiceUnavailableStore(t *testing.T) {
 		t.Fatalf("unavailable list err = %v", err)
 	}
 }
+
+// TestSelfCheckCorrectionCountsAKeyedPaidStepOnce is the #246 regression: the
+// same paid submission can reach the count from a restarted turn, a bound-task
+// observation or a retried approval, but corrections_used advances once per
+// key and the conclusion is invalidated only by the first real correction.
+func TestSelfCheckCorrectionCountsAKeyedPaidStepOnce(t *testing.T) {
+	schema := testSelfCheckSchema(t)
+	store := newMemorySelfCheckStore()
+	service := chat.NewSelfCheckService(store, schema)
+	ctx := context.Background()
+	if _, err := service.AppendCheck(ctx, "owner-a", "session-a", "task-a", "", chat.SelfCheckCheck{
+		Kind: chat.SelfCheckKindInspect, Tool: "inspect_model", OK: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.AppendCheck(ctx, "owner-a", "session-a", "task-a", "", chat.SelfCheckCheck{
+		Kind: chat.SelfCheckKindRender, Tool: "render_model_views", OK: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RecordConclusion(ctx, "owner-a", "session-a", "task-a", "",
+		chat.SelfCheckConclusion{Status: "passed", Summary: "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	first, found, err := service.IncrementCorrectionsOnce(ctx, "owner-a", "session-a", "task-a", "operation:op-1")
+	if err != nil || !found || first.CorrectionsUsed != 1 || first.Conclusion != nil {
+		t.Fatalf("first correction = %+v found=%v err=%v", first, found, err)
+	}
+	replayed, found, err := service.IncrementCorrectionsOnce(ctx, "owner-a", "session-a", "task-a", "operation:op-1")
+	if err != nil || !found || replayed.CorrectionsUsed != 1 || replayed.Revision != first.Revision {
+		t.Fatalf("replayed correction = %+v found=%v err=%v", replayed, found, err)
+	}
+	second, found, err := service.IncrementCorrectionsOnce(ctx, "owner-a", "session-a", "task-a", "operation:op-2")
+	if err != nil || !found || second.CorrectionsUsed != 2 || len(second.CorrectionKeys) != 2 {
+		t.Fatalf("second correction = %+v found=%v err=%v", second, found, err)
+	}
+	// The keys survive the stored wire document; a foreign session cannot
+	// count the result at all.
+	stored, found, err := store.SelfCheck(ctx, "owner-a", "session-a", "task-a")
+	if err != nil || !found || len(stored.CorrectionKeys) != 2 {
+		t.Fatalf("stored record = %+v found=%v err=%v", stored, found, err)
+	}
+	if _, found, err := service.IncrementCorrectionsOnce(ctx, "owner-b", "session-a", "task-a", "operation:op-3"); err != nil || found {
+		t.Fatalf("foreign correction found=%v err=%v", found, err)
+	}
+}

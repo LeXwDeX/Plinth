@@ -26,11 +26,12 @@ vi.mock('@/hooks/use-asset-url-rewriter', () => ({
 }));
 // The server is the only source of records; the test answers each read from
 // whatever the fake server currently holds.
-const server = vi.hoisted(() => ({ calls: 0, records: [] as unknown[] }));
+const server = vi.hoisted(() => ({ calls: 0, records: [] as unknown[], fail: false }));
 vi.mock('@/lib/chat/browser-client', () => ({
   createChatBrowserClient: () => ({
     getSelfChecks: async () => {
       server.calls += 1;
+      if (server.fail) throw new Error('self-check read failed');
       return server.records;
     },
   }),
@@ -67,6 +68,7 @@ function Conversation({ laterStreaming }: { laterStreaming: boolean }) {
 beforeEach(() => {
   server.calls = 0;
   server.records = [];
+  server.fail = false;
   // jsdom has no media queries; the streaming spinner reads prefers-reduced-motion.
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
@@ -94,5 +96,14 @@ describe('the result card follows records written by a later turn (#246)', () =>
     expect(badge().textContent).toBe(messages['ui.chat.self_check.status_passed']);
     // The earlier reply also shows the folded record card, without a reload.
     expect(view.getByTestId('chat-self-check-record').textContent).toContain('matches the reference');
+  });
+
+  // #246: a failed read is said out loud; the card never presents the failure
+  // as a real "unchecked" state.
+  it('says the session records could not be read', async () => {
+    server.fail = true;
+    const view = render(<Conversation laterStreaming={false} />);
+    await waitFor(() => expect(view.getByTestId('chat-self-check-load-failed')).toBeTruthy());
+    expect(view.getByTestId('chat-self-check-load-failed').textContent).toBe(messages['ui.chat.self_check.load_failed']);
   });
 });

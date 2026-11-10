@@ -82,9 +82,13 @@ type SelfCheckRecord struct {
 	Checks          []SelfCheckCheck     `json:"checks"`
 	Conclusion      *SelfCheckConclusion `json:"conclusion,omitempty"`
 	CorrectionsUsed int                  `json:"corrections_used"`
-	Revision        int64                `json:"-"`
-	CreatedAt       time.Time            `json:"created_at"`
-	UpdatedAt       time.Time            `json:"updated_at"`
+	// CorrectionKeys are the paid steps already counted, by stable operation
+	// or call identity (#246). They make a correction exactly-once across a
+	// restarted turn or an approval the background sweep retries.
+	CorrectionKeys []string  `json:"correction_keys,omitempty"`
+	Revision       int64     `json:"-"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // SelfCheckCounters is the derived state the tools and the prompt report.
@@ -117,6 +121,7 @@ type selfCheckJSON struct {
 	Checks          []SelfCheckCheck     `json:"checks"`
 	Conclusion      *SelfCheckConclusion `json:"conclusion,omitempty"`
 	CorrectionsUsed int                  `json:"corrections_used"`
+	CorrectionKeys  []string             `json:"correction_keys,omitempty"`
 	CreatedAt       time.Time            `json:"created_at"`
 	UpdatedAt       time.Time            `json:"updated_at"`
 }
@@ -134,6 +139,7 @@ func EncodeSelfCheckRecord(record SelfCheckRecord) (string, error) {
 		Checks:          checks,
 		Conclusion:      record.Conclusion,
 		CorrectionsUsed: record.CorrectionsUsed,
+		CorrectionKeys:  record.CorrectionKeys,
 		CreatedAt:       record.CreatedAt,
 		UpdatedAt:       record.UpdatedAt,
 	})
@@ -156,6 +162,7 @@ func DecodeSelfCheckRecord(raw string, revision int64) (SelfCheckRecord, error) 
 		Checks:          document.Checks,
 		Conclusion:      document.Conclusion,
 		CorrectionsUsed: document.CorrectionsUsed,
+		CorrectionKeys:  document.CorrectionKeys,
 		Revision:        revision,
 		CreatedAt:       document.CreatedAt,
 		UpdatedAt:       document.UpdatedAt,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -201,12 +202,16 @@ func (service *SelfCheckService) RecordConclusion(ctx context.Context, owner, se
 	return record, err
 }
 
-// IncrementCorrections counts one paid correction step against the result it
-// changes. A correction is new evidence too, so a written conclusion is
-// invalidated and the state returns to unchecked. A result without a record
-// stays without one: a correction of an unchecked result is already visible as
-// unchecked, and recording a paid step as self-check evidence would be false.
-func (service *SelfCheckService) IncrementCorrections(ctx context.Context, owner, session, taskID string) (SelfCheckRecord, bool, error) {
+// IncrementCorrectionsOnce counts one paid correction step against the result
+// it changes. key identifies the paid step (an operation, a tool call); a key
+// that is already on the record makes this a no-op, so a restarted turn and a
+// retried detached approval cannot count the same submission twice. A
+// correction is new evidence too, so a written conclusion is invalidated and
+// the state returns to unchecked. A result without a record stays without one:
+// a correction of an unchecked result is already visible as unchecked, and
+// recording a paid step as self-check evidence would be false.
+func (service *SelfCheckService) IncrementCorrectionsOnce(ctx context.Context, owner, session, taskID,
+	key string) (SelfCheckRecord, bool, error) {
 	if !service.available() {
 		return SelfCheckRecord{}, false, ErrSelfCheckUnavailable
 	}
@@ -214,7 +219,17 @@ func (service *SelfCheckService) IncrementCorrections(ctx context.Context, owner
 	if err != nil || !found {
 		return SelfCheckRecord{}, found, err
 	}
+	key = strings.TrimSpace(key)
+	if key != "" && slices.Contains(record.CorrectionKeys, key) {
+		return record, true, nil
+	}
 	next, err := service.mutate(ctx, owner, session, taskID, record.ModelAssetID, func(record *SelfCheckRecord) error {
+		if key != "" {
+			if slices.Contains(record.CorrectionKeys, key) {
+				return nil
+			}
+			record.CorrectionKeys = append(record.CorrectionKeys, key)
+		}
 		record.CorrectionsUsed++
 		record.Conclusion = nil
 		return nil

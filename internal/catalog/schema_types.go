@@ -1318,6 +1318,15 @@ type PublicChatSelfCheckSchema struct {
 	Tools    ChatSelfCheckToolsSchema    `json:"tools"`
 	Statuses []PublicChatSelfCheckStatus `json:"statuses"`
 	Limits   PublicChatSelfCheckLimits   `json:"limits"`
+	// Checkpoints are the declared plan check ids with their labels (#246):
+	// the plan card shows the label, never the internal id.
+	Checkpoints []PublicChatSelfCheckCheckpoint `json:"checkpoints"`
+}
+
+// PublicChatSelfCheckCheckpoint is one plan checkpoint the browser can label.
+type PublicChatSelfCheckCheckpoint struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
 }
 
 // PublicChatSelfCheckStatus is one declared delivery state. Role is the only
@@ -2387,7 +2396,6 @@ type ChatSelfCheckContextSchema struct {
 	ContextTemplate   string `json:"context_template"`
 	TaskLineTemplate  string `json:"task_line_template"`
 	UncheckedRuleText string `json:"unchecked_rule_text"`
-	NoRecordsText     string `json:"no_records_text"`
 	// BackgroundText marks a result the person stopped waiting for; the
 	// prompt lists it as pending self-check on the next turn.
 	BackgroundText string `json:"background_text"`
@@ -2410,7 +2418,6 @@ type ChatSelfCheckTextsSchema struct {
 	RecordInvalidArguments   string `json:"record_invalid_arguments"`
 	RecordUnknownTask        string `json:"record_unknown_task"`
 	ReferenceReady           string `json:"reference_ready"`
-	ReferenceMissing         string `json:"reference_missing"`
 	ReferenceUnreadable      string `json:"reference_unreadable"`
 	ReferenceNoReference     string `json:"reference_no_reference"`
 	Caveats                  string `json:"caveats"`
