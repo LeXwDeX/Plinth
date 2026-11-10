@@ -484,3 +484,82 @@ func TestAlignmentReportIsCommittedAndClean(t *testing.T) {
 		}
 	}
 }
+
+// #247: the fake records what each chat request carried, so the fake stack can
+// assert details without reading picture bytes.
+func TestChatRequestsAreRecordedForTheVisionBudget(t *testing.T) {
+	fake, err := fakeupstream.New(fakeupstream.Config{}, Version())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(fake)
+	defer server.Close()
+	body := map[string]any{
+		"model": "fake-vision-model",
+		"messages": []any{map[string]any{
+			"role": "user",
+			"content": []any{
+				map[string]any{"type": "text", "text": "look at these"},
+				map[string]any{"type": "image_url", "image_url": map[string]any{
+					"url": "data:image/png;base64,AAAA", "detail": "high",
+				}},
+				map[string]any{"type": "image_url", "image_url": map[string]any{
+					"url": "data:image/png;base64,BBBB", "detail": "low",
+				}},
+			},
+		}},
+	}
+	raw, _ := json.Marshal(body)
+	request, err := http.NewRequest(http.MethodPost, server.URL+Prefix+"/chat/completions", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer fake-test-key")
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+
+	records := fake.Env().ChatRequests()
+	if len(records) != 1 || records[0].Model != "fake-vision-model" || len(records[0].Messages) != 1 {
+		t.Fatalf("records = %+v", records)
+	}
+	message := records[0].Messages[0]
+	if message.Role != "user" || !strings.Contains(message.Text, "look at these") || len(message.Images) != 2 {
+		t.Fatalf("message record = %+v", message)
+	}
+	if message.Images[0].Detail != "high" || message.Images[0].Detail == message.Images[1].Detail ||
+		!message.Images[0].DataURI || message.Images[0].Bytes != 3 {
+		t.Fatalf("image records = %+v", message.Images)
+	}
+
+	// The control route is readable and clearable outside every version prefix.
+	control, err := http.Get(server.URL + fakeupstream.ChatRequestsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed struct {
+		Requests []fakeupstream.ChatRequestRecord `json:"requests"`
+	}
+	if err := json.NewDecoder(control.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	_ = control.Body.Close()
+	if len(listed.Requests) != 1 {
+		t.Fatalf("control requests = %+v", listed.Requests)
+	}
+	clear, err := http.NewRequest(http.MethodDelete, server.URL+fakeupstream.ChatRequestsPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := http.DefaultClient.Do(clear)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = deleted.Body.Close()
+	if deleted.StatusCode != http.StatusNoContent || len(fake.Env().ChatRequests()) != 0 {
+		t.Fatalf("clear: %d, records=%+v", deleted.StatusCode, fake.Env().ChatRequests())
+	}
+}

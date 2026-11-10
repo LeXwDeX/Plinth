@@ -1,15 +1,22 @@
 package openaiimagesv1
 
 import (
+	"bytes"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"io"
 	"io/fs"
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
@@ -184,6 +191,9 @@ type request struct {
 	model  string
 	form   map[string]string
 	hasImg bool
+	// count is the requested candidate count (n): 1..10. The recorded samples
+	// only ever ask for one, so n>1 is a constructed-from-docs behavior.
+	count int
 }
 
 func readRequest(r *http.Request, endpoint string) (request, bool) {
@@ -194,8 +204,13 @@ func readRequest(r *http.Request, endpoint string) (request, bool) {
 			return out, false
 		}
 		for key, value := range body {
-			if text, ok := value.(string); ok {
-				out.form[key] = text
+			switch typed := value.(type) {
+			case string:
+				out.form[key] = typed
+			case float64:
+				if key == "n" {
+					out.count = int(typed)
+				}
 			}
 		}
 	} else {
@@ -216,6 +231,11 @@ func readRequest(r *http.Request, endpoint string) (request, bool) {
 			case part.FileName() == "":
 				out.form[name] = string(data)
 			}
+		}
+	}
+	if out.count == 0 {
+		if parsed, err := strconv.Atoi(strings.TrimSpace(out.form["n"])); err == nil {
+			out.count = parsed
 		}
 	}
 	out.prompt, out.model = strings.TrimSpace(out.form["prompt"]), strings.TrimSpace(out.form["model"])
@@ -269,8 +289,34 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request, endpoint string
 	}
 	body := fakeupstream.Clone(h.ok[endpoint])
 	if list, ok := body["data"].([]any); ok && len(list) > 0 {
-		if item, ok := list[0].(map[string]any); ok {
-			item["b64_json"] = base64.StdEncoding.EncodeToString(data)
+		if template, ok := list[0].(map[string]any); ok {
+			// n is documented by the official Create image reference. The
+			// committed samples only ask for one picture, so returning n
+			// distinct pictures is constructed-from-docs.
+			count := req.count
+			if count < 1 {
+				count = 1
+			}
+			if count > 10 {
+				count = 10
+			}
+			items := make([]any, 0, count)
+			for index := 0; index < count; index++ {
+				item := fakeupstream.Clone(template)
+				candidate := data
+				if count > 1 {
+					candidate = candidatePNG(index)
+				}
+				if scenario == fakeupstream.ScenarioArtifactCorrupt {
+					candidate = fakeupstream.Corrupt(candidate)
+				}
+				item["b64_json"] = base64.StdEncoding.EncodeToString(candidate)
+				if _, exists := item["generation_id"]; exists {
+					item["generation_id"] = fmt.Sprintf("id-%d", index+1)
+				}
+				items = append(items, item)
+			}
+			body["data"] = items
 		}
 	}
 	for _, field := range []string{"size", "quality", "output_format", "background"} {
@@ -279,4 +325,17 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request, endpoint string
 		}
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// candidatePNG returns a deterministic solid-colour picture whose bytes differ
+// per candidate. It is fake fixture data, not a Provider response.
+func candidatePNG(index int) []byte {
+	picture := image.NewRGBA(image.Rect(0, 0, 256, 256))
+	shade := uint8(40 + index*18)
+	draw.Draw(picture, picture.Bounds(), &image.Uniform{
+		C: color.RGBA{R: shade, G: uint8(180 - index*12), B: uint8(90 + index*8), A: 255},
+	}, image.Point{}, draw.Src)
+	var encoded bytes.Buffer
+	_ = png.Encode(&encoded, picture)
+	return encoded.Bytes()
 }

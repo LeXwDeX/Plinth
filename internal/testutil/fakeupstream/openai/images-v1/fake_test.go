@@ -263,3 +263,30 @@ func TestEndpointTableIsCompleteAndHonest(t *testing.T) {
 func TestAlignmentReportIsCommittedAndClean(t *testing.T) {
 	testkit.AssertAlignmentReport(t, "testdata/alignment-report.json", OfficialBase, true)
 }
+
+// #247: n returns that many distinct candidates. The committed samples only
+// ask for one, so this is a constructed-from-docs behavior.
+func TestGenerationReturnsEveryRequestedCandidate(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	status, body := generate(f, map[string]any{"model": Model, "prompt": "six cubes", "n": 6})
+	if status != http.StatusOK {
+		t.Fatalf("generation: %d %v", status, body)
+	}
+	data, ok := body["data"].([]any)
+	if !ok || len(data) != 6 {
+		t.Fatalf("data = %#v; want 6 candidates", body["data"])
+	}
+	seen := map[string]bool{}
+	for index, raw := range data {
+		item, _ := raw.(map[string]any)
+		encoded, _ := item["b64_json"].(string)
+		if encoded == "" || seen[encoded] {
+			t.Fatalf("candidate %d is empty or duplicated", index)
+		}
+		seen[encoded] = true
+		bytes, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil || len(bytes) == 0 {
+			t.Fatalf("candidate %d does not decode: %v", index, err)
+		}
+	}
+}
