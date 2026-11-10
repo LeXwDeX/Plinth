@@ -1,0 +1,381 @@
+{
+  "version": 1,
+  "description": "Agent 产出质量评测的固定请求集（#238）。轨迹评测用 steps 中的 tool 驱动 fake LLM；产出评测只发送 prompt，由真实 Agent 自行决定工具。用途取自 Product Schema chat.model3d_usage.profiles。",
+  "requests": [
+    {
+      "id": "3d-humanoid-character",
+      "title": "人形角色：赛博朋克女刺客（游戏角色）",
+      "modality": "3d",
+      "category": "humanoid_character",
+      "purpose": "game_character",
+      "prompt": "开始做一个赛博朋克风格的女刺客，全身，准备放进 Unity 做游戏角色，要能绑骨。",
+      "reference_images": [],
+      "deliverables": ["可导入引擎的 3D 模型（GLB）", "正面、背面与 3/4 视角渲染", "几何与用途预算自检"],
+      "steps": [
+        {
+          "user": "用途是游戏角色，先把用途记下来。",
+          "tool": {"name": "ask_choice", "arguments": {"kind": "usage_profile"}}
+        },
+        {
+          "user": "按游戏角色的默认设置继续。",
+          "tool": {"name": "update_production_brief", "arguments": {"purpose": "game_character", "target_platform": "Unity", "needs_rig": true, "style": "cyberpunk"}}
+        },
+        {
+          "user": "开始建模。",
+          "tool": {"name": "create_model_3d", "arguments": {"prompt": "cyberpunk female assassin, full body, A-pose, game character, dark techwear jacket, neon accents, detailed face, realistic stylized"}}
+        },
+        {
+          "user": "检查一下几何和用途预算。",
+          "tool": {"name": "inspect_model", "arguments": {"model": "@model1"}}
+        },
+        {
+          "user": "渲染正面、背面和 3/4 视角。",
+          "tool": {"name": "render_model_views", "arguments": {"model": "@model1", "views": ["front", "back", "three_quarter"]}}
+        }
+      ],
+      "live_followups": ["请按默认设置继续完成。", "请渲染正面、背面和 3/4 视角供验收。"],
+      "expected": {
+        "capabilities": ["text-to-3d"],
+        "required_tool_groups": [
+          {"id": "usage", "any": ["ask_choice"]},
+          {"id": "brief", "any": ["update_production_brief"]},
+          {"id": "generate_3d", "any": ["create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views"]}
+        ],
+        "order": [
+          {"before": ["ask_choice", "update_production_brief"], "after": ["create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views"]}
+        ],
+        "soft_tools": ["inspect_model", "render_model_views"],
+        "budgets": {"max_paid_calls": 1, "max_tool_calls": 12, "max_interruptions": 2}
+      }
+    },
+    {
+      "id": "3d-hard-surface-prop",
+      "title": "硬表面道具：低多边形科幻能量步枪（游戏道具）",
+      "modality": "3d",
+      "category": "hard_surface_prop",
+      "purpose": "game_prop",
+      "prompt": "开始做一个低多边形科幻能量步枪，硬表面，游戏里用的道具。",
+      "reference_images": [],
+      "deliverables": ["可导入引擎的 3D 模型（GLB）", "正面、背面与 3/4 视角渲染", "几何与用途预算自检"],
+      "steps": [
+        {
+          "user": "用途是游戏道具，先把用途记下来。",
+          "tool": {"name": "ask_choice", "arguments": {"kind": "usage_profile"}}
+        },
+        {
+          "user": "按游戏道具的默认设置继续。",
+          "tool": {"name": "update_production_brief", "arguments": {"purpose": "game_prop", "target_platform": "Unreal", "style": "low-poly hard surface"}}
+        },
+        {
+          "user": "开始建模。",
+          "tool": {"name": "create_model_3d", "arguments": {"prompt": "low-poly sci-fi energy rifle, hard surface, chunky angular silhouette, game prop, dark metal with cyan energy cell"}}
+        },
+        {
+          "user": "检查一下几何和用途预算。",
+          "tool": {"name": "inspect_model", "arguments": {"model": "@model1"}}
+        },
+        {
+          "user": "渲染正面、背面和 3/4 视角。",
+          "tool": {"name": "render_model_views", "arguments": {"model": "@model1", "views": ["front", "back", "three_quarter"]}}
+        }
+      ],
+      "live_followups": ["请按默认设置继续完成。", "请渲染正面、背面和 3/4 视角供验收。"],
+      "expected": {
+        "capabilities": ["text-to-3d"],
+        "required_tool_groups": [
+          {"id": "usage", "any": ["ask_choice"]},
+          {"id": "brief", "any": ["update_production_brief"]},
+          {"id": "generate_3d", "any": ["create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views"]}
+        ],
+        "order": [
+          {"before": ["ask_choice", "update_production_brief"], "after": ["create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views"]}
+        ],
+        "soft_tools": ["inspect_model", "render_model_views"],
+        "budgets": {"max_paid_calls": 1, "max_tool_calls": 12, "max_interruptions": 2}
+      }
+    },
+    {
+      "id": "3d-scene-piece",
+      "title": "场景件：石砌水井（游戏场景小件）",
+      "modality": "3d",
+      "category": "scene_piece",
+      "purpose": "game_prop",
+      "prompt": "开始做一个石砌水井的场景小件，风格化的，游戏场景用。",
+      "reference_images": [],
+      "deliverables": ["可导入引擎的 3D 模型（GLB）", "正面、背面与 3/4 视角渲染", "几何与用途预算自检"],
+      "steps": [
+        {
+          "user": "用途是游戏场景件，先把用途记下来。",
+          "tool": {"name": "ask_choice", "arguments": {"kind": "usage_profile"}}
+        },
+        {
+          "user": "按游戏道具与场景件的默认设置继续。",
+          "tool": {"name": "update_production_brief", "arguments": {"purpose": "game_prop", "target_platform": "Unity", "style": "stylized hand-painted"}}
+        },
+        {
+          "user": "开始建模。",
+          "tool": {"name": "create_model_3d", "arguments": {"prompt": "stylized stone well, scene prop, chunky masonry, wooden roof and bucket, hand-painted game art style"}}
+        },
+        {
+          "user": "检查一下几何和用途预算。",
+          "tool": {"name": "inspect_model", "arguments": {"model": "@model1"}}
+        },
+        {
+          "user": "渲染正面、背面和 3/4 视角。",
+          "tool": {"name": "render_model_views", "arguments": {"model": "@model1", "views": ["front", "back", "three_quarter"]}}
+        }
+      ],
+      "live_followups": ["请按默认设置继续完成。", "请渲染正面、背面和 3/4 视角供验收。"],
+      "expected": {
+        "capabilities": ["text-to-3d"],
+        "required_tool_groups": [
+          {"id": "usage", "any": ["ask_choice"]},
+          {"id": "brief", "any": ["update_production_brief"]},
+          {"id": "generate_3d", "any": ["create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views"]}
+        ],
+        "order": [
+          {"before": ["ask_choice", "update_production_brief"], "after": ["create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views"]}
+        ],
+        "soft_tools": ["inspect_model", "render_model_views"],
+        "budgets": {"max_paid_calls": 1, "max_tool_calls": 12, "max_interruptions": 2}
+      }
+    },
+    {
+      "id": "3d-creature",
+      "title": "生物：发光深海水母（展示渲染）",
+      "modality": "3d",
+      "category": "creature",
+      "purpose": "render",
+      "prompt": "开始做一只会发光的深海水母状生物，展示用，不要打印。",
+      "reference_images": [],
+      "deliverables": ["3D 模型（GLB）", "正面、背面与 3/4 视角渲染", "几何与用途预算自检"],
+      "steps": [
+        {
+          "user": "用途是展示渲染，先把用途记下来。",
+          "tool": {"name": "ask_choice", "arguments": {"kind": "usage_profile"}}
+        },
+        {
+          "user": "按展示渲染的默认设置继续。",
+          "tool": {"name": "update_production_brief", "arguments": {"purpose": "render", "target_platform": "Web", "style": "bioluminescent organic"}}
+        },
+        {
+          "user": "开始建模。",
+          "tool": {"name": "create_model_3d", "arguments": {"prompt": "bioluminescent deep-sea jellyfish creature, translucent bell, glowing tentacles, organic sci-fi, display model, detailed"}}
+        },
+        {
+          "user": "检查一下几何和用途预算。",
+          "tool": {"name": "inspect_model", "arguments": {"model": "@model1"}}
+        },
+        {
+          "user": "渲染正面、背面和 3/4 视角。",
+          "tool": {"name": "render_model_views", "arguments": {"model": "@model1", "views": ["front", "back", "three_quarter"]}}
+        }
+      ],
+      "live_followups": ["请按默认设置继续完成。", "请渲染正面、背面和 3/4 视角供验收。"],
+      "expected": {
+        "capabilities": ["text-to-3d"],
+        "required_tool_groups": [
+          {"id": "usage", "any": ["ask_choice"]},
+          {"id": "brief", "any": ["update_production_brief"]},
+          {"id": "generate_3d", "any": ["create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views"]}
+        ],
+        "order": [
+          {"before": ["ask_choice", "update_production_brief"], "after": ["create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views"]}
+        ],
+        "soft_tools": ["inspect_model", "render_model_views"],
+        "budgets": {"max_paid_calls": 1, "max_tool_calls": 12, "max_interruptions": 2}
+      }
+    },
+    {
+      "id": "3d-print-figurine",
+      "title": "打印手办：15 厘米桌游骑士（先概念图再图生 3D）",
+      "modality": "3d",
+      "category": "print_figurine",
+      "purpose": "print",
+      "prompt": "开始做一个 15 厘米高的桌游手办，要能 3D 打印，水密。先按我的描述画一张概念图，再照着它建模。",
+      "reference_images": [],
+      "deliverables": ["水密的 3D 打印模型（GLB）", "正面、背面与 3/4 视角渲染", "几何、水密与用途预算自检"],
+      "steps": [
+        {
+          "user": "用途是 3D 打印，先把用途记下来。",
+          "tool": {"name": "ask_choice", "arguments": {"kind": "usage_profile"}}
+        },
+        {
+          "user": "按 3D 打印的默认设置继续。",
+          "tool": {"name": "update_production_brief", "arguments": {"purpose": "print", "target_platform": "3D print", "notes": "15 cm tall, watertight"}}
+        },
+        {
+          "user": "先画一张正面概念图。",
+          "tool": {"name": "refine_image", "arguments": {"prompt": "concept art of a tabletop miniature knight, full body, neutral A-pose, plain light background, front view, clean silhouette, printable details, realistic stylized"}}
+        },
+        {
+          "user": "照着这张概念图建模。",
+          "tool": {"name": "create_model_3d_from_image", "arguments": {"prompt": "tabletop miniature knight, full body, watertight solid mesh, 15 cm tall, detailed armor", "reference_image_indices": [1]}}
+        },
+        {
+          "user": "检查水密性和用途预算。",
+          "tool": {"name": "inspect_model", "arguments": {"model": "@model1"}}
+        },
+        {
+          "user": "渲染正面、背面和 3/4 视角。",
+          "tool": {"name": "render_model_views", "arguments": {"model": "@model1", "views": ["front", "back", "three_quarter"]}}
+        }
+      ],
+      "live_followups": ["请按默认设置继续完成。", "请渲染正面、背面和 3/4 视角供验收。"],
+      "expected": {
+        "capabilities": ["text-to-image", "image-to-3d"],
+        "required_tool_groups": [
+          {"id": "usage", "any": ["ask_choice"]},
+          {"id": "brief", "any": ["update_production_brief"]},
+          {"id": "concept_image", "any": ["refine_image"]},
+          {"id": "generate_3d", "any": ["create_model_3d_from_image", "create_model_3d_from_views", "create_model_3d"]}
+        ],
+        "order": [
+          {"before": ["refine_image"], "after": ["create_model_3d_from_image", "create_model_3d_from_views"]},
+          {"before": ["ask_choice", "update_production_brief"], "after": ["create_model_3d_from_image", "create_model_3d_from_views", "create_model_3d"]}
+        ],
+        "soft_tools": ["inspect_model", "render_model_views"],
+        "budgets": {"max_paid_calls": 2, "max_tool_calls": 14, "max_interruptions": 2}
+      }
+    },
+    {
+      "id": "3d-ar-product",
+      "title": "AR 商品：运动水壶（先商品图再图生 3D）",
+      "modality": "3d",
+      "category": "ar_product",
+      "purpose": "web_ar",
+      "prompt": "开始把一个运动水壶做成 AR 商品展示模型，网页里实时查看，先画一张商品图再建模。",
+      "reference_images": [],
+      "deliverables": ["适合 Web/AR 的 3D 模型（GLB）", "正面、背面与 3/4 视角渲染", "几何、贴图与用途预算自检"],
+      "steps": [
+        {
+          "user": "用途是 Web/AR 展示，先把用途记下来。",
+          "tool": {"name": "ask_choice", "arguments": {"kind": "usage_profile"}}
+        },
+        {
+          "user": "按 Web/AR 展示的默认设置继续。",
+          "tool": {"name": "update_production_brief", "arguments": {"purpose": "web_ar", "target_platform": "Web and AR", "style": "clean product photo"}}
+        },
+        {
+          "user": "先画一张商品图。",
+          "tool": {"name": "refine_image", "arguments": {"prompt": "product photo of a stainless steel sports water bottle, front view, plain white background, soft studio lighting, clean reflections, centered"}}
+        },
+        {
+          "user": "照着这张商品图建模。",
+          "tool": {"name": "create_model_3d_from_image", "arguments": {"prompt": "stainless steel sports water bottle, product model, clean topology, compact for web and AR", "reference_image_indices": [1]}}
+        },
+        {
+          "user": "检查几何、贴图和用途预算。",
+          "tool": {"name": "inspect_model", "arguments": {"model": "@model1"}}
+        },
+        {
+          "user": "渲染正面、背面和 3/4 视角。",
+          "tool": {"name": "render_model_views", "arguments": {"model": "@model1", "views": ["front", "back", "three_quarter"]}}
+        }
+      ],
+      "live_followups": ["请按默认设置继续完成。", "请渲染正面、背面和 3/4 视角供验收。"],
+      "expected": {
+        "capabilities": ["text-to-image", "image-to-3d"],
+        "required_tool_groups": [
+          {"id": "usage", "any": ["ask_choice"]},
+          {"id": "brief", "any": ["update_production_brief"]},
+          {"id": "concept_image", "any": ["refine_image"]},
+          {"id": "generate_3d", "any": ["create_model_3d_from_image", "create_model_3d_from_views", "create_model_3d"]}
+        ],
+        "order": [
+          {"before": ["refine_image"], "after": ["create_model_3d_from_image", "create_model_3d_from_views"]},
+          {"before": ["ask_choice", "update_production_brief"], "after": ["create_model_3d_from_image", "create_model_3d_from_views", "create_model_3d"]}
+        ],
+        "soft_tools": ["inspect_model", "render_model_views"],
+        "budgets": {"max_paid_calls": 2, "max_tool_calls": 14, "max_interruptions": 2}
+      }
+    },
+    {
+      "id": "2d-character-illustration",
+      "title": "2D 角色立绘：赛博朋克女刺客",
+      "modality": "2d",
+      "category": "character_illustration",
+      "purpose": null,
+      "prompt": "画一张赛博朋克女刺客的全身立绘，简洁数字插画，透明背景。",
+      "reference_images": [],
+      "deliverables": ["透明背景的全身立绘（PNG）"],
+      "steps": [
+        {
+          "user": "开始画。",
+          "tool": {"name": "refine_image", "arguments": {"prompt": "full-body cyberpunk female assassin, clean digital illustration, confident pose, neon accents, transparent background, sharp silhouette, no text, no watermark"}}
+        }
+      ],
+      "live_followups": ["请按这个描述完成一张全身立绘。"],
+      "expected": {
+        "capabilities": ["text-to-image"],
+        "required_tool_groups": [
+          {"id": "generate_2d", "any": ["refine_image"]}
+        ],
+        "order": [],
+        "soft_tools": [],
+        "budgets": {"max_paid_calls": 1, "max_tool_calls": 4, "max_interruptions": 1}
+      }
+    },
+    {
+      "id": "2d-icon-set",
+      "title": "2D 图标/道具图：三色药水瓶图标",
+      "modality": "2d",
+      "category": "icon_prop",
+      "purpose": null,
+      "prompt": "画一套三个不同颜色的药水瓶图标，统一画风，透明背景。",
+      "reference_images": [],
+      "deliverables": ["透明背景的三色药水瓶图标（PNG）"],
+      "steps": [
+        {
+          "user": "开始画。",
+          "tool": {"name": "refine_image", "arguments": {"prompt": "set of three potion bottle icons, red blue and green liquid, matching stylized game icon style, thick clean outlines, transparent background, no text, no watermark"}}
+        }
+      ],
+      "live_followups": ["请按这个描述完成图标图。"],
+      "expected": {
+        "capabilities": ["text-to-image"],
+        "required_tool_groups": [
+          {"id": "generate_2d", "any": ["refine_image"]}
+        ],
+        "order": [],
+        "soft_tools": [],
+        "budgets": {"max_paid_calls": 1, "max_tool_calls": 4, "max_interruptions": 1}
+      }
+    },
+    {
+      "id": "2d-series-consistency",
+      "title": "2D 系列一致性：同一角色的立绘、半身像与侧面像",
+      "modality": "2d",
+      "category": "series_consistency",
+      "purpose": null,
+      "prompt": "先画主角的全身立绘，再画同一角色的半身像和侧面像，三张保持同一画风和身份特征。",
+      "reference_images": [],
+      "deliverables": ["同一角色的三张系列图（PNG）", "三张图共用风格锚与身份锚"],
+      "steps": [
+        {
+          "user": "先画全身立绘。",
+          "tool": {"name": "refine_image", "arguments": {"prompt": "full-body portrait of a young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"}}
+        },
+        {
+          "user": "再画同一角色的半身像，保持画风和身份特征。",
+          "tool": {"name": "refine_image", "arguments": {"prompt": "half-body portrait of the same young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"}}
+        },
+        {
+          "user": "再画同一角色的侧面像，保持画风和身份特征。",
+          "tool": {"name": "refine_image", "arguments": {"prompt": "side profile of the same young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"}}
+        }
+      ],
+      "live_followups": ["请继续画同一角色的半身像和侧面像，保持画风与身份特征。"],
+      "expected": {
+        "capabilities": ["text-to-image"],
+        "min_tasks": {"text-to-image": 3},
+        "required_tool_groups": [
+          {"id": "generate_2d", "any": ["refine_image"]}
+        ],
+        "order": [],
+        "soft_tools": [],
+        "budgets": {"max_paid_calls": 3, "max_tool_calls": 6, "max_interruptions": 2}
+      }
+    }
+  ]
+}

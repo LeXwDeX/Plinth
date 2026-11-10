@@ -1162,12 +1162,222 @@ def check_no_real_upstream(work):
            f"{logs} stack logs, {len(refused)} refused" + ("; " + "; ".join(refused[:5]) if refused else ""))
 
 
+# ---------------------------------------------------------------- agent quality (#238)
+#
+# The free trajectory evaluation: the fixed request set under
+# scripts/smoke/agent-quality/ drives the real chat/orchestration path, while the
+# fake LLM only turns the marker in each user step into the tool call the request
+# set names. Cards, approvals, Tasks, renders and the final reply are real. This
+# measures the system's realization of a reference trajectory (not a model's
+# choices); the live output run in eval-agent-output.py measures real Agent
+# behavior and artifacts.
+
+def _quality_git_state():
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
+    dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=REPO, text=True).strip())
+    return revision, dirty
+
+
+def _quality_marker(tool):
+    """The fake LLM's tool marker for one step (compact JSON keeps the marker regex simple)."""
+    arguments = json.dumps(tool.get("arguments") or {}, ensure_ascii=False, separators=(",", ":"))
+    return f"[[fake:tool:{tool['name']} {arguments}]]"
+
+
+def _quality_model_task(api, session):
+    """The newest finished 3D task of the session, which the review tools can name by ID.
+
+    The generated model's @handle is attached to the result message but the review
+    tools did not resolve it in this fake flow; a Task ID is the stable reference.
+    """
+    tasks = [task for task in session_tasks(api, session)
+             if task.get("capability") in ("text-to-3d", "image-to-3d", "multiview-to-3d")
+             and task.get("state") == "SUCCEEDED"]
+    return tasks[-1]["id"] if tasks else ""
+
+
+def _quality_choices(api, session):
+    status, body = api.json("GET", f"/api/v1/chat/sessions/{session}/choices")
+    return body.get("choices") or [] if status == 200 else []
+
+
+def _quality_pending(api, session):
+    status, body = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")
+    return body.get("items") or [] if status == 200 else []
+
+
+def _quality_answer(api, session, card, purpose, domain, model):
+    options = [option for option in card.get("options") or [] if isinstance(option, dict) and option.get("id")]
+    pick = next((option for option in options if purpose and option["id"] == purpose), None)
+    pick = pick or next((option for option in options if option.get("recommended")), options[0] if options else None)
+    if pick is None:
+        return False
+    body = {"content": "按默认选项继续。", "choiceAnswer": {"choice_id": card["id"], "option_id": pick["id"]},
+            "creative_domain": domain, "ai_model": model}
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+    return status in (200, 201, 202)
+
+
+def _quality_send(api, session, content, domain, model):
+    body = {"content": content, "creative_domain": domain, "ai_model": model}
+    end = time.time() + 30
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+    while status == 409 and time.time() < end:
+        time.sleep(0.5)
+        status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+    return status in (200, 201, 202)
+
+
+def _quality_turn_done(api, session, timeout=90):
+    """Wait for the session's chat stream to carry its done event (or answer 204: no turn is held)."""
+    request = urllib.request.Request(f"{api.base}/api/chat/sessions/{session}/stream?fromId=0",
+                                     headers={"Accept": "text/event-stream", "Origin": api.base})
+    end = time.time() + timeout
+    try:
+        with api.opener.open(request, timeout=min(max(timeout, 1), 30)) as response:
+            if response.status == 204:
+                return True
+            for raw in response:
+                line = raw.decode("utf-8", "replace").strip()
+                if line.startswith("data:"):
+                    try:
+                        payload = json.loads(line[len("data:"):].strip())
+                    except ValueError:
+                        continue
+                    if isinstance(payload, dict) and payload.get("type") == "done":
+                        return True
+                if time.time() >= end:
+                    return False
+    except urllib.error.HTTPError as error:
+        return error.code == 204
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return False
+    return False
+
+
+def _quality_messages(api, session):
+    status, body = api.json("GET", f"/api/chat/sessions/{session}/messages")
+    if status != 200:
+        return []
+    return body if isinstance(body, list) else body.get("messages", [])
+
+
+def _quality_final_reply(messages):
+    for message in reversed(messages or []):
+        if message.get("role") == "assistant" and (message.get("content") or "").strip():
+            return message
+    return {}
+
+
+def run_quality_case(api, request, domain, model, model_3d=""):
+    """One request through the fake-LLM chat path; returns the run dict for agent_quality."""
+    started = time.time()
+    session = new_session(api)
+    api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "manual"})
+    if request.get("modality") == "3d" and model_3d:
+        # #103: only an explicit pick in the session's model picker binds the 3D tools.
+        api.json("PUT", f"/api/v1/chat/sessions/{session}/model3d", {"explicit_model_3d": model_3d})
+    cards, seen = [], set()
+    turns = 0
+    for step in request["steps"]:
+        tool = {"name": step["tool"]["name"], "arguments": dict(step["tool"].get("arguments") or {})}
+        model_task = _quality_model_task(api, session)
+        if model_task and tool["arguments"].get("model") == "@model1":
+            tool["arguments"]["model"] = model_task
+        content = f"{step['user']} {_quality_marker(tool)}"
+        before_tasks = {task.get("id") for task in session_tasks(api, session)}
+        if not _quality_send(api, session, content, domain, model):
+            record(f"agent-quality {request['id']}: send {step['tool']['name']}", False, "message refused")
+            break
+        turns += 1
+        if not _quality_turn_done(api, session):
+            record(f"agent-quality {request['id']}: turn {step['tool']['name']}", False, "turn did not finish")
+            break
+        # A card ends its turn; answer or approve it, then follow the turn it starts.
+        for _ in range(4):
+            answered = False
+            for card in _quality_pending(api, session):
+                request_id = card.get("request_id")
+                if not request_id or request_id in seen:
+                    continue
+                seen.add(request_id)
+                cards.append({"kind": "approval", "id": request_id, "tool": card.get("tool"),
+                              "capability": card.get("capability"), "state": "approved"})
+                status, decision = api.json("PUT", f"/api/v1/tasks/grants/{request_id}", decision_body(api, "approve"))
+                task_id = decision.get("task_id")
+                if status == 200 and task_id:
+                    wait_task(api, task_id)
+                answered = True
+            for card in _quality_choices(api, session):
+                card_id = card.get("id")
+                if card.get("state") != "pending" or not card_id or card_id in seen:
+                    continue
+                seen.add(card_id)
+                cards.append({"kind": "choice", "id": card_id, "tool": card.get("tool"),
+                              "card_kind": card.get("kind"), "state": "answered"})
+                _quality_answer(api, session, card, request.get("purpose"), domain, model)
+                answered = True
+            if not answered:
+                break
+            if not _quality_turn_done(api, session):
+                break
+        for task in session_tasks(api, session):
+            if task.get("id") not in before_tasks:
+                wait_task(api, task.get("id"))
+    messages = _quality_messages(api, session)
+    tasks = session_tasks(api, session)
+    images = sum(1 for message in messages for attachment in message.get("attachments") or []
+                 if isinstance(attachment, dict) and attachment.get("kind") == "image")
+    return {
+        "session_id": session,
+        "messages": messages,
+        "tasks": tasks,
+        "cards": cards,
+        "final_reply": _quality_final_reply(messages),
+        "image_count": images,
+        "turns": turns,
+        "elapsed_ms": int((time.time() - started) * 1000),
+    }
+
+
+def scenario_agent_quality(api, offerings, report_dir=""):
+    """Run the fixed request set (#238) and write a trajectory report."""
+    import agent_quality as quality
+
+    data, path, digest = quality.load_requests()
+    image_model = next((item["model_id"] for item in offerings.values()
+                        if item.get("available") and item.get("capability") == "text-to-image" and item.get("model_id")), "")
+    model_3d = next((item["model_id"] for item in offerings.values()
+                     if item.get("available") and item.get("capability") == "text-to-3d" and item.get("model_id")), "")
+    cases = []
+    for request in data["requests"]:
+        domain = "image" if request.get("modality") == "2d" else "model-3d"
+        model = image_model if request.get("modality") == "2d" else model_3d
+        run = run_quality_case(api, request, domain, model, model_3d)
+        case = quality.evaluate_case(request, run)
+        cases.append(case)
+        failed = quality.case_hard_failures(case)
+        record(f"agent-quality {request['id']}", not failed,
+               f"tools={case['metrics']['tool_call_count']} paid={case['metrics']['paid_call_count']} "
+               f"cards={case['metrics']['interruption_count']} inspect={case['metrics']['self_inspection']['inspect_model']} "
+               f"render={case['metrics']['self_inspection']['render_model_views']}"
+               + ("" if not failed else "; " + "; ".join(f"{check['id']}: {check['detail']}" for check in failed)))
+    revision, dirty = _quality_git_state()
+    report = quality.summarize(cases, "trajectory-fake", revision, dirty,
+                               {"path": os.path.relpath(path, REPO), "version": data["version"], "sha256": digest})
+    directory = report_dir or os.path.join(tempfile.gettempdir(), "plinth-agent-quality")
+    json_path, markdown_path = quality.write_report(report, directory, "agent-quality-trajectory")
+    print(f"# agent quality report: {json_path} and {markdown_path}", flush=True)
+    return report
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,faults")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
+    parser.add_argument("--report", default="", help="directory for the #238 agent-quality report (default: a temporary one)")
     args = parser.parse_args()
     selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "tripo", "p2", "agent", "agent-background", "faults"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
@@ -1185,7 +1395,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -1208,6 +1418,8 @@ def main():
                 scenario_hyper3d_agent(api, offerings)
             if "agent-background" in selected:
                 scenario_agent_background(api, offerings)
+            if "agent-quality" in selected:
+                scenario_agent_quality(api, offerings, args.report or os.path.join(work, "agent-quality"))
             processes.stop(child)
         if "faults" in selected:
             for scenario in [name for name in FAULTS if not args.faults or name in args.faults.split(",")]:
