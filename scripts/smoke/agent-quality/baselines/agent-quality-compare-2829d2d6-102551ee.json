@@ -1,0 +1,95 @@
+{
+  "ok": false,
+  "problems": [],
+  "regressions": [
+    {
+      "case": "*",
+      "check": "metric:tool_calls",
+      "before": 53,
+      "after": 54
+    },
+    {
+      "case": "*",
+      "check": "metric:paid_calls",
+      "before": 18,
+      "after": 19
+    }
+  ],
+  "improvements": [
+    {
+      "case": "3d-multistep-rig-checkpoint",
+      "check": "capability:remesh",
+      "before": "fail",
+      "after": "pass"
+    },
+    {
+      "case": "3d-multistep-rig-checkpoint",
+      "check": "order:plan_model_processing<revise_processing_plan",
+      "before": "fail",
+      "after": "pass"
+    },
+    {
+      "case": "3d-multistep-rig-checkpoint",
+      "check": "order:revise_processing_plan<inspect_model",
+      "before": "fail",
+      "after": "pass"
+    },
+    {
+      "case": "3d-multistep-rig-checkpoint",
+      "check": "tool_group:revise",
+      "before": "fail",
+      "after": "pass"
+    }
+  ],
+  "changed": [],
+  "metrics": {
+    "tool_calls": {
+      "before": 53,
+      "after": 54,
+      "delta": 1,
+      "direction": "lower"
+    },
+    "paid_calls": {
+      "before": 18,
+      "after": 19,
+      "delta": 1,
+      "direction": "lower"
+    },
+    "interruptions": {
+      "before": 19,
+      "after": 19,
+      "delta": 0,
+      "direction": "lower"
+    },
+    "inspect_model": {
+      "before": 8,
+      "after": 8,
+      "delta": 0,
+      "direction": "higher"
+    },
+    "render_model_views": {
+      "before": 6,
+      "after": 6,
+      "delta": 0,
+      "direction": "higher"
+    },
+    "compare_model_reference": {
+      "before": 1,
+      "after": 1,
+      "delta": 0,
+      "direction": "higher"
+    },
+    "self_check_records": {
+      "before": 1,
+      "after": 1,
+      "delta": 0,
+      "direction": "higher"
+    },
+    "self_check_passed": {
+      "before": 1,
+      "after": 1,
+      "delta": 0,
+      "direction": "higher"
+    }
+  }
+}

@@ -1,0 +1,3224 @@
+{
+  "schema_version": 1,
+  "kind": "agent-quality",
+  "mode": "trajectory-fake",
+  "generated_at": "2026-11-10T22:45:04Z",
+  "revision": "102551ee07e781b6813e6f35ec5939626ce3026f",
+  "dirty": false,
+  "request_set": {
+    "path": "scripts/smoke/agent-quality/requests.json",
+    "version": 3,
+    "sha256": "33b92ca771d3a1ff5f033a477fb4d3a5a1f8e07af82a8d7bef2fa37a9592f819"
+  },
+  "cases": [
+    {
+      "id": "3d-humanoid-character",
+      "title": "人形角色：赛博朋克女刺客（游戏角色）",
+      "modality": "3d",
+      "category": "humanoid_character",
+      "purpose": "game_character",
+      "session_id": "session_t61tUXRFEVQsTvl0arejhueu",
+      "turns": 5,
+      "tool_calls": [
+        {
+          "name": "ask_choice",
+          "arguments": {
+            "kind": "usage_profile"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "update_production_brief",
+          "arguments": {
+            "purpose": "game_character",
+            "target_platform": "Unity",
+            "needs_rig": true,
+            "style": "cyberpunk"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "create_model_3d",
+          "arguments": {
+            "prompt": "cyberpunk female assassin, full body, A-pose, game character, dark techwear jacket, neon accents, detailed face, realistic stylized"
+          },
+          "task_id": "task_044b6aeaf5df437e67055e76e1e97e95",
+          "summary": null
+        },
+        {
+          "name": "inspect_model",
+          "arguments": {
+            "model": "task_044b6aeaf5df437e67055e76e1e97e95"
+          },
+          "task_id": null,
+          "summary": {
+            "tool": "inspect",
+            "model": "task_044b6aeaf5df437e67055e76e1e97e95",
+            "task_id": "task_044b6aeaf5df437e67055e76e1e97e95",
+            "triangles": 72,
+            "has_uv": true,
+            "watertight": true,
+            "has_skin": false,
+            "usage": {
+              "purpose": "game_character",
+              "purpose_label": "游戏/实时·角色",
+              "purpose_source": "production_brief",
+              "note": "按制作简报的用途「游戏/实时·角色」判定。",
+              "checks": [
+                {
+                  "check": "triangles",
+                  "status": "fail",
+                  "actual": 72,
+                  "budget": {
+                    "maximum": 60000,
+                    "minimum": 5000
+                  },
+                  "fix_hint": "可用 remesh 把面数调整到用途预算内。"
+                },
+                {
+                  "check": "uv",
+                  "status": "pass",
+                  "actual": true,
+                  "budget": {
+                    "required": true
+                  }
+                },
+                {
+                  "check": "watertight",
+                  "status": "unknown",
+                  "actual": true,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "skin",
+                  "status": "unknown",
+                  "actual": 0,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "texture_size",
+                  "status": "pass",
+                  "actual": 64,
+                  "budget": {
+                    "maximum": 2048
+                  }
+                },
+                {
+                  "check": "pivot_bottom_center",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.01
+                  }
+                },
+                {
+                  "check": "y_up",
+                  "status": "pass",
+                  "actual": "y",
+                  "budget": {
+                    "axis": "y",
+                    "flat_ratio": 0.05
+                  }
+                },
+                {
+                  "check": "plausible_scale",
+                  "status": "pass",
+                  "actual": 1.612406849861145,
+                  "budget": {
+                    "maximum": 5,
+                    "minimum": 0.3,
+                    "unit": "m"
+                  }
+                },
+                {
+                  "check": "debris",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.01
+                  }
+                },
+                {
+                  "check": "degenerate",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.001
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "render_model_views",
+          "arguments": {
+            "model": "task_044b6aeaf5df437e67055e76e1e97e95",
+            "views": [
+              "front",
+              "back",
+              "three_quarter"
+            ]
+          },
+          "task_id": null,
+          "summary": {
+            "handles": [
+              "@img1",
+              "@img2",
+              "@img3"
+            ],
+            "model": "task_044b6aeaf5df437e67055e76e1e97e95",
+            "render_calls_remaining": 5,
+            "task_id": "task_044b6aeaf5df437e67055e76e1e97e95",
+            "tool": "render",
+            "views": [
+              "front",
+              "back",
+              "three_quarter"
+            ]
+          }
+        }
+      ],
+      "cards": [
+        {
+          "kind": "choice",
+          "id": "choice_7dbd050433af719680c1e286",
+          "tool": "update_production_brief",
+          "card_kind": "usage_profile",
+          "state": "answered"
+        },
+        {
+          "kind": "approval",
+          "id": "eg_ee2a6ef1118f5090056e7599523913a587ef8678911428b8",
+          "tool": "create_model_3d",
+          "capability": "text-to-3d",
+          "state": "approved"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task_044b6aeaf5df437e67055e76e1e97e95",
+          "capability": "text-to-3d",
+          "model_id": "meshy-7.1",
+          "offering_id": "meshy/meshy-7.1/text-to-3d",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        }
+      ],
+      "final_reply": {
+        "content": "Fake upstream reply.",
+        "failed": false
+      },
+      "assets": [],
+      "metrics": {
+        "tool_call_count": 5,
+        "credits": {
+          "legacy.credits": "40"
+        },
+        "paid_call_count": 1,
+        "interruption_count": 2,
+        "choice_card_count": 1,
+        "approval_card_count": 1,
+        "plan_card_count": 0,
+        "tool_counts": {
+          "ask_choice": 1,
+          "update_production_brief": 1,
+          "create_model_3d": 1,
+          "inspect_model": 1,
+          "render_model_views": 1
+        },
+        "rework": {
+          "count": 0,
+          "failed_tasks": 0,
+          "revision_count": 0,
+          "revision_operations": {}
+        },
+        "checkpoints": {
+          "total": 0,
+          "passed": 0,
+          "failed": 0,
+          "waived": 0,
+          "unknown": 0
+        },
+        "self_inspection": {
+          "inspect_model": 1,
+          "render_model_views": 1,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
+        },
+        "image_count": 3,
+        "final_reply_chars": 20,
+        "elapsed_ms": 7117
+      },
+      "checks": [
+        {
+          "id": "final_reply",
+          "status": "pass",
+          "detail": "20 chars"
+        },
+        {
+          "id": "capability:text-to-3d",
+          "status": "pass",
+          "detail": "1/1 succeeded; succeeded=['text-to-3d']; tasks=['text-to-3d']"
+        },
+        {
+          "id": "no_failed_tasks",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "tool_group:usage",
+          "status": "pass",
+          "detail": "any of ['ask_choice']; called=['ask_choice', 'update_production_brief', 'create_model_3d', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "tool_group:brief",
+          "status": "pass",
+          "detail": "any of ['update_production_brief']; called=['ask_choice', 'update_production_brief', 'create_model_3d', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "tool_group:generate_3d",
+          "status": "pass",
+          "detail": "any of ['create_model_3d', 'create_model_3d_from_image', 'create_model_3d_from_views']; called=['ask_choice', 'update_production_brief', 'create_model_3d', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "order:ask_choice+update_production_brief<create_model_3d+create_model_3d_from_image+create_model_3d_from_views",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "budget:paid_calls",
+          "status": "pass",
+          "detail": "1 task(s)"
+        },
+        {
+          "id": "budget:tool_calls",
+          "status": "pass",
+          "detail": "5 call(s)"
+        },
+        {
+          "id": "budget:interruptions",
+          "status": "pass",
+          "detail": "2 card(s)"
+        }
+      ]
+    },
+    {
+      "id": "3d-hard-surface-prop",
+      "title": "硬表面道具：低多边形科幻能量步枪（游戏道具）",
+      "modality": "3d",
+      "category": "hard_surface_prop",
+      "purpose": "game_prop",
+      "session_id": "session_H_kS5xugWWVCWo3fQ8Ge0jkJ",
+      "turns": 5,
+      "tool_calls": [
+        {
+          "name": "ask_choice",
+          "arguments": {
+            "kind": "usage_profile"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "update_production_brief",
+          "arguments": {
+            "purpose": "game_prop",
+            "target_platform": "Unreal",
+            "style": "low-poly hard surface"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "create_model_3d",
+          "arguments": {
+            "prompt": "low-poly sci-fi energy rifle, hard surface, chunky angular silhouette, game prop, dark metal with cyan energy cell"
+          },
+          "task_id": "task_4ad172ef067e8d627622697e8c373174",
+          "summary": null
+        },
+        {
+          "name": "inspect_model",
+          "arguments": {
+            "model": "task_4ad172ef067e8d627622697e8c373174"
+          },
+          "task_id": null,
+          "summary": {
+            "tool": "inspect",
+            "model": "task_4ad172ef067e8d627622697e8c373174",
+            "task_id": "task_4ad172ef067e8d627622697e8c373174",
+            "triangles": 72,
+            "has_uv": true,
+            "watertight": true,
+            "has_skin": false,
+            "usage": {
+              "purpose": "game_prop",
+              "purpose_label": "游戏/实时·道具与场景件",
+              "purpose_source": "production_brief",
+              "note": "按制作简报的用途「游戏/实时·道具与场景件」判定。",
+              "checks": [
+                {
+                  "check": "triangles",
+                  "status": "fail",
+                  "actual": 72,
+                  "budget": {
+                    "maximum": 20000,
+                    "minimum": 300
+                  },
+                  "fix_hint": "可用 remesh 把面数调整到用途预算内。"
+                },
+                {
+                  "check": "uv",
+                  "status": "pass",
+                  "actual": true,
+                  "budget": {
+                    "required": true
+                  }
+                },
+                {
+                  "check": "watertight",
+                  "status": "unknown",
+                  "actual": true,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "skin",
+                  "status": "unknown",
+                  "actual": 0,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "texture_size",
+                  "status": "pass",
+                  "actual": 64,
+                  "budget": {
+                    "maximum": 2048
+                  }
+                },
+                {
+                  "check": "pivot_bottom_center",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.01
+                  }
+                },
+                {
+                  "check": "y_up",
+                  "status": "pass",
+                  "actual": "y",
+                  "budget": {
+                    "axis": "y",
+                    "flat_ratio": 0.05
+                  }
+                },
+                {
+                  "check": "plausible_scale",
+                  "status": "pass",
+                  "actual": 1.612406849861145,
+                  "budget": {
+                    "maximum": 20,
+                    "minimum": 0.02,
+                    "unit": "m"
+                  }
+                },
+                {
+                  "check": "debris",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.01
+                  }
+                },
+                {
+                  "check": "degenerate",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.001
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "render_model_views",
+          "arguments": {
+            "model": "task_4ad172ef067e8d627622697e8c373174",
+            "views": [
+              "front",
+              "back",
+              "three_quarter"
+            ]
+          },
+          "task_id": null,
+          "summary": {
+            "handles": [
+              "@img1",
+              "@img2",
+              "@img3"
+            ],
+            "model": "task_4ad172ef067e8d627622697e8c373174",
+            "render_calls_remaining": 5,
+            "task_id": "task_4ad172ef067e8d627622697e8c373174",
+            "tool": "render",
+            "views": [
+              "front",
+              "back",
+              "three_quarter"
+            ]
+          }
+        }
+      ],
+      "cards": [
+        {
+          "kind": "choice",
+          "id": "choice_a73f19153e7af6f50042dba4",
+          "tool": "update_production_brief",
+          "card_kind": "usage_profile",
+          "state": "answered"
+        },
+        {
+          "kind": "approval",
+          "id": "eg_ff87a3709739fb1395f4c77b5524076b54b80b5558e88767",
+          "tool": "create_model_3d",
+          "capability": "text-to-3d",
+          "state": "approved"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task_4ad172ef067e8d627622697e8c373174",
+          "capability": "text-to-3d",
+          "model_id": "meshy-7.1",
+          "offering_id": "meshy/meshy-7.1/text-to-3d",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        }
+      ],
+      "final_reply": {
+        "content": "Fake upstream reply.",
+        "failed": false
+      },
+      "assets": [],
+      "metrics": {
+        "tool_call_count": 5,
+        "credits": {
+          "legacy.credits": "40"
+        },
+        "paid_call_count": 1,
+        "interruption_count": 2,
+        "choice_card_count": 1,
+        "approval_card_count": 1,
+        "plan_card_count": 0,
+        "tool_counts": {
+          "ask_choice": 1,
+          "update_production_brief": 1,
+          "create_model_3d": 1,
+          "inspect_model": 1,
+          "render_model_views": 1
+        },
+        "rework": {
+          "count": 0,
+          "failed_tasks": 0,
+          "revision_count": 0,
+          "revision_operations": {}
+        },
+        "checkpoints": {
+          "total": 0,
+          "passed": 0,
+          "failed": 0,
+          "waived": 0,
+          "unknown": 0
+        },
+        "self_inspection": {
+          "inspect_model": 1,
+          "render_model_views": 1,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
+        },
+        "image_count": 3,
+        "final_reply_chars": 20,
+        "elapsed_ms": 7117
+      },
+      "checks": [
+        {
+          "id": "final_reply",
+          "status": "pass",
+          "detail": "20 chars"
+        },
+        {
+          "id": "capability:text-to-3d",
+          "status": "pass",
+          "detail": "1/1 succeeded; succeeded=['text-to-3d']; tasks=['text-to-3d']"
+        },
+        {
+          "id": "no_failed_tasks",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "tool_group:usage",
+          "status": "pass",
+          "detail": "any of ['ask_choice']; called=['ask_choice', 'update_production_brief', 'create_model_3d', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "tool_group:brief",
+          "status": "pass",
+          "detail": "any of ['update_production_brief']; called=['ask_choice', 'update_production_brief', 'create_model_3d', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "tool_group:generate_3d",
+          "status": "pass",
+          "detail": "any of ['create_model_3d', 'create_model_3d_from_image', 'create_model_3d_from_views']; called=['ask_choice', 'update_production_brief', 'create_model_3d', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "order:ask_choice+update_production_brief<create_model_3d+create_model_3d_from_image+create_model_3d_from_views",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "budget:paid_calls",
+          "status": "pass",
+          "detail": "1 task(s)"
+        },
+        {
+          "id": "budget:tool_calls",
+          "status": "pass",
+          "detail": "5 call(s)"
+        },
+        {
+          "id": "budget:interruptions",
+          "status": "pass",
+          "detail": "2 card(s)"
+        }
+      ]
+    },
+    {
+      "id": "3d-scene-piece",
+      "title": "场景件：石砌水井（游戏场景小件）",
+      "modality": "3d",
+      "category": "scene_piece",
+      "purpose": "game_prop",
+      "session_id": "session_U-C5hjad8gcba6QnVcataz3z",
+      "turns": 5,
+      "tool_calls": [
+        {
+          "name": "ask_choice",
+          "arguments": {
+            "kind": "usage_profile"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "update_production_brief",
+          "arguments": {
+            "purpose": "game_prop",
+            "target_platform": "Unity",
+            "style": "stylized hand-painted"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "create_model_3d",
+          "arguments": {
+            "prompt": "stylized stone well, scene prop, chunky masonry, wooden roof and bucket, hand-painted game art style"
+          },
+          "task_id": "task_6f59935eb6d1e30a16ba24b202fbe2ec",
+          "summary": null
+        },
+        {
+          "name": "inspect_model",
+          "arguments": {
+            "model": "task_6f59935eb6d1e30a16ba24b202fbe2ec"
+          },
+          "task_id": null,
+          "summary": {
+            "tool": "inspect",
+            "model": "task_6f59935eb6d1e30a16ba24b202fbe2ec",
+            "task_id": "task_6f59935eb6d1e30a16ba24b202fbe2ec",
+            "triangles": 72,
+            "has_uv": true,
+            "watertight": true,
+            "has_skin": false,
+            "usage": {
+              "purpose": "game_prop",
+              "purpose_label": "游戏/实时·道具与场景件",
+              "purpose_source": "production_brief",
+              "note": "按制作简报的用途「游戏/实时·道具与场景件」判定。",
+              "checks": [
+                {
+                  "check": "triangles",
+                  "status": "fail",
+                  "actual": 72,
+                  "budget": {
+                    "maximum": 20000,
+                    "minimum": 300
+                  },
+                  "fix_hint": "可用 remesh 把面数调整到用途预算内。"
+                },
+                {
+                  "check": "uv",
+                  "status": "pass",
+                  "actual": true,
+                  "budget": {
+                    "required": true
+                  }
+                },
+                {
+                  "check": "watertight",
+                  "status": "unknown",
+                  "actual": true,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "skin",
+                  "status": "unknown",
+                  "actual": 0,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "texture_size",
+                  "status": "pass",
+                  "actual": 64,
+                  "budget": {
+                    "maximum": 2048
+                  }
+                },
+                {
+                  "check": "pivot_bottom_center",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.01
+                  }
+                },
+                {
+                  "check": "y_up",
+                  "status": "pass",
+                  "actual": "y",
+                  "budget": {
+                    "axis": "y",
+                    "flat_ratio": 0.05
+                  }
+                },
+                {
+                  "check": "plausible_scale",
+                  "status": "pass",
+                  "actual": 1.612406849861145,
+                  "budget": {
+                    "maximum": 20,
+                    "minimum": 0.02,
+                    "unit": "m"
+                  }
+                },
+                {
+                  "check": "debris",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.01
+                  }
+                },
+                {
+                  "check": "degenerate",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.001
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "render_model_views",
+          "arguments": {
+            "model": "task_6f59935eb6d1e30a16ba24b202fbe2ec",
+            "views": [
+              "front",
+              "back",
+              "three_quarter"
+            ]
+          },
+          "task_id": null,
+          "summary": {
+            "handles": [
+              "@img1",
+              "@img2",
+              "@img3"
+            ],
+            "model": "task_6f59935eb6d1e30a16ba24b202fbe2ec",
+            "render_calls_remaining": 5,
+            "task_id": "task_6f59935eb6d1e30a16ba24b202fbe2ec",
+            "tool": "render",
+            "views": [
+              "front",
+              "back",
+              "three_quarter"
+            ]
+          }
+        }
+      ],
+      "cards": [
+        {
+          "kind": "choice",
+          "id": "choice_9cc337c58ea4dcaed5f2bf1b",
+          "tool": "update_production_brief",
+          "card_kind": "usage_profile",
+          "state": "answered"
+        },
+        {
+          "kind": "approval",
+          "id": "eg_2b6f70cd2ba3c9796dd66da9ca02adf50e2fdf73fe6ea5c4",
+          "tool": "create_model_3d",
+          "capability": "text-to-3d",
+          "state": "approved"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task_6f59935eb6d1e30a16ba24b202fbe2ec",
+          "capability": "text-to-3d",
+          "model_id": "meshy-7.1",
+          "offering_id": "meshy/meshy-7.1/text-to-3d",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        }
+      ],
+      "final_reply": {
+        "content": "Fake upstream reply.",
+        "failed": false
+      },
+      "assets": [],
+      "metrics": {
+        "tool_call_count": 5,
+        "credits": {
+          "legacy.credits": "40"
+        },
+        "paid_call_count": 1,
+        "interruption_count": 2,
+        "choice_card_count": 1,
+        "approval_card_count": 1,
+        "plan_card_count": 0,
+        "tool_counts": {
+          "ask_choice": 1,
+          "update_production_brief": 1,
+          "create_model_3d": 1,
+          "inspect_model": 1,
+          "render_model_views": 1
+        },
+        "rework": {
+          "count": 0,
+          "failed_tasks": 0,
+          "revision_count": 0,
+          "revision_operations": {}
+        },
+        "checkpoints": {
+          "total": 0,
+          "passed": 0,
+          "failed": 0,
+          "waived": 0,
+          "unknown": 0
+        },
+        "self_inspection": {
+          "inspect_model": 1,
+          "render_model_views": 1,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
+        },
+        "image_count": 3,
+        "final_reply_chars": 20,
+        "elapsed_ms": 7783
+      },
+      "checks": [
+        {
+          "id": "final_reply",
+          "status": "pass",
+          "detail": "20 chars"
+        },
+        {
+          "id": "capability:text-to-3d",
+          "status": "pass",
+          "detail": "1/1 succeeded; succeeded=['text-to-3d']; tasks=['text-to-3d']"
+        },
+        {
+          "id": "no_failed_tasks",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "tool_group:usage",
+          "status": "pass",
+          "detail": "any of ['ask_choice']; called=['ask_choice', 'update_production_brief', 'create_model_3d', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "tool_group:brief",
+          "status": "pass",
+          "detail": "any of ['update_production_brief']; called=['ask_choice', 'update_production_brief', 'create_model_3d', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "tool_group:generate_3d",
+          "status": "pass",
+          "detail": "any of ['create_model_3d', 'create_model_3d_from_image', 'create_model_3d_from_views']; called=['ask_choice', 'update_production_brief', 'create_model_3d', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "order:ask_choice+update_production_brief<create_model_3d+create_model_3d_from_image+create_model_3d_from_views",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "budget:paid_calls",
+          "status": "pass",
+          "detail": "1 task(s)"
+        },
+        {
+          "id": "budget:tool_calls",
+          "status": "pass",
+          "detail": "5 call(s)"
+        },
+        {
+          "id": "budget:interruptions",
+          "status": "pass",
+          "detail": "2 card(s)"
+        }
+      ]
+    },
+    {
+      "id": "3d-creature",
+      "title": "生物：发光深海水母（展示渲染）",
+      "modality": "3d",
+      "category": "creature",
+      "purpose": "render",
+      "session_id": "session_LXFM1ODXVwgskYwLstXM6idn",
+      "turns": 5,
+      "tool_calls": [
+        {
+          "name": "ask_choice",
+          "arguments": {
+            "kind": "usage_profile"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "update_production_brief",
+          "arguments": {
+            "purpose": "render",
+            "target_platform": "Web",
+            "style": "bioluminescent organic"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "create_model_3d",
+          "arguments": {
+            "prompt": "bioluminescent deep-sea jellyfish creature, translucent bell, glowing tentacles, organic sci-fi, display model, detailed"
+          },
+          "task_id": "task_bb84c0cd92417b80ef68cc5b11b7b343",
+          "summary": null
+        },
+        {
+          "name": "inspect_model",
+          "arguments": {
+            "model": "task_bb84c0cd92417b80ef68cc5b11b7b343"
+          },
+          "task_id": null,
+          "summary": {
+            "tool": "inspect",
+            "model": "task_bb84c0cd92417b80ef68cc5b11b7b343",
+            "task_id": "task_bb84c0cd92417b80ef68cc5b11b7b343",
+            "triangles": 72,
+            "has_uv": true,
+            "watertight": true,
+            "has_skin": false,
+            "usage": {
+              "purpose": "render",
+              "purpose_label": "展示/渲染",
+              "purpose_source": "production_brief",
+              "note": "按制作简报的用途「展示/渲染」判定。",
+              "checks": [
+                {
+                  "check": "triangles",
+                  "status": "pass",
+                  "actual": 72,
+                  "budget": {
+                    "maximum": 2000000
+                  }
+                },
+                {
+                  "check": "uv",
+                  "status": "unknown",
+                  "actual": true,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "watertight",
+                  "status": "unknown",
+                  "actual": true,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "skin",
+                  "status": "unknown",
+                  "actual": 0,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "texture_size",
+                  "status": "pass",
+                  "actual": 64,
+                  "budget": {
+                    "maximum": 8192
+                  }
+                },
+                {
+                  "check": "pivot_bottom_center",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.01
+                  }
+                },
+                {
+                  "check": "y_up",
+                  "status": "pass",
+                  "actual": "y",
+                  "budget": {
+                    "axis": "y",
+                    "flat_ratio": 0.05
+                  }
+                },
+                {
+                  "check": "plausible_scale",
+                  "status": "unknown",
+                  "actual": 1.612406849861145,
+                  "budget": {}
+                },
+                {
+                  "check": "debris",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.01
+                  }
+                },
+                {
+                  "check": "degenerate",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.001
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "render_model_views",
+          "arguments": {
+            "model": "task_bb84c0cd92417b80ef68cc5b11b7b343",
+            "views": [
+              "front",
+              "back",
+              "three_quarter"
+            ]
+          },
+          "task_id": null,
+          "summary": {
+            "handles": [
+              "@img1",
+              "@img2",
+              "@img3"
+            ],
+            "model": "task_bb84c0cd92417b80ef68cc5b11b7b343",
+            "render_calls_remaining": 5,
+            "task_id": "task_bb84c0cd92417b80ef68cc5b11b7b343",
+            "tool": "render",
+            "views": [
+              "front",
+              "back",
+              "three_quarter"
+            ]
+          }
+        }
+      ],
+      "cards": [
+        {
+          "kind": "choice",
+          "id": "choice_a57452bbf6f0639e189d29be",
+          "tool": "update_production_brief",
+          "card_kind": "usage_profile",
+          "state": "answered"
+        },
+        {
+          "kind": "approval",
+          "id": "eg_e65bef019a30e9795a28238065269ee94090514d515da662",
+          "tool": "create_model_3d",
+          "capability": "text-to-3d",
+          "state": "approved"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task_bb84c0cd92417b80ef68cc5b11b7b343",
+          "capability": "text-to-3d",
+          "model_id": "meshy-7.1",
+          "offering_id": "meshy/meshy-7.1/text-to-3d",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        }
+      ],
+      "final_reply": {
+        "content": "Fake upstream reply.",
+        "failed": false
+      },
+      "assets": [],
+      "metrics": {
+        "tool_call_count": 5,
+        "credits": {
+          "legacy.credits": "40"
+        },
+        "paid_call_count": 1,
+        "interruption_count": 2,
+        "choice_card_count": 1,
+        "approval_card_count": 1,
+        "plan_card_count": 0,
+        "tool_counts": {
+          "ask_choice": 1,
+          "update_production_brief": 1,
+          "create_model_3d": 1,
+          "inspect_model": 1,
+          "render_model_views": 1
+        },
+        "rework": {
+          "count": 0,
+          "failed_tasks": 0,
+          "revision_count": 0,
+          "revision_operations": {}
+        },
+        "checkpoints": {
+          "total": 0,
+          "passed": 0,
+          "failed": 0,
+          "waived": 0,
+          "unknown": 0
+        },
+        "self_inspection": {
+          "inspect_model": 1,
+          "render_model_views": 1,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
+        },
+        "image_count": 3,
+        "final_reply_chars": 20,
+        "elapsed_ms": 7458
+      },
+      "checks": [
+        {
+          "id": "final_reply",
+          "status": "pass",
+          "detail": "20 chars"
+        },
+        {
+          "id": "capability:text-to-3d",
+          "status": "pass",
+          "detail": "1/1 succeeded; succeeded=['text-to-3d']; tasks=['text-to-3d']"
+        },
+        {
+          "id": "no_failed_tasks",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "tool_group:usage",
+          "status": "pass",
+          "detail": "any of ['ask_choice']; called=['ask_choice', 'update_production_brief', 'create_model_3d', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "tool_group:brief",
+          "status": "pass",
+          "detail": "any of ['update_production_brief']; called=['ask_choice', 'update_production_brief', 'create_model_3d', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "tool_group:generate_3d",
+          "status": "pass",
+          "detail": "any of ['create_model_3d', 'create_model_3d_from_image', 'create_model_3d_from_views']; called=['ask_choice', 'update_production_brief', 'create_model_3d', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "order:ask_choice+update_production_brief<create_model_3d+create_model_3d_from_image+create_model_3d_from_views",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "budget:paid_calls",
+          "status": "pass",
+          "detail": "1 task(s)"
+        },
+        {
+          "id": "budget:tool_calls",
+          "status": "pass",
+          "detail": "5 call(s)"
+        },
+        {
+          "id": "budget:interruptions",
+          "status": "pass",
+          "detail": "2 card(s)"
+        }
+      ]
+    },
+    {
+      "id": "3d-print-figurine",
+      "title": "打印手办：15 厘米桌游骑士（先概念图再图生 3D）",
+      "modality": "3d",
+      "category": "print_figurine",
+      "purpose": "print",
+      "session_id": "session_LB_39EgCznP0o2FMv8GPFVTd",
+      "turns": 6,
+      "tool_calls": [
+        {
+          "name": "ask_choice",
+          "arguments": {
+            "kind": "usage_profile"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "update_production_brief",
+          "arguments": {
+            "purpose": "print",
+            "target_platform": "3D print",
+            "notes": "15 cm tall, watertight"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "refine_image",
+          "arguments": {
+            "prompt": "concept art of a tabletop miniature knight, full body, neutral A-pose, plain light background, front view, clean silhouette, printable details, realistic stylized"
+          },
+          "task_id": "task_94b9dcfc05b724fe14a6cd9597dab18d",
+          "summary": null
+        },
+        {
+          "name": "create_model_3d_from_image",
+          "arguments": {
+            "prompt": "tabletop miniature knight, full body, watertight solid mesh, 15 cm tall, detailed armor",
+            "reference_image_indices": [
+              1
+            ],
+            "input_override_reason": "the fake upstream image is a placeholder, not a real 3D input"
+          },
+          "task_id": "task_dece6f14c40c3d8da5b7b03f4d1f770c",
+          "summary": null
+        },
+        {
+          "name": "inspect_model",
+          "arguments": {
+            "model": "task_dece6f14c40c3d8da5b7b03f4d1f770c"
+          },
+          "task_id": null,
+          "summary": {
+            "tool": "inspect",
+            "model": "task_dece6f14c40c3d8da5b7b03f4d1f770c",
+            "task_id": "task_dece6f14c40c3d8da5b7b03f4d1f770c",
+            "triangles": 72,
+            "has_uv": true,
+            "watertight": true,
+            "has_skin": false,
+            "usage": {
+              "purpose": "print",
+              "purpose_label": "3D 打印",
+              "purpose_source": "production_brief",
+              "note": "按制作简报的用途「3D 打印」判定。",
+              "checks": [
+                {
+                  "check": "triangles",
+                  "status": "pass",
+                  "actual": 72,
+                  "budget": {
+                    "maximum": 2000000
+                  }
+                },
+                {
+                  "check": "uv",
+                  "status": "unknown",
+                  "actual": true,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "watertight",
+                  "status": "pass",
+                  "actual": true,
+                  "budget": {
+                    "required": true
+                  }
+                },
+                {
+                  "check": "skin",
+                  "status": "unknown",
+                  "actual": 0,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "texture_size",
+                  "status": "pass",
+                  "actual": 64,
+                  "budget": {
+                    "maximum": 4096
+                  }
+                },
+                {
+                  "check": "pivot_bottom_center",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.01
+                  }
+                },
+                {
+                  "check": "y_up",
+                  "status": "pass",
+                  "actual": "y",
+                  "budget": {
+                    "axis": "y",
+                    "flat_ratio": 0.05
+                  }
+                },
+                {
+                  "check": "plausible_scale",
+                  "status": "pass",
+                  "actual": 1.612406849861145,
+                  "budget": {
+                    "maximum": 2,
+                    "minimum": 0.01,
+                    "unit": "m"
+                  }
+                },
+                {
+                  "check": "debris",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.01
+                  }
+                },
+                {
+                  "check": "degenerate",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.001
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "render_model_views",
+          "arguments": {
+            "model": "task_dece6f14c40c3d8da5b7b03f4d1f770c",
+            "views": [
+              "front",
+              "back",
+              "three_quarter"
+            ]
+          },
+          "task_id": null,
+          "summary": {
+            "handles": [
+              "@img2",
+              "@img3",
+              "@img4"
+            ],
+            "model": "task_dece6f14c40c3d8da5b7b03f4d1f770c",
+            "render_calls_remaining": 5,
+            "task_id": "task_dece6f14c40c3d8da5b7b03f4d1f770c",
+            "tool": "render",
+            "views": [
+              "front",
+              "back",
+              "three_quarter"
+            ]
+          }
+        }
+      ],
+      "cards": [
+        {
+          "kind": "choice",
+          "id": "choice_5ca6d18ccbd73e8624fcaa33",
+          "tool": "update_production_brief",
+          "card_kind": "usage_profile",
+          "state": "answered"
+        },
+        {
+          "kind": "approval",
+          "id": "eg_a97e92b9dac1c4bc8792122012436f150f47a71e458af68d",
+          "tool": "create_model_3d_from_image",
+          "capability": "image-to-3d",
+          "state": "approved"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task_dece6f14c40c3d8da5b7b03f4d1f770c",
+          "capability": "image-to-3d",
+          "model_id": "meshy-7.1",
+          "offering_id": "meshy/meshy-7.1/image-to-3d",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        },
+        {
+          "id": "task_94b9dcfc05b724fe14a6cd9597dab18d",
+          "capability": "text-to-image",
+          "model_id": "nano-banana-pro",
+          "offering_id": "meshy/nano-banana-pro/text-to-image",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        }
+      ],
+      "final_reply": {
+        "content": "Fake upstream reply.",
+        "failed": false
+      },
+      "assets": [],
+      "metrics": {
+        "tool_call_count": 6,
+        "credits": {
+          "legacy.credits": "49"
+        },
+        "paid_call_count": 2,
+        "interruption_count": 2,
+        "choice_card_count": 1,
+        "approval_card_count": 1,
+        "plan_card_count": 0,
+        "tool_counts": {
+          "ask_choice": 1,
+          "update_production_brief": 1,
+          "refine_image": 1,
+          "create_model_3d_from_image": 1,
+          "inspect_model": 1,
+          "render_model_views": 1
+        },
+        "rework": {
+          "count": 0,
+          "failed_tasks": 0,
+          "revision_count": 0,
+          "revision_operations": {}
+        },
+        "checkpoints": {
+          "total": 0,
+          "passed": 0,
+          "failed": 0,
+          "waived": 0,
+          "unknown": 0
+        },
+        "self_inspection": {
+          "inspect_model": 1,
+          "render_model_views": 1,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
+        },
+        "image_count": 4,
+        "final_reply_chars": 20,
+        "elapsed_ms": 7574
+      },
+      "checks": [
+        {
+          "id": "final_reply",
+          "status": "pass",
+          "detail": "20 chars"
+        },
+        {
+          "id": "capability:text-to-image",
+          "status": "pass",
+          "detail": "1/1 succeeded; succeeded=['image-to-3d', 'text-to-image']; tasks=['image-to-3d', 'text-to-image']"
+        },
+        {
+          "id": "capability:image-to-3d",
+          "status": "pass",
+          "detail": "1/1 succeeded; succeeded=['image-to-3d', 'text-to-image']; tasks=['image-to-3d', 'text-to-image']"
+        },
+        {
+          "id": "no_failed_tasks",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "tool_group:usage",
+          "status": "pass",
+          "detail": "any of ['ask_choice']; called=['ask_choice', 'update_production_brief', 'refine_image', 'create_model_3d_from_image', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "tool_group:brief",
+          "status": "pass",
+          "detail": "any of ['update_production_brief']; called=['ask_choice', 'update_production_brief', 'refine_image', 'create_model_3d_from_image', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "tool_group:concept_image",
+          "status": "pass",
+          "detail": "any of ['refine_image']; called=['ask_choice', 'update_production_brief', 'refine_image', 'create_model_3d_from_image', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "tool_group:generate_3d",
+          "status": "pass",
+          "detail": "any of ['create_model_3d_from_image', 'create_model_3d_from_views', 'create_model_3d']; called=['ask_choice', 'update_production_brief', 'refine_image', 'create_model_3d_from_image', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "order:refine_image<create_model_3d_from_image+create_model_3d_from_views",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "order:ask_choice+update_production_brief<create_model_3d_from_image+create_model_3d_from_views+create_model_3d",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "budget:paid_calls",
+          "status": "pass",
+          "detail": "2 task(s)"
+        },
+        {
+          "id": "budget:tool_calls",
+          "status": "pass",
+          "detail": "6 call(s)"
+        },
+        {
+          "id": "budget:interruptions",
+          "status": "pass",
+          "detail": "2 card(s)"
+        }
+      ]
+    },
+    {
+      "id": "3d-ar-product",
+      "title": "AR 商品：运动水壶（先商品图再图生 3D）",
+      "modality": "3d",
+      "category": "ar_product",
+      "purpose": "web_ar",
+      "session_id": "session_5MDtgGWcmWpqg8i3SJw5fYnu",
+      "turns": 6,
+      "tool_calls": [
+        {
+          "name": "ask_choice",
+          "arguments": {
+            "kind": "usage_profile"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "update_production_brief",
+          "arguments": {
+            "purpose": "web_ar",
+            "target_platform": "Web and AR",
+            "style": "clean product photo"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "refine_image",
+          "arguments": {
+            "prompt": "product photo of a stainless steel sports water bottle, front view, plain white background, soft studio lighting, clean reflections, centered"
+          },
+          "task_id": "task_1042b4d44c3e82a79d1d56a75f4df2d6",
+          "summary": null
+        },
+        {
+          "name": "create_model_3d_from_image",
+          "arguments": {
+            "prompt": "stainless steel sports water bottle, product model, clean topology, compact for web and AR",
+            "reference_image_indices": [
+              1
+            ],
+            "input_override_reason": "the fake upstream image is a placeholder, not a real 3D input"
+          },
+          "task_id": "task_06ed415e97159fe952cd99397929aa9b",
+          "summary": null
+        },
+        {
+          "name": "inspect_model",
+          "arguments": {
+            "model": "task_06ed415e97159fe952cd99397929aa9b"
+          },
+          "task_id": null,
+          "summary": {
+            "tool": "inspect",
+            "model": "task_06ed415e97159fe952cd99397929aa9b",
+            "task_id": "task_06ed415e97159fe952cd99397929aa9b",
+            "triangles": 72,
+            "has_uv": true,
+            "watertight": true,
+            "has_skin": false,
+            "usage": {
+              "purpose": "web_ar",
+              "purpose_label": "Web/AR 展示",
+              "purpose_source": "production_brief",
+              "note": "按制作简报的用途「Web/AR 展示」判定。",
+              "checks": [
+                {
+                  "check": "triangles",
+                  "status": "pass",
+                  "actual": 72,
+                  "budget": {
+                    "maximum": 100000
+                  }
+                },
+                {
+                  "check": "uv",
+                  "status": "pass",
+                  "actual": true,
+                  "budget": {
+                    "required": true
+                  }
+                },
+                {
+                  "check": "watertight",
+                  "status": "unknown",
+                  "actual": true,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "skin",
+                  "status": "unknown",
+                  "actual": 0,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "texture_size",
+                  "status": "pass",
+                  "actual": 64,
+                  "budget": {
+                    "maximum": 2048
+                  }
+                },
+                {
+                  "check": "pivot_bottom_center",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.01
+                  }
+                },
+                {
+                  "check": "y_up",
+                  "status": "pass",
+                  "actual": "y",
+                  "budget": {
+                    "axis": "y",
+                    "flat_ratio": 0.05
+                  }
+                },
+                {
+                  "check": "plausible_scale",
+                  "status": "pass",
+                  "actual": 1.612406849861145,
+                  "budget": {
+                    "maximum": 10,
+                    "minimum": 0.05,
+                    "unit": "m"
+                  }
+                },
+                {
+                  "check": "debris",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.01
+                  }
+                },
+                {
+                  "check": "degenerate",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.001
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "render_model_views",
+          "arguments": {
+            "model": "task_06ed415e97159fe952cd99397929aa9b",
+            "views": [
+              "front",
+              "back",
+              "three_quarter"
+            ]
+          },
+          "task_id": null,
+          "summary": {
+            "handles": [
+              "@img2",
+              "@img3",
+              "@img4"
+            ],
+            "model": "task_06ed415e97159fe952cd99397929aa9b",
+            "render_calls_remaining": 5,
+            "task_id": "task_06ed415e97159fe952cd99397929aa9b",
+            "tool": "render",
+            "views": [
+              "front",
+              "back",
+              "three_quarter"
+            ]
+          }
+        }
+      ],
+      "cards": [
+        {
+          "kind": "choice",
+          "id": "choice_b1cc6259fe3c94590d500b40",
+          "tool": "update_production_brief",
+          "card_kind": "usage_profile",
+          "state": "answered"
+        },
+        {
+          "kind": "approval",
+          "id": "eg_9af6455d837bd05822a0fb0695f91d561087643ed6df7354",
+          "tool": "create_model_3d_from_image",
+          "capability": "image-to-3d",
+          "state": "approved"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task_06ed415e97159fe952cd99397929aa9b",
+          "capability": "image-to-3d",
+          "model_id": "meshy-7.1",
+          "offering_id": "meshy/meshy-7.1/image-to-3d",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        },
+        {
+          "id": "task_1042b4d44c3e82a79d1d56a75f4df2d6",
+          "capability": "text-to-image",
+          "model_id": "nano-banana-pro",
+          "offering_id": "meshy/nano-banana-pro/text-to-image",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        }
+      ],
+      "final_reply": {
+        "content": "Fake upstream reply.",
+        "failed": false
+      },
+      "assets": [],
+      "metrics": {
+        "tool_call_count": 6,
+        "credits": {
+          "legacy.credits": "49"
+        },
+        "paid_call_count": 2,
+        "interruption_count": 2,
+        "choice_card_count": 1,
+        "approval_card_count": 1,
+        "plan_card_count": 0,
+        "tool_counts": {
+          "ask_choice": 1,
+          "update_production_brief": 1,
+          "refine_image": 1,
+          "create_model_3d_from_image": 1,
+          "inspect_model": 1,
+          "render_model_views": 1
+        },
+        "rework": {
+          "count": 0,
+          "failed_tasks": 0,
+          "revision_count": 0,
+          "revision_operations": {}
+        },
+        "checkpoints": {
+          "total": 0,
+          "passed": 0,
+          "failed": 0,
+          "waived": 0,
+          "unknown": 0
+        },
+        "self_inspection": {
+          "inspect_model": 1,
+          "render_model_views": 1,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
+        },
+        "image_count": 4,
+        "final_reply_chars": 20,
+        "elapsed_ms": 7508
+      },
+      "checks": [
+        {
+          "id": "final_reply",
+          "status": "pass",
+          "detail": "20 chars"
+        },
+        {
+          "id": "capability:text-to-image",
+          "status": "pass",
+          "detail": "1/1 succeeded; succeeded=['image-to-3d', 'text-to-image']; tasks=['image-to-3d', 'text-to-image']"
+        },
+        {
+          "id": "capability:image-to-3d",
+          "status": "pass",
+          "detail": "1/1 succeeded; succeeded=['image-to-3d', 'text-to-image']; tasks=['image-to-3d', 'text-to-image']"
+        },
+        {
+          "id": "no_failed_tasks",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "tool_group:usage",
+          "status": "pass",
+          "detail": "any of ['ask_choice']; called=['ask_choice', 'update_production_brief', 'refine_image', 'create_model_3d_from_image', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "tool_group:brief",
+          "status": "pass",
+          "detail": "any of ['update_production_brief']; called=['ask_choice', 'update_production_brief', 'refine_image', 'create_model_3d_from_image', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "tool_group:concept_image",
+          "status": "pass",
+          "detail": "any of ['refine_image']; called=['ask_choice', 'update_production_brief', 'refine_image', 'create_model_3d_from_image', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "tool_group:generate_3d",
+          "status": "pass",
+          "detail": "any of ['create_model_3d_from_image', 'create_model_3d_from_views', 'create_model_3d']; called=['ask_choice', 'update_production_brief', 'refine_image', 'create_model_3d_from_image', 'inspect_model', 'render_model_views']"
+        },
+        {
+          "id": "order:refine_image<create_model_3d_from_image+create_model_3d_from_views",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "order:ask_choice+update_production_brief<create_model_3d_from_image+create_model_3d_from_views+create_model_3d",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "budget:paid_calls",
+          "status": "pass",
+          "detail": "2 task(s)"
+        },
+        {
+          "id": "budget:tool_calls",
+          "status": "pass",
+          "detail": "6 call(s)"
+        },
+        {
+          "id": "budget:interruptions",
+          "status": "pass",
+          "detail": "2 card(s)"
+        }
+      ]
+    },
+    {
+      "id": "2d-character-illustration",
+      "title": "2D 角色立绘：赛博朋克女刺客",
+      "modality": "2d",
+      "category": "character_illustration",
+      "purpose": "illustration",
+      "session_id": "session_OwVdORHWblvW04FBYwPiJtfB",
+      "turns": 2,
+      "tool_calls": [
+        {
+          "name": "ask_choice",
+          "arguments": {
+            "kind": "image_usage_profile"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "refine_image",
+          "arguments": {
+            "prompt": "full-body cyberpunk female assassin, clean digital illustration, confident pose, neon accents, transparent background, sharp silhouette, no text, no watermark"
+          },
+          "task_id": "task_5680a6f6b54d207c8ea21f35c7226f65",
+          "summary": null
+        }
+      ],
+      "cards": [
+        {
+          "kind": "choice",
+          "id": "choice_9e38c8816a4356b1edb96855",
+          "tool": "update_production_brief",
+          "card_kind": "image_usage_profile",
+          "state": "answered"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task_5680a6f6b54d207c8ea21f35c7226f65",
+          "capability": "text-to-image",
+          "model_id": "gpt-image-2.6-sunburst",
+          "offering_id": "openai/gpt-image-2/text-to-image",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        }
+      ],
+      "final_reply": {
+        "content": "Fake upstream reply.",
+        "failed": false
+      },
+      "assets": [],
+      "metrics": {
+        "tool_call_count": 2,
+        "credits": {
+          "legacy.credits": "6"
+        },
+        "paid_call_count": 1,
+        "interruption_count": 1,
+        "choice_card_count": 1,
+        "approval_card_count": 0,
+        "plan_card_count": 0,
+        "tool_counts": {
+          "ask_choice": 1,
+          "refine_image": 1
+        },
+        "rework": {
+          "count": 0,
+          "failed_tasks": 0,
+          "revision_count": 0,
+          "revision_operations": {}
+        },
+        "checkpoints": {
+          "total": 0,
+          "passed": 0,
+          "failed": 0,
+          "waived": 0,
+          "unknown": 0
+        },
+        "self_inspection": {
+          "inspect_model": 0,
+          "render_model_views": 0,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
+        },
+        "image_count": 1,
+        "final_reply_chars": 20,
+        "elapsed_ms": 488
+      },
+      "checks": [
+        {
+          "id": "final_reply",
+          "status": "pass",
+          "detail": "20 chars"
+        },
+        {
+          "id": "capability:text-to-image",
+          "status": "pass",
+          "detail": "1/1 succeeded; succeeded=['text-to-image']; tasks=['text-to-image']"
+        },
+        {
+          "id": "no_failed_tasks",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "tool_group:usage",
+          "status": "pass",
+          "detail": "any of ['ask_choice']; called=['ask_choice', 'refine_image']"
+        },
+        {
+          "id": "tool_group:generate_2d",
+          "status": "pass",
+          "detail": "any of ['refine_image']; called=['ask_choice', 'refine_image']"
+        },
+        {
+          "id": "order:ask_choice<refine_image",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "budget:paid_calls",
+          "status": "pass",
+          "detail": "1 task(s)"
+        },
+        {
+          "id": "budget:tool_calls",
+          "status": "pass",
+          "detail": "2 call(s)"
+        },
+        {
+          "id": "budget:interruptions",
+          "status": "pass",
+          "detail": "1 card(s)"
+        }
+      ]
+    },
+    {
+      "id": "2d-icon-set",
+      "title": "2D 图标/道具图：三色药水瓶图标",
+      "modality": "2d",
+      "category": "icon_prop",
+      "purpose": "icon_prop",
+      "session_id": "session_-UAe_XwvF-lBrIeqYa0Gb-B_",
+      "turns": 2,
+      "tool_calls": [
+        {
+          "name": "ask_choice",
+          "arguments": {
+            "kind": "image_usage_profile"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "refine_image",
+          "arguments": {
+            "prompt": "set of three potion bottle icons, red blue and green liquid, matching stylized game icon style, thick clean outlines, transparent background, no text, no watermark"
+          },
+          "task_id": "task_68009cc59851176b21007707cd4749a2",
+          "summary": null
+        }
+      ],
+      "cards": [
+        {
+          "kind": "choice",
+          "id": "choice_fc24ed72558acf528aae7c7d",
+          "tool": "update_production_brief",
+          "card_kind": "image_usage_profile",
+          "state": "answered"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task_68009cc59851176b21007707cd4749a2",
+          "capability": "text-to-image",
+          "model_id": "gpt-image-2.6-sunburst",
+          "offering_id": "openai/gpt-image-2/text-to-image",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        }
+      ],
+      "final_reply": {
+        "content": "Fake upstream reply.",
+        "failed": false
+      },
+      "assets": [],
+      "metrics": {
+        "tool_call_count": 2,
+        "credits": {
+          "legacy.credits": "6"
+        },
+        "paid_call_count": 1,
+        "interruption_count": 1,
+        "choice_card_count": 1,
+        "approval_card_count": 0,
+        "plan_card_count": 0,
+        "tool_counts": {
+          "ask_choice": 1,
+          "refine_image": 1
+        },
+        "rework": {
+          "count": 0,
+          "failed_tasks": 0,
+          "revision_count": 0,
+          "revision_operations": {}
+        },
+        "checkpoints": {
+          "total": 0,
+          "passed": 0,
+          "failed": 0,
+          "waived": 0,
+          "unknown": 0
+        },
+        "self_inspection": {
+          "inspect_model": 0,
+          "render_model_views": 0,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
+        },
+        "image_count": 1,
+        "final_reply_chars": 20,
+        "elapsed_ms": 498
+      },
+      "checks": [
+        {
+          "id": "final_reply",
+          "status": "pass",
+          "detail": "20 chars"
+        },
+        {
+          "id": "capability:text-to-image",
+          "status": "pass",
+          "detail": "1/1 succeeded; succeeded=['text-to-image']; tasks=['text-to-image']"
+        },
+        {
+          "id": "no_failed_tasks",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "tool_group:usage",
+          "status": "pass",
+          "detail": "any of ['ask_choice']; called=['ask_choice', 'refine_image']"
+        },
+        {
+          "id": "tool_group:generate_2d",
+          "status": "pass",
+          "detail": "any of ['refine_image']; called=['ask_choice', 'refine_image']"
+        },
+        {
+          "id": "order:ask_choice<refine_image",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "budget:paid_calls",
+          "status": "pass",
+          "detail": "1 task(s)"
+        },
+        {
+          "id": "budget:tool_calls",
+          "status": "pass",
+          "detail": "2 call(s)"
+        },
+        {
+          "id": "budget:interruptions",
+          "status": "pass",
+          "detail": "1 card(s)"
+        }
+      ]
+    },
+    {
+      "id": "2d-series-consistency",
+      "title": "2D 系列一致性：同一角色的立绘、半身像与侧面像",
+      "modality": "2d",
+      "category": "series_consistency",
+      "purpose": "illustration",
+      "session_id": "session_VhXS0cg86GuIRGObWTIWVzM-",
+      "turns": 4,
+      "tool_calls": [
+        {
+          "name": "ask_choice",
+          "arguments": {
+            "kind": "image_usage_profile"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "refine_image",
+          "arguments": {
+            "prompt": "full-body portrait of a young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"
+          },
+          "task_id": "task_3a71ed7e60cf99071a595efa114c7e60",
+          "summary": null
+        },
+        {
+          "name": "refine_image",
+          "arguments": {
+            "prompt": "half-body portrait of the same young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"
+          },
+          "task_id": "task_ebba56eeb94177e76e0f40f566cce34c",
+          "summary": null
+        },
+        {
+          "name": "refine_image",
+          "arguments": {
+            "prompt": "side profile of the same young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"
+          },
+          "task_id": "task_01eac628830247770ee252db5abb88e5",
+          "summary": null
+        }
+      ],
+      "cards": [
+        {
+          "kind": "choice",
+          "id": "choice_6036ea6dba5df778aa88386d",
+          "tool": "update_production_brief",
+          "card_kind": "image_usage_profile",
+          "state": "answered"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task_01eac628830247770ee252db5abb88e5",
+          "capability": "text-to-image",
+          "model_id": "gpt-image-2.6-sunburst",
+          "offering_id": "openai/gpt-image-2/text-to-image",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        },
+        {
+          "id": "task_ebba56eeb94177e76e0f40f566cce34c",
+          "capability": "text-to-image",
+          "model_id": "gpt-image-2.6-sunburst",
+          "offering_id": "openai/gpt-image-2/text-to-image",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        },
+        {
+          "id": "task_3a71ed7e60cf99071a595efa114c7e60",
+          "capability": "text-to-image",
+          "model_id": "gpt-image-2.6-sunburst",
+          "offering_id": "openai/gpt-image-2/text-to-image",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        }
+      ],
+      "final_reply": {
+        "content": "Fake upstream reply.",
+        "failed": false
+      },
+      "assets": [],
+      "metrics": {
+        "tool_call_count": 4,
+        "credits": {
+          "legacy.credits": "18"
+        },
+        "paid_call_count": 3,
+        "interruption_count": 1,
+        "choice_card_count": 1,
+        "approval_card_count": 0,
+        "plan_card_count": 0,
+        "tool_counts": {
+          "ask_choice": 1,
+          "refine_image": 3
+        },
+        "rework": {
+          "count": 0,
+          "failed_tasks": 0,
+          "revision_count": 0,
+          "revision_operations": {}
+        },
+        "checkpoints": {
+          "total": 0,
+          "passed": 0,
+          "failed": 0,
+          "waived": 0,
+          "unknown": 0
+        },
+        "self_inspection": {
+          "inspect_model": 0,
+          "render_model_views": 0,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
+        },
+        "image_count": 3,
+        "final_reply_chars": 20,
+        "elapsed_ms": 984
+      },
+      "checks": [
+        {
+          "id": "final_reply",
+          "status": "pass",
+          "detail": "20 chars"
+        },
+        {
+          "id": "capability:text-to-image",
+          "status": "pass",
+          "detail": "3/3 succeeded; succeeded=['text-to-image']; tasks=['text-to-image', 'text-to-image', 'text-to-image']"
+        },
+        {
+          "id": "no_failed_tasks",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "tool_group:usage",
+          "status": "pass",
+          "detail": "any of ['ask_choice']; called=['ask_choice', 'refine_image', 'refine_image', 'refine_image']"
+        },
+        {
+          "id": "tool_group:generate_2d",
+          "status": "pass",
+          "detail": "any of ['refine_image']; called=['ask_choice', 'refine_image', 'refine_image', 'refine_image']"
+        },
+        {
+          "id": "order:ask_choice<refine_image",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "budget:paid_calls",
+          "status": "pass",
+          "detail": "3 task(s)"
+        },
+        {
+          "id": "budget:tool_calls",
+          "status": "pass",
+          "detail": "4 call(s)"
+        },
+        {
+          "id": "budget:interruptions",
+          "status": "pass",
+          "detail": "1 card(s)"
+        }
+      ]
+    },
+    {
+      "id": "2d-3d-input-concept",
+      "title": "2D 到 3D：单主体、纯色背景的概念图",
+      "modality": "2d",
+      "category": "model3d_input",
+      "purpose": "model3d_input",
+      "session_id": "session_vI8KbueOMhH_5kFV8noguTtV",
+      "turns": 3,
+      "tool_calls": [
+        {
+          "name": "ask_choice",
+          "arguments": {
+            "kind": "image_usage_profile"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "update_production_brief",
+          "arguments": {
+            "image_use": "model3d_input",
+            "image_for_3d": true,
+            "image_transparent": false
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "refine_image",
+          "arguments": {
+            "model": "nano-banana-pro",
+            "prompt": "single mechanical arm prop, A-pose, full subject, solid neutral background, even studio lighting, product concept art, no text, no watermark"
+          },
+          "task_id": "task_8c6bf706ebf1c250444fa2acf5f0f530",
+          "summary": null
+        }
+      ],
+      "cards": [
+        {
+          "kind": "choice",
+          "id": "choice_2e1a97070b091ab3c18f7dff",
+          "tool": "update_production_brief",
+          "card_kind": "image_usage_profile",
+          "state": "answered"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task_8c6bf706ebf1c250444fa2acf5f0f530",
+          "capability": "text-to-image",
+          "model_id": "nano-banana-pro",
+          "offering_id": "meshy/nano-banana-pro/text-to-image",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        }
+      ],
+      "final_reply": {
+        "content": "Fake upstream reply.",
+        "failed": false
+      },
+      "assets": [],
+      "metrics": {
+        "tool_call_count": 3,
+        "credits": {
+          "legacy.credits": "9"
+        },
+        "paid_call_count": 1,
+        "interruption_count": 1,
+        "choice_card_count": 1,
+        "approval_card_count": 0,
+        "plan_card_count": 0,
+        "tool_counts": {
+          "ask_choice": 1,
+          "update_production_brief": 1,
+          "refine_image": 1
+        },
+        "rework": {
+          "count": 0,
+          "failed_tasks": 0,
+          "revision_count": 0,
+          "revision_operations": {}
+        },
+        "checkpoints": {
+          "total": 0,
+          "passed": 0,
+          "failed": 0,
+          "waived": 0,
+          "unknown": 0
+        },
+        "self_inspection": {
+          "inspect_model": 0,
+          "render_model_views": 0,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
+        },
+        "image_count": 1,
+        "final_reply_chars": 20,
+        "elapsed_ms": 3517
+      },
+      "checks": [
+        {
+          "id": "final_reply",
+          "status": "pass",
+          "detail": "20 chars"
+        },
+        {
+          "id": "capability:text-to-image",
+          "status": "pass",
+          "detail": "1/1 succeeded; succeeded=['text-to-image']; tasks=['text-to-image']"
+        },
+        {
+          "id": "no_failed_tasks",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "tool_group:usage",
+          "status": "pass",
+          "detail": "any of ['ask_choice']; called=['ask_choice', 'update_production_brief', 'refine_image']"
+        },
+        {
+          "id": "tool_group:brief",
+          "status": "pass",
+          "detail": "any of ['update_production_brief']; called=['ask_choice', 'update_production_brief', 'refine_image']"
+        },
+        {
+          "id": "tool_group:generate_2d",
+          "status": "pass",
+          "detail": "any of ['refine_image']; called=['ask_choice', 'update_production_brief', 'refine_image']"
+        },
+        {
+          "id": "order:ask_choice+update_production_brief<refine_image",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "budget:paid_calls",
+          "status": "pass",
+          "detail": "1 task(s)"
+        },
+        {
+          "id": "budget:tool_calls",
+          "status": "pass",
+          "detail": "3 call(s)"
+        },
+        {
+          "id": "budget:interruptions",
+          "status": "pass",
+          "detail": "1 card(s)"
+        }
+      ]
+    },
+    {
+      "id": "3d-image-reference",
+      "title": "参考图贴合：图生 3D 的并排对照与自检记录",
+      "modality": "3d",
+      "category": "reference_fidelity",
+      "purpose": "game_prop",
+      "session_id": "session_0whz4ecC9ubV4jk4z0tZb9hl",
+      "turns": 4,
+      "tool_calls": [
+        {
+          "name": "create_model_3d_from_image",
+          "arguments": {
+            "prompt": "stylized red cargo crate, plain background, game prop",
+            "reference_handles": [
+              "@img1"
+            ],
+            "input_override_reason": "the fake upstream image is a placeholder, not a real 3D input"
+          },
+          "task_id": "task_d853ab348b0b264bd5a037e3430d4a91",
+          "summary": null
+        },
+        {
+          "name": "inspect_model",
+          "arguments": {
+            "model": "task_d853ab348b0b264bd5a037e3430d4a91"
+          },
+          "task_id": null,
+          "summary": {
+            "tool": "inspect",
+            "model": "task_d853ab348b0b264bd5a037e3430d4a91",
+            "task_id": "task_d853ab348b0b264bd5a037e3430d4a91",
+            "triangles": 72,
+            "has_uv": true,
+            "watertight": true,
+            "has_skin": false,
+            "usage": {
+              "purpose": "render",
+              "purpose_label": "展示/渲染",
+              "purpose_source": "default_profile",
+              "note": "会话没有可用的制作简报用途，按默认用途「展示/渲染」判定。",
+              "checks": [
+                {
+                  "check": "triangles",
+                  "status": "pass",
+                  "actual": 72,
+                  "budget": {
+                    "maximum": 2000000
+                  }
+                },
+                {
+                  "check": "uv",
+                  "status": "unknown",
+                  "actual": true,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "watertight",
+                  "status": "unknown",
+                  "actual": true,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "skin",
+                  "status": "unknown",
+                  "actual": 0,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "texture_size",
+                  "status": "pass",
+                  "actual": 64,
+                  "budget": {
+                    "maximum": 8192
+                  }
+                },
+                {
+                  "check": "pivot_bottom_center",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.01
+                  }
+                },
+                {
+                  "check": "y_up",
+                  "status": "pass",
+                  "actual": "y",
+                  "budget": {
+                    "axis": "y",
+                    "flat_ratio": 0.05
+                  }
+                },
+                {
+                  "check": "plausible_scale",
+                  "status": "unknown",
+                  "actual": 1.612406849861145,
+                  "budget": {}
+                },
+                {
+                  "check": "debris",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.01
+                  }
+                },
+                {
+                  "check": "degenerate",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.001
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "compare_model_reference",
+          "arguments": {
+            "model": "task_d853ab348b0b264bd5a037e3430d4a91"
+          },
+          "task_id": null,
+          "summary": {
+            "handles": [
+              "@img2"
+            ],
+            "model": "task_d853ab348b0b264bd5a037e3430d4a91",
+            "render_calls_remaining": 5,
+            "task_id": "task_d853ab348b0b264bd5a037e3430d4a91",
+            "tool": "reference",
+            "views": [
+              "front"
+            ]
+          }
+        },
+        {
+          "name": "record_self_check",
+          "arguments": {
+            "model": "task_d853ab348b0b264bd5a037e3430d4a91",
+            "status": "passed",
+            "summary": "the silhouette and colour match the reference",
+            "findings": [
+              "silhouette matches the reference"
+            ],
+            "fixes": [],
+            "remaining": []
+          },
+          "task_id": null,
+          "summary": {
+            "corrections_used": 0,
+            "remaining": [],
+            "rounds_used": 1,
+            "status": "passed",
+            "status_role": "passed",
+            "task_id": "task_d853ab348b0b264bd5a037e3430d4a91",
+            "tool": "record_self_check"
+          }
+        }
+      ],
+      "cards": [
+        {
+          "kind": "approval",
+          "id": "eg_90bea4d439c458f10433b31f3beeeeb9af69c911bfd3b21f",
+          "tool": "create_model_3d_from_image",
+          "capability": "image-to-3d",
+          "state": "approved"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task_d853ab348b0b264bd5a037e3430d4a91",
+          "capability": "image-to-3d",
+          "model_id": "meshy-7.1",
+          "offering_id": "meshy/meshy-7.1/image-to-3d",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        }
+      ],
+      "final_reply": {
+        "content": "Fake upstream reply.",
+        "failed": false
+      },
+      "assets": [],
+      "metrics": {
+        "tool_call_count": 4,
+        "credits": {
+          "legacy.credits": "40"
+        },
+        "paid_call_count": 1,
+        "interruption_count": 1,
+        "choice_card_count": 0,
+        "approval_card_count": 1,
+        "plan_card_count": 0,
+        "tool_counts": {
+          "create_model_3d_from_image": 1,
+          "inspect_model": 1,
+          "compare_model_reference": 1,
+          "record_self_check": 1
+        },
+        "rework": {
+          "count": 0,
+          "failed_tasks": 0,
+          "revision_count": 0,
+          "revision_operations": {}
+        },
+        "checkpoints": {
+          "total": 0,
+          "passed": 0,
+          "failed": 0,
+          "waived": 0,
+          "unknown": 0
+        },
+        "self_inspection": {
+          "inspect_model": 1,
+          "render_model_views": 0,
+          "compare_model_reference": 1,
+          "self_check_records": 1,
+          "self_check_passed": 1,
+          "self_check_issues": 0
+        },
+        "image_count": 2,
+        "final_reply_chars": 20,
+        "elapsed_ms": 3828
+      },
+      "checks": [
+        {
+          "id": "final_reply",
+          "status": "pass",
+          "detail": "20 chars"
+        },
+        {
+          "id": "capability:image-to-3d",
+          "status": "pass",
+          "detail": "1/1 succeeded; succeeded=['image-to-3d']; tasks=['image-to-3d']"
+        },
+        {
+          "id": "no_failed_tasks",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "tool_group:generate_3d",
+          "status": "pass",
+          "detail": "any of ['create_model_3d_from_image']; called=['create_model_3d_from_image', 'inspect_model', 'compare_model_reference', 'record_self_check']"
+        },
+        {
+          "id": "tool_group:reference",
+          "status": "pass",
+          "detail": "any of ['compare_model_reference']; called=['create_model_3d_from_image', 'inspect_model', 'compare_model_reference', 'record_self_check']"
+        },
+        {
+          "id": "tool_group:record",
+          "status": "pass",
+          "detail": "any of ['record_self_check']; called=['create_model_3d_from_image', 'inspect_model', 'compare_model_reference', 'record_self_check']"
+        },
+        {
+          "id": "order:create_model_3d_from_image<compare_model_reference+record_self_check",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "budget:paid_calls",
+          "status": "pass",
+          "detail": "1 task(s)"
+        },
+        {
+          "id": "budget:tool_calls",
+          "status": "pass",
+          "detail": "4 call(s)"
+        },
+        {
+          "id": "budget:interruptions",
+          "status": "pass",
+          "detail": "1 card(s)"
+        }
+      ]
+    },
+    {
+      "id": "3d-multistep-rig-checkpoint",
+      "title": "多步加工：角色底模→减面检查点→预案修正→绑骨",
+      "modality": "3d",
+      "category": "multistep_checkpoint",
+      "purpose": "game_character",
+      "session_id": "session_7qdPEnQ3AtBk9bae7pjVdt_K",
+      "turns": 7,
+      "tool_calls": [
+        {
+          "name": "ask_choice",
+          "arguments": {
+            "kind": "usage_profile"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "update_production_brief",
+          "arguments": {
+            "purpose": "game_character",
+            "target_platform": "Unity",
+            "needs_rig": true,
+            "style": "stylized realistic"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "propose_production_plan",
+          "arguments": {
+            "title": "游戏角色多步制作",
+            "steps": [
+              {
+                "capability": "text-to-3d",
+                "model": "meshy/meshy-7.1/text-to-3d",
+                "purpose": "生成角色底模"
+              },
+              {
+                "capability": "remesh",
+                "model": "meshy/processing/remesh",
+                "purpose": "减面到游戏预算"
+              },
+              {
+                "capability": "rigging",
+                "model": "meshy/processing/rigging",
+                "purpose": "绑骨"
+              }
+            ],
+            "budgets": [
+              {
+                "unit": "legacy.credits",
+                "amount": 100
+              }
+            ],
+            "checkpoints": [
+              {
+                "after_capability": "remesh",
+                "checks": [
+                  "triangles",
+                  "pivot_bottom_center"
+                ]
+              }
+            ],
+            "contingencies": [
+              {
+                "id": "low_poly",
+                "trigger": [
+                  "triangles"
+                ],
+                "step": {
+                  "capability": "remesh",
+                  "model": "meshy/processing/remesh",
+                  "purpose": "按用途面数预算再减面"
+                }
+              },
+              {
+                "id": "pivot",
+                "trigger": [
+                  "pivot_bottom_center"
+                ],
+                "step": {
+                  "capability": "resize",
+                  "model": "meshy/processing/resize",
+                  "purpose": "把原点移到底部中心"
+                }
+              }
+            ]
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "create_model_3d",
+          "arguments": {
+            "prompt": "stylized game character, full body, A-pose, clean topology, rig-ready"
+          },
+          "task_id": "task_86c4a26fd6e4854a1bc7f964d0143b6c",
+          "summary": null
+        },
+        {
+          "name": "plan_model_processing",
+          "arguments": {
+            "source_task_id": "task_86c4a26fd6e4854a1bc7f964d0143b6c",
+            "steps": [
+              {
+                "capability": "remesh",
+                "offering_id": "meshy/processing/remesh",
+                "parameters": {
+                  "topology": "triangle",
+                  "target_polycount": 100000
+                }
+              },
+              {
+                "capability": "rigging",
+                "offering_id": "meshy/processing/rigging",
+                "parameters": {}
+              }
+            ]
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "revise_processing_plan",
+          "arguments": {
+            "plan_id": "a9d3bcd1d31ff8bb8674da6981f0cc13a12477030e724d0ea576a118375c8a77",
+            "expected_plan_version": 4,
+            "operation": "insert",
+            "step_index": 0,
+            "contingency_id": "low_poly",
+            "parameters": {
+              "topology": "triangle",
+              "target_polycount": 20000
+            },
+            "reason": "检查点未通过：面数超过用途预算，按预案再减面"
+          },
+          "task_id": null,
+          "summary": null
+        },
+        {
+          "name": "inspect_model",
+          "arguments": {
+            "model": "task_86c4a26fd6e4854a1bc7f964d0143b6c"
+          },
+          "task_id": null,
+          "summary": {
+            "tool": "inspect",
+            "model": "task_86c4a26fd6e4854a1bc7f964d0143b6c",
+            "task_id": "task_86c4a26fd6e4854a1bc7f964d0143b6c",
+            "triangles": 72,
+            "has_uv": true,
+            "watertight": true,
+            "has_skin": false,
+            "usage": {
+              "purpose": "game_character",
+              "purpose_label": "游戏/实时·角色",
+              "purpose_source": "production_brief",
+              "note": "按制作简报的用途「游戏/实时·角色」判定。",
+              "checks": [
+                {
+                  "check": "triangles",
+                  "status": "fail",
+                  "actual": 72,
+                  "budget": {
+                    "maximum": 60000,
+                    "minimum": 5000
+                  },
+                  "fix_hint": "可用 remesh 把面数调整到用途预算内。"
+                },
+                {
+                  "check": "uv",
+                  "status": "pass",
+                  "actual": true,
+                  "budget": {
+                    "required": true
+                  }
+                },
+                {
+                  "check": "watertight",
+                  "status": "unknown",
+                  "actual": true,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "skin",
+                  "status": "unknown",
+                  "actual": 0,
+                  "budget": {
+                    "required": false
+                  }
+                },
+                {
+                  "check": "texture_size",
+                  "status": "pass",
+                  "actual": 64,
+                  "budget": {
+                    "maximum": 2048
+                  }
+                },
+                {
+                  "check": "pivot_bottom_center",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.01
+                  }
+                },
+                {
+                  "check": "y_up",
+                  "status": "pass",
+                  "actual": "y",
+                  "budget": {
+                    "axis": "y",
+                    "flat_ratio": 0.05
+                  }
+                },
+                {
+                  "check": "plausible_scale",
+                  "status": "pass",
+                  "actual": 1.612406849861145,
+                  "budget": {
+                    "maximum": 5,
+                    "minimum": 0.3,
+                    "unit": "m"
+                  }
+                },
+                {
+                  "check": "debris",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.01
+                  }
+                },
+                {
+                  "check": "degenerate",
+                  "status": "pass",
+                  "actual": 0,
+                  "budget": {
+                    "maximum_ratio": 0.001
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "cards": [
+        {
+          "kind": "choice",
+          "id": "choice_75cd6943e1b8fd34efc54ac6",
+          "tool": "update_production_brief",
+          "card_kind": "usage_profile",
+          "state": "answered"
+        },
+        {
+          "kind": "plan",
+          "id": "pb_065aa5aa9521120feaedbd5e26dccfebf7af56efd1634245cf2cb0dff725a0a5",
+          "tool": "propose_production_plan",
+          "state": "approved"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "task_84d87d3bca227815b0bebb890dd7a73e",
+          "capability": "rigging",
+          "model_id": "meshy-processing",
+          "offering_id": "meshy/processing/rigging",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        },
+        {
+          "id": "task_3100c77f054f02d5cbb803f1690a56a7",
+          "capability": "remesh",
+          "model_id": "meshy-processing",
+          "offering_id": "meshy/processing/remesh",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        },
+        {
+          "id": "task_9382248ef4e804920090f52999235c4b",
+          "capability": "remesh",
+          "model_id": "meshy-processing",
+          "offering_id": "meshy/processing/remesh",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        },
+        {
+          "id": "task_86c4a26fd6e4854a1bc7f964d0143b6c",
+          "capability": "text-to-3d",
+          "model_id": "meshy-7.1",
+          "offering_id": "meshy/meshy-7.1/text-to-3d",
+          "state": "SUCCEEDED",
+          "credits_charged": null
+        }
+      ],
+      "final_reply": {
+        "content": "Fake upstream reply.",
+        "failed": false
+      },
+      "assets": [],
+      "metrics": {
+        "tool_call_count": 7,
+        "credits": {
+          "legacy.credits": "40"
+        },
+        "paid_call_count": 4,
+        "interruption_count": 2,
+        "choice_card_count": 1,
+        "approval_card_count": 0,
+        "plan_card_count": 1,
+        "tool_counts": {
+          "ask_choice": 1,
+          "update_production_brief": 1,
+          "propose_production_plan": 1,
+          "create_model_3d": 1,
+          "plan_model_processing": 1,
+          "revise_processing_plan": 1,
+          "inspect_model": 1
+        },
+        "rework": {
+          "count": 1,
+          "failed_tasks": 0,
+          "revision_count": 1,
+          "revision_operations": {
+            "insert": 1
+          }
+        },
+        "checkpoints": {
+          "total": 1,
+          "passed": 0,
+          "failed": 1,
+          "waived": 0,
+          "unknown": 0
+        },
+        "self_inspection": {
+          "inspect_model": 1,
+          "render_model_views": 0,
+          "compare_model_reference": 0,
+          "self_check_records": 0,
+          "self_check_passed": 0,
+          "self_check_issues": 0
+        },
+        "image_count": 0,
+        "final_reply_chars": 20,
+        "elapsed_ms": 24129
+      },
+      "checks": [
+        {
+          "id": "final_reply",
+          "status": "pass",
+          "detail": "20 chars"
+        },
+        {
+          "id": "capability:text-to-3d",
+          "status": "pass",
+          "detail": "1/1 succeeded; succeeded=['remesh', 'rigging', 'text-to-3d']; tasks=['rigging', 'remesh', 'remesh', 'text-to-3d']"
+        },
+        {
+          "id": "capability:remesh",
+          "status": "pass",
+          "detail": "2/2 succeeded; succeeded=['remesh', 'rigging', 'text-to-3d']; tasks=['rigging', 'remesh', 'remesh', 'text-to-3d']"
+        },
+        {
+          "id": "capability:rigging",
+          "status": "pass",
+          "detail": "1/1 succeeded; succeeded=['remesh', 'rigging', 'text-to-3d']; tasks=['rigging', 'remesh', 'remesh', 'text-to-3d']"
+        },
+        {
+          "id": "no_failed_tasks",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "tool_group:usage",
+          "status": "pass",
+          "detail": "any of ['ask_choice']; called=['ask_choice', 'update_production_brief', 'propose_production_plan', 'create_model_3d', 'plan_model_processing', 'revise_processing_plan', 'inspect_model']"
+        },
+        {
+          "id": "tool_group:brief",
+          "status": "pass",
+          "detail": "any of ['update_production_brief']; called=['ask_choice', 'update_production_brief', 'propose_production_plan', 'create_model_3d', 'plan_model_processing', 'revise_processing_plan', 'inspect_model']"
+        },
+        {
+          "id": "tool_group:plan",
+          "status": "pass",
+          "detail": "any of ['propose_production_plan']; called=['ask_choice', 'update_production_brief', 'propose_production_plan', 'create_model_3d', 'plan_model_processing', 'revise_processing_plan', 'inspect_model']"
+        },
+        {
+          "id": "tool_group:generate_3d",
+          "status": "pass",
+          "detail": "any of ['create_model_3d']; called=['ask_choice', 'update_production_brief', 'propose_production_plan', 'create_model_3d', 'plan_model_processing', 'revise_processing_plan', 'inspect_model']"
+        },
+        {
+          "id": "tool_group:processing_plan",
+          "status": "pass",
+          "detail": "any of ['plan_model_processing']; called=['ask_choice', 'update_production_brief', 'propose_production_plan', 'create_model_3d', 'plan_model_processing', 'revise_processing_plan', 'inspect_model']"
+        },
+        {
+          "id": "tool_group:revise",
+          "status": "pass",
+          "detail": "any of ['revise_processing_plan']; called=['ask_choice', 'update_production_brief', 'propose_production_plan', 'create_model_3d', 'plan_model_processing', 'revise_processing_plan', 'inspect_model']"
+        },
+        {
+          "id": "tool_group:inspect",
+          "status": "pass",
+          "detail": "any of ['inspect_model']; called=['ask_choice', 'update_production_brief', 'propose_production_plan', 'create_model_3d', 'plan_model_processing', 'revise_processing_plan', 'inspect_model']"
+        },
+        {
+          "id": "order:propose_production_plan<create_model_3d",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "order:plan_model_processing<revise_processing_plan",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "order:revise_processing_plan<inspect_model",
+          "status": "pass",
+          "detail": ""
+        },
+        {
+          "id": "budget:paid_calls",
+          "status": "pass",
+          "detail": "4 task(s)"
+        },
+        {
+          "id": "budget:tool_calls",
+          "status": "pass",
+          "detail": "7 call(s)"
+        },
+        {
+          "id": "budget:interruptions",
+          "status": "pass",
+          "detail": "2 card(s)"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "cases": 12,
+    "hard_failures": 0,
+    "failed_cases": [],
+    "metrics": {
+      "tool_calls": 54,
+      "paid_calls": 19,
+      "interruptions": 19,
+      "inspect_model": 8,
+      "render_model_views": 6,
+      "compare_model_reference": 1,
+      "self_check_records": 1,
+      "self_check_passed": 1,
+      "rework_count": 1,
+      "revision_count": 1,
+      "checkpoint_count": 1,
+      "checkpoint_passed": 0,
+      "checkpoint_failed": 1,
+      "checkpoint_waived": 0,
+      "checkpoint_unknown": 0,
+      "success_rate": 100.0,
+      "credits": {
+        "legacy.credits": "377"
+      },
+      "elapsed_ms": 78001
+    }
+  }
+}

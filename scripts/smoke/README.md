@@ -135,7 +135,7 @@ ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- bash scripts/
 python3 scripts/smoke/smoke-fake-stack.py --only agent-quality --report <目录>
 ```
 
-在 `smoke-fake-stack.py` 的隔离 fake 栈（真实 chat/编排/批准/Task/render 路径，fake LLM 只把请求集每个 step 的 tool 标记变成工具调用）上跑完整请求集。它评的是**系统对参考轨迹的实现**：用途卡、制作简报、付费批准、3D 任务、`inspect_model`、`render_model_views`、最终回复是否按请求集走通；不是模型自主选择的质量。硬断言是最终回复非失败、预期能力任务 SUCCEEDED、必需工具组与先后顺序、付费/工具/打断预算、无失败任务；`inspect_model` 与 `render_model_views` 次数作为软指标记录。`3d-multistep-rig-checkpoint` 还驱动预算计划卡、服务端检查点与 `revise_processing_plan`，报告记录 `rework_count`（失败任务加修订次数）、`revision_count`、检查点状态计数与用例成功率；这些质量指标只用于 base/分支对比展示，不进入自动回退门槛。零成本、离线、只用回环地址，结果稳定，可用于门禁（当前未接入 CI，需要时把 `agent-quality` 加进 `--only` 列表）。报告写 `agent-quality-trajectory.json` 与 `.md`；`main` 的基线放在 `scripts/smoke/agent-quality/baselines/`。
+在 `smoke-fake-stack.py` 的隔离 fake 栈（真实 chat/编排/批准/Task/render 路径，fake LLM 只把请求集每个 step 的 tool 标记变成工具调用）上跑完整请求集。它评的是**系统对参考轨迹的实现**：用途卡、制作简报、付费批准、3D 任务、`inspect_model`、`render_model_views`、最终回复是否按请求集走通；不是模型自主选择的质量。硬断言是最终回复非失败、预期能力任务 SUCCEEDED、必需工具组与先后顺序、付费/工具/打断预算、无失败任务；`inspect_model` 与 `render_model_views` 次数作为软指标记录。`3d-multistep-rig-checkpoint` 还驱动预算计划卡、服务端检查点与 `revise_processing_plan`，报告记录 `rework_count`（失败任务加修订次数）、`revision_count`、检查点状态计数与用例成功率；这些质量指标只用于 base/分支对比展示，不进入自动回退门槛。零成本、离线、只用回环地址，结果稳定，可用于门禁（当前未接入 CI，需要时把 `agent-quality` 加进 `--only` 列表）。报告写 `agent-quality-trajectory.json` 与 `.md`；`main` 的基线放在 `scripts/smoke/agent-quality/baselines/`。#251 的请求集版本 3 对比记录包括 `agent-quality-trajectory-<分支 revision>`、`agent-quality-base-2829d2d6.*`（在临时 worktree 只复制请求集与评测 harness 后运行，因此报告标 dirty）以及 `agent-quality-compare-2829d2d6-<分支 revision>.*`；汇总指标里的工具/付费调用增长来自新增用例的检查点修正步骤，逐用例预算仍通过。
 
 ### 产出评测（真实上游，按次同意）
 
