@@ -31,6 +31,7 @@ import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-
 import { relativeTime } from '@/lib/workspace/relative-time';
 import { cn } from '@/lib/utils';
 import { useChatStore, type ChatSession } from '@/store/chat-store';
+import { useProjectStore } from '@/store/project-store';
 import { useWorkspaceStore } from '@/store/workspace-store';
 
 /** What a key press in the delete confirmation means; IME and repeated keys never delete. */
@@ -267,7 +268,7 @@ function SessionList({ onClose }: { onClose: () => void }) {
 
   const create = async () => {
     try {
-      const session = await chat.createSession();
+      const session = await chat.createSession('', useProjectStore.getState().activeProjectId ?? '');
       useWorkspaceStore.getState().clearTrackedTasks();
       useChatStore.getState().addSession(session);
       onClose();

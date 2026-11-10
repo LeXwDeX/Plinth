@@ -22,9 +22,9 @@ function withTabs(change: (tabs: ProductSchema['canvas']['frontend']['panel_tabs
 
 describe('which tabs a kind of thing gets', () => {
   it('reads the Schema table: a picture, the bare board and a model', () => {
-    expect(panelTabIds(schema, 'image')).toEqual(['layers', 'history', 'details', 'operations']);
-    expect(panelTabIds(schema, 'board')).toEqual(['layers', 'history', 'operations', 'details']);
-    expect(panelTabIds(schema, 'model')).toEqual(['operations', 'process', 'formats', 'parts', 'details']);
+    expect(panelTabIds(schema, 'image')).toEqual(['layers', 'history', 'details', 'operations', 'project']);
+    expect(panelTabIds(schema, 'board')).toEqual(['layers', 'history', 'operations', 'details', 'project']);
+    expect(panelTabIds(schema, 'model')).toEqual(['operations', 'process', 'formats', 'parts', 'details', 'project']);
     expect(panelWidth(schema)).toBe(300);
   });
 
@@ -36,14 +36,14 @@ describe('which tabs a kind of thing gets', () => {
   it('follows the Schema order and set, not a list of its own', () => {
     const changed = withTabs((tabs) => { tabs.kinds.find((entry) => entry.kind === 'image')!.tabs = ['details', 'layers']; });
     expect(panelTabIds(changed, 'image')).toEqual(['details', 'layers']);
-    expect(panelTabIds(schema, 'image')).toEqual(['layers', 'history', 'details', 'operations']);
+    expect(panelTabIds(schema, 'image')).toEqual(['layers', 'history', 'details', 'operations', 'project']);
   });
 
   it('leaves out an id the code has no body for, and one the table does not declare', () => {
     const unknown = withTabs((tabs) => { tabs.kinds.find((entry) => entry.kind === 'board')!.tabs = ['layers', 'sparkle', 'history']; });
     expect(panelTabIds(unknown, 'board')).toEqual(['layers', 'history']);
     const undeclared = withTabs((tabs) => { tabs.tabs = tabs.tabs.filter((tab) => tab.id !== 'history'); });
-    expect(panelTabIds(undeclared, 'board')).toEqual(['layers', 'operations', 'details']);
+    expect(panelTabIds(undeclared, 'board')).toEqual(['layers', 'operations', 'details', 'project']);
   });
 
   it('words every tab from Schema messages: name, one-line hint, icon and shortcut setting', () => {
@@ -55,8 +55,8 @@ describe('which tabs a kind of thing gets', () => {
       }
     }
     const names = Object.fromEntries(panelTabViews(schema, 'model').map((view) => [view.id, view.label]));
-    expect(names).toEqual({ operations: '功能', process: '加工', formats: '格式', parts: '部件', details: '详情' });
-    expect(panelTabViews(schema, 'image').map((view) => view.shortcut)).toEqual(['layers_panel_shortcut', 'history_panel_shortcut', undefined, undefined]);
+    expect(names).toEqual({ operations: '功能', process: '加工', formats: '格式', parts: '部件', details: '详情', project: '项目' });
+    expect(panelTabViews(schema, 'image').map((view) => view.shortcut)).toEqual(['layers_panel_shortcut', 'history_panel_shortcut', undefined, undefined, undefined]);
   });
 });
 

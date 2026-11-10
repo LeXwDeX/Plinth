@@ -362,6 +362,48 @@ func TestBranchCopiesProjectAndStyleSource(t *testing.T) {
 	}
 }
 
+func TestProjectRegisteredPictureChecksOnlyTheOwnerProjectReferences(t *testing.T) {
+	ctx := context.Background()
+	_, projects := openProjectRepository(t)
+	if _, err := projects.CreateProject(ctx, testProject("p1", "owner-a", "One"), 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := projects.CreateProject(ctx, testProject("p2", "owner-b", "Other"), 10); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 12, 2, 0, 0, 0, time.UTC)
+	if _, err := projects.SetStyleGuide(ctx, "owner-a", "p1", project.StyleGuide{
+		ProjectID: "p1", Enabled: true,
+		References: []project.Reference{{TaskID: "task-guide", AssetID: "asset-guide"}},
+		UpdatedAt:  now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := projects.CreateAsset(ctx, "p1", project.Asset{
+		ID: "passet_1", ProjectID: "p1", OwnerID: "owner-a", Kind: "character", Name: "Role A",
+		Images:    []project.Reference{{TaskID: "task-asset", AssetID: "asset-asset"}},
+		CreatedAt: now, UpdatedAt: now,
+	}, 10); err != nil {
+		t.Fatal(err)
+	}
+	for name, probe := range map[string]struct {
+		owner, project, task, asset string
+		want                        bool
+	}{
+		"asset picture":       {"owner-a", "p1", "task-asset", "asset-asset", true},
+		"style guide picture": {"owner-a", "p1", "task-guide", "asset-guide", true},
+		"wrong asset":         {"owner-a", "p1", "task-asset", "asset-other", false},
+		"other project":       {"owner-a", "p2", "task-asset", "asset-asset", false},
+		"other owner":         {"owner-b", "p1", "task-asset", "asset-asset", false},
+		"unknown project":     {"owner-a", "p9", "task-asset", "asset-asset", false},
+	} {
+		got, err := projects.RegisteredPicture(ctx, probe.owner, probe.project, probe.task, probe.asset)
+		if err != nil || got != probe.want {
+			t.Errorf("%s = %v err=%v want %v", name, got, err, probe.want)
+		}
+	}
+}
+
 func TestProjectMigrationsCreateExpectedTables(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "schema.db")
 	repository, err := Open(path)

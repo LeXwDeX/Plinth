@@ -249,7 +249,7 @@ func (executor *Executor) conversationInput(ctx context.Context, command chat.To
 	if len(urls) != len(tokens) {
 		return refuse(invalid)
 	}
-	assets, err := executor.references.Resolve(ctx, generation.OwnerID(command.OwnerID), urls)
+	assets, err := executor.references.Resolve(ctx, commandReferenceScope(command), urls)
 	if result, refused := executor.inputRefusal(command, err); refused {
 		return nil, &result, nil
 	}

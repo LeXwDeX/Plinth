@@ -31,6 +31,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/agentparams"
+	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness/resolve"
@@ -51,6 +52,13 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/taskretry"
 	"github.com/LeXwDeX/Plinth/internal/transport/httplocale"
 )
+
+// DirectStyleReferenceResolver turns frozen project style picture URLs into
+// the owner's input assets for a direct prepare (#240). It is the same
+// resolver the chat generation tools use.
+type DirectStyleReferenceResolver interface {
+	Resolve(context.Context, references.ReferenceScope, []string) ([]generation.AssetID, error)
+}
 
 type Config struct {
 	Harness            *resolve.Service
@@ -96,8 +104,11 @@ type Config struct {
 	Chat            *chat.Service
 	// Projects is the owner-scoped project service (#240); nil leaves the
 	// project routes unregistered.
-	Projects      *project.Service
-	ChatScheduler ChatTurnScheduler
+	Projects *project.Service
+	// DirectStyleReferences resolves a project session's frozen style pictures
+	// for a direct prepare; nil refuses a request that would need them.
+	DirectStyleReferences DirectStyleReferenceResolver
+	ChatScheduler         ChatTurnScheduler
 	// ChatContext compacts a session's context on request (#322); nil makes
 	// the compaction route answer that compaction is unavailable.
 	ChatContext ChatContextCompactor
@@ -213,6 +224,7 @@ type Server struct {
 	renderManifests                   *rendermanifest.Service
 	chat                              *chat.Service
 	projects                          *project.Service
+	directStyleReferences             DirectStyleReferenceResolver
 	chatScheduler                     ChatTurnScheduler
 	chatContext                       ChatContextCompactor
 	ownsAgentSession                  func(context.Context, string, string) bool
@@ -427,6 +439,7 @@ func New(config Config) (*Server, error) {
 		canvasImages:          config.CanvasImages,
 		chat:                  config.Chat,
 		projects:              config.Projects,
+		directStyleReferences: config.DirectStyleReferences,
 		chatScheduler:         config.ChatScheduler,
 		chatContext:           config.ChatContext,
 		ownsAgentSession:      config.OwnsAgentSession,

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/imaging"
 	_ "golang.org/x/image/webp"
@@ -28,7 +29,7 @@ var (
 type MergeReferenceResolver interface {
 	Resolve(
 		context.Context,
-		generation.OwnerID,
+		references.ReferenceScope,
 		[]string,
 	) ([]generation.AssetID, error)
 }
@@ -158,7 +159,9 @@ func (service *ImageService) Merge(
 	canvasWidth, canvasHeight := int(widthValue), int(heightValue)
 	target := image.NewNRGBA(image.Rect(0, 0, canvasWidth, canvasHeight))
 
-	assetIDs, err := service.references.Resolve(ctx, owner, urls)
+	assetIDs, err := service.references.Resolve(ctx, references.ReferenceScope{
+		Owner: owner, AllowAnyOwnerTask: true,
+	}, urls)
 	if err != nil {
 		return generation.InputAsset{}, fmt.Errorf(
 			"canvas: resolve merge references: %w",

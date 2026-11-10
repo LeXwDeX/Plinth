@@ -6,15 +6,16 @@ import { ArrowDown, ArrowUp, ImagePlus, Layers, Upload, X } from 'lucide-react';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { CollapsibleSection } from '@/components/ui/collapsible-section';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
+import { useProjects } from '@/hooks/use-projects';
 import { useStyleLock, EMPTY_STYLE_LOCK } from '@/hooks/use-style-lock';
-import { createChatBrowserClient, type ChatStyleLock } from '@/lib/chat/browser-client';
+import { createChatBrowserClient, type ChatStyleLock, type ChatStyleLockSource } from '@/lib/chat/browser-client';
 import { exportCanvasToBlob } from '@/lib/canvas/export-canvas';
 import { flushPendingEdits } from '@/lib/canvas/pending-edits';
 import { exportAndUploadSnapshot, snapshotFilename } from '@/lib/canvas/send-snapshot';
 import { prepareImageUploadBlob } from '@/lib/image-upload';
 import { uploadWorkspaceInputAssetResult } from '@/lib/workspace/input-asset-upload';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
-import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-schema';
+import { formatSchemaText, projectContract, schemaCountMessage, schemaText } from '@/lib/product-schema';
 import { useCanvasStore, type CanvasNode } from '@/store/canvas-store';
 import { useChatStore, type ChatMessage } from '@/store/chat-store';
 import { useStudioStore } from '@/store/studio-store';
@@ -43,6 +44,7 @@ function cachedDraft(sessionId: string | null): StyleLockDraft {
 
 function sameLock(left: ChatStyleLock, right: ChatStyleLock): boolean {
   return left.enabled === right.enabled && left.text.trim() === right.text.trim()
+    && (left.source ?? 'project') === (right.source ?? 'project')
     && left.references.length === right.references.length
     && left.references.every((reference, index) => reference === right.references[index]);
 }
@@ -84,6 +86,7 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
   const { schema } = useProductSchema();
   const client = useMemo(() => createChatBrowserClient(schema), [schema]);
   const lockState = useStyleLock(client, sessionId);
+  const projects = useProjects(sessionId);
   const { previewAssetUrl } = useAssetURLRewriter();
   const messages = useChatStore((state) => (sessionId ? state.messagesBySession?.[sessionId] ?? NO_MESSAGES : NO_MESSAGES));
   const nodes = useCanvasStore((state) => (sessionId ? state.nodesBySession[sessionId] ?? NO_NODES : NO_NODES));
@@ -98,6 +101,7 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
   const [uploadFailed, setUploadFailed] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const text = (key: string) => schemaText(schema, `ui.studio.style_lock.${key}`);
+  const projectText = (key: string) => schemaText(schema, `ui.project.${key}`);
   const labelOf = (index: number) => formatSchemaText(schemaText(schema, 'ui.studio.strip.candidate_n'), { index });
   const choices = useMemo(() => sessionReferences(messages, labelOf), [labelOf, messages]);
   // Canvas layers the person can turn into a style reference: visible, non-guide nodes, top layer first.
@@ -122,23 +126,45 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
   useEffect(() => { setDraftState(cachedDraft(sessionId)); }, [sessionId]);
   if (!sessionId) return null;
   const draft = followed.draft;
+  // A Catalog without projects keeps the historical session lock; otherwise
+  // project is the default. A session outside any project has no guide to
+  // inherit, so its own lock is the effective source, matching the server.
+  const projectSchema = projectContract(schema);
+  const storedSource = draft.source ?? (projectSchema ? 'project' : 'session');
+  const fallbackToSession = storedSource === 'project' && (!projectSchema || (projects.loaded && !projects.activeProject));
+  const source = fallbackToSession ? 'session' : storedSource;
+  const sessionEditable = source === 'session';
+  const sources = (schema.chat.style_lock.sources ?? ['project', 'session', 'off'])
+    .filter((value): value is ChatStyleLockSource => value === 'project' || value === 'session' || value === 'off');
+  const sourceHint = source === 'off'
+    ? projectText('style_source_off_hint')
+    : source === 'session'
+      ? projectText('style_source_session_hint')
+      : projects.activeProject
+        ? projectText('style_source_project_hint').replace('{project}', projects.activeProject.name)
+        : projectText('no_project_hint');
   const state = {
     count: Array.from(draft.text.trim()).length,
     dirty: !sameLock(draft, followed.base),
   };
-  const overLimit = state.count > maximumText;
-  const refsAtLimit = draft.references.length >= maximumReferences;
+  const overLimit = sessionEditable && state.count > maximumText;
+  const refsAtLimit = sessionEditable && draft.references.length >= maximumReferences;
   const commitDraft = (next: StyleLockDraft) => {
     setDraftState(next);
     if (sessionId) draftCache.set(sessionId, next);
   };
-  const updateDraft = (next: ChatStyleLock) => commitDraft({ draft: { ...next, references: [...next.references] }, base: followed.base });
+  const updateDraft = (next: ChatStyleLock) => {
+    const normalized = next.source === 'project' && (!projectSchema || (projects.loaded && !projects.activeProject))
+      ? { ...next, source: 'session' as ChatStyleLockSource }
+      : next;
+    commitDraft({ draft: { ...normalized, references: [...normalized.references] }, base: followed.base });
+  };
   const previewFor = (assetId: string) => {
     const raw = localURLs[assetId] ?? choices.find((item) => item.assetId === assetId)?.url ?? assetURL(schema, assetId);
     return previewAssetUrl(raw) || safePreviewURL(raw);
   };
   const save = async () => {
-    if (!state.dirty || overLimit || draft.references.length > maximumReferences || lockState.busy) return;
+    if (!state.dirty || overLimit || (sessionEditable && draft.references.length > maximumReferences) || lockState.busy) return;
     const ok = await lockState.save({ ...draft, text: draft.text.trim() });
     if (ok && sessionId) draftCache.delete(sessionId);
     setSaveState(ok ? 'saved' : 'failed');
@@ -223,11 +249,31 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
           <button type="button" className="font-medium underline" onClick={() => void lockState.refresh()}>{text('retry')}</button>
         </div>
       ) : null}
+      <div className="mt-3" role="radiogroup" aria-label={projectText('style_source')} data-testid="style-lock-source">
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          {sources.map((candidate) => (
+            <label key={candidate} className="flex items-center gap-1 text-xs">
+              <input
+                type="radio"
+                name="style-lock-source"
+                value={candidate}
+                checked={source === candidate}
+                disabled={lockState.busy || lockState.failed}
+                onChange={() => { updateDraft({ ...draft, source: candidate }); setSaveState('idle'); }}
+                data-testid={`style-lock-source-${candidate}`}
+              />
+              {projectText(`style_source_${candidate}`)}
+            </label>
+          ))}
+        </div>
+        <p className="mt-1 text-[11px] leading-4 text-muted-foreground" data-testid="style-lock-source-hint">{sourceHint}</p>
+        <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">{projectText('style_source_help')}</p>
+      </div>
       <label className="mt-3 flex items-center gap-2 text-xs font-medium">
         <input
           type="checkbox"
           checked={draft.enabled}
-          disabled={lockState.busy || lockState.failed}
+          disabled={lockState.busy || lockState.failed || !sessionEditable}
           onChange={(event) => { updateDraft({ ...draft, enabled: event.target.checked }); setSaveState('idle'); }}
           data-testid="style-lock-enabled"
         />
@@ -238,7 +284,7 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
         id="style-lock-text"
         value={draft.text}
         maxLength={maximumText}
-        disabled={lockState.busy || lockState.failed}
+        disabled={lockState.busy || lockState.failed || !sessionEditable}
         placeholder={text('text_placeholder')}
         onChange={(event) => { updateDraft({ ...draft, text: event.target.value }); setSaveState('idle'); }}
         rows={4}
@@ -262,9 +308,9 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
               {previewFor(assetId) ? <img src={previewFor(assetId)} alt={labelOf(index + 1)} className="size-full object-cover" /> : null}
               <span className="sr-only">{labelOf(index + 1)}</span>
               <span className="absolute inset-x-0 bottom-0 flex justify-center gap-0.5 bg-black/60 py-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                <button type="button" aria-label={text('move_up')} disabled={index === 0} onClick={() => move(index, -1)} className="text-white disabled:opacity-40"><ArrowUp className="size-3" /></button>
-                <button type="button" aria-label={text('move_down')} disabled={index === draft.references.length - 1} onClick={() => move(index, 1)} className="text-white disabled:opacity-40"><ArrowDown className="size-3" /></button>
-                <button type="button" aria-label={text('remove_reference')} onClick={() => remove(index)} className="text-white"><X className="size-3" /></button>
+                <button type="button" aria-label={text('move_up')} disabled={!sessionEditable || index === 0} onClick={() => move(index, -1)} className="text-white disabled:opacity-40"><ArrowUp className="size-3" /></button>
+                <button type="button" aria-label={text('move_down')} disabled={!sessionEditable || index === draft.references.length - 1} onClick={() => move(index, 1)} className="text-white disabled:opacity-40"><ArrowDown className="size-3" /></button>
+                <button type="button" aria-label={text('remove_reference')} disabled={!sessionEditable} onClick={() => remove(index)} className="text-white"><X className="size-3" /></button>
               </span>
             </li>
           ))}
@@ -272,13 +318,13 @@ export function StyleLockPanel({ sessionId }: { sessionId: string | null }) {
       ) : null}
       <div className="mt-2 flex flex-wrap gap-1.5">
         <input ref={fileInput} type="file" accept={schema.chat.frontend.image_file_accept} className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); }} />
-        <button type="button" disabled={refsAtLimit || lockState.busy} onClick={() => fileInput.current?.click()} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50">
+        <button type="button" disabled={!sessionEditable || refsAtLimit || lockState.busy} onClick={() => fileInput.current?.click()} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50">
           <Upload className="size-3.5" aria-hidden="true" />{text('upload_reference')}
         </button>
-        <button type="button" disabled={refsAtLimit || lockState.busy} onClick={() => setChooserOpen((open) => !open)} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50">
+        <button type="button" disabled={!sessionEditable || refsAtLimit || lockState.busy} onClick={() => setChooserOpen((open) => !open)} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50">
           <ImagePlus className="size-3.5" aria-hidden="true" />{text('choose_session_reference')}
         </button>
-        <button type="button" disabled={refsAtLimit || lockState.busy} onClick={() => setLayerChooserOpen((open) => !open)} aria-expanded={layerChooserOpen} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50">
+        <button type="button" disabled={!sessionEditable || refsAtLimit || lockState.busy} onClick={() => setLayerChooserOpen((open) => !open)} aria-expanded={layerChooserOpen} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50">
           <Layers className="size-3.5" aria-hidden="true" />{text('canvas_layers')}
         </button>
       </div>

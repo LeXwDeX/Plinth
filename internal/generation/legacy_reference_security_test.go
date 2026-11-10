@@ -80,7 +80,7 @@ func TestRetainedForeignTaskReferenceNeverReassignsOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := "/generated/" + string(task.ID) + "_0.png"
-	ids, err := resolver.Resolve(ctx, "owner-b", []string{ref})
+	ids, err := resolver.Resolve(ctx, references.ReferenceScope{Owner: "owner-b"}, []string{ref})
 	if err != nil || len(ids) != 1 || inputs.uploads != 1 || legacy.opened != 0 {
 		t.Fatalf("owned native reference: ids=%v error=%v uploads=%d legacy opens=%d", ids, err, inputs.uploads, legacy.opened)
 	}
@@ -96,7 +96,7 @@ func TestRetainedForeignTaskReferenceNeverReassignsOwner(t *testing.T) {
 	}
 	assertDenied := func(owner generation.OwnerID) {
 		t.Helper()
-		ids, err := resolver.Resolve(ctx, owner, []string{ref})
+		ids, err := resolver.Resolve(ctx, references.ReferenceScope{Owner: owner}, []string{ref})
 		if len(ids) != 0 || !errors.Is(err, references.ErrUnsupportedReference) || inputs.uploads != 1 || legacy.opened != 0 {
 			t.Fatalf("owner=%s ids=%v error=%v uploads=%d legacy opens=%d", owner, ids, err, inputs.uploads, legacy.opened)
 		}

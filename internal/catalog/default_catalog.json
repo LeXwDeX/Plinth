@@ -2738,6 +2738,8 @@
       "ui.project.assets_section": "项目资产",
       "ui.project.style_text": "风格说明",
       "ui.project.palette": "色板",
+      "ui.project.palette_placeholder": "#1f2937, #f9fafb",
+      "ui.project.brief_json": "生产约定 JSON",
       "ui.project.references": "项目风格参考图",
       "ui.project.asset_add": "添加资产",
       "ui.project.asset_kind": "种类",
@@ -2763,6 +2765,40 @@
       "ui.project.convention.pipeline": "制作流程",
       "ui.project.convention.naming": "命名约定",
       "ui.project.convention.coordinates": "坐标约定",
+      "ui.project.panel_hint": "本会话所属项目的风格指南、生产约定与资产；可在这里切换或新建项目。",
+      "ui.project.loading": "正在读取项目…",
+      "ui.project.load_failed": "项目读取失败，请重试。",
+      "ui.project.create_failed": "项目创建失败，请核对名称后重试。",
+      "ui.project.rename_failed": "项目重命名失败。",
+      "ui.project.delete_failed": "项目删除失败。",
+      "ui.project.switch_failed": "切换项目失败。",
+      "ui.project.none": "未归入项目",
+      "ui.project.current": "当前项目",
+      "ui.project.updated": "项目已保存。",
+      "ui.project.asset_empty": "这个项目还没有资产。",
+      "ui.project.asset_delete_confirm": "删除资产只删除项目里的这条引用，不会删除已完成任务的产物。",
+      "ui.project.delete_asset": "删除资产",
+      "ui.project.asset_delete_failed": "资产删除失败。",
+      "ui.project.asset_saved": "资产已保存。",
+      "ui.project.promote_style": "把本会话风格锁提升为项目风格指南",
+      "ui.project.promote_style_confirm": "把本会话的风格说明和参考图保存为项目风格指南？之后项目内新会话会默认继承它。",
+      "ui.project.promote_style_failed": "风格锁提升失败。",
+      "ui.project.promote_failed": "提升失败。",
+      "ui.project.promotion_source": "来源图片",
+      "ui.project.promotion_saved": "已提升为项目资产。",
+      "ui.project.session_images": "本会话的定稿图片",
+      "ui.project.style_enabled": "启用项目风格指南",
+      "ui.project.style_saved": "风格指南已保存。",
+      "ui.project.conventions_saved": "生产约定已保存。",
+      "ui.project.reference_limit": "最多 {maximum} 张",
+      "ui.project.inherit_hint": "本会话默认继承项目「{project}」的风格指南；切换到“本会话”可以覆盖它。",
+      "ui.project.no_project_hint": "让会话归入一个项目，才能复用风格指南与项目资产。",
+      "ui.project.promote_title": "提升为项目资产",
+      "ui.project.confirm": "确认提升",
+      "ui.project.cancel": "取消",
+      "ui.project.asset_count": "{count} 个资产",
+      "ui.project.asset_count_one": "{count} 个资产",
+      "ui.project.style_source_help": "项目是默认值；本会话可覆盖或关闭，两套参考图不会合并。",
       "ui.harness.title": "功能设置",
         "ui.harness.operation_section": "选择功能",
         "ui.harness.not_connected": "这项功能暂未接入可用服务。",
@@ -5209,6 +5245,17 @@
           {"name": "coordinates", "label_key": "ui.project.convention.coordinates", "maximum_characters": 500}
         ]
       },
+      "agent": {
+        "tool_name": "list_project_assets",
+        "context_template": "\n【项目】{project}（{handle_prefix}N 是项目资产的只读句柄）。项目风格指南：{style}。项目约定：{conventions}。项目资产摘要（详情用 {tool} 查看）：\n{assets}",
+        "asset_line_template": "- {handle} {kind}：{name}{description}",
+        "citation_template": "引用项目资产：{assets}",
+        "unknown_asset_template": "项目资产 {handle} 不存在或不属于当前项目。请调用 {tool} 查看可用句柄。",
+        "list_limit_template": "最多列出 {limit} 个项目资产。",
+        "style_prompt_template": "\n\nProject style: Apply the project's visual style while preserving the user's requested subject, composition and changes. Project: {project}. Style description: {style}",
+        "handle_prefix": "@project",
+        "list_limit": 20
+      },
       "audit": {
         "create_action": "create_project",
         "update_action": "update_project",
@@ -7106,6 +7153,16 @@
             "required": ["action"],
             "additionalProperties": false
           }
+        },
+        {
+          "name": "list_project_assets",
+          "execution": {"implementation_key":"project.list","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "description": "List the assets of the project this session belongs to: each asset's read-only handle, kind, name, description and picture references, plus any saved 3D model references. Use the handles (for example @project1) in reference_handles of a generation tool to reuse a finished character or prop; the server attaches the project's style references automatically. Saved 3D model references are listed for reference only: this version cannot use a project model as the source of a paid processing step. A session outside any project has nothing to list.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
         }
       ],
       "tools": [
@@ -7210,7 +7267,8 @@
             "reason": "reason",
             "final_prompt": "final_prompt",
             "prompt_note": "prompt_note",
-            "reference_note": "reference_note"
+            "reference_note": "reference_note",
+            "style_sources": "style_sources"
           }
         },
         {
@@ -7612,7 +7670,8 @@
             "reason": "reason",
             "purpose_budget_note": "purpose_budget_note",
             "final_prompt": "final_prompt",
-            "prompt_note": "prompt_note"
+            "prompt_note": "prompt_note",
+            "style_sources": "style_sources"
           }
         },
         {
@@ -10747,6 +10806,12 @@
               "hint_key": "ui.studio.panel.tab.details_hint"
             },
             {
+              "id": "project",
+              "icon": "folder",
+              "label_key": "ui.project.title",
+              "hint_key": "ui.project.panel_hint"
+            },
+            {
               "id": "operations",
               "icon": "list-checks",
               "label_key": "ui.studio.panel.tab.operations",
@@ -10778,7 +10843,8 @@
                 "layers",
                 "history",
                 "details",
-                "operations"
+                "operations",
+                "project"
               ],
               "default": "layers"
             },
@@ -10788,7 +10854,8 @@
                 "layers",
                 "history",
                 "operations",
-                "details"
+                "details",
+                "project"
               ],
               "default": "layers",
               "default_when_unavailable": "operations"
@@ -10800,7 +10867,8 @@
                 "process",
                 "formats",
                 "parts",
-                "details"
+                "details",
+                "project"
               ],
               "default": "operations"
             }
@@ -14779,6 +14847,8 @@
             "ui.project.assets_section": "Project assets",
             "ui.project.style_text": "Style description",
             "ui.project.palette": "Palette",
+            "ui.project.palette_placeholder": "#1f2937, #f9fafb",
+            "ui.project.brief_json": "Production conventions JSON",
             "ui.project.references": "Project style references",
             "ui.project.asset_add": "Add asset",
             "ui.project.asset_kind": "Kind",
@@ -14804,6 +14874,40 @@
             "ui.project.convention.pipeline": "Production pipeline",
             "ui.project.convention.naming": "Naming convention",
             "ui.project.convention.coordinates": "Coordinate convention",
+            "ui.project.panel_hint": "The style guide, production conventions and assets of this session's project; switch or create a project here.",
+            "ui.project.loading": "Loading projects…",
+            "ui.project.load_failed": "Projects could not be loaded. Try again.",
+            "ui.project.create_failed": "The project could not be created. Check the name and try again.",
+            "ui.project.rename_failed": "The project could not be renamed.",
+            "ui.project.delete_failed": "The project could not be deleted.",
+            "ui.project.switch_failed": "The project could not be switched.",
+            "ui.project.none": "No project",
+            "ui.project.current": "Current project",
+            "ui.project.updated": "Project saved.",
+            "ui.project.asset_empty": "This project has no assets yet.",
+            "ui.project.asset_delete_confirm": "Deleting an asset removes only this reference from the project; finished task results are kept.",
+            "ui.project.delete_asset": "Delete asset",
+            "ui.project.asset_delete_failed": "The asset could not be deleted.",
+            "ui.project.asset_saved": "Asset saved.",
+            "ui.project.promote_style": "Promote this session's style lock to the project style guide",
+            "ui.project.promote_style_confirm": "Save this session's style description and reference pictures as the project style guide? New sessions in the project inherit it by default.",
+            "ui.project.promote_style_failed": "The style lock could not be promoted.",
+            "ui.project.promote_failed": "Promotion failed.",
+            "ui.project.promotion_source": "Source picture",
+            "ui.project.promotion_saved": "Promoted to a project asset.",
+            "ui.project.session_images": "Finished pictures in this session",
+            "ui.project.style_enabled": "Enable the project style guide",
+            "ui.project.style_saved": "Style guide saved.",
+            "ui.project.conventions_saved": "Production conventions saved.",
+            "ui.project.reference_limit": "At most {maximum}",
+            "ui.project.inherit_hint": "This session defaults to inheriting project \"{project}\"; choose \"This session\" to override it.",
+            "ui.project.no_project_hint": "Assign the session to a project to reuse its style guide and assets.",
+            "ui.project.promote_title": "Promote to project asset",
+            "ui.project.confirm": "Promote",
+            "ui.project.cancel": "Cancel",
+            "ui.project.asset_count": "{count} assets",
+            "ui.project.asset_count_one": "{count} asset",
+            "ui.project.style_source_help": "The project is the default; this session may override or turn it off. The two reference sets are never merged.",
             "ui.harness.title": "Feature settings",
             "ui.harness.operation_section": "Choose a feature",
             "ui.harness.not_connected": "No service is available for this feature yet.",

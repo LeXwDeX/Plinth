@@ -59,6 +59,12 @@ type TurnOptions struct {
 	// StyleLock is the session lock snapshot frozen when the turn starts. The
 	// generation tool never reads the mutable session row for a running turn.
 	StyleLock StyleLock
+	// ProjectID is the owner project the session belonged to when the turn
+	// started (#240), empty outside a project. ProjectContext is the frozen
+	// project snapshot: style guide, conventions and @projectN assets. A turn
+	// never reads the mutable project rows.
+	ProjectID      string          `json:"ProjectID,omitempty"`
+	ProjectContext *ProjectContext `json:"ProjectContext,omitempty"`
 	// VisualAnchors is the session's reference-backed identity and style anchor
 	// snapshot frozen when the turn starts (#250). A running turn never reads
 	// the mutable session row, so an anchor edit cannot change a frozen task.

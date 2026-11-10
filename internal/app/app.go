@@ -362,7 +362,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		if err != nil {
 			return nil, err
 		}
-		projectSource = projectService
+		projectSource = newProjectChatSource(projectService, *applicationSchema.Project,
+			applicationSchema.Runtime.HTTP.Routes)
 	}
 	chatService, err := chat.NewService(chat.ServiceConfig{
 		ApprovalPolicy:             approvalPolicy,
@@ -558,6 +559,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
+	var projectReferenceChecker references.ProjectReferenceChecker
+	if applicationSchema.Project != nil {
+		projectReferenceChecker = repository.ProjectRepository()
+	}
 	referenceResolver, err := references.New(references.Config{
 		Inputs: inputAssetService,
 		Tasks:  module,
@@ -592,6 +597,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		TaskInSession: func(ctx context.Context, owner generation.OwnerID, sessionID string, taskID generation.TaskID) (bool, error) {
 			return module.TaskInSession(ctx, owner, sessionID, taskID)
 		},
+		// #240: a finished Task picture registered in the owner's project may
+		// be read from any session of that project. The exact (task, asset)
+		// pair is checked here; no request can name its own scope.
+		ProjectReferences: projectReferenceChecker,
 		// #244: the frozen selection mask and its server-composed preview.
 		SelectionMaskLimits: imageinspect.Limits{
 			MaxBytes:  applicationSchema.Chat.ImageMask.Limits.MaxBytes,
@@ -775,6 +784,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		SelfChecks:      selfCheckService,
 		InputAssetRoute: applicationSchema.Runtime.HTTP.Routes.AssetItem,
 		Chat:            applicationSchema.Chat,
+		Project:         applicationSchema.Project,
 		CanvasArtboard:  applicationSchema.Canvas.Frontend.Artboard,
 		ModelDelivery:   applicationSchema.ModelDelivery,
 		Skills:          skillCatalog,
@@ -834,6 +844,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		AskChoice:            chatService.AskChoice,
 		ProposePlan:          chatService.ProposeProductionPlan,
 		WriteVisualAnchor:    chatService.WriteVisualAnchor,
+		Project:              applicationSchema.Project,
 		ChoiceKinds:          applicationSchema.Chat.Choice.Kinds,
 		ChoiceOptionInvalid:  applicationSchema.Chat.Presentation.Messages.ChoiceOptionInvalid,
 		BriefSavedMessage:    applicationSchema.Chat.Model3DUsage.Brief.SavedMessage,
@@ -947,7 +958,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		config.AgentMaxToolCallsPerReply,
 	)
 	chatAgent, err := chat.NewOrchestrator(chat.OrchestratorConfig{
-		Texts: texts,
+		Project: applicationSchema.Project,
+		Texts:   texts,
 		Configuration: func(ctx context.Context, owner string) (chat.AgentConfigurationSnapshot, error) {
 			snapshot, err := agentConfigurationService.SnapshotForOwner(ctx, owner)
 			if err != nil {
@@ -1681,6 +1693,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		CanvasImages:                      canvasImageService,
 		Chat:                              chatService,
 		Projects:                          projectService,
+		DirectStyleReferences:             referenceResolver,
 		AgentParams:                       paramsStore,
 		AgentState:                        agentStateStore,
 		ChatScheduler:                     chatAgent,

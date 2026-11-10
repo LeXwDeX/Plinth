@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness"
@@ -108,7 +109,9 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		if len(urls) != 1 {
 			return chat.ToolResult{AgentContent: e.threeView.Messages.ReferenceRequired, NoSubmission: true}, nil
 		}
-		assets, err := e.skillReferences.Resolve(ctx, generation.OwnerID(command.OwnerID), urls)
+		assets, err := e.skillReferences.Resolve(ctx, references.ReferenceScope{
+			Owner: generation.OwnerID(command.OwnerID), SessionID: command.SessionID, ProjectID: command.Options.ProjectID,
+		}, urls)
 		if err != nil || len(assets) != 1 || assets[0] == "" {
 			return chat.ToolResult{AgentContent: "所选图片不可用，请重新选择。", NoSubmission: true}, nil
 		}

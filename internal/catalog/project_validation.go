@@ -180,11 +180,52 @@ func validateProjectAgent(agent ProjectAgentSchema, chat ChatSchema, runtime Run
 			return fmt.Errorf("project.agent.%s 不能为空", name)
 		}
 	}
-	if !strings.Contains(agent.ContextTemplate, "{assets}") {
-		return errors.New("project.agent.context_template 必须包含 {assets}")
+	for placeholder, template := range map[string]string{
+		"{project}":       agent.ContextTemplate,
+		"{handle_prefix}": agent.ContextTemplate,
+		"{style}":         agent.ContextTemplate,
+		"{conventions}":   agent.ContextTemplate,
+		"{assets}":        agent.ContextTemplate,
+		"{tool}":          agent.ContextTemplate,
+	} {
+		if !strings.Contains(template, placeholder) {
+			return fmt.Errorf("project.agent.context_template 必须包含 %s", placeholder)
+		}
 	}
-	if !strings.Contains(agent.StylePromptTemplate, "{style}") {
-		return errors.New("project.agent.style_prompt_template 必须包含 {style}")
+	for placeholder, template := range map[string]string{
+		"{handle}":      agent.AssetLineTemplate,
+		"{kind}":        agent.AssetLineTemplate,
+		"{name}":        agent.AssetLineTemplate,
+		"{description}": agent.AssetLineTemplate,
+	} {
+		if !strings.Contains(template, placeholder) {
+			return fmt.Errorf("project.agent.asset_line_template 必须包含 %s", placeholder)
+		}
+	}
+	for placeholder, template := range map[string]string{
+		"{assets}": agent.CitationTemplate,
+	} {
+		if !strings.Contains(template, placeholder) {
+			return fmt.Errorf("project.agent.citation_template 必须包含 %s", placeholder)
+		}
+	}
+	for placeholder, template := range map[string]string{
+		"{handle}": agent.UnknownAssetTemplate,
+	} {
+		if !strings.Contains(template, placeholder) {
+			return fmt.Errorf("project.agent.unknown_asset_template 必须包含 %s", placeholder)
+		}
+	}
+	if !strings.Contains(agent.ListLimitTemplate, "{limit}") {
+		return errors.New("project.agent.list_limit_template 必须包含 {limit}")
+	}
+	for placeholder, template := range map[string]string{
+		"{style}":   agent.StylePromptTemplate,
+		"{project}": agent.StylePromptTemplate,
+	} {
+		if !strings.Contains(template, placeholder) {
+			return fmt.Errorf("project.agent.style_prompt_template 必须包含 %s", placeholder)
+		}
 	}
 	if strings.TrimSpace(agent.HandlePrefix) == "" {
 		return errors.New("project.agent.handle_prefix 不能为空")

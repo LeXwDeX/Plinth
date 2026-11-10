@@ -922,6 +922,7 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"record_self_check":       {"self_check.record", "SESSION_WRITE", []string{"model-3d"}},
 		"get_production_step":     {"ledger.read", "READ", []string{"image", "model-3d"}},
 		"set_visual_anchor":       {"anchor.write", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"list_project_assets":     {"project.list", "READ", []string{"image", "model-3d"}},
 	}
 	var controlDomains []string
 	var expectedEffect string

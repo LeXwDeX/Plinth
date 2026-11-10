@@ -12,6 +12,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
+	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
@@ -21,7 +22,7 @@ const multiviewOffering = "tripo/tripo-v3.1-multiview/image-to-3d"
 // frozen input keeps one asset per view.
 type countingReferences struct{ urls []string }
 
-func (resolver *countingReferences) Resolve(_ context.Context, _ generation.OwnerID, urls []string) ([]generation.AssetID, error) {
+func (resolver *countingReferences) Resolve(_ context.Context, _ references.ReferenceScope, urls []string) ([]generation.AssetID, error) {
 	result := make([]generation.AssetID, 0, len(urls))
 	for _, url := range urls {
 		resolver.urls = append(resolver.urls, url)

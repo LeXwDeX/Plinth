@@ -228,6 +228,11 @@ func hasImagePart(messages []agents.Message, userRole string) bool {
 // variantPattern 匹配“出 3 个天气：雪夜、正午、雾”这类要几个变体的说法。
 var variantPattern = regexp.MustCompile(`[:：]\s*([^，。,.:：\n]+(?:[、，,][^，。,.:：\n]+)+)\s*$`)
 
+// seriesProjectPattern recognises a request that continues a project's
+// established series or reuses its style (#240). The server attaches the
+// project's style references, so no handle is sent.
+var seriesProjectPattern = regexp.MustCompile(`同系列|沿用项目|项目风格|项目资产|系列一致`)
+
 type plannedCall struct {
 	name      string
 	arguments map[string]any
@@ -458,6 +463,12 @@ func (adapter *Adapter) route(request agents.Request, text string) (string, map[
 		if adapter.wants(request, toolCreateModel3D) {
 			return toolCreateModel3D, map[string]any{"prompt": text}
 		}
+
+	case adapter.wants(request, toolRefineImage) && seriesProjectPattern.MatchString(text):
+		// #240: "a character from the same series" reuses the project's
+		// style guide automatically; the server attaches the project style
+		// pictures, so the mock names no handle.
+		return toolRefineImage, map[string]any{"prompt": text}
 
 	case adapter.wants(request, toolRefineImage) && imageHandle != "":
 		return toolRefineImage, map[string]any{"prompt": text, "reference_handles": []string{imageHandle}}

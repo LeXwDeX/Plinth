@@ -32,6 +32,15 @@ type StyleLock struct {
 	// Source is the three-state origin (#240): project, session or off. It
 	// is read from and written to go_chat_sessions.style_lock_source.
 	Source string
+	// ProjectReferences are the project style guide's canonical picture URLs
+	// frozen with a project-source turn (#240). References above stays the
+	// session lock's input asset IDs; the two sets are never merged.
+	ProjectReferences []string `json:"ProjectReferences,omitempty"`
+	// ProjectName names the project whose guide the turn inherited. ProjectID is
+	// the owner project for direct-prepare reference resolution; it is never part
+	// of the stored session lock.
+	ProjectName string `json:"ProjectName,omitempty"`
+	ProjectID   string `json:"ProjectID,omitempty"`
 }
 
 // The three declared style-lock sources (#240). project inherits the
@@ -228,10 +237,17 @@ func ApplyStyleLockToDirectInput(
 				}
 			}
 			template := style.PromptTemplate
+			projectName := ""
+			if lock.Source == StyleLockSourceProject {
+				if declared := style.ProjectPromptTemplate; declared != "" {
+					template = declared
+				}
+				projectName = lock.ProjectName
+			}
 			if template == "" {
 				template = "\n\nStyle lock: {style}"
 			}
-			prompt += strings.NewReplacer("{style}", text, "{text}", text).Replace(template)
+			prompt += strings.NewReplacer("{style}", text, "{text}", text, "{project}", projectName).Replace(template)
 			if offering.Capability == generation.ImageToImage && style.EditScopeTemplate != "" {
 				prompt += style.EditScopeTemplate
 			}

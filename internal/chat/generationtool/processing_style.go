@@ -47,8 +47,7 @@ func (executor *Executor) processingStyleReference(
 	if executor.processingStyleInputOccupied(offering, parameter.Name, input) {
 		return executor.styleNote(command, executor.chat.StyleLock.SkipNote), nil
 	}
-	owner := generation.OwnerID(command.OwnerID)
-	assets, resolveErr := executor.references.Resolve(ctx, owner, urls[:1])
+	assets, resolveErr := executor.references.Resolve(ctx, commandReferenceScope(command), urls[:1])
 	if resolveErr != nil {
 		return "", resolveErr
 	}

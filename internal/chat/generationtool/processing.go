@@ -14,6 +14,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
@@ -847,7 +848,9 @@ func (executor *Executor) executeProcessing(
 			if !ok || (parameter.Type == "asset" && len(urls) != 1) {
 				return executor.reject(command, messages.ReferenceUnsupported)
 			}
-			assets, err := executor.references.Resolve(ctx, owner, urls)
+			assets, err := executor.references.Resolve(ctx, references.ReferenceScope{
+				Owner: owner, SessionID: command.SessionID, ProjectID: command.Options.ProjectID,
+			}, urls)
 			if result, refused := executor.inputRefusal(command, err); refused {
 				return result, nil
 			}

@@ -47,9 +47,12 @@ var (
 )
 
 // ProjectSource is the narrow port the chat service uses to attribute a
-// session to an owner project (#240). A foreign project reports false.
+// session to an owner project (#240). A foreign project reports false; Context
+// returns the frozen project snapshot for one owner project and
+// ErrProjectNotFound for a missing or foreign one.
 type ProjectSource interface {
 	Exists(ctx context.Context, ownerID, projectID string) (bool, error)
+	Context(ctx context.Context, ownerID, projectID string) (ProjectContext, error)
 }
 
 type Repository interface {
@@ -91,6 +94,9 @@ type Repository interface {
 	// SetSessionProject assigns (or clears, with an empty project) the
 	// owner's project on the session (#240). It does not touch updated_at.
 	SetSessionProject(ctx context.Context, owner, session, projectID string) (Session, bool, error)
+	// SessionProject reads the owner's session project ID (#240). found is
+	// false for a missing or foreign session.
+	SessionProject(ctx context.Context, owner, session string) (string, bool, error)
 	// VisualAnchors and SetVisualAnchors read and replace the owner's session
 	// visual anchors (#250). A missing or foreign session reports found=false.
 	// Writing does not touch updated_at.
@@ -535,16 +541,23 @@ func (service *Service) CreateSessionInProject(
 	projectID string,
 ) (Session, error) {
 	projectID = strings.TrimSpace(projectID)
+	var projectBrief ProductionBrief
 	if projectID != "" {
 		if service.projects == nil {
 			return Session{}, ErrProjectNotFound
 		}
-		exists, err := service.projects.Exists(ctx, ownerID, projectID)
+		projectContext, err := service.projects.Context(ctx, ownerID, projectID)
 		if err != nil {
+			if errors.Is(err, ErrProjectNotFound) {
+				return Session{}, ErrProjectNotFound
+			}
 			return Session{}, err
 		}
-		if !exists {
-			return Session{}, ErrProjectNotFound
+		// The project's production defaults seed an empty session brief as a
+		// system default (no audit). The next turn freezes the result, like
+		// any other brief (#240).
+		if !projectContext.Conventions.Brief.Empty() {
+			projectBrief = cloneProductionBrief(projectContext.Conventions.Brief)
 		}
 	}
 	title = strings.TrimSpace(title)
@@ -563,6 +576,7 @@ func (service *Service) CreateSessionInProject(
 		CreatedAt:   now,
 		UpdatedAt:   now,
 		ProjectID:   projectID,
+		Brief:       projectBrief,
 		// New sessions inherit their project's style guide by default.
 		StyleLockSource: StyleLockSourceProject,
 		// Every new session starts in the Schema default mode.
@@ -570,6 +584,19 @@ func (service *Service) CreateSessionInProject(
 		// ... and in the Schema default Agent scope (auto).
 		AgentScope: service.agentScope.Normalize(service.agentScope.DefaultMode),
 	})
+}
+
+// cloneProductionBrief copies a frozen brief so a caller cannot mutate the
+// project context it came from.
+func cloneProductionBrief(brief ProductionBrief) ProductionBrief {
+	if len(brief) == 0 {
+		return nil
+	}
+	cloned := make(ProductionBrief, len(brief))
+	for name, value := range brief {
+		cloned[name] = append(json.RawMessage(nil), value...)
+	}
+	return cloned
 }
 
 // SetSessionProject assigns an existing owner session to a project, or clears
@@ -1040,7 +1067,36 @@ func (service *Service) startTurn(
 		return Message{}, ErrSessionNotFound
 	}
 	styleLock.References = append([]string(nil), styleLock.References...)
-	command.Options.StyleLock = styleLock
+	// The project is frozen with the turn (#240): a project edit applies to the
+	// next turn, and a running or recovered turn keeps the same guide,
+	// conventions and @projectN handles.
+	projectID, found, err := service.repository.SessionProject(ctx, command.OwnerID, command.SessionID)
+	if err != nil {
+		return Message{}, err
+	}
+	if !found {
+		return Message{}, ErrSessionNotFound
+	}
+	command.Options.ProjectID = projectID
+	var projectContext *ProjectContext
+	if projectID != "" && service.projects != nil {
+		frozen, projectErr := service.projects.Context(ctx, command.OwnerID, projectID)
+		switch {
+		case projectErr == nil:
+			projectContext = &frozen
+			command.Options.ProjectContext = projectContext
+		case errors.Is(projectErr, ErrProjectNotFound):
+			// The project vanished between the session read and the context
+			// read (deleted elsewhere). The session continues unassigned.
+			command.Options.ProjectID = ""
+		default:
+			return Message{}, projectErr
+		}
+	}
+	// The effective style lock follows the frozen three-state source: project
+	// inherits the project guide, session keeps this session's lock, off
+	// injects nothing. The two reference sets are never merged.
+	command.Options.StyleLock = effectiveStyleLock(styleLock, projectContext)
 	// The visual anchors are frozen with the turn for the same reason: an edit
 	// by the person or a later Agent write must not change a running turn or a
 	// recovered one (#250).

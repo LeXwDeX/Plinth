@@ -5103,6 +5103,10 @@ type ChatToolResultFields struct {
 	// truncation and the length.
 	FinalPrompt string `json:"final_prompt,omitempty"`
 	PromptNote  string `json:"prompt_note,omitempty"`
+	// StyleSources is the optional key naming the project assets whose
+	// pictures this step actually injected (#240). It is present only when
+	// some project asset was used, so the Agent can cite them as they are.
+	StyleSources string `json:"style_sources,omitempty"`
 }
 
 // ChatAgentToolSchema 声明非生成类 agent 控制工具（set_params /

@@ -32,7 +32,7 @@ afterEach(() => {
 describe('model parts panel', () => {
   it('puts 部件 between the formats and the details of a model, and offers a picture no parts tab', () => {
     const schema = defaultCatalog.application as unknown as ProductSchema;
-    expect(panelTabIds(schema, 'model')).toEqual(['operations', 'process', 'formats', 'parts', 'details']);
+    expect(panelTabIds(schema, 'model')).toEqual(['operations', 'process', 'formats', 'parts', 'details', 'project']);
     expect(panelTabIds(schema, 'image')).not.toContain('parts');
     expect(panelTabIds(schema, 'board')).not.toContain('parts');
     const panel = readFileSync(new URL('./right-panel.tsx', import.meta.url), 'utf8');

@@ -10,10 +10,22 @@ import (
 
 type testProjectSource struct {
 	projects map[string]bool
+	contexts map[string]chat.ProjectContext
 }
 
 func (source testProjectSource) Exists(_ context.Context, ownerID, projectID string) (bool, error) {
 	return source.projects[ownerID+"/"+projectID], nil
+}
+
+func (source testProjectSource) Context(_ context.Context, ownerID, projectID string) (chat.ProjectContext, error) {
+	key := ownerID + "/" + projectID
+	if value, exists := source.contexts[key]; exists {
+		return value, nil
+	}
+	if source.projects[key] {
+		return chat.ProjectContext{ID: projectID}, nil
+	}
+	return chat.ProjectContext{}, chat.ErrProjectNotFound
 }
 
 func TestCreateSessionInProjectValidatesOwnershipAndDefaultsSource(t *testing.T) {
@@ -80,6 +92,128 @@ func TestSetSessionProjectIsOwnerScoped(t *testing.T) {
 	cleared, err := service.SetSessionProject(context.Background(), "owner-a", session.ID, "")
 	if err != nil || cleared.ProjectID != "" {
 		t.Fatalf("clear = %+v err=%v", cleared, err)
+	}
+}
+
+func TestCreateSessionSeedsTheProjectBriefAndDefaults(t *testing.T) {
+	repository := newMemoryChatRepository()
+	projectID := "prj_own"
+	service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) {
+		config.Projects = testProjectSource{
+			projects: map[string]bool{"owner-a/" + projectID: true},
+			contexts: map[string]chat.ProjectContext{
+				"owner-a/" + projectID: {
+					ID: projectID, Name: "Star Harbor",
+					StyleGuide: chat.ProjectStyleGuideContext{Enabled: true, Text: "warm ink",
+						References: []string{"/api/v1/tasks/t1/assets/a1"}},
+					Conventions: chat.ProjectConventionsContext{
+						Brief: chat.ProductionBrief{"purpose": []byte(`"character"`)},
+						Texts: map[string]string{"naming": "hero_"},
+					},
+					Assets: []chat.ProjectAssetContext{{
+						Handle: "@project1", Kind: "character", Name: "Role A",
+						Images: []string{"/api/v1/tasks/t1/assets/a1"},
+					}},
+				},
+			},
+		}
+	})
+	session, err := service.CreateSessionInProject(context.Background(), "owner-a", "Owner", "Project chat", projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.ProjectID != projectID || session.StyleLockSource != chat.StyleLockSourceProject {
+		t.Fatalf("session = %+v", session)
+	}
+	if session.Brief.Text("purpose") != "character" {
+		t.Fatalf("seeded brief = %#v", session.Brief)
+	}
+	assistant, err := service.StartTurn(context.Background(), chat.StartTurn{
+		OwnerID: "owner-a", SessionID: session.ID, Content: "draw role B",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := service.GetTurn(context.Background(), "owner-a", session.ID, assistant.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := turn.Options
+	if options.ProjectID != projectID || options.ProjectContext == nil ||
+		options.ProjectContext.Name != "Star Harbor" || len(options.ProjectContext.Assets) != 1 {
+		t.Fatalf("frozen project = %+v", options.ProjectContext)
+	}
+	lock := options.StyleLock
+	if lock.Source != chat.StyleLockSourceProject || !lock.Enabled || lock.Text != "warm ink" ||
+		len(lock.ProjectReferences) != 1 || lock.ProjectName != "Star Harbor" || lock.ProjectID != projectID {
+		t.Fatalf("frozen project style lock = %+v", lock)
+	}
+}
+
+func TestStartTurnFreezesTheThreeStyleSources(t *testing.T) {
+	repository := newMemoryChatRepository()
+	projectID := "prj_own"
+	source := testProjectSource{
+		projects: map[string]bool{"owner-a/" + projectID: true},
+		contexts: map[string]chat.ProjectContext{
+			"owner-a/" + projectID: {
+				ID: projectID, Name: "P",
+				StyleGuide: chat.ProjectStyleGuideContext{Enabled: true, Text: "project style",
+					References: []string{"/api/v1/tasks/t1/assets/a1"}},
+			},
+		},
+	}
+	service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) {
+		config.Projects = source
+		config.StyleLockSources = []string{"project", "session", "off"}
+		config.MaximumStyleLockText = 100
+		config.MaximumStyleLockReferences = 3
+	})
+	session, err := service.CreateSessionInProject(context.Background(), "owner-a", "Owner", "chat", projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freeze := func() chat.StyleLock {
+		t.Helper()
+		assistant, err := service.StartTurn(context.Background(), chat.StartTurn{
+			OwnerID: "owner-a", SessionID: session.ID, Content: "draw",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		turn, err := service.GetTurn(context.Background(), "owner-a", session.ID, assistant.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return turn.Options.StyleLock
+	}
+	if lock := freeze(); lock.Source != chat.StyleLockSourceProject || lock.Text != "project style" || len(lock.ProjectReferences) != 1 {
+		t.Fatalf("project source = %+v", lock)
+	}
+	if _, err := service.SetStyleLockWithSource(context.Background(), "owner-a", session.ID,
+		chat.StyleLockSourceSession, true, "session ink", nil); err != nil {
+		t.Fatal(err)
+	}
+	if lock := freeze(); lock.Source != chat.StyleLockSourceSession || lock.Text != "session ink" || len(lock.ProjectReferences) != 0 {
+		t.Fatalf("session source = %+v", lock)
+	}
+	if _, err := service.SetStyleLockWithSource(context.Background(), "owner-a", session.ID,
+		chat.StyleLockSourceOff, true, "session ink", nil); err != nil {
+		t.Fatal(err)
+	}
+	if lock := freeze(); lock.Source != chat.StyleLockSourceOff || lock.Enabled || lock.Text != "" || len(lock.ProjectReferences) != 0 {
+		t.Fatalf("off source = %+v", lock)
+	}
+	// A project edit applies to the next turn, never a frozen one.
+	source.contexts["owner-a/"+projectID] = chat.ProjectContext{
+		ID: projectID, Name: "P", StyleGuide: chat.ProjectStyleGuideContext{Enabled: true, Text: "changed"},
+	}
+	if _, err := service.SetStyleLockWithSource(context.Background(), "owner-a", session.ID,
+		chat.StyleLockSourceProject, true, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if lock := freeze(); lock.Text != "changed" {
+		t.Fatalf("next turn project edit = %+v", lock)
 	}
 }
 

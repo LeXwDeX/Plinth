@@ -21,6 +21,7 @@ func TestDefaultCatalogDeclaresTheRightPanelTabs(t *testing.T) {
 		{"layers", "layers", "layers_panel_shortcut"},
 		{"history", "history", "history_panel_shortcut"},
 		{"details", "info", ""},
+		{"project", "folder", ""},
 		{"operations", "list-checks", ""},
 		{"process", "sliders-horizontal", ""},
 		{"formats", "file-box", ""},
@@ -36,9 +37,9 @@ func TestDefaultCatalogDeclaresTheRightPanelTabs(t *testing.T) {
 		}
 	}
 	wantKinds := []CanvasPanelKindSchema{
-		{Kind: "image", Tabs: []string{"layers", "history", "details", "operations"}, Default: "layers"},
-		{Kind: "board", Tabs: []string{"layers", "history", "operations", "details"}, Default: "layers", DefaultWhenUnavailable: "operations"},
-		{Kind: "model", Tabs: []string{"operations", "process", "formats", "parts", "details"}, Default: "operations"},
+		{Kind: "image", Tabs: []string{"layers", "history", "details", "operations", "project"}, Default: "layers"},
+		{Kind: "board", Tabs: []string{"layers", "history", "operations", "details", "project"}, Default: "layers", DefaultWhenUnavailable: "operations"},
+		{Kind: "model", Tabs: []string{"operations", "process", "formats", "parts", "details", "project"}, Default: "operations"},
 	}
 	if !reflect.DeepEqual(panel.Kinds, wantKinds) {
 		t.Errorf("panel_tabs.kinds = %+v, want %+v", panel.Kinds, wantKinds)
@@ -162,7 +163,8 @@ func TestPanelTabsAreInThePublicProjection(t *testing.T) {
 	for _, fragment := range []string{
 		`"panel_tabs":{"width_pixels":300,"tabs":[{"id":"layers","icon":"layers","label_key":"ui.studio.panel.tab.layers","hint_key":"ui.studio.panel.tab.layers_hint","shortcut":"layers_panel_shortcut"}`,
 		`{"id":"process","icon":"sliders-horizontal"`,
-		`{"kind":"model","tabs":["operations","process","formats","parts","details"],"default":"operations"}`,
+		`{"kind":"model","tabs":["operations","process","formats","parts","details","project"],"default":"operations"}`,
+		`{"id":"project","icon":"folder","label_key":"ui.project.title","hint_key":"ui.project.panel_hint"}`,
 	} {
 		if !strings.Contains(string(encoded), fragment) {
 			t.Errorf("public canvas.frontend lacks %s", fragment)

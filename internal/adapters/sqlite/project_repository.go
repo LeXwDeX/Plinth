@@ -516,6 +516,68 @@ func decodeProjectTexts(raw string) map[string]string {
 	return values
 }
 
+// RegisteredPicture reports whether the exact (task, asset) picture is stored
+// in the owner's project style guide or one of its assets (#240). The chat
+// reference resolver is the only caller: it may read another session's Task
+// picture only when this passes, so a client claim can never widen the scope.
+func (r *ProjectRepository) RegisteredPicture(
+	ctx context.Context,
+	ownerID, projectID, taskID, assetID string,
+) (bool, error) {
+	if ownerID == "" || projectID == "" || taskID == "" || assetID == "" {
+		return false, nil
+	}
+	var owned int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT 1 FROM projects WHERE id = ? AND owner_id = ?`,
+		projectID, ownerID).Scan(&owned)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check project owner: %w", err)
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT images_json FROM project_assets WHERE project_id = ? AND owner_id = ?`,
+		projectID, ownerID)
+	if err != nil {
+		return false, fmt.Errorf("read project asset references: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return false, err
+		}
+		if projectReferenceMatches(decodeProjectReferences(raw), taskID, assetID) {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	var guide string
+	err = r.db.QueryRowContext(ctx, `
+		SELECT references_json FROM project_style_guides WHERE project_id = ?`,
+		projectID).Scan(&guide)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read project style references: %w", err)
+	}
+	return projectReferenceMatches(decodeProjectReferences(guide), taskID, assetID), nil
+}
+
+func projectReferenceMatches(references []project.Reference, taskID, assetID string) bool {
+	for _, reference := range references {
+		if reference.TaskID == taskID && reference.AssetID == assetID {
+			return true
+		}
+	}
+	return false
+}
+
 // ProjectAssetSource verifies an owner's input or finished-Task asset before a
 // project stores its reference (#240). It never copies bytes.
 type ProjectAssetSource struct {

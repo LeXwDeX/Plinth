@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import type { ChatBrowserClient, ChatStyleLock } from '@/lib/chat/browser-client';
 
-export const EMPTY_STYLE_LOCK: ChatStyleLock = { enabled: false, text: '', references: [] };
+export const EMPTY_STYLE_LOCK: ChatStyleLock = { enabled: false, text: '', references: [], source: 'project' };
 
 type StyleLockListener = (sessionId: string, lock: ChatStyleLock) => void;
 const listeners = new Set<StyleLockListener>();
@@ -15,7 +15,12 @@ function publishStyleLock(sessionId: string, lock: ChatStyleLock): void {
 }
 
 function copyLock(lock: ChatStyleLock): ChatStyleLock {
-  return { enabled: lock.enabled === true, text: typeof lock.text === 'string' ? lock.text : '', references: Array.isArray(lock.references) ? [...lock.references] : [] };
+  return {
+    enabled: lock.enabled === true,
+    text: typeof lock.text === 'string' ? lock.text : '',
+    references: Array.isArray(lock.references) ? [...lock.references] : [],
+    ...(lock.source === 'project' || lock.source === 'session' || lock.source === 'off' ? { source: lock.source } : {}),
+  };
 }
 
 /**

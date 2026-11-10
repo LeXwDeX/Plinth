@@ -195,7 +195,10 @@ type OrchestratorConfig struct {
 	Configuration func(context.Context, string) (AgentConfigurationSnapshot, error)
 	Service       *Service
 	Schema        catalog.ChatSchema
-	Model         string
+	// Project is application.project (#240): the project block and citation
+	// template. Nil keeps the block out (a Catalog without projects).
+	Project *catalog.ProjectSchema
+	Model   string
 	// DSMLFor reports whether a turn on the model reads DSML tool calls
 	// (its profile's dsml_tool_calls, #253/#322); nil keeps Schema.DSML as is.
 	DSMLFor func(model string) bool
@@ -274,6 +277,7 @@ type Orchestrator struct {
 	configuration func(context.Context, string) (AgentConfigurationSnapshot, error)
 	service       *Service
 	schema        catalog.ChatSchema
+	project       *catalog.ProjectSchema
 	model         string
 	dsmlFor       func(string) bool
 	agent         agents.Adapter
@@ -668,6 +672,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 	return &Orchestrator{
 		service:            config.Service,
 		schema:             config.Schema,
+		project:            config.Project,
 		model:              config.Model,
 		dsmlFor:            config.DSMLFor,
 		visionInline:       config.VisionInline,
@@ -2003,6 +2008,10 @@ func (orchestrator *Orchestrator) agentRequest(
 	sections.add("visual_anchors", orchestrator.visualAnchorsPrompt(options))
 	sections.add("selection", orchestrator.selectionPrompt(options))
 	sections.add("brief", orchestrator.briefPrompt(options))
+	// The project block follows the brief and precedes the session settings;
+	// its guide, conventions and @projectN assets are the frozen snapshot of
+	// the turn, never the mutable project rows (#240).
+	sections.add("project", orchestrator.projectPrompt(options))
 	// The self-check state is stored session data, not a message-window
 	// projection, so context compaction never changes it (#246). It sits
 	// before the framed session notes, which stay the last settings block.

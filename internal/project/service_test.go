@@ -3,13 +3,17 @@ package project_test
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/project"
 )
+
+var testIDCounter atomic.Uint64
 
 type memoryRepository struct {
 	projects    map[string]project.Project
@@ -248,7 +252,7 @@ func newService(t *testing.T, repository project.Repository, sources project.Ass
 		Sources: sources,
 		Clock:   func() time.Time { return now },
 		NewID: func(prefix string) (string, error) {
-			return prefix + "fixed" + time.Now().Format("150405.000000"), nil
+			return prefix + "fixed" + strconv.FormatUint(testIDCounter.Add(1), 10), nil
 		},
 	})
 	if err != nil {

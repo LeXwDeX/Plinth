@@ -158,11 +158,17 @@ func (r *Repository) CreateSession(
 	ctx context.Context,
 	session chat.Session,
 ) (chat.Session, error) {
-	_, err := r.db.ExecContext(ctx, `
+	// A project's production defaults seed an empty session brief at creation
+	// (#240), in the same INSERT so a new session never exists without it.
+	storedBrief, err := chat.EncodeProductionBrief(session.Brief)
+	if err != nil {
+		return chat.Session{}, err
+	}
+	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO go_chat_sessions (
 			id, owner_id, owner_name, title, created_at, updated_at, approval_mode, agent_scope, title_source,
-			parent_session_id, parent_message_id, parent_title, parent_deleted, project_id, style_lock_source
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			parent_session_id, parent_message_id, parent_title, parent_deleted, project_id, style_lock_source, brief
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		session.ID,
 		session.OwnerID,
 		session.OwnerName,
@@ -178,6 +184,7 @@ func (r *Repository) CreateSession(
 		session.ParentDeleted,
 		session.ProjectID,
 		sessionStyleLockSourceOrProject(session.StyleLockSource),
+		storedBrief,
 	)
 	if err != nil {
 		return chat.Session{}, fmt.Errorf("create chat session: %w", err)
@@ -349,6 +356,23 @@ func (r *Repository) SetSessionProject(ctx context.Context, ownerID, sessionID, 
 		return chat.Session{}, false, err
 	}
 	return session, true, nil
+}
+
+// SessionProject reads the project the owner's session belongs to (#240).
+// found is false for a missing or foreign session; an unassigned session
+// reports found true with an empty project.
+func (r *Repository) SessionProject(ctx context.Context, ownerID, sessionID string) (string, bool, error) {
+	var projectID string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT project_id FROM go_chat_sessions WHERE id = ? AND owner_id = ?`,
+		sessionID, ownerID).Scan(&projectID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read chat session project: %w", err)
+	}
+	return projectID, true, nil
 }
 
 // VisualAnchors reads the session-level visual anchors of the owner's session

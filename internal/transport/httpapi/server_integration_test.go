@@ -62,6 +62,30 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/transport/httpapi"
 )
 
+// integrationProjectSource is the narrow chat port over the real project
+// service. It returns the project ID as the frozen context; the generation
+// tests that need style inheritance use the app assembly instead.
+type integrationProjectSource struct{ service *project.Service }
+
+func (source integrationProjectSource) Exists(ctx context.Context, ownerID, projectID string) (bool, error) {
+	return source.service.Exists(ctx, ownerID, projectID)
+}
+
+func (source integrationProjectSource) Context(ctx context.Context, ownerID, projectID string) (chat.ProjectContext, error) {
+	exists, err := source.service.Exists(ctx, ownerID, projectID)
+	if err != nil {
+		return chat.ProjectContext{}, err
+	}
+	if !exists {
+		return chat.ProjectContext{}, chat.ErrProjectNotFound
+	}
+	value, err := source.service.Get(ctx, ownerID, projectID)
+	if err != nil {
+		return chat.ProjectContext{}, chat.ErrProjectNotFound
+	}
+	return chat.ProjectContext{ID: value.ID, Name: value.Name}, nil
+}
+
 func TestHTTPVerticalSliceUploadSubmitObserveAndDownload(t *testing.T) {
 	t.Parallel()
 	module, api, inputs := newHTTPHarness(t)
@@ -1296,7 +1320,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		if err != nil {
 			t.Fatal(err)
 		}
-		projectSource = projectService
+		projectSource = integrationProjectSource{service: projectService}
 	}
 	chatService, err := chat.NewService(chat.ServiceConfig{
 		Repository:                 repository,

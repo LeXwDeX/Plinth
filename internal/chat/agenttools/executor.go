@@ -18,6 +18,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/agentparams"
+	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/skillrun"
 	"github.com/LeXwDeX/Plinth/internal/threeview"
@@ -75,6 +76,9 @@ const (
 	// ToolSetVisualAnchor writes a session visual anchor after the person
 	// confirmed it on a choice card (#250).
 	ToolSetVisualAnchor = "set_visual_anchor"
+	// ToolListProjectAssets lists the project assets frozen with this turn,
+	// with the @projectN handles the Agent may pass to a generation tool (#240).
+	ToolListProjectAssets = "list_project_assets"
 )
 
 // 同意状态键与决定值（agent 状态 store 与 harness consent 端点共用词汇）。
@@ -158,6 +162,9 @@ type Config struct {
 	// (#250). The service owns the owner/session checks and the bounds; this
 	// tool cannot touch the user's style lock.
 	WriteVisualAnchor func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	// Project is application.project (#240): the list_project_assets copy,
+	// handle prefix and list bound. Nil leaves the tool unavailable.
+	Project *catalog.ProjectSchema
 	// ChoiceKinds are chat.choice.kinds from the Product Schema; the Agent
 	// names one by id and supplies options only for a kind whose option source
 	// is agent (#239).
@@ -239,6 +246,7 @@ type Executor struct {
 		arguments chat.AskChoiceArguments) (chat.ToolResult, error)
 	proposePlan            func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	writeVisualAnchor      func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	project                *catalog.ProjectSchema
 	choiceKinds            map[string]catalog.ChatChoiceKindSchema
 	choiceOptionInvalid    string
 	briefSavedMessage      string
@@ -264,7 +272,7 @@ type Executor struct {
 }
 
 type SkillReferenceResolver interface {
-	Resolve(context.Context, generation.OwnerID, []string) ([]generation.AssetID, error)
+	Resolve(context.Context, references.ReferenceScope, []string) ([]generation.AssetID, error)
 }
 
 type SkillOfferingResolver interface {
@@ -384,6 +392,7 @@ func New(config Config) (*Executor, error) {
 		askChoice:              config.AskChoice,
 		proposePlan:            config.ProposePlan,
 		writeVisualAnchor:      config.WriteVisualAnchor,
+		project:                config.Project,
 		consent:                config.Consent,
 		consentState:           config.ConsentState,
 		consentClear:           config.ConsentClear,
@@ -438,6 +447,8 @@ func (e *Executor) Execute(
 			return chat.ToolResult{Error: "visual anchors unavailable", NoSubmission: true}, nil
 		}
 		return e.writeVisualAnchor(ctx, command)
+	case ToolListProjectAssets:
+		return e.listProjectAssets(ctx, command), nil
 	case ToolProposeProductionPlan:
 		if e.proposePlan == nil {
 			return chat.ToolResult{Error: "production plans unavailable", NoSubmission: true}, nil

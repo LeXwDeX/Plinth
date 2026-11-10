@@ -850,6 +850,20 @@ func (r *memoryChatRepository) SetSessionProject(
 	return session, true, nil
 }
 
+func (r *memoryChatRepository) SessionProject(
+	_ context.Context,
+	ownerID string,
+	sessionID string,
+) (string, bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	session, found := r.sessions[sessionID]
+	if !found || session.OwnerID != ownerID {
+		return "", false, nil
+	}
+	return session.ProjectID, true, nil
+}
+
 func (r *memoryChatRepository) VisualAnchors(
 	_ context.Context,
 	ownerID string,
