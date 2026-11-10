@@ -833,6 +833,46 @@ func (r *memoryChatRepository) SetStyleLock(
 	return true, nil
 }
 
+func (r *memoryChatRepository) VisualAnchors(
+	_ context.Context,
+	ownerID string,
+	sessionID string,
+) ([]chat.VisualAnchor, bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	session, found := r.sessions[sessionID]
+	if !found || session.OwnerID != ownerID {
+		return nil, false, nil
+	}
+	return cloneTestAnchors(session.VisualAnchors), true, nil
+}
+
+func (r *memoryChatRepository) SetVisualAnchors(
+	_ context.Context,
+	ownerID string,
+	sessionID string,
+	anchors []chat.VisualAnchor,
+) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	session, found := r.sessions[sessionID]
+	if !found || session.OwnerID != ownerID {
+		return false, nil
+	}
+	session.VisualAnchors = cloneTestAnchors(anchors)
+	r.sessions[sessionID] = session
+	return true, nil
+}
+
+func cloneTestAnchors(anchors []chat.VisualAnchor) []chat.VisualAnchor {
+	result := make([]chat.VisualAnchor, 0, len(anchors))
+	for _, anchor := range anchors {
+		anchor.References = append([]string(nil), anchor.References...)
+		result = append(result, anchor)
+	}
+	return result
+}
+
 func (r *memoryChatRepository) SessionPick(
 	_ context.Context,
 	ownerID string,

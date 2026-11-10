@@ -2720,13 +2720,17 @@ type ChatSchema struct {
 	Agent              ChatAgentSchema                        `json:"agent"`
 	Context            ChatContextSchema                      `json:"context"`
 	StyleLock          ChatStyleLockSchema                    `json:"style_lock"`
-	DSML               ChatDSMLSchema                         `json:"dsml"`
-	Stream             ChatStreamSchema                       `json:"stream"`
-	Tools              []ChatToolSchema                       `json:"tools"`
-	AgentTools         []ChatAgentToolSchema                  `json:"agent_tools,omitempty"`
-	Skills             ChatSkillsSchema                       `json:"skills"`
-	Presentation       ChatPresentationSchema                 `json:"presentation"`
-	Audit              ChatAuditSchema                        `json:"audit"`
+	// VisualAnchors declares the session-level reference-backed identity and
+	// style anchors (#250): their bounds, kinds, Agent-facing context block and
+	// tool copy. Server side only; the browser reads no anchor projection.
+	VisualAnchors ChatVisualAnchorsSchema `json:"visual_anchors,omitempty"`
+	DSML          ChatDSMLSchema          `json:"dsml"`
+	Stream        ChatStreamSchema        `json:"stream"`
+	Tools         []ChatToolSchema        `json:"tools"`
+	AgentTools    []ChatAgentToolSchema   `json:"agent_tools,omitempty"`
+	Skills        ChatSkillsSchema        `json:"skills"`
+	Presentation  ChatPresentationSchema  `json:"presentation"`
+	Audit         ChatAuditSchema         `json:"audit"`
 	// ApprovalPolicy declares the per-session paid-step approval modes and
 	// which capabilities still need a human in manual mode.
 	ApprovalPolicy ChatApprovalPolicySchema `json:"approval_policy"`
@@ -2874,13 +2878,17 @@ type ChatChoiceKindSchema struct {
 	// string parameter that receives the option id.
 	ToolName string `json:"tool_name"`
 	Argument string `json:"argument"`
-	// OptionSource names where the server builds the options: the only
-	// declared source is "usage_profiles".
+	// OptionSource names where the server builds the options: "usage_profiles"
+	// builds them from the declared purposes, "agent_proposal" from the
+	// proposal the Agent names on the card (#250).
 	OptionSource string `json:"option_source"`
 	// Question is the default question the tool result shows when the Agent
 	// names none; Message is the Agent-facing line of the tool result.
 	Question string `json:"question"`
 	Message  string `json:"message"`
+	// AcceptLabel and DeclineLabel word an agent_proposal card's two options.
+	AcceptLabel  string `json:"accept_label,omitempty"`
+	DeclineLabel string `json:"decline_label,omitempty"`
 }
 
 // ChatModel3DUsageSchema is application.chat.model3d_usage (#103).
@@ -3556,11 +3564,76 @@ type ChatStyleLockSchema struct {
 	// requests (POST /api/v1/tasks/prepare) carry the lock. It is server-only:
 	// the public projection keeps publishing the two bounds above.
 	DirectTaskCapabilities []schemacontract.Capability `json:"direct_task_capabilities,omitempty"`
+	// ReferenceCapabilities names the capabilities whose generation and
+	// processing steps may carry the lock's reference pictures (#250). The
+	// declared image capabilities keep the historical text and edit-scope
+	// prompt; retexture takes the reference picture but never the style text.
+	ReferenceCapabilities []schemacontract.Capability `json:"reference_capabilities,omitempty"`
 	// PromptTemplate and EditScopeTemplate are English provider-prompt copy;
 	// the generation tool and direct prepare fill them only for the declared
 	// image capabilities.
 	PromptTemplate    string `json:"prompt_template,omitempty"`
 	EditScopeTemplate string `json:"edit_scope_template,omitempty"`
+	// AgentContextTemplate states the lock to the Agent in the system prompt
+	// ({enabled}, {text}, {references}). EnabledText and DisabledText are the
+	// words the enabled placeholder takes.
+	AgentContextTemplate string `json:"agent_context_template,omitempty"`
+	EnabledText          string `json:"enabled_text,omitempty"`
+	DisabledText         string `json:"disabled_text,omitempty"`
+	// ReferencePurposeTemplate labels a retained style-lock picture in the
+	// final prompt, keyed to its position by the reference_purposes mechanism.
+	ReferencePurposeTemplate string `json:"reference_purpose_template,omitempty"`
+	// SkipNote explains, in a processing result, why a style reference was not
+	// written into a step that already carried a picture. UnsupportedNote
+	// explains that the chosen service takes no reference picture at all.
+	SkipNote        string `json:"skip_note,omitempty"`
+	UnsupportedNote string `json:"unsupported_note,omitempty"`
+}
+
+// ChatVisualAnchorsSchema is application.chat.visual_anchors (#250). Anchors
+// are session-level identity and style references that a generation call can
+// name without the person re-selecting pictures. Bounds are in characters and
+// pictures; templates are Server-owned Agent copy.
+type ChatVisualAnchorsSchema struct {
+	MaximumAnchors               int `json:"maximum_anchors"`
+	MaximumReferences            int `json:"maximum_references"`
+	MaximumNameCharacters        int `json:"maximum_name_characters"`
+	MaximumDescriptionCharacters int `json:"maximum_description_characters"`
+	// Kinds declares the anchor kinds. A kind's reference purpose template
+	// labels its pictures in the final generation prompt ({name}).
+	Kinds           []ChatVisualAnchorKindSchema `json:"kinds"`
+	ContextTemplate string                       `json:"context_template"`
+	OpenMarker      string                       `json:"open_marker"`
+	CloseMarker     string                       `json:"close_marker"`
+	EmptyText       string                       `json:"empty_text"`
+	ItemTemplate    string                       `json:"item_template"`
+	PrecedenceNote  string                       `json:"precedence_note"`
+	PromptHint      string                       `json:"prompt_hint"`
+	NoteTemplate    string                       `json:"note_template"`
+	InvalidTemplate string                       `json:"invalid_template"`
+	// ReferenceCountTemplate fills an anchor item's {references}.
+	ReferenceCountTemplate string `json:"reference_count_template"`
+	// ReferenceLabelTemplate and DroppedLabelTemplate label an anchor picture
+	// in the vision context ({name}, {index}, {kind}).
+	ReferenceLabelTemplate string `json:"reference_label_template"`
+	DroppedLabelTemplate   string `json:"dropped_label_template"`
+	// ReferenceUnavailableTemplate refuses a generation step whose anchor
+	// picture cannot be read any more (deleted or expired), naming the stored
+	// anchor handle ({handle}) instead of a generic generation failure (#250).
+	ReferenceUnavailableTemplate string `json:"reference_unavailable_template"`
+	// SavedMessage, RemovedMessage and DeclinedMessage word the anchor tool's
+	// result; the turn's locale translates them.
+	SavedMessage    string `json:"saved_message"`
+	RemovedMessage  string `json:"removed_message"`
+	DeclinedMessage string `json:"declined_message"`
+}
+
+type ChatVisualAnchorKindSchema struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	// ReferencePurposeTemplate labels one picture of this kind in the final
+	// generation prompt ({name}).
+	ReferencePurposeTemplate string `json:"reference_purpose_template"`
 }
 
 type ChatStyleLockAPIFields struct {
@@ -4511,11 +4584,15 @@ type ChatToolSchema struct {
 	// reference or previous template; {purposes} is one
 	// ReferencePurposeItemTemplate ({position} {purpose}) per purposed picture,
 	// in the order the pictures are really sent.
-	ReferencePurposesArgument           string               `json:"reference_purposes_argument,omitempty"`
-	PromptWithReferencePurposesTemplate string               `json:"prompt_with_reference_purposes_template,omitempty"`
-	ReferencePurposeItemTemplate        string               `json:"reference_purpose_item_template,omitempty"`
-	IdempotencyKeyTemplate              string               `json:"idempotency_key_template"`
-	ResultFields                        ChatToolResultFields `json:"result_fields"`
+	ReferencePurposesArgument           string `json:"reference_purposes_argument,omitempty"`
+	PromptWithReferencePurposesTemplate string `json:"prompt_with_reference_purposes_template,omitempty"`
+	ReferencePurposeItemTemplate        string `json:"reference_purpose_item_template,omitempty"`
+	// AnchorArgument names the tool argument that lists the identity anchors
+	// a call uses by name (#250). The declared anchors' reference pictures are
+	// resolved server side and placed before the turn's own references.
+	AnchorArgument         string               `json:"anchor_argument,omitempty"`
+	IdempotencyKeyTemplate string               `json:"idempotency_key_template"`
+	ResultFields           ChatToolResultFields `json:"result_fields"`
 	// Processing, when present, makes this a tool that processes an existing
 	// 3D model of the session instead of creating a new one. It is
 	// server-side only and omitted from public projections.
@@ -4919,12 +4996,21 @@ type ChatMessageTexts struct {
 	// ProductionBriefConflict refuses a whole-brief replacement that lost
 	// every bounded retry to a concurrent writer, so the caller retries instead
 	// of overwriting the other change (#103 review C5).
-	ProductionBriefConflict          string `json:"production_brief_conflict,omitempty"`
-	StyleLockTextTooLong             string `json:"style_lock_text_too_long,omitempty"`
-	StyleLockReferenceLimit          string `json:"style_lock_reference_limit,omitempty"`
-	StyleLockReferenceInvalid        string `json:"style_lock_reference_invalid,omitempty"`
-	StyleLockReferenceUnavailable    string `json:"style_lock_reference_unavailable,omitempty"`
-	StyleLockReferencesTrimmed       string `json:"style_lock_references_trimmed,omitempty"`
+	ProductionBriefConflict       string `json:"production_brief_conflict,omitempty"`
+	StyleLockTextTooLong          string `json:"style_lock_text_too_long,omitempty"`
+	StyleLockReferenceLimit       string `json:"style_lock_reference_limit,omitempty"`
+	StyleLockReferenceInvalid     string `json:"style_lock_reference_invalid,omitempty"`
+	StyleLockReferenceUnavailable string `json:"style_lock_reference_unavailable,omitempty"`
+	StyleLockReferencesTrimmed    string `json:"style_lock_references_trimmed,omitempty"`
+	// ReferencePriorityTrimmed explains a cut of the turn's ordinary reference
+	// pictures while the visual anchors and style references were kept (#250)
+	// ({maximum}, {anchors}, {dropped}).
+	ReferencePriorityTrimmed string `json:"reference_priority_trimmed,omitempty"`
+	// VisualAnchorSaved, VisualAnchorRemoved and VisualAnchorDeclined word the
+	// set_visual_anchor tool's result (#250).
+	VisualAnchorSaved                string `json:"visual_anchor_saved,omitempty"`
+	VisualAnchorRemoved              string `json:"visual_anchor_removed,omitempty"`
+	VisualAnchorDeclined             string `json:"visual_anchor_declined,omitempty"`
 	InvalidReferenceIndices          string `json:"invalid_reference_indices"`
 	ReferenceIndexOutOfRangeTemplate string `json:"reference_index_out_of_range_template"`
 	// InvalidInputSource rejects an undeclared input_source; CanvasSourceMissing

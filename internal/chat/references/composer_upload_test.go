@@ -165,6 +165,55 @@ func TestComposerPictureAsInputAssetReachesTheAgentAsTheDataURIDid(t *testing.T)
 	}
 }
 
+// #250: a visual anchor's stored reference can be an input asset ID, an input
+// asset URL, or the canonical Task asset URL of a generated result. The Task
+// form is owner- and session-scoped, like the attachment verifier; a picture
+// of another session or owner never reaches the model.
+func TestOpenVisionReferenceAcceptsBothReferenceFormsWithinTheSession(t *testing.T) {
+	ctx := context.Background()
+	picture := []byte("\x89PNG\r\n\x1a\nthe anchor picture")
+	inputs := &storedInputs{assets: map[generation.AssetID]generation.InputAsset{}, bodies: map[generation.AssetID][]byte{}}
+	uploaded, err := inputs.UploadAsset(ctx, "owner-a", generation.InputAssetUpload{
+		Body: bytes.NewReader(picture), MediaType: "image/png", MaxBytes: 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tasks := &fakeTasks{
+		tasks: map[generation.TaskID]generation.Task{
+			"task-a": {ID: "task-a", OwnerID: "owner-a", SessionID: "session-a"},
+			"task-b": {ID: "task-b", OwnerID: "owner-a", SessionID: "session-b"},
+		},
+		contents: map[string]generation.AssetContent{
+			"task-a/asset-a": {Body: io.NopCloser(bytes.NewReader(picture)), MediaType: "image/png", Size: int64(len(picture))},
+			"task-b/asset-b": {Body: io.NopCloser(bytes.NewReader(picture)), MediaType: "image/png", Size: int64(len(picture))},
+		},
+	}
+	resolver := limitedResolver(t, inputs, resolverLimits{upload: 1024, vision: 1024, tasks: tasks})
+	want := "data:image/png;base64," + base64.StdEncoding.EncodeToString(picture)
+	for name, reference := range map[string]string{
+		"input asset id":  string(uploaded.ID),
+		"input asset URL": "/configured/assets/" + string(uploaded.ID),
+		"task asset URL":  "/configured/tasks/task-a/assets/asset-a",
+	} {
+		t.Run(name, func(t *testing.T) {
+			inlined, ok := resolver.OpenVisionReference(ctx, "owner-a", "session-a", reference)
+			if !ok || inlined != want {
+				t.Fatalf("reference %q inlined ok=%v; want the picture", reference, ok)
+			}
+		})
+	}
+	if _, ok := resolver.OpenVisionReference(ctx, "owner-a", "session-a", "/configured/tasks/task-b/assets/asset-b"); ok {
+		t.Fatal("another session's Task must not reach the model")
+	}
+	if _, ok := resolver.OpenVisionReference(ctx, "owner-b", "session-a", "/configured/tasks/task-a/assets/asset-a"); ok {
+		t.Fatal("another owner's Task must not reach the model")
+	}
+	if _, ok := resolver.OpenVisionReference(ctx, "owner-a", "session-a", "/configured/tasks/missing/assets/asset-a"); ok {
+		t.Fatal("a missing Task must not reach the model")
+	}
+}
+
 // busyPhoto draws a picture with gradient and grain, so its PNG is several MB.
 func busyPhoto(t *testing.T, width, height int) []byte {
 	t.Helper()

@@ -124,14 +124,14 @@ func TestStyleLockAppliesToTextReferencePurposeAndPreviousPromptPaths(t *testing
 		}
 	})
 
-	t.Run("reference handles keep agent image first", func(t *testing.T) {
+	t.Run("style references precede the agent image", func(t *testing.T) {
 		rig := newStyleLockRig(t, 3)
 		options := styleLock(true, "ink wash", "style-a")
 		result, input := rig.run(t, options, imageHistory(), `{"prompt":"recolor","reference_handles":["@img1"]}`)
-		if result.NoSubmission || input["prompt"] != "REF:recolor STYLE[ink wash] EDIT_SCOPE" {
+		if result.NoSubmission || input["prompt"] != "PURPOSE:image 1: 沿用用户风格锁的画风. |recolor STYLE[ink wash] EDIT_SCOPE" {
 			t.Fatalf("result=%+v input=%#v", result, input)
 		}
-		if len(rig.resolver.urls) != 2 || rig.resolver.urls[0] != "/api/v1/input-assets/agent-image" || rig.resolver.urls[1] != "/api/v1/input-assets/style-a" {
+		if len(rig.resolver.urls) != 2 || rig.resolver.urls[0] != "/api/v1/input-assets/style-a" || rig.resolver.urls[1] != "/api/v1/input-assets/agent-image" {
 			t.Fatalf("reference order=%v", rig.resolver.urls)
 		}
 	})
@@ -174,13 +174,13 @@ func TestStyleLockCanBeDisabledOrSkipped(t *testing.T) {
 	}
 }
 
-func TestStyleLockTrimsStyleReferencesAfterAgentReferences(t *testing.T) {
+func TestStyleReferencesOutrankAndSurviveTheReferenceLimit(t *testing.T) {
 	rig := newStyleLockRig(t, 2)
 	result, _ := rig.run(t, styleLock(true, "ink wash", "style-a", "style-b"), imageHistory(), `{"prompt":"recolor","reference_handles":["@img1"]}`)
-	if result.NoSubmission || len(rig.resolver.urls) != 2 || rig.resolver.urls[0] != "/api/v1/input-assets/agent-image" || rig.resolver.urls[1] != "/api/v1/input-assets/style-a" {
+	if result.NoSubmission || len(rig.resolver.urls) != 2 || rig.resolver.urls[0] != "/api/v1/input-assets/style-a" || rig.resolver.urls[1] != "/api/v1/input-assets/style-b" {
 		t.Fatalf("result=%+v references=%v", result, rig.resolver.urls)
 	}
-	if !strings.Contains(result.AgentContent, "优先保留") {
+	if !strings.Contains(result.AgentContent, "丢弃了普通参考 @img1") {
 		t.Fatalf("trim note missing from result: %s", result.AgentContent)
 	}
 }

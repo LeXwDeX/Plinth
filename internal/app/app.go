@@ -355,6 +355,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		MaximumSessionNotes:        applicationSchema.Chat.Context.MaximumSessionNotesCharacters,
 		MaximumStyleLockText:       applicationSchema.Chat.StyleLock.MaximumTextCharacters,
 		MaximumStyleLockReferences: applicationSchema.Chat.StyleLock.MaximumReferenceImages,
+		VisualAnchors:              applicationSchema.Chat.VisualAnchors,
 		CanvasInputSource:          applicationSchema.Chat.Context.CanvasInputSource,
 		// A turn's pick of a retired generation model runs on its successor
 		// (#329 follow-up).
@@ -804,6 +805,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		},
 		AskChoice:            chatService.AskChoice,
 		ProposePlan:          chatService.ProposeProductionPlan,
+		WriteVisualAnchor:    chatService.WriteVisualAnchor,
 		ChoiceKinds:          applicationSchema.Chat.Choice.Kinds,
 		ChoiceOptionInvalid:  applicationSchema.Chat.Presentation.Messages.ChoiceOptionInvalid,
 		BriefSavedMessage:    applicationSchema.Chat.Model3DUsage.Brief.SavedMessage,
@@ -961,7 +963,11 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		VisionAssetInline: func(ctx context.Context, owner generation.OwnerID, assetID string) (string, bool) {
 			return referenceResolver.OpenVisionAsset(ctx, owner, generation.AssetID(assetID))
 		},
-		SelectionPreview: referenceResolver.OpenSelectionPreview,
+		// #250: an anchor reference may be an input asset ID or the canonical
+		// Task asset URL of a generated result; the resolver proves the owner
+		// and the session (including a branch's ancestor Tasks).
+		VisionAnchorInline: referenceResolver.OpenVisionReference,
+		SelectionPreview:   referenceResolver.OpenSelectionPreview,
 		ToolAllowed: func(capability, _ string) bool {
 			// ToolExecution.domains is the creative workspace (image/model).
 			// CapabilityPresentation.domain is a product category, where

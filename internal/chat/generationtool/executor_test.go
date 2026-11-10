@@ -808,6 +808,9 @@ func (gateway *fakeGateway) Get(
 
 type fakeReferences struct {
 	urls []string
+	// fail marks references the resolver cannot prove, like a deleted or
+	// expired picture.
+	fail map[string]bool
 }
 
 func (resolver *fakeReferences) Resolve(
@@ -816,6 +819,11 @@ func (resolver *fakeReferences) Resolve(
 	urls []string,
 ) ([]generation.AssetID, error) {
 	resolver.urls = append(resolver.urls, urls...)
+	for _, url := range urls {
+		if resolver.fail[url] {
+			return nil, errors.New("reference picture unavailable")
+		}
+	}
 	return []generation.AssetID{"configured-input-asset"}, nil
 }
 

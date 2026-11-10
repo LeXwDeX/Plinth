@@ -40,7 +40,7 @@ same HTTP API the browser uses:
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
 (NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, p2, agent, agent-background,
-agent-quality, image-self-check, image-purpose, offering-knowledge, work-ledger, vision-budget, faults;
+agent-quality, image-self-check, image-purpose, offering-knowledge, work-ledger, vision-budget, visual-anchors, faults;
 "agent" runs both agent scenarios, "hyper3d-agent" the Hyper3D chain alone,
 "p2" the Tripo P2 quote/chain, "agent-background" the batched wait that keeps both Tasks running,
 "image-purpose" the #239 2D purpose card, brief, purpose-driven model and 2D lock,
@@ -48,6 +48,7 @@ agent-quality, image-self-check, image-purpose, offering-knowledge, work-ledger,
 over-limit refusal and final_prompt report,
 "work-ledger" the #248 frozen prompts, compaction, style anchor and self-check leftovers,
 "vision-budget" the #247 image detail, contact sheet and vision token accounting,
+"visual-anchors" the #250 system-prompt visibility, confirmation card, priority trim and retexture style reference,
 "mask-selection" the #244 frozen selection mask, mask binding, approval-card note,
 mask-unsupported refusal and create_selection_mask)
 Needs `go`. Exit 0 = every selected check passed.
@@ -3028,9 +3029,416 @@ def scenario_vision_budget(api, offerings, work):
            "request found" if render_request else "no request carried both the render and the thumbnail")
 
 
+PENDING_ASSISTANT_CONTENT = "__GENERATING__"
+
+
+def _visual_anchor_reply_count(api, session):
+    """Every assistant message whose content is no longer the pending marker."""
+    messages = api.json("GET", f"/api/chat/sessions/{session}/messages")[1]
+    messages = messages if isinstance(messages, list) else messages.get("messages", [])
+    return sum(1 for message in messages
+               if message.get("role") == "assistant"
+               and str(message.get("content") or "").strip() not in ("", PENDING_ASSISTANT_CONTENT))
+
+
+def _visual_anchor_wait_reply(api, session, before, seconds=120):
+    end = time.time() + seconds
+    while time.time() < end:
+        if _visual_anchor_reply_count(api, session) > before:
+            return True
+        time.sleep(0.4)
+    return False
+
+
+def _visual_anchor_turn(api, session, content, image_urls=None, domain="image", model=None):
+    """One Agent turn whose fake reply needs no Task; waits for its answer."""
+    replies = _visual_anchor_reply_count(api, session)
+    body = {"content": content}
+    if image_urls:
+        body["image_urls"] = image_urls
+    if domain:
+        body["creative_domain"] = domain
+    if model:
+        body["ai_model"] = model
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+    if status not in (200, 201, 202):
+        return False
+    return _visual_anchor_wait_reply(api, session, replies)
+
+
+def _visual_anchor_answer(api, session, card, option_id, content):
+    """Answer a card on the card, carrying the fake tool marker of the Agent's
+    continuation in the user text."""
+    replies = _visual_anchor_reply_count(api, session)
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", {
+        "content": content,
+        "choiceAnswer": {"choice_id": card["id"], "option_id": option_id},
+        "creative_domain": "image",
+    })
+    if status not in (200, 201, 202):
+        return False
+    return _visual_anchor_wait_reply(api, session, replies)
+
+
+def _visual_anchor_system_with(work, session, needle, seconds=20):
+    """A stored turn request whose system prompt carries the text. Turn rows
+    include ones whose checkpoint is not written yet, so scan every row instead
+    of trusting the newest."""
+    import sqlite3
+    end = time.time() + seconds
+    while time.time() < end:
+        try:
+            db = sqlite3.connect(f"file:{work}/main/app.db?mode=ro", uri=True)
+            db.row_factory = sqlite3.Row
+            rows = db.execute("SELECT checkpoint_json FROM go_chat_turns WHERE session_id=?",
+                              (session,)).fetchall()
+            db.close()
+        except sqlite3.Error:
+            rows = []
+        for row in rows:
+            if not row["checkpoint_json"]:
+                continue
+            try:
+                system = _work_ledger_system_prompt(json.loads(row["checkpoint_json"]))
+            except ValueError:
+                continue
+            if needle in system:
+                return system
+        time.sleep(0.5)
+    return ""
+
+
+def _visual_anchor_frozen_input(work, task_id):
+    """The Task's frozen input from the stack database. The public Task input
+    withholds asset ids by design, so the smoke reads the frozen record."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/main/app.db?mode=ro", uri=True)
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT input_json FROM generation_tasks WHERE id=?", (task_id,)).fetchone()
+        db.close()
+    except sqlite3.Error:
+        return {}
+    if not row or not row["input_json"]:
+        return {}
+    try:
+        return json.loads(row["input_json"])
+    except ValueError:
+        return {}
+
+
+def _visual_anchor_handles(api, session):
+    """The picture handles the session gave its messages, by asset id."""
+    status, body = api.json("GET", f"/api/chat/sessions/{session}/messages")
+    messages = body if isinstance(body, list) else (body or {}).get("messages", [])
+    by_asset = {}
+    for message in messages:
+        for attachment in message.get("attachments") or []:
+            asset_id = attachment.get("asset_id") or attachment.get("assetId")
+            handle = attachment.get("handle")
+            if asset_id and handle:
+                by_asset[asset_id] = handle
+    return by_asset
+
+
+def _visual_anchor_card(api, session, kind="visual_anchor"):
+    for card in _quality_choices(api, session):
+        if card.get("state") == "pending" and card.get("kind") == kind:
+            return card
+    return None
+
+
+def _visual_anchor_wait_tool_content(work, session, needle, seconds=20):
+    """Wait until the newest checkpoint's tool receipts carry the text."""
+    end = time.time() + seconds
+    contents = []
+    while time.time() < end:
+        contents = _work_ledger_tool_contents(_work_ledger_checkpoint(work, session))
+        if any(needle in content for content in contents):
+            return contents
+        time.sleep(0.5)
+    return contents
+
+
+def scenario_visual_anchors(api, offerings, work):
+    """#250: the session's visual anchors on the fake stack.
+
+    The style lock reaches the Agent's system prompt; a proposed identity
+    anchor only lands after the person accepts the confirmation card and never
+    changes the person's style lock; a declined proposal writes nothing; a
+    later generation uses the anchor without re-selecting pictures; a
+    single-picture 3D model keeps the anchor and drops the ordinary reference
+    with a named handle; and Meshy retexture sends the style lock's picture as
+    its style_asset without the style text.
+    """
+    fake_control("DELETE")
+    session = new_session(api)
+    fields, _route = chat_schema_facts(api)
+    approval_field = fields.get("approval_mode", "approvalMode")
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {approval_field: "auto"})
+    if status != 200:
+        record("#250 auto approval", False, f"status {status}")
+        return
+    hero_asset = upload_asset(api, "anchor-hero.png", make_png(48), "image/png")
+    style_asset = upload_asset(api, "anchor-style.png", make_png(56), "image/png")
+    villain_asset = upload_asset(api, "anchor-villain.png", make_png(40), "image/png")
+    ordinary_asset = upload_asset(api, "anchor-ordinary.png", make_png(64), "image/png")
+    if not all((hero_asset, style_asset, villain_asset, ordinary_asset)):
+        record("#250 upload the anchor pictures", False,
+               f"assets={hero_asset},{style_asset},{villain_asset},{ordinary_asset}")
+        return
+    style_text = "ANCHOR-STYLE-9c41 印象派笔触与暖金色光线"
+    status, body = api.json("PUT", f"/api/v1/chat/sessions/{session}/style-lock",
+                            {"enabled": True, "text": style_text, "references": [style_asset]})
+    record("#250 the session style lock is saved",
+           status == 200 and (body.get("styleLock") or {}).get("enabled") is True,
+           f"status {status} {json.dumps(body, ensure_ascii=False)[:200]}")
+    # The shipped 2D purpose (concept art) recommends this model; using the
+    # workspace model avoids the #239 purpose/model conflict card.
+    image_model = IMAGE_OFFERINGS["meshy"][1]
+    # The Agent never sees an input-asset id: the pictures it can name are the
+    # handles the session gives the messages. Send all four in one turn, then
+    # read the handles the way the Agent's context shows them.
+    upload_urls = [f"/api/v1/assets/{asset}" for asset in (hero_asset, style_asset, villain_asset, ordinary_asset)]
+
+    # (a) The Agent sees the style lock in its system prompt. The fake-only
+    # marker makes the reply itself carry the answer, so the check reads what
+    # the model really received.
+    if not _visual_anchor_turn(api, session, "检查系统提示 [[fake:system-contains ANCHOR-STYLE-9c41]]",
+                               image_urls=upload_urls, domain="image", model=image_model):
+        record("#250 the style lock reaches the system prompt", False, "turn did not finish")
+    else:
+        reply = str((_quality_final_reply(_quality_messages(api, session)) or {}).get("content") or "")
+        record("#250 the style lock reaches the system prompt",
+               "present: ANCHOR-STYLE-9c41" in reply,
+               f"reply={reply[:120]!r}")
+    handles = _visual_anchor_handles(api, session)
+    record("#250 the Agent can name the pictures by their handles",
+           all(handles.get(asset) for asset in (hero_asset, style_asset, villain_asset, ordinary_asset)),
+           f"handles={handles}")
+    # (b) The Agent proposes an identity anchor; the person accepts on the card.
+    hero_proposal = {"action": "create", "name": "hero", "kind": "identity",
+                     "description": "red cloak", "references": [handles.get(hero_asset)]}
+    propose = _work_ledger_marker("ask_choice", {
+        "kind": "visual_anchor", "question": "把这张图设为角色标准形象？",
+        "proposal": {"arguments": hero_proposal},
+    })
+    if not _visual_anchor_turn(api, session, "提议保存角色形象 " + propose, domain="image", model=image_model):
+        record("#250 visual anchor confirmation card", False, "turn did not finish")
+        return
+    card = _visual_anchor_card(api, session)
+    options = {option.get("id"): option for option in (card or {}).get("options") or []}
+    record("#250 the confirmation card offers accept and decline",
+           card is not None and set(options) == {"accept", "decline"}
+           and options.get("accept", {}).get("label") == "设为视觉锚",
+           f"card={json.dumps(card, ensure_ascii=False)[:240] if card else 'missing'}")
+    system = _visual_anchor_system_with(work, session, "ANCHOR-STYLE-9c41")
+    record("#250 the system prompt frames the lock and its references",
+           "<<<VISUAL_ANCHORS>>>" in system and "<<<END_VISUAL_ANCHORS>>>" in system
+           and "参考图 1 张" in system,
+           f"marker={'yes' if '<<<VISUAL_ANCHORS>>>' in system else 'no'} "
+           f"references={'yes' if '参考图 1 张' in system else 'no'}")
+    # The same user text must appear once, and the two blocks must not give
+    # opposite instructions about repeating it (#250 review).
+    record("#250 one prompt carries the style lock once with one rule",
+           system.count("ANCHOR-STYLE-9c41") == 1 and "逐字保持" not in system
+           and system.count("<<<END_VISUAL_ANCHORS>>>") == 1
+           and "<<<WORK_ANCHORS>>>" in system,
+           f"texts={system.count('ANCHOR-STYLE-9c41')} "
+           f"verbatim={'yes' if '逐字保持' in system else 'no'} "
+           f"visual_close={system.count('<<<END_VISUAL_ANCHORS>>>')}")
+    if card is None:
+        return
+    accept = _work_ledger_marker("set_visual_anchor", hero_proposal)
+    if not _visual_anchor_answer(api, session, card, "accept", "保存这个锚点 " + accept):
+        record("#250 accept the proposed anchor", False, "answer turn did not finish")
+        return
+    receipts = _visual_anchor_wait_tool_content(work, session, "视觉锚已保存")
+    record("#250 the accepted anchor is written", bool(receipts) and
+           any("视觉锚已保存" in content for content in receipts),
+           f"receipts={len(receipts)}")
+    # An Agent call that no answered card names is refused even though it uses
+    # a handle the session really gave (#250 review).
+    intruder = _work_ledger_marker("set_visual_anchor", {
+        "action": "create", "name": "intruder", "kind": "identity",
+        "references": [handles.get(ordinary_asset)],
+    })
+    if not _visual_anchor_turn(api, session, "未经确认直接写入 " + intruder,
+                               domain="image", model=image_model):
+        record("#250 an unconfirmed write is refused", False, "turn did not finish")
+    else:
+        receipts = _visual_anchor_wait_tool_content(work, session, "用户确认卡")
+        record("#250 an unconfirmed write is refused",
+               any("还没有经用户确认卡确认" in content for content in receipts),
+               f"receipts={len(receipts)}")
+    _visual_anchor_turn(api, session, "检查未确认锚点 [[fake:system-contains 身份锚「intruder」]]",
+                        domain="image", model=image_model)
+    reply = str((_quality_final_reply(_quality_messages(api, session)) or {}).get("content") or "")
+    record("#250 an unconfirmed write stores no anchor", "absent: 身份锚「intruder」" in reply,
+           f"reply={reply[:120]!r}")
+    # A declined proposal writes nothing and leaves the person's lock alone.
+    villain_proposal = {"action": "create", "name": "villain", "kind": "identity",
+                        "description": "black cloak", "references": [handles.get(villain_asset)]}
+    propose = _work_ledger_marker("ask_choice", {
+        "kind": "visual_anchor", "question": "把这张图也设为角色标准形象？",
+        "proposal": {"arguments": villain_proposal},
+    })
+    if not _visual_anchor_turn(api, session, "再提议一个 " + propose, domain="image", model=image_model):
+        record("#250 the declined proposal card", False, "turn did not finish")
+        return
+    card = _visual_anchor_card(api, session)
+    system = _visual_anchor_system_with(work, session, "身份锚「hero」")
+    record("#250 the next turn sees the accepted identity anchor",
+           "身份锚「hero」" in system and "<<<VISUAL_ANCHORS>>>" in system,
+           f"anchor={'yes' if '身份锚「hero」' in system else 'no'}")
+    decline = _work_ledger_marker("set_visual_anchor", {"action": "decline"})
+    if card is None or not _visual_anchor_answer(api, session, card, "decline", "不用保存 " + decline):
+        record("#250 decline the proposed anchor", False, f"card={card}")
+        return
+    _visual_anchor_turn(api, session, "看看现在的锚点 [[fake:system-contains 身份锚「villain」]]",
+                        domain="image", model=image_model)
+    reply = str((_quality_final_reply(_quality_messages(api, session)) or {}).get("content") or "")
+    villain_system = _visual_anchor_system_with(work, session, "身份锚「villain」", seconds=2)
+    record("#250 a declined anchor writes nothing",
+           "absent: 身份锚「villain」" in reply and "身份锚「villain」" not in villain_system,
+           f"reply={reply[:120]!r} villain={'yes' if '身份锚「villain」' in villain_system else 'no'}")
+    status, lock = api.json("GET", f"/api/v1/chat/sessions/{session}/style-lock")
+    saved = (lock.get("styleLock") or lock or {})
+    record("#250 anchor writes never change the person's style lock",
+           status == 200 and saved.get("text") == style_text and saved.get("enabled") is True
+           and saved.get("references") == [style_asset],
+           f"status={status} lock={json.dumps(lock, ensure_ascii=False)[:200]}")
+
+    # (c) A later generation names the anchor and carries its picture without
+    # any handle from the person.
+    marker = _work_ledger_marker("refine_image", {"prompt": "a portrait of the ranger", "anchors": ["hero"]})
+    task, why, _approval = agent_tool_turn(api, session, "画她坐着的样子 " + marker,
+                                           creative_domain="image", ai_model=image_model)
+    if not task or why or task.get("state") != "SUCCEEDED":
+        record("#250 generation uses the anchor", False, why or f"state={(task or {}).get('state')}")
+        return
+    task_id = task.get("task_id") or task.get("id")
+    anchor_input = _visual_anchor_frozen_input(work, task_id)
+    references = anchor_input.get("reference_assets") or []
+    prompt = str(anchor_input.get("prompt") or "")
+    record("#250 generation uses the anchor picture without a handle",
+           references == [hero_asset, style_asset] and "保留「hero」的身份" in prompt,
+           f"references={references} prompt={prompt[:160]!r}")
+
+    # (c2) The picture the Agent just made becomes an identity anchor. The
+    # Agent only names its session handle; the stored reference is the
+    # canonical Task asset URL. The next turn must carry that picture in the
+    # model's vision context at high detail: the anchor path used to inline
+    # input asset ids only, so a Task URL was silently skipped (#250 review).
+    handles = _visual_anchor_handles(api, session)
+    generated_handles = [handles.get(asset.get("id")) for asset in task.get("assets") or []
+                         if handles.get(asset.get("id"))]
+    if not generated_handles:
+        record("#250 a generated result can be an identity anchor", False,
+               f"no handle for the result assets {task.get('assets')}")
+    else:
+        made_proposal = {"action": "create", "name": "made-hero", "kind": "identity",
+                         "description": "the portrait just generated",
+                         "references": [generated_handles[0]]}
+        propose = _work_ledger_marker("ask_choice", {
+            "kind": "visual_anchor", "question": "把刚生成的这张设为角色标准形象？",
+            "proposal": {"arguments": made_proposal},
+        })
+        card = None
+        if _visual_anchor_turn(api, session, "把刚生成的图设为锚点 " + propose,
+                               domain="image", model=image_model):
+            card = _visual_anchor_card(api, session)
+        if card is None:
+            record("#250 a generated result can be an identity anchor", False,
+                   "the confirmation card is missing")
+        else:
+            accept = _work_ledger_marker("set_visual_anchor", made_proposal)
+            saved = _visual_anchor_answer(api, session, card, "accept", "保存这个锚点 " + accept)
+            receipts = _visual_anchor_wait_tool_content(work, session, "视觉锚已保存")
+            _visual_anchor_turn(
+                api, session, "检查刚保存的锚点 [[fake:system-contains 身份锚「made-hero」]]",
+                domain="image", model=image_model)
+            reply = str((_quality_final_reply(_quality_messages(api, session)) or {}).get("content") or "")
+            record("#250 a generated result can be an identity anchor",
+                   saved and bool(receipts) and "present: 身份锚「made-hero」" in reply,
+                   f"saved={saved} receipts={len(receipts)} reply={reply[:120]!r}")
+
+            def has_generated_anchor_image(messages):
+                for message in messages:
+                    for image in message.get("images") or []:
+                        if (image.get("detail") == "high" and image.get("data_uri")
+                                and "身份锚「made-hero」参考图 1" in (image.get("label") or "")):
+                            return True
+                return False
+
+            anchor_request = last_request_with(has_generated_anchor_image)
+            record("#250 a generated-result anchor reaches vision at high detail",
+                   anchor_request is not None,
+                   f"handle={generated_handles[0]} "
+                   f"request={'found' if anchor_request else 'missing'} "
+                   f"images={[(image.get('detail'), image.get('data_uri'), image.get('label')) for request in fake_chat_requests()[-3:] for message in request.get('messages') or [] for image in message.get('images') or []]}")
+
+    # (d) A single-picture model keeps the anchor and drops the ordinary
+    # reference; the tool result names the dropped handle. Both pictures are
+    # real session handles: the ordinary one was sent in the first turn.
+    ordinary_handle = handles.get(ordinary_asset)
+    marker = _work_ledger_marker("create_model_3d_from_image", {
+        "prompt": "a ranger miniature", "anchors": ["hero"],
+        "reference_handles": [ordinary_handle], "input_override_reason": "fake stack single-picture check",
+    })
+    model_task, why, _approval = agent_tool_turn(
+        api, session, "把参考和标准形象一起做成模型 " + marker,
+        creative_domain="model-3d", ai_model="meshy/meshy-7.1/image-to-3d")
+    if not model_task or why or model_task.get("state") != "SUCCEEDED":
+        record("#250 the single-picture model keeps the anchor", False,
+               why or f"state={(model_task or {}).get('state')}")
+        return
+    model_task_id = model_task.get("task_id") or model_task.get("id")
+    model_input = _visual_anchor_frozen_input(work, model_task_id)
+    model_references = model_input.get("reference_assets") or []
+    record("#250 the single-picture model keeps the anchor and drops the ordinary reference",
+           model_references == [hero_asset],
+           f"references={model_references} input={json.dumps(model_input, ensure_ascii=False)[:200]}")
+    receipts = _visual_anchor_wait_tool_content(work, session, "reference_note")
+    note = ""
+    for content in reversed(receipts):
+        try:
+            candidate = json.loads(content)
+        except ValueError:
+            continue
+        if isinstance(candidate, dict) and candidate.get("reference_note"):
+            note = str(candidate["reference_note"])
+            break
+    record("#250 the tool result names the dropped ordinary reference",
+           "丢弃了普通参考" in note and bool(ordinary_handle) and ordinary_handle in note,
+           f"reference_note={note[:200]!r} handle={ordinary_handle}")
+
+    # (e) Meshy retexture sends the style lock picture as its style_asset and
+    # never injects the style text into the 3D prompt.
+    source_task = model_task.get("task_id") or model_task.get("id")
+    marker = _work_ledger_marker("retexture_model", {
+        "source_task_id": source_task, "offering_id": "meshy/processing/retexture",
+    })
+    texture, why, _approval = agent_tool_turn(api, session, "换成苔藓贴图 " + marker,
+                                              creative_domain="model-3d")
+    if not texture or why or texture.get("state") != "SUCCEEDED":
+        record("#250 retexture carries the style reference", False,
+               why or f"state={(texture or {}).get('state')}")
+        return
+    texture_id = texture.get("task_id") or texture.get("id")
+    texture_input = _visual_anchor_frozen_input(work, texture_id)
+    texture_prompt = str(texture_input.get("prompt") or "")
+    record("#250 retexture sends the style lock picture as style_asset",
+           texture_input.get("style_asset") == style_asset,
+           f"style_asset={texture_input.get('style_asset')} input={json.dumps(texture_input, ensure_ascii=False)[:200]}")
+    record("#250 retexture never injects the style text",
+           "prompt" not in texture_input and style_text not in texture_prompt and "Style lock" not in texture_prompt,
+           f"prompt={texture_prompt!r}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,vision-budget,three-view,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,vision-budget,three-view,visual-anchors,faults")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
@@ -3052,7 +3460,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "work-ledger", "vision-budget", "three-view"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "work-ledger", "vision-budget", "three-view", "visual-anchors"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -3087,6 +3495,8 @@ def main():
                 scenario_work_ledger(api, offerings, work)
             if "vision-budget" in selected:
                 scenario_vision_budget(api, offerings, work)
+            if "visual-anchors" in selected:
+                scenario_visual_anchors(api, offerings, work)
             processes.stop(child)
         if "offering-knowledge" in selected:
             offering_catalog = private_catalog(

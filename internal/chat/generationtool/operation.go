@@ -45,6 +45,12 @@ type Operation struct {
 	// it with the Offering's reference-limit note (runtime.generation_messages).
 	ReferenceCount int
 	ReferenceTotal int
+	// ReferenceNote freezes the rendered reference note of this preparation
+	// (#250): the priority cut that kept the identity/style pictures and named
+	// the dropped ordinary handles, or the Offering's reference-limit note.
+	// Empty on operations written before the note was kept; the read paths
+	// then fall back to the older counts-only wording.
+	ReferenceNote string
 	// ReferenceSource freezes what the reference pictures really were when
 	// this operation was prepared: the source identities before and after a
 	// three-view replacement, de-duplication and the Offering's cut, and the

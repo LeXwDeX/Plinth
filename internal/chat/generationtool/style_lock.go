@@ -2,8 +2,6 @@ package generationtool
 
 import (
 	"errors"
-	"fmt"
-	"net/url"
 	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/chat"
@@ -30,6 +28,9 @@ func styleLockImageOffering(offering generation.Offering) bool {
 // belongs to the image domain. This keeps style-lock input out of 3D tools
 // without maintaining a second capability list in chat.
 func (executor *Executor) styleLockImageTool(command chat.ToolCommand) bool {
+	if executor.gateway == nil {
+		return false
+	}
 	for _, capability := range []generation.Capability{
 		command.Tool.Capability,
 		command.Tool.FallbackCapability,
@@ -46,28 +47,8 @@ func (executor *Executor) styleLockImageTool(command chat.ToolCommand) bool {
 	return false
 }
 
-// styleLockReferenceURLs turns the stored input-asset IDs into the same
-// canonical input-asset URLs used by uploaded attachments. The resolver later
-// proves ownership and converts those URLs back to asset IDs before prepare.
-func (executor *Executor) styleLockReferenceURLs(command chat.ToolCommand) ([]string, error) {
-	lock := command.Options.StyleLock
-	if command.Options.StyleLockSkipped || !lock.Enabled || len(lock.References) == 0 || !executor.styleLockImageTool(command) {
-		return nil, nil
-	}
-	if executor.inputAsset == "" || !strings.Contains(executor.inputAsset, "{assetID}") {
-		return nil, ErrStyleLockReferenceURL
-	}
-	urls := make([]string, 0, len(lock.References))
-	for _, assetID := range lock.References {
-		assetID = strings.TrimSpace(assetID)
-		if assetID == "" {
-			return nil, fmt.Errorf("%w: empty asset ID", ErrStyleLockReferenceURL)
-		}
-		urls = append(urls, strings.ReplaceAll(executor.inputAsset, "{assetID}", url.PathEscape(assetID)))
-	}
-	return urls, nil
-}
-
+// styleLockUnavailableMessage is the Schema wording for an unusable style
+// reference picture.
 func (executor *Executor) styleLockUnavailableMessage(command chat.ToolCommand) string {
 	message := executor.chat.Presentation.Messages.StyleLockReferenceUnavailable
 	if message == "" {

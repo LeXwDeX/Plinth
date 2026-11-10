@@ -216,6 +216,16 @@ type OrchestratorConfig struct {
 		owner generation.OwnerID,
 		assetID string,
 	) (string, bool)
+	// VisionAnchorInline 把视觉锚的参考图转成 data URI（#250）。锚点参考图
+	// 可能是 input asset id、input asset URL 或生成结果的规范 Task 资产
+	// URL，校验按 owner 与会话进行；nil 时锚点图片只保留文字标签，并在溢出
+	// 说明里点名。
+	VisionAnchorInline func(
+		ctx context.Context,
+		owner generation.OwnerID,
+		sessionID string,
+		reference string,
+	) (string, bool)
 	// SelectionPreview composes the server-side preview of the turn's frozen
 	// selection mask (#244): the artboard snapshot dimmed outside the selected
 	// region and tinted inside it, as a data URI. It reports false when the
@@ -279,6 +289,14 @@ type Orchestrator struct {
 		ctx context.Context,
 		owner generation.OwnerID,
 		assetID string,
+	) (string, bool)
+	// visionAnchorInline 把视觉锚的参考图（资产 ID 或平台 URL）转成 data
+	// URI；nil 表示锚点图片只保留文字标签（#250）。
+	visionAnchorInline func(
+		ctx context.Context,
+		owner generation.OwnerID,
+		sessionID string,
+		reference string,
 	) (string, bool)
 	selectionPreview func(
 		ctx context.Context,
@@ -644,33 +662,33 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 	registry.offeringAllowed = config.OfferingAllowed
 	registry.offerings = config.Offerings
 	return &Orchestrator{
-		service:           config.Service,
-		schema:            config.Schema,
-		model:             config.Model,
-		dsmlFor:           config.DSMLFor,
-		visionInline:      config.VisionInline,
-		visionAssetInline: config.VisionAssetInline,
-		selectionPreview:  config.SelectionPreview,
-		agent:             config.Agent,
-		tools:             config.Tools,
-		logger:            config.Logger,
-		registry:          registry,
-		agentScope:        registry.scope,
-		configuration:     config.Configuration,
-		taskCanceler:      config.TaskCanceler,
-		toolNote:          config.ToolNote,
-		taskLookup:        config.TaskLookup,
-		taskGet:           config.TaskGet,
-		stopConsent:       config.StopConsent,
-		texts:             config.Texts,
-		queue:             make(chan ProcessTurn, config.Schema.Agent.QueueSize),
-		queued:            map[string]struct{}{},
-		activeCancel:      map[string]context.CancelFunc{},
-		canceledTurn:      map[string]struct{}{},
-		consentWaits:      map[string]*consentSuspend{},
-		compacting:        map[string]*compactionLock{},
-
-		backgroundWarned: map[string]time.Time{},
+		service:            config.Service,
+		schema:             config.Schema,
+		model:              config.Model,
+		dsmlFor:            config.DSMLFor,
+		visionInline:       config.VisionInline,
+		visionAssetInline:  config.VisionAssetInline,
+		visionAnchorInline: config.VisionAnchorInline,
+		selectionPreview:   config.SelectionPreview,
+		agent:              config.Agent,
+		tools:              config.Tools,
+		logger:             config.Logger,
+		registry:           registry,
+		agentScope:         registry.scope,
+		configuration:      config.Configuration,
+		taskCanceler:       config.TaskCanceler,
+		toolNote:           config.ToolNote,
+		taskLookup:         config.TaskLookup,
+		taskGet:            config.TaskGet,
+		stopConsent:        config.StopConsent,
+		texts:              config.Texts,
+		queue:              make(chan ProcessTurn, config.Schema.Agent.QueueSize),
+		queued:             map[string]struct{}{},
+		activeCancel:       map[string]context.CancelFunc{},
+		canceledTurn:       map[string]struct{}{},
+		consentWaits:       map[string]*consentSuspend{},
+		compacting:         map[string]*compactionLock{},
+		backgroundWarned:   map[string]time.Time{},
 	}, nil
 }
 
@@ -1170,6 +1188,7 @@ func (orchestrator *Orchestrator) Process(
 	command.Options.ExplicitModelImage = turn.Options.ExplicitModelImage
 	command.Options.StyleLock = turn.Options.StyleLock
 	command.Options.StyleLockSkipped = turn.Options.StyleLockSkipped
+	command.Options.VisualAnchors = cloneVisualAnchors(turn.Options.VisualAnchors)
 	// A plan continuation is the service's mark, never the caller's (#134).
 	command.Options.PlanContinuation = turn.Options.PlanContinuation
 	// DSML tool calls are read only for a model whose profile writes them.
@@ -1969,9 +1988,13 @@ func (orchestrator *Orchestrator) agentRequest(
 	sections.add("summary", orchestrator.summaryPrompt(latest))
 	sections.add("compacted_handles", orchestrator.compactedHandlePrompt(history, indexedByMessage, summarized, lastUserMessage))
 	// The ledger and the style anchor are projected from stored facts, not from
-	// the message window, so compaction never changes them (#248).
+	// the message window, so compaction never changes them (#248). The style
+	// lock text is read from the turn's frozen snapshot: the visual anchors
+	// block states its state and picture count only, so one prompt never shows
+	// two versions of the same user setting (#250).
 	sections.add("work_ledger", orchestrator.workLedgerPrompt(ctx, ownerID, sessionID, history))
-	sections.add("work_anchors", orchestrator.workAnchorsPrompt(ctx, ownerID, sessionID))
+	sections.add("work_anchors", orchestrator.workAnchorsPrompt(ctx, ownerID, sessionID, options.StyleLock))
+	sections.add("visual_anchors", orchestrator.visualAnchorsPrompt(options))
 	sections.add("selection", orchestrator.selectionPrompt(options))
 	sections.add("brief", orchestrator.briefPrompt(options))
 	sections.add("notes", orchestrator.notesPrompt(ctx, ownerID, sessionID))
@@ -2048,7 +2071,7 @@ func (orchestrator *Orchestrator) agentRequest(
 		}
 	}
 	plan := orchestrator.planVision(
-		ctx, ownerID, history, indexedByMessage, summarized, lastUserMessage,
+		ctx, ownerID, sessionID, history, indexedByMessage, summarized, lastUserMessage,
 		options, spend,
 	)
 	// The newest generated pictures (a 3D result's thumbnail included) are shown

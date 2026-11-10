@@ -263,6 +263,9 @@ type AskChoiceArguments struct {
 	Question    string
 	Recommended string
 	Options     []ChoiceOptionInput
+	// Proposal is the Agent's exact proposal whose confirmation an
+	// agent_proposal card offers. It is the target tool's arguments object.
+	Proposal json.RawMessage
 }
 
 // ChoiceOptionInput is one Agent-supplied option of a direction card. ID is
@@ -288,10 +291,12 @@ func (service *Service) AskChoice(
 	if service.choices == nil {
 		return ToolResult{Error: "choice cards unavailable", NoSubmission: true}, nil
 	}
+	recommended := strings.TrimSpace(arguments.Recommended)
 	type optionSpec struct {
 		id, label, description string
 	}
 	var specs []optionSpec
+	var proposalOptions []ChoiceOption
 	switch kind.OptionSource {
 	case "usage_profiles":
 		for _, profile := range service.model3DUsage.Profiles {
@@ -313,34 +318,65 @@ func (service *Service) AskChoice(
 			}
 			specs = append(specs, optionSpec{id, label, strings.TrimSpace(option.Description)})
 		}
-	default:
-		return ToolResult{Error: "choice kind unavailable", NoSubmission: true}, nil
-	}
-	if len(specs) == 0 {
-		return ToolResult{Error: "choice kind unavailable", NoSubmission: true}, nil
-	}
-	recommended := strings.TrimSpace(arguments.Recommended)
-	options := make([]ChoiceOption, 0, len(specs))
-	seenRecommended := false
-	for _, spec := range specs {
-		optionArguments, err := json.Marshal(map[string]string{kind.Argument: spec.id})
+	case "agent_proposal":
+		// The Agent's confirmation card offers its exact proposal as accept
+		// and a decline that writes nothing (#250). Opening the card itself
+		// writes no anchor.
+		var values map[string]json.RawMessage
+		if len(arguments.Proposal) == 0 || json.Unmarshal(arguments.Proposal, &values) != nil || values == nil {
+			return ToolResult{Error: "choice card unavailable", NoSubmission: true}, nil
+		}
+		declined, err := json.Marshal(map[string]string{kind.Argument: visualAnchorActionDecline})
 		if err != nil {
 			return ToolResult{Error: "choice card unavailable", NoSubmission: true}, nil
 		}
-		option := ChoiceOption{
-			ID:          spec.id,
-			Label:       spec.label,
-			Description: spec.description,
-			Arguments:   optionArguments,
+		accept := ChoiceOption{ID: visualAnchorAcceptOption, Label: kind.AcceptLabel, Description: kind.Question,
+			Arguments: append(json.RawMessage(nil), arguments.Proposal...)}
+		decline := ChoiceOption{ID: visualAnchorDeclineOption, Label: kind.DeclineLabel, Arguments: declined}
+		switch recommended {
+		case visualAnchorAcceptOption:
+			accept.Recommended = true
+		case visualAnchorDeclineOption:
+			decline.Recommended = true
+		default:
+			recommended = ""
 		}
-		if recommended != "" && spec.id == recommended {
-			option.Recommended = true
-			seenRecommended = true
-		}
-		options = append(options, option)
+		proposalOptions = []ChoiceOption{accept, decline}
+	default:
+		return ToolResult{Error: "choice kind unavailable", NoSubmission: true}, nil
 	}
-	if !seenRecommended {
-		recommended = ""
+	var options []ChoiceOption
+	if proposalOptions != nil {
+		options = proposalOptions
+	} else {
+		if len(specs) == 0 {
+			return ToolResult{Error: "choice kind unavailable", NoSubmission: true}, nil
+		}
+		options = make([]ChoiceOption, 0, len(specs))
+		seenRecommended := false
+		for _, spec := range specs {
+			optionArguments, err := json.Marshal(map[string]string{kind.Argument: spec.id})
+			if err != nil {
+				return ToolResult{Error: "choice card unavailable", NoSubmission: true}, nil
+			}
+			option := ChoiceOption{
+				ID:          spec.id,
+				Label:       spec.label,
+				Description: spec.description,
+				Arguments:   optionArguments,
+			}
+			if recommended != "" && spec.id == recommended {
+				option.Recommended = true
+				seenRecommended = true
+			}
+			options = append(options, option)
+		}
+		if !seenRecommended {
+			recommended = ""
+		}
+	}
+	if len(options) == 0 {
+		return ToolResult{Error: "choice kind unavailable", NoSubmission: true}, nil
 	}
 	question := strings.TrimSpace(arguments.Question)
 	if question == "" {

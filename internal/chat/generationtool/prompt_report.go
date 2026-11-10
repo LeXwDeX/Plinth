@@ -384,11 +384,11 @@ func (executor *Executor) replayPromptTrace(
 	// Replaying them would invent a prompt the first submission never sent;
 	// its only rewrite is the length cut below.
 	if command.Tool.Processing == nil {
-		referenceURLs, ok := executor.replayReferenceURLs(ctx, command, offering, arguments, frozenReferences, frozenKnown)
+		referenceURLs, serverPurposes, ok := executor.replayReferenceURLs(ctx, command, offering, arguments, frozenReferences, frozenKnown)
 		if !ok {
 			return nil
 		}
-		purposes, refusal := executor.referencePurposes(command, arguments, referenceURLs)
+		purposes, refusal := executor.referencePurposes(command, arguments, referenceURLs, serverPurposes)
 		if refusal != "" {
 			return nil
 		}
@@ -459,14 +459,14 @@ func (executor *Executor) replayReferenceURLs(
 	arguments map[string]json.RawMessage,
 	frozenReferences int,
 	frozenKnown bool,
-) ([]string, bool) {
+) ([]string, map[string]string, bool) {
 	if !frozenKnown {
-		return nil, false
+		return nil, nil, false
 	}
 	var referenceURLs []string
 	multiview, refusal, err := executor.multiviewSelection(ctx, command, arguments)
 	if err != nil || refusal != "" {
-		return nil, false
+		return nil, nil, false
 	}
 	if multiview != nil {
 		for _, name := range []string{executor.chat.ThreeView.Multiview.ViewsArgument,
@@ -477,15 +477,23 @@ func (executor *Executor) replayReferenceURLs(
 	} else if command.Tool.AcceptReferenceImages == nil || *command.Tool.AcceptReferenceImages {
 		urls, err := executor.selectReferences(command, arguments)
 		if err != nil {
-			return nil, false
+			return nil, nil, false
 		}
 		referenceURLs = urls
 	}
-	style, err := executor.styleLockReferenceURLs(command)
-	if err != nil {
-		return nil, false
+	// #250: the reference list is rebuilt in the same priority order as the
+	// first submission, with the same server-generated purposes, so the
+	// replayed prompt can match the frozen one.
+	identity, identityPurposes, _, anchorRefusal, err := executor.anchorReferenceURLs(command, arguments)
+	if err != nil || anchorRefusal != "" {
+		return nil, nil, false
 	}
-	referenceURLs = append(referenceURLs, style...)
+	style, stylePurposes, err := executor.styleReferenceURLs(command)
+	if err != nil {
+		return nil, nil, false
+	}
+	groups := executor.referenceGroupsFor(command, identity, style, referenceURLs)
+	referenceURLs = groups.URLs
 	capability := command.Tool.FallbackCapability
 	if len(referenceURLs) > 0 {
 		capability = command.Tool.Capability
@@ -493,16 +501,16 @@ func (executor *Executor) replayReferenceURLs(
 	// The image-to-3D source-model selection rewrites the reference list from
 	// the chat history; the frozen input does not record that choice.
 	if capability == generation.ImageTo3D && offering.ReferenceSelectionPolicy != "preserve" {
-		return nil, false
+		return nil, nil, false
 	}
 	effective := referenceURLs
 	if offering.ReferenceSelectionPolicy != "preserve" {
 		effective = truncateReferences(referenceURLs, offering)
 	}
 	if len(effective) != frozenReferences {
-		return nil, false
+		return nil, nil, false
 	}
-	return referenceURLs, true
+	return referenceURLs, mergeReferencePurposes(identityPurposes, stylePurposes), true
 }
 
 // frozenReferenceCount is how many reference pictures the frozen input

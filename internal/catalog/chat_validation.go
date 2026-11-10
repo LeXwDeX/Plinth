@@ -261,6 +261,23 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		}
 		directStyleLockCapabilities[capability] = true
 	}
+	referenceCapabilities := make(map[schemacontract.Capability]bool, len(schema.StyleLock.ReferenceCapabilities))
+	for _, capability := range schema.StyleLock.ReferenceCapabilities {
+		if !capability.Valid() {
+			return errors.New("style_lock.reference_capabilities 只能声明已知能力")
+		}
+		// Style pictures are reference inputs: a 3D geometry or motion
+		// capability has no style reference slot, so only image and
+		// processing steps may declare one (#250).
+		if domain, known := capabilityDomains[capability]; !known ||
+			(domain != schemacontract.DomainImage && domain != schemacontract.DomainProcessing) {
+			return errors.New("style_lock.reference_capabilities 只能声明图片或处理能力")
+		}
+		if referenceCapabilities[capability] {
+			return errors.New("style_lock.reference_capabilities 不能重复声明同一能力")
+		}
+		referenceCapabilities[capability] = true
+	}
 	styleLockDeclared := runtime.HTTP.Routes.ChatSessionStyleLock != "" ||
 		schema.StyleLock.MaximumTextCharacters > 0 || schema.StyleLock.MaximumReferenceImages > 0 ||
 		schema.API.StyleLock.Enabled != "" || schema.API.StyleLock.Text != "" || schema.API.StyleLock.References != "" ||
@@ -278,7 +295,17 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		strings.TrimSpace(schema.Presentation.Messages.StyleLockReferenceLimit) == "" ||
 		strings.TrimSpace(schema.Presentation.Messages.StyleLockReferenceInvalid) == "" ||
 		strings.TrimSpace(schema.Presentation.Messages.StyleLockReferenceUnavailable) == "" ||
-		strings.TrimSpace(schema.Presentation.Messages.StyleLockReferencesTrimmed) == "") {
+		strings.TrimSpace(schema.Presentation.Messages.StyleLockReferencesTrimmed) == "" ||
+		len(schema.StyleLock.ReferenceCapabilities) == 0 ||
+		strings.TrimSpace(schema.StyleLock.AgentContextTemplate) == "" ||
+		!strings.Contains(schema.StyleLock.AgentContextTemplate, "{enabled}") ||
+		!strings.Contains(schema.StyleLock.AgentContextTemplate, "{text}") ||
+		!strings.Contains(schema.StyleLock.AgentContextTemplate, "{references}") ||
+		strings.TrimSpace(schema.StyleLock.EnabledText) == "" ||
+		strings.TrimSpace(schema.StyleLock.DisabledText) == "" ||
+		strings.TrimSpace(schema.StyleLock.ReferencePurposeTemplate) == "" ||
+		strings.TrimSpace(schema.StyleLock.SkipNote) == "" ||
+		strings.TrimSpace(schema.StyleLock.UnsupportedNote) == "") {
 		return errors.New("style_lock 的上限、字段与错误文案必须完整")
 	}
 	if err := validatePendingApprovals(schema.PendingApprovals); err != nil {
@@ -686,6 +713,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateWorkLedger(schema); err != nil {
 		return err
 	}
+	if err := validateVisualAnchors(schema); err != nil {
+		return err
+	}
 	for index, tool := range schema.Tools {
 		if tool.RequireUniqueOffering && (!tool.IgnoreUserModel || tool.RequireUserModel || tool.CrossDomainModelFallback) {
 			return fmt.Errorf("tools[%d] require_unique_offering requires independent model selection", index)
@@ -811,6 +841,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		if err := validateReferencePurposes(tool, acceptReferences, schema.Context); err != nil {
 			return fmt.Errorf("tools[%d]: %w", index, err)
 		}
+		if err := validateAnchorArgument(tool, acceptReferences); err != nil {
+			return fmt.Errorf("tools[%d]: %w", index, err)
+		}
 		if note := tool.ReferenceCapacityNote; note != (ChatToolReferenceCapacityNote{}) && (!acceptReferences ||
 			strings.TrimSpace(note.Single) == "" || !strings.Contains(note.Multiple, "{count}") ||
 			(note.NoPrompt != "" && strings.TrimSpace(note.NoPrompt) == "") ||
@@ -866,6 +899,7 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"render_model_views":      {"model.render", "READ", []string{"model-3d"}},
 		"compare_models":          {"model.compare", "READ", []string{"model-3d"}},
 		"get_production_step":     {"ledger.read", "READ", []string{"image", "model-3d"}},
+		"set_visual_anchor":       {"anchor.write", "SESSION_WRITE", []string{"image", "model-3d"}},
 	}
 	var controlDomains []string
 	var expectedEffect string
@@ -2532,6 +2566,191 @@ func validateChatChoice(schema ChatSchema) error {
 	}
 	if schema.Choice.MaxOptions < 2 || schema.Choice.ListLimit < 1 {
 		return errors.New("choice.max_options 至少为 2，choice.list_limit 至少为 1")
+	}
+	return nil
+}
+
+// validateVisualAnchors checks application.chat.visual_anchors (#250) once the
+// set_visual_anchor tool is declared. Bounds are positive, every kind is
+// unique with a label and a purpose template, the Agent block carries the
+// placeholders its renderer fills, and the tool's parameters agree with the
+// declared kinds and action vocabulary. A Catalog without the tool stays
+// valid.
+func validateVisualAnchors(schema ChatSchema) error {
+	declared := false
+	for _, tool := range schema.AgentTools {
+		if tool.Execution.ImplementationKey == "anchor.write" {
+			declared = true
+			break
+		}
+	}
+	anchors := schema.VisualAnchors
+	if !declared {
+		if len(anchors.Kinds) > 0 || anchors.MaximumAnchors > 0 {
+			return errors.New("chat.visual_anchors 需要已声明的 set_visual_anchor 工具")
+		}
+		return nil
+	}
+	if anchors.MaximumAnchors <= 0 || anchors.MaximumReferences <= 0 ||
+		anchors.MaximumNameCharacters <= 0 || anchors.MaximumDescriptionCharacters <= 0 {
+		return errors.New("chat.visual_anchors 的上限必须为正数")
+	}
+	if len(anchors.Kinds) == 0 {
+		return errors.New("chat.visual_anchors.kinds 不能为空")
+	}
+	kindIDs := make([]string, 0, len(anchors.Kinds))
+	seen := map[string]bool{}
+	for index, kind := range anchors.Kinds {
+		switch kind.ID {
+		case "identity", "style":
+		default:
+			return fmt.Errorf("chat.visual_anchors.kinds[%d].id 无效: %q", index, kind.ID)
+		}
+		if seen[kind.ID] {
+			return fmt.Errorf("chat.visual_anchors.kinds[%d].id 重复: %q", index, kind.ID)
+		}
+		seen[kind.ID] = true
+		kindIDs = append(kindIDs, kind.ID)
+		if strings.TrimSpace(kind.Label) == "" || strings.TrimSpace(kind.ReferencePurposeTemplate) == "" ||
+			!strings.Contains(kind.ReferencePurposeTemplate, "{name}") {
+			return fmt.Errorf("chat.visual_anchors.kinds[%d] 的 label 与 reference_purpose_template 不完整", index)
+		}
+	}
+	for name, template := range map[string]string{
+		"context_template":               anchors.ContextTemplate,
+		"item_template":                  anchors.ItemTemplate,
+		"prompt_hint":                    anchors.PromptHint,
+		"note_template":                  anchors.NoteTemplate,
+		"invalid_template":               anchors.InvalidTemplate,
+		"precedence_note":                anchors.PrecedenceNote,
+		"reference_count_template":       anchors.ReferenceCountTemplate,
+		"reference_label_template":       anchors.ReferenceLabelTemplate,
+		"dropped_label_template":         anchors.DroppedLabelTemplate,
+		"reference_unavailable_template": anchors.ReferenceUnavailableTemplate,
+		"saved_message":                  anchors.SavedMessage,
+		"removed_message":                anchors.RemovedMessage,
+		"declined_message":               anchors.DeclinedMessage,
+	} {
+		if strings.TrimSpace(template) == "" {
+			return fmt.Errorf("chat.visual_anchors.%s 不能为空", name)
+		}
+	}
+	if !strings.Contains(anchors.ContextTemplate, "{open}") ||
+		!strings.Contains(anchors.ContextTemplate, "{anchors}") ||
+		!strings.Contains(anchors.ContextTemplate, "{style_lock}") ||
+		!strings.Contains(anchors.ContextTemplate, "{precedence}") ||
+		!strings.Contains(anchors.ContextTemplate, "{close}") {
+		return errors.New("chat.visual_anchors.context_template 缺少占位符")
+	}
+	if !strings.Contains(anchors.ItemTemplate, "{kind}") ||
+		!strings.Contains(anchors.ItemTemplate, "{name}") ||
+		!strings.Contains(anchors.ItemTemplate, "{description}") ||
+		!strings.Contains(anchors.ItemTemplate, "{references}") {
+		return errors.New("chat.visual_anchors.item_template 缺少占位符")
+	}
+	if !strings.Contains(anchors.PromptHint, "{argument}") || !strings.Contains(anchors.PromptHint, "{names}") ||
+		!strings.Contains(anchors.NoteTemplate, "{argument}") || !strings.Contains(anchors.NoteTemplate, "{names}") ||
+		!strings.Contains(anchors.InvalidTemplate, "{reason}") ||
+		!strings.Contains(anchors.ReferenceCountTemplate, "{count}") ||
+		!strings.Contains(anchors.ReferenceLabelTemplate, "{name}") ||
+		!strings.Contains(anchors.ReferenceLabelTemplate, "{index}") ||
+		!strings.Contains(anchors.DroppedLabelTemplate, "{name}") ||
+		!strings.Contains(anchors.DroppedLabelTemplate, "{index}") ||
+		!strings.Contains(anchors.ReferenceUnavailableTemplate, "{handle}") {
+		return errors.New("chat.visual_anchors 的模板缺少占位符")
+	}
+	if anchors.OpenMarker == "" || anchors.CloseMarker == "" || anchors.OpenMarker == anchors.CloseMarker {
+		return errors.New("chat.visual_anchors 的 open_marker 与 close_marker 须为两个不同的非空标记")
+	}
+	parameters, found := declaredToolParameters(schema, "set_visual_anchor")
+	if !found {
+		return errors.New("chat.visual_anchors 需要已声明的 set_visual_anchor 工具")
+	}
+	properties, _ := parameters["properties"].(map[string]any)
+	action, _ := properties["action"].(map[string]any)
+	if action == nil || action["type"] != "string" {
+		return errors.New("set_visual_anchor.action 必须是字符串参数")
+	}
+	values, _ := action["enum"].([]any)
+	wantActions := []string{"create", "update", "delete", "decline"}
+	if len(values) != len(wantActions) {
+		return errors.New("set_visual_anchor.action 的 enum 必须覆盖 create/update/delete/decline")
+	}
+	for index, value := range values {
+		if value != wantActions[index] {
+			return errors.New("set_visual_anchor.action 的 enum 必须覆盖 create/update/delete/decline")
+		}
+	}
+	kind, _ := properties["kind"].(map[string]any)
+	kindValues, _ := kind["enum"].([]any)
+	if kind == nil || len(kindValues) != len(kindIDs) {
+		return errors.New("set_visual_anchor.kind 的 enum 必须与 chat.visual_anchors.kinds 一致")
+	}
+	for index, value := range kindValues {
+		if value != kindIDs[index] {
+			return errors.New("set_visual_anchor.kind 的 enum 必须与 chat.visual_anchors.kinds 一致")
+		}
+	}
+	required, _ := parameters["required"].([]any)
+	if len(required) == 0 || required[0] != "action" {
+		return errors.New("set_visual_anchor.required 必须包含 action")
+	}
+	// The tool's target must be reachable by an Agent choice card: a
+	// visual_anchor kind whose options come from the Agent's proposal.
+	choiceKind := false
+	for _, declaredKind := range schema.Choice.Kinds {
+		if declaredKind.ID == "visual_anchor" && declaredKind.ToolName == "set_visual_anchor" &&
+			declaredKind.OptionSource == "agent_proposal" && declaredKind.Argument == "action" {
+			choiceKind = true
+		}
+	}
+	if !choiceKind {
+		return errors.New("chat.choice.kinds 必须声明 visual_anchor 确认卡")
+	}
+	for _, field := range []string{"reference_priority_trimmed", "visual_anchor_saved", "visual_anchor_removed", "visual_anchor_declined"} {
+		value := map[string]string{
+			"reference_priority_trimmed": schema.Presentation.Messages.ReferencePriorityTrimmed,
+			"visual_anchor_saved":        schema.Presentation.Messages.VisualAnchorSaved,
+			"visual_anchor_removed":      schema.Presentation.Messages.VisualAnchorRemoved,
+			"visual_anchor_declined":     schema.Presentation.Messages.VisualAnchorDeclined,
+		}[field]
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("chat.presentation.messages.%s 不能为空", field)
+		}
+	}
+	if !strings.Contains(schema.Presentation.Messages.ReferencePriorityTrimmed, "{maximum}") ||
+		!strings.Contains(schema.Presentation.Messages.ReferencePriorityTrimmed, "{anchors}") ||
+		!strings.Contains(schema.Presentation.Messages.ReferencePriorityTrimmed, "{dropped}") {
+		return errors.New("chat.presentation.messages.reference_priority_trimmed 缺少占位符")
+	}
+	return nil
+}
+
+// validateAnchorArgument checks a tool's anchor_argument (#250): only a
+// reference-reading generation tool may declare one, and it must be a declared
+// array-of-strings parameter.
+func validateAnchorArgument(tool ChatToolSchema, acceptReferences bool) error {
+	if tool.AnchorArgument == "" {
+		return nil
+	}
+	if !acceptReferences || tool.Processing != nil {
+		return errors.New("anchor_argument 只适用于读取参考图的生成工具")
+	}
+	var parameters struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if json.Unmarshal(tool.Parameters, &parameters) != nil || parameters.Properties[tool.AnchorArgument] == nil {
+		return fmt.Errorf("anchor_argument %q 不是工具参数", tool.AnchorArgument)
+	}
+	var property struct {
+		Type  string `json:"type"`
+		Items struct {
+			Type string `json:"type"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(parameters.Properties[tool.AnchorArgument], &property) != nil ||
+		property.Type != "array" || property.Items.Type != "string" {
+		return fmt.Errorf("anchor_argument %q 必须是字符串数组参数", tool.AnchorArgument)
 	}
 	return nil
 }

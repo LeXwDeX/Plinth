@@ -113,8 +113,9 @@ func TestAppendOnlyMigrationsShape(t *testing.T) {
 	}
 	head := sqlite.MigrationHead()
 	// The embedded migration list is the source of truth: there is no hole now
-	// that #247 fills 84 (vision usage) and #239 adds 85 (explicit 2D model
-	// lock); every embedded version must exist and no extra file may exist.
+	// that #247 fills 84 (vision usage), #239 adds 85 (explicit 2D model lock)
+	// and #250 adds 86 (visual anchors); every embedded version must exist and
+	// no extra file may exist.
 	expected := sqlite.MigrationVersions()
 	if len(files) != len(expected) {
 		t.Fatalf("migration files = %d; want %d (embedded versions %v)", len(files), len(expected), expected)
