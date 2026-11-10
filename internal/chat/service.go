@@ -340,6 +340,10 @@ type Service struct {
 	// visualAnchors is application.chat.visual_anchors (#250): the Schema bounds,
 	// declared kinds and result copy of the session anchor settings.
 	visualAnchors catalog.ChatVisualAnchorsSchema
+	// visualAnchorKind is the declared confirmation-card kind whose options
+	// come from an Agent proposal (#250). Without it no Agent anchor write is
+	// accepted: the gate must fail closed.
+	visualAnchorKind *catalog.ChatChoiceKindSchema
 
 	// workLedger is application.chat.work_ledger (#248); workLedgerTasks is
 	// the public-Task page source, workLedgerDetail the full single-Task read,
@@ -449,6 +453,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 		choiceMaxOptions:           config.ChoiceMaxOptions,
 		models:                     config.Models,
 		visualAnchors:              config.VisualAnchors,
+		visualAnchorKind:           choiceKindOf(config.ChoiceKinds, "agent_proposal"),
 		workLedger:                 config.WorkLedger,
 		visionBudget:               config.VisionBudget,
 		visionTokenBudget:          config.VisionTokenBudget,

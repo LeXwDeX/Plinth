@@ -11,23 +11,27 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
-// referenceClass orders reference pictures for a step (#250): identity anchors
-// first, then the style lock and style anchors, then the turn's own ordinary
-// references. The order is also the trimming priority: a model limit first
-// drops ordinary references.
+// referenceClass tags one picture in the final reference list (#250). The
+// order is also the trimming priority: a model limit cuts the tail, so the
+// turn's other ordinary references go first, then style pictures, then identity
+// anchors. A required turn input (the artboard snapshot or a picture the person
+// marked "input") keeps the front of the list whatever its class priority: an
+// image-to-image model edits its first picture (#266).
 type referenceClass int
 
 const (
-	referenceClassIdentity referenceClass = iota
+	referenceClassTurn referenceClass = iota
+	referenceClassIdentity
 	referenceClassStyle
-	referenceClassTurn
 )
 
 // anchorReferenceURLs resolves the identity anchors a call named in its
 // Schema-declared anchor argument. Names are matched against the frozen turn
 // snapshot; an unknown name or a style anchor is refused with the Schema text.
-// The anchors' pictures become canonical input-asset URLs, the same ones an
-// uploaded attachment uses, so the owning resolver proves the asset again.
+// The anchors' pictures are the stored references: an input asset becomes its
+// canonical input URL, a generated picture keeps the platform Task asset URL
+// that recordVisualAnchorReference stored. The owning resolver proves the
+// object again when the step is prepared.
 func (executor *Executor) anchorReferenceURLs(
 	command chat.ToolCommand,
 	arguments map[string]json.RawMessage,
@@ -86,7 +90,7 @@ func (executor *Executor) anchorReferenceURLs(
 			if reference == "" {
 				continue
 			}
-			referenceURL, ok := executor.assetReferenceURL(reference)
+			referenceURL, ok := executor.storedReferenceURL(reference)
 			if !ok {
 				return nil, nil, executor.anchorInvalid(command, "锚点参考图无法转换为输入资产 URL"), ErrStyleLockReferenceURL
 			}
@@ -108,6 +112,17 @@ func (executor *Executor) anchorInvalid(command chat.ToolCommand, reason string)
 	}
 	template = strings.ReplaceAll(template, "{reason}", reason)
 	return executor.localized(command, template)
+}
+
+// storedReferenceURL turns a stored anchor reference into a URL the reference
+// resolver understands. An input asset becomes the Schema-owned input route; a
+// platform URL (a Task asset of a generated result, or an input asset URL)
+// passes through unchanged and is verified by the resolver at prepare time.
+func (executor *Executor) storedReferenceURL(reference string) (string, bool) {
+	if strings.HasPrefix(reference, "/") || strings.HasPrefix(reference, "http://") || strings.HasPrefix(reference, "https://") {
+		return reference, true
+	}
+	return executor.assetReferenceURL(reference)
 }
 
 // assetReferenceURL turns a stored input-asset ID into the canonical input
@@ -175,7 +190,7 @@ func (executor *Executor) styleReferenceURLs(command chat.ToolCommand) ([]string
 			if assetID == "" {
 				continue
 			}
-			referenceURL, ok := executor.assetReferenceURL(assetID)
+			referenceURL, ok := executor.storedReferenceURL(assetID)
 			if !ok {
 				return nil, nil, ErrStyleLockReferenceURL
 			}
@@ -273,51 +288,172 @@ func uniqueReferenceURLs(urls []string) []string {
 	return unique
 }
 
-// referenceGroups is the priority-ordered reference list and how many
-// pictures each class contributes to it. TurnURLs keeps the ordinary pictures
-// in their final order, so a model limit can name exactly the ones it cut.
+// referenceGroups is the final reference list with a class per picture. The
+// classes keep the trimming and reporting correct when the list is not a
+// simple prefix per class (a required turn input leads the list, and style
+// pictures sit between identity anchors and ordinary references). TurnURLs
+// keeps the turn's pictures in the order the turn gave them, so a model limit
+// can name exactly the ordinary references it cut.
 type referenceGroups struct {
 	URLs     []string
+	Classes  []referenceClass
 	Identity int
 	Style    int
 	Turn     int
 	TurnURLs []string
 }
 
-// assembleReferenceGroups orders identity anchors, style pictures and the
-// turn's own references (#250). Without an identity anchor the historical
-// list is preserved byte for byte; with one, repeats are dropped and the first
-// occurrence keeps its class and position, so an identity picture shared with
-// an ordinary reference stays an anchor.
-func assembleReferenceGroups(identity, style, turn []string) referenceGroups {
+// countClasses reports how many kept pictures of each class the prefix of
+// length kept holds.
+func (groups referenceGroups) countClasses(kept int) (identity, style, turn int) {
+	if kept > len(groups.Classes) {
+		kept = len(groups.Classes)
+	}
+	for index := 0; index < kept; index++ {
+		switch groups.Classes[index] {
+		case referenceClassIdentity:
+			identity++
+		case referenceClassStyle:
+			style++
+		default:
+			turn++
+		}
+	}
+	return identity, style, turn
+}
+
+// droppedTurnURLs names the turn pictures the model limit cut, in the turn's
+// order. A picture that survives only once, shared with an anchor, is not
+// dropped: it is still sent, in its anchor class.
+func (groups referenceGroups) droppedTurnURLs(kept int) []string {
+	cut := map[string]bool{}
+	for index := kept; index < len(groups.URLs); index++ {
+		if groups.Classes[index] == referenceClassTurn {
+			cut[groups.URLs[index]] = true
+		}
+	}
+	var dropped []string
+	seen := map[string]bool{}
+	for _, reference := range groups.TurnURLs {
+		if !cut[reference] || seen[reference] {
+			continue
+		}
+		seen[reference] = true
+		dropped = append(dropped, reference)
+	}
+	return dropped
+}
+
+// referenceGroupsFor assembles the final list for a command. The leading
+// pictures are the turn inputs an image-to-image model must see first: the
+// bound artboard snapshot (#266) and the pictures the person marked "input".
+func (executor *Executor) referenceGroupsFor(command chat.ToolCommand, identity, style, turn []string) referenceGroups {
+	return assembleReferenceGroups(identity, style, executor.turnLeadingReferences(command, turn), turn)
+}
+
+// turnLeadingReferences returns the turn pictures that must stay ahead of the
+// anchors: the artboard snapshot of a canvas turn and every picture whose
+// declared attachment purpose is "input". A picture the person marked input
+// but the call did not send is not leading; the purpose check refuses it
+// later.
+func (executor *Executor) turnLeadingReferences(command chat.ToolCommand, turn []string) []string {
+	required := map[string]bool{}
+	if executor.canvasTurn(command) && command.Tool.CanvasSource == canvasSourceBind {
+		for _, reference := range selectedImageURLs(command) {
+			required[reference] = true
+		}
+	}
+	if command.Tool.ReferencePurposesArgument != "" {
+		for handle, purpose := range command.Options.AttachmentPurposes {
+			if purpose != "input" {
+				continue
+			}
+			resolved, err := executor.handlePolicy().ResolveHandles(
+				command.ReferenceHistory(), command.Options.Selection, []string{handle}, chat.AttachmentKindImage)
+			if err != nil || len(resolved) != 1 || resolved[0].URL == "" {
+				continue
+			}
+			required[resolved[0].URL] = true
+		}
+	}
+	leading := make([]string, 0, len(required))
+	for _, reference := range turn {
+		if required[reference] {
+			leading = append(leading, reference)
+		}
+	}
+	return leading
+}
+
+// assembleReferenceGroups orders the final reference list (#250). A required
+// turn input leads so the image-to-image model edits the intended base picture
+// (#266); identity anchors follow, then style pictures, then the turn's other
+// ordinary references. Retention follows the same order (truncateReferences
+// keeps the head), so ordinary references are dropped first, then style, while
+// at least one input and the identity anchors remain. Without anchors and
+// without a required input the historical list is preserved byte for byte
+// (three-view repeats included); a required input is moved ahead of the rest
+// without otherwise reordering or de-duplicating.
+func assembleReferenceGroups(identity, style, leading, turn []string) referenceGroups {
 	identity = uniqueReferenceURLs(identity)
 	style = uniqueReferenceURLs(style)
-	if len(identity) == 0 {
-		urls := append(append([]string(nil), style...), turn...)
+	if len(identity) == 0 && len(style) == 0 {
+		if len(leading) == 0 {
+			return referenceGroups{
+				URLs: append([]string(nil), turn...), Classes: turnClasses(len(turn)),
+				Turn: len(turn), TurnURLs: append([]string(nil), turn...),
+			}
+		}
+		urls := append([]string(nil), leading...)
+		for _, reference := range turn {
+			if slices.Contains(leading, reference) {
+				continue
+			}
+			urls = append(urls, reference)
+		}
 		return referenceGroups{
-			URLs: urls, Style: len(style), Turn: len(turn),
-			TurnURLs: append([]string(nil), turn...),
+			URLs: urls, Classes: turnClasses(len(urls)),
+			Turn: len(urls), TurnURLs: append([]string(nil), turn...),
 		}
 	}
-	urls := append([]string(nil), identity...)
-	styleKept := 0
+	seen := map[string]bool{}
+	urls := make([]string, 0, len(leading)+len(identity)+len(style)+len(turn))
+	classes := make([]referenceClass, 0, cap(urls))
+	add := func(reference string, class referenceClass) {
+		if reference == "" || seen[reference] {
+			return
+		}
+		seen[reference] = true
+		urls = append(urls, reference)
+		classes = append(classes, class)
+	}
+	for _, reference := range leading {
+		add(reference, referenceClassTurn)
+	}
+	for _, reference := range identity {
+		add(reference, referenceClassIdentity)
+	}
 	for _, reference := range style {
-		if slices.Contains(urls, reference) {
-			continue
-		}
-		urls = append(urls, reference)
-		styleKept++
+		add(reference, referenceClassStyle)
 	}
-	var turnKept []string
 	for _, reference := range turn {
-		if slices.Contains(urls, reference) {
-			continue
+		add(reference, referenceClassTurn)
+	}
+	groups := referenceGroups{URLs: urls, Classes: classes, TurnURLs: uniqueReferenceURLs(turn)}
+	for _, class := range classes {
+		switch class {
+		case referenceClassIdentity:
+			groups.Identity++
+		case referenceClassStyle:
+			groups.Style++
+		default:
+			groups.Turn++
 		}
-		urls = append(urls, reference)
-		turnKept = append(turnKept, reference)
 	}
-	return referenceGroups{
-		URLs: urls, Identity: len(identity), Style: styleKept,
-		Turn: len(turnKept), TurnURLs: turnKept,
-	}
+	return groups
+}
+
+func turnClasses(count int) []referenceClass {
+	classes := make([]referenceClass, count)
+	return classes
 }

@@ -11,10 +11,23 @@ import (
 
 type styleLockVerifier struct {
 	owned map[string]bool
+	// urls names verified platform picture URLs for the tests that resolve
+	// handles or Task asset addresses (#250).
+	urls map[string]chat.Attachment
 }
 
 func (v styleLockVerifier) VerifyAttachment(_ context.Context, owner, _ string, ref chat.AttachmentRef) (chat.Attachment, error) {
-	if owner != "owner-a" || ref.Kind != chat.AttachmentKindImage || !v.owned[ref.AssetID] {
+	if owner != "owner-a" || ref.Kind != chat.AttachmentKindImage {
+		return chat.Attachment{}, chat.ErrAttachmentRejected
+	}
+	if ref.URL != "" {
+		attachment, ok := v.urls[ref.URL]
+		if !ok {
+			return chat.Attachment{}, chat.ErrAttachmentRejected
+		}
+		return attachment, nil
+	}
+	if !v.owned[ref.AssetID] {
 		return chat.Attachment{}, chat.ErrAttachmentRejected
 	}
 	return chat.Attachment{Kind: ref.Kind, AssetID: ref.AssetID}, nil

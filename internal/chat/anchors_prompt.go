@@ -7,13 +7,16 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
 
-// visualAnchorsPrompt renders the session's visual anchors and the person's
-// style lock for the system prompt (#250). The style text and the anchor
-// descriptions are user- or Agent-written data, so every marker is stripped
-// and the whole block is framed as data, not instructions, exactly like the
-// session notes and the work ledger. The names the Agent may pass in a
-// generation tool's anchor argument are the stored ones; the server never
-// injects an anchor silently.
+// visualAnchorsPrompt renders the session's visual anchors for the system
+// prompt (#250). The style lock's text is carried by the work anchors block
+// (#248): repeating it here would show one user text twice and put two
+// instructions about it in one prompt. This block states the lock's enabled
+// state and reference count and tells the Agent not to copy the lock's wording
+// into a generation prompt. Anchor names and descriptions are user- or
+// Agent-written data, so every declared marker is stripped and the whole block
+// is framed as data, not instructions, exactly like the session notes and the
+// work ledger. The names the Agent may pass in a generation tool's anchor
+// argument are the stored ones; the server never injects an anchor silently.
 func (orchestrator *Orchestrator) visualAnchorsPrompt(options TurnOptions) string {
 	schema := orchestrator.schema.VisualAnchors
 	if strings.TrimSpace(schema.ContextTemplate) == "" {
@@ -37,8 +40,8 @@ func (orchestrator *Orchestrator) visualAnchorsPrompt(options TurnOptions) strin
 		references := strings.ReplaceAll(schema.ReferenceCountTemplate, "{count}", strconv.Itoa(len(anchor.References)))
 		items = append(items, strings.NewReplacer(
 			"{kind}", kindLabel,
-			"{name}", withoutMarkers(anchor.Name, schema.OpenMarker, schema.CloseMarker),
-			"{description}", withoutMarkers(anchor.Description, schema.OpenMarker, schema.CloseMarker),
+			"{name}", orchestrator.stripAnchorMarkers(anchor.Name),
+			"{description}", orchestrator.stripAnchorMarkers(anchor.Description),
 			"{references}", references,
 		).Replace(schema.ItemTemplate))
 	}
@@ -53,8 +56,14 @@ func (orchestrator *Orchestrator) visualAnchorsPrompt(options TurnOptions) strin
 		references := 0
 		if styleLock.Enabled {
 			enabled = orchestrator.schema.StyleLock.EnabledText
-			lockText = withoutMarkers(styleLock.Text, schema.OpenMarker, schema.CloseMarker)
 			references = len(styleLock.References)
+			// A Catalog without the #248 work anchors block has nowhere else to
+			// carry the lock text, so this block carries it instead of losing a
+			// user setting. With the block declared, the text is rendered there
+			// exactly once.
+			if strings.TrimSpace(orchestrator.schema.WorkLedger.Anchors.ContextTemplate) == "" {
+				lockText = orchestrator.stripAnchorMarkers(styleLock.Text)
+			}
 		}
 		styleLockText = strings.NewReplacer(
 			"{enabled}", enabled,
@@ -70,6 +79,26 @@ func (orchestrator *Orchestrator) visualAnchorsPrompt(options TurnOptions) strin
 		"{argument}", anchorArgumentForSchema(orchestrator.schema.Tools),
 		"{close}", schema.CloseMarker,
 	).Replace(schema.ContextTemplate)
+}
+
+// stripAnchorMarkers removes every declared anchor marker from user- or
+// Agent-written text. Both blocks strip both pairs, so a text that carries the
+// other block's close marker cannot break out of either frame (#250 review).
+func (orchestrator *Orchestrator) stripAnchorMarkers(text string) string {
+	return stripDeclaredAnchorMarkers(text, orchestrator.schema.VisualAnchors, orchestrator.schema.WorkLedger.Anchors)
+}
+
+// stripDeclaredAnchorMarkers removes the visual-anchor and work-anchor marker
+// pairs from text. An empty pair (a Schema that declares no block) is skipped
+// by withoutMarkers itself.
+func stripDeclaredAnchorMarkers(text string, visual catalog.ChatVisualAnchorsSchema, work catalog.ChatWorkLedgerAnchorsSchema) string {
+	text = withoutMarkers(text, visual.OpenMarker, visual.CloseMarker)
+	return withoutMarkers(text, work.OpenMarker, work.CloseMarker)
+}
+
+// stripAnchorMarkers is the Service-side form used by the work anchors block.
+func (service *Service) stripAnchorMarkers(text string) string {
+	return stripDeclaredAnchorMarkers(text, service.visualAnchors, service.workLedger.Anchors)
 }
 
 // anchorToolNote is added to a generation tool's description when the session

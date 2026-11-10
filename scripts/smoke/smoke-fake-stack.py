@@ -2916,6 +2916,20 @@ def _visual_anchor_frozen_input(work, task_id):
         return {}
 
 
+def _visual_anchor_handles(api, session):
+    """The picture handles the session gave its messages, by asset id."""
+    status, body = api.json("GET", f"/api/chat/sessions/{session}/messages")
+    messages = body if isinstance(body, list) else (body or {}).get("messages", [])
+    by_asset = {}
+    for message in messages:
+        for attachment in message.get("attachments") or []:
+            asset_id = attachment.get("asset_id") or attachment.get("assetId")
+            handle = attachment.get("handle")
+            if asset_id and handle:
+                by_asset[asset_id] = handle
+    return by_asset
+
+
 def _visual_anchor_card(api, session, kind="visual_anchor"):
     for card in _quality_choices(api, session):
         if card.get("state") == "pending" and card.get("kind") == kind:
@@ -2971,21 +2985,29 @@ def scenario_visual_anchors(api, offerings, work):
     # The shipped 2D purpose (concept art) recommends this model; using the
     # workspace model avoids the #239 purpose/model conflict card.
     image_model = IMAGE_OFFERINGS["meshy"][1]
+    # The Agent never sees an input-asset id: the pictures it can name are the
+    # handles the session gives the messages. Send all four in one turn, then
+    # read the handles the way the Agent's context shows them.
+    upload_urls = [f"/api/v1/assets/{asset}" for asset in (hero_asset, style_asset, villain_asset, ordinary_asset)]
 
     # (a) The Agent sees the style lock in its system prompt. The fake-only
     # marker makes the reply itself carry the answer, so the check reads what
     # the model really received.
     if not _visual_anchor_turn(api, session, "检查系统提示 [[fake:system-contains ANCHOR-STYLE-9c41]]",
-                               domain="image", model=image_model):
+                               image_urls=upload_urls, domain="image", model=image_model):
         record("#250 the style lock reaches the system prompt", False, "turn did not finish")
     else:
         reply = str((_quality_final_reply(_quality_messages(api, session)) or {}).get("content") or "")
         record("#250 the style lock reaches the system prompt",
                "present: ANCHOR-STYLE-9c41" in reply,
                f"reply={reply[:120]!r}")
+    handles = _visual_anchor_handles(api, session)
+    record("#250 the Agent can name the pictures by their handles",
+           all(handles.get(asset) for asset in (hero_asset, style_asset, villain_asset, ordinary_asset)),
+           f"handles={handles}")
     # (b) The Agent proposes an identity anchor; the person accepts on the card.
     hero_proposal = {"action": "create", "name": "hero", "kind": "identity",
-                     "description": "red cloak", "references": [hero_asset]}
+                     "description": "red cloak", "references": [handles.get(hero_asset)]}
     propose = _work_ledger_marker("ask_choice", {
         "kind": "visual_anchor", "question": "把这张图设为角色标准形象？",
         "proposal": {"arguments": hero_proposal},
@@ -3005,6 +3027,15 @@ def scenario_visual_anchors(api, offerings, work):
            and "参考图 1 张" in system,
            f"marker={'yes' if '<<<VISUAL_ANCHORS>>>' in system else 'no'} "
            f"references={'yes' if '参考图 1 张' in system else 'no'}")
+    # The same user text must appear once, and the two blocks must not give
+    # opposite instructions about repeating it (#250 review).
+    record("#250 one prompt carries the style lock once with one rule",
+           system.count("ANCHOR-STYLE-9c41") == 1 and "逐字保持" not in system
+           and system.count("<<<END_VISUAL_ANCHORS>>>") == 1
+           and "<<<WORK_ANCHORS>>>" in system,
+           f"texts={system.count('ANCHOR-STYLE-9c41')} "
+           f"verbatim={'yes' if '逐字保持' in system else 'no'} "
+           f"visual_close={system.count('<<<END_VISUAL_ANCHORS>>>')}")
     if card is None:
         return
     accept = _work_ledger_marker("set_visual_anchor", hero_proposal)
@@ -3015,9 +3046,28 @@ def scenario_visual_anchors(api, offerings, work):
     record("#250 the accepted anchor is written", bool(receipts) and
            any("视觉锚已保存" in content for content in receipts),
            f"receipts={len(receipts)}")
+    # An Agent call that no answered card names is refused even though it uses
+    # a handle the session really gave (#250 review).
+    intruder = _work_ledger_marker("set_visual_anchor", {
+        "action": "create", "name": "intruder", "kind": "identity",
+        "references": [handles.get(ordinary_asset)],
+    })
+    if not _visual_anchor_turn(api, session, "未经确认直接写入 " + intruder,
+                               domain="image", model=image_model):
+        record("#250 an unconfirmed write is refused", False, "turn did not finish")
+    else:
+        receipts = _visual_anchor_wait_tool_content(work, session, "用户确认卡")
+        record("#250 an unconfirmed write is refused",
+               any("还没有经用户确认卡确认" in content for content in receipts),
+               f"receipts={len(receipts)}")
+    _visual_anchor_turn(api, session, "检查未确认锚点 [[fake:system-contains 身份锚「intruder」]]",
+                        domain="image", model=image_model)
+    reply = str((_quality_final_reply(_quality_messages(api, session)) or {}).get("content") or "")
+    record("#250 an unconfirmed write stores no anchor", "absent: 身份锚「intruder」" in reply,
+           f"reply={reply[:120]!r}")
     # A declined proposal writes nothing and leaves the person's lock alone.
     villain_proposal = {"action": "create", "name": "villain", "kind": "identity",
-                        "description": "black cloak", "references": [villain_asset]}
+                        "description": "black cloak", "references": [handles.get(villain_asset)]}
     propose = _work_ledger_marker("ask_choice", {
         "kind": "visual_anchor", "question": "把这张图也设为角色标准形象？",
         "proposal": {"arguments": villain_proposal},
@@ -3065,14 +3115,15 @@ def scenario_visual_anchors(api, offerings, work):
            f"references={references} prompt={prompt[:160]!r}")
 
     # (d) A single-picture model keeps the anchor and drops the ordinary
-    # reference; the tool result names the dropped handle.
-    ordinary_url = f"/api/v1/assets/{ordinary_asset}"
+    # reference; the tool result names the dropped handle. Both pictures are
+    # real session handles: the ordinary one was sent in the first turn.
+    ordinary_handle = handles.get(ordinary_asset)
     marker = _work_ledger_marker("create_model_3d_from_image", {
         "prompt": "a ranger miniature", "anchors": ["hero"],
-        "reference_handles": ["@img1"], "input_override_reason": "fake stack single-picture check",
+        "reference_handles": [ordinary_handle], "input_override_reason": "fake stack single-picture check",
     })
     model_task, why, _approval = agent_tool_turn(
-        api, session, "把参考和标准形象一起做成模型 " + marker, image_urls=[ordinary_url],
+        api, session, "把参考和标准形象一起做成模型 " + marker,
         creative_domain="model-3d", ai_model="meshy/meshy-7.1/image-to-3d")
     if not model_task or why or model_task.get("state") != "SUCCEEDED":
         record("#250 the single-picture model keeps the anchor", False,
@@ -3095,8 +3146,8 @@ def scenario_visual_anchors(api, offerings, work):
             note = str(candidate["reference_note"])
             break
     record("#250 the tool result names the dropped ordinary reference",
-           "丢弃了普通参考" in note and "@img1" in note,
-           f"reference_note={note[:200]!r}")
+           "丢弃了普通参考" in note and bool(ordinary_handle) and ordinary_handle in note,
+           f"reference_note={note[:200]!r} handle={ordinary_handle}")
 
     # (e) Meshy retexture sends the style lock picture as its style_asset and
     # never injects the style text into the 3D prompt.

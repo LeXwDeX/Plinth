@@ -326,17 +326,17 @@ func (service *Service) AskChoice(
 		if len(arguments.Proposal) == 0 || json.Unmarshal(arguments.Proposal, &values) != nil || values == nil {
 			return ToolResult{Error: "choice card unavailable", NoSubmission: true}, nil
 		}
-		declined, err := json.Marshal(map[string]string{kind.Argument: "decline"})
+		declined, err := json.Marshal(map[string]string{kind.Argument: visualAnchorActionDecline})
 		if err != nil {
 			return ToolResult{Error: "choice card unavailable", NoSubmission: true}, nil
 		}
-		accept := ChoiceOption{ID: "accept", Label: kind.AcceptLabel, Description: kind.Question,
+		accept := ChoiceOption{ID: visualAnchorAcceptOption, Label: kind.AcceptLabel, Description: kind.Question,
 			Arguments: append(json.RawMessage(nil), arguments.Proposal...)}
-		decline := ChoiceOption{ID: "decline", Label: kind.DeclineLabel, Arguments: declined}
+		decline := ChoiceOption{ID: visualAnchorDeclineOption, Label: kind.DeclineLabel, Arguments: declined}
 		switch recommended {
-		case "accept":
+		case visualAnchorAcceptOption:
 			accept.Recommended = true
-		case "decline":
+		case visualAnchorDeclineOption:
 			decline.Recommended = true
 		default:
 			recommended = ""

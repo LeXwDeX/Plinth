@@ -492,7 +492,7 @@ func (executor *Executor) replayReferenceURLs(
 	if err != nil {
 		return nil, nil, false
 	}
-	groups := assembleReferenceGroups(identity, style, referenceURLs)
+	groups := executor.referenceGroupsFor(command, identity, style, referenceURLs)
 	referenceURLs = groups.URLs
 	capability := command.Tool.FallbackCapability
 	if len(referenceURLs) > 0 {

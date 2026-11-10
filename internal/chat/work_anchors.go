@@ -15,26 +15,24 @@ import (
 // only what the generator sends, never this recorded fact.
 //
 // Identity anchors (a separately stored identity description and its
-// references) are NOT delivered by #248. The current Schema has no session
-// setting that could carry that text without a new column or migration, and
-// #248's delivery reserves the migration for #247. The handoff is explicit and
-// recorded in docs/architecture.md, the PR and Issue #248: #250 owns
-// identity-anchor persistence and its confirmation flow. This branch does not
-// claim that acceptance and does not fabricate an identity-anchor entry from
-// the style lock, whose text is the separately recorded style setting. The
-// Model3D/2D craft prompts keep asking the Agent to reuse the identity wording
-// verbatim in the meantime.
+// references) are persisted by #250 in the session's visual_anchors column and
+// rendered by the `visual_anchors` system-prompt section. This block stays the
+// single place that carries the style lock's text: the #250 block states the
+// lock's state and reference count only, so the same user text never appears
+// twice and the two blocks cannot contradict each other. The style lock is not
+// copied into another store, and a generation turn's one-turn exemption
+// (StyleLockSkipped) changes only what the generator sends, never this recorded
+// fact.
 
-// workAnchorsSummary renders the anchor block for the owner's session. It
-// returns "" when the style lock is disabled or empty, or when the Schema
-// declares no anchor block.
-func (service *Service) workAnchorsSummary(ctx context.Context, ownerID, sessionID string) string {
+// workAnchorsSummary renders the anchor block for the owner's session from the
+// turn's frozen style lock. It returns "" when the style lock is disabled or
+// empty, or when the Schema declares no anchor block. The frozen snapshot is
+// the only source of the lock text: reading the mutable session row here would
+// let a mid-turn edit show two versions of one lock in one prompt and diverge
+// from what the generator actually applies (#250).
+func (service *Service) workAnchorsSummary(ctx context.Context, ownerID, sessionID string, lock StyleLock) string {
 	anchors := service.workLedger.Anchors
 	if sessionID == "" || strings.TrimSpace(anchors.ContextTemplate) == "" {
-		return ""
-	}
-	lock, found, err := service.repository.StyleLock(ctx, ownerID, sessionID)
-	if err != nil || !found {
 		return ""
 	}
 	text := strings.TrimSpace(lock.Text)
@@ -47,7 +45,7 @@ func (service *Service) workAnchorsSummary(ctx context.Context, ownerID, session
 	references := service.workAnchorReferences(ctx, ownerID, sessionID, lock.References, anchors.ReferenceTemplate)
 	entry := strings.NewReplacer(
 		"{label}", anchors.StyleLabel,
-		"{text}", withoutMarkers(text, anchors.OpenMarker, anchors.CloseMarker),
+		"{text}", service.stripAnchorMarkers(text),
 		"{references}", references,
 	).Replace(anchors.EntryTemplate)
 	return strings.NewReplacer(

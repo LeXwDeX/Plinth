@@ -461,9 +461,10 @@ func (executor *Executor) Execute(
 			return result, err
 		}
 	}
-	// #250: the identity anchors this call named precede the style pictures,
-	// which precede the turn's own ordinary references. The order is also the
-	// trimming priority.
+	// #250: the required turn inputs lead the list (the artboard snapshot and
+	// the pictures marked "input"); identity anchors follow, then the style
+	// pictures, then the turn's other ordinary references. The order is also
+	// the trimming priority.
 	identityReferenceURLs, identityPurposes, anchorRefusal, anchorErr := executor.anchorReferenceURLs(command, arguments)
 	if anchorErr != nil && anchorRefusal == "" {
 		anchorRefusal = executor.anchorInvalid(command, "锚点参考图不可用")
@@ -480,15 +481,14 @@ func (executor *Executor) Execute(
 		return result, nil
 	}
 	serverPurposes := mergeReferencePurposes(identityPurposes, stylePurposes)
-	// Without an identity anchor the historical reference list is preserved
+	// A historical turn without anchors or a required input keeps its list
 	// byte for byte (a duplicate URL stays ambiguous, a three-view selection
-	// keeps its repeats). With one, the priority groups are de-duplicated so
-	// the same picture is not sent twice, and the counts follow the final list
-	// so a trimmed suffix is reported by the right class.
-	groups := assembleReferenceGroups(identityReferenceURLs, styleReferenceURLs, turnReferenceURLs)
+	// keeps its repeats). An anchored turn de-duplicates so the same picture is
+	// not sent twice, and the counts follow the final list so a trimmed suffix
+	// is reported by the right class.
+	groups := executor.referenceGroupsFor(command, identityReferenceURLs, styleReferenceURLs, turnReferenceURLs)
 	referenceURLs := groups.URLs
-	identityReferenceCount, styleReferenceCount, turnReferenceCount := groups.Identity, groups.Style, groups.Turn
-	if command.Tool.ReferencePurposesArgument != "" && identityReferenceCount+styleReferenceCount == 0 {
+	if command.Tool.ReferencePurposesArgument != "" {
 		for handle, purpose := range command.Options.AttachmentPurposes {
 			if purpose != "input" {
 				continue
@@ -504,9 +504,6 @@ func (executor *Executor) Execute(
 				result.NoSubmission = true
 				return result, nil
 			}
-			input := referenceURLs[position]
-			copy(referenceURLs[1:position+1], referenceURLs[:position])
-			referenceURLs[0] = input
 		}
 	}
 	capability := command.Tool.FallbackCapability
@@ -574,11 +571,10 @@ func (executor *Executor) Execute(
 			views, _ := json.Marshal(multiview.Views)
 			arguments[executor.chat.ThreeView.Multiview.ViewsArgument] = views
 		}
-		groups = assembleReferenceGroups(identityReferenceURLs, styleReferenceURLs, multiview.URLs)
+		groups = executor.referenceGroupsFor(command, identityReferenceURLs, styleReferenceURLs, multiview.URLs)
 		referenceURLs = groups.URLs
-		identityReferenceCount, styleReferenceCount, turnReferenceCount = groups.Identity, groups.Style, groups.Turn
 	}
-	if identityReferenceCount+styleReferenceCount > 0 {
+	if groups.Identity+groups.Style > 0 {
 		if _, supported := semanticParameter(offering, generation.SemanticReferenceImage); !supported {
 			result := executor.failure(command, "", executor.styleLockUnavailableMessage(command))
 			result.NoSubmission = true
@@ -625,22 +621,20 @@ func (executor *Executor) Execute(
 		given := len(referenceURLs)
 		referenceURLs = truncateReferences(referenceURLs, offering)
 		if len(referenceURLs) < given {
-			identityUsed := min(identityReferenceCount, len(referenceURLs))
-			styleUsed := min(styleReferenceCount, max(0, len(referenceURLs)-identityUsed))
-			turnUsed := max(0, len(referenceURLs)-identityUsed-styleUsed)
+			identityUsed, styleUsed, turnUsed := groups.countClasses(len(referenceURLs))
 			references = referenceUse{
 				Used: len(referenceURLs), Given: given,
-				IdentityGiven: identityReferenceCount, IdentityUsed: identityUsed,
-				StyleGiven: styleReferenceCount, StyleUsed: styleUsed,
-				TurnGiven: turnReferenceCount, TurnUsed: turnUsed,
+				IdentityGiven: groups.Identity, IdentityUsed: identityUsed,
+				StyleGiven: groups.Style, StyleUsed: styleUsed,
+				TurnGiven: groups.Turn, TurnUsed: turnUsed,
 			}
-			references.StyleTrimmed = styleUsed < styleReferenceCount
-			// Anchors are the prefix; the ordinary references are the suffix.
-			// Everything the limit cut from that suffix is reported to the
-			// Agent by handle (#250).
-			if turnUsed < len(groups.TurnURLs) {
-				references.DroppedTurn = executor.referenceHandleLabels(command, groups.TurnURLs[turnUsed:])
-				references.DroppedTurnCount = len(groups.TurnURLs) - turnUsed
+			references.StyleTrimmed = styleUsed < groups.Style
+			// The model limit cuts the tail: ordinary references first, then
+			// style pictures. Everything it cut from the turn's own list is
+			// reported to the Agent by handle (#250).
+			if dropped := groups.droppedTurnURLs(len(referenceURLs)); len(dropped) > 0 {
+				references.DroppedTurn = executor.referenceHandleLabels(command, dropped)
+				references.DroppedTurnCount = len(dropped)
 			}
 		}
 		if capability == generation.ImageTo3D {
@@ -652,14 +646,15 @@ func (executor *Executor) Execute(
 	}
 	if capability == generation.ImageTo3D {
 		// Style-lock pictures guide the look, not the geometry: they are not
-		// 3D inputs and must not be judged by the input checklist.
-		gateReferences := referenceURLs
-		styleUsed := styleReferenceCount
-		if references.StyleTrimmed {
-			styleUsed = references.StyleUsed
-		}
-		if styleUsed > 0 && styleUsed <= len(gateReferences) {
-			gateReferences = gateReferences[:len(gateReferences)-styleUsed]
+		// 3D inputs and must not be judged by the input checklist. They sit
+		// between the identity anchors and the ordinary references, so filter
+		// by class instead of assuming a suffix.
+		gateReferences := make([]string, 0, len(referenceURLs))
+		for index, reference := range referenceURLs {
+			if index < len(groups.Classes) && groups.Classes[index] == referenceClassStyle {
+				continue
+			}
+			gateReferences = append(gateReferences, reference)
 		}
 		override, refusal := executor.review3DInput(ctx, command, gateReferences)
 		if refusal != "" {

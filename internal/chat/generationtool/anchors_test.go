@@ -3,8 +3,11 @@ package generationtool_test
 import (
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
 func anchor(name, kind string, references ...string) chat.VisualAnchor {
@@ -84,7 +87,104 @@ func TestAnchorReferencesAreDeduplicatedAgainstTurnReferences(t *testing.T) {
 	}
 }
 
-// #250: only a stored identity anchor may be named; an unknown name or a style
+// #250 review: the artboard snapshot must stay the first reference picture
+// (#266) even when the turn has identity and style pictures. The priority
+// order applies after the required turn input.
+func TestCanvasSnapshotLeadsAnchorAndStyleReferences(t *testing.T) {
+	rig := newStyleLockRig(t, 4)
+	options := styleLock(true, "ink wash", "style-a")
+	options.VisualAnchors = []chat.VisualAnchor{anchor("hero", chat.VisualAnchorKindIdentity, "hero-a")}
+	options.InputSource = rig.app.Chat.Context.CanvasInputSource
+	options.Selection = []chat.Attachment{{
+		Handle: "@img9", Kind: chat.AttachmentKindImage, Role: chat.AttachmentRoleCanvas,
+		AssetID: "board", URL: "/api/v1/input-assets/board",
+		Canvas: &chat.CanvasLayout{Width: 1024, Height: 1024},
+	}}
+	result, input := rig.run(t, options, imageHistory(),
+		`{"prompt":"repaint the board","reference_handles":["@img1"],"anchors":["hero"]}`)
+	if result.NoSubmission {
+		t.Fatalf("result=%+v error=%q", result, result.Error)
+	}
+	want := []string{
+		"/api/v1/input-assets/board",
+		"/api/v1/input-assets/hero-a",
+		"/api/v1/input-assets/style-a",
+		"/api/v1/input-assets/agent-image",
+	}
+	if strings.Join(rig.resolver.urls, ",") != strings.Join(want, ",") {
+		t.Fatalf("reference order=%v, want %v", rig.resolver.urls, want)
+	}
+	prompt, _ := input["prompt"].(string)
+	if !strings.Contains(prompt, "image 2: 保留「hero」的身份、外形、服装与配色") ||
+		!strings.Contains(prompt, "image 3: 沿用用户风格锁的画风") {
+		t.Fatalf("purposes are numbered against the final order: %q", prompt)
+	}
+}
+
+// #250 review: a picture the person marked "input" keeps the front even when a
+// style lock picture exists; the old code skipped the reorder whenever any
+// style reference was present.
+func TestInputPurposeLeadsTheListBesideStyleReferences(t *testing.T) {
+	rig := newStyleLockRig(t, 4)
+	options := styleLock(true, "ink wash", "style-a")
+	options.AttachmentPurposes = map[string]string{"@img1": "input"}
+	result, _ := rig.run(t, options, imageHistory(), `{"prompt":"repaint","reference_handles":["@img1"]}`)
+	if result.NoSubmission {
+		t.Fatalf("result=%+v error=%q", result, result.Error)
+	}
+	want := []string{"/api/v1/input-assets/agent-image", "/api/v1/input-assets/style-a"}
+	if strings.Join(rig.resolver.urls, ",") != strings.Join(want, ",") {
+		t.Fatalf("reference order=%v, want %v", rig.resolver.urls, want)
+	}
+}
+
+// #250 review: the model limit keeps the required input and the identity
+// anchor, drops the style picture and the ordinary reference, and names the
+// dropped ordinary handle.
+func TestCanvasAndAnchorReferencesOutrankTheTurnLimit(t *testing.T) {
+	rig := newStyleLockRig(t, 2)
+	options := styleLock(true, "ink wash", "style-a")
+	options.VisualAnchors = []chat.VisualAnchor{anchor("hero", chat.VisualAnchorKindIdentity, "hero-a")}
+	options.InputSource = rig.app.Chat.Context.CanvasInputSource
+	options.Selection = []chat.Attachment{{
+		Handle: "@img9", Kind: chat.AttachmentKindImage, Role: chat.AttachmentRoleCanvas,
+		AssetID: "board", URL: "/api/v1/input-assets/board",
+		Canvas: &chat.CanvasLayout{Width: 1024, Height: 1024},
+	}}
+	result, _ := rig.run(t, options, imageHistory(),
+		`{"prompt":"repaint the board","reference_handles":["@img1"],"anchors":["hero"]}`)
+	if result.NoSubmission {
+		t.Fatalf("result=%+v error=%q", result, result.Error)
+	}
+	want := []string{"/api/v1/input-assets/board", "/api/v1/input-assets/hero-a"}
+	if strings.Join(rig.resolver.urls, ",") != strings.Join(want, ",") {
+		t.Fatalf("reference order=%v, want %v", rig.resolver.urls, want)
+	}
+	if !strings.Contains(result.AgentContent, "丢弃了普通参考 @img1") {
+		t.Fatalf("dropped-reference note missing: %s", result.AgentContent)
+	}
+}
+
+// #250 review: a generated picture is stored as its Task asset URL (the Agent
+// can anchor what it just made without ever seeing an input-asset ID). The
+// exact URL reaches the resolver, which verifies and copies it.
+func TestIdentityAnchorTaskAssetURLIsSentUnchanged(t *testing.T) {
+	rig := newStyleLockRig(t, 3)
+	options := styleLock(false, "")
+	options.VisualAnchors = []chat.VisualAnchor{
+		anchor("hero", chat.VisualAnchorKindIdentity, "/api/v1/tasks/task-1/assets/gen-1"),
+	}
+	result, _ := rig.run(t, options, imageHistory(), `{"prompt":"portrait","anchors":["hero"]}`)
+	if result.NoSubmission {
+		t.Fatalf("result=%+v error=%q", result, result.Error)
+	}
+	want := []string{"/api/v1/tasks/task-1/assets/gen-1", "/api/v1/input-assets/agent-image"}
+	if strings.Join(rig.resolver.urls, ",") != strings.Join(want, ",") {
+		t.Fatalf("reference order=%v, want %v", rig.resolver.urls, want)
+	}
+}
+
+// #250 review: only a stored identity anchor may be named; an unknown name or a style
 // anchor is refused before any submission.
 func TestAnchorArgumentRefusesUnknownAndStyleAnchors(t *testing.T) {
 	cases := map[string]struct {
@@ -116,5 +216,45 @@ func TestAnchorArgumentRefusesUnknownAndStyleAnchors(t *testing.T) {
 				t.Fatalf("an invalid anchor resolved pictures: %v", rig.resolver.urls)
 			}
 		})
+	}
+}
+
+func TestIdentityAnchorSurvivesTheImageTo3DLimit(t *testing.T) {
+	rig := newStyleLockRig(t, 1)
+	var tool catalog.ChatToolSchema
+	for _, candidate := range rig.app.Chat.Tools {
+		if candidate.Name == "create_model_3d_from_image" {
+			tool = candidate
+		}
+	}
+	if tool.Name == "" {
+		t.Fatal("create_model_3d_from_image is not declared")
+	}
+	rig.tool = tool
+	offering := generation.Offering{
+		ID: "configured/i23d", ModelID: "configured-model", Capability: generation.ImageTo3D,
+		Domain: generation.DomainModel3D, Enabled: true, Default: true,
+		PollInterval: time.Second, Timeout: time.Second,
+		Parameters: []generation.Parameter{
+			{Name: "prompt", Type: "string", Semantic: generation.SemanticPrompt, Required: true},
+			{Name: "images", Type: "asset-array", Semantic: generation.SemanticReferenceImage, MaxItems: 1},
+		},
+	}
+	rig.gateway.offerings = []generation.Offering{offering}
+	rig.gateway.tasks = []generation.Task{{State: generation.TaskSucceeded, Offering: offering}}
+	options := styleLock(false, "")
+	options.AIModel = "configured-model"
+	options.VisualAnchors = []chat.VisualAnchor{anchor("hero", chat.VisualAnchorKindIdentity, "hero-a")}
+	result, input := rig.run(t, options, imageHistory(),
+		`{"prompt":"a ranger","reference_handles":["@img1"],"anchors":["hero"]}`)
+	t.Logf("result=%+v\ninput=%v", result, input)
+	if result.NoSubmission {
+		t.Fatalf("result=%+v error=%q", result, result.Error)
+	}
+	if strings.Join(rig.resolver.urls, ",") != "/api/v1/input-assets/hero-a" {
+		t.Fatalf("references=%v", rig.resolver.urls)
+	}
+	if !strings.Contains(result.AgentContent, "丢弃了普通参考 @img1") {
+		t.Fatalf("dropped-reference note missing: %s", result.AgentContent)
 	}
 }

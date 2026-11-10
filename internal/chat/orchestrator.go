@@ -1950,9 +1950,12 @@ func (orchestrator *Orchestrator) agentRequest(
 	sections.add("summary", orchestrator.summaryPrompt(latest))
 	sections.add("compacted_handles", orchestrator.compactedHandlePrompt(history, indexedByMessage, summarized, lastUserMessage))
 	// The ledger and the style anchor are projected from stored facts, not from
-	// the message window, so compaction never changes them (#248).
+	// the message window, so compaction never changes them (#248). The style
+	// lock text is read from the turn's frozen snapshot: the visual anchors
+	// block states its state and picture count only, so one prompt never shows
+	// two versions of the same user setting (#250).
 	sections.add("work_ledger", orchestrator.workLedgerPrompt(ctx, ownerID, sessionID, history))
-	sections.add("work_anchors", orchestrator.workAnchorsPrompt(ctx, ownerID, sessionID))
+	sections.add("work_anchors", orchestrator.workAnchorsPrompt(ctx, ownerID, sessionID, options.StyleLock))
 	sections.add("visual_anchors", orchestrator.visualAnchorsPrompt(options))
 	sections.add("selection", orchestrator.selectionPrompt(options))
 	sections.add("brief", orchestrator.briefPrompt(options))
