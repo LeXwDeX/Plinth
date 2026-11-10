@@ -16,6 +16,8 @@ var (
 	ErrStyleLockTextTooLong      = errors.New("chat: style lock text too long")
 	ErrStyleLockReferenceLimit   = errors.New("chat: too many style lock references")
 	ErrStyleLockReferenceInvalid = errors.New("chat: invalid style lock reference")
+	// ErrStyleLockSourceInvalid rejects a source the Schema does not declare.
+	ErrStyleLockSourceInvalid = errors.New("chat: invalid style lock source")
 	// ErrStyleLockReferenceUnavailable reports that a direct prepare input
 	// cannot carry the lock's reference pictures: it has no reference
 	// parameter, or its single-picture parameter already holds the turn's own
@@ -27,6 +29,26 @@ type StyleLock struct {
 	Enabled    bool
 	Text       string
 	References []string
+	// Source is the three-state origin (#240): project, session or off. It
+	// is read from and written to go_chat_sessions.style_lock_source.
+	Source string
+}
+
+// The three declared style-lock sources (#240). project inherits the
+// session's project guide, session uses this session's lock, off injects
+// nothing. The two tables are never merged.
+const (
+	StyleLockSourceProject = "project"
+	StyleLockSourceSession = "session"
+	StyleLockSourceOff     = "off"
+)
+
+func styleLockSourceSet(sources []string) map[string]bool {
+	set := make(map[string]bool, len(sources))
+	for _, source := range sources {
+		set[source] = true
+	}
+	return set
 }
 
 type StyleLockTextTooLongError struct {
@@ -79,6 +101,24 @@ func (service *Service) SetStyleLock(
 	text string,
 	references []string,
 ) (StyleLock, error) {
+	return service.SetStyleLockWithSource(ctx, ownerID, sessionID, "", enabled, text, references)
+}
+
+// SetStyleLockWithSource is SetStyleLock plus the three-state source (#240).
+// An empty source keeps the stored source; a non-empty source must be one the
+// Schema declares.
+func (service *Service) SetStyleLockWithSource(
+	ctx context.Context,
+	ownerID, sessionID string,
+	source string,
+	enabled bool,
+	text string,
+	references []string,
+) (StyleLock, error) {
+	source = strings.TrimSpace(source)
+	if source != "" && !service.styleLockSources[source] {
+		return StyleLock{}, ErrStyleLockSourceInvalid
+	}
 	text = strings.TrimSpace(text)
 	length := utf8.RuneCountInString(text)
 	if maximum := service.maximumStyleLockText; maximum <= 0 || length > maximum {
@@ -100,7 +140,14 @@ func (service *Service) SetStyleLock(
 			return StyleLock{}, ErrStyleLockReferenceInvalid
 		}
 	}
-	stored := StyleLock{Enabled: enabled, Text: text, References: append([]string(nil), references...)}
+	stored := StyleLock{Enabled: enabled, Text: text, References: append([]string(nil), references...), Source: source}
+	if stored.Source == "" {
+		// Preserve the source unless the caller explicitly switches it
+		// (#240).
+		if current, found, err := service.repository.StyleLock(ctx, ownerID, sessionID); err == nil && found {
+			stored.Source = current.Source
+		}
+	}
 	found, err := service.repository.SetStyleLock(ctx, ownerID, sessionID, stored)
 	if err != nil {
 		return StyleLock{}, err

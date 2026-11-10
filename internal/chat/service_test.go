@@ -833,6 +833,23 @@ func (r *memoryChatRepository) SetStyleLock(
 	return true, nil
 }
 
+func (r *memoryChatRepository) SetSessionProject(
+	_ context.Context,
+	ownerID string,
+	sessionID string,
+	projectID string,
+) (chat.Session, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	session, found := r.sessions[sessionID]
+	if !found || session.OwnerID != ownerID {
+		return chat.Session{}, false, nil
+	}
+	session.ProjectID = projectID
+	r.sessions[sessionID] = session
+	return session, true, nil
+}
+
 func (r *memoryChatRepository) VisualAnchors(
 	_ context.Context,
 	ownerID string,

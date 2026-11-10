@@ -55,6 +55,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/modeldelivery"
 	"github.com/LeXwDeX/Plinth/internal/pendingapproval"
 	"github.com/LeXwDeX/Plinth/internal/processing"
+	"github.com/LeXwDeX/Plinth/internal/project"
 	"github.com/LeXwDeX/Plinth/internal/promptenhance"
 	"github.com/LeXwDeX/Plinth/internal/provideraccounts"
 	provideraccounthttpjson "github.com/LeXwDeX/Plinth/internal/provideraccounts/httpjson"
@@ -348,6 +349,21 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		return nil, err
 	}
 	approvalPolicy := approvalPolicyFromSchema(applicationSchema)
+	// Projects are assembled before chat so a session can be attributed to
+	// an owner project at creation (#240). A Catalog without the section
+	// leaves the routes unregistered and every project assignment refused.
+	var projectService *project.Service
+	var projectSource chat.ProjectSource
+	if applicationSchema.Project != nil {
+		projectService, err = project.New(repository.ProjectRepository(), project.Config{
+			Schema:  *applicationSchema.Project,
+			Sources: repository.ProjectAssetSource(),
+		})
+		if err != nil {
+			return nil, err
+		}
+		projectSource = projectService
+	}
 	chatService, err := chat.NewService(chat.ServiceConfig{
 		ApprovalPolicy:             approvalPolicy,
 		AgentScope:                 agentscope.FromSchema(applicationSchema.Chat.AgentScope),
@@ -355,6 +371,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		MaximumSessionNotes:        applicationSchema.Chat.Context.MaximumSessionNotesCharacters,
 		MaximumStyleLockText:       applicationSchema.Chat.StyleLock.MaximumTextCharacters,
 		MaximumStyleLockReferences: applicationSchema.Chat.StyleLock.MaximumReferenceImages,
+		StyleLockSources:           applicationSchema.Chat.StyleLock.Sources,
+		Projects:                   projectSource,
 		VisualAnchors:              applicationSchema.Chat.VisualAnchors,
 		CanvasInputSource:          applicationSchema.Chat.Context.CanvasInputSource,
 		// A turn's pick of a retired generation model runs on its successor
@@ -1662,6 +1680,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Canvas:                            canvasService,
 		CanvasImages:                      canvasImageService,
 		Chat:                              chatService,
+		Projects:                          projectService,
 		AgentParams:                       paramsStore,
 		AgentState:                        agentStateStore,
 		ChatScheduler:                     chatAgent,

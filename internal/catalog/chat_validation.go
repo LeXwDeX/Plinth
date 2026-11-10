@@ -308,6 +308,23 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		strings.TrimSpace(schema.StyleLock.UnsupportedNote) == "") {
 		return errors.New("style_lock 的上限、字段与错误文案必须完整")
 	}
+	if sources := schema.StyleLock.Sources; len(sources) > 0 {
+		allowed := map[string]bool{"project": true, "session": true, "off": true}
+		seen := make(map[string]bool, len(sources))
+		for _, source := range sources {
+			if !allowed[source] || seen[source] {
+				return fmt.Errorf("style_lock.sources 只能是 project/session/off 且不重复: %q", source)
+			}
+			seen[source] = true
+		}
+		if !seen["project"] || !seen["session"] || !seen["off"] {
+			return errors.New("style_lock.sources 必须声明 project、session 与 off 三态")
+		}
+	}
+	if template := schema.StyleLock.ProjectPromptTemplate; template != "" &&
+		(!strings.Contains(template, "{style}") || !strings.Contains(template, "{project}")) {
+		return errors.New("style_lock.project_prompt_template 必须包含 {style} 与 {project}")
+	}
 	if err := validatePendingApprovals(schema.PendingApprovals); err != nil {
 		return err
 	}

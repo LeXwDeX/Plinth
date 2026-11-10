@@ -50,6 +50,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/modeldelivery"
 	"github.com/LeXwDeX/Plinth/internal/pendingapproval"
 	"github.com/LeXwDeX/Plinth/internal/processing"
+	"github.com/LeXwDeX/Plinth/internal/project"
 	"github.com/LeXwDeX/Plinth/internal/promptenhance"
 	"github.com/LeXwDeX/Plinth/internal/provideraccounts"
 	"github.com/LeXwDeX/Plinth/internal/providers"
@@ -1285,6 +1286,18 @@ func newHTTPHarnessWithCatalogAndProviders(
 		t.Fatal(err)
 	}
 	approvalPolicy := harnessApprovalPolicy(applicationSchema)
+	var projectService *project.Service
+	var projectSource chat.ProjectSource
+	if applicationSchema.Project != nil {
+		projectService, err = project.New(repository.ProjectRepository(), project.Config{
+			Schema:  *applicationSchema.Project,
+			Sources: repository.ProjectAssetSource(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		projectSource = projectService
+	}
 	chatService, err := chat.NewService(chat.ServiceConfig{
 		Repository:                 repository,
 		ApprovalPolicy:             approvalPolicy,
@@ -1293,6 +1306,8 @@ func newHTTPHarnessWithCatalogAndProviders(
 		MaximumSessionNotes:        applicationSchema.Chat.Context.MaximumSessionNotesCharacters,
 		MaximumStyleLockText:       applicationSchema.Chat.StyleLock.MaximumTextCharacters,
 		MaximumStyleLockReferences: applicationSchema.Chat.StyleLock.MaximumReferenceImages,
+		StyleLockSources:           applicationSchema.Chat.StyleLock.Sources,
+		Projects:                   projectSource,
 		Attachments:                harnessAttachmentVerifier{},
 		Model3DUsage:               applicationSchema.Chat.Model3DUsage,
 		Image2DUsage:               applicationSchema.Chat.Image2DUsage,
@@ -1740,6 +1755,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		Canvas:                            canvasService,
 		CanvasImages:                      canvasImageService,
 		Chat:                              chatService,
+		Projects:                          projectService,
 		ChatScheduler:                     chatScheduler,
 		ChatContext:                       harnessCompactor(chatScheduler),
 		OwnsAgentSession: func(ctx context.Context, ownerID, sessionID string) bool {

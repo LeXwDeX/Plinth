@@ -286,8 +286,16 @@ type Session struct {
 	// Brief is the session's structured production brief (#103).
 	Brief ProductionBrief
 	// StyleLock is the session-level style lock. It is owner-scoped and is
-	// projected only when the Catalog declares its session DTO field.
+	// projected only when the Catalog declares its session DTO field. Source
+	// is the effective three-state origin (#240): project, session or off.
 	StyleLock StyleLock
+	// ProjectID is the owner project the session belongs to (#240); empty
+	// means the session is unassigned.
+	ProjectID string
+	// StyleLockSource persists the three-state style source (#240). New
+	// sessions default to "project"; upgraded sessions with an enabled lock
+	// are backfilled to "session".
+	StyleLockSource string
 	// VisualAnchors are the session's reference-backed identity and style
 	// anchors (#250). They are server-side only; the browser reads no anchor
 	// projection.

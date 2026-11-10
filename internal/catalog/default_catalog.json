@@ -2105,6 +2105,14 @@
           "readiness": "/readyz",
           "product_schema": "/api/v1/schema",
           "chat_skills": "/api/v1/chat/skills",
+          "project": "/api/v1/projects",
+          "project_item": "/api/v1/projects/{projectID}",
+          "project_assets": "/api/v1/projects/{projectID}/assets",
+          "project_asset_item": "/api/v1/projects/{projectID}/assets/{assetID}",
+          "project_style_guide": "/api/v1/projects/{projectID}/style-guide",
+          "project_conventions": "/api/v1/projects/{projectID}/conventions",
+          "project_promote": "/api/v1/projects/{projectID}/promote",
+          "chat_session_project": "/api/v1/chat/sessions/{sessionID}/project",
           "client_errors": "/api/v1/client-errors",
           "chat_session_approval": "/api/v1/chat/sessions/{sessionID}/approval",
           "chat_session_branch": "/api/v1/chat/sessions/{sessionID}/branch",
@@ -2715,6 +2723,46 @@
       "error.invalid_model_input": "模型文件结构无效，请检查文件后重新上传。",
       "error.unsupported_model_input": "此模型不符合当前支持的上传格式或功能条件，请查看格式说明。",
       "error.model_input_limit": "模型内容超过当前处理限制，请减小文件、几何或贴图规模后重试。",
+      "ui.project.title": "项目",
+      "ui.project.create": "新建项目",
+      "ui.project.name": "项目名称",
+      "ui.project.name_placeholder": "例如：星港系列",
+      "ui.project.empty": "还没有项目。创建项目后，会话可以复用它的风格指南、角色设定与约定。",
+      "ui.project.switch": "切换项目",
+      "ui.project.clear": "不归入项目",
+      "ui.project.save": "保存",
+      "ui.project.delete": "删除项目",
+      "ui.project.delete_confirm": "删除项目会同时删除它的风格指南、资产与约定；已有会话和任务产物不受影响。",
+      "ui.project.style_section": "风格指南",
+      "ui.project.conventions_section": "生产约定",
+      "ui.project.assets_section": "项目资产",
+      "ui.project.style_text": "风格说明",
+      "ui.project.palette": "色板",
+      "ui.project.references": "项目风格参考图",
+      "ui.project.asset_add": "添加资产",
+      "ui.project.asset_kind": "种类",
+      "ui.project.asset_name": "名称",
+      "ui.project.asset_description": "说明",
+      "ui.project.asset_images": "形象参考图",
+      "ui.project.asset_models": "3D 模型引用",
+      "ui.project.promote": "提升为项目资产",
+      "ui.project.promote_confirm": "提升后会保存这张图的引用；删除项目资产不会删除已完成任务的产物。",
+      "ui.project.promote_kind": "资产种类",
+      "ui.project.promote_name": "资产名称",
+      "ui.project.style_source": "风格来源",
+      "ui.project.style_source_project": "继承项目",
+      "ui.project.style_source_session": "本会话",
+      "ui.project.style_source_off": "不注入",
+      "ui.project.style_source_project_hint": "继承项目「{project}」的风格指南",
+      "ui.project.style_source_session_hint": "使用本会话自己设置的风格锁",
+      "ui.project.style_source_off_hint": "本轮不注入任何风格参考",
+      "ui.project.kind.character": "角色",
+      "ui.project.kind.prop": "道具",
+      "ui.project.kind.style_reference": "风格参考",
+      "ui.project.kind.other": "其他",
+      "ui.project.convention.pipeline": "制作流程",
+      "ui.project.convention.naming": "命名约定",
+      "ui.project.convention.coordinates": "坐标约定",
       "ui.harness.title": "功能设置",
         "ui.harness.operation_section": "选择功能",
         "ui.harness.not_connected": "这项功能暂未接入可用服务。",
@@ -5121,6 +5169,71 @@
         "ui.viewer.splat.load_failed": "Gaussian Splat 暂时无法预览。原始文件仍可下载。"
       }
     },
+    "project": {
+      "limits": {
+        "maximum_projects_per_owner": 20,
+        "maximum_name_characters": 80,
+        "maximum_assets_per_project": 200,
+        "maximum_asset_name_characters": 120,
+        "maximum_asset_description_characters": 1000,
+        "maximum_asset_images": 8,
+        "maximum_asset_models": 4,
+        "maximum_list_items": 200
+      },
+      "style_guide": {
+        "maximum_text_characters": 2000,
+        "maximum_references": 8,
+        "maximum_palette_colors": 12,
+        "palette_color_pattern": "^#[0-9a-fA-F]{6}$"
+      },
+      "assets": {
+        "kinds": [
+          {"id": "character", "label_key": "ui.project.kind.character"},
+          {"id": "prop", "label_key": "ui.project.kind.prop"},
+          {"id": "style_reference", "label_key": "ui.project.kind.style_reference"},
+          {"id": "other", "label_key": "ui.project.kind.other"}
+        ]
+      },
+      "conventions": {
+        "fields": [
+          {"name": "purpose", "type": "profile", "label": "用途"},
+          {"name": "image_use", "type": "image_profile", "label": "2D 用途"},
+          {"name": "style", "type": "text", "label": "风格", "maximum_characters": 200, "multiline": true, "placeholder": "如：写实、低多边形、暖色调金属材质"},
+          {"name": "target_platform", "type": "text", "label": "目标平台", "maximum_characters": 120, "placeholder": "如：Unity、Unreal、Web、AR、3D 打印"},
+          {"name": "triangle_budget", "type": "integer", "label": "三角面预算", "minimum": 100, "maximum": 2000000},
+          {"name": "notes", "type": "text", "label": "补充说明", "maximum_characters": 1000, "multiline": true, "placeholder": "记录限制、排除项和参考方向。"}
+        ],
+        "texts": [
+          {"name": "pipeline", "label_key": "ui.project.convention.pipeline", "maximum_characters": 1000},
+          {"name": "naming", "label_key": "ui.project.convention.naming", "maximum_characters": 500},
+          {"name": "coordinates", "label_key": "ui.project.convention.coordinates", "maximum_characters": 500}
+        ]
+      },
+      "audit": {
+        "create_action": "create_project",
+        "update_action": "update_project",
+        "delete_action": "delete_project",
+        "promote_action": "promote_project_asset",
+        "project_resource_type": "project",
+        "asset_resource_type": "project_asset"
+      },
+      "messages": {
+        "name_required": "项目名称不能为空。",
+        "name_too_long": "项目名称不能超过 {maximum} 个字符。",
+        "project_limit": "每个用户最多创建 {maximum} 个项目。",
+        "asset_limit": "每个项目最多保存 {maximum} 个资产。",
+        "style_text_too_long": "风格说明不能超过 {maximum} 个字符。",
+        "palette_color_invalid": "色板颜色必须是 #RRGGBB 形式。",
+        "reference_limit": "风格参考图最多 {maximum} 张。",
+        "reference_invalid": "参考图不可用或不属于当前用户。",
+        "unknown_project": "项目不存在或不属于当前用户。",
+        "asset_not_found": "项目资产不存在。",
+        "promotion_source_invalid": "只能提升自己的已完成任务产物或上传的图片。",
+        "style_guide_inherited": "本项目会话默认继承项目「{project}」的风格指南。",
+        "style_guide_overridden": "本会话已覆盖项目风格指南。",
+        "style_guide_off": "本会话不注入任何风格参考。"
+      }
+    },
     "chat": {
       "attachment_purposes": {
         "style": {"agent_text": "Use this image as a visual style reference."},
@@ -5146,7 +5259,13 @@
         "disabled_text": "未开启",
         "reference_purpose_template": "沿用用户风格锁的画风",
         "skip_note": "这一步已经指定了参考图，没有追加上风格锁参考图。",
-        "unsupported_note": "当前服务不接受参考图，风格锁参考图没有随这一步发送。"
+        "unsupported_note": "当前服务不接受参考图，风格锁参考图没有随这一步发送。",
+        "sources": [
+          "project",
+          "session",
+          "off"
+        ],
+        "project_prompt_template": "\n\nProject style: Apply the project's visual style while preserving the user's requested subject, composition and changes. Project: {project}. Style description: {style}"
       },
       "visual_anchors": {
         "maximum_anchors": 6,
@@ -5220,6 +5339,7 @@
           "choice_answer": "choiceAnswer",
           "reasoning_effort": "reasoningEffort",
           "chat_model": "chatModel",
+           "project_id": "project_id",
            "style_lock_enabled": "enabled",
            "style_lock_text": "text",
            "style_lock_references": "references",
@@ -5229,7 +5349,8 @@
         "style_lock": {
           "enabled": "enabled",
           "text": "text",
-          "references": "references"
+          "references": "references",
+          "source": "source"
         },
         "response_fields": {
           "id": "id",
@@ -5293,6 +5414,8 @@
           "chat_models": "chatModels",
           "chat_model_name": "model",
           "style_lock": "styleLock",
+          "project_id": "projectId",
+          "style_lock_source": "styleLockSource",
           "self_checks": "selfChecks",
           "status": "status",
           "rounds_used": "roundsUsed",
@@ -13519,6 +13642,22 @@
         "label": "设置 Agent 范围"
       },
       {
+        "value": "create_project",
+        "label": "创建项目"
+      },
+      {
+        "value": "update_project",
+        "label": "更新项目"
+      },
+      {
+        "value": "delete_project",
+        "label": "删除项目"
+      },
+      {
+        "value": "promote_project_asset",
+        "label": "提升为项目资产"
+      },
+      {
         "value": "set_production_brief",
         "label": "设置制作简报"
       },
@@ -14625,6 +14764,46 @@
             "error.invalid_model_input": "The model file structure is invalid. Check the file and upload it again.",
             "error.unsupported_model_input": "This model doesn't meet the currently supported upload format or feature requirements. See the format notes.",
             "error.model_input_limit": "The model content exceeds the current processing limit. Reduce the file, geometry, or texture size and try again.",
+            "ui.project.title": "Project",
+            "ui.project.create": "New project",
+            "ui.project.name": "Project name",
+            "ui.project.name_placeholder": "For example: Star Harbor series",
+            "ui.project.empty": "No projects yet. A project lets later sessions reuse its style guide, character designs and conventions.",
+            "ui.project.switch": "Switch project",
+            "ui.project.clear": "No project",
+            "ui.project.save": "Save",
+            "ui.project.delete": "Delete project",
+            "ui.project.delete_confirm": "Deleting the project also deletes its style guide, assets and conventions; existing sessions and finished task results are unaffected.",
+            "ui.project.style_section": "Style guide",
+            "ui.project.conventions_section": "Production conventions",
+            "ui.project.assets_section": "Project assets",
+            "ui.project.style_text": "Style description",
+            "ui.project.palette": "Palette",
+            "ui.project.references": "Project style references",
+            "ui.project.asset_add": "Add asset",
+            "ui.project.asset_kind": "Kind",
+            "ui.project.asset_name": "Name",
+            "ui.project.asset_description": "Description",
+            "ui.project.asset_images": "Reference images",
+            "ui.project.asset_models": "3D model references",
+            "ui.project.promote": "Promote to project asset",
+            "ui.project.promote_confirm": "Promotion stores a reference to this picture; deleting the project asset never deletes finished task results.",
+            "ui.project.promote_kind": "Asset kind",
+            "ui.project.promote_name": "Asset name",
+            "ui.project.style_source": "Style source",
+            "ui.project.style_source_project": "Inherit project",
+            "ui.project.style_source_session": "This session",
+            "ui.project.style_source_off": "Do not inject",
+            "ui.project.style_source_project_hint": "Inherit the style guide of project \"{project}\"",
+            "ui.project.style_source_session_hint": "Use this session's own style lock",
+            "ui.project.style_source_off_hint": "Inject no style reference for this turn",
+            "ui.project.kind.character": "Character",
+            "ui.project.kind.prop": "Prop",
+            "ui.project.kind.style_reference": "Style reference",
+            "ui.project.kind.other": "Other",
+            "ui.project.convention.pipeline": "Production pipeline",
+            "ui.project.convention.naming": "Naming convention",
+            "ui.project.convention.coordinates": "Coordinate convention",
             "ui.harness.title": "Feature settings",
             "ui.harness.operation_section": "Choose a feature",
             "ui.harness.not_connected": "No service is available for this feature yet.",
@@ -17876,6 +18055,10 @@
             "audit_actions[value=bootstrap_admin_password_reset].label": "Administrator password reset at startup",
             "audit_actions[value=set_approval_mode].label": "Set approval mode",
             "audit_actions[value=set_agent_scope].label": "Set Agent scope",
+            "audit_actions[value=create_project].label": "Create project",
+            "audit_actions[value=update_project].label": "Update project",
+            "audit_actions[value=delete_project].label": "Delete project",
+            "audit_actions[value=promote_project_asset].label": "Promote project asset",
             "audit_actions[value=set_production_brief].label": "Set production brief",
             "audit_actions[value=continue_turn_in_background].label": "Stop waiting, keep the task running",
             "audit_actions[value=change_own_password].label": "Change own password",

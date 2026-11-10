@@ -42,6 +42,9 @@ func validateApplication(schema ApplicationSchema) error {
 	); err != nil {
 		return fmt.Errorf("chat: %w", err)
 	}
+	if err := validateProject(schema.Project, schema.Chat, schema.Runtime, schema.Content); err != nil {
+		return fmt.Errorf("project: %w", err)
+	}
 	if err := validateCanvas(schema.Canvas, schema.Runtime, schema.Content); err != nil {
 		return fmt.Errorf("canvas: %w", err)
 	}
