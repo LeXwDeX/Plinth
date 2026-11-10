@@ -24,7 +24,7 @@ func scanAgentOperation(row interface{ Scan(...any) error }) (generationtool.Ope
 		&op.PreparedInputID, &op.PreparedInputHash, &op.OfferingID,
 		&op.OfferingRevision, &op.GrantRequestID, &op.Seq, &op.Detached,
 		&op.PolicyEvaluated, &op.Settled, &op.Harness.Revision, &op.Harness.Digest, &op.RechargeTaskID,
-		&op.ReferenceCount, &op.ReferenceTotal, &referenceSource)
+		&op.CorrectionTaskID, &op.ReferenceCount, &op.ReferenceTotal, &referenceSource)
 	if errors.Is(err, sql.ErrNoRows) {
 		return op, generationtool.ErrOperationNotFound
 	}
@@ -58,7 +58,7 @@ const agentOperationSelect = `SELECT o.owner_id,o.session_id,o.assistant_message
  o.tool_name,o.command_hash,o.operation_id,o.idempotency_key,o.prepared_input_id,
  o.prepared_input_hash,o.offering_id,o.offering_revision,o.grant_request_id,
  o.rowid,o.detached_at<>'',o.policy_evaluated_at<>'',o.settled_at<>'',o.harness_revision,o.harness_digest,
- o.recharge_task_id,o.reference_count,o.reference_total,o.reference_source
+ o.recharge_task_id,o.correction_task_id,o.reference_count,o.reference_total,o.reference_source
  FROM agent_generation_operations o`
 
 func (r *Repository) LoadAgentOperation(ctx context.Context, owner, session, assistantMessageID, callID string) (generationtool.Operation, error) {
@@ -82,6 +82,7 @@ func sameAgentOperation(a, b generationtool.Operation) bool {
 		a.IdempotencyKey == b.IdempotencyKey &&
 		a.PreparedInputHash == b.PreparedInputHash && a.OfferingID == b.OfferingID &&
 		a.OfferingRevision == b.OfferingRevision && a.Harness == b.Harness &&
+		a.CorrectionTaskID == b.CorrectionTaskID &&
 		sameReferenceSource(a.ReferenceSource, b.ReferenceSource)
 }
 
@@ -118,13 +119,13 @@ func (r *Repository) InsertAgentOperation(ctx context.Context, candidate generat
 	_, err := r.db.ExecContext(ctx, `INSERT INTO agent_generation_operations
  (owner_id,session_id,assistant_message_id,call_id,tool_name,command_hash,operation_id,
  idempotency_key,prepared_input_id,prepared_input_hash,offering_id,offering_revision,created_at,harness_revision,harness_digest,
- recharge_task_id,reference_count,reference_total,reference_source)
- VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(owner_id,session_id,assistant_message_id,call_id) DO NOTHING`,
+ recharge_task_id,correction_task_id,reference_count,reference_total,reference_source)
+ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(owner_id,session_id,assistant_message_id,call_id) DO NOTHING`,
 		candidate.OwnerID, candidate.SessionID, candidate.AssistantMessageID, candidate.CallID,
 		candidate.ToolName, candidate.CommandHash, candidate.OperationID,
 		candidate.IdempotencyKey, candidate.PreparedInputID, candidate.PreparedInputHash,
 		candidate.OfferingID, candidate.OfferingRevision, time.Now().UTC().Format(time.RFC3339Nano), candidate.Harness.Revision, candidate.Harness.Digest,
-		candidate.RechargeTaskID, candidate.ReferenceCount, candidate.ReferenceTotal, referenceSource)
+		candidate.RechargeTaskID, candidate.CorrectionTaskID, candidate.ReferenceCount, candidate.ReferenceTotal, referenceSource)
 	if err != nil {
 		return generationtool.Operation{}, err
 	}

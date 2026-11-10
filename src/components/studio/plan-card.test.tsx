@@ -37,8 +37,8 @@ vi.mock('swr', () => ({
 const plan: ProductionPlan = {
   title: '木椅',
   steps: [
-    { capability: 'text-to-3d', offeringId: 'tripo-v3', purpose: '主体', estimate: tripo('80'), purposeBudgetNote: '' },
-    { capability: 'retexture', offeringId: '', purpose: '材质', estimate: legacy('20'), purposeBudgetNote: '' },
+    { capability: 'text-to-3d', offeringId: 'tripo-v3', purpose: '主体', estimate: tripo('80'), purposeBudgetNote: '', check: '' },
+    { capability: 'retexture', offeringId: '', purpose: '材质', estimate: legacy('20'), purposeBudgetNote: '', check: '' },
   ],
   correctionCapabilities: ['remesh'],
 };
@@ -94,6 +94,19 @@ describe('a production plan waiting for approval (#103)', () => {
     expect(notes).toHaveLength(1);
     expect(notes[0].textContent).toBe('面数上限 1000 超过用途预算 500');
     expect(within(view.getAllByTestId('studio-plan-step')[0]).getByTestId('studio-plan-step-budget-note')).toBeTruthy();
+  });
+
+  // #246: a step may declare a Schema checkpoint; the plan card repeats it.
+  it('shows the declared checkpoint of a step', () => {
+    const checked = { ...plan, steps: [{ ...plan.steps[0], check: 'self_check' }, plan.steps[1]] };
+    const view = render(<PlanCard plan={checked} budgets={budgets} tasks={[]} />);
+    const checks = view.getAllByTestId('studio-plan-step-check');
+    expect(checks).toHaveLength(1);
+    // The declared label, never the internal checkpoint id.
+    const label = schema.chat.self_check?.checkpoints?.find((checkpoint) => checkpoint.id === 'self_check')?.label;
+    expect(label).toBeTruthy();
+    expect(checks[0].textContent).toBe(words('ui.studio.plan.checkpoint', { check: label! }));
+    expect(within(view.getAllByTestId('studio-plan-step')[0]).getByTestId('studio-plan-step-check')).toBeTruthy();
   });
 
   it('approves and declines through the card, and disables both while a decision is on its way', () => {

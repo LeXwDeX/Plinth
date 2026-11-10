@@ -50,6 +50,13 @@ type ImageReviewer interface {
 	ReviewAttachment(context.Context, string, chat.Attachment, string, string) (imageinspect.Report, []imageinspect.Check, error)
 }
 
+// PictureReader opens one picture of the command's owner for the reference
+// comparison (#246): a chat handle's stored asset or a frozen input asset. The
+// returned bytes are bounded by the caller.
+type PictureReader interface {
+	OpenPicture(context.Context, string, chat.Attachment, string) ([]byte, error)
+}
+
 // ModelSource is the view of a three-view group that a 3D model made from the
 // group uses.
 type ModelSource struct {
@@ -111,6 +118,12 @@ type Config struct {
 	// ImageReview checks an image-to-3D input before submission (#245). Nil
 	// disables the gate.
 	ImageReview ImageReviewer
+	// PictureReader opens a session picture for compare_model_reference (#246).
+	// Nil leaves that tool unavailable.
+	PictureReader PictureReader
+	// SelfChecks is the persisted 3D self-check record (#246). Nil leaves the
+	// evidence trail, the limits and record_self_check unavailable.
+	SelfChecks *chat.SelfCheckService
 	// InputAssetRoute is the Schema's input-asset item route ({assetID}); a
 	// three-view view the person replaced with an upload is named by it (#65).
 	InputAssetRoute string
@@ -155,6 +168,8 @@ type Executor struct {
 	modelAssets   ModelAssetGateway
 	inputAssets   ModelRenderStore
 	imageReview   ImageReviewer
+	pictureReader PictureReader
+	selfChecks    *chat.SelfCheckService
 	inputAsset    string
 	chat          catalog.ChatSchema
 	texts         *catalog.TextLocalizer
@@ -220,6 +235,8 @@ func New(config Config) (*Executor, error) {
 		modelAssets:   config.ModelAssets,
 		inputAssets:   config.InputAssets,
 		imageReview:   config.ImageReview,
+		pictureReader: config.PictureReader,
+		selfChecks:    config.SelfChecks,
 		inputAsset:    config.InputAssetRoute,
 		chat:          config.Chat,
 		texts:         config.Texts,
@@ -774,7 +791,7 @@ func (executor *Executor) Execute(
 	idempotencyKey := command.IdempotencyKey()
 	if executor.UsesExecutionGrants() {
 		return executor.prepareAgentOperation(ctx, command, capability, offering, input, prompt, idempotencyKey,
-			references, selection, finalReferences, referenceIDs, observe, trace)
+			references, selection, finalReferences, referenceIDs, "", observe, trace)
 	}
 	if offering.NativePricing != nil {
 		return chat.ToolResult{NoSubmission: true}, errors.New("native pricing requires prepared authorization")
@@ -1003,7 +1020,10 @@ func (executor *Executor) observeBoundTask(
 			}
 		}
 	}
-	return executor.wait(ctx, command, task.Offering, task.ID, observe, info)
+	result, err := executor.wait(ctx, command, task.Offering, task.ID, observe, info)
+	// #246: a paid correction accepted while its Task was still running gets
+	// its self-check counters added to the receipt that is built here.
+	return executor.attachCorrectionReceipt(ctx, command, result), err
 }
 
 // multiviewModelID accepts a structured request's model as either the model ID

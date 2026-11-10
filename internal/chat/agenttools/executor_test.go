@@ -1291,7 +1291,7 @@ func TestGetProductionStepDispatchesToTheReadOnlyReader(t *testing.T) {
 }
 
 func TestGetProductionStepWithoutAReaderIsUnavailable(t *testing.T) {
-	executor, err := New(Config{Params: agentparams.NewStore(), Generate: &fakeGenerate{}})
+	executor, err := New(Config{Params: agentparams.NewStore(), Generate: &exactPendingGenerate{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1301,5 +1301,52 @@ func TestGetProductionStepWithoutAReaderIsUnavailable(t *testing.T) {
 	}, nil)
 	if err != nil || result.Error == "" || !result.NoSubmission {
 		t.Fatalf("unwired reader: result=%+v err=%v", result, err)
+	}
+}
+
+// #246: the two self-check tools are dispatched by their public names; an
+// unassembled deployment answers unavailable rather than falling through to
+// the generation path.
+func TestSelfCheckToolsDispatchAndRefuseWhenUnavailable(t *testing.T) {
+	var dispatched []string
+	executor, err := New(Config{
+		Params: agentparams.NewStore(), Generate: &exactPendingGenerate{},
+		CompareModelReference: func(_ context.Context, command chat.ToolCommand) (chat.ToolResult, error) {
+			dispatched = append(dispatched, command.Call.Name)
+			return chat.ToolResult{AgentContent: `{"ok":true}`, NoSubmission: true}, nil
+		},
+		RecordSelfCheck: func(_ context.Context, command chat.ToolCommand) (chat.ToolResult, error) {
+			dispatched = append(dispatched, command.Call.Name)
+			return chat.ToolResult{AgentContent: `{"ok":true}`, NoSubmission: true, Summary: json.RawMessage(`{"status":"passed"}`)}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{ToolCompareModelReference, ToolRecordSelfCheck} {
+		result, err := executor.Execute(context.Background(), chat.ToolCommand{
+			OwnerID: testOwner, SessionID: "s1", AssistantMessageID: "turn-a",
+			Call: agents.ToolCall{ID: name, Name: name, Arguments: json.RawMessage(`{}`)},
+		}, nil)
+		if err != nil || result.Error != "" || string(result.AgentContent) != `{"ok":true}` {
+			t.Fatalf("%s = %+v err=%v", name, result, err)
+		}
+	}
+	if len(dispatched) != 2 || dispatched[0] != ToolCompareModelReference || dispatched[1] != ToolRecordSelfCheck {
+		t.Fatalf("dispatched = %v", dispatched)
+	}
+
+	empty, err := New(Config{Params: agentparams.NewStore(), Generate: &exactPendingGenerate{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{ToolCompareModelReference, ToolRecordSelfCheck} {
+		result, err := empty.Execute(context.Background(), chat.ToolCommand{
+			OwnerID: testOwner, SessionID: "s1", AssistantMessageID: "turn-a",
+			Call: agents.ToolCall{ID: name, Name: name, Arguments: json.RawMessage(`{}`)},
+		}, nil)
+		if err != nil || result.Error == "" || !result.NoSubmission {
+			t.Fatalf("unavailable %s = %+v err=%v", name, result, err)
+		}
 	}
 }

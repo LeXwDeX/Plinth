@@ -21,6 +21,7 @@ import type {
   ChatToolCall,
 } from '@/store/chat-store';
 import { parseProductionBrief, type ProductionBrief } from '@/lib/chat/production-brief';
+import { parseSelfChecks, type SelfCheckRecord } from '@/lib/chat/self-check';
 import { parseSessionBudget } from '@/lib/chat/budget';
 import { parseNativeQuote, parsePriceTotals, type NativeQuote } from '@/lib/pricing';
 import { responseRequestId, withRequestReference } from '@/lib/problem-reference';
@@ -312,6 +313,8 @@ export interface ChatBrowserClient {
   /** 会话设定摘要：Agent 每轮都能看到，用户可查看和修改。 */
   getNotes(sessionID: string, signal?: AbortSignal): Promise<string>;
   setNotes(sessionID: string, notes: string): Promise<string>;
+  /** #246: the session's persisted 3D self-check records (empty when none). */
+  getSelfChecks(sessionID: string, signal?: AbortSignal): Promise<SelfCheckRecord[]>;
   /** #154: the session-level style lock and its ordered image asset IDs. */
   getStyleLock(sessionID: string, signal?: AbortSignal): Promise<ChatStyleLock>;
   setStyleLock(sessionID: string, lock: ChatStyleLock): Promise<ChatStyleLock>;
@@ -1446,6 +1449,12 @@ export function createChatBrowserClient(
       const payload = await responseValue(response);
       if (!response.ok) throw approvalError(schema, payload, response.status);
       return notesOf(schema, payload);
+    },
+    async getSelfChecks(sessionID, signal) {
+      const response = await fetcher(sessionRoute(schema, schema.runtime.http.routes.chat_session_self_checks, sessionID), { signal });
+      const payload = await responseValue(response);
+      if (!response.ok) throw approvalError(schema, payload, response.status);
+      return parseSelfChecks(schema, payload);
     },
     async getStyleLock(sessionID, signal) {
       const response = await fetcher(styleLockRoute(schema, sessionID), { signal });

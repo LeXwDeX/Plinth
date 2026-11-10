@@ -93,6 +93,11 @@ type Config struct {
 	// VerifyPreparedSource rechecks an original frozen Harness scope before
 	// approval and before detached submission. Nonzero Harness bindings require it.
 	VerifyPreparedSource func(context.Context, generationtool.Operation, generation.PreparedInput) error
+	// ProcessingCorrection counts the paid processing step this operation
+	// really submitted against the result it changes (#246). The operation
+	// carries the owner, session and corrected Task. A sweep may retry an
+	// unsettled operation, so the callback must count each operation only once.
+	ProcessingCorrection func(context.Context, generationtool.Operation) error
 	Operations           Operations
 	Grants               *executiongrant.Service
 	Gateway              Gateway
@@ -111,6 +116,7 @@ type Config struct {
 // Service is safe for concurrent use.
 type Service struct {
 	verifyPreparedSource func(context.Context, generationtool.Operation, generation.PreparedInput) error
+	processingCorrection func(context.Context, generationtool.Operation) error
 	operations           Operations
 	grants               *executiongrant.Service
 	gateway              Gateway
@@ -145,7 +151,8 @@ func New(config Config) (*Service, error) {
 		tools[tool.Name] = tool
 	}
 	return &Service{
-		verifyPreparedSource: config.VerifyPreparedSource, operations: config.Operations, grants: config.Grants, gateway: config.Gateway,
+		verifyPreparedSource: config.VerifyPreparedSource, processingCorrection: config.ProcessingCorrection,
+		operations: config.Operations, grants: config.Grants, gateway: config.Gateway,
 		chat: config.Chat, schema: config.Schema, clock: config.Clock, tools: tools, texts: config.Texts,
 		defaultLocale: config.DefaultLocale,
 	}, nil
@@ -1102,7 +1109,25 @@ func (s *Service) runApproved(ctx context.Context, op generationtool.Operation, 
 	if task.OwnerID != generation.OwnerID(op.OwnerID) || task.SessionID != op.SessionID || task.ID != taskID {
 		return Outcome{TaskID: string(taskID)}, generationtool.ErrOperationConflict
 	}
+	// The step is really accepted now (a fresh submit above, or a bound grant
+	// the sweep is finishing). Count its correction before the outcome is
+	// posted; the callback's per-operation idempotency makes the retries of an
+	// unsettled operation harmless.
+	s.countProcessingCorrection(ctx, op)
 	return s.report(ctx, op, task)
+}
+
+// countProcessingCorrection reports a paid processing step to the owner's
+// self-check record. Evidence bookkeeping never blocks the paid result: an
+// unreadable record only leaves the correction uncounted, like the tool-side
+// path.
+func (s *Service) countProcessingCorrection(ctx context.Context, op generationtool.Operation) {
+	if s.processingCorrection == nil || op.CorrectionTaskID == "" {
+		return
+	}
+	// The Task is already accepted; a cancelled request context must not
+	// discard its evidence.
+	_ = s.processingCorrection(context.WithoutCancel(ctx), op)
 }
 
 // permanentSubmitFailure tells a submit error that no later attempt can

@@ -27,6 +27,7 @@ func TestMigration0066UpgradesExistingSessionsToFollowTheDefaultModel(t *testing
 	for _, statement := range []string{
 		`DELETE FROM go_schema_migrations WHERE version >= 66`,
 		`DROP TABLE IF EXISTS chat_branch_task_refs`,
+		`DROP TABLE IF EXISTS chat_self_checks`,
 		`DROP TABLE llm_settings_versions`,
 		`DROP TABLE llm_connection_checks`,
 		`ALTER TABLE go_chat_sessions DROP COLUMN chat_model`,
@@ -36,6 +37,7 @@ func TestMigration0066UpgradesExistingSessionsToFollowTheDefaultModel(t *testing
 		`ALTER TABLE agent_generation_operations DROP COLUMN reference_count`,
 		`ALTER TABLE agent_generation_operations DROP COLUMN reference_total`,
 		`ALTER TABLE agent_generation_operations DROP COLUMN reference_source`,
+		`ALTER TABLE agent_generation_operations DROP COLUMN correction_task_id`,
 		`DROP TABLE budget_reservations`,
 		`DROP TABLE production_budgets`,
 		`ALTER TABLE execution_grants DROP COLUMN budget_eligible`,

@@ -281,7 +281,7 @@ func TestModelReviewIsOnlyValidatedWhenAToolUsesIt(t *testing.T) {
 	var remaining []catalog.ChatAgentToolSchema
 	for _, tool := range app.Chat.AgentTools {
 		switch tool.Execution.ImplementationKey {
-		case "model.inspect", "model.render", "model.compare":
+		case "model.inspect", "model.render", "model.compare", "model.compare_reference", "self_check.record":
 			continue
 		}
 		remaining = append(remaining, tool)
@@ -293,7 +293,7 @@ func TestModelReviewIsOnlyValidatedWhenAToolUsesIt(t *testing.T) {
 		var triggers []string
 		for _, name := range app.Chat.Agent.CraftPrompts[index].WhenToolsAny {
 			switch name {
-			case "compare_models", "inspect_model", "render_model_views":
+			case "compare_models", "compare_model_reference", "inspect_model", "record_self_check", "render_model_views":
 				continue
 			}
 			triggers = append(triggers, name)
@@ -302,13 +302,15 @@ func TestModelReviewIsOnlyValidatedWhenAToolUsesIt(t *testing.T) {
 	}
 	var base []string
 	for _, name := range app.Chat.Harness.BaseTools {
-		if name == "inspect_model" || name == "render_model_views" || name == "compare_models" {
+		if name == "inspect_model" || name == "render_model_views" || name == "compare_models" ||
+			name == "compare_model_reference" || name == "record_self_check" {
 			continue
 		}
 		base = append(base, name)
 	}
 	app.Chat.Harness.BaseTools = base
 	app.Chat.ModelReview = catalog.ChatModelReviewSchema{}
+	app.Chat.SelfCheck = catalog.ChatSelfCheckSchema{}
 	if err := catalog.ValidateApplicationSchema(app); err != nil {
 		t.Fatalf("a Schema without the review tools was rejected: %v", err)
 	}

@@ -326,11 +326,20 @@ func (executor *Executor) InspectModel(ctx context.Context, command chat.ToolCom
 	if refusal != nil {
 		return *refusal, nil
 	}
+	if refusal := executor.selfCheckRoundRefusal(ctx, command, source); refusal != nil {
+		return *refusal, nil
+	}
 	entry, refusal, err := executor.loadReviewedModel(ctx, command, review, source)
 	if err != nil {
 		return chat.ToolResult{}, err
 	}
 	if refusal != nil {
+		// The call named this model but could not read it: the round stays in
+		// the record as failed evidence, never as a passed check.
+		executor.appendSelfCheckCheck(ctx, command, source, chat.SelfCheckCheck{
+			Kind: chat.SelfCheckKindInspect, Tool: command.Call.Name,
+			AssetID: string(source.asset.ID), Views: []string{}, OK: false, Error: refusal.Error,
+		})
 		return *refusal, nil
 	}
 	options := modelReviewInspectOptions(review)
@@ -371,6 +380,10 @@ func (executor *Executor) InspectModel(ctx context.Context, command chat.ToolCom
 		UsageCheck:     usageCheck,
 		PartsTotal:     total,
 		PartsTruncated: truncated,
+		SelfCheck: executor.appendSelfCheckCheck(ctx, command, source, chat.SelfCheckCheck{
+			Kind: chat.SelfCheckKindInspect, Tool: command.Call.Name,
+			AssetID: string(source.asset.ID), Views: []string{}, OK: true,
+		}),
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
@@ -431,11 +444,18 @@ func (executor *Executor) RenderModelViews(ctx context.Context, command chat.Too
 	if refusal != nil {
 		return *refusal, nil
 	}
+	if refusal := executor.selfCheckRenderRefusal(ctx, command, source); refusal != nil {
+		return *refusal, nil
+	}
 	entry, refusal, err := executor.loadReviewedModel(ctx, command, review, source)
 	if err != nil {
 		return chat.ToolResult{}, err
 	}
 	if refusal != nil {
+		executor.appendSelfCheckCheck(ctx, command, source, chat.SelfCheckCheck{
+			Kind: chat.SelfCheckKindRender, Tool: command.Call.Name,
+			AssetID: string(source.asset.ID), Views: []string{}, OK: false, Error: refusal.Error,
+		})
 		return *refusal, nil
 	}
 	report, err := entry.inspect(ctx, executor.modelReview, modelReviewInspectOptions(review))
@@ -457,7 +477,8 @@ func (executor *Executor) RenderModelViews(ctx context.Context, command chat.Too
 		RenderCallsRemaining: executor.modelReviewCallsRemaining(command, review),
 	}
 	for _, view := range views {
-		picture, err := executor.renderReviewedView(ctx, review, entry, view, mode, parts, isolate, size)
+		picture, err := executor.renderReviewedView(ctx, review, entry, view, mode, parts, isolate,
+			review.Render.Supersample, size)
 		if err != nil {
 			executor.logger.Warn("model review view not rendered",
 				"task_id", source.task.ID, "asset_id", source.asset.ID, "view", view, "error", err)
@@ -483,6 +504,15 @@ func (executor *Executor) RenderModelViews(ctx context.Context, command chat.Too
 	}
 	executor.finishRenderResult(command, review, &result.OK, &result.Message, &result.Note,
 		len(result.Views), modelReviewViewNames(result.Views))
+	failedReason := ""
+	if !result.OK && len(result.FailedViews) > 0 {
+		failedReason = result.FailedViews[0].Error
+	}
+	result.SelfCheck = executor.appendSelfCheckCheck(ctx, command, source, chat.SelfCheckCheck{
+		Kind: chat.SelfCheckKindRender, Tool: command.Call.Name,
+		AssetID: string(source.asset.ID), Views: modelReviewSummaryViews(result.Views), OK: result.OK,
+		Error: failedReason,
+	})
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		return chat.ToolResult{Error: "model render not readable", NoSubmission: true}, nil
@@ -547,6 +577,9 @@ func (executor *Executor) CompareModels(ctx context.Context, command chat.ToolCo
 	}
 	entries := make([]*modelReviewEntry, 0, 2)
 	for _, source := range sources {
+		if refusal := executor.selfCheckRenderRefusal(ctx, command, source); refusal != nil {
+			return *refusal, nil
+		}
 		entry, refusal, err := executor.loadReviewedModel(ctx, command, review, source)
 		if err != nil {
 			return chat.ToolResult{}, err
@@ -594,7 +627,8 @@ func (executor *Executor) CompareModels(ctx context.Context, command chat.ToolCo
 		RenderCallsRemaining: executor.modelReviewCallsRemaining(command, review),
 	}
 	for _, view := range views {
-		left, err := executor.renderReviewedView(ctx, review, entries[0], view, mode, nil, false, review.Render.Size)
+		left, err := executor.renderReviewedView(ctx, review, entries[0], view, mode, nil, false,
+			review.Render.Supersample, review.Render.Size)
 		if err != nil {
 			result.FailedViews = append(result.FailedViews, modelReviewFailedView{
 				View: string(view), Error: executor.fillText(command, review.Texts.RenderFailed,
@@ -602,7 +636,8 @@ func (executor *Executor) CompareModels(ctx context.Context, command chat.ToolCo
 			})
 			continue
 		}
-		right, err := executor.renderReviewedView(ctx, review, entries[1], view, mode, nil, false, review.Render.Size)
+		right, err := executor.renderReviewedView(ctx, review, entries[1], view, mode, nil, false,
+			review.Render.Supersample, review.Render.Size)
 		if err != nil {
 			result.FailedViews = append(result.FailedViews, modelReviewFailedView{
 				View: string(view), Error: executor.fillText(command, review.Texts.RenderFailed,
@@ -633,6 +668,16 @@ func (executor *Executor) CompareModels(ctx context.Context, command chat.ToolCo
 			"{count}", strconv.Itoa(len(result.Views)), "{views}", modelReviewCompareViewNames(result.Views))
 	}
 	result.Note = executor.modelReviewNote(command, review, len(result.Views))
+	compareViews := modelReviewSummaryCompareViews(result.Views)
+	for index, source := range sources {
+		block := executor.appendSelfCheckCheck(ctx, command, source, chat.SelfCheckCheck{
+			Kind: chat.SelfCheckKindCompare, Tool: command.Call.Name,
+			AssetID: string(source.asset.ID), Views: compareViews, OK: result.OK,
+		})
+		if index == 0 {
+			result.SelfCheck = block
+		}
+	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		return chat.ToolResult{Error: "model comparison not readable", NoSubmission: true}, nil
@@ -860,13 +905,16 @@ func (executor *Executor) renderReviewedView(
 	mode modelinspect.RenderMode,
 	parts []string,
 	isolate bool,
+	supersample int,
 	size int,
 ) (*image.NRGBA, error) {
 	if err := executor.modelReview.acquire(ctx); err != nil {
 		return nil, err
 	}
 	defer executor.modelReview.release()
-	supersample := review.Render.Supersample
+	if supersample < 1 {
+		supersample = review.Render.Supersample
+	}
 	if supersample < 1 {
 		supersample = 1
 	}
@@ -1397,6 +1445,7 @@ type modelReviewInspectResult struct {
 	UsageCheck     *modelReviewUsageCheck `json:"usage_check,omitempty"`
 	PartsTotal     int                    `json:"parts_total"`
 	PartsTruncated bool                   `json:"parts_truncated"`
+	SelfCheck      *selfCheckStatusBlock  `json:"self_check,omitempty"`
 }
 
 type modelReviewViewResult struct {
@@ -1419,6 +1468,7 @@ type modelReviewRenderResult struct {
 	FailedViews          []modelReviewFailedView `json:"failed_views"`
 	RenderCallsRemaining int                     `json:"render_calls_remaining"`
 	Note                 string                  `json:"note,omitempty"`
+	SelfCheck            *selfCheckStatusBlock   `json:"self_check,omitempty"`
 	ImageURLs            []string                `json:"-"`
 	Pictures             []chat.ToolPicture      `json:"-"`
 }
@@ -1454,6 +1504,7 @@ type modelReviewCompareResult struct {
 	FailedViews          []modelReviewFailedView  `json:"failed_views"`
 	RenderCallsRemaining int                      `json:"render_calls_remaining"`
 	Note                 string                   `json:"note,omitempty"`
+	SelfCheck            *selfCheckStatusBlock    `json:"self_check,omitempty"`
 	ImageURLs            []string                 `json:"-"`
 	Pictures             []chat.ToolPicture       `json:"-"`
 }

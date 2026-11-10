@@ -71,6 +71,43 @@ describe('ChatBrowserClient', () => {
     await expect(createChatBrowserClient(schema).getNotes('s')).rejects.toBeInstanceOf(Error);
   });
 
+  it('reads the session self-check records through the Schema route and field names (#246)', async () => {
+    const schema = schemaFixture();
+    schema.runtime.http.routes.chat_session_self_checks = '/configured/{sessionID}/self-checks';
+    schema.chat.api.response_fields.self_checks = 'configured-self-checks';
+    schema.chat.api.response_fields.task_id = 'configured-task';
+    schema.chat.api.response_fields.status = 'configured-status';
+    schema.chat.api.response_fields.rounds_used = 'configured-rounds';
+    schema.chat.api.response_fields.checks = 'configured-checks';
+    schema.chat.api.response_fields.conclusion = 'configured-conclusion';
+    const calls: string[] = [];
+    const client = createChatBrowserClient(schema, {
+      fetcher: async (input) => {
+        calls.push(String(input));
+        if (String(input).includes('missing')) return Response.json({ error: 'gone' }, { status: 404 });
+        return Response.json({
+          id: 's',
+          'configured-self-checks': [{
+            'configured-task': 'task-a',
+            'configured-status': 'passed',
+            'configured-rounds': 2,
+            'configured-checks': [{ round: 1, kind: 'reference', tool: 'compare_model_reference', views: ['front'], handles: ['@img1'], ok: true }],
+            'configured-conclusion': { status: 'passed', summary: 'matches' },
+          }],
+        });
+      },
+    });
+    const records = await client.getSelfChecks('s/1');
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ taskId: 'task-a', status: 'passed', roundsUsed: 2 });
+    expect(records[0].checks[0]).toMatchObject({ kind: 'reference', handles: ['@img1'] });
+    expect(records[0].conclusion?.summary).toBe('matches');
+    expect(calls).toEqual(['/configured/s%2F1/self-checks']);
+    await expect(client.getSelfChecks('missing')).rejects.toMatchObject({ status: 404, message: 'gone' });
+    delete schema.runtime.http.routes.chat_session_self_checks;
+    await expect(createChatBrowserClient(schema).getSelfChecks('s')).rejects.toBeInstanceOf(Error);
+  });
+
   it('reads and replaces the session style lock through Schema fields and keeps server detail', async () => {
     const schema = schemaFixture();
     schema.runtime.http.routes.chat_session_style_lock = '/configured/{sessionID}/style';

@@ -430,6 +430,48 @@
         "soft_tools": [],
         "budgets": {"max_paid_calls": 1, "max_tool_calls": 8, "max_interruptions": 2}
       }
+    },
+    {
+      "id": "3d-image-reference",
+      "title": "参考图贴合：图生 3D 的并排对照与自检记录",
+      "modality": "3d",
+      "category": "reference_fidelity",
+      "purpose": "game_prop",
+      "prompt": "按这张参考图做一个红色货箱道具，交付前对照参考图自检。",
+      "reference_images": [{"filename": "reference.png", "description": "纯色背景上的红色矩形主体"}],
+      "deliverables": ["可导入引擎的 3D 模型（GLB）", "参考图与模型渲染的并排对照图", "持久化的自检记录与结论"],
+      "steps": [
+        {
+          "user": "按这张参考图开始建模。",
+          "tool": {"name": "create_model_3d_from_image", "arguments": {"prompt": "stylized red cargo crate, plain background, game prop", "reference_handles": ["@img1"]}}
+        },
+        {
+          "user": "检查一下几何和用途预算。",
+          "tool": {"name": "inspect_model", "arguments": {"model": "@model1"}}
+        },
+        {
+          "user": "把模型和参考图并排对照。",
+          "tool": {"name": "compare_model_reference", "arguments": {"model": "@model1"}}
+        },
+        {
+          "user": "把这次的结论记进自检记录。",
+          "tool": {"name": "record_self_check", "arguments": {"model": "@model1", "status": "passed", "summary": "the silhouette and colour match the reference", "findings": ["silhouette matches the reference"], "fixes": [], "remaining": []}}
+        }
+      ],
+      "live_followups": ["请对照参考图检查并记录自检结论。"],
+      "expected": {
+        "capabilities": ["image-to-3d"],
+        "required_tool_groups": [
+          {"id": "generate_3d", "any": ["create_model_3d_from_image"]},
+          {"id": "reference", "any": ["compare_model_reference"]},
+          {"id": "record", "any": ["record_self_check"]}
+        ],
+        "order": [
+          {"before": ["create_model_3d_from_image"], "after": ["compare_model_reference", "record_self_check"]}
+        ],
+        "soft_tools": ["inspect_model", "compare_model_reference", "record_self_check"],
+        "budgets": {"max_paid_calls": 1, "max_tool_calls": 10, "max_interruptions": 2}
+      }
     }
 
   ]

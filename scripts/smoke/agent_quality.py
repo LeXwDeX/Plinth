@@ -76,6 +76,12 @@ def validate_request_set(data, purposes=None):
             problems.append(f"{request_id}: modality must be 2d or 3d")
         if request.get("modality") == "3d" and not request.get("purpose"):
             problems.append(f"{request_id}: a 3D request needs a purpose")
+        references = request.get("reference_images")
+        if references is not None and not isinstance(references, list):
+            problems.append(f"{request_id}: reference_images must be a list")
+        for reference in references or []:
+            if not isinstance(reference, str) and not (isinstance(reference, dict) and reference.get("filename")):
+                problems.append(f"{request_id}: every reference image needs a filename")
         if purposes is not None and request.get("purpose"):
             allowed = purposes.get(request.get("modality")) or set()
             if request["purpose"] not in allowed:
@@ -253,6 +259,17 @@ def evaluate_case(request, run):
     counts = {}
     for name in names:
         counts[name] = counts.get(name, 0) + 1
+    self_check_records = 0
+    self_check_status = {}
+    for tool in tools:
+        if tool.get("name") != "record_self_check":
+            continue
+        summary = tool.get("summary")
+        if isinstance(summary, dict):
+            self_check_records += 1
+            role = summary.get("status_role")
+            if role:
+                self_check_status[role] = self_check_status.get(role, 0) + 1
     prices = common.call_prices(run.get("messages") or [])
     credits = common.spend_by_unit(prices.values())
     metrics = {
@@ -267,6 +284,10 @@ def evaluate_case(request, run):
         "self_inspection": {
             "inspect_model": counts.get("inspect_model", 0),
             "render_model_views": counts.get("render_model_views", 0),
+            "compare_model_reference": counts.get("compare_model_reference", 0),
+            "self_check_records": self_check_records,
+            "self_check_passed": self_check_status.get("passed", 0),
+            "self_check_issues": self_check_status.get("issues", 0),
         },
         "image_count": run.get("image_count", 0),
         "final_reply_chars": len(content),
@@ -314,6 +335,9 @@ def summarize(cases, mode, revision, dirty, request_set, rubric=None, started_at
     total_tools = sum(case["metrics"]["tool_call_count"] for case in cases)
     inspect = sum(case["metrics"]["self_inspection"]["inspect_model"] for case in cases)
     renders = sum(case["metrics"]["self_inspection"]["render_model_views"] for case in cases)
+    references = sum(case["metrics"]["self_inspection"].get("compare_model_reference", 0) for case in cases)
+    self_check_records = sum(case["metrics"]["self_inspection"].get("self_check_records", 0) for case in cases)
+    self_check_passed = sum(case["metrics"]["self_inspection"].get("self_check_passed", 0) for case in cases)
     credits = {}
     for case in cases:
         for unit, amount in (case["metrics"].get("credits") or {}).items():
@@ -337,6 +361,9 @@ def summarize(cases, mode, revision, dirty, request_set, rubric=None, started_at
                 "interruptions": total_cards,
                 "inspect_model": inspect,
                 "render_model_views": renders,
+                "compare_model_reference": references,
+                "self_check_records": self_check_records,
+                "self_check_passed": self_check_passed,
                 "credits": {unit: str(amount) for unit, amount in sorted(credits.items())},
                 "elapsed_ms": sum((case["metrics"].get("elapsed_ms") or 0) for case in cases),
             },
@@ -375,23 +402,25 @@ def report_markdown(report):
         lines.append(f"- 量表: version {report['rubric'].get('version')}, sha256 `{report['rubric'].get('sha256')}`")
     lines += [
         f"- 用例: {summary.get('cases', 0)}；硬失败: {summary.get('hard_failures', 0)}",
-        f"- 合计: 工具调用 {metrics.get('tool_calls', 0)}，付费调用 {metrics.get('paid_calls', 0)}，打断 {metrics.get('interruptions', 0)}，inspect {metrics.get('inspect_model', 0)}，render {metrics.get('render_model_views', 0)}，计费 {metrics.get('credits', {})}",
+        f"- 合计: 工具调用 {metrics.get('tool_calls', 0)}，付费调用 {metrics.get('paid_calls', 0)}，打断 {metrics.get('interruptions', 0)}，inspect {metrics.get('inspect_model', 0)}，render {metrics.get('render_model_views', 0)}，对照 {metrics.get('compare_model_reference', 0)}，自检记录 {metrics.get('self_check_records', 0)}，计费 {metrics.get('credits', {})}",
         "",
-        "| 用例 | 结果 | 工具 | 付费 | 打断 | inspect | render | 耗时 |",
-        "|---|---|---|---|---|---|---|---|",
+        "| 用例 | 结果 | 工具 | 付费 | 打断 | inspect | render | 对照 | 自检 | 耗时 |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for case in report.get("cases") or []:
         case_metrics = case.get("metrics") or {}
         status = "FAIL" if case_hard_failures(case) else "PASS"
         elapsed = case_metrics.get("elapsed_ms")
         lines.append(
-            "| {id} | {status} | {tools} | {paid} | {cards} | {inspect} | {render} | {elapsed} |".format(
+            "| {id} | {status} | {tools} | {paid} | {cards} | {inspect} | {render} | {reference} | {check} | {elapsed} |".format(
                 id=case.get("id"), status=status,
                 tools=case_metrics.get("tool_call_count", 0),
                 paid=case_metrics.get("paid_call_count", 0),
                 cards=case_metrics.get("interruption_count", 0),
                 inspect=case_metrics.get("self_inspection", {}).get("inspect_model", 0),
                 render=case_metrics.get("self_inspection", {}).get("render_model_views", 0),
+                reference=case_metrics.get("self_inspection", {}).get("compare_model_reference", 0),
+                check=case_metrics.get("self_inspection", {}).get("self_check_records", 0),
                 elapsed=f"{elapsed / 1000:.1f}s" if isinstance(elapsed, (int, float)) else "-",
             )
         )
@@ -595,6 +624,9 @@ TAIL_METRICS = {
     "interruptions": "lower",
     "inspect_model": "higher",
     "render_model_views": "higher",
+    "compare_model_reference": "higher",
+    "self_check_records": "higher",
+    "self_check_passed": "higher",
 }
 
 

@@ -667,6 +667,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		},
 		OfferingAvailable: module.OfferingAvailable,
 		Store:             executionGrants,
+		Checkpoints:       selfCheckCheckpointIDs(applicationSchema.Chat.SelfCheck),
 	})
 	paramsStore := agentparams.NewPersistentParameterStore(repository, logger)
 	// The ledger's parameter source is the existing parameter store's
@@ -695,6 +696,11 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
+	// The persisted 3D self-check record (#246) serves both the tools and the
+	// session read route. Its store is the chat repository; the record is
+	// session data and never rewrites a Task.
+	selfCheckService := chat.NewSelfCheckService(repository, applicationSchema.Chat.SelfCheck)
+	chatService.SetSelfChecks(repository, applicationSchema.Chat.SelfCheck)
 	// #244: the read-only create_selection_mask tool builds its mask locally and
 	// stores it as the owner's input asset; no upstream call, Task or credits.
 	imageMask, err := imagemask.New(imagemask.Config{
@@ -747,6 +753,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		ModelAssets:     module,
 		InputAssets:     inputAssetService,
 		ImageReview:     imageReview,
+		PictureReader:   imageReview,
+		SelfChecks:      selfCheckService,
 		InputAssetRoute: applicationSchema.Runtime.HTTP.Routes.AssetItem,
 		Chat:            applicationSchema.Chat,
 		CanvasArtboard:  applicationSchema.Canvas.Frontend.Artboard,
@@ -774,22 +782,24 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		)
 	}
 	agentToolsConfig := agenttools.Config{
-		Offerings:           func() []generation.Offering { return module.Offerings("") },
-		Context:             applicationSchema.Chat.Context,
-		HistoryLookup:       chat.NewHistoryLookupPolicy(applicationSchema.Chat),
-		Params:              paramsStore,
-		Generate:            toolExecutor,
-		ReadTask:            newAgentTaskReader(module, applicationSchema.Chat, applicationSchema.Content.Messages, texts),
-		RecoverTask:         newAgentTaskRecoverer(module, applicationSchema.Chat, applicationSchema.Content.Messages, texts),
-		ListModels:          toolExecutor.ListSessionModels,
-		ReadProcessingPlan:  toolExecutor.ReadProcessingPlan,
-		InspectImage:        imageReview.Inspect,
-		CreateSelectionMask: imageMask.Execute,
-		InspectModel:        toolExecutor.InspectModel,
-		RenderModelViews:    toolExecutor.RenderModelViews,
-		CompareModels:       toolExecutor.CompareModels,
-		ReadProductionStep:  chatService.ReadProductionStep,
-		UpdateNotes:         chatService.SetSessionNotes,
+		Offerings:             func() []generation.Offering { return module.Offerings("") },
+		Context:               applicationSchema.Chat.Context,
+		HistoryLookup:         chat.NewHistoryLookupPolicy(applicationSchema.Chat),
+		Params:                paramsStore,
+		Generate:              toolExecutor,
+		ReadTask:              newAgentTaskReader(module, applicationSchema.Chat, applicationSchema.Content.Messages, texts),
+		RecoverTask:           newAgentTaskRecoverer(module, applicationSchema.Chat, applicationSchema.Content.Messages, texts),
+		ListModels:            toolExecutor.ListSessionModels,
+		ReadProcessingPlan:    toolExecutor.ReadProcessingPlan,
+		InspectImage:          imageReview.Inspect,
+		CreateSelectionMask:   imageMask.Execute,
+		InspectModel:          toolExecutor.InspectModel,
+		RenderModelViews:      toolExecutor.RenderModelViews,
+		CompareModels:         toolExecutor.CompareModels,
+		CompareModelReference: toolExecutor.CompareModelReference,
+		RecordSelfCheck:       toolExecutor.RecordSelfCheck,
+		ReadProductionStep:    chatService.ReadProductionStep,
+		UpdateNotes:           chatService.SetSessionNotes,
 		UpdateBrief: func(ctx context.Context, ownerID, sessionID string, brief map[string]json.RawMessage) error {
 			return updateProductionBriefAudited(
 				ctx,
@@ -997,6 +1007,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// #329 E': a generation tool's description says how many reference
 		// pictures the turn's picked model uses.
 		ToolNote: toolExecutor.ToolDescriptionNote,
+		// #246: the self-check state block lists the session's finished 3D
+		// results and their persisted records every turn.
+		SelfCheckTasks: toolExecutor.SessionModelTasks,
 		TaskCanceler: func(ctx context.Context, ownerID, taskID string) error {
 			_, err := module.Cancel(
 				ctx,
@@ -1564,6 +1577,14 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 				return err
 			}
 			return toolExecutor.VerifyDetachedHarnessSource(ctx, turn, op, prepared)
+		},
+		// #246: an approval submitted in the background is still a paid
+		// correction of the result the operation froze. The callback is keyed
+		// by operation, so a retried sweep counts it once.
+		ProcessingCorrection: func(ctx context.Context, op generationtool.Operation) error {
+			_, _, err := selfCheckService.IncrementCorrectionsOnce(ctx,
+				op.OwnerID, op.SessionID, op.CorrectionTaskID, generationtool.CorrectionKey(op))
+			return err
 		},
 		Operations: repository, Grants: executionGrants, Gateway: module,
 		Chat: chatService, Schema: applicationSchema.Chat,
@@ -2142,4 +2163,14 @@ func orchestratorChatSchema(schema catalog.ChatSchema, model string) catalog.Cha
 		schema.DSML.Enabled = true
 	}
 	return schema
+}
+
+// selfCheckCheckpointIDs lists the plan checkpoint ids the Product Schema
+// declares (#246). The interface is fixed here; #251 owns revising plans.
+func selfCheckCheckpointIDs(schema catalog.ChatSelfCheckSchema) []string {
+	ids := make([]string, 0, len(schema.Checkpoints))
+	for _, checkpoint := range schema.Checkpoints {
+		ids = append(ids, checkpoint.ID)
+	}
+	return ids
 }

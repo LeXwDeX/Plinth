@@ -255,6 +255,79 @@ func (executor *Executor) ListSessionModels(ctx context.Context, ownerID, sessio
 	return json.Marshal(map[string]any{"models": views})
 }
 
+// SessionModelTasks lists this session's finished 3D results for the
+// self-check prompt (#246): platform Task IDs and public model names only. It
+// shares the listing rules of list_session_models, including branch ancestry.
+func (executor *Executor) SessionModelTasks(ctx context.Context, ownerID, sessionID string) ([]chat.SelfCheckTask, error) {
+	limit := executor.chat.SelfCheck.Context.MaxResults
+	if limit <= 0 {
+		limit = executor.chat.Agent.MaxListedModels
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	// The whole bounded candidate window is read before the limit is applied:
+	// the prompt puts unchecked results first, so an old unchecked result must
+	// be able to displace a newer checked one (#246). Truncating the list read
+	// first would hide exactly those results.
+	tasks, err := executor.sessionModelTasks(ctx, ownerID, sessionID, sessionTaskMaxPages*sessionTaskPageSize)
+	if err != nil {
+		return nil, err
+	}
+	records := map[string]chat.SelfCheckRecord{}
+	if executor.selfChecks != nil {
+		if stored, listErr := executor.selfChecks.List(ctx, ownerID, sessionID); listErr != nil {
+			executor.logger.Warn("self-check records not readable for the prompt task list",
+				"owner_id", ownerID, "session_id", sessionID, "error", listErr)
+		} else {
+			for _, record := range stored {
+				records[record.TaskID] = record
+			}
+		}
+	}
+	type selfCheckTaskEntry struct {
+		task      chat.SelfCheckTask
+		unchecked bool
+		updated   int64
+	}
+	entries := make([]selfCheckTaskEntry, 0, len(tasks))
+	for _, task := range tasks {
+		model := task.Offering.ModelName
+		if model == "" {
+			model = task.Offering.ModelID
+		}
+		finished := task.CreatedAt
+		if task.FinishedAt != nil {
+			finished = *task.FinishedAt
+		}
+		entry := selfCheckTaskEntry{
+			task: chat.SelfCheckTask{TaskID: string(task.ID), Model: model, ResultAt: finished},
+			// Without the record service every result is unchecked.
+			unchecked: true,
+		}
+		if executor.selfChecks != nil {
+			record := records[string(task.ID)]
+			entry.unchecked = executor.selfChecks.Counts(record).StatusRole == chat.SelfCheckRoleUnchecked
+			entry.updated = record.UpdatedAt.UnixNano()
+		}
+		entries = append(entries, entry)
+	}
+	sort.SliceStable(entries, func(left, right int) bool {
+		if entries[left].unchecked != entries[right].unchecked {
+			return entries[left].unchecked
+		}
+		return entries[left].updated > entries[right].updated
+	})
+	if len(entries) > limit {
+		entries = entries[:limit]
+	}
+	result := make([]chat.SelfCheckTask, 0, len(entries))
+	for _, entry := range entries {
+		result = append(result, entry.task)
+	}
+	return result, nil
+}
+
 // modelParts reads a split result's parts_manifest and pairs each entry with
 // the saved model file of the same ordinal. A missing or unreadable manifest
 // leaves the list without parts; it never fails the model listing.
@@ -834,8 +907,12 @@ func (executor *Executor) executeProcessing(
 	if promptTrace != nil {
 		prompt = promptTrace.Final
 	}
+	// #246: a paid correction counts against the result it changes. The
+	// operation freezes that source Task, so the count is taken on the path
+	// that really submits the step (the turn or a later detached approval),
+	// never when a bound grant is merely observed again.
 	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, prompt,
-		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, observe, promptTrace)
+		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, string(source.ID), observe, promptTrace)
 	result = executor.attachProcessingReferenceNote(command.Tool, styleNote, result)
 	return executor.processingOutcome(command, result, err, executor.inputShape(command, input))
 }
@@ -1036,7 +1113,7 @@ func (executor *Executor) executeMultiSourceProcessing(
 		prompt = promptTrace.Final
 	}
 	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, prompt,
-		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, observe, promptTrace)
+		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, "", observe, promptTrace)
 	return executor.processingOutcome(command, result, err, executor.inputShape(command, input))
 }
 

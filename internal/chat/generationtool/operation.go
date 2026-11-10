@@ -36,6 +36,12 @@ type Operation struct {
 	// card whatever the session's approval mode, and the card says the earlier
 	// attempt was already charged so this one charges again.
 	RechargeTaskID string
+	// CorrectionTaskID names the result a paid processing step corrects
+	// (#246): the source Task whose self-check record counts the step. It is
+	// empty for tools that do not change a finished result. Keeping it on the
+	// operation means a detached approval counts the correction exactly once
+	// after it really submits, even across a restart.
+	CorrectionTaskID string
 	// ReferenceCount of ReferenceTotal are the reference pictures the step
 	// uses of the ones the turn gave, when the Offering takes fewer (#329 E:
 	// Meshy 7.1 Image to 3D takes one). Decided once, when the operation is
@@ -72,6 +78,16 @@ type Operation struct {
 	// Settled means the outcome of a detached decision (the denial, or the
 	// finished task) was posted into the session.
 	Settled bool
+}
+
+// CorrectionKey is the stable identity of one paid step's correction count
+// (#246). The operation ID outlives a restart; the call ID is the fallback for
+// an operation written before the ID existed.
+func CorrectionKey(op Operation) string {
+	if op.OperationID != "" {
+		return "operation:" + op.OperationID
+	}
+	return "call:" + op.CallID
 }
 
 type OperationStore interface {

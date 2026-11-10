@@ -21,6 +21,9 @@ import { messageTaskIds, modelCardsOf, modelTaskIdsOf, splitMessagePictures, typ
 import { reviewRecordOf } from '@/lib/chat/model-review';
 import { REPLY_LINE_HEIGHT_EM, replyNeedsCollapse } from '@/lib/chat/reply-collapse';
 import { ReviewRecordCard } from '@/components/chat/review-record';
+import { SelfCheckRecordCard } from '@/components/chat/self-check-record';
+import { selfCheckRecordsByTask, type SelfCheckRecord } from '@/lib/chat/self-check';
+import { useSelfChecks } from '@/hooks/use-self-checks';
 import { chatGaussianSplatResults, chatModelResults } from '@/lib/chat/model-results';
 import type { ComposerReference } from '@/lib/chat/composer-reference';
 import { domainOfCapability } from '@/lib/workspace/versions';
@@ -159,7 +162,11 @@ function MessageActions({
 }
 
 /** The 3D results of this message: a card per model, each with its picture as the cover. */
-function ChatModelCards({ cards, sessionId }: { cards: ModelCardModel[]; sessionId?: string | null }) {
+function ChatModelCards({ cards, sessionId, selfChecks }: {
+  cards: ModelCardModel[];
+  sessionId?: string | null;
+  selfChecks: ReadonlyMap<string, SelfCheckRecord>;
+}) {
   return (
     <div className="flex w-full flex-col gap-2">
       {cards.map((card) => (
@@ -170,6 +177,7 @@ function ChatModelCards({ cards, sessionId }: { cards: ModelCardModel[]; session
           cover={card.cover?.image ?? null}
           handle={card.handle}
           sessionId={sessionId}
+          selfCheck={selfChecks.get(card.taskId) ?? null}
         />
       ))}
     </div>
@@ -224,6 +232,16 @@ export const ChatMessage = memo(function ChatMessage({
   const collapsibleReply = !isUser && settled && replyNeedsCollapse(displayContent, collapseLines);
   const foldedReply = collapsibleReply && !replyOpen;
   const modelCards = modelCardsOf(message, previews, modelResults);
+  // #246: the session's persisted self-check records. Every reply subscribes,
+  // not only one with a model card: a later turn may self-check an earlier
+  // reply's result, and that turn's settle re-reads the shared entry. The
+  // records shown here are still only this reply's cards' records.
+  const { records: selfCheckRecords, failed: selfChecksFailed } = useSelfChecks(isUser ? null : sessionId, settled);
+  const selfChecksByTask = useMemo(() => selfCheckRecordsByTask(selfCheckRecords), [selfCheckRecords]);
+  const messageSelfChecks = useMemo(
+    () => modelCards.map((card) => selfChecksByTask.get(card.taskId)).filter((record): record is SelfCheckRecord => Boolean(record)),
+    [modelCards, selfChecksByTask],
+  );
   // #326: a paid step that failed because its source's original task is gone is judged by the server with the
   // rule plans use; a regenerate certain to fail again is not offered, and one that takes the saved file says so.
   const expiredSteps = isUser ? [] : sourceExpiredSteps((message.paidSteps ?? []).map((step) => step.taskId), trackedTasks);
@@ -322,7 +340,15 @@ export const ChatMessage = memo(function ChatMessage({
         />
       )}
 
-      {modelCards.length > 0 && <ChatModelCards cards={modelCards} sessionId={sessionId} />}
+      {modelCards.length > 0 && <ChatModelCards cards={modelCards} sessionId={sessionId} selfChecks={selfChecksByTask} />}
+      {!isUser && selfChecksFailed && modelCards.length > 0 && (
+        // #246: a failed read never turns into a false "unchecked" claim; the
+        // model card's state stays unknown and this line says why.
+        <p className="text-[11px] text-muted-foreground" role="status" data-testid="chat-self-check-load-failed">
+          {schemaText(schema, 'ui.chat.self_check.load_failed')}
+        </p>
+      )}
+      {!isUser && messageSelfChecks.length > 0 && <SelfCheckRecordCard records={messageSelfChecks} renders={renders} />}
       {splatResults.map((target) => <GaussianSplatResultCard key={target.taskId} target={target} />)}
 
       {/* 已提交的付费步骤：估算积分与批准来源 */}

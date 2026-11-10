@@ -23,7 +23,20 @@ vi.mock('@/hooks/use-asset-url-rewriter', () => ({
     proxyAssetUrl: (url: string) => `proxy:${url}`,
   }),
 }));
-vi.mock('swr', () => ({ default: () => ({ data: undefined, mutate: async () => undefined }) }));
+const selfCheckData = vi.hoisted(() => ({
+  current: undefined as unknown,
+  keys: [] as unknown[],
+  mutateCalls: 0,
+}));
+vi.mock('swr', () => ({
+  default: (key: unknown) => {
+    selfCheckData.keys.push(key);
+    return {
+      data: selfCheckData.current,
+      mutate: async () => { selfCheckData.mutateCalls += 1; },
+    };
+  },
+}));
 
 const longReply = Array.from({ length: 14 }, (_, index) => `第 ${index + 1} 行`).join('\n');
 const reply = (extra: Partial<ChatMessageType> = {}): ChatMessageType => ({
@@ -44,6 +57,9 @@ const renderImage = { url: '/api/v1/tasks/t1/assets/render-front', taskId: 't1' 
 const renderAttachment = { handle: '@render1', kind: 'image' as const, role: 'render', imageSlot: 1 };
 
 beforeEach(() => {
+  selfCheckData.current = undefined;
+  selfCheckData.keys = [];
+  selfCheckData.mutateCalls = 0;
   // jsdom has no media queries; the streaming spinner reads prefers-reduced-motion.
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
@@ -130,5 +146,59 @@ describe('the self-check calls of a reply (#103)', () => {
     // Without role="render" the picture is an ordinary result, and the review call has no picture to show.
     expect(view.queryByTestId('chat-review-thumbnail')).toBeNull();
     expect(view.getByTestId('chat-image-result')).toBeTruthy();
+  });
+});
+
+describe('the persisted self-check record of a result (#246)', () => {
+  it('shows the recorded state on the model card and beside the review calls', () => {
+    selfCheckData.current = [{
+      taskId: 't1', status: 'passed', roundsUsed: 1, roundsLimit: 3, rendersInRound: 1, rendersLimit: 6,
+      correctionsUsed: 0, correctionsLimit: 2,
+      checks: [{ round: 1, kind: 'reference', tool: 'compare_model_reference', views: ['front'], handles: [], metrics: null, ok: true, error: '', at: '' }],
+      conclusion: { status: 'passed', summary: 'matches the reference', findings: [], fixes: [], remaining: [], at: '' },
+      updatedAt: '',
+    }];
+    const view = renderMessage(reply({
+      content: '完成。',
+      attachments: [{ handle: '@model1', kind: 'model', taskId: 't1', imageSlot: 1 }],
+      images: [{ url: '/api/v1/tasks/t1/assets/preview', taskId: 't1' }],
+    }));
+    expect(view.getByTestId('chat-model-results')).toBeTruthy();
+    const badge = view.getByTestId('chat-model-self-check-status');
+    expect(badge.getAttribute('data-role')).toBe('passed');
+    expect(badge.textContent).toBe(messages['ui.chat.self_check.status_passed']);
+    const record = view.getByTestId('chat-self-check-record');
+    expect(record.textContent).toContain('matches the reference');
+  });
+
+  it('shows an unchecked result without inventing a record', () => {
+    const view = renderMessage(reply({
+      content: '完成。',
+      attachments: [{ handle: '@model1', kind: 'model', taskId: 't1', imageSlot: 1 }],
+      images: [{ url: '/api/v1/tasks/t1/assets/preview', taskId: 't1' }],
+    }));
+    const badge = view.getByTestId('chat-model-self-check-status');
+    expect(badge.getAttribute('data-role')).toBe('unchecked');
+    expect(badge.textContent).toBe(messages['ui.chat.self_check.status_unchecked']);
+    expect(view.queryByTestId('chat-self-check-record')).toBeNull();
+  });
+
+  it('reads the session records for a reply without a model card too', () => {
+    // A later turn's reply has no model card of its own; it still subscribes
+    // to the session's records, because its settle is what the records written
+    // by that turn's tools are read after.
+    const keys = () => selfCheckData.keys.filter(
+      (key): key is [string, string] => Array.isArray(key) && key.length >= 2,
+    );
+    renderMessage(reply({ content: '对照参考图后记录结论。' }));
+    expect(keys().some((key) => key[0] === 'chat-self-checks' && key[1] === 's1')).toBe(true);
+  });
+
+  it('re-reads the shared session records when a reply settles', () => {
+    const streaming = reply({ content: '检查中。', isStreaming: true });
+    const view = renderMessage(streaming);
+    expect(selfCheckData.mutateCalls).toBe(0);
+    view.rerender(<ChatMessage message={{ ...streaming, content: '完成。', isStreaming: false }} sessionId="s1" />);
+    expect(selfCheckData.mutateCalls).toBeGreaterThan(0);
   });
 });
