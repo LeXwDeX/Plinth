@@ -300,12 +300,15 @@ type Service struct {
 	compactionListLimit int
 
 	// workLedger is application.chat.work_ledger (#248); workLedgerTasks is
-	// the public-Task read source and workDecisions the optional rejected
-	// direction source (#241). Both are set during application assembly.
-	workLedger       catalog.ChatWorkLedgerSchema
-	workLedgerTasks  SessionTaskSource
-	workLedgerDetail SessionTaskDetail
-	workDecisions    WorkDecisionReader
+	// the public-Task page source, workLedgerDetail the full single-Task read,
+	// workDecisions the rejected-direction source and workParameterSource the
+	// existing parameter store's last-writer state. All are set during
+	// application assembly.
+	workLedger          catalog.ChatWorkLedgerSchema
+	workLedgerTasks     SessionTaskSource
+	workLedgerDetail    SessionTaskDetail
+	workDecisions       WorkDecisionReader
+	workParameterSource WorkParameterSource
 }
 
 func NewService(config ServiceConfig) (*Service, error) {

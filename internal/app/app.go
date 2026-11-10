@@ -541,13 +541,15 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	chatService.SetAttachmentVerifier(referenceResolver)
 	// The session production ledger (#248) reads its steps from the public
 	// Tasks of the session; a branch additionally reads its ancestors' Tasks
-	// through the refs table. The read is bounded by the Schema and is not an
+	// through the refs table. The summary reads one bounded page, while
+	// get_production_step pages the complete session set; the read is not an
 	// execution grant.
-	chatService.SetSessionTaskSource(func(ctx context.Context, ownerID, sessionID string) (generation.TaskPage, error) {
+	chatService.SetSessionTaskSource(func(ctx context.Context, ownerID, sessionID string, offset, limit int) (generation.TaskPage, error) {
 		return module.List(ctx, generation.OwnTasks(generation.OwnerID(ownerID)), generation.ListQuery{
 			SessionID:         sessionID,
 			IncludeBranchRefs: true,
-			Limit:             applicationSchema.Chat.WorkLedger.MaximumSteps,
+			Offset:            offset,
+			Limit:             limit,
 		})
 	})
 	// get_production_step reads the one requested step in full; the list
@@ -555,6 +557,13 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	chatService.SetSessionTaskDetail(func(ctx context.Context, ownerID, sessionID, taskID string) (generation.Task, error) {
 		return module.Get(ctx, generation.OwnerID(ownerID), generation.TaskID(taskID))
 	})
+	// Rejected directions (#248). Explicit rejection writes are #241's scope;
+	// until they exist the reader projects the selected results a later
+	// selection or pick superseded from the persisted turn options. It never
+	// invents a direction, and a read failure becomes a ledger omission, not an
+	// empty list. No migration is added.
+	chatService.SetDecisionReader(chat.NewSessionDecisionReader(repository,
+		applicationSchema.Chat.WorkLedger.Rejected.SupersededReason))
 	// In-chat choice cards (#321): processing tools ask the person which service to use.
 	chatService.SetChoices(repository, applicationSchema.Chat.Choice.ListLimit)
 	// Session thinking level, context usage and compactions (#322).
@@ -609,6 +618,18 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Store:             executionGrants,
 	})
 	paramsStore := agentparams.NewPersistentParameterStore(repository, logger)
+	// The ledger's parameter source is the existing parameter store's
+	// last-writer state (#248): when the person's pin still equals the frozen
+	// value, the step reports "user"; otherwise the source stays unknown. A
+	// read failure becomes a ledger omission. No new store or migration.
+	chatService.SetParameterSource(func(_ context.Context, ownerID, sessionID, offeringID string) (map[string]chat.WorkParameterState, error) {
+		states := paramsStore.OfferingStates(agentparams.ScopeKey(ownerID, sessionID), offeringID)
+		result := make(map[string]chat.WorkParameterState, len(states))
+		for name, state := range states {
+			result[name] = chat.WorkParameterState{Value: state.Value, Source: state.Source}
+		}
+		return result, nil
+	})
 	// One localizer serves the Agent turn and its tool results.
 	texts, err := catalog.NewTextLocalizer(applicationSchema)
 	if err != nil {

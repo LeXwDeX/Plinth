@@ -35,17 +35,22 @@ import (
 // policy or the session Task source.
 var ErrWorkLedgerUnavailable = errors.New("chat: work ledger unavailable")
 
-// SessionTaskSource reads the session's public Tasks, newest first, bounded to
-// the requested limit. The application supplies it with
+// SessionTaskSource reads one page of the session's public Tasks, newest first,
+// and reports the full count. The application supplies it with
 // generation.Module.List(OwnTasks(owner), ListQuery{SessionID: session,
-// IncludeBranchRefs: true, Limit: maximum_steps}); a branch session therefore
-// reads its ancestors' Tasks too, while owner scope never widens.
+// IncludeBranchRefs: true, Offset: offset, Limit: limit}); a branch session
+// therefore reads its ancestors' Tasks too, while owner scope never widens.
 //
-// The list projection is reduced on purpose: it carries the prompt and the
-// result assets, not the full frozen Offering or input. The ledger summary
+// The summary reads only the newest chat.work_ledger.maximum_steps Tasks, but
+// the same source pages the complete set for a step the summary left out
+// (get_production_step, and an old picked object or rejected direction that
+// must still enter the summary).
+//
+// The list projection is reduced on purpose: it carries the semantic prompt and
+// the result assets, not the full frozen Offering or input. The ledger summary
 // works with it; get_production_step reads the one requested step in full
 // through SessionTaskDetail.
-type SessionTaskSource func(ctx context.Context, ownerID, sessionID string) (generation.TaskPage, error)
+type SessionTaskSource func(ctx context.Context, ownerID, sessionID string, offset, limit int) (generation.TaskPage, error)
 
 // SessionTaskDetail reads one public Task of the owner in full (the frozen
 // Offering, every declared parameter and the whole input). The caller only
@@ -54,6 +59,21 @@ type SessionTaskSource func(ctx context.Context, ownerID, sessionID string) (gen
 // parameters.
 type SessionTaskDetail func(ctx context.Context, ownerID, sessionID, taskID string) (generation.Task, error)
 
+// WorkParameterState is the last-writer state of one persisted Offering
+// parameter (the existing workspace/Agent parameter store, not a new store).
+// Value is compared with the Task's frozen input before the source is claimed:
+// a state that no longer matches the step cannot name who wrote that step.
+type WorkParameterState struct {
+	Value  json.RawMessage
+	Source string
+}
+
+// WorkParameterSource reads the persisted last-writer state of every parameter
+// of one Offering for the session. It is supplied by the application from the
+// existing agent parameter store; errors leave the source unknown and are
+// reported as an omission.
+type WorkParameterSource func(ctx context.Context, ownerID, sessionID, offeringID string) (map[string]WorkParameterState, error)
+
 // WorkDecision states.
 const (
 	WorkDecisionAdopted  = "adopted"
@@ -61,9 +81,9 @@ const (
 )
 
 // WorkDecision is one persisted decision about a production step. The ledger
-// derives "adopted" from the session pick; "rejected" and its reason come from
-// the optional decision source (#241). A step without any source entry has no
-// decision.
+// derives "adopted" from the session pick; "rejected" comes from the injected
+// reader (see SessionDecisionReader) and, once #241 lands, from explicit
+// rejection records. A step without any source entry has no decision.
 type WorkDecision struct {
 	Step   string `json:"step,omitempty"`
 	TaskID string `json:"task_id,omitempty"`
@@ -71,8 +91,11 @@ type WorkDecision struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// WorkDecisionReader is the optional source of rejected directions (#241).
-// Without one the ledger's rejected list stays empty.
+// WorkDecisionReader is the source of rejected directions. The application
+// supplies SessionDecisionReader, which projects the results a later selection
+// superseded from the existing turn records; #241 owns explicit rejection
+// writes and can extend or replace it. Without one the ledger's rejected list
+// stays empty.
 type WorkDecisionReader interface {
 	WorkDecisions(ctx context.Context, ownerID, sessionID string) ([]WorkDecision, error)
 }
@@ -145,11 +168,27 @@ type WorkStep struct {
 	CreatedAt        time.Time       `json:"created_at"`
 }
 
+// WorkOmission is one fact the projection could not read or attribute. Kind is
+// a stable machine-readable tag; Subject names the non-sensitive subject (a
+// tool name, an Offering ID or a bounded token); Detail is a bounded
+// operator-facing explanation. Prompt text and user content never appear here.
+type WorkOmission struct {
+	Kind    string `json:"kind"`
+	Subject string `json:"subject,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+}
+
 // WorkLedger is the projection of one session.
 type WorkLedger struct {
 	Steps []WorkStep `json:"steps"`
-	// Rejected is the "do not do again" list, newest first.
+	// Rejected is the "do not do again" list, newest first. It is omitted when
+	// the existing records name no rejected direction, never rendered as an
+	// empty list.
 	Rejected []WorkDecision `json:"rejected,omitempty"`
+	// Omissions names every fact this projection could not read or attribute.
+	// The summary renders a Schema note when the list is non-empty, so a failed
+	// decision read is visible instead of silently empty.
+	Omissions []WorkOmission `json:"omissions,omitempty"`
 	// CurrentTaskID is the step whose result is the session's picked object, ""
 	// when nothing is picked.
 	CurrentTaskID string `json:"-"`
@@ -177,6 +216,13 @@ func (service *Service) SetDecisionReader(reader WorkDecisionReader) {
 	service.workDecisions = reader
 }
 
+// SetParameterSource supplies the existing parameter store's last-writer state,
+// so a parameter the person pinned is reported as "user" when the frozen value
+// still matches it.
+func (service *Service) SetParameterSource(source WorkParameterSource) {
+	service.workParameterSource = source
+}
+
 // workLedgerEnabled reports whether the Schema declared the ledger and the
 // assembly supplied its task source.
 func (service *Service) workLedgerEnabled() bool {
@@ -187,13 +233,6 @@ func (service *Service) workLedgerEnabled() bool {
 // the injected source, the persisted messages (tool arguments and summaries)
 // and the session pick; it never writes.
 func (service *Service) WorkLedger(ctx context.Context, ownerID, sessionID string) (WorkLedger, error) {
-	return service.readWorkLedger(ctx, ownerID, sessionID, "")
-}
-
-// workLedger projects the session; detailTaskID asks for that one step to be
-// read in full (the get_production_step path), while every other step stays on
-// the reduced list projection.
-func (service *Service) readWorkLedger(ctx context.Context, ownerID, sessionID, detailTaskID string) (WorkLedger, error) {
 	if !service.workLedgerEnabled() {
 		return WorkLedger{}, ErrWorkLedgerUnavailable
 	}
@@ -204,52 +243,86 @@ func (service *Service) readWorkLedger(ctx context.Context, ownerID, sessionID, 
 	if !owned {
 		return WorkLedger{}, ErrSessionNotFound
 	}
-	page, err := service.workLedgerTasks(ctx, ownerID, sessionID)
+	page, err := service.workLedgerTasks(ctx, ownerID, sessionID, 0, service.workLedger.MaximumSteps)
 	if err != nil {
 		return WorkLedger{}, err
 	}
-	if detailTaskID != "" && service.workLedgerDetail != nil {
-		for index := range page.Tasks {
-			if string(page.Tasks[index].ID) != detailTaskID {
-				continue
-			}
-			full, err := service.workLedgerDetail(ctx, ownerID, sessionID, detailTaskID)
-			if err != nil {
-				return WorkLedger{}, err
-			}
-			page.Tasks[index] = full
-			break
-		}
+	facts, err := service.loadWorkLedgerFacts(ctx, ownerID, sessionID)
+	if err != nil {
+		return WorkLedger{}, err
 	}
+	steps, omissions := service.workLedgerSteps(ctx, ownerID, sessionID, page, facts)
+	facts.omissions = appendWorkOmissions(facts.omissions, omissions...)
+	parameterStates, stateOmissions := service.workParameterStates(ctx, ownerID, sessionID, steps)
+	facts.omissions = appendWorkOmissions(facts.omissions, stateOmissions...)
+	return service.projectWorkLedger(steps, max(page.Total, len(steps)), facts, parameterStates), nil
+}
+
+// workLedgerFacts are the stored facts every projection shares: the history,
+// the style lock, the rejected directions, the pick and the read omissions.
+type workLedgerFacts struct {
+	history   []Message
+	styleLock StyleLock
+	decisions []WorkDecision
+	pick      Attachment
+	omissions []WorkOmission
+}
+
+// loadWorkLedgerFacts reads the session's stored facts once. A failed decision
+// read becomes a diagnosable omission; it never silently reads as "no
+// rejected directions".
+func (service *Service) loadWorkLedgerFacts(ctx context.Context, ownerID, sessionID string) (workLedgerFacts, error) {
 	history, err := service.repository.ListMessages(ctx, ownerID, sessionID)
 	if err != nil {
-		return WorkLedger{}, err
+		return workLedgerFacts{}, err
 	}
 	styleLock, _, err := service.repository.StyleLock(ctx, ownerID, sessionID)
 	if err != nil {
-		return WorkLedger{}, err
-	}
-	decisions := []WorkDecision(nil)
-	if service.workDecisions != nil {
-		decisions, _ = service.workDecisions.WorkDecisions(ctx, ownerID, sessionID)
+		return workLedgerFacts{}, err
 	}
 	pick, _, err := service.SessionPick(ctx, ownerID, sessionID)
 	if err != nil {
-		return WorkLedger{}, err
+		return workLedgerFacts{}, err
 	}
-	return service.projectWorkLedger(page, history, styleLock, decisions, pick), nil
+	facts := workLedgerFacts{history: history, styleLock: styleLock, pick: pick}
+	if service.workDecisions != nil {
+		decisions, readErr := service.workDecisions.WorkDecisions(ctx, ownerID, sessionID)
+		if readErr != nil {
+			facts.omissions = appendWorkOmissions(facts.omissions, WorkOmission{
+				Kind:   "decisions_unreadable",
+				Detail: truncateRunes(readErr.Error(), 200),
+			})
+		} else {
+			facts.decisions = decisions
+		}
+	}
+	return facts, nil
 }
 
-// projectWorkLedger builds the read model. It is pure apart from the values
-// its arguments carry, so unit tests can exercise ordering and attribution
-// without a repository.
-func (service *Service) projectWorkLedger(
+// workNumberedStep is one Task with its chronological step number, the number
+// its @stepN handle uses.
+type workNumberedStep struct {
+	task generation.Task
+	step int
+}
+
+// workExtraCandidate names a step outside the summary page that must still be
+// visible: the picked object or a rejected direction.
+type workExtraCandidate struct {
+	taskID string
+	step   int
+	kind   string
+}
+
+// workLedgerSteps numbers the newest page and adds the steps outside it that
+// the priority rules must still see. The summary itself stays bounded: these
+// extras only make the picked and rejected steps resolvable and renderable.
+func (service *Service) workLedgerSteps(
+	ctx context.Context,
+	ownerID, sessionID string,
 	page generation.TaskPage,
-	history []Message,
-	styleLock StyleLock,
-	decisions []WorkDecision,
-	pick Attachment,
-) WorkLedger {
+	facts workLedgerFacts,
+) ([]workNumberedStep, []WorkOmission) {
 	tasks := append([]generation.Task(nil), page.Tasks...)
 	sort.SliceStable(tasks, func(left, right int) bool {
 		if tasks[left].CreatedAt.Equal(tasks[right].CreatedAt) {
@@ -258,57 +331,271 @@ func (service *Service) projectWorkLedger(
 		return tasks[left].CreatedAt.Before(tasks[right].CreatedAt)
 	})
 	offset := max(0, page.Total-len(tasks))
-	prefix := service.workLedger.StepPrefix
-	if prefix == "" {
-		prefix = "@step"
+	steps := make([]workNumberedStep, 0, len(tasks))
+	inPage := make(map[string]bool, len(tasks))
+	for index := range tasks {
+		steps = append(steps, workNumberedStep{task: tasks[index], step: offset + index + 1})
+		inPage[string(tasks[index].ID)] = true
 	}
-
-	calls := workCallsByTask(history, service.assistantRole)
-	attachmentsByAsset := map[string]Attachment{}
-	attachmentsByTask := map[string]Attachment{}
-	resultAttachments := map[string][]Attachment{}
-	for _, message := range history {
-		for _, attachment := range message.Attachments {
-			if attachment.Handle == "" {
+	rejected := workRejectedDecisions(facts.decisions)
+	var candidates []workExtraCandidate
+	adopted := workAdoptedTaskFromHistory(facts.pick, facts.history)
+	if adopted != "" && !inPage[adopted] {
+		candidates = append(candidates, workExtraCandidate{taskID: adopted, kind: "current_step_unreadable"})
+	}
+	limit := service.workLedger.Rejected.MaximumItems
+	seenRejected := map[string]bool{}
+	for _, decision := range rejected {
+		if limit > 0 && len(seenRejected) >= limit {
+			break
+		}
+		if decision.TaskID != "" {
+			if inPage[decision.TaskID] || seenRejected[decision.TaskID] {
 				continue
 			}
-			if attachment.AssetID != "" {
-				attachmentsByAsset[attachment.AssetID] = attachment
-			}
-			if attachment.TaskID != "" {
-				attachmentsByTask[attachment.TaskID] = attachment
-				resultAttachments[attachment.TaskID] = append(resultAttachments[attachment.TaskID], attachment)
-			}
+			seenRejected[decision.TaskID] = true
+			candidates = append(candidates, workExtraCandidate{taskID: decision.TaskID, kind: "rejected_step_unreadable"})
+			continue
+		}
+		if number, ok := service.stepNumber(decision.Step); ok && number >= 1 && number <= page.Total {
+			candidates = append(candidates, workExtraCandidate{step: number, kind: "rejected_step_unreadable"})
 		}
 	}
-	stepHandles := make(map[string]string, len(tasks))
-	for index := range tasks {
-		stepHandles[string(tasks[index].ID)] = prefix + strconv.Itoa(offset+index+1)
+	seen := map[string]bool{}
+	var omissions []WorkOmission
+	for _, candidate := range candidates {
+		var (
+			task   generation.Task
+			number int
+			found  bool
+			err    error
+		)
+		if candidate.taskID != "" {
+			if seen[candidate.taskID] {
+				continue
+			}
+			seen[candidate.taskID] = true
+			task, number, found, err = service.findSessionTask(ctx, ownerID, sessionID, candidate.taskID, page)
+		} else {
+			task, number, found, err = service.findSessionStep(ctx, ownerID, sessionID, candidate.step, page)
+			if found {
+				seen[string(task.ID)] = true
+			}
+		}
+		switch {
+		case err != nil:
+			omissions = appendWorkOmissions(omissions, WorkOmission{
+				Kind:   candidate.kind,
+				Detail: truncateRunes(err.Error(), 200),
+			})
+		case !found:
+			omissions = appendWorkOmissions(omissions, WorkOmission{
+				Kind:   candidate.kind,
+				Detail: "the step is no longer in the session",
+			})
+		default:
+			steps = append(steps, workNumberedStep{task: task, step: number})
+		}
 	}
-	selfChecks := workSelfChecks(history, service.assistantRole, attachmentsByAsset, attachmentsByTask, stepHandles)
-	adopted := workAdoptedTask(pick, attachmentsByAsset, attachmentsByTask)
-	rejected := workRejectedDecisions(decisions)
+	sort.SliceStable(steps, func(left, right int) bool { return steps[left].step < steps[right].step })
+	return steps, omissions
+}
+
+// workLedgerLookupPageSize is one page of the complete-set step lookup. The
+// generation list read caps a page at 100.
+const workLedgerLookupPageSize = 100
+
+// findSessionTask pages the session's complete Task set (newest first) until
+// taskID is found, returning the Task and its chronological position. page is
+// the summary page already read, so a step it contains needs no extra read.
+func (service *Service) findSessionTask(
+	ctx context.Context,
+	ownerID, sessionID, taskID string,
+	page generation.TaskPage,
+) (generation.Task, int, bool, error) {
+	for index := range page.Tasks {
+		if string(page.Tasks[index].ID) == taskID {
+			return page.Tasks[index], page.Total - index, true, nil
+		}
+	}
+	total := page.Total
+	for offset := 0; ; {
+		next, err := service.workLedgerTasks(ctx, ownerID, sessionID, offset, workLedgerLookupPageSize)
+		if err != nil {
+			return generation.Task{}, 0, false, err
+		}
+		if offset == 0 {
+			total = next.Total
+		}
+		for index := range next.Tasks {
+			if string(next.Tasks[index].ID) == taskID {
+				return next.Tasks[index], total - (offset + index), true, nil
+			}
+		}
+		offset += len(next.Tasks)
+		if len(next.Tasks) == 0 || offset >= total {
+			return generation.Task{}, 0, false, nil
+		}
+	}
+}
+
+// findSessionStep reads the Task at one chronological step number from the
+// complete session set. The summary page answers it without an extra read when
+// the number falls inside that page.
+func (service *Service) findSessionStep(
+	ctx context.Context,
+	ownerID, sessionID string,
+	number int,
+	page generation.TaskPage,
+) (generation.Task, int, bool, error) {
+	if number < 1 || number > page.Total {
+		return generation.Task{}, 0, false, nil
+	}
+	index := page.Total - number
+	if index < len(page.Tasks) {
+		return page.Tasks[index], number, true, nil
+	}
+	next, err := service.workLedgerTasks(ctx, ownerID, sessionID, index, 1)
+	if err != nil {
+		return generation.Task{}, 0, false, err
+	}
+	if len(next.Tasks) == 0 {
+		return generation.Task{}, 0, false, nil
+	}
+	return next.Tasks[0], number, true, nil
+}
+
+// stepPrefix is the Schema's step handle prefix.
+func (service *Service) stepPrefix() string {
+	if prefix := strings.TrimSpace(service.workLedger.StepPrefix); prefix != "" {
+		return prefix
+	}
+	return "@step"
+}
+
+// stepNumber reads the canonical @stepN handle. Only the exact spelling the
+// renderer writes is accepted; a display name or the selection alias is not a
+// handle.
+func (service *Service) stepNumber(token string) (int, bool) {
+	prefix := service.stepPrefix()
+	if !strings.HasPrefix(token, prefix) {
+		return 0, false
+	}
+	digits := strings.TrimPrefix(token, prefix)
+	number, err := strconv.Atoi(digits)
+	if err != nil || number < 1 || strconv.Itoa(number) != digits {
+		return 0, false
+	}
+	return number, true
+}
+
+// workParameterStates reads the persisted last-writer state of every Offering
+// involved. A store it cannot read leaves the sources unknown and is reported
+// as an omission.
+func (service *Service) workParameterStates(
+	ctx context.Context,
+	ownerID, sessionID string,
+	steps []workNumberedStep,
+) (map[string]map[string]WorkParameterState, []WorkOmission) {
+	states := map[string]map[string]WorkParameterState{}
+	if service.workParameterSource == nil {
+		return states, nil
+	}
+	seen := map[string]bool{}
+	var omissions []WorkOmission
+	for index := range steps {
+		offeringID := string(steps[index].task.Offering.ID)
+		if offeringID == "" || seen[offeringID] {
+			continue
+		}
+		seen[offeringID] = true
+		state, err := service.workParameterSource(ctx, ownerID, sessionID, offeringID)
+		if err != nil {
+			omissions = appendWorkOmissions(omissions, WorkOmission{
+				Kind:    "parameter_source_unreadable",
+				Subject: offeringID,
+				Detail:  truncateRunes(err.Error(), 200),
+			})
+			continue
+		}
+		states[offeringID] = state
+	}
+	return states, omissions
+}
+
+// projectWorkLedger builds the read model from already-read facts. It performs
+// no IO, so unit tests can exercise ordering and attribution directly.
+func (service *Service) projectWorkLedger(
+	steps []workNumberedStep,
+	totalSteps int,
+	facts workLedgerFacts,
+	parameterStates map[string]map[string]WorkParameterState,
+) WorkLedger {
+	prefix := service.stepPrefix()
+	ordered := append([]workNumberedStep(nil), steps...)
+	sort.SliceStable(ordered, func(left, right int) bool {
+		if ordered[left].step == ordered[right].step {
+			return ordered[left].task.ID < ordered[right].task.ID
+		}
+		return ordered[left].step < ordered[right].step
+	})
+	unique := make([]workNumberedStep, 0, len(ordered))
+	stepHandles := make(map[string]string, len(ordered))
+	seen := make(map[string]bool, len(ordered))
+	for _, item := range ordered {
+		taskID := string(item.task.ID)
+		if taskID == "" || seen[taskID] {
+			continue
+		}
+		seen[taskID] = true
+		unique = append(unique, item)
+		stepHandles[taskID] = prefix + strconv.Itoa(item.step)
+	}
+
+	calls := workCallsByTask(facts.history, service.assistantRole)
+	attachmentsByAsset, attachmentsByTask, resultAttachments := workHistoryAttachments(facts.history)
+	selfChecks, selfOmissions := workSelfChecks(
+		facts.history, service.assistantRole, attachmentsByAsset, attachmentsByTask, stepHandles)
+	adopted := workAdoptedTask(facts.pick, attachmentsByAsset, attachmentsByTask)
+	rejected := workRejectedDecisions(facts.decisions)
+	for index := range rejected {
+		if handle, exists := stepHandles[rejected[index].TaskID]; exists && rejected[index].Step == "" {
+			rejected[index].Step = handle
+		}
+	}
 	rejectedByTask := map[string]WorkDecision{}
 	for _, decision := range rejected {
 		if decision.TaskID != "" {
 			rejectedByTask[decision.TaskID] = decision
 		}
 	}
+	omissions := appendWorkOmissions(nil, facts.omissions...)
+	omissions = appendWorkOmissions(omissions, selfOmissions...)
 
-	ledger := WorkLedger{
-		Steps:         make([]WorkStep, 0, len(tasks)),
-		Rejected:      rejected,
-		CurrentTaskID: adopted,
-		TotalSteps:    max(page.Total, len(tasks)),
-		StepOffset:    offset,
+	stepOffset := 0
+	if len(unique) > 0 {
+		stepOffset = max(0, unique[0].step-1)
 	}
-	for index := range tasks {
-		task := tasks[index]
-		stepHandle := stepHandles[string(task.ID)]
-		call := calls[string(task.ID)]
+	ledger := WorkLedger{
+		Steps:         make([]WorkStep, 0, len(unique)),
+		Rejected:      rejectedOrNil(rejected),
+		Omissions:     omissionsOrNil(omissions),
+		CurrentTaskID: adopted,
+		TotalSteps:    max(totalSteps, len(unique)),
+		StepOffset:    stepOffset,
+	}
+	styleText := ""
+	if facts.styleLock.Enabled {
+		styleText = facts.styleLock.Text
+	}
+	for index := range unique {
+		task := unique[index].task
+		taskID := string(task.ID)
+		stepHandle := stepHandles[taskID]
+		call := calls[taskID]
 		step := WorkStep{
 			Step:             stepHandle,
-			TaskID:           string(task.ID),
+			TaskID:           taskID,
 			Capability:       string(task.Capability),
 			Offering:         string(task.Offering.ID),
 			Model:            task.Offering.ModelName,
@@ -329,17 +616,14 @@ func (service *Service) projectWorkLedger(
 			step.RawPrompt = workPromptFromArguments(call.Arguments, service.promptArgument())
 		}
 		step.FinalPrompt, step.NegativePrompt = workFrozenPrompts(task)
-		styleText := ""
-		if styleLock.Enabled {
-			styleText = styleLock.Text
-		}
-		step.Parameters, step.Inputs = workParameters(task, call, styleText, stepHandles, attachmentsByAsset, attachmentsByTask)
+		step.Parameters, step.Inputs = workParameters(task, call, styleText, stepHandles,
+			attachmentsByAsset, attachmentsByTask, parameterStates[string(task.Offering.ID)])
 		step.Results = workResults(task, resultAttachments)
-		step.SelfChecks = selfChecks[string(task.ID)]
-		if adopted != "" && adopted == string(task.ID) {
+		step.SelfChecks = selfChecks[taskID]
+		if adopted != "" && adopted == taskID {
 			step.Decision = WorkDecisionAdopted
 		}
-		if decision, exists := rejectedByTask[string(task.ID)]; exists {
+		if decision, exists := rejectedByTask[taskID]; exists {
 			step.Decision = WorkDecisionRejected
 			step.DecisionReason = decision.Reason
 		}
@@ -375,7 +659,10 @@ func workCallsByTask(history []Message, assistantRole string) map[string]*ToolCa
 }
 
 // workPromptFromArguments reads the Agent's original prompt from the frozen
-// call arguments. An argument object that is not an object yields no prompt.
+// call arguments. A single prompt argument is returned verbatim; a tool that
+// carries one prompt per view (front_prompt, left_prompt, ...) has its named
+// values listed instead, so the raw prompt is never silently empty. An argument
+// object that is not an object yields no prompt.
 func workPromptFromArguments(arguments []byte, name string) string {
 	if len(arguments) == 0 {
 		return ""
@@ -384,26 +671,66 @@ func workPromptFromArguments(arguments []byte, name string) string {
 	if json.Unmarshal(arguments, &values) != nil {
 		return ""
 	}
-	raw, present := values[name]
-	if !present {
+	if raw, present := values[name]; present {
+		var text string
+		if json.Unmarshal(raw, &text) == nil && strings.TrimSpace(text) != "" {
+			return text
+		}
+	}
+	names := make([]string, 0, 4)
+	for key := range values {
+		if key == "negative_prompt" || key == name || !strings.HasSuffix(key, "_prompt") {
+			continue
+		}
+		var text string
+		if json.Unmarshal(values[key], &text) != nil || strings.TrimSpace(text) == "" {
+			continue
+		}
+		names = append(names, key)
+	}
+	if len(names) == 0 {
 		return ""
 	}
-	var text string
-	if json.Unmarshal(raw, &text) != nil {
-		return ""
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, key := range names {
+		var text string
+		_ = json.Unmarshal(values[key], &text)
+		parts = append(parts, key+": "+text)
 	}
-	return text
+	return strings.Join(parts, "; ")
+}
+
+// workPromptSlot reports whether a declared parameter carries prompt text. A
+// tool may declare several prompts (front_prompt, left_prompt, ...) without the
+// single semantic=prompt marker; the name suffix makes them prompt slots, not
+// ordinary parameters.
+func workPromptSlot(parameter generation.Parameter) bool {
+	if parameter.Semantic == generation.SemanticNegativePrompt || parameter.Name == "negative_prompt" {
+		return false
+	}
+	if parameter.Semantic == generation.SemanticPrompt {
+		return true
+	}
+	return parameter.Name != "prompt" && strings.HasSuffix(strings.ToLower(parameter.Name), "_prompt")
 }
 
 // workFrozenPrompts reads the final prompt and negative prompt from the Task's
 // frozen input, by the Offering's declared semantics. This is what was really
 // sent upstream (style lock and template rewrites included); the Agent's
-// original wording lives only in the historical call arguments.
+// original wording lives only in the historical call arguments. A tool with
+// several prompt slots lists each value under its parameter name; a single
+// prompt is returned verbatim.
 func workFrozenPrompts(task generation.Task) (prompt, negative string) {
 	var input map[string]json.RawMessage
 	if len(task.Input) == 0 || json.Unmarshal(task.Input, &input) != nil {
 		return "", ""
 	}
+	type promptValue struct {
+		name string
+		text string
+	}
+	var prompts []promptValue
 	for _, parameter := range task.Offering.Parameters {
 		raw, present := input[parameter.Name]
 		if !present || len(raw) == 0 || string(raw) == "null" {
@@ -413,24 +740,36 @@ func workFrozenPrompts(task generation.Task) (prompt, negative string) {
 		if json.Unmarshal(raw, &text) != nil {
 			continue
 		}
-		switch parameter.Semantic {
-		case generation.SemanticPrompt:
-			if prompt == "" {
-				prompt = text
-			}
-		case generation.SemanticNegativePrompt:
+		switch {
+		case parameter.Semantic == generation.SemanticNegativePrompt:
 			if negative == "" {
 				negative = text
 			}
+		case workPromptSlot(parameter):
+			if strings.TrimSpace(text) == "" {
+				continue
+			}
+			prompts = append(prompts, promptValue{name: parameter.Name, text: text})
 		}
 	}
-	return prompt, negative
+	switch {
+	case len(prompts) == 0:
+		return "", negative
+	case len(prompts) == 1 && prompts[0].name == "prompt":
+		return prompts[0].text, negative
+	}
+	parts := make([]string, 0, len(prompts))
+	for _, item := range prompts {
+		parts = append(parts, item.name+": "+item.text)
+	}
+	return strings.Join(parts, "; "), negative
 }
 
 // workParameters projects every declared, non-secret parameter with its
 // effective value and read-time source, and every reference parameter as a
 // handle plus its declared purpose. Mask, source-URL, source-asset and hidden
-// parameters never leave their raw values.
+// parameters never leave their raw values. Prompt slots are projected as
+// prompts, not parameters.
 func workParameters(
 	task generation.Task,
 	call *ToolCall,
@@ -438,6 +777,7 @@ func workParameters(
 	stepHandles map[string]string,
 	attachmentsByAsset map[string]Attachment,
 	attachmentsByTask map[string]Attachment,
+	states map[string]WorkParameterState,
 ) ([]WorkParameter, []WorkReference) {
 	var input map[string]json.RawMessage
 	if len(task.Input) > 0 {
@@ -457,7 +797,7 @@ func workParameters(
 		if parameter.Presentation != nil && parameter.Presentation.Surface == "hidden" {
 			continue
 		}
-		if parameter.Semantic == generation.SemanticPrompt || parameter.Semantic == generation.SemanticNegativePrompt {
+		if workPromptSlot(parameter) {
 			continue
 		}
 		switch {
@@ -479,21 +819,27 @@ func workParameters(
 		parameters = append(parameters, WorkParameter{
 			Name:   parameter.Name,
 			Value:  workValueText(raw, parameter.Type),
-			Source: workParameterSource(parameter, raw, arguments, styleText),
+			Source: workParameterSource(parameter, raw, arguments, styleText, states),
 		})
 	}
 	return parameters, inputs
 }
 
 // workParameterSource reports where an effective value came from, in the
-// declared order: the Agent's call, the Offering default, the style lock text,
-// otherwise unknown. It never guesses a person wrote a value.
+// declared order: a persisted user pin that still matches the frozen value,
+// the Agent's call, the Offering default, the style lock text, otherwise
+// unknown. It never guesses a person wrote a value.
 func workParameterSource(
 	parameter generation.Parameter,
 	value json.RawMessage,
 	arguments map[string]json.RawMessage,
 	styleText string,
+	states map[string]WorkParameterState,
 ) string {
+	if state, exists := states[parameter.Name]; exists && state.Source == "user" &&
+		len(state.Value) > 0 && workSameJSON(value, state.Value) {
+		return "user"
+	}
 	if _, exists := arguments[parameter.Name]; exists {
 		return "agent"
 	}
@@ -640,16 +986,19 @@ func workResults(task generation.Task, attachments map[string][]Attachment) []Wo
 // workSelfChecks attributes the persisted read-only tool summaries to the
 // steps they inspected. inspect_model contributes its pass, unknown and fail
 // counts plus the failed checks' fix hints; inspect_image contributes
-// pass/fail counts; render and compare contribute their failed views.
+// pass/fail counts; render and compare contribute their failed views. A summary
+// whose model token names no step handle, Task ID or attachment handle is not
+// attached to an invented Task: it is recorded as a diagnosable omission.
 func workSelfChecks(
 	history []Message,
 	assistantRole string,
 	attachmentsByAsset map[string]Attachment,
 	attachmentsByTask map[string]Attachment,
 	stepHandles map[string]string,
-) map[string][]WorkSelfCheck {
+) (map[string][]WorkSelfCheck, []WorkOmission) {
 	byTask := map[string]map[string]WorkSelfCheck{}
 	order := map[string][]string{}
+	var omissions []WorkOmission
 	update := func(taskID string, check WorkSelfCheck) {
 		if taskID == "" {
 			return
@@ -663,6 +1012,25 @@ func workSelfChecks(
 			order[taskID] = append(order[taskID], check.Tool)
 		}
 		checks[check.Tool] = check
+	}
+	resolve := func(tool, token string) string {
+		token = strings.TrimSpace(token)
+		if token == "" {
+			// A summary that names no target cannot be attributed, but it also
+			// makes no false claim about a step; only an unrecognised token is
+			// a diagnostic.
+			return ""
+		}
+		taskID, ok := workTaskOfToken(token, attachmentsByTask, stepHandles)
+		if ok {
+			return taskID
+		}
+		omissions = appendWorkOmissions(omissions, WorkOmission{
+			Kind:    "self_check_unattributed",
+			Subject: truncateRunes(tool+": "+token, 120),
+			Detail:  "the token names no step handle, Task ID or attachment handle of this projection",
+		})
+		return ""
 	}
 	for _, message := range history {
 		if message.Role != assistantRole {
@@ -725,7 +1093,7 @@ func workSelfChecks(
 				}
 				taskID := summary.TaskID
 				if taskID == "" {
-					taskID = workTaskOfToken(summary.Model, attachmentsByTask, stepHandles)
+					taskID = resolve("inspect_model", summary.Model)
 				}
 				update(taskID, check)
 			case "inspect_image":
@@ -736,17 +1104,19 @@ func workSelfChecks(
 			case "render":
 				taskID := summary.TaskID
 				if taskID == "" {
-					taskID = workTaskOfToken(summary.Model, attachmentsByTask, stepHandles)
+					taskID = resolve("render_model_views", summary.Model)
 				}
 				update(taskID, WorkSelfCheck{
 					Tool: "render_model_views", Passed: len(summary.Views),
 					Failed: len(summary.FailedViews), FailedViews: summary.FailedViews,
 				})
 			case "compare":
-				taskIDs := summary.TaskIDs
+				taskIDs := append([]string(nil), summary.TaskIDs...)
 				if len(taskIDs) == 0 {
 					for _, model := range summary.Models {
-						taskIDs = append(taskIDs, workTaskOfToken(model, attachmentsByTask, stepHandles))
+						if taskID := resolve("compare_models", model); taskID != "" {
+							taskIDs = append(taskIDs, taskID)
+						}
 					}
 				}
 				for _, taskID := range taskIDs {
@@ -766,7 +1136,7 @@ func workSelfChecks(
 		}
 		result[taskID] = list
 	}
-	return result
+	return result, omissions
 }
 
 // workAnyText renders a JSON value for a self-check leftover. It is bounded so
@@ -783,28 +1153,31 @@ func workAnyText(value any) string {
 }
 
 // workTaskOfToken resolves a self-check target named by a model token: a step
-// handle, a Task ID or an attachment handle.
-func workTaskOfToken(token string, attachmentsByTask map[string]Attachment, stepHandles map[string]string) string {
+// handle, a Task ID or an attachment handle. Any other token (a display name,
+// @selected, an old free-form value) resolves to nothing: it must not create a
+// phantom step. The caller records the unresolved token as an omission.
+func workTaskOfToken(token string, attachmentsByTask map[string]Attachment, stepHandles map[string]string) (string, bool) {
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return ""
+		return "", false
 	}
 	if _, exists := stepHandles[token]; exists {
-		return token
+		return token, true
 	}
 	for taskID, handle := range stepHandles {
 		if handle == token {
-			return taskID
+			return taskID, true
 		}
 	}
-	if attachment, exists := attachmentsByTask[token]; exists {
-		return attachment.TaskID
+	if attachment, exists := attachmentsByTask[token]; exists && attachment.TaskID != "" {
+		return attachment.TaskID, true
 	}
-	// A task ID is the remaining accepted spelling.
-	if _, exists := stepHandles[token]; exists {
-		return token
+	for _, attachment := range attachmentsByTask {
+		if attachment.Handle == token && attachment.TaskID != "" {
+			return attachment.TaskID, true
+		}
 	}
-	return token
+	return "", false
 }
 
 // workTaskOfHandle resolves an attachment handle to the Task that produced it.
@@ -826,6 +1199,37 @@ func workTaskOfHandle(handle string, attachmentsByAsset map[string]Attachment, a
 	return ""
 }
 
+// workHistoryAttachments indexes the session's attachments by asset, by Task
+// and by result Task. Only attachments the session already gave a handle to are
+// indexed: an internal ID never becomes a handle here.
+func workHistoryAttachments(history []Message) (map[string]Attachment, map[string]Attachment, map[string][]Attachment) {
+	byAsset := map[string]Attachment{}
+	byTask := map[string]Attachment{}
+	results := map[string][]Attachment{}
+	for index := range history {
+		for _, attachment := range history[index].Attachments {
+			if attachment.Handle == "" {
+				continue
+			}
+			if attachment.AssetID != "" {
+				byAsset[attachment.AssetID] = attachment
+			}
+			if attachment.TaskID != "" {
+				byTask[attachment.TaskID] = attachment
+				results[attachment.TaskID] = append(results[attachment.TaskID], attachment)
+			}
+		}
+	}
+	return byAsset, byTask, results
+}
+
+// workAdoptedTaskFromHistory resolves the picked attachment to its Task with
+// the handles the history already carries.
+func workAdoptedTaskFromHistory(pick Attachment, history []Message) string {
+	byAsset, byTask, _ := workHistoryAttachments(history)
+	return workAdoptedTask(pick, byAsset, byTask)
+}
+
 // workAdoptedTask reads the session pick into the Task it belongs to.
 func workAdoptedTask(pick Attachment, attachmentsByAsset, attachmentsByTask map[string]Attachment) string {
 	if pick.TaskID != "" {
@@ -839,7 +1243,45 @@ func workAdoptedTask(pick Attachment, attachmentsByAsset, attachmentsByTask map[
 	return ""
 }
 
+// appendWorkOmissions adds omissions without repeating the same fact. Two
+// reads of the same unreadable store, or two self-checks naming the same
+// unknown token, produce one diagnostic.
+func appendWorkOmissions(list []WorkOmission, additions ...WorkOmission) []WorkOmission {
+	for _, addition := range additions {
+		duplicate := false
+		for _, existing := range list {
+			if existing.Kind == addition.Kind && existing.Subject == addition.Subject {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			list = append(list, addition)
+		}
+	}
+	return list
+}
+
+// rejectedOrNil keeps an empty rejected list out of the JSON read model.
+func rejectedOrNil(rejected []WorkDecision) []WorkDecision {
+	if len(rejected) == 0 {
+		return nil
+	}
+	return rejected
+}
+
+// omissionsOrNil keeps an empty omission list out of the JSON read model.
+func omissionsOrNil(omissions []WorkOmission) []WorkOmission {
+	if len(omissions) == 0 {
+		return nil
+	}
+	return omissions
+}
+
 func workRejectedDecisions(decisions []WorkDecision) []WorkDecision {
+	if len(decisions) == 0 {
+		return nil
+	}
 	rejected := make([]WorkDecision, 0, len(decisions))
 	for _, decision := range decisions {
 		decision.State = strings.TrimSpace(decision.State)
@@ -847,6 +1289,9 @@ func workRejectedDecisions(decisions []WorkDecision) []WorkDecision {
 			continue
 		}
 		rejected = append(rejected, decision)
+	}
+	if len(rejected) == 0 {
+		return nil
 	}
 	return rejected
 }
@@ -867,12 +1312,10 @@ func (service *Service) workLedgerSummary(
 	policy := service.workLedger
 	ordered := workLedgerPriority(ledger, mention)
 	var lines []string
-	truncated := 0
 	used := 0
 	for _, step := range ordered {
 		if len(lines) >= policy.MaximumSteps {
-			truncated++
-			continue
+			break
 		}
 		line := service.workStepLine(step, previews)
 		if line == "" {
@@ -882,7 +1325,6 @@ func (service *Service) workLedgerSummary(
 			line = truncateRunes(line, policy.EntryMaximumCharacters)
 		}
 		if policy.SummaryMaximumCharacters > 0 && used+utf8.RuneCountInString(line)+1 > policy.SummaryMaximumCharacters {
-			truncated++
 			continue
 		}
 		lines = append(lines, line)
@@ -891,6 +1333,10 @@ func (service *Service) workLedgerSummary(
 	if len(lines) == 0 {
 		return ""
 	}
+	// Every session step not rendered in this block is counted, whether it fell
+	// outside the newest page or past the summary's own bounds. The Schema note
+	// tells the Agent the rest is still readable through get_production_step.
+	truncated := max(0, ledger.TotalSteps-len(lines))
 	for index := range lines {
 		lines[index] = withoutMarkers(lines[index], policy.OpenMarker, policy.CloseMarker)
 	}
@@ -902,6 +1348,11 @@ func (service *Service) workLedgerSummary(
 	}
 	rejected := withoutMarkers(service.workRejectedBlock(ledger.Rejected),
 		policy.OpenMarker, policy.CloseMarker)
+	omissions := ""
+	if count := len(ledger.Omissions); count > 0 && strings.TrimSpace(policy.OmissionsNote) != "" {
+		omissions = withoutMarkers(strings.ReplaceAll(policy.OmissionsNote, "{count}", strconv.Itoa(count)),
+			policy.OpenMarker, policy.CloseMarker)
+	}
 	// One pass: substituted text is never scanned again, so a ledger line that
 	// spells "{close}" stays literal. The projected text already has the frame
 	// markers removed, so it cannot close the frame early either.
@@ -909,6 +1360,7 @@ func (service *Service) workLedgerSummary(
 		"{open}", policy.OpenMarker,
 		"{steps}", stepsText,
 		"{rejected}", rejected,
+		"{omissions}", omissions,
 		"{close}", policy.CloseMarker,
 	).Replace(policy.SummaryTemplate)
 }
@@ -979,11 +1431,19 @@ func (service *Service) workStepLine(step WorkStep, previews bool) string {
 	if !previews {
 		prompt = policy.PromptOmittedText
 	}
-	if previews && step.FinalPrompt != "" {
-		preview := step.FinalPrompt
+	previewText := step.FinalPrompt
+	if previewText == "" {
+		// The reduced list projection keeps only parameters the Offering marks
+		// semantic=prompt. A tool that carries one prompt per view has no such
+		// parameter, so its recorded Agent arguments are the only preview the
+		// summary can show; the full step still comes from get_production_step.
+		previewText = step.RawPrompt
+	}
+	if previews && previewText != "" {
+		preview := previewText
 		if policy.PromptPreviewCharacters > 0 {
 			preview = truncateRunes(preview, policy.PromptPreviewCharacters)
-			if utf8.RuneCountInString(step.FinalPrompt) > policy.PromptPreviewCharacters {
+			if utf8.RuneCountInString(previewText) > policy.PromptPreviewCharacters {
 				preview += "…"
 			}
 		}
@@ -1106,7 +1566,9 @@ func (orchestrator *Orchestrator) workAnchorsPrompt(ctx context.Context, ownerID
 
 // ReadProductionStep backs get_production_step: it resolves one step by handle
 // or Task ID for the command's own owner and session and returns the complete
-// record plus one-line summary. It is read-only and never logs the record.
+// record plus one-line summary. The lookup covers the complete session Task set,
+// not only the newest summary page, so an old step is still readable after it
+// fell out of the summary bound. It is read-only and never logs the record.
 func (service *Service) ReadProductionStep(ctx context.Context, command ToolCommand) (ToolResult, error) {
 	if !service.workLedgerEnabled() {
 		return ToolResult{Error: service.workLedger.NotReadableTemplate, NoSubmission: true}, nil
@@ -1121,51 +1583,81 @@ func (service *Service) ReadProductionStep(ctx context.Context, command ToolComm
 	if token == "" {
 		return ToolResult{Error: strings.ReplaceAll(service.workLedger.UnknownStepTemplate, "{step}", token), NoSubmission: true}, nil
 	}
-	ledger, err := service.WorkLedger(ctx, command.OwnerID, command.SessionID)
+	owned, err := service.repository.OwnsSession(ctx, command.OwnerID, command.SessionID)
 	if err != nil {
 		return ToolResult{Error: service.workLedger.NotReadableTemplate, NoSubmission: true}, nil
 	}
-	var found *WorkStep
-	for index := range ledger.Steps {
-		step := &ledger.Steps[index]
-		if step.Step == token || step.TaskID == token {
-			found = step
-			break
-		}
+	if !owned {
+		return ToolResult{Error: service.workLedger.NotReadableTemplate, NoSubmission: true}, nil
 	}
-	if found == nil {
+	page, err := service.workLedgerTasks(ctx, command.OwnerID, command.SessionID, 0, service.workLedger.MaximumSteps)
+	if err != nil {
+		return ToolResult{Error: service.workLedger.NotReadableTemplate, NoSubmission: true}, nil
+	}
+	task, number, found, err := service.resolveProductionStep(ctx, command.OwnerID, command.SessionID, token, page)
+	if err != nil {
+		return ToolResult{Error: service.workLedger.NotReadableTemplate, NoSubmission: true}, nil
+	}
+	if !found {
 		return ToolResult{
 			Error:        strings.ReplaceAll(service.workLedger.UnknownStepTemplate, "{step}", truncateRunes(token, 200)),
 			NoSubmission: true,
 		}, nil
 	}
-	// The list projection carries only the prompt; the full record (every
-	// declared parameter, source and input reference) comes from the one
-	// owner-scoped Task read.
+	// The list projection carries only the semantic prompt; the full record
+	// (every declared parameter, source and input reference) comes from the one
+	// owner-scoped Task read. Session membership was established by the
+	// session-scoped list above.
 	if service.workLedgerDetail != nil {
-		detailed, err := service.readWorkLedger(ctx, command.OwnerID, command.SessionID, found.TaskID)
-		if err != nil {
+		detailed, detailErr := service.workLedgerDetail(ctx, command.OwnerID, command.SessionID, string(task.ID))
+		if detailErr != nil {
 			return ToolResult{Error: service.workLedger.NotReadableTemplate, NoSubmission: true}, nil
 		}
-		for index := range detailed.Steps {
-			if detailed.Steps[index].TaskID == found.TaskID {
-				found = &detailed.Steps[index]
-				ledger = detailed
-				break
-			}
+		task = detailed
+	}
+	facts, err := service.loadWorkLedgerFacts(ctx, command.OwnerID, command.SessionID)
+	if err != nil {
+		return ToolResult{Error: service.workLedger.NotReadableTemplate, NoSubmission: true}, nil
+	}
+	steps := []workNumberedStep{{task: task, step: number}}
+	parameterStates, stateOmissions := service.workParameterStates(ctx, command.OwnerID, command.SessionID, steps)
+	facts.omissions = appendWorkOmissions(facts.omissions, stateOmissions...)
+	ledger := service.projectWorkLedger(steps, max(page.Total, len(steps)), facts, parameterStates)
+	var foundStep *WorkStep
+	for index := range ledger.Steps {
+		if ledger.Steps[index].TaskID == string(task.ID) {
+			foundStep = &ledger.Steps[index]
+			break
 		}
+	}
+	if foundStep == nil {
+		return ToolResult{Error: service.workLedger.NotReadableTemplate, NoSubmission: true}, nil
 	}
 	content, err := json.Marshal(map[string]any{
 		"ok":          true,
-		"step":        found,
+		"step":        foundStep,
 		"total_steps": ledger.TotalSteps,
 	})
 	if err != nil {
 		return ToolResult{Error: service.workLedger.NotReadableTemplate, NoSubmission: true}, nil
 	}
 	summary, _ := json.Marshal(map[string]any{
-		"tool": "get_production_step", "step": found.Step, "task_id": found.TaskID,
-		"state": found.State, "decision": found.Decision, "self_check": found.SelfChecks,
+		"tool": "get_production_step", "step": foundStep.Step, "task_id": foundStep.TaskID,
+		"state": foundStep.State, "decision": foundStep.Decision, "self_check": foundStep.SelfChecks,
 	})
 	return ToolResult{AgentContent: string(content), Summary: summary, NoSubmission: true}, nil
+}
+
+// resolveProductionStep resolves a step handle or a Task ID against the
+// complete session Task set. The step handle is the exact @stepN spelling; any
+// other token is looked up as a Task ID of this session only.
+func (service *Service) resolveProductionStep(
+	ctx context.Context,
+	ownerID, sessionID, token string,
+	page generation.TaskPage,
+) (generation.Task, int, bool, error) {
+	if number, ok := service.stepNumber(token); ok {
+		return service.findSessionStep(ctx, ownerID, sessionID, number, page)
+	}
+	return service.findSessionTask(ctx, ownerID, sessionID, token, page)
 }

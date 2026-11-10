@@ -52,6 +52,18 @@ func TestWorkLedgerDeclarationIsValidated(t *testing.T) {
 		{"a summary without steps", func(app *catalog.ApplicationSchema) {
 			app.Chat.WorkLedger.SummaryTemplate = "{open}{rejected}{close}"
 		}, "{steps}"},
+		{"a summary without omissions", func(app *catalog.ApplicationSchema) {
+			app.Chat.WorkLedger.SummaryTemplate = "{open}{steps}{rejected}{close}"
+		}, "{omissions}"},
+		{"an empty omissions note", func(app *catalog.ApplicationSchema) {
+			app.Chat.WorkLedger.OmissionsNote = ""
+		}, "omissions_note"},
+		{"an omissions note without a count", func(app *catalog.ApplicationSchema) {
+			app.Chat.WorkLedger.OmissionsNote = "facts unreadable"
+		}, "{count}"},
+		{"an empty superseded reason", func(app *catalog.ApplicationSchema) {
+			app.Chat.WorkLedger.Rejected.SupersededReason = ""
+		}, "superseded_reason"},
 		{"a step line without self-check", func(app *catalog.ApplicationSchema) {
 			app.Chat.WorkLedger.StepLineTemplate = "{step} {task_id} {capability} {model} {status} {prompt} {decision}"
 		}, "{self_check}"},

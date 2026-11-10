@@ -15,11 +15,15 @@ import (
 // only what the generator sends, never this recorded fact.
 //
 // Identity anchors (a separately stored identity description and its
-// references) are not persisted here: the current Schema has no session
+// references) are NOT delivered by #248. The current Schema has no session
 // setting that could carry that text without a new column or migration, and
-// #248's delivery reserves the migration for #247. #250 owns identity-anchor
-// persistence and its confirmation flow; the Model3D/2D craft prompts keep
-// asking the Agent to reuse the identity wording verbatim in the meantime.
+// #248's delivery reserves the migration for #247. The handoff is explicit and
+// recorded in docs/architecture.md, the PR and Issue #248: #250 owns
+// identity-anchor persistence and its confirmation flow. This branch does not
+// claim that acceptance and does not fabricate an identity-anchor entry from
+// the style lock, whose text is the separately recorded style setting. The
+// Model3D/2D craft prompts keep asking the Agent to reuse the identity wording
+// verbatim in the meantime.
 
 // workAnchorsSummary renders the anchor block for the owner's session. It
 // returns "" when the style lock is disabled or empty, or when the Schema

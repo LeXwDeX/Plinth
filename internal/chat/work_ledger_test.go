@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -98,8 +100,30 @@ func newLedgerFixture(
 	fixture.repository.mu.Lock()
 	fixture.repository.messages[session.ID] = append([]chat.Message(nil), fixture.messages...)
 	fixture.repository.mu.Unlock()
-	fixture.service.SetSessionTaskSource(func(context.Context, string, string) (generation.TaskPage, error) {
-		return generation.TaskPage{Tasks: append([]generation.Task(nil), fixture.tasks...), Total: len(fixture.tasks)}, nil
+	fixture.service.SetSessionTaskSource(func(_ context.Context, _, _ string, offset, limit int) (generation.TaskPage, error) {
+		// Mirror generation.Module.List: newest first (CreatedAt DESC, ID DESC)
+		// with the production page bound applied. Tests that lower
+		// MaximumSteps therefore exercise the real list bound, not a fixture
+		// that always returns every Task.
+		ordered := append([]generation.Task(nil), fixture.tasks...)
+		sort.SliceStable(ordered, func(left, right int) bool {
+			if ordered[left].CreatedAt.Equal(ordered[right].CreatedAt) {
+				return ordered[left].ID > ordered[right].ID
+			}
+			return ordered[left].CreatedAt.After(ordered[right].CreatedAt)
+		})
+		total := len(ordered)
+		if limit <= 0 {
+			limit = 20
+		}
+		if offset < 0 {
+			offset = 0
+		}
+		if offset >= total {
+			return generation.TaskPage{Tasks: []generation.Task{}, Total: total}, nil
+		}
+		end := min(offset+limit, total)
+		return generation.TaskPage{Tasks: append([]generation.Task(nil), ordered[offset:end]...), Total: total}, nil
 	})
 	fixture.service.SetSessionTaskDetail(func(_ context.Context, _, _, taskID string) (generation.Task, error) {
 		for _, task := range append(append([]generation.Task(nil), fixture.detailTasks...), fixture.tasks...) {
@@ -726,5 +750,436 @@ func TestStyleLockIsInjectedAsTheStyleAnchorOnlyWhenEnabled(t *testing.T) {
 	system = ledgerPromptTurn(t, fixture, agent, nil)
 	if !strings.Contains(system, "enabled style") {
 		t.Fatalf("an enabled style lock must be injected: %q", system)
+	}
+}
+
+func workLedgerFourTasks() []generation.Task {
+	return []generation.Task{
+		workTask("task-1", time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC), "first", "first"),
+		workTask("task-2", time.Date(2026, 11, 1, 11, 0, 0, 0, time.UTC), "second", "second"),
+		workTask("task-3", time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC), "third", "third"),
+		workTask("task-4", time.Date(2026, 11, 1, 13, 0, 0, 0, time.UTC), "fourth", "fourth"),
+	}
+}
+
+// TestWorkLedgerReadsStepsBeyondTheSummaryBound is the #248 regression for the
+// bounded Task read: the summary still lists at most maximum_steps Tasks, but
+// get_production_step must resolve any @stepN or Task ID in the complete
+// session set, including a step the summary page never loaded.
+func TestWorkLedgerReadsStepsBeyondTheSummaryBound(t *testing.T) {
+	tasks := workLedgerFourTasks()
+	messages := []chat.Message{{
+		Role:      "configured-assistant",
+		ToolCalls: []chat.ToolCall{workCall("call-1", "task-1", "first", "")},
+	}}
+	fixture := newLedgerFixture(t, func(config *chat.ServiceConfig) {
+		config.WorkLedger.MaximumSteps = 2
+	}, tasks, messages)
+	ctx := context.Background()
+	ledger, err := fixture.service.WorkLedger(ctx, "owner-a", fixture.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ledger.TotalSteps != 4 {
+		t.Fatalf("total steps = %d", ledger.TotalSteps)
+	}
+	if len(ledger.Steps) != 2 || ledger.Steps[0].Step != "@step3" || ledger.Steps[1].Step != "@step4" {
+		t.Fatalf("the bounded projection must hold only the newest page: %+v", ledger.Steps)
+	}
+	summary := fixture.service.WorkLedgerSummary(ctx, "owner-a", fixture.session.ID, "")
+	if !strings.Contains(summary, "另有 2 步") || !strings.Contains(summary, "get_production_step 取回") {
+		t.Fatalf("the summary must name the steps it left out: %s", summary)
+	}
+	for token, wantTask := range map[string]string{"@step1": "task-1", "@step2": "task-2", "task-1": "task-1"} {
+		result, err := fixture.service.ReadProductionStep(ctx, workStepArgument(t, fixture.session.ID, token))
+		if err != nil || result.Error != "" {
+			t.Fatalf("read %s = %+v, %v", token, result, err)
+		}
+		var payload struct {
+			Step  chat.WorkStep `json:"step"`
+			Total int           `json:"total_steps"`
+		}
+		if err := json.Unmarshal([]byte(result.AgentContent), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Step.TaskID != wantTask || payload.Total != 4 {
+			t.Fatalf("read %s = %+v", token, payload)
+		}
+		wantStep := map[string]string{"@step1": "@step1", "@step2": "@step2", "task-1": "@step1"}[token]
+		if payload.Step.Step != wantStep {
+			t.Fatalf("read %s step handle = %q; want %q", token, payload.Step.Step, wantStep)
+		}
+		if len(payload.Step.Parameters) == 0 {
+			t.Fatalf("read %s must return the full frozen step: %+v", token, payload.Step)
+		}
+	}
+	if result, _ := fixture.service.ReadProductionStep(ctx, workStepArgument(t, fixture.session.ID, "first")); result.Error == "" {
+		t.Fatalf("a display name must not resolve as a Task ID: %+v", result)
+	}
+}
+
+// TestWorkLedgerSummaryKeepsAnOldPickedStep is the #248 regression for the
+// picked object: even when its Task is older than the bounded summary page, it
+// is fetched and ranked first instead of silently disappearing.
+func TestWorkLedgerSummaryKeepsAnOldPickedStep(t *testing.T) {
+	fixture := newLedgerFixture(t, func(config *chat.ServiceConfig) {
+		config.WorkLedger.MaximumSteps = 2
+	}, workLedgerFourTasks(), nil)
+	ctx := context.Background()
+	if _, err := fixture.repository.SetSessionPick(ctx, "owner-a", fixture.session.ID, chat.Attachment{
+		Kind: chat.AttachmentKindImage, AssetID: "asset-1", TaskID: "task-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := fixture.service.WorkLedger(ctx, "owner-a", fixture.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ledger.CurrentTaskID != "task-1" {
+		t.Fatalf("current = %q", ledger.CurrentTaskID)
+	}
+	found := false
+	for _, step := range ledger.Steps {
+		if step.TaskID == "task-1" && step.Step == "@step1" && step.Decision == chat.WorkDecisionAdopted {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the old picked step must be fetched into the projection: %+v", ledger.Steps)
+	}
+	summary := fixture.service.WorkLedgerSummary(ctx, "owner-a", fixture.session.ID, "")
+	if !strings.Contains(summary, "@step1") || !strings.Contains(summary, "task-1") {
+		t.Fatalf("the old picked step is missing from the summary: %s", summary)
+	}
+	if !strings.Contains(summary, "另有 2 步") {
+		t.Fatalf("the summary must count every unlisted step: %s", summary)
+	}
+}
+
+type failingDecisions struct{}
+
+func (failingDecisions) WorkDecisions(context.Context, string, string) ([]chat.WorkDecision, error) {
+	return nil, errors.New("decision store unavailable")
+}
+
+// TestDecisionReadFailuresBecomeOmissions is the #248 regression for the
+// previously swallowed rejected-direction read error: it must surface as a
+// diagnosable omission and a Schema note, never as an empty "no rejections"
+// list.
+func TestDecisionReadFailuresBecomeOmissions(t *testing.T) {
+	task := workTask("task-1", time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC), "raw", "final")
+	fixture := newLedgerFixture(t, nil, []generation.Task{task}, nil)
+	fixture.service.SetDecisionReader(failingDecisions{})
+	ctx := context.Background()
+	ledger, err := fixture.service.WorkLedger(ctx, "owner-a", fixture.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ledger.Rejected != nil {
+		t.Fatalf("an unreadable decision store must not report a decision: %+v", ledger.Rejected)
+	}
+	if len(ledger.Omissions) != 1 {
+		t.Fatalf("omissions = %+v", ledger.Omissions)
+	}
+	omission := ledger.Omissions[0]
+	if omission.Kind != "decisions_unreadable" || omission.Detail == "" {
+		t.Fatalf("omission = %+v", omission)
+	}
+	summary := fixture.service.WorkLedgerSummary(ctx, "owner-a", fixture.session.ID, "")
+	if !strings.Contains(summary, "另有 1 项账本事实未能读取或归属") {
+		t.Fatalf("the summary must surface the failed read: %s", summary)
+	}
+}
+
+// addSelectionTurn records one persisted turn with the objects the person
+// selected for it. picked marks a selection that is only the session pick
+// carried into the turn, not a new choice.
+func addSelectionTurn(t *testing.T, fixture *ledgerFixture, at time.Time, picked bool, taskIDs ...string) {
+	t.Helper()
+	attachments := make([]chat.Attachment, 0, len(taskIDs))
+	for _, taskID := range taskIDs {
+		suffix := taskID[len(taskID)-1:]
+		attachments = append(attachments, chat.Attachment{
+			Handle: "@img" + suffix, Kind: chat.AttachmentKindImage, Role: chat.AttachmentRoleGenerated,
+			AssetID: "asset-" + suffix, TaskID: taskID,
+		})
+	}
+	fixture.repository.mu.Lock()
+	fixture.repository.turns["selection-turn-"+at.Format("150405.000")] = chat.Turn{
+		OwnerID:   "owner-a",
+		SessionID: fixture.session.ID,
+		Options:   chat.TurnOptions{Selection: attachments, SelectionPicked: picked},
+		CreatedAt: at,
+	}
+	fixture.repository.mu.Unlock()
+}
+
+// TestSessionDecisionReaderProjectsSupersededSelections is the #248 regression
+// for the production decision source: the persisted turn selections and the
+// session pick are the verifiable facts, and no fact means no block.
+func TestSessionDecisionReaderProjectsSupersededSelections(t *testing.T) {
+	tasks := []generation.Task{
+		workTask("task-1", time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC), "first", "first"),
+		workTask("task-2", time.Date(2026, 11, 1, 11, 0, 0, 0, time.UTC), "second", "second"),
+	}
+	fixture := newLedgerFixture(t, nil, tasks, nil)
+	ctx := context.Background()
+	const reason = "已被后续选择取代，不要再按这个结果继续"
+	addSelectionTurn(t, fixture, time.Date(2026, 11, 1, 10, 1, 0, 0, time.UTC), false, "task-1")
+	addSelectionTurn(t, fixture, time.Date(2026, 11, 1, 11, 1, 0, 0, time.UTC), false, "task-2")
+	reader := chat.NewSessionDecisionReader(fixture.repository, reason)
+	decisions, err := reader.WorkDecisions(ctx, "owner-a", fixture.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) != 1 || decisions[0].TaskID != "task-1" || decisions[0].State != chat.WorkDecisionRejected || decisions[0].Reason != reason {
+		t.Fatalf("decisions = %+v", decisions)
+	}
+	fixture.service.SetDecisionReader(reader)
+	ledger, err := fixture.service.WorkLedger(ctx, "owner-a", fixture.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Rejected) != 1 || ledger.Rejected[0].Step != "@step1" {
+		t.Fatalf("rejected steps must carry their handle: %+v", ledger.Rejected)
+	}
+	stepByID := map[string]chat.WorkStep{}
+	for _, step := range ledger.Steps {
+		stepByID[step.TaskID] = step
+	}
+	if stepByID["task-1"].Decision != chat.WorkDecisionRejected || stepByID["task-2"].Decision == chat.WorkDecisionRejected {
+		t.Fatalf("step decisions = %+v", stepByID)
+	}
+	summary := fixture.service.WorkLedgerSummary(ctx, "owner-a", fixture.session.ID, "")
+	if !strings.Contains(summary, "不要再做") || !strings.Contains(summary, "@step1") || !strings.Contains(summary, reason) {
+		t.Fatalf("rejected block missing from the summary: %s", summary)
+	}
+
+	// A session pick proven newer than the last explicit selection (a later
+	// turn carried it) supersedes that selection.
+	pickFixture := newLedgerFixture(t, nil, tasks, nil)
+	addSelectionTurn(t, pickFixture, time.Date(2026, 11, 1, 10, 1, 0, 0, time.UTC), false, "task-1")
+	if _, err := pickFixture.repository.SetSessionPick(ctx, "owner-a", pickFixture.session.ID, chat.Attachment{
+		Kind: chat.AttachmentKindImage, AssetID: "asset-2", TaskID: "task-2",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	addSelectionTurn(t, pickFixture, time.Date(2026, 11, 1, 10, 2, 0, 0, time.UTC), true, "task-2")
+	pickDecisions, err := chat.NewSessionDecisionReader(pickFixture.repository, reason).
+		WorkDecisions(ctx, "owner-a", pickFixture.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pickDecisions) != 1 || pickDecisions[0].TaskID != "task-1" {
+		t.Fatalf("pick decisions = %+v", pickDecisions)
+	}
+
+	// A stale pick with no later turn carrying it must not override the newest
+	// explicit selection: an old pick is not proof of a later choice.
+	staleFixture := newLedgerFixture(t, nil, tasks, nil)
+	if _, err := staleFixture.repository.SetSessionPick(ctx, "owner-a", staleFixture.session.ID, chat.Attachment{
+		Kind: chat.AttachmentKindImage, AssetID: "asset-2", TaskID: "task-2",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	addSelectionTurn(t, staleFixture, time.Date(2026, 11, 1, 10, 1, 0, 0, time.UTC), false, "task-1")
+	staleDecisions, err := chat.NewSessionDecisionReader(staleFixture.repository, reason).
+		WorkDecisions(ctx, "owner-a", staleFixture.session.ID)
+	if err != nil || len(staleDecisions) != 0 {
+		t.Fatalf("a stale pick must not invent a rejection: %+v, %v", staleDecisions, err)
+	}
+
+	// A turn that only carried the session pick is not a new choice; a session
+	// whose existing records prove nothing must omit the block.
+	emptyFixture := newLedgerFixture(t, nil, tasks, nil)
+	addSelectionTurn(t, emptyFixture, time.Date(2026, 11, 1, 10, 1, 0, 0, time.UTC), true, "task-1")
+	emptyDecisions, err := chat.NewSessionDecisionReader(emptyFixture.repository, reason).
+		WorkDecisions(ctx, "owner-a", emptyFixture.session.ID)
+	if err != nil || len(emptyDecisions) != 0 {
+		t.Fatalf("empty decisions = %+v, %v", emptyDecisions, err)
+	}
+	emptyFixture.service.SetDecisionReader(chat.NewSessionDecisionReader(emptyFixture.repository, reason))
+	if summary := emptyFixture.service.WorkLedgerSummary(ctx, "owner-a", emptyFixture.session.ID, ""); strings.Contains(summary, "不要再做") {
+		t.Fatalf("no verifiable rejection must render no block: %s", summary)
+	}
+}
+
+// TestWorkParameterSourceReportsTheUserOnlyWhenThePinMatches is the #248
+// regression for the parameter source: the existing parameter store's
+// last-writer state is used only when it still equals the frozen value.
+func TestWorkParameterSourceReportsTheUserOnlyWhenThePinMatches(t *testing.T) {
+	task := workTask("task-1", time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC), "raw", "final")
+	task.Input = json.RawMessage(`{"prompt":"final","negative_prompt":"blurry","size":"2048x2048"}`)
+	messages := []chat.Message{{
+		Role: "configured-assistant", ToolCalls: []chat.ToolCall{workCall("call-1", "task-1", "raw", "")},
+	}}
+	fixture := newLedgerFixture(t, nil, []generation.Task{task}, messages)
+	ctx := context.Background()
+	readSizeSource := func() string {
+		t.Helper()
+		result, err := fixture.service.ReadProductionStep(ctx, workStepArgument(t, fixture.session.ID, "@step1"))
+		if err != nil || result.Error != "" {
+			t.Fatalf("read = %+v, %v", result, err)
+		}
+		var payload struct {
+			Step chat.WorkStep `json:"step"`
+		}
+		if err := json.Unmarshal([]byte(result.AgentContent), &payload); err != nil {
+			t.Fatal(err)
+		}
+		for _, parameter := range payload.Step.Parameters {
+			if parameter.Name == "size" {
+				if parameter.Value != "2048x2048" {
+					t.Fatalf("size value = %q", parameter.Value)
+				}
+				return parameter.Source
+			}
+		}
+		t.Fatalf("size parameter missing: %+v", payload.Step.Parameters)
+		return ""
+	}
+	if source := readSizeSource(); source != "unknown" {
+		t.Fatalf("without a parameter source the source must stay unknown: %q", source)
+	}
+	fixture.service.SetParameterSource(func(context.Context, string, string, string) (map[string]chat.WorkParameterState, error) {
+		return map[string]chat.WorkParameterState{
+			"size": {Value: json.RawMessage(`"2048x2048"`), Source: "user"},
+		}, nil
+	})
+	if source := readSizeSource(); source != "user" {
+		t.Fatalf("a matching persisted user pin must report user: %q", source)
+	}
+	fixture.service.SetParameterSource(func(context.Context, string, string, string) (map[string]chat.WorkParameterState, error) {
+		return map[string]chat.WorkParameterState{
+			"size": {Value: json.RawMessage(`"1024x1024"`), Source: "user"},
+		}, nil
+	})
+	if source := readSizeSource(); source != "unknown" {
+		t.Fatalf("a stale user pin must not claim the frozen value: %q", source)
+	}
+	fixture.service.SetParameterSource(func(context.Context, string, string, string) (map[string]chat.WorkParameterState, error) {
+		return nil, errors.New("parameter store unavailable")
+	})
+	ledger, err := fixture.service.WorkLedger(ctx, "owner-a", fixture.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, omission := range ledger.Omissions {
+		if omission.Kind == "parameter_source_unreadable" && omission.Subject != "" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("an unreadable parameter store must be an omission: %+v", ledger.Omissions)
+	}
+}
+
+// TestWorkLedgerAggregatesMultiPromptTools is the #248 regression for tools
+// that carry one prompt per view: raw and final prompts must list the named
+// values instead of being empty, and the summary must preview that content.
+func TestWorkLedgerAggregatesMultiPromptTools(t *testing.T) {
+	full := generation.Task{
+		ID:         generation.TaskID("task-1"),
+		OwnerID:    generation.OwnerID("owner-a"),
+		SessionID:  "session",
+		Capability: generation.Capability("edit-multiview"),
+		Offering: generation.Offering{
+			ID:      generation.OfferingID("offering-multiview"),
+			ModelID: "model-multiview",
+			Parameters: []generation.Parameter{
+				{Name: "front_prompt", Type: "text"},
+				{Name: "back_prompt", Type: "text"},
+			},
+		},
+		Input:     json.RawMessage(`{"front_prompt":"green cloak on the front","back_prompt":"red cape on the back"}`),
+		State:     generation.TaskSucceeded,
+		Progress:  100,
+		CreatedAt: time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC),
+		Assets: []generation.Asset{{
+			ID: generation.AssetID("asset-1"), TaskID: "task-1", Role: "image", Variant: "front", MediaType: "image/png",
+		}},
+	}
+	reduced := full
+	reduced.Offering.Parameters = nil
+	reduced.Input = json.RawMessage(`{}`)
+	call := chat.ToolCall{
+		ID: "call-1", Name: "edit_multiview_images", TaskID: "task-1",
+		Arguments: json.RawMessage(`{"front_prompt":"green","back_prompt":"red"}`),
+	}
+	messages := []chat.Message{{
+		Role: "configured-assistant", ToolCalls: []chat.ToolCall{call},
+		Attachments: []chat.Attachment{{
+			Handle: "@img4", Kind: chat.AttachmentKindImage, Role: chat.AttachmentRoleGenerated,
+			AssetID: "asset-1", TaskID: "task-1",
+		}},
+	}}
+	fixture := newLedgerFixture(t, nil, []generation.Task{reduced}, messages)
+	fixture.detailTasks = []generation.Task{full}
+	ctx := context.Background()
+	ledger, err := fixture.service.WorkLedger(ctx, "owner-a", fixture.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ledger.Steps[0].RawPrompt != "back_prompt: red; front_prompt: green" {
+		t.Fatalf("raw prompt = %q", ledger.Steps[0].RawPrompt)
+	}
+	summary := fixture.service.WorkLedgerSummary(ctx, "owner-a", fixture.session.ID, "")
+	if !strings.Contains(summary, "front_prompt: green") || !strings.Contains(summary, "back_prompt: red") {
+		t.Fatalf("the summary must preview the named prompts: %s", summary)
+	}
+	result, err := fixture.service.ReadProductionStep(ctx, workStepArgument(t, fixture.session.ID, "@step1"))
+	if err != nil || result.Error != "" {
+		t.Fatalf("read = %+v, %v", result, err)
+	}
+	var payload struct {
+		Step chat.WorkStep `json:"step"`
+	}
+	if err := json.Unmarshal([]byte(result.AgentContent), &payload); err != nil {
+		t.Fatal(err)
+	}
+	want := "front_prompt: green cloak on the front; back_prompt: red cape on the back"
+	if payload.Step.FinalPrompt != want {
+		t.Fatalf("final prompt = %q; want %q", payload.Step.FinalPrompt, want)
+	}
+	for _, parameter := range payload.Step.Parameters {
+		if strings.HasSuffix(parameter.Name, "_prompt") {
+			t.Fatalf("a prompt slot must not be projected as a parameter: %+v", parameter)
+		}
+	}
+}
+
+// TestWorkLedgerDoesNotAttributeSelfChecksToUnknownTokens is the #248
+// regression for old sessions whose self-check summaries name @selected or a
+// display name: an unknown token must not become a phantom Task ID.
+func TestWorkLedgerDoesNotAttributeSelfChecksToUnknownTokens(t *testing.T) {
+	task := workTask("task-1", time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC), "raw", "final")
+	messages := []chat.Message{{
+		Role: "configured-assistant",
+		ToolCalls: []chat.ToolCall{
+			{ID: "call-1", Name: "render_model_views",
+				Summary: json.RawMessage(`{"tool":"render","model":"@selected","views":["front"]}`)},
+			{ID: "call-2", Name: "render_model_views",
+				Summary: json.RawMessage(`{"tool":"render","model":"Tripo v3.1","views":["back"]}`)},
+			{ID: "call-3", Name: "render_model_views",
+				Summary: json.RawMessage(`{"tool":"render","model":"@step1","views":["left"]}`)},
+		},
+	}}
+	fixture := newLedgerFixture(t, nil, []generation.Task{task}, messages)
+	ledger, err := fixture.service.WorkLedger(context.Background(), "owner-a", fixture.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks := ledger.Steps[0].SelfChecks
+	if len(checks) != 1 || checks[0].Tool != "render_model_views" || checks[0].Passed != 1 {
+		t.Fatalf("only the resolvable self-check must attach: %+v", checks)
+	}
+	if len(ledger.Omissions) != 2 {
+		t.Fatalf("unresolved tokens must be recorded: %+v", ledger.Omissions)
+	}
+	for _, omission := range ledger.Omissions {
+		if omission.Kind != "self_check_unattributed" || omission.Subject == "" {
+			t.Fatalf("omission = %+v", omission)
+		}
 	}
 }

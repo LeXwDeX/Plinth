@@ -1622,6 +1622,24 @@ def _work_ledger_plain_turn(api, session, content, creative_domain="image", imag
     return False
 
 
+def _work_ledger_selection_turn(api, session, content, asset_id, task_id):
+    """Send one plain turn that selects an existing generated object. The
+    selection is persisted in the turn options, which is the existing fact the
+    ledger's rejected-direction projection reads."""
+    replies = assistant_reply_count(api, session)
+    body = {"content": content, "creative_domain": "image",
+            "selection": [{"kind": "image", "assetId": asset_id, "taskId": task_id}]}
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+    if status not in (200, 201, 202):
+        return False
+    end = time.time() + 60
+    while time.time() < end:
+        if assistant_reply_count(api, session) > replies:
+            return True
+        time.sleep(0.5)
+    return False
+
+
 def _work_ledger_marker(tool, arguments):
     return "[[fake:tool:" + tool + " " + json.dumps(arguments, ensure_ascii=False, separators=(",", ":")) + "]]"
 
@@ -1720,6 +1738,35 @@ def scenario_work_ledger(api, offerings, work):
            bool(second) and second.get("state") == "SUCCEEDED" and new_prompt == changed
            and "black cloak" not in new_prompt and new_prompt != first_prompt,
            f"state={(second or {}).get('state')} new_chars={len(new_prompt)}")
+    # A rejected direction is projected from existing records: the person
+    # selected the first result in a user message, then picked the second
+    # result. No explicit-rejection write (#241) exists yet.
+    first_asset = (task.get("assets") or [{}])[0]
+    second_asset = (second.get("assets") or [{}])[0]
+    if not first_asset.get("id") or not second_asset.get("id"):
+        record("#248 rejected direction from existing selection records", False, "task assets without ids")
+        return
+    selected = _work_ledger_selection_turn(api, session, "keep this direction for now",
+                                            first_asset["id"], first_task_id)
+    status, body = api.json("PUT", f"/api/v1/chat/sessions/{session}/pick",
+                            {"kind": "image", "assetId": second_asset["id"], "taskId": second["id"]})
+    recorded = selected and status == 200
+    if not recorded:
+        record("#248 rejected direction from existing selection records", False,
+               f"selection={selected} pick={status} {body if status != 200 else ''}")
+        return
+    # A read-only tool turn stores its request checkpoint; read the system
+    # prompt that turn received after the pick moved.
+    probe = _work_ledger_marker("get_production_step", {"step": second["id"]})
+    if not _work_ledger_plain_turn(api, session, "confirm the kept step " + probe, creative_domain="image"):
+        record("#248 rejected direction turn", False, "turn did not finish")
+        return
+    system = _work_ledger_wait_system(work, session, "不要再做")
+    record("#248 rejected direction is projected from the existing records",
+           "不要再做" in system and first_task_id in system and "已被后续选择取代" in system,
+           f"block={'yes' if '不要再做' in system else 'no'} "
+           f"task={'yes' if first_task_id in system else 'no'} "
+           f"reason={'yes' if '已被后续选择取代' in system else 'no'}")
     # The style anchor is the existing session style lock, injected verbatim.
     status, uploaded = api.upload("/api/v1/assets", "file", "style-ref.png", make_png(), "image/png")
     asset_id = uploaded.get("id") if status in (200, 201) else None

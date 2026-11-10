@@ -2283,7 +2283,7 @@ func validateWorkLedger(schema ChatSchema) error {
 		text         string
 		placeholders []string
 	}{
-		{"summary_template", ledger.SummaryTemplate, []string{"{open}", "{steps}", "{rejected}", "{close}"}},
+		{"summary_template", ledger.SummaryTemplate, []string{"{open}", "{steps}", "{rejected}", "{omissions}", "{close}"}},
 		{"step_line_template", ledger.StepLineTemplate, []string{"{step}", "{task_id}", "{capability}", "{model}", "{status}", "{prompt}", "{self_check}", "{decision}"}},
 		{"prompt_line_template", ledger.PromptLineTemplate, []string{"{preview}"}},
 		{"self_check_line_template", ledger.SelfCheckLineTemplate, []string{"{tool}", "{passed}", "{unknown}", "{failed}", "{leftovers}"}},
@@ -2304,10 +2304,14 @@ func validateWorkLedger(schema ChatSchema) error {
 		"not_readable_template": ledger.NotReadableTemplate,
 		"none_text":             ledger.NoneText,
 		"prompt_omitted_text":   ledger.PromptOmittedText,
+		"omissions_note":        ledger.OmissionsNote,
 	} {
 		if strings.TrimSpace(text) == "" {
 			return fmt.Errorf("chat.work_ledger.%s 不能为空", name)
 		}
+	}
+	if !strings.Contains(ledger.OmissionsNote, "{count}") {
+		return errors.New("chat.work_ledger.omissions_note 须含 {count}")
 	}
 	if !strings.Contains(ledger.FailedViewsTemplate, "{views}") {
 		return errors.New("chat.work_ledger.failed_views_template 须含 {views}")
@@ -2344,6 +2348,9 @@ func validateWorkLedger(schema ChatSchema) error {
 		if !strings.Contains(rejected.LineTemplate, placeholder) {
 			return fmt.Errorf("chat.work_ledger.rejected.line_template 须含 %s", placeholder)
 		}
+	}
+	if strings.TrimSpace(rejected.SupersededReason) == "" {
+		return errors.New("chat.work_ledger.rejected.superseded_reason 不能为空")
 	}
 	anchors := ledger.Anchors
 	if anchors.MaximumTextCharacters <= 0 || strings.TrimSpace(anchors.StyleLabel) == "" {

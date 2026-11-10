@@ -2298,8 +2298,10 @@ type ChatImageReviewSchema struct {
 // instructions; markers in the projected text are removed first, like the
 // session notes.
 type ChatWorkLedgerSchema struct {
-	// MaximumSteps bounds the Tasks one ledger projection reads; the summary
-	// lists at most this many.
+	// MaximumSteps bounds the Tasks one summary projection reads and the step
+	// lines the summary lists. The picked object and rejected directions outside
+	// that page are fetched individually, and get_production_step searches the
+	// complete session set.
 	MaximumSteps int `json:"maximum_steps"`
 	// SummaryMaximumCharacters bounds the rendered summary block.
 	SummaryMaximumCharacters int `json:"summary_maximum_characters"`
@@ -2331,16 +2333,21 @@ type ChatWorkLedgerSchema struct {
 	// EmptyText, TruncatedNote, UnknownStepTemplate and NotReadableTemplate
 	// are the Agent-facing texts: an empty ledger, a summary that dropped steps
 	// ({count} dropped), a step the tool cannot find ({step}) and an unreadable
-	// session or Task.
+	// session or Task. OmissionsNote names the facts the projection could not
+	// read or attribute ({count}); it makes a failed decision or parameter read
+	// visible instead of silently empty.
 	EmptyText           string `json:"empty_text"`
 	TruncatedNote       string `json:"truncated_note"`
 	UnknownStepTemplate string `json:"unknown_step_template"`
 	NotReadableTemplate string `json:"not_readable_template"`
+	OmissionsNote       string `json:"omissions_note"`
 	// OpenMarker and CloseMarker frame the summary block.
 	OpenMarker  string `json:"open_marker"`
 	CloseMarker string `json:"close_marker"`
-	// Rejected is the "do not do again" block read from the decision source
-	// (#241). Without a decision source the block is empty.
+	// Rejected is the "do not do again" block. Its decisions come from the
+	// injected reader: explicit rejection writes belong to #241; until then the
+	// application projects results superseded by a later selection from the
+	// existing messages and pick. No record means the block is omitted.
 	Rejected ChatWorkLedgerRejectedSchema `json:"rejected"`
 	// Anchors declares the style anchor injection (#248). Identity anchors are
 	// not persisted yet; their storage is #250's scope.
@@ -2352,6 +2359,10 @@ type ChatWorkLedgerRejectedSchema struct {
 	MaximumItems    int    `json:"maximum_items"`
 	ContextTemplate string `json:"context_template"`
 	LineTemplate    string `json:"line_template"`
+	// SupersededReason words a rejection the projection inferred from existing
+	// records (a chosen result replaced by a later selection). Explicit
+	// rejection writes and their reasons remain #241's scope.
+	SupersededReason string `json:"superseded_reason"`
 }
 
 // ChatWorkLedgerAnchorsSchema declares the style anchor block. The style
