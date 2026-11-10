@@ -1,6 +1,7 @@
 package catalog_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -22,12 +23,72 @@ func TestThreeViewDeclarationsAreValidated(t *testing.T) {
 		{"agent text names the task", func(a *catalog.ApplicationSchema) {
 			a.Chat.ThreeView.Messages.AgentStarted = strings.ReplaceAll(a.Chat.ThreeView.Messages.AgentStarted, "{task}", "")
 		}},
-		{"a view may not depend on another", func(a *catalog.ApplicationSchema) {
+		{"a later view must use the model-source view", func(a *catalog.ApplicationSchema) {
 			for i := range a.Chat.Skills.Recipes {
 				if a.Chat.Skills.Recipes[i].ID == a.Chat.ThreeView.RecipeID {
-					a.Chat.Skills.Recipes[i].Steps[1].SourceStepKey = a.Chat.Skills.Recipes[i].Steps[0].Key
+					a.Chat.Skills.Recipes[i].Steps[1].SourceStepKey = ""
 				}
 			}
+		}},
+		{"the first view must not depend on another", func(a *catalog.ApplicationSchema) {
+			for i := range a.Chat.Skills.Recipes {
+				if a.Chat.Skills.Recipes[i].ID == a.Chat.ThreeView.RecipeID {
+					a.Chat.Skills.Recipes[i].Steps[0].SourceStepKey = a.Chat.Skills.Recipes[i].Steps[1].Key
+				}
+			}
+		}},
+		{"subject types need the default", func(a *catalog.ApplicationSchema) {
+			a.Chat.ThreeView.DefaultSubjectType = "no-such-subject"
+		}},
+		{"the subject tool enum must match the declared types", func(a *catalog.ApplicationSchema) {
+			for i := range a.Chat.AgentTools {
+				if a.Chat.AgentTools[i].Name != "create_three_view" {
+					continue
+				}
+				var parameters struct {
+					Properties map[string]struct {
+						Enum []string `json:"enum"`
+					} `json:"properties"`
+				}
+				if err := json.Unmarshal(a.Chat.AgentTools[i].Parameters, &parameters); err != nil {
+					t.Fatal(err)
+				}
+				property := parameters.Properties["subject_type"]
+				property.Enum = property.Enum[:len(property.Enum)-1]
+				encoded, err := json.Marshal(map[string]any{"properties": map[string]any{"subject_type": property}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				a.Chat.AgentTools[i].Parameters = encoded
+			}
+		}},
+		{"the front prompt needs its subject constraints", func(a *catalog.ApplicationSchema) {
+			for i := range a.Chat.Skills.Recipes {
+				if a.Chat.Skills.Recipes[i].ID == a.Chat.ThreeView.RecipeID {
+					a.Chat.Skills.Recipes[i].Steps[0].PromptTemplate =
+						strings.ReplaceAll(a.Chat.Skills.Recipes[i].Steps[0].PromptTemplate, "{subject_front_constraints}", "")
+				}
+			}
+		}},
+		{"a later view prompt needs the view constraints", func(a *catalog.ApplicationSchema) {
+			for i := range a.Chat.Skills.Recipes {
+				if a.Chat.Skills.Recipes[i].ID == a.Chat.ThreeView.RecipeID {
+					a.Chat.Skills.Recipes[i].Steps[2].PromptTemplate =
+						strings.ReplaceAll(a.Chat.Skills.Recipes[i].Steps[2].PromptTemplate, "{subject_view_constraints}", "")
+				}
+			}
+		}},
+		{"consistency thresholds must not be negative", func(a *catalog.ApplicationSchema) {
+			a.Chat.ThreeView.Consistency.MaxSubjectRatioDelta = -0.1
+		}},
+		{"view_order must start with the required view", func(a *catalog.ApplicationSchema) {
+			a.Chat.ThreeView.Multiview.ViewOrder = []string{"left", "front", "back", "right"}
+		}},
+		{"view_order must name recipe steps", func(a *catalog.ApplicationSchema) {
+			a.Chat.ThreeView.Multiview.ViewOrder = []string{"front", "top"}
+		}},
+		{"the completion receipt needs its placeholders", func(a *catalog.ApplicationSchema) {
+			a.Chat.ThreeView.Messages.AgentCompleted = "done"
 		}},
 		{"view route needs the run and view parameters", func(a *catalog.ApplicationSchema) {
 			a.Runtime.HTTP.Routes.ChatSessionThreeViewItem = "/api/v1/chat/sessions/{sessionID}/three-views/view"

@@ -1025,6 +1025,258 @@ def session_tasks(api, session):
     return body.get("tasks") or body.get("data") or []
 
 
+THREE_VIEW_IMAGE = IMAGE_OFFERINGS["openai"][1]
+
+
+def _three_view_groups(api, session):
+    body = api.json("GET", f"/api/v1/chat/sessions/{session}/three-views")[1]
+    return body.get("items") or []
+
+
+def _three_view_group(api, session):
+    groups = _three_view_groups(api, session)
+    return groups[0] if groups else None
+
+
+def _wait_three_view(api, session, seconds=120):
+    """Waits for the group's required views to finish (accepted or not)."""
+    end = time.time() + seconds
+    group = None
+    while time.time() < end:
+        group = _three_view_group(api, session)
+        if group:
+            slots = {slot.get("key"): slot for slot in group.get("slots") or []}
+            required = [slot for slot in slots.values() if not slot.get("optional")]
+            if required and all(slot.get("status") in ("succeeded", "failed", "rejected", "denied", "canceled")
+                                for slot in required):
+                return group
+        time.sleep(0.3)
+    return group
+
+
+def _prepared_inputs(work, stack, session):
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+        rows = db.execute("SELECT payload_json FROM generation_prepared_inputs WHERE session_id=?",
+                          (session,)).fetchall()
+        db.close()
+    except sqlite3.Error:
+        return []
+    parsed = []
+    for (payload,) in rows:
+        try:
+            parsed.append(json.loads(payload))
+        except ValueError:
+            continue
+    return parsed
+
+
+def _prepared_reference_assets(payload):
+    normalized = payload.get("normalized_input")
+    if isinstance(normalized, str):
+        try:
+            normalized = json.loads(normalized)
+        except ValueError:
+            return []
+    return normalized.get("reference_assets") or [] if isinstance(normalized, dict) else []
+
+
+def _send_chat(api, session, body, seconds=45):
+    """Sends one chat message, retrying while a continuation turn still owns it."""
+    end = time.time() + seconds
+    status, payload = 0, {}
+    while time.time() < end:
+        status, payload = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+        if status != 409:
+            return status, payload
+        time.sleep(0.5)
+    return status, payload
+
+
+def scenario_three_view(work, api, offerings):
+    """#243: an approved budget finishes front, left and back without a click,
+    feeds the front output into the later views and submits a P2 multiview 3D
+    step; manual mode starts only the front view until the person asks for the
+    next one."""
+    picture = upload_asset(api, "reference.png", make_png(), "image/png")
+    if not picture:
+        record("three-view: upload the reference picture", False, "upload refused")
+        return
+    picture_url = f"/api/v1/assets/{picture}"
+    plan = {
+        "title": "三视图链路",
+        "steps": [
+            {"capability": "image-to-image", "purpose": "三视图正面"},
+            {"capability": "image-to-image", "purpose": "三视图左侧"},
+            {"capability": "image-to-image", "purpose": "三视图背面"},
+            {"capability": "image-to-3d", "model": TRIPO_P2_MULTIVIEW_TO_3D, "purpose": "多视图生成 3D"},
+        ],
+        "budgets": [{"unit": "legacy.credits", "amount": 100}, {"unit": "tripo.credit", "amount": 200}],
+    }
+    session = new_session(api)
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
+    if status != 200:
+        record("three-view: budget approval mode", False, f"PUT {status}")
+        return
+    marker = "[[fake:tool:propose_production_plan " + json.dumps(plan, ensure_ascii=False, separators=(",", ":")) + "]]"
+    status, _ = _send_chat(api, session, {"content": "按计划做三视图 " + marker,
+                                           "creative_domain": "image", "ai_model": THREE_VIEW_IMAGE,
+                                           "image_urls": [picture_url]})
+    if status not in (200, 201, 202):
+        record("three-view: propose the plan", False, f"send {status}")
+        return
+    budget_id, why = "", ""
+    end = time.time() + 30
+    while time.time() < end:
+        pending = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items") or []
+        plan_card = next((item for item in pending if item.get("kind") == "plan"), None)
+        if plan_card:
+            budget_id = plan_card.get("request_id") or ""
+            break
+        time.sleep(0.4)
+    if not budget_id:
+        record("three-view: budget card appears", False, "no plan card")
+        return
+    status, approved = api.json("PUT", f"/api/v1/chat/sessions/{session}/budgets/{budget_id}",
+                                decision_body(api, "approve"))
+    if status != 200 or approved.get("state") != "active":
+        record("three-view: approve the plan", False, f"PUT {status} {approved}")
+        return
+    record("three-view: plan approved and active", True, f"budget {budget_id} state {approved.get('state')}")
+
+    views = '[[fake:tool:create_three_view {"reference_image_indices":[1],"subject_type":"humanoid"}]]'
+    status, _ = _send_chat(api, session, {"content": "生成三视图 " + views, "creative_domain": "image",
+                                           "ai_model": THREE_VIEW_IMAGE, "image_urls": [picture_url]})
+    if status not in (200, 201, 202):
+        record("three-view: start the views", False, f"send {status}")
+        return
+    group = _wait_three_view(api, session)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    front = slots.get("front") or {}
+    record("three-view: the budget finishes front, left and back without a click",
+           bool(group) and group.get("complete") is True
+           and slots.get("front", {}).get("status") == "succeeded"
+           and slots.get("left", {}).get("status") == "succeeded"
+           and slots.get("back", {}).get("status") == "succeeded"
+           and slots.get("right", {}).get("status") == "not_started",
+           f"complete={group.get('complete') if group else None} slots={ {k: v.get('status') for k, v in slots.items()} }")
+    image_tasks = [task for task in session_tasks(api, session)
+                   if task.get("capability") == "image-to-image" and task.get("state") != "CANCELED"]
+    record("three-view: exactly three image tasks run, the optional right view does not",
+           len(image_tasks) == 3, f"image tasks {[t.get('state') for t in image_tasks]}")
+    pending = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items") or []
+    record("three-view: no approval card is left pending", len(pending) == 0,
+           f"pending {[(item.get('kind'), item.get('status')) for item in pending]}")
+    front_asset = front.get("output_asset_id") or ""
+    prepared = _prepared_inputs(work, "main", session)
+    fed_front = {}
+    for needle, key in (("clean left view", "left"), ("clean back view", "back")):
+        match = next((item for item in prepared
+                      if needle in json.dumps(item.get("normalized_input"), ensure_ascii=False)), None)
+        assets = _prepared_reference_assets(match) if match else []
+        fed_front[key] = bool(front_asset) and bool(assets) and assets[0] == front_asset
+    record("three-view: left and back frozen inputs use the front output as their source",
+           fed_front.get("left") and fed_front.get("back") and bool(front_asset),
+           f"front asset {front_asset or 'none'}, left/back fed front {fed_front}")
+    run_id = (group or {}).get("run_id") or ""
+
+    # The accepted group feeds the multiview 3D step of the same plan.
+    before = {task.get("id") for task in session_tasks(api, session)}
+    submit = ('[[fake:tool:create_model_3d_from_views {"three_view_group":"' + run_id
+              + '","model":"tripo-p2-multiview"}]]')
+    status, _ = _send_chat(api, session, {"content": "用三视图生成 3D " + submit,
+                                           "creative_domain": "model-3d", "ai_model": TRIPO_P2_MULTIVIEW_TO_3D,
+                                           "domainModels": {"model-3d": TRIPO_P2_MULTIVIEW_TO_3D}})
+    if status not in (200, 201, 202):
+        record("three-view: submit the multiview 3D step", False, f"send {status}")
+        return
+    task = None
+    end = time.time() + 60
+    while time.time() < end and not task:
+        for candidate in session_tasks(api, session):
+            if candidate.get("id") in before or candidate.get("capability") != "image-to-3d":
+                continue
+            task = candidate
+            break
+        time.sleep(0.3)
+    if task:
+        task = wait_task(api, task.get("id"))
+    record("three-view: the group submits a P2 multiview 3D task",
+           bool(task) and task.get("state") == "SUCCEEDED" and task.get("offering_id") == TRIPO_P2_MULTIVIEW_TO_3D,
+           f"task {task.get('id') if task else None} state {task.get('state') if task else None} "
+           f"offering {task.get('offering_id') if task else None}")
+
+    # Manual (strict) mode: only the front view starts by itself; the person
+    # starts the left view, whose frozen input names the front output.
+    strict = new_session(api)
+    api.json("PUT", f"/api/v1/chat/sessions/{strict}/approval", {"approvalMode": "manual"})
+    status, _ = _send_chat(api, strict, {"content": "生成三视图 " + views, "creative_domain": "image",
+                                          "ai_model": THREE_VIEW_IMAGE, "image_urls": [picture_url]})
+    if status not in (200, 201, 202):
+        record("three-view strict: start the front view", False, f"send {status}")
+        return
+    group = None
+    end = time.time() + 60
+    while time.time() < end:
+        group = _three_view_group(api, strict)
+        slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+        if slots.get("front", {}).get("task_id"):
+            break
+        time.sleep(0.3)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    front = slots.get("front") or {}
+    record("three-view strict: only the front view starts by itself",
+           bool(group) and front.get("status") in ("succeeded", "running") and
+           slots.get("left", {}).get("status") == "not_started" and
+           len([t for t in session_tasks(api, strict)
+                if t.get("capability") == "image-to-image" and t.get("state") != "CANCELED"]) == 1,
+           f"front {front.get('status')}, left {slots.get('left', {}).get('status')}")
+    if front.get("task_id"):
+        wait_task(api, front.get("task_id"))
+    else:
+        record("three-view strict: front task exists", False, "no front task")
+        return
+    # Strict mode has no server-side continuation: even after the front view
+    # finished, left and back stay not started until the person clicks.
+    group = _three_view_group(api, strict)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    strict_tasks = [t for t in session_tasks(api, strict)
+                    if t.get("capability") == "image-to-image" and t.get("state") != "CANCELED"]
+    record("three-view strict: the finished front does not start the next view",
+           bool(group) and slots.get("left", {}).get("status") == "not_started" and
+           slots.get("back", {}).get("status") == "not_started" and len(strict_tasks) == 1,
+           f"front {slots.get('front', {}).get('status')}, left {slots.get('left', {}).get('status')}, "
+           f"back {slots.get('back', {}).get('status')}, tasks {[t.get('state') for t in strict_tasks]}")
+    view_route = f"/api/v1/chat/sessions/{strict}/three-views/{(group or {}).get('run_id')}/views/left"
+    status, body = api.json("POST", view_route, {"action": "start", "attempt": 0})
+    record("three-view strict: the person starts the left view", status == 200 and
+           next((slot.get("status") for slot in body.get("group", {}).get("slots", [])
+                 if slot.get("key") == "left"), "") in ("starting", "running", "succeeded"),
+           f"POST {status}")
+    end = time.time() + 90
+    group = None
+    while time.time() < end:
+        group = _three_view_group(api, strict)
+        slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+        if slots.get("left", {}).get("status") in ("succeeded", "failed", "rejected", "denied", "canceled"):
+            break
+        time.sleep(0.3)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    front, left = slots.get("front") or {}, slots.get("left") or {}
+    record("three-view strict: the clicked left view succeeds and back never starts",
+           left.get("status") == "succeeded" and slots.get("back", {}).get("status") == "not_started",
+           f"left {left.get('status')}, back {slots.get('back', {}).get('status')}")
+    prepared = _prepared_inputs(work, "main", strict)
+    match = next((item for item in prepared
+                  if "clean left view" in json.dumps(item.get("normalized_input"), ensure_ascii=False)), None)
+    assets = _prepared_reference_assets(match) if match else []
+    front_asset = (slots.get("front") or {}).get("output_asset_id") or ""
+    record("three-view strict: the frozen left input contains the front output",
+           bool(front_asset) and bool(assets) and assets[0] == front_asset,
+           f"front {front_asset or 'none'} left source {assets[:1]}")
+
+
 def scenario_agent_background(api, offerings):
     """#189: one assistant completion submits a generation step and the
     three-view SkillRun. With the session in auto mode both submit in that one
@@ -2567,13 +2819,13 @@ def scenario_vision_budget(api, offerings, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,image-purpose,offering-knowledge,work-ledger,vision-budget,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,image-purpose,offering-knowledge,work-ledger,vision-budget,three-view,faults")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     parser.add_argument("--report", default="", help="directory for the #238 agent-quality report (default: a temporary one)")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "tripo", "p2", "agent", "agent-background", "faults"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "tripo", "p2", "agent", "agent-background", "three-view", "faults"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -2589,7 +2841,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "work-ledger", "vision-budget"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "work-ledger", "vision-budget", "three-view"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -2616,6 +2868,8 @@ def main():
                 scenario_agent_quality(api, offerings, args.report or os.path.join(work, "agent-quality"))
             if "image-self-check" in selected:
                 scenario_image_self_check(api, offerings, work)
+            if "three-view" in selected:
+                scenario_three_view(work, api, offerings)
             if "image-purpose" in selected:
                 scenario_image_purpose(api, offerings, work)
             if "work-ledger" in selected:

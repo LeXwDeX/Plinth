@@ -274,7 +274,30 @@ func offeringMatchesModelChoices(offering schemacontract.Offering, choices ChatT
 			return false
 		}
 	}
+	if choices.RequireMultiview && !offeringTakesSeveralViews(offering) {
+		return false
+	}
 	return true
+}
+
+// offeringTakesSeveralViews reports whether an Offering takes several labelled
+// views of one object (#243): it declares the reference-views semantic, or its
+// provider endpoint is the order-only multi-image contract, where the pictures
+// are views by position. A plain multi-reference Offering (several pictures of
+// one object with no view keys) is not a multiview step.
+func offeringTakesSeveralViews(offering schemacontract.Offering) bool {
+	for _, parameter := range offering.Parameters {
+		if parameter.Semantic == schemacontract.SemanticReferenceViews {
+			return true
+		}
+	}
+	var options struct {
+		Endpoint string `json:"endpoint"`
+	}
+	if len(offering.ProviderOptions) > 0 && json.Unmarshal(offering.ProviderOptions, &options) == nil {
+		return options.Endpoint == "multi-image-to-3d"
+	}
+	return false
 }
 
 func offeringsList(offerings generationMap) []schemacontract.Offering {

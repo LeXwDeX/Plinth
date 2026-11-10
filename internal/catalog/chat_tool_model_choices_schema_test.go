@@ -104,13 +104,11 @@ func TestChatToolModelChoicesRejections(t *testing.T) {
 	}
 }
 
-// #249 follow-up: meshy-7.1-multiview is enabled and the Meshy adapter
-// supports its multi-image endpoint, but the Offering declares no
-// reference-views semantics. No 3D tool may select it until the Provider
-// adapter maps ordered multi-images to view labels (recorded as deferred in
-// docs/architecture.md); this test keeps that state explicit rather than a
-// silently unselectable model.
-func TestMeshyMultiviewStaysOutOfEvery3DToolUntilViewsAreMapped(t *testing.T) {
+// #243: the multiview tool selects every enabled multiview Offering, including
+// an order-only one whose pictures carry the views by position (Meshy 7.1
+// multiview). A plain multi-reference Offering is not a multiview step and
+// stays out; a single-picture 3D tool keeps the order-only model out too.
+func TestMultiviewModelChoicesIncludeOrderOnlyOfferings(t *testing.T) {
 	product, err := LoadDefault()
 	if err != nil {
 		t.Fatal(err)
@@ -126,22 +124,32 @@ func TestMeshyMultiviewStaysOutOfEvery3DToolUntilViewsAreMapped(t *testing.T) {
 	}
 	for _, parameter := range multiview.Parameters {
 		if parameter.Semantic == schemacontract.SemanticReferenceViews {
-			t.Fatalf("meshy multiview now declares reference-views: map it into the 3D tools and update the deferred note")
+			t.Fatalf("meshy multiview now declares reference-views: it no longer exercises the order-only path")
 		}
 	}
-	for _, name := range []string{"create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views"} {
-		var tool ChatToolSchema
-		for _, candidate := range product.Application().Chat.Tools {
-			if candidate.Name == name {
-				tool = candidate
-			}
+	var fromViews, fromImage ChatToolSchema
+	for _, candidate := range product.Application().Chat.Tools {
+		switch candidate.Name {
+		case "create_model_3d_from_views":
+			fromViews = candidate
+		case "create_model_3d_from_image":
+			fromImage = candidate
 		}
-		if tool.Name == "" {
-			t.Fatalf("%s is not declared", name)
+	}
+	if fromViews.Name == "" || fromImage.Name == "" {
+		t.Fatal("3D tools are not declared")
+	}
+	choices := DerivedModelChoices(fromViews, product.List(""), nil)
+	for _, want := range []string{"tripo-v3.1-multiview", "tripo-p2-multiview", "meshy-7.1-multiview"} {
+		if !slices.Contains(choices, want) {
+			t.Fatalf("create_model_3d_from_views choices %v lack %q", choices, want)
 		}
-		if slices.Contains(DerivedModelChoices(tool, product.List(""), nil), "meshy-7.1-multiview") {
-			t.Fatalf("%s selects meshy-7.1-multiview without a view mapping", name)
-		}
+	}
+	if slices.Contains(choices, "rodin-gen-2.5") {
+		t.Fatalf("a plain multi-reference Offering was selected as multiview: %v", choices)
+	}
+	if slices.Contains(DerivedModelChoices(fromImage, product.List(""), nil), "meshy-7.1-multiview") {
+		t.Fatal("the single-picture 3D tool selects an order-only multiview Offering")
 	}
 }
 

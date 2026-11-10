@@ -15,7 +15,7 @@ import (
 
 type testRecipeResolver struct{ recipe skillrun.Recipe }
 
-func (r testRecipeResolver) ResolveRecipe(_ context.Context, id string, offering generation.OfferingID) (skillrun.Recipe, bool, error) {
+func (r testRecipeResolver) ResolveRecipe(_ context.Context, id string, offering generation.OfferingID, _ string) (skillrun.Recipe, bool, error) {
 	return r.recipe, r.recipe.ID == id && offering == "offering-i2i", nil
 }
 

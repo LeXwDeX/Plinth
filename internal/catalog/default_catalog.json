@@ -4723,6 +4723,7 @@
         "ui.studio.three_view.status.running": "生成中",
         "ui.studio.three_view.status.succeeded": "已完成",
         "ui.studio.three_view.status.failed": "失败",
+        "ui.studio.three_view.status.rejected": "不一致，待重做",
         "ui.studio.three_view.status.canceled": "已取消",
         "ui.studio.three_view.status.unknown": "状态未知",
         "ui.studio.three_view.start": "继续生成",
@@ -5644,6 +5645,15 @@
             "offering_capabilities": ["text-to-3d", "image-to-3d"],
             "tradeoff_template": "- {model}：擅长 {strengths}；避免 {weaknesses}",
             "tradeoff_separator": "\n"
+          },
+          {
+            "id": "three-view",
+            "when_tools_any": [
+              "create_three_view",
+              "create_multiview_images",
+              "create_model_3d_from_views"
+            ],
+            "text": "【三视图制作要领】\n逐张三视图（create_three_view）用于要给 3D 做输入的同一主体：正面以用户选的图为身份锚，左侧、背面（和可选右侧）都以已通过的正面为源，按正交投影、中性均匀光、统一姿态/比例/画幅生成；主体类型（generic、humanoid、quadruped、hard_surface）决定姿态与硬表面约束。每一张都是独立任务，因此可以只重做或替换有问题的那一张，并在完成后用 inspect_image 比较主体占比、背景和轮廓高度；预算制且计划已覆盖这些步骤时，服务端会逐视角自动完成并只重做不一致的那一张，严格/自动模式仍逐张由用户点“继续生成”。\n一步出四视角（create_multiview_images）用于只需要一张多视角图片资产、或不要求逐视角控制和单视角重做时：它一次生成正面、左侧、背面、右侧四张图，不能替代逐张三视图的源图控制与一致性检查，也不是 3D 步骤。\n用已经完成的三视图生成 3D 时调用 create_model_3d_from_views 并传 three_view_group；多视图模型由 Catalog 的启用项决定，支持视角标注的模型和按 front/left/back/right 顺序读取的模型都可用，不要假设不同模型价格相同。"
           },
           {
             "id": "image2d",
@@ -6608,7 +6618,7 @@
         {
           "name": "create_three_view",
           "execution": {"implementation_key":"skill.prepare","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":[],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
-          "description": "Start the image-three-view recipe from exactly one user-selected image and the image-to-image model selected by the human. This prepares the first (front) view and requests approval by the session approval mode (an image step is approved automatically unless the session policy says otherwise). The left and back views (and the optional right view) do not start by themselves: the user starts each one from the three-view card (the continue button, or generate remaining views), and a failed view can be retried or replaced alone. The views form one group whose run ID the result names. To make one 3D model from the finished views, call create_model_3d_from_views with three_view_group set to that run ID; the server reads the pictures and their views from the group. Making a 3D model from the front view alone uses create_model_3d_from_image. Never claim all views are complete after this call.",
+          "description": "Start the image-three-view recipe from exactly one user-selected image and the image-to-image model selected by the human. Each view is an orthographic render: the front view uses the selected image as its identity anchor, and the left, back and right views use the approved front view, so clothing, proportions and colors stay consistent. Pick subject_type from these declared classes: generic, humanoid, quadruped, hard_surface; humanoid uses a neutral A-pose or T-pose. This prepares the first (front) view and requests approval by the session approval mode. In strict and auto modes the later views do not start by themselves: the user starts each one from the three-view card, and a failed or inconsistent view can be retried or replaced alone. In budget mode, when the approved production plan covers every required view, the server authorizes and submits the remaining views one at a time in the same turn, and automatically redraws only a view whose consistency check failed. The views form one group whose run ID the result names. To make one 3D model from the finished views, call create_model_3d_from_views with three_view_group set to that run ID. Making a 3D model from the front view alone uses create_model_3d_from_image. Never claim all views are complete after this call unless its result says the required views are accepted.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -6621,6 +6631,11 @@
                 "type": "array",
                 "items": { "type": "string" },
                 "description": "One image handle (such as @img3, or @selected) instead of an index."
+              },
+              "subject_type": {
+                "type": "string",
+                "enum": ["generic", "humanoid", "quadruped", "hard_surface"],
+                "description": "Optional subject class for the constraint template. humanoid uses a neutral A-pose or T-pose; quadruped stands on all four legs; hard_surface keeps rigid panels and symmetry. Omit for the session default."
               }
             },
             "additionalProperties": false
@@ -6938,10 +6953,10 @@
           "name": "create_model_3d_from_views",
           "canvas_source": "bind",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["image-to-3d"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
-          "description": "Generate one 3D model from several views of the SAME object with a multiview image-to-3D model. For a three-view group of this chat, pass three_view_group (the group's run ID) and nothing else about the pictures: the server reads the finished views and their view keys from the group. Otherwise use it only when the user gives 2 to 4 views of one object (a front view plus left, back or right views, for example the four pictures of a four-view image group) and wants a 3D model: pass the handles in front, left, back, right order, or say which view each handle is in reference_views (front, left, back, right); a front view is required. Left and right are the object's own left and right sides. For one picture, or pictures of different objects, use create_model_3d_from_image instead. The estimated native price is the same as Tripo image to 3D.",
+          "description": "Generate one 3D model from several views of the SAME object with a multiview image-to-3D model. The available models are derived from the Catalog's enabled multiview Offerings: those that label each picture's view (reference_views) and order-only models such as Meshy 7.1 multiview, whose pictures are read as front, left, back, right by position. For a three-view group of this chat, pass three_view_group (the group's run ID) and nothing else about the pictures: the server reads the finished views and their view keys from the group. Otherwise use it only when the user gives 2 to 4 views of one object (a front view plus left, back or right views, for example the four pictures of a four-view image group) and wants a 3D model: pass the handles in front, left, back, right order, or say which view each handle is in reference_views (front, left, back, right); a front view is required. An order-only model accepts only a contiguous front, left, back, right prefix, so never give it front plus back without left. Left and right are the object's own left and right sides. For one picture, or pictures of different objects, use create_model_3d_from_image instead. Use list_offerings for actual quotes; do not assume one multiview model costs the same as another.",
           "ignore_user_model": true,
           "model_argument": "model",
-          "model_choices": {"from": "available_offerings", "require_parameters": ["reference-views"]},
+          "model_choices": {"from": "available_offerings", "require_multiview": true},
           "default_to_selection": true,
           "capability": "image-to-3d",
           "fallback_capability": "image-to-3d",
@@ -8070,34 +8085,37 @@
         "recipes": [
           {
             "id": "image-three-view",
-            "revision": "2026-11-03.65.1",
+            "revision": "2026-11-10.243.1",
             "steps": [
               {
                 "key": "front",
                 "label": "正面",
                 "capability": "image-to-image",
-                "prompt_template": "Use the subject in the reference image as the exact identity. Render a clean front view of that same subject, facing the camera. Preserve its category, shape, geometry, proportions, colors, materials, surface markings and existing features. Keep markings on their original surfaces; show or hide them only as required by the view, never move them to a different surface. Change only the viewing angle. Keep the same depicted extent of the subject in frame on a plain background. If the reference already depicts a character, retain its existing anatomy, facial features, clothing, accessories and pose. For non-character objects, do not add bodies, limbs, faces, clothing or other character features. Do not add captions, view labels, text or decoration.",
+                "prompt_template": "Use the original reference image as the identity anchor. Create a clean, neutral front view of the single subject, facing the camera. {subject_front_constraints} Preserve its category, shape, geometry, proportions, colors, materials, surface markings and existing features exactly. Keep markings on their original surfaces; show or hide them only as required by the view, never move them to a different surface. Use neutral, even lighting with no strong directional shadows, and exactly one subject on a plain uniform background, complete and uncropped with even margins. Keep the same scale, proportions and framing across the whole view set. Do not add captions, view labels, text, decoration or extra objects.",
                 "output_role": "image"
               },
               {
                 "key": "left",
                 "label": "左侧",
                 "capability": "image-to-image",
-                "prompt_template": "Use the subject in the reference image as the exact identity. Render a clean left view of that same subject: the subject is turned 90 degrees so that its own left side faces the camera, as if the camera stood at the subject's left looking at its left flank. Preserve its category, shape, geometry, proportions, colors, materials, surface markings and existing features. Keep markings on their original surfaces; show or hide them only as required by the view, never move them to a different surface. Change only the viewing angle. Keep the same depicted extent of the subject in frame on a plain background. If the reference already depicts a character, retain its existing anatomy, facial features, clothing, accessories and pose. For non-character objects, do not add bodies, limbs, faces, clothing or other character features. Do not add captions, view labels, text or decoration.",
+                "source_step_key": "front",
+                "prompt_template": "Use the approved front view as the identity anchor. Render a clean left view of that same subject: its own left side faces the camera, as if seen from the subject's left. {subject_view_constraints} Preserve its category, shape, geometry, proportions, colors, materials, surface markings, clothing and accessories exactly; keep every marking on its original surface and never move it. Change only the viewing angle. The subject must stay the same size in frame as the front view, with the same silhouette height, on the same plain uniform background. Do not add captions, view labels, text, decoration or extra objects.",
                 "output_role": "image"
               },
               {
                 "key": "back",
                 "label": "背面",
                 "capability": "image-to-image",
-                "prompt_template": "Use the subject in the reference image as the exact identity. Render a clean back view of that same subject. Preserve its category, shape, geometry, proportions, colors, materials, surface markings and existing features. Keep markings on their original surfaces; show or hide them only as required by the view, never move them to a different surface. Change only the viewing angle. Keep the same depicted extent of the subject in frame on a plain background. If the reference already depicts a character, retain its existing anatomy, facial features, clothing, accessories and pose. For non-character objects, do not add bodies, limbs, faces, clothing or other character features. Do not add captions, view labels, text or decoration.",
+                "source_step_key": "front",
+                "prompt_template": "Use the approved front view as the identity anchor. Render a clean back view of that same subject, seen from directly behind. {subject_view_constraints} Preserve its category, shape, geometry, proportions, colors, materials, surface markings, clothing and accessories exactly; keep every marking on its original surface and never move it. Change only the viewing angle. The subject must stay the same size in frame as the front view, with the same silhouette height, on the same plain uniform background. Do not add captions, view labels, text, decoration or extra objects.",
                 "output_role": "image"
               },
               {
                 "key": "right",
                 "label": "右侧",
                 "capability": "image-to-image",
-                "prompt_template": "Use the subject in the reference image as the exact identity. Render a clean right view of that same subject: the subject is turned 90 degrees so that its own right side faces the camera, as if the camera stood at the subject's right looking at its right flank. Preserve its category, shape, geometry, proportions, colors, materials, surface markings and existing features. Keep markings on their original surfaces; show or hide them only as required by the view, never move them to a different surface. Change only the viewing angle. Keep the same depicted extent of the subject in frame on a plain background. If the reference already depicts a character, retain its existing anatomy, facial features, clothing, accessories and pose. For non-character objects, do not add bodies, limbs, faces, clothing or other character features. Do not add captions, view labels, text or decoration.",
+                "source_step_key": "front",
+                "prompt_template": "Use the approved front view as the identity anchor. Render a clean right view of that same subject: its own right side faces the camera, as if seen from the subject's right. {subject_view_constraints} Preserve its category, shape, geometry, proportions, colors, materials, surface markings, clothing and accessories exactly; keep every marking on its original surface and never move it. Change only the viewing angle. The subject must stay the same size in frame as the front view, with the same silhouette height, on the same plain uniform background. Do not add captions, view labels, text, decoration or extra objects.",
                 "output_role": "image",
                 "optional": true
               }
@@ -8930,8 +8948,51 @@
         "maximum_listed": 10,
         "model_source_note": "「只用正面转 3D」只用正面图；「用三视图生成 3D」按视角使用已完成的正面、左侧、背面和右侧图。",
         "queue_limit_seconds": 1800,
+        "subject_argument": "subject_type",
+        "default_subject_type": "generic",
+        "subject_types": [
+          {
+            "id": "generic",
+            "label": "通用主体",
+            "front_constraints": "The subject is one complete object with its natural proportions; keep it centered, fully inside the frame, upright and facing the camera with no perspective or foreshortening.",
+            "view_constraints": "Use true orthographic projection for this view with no perspective or foreshortening; keep exactly the same pose, scale, proportions, silhouette height and framing as the front view; use neutral even lighting without cast shadows on a plain background."
+          },
+          {
+            "id": "humanoid",
+            "label": "人形角色",
+            "front_constraints": "The subject is a humanoid character: use a neutral standing A-pose (or keep the reference's T-pose), with arms away from the body, hands open and fingers separated, feet apart and weight even; keep the same anatomy, face, hairstyle, clothing, accessories and colors as the reference.",
+            "view_constraints": "The subject is the same humanoid character in true orthographic projection for this view: no perspective or foreshortening; keep exactly the same A-pose or T-pose, proportions, height in frame and scale as the front view; arms and fingers stay separated and do not overlap the torso; neutral even lighting, plain background."
+          },
+          {
+            "id": "quadruped",
+            "label": "四足动物",
+            "front_constraints": "The subject is a quadruped animal: use a neutral standing pose with all four legs visible and separated, head level, tail clear of the body; keep the same anatomy, fur or scales, markings and colors as the reference.",
+            "view_constraints": "The subject is the same quadruped animal in true orthographic projection for this view: no perspective or foreshortening; keep exactly the same pose, proportions, height in frame and scale as the front view; all four legs and the tail stay visible and separated; neutral even lighting, plain background."
+          },
+          {
+            "id": "hard_surface",
+            "label": "硬表面道具",
+            "front_constraints": "The subject is a rigid hard-surface prop or vehicle: keep its rigid panels, mechanical parts, symmetry, panel lines and proportions; add no organic or character features; present it upright with its front face parallel to the camera and no perspective.",
+            "view_constraints": "The subject is the same hard-surface prop in true orthographic projection for this view: no perspective or foreshortening; rigid parts stay straight and aligned, with no bending or deformation; keep exactly the same pose, proportions, height in frame and scale as the front view; neutral even lighting, plain background."
+          }
+        ],
+        "consistency": {
+          "max_subject_ratio_delta": 0.08,
+          "max_background_spread": 32,
+          "max_bbox_height_delta": 0.12,
+          "max_attempts_per_view": 2
+        },
+        "continuation": {
+          "enabled": true,
+          "reasons": {
+            "budget_not_covered": "已批准计划的预算不再覆盖后续视角",
+            "view_not_finished": "这个视角的任务没有成功完成",
+            "view_already_started": "另一个视角已在等待或生成中",
+            "consistency_retries_exhausted": "自动重做次数已用完，这一张仍与正面图不一致"
+          }
+        },
         "messages": {
-          "agent_started": "三视图运行 {run} 的 {view} 步骤已提交（{approval}，估算 {credits} 积分），任务 {task}。三视图的其余视图不会自动开始，用户在三视图卡片上逐个点“继续生成”才会开始；在三张都完成之前，不要说三视图已全部完成。",
+          "agent_started": "三视图运行 {run} 的 {view} 步骤已提交（{approval}，估算 {credits} 积分），任务 {task}。严格模式下其余视图不会自动开始，用户在三视图卡片上逐个点“继续生成”才会开始；在必需视角都完成之前，不要说三视图已全部完成。",
           "admission_full": "进行中的生成任务较多，这个三视图步骤排队等待超过了时限，任务没有提交，也没有扣积分。请告诉用户稍后再试，或在三视图卡片上点“继续生成”重新开始这个视图；不要说三视图已经开始生成。",
           "approval_human": "用户已批准",
           "approval_policy": "按会话批准方式自动批准，不是用户点的批准",
@@ -8940,7 +9001,12 @@
           "group_not_found": "这个三视图组不在本会话里，没有提交任务。请用本会话三视图卡片所属的组（create_three_view 结果里的运行 ID）再调用，或请用户在三视图卡片上点「用三视图生成 3D」。",
           "group_not_ready": "这组三视图还不能用于多视图生成 3D，没有提交任务：需要正面图和至少一个其他视角都已完成。请告诉用户先在三视图卡片上生成剩余视图，或改用「只用正面转 3D」。",
           "views_changed": "用户点按钮之后这组三视图有视图被替换或重新生成了，没有提交任务。请告诉用户在三视图卡片上重新点「用三视图生成 3D」。",
-          "views_invalid": "图片的视角标注无效，没有提交任务：每张图只能标一个所选模型支持的视角，不能重复，且必须有正面。请让用户重新标注视角。"
+          "views_invalid": "图片的视角标注无效，没有提交任务：每张图只能标一个所选模型支持的视角，不能重复，且必须有正面。请让用户重新标注视角。",
+          "agent_completed": "三视图运行 {run} 的必需视角已完成并通过一致性检查：{views}。用 create_model_3d_from_views 的 three_view_group={run} 提交多视图 3D；不要再告诉用户这些视角不会自动完成。",
+          "agent_paused": "三视图运行 {run} 在 {view} 暂停：{reason}。后续视角没有自动提交，请告诉用户在三视图卡片上继续或重试。",
+          "consistency_retry": "{view} 与正面图不一致（{reasons}），已自动重做第 {attempt}/{maximum} 次；其他视角不受影响。",
+          "consistency_failed": "{view} 与正面图仍不一致（{reasons}），已停止自动重做。请让用户在三视图卡片上重试这一张，或替换它。",
+          "subject_invalid": "主体类型 {subject} 不受支持；可选：{choices}。"
         },
         "multiview": {
           "tool": "create_model_3d_from_views",
@@ -8948,6 +9014,7 @@
           "views_argument": "reference_views",
           "required_view": "front",
           "minimum_views": 2,
+          "view_order": ["front", "left", "back", "right"],
           "group_directive": "\n\n【三视图生成 3D】用户在三视图卡片上点了「用三视图生成 3D」，用到的视角：{views}。本轮必须调用工具 {tool}：three_view_group 填 {group}，model 填 {model}。图片和视角由服务端从这组三视图里取，不要填 reference_handles、reference_image_indices 或 reference_views，也不要改用别的工具。",
           "upload_directive": "\n\n【多视角生成 3D】用户确认随消息附上的图片是同一物体的多个视角，并逐张标了视角：{views}。本轮必须调用工具 {tool}，model 填 {model}。图片和视角由服务端按用户的标注绑定，不要填 reference_handles、reference_image_indices 或 reference_views，也不要改用别的工具。",
           "views_note": "由 {views} 视图生成",
@@ -16173,6 +16240,7 @@
             "ui.studio.three_view.status.running": "Generating",
             "ui.studio.three_view.status.succeeded": "Completed",
             "ui.studio.three_view.status.failed": "Failed",
+            "ui.studio.three_view.status.rejected": "Inconsistent, redo this view",
             "ui.studio.three_view.status.canceled": "Canceled",
             "ui.studio.three_view.status.unknown": "Status unknown",
             "ui.studio.three_view.start": "Continue generating",

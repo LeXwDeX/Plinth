@@ -5,6 +5,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"math"
 	"sync"
@@ -40,9 +43,20 @@ func ModelFile(format string) (File, error) {
 	return file, nil
 }
 
-// ImageFile returns a fixed picture: "png", "jpeg" or "webp".
+// ImageFile returns a fixed picture: "png", "jpeg" or "webp". The PNG is a
+// 64x64 plain background with one centered subject so the imageinspect
+// checklists (#245) and the three-view consistency checks (#243) see a usable
+// picture in the fake stack; the 1x1 recipes remain for wire fixtures that
+// only need decodable bytes.
 func ImageFile(format string) (File, error) {
-	recipe := map[string]string{"png": "png-1x1", "jpeg": "jpeg-1x1", "webp": "webp-1x1"}[format]
+	if format == "png" {
+		data, err := subjectPNG()
+		if err != nil {
+			return File{}, err
+		}
+		return File{MediaType: "image/png", Data: data}, nil
+	}
+	recipe := map[string]string{"jpeg": "jpeg-1x1", "webp": "webp-1x1"}[format]
 	if recipe == "" {
 		return File{}, fmt.Errorf("fakeupstream: no fixture for image format %q", format)
 	}
@@ -51,6 +65,32 @@ func ImageFile(format string) (File, error) {
 		return File{}, err
 	}
 	return File{MediaType: media.MediaType, Data: data}, nil
+}
+
+// subjectPNG draws the deterministic fake picture: a white background and one
+// dark rectangle centered with margins on every side. Its subject ratio
+// (~28%), border spread (0) and single component satisfy the shipped 3d_input
+// checklist and the consistency thresholds the fake three-view step relies on.
+func subjectPNG() ([]byte, error) {
+	const width, height = 64, 64
+	picture := image.NewNRGBA(image.Rect(0, 0, width, height))
+	background := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	subject := color.NRGBA{R: 52, G: 58, B: 70, A: 255}
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			picture.SetNRGBA(x, y, background)
+		}
+	}
+	for y := 8; y < 56; y++ {
+		for x := 20; x < 44; x++ {
+			picture.SetNRGBA(x, y, subject)
+		}
+	}
+	var buffer bytes.Buffer
+	if err := png.Encode(&buffer, picture); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
 }
 
 // Corrupt returns bytes that no longer match the declared format: the magic is
