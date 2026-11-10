@@ -5,6 +5,7 @@ import useSWR from 'swr';
 import { Box, Camera, Check, Download, Image as ImageIcon, Info } from 'lucide-react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
+import { selfCheckStatus, selfCheckStatusLabel, type SelfCheckRecord } from '@/lib/chat/self-check';
 import { KindBadge, KindBadgeFace, kindBadgeClass } from '@/components/studio/kind-badge';
 import { Action, buttonVariants } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
@@ -322,6 +323,8 @@ export interface ModelResultCardProps {
   cover: ChatImage | null;
   handle?: string;
   sessionId?: string | null;
+  /** #246: the persisted self-check record; absent means the result is unchecked. */
+  selfCheck?: SelfCheckRecord | null;
 }
 
 /**
@@ -329,8 +332,9 @@ export interface ModelResultCardProps {
  * corner button turns it in a viewer inside the card (one card at a time holds a live viewer). Below: capture to 2D,
  * the ZIP of every format, and the task details.
  */
-export function ModelResultCard({ taskId, result, cover, handle, sessionId }: ModelResultCardProps) {
+export function ModelResultCard({ taskId, result, cover, handle, sessionId, selfCheck }: ModelResultCardProps) {
   const { schema } = useProductSchema();
+  const checkState = selfCheckStatus(schema, selfCheck);
   const { proxyAssetUrl, previewAssetUrl } = useAssetURLRewriter();
   const { openOnStage, captureToTwoD } = useObjectActions();
   const captureBlock = useModelCaptureBlock(taskId);
@@ -366,7 +370,23 @@ export function ModelResultCard({ taskId, result, cover, handle, sessionId }: Mo
   return (
     <div className="flex w-full flex-col gap-2 rounded-lg border border-border bg-surface p-2" data-testid="chat-model-results" data-available={result ? 'true' : 'false'}>
       <div className="flex select-none items-center justify-between gap-2 px-0.5 text-[11px] text-muted-foreground">
-        <span className="flex items-center gap-1.5"><KindBadge kind="model" />{title}</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <KindBadge kind="model" />{title}
+          {schema.chat.self_check && (
+            <span
+              className={cn(
+                'rounded border px-1.5 py-0.5 text-[10px] font-medium',
+                checkState.role === 'passed' && 'border-success/50 bg-success/10 text-success',
+                checkState.role === 'issues' && 'border-warning/50 bg-warning/10 text-warning',
+                checkState.role !== 'passed' && checkState.role !== 'issues' && 'border-border bg-muted text-muted-foreground',
+              )}
+              data-testid="chat-model-self-check-status"
+              data-role={checkState.role}
+            >
+              {selfCheckStatusLabel(schema, selfCheck)}
+            </span>
+          )}
+        </span>
         {handle ? <HandleTag reference={{ handle, kind: 'model', url: '', taskId }} className="text-[11px] text-muted-foreground hover:text-foreground" /> : null}
       </div>
       <div className="relative w-full max-w-64">

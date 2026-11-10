@@ -1347,6 +1347,9 @@ func newHTTPHarnessWithCatalogAndProviders(
 	}
 	chatService.SetChoices(repository, applicationSchema.Chat.Choice.ListLimit)
 	chatService.SetContextStore(repository, applicationSchema.Chat.ContextCompaction.ListLimit)
+	// #246: the production assembly installs the persisted self-check record;
+	// the harness must serve the same route from the same store.
+	chatService.SetSelfChecks(repository, applicationSchema.Chat.SelfCheck)
 	canvasService, err := canvas.New(canvas.Config{
 		Repository:           repository,
 		Sessions:             chatService,

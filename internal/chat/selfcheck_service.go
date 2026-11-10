@@ -14,6 +14,10 @@ import (
 // installed one.
 var ErrSelfCheckUnavailable = errors.New("chat: self-check record unavailable")
 
+// errSelfCheckNoCheck makes AttachCheckHandles a no-op when the check it
+// names is not in the record; it never reaches the caller.
+var errSelfCheckNoCheck = errors.New("chat: no matching self-check evidence")
+
 // SelfCheckStore is the narrow persistence port of the self-check records.
 // SaveSelfCheck writes record only when the stored revision still equals
 // expectedRevision (zero for a new record) and reports conflict when another
@@ -137,6 +141,30 @@ func (service *SelfCheckService) AppendCheck(ctx context.Context, owner, session
 		return nil
 	})
 	return record, err
+}
+
+// AttachCheckHandles names the pictures a recorded check produced once the
+// reply's attachments have assigned them. It finds the newest check of the
+// same tool without handles and leaves the conclusion untouched: naming a
+// picture is not new evidence.
+func (service *SelfCheckService) AttachCheckHandles(ctx context.Context, owner, session, taskID, tool string,
+	handles []string) error {
+	if !service.available() || strings.TrimSpace(taskID) == "" || strings.TrimSpace(tool) == "" || len(handles) == 0 {
+		return nil
+	}
+	_, err := service.mutate(ctx, owner, session, taskID, "", func(record *SelfCheckRecord) error {
+		for index := len(record.Checks) - 1; index >= 0; index-- {
+			if record.Checks[index].Tool == tool && len(record.Checks[index].Handles) == 0 {
+				record.Checks[index].Handles = append([]string(nil), handles...)
+				return nil
+			}
+		}
+		return errSelfCheckNoCheck
+	})
+	if errors.Is(err, errSelfCheckNoCheck) {
+		return nil
+	}
+	return err
 }
 
 // RecordConclusion writes the Agent's conclusion after applying the Schema's

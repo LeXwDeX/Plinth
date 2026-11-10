@@ -23,7 +23,8 @@ vi.mock('@/hooks/use-asset-url-rewriter', () => ({
     proxyAssetUrl: (url: string) => `proxy:${url}`,
   }),
 }));
-vi.mock('swr', () => ({ default: () => ({ data: undefined, mutate: async () => undefined }) }));
+const selfCheckData = vi.hoisted(() => ({ current: undefined as unknown }));
+vi.mock('swr', () => ({ default: () => ({ data: selfCheckData.current, mutate: async () => undefined }) }));
 
 const longReply = Array.from({ length: 14 }, (_, index) => `第 ${index + 1} 行`).join('\n');
 const reply = (extra: Partial<ChatMessageType> = {}): ChatMessageType => ({
@@ -44,6 +45,7 @@ const renderImage = { url: '/api/v1/tasks/t1/assets/render-front', taskId: 't1' 
 const renderAttachment = { handle: '@render1', kind: 'image' as const, role: 'render', imageSlot: 1 };
 
 beforeEach(() => {
+  selfCheckData.current = undefined;
   // jsdom has no media queries; the streaming spinner reads prefers-reduced-motion.
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
@@ -130,5 +132,40 @@ describe('the self-check calls of a reply (#103)', () => {
     // Without role="render" the picture is an ordinary result, and the review call has no picture to show.
     expect(view.queryByTestId('chat-review-thumbnail')).toBeNull();
     expect(view.getByTestId('chat-image-result')).toBeTruthy();
+  });
+});
+
+describe('the persisted self-check record of a result (#246)', () => {
+  it('shows the recorded state on the model card and beside the review calls', () => {
+    selfCheckData.current = [{
+      taskId: 't1', status: 'passed', roundsUsed: 1, roundsLimit: 3, rendersInRound: 1, rendersLimit: 6,
+      correctionsUsed: 0, correctionsLimit: 2,
+      checks: [{ round: 1, kind: 'reference', tool: 'compare_model_reference', views: ['front'], handles: [], metrics: null, ok: true, error: '', at: '' }],
+      conclusion: { status: 'passed', summary: 'matches the reference', findings: [], fixes: [], remaining: [], at: '' },
+      updatedAt: '',
+    }];
+    const view = renderMessage(reply({
+      content: '完成。',
+      attachments: [{ handle: '@model1', kind: 'model', taskId: 't1', imageSlot: 1 }],
+      images: [{ url: '/api/v1/tasks/t1/assets/preview', taskId: 't1' }],
+    }));
+    expect(view.getByTestId('chat-model-results')).toBeTruthy();
+    const badge = view.getByTestId('chat-model-self-check-status');
+    expect(badge.getAttribute('data-role')).toBe('passed');
+    expect(badge.textContent).toBe(messages['ui.chat.self_check.status_passed']);
+    const record = view.getByTestId('chat-self-check-record');
+    expect(record.textContent).toContain('matches the reference');
+  });
+
+  it('shows an unchecked result without inventing a record', () => {
+    const view = renderMessage(reply({
+      content: '完成。',
+      attachments: [{ handle: '@model1', kind: 'model', taskId: 't1', imageSlot: 1 }],
+      images: [{ url: '/api/v1/tasks/t1/assets/preview', taskId: 't1' }],
+    }));
+    const badge = view.getByTestId('chat-model-self-check-status');
+    expect(badge.getAttribute('data-role')).toBe('unchecked');
+    expect(badge.textContent).toBe(messages['ui.chat.self_check.status_unchecked']);
+    expect(view.queryByTestId('chat-self-check-record')).toBeNull();
   });
 });

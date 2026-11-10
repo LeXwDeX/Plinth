@@ -37,6 +37,9 @@
 9. **脚本单测**「scripts tests」（本地 + CI）：`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_*.py'` 必须通过（#86：发布、门禁与公开快照脚本——`verify-local.py`、`release-env.py`、`make-public-snapshot.py`、hook 安装器、割接验收等——自己的单测，项目不用 pytest；约 2 分钟，需要 git、python3 与 sqlite3 命令行；`PYTHONDONTWRITEBYTECODE` 防止在被检出的源码树里留下 `__pycache__`，让主机 CI 的“源码未变”核对不被干扰）；
 10. **Fake 栈冒烟**「fake stack」（本地 + CI）：`python3 scripts/smoke/smoke-fake-stack.py --only balance,meshy,images,p2,agent,agent-background,vision-budget,faults --faults task-failed,artifact-expired-stuck` 必须通过（#218：在 fake 上游上跑整栈冒烟的稳定子集，任一检查失败即门禁失败；栈的每个连接都经回环守卫，非回环目标一律拒绝并记入栈日志，脚本发现任一拒绝即判失败，以此证明门禁零真实上游请求；离线、只用回环地址，不读取真实 Key；约 5 分钟，需要 go 与 python3，不需要前端构建产物）；
 
+
+#246 的 `self-check` 场景使用独立栈与调小上限的私有 Catalog，覆盖参考图比对、记录三态、压缩后读取、上限与后台结果，单独用 `python3 scripts/smoke/smoke-fake-stack.py --only self-check --work <目录> --keep` 运行，不并入上面的门禁子集以保持约 5 分钟预算。
+
 **为什么这样分**：第 5、6 项跑的是同一批 Go 测试，第 6 项多开 race detector，因而更严格也更慢（CI 约 21 分钟，本机 8–20 分钟，几个 worktree 同时 push 时还会因负载误报）。因此（决策背景见 `docs/history.md`）：
 
 - **race 只在 CI 跑**：它是最慢的一项，且在 CI 上与本地不争资源；本地需要时用 `python3 scripts/verify-local.py --race` 加跑（排在 `go test` 之后，与本节顺序一致）；

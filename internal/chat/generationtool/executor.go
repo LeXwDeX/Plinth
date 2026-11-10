@@ -969,7 +969,10 @@ func (executor *Executor) observeBoundTask(
 			}
 		}
 	}
-	return executor.wait(ctx, command, task.Offering, task.ID, observe, info)
+	result, err := executor.wait(ctx, command, task.Offering, task.ID, observe, info)
+	// #246: a paid correction accepted while its Task was still running gets
+	// its self-check counters added to the receipt that is built here.
+	return executor.attachCorrectionReceipt(ctx, command, result), err
 }
 
 // multiviewModelID accepts a structured request's model as either the model ID

@@ -21,6 +21,8 @@ export interface ProductionPlanStep {
    * over the session purpose's budget; empty when they fit.
    */
   purposeBudgetNote: string;
+  /** #246: the Schema checkpoint declared after this step; empty or absent when none. */
+  check?: string;
 }
 
 /** #120: one credit unit of a plan budget, as the server's decimal strings. */
@@ -192,6 +194,7 @@ export function parseProductionPlanStep(value: unknown): ProductionPlanStep | nu
     purpose: text(item.purpose),
     estimate: priceTotal(item.estimate),
     purposeBudgetNote: text(item.purpose_budget_note),
+    check: text(item.check),
   };
 }
 

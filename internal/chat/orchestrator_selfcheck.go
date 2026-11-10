@@ -8,6 +8,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -105,6 +106,51 @@ func (orchestrator *Orchestrator) selfCheckPrompt(ctx context.Context, ownerID, 
 		"{results}", strings.Join(lines, "\n"),
 		"{rule}", policy.UncheckedRuleText,
 	).Replace(orchestrator.text(ctx, policy.ContextTemplate))
+}
+
+// attachSelfCheckHandles names the pictures a read-only check produced in its
+// persisted record. It reads the compact summary of the call (the same
+// summary the conversation shows) and only handles single-model checks:
+// compare_models shows two models in one picture set, so its checks keep the
+// empty handle list and the card pairs pictures by view.
+func (orchestrator *Orchestrator) attachSelfCheckHandles(ctx context.Context, ownerID, sessionID string,
+	summary json.RawMessage, handles []string) {
+	if orchestrator.service == nil || len(handles) == 0 || len(summary) == 0 {
+		return
+	}
+	var stored struct {
+		Tool    string   `json:"tool"`
+		TaskID  string   `json:"task_id"`
+		TaskIDs []string `json:"task_ids"`
+	}
+	if json.Unmarshal(summary, &stored) != nil || stored.TaskID == "" || len(stored.TaskIDs) > 0 {
+		return
+	}
+	tool := orchestrator.selfCheckToolName(stored.Tool)
+	if tool == "" {
+		return
+	}
+	if err := orchestrator.service.AttachSelfCheckHandles(ctx, ownerID, sessionID,
+		stored.TaskID, tool, handles); err != nil {
+		orchestrator.logger.Warn("self-check handles not stored",
+			"task_id", stored.TaskID, "tool", tool, "error", err)
+	}
+}
+
+// selfCheckToolName maps a compact summary's tool key to the public tool name
+// the record stores, read from the Schema's tool tables.
+func (orchestrator *Orchestrator) selfCheckToolName(key string) string {
+	switch key {
+	case "inspect":
+		return orchestrator.schema.ModelReview.Tools.Inspect
+	case "render":
+		return orchestrator.schema.ModelReview.Tools.Render
+	case "compare":
+		return orchestrator.schema.ModelReview.Tools.Compare
+	case "reference":
+		return orchestrator.schema.SelfCheck.Tools.ReferenceCompare
+	}
+	return ""
 }
 
 // backgroundResultTasks names the Tasks the person stopped waiting for, read

@@ -107,6 +107,10 @@ func (executor *Executor) CompareModelReference(ctx context.Context, command cha
 		return chat.ToolResult{}, err
 	}
 	if refusal != nil {
+		executor.appendSelfCheckCheck(ctx, command, source, chat.SelfCheckCheck{
+			Kind: chat.SelfCheckKindReference, Tool: command.Call.Name,
+			AssetID: string(source.asset.ID), Views: []string{}, OK: false, Error: refusal.Error,
+		})
 		return *refusal, nil
 	}
 	referenceLimits := imageinspect.Limits{
@@ -133,7 +137,8 @@ func (executor *Executor) CompareModelReference(ctx context.Context, command cha
 			})
 			continue
 		}
-		rendered, renderErr := executor.renderReviewedView(ctx, review, entry, modelinspect.View(pair.View), mode, nil, false, size)
+		rendered, renderErr := executor.renderReviewedView(ctx, review, entry, modelinspect.View(pair.View), mode, nil, false,
+			reference.Supersample, size)
 		if renderErr != nil {
 			result.FailedViews = append(result.FailedViews, modelReviewFailedView{
 				View: pair.View, Error: executor.fillText(command, review.Texts.RenderFailed,

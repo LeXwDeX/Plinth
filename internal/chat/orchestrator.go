@@ -2786,6 +2786,9 @@ func (orchestrator *Orchestrator) executeTools(
 		imagesBefore := len(produced.ImageURLs)
 		handles := orchestrator.recordTurnResult(ctx, command.OwnerID, produced, call.ID, taskBindings[call.ID], result.ImageURLs)
 		content = orchestrator.withResultHandles(content, handles)
+		// #246: the self-check record stores the pictures a check produced by
+		// their attachment handles, once the reply has named them.
+		orchestrator.attachSelfCheckHandles(ctx, command.OwnerID, command.SessionID, result.Summary, handles)
 		// A read-only tool's compact summary travels with its call, so the
 		// conversation can show one line per check (#103). The handles its
 		// pictures received belong in the summary too, so the frontend binds

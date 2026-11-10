@@ -259,7 +259,44 @@ func (executor *Executor) attachCorrection(ctx context.Context, command chat.Too
 	if counters.CorrectionsLimit > 0 && counters.CorrectionsUsed >= counters.CorrectionsLimit {
 		note = executor.localized(command, executor.selfChecks.Schema().Texts.LimitReached)
 	}
-	if result.AgentContent == "" {
+	return executor.addSelfCheckBlock(result, block, note)
+}
+
+// attachCorrectionReceipt adds the current self-check counters to the receipt
+// of a paid processing step that finished after its submission. The count was
+// taken when the step was accepted; this path must not increment it again.
+func (executor *Executor) attachCorrectionReceipt(ctx context.Context, command chat.ToolCommand,
+	result chat.ToolResult) chat.ToolResult {
+	if executor.selfChecks == nil || command.Tool.Processing == nil || result.AgentContent == "" {
+		return result
+	}
+	var arguments map[string]json.RawMessage
+	if json.Unmarshal(command.Call.Arguments, &arguments) != nil || arguments == nil {
+		return result
+	}
+	source, _, rejection, err := executor.resolveProcessingSource(ctx, command, arguments)
+	if err != nil || rejection != nil || source.ID == "" {
+		return result
+	}
+	record, found, err := executor.selfChecks.Get(ctx, command.OwnerID, command.SessionID, string(source.ID))
+	if err != nil || !found {
+		return result
+	}
+	block := executor.selfCheckBlock(record)
+	counters := executor.selfChecks.Counts(record)
+	note := ""
+	if counters.CorrectionsLimit > 0 && counters.CorrectionsUsed >= counters.CorrectionsLimit {
+		note = executor.localized(command, executor.selfChecks.Schema().Texts.LimitReached)
+	}
+	return executor.addSelfCheckBlock(result, block, note)
+}
+
+// addSelfCheckBlock merges the counters into an existing JSON receipt. A
+// receipt that is not a JSON object is left as it is; the step itself already
+// happened and must not be lost because its presentation could not be edited.
+func (executor *Executor) addSelfCheckBlock(result chat.ToolResult, block *selfCheckStatusBlock,
+	note string) chat.ToolResult {
+	if block == nil || result.AgentContent == "" {
 		return result
 	}
 	payload := map[string]any{}

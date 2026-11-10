@@ -62,11 +62,16 @@ def base_request(**overrides):
 class RequestSetTest(unittest.TestCase):
     def test_the_shipped_request_set_is_valid(self):
         data, path, digest = quality.load_requests()
-        self.assertEqual(data["version"], 1)
-        self.assertEqual(len(data["requests"]), 9)
+        self.assertEqual(data["version"], 2)
+        self.assertEqual(len(data["requests"]), 10)
         self.assertTrue(path.endswith("requests.json"))
         self.assertEqual(len(digest), 64)
-        self.assertEqual(len({request["id"] for request in data["requests"]}), 9)
+        self.assertEqual(len({request["id"] for request in data["requests"]}), 10)
+        reference = next(request for request in data["requests"] if request["id"] == "3d-image-reference")
+        self.assertEqual(reference["modality"], "3d")
+        self.assertEqual(reference["expected"]["capabilities"], ["image-to-3d"])
+        self.assertEqual([step["tool"]["name"] for step in reference["steps"]],
+                         ["create_model_3d_from_image", "inspect_model", "compare_model_reference", "record_self_check"])
         self.assertEqual({request["modality"] for request in data["requests"]}, {"2d", "3d"})
 
     def test_duplicate_ids_and_missing_fields_are_reported(self):
@@ -142,8 +147,43 @@ class TrajectoryTest(unittest.TestCase):
         self.assertEqual(case["metrics"]["tool_call_count"], 5)
         self.assertEqual(case["metrics"]["paid_call_count"], 1)
         self.assertEqual(case["metrics"]["interruption_count"], 2)
-        self.assertEqual(case["metrics"]["self_inspection"], {"inspect_model": 1, "render_model_views": 1})
+        self.assertEqual(case["metrics"]["self_inspection"],
+                         {"inspect_model": 1, "render_model_views": 1, "compare_model_reference": 0,
+                          "self_check_records": 0, "self_check_passed": 0, "self_check_issues": 0})
         self.assertEqual(case["metrics"]["credits"], {"legacy.credits": "40"})
+
+    def test_evaluate_case_counts_reference_checks_and_recorded_conclusions(self):
+        run = {
+            "messages": [
+                message({"name": "create_model_3d_from_image", "taskId": "t1", "estimatedCredits": 40}),
+                message({"name": "inspect_model"}),
+                message({"name": "compare_model_reference"}),
+                message({"name": "record_self_check",
+                         "summary": {"tool": "record_self_check", "task_id": "t1", "status": "passed", "status_role": "passed"}}),
+            ],
+            "tasks": [succeeded("image-to-3d")],
+            "cards": [{"kind": "approval"}],
+            "final_reply": {"content": "完成，已对照参考图。"},
+        }
+        request = base_request()
+        request["expected"] = {
+            "capabilities": ["image-to-3d"],
+            "required_tool_groups": [
+                {"id": "generate", "any": ["create_model_3d_from_image"]},
+                {"id": "reference", "any": ["compare_model_reference"]},
+                {"id": "record", "any": ["record_self_check"]},
+            ],
+            "order": [{"before": ["create_model_3d_from_image"], "after": ["compare_model_reference", "record_self_check"]}],
+            "soft_tools": [],
+            "budgets": {"max_paid_calls": 1, "max_tool_calls": 10, "max_interruptions": 1},
+        }
+        case = quality.evaluate_case(request, run)
+        self.assertEqual(quality.case_hard_failures(case), [])
+        inspection = case["metrics"]["self_inspection"]
+        self.assertEqual(inspection["compare_model_reference"], 1)
+        self.assertEqual(inspection["self_check_records"], 1)
+        self.assertEqual(inspection["self_check_passed"], 1)
+        self.assertEqual(inspection["self_check_issues"], 0)
 
     def test_evaluate_case_reports_each_kind_of_failure(self):
         run = {

@@ -64,6 +64,8 @@ export interface ProductSchema {
          chat_session_notes?: string;
          /** #154: the session's style lock (GET/PUT). */
          chat_session_style_lock?: string;
+         /** #246: the session's persisted 3D self-check records (GET). Absent on older servers. */
+         chat_session_self_checks?: string;
          /** #103: the session's production brief (GET/PUT). Absent on older servers. */
         chat_session_brief?: string;
         /** #103: decide one production plan budget (PUT approve/deny). Absent on older servers. */
@@ -1491,6 +1493,17 @@ export interface ChatProductSchema {
       chat_model_fallback?: string;
       chat_models?: string;
       chat_model_name?: string;
+      /** #246: the session's persisted 3D self-check records and one record's fields. */
+      self_checks?: string;
+      status?: string;
+      rounds_used?: string;
+      rounds_limit?: string;
+      renders_in_round?: string;
+      renders_limit?: string;
+      corrections_used?: string;
+      corrections_limit?: string;
+      checks?: string;
+      conclusion?: string;
     };
     /** 一个附件对象的成员名（消息响应与 attachments/selection 请求共用）。 */
     attachment: {
@@ -1647,6 +1660,11 @@ export interface ChatProductSchema {
    */
   model_review?: ChatModelReviewSchema;
   /**
+   * #246: the persisted 3D self-check contract: the two tool names, the delivery states by id/role/label,
+   * and the display limits of the server-side counters. Thresholds and prompt text stay server-side.
+   */
+  self_check?: ChatSelfCheckSchema;
+  /**
    * #103: 3D 制作简报。字段名、类型与上限来自 Schema；用途选项来自 profiles。
    */
   model3d_usage?: ChatModel3DUsageSchema;
@@ -1706,6 +1724,29 @@ export interface ChatModelReviewToolsSchema {
 export interface ChatModelReviewSchema {
   tools?: ChatModelReviewToolsSchema;
   render?: { asset_type?: string };
+}
+
+export interface ChatSelfCheckToolsSchema {
+  record?: string;
+  reference_compare?: string;
+}
+
+export interface ChatSelfCheckStatusSchema {
+  id: string;
+  role: string;
+  label: string;
+}
+
+export interface ChatSelfCheckLimitsSchema {
+  max_rounds_per_result: number;
+  max_corrections_per_result: number;
+  max_renders_per_round: number;
+}
+
+export interface ChatSelfCheckSchema {
+  tools?: ChatSelfCheckToolsSchema;
+  statuses?: ChatSelfCheckStatusSchema[];
+  limits?: ChatSelfCheckLimitsSchema;
 }
 
 export interface ChatModel3DProfileSchema {

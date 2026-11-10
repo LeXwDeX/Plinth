@@ -173,6 +173,13 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
                     {entry.step.purposeBudgetNote}
                   </p>
                 ) : null}
+                {entry.step.check ? (
+                  // #246: the Schema checkpoint after this step, repeated by the
+                  // approved continuation before the next step or delivery.
+                  <p className="col-start-2 col-end-4 text-[11px] text-muted-foreground" data-testid="studio-plan-step-check">
+                    {formatSchemaText(schemaText(schema, 'ui.studio.plan.checkpoint'), { check: entry.step.check })}
+                  </p>
+                ) : null}
               </li>
             );
           })}

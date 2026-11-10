@@ -40,12 +40,14 @@ same HTTP API the browser uses:
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
 (NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, p2, agent, agent-background,
-agent-quality, image-self-check, offering-knowledge, work-ledger, faults;
+agent-quality, image-self-check, self-check, offering-knowledge, work-ledger, faults;
 "agent" runs both agent scenarios, "hyper3d-agent" the Hyper3D chain alone,
 "p2" the Tripo P2 quote/chain, "agent-background" the batched wait that keeps both Tasks running,
 "offering-knowledge" the #249 knowledge projection, derived model list, purpose coverage,
 over-limit refusal and final_prompt report,
-"work-ledger" the #248 frozen prompts, compaction, style anchor and self-check leftovers)
+"work-ledger" the #248 frozen prompts, compaction, style anchor and self-check leftovers,
+"self-check" the #246 persisted 3D self-check contract: reference comparison, records,
+limits, corrections, compaction and background results)
 Needs `go`. Exit 0 = every selected check passed.
 
 The stack runs inside the internal/app test binary (TestFakeUpstreamStack, built with -tags fakestack), not
@@ -291,7 +293,7 @@ def build(work):
     return fake, stack
 
 
-def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, name="catalog.json"):
+def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, self_check=False, name="catalog.json"):
     """The default Catalog with four changes for Tripo, Meshy and Hyper3D: the fake
     artifact host is an allowed asset host, they poll once a second, and a failing
     materialization is retried once. The matting service polls once a second too,
@@ -329,6 +331,14 @@ def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, na
                     parameter["default"] = "url"
                     parameter.pop("forced_when", None)
                     parameter.pop("fixed", None)
+    if self_check:
+        chat = catalog["application"]["chat"]
+        chat["self_check"]["limits"] = {
+            "max_rounds_per_result": 2,
+            "max_corrections_per_result": 1,
+            "max_renders_per_round": 2,
+        }
+        chat["self_check"]["reference"]["size"] = 256
     path = os.path.join(work, "catalog-urls.json" if jimeng_urls else name)
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(catalog, handle, ensure_ascii=False)
@@ -1296,8 +1306,10 @@ def _quality_answer(api, session, card, purpose, domain, model):
     return status in (200, 201, 202)
 
 
-def _quality_send(api, session, content, domain, model):
+def _quality_send(api, session, content, domain, model, image_urls=None):
     body = {"content": content, "creative_domain": domain, "ai_model": model}
+    if image_urls:
+        body["image_urls"] = image_urls
     end = time.time() + 30
     status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
     while status == 409 and time.time() < end:
@@ -1357,6 +1369,14 @@ def run_quality_case(api, request, domain, model, model_3d=""):
         api.json("PUT", f"/api/v1/chat/sessions/{session}/model3d", {"explicit_model_3d": model_3d})
     cards, seen = [], set()
     turns = 0
+    reference_urls = []
+    if request.get("reference_images"):
+        # A deterministic reference picture, uploaded like the person's own.
+        white, red = (250, 250, 250), (200, 30, 30)
+        asset_id = upload_asset(api, "reference.png",
+                                make_picture(128, 128, white, [((40, 32, 88, 96), red)]), "image/png")
+        if asset_id:
+            reference_urls = [f"/api/v1/assets/{asset_id}"]
     for step in request["steps"]:
         arguments = dict(step["tool"].get("arguments") or {})
         if step["tool"]["name"] == "create_model_3d_from_image" and "input_override_reason" not in arguments:
@@ -1371,7 +1391,8 @@ def run_quality_case(api, request, domain, model, model_3d=""):
             tool["arguments"]["model"] = model_task
         content = f"{step['user']} {_quality_marker(tool)}"
         before_tasks = {task.get("id") for task in session_tasks(api, session)}
-        if not _quality_send(api, session, content, domain, model):
+        if not _quality_send(api, session, content, domain, model,
+                             image_urls=reference_urls if turns == 0 else None):
             record(f"agent-quality {request['id']}: send {step['tool']['name']}", False, "message refused")
             break
         turns += 1
@@ -1831,13 +1852,13 @@ def scenario_image_self_check(api, offerings, work):
            f"task={task.get('id') if task else None} state={task.get('state') if task else None}")
 
 
-def _work_ledger_checkpoint(work, session):
+def _work_ledger_checkpoint(work, session, stack="main"):
     """The newest turn checkpoint of the session: the request the model got and
     this round's tool receipts. The checkpoint stores Go field names; older
     records may carry lowercase keys, so both spellings are accepted."""
     import sqlite3
     try:
-        db = sqlite3.connect(f"file:{work}/main/app.db?mode=ro", uri=True)
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
         db.row_factory = sqlite3.Row
         row = db.execute("SELECT checkpoint_json FROM go_chat_turns WHERE session_id=? ORDER BY updated_at DESC LIMIT 1",
                          (session,)).fetchone()
@@ -1852,17 +1873,121 @@ def _work_ledger_checkpoint(work, session):
         return {}
 
 
-def _work_ledger_wait_system(work, session, needle, seconds=20):
-    """Wait until the newest checkpoint's system prompt carries a marker; the
-    turn's checkpoint may land a moment after its reply."""
+def _work_ledger_recent_systems(work, session, stack="main", limit=6):
+    """The system prompts of the newest checkpoints, newest first. A turn that
+    is still running can leave a checkpoint with no request yet, so the caller
+    must not depend on the newest row alone."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+        db.row_factory = sqlite3.Row
+        rows = db.execute("SELECT checkpoint_json FROM go_chat_turns WHERE session_id=? ORDER BY updated_at DESC LIMIT ?",
+                          (session, limit)).fetchall()
+        db.close()
+    except sqlite3.Error:
+        return []
+    systems = []
+    for row in rows:
+        try:
+            checkpoint = json.loads(row["checkpoint_json"])
+        except ValueError:
+            continue
+        system = _work_ledger_system_prompt(checkpoint)
+        if system:
+            systems.append(system)
+    return systems
+
+
+def _work_ledger_wait_system(work, session, needle, seconds=20, stack="main"):
+    """Wait until one of the newest checkpoints' system prompts carries a
+    marker; the turn's checkpoint may land a moment after its reply."""
     end = time.time() + seconds
-    system = ""
+    systems = []
     while time.time() < end:
-        system = _work_ledger_system_prompt(_work_ledger_checkpoint(work, session))
-        if needle in system:
-            return system
+        systems = _work_ledger_recent_systems(work, session, stack)
+        for system in systems:
+            if needle in system:
+                return system
         time.sleep(0.5)
-    return system
+    return systems[0] if systems else ""
+
+
+def _work_ledger_request_marker(work, session, stack, marker, seconds=120):
+    """Wait for the turn whose request ends with a user message carrying the
+    marker; returns (checkpoint, system prompt). The turn row may be written
+    before its request, and a compaction can delay it, so read recent rows."""
+    import sqlite3
+    end = time.time() + seconds
+    while time.time() < end:
+        try:
+            db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+            db.row_factory = sqlite3.Row
+            rows = db.execute("SELECT checkpoint_json FROM go_chat_turns WHERE session_id=? ORDER BY updated_at DESC LIMIT 24",
+                              (session,)).fetchall()
+            db.close()
+        except sqlite3.Error:
+            rows = []
+        for row in rows:
+            try:
+                checkpoint = json.loads(row["checkpoint_json"])
+            except ValueError:
+                continue
+            request = checkpoint.get("Request") or checkpoint.get("request") or {}
+            messages = request.get("Messages") or request.get("messages") or []
+            for message in messages:
+                role = message.get("Role") or message.get("role") or ""
+                content = str(message.get("Content") or message.get("content") or "")
+                if role == "user" and marker in content:
+                    return checkpoint, _work_ledger_system_prompt(checkpoint)
+        time.sleep(0.5)
+    return {}, ""
+
+
+def _self_check_results_recent(work, session, needle, limit=24):
+    """Parse every recent checkpoint's tool receipts; return the JSON objects
+    and the plain texts carrying the needle."""
+    import sqlite3
+    parsed, texts = [], []
+    try:
+        db = sqlite3.connect(f"file:{work}/self-check/app.db?mode=ro", uri=True)
+        db.row_factory = sqlite3.Row
+        rows = db.execute("SELECT checkpoint_json FROM go_chat_turns WHERE session_id=? ORDER BY updated_at DESC LIMIT ?",
+                          (session, limit)).fetchall()
+        db.close()
+    except sqlite3.Error:
+        return parsed, texts
+    for row in rows:
+        try:
+            checkpoint = json.loads(row["checkpoint_json"])
+        except ValueError:
+            continue
+        for message in checkpoint.get("completed") or []:
+            content = str(message.get("Content") if "Content" in message else message.get("content") or "")
+            if not content:
+                continue
+            try:
+                value = json.loads(content)
+            except ValueError:
+                if needle in content:
+                    texts.append(content)
+                continue
+            parsed.append(value)
+            if needle in content:
+                texts.append(content)
+    return parsed, texts
+
+
+def _work_ledger_wait_system_all(work, session, needles, seconds=60, stack="main"):
+    """Wait until one recent system prompt carries every needle."""
+    end = time.time() + seconds
+    systems = []
+    while time.time() < end:
+        systems = _work_ledger_recent_systems(work, session, stack)
+        for system in systems:
+            if all(needle in system for needle in needles):
+                return system
+        time.sleep(0.5)
+    return systems[0] if systems else ""
 
 
 def _work_ledger_system_prompt(checkpoint):
@@ -2183,6 +2308,305 @@ def image_handles(api, session):
     return list(dict.fromkeys(handles))
 
 
+def _self_check_records(api, session):
+    status, body = api.json("GET", f"/api/v1/chat/sessions/{session}/self-checks")
+    if status != 200:
+        return []
+    records = body.get("selfChecks")
+    return records if isinstance(records, list) else []
+
+
+def _self_check_record(records, task_id):
+    return next((record for record in records if record.get("taskId") == task_id), None)
+
+
+def _self_check_send(api, session, content, model, image_urls=None, replies_before=None):
+    replies = assistant_reply_count(api, session) if replies_before is None else replies_before
+    body = {"content": content, "creative_domain": "model-3d", "ai_model": model}
+    if image_urls:
+        body["image_urls"] = image_urls
+    end = time.time() + 30
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+    while status == 409 and time.time() < end:
+        time.sleep(0.5)
+        status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", body)
+    if status not in (200, 201, 202):
+        return False
+    return wait_agent_reply(api, session, replies, 120)
+
+
+def _self_check_results(work, session):
+    """The newest turn's tool results, parsed where they are JSON (a refusal is text)."""
+    parsed, texts = [], []
+    for content in _checkpoint_completed_contents(work, "self-check", session):
+        try:
+            parsed.append(json.loads(content))
+        except ValueError:
+            texts.append(content)
+    return parsed, texts
+
+
+def scenario_self_check(work, stack_binary, processes, catalog):
+    """#246: the persisted 3D self-check contract on the fake stack.
+
+    One image-to-3D result gets a reference comparison and an inspection, a
+    written conclusion, survives a context compaction, refuses more rounds and
+    renders at the Schema limits, records a has-issues conclusion at the limit,
+    counts paid corrections, and a background-finished result is listed as
+    unchecked on the next turn. Fake only: no real upstream, no paid call.
+    """
+    child, api = start_stack(processes, stack_binary, work, "self-check", catalog, GOOD_KEY)
+    try:
+        offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
+        model = next((item["model_id"] for item in offerings.values()
+                      if item.get("available") and item.get("capability") == "text-to-3d"), "")
+        if not model:
+            record("#246 self-check setup", False, "no text-to-3d offering")
+            return
+        session = new_session(api)
+        api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "auto"})
+        api.json("PUT", f"/api/v1/chat/sessions/{session}/model3d", {"explicit_model_3d": model})
+        white, red = (250, 250, 250), (200, 30, 30)
+        picture_id = upload_asset(api, "reference.png", make_picture(128, 128, white, [((40, 32, 88, 96), red)]), "image/png")
+        if not picture_id:
+            record("#246 reference upload", False, "the library upload was refused")
+            return
+        if not _self_check_send(api, session, "这是参考图", model, image_urls=[f"/api/v1/assets/{picture_id}"]):
+            record("#246 reference attachment", False, "the reference turn did not finish")
+            return
+        handles = image_handles(api, session)
+        if not handles:
+            record("#246 reference attachment", False, "no image handle")
+            return
+        handle = handles[-1]
+        task, why, _ = agent_tool_turn(
+            api, session,
+            "开始建模 " + _work_ledger_marker("create_model_3d_from_image",
+                                             {"prompt": "a stylized red robot, plain background",
+                                              "reference_handles": [handle]}),
+            creative_domain="model-3d", ai_model=model)
+        if not task or why or task.get("state") != "SUCCEEDED":
+            record("#246 image-to-3D result", False, why or f"state={(task or {}).get('state')}")
+            return
+        task_id = task.get("task_id") or task.get("id")
+        record("#246 image-to-3D result", True, f"task={task_id}")
+
+        # One turn runs the inspection and the reference comparison; the server
+        # writes both evidence rows and the Agent sees the side-by-side handles.
+        replies = assistant_reply_count(api, session)
+        compare_marker = _work_ledger_marker("compare_model_reference", {"model": task_id})
+        inspect_marker = _work_ledger_marker("inspect_model", {"model": task_id})
+        if not _self_check_send(api, session, "检查并对照参考图 " + inspect_marker + " " + compare_marker,
+                                model, replies_before=replies):
+            record("#246 inspect and reference turn", False, "turn did not finish")
+            return
+        records = _self_check_records(api, session)
+        first = _self_check_record(records, task_id)
+        kinds = [check.get("kind") for check in (first or {}).get("checks") or []]
+        record("#246 the server records the real inspect and reference calls",
+               first is not None and "inspect" in kinds and "reference" in kinds
+               and first.get("status") == "unchecked",
+               f"record={first}")
+        messages = api.json("GET", f"/api/chat/sessions/{session}/messages")[1]
+        messages = messages if isinstance(messages, list) else messages.get("messages", [])
+        summary = None
+        for message in messages:
+            for call in _tool_calls(message):
+                if call.get("name") == "compare_model_reference" and call.get("summary"):
+                    summary = call["summary"]
+        record("#246 the comparison summary names its views and handles",
+               bool(summary) and summary.get("views") == ["front"] and bool(summary.get("handles")),
+               f"summary={summary}")
+
+        # The Agent writes the conclusion; the state and counters come back.
+        replies = assistant_reply_count(api, session)
+        if not _self_check_send(api, session, "记录结论 " + _work_ledger_marker("record_self_check", {
+                "model": task_id, "status": "passed", "summary": "matches the reference",
+                "findings": ["silhouette and colour match"], "fixes": [], "remaining": []}),
+                model, replies_before=replies):
+            record("#246 record conclusion turn", False, "turn did not finish")
+            return
+        first = _self_check_record(_self_check_records(api, session), task_id)
+        conclusion = (first or {}).get("conclusion") or {}
+        record("#246 passed conclusion is persisted",
+               (first or {}).get("status") == "passed" and conclusion.get("status") == "passed"
+               and (first or {}).get("roundsUsed") == 1 and (first or {}).get("rendersInRound") >= 1,
+               f"record={first}")
+
+        # A manual compaction keeps the record readable in the next prompt.
+        # A manual compaction needs history older than the kept rounds.
+        for index in range(5):
+            _work_ledger_plain_turn(api, session, f"整理上下文 {index}", creative_domain="model-3d", ai_model=model)
+        time.sleep(1)
+        compaction_status, compaction_body = 0, {}
+        for _attempt in range(4):
+            compaction_status, compaction_body = api.json("POST", f"/api/v1/chat/sessions/{session}/context/compaction")
+            if compaction_status == 200:
+                break
+            time.sleep(1)
+        record("#246 the manual compaction completes",
+               compaction_status == 200 and bool(compaction_body.get("compactions")),
+               f"status={compaction_status} body={compaction_body}")
+        record("#246 the compaction leaves the persisted conclusion readable",
+               (_self_check_record(_self_check_records(api, session), task_id) or {}).get("status") == "passed",
+               f"record={_self_check_record(_self_check_records(api, session), task_id)}")
+
+        # A second result that is never checked is listed as unchecked and has no
+        # record; the result itself still downloads.
+        second, why, _ = agent_tool_turn(
+            api, session,
+            "再做一版 " + _work_ledger_marker("create_model_3d_from_image",
+                                              {"prompt": "a second stylized robot",
+                                               "reference_handles": [handle]}),
+            creative_domain="model-3d", ai_model=model)
+        if not second or why or second.get("state") != "SUCCEEDED":
+            record("#246 second unchecked result", False, why or f"state={(second or {}).get('state')}")
+            return
+        second_id = second.get("task_id") or second.get("id")
+        # The model listing reads the saved model file; let the finished Task
+        # finish materializing its asset before the next prompt lists it.
+        time.sleep(2.5)
+        records = _self_check_records(api, session)
+        marker = "SECOND-MARKER"
+        _work_ledger_plain_turn(api, session, "这一版呢 " + marker, creative_domain="model-3d", ai_model=model)
+        prompt = _work_ledger_wait_system_all(work, session,
+                                              [second_id, "未自检", "不得说成已检查"],
+                                              seconds=300, stack="self-check")
+        record("#246 an unchecked result stays unchecked and is named in the prompt",
+               _self_check_record(records, second_id) is None
+               and second_id in prompt and "未自检" in prompt and "不得说成已检查" in prompt
+               and "已自检通过" in prompt,
+               f"records={records} prompt={prompt[-300:]}")
+
+        # Round and render bounds are counted by the server; the record writer
+        # stays available so the Agent can close the result truthfully.
+        replies = assistant_reply_count(api, session)
+        markers = " ".join(_work_ledger_marker("inspect_model", {"model": task_id}) for _ in range(2))
+        if not _self_check_send(api, session, "再检查一次 " + markers, model, replies_before=replies):
+            record("#246 round limit turn", False, "turn did not finish")
+            return
+        texts = []
+        deadline = time.time() + 60
+        while time.time() < deadline and not any("self-check limit declared" in text for text in texts):
+            _, texts = _self_check_results_recent(work, session, "self-check limit declared")
+            if not any("self-check limit declared" in text for text in texts):
+                time.sleep(0.5)
+        record("#246 the per-result round limit is refused with the Schema text",
+               any("self-check limit declared" in text for text in texts), f"{texts}")
+        replies = assistant_reply_count(api, session)
+        markers = " ".join(_work_ledger_marker("render_model_views", {"model": task_id, "views": ["front"]})
+                           for _ in range(3))
+        if not _self_check_send(api, session, "再渲染 " + markers, model, replies_before=replies):
+            record("#246 render limit turn", False, "turn did not finish")
+            return
+        texts = []
+        deadline = time.time() + 60
+        while time.time() < deadline and not any("self-check limit declared" in text for text in texts):
+            _, texts = _self_check_results_recent(work, session, "self-check limit declared")
+            if not any("self-check limit declared" in text for text in texts):
+                time.sleep(0.5)
+        record("#246 the per-round render limit is refused with the Schema text",
+               any("self-check limit declared" in text for text in texts), f"{texts}")
+        replies = assistant_reply_count(api, session)
+        if not _self_check_send(api, session, "记录遗留问题 " + _work_ledger_marker("record_self_check", {
+                "model": task_id, "status": "has_issues", "summary": "one seam remains",
+                "findings": ["texture seam"], "fixes": ["re-rendered"], "remaining": ["seam on the back"]}),
+                model, replies_before=replies):
+            record("#246 issues conclusion turn", False, "turn did not finish")
+            return
+        first = _self_check_record(_self_check_records(api, session), task_id)
+        record("#246 a has-issues conclusion is still writable at the limits",
+               (first or {}).get("status") == "has_issues"
+               and ((first or {}).get("conclusion") or {}).get("remaining") == ["seam on the back"],
+               f"record={first}")
+
+        # Two paid corrections: the first reaches the declared bound, the second
+        # is not refused but the result says the bound is reached.
+        correction_blocks = []
+        for attempt in range(2):
+            step, why, _ = agent_tool_turn(
+                api, session,
+                f"修一下第 {attempt + 1} 次 " + _work_ledger_marker(
+                    "retexture_model", {"source_task_id": task_id, "prompt": "cleaner texture",
+                                       "use_default_offering": True}),
+                creative_domain="model-3d", ai_model=model)
+            result_item = None
+            deadline = time.time() + 90
+            while time.time() < deadline and result_item is None:
+                parsed, _ = _self_check_results_recent(work, session, "corrections_used")
+                candidates = [item for item in parsed if isinstance(item.get("self_check"), dict)
+                              and item.get("self_check", {}).get("corrections_used", 0) >= attempt + 1]
+                if candidates:
+                    result_item = max(candidates, key=lambda item: item["self_check"]["corrections_used"])
+                else:
+                    time.sleep(0.5)
+            correction_blocks.append(result_item)
+            if not step or why or step.get("state") != "SUCCEEDED":
+                record(f"#246 correction {attempt + 1}", False, why or f"state={(step or {}).get('state')}")
+                return
+        first_block = (correction_blocks[0] or {}).get("self_check") or {}
+        second_block = (correction_blocks[1] or {}).get("self_check") or {}
+        record("#246 correction counts and the Schema limit note",
+               first_block.get("corrections_used") == 1
+               and second_block.get("corrections_used") == 2
+               and second_block.get("corrections_limit") == 1
+               and bool((correction_blocks[1] or {}).get("self_check_note")),
+               f"blocks={correction_blocks}")
+
+        # A background-finished result is listed as pending self-check on the
+        # next turn; it has no record yet.
+        fields, route = chat_schema_facts(api)
+        available_member = fields.get("turn_background_available", "")
+        backgrounded_member = fields.get("turn_backgrounded", "")
+        background_path = route.replace("{sessionID}", session) if route else ""
+        replies = assistant_reply_count(api, session)
+        status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", {
+            "content": "后台做一个立方体 " + _work_ledger_marker("create_model_3d", {"prompt": "a plain cube"}),
+            "creative_domain": "model-3d", "ai_model": model,
+        })
+        background_task, task_id_background = None, ""
+        deadline = time.time() + 45
+        while status in (200, 201, 202) and time.time() < deadline:
+            for candidate in session_tasks(api, session):
+                if candidate.get("capability") == "text-to-3d" and candidate.get("state") != "CANCELED":
+                    background_task, task_id_background = candidate, candidate.get("task_id") or candidate.get("id")
+                    break
+            ready = api.json("GET", background_path)[1].get(available_member) if background_path and available_member else False
+            if background_task and ready:
+                break
+            time.sleep(0.3)
+        if not background_task or not available_member or not backgrounded_member:
+            record("#246 background turn", False,
+                   f"task={background_task} route={background_path!r} fields={available_member!r}/{backgrounded_member!r}")
+            return
+        status, body = api.json("POST", background_path)
+        record("#246 background wait stops", status == 200 and body.get(backgrounded_member) is True, f"POST {status} {body}")
+        background_task = wait_task(api, task_id_background, 120)
+        _quality_turn_done(api, session, 120)
+        time.sleep(2.5)
+        _self_check_send(api, session, "后台好了吗", model)
+        _quality_turn_done(api, session, 120)
+        prompt = _work_ledger_wait_system(work, session, task_id_background, seconds=180, stack="self-check")
+        record("#246 a background-finished result is listed as pending self-check",
+               background_task.get("state") == "SUCCEEDED"
+               and _self_check_record(_self_check_records(api, session), task_id_background) is None
+               and task_id_background in prompt and "后台完成，待自检" in prompt,
+               f"task={background_task.get('state')} prompt={prompt[-300:]}")
+    finally:
+        processes.stop(child)
+
+
+def _tool_calls(message):
+    raw = message.get("toolCalls")
+    if not raw:
+        return []
+    try:
+        calls = json.loads(raw) if isinstance(raw, str) else raw
+    except ValueError:
+        return []
+    return calls if isinstance(calls, list) else []
+
+
 def scenario_vision_budget(api, offerings, work):
     """#247: purpose-based vision budget on the fake stack.
 
@@ -2348,7 +2772,7 @@ def scenario_vision_budget(api, offerings, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,offering-knowledge,work-ledger,vision-budget,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,offering-knowledge,work-ledger,self-check,vision-budget,faults")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
@@ -2410,6 +2834,9 @@ def main():
                 name="catalog-offering-knowledge.json",
             )
             scenario_offering_knowledge(work, stack_binary, processes, offering_catalog)
+        if "self-check" in selected:
+            self_check_catalog = private_catalog(work, self_check=True, name="catalog-self-check.json")
+            scenario_self_check(work, stack_binary, processes, self_check_catalog)
         if "faults" in selected:
             for scenario in [name for name in FAULTS if not args.faults or name in args.faults.split(",")]:
                 child, api = start_stack(processes, stack_binary, work, "fault-" + scenario, url_catalog, FAULT_KEYS.get(scenario, f"fake-{scenario}"))

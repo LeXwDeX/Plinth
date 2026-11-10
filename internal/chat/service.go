@@ -1064,6 +1064,16 @@ func (service *Service) SelfCheck(ctx context.Context, ownerID, sessionID, taskI
 	return service.selfChecks.Get(ctx, ownerID, sessionID, taskID)
 }
 
+// AttachSelfCheckHandles names the pictures one recorded check produced; the
+// orchestrator calls it after the reply assigned the attachment handles.
+func (service *Service) AttachSelfCheckHandles(ctx context.Context, ownerID, sessionID, taskID, tool string,
+	handles []string) error {
+	if service.selfChecks == nil {
+		return nil
+	}
+	return service.selfChecks.AttachCheckHandles(ctx, ownerID, sessionID, taskID, tool, handles)
+}
+
 // ListChoices returns the session's cards, newest first. A missing or
 // foreign session is ErrSessionNotFound.
 func (service *Service) ListChoices(ctx context.Context, ownerID, sessionID string) ([]Choice, error) {

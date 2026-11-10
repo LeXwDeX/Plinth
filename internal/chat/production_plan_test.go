@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
@@ -84,9 +85,10 @@ func proposalService(t *testing.T, store chat.ProductionPlanStore, budgetSchema 
 	t.Helper()
 	service := &chat.Service{}
 	service.SetProductionPlans(chat.ProductionPlanPolicy{
-		Budget:    budgetSchema,
-		Offerings: planOfferings,
-		Store:     store,
+		Budget:      budgetSchema,
+		Offerings:   planOfferings,
+		Store:       store,
+		Checkpoints: []string{"self_check"},
 	})
 	return service
 }
@@ -176,6 +178,47 @@ func TestProposeProductionPlanQuotesEveryStepServerSide(t *testing.T) {
 	}
 	if content["message"] != budgetSchema.ToolMessages.Proposed {
 		t.Fatalf("proposal message = %q, want the Schema's %q", content["message"], budgetSchema.ToolMessages.Proposed)
+	}
+}
+
+// #246: a step may declare a Schema checkpoint. It is stored on the step,
+// shown on the plan card and repeated by the plan's prompt line.
+func TestProposeProductionPlanCarriesStepCheckpoints(t *testing.T) {
+	store := &recordingProductionPlans{}
+	budgetSchema := shippedBudgetSchema(t)
+	service := proposalService(t, store, budgetSchema)
+	result, err := service.ProposeProductionPlan(context.Background(), planCommand(`{
+		"title":"检查点",
+		"steps":[
+			{"capability":"text-to-image","purpose":"生成概念图","check":"self_check"},
+			{"capability":"image-to-3d","purpose":"生成低模"}
+		],
+		"budgets":[{"unit":"legacy.credits","amount":12}]
+	}`))
+	if err != nil || result.Error != "" || len(store.created) != 1 {
+		t.Fatalf("proposal = %+v err=%v stored=%d", result, err, len(store.created))
+	}
+	plan := store.plans[0]
+	if plan.Steps[0].Check != "self_check" || plan.Steps[1].Check != "" {
+		t.Fatalf("steps = %+v", plan.Steps)
+	}
+	var content map[string]any
+	if err := json.Unmarshal([]byte(result.AgentContent), &content); err != nil {
+		t.Fatal(err)
+	}
+	steps := content["steps"].([]any)
+	if steps[0].(map[string]any)["check"] != "self_check" || steps[1].(map[string]any)["check"] != nil {
+		t.Fatalf("content steps = %v", steps)
+	}
+	format := budget.AmountFormat{LegacyLabel: "积分"}
+	if line := plan.PromptLine(format); !strings.Contains(line, "检查点 self_check") {
+		t.Fatalf("prompt line = %q", line)
+	}
+	// A step stored before #246 (no check) still decodes and re-encodes
+	// without the member.
+	encoded, err := json.Marshal(plan.Steps[1])
+	if err != nil || strings.Contains(string(encoded), `"check"`) {
+		t.Fatalf("encoded step = %s err=%v", encoded, err)
 	}
 }
 
@@ -272,6 +315,10 @@ func TestProposeProductionPlanRefusesInvalidPlansWithoutStoringThem(t *testing.T
 			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"concept"}],"budgets":[{"unit":"legacy.credits","amount":5}]}`,
 			mutate:    func(schema *catalog.ChatApprovalBudgetSchema) { schema.MaxPurposeCharacters = 3 },
 			want:      "step purpose is too long",
+		},
+		"unknown checkpoint": {
+			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a","check":"delivery"}],"budgets":[{"unit":"legacy.credits","amount":5}]}`,
+			want:      "step checkpoint delivery is not declared",
 		},
 		"unknown field": {
 			arguments: `{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budgets":[{"unit":"legacy.credits","amount":5}],"secret":true}`,

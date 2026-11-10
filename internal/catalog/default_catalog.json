@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-08.192-p2-pricing.1",
+    "revision": "2026-11-10.246-self-check.1",
     "terminology": {
       "user_facing": [
         {
@@ -3106,6 +3106,9 @@
         "ui.chat.self_check.no_findings": "没有记录发现",
         "ui.chat.self_check.no_remaining": "没有遗留问题",
         "ui.chat.self_check.record_empty": "还没有自检记录",
+        "ui.chat.self_check.check_count": "{count} 项检查记录",
+        "ui.chat.self_check.check_count_one": "{count} 项检查记录",
+        "ui.studio.plan.checkpoint": "检查点 {check}",
         "ui.chat.self_check.reference_metric_iou": "轮廓 IoU {value}",
         "ui.chat.self_check.reference_metric_color": "主色差 {value}",
         "ui.chat.self_check.caveat": "指标为确定性参考：渲染器近似 PBR、仅支持 GLB、按各自包围盒取景；请以并排图和实际判断为准。",
@@ -6674,7 +6677,7 @@
                 "description": "Unfixed issues; required for has_issues and must be empty for passed."
               }
             },
-            "required": ["model", "status", "summary"],
+            "required": ["status", "summary"],
             "additionalProperties": false
           }
         },
@@ -14487,6 +14490,9 @@
             "ui.chat.self_check.no_findings": "No findings recorded",
             "ui.chat.self_check.no_remaining": "No remaining issues",
             "ui.chat.self_check.record_empty": "No self-check record yet",
+            "ui.chat.self_check.check_count": "{count} checks recorded",
+            "ui.chat.self_check.check_count_one": "{count} check recorded",
+            "ui.studio.plan.checkpoint": "Checkpoint {check}",
             "ui.chat.self_check.reference_metric_iou": "Silhouette IoU {value}",
             "ui.chat.self_check.reference_metric_color": "Dominant colour distance {value}",
             "ui.chat.self_check.caveat": "Deterministic metrics are a reference: the renderer uses approximate PBR, reads GLB only and frames each subject by its own bounding box; judge the side-by-side picture yourself.",
