@@ -2286,7 +2286,7 @@ func validateWorkLedger(schema ChatSchema) error {
 		{"summary_template", ledger.SummaryTemplate, []string{"{open}", "{steps}", "{rejected}", "{close}"}},
 		{"step_line_template", ledger.StepLineTemplate, []string{"{step}", "{task_id}", "{capability}", "{model}", "{status}", "{prompt}", "{self_check}", "{decision}"}},
 		{"prompt_line_template", ledger.PromptLineTemplate, []string{"{preview}"}},
-		{"self_check_line_template", ledger.SelfCheckLineTemplate, []string{"{tool}", "{passed}", "{failed}", "{leftovers}"}},
+		{"self_check_line_template", ledger.SelfCheckLineTemplate, []string{"{tool}", "{passed}", "{unknown}", "{failed}", "{leftovers}"}},
 		{"leftover_template", ledger.LeftoverTemplate, []string{"{checks}"}},
 		{"unknown_step_template", ledger.UnknownStepTemplate, []string{"{step}"}},
 	} {

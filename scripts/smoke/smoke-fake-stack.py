@@ -1776,10 +1776,49 @@ def scenario_work_ledger(api, offerings, work):
                                    ai_model=TEXT_TO_3D):
         record("#248 leftover visibility turn", False, "turn did not finish")
         return
-    system = _work_ledger_wait_system(work, session, "inspect_model")
-    record("#248 inspect_model leftovers reach the next turn",
-           "triangles" in system and "inspect_model" in system and ("遗留" in system or "fail" in system.lower()),
-           f"triangles={'yes' if 'triangles' in system else 'no'} inspect={'yes' if 'inspect_model' in system else 'no'}")
+    # The read-only tool must attribute the self-check to this step with the
+    # tool's own pass/unknown/fail counts; unknown checks are never folded
+    # into passed.
+    checkpoint = _work_ledger_checkpoint(work, session)
+    readable = None
+    for content in _work_ledger_tool_contents(checkpoint):
+        if '"raw_prompt"' not in content:
+            continue
+        try:
+            candidate = json.loads(content)
+        except ValueError:
+            continue
+        if (candidate.get("step") or {}).get("task_id") == model["id"]:
+            readable = candidate
+            break
+    model_step = (readable or {}).get("step") or {}
+    self_checks = model_step.get("self_check") or []
+    inspect_check = next((check for check in self_checks if check.get("tool") == "inspect_model"), None)
+    counted = (bool(inspect_check) and inspect_check.get("passed", 0) > 0
+               and inspect_check.get("unknown", 0) > 0 and inspect_check.get("failed", 0) > 0
+               and bool(inspect_check.get("leftovers")))
+    record("#248 get_production_step attributes the inspect_model self-check to its step", counted,
+           f"step={model_step.get('step')} checks={json.dumps(inspect_check, ensure_ascii=False) if inspect_check else 'missing'}")
+    # The next turn's ledger line must carry those exact counts and the failed
+    # check names. Requiring them on the same line as the step handle and Task
+    # ID rules out an incidental match in the static craft prompt, which also
+    # mentions triangles, inspect_model and 遗留 on every model-3d turn.
+    needle = model_step.get("step") or model["id"]
+    system = _work_ledger_wait_system(work, session, needle)
+    ledger_line = ""
+    for line in system.splitlines():
+        if needle in line and model["id"] in line and "inspect_model" in line:
+            ledger_line = line
+            break
+    expected = ""
+    if inspect_check:
+        expected = (f"inspect_model 通过 {inspect_check.get('passed', 0)} "
+                    f"未判定 {inspect_check.get('unknown', 0)} 失败 {inspect_check.get('failed', 0)}")
+    leftovers = [item.get("check") for item in (inspect_check or {}).get("leftovers") or [] if item.get("check")]
+    visible = bool(expected) and expected in ledger_line and all(name in ledger_line for name in leftovers)
+    record("#248 inspect_model leftovers reach the next turn", counted and visible,
+           f"counts={expected or 'missing'} leftovers={','.join(leftovers) or 'missing'} "
+           f"ledger={'yes' if ledger_line else 'no'}")
     # Ledger content never reaches a server log.
     logs = _work_ledger_log_text(work)
     record("#248 ledger content is absent from server logs", secret not in logs and long_prompt not in logs,

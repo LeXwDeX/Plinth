@@ -176,10 +176,11 @@ func mustJSON(value any) string {
 	return string(encoded)
 }
 
-func workStepArgument(t *testing.T, step string) chat.ToolCommand {
+func workStepArgument(t *testing.T, sessionID, step string) chat.ToolCommand {
 	t.Helper()
 	return chat.ToolCommand{
-		OwnerID: "owner-a",
+		OwnerID:   "owner-a",
+		SessionID: sessionID,
 		Call: agents.ToolCall{
 			ID: "ledger-call", Name: "get_production_step",
 			Arguments: []byte(`{"step":` + mustJSON(step) + `}`),
@@ -250,7 +251,8 @@ func TestWorkLedgerKeepsPromptsBeyondTheHistoryPreview(t *testing.T) {
 func TestWorkLedgerSummarizesSelfCheckLeftovers(t *testing.T) {
 	inspect := `{"tool":"inspect","task_id":"task-1","usage":{"checks":[` +
 		`{"check":"watertight","status":"fail","actual":false,"budget":{"required":true},"fix_hint":"Repair the mesh"},` +
-		`{"check":"triangles","status":"pass","actual":100,"budget":{"max":200}}]}}`
+		`{"check":"triangles","status":"pass","actual":100,"budget":{"max":200}},` +
+		`{"check":"uv","status":"unknown","actual":false,"budget":{"required":false}}]}}`
 	image := `{"tool":"inspect_image","handle":"@img1","checks":{"passed":2,"failed":1}}`
 	render := `{"tool":"render","model":"task-1","views":["front"],"failed_views":["back"]}`
 	task := workTask("task-1", time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC), "prompt", "prompt")
@@ -274,7 +276,7 @@ func TestWorkLedgerSummarizesSelfCheckLeftovers(t *testing.T) {
 		byTool[check.Tool] = check
 	}
 	inspectCheck, found := byTool["inspect_model"]
-	if !found || inspectCheck.Failed != 1 || len(inspectCheck.Leftovers) != 1 {
+	if !found || inspectCheck.Passed != 1 || inspectCheck.Unknown != 1 || inspectCheck.Failed != 1 || len(inspectCheck.Leftovers) != 1 {
 		t.Fatalf("inspect_model self-check = %+v", inspectCheck)
 	}
 	if inspectCheck.Leftovers[0].Check != "watertight" || inspectCheck.Leftovers[0].FixHint != "Repair the mesh" {
@@ -290,8 +292,59 @@ func TestWorkLedgerSummarizesSelfCheckLeftovers(t *testing.T) {
 	if !strings.Contains(summary, "watertight") || !strings.Contains(summary, "Repair the mesh") {
 		t.Fatalf("leftovers missing from the summary: %s", summary)
 	}
+	if !strings.Contains(summary, "inspect_model 通过 1 未判定 1 失败 1") {
+		t.Fatalf("inspect_model counts must separate unknown from pass: %s", summary)
+	}
 	if !strings.Contains(summary, "inspect_image") {
 		t.Fatalf("inspect_image counts missing from the summary: %s", summary)
+	}
+}
+
+// TestWorkLedgerDoesNotCountUnknownInspectChecksAsPassed is the #248
+// regression: an inspect_model check the purpose did not ask for or the file
+// could not judge is unknown, not passed. Both the summary and
+// get_production_step must report it as such.
+func TestWorkLedgerDoesNotCountUnknownInspectChecksAsPassed(t *testing.T) {
+	inspect := `{"tool":"inspect","task_id":"task-1","usage":{"checks":[` +
+		`{"check":"triangles","status":"pass","actual":100,"budget":{"max":200}},` +
+		`{"check":"watertight","status":"unknown","actual":false,"budget":{"required":false}},` +
+		`{"check":"skin","status":"unknown","actual":0,"budget":{"required":false}},` +
+		`{"check":"uv","status":"fail","actual":false,"budget":{"required":true},"fix_hint":"Unwrap the mesh"}]}}`
+	task := workTask("task-1", time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC), "prompt", "prompt")
+	messages := []chat.Message{{
+		Role:      "configured-assistant",
+		ToolCalls: []chat.ToolCall{workCall("call-1", "task-1", "prompt", inspect)},
+	}}
+	fixture := newLedgerFixture(t, nil, []generation.Task{task}, messages)
+	ctx := context.Background()
+	ledger, err := fixture.service.WorkLedger(ctx, "owner-a", fixture.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := ledger.Steps[0].SelfChecks[0]
+	if check.Passed != 1 || check.Unknown != 2 || check.Failed != 1 || len(check.Leftovers) != 1 {
+		t.Fatalf("self-check = %+v", check)
+	}
+	summary := fixture.service.WorkLedgerSummary(ctx, "owner-a", fixture.session.ID, "")
+	if !strings.Contains(summary, "inspect_model 通过 1 未判定 2 失败 1") {
+		t.Fatalf("summary folds unknown into pass: %s", summary)
+	}
+	if strings.Contains(summary, "通过 3") {
+		t.Fatalf("summary counted unknown checks as passed: %s", summary)
+	}
+	result, err := fixture.service.ReadProductionStep(ctx, workStepArgument(t, fixture.session.ID, "@step1"))
+	if err != nil || result.Error != "" {
+		t.Fatalf("read = %+v, %v", result, err)
+	}
+	var payload struct {
+		Step chat.WorkStep `json:"step"`
+	}
+	if err := json.Unmarshal([]byte(result.AgentContent), &payload); err != nil {
+		t.Fatal(err)
+	}
+	readCheck := payload.Step.SelfChecks[0]
+	if readCheck.Passed != 1 || readCheck.Unknown != 2 || readCheck.Failed != 1 {
+		t.Fatalf("get_production_step self-check = %+v", readCheck)
 	}
 }
 

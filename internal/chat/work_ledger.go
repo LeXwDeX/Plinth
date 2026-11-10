@@ -107,10 +107,14 @@ type WorkLeftover struct {
 }
 
 // WorkSelfCheck is the read-only self-check conclusion stored with a tool call
-// and attributed to the step it inspected.
+// and attributed to the step it inspected. Passed counts only checks the tool
+// judged as pass; Unknown counts checks the purpose did not ask for or the
+// file could not judge. Unknown is never folded into Passed: an unjudged check
+// must not read as a passed one.
 type WorkSelfCheck struct {
 	Tool        string         `json:"tool"`
 	Passed      int            `json:"passed"`
+	Unknown     int            `json:"unknown"`
 	Failed      int            `json:"failed"`
 	Leftovers   []WorkLeftover `json:"leftovers,omitempty"`
 	FailedViews []string       `json:"failed_views,omitempty"`
@@ -634,9 +638,9 @@ func workResults(task generation.Task, attachments map[string][]Attachment) []Wo
 }
 
 // workSelfChecks attributes the persisted read-only tool summaries to the
-// steps they inspected. inspect_model contributes its usage-check failures and
-// fix hints; inspect_image contributes pass/fail counts; render and compare
-// contribute their failed views.
+// steps they inspected. inspect_model contributes its pass, unknown and fail
+// counts plus the failed checks' fix hints; inspect_image contributes
+// pass/fail counts; render and compare contribute their failed views.
 func workSelfChecks(
 	history []Message,
 	assistantRole string,
@@ -701,7 +705,10 @@ func workSelfChecks(
 				}
 				check := WorkSelfCheck{Tool: "inspect_model"}
 				for _, item := range summary.Usage.Checks {
-					if item.Status == "fail" {
+					switch item.Status {
+					case "pass":
+						check.Passed++
+					case "fail":
 						check.Failed++
 						check.Leftovers = append(check.Leftovers, WorkLeftover{
 							Check:   item.Check,
@@ -709,8 +716,11 @@ func workSelfChecks(
 							Budget:  workAnyText(item.Budget),
 							FixHint: item.FixHint,
 						})
-					} else {
-						check.Passed++
+					default:
+						// unknown means the purpose did not ask for the
+						// property or the file could not be judged; it is a
+						// fact, not a pass.
+						check.Unknown++
 					}
 				}
 				taskID := summary.TaskID
@@ -1025,6 +1035,7 @@ func (service *Service) workSelfCheckLine(checks []WorkSelfCheck) string {
 		line := strings.NewReplacer(
 			"{tool}", check.Tool,
 			"{passed}", strconv.Itoa(check.Passed),
+			"{unknown}", strconv.Itoa(check.Unknown),
 			"{failed}", strconv.Itoa(check.Failed),
 			"{leftovers}", leftovers,
 		).Replace(policy.SelfCheckLineTemplate)

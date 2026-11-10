@@ -2314,8 +2314,8 @@ type ChatWorkLedgerSchema struct {
 	// (the rejected block or nothing). StepLineTemplate renders one step with
 	// {step}, {task_id}, {capability}, {model}, {status}, {prompt},
 	// {self_check} and {decision}. PromptLineTemplate fills {prompt} ({preview});
-	// SelfCheckLineTemplate fills {self_check} ({tool}, {passed}, {failed} and
-	// {leftovers}); LeftoverTemplate fills {leftovers} ({checks}).
+	// SelfCheckLineTemplate fills {self_check} ({tool}, {passed}, {unknown},
+	// {failed} and {leftovers}); LeftoverTemplate fills {leftovers} ({checks}).
 	SummaryTemplate       string `json:"summary_template"`
 	StepLineTemplate      string `json:"step_line_template"`
 	PromptLineTemplate    string `json:"prompt_line_template"`

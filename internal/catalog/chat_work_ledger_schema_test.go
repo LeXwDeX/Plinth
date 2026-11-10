@@ -58,6 +58,9 @@ func TestWorkLedgerDeclarationIsValidated(t *testing.T) {
 		{"an empty none text", func(app *catalog.ApplicationSchema) {
 			app.Chat.WorkLedger.NoneText = ""
 		}, "none_text"},
+		{"a self-check line without unknown", func(app *catalog.ApplicationSchema) {
+			app.Chat.WorkLedger.SelfCheckLineTemplate = "{tool} 通过 {passed} 失败 {failed}{leftovers}"
+		}, "{unknown}"},
 		{"failed views without a placeholder", func(app *catalog.ApplicationSchema) {
 			app.Chat.WorkLedger.FailedViewsTemplate = "failed"
 		}, "{views}"},
