@@ -17,13 +17,15 @@ const fields = productionBriefFields(schema);
 describe('the declared brief fields', () => {
   it('reads names, types, labels and limits from the Schema in its order', () => {
     expect(fields.map((field) => field.name)).toEqual([
-      'purpose', 'style', 'target_platform', 'needs_parts', 'needs_rig', 'needs_animation', 'triangle_budget', 'notes',
+      'purpose', 'image_use', 'image_transparent', 'image_for_3d', 'style', 'target_platform', 'needs_parts', 'needs_rig', 'needs_animation', 'triangle_budget', 'notes',
     ]);
     const style = fields.find((field) => field.name === 'style')!;
     expect(style).toMatchObject({ type: 'text', label: '风格', maximumCharacters: 200 });
     const budget = fields.find((field) => field.name === 'triangle_budget')!;
     expect(budget).toMatchObject({ type: 'integer', minimum: 100, maximum: 2000000 });
     expect(fields.find((field) => field.name === 'purpose')?.type).toBe('profile');
+    expect(fields.find((field) => field.name === 'image_use')?.type).toBe('image_profile');
+    expect(fields.find((field) => field.name === 'image_transparent')?.type).toBe('boolean');
   });
 
   it('has no fields without a declared brief', () => {

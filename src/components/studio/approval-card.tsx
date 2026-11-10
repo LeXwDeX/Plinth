@@ -100,7 +100,8 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
   const adjustments = model.parameterAdjustments ?? [];
   const profileGroups = profileAdjustmentGroups(adjustments);
   const agentAdjustments = adjustments.filter((item) => !item.profile);
-  const profileLabel = (id: string) => schema.chat.model3d_usage?.profiles?.find((profile) => profile.id === id)?.label ?? id;
+  const profileLabel = (id: string) => schema.chat.model3d_usage?.profiles?.find((profile) => profile.id === id)?.label
+    ?? schema.chat.image2d_usage?.profiles?.find((profile) => profile.id === id)?.label ?? id;
   const profileSummary = (group: ProfileAdjustmentGroup) => schemaCountMessage(
     schema,
     'ui.studio.approval.card.parameter_summary',
@@ -147,6 +148,31 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
   const retexture = isRetextureCard(model);
   const invalidNativeQuote = nativePricing && model.nativeQuote == null;
   const extra = model.extra;
+  // #239: the card says who chose the model and, for a purpose, why. The
+  // server translated the reason; the source code maps to the Schema's words.
+  const modelChoiceSource = (choice: NonNullable<ApprovalCardModel['modelChoice']>): string => {
+    if (choice.source === 'profile') {
+      return formatSchemaText(schemaText(schema, 'ui.studio.approval.card.model_source_profile'), {
+        profile: profileLabel(choice.profile ?? ''),
+      });
+    }
+    const key = choice.source === 'user' || choice.source === 'agent' || choice.source === 'default'
+      ? choice.source
+      : 'default';
+    return schemaText(schema, `ui.studio.approval.card.model_source_${key}`);
+  };
+  const modelChoiceText = model.modelChoice
+    ? formatSchemaText(
+      schemaText(schema, model.modelChoice.reason
+        ? 'ui.studio.approval.card.model_choice_line'
+        : 'ui.studio.approval.card.model_choice_line_no_reason'),
+      {
+        model: names.modelName || model.model,
+        source: modelChoiceSource(model.modelChoice),
+        reason: model.modelChoice.reason ?? '',
+      },
+    )
+    : '';
   // What the extra credits pay for ("附加导出格式：FBX、USDZ，约 N 积分"), all from the Schema's words.
   const extraLine = extra
     ? schemaCountMessage(
@@ -205,6 +231,12 @@ export function ApprovalCard({ model, busy, now, onDecide, onRerequest, error = 
         ) : null}
         <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.model')}</dt>
         <dd className="truncate" data-testid="studio-approval-model">{[names.modelName, names.providerName].filter(Boolean).join(' · ')}</dd>
+        {modelChoiceText ? (
+          <>
+            <dt className="text-muted-foreground">{schemaText(schema, 'ui.studio.approval.card.parameter_source')}</dt>
+            <dd className="text-muted-foreground" data-testid="studio-approval-model-choice">{modelChoiceText}</dd>
+          </>
+        ) : null}
         {model.nativeQuote ? (
           <>
             <dt className="text-muted-foreground">{formatSchemaText(schemaText(schema, 'ui.pricing.frozen_estimate'), { amount: formatNativePrice(model.nativeQuote.total_amount, model.nativeQuote.unit_label) ?? schemaText(schema, 'ui.pricing.unknown') })}</dt>

@@ -86,6 +86,28 @@ describe('approval card', () => {
     expect(minutes).not.toContain('1 minutes');
   });
 
+  it('says who chose the model and why, with the 2D purpose label (#239)', () => {
+    const html = render({ ...card(null), modelChoice: { source: 'profile', profile: 'illustration', reason: '立绘需要竖画幅和稳定身份。' } });
+    expect(html).toContain('data-testid="studio-approval-model-choice"');
+    expect(html).toContain('角色立绘 / 宣传插画');
+    expect(html).toContain('立绘需要竖画幅和稳定身份。');
+    expect(html).not.toContain('illustration');
+  });
+
+  it('shows a user lock without inventing a reason', () => {
+    const html = render({ ...card(null), modelChoice: { source: 'user' } });
+    expect(html).toContain(messages['ui.studio.approval.card.model_source_user']);
+    expect(html).not.toContain(messages['ui.studio.approval.card.model_choice_line']);
+  });
+
+  it('parses the model choice from a detached pending approval', () => {
+    const [pending] = parsePendingApprovals({ items: [{ request_id: 'r-choice', status: 'pending', capability: 'text-to-image', model: 'nano-banana-pro', provider: 'Meshy AI',
+      model_choice: { source: 'profile', profile: 'illustration', reason: 'frozen reason' } }] });
+    const model = cardFromPending(pending);
+    expect(model.modelChoice).toEqual({ source: 'profile', profile: 'illustration', reason: 'frozen reason' });
+    expect(render(model)).toContain('frozen reason');
+  });
+
   it('keeps the plain card when the step has no extra credits', () => {
     const html = render(card(null));
     expect(html).toContain('data-testid="studio-approval-credits"');

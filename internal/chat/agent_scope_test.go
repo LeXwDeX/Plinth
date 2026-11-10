@@ -63,6 +63,10 @@ func newScopeRig(t *testing.T, responses ...agents.Completion) *scopeRig {
 // turn creates a session in the scope, starts a turn and runs it. The options
 // the "client" sends deliberately name another scope: the server must ignore it.
 func (rig *scopeRig) turn(t *testing.T, scope string) string {
+	return rig.turnDomain(t, scope, "image")
+}
+
+func (rig *scopeRig) turnDomain(t *testing.T, scope, domain string) string {
 	t.Helper()
 	ctx := context.Background()
 	session, err := rig.service.CreateSession(ctx, "owner-a", "Owner", "chat")
@@ -73,12 +77,12 @@ func (rig *scopeRig) turn(t *testing.T, scope string) string {
 		rig.seedScope(t, "owner-a", session.ID, scope)
 	}
 	assistant, err := rig.service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID, Content: "hello",
-		Options: chat.TurnOptions{CreativeDomain: "image", AgentScope: "forged"}})
+		Options: chat.TurnOptions{CreativeDomain: domain, AgentScope: "forged"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := rig.orchestrator.Process(ctx, chat.ProcessTurn{OwnerID: "owner-a", SessionID: session.ID, AssistantMessageID: assistant.ID,
-		Options: chat.TurnOptions{CreativeDomain: "image", AgentScope: "forged"}}); err != nil {
+		Options: chat.TurnOptions{CreativeDomain: domain, AgentScope: "forged"}}); err != nil {
 		t.Fatal(err)
 	}
 	return session.ID

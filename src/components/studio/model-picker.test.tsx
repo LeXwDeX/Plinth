@@ -59,10 +59,11 @@ describe('the model picker without an Agent scope picker (#103)', () => {
     expect(trigger(html, 'workspace-model-picker')).not.toContain('disabled=""');
   });
 
-  it('writes a 3D pick through the serial lock writer and rolls back with a toast on failure', () => {
+  it('writes a 2D or 3D pick through the serial lock writer and rolls back with a toast on failure', () => {
     const source = readFileSync(new URL('./model-picker.tsx', import.meta.url), 'utf8');
-    expect(source).toContain('pickExplicitModel3D({');
-    expect(source).toContain("setModel('model-3d', previous)");
+    expect(source).toContain('pickExplicitModel3D');
+    expect(source).toContain('pickExplicitModelImage');
+    expect(source).toContain('setModel(domain, previous)');
     expect(source).toContain("toast.error(schemaText(schema, 'ui.studio.picker.lock_failed'))");
     // The old fire-and-forget call swallowed every failure.
     expect(source).not.toContain('.catch(() => undefined)');

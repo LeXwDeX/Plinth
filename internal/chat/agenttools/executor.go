@@ -133,8 +133,12 @@ type Config struct {
 	// plan card (#103).
 	ProposePlan func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	// ChoiceKinds are chat.choice.kinds from the Product Schema; the Agent
-	// names one by id and never supplies options of its own.
+	// names one by id and supplies options only for a kind whose option source
+	// is agent (#239).
 	ChoiceKinds []catalog.ChatChoiceKindSchema
+	// ChoiceOptionInvalid words a refused direction-card option list
+	// (chat.presentation.messages.choice_option_invalid, #239).
+	ChoiceOptionInvalid string
 	// BriefSavedMessage and BriefInvalidTemplate word the update tool's result
 	// (model3d_usage.brief.saved_message / invalid_template); BriefMessages
 	// words its field refusals (model3d_usage.brief.messages).
@@ -205,6 +209,7 @@ type Executor struct {
 		arguments chat.AskChoiceArguments) (chat.ToolResult, error)
 	proposePlan            func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	choiceKinds            map[string]catalog.ChatChoiceKindSchema
+	choiceOptionInvalid    string
 	briefSavedMessage      string
 	briefInvalidTemplate   string
 	briefMessages          catalog.ChatProductionBriefMessages
@@ -315,6 +320,7 @@ func New(config Config) (*Executor, error) {
 	}
 	return &Executor{
 		choiceKinds:            choiceKinds,
+		choiceOptionInvalid:    config.ChoiceOptionInvalid,
 		briefSavedMessage:      config.BriefSavedMessage,
 		briefInvalidTemplate:   config.BriefInvalidTemplate,
 		briefMessages:          config.BriefMessages,
@@ -632,6 +638,25 @@ func (e *Executor) briefInvalid(reason string) string {
 // (#103). The Agent names the kind only; the options and their arguments come
 // from the Schema and the service. The card's answer would call its target
 // tool, so that tool must be registered and available in this turn's scope.
+// boundedChoiceToken reports whether an Agent-supplied direction option id is
+// a bounded token the answer can pass to a tool argument: a letter or digit
+// followed by at most 63 letters, digits, dots, underscores, colons, slashes
+// or hyphens. Free text never becomes an option id (#239).
+func boundedChoiceToken(id string) bool {
+	if id == "" || len(id) > 64 {
+		return false
+	}
+	for index, char := range id {
+		switch {
+		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
+		case index > 0 && (char == '.' || char == '_' || char == ':' || char == '/' || char == '-'):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) chat.ToolResult {
 	if e.askChoice == nil {
 		return chat.ToolResult{Error: "choice cards unavailable", NoSubmission: true}
@@ -640,6 +665,11 @@ func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) 
 		Kind        string `json:"kind"`
 		Question    string `json:"question"`
 		Recommended string `json:"recommended"`
+		Options     []struct {
+			ID          string `json:"id"`
+			Label       string `json:"label"`
+			Description string `json:"description"`
+		} `json:"options"`
 	}
 	if err := json.Unmarshal(command.Call.Arguments, &arguments); err != nil || arguments.Kind == "" {
 		return chat.ToolResult{Error: "invalid choice arguments", NoSubmission: true}
@@ -651,8 +681,21 @@ func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) 
 	if command.ToolAvailable != nil && !command.ToolAvailable(kind.ToolName) {
 		return chat.ToolResult{Error: "choice target tool unavailable", NoSubmission: true}
 	}
+	options := make([]chat.ChoiceOptionInput, 0, len(arguments.Options))
+	for _, option := range arguments.Options {
+		id := strings.TrimSpace(option.ID)
+		label := strings.TrimSpace(option.Label)
+		if !boundedChoiceToken(id) || label == "" || len([]rune(label)) > 120 || len([]rune(option.Description)) > 300 {
+			message := e.choiceOptionInvalid
+			if message == "" {
+				message = "invalid choice options"
+			}
+			return chat.ToolResult{Error: message, NoSubmission: true}
+		}
+		options = append(options, chat.ChoiceOptionInput{ID: id, Label: label, Description: strings.TrimSpace(option.Description)})
+	}
 	result, err := e.askChoice(ctx, command, kind, chat.AskChoiceArguments{
-		Kind: arguments.Kind, Question: arguments.Question, Recommended: arguments.Recommended,
+		Kind: arguments.Kind, Question: arguments.Question, Recommended: arguments.Recommended, Options: options,
 	})
 	if err != nil {
 		if errors.Is(err, chat.ErrSessionNotFound) {

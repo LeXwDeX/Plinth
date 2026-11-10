@@ -114,6 +114,66 @@ func (s *Server) chatExplicitModel3DWire(sessionID, model string) map[string]any
 	}
 }
 
+func (s *Server) chatExplicitModelImageWire(sessionID, model string) map[string]any {
+	fields := s.application.Chat.API.ResponseFields
+	return map[string]any{
+		fields.ID:                 sessionID,
+		fields.ExplicitModelImage: model,
+	}
+}
+
+func (s *Server) writeChatExplicitModelImageError(writer http.ResponseWriter, err error) {
+	noteCause(writer, err)
+	messages := s.application.Chat.Presentation.Messages
+	switch {
+	case errors.Is(err, chat.ErrSessionNotFound):
+		s.writeChatError(writer, http.StatusNotFound, messages.SessionNotFound)
+	case errors.Is(err, chat.ErrInvalidExplicitModelImage):
+		s.writeChatError(writer, http.StatusBadRequest, messages.InvalidParameters)
+	default:
+		s.writeChatInternalError(writer, err)
+	}
+}
+
+// getChatSessionExplicitModelImage returns the 2D model the person explicitly
+// picked in the session, or the empty string when there is none (#239).
+func (s *Server) getChatSessionExplicitModelImage(writer http.ResponseWriter, request *http.Request, owner generation.OwnerID) {
+	sessionID := request.PathValue("sessionID")
+	model, err := s.chat.SessionExplicitModelImage(request.Context(), string(owner), sessionID)
+	if err != nil {
+		s.writeChatExplicitModelImageError(writer, err)
+		return
+	}
+	writer.Header().Set("Cache-Control", s.application.Runtime.HTTP.PrivateCacheControl)
+	writeJSON(writer, http.StatusOK, s.chatExplicitModelImageWire(sessionID, model))
+}
+
+// putChatSessionExplicitModelImage records or clears the person's explicit 2D
+// model pick. An empty model clears the lock; nothing is submitted.
+func (s *Server) putChatSessionExplicitModelImage(writer http.ResponseWriter, request *http.Request, owner generation.OwnerID) {
+	sessionID := request.PathValue("sessionID")
+	var body map[string]json.RawMessage
+	reader := http.MaxBytesReader(writer, request.Body, s.application.Runtime.HTTP.JSONBodyMaxBytes)
+	if err := json.NewDecoder(reader).Decode(&body); err != nil {
+		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidParameters)
+		return
+	}
+	var model string
+	if raw, present := body[s.application.Chat.API.Fields.ExplicitModelImage]; present && string(raw) != "null" {
+		if err := json.Unmarshal(raw, &model); err != nil {
+			s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidParameters)
+			return
+		}
+	}
+	stored, err := s.chat.SetExplicitModelImage(request.Context(), string(owner), sessionID, model)
+	if err != nil {
+		s.writeChatExplicitModelImageError(writer, err)
+		return
+	}
+	writer.Header().Set("Cache-Control", s.application.Runtime.HTTP.PrivateCacheControl)
+	writeJSON(writer, http.StatusOK, s.chatExplicitModelImageWire(sessionID, stored))
+}
+
 func (s *Server) writeChatExplicitModel3DError(writer http.ResponseWriter, err error) {
 	noteCause(writer, err)
 	messages := s.application.Chat.Presentation.Messages

@@ -70,6 +70,8 @@ export interface ProductSchema {
         chat_session_budget?: string;
         /** #103: the 3D model the person explicitly picked in the session (GET/PUT). Absent on older servers. */
         chat_session_model3d?: string;
+        /** #239: the 2D model the person explicitly picked in the session (GET/PUT). Absent on older servers. */
+        chat_session_model2d?: string;
         chat_session_pick?: string;
         chat_session_agent_scope?: string;
         /** #322: the session's thinking level (GET/PUT). Absent on older servers: the picker is hidden. */
@@ -1394,9 +1396,10 @@ export interface ChatProductSchema {
        style_lock_text?: string;
        style_lock_references?: string;
        style_lock_skipped?: string;
-       /** #103: 会话制作简报与明确选定的 3D 模型。 */
+       /** #103: 会话制作简报与明确选定的 3D 模型；#239: 2D 模型锁。 */
       brief?: string;
       explicit_model_3d?: string;
+      explicit_model_2d?: string;
       /** #103: the request member that carries an approval decision. */
       decision?: string;
       /** 会话 Agent 范围的请求成员。 */
@@ -1454,8 +1457,9 @@ export interface ChatProductSchema {
       brief?: string;
       /** #103: 会话当前制作计划预算成员；没有计划时省略。 */
       budget?: string;
-      /** #103: 会话明确选定的 3D 模型成员。 */
+      /** #103: 会话明确选定的 3D 模型成员；#239: 2D 模型成员。 */
       explicit_model_3d?: string;
+      explicit_model_2d?: string;
       /** 会话选用的候选图成员。 */
       pick: string;
       /** 会话 Agent 范围成员。 */
@@ -1650,6 +1654,10 @@ export interface ChatProductSchema {
    * #103: 3D 制作简报。字段名、类型与上限来自 Schema；用途选项来自 profiles。
    */
   model3d_usage?: ChatModel3DUsageSchema;
+  /**
+   * #239: 2D 制作简报的用途标签（公开投影只给 id/label）。
+   */
+  image2d_usage?: ChatImage2DUsageSchema;
   stream: { event_fields: ChatStreamEventFieldsSchema; event_types: ChatStreamEventTypesSchema };
   tools: Array<{
     name: string;
@@ -1733,6 +1741,11 @@ export interface ChatModel3DUsageSchema {
   default_profile?: string;
   profiles?: ChatModel3DProfileSchema[];
   brief?: { fields?: ChatModel3DBriefFieldSchema[] };
+}
+
+/** #239: the public 2D purpose labels the brief panel and choice card render. */
+export interface ChatImage2DUsageSchema {
+  profiles?: ChatModel3DProfileSchema[];
 }
 
 export interface ChatStreamEventFieldsSchema {

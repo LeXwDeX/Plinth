@@ -124,23 +124,26 @@ func TestProfileParameterSimulationAcceptsAPublicValue(t *testing.T) {
 func TestProductionBriefValidationLocatesFieldsByType(t *testing.T) {
 	brief := func(fields ...ChatProductionBriefField) ChatProductionBriefSchema {
 		return ChatProductionBriefSchema{
-			Fields:                 fields,
-			ContextTemplate:        "{brief}",
-			EmptyText:              "none",
-			FieldTemplate:          "{label}: {value}",
-			FlagTemplate:           "{label}",
-			Separator:              "; ",
-			PurposeTemplate:        "{label} ({budget})",
-			BudgetTemplate:         "{minimum}-{maximum}{requirements}",
-			OpenBudgetTemplate:     "{maximum}{requirements}",
-			OverrideBudgetTemplate: "{value}{requirements}",
-			RequirementsTemplate:   "{items}",
-			RequirementSeparator:   ", ",
-			UVText:                 "uv",
-			WatertightText:         "watertight",
-			SkinText:               "skin",
-			SavedMessage:           "saved",
-			InvalidTemplate:        "invalid: {reason}",
+			Fields:                    fields,
+			ContextTemplate:           "{brief}",
+			EmptyText:                 "none",
+			FieldTemplate:             "{label}: {value}",
+			FlagTemplate:              "{label}",
+			Separator:                 "; ",
+			PurposeTemplate:           "{label} ({budget})",
+			BudgetTemplate:            "{minimum}-{maximum}{requirements}",
+			OpenBudgetTemplate:        "{maximum}{requirements}",
+			OverrideBudgetTemplate:    "{value}{requirements}",
+			RequirementsTemplate:      "{items}",
+			RequirementSeparator:      ", ",
+			ImagePurposeTemplate:      "{label} ({requirements})",
+			ImageRequirementsTemplate: "{items}",
+			ImageRequirementSeparator: ", ",
+			UVText:                    "uv",
+			WatertightText:            "watertight",
+			SkinText:                  "skin",
+			SavedMessage:              "saved",
+			InvalidTemplate:           "invalid: {reason}",
 		}
 	}
 	profile := ChatProductionBriefField{Name: "use", Type: "profile", Label: "Use"}
@@ -148,7 +151,7 @@ func TestProductionBriefValidationLocatesFieldsByType(t *testing.T) {
 	flag := ChatProductionBriefField{Name: "animate", Type: "boolean", Label: "Animate"}
 	integer := ChatProductionBriefField{Name: "faces", Type: "integer", Label: "Faces", Minimum: 100, Maximum: 1000}
 	renamed := brief(profile, text, flag, integer)
-	if err := validateProductionBrief(renamed); err != nil {
+	if err := validateProductionBrief(renamed, false); err != nil {
 		t.Fatalf("renamed fields refused: %v", err)
 	}
 	if got := renamed.FieldNameOfType("profile"); got != "use" {
@@ -171,7 +174,7 @@ func TestProductionBriefValidationLocatesFieldsByType(t *testing.T) {
 		{name: "an unbounded integer", brief: brief(profile, ChatProductionBriefField{Name: "faces", Type: "integer", Label: "Faces"}), want: "最小/最大值"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			err := validateProductionBrief(test.brief)
+			err := validateProductionBrief(test.brief, false)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want mention of %q", err, test.want)
 			}

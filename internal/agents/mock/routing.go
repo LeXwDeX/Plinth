@@ -54,6 +54,11 @@ var (
 	formatWordPattern    = regexp.MustCompile(`(?i)(gltf|glb|fbx|obj|usdz|stl|3mf)`)
 	// 3D 制作开工的说法：还没有制作简报时，mock 先用选择卡问用途（#103）。
 	startMakingPattern = regexp.MustCompile(`开始制作|开始做|开工`)
+	// #239: 2D 绘制意图与已经说清的规格。2D 引导更轻：需求已说清（画幅、尺寸、透明背景等）时不出卡。
+	drawingIntentPattern     = regexp.MustCompile(`画一|画个|画张|绘制|立绘|插画|图标|贴图|概念图|海报|封面|出图|生成.*(图|插画|立绘|图标)`)
+	explicitImageSpecPattern = regexp.MustCompile(`\d+\s*[:：]\s*\d+|\d+\s*[x×]\s*\d+|透明背景|背景透明|纯色背景|白色背景|尺寸|像素|竖版|横版|方形`)
+	imageWorkspaceMarker     = "本轮用户正在 2D 图片工作区"
+	modelWorkspaceMarker     = "本轮用户正在 3D 模型工作区"
 )
 
 // multiviewPrompts 是四视角编辑里视角词到 edit_multiview_images 参数的对应，按 front、left、back、right 排列。
@@ -290,6 +295,13 @@ func (adapter *Adapter) route(request agents.Request, text string) (string, map[
 			notes = strings.TrimSpace(text)
 		}
 		return toolUpdateSessionNotes, map[string]any{"notes": notes}
+
+	case adapter.wants(request, toolAskChoice) && briefMissing(request.Messages) &&
+		workspaceDomain(request.Messages) == "image" && drawingIntentPattern.MatchString(text) &&
+		!explicitImageSpecPattern.MatchString(text):
+		// #239: a 2D drawing request without a brief asks the 2D purpose, but
+		// only when the request still leaves the delivery requirements open.
+		return toolAskChoice, map[string]any{"kind": "image_usage_profile"}
 
 	case adapter.wants(request, toolAskChoice) && briefMissing(request.Messages) && startMakingPattern.MatchString(text):
 		// #103: a new 3D job has no production brief yet; the mock asks the
@@ -566,6 +578,23 @@ func briefMissing(messages []agents.Message) bool {
 		}
 	}
 	return false
+}
+
+// workspaceDomain reads the Schema's domain context from the system message:
+// "image", "model-3d", or empty when the turn names no workspace.
+func workspaceDomain(messages []agents.Message) string {
+	for _, message := range messages {
+		if message.Role != "system" {
+			continue
+		}
+		switch {
+		case strings.Contains(message.Content, imageWorkspaceMarker):
+			return "image"
+		case strings.Contains(message.Content, modelWorkspaceMarker):
+			return "model-3d"
+		}
+	}
+	return ""
 }
 
 // multiviewDirectivePattern reads the model, and the group when there is one,
