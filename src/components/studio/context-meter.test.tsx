@@ -65,7 +65,7 @@ describe('the context meter (#322)', () => {
     open({ tokens: 356_000, visionTokens: 1_105, visionBudget: 10, window: 1_000_000, compactions: [] });
     const html = renderToStaticMarkup(<ContextMeter />);
     const hint = hintOf(html, 'composer-context-meter');
-    expect(hint).toContain(`data-hint="${formatSchemaText(messages['ui.studio.context.hint_window'], { used: '356K', window: '1M', threshold: 80 })}；${formatSchemaText(messages['ui.studio.context.hint_vision'], { vision: '1.1K', budget: '10' })}"`);
+    expect(hint).toContain(`data-hint="${formatSchemaText(messages['ui.studio.context.hint_window'], { used: '356K', window: '1M', threshold: 80 })} · ${formatSchemaText(messages['ui.studio.context.hint_vision'], { vision: '1.1K', budget: '10' })}"`);
     // No declared vision estimate leaves the hint unchanged.
     open({ tokens: 356_000, window: 1_000_000, compactions: [] });
     expect(hintOf(renderToStaticMarkup(<ContextMeter />), 'composer-context-meter'))

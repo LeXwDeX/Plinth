@@ -52,7 +52,7 @@ function contextHint(
     vision: formatTokenCount(visionTokens),
     budget: formatTokenCount(visionBudget),
   });
-  return `${text}；${vision}`;
+  return `${text} · ${vision}`;
 }
 
 function contextBaseHint(schema: ProductSchema, tokens: number | null, window: number | null, settings: CompactionSettings): string {
