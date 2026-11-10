@@ -73,6 +73,7 @@ describe('ChatBrowserClient context usage and compaction (#322)', () => {
       [fields.id]: 's',
       [fields.context_tokens!]: 356_000,
       [fields.context_vision_tokens!]: 1_105,
+      [fields.context_vision_token_budget!]: 12_000,
       [fields.context_vision_budget!]: 10,
       [fields.context_window!]: 1_000_000,
       [fields.compactions!]: [
@@ -83,6 +84,7 @@ describe('ChatBrowserClient context usage and compaction (#322)', () => {
     expect(await client.getContext('s')).toEqual({
       tokens: 356_000,
       visionTokens: 1_105,
+      visionTokenBudget: 12_000,
       visionBudget: 10,
       window: 1_000_000,
       compactions: [
@@ -96,10 +98,10 @@ describe('ChatBrowserClient context usage and compaction (#322)', () => {
   it('keeps an unreported count and an undeclared window unknown instead of zero', async () => {
     const schema = schemaFixture();
     const fields = schema.chat.api.response_fields;
-    const { client } = recording(schema, () => Response.json({ [fields.id]: 's', [fields.context_tokens!]: null, [fields.context_vision_tokens!]: null, [fields.context_vision_budget!]: null, [fields.context_window!]: null, [fields.compactions!]: [] }));
-    expect(await client.getContext('s')).toEqual({ tokens: null, visionTokens: null, visionBudget: null, window: null, compactions: [] });
+    const { client } = recording(schema, () => Response.json({ [fields.id]: 's', [fields.context_tokens!]: null, [fields.context_vision_tokens!]: null, [fields.context_vision_token_budget!]: null, [fields.context_vision_budget!]: null, [fields.context_window!]: null, [fields.compactions!]: [] }));
+    expect(await client.getContext('s')).toEqual({ tokens: null, visionTokens: null, visionTokenBudget: null, visionBudget: null, window: null, compactions: [] });
     const missing = recording(schema, () => Response.json({ [fields.id]: 's' }));
-    expect(await missing.client.getContext('s')).toEqual({ tokens: null, visionTokens: null, visionBudget: null, window: null, compactions: [] });
+    expect(await missing.client.getContext('s')).toEqual({ tokens: null, visionTokens: null, visionTokenBudget: null, visionBudget: null, window: null, compactions: [] });
   });
 
   it('compacts with an empty POST and returns the context after the compaction', async () => {

@@ -43,14 +43,18 @@ function contextHint(
   window: number | null,
   settings: CompactionSettings,
   visionTokens: number | null = null,
-  visionBudget: number | null = null,
+  visionTokenBudget: number | null = null,
+  visionImages: number | null = null,
 ): string {
   const text = contextBaseHint(schema, tokens, window, settings);
-  // #247: the vision part is a declared estimate, separate from the upstream's count.
-  if (visionTokens === null || visionBudget === null || visionBudget <= 0) return text;
+  // #247: the vision part is a declared estimate, separate from the upstream's count. The token bound
+  // is the declared maximum_tokens; the picture places are a count, never formatted as tokens.
+  if (visionTokens === null || visionTokenBudget === null || visionTokenBudget <= 0 ||
+      visionImages === null || visionImages <= 0) return text;
   const vision = formatSchemaText(schemaText(schema, 'ui.studio.context.hint_vision'), {
     vision: formatTokenCount(visionTokens),
-    budget: formatTokenCount(visionBudget),
+    token_budget: formatTokenCount(visionTokenBudget),
+    images: visionImages,
   });
   return `${text} · ${vision}`;
 }
@@ -93,7 +97,8 @@ export function ContextMeter() {
   const text = formatContextUsage(tokens, window, schemaText(schema, 'ui.studio.context.unknown'));
   const level = contextLevel(tokens, window, settings);
   const visionTokens = context?.visionTokens ?? null;
-  const visionBudget = context?.visionBudget ?? null;
+  const visionTokenBudget = context?.visionTokenBudget ?? null;
+  const visionImages = context?.visionBudget ?? null;
   const toolCallLimit = schema.chat.agent_limits?.max_tool_calls_per_reply ?? 0;
   const toolCallLabel = schemaText(schema, 'ui.studio.tool_calls.label');
   const toolCallText = `${toolCallLabel} ${toolCalls} / ${toolCallLimit}`;
@@ -116,7 +121,7 @@ export function ContextMeter() {
     // as the cells above: the figure and the compact action sit together on the left, the tool call counter
     // alone on the right edge. Only the figure and the counter give way (truncate) when the row is short.
     <div className="col-span-full flex h-7 min-w-0 items-center gap-1 @[40rem]:col-span-1" data-testid="composer-context">
-      <HintTooltip name={`${label}: ${text}`} hint={contextHint(schema, tokens, window, settings, visionTokens, visionBudget)} className="min-w-0 shrink">
+      <HintTooltip name={`${label}: ${text}`} hint={contextHint(schema, tokens, window, settings, visionTokens, visionTokenBudget, visionImages)} className="min-w-0 shrink">
         <span
           tabIndex={0}
           aria-label={`${label}: ${text}`}

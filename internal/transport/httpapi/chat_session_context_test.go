@@ -96,6 +96,7 @@ func TestChatSessionContextReportsUsageWindowAndCompactions(t *testing.T) {
 	if read.Code != http.StatusOK ||
 		!strings.Contains(read.Body.String(), `"contextTokens":null`) ||
 		!strings.Contains(read.Body.String(), `"contextVisionTokens":null`) ||
+		!strings.Contains(read.Body.String(), `"contextVisionTokenBudget":12000`) ||
 		!strings.Contains(read.Body.String(), `"contextVisionBudget":10`) ||
 		!strings.Contains(read.Body.String(), `"contextWindow":1000000`) ||
 		!strings.Contains(read.Body.String(), `"compactions":[]`) {
@@ -119,7 +120,8 @@ func TestChatSessionContextReportsUsageWindowAndCompactions(t *testing.T) {
 	body := decodeMap(t, read.Body.String())
 	compactions, _ := body["compactions"].([]any)
 	if read.Code != http.StatusOK || body["contextTokens"] != float64(2345) || len(compactions) != 1 ||
-		body["contextVisionTokens"] != float64(2210) || body["contextVisionBudget"] != float64(10) {
+		body["contextVisionTokens"] != float64(2210) || body["contextVisionTokenBudget"] != float64(12000) ||
+		body["contextVisionBudget"] != float64(10) {
 		t.Fatalf("context: %d %s", read.Code, read.Body.String())
 	}
 	record, _ := compactions[0].(map[string]any)

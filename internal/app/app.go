@@ -354,6 +354,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		VisionBudget: func(model string) int {
 			return chat.EffectiveVisionImages(applicationSchema.Chat, model)
 		},
+		VisionTokenBudget: func(model string) int {
+			return chat.EffectiveVisionTokens(applicationSchema.Chat, model)
+		},
 		Repository:            repository,
 		DefaultTitle:          applicationSchema.Chat.Defaults.Title,
 		BranchTitleTemplate:   applicationSchema.Chat.Defaults.BranchTitleTemplate,

@@ -3466,15 +3466,18 @@ type ChatAPIResponseFields struct {
 	ReasoningDefault string `json:"reasoning_default,omitempty"`
 	ContextTokens    string `json:"context_tokens,omitempty"`
 	// ContextVisionTokens is the estimated vision tokens of the session's
-	// newest request (#247); ContextVisionBudget is the effective declared
-	// budget. Both are null while unknown and never the upstream's own count.
-	ContextVisionTokens string `json:"context_vision_tokens,omitempty"`
-	ContextVisionBudget string `json:"context_vision_budget,omitempty"`
-	ContextWindow       string `json:"context_window,omitempty"`
-	Compactions         string `json:"compactions,omitempty"`
-	CompactionTrigger   string `json:"compaction_trigger,omitempty"`
-	CompactedRounds     string `json:"compacted_rounds,omitempty"`
-	ThroughMessageID    string `json:"through_message_id,omitempty"`
+	// newest request (#247); ContextVisionTokenBudget is the effective
+	// per-request token bound and ContextVisionBudget the effective picture
+	// places, both for the session's current model. The estimates are never
+	// the upstream's own count.
+	ContextVisionTokens      string `json:"context_vision_tokens,omitempty"`
+	ContextVisionTokenBudget string `json:"context_vision_token_budget,omitempty"`
+	ContextVisionBudget      string `json:"context_vision_budget,omitempty"`
+	ContextWindow            string `json:"context_window,omitempty"`
+	Compactions              string `json:"compactions,omitempty"`
+	CompactionTrigger        string `json:"compaction_trigger,omitempty"`
+	CompactedRounds          string `json:"compacted_rounds,omitempty"`
+	ThroughMessageID         string `json:"through_message_id,omitempty"`
 	// Chat model members of the session model read (#322 Scope 5): ChatModel
 	// is the model ID the next turn uses, ChatModelChosen the session's own
 	// choice ("" when it follows the default), ChatModelDefault the

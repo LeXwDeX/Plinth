@@ -423,6 +423,18 @@ def chat_schema_facts(api):
     return api.chat_schema_facts
 
 
+def chat_context_facts(api):
+    """The public Schema's context response members and session-context route, read
+    once like the browser reads them (#247)."""
+    if not hasattr(api, "chat_context_facts"):
+        status, schema = api.json("GET", "/api/v1/schema")
+        schema = schema.get("schema", schema) if status == 200 and isinstance(schema, dict) else {}
+        response_fields = ((schema.get("chat") or {}).get("api") or {}).get("response_fields") or {}
+        routes = ((schema.get("runtime") or {}).get("http") or {}).get("routes") or {}
+        api.chat_context_facts = (response_fields, routes.get("chat_session_context") or "")
+    return api.chat_context_facts
+
+
 def submit(api, offering, capability, payload, session, style_lock_skipped=False):
     """prepare -> grant (-> human approval) -> submit. Returns (task_id, why).
     style_lock_skipped is the direct prepare's one-turn exemption (#187)."""
@@ -1651,6 +1663,19 @@ def scenario_vision_budget(api, offerings, work):
     # the one contact-sheet picture.
     record("#247 the same-turn reference is not squeezed out", has_reference(follow_up["messages"]),
            f"images={[(image.get('detail'), image.get('label')) for message in follow_up['messages'] for image in message.get('images') or []]}")
+
+    # The context view separates the estimated vision tokens from the per-request
+    # token bound and the picture places; the places are never reported as tokens.
+    response_fields, context_route = chat_context_facts(api)
+    context_path = context_route.replace("{sessionID}", session) if context_route else ""
+    status, context = api.json("GET", context_path) if context_path else (0, {})
+    token_field = response_fields.get("context_vision_tokens", "contextVisionTokens")
+    token_budget_field = response_fields.get("context_vision_token_budget", "contextVisionTokenBudget")
+    image_budget_field = response_fields.get("context_vision_budget", "contextVisionBudget")
+    record("#247 the context view names the vision token bound and the picture places",
+           status == 200 and context.get(token_budget_field) == 12000 and context.get(image_budget_field) == 10
+           and (context.get(token_field) or 0) > 0,
+           f"status={status} context={context}")
 
     # Name one candidate and look closely: the crop must arrive at the crop
     # detail with its handle and region in the label.

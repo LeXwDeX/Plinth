@@ -182,6 +182,9 @@ func newContextFixtureWith(t *testing.T, policy chat.ModelPolicy, mutate func(*c
 		config.VisionBudget = func(model string) int {
 			return chat.EffectiveVisionImages(schema, model)
 		}
+		config.VisionTokenBudget = func(model string) int {
+			return chat.EffectiveVisionTokens(schema, model)
+		}
 	})
 	store := newMemoryContextStore(repository)
 	service.SetContextStore(store, schema.ContextCompaction.ListLimit)
@@ -666,7 +669,7 @@ func TestContextUsageRecordsTheVisionEstimate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if view.VisionTokens == nil || *view.VisionTokens != 2210 || view.VisionBudget != 10 {
+	if view.VisionTokens == nil || *view.VisionTokens != 2210 || view.VisionTokenBudget != 12000 || view.VisionBudget != 10 {
 		t.Fatalf("context view = %+v", view)
 	}
 }

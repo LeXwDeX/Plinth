@@ -228,12 +228,14 @@ type ContextView struct {
 	Tokens *int
 	// VisionTokens is the declared estimate of the session's newest request's
 	// vision pictures (#247); nil while unknown or when the Schema estimates
-	// none. VisionBudget is the effective image budget for the session's
-	// current model.
-	VisionTokens *int
-	VisionBudget int
-	Window       int
-	Compactions  []Compaction
+	// none. VisionTokenBudget is the effective per-request vision token bound
+	// for the session's current model and VisionBudget its effective picture
+	// places.
+	VisionTokens      *int
+	VisionTokenBudget int
+	VisionBudget      int
+	Window            int
+	Compactions       []Compaction
 }
 
 // SetContextStore installs the store of the sessions' thinking level, usage
@@ -354,6 +356,9 @@ func (service *Service) SessionContextView(ctx context.Context, ownerID, session
 	}
 	if service.visionBudget != nil {
 		view.VisionBudget = service.visionBudget(option.Model)
+	}
+	if service.visionTokenBudget != nil {
+		view.VisionTokenBudget = service.visionTokenBudget(option.Model)
 	}
 	compactions, err := service.contextStore.ListCompactions(ctx, ownerID, sessionID, service.compactionListLimit)
 	if err != nil {

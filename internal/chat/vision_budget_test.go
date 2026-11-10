@@ -283,3 +283,29 @@ func TestSelectedVisionImagesStayOnTheirOwnRole(t *testing.T) {
 		t.Fatalf("unselected current pictures leaked in: %+v", plan.Picks[3])
 	}
 }
+
+// The exported resolvers expose the same declared bounds the wiring uses: the
+// token bound (not the picture places) comes from maximum_tokens and is
+// narrowed by a matching model profile (#247).
+func TestEffectiveVisionBoundsExposeTokensAndImages(t *testing.T) {
+	roles := []catalog.ChatVisionRoleSchema{
+		visionRole("turn_reference", []string{"turn"}, 2, 100, "high"),
+		visionRole("recent_result", []string{"generated"}, 2, 100, "high"),
+		visionRole("history", []string{"history"}, 2, 10, "low"),
+	}
+	schema := visionTestSchema(t, roles, 6, 12000)
+	schema.Context.Vision.ModelProfiles = []catalog.ChatVisionModelProfileSchema{
+		{ModelPrefixes: []string{"narrow"}, MaximumImages: 3, MaximumTokens: 4000},
+	}
+	if images, tokens := EffectiveVisionImages(schema, "other-model"), EffectiveVisionTokens(schema, "other-model"); images != 6 || tokens != 12000 {
+		t.Fatalf("declared bounds = images %d tokens %d; want 6 and 12000", images, tokens)
+	}
+	if images, tokens := EffectiveVisionImages(schema, "NARROW-mini"), EffectiveVisionTokens(schema, "NARROW-mini"); images != 3 || tokens != 4000 {
+		t.Fatalf("narrowed bounds = images %d tokens %d; want 3 and 4000", images, tokens)
+	}
+	// The legacy fallback declares no token bound.
+	schema.Context.Vision = nil
+	if tokens := EffectiveVisionTokens(schema, "other-model"); tokens != 0 {
+		t.Fatalf("legacy token bound = %d; want 0", tokens)
+	}
+}

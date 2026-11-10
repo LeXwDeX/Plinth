@@ -710,6 +710,13 @@ func EffectiveVisionImages(schema catalog.ChatSchema, model string) int {
 	return effectiveVisionBudget(schema, model).MaximumImages
 }
 
+// EffectiveVisionTokens is the effective per-request vision token bound of a
+// model under the Schema's purpose-based vision block (#247), narrowed by a
+// matching model profile. Zero means the Catalog declares none (legacy).
+func EffectiveVisionTokens(schema catalog.ChatSchema, model string) int {
+	return effectiveVisionBudget(schema, model).MaximumTokens
+}
+
 // canSpend reports whether one more picture fits the request's budget. A zero
 // or negative bound is unlimited (the legacy fallback and an undeclared cap).
 func (budget visionBudget) canSpend(spend visionSpend, tokenCost int, bytes int64) bool {
