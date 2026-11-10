@@ -197,10 +197,15 @@ func TestAStepWaitingOnItsCardSaysOnlyTheFirstPictureIsUsed(t *testing.T) {
 		t.Fatalf("one picture: result %v, operation %d of %d", single.content, single.op.ReferenceCount, single.op.ReferenceTotal)
 	}
 
-	// A multi-image model takes both: no note either.
+	// A multi-image model takes both pictures: no truncation note. The result
+	// may still name the views the ordered pictures stand for (#243).
 	views := runImageTo3DWithPictures(t, "manual", "meshy-7.1-multiview", 2)
-	if _, noted := views.content[views.tool.ResultFields.ReferenceNote]; noted || views.op.ReferenceTotal != 0 {
-		t.Fatalf("multi-view: result %v, operation %d of %d", views.content, views.op.ReferenceCount, views.op.ReferenceTotal)
+	if note, _ := views.content[views.tool.ResultFields.ReferenceNote].(string); note != "" &&
+		!strings.Contains(note, "front") {
+		t.Fatalf("multi-view note = %q", note)
+	}
+	if views.op.ReferenceTotal != 0 {
+		t.Fatalf("multi-view: operation %d of %d", views.op.ReferenceCount, views.op.ReferenceTotal)
 	}
 }
 

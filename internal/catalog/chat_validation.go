@@ -284,7 +284,7 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validatePendingApprovals(schema.PendingApprovals); err != nil {
 		return err
 	}
-	if err := validateThreeView(schema.ThreeView, schema.Skills.Recipes, schema.Tools); err != nil {
+	if err := validateThreeView(schema.ThreeView, schema.Skills.Recipes, schema.Tools, schema.AgentTools); err != nil {
 		return err
 	}
 	if err := validateDSMLSpellings(schema.DSML); err != nil {
@@ -1667,8 +1667,10 @@ const threeViewQueueLimitMaximumSeconds = 86400
 
 // validateThreeView accepts an absent declaration and rejects a three-view declaration that names a recipe or a
 // model-source view the Schema does not have, or that leaves a text empty.
-func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSchema, tools []ChatToolSchema) error {
-	if schema == (ChatThreeViewSchema{}) {
+func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSchema, tools []ChatToolSchema,
+	agentTools []ChatAgentToolSchema) error {
+	if schema.RecipeID == "" && schema.Label == "" && schema.ModelSourceStepKey == "" &&
+		schema.MaximumListed == 0 && schema.QueueLimitSeconds == 0 {
 		return nil // a deployment without the three-view recipe declares none
 	}
 	if strings.TrimSpace(schema.Label) == "" || strings.TrimSpace(schema.ModelSourceNote) == "" ||
@@ -1687,25 +1689,48 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 	if recipe == nil || len(recipe.Steps) < 2 {
 		return fmt.Errorf("three_view.recipe_id %q 必须是至少有两步的已声明 skill recipe", schema.RecipeID)
 	}
+	// #243: the first view uses the original source; every later view uses the
+	// accepted model-source view (front) as its identity anchor. A historical
+	// recipe with neither subject templates nor a source chain keeps working.
 	source := false
-	for _, step := range recipe.Steps {
-		if step.SourceStepKey != "" {
-			return errors.New("three_view 的每个视图都必须直接取自原图，不能依赖前一步")
+	subjectTemplates := recipeUsesSubjectPlaceholders(*recipe)
+	sourceChain := recipeUsesSourceChain(*recipe)
+	for index, step := range recipe.Steps {
+		if step.Key == schema.ModelSourceStepKey {
+			source = true
 		}
-		source = source || step.Key == schema.ModelSourceStepKey
+		if !subjectTemplates && !sourceChain {
+			continue
+		}
+		if index == 0 {
+			if step.SourceStepKey != "" {
+				return errors.New("three_view 的第一个视图必须取自原图，不能依赖前一步")
+			}
+			continue
+		}
+		if step.SourceStepKey != schema.ModelSourceStepKey {
+			return fmt.Errorf("three_view 的后续视图 %q 必须以 %q 为 source_step_key", step.Key, schema.ModelSourceStepKey)
+		}
 	}
 	if !source {
 		return fmt.Errorf("three_view.model_source_step_key %q 不是该 recipe 的步骤", schema.ModelSourceStepKey)
 	}
 	messages := schema.Messages
-	for name, value := range map[string]string{
+	required := map[string]string{
 		"agent_started": messages.AgentStarted, "admission_full": messages.AdmissionFull,
 		"approval_human":  messages.ApprovalHuman,
 		"approval_policy": messages.ApprovalPolicy, "model_source_not_yet": messages.ModelSourceNotYet,
 		"reference_required": messages.ReferenceRequired, "group_not_found": messages.GroupNotFound,
 		"group_not_ready": messages.GroupNotReady, "views_changed": messages.ViewsChanged,
 		"views_invalid": messages.ViewsInvalid,
-	} {
+	}
+	if schema.Continuation.Enabled || subjectTemplates || len(schema.SubjectTypes) > 0 {
+		required["agent_completed"] = messages.AgentCompleted
+		required["agent_paused"] = messages.AgentPaused
+		required["consistency_retry"] = messages.ConsistencyRetry
+		required["consistency_failed"] = messages.ConsistencyFailed
+	}
+	for name, value := range required {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("three_view.messages.%s 不能为空", name)
 		}
@@ -1715,15 +1740,176 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 			return fmt.Errorf("three_view.messages.agent_started 必须包含 %s", field)
 		}
 	}
+	for _, required := range []struct {
+		name   string
+		text   string
+		fields string
+	}{
+		{"agent_completed", messages.AgentCompleted, "{run}{views}"},
+		{"agent_paused", messages.AgentPaused, "{run}{view}{reason}"},
+		{"consistency_retry", messages.ConsistencyRetry, "{view}{maximum}{reasons}"},
+		{"consistency_failed", messages.ConsistencyFailed, "{view}{reasons}"},
+	} {
+		for _, field := range splitPlaceholders(required.fields) {
+			if !strings.Contains(required.text, field) {
+				return fmt.Errorf("three_view.messages.%s 必须包含 %s", required.name, field)
+			}
+		}
+	}
 	if recipe.Steps[0].Optional || recipe.Steps[0].Key != schema.ModelSourceStepKey {
 		return errors.New("three_view 的第一个视图必须是 3D 来源视图，且不能是可选视图")
 	}
+	if err := validateThreeViewSubjectTypes(schema, *recipe, agentTools); err != nil {
+		return err
+	}
+	if err := validateThreeViewConsistency(schema); err != nil {
+		return err
+	}
 	return validateThreeViewMultiview(schema.Multiview, *recipe, tools)
+}
+
+// validateThreeViewSubjectTypes checks the subject constraint templates
+// (#243): the Agent argument and its enum match the declared types, and each
+// view's prompt carries the placeholder its role substitutes.
+func validateThreeViewSubjectTypes(schema ChatThreeViewSchema, recipe ChatSkillRecipeSchema,
+	agentTools []ChatAgentToolSchema) error {
+	if len(schema.SubjectTypes) == 0 {
+		// A historical declaration without subject templates keeps working;
+		// prompts then carry no subject placeholder.
+		for index, step := range recipe.Steps {
+			if strings.Contains(step.PromptTemplate, "{subject_front_constraints}") ||
+				strings.Contains(step.PromptTemplate, "{subject_view_constraints}") {
+				return fmt.Errorf("three_view 没有声明 subject_types，步骤 %q 不能使用主体占位符", step.Key)
+			}
+			if index == 0 && strings.Contains(step.PromptTemplate, "{subject_view_constraints}") {
+				return errors.New("three_view 的首视图不能使用后续视图约束")
+			}
+		}
+		return nil
+	}
+	if strings.TrimSpace(schema.SubjectArgument) == "" || strings.TrimSpace(schema.DefaultSubjectType) == "" {
+		return errors.New("three_view 声明 subject_types 时必须声明 subject_argument 与 default_subject_type")
+	}
+	if strings.TrimSpace(schema.Messages.SubjectInvalid) == "" ||
+		!strings.Contains(schema.Messages.SubjectInvalid, "{subject}") ||
+		!strings.Contains(schema.Messages.SubjectInvalid, "{choices}") {
+		return errors.New("three_view.messages.subject_invalid 必须包含 {subject} 与 {choices}")
+	}
+	seen := map[string]bool{}
+	for _, subject := range schema.SubjectTypes {
+		id := strings.TrimSpace(subject.ID)
+		if id == "" || seen[id] || strings.TrimSpace(subject.Label) == "" ||
+			strings.TrimSpace(subject.FrontConstraints) == "" || strings.TrimSpace(subject.ViewConstraints) == "" {
+			return fmt.Errorf("three_view.subject_types 含无效或重复的类型 %q", subject.ID)
+		}
+		seen[id] = true
+	}
+	if !seen[schema.DefaultSubjectType] {
+		return fmt.Errorf("three_view.default_subject_type %q 不在 subject_types 中", schema.DefaultSubjectType)
+	}
+	var subjectTool *ChatAgentToolSchema
+	for index := range agentTools {
+		if agentTools[index].Name == "create_three_view" {
+			subjectTool = &agentTools[index]
+			break
+		}
+	}
+	if subjectTool == nil {
+		return errors.New("three_view 需要已声明的 create_three_view 工具")
+	}
+	var parameters struct {
+		Properties map[string]struct {
+			Type string   `json:"type"`
+			Enum []string `json:"enum"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(subjectTool.Parameters, &parameters); err != nil {
+		return fmt.Errorf("three_view.subject_argument 的工具参数无法解析: %w", err)
+	}
+	property, declared := parameters.Properties[schema.SubjectArgument]
+	if !declared || property.Type != "string" {
+		return fmt.Errorf("create_three_view 缺少参数 %q", schema.SubjectArgument)
+	}
+	enumerated := map[string]bool{}
+	for _, value := range property.Enum {
+		enumerated[value] = true
+	}
+	if len(enumerated) != len(seen) {
+		return errors.New("create_three_view.subject_type 的 enum 必须与 three_view.subject_types 一致")
+	}
+	for id := range seen {
+		if !enumerated[id] {
+			return fmt.Errorf("create_three_view.subject_type 缺少类型 %q", id)
+		}
+	}
+	if !recipeUsesSubjectPlaceholders(recipe) {
+		// A historical recipe has no subject templates; its separately declared
+		// types and tool enum may still grow without rewriting old runs.
+		return nil
+	}
+	for index, step := range recipe.Steps {
+		if index == 0 {
+			if !strings.Contains(step.PromptTemplate, "{subject_front_constraints}") {
+				return errors.New("three_view 的首视图提示词必须包含 {subject_front_constraints}")
+			}
+			if strings.Contains(step.PromptTemplate, "{subject_view_constraints}") {
+				return errors.New("three_view 的首视图提示词不能使用 {subject_view_constraints}")
+			}
+			continue
+		}
+		if !strings.Contains(step.PromptTemplate, "{subject_view_constraints}") {
+			return fmt.Errorf("three_view 的视图 %q 提示词必须包含 {subject_view_constraints}", step.Key)
+		}
+	}
+	return nil
+}
+
+func recipeUsesSubjectPlaceholders(recipe ChatSkillRecipeSchema) bool {
+	for _, step := range recipe.Steps {
+		if strings.Contains(step.PromptTemplate, "{subject_front_constraints}") ||
+			strings.Contains(step.PromptTemplate, "{subject_view_constraints}") {
+			return true
+		}
+	}
+	return false
+}
+
+func recipeUsesSourceChain(recipe ChatSkillRecipeSchema) bool {
+	for _, step := range recipe.Steps {
+		if step.SourceStepKey != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// validateThreeViewConsistency checks the automatic check's bounds (#243).
+func validateThreeViewConsistency(schema ChatThreeViewSchema) error {
+	consistency := schema.Consistency
+	if consistency.MaxSubjectRatioDelta < 0 || consistency.MaxBackgroundSpread < 0 || consistency.MaxBBoxHeightDelta < 0 {
+		return errors.New("three_view.consistency 的阈值不能为负")
+	}
+	if schema.Continuation.Enabled && consistency.MaxAttemptsPerView < 1 {
+		return errors.New("three_view.consistency.max_attempts_per_view 必须为正")
+	}
+	return nil
 }
 
 // validateThreeViewMultiview checks the binding to the multiview tool (#65):
 // the tool takes the group and views arguments, and the required view is a
 // step of the recipe.
+// splitPlaceholders turns "{run}{views}" into its two field names.
+func splitPlaceholders(fields string) []string {
+	var result []string
+	for _, part := range strings.Split(fields, "}") {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		result = append(result, part+"}")
+	}
+	return result
+}
+
 func validateThreeViewMultiview(multiview ChatThreeViewMultiviewSchema, recipe ChatSkillRecipeSchema, tools []ChatToolSchema) error {
 	for name, value := range map[string]string{
 		"tool": multiview.Tool, "group_argument": multiview.GroupArgument, "views_argument": multiview.ViewsArgument,
@@ -1744,6 +1930,26 @@ func validateThreeViewMultiview(multiview ChatThreeViewMultiviewSchema, recipe C
 	}
 	if !required {
 		return fmt.Errorf("three_view.multiview.required_view %q 必须是该 recipe 的必需步骤", multiview.RequiredView)
+	}
+	// #243: an Offering without view labels receives the views in this order,
+	// as a contiguous prefix that starts with the required view. A historical
+	// recipe without subject templates keeps its old view keys; the order is
+	// only required for the new contract.
+	if recipeUsesSubjectPlaceholders(recipe) {
+		if len(multiview.ViewOrder) == 0 || multiview.ViewOrder[0] != multiview.RequiredView {
+			return fmt.Errorf("three_view.multiview.view_order 必须以 required_view %q 开头", multiview.RequiredView)
+		}
+		known := map[string]bool{}
+		for _, step := range recipe.Steps {
+			known[step.Key] = true
+		}
+		seenViews := map[string]bool{}
+		for _, view := range multiview.ViewOrder {
+			if !known[view] || seenViews[view] {
+				return fmt.Errorf("three_view.multiview.view_order 含未知或重复的视图 %q", view)
+			}
+			seenViews[view] = true
+		}
 	}
 	for field, text := range map[string]string{
 		"{tool}": multiview.GroupDirective, "{group}": multiview.GroupDirective, "{model}": multiview.GroupDirective,

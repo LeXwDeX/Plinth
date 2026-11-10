@@ -96,12 +96,13 @@ func TestCraftPromptSitsBetweenDomainContextAndScope(t *testing.T) {
 	craft := ""
 	for _, prompt := range rig.schema.Agent.CraftPrompts {
 		if prompt.ID == "image2d_production" {
-			craft = prompt.Text
+			craft = renderedCraftText(prompt)
 		}
 	}
 	if craft == "" {
 		t.Fatal("no image2d_production craft prompt")
 	}
+	expected := craft
 	const domainContext = "Use configured 2D tools"
 	start := strings.Index(system, domainContext)
 	craftStart := strings.Index(system, craft)
@@ -109,10 +110,32 @@ func TestCraftPromptSitsBetweenDomainContextAndScope(t *testing.T) {
 	if start < 0 || craftStart < 0 || end < 0 || end < start || craftStart < start {
 		t.Fatalf("domain context (%d), craft (%d) or scope block (%d) not found in order", start, craftStart, end)
 	}
-	if craftStart > end {
-		t.Fatal("the craft brief does not sit before the scope block")
+	segment := system[start+len(domainContext) : end]
+	if !strings.Contains(segment, expected) {
+		t.Fatalf("between domain context and scope = %q, want the 2D craft brief", segment)
 	}
 	if strings.Index(system, "【批准方式】") < end {
 		t.Fatal("the approval block does not follow the scope block")
+	}
+}
+
+// #243's three-view brief is domain-gated like the other crafts: an auto turn
+// in the 3D workspace must include it, while an image turn must not (#239).
+func TestThreeViewCraftIsInjectedOnAModel3DTurn(t *testing.T) {
+	rig := newScopeRig(t, agents.Completion{Content: "ok"})
+	rig.turnDomain(t, "auto", "model-3d")
+	system := rig.agent.requests[0].Messages[0].Content
+	found := false
+	for _, prompt := range rig.schema.Agent.CraftPrompts {
+		if prompt.ID != "three-view" {
+			continue
+		}
+		found = true
+		if !strings.Contains(system, renderedCraftText(prompt)) {
+			t.Fatal("the 3D turn omits the three-view craft brief")
+		}
+	}
+	if !found {
+		t.Fatal("test setup: no three-view craft prompt")
 	}
 }

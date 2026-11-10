@@ -88,6 +88,29 @@ type Application struct {
 // the bytes (#49).
 var _ references.InputAssetRecords = (*inputassets.Service)(nil)
 
+// threeViewAssetStore lets the three-view consistency check open both kinds
+// of picture a view can have (#243): a generated Task output, or an input asset
+// the person put in its place.
+type threeViewAssetStore struct {
+	inputs *inputassets.Service
+	tasks  interface {
+		OpenAsset(context.Context, generation.OwnerID, generation.TaskID,
+			generation.AssetID) (generation.AssetContent, error)
+	}
+}
+
+func (s threeViewAssetStore) OpenOwned(ctx context.Context, owner generation.OwnerID,
+	id generation.AssetID,
+) (generation.InputAsset, io.ReadCloser, error) {
+	return s.inputs.OpenOwned(ctx, owner, id)
+}
+
+func (s threeViewAssetStore) OpenAsset(ctx context.Context, owner generation.OwnerID,
+	task generation.TaskID, id generation.AssetID,
+) (generation.AssetContent, error) {
+	return s.tasks.OpenAsset(ctx, owner, task, id)
+}
+
 type renderAssetStore struct {
 	inputs   *inputassets.Service
 	maxBytes int64
@@ -1560,10 +1583,13 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if applicationSchema.Chat.ThreeView.RecipeID != "" {
 		threeViewService, err = threeview.New(threeview.Config{
 			Runtime: skillRuntime, Sessions: chatService, Schema: applicationSchema.Chat.ThreeView,
+			Assets: threeViewAssetStore{inputs: inputAssetService, tasks: module},
+			Review: applicationSchema.Chat.ImageReview,
 		})
 		if err != nil {
 			return nil, err
 		}
+		agentToolExecutor.SetThreeViewService(threeViewService)
 		lineageService.SetGroups(threeViewService)
 		toolExecutor.SetThreeViews(threeview.ForGeneration{Service: threeViewService})
 	}

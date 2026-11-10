@@ -31,7 +31,24 @@ func ReferenceViews(offering generation.Offering, input json.RawMessage) (views 
 		}
 	}
 	if parameter == nil {
-		return nil, false
+		// An order-only multiview Offering carries the views by position; the
+		// platform's key order names them for the note and the approval card
+		// (#243).
+		var options struct {
+			Endpoint string `json:"endpoint"`
+		}
+		if len(offering.ProviderOptions) == 0 ||
+			json.Unmarshal(offering.ProviderOptions, &options) != nil ||
+			options.Endpoint != "multi-image-to-3d" {
+			return nil, false
+		}
+		for _, view := range defaultViewOrder {
+			if len(views) >= pictures {
+				break
+			}
+			views = append(views, view)
+		}
+		return views, len(views) > 0
 	}
 	if json.Unmarshal(values[parameter.Name], &views) == nil && len(views) > 0 {
 		return views, true

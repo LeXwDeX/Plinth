@@ -282,19 +282,13 @@ func (executor *Executor) acceptsModelInput(offering generation.Offering, input 
 // at least the Schema's minimum. A group leaves out a view the Offering does
 // not name, as fitMultiviewViews does.
 func multiviewAccepts(offering generation.Offering, views []string, group bool, multiview catalog.ChatThreeViewMultiviewSchema) bool {
-	declared := false
-	var accepted []string
-	for _, parameter := range offering.Parameters {
-		if parameter.Semantic != generation.SemanticReferenceViews {
-			continue
-		}
-		declared = true
-		for _, option := range parameter.Options {
-			accepted = append(accepted, option.Value)
-		}
-	}
+	accepted, ordered, declared := multiviewViewsOf(offering, multiview)
 	if !declared {
 		return false
+	}
+	if ordered {
+		return orderedViewPrefix(views, accepted, multiview.RequiredView) &&
+			len(views) >= multiview.MinimumViews
 	}
 	kept := make([]string, 0, len(views))
 	for _, view := range views {

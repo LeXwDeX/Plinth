@@ -1,9 +1,47 @@
 package threeview
 
 import (
-	"github.com/LeXwDeX/Plinth/internal/schema"
 	"testing"
+
+	"github.com/LeXwDeX/Plinth/internal/schema"
+	"github.com/LeXwDeX/Plinth/internal/skillrun"
 )
+
+func TestARejectedSourceKeepsTheDependentViewsClosed(t *testing.T) {
+	run := skillrun.Run{Steps: []skillrun.Step{
+		{Spec: skillrun.StepSpec{Key: "front"}, Phase: skillrun.OutputReady, Review: skillrun.Rejected},
+		{Spec: skillrun.StepSpec{Key: "left", SourceStepKey: "front"}},
+		{Spec: skillrun.StepSpec{Key: "back", SourceStepKey: "front"}},
+	}}
+	slots := []Slot{
+		{Key: "front", Status: Rejected, Review: string(skillrun.Rejected), Retryable: true},
+		{Key: "left", Status: NotStarted, Startable: true},
+		{Key: "back", Status: NotStarted, Startable: true},
+	}
+	applyViewDependencies(run, slots)
+	if slots[1].Startable || slots[2].Startable {
+		t.Fatalf("a rejected front reopened the dependent views: %+v", slots)
+	}
+}
+
+func TestAReplacedSourceReopensTheDependentViews(t *testing.T) {
+	run := skillrun.Run{Steps: []skillrun.Step{
+		{Spec: skillrun.StepSpec{Key: "front"}, Phase: skillrun.OutputReady,
+			Review: skillrun.Rejected, ReplacementAssetID: "upload"},
+		{Spec: skillrun.StepSpec{Key: "left", SourceStepKey: "front"}},
+		{Spec: skillrun.StepSpec{Key: "back", SourceStepKey: "front"}},
+	}}
+	slots := []Slot{
+		{Key: "front", Status: Succeeded, Review: string(skillrun.Rejected), Replaced: true,
+			OutputAssetID: "upload"},
+		{Key: "left", Status: NotStarted, Startable: true},
+		{Key: "back", Status: NotStarted, Startable: true},
+	}
+	applyViewDependencies(run, slots)
+	if !slots[1].Startable || !slots[2].Startable {
+		t.Fatalf("a replaced front must reopen the dependent views: %+v", slots)
+	}
+}
 
 func TestUnstartedViewsArePricedLikeTheOnesThatHaveATask(t *testing.T) {
 	group := Group{Slots: []Slot{

@@ -3203,6 +3203,52 @@ type ChatThreeViewSchema struct {
 	// Multiview binds the groups, and pictures the person labelled with their
 	// views, to the multiview image-to-3D tool (#65).
 	Multiview ChatThreeViewMultiviewSchema `json:"multiview"`
+	// SubjectArgument names the create_three_view argument whose value picks
+	// one of SubjectTypes; an absent or empty value means DefaultSubjectType
+	// (#243). The recipe prompt is resolved with that type's constraints.
+	SubjectArgument    string `json:"subject_argument,omitempty"`
+	DefaultSubjectType string `json:"default_subject_type,omitempty"`
+	// SubjectTypes are the subject classes the recipe templates can express.
+	// Every type carries the constraint text substituted for the front view
+	// and for the other views.
+	SubjectTypes []ChatThreeViewSubjectType `json:"subject_types,omitempty"`
+	// Consistency bounds the automatic check of each later view against the
+	// accepted front view (#243).
+	Consistency ChatThreeViewConsistencySchema `json:"consistency,omitempty"`
+	// Continuation lets the server finish the required views of one group
+	// inside an approved budget plan, without a card per view (#243).
+	Continuation ChatThreeViewContinuationSchema `json:"continuation,omitempty"`
+}
+
+// ChatThreeViewSubjectType is one subject class of the three-view recipe. The
+// strings are substituted into the step prompts: FrontConstraints for the
+// front view and ViewConstraints for every later view.
+type ChatThreeViewSubjectType struct {
+	ID               string `json:"id"`
+	Label            string `json:"label"`
+	FrontConstraints string `json:"front_constraints"`
+	ViewConstraints  string `json:"view_constraints"`
+}
+
+// ChatThreeViewConsistencySchema declares how a finished later view is judged
+// against the accepted front view (#243). Zero thresholds disable the
+// corresponding comparison; MaxAttemptsPerView bounds the automatic redraws of
+// one rejected view before the group waits for a person.
+type ChatThreeViewConsistencySchema struct {
+	MaxSubjectRatioDelta float64 `json:"max_subject_ratio_delta"`
+	MaxBackgroundSpread  float64 `json:"max_background_spread"`
+	MaxBBoxHeightDelta   float64 `json:"max_bbox_height_delta"`
+	MaxAttemptsPerView   int     `json:"max_attempts_per_view"`
+}
+
+// ChatThreeViewContinuationSchema enables the budget continuation (#243).
+// Reasons word why a continuation stopped, keyed by the stable codes the
+// three-view service returns.
+type ChatThreeViewContinuationSchema struct {
+	Enabled bool `json:"enabled"`
+	// Reasons keys: budget_not_covered, view_not_finished,
+	// view_already_started, consistency_retries_exhausted.
+	Reasons map[string]string `json:"reasons,omitempty"`
 }
 
 // ChatThreeViewMultiviewSchema says how a group (or labelled uploads) becomes
@@ -3222,6 +3268,10 @@ type ChatThreeViewMultiviewSchema struct {
 	// views a step takes.
 	RequiredView string `json:"required_view"`
 	MinimumViews int    `json:"minimum_views"`
+	// ViewOrder is the recipe step order a multiview step uses. An Offering
+	// without reference-views semantics receives the views in this order as a
+	// contiguous prefix starting at RequiredView (#243).
+	ViewOrder []string `json:"view_order,omitempty"`
 	// GroupDirective is the turn's system block when the person pressed the
 	// group's button: {tool}, {group}, {model}, {views}. UploadDirective is the
 	// block for uploads the person labelled: {tool}, {model}, {views}.
@@ -3243,6 +3293,20 @@ type ChatThreeViewMessages struct {
 	ApprovalPolicy    string `json:"approval_policy"`
 	ModelSourceNotYet string `json:"model_source_not_yet"`
 	ReferenceRequired string `json:"reference_required"`
+	// AgentCompleted is the receipt once every required view of the group is
+	// accepted; {run}, {views}, {group} and {model_source} are filled (#243).
+	AgentCompleted string `json:"agent_completed,omitempty"`
+	// AgentPaused says the budget continuation stopped without finishing the
+	// group and what the person can do. Fields: {run}, {view}, {reason}.
+	AgentPaused string `json:"agent_paused,omitempty"`
+	// ConsistencyRetry reports one automatically redrawn view: {view},
+	// {attempt}, {maximum}, {reasons}.
+	ConsistencyRetry string `json:"consistency_retry,omitempty"`
+	// ConsistencyFailed reports a view that stayed inconsistent; the group
+	// waits for a person. Fields: {view}, {reasons}.
+	ConsistencyFailed string `json:"consistency_failed,omitempty"`
+	// SubjectInvalid refuses an unknown subject_type: {subject}, {choices}.
+	SubjectInvalid string `json:"subject_invalid,omitempty"`
 	// GroupNotFound, GroupNotReady, ViewsChanged and ViewsInvalid refuse a
 	// multiview step (#65) before anything is prepared.
 	GroupNotFound string `json:"group_not_found"`
@@ -4473,6 +4537,11 @@ type ChatToolModelChoicesSchema struct {
 	// parameters match but whose role is different (a segmentation step that
 	// is technically image-to-3D). Each ID must exist.
 	ExcludeOfferings []string `json:"exclude_offerings,omitempty"`
+	// RequireMultiview keeps only Offerings that take several views of one
+	// object: one declaring the reference-views semantic, or an order-only
+	// provider endpoint ("multi-image-to-3d") whose pictures carry the views
+	// by their order (#243). A plain multi-reference Offering does not match.
+	RequireMultiview bool `json:"require_multiview,omitempty"`
 }
 
 // ChatToolProcessingSchema declares how a processing tool maps the model's

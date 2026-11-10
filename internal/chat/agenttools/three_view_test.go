@@ -79,6 +79,26 @@ func TestThreeViewReferenceCardinalityUsesSchemaCopyBeforePreparingAnything(t *t
 	}
 }
 
+func TestThreeViewSubjectTypeUsesDeclaredTemplates(t *testing.T) {
+	executor := &Executor{}
+	executor.SetThreeView(catalog.ChatThreeViewSchema{
+		DefaultSubjectType: "generic", SubjectArgument: "subject_type",
+		SubjectTypes: []catalog.ChatThreeViewSubjectType{
+			{ID: "generic", Label: "Generic"}, {ID: "humanoid", Label: "Humanoid"}},
+		Messages: catalog.ChatThreeViewMessages{SubjectInvalid: "unknown {subject}; choose {choices}"},
+	})
+	if got, refusal := executor.threeViewSubjectType(""); got != "generic" || refusal != "" {
+		t.Fatalf("default subject = %q, %q", got, refusal)
+	}
+	if got, refusal := executor.threeViewSubjectType("humanoid"); got != "humanoid" || refusal != "" {
+		t.Fatalf("declared subject = %q, %q", got, refusal)
+	}
+	if got, refusal := executor.threeViewSubjectType("robot"); got != "" ||
+		refusal != "unknown robot; choose generic, humanoid" {
+		t.Fatalf("unknown subject = %q, %q", got, refusal)
+	}
+}
+
 func TestThreeViewHandleWithoutAPictureIsRefusedWithSchemaWording(t *testing.T) {
 	executor := &Executor{context: catalog.ChatContextSchema{
 		HandlePrefixes:        map[string]string{"image": "@img", "model": "@model"},

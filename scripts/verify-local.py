@@ -26,7 +26,7 @@ import time
 # chains, the 2D purpose and vision budget scenarios and two fault scenarios; the rest (Tripo
 # chains, Hyper3D direct, five more faults) stay in the full `smoke-fake-stack.py` run, which
 # takes about 15 minutes.
-FAKE_STACK_SCENARIOS = 'balance,meshy,images,p2,agent,agent-background,image-purpose,mask-selection,vision-budget,faults'
+FAKE_STACK_SCENARIOS = 'balance,meshy,images,p2,agent,agent-background,three-view,image-purpose,mask-selection,vision-budget,faults'
 FAKE_STACK_FAULTS = 'task-failed,artifact-expired-stuck'
 # The gates dev_test.md §2 marks local, in §2 order; the default and pre-push run.
 GATES = [

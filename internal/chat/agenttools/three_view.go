@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness"
 	"github.com/LeXwDeX/Plinth/internal/skillrun"
+	"github.com/LeXwDeX/Plinth/internal/threeview"
 )
 
 const threeViewRecipeID = "image-three-view"
@@ -33,7 +35,21 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 	if err != nil && !errors.Is(err, skillrun.ErrMissing) {
 		return chat.ToolResult{}, err
 	}
+	// A run whose grants were recorded budget-eligible continues inside the
+	// approved plan (#243). A strict-mode run never becomes one later.
+	continuationRun := err == nil && grant.BudgetEligible && e.threeViewService != nil &&
+		e.threeViewService.ContinuationEnabled()
 	if err == nil && grant.Status == executiongrant.Bound {
+		if continuationRun {
+			stopped, stopErr := e.skillTurnStopped(ctx, command.OwnerID, command.SessionID, command.AssistantMessageID)
+			if stopErr != nil {
+				return chat.ToolResult{NoSubmission: true}, stopErr
+			}
+			if stopped {
+				return chat.ToolResult{AgentContent: "本轮已停止，三视图任务未提交。", NoSubmission: true}, nil
+			}
+			return e.continueThreeView(ctx, command, run, observe)
+		}
 		return e.observeThreeView(ctx, command, run, execution, grant, observe)
 	}
 	if command.BoundTaskID != "" {
@@ -46,6 +62,7 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 	if stopped {
 		return chat.ToolResult{AgentContent: "本轮已停止，三视图任务未提交。", NoSubmission: true}, nil
 	}
+	created := false
 	if errors.Is(err, skillrun.ErrMissing) {
 		// Mutable model/reference/recipe selection applies only to a new run.
 		// Existing runs keep their original recipe and frozen source.
@@ -55,9 +72,14 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		var args struct {
 			ReferenceImageIndices []int    `json:"reference_image_indices"`
 			ReferenceHandles      []string `json:"reference_handles"`
+			SubjectType           string   `json:"subject_type"`
 		}
 		if err := json.Unmarshal(command.Call.Arguments, &args); err != nil {
 			return chat.ToolResult{Error: "invalid three-view arguments", NoSubmission: true}, nil
+		}
+		subjectType, subjectRefusal := e.threeViewSubjectType(args.SubjectType)
+		if subjectRefusal != "" {
+			return chat.ToolResult{AgentContent: subjectRefusal, NoSubmission: true}, nil
 		}
 		// The model chosen for this tool's own domain, whichever workspace is in view.
 		toolDomain := command.Options.CreativeDomain
@@ -99,21 +121,34 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 			OwnerID: generation.OwnerID(command.OwnerID), SessionID: command.SessionID,
 			RecipeID: threeViewRecipeID, ExpectedRevision: revision,
 			SelectedOfferingID: selected.ID, SourceAssetID: assets[0],
-			IdempotencyKey: threeViewRunKey(command),
+			IdempotencyKey: threeViewRunKey(command), SubjectType: subjectType,
 		})
 		if err != nil {
 			return chat.ToolResult{NoSubmission: true}, err
 		}
+		created = true
 	}
 	if len(run.Steps) == 0 {
 		return chat.ToolResult{NoSubmission: true}, skillrun.ErrConflict
+	}
+	canContinue := false
+	if e.threeViewService != nil && e.threeViewService.ContinuationEnabled() && (created || grant.BudgetEligible) {
+		canContinue, err = e.threeViewService.CanContinue(ctx, command.OwnerID, command.SessionID, run.ID)
+		if err != nil {
+			return chat.ToolResult{NoSubmission: true}, err
+		}
 	}
 	stepKey := run.Steps[0].Spec.Key
 	if _, _, err := e.skillRuntime.PrepareStep(ctx, generation.OwnerID(command.OwnerID), run.ID, stepKey); err != nil {
 		return chat.ToolResult{NoSubmission: true}, err
 	}
-	_, _, err = e.skillRuntime.RequestAgentGrant(ctx, generation.OwnerID(command.OwnerID),
-		run.ID, stepKey, command.AssistantMessageID)
+	if canContinue {
+		_, _, err = e.skillRuntime.RequestAgentGrantWithBudget(ctx, generation.OwnerID(command.OwnerID),
+			run.ID, stepKey, command.AssistantMessageID)
+	} else {
+		_, _, err = e.skillRuntime.RequestAgentGrant(ctx, generation.OwnerID(command.OwnerID),
+			run.ID, stepKey, command.AssistantMessageID)
+	}
 	if err != nil {
 		return chat.ToolResult{NoSubmission: true}, err
 	}
@@ -163,7 +198,21 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 	if err != nil {
 		return e.awaitThreeView(command, string(accepted.TaskID), generation.Offering{}, err)
 	}
-	return e.observeThreeView(ctx, command, run, execution, grant, observe)
+	result, err := e.observeThreeView(ctx, command, run, execution, grant, observe)
+	if err != nil || !canContinue {
+		return result, err
+	}
+	// The budget continuation keeps this call open for the whole view series:
+	// every later view is submitted on replay after its predecessor finished
+	// (#243).
+	offering := generation.Offering{}
+	if task, readErr := e.skillRuntime.Generation.Get(ctx, generation.OwnerID(command.OwnerID),
+		generation.TaskID(result.TaskID)); readErr == nil {
+		offering = task.Offering
+	}
+	result.AwaitTask = true
+	result.WaitUntil = e.threeViewWaitUntil(command, offering)
+	return result, nil
 }
 
 func threeViewRunKey(command chat.ToolCommand) string {
@@ -184,19 +233,40 @@ func (e *Executor) existingThreeView(ctx context.Context, command chat.ToolComma
 	return run, execution, grant, err
 }
 
-// Read-only identity lookup is used by Stop before executable tool resolution.
-// ResolveAgentStep still verifies the stored Run, Grant, turn and step identity.
-func (e *Executor) readThreeView(ctx context.Context, command chat.ToolCommand) (skillrun.Run, skillrun.Execution, executiongrant.Grant, error) {
-	run, execution, grant, err := e.skillRuntime.ResolveAgentStep(ctx, generation.OwnerID(command.OwnerID),
-		command.SessionID, threeViewRunKey(command), command.AssistantMessageID)
+// resolveThreeViewState reads the run, the step named by the call's bound Task
+// (or the first step), and its exact grant. A Task bound to the grant while the
+// Skill step binding was lost is recovered only when the grant really names
+// that Task; any other Task is a different call's (#243).
+func (e *Executor) resolveThreeViewState(ctx context.Context, command chat.ToolCommand) (skillrun.Run, skillrun.Execution, executiongrant.Grant, error) {
+	run, execution, grant, err := e.skillRuntime.ResolveAgentStepAt(ctx, generation.OwnerID(command.OwnerID),
+		command.SessionID, threeViewRunKey(command), command.AssistantMessageID, command.BoundTaskID)
+	if command.BoundTaskID != "" && errors.Is(err, skillrun.ErrMissing) {
+		run, execution, grant, err = e.skillRuntime.ResolveAgentStep(ctx, generation.OwnerID(command.OwnerID),
+			command.SessionID, threeViewRunKey(command), command.AssistantMessageID)
+		if err == nil && (grant.Status != executiongrant.Bound || grant.TaskID != command.BoundTaskID) {
+			err = chat.ErrTurnCheckpointConflict
+		}
+	}
 	if err != nil {
-		if errors.Is(err, skillrun.ErrConflict) {
+		if errors.Is(err, skillrun.ErrConflict) ||
+			(command.BoundTaskID != "" && errors.Is(err, skillrun.ErrMissing)) {
 			err = errors.Join(chat.ErrTurnCheckpointConflict, err)
 		}
 		return run, execution, grant, err
 	}
+	return run, execution, grant, nil
+}
+
+// Read-only identity lookup is used by Stop before executable tool resolution.
+// ResolveAgentStep still verifies the stored Run, Grant, turn and step identity.
+func (e *Executor) readThreeView(ctx context.Context, command chat.ToolCommand) (skillrun.Run, skillrun.Execution, executiongrant.Grant, error) {
+	run, execution, grant, err := e.resolveThreeViewState(ctx, command)
+	if err != nil {
+		return run, execution, grant, err
+	}
 	if run.RecipeID != threeViewRecipeID || execution.Step.Spec.Capability != generation.ImageToImage ||
-		(command.FrozenIdempotencyKey != "" && command.FrozenIdempotencyKey != execution.IdempotencyKey) ||
+		(command.FrozenIdempotencyKey != "" && execution.Step.Spec.Key == run.Steps[0].Spec.Key &&
+			command.FrozenIdempotencyKey != execution.IdempotencyKey) ||
 		(command.BoundTaskID != "" && command.BoundTaskID != grant.TaskID) {
 		return skillrun.Run{}, skillrun.Execution{}, executiongrant.Grant{}, chat.ErrTurnCheckpointConflict
 	}
@@ -212,12 +282,47 @@ func (e *Executor) TaskIdentityForCall(ctx context.Context, command chat.ToolCom
 	if e.skillRuntime == nil {
 		return chat.ToolTaskIdentity{}, skillrun.ErrInvalid
 	}
-	_, execution, grant, err := e.readThreeView(ctx, command)
+	// The call's frozen identity must be this run's first step; a persisted
+	// Task must belong to this run, even when it is an older view of a
+	// continuation (#243). Both refusals are checkpoint conflicts, not a reason
+	// to cancel this call's current view.
+	if command.FrozenIdempotencyKey != "" {
+		_, first, _, err := e.skillRuntime.ResolveAgentStep(ctx, generation.OwnerID(command.OwnerID),
+			command.SessionID, threeViewRunKey(command), command.AssistantMessageID)
+		if errors.Is(err, skillrun.ErrMissing) {
+			return chat.ToolTaskIdentity{}, nil
+		}
+		if err != nil {
+			return chat.ToolTaskIdentity{}, errors.Join(chat.ErrTurnCheckpointConflict, err)
+		}
+		if first.IdempotencyKey != command.FrozenIdempotencyKey {
+			return chat.ToolTaskIdentity{}, chat.ErrTurnCheckpointConflict
+		}
+	}
+	if command.BoundTaskID != "" {
+		_, _, grant, err := e.resolveThreeViewState(ctx, command)
+		if errors.Is(err, skillrun.ErrMissing) {
+			return chat.ToolTaskIdentity{}, nil
+		}
+		if err != nil {
+			return chat.ToolTaskIdentity{}, chat.ErrTurnCheckpointConflict
+		}
+		if grant.Status != executiongrant.Bound || grant.TaskID != command.BoundTaskID {
+			return chat.ToolTaskIdentity{}, chat.ErrTurnCheckpointConflict
+		}
+	}
+	// Stop must cancel the view in flight, which may be a later one of a budget
+	// continuation rather than the first (#243).
+	_, execution, grant, err := e.skillRuntime.ResolveAgentCurrentStep(ctx, generation.OwnerID(command.OwnerID),
+		command.SessionID, threeViewRunKey(command), command.AssistantMessageID)
 	if errors.Is(err, skillrun.ErrMissing) {
 		return chat.ToolTaskIdentity{}, nil
 	}
 	if err != nil {
-		return chat.ToolTaskIdentity{}, err
+		return chat.ToolTaskIdentity{}, errors.Join(chat.ErrTurnCheckpointConflict, err)
+	}
+	if execution.RunID == "" || execution.Step.Spec.Capability != generation.ImageToImage {
+		return chat.ToolTaskIdentity{}, chat.ErrTurnCheckpointConflict
 	}
 	identity := chat.ToolTaskIdentity{IdempotencyKey: execution.IdempotencyKey}
 	if grant.Status == executiongrant.Bound {
@@ -227,21 +332,145 @@ func (e *Executor) TaskIdentityForCall(ctx context.Context, command chat.ToolCom
 }
 
 func (e *Executor) awaitThreeView(command chat.ToolCommand, taskID string, offering generation.Offering, err error) (chat.ToolResult, error) {
-	deadline := command.TaskWaitDeadline
-	if deadline.IsZero() {
-		timeout := offering.Timeout
-		if timeout <= 0 {
-			timeout = e.taskObservationTimeout
-		} else {
-			// Upstream queue time does not count toward the job timeout (#136).
-			timeout += offering.UpstreamQueueTimeout
-		}
-		deadline = time.Now().Add(timeout)
-	}
+	deadline := e.threeViewWaitUntil(command, offering)
 	if !time.Now().Before(deadline) {
 		return chat.ToolResult{TaskID: taskID, Error: e.consentContents.reconcile}, err
 	}
 	return chat.ToolResult{TaskID: taskID, AwaitTask: true, WaitUntil: deadline}, err
+}
+
+// threeViewWaitUntil is how long one view may take from now: the turn's
+// existing deadline when it has one, else the Offering's job timeout plus the
+// upstream queue allowance (#136).
+func (e *Executor) threeViewWaitUntil(command chat.ToolCommand, offering generation.Offering) time.Time {
+	if !command.TaskWaitDeadline.IsZero() {
+		return command.TaskWaitDeadline
+	}
+	timeout := offering.Timeout
+	if timeout <= 0 {
+		timeout = e.taskObservationTimeout
+	} else {
+		timeout += offering.UpstreamQueueTimeout
+	}
+	return time.Now().Add(timeout)
+}
+
+// threeViewSubjectType validates the Agent's subject_type against the declared
+// templates (#243). An absent value means the declared default; a historical
+// Schema without subject types accepts the empty value only.
+func (e *Executor) threeViewSubjectType(requested string) (string, string) {
+	requested = strings.TrimSpace(requested)
+	if len(e.threeView.SubjectTypes) == 0 {
+		return requested, ""
+	}
+	wanted := requested
+	if wanted == "" {
+		wanted = e.threeView.DefaultSubjectType
+	}
+	choices := make([]string, 0, len(e.threeView.SubjectTypes))
+	for _, subject := range e.threeView.SubjectTypes {
+		choices = append(choices, subject.ID)
+		if subject.ID == wanted {
+			return wanted, ""
+		}
+	}
+	return "", strings.NewReplacer("{subject}", requested, "{choices}", strings.Join(choices, ", ")).
+		Replace(e.threeView.Messages.SubjectInvalid)
+}
+
+// continueThreeView advances a budget continuation after one view's Task
+// finished (#243): it settles and reviews that view, submits the next required
+// one the plan covers, and ends the tool call only when the group is complete
+// or paused for a person. Accepted views travel to the Agent as same-turn
+// pictures so it can check clothing and colors.
+func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolCommand, run skillrun.Run,
+	observe func(chat.ToolObservation) error,
+) (chat.ToolResult, error) {
+	result, err := e.threeViewService.Continue(ctx, command.OwnerID, command.SessionID, run.ID,
+		command.BoundTaskID, command.AssistantMessageID)
+	if err != nil {
+		return chat.ToolResult{TaskID: command.BoundTaskID}, err
+	}
+	messages := e.threeView.Messages
+	if result.TaskID != "" {
+		if observe != nil {
+			task := result.Task
+			if err := observe(chat.ToolObservation{Registered: true, TaskID: result.TaskID,
+				Capability: string(task.Capability), AIModel: task.Offering.ModelID,
+				NativeQuote: task.NativeQuote, EstimatedCredits: legacyThreeViewCredits(task),
+				ApprovalSource: "policy"}); err != nil {
+				return e.awaitThreeView(command, result.TaskID, task.Offering, err)
+			}
+		}
+		content := ""
+		if result.Retried {
+			content = strings.NewReplacer(
+				"{view}", e.threeViewSlotLabel(result, result.View),
+				"{attempt}", strconv.Itoa(result.Attempt),
+				"{maximum}", strconv.Itoa(result.MaximumAttempts),
+				"{reasons}", result.FailedReasons,
+			).Replace(messages.ConsistencyRetry)
+		}
+		return chat.ToolResult{TaskID: result.TaskID, AgentContent: content,
+			AwaitTask: true, WaitUntil: e.threeViewWaitUntil(command, result.Task.Offering)}, nil
+	}
+	pictures := e.threeViewPictures(result)
+	if result.Paused {
+		content := ""
+		if result.Reason == threeview.ReasonConsistencyExhausted {
+			content = strings.NewReplacer("{view}", e.threeViewSlotLabel(result, result.View),
+				"{reasons}", result.FailedReasons).Replace(messages.ConsistencyFailed)
+		} else {
+			reason := e.threeView.Continuation.Reasons[result.Reason]
+			if reason == "" {
+				reason = result.Reason
+			}
+			content = strings.NewReplacer("{run}", run.ID, "{view}", e.threeViewSlotLabel(result, result.View),
+				"{reason}", reason).Replace(messages.AgentPaused)
+		}
+		return chat.ToolResult{AgentContent: content, Pictures: pictures}, nil
+	}
+	content := strings.NewReplacer("{run}", run.ID, "{views}", e.threeViewViewLabels(result),
+		"{group}", run.ID, "{model_source}", e.threeView.ModelSourceStepKey).Replace(messages.AgentCompleted)
+	return chat.ToolResult{AgentContent: content, Pictures: pictures}, nil
+}
+
+func (e *Executor) threeViewSlotLabel(result threeview.ContinuationResult, key string) string {
+	for _, slot := range result.Group.Slots {
+		if slot.Key == key && slot.Label != "" {
+			return slot.Label
+		}
+	}
+	return key
+}
+
+func (e *Executor) threeViewViewLabels(result threeview.ContinuationResult) string {
+	labels := make([]string, 0, len(result.Completed))
+	for _, view := range result.Completed {
+		labels = append(labels, e.threeViewSlotLabel(result, view.Key))
+	}
+	separator := e.threeView.Multiview.ViewSeparator
+	if separator == "" {
+		separator = " / "
+	}
+	return strings.Join(labels, separator)
+}
+
+func (e *Executor) threeViewPictures(result threeview.ContinuationResult) []chat.ToolPicture {
+	template := e.context.AssetURLTemplate
+	if template == "" {
+		return nil
+	}
+	pictures := make([]chat.ToolPicture, 0, len(result.Completed))
+	for _, view := range result.Completed {
+		if view.TaskID == "" || view.AssetID == "" {
+			continue
+		}
+		handle := e.threeViewSlotLabel(result, view.Key)
+		url := strings.NewReplacer("{task_id}", view.TaskID, "{asset_id}", view.AssetID).Replace(template)
+		pictures = append(pictures, chat.ToolPicture{Handle: handle, URL: url, Fresh: true})
+	}
+	return pictures
 }
 
 // observeThreeView returns the started-view receipt. It deliberately does not

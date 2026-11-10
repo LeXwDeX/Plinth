@@ -24,7 +24,7 @@ import (
 
 type harnessThreeRecipe struct{}
 
-func (harnessThreeRecipe) ResolveRecipe(context.Context, string, generation.OfferingID) (skillrun.Recipe, bool, error) {
+func (harnessThreeRecipe) ResolveRecipe(context.Context, string, generation.OfferingID, string) (skillrun.Recipe, bool, error) {
 	return skillrun.Recipe{ID: threeViewRecipeID, Revision: "recipe-r1", Steps: []skillrun.StepSpec{{Key: "front", Label: "Front", Capability: generation.ImageToImage, OfferingID: "image-offering", OfferingRevision: "offering-r1", PromptTemplate: "front view", PromptParameter: "prompt", SourceParameter: "reference_assets", OutputRole: "image"}}}, true, nil
 }
 
