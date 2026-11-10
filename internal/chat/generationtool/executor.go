@@ -16,9 +16,9 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
-	"github.com/LeXwDeX/Plinth/internal/imageinspect"
 	"github.com/LeXwDeX/Plinth/internal/harness"
 	"github.com/LeXwDeX/Plinth/internal/harness/resolve"
+	"github.com/LeXwDeX/Plinth/internal/imageinspect"
 	"github.com/LeXwDeX/Plinth/internal/processing"
 )
 

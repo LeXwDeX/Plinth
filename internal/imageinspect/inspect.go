@@ -29,10 +29,10 @@ type Limits struct {
 
 // Report is the JSON-ready inspection result. Ratios are in [0, 1].
 type Report struct {
-	Format  string `json:"format"`
-	Width   int    `json:"width"`
-	Height  int    `json:"height"`
-	HasAlpha bool  `json:"has_alpha"`
+	Format   string `json:"format"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	HasAlpha bool   `json:"has_alpha"`
 	// TransparentRatio is the share of fully transparent pixels; 0 when the
 	// picture has no alpha channel.
 	TransparentRatio float64 `json:"transparent_ratio"`
@@ -291,4 +291,3 @@ func subjectComponents(mask []bool, width, height int) (int, float64) {
 	}
 	return count, float64(largest) / float64(total)
 }
-

@@ -51,25 +51,25 @@ func (r Report) Review(checklist Checklist) []Check {
 			expected = fmt.Sprintf("transparency or border spread <= %.0f", checklist.MaxBackgroundSpread)
 		}
 		checks = append(checks, Check{Name: "background", Status: status(ok),
-			Actual: fmt.Sprintf("alpha=%t, border spread %.1f", r.HasAlpha, r.BackgroundSpread),
+			Actual:   fmt.Sprintf("alpha=%t, border spread %.1f", r.HasAlpha, r.BackgroundSpread),
 			Expected: expected, Fix: "remove_background"})
 	}
 	if checklist.MinSubjectRatio > 0 || checklist.MaxSubjectRatio > 0 {
 		ok := (checklist.MinSubjectRatio == 0 || r.SubjectRatio >= checklist.MinSubjectRatio) &&
 			(checklist.MaxSubjectRatio == 0 || r.SubjectRatio <= checklist.MaxSubjectRatio)
 		checks = append(checks, Check{Name: "subject_size", Status: status(ok),
-			Actual: fmt.Sprintf("%.1f%%", r.SubjectRatio*100),
+			Actual:   fmt.Sprintf("%.1f%%", r.SubjectRatio*100),
 			Expected: fmt.Sprintf("%.0f%%..%.0f%%", checklist.MinSubjectRatio*100, checklist.MaxSubjectRatio*100),
 			Fix:      "crop_subject"})
 	}
 	if checklist.RequireEdgeClear {
 		checks = append(checks, Check{Name: "edge", Status: status(!r.TouchesEdge),
-			Actual: fmt.Sprintf("touches edge=%t", r.TouchesEdge),
+			Actual:   fmt.Sprintf("touches edge=%t", r.TouchesEdge),
 			Expected: "the subject stays inside the frame", Fix: "crop_subject"})
 	}
 	if checklist.MaxComponents > 0 {
 		checks = append(checks, Check{Name: "components", Status: status(r.ComponentCount <= checklist.MaxComponents),
-			Actual: fmt.Sprintf("%d component(s)", r.ComponentCount),
+			Actual:   fmt.Sprintf("%d component(s)", r.ComponentCount),
 			Expected: fmt.Sprintf("<= %d", checklist.MaxComponents), Fix: "single_subject"})
 	}
 	return checks

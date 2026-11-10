@@ -100,8 +100,8 @@ type Config struct {
 	ListModels         func(ctx context.Context, ownerID, sessionID string) (json.RawMessage, error)
 	ReadProcessingPlan func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	// InspectImage is the read-only image inspection tool (#245). It reads one
-// picture of the command's owner and session, never creates a Task and never
-// spends credits.
+	// picture of the command's owner and session, never creates a Task and never
+	// spends credits.
 	InspectImage func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	// InspectModel, RenderModelViews and CompareModels are the read-only model
 	// review tools (#103). They read only the command's owner and session,

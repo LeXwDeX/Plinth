@@ -51,20 +51,20 @@ func picture(t *testing.T) []byte {
 func service(t *testing.T, inputs InputAssetReader, tasks TaskAssetReader) *Service {
 	t.Helper()
 	review := catalog.ChatImageReviewSchema{
-		Limits:     catalog.ImageInspectLimitsSchema{MaxBytes: 1 << 20, MaxPixels: 1 << 20},
-		Delivery:   catalog.ChatImageChecklistSchema{MinSubjectRatio: 0.01, MaxSubjectRatio: 0.99},
-		Input3D:    catalog.ChatImageChecklistSchema{RequirePlainBackground: true, MaxBackgroundSpread: 20, MinSubjectRatio: 0.05, RequireEdgeClear: true, MaxComponents: 1},
-		MaxRounds:  3,
-		OverrideNote: "override {reason}",
-		UnreadableTemplate: "unreadable {handle}: {reason}",
+		Limits:                  catalog.ImageInspectLimitsSchema{MaxBytes: 1 << 20, MaxPixels: 1 << 20},
+		Delivery:                catalog.ChatImageChecklistSchema{MinSubjectRatio: 0.01, MaxSubjectRatio: 0.99},
+		Input3D:                 catalog.ChatImageChecklistSchema{RequirePlainBackground: true, MaxBackgroundSpread: 20, MinSubjectRatio: 0.05, RequireEdgeClear: true, MaxComponents: 1},
+		MaxRounds:               3,
+		OverrideNote:            "override {reason}",
+		UnreadableTemplate:      "unreadable {handle}: {reason}",
 		RoundsExhaustedTemplate: "rounds exhausted {maximum}",
-		DeliveryChecklist: "delivery checklist",
-		Input3DChecklist: "3d input checklist",
+		DeliveryChecklist:       "delivery checklist",
+		Input3DChecklist:        "3d input checklist",
 	}
 	got, err := New(Config{
 		Context: catalog.ChatContextSchema{
-			HandlePrefixes: map[string]string{"image": "@img", "model": "@model"},
-			SelectionAlias: "@selected",
+			HandlePrefixes:        map[string]string{"image": "@img", "model": "@model"},
+			SelectionAlias:        "@selected",
 			UnknownHandleTemplate: "unknown {handle}", WrongHandleKindTemplate: "kind {handle}",
 		},
 		Review: review, Inputs: inputs, Tasks: tasks,

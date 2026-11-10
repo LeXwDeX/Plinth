@@ -490,6 +490,27 @@ def make_png(size=64):
             + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
 
 
+def make_picture(width, height, background, subjects):
+    """A deterministic RGB PNG: a plain or busy background with solid rectangles."""
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    rows = []
+    for y in range(height):
+        row = bytearray()
+        for x in range(width):
+            colour = background(x, y) if callable(background) else background
+            for (x0, y0, x1, y1), fill in subjects:
+                if x0 <= x < x1 and y0 <= y < y1:
+                    colour = fill
+                    break
+            row.extend(colour)
+        rows.append(b"\x00" + bytes(row))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
+
+
 def upload_asset(api, filename, data, mime):
     """Library upload (POST /api/v1/assets); returns the asset id or None."""
     status, body = api.upload("/api/v1/assets", "file", filename, data, mime)
@@ -1280,7 +1301,14 @@ def run_quality_case(api, request, domain, model, model_3d=""):
     cards, seen = [], set()
     turns = 0
     for step in request["steps"]:
-        tool = {"name": step["tool"]["name"], "arguments": dict(step["tool"].get("arguments") or {})}
+        arguments = dict(step["tool"].get("arguments") or {})
+        if step["tool"]["name"] == "create_model_3d_from_image" and "input_override_reason" not in arguments:
+            # The fake upstream's generated picture is a 1x1 placeholder, not a
+            # real 3D input. The reference-trajectory runner records the
+            # person's explicit override; the live output run does not use
+            # these steps and the real Agent must pass the gate or ask.
+            arguments["input_override_reason"] = "the fake upstream image is a placeholder, not a real 3D input"
+        tool = {"name": step["tool"]["name"], "arguments": arguments}
         model_task = _quality_model_task(api, session)
         if model_task and tool["arguments"].get("model") == "@model1":
             tool["arguments"]["model"] = model_task
@@ -1371,9 +1399,147 @@ def scenario_agent_quality(api, offerings, report_dir=""):
     return report
 
 
+def _image_self_check_summaries(api, session):
+    status, body = api.json("GET", f"/api/chat/sessions/{session}/messages")
+    messages = body if isinstance(body, list) else body.get("messages", [])
+    summaries = []
+    for message in messages:
+        raw = message.get("toolCalls")
+        if not raw:
+            continue
+        try:
+            calls = json.loads(raw) if isinstance(raw, str) else raw
+        except ValueError:
+            continue
+        for call in calls if isinstance(calls, list) else []:
+            if call.get("name") == "inspect_image" and call.get("summary"):
+                summaries.append(call["summary"])
+    return summaries
+
+
+def _image_self_check_refusal(work, session):
+    """The latest turn's tool results live in the checkpoint, not the messages wire."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/main/app.db?mode=ro", uri=True)
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT checkpoint_json FROM go_chat_turns WHERE session_id=? ORDER BY updated_at DESC LIMIT 1",
+                         (session,)).fetchone()
+        db.close()
+    except sqlite3.Error:
+        return ""
+    if not row or not row["checkpoint_json"]:
+        return ""
+    try:
+        checkpoint = json.loads(row["checkpoint_json"])
+    except ValueError:
+        return ""
+    for message in checkpoint.get("completed") or []:
+        content = str(message.get("Content") or message.get("content") or "")
+        if "不适合作为 3D 源" in content:
+            return content
+    return ""
+
+
+def _image_self_check_send(api, session, content, model, replies_before):
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages",
+                         {"content": content, "creative_domain": "model-3d", "ai_model": model})
+    if status not in (200, 201, 202):
+        return False
+    end = time.time() + 60
+    while time.time() < end:
+        if assistant_reply_count(api, session) > replies_before:
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def scenario_image_self_check(api, offerings, work):
+    """#245: inspect_image checklists and the image-to-3D input gate on the fake stack."""
+    session = new_session(api)
+    api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "auto"})
+    model = next((item["model_id"] for item in offerings.values()
+                  if item.get("available") and item.get("capability") == "text-to-3d"), "")
+    if model:
+        api.json("PUT", f"/api/v1/chat/sessions/{session}/model3d", {"explicit_model_3d": model})
+    white, red = (250, 250, 250), (200, 30, 30)
+    pictures = [
+        ("good", make_picture(128, 128, white, [((40, 32, 88, 96), red)])),
+        ("busy", make_picture(128, 128, lambda x, y: (0, 0, 0) if (x // 8 + y // 8) % 2 else (255, 255, 255),
+                              [((40, 32, 88, 96), red)])),
+        ("multi", make_picture(128, 128, white, [((20, 40, 48, 88), red), ((80, 40, 108, 88), red)])),
+        ("edge", make_picture(128, 128, white, [((0, 40, 40, 88), red)])),
+    ]
+    urls = []
+    for name, data in pictures:
+        status, body = api.upload("/api/v1/assets", "file", name + ".png", data, "image/png")
+        asset_id = body.get("id") if status in (200, 201) else None
+        if not asset_id:
+            record("#245 sample upload", False, f"{name}: HTTP {status}")
+            return
+        urls.append(f"/api/v1/assets/{asset_id}")
+    replies = assistant_reply_count(api, session)
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages",
+                         {"content": "这四张图是素材", "image_urls": urls, "creative_domain": "model-3d", "ai_model": model})
+    if status not in (200, 201, 202):
+        record("#245 sample attachments", False, f"send {status}")
+        return
+    end = time.time() + 30
+    handles = []
+    while time.time() < end and len(handles) < 4:
+        time.sleep(0.3)
+        _, body = api.json("GET", f"/api/chat/sessions/{session}/messages")
+        messages = body if isinstance(body, list) else body.get("messages", [])
+        for message in messages:
+            for attachment in message.get("attachments") or []:
+                if attachment.get("kind") == "image" and attachment.get("handle"):
+                    handles.append(attachment["handle"])
+        handles = list(dict.fromkeys(handles))
+    if len(handles) < 4:
+        record("#245 sample handles", False, f"handles={handles}")
+        return
+    expected = {"good": 0, "busy": 1, "multi": 1, "edge": 1}
+    for index, (name, _data) in enumerate(pictures):
+        before = assistant_reply_count(api, session)
+        marker = '[[fake:tool:inspect_image {"image":"' + handles[index] + '","checklist":"3d_input"}]]'
+        if not _image_self_check_send(api, session, "检查 " + marker, model, before):
+            record(f"#245 inspect_image {name}", False, "turn did not finish")
+            continue
+        summaries = _image_self_check_summaries(api, session)
+        summary = next((item for item in reversed(summaries) if item.get("handle") == handles[index]), None)
+        failed = (summary or {}).get("checks", {}).get("failed")
+        ok = summary is not None and ((failed == 0) if expected[name] == 0 else (failed or 0) >= expected[name])
+        record(f"#245 inspect_image {name}", ok, f"handle={handles[index]} failed={failed} summary={summary}")
+    before_tasks = {task.get("id") for task in session_tasks(api, session)}
+    before = assistant_reply_count(api, session)
+    bad = json.dumps({"prompt": "a prop", "reference_handles": [handles[1]]}, ensure_ascii=False, separators=(",", ":"))
+    _image_self_check_send(api, session, "提交 3D [[fake:tool:create_model_3d_from_image " + bad + "]]", model, before)
+    refusal = _image_self_check_refusal(work, session)
+    new_tasks = {task.get("id") for task in session_tasks(api, session)} - before_tasks
+    record("#245 3D input gate refuses a busy picture", bool(refusal) and not new_tasks,
+           f"refusal={'yes' if refusal else 'no'} tasks={len(new_tasks)}")
+    before = assistant_reply_count(api, session)
+    override = json.dumps({"prompt": "a prop", "reference_handles": [handles[1]],
+                           "input_override_reason": "the person asked to keep the photo background"},
+                          ensure_ascii=False, separators=(",", ":"))
+    _image_self_check_send(api, session, "提交 3D [[fake:tool:create_model_3d_from_image " + override + "]]", model, before)
+    task = None
+    end = time.time() + 60
+    while time.time() < end and task is None:
+        for candidate in session_tasks(api, session):
+            if candidate.get("id") not in before_tasks:
+                task = candidate
+                break
+        time.sleep(0.5)
+    if task is not None:
+        task = wait_task(api, task["id"], 90)
+    record("#245 3D input gate accepts an override reason", bool(task) and task.get("state") == "SUCCEEDED",
+           f"task={task.get('id') if task else None} state={task.get('state') if task else None}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,faults")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
@@ -1395,7 +1561,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality", "image-self-check"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -1420,6 +1586,8 @@ def main():
                 scenario_agent_background(api, offerings)
             if "agent-quality" in selected:
                 scenario_agent_quality(api, offerings, args.report or os.path.join(work, "agent-quality"))
+            if "image-self-check" in selected:
+                scenario_image_self_check(api, offerings, work)
             processes.stop(child)
         if "faults" in selected:
             for scenario in [name for name in FAULTS if not args.faults or name in args.faults.split(",")]:

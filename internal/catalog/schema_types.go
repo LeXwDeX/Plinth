@@ -2277,7 +2277,7 @@ type ChatImageReviewSchema struct {
 	// argument: {reason} is the reason it gave.
 	OverrideNote string `json:"override_note"`
 	// UnreadableTemplate words a picture whose bytes cannot be read or decoded:
-// {handle} and {reason}.
+	// {handle} and {reason}.
 	UnreadableTemplate string `json:"unreadable_template"`
 	// MaxRounds bounds inspect_image calls per reply; RoundsExhaustedTemplate
 	// is returned once the budget is spent.
@@ -3859,8 +3859,8 @@ type ChatContextSchema struct {
 	// ResultImageViewIntro and ResultImageViewLabelTemplate frame those
 	// pictures: they are this turn's results, not pictures looked up from
 	// history. Empty falls back to the history copy.
-	ResultImageViewIntro         string `json:"result_image_view_intro,omitempty"`
-	ResultImageViewLabelTemplate string `json:"result_image_view_label_template,omitempty"`
+	ResultImageViewIntro          string `json:"result_image_view_intro,omitempty"`
+	ResultImageViewLabelTemplate  string `json:"result_image_view_label_template,omitempty"`
 	ResultImageUnreadableTemplate string `json:"result_image_unreadable_template,omitempty"`
 	// GeneratedVisionIntro precedes those pictures in the newest user message
 	// (#327): they are earlier results of the session (a model's preview
