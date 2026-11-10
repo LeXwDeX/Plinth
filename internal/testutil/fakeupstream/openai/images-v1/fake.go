@@ -293,14 +293,17 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request, endpoint string
 			// n is documented by the official Create image reference. The
 			// committed samples only ask for one picture, so returning n
 			// distinct pictures is constructed-from-docs.
+			const maximumFakeImages = 10
 			count := req.count
 			if count < 1 {
 				count = 1
 			}
-			if count > 10 {
-				count = 10
+			if count > maximumFakeImages {
+				count = maximumFakeImages
 			}
-			items := make([]any, 0, count)
+			// The capacity is a constant so the allocation never depends on the
+			// request's n; count only decides how many entries are appended.
+			items := make([]any, 0, maximumFakeImages)
 			for index := 0; index < count; index++ {
 				item := fakeupstream.Clone(template)
 				candidate := data
