@@ -3573,15 +3573,23 @@ type ChatAPIResponseFields struct {
 	// session's compaction records, each with CreatedAt, CompactionTrigger
 	// ("manual" or "auto"), CompactedRounds and ThroughMessageID (the last
 	// message the summary covers).
-	ReasoningEffort   string `json:"reasoning_effort,omitempty"`
-	ReasoningLevels   string `json:"reasoning_levels,omitempty"`
-	ReasoningDefault  string `json:"reasoning_default,omitempty"`
-	ContextTokens     string `json:"context_tokens,omitempty"`
-	ContextWindow     string `json:"context_window,omitempty"`
-	Compactions       string `json:"compactions,omitempty"`
-	CompactionTrigger string `json:"compaction_trigger,omitempty"`
-	CompactedRounds   string `json:"compacted_rounds,omitempty"`
-	ThroughMessageID  string `json:"through_message_id,omitempty"`
+	ReasoningEffort  string `json:"reasoning_effort,omitempty"`
+	ReasoningLevels  string `json:"reasoning_levels,omitempty"`
+	ReasoningDefault string `json:"reasoning_default,omitempty"`
+	ContextTokens    string `json:"context_tokens,omitempty"`
+	// ContextVisionTokens is the estimated vision tokens of the session's
+	// newest request (#247); ContextVisionTokenBudget is the effective
+	// per-request token bound and ContextVisionBudget the effective picture
+	// places, both for the session's current model. The estimates are never
+	// the upstream's own count.
+	ContextVisionTokens      string `json:"context_vision_tokens,omitempty"`
+	ContextVisionTokenBudget string `json:"context_vision_token_budget,omitempty"`
+	ContextVisionBudget      string `json:"context_vision_budget,omitempty"`
+	ContextWindow            string `json:"context_window,omitempty"`
+	Compactions              string `json:"compactions,omitempty"`
+	CompactionTrigger        string `json:"compaction_trigger,omitempty"`
+	CompactedRounds          string `json:"compacted_rounds,omitempty"`
+	ThroughMessageID         string `json:"through_message_id,omitempty"`
 	// Chat model members of the session model read (#322 Scope 5): ChatModel
 	// is the model ID the next turn uses, ChatModelChosen the session's own
 	// choice ("" when it follows the default), ChatModelDefault the
@@ -3930,8 +3938,11 @@ type ChatContextSchema struct {
 	ImageDetail            string `json:"image_detail"`
 	// CanvasImageDetail is the detail of the artboard snapshot picture of a
 	// canvas turn (#16): a layout of many layers needs more than the default.
-	CanvasImageDetail      string `json:"canvas_image_detail"`
-	UserImageLabelTemplate string `json:"user_image_label_template"`
+	CanvasImageDetail string `json:"canvas_image_detail"`
+	// Vision is the purpose-based vision budget of an Agent turn (#247). When
+	// absent the legacy image_detail / maximum_vision_images behavior applies.
+	Vision                 *ChatVisionSchema `json:"vision,omitempty"`
+	UserImageLabelTemplate string            `json:"user_image_label_template"`
 	// CanvasInputSource is the input_source value of a turn whose source is
 	// the artboard snapshot sent as its selection (#266).
 	CanvasInputSource    string `json:"canvas_input_source"`
@@ -5917,4 +5928,107 @@ type ChatVisionDerivativeSchema struct {
 	// CacheMaximumBytes bounds the in-memory cache of made copies, keyed by
 	// the source's SHA-256 and the policy, so later turns do not re-encode.
 	CacheMaximumBytes int64 `json:"cache_maximum_bytes"`
+}
+
+// ChatVisionSchema is the purpose-based visual budget of an Agent turn (#247):
+// which pictures of the history reach the model under which role, at which
+// detail, with how many places and how many estimated vision tokens, and what
+// happens to the pictures that no longer fit.
+//
+// Roles are declared in priority order: when a bound is reached the pictures
+// of later roles are dropped first, and every dropped handle is named in
+// overflow_template. The legacy context keys stay hard caps: the effective
+// image bound is min(maximum_images, maximum_vision_images); the generated
+// role is additionally capped by recent_generated_image_limit and the history
+// role by recent_image_limit.
+type ChatVisionSchema struct {
+	Roles         []ChatVisionRoleSchema `json:"roles"`
+	MaximumImages int                    `json:"maximum_images"`
+	MaximumTokens int                    `json:"maximum_tokens"`
+	MaximumBytes  int64                  `json:"maximum_bytes"`
+	// OverflowTemplate says which pictures were dropped ({handles}, the
+	// dropped handles or index labels, space separated).
+	OverflowTemplate string `json:"overflow_template,omitempty"`
+	// VisionOffNote is added when no picture is sent at all because the Agent
+	// or the turn's model does not read images.
+	VisionOffNote string `json:"vision_off_note,omitempty"`
+	// StyleAnchorIntro and StyleAnchorLabelTemplate frame the session style
+	// lock's reference pictures ({index} is their 1-based position).
+	// StyleAnchorDroppedTemplate names one of them when the budget refuses it
+	// ({index}); UnnamedPictureLabel names a tool picture that carries no
+	// handle, so no model-visible word is hardcoded in the code.
+	StyleAnchorIntro           string `json:"style_anchor_intro,omitempty"`
+	StyleAnchorLabelTemplate   string `json:"style_anchor_label_template,omitempty"`
+	StyleAnchorDroppedTemplate string `json:"style_anchor_dropped_template,omitempty"`
+	UnnamedPictureLabel        string `json:"unnamed_picture_label,omitempty"`
+	// ContactSheet folds pictures of one tool result over their quota into one
+	// labelled sheet with every handle.
+	ContactSheet ChatVisionContactSheetSchema `json:"contact_sheet"`
+	// Crop is the inspect_image region/show_picture policy.
+	Crop ChatVisionCropSchema `json:"crop"`
+	// ModelProfiles narrow the budget or turn vision off for a model family,
+	// matched case-insensitively by prefix; the first match wins.
+	ModelProfiles []ChatVisionModelProfileSchema `json:"model_profiles,omitempty"`
+}
+
+// Vision role sources. A picture belongs to exactly one source: the artboard
+// snapshot, the current user's references, the style lock, a render of the
+// model-review tools, another generated picture, or an older user picture.
+const (
+	ChatVisionSourceCanvas    = "canvas"
+	ChatVisionSourceTurn      = "turn"
+	ChatVisionSourceStyle     = "style"
+	ChatVisionSourceRender    = "render"
+	ChatVisionSourceGenerated = "generated"
+	ChatVisionSourceHistory   = "history"
+)
+
+type ChatVisionRoleSchema struct {
+	ID            string   `json:"id"`
+	Sources       []string `json:"sources"`
+	MaximumImages int      `json:"maximum_images"`
+	Detail        string   `json:"detail"`
+	// TokenCost is the declared estimate of one picture at Detail (#247).
+	TokenCost int `json:"token_cost"`
+}
+
+type ChatVisionContactSheetSchema struct {
+	Enabled       bool   `json:"enabled"`
+	MaximumTiles  int    `json:"maximum_tiles"`
+	Columns       int    `json:"columns"`
+	TilePixels    int    `json:"tile_pixels"`
+	LabelHeight   int    `json:"label_height"`
+	JPEGQualities []int  `json:"jpeg_qualities"`
+	MaximumBytes  int64  `json:"maximum_bytes"`
+	Detail        string `json:"detail"`
+	TokenCost     int    `json:"token_cost"`
+	Intro         string `json:"intro,omitempty"`
+	// LabelTemplate labels one tile; {handle} and {index} are filled.
+	LabelTemplate string `json:"label_template,omitempty"`
+}
+
+type ChatVisionCropSchema struct {
+	Enabled             bool   `json:"enabled"`
+	Detail              string `json:"detail"`
+	TokenCost           int    `json:"token_cost"`
+	RegionArgument      string `json:"region_argument"`
+	ShowPictureArgument string `json:"show_picture_argument"`
+	MinimumSidePixels   int    `json:"minimum_side_pixels"`
+	MaximumPixels       int    `json:"maximum_pixels"`
+	TooLargeTemplate    string `json:"too_large_template,omitempty"`
+	// PictureLabelTemplate labels the shown crop ({handle} {region} {width}
+	// {height}); OriginalPictureLabelTemplate labels the whole picture
+	// show_picture attaches beside it ({handle} {width} {height}), so the
+	// original is never described as a crop or with the crop's size.
+	PictureLabelTemplate         string `json:"picture_label_template,omitempty"`
+	OriginalPictureLabelTemplate string `json:"original_picture_label_template,omitempty"`
+}
+
+type ChatVisionModelProfileSchema struct {
+	ModelPrefixes []string `json:"model_prefixes"`
+	// SupportsVision nil follows the Agent's vision switch.
+	SupportsVision *bool `json:"supports_vision,omitempty"`
+	// MaximumImages and MaximumTokens narrow the context budget when positive.
+	MaximumImages int `json:"maximum_images,omitempty"`
+	MaximumTokens int `json:"maximum_tokens,omitempty"`
 }

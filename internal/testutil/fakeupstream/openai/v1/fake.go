@@ -2,6 +2,7 @@ package openaiv1
 
 import (
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -391,6 +392,7 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, officialErrorBody("Missing required parameter: 'messages'.", "invalid_request_error", "messages", "missing_required_parameter"))
 		return
 	}
+	h.recordChatRequest(request)
 	if scenario == fakeupstream.ScenarioModelNotFound {
 		writeJSON(w, http.StatusNotFound, officialErrorBody(fmt.Sprintf("The model %q does not exist or you do not have access to it.", request.Model), "invalid_request_error", "model", "model_not_found"))
 		return
@@ -431,6 +433,77 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// recordChatRequest keeps the bounded #247 record of what Plinth sent: roles,
+// short text and each picture part's detail, data-URI marker and byte count.
+// Picture bytes are never stored.
+func (h *handler) recordChatRequest(request chatRequest) {
+	record := fakeupstream.ChatRequestRecord{Model: request.Model}
+	for _, message := range request.Messages {
+		entry := fakeupstream.ChatMessageRecord{Role: message.Role}
+		var text string
+		if json.Unmarshal(message.Content, &text) == nil {
+			entry.Text = summarizeChatText(text)
+		} else {
+			var parts []struct {
+				Type     string `json:"type"`
+				Text     string `json:"text"`
+				ImageURL struct {
+					URL    string `json:"url"`
+					Detail string `json:"detail"`
+				} `json:"image_url"`
+			}
+			if json.Unmarshal(message.Content, &parts) == nil {
+				var texts []string
+				for _, part := range parts {
+					if part.Text != "" {
+						texts = append(texts, part.Text)
+						// The text right after a picture is its label.
+						if len(entry.Images) > 0 && entry.Images[len(entry.Images)-1].Label == "" &&
+							!strings.HasPrefix(part.Text, "以下是") && strings.TrimSpace(part.Text) != "" {
+							entry.Images[len(entry.Images)-1].Label = summarizeChatText(part.Text)
+						}
+					}
+					if part.ImageURL.URL != "" || part.Type == "image_url" {
+						entry.Images = append(entry.Images, chatImageRecord(part.ImageURL.URL, part.ImageURL.Detail))
+					}
+				}
+				entry.Text = summarizeChatText(strings.Join(texts, "\n"))
+			}
+		}
+		record.Messages = append(record.Messages, entry)
+	}
+	h.env.RecordChatRequest(record)
+}
+
+func chatImageRecord(url, detail string) fakeupstream.ChatImageRecord {
+	record := fakeupstream.ChatImageRecord{Detail: detail}
+	lower := strings.ToLower(url)
+	if strings.HasPrefix(lower, "data:image/") {
+		record.DataURI = true
+		if comma := strings.Index(url, ","); comma >= 0 {
+			if data, err := base64.StdEncoding.DecodeString(url[comma+1:]); err == nil {
+				record.Bytes = len(data)
+				return record
+			}
+			record.Bytes = len(url) - comma - 1
+			return record
+		}
+	}
+	record.Bytes = len(url)
+	return record
+}
+
+// summarizeChatText keeps a short, bounded summary; the record is a fixture,
+// not a transcript.
+func summarizeChatText(text string) string {
+	const limit = 200
+	text = strings.Join(strings.Fields(text), " ")
+	if len(text) <= limit {
+		return text
+	}
+	return text[:limit]
 }
 
 // renderToolCall clones the sample's first call for one parsed marker. The

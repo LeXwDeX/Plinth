@@ -177,7 +177,15 @@ func newContextFixtureWith(t *testing.T, policy chat.ModelPolicy, mutate func(*c
 	if policy.Thinking == nil {
 		policy.Thinking = schema.Agent.Thinking
 	}
-	service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) { config.Models = policy })
+	service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) {
+		config.Models = policy
+		config.VisionBudget = func(model string) int {
+			return chat.EffectiveVisionImages(schema, model)
+		}
+		config.VisionTokenBudget = func(model string) int {
+			return chat.EffectiveVisionTokens(schema, model)
+		}
+	})
 	store := newMemoryContextStore(repository)
 	service.SetContextStore(store, schema.ContextCompaction.ListLimit)
 	agent := &contextAgent{summary: "configured summary @img1"}
@@ -618,5 +626,50 @@ func TestCompactionKeepsHandlesNotesAndChoicesWorking(t *testing.T) {
 	history, _ = service.ListMessages(ctx, "owner-a", session.ID)
 	if next := chat.NewHandlePolicy(schema.Context).Assign(history, []chat.Attachment{{Kind: chat.AttachmentKindImage}}); next[0].Handle != "@img2" {
 		t.Fatalf("next handle after compaction = %q", next[0].Handle)
+	}
+}
+
+// #247: the request's vision pictures are recorded as the Schema's declared
+// estimate, separate from the upstream's prompt tokens, and the context view
+// reports both the estimate and the effective image budget.
+func TestContextUsageRecordsTheVisionEstimate(t *testing.T) {
+	ctx := context.Background()
+	fixture := newContextFixtureWith(t, chat.ModelPolicy{Model: "configured-model"}, func(schema *catalog.ChatSchema) {
+		schema.Context.MaximumVisionImages = 10
+		schema.Context.RecentImageLimit = 10
+		schema.Context.RecentGeneratedImageLimit = 10
+		schema.Context.Vision.Roles = []catalog.ChatVisionRoleSchema{
+			{ID: "turn_reference", Sources: []string{"turn"}, MaximumImages: 4, Detail: "high", TokenCost: 1105},
+			{ID: "recent_result", Sources: []string{"generated"}, MaximumImages: 2, Detail: "high", TokenCost: 1105},
+			{ID: "history", Sources: []string{"history"}, MaximumImages: 4, Detail: "low", TokenCost: 85},
+		}
+		schema.Context.Vision.MaximumImages = 10
+	})
+	fixture.agent.usage = &agents.Usage{PromptTokens: 900, CompletionTokens: 30}
+	assistant, err := fixture.service.StartTurn(ctx, chat.StartTurn{
+		OwnerID: "owner-a", SessionID: fixture.session, Content: "look",
+		ImageURLs: []string{"data:image/png;base64,AAAA", "data:image/png;base64,BBBB"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.orchestrator.Process(ctx, chat.ProcessTurn{
+		OwnerID: "owner-a", SessionID: fixture.session, AssistantMessageID: assistant.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fixture.orchestrator.WaitForTitles()
+	fixture.store.mu.Lock()
+	usage := fixture.store.usage[fixture.session]
+	fixture.store.mu.Unlock()
+	if usage == nil || usage.VisionTokens != 2*1105 {
+		t.Fatalf("recorded usage = %+v; want 2210 estimated vision tokens", usage)
+	}
+	view, err := fixture.service.SessionContextView(ctx, "owner-a", fixture.session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.VisionTokens == nil || *view.VisionTokens != 2210 || view.VisionTokenBudget != 12000 || view.VisionBudget != 10 {
+		t.Fatalf("context view = %+v", view)
 	}
 }

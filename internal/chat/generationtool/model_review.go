@@ -930,7 +930,7 @@ func (executor *Executor) uploadReviewedPicture(
 
 func (executor *Executor) appendReviewedPicture(pictures *[]chat.ToolPicture, urls *[]string, url string) {
 	*urls = append(*urls, url)
-	*pictures = append(*pictures, chat.ToolPicture{URL: url})
+	*pictures = append(*pictures, chat.ToolPicture{URL: url, Purpose: chat.ToolPictureRender})
 }
 
 // modelReviewBudgetRefusal refuses another render or comparison when this

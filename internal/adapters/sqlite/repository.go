@@ -373,6 +373,9 @@ var chatBranchTaskRefsMigration string
 //go:embed migrations/0083_session_evidence_deletions.sql
 var sessionEvidenceDeletionsMigration string
 
+//go:embed migrations/0084_chat_session_vision_usage.sql
+var chatSessionVisionUsageMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -447,7 +450,8 @@ func migrations() []migration {
 		migration{version: 80, name: "chat_branch_lineage", sql: chatBranchLineageMigration},
 		migration{version: 81, name: "chat_session_style_lock", sql: chatSessionStyleLockMigration},
 		migration{version: 82, name: "chat_branch_task_refs", sql: chatBranchTaskRefsMigration},
-		migration{version: 83, name: "session_evidence_deletions", sql: sessionEvidenceDeletionsMigration})
+		migration{version: 83, name: "session_evidence_deletions", sql: sessionEvidenceDeletionsMigration},
+		migration{version: 84, name: "chat_session_vision_usage", sql: chatSessionVisionUsageMigration})
 }
 
 type migration struct {

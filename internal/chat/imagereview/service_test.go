@@ -15,6 +15,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/visionview"
 )
 
 type fakeInputs struct {
@@ -166,4 +167,149 @@ type failingInputs struct{}
 
 func (failingInputs) OpenOwned(context.Context, generation.OwnerID, generation.AssetID) (generation.InputAsset, io.ReadCloser, error) {
 	return generation.InputAsset{}, nil, io.ErrUnexpectedEOF
+}
+
+// cropService is the same review service with the #247 crop policy declared.
+func cropService(t *testing.T, inputs InputAssetReader, crop catalog.ChatVisionCropSchema) *Service {
+	t.Helper()
+	context := catalog.ChatContextSchema{
+		HandlePrefixes:        map[string]string{"image": "@img", "model": "@model"},
+		SelectionAlias:        "@selected",
+		UnknownHandleTemplate: "unknown {handle}", WrongHandleKindTemplate: "kind {handle}",
+		VisionInlineMaxBytes: 1 << 20,
+		Vision:               &catalog.ChatVisionSchema{Crop: crop},
+	}
+	review := catalog.ChatImageReviewSchema{
+		Limits:                  catalog.ImageInspectLimitsSchema{MaxBytes: 1 << 20, MaxPixels: 1 << 20},
+		Delivery:                catalog.ChatImageChecklistSchema{MinSubjectRatio: 0.01, MaxSubjectRatio: 0.99},
+		Input3D:                 catalog.ChatImageChecklistSchema{RequirePlainBackground: true, MaxBackgroundSpread: 20, MinSubjectRatio: 0.05, RequireEdgeClear: true, MaxComponents: 1},
+		MaxRounds:               3,
+		OverrideNote:            "override {reason}",
+		UnreadableTemplate:      "unreadable {handle}: {reason}",
+		RoundsExhaustedTemplate: "rounds exhausted {maximum}",
+		DeliveryChecklist:       "delivery checklist",
+		Input3DChecklist:        "3d input checklist",
+	}
+	got, err := New(Config{Context: context, Review: review, Inputs: inputs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func cropCommand(arguments string) chat.ToolCommand {
+	command := command(arguments, nil)
+	command.History[0].Attachments[0].URL = "/api/v1/assets/a1"
+	return command
+}
+
+// #247: a region crop keeps the original pixels (no scaling) and reports the
+// source size and the pixel rectangle beside the crop's own facts.
+func TestInspectImageCropKeepsOriginalPixelsAndOwnership(t *testing.T) {
+	crop := catalog.ChatVisionCropSchema{
+		Enabled: true, Detail: "high", TokenCost: 1105,
+		RegionArgument: "region", ShowPictureArgument: "show_picture",
+		MinimumSidePixels: 8, MaximumPixels: 1 << 20,
+		TooLargeTemplate:             "too large {maximum}",
+		PictureLabelTemplate:         "[crop {handle} {region} {width}x{height}]",
+		OriginalPictureLabelTemplate: "[whole {handle} {width}x{height}]",
+	}
+	svc := cropService(t, fakeInputs{data: picture(t)}, crop)
+	result, err := svc.Inspect(context.Background(), cropCommand(
+		`{"image":"@img1","region":{"x":0.3,"y":0.3,"width":0.4,"height":0.4},"show_picture":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Error != "" {
+		t.Fatalf("result = %+v", result)
+	}
+	var payload struct {
+		Image struct {
+			Width        int
+			Height       int
+			SourceWidth  int `json:"source_width"`
+			SourceHeight int `json:"source_height"`
+			Region       struct{ X, Y, Width, Height int }
+			CropWidth    int `json:"crop_width"`
+		} `json:"image"`
+	}
+	if err := json.Unmarshal([]byte(result.AgentContent), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Image.Region.X != 30 || payload.Image.Region.Y != 30 ||
+		payload.Image.Region.Width != 40 || payload.Image.Region.Height != 40 ||
+		payload.Image.SourceWidth != 100 || payload.Image.SourceHeight != 100 ||
+		payload.Image.Width != 40 || payload.Image.Height != 40 {
+		t.Fatalf("crop facts = %+v", payload.Image)
+	}
+	if len(result.Pictures) != 2 {
+		t.Fatalf("show_picture pictures = %+v", result.Pictures)
+	}
+	original, cropped := result.Pictures[0], result.Pictures[1]
+	if original.URL != "/api/v1/assets/a1" || original.Purpose != chat.ToolPictureCrop ||
+		original.Detail != "high" {
+		t.Fatalf("original picture = %+v", original)
+	}
+	// The whole picture has its own label and the source size, never the crop
+	// region or the crop's dimensions (#247 review).
+	if original.Label != "[whole @img1 100x100]" {
+		t.Fatalf("original label = %q; want the whole-picture template and the source size", original.Label)
+	}
+	if strings.Contains(original.Label, "局部裁剪") || strings.Contains(original.Label, "40x40") {
+		t.Fatalf("the original was labelled as a crop: %q", original.Label)
+	}
+	if cropped.Handle != "@img1" || cropped.Detail != "high" ||
+		!strings.Contains(cropped.Label, "@img1") || !strings.Contains(cropped.Label, "30,30 40×40") ||
+		!strings.HasPrefix(cropped.URL, "data:image/jpeg;base64,") {
+		t.Fatalf("crop picture = %+v", cropped)
+	}
+	decoded, err := visionview.DecodeDataURI(cropped.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Bounds().Dx() != 40 || decoded.Bounds().Dy() != 40 {
+		t.Fatalf("crop pixels = %v", decoded.Bounds())
+	}
+}
+
+// A crop over the declared pixel bound is refused with the Schema text and no
+// picture.
+func TestCropOverLimitsIsRefused(t *testing.T) {
+	crop := catalog.ChatVisionCropSchema{
+		Enabled: true, Detail: "high", TokenCost: 1105,
+		RegionArgument: "region", ShowPictureArgument: "show_picture",
+		MinimumSidePixels: 8, MaximumPixels: 100,
+		TooLargeTemplate:     "too large {width}x{height} maximum {maximum}",
+		PictureLabelTemplate: "[crop {handle}]",
+	}
+	svc := cropService(t, fakeInputs{data: picture(t)}, crop)
+	result, err := svc.Inspect(context.Background(), cropCommand(
+		`{"image":"@img1","region":{"x":0,"y":0,"width":1,"height":1},"show_picture":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Error, "100x100 maximum 100") || len(result.Pictures) != 0 {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+// show_picture without a region attaches the named original.
+func TestInspectImageShowsTheNamedOriginal(t *testing.T) {
+	crop := catalog.ChatVisionCropSchema{
+		Enabled: true, Detail: "high", TokenCost: 1105,
+		RegionArgument: "region", ShowPictureArgument: "show_picture",
+		MinimumSidePixels: 8, MaximumPixels: 1 << 20,
+		TooLargeTemplate:             "too large {maximum}",
+		PictureLabelTemplate:         "[crop {handle} {region}]",
+		OriginalPictureLabelTemplate: "[whole {handle} {width}x{height}]",
+	}
+	svc := cropService(t, fakeInputs{data: picture(t)}, crop)
+	result, err := svc.Inspect(context.Background(), cropCommand(`{"image":"@img1","show_picture":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Pictures) != 1 || result.Pictures[0].URL != "/api/v1/assets/a1" ||
+		result.Pictures[0].Label != "[whole @img1 100x100]" {
+		t.Fatalf("pictures = %+v", result.Pictures)
+	}
 }
