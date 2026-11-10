@@ -45,11 +45,11 @@ func (r *Repository) SetSessionReasoningEffort(ctx context.Context, ownerID, ses
 // compaction. found is false for a missing or foreign session.
 func (r *Repository) SessionContext(ctx context.Context, ownerID, sessionID string) (chat.SessionContext, bool, error) {
 	var state chat.SessionContext
-	var prompt, completion sql.NullInt64
+	var prompt, completion, vision sql.NullInt64
 	var model, updated string
 	err := r.db.QueryRowContext(ctx, `SELECT reasoning_effort, context_prompt_tokens, context_completion_tokens,
-		context_model, context_updated_at, chat_model FROM go_chat_sessions WHERE id = ? AND owner_id = ?`,
-		sessionID, ownerID).Scan(&state.ReasoningEffort, &prompt, &completion, &model, &updated, &state.ChatModel)
+		context_vision_tokens, context_model, context_updated_at, chat_model FROM go_chat_sessions WHERE id = ? AND owner_id = ?`,
+		sessionID, ownerID).Scan(&state.ReasoningEffort, &prompt, &completion, &vision, &model, &updated, &state.ChatModel)
 	if errors.Is(err, sql.ErrNoRows) {
 		return chat.SessionContext{}, false, nil
 	}
@@ -57,7 +57,8 @@ func (r *Repository) SessionContext(ctx context.Context, ownerID, sessionID stri
 		return chat.SessionContext{}, false, fmt.Errorf("read chat session context: %w", err)
 	}
 	if prompt.Valid && completion.Valid {
-		usage := &chat.ContextUsage{PromptTokens: int(prompt.Int64), CompletionTokens: int(completion.Int64), Model: model}
+		usage := &chat.ContextUsage{PromptTokens: int(prompt.Int64), CompletionTokens: int(completion.Int64),
+			VisionTokens: int(vision.Int64), Model: model}
 		if updated != "" {
 			if usage.UpdatedAt, err = parseTime(updated); err != nil {
 				return chat.SessionContext{}, false, err
@@ -79,17 +80,18 @@ func (r *Repository) SessionContext(ctx context.Context, ownerID, sessionID stri
 // RecordContextUsage replaces the usage of the owner's session; nil records
 // that the upstream reported none.
 func (r *Repository) RecordContextUsage(ctx context.Context, ownerID, sessionID string, usage *chat.ContextUsage) error {
-	var prompt, completion any
+	var prompt, completion, vision any
 	model, updated := "", ""
 	if usage != nil {
 		prompt, completion, model = usage.PromptTokens, usage.CompletionTokens, usage.Model
+		vision = usage.VisionTokens
 		if !usage.UpdatedAt.IsZero() {
 			updated = formatTime(usage.UpdatedAt)
 		}
 	}
 	if _, err := r.db.ExecContext(ctx, `UPDATE go_chat_sessions SET context_prompt_tokens = ?,
-		context_completion_tokens = ?, context_model = ?, context_updated_at = ?
-		WHERE id = ? AND owner_id = ?`, prompt, completion, model, updated, sessionID, ownerID); err != nil {
+		context_completion_tokens = ?, context_vision_tokens = ?, context_model = ?, context_updated_at = ?
+		WHERE id = ? AND owner_id = ?`, prompt, completion, vision, model, updated, sessionID, ownerID); err != nil {
 		return fmt.Errorf("record chat session context usage: %w", err)
 	}
 	return nil
@@ -138,7 +140,7 @@ func (r *Repository) SaveCompaction(ctx context.Context, compaction chat.Compact
 		return chat.Compaction{}, fmt.Errorf("insert chat compaction: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE go_chat_sessions SET context_prompt_tokens = NULL,
-		context_completion_tokens = NULL, context_model = '', context_updated_at = ''
+		context_completion_tokens = NULL, context_vision_tokens = NULL, context_model = '', context_updated_at = ''
 		WHERE id = ? AND owner_id = ?`, compaction.SessionID, compaction.OwnerID); err != nil {
 		return chat.Compaction{}, fmt.Errorf("reset chat session context usage: %w", err)
 	}

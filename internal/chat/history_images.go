@@ -149,7 +149,7 @@ func (policy HistoryLookupPolicy) apply(
 			index := matchCandidate(candidates, item.Attachment, item.URL)
 			if index < 0 {
 				// A handle of an image without a picture: nothing can be shown.
-				result.Pictures = append(result.Pictures, ToolPicture{Handle: item.Attachment.Handle})
+				result.Pictures = append(result.Pictures, ToolPicture{Handle: item.Attachment.Handle, Purpose: ToolPictureHistory})
 				continue
 			}
 			if !admit(index) {
@@ -159,7 +159,7 @@ func (policy HistoryLookupPolicy) apply(
 			fact := candidates[index].fact
 			fact.Handle, fact.Shown = item.Attachment.Handle, true
 			result.Images = append(result.Images, fact)
-			result.Pictures = append(result.Pictures, ToolPicture{Handle: item.Attachment.Handle, URL: candidates[index].url})
+			result.Pictures = append(result.Pictures, ToolPicture{Handle: item.Attachment.Handle, URL: candidates[index].url, Purpose: ToolPictureHistory})
 		}
 	}
 	result.Used = len(surfaced)

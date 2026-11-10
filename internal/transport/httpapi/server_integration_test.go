@@ -1299,6 +1299,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		RetiredModels:              taskCatalog.RetiredModelSuccessors(),
 		// The harness deployment chats with the DeepSeek profile (#322).
 		Models:                chat.ModelPolicy{Model: "deepseek", Thinking: applicationSchema.Chat.Agent.Thinking},
+		VisionBudget:          func(model string) int { return chat.EffectiveVisionImages(applicationSchema.Chat, model) },
 		DefaultTitle:          applicationSchema.Chat.Defaults.Title,
 		BranchTitleTemplate:   applicationSchema.Chat.Defaults.BranchTitleTemplate,
 		CanvasProjectIDPrefix: applicationSchema.Canvas.Defaults.ProjectIDPrefix,

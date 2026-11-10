@@ -144,11 +144,28 @@ type ToolResult struct {
 // ToolPicture is one picture a tool shows the Agent, by handle and platform URL.
 // Fresh marks a picture this turn's generation just produced (#245): it is
 // framed as a result to inspect, not as a historical lookup.
+//
+// Purpose is the vision role the picture plays (#247): "result" and "render"
+// are this turn's work, "history" a lookup, "crop" an inspect_image view. It
+// selects the role's place quota and detail. Detail overrides the role's
+// detail when set (a crop carries the crop policy's), and Label is a complete
+// label for a view the default templates cannot name (a crop region).
 type ToolPicture struct {
-	Handle string
-	URL    string
-	Fresh  bool
+	Handle  string
+	URL     string
+	Fresh   bool
+	Purpose string
+	Detail  string
+	Label   string
 }
+
+// Tool picture purposes (#247).
+const (
+	ToolPictureResult  = "result"
+	ToolPictureRender  = "render"
+	ToolPictureHistory = "history"
+	ToolPictureCrop    = "crop"
+)
 
 // ToolTaskIdentity contains only a server-verified paid-step binding. Skill
 // calls use their persisted step key, rather than a generated Chat key.
@@ -192,6 +209,13 @@ type OrchestratorConfig struct {
 		owner generation.OwnerID,
 		url string,
 	) (string, bool)
+	// VisionAssetInline 把风格锁的资产 ID 转成 data URI（#247）；nil 时风格
+	// 锁参考图只保留文字说明，不占视觉预算。
+	VisionAssetInline func(
+		ctx context.Context,
+		owner generation.OwnerID,
+		assetID string,
+	) (string, bool)
 	// TaskCanceler 供停止轮次时取消该轮已绑定的生成任务（尽力而为，
 	// 失败只记录日志，不阻塞停止语义）。
 	TaskCanceler func(ctx context.Context, ownerID, taskID string) error
@@ -233,6 +257,13 @@ type Orchestrator struct {
 		ctx context.Context,
 		owner generation.OwnerID,
 		url string,
+	) (string, bool)
+	// visionAssetInline 把风格锁的资产 ID（不是 URL）转成 data URI；nil 表示
+	// 风格锁参考图不进入视觉上下文（#247）。
+	visionAssetInline func(
+		ctx context.Context,
+		owner generation.OwnerID,
+		assetID string,
 	) (string, bool)
 	taskCanceler func(ctx context.Context, ownerID, taskID string) error
 	toolNote     func(tool catalog.ChatToolSchema, options TurnOptions) string
@@ -591,29 +622,30 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 	}
 	registry.offeringAllowed = config.OfferingAllowed
 	return &Orchestrator{
-		service:       config.Service,
-		schema:        config.Schema,
-		model:         config.Model,
-		dsmlFor:       config.DSMLFor,
-		visionInline:  config.VisionInline,
-		agent:         config.Agent,
-		tools:         config.Tools,
-		logger:        config.Logger,
-		registry:      registry,
-		agentScope:    registry.scope,
-		configuration: config.Configuration,
-		taskCanceler:  config.TaskCanceler,
-		toolNote:      config.ToolNote,
-		taskLookup:    config.TaskLookup,
-		taskGet:       config.TaskGet,
-		stopConsent:   config.StopConsent,
-		texts:         config.Texts,
-		queue:         make(chan ProcessTurn, config.Schema.Agent.QueueSize),
-		queued:        map[string]struct{}{},
-		activeCancel:  map[string]context.CancelFunc{},
-		canceledTurn:  map[string]struct{}{},
-		consentWaits:  map[string]*consentSuspend{},
-		compacting:    map[string]*compactionLock{},
+		service:           config.Service,
+		schema:            config.Schema,
+		model:             config.Model,
+		dsmlFor:           config.DSMLFor,
+		visionInline:      config.VisionInline,
+		visionAssetInline: config.VisionAssetInline,
+		agent:             config.Agent,
+		tools:             config.Tools,
+		logger:            config.Logger,
+		registry:          registry,
+		agentScope:        registry.scope,
+		configuration:     config.Configuration,
+		taskCanceler:      config.TaskCanceler,
+		toolNote:          config.ToolNote,
+		taskLookup:        config.TaskLookup,
+		taskGet:           config.TaskGet,
+		stopConsent:       config.StopConsent,
+		texts:             config.Texts,
+		queue:             make(chan ProcessTurn, config.Schema.Agent.QueueSize),
+		queued:            map[string]struct{}{},
+		activeCancel:      map[string]context.CancelFunc{},
+		canceledTurn:      map[string]struct{}{},
+		consentWaits:      map[string]*consentSuspend{},
+		compacting:        map[string]*compactionLock{},
 
 		backgroundWarned: map[string]time.Time{},
 	}, nil
@@ -1344,7 +1376,7 @@ func (orchestrator *Orchestrator) Process(
 				orchestrator.agentFailureMessage(ctx, err),
 			)
 		}
-		orchestrator.recordUsage(ctx, command, request.Model, completion.Usage)
+		orchestrator.recordUsage(ctx, command, request.Model, completion.Usage, request)
 		if err := streamFilter.Flush(round.emitText); err != nil {
 			if orchestrator.turnCanceled(turnKey) {
 				return finalizeStop()
@@ -1377,7 +1409,7 @@ func (orchestrator *Orchestrator) Process(
 			},
 		)
 		if summaryErr == nil {
-			orchestrator.recordUsage(ctx, command, summaryRequest.Model, summary.Usage)
+			orchestrator.recordUsage(ctx, command, summaryRequest.Model, summary.Usage, summaryRequest)
 			summaryErr = summaryFilter.Flush(summaryRound.emitText)
 		}
 		if summaryErr != nil {
@@ -1556,6 +1588,11 @@ func (orchestrator *Orchestrator) Process(
 			return err
 		}
 		results := turnResults(assistant, boundTasks)
+		// Tool pictures share the request's vision budget (#247): the base
+		// request's pictures spend first, and every round of this turn keeps
+		// spending from the same count.
+		toolBudget := orchestrator.visionBudget(command.Options)
+		toolSpend := orchestrator.requestVisionSpend(request)
 		toolContent, imageURLs, taskBindings, toolErr :=
 			orchestrator.executeTools(
 				processCtx,
@@ -1566,6 +1603,8 @@ func (orchestrator *Orchestrator) Process(
 				assistant.ToolCalls,
 				&turn,
 				&results,
+				toolBudget,
+				&toolSpend,
 			)
 		// Handles given during the round stay with the reply, so the next
 		// round and the final write keep the numbers the Agent was told (#25).
@@ -1691,7 +1730,7 @@ func (orchestrator *Orchestrator) Process(
 			followUpErr = streamErr
 			break
 		}
-		orchestrator.recordUsage(ctx, command, followUp.Model, next.Usage)
+		orchestrator.recordUsage(ctx, command, followUp.Model, next.Usage, followUp)
 		if err := streamFilter.Flush(followUpRound.emitText); err != nil {
 			if orchestrator.turnCanceled(turnKey) {
 				return finalizeStop()
@@ -1920,29 +1959,39 @@ func (orchestrator *Orchestrator) agentRequest(
 			Content: systemPrompt,
 		}},
 	}
-	visibleImages := orchestrator.selectVisionImages(
-		indexedByMessage,
-		options.ReferenceImageIndices,
+	// The vision budget (#247) classifies the request's pictures by purpose.
+	// The current turn's artboard snapshot is its primary input, so it spends
+	// the canvas role's places before any history picture does (#16).
+	budget := orchestrator.visionBudget(options)
+	spend := visionSpend{}
+	var canvasParts []agents.ContentPart
+	var canvasShown map[int]bool
+	if budget.Enabled && lastUserMessage > summarized && lastUserMessage >= 0 {
+		canvasParts, canvasShown = orchestrator.canvasSnapshotParts(
+			ctx, ownerID, history[lastUserMessage],
+			budget.roleQuota(catalog.ChatVisionSourceCanvas))
+		canvasTokens := budget.tokenCostFor(catalog.ChatVisionSourceCanvas)
+		for _, part := range canvasParts {
+			if part.Kind == orchestrator.schema.Context.ImagePartKind {
+				spend.Images++
+				spend.Tokens += canvasTokens
+				spend.Bytes += int64(len(part.URL))
+			}
+		}
+	}
+	plan := orchestrator.planVision(
+		ctx, ownerID, history, indexedByMessage, summarized, lastUserMessage,
+		options, spend,
 	)
 	// The newest generated pictures (a 3D result's thumbnail included) are shown
 	// to the model too, so "the one you just made" can be looked at. They ride
 	// with the latest user message: image parts are not valid in assistant turns.
-	generatedParts := orchestrator.generatedVisionParts(ctx, ownerID, history, indexedByMessage)
-	// 内联失败（超过大小上限、非图片、打开失败）的图不能占住
-	// maximum_vision_images 名额：只有真正渲染成图片部分的才计数。
-	renderedVisionImages := 0
-	visionImageLimit := min(
-		orchestrator.schema.Context.MaximumVisionImages,
-		orchestrator.schema.Context.RecentImageLimit,
-	)
-	// The current turn's artboard snapshot is its primary input, so it takes
-	// its place in the vision limit before any history picture does (#16).
-	var canvasParts []agents.ContentPart
-	var canvasShown map[int]bool
-	if lastUserMessage > summarized && lastUserMessage >= 0 {
-		canvasParts, canvasShown = orchestrator.canvasSnapshotParts(
-			ctx, ownerID, history[lastUserMessage], visionImageLimit)
-		renderedVisionImages += len(canvasShown)
+	generatedParts := orchestrator.plannedGeneratedParts(plan)
+	styleParts := orchestrator.plannedStyleParts(plan)
+	overflowNote := budget.overflowText(plan.Dropped)
+	visionOffNote := ""
+	if plan.Off {
+		visionOffNote = budget.VisionOff
 	}
 	for messageIndex, message := range history {
 		if messageIndex <= summarized || !orchestrator.contextMessage(message) {
@@ -1967,28 +2016,9 @@ func (orchestrator *Orchestrator) agentRequest(
 			content += text
 		}
 		for _, image := range images {
-			visionURL := ""
-			if visibleImages[image.index] &&
+			// A selected picture is already budgeted and inlined by the plan.
+			if pick, picked := plan.pickFor(messageIndex, image.slot-1); picked &&
 				message.Role == orchestrator.schema.Roles.User {
-				visionURL = image.url
-				if !visionSafeImage(visionURL) && orchestrator.visionInline != nil {
-					inlined, ok := orchestrator.visionInline(
-						ctx,
-						generation.OwnerID(ownerID),
-						image.url,
-					)
-					if !ok {
-						visionURL = ""
-					} else {
-						visionURL = inlined
-					}
-				}
-			}
-			if visionURL != "" && renderedVisionImages >= visionImageLimit {
-				visionURL = ""
-			}
-			if visionURL != "" {
-				renderedVisionImages++
 				if len(parts) == 0 && content != "" {
 					parts = append(parts, agents.ContentPart{
 						Kind: orchestrator.schema.Context.TextPartKind,
@@ -1998,14 +2028,14 @@ func (orchestrator *Orchestrator) agentRequest(
 				}
 				parts = append(parts, agents.ContentPart{
 					Kind:   orchestrator.schema.Context.ImagePartKind,
-					URL:    visionURL,
-					Detail: orchestrator.schema.Context.ImageDetail,
+					URL:    pick.URL,
+					Detail: pick.Detail,
 				})
 				// The picture itself carries no name; its handle label does.
-				if label, structured := orchestrator.attachmentLabel(message, image.slot, image.index); structured {
+				if pick.Label != "" {
 					parts = append(parts, agents.ContentPart{
 						Kind: orchestrator.schema.Context.TextPartKind,
-						Text: label,
+						Text: pick.Label,
 					})
 				}
 				continue
@@ -2077,6 +2107,24 @@ func (orchestrator *Orchestrator) agentRequest(
 				content = ""
 			}
 			parts = append(parts, generatedParts...)
+		}
+		if messageIndex == lastUserMessage && len(styleParts) > 0 {
+			if len(parts) == 0 && content != "" {
+				parts = append(parts, agents.ContentPart{
+					Kind: orchestrator.schema.Context.TextPartKind,
+					Text: content,
+				})
+				content = ""
+			}
+			parts = append(parts, styleParts...)
+		}
+		if messageIndex == lastUserMessage && message.Role == orchestrator.schema.Roles.User {
+			if overflowNote != "" {
+				appendText(overflowNote)
+			}
+			if visionOffNote != "" {
+				appendText(visionOffNote)
+			}
 		}
 		// 历史里的 assistant.tool_calls 折叠为文本摘要：严格的 OpenAI
 		// 兼容上游要求 assistant.tool_calls 跟随配对的 tool 消息，而
@@ -2471,6 +2519,8 @@ func (orchestrator *Orchestrator) executeTools(
 	storedCalls []ToolCall,
 	turn *Turn,
 	produced *Message,
+	budget visionBudget,
+	spend *visionSpend,
 ) ([]agents.Message, []string, map[string]string, error) {
 	registry, registryErr := orchestrator.registryFor(ctx)
 	if registryErr != nil {
@@ -2775,7 +2825,7 @@ func (orchestrator *Orchestrator) executeTools(
 			ToolCallID: call.ID,
 		}
 		orchestrator.attachToolPictures(ctx, command.OwnerID, &reply,
-			picturesWithHandles(*produced, imagesBefore, result.Pictures))
+			picturesWithHandles(*produced, imagesBefore, result.Pictures), budget, spend)
 		results = append(results, reply)
 		turn.Checkpoint.Completed = append(turn.Checkpoint.Completed, results[len(results)-1])
 		turn.Checkpoint.ImageURLs = append(turn.Checkpoint.ImageURLs, result.ImageURLs...)
