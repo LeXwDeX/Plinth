@@ -4138,18 +4138,40 @@ def scenario_preferences(api, offerings, work, enabled=True):
     if not selected or not rejected:
         return
 
+    # A later pick of an earlier candidate (A -> B -> A) is the newest action on
+    # A: its record keeps the ID but becomes the newest selection again, so the
+    # prompt must continue from A instead of the superseded B.
+    for prompt in (prompts[2], prompts[0]):
+        task = by_prompt[prompt]
+        status, body = api.json("PUT", f"/api/v1/chat/sessions/{session}/pick", {
+            "kind": "image", "taskId": task.get("task_id") or task.get("id"), "assetId": assets[prompt],
+        })
+        record(f"#241 re-pick candidate {prompts.index(prompt)}", status == 200,
+               f"status={status} {json.dumps(body, ensure_ascii=False)[:160]}")
+    status, body = api.json("GET", preferences_route)
+    admitted = body.get("preferences") or []
+    reselected = [item for item in admitted if item.get("kind") == "selected"]
+    record("#241 re-selecting an earlier candidate becomes the newest selection",
+           status == 200 and len(reselected) == 2
+           and reselected[0].get("direction") == prompts[0]
+           and reselected[0].get("assetId") == assets[prompts[0]],
+           f"status={status} selected={json.dumps(reselected, ensure_ascii=False)[:300]}")
+
     # The next Agent turn reads the preference block and carries it into the
     # tool prompt (the fake-only prompt_from_preferences convention).
     _task, prompt, why = _preference_prompt_turn(api, session, work, image_model, "按偏好再画一张")
     record("#241 the next prompt carries the chosen direction",
            bool(_task) and prompts[0] in prompt, why or f"prompt={prompt[:220]!r}")
+    record("#241 the next prompt follows the latest reselection",
+           prompts[2] not in prompt, f"prompt={prompt[:220]!r}")
     record("#241 the next prompt avoids the refused direction and its reason",
            prompts[1] in prompt and "too realistic" in prompt and "风格不对" in prompt,
            f"prompt={prompt[:220]!r}")
     system = _work_ledger_wait_system(work, session, prompts[0], stack="preferences")
     record("#241 the system prompt frames the preferences",
            "<<<PREFERENCES>>>" in system and "<<<END_PREFERENCES>>>" in system
-           and prompts[0] in system and prompts[1] in system and "too realistic" in system,
+           and prompts[0] in system and prompts[1] in system and "too realistic" in system
+           and "- 已选用：PREF-DIR-2" not in system,
            f"frame={'yes' if '<<<PREFERENCES>>>' in system else 'no'}")
 
     # A manual compaction keeps the preference block: it is stored session data,

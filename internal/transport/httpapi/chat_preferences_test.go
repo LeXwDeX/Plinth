@@ -113,6 +113,13 @@ func TestPreferenceWritesRejectMalformedBodiesAndUnknownReasons(t *testing.T) {
 		`{"kind":"image","taskId":"someone-elses-task","assetId":"someone-elses-asset"}`,
 		`{"signal":"approve","handles":[{"kind":"image","taskId":"own-task","assetId":"own-asset"}]}`,
 		`{"signal":"regenerate","handles":[]}`,
+		// Both write shapes at once are refused, not silently resolved.
+		`{"signal":"regenerate","handles":[{"kind":"image","taskId":"own-task","assetId":"own-asset"}],` +
+			`"kind":"image","taskId":"own-task","assetId":"own-asset"}`,
+		`{"signal":"regenerate","handles":[{"kind":"image","taskId":"own-task","assetId":"own-asset"}],` +
+			`"reasonPreset":"style"}`,
+		`{"signal":"regenerate","handles":[{"kind":"image","taskId":"own-task","assetId":"own-asset"}],` +
+			`"reasonText":"too realistic"}`,
 	} {
 		response := grantTestRequest(t, handler, cookie, http.MethodPost, preferencesPath(sessionID), body, "")
 		if response.Code != http.StatusBadRequest {

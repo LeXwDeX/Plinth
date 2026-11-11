@@ -278,6 +278,15 @@ describe('session preference wiring (#241)', () => {
     expect(chatMessage).toContain('onReject={onReject}');
   });
 
+  it('refreshes the shared preference list after the pick recorded a selection', () => {
+    // A pick writes a selected preference on the server; the cache the sidebar
+    // and the result cards read must follow it instead of staying stale.
+    const start = agentDialog.indexOf('const pickCandidate = useCallback');
+    const block = agentDialog.slice(start, start + 520);
+    expect(start).toBeGreaterThan(0);
+    expect(block).toContain('void refreshSessionPreferences();');
+  });
+
   it('reports the three weak signals: regenerate, prompt edit and canvas repaint', () => {
     expect(agentDialog).toMatch(/recordPreferenceSignal\('regenerate', generatedPictureClaims\(produced\)\)/);
     expect(agentDialog).toMatch(/recordPreferenceSignal\('prompt_edit', replaced\.flatMap\(generatedPictureClaims\)\)/);

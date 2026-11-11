@@ -198,6 +198,108 @@ func TestRejectionReplacesTheObjectAndClearsACurrentPick(t *testing.T) {
 	}
 }
 
+// Re-selecting an earlier candidate (A -> B -> A) is the latest action on A:
+// its record keeps its identity but must become the newest record, so the
+// prompt continues from A and not from B. Before #241 was fixed the replaced
+// record kept its first created_at and the prompt injected B again.
+func TestRepickingAnEarlierCandidateBecomesTheNewestSelection(t *testing.T) {
+	verifier := &recordingVerifier{held: map[string]map[string]bool{}}
+	clock := time.Date(2026, 7, 26, 10, 0, 0, 0, time.UTC)
+	rig := newPreferencesRigWith(t, func(config *chat.ServiceConfig) {
+		config.Handles = chat.NewHandlePolicy(catalog.ChatContextSchema{})
+		config.Attachments = verifier
+		config.Clock = func() time.Time {
+			clock = clock.Add(time.Second)
+			return clock
+		}
+	})
+	ctx := context.Background()
+	session, err := rig.service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier.held = heldCandidates("owner-a", session.ID)
+	seedResultCard(t, rig.repository, "owner-a", session.ID)
+	pick := func(assetID string) {
+		t.Helper()
+		if _, err := rig.service.PickCandidate(ctx, "owner-a", session.ID,
+			chat.AttachmentRef{TaskID: "task-1", AssetID: assetID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pick("asset-1")
+	first, err := rig.service.ListPreferences(ctx, "owner-a", session.ID)
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first selection = %+v, %v", first, err)
+	}
+	pick("asset-2")
+	pick("asset-1")
+	preferences, err := rig.service.ListPreferences(ctx, "owner-a", session.ID)
+	if err != nil || len(preferences) != 2 {
+		t.Fatalf("preferences = %+v, %v", preferences, err)
+	}
+	if preferences[0].AssetID != "asset-1" || preferences[1].AssetID != "asset-2" {
+		t.Fatalf("re-selecting A must put it in front of B: %+v", preferences)
+	}
+	if preferences[0].ID != first[0].ID {
+		t.Fatalf("the replaced record changed identity: %q -> %q", first[0].ID, preferences[0].ID)
+	}
+	if !preferences[0].CreatedAt.After(preferences[1].CreatedAt) {
+		t.Fatalf("a re-selected record kept its old action time: %+v", preferences)
+	}
+	system := rig.systemPrompt(t, session.ID)
+	if strings.Count(system, "- 已选用：") != 1 ||
+		!strings.Contains(system, "- 已选用：a silver fox in the snow（@img1）") ||
+		strings.Contains(system, "- 已选用：a silver fox in the snow（@img2）") {
+		t.Fatalf("the prompt does not continue from the re-selected candidate: %q", system)
+	}
+}
+
+// The cap evicts the oldest explicit record. A re-selected record is the
+// latest action, so it must survive while the record it superseded (or any
+// older record) is evicted instead.
+func TestReselectedRecordIsNotEvictedAsTheOldest(t *testing.T) {
+	verifier := &recordingVerifier{held: map[string]map[string]bool{}}
+	clock := time.Date(2026, 7, 26, 10, 0, 0, 0, time.UTC)
+	service, repository := newPreferenceService(t, verifier, func(config *chat.ServiceConfig) {
+		config.Preferences.MaximumEntries = 2
+		config.Preferences.MaximumPromptItems = 2
+		config.Clock = func() time.Time {
+			clock = clock.Add(time.Second)
+			return clock
+		}
+	})
+	ctx := context.Background()
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier.held = heldCandidates("owner-a", session.ID)
+	seedResultCard(t, repository, "owner-a", session.ID)
+	for _, assetID := range []string{"asset-1", "asset-2", "asset-1"} {
+		if _, err := service.PickCandidate(ctx, "owner-a", session.ID,
+			chat.AttachmentRef{TaskID: "task-1", AssetID: assetID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A third record pushes the cap: the oldest record goes, not the reselected one.
+	if _, err := service.RecordRejection(ctx, "owner-a", session.ID,
+		chat.AttachmentRef{TaskID: "task-2", AssetID: "asset-4"}, "style", ""); err != nil {
+		t.Fatal(err)
+	}
+	preferences, err := service.ListPreferences(ctx, "owner-a", session.ID)
+	if err != nil || len(preferences) != 2 {
+		t.Fatalf("preferences = %+v, %v", preferences, err)
+	}
+	kept := map[string]bool{}
+	for _, preference := range preferences {
+		kept[preference.AssetID] = true
+	}
+	if !kept["asset-1"] || kept["asset-2"] || !kept["asset-4"] {
+		t.Fatalf("the reselected record was evicted as the oldest: %+v", preferences)
+	}
+}
+
 func TestSignalsAreUnconfirmedAndOnlyStoreVerifiedObjects(t *testing.T) {
 	verifier := &recordingVerifier{held: map[string]map[string]bool{}}
 	service, repository := newPreferenceService(t, verifier, nil)
@@ -399,11 +501,19 @@ type preferencesRig struct {
 
 func newPreferencesRig(t *testing.T) *preferencesRig {
 	t.Helper()
+	return newPreferencesRigWith(t, nil)
+}
+
+func newPreferencesRigWith(t *testing.T, adjust func(*chat.ServiceConfig)) *preferencesRig {
+	t.Helper()
 	rig := &preferencesRig{}
 	rig.repository = newMemoryChatRepository()
 	rig.service = newChatServiceWith(t, rig.repository, func(config *chat.ServiceConfig) {
 		config.MaximumSessionNotes = 2000
 		config.Preferences = preferenceSchemaForTest()
+		if adjust != nil {
+			adjust(config)
+		}
 	})
 	schema := configuredChatSchema(t)
 	schema.Agent.Vision = false

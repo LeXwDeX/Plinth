@@ -91,6 +91,12 @@ func (s *Server) postChatSessionPreferences(writer http.ResponseWriter, request 
 	var signal string
 	_ = json.Unmarshal(body[fields.Signal], &signal)
 	if signal != "" {
+		// A body carrying a signal and a rejection claim (or a rejection reason)
+		// is two write shapes at once; refuse it instead of silently choosing one.
+		if s.chatPreferenceBodyMixesSignalAndRejection(body) {
+			s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidParameters)
+			return
+		}
 		refs := s.chatAttachmentRefs(body, fields.Handles)
 		preferences, err := s.chat.RecordSignal(request.Context(), string(owner), sessionID, signal, refs)
 		if err != nil {
@@ -118,6 +124,28 @@ func (s *Server) postChatSessionPreferences(writer http.ResponseWriter, request 
 	writeJSON(writer, http.StatusOK, map[string]any{
 		s.application.Chat.API.ResponseFields.Preferences: []map[string]any{s.chatPreferenceWire(preference)},
 	})
+}
+
+// chatPreferenceBodyMixesSignalAndRejection reports a body that speaks both
+// write shapes: a weak signal plus any rejection member (an attachment claim, a
+// reason preset or reason text). A signal body is only the signal and its
+// handles; the two shapes never mix.
+func (s *Server) chatPreferenceBodyMixesSignalAndRejection(body map[string]json.RawMessage) bool {
+	fields := s.application.Chat.API.Preference
+	attachment := s.application.Chat.API.Attachment
+	for _, name := range []string{
+		fields.ReasonPreset, fields.ReasonText,
+		attachment.Kind, attachment.URL, attachment.AssetID, attachment.TaskID,
+		attachment.CaptureID, attachment.ImageSlot, attachment.CanvasLayers, attachment.CanvasSources,
+	} {
+		if name == "" {
+			continue
+		}
+		if _, present := body[name]; present {
+			return true
+		}
+	}
+	return false
 }
 
 // putChatSessionPreference edits one record: its direction, its reason and

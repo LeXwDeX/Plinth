@@ -23,38 +23,55 @@ export function useSessionPreferences(client: ChatBrowserClient, sessionId: stri
   const key = available ? preferencesKey(sessionId) : null;
   const { data, error, isLoading } = useSWR<ChatPreference[]>(
     key,
-    ([, id]: readonly [string, string]) => client.listPreferences(id).catch(() => []),
+    ([, id]: readonly [string, string]) => client.listPreferences(id),
     { revalidateOnFocus: false },
   );
 
   const replace = useCallback((next: ChatPreference[]) => mutate(key, next, { revalidate: false }), [key, mutate]);
-  const append = useCallback((created: ChatPreference[]) => {
+  // The server reuses the record ID when a later action replaces the same object
+  // (a pick becomes a rejection, or an earlier candidate is picked again), so a
+  // created record is an upsert, never an "add only if unseen" append: dropping
+  // it would keep showing the superseded kind. The server lists newest first and
+  // a replaced record carries the refreshed action time, so it goes to the front.
+  const upsert = useCallback((created: ChatPreference[]) => {
+    if (created.length === 0) return;
     void mutate(key, (current: ChatPreference[] | undefined) => {
-      const known = new Set((current ?? []).map((preference) => preference.id));
-      return [...created.filter((preference) => !known.has(preference.id)), ...(current ?? [])];
+      const incoming = new Map(created.map((preference) => [preference.id, preference]));
+      return [...created, ...(current ?? []).filter((preference) => !incoming.has(preference.id))];
     }, { revalidate: false });
+  }, [key, mutate]);
+
+  /** Read the server list again, e.g. after a pick wrote a selected preference. */
+  const refresh = useCallback(async () => {
+    if (!key) return false;
+    try {
+      await mutate(key);
+      return true;
+    } catch {
+      return false;
+    }
   }, [key, mutate]);
 
   /** Report "not this one"; true when the server stored the record. */
   const reject = useCallback(async (claim: ChatAttachmentClaim, reasonPreset: string, reasonText: string) => {
     if (!key) return false;
     try {
-      append(await client.rejectCandidate(sessionId!, claim, reasonPreset, reasonText));
+      upsert(await client.rejectCandidate(sessionId!, claim, reasonPreset, reasonText));
       return true;
     } catch {
       return false;
     }
-  }, [append, client, key, sessionId]);
+  }, [client, key, sessionId, upsert]);
 
   /** Report a weak redo signal; a failure is ignored: the signal is only a hint. */
   const signal = useCallback(async (kind: PreferenceSignal, claims: readonly ChatAttachmentClaim[]) => {
     if (!key || claims.length === 0) return;
     try {
-      append(await client.recordPreferenceSignal(sessionId!, kind, claims));
+      upsert(await client.recordPreferenceSignal(sessionId!, kind, claims));
     } catch {
       // A weak signal must never interrupt the action it describes.
     }
-  }, [append, client, key, sessionId]);
+  }, [client, key, sessionId, upsert]);
 
   const update = useCallback(async (preferenceID: string, edit: ChatPreferenceEdit) => {
     if (!key) return false;
@@ -87,6 +104,7 @@ export function useSessionPreferences(client: ChatBrowserClient, sessionId: stri
     preferences: sessionId ? data ?? [] : [],
     loaded: data !== undefined,
     failed: Boolean(error),
+    refresh,
     reject,
     signal,
     update,

@@ -393,8 +393,9 @@ func (service *Service) recordSelection(ctx context.Context, ownerID, sessionID 
 }
 
 // storePreference replaces the object's previous active record (latest action
-// wins), keeps a user-edited record's edits, enforces the entry cap and
-// returns the stored record.
+// wins) under the same ID, keeps a user-edited record's edits, refreshes the
+// action time so the latest choice is the newest entry, enforces the entry cap
+// and returns the stored record.
 func (service *Service) storePreference(ctx context.Context, ownerID, sessionID string, preference Preference) (Preference, error) {
 	now := service.clock()
 	preference.CreatedAt = now
@@ -417,7 +418,10 @@ func (service *Service) storePreference(ctx context.Context, ownerID, sessionID 
 			preference.ReasonText = current.ReasonText
 			preference.UserEdited = true
 		}
-		preference.CreatedAt = current.CreatedAt
+		// The record keeps its identity but not its old action time: the list and
+		// the prompt read created_at as "when this object last became the choice".
+		// Re-selecting an earlier candidate (A -> B -> A) must therefore move it
+		// back in front, and the cap must not evict it as the oldest record.
 		break
 	}
 	stored, found, err := service.repository.PutPreference(ctx, ownerID, sessionID, preference)

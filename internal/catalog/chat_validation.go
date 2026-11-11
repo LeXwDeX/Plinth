@@ -13,7 +13,7 @@ import (
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
 
-func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentations []CapabilityPresentation, maxPromptCharacters int) error {
+func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchema, capabilityPresentations []CapabilityPresentation, maxPromptCharacters int) error {
 	if runtime.HTTP.Routes.ChatSessionBranch != "" {
 		if strings.Count(schema.Defaults.BranchTitleTemplate, "{title}") != 1 ||
 			strings.TrimSpace(schema.Presentation.Messages.BranchTurnActive) == "" ||
@@ -756,7 +756,7 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateVisualAnchors(schema); err != nil {
 		return err
 	}
-	if err := validateChatPreferences(schema); err != nil {
+	if err := validateChatPreferences(schema, content); err != nil {
 		return err
 	}
 	for index, tool := range schema.Tools {
@@ -2772,14 +2772,20 @@ func validateVisualAnchors(schema ChatSchema) error {
 	return nil
 }
 
+// chatPreferenceReasonMessagePrefix names the UI copy of one declared rejection
+// reason. The workspace renders the preset by this key, so a Catalog that
+// declares the preset without the text would show an empty choice.
+const chatPreferenceReasonMessagePrefix = "ui.workspace.preferences.reason."
+
 // validateChatPreferences checks application.chat.preferences (#241). A
 // Catalog that declares no preference storage stays valid. When it does, the
 // bounds are positive, the prompt cap fits the entry cap, the context template
 // frames its items between two distinct markers that are not the settings
-// summary's, and every item and reason template carries the placeholders its
-// renderer fills. Reason presets are unique stable ids with a label, because a
+// summary's, every item and reason template carries the placeholders its
+// renderer fills, and every reason preset has both a label and the UI copy the
+// workspace shows. Reason presets are unique stable ids with a label, because a
 // stored record keeps the id across schema edits.
-func validateChatPreferences(schema ChatSchema) error {
+func validateChatPreferences(schema ChatSchema, content ContentSchema) error {
 	preferences := schema.Preferences
 	// A zero entry cap disables the feature (the #238 "before" Catalog keeps the
 	// rest of the block, so only the cap says off). It is valid and injects
@@ -2836,6 +2842,10 @@ func validateChatPreferences(schema ChatSchema) error {
 		}
 		if seen[preset.ID] {
 			return fmt.Errorf("chat.preferences.reason_presets[%d].id 重复: %q", index, preset.ID)
+		}
+		if strings.TrimSpace(content.Messages[chatPreferenceReasonMessagePrefix+preset.ID]) == "" {
+			return fmt.Errorf("chat.preferences.reason_presets[%d] 缺少 %s%s 文案",
+				index, chatPreferenceReasonMessagePrefix, preset.ID)
 		}
 		seen[preset.ID] = true
 	}

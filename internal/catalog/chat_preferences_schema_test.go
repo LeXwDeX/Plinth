@@ -118,6 +118,9 @@ func TestChatPreferencesDeclarationIsValidated(t *testing.T) {
 		{"a preset without a label", func(app *catalog.ApplicationSchema) {
 			app.Chat.Preferences.ReasonPresets[0].Label = ""
 		}, "小写稳定 id 与非空 label"},
+		{"a preset without UI copy", func(app *catalog.ApplicationSchema) {
+			delete(app.Content.Messages, "ui.workspace.preferences.reason.style")
+		}, "ui.workspace.preferences.reason.style"},
 		{"no preferences response member", func(app *catalog.ApplicationSchema) {
 			app.Chat.API.ResponseFields.Preferences = ""
 		}, "api.response_fields.preferences"},

@@ -313,6 +313,7 @@ export function ChatColumn() {
   const chooseCandidate = sessionPick.choose;
   const sessionPreferences = useSessionPreferences(chatClient, activeSessionId);
   const recordPreferenceSignal = sessionPreferences.signal;
+  const refreshSessionPreferences = sessionPreferences.refresh;
   const rejectedAssets = useMemo(() => {
     const rejected = new Set<string>();
     for (const preference of sessionPreferences.preferences) {
@@ -1595,9 +1596,15 @@ export function ChatColumn() {
   // 删除：先本地移除（乐观），失败时回填服务端列表并提示，不静默吞掉错误。
   const pickCandidate = useCallback(async (claim: ChatAttachmentClaim) => {
     const ok = await chooseCandidate(claim);
-    if (!ok) toast.error(ui.pickFailed);
+    if (!ok) {
+      toast.error(ui.pickFailed);
+      return ok;
+    }
+    // #241: the pick is also a selected preference on the server. Refresh the
+    // shared list so the sidebar and the rejected candidate cards agree with it.
+    void refreshSessionPreferences();
     return ok;
-  }, [chooseCandidate, ui.pickFailed]);
+  }, [chooseCandidate, refreshSessionPreferences, ui.pickFailed]);
   // #241: "不要这个" is an explicit server fact; a failure is shown and the dialog stays open.
   const rejectCandidate = useCallback(async (claim: ChatAttachmentClaim, reasonPreset: string, reasonText: string) => {
     const ok = await sessionPreferences.reject(claim, reasonPreset, reasonText);
