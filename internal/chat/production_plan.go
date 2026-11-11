@@ -102,8 +102,9 @@ type ProductionPlanPolicy struct {
 	Usage      catalog.ChatModel3DUsageSchema
 	Production catalog.ChatModelInspectProductionSchema
 	// Localize translates the acceptance wording into the proposal turn's
-	// language; nil keeps the Schema's default language.
-	Localize func(text string) string
+	// language. The locale is the turn's own (command.Options.Locale); nil
+	// keeps the Schema's default language.
+	Localize func(locale, text string) string
 	// PurposeBudgetNote words the values a planned step would run with that
 	// are over the session purpose's budget (#129), or "" when they fit. It is
 	// optional: without it a plan carries no purpose budget note.
@@ -124,8 +125,9 @@ func (service *Service) SetProductionPlanPurposeBudget(note func(ToolCommand, ge
 
 // SetProductionPlanLocalizer installs the text translation used for the
 // acceptance criteria frozen at proposal time (#251). It is optional and runs
-// after the Schema's localizer exists.
-func (service *Service) SetProductionPlanLocalizer(localize func(string) string) {
+// after the Schema's localizer exists; the callback receives the proposal
+// turn's locale.
+func (service *Service) SetProductionPlanLocalizer(localize func(locale, text string) string) {
 	if service.productionPlans != nil {
 		service.productionPlans.Localize = localize
 	}
@@ -236,7 +238,7 @@ func (service *Service) ProposeProductionPlan(ctx context.Context, command ToolC
 			return ToolResult{NoSubmission: true}, err
 		}
 	}
-	content, err := json.Marshal(planProposedContent(stored, policy.Budget.ToolMessages, policy.localize(policy.Budget.Acceptance.Report)))
+	content, err := json.Marshal(planProposedContent(stored, policy.Budget.ToolMessages, policy.localize(command.Options.Locale, policy.Budget.Acceptance.Report)))
 	if err != nil {
 		return ToolResult{NoSubmission: true}, err
 	}

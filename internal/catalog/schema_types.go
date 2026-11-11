@@ -3631,14 +3631,17 @@ type ChatApprovalBudgetSchema struct {
 
 // ChatApprovalBudgetAcceptanceSchema words the plan's acceptance criteria
 // (#251). Criteria maps a server check id to a template filled from the
-// purpose budget: {minimum}, {maximum}, {purpose}. A check without a template
-// produces no criterion. PurposeLine names the purpose the plan was built for
-// ({purpose}); Report tells the Agent to answer each criterion in its final
-// report.
+// purpose budget: {minimum}, {maximum}, {purpose}. A range template replaces
+// it when the frozen check declares both a lower and an upper bound, so the
+// card states the same standard the checkpoint evaluates. A check without a
+// template produces no criterion. PurposeLine names the purpose the plan was
+// built for ({purpose}); Report tells the Agent to answer each criterion in
+// its final report.
 type ChatApprovalBudgetAcceptanceSchema struct {
-	PurposeLine string            `json:"purpose_line"`
-	Criteria    map[string]string `json:"criteria"`
-	Report      string            `json:"report"`
+	PurposeLine   string            `json:"purpose_line"`
+	Criteria      map[string]string `json:"criteria"`
+	RangeCriteria map[string]string `json:"range_criteria,omitempty"`
+	Report        string            `json:"report"`
 }
 
 // ChatApprovalBudgetContinuation is the turn that follows a plan approval
@@ -4970,12 +4973,16 @@ type ChatToolProcessingMessages struct {
 	// prepared, was granted or submitted; RevisionRetryPerson refuses a retry
 	// that may have been charged; RevisionApplied confirms one. {detail} and
 	// {step} are substituted where present.
-	RevisionOutsidePlan   string `json:"revision_outside_plan,omitempty"`
-	RevisionNotStarted    string `json:"revision_not_started,omitempty"`
-	RevisionRetryPerson   string `json:"revision_retry_person,omitempty"`
-	RevisionApplied       string `json:"revision_applied,omitempty"`
-	ContingencyUnknown    string `json:"contingency_unknown,omitempty"`
-	CheckpointUnavailable string `json:"checkpoint_unavailable,omitempty"`
+	RevisionOutsidePlan string `json:"revision_outside_plan,omitempty"`
+	RevisionNotStarted  string `json:"revision_not_started,omitempty"`
+	RevisionRetryPerson string `json:"revision_retry_person,omitempty"`
+	RevisionApplied     string `json:"revision_applied,omitempty"`
+	// RevisionCheckpointBlocked refuses replace/skip while a failed
+	// checkpoint still blocks the plan; the Agent must insert the declared
+	// contingency or waive the checkpoint first (#251 fix).
+	RevisionCheckpointBlocked string `json:"revision_checkpoint_blocked,omitempty"`
+	ContingencyUnknown        string `json:"contingency_unknown,omitempty"`
+	CheckpointUnavailable     string `json:"checkpoint_unavailable,omitempty"`
 	// SourceConfirmation is the refusal of a paid step on another model than
 	// the one selected on the workspace, before the person agreed (#321 D).
 	// {selected}, {source}, {step} and {reason} are substituted; {reason} is

@@ -78,6 +78,12 @@ func (executor *Executor) ReviseProcessingPlan(ctx context.Context, command chat
 	switch {
 	case errors.Is(err, processing.ErrRevisionOutsidePlan):
 		return executor.approvalRequiredRefusal(command, config)
+	case errors.Is(err, processing.ErrRevisionNotStarted):
+		return executor.revisionRefusal(command, config, config.Messages.RevisionNotStarted)
+	case errors.Is(err, processing.ErrRevisionRetryPerson):
+		return executor.revisionDecisionRefusal(command, config, config.Messages.RevisionRetryPerson)
+	case errors.Is(err, processing.ErrRevisionCheckpointBlocked):
+		return executor.revisionRefusal(command, config, config.Messages.RevisionCheckpointBlocked)
 	case errors.Is(err, processing.ErrConflict):
 		return executor.revisionRefusal(command, config, "The plan changed; read it again with get_processing_plan.")
 	case errors.Is(err, processing.ErrInvalid):
@@ -123,6 +129,20 @@ func (executor *Executor) revisionRefusal(command chat.ToolCommand, config *cata
 	}
 	content, _ := json.Marshal(map[string]any{
 		"success": false, "error": executor.localized(command, text), "next_action": "ask_user",
+	})
+	return chat.ToolResult{AgentContent: string(content), Error: text, NoSubmission: true}, nil
+}
+
+// revisionDecisionRefusal refuses a retry whose result is ambiguous: the
+// Provider may already have charged it, so the person, not the Agent, decides
+// whether to charge again.
+func (executor *Executor) revisionDecisionRefusal(command chat.ToolCommand, config *catalog.ChatToolProcessingSchema, text string) (chat.ToolResult, error) {
+	if text == "" {
+		text = "The retry may already have been charged; the person must decide."
+	}
+	content, _ := json.Marshal(map[string]any{
+		"success": false, "error": executor.localized(command, text),
+		"next_action": "ask_user", "user_decision_required": true,
 	})
 	return chat.ToolResult{AgentContent: string(content), Error: text, NoSubmission: true}, nil
 }

@@ -692,7 +692,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		return nil, err
 	}
 	// #251: the acceptance wording is frozen in the proposal turn's language.
-	chatService.SetProductionPlanLocalizer(func(text string) string { return texts.Text("", text) })
+	// Text takes the turn locale; an empty locale would never translate.
+	chatService.SetProductionPlanLocalizer(texts.Text)
 	imageReview, err := imagereview.New(imagereview.Config{
 		Context: applicationSchema.Chat.Context,
 		Review:  applicationSchema.Chat.ImageReview,

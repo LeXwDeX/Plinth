@@ -1115,6 +1115,12 @@ func validateApprovalBudget(budget ChatApprovalBudgetSchema) error {
 			return errors.New("approval_policy.budget.acceptance.criteria 含空项")
 		}
 	}
+	for check, template := range budget.Acceptance.RangeCriteria {
+		if strings.TrimSpace(check) == "" || strings.TrimSpace(template) == "" ||
+			budget.Acceptance.Criteria[check] == "" {
+			return errors.New("approval_policy.budget.acceptance.range_criteria 含空项或没有对应的 criteria")
+		}
+	}
 	if strings.TrimSpace(budget.ContextTemplate) == "" || strings.TrimSpace(budget.NoPlanState) == "" ||
 		strings.TrimSpace(budget.NoPlanText) == "" {
 		return errors.New("approval_policy.budget 的上下文文案不能为空")

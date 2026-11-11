@@ -3175,6 +3175,8 @@
         "ui.chat.review.check_names.plausible_scale": "尺寸",
         "ui.chat.review.check_names.debris": "漂浮碎片",
         "ui.chat.review.check_names.degenerate": "退化三角形",
+        "ui.chat.review.check_names.task_failed": "任务失败",
+        "ui.chat.review.check_names.checkpoint_failed": "检查点未通过",
         "ui.chat.review.used_tool": "执行了 {capability}",
         "ui.chat.message.expand_full": "展开全文",
         "ui.chat.message.collapse_full": "收起",
@@ -6622,7 +6624,7 @@
               "contingencies": {
                 "type": "array",
                 "maxItems": 4,
-                "description": "Declared repair steps for failed checkpoints. Their worst-case estimates are counted in the approved budget limit, so inserting one under a triggered checkpoint needs no new approval. A capability outside this list (and outside correction_capabilities) still needs the person's approval.",
+                "description": "Declared repair steps for failed checkpoints or failed Tasks. Their worst-case estimates are counted in the approved budget limit, so inserting one under a triggered checkpoint or Task failure needs no new approval. A capability outside this list (and outside correction_capabilities) still needs the person's approval.",
                 "items": {
                   "type": "object",
                   "properties": {
@@ -6656,14 +6658,14 @@
         {
           "name": "revise_processing_plan",
           "execution": {"implementation_key":"processing.revise","effects":["SESSION_WRITE"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"3d"},
-          "description": "Revise one processing plan of this session within the approval the person already gave. Use it after a step's server-evaluated checkpoint failed, after a step failed for a retryable reason, or to remove a step that never started. Operations: insert (only after a failed checkpoint, and only a contingency the approved production plan declared, matched by contingency_id; its estimate is already in the approved budget), replace or skip (only a step that never started and has no frozen input), retry (the same rules as a person's retry: a failure that may already have been charged or is ambiguous still asks the person), and waive_checkpoint (bounded per plan and needs a reason). Every revision needs expected_plan_version from the latest get_processing_plan; a stale version is refused. A revision outside the approved plan or budget returns approval_required: stop and ask the person; do not create a second plan on your own. Parameters are ordinary Offering parameters only, never a source or consent parameter; the server binds and re-prices the step.",
+          "description": "Revise one processing plan of this session within the approval the person already gave. Use it after a step's server-evaluated checkpoint failed, after a Task failed for a retryable reason, or to remove a step that never started. Operations: insert (after a failed checkpoint, or after a Task failure for a contingency triggered by task_failed; only a contingency the approved production plan declared, matched by contingency_id; its estimate is already in the approved budget), replace or skip (only a step that never started and has no frozen input), retry (the same rules as a person's retry: a failure that may already have been charged or is ambiguous still asks the person), and waive_checkpoint (bounded per plan and needs a reason). Every revision needs expected_plan_version from the latest get_processing_plan; a stale version is refused. A revision outside the approved plan or budget returns approval_required: stop and ask the person; do not create a second plan on your own. Parameters are ordinary Offering parameters only, never a source or consent parameter; the server binds and re-prices the step.",
           "parameters": {
             "type": "object",
             "properties": {
               "plan_id": {"type": "string", "description": "The processing plan to revise, as reported by get_processing_plan."},
               "expected_plan_version": {"type": "integer", "minimum": 1, "description": "The plan version you read; the server refuses a stale revision."},
               "operation": {"type": "string", "enum": ["insert", "replace", "skip", "retry", "waive_checkpoint"]},
-              "step_index": {"type": "integer", "minimum": 0, "description": "For insert: the index of the step whose checkpoint failed (the new step goes after it). For replace/skip/retry/waive_checkpoint: the target step's index."},
+              "step_index": {"type": "integer", "minimum": 0, "description": "For insert: the index of the step whose checkpoint failed or whose Task failed (the new step goes after it). For replace/skip/retry/waive_checkpoint: the target step's index."},
               "contingency_id": {"type": "string", "description": "For insert: the id of a contingency declared in the approved production plan."},
               "capability": {"type": "string", "description": "For replace: the new processing capability. Omit to keep the step's capability."},
               "offering_id": {"type": "string", "description": "Optional available Offering of the step's capability. Omit to keep the current or the contingency's Offering."},
@@ -7995,6 +7997,7 @@
               "revision_outside_plan": "这次修订超出了已批准的计划或预算，没有改动计划。请停下并询问用户；不要自行建立第二份计划。",
               "revision_not_started": "只能替换或跳过尚未开始、没有冻结输入的步骤；该步骤已准备、已授权或已提交，未改动计划。",
               "revision_retry_person": "这次重试可能已经扣费或结果不明，必须由用户在加工面板确认；未发起重试。",
+              "revision_checkpoint_blocked": "计划因检查点未通过而停在下一步之前；请先按预案 insert 修正，或 waive_checkpoint 豁免该检查点，再替换或跳过其他步骤。未改动计划。",
               "revision_applied": "修订已应用；计划在已批准的预算与预案内继续。",
               "contingency_unknown": "已批准的制作计划里没有这个预案，未改动计划。",
               "checkpoint_unavailable": "检查点无法评估（模型文件或报告不可读），已记为未知并继续；不要据此声称检查通过。",
@@ -8824,6 +8827,9 @@
               "plausible_scale": "最长边在 {minimum}–{maximum} 米",
               "debris": "碎片三角形占比不超过 {maximum}",
               "degenerate": "退化三角形占比不超过 {maximum}"
+            },
+            "range_criteria": {
+              "triangles": "三角面数在 {minimum}–{maximum} 之间"
             },
             "report": "最终汇报必须逐条对照这些验收标准说明是否达成；未达成时说明原因和可执行的补救选项。"
           },
@@ -15252,6 +15258,8 @@
             "ui.chat.review.check_names.plausible_scale": "Scale",
             "ui.chat.review.check_names.debris": "Loose debris",
             "ui.chat.review.check_names.degenerate": "Degenerate triangles",
+            "ui.chat.review.check_names.task_failed": "Task failure",
+            "ui.chat.review.check_names.checkpoint_failed": "Checkpoint failed",
             "ui.chat.review.used_tool": "Ran {capability}",
             "ui.chat.message.expand_full": "Show full reply",
             "ui.chat.message.collapse_full": "Show less",
@@ -18217,6 +18225,18 @@
             "chat.model3d_usage.budget_limits[semantic=texture-size].item_template": "{parameter} of {model} is {value} (textures {amount} pixels on a side), over the {maximum}-pixel texture limit of the purpose “{purpose}”",
             "chat.model3d_usage.budget_note.template": "These values are over the budget of this session's purpose “{purpose}”; the server submits them as given and refused nothing: {items}. Tell the user plainly which values are over the budget and what that may mean; unless the user explicitly asked for these values, suggest values within the budget.",
             "chat.model3d_usage.budget_note.separator": "; ",
+            "chat.approval_policy.budget.acceptance.purpose_line": "Delivery standard for the purpose “{purpose}”:",
+            "chat.approval_policy.budget.acceptance.criteria.triangles": "At most {maximum} triangles",
+            "chat.approval_policy.budget.acceptance.criteria.uv": "UVs required",
+            "chat.approval_policy.budget.acceptance.criteria.watertight": "Watertight required",
+            "chat.approval_policy.budget.acceptance.criteria.skin": "Skin required",
+            "chat.approval_policy.budget.acceptance.criteria.texture_size": "Texture side at most {maximum} pixels",
+            "chat.approval_policy.budget.acceptance.criteria.pivot_bottom_center": "Origin at the bottom centre",
+            "chat.approval_policy.budget.acceptance.criteria.plausible_scale": "Longest side between {minimum} and {maximum} metres",
+            "chat.approval_policy.budget.acceptance.criteria.debris": "Debris triangles at most {maximum} of the total",
+            "chat.approval_policy.budget.acceptance.criteria.degenerate": "Degenerate triangles at most {maximum} of the total",
+            "chat.approval_policy.budget.acceptance.range_criteria.triangles": "Between {minimum} and {maximum} triangles",
+            "chat.approval_policy.budget.acceptance.report": "In the final report, answer each acceptance criterion one by one and say whether it was met; when it was not, explain why and give actionable remedies.",
             "chat.presentation.messages.offering_choice_unavailable": "The selected option is not available right now, so nothing was submitted. Choose only from these available options: {choices}.",
             "chat.presentation.messages.source_offering_unpaired": "This source Task cannot be used with this tool, so nothing was submitted. The source must be a Task you completed successfully in this session that pairs with one of this tool's available functions (for example, a Creative Lab design preview of the same template).",
             "chat.presentation.messages.source_offering_canvas": "This turn's input is the artboard snapshot. The snapshot is not a source Task itself, and the artboard does not show exactly one design preview you completed successfully in this session that can pair, so nothing was submitted. Call again with the design preview's image handle or its Task ID; the user does not need to clear the artboard or select again.",
