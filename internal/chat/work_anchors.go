@@ -35,6 +35,12 @@ func (service *Service) workAnchorsSummary(ctx context.Context, ownerID, session
 	if sessionID == "" || strings.TrimSpace(anchors.ContextTemplate) == "" {
 		return ""
 	}
+	// The anchors block describes the session's own style lock. A project-source
+	// or off-source turn gets its style statement from the dedicated project
+	// block instead, so this block never calls a project guide a session lock.
+	if lock.Source != "" && lock.Source != StyleLockSourceSession {
+		return ""
+	}
 	text := strings.TrimSpace(lock.Text)
 	if !lock.Enabled || (text == "" && len(lock.References) == 0) {
 		return ""

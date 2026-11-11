@@ -54,6 +54,11 @@ type ApplicationSchema struct {
 	// Localization declares the UI locales and every non-default locale's
 	// copy. Omitted, the application has one locale: runtime.frontend.display_locale.
 	Localization *LocalizationSchema `json:"localization,omitempty"`
+	// Project is the owner-scoped project contract (#240): the reusable
+	// style guide, character/prop references and production conventions a
+	// session inherits. Optional so older external Catalog documents stay
+	// valid; omitted, the project routes are not registered.
+	Project *ProjectSchema `json:"project,omitempty"`
 	// ProviderDeprecations lists, per Provider, the models, wire fields and
 	// values its current documentation has deprecated or retired (#329).
 	// Catalog loading rejects an Offering that would send one. Server-side
@@ -1171,6 +1176,9 @@ type PublicApplicationSchema struct {
 	DeliveryFormats []PublicDeliveryFormat     `json:"delivery_formats"`
 	Authentication  PublicAuthenticationSchema `json:"authentication"`
 	Localization    PublicLocalizationSchema   `json:"localization"`
+	// Project is the browser-visible project contract (#240). Omitted when
+	// the Catalog predates projects.
+	Project *PublicProjectSchema `json:"project,omitempty"`
 }
 
 // PublicDeliveryFormat is the browser-visible part of ModelFormatSchema.
@@ -1299,6 +1307,20 @@ type PublicChatSchema struct {
 	// StyleLock publishes the bounds the browser needs (#154); the prompt and
 	// edit-scope templates stay server-only.
 	StyleLock PublicChatStyleLockSchema `json:"style_lock"`
+	// Preferences publishes the bounds and the declared rejection reason ids
+	// the sidebar needs (#241); the framing templates, markers and prompt
+	// paragraph stay server-only.
+	Preferences *PublicChatPreferencesSchema `json:"preferences,omitempty"`
+}
+
+// PublicChatPreferencesSchema is the browser contract of session preferences
+// (#241): the entry and text bounds and the reason preset ids. Labels reach the
+// browser through the localized UI messages, not through this projection.
+type PublicChatPreferencesSchema struct {
+	MaximumEntries             int      `json:"maximum_entries"`
+	MaximumDirectionCharacters int      `json:"maximum_direction_characters"`
+	MaximumReasonCharacters    int      `json:"maximum_reason_characters"`
+	ReasonPresets              []string `json:"reason_presets"`
 }
 
 // PublicChatStyleLockSchema is the browser contract of the session style lock
@@ -1306,6 +1328,9 @@ type PublicChatSchema struct {
 type PublicChatStyleLockSchema struct {
 	MaximumTextCharacters  int `json:"maximum_text_characters"`
 	MaximumReferenceImages int `json:"maximum_reference_images"`
+	// Sources is the three-state style source the panel offers (#240):
+	// project, session, off. The provider prompt templates stay server-side.
+	Sources []string `json:"sources,omitempty"`
 }
 
 // PublicChatModelReviewSchema is the browser contract of the read-only model
@@ -1431,6 +1456,7 @@ type PublicChatAPISchema struct {
 	Fields         ChatAPIFields           `json:"fields"`
 	ResponseFields ChatAPIResponseFields   `json:"response_fields"`
 	Attachment     ChatAttachmentAPIFields `json:"attachment"`
+	Preference     ChatPreferenceAPIFields `json:"preference,omitempty"`
 	StyleLock      ChatStyleLockAPIFields  `json:"style_lock"`
 	PromptEnhance  struct {
 		PromptField               string `json:"prompt_field"`
@@ -2897,13 +2923,18 @@ type ChatSchema struct {
 	// style anchors (#250): their bounds, kinds, Agent-facing context block and
 	// tool copy. Server side only; the browser reads no anchor projection.
 	VisualAnchors ChatVisualAnchorsSchema `json:"visual_anchors,omitempty"`
-	DSML          ChatDSMLSchema          `json:"dsml"`
-	Stream        ChatStreamSchema        `json:"stream"`
-	Tools         []ChatToolSchema        `json:"tools"`
-	AgentTools    []ChatAgentToolSchema   `json:"agent_tools,omitempty"`
-	Skills        ChatSkillsSchema        `json:"skills"`
-	Presentation  ChatPresentationSchema  `json:"presentation"`
-	Audit         ChatAuditSchema         `json:"audit"`
+	// Preferences declares the session-level record of the person's choices
+	// (#241): the bounds, the framed system-prompt block and the rejection
+	// reasons the browser offers. The templates and the framing markers stay
+	// server-only; the public projection publishes only the bounds and ids.
+	Preferences  ChatPreferencesSchema  `json:"preferences,omitempty"`
+	DSML         ChatDSMLSchema         `json:"dsml"`
+	Stream       ChatStreamSchema       `json:"stream"`
+	Tools        []ChatToolSchema       `json:"tools"`
+	AgentTools   []ChatAgentToolSchema  `json:"agent_tools,omitempty"`
+	Skills       ChatSkillsSchema       `json:"skills"`
+	Presentation ChatPresentationSchema `json:"presentation"`
+	Audit        ChatAuditSchema        `json:"audit"`
 	// ApprovalPolicy declares the per-session paid-step approval modes and
 	// which capabilities still need a human in manual mode.
 	ApprovalPolicy ChatApprovalPolicySchema `json:"approval_policy"`
@@ -3734,14 +3765,17 @@ type ChatApprovalBudgetSchema struct {
 
 // ChatApprovalBudgetAcceptanceSchema words the plan's acceptance criteria
 // (#251). Criteria maps a server check id to a template filled from the
-// purpose budget: {minimum}, {maximum}, {purpose}. A check without a template
-// produces no criterion. PurposeLine names the purpose the plan was built for
-// ({purpose}); Report tells the Agent to answer each criterion in its final
-// report.
+// purpose budget: {minimum}, {maximum}, {purpose}. A range template replaces
+// it when the frozen check declares both a lower and an upper bound, so the
+// card states the same standard the checkpoint evaluates. A check without a
+// template produces no criterion. PurposeLine names the purpose the plan was
+// built for ({purpose}); Report tells the Agent to answer each criterion in
+// its final report.
 type ChatApprovalBudgetAcceptanceSchema struct {
-	PurposeLine string            `json:"purpose_line"`
-	Criteria    map[string]string `json:"criteria"`
-	Report      string            `json:"report"`
+	PurposeLine   string            `json:"purpose_line"`
+	Criteria      map[string]string `json:"criteria"`
+	RangeCriteria map[string]string `json:"range_criteria,omitempty"`
+	Report        string            `json:"report"`
 }
 
 // ChatApprovalBudgetContinuation is the turn that follows a plan approval
@@ -3854,12 +3888,69 @@ type ChatAPISchema struct {
 	// (#244). It is server-side only; the public projection publishes the
 	// field name above.
 	SelectionMask ChatAPISelectionMaskSchema `json:"selection_mask"`
+	// Preference names the members of the preference rejection and signal
+	// request and the edit body (#241). The browser reads them from the public
+	// projection.
+	Preference    ChatPreferenceAPIFields    `json:"preference,omitempty"`
 	StyleLock     ChatStyleLockAPIFields     `json:"style_lock"`
 	PromptEnhance ChatPromptEnhanceAPISchema `json:"prompt_enhance"`
 	// SessionList bounds the paged session list (server side only).
 	SessionList ChatSessionListSchema `json:"session_list"`
 	// MessageList bounds a paged read of one conversation (server side only).
 	MessageList ChatMessageListSchema `json:"message_list"`
+}
+
+// ChatPreferencesSchema is application.chat.preferences (#241): the session's
+// record of chosen and refused directions. Entry and direction bounds are in
+// characters. The context template frames the rendered items between two
+// markers and says they are background, not instructions; the item templates
+// name a direction, its handle and, for a rejection, its reason. The reason
+// presets are the declared rejection reasons the browser offers and the prompt
+// labels.
+type ChatPreferencesSchema struct {
+	MaximumEntries             int                          `json:"maximum_entries"`
+	MaximumPromptItems         int                          `json:"maximum_prompt_items"`
+	MaximumDirectionCharacters int                          `json:"maximum_direction_characters"`
+	MaximumReasonCharacters    int                          `json:"maximum_reason_characters"`
+	ContextTemplate            string                       `json:"context_template"`
+	OpenMarker                 string                       `json:"open_marker"`
+	CloseMarker                string                       `json:"close_marker"`
+	SelectedItemTemplate       string                       `json:"selected_item_template"`
+	RejectedItemTemplate       string                       `json:"rejected_item_template"`
+	SignalItemTemplate         string                       `json:"signal_item_template"`
+	ReasonJoinTemplate         string                       `json:"reason_join_template"`
+	ReasonPresets              []ChatPreferenceReasonSchema `json:"reason_presets"`
+}
+
+// ChatPreferenceReasonSchema is one declared rejection reason. The ID is
+// stored with a preference, so it is stable and language independent; the
+// label is the browser and prompt text.
+type ChatPreferenceReasonSchema struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// ChatPreferenceAPIFields names the members of a preference write. A rejection
+// names the claimed candidate through the attachment member names plus a
+// reason preset and free text; a weak signal names the signal and the claimed
+// handles. An edit carries a direction, a reason and the active flag.
+type ChatPreferenceAPIFields struct {
+	ReasonPreset string `json:"reason_preset"`
+	ReasonText   string `json:"reason_text"`
+	Signal       string `json:"signal"`
+	Handles      string `json:"handles"`
+	Direction    string `json:"direction"`
+	Active       string `json:"active"`
+	// The read members. kind and source name the stored fact, alternatives
+	// lists the unselected handles of the same result card, explicit marks a
+	// person's action rather than a weak signal and user_edited marks an
+	// edited record. ID, task_id, asset_id, handle and created_at reuse the
+	// response and attachment member names.
+	Kind         string `json:"kind"`
+	Source       string `json:"source"`
+	Alternatives string `json:"alternatives"`
+	Explicit     string `json:"explicit"`
+	UserEdited   string `json:"user_edited"`
 }
 
 type ChatStyleLockSchema struct {
@@ -3893,6 +3984,14 @@ type ChatStyleLockSchema struct {
 	// explains that the chosen service takes no reference picture at all.
 	SkipNote        string `json:"skip_note,omitempty"`
 	UnsupportedNote string `json:"unsupported_note,omitempty"`
+	// Sources is the three-state origin of the effective style guide (#240):
+	// project inherits the session's project, session uses this session's
+	// lock, off injects nothing. The values are the only writable ones.
+	Sources []string `json:"sources,omitempty"`
+	// ProjectPromptTemplate is the provider-prompt suffix used when the
+	// effective source is the project guide ({style}, {project}). It is
+	// server-only and never enters the public projection.
+	ProjectPromptTemplate string `json:"project_prompt_template,omitempty"`
 }
 
 // ChatVisualAnchorsSchema is application.chat.visual_anchors (#250). Anchors
@@ -3945,6 +4044,9 @@ type ChatStyleLockAPIFields struct {
 	Enabled    string `json:"enabled"`
 	Text       string `json:"text"`
 	References string `json:"references"`
+	// Source is the three-state style-lock origin (#240): project, session
+	// or off. Empty leaves the field out for historical Catalogs.
+	Source string `json:"source,omitempty"`
 }
 
 // ChatMessageListSchema is the paging contract of a conversation's messages:
@@ -4094,7 +4196,10 @@ type ChatAPIFields struct {
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// ChatModel is the request field of the session chat-model write (#322
 	// Scope 5): the ID of an available model, or "" to follow the default.
-	ChatModel           string `json:"chat_model,omitempty"`
+	ChatModel string `json:"chat_model,omitempty"`
+	// ProjectID carries the optional project a new session belongs to
+	// (#240). Empty creates an unassigned session.
+	ProjectID           string `json:"project_id,omitempty"`
 	StyleLockEnabled    string `json:"style_lock_enabled,omitempty"`
 	StyleLockText       string `json:"style_lock_text,omitempty"`
 	StyleLockReferences string `json:"style_lock_references,omitempty"`
@@ -4113,6 +4218,9 @@ type ChatAPIResponseFields struct {
 	ImageURLs string `json:"image_urls"`
 	// Attachments is the message member listing its attachment objects.
 	Attachments string `json:"attachments"`
+	// Preferences is the session read member listing the active preference
+	// records of the preference routes (#241).
+	Preferences string `json:"preferences,omitempty"`
 	// Multiview is the message member with the structured multiview request
 	// a user message was sent with (#65); empty leaves it out.
 	Multiview     string `json:"multiview,omitempty"`
@@ -4227,6 +4335,12 @@ type ChatAPIResponseFields struct {
 	ChatModelName     string `json:"chat_model_name,omitempty"`
 	// StyleLock is the session DTO member carrying the session style lock.
 	StyleLock string `json:"style_lock,omitempty"`
+	// ProjectID is the session DTO member naming the project the session
+	// belongs to (#240); empty means unassigned and leaves the member out.
+	ProjectID string `json:"project_id,omitempty"`
+	// StyleLockSource is the session DTO member carrying the effective
+	// three-state style source (#240): project, session or off.
+	StyleLockSource string `json:"style_lock_source,omitempty"`
 }
 
 type ChatDefaultsSchema struct {
@@ -5073,12 +5187,16 @@ type ChatToolProcessingMessages struct {
 	// prepared, was granted or submitted; RevisionRetryPerson refuses a retry
 	// that may have been charged; RevisionApplied confirms one. {detail} and
 	// {step} are substituted where present.
-	RevisionOutsidePlan   string `json:"revision_outside_plan,omitempty"`
-	RevisionNotStarted    string `json:"revision_not_started,omitempty"`
-	RevisionRetryPerson   string `json:"revision_retry_person,omitempty"`
-	RevisionApplied       string `json:"revision_applied,omitempty"`
-	ContingencyUnknown    string `json:"contingency_unknown,omitempty"`
-	CheckpointUnavailable string `json:"checkpoint_unavailable,omitempty"`
+	RevisionOutsidePlan string `json:"revision_outside_plan,omitempty"`
+	RevisionNotStarted  string `json:"revision_not_started,omitempty"`
+	RevisionRetryPerson string `json:"revision_retry_person,omitempty"`
+	RevisionApplied     string `json:"revision_applied,omitempty"`
+	// RevisionCheckpointBlocked refuses replace/skip while a failed
+	// checkpoint still blocks the plan; the Agent must insert the declared
+	// contingency or waive the checkpoint first (#251 fix).
+	RevisionCheckpointBlocked string `json:"revision_checkpoint_blocked,omitempty"`
+	ContingencyUnknown        string `json:"contingency_unknown,omitempty"`
+	CheckpointUnavailable     string `json:"checkpoint_unavailable,omitempty"`
 	// SourceConfirmation is the refusal of a paid step on another model than
 	// the one selected on the workspace, before the person agreed (#321 D).
 	// {selected}, {source}, {step} and {reason} are substituted; {reason} is
@@ -5246,6 +5364,10 @@ type ChatToolResultFields struct {
 	// truncation and the length.
 	FinalPrompt string `json:"final_prompt,omitempty"`
 	PromptNote  string `json:"prompt_note,omitempty"`
+	// StyleSources is the optional key naming the project assets whose
+	// pictures this step actually injected (#240). It is present only when
+	// some project asset was used, so the Agent can cite them as they are.
+	StyleSources string `json:"style_sources,omitempty"`
 }
 
 // ChatAgentToolSchema 声明非生成类 agent 控制工具（set_params /
@@ -5748,10 +5870,16 @@ type CoreHTTPRoutesSchema struct {
 	ChatSessionModel2D string `json:"chat_session_model2d,omitempty"`
 	// ChatSessionBudget decides one production plan card of the session (#103):
 	// PUT {sessionID, budgetID} with {"decision": "approve"|"deny"}.
-	ChatSessionBudget     string `json:"chat_session_budget,omitempty"`
-	ChatSessionPick       string `json:"chat_session_pick"`
-	ChatSessionChoices    string `json:"chat_session_choices"`
-	ChatSessionAgentScope string `json:"chat_session_agent_scope"`
+	ChatSessionBudget string `json:"chat_session_budget,omitempty"`
+	ChatSessionPick   string `json:"chat_session_pick"`
+	// ChatSessionPreferences lists the session's active preference records and
+	// receives an explicit rejection or a weak signal (#241);
+	// ChatSessionPreferenceItem edits or deletes one record. Empty (historical
+	// Catalogs) keeps the handlers unregistered.
+	ChatSessionPreferences    string `json:"chat_session_preferences,omitempty"`
+	ChatSessionPreferenceItem string `json:"chat_session_preference_item,omitempty"`
+	ChatSessionChoices        string `json:"chat_session_choices"`
+	ChatSessionAgentScope     string `json:"chat_session_agent_scope"`
 	// ChatSessionReasoning reads and writes the session thinking level;
 	// ChatSessionContext reads the context usage and compaction records;
 	// ChatSessionContextCompaction compacts the context now (#322).
@@ -5765,31 +5893,44 @@ type CoreHTTPRoutesSchema struct {
 	ChatSessionThreeViews       string `json:"chat_session_three_views,omitempty"`
 	ChatSessionThreeViewItem    string `json:"chat_session_three_view_item,omitempty"`
 	ChatSessionLineage          string `json:"chat_session_lineage"`
-	ProviderAsset               string `json:"provider_asset"`
-	Offerings                   string `json:"offerings"`
-	Assets                      string `json:"assets"`
-	AssetItem                   string `json:"asset_item"`
-	AssetModelPreview           string `json:"asset_model_preview,omitempty"`
-	ModelCaptures               string `json:"model_captures,omitempty"`
-	ModelCaptureItem            string `json:"model_capture_item,omitempty"`
-	SceneObjects                string `json:"scene_objects,omitempty"`
-	SceneObjectItem             string `json:"scene_object_item,omitempty"`
-	SceneObjectRepresentations  string `json:"scene_object_representations,omitempty"`
-	SceneObjectApply            string `json:"scene_object_apply,omitempty"`
-	SceneSnapshot               string `json:"scene_snapshot,omitempty"`
-	RenderManifests             string `json:"render_manifests,omitempty"`
-	RenderManifestItem          string `json:"render_manifest_item,omitempty"`
-	SkillRuns                   string `json:"skill_runs,omitempty"`
-	SkillRunItem                string `json:"skill_run_item,omitempty"`
-	SkillRunStep                string `json:"skill_run_step,omitempty"`
-	SkillRunReview              string `json:"skill_run_review,omitempty"`
-	Tasks                       string `json:"tasks"`
-	TaskPrepare                 string `json:"task_prepare"`
-	TaskGrants                  string `json:"task_grants"`
-	TaskGrantDecision           string `json:"task_grant_decision"`
-	TaskItem                    string `json:"task_item"`
-	TaskRecovery                string `json:"task_recovery,omitempty"`
-	TaskRecoveryPrepare         string `json:"task_recovery_prepare,omitempty"`
+	// Project routes (#240). Empty (historical Catalogs) keeps the handlers
+	// unregistered. ProjectItem, ProjectAssets, ProjectAssetItem,
+	// ProjectStyleGuide, ProjectConventions and ProjectPromote are the
+	// per-project sub-routes; ChatSessionProject assigns a session to a
+	// project.
+	Project                    string `json:"project,omitempty"`
+	ProjectItem                string `json:"project_item,omitempty"`
+	ProjectAssets              string `json:"project_assets,omitempty"`
+	ProjectAssetItem           string `json:"project_asset_item,omitempty"`
+	ProjectStyleGuide          string `json:"project_style_guide,omitempty"`
+	ProjectConventions         string `json:"project_conventions,omitempty"`
+	ProjectPromote             string `json:"project_promote,omitempty"`
+	ChatSessionProject         string `json:"chat_session_project,omitempty"`
+	ProviderAsset              string `json:"provider_asset"`
+	Offerings                  string `json:"offerings"`
+	Assets                     string `json:"assets"`
+	AssetItem                  string `json:"asset_item"`
+	AssetModelPreview          string `json:"asset_model_preview,omitempty"`
+	ModelCaptures              string `json:"model_captures,omitempty"`
+	ModelCaptureItem           string `json:"model_capture_item,omitempty"`
+	SceneObjects               string `json:"scene_objects,omitempty"`
+	SceneObjectItem            string `json:"scene_object_item,omitempty"`
+	SceneObjectRepresentations string `json:"scene_object_representations,omitempty"`
+	SceneObjectApply           string `json:"scene_object_apply,omitempty"`
+	SceneSnapshot              string `json:"scene_snapshot,omitempty"`
+	RenderManifests            string `json:"render_manifests,omitempty"`
+	RenderManifestItem         string `json:"render_manifest_item,omitempty"`
+	SkillRuns                  string `json:"skill_runs,omitempty"`
+	SkillRunItem               string `json:"skill_run_item,omitempty"`
+	SkillRunStep               string `json:"skill_run_step,omitempty"`
+	SkillRunReview             string `json:"skill_run_review,omitempty"`
+	Tasks                      string `json:"tasks"`
+	TaskPrepare                string `json:"task_prepare"`
+	TaskGrants                 string `json:"task_grants"`
+	TaskGrantDecision          string `json:"task_grant_decision"`
+	TaskItem                   string `json:"task_item"`
+	TaskRecovery               string `json:"task_recovery,omitempty"`
+	TaskRecoveryPrepare        string `json:"task_recovery_prepare,omitempty"`
 	// TaskRefetch: GET the owner's upstream refetch eligibility of a failed
 	// Task, POST to start (or return) its refetch (#295).
 	TaskRefetch             string `json:"task_refetch,omitempty"`

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness"
@@ -58,6 +59,23 @@ func (s *Server) taskHumanPrincipal(request *http.Request, owner generation.Owne
 	return executiongrant.Principal{OwnerID: user.ID, ActorID: user.ID, Source: executiongrant.HumanBrowser}, true
 }
 
+// writeDirectProjectReferenceProblem refuses a direct prepare whose project
+// style pictures cannot be copied into the owner's input assets (#240). It
+// never submits a request with the pictures silently dropped.
+func (s *Server) writeDirectProjectReferenceProblem(writer http.ResponseWriter, request *http.Request) {
+	detail := ""
+	if s.application.Project != nil {
+		detail = s.application.Project.Messages.ReferenceInvalid
+	}
+	if detail == "" {
+		detail = s.application.Chat.Presentation.Messages.InvalidParameters
+	}
+	if s.texts != nil {
+		detail = s.texts.TextIn(request.Context(), detail)
+	}
+	writeProblem(writer, http.StatusBadRequest, "invalid_input", detail)
+}
+
 func (s *Server) prepareTask(writer http.ResponseWriter, request *http.Request, owner generation.OwnerID) {
 	var body struct {
 		Capability          generation.Capability `json:"capability"`
@@ -93,12 +111,37 @@ func (s *Server) prepareTask(writer http.ResponseWriter, request *http.Request, 
 			}
 			if offering, found := s.generation.Offering(offeringID); found &&
 				chat.StyleLockAppliesToDirect(style, offering.Capability) {
-				lock, lockErr := s.chat.StyleLock(request.Context(), string(owner), body.SessionID)
+				lock, lockErr := s.chat.EffectiveStyleLock(request.Context(), string(owner), body.SessionID)
 				if lockErr != nil {
 					// The session was just proved owned, so this is a read failure.
 					noteCause(writer, lockErr)
 					s.writeMessageProblem(writer, http.StatusInternalServerError, "internal", "error.internal")
 					return
+				}
+				// A project-source lock carries the project guide's canonical
+				// URLs. Direct prepare accepts input assets, so they are copied
+				// here exactly like the chat generation path copies a Task
+				// picture; a failure refuses the request with the Schema copy
+				// instead of silently dropping pictures (#240).
+				if lock.ProjectID != "" && len(lock.ProjectReferences) > 0 {
+					if s.directStyleReferences == nil {
+						s.writeDirectProjectReferenceProblem(writer, request)
+						return
+					}
+					assets, resolveErr := s.directStyleReferences.Resolve(request.Context(),
+						references.ReferenceScope{
+							Owner: owner, SessionID: body.SessionID, ProjectID: lock.ProjectID,
+						}, lock.ProjectReferences)
+					if resolveErr != nil {
+						noteCause(writer, resolveErr)
+						s.writeDirectProjectReferenceProblem(writer, request)
+						return
+					}
+					lock.References = make([]string, 0, len(assets))
+					for _, assetID := range assets {
+						lock.References = append(lock.References, string(assetID))
+					}
+					lock.ProjectReferences = nil
 				}
 				merged, mergeErr := chat.ApplyStyleLockToDirectInput(lock, body.StyleLockSkipped,
 					body.Capability, offering, style, input)

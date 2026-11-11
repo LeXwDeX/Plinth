@@ -50,7 +50,7 @@ func TestGeneratedReferenceLargerThanUploadLimitIsCopied(t *testing.T) {
 		"/configured/generated/historical_0.png",
 	} {
 		open()
-		ids, err := resolver.Resolve(t.Context(), "owner-a", []string{value})
+		ids, err := resolver.Resolve(t.Context(), references.ReferenceScope{Owner: "owner-a"}, []string{value})
 		if err != nil || len(ids) != 1 {
 			t.Fatalf("%s: ids=%v error=%v", value, ids, err)
 		}
@@ -60,7 +60,7 @@ func TestGeneratedReferenceLargerThanUploadLimitIsCopied(t *testing.T) {
 		}
 	}
 	pasted := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte(large))
-	if _, err := resolver.Resolve(t.Context(), "owner-a", []string{pasted}); !errors.Is(err, references.ErrUnsupportedReference) {
+	if _, err := resolver.Resolve(t.Context(), references.ReferenceScope{Owner: "owner-a"}, []string{pasted}); !errors.Is(err, references.ErrUnsupportedReference) {
 		t.Fatalf("pasted image over the upload limit: %v", err)
 	}
 }
@@ -90,7 +90,7 @@ func TestGeneratedReferenceOverLimitIsRefusedWithSizeAndLimit(t *testing.T) {
 		"/configured/generated/task-a_0.png",
 		"/configured/generated/historical_0.png",
 	} {
-		_, err := resolver.Resolve(t.Context(), "owner-a", []string{value})
+		_, err := resolver.Resolve(t.Context(), references.ReferenceScope{Owner: "owner-a"}, []string{value})
 		var refusal *generation.Error
 		if !errors.Is(err, references.ErrUnsupportedReference) || !errors.As(err, &refusal) ||
 			refusal.Code != generation.ErrInvalidInput || refusal.Detail != want ||
@@ -180,7 +180,7 @@ func TestGeneratedReferenceUsesOfferingLimitNotUploadLimit(t *testing.T) {
 	}
 	reference := strings.NewReplacer("{taskID}", "task-a", "{assetID}", "result-a").
 		Replace(application.Runtime.HTTP.Routes.TaskAsset)
-	ids, err := resolver.Resolve(t.Context(), "owner-a", []string{reference})
+	ids, err := resolver.Resolve(t.Context(), references.ReferenceScope{Owner: "owner-a"}, []string{reference})
 	if err != nil || len(ids) != 1 {
 		t.Fatalf("generated reference over the upload limit: ids=%v error=%v", ids, err)
 	}

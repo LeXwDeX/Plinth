@@ -19,11 +19,11 @@ import (
 // derives the acceptance criteria from the same purpose plus the frozen
 // production brief. The Agent never supplies a number.
 
-func (policy *ProductionPlanPolicy) localize(text string) string {
+func (policy *ProductionPlanPolicy) localize(locale, text string) string {
 	if policy.Localize == nil || text == "" {
 		return text
 	}
-	return policy.Localize(text)
+	return policy.Localize(locale, text)
 }
 
 // acceptanceFor builds the final-delivery criteria the person approves. It
@@ -38,11 +38,13 @@ func (policy *ProductionPlanPolicy) acceptanceFor(command ToolCommand) ([]budget
 	if maximum <= 0 {
 		maximum = len(modelcheck.KnownIDs()) + 1
 	}
+	locale := command.Options.Locale
+	purpose := policy.localize(locale, profile.Label)
 	criteria := make([]budget.AcceptanceCriterion, 0, maximum)
-	if purpose := strings.TrimSpace(policy.Budget.Acceptance.PurposeLine); purpose != "" {
+	if line := strings.TrimSpace(policy.Budget.Acceptance.PurposeLine); line != "" {
 		criteria = append(criteria, budget.AcceptanceCriterion{
 			ID: "purpose", Check: profile.ID,
-			Statement: policy.localize(fillAcceptance(purpose, profile, nil)),
+			Statement: fillAcceptance(policy.localize(locale, line), purpose, nil),
 		})
 	}
 	for _, check := range modelcheck.KnownIDs() {
@@ -51,12 +53,21 @@ func (policy *ProductionPlanPolicy) acceptanceFor(command ToolCommand) ([]budget
 			continue
 		}
 		planCheck, ok := policy.planCheck(check, profile)
-		if !ok || !acceptanceApplies(template, planCheck) {
+		if !ok {
+			continue
+		}
+		// A check with a lower bound is judged on both bounds; a range
+		// template (when declared) words the same standard the checkpoint
+		// freezes instead of promising only the upper bound (#251 fix).
+		if rangeTemplate := policy.Budget.Acceptance.RangeCriteria[check]; planCheck.Minimum != nil && rangeTemplate != "" {
+			template = rangeTemplate
+		}
+		if !acceptanceApplies(template, planCheck) {
 			continue
 		}
 		criteria = append(criteria, budget.AcceptanceCriterion{
 			ID: check, Check: check,
-			Statement: policy.localize(fillAcceptance(template, profile, &planCheck)),
+			Statement: fillAcceptance(policy.localize(locale, template), purpose, &planCheck),
 		})
 	}
 	return criteria, ""
@@ -358,8 +369,8 @@ func (policy *ProductionPlanPolicy) contingencyAllowed(capability string, trigge
 	return false
 }
 
-func fillAcceptance(template string, profile catalog.ChatModel3DUsageProfile, check *budget.PlanCheck) string {
-	replacements := []string{"{purpose}", profile.Label}
+func fillAcceptance(template, purpose string, check *budget.PlanCheck) string {
+	replacements := []string{"{purpose}", purpose}
 	if check != nil {
 		if check.Minimum != nil {
 			replacements = append(replacements, "{minimum}", formatThreshold(*check.Minimum))

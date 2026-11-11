@@ -9,6 +9,21 @@ import (
 	"sync"
 )
 
+func cloneProject(source *ProjectSchema) *ProjectSchema {
+	if source == nil {
+		return nil
+	}
+	result := *source
+	result.Assets.Kinds = append([]ProjectAssetKindSchema(nil), source.Assets.Kinds...)
+	result.Conventions.Fields = append([]ChatProductionBriefField(nil), source.Conventions.Fields...)
+	result.Conventions.Texts = append([]ProjectConventionTextSchema(nil), source.Conventions.Texts...)
+	if source.Agent != nil {
+		agent := *source.Agent
+		result.Agent = &agent
+	}
+	return &result
+}
+
 func cloneStringMap(source map[string]string) map[string]string {
 	result := make(map[string]string, len(source))
 	for key, value := range source {
@@ -81,6 +96,7 @@ func cloneApplication(source ApplicationSchema) ApplicationSchema {
 	}
 	result.AgentConfiguration = cloneAgentConfiguration(source.AgentConfiguration)
 	result.LLMSettings = cloneLLMSettings(source.LLMSettings)
+	result.Project = cloneProject(source.Project)
 	result.Chat.Skills.Categories = make([]ChatSkillCategorySchema, len(source.Chat.Skills.Categories))
 	for i, category := range source.Chat.Skills.Categories {
 		result.Chat.Skills.Categories[i] = category

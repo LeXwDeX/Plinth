@@ -208,7 +208,7 @@ func (executor *Executor) executeHarnessOperation(ctx context.Context, command c
 	if err != nil {
 		return chat.ToolResult{NoSubmission: true}, err
 	}
-	return executor.prepareAgentOperation(ctx, command, snapshot.Capability, offering, encoded, "", command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, "", observe, nil)
+	return executor.prepareAgentOperation(ctx, command, snapshot.Capability, offering, encoded, "", command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, "", observe, nil, nil)
 }
 
 // conversationInput resolves the image handles an Agent gave for a
@@ -249,7 +249,7 @@ func (executor *Executor) conversationInput(ctx context.Context, command chat.To
 	if len(urls) != len(tokens) {
 		return refuse(invalid)
 	}
-	assets, err := executor.references.Resolve(ctx, generation.OwnerID(command.OwnerID), urls)
+	assets, err := executor.references.Resolve(ctx, commandReferenceScope(command), urls)
 	if result, refused := executor.inputRefusal(command, err); refused {
 		return nil, &result, nil
 	}

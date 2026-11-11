@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type DragEvent } from 'react';
 import useSWR from 'swr';
-import { Box, Camera, Check, Download, Image as ImageIcon, Info, RefreshCw } from 'lucide-react';
+import { Box, Camera, Check, Download, Image as ImageIcon, Info, RefreshCw, ThumbsDown } from 'lucide-react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { selfCheckStatus, selfCheckStatusLabel, type SelfCheckRecord } from '@/lib/chat/self-check';
@@ -36,6 +36,8 @@ import { useInlineModelPreviewStore } from '@/store/inline-model-preview-store';
 import { fetchCapabilityOfferings } from '@/lib/agent-offerings';
 import { canCreateGaussianSplat, gaussianSplatAvailableCount, gaussianSplatTool } from '@/lib/workspace/gaussian-splat-action';
 import type { ImageGroupPresentation } from '@/lib/workspace/image-result-group';
+import { RejectCandidateDialog } from '@/components/chat/reject-candidate-dialog';
+import { preferencesAvailable, preferenceReasonPresetIds } from '@/lib/chat/preferences';
 
 export interface ImageResultCardProps {
   /** The message's 2D pictures. Each keeps its index in the message's images: attachments, handle tags, drags, picks and detail targets are all keyed by it. */
@@ -48,6 +50,13 @@ export interface ImageResultCardProps {
   pickBusy?: boolean;
   /** Resolves true when the server accepted the pick. */
   onPick?: (claim: ChatAttachmentClaim) => Promise<boolean> | void;
+  /**
+   * #241: asset IDs the person already rejected. A rejected candidate shows "已否决"; it stays visible and
+   * selectable, because the rejection only steers later generations, it never rewrites this result.
+   */
+  rejectedAssets?: ReadonlySet<string>;
+  /** Resolves true when the server stored the rejection. */
+  onReject?: (claim: ChatAttachmentClaim, reasonPreset: string, reasonText: string) => Promise<boolean> | void;
   /** Shows a picture that cannot go on the stage (it has no task of its own): the index in the message's images. */
   onPreview: (index: number) => void;
   /** Accessible name of one picture, e.g. "生成图片". */
@@ -64,7 +73,8 @@ function columnsFor(count: number): string {
  * 卡片按钮作用于当前高亮的那一张。选用随时可改，不随后续步骤禁用。
  */
 export function ImageResultCard({
-  candidates: delivered, group: imageGroup, attachments, sessionId, pick, pickBusy, onPick, onPreview, labelPrefix,
+  candidates: delivered, group: imageGroup, attachments, sessionId, pick, pickBusy, onPick,
+  rejectedAssets, onReject, onPreview, labelPrefix,
 }: ImageResultCardProps) {
   const { schema } = useProductSchema();
   const { proxyAssetUrl, previewAssetUrl } = useAssetURLRewriter();
@@ -90,8 +100,15 @@ export function ImageResultCard({
   const pickedPosition = candidates.findIndex((entry) => isPickedCandidate(pick, entry.image, attachmentOf(entry)));
   // The card's current picture is remembered by identity, so a re-sort (a group's slot order arriving later) keeps it.
   const [chosen, setChosen] = useState<string | null>(null);
+  const [rejectClaim, setRejectClaim] = useState<ChatAttachmentClaim | null>(null);
+  const [rejectBusy, setRejectBusy] = useState(false);
   const active = activePicturePosition(candidates, chosen, pickedPosition);
   if (candidates.length === 0) return null;
+  const canReject = preferencesAvailable(schema) && Boolean(onReject) && Boolean(sessionId);
+  const reasonPresets = preferenceReasonPresetIds(schema);
+  const isRejected = (attachment: ChatAttachment | null | undefined) =>
+    Boolean(attachment && ((attachment.assetId && rejectedAssets?.has(attachment.assetId)) ||
+      (attachment.handle && rejectedAssets?.has(attachment.handle))));
 
   const objectAt = (entry: MessagePicture): CurrentObject | null => {
     const attachment = attachmentOf(entry);
@@ -190,37 +207,66 @@ export function ImageResultCard({
                 })()}
               </div>
               {viewLabel ? <span className="truncate select-none px-0.5 text-center text-[11px] text-muted-foreground" data-testid="chat-result-view-label">{viewLabel}</span> : null}
-              {onPick ? (
-                <HintTooltip
-                  name={picked ? schemaText(schema, 'ui.chat.image.picked') : schemaText(schema, 'ui.chat.image.pick')}
-                  reason={!claim ? schemaText(schema, 'ui.chat.image.pick_unavailable') : undefined}
-                  hint={!picked && claim ? schemaText(schema, 'ui.chat.image.pick_hint') : undefined}
-                  className="w-full"
-                >
-                  <Action
-                    type="button"
-                    variant={picked ? 'secondary' : 'outline'}
-                    size="xs"
-                    data-testid="candidate-pick"
-                    data-picked={picked ? 'true' : 'false'}
-                    aria-pressed={picked}
-                    aria-label={picked ? schemaText(schema, 'ui.chat.image.picked') : claim ? schemaText(schema, 'ui.chat.image.pick') : schemaText(schema, 'ui.chat.image.pick_unavailable')}
-                    disabled={!claim || !sessionId || pickBusy || picked}
-                    onClick={() => {
-                      if (!claim) return;
-                      setChosen(pictureKey(entry));
-                      void Promise.resolve(onPick(claim)).then((ok) => {
-                        // Picking makes this candidate the one on the stage.
-                        const object = objectAt(entry);
-                        if (ok !== false && object) openOnStage(object);
-                      });
-                    }}
-                    className={cn('w-full', picked && 'text-primary')}
-                  >
-                    {picked ? <Check /> : null}
-                    {picked ? schemaText(schema, 'ui.chat.image.picked') : schemaText(schema, 'ui.chat.image.pick')}
-                  </Action>
-                </HintTooltip>
+              {(onPick || canReject) ? (
+                <div className="flex gap-1">
+                  {onPick ? (
+                    <HintTooltip
+                      name={picked ? schemaText(schema, 'ui.chat.image.picked') : schemaText(schema, 'ui.chat.image.pick')}
+                      reason={!claim ? schemaText(schema, 'ui.chat.image.pick_unavailable') : undefined}
+                      hint={!picked && claim ? schemaText(schema, 'ui.chat.image.pick_hint') : undefined}
+                      className="min-w-0 flex-1"
+                    >
+                      <Action
+                        type="button"
+                        variant={picked ? 'secondary' : 'outline'}
+                        size="xs"
+                        data-testid="candidate-pick"
+                        data-picked={picked ? 'true' : 'false'}
+                        aria-pressed={picked}
+                        aria-label={picked ? schemaText(schema, 'ui.chat.image.picked') : claim ? schemaText(schema, 'ui.chat.image.pick') : schemaText(schema, 'ui.chat.image.pick_unavailable')}
+                        disabled={!claim || !sessionId || pickBusy || picked}
+                        onClick={() => {
+                          if (!claim) return;
+                          setChosen(pictureKey(entry));
+                          void Promise.resolve(onPick(claim)).then((ok) => {
+                            // Picking makes this candidate the one on the stage.
+                            const object = objectAt(entry);
+                            if (ok !== false && object) openOnStage(object);
+                          });
+                        }}
+                        className={cn('w-full', picked && 'text-primary')}
+                      >
+                        {picked ? <Check /> : null}
+                        {picked ? schemaText(schema, 'ui.chat.image.picked') : schemaText(schema, 'ui.chat.image.pick')}
+                      </Action>
+                    </HintTooltip>
+                  ) : null}
+                  {canReject ? (() => {
+                    const rejected = isRejected(attachment);
+                    const rejectLabel = rejected
+                      ? schemaText(schema, 'ui.chat.image.rejected')
+                      : schemaText(schema, 'ui.chat.image.reject');
+                    return (
+                      <HintTooltip name={rejectLabel} hint={rejected ? undefined : schemaText(schema, 'ui.chat.image.reject_hint')}>
+                        <Action
+                          type="button"
+                          variant="outline"
+                          size="xs"
+                          data-testid="candidate-reject"
+                          data-rejected={rejected ? 'true' : 'false'}
+                          aria-pressed={rejected}
+                          aria-label={rejectLabel}
+                          disabled={!claim || rejectBusy}
+                          className={cn(!onPick && 'w-full', rejected && 'text-destructive')}
+                          onClick={() => { if (claim) setRejectClaim(claim); }}
+                        >
+                          <ThumbsDown />
+                          {rejectLabel}
+                        </Action>
+                      </HintTooltip>
+                    );
+                  })() : null}
+                </div>
               ) : null}
             </li>
           );
@@ -278,6 +324,25 @@ export function ImageResultCard({
       ) : (
         <UnavailableNotice className="px-0.5 text-[11px]" label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.result.send_to_canvas'))} detail={schemaText(schema, 'ui.chat.image.send_to_canvas_unavailable')} />
       )}
+      {canReject ? (
+        <RejectCandidateDialog
+          claim={rejectClaim}
+          reasonPresets={reasonPresets}
+          busy={rejectBusy}
+          onClose={() => setRejectClaim(null)}
+          onConfirm={async (preset, text) => {
+            if (!rejectClaim || !onReject) return false;
+            setRejectBusy(true);
+            try {
+              const ok = (await onReject(rejectClaim, preset, text)) !== false;
+              if (ok) setRejectClaim(null);
+              return ok;
+            } finally {
+              setRejectBusy(false);
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }

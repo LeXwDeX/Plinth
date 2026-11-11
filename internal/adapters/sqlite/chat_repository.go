@@ -25,7 +25,7 @@ func (r *Repository) ListSessions(
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
 		       s.brief, s.explicit_model_3d, s.explicit_model_image, s.style_lock_enabled, s.style_lock_text,
-		       s.style_lock_references, s.visual_anchors, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
+		       s.style_lock_references, s.visual_anchors, s.project_id, s.style_lock_source, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE s.owner_id = ?
@@ -93,7 +93,7 @@ func (r *Repository) ListSessionsPage(
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
 		       s.brief, s.explicit_model_3d, s.explicit_model_image, s.style_lock_enabled, s.style_lock_text,
-		       s.style_lock_references, s.visual_anchors, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
+		       s.style_lock_references, s.visual_anchors, s.project_id, s.style_lock_source, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE `+where+`
@@ -158,11 +158,17 @@ func (r *Repository) CreateSession(
 	ctx context.Context,
 	session chat.Session,
 ) (chat.Session, error) {
-	_, err := r.db.ExecContext(ctx, `
+	// A project's production defaults seed an empty session brief at creation
+	// (#240), in the same INSERT so a new session never exists without it.
+	storedBrief, err := chat.EncodeProductionBrief(session.Brief)
+	if err != nil {
+		return chat.Session{}, err
+	}
+	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO go_chat_sessions (
 			id, owner_id, owner_name, title, created_at, updated_at, approval_mode, agent_scope, title_source,
-			parent_session_id, parent_message_id, parent_title, parent_deleted
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			parent_session_id, parent_message_id, parent_title, parent_deleted, project_id, style_lock_source, brief
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		session.ID,
 		session.OwnerID,
 		session.OwnerName,
@@ -176,6 +182,9 @@ func (r *Repository) CreateSession(
 		session.ParentMessageID,
 		session.ParentTitle,
 		session.ParentDeleted,
+		session.ProjectID,
+		sessionStyleLockSourceOrProject(session.StyleLockSource),
+		storedBrief,
 	)
 	if err != nil {
 		return chat.Session{}, fmt.Errorf("create chat session: %w", err)
@@ -278,18 +287,18 @@ func (r *Repository) SetSessionNotes(ctx context.Context, ownerID, sessionID, no
 // StyleLock reads the session-level style lock of the owner's session.
 func (r *Repository) StyleLock(ctx context.Context, ownerID, sessionID string) (chat.StyleLock, bool, error) {
 	var enabled int
-	var text, rawReferences string
+	var text, rawReferences, source string
 	err := r.db.QueryRowContext(ctx, `
-		SELECT style_lock_enabled, style_lock_text, style_lock_references
+		SELECT style_lock_enabled, style_lock_text, style_lock_references, style_lock_source
 		FROM go_chat_sessions WHERE id = ? AND owner_id = ?`, sessionID, ownerID).
-		Scan(&enabled, &text, &rawReferences)
+		Scan(&enabled, &text, &rawReferences, &source)
 	if errors.Is(err, sql.ErrNoRows) {
 		return chat.StyleLock{}, false, nil
 	}
 	if err != nil {
 		return chat.StyleLock{}, false, fmt.Errorf("read chat session style lock: %w", err)
 	}
-	return chat.StyleLock{Enabled: enabled != 0, Text: text, References: chat.DecodeStyleLockReferences(rawReferences)}, true, nil
+	return chat.StyleLock{Enabled: enabled != 0, Text: text, References: chat.DecodeStyleLockReferences(rawReferences), Source: source}, true, nil
 }
 
 // SetStyleLock replaces the session-level style lock in one transaction. It
@@ -306,8 +315,9 @@ func (r *Repository) SetStyleLock(ctx context.Context, ownerID, sessionID string
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `
 		UPDATE go_chat_sessions
-		SET style_lock_enabled = ?, style_lock_text = ?, style_lock_references = ?
-		WHERE id = ? AND owner_id = ?`, lock.Enabled, lock.Text, rawReferences, sessionID, ownerID)
+		SET style_lock_enabled = ?, style_lock_text = ?, style_lock_references = ?,
+		    style_lock_source = COALESCE(NULLIF(?, ''), style_lock_source)
+		WHERE id = ? AND owner_id = ?`, lock.Enabled, lock.Text, rawReferences, lock.Source, sessionID, ownerID)
 	if err != nil {
 		return false, fmt.Errorf("set chat session style lock: %w", err)
 	}
@@ -322,6 +332,47 @@ func (r *Repository) SetStyleLock(ctx context.Context, ownerID, sessionID string
 		return false, fmt.Errorf("commit chat session style lock: %w", err)
 	}
 	return true, nil
+}
+
+// SetSessionProject assigns (or clears, with an empty project) the owner's
+// project on a session (#240). It keeps updated_at so changing the project
+// does not reorder history.
+func (r *Repository) SetSessionProject(ctx context.Context, ownerID, sessionID, projectID string) (chat.Session, bool, error) {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE go_chat_sessions SET project_id = ?
+		WHERE id = ? AND owner_id = ?`, projectID, sessionID, ownerID)
+	if err != nil {
+		return chat.Session{}, false, fmt.Errorf("set chat session project: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return chat.Session{}, false, err
+	}
+	if affected == 0 {
+		return chat.Session{}, false, nil
+	}
+	session, err := r.getChatSession(ctx, ownerID, sessionID)
+	if err != nil {
+		return chat.Session{}, false, err
+	}
+	return session, true, nil
+}
+
+// SessionProject reads the project the owner's session belongs to (#240).
+// found is false for a missing or foreign session; an unassigned session
+// reports found true with an empty project.
+func (r *Repository) SessionProject(ctx context.Context, ownerID, sessionID string) (string, bool, error) {
+	var projectID string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT project_id FROM go_chat_sessions WHERE id = ? AND owner_id = ?`,
+		sessionID, ownerID).Scan(&projectID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read chat session project: %w", err)
+	}
+	return projectID, true, nil
 }
 
 // VisualAnchors reads the session-level visual anchors of the owner's session
@@ -566,6 +617,16 @@ func sessionAgentScopeOrAuto(scope string) string {
 	return scope
 }
 
+// sessionStyleLockSourceOrProject stores an empty source as the migration
+// default: a new session inherits its project unless the person overrides it.
+func sessionStyleLockSourceOrProject(source string) string {
+	switch source {
+	case chat.StyleLockSourceSession, chat.StyleLockSourceOff:
+		return source
+	}
+	return chat.StyleLockSourceProject
+}
+
 // SessionAgentScope reads the Agent scope of the owner's session. found is
 // false for a missing or foreign session.
 func (r *Repository) SessionAgentScope(ctx context.Context, ownerID, sessionID string) (string, bool, error) {
@@ -768,6 +829,7 @@ var sessionDependentDeletes = []struct {
 }{
 	{"agent state", `DELETE FROM go_agent_state WHERE owner_id = ? AND scope = ?`},
 	{"choices", `DELETE FROM chat_choices WHERE owner_id = ? AND session_id = ?`},
+	{"preferences", `DELETE FROM chat_session_preferences WHERE owner_id = ? AND session_id = ?`},
 	{"compactions", `DELETE FROM chat_context_compactions WHERE owner_id = ? AND session_id = ?`},
 }
 
@@ -1647,7 +1709,7 @@ func (r *Repository) Session(
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
 		       s.brief, s.explicit_model_3d, s.explicit_model_image, s.style_lock_enabled, s.style_lock_text,
-		       s.style_lock_references, s.visual_anchors, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
+		       s.style_lock_references, s.visual_anchors, s.project_id, s.style_lock_source, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE s.id = ? AND s.owner_id = ?
@@ -1674,7 +1736,7 @@ func (r *Repository) getChatSession(
 		SELECT s.id, s.owner_id, s.owner_name, s.title, s.created_at,
 		       s.updated_at, COUNT(m.id), s.approval_mode, s.agent_scope, s.title_source,
 		       s.brief, s.explicit_model_3d, s.explicit_model_image, s.style_lock_enabled, s.style_lock_text,
-		       s.style_lock_references, s.visual_anchors, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
+		       s.style_lock_references, s.visual_anchors, s.project_id, s.style_lock_source, s.parent_session_id, s.parent_message_id, s.parent_title, s.parent_deleted
 		FROM go_chat_sessions AS s
 		LEFT JOIN go_chat_messages AS m ON m.session_id = s.id
 		WHERE s.id = ? AND s.owner_id = ?
@@ -1714,6 +1776,8 @@ func scanChatSession(scanner chatSessionScanner) (chat.Session, error) {
 		&styleLockText,
 		&styleLockReferences,
 		&visualAnchors,
+		&session.ProjectID,
+		&session.StyleLockSource,
 		&session.ParentSessionID,
 		&session.ParentMessageID,
 		&session.ParentTitle,
@@ -1726,6 +1790,7 @@ func scanChatSession(scanner chatSessionScanner) (chat.Session, error) {
 		Enabled:    styleLockEnabled != 0,
 		Text:       styleLockText,
 		References: chat.DecodeStyleLockReferences(styleLockReferences),
+		Source:     session.StyleLockSource,
 	}
 	session.VisualAnchors = chat.DecodeVisualAnchors(visualAnchors)
 	var err error

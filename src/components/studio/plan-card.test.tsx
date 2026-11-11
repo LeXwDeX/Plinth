@@ -250,7 +250,7 @@ describe('a production plan with acceptance and contingencies (#251)', () => {
       correction_capabilities: plan.correctionCapabilities,
       acceptance: [
         { id: 'purpose', statement: '用途「游戏/实时·角色」的交付标准：', check: 'game_character' },
-        { id: 'triangles', statement: '三角面数不超过 60000', check: 'triangles' },
+        { id: 'triangles', statement: '三角面数在 5000–60000 之间', check: 'triangles' },
       ],
       checkpoints: [{ after_capability: 'remesh', checks: [{ check: 'triangles', maximum: 60000 }, { check: 'pivot_bottom_center', maximum_ratio: 0.01 }] }],
       contingencies: [{
@@ -262,7 +262,7 @@ describe('a production plan with acceptance and contingencies (#251)', () => {
       contingencyTotals={[legacy('5')]} tasks={[]} />);
     const acceptance = view.getByTestId('studio-plan-acceptance');
     expect(acceptance.textContent).toContain(text('ui.studio.plan.acceptance'));
-    expect(acceptance.textContent).toContain('三角面数不超过 60000');
+    expect(acceptance.textContent).toContain('三角面数在 5000–60000 之间');
     const checkpoints = view.getByTestId('studio-plan-checkpoints');
     expect(checkpoints.textContent).toContain(words('ui.studio.plan.checkpoint_item', {
       capability: capability('remesh'),

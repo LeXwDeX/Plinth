@@ -51,7 +51,8 @@
     "3d-ar-product": ["reference_fidelity", "silhouette_anatomy", "back_and_detail", "texture_and_material", "purpose_fit"],
     "2d-character-illustration": ["reference_fidelity", "craft"],
     "2d-icon-set": ["reference_fidelity", "craft"],
-    "2d-series-consistency": ["reference_fidelity", "series_consistency", "craft"]
+    "2d-series-consistency": ["reference_fidelity", "series_consistency", "craft"],
+    "2d-series-project": ["reference_fidelity", "series_consistency", "craft"]
   },
   "prompt_template": "你是 Plinth 的 Agent 产出质量评审。请只依据给出的请求、参考图和渲染图评分，不要臆测未提供的信息。\n\n请求：{title}\n用户话术：{prompt}\n用途：{purpose}\n期望交付物：{deliverables}\n\n参考图（如有）：\n{reference_images}\n\n统一视角渲染图 / 产出图：\n{rendered_views}\n\n评分维度（每项 1-5 分，并写一句理由）：\n{axes}\n\n量表：\n{scale}\n\n输出严格的 JSON 对象，键为维度 id，值为 {{\"score\": 1-5, \"reason\": \"...\"}}。不要输出 JSON 以外的内容。",
   "reference_view_policy": "3D 产出统一使用 render_model_views 的 front、back、three_quarter 视角；2D 产出直接使用生成图。参考图按请求给出；没有参考图时在提示词中写“无”。",

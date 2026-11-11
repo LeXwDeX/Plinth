@@ -77,8 +77,8 @@ func TestDirectPrepareAppliesTheStyleLockOnlyToDeclaredImageCapabilities(t *test
 	imageToImage := func(session string, skipped bool) map[string]any {
 		return map[string]any{
 			"session_id": session, "capability": "image-to-image",
-			"offering_id": "openai/gpt-image-2/image-to-image",
-			"input":       map[string]any{"prompt": "make the cube blue", "reference_assets": []string{turnPicture}},
+			"offering_id":        "openai/gpt-image-2/image-to-image",
+			"input":              map[string]any{"prompt": "make the cube blue", "reference_assets": []string{turnPicture}},
 			"style_lock_skipped": skipped,
 		}
 	}

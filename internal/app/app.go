@@ -55,6 +55,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/modeldelivery"
 	"github.com/LeXwDeX/Plinth/internal/pendingapproval"
 	"github.com/LeXwDeX/Plinth/internal/processing"
+	"github.com/LeXwDeX/Plinth/internal/project"
 	"github.com/LeXwDeX/Plinth/internal/promptenhance"
 	"github.com/LeXwDeX/Plinth/internal/provideraccounts"
 	provideraccounthttpjson "github.com/LeXwDeX/Plinth/internal/provideraccounts/httpjson"
@@ -349,6 +350,25 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		return nil, err
 	}
 	approvalPolicy := approvalPolicyFromSchema(applicationSchema)
+	// Projects are assembled before chat so a session can be attributed to
+	// an owner project at creation (#240). A Catalog without the section
+	// leaves the routes unregistered and every project assignment refused.
+	var projectService *project.Service
+	var projectSource chat.ProjectSource
+	if applicationSchema.Project != nil {
+		profiles, imageProfiles := project.PurposeProfiles(applicationSchema.Chat)
+		projectService, err = project.New(repository.ProjectRepository(), project.Config{
+			Schema:        *applicationSchema.Project,
+			Profiles:      profiles,
+			ImageProfiles: imageProfiles,
+			Sources:       repository.ProjectAssetSource(),
+		})
+		if err != nil {
+			return nil, err
+		}
+		projectSource = newProjectChatSource(projectService, *applicationSchema.Project,
+			applicationSchema.Runtime.HTTP.Routes)
+	}
 	chatService, err := chat.NewService(chat.ServiceConfig{
 		ApprovalPolicy:             approvalPolicy,
 		AgentScope:                 agentscope.FromSchema(applicationSchema.Chat.AgentScope),
@@ -356,7 +376,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		MaximumSessionNotes:        applicationSchema.Chat.Context.MaximumSessionNotesCharacters,
 		MaximumStyleLockText:       applicationSchema.Chat.StyleLock.MaximumTextCharacters,
 		MaximumStyleLockReferences: applicationSchema.Chat.StyleLock.MaximumReferenceImages,
+		StyleLockSources:           applicationSchema.Chat.StyleLock.Sources,
+		Projects:                   projectSource,
 		VisualAnchors:              applicationSchema.Chat.VisualAnchors,
+		Preferences:                applicationSchema.Chat.Preferences,
 		CanvasInputSource:          applicationSchema.Chat.Context.CanvasInputSource,
 		// A turn's pick of a retired generation model runs on its successor
 		// (#329 follow-up).
@@ -545,6 +568,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
+	var projectReferenceChecker references.ProjectReferenceChecker
+	if applicationSchema.Project != nil {
+		projectReferenceChecker = repository.ProjectRepository()
+	}
 	referenceResolver, err := references.New(references.Config{
 		Inputs: inputAssetService,
 		Tasks:  module,
@@ -579,6 +606,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		TaskInSession: func(ctx context.Context, owner generation.OwnerID, sessionID string, taskID generation.TaskID) (bool, error) {
 			return module.TaskInSession(ctx, owner, sessionID, taskID)
 		},
+		// #240: a finished Task picture registered in the owner's project may
+		// be read from any session of that project. The exact (task, asset)
+		// pair is checked here; no request can name its own scope.
+		ProjectReferences: projectReferenceChecker,
 		// #244: the frozen selection mask and its server-composed preview.
 		SelectionMaskLimits: imageinspect.Limits{
 			MaxBytes:  applicationSchema.Chat.ImageMask.Limits.MaxBytes,
@@ -699,7 +730,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		return nil, err
 	}
 	// #251: the acceptance wording is frozen in the proposal turn's language.
-	chatService.SetProductionPlanLocalizer(func(text string) string { return texts.Text("", text) })
+	// Text takes the turn locale; an empty locale would never translate.
+	chatService.SetProductionPlanLocalizer(texts.Text)
 	imageReview, err := imagereview.New(imagereview.Config{
 		Context: applicationSchema.Chat.Context,
 		Review:  applicationSchema.Chat.ImageReview,
@@ -770,6 +802,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		SelfChecks:      selfCheckService,
 		InputAssetRoute: applicationSchema.Runtime.HTTP.Routes.AssetItem,
 		Chat:            applicationSchema.Chat,
+		Project:         applicationSchema.Project,
 		CanvasArtboard:  applicationSchema.Canvas.Frontend.Artboard,
 		ModelDelivery:   applicationSchema.ModelDelivery,
 		Skills:          skillCatalog,
@@ -830,6 +863,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		AskChoice:            chatService.AskChoice,
 		ProposePlan:          chatService.ProposeProductionPlan,
 		WriteVisualAnchor:    chatService.WriteVisualAnchor,
+		Project:              applicationSchema.Project,
 		ChoiceKinds:          applicationSchema.Chat.Choice.Kinds,
 		ChoiceOptionInvalid:  applicationSchema.Chat.Presentation.Messages.ChoiceOptionInvalid,
 		BriefSavedMessage:    applicationSchema.Chat.Model3DUsage.Brief.SavedMessage,
@@ -943,7 +977,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		config.AgentMaxToolCallsPerReply,
 	)
 	chatAgent, err := chat.NewOrchestrator(chat.OrchestratorConfig{
-		Texts: texts,
+		Project: applicationSchema.Project,
+		Texts:   texts,
 		Configuration: func(ctx context.Context, owner string) (chat.AgentConfigurationSnapshot, error) {
 			snapshot, err := agentConfigurationService.SnapshotForOwner(ctx, owner)
 			if err != nil {
@@ -1693,6 +1728,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Canvas:                            canvasService,
 		CanvasImages:                      canvasImageService,
 		Chat:                              chatService,
+		Projects:                          projectService,
+		DirectStyleReferences:             referenceResolver,
 		AgentParams:                       paramsStore,
 		AgentState:                        agentStateStore,
 		ChatScheduler:                     chatAgent,

@@ -26,13 +26,16 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		t.Fatal(err)
 	}
 	for path, keys := range map[string][]string{
-		"":             {"revision", "runtime", "content", "chat", "canvas", "task_history", "task_stream", "administration", "agent_configuration", "llm_settings", "capabilities", "task_states", "audit_actions", "delivery_formats", "authentication", "localization"},
+		"":             {"revision", "runtime", "content", "chat", "canvas", "task_history", "task_stream", "administration", "agent_configuration", "llm_settings", "capabilities", "task_states", "audit_actions", "delivery_formats", "authentication", "localization", "project"},
 		"llm_settings": {"routes", "ui"},
 		"runtime":      {"http", "input_assets", "cache", "asset_delivery", "frontend", "generation_messages"},
 		// #80: the composer's capacity text and the result limit pair.
 		"runtime.generation_messages": {"reference_capacity", "reference_capacity_multiview", "reference_limit", "reference_limit_one"},
-		"chat":                        {"api", "defaults", "roles", "state", "frontend", "context", "stream", "tools", "skills", "presentation", "approval_policy", "agent_scope", "harness", "agent_status", "agent_limits", "three_view_limits", "context_compaction", "model_review", "self_check", "model3d_usage", "image2d_usage", "style_lock"},
-		"chat.style_lock":             {"maximum_text_characters", "maximum_reference_images"},
+		"chat":                        {"api", "defaults", "roles", "state", "frontend", "context", "stream", "tools", "skills", "presentation", "approval_policy", "agent_scope", "harness", "agent_status", "agent_limits", "three_view_limits", "context_compaction", "model_review", "self_check", "model3d_usage", "image2d_usage", "style_lock", "preferences"},
+		"chat.style_lock":             {"maximum_text_characters", "maximum_reference_images", "sources"},
+		// #241: the sidebar sees the bounds and the declared reason ids only;
+		// the framing templates, markers and prompt paragraph stay server-side.
+		"chat.preferences": {"maximum_entries", "maximum_direction_characters", "maximum_reason_characters", "reason_presets"},
 		// #7: the Agent's approval-mode texts (approval_policy.prompt) stay on the server.
 		"chat.approval_policy": {"default_mode", "modes", "manual_approval_capabilities", "budget_states"},
 		// #103: only the review tool names, purpose labels and brief field
@@ -42,12 +45,19 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		// #246: the browser sees the tool names, the three delivery states by
 		// role, the display limits and the plan checkpoints' labels; thresholds
 		// and prompts stay server-side.
-		"chat.self_check":                   {"tools", "statuses", "limits", "checkpoints"},
-		"chat.self_check.tools":             {"record", "reference_compare"},
-		"chat.self_check.limits":            {"max_rounds_per_result", "max_corrections_per_result", "max_renders_per_round"},
-		"chat.model3d_usage":                {"profiles", "brief"},
-		"chat.model3d_usage.brief":          {"fields"},
-		"chat.image2d_usage":                {"profiles"},
+		"chat.self_check":          {"tools", "statuses", "limits", "checkpoints"},
+		"chat.self_check.tools":    {"record", "reference_compare"},
+		"chat.self_check.limits":   {"max_rounds_per_result", "max_corrections_per_result", "max_renders_per_round"},
+		"chat.model3d_usage":       {"profiles", "brief"},
+		"chat.model3d_usage.brief": {"fields"},
+		"chat.image2d_usage":       {"profiles"},
+		// #240: the browser builds the project switcher and panels from the
+		// limits, asset kinds, style-guide bounds and convention names; Agent
+		// templates, audit actions and error copy stay server-side.
+		"project":                           {"limits", "assets", "style_guide", "conventions"},
+		"project.assets":                    {"kinds"},
+		"project.style_guide":               {"maximum_text_characters", "maximum_references", "maximum_palette_colors", "palette_color_pattern"},
+		"project.conventions":               {"fields", "texts"},
 		"canvas":                            {"api", "defaults", "limits", "frontend", "presentation"},
 		"task_stream":                       {"aliases"},
 		"administration":                    {"navigation", "users", "audit_logs", "generations", "usage", "user_assets"},

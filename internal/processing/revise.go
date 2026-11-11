@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -31,6 +32,23 @@ const (
 // ErrRevisionOutsidePlan refuses a revision the approved plan does not cover.
 // The tool layer turns it into an approval-required refusal.
 var ErrRevisionOutsidePlan = errors.New("processing: revision outside the approved plan")
+
+// Revision conflicts that carry a reason the Agent can act on. They wrap
+// ErrConflict so every existing caller keeps treating them as a conflict,
+// while the tool layer can pick the Schema wording for the actual cause.
+var (
+	// ErrRevisionNotStarted refuses replace or skip on a step that prepared,
+	// was granted or was submitted; only an unstarted step may move.
+	ErrRevisionNotStarted = fmt.Errorf("%w: the step already started", ErrConflict)
+	// ErrRevisionRetryPerson refuses a retry whose Task failure is ambiguous,
+	// because the Provider may already have charged it. Only the person may
+	// decide whether to charge again.
+	ErrRevisionRetryPerson = fmt.Errorf("%w: the retry needs the person", ErrConflict)
+	// ErrRevisionCheckpointBlocked refuses moving another step while a failed
+	// checkpoint blocks the plan. The Agent must insert the declared
+	// contingency or waive the checkpoint first.
+	ErrRevisionCheckpointBlocked = fmt.Errorf("%w: a failed checkpoint blocks the plan", ErrConflict)
+)
 
 // ReviseCommand is one Agent-issued plan revision. The owner, session and
 // harness come from the server-held tool call; the Agent cannot widen them.
@@ -92,34 +110,39 @@ func (s *Service) Revise(ctx context.Context, command ReviseCommand) (Plan, erro
 }
 
 func (s *Service) reviseInsert(ctx context.Context, plan *Plan, command ReviseCommand, reason string) (Plan, error) {
-	if plan.State != Paused || plan.Failure != ReasonCheckpointFailed ||
-		command.StepIndex < 0 || command.StepIndex >= len(plan.Steps) || len(plan.Steps) >= MaxPlanSteps {
+	if command.StepIndex < 0 || command.StepIndex >= len(plan.Steps) || len(plan.Steps) >= MaxPlanSteps {
 		return Plan{}, ErrConflict
 	}
 	step := &plan.Steps[command.StepIndex]
-	// Only the step that currently blocks the plan may insert its contingency.
-	// An older checkpoint keeps its failed result as provenance after a revision,
-	// but its Failure reason is cleared; accepting it would let a revision bypass
-	// the checkpoint that actually stopped this plan.
-	if step.State != Succeeded || step.Failure != ReasonCheckpointFailed ||
-		step.Checkpoint == nil || step.Checkpoint.State != CheckpointFailed {
+	// insert is reachable from the two states where a declared contingency is
+	// the approved repair: a failed checkpoint that paused the plan after a
+	// successful step, and a failed Task that stopped the plan (#251 fix).
+	checkpointBlocked := plan.State == Paused && plan.Failure == ReasonCheckpointFailed
+	taskFailed := plan.State == Failed && plan.Failure == ReasonTaskFailed
+	checkpointTarget := checkpointBlocked && step.State == Succeeded &&
+		step.Failure == ReasonCheckpointFailed && step.Checkpoint != nil &&
+		step.Checkpoint.State == CheckpointFailed
+	taskTarget := taskFailed && step.State == Failed && step.Failure == ReasonTaskFailed
+	if !checkpointTarget && !taskTarget {
 		return Plan{}, ErrConflict
 	}
 	contingency := command.Contingency
 	if contingency == nil || contingency.ID != command.ContingencyID {
 		return Plan{}, ErrRevisionOutsidePlan
 	}
-	triggered := failedChecks(step.Checkpoint)
-	if !slices.ContainsFunc(contingency.Trigger, func(trigger string) bool {
+	triggered := false
+	for _, trigger := range contingency.Trigger {
 		switch trigger {
-		case "checkpoint_failed":
-			return step.Checkpoint != nil && step.Checkpoint.State == CheckpointFailed
 		case "task_failed":
-			return step.Failure == ReasonTaskFailed
+			triggered = triggered || taskTarget
+		case "checkpoint_failed":
+			triggered = triggered || checkpointTarget
 		default:
-			return slices.Contains(triggered, trigger)
+			triggered = triggered || (checkpointTarget &&
+				slices.Contains(failedChecks(step.Checkpoint), trigger))
 		}
-	}) {
+	}
+	if !triggered {
 		return Plan{}, ErrRevisionOutsidePlan
 	}
 	if command.Capability != "" && string(command.Capability) != contingency.Step.Capability {
@@ -140,6 +163,13 @@ func (s *Service) reviseInsert(ctx context.Context, plan *Plan, command ReviseCo
 		return Plan{}, err
 	}
 	planned.ContingencyID, planned.RevisionOperation, planned.RevisionReason = contingency.ID, OperationInsert, reason
+	if taskTarget {
+		// The failed Task produced no model. Keep its TaskID and failure as
+		// the audit trail but mark it SKIPPED so the chain, the source search
+		// and advance pass over it; the approved repair takes its place and
+		// binds the nearest successful source.
+		step.State = Skipped
+	}
 	steps := slices.Insert(slices.Clone(plan.Steps), command.StepIndex+1, planned)
 	if err := s.validateRevisedChain(ctx, plan, steps); err != nil {
 		return Plan{}, err
@@ -154,9 +184,15 @@ func (s *Service) reviseReplace(ctx context.Context, plan *Plan, command ReviseC
 	if command.StepIndex < 0 || command.StepIndex >= len(plan.Steps) {
 		return Plan{}, ErrConflict
 	}
+	// A failed checkpoint still blocks the plan. Replacing another step must
+	// not clear that contract: the Agent inserts the declared contingency or
+	// waives the checkpoint first (#251 fix).
+	if plan.State == Paused && plan.Failure == ReasonCheckpointFailed {
+		return Plan{}, ErrRevisionCheckpointBlocked
+	}
 	step := &plan.Steps[command.StepIndex]
 	if !unstarted(*step) {
-		return Plan{}, ErrConflict
+		return Plan{}, ErrRevisionNotStarted
 	}
 	offeringID := command.OfferingID
 	if offeringID == "" {
@@ -180,10 +216,6 @@ func (s *Service) reviseReplace(ctx context.Context, plan *Plan, command ReviseC
 		return Plan{}, err
 	}
 	plan.Steps = steps
-	if plan.State == Paused && plan.Failure == ReasonCheckpointFailed {
-		plan.State, plan.Failure = Pending, ""
-		resolveCheckpointFailures(plan)
-	}
 	plan.UpdatedAt = time.Now().UTC()
 	return s.finishRevision(ctx, plan, command.Operation, reason)
 }
@@ -193,7 +225,10 @@ func (s *Service) reviseSkip(ctx context.Context, plan *Plan, command ReviseComm
 		return Plan{}, ErrConflict
 	}
 	step := &plan.Steps[command.StepIndex]
-	if !unstarted(*step) || step.Checkpoint != nil {
+	if !unstarted(*step) {
+		return Plan{}, ErrRevisionNotStarted
+	}
+	if step.Checkpoint != nil {
 		// A step with a checkpoint is a contract point; skipping it would drop
 		// the approved acceptance check.
 		return Plan{}, ErrConflict
@@ -203,7 +238,7 @@ func (s *Service) reviseSkip(ctx context.Context, plan *Plan, command ReviseComm
 	// with a cleared failure and stay PENDING forever; the Agent must revise or
 	// waive the current checkpoint first.
 	if hasFailedCheckpoint(plan.Steps) {
-		return Plan{}, ErrConflict
+		return Plan{}, ErrRevisionCheckpointBlocked
 	}
 	steps := slices.Clone(plan.Steps)
 	steps[command.StepIndex].State = Skipped
@@ -214,14 +249,7 @@ func (s *Service) reviseSkip(ctx context.Context, plan *Plan, command ReviseComm
 		return Plan{}, err
 	}
 	plan.Steps = steps
-	if noStepRemains(plan.Steps) && !hasFailedCheckpoint(plan.Steps) {
-		plan.State, plan.Failure = Succeeded, ""
-	} else if plan.State == Paused && plan.Failure == ReasonCheckpointFailed {
-		plan.State, plan.Failure = Pending, ""
-	}
-	if plan.Failure == "" {
-		resolveCheckpointFailures(plan)
-	}
+	settlePlan(plan)
 	plan.UpdatedAt = time.Now().UTC()
 	return s.finishRevision(ctx, plan, command.Operation, reason)
 }
@@ -256,6 +284,9 @@ func (s *Service) reviseWaive(ctx context.Context, plan *Plan, command ReviseCom
 	step.RevisionOperation, step.RevisionReason = OperationWaiveCheckpoint, reason
 	step.Failure, step.Retryable = "", false
 	plan.State, plan.Failure, plan.UpdatedAt = Pending, "", time.Now().UTC()
+	// Waiving the checkpoint after the last step leaves nothing to advance;
+	// close the plan instead of keeping it PENDING (#251 fix).
+	settlePlan(plan)
 	return s.finishRevision(ctx, plan, command.Operation, reason)
 }
 

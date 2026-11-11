@@ -49,12 +49,19 @@ func (r *Repository) BranchSession(ctx context.Context, request chat.BranchReque
 	branchTitle := strings.ReplaceAll(request.TitleTemplate, "{title}", title)
 	// 分支可读直接父会话及更早祖先的 Task（只读 source_task/lineage 授权）。
 	// 压缩记录不复制，后续从完整原始消息重新压缩。
-	_, err = tx.ExecContext(ctx, `INSERT INTO go_chat_sessions (id,owner_id,owner_name,title,created_at,updated_at,approval_mode,agent_scope,title_source,notes,brief,chat_model,reasoning_effort,picked,style_lock_enabled,style_lock_text,style_lock_references,visual_anchors,parent_session_id,parent_message_id,parent_title,parent_deleted)
-		SELECT ?,owner_id,owner_name,?,?,?,approval_mode,agent_scope,?,notes,brief,chat_model,reasoning_effort,picked,style_lock_enabled,style_lock_text,style_lock_references,visual_anchors,id,?,title,0 FROM go_chat_sessions WHERE id=? AND owner_id=?`, request.NewSessionID, branchTitle, formatTime(request.At), formatTime(request.At), chat.TitleSourceAuto, request.MessageID, request.SessionID, request.OwnerID)
+	_, err = tx.ExecContext(ctx, `INSERT INTO go_chat_sessions (id,owner_id,owner_name,title,created_at,updated_at,approval_mode,agent_scope,title_source,notes,brief,chat_model,reasoning_effort,picked,style_lock_enabled,style_lock_text,style_lock_references,visual_anchors,project_id,style_lock_source,parent_session_id,parent_message_id,parent_title,parent_deleted)
+		SELECT ?,owner_id,owner_name,?,?,?,approval_mode,agent_scope,?,notes,brief,chat_model,reasoning_effort,picked,style_lock_enabled,style_lock_text,style_lock_references,visual_anchors,project_id,style_lock_source,id,?,title,0 FROM go_chat_sessions WHERE id=? AND owner_id=?`, request.NewSessionID, branchTitle, formatTime(request.At), formatTime(request.At), chat.TitleSourceAuto, request.MessageID, request.SessionID, request.OwnerID)
 	if err != nil {
 		return chat.Session{}, fmt.Errorf("insert branch session: %w", err)
 	}
 	if err := insertBranchTaskRefs(ctx, tx, request.OwnerID, request.SessionID, request.NewSessionID, formatTime(request.At)); err != nil {
+		return chat.Session{}, err
+	}
+	// Active preference records follow the branch under fresh IDs (#241): the
+	// branch starts with the same choices its history up to the branch point
+	// carries, and editing or deleting one in either session leaves the other
+	// alone.
+	if err := copyBranchPreferences(ctx, tx, request); err != nil {
 		return chat.Session{}, err
 	}
 	// The current 3D stage and its captures are copied with fresh IDs. Both
@@ -126,7 +133,7 @@ func (r *Repository) BranchSession(ctx context.Context, request chat.BranchReque
 		}
 		canvasCopied = true
 	}
-	row := tx.QueryRowContext(ctx, `SELECT s.id,s.owner_id,s.owner_name,s.title,s.created_at,s.updated_at,COUNT(m.id),s.approval_mode,s.agent_scope,s.title_source,s.brief,s.explicit_model_3d,s.explicit_model_image,s.style_lock_enabled,s.style_lock_text,s.style_lock_references,s.visual_anchors,s.parent_session_id,s.parent_message_id,s.parent_title,s.parent_deleted FROM go_chat_sessions s LEFT JOIN go_chat_messages m ON m.session_id=s.id WHERE s.id=? AND s.owner_id=? GROUP BY s.id`, request.NewSessionID, request.OwnerID)
+	row := tx.QueryRowContext(ctx, `SELECT s.id,s.owner_id,s.owner_name,s.title,s.created_at,s.updated_at,COUNT(m.id),s.approval_mode,s.agent_scope,s.title_source,s.brief,s.explicit_model_3d,s.explicit_model_image,s.style_lock_enabled,s.style_lock_text,s.style_lock_references,s.visual_anchors,s.project_id,s.style_lock_source,s.parent_session_id,s.parent_message_id,s.parent_title,s.parent_deleted FROM go_chat_sessions s LEFT JOIN go_chat_messages m ON m.session_id=s.id WHERE s.id=? AND s.owner_id=? GROUP BY s.id`, request.NewSessionID, request.OwnerID)
 	session, err := scanChatSession(row)
 	if err != nil {
 		return chat.Session{}, err

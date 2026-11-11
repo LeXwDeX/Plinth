@@ -37,7 +37,7 @@ describe('useStyleLock', () => {
     await waitFor(() => expect(result.current.failed).toBe(true));
     await act(async () => { expect(await result.current.save(lock({ text: 'local draft' }))).toBe(false); });
     expect(result.current.saveError?.message).toBe('detail from server');
-    expect(result.current.lock).toEqual({ enabled: false, text: '', references: [] });
+    expect(result.current.lock).toEqual({ enabled: false, text: '', references: [], source: 'project' });
   });
 
   it('does not let a previous session response replace the current session', async () => {
@@ -46,7 +46,7 @@ describe('useStyleLock', () => {
     const { result, rerender } = renderHook(({ session }) => useStyleLock(api, session), { initialProps: { session: 'old' } });
     rerender({ session: 'new' });
     await act(async () => { resolvers[0]?.(lock({ text: 'old' })); });
-    expect(result.current.lock).toEqual({ enabled: false, text: '', references: [] });
+    expect(result.current.lock).toEqual({ enabled: false, text: '', references: [], source: 'project' });
   });
 
   it('publishes a save to every mounted editor of the same session', async () => {

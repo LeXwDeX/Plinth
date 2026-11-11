@@ -105,6 +105,55 @@ func TestAcceptanceOmitsUnrequiredAndUnboundedChecks(t *testing.T) {
 	}
 }
 
+// #251 fix: the triangle checkpoint freezes both bounds; the approved
+// acceptance wording must state the same range, not only the upper bound.
+func TestAcceptanceTriangleCriterionShowsTheFrozenRange(t *testing.T) {
+	store := &recordingProductionPlans{}
+	service := proposalService(t, store, shippedBudgetSchema(t))
+	brief := chat.ProductionBrief{"purpose": json.RawMessage(`"game_character"`)}
+	command := planCommandWithBrief(`{"title":"角色","steps":[{"capability":"image-to-3d","purpose":"生成角色"}],"budgets":[{"unit":"legacy.credits","amount":20}]}`, brief)
+	plan, _ := propose(t, service, store, command)
+	for _, criterion := range plan.Acceptance {
+		if criterion.ID != "triangles" {
+			continue
+		}
+		if !strings.Contains(criterion.Statement, "5000") || !strings.Contains(criterion.Statement, "60000") ||
+			!strings.Contains(criterion.Statement, "之间") {
+			t.Fatalf("triangle acceptance must show both bounds: %s", criterion.Statement)
+		}
+		return
+	}
+	t.Fatalf("no triangle acceptance criterion: %+v", plan.Acceptance)
+}
+
+// #251 fix: the acceptance texts are translated in the proposal turn's locale,
+// before their placeholders are filled; an empty locale never translated.
+func TestAcceptanceUsesTheProposalTurnLocale(t *testing.T) {
+	store := &recordingProductionPlans{}
+	service := proposalService(t, store, shippedBudgetSchema(t))
+	service.SetProductionPlanLocalizer(func(locale, text string) string {
+		if locale == "en" {
+			return "[en]" + text
+		}
+		return text
+	})
+	brief := chat.ProductionBrief{"purpose": json.RawMessage(`"game_character"`)}
+	command := planCommandWithBrief(`{"title":"角色","steps":[{"capability":"image-to-3d","purpose":"生成角色"}],"budgets":[{"unit":"legacy.credits","amount":20}]}`, brief)
+	command.Options.Locale = "en"
+	plan, content := propose(t, service, store, command)
+	if len(plan.Acceptance) == 0 {
+		t.Fatal("no acceptance criteria")
+	}
+	for _, criterion := range plan.Acceptance {
+		if !strings.HasPrefix(criterion.Statement, "[en]") {
+			t.Fatalf("criterion %q was not translated in the turn locale", criterion.Statement)
+		}
+	}
+	if report, _ := content["report_instruction"].(string); !strings.HasPrefix(report, "[en]") {
+		t.Fatalf("report instruction was not translated: %q", report)
+	}
+}
+
 func TestProposeProductionPlanFreezesCheckpointThresholdsAndContingencies(t *testing.T) {
 	store := &recordingProductionPlans{}
 	service := proposalService(t, store, shippedBudgetSchema(t))
@@ -136,6 +185,25 @@ func TestProposeProductionPlanFreezesCheckpointThresholdsAndContingencies(t *tes
 	}
 	if content["contingency_totals"] == nil || content["step_totals"] == nil {
 		t.Fatalf("plan result must split step and contingency totals: %v", content)
+	}
+}
+
+// #251 fix: a contingency triggered by task_failed is an approved repair and
+// must survive proposal validation; processing can then insert it.
+func TestProposeProductionPlanAcceptsATaskFailedContingency(t *testing.T) {
+	store := &recordingProductionPlans{}
+	service := proposalService(t, store, shippedBudgetSchema(t))
+	arguments := `{"title":"角色","steps":[{"capability":"image-to-3d","purpose":"生成"}],` +
+		`"budgets":[{"unit":"legacy.credits","amount":20}],` +
+		`"correction_capabilities":["resize"],` +
+		`"contingencies":[{"id":"retry","trigger":["task_failed"],"step":{"capability":"resize","purpose":"调整尺寸"}}]}`
+	plan, content := propose(t, service, store, planCommand(arguments))
+	if content["success"] == false {
+		t.Fatalf("task_failed contingency was refused: %v", content)
+	}
+	if len(plan.Contingencies) != 1 || plan.Contingencies[0].ID != "retry" ||
+		len(plan.Contingencies[0].Trigger) != 1 || plan.Contingencies[0].Trigger[0] != "task_failed" {
+		t.Fatalf("contingency = %+v", plan.Contingencies)
 	}
 }
 

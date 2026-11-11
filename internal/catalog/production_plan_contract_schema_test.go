@@ -27,6 +27,24 @@ func TestDefaultCatalogDeclaresThePlanAcceptanceContract(t *testing.T) {
 		budget.Acceptance.Criteria["triangles"] == "" || budget.Acceptance.Criteria["pivot_bottom_center"] == "" {
 		t.Fatalf("acceptance templates = %+v", budget.Acceptance)
 	}
+	// #251 fix: a check with both bounds is worded as a range, and the English
+	// bundle carries the acceptance and report templates.
+	if rangeTemplate := budget.Acceptance.RangeCriteria["triangles"]; rangeTemplate == "" ||
+		!strings.Contains(rangeTemplate, "{minimum}") || !strings.Contains(rangeTemplate, "{maximum}") {
+		t.Fatalf("triangle range template = %q", rangeTemplate)
+	}
+	texts, err := catalog.NewTextLocalizer(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, source := range map[string]string{
+		"range":  budget.Acceptance.RangeCriteria["triangles"],
+		"report": budget.Acceptance.Report,
+	} {
+		if translated := texts.Text("en", source); translated == "" || translated == source {
+			t.Fatalf("%s acceptance text has no English template: %q", name, source)
+		}
+	}
 	for _, placeholder := range []string{"{acceptance}", "{checkpoints}", "{contingencies}", "{report}"} {
 		if !strings.Contains(budget.ContextTemplate, placeholder) {
 			t.Fatalf("context_template lacks %s", placeholder)

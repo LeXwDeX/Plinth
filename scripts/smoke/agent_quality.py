@@ -27,6 +27,10 @@ SUCCESS = common.SUCCESS_STATE
 FAILED_STATES = common.FAILED_STATES
 CHECK_PASS, CHECK_FAIL, CHECK_SKIP = "pass", "fail", "skip"
 
+# Project steps set up the #240 fixture between tool steps; they are not tool
+# calls and never count against the tool-call budget.
+PROJECT_SETUP_ACTIONS = ("promote_first_image", "new_session")
+
 
 # ---------------------------------------------------------------- request set
 
@@ -87,14 +91,59 @@ def validate_request_set(data, purposes=None):
             if request["purpose"] not in allowed:
                 problems.append(
                     f"{request_id}: purpose {request['purpose']} is not declared for {request.get('modality')} work")
+        project = request.get("project")
+        if project is not None:
+            if not isinstance(project, dict) or not str(project.get("name") or "").strip():
+                problems.append(f"{request_id}: project needs a name")
+            elif project.get("conventions") is not None and not isinstance(project["conventions"], dict):
+                problems.append(f"{request_id}: project.conventions must be an object")
+            elif project.get("style_guide") is not None and not isinstance(project["style_guide"], dict):
+                problems.append(f"{request_id}: project.style_guide must be an object")
         steps = request.get("steps") or []
         if not isinstance(steps, list) or not steps:
             problems.append(f"{request_id}: steps must be a non-empty list")
         else:
             for step_index, step in enumerate(steps):
-                tool = (step or {}).get("tool") or {}
-                if not step.get("user") or not tool.get("name"):
+                if not isinstance(step, dict) or not step.get("user"):
                     problems.append(f"{request_id}.steps[{step_index}]: missing user or tool.name")
+                    continue
+                tool = step.get("tool") or {}
+                tools = step.get("tools")
+                setup = step.get("project_setup")
+                if tools is not None:
+                    if setup is not None or tool.get("name"):
+                        problems.append(f"{request_id}.steps[{step_index}]: a step is tools[], a tool or a project_setup, not more")
+                    elif not isinstance(tools, list) or not tools or any(
+                            not isinstance(item, dict) or not item.get("name") for item in tools):
+                        problems.append(f"{request_id}.steps[{step_index}]: tools[] needs a name on every call")
+                elif setup is not None and setup not in PROJECT_SETUP_ACTIONS:
+                    problems.append(f"{request_id}.steps[{step_index}]: unknown project_setup {setup}")
+                elif setup is not None and tool.get("name"):
+                    problems.append(f"{request_id}.steps[{step_index}]: a step is a tool or a project_setup, not both")
+                elif setup is None and not tool.get("name") and not step.get("feedback"):
+                    problems.append(f"{request_id}.steps[{step_index}]: missing user or tool.name")
+                elif setup == "promote_first_image":
+                    asset = step.get("asset")
+                    if asset is not None and (not isinstance(asset, dict) or not str(asset.get("name") or "").strip()):
+                        problems.append(f"{request_id}.steps[{step_index}]: a promoted asset needs a name")
+                feedback = step.get("feedback")
+                if feedback is not None:
+                    if not isinstance(feedback, list) or not feedback:
+                        problems.append(f"{request_id}.steps[{step_index}]: feedback must be a non-empty list")
+                    else:
+                        for action_index, action in enumerate(feedback):
+                            if not isinstance(action, dict) or action.get("action") not in PREFERENCE_ACTIONS:
+                                problems.append(f"{request_id}.steps[{step_index}].feedback[{action_index}]: unknown action")
+                                continue
+                            if action["action"] in ("pick", "reject"):
+                                index = action.get("task")
+                                prompt = action.get("prompt")
+                                if (not isinstance(index, int) or index < 0) and not (isinstance(prompt, str) and prompt):
+                                    problems.append(f"{request_id}.steps[{step_index}].feedback[{action_index}]: needs a task index or prompt")
+                            if action["action"] == "reject" and action.get("reasonPreset") is not None and not isinstance(action.get("reasonPreset"), str):
+                                problems.append(f"{request_id}.steps[{step_index}].feedback[{action_index}]: reasonPreset must be a string")
+                            if action["action"] == "edit" and not any(key in action for key in ("direction", "reasonPreset", "reasonText", "active")):
+                                problems.append(f"{request_id}.steps[{step_index}].feedback[{action_index}]: edit changes nothing")
         expected = request.get("expected") or {}
         if not expected.get("capabilities"):
             problems.append(f"{request_id}: expected.capabilities is empty")
@@ -112,7 +161,20 @@ def validate_request_set(data, purposes=None):
             value = budgets.get(name)
             if not isinstance(value, int) or value < 0:
                 problems.append(f"{request_id}: budgets.{name} must be a non-negative integer")
+        preference_checks = expected.get("preferences")
+        if preference_checks is not None:
+            if not isinstance(preference_checks, dict):
+                problems.append(f"{request_id}: expected.preferences must be an object")
+            else:
+                for name, value in preference_checks.items():
+                    if name not in PREFERENCE_CHECKS or not isinstance(value, bool):
+                        problems.append(f"{request_id}: expected.preferences.{name} is not a boolean check")
     return problems
+
+
+# #241: the feedback actions a trajectory step may perform between turns.
+PREFERENCE_ACTIONS = ("pick", "reject", "compact", "edit", "delete")
+PREFERENCE_CHECKS = ("captured", "injected", "after_compaction", "edited", "deleted")
 
 
 def load_requests(path=REQUESTS_PATH):
@@ -264,6 +326,55 @@ def evaluate_case(request, run):
     check("budget:tool_calls", len(names) <= budgets.get("max_tool_calls", 10 ** 9), f"{len(names)} call(s)")
     check("budget:interruptions", len(cards) <= budgets.get("max_interruptions", 10 ** 9), f"{len(cards)} card(s)")
     checks.extend(run.get("output_checks") or [])
+
+    # #241: the feedback facts and the prompts the fake-only convention
+    # produced from them at each stage.
+    preference_expectations = expected.get("preferences") or {}
+    if preference_expectations:
+        facts = run.get("preference_facts") or {}
+        captured = run.get("preference_captured") or []
+        kinds = {preference.get("kind") for preference in captured}
+        prompts = {record.get("stage"): record.get("prompt") or "" for record in run.get("preference_prompts") or []}
+        selected = facts.get("selected_direction") or ""
+        rejected = facts.get("rejected_direction") or ""
+        rejected_reason = facts.get("rejected_reason") or ""
+        edited = facts.get("edited_direction") or ""
+        edited_reason = facts.get("edited_reason") or ""
+
+        def staged(stage):
+            return prompts.get(stage, "")
+
+        if preference_expectations.get("captured"):
+            check("preference:captured", {"selected", "rejected"} <= kinds,
+                  f"kinds={sorted(kind for kind in kinds if kind)}")
+        if preference_expectations.get("injected"):
+            prompt = staged("captured")
+            check("preference:injected",
+                  bool(selected and rejected and rejected_reason and selected in prompt
+                       and rejected in prompt and rejected_reason in prompt),
+                  f"selected={'yes' if selected and selected in prompt else 'no'} "
+                  f"rejected={'yes' if rejected and rejected in prompt else 'no'} "
+                  f"reason={'yes' if rejected_reason and rejected_reason in prompt else 'no'}")
+        if preference_expectations.get("after_compaction"):
+            prompt = staged("after_compaction")
+            check("preference:after_compaction",
+                  bool(selected and selected in prompt and rejected and rejected in prompt),
+                  f"compacted_prompt={'found' if prompt else 'missing'}")
+        if preference_expectations.get("edited"):
+            prompt = staged("edited")
+            check("preference:edited",
+                  bool(edited and edited in prompt and (not edited_reason or edited_reason in prompt)
+                       and (not rejected or rejected not in prompt)),
+                  f"edited={'yes' if edited and edited in prompt else 'no'} "
+                  f"old_gone={'yes' if rejected and rejected not in prompt else 'no'}")
+        if preference_expectations.get("deleted"):
+            prompt = staged("deleted")
+            check("preference:deleted",
+                  bool(prompt and (not edited or edited not in prompt)
+                       and (not edited_reason or edited_reason not in prompt)
+                       and (not selected or selected in prompt)),
+                  f"edited_gone={'yes' if edited and edited not in prompt else 'no'} "
+                  f"selected_kept={'yes' if selected and selected in prompt else 'no'}")
 
     counts = {}
     revision_operations = {}
@@ -691,13 +802,20 @@ TAIL_METRICS = {
 }
 
 
-def compare_reports(baseline, candidate, tolerance=0):
-    """Regressions, improvements and changed metric deltas between two reports."""
+def compare_reports(baseline, candidate, tolerance=0, new_request_set=False):
+    """Regressions, improvements and changed metric deltas between two reports.
+
+    new_request_set is the explicit report mode for a changed fixed request
+    set (#240): the request-set version/content difference is recorded rather
+    than treated as incomparable, cases missing from the baseline count as
+    additions, and the tail metrics are compared over the common cases only.
+    """
     problems = []
-    if baseline.get("request_set", {}).get("version") != candidate.get("request_set", {}).get("version"):
-        problems.append("the two reports used different request-set versions")
-    if baseline.get("request_set", {}).get("sha256") != candidate.get("request_set", {}).get("sha256"):
-        problems.append("the two reports used different request-set contents")
+    if not new_request_set:
+        if baseline.get("request_set", {}).get("version") != candidate.get("request_set", {}).get("version"):
+            problems.append("the two reports used different request-set versions")
+        if baseline.get("request_set", {}).get("sha256") != candidate.get("request_set", {}).get("sha256"):
+            problems.append("the two reports used different request-set contents")
     if baseline.get("mode") != candidate.get("mode"):
         problems.append(f"the two reports used different modes: {baseline.get('mode')} vs {candidate.get('mode')}")
 
@@ -706,6 +824,10 @@ def compare_reports(baseline, candidate, tolerance=0):
     regressions, improvements, changed = [], [], []
     for case_id in sorted(set(base_cases) | set(cand_cases)):
         if case_id not in cand_cases:
+            if new_request_set:
+                changed.append({"case": case_id, "check": "case",
+                                "detail": "removed from the candidate request set"})
+                continue
             regressions.append({"case": case_id, "check": "case", "detail": "missing from the candidate report"})
             continue
         if case_id not in base_cases:
@@ -726,8 +848,15 @@ def compare_reports(baseline, candidate, tolerance=0):
             else:
                 changed.append(entry)
 
-    base_metrics = (baseline.get("summary") or {}).get("metrics") or {}
-    cand_metrics = (candidate.get("summary") or {}).get("metrics") or {}
+    if new_request_set:
+        # The request set changed, so the report totals are not comparable.
+        # Compare the same metrics over the cases both reports ran.
+        common = set(base_cases) & set(cand_cases)
+        base_metrics = case_metric_totals(base_cases, common)
+        cand_metrics = case_metric_totals(cand_cases, common)
+    else:
+        base_metrics = (baseline.get("summary") or {}).get("metrics") or {}
+        cand_metrics = (candidate.get("summary") or {}).get("metrics") or {}
     deltas = {}
     for metric, direction in TAIL_METRICS.items():
         before = base_metrics.get(metric)
@@ -736,6 +865,10 @@ def compare_reports(baseline, candidate, tolerance=0):
             continue
         delta = after - before
         deltas[metric] = {"before": before, "after": after, "delta": delta, "direction": direction}
+        if new_request_set:
+            # A changed request definition can add tools or cards to a common
+            # case; the delta stays visible but never blocks a report-only run.
+            continue
         if direction == "lower" and delta > tolerance:
             regressions.append({"case": "*", "check": f"metric:{metric}", "before": before, "after": after})
         elif direction == "higher" and delta < -tolerance:
@@ -747,27 +880,64 @@ def compare_reports(baseline, candidate, tolerance=0):
         "improvements": improvements,
         "changed": changed,
         "metrics": deltas,
-        "markdown": compare_markdown(baseline, candidate, problems, regressions, improvements, changed, deltas),
+        "new_request_set": new_request_set,
+        "markdown": compare_markdown(baseline, candidate, problems, regressions, improvements, changed, deltas,
+                                     new_request_set=new_request_set),
     }
 
 
-def compare_markdown(baseline, candidate, problems, regressions, improvements, changed, deltas):
+# CASE_METRIC_PATHS reads the per-case metrics a report summary flattens.
+CASE_METRIC_PATHS = {
+    "tool_calls": ("tool_call_count",),
+    "paid_calls": ("paid_call_count",),
+    "interruptions": ("interruption_count",),
+    "inspect_model": ("self_inspection", "inspect_model"),
+    "render_model_views": ("self_inspection", "render_model_views"),
+    "compare_model_reference": ("self_inspection", "compare_model_reference"),
+    "self_check_records": ("self_inspection", "self_check_records"),
+    "self_check_passed": ("self_inspection", "self_check_passed"),
+}
+
+
+def case_metric_totals(cases, case_ids):
+    """The tail metrics a candidate and a baseline share, summed per case."""
+    totals = {}
+    for metric, path in CASE_METRIC_PATHS.items():
+        total = 0
+        for case_id in case_ids:
+            value = (cases.get(case_id) or {}).get("metrics") or {}
+            for key in path:
+                value = (value or {}).get(key) if isinstance(value, dict) else None
+            if isinstance(value, int):
+                total += value
+        totals[metric] = total
+    return totals
+
+
+def compare_markdown(baseline, candidate, problems, regressions, improvements, changed, deltas,
+                     new_request_set=False):
     lines = [
         "# Agent 产出质量评测对比",
         "",
         f"- 基线: `{baseline.get('revision')}`",
         f"- 候选: `{candidate.get('revision')}`",
         f"- 结论: {'无回退' if not regressions and not problems else '存在回退或不可比项'}",
-        "",
     ]
+    if new_request_set:
+        lines.append("- 请求集: 显式按新请求集对比（新增用例计为新增，汇总指标只比较两边共有的用例且仅作参考）")
+    lines.append("")
     if problems:
         lines += ["## 不可比", ""] + [f"- {problem}" for problem in problems] + [""]
     if regressions:
         lines += ["## 回退", "", "| 用例 | 检查 | 基线 | 候选 |", "|---|---|---|---|"]
         lines += [f"| {item.get('case')} | {item.get('check')} | {item.get('before', '-')} | {item.get('after', '-')} |" for item in regressions]
         lines.append("")
-    if improvements:
-        lines += ["## 改善", ""] + [f"- `{item.get('case')}` / `{item.get('check')}`: {item.get('before')} → {item.get('after')}" for item in improvements] + [""]
+    added = [item for item in improvements if item.get("check") == "case"]
+    if added:
+        lines += ["## 新增用例", ""] + [f"- `{item.get('case')}`: {item.get('detail')}" for item in added] + [""]
+    kept = [item for item in improvements if item.get("check") != "case"]
+    if kept:
+        lines += ["## 改善", ""] + [f"- `{item.get('case')}` / `{item.get('check')}`: {item.get('before') or '未检查'} → {item.get('after')}" for item in kept] + [""]
     if changed:
         lines += ["## 其他变化", ""] + [f"- `{item.get('case')}` / `{item.get('check')}`: {item.get('before')} → {item.get('after')}" for item in changed] + [""]
     if deltas:

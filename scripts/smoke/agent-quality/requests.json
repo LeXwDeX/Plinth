@@ -1,6 +1,6 @@
 {
-  "version": 4,
-  "description": "Agent 产出质量评测的固定请求集（#238）。轨迹评测用 steps 中的 tool 驱动 fake LLM；产出评测只发送 prompt，由真实 Agent 自行决定工具。用途取自 Product Schema chat.model3d_usage.profiles。version 4 增加 #242 的开放概念方向与 3D 候选案例。",
+  "version": 5,
+  "description": "Agent 产出质量评测的固定请求集（#238）。轨迹评测用 steps 中的 tool 驱动 fake LLM；产出评测只发送 prompt，由真实 Agent 自行决定工具。用途取自 Product Schema chat.model3d_usage.profiles。version 5 合并 #240 的项目夹具（project/project_setup：建项目、提升首图、同项目新会话，不算工具调用）、#241 的会话偏好用例与 #242 的开放概念方向、3D 候选案例。",
   "requests": [
     {
       "id": "3d-humanoid-character",
@@ -1024,6 +1024,66 @@
       }
     },
     {
+      "id": "2d-series-project",
+      "title": "2D 项目系列复用：项目里定稿角色 A，新会话画同系列角色 B",
+      "modality": "2d",
+      "category": "series_consistency",
+      "purpose": "illustration",
+      "prompt": "在项目里先画角色 A 并定稿为标准形象，再在项目的新会话里画同系列的角色 B。",
+      "output": {"background": "solid"},
+      "reference_images": [],
+      "deliverables": ["角色 A 的定稿立绘（PNG）", "新会话里的同系列角色 B 立绘（PNG）", "项目风格指南与标准形象被后续会话复用"],
+      "project": {
+        "name": "红发剑士系列",
+        "style_guide": {
+          "text": "系列项目风格：赛璐璐平涂、暖色高光、干净轮廓、纯色背景。",
+          "palette": ["#c94f3d", "#f2d7b6", "#2b2b2b"],
+          "reference_from_asset": false
+        },
+        "conventions": {"image_use": "illustration"}
+      },
+      "steps": [
+        {
+          "user": "这张图主要用来做什么？",
+          "tool": {"name": "ask_choice", "arguments": {"kind": "image_usage_profile"}}
+        },
+        {
+          "user": "先画角色 A 的全身立绘。",
+          "tool": {"name": "refine_image", "arguments": {"prompt": "full-body portrait of role A, a young red-haired swordswoman, cel-shaded flat colour, warm highlights, clean silhouette, solid neutral background, no text, no watermark"}}
+        },
+        {
+          "user": "把角色 A 的定稿图提升为项目标准形象。",
+          "project_setup": "promote_first_image",
+          "asset": {"kind": "character", "name": "角色 A", "description": "红发剑士的标准全身立绘"}
+        },
+        {
+          "user": "在同一个项目里新开一个会话。",
+          "project_setup": "new_session"
+        },
+        {
+          "user": "画同系列的角色 B，沿用项目的风格与角色 A 的标准形象。",
+          "tool": {"name": "refine_image", "arguments": {"prompt": "full-body portrait of role B, same series as role A, matching cel-shaded flat colour, warm highlights, clean silhouette, solid neutral background, no text, no watermark"}}
+        },
+        {
+          "user": "列出项目里可复用的资产。",
+          "tool": {"name": "list_project_assets", "arguments": {}}
+        }
+      ],
+      "live_followups": ["请先画角色 A 的全身立绘。", "请在新会话里画同系列的角色 B。"],
+      "expected": {
+        "capabilities": ["text-to-image"],
+        "min_tasks": {"text-to-image": 2},
+        "required_tool_groups": [
+          {"id": "usage", "any": ["ask_choice"]},
+          {"id": "generate_2d", "any": ["refine_image"]},
+          {"id": "project_assets", "any": ["list_project_assets"]}
+        ],
+        "order": [{"before": ["ask_choice"], "after": ["refine_image"]}],
+        "soft_tools": [],
+        "budgets": {"max_paid_calls": 2, "max_tool_calls": 9, "max_interruptions": 3}
+      }
+    },
+    {
       "id": "2d-3d-input-concept",
       "title": "2D 到 3D：单主体、纯色背景的概念图",
       "modality": "2d",
@@ -1505,12 +1565,6 @@
       "steps": [
         {
           "user": "先给三个方向，然后让我选。",
-          "tool": {
-            "name": "create_concept_sketch",
-            "arguments": {
-              "prompt": "photorealistic forest guardian concept art, natural materials, soft studio lighting, no text"
-            }
-          },
           "tools": [
             {
               "name": "create_concept_sketch",
@@ -1756,6 +1810,72 @@
           "max_tool_calls": 8,
           "max_interruptions": 3
         }
+      }
+    },
+    {
+      "id": "2d-preference-multiturn",
+      "title": "2D 多轮反馈：选用、否决与弱信号进入后续生成",
+      "modality": "2d",
+      "category": "multi_turn_feedback",
+      "purpose": "illustration",
+      "prompt": "先按四个方向各出一张概念图，我选一张、否一张，之后按我的取舍继续画。",
+      "reference_images": [],
+      "deliverables": ["四张不同方向的候选", "带已选用/已否决方向的下一轮提示词", "压缩后仍生效的偏好摘要"],
+      "steps": [
+        {
+          "user": "四个方向各出一张。",
+          "tools": [
+            {"name": "refine_image", "arguments": {"prompt": "PREF-CAND-0 a watercolor fox in the snow, soft ink wash, cool palette"}},
+            {"name": "refine_image", "arguments": {"prompt": "PREF-CAND-1 a photorealistic fox portrait, studio lighting, detailed fur"}},
+            {"name": "refine_image", "arguments": {"prompt": "PREF-CAND-2 a clay fox figurine, hand-painted, warm palette"}},
+            {"name": "refine_image", "arguments": {"prompt": "PREF-CAND-3 a low-poly fox, flat shading, game asset"}}
+          ]
+        },
+        {
+          "user": "我选水墨那张，不要写实那张（风格不对，太写实了）。",
+          "feedback": [
+            {"action": "pick", "prompt": "PREF-CAND-0 a watercolor fox in the snow, soft ink wash, cool palette"},
+            {"action": "reject", "prompt": "PREF-CAND-1 a photorealistic fox portrait, studio lighting, detailed fur", "reasonPreset": "style", "reasonText": "too realistic"}
+          ]
+        },
+        {
+          "user": "按我的取舍再画一张。",
+          "tool": {"name": "refine_image", "arguments": {"prompt_from_preferences": true}}
+        },
+        {
+          "user": "先压缩一下上下文，再按取舍画。",
+          "feedback": [{"action": "compact"}]
+        },
+        {
+          "user": "压缩后按偏好再画一张。",
+          "tool": {"name": "refine_image", "arguments": {"prompt_from_preferences": true}}
+        },
+        {
+          "user": "把否决改成水墨风，原因是洗淡了。",
+          "feedback": [{"action": "edit", "direction": "PREF-EDIT an ink-wash fox", "reasonPreset": "other", "reasonText": "washed out"}]
+        },
+        {
+          "user": "编辑后再画一张。",
+          "tool": {"name": "refine_image", "arguments": {"prompt_from_preferences": true}}
+        },
+        {
+          "user": "删掉那条否决。",
+          "feedback": [{"action": "delete"}]
+        },
+        {
+          "user": "删除后再画一张。",
+          "tool": {"name": "refine_image", "arguments": {"prompt_from_preferences": true}}
+        }
+      ],
+      "live_followups": ["先出四张候选，然后按我选中的方向继续画，避开我否掉的方向。"],
+      "expected": {
+        "capabilities": ["text-to-image"],
+        "required_tool_groups": [
+          {"id": "candidates", "any": ["refine_image"]}
+        ],
+        "soft_tools": [],
+        "budgets": {"max_paid_calls": 8, "max_tool_calls": 12, "max_interruptions": 2},
+        "preferences": {"captured": true, "injected": true, "after_compaction": true, "edited": true, "deleted": true}
       }
     }
   ]

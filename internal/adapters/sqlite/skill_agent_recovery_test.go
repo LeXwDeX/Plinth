@@ -15,6 +15,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/agentparams"
 	"github.com/LeXwDeX/Plinth/internal/chat/agenttools"
+	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/skillrun"
@@ -123,7 +124,7 @@ type skillRecoveryReferences struct {
 	fail  bool
 }
 
-func (r *skillRecoveryReferences) Resolve(context.Context, generation.OwnerID, []string) ([]generation.AssetID, error) {
+func (r *skillRecoveryReferences) Resolve(context.Context, references.ReferenceScope, []string) ([]generation.AssetID, error) {
 	r.calls++
 	if r.fail {
 		return nil, errors.New("references changed after acceptance")

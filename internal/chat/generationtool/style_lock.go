@@ -66,10 +66,26 @@ func (executor *Executor) applyStyleLockPrompt(command chat.ToolCommand, offerin
 	}
 	if text := strings.TrimSpace(lock.Text); text != "" {
 		template := executor.chat.StyleLock.PromptTemplate
+		project := ""
+		if lock.Source == chat.StyleLockSourceProject {
+			// A project-source turn uses the project template and the project
+			// name; the session lock's own wording never applies (#240).
+			declared := ""
+			if executor.project != nil && executor.project.Agent != nil {
+				declared = executor.project.Agent.StylePromptTemplate
+			}
+			if declared == "" {
+				declared = executor.chat.StyleLock.ProjectPromptTemplate
+			}
+			if declared != "" {
+				template = declared
+			}
+			project = lock.ProjectName
+		}
 		if template == "" {
 			template = "\n\nStyle lock: {style}"
 		}
-		prompt += strings.NewReplacer("{style}", text, "{text}", text).Replace(template)
+		prompt += strings.NewReplacer("{style}", text, "{text}", text, "{project}", project).Replace(template)
 	}
 	if offering.Capability == generation.ImageToImage {
 		if template := executor.chat.StyleLock.EditScopeTemplate; template != "" {

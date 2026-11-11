@@ -13,7 +13,7 @@ import { shortcutCaps } from '@/lib/workspace/stage-actions';
  * each tab *shows* is code, keyed by id: the right panel binds one body to every id listed here, and a Schema
  * entry whose id is not listed is not drawn (there is nothing for it to show).
  */
-export const PANEL_TAB_IDS = ['layers', 'history', 'details', 'process', 'formats', 'parts', 'operations'] as const;
+export const PANEL_TAB_IDS = ['layers', 'history', 'details', 'project', 'process', 'formats', 'parts', 'operations'] as const;
 
 export type PanelTabId = (typeof PANEL_TAB_IDS)[number];
 

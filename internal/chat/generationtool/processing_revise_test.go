@@ -8,6 +8,8 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/processing"
 )
 
 func reviseCommand(arguments string) chat.ToolCommand {
@@ -79,6 +81,67 @@ func TestReviseProcessingPlanRefusesAnUnstartedStepWithFrozenInput(t *testing.T)
 	result, _ := h.executor.ReviseProcessingPlan(context.Background(), reviseCommand(arguments))
 	if !strings.Contains(result.AgentContent, `"success":false`) {
 		t.Fatalf("skip with frozen input = %+v", result)
+	}
+}
+
+// #251 fix: a frozen step is refused with the Schema text that says which
+// steps may move, not the generic "the plan changed" advice.
+func TestReviseProcessingPlanMapsAStartedStepToItsDeclaredText(t *testing.T) {
+	h := newAgentPlanHarness(t, "auto", false)
+	_, plan := h.propose(agentPlanArguments)
+	h.tick() // auto-approve and submit the first step
+	current := h.get(plan.ID)
+	arguments := `{"plan_id":"` + plan.ID + `","expected_plan_version":` +
+		jsonNumber(current.Version) + `,"operation":"replace","step_index":0,"reason":"替换已开始的步骤"}`
+	result, err := h.executor.ReviseProcessingPlan(context.Background(), reviseCommand(arguments))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := h.tool("plan_model_processing").Processing.Messages.RevisionNotStarted
+	if text == "" || !strings.Contains(result.AgentContent, text) || result.Error != text {
+		t.Fatalf("started-step refusal = %+v, want %q", result, text)
+	}
+}
+
+// #251 fix: an ambiguous retry may already have been charged; the Schema says
+// the person decides, and the result marks user_decision_required.
+func TestReviseProcessingPlanMarksAnAmbiguousRetryForThePerson(t *testing.T) {
+	h := newAgentPlanHarness(t, "auto", true)
+	_, plan := h.propose(agentPlanArguments)
+	h.tick()
+	h.tick()
+	h.tick() // remesh succeeds; rigging accepted
+	plan = h.get(plan.ID)
+	failed := h.gateway.tasks[plan.Steps[1].TaskID]
+	failed.State = generation.TaskFailed
+	failed.Failure = &generation.Failure{Class: generation.FailureInternal, Ambiguous: true}
+	h.gateway.tasks[failed.ID] = failed
+	h.tick()
+	h.tick()
+	stopped := h.get(plan.ID)
+	if stopped.State != processing.Failed {
+		t.Fatalf("plan after ambiguous failure = %s/%s", stopped.State, stopped.Failure)
+	}
+	submissions := len(h.gateway.commands)
+	arguments := `{"plan_id":"` + plan.ID + `","expected_plan_version":` +
+		jsonNumber(stopped.Version) + `,"operation":"retry","step_index":1,"reason":"重试可能已扣费"}`
+	result, err := h.executor.ReviseProcessingPlan(context.Background(), reviseCommand(arguments))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var content map[string]any
+	if json.Unmarshal([]byte(result.AgentContent), &content) != nil {
+		t.Fatalf("result = %s", result.AgentContent)
+	}
+	text := h.tool("plan_model_processing").Processing.Messages.RevisionRetryPerson
+	if text == "" || content["error"] != text || content["user_decision_required"] != true || content["next_action"] != "ask_user" {
+		t.Fatalf("ambiguous retry refusal = %v, want %q", content, text)
+	}
+	if len(h.gateway.commands) != submissions {
+		t.Fatal("an ambiguous retry submitted paid work")
+	}
+	if after := h.get(plan.ID); after.State != processing.Failed || after.Version != stopped.Version {
+		t.Fatalf("refused retry mutated the plan: %+v", after)
 	}
 }
 

@@ -26,7 +26,7 @@ func TestMigration0065UpgradesExistingSessionsWithoutContext(t *testing.T) {
 	// Roll the ledger back to 0064 and drop what 0065 (and the later 0066, 0067)
 	// added, then reopen.
 	for _, statement := range []string{
-		`DELETE FROM go_schema_migrations WHERE version >= 65`,
+		`DELETE FROM go_schema_migrations WHERE version >= 65`, `DROP TABLE IF EXISTS project_assets`, `DROP TABLE IF EXISTS project_conventions`, `DROP TABLE IF EXISTS project_style_guides`, `DROP TABLE IF EXISTS projects`, `DROP TABLE IF EXISTS chat_session_preferences`, `ALTER TABLE go_chat_sessions DROP COLUMN project_id`, `ALTER TABLE go_chat_sessions DROP COLUMN style_lock_source`,
 		`DROP TABLE IF EXISTS chat_branch_task_refs`,
 		`DROP TABLE IF EXISTS chat_self_checks`,
 		`DROP TABLE llm_settings_versions`,

@@ -736,7 +736,16 @@ func (s *Service) retryStep(ctx context.Context, plan *Plan, index int, expected
 		return Plan{}, ErrConflict
 	}
 	task, err := s.gateway.Get(ctx, plan.OwnerID, step.TaskID)
-	if err != nil || task.State != generation.TaskFailed || (task.Failure != nil && (task.Failure.Ambiguous || task.Failure.Class == generation.FailureSourceExpired)) {
+	if err != nil || task.State != generation.TaskFailed {
+		return Plan{}, ErrConflict
+	}
+	// An ambiguous failure may already have been charged; only the person may
+	// decide to charge again. The revision tool words this differently from a
+	// stale plan or a step that cannot move (#251 fix).
+	if task.Failure != nil && task.Failure.Ambiguous {
+		return Plan{}, ErrRevisionRetryPerson
+	}
+	if task.Failure != nil && task.Failure.Class == generation.FailureSourceExpired {
 		return Plan{}, ErrConflict
 	}
 	offering, ok := s.catalog.Get(step.OfferingID)
@@ -913,6 +922,9 @@ func (s *Service) continuePastCheckpoint(ctx context.Context, plan *Plan) (Plan,
 		step.Checkpoint.State, step.Checkpoint.Resolution = CheckpointWaived, CheckpointResolutionUserContinue
 		step.Failure, step.Retryable = "", false
 		plan.State, plan.Failure, plan.UpdatedAt = Pending, "", time.Now().UTC()
+		// A continue on the last step leaves nothing to advance; close the
+		// plan now instead of leaving it active forever (#251 fix).
+		settlePlan(plan)
 		if err := s.savePlan(ctx, plan); err != nil {
 			return Plan{}, err
 		}
@@ -1024,8 +1036,8 @@ func (s *Service) advance(ctx context.Context, plan *Plan) error {
 				if err != nil {
 					return err
 				}
-				if !blocked && noStepRemains(plan.Steps) {
-					plan.State = Succeeded
+				if !blocked {
+					settlePlan(plan)
 				}
 			case generation.TaskCanceled:
 				step.State, plan.State = Paused, Paused
@@ -1178,6 +1190,14 @@ func (s *Service) advance(ctx context.Context, plan *Plan) error {
 		plan.UpdatedAt = time.Now().UTC()
 		return s.savePlan(ctx, plan)
 	}
+	// Every step is terminal and no checkpoint blocks the plan: close it.
+	// A waive or person's continue on the last step clears the checkpoint
+	// failure and sets PENDING; without this the plan would stay active
+	// forever because advance only marks SUCCEEDED when a live Task changes
+	// state (#251 fix).
+	if settlePlan(plan) {
+		return s.savePlan(ctx, plan)
+	}
 	return nil
 }
 
@@ -1261,6 +1281,18 @@ func noStepRemains(steps []Step) bool {
 			return false
 		}
 	}
+	return true
+}
+
+// settlePlan closes a plan whose steps are all terminal and whose failed
+// checkpoints were resolved. A waive, a person's continue or a skip on the
+// last step leaves the plan PENDING with no live Task to observe; without
+// this it would never become SUCCEEDED (#251 fix).
+func settlePlan(plan *Plan) bool {
+	if plan.State == Succeeded || !noStepRemains(plan.Steps) || hasFailedCheckpoint(plan.Steps) {
+		return false
+	}
+	plan.State, plan.Failure, plan.UpdatedAt = Succeeded, "", time.Now().UTC()
 	return true
 }
 

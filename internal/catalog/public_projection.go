@@ -108,9 +108,26 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 	publicChat.API.Fields = cloned.Chat.API.Fields
 	publicChat.API.ResponseFields = cloned.Chat.API.ResponseFields
 	publicChat.API.Attachment = cloned.Chat.API.Attachment
+	publicChat.API.Preference = cloned.Chat.API.Preference
 	publicChat.API.StyleLock = cloned.Chat.API.StyleLock
+	// #241: the browser needs the bounds and the declared reason ids; the
+	// framing templates, markers, item templates and prompt paragraph stay
+	// server-only.
+	if preferences := cloned.Chat.Preferences; preferences.MaximumEntries > 0 {
+		ids := make([]string, 0, len(preferences.ReasonPresets))
+		for _, preset := range preferences.ReasonPresets {
+			ids = append(ids, preset.ID)
+		}
+		publicChat.Preferences = &PublicChatPreferencesSchema{
+			MaximumEntries:             preferences.MaximumEntries,
+			MaximumDirectionCharacters: preferences.MaximumDirectionCharacters,
+			MaximumReasonCharacters:    preferences.MaximumReasonCharacters,
+			ReasonPresets:              ids,
+		}
+	}
 	publicChat.StyleLock.MaximumTextCharacters = cloned.Chat.StyleLock.MaximumTextCharacters
 	publicChat.StyleLock.MaximumReferenceImages = cloned.Chat.StyleLock.MaximumReferenceImages
+	publicChat.StyleLock.Sources = append([]string(nil), cloned.Chat.StyleLock.Sources...)
 	publicChat.API.PromptEnhance.PromptField = cloned.Chat.API.PromptEnhance.PromptField
 	publicChat.API.PromptEnhance.CapabilityField = cloned.Chat.API.PromptEnhance.CapabilityField
 	publicChat.API.PromptEnhance.ModelField = cloned.Chat.API.PromptEnhance.ModelField
@@ -152,6 +169,23 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 	deliveryFormats := make([]PublicDeliveryFormat, 0, len(cloned.ModelDelivery.Formats))
 	for _, format := range cloned.ModelDelivery.Formats {
 		deliveryFormats = append(deliveryFormats, PublicDeliveryFormat{ID: format.ID, Label: format.Label})
+	}
+	var publicProject *PublicProjectSchema
+	if cloned.Project != nil {
+		fields := make([]string, 0, len(cloned.Project.Conventions.Fields))
+		for _, field := range cloned.Project.Conventions.Fields {
+			fields = append(fields, field.Name)
+		}
+		texts := make([]string, 0, len(cloned.Project.Conventions.Texts))
+		for _, text := range cloned.Project.Conventions.Texts {
+			texts = append(texts, text.Name)
+		}
+		publicProject = &PublicProjectSchema{
+			Limits:      cloned.Project.Limits,
+			Assets:      cloned.Project.Assets,
+			StyleGuide:  cloned.Project.StyleGuide,
+			Conventions: PublicProjectConventionsSchema{Fields: fields, Texts: texts},
+		}
 	}
 	return PublicApplicationSchema{
 		AgentConfiguration: cloned.AgentConfiguration.Public(),
@@ -226,6 +260,7 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 		DeliveryFormats: deliveryFormats,
 		Authentication:  publicAuth,
 		Localization:    source.publicLocalization(),
+		Project:         publicProject,
 	}
 }
 

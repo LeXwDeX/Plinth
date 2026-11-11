@@ -52,6 +52,9 @@ vi.mock('@/components/workspace/harness-panel', () => ({
 vi.mock('@/components/workspace/style-lock-panel', () => ({
   StyleLockSection: ({ sessionId }: { sessionId: string | null }) => <div data-testid="stub-style-lock" data-session={sessionId ?? ''} />,
 }));
+vi.mock('@/components/workspace/preferences-panel', () => ({
+  PreferencesPanel: ({ sessionId }: { sessionId: string | null }) => <div data-testid="stub-preferences" data-session={sessionId ?? ''} />,
+}));
 vi.mock('@/components/canvas/layers-panel', () => ({
   CanvasLayersPanel: ({ sessionId }: { sessionId: string }) => <div data-testid="stub-layers" data-session={sessionId} />,
 }));
@@ -103,6 +106,10 @@ describe('nothing on the stage and an empty board', () => {
     expect(html).toContain('data-kind="none"');
     expect(html).toContain('data-testid="stub-operations" data-session="s1" data-task=""');
     expect(html).toContain('data-testid="stub-style-lock" data-session="s1"');
+    // #241: the preference summary sits in 功能, below the style lock and above the operation groups.
+    expect(html).toContain('data-testid="stub-preferences" data-session="s1"');
+    expect(html.indexOf('stub-style-lock')).toBeLessThan(html.indexOf('stub-preferences'));
+    expect(html.indexOf('stub-preferences')).toBeLessThan(html.indexOf('stub-operations'));
     expect(html.indexOf('right-panel-tabs')).toBeLessThan(html.indexOf('stub-style-lock'));
     expect(html).toContain('role="tablist"');
     expect(html).toContain('data-tab="operations"');
@@ -139,7 +146,7 @@ describe('a picture on the stage', () => {
   it('adds 功能 after the existing picture tabs and still opens on 图层', () => {
     const html = render();
     expect(html).toContain('data-kind="image"');
-    expect(tabIds(html)).toEqual(['layers', 'history', 'details', 'operations']);
+    expect(tabIds(html)).toEqual(['layers', 'history', 'details', 'operations', 'project']);
     expect(selectedTab(html)).toEqual(['layers']);
     expect(bodyOf(html)).toBe('layers');
     expect(html).toContain('data-testid="stub-layers" data-session="s1"');
@@ -181,7 +188,7 @@ describe('the bare board', () => {
   it('adds 功能 and 详情 after 图层 and 历史 and still opens on 图层', () => {
     const html = render();
     expect(html).toContain('data-kind="board"');
-    expect(tabIds(html)).toEqual(['layers', 'history', 'operations', 'details']);
+    expect(tabIds(html)).toEqual(['layers', 'history', 'operations', 'details', 'project']);
     expect(selectedTab(html)).toEqual(['layers']);
     expect(html).not.toContain('right-panel-empty');
   });
@@ -244,7 +251,7 @@ describe('a 3D model on the stage', () => {
   it('has 功能, 加工, 格式, 部件 and 详情 and opens on 功能', () => {
     const html = render();
     expect(html).toContain('data-kind="model"');
-    expect(tabIds(html)).toEqual(['operations', 'process', 'formats', 'parts', 'details']);
+    expect(tabIds(html)).toEqual(['operations', 'process', 'formats', 'parts', 'details', 'project']);
     expect(selectedTab(html)).toEqual(['operations']);
     expect(html).toContain('data-testid="stub-operations" data-session="s1" data-task="t-3d"');
     expect(html).toContain('data-testid="stub-style-lock" data-session="s1"');
@@ -299,13 +306,13 @@ describe('the tab bar', () => {
     expect(markup).toContain('right-panel-tabs');
     expect(markup).toMatch(/class="flex h-11 shrink-0 border-b/);
     const tabs = markup.match(/<button[^>]*role="tab"[\s\S]*?<\/button>/g) ?? [];
-    expect(tabs).toHaveLength(5);
+    expect(tabs).toHaveLength(6);
     for (const tab of tabs) {
       expect(tab).toContain('<svg');
       expect(tab).toContain('h-11');
     }
     const labels = tabs.map((tab) => tab.match(/<span class="truncate">([^<]+)<\/span>/)?.[1]);
-    expect(labels).toEqual(['功能', '加工', '格式', '部件', '详情']);
+    expect(labels).toEqual(['功能', '加工', '格式', '部件', '详情', '项目']);
   });
 
   it('underlines the active tab only, 2px', () => {
@@ -320,8 +327,8 @@ describe('the tab bar', () => {
   it('keeps one tab in the tab order and links each tab to the one body', () => {
     const markup = html();
     expect(markup.match(/tabindex="0"/g)).toHaveLength(1);
-    expect(markup.match(/tabindex="-1"/g)).toHaveLength(4);
-    expect(markup.match(/aria-controls="right-panel-body"/g)).toHaveLength(5);
+    expect(markup.match(/tabindex="-1"/g)).toHaveLength(5);
+    expect(markup.match(/aria-controls="right-panel-body"/g)).toHaveLength(6);
     expect(markup).toMatch(/role="tabpanel" id="right-panel-body" aria-labelledby="right-panel-tab-operations"/);
   });
 
@@ -334,7 +341,7 @@ describe('the tab bar', () => {
 
   it('draws the tabs of a given kind in the Schema order, whatever the active one is', () => {
     const bar = renderToStaticMarkup(<PanelTabBar views={panelTabViews(schema, 'image')} active="details" onSelect={() => {}} label="x" />);
-    expect(tabIds(bar)).toEqual(['layers', 'history', 'details', 'operations']);
+    expect(tabIds(bar)).toEqual(['layers', 'history', 'details', 'operations', 'project']);
     expect(selectedTab(bar)).toEqual(['details']);
   });
 

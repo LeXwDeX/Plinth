@@ -22,6 +22,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
+	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/providers"
@@ -219,7 +220,7 @@ func TestMultiviewRealPreparedInputFreezesOrderBytesAndGrantAcrossRestart(t *tes
 
 type multiviewReferenceFixture []generation.AssetID
 
-func (ids multiviewReferenceFixture) Resolve(context.Context, generation.OwnerID, []string) ([]generation.AssetID, error) {
+func (ids multiviewReferenceFixture) Resolve(context.Context, references.ReferenceScope, []string) ([]generation.AssetID, error) {
 	return ids, nil
 }
 

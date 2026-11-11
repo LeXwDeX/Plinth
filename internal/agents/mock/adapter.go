@@ -44,8 +44,12 @@ type Config struct {
 	// (#322); {handles} lists the attachment handles the summarized text
 	// names. Optional: without it the summary is the plain Summary.
 	SummaryTemplate string
-	UserRole        string
-	ToolRole        string
+	// CitationTemplate closes a turn that used project assets (#240) with the
+	// Schema's citation line; {assets} lists the asset names the tool reported
+	// in style_sources. Optional.
+	CitationTemplate string
+	UserRole         string
+	ToolRole         string
 	// Localize gives a Schema text in the UI locale of the turn in ctx. Nil
 	// keeps the default-locale copy.
 	Localize func(context.Context, string) string
@@ -64,6 +68,7 @@ type Adapter struct {
 	scopeRefusal   string
 	choiceSummary  string
 	summaryTmpl    string
+	citationTmpl   string
 	userRole       string
 	toolRole       string
 	localize       func(context.Context, string) string
@@ -90,6 +95,7 @@ func New(config Config) (*Adapter, error) {
 		scopeRefusal:   config.ScopeRefusal,
 		choiceSummary:  config.ChoiceSummary,
 		summaryTmpl:    config.SummaryTemplate,
+		citationTmpl:   config.CitationTemplate,
 		userRole:       config.UserRole,
 		toolRole:       config.ToolRole,
 		localize:       config.Localize,
@@ -261,6 +267,8 @@ func (adapter *Adapter) closingSummary(ctx context.Context, messages []agents.Me
 	// (#329 E); the reply repeats it.
 	referenceNote := ""
 	notesSaved, briefSaved, ranStep := "", "", false
+	var styleSources []string
+	styleSeen := map[string]bool{}
 	toolNames := turnToolNames(messages, adapter.userRole)
 	for index := len(messages) - 1; index >= 0; index-- {
 		message := messages[index]
@@ -297,10 +305,11 @@ func (adapter *Adapter) closingSummary(ctx context.Context, messages []agents.Me
 			return adapter.text(ctx, adapter.choiceSummary)
 		}
 		var result struct {
-			Success *bool  `json:"success"`
-			Error   string `json:"error"`
-			PlanID  string `json:"plan_id"`
-			Message string `json:"message"`
+			Success      *bool    `json:"success"`
+			Error        string   `json:"error"`
+			PlanID       string   `json:"plan_id"`
+			Message      string   `json:"message"`
+			StyleSources []string `json:"style_sources"`
 		}
 		if json.Unmarshal([]byte(message.Content), &result) != nil {
 			content := strings.TrimSpace(message.Content)
@@ -321,6 +330,13 @@ func (adapter *Adapter) closingSummary(ctx context.Context, messages []agents.Me
 			continue
 		}
 		ranStep = true
+		for _, source := range result.StyleSources {
+			if source == "" || styleSeen[source] {
+				continue
+			}
+			styleSeen[source] = true
+			styleSources = append(styleSources, source)
+		}
 		if result.PlanID != "" && result.Message != "" {
 			// A persisted proposal is not a finished model. Its Schema result
 			// text tells the person how approval and observation will proceed.
@@ -348,7 +364,13 @@ func (adapter *Adapter) closingSummary(ctx context.Context, messages []agents.Me
 	case briefSaved != "" && !ranStep:
 		return briefSaved
 	}
-	return adapter.text(ctx, adapter.summary)
+	summary := adapter.text(ctx, adapter.summary)
+	if len(styleSources) > 0 && adapter.citationTmpl != "" {
+		citation := strings.ReplaceAll(adapter.text(ctx, adapter.citationTmpl),
+			"{assets}", strings.Join(styleSources, "、"))
+		summary += "\n" + citation
+	}
+	return summary
 }
 
 // awaitingApproval reports the result of a step that waits on its approval

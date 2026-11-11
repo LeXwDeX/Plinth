@@ -13,7 +13,7 @@ import (
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
 
-func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentations []CapabilityPresentation, maxPromptCharacters int) error {
+func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchema, capabilityPresentations []CapabilityPresentation, maxPromptCharacters int) error {
 	if runtime.HTTP.Routes.ChatSessionBranch != "" {
 		if strings.Count(schema.Defaults.BranchTitleTemplate, "{title}") != 1 ||
 			strings.TrimSpace(schema.Presentation.Messages.BranchTurnActive) == "" ||
@@ -212,6 +212,26 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 
 		"presentation.agent_inline_image_output": schema.Presentation.Messages.AgentInlineImageOutput,
 	}
+	// The preference members are required only when the Catalog declares
+	// preference storage, so a historical Catalog without #241 stays valid.
+	if schema.Preferences.MaximumEntries > 0 {
+		for name, value := range map[string]string{
+			"api.response_fields.preferences": schema.API.ResponseFields.Preferences,
+			"api.preference.reason_preset":    schema.API.Preference.ReasonPreset,
+			"api.preference.reason_text":      schema.API.Preference.ReasonText,
+			"api.preference.signal":           schema.API.Preference.Signal,
+			"api.preference.handles":          schema.API.Preference.Handles,
+			"api.preference.direction":        schema.API.Preference.Direction,
+			"api.preference.active":           schema.API.Preference.Active,
+			"api.preference.kind":             schema.API.Preference.Kind,
+			"api.preference.source":           schema.API.Preference.Source,
+			"api.preference.alternatives":     schema.API.Preference.Alternatives,
+			"api.preference.explicit":         schema.API.Preference.Explicit,
+			"api.preference.user_edited":      schema.API.Preference.UserEdited,
+		} {
+			required[name] = value
+		}
+	}
 	for name, value := range required {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("%s 不能为空", name)
@@ -313,6 +333,23 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 		strings.TrimSpace(schema.StyleLock.SkipNote) == "" ||
 		strings.TrimSpace(schema.StyleLock.UnsupportedNote) == "") {
 		return errors.New("style_lock 的上限、字段与错误文案必须完整")
+	}
+	if sources := schema.StyleLock.Sources; len(sources) > 0 {
+		allowed := map[string]bool{"project": true, "session": true, "off": true}
+		seen := make(map[string]bool, len(sources))
+		for _, source := range sources {
+			if !allowed[source] || seen[source] {
+				return fmt.Errorf("style_lock.sources 只能是 project/session/off 且不重复: %q", source)
+			}
+			seen[source] = true
+		}
+		if !seen["project"] || !seen["session"] || !seen["off"] {
+			return errors.New("style_lock.sources 必须声明 project、session 与 off 三态")
+		}
+	}
+	if template := schema.StyleLock.ProjectPromptTemplate; template != "" &&
+		(!strings.Contains(template, "{style}") || !strings.Contains(template, "{project}")) {
+		return errors.New("style_lock.project_prompt_template 必须包含 {style} 与 {project}")
 	}
 	if err := validatePendingApprovals(schema.PendingApprovals); err != nil {
 		return err
@@ -725,6 +762,9 @@ func validateChat(schema ChatSchema, runtime RuntimeSchema, capabilityPresentati
 	if err := validateVisualAnchors(schema); err != nil {
 		return err
 	}
+	if err := validateChatPreferences(schema, content); err != nil {
+		return err
+	}
 	for index, tool := range schema.Tools {
 		if tool.RequireUniqueOffering && (!tool.IgnoreUserModel || tool.RequireUserModel || tool.CrossDomainModelFallback) {
 			return fmt.Errorf("tools[%d] require_unique_offering requires independent model selection", index)
@@ -949,6 +989,7 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"record_self_check":       {"self_check.record", "SESSION_WRITE", []string{"model-3d"}},
 		"get_production_step":     {"ledger.read", "READ", []string{"image", "model-3d"}},
 		"set_visual_anchor":       {"anchor.write", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"list_project_assets":     {"project.list", "READ", []string{"image", "model-3d"}},
 	}
 	var controlDomains []string
 	var expectedEffect string
@@ -1116,6 +1157,12 @@ func validateApprovalBudget(budget ChatApprovalBudgetSchema) error {
 	for check, template := range budget.Acceptance.Criteria {
 		if strings.TrimSpace(check) == "" || strings.TrimSpace(template) == "" {
 			return errors.New("approval_policy.budget.acceptance.criteria 含空项")
+		}
+	}
+	for check, template := range budget.Acceptance.RangeCriteria {
+		if strings.TrimSpace(check) == "" || strings.TrimSpace(template) == "" ||
+			budget.Acceptance.Criteria[check] == "" {
+			return errors.New("approval_policy.budget.acceptance.range_criteria 含空项或没有对应的 criteria")
 		}
 	}
 	if strings.TrimSpace(budget.ContextTemplate) == "" || strings.TrimSpace(budget.NoPlanState) == "" ||
@@ -2795,6 +2842,98 @@ func validateVisualAnchors(schema ChatSchema) error {
 		return errors.New("chat.presentation.messages.reference_priority_trimmed 缺少占位符")
 	}
 	return nil
+}
+
+// chatPreferenceReasonMessagePrefix names the UI copy of one declared rejection
+// reason. The workspace renders the preset by this key, so a Catalog that
+// declares the preset without the text would show an empty choice.
+const chatPreferenceReasonMessagePrefix = "ui.workspace.preferences.reason."
+
+// validateChatPreferences checks application.chat.preferences (#241). A
+// Catalog that declares no preference storage stays valid. When it does, the
+// bounds are positive, the prompt cap fits the entry cap, the context template
+// frames its items between two distinct markers that are not the settings
+// summary's, every item and reason template carries the placeholders its
+// renderer fills, and every reason preset has both a label and the UI copy the
+// workspace shows. Reason presets are unique stable ids with a label, because a
+// stored record keeps the id across schema edits.
+func validateChatPreferences(schema ChatSchema, content ContentSchema) error {
+	preferences := schema.Preferences
+	// A zero entry cap disables the feature (the #238 "before" Catalog keeps the
+	// rest of the block, so only the cap says off). It is valid and injects
+	// nothing; the routes answer an empty list and refuse writes.
+	if preferences.MaximumEntries <= 0 {
+		return nil
+	}
+	if preferences.MaximumPromptItems <= 0 ||
+		preferences.MaximumPromptItems > preferences.MaximumEntries ||
+		preferences.MaximumDirectionCharacters <= 0 || preferences.MaximumReasonCharacters <= 0 {
+		return errors.New("chat.preferences 的上限必须为正数，且 maximum_prompt_items 不得大于 maximum_entries")
+	}
+	if strings.TrimSpace(preferences.ContextTemplate) == "" ||
+		!preferencesFrameOrdered(preferences.ContextTemplate, preferences.OpenMarker, preferences.CloseMarker) {
+		return errors.New("chat.preferences.context_template 必须按 {open}/{items}/{close} 顺序框住条目")
+	}
+	if strings.TrimSpace(preferences.OpenMarker) == "" || strings.TrimSpace(preferences.CloseMarker) == "" ||
+		preferences.OpenMarker == preferences.CloseMarker {
+		return errors.New("chat.preferences 的 open_marker 与 close_marker 须为两个不同的非空标记")
+	}
+	for _, marker := range []string{schema.Context.SessionNotesOpenMarker, schema.Context.SessionNotesCloseMarker} {
+		if marker != "" && (marker == preferences.OpenMarker || marker == preferences.CloseMarker) {
+			return errors.New("chat.preferences 的标记不能与设定摘要的标记相同")
+		}
+	}
+	for name, template := range map[string]string{
+		"selected_item_template": preferences.SelectedItemTemplate,
+		"signal_item_template":   preferences.SignalItemTemplate,
+	} {
+		if strings.TrimSpace(template) == "" || !strings.Contains(template, "{direction}") ||
+			!strings.Contains(template, "{handle}") {
+			return fmt.Errorf("chat.preferences.%s 必须包含 {direction} 与 {handle}", name)
+		}
+	}
+	if strings.TrimSpace(preferences.RejectedItemTemplate) == "" ||
+		!strings.Contains(preferences.RejectedItemTemplate, "{direction}") ||
+		!strings.Contains(preferences.RejectedItemTemplate, "{handle}") ||
+		!strings.Contains(preferences.RejectedItemTemplate, "{reason}") {
+		return errors.New("chat.preferences.rejected_item_template 必须包含 {direction}、{handle} 与 {reason}")
+	}
+	if strings.TrimSpace(preferences.ReasonJoinTemplate) == "" ||
+		!strings.Contains(preferences.ReasonJoinTemplate, "{preset}") ||
+		!strings.Contains(preferences.ReasonJoinTemplate, "{text}") {
+		return errors.New("chat.preferences.reason_join_template 必须包含 {preset} 与 {text}")
+	}
+	if len(preferences.ReasonPresets) == 0 {
+		return errors.New("chat.preferences.reason_presets 不能为空")
+	}
+	seen := map[string]bool{}
+	presetPattern := regexp.MustCompile(`^[a-z0-9_]+$`)
+	for index, preset := range preferences.ReasonPresets {
+		if !presetPattern.MatchString(preset.ID) || strings.TrimSpace(preset.Label) == "" {
+			return fmt.Errorf("chat.preferences.reason_presets[%d] 需要小写稳定 id 与非空 label", index)
+		}
+		if seen[preset.ID] {
+			return fmt.Errorf("chat.preferences.reason_presets[%d].id 重复: %q", index, preset.ID)
+		}
+		if strings.TrimSpace(content.Messages[chatPreferenceReasonMessagePrefix+preset.ID]) == "" {
+			return fmt.Errorf("chat.preferences.reason_presets[%d] 缺少 %s%s 文案",
+				index, chatPreferenceReasonMessagePrefix, preset.ID)
+		}
+		seen[preset.ID] = true
+	}
+	return nil
+}
+
+// preferencesFrameOrdered reports whether the preference template frames its
+// items between an opening and a closing marker in that order.
+func preferencesFrameOrdered(template, open, close string) bool {
+	if strings.TrimSpace(open) == "" || strings.TrimSpace(close) == "" || open == close {
+		return false
+	}
+	first := strings.Index(template, "{open}")
+	items := strings.Index(template, "{items}")
+	last := strings.LastIndex(template, "{close}")
+	return first >= 0 && items > first && last > items
 }
 
 // validateAnchorArgument checks a tool's anchor_argument (#250): only a

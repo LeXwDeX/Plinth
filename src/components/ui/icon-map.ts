@@ -1,6 +1,6 @@
 import {
   ClipboardCheck, Clapperboard, Printer, Ruler, ScanLine, UnfoldHorizontal, Wrench,
-  ArrowLeftRight, Bone, Box, Camera, Circle, Columns2, Combine, Cylinder, Eraser, FileBox, FileOutput, GitBranch, Grid3x3, Hand, History,
+  ArrowLeftRight, Bone, Box, Camera, Circle, Columns2, Combine, Cylinder, Eraser, FileBox, FileOutput, Folder, GitBranch, Grid3x3, Hand, History,
   Image as ImageGlyph, ImageMinus, ImagePlus, Info, Lasso, Layers, ListChecks, Magnet, Maximize2, Merge, MessageSquarePlus, MousePointer2, Network, PackagePlus,
   PaintBucket, Paintbrush, Palette, Pencil, PersonStanding, Pipette, Puzzle, Redo2, Rotate3d, Scissors, SlidersHorizontal, SprayCan,
   Split, Square, SquareDashed, Type, Undo2, Wallpaper, WandSparkles, ZoomIn, type LucideIcon,
@@ -32,6 +32,7 @@ const ICONS: Readonly<Record<string, LucideIcon>> = {
   eraser: Eraser,
   'file-box': FileBox,
   'file-output': FileOutput,
+  folder: Folder,
   'git-branch': GitBranch,
   'grid-3x3': Grid3x3,
   hand: Hand,

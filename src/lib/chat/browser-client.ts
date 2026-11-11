@@ -21,6 +21,7 @@ import type {
   ChatToolCall,
 } from '@/store/chat-store';
 import { parseProductionBrief, type ProductionBrief } from '@/lib/chat/production-brief';
+import { parsePreferences, type ChatPreference, type PreferenceSignal } from '@/lib/chat/preferences';
 import { parseSelfChecks, type SelfCheckRecord } from '@/lib/chat/self-check';
 import { parseSessionBudget } from '@/lib/chat/budget';
 import { parseNativeQuote, parsePriceTotals, type NativeQuote } from '@/lib/pricing';
@@ -211,12 +212,17 @@ export interface ChatApproval {
   priceTotals?: import('@/lib/pricing').PriceTotal[];
 }
 
+/** #240: the three-state style source declared by the Schema. */
+export type ChatStyleLockSource = 'project' | 'session' | 'off';
+
 /** #154: the owner-scoped style lock stored on one chat session. */
 export interface ChatStyleLock {
   enabled: boolean;
   text: string;
   /** Input or generated image asset IDs, kept in the user's order. */
   references: string[];
+  /** #240: project inherits the session's project, session uses this lock, off injects nothing. */
+  source?: ChatStyleLockSource;
 }
 
 export interface ChatSubscriptionOptions {
@@ -230,6 +236,14 @@ export interface EventSourceAdapter {
   onmessage: ((event: MessageEvent<string>) => void) | null;
   onerror: ((event?: Event) => void) | null;
   close(): void;
+}
+
+/** #241: the editable fields of one preference record; an absent field is left as it is. */
+export interface ChatPreferenceEdit {
+  direction?: string;
+  reasonPreset?: string;
+  reasonText?: string;
+  active?: boolean;
 }
 
 export interface ChatBrowserClient {
@@ -247,7 +261,7 @@ export interface ChatBrowserClient {
     signal?: AbortSignal,
   ): Promise<PromptEnhanceResult>;
   listSkills(signal?: AbortSignal): Promise<ChatSkillCatalog>;
-  createSession(title?: string): Promise<ChatSession>;
+  createSession(title?: string, projectID?: string): Promise<ChatSession>;
   branchSession(sessionID: string, messageID: string): Promise<{ session: ChatSession; canvasCopied: boolean; sceneCopied: boolean; capturesCopied: boolean }>;
   renameSession(sessionID: string, title: string): Promise<ChatSession>;
   deleteSession(sessionID: string): Promise<boolean>;
@@ -318,10 +332,23 @@ export interface ChatBrowserClient {
   /** #154: the session-level style lock and its ordered image asset IDs. */
   getStyleLock(sessionID: string, signal?: AbortSignal): Promise<ChatStyleLock>;
   setStyleLock(sessionID: string, lock: ChatStyleLock): Promise<ChatStyleLock>;
+  /** #240: assign (or clear, with '') the session's project; returns the session wire. */
+  setSessionProject(sessionID: string, projectID: string): Promise<ChatSession>;
   /** 会话选用的候选图（后续步骤默认以它为准）；没有则为 null。 */
   getPick(sessionID: string, signal?: AbortSignal): Promise<ChatAttachment | null>;
   setPick(sessionID: string, claim: ChatAttachmentClaim): Promise<ChatAttachment | null>;
   clearPick(sessionID: string): Promise<void>;
+  /**
+   * #241: the session's active preference records. An undeclared preference route yields an empty list, so the
+   * sidebar section simply stays hidden on an older server.
+   */
+  listPreferences(sessionID: string, signal?: AbortSignal): Promise<ChatPreference[]>;
+  /** Say "not this one" about a generated 2D candidate, with a declared reason preset and/or free text. */
+  rejectCandidate(sessionID: string, claim: ChatAttachmentClaim, reasonPreset: string, reasonText: string): Promise<ChatPreference[]>;
+  /** Report a weak redo signal (regenerate / repaint / prompt edit) about the given objects. */
+  recordPreferenceSignal(sessionID: string, signal: PreferenceSignal, claims: readonly ChatAttachmentClaim[]): Promise<ChatPreference[]>;
+  updatePreference(sessionID: string, preferenceID: string, edit: ChatPreferenceEdit): Promise<ChatPreference>;
+  deletePreference(sessionID: string, preferenceID: string): Promise<void>;
   /** 会话版本链（2D/3D 版本及其来源）；只读，来源无法确认时保持未知。 */
   getLineage(sessionID: string, signal?: AbortSignal): Promise<LineageGraph>;
   getLineagePage(sessionID: string, cursor?: string, signal?: AbortSignal): Promise<LineageGraph>;
@@ -487,10 +514,14 @@ function styleLockOf(schema: ProductSchema, payload: unknown): ChatStyleLock {
   const nested = member ? record(response[member]) : {};
   const source = Object.keys(nested).length > 0 ? nested : response;
   const fields = schema.chat.api.style_lock;
+  const sourceValue = fields.source ? source[fields.source] : undefined;
   return {
     enabled: source[fields.enabled] === true,
     text: typeof source[fields.text] === 'string' ? source[fields.text] as string : '',
     references: array(source[fields.references]).filter((item): item is string => typeof item === 'string' && item !== ''),
+    ...(sourceValue === 'project' || sourceValue === 'session' || sourceValue === 'off'
+      ? { source: sourceValue }
+      : {}),
   };
 }
 
@@ -509,6 +540,18 @@ function pickRoute(schema: ProductSchema, sessionID: string): string {
   const template = schema.runtime.http.routes.chat_session_pick;
   if (!template) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, 0);
   return route(template, { sessionID });
+}
+
+function preferencesRoute(schema: ProductSchema, sessionID: string): string {
+  const template = schema.runtime.http.routes.chat_session_preferences;
+  if (!template) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, 0);
+  return route(template, { sessionID });
+}
+
+function preferenceItemRoute(schema: ProductSchema, sessionID: string, preferenceID: string): string {
+  const template = schema.runtime.http.routes.chat_session_preference_item;
+  if (!template) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, 0);
+  return route(template, { sessionID, preferenceID });
 }
 
 function lineageRoute(schema: ProductSchema, sessionID: string): string {
@@ -726,8 +769,14 @@ function normalizeSession(
   const parentSessionId = fields.parent_session_id ? optionalString(source, fields.parent_session_id) : undefined;
   const parentMessageId = fields.parent_message_id ? optionalString(source, fields.parent_message_id) : undefined;
   const parentTitle = fields.parent_title ? optionalString(source, fields.parent_title) : undefined;
+  const projectId = fields.project_id ? optionalString(source, fields.project_id) : undefined;
+  const styleLockSourceValue = fields.style_lock_source ? optionalString(source, fields.style_lock_source) : undefined;
   return {
     ...(parentSessionId ? { parentSessionId, parentMessageId, parentTitle, parentDeleted: fields.parent_deleted ? source[fields.parent_deleted] === true : false } : {}),
+    ...(projectId ? { projectId } : {}),
+    ...(styleLockSourceValue === 'project' || styleLockSourceValue === 'session' || styleLockSourceValue === 'off'
+      ? { styleLockSource: styleLockSourceValue }
+      : {}),
     ...(generationModels ? { generationModels } : {}),
     ...(generationModels && generationModelsRetired ? { generationModelsRetired } : {}),
     ...(brief ? { brief } : {}),
@@ -1023,13 +1072,16 @@ export function createChatBrowserClient(
         capturesCopied: Boolean(capturesField && payload[capturesField] === true),
       };
     },
-    async createSession(title = '') {
+    async createSession(title = '', projectID = '') {
       const response = await fetcher(
         schema.runtime.http.legacy_routes.chat_sessions,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ [fields.title]: title }),
+          body: JSON.stringify({
+            [fields.title]: title,
+            ...(projectID && fields.project_id ? { [fields.project_id]: projectID } : {}),
+          }),
         },
       );
       const payload = await responseValue(response);
@@ -1471,11 +1523,27 @@ export function createChatBrowserClient(
           [names.enabled]: lock.enabled,
           [names.text]: lock.text,
           [names.references]: lock.references,
+          ...(names.source && lock.source ? { [names.source]: lock.source } : {}),
         }),
       });
       const payload = await responseValue(response);
       if (!response.ok) throw styleLockError(schema, response, payload);
       return styleLockOf(schema, payload);
+    },
+    async setSessionProject(sessionID, projectID) {
+      const template = schema.runtime.http.routes.chat_session_project;
+      if (!template) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, 0);
+      const field = schema.chat.api.fields.project_id ?? 'project_id';
+      const response = await fetcher(route(template, { sessionID }), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: projectID }),
+      });
+      const payload = await responseValue(response);
+      if (!response.ok) throw styleLockError(schema, response, payload);
+      const session = normalizeSession(schema, payload);
+      if (!session.id) throw new ChatBrowserError('', response.status);
+      return session;
     },
     async getPick(sessionID, signal) {
       const response = await fetcher(pickRoute(schema, sessionID), { signal });
@@ -1544,6 +1612,66 @@ export function createChatBrowserClient(
     },
     async clearPick(sessionID) {
       const response = await fetcher(pickRoute(schema, sessionID), { method: 'DELETE' });
+      if (!response.ok) throw approvalError(schema, await responseValue(response), response.status);
+    },
+    async listPreferences(sessionID, signal) {
+      if (!schema.runtime.http.routes.chat_session_preferences) return [];
+      const response = await fetcher(preferencesRoute(schema, sessionID), { signal });
+      const payload = await responseValue(response);
+      if (!response.ok) throw approvalError(schema, payload, response.status);
+      return parsePreferences(schema, payload);
+    },
+    async rejectCandidate(sessionID, claim, reasonPreset, reasonText) {
+      const names = schema.chat.api.preference;
+      if (!names) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, 0);
+      const body: Record<string, unknown> = { ...encodeAttachmentClaims(schema, [claim])[0] };
+      if (reasonPreset) body[names.reason_preset] = reasonPreset;
+      if (reasonText) body[names.reason_text] = reasonText;
+      const response = await fetcher(preferencesRoute(schema, sessionID), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const payload = await responseValue(response);
+      if (!response.ok) throw approvalError(schema, payload, response.status);
+      return parsePreferences(schema, payload);
+    },
+    async recordPreferenceSignal(sessionID, signal, claims) {
+      const names = schema.chat.api.preference;
+      if (!names || claims.length === 0) return [];
+      const response = await fetcher(preferencesRoute(schema, sessionID), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          [names.signal]: signal,
+          [names.handles]: encodeAttachmentClaims(schema, claims),
+        }),
+      });
+      const payload = await responseValue(response);
+      if (!response.ok) throw approvalError(schema, payload, response.status);
+      return parsePreferences(schema, payload);
+    },
+    async updatePreference(sessionID, preferenceID, edit) {
+      const names = schema.chat.api.preference;
+      if (!names) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, 0);
+      const body: Record<string, unknown> = {};
+      if (edit.direction !== undefined) body[names.direction] = edit.direction;
+      if (edit.reasonPreset !== undefined) body[names.reason_preset] = edit.reasonPreset;
+      if (edit.reasonText !== undefined) body[names.reason_text] = edit.reasonText;
+      if (edit.active !== undefined) body[names.active] = edit.active;
+      const response = await fetcher(preferenceItemRoute(schema, sessionID, preferenceID), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const payload = await responseValue(response);
+      if (!response.ok) throw approvalError(schema, payload, response.status);
+      const preferences = parsePreferences(schema, payload);
+      if (preferences.length === 0) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, response.status);
+      return preferences[0];
+    },
+    async deletePreference(sessionID, preferenceID) {
+      const response = await fetcher(preferenceItemRoute(schema, sessionID, preferenceID), { method: 'DELETE' });
       if (!response.ok) throw approvalError(schema, await responseValue(response), response.status);
     },
     subscribe(sessionID, options) {

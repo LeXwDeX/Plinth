@@ -50,6 +50,10 @@ interface ChatMessageProps {
   pick?: ChatAttachment | null;
   pickBusy?: boolean;
   onPick?: (claim: ChatAttachmentClaim) => Promise<boolean> | void;
+  /** #241: asset IDs the person rejected; they show "已否决". */
+  rejectedAssets?: ReadonlySet<string>;
+  /** #241: record an explicit rejection with its optional reason. */
+  onReject?: (claim: ChatAttachmentClaim, reasonPreset: string, reasonText: string) => Promise<boolean> | void;
   /** The session's pictures by handle: a handle written in the text becomes a tag that attaches it. */
   handleReferences?: ReadonlyMap<string, ComposerReference>;
 }
@@ -189,7 +193,7 @@ function ChatModelCards({ cards, sessionId, selfChecks }: {
  * chunk, and only the streaming message (and a message whose own tasks changed) receives new props.
  */
 export const ChatMessage = memo(function ChatMessage({
-  message, sessionId, onDelete, onCopyToInput, onRegenerate, regenerateCredits, onEdit, onBranch, branchDisabledReason, onImageClick, pick, pickBusy, onPick, handleReferences,
+  message, sessionId, onDelete, onCopyToInput, onRegenerate, regenerateCredits, onEdit, onBranch, branchDisabledReason, onImageClick, pick, pickBusy, onPick, rejectedAssets, onReject, handleReferences,
 }: ChatMessageProps) {
   const { schema } = useProductSchema();
   const isUser = message.role === 'user';
@@ -335,6 +339,8 @@ export const ChatMessage = memo(function ChatMessage({
           pick={pick}
           pickBusy={pickBusy}
           onPick={onPick}
+          rejectedAssets={rejectedAssets}
+          onReject={onReject}
           onPreview={handleImageClick}
           labelPrefix={schemaText(schema, 'ui.chat.message.generated_image')}
         />

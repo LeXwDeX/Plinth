@@ -31,6 +31,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/agentparams"
+	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness/resolve"
@@ -40,6 +41,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/modeldelivery"
 	"github.com/LeXwDeX/Plinth/internal/moderation"
 	"github.com/LeXwDeX/Plinth/internal/processing"
+	"github.com/LeXwDeX/Plinth/internal/project"
 	"github.com/LeXwDeX/Plinth/internal/promptenhance"
 	"github.com/LeXwDeX/Plinth/internal/provideraccounts"
 	"github.com/LeXwDeX/Plinth/internal/rendermanifest"
@@ -51,6 +53,13 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/taskretry"
 	"github.com/LeXwDeX/Plinth/internal/transport/httplocale"
 )
+
+// DirectStyleReferenceResolver turns frozen project style picture URLs into
+// the owner's input assets for a direct prepare (#240). It is the same
+// resolver the chat generation tools use.
+type DirectStyleReferenceResolver interface {
+	Resolve(context.Context, references.ReferenceScope, []string) ([]generation.AssetID, error)
+}
 
 type Config struct {
 	Harness            *resolve.Service
@@ -96,7 +105,13 @@ type Config struct {
 	Scene           *scene.Service
 	RenderManifests *rendermanifest.Service
 	Chat            *chat.Service
-	ChatScheduler   ChatTurnScheduler
+	// Projects is the owner-scoped project service (#240); nil leaves the
+	// project routes unregistered.
+	Projects *project.Service
+	// DirectStyleReferences resolves a project session's frozen style pictures
+	// for a direct prepare; nil refuses a request that would need them.
+	DirectStyleReferences DirectStyleReferenceResolver
+	ChatScheduler         ChatTurnScheduler
 	// ChatContext compacts a session's context on request (#322); nil makes
 	// the compaction route answer that compaction is unavailable.
 	ChatContext ChatContextCompactor
@@ -212,6 +227,8 @@ type Server struct {
 	scene                             *scene.Service
 	renderManifests                   *rendermanifest.Service
 	chat                              *chat.Service
+	projects                          *project.Service
+	directStyleReferences             DirectStyleReferenceResolver
 	chatScheduler                     ChatTurnScheduler
 	chatContext                       ChatContextCompactor
 	ownsAgentSession                  func(context.Context, string, string) bool
@@ -426,6 +443,8 @@ func New(config Config) (*Server, error) {
 		canvas:                config.Canvas,
 		canvasImages:          config.CanvasImages,
 		chat:                  config.Chat,
+		projects:              config.Projects,
+		directStyleReferences: config.DirectStyleReferences,
 		chatScheduler:         config.ChatScheduler,
 		chatContext:           config.ChatContext,
 		ownsAgentSession:      config.OwnsAgentSession,
@@ -607,6 +626,39 @@ func (s *Server) routes() {
 		s.mux.HandleFunc("GET "+routes.ChatSessionStyleLock, s.withIdentity(s.getChatSessionStyleLock))
 		s.mux.HandleFunc("PUT "+routes.ChatSessionStyleLock, s.withIdentity(s.putChatSessionStyleLock))
 	}
+	// Owner-scoped projects (#240). Every route is registered only when the
+	// Catalog declares it, so a historical Catalog keeps them unavailable.
+	if route := routes.Project; route != "" {
+		s.mux.HandleFunc("GET "+route, s.withPrincipal(s.listProjects))
+		s.mux.HandleFunc("POST "+route, s.withPrincipal(s.createProject))
+	}
+	if route := routes.ProjectItem; route != "" {
+		s.mux.HandleFunc("GET "+route, s.withPrincipal(s.getProject))
+		s.mux.HandleFunc("PATCH "+route, s.withPrincipal(s.updateProject))
+		s.mux.HandleFunc("DELETE "+route, s.withPrincipal(s.deleteProject))
+	}
+	if route := routes.ProjectStyleGuide; route != "" {
+		s.mux.HandleFunc("GET "+route, s.withPrincipal(s.getProjectStyleGuide))
+		s.mux.HandleFunc("PUT "+route, s.withPrincipal(s.putProjectStyleGuide))
+	}
+	if route := routes.ProjectConventions; route != "" {
+		s.mux.HandleFunc("GET "+route, s.withPrincipal(s.getProjectConventions))
+		s.mux.HandleFunc("PUT "+route, s.withPrincipal(s.putProjectConventions))
+	}
+	if route := routes.ProjectAssets; route != "" {
+		s.mux.HandleFunc("GET "+route, s.withPrincipal(s.listProjectAssets))
+		s.mux.HandleFunc("POST "+route, s.withPrincipal(s.createProjectAsset))
+	}
+	if route := routes.ProjectAssetItem; route != "" {
+		s.mux.HandleFunc("PATCH "+route, s.withPrincipal(s.updateProjectAsset))
+		s.mux.HandleFunc("DELETE "+route, s.withPrincipal(s.deleteProjectAsset))
+	}
+	if route := routes.ProjectPromote; route != "" {
+		s.mux.HandleFunc("POST "+route, s.withPrincipal(s.promoteProjectAsset))
+	}
+	if route := routes.ChatSessionProject; route != "" {
+		s.mux.HandleFunc("PUT "+route, s.withPrincipal(s.putChatSessionProject))
+	}
 	if routes.ChatSessionBrief != "" {
 		s.mux.HandleFunc("GET "+routes.ChatSessionBrief, s.withIdentity(s.getChatSessionBrief))
 		s.mux.HandleFunc("PUT "+routes.ChatSessionBrief, s.withPrincipal(s.putChatSessionBrief))
@@ -661,6 +713,17 @@ func (s *Server) routes() {
 		s.mux.HandleFunc("GET "+routes.ChatSessionPick, s.withIdentity(s.getChatSessionPick))
 		s.mux.HandleFunc("PUT "+routes.ChatSessionPick, s.withIdentity(s.putChatSessionPick))
 		s.mux.HandleFunc("DELETE "+routes.ChatSessionPick, s.withIdentity(s.deleteChatSessionPick))
+	}
+	// Session preferences (#241). The list/reject/signal route and the
+	// per-record edit/delete route are registered independently, so a
+	// historical Catalog without them keeps the feature unavailable.
+	if routes.ChatSessionPreferences != "" {
+		s.mux.HandleFunc("GET "+routes.ChatSessionPreferences, s.withIdentity(s.getChatSessionPreferences))
+		s.mux.HandleFunc("POST "+routes.ChatSessionPreferences, s.withIdentity(s.postChatSessionPreferences))
+	}
+	if routes.ChatSessionPreferenceItem != "" {
+		s.mux.HandleFunc("PUT "+routes.ChatSessionPreferenceItem, s.withIdentity(s.putChatSessionPreference))
+		s.mux.HandleFunc("DELETE "+routes.ChatSessionPreferenceItem, s.withIdentity(s.deleteChatSessionPreference))
 	}
 	s.mux.HandleFunc(
 		"GET "+legacyRoutes.Providers,

@@ -147,7 +147,7 @@ func (executor *Executor) anchorReferenceRefusal(
 		seen[referenceURL] = true
 		if _, err := executor.references.Resolve(
 			ctx,
-			generation.OwnerID(command.OwnerID),
+			commandReferenceScope(command),
 			[]string{referenceURL},
 		); err != nil {
 			template := executor.chat.VisualAnchors.ReferenceUnavailableTemplate
@@ -219,6 +219,21 @@ func (executor *Executor) styleReferenceURLs(command chat.ToolCommand) ([]string
 			referenceURL, ok := executor.assetReferenceURL(assetID)
 			if !ok {
 				return nil, nil, ErrStyleLockReferenceURL
+			}
+			urls = append(urls, referenceURL)
+			if purpose != "" {
+				if _, exists := purposes[referenceURL]; !exists {
+					purposes[referenceURL] = purpose
+				}
+			}
+		}
+		// A project-source turn carries the project guide's already canonical
+		// picture URLs (#240). They are kept apart from the session lock: the
+		// three-state source never merges the two tables.
+		for _, referenceURL := range lock.ProjectReferences {
+			referenceURL = strings.TrimSpace(referenceURL)
+			if referenceURL == "" {
+				continue
 			}
 			urls = append(urls, referenceURL)
 			if purpose != "" {
@@ -342,6 +357,16 @@ func (executor *Executor) styleReferenceLabels(command chat.ToolCommand, urls []
 				continue
 			}
 			labels[referenceURL] = strings.ReplaceAll(template, "{index}", strconv.Itoa(index+1))
+		}
+		projectLabel := "项目风格参考图 #{index}"
+		if lock.ProjectName != "" {
+			projectLabel = "项目「" + lock.ProjectName + "」风格参考图 #{index}"
+		}
+		for index, referenceURL := range lock.ProjectReferences {
+			if strings.TrimSpace(referenceURL) == "" {
+				continue
+			}
+			labels[referenceURL] = strings.ReplaceAll(projectLabel, "{index}", strconv.Itoa(index+1))
 		}
 	}
 	result := make([]string, 0, len(urls))
