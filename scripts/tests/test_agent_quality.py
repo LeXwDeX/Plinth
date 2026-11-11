@@ -65,10 +65,10 @@ class RequestSetTest(unittest.TestCase):
     def test_the_shipped_request_set_is_valid(self):
         data, path, digest = quality.load_requests()
         self.assertEqual(data["version"], 3)
-        self.assertEqual(len(data["requests"]), 12)
+        self.assertEqual(len(data["requests"]), 13)
         self.assertTrue(path.endswith("requests.json"))
         self.assertEqual(len(digest), 64)
-        self.assertEqual(len({request["id"] for request in data["requests"]}), 12)
+        self.assertEqual(len({request["id"] for request in data["requests"]}), 13)
         reference = next(request for request in data["requests"] if request["id"] == "3d-image-reference")
         self.assertEqual(reference["modality"], "3d")
         self.assertEqual(reference["expected"]["capabilities"], ["image-to-3d"])
@@ -77,6 +77,12 @@ class RequestSetTest(unittest.TestCase):
         concept = next(request for request in data["requests"] if request["id"] == "2d-3d-input-concept")
         self.assertEqual(concept["modality"], "2d")
         self.assertEqual(concept["expected"]["capabilities"], ["text-to-image"])
+        preferences = next(request for request in data["requests"] if request["id"] == "2d-preference-multiturn")
+        self.assertEqual(preferences["category"], "multi_turn_feedback")
+        self.assertEqual(len(preferences["steps"][0]["tools"]), 4)
+        self.assertEqual(preferences["steps"][1]["feedback"][0]["action"], "pick")
+        self.assertEqual(preferences["expected"]["preferences"],
+                         {"captured": True, "injected": True, "after_compaction": True, "edited": True, "deleted": True})
         project = next(request for request in data["requests"] if request["id"] == "2d-series-project")
         self.assertEqual(project["category"], "series_consistency")
         self.assertEqual(project["project"]["name"], "红发剑士系列")
@@ -141,6 +147,42 @@ class RequestSetTest(unittest.TestCase):
         problems = quality.validate_request_set({"version": 3, "requests": [request]}, PURPOSES)
         self.assertTrue(any("project needs a name" in problem for problem in problems))
 
+
+    def test_tools_and_feedback_steps_are_validated(self):
+        request = base_request(
+            modality="2d", purpose="illustration",
+            expected={
+                "capabilities": ["text-to-image"],
+                "required_tool_groups": [{"id": "generate", "any": ["refine_image"]}],
+                "budgets": {"max_paid_calls": 2, "max_tool_calls": 8, "max_interruptions": 1},
+                "preferences": {"captured": True, "injected": True},
+            },
+            steps=[
+                {"user": "four candidates", "tools": [{"name": "refine_image"}, {"name": "refine_image"}]},
+                {"user": "feedback", "feedback": [{"action": "pick", "task": 0},
+                                                  {"action": "reject", "task": 1, "reasonPreset": "style"}]},
+                {"user": "again", "tool": {"name": "refine_image", "arguments": {"prompt_from_preferences": True}}},
+            ],
+        )
+        self.assertEqual(quality.validate_request_set({"version": 3, "requests": [request]}, PURPOSES), [])
+        request["steps"][0]["tool"] = {"name": "refine_image"}
+        problems = quality.validate_request_set({"version": 3, "requests": [request]}, PURPOSES)
+        self.assertTrue(any("not more" in problem for problem in problems))
+        del request["steps"][0]["tool"]
+        request["steps"][0]["tools"] = []
+        problems = quality.validate_request_set({"version": 3, "requests": [request]}, PURPOSES)
+        self.assertTrue(any("tools[] needs a name" in problem for problem in problems))
+        request["steps"][0]["tools"] = [{"name": "refine_image"}]
+        request["steps"][1]["feedback"].append({"action": "explode"})
+        problems = quality.validate_request_set({"version": 3, "requests": [request]}, PURPOSES)
+        self.assertTrue(any("unknown action" in problem for problem in problems))
+        request["steps"][1]["feedback"][-1] = {"action": "pick"}
+        problems = quality.validate_request_set({"version": 3, "requests": [request]}, PURPOSES)
+        self.assertTrue(any("task index or prompt" in problem for problem in problems))
+        request["steps"][1]["feedback"][-1] = {"action": "pick", "task": 0}
+        request["expected"]["preferences"]["recommended"] = True
+        problems = quality.validate_request_set({"version": 3, "requests": [request]}, PURPOSES)
+        self.assertTrue(any("not a boolean check" in problem for problem in problems))
 
 class TrajectoryTest(unittest.TestCase):
     def test_tools_are_read_in_wire_order(self):
@@ -270,6 +312,52 @@ class TrajectoryTest(unittest.TestCase):
         self.assertIn("budget:tool_calls", failed)
         self.assertIn("budget:interruptions", failed)
 
+
+    def test_evaluate_case_checks_the_preference_stages(self):
+        request = base_request(
+            modality="2d", purpose="illustration",
+            expected={
+                "capabilities": ["text-to-image"],
+                "required_tool_groups": [{"id": "generate", "any": ["refine_image"]}],
+                "budgets": {"max_paid_calls": 4, "max_tool_calls": 6, "max_interruptions": 1},
+                "preferences": {"captured": True, "injected": True, "after_compaction": True,
+                                "edited": True, "deleted": True},
+            },
+        )
+        run = {
+            "messages": [
+                message({"name": "refine_image", "taskId": "t1"}),
+                message({"name": "refine_image", "taskId": "t2"}),
+            ],
+            "tasks": [succeeded("text-to-image")],
+            "cards": [],
+            "final_reply": {"content": "完成。"},
+            "preference_captured": [
+                {"kind": "selected", "direction": "PREF-0"},
+                {"kind": "rejected", "direction": "PREF-1", "reasonText": "too realistic"},
+            ],
+            "preference_prompts": [
+                {"stage": "captured", "prompt": "已选用 PREF-0 | 已否决 PREF-1 原因 too realistic"},
+                {"stage": "after_compaction", "prompt": "已选用 PREF-0 | 已否决 PREF-1 原因 too realistic"},
+                {"stage": "edited", "prompt": "已选用 PREF-0 | 已否决 PREF-EDIT 原因 washed out"},
+                {"stage": "deleted", "prompt": "已选用 PREF-0"},
+            ],
+            "preference_facts": {
+                "selected_direction": "PREF-0", "rejected_direction": "PREF-1",
+                "rejected_reason": "too realistic", "edited_direction": "PREF-EDIT",
+                "edited_reason": "washed out",
+            },
+        }
+        case = quality.evaluate_case(request, run)
+        self.assertEqual(quality.case_hard_failures(case), [])
+        checks = {check["id"]: check["status"] for check in case["checks"]}
+        for name in ("preference:captured", "preference:injected", "preference:after_compaction",
+                     "preference:edited", "preference:deleted"):
+            self.assertEqual(checks[name], "pass")
+        # The old direction coming back in the edited prompt fails the check.
+        run["preference_prompts"][2]["prompt"] = "PREF-0 PREF-1 PREF-EDIT washed out"
+        failed = {check["id"] for check in quality.case_hard_failures(quality.evaluate_case(request, run))}
+        self.assertIn("preference:edited", failed)
 
 class OutputMetricsTest(unittest.TestCase):
     def test_an_rgb_png_reports_its_subject_coverage(self):

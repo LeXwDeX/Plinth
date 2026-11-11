@@ -266,3 +266,23 @@ describe('the conversation is read a page at a time', () => {
     expect(chatMessage).toContain("data-thinking={thinking ? 'true' : undefined}");
   });
 });
+
+describe('session preference wiring (#241)', () => {
+  const canvasActions = source('../workspace/canvas-image-actions.tsx');
+
+  it('passes the rejected candidates and the rejection handler to every result card', () => {
+    expect(agentDialog).toContain('const sessionPreferences = useSessionPreferences(chatClient, activeSessionId);');
+    expect(agentDialog).toContain('rejectedAssets={rejectedAssets}');
+    expect(agentDialog).toContain('onReject={rejectCandidate}');
+    expect(chatMessage).toContain('rejectedAssets={rejectedAssets}');
+    expect(chatMessage).toContain('onReject={onReject}');
+  });
+
+  it('reports the three weak signals: regenerate, prompt edit and canvas repaint', () => {
+    expect(agentDialog).toMatch(/recordPreferenceSignal\('regenerate', generatedPictureClaims\(produced\)\)/);
+    expect(agentDialog).toMatch(/recordPreferenceSignal\('prompt_edit', replaced\.flatMap\(generatedPictureClaims\)\)/);
+    expect(canvasActions).toMatch(/recordPreferenceSignal\(sessionID, 'inpaint'/);
+    // The signals are sent next to the action, never instead of it.
+    expect(canvasActions.indexOf('recordInpaintSignal()')).toBeLessThan(canvasActions.indexOf('request.onSubmitted?.()'));
+  });
+});

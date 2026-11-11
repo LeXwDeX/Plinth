@@ -37,6 +37,7 @@ import { captureSessionScope, isCurrentSessionScope } from '@/lib/workspace/sess
 import { useStyleLock } from '@/hooks/use-style-lock';
 import { createChatBrowserClient } from '@/lib/chat/browser-client';
 import { styleLockCapability } from '@/lib/workspace/style-lock-capability';
+import { selectionForSession } from '@/lib/workspace/session-scope';
 
 /** The whole artboard rasterised into one uploaded picture, and the mask of the same pixel size and origin. */
 export interface InpaintRequest {
@@ -423,6 +424,19 @@ export function InpaintDialog({
     if (matched?.prompt) setPrompt(matched.prompt);
   }, [sessionID, sourceIdentity, request.size.height, request.size.width, styleLockSnapshot]);
 
+  // #241: committing a canvas repaint is a weak, unconfirmed signal about the picture being repainted. The
+// server re-verifies the claim for the owner and session; a failure never blocks the paid step.
+  const recordInpaintSignal = () => {
+    if (!sessionID) return;
+    const object = selectionForSession(useWorkspaceStore.getState().currentObject, sessionID);
+    if (!object || object.kind !== 'image' || !object.taskId) return;
+    void chatClient.recordPreferenceSignal(sessionID, 'inpaint', [{
+      kind: 'image',
+      taskId: object.taskId,
+      ...(object.assetId ? { assetId: object.assetId } : {}),
+      ...(object.url ? { url: object.url } : {}),
+    }]).catch(() => undefined);
+  };
   const submit = async () => {
     if (!offering || !sessionID || !sourceIdentity || prompt.trim() === '' || targetBlocks) return;
     const submitted = { identity: submissionIdentity, scope: captureSessionScope() };
@@ -450,6 +464,7 @@ export function InpaintDialog({
         // Only this accepted request is cleared: a later click may have stored a newer draft meanwhile.
         clearPendingDirectTask(sessionID, sourceIdentity, pending);
         if (!stillActive()) return;
+        recordInpaintSignal();
         request.onSubmitted?.();
         close();
         return;
@@ -486,6 +501,7 @@ export function InpaintDialog({
           progressMaximum: schema.runtime.frontend.percentage_multiplier, autoPreview: false });
         clearPendingDirectTask(sessionID, sourceIdentity, prepared);
         if (!stillActive()) return;
+        recordInpaintSignal();
         request.onSubmitted?.();
         close();
         return;

@@ -82,6 +82,82 @@ func (r chatRequest) systemContains(text string) bool {
 	return false
 }
 
+// PreferencePromptMarker is the fake-only argument convention of the tool
+// call markers: {"prompt_from_preferences": true} asks the fake to replace the
+// call's prompt with the lines between the system message's preference
+// markers. The official model has no such behavior; the marker exists so a
+// smoke scenario can assert that the Agent received the stored choices in its
+// system prompt and could carry them into the tool prompt, without reading the
+// server's private prompt.
+const PreferencePromptMarker = "prompt_from_preferences"
+
+// preferenceOpenMarker and preferenceCloseMarker are the framing markers of
+// the session preference block (product Schema application.chat.preferences).
+const (
+	preferenceOpenMarker  = "<<<PREFERENCES>>>"
+	preferenceCloseMarker = "<<<END_PREFERENCES>>>"
+)
+
+// messageText reads a message content that is either a string or a list of
+// text parts.
+func messageText(content json.RawMessage) string {
+	var text string
+	if json.Unmarshal(content, &text) == nil {
+		return text
+	}
+	var parts []struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(content, &parts) == nil {
+		var all []string
+		for _, part := range parts {
+			all = append(all, part.Text)
+		}
+		return strings.Join(all, "\n")
+	}
+	return ""
+}
+
+// preferencePromptArguments builds the tool arguments a
+// prompt_from_preferences marker asks for: every item line between the
+// preference frame's markers, in prompt order. A request without the block
+// yields an empty prompt.
+func (r chatRequest) preferencePromptArguments() string {
+	var lines []string
+	for _, message := range r.Messages {
+		if message.Role != "system" {
+			continue
+		}
+		text := messageText(message.Content)
+		start := strings.Index(text, preferenceOpenMarker)
+		end := strings.Index(text, preferenceCloseMarker)
+		if start < 0 || end <= start {
+			continue
+		}
+		block := text[start+len(preferenceOpenMarker) : end]
+		for _, line := range strings.Split(block, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "- ") {
+				lines = append(lines, strings.TrimSpace(strings.TrimPrefix(line, "- ")))
+			}
+		}
+		break
+	}
+	arguments, _ := json.Marshal(map[string]string{"prompt": strings.Join(lines, " | ")})
+	return string(arguments)
+}
+
+// promptFromPreferences reports whether a tool marker asked for the
+// preference-derived prompt.
+func promptFromPreferences(arguments string) bool {
+	var members map[string]json.RawMessage
+	if json.Unmarshal([]byte(arguments), &members) != nil {
+		return false
+	}
+	var requested bool
+	return json.Unmarshal(members[PreferencePromptMarker], &requested) == nil && requested
+}
+
 // ToolMarkerFor builds the marker a test or script puts in a user message.
 func ToolMarkerFor(name string, arguments string) string {
 	if arguments == "" {
@@ -375,6 +451,9 @@ func (r chatRequest) calls() []toolCall {
 		arguments := match[2]
 		if arguments == "" || !json.Valid([]byte(arguments)) {
 			arguments = "{}"
+		}
+		if promptFromPreferences(arguments) {
+			arguments = r.preferencePromptArguments()
 		}
 		calls = append(calls, toolCall{name: match[1], arguments: arguments})
 	}

@@ -21,6 +21,7 @@ import type {
   ChatToolCall,
 } from '@/store/chat-store';
 import { parseProductionBrief, type ProductionBrief } from '@/lib/chat/production-brief';
+import { parsePreferences, type ChatPreference, type PreferenceSignal } from '@/lib/chat/preferences';
 import { parseSelfChecks, type SelfCheckRecord } from '@/lib/chat/self-check';
 import { parseSessionBudget } from '@/lib/chat/budget';
 import { parseNativeQuote, parsePriceTotals, type NativeQuote } from '@/lib/pricing';
@@ -237,6 +238,14 @@ export interface EventSourceAdapter {
   close(): void;
 }
 
+/** #241: the editable fields of one preference record; an absent field is left as it is. */
+export interface ChatPreferenceEdit {
+  direction?: string;
+  reasonPreset?: string;
+  reasonText?: string;
+  active?: boolean;
+}
+
 export interface ChatBrowserClient {
   generationCapability(referenceImageCount: number): string;
   enhancePrompt(
@@ -329,6 +338,17 @@ export interface ChatBrowserClient {
   getPick(sessionID: string, signal?: AbortSignal): Promise<ChatAttachment | null>;
   setPick(sessionID: string, claim: ChatAttachmentClaim): Promise<ChatAttachment | null>;
   clearPick(sessionID: string): Promise<void>;
+  /**
+   * #241: the session's active preference records. An undeclared preference route yields an empty list, so the
+   * sidebar section simply stays hidden on an older server.
+   */
+  listPreferences(sessionID: string, signal?: AbortSignal): Promise<ChatPreference[]>;
+  /** Say "not this one" about a generated 2D candidate, with a declared reason preset and/or free text. */
+  rejectCandidate(sessionID: string, claim: ChatAttachmentClaim, reasonPreset: string, reasonText: string): Promise<ChatPreference[]>;
+  /** Report a weak redo signal (regenerate / repaint / prompt edit) about the given objects. */
+  recordPreferenceSignal(sessionID: string, signal: PreferenceSignal, claims: readonly ChatAttachmentClaim[]): Promise<ChatPreference[]>;
+  updatePreference(sessionID: string, preferenceID: string, edit: ChatPreferenceEdit): Promise<ChatPreference>;
+  deletePreference(sessionID: string, preferenceID: string): Promise<void>;
   /** 会话版本链（2D/3D 版本及其来源）；只读，来源无法确认时保持未知。 */
   getLineage(sessionID: string, signal?: AbortSignal): Promise<LineageGraph>;
   getLineagePage(sessionID: string, cursor?: string, signal?: AbortSignal): Promise<LineageGraph>;
@@ -520,6 +540,18 @@ function pickRoute(schema: ProductSchema, sessionID: string): string {
   const template = schema.runtime.http.routes.chat_session_pick;
   if (!template) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, 0);
   return route(template, { sessionID });
+}
+
+function preferencesRoute(schema: ProductSchema, sessionID: string): string {
+  const template = schema.runtime.http.routes.chat_session_preferences;
+  if (!template) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, 0);
+  return route(template, { sessionID });
+}
+
+function preferenceItemRoute(schema: ProductSchema, sessionID: string, preferenceID: string): string {
+  const template = schema.runtime.http.routes.chat_session_preference_item;
+  if (!template) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, 0);
+  return route(template, { sessionID, preferenceID });
 }
 
 function lineageRoute(schema: ProductSchema, sessionID: string): string {
@@ -1580,6 +1612,66 @@ export function createChatBrowserClient(
     },
     async clearPick(sessionID) {
       const response = await fetcher(pickRoute(schema, sessionID), { method: 'DELETE' });
+      if (!response.ok) throw approvalError(schema, await responseValue(response), response.status);
+    },
+    async listPreferences(sessionID, signal) {
+      if (!schema.runtime.http.routes.chat_session_preferences) return [];
+      const response = await fetcher(preferencesRoute(schema, sessionID), { signal });
+      const payload = await responseValue(response);
+      if (!response.ok) throw approvalError(schema, payload, response.status);
+      return parsePreferences(schema, payload);
+    },
+    async rejectCandidate(sessionID, claim, reasonPreset, reasonText) {
+      const names = schema.chat.api.preference;
+      if (!names) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, 0);
+      const body: Record<string, unknown> = { ...encodeAttachmentClaims(schema, [claim])[0] };
+      if (reasonPreset) body[names.reason_preset] = reasonPreset;
+      if (reasonText) body[names.reason_text] = reasonText;
+      const response = await fetcher(preferencesRoute(schema, sessionID), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const payload = await responseValue(response);
+      if (!response.ok) throw approvalError(schema, payload, response.status);
+      return parsePreferences(schema, payload);
+    },
+    async recordPreferenceSignal(sessionID, signal, claims) {
+      const names = schema.chat.api.preference;
+      if (!names || claims.length === 0) return [];
+      const response = await fetcher(preferencesRoute(schema, sessionID), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          [names.signal]: signal,
+          [names.handles]: encodeAttachmentClaims(schema, claims),
+        }),
+      });
+      const payload = await responseValue(response);
+      if (!response.ok) throw approvalError(schema, payload, response.status);
+      return parsePreferences(schema, payload);
+    },
+    async updatePreference(sessionID, preferenceID, edit) {
+      const names = schema.chat.api.preference;
+      if (!names) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, 0);
+      const body: Record<string, unknown> = {};
+      if (edit.direction !== undefined) body[names.direction] = edit.direction;
+      if (edit.reasonPreset !== undefined) body[names.reason_preset] = edit.reasonPreset;
+      if (edit.reasonText !== undefined) body[names.reason_text] = edit.reasonText;
+      if (edit.active !== undefined) body[names.active] = edit.active;
+      const response = await fetcher(preferenceItemRoute(schema, sessionID, preferenceID), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const payload = await responseValue(response);
+      if (!response.ok) throw approvalError(schema, payload, response.status);
+      const preferences = parsePreferences(schema, payload);
+      if (preferences.length === 0) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, response.status);
+      return preferences[0];
+    },
+    async deletePreference(sessionID, preferenceID) {
+      const response = await fetcher(preferenceItemRoute(schema, sessionID, preferenceID), { method: 'DELETE' });
       if (!response.ok) throw approvalError(schema, await responseValue(response), response.status);
     },
     subscribe(sessionID, options) {

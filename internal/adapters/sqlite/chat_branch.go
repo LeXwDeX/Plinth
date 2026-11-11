@@ -57,6 +57,13 @@ func (r *Repository) BranchSession(ctx context.Context, request chat.BranchReque
 	if err := insertBranchTaskRefs(ctx, tx, request.OwnerID, request.SessionID, request.NewSessionID, formatTime(request.At)); err != nil {
 		return chat.Session{}, err
 	}
+	// Active preference records follow the branch under fresh IDs (#241): the
+	// branch starts with the same choices its history up to the branch point
+	// carries, and editing or deleting one in either session leaves the other
+	// alone.
+	if err := copyBranchPreferences(ctx, tx, request); err != nil {
+		return chat.Session{}, err
+	}
 	// The current 3D stage and its captures are copied with fresh IDs. Both
 	// are fail-closed: evidence the owner or the source session cannot read
 	// refuses the whole branch with ErrBranchScene instead of dropping rows.

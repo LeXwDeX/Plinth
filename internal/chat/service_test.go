@@ -496,6 +496,9 @@ type memoryChatRepository struct {
 	turns    map[string]chat.Turn
 	notes    map[string]string
 	picks    map[string]chat.Attachment
+	// preferences holds the session's preference rows, active and inactive,
+	// in insertion order; ListPreferences returns the active ones newest first.
+	preferences map[string][]chat.Preference
 	// interposeBrief simulates a concurrent writer landing between the read and
 	// the conditional replace; it runs under the repository lock (#103 review
 	// C5).
@@ -504,11 +507,12 @@ type memoryChatRepository struct {
 
 func newMemoryChatRepository() *memoryChatRepository {
 	return &memoryChatRepository{
-		sessions: map[string]chat.Session{},
-		messages: map[string][]chat.Message{},
-		events:   map[string][]chat.Event{},
-		streams:  map[string]chat.Stream{},
-		turns:    map[string]chat.Turn{},
+		sessions:    map[string]chat.Session{},
+		messages:    map[string][]chat.Message{},
+		events:      map[string][]chat.Event{},
+		streams:     map[string]chat.Stream{},
+		turns:       map[string]chat.Turn{},
+		preferences: map[string][]chat.Preference{},
 	}
 }
 
@@ -937,6 +941,132 @@ func (r *memoryChatRepository) SetSessionPick(
 	return true, nil
 }
 
+func (r *memoryChatRepository) ListPreferences(
+	_ context.Context,
+	ownerID string,
+	sessionID string,
+) ([]chat.Preference, bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	session, found := r.sessions[sessionID]
+	if !found || session.OwnerID != ownerID {
+		return nil, false, nil
+	}
+	var result []chat.Preference
+	for index := len(r.preferences[sessionID]) - 1; index >= 0; index-- {
+		preference := r.preferences[sessionID][index]
+		if preference.Active {
+			preference.Alternatives = append([]string(nil), preference.Alternatives...)
+			result = append(result, preference)
+		}
+	}
+	sort.SliceStable(result, func(left, right int) bool {
+		if !result[left].CreatedAt.Equal(result[right].CreatedAt) {
+			return result[left].CreatedAt.After(result[right].CreatedAt)
+		}
+		return result[left].ID > result[right].ID
+	})
+	return result, true, nil
+}
+
+func (r *memoryChatRepository) PutPreference(
+	_ context.Context,
+	ownerID string,
+	sessionID string,
+	preference chat.Preference,
+) (chat.Preference, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	session, found := r.sessions[sessionID]
+	if !found || session.OwnerID != ownerID {
+		return chat.Preference{}, false, nil
+	}
+	stored := preference
+	stored.Alternatives = append([]string(nil), preference.Alternatives...)
+	if stored.TaskID != "" && stored.AssetID != "" {
+		kept := r.preferences[sessionID][:0]
+		for _, current := range r.preferences[sessionID] {
+			replace := current.Active && current.TaskID == stored.TaskID && current.AssetID == stored.AssetID
+			if replace && !stored.Explicit {
+				replace = !current.Explicit && current.Source == stored.Source
+			}
+			if !replace {
+				kept = append(kept, current)
+			}
+		}
+		r.preferences[sessionID] = kept
+	}
+	r.preferences[sessionID] = append(r.preferences[sessionID], stored)
+	return stored, true, nil
+}
+
+func (r *memoryChatRepository) UpdatePreference(
+	_ context.Context,
+	ownerID string,
+	sessionID string,
+	preferenceID string,
+	edit chat.PreferenceEdit,
+) (chat.Preference, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	session, found := r.sessions[sessionID]
+	if !found || session.OwnerID != ownerID {
+		return chat.Preference{}, false, nil
+	}
+	for index := range r.preferences[sessionID] {
+		preference := r.preferences[sessionID][index]
+		if preference.ID != preferenceID {
+			continue
+		}
+		if edit.Direction != nil {
+			preference.Direction = *edit.Direction
+		}
+		if edit.ReasonPreset != nil {
+			preference.ReasonPreset = *edit.ReasonPreset
+		}
+		if edit.ReasonText != nil {
+			preference.ReasonText = *edit.ReasonText
+		}
+		if edit.Active != nil {
+			preference.Active = *edit.Active
+		}
+		preference.UserEdited = true
+		preference.UpdatedAt = r.nowForTest()
+		r.preferences[sessionID][index] = preference
+		return preference, true, nil
+	}
+	return chat.Preference{}, false, nil
+}
+
+func (r *memoryChatRepository) DeletePreference(
+	_ context.Context,
+	ownerID string,
+	sessionID string,
+	preferenceID string,
+) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	session, found := r.sessions[sessionID]
+	if !found || session.OwnerID != ownerID {
+		return false, nil
+	}
+	for index := range r.preferences[sessionID] {
+		preference := r.preferences[sessionID][index]
+		if preference.ID == preferenceID && preference.Active {
+			preference.Active = false
+			r.preferences[sessionID][index] = preference
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// nowForTest keeps the memory repository's updated_at monotonic enough for
+// tests that only distinguish before and after.
+func (r *memoryChatRepository) nowForTest() time.Time {
+	return time.Now()
+}
+
 func (r *memoryChatRepository) DeleteSession(
 	_ context.Context,
 	ownerID string,
@@ -951,6 +1081,7 @@ func (r *memoryChatRepository) DeleteSession(
 	delete(r.sessions, sessionID)
 	delete(r.notes, sessionID)
 	delete(r.picks, sessionID)
+	delete(r.preferences, sessionID)
 	delete(r.messages, sessionID)
 	delete(r.events, sessionID)
 	return true, nil

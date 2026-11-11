@@ -102,6 +102,16 @@ type Repository interface {
 	// Writing does not touch updated_at.
 	VisualAnchors(ctx context.Context, owner, session string) ([]VisualAnchor, bool, error)
 	SetVisualAnchors(ctx context.Context, owner, session string, anchors []VisualAnchor) (bool, error)
+	// ListPreferences reads the active preference records of the owner's
+	// session, newest first (#241). found is false for a missing or foreign
+	// session. PutPreference inserts a record, replacing the same object's
+	// previous active record in one transaction; UpdatePreference edits one
+	// record and DeletePreference hides it (active=0). Every method is scoped
+	// to both owner and session.
+	ListPreferences(ctx context.Context, owner, session string) ([]Preference, bool, error)
+	PutPreference(ctx context.Context, owner, session string, preference Preference) (Preference, bool, error)
+	UpdatePreference(ctx context.Context, owner, session, preferenceID string, edit PreferenceEdit) (Preference, bool, error)
+	DeletePreference(ctx context.Context, owner, session, preferenceID string) (bool, error)
 	// SessionBrief and ReplaceSessionBrief read and conditionally replace the
 	// session's structured production brief (#103). Both are scoped to the
 	// owner; found is false for a missing or foreign session. Writing does not
@@ -302,6 +312,10 @@ type ServiceConfig struct {
 	// Projects verifies the owner's project when a session is created in or
 	// assigned to one (#240). Nil rejects every non-empty project.
 	Projects ProjectSource
+	// Preferences is application.chat.preferences (#241): the entry and prompt
+	// bounds, the framing template and the declared rejection reasons. A zero
+	// value disables preference storage, injection and the sidebar routes.
+	Preferences catalog.ChatPreferencesSchema
 }
 
 type Service struct {
@@ -384,6 +398,9 @@ type Service struct {
 
 	// projects verifies owner projects when a session joins one (#240).
 	projects ProjectSource
+
+	// preferenceSchema is application.chat.preferences (#241).
+	preferenceSchema catalog.ChatPreferencesSchema
 
 	// workLedger is application.chat.work_ledger (#248); workLedgerTasks is
 	// the public-Task page source, workLedgerDetail the full single-Task read,
@@ -499,6 +516,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 		visionBudget:               config.VisionBudget,
 		visionTokenBudget:          config.VisionTokenBudget,
 		projects:                   config.Projects,
+		preferenceSchema:           config.Preferences,
 	}, nil
 }
 

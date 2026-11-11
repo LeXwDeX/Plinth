@@ -43,6 +43,7 @@ import { useSessionNotes } from '@/hooks/use-session-notes';
 import { useSessionPendingApprovals } from '@/hooks/use-session-pending-approvals';
 import { useSessionChoices } from '@/hooks/use-session-choices';
 import { useSessionPick } from '@/hooks/use-session-pick';
+import { useSessionPreferences } from '@/hooks/use-session-preferences';
 import { useSessionState } from '@/hooks/use-session-state';
 import { useThreeViews } from '@/hooks/use-three-views';
 import { asksTurnBackground, useTurnBackground } from '@/hooks/use-turn-background';
@@ -211,6 +212,24 @@ function attachmentsPending(reads: { current: PendingAttachmentReads }, scope: S
   return sameSessionScope(reads.current.scope, scope) && reads.current.count > 0;
 }
 
+/**
+ * #241: the generated 2D pictures of one message as claims for a weak preference signal. Only pictures the server
+ * gave a Task are sent; the server re-verifies every one for the owner and the session.
+ */
+function generatedPictureClaims(message: ChatMessageType | undefined): ChatAttachmentClaim[] {
+  if (!message) return [];
+  return (message.attachments ?? []).flatMap((attachment): ChatAttachmentClaim[] => {
+    if (attachment.kind !== 'image' || !attachment.taskId) return [];
+    return [{
+      kind: 'image',
+      ...(attachment.taskId ? { taskId: attachment.taskId } : {}),
+      ...(attachment.assetId ? { assetId: attachment.assetId } : {}),
+      ...(attachment.url ? { url: attachment.url } : {}),
+      ...(attachment.captureId ? { captureId: attachment.captureId } : {}),
+    }];
+  });
+}
+
 export function ChatColumn() {
   const { schema } = useProductSchema();
   const chatClient = useMemo(() => createChatBrowserClient(schema), [schema]);
@@ -292,6 +311,17 @@ export function ChatColumn() {
   const notesText = useMemo(() => sessionNotesText(schema), [schema]);
   const sessionPick = useSessionPick(chatClient, activeSessionId);
   const chooseCandidate = sessionPick.choose;
+  const sessionPreferences = useSessionPreferences(chatClient, activeSessionId);
+  const recordPreferenceSignal = sessionPreferences.signal;
+  const rejectedAssets = useMemo(() => {
+    const rejected = new Set<string>();
+    for (const preference of sessionPreferences.preferences) {
+      if (preference.kind !== 'rejected' || !preference.active) continue;
+      if (preference.assetId) rejected.add(preference.assetId);
+      if (preference.handle) rejected.add(preference.handle);
+    }
+    return rejected;
+  }, [sessionPreferences.preferences]);
   const pending = useSessionPendingApprovals(activeSessionId);
   const sessionChoices = useSessionChoices(activeSessionId);
   const refreshChoices = sessionChoices.refresh;
@@ -563,6 +593,7 @@ export function ChatColumn() {
       consentFailed: schemaText(schema, 'ui.workspace.agent.consent_failed'),
       notesSaveFailed: schemaText(schema, 'ui.workspace.notes.save_failed'),
       pickFailed: schemaText(schema, 'ui.chat.image.pick_failed'),
+      rejectFailed: schemaText(schema, 'ui.chat.image.reject_failed'),
     }),
     [schema],
   );
@@ -1512,11 +1543,14 @@ export function ChatColumn() {
   // 文字和图片会回到输入框（见 send）。
   const regenerateReply = useCallback(() => {
     if (!regenerate) return;
+    // #241: regenerating the same step is a weak, unconfirmed signal about the direction the reply produced.
+    const produced = displayMessages.find((message) => message.id === regenerate.assistantId);
+    void recordPreferenceSignal('regenerate', generatedPictureClaims(produced));
     const payload = turnPayload(regenerate.user);
     // #65: a turn sent with a structured multiview request sends it again, so the same pictures and views are bound.
     void send(payload.text, payload.images, payload.claims, regenerate.deleteIds, undefined, undefined, undefined,
       payload.multiview ? { multiview: payload.multiview } : undefined);
-  }, [regenerate, send]);
+  }, [displayMessages, recordPreferenceSignal, regenerate, send]);
 
   const focusComposer = useCallback(() => {
     window.requestAnimationFrame(() => focusWhenUnblocked(() => document.getElementById('art-ai-chat-composer')));
@@ -1525,6 +1559,10 @@ export function ChatColumn() {
   // 编辑后重发：把最后一条用户消息放回输入框（文字与图片及其来源），发送时替换那一轮。
   const editLastMessage = useCallback((message: ChatMessageType) => {
     if (!editable || editable.userId !== message.id) return;
+    // #241: editing the prompt and sending again means the previous direction was not confirmed. It is a weak
+    // signal, so the Agent asks before producing a batch in a new direction.
+    const replaced = displayMessages.filter((item) => editable.deleteIds.includes(item.id));
+    void recordPreferenceSignal('prompt_edit', replaced.flatMap(generatedPictureClaims));
     draftEpoch.current += 1;
     setEditing({ deleteIds: editable.deleteIds });
     setInput(message.content);
@@ -1532,7 +1570,7 @@ export function ChatColumn() {
     setAttachmentPurposes([]);
     useWorkspaceStore.getState().queueChatAttachments(editAttachments(message));
     focusComposer();
-  }, [editable, focusComposer, setAttachedImages, setEditing, setInput]);
+  }, [displayMessages, editable, focusComposer, recordPreferenceSignal, setAttachedImages, setEditing, setInput]);
 
   // 更早的用户消息：放回输入框，改一改再发，不替换任何一轮。
   const copyToInput = useCallback((message: ChatMessageType) => {
@@ -1560,6 +1598,12 @@ export function ChatColumn() {
     if (!ok) toast.error(ui.pickFailed);
     return ok;
   }, [chooseCandidate, ui.pickFailed]);
+  // #241: "不要这个" is an explicit server fact; a failure is shown and the dialog stays open.
+  const rejectCandidate = useCallback(async (claim: ChatAttachmentClaim, reasonPreset: string, reasonText: string) => {
+    const ok = await sessionPreferences.reject(claim, reasonPreset, reasonText);
+    if (!ok) toast.error(ui.rejectFailed);
+    return ok;
+  }, [sessionPreferences.reject, ui.rejectFailed]);
   const removeMessage = useCallback(
     async (messageId: string) => {
       if (!activeSessionId) return;
@@ -2157,6 +2201,8 @@ export function ChatColumn() {
                     pick={sessionPick.pick}
                     pickBusy={sessionPick.busy}
                     onPick={pickCandidate}
+                    rejectedAssets={rejectedAssets}
+                    onReject={rejectCandidate}
                     onCopyToInput={item.message.isPending || editable?.userId === item.message.id ? undefined : copyToInput}
                     onRegenerate={regenerate?.assistantId === item.message.id ? regenerateReply : undefined}
                     regenerateCredits={regenerate?.assistantId === item.message.id ? regenerateCredits : undefined}

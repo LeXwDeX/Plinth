@@ -1333,6 +1333,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		StyleLockSources:           applicationSchema.Chat.StyleLock.Sources,
 		Projects:                   projectSource,
 		Attachments:                harnessAttachmentVerifier{},
+		Preferences:                applicationSchema.Chat.Preferences,
 		Model3DUsage:               applicationSchema.Chat.Model3DUsage,
 		Image2DUsage:               applicationSchema.Chat.Image2DUsage,
 		ExplicitModel3DValid: func(model string) bool {

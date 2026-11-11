@@ -40,7 +40,9 @@ same HTTP API the browser uses:
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
 (NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, p2, project, agent, agent-background,
-agent-quality, image-self-check, image-purpose, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, faults;
+agent-quality, image-self-check, image-purpose, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, preferences, faults;
+"preferences" the #241 session choices: four candidates, pick/reject with reasons, the next prompt carrying them,
+the framed block surviving compaction, edit/delete effects, and a second owner's 404;
 "agent" runs both agent scenarios, "hyper3d-agent" the Hyper3D chain alone,
 "p2" the Tripo P2 quote/chain, "agent-background" the batched wait that keeps both Tasks running,
 "project" the #240 project inheritance: promote a finished picture, new session, reused style reference,
@@ -299,7 +301,7 @@ def build(work):
     return fake, stack
 
 
-def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, self_check=False, name="catalog.json", manual_image_edits=False):
+def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, self_check=False, name="catalog.json", manual_image_edits=False, preferences=True, preference_compaction=False):
     """The default Catalog with four changes for Tripo, Meshy and Hyper3D: the fake
     artifact host is an allowed asset host, they poll once a second, and a failing
     materialization is retried once. The matting service polls once a second too,
@@ -313,6 +315,14 @@ def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, se
     with open(os.path.join(REPO, "internal/catalog/default_catalog.json"), encoding="utf-8") as handle:
         catalog = json.load(handle)
     catalog["application"]["chat"]["agent"]["background_wait"]["after_seconds"] = 1
+    # #241: a preferences-off Catalog disables the feature server-side (no
+    # injection, no writes), which is the "before" arm of the #238 comparison.
+    # The preferences scenario keeps only one recent round so a manual
+    # compaction really has something to summarise.
+    if not preferences:
+        catalog["application"]["chat"]["preferences"]["maximum_entries"] = 0
+    if preference_compaction:
+        catalog["application"]["chat"]["context_compaction"]["keep_recent_rounds"] = 1
     if manual_image_edits:
         # The mask scenario needs an approval card for a 2D edit step (#244);
         # the shipped policy asks a human only for the listed capabilities.
@@ -1850,9 +1860,10 @@ def _quality_bind_session(api, session, request, domain, model, model_3d=""):
         # #239: the same explicit pick binds the 2D tool above the purpose
         # recommendation. A request that names a model in a step leaves that
         # choice to the Agent, so the purpose can still recommend one.
-        named = any((step.get("tool", {}).get("arguments") or {}).get("model")
+        named = any((item.get("arguments") or {}).get("model")
                     for step in request.get("steps") or []
-                    if step.get("tool", {}).get("name") == "refine_image")
+                    for item in ([step["tool"]] if step.get("tool") else step.get("tools") or [])
+                    if item.get("name") == "refine_image")
         if not named:
             api.json("PUT", f"/api/v1/chat/sessions/{session}/model2d", {"explicit_model_2d": model})
 
@@ -1916,12 +1927,102 @@ def _quality_promote_first_image(api, project_id, request, step, session):
     return True
 
 
+def _quality_feedback(api, session, feedback, tasks, facts, domain=None, model=None):
+    """Run #241 feedback actions between turns; returns (stage, why). A step's
+    tasks are named by their frozen prompt (or index), so the actions never
+    depend on the API's list order."""
+    stage = None
+    for action in feedback:
+        kind = action.get("action")
+        if kind in ("pick", "reject"):
+            task = None
+            if action.get("prompt"):
+                task = next((item for item in tasks
+                             if str(((item.get("input") or {}).get("prompt") or "")) == action["prompt"]), None)
+            elif isinstance(action.get("task"), int):
+                task = tasks[action["task"]] if action["task"] < len(tasks) else None
+            if not task:
+                return stage, f"no task for {kind}"
+            asset = next((item for item in task.get("assets") or [] if item.get("id")), None)
+            if not asset:
+                return stage, f"the task {task.get('id')} has no asset"
+            if kind == "pick":
+                status, body = api.json("PUT", f"/api/v1/chat/sessions/{session}/pick", {
+                    "kind": "image", "taskId": task.get("id"), "assetId": asset.get("id"),
+                })
+                if status != 200:
+                    return stage, f"pick {status} {body}"
+                status, body = api.json("GET", f"/api/v1/chat/sessions/{session}/preferences")
+                selected = next((item for item in body.get("preferences") or [] if item.get("kind") == "selected"), None)
+                if selected:
+                    facts["selected_direction"] = selected.get("direction") or ""
+                continue
+            status, body = api.json("POST", f"/api/v1/chat/sessions/{session}/preferences", {
+                "kind": "image", "taskId": task.get("id"), "assetId": asset.get("id"),
+                **({"reasonPreset": action["reasonPreset"]} if action.get("reasonPreset") else {}),
+                **({"reasonText": action["reasonText"]} if action.get("reasonText") else {}),
+            })
+            if status != 200:
+                return stage, f"reject {status} {body}"
+            rejected = next((item for item in body.get("preferences") or [] if item.get("kind") == "rejected"), None)
+            if rejected:
+                facts["rejected_direction"] = rejected.get("direction") or ""
+                facts["rejected_reason"] = rejected.get("reasonText") or ""
+                facts["rejected_id"] = rejected.get("id") or ""
+            continue
+        if kind == "compact":
+            status, body = api.json("POST", f"/api/v1/chat/sessions/{session}/context/compaction")
+            # The shipped Catalog keeps five recent rounds. A trajectory that
+            # reaches the compact action earlier gets plain filler turns (no
+            # tool, no Task, no tool-call budget) until the manual compaction has
+            # something older to summarise.
+            for _ in range(6):
+                if status == 200 or not domain or not model:
+                    break
+                if not _quality_send(api, session, "再补充一点背景设定，稍后继续。", domain, model):
+                    return stage, "a filler turn was refused"
+                if not _quality_turn_done(api, session):
+                    return stage, "a filler turn did not finish"
+                status, body = api.json("POST", f"/api/v1/chat/sessions/{session}/context/compaction")
+            if status != 200:
+                return stage, f"compact {status} {body}"
+            stage = "after_compaction"
+            continue
+        preferences = []
+        if kind in ("edit", "delete"):
+            status, body = api.json("GET", f"/api/v1/chat/sessions/{session}/preferences")
+            preferences = body.get("preferences") or []
+            rejected_id = facts.get("rejected_id") or next(
+                (item.get("id") for item in preferences if item.get("kind") == "rejected"), "")
+            if not rejected_id:
+                return stage, f"no rejected preference to {kind}"
+        if kind == "edit":
+            edit = {name: action[name] for name in ("direction", "reasonPreset", "reasonText", "active") if name in action}
+            status, body = api.json("PUT", f"/api/v1/chat/sessions/{session}/preferences/{rejected_id}", edit)
+            if status != 200:
+                return stage, f"edit {status} {body}"
+            edited = (body.get("preferences") or [{}])[0]
+            facts["edited_direction"] = edited.get("direction") or ""
+            facts["edited_reason"] = edited.get("reasonText") or ""
+            stage = "edited"
+            continue
+        if kind == "delete":
+            status, _ = api.json("DELETE", f"/api/v1/chat/sessions/{session}/preferences/{rejected_id}")
+            if status != 200:
+                return stage, f"delete {status}"
+            stage = "deleted"
+            continue
+        return stage, f"unknown action {kind}"
+    return stage, ""
+
+
 def run_quality_case(api, request, domain, model, model_3d=""):
     """One request through the fake-LLM chat path; returns the run dict for agent_quality.
 
     A request with a project builds the #240 fixture first: project_setup steps
     promote the first picture and open the project's next session; only tool
-    steps count as tool calls."""
+    steps count as tool calls. #241 steps may carry several tools in one user
+    message (one result card) and feedback actions between turns."""
     started = time.time()
     project_id = _quality_create_project(api, request)
     session = new_session(api, project_id)
@@ -1929,6 +2030,10 @@ def run_quality_case(api, request, domain, model, model_3d=""):
     sessions = [session]
     cards, seen = [], set()
     turns = 0
+    # #241: the preference facts and the fake prompts built from them at each stage.
+    preference_stage = "captured"
+    preference_facts, preference_captured, preference_prompts = {}, [], []
+    last_step_tasks = []
     reference_urls = []
     if request.get("reference_images"):
         # A deterministic reference picture, uploaded like the person's own.
@@ -1950,58 +2055,87 @@ def run_quality_case(api, request, domain, model, model_3d=""):
                        f"project={project_id} session={session}")
                 break
             continue
-        arguments = dict(step["tool"].get("arguments") or {})
-        if step["tool"]["name"] == "create_model_3d_from_image" and "input_override_reason" not in arguments:
-            # The fake upstream's generated picture is a 1x1 placeholder, not a
-            # real 3D input. The reference-trajectory runner records the
-            # person's explicit override; the live output run does not use
-            # these steps and the real Agent must pass the gate or ask.
-            arguments["input_override_reason"] = "the fake upstream image is a placeholder, not a real 3D input"
-        tool = {"name": step["tool"]["name"], "arguments": arguments}
-        model_task = _quality_model_task(api, session)
-        if model_task and tool["arguments"].get("model") == "@model1":
-            tool["arguments"]["model"] = model_task
-        content = f"{step['user']} {_quality_marker(tool)}"
-        before_tasks = {task.get("id") for task in session_tasks(api, session)}
-        if not _quality_send(api, session, content, domain, model,
-                             image_urls=reference_urls if turns == 0 else None):
-            record(f"agent-quality {request['id']}: send {step['tool']['name']}", False, "message refused")
-            break
-        turns += 1
-        if not _quality_turn_done(api, session):
-            record(f"agent-quality {request['id']}: turn {step['tool']['name']}", False, "turn did not finish")
-            break
-        # A card ends its turn; answer or approve it, then follow the turn it starts.
-        for _ in range(4):
-            answered = False
-            for card in _quality_pending(api, session):
-                request_id = card.get("request_id")
-                if not request_id or request_id in seen:
-                    continue
-                seen.add(request_id)
-                cards.append({"kind": "approval", "id": request_id, "tool": card.get("tool"),
-                              "capability": card.get("capability"), "state": "approved"})
-                status, decision = api.json("PUT", f"/api/v1/tasks/grants/{request_id}", decision_body(api, "approve"))
-                task_id = decision.get("task_id")
-                if status == 200 and task_id:
-                    wait_task(api, task_id)
-                answered = True
-            for card in _quality_choices(api, session):
-                card_id = card.get("id")
-                if card.get("state") != "pending" or not card_id or card_id in seen:
-                    continue
-                seen.add(card_id)
-                cards.append({"kind": "choice", "id": card_id, "tool": card.get("tool"),
-                              "card_kind": card.get("kind"), "state": "answered"})
-                _quality_answer(api, session, card, request.get("purpose"), domain, model)
-                answered = True
-            if not answered:
+        step_tools = step.get("tools") or ([step["tool"]] if step.get("tool") else [])
+        markers = []
+        preference_prompt = False
+        for tool_spec in step_tools:
+            arguments = dict(tool_spec.get("arguments") or {})
+            if tool_spec["name"] == "create_model_3d_from_image" and "input_override_reason" not in arguments:
+                # The fake upstream's generated picture is a 1x1 placeholder, not a
+                # real 3D input. The reference-trajectory runner records the
+                # person's explicit override; the live output run does not use
+                # these steps and the real Agent must pass the gate or ask.
+                arguments["input_override_reason"] = "the fake upstream image is a placeholder, not a real 3D input"
+            model_task = _quality_model_task(api, session)
+            if model_task and arguments.get("model") == "@model1":
+                arguments["model"] = model_task
+            if tool_spec["name"] == "refine_image" and arguments.get("prompt_from_preferences"):
+                preference_prompt = True
+            markers.append(_quality_marker({"name": tool_spec["name"], "arguments": arguments}))
+        step_tasks = []
+        if markers:
+            names = "+".join(tool_spec["name"] for tool_spec in step_tools)
+            content = f"{step['user']} {' '.join(markers)}"
+            before_tasks = {task.get("id") for task in session_tasks(api, session)}
+            if not _quality_send(api, session, content, domain, model,
+                                 image_urls=reference_urls if turns == 0 else None):
+                record(f"agent-quality {request['id']}: send {names}", False, "message refused")
                 break
+            turns += 1
             if not _quality_turn_done(api, session):
+                record(f"agent-quality {request['id']}: turn {names}", False, "turn did not finish")
                 break
-        for task in session_tasks(api, session):
-            if task.get("id") not in before_tasks:
-                wait_task(api, task.get("id"))
+            # A card ends its turn; answer or approve it, then follow the turn it starts.
+            for _ in range(4):
+                answered = False
+                for card in _quality_pending(api, session):
+                    request_id = card.get("request_id")
+                    if not request_id or request_id in seen:
+                        continue
+                    seen.add(request_id)
+                    cards.append({"kind": "approval", "id": request_id, "tool": card.get("tool"),
+                                  "capability": card.get("capability"), "state": "approved"})
+                    status, decision = api.json("PUT", f"/api/v1/tasks/grants/{request_id}", decision_body(api, "approve"))
+                    task_id = decision.get("task_id")
+                    if status == 200 and task_id:
+                        wait_task(api, task_id)
+                    answered = True
+                for card in _quality_choices(api, session):
+                    card_id = card.get("id")
+                    if card.get("state") != "pending" or not card_id or card_id in seen:
+                        continue
+                    seen.add(card_id)
+                    cards.append({"kind": "choice", "id": card_id, "tool": card.get("tool"),
+                                  "card_kind": card.get("kind"), "state": "answered"})
+                    _quality_answer(api, session, card, request.get("purpose"), domain, model)
+                    answered = True
+                if not answered:
+                    break
+                if not _quality_turn_done(api, session):
+                    break
+            for task in session_tasks(api, session):
+                if task.get("id") not in before_tasks:
+                    detail = wait_task(api, task.get("id"))
+                    if detail:
+                        step_tasks.append(detail)
+            last_step_tasks = step_tasks
+            if preference_prompt and step_tasks:
+                for task in step_tasks:
+                    prompt = str((task.get("input") or {}).get("prompt") or "")
+                    preference_prompts.append({"stage": preference_stage, "prompt": prompt})
+        if step.get("feedback"):
+            next_stage, why = _quality_feedback(api, session, step["feedback"], last_step_tasks, preference_facts,
+                                               domain=domain, model=model)
+            if why:
+                record(f"agent-quality {request['id']}: feedback", False, why)
+                break
+            if next_stage:
+                preference_stage = next_stage
+            status, body = api.json("GET", f"/api/v1/chat/sessions/{session}/preferences")
+            current = body.get("preferences") or []
+            if any(item.get("kind") == "selected" for item in current) and any(
+                    item.get("kind") == "rejected" for item in current):
+                preference_captured = current
     messages = []
     tasks, task_ids = [], set()
     for quality_session in sessions:
@@ -2021,6 +2155,9 @@ def run_quality_case(api, request, domain, model, model_3d=""):
         "image_count": images,
         "turns": turns,
         "elapsed_ms": int((time.time() - started) * 1000),
+        "preference_captured": preference_captured,
+        "preference_prompts": preference_prompts,
+        "preference_facts": preference_facts,
     }
 
 
@@ -3812,12 +3949,12 @@ def _visual_anchor_system_with(work, session, needle, seconds=20):
     return ""
 
 
-def _visual_anchor_frozen_input(work, task_id):
+def _visual_anchor_frozen_input(work, task_id, stack="main"):
     """The Task's frozen input from the stack database. The public Task input
     withholds asset ids by design, so the smoke reads the frozen record."""
     import sqlite3
     try:
-        db = sqlite3.connect(f"file:{work}/main/app.db?mode=ro", uri=True)
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
         db.row_factory = sqlite3.Row
         row = db.execute("SELECT input_json FROM generation_tasks WHERE id=?", (task_id,)).fetchone()
         db.close()
@@ -3862,6 +3999,239 @@ def _visual_anchor_wait_tool_content(work, session, needle, seconds=20):
             return contents
         time.sleep(0.5)
     return contents
+
+
+def _preference_send(api, session, content, image_model, expected, timeout=120):
+    """Send one turn and wait for its reply and its fresh Tasks. Returns
+    (fresh task ids, why); fresh ids are ordered by first appearance."""
+    replies = assistant_reply_count(api, session)
+    known = set(session_tool_calls(api, session))
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", {
+        "content": content, "creative_domain": "image", "ai_model": image_model,
+    })
+    end = time.time() + 30
+    while status == 409 and time.time() < end:
+        time.sleep(0.5)
+        status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", {
+            "content": content, "creative_domain": "image", "ai_model": image_model,
+        })
+    if status not in (200, 201, 202):
+        return [], f"send {status}"
+    end = time.time() + timeout
+    fresh = []
+    while time.time() < end:
+        current = [task for task in session_tool_calls(api, session) if task not in known]
+        if len(current) >= expected and assistant_reply_count(api, session) > replies:
+            fresh = current
+            break
+        time.sleep(0.5)
+    if not fresh:
+        return [], "the turn produced no Task"
+    tasks = []
+    for task_id in fresh:
+        task = wait_task(api, task_id, 90)
+        if task.get("state") != "SUCCEEDED":
+            return [], f"task {task_id} state {task.get('state')}"
+        tasks.append(task)
+    return tasks, ""
+
+
+def _preference_prompt_turn(api, session, work, image_model, label):
+    """One turn whose refine_image prompt is filled from the system preference
+    block. Returns (task, frozen prompt, why)."""
+    marker = _work_ledger_marker("refine_image", {"prompt_from_preferences": True})
+    tasks, why = _preference_send(api, session, f"{label} {marker}", image_model, 1)
+    if not tasks:
+        return None, "", why
+    task = tasks[0]
+    task_id = task.get("task_id") or task.get("id")
+    frozen = _visual_anchor_frozen_input(work, task_id, stack="preferences")
+    return task, str(frozen.get("prompt") or ""), ""
+
+
+def scenario_preferences(api, offerings, work, enabled=True):
+    """#241: the session's choice facts on the fake stack.
+
+    Four candidates come from four refine_image calls in one turn. The person
+    picks one and rejects another with a preset and a note; the next turn's
+    fake-only prompt_from_preferences convention proves the Agent received the
+    chosen and refused directions. The block survives a context compaction, an
+    edit replaces the old text, a delete stops the injection, and a second
+    owner sees 404 everywhere.
+    """
+    fake_control("DELETE")
+    session = new_session(api)
+    fields, _route = chat_schema_facts(api)
+    approval_field = fields.get("approval_mode", "approvalMode")
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {approval_field: "auto"})
+    if status != 200:
+        record("#241 auto approval", False, f"status {status}")
+        return
+    preferences_route = f"/api/v1/chat/sessions/{session}/preferences"
+    if not enabled:
+        status, body = api.json("GET", preferences_route)
+        record("#241 a preferences-off Catalog declares no records",
+               status == 200 and body.get("preferences") == [],
+               f"status={status} body={json.dumps(body, ensure_ascii=False)[:160]}")
+        status, body = api.json("POST", preferences_route, {"kind": "image", "taskId": "t", "assetId": "a"})
+        record("#241 a preferences-off Catalog refuses writes", status == 400,
+               f"status={status} body={json.dumps(body, ensure_ascii=False)[:160]}")
+        return
+
+    image_model = IMAGE_OFFERINGS["meshy"][0]
+    prompts = [f"PREF-DIR-{index} a watercolor fox in the snow" for index in range(4)]
+    markers = " ".join(_work_ledger_marker("refine_image", {"prompt": prompt}) for prompt in prompts)
+    tasks, why = _preference_send(api, session, "给四个方向各出一张 " + markers, image_model, 4)
+    if not tasks:
+        record("#241 four candidates", False, why)
+        return
+    record("#241 four candidates in one result card", len(tasks) == 4, f"tasks={len(tasks)}")
+    by_prompt = {}
+    for task in tasks:
+        task_id = task.get("task_id") or task.get("id")
+        frozen = _visual_anchor_frozen_input(work, task_id, stack="preferences")
+        by_prompt[str(frozen.get("prompt") or "")] = task
+    if not all(prompt in by_prompt for prompt in prompts):
+        record("#241 every candidate froze its own direction", False,
+               f"prompts={sorted(by_prompt)}")
+        return
+    handles = {}
+    end = time.time() + 20
+    while time.time() < end:
+        handles = _visual_anchor_handles(api, session)
+        if len(handles) >= 4:
+            break
+        time.sleep(0.5)
+    assets = {prompt: (by_prompt[prompt].get("assets") or [{}])[0].get("id") for prompt in prompts}
+    if not all(assets[prompt] and handles.get(assets[prompt]) for prompt in prompts):
+        record("#241 every candidate has a handle", False, f"assets={assets} handles={handles}")
+        return
+    # Pick candidate 0, reject candidate 1 with a declared reason and a note.
+    first = by_prompt[prompts[0]]
+    second = by_prompt[prompts[1]]
+    status, body = api.json("PUT", f"/api/v1/chat/sessions/{session}/pick", {
+        "kind": "image", "taskId": first.get("task_id") or first.get("id"), "assetId": assets[prompts[0]],
+    })
+    record("#241 pick a candidate", status == 200, f"status={status} {json.dumps(body, ensure_ascii=False)[:160]}")
+    status, body = api.json("POST", preferences_route, {
+        "kind": "image", "taskId": second.get("task_id") or second.get("id"), "assetId": assets[prompts[1]],
+        "reasonPreset": "style", "reasonText": "too realistic",
+    })
+    record("#241 reject a candidate with a reason", status == 200 and bool(body.get("preferences")),
+           f"status={status} {json.dumps(body, ensure_ascii=False)[:200]}")
+    status, body = api.json("GET", preferences_route)
+    items = body.get("preferences") or []
+    selected = [item for item in items if item.get("kind") == "selected"]
+    rejected = [item for item in items if item.get("kind") == "rejected"]
+    other_handles = {handles[assets[prompt]] for prompt in prompts[1:]}
+    record("#241 the selection records its direction and the unselected candidates",
+           status == 200 and len(selected) == 1
+           and selected[0].get("direction") == prompts[0]
+           and set(selected[0].get("alternatives") or []) == other_handles,
+           f"status={status} selected={json.dumps(selected, ensure_ascii=False)[:260]}")
+    record("#241 the rejection records its direction and reason",
+           len(rejected) == 1 and rejected[0].get("direction") == prompts[1]
+           and rejected[0].get("reasonPreset") == "style"
+           and rejected[0].get("reasonText") == "too realistic"
+           and rejected[0].get("explicit") is True,
+           f"rejected={json.dumps(rejected, ensure_ascii=False)[:260]}")
+    if not selected or not rejected:
+        return
+
+    # The next Agent turn reads the preference block and carries it into the
+    # tool prompt (the fake-only prompt_from_preferences convention).
+    _task, prompt, why = _preference_prompt_turn(api, session, work, image_model, "按偏好再画一张")
+    record("#241 the next prompt carries the chosen direction",
+           bool(_task) and prompts[0] in prompt, why or f"prompt={prompt[:220]!r}")
+    record("#241 the next prompt avoids the refused direction and its reason",
+           prompts[1] in prompt and "too realistic" in prompt and "风格不对" in prompt,
+           f"prompt={prompt[:220]!r}")
+    system = _work_ledger_wait_system(work, session, prompts[0], stack="preferences")
+    record("#241 the system prompt frames the preferences",
+           "<<<PREFERENCES>>>" in system and "<<<END_PREFERENCES>>>" in system
+           and prompts[0] in system and prompts[1] in system and "too realistic" in system,
+           f"frame={'yes' if '<<<PREFERENCES>>>' in system else 'no'}")
+
+    # A manual compaction keeps the preference block: it is stored session data,
+    # not part of the message window.
+    for index in range(3):
+        if not _work_ledger_plain_turn(api, session, f"keep thinking {index}", creative_domain="image"):
+            record(f"#241 filler round {index}", False, "turn did not finish")
+            return
+    status, body = api.json("POST", f"/api/v1/chat/sessions/{session}/context/compaction")
+    compactions = body.get("compactions") or []
+    record("#241 manual compaction", status == 200 and bool(compactions),
+           f"status={status} compactions={len(compactions)}")
+    _task, prompt, why = _preference_prompt_turn(api, session, work, image_model, "压缩后按偏好")
+    record("#241 the prompt keeps the choices after compaction",
+           bool(_task) and prompts[0] in prompt and prompts[1] in prompt and "too realistic" in prompt,
+           why or f"prompt={prompt[:220]!r}")
+    system = _work_ledger_wait_system(work, session, prompts[0], stack="preferences")
+    record("#241 the system prompt keeps the framed block after compaction",
+           "<<<PREFERENCES>>>" in system and prompts[0] in system and prompts[1] in system,
+           f"frame={'yes' if '<<<PREFERENCES>>>' in system else 'no'}")
+
+    # An edit replaces the refused direction and its reason in the next prompt.
+    edited_direction = "PREF-DIR-EDIT an ink-wash fox"
+    edited_reason = "washed out"
+    status, body = api.json("PUT", f"{preferences_route}/{rejected[0]['id']}", {
+        "direction": edited_direction, "reasonPreset": "other", "reasonText": edited_reason,
+    })
+    record("#241 edit a preference", status == 200 and
+           (body.get("preferences") or [{}])[0].get("direction") == edited_direction,
+           f"status={status} {json.dumps(body, ensure_ascii=False)[:200]}")
+    _task, prompt, why = _preference_prompt_turn(api, session, work, image_model, "编辑后再画")
+    record("#241 the edited direction replaces the old one",
+           bool(_task) and edited_direction in prompt and edited_reason in prompt
+           and prompts[1] not in prompt and "too realistic" not in prompt,
+           why or f"prompt={prompt[:240]!r}")
+
+    # Deleting the record stops the injection on the next turn.
+    status, _ = api.json("DELETE", f"{preferences_route}/{rejected[0]['id']}")
+    record("#241 delete a preference", status == 200, f"status={status}")
+    status, body = api.json("GET", preferences_route)
+    record("#241 a deleted preference is no longer listed",
+           status == 200 and all(item.get("id") != rejected[0]["id"] for item in body.get("preferences") or []),
+           f"status={status}")
+    _task, prompt, why = _preference_prompt_turn(api, session, work, image_model, "删除后再画")
+    record("#241 a deleted preference is no longer injected",
+           bool(_task) and edited_direction not in prompt and "washed out" not in prompt
+           and prompts[0] in prompt,
+           why or f"prompt={prompt[:240]!r}")
+
+    # A second owner sees 404 on every preference route and no content leaks.
+    import sqlite3
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    try:
+        db = sqlite3.connect(f"file:{work}/preferences/app.db", uri=True, timeout=10)
+        db.execute("INSERT OR REPLACE INTO go_chat_sessions (id,owner_id,owner_name,title,created_at,updated_at) "
+                   "VALUES ('foreign-session','owner-other','Other','other',?,?)", (now, now))
+        db.execute("INSERT OR REPLACE INTO chat_session_preferences "
+                   "(id,owner_id,session_id,kind,source,direction,reason_preset,reason_text,task_id,asset_id,handle,"
+                   "alternatives_json,explicit,active,user_edited,created_at,updated_at) "
+                   "VALUES ('foreign-preference','owner-other','foreign-session','rejected','reject',"
+                   "'secret direction','style','secret reason','','','@img-secret','[]',1,1,0,?,?)", (now, now))
+        db.commit()
+        db.close()
+    except sqlite3.Error as error:
+        record("#241 a second owner's rows exist for the 404 check", False, str(error))
+        return
+    checked = []
+    for method, path, body in [
+        ("GET", "/api/v1/chat/sessions/foreign-session/preferences", None),
+        ("POST", "/api/v1/chat/sessions/foreign-session/preferences",
+         {"kind": "image", "taskId": "own-task", "assetId": "own-asset"}),
+        ("PUT", "/api/v1/chat/sessions/foreign-session/preferences/foreign-preference", {"direction": "taken"}),
+        ("DELETE", "/api/v1/chat/sessions/foreign-session/preferences/foreign-preference", None),
+    ]:
+        status, body = api.json(method, path, body)
+        checked.append((method, status, "secret" in json.dumps(body)))
+    record("#241 a second owner gets 404 on every preference route",
+           all(item[1] == 404 and not item[2] for item in checked), f"{checked}")
+    status, body = api.json("GET", preferences_route)
+    record("#241 a foreign write never entered this session",
+           all(item.get("id") != "foreign-preference" for item in body.get("preferences") or []),
+           f"status={status}")
 
 
 def scenario_visual_anchors(api, offerings, work):
@@ -4142,7 +4512,11 @@ def scenario_visual_anchors(api, offerings, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,preferences,faults")
+    # #241/#238: the preferences-off arm disables the feature in the private
+    # Catalog (maximum_entries=0) without changing the revision.
+    parser.add_argument("--preferences", choices=("on", "off"), default="on",
+                        help="off disables session preferences in the private Catalog (the #238 'before' arm)")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
@@ -4154,8 +4528,8 @@ def main():
     processes = Processes()
     try:
         fake_binary, stack_binary = build(work)
-        catalog = private_catalog(work)
-        url_catalog = private_catalog(work, jimeng_urls=True)
+        catalog = private_catalog(work, preferences=args.preferences != "off")
+        url_catalog = private_catalog(work, jimeng_urls=True, preferences=args.preferences != "off")
         require_free(FAKE_PORT, "fake upstream")
         require_free(STACK_PORT, "stack")
         fake_child = processes.start([fake_binary, "-addr", f"127.0.0.1:{FAKE_PORT}", "-artifact-origin", f"https://{ASSET_HOST}"],
@@ -4226,6 +4600,19 @@ def main():
             child, api = start_stack(processes, stack_binary, work, "mask", mask_catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             scenario_mask_selection(api, offerings, work)
+            processes.stop(child)
+        if "preferences" in selected:
+            # #241: a private Catalog whose compaction keeps one recent round, so
+            # the scenario can prove the framed block survives a real compaction.
+            preferences_catalog = private_catalog(
+                work,
+                name="catalog-preferences.json",
+                preferences=args.preferences != "off",
+                preference_compaction=True,
+            )
+            child, api = start_stack(processes, stack_binary, work, "preferences", preferences_catalog, GOOD_KEY)
+            offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
+            scenario_preferences(api, offerings, work, enabled=args.preferences != "off")
             processes.stop(child)
         check_no_real_upstream(work)
     finally:
