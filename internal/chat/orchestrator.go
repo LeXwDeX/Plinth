@@ -2020,6 +2020,10 @@ func (orchestrator *Orchestrator) agentRequest(
 	// projection, so context compaction never changes it (#246). It sits
 	// before the framed session notes, which stay the last settings block.
 	sections.add("self_check", orchestrator.selfCheckPrompt(ctx, ownerID, sessionID, history))
+	// The session's stored choices are also read from storage, not from the
+	// message window, so compaction cannot lose them (#241). They precede the
+	// settings summary, which stays the last settings block.
+	sections.add("preferences", orchestrator.preferencesPrompt(ctx, ownerID, sessionID))
 	sections.add("notes", orchestrator.notesPrompt(ctx, ownerID, sessionID))
 	var choices []Choice
 	if orchestrator.service != nil && sessionID != "" {

@@ -1307,6 +1307,20 @@ type PublicChatSchema struct {
 	// StyleLock publishes the bounds the browser needs (#154); the prompt and
 	// edit-scope templates stay server-only.
 	StyleLock PublicChatStyleLockSchema `json:"style_lock"`
+	// Preferences publishes the bounds and the declared rejection reason ids
+	// the sidebar needs (#241); the framing templates, markers and prompt
+	// paragraph stay server-only.
+	Preferences *PublicChatPreferencesSchema `json:"preferences,omitempty"`
+}
+
+// PublicChatPreferencesSchema is the browser contract of session preferences
+// (#241): the entry and text bounds and the reason preset ids. Labels reach the
+// browser through the localized UI messages, not through this projection.
+type PublicChatPreferencesSchema struct {
+	MaximumEntries             int      `json:"maximum_entries"`
+	MaximumDirectionCharacters int      `json:"maximum_direction_characters"`
+	MaximumReasonCharacters    int      `json:"maximum_reason_characters"`
+	ReasonPresets              []string `json:"reason_presets"`
 }
 
 // PublicChatStyleLockSchema is the browser contract of the session style lock
@@ -1442,6 +1456,7 @@ type PublicChatAPISchema struct {
 	Fields         ChatAPIFields           `json:"fields"`
 	ResponseFields ChatAPIResponseFields   `json:"response_fields"`
 	Attachment     ChatAttachmentAPIFields `json:"attachment"`
+	Preference     ChatPreferenceAPIFields `json:"preference,omitempty"`
 	StyleLock      ChatStyleLockAPIFields  `json:"style_lock"`
 	PromptEnhance  struct {
 		PromptField               string `json:"prompt_field"`
@@ -2908,13 +2923,18 @@ type ChatSchema struct {
 	// style anchors (#250): their bounds, kinds, Agent-facing context block and
 	// tool copy. Server side only; the browser reads no anchor projection.
 	VisualAnchors ChatVisualAnchorsSchema `json:"visual_anchors,omitempty"`
-	DSML          ChatDSMLSchema          `json:"dsml"`
-	Stream        ChatStreamSchema        `json:"stream"`
-	Tools         []ChatToolSchema        `json:"tools"`
-	AgentTools    []ChatAgentToolSchema   `json:"agent_tools,omitempty"`
-	Skills        ChatSkillsSchema        `json:"skills"`
-	Presentation  ChatPresentationSchema  `json:"presentation"`
-	Audit         ChatAuditSchema         `json:"audit"`
+	// Preferences declares the session-level record of the person's choices
+	// (#241): the bounds, the framed system-prompt block and the rejection
+	// reasons the browser offers. The templates and the framing markers stay
+	// server-only; the public projection publishes only the bounds and ids.
+	Preferences  ChatPreferencesSchema  `json:"preferences,omitempty"`
+	DSML         ChatDSMLSchema         `json:"dsml"`
+	Stream       ChatStreamSchema       `json:"stream"`
+	Tools        []ChatToolSchema       `json:"tools"`
+	AgentTools   []ChatAgentToolSchema  `json:"agent_tools,omitempty"`
+	Skills       ChatSkillsSchema       `json:"skills"`
+	Presentation ChatPresentationSchema `json:"presentation"`
+	Audit        ChatAuditSchema        `json:"audit"`
 	// ApprovalPolicy declares the per-session paid-step approval modes and
 	// which capabilities still need a human in manual mode.
 	ApprovalPolicy ChatApprovalPolicySchema `json:"approval_policy"`
@@ -3765,12 +3785,69 @@ type ChatAPISchema struct {
 	// (#244). It is server-side only; the public projection publishes the
 	// field name above.
 	SelectionMask ChatAPISelectionMaskSchema `json:"selection_mask"`
+	// Preference names the members of the preference rejection and signal
+	// request and the edit body (#241). The browser reads them from the public
+	// projection.
+	Preference    ChatPreferenceAPIFields    `json:"preference,omitempty"`
 	StyleLock     ChatStyleLockAPIFields     `json:"style_lock"`
 	PromptEnhance ChatPromptEnhanceAPISchema `json:"prompt_enhance"`
 	// SessionList bounds the paged session list (server side only).
 	SessionList ChatSessionListSchema `json:"session_list"`
 	// MessageList bounds a paged read of one conversation (server side only).
 	MessageList ChatMessageListSchema `json:"message_list"`
+}
+
+// ChatPreferencesSchema is application.chat.preferences (#241): the session's
+// record of chosen and refused directions. Entry and direction bounds are in
+// characters. The context template frames the rendered items between two
+// markers and says they are background, not instructions; the item templates
+// name a direction, its handle and, for a rejection, its reason. The reason
+// presets are the declared rejection reasons the browser offers and the prompt
+// labels.
+type ChatPreferencesSchema struct {
+	MaximumEntries             int                          `json:"maximum_entries"`
+	MaximumPromptItems         int                          `json:"maximum_prompt_items"`
+	MaximumDirectionCharacters int                          `json:"maximum_direction_characters"`
+	MaximumReasonCharacters    int                          `json:"maximum_reason_characters"`
+	ContextTemplate            string                       `json:"context_template"`
+	OpenMarker                 string                       `json:"open_marker"`
+	CloseMarker                string                       `json:"close_marker"`
+	SelectedItemTemplate       string                       `json:"selected_item_template"`
+	RejectedItemTemplate       string                       `json:"rejected_item_template"`
+	SignalItemTemplate         string                       `json:"signal_item_template"`
+	ReasonJoinTemplate         string                       `json:"reason_join_template"`
+	ReasonPresets              []ChatPreferenceReasonSchema `json:"reason_presets"`
+}
+
+// ChatPreferenceReasonSchema is one declared rejection reason. The ID is
+// stored with a preference, so it is stable and language independent; the
+// label is the browser and prompt text.
+type ChatPreferenceReasonSchema struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// ChatPreferenceAPIFields names the members of a preference write. A rejection
+// names the claimed candidate through the attachment member names plus a
+// reason preset and free text; a weak signal names the signal and the claimed
+// handles. An edit carries a direction, a reason and the active flag.
+type ChatPreferenceAPIFields struct {
+	ReasonPreset string `json:"reason_preset"`
+	ReasonText   string `json:"reason_text"`
+	Signal       string `json:"signal"`
+	Handles      string `json:"handles"`
+	Direction    string `json:"direction"`
+	Active       string `json:"active"`
+	// The read members. kind and source name the stored fact, alternatives
+	// lists the unselected handles of the same result card, explicit marks a
+	// person's action rather than a weak signal and user_edited marks an
+	// edited record. ID, task_id, asset_id, handle and created_at reuse the
+	// response and attachment member names.
+	Kind         string `json:"kind"`
+	Source       string `json:"source"`
+	Alternatives string `json:"alternatives"`
+	Explicit     string `json:"explicit"`
+	UserEdited   string `json:"user_edited"`
 }
 
 type ChatStyleLockSchema struct {
@@ -4038,6 +4115,9 @@ type ChatAPIResponseFields struct {
 	ImageURLs string `json:"image_urls"`
 	// Attachments is the message member listing its attachment objects.
 	Attachments string `json:"attachments"`
+	// Preferences is the session read member listing the active preference
+	// records of the preference routes (#241).
+	Preferences string `json:"preferences,omitempty"`
 	// Multiview is the message member with the structured multiview request
 	// a user message was sent with (#65); empty leaves it out.
 	Multiview     string `json:"multiview,omitempty"`
@@ -5687,10 +5767,16 @@ type CoreHTTPRoutesSchema struct {
 	ChatSessionModel2D string `json:"chat_session_model2d,omitempty"`
 	// ChatSessionBudget decides one production plan card of the session (#103):
 	// PUT {sessionID, budgetID} with {"decision": "approve"|"deny"}.
-	ChatSessionBudget     string `json:"chat_session_budget,omitempty"`
-	ChatSessionPick       string `json:"chat_session_pick"`
-	ChatSessionChoices    string `json:"chat_session_choices"`
-	ChatSessionAgentScope string `json:"chat_session_agent_scope"`
+	ChatSessionBudget string `json:"chat_session_budget,omitempty"`
+	ChatSessionPick   string `json:"chat_session_pick"`
+	// ChatSessionPreferences lists the session's active preference records and
+	// receives an explicit rejection or a weak signal (#241);
+	// ChatSessionPreferenceItem edits or deletes one record. Empty (historical
+	// Catalogs) keeps the handlers unregistered.
+	ChatSessionPreferences    string `json:"chat_session_preferences,omitempty"`
+	ChatSessionPreferenceItem string `json:"chat_session_preference_item,omitempty"`
+	ChatSessionChoices        string `json:"chat_session_choices"`
+	ChatSessionAgentScope     string `json:"chat_session_agent_scope"`
 	// ChatSessionReasoning reads and writes the session thinking level;
 	// ChatSessionContext reads the context usage and compaction records;
 	// ChatSessionContextCompaction compacts the context now (#322).

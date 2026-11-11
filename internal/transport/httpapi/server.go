@@ -709,6 +709,17 @@ func (s *Server) routes() {
 		s.mux.HandleFunc("PUT "+routes.ChatSessionPick, s.withIdentity(s.putChatSessionPick))
 		s.mux.HandleFunc("DELETE "+routes.ChatSessionPick, s.withIdentity(s.deleteChatSessionPick))
 	}
+	// Session preferences (#241). The list/reject/signal route and the
+	// per-record edit/delete route are registered independently, so a
+	// historical Catalog without them keeps the feature unavailable.
+	if routes.ChatSessionPreferences != "" {
+		s.mux.HandleFunc("GET "+routes.ChatSessionPreferences, s.withIdentity(s.getChatSessionPreferences))
+		s.mux.HandleFunc("POST "+routes.ChatSessionPreferences, s.withIdentity(s.postChatSessionPreferences))
+	}
+	if routes.ChatSessionPreferenceItem != "" {
+		s.mux.HandleFunc("PUT "+routes.ChatSessionPreferenceItem, s.withIdentity(s.putChatSessionPreference))
+		s.mux.HandleFunc("DELETE "+routes.ChatSessionPreferenceItem, s.withIdentity(s.deleteChatSessionPreference))
+	}
 	s.mux.HandleFunc(
 		"GET "+legacyRoutes.Providers,
 		s.withIdentity(s.legacyProviderDiscovery),

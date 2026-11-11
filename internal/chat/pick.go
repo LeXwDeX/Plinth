@@ -20,21 +20,12 @@ func (service *Service) PickCandidate(
 	ownerID, sessionID string,
 	ref AttachmentRef,
 ) (Attachment, error) {
-	owns, err := service.repository.OwnsSession(ctx, ownerID, sessionID)
+	verified, err := service.verifyCandidate(ctx, ownerID, sessionID, ref)
 	if err != nil {
+		if errors.Is(err, ErrCandidateRejected) {
+			return Attachment{}, ErrPickRejected
+		}
 		return Attachment{}, err
-	}
-	if !owns {
-		return Attachment{}, ErrSessionNotFound
-	}
-	if service.attachments == nil {
-		return Attachment{}, ErrPickRejected
-	}
-	ref.Kind, ref.ImageSlot = AttachmentKindImage, 0
-	verified, err := service.attachments.VerifyAttachment(ctx, ownerID, sessionID, ref)
-	if err != nil || verified.Role != AttachmentRoleGenerated || verified.TaskID == "" || verified.AssetID == "" ||
-		service.isModelPreview(ctx, ownerID, sessionID, verified) {
-		return Attachment{}, ErrPickRejected
 	}
 	found, err := service.repository.SetSessionPick(ctx, ownerID, sessionID, verified)
 	if err != nil {
@@ -43,7 +34,11 @@ func (service *Service) PickCandidate(
 	if !found {
 		return Attachment{}, ErrSessionNotFound
 	}
-	return service.withKnownHandle(ctx, ownerID, sessionID, verified), nil
+	picked := service.withKnownHandle(ctx, ownerID, sessionID, verified)
+	// The pick is also the person's direction signal (#241). Recording it is
+	// best effort: a preference write must never make the pick fail.
+	service.recordSelection(ctx, ownerID, sessionID, picked)
+	return picked, nil
 }
 
 // ClearSessionPick forgets the session's pick.

@@ -36,6 +36,7 @@ func validateApplication(schema ApplicationSchema) error {
 	}
 	if err := validateChat(
 		schema.Chat,
+		schema.Content,
 		schema.Runtime,
 		schema.Capabilities,
 		schema.AgentConfiguration.Limits.MaxPromptCharacters,
