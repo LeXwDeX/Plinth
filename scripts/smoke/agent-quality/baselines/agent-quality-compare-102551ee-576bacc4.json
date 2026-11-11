@@ -1,0 +1,158 @@
+{
+  "before": {
+    "revision": "102551ee07e781b6813e6f35ec5939626ce3026f",
+    "request_set": {
+      "path": "scripts/smoke/agent-quality/requests.json",
+      "version": 3,
+      "sha256": "33b92ca771d3a1ff5f033a477fb4d3a5a1f8e07af82a8d7bef2fa37a9592f819"
+    },
+    "cases": 12
+  },
+  "after": {
+    "revision": "576bacc4db8c290e5c20571726e27ff0398495e9",
+    "request_set": {
+      "path": "scripts/smoke/agent-quality/requests.json",
+      "version": 4,
+      "sha256": "99852f1e48333735e91ec1533d76baf80bf15274b06df68d7bffbcfb968da54b"
+    },
+    "cases": 14
+  },
+  "shared": [
+    {
+      "id": "2d-3d-input-concept",
+      "before_status": null,
+      "after_status": null,
+      "before_failed": 0,
+      "after_failed": 0,
+      "before_tools": 3,
+      "after_tools": 3,
+      "before_paid": 1,
+      "after_paid": 1
+    },
+    {
+      "id": "2d-character-illustration",
+      "before_status": null,
+      "after_status": null,
+      "before_failed": 0,
+      "after_failed": 0,
+      "before_tools": 2,
+      "after_tools": 2,
+      "before_paid": 1,
+      "after_paid": 1
+    },
+    {
+      "id": "2d-icon-set",
+      "before_status": null,
+      "after_status": null,
+      "before_failed": 0,
+      "after_failed": 0,
+      "before_tools": 2,
+      "after_tools": 2,
+      "before_paid": 1,
+      "after_paid": 1
+    },
+    {
+      "id": "2d-series-consistency",
+      "before_status": null,
+      "after_status": null,
+      "before_failed": 0,
+      "after_failed": 0,
+      "before_tools": 4,
+      "after_tools": 4,
+      "before_paid": 3,
+      "after_paid": 3
+    },
+    {
+      "id": "3d-ar-product",
+      "before_status": null,
+      "after_status": null,
+      "before_failed": 0,
+      "after_failed": 0,
+      "before_tools": 6,
+      "after_tools": 6,
+      "before_paid": 2,
+      "after_paid": 2
+    },
+    {
+      "id": "3d-creature",
+      "before_status": null,
+      "after_status": null,
+      "before_failed": 0,
+      "after_failed": 0,
+      "before_tools": 5,
+      "after_tools": 5,
+      "before_paid": 1,
+      "after_paid": 1
+    },
+    {
+      "id": "3d-hard-surface-prop",
+      "before_status": null,
+      "after_status": null,
+      "before_failed": 0,
+      "after_failed": 0,
+      "before_tools": 5,
+      "after_tools": 5,
+      "before_paid": 1,
+      "after_paid": 1
+    },
+    {
+      "id": "3d-humanoid-character",
+      "before_status": null,
+      "after_status": null,
+      "before_failed": 0,
+      "after_failed": 0,
+      "before_tools": 5,
+      "after_tools": 5,
+      "before_paid": 1,
+      "after_paid": 1
+    },
+    {
+      "id": "3d-image-reference",
+      "before_status": null,
+      "after_status": null,
+      "before_failed": 0,
+      "after_failed": 0,
+      "before_tools": 4,
+      "after_tools": 4,
+      "before_paid": 1,
+      "after_paid": 1
+    },
+    {
+      "id": "3d-multistep-rig-checkpoint",
+      "before_status": null,
+      "after_status": null,
+      "before_failed": 0,
+      "after_failed": 0,
+      "before_tools": 7,
+      "after_tools": 7,
+      "before_paid": 4,
+      "after_paid": 4
+    },
+    {
+      "id": "3d-print-figurine",
+      "before_status": null,
+      "after_status": null,
+      "before_failed": 0,
+      "after_failed": 0,
+      "before_tools": 6,
+      "after_tools": 6,
+      "before_paid": 2,
+      "after_paid": 2
+    },
+    {
+      "id": "3d-scene-piece",
+      "before_status": null,
+      "after_status": null,
+      "before_failed": 0,
+      "after_failed": 0,
+      "before_tools": 5,
+      "after_tools": 5,
+      "before_paid": 1,
+      "after_paid": 1
+    }
+  ],
+  "added": [
+    "2d-open-concept",
+    "3d-open-candidates"
+  ]
+}
