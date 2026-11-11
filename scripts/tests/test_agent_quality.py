@@ -64,11 +64,11 @@ def base_request(**overrides):
 class RequestSetTest(unittest.TestCase):
     def test_the_shipped_request_set_is_valid(self):
         data, path, digest = quality.load_requests()
-        self.assertEqual(data["version"], 3)
-        self.assertEqual(len(data["requests"]), 12)
+        self.assertEqual(data["version"], 4)
+        self.assertEqual(len(data["requests"]), 14)
         self.assertTrue(path.endswith("requests.json"))
         self.assertEqual(len(digest), 64)
-        self.assertEqual(len({request["id"] for request in data["requests"]}), 12)
+        self.assertEqual(len({request["id"] for request in data["requests"]}), 14)
         reference = next(request for request in data["requests"] if request["id"] == "3d-image-reference")
         self.assertEqual(reference["modality"], "3d")
         self.assertEqual(reference["expected"]["capabilities"], ["image-to-3d"])
