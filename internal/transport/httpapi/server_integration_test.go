@@ -50,6 +50,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/modeldelivery"
 	"github.com/LeXwDeX/Plinth/internal/pendingapproval"
 	"github.com/LeXwDeX/Plinth/internal/processing"
+	"github.com/LeXwDeX/Plinth/internal/project"
 	"github.com/LeXwDeX/Plinth/internal/promptenhance"
 	"github.com/LeXwDeX/Plinth/internal/provideraccounts"
 	"github.com/LeXwDeX/Plinth/internal/providers"
@@ -60,6 +61,30 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/threeview"
 	"github.com/LeXwDeX/Plinth/internal/transport/httpapi"
 )
+
+// integrationProjectSource is the narrow chat port over the real project
+// service. It returns the project ID as the frozen context; the generation
+// tests that need style inheritance use the app assembly instead.
+type integrationProjectSource struct{ service *project.Service }
+
+func (source integrationProjectSource) Exists(ctx context.Context, ownerID, projectID string) (bool, error) {
+	return source.service.Exists(ctx, ownerID, projectID)
+}
+
+func (source integrationProjectSource) Context(ctx context.Context, ownerID, projectID string) (chat.ProjectContext, error) {
+	exists, err := source.service.Exists(ctx, ownerID, projectID)
+	if err != nil {
+		return chat.ProjectContext{}, err
+	}
+	if !exists {
+		return chat.ProjectContext{}, chat.ErrProjectNotFound
+	}
+	value, err := source.service.Get(ctx, ownerID, projectID)
+	if err != nil {
+		return chat.ProjectContext{}, chat.ErrProjectNotFound
+	}
+	return chat.ProjectContext{ID: value.ID, Name: value.Name}, nil
+}
 
 func TestHTTPVerticalSliceUploadSubmitObserveAndDownload(t *testing.T) {
 	t.Parallel()
@@ -1285,6 +1310,21 @@ func newHTTPHarnessWithCatalogAndProviders(
 		t.Fatal(err)
 	}
 	approvalPolicy := harnessApprovalPolicy(applicationSchema)
+	var projectService *project.Service
+	var projectSource chat.ProjectSource
+	if applicationSchema.Project != nil {
+		profiles, imageProfiles := project.PurposeProfiles(applicationSchema.Chat)
+		projectService, err = project.New(repository.ProjectRepository(), project.Config{
+			Schema:        *applicationSchema.Project,
+			Profiles:      profiles,
+			ImageProfiles: imageProfiles,
+			Sources:       repository.ProjectAssetSource(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		projectSource = integrationProjectSource{service: projectService}
+	}
 	chatService, err := chat.NewService(chat.ServiceConfig{
 		Repository:                 repository,
 		ApprovalPolicy:             approvalPolicy,
@@ -1293,6 +1333,8 @@ func newHTTPHarnessWithCatalogAndProviders(
 		MaximumSessionNotes:        applicationSchema.Chat.Context.MaximumSessionNotesCharacters,
 		MaximumStyleLockText:       applicationSchema.Chat.StyleLock.MaximumTextCharacters,
 		MaximumStyleLockReferences: applicationSchema.Chat.StyleLock.MaximumReferenceImages,
+		StyleLockSources:           applicationSchema.Chat.StyleLock.Sources,
+		Projects:                   projectSource,
 		Attachments:                harnessAttachmentVerifier{},
 		Model3DUsage:               applicationSchema.Chat.Model3DUsage,
 		Image2DUsage:               applicationSchema.Chat.Image2DUsage,
@@ -1740,6 +1782,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		Canvas:                            canvasService,
 		CanvasImages:                      canvasImageService,
 		Chat:                              chatService,
+		Projects:                          projectService,
 		ChatScheduler:                     chatScheduler,
 		ChatContext:                       harnessCompactor(chatScheduler),
 		OwnsAgentSession: func(ctx context.Context, ownerID, sessionID string) bool {

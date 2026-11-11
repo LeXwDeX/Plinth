@@ -15,7 +15,7 @@ import (
 func (s *Server) chatStyleLockWire(sessionID string, lock chat.StyleLock) map[string]any {
 	fields := s.application.Chat.API.ResponseFields
 	names := s.application.Chat.API.StyleLock
-	return map[string]any{
+	wire := map[string]any{
 		fields.ID: sessionID,
 		fields.StyleLock: map[string]any{
 			names.Enabled:    lock.Enabled,
@@ -23,6 +23,10 @@ func (s *Server) chatStyleLockWire(sessionID string, lock chat.StyleLock) map[st
 			names.References: append([]string(nil), lock.References...),
 		},
 	}
+	if names.Source != "" {
+		wire[fields.StyleLock].(map[string]any)[names.Source] = lock.Source
+	}
+	return wire
 }
 
 func (s *Server) writeChatStyleLockError(writer http.ResponseWriter, err error) {
@@ -47,6 +51,8 @@ func (s *Server) writeChatStyleLockError(writer http.ResponseWriter, err error) 
 		s.writeChatError(writer, http.StatusBadRequest, messages.InvalidParameters)
 	case errors.Is(err, chat.ErrStyleLockReferenceInvalid):
 		s.writeChatError(writer, http.StatusBadRequest, messages.StyleLockReferenceInvalid)
+	case errors.Is(err, chat.ErrStyleLockSourceInvalid):
+		s.writeChatError(writer, http.StatusBadRequest, messages.InvalidParameters)
 	default:
 		s.writeChatInternalError(writer, err)
 	}
@@ -80,7 +86,7 @@ func (s *Server) putChatSessionStyleLock(writer http.ResponseWriter, request *ht
 	}
 	names := s.application.Chat.API.StyleLock
 	for name := range body {
-		if name != names.Enabled && name != names.Text && name != names.References {
+		if name != names.Enabled && name != names.Text && name != names.References && name != names.Source {
 			s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidParameters)
 			return
 		}
@@ -88,6 +94,7 @@ func (s *Server) putChatSessionStyleLock(writer http.ResponseWriter, request *ht
 	var enabled bool
 	var text string
 	var references []string
+	var source string
 	if raw, ok := body[names.Enabled]; !ok || string(raw) == "null" || json.Unmarshal(raw, &enabled) != nil {
 		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidParameters)
 		return
@@ -100,7 +107,13 @@ func (s *Server) putChatSessionStyleLock(writer http.ResponseWriter, request *ht
 		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidParameters)
 		return
 	}
-	lock, err := s.chat.SetStyleLock(request.Context(), string(owner), request.PathValue("sessionID"), enabled, text, references)
+	if names.Source != "" {
+		if raw, ok := body[names.Source]; ok && (string(raw) == "null" || json.Unmarshal(raw, &source) != nil) {
+			s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidParameters)
+			return
+		}
+	}
+	lock, err := s.chat.SetStyleLockWithSource(request.Context(), string(owner), request.PathValue("sessionID"), source, enabled, text, references)
 	if err != nil {
 		s.writeChatStyleLockError(writer, err)
 		return

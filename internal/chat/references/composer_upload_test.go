@@ -63,6 +63,7 @@ type resolverLimits struct {
 	upload, vision int64
 	tasks          *fakeTasks
 	derivative     *visionimage.Deriver
+	project        references.ProjectReferenceChecker
 }
 
 func composerResolver(t *testing.T, inputs *storedInputs) *references.Resolver {
@@ -91,6 +92,7 @@ func limitedResolver(t *testing.T, inputs *storedInputs, limits resolverLimits) 
 		VisionInlineMaxBytes:               limits.vision,
 		VisionDerivative:                   limits.derivative,
 		VisionFallbackMediaType:            "image/png",
+		ProjectReferences:                  limits.project,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +144,7 @@ func TestComposerPictureAsInputAssetReachesTheAgentAsTheDataURIDid(t *testing.T)
 
 	// Reference: the data URI was uploaded again at every use; the asset URL is the asset itself.
 	before := inputs.uploads
-	ids, err := resolver.Resolve(ctx, "owner-a", []string{dataURI, assetURL})
+	ids, err := resolver.Resolve(ctx, references.ReferenceScope{Owner: "owner-a"}, []string{dataURI, assetURL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +159,7 @@ func TestComposerPictureAsInputAssetReachesTheAgentAsTheDataURIDid(t *testing.T)
 	if _, ok := resolver.OpenVisionImage(ctx, "owner-b", assetURL); ok {
 		t.Fatal("another owner must not read the picture")
 	}
-	if _, err := resolver.Resolve(ctx, "owner-b", []string{assetURL}); err == nil {
+	if _, err := resolver.Resolve(ctx, references.ReferenceScope{Owner: "owner-b"}, []string{assetURL}); err == nil {
 		t.Fatal("another owner must not reference the picture")
 	}
 	if _, err := resolver.VerifyAttachment(ctx, "owner-b", "session-b", chat.AttachmentRef{Kind: chat.AttachmentKindImage, URL: assetURL}); err == nil {
@@ -294,7 +296,7 @@ func TestLargeComposerPictureReachesVisionAsAScaledCopyAndReferencesStayOriginal
 
 	// The generation reference is the asset itself: same ID, original bytes, nothing re-encoded or uploaded.
 	before := inputs.uploads
-	ids, err := resolver.Resolve(ctx, "owner-a", []string{assetURL})
+	ids, err := resolver.Resolve(ctx, references.ReferenceScope{Owner: "owner-a"}, []string{assetURL})
 	if err != nil {
 		t.Fatal(err)
 	}

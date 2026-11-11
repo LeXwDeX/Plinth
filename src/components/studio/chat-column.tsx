@@ -119,6 +119,7 @@ import { maskStrokeCount, sameMaskDraft, useMaskStore } from '@/store/mask-store
 import { CHAT_RAIL_WIDTH, CHAT_WIDTH_MAX, CHAT_WIDTH_MIN, useStudioStore } from '@/store/studio-store';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import { useSessionContextStore } from '@/store/session-context-store';
+import { useProjectStore } from '@/store/project-store';
 import { branchConversation, branchCopiedCurrentState, branchUnavailableReason } from '@/lib/chat/session-branch';
 import { MultiviewUploadPanel } from '@/components/studio/multiview-upload-panel';
 import { buildMultiviewRequest, chosenViewLabels, multiviewOffering } from '@/lib/workspace/multiview-upload';
@@ -590,7 +591,7 @@ export function ChatColumn() {
           setActiveSession(initial.id);
           return;
         }
-        const session = await chatClient.createSession();
+        const session = await chatClient.createSession('', useProjectStore.getState().activeProjectId ?? '');
         if (cancelled) return;
         setSessions([]);
         addSession(session);

@@ -260,6 +260,7 @@ Catalog 加载时统一检查 URL 产物映射（`provider_options.result_assets
 | `internal/agents` | LLM 对话协议与模型调用端口，不管理生成 Task |
 | `internal/agentscope` | Agent 范围（2D / 3D / 自动）的纯策略：`Policy` 把“范围 × 工具类别（`2d`/`3d`/`cross`/`utility`）”解释为允许与否，类别未知或为空按 `cross`（只在自动模式出现），范围未知回到 Schema 默认；从 Schema `chat.agent_scope` 构造，不读写状态；dev-test 已验收（`3a19cc3`） |
 | `internal/chat` | 持久轮次/checkpoint、工具策略、事件与挂起恢复；消息附件与句柄、当前选中对象（已验代表性选用持久化及图片/模型句柄插入；异常恢复范围另列）；工具执行经 Generation 网关 |
+| `internal/project` | owner 级项目容器与资产引用（#240）：项目 CRUD、风格指南（文本/色板/参考图）、生产约定、角色/道具资产与提升；只存引用与元数据，不复制字节；仓储按 `projects.owner_id` 过滤，未知或他人项目一律 not found；跨会话读取 Task 产物只允许项目登记内的精确 `(task, asset)` 对 |
 | `internal/agentconfiguration` | 有界共享 Agent 配置及版本管理；`SnapshotForOwner` 始终把 Schema 系统 Skill 放在最前（不属于任何已发布版本，已发布或个人 Skill 不得绑定工具或复用其 ID，修订号附加系统 Skill 摘要）；另按 owner 管理文本 Skill（#152：`UpdatePersonalSkill` 按 owner+ID 整体替换，名称/提示词校验与创建共享），并在新轮次创建 owner 快照；编辑只影响尚未首次冻结的轮次，不编辑执行代码、运行凭据或付费授权 |
 | `internal/mcp` | Schema 固定只读工具、参数与 owner/session 范围的业务准入；协议传输和数据读取由端口注入 |
 | `internal/modeldelivery` | 3D 交付投影：按 Schema `model_delivery` 计算每个 3D 任务的格式覆盖（可下载/可补齐含积分/不可用含原因）、把“补齐格式”规划成 Processing Plan 步骤、并把已隔离的本地资产流式打成 ZIP；不持有任务状态，不调用供应商，不做本地转换 |
@@ -623,6 +624,7 @@ Go shell 安全注入 Product Schema
   → 浏览器 API client → 同源 Go API
   → 稳定视图模型与 session store → Canvas / Agent / 任务与历史展示
 ```
+项目数据流（#240）：`ProjectSwitcher` 与右侧栏 `ProjectPanel` 经 `src/lib/projects/browser-client.ts` 读取公开路由；选择项目时调用 `PUT chat_session_project` 并更新 chat store 的 `projectId`，新建会话把 `project-store` 中当前项目传给 `createSession(title, projectID)`。项目面板分别读写风格指南、约定与资产，提升图片走 `POST project_promote`（来源只允许本人输入资产或已完成 Task 产物），删除资产先显示确认；风格锁定面板的三态来源经 `PUT chat_style_lock` 的 `source` 成员保存，继承/关闭时本会话编辑控件禁用。公开 Schema 只带项目限额、种类与约定字段名，文案全部来自 `content.messages` 的 `ui.project.*`。
 
 对话发送接口可接收按消息图片 slot 指定的 `attachmentPurposes`。服务端校验用途与附件归属，将 slot 转成句柄并冻结到轮次；没有该字段的旧请求沿用原行为。声明 `reference_purposes` 参数的工具按 Schema 英文描述使用这些用途：`input` 图排在参考图首位，超限后用途指向的图不在实际参考图中则拒绝提交。画板源与指定输入图冲突，或同一参考 URL 重复导致位置无法区分时拒绝；未声明用途参数的工具不伪造用途。输入区每张附图可单独选用途（未指定允许），批量入口设置全部；草稿按图恢复，移除附图清理；画板固定图只显示用途、不发送；「当作输入图」最多一张，多张时阻止发送。部署与真实模型验收尚未完成。
 
@@ -1659,6 +1661,24 @@ Chat Agent 通过三个只读工具直接查看本会话（分支会话含祖先
 2D 生成工具（`refine_image`、`remove_background`、`create_multiview_images`、`edit_multiview_images`）成功时把产出图作为 `ToolResult.Pictures`（`Fresh: true`）带回同一回合；编排器按 `context.max_result_pictures` 均匀抽样（保留首末），把全部图片句柄写进结果的 `handles`，并用 `context.result_image_view_intro` / `result_image_view_label_template` 与历史查找的文案区分。3D 结果仍走 `inspect_model` / `render_model_views`，不回灌缩略图。
 
 图生 3D（`create_model_3d_from_image`、`create_model_3d_from_views`）提交前，`generationtool` 对最终参考图运行 `image_review.input_3d` 清单；不通过时返回 `refused_template` 并 `NoSubmission`，不提交、不扣费。工具参数 `input_override_reason` 允许 Agent 在用户明确要求照原图做时带理由放行；理由写入服务端日志并留在会话的工具调用参数中。输入图字节不可读时按 unknown 处理，不阻塞提交。
+
+### 跨会话项目资产（#240）
+
+**源码与测试已实现；本机 fake 验收，未部署验收。**
+
+项目是 owner 级对象（迁移 0089）：`projects`、`project_style_guides`、`project_conventions`、`project_assets`。迁移 0090 给 `go_chat_sessions` 增加 `project_id` 与 `style_lock_source`，并把升级前已启用的会话锁回填为 `source=session`，避免用户的锁被项目默认值覆盖。项目只保存引用：风格参考图与资产图片/模型是本人输入资产 ID 或已完成 Task 的 `(task_id, asset_id)`，字节仍由 `internal/assets` 与 `generation` 拥有；删除项目或项目资产只删引用行并级联项目内的指南/约定，不触碰 `generation_assets`、输入资产或已完成任务。`internal/project.Service` 校验名称/数量/文本/参考图限额与提升来源，`internal/adapters/sqlite.ProjectRepository` 的每条查询都按 `projects.owner_id` 过滤，跨用户读写删与提升一律 not found → 404。
+
+会话创建可带 `project_id`（缺失/他人项目拒绝且不建会话）；空简报用项目约定的默认值在同一 INSERT 播种。`StartTurn` 冻结项目上下文（名称、风格指南、约定、资产句柄）与三态风格来源：`project` 只用项目指南（`StyleLock.ProjectReferences` 是服务端转换后的规范图片 URL），`session` 只用本会话锁，`off` 不注入；两套参考图不合并。项目修改只影响下一轮。未归入项目的会话没有可继承指南，其本会话锁继续生效。
+
+Agent 上下文新增项目段（`application.project.agent.context_template`），位于制作简报之后、自检与设定摘要之前，只列摘要与句柄；只读工具 `list_project_assets`（`implementation_key: project.list`、`READ`、`utility`、domains image/model-3d）从冻结上下文返回 `handle/kind/name/description/images/model`，超过 `list_limit` 时附 Schema 文案。生成工具先按 `handle_prefix`（`@projectN`）解析项目句柄，再回落到会话句柄；未知项目句柄返回项目文案，不落到同名会话句柄。结果 `style_sources` 只列出真正进入最终参考列表的项目资产名。项目风格文本写 provider 提示时使用 `chat.style_lock.project_prompt_template`（`{style}`、`{project}`），会话来源保持原模板。
+
+`internal/chat/references` 的 `Resolve` 改为接收服务端 `ReferenceScope{Owner, SessionID, ProjectID}`：Task 图片只接受本会话、分支祖先（`TaskInSession`）或项目登记内的精确 `(task, asset)`（`ProjectReferenceChecker.RegisteredPicture`，读 `project_assets.images_json` 与 `project_style_guides.references_json`）。客户端 claim 的 `VerifyAttachment` 不放宽；客户端不能自行指定项目 scope。直提交流程（`POST /api/v1/tasks/prepare`）用 `EffectiveStyleLock` 读同一组合锁，把项目参考图经同一解析器复制为本人输入资产后注入；解析失败按 `project.messages.reference_invalid` 返回 400，不静默丢图、不跳过 Grant/预算。
+
+前端：公开投影只含限额、资产种类（id/label_key）、风格指南限额与色板规则、约定字段名；Agent 模板、审计动作与错误文案留在服务端。项目 client 消费 `runtime.http.routes.project*` 与 `chat_session_project`；`src/store/project-store.ts` 保存项目列表与下一次新建会话要加入的项目，`use-projects` 把选择写入当前会话（HTTP 404 即未知/他人项目）。顶栏会话菜单左侧是项目切换器，右侧栏「项目」标签显示并保存风格指南/色板/参考图、约定与资产列表，提升入口先显示确认弹窗，来源缩略图与名称/种类/描述齐全；风格锁定面板提供 `project/session/off` 三态单选，继承或关闭时禁编辑本会话文字与参考图。新建会话带当前项目。
+
+项目里的 3D 模型引用本期只保存、展示并在 `list_project_assets` 中列出，不作为 `process_model` / `retexture_model` / `inspect_model` / lineage / pendingapproval 的来源；这些路径仍按会话校验来源 Task，跨会话放宽留独立 Issue。
+
+验证：`internal/catalog/project_validation_test.go` 与公开投影测试、`internal/project/service_test.go`、`internal/adapters/sqlite/project_repository_test.go`、`internal/chat/project_session_test.go`、`orchestrator_project_test.go`、`internal/chat/generationtool/project_style_test.go`、`internal/chat/references/project_test.go`、`internal/chat/agenttools/project_assets_test.go`、`internal/agents/mock/project_test.go`、`internal/app/project_source_test.go`、`internal/transport/httpapi/projects_test.go` 与前端 vitest；fake 栈 `smoke-fake-stack.py --only project` 覆盖提升、同项目新会话继承、项目参考图进入冻结输入、`style_sources`/回复引用与删除资产后产物仍可下载；评测请求集 v3 的 `2d-series-project` 用 `eval-agent-compare.py --new-request-set` 对比 `scripts/smoke/agent-quality/baselines/agent-quality-trajectory-77fc6878.json` 与新基线记录改前后轨迹。
 
 ### 选区作为冻结输入与带蒙版的局部修改（#244）
 

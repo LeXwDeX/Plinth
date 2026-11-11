@@ -219,13 +219,19 @@ func (s *Server) legacyCreateChatSession(
 ) {
 	body := s.decodeOptionalChatObject(writer, request)
 	title := chatString(body, s.application.Chat.API.Fields.Title)
-	session, err := s.chat.CreateSession(
+	projectID := chatString(body, s.application.Chat.API.Fields.ProjectID)
+	session, err := s.chat.CreateSessionInProject(
 		request.Context(),
 		principal.ID(),
 		principal.Claims.Name,
 		title,
+		projectID,
 	)
 	if err != nil {
+		if errors.Is(err, chat.ErrProjectNotFound) {
+			s.writeChatError(writer, http.StatusNotFound, s.projectUnknownMessage())
+			return
+		}
 		s.writeChatInternalError(writer, err)
 		return
 	}
@@ -815,11 +821,21 @@ func (s *Server) chatSessionWireWithBudgets(
 		result[fields.Brief] = productionBriefWire(session.Brief)
 	}
 	if fields.StyleLock != "" {
-		result[fields.StyleLock] = map[string]any{
+		lockWire := map[string]any{
 			s.application.Chat.API.StyleLock.Enabled:    session.StyleLock.Enabled,
 			s.application.Chat.API.StyleLock.Text:       session.StyleLock.Text,
 			s.application.Chat.API.StyleLock.References: append([]string(nil), session.StyleLock.References...),
 		}
+		if names := s.application.Chat.API.StyleLock; names.Source != "" {
+			lockWire[names.Source] = session.StyleLockSource
+		}
+		result[fields.StyleLock] = lockWire
+	}
+	if fields.ProjectID != "" && session.ProjectID != "" {
+		result[fields.ProjectID] = session.ProjectID
+	}
+	if fields.StyleLockSource != "" && session.StyleLockSource != "" {
+		result[fields.StyleLockSource] = session.StyleLockSource
 	}
 	if fields.ExplicitModel3D != "" && session.ExplicitModel3D != "" {
 		result[fields.ExplicitModel3D] = session.ExplicitModel3D

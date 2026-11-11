@@ -115,7 +115,8 @@ func TestAppendOnlyMigrationsShape(t *testing.T) {
 	// The embedded migration list is the source of truth and must stay strictly
 	// contiguous 1..head: 84 is the vision usage (#247), 85 the explicit 2D model
 	// lock (#239), 86 the visual anchors (#250), 87 the persisted 3D self-check
-	// records and 88 the correction ownership of a paid step (#246). Every
+	// records, 88 the correction ownership of a paid step (#246), 89 the
+	// project assets and 90 the session's project/style source (#240). Every
 	// embedded version must exist on disk and no extra file may exist.
 	expected := sqlite.MigrationVersions()
 	if len(files) != len(expected) {

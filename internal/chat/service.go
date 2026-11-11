@@ -41,7 +41,19 @@ var (
 	ErrTurnCheckpointConflict     = errors.New("chat: turn checkpoint conflict")
 	ErrInvalidApprovalMode        = errors.New("chat: invalid approval mode")
 	ErrInvalidAgentScope          = errors.New("chat: invalid agent scope")
+	// ErrProjectNotFound reports an unknown or foreign project. The HTTP
+	// boundary answers the same 404 as a missing project (#240).
+	ErrProjectNotFound = errors.New("chat: project not found")
 )
+
+// ProjectSource is the narrow port the chat service uses to attribute a
+// session to an owner project (#240). A foreign project reports false; Context
+// returns the frozen project snapshot for one owner project and
+// ErrProjectNotFound for a missing or foreign one.
+type ProjectSource interface {
+	Exists(ctx context.Context, ownerID, projectID string) (bool, error)
+	Context(ctx context.Context, ownerID, projectID string) (ProjectContext, error)
+}
 
 type Repository interface {
 	ListSessions(context.Context, string) ([]Session, error)
@@ -79,6 +91,12 @@ type Repository interface {
 	// style lock. References are stored in request order.
 	StyleLock(ctx context.Context, owner, session string) (StyleLock, bool, error)
 	SetStyleLock(ctx context.Context, owner, session string, lock StyleLock) (bool, error)
+	// SetSessionProject assigns (or clears, with an empty project) the
+	// owner's project on the session (#240). It does not touch updated_at.
+	SetSessionProject(ctx context.Context, owner, session, projectID string) (Session, bool, error)
+	// SessionProject reads the owner's session project ID (#240). found is
+	// false for a missing or foreign session.
+	SessionProject(ctx context.Context, owner, session string) (string, bool, error)
 	// VisualAnchors and SetVisualAnchors read and replace the owner's session
 	// visual anchors (#250). A missing or foreign session reports found=false.
 	// Writing does not touch updated_at.
@@ -232,6 +250,9 @@ type ServiceConfig struct {
 	// for the session style lock.
 	MaximumStyleLockText       int
 	MaximumStyleLockReferences int
+	// StyleLockSources are the three-state sources declared by the Schema
+	// (#240). Empty keeps the source read-only and rejects writes.
+	StyleLockSources []string
 	// CanvasInputSource is chat.context.canvas_input_source (#266). Empty: the
 	// service accepts no input source.
 	CanvasInputSource string
@@ -278,6 +299,9 @@ type ServiceConfig struct {
 	// declared kinds and Agent-facing copy of the session anchor settings. A
 	// zero value leaves the anchor tool unavailable.
 	VisualAnchors catalog.ChatVisualAnchorsSchema
+	// Projects verifies the owner's project when a session is created in or
+	// assigned to one (#240). Nil rejects every non-empty project.
+	Projects ProjectSource
 }
 
 type Service struct {
@@ -313,6 +337,7 @@ type Service struct {
 	maximumNotes               int
 	maximumStyleLockText       int
 	maximumStyleLockReferences int
+	styleLockSources           map[string]bool
 	canvasInputSource          string
 	retiredModels              map[string]catalog.RetiredModelSuccessor
 	model3DUsage               catalog.ChatModel3DUsageSchema
@@ -356,6 +381,9 @@ type Service struct {
 	// come from an Agent proposal (#250). Without it no Agent anchor write is
 	// accepted: the gate must fail closed.
 	visualAnchorKind *catalog.ChatChoiceKindSchema
+
+	// projects verifies owner projects when a session joins one (#240).
+	projects ProjectSource
 
 	// workLedger is application.chat.work_ledger (#248); workLedgerTasks is
 	// the public-Task page source, workLedgerDetail the full single-Task read,
@@ -454,6 +482,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 		maximumNotes:               config.MaximumSessionNotes,
 		maximumStyleLockText:       config.MaximumStyleLockText,
 		maximumStyleLockReferences: config.MaximumStyleLockReferences,
+		styleLockSources:           styleLockSourceSet(config.StyleLockSources),
 		canvasInputSource:          config.CanvasInputSource,
 		retiredModels:              retiredModelIndex(config.RetiredModels),
 		model3DUsage:               config.Model3DUsage,
@@ -469,6 +498,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 		workLedger:                 config.WorkLedger,
 		visionBudget:               config.VisionBudget,
 		visionTokenBudget:          config.VisionTokenBudget,
+		projects:                   config.Projects,
 	}, nil
 }
 
@@ -496,6 +526,40 @@ func (service *Service) CreateSession(
 	ownerName string,
 	title string,
 ) (Session, error) {
+	return service.CreateSessionInProject(ctx, ownerID, ownerName, title, "")
+}
+
+// CreateSessionInProject creates a session and, when projectID is non-empty,
+// attributes it to the owner's project. A missing or foreign project is
+// ErrProjectNotFound and creates no session. New sessions default their style
+// source to the project (#240).
+func (service *Service) CreateSessionInProject(
+	ctx context.Context,
+	ownerID string,
+	ownerName string,
+	title string,
+	projectID string,
+) (Session, error) {
+	projectID = strings.TrimSpace(projectID)
+	var projectBrief ProductionBrief
+	if projectID != "" {
+		if service.projects == nil {
+			return Session{}, ErrProjectNotFound
+		}
+		projectContext, err := service.projects.Context(ctx, ownerID, projectID)
+		if err != nil {
+			if errors.Is(err, ErrProjectNotFound) {
+				return Session{}, ErrProjectNotFound
+			}
+			return Session{}, err
+		}
+		// The project's production defaults seed an empty session brief as a
+		// system default (no audit). The next turn freezes the result, like
+		// any other brief (#240).
+		if !projectContext.Conventions.Brief.Empty() {
+			projectBrief = cloneProductionBrief(projectContext.Conventions.Brief)
+		}
+	}
 	title = strings.TrimSpace(title)
 	titleSource := TitleSourceUser
 	if title == "" || title == service.defaultTitle {
@@ -511,11 +575,58 @@ func (service *Service) CreateSession(
 		TitleSource: titleSource,
 		CreatedAt:   now,
 		UpdatedAt:   now,
+		ProjectID:   projectID,
+		Brief:       projectBrief,
+		// New sessions inherit their project's style guide by default.
+		StyleLockSource: StyleLockSourceProject,
 		// Every new session starts in the Schema default mode.
 		ApprovalMode: service.approvalPolicy.NormalizeMode(service.approvalPolicy.DefaultMode),
 		// ... and in the Schema default Agent scope (auto).
 		AgentScope: service.agentScope.Normalize(service.agentScope.DefaultMode),
 	})
+}
+
+// cloneProductionBrief copies a frozen brief so a caller cannot mutate the
+// project context it came from.
+func cloneProductionBrief(brief ProductionBrief) ProductionBrief {
+	if len(brief) == 0 {
+		return nil
+	}
+	cloned := make(ProductionBrief, len(brief))
+	for name, value := range brief {
+		cloned[name] = append(json.RawMessage(nil), value...)
+	}
+	return cloned
+}
+
+// SetSessionProject assigns an existing owner session to a project, or clears
+// the assignment with an empty projectID. A missing/foreign project is
+// ErrProjectNotFound; a missing/foreign session is ErrSessionNotFound.
+func (service *Service) SetSessionProject(
+	ctx context.Context,
+	ownerID, sessionID, projectID string,
+) (Session, error) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID != "" {
+		if service.projects == nil {
+			return Session{}, ErrProjectNotFound
+		}
+		exists, err := service.projects.Exists(ctx, ownerID, projectID)
+		if err != nil {
+			return Session{}, err
+		}
+		if !exists {
+			return Session{}, ErrProjectNotFound
+		}
+	}
+	session, found, err := service.repository.SetSessionProject(ctx, ownerID, sessionID, projectID)
+	if err != nil {
+		return Session{}, err
+	}
+	if !found {
+		return Session{}, ErrSessionNotFound
+	}
+	return session, nil
 }
 
 // SetAgentScope keeps a session on the unrestricted Agent scope. The public
@@ -956,7 +1067,36 @@ func (service *Service) startTurn(
 		return Message{}, ErrSessionNotFound
 	}
 	styleLock.References = append([]string(nil), styleLock.References...)
-	command.Options.StyleLock = styleLock
+	// The project is frozen with the turn (#240): a project edit applies to the
+	// next turn, and a running or recovered turn keeps the same guide,
+	// conventions and @projectN handles.
+	projectID, found, err := service.repository.SessionProject(ctx, command.OwnerID, command.SessionID)
+	if err != nil {
+		return Message{}, err
+	}
+	if !found {
+		return Message{}, ErrSessionNotFound
+	}
+	command.Options.ProjectID = projectID
+	var projectContext *ProjectContext
+	if projectID != "" && service.projects != nil {
+		frozen, projectErr := service.projects.Context(ctx, command.OwnerID, projectID)
+		switch {
+		case projectErr == nil:
+			projectContext = &frozen
+			command.Options.ProjectContext = projectContext
+		case errors.Is(projectErr, ErrProjectNotFound):
+			// The project vanished between the session read and the context
+			// read (deleted elsewhere). The session continues unassigned.
+			command.Options.ProjectID = ""
+		default:
+			return Message{}, projectErr
+		}
+	}
+	// The effective style lock follows the frozen three-state source: project
+	// inherits the project guide, session keeps this session's lock, off
+	// injects nothing. The two reference sets are never merged.
+	command.Options.StyleLock = effectiveStyleLock(styleLock, projectContext)
 	// The visual anchors are frozen with the turn for the same reason: an edit
 	// by the person or a later Agent write must not change a running turn or a
 	// recovered one (#250).

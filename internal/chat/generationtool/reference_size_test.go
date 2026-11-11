@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
@@ -15,7 +16,7 @@ import (
 // measures it, like references.Resolver for an owned input asset.
 type measuredReferences map[string][2]int
 
-func (sizes measuredReferences) Resolve(_ context.Context, _ generation.OwnerID, urls []string) ([]generation.AssetID, error) {
+func (sizes measuredReferences) Resolve(_ context.Context, _ references.ReferenceScope, urls []string) ([]generation.AssetID, error) {
 	assets := make([]generation.AssetID, 0, len(urls))
 	for _, url := range urls {
 		assets = append(assets, generation.AssetID(url))
@@ -34,7 +35,7 @@ func (sizes measuredReferences) ImageDimensions(_ context.Context, _, asset stri
 // unmeasuredReferences resolves pictures but cannot read their size.
 type unmeasuredReferences struct{}
 
-func (unmeasuredReferences) Resolve(_ context.Context, _ generation.OwnerID, urls []string) ([]generation.AssetID, error) {
+func (unmeasuredReferences) Resolve(_ context.Context, _ references.ReferenceScope, urls []string) ([]generation.AssetID, error) {
 	assets := make([]generation.AssetID, 0, len(urls))
 	for _, url := range urls {
 		assets = append(assets, generation.AssetID(url))

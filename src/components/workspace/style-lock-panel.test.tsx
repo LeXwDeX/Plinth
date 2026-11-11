@@ -12,8 +12,8 @@ import { StyleLockPanel, StyleLockSection, clearStyleLockDraftCache } from './st
 const schema = defaultCatalog.application as unknown as ProductSchema;
 const messages = schema.content.messages;
 const mock = vi.hoisted(() => ({
-  get: vi.fn(async () => ({ enabled: true, text: 'ink', references: [] as string[] })),
-  set: vi.fn(async (_session: string, value: { enabled: boolean; text: string; references: string[] }) => value),
+  get: vi.fn(async () => ({ enabled: true, text: 'ink', references: [] as string[], source: 'session' })),
+  set: vi.fn(async (_session: string, value: { enabled: boolean; text: string; references: string[]; source?: string }) => value),
   upload: vi.fn(async () => ({ id: 'upload-1', url: '/api/v1/assets/upload-1' })),
   exportPicture: vi.fn(async () => new Blob(['layer'], { type: 'image/png' })),
   nodes: [] as Array<{ id: string; type: string; imageUrl: string; taskId: string; x: number; y: number; width: number; height: number; zIndex: number; name?: string; visible?: boolean }>,
@@ -66,7 +66,7 @@ beforeEach(() => {
   clearStyleLockDraftCache();
   useStudioStore.setState({ styleLockRequest: null, styleLockOpen: false });
   mock.nodes = [];
-  mock.get.mockResolvedValue({ enabled: true, text: 'ink', references: [] });
+  mock.get.mockResolvedValue({ enabled: true, text: 'ink', references: [], source: 'session' });
   mock.set.mockImplementation(async (_session, value) => value);
   mock.upload.mockClear();
   mock.exportPicture.mockClear();
@@ -95,7 +95,7 @@ describe('StyleLockPanel', () => {
     expect(screen.getAllByRole('img')).toHaveLength(2);
     fireEvent.click(screen.getAllByRole('button', { name: messages['ui.studio.style_lock.move_up'] })[1]);
     fireEvent.click(screen.getByRole('button', { name: messages['ui.studio.style_lock.save'] }));
-    await waitFor(() => expect(mock.set).toHaveBeenCalledWith('s1', { enabled: true, text: 'ink', references: ['a1', 'a2'] }));
+    await waitFor(() => expect(mock.set).toHaveBeenCalledWith('s1', { enabled: true, text: 'ink', references: ['a1', 'a2'], source: 'session' }));
     fireEvent.click(screen.getAllByRole('button', { name: messages['ui.studio.style_lock.remove_reference'] })[0]);
     expect(screen.getAllByRole('button', { name: messages['ui.studio.style_lock.remove_reference'] })).toHaveLength(1);
   });
@@ -134,7 +134,7 @@ describe('StyleLockPanel', () => {
     await waitFor(() => expect(mock.upload).toHaveBeenCalledOnce());
     expect(screen.getAllByRole('img')).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: messages['ui.studio.style_lock.save'] }));
-    await waitFor(() => expect(mock.set).toHaveBeenCalledWith('s1', { enabled: true, text: 'ink', references: ['upload-1'] }));
+    await waitFor(() => expect(mock.set).toHaveBeenCalledWith('s1', { enabled: true, text: 'ink', references: ['upload-1'], source: 'session' }));
   });
 });
 
@@ -164,6 +164,36 @@ describe('StyleLockSection', () => {
     expect(body!.className).not.toMatch(/overflow-y-auto|max-h/);
     // No hidden second scrollbar even in a short viewport: the whole body is plain content height.
     expect(section.innerHTML).not.toContain('overflow-y-auto');
+  });
+});
+
+describe('style lock source', () => {
+  it('defaults a project-source lock to inheritance, disables the session fields, and saves a switch to this session', async () => {
+    mock.get.mockResolvedValue({ enabled: true, text: 'project ink', references: [], source: 'project' });
+    render(<StyleLockPanel sessionId="s1" />);
+    const textarea = await screen.findByTestId('style-lock-text') as HTMLTextAreaElement;
+    await waitFor(() => expect(textarea.value).toBe('project ink'));
+    expect((screen.getByTestId('style-lock-source-project') as HTMLInputElement).checked).toBe(true);
+    expect(textarea.disabled).toBe(true);
+    expect((screen.getByTestId('style-lock-enabled') as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByTestId('style-lock-source-hint').textContent).not.toBe('');
+    fireEvent.click(screen.getByTestId('style-lock-source-session'));
+    expect(textarea.disabled).toBe(false);
+    fireEvent.change(textarea, { target: { value: 'session ink' } });
+    fireEvent.click(screen.getByRole('button', { name: messages['ui.studio.style_lock.save'] }));
+    await waitFor(() => expect(mock.set).toHaveBeenCalledWith('s1', {
+      enabled: true, text: 'session ink', references: [], source: 'session',
+    }));
+  });
+
+  it('turns injection off without merging either reference set', async () => {
+    mock.get.mockResolvedValue({ enabled: true, text: 'session ink', references: [], source: 'session' });
+    render(<StyleLockPanel sessionId="s1" />);
+    await screen.findByTestId('style-lock-text');
+    fireEvent.click(screen.getByTestId('style-lock-source-off'));
+    expect((screen.getByTestId('style-lock-text') as HTMLTextAreaElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: messages['ui.studio.style_lock.save'] }));
+    await waitFor(() => expect(mock.set).toHaveBeenCalledWith('s1', expect.objectContaining({ source: 'off' })));
   });
 });
 

@@ -15,6 +15,54 @@ export interface ModelInputLimits {
 import type { PublicHarnessSchema } from '@/lib/harness';
 import { activeLocale } from '@/lib/i18n/locale';
 
+/** #240: the browser-visible project contract published by the server. */
+export interface ProjectProductSchema {
+  limits: {
+    maximum_projects_per_owner: number;
+    maximum_name_characters: number;
+    maximum_assets_per_project: number;
+    maximum_asset_name_characters: number;
+    maximum_asset_description_characters: number;
+    maximum_asset_images: number;
+    maximum_asset_models: number;
+    maximum_list_items: number;
+  };
+  style_guide: {
+    maximum_text_characters: number;
+    maximum_references: number;
+    maximum_palette_colors: number;
+    palette_color_pattern: string;
+  };
+  assets: { kinds: Array<{ id: string; label_key: string }> };
+  /** Field names; the raw Catalog declares objects, the public projection strings. */
+  conventions: { fields: Array<string | { name: string }>; texts: Array<string | { name: string }> };
+}
+
+/** The browser contract after convention names are reduced to strings. */
+export type NormalizedProjectProductSchema = Omit<ProjectProductSchema, 'conventions'> & {
+  conventions: { fields: string[]; texts: string[] };
+};
+
+/**
+ * The project contract under either accepted key, or undefined on an older
+ * server. The raw Catalog declares conventions as field objects; the public
+ * projection names only the fields. Both read as the browser contract here.
+ */
+export function projectContract(schema: ProductSchema): NormalizedProjectProductSchema | undefined {
+  const source = schema.project ?? schema.projects;
+  if (!source) return undefined;
+  const names = (values: unknown): string[] => (Array.isArray(values) ? values : [])
+    .map((value) => typeof value === 'string' ? value : (value && typeof value === 'object' && 'name' in value ? String((value as { name: unknown }).name) : ''))
+    .filter((value) => value !== '');
+  return {
+    ...source,
+    conventions: {
+      fields: names(source.conventions.fields),
+      texts: names(source.conventions.texts),
+    },
+  };
+}
+
 export interface ProductSchema {
   revision: string;
   /**
@@ -44,6 +92,15 @@ export interface ProductSchema {
     routes: { admin: string; publish: string; restore: string; reset: string; test: string };
     ui: Record<string, string>;
   };
+  /**
+   * #240: the browser-visible project contract. Absent on older servers: the
+   * project switcher and panel stay hidden. Agent templates, audit actions and
+   * error copy are server-side and never reach this projection.
+   * The Go public projection names it `project`; `projects` is accepted for
+   * documents written against the earlier plan spelling.
+   */
+  project?: ProjectProductSchema;
+  projects?: ProjectProductSchema;
   runtime: {
     /**
      * #329 note 99647: the one text that says only the first reference pictures are used — the general form and
@@ -64,6 +121,16 @@ export interface ProductSchema {
          chat_session_notes?: string;
          /** #154: the session's style lock (GET/PUT). */
          chat_session_style_lock?: string;
+         /** #240: owner projects, their assets, style guide, conventions and promotion. */
+         project?: string;
+         project_item?: string;
+         project_assets?: string;
+         project_asset_item?: string;
+         project_style_guide?: string;
+         project_conventions?: string;
+         project_promote?: string;
+         /** #240: assign (PUT) the session to a project. */
+         chat_session_project?: string;
          /** #246: the session's persisted 3D self-check records (GET). Absent on older servers. */
          chat_session_self_checks?: string;
          /** #103: the session's production brief (GET/PUT). Absent on older servers. */
@@ -1416,6 +1483,8 @@ export interface ChatProductSchema {
       reasoning_effort?: string;
       /** #322: the request member of the chat model switch. */
       chat_model?: string;
+      /** #240: the optional project a new session belongs to. */
+      project_id?: string;
     };
     response_fields: {
       id: string;
@@ -1457,6 +1526,9 @@ export interface ChatProductSchema {
        notes: string;
        /** #154: the response member carrying the session style lock object. */
        style_lock?: string;
+       /** #240: the project the session belongs to and its three-state style source. */
+       project_id?: string;
+       style_lock_source?: string;
        /** #103: 会话制作简报成员。 */
       brief?: string;
       /** #103: 会话当前制作计划预算成员；没有计划时省略。 */
@@ -1534,6 +1606,8 @@ export interface ChatProductSchema {
        enabled: string;
        text: string;
        references: string;
+       /** #240: the three-state source member (project/session/off). */
+       source?: string;
      };
     prompt_enhance: {
       prompt_field: string;
@@ -1610,7 +1684,7 @@ export interface ChatProductSchema {
   };
   context: { image_index_base: number; maximum_session_notes_characters: number; canvas_input_source: string; reference_filename: string };
   /** #154: bounds for the session-level style lock editor. */
-  style_lock: { maximum_text_characters: number; maximum_reference_images: number };
+  style_lock: { maximum_text_characters: number; maximum_reference_images: number; sources?: string[] };
   /** Paid-step approval modes the Schema offers, and which capabilities a person still decides in manual mode. */
   approval_policy: {
     default_mode: string;

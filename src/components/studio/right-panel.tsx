@@ -14,6 +14,7 @@ import { unavailableLabel } from '@/lib/unavailable';
 import { iconByName } from '@/components/ui/icon-map';
 import { ModelArchiveLink, ModelFormatsPanel } from '@/components/workspace/model-formats';
 import { ModelProcessingPanel } from '@/components/workspace/model-processing-panel';
+import { ProjectPanel } from '@/components/workspace/project-panel';
 import { HarnessPanel } from '@/components/workspace/harness-panel';
 import { StyleLockSection } from '@/components/workspace/style-lock-panel';
 import { useModelProcessingCapabilities } from '@/hooks/use-model-processing-capabilities';
@@ -128,6 +129,8 @@ function PanelBody({ tab, object, sessionId }: PanelBodyProps) {
           {object ? <ObjectDetails object={object} /> : null}
         </div>
       );
+    case 'project':
+      return <ProjectPanel sessionId={sessionId} />;
     case 'process':
       return object?.kind === 'model' ? <ModelProcessingPanel key={`${object.taskId}:${object.assetId}`} selection={object} /> : null;
     case 'formats':

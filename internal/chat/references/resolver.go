@@ -62,6 +62,27 @@ type LegacyStore interface {
 	Open(context.Context, string) (io.ReadCloser, int64, error)
 }
 
+// ProjectReferenceChecker reports whether one finished Task picture is
+// registered in the owner's project (#240). It is the only relaxation for a
+// Task outside the current session: an exact (task, asset) pair stored by the
+// project, never a client claim.
+type ProjectReferenceChecker interface {
+	RegisteredPicture(ctx context.Context, ownerID, projectID, taskID, assetID string) (bool, error)
+}
+
+// ReferenceScope is the server-held owner/session/project a reference is
+// resolved for. The model never supplies it.
+type ReferenceScope struct {
+	Owner     generation.OwnerID
+	SessionID string
+	ProjectID string
+	// AllowAnyOwnerTask keeps the historical owner-scoped rule for a path
+	// without a session (the canvas merge). Generation and chat paths leave it
+	// false, so they accept only this session, a branch ancestor or a project
+	// registration.
+	AllowAnyOwnerTask bool
+}
+
 type Config struct {
 	Inputs              InputGateway
 	Tasks               TaskGateway
@@ -100,6 +121,9 @@ type Config struct {
 	// chat session (#186). It is true for the session's own Tasks and for a
 	// branch's inherited ancestor Tasks; ownership is always checked.
 	TaskInSession func(ctx context.Context, owner generation.OwnerID, sessionID string, taskID generation.TaskID) (bool, error)
+	// ProjectReferences recognises a finished Task picture registered in an
+	// owner project (#240). Nil accepts no picture outside the session.
+	ProjectReferences ProjectReferenceChecker
 	// SelectionMaskLimits bound the mask MeasureMask reads and decodes (#244).
 	SelectionMaskLimits imageinspect.Limits
 	// SelectionPreview bounds and styles the server-composed selection preview
@@ -131,6 +155,7 @@ type Resolver struct {
 	modelAssetRole          string
 	renderAssetType         string
 	taskInSession           func(ctx context.Context, owner generation.OwnerID, sessionID string, taskID generation.TaskID) (bool, error)
+	projectReferences       ProjectReferenceChecker
 	selectionMaskLimits     imageinspect.Limits
 	selectionPreview        imaging.SelectionPreviewStyle
 }
@@ -172,6 +197,7 @@ func New(config Config) (*Resolver, error) {
 		modelAssetRole:          config.ModelAssetRole,
 		renderAssetType:         config.RenderAssetType,
 		taskInSession:           config.TaskInSession,
+		projectReferences:       config.ProjectReferences,
 		selectionMaskLimits:     config.SelectionMaskLimits,
 		selectionPreview:        config.SelectionPreview,
 	}, nil
@@ -179,15 +205,15 @@ func New(config Config) (*Resolver, error) {
 
 func (resolver *Resolver) Resolve(
 	ctx context.Context,
-	owner generation.OwnerID,
+	scope ReferenceScope,
 	values []string,
 ) ([]generation.AssetID, error) {
-	if owner == "" {
+	if scope.Owner == "" {
 		return nil, ErrUnsupportedReference
 	}
 	result := make([]generation.AssetID, 0, len(values))
 	for _, value := range values {
-		id, err := resolver.resolveOne(ctx, owner, value)
+		id, err := resolver.resolveOne(ctx, scope, value)
 		if err != nil {
 			return nil, fmt.Errorf(
 				"%w: %w",
@@ -202,9 +228,10 @@ func (resolver *Resolver) Resolve(
 
 func (resolver *Resolver) resolveOne(
 	ctx context.Context,
-	owner generation.OwnerID,
+	scope ReferenceScope,
 	value string,
 ) (generation.AssetID, error) {
+	owner := scope.Owner
 	if strings.HasPrefix(value, "data:") {
 		body, mediaType, err := decodeDataURI(value)
 		if err != nil {
@@ -240,6 +267,14 @@ func (resolver *Resolver) resolveOne(
 		resolver.taskAssetRoute,
 		referencePath,
 	); matched && len(values) == 2 {
+		allowed, err := resolver.taskReferenceAllowed(ctx, scope,
+			generation.TaskID(values[0]), generation.AssetID(values[1]))
+		if err != nil {
+			return "", err
+		}
+		if !allowed {
+			return "", ErrUnsupportedReference
+		}
 		content, err := resolver.tasks.OpenAsset(
 			ctx,
 			owner,
@@ -265,6 +300,49 @@ func (resolver *Resolver) resolveOne(
 		return resolver.resolveGenerated(ctx, owner, values[0])
 	}
 	return "", ErrUnsupportedReference
+}
+
+// taskReferenceAllowed applies the one rule for a Task picture used as a
+// generation input: the owner's own Task of this session (or a Task outside
+// any chat), a branch ancestor this session may read, or a finished Task
+// picture registered in the turn's frozen project (#240). Another session's
+// Task is refused unless exactly one of those holds; another owner never is.
+func (resolver *Resolver) taskReferenceAllowed(
+	ctx context.Context,
+	scope ReferenceScope,
+	taskID generation.TaskID,
+	assetID generation.AssetID,
+) (bool, error) {
+	task, err := resolver.tasks.Get(ctx, scope.Owner, taskID)
+	if err != nil {
+		return false, err
+	}
+	if task.ID != taskID || task.OwnerID != scope.Owner {
+		return false, nil
+	}
+	if scope.AllowAnyOwnerTask || task.SessionID == "" || task.SessionID == scope.SessionID {
+		return true, nil
+	}
+	if scope.ProjectID != "" && resolver.projectReferences != nil {
+		registered, err := resolver.projectReferences.RegisteredPicture(
+			ctx, string(scope.Owner), scope.ProjectID, string(taskID), string(assetID))
+		if err != nil {
+			return false, err
+		}
+		if registered {
+			return true, nil
+		}
+	}
+	if resolver.taskInSession != nil && task.SessionID != "" {
+		allowed, err := resolver.taskInSession(ctx, scope.Owner, scope.SessionID, taskID)
+		if err != nil {
+			return false, err
+		}
+		if allowed {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (resolver *Resolver) resolveGenerated(

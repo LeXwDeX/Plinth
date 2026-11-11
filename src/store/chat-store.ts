@@ -95,6 +95,10 @@ export interface ChatSession {
   brief?: ProductionBrief;
   /** #103: the session's current production plan budget; absent when no plan exists. */
   budget?: SessionBudget;
+  /** #240: the project the session belongs to; absent when unassigned. */
+  projectId?: string;
+  /** #240: the three-state style source stored on the session. */
+  styleLockSource?: 'project' | 'session' | 'off';
 }
 
 export interface GenState {
@@ -159,6 +163,8 @@ interface ChatStore {
   rememberSession: (session: ChatSession) => void;
   removeSession: (id: string) => void;
   updateSessionTitle: (id: string, title: string) => void;
+  /** #240: replace the session's project and style source without touching other fields. */
+  updateSessionProject: (id: string, project: { projectId?: string; styleLockSource?: 'project' | 'session' | 'off' }) => void;
   /** 只更新批准方式与累计积分，不改动其它会话字段。 */
   updateSessionApproval: (id: string, approval: { approvalMode?: ApprovalMode; estimatedCredits?: number; priceTotals?: PriceTotal[] }) => void;
   /** #103: replace the session's production brief without touching other session fields. */
@@ -255,6 +261,14 @@ export const useChatStore = create<ChatStore>((set) => ({
     set((s) => ({
       sessions: s.sessions.map((ss) => (ss.id === id ? { ...ss, title } : ss)),
       sessionListRevision: s.sessionListRevision + (s.sessions.some((ss) => ss.id === id && ss.title === title) ? 0 : 1),
+    })),
+  updateSessionProject: (id, project) =>
+    set((s) => ({
+      sessions: s.sessions.map((ss) => (ss.id === id ? {
+        ...ss,
+        projectId: project.projectId || undefined,
+        ...(project.styleLockSource ? { styleLockSource: project.styleLockSource } : {}),
+      } : ss)),
     })),
   updateSessionApproval: (id, approval) =>
     set((s) => ({

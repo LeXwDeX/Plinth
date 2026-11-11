@@ -16,47 +16,48 @@ import (
 // single-picture parameter already holding the person's picture is never
 // replaced. The style text is not written into 3D prompts; the production
 // brief keeps that role. A skip returns the Schema's note for the result.
+// injected names the pictures actually written into the input, so the result
+// can cite the project assets they came from (#240).
 func (executor *Executor) processingStyleReference(
 	ctx context.Context,
 	command chat.ToolCommand,
 	capability generation.Capability,
 	offering generation.Offering,
 	input map[string]any,
-) (string, error) {
+) (note string, injected []string, err error) {
 	if capability != generation.Retexture || !executor.styleExtendsTo(capability) {
-		return "", nil
+		return "", nil, nil
 	}
 	urls, _, err := executor.styleReferenceURLs(command)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if len(urls) == 0 {
-		return "", nil
+		return "", nil, nil
 	}
 	parameter, declared := semanticParameter(offering, generation.SemanticReferenceImage)
 	if !declared || parameter.Type != "asset" {
-		return executor.styleNote(command, executor.chat.StyleLock.UnsupportedNote), nil
+		return executor.styleNote(command, executor.chat.StyleLock.UnsupportedNote), nil, nil
 	}
 	if current, exists := input[parameter.Name]; exists && current != nil && current != "" {
-		return executor.styleNote(command, executor.chat.StyleLock.SkipNote), nil
+		return executor.styleNote(command, executor.chat.StyleLock.SkipNote), nil, nil
 	}
 	// Some services take either a prompt or a reference picture for one style
 	// input (Meshy retexture). The Schema's input rule already groups the
 	// alternatives; when the step filled another member, the style picture
 	// would make the frozen input invalid, so it is skipped and reported.
 	if executor.processingStyleInputOccupied(offering, parameter.Name, input) {
-		return executor.styleNote(command, executor.chat.StyleLock.SkipNote), nil
+		return executor.styleNote(command, executor.chat.StyleLock.SkipNote), nil, nil
 	}
-	owner := generation.OwnerID(command.OwnerID)
-	assets, resolveErr := executor.references.Resolve(ctx, owner, urls[:1])
+	assets, resolveErr := executor.references.Resolve(ctx, commandReferenceScope(command), urls[:1])
 	if resolveErr != nil {
-		return "", resolveErr
+		return "", nil, resolveErr
 	}
 	if len(assets) == 0 {
-		return executor.styleNote(command, executor.chat.StyleLock.UnsupportedNote), nil
+		return executor.styleNote(command, executor.chat.StyleLock.UnsupportedNote), nil, nil
 	}
 	input[parameter.Name] = assets[0]
-	return "", nil
+	return "", urls[:1], nil
 }
 
 // processingStyleInputOccupied reports whether another parameter of the same

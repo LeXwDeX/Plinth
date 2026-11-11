@@ -20,7 +20,7 @@ import (
 
 type refusingReferences struct{ err error }
 
-func (resolver refusingReferences) Resolve(context.Context, generation.OwnerID, []string) ([]generation.AssetID, error) {
+func (resolver refusingReferences) Resolve(context.Context, references.ReferenceScope, []string) ([]generation.AssetID, error) {
 	return nil, resolver.err
 }
 

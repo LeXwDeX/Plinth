@@ -54,6 +54,11 @@ type ApplicationSchema struct {
 	// Localization declares the UI locales and every non-default locale's
 	// copy. Omitted, the application has one locale: runtime.frontend.display_locale.
 	Localization *LocalizationSchema `json:"localization,omitempty"`
+	// Project is the owner-scoped project contract (#240): the reusable
+	// style guide, character/prop references and production conventions a
+	// session inherits. Optional so older external Catalog documents stay
+	// valid; omitted, the project routes are not registered.
+	Project *ProjectSchema `json:"project,omitempty"`
 	// ProviderDeprecations lists, per Provider, the models, wire fields and
 	// values its current documentation has deprecated or retired (#329).
 	// Catalog loading rejects an Offering that would send one. Server-side
@@ -1171,6 +1176,9 @@ type PublicApplicationSchema struct {
 	DeliveryFormats []PublicDeliveryFormat     `json:"delivery_formats"`
 	Authentication  PublicAuthenticationSchema `json:"authentication"`
 	Localization    PublicLocalizationSchema   `json:"localization"`
+	// Project is the browser-visible project contract (#240). Omitted when
+	// the Catalog predates projects.
+	Project *PublicProjectSchema `json:"project,omitempty"`
 }
 
 // PublicDeliveryFormat is the browser-visible part of ModelFormatSchema.
@@ -1306,6 +1314,9 @@ type PublicChatSchema struct {
 type PublicChatStyleLockSchema struct {
 	MaximumTextCharacters  int `json:"maximum_text_characters"`
 	MaximumReferenceImages int `json:"maximum_reference_images"`
+	// Sources is the three-state style source the panel offers (#240):
+	// project, session, off. The provider prompt templates stay server-side.
+	Sources []string `json:"sources,omitempty"`
 }
 
 // PublicChatModelReviewSchema is the browser contract of the read-only model
@@ -3765,6 +3776,14 @@ type ChatStyleLockSchema struct {
 	// explains that the chosen service takes no reference picture at all.
 	SkipNote        string `json:"skip_note,omitempty"`
 	UnsupportedNote string `json:"unsupported_note,omitempty"`
+	// Sources is the three-state origin of the effective style guide (#240):
+	// project inherits the session's project, session uses this session's
+	// lock, off injects nothing. The values are the only writable ones.
+	Sources []string `json:"sources,omitempty"`
+	// ProjectPromptTemplate is the provider-prompt suffix used when the
+	// effective source is the project guide ({style}, {project}). It is
+	// server-only and never enters the public projection.
+	ProjectPromptTemplate string `json:"project_prompt_template,omitempty"`
 }
 
 // ChatVisualAnchorsSchema is application.chat.visual_anchors (#250). Anchors
@@ -3817,6 +3836,9 @@ type ChatStyleLockAPIFields struct {
 	Enabled    string `json:"enabled"`
 	Text       string `json:"text"`
 	References string `json:"references"`
+	// Source is the three-state style-lock origin (#240): project, session
+	// or off. Empty leaves the field out for historical Catalogs.
+	Source string `json:"source,omitempty"`
 }
 
 // ChatMessageListSchema is the paging contract of a conversation's messages:
@@ -3966,7 +3988,10 @@ type ChatAPIFields struct {
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// ChatModel is the request field of the session chat-model write (#322
 	// Scope 5): the ID of an available model, or "" to follow the default.
-	ChatModel           string `json:"chat_model,omitempty"`
+	ChatModel string `json:"chat_model,omitempty"`
+	// ProjectID carries the optional project a new session belongs to
+	// (#240). Empty creates an unassigned session.
+	ProjectID           string `json:"project_id,omitempty"`
 	StyleLockEnabled    string `json:"style_lock_enabled,omitempty"`
 	StyleLockText       string `json:"style_lock_text,omitempty"`
 	StyleLockReferences string `json:"style_lock_references,omitempty"`
@@ -4099,6 +4124,12 @@ type ChatAPIResponseFields struct {
 	ChatModelName     string `json:"chat_model_name,omitempty"`
 	// StyleLock is the session DTO member carrying the session style lock.
 	StyleLock string `json:"style_lock,omitempty"`
+	// ProjectID is the session DTO member naming the project the session
+	// belongs to (#240); empty means unassigned and leaves the member out.
+	ProjectID string `json:"project_id,omitempty"`
+	// StyleLockSource is the session DTO member carrying the effective
+	// three-state style source (#240): project, session or off.
+	StyleLockSource string `json:"style_lock_source,omitempty"`
 }
 
 type ChatDefaultsSchema struct {
@@ -5072,6 +5103,10 @@ type ChatToolResultFields struct {
 	// truncation and the length.
 	FinalPrompt string `json:"final_prompt,omitempty"`
 	PromptNote  string `json:"prompt_note,omitempty"`
+	// StyleSources is the optional key naming the project assets whose
+	// pictures this step actually injected (#240). It is present only when
+	// some project asset was used, so the Agent can cite them as they are.
+	StyleSources string `json:"style_sources,omitempty"`
 }
 
 // ChatAgentToolSchema 声明非生成类 agent 控制工具（set_params /
@@ -5591,31 +5626,44 @@ type CoreHTTPRoutesSchema struct {
 	ChatSessionThreeViews       string `json:"chat_session_three_views,omitempty"`
 	ChatSessionThreeViewItem    string `json:"chat_session_three_view_item,omitempty"`
 	ChatSessionLineage          string `json:"chat_session_lineage"`
-	ProviderAsset               string `json:"provider_asset"`
-	Offerings                   string `json:"offerings"`
-	Assets                      string `json:"assets"`
-	AssetItem                   string `json:"asset_item"`
-	AssetModelPreview           string `json:"asset_model_preview,omitempty"`
-	ModelCaptures               string `json:"model_captures,omitempty"`
-	ModelCaptureItem            string `json:"model_capture_item,omitempty"`
-	SceneObjects                string `json:"scene_objects,omitempty"`
-	SceneObjectItem             string `json:"scene_object_item,omitempty"`
-	SceneObjectRepresentations  string `json:"scene_object_representations,omitempty"`
-	SceneObjectApply            string `json:"scene_object_apply,omitempty"`
-	SceneSnapshot               string `json:"scene_snapshot,omitempty"`
-	RenderManifests             string `json:"render_manifests,omitempty"`
-	RenderManifestItem          string `json:"render_manifest_item,omitempty"`
-	SkillRuns                   string `json:"skill_runs,omitempty"`
-	SkillRunItem                string `json:"skill_run_item,omitempty"`
-	SkillRunStep                string `json:"skill_run_step,omitempty"`
-	SkillRunReview              string `json:"skill_run_review,omitempty"`
-	Tasks                       string `json:"tasks"`
-	TaskPrepare                 string `json:"task_prepare"`
-	TaskGrants                  string `json:"task_grants"`
-	TaskGrantDecision           string `json:"task_grant_decision"`
-	TaskItem                    string `json:"task_item"`
-	TaskRecovery                string `json:"task_recovery,omitempty"`
-	TaskRecoveryPrepare         string `json:"task_recovery_prepare,omitempty"`
+	// Project routes (#240). Empty (historical Catalogs) keeps the handlers
+	// unregistered. ProjectItem, ProjectAssets, ProjectAssetItem,
+	// ProjectStyleGuide, ProjectConventions and ProjectPromote are the
+	// per-project sub-routes; ChatSessionProject assigns a session to a
+	// project.
+	Project                    string `json:"project,omitempty"`
+	ProjectItem                string `json:"project_item,omitempty"`
+	ProjectAssets              string `json:"project_assets,omitempty"`
+	ProjectAssetItem           string `json:"project_asset_item,omitempty"`
+	ProjectStyleGuide          string `json:"project_style_guide,omitempty"`
+	ProjectConventions         string `json:"project_conventions,omitempty"`
+	ProjectPromote             string `json:"project_promote,omitempty"`
+	ChatSessionProject         string `json:"chat_session_project,omitempty"`
+	ProviderAsset              string `json:"provider_asset"`
+	Offerings                  string `json:"offerings"`
+	Assets                     string `json:"assets"`
+	AssetItem                  string `json:"asset_item"`
+	AssetModelPreview          string `json:"asset_model_preview,omitempty"`
+	ModelCaptures              string `json:"model_captures,omitempty"`
+	ModelCaptureItem           string `json:"model_capture_item,omitempty"`
+	SceneObjects               string `json:"scene_objects,omitempty"`
+	SceneObjectItem            string `json:"scene_object_item,omitempty"`
+	SceneObjectRepresentations string `json:"scene_object_representations,omitempty"`
+	SceneObjectApply           string `json:"scene_object_apply,omitempty"`
+	SceneSnapshot              string `json:"scene_snapshot,omitempty"`
+	RenderManifests            string `json:"render_manifests,omitempty"`
+	RenderManifestItem         string `json:"render_manifest_item,omitempty"`
+	SkillRuns                  string `json:"skill_runs,omitempty"`
+	SkillRunItem               string `json:"skill_run_item,omitempty"`
+	SkillRunStep               string `json:"skill_run_step,omitempty"`
+	SkillRunReview             string `json:"skill_run_review,omitempty"`
+	Tasks                      string `json:"tasks"`
+	TaskPrepare                string `json:"task_prepare"`
+	TaskGrants                 string `json:"task_grants"`
+	TaskGrantDecision          string `json:"task_grant_decision"`
+	TaskItem                   string `json:"task_item"`
+	TaskRecovery               string `json:"task_recovery,omitempty"`
+	TaskRecoveryPrepare        string `json:"task_recovery_prepare,omitempty"`
 	// TaskRefetch: GET the owner's upstream refetch eligibility of a failed
 	// Task, POST to start (or return) its refetch (#295).
 	TaskRefetch             string `json:"task_refetch,omitempty"`

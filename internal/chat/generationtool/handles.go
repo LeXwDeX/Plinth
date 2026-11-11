@@ -78,15 +78,40 @@ func (executor *Executor) handleFailure(command chat.ToolCommand, err error) err
 // from the server, so a handle cannot name another owner's or session's
 // object; the URLs are resolved to owned assets later like any reference.
 func (executor *Executor) resolveImageHandles(command chat.ToolCommand, tokens []string) ([]string, error) {
-	resolved, err := executor.handlePolicy().ResolveHandles(
-		command.ReferenceHistory(), command.Options.Selection, tokens, chat.AttachmentKindImage)
-	if err != nil {
-		return nil, executor.handleFailure(command, err)
+	if len(tokens) == 0 {
+		return nil, nil
 	}
-	urls := make([]string, 0, len(resolved))
-	for _, item := range resolved {
-		if item.URL != "" {
-			urls = append(urls, item.URL)
+	urls := make([]string, 0, len(tokens))
+	seen := make(map[string]bool, len(tokens))
+	add := func(url string) {
+		if url == "" || seen[url] {
+			return
+		}
+		seen[url] = true
+		urls = append(urls, url)
+	}
+	// A project handle is resolved from the frozen project snapshot first. A
+	// token that starts with the declared prefix but names no project asset is
+	// refused with the project copy; it never falls back to a session handle of
+	// the same spelling (#240).
+	for _, token := range tokens {
+		projectURLs, projectToken, valid := executor.projectHandleURLs(command, token)
+		if projectToken {
+			if !valid {
+				return nil, executor.projectHandleFailure(command, token)
+			}
+			for _, url := range projectURLs {
+				add(url)
+			}
+			continue
+		}
+		resolved, err := executor.handlePolicy().ResolveHandles(
+			command.ReferenceHistory(), command.Options.Selection, []string{token}, chat.AttachmentKindImage)
+		if err != nil {
+			return nil, executor.handleFailure(command, err)
+		}
+		for _, item := range resolved {
+			add(item.URL)
 		}
 	}
 	if len(urls) == 0 && len(tokens) > 0 {
