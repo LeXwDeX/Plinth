@@ -63,6 +63,7 @@ func (orchestrator *Orchestrator) productionBudgetPrompt(ctx context.Context, ow
 	format := budget.AmountFormat{LegacyLabel: config.LegacyUnitLabel, Separator: config.UnitSeparator}
 	state, limit, spent, reserved, remaining := config.NoPlanState, "0", "0", "0", "0"
 	planText := config.NoPlanText
+	acceptance, checkpoints, contingencies := "", "", ""
 	summary, found, err := orchestrator.service.ProductionBudgetSummary(ctx, ownerID, sessionID)
 	if err != nil || !found {
 		summary, found, err = orchestrator.service.PendingProductionBudget(ctx, ownerID, sessionID)
@@ -74,6 +75,9 @@ func (orchestrator *Orchestrator) productionBudgetPrompt(ctx context.Context, ow
 		reserved = format.Units(summary.Units, budget.ReservedOf)
 		remaining = format.Units(summary.Units, budget.RemainingOf)
 		planText = summary.Plan.PromptLine(format)
+		acceptance = summary.Plan.AcceptanceLine()
+		checkpoints = summary.Plan.CheckpointLine()
+		contingencies = summary.Plan.ContingencyLine(format)
 	}
 	label := state
 	for _, declared := range config.States {
@@ -82,6 +86,10 @@ func (orchestrator *Orchestrator) productionBudgetPrompt(ctx context.Context, ow
 			break
 		}
 	}
+	report := config.Acceptance.Report
+	if orchestrator.texts != nil {
+		report = orchestrator.text(ctx, report)
+	}
 	return strings.NewReplacer(
 		"{state}", label,
 		"{limit}", limit,
@@ -89,5 +97,9 @@ func (orchestrator *Orchestrator) productionBudgetPrompt(ctx context.Context, ow
 		"{reserved}", reserved,
 		"{remaining}", remaining,
 		"{plan}", planText,
+		"{acceptance}", acceptance,
+		"{checkpoints}", checkpoints,
+		"{contingencies}", contingencies,
+		"{report}", report,
 	).Replace(config.ContextTemplate)
 }

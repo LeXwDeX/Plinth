@@ -65,10 +65,10 @@ class RequestSetTest(unittest.TestCase):
     def test_the_shipped_request_set_is_valid(self):
         data, path, digest = quality.load_requests()
         self.assertEqual(data["version"], 3)
-        self.assertEqual(len(data["requests"]), 13)
+        self.assertEqual(len(data["requests"]), 14)
         self.assertTrue(path.endswith("requests.json"))
         self.assertEqual(len(digest), 64)
-        self.assertEqual(len({request["id"] for request in data["requests"]}), 13)
+        self.assertEqual(len({request["id"] for request in data["requests"]}), 14)
         reference = next(request for request in data["requests"] if request["id"] == "3d-image-reference")
         self.assertEqual(reference["modality"], "3d")
         self.assertEqual(reference["expected"]["capabilities"], ["image-to-3d"])
@@ -77,6 +77,13 @@ class RequestSetTest(unittest.TestCase):
         concept = next(request for request in data["requests"] if request["id"] == "2d-3d-input-concept")
         self.assertEqual(concept["modality"], "2d")
         self.assertEqual(concept["expected"]["capabilities"], ["text-to-image"])
+        multistep = next(request for request in data["requests"] if request["id"] == "3d-multistep-rig-checkpoint")
+        self.assertEqual(multistep["modality"], "3d")
+        self.assertEqual(multistep["expected"]["min_tasks"], {"text-to-3d": 1, "remesh": 2, "rigging": 1})
+        self.assertEqual([step["tool"]["name"] for step in multistep["steps"]],
+                         ["ask_choice", "update_production_brief", "propose_production_plan", "create_model_3d",
+                          "plan_model_processing", "revise_processing_plan", "inspect_model"])
+        self.assertEqual(multistep["steps"][5]["tool"]["arguments"]["operation"], "insert")
         preferences = next(request for request in data["requests"] if request["id"] == "2d-preference-multiturn")
         self.assertEqual(preferences["category"], "multi_turn_feedback")
         self.assertEqual(len(preferences["steps"][0]["tools"]), 4)
@@ -282,6 +289,33 @@ class TrajectoryTest(unittest.TestCase):
         self.assertEqual(inspection["self_check_passed"], 1)
         self.assertEqual(inspection["self_check_issues"], 0)
 
+    def test_evaluate_case_records_rework_revisions_and_checkpoints(self):
+        run = {
+            "messages": [
+                message({"name": "create_model_3d", "taskId": "t1"}),
+                message({"name": "plan_model_processing"}),
+                message({"name": "revise_processing_plan", "arguments": json.dumps({"operation": "insert"})}),
+                message({"name": "revise_processing_plan", "arguments": json.dumps({"operation": "skip"})}),
+            ],
+            "tasks": [succeeded("text-to-3d")],
+            "plans": [{"id": "p1", "state": "SUCCEEDED", "steps": [
+                {"capability": "remesh", "state": "SUCCEEDED", "checkpoint": {"state": "failed", "results": []}},
+                {"capability": "resize", "state": "SUCCEEDED"},
+                {"capability": "rigging", "state": "SUCCEEDED", "checkpoint": {"state": "passed", "results": []}},
+            ]}],
+            "cards": [{"kind": "plan"}],
+            "final_reply": {"content": "完成。"},
+        }
+        request = base_request()
+        request["expected"]["capabilities"] = ["text-to-3d"]
+        request["expected"]["budgets"] = {"max_paid_calls": 3, "max_tool_calls": 10, "max_interruptions": 1}
+        case = quality.evaluate_case(request, run)
+        metrics = case["metrics"]
+        self.assertEqual(metrics["rework"]["count"], 2)
+        self.assertEqual(metrics["rework"]["revision_count"], 2)
+        self.assertEqual(metrics["rework"]["revision_operations"], {"insert": 1, "skip": 1})
+        self.assertEqual(metrics["checkpoints"], {"total": 2, "passed": 1, "failed": 1, "waived": 0, "unknown": 0})
+
     def test_evaluate_case_reports_each_kind_of_failure(self):
         run = {
             "messages": [message({"name": "create_model_3d"})],
@@ -422,6 +456,27 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(report["summary"]["hard_failures"], 1)
         self.assertEqual(report["summary"]["failed_cases"], ["case"])
         self.assertIn("case", quality.report_markdown(report))
+
+    def test_summary_records_success_rate_rework_and_checkpoints(self):
+        cases = [{
+            "id": "case", "title": "case",
+            "metrics": {"tool_call_count": 1, "paid_call_count": 1, "interruption_count": 0,
+                        "self_inspection": {"inspect_model": 0, "render_model_views": 0}, "elapsed_ms": 1,
+                        "rework": {"count": 2, "failed_tasks": 0, "revision_count": 2},
+                        "checkpoints": {"total": 1, "passed": 0, "failed": 1, "waived": 1, "unknown": 0}},
+            "checks": [{"id": "final_reply", "status": "pass", "detail": ""}],
+            "tasks": [],
+        }]
+        report = quality.summarize(cases, "trajectory-fake", "a", False, {"version": 3, "sha256": "x"})
+        metrics = report["summary"]["metrics"]
+        self.assertEqual(metrics["success_rate"], 100.0)
+        self.assertEqual(metrics["rework_count"], 2)
+        self.assertEqual(metrics["revision_count"], 2)
+        self.assertEqual(metrics["checkpoint_count"], 1)
+        self.assertEqual(metrics["checkpoint_failed"], 1)
+        self.assertIn("成功率", quality.report_markdown(report))
+        compared = quality.compare_reports(report, report)
+        self.assertIn("质量指标", compared["markdown"])
 
     def test_compare_flags_a_pass_to_fail_regression(self):
         result = quality.compare_reports(self.report(), self.report(revision="b", statuses=("fail",)))

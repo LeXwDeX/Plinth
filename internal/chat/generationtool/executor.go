@@ -1809,9 +1809,12 @@ func (executor *Executor) wait(
 			if detail == "" {
 				detail = executor.localized(command, executor.chat.Presentation.Messages.GenerationFailed)
 			}
-			return executor.failure(
+			// An ordinary failed Task carries the same actionable category and
+			// suggested action as the plan and task views (#251), so the Agent's
+			// primary result never leaves it with a generic "failed" text.
+			return executor.taskFailure(
 				command,
-				string(taskID),
+				task,
 				detail,
 			), errors.New(detail)
 		}
@@ -2075,13 +2078,46 @@ func (executor *Executor) failure(
 	taskID string,
 	publicMessage string,
 ) chat.ToolResult {
+	return executor.failureWithReport(command, taskID, publicMessage, nil)
+}
+
+// taskFailure is a failed Task's result. Besides the public message it names
+// the actionable category, next action and advice (#251); the internal class
+// and the upstream text stay server-side.
+func (executor *Executor) taskFailure(
+	command chat.ToolCommand,
+	task generation.Task,
+	publicMessage string,
+) chat.ToolResult {
+	var report *generation.FailureReport
+	if task.Failure != nil {
+		classified := generation.ClassifyFailure(task.Failure.Class, task.Failure.Retryable, task.Failure.Ambiguous)
+		report = &classified
+	}
+	return executor.failureWithReport(command, string(task.ID), publicMessage, report)
+}
+
+func (executor *Executor) failureWithReport(
+	command chat.ToolCommand,
+	taskID string,
+	publicMessage string,
+	report *generation.FailureReport,
+) chat.ToolResult {
 	tool := command.Tool
 	publicMessage = executor.localized(command, publicMessage)
-	content, _ := json.Marshal(map[string]any{
+	payload := map[string]any{
 		tool.ResultFields.Success: false,
 		tool.ResultFields.TaskID:  taskID,
 		tool.ResultFields.Error:   publicMessage,
-	})
+	}
+	if report != nil {
+		payload["failure_category"] = string(report.Category)
+		payload["next_action"] = string(report.Action)
+		payload["failure_advice"] = executor.processingFailureAdvice(*report)
+		payload["retryable"] = report.Retryable
+		payload["user_decision_required"] = report.UserDecisionRequired
+	}
+	content, _ := json.Marshal(payload)
 	return chat.ToolResult{
 		TaskID:       taskID,
 		Error:        publicMessage,

@@ -68,6 +68,9 @@ export interface PlanCardProps {
   error?: string | null;
   /** The decided plan's live budget: the card shows spent/limit and each step's task state. */
   progress?: SessionBudget | null;
+  /** #251: the server's per-unit totals of the main steps and the declared contingencies. */
+  stepTotals?: readonly PriceTotal[];
+  contingencyTotals?: readonly PriceTotal[];
 }
 
 function capabilityLabel(schema: ReturnType<typeof useProductSchema>['schema'], id: string): string {
@@ -83,12 +86,18 @@ function checkpointLabel(schema: ProductSchema, id: string): string {
   return schema.chat.self_check?.checkpoints?.find((checkpoint) => checkpoint.id === id)?.label || id;
 }
 
+/** #251: the review vocabulary's label for a plan check, else its id. */
+function planCheckLabel(schema: ProductSchema, id: string): string {
+  return schemaText(schema, `ui.chat.review.check_names.${id}`) || id;
+}
+
 /**
  * #103: one production plan. While it waits for approval it lists the steps,
  * their models and quotes plus the correction capabilities it allows; once
  * approved the same card shows the live budget and each step's Task state.
  */
-export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, error = null, progress = null }: PlanCardProps) {
+export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, error = null, progress = null,
+  stepTotals = [], contingencyTotals = [] }: PlanCardProps) {
   const { schema } = useProductSchema();
   const text = (key: string) => schemaText(schema, key);
   const capabilities = useMemo(
@@ -147,6 +156,19 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
           <span>{formatSchemaText(schemaText(schema, 'ui.studio.plan.steps_done'), { done, total: plan.steps.length })}</span>
         </p>
       ) : null}
+      {stepTotals.length > 0 || contingencyTotals.length > 0 ? (
+        // #251: the approved limit is the worst case; the card separates the
+        // main steps from the declared repairs so the usual route never looks
+        // as expensive as the worst case.
+        <p className="flex flex-wrap gap-x-2 text-[11px] tabular-nums text-muted-foreground" data-testid="studio-plan-estimates">
+          {stepTotals.length > 0 ? (
+            <span>{formatSchemaText(text('ui.studio.plan.step_total'), { amounts: priceTotalsAmountsText(schema, stepTotals) })}</span>
+          ) : null}
+          {contingencyTotals.length > 0 ? (
+            <span>{formatSchemaText(text('ui.studio.plan.contingency_total'), { amounts: priceTotalsAmountsText(schema, contingencyTotals) })}</span>
+          ) : null}
+        </p>
+      ) : null}
       {plan.steps.length > 0 ? (
         <ol className="flex flex-col gap-0.5" aria-label={text('ui.studio.plan.step')}>
           {stepProgress.map((entry, index) => {
@@ -192,6 +214,52 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
             );
           })}
         </ol>
+      ) : null}
+      {(plan.acceptance?.length ?? 0) > 0 ? (
+        <section className="flex flex-col gap-0.5" data-testid="studio-plan-acceptance">
+          <span className="text-[11px] text-foreground/70">{text('ui.studio.plan.acceptance')}</span>
+          <ul className="flex list-disc flex-col gap-0.5 pl-4 text-[11px] text-muted-foreground">
+            {plan.acceptance!.map((criterion) => (
+              <li key={criterion.id || criterion.statement}>{criterion.statement}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {(plan.checkpoints?.length ?? 0) > 0 ? (
+        <section className="flex flex-col gap-0.5" data-testid="studio-plan-checkpoints">
+          <span className="text-[11px] text-foreground/70">{text('ui.studio.plan.checkpoints')}</span>
+          <ul className="flex flex-col gap-0.5 text-[11px] text-muted-foreground">
+            {plan.checkpoints!.map((checkpoint) => (
+              <li key={checkpoint.afterCapability} data-testid="studio-plan-checkpoint">
+                {formatSchemaText(text('ui.studio.plan.checkpoint_item'), {
+                  capability: capabilityLabel(schema, checkpoint.afterCapability),
+                  checks: checkpoint.checks.map((check) => planCheckLabel(schema, check.check)).join(text('ui.studio.approval.card.extra_items_separator')),
+                })}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {(plan.contingencies?.length ?? 0) > 0 ? (
+        <section className="flex flex-col gap-0.5" data-testid="studio-plan-contingencies">
+          <span className="text-[11px] text-foreground/70">
+            {formatSchemaText(text('ui.studio.plan.contingencies'), {
+              amounts: priceTotalsAmountsText(schema, contingencyTotals.length > 0 ? contingencyTotals
+                : plan.contingencies!.map((item) => item.estimate).filter((item): item is PriceTotal => item !== null)),
+            })}
+          </span>
+          <ul className="flex flex-col gap-0.5 text-[11px] text-muted-foreground">
+            {plan.contingencies!.map((contingency) => (
+              <li key={contingency.id} data-testid="studio-plan-contingency">
+                {formatSchemaText(text('ui.studio.plan.contingency_item'), {
+                  trigger: contingency.trigger.map((trigger) => planCheckLabel(schema, trigger)).join(text('ui.studio.approval.card.extra_items_separator')),
+                  capability: capabilityLabel(schema, contingency.capability),
+                  amount: contingency.estimate ? priceTotalsAmountsText(schema, [contingency.estimate]) : '',
+                })}
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
       <p className="text-[11px] text-muted-foreground" data-testid="studio-plan-corrections">
         <span className="text-foreground/70">{text('ui.studio.plan.corrections')}</span>

@@ -18,7 +18,7 @@ import type { ProductSchema } from '@/lib/product-schema';
 
 function approval(requestId: string, expiresAt: string, status: PendingApproval['status'] = 'pending'): PendingApproval {
   return {
-    requestId, status, kind: 'step', plan: null, budgets: [],
+    requestId, status, kind: 'step', plan: null, budgets: [], stepTotals: [], contingencyTotals: [],
     tool: 'create_model_3d', capability: 'text-to-3d', model: 'meshy-7.1', provider: 'Meshy AI', providerId: 'meshy',
     estimatedCredits: 20, baseCredits: 0, extraCredits: 0, extraLabel: '', extraItems: [], prompt: 'a chair', inputs: [], messageId: '', createdAt: '', expiresAt,
   };
@@ -70,6 +70,23 @@ describe('a card kind this client does not render yet (#103)', () => {
       { request_id: 'step-1', status: 'pending', capability: 'text-to-3d' },
     ] });
     expect(items.map((item) => item.requestId)).toEqual(['step-1']);
+  });
+
+  it('reads the plan card with its nested contingencies and the server split totals (#251)', () => {
+    const [item] = parsePendingApprovals({ items: [{
+      request_id: 'plan-2', status: 'pending', kind: 'plan',
+      budgets: [{ unit: 'legacy.credits', unit_label: 'legacy.credits', amount: '100' }],
+      step_totals: [{ unit: 'legacy.credits', unit_label: 'legacy.credits', amount: '80' }],
+      contingency_totals: [{ unit: 'legacy.credits', unit_label: 'legacy.credits', amount: '5' }],
+      plan: {
+        title: '角色', steps: [{ capability: 'text-to-3d', purpose: '底模', estimate: { unit: 'legacy.credits', unit_label: 'legacy.credits', amount: '80' } }],
+        contingencies: [{ id: 'low_poly', trigger: ['triangles'],
+          step: { capability: 'remesh', offering_id: 'meshy/processing/remesh', purpose: '再减面', estimate: { unit: 'legacy.credits', unit_label: 'legacy.credits', amount: '5' } } }],
+      },
+    }] });
+    expect(item.plan?.contingencies?.[0]).toMatchObject({ id: 'low_poly', capability: 'remesh', offeringId: 'meshy/processing/remesh', purpose: '再减面' });
+    expect(item.stepTotals?.map((total) => total.amount)).toEqual(['80']);
+    expect(item.contingencyTotals?.map((total) => total.amount)).toEqual(['5']);
   });
 });
 

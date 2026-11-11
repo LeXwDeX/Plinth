@@ -77,18 +77,27 @@ func planOfferings() []generation.Offering {
 		{ID: "three-default", Revision: "v1", Capability: "image-to-3d", Enabled: true, Default: true, EstimatedCredits: 7},
 		{ID: "three-pinned", Revision: "v1", Capability: "image-to-3d", Enabled: true, EstimatedCredits: 20},
 		{ID: "retexture-default", Revision: "v1", Capability: "retexture", Enabled: true, Default: true, EstimatedCredits: 4},
+		{ID: "remesh-default", Revision: "v1", Capability: "remesh", Domain: generation.DomainProcessing, Enabled: true, Default: true, EstimatedCredits: 6},
+		{ID: "resize-default", Revision: "v1", Capability: "resize", Domain: generation.DomainProcessing, Enabled: true, Default: true, EstimatedCredits: 3},
 		{ID: "disabled", Revision: "v1", Capability: "image-to-3d", Enabled: false, EstimatedCredits: 1},
 	}
 }
 
 func proposalService(t *testing.T, store chat.ProductionPlanStore, budgetSchema catalog.ChatApprovalBudgetSchema) *chat.Service {
 	t.Helper()
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := product.Application()
 	service := &chat.Service{}
 	service.SetProductionPlans(chat.ProductionPlanPolicy{
 		Budget:      budgetSchema,
 		Offerings:   planOfferings,
 		Store:       store,
 		Checkpoints: []string{"self_check"},
+		Usage:       application.Chat.Model3DUsage,
+		Production:  application.Chat.ModelReview.Inspect.Production,
 	})
 	return service
 }

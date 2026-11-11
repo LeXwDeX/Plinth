@@ -164,6 +164,12 @@ type agentFailureView struct {
 	Class     string `json:"class"`
 	Retryable bool   `json:"retryable"`
 	Ambiguous bool   `json:"ambiguous,omitempty"`
+	// #251: the actionable category and suggested next action. Category and
+	// NextAction are stable ids; Advice is the Schema's sentence. None of them
+	// carries SafeDetail or an upstream excerpt.
+	Category   string `json:"category,omitempty"`
+	NextAction string `json:"next_action,omitempty"`
+	Advice     string `json:"advice,omitempty"`
 	// UserDecisionRequired marks a failure the Agent must not retry on its own: the
 	// Offering bills in credits and the Schema declares the class as one where the upstream
 	// may already have finished and charged, or the failure is ambiguous (the upstream may
@@ -224,6 +230,9 @@ func buildAgentTaskViewIn(task generation.Task, chatSchema catalog.ChatSchema,
 	if view.Failure != nil && view.Failure.Reason != "" && texts != nil {
 		view.Failure.Reason = texts.Text(locale, view.Failure.Reason)
 	}
+	if view.Failure != nil && view.Failure.Advice != "" && texts != nil {
+		view.Failure.Advice = texts.Text(locale, view.Failure.Advice)
+	}
 	if view.UpstreamQueue != nil && view.UpstreamQueue.Note != "" && texts != nil {
 		view.UpstreamQueue.Note = texts.Text(locale, view.UpstreamQueue.Note)
 	}
@@ -257,6 +266,19 @@ func buildAgentTaskView(task generation.Task, chatSchema catalog.ChatSchema) age
 			view.Failure.Retryable = false
 			view.Failure.UserDecisionRequired = true
 			view.Failure.Reason = reason
+		}
+		// #251: one actionable category and next action, without the internal
+		// failure detail. A metered or ambiguous failure always asks the person.
+		report := generation.ClassifyFailure(task.Failure.Class, task.Failure.Retryable, task.Failure.Ambiguous)
+		if view.Failure.UserDecisionRequired {
+			report.Retryable, report.UserDecisionRequired = false, true
+			report.Action = generation.ActionAskUser
+		}
+		view.Failure.Category, view.Failure.NextAction = string(report.Category), string(report.Action)
+		view.Failure.Retryable = report.Retryable
+		view.Failure.Advice = chatSchema.Processing.Failures.Advice[string(report.Category)]
+		if view.Failure.Advice == "" {
+			view.Failure.Advice = string(report.Action)
 		}
 	}
 	for _, asset := range task.Assets {

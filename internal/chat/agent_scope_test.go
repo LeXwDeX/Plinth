@@ -109,7 +109,7 @@ func toolNames(request agents.Request) []string {
 
 var (
 	twoDTools      = []string{"create_multiview_images", "create_three_view", "edit_multiview_images", "refine_image", "remove_background"}
-	threeDTools    = []string{"build_creative_lab_item", "compare_model_reference", "compare_models", "create_creative_lab_design", "convert_model_format", "create_gaussian_splat", "create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views", "create_motion_clip", "get_processing_plan", "inspect_model", "list_session_models", "plan_model_processing", "process_model", "record_self_check", "render_model_views", "retexture_model"}
+	threeDTools    = []string{"build_creative_lab_item", "compare_model_reference", "compare_models", "create_creative_lab_design", "convert_model_format", "create_gaussian_splat", "create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views", "create_motion_clip", "get_processing_plan", "inspect_model", "list_session_models", "plan_model_processing", "process_model", "record_self_check", "render_model_views", "retexture_model", "revise_processing_plan"}
 	utilityToolSet = []string{"ask_choice", "create_selection_mask", "find_history_images", "get_production_step", "get_task", "inspect_image", "list_offerings", "list_project_assets", "observe_task", "propose_production_plan", "recover_task_result", "request_consent", "set_params", "set_visual_anchor", "update_production_brief", "update_session_notes"}
 )
 

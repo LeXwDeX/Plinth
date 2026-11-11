@@ -40,7 +40,9 @@ same HTTP API the browser uses:
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
 (NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, p2, project, agent, agent-background,
-agent-quality, image-self-check, image-purpose, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, preferences, faults;
+agent-quality, image-self-check, image-purpose, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, faults;
+"plan-checkpoint" the #251 budget plan checkpoint: a failed inherited check pauses the next step,
+the declared contingency is inserted within the approved budget, and no second approval card appears;
 "preferences" the #241 session choices: four candidates, pick/reject with reasons, the next prompt carrying them,
 the framed block surviving compaction, edit/delete effects, and a second owner's 404;
 "agent" runs both agent scenarios, "hyper3d-agent" the Hyper3D chain alone,
@@ -91,6 +93,7 @@ GOOD_KEY = "fake-test-key"
 TEXT_TO_3D = "tripo/tripo-v3.1-full/text-to-3d"
 MESHY_TEXT_TO_3D = "meshy/meshy-7.1/text-to-3d"
 MESHY_REMESH = "meshy/processing/remesh"
+MESHY_RESIZE = "meshy/processing/resize"
 MESHY_RETEXTURE = "meshy/processing/retexture"
 MESHY_CONVERT = "meshy/processing/convert"
 MESHY_RIGGING = "meshy/processing/rigging"
@@ -2016,13 +2019,19 @@ def _quality_feedback(api, session, feedback, tasks, facts, domain=None, model=N
     return stage, ""
 
 
-def run_quality_case(api, request, domain, model, model_3d=""):
+def run_quality_case(api, request, domain, model, model_3d="", work=""):
     """One request through the fake-LLM chat path; returns the run dict for agent_quality.
 
     A request with a project builds the #240 fixture first: project_setup steps
     promote the first picture and open the project's next session; only tool
     steps count as tool calls. #241 steps may carry several tools in one user
-    message (one result card) and feedback actions between turns."""
+    message (one result card) and feedback actions between turns.
+
+    work is the stack's work directory when the request exercises processing
+    plans: plan cards are approved through the budget route, and the revision
+    step reads the paused plan's id/version from the stack's own store (the
+    same values get_processing_plan now reports to the Agent).
+    """
     started = time.time()
     project_id = _quality_create_project(api, request)
     session = new_session(api, project_id)
@@ -2067,8 +2076,26 @@ def run_quality_case(api, request, domain, model, model_3d=""):
                 # these steps and the real Agent must pass the gate or ask.
                 arguments["input_override_reason"] = "the fake upstream image is a placeholder, not a real 3D input"
             model_task = _quality_model_task(api, session)
-            if model_task and arguments.get("model") == "@model1":
-                arguments["model"] = model_task
+            if model_task:
+                for name in ("model", "source_task_id", "source"):
+                    if arguments.get(name) == "@model1":
+                        arguments[name] = model_task
+            if tool_spec["name"] == "revise_processing_plan" and work:
+                # The plan pauses on its checkpoint after the background step
+                # finishes; the Agent reads its id/version from get_processing_plan.
+                paused = _wait_processing_plan(
+                    work, session,
+                    lambda plan: plan["state"] == "PAUSED" and plan["failure"] == "plan_checkpoint_failed",
+                    seconds=180)
+                if paused:
+                    if arguments.get("plan_id") in (None, "", "@plan1"):
+                        arguments["plan_id"] = paused["id"]
+                    if arguments.get("expected_plan_version") in (None, 0, "@plan_version"):
+                        arguments["expected_plan_version"] = paused["version"]
+                    if arguments.get("step_index") == "@checkpoint_step":
+                        arguments["step_index"] = next(
+                            (index for index, item in enumerate(paused["steps"])
+                             if (item.get("checkpoint") or {}).get("state") == "failed"), 0)
             if tool_spec["name"] == "refine_image" and arguments.get("prompt_from_preferences"):
                 preference_prompt = True
             markers.append(_quality_marker({"name": tool_spec["name"], "arguments": arguments}))
@@ -2093,12 +2120,16 @@ def run_quality_case(api, request, domain, model, model_3d=""):
                     if not request_id or request_id in seen:
                         continue
                     seen.add(request_id)
-                    cards.append({"kind": "approval", "id": request_id, "tool": card.get("tool"),
-                                  "capability": card.get("capability"), "state": "approved"})
-                    status, decision = api.json("PUT", f"/api/v1/tasks/grants/{request_id}", decision_body(api, "approve"))
-                    task_id = decision.get("task_id")
-                    if status == 200 and task_id:
-                        wait_task(api, task_id)
+                    if card.get("kind") == "plan":
+                        cards.append({"kind": "plan", "id": request_id, "tool": card.get("tool"), "state": "approved"})
+                        api.json("PUT", f"/api/v1/chat/sessions/{session}/budgets/{request_id}", decision_body(api, "approve"))
+                    else:
+                        cards.append({"kind": "approval", "id": request_id, "tool": card.get("tool"),
+                                      "capability": card.get("capability"), "state": "approved"})
+                        status, decision = api.json("PUT", f"/api/v1/tasks/grants/{request_id}", decision_body(api, "approve"))
+                        task_id = decision.get("task_id")
+                        if status == 200 and task_id:
+                            wait_task(api, task_id)
                     answered = True
                 for card in _quality_choices(api, session):
                     card_id = card.get("id")
@@ -2118,6 +2149,20 @@ def run_quality_case(api, request, domain, model, model_3d=""):
                     detail = wait_task(api, task.get("id"))
                     if detail:
                         step_tasks.append(detail)
+            # A processing plan advances in the background: wait for its checkpoint
+            # pause or final state, then observe every Task it submitted.
+            if work and any(tool_spec["name"] in ("plan_model_processing", "revise_processing_plan")
+                            for tool_spec in step_tools):
+                _wait_processing_plan(
+                    work, session,
+                    lambda plan: plan["state"] in ("SUCCEEDED", "FAILED")
+                    or (plan["state"] == "PAUSED" and plan["failure"] == "plan_checkpoint_failed"),
+                    seconds=180)
+                for task in session_tasks(api, session):
+                    if task.get("id") not in before_tasks:
+                        detail = wait_task(api, task.get("id"))
+                        if detail and all(detail.get("id") != item.get("id") for item in step_tasks):
+                            step_tasks.append(detail)
             last_step_tasks = step_tasks
             if preference_prompt and step_tasks:
                 for task in step_tasks:
@@ -2150,6 +2195,7 @@ def run_quality_case(api, request, domain, model, model_3d=""):
         "session_id": session,
         "messages": messages,
         "tasks": tasks,
+        "plans": _processing_plans(work, "main", session) if work else [],
         "cards": cards,
         "final_reply": _quality_final_reply(_quality_messages(api, sessions[-1])),
         "image_count": images,
@@ -2287,7 +2333,7 @@ def scenario_project(api, offerings, work):
            f"status {status}, {len(raw)} bytes, want {picture['size']}")
 
 
-def scenario_agent_quality(api, offerings, report_dir=""):
+def scenario_agent_quality(api, offerings, report_dir="", work=""):
     """Run the fixed request set (#238) and write a trajectory report."""
     import agent_quality as quality
 
@@ -2300,7 +2346,10 @@ def scenario_agent_quality(api, offerings, report_dir=""):
     for request in data["requests"]:
         domain = "image" if request.get("modality") == "2d" else "model-3d"
         model = image_model if request.get("modality") == "2d" else model_3d
-        run = run_quality_case(api, request, domain, model, model_3d)
+        # A request may pin the session's 3D model when its plan names one
+        # (for example the Meshy 7.1 checkpoint case).
+        session_model_3d = request.get("model_3d") or model_3d
+        run = run_quality_case(api, request, domain, model, session_model_3d, work)
         case = quality.evaluate_case(request, run)
         cases.append(case)
         failed = quality.case_hard_failures(case)
@@ -4532,9 +4581,252 @@ def scenario_visual_anchors(api, offerings, work):
            f"prompt={texture_prompt!r}")
 
 
+def _processing_plans(work, stack, session):
+    """Reads the session's processing plans from the stack's SQLite file, as
+    the panel's own list route would (state, failure and frozen steps)."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+        rows = db.execute(
+            "SELECT id, state, failure, steps_json, version FROM processing_plans "
+            "WHERE session_id=? ORDER BY created_at DESC", (session,)).fetchall()
+        db.close()
+    except sqlite3.Error:
+        return []
+    plans = []
+    for plan_id, state, failure, steps_json, version in rows:
+        try:
+            steps = json.loads(steps_json)
+        except ValueError:
+            steps = []
+        plans.append({"id": plan_id, "state": state, "failure": failure or "",
+                      "steps": steps, "version": version})
+    return plans
+
+
+def _tool_results(work, stack, session, tool_name):
+    """JSON tool results the Agent received for one tool, oldest first.
+
+    They live in the persisted chat checkpoint's completed messages; the
+    public messages wire carries only the call summary. This reads the same
+    server-side copy the Agent sees, never the processing-plans table."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+        rows = db.execute(
+            "SELECT checkpoint_json FROM go_chat_turns WHERE session_id=? ORDER BY updated_at ASC",
+            (session,)).fetchall()
+        db.close()
+    except sqlite3.Error:
+        return []
+    results, seen = [], set()
+    for (checkpoint_json,) in rows:
+        try:
+            checkpoint = json.loads(checkpoint_json or "{}")
+        except ValueError:
+            continue
+        calls = {call.get("ID"): call.get("Name")
+                 for call in (checkpoint.get("assistant") or {}).get("ToolCalls") or []}
+        for message in checkpoint.get("completed") or []:
+            if message.get("Role") != "tool" or calls.get(message.get("ToolCallID")) != tool_name:
+                continue
+            content = message.get("Content") or ""
+            if content in seen:
+                continue
+            try:
+                payload = json.loads(content)
+            except ValueError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            seen.add(content)
+            results.append(payload)
+    return results
+
+
+def _wait_processing_plan(work, session, predicate, seconds=150):
+    end = time.time() + seconds
+    plan = None
+    while time.time() < end:
+        plans = _processing_plans(work, "main", session)
+        if plans:
+            plan = plans[0]
+            if predicate(plan):
+                return plan
+        time.sleep(0.5)
+    return plan
+
+
+def scenario_plan_checkpoint(work, api, offerings):
+    """#251: an approved budget plan stops after a failed checkpoint and the
+    Agent revises it with the declared contingency, without a second approval."""
+    session = new_session(api)
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
+    if status != 200:
+        record("plan-checkpoint: budget approval mode", False, f"PUT {status}")
+        return
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/brief",
+                         {"brief": {"purpose": "game_character"}})
+    if status != 200:
+        record("plan-checkpoint: write the game_character brief", False, f"PUT {status}")
+        return
+    plan = {
+        "title": "预算内检查点修订",
+        "steps": [
+            {"capability": "text-to-3d", "model": MESHY_TEXT_TO_3D, "purpose": "生成角色底模"},
+            {"capability": "remesh", "model": MESHY_REMESH, "purpose": "减面到游戏预算"},
+            {"capability": "rigging", "model": MESHY_RIGGING, "purpose": "绑骨"},
+        ],
+        "budgets": [{"unit": "legacy.credits", "amount": 100}],
+        "checkpoints": [{"after_capability": "remesh", "checks": ["triangles", "pivot_bottom_center"]}],
+        "contingencies": [
+            {"id": "low_poly", "trigger": ["triangles"],
+             "step": {"capability": "remesh", "model": MESHY_REMESH, "purpose": "按用途面数预算再减面"}},
+            {"id": "pivot", "trigger": ["pivot_bottom_center"],
+             "step": {"capability": "resize", "model": MESHY_RESIZE, "purpose": "把原点移到底部中心"}},
+        ],
+    }
+    marker = "[[fake:tool:propose_production_plan " + json.dumps(plan, ensure_ascii=False, separators=(",", ":")) + "]]"
+    status, _ = _send_chat(api, session, {"content": "按计划做角色 " + marker,
+                                          "creative_domain": "model-3d", "ai_model": MESHY_TEXT_TO_3D,
+                                          "domainModels": {"model-3d": MESHY_TEXT_TO_3D}})
+    if status not in (200, 201, 202):
+        record("plan-checkpoint: propose the plan", False, f"send {status}")
+        return
+    budget_id = ""
+    end = time.time() + 30
+    while time.time() < end:
+        pending = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items") or []
+        card = next((item for item in pending if item.get("kind") == "plan"), None)
+        if card:
+            budget_id = card.get("request_id") or ""
+            acceptance = (card.get("plan") or {}).get("acceptance") or []
+            break
+        time.sleep(0.4)
+    if not budget_id:
+        record("plan-checkpoint: plan card appears", False, "no plan card")
+        return
+    record("plan-checkpoint: the card shows acceptance criteria and a split estimate",
+           len(acceptance) > 0 and bool(card.get("step_totals")) and bool(card.get("contingency_totals")),
+           f"acceptance={len(acceptance)} step={card.get('step_totals')} contingencies={card.get('contingency_totals')}")
+    status, approved = api.json("PUT", f"/api/v1/chat/sessions/{session}/budgets/{budget_id}",
+                                decision_body(api, "approve"))
+    if status != 200 or approved.get("state") != "active":
+        record("plan-checkpoint: approve the plan", False, f"PUT {status} {approved}")
+        return
+
+    create = ('[[fake:tool:create_model_3d {"prompt":"a plain cube","model":"meshy-7.1"}]]')
+    model, why, _ = agent_tool_turn(api, session, "生成底模 " + create, creative_domain="model-3d",
+                                    ai_model=MESHY_TEXT_TO_3D)
+    if not model or model.get("state") != "SUCCEEDED":
+        record("plan-checkpoint: the budget generates the model", False, f"{why} {model}")
+        return
+    record("plan-checkpoint: the budget generates the model without a card", True,
+           f"task {model.get('id')}")
+
+    steps = [
+        {"capability": "remesh", "offering_id": MESHY_REMESH,
+         "parameters": {"topology": "triangle", "target_polycount": 100000}},
+        {"capability": "rigging", "offering_id": MESHY_RIGGING, "parameters": {}},
+    ]
+    processing = {"source_task_id": model.get("id"), "steps": steps}
+    marker = "[[fake:tool:plan_model_processing " + json.dumps(processing, ensure_ascii=False, separators=(",", ":")) + "]]"
+    status, _ = _send_chat(api, session, {"content": "建立加工计划 " + marker,
+                                          "creative_domain": "model-3d",
+                                          "domainModels": {"model-3d": MESHY_TEXT_TO_3D}})
+    if status not in (200, 201, 202):
+        record("plan-checkpoint: create the processing plan", False, f"send {status}")
+        return
+    paused = _wait_processing_plan(work, session,
+                                   lambda plan: plan["state"] == "PAUSED" and plan["failure"] == "plan_checkpoint_failed")
+    if not paused:
+        record("plan-checkpoint: the inherited checkpoint fails and pauses", False, "no paused plan")
+        return
+    checkpoint_step = next((step for step in paused["steps"] if step.get("checkpoint")), {})
+    checkpoint = checkpoint_step.get("checkpoint") or {}
+    results = checkpoint.get("results") or []
+    record("plan-checkpoint: the server evaluates the inherited checkpoint after remesh",
+           checkpoint_step.get("capability") == "remesh" and checkpoint_step.get("state") == "SUCCEEDED" and
+           checkpoint.get("state") == "failed" and
+           any(item.get("check") == "triangles" and item.get("status") == "fail" for item in results),
+           f"checkpoint={checkpoint.get('state')} results={[(item.get('check'), item.get('status')) for item in results]}")
+    processing_tasks = [task for task in session_tasks(api, session)
+                        if task.get("capability") in ("remesh", "rigging", "resize")]
+    record("plan-checkpoint: the next processing step (rigging) does not start",
+           len(processing_tasks) == 1 and not any(task.get("capability") == "rigging" for task in processing_tasks),
+           f"processing tasks {[(t.get('capability'), t.get('state')) for t in processing_tasks]}")
+
+    # The Agent reads the paused plan through the tool surface: plan_id came
+    # from the plan result, and get_processing_plan must report the current
+    # version (otherwise revise can never match) and the actionable failure.
+    plan_results = _tool_results(work, "main", session, "plan_model_processing")
+    plan_id = plan_results[-1].get("plan_id") if plan_results else paused["id"]
+    marker = "[[fake:tool:get_processing_plan " + json.dumps({"plan_id": plan_id}, ensure_ascii=False) + "]]"
+    status, _ = _send_chat(api, session, {"content": "读取暂停的加工计划 " + marker,
+                                          "creative_domain": "model-3d",
+                                          "domainModels": {"model-3d": MESHY_TEXT_TO_3D}})
+    if status not in (200, 201, 202):
+        record("plan-checkpoint: get_processing_plan after the pause", False, f"send {status}")
+        return
+    _quality_turn_done(api, session, timeout=60)
+    observed = None
+    end = time.time() + 30
+    while time.time() < end and observed is None:
+        observed = next((result for result in reversed(_tool_results(work, "main", session, "get_processing_plan"))
+                         if result.get("plan_id") == plan_id), None)
+        if observed is None:
+            time.sleep(0.3)
+    observed_version = (observed or {}).get("version")
+    detail = (observed or {}).get("failure_detail") or {}
+    record("plan-checkpoint: the read-only plan tool reports the paused version",
+           observed is not None and observed.get("state") == "PAUSED" and
+           observed.get("failure") == "plan_checkpoint_failed" and
+           isinstance(observed_version, int) and observed_version == paused["version"],
+           f"observed={observed_version} paused={paused['version']} state={(observed or {}).get('state')}")
+    record("plan-checkpoint: a failed checkpoint is classified as an actionable parameter problem",
+           detail.get("category") == "parameter_invalid" and detail.get("next_action") == "fix_parameters",
+           f"failure_detail={detail}")
+
+    revision = {
+        "plan_id": plan_id, "expected_plan_version": observed_version,
+        "operation": "insert", "step_index": 0, "contingency_id": "low_poly",
+        "parameters": {"topology": "triangle", "target_polycount": 20000},
+        "reason": "检查点未通过：把原点移到底部中心",
+    }
+    marker = "[[fake:tool:revise_processing_plan " + json.dumps(revision, ensure_ascii=False, separators=(",", ":")) + "]]"
+    status, _ = _send_chat(api, session, {"content": "按预案修订 " + marker,
+                                          "creative_domain": "model-3d",
+                                          "domainModels": {"model-3d": MESHY_TEXT_TO_3D}})
+    if status not in (200, 201, 202):
+        record("plan-checkpoint: revise insert", False, f"send {status}")
+        return
+    finished = _wait_processing_plan(work, session, lambda plan: plan["state"] in ("SUCCEEDED", "FAILED"))
+    if not finished or finished["state"] != "SUCCEEDED":
+        record("plan-checkpoint: the revision finishes inside the budget", False,
+               f"plan {finished.get('state') if finished else None}/{finished.get('failure') if finished else None}")
+        return
+    inserted = next((step for step in finished["steps"]
+                     if step.get("contingency_id") == "low_poly"), {})
+    record("plan-checkpoint: the declared contingency ran as an insert",
+           inserted.get("capability") == "remesh" and
+           inserted.get("revision_operation") == "insert" and inserted.get("state") == "SUCCEEDED",
+           f"inserted={inserted.get('capability')}/{inserted.get('revision_operation')}/{inserted.get('state')}")
+    record("plan-checkpoint: rigging finished after the revision",
+           finished["steps"][-1].get("capability") == "rigging" and finished["steps"][-1].get("state") == "SUCCEEDED",
+           f"steps {[(step.get('capability'), step.get('state')) for step in finished['steps']]}")
+    total = sum(int(step.get("estimated_credits") or 0) for step in finished["steps"])
+    record("plan-checkpoint: the worst-case estimate stays within the approved 100",
+           total <= 100, f"estimated {total} legacy.credits")
+    pending = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items") or []
+    plans = _processing_plans(work, "main", session)
+    record("plan-checkpoint: no second plan card and no pending approval",
+           len(pending) == 0 and len(plans) == 1,
+           f"pending={[(item.get('kind'), item.get('status')) for item in pending]} plans={len(plans)}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,preferences,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,plan-checkpoint,preferences,faults")
     # #241/#238: the preferences-off arm disables the feature in the private
     # Catalog (maximum_entries=0) without changing the revision.
     parser.add_argument("--preferences", choices=("on", "off"), default="on",
@@ -4560,7 +4852,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "work-ledger", "vision-budget", "three-view", "visual-anchors"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "work-ledger", "vision-budget", "three-view", "visual-anchors", "plan-checkpoint"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -4586,11 +4878,13 @@ def main():
             if "agent-background" in selected:
                 scenario_agent_background(api, offerings)
             if "agent-quality" in selected:
-                scenario_agent_quality(api, offerings, args.report or os.path.join(work, "agent-quality"))
+                scenario_agent_quality(api, offerings, args.report or os.path.join(work, "agent-quality"), work)
             if "image-self-check" in selected:
                 scenario_image_self_check(api, offerings, work)
             if "three-view" in selected:
                 scenario_three_view(work, api, offerings)
+            if "plan-checkpoint" in selected:
+                scenario_plan_checkpoint(work, api, offerings)
             if "image-purpose" in selected:
                 scenario_image_purpose(api, offerings, work)
             if "work-ledger" in selected:

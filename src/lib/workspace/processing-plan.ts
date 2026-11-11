@@ -9,6 +9,33 @@ import { withRequestReference } from '@/lib/problem-reference';
  * step of it. The 加工 tab and the 格式 tab both resume a plan through `resumeProcessingPlan`, so the consent
  * grant, the revision checks and the request body exist once.
  */
+/** #251: one frozen acceptance check of a processing checkpoint. */
+export interface ProcessingPlanCheck {
+  check: string;
+  minimum?: number;
+  maximum?: number;
+  maximum_ratio?: number;
+  required?: boolean;
+}
+
+/** #251: the server's judgement of one checkpoint check. */
+export interface ProcessingPlanCheckpointResult {
+  check: string;
+  status: string;
+  actual?: unknown;
+  detail?: string;
+}
+
+/** #251: the server-evaluated checkpoint after a step. It lives in steps_json. */
+export interface ProcessingPlanCheckpoint {
+  checks?: ProcessingPlanCheck[];
+  results?: ProcessingPlanCheckpointResult[];
+  state: string;
+  resolution?: string;
+  attempts?: number;
+  evaluated_at?: string;
+}
+
 export interface ProcessingPlanStep {
   capability: string;
   offering_id: string;
@@ -27,6 +54,16 @@ export interface ProcessingPlanStep {
   idempotency_key?: string;
   /** 进行中任务已满而排队：到这个时间（RFC3339）后台自动重提，提交成功后清空。 */
   queued_until?: string;
+  /** #251: the server-evaluated acceptance check after this step. */
+  checkpoint?: ProcessingPlanCheckpoint;
+  /** #251: a step inserted or replaced by an Agent revision. */
+  contingency_id?: string;
+  revision_operation?: string;
+  revision_reason?: string;
+  /** #251: the Agent-actionable failure classification, when this step failed. */
+  failure_category?: string;
+  next_action?: string;
+  failure_advice?: string;
 }
 
 export interface ProcessingPlan {
@@ -47,6 +84,22 @@ export function pausedResumableStep(plan: ProcessingPlan | null | undefined): Pr
 /** The failed step a person may retry; none while the plan has not failed. */
 export function retryableFailedStep(plan: ProcessingPlan | null | undefined): ProcessingPlanStep | undefined {
   return plan?.state === 'FAILED' ? plan.steps.find((step) => step.state === 'FAILED' && step.retryable) : undefined;
+}
+
+/**
+ * #251: the step whose checkpoint failure stopped the plan. While one exists
+ * the plan is paused before the next step; the person may continue past it
+ * (the check is recorded as waived) or the Agent may revise the plan.
+ */
+export function failedCheckpointStep(plan: ProcessingPlan | null | undefined): ProcessingPlanStep | undefined {
+  return plan?.state === 'PAUSED' && plan.failure === 'plan_checkpoint_failed'
+    ? plan.steps.find((step) => step.checkpoint?.state === 'failed')
+    : undefined;
+}
+
+/** A plan stopped by a failed checkpoint, with the step that carries it. */
+export function checkpointStopsPlan(plan: ProcessingPlan | null | undefined): boolean {
+  return failedCheckpointStep(plan) !== undefined;
 }
 
 /**
@@ -92,6 +145,38 @@ export async function reconcileProcessingPlan(schema: ProductSchema, plan: Proce
   const updated: unknown = await response.json().catch(() => undefined);
   if (!updated || typeof updated !== 'object' || (updated as ProcessingPlan).id !== plan.id
     || typeof (updated as ProcessingPlan).version !== 'number' || !Array.isArray((updated as ProcessingPlan).steps)) throw undetermined();
+  return updated as ProcessingPlan;
+}
+
+/**
+ * #251: the person continues past a failed checkpoint. The server records the
+ * check as waived for this person and advances the plan; the failed result
+ * stays visible. No new Task is submitted by this call, and each later step
+ * keeps its own approval rules.
+ */
+export async function continuePastCheckpoint(
+  schema: ProductSchema, plan: ProcessingPlan, fetcher: typeof fetch = (input, init) => fetch(input, init),
+): Promise<ProcessingPlan> {
+  const route = schema.runtime.http.routes.processing_plan_resume;
+  const step = failedCheckpointStep(plan);
+  if (!route || !step) throw new Error(schemaText(schema, 'ui.workspace.processing.plan_continue_checkpoint_failed'));
+  let response: Response;
+  try {
+    response = await fetcher(route.replace('{planID}', encodeURIComponent(plan.id)), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expected_plan_version: plan.version, expected_offering_revision: step.revision }),
+    });
+  } catch { throw new Error(schemaText(schema, 'ui.workspace.processing.plan_continue_checkpoint_failed')); }
+  if (!response.ok) {
+    const body: { detail?: string } = await response.json().catch(() => ({}));
+    throw new Error(body?.detail ? withRequestReference(body.detail, body)
+      : schemaText(schema, 'ui.workspace.processing.plan_continue_checkpoint_failed'));
+  }
+  const updated: unknown = await response.json().catch(() => undefined);
+  if (!updated || typeof updated !== 'object' || (updated as ProcessingPlan).id !== plan.id
+    || typeof (updated as ProcessingPlan).version !== 'number' || !Array.isArray((updated as ProcessingPlan).steps)) {
+    throw new Error(schemaText(schema, 'ui.workspace.processing.plan_continue_checkpoint_failed'));
+  }
   return updated as ProcessingPlan;
 }
 

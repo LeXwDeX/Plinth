@@ -96,6 +96,15 @@ type ProductionPlanPolicy struct {
 	Offerings         func() []generation.Offering
 	OfferingAvailable func(generation.OfferingID) bool
 	Store             ProductionPlanStore
+	// Usage and Production are the purpose budget and review thresholds the
+	// server uses to derive acceptance criteria and checkpoint thresholds
+	// (#251). The Agent names checks; these values fix what they mean.
+	Usage      catalog.ChatModel3DUsageSchema
+	Production catalog.ChatModelInspectProductionSchema
+	// Localize translates the acceptance wording into the proposal turn's
+	// language. The locale is the turn's own (command.Options.Locale); nil
+	// keeps the Schema's default language.
+	Localize func(locale, text string) string
 	// PurposeBudgetNote words the values a planned step would run with that
 	// are over the session purpose's budget (#129), or "" when they fit. It is
 	// optional: without it a plan carries no purpose budget note.
@@ -111,6 +120,16 @@ type ProductionPlanPolicy struct {
 func (service *Service) SetProductionPlanPurposeBudget(note func(ToolCommand, generation.Offering) string) {
 	if service.productionPlans != nil {
 		service.productionPlans.PurposeBudgetNote = note
+	}
+}
+
+// SetProductionPlanLocalizer installs the text translation used for the
+// acceptance criteria frozen at proposal time (#251). It is optional and runs
+// after the Schema's localizer exists; the callback receives the proposal
+// turn's locale.
+func (service *Service) SetProductionPlanLocalizer(localize func(locale, text string) string) {
+	if service.productionPlans != nil {
+		service.productionPlans.Localize = localize
 	}
 }
 
@@ -169,6 +188,20 @@ type proposedPlanArguments struct {
 		Amount json.Number `json:"amount"`
 	} `json:"budgets"`
 	CorrectionCapabilities []string `json:"correction_capabilities"`
+	// #251: checkpoints name only check ids; thresholds are server-derived.
+	Checkpoints []struct {
+		AfterCapability string   `json:"after_capability"`
+		Checks          []string `json:"checks"`
+	} `json:"checkpoints"`
+	Contingencies []struct {
+		ID      string   `json:"id"`
+		Trigger []string `json:"trigger"`
+		Step    struct {
+			Capability string `json:"capability"`
+			Model      string `json:"model"`
+			Purpose    string `json:"purpose"`
+		} `json:"step"`
+	} `json:"contingencies"`
 }
 
 // ProposeProductionPlan validates and stores one pending plan for the Agent's
@@ -205,7 +238,7 @@ func (service *Service) ProposeProductionPlan(ctx context.Context, command ToolC
 			return ToolResult{NoSubmission: true}, err
 		}
 	}
-	content, err := json.Marshal(planProposedContent(stored, policy.Budget.ToolMessages))
+	content, err := json.Marshal(planProposedContent(stored, policy.Budget.ToolMessages, policy.localize(command.Options.Locale, policy.Budget.Acceptance.Report)))
 	if err != nil {
 		return ToolResult{NoSubmission: true}, err
 	}
@@ -311,6 +344,21 @@ func (policy *ProductionPlanPolicy) buildPlan(command ToolCommand, arguments pro
 		}
 		plan.Steps = append(plan.Steps, planned)
 	}
+	acceptance, refusal := policy.acceptanceFor(command)
+	if refusal != "" {
+		return budget.Plan{}, nil, refusal
+	}
+	plan.Acceptance = acceptance
+	checkpoints, refusal := policy.buildCheckpoints(command, plan.Steps, arguments.Checkpoints)
+	if refusal != "" {
+		return budget.Plan{}, nil, refusal
+	}
+	plan.Checkpoints = checkpoints
+	contingencies, refusal := policy.buildContingencies(command, arguments, plan)
+	if refusal != "" {
+		return budget.Plan{}, nil, refusal
+	}
+	plan.Contingencies = contingencies
 	if uncovered := plan.Uncovered(limits); len(uncovered) > 0 {
 		return budget.Plan{}, nil, "budgets must give every unit the steps are quoted in at least the server estimate of that unit (" +
 			unitAmountsText(plan.EstimatedTotals()) + "); missing or too low: " + unitAmountsText(uncovered) +
@@ -506,7 +554,7 @@ func (policy *ProductionPlanPolicy) capabilityKnown(capability string) bool {
 // planProposedContent is the Agent-facing result of the plan tool. Its state
 // messages come from the Schema's approval_policy.budget.tool_messages, with
 // an English fallback for a historical Catalog (#103 review B4).
-func planProposedContent(stored budget.ProductionBudget, messages catalog.ChatApprovalBudgetToolMessages) map[string]any {
+func planProposedContent(stored budget.ProductionBudget, messages catalog.ChatApprovalBudgetToolMessages, report string) map[string]any {
 	steps := make([]map[string]any, 0, len(stored.Plan.Steps))
 	for _, step := range stored.Plan.Steps {
 		item := map[string]any{
@@ -524,6 +572,37 @@ func planProposedContent(stored budget.ProductionBudget, messages catalog.ChatAp
 			item["check"] = step.Check
 		}
 		steps = append(steps, item)
+	}
+	checkpoints := make([]map[string]any, 0, len(stored.Plan.Checkpoints))
+	for _, checkpoint := range stored.Plan.Checkpoints {
+		checks := make([]map[string]any, 0, len(checkpoint.Checks))
+		for _, check := range checkpoint.Checks {
+			item := map[string]any{"check": check.Check}
+			if check.Minimum != nil {
+				item["minimum"] = *check.Minimum
+			}
+			if check.Maximum != nil {
+				item["maximum"] = *check.Maximum
+			}
+			if check.MaximumRatio != nil {
+				item["maximum_ratio"] = *check.MaximumRatio
+			}
+			if check.Required {
+				item["required"] = true
+			}
+			checks = append(checks, item)
+		}
+		checkpoints = append(checkpoints, map[string]any{
+			"after_capability": checkpoint.AfterCapability, "checks": checks,
+		})
+	}
+	contingencies := make([]map[string]any, 0, len(stored.Plan.Contingencies))
+	for _, contingency := range stored.Plan.Contingencies {
+		contingencies = append(contingencies, map[string]any{
+			"id": contingency.ID, "trigger": contingency.Trigger,
+			"capability": contingency.Step.Capability, "offering_id": contingency.Step.OfferingID,
+			"purpose": contingency.Step.Purpose, "estimate": contingency.Step.Estimate,
+		})
 	}
 	message := planToolMessage(messages.Proposed,
 		"Production plan proposed; wait for the person to approve or deny it. Do not propose another plan before this one is decided.")
@@ -543,8 +622,14 @@ func planProposedContent(stored budget.ProductionBudget, messages catalog.ChatAp
 		"title":                   stored.Plan.Title,
 		"budgets":                 stored.Limits,
 		"estimated_totals":        stored.Plan.EstimatedTotals(),
+		"step_totals":             stored.Plan.StepTotals(),
+		"contingency_totals":      stored.Plan.ContingencyTotals(),
 		"steps":                   steps,
+		"acceptance":              stored.Plan.Acceptance,
+		"checkpoints":             checkpoints,
+		"contingencies":           contingencies,
 		"correction_capabilities": stored.Plan.CorrectionCapabilities,
+		"report_instruction":      report,
 		"message":                 message,
 	}
 }

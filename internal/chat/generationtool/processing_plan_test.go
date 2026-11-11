@@ -407,6 +407,28 @@ func TestAgentPlanObservationIsReadOnlyOwnerAndSessionScoped(t *testing.T) {
 	if err != nil || result.Error != "" || !strings.Contains(result.AgentContent, "「加工」") || strings.Contains(result.AgentContent, "prepared_input_hash") || strings.Contains(result.AgentContent, "authorization_request_id") {
 		t.Fatalf("observation=%+v err=%v", result, err)
 	}
+	// #251 fix: get_processing_plan exposes the plan version the revision tool
+	// requires. Without it the Agent has no observable source for
+	// expected_plan_version and every insert/replace/skip/retry/waive conflicts.
+	var observed map[string]any
+	if json.Unmarshal([]byte(result.AgentContent), &observed) != nil {
+		t.Fatalf("observation is not JSON: %s", result.AgentContent)
+	}
+	current := h.get(plan.ID)
+	version, ok := observed["version"].(float64)
+	if !ok || int64(version) != current.Version {
+		t.Fatalf("observed version = %v, plan version = %d", observed["version"], current.Version)
+	}
+	revise := `{"plan_id":"` + plan.ID + `","expected_plan_version":` + jsonNumber(int64(version)) +
+		`,"operation":"skip","step_index":2,"reason":"按观察到的版本跳过未开始的动画"}`
+	revised, err := h.executor.ReviseProcessingPlan(context.Background(), reviseCommand(revise))
+	if err != nil || strings.Contains(revised.AgentContent, `"success":false`) {
+		t.Fatalf("revision with the observed version failed: %+v err=%v", revised, err)
+	}
+	after := h.get(plan.ID)
+	if after.Steps[2].State != processing.Skipped || after.Version <= current.Version {
+		t.Fatalf("revision did not apply: %+v", after)
+	}
 	for _, scope := range [][2]string{{"owner-b", "session-a"}, {"owner-a", "session-b"}} {
 		command.OwnerID, command.SessionID = scope[0], scope[1]
 		result, err = h.executor.ReadProcessingPlan(context.Background(), command)
@@ -459,5 +481,34 @@ func TestAgentPlanRefusesRemeshDefaultsOverTheRiggingLimit(t *testing.T) {
 		if result, _ := h.executor.Execute(context.Background(), h.command(arguments), nil); result.Error != "" {
 			t.Fatalf("compatible plan %s refused: %s", parameters, result.Error)
 		}
+	}
+}
+
+// #251: retexture and format-conversion are plan capabilities; a retexture
+// that needs a reference picture stays with retexture_model.
+func TestPlanToolCoversRetextureAndFormatConversion(t *testing.T) {
+	h := newAgentPlanHarness(t, "auto", false)
+	arguments := `{"source_task_id":"model-1","steps":[` +
+		`{"capability":"retexture","offering_id":"meshy/processing/retexture","parameters":{"prompt":"mossy stone"}},` +
+		`{"capability":"format-conversion","offering_id":"meshy/processing/convert","parameters":{}}]}`
+	_, plan := h.propose(arguments)
+	if len(plan.Steps) != 2 || plan.Steps[0].Capability != "retexture" || plan.Steps[1].Capability != "format-conversion" ||
+		plan.Steps[0].OfferingID != "meshy/processing/retexture" || plan.Steps[1].OfferingID != "meshy/processing/convert" {
+		t.Fatalf("plan steps = %+v", plan.Steps)
+	}
+
+	// hyper3d's retexture requires a reference picture the plan tool cannot
+	// supply, so calling it with that pinned Offering must point at
+	// retexture_model instead.
+	reference := `{"source_task_id":"model-1","steps":[` +
+		`{"capability":"retexture","offering_id":"hyper3d/texture/local-model","parameters":{}}]}`
+	badCommand := h.command(reference)
+	badCommand.Call.ID = "plan-call-reference"
+	result, err := h.executor.Execute(context.Background(), badCommand, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Error == "" || result.NoSubmission == false {
+		t.Fatalf("a reference-only retexture must be refused without a plan: %+v", result)
 	}
 }

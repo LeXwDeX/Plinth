@@ -1,0 +1,695 @@
+package processing
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+
+	"github.com/LeXwDeX/Plinth/internal/budget"
+	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/modelinspect"
+)
+
+// checkpointFixture builds an Agent plan "remesh -> rigging" with a pivot
+// checkpoint after remesh and a resize contingency. The mock report fails the
+// pivot check unless the test changes it.
+func checkpointFixture(t *testing.T) (*Service, *memoryStore, *gatewayFake, Plan) {
+	t.Helper()
+	service, store, gateway := checkpointService(t)
+	ratio := 0.01
+	plan, err := service.Create(context.Background(), CreateCommand{OwnerID: "owner", SessionID: "session",
+		SourceTaskID: "source", SourceAssetID: "model", IdempotencyKey: "checkpoint-plan-key",
+		Origin: OriginAgent,
+		Steps: []StepRequest{
+			{OfferingID: "remesh", ExpectedOfferingRevision: "v1", Input: json.RawMessage(`{}`),
+				Checkpoint: &Checkpoint{Checks: []budget.PlanCheck{{Check: "pivot_bottom_center", MaximumRatio: &ratio}}}},
+			{OfferingID: "rigging", ExpectedOfferingRevision: "v1", Input: json.RawMessage(`{}`)},
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service, store, gateway, plan
+}
+
+// checkpointService is the shared runtime of the checkpoint fixtures: a
+// processing Catalog whose resize/rigging steps accept a remesh source, one
+// succeeded source Task, and a model report that fails the pivot check.
+func checkpointService(t *testing.T) (*Service, *memoryStore, *gatewayFake) {
+	t.Helper()
+	catalog := memoryCatalog{
+		"remesh": {ID: "remesh", Revision: "v1", ProviderID: "meshy", Capability: "remesh", Domain: generation.DomainProcessing,
+			Enabled: true, EstimatedCredits: 5, Parameters: []generation.Parameter{
+				{Name: "source_task", Type: "task", TaskCapabilities: []generation.Capability{"text-to-3d"}}}},
+		"resize": {ID: "resize", Revision: "v1", ProviderID: "meshy", Capability: "resize", Domain: generation.DomainProcessing,
+			Enabled: true, EstimatedCredits: 3, Parameters: []generation.Parameter{
+				{Name: "source_task", Type: "task", TaskCapabilities: []generation.Capability{"remesh"}},
+				{Name: "origin_at", Type: "text"}}},
+		"rigging": {ID: "rigging", Revision: "v1", ProviderID: "meshy", Capability: "rigging", Domain: generation.DomainProcessing,
+			Enabled: true, EstimatedCredits: 5, Parameters: []generation.Parameter{
+				{Name: "source_task", Type: "task", TaskCapabilities: []generation.Capability{"remesh", "resize"}}}},
+	}
+	source := generation.Task{ID: "source", OwnerID: "owner", SessionID: "session", Capability: "text-to-3d", State: generation.TaskSucceeded,
+		Offering: generation.Offering{ProviderID: "meshy"}, Assets: []generation.Asset{{ID: "model", Role: "model", StorageKey: "ready"}}}
+	gateway := &gatewayFake{tasks: map[generation.TaskID]generation.Task{"source": source}, byKey: map[string]generation.TaskID{}}
+	store := &memoryStore{plans: map[string]Plan{}}
+	service, err := New(store, catalog, gateway, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.WithModelReport(func(context.Context, generation.OwnerID, generation.TaskID, generation.AssetID) (modelinspect.Report, error) {
+		return modelinspect.Report{
+			Triangles: 100,
+			BBox: modelinspect.BBoxReport{Size: [3]float64{1, 1, 1},
+				BottomCenterOffset: [3]float64{0, 0.5, 0}},
+		}, nil
+	})
+	return service, store, gateway
+}
+
+func succeedTask(gateway *gatewayFake, id generation.TaskID) {
+	task := gateway.tasks[id]
+	task.State = generation.TaskSucceeded
+	task.Offering.ProviderID = "meshy"
+	task.Assets = []generation.Asset{{ID: "out", Role: "model", StorageKey: "ready"}}
+	gateway.tasks[id] = task
+}
+
+func TestCheckpointFailureStopsTheNextStep(t *testing.T) {
+	ctx := context.Background()
+	service, store, gateway, plan := checkpointFixture(t)
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	if len(gateway.commands) != 1 {
+		t.Fatalf("first step submissions = %d", len(gateway.commands))
+	}
+	succeedTask(gateway, "step-1")
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	stored := store.plans[plan.ID]
+	if stored.State != Paused || stored.Failure != ReasonCheckpointFailed {
+		t.Fatalf("plan after failed checkpoint = %s/%s", stored.State, stored.Failure)
+	}
+	if len(gateway.commands) != 1 {
+		t.Fatalf("a failed checkpoint must not start the next step: %d submissions", len(gateway.commands))
+	}
+	step := stored.Steps[0]
+	if step.State != Succeeded || step.Checkpoint == nil || step.Checkpoint.State != CheckpointFailed {
+		t.Fatalf("step checkpoint = %+v", step.Checkpoint)
+	}
+	// The succeeded step carries the blocking reason, so the plan failure is
+	// classified from it: a checkpoint failure is an actionable parameter
+	// problem, not an internal error that tells the Agent to contact an admin.
+	if step.Failure != ReasonCheckpointFailed {
+		t.Fatalf("step failure = %q, want %q", step.Failure, ReasonCheckpointFailed)
+	}
+	if len(step.Checkpoint.Results) != 1 || step.Checkpoint.Results[0].Status != "fail" {
+		t.Fatalf("checkpoint results = %+v", step.Checkpoint.Results)
+	}
+	report := ClassifyStepFailure(step.Failure, nil)
+	if report.Category != generation.CategoryParameterInvalid || report.Action != generation.ActionFixParameters {
+		t.Fatalf("checkpoint failure classification = %+v", report)
+	}
+}
+
+func TestPersonContinuesPastAFailedCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	service, store, gateway, plan := checkpointFixture(t)
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	succeedTask(gateway, "step-1")
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	paused := store.plans[plan.ID]
+	if paused.State != Paused || paused.Failure != ReasonCheckpointFailed {
+		t.Fatalf("paused plan = %s/%s", paused.State, paused.Failure)
+	}
+	continued, err := service.Resume(ctx, ResumeCommand{OwnerID: "owner", PlanID: plan.ID,
+		ExpectedPlanVersion: paused.Version, ExpectedOfferingRevision: paused.Steps[0].Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if continued.State != Pending || continued.Failure != "" ||
+		continued.Steps[0].Checkpoint.State != CheckpointWaived ||
+		continued.Steps[0].Checkpoint.Resolution != CheckpointResolutionUserContinue ||
+		continued.Steps[0].Failure != "" {
+		t.Fatalf("continued plan = %+v steps=%+v", continued, continued.Steps)
+	}
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	if len(gateway.commands) != 2 {
+		t.Fatalf("person's continue must start the next step: %d submissions", len(gateway.commands))
+	}
+}
+
+func TestCheckpointPassAndUnknownContinueThePlan(t *testing.T) {
+	ctx := context.Background()
+	service, store, gateway, plan := checkpointFixture(t)
+	service.WithModelReport(func(context.Context, generation.OwnerID, generation.TaskID, generation.AssetID) (modelinspect.Report, error) {
+		return modelinspect.Report{BBox: modelinspect.BBoxReport{Size: [3]float64{1, 1, 1}}}, nil
+	})
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	succeedTask(gateway, "step-1")
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	if len(gateway.commands) != 2 {
+		t.Fatalf("a passed checkpoint must let the next step start: %d submissions", len(gateway.commands))
+	}
+	stored := store.plans[plan.ID]
+	if stored.Steps[0].Checkpoint.State != CheckpointPassed || stored.State != Running {
+		t.Fatalf("passed checkpoint = %+v plan %s", stored.Steps[0].Checkpoint, stored.State)
+	}
+
+	// An unreadable report is unknown and must not block.
+	service, store, gateway, plan = checkpointFixture(t)
+	service.WithModelReport(func(context.Context, generation.OwnerID, generation.TaskID, generation.AssetID) (modelinspect.Report, error) {
+		return modelinspect.Report{}, errors.New("asset store unavailable")
+	})
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	succeedTask(gateway, "step-1")
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	stored = store.plans[plan.ID]
+	if stored.Steps[0].Checkpoint.State != CheckpointUnknown || stored.State != Running {
+		t.Fatalf("unknown checkpoint = %+v plan %s", stored.Steps[0].Checkpoint, stored.State)
+	}
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	if len(gateway.commands) != 2 {
+		t.Fatalf("unknown must not block: %d submissions", len(gateway.commands))
+	}
+}
+
+func TestCreateRefusesCheckpointsWithoutAnEvaluatorOrForBrowserPlans(t *testing.T) {
+	ctx := context.Background()
+	catalog := memoryCatalog{"remesh": {ID: "remesh", Revision: "v1", ProviderID: "meshy", Capability: "remesh",
+		Domain: generation.DomainProcessing, Enabled: true, EstimatedCredits: 5,
+		Parameters: []generation.Parameter{{Name: "source_task", Type: "task", TaskCapabilities: []generation.Capability{"text-to-3d"}}}}}
+	source := generation.Task{ID: "source", OwnerID: "owner", SessionID: "session", Capability: "text-to-3d", State: generation.TaskSucceeded,
+		Offering: generation.Offering{ProviderID: "meshy"}, Assets: []generation.Asset{{ID: "model", Role: "model", StorageKey: "ready"}}}
+	gateway := &gatewayFake{tasks: map[generation.TaskID]generation.Task{"source": source}, byKey: map[string]generation.TaskID{}}
+	store := &memoryStore{plans: map[string]Plan{}}
+	service, err := New(store, catalog, gateway, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ratio := 0.1
+	request := CreateCommand{OwnerID: "owner", SessionID: "session", SourceTaskID: "source", SourceAssetID: "model",
+		IdempotencyKey: "checkpoint-no-evaluator", Origin: OriginAgent,
+		Steps: []StepRequest{{OfferingID: "remesh", ExpectedOfferingRevision: "v1", Input: json.RawMessage(`{}`),
+			Checkpoint: &Checkpoint{Checks: []budget.PlanCheck{{Check: "pivot_bottom_center", MaximumRatio: &ratio}}}}}}
+	if _, err := service.Create(ctx, request); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("checkpoint without evaluator = %v", err)
+	}
+	service.WithModelReport(func(context.Context, generation.OwnerID, generation.TaskID, generation.AssetID) (modelinspect.Report, error) {
+		return modelinspect.Report{}, nil
+	})
+	request.Origin = OriginBrowser
+	request.IdempotencyKey = "checkpoint-browser-plan"
+	if _, err := service.Create(ctx, request); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("browser checkpoint = %v", err)
+	}
+	request.Origin = OriginAgent
+	request.IdempotencyKey = "checkpoint-unknown-check"
+	request.Steps[0].Checkpoint.Checks[0].Check = "made_up"
+	if _, err := service.Create(ctx, request); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unknown check = %v", err)
+	}
+}
+
+func TestReviseInsertRunsTheDeclaredContingencyInsideThePlan(t *testing.T) {
+	ctx := context.Background()
+	service, store, gateway, plan := checkpointFixture(t)
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	succeedTask(gateway, "step-1")
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	paused := store.plans[plan.ID]
+	contingency := budget.PlanContingency{ID: "pivot", Trigger: []string{"pivot_bottom_center"},
+		Step: budget.PlanStep{Capability: "resize", OfferingID: "resize", Estimate: budget.Legacy(3)}}
+	revised, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: paused.Version, Operation: OperationInsert, StepIndex: 0,
+		ContingencyID: "pivot", Contingency: &contingency, Parameters: json.RawMessage(`{"origin_at":"bottom"}`),
+		Reason: "检查点未通过，按预案把原点移到底部中心"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revised.Steps) != 3 || revised.Steps[1].Capability != "resize" ||
+		revised.Steps[1].ContingencyID != "pivot" || revised.Steps[1].RevisionOperation != OperationInsert {
+		t.Fatalf("inserted step = %+v", revised.Steps)
+	}
+	if revised.State != Pending || revised.Failure != "" {
+		t.Fatalf("plan after insert = %s/%s", revised.State, revised.Failure)
+	}
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	succeedTask(gateway, "step-2")
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	succeedTask(gateway, "step-3")
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	final := store.plans[plan.ID]
+	if final.State != Succeeded {
+		t.Fatalf("final plan = %s/%s steps=%+v", final.State, final.Failure, final.Steps)
+	}
+	if len(gateway.commands) != 3 {
+		t.Fatalf("paid submissions = %d", len(gateway.commands))
+	}
+}
+
+func TestReviseOutsideTheDeclaredContingencyNeedsAPerson(t *testing.T) {
+	ctx := context.Background()
+	service, store, gateway, plan := checkpointFixture(t)
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	succeedTask(gateway, "step-1")
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	paused := store.plans[plan.ID]
+	other := budget.PlanContingency{ID: "other", Trigger: []string{"triangles"},
+		Step: budget.PlanStep{Capability: "resize", OfferingID: "resize", Estimate: budget.Legacy(3)}}
+	for name, command := range map[string]ReviseCommand{
+		"unknown contingency": {OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+			ExpectedPlanVersion: paused.Version, Operation: OperationInsert, StepIndex: 0,
+			ContingencyID: "missing", Parameters: json.RawMessage(`{"origin_at":"bottom"}`), Reason: "x"},
+		"trigger does not match": {OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+			ExpectedPlanVersion: paused.Version, Operation: OperationInsert, StepIndex: 0,
+			ContingencyID: "other", Contingency: &other, Parameters: json.RawMessage(`{"origin_at":"bottom"}`), Reason: "x"},
+	} {
+		if _, err := service.Revise(ctx, command); !errors.Is(err, ErrRevisionOutsidePlan) {
+			t.Fatalf("%s = %v", name, err)
+		}
+	}
+	if len(gateway.commands) != 1 {
+		t.Fatalf("a refused revision submitted a task: %d", len(gateway.commands))
+	}
+}
+
+func TestReviseReplaceSkipRetryAndWaiveRespectFreezingAndLimits(t *testing.T) {
+	ctx := context.Background()
+	service, store, gateway, plan := checkpointFixture(t)
+	// Replace and skip only move a step that never started.
+	replaced, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: plan.Version, Operation: OperationReplace, StepIndex: 1,
+		Capability: "resize", OfferingID: "resize", Parameters: json.RawMessage(`{"origin_at":"bottom"}`), Reason: "换一个未开始的步骤"})
+	if err != nil || replaced.Steps[1].Capability != "resize" {
+		t.Fatalf("replace pending = %+v %v", replaced.Steps, err)
+	}
+	// A started step cannot be moved.
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	running := store.plans[plan.ID]
+	if _, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: running.Version, Operation: OperationSkip, StepIndex: 0, Reason: "skip a started step"}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("skip started = %v", err)
+	}
+	// Version, owner and session are checked before any mutation.
+	if _, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: running.Version - 1, Operation: OperationSkip, StepIndex: 1, Reason: "stale"}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale version = %v", err)
+	}
+	if _, err := service.Revise(ctx, ReviseCommand{OwnerID: "other", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: running.Version, Operation: OperationSkip, StepIndex: 1, Reason: "foreign"}); err == nil {
+		t.Fatal("foreign owner was accepted")
+	}
+	if _, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "other", PlanID: plan.ID,
+		ExpectedPlanVersion: running.Version, Operation: OperationSkip, StepIndex: 1, Reason: "foreign"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("foreign session = %v", err)
+	}
+	// Empty and overlong reasons are refused.
+	if _, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: running.Version, Operation: OperationSkip, StepIndex: 1, Reason: " "}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("empty reason = %v", err)
+	}
+	long := make([]byte, MaxRevisionReasonCharacters+1)
+	for index := range long {
+		long[index] = 'a'
+	}
+	if _, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: running.Version, Operation: OperationSkip, StepIndex: 1, Reason: string(long)}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("long reason = %v", err)
+	}
+	// Retry uses the existing failed-step rules. The checkpoint after the first
+	// step is waived so the plan can continue to the replaced step.
+	succeedTask(gateway, "step-1")
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	checkpointFailed := store.plans[plan.ID]
+	waived, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: checkpointFailed.Version, Operation: OperationWaiveCheckpoint, StepIndex: 0,
+		Reason: "先接受原点位置，验证重试路径"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = waived
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	failedTask := gateway.tasks["step-2"]
+	failedTask.State = generation.TaskFailed
+	failedTask.Failure = &generation.Failure{Class: generation.FailureRateLimited, Retryable: true}
+	gateway.tasks["step-2"] = failedTask
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	failed := store.plans[plan.ID]
+	if failed.State != Failed {
+		t.Fatalf("plan after upstream failure = %s", failed.State)
+	}
+	retried, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: failed.Version, Operation: OperationRetry, StepIndex: 1, Reason: "上游限流，重试"})
+	if err != nil || retried.Steps[1].Retry != 1 {
+		t.Fatalf("revise retry = %+v %v", retried.Steps, err)
+	}
+}
+
+func TestReviseWaivesAFailedCheckpointOnceWithAReason(t *testing.T) {
+	ctx := context.Background()
+	service, store, gateway, plan := checkpointFixture(t)
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	succeedTask(gateway, "step-1")
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	paused := store.plans[plan.ID]
+	waived, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: paused.Version, Operation: OperationWaiveCheckpoint, StepIndex: 0,
+		Reason: "用户接受当前原点位置"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waived.Steps[0].Checkpoint.State != CheckpointWaived || waived.State != Pending {
+		t.Fatalf("waived checkpoint = %+v plan %s", waived.Steps[0].Checkpoint, waived.State)
+	}
+	// The same plan cannot waive a second checkpoint.
+	if _, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: waived.Version, Operation: OperationWaiveCheckpoint, StepIndex: 0,
+		Reason: "again"}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("second waive = %v", err)
+	}
+}
+
+// #251: a historical failed checkpoint is provenance only; an insert/waive must
+// target the step that currently blocks the plan.
+func TestReviseRefusesToSkipWhileACheckpointBlocksThePlan(t *testing.T) {
+	ctx := context.Background()
+	service, store, gateway, plan := checkpointFixture(t)
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	succeedTask(gateway, "step-1")
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	paused := store.plans[plan.ID]
+	if paused.State != Paused || paused.Failure != ReasonCheckpointFailed {
+		t.Fatalf("paused plan = %s/%s", paused.State, paused.Failure)
+	}
+	if _, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: paused.Version, Operation: OperationSkip, StepIndex: 1,
+		Reason: "跳过剩余步骤"}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("skip while checkpoint blocks = %v, want ErrConflict", err)
+	}
+	stored := store.plans[plan.ID]
+	if stored.State != Paused || stored.Steps[1].State == Skipped {
+		t.Fatalf("refused skip mutated the plan: %+v", stored)
+	}
+}
+
+func TestReviseInsertAcceptsADeclaredCheckpointFailedContingency(t *testing.T) {
+	ctx := context.Background()
+	service, store, gateway, plan := checkpointFixture(t)
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	succeedTask(gateway, "step-1")
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	paused := store.plans[plan.ID]
+	contingency := budget.PlanContingency{ID: "repair", Trigger: []string{"checkpoint_failed"},
+		Step: budget.PlanStep{Capability: "resize", OfferingID: "resize", Estimate: budget.Legacy(3)}}
+	revised, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: paused.Version, Operation: OperationInsert, StepIndex: 0,
+		ContingencyID: "repair", Contingency: &contingency, Parameters: json.RawMessage(`{"origin_at":"bottom"}`),
+		Reason: "按声明检查点失败预案修复"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revised.Steps) != 3 || revised.Steps[1].ContingencyID != "repair" {
+		t.Fatalf("contingency step = %+v", revised.Steps)
+	}
+}
+
+func TestConsentRequiredIsAUserDecisionNotAnInternalError(t *testing.T) {
+	report := ClassifyStepFailure(ReasonConsentRequired, nil)
+	if report.Category == generation.CategoryInternal || report.Action == generation.ActionContactAdmin {
+		t.Fatalf("consent-required classification = %+v", report)
+	}
+	if report.Action != generation.ActionAskUser || !report.UserDecisionRequired {
+		t.Fatalf("consent-required should ask the user: %+v", report)
+	}
+}
+
+// singleStepCheckpointFixture is a plan whose only step carries a failing
+// checkpoint. Waiving or continuing it leaves nothing to advance (#251 fix).
+func singleStepCheckpointFixture(t *testing.T) (*Service, *memoryStore, *gatewayFake, Plan) {
+	t.Helper()
+	service, store, gateway := checkpointService(t)
+	ratio := 0.01
+	plan, err := service.Create(context.Background(), CreateCommand{OwnerID: "owner", SessionID: "session",
+		SourceTaskID: "source", SourceAssetID: "model", IdempotencyKey: "last-step-checkpoint",
+		Origin: OriginAgent,
+		Steps: []StepRequest{{OfferingID: "remesh", ExpectedOfferingRevision: "v1", Input: json.RawMessage(`{}`),
+			Checkpoint: &Checkpoint{Checks: []budget.PlanCheck{{Check: "pivot_bottom_center", MaximumRatio: &ratio}}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service, store, gateway, plan
+}
+
+// #251 fix: a last-step waive/continue used to leave the plan PENDING forever
+// because advance only marked SUCCEEDED when a live Task changed state.
+func TestLastStepCheckpointResolutionCompletesThePlan(t *testing.T) {
+	ctx := context.Background()
+	for name, resolve := range map[string]func(t *testing.T) (*Service, *memoryStore, *gatewayFake, Plan, Plan){
+		"agent waive": func(t *testing.T) (*Service, *memoryStore, *gatewayFake, Plan, Plan) {
+			service, store, gateway, plan := singleStepCheckpointFixture(t)
+			if err := advanceApproved(ctx, service); err != nil {
+				t.Fatal(err)
+			}
+			succeedTask(gateway, "step-1")
+			if err := advanceApproved(ctx, service); err != nil {
+				t.Fatal(err)
+			}
+			paused := store.plans[plan.ID]
+			waived, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+				ExpectedPlanVersion: paused.Version, Operation: OperationWaiveCheckpoint, StepIndex: 0,
+				Reason: "接受最后一步的检查结果"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return service, store, gateway, plan, waived
+		},
+		"person continue": func(t *testing.T) (*Service, *memoryStore, *gatewayFake, Plan, Plan) {
+			service, store, gateway, plan := singleStepCheckpointFixture(t)
+			if err := advanceApproved(ctx, service); err != nil {
+				t.Fatal(err)
+			}
+			succeedTask(gateway, "step-1")
+			if err := advanceApproved(ctx, service); err != nil {
+				t.Fatal(err)
+			}
+			paused := store.plans[plan.ID]
+			continued, err := service.Resume(ctx, ResumeCommand{OwnerID: "owner", PlanID: plan.ID,
+				ExpectedPlanVersion: paused.Version, ExpectedOfferingRevision: paused.Steps[0].Revision})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return service, store, gateway, plan, continued
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			service, store, gateway, plan, resolved := resolve(t)
+			if resolved.State != Succeeded || resolved.Failure != "" {
+				t.Fatalf("resolved plan = %s/%s, want SUCCEEDED", resolved.State, resolved.Failure)
+			}
+			if resolved.Steps[0].Checkpoint.State != CheckpointWaived || resolved.Steps[0].Failure != "" {
+				t.Fatalf("resolved step = %+v", resolved.Steps[0])
+			}
+			if len(gateway.commands) != 1 {
+				t.Fatalf("resolution submitted another step: %d submissions", len(gateway.commands))
+			}
+			// The background sweep must not reopen or advance the finished plan.
+			if err := advanceApproved(ctx, service); err != nil {
+				t.Fatal(err)
+			}
+			final := store.plans[plan.ID]
+			if final.State != Succeeded || final.Version != resolved.Version {
+				t.Fatalf("finished plan changed: %+v", final)
+			}
+		})
+	}
+}
+
+// #251 fix: replace must not clear a checkpoint failure that still blocks the
+// plan; the Agent inserts the declared contingency or waives first.
+func TestReviseReplaceRefusesWhileACheckpointBlocksThePlan(t *testing.T) {
+	ctx := context.Background()
+	service, store, gateway, plan := checkpointFixture(t)
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	succeedTask(gateway, "step-1")
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	paused := store.plans[plan.ID]
+	if paused.State != Paused || paused.Failure != ReasonCheckpointFailed {
+		t.Fatalf("paused plan = %s/%s", paused.State, paused.Failure)
+	}
+	_, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: paused.Version, Operation: OperationReplace, StepIndex: 1,
+		Capability: "resize", OfferingID: "resize", Parameters: json.RawMessage(`{"origin_at":"bottom"}`),
+		Reason: "替换未开始的步骤"})
+	if !errors.Is(err, ErrRevisionCheckpointBlocked) || !errors.Is(err, ErrConflict) {
+		t.Fatalf("replace while checkpoint blocks = %v, want ErrRevisionCheckpointBlocked", err)
+	}
+	stored := store.plans[plan.ID]
+	if stored.State != Paused || stored.Failure != ReasonCheckpointFailed ||
+		stored.Steps[0].Failure != ReasonCheckpointFailed || stored.Steps[1].State != Pending ||
+		stored.Steps[1].Capability != "rigging" {
+		t.Fatalf("refused replace mutated the plan: %+v", stored)
+	}
+	// The same replace succeeds once the checkpoint no longer blocks.
+	waived, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: stored.Version, Operation: OperationWaiveCheckpoint, StepIndex: 0,
+		Reason: "先豁免检查点"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: waived.Version, Operation: OperationReplace, StepIndex: 1,
+		Capability: "resize", OfferingID: "resize", Parameters: json.RawMessage(`{"origin_at":"bottom"}`),
+		Reason: "现在可以替换未开始的步骤"}); err != nil {
+		t.Fatalf("replace after waive = %v", err)
+	}
+}
+
+// #251 fix: a contingency triggered by task_failed was approvable but its
+// insert branch was unreachable. The failed attempt is kept as provenance and
+// superseded by the declared repair.
+func TestReviseInsertAfterATaskFailureRunsTheDeclaredRepair(t *testing.T) {
+	ctx := context.Background()
+	service, store, gateway := checkpointService(t)
+	plan, err := service.Create(ctx, CreateCommand{OwnerID: "owner", SessionID: "session",
+		SourceTaskID: "source", SourceAssetID: "model", IdempotencyKey: "task-failed-repair",
+		Origin: OriginAgent,
+		Steps: []StepRequest{
+			{OfferingID: "remesh", ExpectedOfferingRevision: "v1", Input: json.RawMessage(`{}`)},
+			{OfferingID: "rigging", ExpectedOfferingRevision: "v1", Input: json.RawMessage(`{}`)},
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	succeedTask(gateway, "step-1")
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	// The next sweep prepares and submits rigging; a later sweep observes it.
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	failed := gateway.tasks["step-2"]
+	if failed.ID == "" {
+		t.Fatalf("rigging was not submitted: %+v", gateway.tasks)
+	}
+	failed.State = generation.TaskFailed
+	failed.Failure = &generation.Failure{Class: generation.FailureRateLimited, Retryable: true}
+	gateway.tasks[failed.ID] = failed
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	stopped := store.plans[plan.ID]
+	if stopped.State != Failed || stopped.Failure != ReasonTaskFailed || stopped.Steps[1].State != Failed {
+		t.Fatalf("failed plan = %s/%s steps=%+v", stopped.State, stopped.Failure, stopped.Steps)
+	}
+	contingency := budget.PlanContingency{ID: "retry-rigging", Trigger: []string{"task_failed"},
+		Step: budget.PlanStep{Capability: "rigging", OfferingID: "rigging", Estimate: budget.Legacy(5)}}
+	revised, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: stopped.Version, Operation: OperationInsert, StepIndex: 1,
+		ContingencyID: "retry-rigging", Contingency: &contingency, Parameters: json.RawMessage(`{}`),
+		Reason: "绑骨任务失败，按 task_failed 预案重新绑骨"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revised.State != Pending || revised.Failure != "" || len(revised.Steps) != 3 {
+		t.Fatalf("revised plan = %s/%s steps=%+v", revised.State, revised.Failure, revised.Steps)
+	}
+	if revised.Steps[1].State != Skipped || revised.Steps[1].TaskID != "step-2" ||
+		revised.Steps[1].Failure != ReasonTaskFailed {
+		t.Fatalf("superseded failed step = %+v", revised.Steps[1])
+	}
+	if revised.Steps[2].Capability != "rigging" || revised.Steps[2].ContingencyID != "retry-rigging" {
+		t.Fatalf("repair step = %+v", revised.Steps[2])
+	}
+	// The repair runs from the nearest successful source and the plan ends.
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	succeedTask(gateway, "step-3")
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	final := store.plans[plan.ID]
+	if final.State != Succeeded || len(gateway.commands) != 3 {
+		t.Fatalf("final plan = %s/%s submissions=%d", final.State, final.Failure, len(gateway.commands))
+	}
+	var input map[string]any
+	if len(gateway.commands) != 3 || json.Unmarshal(gateway.commands[2].Input, &input) != nil {
+		t.Fatalf("repair submission = %+v", gateway.commands)
+	}
+	if input["source_task"] != "step-1" {
+		t.Fatalf("repair source = %v, want the successful remesh task", input["source_task"])
+	}
+}

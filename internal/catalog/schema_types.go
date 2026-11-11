@@ -2955,6 +2955,9 @@ type ChatSchema struct {
 	// comparison tools (#103): their bounds, enumerations and Agent-facing
 	// texts. Server-side only, like the tools themselves.
 	ModelReview ChatModelReviewSchema `json:"model_review"`
+	// Processing declares the server-only wording of processing plan
+	// checkpoints, revisions and failure classification (#251).
+	Processing ChatProcessingSchema `json:"processing"`
 	// SelfCheck declares the persisted 3D self-check contract (#246): the
 	// record writer, the reference-comparison tool, the three delivery states
 	// and the per-result limits. Server-side only.
@@ -3615,6 +3618,16 @@ type ChatApprovalBudgetSchema struct {
 	MaxSteps             int `json:"max_steps"`
 	MaxTitleCharacters   int `json:"max_title_characters"`
 	MaxPurposeCharacters int `json:"max_purpose_characters"`
+	// #251: bounds of the plan's acceptance criteria, checkpoints and
+	// contingencies. The thresholds themselves are server-derived, so the
+	// Agent's arguments name check ids only.
+	MaxAcceptanceCriteria  int `json:"max_acceptance_criteria"`
+	MaxChecksPerCheckpoint int `json:"max_checks_per_checkpoint"`
+	MaxContingencies       int `json:"max_contingencies"`
+	MaxWaivedCheckpoints   int `json:"max_waived_checkpoints"`
+	// Acceptance words the final-delivery criteria the server derives from the
+	// purpose budget and the frozen brief.
+	Acceptance ChatApprovalBudgetAcceptanceSchema `json:"acceptance"`
 	// ContextTemplate is appended to the Agent's system context in budget mode.
 	// Fields: {state} (the state's label), {limit}, {spent}, {reserved},
 	// {remaining}, {plan}. The amounts are listed per unit, each with its
@@ -3645,6 +3658,21 @@ type ChatApprovalBudgetSchema struct {
 	// Continuation is the turn the server starts when the person approves a
 	// plan, so the Agent runs it without being told to start (#134).
 	Continuation ChatApprovalBudgetContinuation `json:"continuation"`
+}
+
+// ChatApprovalBudgetAcceptanceSchema words the plan's acceptance criteria
+// (#251). Criteria maps a server check id to a template filled from the
+// purpose budget: {minimum}, {maximum}, {purpose}. A range template replaces
+// it when the frozen check declares both a lower and an upper bound, so the
+// card states the same standard the checkpoint evaluates. A check without a
+// template produces no criterion. PurposeLine names the purpose the plan was
+// built for ({purpose}); Report tells the Agent to answer each criterion in
+// its final report.
+type ChatApprovalBudgetAcceptanceSchema struct {
+	PurposeLine   string            `json:"purpose_line"`
+	Criteria      map[string]string `json:"criteria"`
+	RangeCriteria map[string]string `json:"range_criteria,omitempty"`
+	Report        string            `json:"report"`
 }
 
 // ChatApprovalBudgetContinuation is the turn that follows a plan approval
@@ -4996,6 +5024,41 @@ type ChatToolProcessingPlanSchema struct {
 	CreatedContent  string `json:"created_content"`
 	WaitingContent  string `json:"waiting_content"`
 	NotFoundContent string `json:"not_found_content"`
+	// Revision bounds the Agent's controlled plan revision (#251): the reason
+	// length and the waived-checkpoint limit. The runtime constants in
+	// internal/processing and internal/catalog tests are aligned with them.
+	Revision ChatToolProcessingRevisionSchema `json:"revision"`
+}
+
+// ChatToolProcessingRevisionSchema declares the Agent revision tool's bounds.
+type ChatToolProcessingRevisionSchema struct {
+	MaxReasonCharacters  int `json:"max_reason_characters"`
+	MaxWaivedCheckpoints int `json:"max_waived_checkpoints"`
+}
+
+// ChatProcessingSchema is application.chat.processing: server-only wording for
+// the processing plan's failure classification and revision (#251). It is not
+// projected to the browser, and it declares every category and action the
+// runtime may report.
+type ChatProcessingSchema struct {
+	Failures ChatProcessingFailuresSchema `json:"failures"`
+}
+
+type ChatProcessingFailuresSchema struct {
+	// Categories and Actions map the runtime ids to the wording the Agent
+	// reads. Every id of internal/generation's vocabulary must be present.
+	Categories map[string]string `json:"categories"`
+	Actions    map[string]string `json:"actions"`
+	// Advice is one suggested next action per category, without internal
+	// detail or upstream text.
+	Advice map[string]string `json:"advice"`
+	// CheckpointFailed is the Agent-facing note when a step's checkpoint
+	// failed and the plan stopped before the next step.
+	CheckpointFailed string `json:"checkpoint_failed"`
+	// RevisionApplied is the Agent-facing note after a revision.
+	RevisionApplied string `json:"revision_applied"`
+	// ReasonRequired refuses a revision without a reason.
+	ReasonRequired string `json:"reason_required"`
 }
 
 // ChatToolProcessingMessages are the LLM-facing rejection texts of a
@@ -5016,6 +5079,21 @@ type ChatToolProcessingMessages struct {
 	NoOffering        string `json:"no_offering"`
 	InvalidInput      string `json:"invalid_input"`
 	Unavailable       string `json:"unavailable"`
+	// #251 revision texts. RevisionOutsidePlan refuses a step the approved
+	// plan does not cover; RevisionNotStarted refuses moving a step that
+	// prepared, was granted or submitted; RevisionRetryPerson refuses a retry
+	// that may have been charged; RevisionApplied confirms one. {detail} and
+	// {step} are substituted where present.
+	RevisionOutsidePlan string `json:"revision_outside_plan,omitempty"`
+	RevisionNotStarted  string `json:"revision_not_started,omitempty"`
+	RevisionRetryPerson string `json:"revision_retry_person,omitempty"`
+	RevisionApplied     string `json:"revision_applied,omitempty"`
+	// RevisionCheckpointBlocked refuses replace/skip while a failed
+	// checkpoint still blocks the plan; the Agent must insert the declared
+	// contingency or waive the checkpoint first (#251 fix).
+	RevisionCheckpointBlocked string `json:"revision_checkpoint_blocked,omitempty"`
+	ContingencyUnknown        string `json:"contingency_unknown,omitempty"`
+	CheckpointUnavailable     string `json:"checkpoint_unavailable,omitempty"`
 	// SourceConfirmation is the refusal of a paid step on another model than
 	// the one selected on the workspace, before the person agreed (#321 D).
 	// {selected}, {source}, {step} and {reason} are substituted; {reason} is

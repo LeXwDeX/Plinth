@@ -22,6 +22,10 @@ const (
 	Running   = "RUNNING"
 	Succeeded = "SUCCEEDED"
 	Failed    = "FAILED"
+	// Skipped is a step the Agent removed while it was still unstarted
+	// (#251). It never ran and never spends; a later step binds the most
+	// recent successful source instead.
+	Skipped = "SKIPPED"
 	// Paused 表示计划因不能自动判定的情况停下：提交结果不明、供给项
 	// 修订/费用变化或不可用、步骤任务被取消。暂停计划不被后台推进，只有
 	// 用户按当前费用显式确认 Resume 后才继续；FAILED 只用于可判定的终态
@@ -77,6 +81,18 @@ const (
 	// A same-scope Task is linked for observation, but its frozen request cannot
 	// be proved to be this step. Its output must never feed a following step.
 	ReasonReconciledMismatch = "plan_reconciled_mismatch"
+	// ReasonCheckpointFailed stops the plan after a successful step whose
+	// declared checkpoint failed (#251). The next step does not start until
+	// the Agent revises the plan within its approved contingencies, waives the
+	// checkpoint, or the person starts a new plan.
+	ReasonCheckpointFailed = "plan_checkpoint_failed"
+	// ReasonCheckpointUnavailable means the checkpoint could not be evaluated
+	// (the saved model or report was unreadable). It is recorded and does not
+	// block the next step, so an infrastructure fault cannot deadlock a plan.
+	ReasonCheckpointUnavailable = "plan_checkpoint_unavailable"
+	// ReasonRevisionOutsidePlan refuses a revision that is not covered by the
+	// approved steps, contingencies or budget (#251).
+	ReasonRevisionOutsidePlan = "plan_revision_outside_plan"
 )
 
 var (
@@ -102,6 +118,15 @@ type Step struct {
 	// Resumable marks a PAUSED step that Resume may continue after the user
 	// confirms the current cost; unreconciled submissions are never resumable.
 	Resumable bool `json:"resumable,omitempty"`
+	// Checkpoint is the server-evaluated check declared after this step
+	// (#251). It lives in steps_json; an older plan has none.
+	Checkpoint *Checkpoint `json:"checkpoint,omitempty"`
+	// ContingencyID, RevisionOperation and RevisionReason record how an Agent
+	// revision produced this step, so the panel and the conversation can show
+	// why it exists (#251). Empty for steps created with the plan.
+	ContingencyID     string `json:"contingency_id,omitempty"`
+	RevisionOperation string `json:"revision_operation,omitempty"`
+	RevisionReason    string `json:"revision_reason,omitempty"`
 	// SubmissionUncertain keeps the original catalog revision frozen until a
 	// previously accepted Task is recovered or the original key is safely replayed.
 	SubmissionUncertain bool                       `json:"submission_uncertain,omitempty"`
@@ -147,6 +172,9 @@ type StepRequest struct {
 	OfferingID               generation.OfferingID `json:"offering_id"`
 	ExpectedOfferingRevision string                `json:"expected_offering_revision"`
 	Input                    json.RawMessage       `json:"input"`
+	// Checkpoint is an optional server-evaluated check after this step. Only
+	// an Agent-created plan may declare one (#251); a browser plan refuses it.
+	Checkpoint *Checkpoint `json:"checkpoint,omitempty"`
 }
 
 type CreateCommand struct {
@@ -224,6 +252,9 @@ type Service struct {
 	// sourcePreference orders the model variants a later step binds from the
 	// previous step's result (#334); see WithSourcePreference.
 	sourcePreference []string
+	// modelReport evaluates a checkpoint against a saved model (#251). Without
+	// it a plan may declare no checkpoint.
+	modelReport ModelReport
 }
 
 // WithGrants enables approval by session policy for plan steps. The grant is
@@ -363,6 +394,16 @@ func (s *Service) Create(ctx context.Context, command CreateCommand) (Plan, erro
 		if requested.ExpectedOfferingRevision == "" {
 			return Plan{}, ErrInvalid
 		}
+		if requested.Checkpoint != nil {
+			// #251: only an Agent-created plan may carry a checkpoint; a plan a
+			// person started in the panel has no approved acceptance contract.
+			if command.Origin != OriginAgent || s.modelReport == nil {
+				return Plan{}, ErrInvalid
+			}
+			if err := validateCheckpoint(requested.Checkpoint); err != nil {
+				return Plan{}, err
+			}
+		}
 		offering, ok := s.catalog.Get(requested.OfferingID)
 		if !ok || !offering.Enabled || offering.Domain != generation.DomainProcessing {
 			return Plan{}, ErrInvalid
@@ -415,7 +456,14 @@ func (s *Service) Create(ctx context.Context, command CreateCommand) (Plan, erro
 		if priceErr != nil {
 			return Plan{}, ErrInvalid
 		}
-		steps = append(steps, Step{Capability: offering.Capability, OfferingID: offering.ID, Input: requested.Input, EstimatedCredits: stepCredits, NativeQuote: quote, Revision: offering.Revision, State: Pending})
+		step := Step{Capability: offering.Capability, OfferingID: offering.ID, Input: requested.Input, EstimatedCredits: stepCredits, NativeQuote: quote, Revision: offering.Revision, State: Pending}
+		if requested.Checkpoint != nil {
+			checkpoint := *requested.Checkpoint
+			checkpoint.State = CheckpointPending
+			checkpoint.Results, checkpoint.Resolution, checkpoint.Attempts, checkpoint.EvaluatedAt = nil, "", 0, nil
+			step.Checkpoint = &checkpoint
+		}
+		steps = append(steps, step)
 		previous = offering
 	}
 	now := time.Now().UTC()
@@ -547,8 +595,8 @@ func (s *Service) sourceOutlook(ctx context.Context, plan Plan, index int, froze
 		return "", false
 	}
 	sourceID, asset := plan.SourceTaskID, plan.SourceAssetID
-	if index > 0 {
-		sourceID, asset = plan.Steps[index-1].TaskID, ""
+	if previous := previousSourceIndex(plan, index); previous >= 0 {
+		sourceID, asset = plan.Steps[previous].TaskID, ""
 	}
 	if sourceID == "" {
 		return "", false
@@ -669,40 +717,57 @@ func (s *Service) Retry(ctx context.Context, command RetryCommand) (Plan, error)
 		if step.State != Failed {
 			continue
 		}
-		if step.TaskID == "" {
-			return Plan{}, ErrConflict
-		}
-		// #326: a retry that is certain to fail under today's rules is not a
-		// paid attempt to offer or accept.
-		if _, retryable, known := s.retryOutlook(ctx, plan, index); known && !retryable {
-			return Plan{}, ErrConflict
-		}
-		task, err := s.gateway.Get(ctx, command.OwnerID, step.TaskID)
-		if err != nil || task.State != generation.TaskFailed || (task.Failure != nil && (task.Failure.Ambiguous || task.Failure.Class == generation.FailureSourceExpired)) {
-			return Plan{}, ErrConflict
-		}
-		offering, ok := s.catalog.Get(step.OfferingID)
-		if !ok || !offering.Enabled || !s.catalog.OfferingAvailable(step.OfferingID) ||
-			offering.Domain != generation.DomainProcessing || offering.Capability != step.Capability ||
-			offering.Revision != command.ExpectedOfferingRevision {
-			return Plan{}, ErrConflict
-		}
-		step.State, step.TaskID, step.Failure, step.Retryable = Pending, "", "", false
-		step.PreparedInputID, step.PreparedInputHash, step.AuthorizationRef = "", "", ""
-		step.OperationID, step.PlanStepID, step.IdempotencyKey = "", "", ""
-		credits, quote, priceErr := processingPrice(offering, step.Input)
-		if priceErr != nil {
-			return Plan{}, ErrConflict
-		}
-		step.Revision, step.EstimatedCredits, step.NativeQuote = offering.Revision, credits, quote
-		step.Retry++
-		plan.State, plan.Failure, plan.UpdatedAt = Pending, "", time.Now().UTC()
-		if err := s.savePlan(ctx, &plan); err != nil {
-			return Plan{}, err
-		}
-		return plan, nil
+		return s.retryStep(ctx, &plan, index, command.ExpectedOfferingRevision)
 	}
 	return Plan{}, ErrConflict
+}
+
+// retryStep turns one failed step back into a fresh paid attempt (#326). It
+// is shared by the person's Retry and the Agent's revise operation retry, so
+// both judge a certain failure and reset the frozen identity the same way.
+func (s *Service) retryStep(ctx context.Context, plan *Plan, index int, expectedOfferingRevision string) (Plan, error) {
+	step := &plan.Steps[index]
+	if step.TaskID == "" {
+		return Plan{}, ErrConflict
+	}
+	// #326: a retry that is certain to fail under today's rules is not a
+	// paid attempt to offer or accept.
+	if _, retryable, known := s.retryOutlook(ctx, *plan, index); known && !retryable {
+		return Plan{}, ErrConflict
+	}
+	task, err := s.gateway.Get(ctx, plan.OwnerID, step.TaskID)
+	if err != nil || task.State != generation.TaskFailed {
+		return Plan{}, ErrConflict
+	}
+	// An ambiguous failure may already have been charged; only the person may
+	// decide to charge again. The revision tool words this differently from a
+	// stale plan or a step that cannot move (#251 fix).
+	if task.Failure != nil && task.Failure.Ambiguous {
+		return Plan{}, ErrRevisionRetryPerson
+	}
+	if task.Failure != nil && task.Failure.Class == generation.FailureSourceExpired {
+		return Plan{}, ErrConflict
+	}
+	offering, ok := s.catalog.Get(step.OfferingID)
+	if !ok || !offering.Enabled || !s.catalog.OfferingAvailable(step.OfferingID) ||
+		offering.Domain != generation.DomainProcessing || offering.Capability != step.Capability ||
+		offering.Revision != expectedOfferingRevision {
+		return Plan{}, ErrConflict
+	}
+	step.State, step.TaskID, step.Failure, step.Retryable = Pending, "", "", false
+	step.PreparedInputID, step.PreparedInputHash, step.AuthorizationRef = "", "", ""
+	step.OperationID, step.PlanStepID, step.IdempotencyKey = "", "", ""
+	credits, quote, priceErr := processingPrice(offering, step.Input)
+	if priceErr != nil {
+		return Plan{}, ErrConflict
+	}
+	step.Revision, step.EstimatedCredits, step.NativeQuote = offering.Revision, credits, quote
+	step.Retry++
+	plan.State, plan.Failure, plan.UpdatedAt = Pending, "", time.Now().UTC()
+	if err := s.savePlan(ctx, plan); err != nil {
+		return Plan{}, err
+	}
+	return *plan, nil
 }
 
 // Resume continues a PAUSED plan after the user confirms the paused step's
@@ -719,6 +784,13 @@ func (s *Service) Resume(ctx context.Context, command ResumeCommand) (Plan, erro
 	}
 	if plan.Version != command.ExpectedPlanVersion || plan.State != Paused {
 		return Plan{}, ErrConflict
+	}
+	// A checkpoint failure pauses the plan with no paused step. The person may
+	// continue past it: the check is waived (recorded with a resolution), and
+	// the next step starts under the approved plan. This is the panel's escape
+	// hatch when the Agent's turn ended without a revision.
+	if plan.Failure == ReasonCheckpointFailed {
+		return s.continuePastCheckpoint(ctx, &plan)
 	}
 	for index := range plan.Steps {
 		step := &plan.Steps[index]
@@ -837,6 +909,30 @@ func (s *Service) Resume(ctx context.Context, command ResumeCommand) (Plan, erro
 	return Plan{}, ErrConflict
 }
 
+// continuePastCheckpoint is the person's continue after a failed checkpoint.
+// The check is waived with a human resolution and the plan advances; the
+// failed result stays as the audit trail.
+func (s *Service) continuePastCheckpoint(ctx context.Context, plan *Plan) (Plan, error) {
+	for index := range plan.Steps {
+		step := &plan.Steps[index]
+		if step.Checkpoint == nil || step.Checkpoint.State != CheckpointFailed ||
+			step.Failure != ReasonCheckpointFailed {
+			continue
+		}
+		step.Checkpoint.State, step.Checkpoint.Resolution = CheckpointWaived, CheckpointResolutionUserContinue
+		step.Failure, step.Retryable = "", false
+		plan.State, plan.Failure, plan.UpdatedAt = Pending, "", time.Now().UTC()
+		// A continue on the last step leaves nothing to advance; close the
+		// plan now instead of leaving it active forever (#251 fix).
+		settlePlan(plan)
+		if err := s.savePlan(ctx, plan); err != nil {
+			return Plan{}, err
+		}
+		return *plan, nil
+	}
+	return Plan{}, ErrConflict
+}
+
 // freezeAgain drops a paused step's frozen input, which names a source task
 // the Provider no longer keeps, so the step is prepared again under today's
 // rules (the saved model file) and waits for consent at the current price
@@ -910,7 +1006,7 @@ func (s *Service) advanceAll(ctx context.Context) error {
 func (s *Service) advance(ctx context.Context, plan *Plan) error {
 	for index := range plan.Steps {
 		step := &plan.Steps[index]
-		if step.State == Succeeded {
+		if step.State == Succeeded || step.State == Skipped {
 			continue
 		}
 		if step.TaskID != "" {
@@ -932,8 +1028,16 @@ func (s *Service) advance(ctx context.Context, plan *Plan) error {
 			switch task.State {
 			case generation.TaskSucceeded:
 				step.State = Succeeded
-				if index == len(plan.Steps)-1 {
-					plan.State = Succeeded
+				// #251: a declared checkpoint is judged on the model this step
+				// produced. A failure stops the plan after this step; the next
+				// one never starts until the Agent revises within the approved
+				// contingencies or waives the check.
+				blocked, err := s.checkpointBlocked(ctx, plan, step, task)
+				if err != nil {
+					return err
+				}
+				if !blocked {
+					settlePlan(plan)
 				}
 			case generation.TaskCanceled:
 				step.State, plan.State = Paused, Paused
@@ -984,11 +1088,14 @@ func (s *Service) advance(ctx context.Context, plan *Plan) error {
 		var source generation.Task
 		var assetID generation.AssetID
 		var err error
-		if index == 0 {
+		// A skipped step contributes no output (#251): the next step binds the
+		// most recent successful source, or the plan's own source when none
+		// succeeded yet.
+		if previous := previousSourceIndex(*plan, index); previous >= 0 {
+			source, err = s.gateway.Get(ctx, plan.OwnerID, plan.Steps[previous].TaskID)
+		} else {
 			source, err = s.gateway.Get(ctx, plan.OwnerID, plan.SourceTaskID)
 			assetID = plan.SourceAssetID
-		} else {
-			source, err = s.gateway.Get(ctx, plan.OwnerID, plan.Steps[index-1].TaskID)
 		}
 		if err != nil {
 			return err
@@ -1083,6 +1190,14 @@ func (s *Service) advance(ctx context.Context, plan *Plan) error {
 		plan.UpdatedAt = time.Now().UTC()
 		return s.savePlan(ctx, plan)
 	}
+	// Every step is terminal and no checkpoint blocks the plan: close it.
+	// A waive or person's continue on the last step clears the checkpoint
+	// failure and sets PENDING; without this the plan would stay active
+	// forever because advance only marks SUCCEEDED when a live Task changes
+	// state (#251 fix).
+	if settlePlan(plan) {
+		return s.savePlan(ctx, plan)
+	}
 	return nil
 }
 
@@ -1146,6 +1261,39 @@ func (s *Service) savePlan(ctx context.Context, plan *Plan) error {
 	// Keep the returned Retry/Resume representation in sync with persisted state.
 	plan.Version++
 	return nil
+}
+
+// previousSourceIndex finds the nearest earlier step that produced a model.
+// A SKIPPED step has no Task and is passed over (#251); -1 means the plan's
+// own source task is the source.
+func previousSourceIndex(plan Plan, index int) int {
+	for previous := index - 1; previous >= 0; previous-- {
+		if plan.Steps[previous].TaskID != "" && plan.Steps[previous].State == Succeeded {
+			return previous
+		}
+	}
+	return -1
+}
+
+func noStepRemains(steps []Step) bool {
+	for _, step := range steps {
+		if step.State != Succeeded && step.State != Skipped {
+			return false
+		}
+	}
+	return true
+}
+
+// settlePlan closes a plan whose steps are all terminal and whose failed
+// checkpoints were resolved. A waive, a person's continue or a skip on the
+// last step leaves the plan PENDING with no live Task to observe; without
+// this it would never become SUCCEEDED (#251 fix).
+func settlePlan(plan *Plan) bool {
+	if plan.State == Succeeded || !noStepRemains(plan.Steps) || hasFailedCheckpoint(plan.Steps) {
+		return false
+	}
+	plan.State, plan.Failure, plan.UpdatedAt = Succeeded, "", time.Now().UTC()
+	return true
 }
 
 func resumableReason(reason string) bool {

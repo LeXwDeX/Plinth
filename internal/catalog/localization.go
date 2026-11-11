@@ -310,7 +310,7 @@ func validateLocalization(schema ApplicationSchema) error {
 		if err := validateBundleMessages(schema.Content.Messages, bundle.Messages); err != nil {
 			return fmt.Errorf("bundles.%s.messages: %w", locale.ID, err)
 		}
-		covered, err := validateBundleFields(document, bundle.Fields)
+		covered, err := validateBundleFields(document, applicableBundleFields(schema, bundle.Fields))
 		if err != nil {
 			return fmt.Errorf("bundles.%s.fields: %w", locale.ID, err)
 		}
@@ -578,6 +578,26 @@ func validateBundleFieldLeaf(steps []pathStep) error {
 		}
 	}
 	return nil
+}
+
+// applicableBundleFields drops translations of an optional section the
+// application does not configure. A bundle is shared with variants that omit
+// a mode: a historical Catalog without budget mode has no acceptance fields,
+// and localizedPublic and TextLocalizer already skip such paths. Keeping the
+// check strict while the mode is configured still catches typos in the
+// shipped copy.
+func applicableBundleFields(schema ApplicationSchema, fields map[string]string) map[string]string {
+	if schema.Chat.ApprovalPolicy.Budget.MaxCredits > 0 {
+		return fields
+	}
+	applied := make(map[string]string, len(fields))
+	for path, text := range fields {
+		if strings.HasPrefix(path, "chat.approval_policy.budget.") {
+			continue
+		}
+		applied[path] = text
+	}
+	return applied
 }
 
 func validateBundleFields(document map[string]any, fields map[string]string) (map[leafKey]bool, error) {

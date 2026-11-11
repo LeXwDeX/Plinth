@@ -71,6 +71,39 @@ describe('the production plan', () => {
   });
 });
 
+// #251: the server's production plan JSON nests each contingency step
+// (`{id, trigger, step: {capability, offering_id, purpose, estimate}}`).
+// Reading only flattened fields silently dropped every real contingency.
+describe('the production plan contract (#251)', () => {
+  it('reads the nested contingency step, its estimate and its trigger', () => {
+    const plan = parseProductionPlan({
+      title: '角色',
+      steps: [{ capability: 'text-to-3d', offering_id: 'meshy-7.1', purpose: '底模', estimate: tripo('7') }],
+      checkpoints: [{ after_capability: 'remesh', checks: [{ check: 'triangles', maximum: 60000 }, { check: 'pivot_bottom_center', maximum_ratio: 0.01 }] }],
+      contingencies: [{
+        id: 'low_poly', trigger: ['triangles'],
+        step: { capability: 'remesh', offering_id: 'meshy/processing/remesh', purpose: '按预算再减面', estimate: legacy('5') },
+      }],
+    })!;
+    expect(plan.contingencies).toEqual([{
+      id: 'low_poly', trigger: ['triangles'], capability: 'remesh',
+      offeringId: 'meshy/processing/remesh', purpose: '按预算再减面', estimate: legacy('5'),
+    }]);
+    expect(plan.checkpoints).toEqual([{
+      afterCapability: 'remesh',
+      checks: [{ check: 'triangles', minimum: undefined, maximum: 60000, maximumRatio: undefined, required: undefined },
+        { check: 'pivot_bottom_center', minimum: undefined, maximum: undefined, maximumRatio: 0.01, required: undefined }],
+    }]);
+  });
+
+  it('still reads a flattened contingency for an older projection', () => {
+    const plan = parseProductionPlan({
+      title: '旧计划', contingencies: [{ id: 'fix', trigger: ['triangles'], capability: 'remesh', offering_id: 'r', purpose: 'p', estimate: legacy('3') }],
+    })!;
+    expect(plan.contingencies?.[0]).toMatchObject({ id: 'fix', capability: 'remesh', offeringId: 'r', estimate: legacy('3') });
+  });
+});
+
 describe('the per-unit budget (#120)', () => {
   const schema = { content: { messages: {
     'ui.pricing.legacy_estimate': '历史积分估算', 'ui.pricing.unknown': '报价未知', 'ui.studio.plan.unit_usage': '{spent} / {limit} {unit}',
