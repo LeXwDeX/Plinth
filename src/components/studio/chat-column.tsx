@@ -53,6 +53,7 @@ import { useStageViewer } from '@/hooks/use-stage-viewer';
 import { useObjectActions } from '@/hooks/use-object-actions';
 import { objectOfTile } from '@/lib/workspace/version-object';
 import { compareFromGroup } from '@/lib/workspace/compare';
+import { candidateSlots, candidateTile } from '@/lib/workspace/candidate-selection';
 import { useRestoreSessionModels } from '@/hooks/use-restore-session-models';
 import { useWorkspaceOfferings } from '@/hooks/use-workspace-offerings';
 import { sessionSkillId } from '@/lib/agent-configuration-resource';
@@ -305,15 +306,11 @@ export function ChatColumn() {
   // #242: a plan candidate group compares its finished tasks in the existing
   // 2/4-pane view; selecting one opens that model or picture on the stage.
   const compareCandidates = useCallback((taskIds: readonly string[]) => {
-    const slots = taskIds.flatMap((taskId) => {
-      const tile = versions.tiles.find((item) => item.taskId === taskId || item.taskIds.includes(taskId));
-      const slot = tile ? slotOf(tile) : null;
-      return slot ? [slot] : [];
-    });
+    const slots = candidateSlots(versions.tiles, taskIds, (tile) => slotOf(tile));
     if (slots.length >= 2) useStudioStore.getState().startCompare(compareFromGroup(slots));
   }, [slotOf, versions.tiles]);
   const selectCandidate = useCallback((taskId: string) => {
-    const tile = versions.tiles.find((item) => item.taskId === taskId || item.taskIds.includes(taskId));
+    const tile = candidateTile(versions.tiles, taskId);
     const object = tile && activeSessionId ? objectOfTile(tile, activeSessionId) : null;
     if (object) openOnStage(object);
   }, [activeSessionId, openOnStage, versions.tiles]);
