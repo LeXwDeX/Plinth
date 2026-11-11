@@ -264,6 +264,7 @@ func validateRuntime(schema RuntimeSchema) error {
 	for name, route := range map[string]string{
 		"asset_model_preview": httpRuntime.Routes.AssetModelPreview, "processing_plan_reconcile": httpRuntime.Routes.ProcessingPlanReconcile,
 		"chat_session_approval":           httpRuntime.Routes.ChatSessionApproval,
+		"task_reroll":                     httpRuntime.Routes.TaskReroll,
 		"chat_session_branch":             httpRuntime.Routes.ChatSessionBranch,
 		"chat_session_notes":              httpRuntime.Routes.ChatSessionNotes,
 		"chat_session_style_lock":         httpRuntime.Routes.ChatSessionStyleLock,
@@ -384,6 +385,7 @@ func validateRuntime(schema RuntimeSchema) error {
 		"processing_plan_reconcile":       {"planID"},
 		"task_cancel":                     {"taskID"},
 		"task_retry":                      {"taskID"},
+		"task_reroll":                     {"taskID"},
 		"task_events":                     {"taskID"},
 		"task_asset":                      {"taskID", "assetID"},
 		"project_item":                    {"projectID"},

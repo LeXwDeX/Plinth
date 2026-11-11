@@ -71,3 +71,38 @@ export function completedPlanSteps(
 ): number {
   return progress.filter((entry) => entry.task !== null && isComplete(entry.task)).length;
 }
+
+/** #242: one declared candidate group of the plan, in plan order. */
+export interface PlanCandidateGroup {
+  group: number;
+  entries: PlanStepProgress[];
+  /** How many candidates reached a successful, terminal state. */
+  completed: number;
+}
+
+/**
+ * #242: groups the expanded plan steps by candidate_group. A plan without
+ * candidates returns no groups; consecutive steps of the same group keep their
+ * candidate_index order (the server wrote them in that order).
+ */
+export function planCandidateGroups(
+  progress: readonly PlanStepProgress[],
+  isComplete: (task: PlanTask) => boolean,
+): PlanCandidateGroup[] {
+  const groups: PlanCandidateGroup[] = [];
+  let current: PlanCandidateGroup | null = null;
+  for (const entry of progress) {
+    const group = entry.step.candidateGroup ?? 0;
+    if (group <= 0) {
+      current = null;
+      continue;
+    }
+    if (!current || current.group !== group) {
+      current = { group, entries: [], completed: 0 };
+      groups.push(current);
+    }
+    current.entries.push(entry);
+    if (entry.task && isComplete(entry.task)) current.completed += 1;
+  }
+  return groups;
+}

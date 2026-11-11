@@ -1981,6 +1981,8 @@ func (orchestrator *Orchestrator) agentRequest(
 		// a domain, while the scope only says which tools this turn offers. The
 		// selection and the framed session notes stay at the end of the prompt.
 		sections.add("craft", orchestrator.craftPrompt(registry, scope, options.CreativeDomain))
+		sections.add("concept_directions", orchestrator.conceptDirectionsPrompt(registry, scope))
+		sections.add("candidates", orchestrator.candidatesPrompt(registry, scope))
 		sections.add("scope", orchestrator.scopePrompt(registry, scope))
 	}
 	// The session's real approval mode follows the scope it must not be mixed

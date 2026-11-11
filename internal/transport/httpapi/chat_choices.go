@@ -21,8 +21,11 @@ type choiceOptionWire struct {
 	// Label and Description are the Schema words of a generic card (#103);
 	// Recommended marks the option the Agent suggests. A provider-choice card
 	// (#321) leaves them empty.
-	Label            string         `json:"label,omitempty"`
-	Description      string         `json:"description,omitempty"`
+	Label       string `json:"label,omitempty"`
+	Description string `json:"description,omitempty"`
+	// ThumbnailURL is a platform picture URL for a concept direction option
+	// (#242); the next-call arguments stay on the server.
+	ThumbnailURL     string         `json:"thumbnail_url,omitempty"`
 	Recommended      bool           `json:"recommended,omitempty"`
 	CreditsMetered   bool           `json:"credits_metered,omitempty"`
 	EstimatedCredits int            `json:"estimated_credits,omitempty"`
@@ -59,7 +62,7 @@ func choiceToWire(choice chat.Choice, question string) choiceWire {
 		State: string(choice.State), CreatedAt: choice.CreatedAt.UTC().Format(time.RFC3339), Options: []choiceOptionWire{}}
 	for _, option := range choice.Options {
 		view := choiceOptionWire{ID: option.ID, ProviderName: option.ProviderName, ModelName: option.ModelName,
-			Label: option.Label, Description: option.Description, Recommended: option.Recommended,
+			Label: option.Label, Description: option.Description, ThumbnailURL: option.ThumbnailURL, Recommended: option.Recommended,
 			CreditsMetered: option.CreditsMetered, EstimatedCredits: option.EstimatedCredits}
 		if quote := option.NativeQuote; quote != nil {
 			encoded, _ := json.Marshal(quote)

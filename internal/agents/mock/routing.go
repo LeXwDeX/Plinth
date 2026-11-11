@@ -2,6 +2,7 @@ package mock
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -17,6 +18,7 @@ import (
 
 const (
 	toolRefineImage          = "refine_image"
+	toolCreateConceptSketch  = "create_concept_sketch"
 	toolRemoveBackground     = "remove_background"
 	toolCreateModel3D        = "create_model_3d"
 	toolCreateModelFromImg   = "create_model_3d_from_image"
@@ -57,8 +59,11 @@ var (
 	// #239: 2D 绘制意图与已经说清的规格。2D 引导更轻：需求已说清（画幅、尺寸、透明背景等）时不出卡。
 	drawingIntentPattern     = regexp.MustCompile(`画一|画个|画张|绘制|立绘|插画|图标|贴图|概念图|海报|封面|出图|生成.*(图|插画|立绘|图标)`)
 	explicitImageSpecPattern = regexp.MustCompile(`\d+\s*[:：]\s*\d+|\d+\s*[x×]\s*\d+|透明背景|背景透明|纯色背景|白色背景|尺寸|像素|竖版|横版|方形`)
-	imageWorkspaceMarker     = "本轮用户正在 2D 图片工作区"
-	modelWorkspaceMarker     = "本轮用户正在 3D 模型工作区"
+	// #242：开放需求先发散。只匹配测试用的开放说法；明确规格或参考图
+	// 不走这里，直接 refine_image。
+	openConceptPattern   = regexp.MustCompile(`森林守卫|概念方向|先给几个方向|发散|探索方向|explore concepts`)
+	imageWorkspaceMarker = "本轮用户正在 2D 图片工作区"
+	modelWorkspaceMarker = "本轮用户正在 3D 模型工作区"
 )
 
 // multiviewPrompts 是四视角编辑里视角词到 edit_multiview_images 参数的对应，按 front、left、back、right 排列。
@@ -241,11 +246,14 @@ type plannedCall struct {
 // routeCalls 在 route 的基础上把“列了几个变体”的改图请求拆成每个变体一次
 // 工具调用，每次的提示词带上自己的变体名，结果因此各不相同。
 func (adapter *Adapter) routeCalls(request agents.Request, text string) []plannedCall {
+	if calls := adapter.conceptDirectionCalls(request, text); len(calls) > 0 {
+		return calls
+	}
 	name, arguments := adapter.route(request, text)
 	if name == "" {
 		return nil
 	}
-	if name == toolRefineImage {
+	if name == toolRefineImage && !explicitImageSpecPattern.MatchString(text) {
 		if match := variantPattern.FindStringSubmatch(strings.TrimSpace(text)); match != nil {
 			variants := splitVariants(match[1])
 			if len(variants) >= 2 && len(variants) <= 6 {
@@ -273,6 +281,56 @@ func splitVariants(list string) []string {
 		}
 	}
 	return variants
+}
+
+// conceptDirectionCalls answers an open 2D request with the shipped flow
+// (#242): three low-cost sketches in one reply, then one concept direction
+// card whose options carry the sketch handles and the exact refine_image
+// arguments. The handles @img1..@img3 are the pictures this reply draws; a
+// message that already has a clear brief or explicit specs goes straight to
+// refine_image instead.
+func (adapter *Adapter) conceptDirectionCalls(request agents.Request, text string) []plannedCall {
+	if !adapter.wants(request, toolCreateConceptSketch) || !adapter.wants(request, toolAskChoice) {
+		return nil
+	}
+	if workspaceDomain(request.Messages) != "image" || briefMissing(request.Messages) ||
+		!openConceptPattern.MatchString(text) || explicitImageSpecPattern.MatchString(text) {
+		return nil
+	}
+	directions := []struct {
+		id, label, description, prompt string
+	}{
+		{"realistic", "写实", "真实材质、自然光与可信比例",
+			"photorealistic game concept art, natural materials, soft studio lighting"},
+		{"cartoon", "卡通", "明快轮廓、夸张比例与高饱和配色",
+			"stylized cartoon concept art, bold clean outlines, exaggerated proportions, vivid colors"},
+		{"low_poly", "低多边形", "几何切面、简洁色块与风格化造型",
+			"low-poly stylized concept art, faceted geometry, flat color blocks"},
+	}
+	options := make([]map[string]any, 0, len(directions))
+	calls := make([]plannedCall, 0, len(directions)+1)
+	for index, direction := range directions {
+		calls = append(calls, plannedCall{name: toolCreateConceptSketch,
+			arguments: map[string]any{"prompt": text + " — " + direction.prompt}})
+		options = append(options, map[string]any{
+			"id":          direction.id,
+			"label":       direction.label,
+			"description": direction.description,
+			"thumbnail":   fmt.Sprintf("@img%d", index+1),
+			"arguments": map[string]any{
+				"prompt": direction.prompt + ". Subject: " + text,
+				"reference_handles": []string{
+					fmt.Sprintf("@img%d", index+1),
+				},
+			},
+		})
+	}
+	calls = append(calls, plannedCall{name: toolAskChoice, arguments: map[string]any{
+		"kind":     "concept_direction",
+		"question": "想沿着哪个方向深入？",
+		"options":  options,
+	}})
+	return calls
 }
 
 // route 返回 (工具名, 参数)；空工具名表示没有命中关键词，走默认路径。
@@ -464,10 +522,13 @@ func (adapter *Adapter) route(request agents.Request, text string) (string, map[
 			return toolCreateModel3D, map[string]any{"prompt": text}
 		}
 
-	case adapter.wants(request, toolRefineImage) && seriesProjectPattern.MatchString(text):
-		// #240: "a character from the same series" reuses the project's
-		// style guide automatically; the server attaches the project style
-		// pictures, so the mock names no handle.
+	case adapter.wants(request, toolRefineImage) &&
+		((drawingIntentPattern.MatchString(text) && explicitImageSpecPattern.MatchString(text)) ||
+			seriesProjectPattern.MatchString(text)):
+		// #242: a fully specified request goes straight to refine_image; it
+		// does not need concept directions. #240: "a character from the same
+		// series" reuses the project's style guide automatically; the server
+		// attaches the project style pictures, so the mock names no handle.
 		return toolRefineImage, map[string]any{"prompt": text}
 
 	case adapter.wants(request, toolRefineImage) && imageHandle != "":

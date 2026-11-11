@@ -469,6 +469,19 @@ func cloneApplication(source ApplicationSchema) ApplicationSchema {
 		result.Chat.Agent.BackgroundWait = &background
 	}
 	result.Chat.ContextCompaction.RoleLabels = cloneStringMap(source.Chat.ContextCompaction.RoleLabels)
+	result.Chat.ConceptDirections.ParameterOverrides = make(
+		map[string]map[string]json.RawMessage,
+		len(source.Chat.ConceptDirections.ParameterOverrides),
+	)
+	for offering, overrides := range source.Chat.ConceptDirections.ParameterOverrides {
+		copied := make(map[string]json.RawMessage, len(overrides))
+		for name, value := range overrides {
+			copied[name] = append(json.RawMessage(nil), value...)
+		}
+		result.Chat.ConceptDirections.ParameterOverrides[offering] = copied
+	}
+	result.Chat.Candidates.Sources = slices.Clone(source.Chat.Candidates.Sources)
+	result.Chat.Reroll.SeedParameters = slices.Clone(source.Chat.Reroll.SeedParameters)
 	if source.Chat.Presentation.Messages.ContentRejectedReasonLabels != nil {
 		result.Chat.Presentation.Messages.ContentRejectedReasonLabels = cloneStringMap(source.Chat.Presentation.Messages.ContentRejectedReasonLabels)
 	}

@@ -262,6 +262,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if err := validateImage2DUsageShape(schema); err != nil {
 		return err
 	}
+	if err := validateConvergence(schema); err != nil {
+		return err
+	}
 	if err := validateHarness(schema, capabilityPresentations); err != nil {
 		return err
 	}

@@ -8,7 +8,7 @@ import { PlanCard, PlanReloadNotice } from '@/components/studio/plan-card';
 import type { ProductionPlan, SessionBudget } from '@/lib/chat/budget';
 import { parseProductionPlan } from '@/lib/chat/budget';
 import type { PlanTask } from '@/lib/chat/plan-progress';
-import { formatSchemaText, schemaText, taskStatePresentation, type ProductSchema } from '@/lib/product-schema';
+import { formatSchemaText, schemaCountMessage, schemaText, taskStatePresentation, type ProductSchema } from '@/lib/product-schema';
 
 function tripo(amount: string) {
   return { unit: 'tripo.credit', unit_label: 'Tripo credits', amount };
@@ -286,5 +286,102 @@ describe('a production plan with acceptance and contingencies (#251)', () => {
     expect(view.queryByTestId('studio-plan-acceptance')).toBeNull();
     expect(view.queryByTestId('studio-plan-checkpoints')).toBeNull();
     expect(view.queryByTestId('studio-plan-contingencies')).toBeNull();
+  });
+});
+
+describe('parallel candidates (#242)', () => {
+  const candidatePlan: ProductionPlan = {
+    title: '两个候选',
+    steps: [
+      { capability: 'text-to-3d', offeringId: 'tripo-v3', purpose: '', estimate: tripo('80'), purposeBudgetNote: '', candidateGroup: 1, candidateIndex: 1 },
+      { capability: 'text-to-3d', offeringId: 'tripo-v3', purpose: '', estimate: tripo('80'), purposeBudgetNote: '', candidateGroup: 1, candidateIndex: 2 },
+    ],
+    correctionCapabilities: [],
+  };
+  const progress: SessionBudget = {
+    id: 'budget-1', state: 'active',
+    units: [{ unit: 'tripo.credit', unitLabel: 'Tripo credits', limit: '300', spent: '0', reserved: '0', remaining: '300' }],
+    plan: candidatePlan, createdAt: '2026-10-01T00:00:00Z', decidedAt: '2026-10-01T00:01:00Z',
+  };
+  const tasks: PlanTask[] = [
+    { taskId: 't1', capability: 'text-to-3d', state: 'SUCCEEDED', offeringId: 'tripo-v3', startedAt: Date.parse('2026-10-01T00:02:00Z') },
+    { taskId: 't2', capability: 'text-to-3d', state: 'SUCCEEDED', offeringId: 'tripo-v3', startedAt: Date.parse('2026-10-01T00:03:00Z') },
+  ];
+
+  it('groups candidates, compares the finished ones and opens the selected one', () => {
+    const compare = vi.fn();
+    const select = vi.fn();
+    const view = render(<PlanCard plan={candidatePlan} tasks={tasks} progress={progress}
+      onCompareCandidates={compare} onSelectCandidate={select} />);
+    expect(view.queryAllByTestId('studio-plan-step')).toHaveLength(0);
+    expect(view.getByTestId('studio-plan-candidate-group').getAttribute('data-group')).toBe('1');
+    expect(view.getAllByTestId('studio-plan-candidate')).toHaveLength(2);
+    // #242: the heading counts the candidates, not the group.
+    expect(view.getByTestId('studio-plan-candidates').textContent).toContain(
+      schemaCountMessage(schema, 'ui.studio.plan.candidates', 2, { count: 2 }));
+    view.getByTestId('studio-plan-compare-candidates').click();
+    expect(compare).toHaveBeenCalledWith(['t1', 't2']);
+    const choices = view.getAllByTestId('studio-plan-select-candidate');
+    expect(choices).toHaveLength(2);
+    choices[1].click();
+    expect(select).toHaveBeenCalledWith('t2');
+  });
+
+  // #242: a running or failed candidate is still listed, but only a succeeded
+  // one may be compared or opened. One success keeps its 选用 entry.
+  it('compares and opens only succeeded candidates, even when one is left', () => {
+    const compare = vi.fn();
+    const select = vi.fn();
+    const mixed: PlanTask[] = [
+      { taskId: 't1', capability: 'text-to-3d', state: 'SUCCEEDED', offeringId: 'tripo-v3', startedAt: Date.parse('2026-10-01T00:02:00Z') },
+      { taskId: 't2', capability: 'text-to-3d', state: 'FAILED', offeringId: 'tripo-v3', startedAt: Date.parse('2026-10-01T00:03:00Z') },
+    ];
+    const view = render(<PlanCard plan={candidatePlan} tasks={mixed} progress={progress}
+      onCompareCandidates={compare} onSelectCandidate={select} />);
+    expect(view.getAllByTestId('studio-plan-candidate')).toHaveLength(2);
+    expect(view.queryByTestId('studio-plan-compare-candidates')).toBeNull();
+    const choices = view.getAllByTestId('studio-plan-select-candidate');
+    expect(choices).toHaveLength(1);
+    expect(choices[0].getAttribute('data-task-id')).toBe('t1');
+    choices[0].click();
+    expect(select).toHaveBeenCalledWith('t1');
+    cleanup();
+
+    const twoWins: PlanTask[] = [
+      mixed[0],
+      { ...mixed[1], taskId: 't2', state: 'SUCCEEDED' },
+      { taskId: 't3', capability: 'text-to-3d', state: 'RUNNING', offeringId: 'tripo-v3', startedAt: Date.parse('2026-10-01T00:04:00Z') },
+    ];
+    const three = { ...candidatePlan, steps: [...candidatePlan.steps, { ...candidatePlan.steps[1], candidateIndex: 3 }] };
+    const withRunning = render(<PlanCard plan={three} tasks={twoWins} progress={{
+      ...progress, plan: three,
+    }} onCompareCandidates={compare} onSelectCandidate={select} />);
+    withRunning.getByTestId('studio-plan-compare-candidates').click();
+    expect(compare).toHaveBeenLastCalledWith(['t1', 't2']);
+    expect(withRunning.getAllByTestId('studio-plan-select-candidate').map((item) => item.getAttribute('data-task-id'))).toEqual(['t1', 't2']);
+  });
+
+  // #242: the Schema's own count message is used, so English picks its singular form.
+  it('words the candidate count with the Schema plural rule', () => {
+    const previousLocale = schema.localization;
+    const plural = messages['ui.studio.plan.candidates'];
+    const singular = messages['ui.studio.plan.candidates_one'];
+    const hadSingular = Object.hasOwn(messages, 'ui.studio.plan.candidates_one');
+    messages['ui.studio.plan.candidates'] = '{count} candidates';
+    messages['ui.studio.plan.candidates_one'] = '{count} candidate';
+    schema.localization = { active_locale: 'en', default_locale: 'en' } as ProductSchema['localization'];
+    try {
+      const one = { ...candidatePlan, steps: [candidatePlan.steps[0]] };
+      const single = render(<PlanCard plan={one} tasks={[tasks[0]]} progress={{ ...progress, plan: one }} />);
+      expect(single.getByTestId('studio-plan-candidates').textContent).toContain('1 candidate');
+      cleanup();
+      const two = render(<PlanCard plan={candidatePlan} tasks={tasks} progress={progress} />);
+      expect(two.getByTestId('studio-plan-candidates').textContent).toContain('2 candidates');
+    } finally {
+      schema.localization = previousLocale;
+      if (plural === undefined) delete messages['ui.studio.plan.candidates']; else messages['ui.studio.plan.candidates'] = plural;
+      if (hadSingular) messages['ui.studio.plan.candidates_one'] = singular!;
+      else delete messages['ui.studio.plan.candidates_one'];
+    }
   });
 });

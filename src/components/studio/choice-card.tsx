@@ -20,6 +20,7 @@ import {
   type ChoiceSelection,
 } from '@/lib/chat/choice-cards';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
+import { safeAssetURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { cn } from '@/lib/utils';
 
 export interface ChoiceCardProps {
@@ -123,6 +124,8 @@ export function ChoiceCard({ card, busy, disabled, waiting = false, error, onAns
       >
         {card.options.map((option, index) => {
           const checked = option.id === checkedId;
+          const title = choiceOptionTitle(option, offerings);
+          const thumbnail = option.thumbnailUrl ? safeAssetURL(option.thumbnailUrl) : null;
           return (
             <div
               key={option.id}
@@ -145,6 +148,17 @@ export function ChoiceCard({ card, busy, disabled, waiting = false, error, onAns
               <span aria-hidden className={cn('mt-0.5 flex size-3.5 shrink-0 items-center justify-center rounded-full border', checked ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground')}>
                 {checked ? <Check className="size-2.5" /> : null}
               </span>
+              {thumbnail ? (
+                // #242: a concept direction shows the sketch it leads to; a card
+                // without one keeps the text layout.
+                <img
+                  src={thumbnail}
+                  alt={formatSchemaText(schemaText(schema, 'ui.chat.choice.thumbnail_alt'), { title })}
+                  loading="lazy"
+                  className="mt-0.5 size-12 shrink-0 rounded object-cover"
+                  data-testid="chat-choice-thumbnail"
+                />
+              ) : null}
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="flex flex-wrap items-center gap-1">
                   <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{choiceOptionTitle(option, offerings)}</span>

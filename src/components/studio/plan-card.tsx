@@ -14,8 +14,8 @@ import {
 } from '@/lib/chat/budget';
 import { priceTotalsAmountsText } from '@/lib/chat/approval-modes';
 import type { PriceTotal } from '@/lib/pricing';
-import { completedPlanSteps, planStepProgress, type PlanTask } from '@/lib/chat/plan-progress';
-import { formatSchemaText, schemaText, taskStatePresentation, type ProductSchema } from '@/lib/product-schema';
+import { completedPlanSteps, planCandidateGroups, planStepProgress, type PlanTask } from '@/lib/chat/plan-progress';
+import { formatSchemaText, schemaCountMessage, schemaText, taskStatePresentation, type ProductSchema } from '@/lib/product-schema';
 import { cn } from '@/lib/utils';
 
 /**
@@ -71,6 +71,10 @@ export interface PlanCardProps {
   /** #251: the server's per-unit totals of the main steps and the declared contingencies. */
   stepTotals?: readonly PriceTotal[];
   contingencyTotals?: readonly PriceTotal[];
+  /** #242: compare the finished candidates of one group in the stage compare view. */
+  onCompareCandidates?: (taskIds: readonly string[]) => void;
+  /** #242: open one candidate on the stage. */
+  onSelectCandidate?: (taskId: string) => void;
 }
 
 function capabilityLabel(schema: ReturnType<typeof useProductSchema>['schema'], id: string): string {
@@ -97,7 +101,7 @@ function planCheckLabel(schema: ProductSchema, id: string): string {
  * approved the same card shows the live budget and each step's Task state.
  */
 export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, error = null, progress = null,
-  stepTotals = [], contingencyTotals = [] }: PlanCardProps) {
+  stepTotals = [], contingencyTotals = [], onCompareCandidates, onSelectCandidate }: PlanCardProps) {
   const { schema } = useProductSchema();
   const text = (key: string) => schemaText(schema, key);
   const capabilities = useMemo(
@@ -113,11 +117,18 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
   );
   const decidedAt = progress?.decidedAt ?? '';
   const stepProgress = useMemo(() => planStepProgress(plan, tasks, decidedAt), [plan, tasks, decidedAt]);
+  const isCompleteTask = (task: PlanTask) => taskStatePresentation(schema, task.state).outcome === 'success';
+  // #242: candidate steps are shown as their own parallel groups; every other
+  // step keeps the ordinary ordered list.
+  const mainProgress = stepProgress.filter((entry) => (entry.step.candidateGroup ?? 0) <= 0);
+  const candidateGroups = planCandidateGroups(stepProgress, isCompleteTask);
+  // #242: the heading counts every declared candidate, not the number of groups.
+  const candidateCount = candidateGroups.reduce((total, group) => total + group.entries.length, 0);
   // Every amount is listed per credit unit with its label; the card never adds units.
   const limits = progress ? budgetUnitTotals(progress.units, 'limit') : budgets;
   const reserved = progress ? budgetUnitsWith(progress.units, 'reserved') : [];
   const done = progress
-    ? completedPlanSteps(stepProgress, (task) => taskStatePresentation(schema, task.state).outcome === 'success')
+    ? completedPlanSteps(stepProgress, isCompleteTask)
     : 0;
   const modelName = (capability: string, offeringId: string): string => {
     if (!offeringId) return text('ui.studio.plan.model_unspecified');
@@ -169,9 +180,9 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
           ) : null}
         </p>
       ) : null}
-      {plan.steps.length > 0 ? (
+      {mainProgress.length > 0 ? (
         <ol className="flex flex-col gap-0.5" aria-label={text('ui.studio.plan.step')}>
-          {stepProgress.map((entry, index) => {
+          {mainProgress.map((entry, index) => {
             const state = entry.task ? taskStatePresentation(schema, entry.task.state) : null;
             const estimate = stepEstimate(entry.step);
             return (
@@ -214,6 +225,88 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
             );
           })}
         </ol>
+      ) : null}
+      {candidateGroups.length > 0 ? (
+        <section className="flex flex-col gap-1" data-testid="studio-plan-candidates">
+          <span className="text-[11px] text-foreground/70">
+            {schemaCountMessage(schema, 'ui.studio.plan.candidates', candidateCount, { count: candidateCount })}
+          </span>
+          {candidateGroups.map((group) => {
+            // #242: only a succeeded candidate can be compared or opened; a
+            // running or failed one is still listed with its own state.
+            const finished = group.entries.flatMap((entry) =>
+              entry.task && isCompleteTask(entry.task) ? [entry.task] : []);
+            const canCompare = onCompareCandidates !== undefined && finished.length >= 2;
+            const canSelect = onSelectCandidate !== undefined && finished.length > 0;
+            return (
+              <div
+                key={group.group}
+                className="flex flex-col gap-0.5 rounded-md border border-border/70 p-1.5"
+                data-testid="studio-plan-candidate-group"
+                data-group={group.group}
+              >
+                <ol className="flex flex-col gap-0.5">
+                  {group.entries.map((entry, index) => {
+                    const state = entry.task ? taskStatePresentation(schema, entry.task.state) : null;
+                    const estimate = stepEstimate(entry.step);
+                    return (
+                      <li
+                        key={`${group.group}-${index}-${entry.step.offeringId}`}
+                        className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-2"
+                        data-testid="studio-plan-candidate"
+                        data-state={entry.task?.state ?? 'pending'}
+                      >
+                        <span className="tabular-nums text-muted-foreground">
+                          {formatSchemaText(text('ui.studio.plan.candidate_n'), { index: entry.step.candidateIndex ?? index + 1 })}
+                        </span>
+                        <span className="min-w-0 truncate">
+                          {capabilityLabel(schema, entry.step.capability)}
+                          <span className="text-muted-foreground"> · {modelName(entry.step.capability, entry.step.offeringId)}</span>
+                        </span>
+                        <span className="flex shrink-0 items-baseline gap-1.5 tabular-nums text-muted-foreground">
+                          {estimate ? (
+                            <span>{formatSchemaText(text('ui.studio.plan.estimated'), { amount: priceTotalsAmountsText(schema, [estimate]) })}</span>
+                          ) : null}
+                          <span className={cn('text-[11px]', state?.outcome === 'success' && 'text-success', state?.outcome === 'failure' && 'text-destructive')}>
+                            {state ? state.label : text('ui.studio.plan.step_pending')}
+                          </span>
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ol>
+                {canCompare || canSelect ? (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {canCompare ? (
+                      <Action
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onCompareCandidates!(finished.map((task) => task.taskId))}
+                        data-testid="studio-plan-compare-candidates"
+                      >
+                        {text('ui.studio.plan.compare_candidates')}
+                      </Action>
+                    ) : null}
+                    {canSelect ? finished.map((task) => (
+                      <Action
+                        key={task.taskId}
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onSelectCandidate!(task.taskId)}
+                        data-testid="studio-plan-select-candidate"
+                        data-task-id={task.taskId}
+                      >
+                        {text('ui.studio.plan.select_candidate')}
+                      </Action>
+                    )) : null}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </section>
       ) : null}
       {(plan.acceptance?.length ?? 0) > 0 ? (
         <section className="flex flex-col gap-0.5" data-testid="studio-plan-acceptance">

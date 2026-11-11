@@ -64,6 +64,26 @@ func (e *Executor) parameterReasons(command chat.ToolCommand, o generation.Offer
 			}
 		}
 	}
+	// #242: the cheap concept-sketch overrides come from the Schema, not the
+	// Agent, so the server supplies their adjustment reason. Without it an
+	// advised override (for example quality=low) is refused even though the
+	// person approved the open-concept flow.
+	if concept := e.chat.ConceptDirections; concept.Enabled && command.Tool.Name == concept.SketchTool && concept.ParameterReason != "" {
+		for name, value := range e.conceptSketchParameterValues(command, o) {
+			if _, explained := reasons[name]; explained {
+				continue
+			}
+			if !advisedParameter(o, name) {
+				continue
+			}
+			// The concept values are merged into the input after this pass, so
+			// the current normalized value may not exist yet; the Schema owns
+			// these values and their explanation either way.
+			_ = value
+			reasons[name] = concept.ParameterReason
+			sources[name] = "profile:concept"
+		}
+	}
 	return reasons, sources, nil
 }
 

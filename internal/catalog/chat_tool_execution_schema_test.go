@@ -19,7 +19,8 @@ func TestDefaultChatToolsDeclareRuntimeExecutionContracts(t *testing.T) {
 	// 25 controls: the shipped 19 plus #246's compare_model_reference and
 	// record_self_check, #250's create_selection_mask/set_visual_anchor,
 	// #251's revise_processing_plan and #240's list_project_assets.
-	if len(app.Chat.Tools) != 15 || len(app.Chat.AgentTools) != 25 {
+	// 16 generation tools: the shipped 15 plus #242's create_concept_sketch.
+	if len(app.Chat.Tools) != 16 || len(app.Chat.AgentTools) != 25 {
 		t.Fatalf("chat tool inventory = generation:%d controls:%d", len(app.Chat.Tools), len(app.Chat.AgentTools))
 	}
 	if err := catalog.ValidateApplicationSchema(app); err != nil {

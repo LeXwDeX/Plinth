@@ -434,6 +434,14 @@ func (executor *Executor) Execute(
 	if command.Tool.Processing != nil {
 		return executor.executeProcessing(ctx, command, observe)
 	}
+	// #242: one reply draws a bounded number of concept sketches; a later reply
+	// starts a fresh count. An already accepted Task is observed above and is
+	// never refused by this limit.
+	if refusal := executor.conceptSketchLimit(command); refusal != "" {
+		result := executor.failure(command, "", refusal)
+		result.NoSubmission = true
+		return result, nil
+	}
 	var arguments map[string]json.RawMessage
 	if err := json.Unmarshal(command.Call.Arguments, &arguments); err != nil {
 		arguments = map[string]json.RawMessage{}
@@ -1427,6 +1435,16 @@ func (executor *Executor) buildInput(
 			profileValues[name] = encoded
 		}
 	}
+	// #242: the concept sketch's cheap parameters per Offering sit above the
+	// purpose values; the Agent's own values still win.
+	conceptValues := executor.conceptSketchParameterValues(command, offering)
+	for name, encoded := range conceptValues {
+		var value any
+		if err := json.Unmarshal(encoded, &value); err != nil {
+			return nil, nil, err
+		}
+		input[name] = value
+	}
 	parameters := make(map[string]json.RawMessage, len(command.Options.Parameters))
 	for name, value := range command.Options.Parameters {
 		if parameter, declared := allowed[name]; declared && turnParameterAllowed(offering, parameter) {
@@ -1479,6 +1497,13 @@ func (executor *Executor) buildInput(
 	// A purpose value survived the later layers (a panel "null" deleted it):
 	// it counts as chosen, so the reference size rule leaves it alone.
 	for name := range profileValues {
+		if _, present := input[name]; present {
+			chosen[name] = true
+		}
+	}
+	// #242: a cheap concept sketch value is a choice too; the reference-size
+	// rule must not replace it with a picture-shaped size.
+	for name := range conceptValues {
 		if _, present := input[name]; present {
 			chosen[name] = true
 		}

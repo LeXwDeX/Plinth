@@ -1,6 +1,6 @@
 {
-  "version": 3,
-  "description": "Agent 产出质量评测的固定请求集（#238）。轨迹评测用 steps 中的 tool 驱动 fake LLM；产出评测只发送 prompt，由真实 Agent 自行决定工具。用途取自 Product Schema chat.model3d_usage.profiles。project/project_setup 步骤搭建 #240 的项目夹具（建项目、提升首图、同项目新会话），不算工具调用。",
+  "version": 5,
+  "description": "Agent 产出质量评测的固定请求集（#238）。轨迹评测用 steps 中的 tool 驱动 fake LLM；产出评测只发送 prompt，由真实 Agent 自行决定工具。用途取自 Product Schema chat.model3d_usage.profiles。version 5 合并 #240 的项目夹具（project/project_setup：建项目、提升首图、同项目新会话，不算工具调用）、#241 的会话偏好用例与 #242 的开放概念方向、3D 候选案例。",
   "requests": [
     {
       "id": "3d-humanoid-character",
@@ -10,42 +10,118 @@
       "purpose": "game_character",
       "prompt": "开始做一个赛博朋克风格的女刺客，全身，准备放进 Unity 做游戏角色，要能绑骨。",
       "reference_images": [],
-      "deliverables": ["可导入引擎的 3D 模型（GLB）", "正面、背面与 3/4 视角渲染", "几何与用途预算自检"],
+      "deliverables": [
+        "可导入引擎的 3D 模型（GLB）",
+        "正面、背面与 3/4 视角渲染",
+        "几何与用途预算自检"
+      ],
       "steps": [
         {
           "user": "用途是游戏角色，先把用途记下来。",
-          "tool": {"name": "ask_choice", "arguments": {"kind": "usage_profile"}}
+          "tool": {
+            "name": "ask_choice",
+            "arguments": {
+              "kind": "usage_profile"
+            }
+          }
         },
         {
           "user": "按游戏角色的默认设置继续。",
-          "tool": {"name": "update_production_brief", "arguments": {"purpose": "game_character", "target_platform": "Unity", "needs_rig": true, "style": "cyberpunk"}}
+          "tool": {
+            "name": "update_production_brief",
+            "arguments": {
+              "purpose": "game_character",
+              "target_platform": "Unity",
+              "needs_rig": true,
+              "style": "cyberpunk"
+            }
+          }
         },
         {
           "user": "开始建模。",
-          "tool": {"name": "create_model_3d", "arguments": {"prompt": "cyberpunk female assassin, full body, A-pose, game character, dark techwear jacket, neon accents, detailed face, realistic stylized"}}
+          "tool": {
+            "name": "create_model_3d",
+            "arguments": {
+              "prompt": "cyberpunk female assassin, full body, A-pose, game character, dark techwear jacket, neon accents, detailed face, realistic stylized"
+            }
+          }
         },
         {
           "user": "检查一下几何和用途预算。",
-          "tool": {"name": "inspect_model", "arguments": {"model": "@model1"}}
+          "tool": {
+            "name": "inspect_model",
+            "arguments": {
+              "model": "@model1"
+            }
+          }
         },
         {
           "user": "渲染正面、背面和 3/4 视角。",
-          "tool": {"name": "render_model_views", "arguments": {"model": "@model1", "views": ["front", "back", "three_quarter"]}}
+          "tool": {
+            "name": "render_model_views",
+            "arguments": {
+              "model": "@model1",
+              "views": [
+                "front",
+                "back",
+                "three_quarter"
+              ]
+            }
+          }
         }
       ],
-      "live_followups": ["请按默认设置继续完成。", "请渲染正面、背面和 3/4 视角供验收。"],
+      "live_followups": [
+        "请按默认设置继续完成。",
+        "请渲染正面、背面和 3/4 视角供验收。"
+      ],
       "expected": {
-        "capabilities": ["text-to-3d"],
+        "capabilities": [
+          "text-to-3d"
+        ],
         "required_tool_groups": [
-          {"id": "usage", "any": ["ask_choice"]},
-          {"id": "brief", "any": ["update_production_brief"]},
-          {"id": "generate_3d", "any": ["create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views"]}
+          {
+            "id": "usage",
+            "any": [
+              "ask_choice"
+            ]
+          },
+          {
+            "id": "brief",
+            "any": [
+              "update_production_brief"
+            ]
+          },
+          {
+            "id": "generate_3d",
+            "any": [
+              "create_model_3d",
+              "create_model_3d_from_image",
+              "create_model_3d_from_views"
+            ]
+          }
         ],
         "order": [
-          {"before": ["ask_choice", "update_production_brief"], "after": ["create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views"]}
+          {
+            "before": [
+              "ask_choice",
+              "update_production_brief"
+            ],
+            "after": [
+              "create_model_3d",
+              "create_model_3d_from_image",
+              "create_model_3d_from_views"
+            ]
+          }
         ],
-        "soft_tools": ["inspect_model", "render_model_views"],
-        "budgets": {"max_paid_calls": 1, "max_tool_calls": 12, "max_interruptions": 2}
+        "soft_tools": [
+          "inspect_model",
+          "render_model_views"
+        ],
+        "budgets": {
+          "max_paid_calls": 1,
+          "max_tool_calls": 12,
+          "max_interruptions": 2
+        }
       }
     },
     {
@@ -56,42 +132,117 @@
       "purpose": "game_prop",
       "prompt": "开始做一个低多边形科幻能量步枪，硬表面，游戏里用的道具。",
       "reference_images": [],
-      "deliverables": ["可导入引擎的 3D 模型（GLB）", "正面、背面与 3/4 视角渲染", "几何与用途预算自检"],
+      "deliverables": [
+        "可导入引擎的 3D 模型（GLB）",
+        "正面、背面与 3/4 视角渲染",
+        "几何与用途预算自检"
+      ],
       "steps": [
         {
           "user": "用途是游戏道具，先把用途记下来。",
-          "tool": {"name": "ask_choice", "arguments": {"kind": "usage_profile"}}
+          "tool": {
+            "name": "ask_choice",
+            "arguments": {
+              "kind": "usage_profile"
+            }
+          }
         },
         {
           "user": "按游戏道具的默认设置继续。",
-          "tool": {"name": "update_production_brief", "arguments": {"purpose": "game_prop", "target_platform": "Unreal", "style": "low-poly hard surface"}}
+          "tool": {
+            "name": "update_production_brief",
+            "arguments": {
+              "purpose": "game_prop",
+              "target_platform": "Unreal",
+              "style": "low-poly hard surface"
+            }
+          }
         },
         {
           "user": "开始建模。",
-          "tool": {"name": "create_model_3d", "arguments": {"prompt": "low-poly sci-fi energy rifle, hard surface, chunky angular silhouette, game prop, dark metal with cyan energy cell"}}
+          "tool": {
+            "name": "create_model_3d",
+            "arguments": {
+              "prompt": "low-poly sci-fi energy rifle, hard surface, chunky angular silhouette, game prop, dark metal with cyan energy cell"
+            }
+          }
         },
         {
           "user": "检查一下几何和用途预算。",
-          "tool": {"name": "inspect_model", "arguments": {"model": "@model1"}}
+          "tool": {
+            "name": "inspect_model",
+            "arguments": {
+              "model": "@model1"
+            }
+          }
         },
         {
           "user": "渲染正面、背面和 3/4 视角。",
-          "tool": {"name": "render_model_views", "arguments": {"model": "@model1", "views": ["front", "back", "three_quarter"]}}
+          "tool": {
+            "name": "render_model_views",
+            "arguments": {
+              "model": "@model1",
+              "views": [
+                "front",
+                "back",
+                "three_quarter"
+              ]
+            }
+          }
         }
       ],
-      "live_followups": ["请按默认设置继续完成。", "请渲染正面、背面和 3/4 视角供验收。"],
+      "live_followups": [
+        "请按默认设置继续完成。",
+        "请渲染正面、背面和 3/4 视角供验收。"
+      ],
       "expected": {
-        "capabilities": ["text-to-3d"],
+        "capabilities": [
+          "text-to-3d"
+        ],
         "required_tool_groups": [
-          {"id": "usage", "any": ["ask_choice"]},
-          {"id": "brief", "any": ["update_production_brief"]},
-          {"id": "generate_3d", "any": ["create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views"]}
+          {
+            "id": "usage",
+            "any": [
+              "ask_choice"
+            ]
+          },
+          {
+            "id": "brief",
+            "any": [
+              "update_production_brief"
+            ]
+          },
+          {
+            "id": "generate_3d",
+            "any": [
+              "create_model_3d",
+              "create_model_3d_from_image",
+              "create_model_3d_from_views"
+            ]
+          }
         ],
         "order": [
-          {"before": ["ask_choice", "update_production_brief"], "after": ["create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views"]}
+          {
+            "before": [
+              "ask_choice",
+              "update_production_brief"
+            ],
+            "after": [
+              "create_model_3d",
+              "create_model_3d_from_image",
+              "create_model_3d_from_views"
+            ]
+          }
         ],
-        "soft_tools": ["inspect_model", "render_model_views"],
-        "budgets": {"max_paid_calls": 1, "max_tool_calls": 12, "max_interruptions": 2}
+        "soft_tools": [
+          "inspect_model",
+          "render_model_views"
+        ],
+        "budgets": {
+          "max_paid_calls": 1,
+          "max_tool_calls": 12,
+          "max_interruptions": 2
+        }
       }
     },
     {
@@ -102,42 +253,117 @@
       "purpose": "game_prop",
       "prompt": "开始做一个石砌水井的场景小件，风格化的，游戏场景用。",
       "reference_images": [],
-      "deliverables": ["可导入引擎的 3D 模型（GLB）", "正面、背面与 3/4 视角渲染", "几何与用途预算自检"],
+      "deliverables": [
+        "可导入引擎的 3D 模型（GLB）",
+        "正面、背面与 3/4 视角渲染",
+        "几何与用途预算自检"
+      ],
       "steps": [
         {
           "user": "用途是游戏场景件，先把用途记下来。",
-          "tool": {"name": "ask_choice", "arguments": {"kind": "usage_profile"}}
+          "tool": {
+            "name": "ask_choice",
+            "arguments": {
+              "kind": "usage_profile"
+            }
+          }
         },
         {
           "user": "按游戏道具与场景件的默认设置继续。",
-          "tool": {"name": "update_production_brief", "arguments": {"purpose": "game_prop", "target_platform": "Unity", "style": "stylized hand-painted"}}
+          "tool": {
+            "name": "update_production_brief",
+            "arguments": {
+              "purpose": "game_prop",
+              "target_platform": "Unity",
+              "style": "stylized hand-painted"
+            }
+          }
         },
         {
           "user": "开始建模。",
-          "tool": {"name": "create_model_3d", "arguments": {"prompt": "stylized stone well, scene prop, chunky masonry, wooden roof and bucket, hand-painted game art style"}}
+          "tool": {
+            "name": "create_model_3d",
+            "arguments": {
+              "prompt": "stylized stone well, scene prop, chunky masonry, wooden roof and bucket, hand-painted game art style"
+            }
+          }
         },
         {
           "user": "检查一下几何和用途预算。",
-          "tool": {"name": "inspect_model", "arguments": {"model": "@model1"}}
+          "tool": {
+            "name": "inspect_model",
+            "arguments": {
+              "model": "@model1"
+            }
+          }
         },
         {
           "user": "渲染正面、背面和 3/4 视角。",
-          "tool": {"name": "render_model_views", "arguments": {"model": "@model1", "views": ["front", "back", "three_quarter"]}}
+          "tool": {
+            "name": "render_model_views",
+            "arguments": {
+              "model": "@model1",
+              "views": [
+                "front",
+                "back",
+                "three_quarter"
+              ]
+            }
+          }
         }
       ],
-      "live_followups": ["请按默认设置继续完成。", "请渲染正面、背面和 3/4 视角供验收。"],
+      "live_followups": [
+        "请按默认设置继续完成。",
+        "请渲染正面、背面和 3/4 视角供验收。"
+      ],
       "expected": {
-        "capabilities": ["text-to-3d"],
+        "capabilities": [
+          "text-to-3d"
+        ],
         "required_tool_groups": [
-          {"id": "usage", "any": ["ask_choice"]},
-          {"id": "brief", "any": ["update_production_brief"]},
-          {"id": "generate_3d", "any": ["create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views"]}
+          {
+            "id": "usage",
+            "any": [
+              "ask_choice"
+            ]
+          },
+          {
+            "id": "brief",
+            "any": [
+              "update_production_brief"
+            ]
+          },
+          {
+            "id": "generate_3d",
+            "any": [
+              "create_model_3d",
+              "create_model_3d_from_image",
+              "create_model_3d_from_views"
+            ]
+          }
         ],
         "order": [
-          {"before": ["ask_choice", "update_production_brief"], "after": ["create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views"]}
+          {
+            "before": [
+              "ask_choice",
+              "update_production_brief"
+            ],
+            "after": [
+              "create_model_3d",
+              "create_model_3d_from_image",
+              "create_model_3d_from_views"
+            ]
+          }
         ],
-        "soft_tools": ["inspect_model", "render_model_views"],
-        "budgets": {"max_paid_calls": 1, "max_tool_calls": 12, "max_interruptions": 2}
+        "soft_tools": [
+          "inspect_model",
+          "render_model_views"
+        ],
+        "budgets": {
+          "max_paid_calls": 1,
+          "max_tool_calls": 12,
+          "max_interruptions": 2
+        }
       }
     },
     {
@@ -148,42 +374,117 @@
       "purpose": "render",
       "prompt": "开始做一只会发光的深海水母状生物，展示用，不要打印。",
       "reference_images": [],
-      "deliverables": ["3D 模型（GLB）", "正面、背面与 3/4 视角渲染", "几何与用途预算自检"],
+      "deliverables": [
+        "3D 模型（GLB）",
+        "正面、背面与 3/4 视角渲染",
+        "几何与用途预算自检"
+      ],
       "steps": [
         {
           "user": "用途是展示渲染，先把用途记下来。",
-          "tool": {"name": "ask_choice", "arguments": {"kind": "usage_profile"}}
+          "tool": {
+            "name": "ask_choice",
+            "arguments": {
+              "kind": "usage_profile"
+            }
+          }
         },
         {
           "user": "按展示渲染的默认设置继续。",
-          "tool": {"name": "update_production_brief", "arguments": {"purpose": "render", "target_platform": "Web", "style": "bioluminescent organic"}}
+          "tool": {
+            "name": "update_production_brief",
+            "arguments": {
+              "purpose": "render",
+              "target_platform": "Web",
+              "style": "bioluminescent organic"
+            }
+          }
         },
         {
           "user": "开始建模。",
-          "tool": {"name": "create_model_3d", "arguments": {"prompt": "bioluminescent deep-sea jellyfish creature, translucent bell, glowing tentacles, organic sci-fi, display model, detailed"}}
+          "tool": {
+            "name": "create_model_3d",
+            "arguments": {
+              "prompt": "bioluminescent deep-sea jellyfish creature, translucent bell, glowing tentacles, organic sci-fi, display model, detailed"
+            }
+          }
         },
         {
           "user": "检查一下几何和用途预算。",
-          "tool": {"name": "inspect_model", "arguments": {"model": "@model1"}}
+          "tool": {
+            "name": "inspect_model",
+            "arguments": {
+              "model": "@model1"
+            }
+          }
         },
         {
           "user": "渲染正面、背面和 3/4 视角。",
-          "tool": {"name": "render_model_views", "arguments": {"model": "@model1", "views": ["front", "back", "three_quarter"]}}
+          "tool": {
+            "name": "render_model_views",
+            "arguments": {
+              "model": "@model1",
+              "views": [
+                "front",
+                "back",
+                "three_quarter"
+              ]
+            }
+          }
         }
       ],
-      "live_followups": ["请按默认设置继续完成。", "请渲染正面、背面和 3/4 视角供验收。"],
+      "live_followups": [
+        "请按默认设置继续完成。",
+        "请渲染正面、背面和 3/4 视角供验收。"
+      ],
       "expected": {
-        "capabilities": ["text-to-3d"],
+        "capabilities": [
+          "text-to-3d"
+        ],
         "required_tool_groups": [
-          {"id": "usage", "any": ["ask_choice"]},
-          {"id": "brief", "any": ["update_production_brief"]},
-          {"id": "generate_3d", "any": ["create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views"]}
+          {
+            "id": "usage",
+            "any": [
+              "ask_choice"
+            ]
+          },
+          {
+            "id": "brief",
+            "any": [
+              "update_production_brief"
+            ]
+          },
+          {
+            "id": "generate_3d",
+            "any": [
+              "create_model_3d",
+              "create_model_3d_from_image",
+              "create_model_3d_from_views"
+            ]
+          }
         ],
         "order": [
-          {"before": ["ask_choice", "update_production_brief"], "after": ["create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views"]}
+          {
+            "before": [
+              "ask_choice",
+              "update_production_brief"
+            ],
+            "after": [
+              "create_model_3d",
+              "create_model_3d_from_image",
+              "create_model_3d_from_views"
+            ]
+          }
         ],
-        "soft_tools": ["inspect_model", "render_model_views"],
-        "budgets": {"max_paid_calls": 1, "max_tool_calls": 12, "max_interruptions": 2}
+        "soft_tools": [
+          "inspect_model",
+          "render_model_views"
+        ],
+        "budgets": {
+          "max_paid_calls": 1,
+          "max_tool_calls": 12,
+          "max_interruptions": 2
+        }
       }
     },
     {
@@ -194,48 +495,145 @@
       "purpose": "print",
       "prompt": "开始做一个 15 厘米高的桌游手办，要能 3D 打印，水密。先按我的描述画一张概念图，再照着它建模。",
       "reference_images": [],
-      "deliverables": ["水密的 3D 打印模型（GLB）", "正面、背面与 3/4 视角渲染", "几何、水密与用途预算自检"],
+      "deliverables": [
+        "水密的 3D 打印模型（GLB）",
+        "正面、背面与 3/4 视角渲染",
+        "几何、水密与用途预算自检"
+      ],
       "steps": [
         {
           "user": "用途是 3D 打印，先把用途记下来。",
-          "tool": {"name": "ask_choice", "arguments": {"kind": "usage_profile"}}
+          "tool": {
+            "name": "ask_choice",
+            "arguments": {
+              "kind": "usage_profile"
+            }
+          }
         },
         {
           "user": "按 3D 打印的默认设置继续。",
-          "tool": {"name": "update_production_brief", "arguments": {"purpose": "print", "target_platform": "3D print", "notes": "15 cm tall, watertight"}}
+          "tool": {
+            "name": "update_production_brief",
+            "arguments": {
+              "purpose": "print",
+              "target_platform": "3D print",
+              "notes": "15 cm tall, watertight"
+            }
+          }
         },
         {
           "user": "先画一张正面概念图。",
-          "tool": {"name": "refine_image", "arguments": {"prompt": "concept art of a tabletop miniature knight, full body, neutral A-pose, plain light background, front view, clean silhouette, printable details, realistic stylized"}}
+          "tool": {
+            "name": "refine_image",
+            "arguments": {
+              "prompt": "concept art of a tabletop miniature knight, full body, neutral A-pose, plain light background, front view, clean silhouette, printable details, realistic stylized"
+            }
+          }
         },
         {
           "user": "照着这张概念图建模。",
-          "tool": {"name": "create_model_3d_from_image", "arguments": {"prompt": "tabletop miniature knight, full body, watertight solid mesh, 15 cm tall, detailed armor", "reference_image_indices": [1]}}
+          "tool": {
+            "name": "create_model_3d_from_image",
+            "arguments": {
+              "prompt": "tabletop miniature knight, full body, watertight solid mesh, 15 cm tall, detailed armor",
+              "reference_image_indices": [
+                1
+              ]
+            }
+          }
         },
         {
           "user": "检查水密性和用途预算。",
-          "tool": {"name": "inspect_model", "arguments": {"model": "@model1"}}
+          "tool": {
+            "name": "inspect_model",
+            "arguments": {
+              "model": "@model1"
+            }
+          }
         },
         {
           "user": "渲染正面、背面和 3/4 视角。",
-          "tool": {"name": "render_model_views", "arguments": {"model": "@model1", "views": ["front", "back", "three_quarter"]}}
+          "tool": {
+            "name": "render_model_views",
+            "arguments": {
+              "model": "@model1",
+              "views": [
+                "front",
+                "back",
+                "three_quarter"
+              ]
+            }
+          }
         }
       ],
-      "live_followups": ["请按默认设置继续完成。", "请渲染正面、背面和 3/4 视角供验收。"],
+      "live_followups": [
+        "请按默认设置继续完成。",
+        "请渲染正面、背面和 3/4 视角供验收。"
+      ],
       "expected": {
-        "capabilities": ["text-to-image", "image-to-3d"],
+        "capabilities": [
+          "text-to-image",
+          "image-to-3d"
+        ],
         "required_tool_groups": [
-          {"id": "usage", "any": ["ask_choice"]},
-          {"id": "brief", "any": ["update_production_brief"]},
-          {"id": "concept_image", "any": ["refine_image"]},
-          {"id": "generate_3d", "any": ["create_model_3d_from_image", "create_model_3d_from_views", "create_model_3d"]}
+          {
+            "id": "usage",
+            "any": [
+              "ask_choice"
+            ]
+          },
+          {
+            "id": "brief",
+            "any": [
+              "update_production_brief"
+            ]
+          },
+          {
+            "id": "concept_image",
+            "any": [
+              "refine_image"
+            ]
+          },
+          {
+            "id": "generate_3d",
+            "any": [
+              "create_model_3d_from_image",
+              "create_model_3d_from_views",
+              "create_model_3d"
+            ]
+          }
         ],
         "order": [
-          {"before": ["refine_image"], "after": ["create_model_3d_from_image", "create_model_3d_from_views"]},
-          {"before": ["ask_choice", "update_production_brief"], "after": ["create_model_3d_from_image", "create_model_3d_from_views", "create_model_3d"]}
+          {
+            "before": [
+              "refine_image"
+            ],
+            "after": [
+              "create_model_3d_from_image",
+              "create_model_3d_from_views"
+            ]
+          },
+          {
+            "before": [
+              "ask_choice",
+              "update_production_brief"
+            ],
+            "after": [
+              "create_model_3d_from_image",
+              "create_model_3d_from_views",
+              "create_model_3d"
+            ]
+          }
         ],
-        "soft_tools": ["inspect_model", "render_model_views"],
-        "budgets": {"max_paid_calls": 2, "max_tool_calls": 14, "max_interruptions": 2}
+        "soft_tools": [
+          "inspect_model",
+          "render_model_views"
+        ],
+        "budgets": {
+          "max_paid_calls": 2,
+          "max_tool_calls": 14,
+          "max_interruptions": 2
+        }
       }
     },
     {
@@ -246,48 +644,145 @@
       "purpose": "web_ar",
       "prompt": "开始把一个运动水壶做成 AR 商品展示模型，网页里实时查看，先画一张商品图再建模。",
       "reference_images": [],
-      "deliverables": ["适合 Web/AR 的 3D 模型（GLB）", "正面、背面与 3/4 视角渲染", "几何、贴图与用途预算自检"],
+      "deliverables": [
+        "适合 Web/AR 的 3D 模型（GLB）",
+        "正面、背面与 3/4 视角渲染",
+        "几何、贴图与用途预算自检"
+      ],
       "steps": [
         {
           "user": "用途是 Web/AR 展示，先把用途记下来。",
-          "tool": {"name": "ask_choice", "arguments": {"kind": "usage_profile"}}
+          "tool": {
+            "name": "ask_choice",
+            "arguments": {
+              "kind": "usage_profile"
+            }
+          }
         },
         {
           "user": "按 Web/AR 展示的默认设置继续。",
-          "tool": {"name": "update_production_brief", "arguments": {"purpose": "web_ar", "target_platform": "Web and AR", "style": "clean product photo"}}
+          "tool": {
+            "name": "update_production_brief",
+            "arguments": {
+              "purpose": "web_ar",
+              "target_platform": "Web and AR",
+              "style": "clean product photo"
+            }
+          }
         },
         {
           "user": "先画一张商品图。",
-          "tool": {"name": "refine_image", "arguments": {"prompt": "product photo of a stainless steel sports water bottle, front view, plain white background, soft studio lighting, clean reflections, centered"}}
+          "tool": {
+            "name": "refine_image",
+            "arguments": {
+              "prompt": "product photo of a stainless steel sports water bottle, front view, plain white background, soft studio lighting, clean reflections, centered"
+            }
+          }
         },
         {
           "user": "照着这张商品图建模。",
-          "tool": {"name": "create_model_3d_from_image", "arguments": {"prompt": "stainless steel sports water bottle, product model, clean topology, compact for web and AR", "reference_image_indices": [1]}}
+          "tool": {
+            "name": "create_model_3d_from_image",
+            "arguments": {
+              "prompt": "stainless steel sports water bottle, product model, clean topology, compact for web and AR",
+              "reference_image_indices": [
+                1
+              ]
+            }
+          }
         },
         {
           "user": "检查几何、贴图和用途预算。",
-          "tool": {"name": "inspect_model", "arguments": {"model": "@model1"}}
+          "tool": {
+            "name": "inspect_model",
+            "arguments": {
+              "model": "@model1"
+            }
+          }
         },
         {
           "user": "渲染正面、背面和 3/4 视角。",
-          "tool": {"name": "render_model_views", "arguments": {"model": "@model1", "views": ["front", "back", "three_quarter"]}}
+          "tool": {
+            "name": "render_model_views",
+            "arguments": {
+              "model": "@model1",
+              "views": [
+                "front",
+                "back",
+                "three_quarter"
+              ]
+            }
+          }
         }
       ],
-      "live_followups": ["请按默认设置继续完成。", "请渲染正面、背面和 3/4 视角供验收。"],
+      "live_followups": [
+        "请按默认设置继续完成。",
+        "请渲染正面、背面和 3/4 视角供验收。"
+      ],
       "expected": {
-        "capabilities": ["text-to-image", "image-to-3d"],
+        "capabilities": [
+          "text-to-image",
+          "image-to-3d"
+        ],
         "required_tool_groups": [
-          {"id": "usage", "any": ["ask_choice"]},
-          {"id": "brief", "any": ["update_production_brief"]},
-          {"id": "concept_image", "any": ["refine_image"]},
-          {"id": "generate_3d", "any": ["create_model_3d_from_image", "create_model_3d_from_views", "create_model_3d"]}
+          {
+            "id": "usage",
+            "any": [
+              "ask_choice"
+            ]
+          },
+          {
+            "id": "brief",
+            "any": [
+              "update_production_brief"
+            ]
+          },
+          {
+            "id": "concept_image",
+            "any": [
+              "refine_image"
+            ]
+          },
+          {
+            "id": "generate_3d",
+            "any": [
+              "create_model_3d_from_image",
+              "create_model_3d_from_views",
+              "create_model_3d"
+            ]
+          }
         ],
         "order": [
-          {"before": ["refine_image"], "after": ["create_model_3d_from_image", "create_model_3d_from_views"]},
-          {"before": ["ask_choice", "update_production_brief"], "after": ["create_model_3d_from_image", "create_model_3d_from_views", "create_model_3d"]}
+          {
+            "before": [
+              "refine_image"
+            ],
+            "after": [
+              "create_model_3d_from_image",
+              "create_model_3d_from_views"
+            ]
+          },
+          {
+            "before": [
+              "ask_choice",
+              "update_production_brief"
+            ],
+            "after": [
+              "create_model_3d_from_image",
+              "create_model_3d_from_views",
+              "create_model_3d"
+            ]
+          }
         ],
-        "soft_tools": ["inspect_model", "render_model_views"],
-        "budgets": {"max_paid_calls": 2, "max_tool_calls": 14, "max_interruptions": 2}
+        "soft_tools": [
+          "inspect_model",
+          "render_model_views"
+        ],
+        "budgets": {
+          "max_paid_calls": 2,
+          "max_tool_calls": 14,
+          "max_interruptions": 2
+        }
       }
     },
     {
@@ -297,29 +792,70 @@
       "category": "character_illustration",
       "purpose": "illustration",
       "prompt": "画一张赛博朋克女刺客的全身立绘，简洁数字插画，透明背景。",
-      "output": {"background": "transparent"},
+      "output": {
+        "background": "transparent"
+      },
       "reference_images": [],
-      "deliverables": ["透明背景的全身立绘（PNG）"],
+      "deliverables": [
+        "透明背景的全身立绘（PNG）"
+      ],
       "steps": [
         {
           "user": "这张图主要用来做什么？",
-          "tool": {"name": "ask_choice", "arguments": {"kind": "image_usage_profile"}}
+          "tool": {
+            "name": "ask_choice",
+            "arguments": {
+              "kind": "image_usage_profile"
+            }
+          }
         },
         {
           "user": "开始画。",
-          "tool": {"name": "refine_image", "arguments": {"prompt": "full-body cyberpunk female assassin, clean digital illustration, confident pose, neon accents, transparent background, sharp silhouette, no text, no watermark"}}
+          "tool": {
+            "name": "refine_image",
+            "arguments": {
+              "prompt": "full-body cyberpunk female assassin, clean digital illustration, confident pose, neon accents, transparent background, sharp silhouette, no text, no watermark"
+            }
+          }
         }
       ],
-      "live_followups": ["请按这个描述完成一张全身立绘。"],
+      "live_followups": [
+        "请按这个描述完成一张全身立绘。"
+      ],
       "expected": {
-        "capabilities": ["text-to-image"],
-        "required_tool_groups": [
-          {"id": "usage", "any": ["ask_choice"]},
-          {"id": "generate_2d", "any": ["refine_image"]}
+        "capabilities": [
+          "text-to-image"
         ],
-        "order": [{"before": ["ask_choice"], "after": ["refine_image"]}],
+        "required_tool_groups": [
+          {
+            "id": "usage",
+            "any": [
+              "ask_choice"
+            ]
+          },
+          {
+            "id": "generate_2d",
+            "any": [
+              "refine_image"
+            ]
+          }
+        ],
+        "order": [
+          {
+            "before": [
+              "ask_choice"
+            ],
+            "after": [
+              "refine_image"
+            ]
+          }
+        ],
         "soft_tools": [],
-        "budgets": {"max_paid_calls": 1, "max_tool_calls": 6, "max_interruptions": 2}
+        "budgets": {
+          "max_paid_calls": 1,
+          "max_tool_calls": 6,
+          "max_interruptions": 2
+        }
       }
     },
     {
@@ -329,29 +865,70 @@
       "category": "icon_prop",
       "purpose": "icon_prop",
       "prompt": "画一套三个不同颜色的药水瓶图标，统一画风，透明背景。",
-      "output": {"background": "transparent"},
+      "output": {
+        "background": "transparent"
+      },
       "reference_images": [],
-      "deliverables": ["透明背景的三色药水瓶图标（PNG）"],
+      "deliverables": [
+        "透明背景的三色药水瓶图标（PNG）"
+      ],
       "steps": [
         {
           "user": "这张图主要用来做什么？",
-          "tool": {"name": "ask_choice", "arguments": {"kind": "image_usage_profile"}}
+          "tool": {
+            "name": "ask_choice",
+            "arguments": {
+              "kind": "image_usage_profile"
+            }
+          }
         },
         {
           "user": "开始画。",
-          "tool": {"name": "refine_image", "arguments": {"prompt": "set of three potion bottle icons, red blue and green liquid, matching stylized game icon style, thick clean outlines, transparent background, no text, no watermark"}}
+          "tool": {
+            "name": "refine_image",
+            "arguments": {
+              "prompt": "set of three potion bottle icons, red blue and green liquid, matching stylized game icon style, thick clean outlines, transparent background, no text, no watermark"
+            }
+          }
         }
       ],
-      "live_followups": ["请按这个描述完成图标图。"],
+      "live_followups": [
+        "请按这个描述完成图标图。"
+      ],
       "expected": {
-        "capabilities": ["text-to-image"],
-        "required_tool_groups": [
-          {"id": "usage", "any": ["ask_choice"]},
-          {"id": "generate_2d", "any": ["refine_image"]}
+        "capabilities": [
+          "text-to-image"
         ],
-        "order": [{"before": ["ask_choice"], "after": ["refine_image"]}],
+        "required_tool_groups": [
+          {
+            "id": "usage",
+            "any": [
+              "ask_choice"
+            ]
+          },
+          {
+            "id": "generate_2d",
+            "any": [
+              "refine_image"
+            ]
+          }
+        ],
+        "order": [
+          {
+            "before": [
+              "ask_choice"
+            ],
+            "after": [
+              "refine_image"
+            ]
+          }
+        ],
         "soft_tools": [],
-        "budgets": {"max_paid_calls": 1, "max_tool_calls": 6, "max_interruptions": 2}
+        "budgets": {
+          "max_paid_calls": 1,
+          "max_tool_calls": 6,
+          "max_interruptions": 2
+        }
       }
     },
     {
@@ -362,36 +939,88 @@
       "purpose": "illustration",
       "prompt": "先画主角的全身立绘，再画同一角色的半身像和侧面像，三张保持同一画风和身份特征。",
       "reference_images": [],
-      "deliverables": ["同一角色的三张系列图（PNG）", "三张图共用风格锚与身份锚"],
+      "deliverables": [
+        "同一角色的三张系列图（PNG）",
+        "三张图共用风格锚与身份锚"
+      ],
       "steps": [
         {
           "user": "这张图主要用来做什么？",
-          "tool": {"name": "ask_choice", "arguments": {"kind": "image_usage_profile"}}
+          "tool": {
+            "name": "ask_choice",
+            "arguments": {
+              "kind": "image_usage_profile"
+            }
+          }
         },
         {
           "user": "先画全身立绘。",
-          "tool": {"name": "refine_image", "arguments": {"prompt": "full-body portrait of a young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"}}
+          "tool": {
+            "name": "refine_image",
+            "arguments": {
+              "prompt": "full-body portrait of a young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"
+            }
+          }
         },
         {
           "user": "再画同一角色的半身像，保持画风和身份特征。",
-          "tool": {"name": "refine_image", "arguments": {"prompt": "half-body portrait of the same young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"}}
+          "tool": {
+            "name": "refine_image",
+            "arguments": {
+              "prompt": "half-body portrait of the same young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"
+            }
+          }
         },
         {
           "user": "再画同一角色的侧面像，保持画风和身份特征。",
-          "tool": {"name": "refine_image", "arguments": {"prompt": "side profile of the same young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"}}
+          "tool": {
+            "name": "refine_image",
+            "arguments": {
+              "prompt": "side profile of the same young red-haired swordswoman, clean digital illustration, warm color palette, soft rim light, flat neutral background, no text, no watermark"
+            }
+          }
         }
       ],
-      "live_followups": ["请继续画同一角色的半身像和侧面像，保持画风与身份特征。"],
+      "live_followups": [
+        "请继续画同一角色的半身像和侧面像，保持画风与身份特征。"
+      ],
       "expected": {
-        "capabilities": ["text-to-image"],
-        "min_tasks": {"text-to-image": 3},
-        "required_tool_groups": [
-          {"id": "usage", "any": ["ask_choice"]},
-          {"id": "generate_2d", "any": ["refine_image"]}
+        "capabilities": [
+          "text-to-image"
         ],
-        "order": [{"before": ["ask_choice"], "after": ["refine_image"]}],
+        "min_tasks": {
+          "text-to-image": 3
+        },
+        "required_tool_groups": [
+          {
+            "id": "usage",
+            "any": [
+              "ask_choice"
+            ]
+          },
+          {
+            "id": "generate_2d",
+            "any": [
+              "refine_image"
+            ]
+          }
+        ],
+        "order": [
+          {
+            "before": [
+              "ask_choice"
+            ],
+            "after": [
+              "refine_image"
+            ]
+          }
+        ],
         "soft_tools": [],
-        "budgets": {"max_paid_calls": 3, "max_tool_calls": 8, "max_interruptions": 3}
+        "budgets": {
+          "max_paid_calls": 3,
+          "max_tool_calls": 8,
+          "max_interruptions": 3
+        }
       }
     },
     {
@@ -461,34 +1090,91 @@
       "category": "model3d_input",
       "purpose": "model3d_input",
       "prompt": "画一张用来生成 3D 模型的概念图：单主体机械臂道具、A-pose、纯色背景、完整不裁切。",
-      "output": {"background": "solid", "single_subject": true, "pose": "a-pose"},
+      "output": {
+        "background": "solid",
+        "single_subject": true,
+        "pose": "a-pose"
+      },
       "reference_images": [],
-      "deliverables": ["单主体、纯色背景、可用于图生 3D 的概念图（PNG）"],
+      "deliverables": [
+        "单主体、纯色背景、可用于图生 3D 的概念图（PNG）"
+      ],
       "steps": [
         {
           "user": "这张图要作为 3D 输入，用途是 3D 输入图。",
-          "tool": {"name": "ask_choice", "arguments": {"kind": "image_usage_profile"}}
+          "tool": {
+            "name": "ask_choice",
+            "arguments": {
+              "kind": "image_usage_profile"
+            }
+          }
         },
         {
           "user": "按 3D 输入图的默认要求画。",
-          "tool": {"name": "update_production_brief", "arguments": {"image_use": "model3d_input", "image_for_3d": true, "image_transparent": false}}
+          "tool": {
+            "name": "update_production_brief",
+            "arguments": {
+              "image_use": "model3d_input",
+              "image_for_3d": true,
+              "image_transparent": false
+            }
+          }
         },
         {
           "user": "开始画。",
-          "tool": {"name": "refine_image", "arguments": {"model": "nano-banana-pro", "prompt": "single mechanical arm prop, A-pose, full subject, solid neutral background, even studio lighting, product concept art, no text, no watermark"}}
+          "tool": {
+            "name": "refine_image",
+            "arguments": {
+              "model": "nano-banana-pro",
+              "prompt": "single mechanical arm prop, A-pose, full subject, solid neutral background, even studio lighting, product concept art, no text, no watermark"
+            }
+          }
         }
       ],
-      "live_followups": ["请画一张用于生成 3D 模型的单主体概念图，纯色背景、完整不裁切。"],
+      "live_followups": [
+        "请画一张用于生成 3D 模型的单主体概念图，纯色背景、完整不裁切。"
+      ],
       "expected": {
-        "capabilities": ["text-to-image"],
-        "required_tool_groups": [
-          {"id": "usage", "any": ["ask_choice"]},
-          {"id": "brief", "any": ["update_production_brief"]},
-          {"id": "generate_2d", "any": ["refine_image"]}
+        "capabilities": [
+          "text-to-image"
         ],
-        "order": [{"before": ["ask_choice", "update_production_brief"], "after": ["refine_image"]}],
+        "required_tool_groups": [
+          {
+            "id": "usage",
+            "any": [
+              "ask_choice"
+            ]
+          },
+          {
+            "id": "brief",
+            "any": [
+              "update_production_brief"
+            ]
+          },
+          {
+            "id": "generate_2d",
+            "any": [
+              "refine_image"
+            ]
+          }
+        ],
+        "order": [
+          {
+            "before": [
+              "ask_choice",
+              "update_production_brief"
+            ],
+            "after": [
+              "refine_image"
+            ]
+          }
+        ],
         "soft_tools": [],
-        "budgets": {"max_paid_calls": 1, "max_tool_calls": 8, "max_interruptions": 2}
+        "budgets": {
+          "max_paid_calls": 1,
+          "max_tool_calls": 8,
+          "max_interruptions": 2
+        }
       }
     },
     {
@@ -498,39 +1184,113 @@
       "category": "reference_fidelity",
       "purpose": "game_prop",
       "prompt": "按这张参考图做一个红色货箱道具，交付前对照参考图自检。",
-      "reference_images": [{"filename": "reference.png", "description": "纯色背景上的红色矩形主体"}],
-      "deliverables": ["可导入引擎的 3D 模型（GLB）", "参考图与模型渲染的并排对照图", "持久化的自检记录与结论"],
+      "reference_images": [
+        {
+          "filename": "reference.png",
+          "description": "纯色背景上的红色矩形主体"
+        }
+      ],
+      "deliverables": [
+        "可导入引擎的 3D 模型（GLB）",
+        "参考图与模型渲染的并排对照图",
+        "持久化的自检记录与结论"
+      ],
       "steps": [
         {
           "user": "按这张参考图开始建模。",
-          "tool": {"name": "create_model_3d_from_image", "arguments": {"prompt": "stylized red cargo crate, plain background, game prop", "reference_handles": ["@img1"]}}
+          "tool": {
+            "name": "create_model_3d_from_image",
+            "arguments": {
+              "prompt": "stylized red cargo crate, plain background, game prop",
+              "reference_handles": [
+                "@img1"
+              ]
+            }
+          }
         },
         {
           "user": "检查一下几何和用途预算。",
-          "tool": {"name": "inspect_model", "arguments": {"model": "@model1"}}
+          "tool": {
+            "name": "inspect_model",
+            "arguments": {
+              "model": "@model1"
+            }
+          }
         },
         {
           "user": "把模型和参考图并排对照。",
-          "tool": {"name": "compare_model_reference", "arguments": {"model": "@model1"}}
+          "tool": {
+            "name": "compare_model_reference",
+            "arguments": {
+              "model": "@model1"
+            }
+          }
         },
         {
           "user": "把这次的结论记进自检记录。",
-          "tool": {"name": "record_self_check", "arguments": {"model": "@model1", "status": "passed", "summary": "the silhouette and colour match the reference", "findings": ["silhouette matches the reference"], "fixes": [], "remaining": []}}
+          "tool": {
+            "name": "record_self_check",
+            "arguments": {
+              "model": "@model1",
+              "status": "passed",
+              "summary": "the silhouette and colour match the reference",
+              "findings": [
+                "silhouette matches the reference"
+              ],
+              "fixes": [],
+              "remaining": []
+            }
+          }
         }
       ],
-      "live_followups": ["请对照参考图检查并记录自检结论。"],
+      "live_followups": [
+        "请对照参考图检查并记录自检结论。"
+      ],
       "expected": {
-        "capabilities": ["image-to-3d"],
+        "capabilities": [
+          "image-to-3d"
+        ],
         "required_tool_groups": [
-          {"id": "generate_3d", "any": ["create_model_3d_from_image"]},
-          {"id": "reference", "any": ["compare_model_reference"]},
-          {"id": "record", "any": ["record_self_check"]}
+          {
+            "id": "generate_3d",
+            "any": [
+              "create_model_3d_from_image"
+            ]
+          },
+          {
+            "id": "reference",
+            "any": [
+              "compare_model_reference"
+            ]
+          },
+          {
+            "id": "record",
+            "any": [
+              "record_self_check"
+            ]
+          }
         ],
         "order": [
-          {"before": ["create_model_3d_from_image"], "after": ["compare_model_reference", "record_self_check"]}
+          {
+            "before": [
+              "create_model_3d_from_image"
+            ],
+            "after": [
+              "compare_model_reference",
+              "record_self_check"
+            ]
+          }
         ],
-        "soft_tools": ["inspect_model", "compare_model_reference", "record_self_check"],
-        "budgets": {"max_paid_calls": 1, "max_tool_calls": 10, "max_interruptions": 2}
+        "soft_tools": [
+          "inspect_model",
+          "compare_model_reference",
+          "record_self_check"
+        ],
+        "budgets": {
+          "max_paid_calls": 1,
+          "max_tool_calls": 10,
+          "max_interruptions": 2
+        }
       }
     },
     {
@@ -542,84 +1302,514 @@
       "model_3d": "meshy/meshy-7.1/text-to-3d",
       "prompt": "做一个能绑骨的游戏角色：先出底模，减面后检查面数和原点，不合格就按已声明的预案修正，最后绑骨，整个过程在已经批准的预算内完成。",
       "reference_images": [],
-      "deliverables": ["可导入引擎的 3D 模型（GLB）", "检查点结果与预案修订记录", "绑骨完成的模型"],
+      "deliverables": [
+        "可导入引擎的 3D 模型（GLB）",
+        "检查点结果与预案修订记录",
+        "绑骨完成的模型"
+      ],
       "steps": [
         {
           "user": "用途是游戏角色，先把用途记下来。",
-          "tool": {"name": "ask_choice", "arguments": {"kind": "usage_profile"}}
+          "tool": {
+            "name": "ask_choice",
+            "arguments": {
+              "kind": "usage_profile"
+            }
+          }
         },
         {
           "user": "按游戏角色的默认设置继续，需要绑骨。",
-          "tool": {"name": "update_production_brief", "arguments": {"purpose": "game_character", "target_platform": "Unity", "needs_rig": true, "style": "stylized realistic"}}
+          "tool": {
+            "name": "update_production_brief",
+            "arguments": {
+              "purpose": "game_character",
+              "target_platform": "Unity",
+              "needs_rig": true,
+              "style": "stylized realistic"
+            }
+          }
         },
         {
           "user": "先提交制作计划：生成、减面检查、绑骨，并声明减面未通过时的预案。",
-          "tool": {"name": "propose_production_plan", "arguments": {
-            "title": "游戏角色多步制作",
-            "steps": [
-              {"capability": "text-to-3d", "model": "meshy/meshy-7.1/text-to-3d", "purpose": "生成角色底模"},
-              {"capability": "remesh", "model": "meshy/processing/remesh", "purpose": "减面到游戏预算"},
-              {"capability": "rigging", "model": "meshy/processing/rigging", "purpose": "绑骨"}
-            ],
-            "budgets": [{"unit": "legacy.credits", "amount": 100}],
-            "checkpoints": [{"after_capability": "remesh", "checks": ["triangles", "pivot_bottom_center"]}],
-            "contingencies": [
-              {"id": "low_poly", "trigger": ["triangles"], "step": {"capability": "remesh", "model": "meshy/processing/remesh", "purpose": "按用途面数预算再减面"}},
-              {"id": "pivot", "trigger": ["pivot_bottom_center"], "step": {"capability": "resize", "model": "meshy/processing/resize", "purpose": "把原点移到底部中心"}}
-            ]
-          }}
+          "tool": {
+            "name": "propose_production_plan",
+            "arguments": {
+              "title": "游戏角色多步制作",
+              "steps": [
+                {
+                  "capability": "text-to-3d",
+                  "model": "meshy/meshy-7.1/text-to-3d",
+                  "purpose": "生成角色底模"
+                },
+                {
+                  "capability": "remesh",
+                  "model": "meshy/processing/remesh",
+                  "purpose": "减面到游戏预算"
+                },
+                {
+                  "capability": "rigging",
+                  "model": "meshy/processing/rigging",
+                  "purpose": "绑骨"
+                }
+              ],
+              "budgets": [
+                {
+                  "unit": "legacy.credits",
+                  "amount": 100
+                }
+              ],
+              "checkpoints": [
+                {
+                  "after_capability": "remesh",
+                  "checks": [
+                    "triangles",
+                    "pivot_bottom_center"
+                  ]
+                }
+              ],
+              "contingencies": [
+                {
+                  "id": "low_poly",
+                  "trigger": [
+                    "triangles"
+                  ],
+                  "step": {
+                    "capability": "remesh",
+                    "model": "meshy/processing/remesh",
+                    "purpose": "按用途面数预算再减面"
+                  }
+                },
+                {
+                  "id": "pivot",
+                  "trigger": [
+                    "pivot_bottom_center"
+                  ],
+                  "step": {
+                    "capability": "resize",
+                    "model": "meshy/processing/resize",
+                    "purpose": "把原点移到底部中心"
+                  }
+                }
+              ]
+            }
+          }
         },
         {
           "user": "按批准的计划生成底模。",
-          "tool": {"name": "create_model_3d", "arguments": {"prompt": "stylized game character, full body, A-pose, clean topology, rig-ready"}}
+          "tool": {
+            "name": "create_model_3d",
+            "arguments": {
+              "prompt": "stylized game character, full body, A-pose, clean topology, rig-ready"
+            }
+          }
         },
         {
           "user": "建立加工计划：先减面，再绑骨。",
-          "tool": {"name": "plan_model_processing", "arguments": {
-            "source_task_id": "@model1",
-            "steps": [
-              {"capability": "remesh", "offering_id": "meshy/processing/remesh", "parameters": {"topology": "triangle", "target_polycount": 100000}},
-              {"capability": "rigging", "offering_id": "meshy/processing/rigging", "parameters": {}}
-            ]
-          }}
+          "tool": {
+            "name": "plan_model_processing",
+            "arguments": {
+              "source_task_id": "@model1",
+              "steps": [
+                {
+                  "capability": "remesh",
+                  "offering_id": "meshy/processing/remesh",
+                  "parameters": {
+                    "topology": "triangle",
+                    "target_polycount": 100000
+                  }
+                },
+                {
+                  "capability": "rigging",
+                  "offering_id": "meshy/processing/rigging",
+                  "parameters": {}
+                }
+              ]
+            }
+          }
         },
         {
           "user": "检查点未通过，按已声明的预设插入再减面这一步，然后继续。",
-          "tool": {"name": "revise_processing_plan", "arguments": {
-            "plan_id": "@plan1",
-            "expected_plan_version": "@plan_version",
-            "operation": "insert",
-            "step_index": "@checkpoint_step",
-            "contingency_id": "low_poly",
-            "parameters": {"topology": "triangle", "target_polycount": 20000},
-            "reason": "检查点未通过：面数超过用途预算，按预案再减面"
-          }}
+          "tool": {
+            "name": "revise_processing_plan",
+            "arguments": {
+              "plan_id": "@plan1",
+              "expected_plan_version": "@plan_version",
+              "operation": "insert",
+              "step_index": "@checkpoint_step",
+              "contingency_id": "low_poly",
+              "parameters": {
+                "topology": "triangle",
+                "target_polycount": 20000
+              },
+              "reason": "检查点未通过：面数超过用途预算，按预案再减面"
+            }
+          }
         },
         {
           "user": "检查最终模型的面数和原点。",
-          "tool": {"name": "inspect_model", "arguments": {"model": "@model1"}}
+          "tool": {
+            "name": "inspect_model",
+            "arguments": {
+              "model": "@model1"
+            }
+          }
         }
       ],
-      "live_followups": ["请按计划完成角色制作，检查点未通过时用已声明的预案修正。"],
+      "live_followups": [
+        "请按计划完成角色制作，检查点未通过时用已声明的预案修正。"
+      ],
       "expected": {
-        "capabilities": ["text-to-3d", "remesh", "rigging"],
-        "min_tasks": {"text-to-3d": 1, "remesh": 2, "rigging": 1},
+        "capabilities": [
+          "text-to-3d",
+          "remesh",
+          "rigging"
+        ],
+        "min_tasks": {
+          "text-to-3d": 1,
+          "remesh": 2,
+          "rigging": 1
+        },
         "required_tool_groups": [
-          {"id": "usage", "any": ["ask_choice"]},
-          {"id": "brief", "any": ["update_production_brief"]},
-          {"id": "plan", "any": ["propose_production_plan"]},
-          {"id": "generate_3d", "any": ["create_model_3d"]},
-          {"id": "processing_plan", "any": ["plan_model_processing"]},
-          {"id": "revise", "any": ["revise_processing_plan"]},
-          {"id": "inspect", "any": ["inspect_model"]}
+          {
+            "id": "usage",
+            "any": [
+              "ask_choice"
+            ]
+          },
+          {
+            "id": "brief",
+            "any": [
+              "update_production_brief"
+            ]
+          },
+          {
+            "id": "plan",
+            "any": [
+              "propose_production_plan"
+            ]
+          },
+          {
+            "id": "generate_3d",
+            "any": [
+              "create_model_3d"
+            ]
+          },
+          {
+            "id": "processing_plan",
+            "any": [
+              "plan_model_processing"
+            ]
+          },
+          {
+            "id": "revise",
+            "any": [
+              "revise_processing_plan"
+            ]
+          },
+          {
+            "id": "inspect",
+            "any": [
+              "inspect_model"
+            ]
+          }
         ],
         "order": [
-          {"before": ["propose_production_plan"], "after": ["create_model_3d"]},
-          {"before": ["plan_model_processing"], "after": ["revise_processing_plan"]},
-          {"before": ["revise_processing_plan"], "after": ["inspect_model"]}
+          {
+            "before": [
+              "propose_production_plan"
+            ],
+            "after": [
+              "create_model_3d"
+            ]
+          },
+          {
+            "before": [
+              "plan_model_processing"
+            ],
+            "after": [
+              "revise_processing_plan"
+            ]
+          },
+          {
+            "before": [
+              "revise_processing_plan"
+            ],
+            "after": [
+              "inspect_model"
+            ]
+          }
         ],
-        "soft_tools": ["inspect_model"],
-        "budgets": {"max_paid_calls": 5, "max_tool_calls": 16, "max_interruptions": 2}
+        "soft_tools": [
+          "inspect_model"
+        ],
+        "budgets": {
+          "max_paid_calls": 5,
+          "max_tool_calls": 16,
+          "max_interruptions": 2
+        }
+      }
+    },
+    {
+      "id": "2d-open-concept",
+      "title": "开放 2D 需求：森林守卫的多个概念方向",
+      "modality": "2d",
+      "category": "open_concept",
+      "purpose": "concept_art",
+      "prompt": "画一个森林守卫，先给几个方向看看。",
+      "reference_images": [],
+      "deliverables": [
+        "3 个明显不同的概念方向（PNG）",
+        "一张方向选择卡",
+        "选定方向的细化图（PNG）"
+      ],
+      "steps": [
+        {
+          "user": "先给三个方向，然后让我选。",
+          "tools": [
+            {
+              "name": "create_concept_sketch",
+              "arguments": {
+                "prompt": "photorealistic forest guardian concept art, natural materials, soft studio lighting, no text"
+              }
+            },
+            {
+              "name": "create_concept_sketch",
+              "arguments": {
+                "prompt": "stylized cartoon forest guardian concept art, bold clean outlines, vivid colors, no text"
+              }
+            },
+            {
+              "name": "create_concept_sketch",
+              "arguments": {
+                "prompt": "low-poly stylized forest guardian concept art, faceted geometry, flat color blocks, no text"
+              }
+            },
+            {
+              "name": "ask_choice",
+              "arguments": {
+                "kind": "concept_direction",
+                "question": "想沿着哪个方向深入？",
+                "options": [
+                  {
+                    "id": "realistic",
+                    "label": "写实",
+                    "description": "真实材质与自然光",
+                    "thumbnail": "@img1",
+                    "arguments": {
+                      "prompt": "photorealistic forest guardian concept art, natural materials, soft studio lighting, no text",
+                      "reference_handles": [
+                        "@img1"
+                      ]
+                    }
+                  },
+                  {
+                    "id": "cartoon",
+                    "label": "卡通",
+                    "description": "明快轮廓与高饱和配色",
+                    "thumbnail": "@img2",
+                    "arguments": {
+                      "prompt": "stylized cartoon forest guardian concept art, bold clean outlines, vivid colors, no text",
+                      "reference_handles": [
+                        "@img2"
+                      ]
+                    }
+                  },
+                  {
+                    "id": "low_poly",
+                    "label": "低多边形",
+                    "description": "几何切面与简洁色块",
+                    "thumbnail": "@img3",
+                    "arguments": {
+                      "prompt": "low-poly stylized forest guardian concept art, faceted geometry, flat color blocks, no text",
+                      "reference_handles": [
+                        "@img3"
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "user": "按写实方向细化。",
+          "tool": {
+            "name": "refine_image",
+            "arguments": {
+              "prompt": "photorealistic forest guardian concept art, natural materials, soft studio lighting, detailed final illustration, no text",
+              "reference_handles": [
+                "@img1"
+              ],
+              "model": "meshy/nano-banana-pro/image-to-image"
+            }
+          }
+        }
+      ],
+      "live_followups": [
+        "请先给几个明显不同的方向，再按我选的方向细化。"
+      ],
+      "expected": {
+        "capabilities": [
+          "text-to-image",
+          "image-to-image"
+        ],
+        "min_tasks": {
+          "text-to-image": 3,
+          "image-to-image": 1
+        },
+        "min_tool_counts": {
+          "create_concept_sketch": 3,
+          "ask_choice": 1
+        },
+        "required_tool_groups": [
+          {
+            "id": "concept",
+            "any": [
+              "create_concept_sketch"
+            ]
+          },
+          {
+            "id": "choice",
+            "any": [
+              "ask_choice"
+            ]
+          },
+          {
+            "id": "refine",
+            "any": [
+              "refine_image"
+            ]
+          }
+        ],
+        "order": [
+          {
+            "before": [
+              "create_concept_sketch"
+            ],
+            "after": [
+              "ask_choice"
+            ]
+          },
+          {
+            "before": [
+              "ask_choice"
+            ],
+            "after": [
+              "refine_image"
+            ]
+          }
+        ],
+        "soft_tools": [],
+        "budgets": {
+          "max_paid_calls": 4,
+          "max_tool_calls": 10,
+          "max_interruptions": 2
+        }
+      }
+    },
+    {
+      "id": "3d-open-candidates",
+      "title": "开放 3D 需求：两个候选方向",
+      "modality": "3d",
+      "category": "open_candidates",
+      "purpose": "game_prop",
+      "model_3d": "meshy/meshy-7.1/text-to-3d",
+      "prompt": "做一个科幻能量步枪，给两个不同风格方向的候选。",
+      "reference_images": [],
+      "deliverables": [
+        "两个不同的 3D 候选（GLB）",
+        "候选对比与选用"
+      ],
+      "steps": [
+        {
+          "user": "用途是游戏道具。",
+          "tool": {
+            "name": "ask_choice",
+            "arguments": {
+              "kind": "usage_profile"
+            }
+          }
+        },
+        {
+          "user": "按游戏道具默认设置。",
+          "tool": {
+            "name": "update_production_brief",
+            "arguments": {
+              "purpose": "game_prop",
+              "target_platform": "Unreal",
+              "style": "sci-fi energy rifle"
+            }
+          }
+        },
+        {
+          "user": "先做硬表面写实候选。",
+          "tool": {
+            "name": "create_model_3d",
+            "arguments": {
+              "prompt": "hard-surface sci-fi energy rifle, realistic materials, game prop, full model"
+            }
+          }
+        },
+        {
+          "user": "再做一个风格化候选。",
+          "tool": {
+            "name": "create_model_3d",
+            "arguments": {
+              "prompt": "stylized sci-fi energy rifle, clean shapes, game prop, full model"
+            }
+          }
+        }
+      ],
+      "live_followups": [
+        "请给两个明显不同的 3D 候选。"
+      ],
+      "expected": {
+        "capabilities": [
+          "text-to-3d"
+        ],
+        "min_tasks": {
+          "text-to-3d": 2
+        },
+        "min_tool_counts": {
+          "create_model_3d": 2
+        },
+        "required_tool_groups": [
+          {
+            "id": "usage",
+            "any": [
+              "ask_choice"
+            ]
+          },
+          {
+            "id": "brief",
+            "any": [
+              "update_production_brief"
+            ]
+          },
+          {
+            "id": "generate",
+            "any": [
+              "create_model_3d"
+            ]
+          }
+        ],
+        "order": [
+          {
+            "before": [
+              "ask_choice",
+              "update_production_brief"
+            ],
+            "after": [
+              "create_model_3d"
+            ]
+          }
+        ],
+        "soft_tools": [],
+        "budgets": {
+          "max_paid_calls": 2,
+          "max_tool_calls": 8,
+          "max_interruptions": 3
+        }
       }
     },
     {

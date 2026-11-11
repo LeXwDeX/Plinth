@@ -302,6 +302,14 @@ type ServiceConfig struct {
 	// ChoiceMaxOptions bounds the options of an Agent-supplied direction card
 	// (#239); zero accepts any non-empty list.
 	ChoiceMaxOptions int
+	// ConceptDirections is application.chat.concept_directions (#242): the
+	// diverge-then-converge bounds and the cheap sketch overrides. A zero value
+	// leaves concept direction cards unavailable.
+	ConceptDirections catalog.ChatConceptDirectionsSchema
+	// ChoiceTargetArguments maps a declared tool name to its parameter names,
+	// so an Agent-supplied option can only carry arguments the target tool
+	// really declares (#242). Nil accepts none when arguments are present.
+	ChoiceTargetArguments map[string][]string
 	// WorkLedger is application.chat.work_ledger (#248). A zero value leaves
 	// the ledger and the get_production_step tool unavailable.
 	WorkLedger catalog.ChatWorkLedgerSchema
@@ -364,6 +372,8 @@ type Service struct {
 	usageProfileKind      *catalog.ChatChoiceKindSchema
 	imageUsageProfileKind *catalog.ChatChoiceKindSchema
 	choiceMaxOptions      int
+	conceptDirections     catalog.ChatConceptDirectionsSchema
+	choiceTargetArguments map[string]map[string]bool
 
 	harnessSnapshotResolver HarnessSnapshotResolver
 
@@ -509,6 +519,8 @@ func NewService(config ServiceConfig) (*Service, error) {
 		usageProfileKind:           choiceKindOf(config.ChoiceKinds, "usage_profiles"),
 		imageUsageProfileKind:      choiceKindOf(config.ChoiceKinds, "image_usage_profiles"),
 		choiceMaxOptions:           config.ChoiceMaxOptions,
+		conceptDirections:          config.ConceptDirections,
+		choiceTargetArguments:      choiceTargetArgumentIndex(config.ChoiceTargetArguments),
 		models:                     config.Models,
 		visualAnchors:              config.VisualAnchors,
 		visualAnchorKind:           choiceKindOf(config.ChoiceKinds, "agent_proposal"),

@@ -86,6 +86,12 @@ type PlanStep struct {
 	// Schema-declared id; self_check means the result must be inspected and
 	// its self-check conclusion recorded before the next step.
 	Check string `json:"check,omitempty"`
+	// CandidateGroup marks one candidate of a declared parallel group (#242):
+	// every expanded step of the group shares the group's 1-based position in
+	// the proposal, and CandidateIndex is its 1-based place inside the group.
+	// Steps that declare no candidates carry zero for both.
+	CandidateGroup int `json:"candidate_group,omitempty"`
+	CandidateIndex int `json:"candidate_index,omitempty"`
 }
 
 // UnmarshalJSON also reads a step stored before #120, whose integer
@@ -100,12 +106,15 @@ func (s *PlanStep) UnmarshalJSON(data []byte) error {
 		EstimatedCredits  int             `json:"estimated_credits"`
 		PurposeBudgetNote string          `json:"purpose_budget_note"`
 		Check             string          `json:"check"`
+		CandidateGroup    int             `json:"candidate_group"`
+		CandidateIndex    int             `json:"candidate_index"`
 	}
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
 	step := PlanStep{Capability: wire.Capability, OfferingID: wire.OfferingID, Purpose: wire.Purpose,
-		Estimate: Legacy(wire.EstimatedCredits), PurposeBudgetNote: wire.PurposeBudgetNote, Check: wire.Check}
+		Estimate: Legacy(wire.EstimatedCredits), PurposeBudgetNote: wire.PurposeBudgetNote, Check: wire.Check,
+		CandidateGroup: wire.CandidateGroup, CandidateIndex: wire.CandidateIndex}
 	if len(wire.Estimate) > 0 && string(wire.Estimate) != "null" {
 		if err := json.Unmarshal(wire.Estimate, &step.Estimate); err != nil {
 			return err

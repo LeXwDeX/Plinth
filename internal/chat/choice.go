@@ -47,11 +47,15 @@ var (
 // names and marks its recommended option. The Offering fields and Arguments
 // stay for the #321 provider-choice cards.
 type ChoiceOption struct {
-	ID               string              `json:"id"`
-	ProviderName     string              `json:"provider_name,omitempty"`
-	ModelName        string              `json:"model_name,omitempty"`
-	Label            string              `json:"label,omitempty"`
-	Description      string              `json:"description,omitempty"`
+	ID           string `json:"id"`
+	ProviderName string `json:"provider_name,omitempty"`
+	ModelName    string `json:"model_name,omitempty"`
+	Label        string `json:"label,omitempty"`
+	Description  string `json:"description,omitempty"`
+	// ThumbnailURL shows a concept sketch of this option (#242). It is a
+	// platform picture URL resolved from a session handle; empty when the
+	// Agent gave none or the handle could not be resolved.
+	ThumbnailURL     string              `json:"thumbnail_url,omitempty"`
 	Recommended      bool                `json:"recommended,omitempty"`
 	CreditsMetered   bool                `json:"credits_metered,omitempty"`
 	EstimatedCredits int                 `json:"estimated_credits,omitempty"`

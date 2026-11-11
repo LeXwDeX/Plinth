@@ -191,6 +191,8 @@ export interface ProductSchema {
         processing_plan_reconcile?: string;
         task_cancel: string;
         task_retry?: string;
+        /** #242: POST one more from a succeeded task's frozen input. */
+        task_reroll?: string;
         task_recovery?: string;
         task_recovery_prepare?: string;
         task_refetch?: string;

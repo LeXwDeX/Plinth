@@ -2978,6 +2978,19 @@ type ChatSchema struct {
 	// an answered or pending card and its bounds. Server side only; the card's
 	// visible words are content messages ui.chat.choice.*.
 	Choice ChatChoiceSchema `json:"choice"`
+	// ConceptDirections declares the diverge-then-converge flow (#242): how many
+	// low-cost concept sketches one reply may draw, the choice kind that turns
+	// them into a direction card, and the per-Offering cheap parameters. Server
+	// side only; the card's visible words come from the Schema's option labels
+	// and ui.chat.choice.*.
+	ConceptDirections ChatConceptDirectionsSchema `json:"concept_directions,omitempty"`
+	// Candidates declares how many parallel candidates one production-plan step
+	// may name (#242) and where they may come from. Server side only; the plan
+	// card reads the expanded steps and their candidate group.
+	Candidates ChatCandidatesSchema `json:"candidates,omitempty"`
+	// Reroll declares the cheap "one more" endpoint (#242): the seed parameters
+	// it reshuffles and the words its refusals use. Server side only.
+	Reroll ChatRerollSchema `json:"reroll,omitempty"`
 	// Model3DUsage declares the production purposes of 3D work (#103): the
 	// recommended offerings and public parameter overrides per purpose, the
 	// triangle/texture budget, and the session production brief. Server side
@@ -3100,6 +3113,96 @@ type ChatChoiceKindSchema struct {
 	// AcceptLabel and DeclineLabel word an agent_proposal card's two options.
 	AcceptLabel  string `json:"accept_label,omitempty"`
 	DeclineLabel string `json:"decline_label,omitempty"`
+}
+
+// ChatConceptDirectionsSchema is application.chat.concept_directions (#242).
+// An open request draws MinCount..MaxCount low-cost concept sketches in one
+// reply, then opens a choice card of Kind whose options carry each sketch's
+// label, one sentence and thumbnail handle, and the exact arguments of the
+// next refine_image call. Enabled is false (the zero value) on historical
+// Catalogs and the flow is off.
+type ChatConceptDirectionsSchema struct {
+	Enabled bool `json:"enabled"`
+	// MinCount and MaxCount bound the sketches of one reply; the options of the
+	// card must be between MinCount and MaxCount too, and every bound stays
+	// within choice.max_options.
+	MinCount int `json:"min_count"`
+	MaxCount int `json:"max_count"`
+	// SketchTool is the generation tool that draws one sketch, and Kind the
+	// declared choice kind whose options the Agent supplies.
+	SketchTool string `json:"sketch_tool"`
+	Kind       string `json:"kind"`
+	// Question is the default card question; Message is the Agent-facing line
+	// of the tool result.
+	Question string `json:"question"`
+	Message  string `json:"message"`
+	// ContextTemplate is added to the system prompt while SketchTool is offered
+	// ({minimum}, {maximum}, {sketch_tool}).
+	ContextTemplate string `json:"context_template"`
+	// MaxLabelCharacters and MaxDescriptionCharacters bound one option; they
+	// stay within ask_choice.options' historical 120/300 bounds.
+	MaxLabelCharacters       int `json:"max_label_characters"`
+	MaxDescriptionCharacters int `json:"max_description_characters"`
+	// MaxArgumentsBytes bounds the exact arguments one option may carry.
+	MaxArgumentsBytes int `json:"max_arguments_bytes"`
+	// LimitReached refuses a sketch beyond MaxCount in the same reply
+	// ({maximum}).
+	LimitReached string `json:"limit_reached"`
+	// ParameterOverrides maps an Offering ID to public parameter values every
+	// sketch on that Offering runs with (a cheaper size or quality). Values are
+	// validated at load time exactly like a real submission. ParameterReason is
+	// the server-supplied explanation frozen with an advised override; the
+	// Agent does not have to repeat it.
+	ParameterOverrides map[string]map[string]json.RawMessage `json:"parameter_overrides,omitempty"`
+	ParameterReason    string                                `json:"parameter_reason,omitempty"`
+}
+
+// ChatCandidatesSchema is application.chat.candidates (#242). A production
+// plan step may declare count candidates of one capability, or name one model
+// per candidate; the server expands them into candidate_group/candidate_index
+// plan steps so every candidate is quoted and counted in the budget.
+type ChatCandidatesSchema struct {
+	Enabled bool `json:"enabled"`
+	// MaxCount bounds the candidates one step may declare (at least 2).
+	MaxCount int `json:"max_count"`
+	// Sources are the declared candidate sources: provider, seed, input_image.
+	Sources []string `json:"sources"`
+	// ContextTemplate tells the Agent when and how to declare candidates
+	// ({maximum}, {sources}).
+	ContextTemplate string `json:"context_template"`
+}
+
+// ChatRerollSchema is application.chat.reroll (#242). The reroll endpoint
+// replays a succeeded Task's frozen input with fresh seed parameters; it is a
+// new paid step that still needs an ExecutionGrant and the budget. Enabled is
+// false on historical Catalogs.
+type ChatRerollSchema struct {
+	Enabled bool `json:"enabled"`
+	// SeedParameters name the integer parameters reshuffled on the frozen input
+	// (for example model_seed and texture_seed). A model that declares none is
+	// simply resampled by the upstream.
+	SeedParameters []string `json:"seed_parameters"`
+	// MinSeed and MaxSeed bound a new seed, inclusive.
+	MinSeed int `json:"min_seed"`
+	MaxSeed int `json:"max_seed"`
+	// Messages word the refusals the endpoint returns.
+	Messages ChatRerollMessages `json:"messages"`
+}
+
+// ChatRerollMessages is the refusal vocabulary of application.chat.reroll.
+type ChatRerollMessages struct {
+	// NotSucceeded refuses a Task that is not SUCCEEDED.
+	NotSucceeded string `json:"not_succeeded"`
+	// NoFrozenInput refuses a Task without a bound PreparedInput.
+	NoFrozenInput string `json:"no_frozen_input"`
+	// InProgress covers an admission already waiting or in flight.
+	InProgress string `json:"in_progress"`
+	// Declined refuses a key whose earlier request a person declined.
+	Declined string `json:"declined"`
+	// Unavailable refuses the endpoint when the Schema disables it.
+	Unavailable string `json:"unavailable"`
+	// IdempotencyRequired refuses a request without Idempotency-Key.
+	IdempotencyRequired string `json:"idempotency_required"`
 }
 
 // ChatModel3DUsageSchema is application.chat.model3d_usage (#103).
@@ -5844,6 +5947,7 @@ type CoreHTTPRoutesSchema struct {
 	AgentConsent            string `json:"agent_consent"`
 	TaskCancel              string `json:"task_cancel"`
 	TaskRetry               string `json:"task_retry"`
+	TaskReroll              string `json:"task_reroll,omitempty"`
 	TaskEvents              string `json:"task_events"`
 	TaskAsset               string `json:"task_asset"`
 }
