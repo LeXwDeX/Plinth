@@ -224,9 +224,17 @@ func (s *Server) writeProjectError(writer http.ResponseWriter, err error, scope 
 			message = messages.UnknownProject
 		}
 	case errors.Is(err, project.ErrNameRequired):
-		message = messages.NameRequired
+		if scope.asset && messages.AssetNameRequired != "" {
+			message = messages.AssetNameRequired
+		} else {
+			message = messages.NameRequired
+		}
 	case errors.Is(err, project.ErrNameTooLong):
-		message = projectRender(messages.NameTooLong, scope.nameMaximum, "")
+		template := messages.NameTooLong
+		if scope.asset && messages.AssetNameTooLong != "" {
+			template = messages.AssetNameTooLong
+		}
+		message = projectRender(template, scope.nameMaximum, "")
 	case errors.Is(err, project.ErrLimit):
 		message = projectRender(scope.limitMessage, scope.limitMaximum, "")
 	case errors.Is(err, project.ErrStyleTextTooLong):
@@ -516,7 +524,7 @@ func (s *Server) createProjectAsset(writer http.ResponseWriter, request *http.Re
 		Kind: kind, Name: name, Description: description, Images: images, Models: models,
 	})
 	if err != nil {
-		s.writeProjectError(writer, err, s.projectScopeProject())
+		s.writeProjectError(writer, err, s.projectScopeAsset())
 		return
 	}
 	audit := s.projectAudit()
@@ -631,7 +639,7 @@ func (s *Server) promoteProjectAsset(writer http.ResponseWriter, request *http.R
 			s.writeChatError(writer, http.StatusBadRequest, message)
 			return
 		}
-		s.writeProjectError(writer, err, s.projectScopeProject())
+		s.writeProjectError(writer, err, s.projectScopeAsset())
 		return
 	}
 	audit := s.projectAudit()

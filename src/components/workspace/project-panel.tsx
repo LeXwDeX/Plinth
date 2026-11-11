@@ -12,6 +12,7 @@ import { useStyleLock } from '@/hooks/use-style-lock';
 import { createChatBrowserClient } from '@/lib/chat/browser-client';
 import type { ProjectAsset, ProjectConventions, ProjectReference, ProjectStyleGuide } from '@/lib/projects/browser-client';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
+import { withErrorReference } from '@/lib/problem-reference';
 import { projectContract, schemaText } from '@/lib/product-schema';
 import { useChatStore, type ChatMessage } from '@/store/chat-store';
 import { PromoteAssetDialog } from '@/components/workspace/promote-asset-dialog';
@@ -156,6 +157,14 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
   }
 
   const palette = draftPalette.split(',').map((color) => color.trim()).filter(Boolean);
+  // A failed save reports the server's reason (the Schema copy for a refused
+  // guide or conventions), falling back to a save-specific line instead of the
+  // load failure text (#240 review).
+  const saveFailure = (error: unknown, fallbackKey: string) => (
+    error instanceof Error && error.message.trim()
+      ? withErrorReference(error.message, error)
+      : text(fallbackKey)
+  );
   const saveGuide = async () => {
     if (!guide || !dirtyGuide || savingGuide || palette.length > maximumPalette || draftText.trim().length > maximumText) return;
     setSavingGuide(true);
@@ -166,8 +175,8 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
       setGuide(saved);
       setPaletteMirror(saved);
       toast.success(text('style_saved'));
-    } catch {
-      toast.error(text('load_failed'));
+    } catch (error) {
+      toast.error(saveFailure(error, 'style_save_failed'));
     } finally {
       setSavingGuide(false);
     }
@@ -185,7 +194,7 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('invalid');
       brief = parsed as Record<string, unknown>;
     } catch {
-      toast.error(text('load_failed'));
+      toast.error(text('conventions_save_failed'));
       return;
     }
     setSavingConventions(true);
@@ -195,8 +204,8 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
       setDraftBrief(JSON.stringify(saved.brief ?? {}, null, 2));
       setDraftTexts(saved.texts ?? {});
       toast.success(text('conventions_saved'));
-    } catch {
-      toast.error(text('load_failed'));
+    } catch (error) {
+      toast.error(saveFailure(error, 'conventions_save_failed'));
     } finally {
       setSavingConventions(false);
     }
@@ -231,14 +240,17 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
     }
   };
   const promoteStyle = async () => {
-    if (!lockState.lock || promotingStyle) return;
+    // Without the loaded guide there is no palette to preserve; promoting
+    // then would overwrite the project's guide with an empty palette (#240
+    // review). The button stays disabled until the guide is readable.
+    if (!lockState.lock || promotingStyle || !guide) return;
     setPromotingStyle(true);
     try {
       const references: ProjectReference[] = lockState.lock.references.map((assetID) => ({ input_asset_id: assetID }));
       const saved = await projects.client.setStyleGuide(projectId, {
         enabled: true,
         text: lockState.lock.text,
-        palette: guide?.palette ?? [],
+        palette: guide.palette,
         references: references.slice(0, maximumReferences),
       });
       setGuide(saved);
@@ -307,7 +319,7 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
           <Action type="button" size="sm" disabled={loading || savingGuide || !dirtyGuide || palette.length > maximumPalette || draftText.trim().length > maximumText} onClick={() => void saveGuide()} data-testid="project-style-save">{text('save')}</Action>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <Action type="button" variant="ghost" size="xs" disabled={promotingStyle || !lockState.lock || (!lockState.lock.text.trim() && lockState.lock.references.length === 0)} onClick={() => setConfirmStyle(true)} data-testid="project-promote-style">{text('promote_style')}</Action>
+          <Action type="button" variant="ghost" size="xs" disabled={promotingStyle || !guide || !lockState.lock || (!lockState.lock.text.trim() && lockState.lock.references.length === 0)} onClick={() => setConfirmStyle(true)} data-testid="project-promote-style">{text('promote_style')}</Action>
         </div>
         {confirmStyle ? (
           <div className="mt-2 rounded-md border border-border p-2" data-testid="project-promote-style-confirm-dialog">

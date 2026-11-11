@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { createChatBrowserClient } from '@/lib/chat/browser-client';
@@ -31,22 +31,36 @@ export function useProjects(sessionId: string | null) {
   const session = useChatStore((state) => (sessionId ? state.sessions?.find((item) => item.id === sessionId) : undefined));
   const sessionProjectId = session?.projectId ?? '';
 
+  // The request output (loading) must never become an effect dependency: the
+  // automatic load flips it to true, which used to re-run the effect and abort
+  // the request that had just started (#240 review). A per-mount request
+  // counter lets a stale or aborted response drop its write; a StrictMode
+  // replay starts a fresh request instead of being blocked by the first.
+  const request = useRef(0);
   const refresh = useCallback(async (signal?: AbortSignal) => {
-    if (loading) return;
+    const id = request.current + 1;
+    request.current = id;
     setStatus({ loading: true, failed: false });
     try {
-      setProjects(await client.listProjects(signal));
+      const projects = await client.listProjects(signal);
+      if (request.current !== id) return;
+      if (signal?.aborted) {
+        setStatus({ loading: false });
+        return;
+      }
+      setProjects(projects);
     } catch {
-      if (!signal?.aborted) setStatus({ loading: false, failed: true });
+      if (request.current !== id) return;
+      setStatus({ loading: false, failed: !signal?.aborted });
     }
-  }, [client, loading, setProjects, setStatus]);
+  }, [client, setProjects, setStatus]);
 
   useEffect(() => {
-    if (loaded || loading) return;
+    if (loaded) return;
     const controller = new AbortController();
     void refresh(controller.signal);
     return () => controller.abort();
-  }, [loaded, loading, refresh]);
+  }, [loaded, refresh]);
 
   // The open session decides the shown project; the store keeps the choice for
   // the next new session.

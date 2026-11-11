@@ -18,17 +18,15 @@ func (orchestrator *Orchestrator) projectPrompt(options TurnOptions) string {
 		return ""
 	}
 	agent := *orchestrator.project.Agent
-	style := "未启用"
+	messages := orchestrator.project.Messages
+	style := messages.StyleGuideEmpty
 	if context.StyleGuide.Enabled {
 		if text := strings.TrimSpace(context.StyleGuide.Text); text != "" {
 			style = text
 		} else if len(context.StyleGuide.References) > 0 {
-			style = "（仅参考图）"
-		} else {
-			style = "未启用"
+			style = messages.StyleGuideReferencesOnly
 		}
 	}
-	messages := orchestrator.project.Messages
 	switch options.StyleLock.Source {
 	case StyleLockSourceOff:
 		style += "\n" + messages.StyleGuideOff
@@ -67,7 +65,7 @@ func (orchestrator *Orchestrator) projectConventionsText(context *ProjectContext
 	}
 	parts = append(parts, names...)
 	if len(parts) == 0 {
-		return "无"
+		return orchestrator.project.Messages.ConventionsEmpty
 	}
 	return strings.Join(parts, "；")
 }
@@ -95,7 +93,7 @@ func (orchestrator *Orchestrator) projectAssetLines(agent catalog.ProjectAgentSc
 		).Replace(agent.AssetLineTemplate))
 	}
 	if len(lines) == 0 {
-		return "无"
+		return orchestrator.project.Messages.AssetsEmpty
 	}
 	if limit > 0 && len(context.Assets) > limit {
 		lines = append(lines, strings.ReplaceAll(agent.ListLimitTemplate,
