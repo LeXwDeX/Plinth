@@ -31,6 +31,7 @@ var allTools = []agents.Tool{
 	{Name: "create_three_view"}, {Name: "update_session_notes"},
 	{Name: "plan_model_processing"}, {Name: "create_multiview_images"}, {Name: "edit_multiview_images"},
 	{Name: "convert_model_format"}, {Name: "ask_choice"}, {Name: "update_production_brief"},
+	{Name: "create_concept_sketch"},
 }
 
 func selectionPrompt(handles ...string) agents.Message {
@@ -594,5 +595,65 @@ func TestImageDrawingWithoutABriefAsksThe2DPurposeOnlyWhenSpecsAreOpen(t *testin
 				t.Fatalf("got %s %#v, want %s %#v", tool, arguments, test.tool, test.args)
 			}
 		})
+	}
+}
+
+// #242: an open 2D request draws visibly different directions in one reply,
+// then opens the concept direction card with each sketch's handle and the
+// exact refine_image arguments. A fully specified request skips the sketches.
+func TestOpenConceptRequestDrawsDirectionsThenOpensTheCard(t *testing.T) {
+	brief := agents.Message{Role: "system", Content: "制作简报：用途：概念设计。\n本轮用户正在 2D 图片工作区"}
+	completion, err := newRoutingAdapter(t).Stream(context.Background(), agents.Request{
+		Messages: []agents.Message{brief, {Role: "user", Content: "画一个森林守卫，先给几个方向"}},
+		Tools:    allTools,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(completion.ToolCalls) != 4 {
+		t.Fatalf("tool calls = %d, want 3 sketches + 1 card", len(completion.ToolCalls))
+	}
+	for index := 0; index < 3; index++ {
+		if completion.ToolCalls[index].Name != "create_concept_sketch" {
+			t.Fatalf("call %d = %s", index, completion.ToolCalls[index].Name)
+		}
+	}
+	card := completion.ToolCalls[3]
+	if card.Name != "ask_choice" {
+		t.Fatalf("last call = %s, want ask_choice", card.Name)
+	}
+	var arguments struct {
+		Kind    string `json:"kind"`
+		Options []struct {
+			ID        string                     `json:"id"`
+			Thumbnail string                     `json:"thumbnail"`
+			Arguments map[string]json.RawMessage `json:"arguments"`
+		} `json:"options"`
+	}
+	if err := json.Unmarshal(card.Arguments, &arguments); err != nil {
+		t.Fatal(err)
+	}
+	if arguments.Kind != "concept_direction" || len(arguments.Options) != 3 {
+		t.Fatalf("card = %s %#v", arguments.Kind, arguments.Options)
+	}
+	for index, option := range arguments.Options {
+		want := map[string]string{"@img1": "realistic", "@img2": "cartoon", "@img3": "low_poly"}
+		handle := []string{"@img1", "@img2", "@img3"}[index]
+		if option.ID != want[handle] || option.Thumbnail != handle {
+			t.Fatalf("option %d = %+v", index, option)
+		}
+		if _, present := option.Arguments["prompt"]; !present {
+			t.Fatalf("option %d lacks refine_image prompt: %+v", index, option.Arguments)
+		}
+	}
+}
+
+func TestExplicitConceptRequestSkipsDirections(t *testing.T) {
+	brief := agents.Message{Role: "system", Content: "制作简报：用途：图标。\n本轮用户正在 2D 图片工作区"}
+	tool, arguments := plan(t, []agents.Message{
+		brief, {Role: "user", Content: "画一个森林守卫图标，1:1，透明背景"},
+	}, allTools)
+	if tool != "refine_image" || !reflect.DeepEqual(arguments, map[string]any{"prompt": "画一个森林守卫图标，1:1，透明背景"}) {
+		t.Fatalf("explicit request = %s %#v", tool, arguments)
 	}
 }

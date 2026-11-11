@@ -769,3 +769,105 @@ func TestDirectionCardTakesBoundedAgentOptions(t *testing.T) {
 		}
 	}
 }
+
+// #242: a concept direction card converges sketches drawn earlier in the same
+// reply. Each option carries the exact refine_image arguments and the handle
+// of its sketch; the server refuses a card with too few sketches or arguments
+// the target tool does not declare, and drops an unresolvable thumbnail
+// without refusing the card.
+func TestConceptDirectionCardCarriesSketchArgumentsAndThumbnails(t *testing.T) {
+	ctx := context.Background()
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "chat.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repository.Close() })
+	now := time.Now().UTC()
+	if _, err := repository.CreateSession(ctx, chat.Session{
+		ID: "session-a", OwnerID: "owner-a", OwnerName: "A", Title: "a", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	conceptKind := catalog.ChatChoiceKindSchema{ID: "concept_direction", OptionSource: "agent",
+		ToolName: "refine_image", Question: "想沿着哪个方向深入？", Message: "请选择概念方向。"}
+	service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) {
+		config.ChoiceKinds = []catalog.ChatChoiceKindSchema{directionChoiceKind(), conceptKind}
+		config.ChoiceMaxOptions = 8
+		config.ConceptDirections = catalog.ChatConceptDirectionsSchema{
+			Enabled: true, MinCount: 3, MaxCount: 4, SketchTool: "create_concept_sketch", Kind: "concept_direction",
+			MaxLabelCharacters: 40, MaxDescriptionCharacters: 120, MaxArgumentsBytes: 4096,
+		}
+		config.ChoiceTargetArguments = map[string][]string{
+			"refine_image": {"prompt", "reference_handles"},
+		}
+		config.Handles = chat.NewHandlePolicy(catalog.ChatContextSchema{
+			HandlePrefixes: map[string]string{"image": "@img"},
+		})
+	})
+	service.SetChoices(repository, 20)
+	command := chat.ToolCommand{
+		OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-1",
+		Call: agents.ToolCall{ID: "call-1", Name: "ask_choice"},
+		Turn: chat.Message{ImageURLs: []string{"/pictures/sketch-1", "/pictures/sketch-2", "/pictures/sketch-3"},
+			Attachments: []chat.Attachment{
+				{Handle: "@img1", Kind: "image", TaskID: "sketch-task-1", ImageSlot: 1},
+				{Handle: "@img2", Kind: "image", TaskID: "sketch-task-2", ImageSlot: 2},
+				{Handle: "@img3", Kind: "image", TaskID: "sketch-task-3", ImageSlot: 3},
+			}},
+		EarlierCalls: []chat.ToolCall{
+			{ID: "call-sketch-1", Name: "create_concept_sketch", TaskID: "sketch-task-1"},
+			{ID: "call-sketch-2", Name: "create_concept_sketch", TaskID: "sketch-task-2"},
+			{ID: "call-sketch-3", Name: "create_concept_sketch", TaskID: "sketch-task-3"},
+		},
+	}
+	arguments := chat.AskChoiceArguments{Kind: "concept_direction", Options: []chat.ChoiceOptionInput{
+		{ID: "realistic", Label: "写实", Description: "自然光与真实材质", Thumbnail: "@img2",
+			Arguments: json.RawMessage(`{"prompt":"a realistic forest guardian","reference_handles":["@img2"]}`)},
+		{ID: "cartoon", Label: "卡通", Thumbnail: "@missing",
+			Arguments: json.RawMessage(`{"prompt":"a cartoon forest guardian"}`)},
+		{ID: "low_poly", Label: "低多边形",
+			Arguments: json.RawMessage(`{"prompt":"a low-poly forest guardian"}`)},
+	}}
+	result, err := service.AskChoice(ctx, command, conceptKind, arguments)
+	if err != nil || result.Error != "" {
+		t.Fatalf("concept card = %+v err=%v", result, err)
+	}
+	choices, err := service.ListChoices(ctx, "owner-a", "session-a")
+	if err != nil || len(choices) != 1 || len(choices[0].Options) != 3 {
+		t.Fatalf("stored cards = %+v %v", choices, err)
+	}
+	if choices[0].Options[0].ThumbnailURL != "/pictures/sketch-2" {
+		t.Fatalf("thumbnail = %q", choices[0].Options[0].ThumbnailURL)
+	}
+	// A handle that names no sketch of this reply only loses the thumbnail.
+	if choices[0].Options[1].ThumbnailURL != "" {
+		t.Fatalf("unresolvable thumbnail = %q", choices[0].Options[1].ThumbnailURL)
+	}
+	var optionArguments map[string]any
+	if err := json.Unmarshal(choices[0].Options[0].Arguments, &optionArguments); err != nil ||
+		optionArguments["prompt"] != "a realistic forest guardian" {
+		t.Fatalf("option arguments = %s %v", choices[0].Options[0].Arguments, err)
+	}
+
+	// Too few sketches: the card would ask the person to choose a direction
+	// that was never drawn.
+	short := command
+	short.EarlierCalls = command.EarlierCalls[:2]
+	if refused, err := service.AskChoice(ctx, short, conceptKind, arguments); err != nil || !refused.NoSubmission || refused.Error == "" {
+		t.Fatalf("short concept card = %+v %v", refused, err)
+	}
+	// Unknown argument keys and a missing prompt are refused.
+	for _, raw := range []string{
+		`{"prompt":"ok","model":"pick-this"}`,
+		`{"reference_handles":["@img1"]}`,
+		`{"prompt":"   "}`,
+	} {
+		bad := arguments
+		bad.Options = []chat.ChoiceOptionInput{{ID: "a", Label: "A", Arguments: json.RawMessage(raw)},
+			{ID: "b", Label: "B", Arguments: json.RawMessage(`{"prompt":"b"}`)},
+			{ID: "c", Label: "C", Arguments: json.RawMessage(`{"prompt":"c"}`)}}
+		if refused, err := service.AskChoice(ctx, command, conceptKind, bad); err != nil || !refused.NoSubmission || refused.Error == "" {
+			t.Fatalf("bad concept arguments %s = %+v %v", raw, refused, err)
+		}
+	}
+}

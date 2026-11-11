@@ -21,6 +21,8 @@ export interface ChoiceOptionModel {
   label: string;
   /** #103: one sentence on what the choice is for; empty on older servers. */
   description: string;
+  /** #242: a sketch thumbnail for a concept direction option; empty or absent when none. */
+  thumbnailUrl?: string;
   /** #103: the server's recommendation for this request. */
   recommended: boolean;
   creditsMetered: boolean;
@@ -77,6 +79,7 @@ function parseOption(value: unknown): ChoiceOptionModel | null {
     modelName: text(item.model_name),
     label: text(item.label),
     description: text(item.description),
+    thumbnailUrl: text(item.thumbnail_url),
     recommended: item.recommended === true,
     creditsMetered: item.credits_metered === true,
     estimatedCredits: typeof item.estimated_credits === 'number' ? item.estimated_credits : null,

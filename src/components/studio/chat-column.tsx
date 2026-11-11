@@ -49,6 +49,10 @@ import { asksTurnBackground, useTurnBackground } from '@/hooks/use-turn-backgrou
 import { interleaveGroups } from '@/lib/workspace/three-view';
 import { ThreeViewCard } from '@/components/studio/three-view-card';
 import { tileOfObject, useSessionVersions } from '@/hooks/use-session-versions';
+import { useStageViewer } from '@/hooks/use-stage-viewer';
+import { useObjectActions } from '@/hooks/use-object-actions';
+import { objectOfTile } from '@/lib/workspace/version-object';
+import { compareFromGroup } from '@/lib/workspace/compare';
 import { useRestoreSessionModels } from '@/hooks/use-restore-session-models';
 import { useWorkspaceOfferings } from '@/hooks/use-workspace-offerings';
 import { sessionSkillId } from '@/lib/agent-configuration-resource';
@@ -296,6 +300,23 @@ export function ChatColumn() {
   const refreshChoices = sessionChoices.refresh;
   const [answeringChoice, setAnsweringChoice] = useState<string | null>(null);
   const versions = useSessionVersions();
+  const { slotOf } = useStageViewer();
+  const { openOnStage } = useObjectActions();
+  // #242: a plan candidate group compares its finished tasks in the existing
+  // 2/4-pane view; selecting one opens that model or picture on the stage.
+  const compareCandidates = useCallback((taskIds: readonly string[]) => {
+    const slots = taskIds.flatMap((taskId) => {
+      const tile = versions.tiles.find((item) => item.taskId === taskId || item.taskIds.includes(taskId));
+      const slot = tile ? slotOf(tile) : null;
+      return slot ? [slot] : [];
+    });
+    if (slots.length >= 2) useStudioStore.getState().startCompare(compareFromGroup(slots));
+  }, [slotOf, versions.tiles]);
+  const selectCandidate = useCallback((taskId: string) => {
+    const tile = versions.tiles.find((item) => item.taskId === taskId || item.taskIds.includes(taskId));
+    const object = tile && activeSessionId ? objectOfTile(tile, activeSessionId) : null;
+    if (object) openOnStage(object);
+  }, [activeSessionId, openOnStage, versions.tiles]);
 
   const effective = useAgentEffectiveConfiguration(schema, activeSessionId, stageDomain, selectedGenerationModel, skillRefreshVersion);
   const skillCatalog = useAgentSkillCatalog(schema, effective.data?.revision, skillRefreshVersion);
@@ -2198,6 +2219,8 @@ export function ChatColumn() {
                     busy={decisionBusy.has(item.requestId)}
                     error={decisionError[item.requestId] ?? null}
                     onDecide={(approved) => { void decidePlan(item.requestId, approved); }}
+                    onCompareCandidates={compareCandidates}
+                    onSelectCandidate={selectCandidate}
                   />
                 ) : null)}
                 {planCards.length === 0 && (planReloadError || budgetAwaiting) ? (
@@ -2211,6 +2234,8 @@ export function ChatColumn() {
                     plan={sessionBudget.plan}
                     tasks={sessionTasks}
                     progress={sessionBudget}
+                    onCompareCandidates={compareCandidates}
+                    onSelectCandidate={selectCandidate}
                   />
                 ) : null}
               </div>

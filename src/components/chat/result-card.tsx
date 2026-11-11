@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type DragEvent } from 'react';
 import useSWR from 'swr';
-import { Box, Camera, Check, Download, Image as ImageIcon, Info } from 'lucide-react';
+import { Box, Camera, Check, Download, Image as ImageIcon, Info, RefreshCw } from 'lucide-react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { selfCheckStatus, selfCheckStatusLabel, type SelfCheckRecord } from '@/lib/chat/self-check';
@@ -13,19 +13,21 @@ import { openResultDetail } from '@/components/result/result-card-parts';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { useModelCaptureBlock } from '@/hooks/use-model-capture-block';
 import { useObjectActions } from '@/hooks/use-object-actions';
+import { useTaskReroll } from '@/hooks/use-task-reroll';
 import type { ChatAttachmentClaim } from '@/lib/chat/attachments';
 import { activePicturePosition, pictureKey, type MessagePicture } from '@/lib/chat/message-pictures';
 import type { ChatModelResult } from '@/lib/chat/model-results';
 import { canvasDragItem, startCanvasDrag, uploadDragItem } from '@/lib/workspace/canvas-drag';
 import { candidateAttachment, isPickedCandidate, pickClaim } from '@/lib/chat/pick';
 import { safeAssetURL, safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
-import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-schema';
+import { formatSchemaText, schemaCountMessage, schemaText, taskStatePresentation } from '@/lib/product-schema';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { unavailableLabel } from '@/lib/unavailable';
 import { cn } from '@/lib/utils';
 import type { ChatAttachment, ChatImage } from '@/store/chat-store';
 import type { ResultTarget } from '@/lib/workspace/result-target';
 import type { CurrentObject } from '@/store/workspace-store';
+import { useWorkspaceStore } from '@/store/workspace-store';
 import { HandleTag } from '@/components/chat/handle-tag';
 import type { ComposerReference } from '@/lib/chat/composer-reference';
 import { ModelViewer3D } from '@/components/viewer/model-viewer-3d';
@@ -67,6 +69,8 @@ export function ImageResultCard({
   const { schema } = useProductSchema();
   const { proxyAssetUrl, previewAssetUrl } = useAssetURLRewriter();
   const { openOnStage, toThreeD, toGaussianSplat } = useObjectActions();
+  const { rerolling, awaiting, rerolled, rerollTask } = useTaskReroll();
+  const trackedTasks = useWorkspaceStore((state) => state.trackedTasks);
   const splatTool = gaussianSplatTool(schema);
   const { data: splatOfferings, isLoading: splatOfferingsLoading, error: splatOfferingsError } = useSWR(
     splatTool ? ['gaussian-splat-offerings', schema.revision, splatTool.capability] : null,
@@ -112,6 +116,11 @@ export function ImageResultCard({
   };
   const activeEntry = candidates[active];
   const activeObject = objectAt(activeEntry);
+  const activeTask = activeObject ? trackedTasks.find((task) => task.taskId === activeObject.taskId) : undefined;
+  // #242: "one more" shows only for a succeeded task; the server refuses any
+  // other state and the card never invites a pointless paid request.
+  const canReroll = activeTask !== undefined && !activeTask.notFound && !rerolled[activeTask.taskId]
+    && taskStatePresentation(schema, activeTask.state).outcome === 'success';
   const activeHandle = attachmentOf(activeEntry)?.handle;
   // What a click on a handle tag brings into the composer: the picture by its platform IDs.
   const referenceAt = (entry: MessagePicture): ComposerReference | null => {
@@ -239,6 +248,18 @@ export function ImageResultCard({
               </Action>
             </HintTooltip>
           ) : null}
+          {canReroll && activeTask ? (
+            <Action
+              type="button"
+              variant="outline"
+              size="xs"
+              disabled={rerolling[activeTask.taskId] === true}
+              onClick={() => void rerollTask(activeTask)}
+              data-testid="chat-result-reroll"
+            >
+              <RefreshCw />{awaiting[activeTask.taskId] ? schemaText(schema, 'ui.workspace.tasks.reroll_confirm') : schemaText(schema, 'ui.workspace.tasks.reroll')}
+            </Action>
+          ) : null}
           {downloadURL ? (
             <a href={downloadURL} download className={buttonVariants({ variant: 'outline', size: 'xs' })} data-testid="chat-result-download">
               <Download />{schemaText(schema, 'ui.studio.result.download')}
@@ -337,6 +358,10 @@ export function ModelResultCard({ taskId, result, cover, handle, sessionId, self
   const checkState = selfCheckStatus(schema, selfCheck);
   const { proxyAssetUrl, previewAssetUrl } = useAssetURLRewriter();
   const { openOnStage, captureToTwoD } = useObjectActions();
+  const { rerolling, awaiting, rerolled, rerollTask } = useTaskReroll();
+  const trackedTask = useWorkspaceStore((state) => state.trackedTasks.find((task) => task.taskId === taskId));
+  const canReroll = trackedTask !== undefined && !trackedTask.notFound && !rerolled[trackedTask.taskId]
+    && taskStatePresentation(schema, trackedTask.state).outcome === 'success';
   const captureBlock = useModelCaptureBlock(taskId);
   const live = useInlineModelPreviewStore((state) => state.taskId === taskId);
   // A card that goes away gives its viewer back.
@@ -433,6 +458,18 @@ export function ModelResultCard({ taskId, result, cover, handle, sessionId, self
             </HintTooltip>
           ) : null}
           {modelUrl ? <ModelArchiveLink taskId={taskId} className="h-6 gap-1 px-2 text-xs" /> : null}
+          {canReroll && trackedTask ? (
+            <Action
+              type="button"
+              variant="outline"
+              size="xs"
+              disabled={rerolling[trackedTask.taskId] === true}
+              onClick={() => void rerollTask(trackedTask)}
+              data-testid="chat-result-reroll"
+            >
+              <RefreshCw />{awaiting[trackedTask.taskId] ? schemaText(schema, 'ui.workspace.tasks.reroll_confirm') : schemaText(schema, 'ui.workspace.tasks.reroll')}
+            </Action>
+          ) : null}
           {detail ? (
             <HintTooltip name={detailText}>
               <Action type="button" variant="outline" size="icon-xs" aria-label={detailText} onClick={() => openResultDetail(detail)} data-testid="chat-result-detail">

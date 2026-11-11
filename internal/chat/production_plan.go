@@ -111,6 +111,10 @@ type ProductionPlanPolicy struct {
 	// Checkpoints are the check ids a step may declare (#246), from
 	// application.chat.self_check.checkpoints. Empty accepts none.
 	Checkpoints []string
+	// Candidates is application.chat.candidates (#242): how many parallel
+	// candidates one step may declare and where they may come from. A zero
+	// value refuses candidates.
+	Candidates catalog.ChatCandidatesSchema
 }
 
 // SetProductionPlanPurposeBudget installs the purpose budget check of planned
@@ -173,14 +177,8 @@ func (service *Service) PendingProductionBudget(ctx context.Context, ownerID, se
 // accepted because the Schema declares it, and deliberately ignored: the
 // server quotes every step itself. budgets holds one amount per credit unit.
 type proposedPlanArguments struct {
-	Title string `json:"title"`
-	Steps []struct {
-		Capability       string `json:"capability"`
-		Model            string `json:"model"`
-		Purpose          string `json:"purpose"`
-		EstimatedCredits *int   `json:"estimated_credits"`
-		Check            string `json:"check"`
-	} `json:"steps"`
+	Title   string             `json:"title"`
+	Steps   []proposedPlanStep `json:"steps"`
 	Budgets []struct {
 		Unit   string      `json:"unit"`
 		Amount json.Number `json:"amount"`
@@ -200,6 +198,25 @@ type proposedPlanArguments struct {
 			Purpose    string `json:"purpose"`
 		} `json:"step"`
 	} `json:"contingencies"`
+}
+
+// proposedPlanStep is one declared step. Candidates, when present, asks the
+// server to expand the step into a parallel candidate group (#242).
+type proposedPlanStep struct {
+	Capability       string                  `json:"capability"`
+	Model            string                  `json:"model"`
+	Purpose          string                  `json:"purpose"`
+	EstimatedCredits *int                    `json:"estimated_credits"`
+	Check            string                  `json:"check"`
+	Candidates       *proposedPlanCandidates `json:"candidates"`
+}
+
+// proposedPlanCandidates declares where a step's parallel candidates differ
+// and how many there are: either count of one model, or one model each.
+type proposedPlanCandidates struct {
+	Source string   `json:"source"`
+	Count  int      `json:"count"`
+	Models []string `json:"models"`
 }
 
 // ProposeProductionPlan validates and stores one pending plan for the Agent's
@@ -294,7 +311,7 @@ func (policy *ProductionPlanPolicy) buildPlan(command ToolCommand, arguments pro
 		seenCorrections[capability] = true
 		plan.CorrectionCapabilities = append(plan.CorrectionCapabilities, capability)
 	}
-	for _, step := range arguments.Steps {
+	for stepIndex, step := range arguments.Steps {
 		capability := strings.TrimSpace(step.Capability)
 		purpose := strings.TrimSpace(step.Purpose)
 		if capability == "" {
@@ -310,37 +327,15 @@ func (policy *ProductionPlanPolicy) buildPlan(command ToolCommand, arguments pro
 		if check != "" && !slices.Contains(policy.Checkpoints, check) {
 			return budget.Plan{}, nil, "step checkpoint " + check + " is not declared"
 		}
-		offering, locked, refusal := policy.stepOffering(capability, strings.TrimSpace(step.Model),
-			strings.TrimSpace(command.Options.ExplicitModel3D), strings.TrimSpace(command.Options.ModelFor("image")))
+		planned, refusal := policy.planStepCandidates(command, step, capability, purpose, check, stepIndex+1)
 		if refusal != "" {
 			return budget.Plan{}, nil, refusal
 		}
-		estimated := budget.EstimateOffering(offering)
-		if offering.CreditsMetered && estimated.Micros <= 0 {
-			// A metered step the server cannot quote cannot be covered by a
-			// budget: reserving zero would let it spend outside the plan (#103
-			// review B1). The Agent must pick a priceable model or let the
-			// person approve the step directly.
-			return budget.Plan{}, nil, "step " + capability + " has no server credit estimate and cannot be budgeted"
-		}
-		offeringID := strings.TrimSpace(step.Model)
-		if locked {
-			offeringID = string(offering.ID)
-		}
-		planned := budget.PlanStep{
-			Capability: capability,
-			OfferingID: offeringID,
-			Purpose:    purpose,
-			Estimate:   estimated,
-			Check:      check,
-		}
-		if policy.PurposeBudgetNote != nil {
-			// A plan step names no parameters, so the check reads the values it
-			// would run with; the person sees an over-budget value on the card
-			// before approving the plan, not only after the step ran (#129).
-			planned.PurposeBudgetNote = policy.PurposeBudgetNote(command, offering)
-		}
-		plan.Steps = append(plan.Steps, planned)
+		plan.Steps = append(plan.Steps, planned...)
+	}
+	if maxSteps > 0 && len(plan.Steps) > maxSteps {
+		return budget.Plan{}, nil, "the plan expands to " + strconv.Itoa(len(plan.Steps)) +
+			" steps, over the declared maximum of " + strconv.Itoa(maxSteps) + "; reduce the candidates or steps"
 	}
 	acceptance, refusal := policy.acceptanceFor(command)
 	if refusal != "" {
@@ -363,6 +358,92 @@ func (policy *ProductionPlanPolicy) buildPlan(command ToolCommand, arguments pro
 			". Units are never added or converted"
 	}
 	return plan, limits, ""
+}
+
+// planStepCandidates quotes one declared step, expanding its candidate group
+// when it names one (#242). Every candidate is quoted by the server in its own
+// unit, so the plan's uncovered totals and the approved limit cover them all.
+func (policy *ProductionPlanPolicy) planStepCandidates(command ToolCommand, step proposedPlanStep,
+	capability, purpose, check string, group int) ([]budget.PlanStep, string) {
+	models := []string{strings.TrimSpace(step.Model)}
+	declared := step.Candidates
+	if declared != nil {
+		if !policy.Candidates.Enabled {
+			return nil, "this Catalog does not declare plan candidates"
+		}
+		source := strings.TrimSpace(declared.Source)
+		if source == "" || !slices.Contains(policy.Candidates.Sources, source) {
+			return nil, "candidate source " + source + " is not declared " +
+				"(use " + strings.Join(policy.Candidates.Sources, ", ") + ")"
+		}
+		named := make([]string, 0, len(declared.Models))
+		for _, model := range declared.Models {
+			if model = strings.TrimSpace(model); model != "" {
+				named = append(named, model)
+			}
+		}
+		maxCount := policy.Candidates.MaxCount
+		switch {
+		case declared.Count > 0 && len(named) > 0:
+			return nil, "a step's candidates take count or models, not both"
+		case declared.Count > 0:
+			if declared.Count < 2 || (maxCount > 0 && declared.Count > maxCount) {
+				return nil, "candidate count must be between 2 and " + strconv.Itoa(maxCount)
+			}
+			// count samples one model (or the default model); the Agent gives
+			// each call a different seed or input in the approved continuation.
+			models = make([]string, declared.Count)
+			for index := range models {
+				models[index] = strings.TrimSpace(step.Model)
+			}
+		case len(named) > 0:
+			if len(named) < 2 || (maxCount > 0 && len(named) > maxCount) {
+				return nil, "candidate models must list between 2 and " + strconv.Itoa(maxCount) + " Offerings"
+			}
+			models = named
+		default:
+			return nil, "a step's candidates need count or models"
+		}
+	}
+	planned := make([]budget.PlanStep, 0, len(models))
+	for index, model := range models {
+		offering, locked, refusal := policy.stepOffering(capability, model,
+			strings.TrimSpace(command.Options.ExplicitModel3D), strings.TrimSpace(command.Options.ModelFor("image")))
+		if refusal != "" {
+			return nil, refusal
+		}
+		estimated := budget.EstimateOffering(offering)
+		if offering.CreditsMetered && estimated.Micros <= 0 {
+			// A metered step the server cannot quote cannot be covered by a
+			// budget: reserving zero would let it spend outside the plan (#103
+			// review B1). The Agent must pick a priceable model or let the
+			// person approve the step directly.
+			return nil, "step " + capability + " has no server credit estimate and cannot be budgeted"
+		}
+		offeringID := model
+		if locked {
+			offeringID = string(offering.ID)
+		}
+		stepPlan := budget.PlanStep{
+			Capability: capability,
+			OfferingID: offeringID,
+			Purpose:    purpose,
+			Estimate:   estimated,
+			Check:      check,
+		}
+		if declared != nil {
+			stepPlan.CandidateGroup = group
+			stepPlan.CandidateIndex = index + 1
+		}
+		if policy.PurposeBudgetNote != nil {
+			// A plan step names no parameters, so the check reads the values it
+			// would run with; the person sees an over-budget value on the card
+			// before approving the plan, not only after the step ran (#129).
+			stepPlan.PurposeBudgetNote = policy.PurposeBudgetNote(command, offering)
+		}
+		planned = append(planned, stepPlan)
+	}
+	return planned, ""
 }
 
 // planLimits reads the per-unit budgets the Agent proposed. A unit must be

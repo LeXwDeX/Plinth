@@ -81,10 +81,12 @@ describe('choice cards (#321)', () => {
 
   it('reads the rich option fields and renders tiles only when one of them is present (#103)', () => {
     const rich = parseChoiceCards({ choices: [{ ...wire, options: [
-      { id: 'a', provider_name: 'P', model_name: 'M', label: '快速草模', description: '几十秒出一个低面数草模', recommended: true },
+      { id: 'a', provider_name: 'P', model_name: 'M', label: '快速草模', description: '几十秒出一个低面数草模', recommended: true, thumbnail_url: '/api/v1/tasks/t/assets/sketch' },
       { id: 'b', provider_name: 'P', model_name: 'M2' },
     ] }] })[0];
-    expect(rich.options[0]).toMatchObject({ label: '快速草模', description: '几十秒出一个低面数草模', recommended: true });
+    expect(rich.options[0]).toMatchObject({ label: '快速草模', description: '几十秒出一个低面数草模', recommended: true, thumbnailUrl: '/api/v1/tasks/t/assets/sketch' });
+    // #242: a card without a thumbnail keeps the text layout.
+    expect(rich.options[1].thumbnailUrl).toBe('');
     expect(rich.options[1]).toMatchObject({ label: '', description: '', recommended: false });
     expect(choiceOptionTitle(rich.options[0], [])).toBe('快速草模');
     expect(choiceCardHasDetails(rich)).toBe(true);

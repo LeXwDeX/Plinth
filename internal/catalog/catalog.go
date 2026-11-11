@@ -297,6 +297,12 @@ func Load(reader io.Reader) (*Catalog, error) {
 	); err != nil {
 		return nil, fmt.Errorf("application.chat.image2d_usage: %w", err)
 	}
+	if err := validateConceptDirectionOfferings(
+		result.application.Chat.ConceptDirections,
+		result.byID,
+	); err != nil {
+		return nil, fmt.Errorf("application.chat.concept_directions: %w", err)
+	}
 	if err := validateModelReviewProductionOfferings(
 		result.application.Chat.ModelReview,
 		result.byID,

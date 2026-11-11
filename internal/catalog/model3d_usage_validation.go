@@ -325,13 +325,18 @@ func validateChoiceKinds(schema ChatSchema) error {
 		}
 		for name, value := range map[string]string{
 			"tool_name": kind.ToolName,
-			"argument":  kind.Argument,
 			"question":  kind.Question,
 			"message":   kind.Message,
 		} {
 			if strings.TrimSpace(value) == "" {
 				return fmt.Errorf("choice.kinds[%d].%s 不能为空", index, name)
 			}
+		}
+		// An agent kind may carry no single answer argument: its options carry
+		// the exact target-tool arguments instead (#242). The historical
+		// direction kind still fills one string argument.
+		if kind.Argument == "" && kind.OptionSource != "agent" {
+			return fmt.Errorf("choice.kinds[%d].argument 不能为空", index)
 		}
 		parameters, found := declaredToolParameters(schema, kind.ToolName)
 		if !found {
@@ -341,6 +346,11 @@ func validateChoiceKinds(schema ChatSchema) error {
 			// The Agent's own proposal fills the options; the argument still
 			// names the target tool's parameter that receives the chosen
 			// action, and the kind needs a declared target tool.
+			continue
+		}
+		if kind.Argument == "" {
+			// An agent kind whose options carry the whole target-tool call
+			// needs no single string argument (#242).
 			continue
 		}
 		properties, ok := parameters["properties"].(map[string]any)

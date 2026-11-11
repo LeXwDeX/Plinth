@@ -2156,6 +2156,7 @@
           "processing_plan_reconcile": "/api/v1/processing-plans/{planID}/reconcile",
           "task_cancel": "/api/v1/tasks/{taskID}/cancel",
           "task_retry": "/api/v1/tasks/{taskID}/retry",
+          "task_reroll": "/api/v1/tasks/{taskID}/reroll",
           "task_events": "/api/v1/tasks/{taskID}/events",
           "task_asset": "/api/v1/tasks/{taskID}/assets/{assetID}",
           "model_formats": "/api/v1/tasks/{taskID}/formats",
@@ -3082,6 +3083,7 @@
         "ui.chat.empty.example.4": "“用 16:9 宽屏比例重新生成”",
         "ui.chat.loading": "加载消息中...",
         "ui.chat.choice.label": "可选服务",
+        "ui.chat.choice.thumbnail_alt": "{title} 的概念草图",
         "ui.chat.choice.offering_question": "「{step}」有多个可用服务，请选择一个",
         "ui.chat.choice.confirm": "确认",
         "ui.chat.choice.use_default": "用默认（{title}）",
@@ -3110,6 +3112,11 @@
         "ui.chat.self_check.check_count": "{count} 项检查记录",
         "ui.chat.self_check.check_count_one": "{count} 项检查记录",
         "ui.studio.plan.checkpoint": "检查点 {check}",
+        "ui.studio.plan.candidates": "{count} 个候选",
+        "ui.studio.plan.candidates_one": "{count} 个候选",
+        "ui.studio.plan.candidate_n": "候选 {index}",
+        "ui.studio.plan.compare_candidates": "比较这组",
+        "ui.studio.plan.select_candidate": "选用",
         "ui.chat.self_check.reference_metric_iou": "轮廓 IoU {value}",
         "ui.chat.self_check.reference_metric_color": "主色差 {value}",
         "ui.chat.self_check.caveat": "指标为确定性参考：渲染器近似 PBR、仅支持 GLB、按各自包围盒取景；请以并排图和实际判断为准。",
@@ -3585,6 +3592,11 @@
         "ui.workspace.tasks.retry_awaiting": "重试需要你确认才会提交，再点一次重试即可确认，可能产生费用。",
         "ui.workspace.tasks.retry_started": "已重新提交",
         "ui.workspace.tasks.retry_failed": "重试失败，请稍后再试",
+        "ui.workspace.tasks.reroll": "再来一个",
+        "ui.workspace.tasks.reroll_confirm": "确认再来一个",
+        "ui.workspace.tasks.reroll_awaiting": "再来一个需要你确认才会提交，再点一次即可确认，可能产生费用。",
+        "ui.workspace.tasks.reroll_started": "已提交新的候选",
+        "ui.workspace.tasks.reroll_failed": "再来一个失败，请稍后再试",
         "ui.workspace.notice.done": "任务已完成",
         "ui.workspace.notice.failed": "任务失败",
         "ui.workspace.notice.tab_title": "（{count}）有任务已结束 · {title}",
@@ -5790,6 +5802,7 @@
             "when_tools_any": [
               "refine_image",
               "remove_background",
+              "create_concept_sketch",
               "create_multiview_images",
               "edit_multiview_images",
               "create_three_view"
@@ -6459,13 +6472,13 @@
         {
           "name": "ask_choice",
           "execution": {"implementation_key":"choice.ask","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Open a choice card in the chat for a decision the person should make themselves. Use kind usage_profile to ask what the 3D result is for; the card lists the declared production purposes, and the person's answer calls update_production_brief with the chosen purpose. Use kind image_usage_profile to ask what a 2D image is for; its options are the declared 2D purposes and its answer writes image_use. Use kind direction with options to ask a stylistic or compositional direction the person should choose themselves; its answer writes style. Use kind visual_anchor to ask the person to confirm a new visual anchor: put the exact set_visual_anchor arguments in proposal.arguments; the accept option calls that tool with them, and the decline option writes nothing. Ask once, then continue from the answer; do not open the same card again while it is pending. The card grants nothing and charges nothing.",
+          "description": "Open a choice card in the chat for a decision the person should make themselves. Use kind usage_profile to ask what the 3D result is for; the card lists the declared production purposes, and the person's answer calls update_production_brief with the chosen purpose. Use kind image_usage_profile to ask what a 2D image is for; its options are the declared 2D purposes and its answer writes image_use. Use kind direction with options to ask a stylistic or compositional direction the person should choose themselves; its answer writes style. Use kind concept_direction after drawing concept sketches: each option carries a label, one sentence, the thumbnail handle of its sketch, and the exact refine_image arguments that continue that direction. Use kind visual_anchor to ask the person to confirm a new visual anchor: put the exact set_visual_anchor arguments in proposal.arguments; the accept option calls that tool with them, and the decline option writes nothing. Ask once, then continue from the answer; do not open the same card again while it is pending. The card grants nothing and charges nothing.",
           "parameters": {
             "type": "object",
             "properties": {
               "kind": {
                 "type": "string",
-                "enum": ["usage_profile", "image_usage_profile", "direction", "visual_anchor"],
+                "enum": ["usage_profile", "image_usage_profile", "direction", "concept_direction", "visual_anchor"],
                 "description": "The kind of choice card to open."
               },
               "proposal": {
@@ -6501,6 +6514,15 @@
                       "type": "string",
                       "maxLength": 300,
                       "description": "Optional one-line explanation of the option."
+                    },
+                    "thumbnail": {
+                      "type": "string",
+                      "maxLength": 40,
+                      "description": "Optional handle (such as @img1) of a concept sketch drawn earlier in this reply; the card shows it as the option's thumbnail. The server drops a handle it cannot resolve instead of refusing the card."
+                    },
+                    "arguments": {
+                      "type": "object",
+                      "description": "For kind concept_direction only: the exact arguments of the target tool's next call for this option (for example prompt and reference_handles). Every key must be one of the target tool's declared parameters."
                     }
                   },
                   "required": ["id", "label"],
@@ -6526,7 +6548,7 @@
         {
           "name": "propose_production_plan",
           "execution": {"implementation_key":"plan.propose","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Propose a production plan with a credit budget per credit unit when the work needs several paid steps (for example: generate a model, inspect it, then fix what the self-check finds). Providers bill in their own units (tripo.credit, hyper3d.credit, meshy.credit, and legacy.credits for steps priced in historical credits); the budget limits and counts each unit separately and never adds different units. The person approves the plan and its budget on one card; afterwards the plan's steps and the correction capabilities you list run continuously by budget without a card per step. The server re-estimates every step from the Catalog in its own unit and refuses a budget whose unit is missing or below that unit's estimate; the refusal lists the estimate of each unit, and the numbers you send are only a summary. A capability outside the plan and its correction capabilities, a step that would exceed what remains in its unit (or whose unit has no budget), and a step that would charge again (extra export formats, additional fees) still show an approval card. Browser-started steps do not use this budget. Optional checkpoints after a processing capability and contingencies (declared repair steps) make the plan a contract: the server derives the checkpoint thresholds from the purpose budget, the card shows the acceptance criteria, the checkpoints and the separate worst-case contingency estimates, and a failed checkpoint stops the next processing step. Contingency estimates count toward the approved limit even if they never run. Propose once and wait for the person: do not open a second plan while one is pending, and do not use this tool to avoid a card the rules require.",
+          "description": "Propose a production plan with a credit budget per credit unit when the work needs several paid steps (for example: generate a model, inspect it, then fix what the self-check finds). Providers bill in their own units (tripo.credit, hyper3d.credit, meshy.credit, and legacy.credits for steps priced in historical credits); the budget limits and counts each unit separately and never adds different units. The person approves the plan and its budget on one card; afterwards the plan's steps and the correction capabilities you list run continuously by budget without a card per step. The server re-estimates every step from the Catalog in its own unit and refuses a budget whose unit is missing or below that unit's estimate; the refusal lists the estimate of each unit, and the numbers you send are only a summary. A capability outside the plan and its correction capabilities, a step that would exceed what remains in its unit (or whose unit has no budget), and a step that would charge again (extra export formats, additional fees) still show an approval card. Browser-started steps do not use this budget. Optional checkpoints after a processing capability and contingencies (declared repair steps) make the plan a contract: the server derives the checkpoint thresholds from the purpose budget, the card shows the acceptance criteria, the checkpoints and the separate worst-case contingency estimates, and a failed checkpoint stops the next processing step. Contingency estimates count toward the approved limit even if they never run. To let the person compare results, optionally declare candidates on one step (source provider, seed or input_image, with count or models up to the Schema maximum): the server quotes every candidate and the approved continuation submits them in parallel, keeping the losers as assets. Propose once and wait for the person: do not open a second plan while one is pending, and do not use this tool to avoid a card the rules require.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -6561,6 +6583,30 @@
                       "type": "string",
                       "enum": ["self_check"],
                       "description": "Optional checkpoint after this step: self_check means the result must be inspected and its self-check conclusion recorded before the next step or delivery. The person sees it on the plan card and the approved continuation repeats it."
+                    },
+                    "candidates": {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "enum": ["provider", "seed", "input_image"],
+                          "description": "Where the candidates differ: provider (different models), seed (different seeds on one model) or input_image (different input pictures)."
+                        },
+                        "count": {
+                          "type": "integer",
+                          "minimum": 2,
+                          "description": "How many candidates to make, all on this step's model (or the default model). Give count or models, never both."
+                        },
+                        "models": {
+                          "type": "array",
+                          "minItems": 2,
+                          "items": {"type": "string"},
+                          "description": "One Offering per candidate. Give count or models, never both."
+                        }
+                      },
+                      "required": ["source"],
+                      "additionalProperties": false,
+                      "description": "Optional parallel candidates for this step. The server expands them into candidate plan steps, quotes every candidate, and counts them in the budget."
                     }
                   },
                   "required": ["capability", "purpose"],
@@ -7297,6 +7343,18 @@
               "model": {
                 "type": "string",
                 "description": "Optional 3D model to run, by model name. Omit to let the session's production brief pick the first available recommended model. The person's explicit model choice in this session always wins; if it conflicts with this value, nothing is submitted."
+              },
+              "model_seed": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483647,
+                "description": "Optional model seed. A different seed asks the provider for a different sample; it is dropped when the selected model declares no model seed."
+              },
+              "texture_seed": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483647,
+                "description": "Optional texture seed. A different seed asks the provider for a different texture sample; it is dropped when the selected model declares no texture seed."
               }
             },
             "required": [
@@ -7305,13 +7363,17 @@
             "additionalProperties": false
           },
           "argument_mappings": {
-            "prompt": "prompt"
+            "prompt": "prompt",
+            "model_seed": "model_seed",
+            "texture_seed": "texture_seed"
           },
           "override_mappings": {
             "aspect_ratio": "aspect_ratio",
             "pose_mode": "pose_mode",
             "size": "size",
-            "image_size": "image_size"
+            "image_size": "image_size",
+            "model_seed": "model_seed",
+            "texture_seed": "texture_seed"
           },
           "default_parameters": {
             "negative_prompt": "low quality, blurry, distorted, deformed, ugly, bad anatomy, watermark, text, extra fingers, mutation"
@@ -7388,6 +7450,18 @@
                 "type": "string",
                 "maxLength": 300,
                 "description": "Only when the person explicitly asks to use a picture that the deterministic 3D-input check refused: state that reason here to proceed. Leave empty otherwise."
+              },
+              "model_seed": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483647,
+                "description": "Optional model seed. A different seed asks the provider for a different sample; it is dropped when the selected model declares no model seed."
+              },
+              "texture_seed": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483647,
+                "description": "Optional texture seed. A different seed asks the provider for a different texture sample; it is dropped when the selected model declares no texture seed."
               }
             },
             "required": [
@@ -7398,13 +7472,17 @@
           "anchor_argument": "anchors",
           "argument_mappings": {
             "prompt": "prompt",
-            "reference_image_indices": "reference-indices"
+            "reference_image_indices": "reference-indices",
+            "model_seed": "model_seed",
+            "texture_seed": "texture_seed"
           },
           "override_mappings": {
             "aspect_ratio": "aspect_ratio",
             "pose_mode": "pose_mode",
             "size": "size",
-            "image_size": "image_size"
+            "image_size": "image_size",
+            "model_seed": "model_seed",
+            "texture_seed": "texture_seed"
           },
           "default_parameters": {
             "negative_prompt": "low quality, blurry, distorted, deformed, ugly, bad anatomy, watermark, text, extra fingers, mutation"
@@ -7490,6 +7568,18 @@
                 "type": "string",
                 "maxLength": 300,
                 "description": "Only when the person explicitly asks to use a picture that the deterministic 3D-input check refused: state that reason here to proceed. Leave empty otherwise."
+              },
+              "model_seed": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483647,
+                "description": "Optional model seed. A different seed asks the provider for a different sample; it is dropped when the selected model declares no model seed."
+              },
+              "texture_seed": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483647,
+                "description": "Optional texture seed. A different seed asks the provider for a different texture sample; it is dropped when the selected model declares no texture seed."
               }
             },
             "required": [],
@@ -7497,10 +7587,14 @@
           },
           "argument_mappings": {
             "reference_image_indices": "reference-indices",
-            "reference_views": "reference-views"
+            "reference_views": "reference-views",
+            "model_seed": "model_seed",
+            "texture_seed": "texture_seed"
           },
           "override_mappings": {
-            "reference-views": "reference_views"
+            "reference-views": "reference_views",
+            "model_seed": "model_seed",
+            "texture_seed": "texture_seed"
           },
           "default_parameters": {},
           "result_attachment_kind": "model",
@@ -8497,6 +8591,76 @@
             "budget": "budget",
             "reason": "reason"
           }
+        },
+        {
+          "name": "create_concept_sketch",
+          "canvas_source": "bind",
+          "selection_mask": "ignore",
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-image","text-to-image"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
+          "description": "Draw one low-cost 2D concept sketch for an open request. Call it several times in the same reply (the Product Schema declares how many) to offer visibly different directions, each with its own English prompt that names the style, medium and key visual differences. Without references it draws from text; with reference_handles it keeps the referenced subject. After drawing, open an ask_choice card of the concept_direction kind whose options carry each sketch's handle and the exact refine_image arguments that continue it. The Product Schema may override cheap parameters per Offering; a model that declares none of them is used as is.",
+          "require_user_model": true,
+          "cross_domain_model_fallback": true,
+          "model_required_message": "请先在工作区选择生成模型。",
+          "capability": "image-to-image",
+          "fallback_capability": "text-to-image",
+          "pending_capability": "image-to-image",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "prompt": {
+                "type": "string",
+                "description": "A concise English description of this concept direction, naming its style, medium and what makes it different from the other directions."
+              },
+              "reference_handles": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Optional handles (such as @img3, or @selected) of a subject picture in this chat. Omit for a fresh concept."
+              },
+              "reference_image_indices": {
+                "type": "array",
+                "items": { "type": "integer", "minimum": 1 },
+                "description": "Optional 1-indexed historical image references; UI selection has priority."
+              }
+            },
+            "required": ["prompt"],
+            "additionalProperties": false
+          },
+          "argument_mappings": {
+            "prompt": "prompt",
+            "reference_image_indices": "reference-indices"
+          },
+          "override_mappings": {
+            "aspect_ratio": "aspect_ratio",
+            "pose_mode": "pose_mode",
+            "size": "size",
+            "image_size": "image_size"
+          },
+          "default_parameters": {
+            "negative_prompt": "low quality, blurry, distorted, deformed, ugly, bad anatomy, watermark, text, extra fingers, mutation"
+          },
+          "result_attachment_kind": "image",
+          "result_asset_roles": ["image"],
+          "prompt_with_reference_template": "Create a concept sketch of the referenced subject: {prompt}. Keep the subject's identity and unchanged elements.",
+          "prompt_with_previous_template": "Original concept: {previous_prompt}. New direction: {prompt}",
+          "idempotency_key_template": "chat:{session_id}:{call_id}",
+          "result_fields": {
+            "success": "success",
+            "task_id": "task_id",
+            "image_urls": "image_urls",
+            "error": "error",
+            "warning": "warning",
+            "estimated_credits": "estimated_credits",
+            "approval": "approval",
+            "model": "model",
+            "model_fallback": "model_fallback",
+            "model_note": "model_note",
+            "model_choice": "model_choice",
+            "budget": "budget",
+            "reason": "reason",
+            "purpose_budget_note": "purpose_budget_note",
+            "final_prompt": "final_prompt",
+            "prompt_note": "prompt_note"
+          }
         }
       ],
       "skills": {
@@ -8910,6 +9074,13 @@
             "message": "请选择这次制作的方向。选项由我按当前需求准备；选好后我会把方向记进制作简报并继续。"
           },
           {
+            "id": "concept_direction",
+            "tool_name": "refine_image",
+            "option_source": "agent",
+            "question": "想沿着哪个方向深入？",
+            "message": "请选择这次制作的概念方向。每个方向都有一张低成本草图和一句说明；选好后我会按该方向的参数继续深入。"
+          },
+          {
             "id": "visual_anchor",
             "tool_name": "set_visual_anchor",
             "argument": "action",
@@ -8920,6 +9091,41 @@
             "decline_label": "不用了"
           }
         ]
+      },
+      "concept_directions": {
+        "enabled": true,
+        "min_count": 3,
+        "max_count": 4,
+        "sketch_tool": "create_concept_sketch",
+        "kind": "concept_direction",
+        "question": "想沿着哪个方向深入？",
+        "message": "请选择这次制作的概念方向。每个方向都有一张低成本草图和一句说明；选好后我会按该方向的参数继续深入。",
+        "context_template": "\n\n发散与收敛（#242）：当用户只给了主题、用途或一句模糊的想法，没有指定风格、构图或参考图，也没有要求直接开始制作时，先用 {sketch_tool} 在同一次回复里并行画 {minimum} 到 {maximum} 个明显不同的概念方向（每张草图用英文 prompt，写清该方向的画风、媒介与关键视觉差异），然后用 ask_choice 开一张 concept_direction 卡：每个选项写 id、label、一句 description、对应草图的 thumbnail 句柄，以及继续该方向所需的完整 refine_image 参数（prompt 必须按所选方向改写，reference_handles 指向该草图）。方向之间必须有明显差异（例如写实、卡通、低多边形），不要只改颜色。已有明确风格、参考图或用户要求直接做时跳过草图，直接 refine_image。3D 模式不画概念草图；最多开一张方向卡，不要重复开同一张卡。",
+        "max_label_characters": 40,
+        "max_description_characters": 120,
+        "max_arguments_bytes": 4096,
+        "limit_reached": "同一次回复最多画 {maximum} 个概念方向；请先让用户在这些方向里选择，再继续深入。",
+        "parameter_overrides": {}
+      },
+      "candidates": {
+        "enabled": true,
+        "max_count": 4,
+        "sources": ["provider", "seed", "input_image"],
+        "context_template": "\n\n候选（#242）：在预算制制作计划里，如果用户要挑一个结果而不是只看一次生成，可以在一个步骤上声明 candidates：source 取 {sources} 之一，并给出 count（2 到 {maximum}，同一模型或默认模型的不同抽样）或 models（2 到 {maximum} 个不同的 Offering）。服务端会把这一步展开为并排的候选计划步骤，每份都按自己的报价计入预算。计划批准后，在同一次回复里并行提交这些候选生成调用；seed 来源用不同的 model_seed/texture_seed，provider 来源用不同模型，input_image 来源用不同输入图。候选完成后在计划卡上并排展示，落选者保留为资产。预算不足时仍停下等待批准，不要绕过。"
+      },
+      "reroll": {
+        "enabled": true,
+        "seed_parameters": ["model_seed", "texture_seed"],
+        "min_seed": 1,
+        "max_seed": 2147483647,
+        "messages": {
+          "not_succeeded": "只有已成功的任务才能再来一个。",
+          "no_frozen_input": "这个任务没有保存的冻结输入，无法原样重抽。",
+          "in_progress": "这个任务的再来一个已经在进行中。",
+          "declined": "上次的再来一个已被拒绝；请换一个 Idempotency-Key 再试。",
+          "unavailable": "当前产品配置未启用再来一个。",
+          "idempotency_required": "再来一个必须带 Idempotency-Key，避免重复扣费。"
+        }
       },
       "model3d_usage": {
         "default_profile": "render",
@@ -15159,6 +15365,7 @@
             "ui.chat.empty.example.4": "\"Regenerate in a 16:9 widescreen ratio\"",
             "ui.chat.loading": "Loading messages…",
             "ui.chat.choice.label": "Available services",
+            "ui.chat.choice.thumbnail_alt": "Concept sketch for {title}",
             "ui.chat.choice.offering_question": "Several services can run “{step}”. Choose one",
             "ui.chat.choice.confirm": "Confirm",
             "ui.chat.choice.use_default": "Use default ({title})",
@@ -15187,6 +15394,11 @@
             "ui.chat.self_check.check_count": "{count} checks recorded",
             "ui.chat.self_check.check_count_one": "{count} check recorded",
             "ui.studio.plan.checkpoint": "Checkpoint {check}",
+            "ui.studio.plan.candidates": "{count} candidates",
+            "ui.studio.plan.candidates_one": "{count} candidate",
+            "ui.studio.plan.candidate_n": "Candidate {index}",
+            "ui.studio.plan.compare_candidates": "Compare this group",
+            "ui.studio.plan.select_candidate": "Use",
             "ui.chat.self_check.reference_metric_iou": "Silhouette IoU {value}",
             "ui.chat.self_check.reference_metric_color": "Dominant colour distance {value}",
             "ui.chat.self_check.caveat": "Deterministic metrics are a reference: the renderer uses approximate PBR, reads GLB only and frames each subject by its own bounding box; judge the side-by-side picture yourself.",
@@ -15662,6 +15874,11 @@
             "ui.workspace.tasks.retry_awaiting": "The retry is submitted only after you confirm. Click Retry again to confirm; it may incur charges.",
             "ui.workspace.tasks.retry_started": "Resubmitted",
             "ui.workspace.tasks.retry_failed": "Retry failed, please try again later",
+            "ui.workspace.tasks.reroll": "One more",
+            "ui.workspace.tasks.reroll_confirm": "Confirm one more",
+            "ui.workspace.tasks.reroll_awaiting": "One more is submitted only after you confirm. Click it again to confirm; it may incur charges.",
+            "ui.workspace.tasks.reroll_started": "A new candidate was submitted",
+            "ui.workspace.tasks.reroll_failed": "One more failed, please try again later",
             "ui.workspace.notice.done": "Task completed",
             "ui.workspace.notice.failed": "Task failed",
             "ui.workspace.notice.tab_title": "({count}) Tasks finished · {title}",
@@ -18128,6 +18345,19 @@
             "chat.choice.kinds[id=image_usage_profile].message": "Choose the purpose of this 2D work. The purpose decides the recommended model, aspect ratio, background and size requirements; after you choose, I will continue with that purpose.",
             "chat.choice.kinds[id=direction].question": "Which direction would you like?",
             "chat.choice.kinds[id=direction].message": "Choose a direction for this work. I prepare the options from the current request; after you choose, I will record it in the production brief and continue.",
+            "chat.choice.kinds[id=concept_direction].question": "Which direction should we develop?",
+            "chat.choice.kinds[id=concept_direction].message": "Choose a concept direction for this work. Each direction has a low-cost sketch and one sentence; after you choose, I will continue with that direction's parameters.",
+            "chat.concept_directions.question": "Which direction should we develop?",
+            "chat.concept_directions.message": "Choose a concept direction for this work. Each direction has a low-cost sketch and one sentence; after you choose, I will continue with that direction's parameters.",
+            "chat.concept_directions.context_template": "\n\nDiverge then converge (#242): when the person gave only a subject, a use or a vague idea, named no style, composition or reference picture, and did not ask to start directly, draw {minimum} to {maximum} visibly different concept directions in the same reply with {sketch_tool} (each prompt names that direction's style, medium and key visual differences), then open an ask_choice card of kind concept_direction: every option carries an id, a label, one sentence of description, the thumbnail handle of its sketch and the complete refine_image arguments that continue it (rewrite prompt for that direction and point reference_handles at the sketch). Directions must differ visibly (for example realistic, cartoon, low-poly), not only in colour. When the style, references or a direct request are already clear, skip the sketches and call refine_image. Never draw concept sketches in 3D mode; open at most one direction card and never repeat the same card.",
+            "chat.concept_directions.limit_reached": "One reply may draw at most {maximum} concept directions; let the person choose among them before developing further.",
+            "chat.candidates.context_template": "\n\nCandidates (#242): in a budget production plan, when the person wants to pick a result instead of seeing one generation, declare candidates on one step: source is one of {sources}, with count (2 to {maximum}, several samples of the same or the default model) or models (2 to {maximum} different Offerings). The server expands the step into side-by-side candidate plan steps and quotes every candidate into the budget. After the plan is approved, submit the candidate generation calls in parallel in the same reply: use different model_seed/texture_seed for source seed, different models for source provider and different input pictures for source input_image. Show the candidates side by side on the plan card; losers stay as assets. When the budget is short, stop and wait for approval; never bypass it.",
+            "chat.reroll.messages.not_succeeded": "Only a succeeded task can be rerolled.",
+            "chat.reroll.messages.no_frozen_input": "This task kept no frozen input, so it cannot be rerolled as-is.",
+            "chat.reroll.messages.in_progress": "A reroll of this task is already in progress.",
+            "chat.reroll.messages.declined": "The last reroll was declined; try again with a new Idempotency-Key.",
+            "chat.reroll.messages.unavailable": "Reroll is not enabled by the current product configuration.",
+            "chat.reroll.messages.idempotency_required": "Reroll requires an Idempotency-Key so a repeated request cannot charge twice.",
             "chat.image2d_usage.profiles[id=concept_art].label": "Concept art",
             "chat.image2d_usage.profiles[id=concept_art].description": "Concept art for games, film or product development; several subjects and a scene are allowed, with emphasis on composition, mood and narrative.",
             "chat.image2d_usage.profiles[id=concept_art].reason": "Concept art explains a scene and the relationships between subjects; prefer models that follow prompts and hold a stable composition, and a wide frame close to the usual concept-art ratio.",

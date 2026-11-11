@@ -23,6 +23,10 @@ export interface ProductionPlanStep {
   purposeBudgetNote: string;
   /** #246: the Schema checkpoint declared after this step; empty or absent when none. */
   check?: string;
+  /** #242: 1-based position of the declared candidate group; 0/absent outside a group. */
+  candidateGroup?: number;
+  /** #242: 1-based place inside the candidate group. */
+  candidateIndex?: number;
 }
 
 /** #120: one credit unit of a plan budget, as the server's decimal strings. */
@@ -231,6 +235,8 @@ export function parseProductionPlanStep(value: unknown): ProductionPlanStep | nu
     estimate: priceTotal(item.estimate),
     purposeBudgetNote: text(item.purpose_budget_note),
     check: text(item.check),
+    ...(typeof item.candidate_group === 'number' && item.candidate_group > 0 ? { candidateGroup: item.candidate_group } : {}),
+    ...(typeof item.candidate_index === 'number' && item.candidate_index > 0 ? { candidateIndex: item.candidate_index } : {}),
   };
 }
 

@@ -47,6 +47,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/scene"
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 	"github.com/LeXwDeX/Plinth/internal/skillrun"
+	"github.com/LeXwDeX/Plinth/internal/taskreroll"
 	"github.com/LeXwDeX/Plinth/internal/taskretry"
 	"github.com/LeXwDeX/Plinth/internal/transport/httplocale"
 )
@@ -56,16 +57,18 @@ type Config struct {
 	AgentConfiguration *agentconfiguration.Service
 	// LLMSettings is the administrator's LLM settings (#322); nil leaves
 	// its routes unregistered.
-	LLMSettings            *llmsettings.Service
-	MCP                    *mcp.Service
-	AccountInputAssets     AccountInputAssetLister
-	Readiness              func(context.Context) error
-	Generation             *generation.Module
-	ExecutionGrants        *executiongrant.Service
-	Processing             *processing.Service
-	ModelDelivery          *modeldelivery.Service
-	Lineage                *lineage.Service
-	Retry                  *taskretry.Service
+	LLMSettings        *llmsettings.Service
+	MCP                *mcp.Service
+	AccountInputAssets AccountInputAssetLister
+	Readiness          func(context.Context) error
+	Generation         *generation.Module
+	ExecutionGrants    *executiongrant.Service
+	Processing         *processing.Service
+	ModelDelivery      *modeldelivery.Service
+	Lineage            *lineage.Service
+	Retry              *taskretry.Service
+	// Reroll starts a new task from the frozen input of a succeeded one (#242).
+	Reroll                 *taskreroll.Service
 	ProviderWebhooks       ProviderWebhookIngestor
 	ProviderWebhookRuntime map[string]ProviderWebhookRuntime
 	Identity               IdentityResolver
@@ -185,6 +188,7 @@ type Server struct {
 	modelDelivery                     *modeldelivery.Service
 	lineage                           *lineage.Service
 	retry                             *taskretry.Service
+	reroll                            *taskreroll.Service
 	providerWebhooks                  ProviderWebhookIngestor
 	providerWebhookBindings           []providerWebhookBinding
 	loginLimiter                      *loginFailureLimiter
@@ -388,6 +392,7 @@ func New(config Config) (*Server, error) {
 		modelDelivery:           config.ModelDelivery,
 		lineage:                 config.Lineage,
 		retry:                   config.Retry,
+		reroll:                  config.Reroll,
 		captures:                config.Captures,
 		skillRuns:               config.SkillRuns,
 		pendingApprovals:        config.PendingApprovals,
@@ -714,6 +719,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST "+routes.Tasks, s.withIdentity(s.submitTask))
 	if s.retry != nil && routes.TaskRetry != "" {
 		s.mux.HandleFunc("POST "+routes.TaskRetry, s.withIdentity(s.retryTask))
+	}
+	if s.reroll != nil && routes.TaskReroll != "" {
+		s.mux.HandleFunc("POST "+routes.TaskReroll, s.withIdentity(s.rerollTask))
 	}
 	if routes.TaskPrepare != "" {
 		s.mux.HandleFunc("POST "+routes.TaskPrepare, s.withIdentity(s.prepareTask))

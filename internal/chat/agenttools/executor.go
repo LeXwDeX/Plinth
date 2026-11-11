@@ -739,9 +739,11 @@ func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) 
 		Question    string `json:"question"`
 		Recommended string `json:"recommended"`
 		Options     []struct {
-			ID          string `json:"id"`
-			Label       string `json:"label"`
-			Description string `json:"description"`
+			ID          string          `json:"id"`
+			Label       string          `json:"label"`
+			Description string          `json:"description"`
+			Thumbnail   string          `json:"thumbnail"`
+			Arguments   json.RawMessage `json:"arguments"`
 		} `json:"options"`
 		Proposal struct {
 			Arguments json.RawMessage `json:"arguments"`
@@ -761,14 +763,17 @@ func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) 
 	for _, option := range arguments.Options {
 		id := strings.TrimSpace(option.ID)
 		label := strings.TrimSpace(option.Label)
-		if !boundedChoiceToken(id) || label == "" || len([]rune(label)) > 120 || len([]rune(option.Description)) > 300 {
+		thumbnail := strings.TrimSpace(option.Thumbnail)
+		if !boundedChoiceToken(id) || label == "" || len([]rune(label)) > 120 || len([]rune(option.Description)) > 300 ||
+			len(thumbnail) > 40 {
 			message := e.choiceOptionInvalid
 			if message == "" {
 				message = "invalid choice options"
 			}
 			return chat.ToolResult{Error: message, NoSubmission: true}
 		}
-		options = append(options, chat.ChoiceOptionInput{ID: id, Label: label, Description: strings.TrimSpace(option.Description)})
+		options = append(options, chat.ChoiceOptionInput{ID: id, Label: label, Description: strings.TrimSpace(option.Description),
+			Thumbnail: thumbnail, Arguments: append(json.RawMessage(nil), option.Arguments...)})
 	}
 	result, err := e.askChoice(ctx, command, kind, chat.AskChoiceArguments{
 		Kind: arguments.Kind, Question: arguments.Question, Recommended: arguments.Recommended,

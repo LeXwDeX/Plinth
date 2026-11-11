@@ -14,10 +14,24 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/authentication"
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/taskreroll"
 )
 
 const retrySessionID = "retry-session"
+
+// rerollTestOrigins adapts the repository to the reroll package's Origin type.
+type rerollTestOrigins struct{ repository *sqlite.Repository }
+
+func (origins rerollTestOrigins) PreparedInputOf(ctx context.Context, owner, task string) (taskreroll.Origin, error) {
+	origin, err := origins.repository.PreparedInputOf(ctx, owner, task)
+	return taskreroll.Origin{PreparedInputID: origin.PreparedInputID, PlanStepID: origin.PlanStepID}, err
+}
+
+func (origins rerollTestOrigins) GrantByKey(ctx context.Context, owner, key string) (executiongrant.Grant, bool, error) {
+	return origins.repository.GrantByKey(ctx, owner, key)
+}
 
 func retryRoute(taskID string) string { return "/api/v1/tasks/" + taskID + "/retry" }
 

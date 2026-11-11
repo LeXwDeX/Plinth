@@ -56,6 +56,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/providers/assetrecovery"
 	"github.com/LeXwDeX/Plinth/internal/providers/mock"
 	"github.com/LeXwDeX/Plinth/internal/skillrun"
+	"github.com/LeXwDeX/Plinth/internal/taskreroll"
 	"github.com/LeXwDeX/Plinth/internal/taskretry"
 	"github.com/LeXwDeX/Plinth/internal/threeview"
 	"github.com/LeXwDeX/Plinth/internal/transport/httpapi"
@@ -1708,6 +1709,16 @@ func newHTTPHarnessWithCatalogAndProviders(
 	if err != nil {
 		t.Fatal(err)
 	}
+	var rerollService *taskreroll.Service
+	if rerollSchema := taskCatalog.Application().Chat.Reroll; rerollSchema.Enabled {
+		rerollService, err = taskreroll.New(taskreroll.Config{
+			Kernel: module, Grants: executionGrants, Origins: rerollTestOrigins{repository: repository},
+			OperationID: httpapi.StandaloneOperationID, Schema: rerollSchema,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	harnessResolver := &resolve.Service{UploadedModels: uploadedModels, Store: repository, Schema: applicationSchema.Chat.Harness, Tools: applicationSchema.Chat.Tools, Catalog: taskCatalog, Gateway: module}
 	chatService.SetHarnessSnapshotResolver(harnessResolver.Snapshot)
 	assetPreviews, err := assetdelivery.NewPreviewStore(t.TempDir(), applicationSchema.Runtime.AssetDelivery.AssetPreview)
@@ -1717,6 +1728,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 	api, err := httpapi.New(httpapi.Config{
 		Harness:                           harnessResolver,
 		Retry:                             retryService,
+		Reroll:                            rerollService,
 		Lineage:                           lineageService,
 		Generation:                        module,
 		ModelDelivery:                     modelDelivery,

@@ -14,6 +14,7 @@ var shippedToolScopes = map[string]string{
 	"create_motion_clip":         "3d",
 	"refine_image":               "2d",
 	"remove_background":          "2d",
+	"create_concept_sketch":      "2d",
 	"create_three_view":          "2d",
 	"create_model_3d":            "3d",
 	"create_model_3d_from_image": "3d",

@@ -270,11 +270,15 @@ type AskChoiceArguments struct {
 
 // ChoiceOptionInput is one Agent-supplied option of a direction card. ID is
 // the bounded token the answer writes into the target tool's argument; Label
-// and Description are what the person reads.
+// and Description are what the person reads. Arguments, when present, is the
+// exact target-tool argument object the answer replays (#242);
+// Thumbnail names a session picture handle the card shows.
 type ChoiceOptionInput struct {
 	ID          string
 	Label       string
 	Description string
+	Thumbnail   string
+	Arguments   json.RawMessage
 }
 
 // AskChoice opens a generic card of a kind the Schema declares. The usage
@@ -294,29 +298,95 @@ func (service *Service) AskChoice(
 	recommended := strings.TrimSpace(arguments.Recommended)
 	type optionSpec struct {
 		id, label, description string
+		thumbnail              string
+		arguments              json.RawMessage
 	}
 	var specs []optionSpec
 	var proposalOptions []ChoiceOption
 	switch kind.OptionSource {
 	case "usage_profiles":
 		for _, profile := range service.model3DUsage.Profiles {
-			specs = append(specs, optionSpec{profile.ID, profile.Label, profile.Description})
+			specs = append(specs, optionSpec{id: profile.ID, label: profile.Label, description: profile.Description})
 		}
 	case "image_usage_profiles":
 		for _, profile := range service.image2DUsage.Profiles {
-			specs = append(specs, optionSpec{profile.ID, profile.Label, profile.Description})
+			specs = append(specs, optionSpec{id: profile.ID, label: profile.Label, description: profile.Description})
 		}
 	case "agent":
-		if len(arguments.Options) < 2 || (service.choiceMaxOptions > 0 && len(arguments.Options) > service.choiceMaxOptions) {
+		concept := service.conceptDirections
+		isConcept := concept.Enabled && kind.ID == concept.Kind
+		minOptions := 2
+		maxOptions := service.choiceMaxOptions
+		sketches := 0
+		sketchTasks := map[string]bool{}
+		if isConcept {
+			minOptions = concept.MinCount
+			if concept.MaxCount > 0 && (maxOptions <= 0 || concept.MaxCount < maxOptions) {
+				maxOptions = concept.MaxCount
+			}
+			for _, call := range command.EarlierCalls {
+				if call.Name != concept.SketchTool {
+					continue
+				}
+				sketches++
+				if call.TaskID != "" {
+					sketchTasks[call.TaskID] = true
+				}
+			}
+			// The card converges directions that were really drawn first: a
+			// concept card without the declared minimum of sketches in this
+			// reply would ask the person to choose nothing (#242).
+			if sketches < concept.MinCount {
+				return ToolResult{Error: "choice options invalid", NoSubmission: true}, nil
+			}
+		}
+		if len(arguments.Options) < minOptions || (maxOptions > 0 && len(arguments.Options) > maxOptions) {
 			return ToolResult{Error: "choice options invalid", NoSubmission: true}, nil
 		}
+		if isConcept && len(arguments.Options) > sketches {
+			return ToolResult{Error: "choice options invalid", NoSubmission: true}, nil
+		}
+		seen := map[string]bool{}
 		for _, option := range arguments.Options {
 			id := strings.TrimSpace(option.ID)
 			label := strings.TrimSpace(option.Label)
-			if id == "" || label == "" || !explicitModel3DName.MatchString(id) {
+			description := strings.TrimSpace(option.Description)
+			if id == "" || label == "" || !explicitModel3DName.MatchString(id) || seen[id] {
 				return ToolResult{Error: "choice options invalid", NoSubmission: true}, nil
 			}
-			specs = append(specs, optionSpec{id, label, strings.TrimSpace(option.Description)})
+			seen[id] = true
+			labelLimit, descriptionLimit := 120, 300
+			if isConcept {
+				labelLimit, descriptionLimit = concept.MaxLabelCharacters, concept.MaxDescriptionCharacters
+			}
+			if len([]rune(label)) > labelLimit || len([]rune(description)) > descriptionLimit {
+				return ToolResult{Error: "choice options invalid", NoSubmission: true}, nil
+			}
+			optionArguments := option.Arguments
+			if isConcept {
+				argumentsObject, valid := service.conceptOptionArguments(kind.ToolName, option.Arguments)
+				if !valid || len(option.Arguments) > concept.MaxArgumentsBytes {
+					return ToolResult{Error: "choice options invalid", NoSubmission: true}, nil
+				}
+				optionArguments = argumentsObject
+			} else {
+				if kind.Argument == "" {
+					return ToolResult{Error: "choice options invalid", NoSubmission: true}, nil
+				}
+				encoded, err := json.Marshal(map[string]string{kind.Argument: id})
+				if err != nil {
+					return ToolResult{Error: "choice card unavailable", NoSubmission: true}, nil
+				}
+				optionArguments = encoded
+			}
+			thumbnail := ""
+			if isConcept && strings.TrimSpace(option.Thumbnail) != "" {
+				// An unresolvable or foreign sketch only loses its thumbnail;
+				// the card itself stays useful as text (#242).
+				thumbnail = service.conceptThumbnailURL(command, sketchTasks, option.Thumbnail)
+			}
+			specs = append(specs, optionSpec{id: id, label: label, description: description,
+				thumbnail: thumbnail, arguments: append(json.RawMessage(nil), optionArguments...)})
 		}
 	case "agent_proposal":
 		// The Agent's confirmation card offers its exact proposal as accept
@@ -355,15 +425,20 @@ func (service *Service) AskChoice(
 		options = make([]ChoiceOption, 0, len(specs))
 		seenRecommended := false
 		for _, spec := range specs {
-			optionArguments, err := json.Marshal(map[string]string{kind.Argument: spec.id})
-			if err != nil {
-				return ToolResult{Error: "choice card unavailable", NoSubmission: true}, nil
+			optionArguments := spec.arguments
+			if len(optionArguments) == 0 {
+				encoded, err := json.Marshal(map[string]string{kind.Argument: spec.id})
+				if err != nil {
+					return ToolResult{Error: "choice card unavailable", NoSubmission: true}, nil
+				}
+				optionArguments = encoded
 			}
 			option := ChoiceOption{
-				ID:          spec.id,
-				Label:       spec.label,
-				Description: spec.description,
-				Arguments:   optionArguments,
+				ID:           spec.id,
+				Label:        spec.label,
+				Description:  spec.description,
+				ThumbnailURL: spec.thumbnail,
+				Arguments:    optionArguments,
 			}
 			if recommended != "" && spec.id == recommended {
 				option.Recommended = true
@@ -404,10 +479,11 @@ func (service *Service) AskChoice(
 	wire := make([]map[string]any, 0, len(choice.Options))
 	for _, option := range choice.Options {
 		wire = append(wire, map[string]any{
-			"id":          option.ID,
-			"label":       option.Label,
-			"description": option.Description,
-			"recommended": option.Recommended,
+			"id":            option.ID,
+			"label":         option.Label,
+			"description":   option.Description,
+			"thumbnail_url": option.ThumbnailURL,
+			"recommended":   option.Recommended,
 		})
 	}
 	content, err := json.Marshal(map[string]any{
@@ -505,4 +581,66 @@ func ProductionBriefValidationErrorText(template string, err error) string {
 		return ""
 	}
 	return strings.ReplaceAll(template, "{reason}", brief.Reason)
+}
+
+// choiceTargetArgumentIndex turns the declared target tools' parameter names
+// into the lookup the concept direction card checks (#242).
+func choiceTargetArgumentIndex(targets map[string][]string) map[string]map[string]bool {
+	if len(targets) == 0 {
+		return nil
+	}
+	index := make(map[string]map[string]bool, len(targets))
+	for tool, names := range targets {
+		allowed := make(map[string]bool, len(names))
+		for _, name := range names {
+			allowed[name] = true
+		}
+		index[tool] = allowed
+	}
+	return index
+}
+
+// conceptOptionArguments checks one concept direction option's exact
+// target-tool arguments: an object whose keys the target tool declares and
+// whose prompt is a non-empty string (#242).
+func (service *Service) conceptOptionArguments(tool string, raw json.RawMessage) (json.RawMessage, bool) {
+	if len(raw) == 0 {
+		return nil, false
+	}
+	var values map[string]json.RawMessage
+	if json.Unmarshal(raw, &values) != nil || len(values) == 0 {
+		return nil, false
+	}
+	allowed := service.choiceTargetArguments[tool]
+	if allowed == nil {
+		return nil, false
+	}
+	for name := range values {
+		if !allowed[name] {
+			return nil, false
+		}
+	}
+	var prompt string
+	if json.Unmarshal(values["prompt"], &prompt) != nil || strings.TrimSpace(prompt) == "" {
+		return nil, false
+	}
+	return append(json.RawMessage(nil), raw...), true
+}
+
+// conceptThumbnailURL resolves an option's sketch handle to a session picture
+// URL. The picture must belong to one of the sketches this reply already
+// submitted; anything else only loses the thumbnail, never the option.
+func (service *Service) conceptThumbnailURL(command ToolCommand, sketchTasks map[string]bool, handle string) string {
+	if len(sketchTasks) == 0 || !service.handles.Enabled() {
+		return ""
+	}
+	resolved, err := service.handles.ResolveHandles(command.ReferenceHistory(), command.Options.Selection,
+		[]string{strings.TrimSpace(handle)}, AttachmentKindImage)
+	if err != nil || len(resolved) != 1 || resolved[0].URL == "" {
+		return ""
+	}
+	if !sketchTasks[resolved[0].Attachment.TaskID] {
+		return ""
+	}
+	return resolved[0].URL
 }

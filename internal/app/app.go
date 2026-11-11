@@ -62,6 +62,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/rendermanifest"
 	"github.com/LeXwDeX/Plinth/internal/scene"
 	"github.com/LeXwDeX/Plinth/internal/skillrun"
+	"github.com/LeXwDeX/Plinth/internal/taskreroll"
 	"github.com/LeXwDeX/Plinth/internal/taskretry"
 	"github.com/LeXwDeX/Plinth/internal/threeview"
 	"github.com/LeXwDeX/Plinth/internal/transport/httpapi"
@@ -378,6 +379,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// kind by its Schema option source (#103, #239).
 		ChoiceKinds:      applicationSchema.Chat.Choice.Kinds,
 		ChoiceMaxOptions: applicationSchema.Chat.Choice.MaxOptions,
+		// The diverge-then-converge flow (#242): concept direction cards carry
+		// exact refine_image arguments, checked against the declared tool.
+		ConceptDirections:     applicationSchema.Chat.ConceptDirections,
+		ChoiceTargetArguments: chatToolArgumentNames(applicationSchema.Chat.Tools),
 		// The session production ledger and its summary bounds (#248).
 		WorkLedger: applicationSchema.Chat.WorkLedger,
 		// The deployment's chat model, its thinking profile and context
@@ -668,6 +673,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		OfferingAvailable: module.OfferingAvailable,
 		Store:             executionGrants,
 		Checkpoints:       selfCheckCheckpointIDs(applicationSchema.Chat.SelfCheck),
+		// #242: a plan step may declare parallel candidates.
+		Candidates: applicationSchema.Chat.Candidates,
 		// #251: the server derives acceptance and checkpoint thresholds from
 		// the purpose budget and the production review settings.
 		Usage:      applicationSchema.Chat.Model3DUsage,
@@ -1576,6 +1583,19 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
+	// #242: "one more" replays a succeeded task's frozen input with fresh
+	// seeds; without the Schema block the route stays unregistered.
+	var taskRerollService *taskreroll.Service
+	if applicationSchema.Chat.Reroll.Enabled {
+		taskRerollService, err = taskreroll.New(taskreroll.Config{
+			Kernel: module, Grants: executionGrants, Origins: taskRerollOrigins{repository: repository},
+			OperationID: httpapi.StandaloneOperationID,
+			Schema:      applicationSchema.Chat.Reroll,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
 	pendingApprovalService, err := pendingapproval.New(pendingapproval.Config{
 		Texts: texts,
 		VerifyPreparedSource: func(ctx context.Context, op generationtool.Operation, prepared generation.PreparedInput) error {
@@ -1657,6 +1677,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		ModelDelivery:                     modelDeliveryService,
 		Lineage:                           lineageService,
 		Retry:                             taskRetryService,
+		Reroll:                            taskRerollService,
 		ProviderWebhookRuntime:            providerWebhookRuntime,
 		Identity:                          authenticationService,
 		Authentication:                    authenticationService,
@@ -2183,4 +2204,38 @@ func selfCheckCheckpointIDs(schema catalog.ChatSelfCheckSchema) []string {
 		ids = append(ids, checkpoint.ID)
 	}
 	return ids
+}
+
+// taskRerollOrigins adapts the repository's admission lookup to the reroll
+// package's own Origin type (#242).
+type taskRerollOrigins struct{ repository *sqlite.Repository }
+
+func (origins taskRerollOrigins) PreparedInputOf(ctx context.Context, owner, task string) (taskreroll.Origin, error) {
+	origin, err := origins.repository.PreparedInputOf(ctx, owner, task)
+	return taskreroll.Origin{PreparedInputID: origin.PreparedInputID, PlanStepID: origin.PlanStepID}, err
+}
+
+func (origins taskRerollOrigins) GrantByKey(ctx context.Context, owner, key string) (executiongrant.Grant, bool, error) {
+	return origins.repository.GrantByKey(ctx, owner, key)
+}
+
+// chatToolArgumentNames lists each declared generation tool's parameter names,
+// so an Agent-supplied choice option can only carry arguments the target tool
+// really accepts (#242).
+func chatToolArgumentNames(tools []catalog.ChatToolSchema) map[string][]string {
+	names := make(map[string][]string, len(tools))
+	for _, tool := range tools {
+		var parameters struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if json.Unmarshal(tool.Parameters, &parameters) != nil || len(parameters.Properties) == 0 {
+			continue
+		}
+		arguments := make([]string, 0, len(parameters.Properties))
+		for name := range parameters.Properties {
+			arguments = append(arguments, name)
+		}
+		names[tool.Name] = arguments
+	}
+	return names
 }

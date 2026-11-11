@@ -98,6 +98,7 @@ func proposalService(t *testing.T, store chat.ProductionPlanStore, budgetSchema 
 		Checkpoints: []string{"self_check"},
 		Usage:       application.Chat.Model3DUsage,
 		Production:  application.Chat.ModelReview.Inspect.Production,
+		Candidates:  application.Chat.Candidates,
 	})
 	return service
 }
@@ -436,5 +437,69 @@ func TestProposeProductionPlanPropagatesStorageFailure(t *testing.T) {
 		`{"title":"p","steps":[{"capability":"text-to-image","purpose":"a"}],"budgets":[{"unit":"legacy.credits","amount":5}]}`))
 	if err == nil || !result.NoSubmission || result.AgentContent != "" {
 		t.Fatalf("storage failure = %+v err=%v", result, err)
+	}
+}
+
+// #242: a step may declare parallel candidates. The server expands them into
+// candidate_group/candidate_index steps, quotes every one, and counts them all
+// in the uncovered totals and the approved limit.
+func TestProposeProductionPlanExpandsCandidateGroups(t *testing.T) {
+	store := &recordingProductionPlans{}
+	service := proposalService(t, store, shippedBudgetSchema(t))
+	result, err := service.ProposeProductionPlan(context.Background(), planCommand(`{
+		"title":"两个候选",
+		"steps":[
+			{"capability":"image-to-3d","purpose":"候选方向","candidates":{"source":"seed","count":2}}
+		],
+		"budgets":[{"unit":"legacy.credits","amount":20}]
+	}`))
+	if err != nil || result.Error != "" || !result.NoSubmission {
+		t.Fatalf("proposal = %+v err=%v", result, err)
+	}
+	plan := store.plans[0]
+	if len(plan.Steps) != 2 {
+		t.Fatalf("steps = %+v", plan.Steps)
+	}
+	if plan.Steps[0].CandidateGroup != 1 || plan.Steps[0].CandidateIndex != 1 ||
+		plan.Steps[1].CandidateGroup != 1 || plan.Steps[1].CandidateIndex != 2 {
+		t.Fatalf("candidate identity = %+v", plan.Steps)
+	}
+	if totals := plan.EstimatedTotals(); len(totals) != 1 || totals[0] != budget.Legacy(14) {
+		t.Fatalf("totals = %+v, want two default quotes", totals)
+	}
+
+	// One model per candidate: every candidate keeps its own server quote.
+	store = &recordingProductionPlans{}
+	service = proposalService(t, store, shippedBudgetSchema(t))
+	result, err = service.ProposeProductionPlan(context.Background(), planCommand(`{
+		"title":"不同模型",
+		"steps":[
+			{"capability":"image-to-3d","purpose":"候选方向","candidates":{"source":"provider","models":["three-default","three-pinned"]}}
+		],
+		"budgets":[{"unit":"legacy.credits","amount":40}]
+	}`))
+	if err != nil || result.Error != "" {
+		t.Fatalf("proposal = %+v err=%v", result, err)
+	}
+	plan = store.plans[0]
+	if len(plan.Steps) != 2 || plan.Steps[0].OfferingID != "three-default" || plan.Steps[0].Estimate != budget.Legacy(7) ||
+		plan.Steps[1].OfferingID != "three-pinned" || plan.Steps[1].Estimate != budget.Legacy(20) {
+		t.Fatalf("per-candidate quotes = %+v", plan.Steps)
+	}
+}
+
+func TestProposeProductionPlanRefusesUndeclaredCandidates(t *testing.T) {
+	cases := []string{
+		`{"title":"坏来源","steps":[{"capability":"image-to-3d","purpose":"x","candidates":{"source":"magic","count":2}}],"budgets":[{"unit":"legacy.credits","amount":40}]}`,
+		`{"title":"两个都给","steps":[{"capability":"image-to-3d","purpose":"x","candidates":{"source":"seed","count":2,"models":["three-default","three-pinned"]}}],"budgets":[{"unit":"legacy.credits","amount":40}]}`,
+		`{"title":"太多","steps":[{"capability":"image-to-3d","purpose":"x","candidates":{"source":"seed","count":5}}],"budgets":[{"unit":"legacy.credits","amount":40}]}`,
+	}
+	for _, arguments := range cases {
+		store := &recordingProductionPlans{}
+		service := proposalService(t, store, shippedBudgetSchema(t))
+		result, err := service.ProposeProductionPlan(context.Background(), planCommand(arguments))
+		if err != nil || result.Error == "" || len(store.created) != 0 {
+			t.Fatalf("arguments %s accepted: %+v err=%v", arguments, result, err)
+		}
 	}
 }

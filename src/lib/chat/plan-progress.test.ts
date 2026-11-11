@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ProductionPlan } from '@/lib/chat/budget';
-import { completedPlanSteps, planStepProgress, type PlanTask } from '@/lib/chat/plan-progress';
+import { completedPlanSteps, planCandidateGroups, planStepProgress, type PlanTask } from '@/lib/chat/plan-progress';
 
 const plan = (...steps: Array<[string, string]>): ProductionPlan => ({
   title: '制作计划',
@@ -78,5 +78,33 @@ describe('counting completed steps', () => {
     const isComplete = (entry: PlanTask) => entry.state === 'SUCCEEDED';
     expect(completedPlanSteps(progress, isComplete)).toBe(1);
     expect(completedPlanSteps(planStepProgress(plan(['a', 'b']), []), isComplete)).toBe(0);
+  });
+});
+
+describe('candidate groups (#242)', () => {
+  const candidatePlan: ProductionPlan = {
+    title: '候选',
+    steps: [
+      { capability: 'text-to-3d', offeringId: 'tripo', purpose: '', estimate: null, purposeBudgetNote: '', candidateGroup: 1, candidateIndex: 1 },
+      { capability: 'text-to-3d', offeringId: 'tripo', purpose: '', estimate: null, purposeBudgetNote: '', candidateGroup: 1, candidateIndex: 2 },
+      { capability: 'remesh', offeringId: '', purpose: '', estimate: null, purposeBudgetNote: '' },
+    ],
+    correctionCapabilities: [],
+  };
+
+  it('groups candidate steps and counts their successful tasks', () => {
+    const progress = planStepProgress(candidatePlan, [
+      task('t1', 'text-to-3d', 'SUCCEEDED', 'tripo'),
+      task('t2', 'text-to-3d', 'RUNNING', 'tripo'),
+    ]);
+    const groups = planCandidateGroups(progress, (entry) => entry.state === 'SUCCEEDED');
+    expect(groups).toHaveLength(1);
+    expect(groups[0].group).toBe(1);
+    expect(groups[0].entries.map((entry) => entry.step.candidateIndex)).toEqual([1, 2]);
+    expect(groups[0].completed).toBe(1);
+  });
+
+  it('returns no groups for a plan without candidates', () => {
+    expect(planCandidateGroups(planStepProgress(plan(['remesh', '']), []), () => true)).toEqual([]);
   });
 });

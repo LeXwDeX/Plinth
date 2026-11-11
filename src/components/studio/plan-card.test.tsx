@@ -288,3 +288,39 @@ describe('a production plan with acceptance and contingencies (#251)', () => {
     expect(view.queryByTestId('studio-plan-contingencies')).toBeNull();
   });
 });
+
+describe('parallel candidates (#242)', () => {
+  const candidatePlan: ProductionPlan = {
+    title: '两个候选',
+    steps: [
+      { capability: 'text-to-3d', offeringId: 'tripo-v3', purpose: '', estimate: tripo('80'), purposeBudgetNote: '', candidateGroup: 1, candidateIndex: 1 },
+      { capability: 'text-to-3d', offeringId: 'tripo-v3', purpose: '', estimate: tripo('80'), purposeBudgetNote: '', candidateGroup: 1, candidateIndex: 2 },
+    ],
+    correctionCapabilities: [],
+  };
+  const progress: SessionBudget = {
+    id: 'budget-1', state: 'active',
+    units: [{ unit: 'tripo.credit', unitLabel: 'Tripo credits', limit: '300', spent: '0', reserved: '0', remaining: '300' }],
+    plan: candidatePlan, createdAt: '2026-10-01T00:00:00Z', decidedAt: '2026-10-01T00:01:00Z',
+  };
+  const tasks: PlanTask[] = [
+    { taskId: 't1', capability: 'text-to-3d', state: 'SUCCEEDED', offeringId: 'tripo-v3', startedAt: Date.parse('2026-10-01T00:02:00Z') },
+    { taskId: 't2', capability: 'text-to-3d', state: 'SUCCEEDED', offeringId: 'tripo-v3', startedAt: Date.parse('2026-10-01T00:03:00Z') },
+  ];
+
+  it('groups candidates, compares the finished ones and opens the selected one', () => {
+    const compare = vi.fn();
+    const select = vi.fn();
+    const view = render(<PlanCard plan={candidatePlan} tasks={tasks} progress={progress}
+      onCompareCandidates={compare} onSelectCandidate={select} />);
+    expect(view.queryAllByTestId('studio-plan-step')).toHaveLength(0);
+    expect(view.getByTestId('studio-plan-candidate-group').getAttribute('data-group')).toBe('1');
+    expect(view.getAllByTestId('studio-plan-candidate')).toHaveLength(2);
+    view.getByTestId('studio-plan-compare-candidates').click();
+    expect(compare).toHaveBeenCalledWith(['t1', 't2']);
+    const choices = view.getAllByTestId('studio-plan-select-candidate');
+    expect(choices).toHaveLength(2);
+    choices[1].click();
+    expect(select).toHaveBeenCalledWith('t2');
+  });
+});

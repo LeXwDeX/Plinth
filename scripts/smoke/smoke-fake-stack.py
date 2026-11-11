@@ -4209,9 +4209,249 @@ def scenario_plan_checkpoint(work, api, offerings):
            f"pending={[(item.get('kind'), item.get('status')) for item in pending]} plans={len(plans)}")
 
 
+
+def _concept_card(api, session):
+    for card in _choice_cards(api, session):
+        if card.get("state") == "pending" and card.get("kind") == "concept_direction":
+            return card
+    return None
+
+
+def _fresh_tasks(api, session, before):
+    return [task for task in session_tasks(api, session)
+            if (task.get("id") or task.get("task_id")) not in before]
+
+
+def _wait_fresh_tasks(api, session, before, count, seconds=120):
+    end = time.time() + seconds
+    while time.time() < end:
+        fresh = _fresh_tasks(api, session, before)
+        if len(fresh) >= count:
+            return fresh
+        time.sleep(0.5)
+    return _fresh_tasks(api, session, before)
+
+
+def scenario_concept_candidates(api, offerings, work):
+    """#242: an open 2D request draws 3 concept sketches in one reply and opens
+    a 3-option direction card whose thumbnails point at those sketches; the
+    answer continues with refine_image. A budget plan declares 2 candidates of
+    one step, the card shows the expanded candidate steps, and the approved
+    continuation submits both 3D calls in one reply with different seeds."""
+    session = new_session(api)
+    api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "auto"})
+    image_text_model, image_edit_model = IMAGE_OFFERINGS["meshy"]
+    directions = [
+        ("realistic", "写实", "真实材质、自然光与可信比例",
+         "photorealistic forest guardian concept art, natural materials, soft studio lighting, no text"),
+        ("cartoon", "卡通", "明快轮廓、夸张比例与高饱和配色",
+         "stylized cartoon forest guardian concept art, bold clean outlines, exaggerated proportions, vivid colors"),
+        ("low_poly", "低多边形", "几何切面、简洁色块与风格化造型",
+         "low-poly stylized forest guardian concept art, faceted geometry, flat color blocks"),
+    ]
+    markers = []
+    options = []
+    for index, (option_id, label, description, prompt) in enumerate(directions):
+        markers.append("[[fake:tool:create_concept_sketch " + json.dumps(
+            {"prompt": prompt}, ensure_ascii=False, separators=(",", ":")) + "]]")
+        options.append({
+            "id": option_id, "label": label, "description": description,
+            "thumbnail": "@img" + str(index + 1),
+            "arguments": {"prompt": prompt, "reference_handles": ["@img" + str(index + 1)]},
+        })
+    markers.append("[[fake:tool:ask_choice " + json.dumps(
+        {"kind": "concept_direction", "question": "想沿着哪个方向深入？", "options": options},
+        ensure_ascii=False, separators=(",", ":")) + "]]")
+    before = {(task.get("id") or task.get("task_id")) for task in session_tasks(api, session)}
+    status, _ = _send_chat(api, session, {
+        "content": "画一个森林守卫，先给几个方向 " + " ".join(markers),
+        "creative_domain": "image",
+        "ai_model": image_text_model,
+        "domainModels": {"image": image_text_model},
+    })
+    if status not in (200, 201, 202):
+        record("#242 concept sketches", False, f"send {status}")
+        return
+    card = None
+    end = time.time() + 150
+    while time.time() < end:
+        card = _concept_card(api, session)
+        if card is not None:
+            break
+        time.sleep(0.5)
+    fresh = _fresh_tasks(api, session, before)
+    record("#242 one reply draws three concept sketches", len(fresh) == 3 and
+           all(task.get("state") == "SUCCEEDED" for task in fresh),
+           f"tasks={[(task.get('id'), task.get('state'), task.get('capability')) for task in fresh]}")
+    if card is None:
+        record("#242 concept direction card", False, "no pending concept_direction card")
+        return
+    card_options = card.get("options") or []
+    record("#242 the direction card carries three options with thumbnails",
+           [option.get("id") for option in card_options] == [direction[0] for direction in directions]
+           and all(option.get("thumbnail_url") for option in card_options)
+           and all("arguments" not in option for option in card_options),
+           f"options={[(option.get('id'), option.get('thumbnail_url')) for option in card_options]}")
+
+    # Answer on the card: the fake continuation calls refine_image with the
+    # chosen direction's sketch as its reference.
+    chosen = next((option for option in card_options if option.get("id") == "cartoon"), card_options[0])
+    continuation = "[[fake:tool:refine_image " + json.dumps(
+        {"prompt": "stylized cartoon forest guardian concept art, refined full body",
+         "reference_handles": ["@img2"]}, ensure_ascii=False, separators=(",", ":")) + "]]"
+    before = {(task.get("id") or task.get("task_id")) for task in session_tasks(api, session)}
+    status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", {
+        "content": "沿着卡通方向继续 " + continuation,
+        "choiceAnswer": {"choice_id": card["id"], "option_id": chosen["id"]},
+        "creative_domain": "image",
+        "ai_model": image_edit_model,
+        "domainModels": {"image": image_edit_model},
+    })
+    if status not in (200, 201, 202):
+        record("#242 direction answer continues", False, f"answer {status}")
+        return
+    fresh = _wait_fresh_tasks(api, session, before, 1)
+    fresh = [wait_task(api, task.get("id") or task.get("task_id")) for task in fresh]
+    prepared = _latest_prepared_input(work, "main", session)
+    normalized = prepared.get("normalized_input") or {}
+    references = normalized.get("reference_assets") or []
+    record("#242 the chosen direction continues with refine_image and its sketch",
+           len(fresh) == 1 and fresh[0].get("state") == "SUCCEEDED"
+           and "cartoon forest guardian" in str(normalized.get("prompt") or "")
+           and bool(references),
+           f"tasks={[(task.get('id'), task.get('state')) for task in fresh]} "
+           f"prompt={str(normalized.get('prompt'))[:80]!r} references={len(references)}")
+
+    # 3D candidates: the plan declares two candidates of one step; the server
+    # expands the plan card and the approved continuation submits both.
+    session3d = new_session(api)
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session3d}/approval", {"approvalMode": "budget"})
+    if status != 200:
+        record("#242 candidate plan card", False, f"approval {status}")
+        return
+    plan = {
+        "title": "两个 3D 候选",
+        "steps": [{"capability": "text-to-3d", "model": TRIPO_P2_TEXT_TO_3D, "purpose": "森林守卫候选",
+                   "candidates": {"source": "seed", "count": 2}}],
+        "budgets": [{"unit": "tripo.credit", "amount": 5000}],
+    }
+    marker = "[[fake:tool:propose_production_plan " + json.dumps(
+        plan, ensure_ascii=False, separators=(",", ":")) + "]]"
+    status, _ = _send_chat(api, session3d, {
+        "content": "做两个候选 " + marker, "creative_domain": "model-3d",
+        "domainModels": {"model-3d": TRIPO_P2_TEXT_TO_3D},
+    })
+    if status not in (200, 201, 202):
+        record("#242 candidate plan card", False, f"send {status}")
+        return
+    budget_id, card_plan = "", {}
+    end = time.time() + 30
+    while time.time() < end:
+        pending = api.json("GET", f"/api/v1/chat/sessions/{session3d}/pending-approvals")[1].get("items") or []
+        plan_card = next((item for item in pending if item.get("kind") == "plan"), None)
+        if plan_card:
+            budget_id = plan_card.get("request_id") or ""
+            card_plan = plan_card.get("plan") or {}
+            break
+        time.sleep(0.4)
+    steps = card_plan.get("steps") or []
+    record("#242 the plan card expands two candidates",
+           bool(budget_id) and len(steps) == 2
+           and [step.get("candidate_group") for step in steps] == [1, 1]
+           and [step.get("candidate_index") for step in steps] == [1, 2],
+           f"budget={budget_id} steps={[(step.get('candidate_group'), step.get('candidate_index')) for step in steps]}")
+    if not budget_id:
+        return
+    status, approved = api.json("PUT", f"/api/v1/chat/sessions/{session3d}/budgets/{budget_id}",
+                                decision_body(api, "approve"))
+    if status != 200 or approved.get("state") != "active":
+        record("#242 approving the candidate plan", False, f"PUT {status} {approved}")
+        return
+    calls = [
+        "[[fake:tool:create_model_3d " + json.dumps(
+            {"prompt": "a forest guardian, game-ready", "model": TRIPO_P2_TEXT_TO_3D,
+             "model_seed": 111}, ensure_ascii=False, separators=(",", ":")) + "]]",
+        "[[fake:tool:create_model_3d " + json.dumps(
+            {"prompt": "a forest guardian, game-ready", "model": TRIPO_P2_TEXT_TO_3D,
+             "model_seed": 222}, ensure_ascii=False, separators=(",", ":")) + "]]",
+    ]
+    before = {(task.get("id") or task.get("task_id")) for task in session_tasks(api, session3d)}
+    status, _ = _send_chat(api, session3d, {
+        "content": "并行提交两个候选 " + " ".join(calls), "creative_domain": "model-3d",
+        "domainModels": {"model-3d": TRIPO_P2_TEXT_TO_3D},
+    })
+    if status not in (200, 201, 202):
+        record("#242 parallel 3D candidates", False, f"send {status}")
+        return
+    fresh = _wait_fresh_tasks(api, session3d, before, 2)
+    fresh = [wait_task(api, task.get("id") or task.get("task_id")) for task in fresh]
+    seeds = []
+    for task in fresh:
+        frozen = _visual_anchor_frozen_input(work, task.get("id") or task.get("task_id"))
+        seeds.append(frozen.get("model_seed"))
+    record("#242 one reply submits two 3D candidates with different seeds",
+           len(fresh) == 2 and all(task.get("state") == "SUCCEEDED" for task in fresh)
+           and len(set(seeds)) == 2 and all(seed is not None for seed in seeds),
+           f"tasks={[(task.get('id'), task.get('state')) for task in fresh]} seeds={seeds}")
+
+
+def scenario_reroll(api, offerings, work):
+    """#242: "one more" replays a succeeded task's frozen input with fresh
+    seeds. The same Idempotency-Key returns the same task; manual mode waits
+    for a person's decision."""
+    session = new_session(api)
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "auto"})
+    if status != 200:
+        record("#242 reroll", False, f"approval {status}")
+        return
+    create = "[[fake:tool:create_model_3d " + json.dumps(
+        {"prompt": "a reroll cube", "model": TRIPO_P2_TEXT_TO_3D, "model_seed": 111},
+        ensure_ascii=False, separators=(",", ":")) + "]]"
+    task, why, _ = agent_tool_turn(api, session, "生成一个模型 " + create,
+                                   creative_domain="model-3d", ai_model=TRIPO_P2_TEXT_TO_3D)
+    if not task or task.get("state") != "SUCCEEDED":
+        record("#242 reroll", False, why or f"task={task}")
+        return
+    source_id = task.get("id") or task.get("task_id")
+    before_input = _visual_anchor_frozen_input(work, source_id)
+    status, rerolled = api.json("POST", f"/api/v1/tasks/{source_id}/reroll", {}, {"Idempotency-Key": "concept-reroll-1"})
+    new_id = (rerolled or {}).get("task_id") or ""
+    same = api.json("POST", f"/api/v1/tasks/{source_id}/reroll", {}, {"Idempotency-Key": "concept-reroll-1"})[1]
+    rerolled_task = wait_task(api, new_id) if new_id else {}
+    new_input = _visual_anchor_frozen_input(work, new_id) if new_id else {}
+    record("#242 reroll submits a new task, replays the same key and changes the seed",
+           status == 202 and rerolled.get("status") == "submitted" and new_id and new_id != source_id
+           and same.get("task_id") == new_id and same.get("replayed") is True
+           and rerolled_task.get("state") == "SUCCEEDED"
+           and new_input.get("model_seed") != before_input.get("model_seed"),
+           f"status={status} new={new_id} replay={same.get('task_id')}/{same.get('replayed')} "
+           f"state={rerolled_task.get('state')} seeds={before_input.get('model_seed')}->{new_input.get('model_seed')}")
+
+    # Strict/manual mode: a 3D reroll waits for the person's decision.
+    session_manual = new_session(api)
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session_manual}/approval", {"approvalMode": "manual"})
+    if status != 200:
+        record("#242 strict reroll waits for a decision", False, f"approval {status}")
+        return
+    create = "[[fake:tool:create_model_3d " + json.dumps(
+        {"prompt": "a strict reroll cube", "model": TRIPO_P2_TEXT_TO_3D},
+        ensure_ascii=False, separators=(",", ":")) + "]]"
+    task, why, _ = agent_tool_turn(api, session_manual, "生成一个模型 " + create,
+                                   creative_domain="model-3d", ai_model=TRIPO_P2_TEXT_TO_3D)
+    if not task or task.get("state") != "SUCCEEDED":
+        record("#242 strict reroll waits for a decision", False, why or f"task={task}")
+        return
+    manual_id = task.get("id") or task.get("task_id")
+    status, waiting = api.json("POST", f"/api/v1/tasks/{manual_id}/reroll", {}, {"Idempotency-Key": "strict-reroll-1"})
+    record("#242 strict mode returns 202 awaiting_decision",
+           status == 202 and (waiting or {}).get("status") == "awaiting_decision"
+           and (waiting or {}).get("request_id") and (waiting or {}).get("idempotency_key") == "reroll:" + manual_id + ":strict-reroll-1",
+           f"status={status} body={waiting}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,plan-checkpoint,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,plan-checkpoint,concept-candidates,reroll,faults")
     parser.add_argument("--faults", default="", help="comma-separated fault scenarios to run (default: all of %s)" % ", ".join(FAULTS))
     parser.add_argument("--work", default="", help="work directory (default: a temporary one, removed afterwards)")
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
@@ -4233,7 +4473,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "work-ledger", "vision-budget", "three-view", "visual-anchors", "plan-checkpoint"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "work-ledger", "vision-budget", "three-view", "visual-anchors", "plan-checkpoint", "concept-candidates", "reroll"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -4264,6 +4504,10 @@ def main():
                 scenario_three_view(work, api, offerings)
             if "plan-checkpoint" in selected:
                 scenario_plan_checkpoint(work, api, offerings)
+            if "concept-candidates" in selected:
+                scenario_concept_candidates(api, offerings, work)
+            if "reroll" in selected:
+                scenario_reroll(api, offerings, work)
             if "image-purpose" in selected:
                 scenario_image_purpose(api, offerings, work)
             if "work-ledger" in selected:
