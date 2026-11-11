@@ -16,9 +16,7 @@ func TestDefaultChatToolsDeclareRuntimeExecutionContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := c.Application()
-	// 24 controls: the shipped 21 plus #246's compare_model_reference and
-	// record_self_check, #250's create_selection_mask/set_visual_anchor and
-	// 25 controls: the shipped 21 plus #246's compare_model_reference and
+	// 25 controls: the shipped 19 plus #246's compare_model_reference and
 	// record_self_check, #250's create_selection_mask/set_visual_anchor,
 	// #251's revise_processing_plan and #240's list_project_assets.
 	if len(app.Chat.Tools) != 15 || len(app.Chat.AgentTools) != 25 {
