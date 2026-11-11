@@ -85,6 +85,7 @@ func (executor *Executor) prepareAgentOperation(
 	offering generation.Offering, input json.RawMessage, prompt, key string, references referenceUse,
 	selection referenceSelection, finalReferences []referenceCandidate, referenceIDs []generation.AssetID,
 	correctionTaskID string, observe func(chat.ToolObservation) error, trace *promptTrace,
+	styleSources []string,
 ) (chat.ToolResult, error) {
 	if command.OwnerID == "" || command.SessionID == "" || command.AssistantMessageID == "" ||
 		command.Call.ID == "" || key == "" {
@@ -218,7 +219,7 @@ func (executor *Executor) prepareAgentOperation(
 	} else if err != nil {
 		return chat.ToolResult{NoSubmission: true}, err
 	}
-	return executor.resumeAgentOperation(ctx, command, op, observe, cardSettled, trace)
+	return executor.resumeAgentOperation(ctx, command, op, observe, cardSettled, trace, styleSources)
 }
 
 // resumeAgentOperation drives a prepared operation. cardSettled, when not nil,
@@ -228,6 +229,7 @@ func (executor *Executor) prepareAgentOperation(
 func (executor *Executor) resumeAgentOperation(
 	ctx context.Context, command chat.ToolCommand, op Operation,
 	observe func(chat.ToolObservation) error, cardSettled func(), trace *promptTrace,
+	styleSources []string,
 ) (result chat.ToolResult, err error) {
 	if cardSettled == nil {
 		cardSettled = func() {}
@@ -265,7 +267,7 @@ func (executor *Executor) resumeAgentOperation(
 				return chat.ToolResult{NoSubmission: true}, ErrOperationConflict
 			}
 			command.BoundTaskID = grant.TaskID
-			return executor.observeBoundTask(ctx, command, observe)
+			return executor.observeBoundTask(ctx, command, observe, styleSources)
 		}
 	}
 	if err := executor.checkCurrentHarness(ctx, command); err != nil {
@@ -438,6 +440,7 @@ func (executor *Executor) resumeAgentOperation(
 		}
 	}
 	info := taskStep(task, approvalSource(grant))
+	info.StyleSources = styleSources
 	info.ReferenceNote = executor.operationReferenceNote(command, op, prepared, task.Offering)
 	if summary, found, err := executor.grants.BudgetForGrant(ctx, op.OwnerID, op.GrantRequestID); err == nil && found {
 		info.Budget = &summary

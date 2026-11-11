@@ -111,6 +111,7 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 	publicChat.API.StyleLock = cloned.Chat.API.StyleLock
 	publicChat.StyleLock.MaximumTextCharacters = cloned.Chat.StyleLock.MaximumTextCharacters
 	publicChat.StyleLock.MaximumReferenceImages = cloned.Chat.StyleLock.MaximumReferenceImages
+	publicChat.StyleLock.Sources = append([]string(nil), cloned.Chat.StyleLock.Sources...)
 	publicChat.API.PromptEnhance.PromptField = cloned.Chat.API.PromptEnhance.PromptField
 	publicChat.API.PromptEnhance.CapabilityField = cloned.Chat.API.PromptEnhance.CapabilityField
 	publicChat.API.PromptEnhance.ModelField = cloned.Chat.API.PromptEnhance.ModelField
@@ -152,6 +153,23 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 	deliveryFormats := make([]PublicDeliveryFormat, 0, len(cloned.ModelDelivery.Formats))
 	for _, format := range cloned.ModelDelivery.Formats {
 		deliveryFormats = append(deliveryFormats, PublicDeliveryFormat{ID: format.ID, Label: format.Label})
+	}
+	var publicProject *PublicProjectSchema
+	if cloned.Project != nil {
+		fields := make([]string, 0, len(cloned.Project.Conventions.Fields))
+		for _, field := range cloned.Project.Conventions.Fields {
+			fields = append(fields, field.Name)
+		}
+		texts := make([]string, 0, len(cloned.Project.Conventions.Texts))
+		for _, text := range cloned.Project.Conventions.Texts {
+			texts = append(texts, text.Name)
+		}
+		publicProject = &PublicProjectSchema{
+			Limits:      cloned.Project.Limits,
+			Assets:      cloned.Project.Assets,
+			StyleGuide:  cloned.Project.StyleGuide,
+			Conventions: PublicProjectConventionsSchema{Fields: fields, Texts: texts},
+		}
 	}
 	return PublicApplicationSchema{
 		AgentConfiguration: cloned.AgentConfiguration.Public(),
@@ -226,6 +244,7 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 		DeliveryFormats: deliveryFormats,
 		Authentication:  publicAuth,
 		Localization:    source.publicLocalization(),
+		Project:         publicProject,
 	}
 }
 

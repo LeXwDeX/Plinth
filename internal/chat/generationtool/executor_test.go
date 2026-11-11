@@ -13,6 +13,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
+	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
@@ -808,6 +809,9 @@ func (gateway *fakeGateway) Get(
 
 type fakeReferences struct {
 	urls []string
+	// scope records the server-held owner/session/project of each resolution
+	// so project tests can prove it came from the frozen turn, not arguments.
+	scope references.ReferenceScope
 	// fail marks references the resolver cannot prove, like a deleted or
 	// expired picture.
 	fail map[string]bool
@@ -815,9 +819,10 @@ type fakeReferences struct {
 
 func (resolver *fakeReferences) Resolve(
 	_ context.Context,
-	_ generation.OwnerID,
+	scope references.ReferenceScope,
 	urls []string,
 ) ([]generation.AssetID, error) {
+	resolver.scope = scope
 	resolver.urls = append(resolver.urls, urls...)
 	for _, url := range urls {
 		if resolver.fail[url] {

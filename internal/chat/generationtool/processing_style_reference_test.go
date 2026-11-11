@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
@@ -112,6 +113,89 @@ func TestRetextureWithoutReferenceInputReportsTheUnsupportedStylePicture(t *test
 	warning, _ := content["warning"].(string)
 	if !strings.Contains(warning, "当前服务不接受参考图") {
 		t.Fatalf("unsupported note missing from warning: %v", content)
+	}
+}
+
+// #240 review: the style picture a retexture really carries may be a project
+// asset picture. The initial submission path names that asset in the tool
+// result, exactly like the observation path of a recovered step.
+func TestRetextureStyleSourcesNameTheInjectedProjectAsset(t *testing.T) {
+	h := newProcessingHarness(t, "auto", meshyCatalogTasks)
+	h.config.Project = h.app.Project
+	executor, err := generationtool.New(h.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.executor = executor
+	options := chat.TurnOptions{
+		StyleLock: chat.StyleLock{
+			Enabled: true, Source: chat.StyleLockSourceProject, Text: "warm ink",
+			ProjectName: "Star Harbor", ProjectID: "prj_1",
+			ProjectReferences: []string{"/api/v1/input-assets/style-a"},
+		},
+		ProjectContext: &chat.ProjectContext{
+			ID: "prj_1", Name: "Star Harbor",
+			StyleGuide: chat.ProjectStyleGuideContext{
+				Enabled: true, Text: "warm ink",
+				References: []string{"/api/v1/input-assets/style-a"},
+			},
+			Assets: []chat.ProjectAssetContext{{
+				Handle: "@project1", Kind: "style_reference", Name: "Role A",
+				Images: []string{"/api/v1/input-assets/style-a"},
+			}},
+		},
+	}
+	result, _ := h.runWith("owner-a", "session-a", "retexture_model",
+		`{"source_task_id":"model-1"}`, nil, options)
+	if result.NoSubmission || h.gateway.submitCount != 1 {
+		t.Fatalf("retexture rejected: %+v submits=%d", result, h.gateway.submitCount)
+	}
+	if input := h.frozenInput(0); input["style_asset"] != "configured-input-asset" {
+		t.Fatalf("style input = %v", input)
+	}
+	content := h.content(result)
+	sources, _ := content["style_sources"].([]any)
+	if len(sources) != 1 || sources[0] != "Role A" {
+		t.Fatalf("style_sources = %v; want the project asset whose picture was injected", content["style_sources"])
+	}
+}
+
+// #240 review: a step whose own prompt occupies the style slot never carries
+// the project picture, so the result must not name that project asset.
+func TestRetextureStyleSourcesStayEmptyWhenTheStylePictureIsSkipped(t *testing.T) {
+	h := newProcessingHarness(t, "auto", meshyCatalogTasks)
+	h.config.Project = h.app.Project
+	executor, err := generationtool.New(h.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.executor = executor
+	options := chat.TurnOptions{
+		StyleLock: chat.StyleLock{
+			Enabled: true, Source: chat.StyleLockSourceProject, Text: "warm ink",
+			ProjectName: "Star Harbor", ProjectID: "prj_1",
+			ProjectReferences: []string{"/api/v1/input-assets/style-a"},
+		},
+		ProjectContext: &chat.ProjectContext{
+			ID: "prj_1", Name: "Star Harbor",
+			StyleGuide: chat.ProjectStyleGuideContext{
+				Enabled: true, Text: "warm ink",
+				References: []string{"/api/v1/input-assets/style-a"},
+			},
+			Assets: []chat.ProjectAssetContext{{
+				Handle: "@project1", Kind: "style_reference", Name: "Role A",
+				Images: []string{"/api/v1/input-assets/style-a"},
+			}},
+		},
+	}
+	result, _ := h.runWith("owner-a", "session-a", "retexture_model",
+		`{"source_task_id":"model-1","prompt":"mossy stone"}`, nil, options)
+	if result.NoSubmission || h.gateway.submitCount != 1 {
+		t.Fatalf("retexture rejected: %+v submits=%d", result, h.gateway.submitCount)
+	}
+	content := h.content(result)
+	if sources, present := content["style_sources"]; present {
+		t.Fatalf("a skipped style picture named project assets: %v", sources)
 	}
 }
 

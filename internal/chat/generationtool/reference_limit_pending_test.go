@@ -23,6 +23,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
+	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness"
@@ -35,7 +36,7 @@ import (
 // the order given, as the production resolver does.
 type uploadedReferences struct{}
 
-func (uploadedReferences) Resolve(_ context.Context, _ generation.OwnerID, urls []string) ([]generation.AssetID, error) {
+func (uploadedReferences) Resolve(_ context.Context, _ references.ReferenceScope, urls []string) ([]generation.AssetID, error) {
 	ids := make([]generation.AssetID, 0, len(urls))
 	for _, url := range urls {
 		ids = append(ids, generation.AssetID(strings.TrimPrefix(url, "/api/v1/assets/")))

@@ -211,12 +211,17 @@ export interface ChatApproval {
   priceTotals?: import('@/lib/pricing').PriceTotal[];
 }
 
+/** #240: the three-state style source declared by the Schema. */
+export type ChatStyleLockSource = 'project' | 'session' | 'off';
+
 /** #154: the owner-scoped style lock stored on one chat session. */
 export interface ChatStyleLock {
   enabled: boolean;
   text: string;
   /** Input or generated image asset IDs, kept in the user's order. */
   references: string[];
+  /** #240: project inherits the session's project, session uses this lock, off injects nothing. */
+  source?: ChatStyleLockSource;
 }
 
 export interface ChatSubscriptionOptions {
@@ -247,7 +252,7 @@ export interface ChatBrowserClient {
     signal?: AbortSignal,
   ): Promise<PromptEnhanceResult>;
   listSkills(signal?: AbortSignal): Promise<ChatSkillCatalog>;
-  createSession(title?: string): Promise<ChatSession>;
+  createSession(title?: string, projectID?: string): Promise<ChatSession>;
   branchSession(sessionID: string, messageID: string): Promise<{ session: ChatSession; canvasCopied: boolean; sceneCopied: boolean; capturesCopied: boolean }>;
   renameSession(sessionID: string, title: string): Promise<ChatSession>;
   deleteSession(sessionID: string): Promise<boolean>;
@@ -318,6 +323,8 @@ export interface ChatBrowserClient {
   /** #154: the session-level style lock and its ordered image asset IDs. */
   getStyleLock(sessionID: string, signal?: AbortSignal): Promise<ChatStyleLock>;
   setStyleLock(sessionID: string, lock: ChatStyleLock): Promise<ChatStyleLock>;
+  /** #240: assign (or clear, with '') the session's project; returns the session wire. */
+  setSessionProject(sessionID: string, projectID: string): Promise<ChatSession>;
   /** 会话选用的候选图（后续步骤默认以它为准）；没有则为 null。 */
   getPick(sessionID: string, signal?: AbortSignal): Promise<ChatAttachment | null>;
   setPick(sessionID: string, claim: ChatAttachmentClaim): Promise<ChatAttachment | null>;
@@ -487,10 +494,14 @@ function styleLockOf(schema: ProductSchema, payload: unknown): ChatStyleLock {
   const nested = member ? record(response[member]) : {};
   const source = Object.keys(nested).length > 0 ? nested : response;
   const fields = schema.chat.api.style_lock;
+  const sourceValue = fields.source ? source[fields.source] : undefined;
   return {
     enabled: source[fields.enabled] === true,
     text: typeof source[fields.text] === 'string' ? source[fields.text] as string : '',
     references: array(source[fields.references]).filter((item): item is string => typeof item === 'string' && item !== ''),
+    ...(sourceValue === 'project' || sourceValue === 'session' || sourceValue === 'off'
+      ? { source: sourceValue }
+      : {}),
   };
 }
 
@@ -726,8 +737,14 @@ function normalizeSession(
   const parentSessionId = fields.parent_session_id ? optionalString(source, fields.parent_session_id) : undefined;
   const parentMessageId = fields.parent_message_id ? optionalString(source, fields.parent_message_id) : undefined;
   const parentTitle = fields.parent_title ? optionalString(source, fields.parent_title) : undefined;
+  const projectId = fields.project_id ? optionalString(source, fields.project_id) : undefined;
+  const styleLockSourceValue = fields.style_lock_source ? optionalString(source, fields.style_lock_source) : undefined;
   return {
     ...(parentSessionId ? { parentSessionId, parentMessageId, parentTitle, parentDeleted: fields.parent_deleted ? source[fields.parent_deleted] === true : false } : {}),
+    ...(projectId ? { projectId } : {}),
+    ...(styleLockSourceValue === 'project' || styleLockSourceValue === 'session' || styleLockSourceValue === 'off'
+      ? { styleLockSource: styleLockSourceValue }
+      : {}),
     ...(generationModels ? { generationModels } : {}),
     ...(generationModels && generationModelsRetired ? { generationModelsRetired } : {}),
     ...(brief ? { brief } : {}),
@@ -1023,13 +1040,16 @@ export function createChatBrowserClient(
         capturesCopied: Boolean(capturesField && payload[capturesField] === true),
       };
     },
-    async createSession(title = '') {
+    async createSession(title = '', projectID = '') {
       const response = await fetcher(
         schema.runtime.http.legacy_routes.chat_sessions,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ [fields.title]: title }),
+          body: JSON.stringify({
+            [fields.title]: title,
+            ...(projectID && fields.project_id ? { [fields.project_id]: projectID } : {}),
+          }),
         },
       );
       const payload = await responseValue(response);
@@ -1471,11 +1491,27 @@ export function createChatBrowserClient(
           [names.enabled]: lock.enabled,
           [names.text]: lock.text,
           [names.references]: lock.references,
+          ...(names.source && lock.source ? { [names.source]: lock.source } : {}),
         }),
       });
       const payload = await responseValue(response);
       if (!response.ok) throw styleLockError(schema, response, payload);
       return styleLockOf(schema, payload);
+    },
+    async setSessionProject(sessionID, projectID) {
+      const template = schema.runtime.http.routes.chat_session_project;
+      if (!template) throw new ChatBrowserError(schema.chat.presentation.messages.internal_error, 0);
+      const field = schema.chat.api.fields.project_id ?? 'project_id';
+      const response = await fetcher(route(template, { sessionID }), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: projectID }),
+      });
+      const payload = await responseValue(response);
+      if (!response.ok) throw styleLockError(schema, response, payload);
+      const session = normalizeSession(schema, payload);
+      if (!session.id) throw new ChatBrowserError('', response.status);
+      return session;
     },
     async getPick(sessionID, signal) {
       const response = await fetcher(pickRoute(schema, sessionID), { signal });

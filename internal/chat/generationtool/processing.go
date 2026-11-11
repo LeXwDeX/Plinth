@@ -14,6 +14,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
@@ -847,7 +848,9 @@ func (executor *Executor) executeProcessing(
 			if !ok || (parameter.Type == "asset" && len(urls) != 1) {
 				return executor.reject(command, messages.ReferenceUnsupported)
 			}
-			assets, err := executor.references.Resolve(ctx, owner, urls)
+			assets, err := executor.references.Resolve(ctx, references.ReferenceScope{
+				Owner: owner, SessionID: command.SessionID, ProjectID: command.Options.ProjectID,
+			}, urls)
 			if result, refused := executor.inputRefusal(command, err); refused {
 				return result, nil
 			}
@@ -867,10 +870,14 @@ func (executor *Executor) executeProcessing(
 	// #250: retexture may carry the session's style picture when it accepts a
 	// reference image and the step did not name one. The style text never goes
 	// into a 3D prompt; a skipped picture is reported in the result's warning.
-	styleNote, styleErr := executor.processingStyleReference(ctx, command, capability, chosen.offering, input)
+	styleNote, styleReferences, styleErr := executor.processingStyleReference(ctx, command, capability, chosen.offering, input)
 	if styleErr != nil {
 		return executor.reject(command, executor.chat.StyleLock.UnsupportedNote)
 	}
+	// #240: the initial submission path reports the project assets whose
+	// pictures the style reference really carried, like the observation path
+	// does for a recovered or detached step.
+	styleSources := executor.projectStyleSources(command, styleReferences)
 	// #129: the session purpose's budget fills the bounded parameters this
 	// call left unset, as it does for the generation tools.
 	current, err := rawInput(input)
@@ -912,7 +919,7 @@ func (executor *Executor) executeProcessing(
 	// that really submits the step (the turn or a later detached approval),
 	// never when a bound grant is merely observed again.
 	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, prompt,
-		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, string(source.ID), observe, promptTrace)
+		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, string(source.ID), observe, promptTrace, styleSources)
 	result = executor.attachProcessingReferenceNote(command.Tool, styleNote, result)
 	return executor.processingOutcome(command, result, err, executor.inputShape(command, input))
 }
@@ -1113,7 +1120,7 @@ func (executor *Executor) executeMultiSourceProcessing(
 		prompt = promptTrace.Final
 	}
 	result, err := executor.prepareAgentOperation(ctx, command, capability, chosen.offering, encoded, prompt,
-		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, "", observe, promptTrace)
+		command.IdempotencyKey(), referenceUse{}, referenceSelection{}, nil, nil, "", observe, promptTrace, nil)
 	return executor.processingOutcome(command, result, err, executor.inputShape(command, input))
 }
 

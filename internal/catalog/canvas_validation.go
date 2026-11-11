@@ -1021,7 +1021,7 @@ func validateCanvasTools(frontend CanvasFrontendSchema, messages map[string]stri
 // Right-panel vocabulary. A tab id names a body the frontend can draw; a kind is a kind of stage object. The
 // frontend needs a tab list for every kind, so all three kinds are declared exactly once.
 var (
-	panelTabIDs   = []string{"layers", "history", "details", "operations", "process", "formats", "parts"}
+	panelTabIDs   = []string{"layers", "history", "details", "operations", "project", "process", "formats", "parts"}
 	panelKindList = []string{"image", "board", "model"}
 )
 

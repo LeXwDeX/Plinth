@@ -92,6 +92,35 @@ func TestDirectStyleLockAppendsPromptByCapability(t *testing.T) {
 	}
 }
 
+func TestDirectStyleLockUsesTheProjectPromptAndResolvedPictures(t *testing.T) {
+	style := directStyleLockStyle()
+	style.ProjectPromptTemplate = "\n\nProject style: {style} of {project}"
+	offering := directStyleLockOffering(generation.ImageToImage, 0, "asset-array", 5)
+	lock := chat.StyleLock{
+		Enabled: true, Source: chat.StyleLockSourceProject, Text: "warm ink",
+		ProjectName: "Star Harbor", ProjectID: "prj_1",
+		// The prepare boundary has already copied the project URLs into the
+		// owner's input assets.
+		References: []string{"style-a"},
+	}
+	input := directStyleLockInput(t, map[string]any{
+		"prompt": "make it blue", "reference_assets": []string{"turn-a"},
+	})
+	merged, err := applyDirectStyleLock(t, lock, false, generation.ImageToImage, offering, style, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := decodeDirectStyleLockInput(t, merged)
+	prompt, _ := values["prompt"].(string)
+	if !strings.Contains(prompt, "Project style: warm ink of Star Harbor") || strings.Contains(prompt, "Style lock:") {
+		t.Fatalf("project prompt = %q", prompt)
+	}
+	references, _ := values["reference_assets"].([]any)
+	if len(references) != 2 || references[0] != "turn-a" || references[1] != "style-a" {
+		t.Fatalf("project references = %v", references)
+	}
+}
+
 func TestDirectStyleLockOrdersReferencesAfterTheTurnPictures(t *testing.T) {
 	style := directStyleLockStyle()
 	offering := directStyleLockOffering(generation.ImageToImage, 0, "asset-array", 5)

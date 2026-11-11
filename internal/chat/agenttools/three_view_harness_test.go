@@ -14,6 +14,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness"
@@ -30,7 +31,7 @@ func (harnessThreeRecipe) ResolveRecipe(context.Context, string, generation.Offe
 
 type harnessThreeReferences struct{ calls int }
 
-func (r *harnessThreeReferences) Resolve(context.Context, generation.OwnerID, []string) ([]generation.AssetID, error) {
+func (r *harnessThreeReferences) Resolve(context.Context, references.ReferenceScope, []string) ([]generation.AssetID, error) {
 	r.calls++
 	return []generation.AssetID{"source"}, nil
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat/agentparams"
 	"github.com/LeXwDeX/Plinth/internal/chat/agenttools"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
+	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
@@ -54,7 +55,7 @@ func (*lookupGateway) Get(context.Context, generation.OwnerID, generation.TaskID
 
 type lookupReferences struct{ urls []string }
 
-func (resolver *lookupReferences) Resolve(_ context.Context, _ generation.OwnerID, urls []string) ([]generation.AssetID, error) {
+func (resolver *lookupReferences) Resolve(_ context.Context, _ references.ReferenceScope, urls []string) ([]generation.AssetID, error) {
 	resolver.urls = append(resolver.urls, urls...)
 	assets := make([]generation.AssetID, len(urls))
 	for index := range urls {

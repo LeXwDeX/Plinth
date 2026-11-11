@@ -27,6 +27,10 @@ SUCCESS = common.SUCCESS_STATE
 FAILED_STATES = common.FAILED_STATES
 CHECK_PASS, CHECK_FAIL, CHECK_SKIP = "pass", "fail", "skip"
 
+# Project steps set up the #240 fixture between tool steps; they are not tool
+# calls and never count against the tool-call budget.
+PROJECT_SETUP_ACTIONS = ("promote_first_image", "new_session")
+
 
 # ---------------------------------------------------------------- request set
 
@@ -87,14 +91,34 @@ def validate_request_set(data, purposes=None):
             if request["purpose"] not in allowed:
                 problems.append(
                     f"{request_id}: purpose {request['purpose']} is not declared for {request.get('modality')} work")
+        project = request.get("project")
+        if project is not None:
+            if not isinstance(project, dict) or not str(project.get("name") or "").strip():
+                problems.append(f"{request_id}: project needs a name")
+            elif project.get("conventions") is not None and not isinstance(project["conventions"], dict):
+                problems.append(f"{request_id}: project.conventions must be an object")
+            elif project.get("style_guide") is not None and not isinstance(project["style_guide"], dict):
+                problems.append(f"{request_id}: project.style_guide must be an object")
         steps = request.get("steps") or []
         if not isinstance(steps, list) or not steps:
             problems.append(f"{request_id}: steps must be a non-empty list")
         else:
             for step_index, step in enumerate(steps):
-                tool = (step or {}).get("tool") or {}
-                if not step.get("user") or not tool.get("name"):
+                if not isinstance(step, dict) or not step.get("user"):
                     problems.append(f"{request_id}.steps[{step_index}]: missing user or tool.name")
+                    continue
+                tool = step.get("tool") or {}
+                setup = step.get("project_setup")
+                if setup is not None and setup not in PROJECT_SETUP_ACTIONS:
+                    problems.append(f"{request_id}.steps[{step_index}]: unknown project_setup {setup}")
+                elif setup is not None and tool.get("name"):
+                    problems.append(f"{request_id}.steps[{step_index}]: a step is a tool or a project_setup, not both")
+                elif setup is None and not tool.get("name"):
+                    problems.append(f"{request_id}.steps[{step_index}]: missing user or tool.name")
+                elif setup == "promote_first_image":
+                    asset = step.get("asset")
+                    if asset is not None and (not isinstance(asset, dict) or not str(asset.get("name") or "").strip()):
+                        problems.append(f"{request_id}.steps[{step_index}]: a promoted asset needs a name")
         expected = request.get("expected") or {}
         if not expected.get("capabilities"):
             problems.append(f"{request_id}: expected.capabilities is empty")
@@ -682,13 +706,20 @@ TAIL_METRICS = {
 }
 
 
-def compare_reports(baseline, candidate, tolerance=0):
-    """Regressions, improvements and changed metric deltas between two reports."""
+def compare_reports(baseline, candidate, tolerance=0, new_request_set=False):
+    """Regressions, improvements and changed metric deltas between two reports.
+
+    new_request_set is the explicit report mode for a changed fixed request
+    set (#240): the request-set version/content difference is recorded rather
+    than treated as incomparable, cases missing from the baseline count as
+    additions, and the tail metrics are compared over the common cases only.
+    """
     problems = []
-    if baseline.get("request_set", {}).get("version") != candidate.get("request_set", {}).get("version"):
-        problems.append("the two reports used different request-set versions")
-    if baseline.get("request_set", {}).get("sha256") != candidate.get("request_set", {}).get("sha256"):
-        problems.append("the two reports used different request-set contents")
+    if not new_request_set:
+        if baseline.get("request_set", {}).get("version") != candidate.get("request_set", {}).get("version"):
+            problems.append("the two reports used different request-set versions")
+        if baseline.get("request_set", {}).get("sha256") != candidate.get("request_set", {}).get("sha256"):
+            problems.append("the two reports used different request-set contents")
     if baseline.get("mode") != candidate.get("mode"):
         problems.append(f"the two reports used different modes: {baseline.get('mode')} vs {candidate.get('mode')}")
 
@@ -697,6 +728,10 @@ def compare_reports(baseline, candidate, tolerance=0):
     regressions, improvements, changed = [], [], []
     for case_id in sorted(set(base_cases) | set(cand_cases)):
         if case_id not in cand_cases:
+            if new_request_set:
+                changed.append({"case": case_id, "check": "case",
+                                "detail": "removed from the candidate request set"})
+                continue
             regressions.append({"case": case_id, "check": "case", "detail": "missing from the candidate report"})
             continue
         if case_id not in base_cases:
@@ -717,8 +752,15 @@ def compare_reports(baseline, candidate, tolerance=0):
             else:
                 changed.append(entry)
 
-    base_metrics = (baseline.get("summary") or {}).get("metrics") or {}
-    cand_metrics = (candidate.get("summary") or {}).get("metrics") or {}
+    if new_request_set:
+        # The request set changed, so the report totals are not comparable.
+        # Compare the same metrics over the cases both reports ran.
+        common = set(base_cases) & set(cand_cases)
+        base_metrics = case_metric_totals(base_cases, common)
+        cand_metrics = case_metric_totals(cand_cases, common)
+    else:
+        base_metrics = (baseline.get("summary") or {}).get("metrics") or {}
+        cand_metrics = (candidate.get("summary") or {}).get("metrics") or {}
     deltas = {}
     for metric, direction in TAIL_METRICS.items():
         before = base_metrics.get(metric)
@@ -727,6 +769,10 @@ def compare_reports(baseline, candidate, tolerance=0):
             continue
         delta = after - before
         deltas[metric] = {"before": before, "after": after, "delta": delta, "direction": direction}
+        if new_request_set:
+            # A changed request definition can add tools or cards to a common
+            # case; the delta stays visible but never blocks a report-only run.
+            continue
         if direction == "lower" and delta > tolerance:
             regressions.append({"case": "*", "check": f"metric:{metric}", "before": before, "after": after})
         elif direction == "higher" and delta < -tolerance:
@@ -738,27 +784,64 @@ def compare_reports(baseline, candidate, tolerance=0):
         "improvements": improvements,
         "changed": changed,
         "metrics": deltas,
-        "markdown": compare_markdown(baseline, candidate, problems, regressions, improvements, changed, deltas),
+        "new_request_set": new_request_set,
+        "markdown": compare_markdown(baseline, candidate, problems, regressions, improvements, changed, deltas,
+                                     new_request_set=new_request_set),
     }
 
 
-def compare_markdown(baseline, candidate, problems, regressions, improvements, changed, deltas):
+# CASE_METRIC_PATHS reads the per-case metrics a report summary flattens.
+CASE_METRIC_PATHS = {
+    "tool_calls": ("tool_call_count",),
+    "paid_calls": ("paid_call_count",),
+    "interruptions": ("interruption_count",),
+    "inspect_model": ("self_inspection", "inspect_model"),
+    "render_model_views": ("self_inspection", "render_model_views"),
+    "compare_model_reference": ("self_inspection", "compare_model_reference"),
+    "self_check_records": ("self_inspection", "self_check_records"),
+    "self_check_passed": ("self_inspection", "self_check_passed"),
+}
+
+
+def case_metric_totals(cases, case_ids):
+    """The tail metrics a candidate and a baseline share, summed per case."""
+    totals = {}
+    for metric, path in CASE_METRIC_PATHS.items():
+        total = 0
+        for case_id in case_ids:
+            value = (cases.get(case_id) or {}).get("metrics") or {}
+            for key in path:
+                value = (value or {}).get(key) if isinstance(value, dict) else None
+            if isinstance(value, int):
+                total += value
+        totals[metric] = total
+    return totals
+
+
+def compare_markdown(baseline, candidate, problems, regressions, improvements, changed, deltas,
+                     new_request_set=False):
     lines = [
         "# Agent 产出质量评测对比",
         "",
         f"- 基线: `{baseline.get('revision')}`",
         f"- 候选: `{candidate.get('revision')}`",
         f"- 结论: {'无回退' if not regressions and not problems else '存在回退或不可比项'}",
-        "",
     ]
+    if new_request_set:
+        lines.append("- 请求集: 显式按新请求集对比（新增用例计为新增，汇总指标只比较两边共有的用例且仅作参考）")
+    lines.append("")
     if problems:
         lines += ["## 不可比", ""] + [f"- {problem}" for problem in problems] + [""]
     if regressions:
         lines += ["## 回退", "", "| 用例 | 检查 | 基线 | 候选 |", "|---|---|---|---|"]
         lines += [f"| {item.get('case')} | {item.get('check')} | {item.get('before', '-')} | {item.get('after', '-')} |" for item in regressions]
         lines.append("")
-    if improvements:
-        lines += ["## 改善", ""] + [f"- `{item.get('case')}` / `{item.get('check')}`: {item.get('before')} → {item.get('after')}" for item in improvements] + [""]
+    added = [item for item in improvements if item.get("check") == "case"]
+    if added:
+        lines += ["## 新增用例", ""] + [f"- `{item.get('case')}`: {item.get('detail')}" for item in added] + [""]
+    kept = [item for item in improvements if item.get("check") != "case"]
+    if kept:
+        lines += ["## 改善", ""] + [f"- `{item.get('case')}` / `{item.get('check')}`: {item.get('before') or '未检查'} → {item.get('after')}" for item in kept] + [""]
     if changed:
         lines += ["## 其他变化", ""] + [f"- `{item.get('case')}` / `{item.get('check')}`: {item.get('before')} → {item.get('after')}" for item in changed] + [""]
     if deltas:

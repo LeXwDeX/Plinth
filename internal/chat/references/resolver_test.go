@@ -20,9 +20,7 @@ func TestResolverAcceptsDataURIAndOwnedInputAssetRoutes(t *testing.T) {
 		},
 	}
 	resolver := newResolver(t, inputs, &fakeTasks{}, fakeLegacy{})
-	ids, err := resolver.Resolve(
-		context.Background(),
-		"owner-a",
+	ids, err := resolver.Resolve(context.Background(), references.ReferenceScope{Owner: "owner-a"},
 		[]string{
 			"data:image/png;base64,Y29uZmlndXJlZA==",
 			"/configured/assets/owned-a",
@@ -71,9 +69,7 @@ func TestResolverMaterializesUnifiedAndHistoricalGeneratedAssets(t *testing.T) {
 		"historical_0.png": "historical-image",
 	}}
 	resolver := newResolver(t, inputs, tasks, legacy)
-	ids, err := resolver.Resolve(
-		context.Background(),
-		"owner-a",
+	ids, err := resolver.Resolve(context.Background(), references.ReferenceScope{Owner: "owner-a"},
 		[]string{
 			"/configured/tasks/task-a/assets/result-a",
 			"/configured/generated/historical_0.png",
@@ -105,9 +101,7 @@ func TestResolverRejectsExternalAndUnconfiguredReferences(t *testing.T) {
 		"/configured/generated/../secret",
 		"/not-configured/image.png",
 	} {
-		if _, err := resolver.Resolve(
-			context.Background(),
-			"owner-a",
+		if _, err := resolver.Resolve(context.Background(), references.ReferenceScope{Owner: "owner-a"},
 			[]string{value},
 		); !errors.Is(err, references.ErrUnsupportedReference) {
 			t.Fatalf("%q error = %v", value, err)
@@ -124,9 +118,7 @@ func TestResolverRefusesForbiddenLegacyGeneratedFallback(t *testing.T) {
 		"task-b_0.png": "someone-elses-image",
 	}}
 	resolver := newResolver(t, inputs, tasks, legacy)
-	_, err := resolver.Resolve(
-		context.Background(),
-		"owner-a",
+	_, err := resolver.Resolve(context.Background(), references.ReferenceScope{Owner: "owner-a"},
 		[]string{"/configured/generated/task-b_0.png"},
 	)
 	var domainErr *generation.Error
@@ -204,7 +196,7 @@ func TestGeneratedReferenceRequiresOwnedTaskEvidence(t *testing.T) {
 				files:  map[string]string{test.filename: "private image bytes"},
 				opened: &opened,
 			})
-			ids, err := resolver.Resolve(t.Context(), "owner-a", []string{
+			ids, err := resolver.Resolve(t.Context(), references.ReferenceScope{Owner: "owner-a"}, []string{
 				"/configured/generated/" + test.filename,
 			})
 			if len(ids) != 0 || !errors.Is(err, references.ErrUnsupportedReference) {
@@ -237,7 +229,7 @@ func TestGeneratedReferencePropagatesNativeAssetFailure(t *testing.T) {
 		files:  map[string]string{"owned_0.png": "stale legacy bytes"},
 		opened: &opened,
 	})
-	ids, err := resolver.Resolve(t.Context(), "owner-a", []string{"/configured/generated/owned_0.png"})
+	ids, err := resolver.Resolve(t.Context(), references.ReferenceScope{Owner: "owner-a"}, []string{"/configured/generated/owned_0.png"})
 	if len(ids) != 0 || !errors.Is(err, assetErr) || len(opened) != 0 || len(inputs.uploads) != 0 {
 		t.Fatalf("ids=%v error=%v opened=%v uploads=%v", ids, err, opened, inputs.uploads)
 	}
@@ -261,7 +253,7 @@ func TestGeneratedReferenceUsesOwnedNativeAssetBeforeLegacyFile(t *testing.T) {
 		files:  map[string]string{"owned_0.png": "stale legacy bytes"},
 		opened: &opened,
 	})
-	ids, err := resolver.Resolve(t.Context(), "owner-a", []string{"/configured/generated/owned_0.png"})
+	ids, err := resolver.Resolve(t.Context(), references.ReferenceScope{Owner: "owner-a"}, []string{"/configured/generated/owned_0.png"})
 	if err != nil || len(ids) != 1 || len(opened) != 0 || len(inputs.uploads) != 1 || inputs.uploads[0].body != "native image" {
 		t.Fatalf("ids=%v error=%v opened=%v uploads=%v", ids, err, opened, inputs.uploads)
 	}

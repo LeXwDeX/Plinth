@@ -14,6 +14,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness"
@@ -39,7 +40,7 @@ type Gateway interface {
 type ReferenceResolver interface {
 	Resolve(
 		context.Context,
-		generation.OwnerID,
+		references.ReferenceScope,
 		[]string,
 	) ([]generation.AssetID, error)
 }
@@ -128,6 +129,9 @@ type Config struct {
 	// three-view view the person replaced with an upload is named by it (#65).
 	InputAssetRoute string
 	Chat            catalog.ChatSchema
+	// Project is application.project (#240): the @projectN handle prefix and
+	// the copy for an unknown project asset. Nil disables project handles.
+	Project *catalog.ProjectSchema
 	// CanvasArtboard gives the Schema tables that turn a ratio-only output
 	// size into pixels (ratio_pixels, ratio_pixel_tiers) for the size notes.
 	CanvasArtboard catalog.CanvasArtboardSchema
@@ -172,6 +176,7 @@ type Executor struct {
 	selfChecks    *chat.SelfCheckService
 	inputAsset    string
 	chat          catalog.ChatSchema
+	project       *catalog.ProjectSchema
 	texts         *catalog.TextLocalizer
 	modelDelivery catalog.ModelDeliverySchema
 	skills        map[string]catalog.SkillSchema
@@ -239,6 +244,7 @@ func New(config Config) (*Executor, error) {
 		selfChecks:    config.SelfChecks,
 		inputAsset:    config.InputAssetRoute,
 		chat:          config.Chat,
+		project:       config.Project,
 		texts:         config.Texts,
 		modelDelivery: config.ModelDelivery,
 		skills:        skills,
@@ -406,13 +412,13 @@ func (executor *Executor) Execute(
 				return chat.ToolResult{NoSubmission: true}, ErrOperationConflict
 			}
 		}
-		return executor.observeBoundTask(ctx, command, observe)
+		return executor.observeBoundTask(ctx, command, observe, nil)
 	}
 	if executor.UsesExecutionGrants() {
 		stored, err := executor.operations.LoadAgentOperation(ctx, command.OwnerID, command.SessionID,
 			command.AssistantMessageID, command.Call.ID)
 		if err == nil {
-			return executor.resumeAgentOperation(ctx, command, stored, observe, nil, nil)
+			return executor.resumeAgentOperation(ctx, command, stored, observe, nil, nil, nil)
 		}
 		if !errors.Is(err, ErrOperationNotFound) {
 			// A failed read cannot prove an earlier submission did not commit.
@@ -788,10 +794,11 @@ func (executor *Executor) Execute(
 		result.NoSubmission = true
 		return result, err
 	}
+	styleSources := executor.projectStyleSources(command, referenceURLs)
 	idempotencyKey := command.IdempotencyKey()
 	if executor.UsesExecutionGrants() {
 		return executor.prepareAgentOperation(ctx, command, capability, offering, input, prompt, idempotencyKey,
-			references, selection, finalReferences, referenceIDs, "", observe, trace)
+			references, selection, finalReferences, referenceIDs, "", observe, trace, styleSources)
 	}
 	if offering.NativePricing != nil {
 		return chat.ToolResult{NoSubmission: true}, errors.New("native pricing requires prepared authorization")
@@ -836,7 +843,8 @@ func (executor *Executor) Execute(
 	}
 	info := stepInfo{Credits: offering.EstimateTotalCredits(input), CreditsMetered: offering.CreditsMetered,
 		ExtraCredits:  offering.ExtraCreditDetail(input).Credits,
-		ReferenceNote: executor.stepReferenceNote(command, offering, fact, references, input)}
+		ReferenceNote: executor.stepReferenceNote(command, offering, fact, references, input),
+		StyleSources:  styleSources}
 	info.PromptFinal, info.PromptNote = executor.promptReport(command, command.Tool, offering, trace)
 	return executor.wait(ctx, command, offering, accepted.TaskID, observe, info)
 }
@@ -885,6 +893,10 @@ type stepInfo struct {
 	// reported only through the tool's declared result keys.
 	PromptFinal string
 	PromptNote  map[string]any
+	// StyleSources names the project assets whose pictures this step really
+	// injected (#240). Empty when none was used; reported only through the
+	// tool's declared result key.
+	StyleSources []string
 }
 
 // budgetResult is the budget part of a paid tool result: the plan the step
@@ -974,6 +986,7 @@ func (executor *Executor) observeBoundTask(
 	ctx context.Context,
 	command chat.ToolCommand,
 	observe func(chat.ToolObservation) error,
+	styleSources []string,
 ) (chat.ToolResult, error) {
 	task, err := executor.gateway.Get(
 		ctx, generation.OwnerID(command.OwnerID), generation.TaskID(command.BoundTaskID),
@@ -999,6 +1012,10 @@ func (executor *Executor) observeBoundTask(
 		}
 	}
 	info := taskStep(task, "")
+	if len(styleSources) == 0 {
+		styleSources = executor.recoveredProjectStyleSources(ctx, command)
+	}
+	info.StyleSources = styleSources
 	if executor.UsesExecutionGrants() {
 		if op, err := executor.operations.LoadAgentOperation(ctx, command.OwnerID, command.SessionID,
 			command.AssistantMessageID, command.Call.ID); err == nil && op.ToolName == command.Call.Name &&
@@ -1478,7 +1495,7 @@ func (executor *Executor) buildInput(
 		}
 		assets, err := executor.references.Resolve(
 			ctx,
-			generation.OwnerID(command.OwnerID),
+			commandReferenceScope(command),
 			referenceURLs,
 		)
 		if err != nil {
@@ -1565,7 +1582,7 @@ func (executor *Executor) buildInput(
 					}
 					assets, err := executor.references.Resolve(
 						ctx,
-						generation.OwnerID(command.OwnerID),
+						commandReferenceScope(command),
 						[]string{reference},
 					)
 					if err != nil {
@@ -1647,7 +1664,7 @@ func (executor *Executor) parameterValue(
 		if !strings.HasPrefix(value, "data:") {
 			return value, nil
 		}
-		assets, err := executor.references.Resolve(ctx, owner, []string{value})
+		assets, err := executor.references.Resolve(ctx, references.ReferenceScope{Owner: owner}, []string{value})
 		if err != nil || len(assets) == 0 {
 			return nil, fmt.Errorf(
 				"generation tool: parameter %q asset rejected",
@@ -1671,7 +1688,7 @@ func (executor *Executor) parameterValue(
 			}
 			assets, err := executor.references.Resolve(
 				ctx,
-				owner,
+				references.ReferenceScope{Owner: owner},
 				[]string{value},
 			)
 			if err != nil || len(assets) == 0 {
@@ -1969,6 +1986,9 @@ func (executor *Executor) success(
 	}
 	if key := tool.ResultFields.PromptNote; key != "" && len(info.PromptNote) > 0 {
 		result[key] = info.PromptNote
+	}
+	if key := tool.ResultFields.StyleSources; key != "" && len(info.StyleSources) > 0 {
+		result[key] = info.StyleSources
 	}
 	if info.Budget != nil {
 		if key := tool.ResultFields.Budget; key != "" {

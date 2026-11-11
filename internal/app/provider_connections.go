@@ -470,6 +470,15 @@ func offeringsForAdapter(offerings []generation.Offering, adapterKey string) []g
 	return scoped
 }
 
+// projectCitationTemplate is the mock Agent's closing line for project asset
+// use (#240). A Catalog without projects has none.
+func projectCitationTemplate(schema catalog.ApplicationSchema) string {
+	if schema.Project == nil || schema.Project.Agent == nil {
+		return ""
+	}
+	return schema.Project.Agent.CitationTemplate
+}
+
 // buildChatAgentWithTransport 按 chat.agent.connection_id 解析声明连接并按
 // 协议构造 Chat LLM 适配器；协议分支唯一，未知协议启动期报错。mock 模式不变。
 func buildChatAgentWithTransport(
@@ -486,21 +495,22 @@ func buildChatAgentWithTransport(
 			return nil, err
 		}
 		mockAdapter, err := agentmock.New(agentmock.Config{
-			Localize:        texts.TextIn,
-			ToolName:        schema.Chat.Agent.MockToolName,
-			PromptArgument:  schema.Chat.Agent.MockPromptArgument,
-			Summary:         schema.Chat.Agent.MockSummary,
-			FailureSummary:  schema.Chat.Agent.MockFailureSummary,
-			WaitingSummary:  schema.Chat.Agent.MockWaitingSummary,
-			WaitingContent:  schema.Chat.Agent.ConsentWaitingContent,
-			RechargeContent: schema.Chat.Agent.ConsentRechargeContent,
-			DeniedSummary:   schema.Chat.Agent.MockDeniedSummary,
-			DeniedContent:   schema.Chat.Agent.ConsentDeniedContent,
-			ScopeRefusal:    schema.Chat.AgentScope.MockRefusal,
-			ChoiceSummary:   schema.Chat.Choice.MockSummary,
-			SummaryTemplate: schema.Chat.ContextCompaction.MockSummaryTemplate,
-			UserRole:        schema.Chat.Roles.User,
-			ToolRole:        schema.Chat.Roles.Tool,
+			Localize:         texts.TextIn,
+			ToolName:         schema.Chat.Agent.MockToolName,
+			PromptArgument:   schema.Chat.Agent.MockPromptArgument,
+			Summary:          schema.Chat.Agent.MockSummary,
+			FailureSummary:   schema.Chat.Agent.MockFailureSummary,
+			WaitingSummary:   schema.Chat.Agent.MockWaitingSummary,
+			WaitingContent:   schema.Chat.Agent.ConsentWaitingContent,
+			RechargeContent:  schema.Chat.Agent.ConsentRechargeContent,
+			DeniedSummary:    schema.Chat.Agent.MockDeniedSummary,
+			DeniedContent:    schema.Chat.Agent.ConsentDeniedContent,
+			ScopeRefusal:     schema.Chat.AgentScope.MockRefusal,
+			ChoiceSummary:    schema.Chat.Choice.MockSummary,
+			SummaryTemplate:  schema.Chat.ContextCompaction.MockSummaryTemplate,
+			CitationTemplate: projectCitationTemplate(schema),
+			UserRole:         schema.Chat.Roles.User,
+			ToolRole:         schema.Chat.Roles.Tool,
 		})
 		if err != nil {
 			return nil, err
