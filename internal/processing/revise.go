@@ -97,7 +97,12 @@ func (s *Service) reviseInsert(ctx context.Context, plan *Plan, command ReviseCo
 		return Plan{}, ErrConflict
 	}
 	step := &plan.Steps[command.StepIndex]
-	if step.State != Succeeded || step.Checkpoint == nil || step.Checkpoint.State != CheckpointFailed {
+	// Only the step that currently blocks the plan may insert its contingency.
+	// An older checkpoint keeps its failed result as provenance after a revision,
+	// but its Failure reason is cleared; accepting it would let a revision bypass
+	// the checkpoint that actually stopped this plan.
+	if step.State != Succeeded || step.Failure != ReasonCheckpointFailed ||
+		step.Checkpoint == nil || step.Checkpoint.State != CheckpointFailed {
 		return Plan{}, ErrConflict
 	}
 	contingency := command.Contingency
@@ -105,7 +110,16 @@ func (s *Service) reviseInsert(ctx context.Context, plan *Plan, command ReviseCo
 		return Plan{}, ErrRevisionOutsidePlan
 	}
 	triggered := failedChecks(step.Checkpoint)
-	if !slices.ContainsFunc(contingency.Trigger, func(trigger string) bool { return slices.Contains(triggered, trigger) }) {
+	if !slices.ContainsFunc(contingency.Trigger, func(trigger string) bool {
+		switch trigger {
+		case "checkpoint_failed":
+			return step.Checkpoint != nil && step.Checkpoint.State == CheckpointFailed
+		case "task_failed":
+			return step.Failure == ReasonTaskFailed
+		default:
+			return slices.Contains(triggered, trigger)
+		}
+	}) {
 		return Plan{}, ErrRevisionOutsidePlan
 	}
 	if command.Capability != "" && string(command.Capability) != contingency.Step.Capability {
@@ -184,6 +198,13 @@ func (s *Service) reviseSkip(ctx context.Context, plan *Plan, command ReviseComm
 		// the approved acceptance check.
 		return Plan{}, ErrConflict
 	}
+	// Skipping the remaining steps does not resolve a checkpoint that is still
+	// blocking the plan. Without this guard the plan would become all-terminal
+	// with a cleared failure and stay PENDING forever; the Agent must revise or
+	// waive the current checkpoint first.
+	if hasFailedCheckpoint(plan.Steps) {
+		return Plan{}, ErrConflict
+	}
 	steps := slices.Clone(plan.Steps)
 	steps[command.StepIndex].State = Skipped
 	steps[command.StepIndex].Failure = ""
@@ -218,7 +239,8 @@ func (s *Service) reviseWaive(ctx context.Context, plan *Plan, command ReviseCom
 		return Plan{}, ErrConflict
 	}
 	step := &plan.Steps[command.StepIndex]
-	if step.Checkpoint == nil || step.Checkpoint.State != CheckpointFailed || plan.Failure != ReasonCheckpointFailed {
+	if step.Failure != ReasonCheckpointFailed || step.Checkpoint == nil ||
+		step.Checkpoint.State != CheckpointFailed || plan.Failure != ReasonCheckpointFailed {
 		return Plan{}, ErrConflict
 	}
 	waived := 0

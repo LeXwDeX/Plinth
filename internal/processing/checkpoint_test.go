@@ -416,3 +416,65 @@ func TestReviseWaivesAFailedCheckpointOnceWithAReason(t *testing.T) {
 		t.Fatalf("second waive = %v", err)
 	}
 }
+
+// #251: a historical failed checkpoint is provenance only; an insert/waive must
+// target the step that currently blocks the plan.
+func TestReviseRefusesToSkipWhileACheckpointBlocksThePlan(t *testing.T) {
+	ctx := context.Background()
+	service, store, gateway, plan := checkpointFixture(t)
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	succeedTask(gateway, "step-1")
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	paused := store.plans[plan.ID]
+	if paused.State != Paused || paused.Failure != ReasonCheckpointFailed {
+		t.Fatalf("paused plan = %s/%s", paused.State, paused.Failure)
+	}
+	if _, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: paused.Version, Operation: OperationSkip, StepIndex: 1,
+		Reason: "跳过剩余步骤"}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("skip while checkpoint blocks = %v, want ErrConflict", err)
+	}
+	stored := store.plans[plan.ID]
+	if stored.State != Paused || stored.Steps[1].State == Skipped {
+		t.Fatalf("refused skip mutated the plan: %+v", stored)
+	}
+}
+
+func TestReviseInsertAcceptsADeclaredCheckpointFailedContingency(t *testing.T) {
+	ctx := context.Background()
+	service, store, gateway, plan := checkpointFixture(t)
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	succeedTask(gateway, "step-1")
+	if err := advanceApproved(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	paused := store.plans[plan.ID]
+	contingency := budget.PlanContingency{ID: "repair", Trigger: []string{"checkpoint_failed"},
+		Step: budget.PlanStep{Capability: "resize", OfferingID: "resize", Estimate: budget.Legacy(3)}}
+	revised, err := service.Revise(ctx, ReviseCommand{OwnerID: "owner", SessionID: "session", PlanID: plan.ID,
+		ExpectedPlanVersion: paused.Version, Operation: OperationInsert, StepIndex: 0,
+		ContingencyID: "repair", Contingency: &contingency, Parameters: json.RawMessage(`{"origin_at":"bottom"}`),
+		Reason: "按声明检查点失败预案修复"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revised.Steps) != 3 || revised.Steps[1].ContingencyID != "repair" {
+		t.Fatalf("contingency step = %+v", revised.Steps)
+	}
+}
+
+func TestConsentRequiredIsAUserDecisionNotAnInternalError(t *testing.T) {
+	report := ClassifyStepFailure(ReasonConsentRequired, nil)
+	if report.Category == generation.CategoryInternal || report.Action == generation.ActionContactAdmin {
+		t.Fatalf("consent-required classification = %+v", report)
+	}
+	if report.Action != generation.ActionAskUser || !report.UserDecisionRequired {
+		t.Fatalf("consent-required should ask the user: %+v", report)
+	}
+}

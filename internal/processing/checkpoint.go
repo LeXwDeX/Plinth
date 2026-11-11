@@ -31,7 +31,7 @@ const CheckpointResolutionUserContinue = "user_continue"
 
 // MaxCheckpointChecks bounds one checkpoint's checks; the Chat tool Schema's
 // maxItems for a checkpoint is aligned with it.
-const MaxCheckpointChecks = 8
+const MaxCheckpointChecks = 4
 
 // MaxWaivedCheckpoints bounds how often one plan may waive a failed
 // checkpoint. The Schema's chat.processing.revision.max_waived_checkpoints is

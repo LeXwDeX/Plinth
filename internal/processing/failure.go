@@ -27,6 +27,11 @@ func ClassifyStepFailure(reason string, task *generation.Task) generation.Failur
 		return generation.FailureReport{Category: generation.CategoryParameterInvalid, Action: generation.ActionFixParameters}
 	case ReasonCheckpointUnavailable:
 		return generation.FailureReport{Category: generation.CategoryInternal, Action: generation.ActionAskUser}
+	case ReasonConsentRequired:
+		// A manual-mode step waiting in the processing panel is a normal user
+		// decision, not an internal error.
+		return generation.FailureReport{Category: generation.CategoryUpstreamCapacity, Action: generation.ActionAskUser,
+			UserDecisionRequired: true}
 	case ReasonTaskFailed, "":
 		if task != nil && task.Failure != nil {
 			return generation.ClassifyFailure(task.Failure.Class, task.Failure.Retryable, task.Failure.Ambiguous)
