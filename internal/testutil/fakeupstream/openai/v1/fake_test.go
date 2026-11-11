@@ -600,3 +600,42 @@ func TestChatRequestsAreRecordedForTheVisionBudget(t *testing.T) {
 		t.Fatalf("clear: %d, records=%+v", deleted.StatusCode, fake.Env().ChatRequests())
 	}
 }
+
+// #241: the fake-only prompt_from_preferences convention reads the framed
+// preference items from the system message and carries them into the tool prompt.
+func TestPromptFromPreferencesReadsTheSystemPreferenceBlock(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	tools := []map[string]any{{"type": "function", "function": map[string]any{"name": "refine_image"}}}
+	marker := ToolMarkerFor("refine_image", `{"prompt_from_preferences":true}`)
+	system := "<<<PREFERENCES>>>\n用户取舍：\n- 已选用：an ink-wash fox（@img3）\n" +
+		"- 已否决：a photorealistic face（@img2）；原因：风格不对：too realistic\n<<<END_PREFERENCES>>>"
+	messages := []map[string]any{
+		{"role": "system", "content": system},
+		{"role": "user", "content": "draw it " + marker},
+	}
+	status, body := f.chat(map[string]any{"model": "m", "messages": messages, "tools": tools})
+	arguments := dig(t, body, "choices", 0, "message", "tool_calls", 0, "function", "arguments")
+	var decoded map[string]string
+	if status != http.StatusOK || json.Unmarshal([]byte(arguments.(string)), &decoded) != nil {
+		t.Fatalf("arguments = %v (%d)", arguments, status)
+	}
+	want := "已选用：an ink-wash fox（@img3） | 已否决：a photorealistic face（@img2）；原因：风格不对：too realistic"
+	if decoded["prompt"] != want {
+		t.Fatalf("prompt = %q; want %q", decoded["prompt"], want)
+	}
+	// No preference frame in the system message yields an empty prompt, and the
+	// arguments stay valid JSON.
+	messages[0]["content"] = "no preferences here"
+	_, empty := f.chat(map[string]any{"model": "m", "messages": messages, "tools": tools})
+	arguments = dig(t, empty, "choices", 0, "message", "tool_calls", 0, "function", "arguments")
+	decoded = nil
+	if json.Unmarshal([]byte(arguments.(string)), &decoded) != nil || decoded["prompt"] != "" {
+		t.Fatalf("without a block: %v", arguments)
+	}
+	// A content-parts system message is read too.
+	messages[0]["content"] = []map[string]string{{"type": "text", "text": system}}
+	_, parts := f.chat(map[string]any{"model": "m", "messages": messages, "tools": tools})
+	if arguments := dig(t, parts, "choices", 0, "message", "tool_calls", 0, "function", "arguments"); !strings.Contains(arguments.(string), "an ink-wash fox") {
+		t.Fatalf("content parts: %v", arguments)
+	}
+}

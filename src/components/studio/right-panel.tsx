@@ -17,6 +17,7 @@ import { ModelProcessingPanel } from '@/components/workspace/model-processing-pa
 import { ProjectPanel } from '@/components/workspace/project-panel';
 import { HarnessPanel } from '@/components/workspace/harness-panel';
 import { StyleLockSection } from '@/components/workspace/style-lock-panel';
+import { PreferencesPanel } from '@/components/workspace/preferences-panel';
 import { useModelProcessingCapabilities } from '@/hooks/use-model-processing-capabilities';
 import { schemaText } from '@/lib/product-schema';
 import {
@@ -115,6 +116,7 @@ function PanelBody({ tab, object, sessionId }: PanelBodyProps) {
       return (
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable]" data-testid="right-panel-operations">
           <StyleLockSection sessionId={sessionId} />
+          <PreferencesPanel sessionId={sessionId} />
           <HarnessPanel sessionId={sessionId} object={object} />
         </div>
       );

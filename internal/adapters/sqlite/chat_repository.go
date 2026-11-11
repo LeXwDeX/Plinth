@@ -829,6 +829,7 @@ var sessionDependentDeletes = []struct {
 }{
 	{"agent state", `DELETE FROM go_agent_state WHERE owner_id = ? AND scope = ?`},
 	{"choices", `DELETE FROM chat_choices WHERE owner_id = ? AND session_id = ?`},
+	{"preferences", `DELETE FROM chat_session_preferences WHERE owner_id = ? AND session_id = ?`},
 	{"compactions", `DELETE FROM chat_context_compactions WHERE owner_id = ? AND session_id = ?`},
 }
 

@@ -108,7 +108,23 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 	publicChat.API.Fields = cloned.Chat.API.Fields
 	publicChat.API.ResponseFields = cloned.Chat.API.ResponseFields
 	publicChat.API.Attachment = cloned.Chat.API.Attachment
+	publicChat.API.Preference = cloned.Chat.API.Preference
 	publicChat.API.StyleLock = cloned.Chat.API.StyleLock
+	// #241: the browser needs the bounds and the declared reason ids; the
+	// framing templates, markers, item templates and prompt paragraph stay
+	// server-only.
+	if preferences := cloned.Chat.Preferences; preferences.MaximumEntries > 0 {
+		ids := make([]string, 0, len(preferences.ReasonPresets))
+		for _, preset := range preferences.ReasonPresets {
+			ids = append(ids, preset.ID)
+		}
+		publicChat.Preferences = &PublicChatPreferencesSchema{
+			MaximumEntries:             preferences.MaximumEntries,
+			MaximumDirectionCharacters: preferences.MaximumDirectionCharacters,
+			MaximumReasonCharacters:    preferences.MaximumReasonCharacters,
+			ReasonPresets:              ids,
+		}
+	}
 	publicChat.StyleLock.MaximumTextCharacters = cloned.Chat.StyleLock.MaximumTextCharacters
 	publicChat.StyleLock.MaximumReferenceImages = cloned.Chat.StyleLock.MaximumReferenceImages
 	publicChat.StyleLock.Sources = append([]string(nil), cloned.Chat.StyleLock.Sources...)

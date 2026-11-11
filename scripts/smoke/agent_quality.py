@@ -108,17 +108,42 @@ def validate_request_set(data, purposes=None):
                     problems.append(f"{request_id}.steps[{step_index}]: missing user or tool.name")
                     continue
                 tool = step.get("tool") or {}
+                tools = step.get("tools")
                 setup = step.get("project_setup")
-                if setup is not None and setup not in PROJECT_SETUP_ACTIONS:
+                if tools is not None:
+                    if setup is not None or tool.get("name"):
+                        problems.append(f"{request_id}.steps[{step_index}]: a step is tools[], a tool or a project_setup, not more")
+                    elif not isinstance(tools, list) or not tools or any(
+                            not isinstance(item, dict) or not item.get("name") for item in tools):
+                        problems.append(f"{request_id}.steps[{step_index}]: tools[] needs a name on every call")
+                elif setup is not None and setup not in PROJECT_SETUP_ACTIONS:
                     problems.append(f"{request_id}.steps[{step_index}]: unknown project_setup {setup}")
                 elif setup is not None and tool.get("name"):
                     problems.append(f"{request_id}.steps[{step_index}]: a step is a tool or a project_setup, not both")
-                elif setup is None and not tool.get("name"):
+                elif setup is None and not tool.get("name") and not step.get("feedback"):
                     problems.append(f"{request_id}.steps[{step_index}]: missing user or tool.name")
                 elif setup == "promote_first_image":
                     asset = step.get("asset")
                     if asset is not None and (not isinstance(asset, dict) or not str(asset.get("name") or "").strip()):
                         problems.append(f"{request_id}.steps[{step_index}]: a promoted asset needs a name")
+                feedback = step.get("feedback")
+                if feedback is not None:
+                    if not isinstance(feedback, list) or not feedback:
+                        problems.append(f"{request_id}.steps[{step_index}]: feedback must be a non-empty list")
+                    else:
+                        for action_index, action in enumerate(feedback):
+                            if not isinstance(action, dict) or action.get("action") not in PREFERENCE_ACTIONS:
+                                problems.append(f"{request_id}.steps[{step_index}].feedback[{action_index}]: unknown action")
+                                continue
+                            if action["action"] in ("pick", "reject"):
+                                index = action.get("task")
+                                prompt = action.get("prompt")
+                                if (not isinstance(index, int) or index < 0) and not (isinstance(prompt, str) and prompt):
+                                    problems.append(f"{request_id}.steps[{step_index}].feedback[{action_index}]: needs a task index or prompt")
+                            if action["action"] == "reject" and action.get("reasonPreset") is not None and not isinstance(action.get("reasonPreset"), str):
+                                problems.append(f"{request_id}.steps[{step_index}].feedback[{action_index}]: reasonPreset must be a string")
+                            if action["action"] == "edit" and not any(key in action for key in ("direction", "reasonPreset", "reasonText", "active")):
+                                problems.append(f"{request_id}.steps[{step_index}].feedback[{action_index}]: edit changes nothing")
         expected = request.get("expected") or {}
         if not expected.get("capabilities"):
             problems.append(f"{request_id}: expected.capabilities is empty")
@@ -133,7 +158,20 @@ def validate_request_set(data, purposes=None):
             value = budgets.get(name)
             if not isinstance(value, int) or value < 0:
                 problems.append(f"{request_id}: budgets.{name} must be a non-negative integer")
+        preference_checks = expected.get("preferences")
+        if preference_checks is not None:
+            if not isinstance(preference_checks, dict):
+                problems.append(f"{request_id}: expected.preferences must be an object")
+            else:
+                for name, value in preference_checks.items():
+                    if name not in PREFERENCE_CHECKS or not isinstance(value, bool):
+                        problems.append(f"{request_id}: expected.preferences.{name} is not a boolean check")
     return problems
+
+
+# #241: the feedback actions a trajectory step may perform between turns.
+PREFERENCE_ACTIONS = ("pick", "reject", "compact", "edit", "delete")
+PREFERENCE_CHECKS = ("captured", "injected", "after_compaction", "edited", "deleted")
 
 
 def load_requests(path=REQUESTS_PATH):
@@ -279,6 +317,55 @@ def evaluate_case(request, run):
     check("budget:tool_calls", len(names) <= budgets.get("max_tool_calls", 10 ** 9), f"{len(names)} call(s)")
     check("budget:interruptions", len(cards) <= budgets.get("max_interruptions", 10 ** 9), f"{len(cards)} card(s)")
     checks.extend(run.get("output_checks") or [])
+
+    # #241: the feedback facts and the prompts the fake-only convention
+    # produced from them at each stage.
+    preference_expectations = expected.get("preferences") or {}
+    if preference_expectations:
+        facts = run.get("preference_facts") or {}
+        captured = run.get("preference_captured") or []
+        kinds = {preference.get("kind") for preference in captured}
+        prompts = {record.get("stage"): record.get("prompt") or "" for record in run.get("preference_prompts") or []}
+        selected = facts.get("selected_direction") or ""
+        rejected = facts.get("rejected_direction") or ""
+        rejected_reason = facts.get("rejected_reason") or ""
+        edited = facts.get("edited_direction") or ""
+        edited_reason = facts.get("edited_reason") or ""
+
+        def staged(stage):
+            return prompts.get(stage, "")
+
+        if preference_expectations.get("captured"):
+            check("preference:captured", {"selected", "rejected"} <= kinds,
+                  f"kinds={sorted(kind for kind in kinds if kind)}")
+        if preference_expectations.get("injected"):
+            prompt = staged("captured")
+            check("preference:injected",
+                  bool(selected and rejected and rejected_reason and selected in prompt
+                       and rejected in prompt and rejected_reason in prompt),
+                  f"selected={'yes' if selected and selected in prompt else 'no'} "
+                  f"rejected={'yes' if rejected and rejected in prompt else 'no'} "
+                  f"reason={'yes' if rejected_reason and rejected_reason in prompt else 'no'}")
+        if preference_expectations.get("after_compaction"):
+            prompt = staged("after_compaction")
+            check("preference:after_compaction",
+                  bool(selected and selected in prompt and rejected and rejected in prompt),
+                  f"compacted_prompt={'found' if prompt else 'missing'}")
+        if preference_expectations.get("edited"):
+            prompt = staged("edited")
+            check("preference:edited",
+                  bool(edited and edited in prompt and (not edited_reason or edited_reason in prompt)
+                       and (not rejected or rejected not in prompt)),
+                  f"edited={'yes' if edited and edited in prompt else 'no'} "
+                  f"old_gone={'yes' if rejected and rejected not in prompt else 'no'}")
+        if preference_expectations.get("deleted"):
+            prompt = staged("deleted")
+            check("preference:deleted",
+                  bool(prompt and (not edited or edited not in prompt)
+                       and (not edited_reason or edited_reason not in prompt)
+                       and (not selected or selected in prompt)),
+                  f"edited_gone={'yes' if edited and edited not in prompt else 'no'} "
+                  f"selected_kept={'yes' if selected and selected in prompt else 'no'}")
 
     counts = {}
     for name in names:

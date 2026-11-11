@@ -532,6 +532,72 @@
         "soft_tools": ["inspect_model", "compare_model_reference", "record_self_check"],
         "budgets": {"max_paid_calls": 1, "max_tool_calls": 10, "max_interruptions": 2}
       }
+    },
+    {
+      "id": "2d-preference-multiturn",
+      "title": "2D 多轮反馈：选用、否决与弱信号进入后续生成",
+      "modality": "2d",
+      "category": "multi_turn_feedback",
+      "purpose": "illustration",
+      "prompt": "先按四个方向各出一张概念图，我选一张、否一张，之后按我的取舍继续画。",
+      "reference_images": [],
+      "deliverables": ["四张不同方向的候选", "带已选用/已否决方向的下一轮提示词", "压缩后仍生效的偏好摘要"],
+      "steps": [
+        {
+          "user": "四个方向各出一张。",
+          "tools": [
+            {"name": "refine_image", "arguments": {"prompt": "PREF-CAND-0 a watercolor fox in the snow, soft ink wash, cool palette"}},
+            {"name": "refine_image", "arguments": {"prompt": "PREF-CAND-1 a photorealistic fox portrait, studio lighting, detailed fur"}},
+            {"name": "refine_image", "arguments": {"prompt": "PREF-CAND-2 a clay fox figurine, hand-painted, warm palette"}},
+            {"name": "refine_image", "arguments": {"prompt": "PREF-CAND-3 a low-poly fox, flat shading, game asset"}}
+          ]
+        },
+        {
+          "user": "我选水墨那张，不要写实那张（风格不对，太写实了）。",
+          "feedback": [
+            {"action": "pick", "prompt": "PREF-CAND-0 a watercolor fox in the snow, soft ink wash, cool palette"},
+            {"action": "reject", "prompt": "PREF-CAND-1 a photorealistic fox portrait, studio lighting, detailed fur", "reasonPreset": "style", "reasonText": "too realistic"}
+          ]
+        },
+        {
+          "user": "按我的取舍再画一张。",
+          "tool": {"name": "refine_image", "arguments": {"prompt_from_preferences": true}}
+        },
+        {
+          "user": "先压缩一下上下文，再按取舍画。",
+          "feedback": [{"action": "compact"}]
+        },
+        {
+          "user": "压缩后按偏好再画一张。",
+          "tool": {"name": "refine_image", "arguments": {"prompt_from_preferences": true}}
+        },
+        {
+          "user": "把否决改成水墨风，原因是洗淡了。",
+          "feedback": [{"action": "edit", "direction": "PREF-EDIT an ink-wash fox", "reasonPreset": "other", "reasonText": "washed out"}]
+        },
+        {
+          "user": "编辑后再画一张。",
+          "tool": {"name": "refine_image", "arguments": {"prompt_from_preferences": true}}
+        },
+        {
+          "user": "删掉那条否决。",
+          "feedback": [{"action": "delete"}]
+        },
+        {
+          "user": "删除后再画一张。",
+          "tool": {"name": "refine_image", "arguments": {"prompt_from_preferences": true}}
+        }
+      ],
+      "live_followups": ["先出四张候选，然后按我选中的方向继续画，避开我否掉的方向。"],
+      "expected": {
+        "capabilities": ["text-to-image"],
+        "required_tool_groups": [
+          {"id": "candidates", "any": ["refine_image"]}
+        ],
+        "soft_tools": [],
+        "budgets": {"max_paid_calls": 8, "max_tool_calls": 12, "max_interruptions": 2},
+        "preferences": {"captured": true, "injected": true, "after_compaction": true, "edited": true, "deleted": true}
+      }
     }
 
   ]

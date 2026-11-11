@@ -378,6 +378,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		StyleLockSources:           applicationSchema.Chat.StyleLock.Sources,
 		Projects:                   projectSource,
 		VisualAnchors:              applicationSchema.Chat.VisualAnchors,
+		Preferences:                applicationSchema.Chat.Preferences,
 		CanvasInputSource:          applicationSchema.Chat.Context.CanvasInputSource,
 		// A turn's pick of a retired generation model runs on its successor
 		// (#329 follow-up).

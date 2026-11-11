@@ -52,6 +52,9 @@ vi.mock('@/components/workspace/harness-panel', () => ({
 vi.mock('@/components/workspace/style-lock-panel', () => ({
   StyleLockSection: ({ sessionId }: { sessionId: string | null }) => <div data-testid="stub-style-lock" data-session={sessionId ?? ''} />,
 }));
+vi.mock('@/components/workspace/preferences-panel', () => ({
+  PreferencesPanel: ({ sessionId }: { sessionId: string | null }) => <div data-testid="stub-preferences" data-session={sessionId ?? ''} />,
+}));
 vi.mock('@/components/canvas/layers-panel', () => ({
   CanvasLayersPanel: ({ sessionId }: { sessionId: string }) => <div data-testid="stub-layers" data-session={sessionId} />,
 }));
@@ -103,6 +106,10 @@ describe('nothing on the stage and an empty board', () => {
     expect(html).toContain('data-kind="none"');
     expect(html).toContain('data-testid="stub-operations" data-session="s1" data-task=""');
     expect(html).toContain('data-testid="stub-style-lock" data-session="s1"');
+    // #241: the preference summary sits in 功能, below the style lock and above the operation groups.
+    expect(html).toContain('data-testid="stub-preferences" data-session="s1"');
+    expect(html.indexOf('stub-style-lock')).toBeLessThan(html.indexOf('stub-preferences'));
+    expect(html.indexOf('stub-preferences')).toBeLessThan(html.indexOf('stub-operations'));
     expect(html.indexOf('right-panel-tabs')).toBeLessThan(html.indexOf('stub-style-lock'));
     expect(html).toContain('role="tablist"');
     expect(html).toContain('data-tab="operations"');

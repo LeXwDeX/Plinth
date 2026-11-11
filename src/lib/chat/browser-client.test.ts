@@ -1069,3 +1069,79 @@ describe('native task registration stream', () => {
     expect(events[0]).not.toHaveProperty('estimatedCredits');
   });
 });
+
+describe('session preferences (#241)', () => {
+  const preference = (schema: ProductSchema) => ({
+    [schema.chat.api.response_fields.id]: 'p1',
+    [schema.chat.api.preference!.kind]: 'rejected',
+    [schema.chat.api.preference!.source]: 'reject',
+    [schema.chat.api.preference!.direction]: 'a photorealistic face',
+    [schema.chat.api.preference!.reason_preset]: 'style',
+    [schema.chat.api.preference!.reason_text]: 'too realistic',
+    [schema.chat.api.preference!.active]: true,
+    [schema.chat.api.preference!.explicit]: true,
+    [schema.chat.api.preference!.user_edited]: false,
+    [schema.chat.api.preference!.alternatives]: ['@img1'],
+    [schema.chat.api.attachment.handle]: '@img2',
+    [schema.chat.api.attachment.task_id]: 't1',
+    [schema.chat.api.attachment.asset_id]: 'a2',
+    [schema.chat.api.response_fields.created_at]: '2026-07-26T10:00:00Z',
+  });
+
+  it('lists, rejects, reports a signal, edits and deletes through the Schema routes and member names', async () => {
+    const schema = schemaFixture();
+    schema.runtime.http.routes.chat_session_preferences = '/configured/{sessionID}/prefs';
+    schema.runtime.http.routes.chat_session_preference_item = '/configured/{sessionID}/prefs/{preferenceID}';
+    schema.chat.api.preference!.reason_preset = 'configured-preset';
+    schema.chat.api.preference!.reason_text = 'configured-reason';
+    const calls: Array<{ url: string; method: string; body?: unknown }> = [];
+    const client = createChatBrowserClient(schema, {
+      fetcher: async (input, init) => {
+        const method = init?.method ?? 'GET';
+        calls.push({ url: String(input), method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+        return Response.json({ [schema.chat.api.response_fields.preferences!]: [preference(schema)] });
+      },
+    });
+    const listed = await client.listPreferences('s/1');
+    expect(listed).toEqual([{
+      id: 'p1', kind: 'rejected', source: 'reject', direction: 'a photorealistic face',
+      reasonPreset: 'style', reasonText: 'too realistic', handle: '@img2', taskId: 't1', assetId: 'a2',
+      alternatives: ['@img1'], explicit: true, active: true, userEdited: false, createdAt: '2026-07-26T10:00:00Z',
+    }]);
+    await client.rejectCandidate('s/1', { kind: 'image', taskId: 't1', assetId: 'a2' }, 'style', 'too realistic');
+    await client.recordPreferenceSignal('s/1', 'regenerate', [{ kind: 'image', taskId: 't1', assetId: 'a2' }]);
+    await client.updatePreference('s/1', 'p1/1', { direction: 'an ink-wash fox', reasonPreset: 'other', active: true });
+    await client.deletePreference('s/1', 'p1/1');
+    expect(calls).toEqual([
+      { url: '/configured/s%2F1/prefs', method: 'GET' },
+      { url: '/configured/s%2F1/prefs', method: 'POST', body: {
+        kind: 'image', taskId: 't1', assetId: 'a2', 'configured-preset': 'style', 'configured-reason': 'too realistic',
+      } },
+      { url: '/configured/s%2F1/prefs', method: 'POST', body: {
+        signal: 'regenerate', handles: [{ kind: 'image', taskId: 't1', assetId: 'a2' }],
+      } },
+      { url: '/configured/s%2F1/prefs/p1%2F1', method: 'PUT', body: {
+        direction: 'an ink-wash fox', 'configured-preset': 'other', active: true,
+      } },
+      { url: '/configured/s%2F1/prefs/p1%2F1', method: 'DELETE' },
+    ]);
+  });
+
+  it('reads an empty list without the route and refuses to edit without it', async () => {
+    const schema = schemaFixture();
+    delete schema.runtime.http.routes.chat_session_preferences;
+    delete schema.runtime.http.routes.chat_session_preference_item;
+    const client = createChatBrowserClient(schema, { fetcher: async () => { throw new Error('must not call'); } });
+    expect(await client.listPreferences('s')).toEqual([]);
+    await expect(client.updatePreference('s', 'p1', { direction: 'x' })).rejects.toBeInstanceOf(Error);
+  });
+
+  it('keeps the server refusal and does not echo the preference body', async () => {
+    const schema = schemaFixture();
+    const client = createChatBrowserClient(schema, {
+      fetcher: async () => Response.json({ error: '生成参数格式无效' }, { status: 400 }),
+    });
+    await expect(client.rejectCandidate('s', { kind: 'image', taskId: 't1', assetId: 'a2' }, 'style', ''))
+      .rejects.toMatchObject({ status: 400, message: '生成参数格式无效' });
+  });
+});

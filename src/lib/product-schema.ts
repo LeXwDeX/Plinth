@@ -142,6 +142,9 @@ export interface ProductSchema {
         /** #239: the 2D model the person explicitly picked in the session (GET/PUT). Absent on older servers. */
         chat_session_model2d?: string;
         chat_session_pick?: string;
+        /** #241: the session's preference records (GET/POST) and one record (PUT/DELETE). */
+        chat_session_preferences?: string;
+        chat_session_preference_item?: string;
         chat_session_agent_scope?: string;
         /** #322: the session's thinking level (GET/PUT). Absent on older servers: the picker is hidden. */
         chat_session_reasoning?: string;
@@ -1512,6 +1515,8 @@ export interface ChatProductSchema {
       images: string;
       url: string;
       task_id: string;
+      /** #241: the session's active preference records. */
+      preferences?: string;
       approval_mode: string;
       estimated_credits: string;
       parent_session_id?: string;
@@ -1601,6 +1606,24 @@ export interface ChatProductSchema {
        /** Request-only, optional: the picture URLs of the layers the artboard snapshot flattens (#189). */
        canvas_sources?: string;
      };
+     /**
+      * #241: members of a preference write and read. The reason/signal/direction/active members carry the
+      * request and the edit; the read members name the stored fact. The attachment and response member names
+      * carry id, task, asset, handle and createdAt.
+      */
+     preference?: {
+       reason_preset: string;
+       reason_text: string;
+       signal: string;
+       handles: string;
+       direction: string;
+       active: string;
+       kind: string;
+       source: string;
+       alternatives: string;
+       explicit: string;
+       user_edited: string;
+     };
      /** #154: members of the session style lock object. */
      style_lock: {
        enabled: string;
@@ -1685,6 +1708,17 @@ export interface ChatProductSchema {
   context: { image_index_base: number; maximum_session_notes_characters: number; canvas_input_source: string; reference_filename: string };
   /** #154: bounds for the session-level style lock editor. */
   style_lock: { maximum_text_characters: number; maximum_reference_images: number; sources?: string[] };
+  /** #241: the preference bounds and the declared rejection reason ids. Absent: the feature is unavailable. */
+  preferences?: {
+    maximum_entries: number;
+    maximum_direction_characters: number;
+    maximum_reason_characters: number;
+    /**
+     * The declared reason ids. The public projection sends ids only; the raw server Catalog (which tests
+     * sometimes cast to this type) carries {id,label} objects, so both shapes are accepted.
+     */
+    reason_presets: Array<string | { id: string; label: string }>;
+  };
   /** Paid-step approval modes the Schema offers, and which capabilities a person still decides in manual mode. */
   approval_policy: {
     default_mode: string;
