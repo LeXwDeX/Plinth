@@ -8,6 +8,12 @@ run the portrait option. The delivered image's real pixel ratio must match the
 chosen option. In separate sessions it then checks image-to-image:
 one reference keeps the source ratio, and two references make the agent state
 `reference_purposes`. Model names are never hard-coded. Needs ART_AI_LIVE_ACK=1.
+
+Each session first locks its 2D model with the model picker (model2d), and the delivered task
+is matched by model_id rather than only by capability: after #242 a turn may draw concept
+sketches and deliver an image-to-image final. L5_2D_MODELS, L5_2D_SHAPES,
+L5_2D_SKIP_MATRIX and L5_2D_SKIP_REFERENCES bound a run so a live check can stay within its
+per-provider budget.
 """
 import concurrent.futures
 import os
@@ -27,16 +33,27 @@ def generate(live, report, session, offering, shape, value):
     name, _ = common.size_options(offering)
     label = f"{offering['model_id']} {shape} {value}"
     prompt = f"生成{SUBJECTS[shape]}，简洁的矢量风格，画面中不要出现文字。"
-    known = live.tasks(session)
-    before = {t.get("id") for t in known}
-    existing = common.tasks_by_capability(known).get("text-to-image", 0)
-    reply, tasks, settled = live.run_turn(session, prompt, "image", offering["model_id"],
-                                          {"text-to-image": existing + 1}, parameters={name: value})
-    images = [t for t in tasks if t.get("id") not in before and t.get("capability") == "text-to-image"
-              and t.get("state") == common.SUCCESS_STATE]
-    if not report.check(f"{label} task SUCCEEDED", settled and bool(images), str(common.describe_tasks(tasks))):
+    # #270: bind the model with the session's 2D picker. The per-message ai_model is only the
+    # workspace value; without this lock the Agent may submit another model with a reason.
+    live.lock_model_2d(session, offering["model_id"])
+    before = {t.get("id") for t in live.tasks(session)}
+    match = lambda task: (task.get("model_id") == offering["model_id"]
+                          and task.get("state") == common.SUCCESS_STATE)
+    # #242: the turn may draw concept sketches, answer a direction card, then deliver the final
+    # image with a sketch as reference. Match a new task by model, not only text-to-image.
+    reply, tasks, task = live.run_generation(session, prompt, "image", offering["model_id"], before, match,
+                                             parameters={name: value})
+    if not report.check(f"{label} task SUCCEEDED", bool(task), str(common.describe_tasks(tasks))):
         return None
-    dimensions = live.first_required_image(images[0]["id"])
+    report.check(f"{label} used the requested model", task.get("model_id") == offering["model_id"],
+                 f"model={task.get('model_id')} offering={task.get('offering_id')}")
+    frozen = common.frozen_parameters(live.task(task["id"]))
+    if task.get("offering_id") == offering["id"] or name in frozen:
+        report.check(f"{label} size parameter reached the frozen task input", frozen.get(name) == value,
+                     f"frozen={frozen.get(name)}")
+    else:
+        print(f"INFO: {label} frozen input has no {name}; task offering {task.get('offering_id')}", flush=True)
+    dimensions = live.first_required_image(task["id"])
     expected = common.option_ratio(value)
     report.check(f"{label} pixel ratio matches option", common.ratio_matches(dimensions, expected),
                  f"pixels={dimensions}")
@@ -47,7 +64,14 @@ def generate(live, report, session, offering, shape, value):
         else:
             # The ratio is the contract; an exact pixel size is informational, not a skipped check.
             print(f"INFO: {label} exact pixel size - provider delivered {dimensions}", flush=True)
-    return images[0]
+    return task
+
+
+def wanted_shapes(full, shapes):
+    """Shapes this offering should run, narrowed by L5_2D_SHAPES (#270)."""
+    keys = list(shapes) if full else [s for s in ("portrait",) if s in shapes]
+    only = {s.strip() for s in os.environ.get("L5_2D_SHAPES", "").split(",") if s.strip()}
+    return [s for s in keys if not only or s in only]
 
 
 def run_offering(live, report, offering, full):
@@ -56,8 +80,13 @@ def run_offering(live, report, offering, full):
         return report.skipped(f"{offering['model_id']} size matrix", "Offering declares no output-size parameter")
     default = next((p.get("default") for p in offering["parameters"] if p["name"] == options[0]), None)
     shapes = common.pick_shapes(options[1], default)
+    wanted = wanted_shapes(full, shapes)
+    if not wanted:
+        return report.skipped(f"{offering['model_id']} shape matrix", "L5_2D_SHAPES selects no declared shape")
     session = live.new_session()
-    wanted = list(shapes) if full else [s for s in ("portrait",) if s in shapes]
+    if not session:
+        return report.failed(f"{offering['model_id']} session", "could not create a session")
+    live.lock_model_2d(session, offering["model_id"])
     for shape in wanted:
         generate(live, report, session, offering, shape, shapes[shape])
     return session if full else None
@@ -72,6 +101,9 @@ def reference_cases(live, report, offering):
         return report.skipped("image-to-image references", "the Offering declares no portrait and landscape size")
     model = offering["model_id"]
     session = live.new_session()
+    if not session:
+        return report.failed("image-to-image references session", "could not create a session")
+    live.lock_model_2d(session, model)
     source = generate(live, report, session, offering, "portrait", shapes["portrait"])
     if not source:
         return report.skipped("image-to-image references", "no source image")
@@ -87,6 +119,9 @@ def reference_cases(live, report, offering):
         report.check("one reference keeps the source ratio",
                      common.ratio_matches(result, source_size[0] / source_size[1]), f"source={source_size} result={result}")
     session = live.new_session()
+    if not session:
+        return report.failed("two-reference session", "could not create a session")
+    live.lock_model_2d(session, model)
     generate(live, report, session, offering, "portrait", shapes["portrait"])
     generate(live, report, session, offering, "landscape", shapes["landscape"])
     mark = len(live.messages(session))
@@ -98,12 +133,20 @@ def reference_cases(live, report, offering):
 
 def body(live, report):
     offerings = [o for o in live.offerings("text-to-image") if o.get("available") and o.get("model_id")]
+    wanted = {token.strip() for token in os.environ.get("L5_2D_MODELS", "").split(",") if token.strip()}
+    if wanted:
+        offerings = [o for o in offerings
+                     if o.get("model_id") in wanted or o.get("provider_id") in wanted
+                     or o.get("id") in wanted or o.get("id", "").split("/")[0] in wanted]
     if not offerings:
-        return report.failed("text-to-image Offerings available")
+        return report.failed("text-to-image Offerings available", "L5_2D_MODELS selected none")
     primary = next((o for o in offerings if common.size_options(o)), offerings[0])
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(offerings) + 1) as pool:
-        futures = [pool.submit(run_offering, live, report, o, o is primary) for o in offerings]
-        futures.append(pool.submit(reference_cases, live, report, primary))
+        futures = []
+        if os.environ.get("L5_2D_SKIP_MATRIX") != "1":
+            futures = [pool.submit(run_offering, live, report, o, o is primary) for o in offerings]
+        if os.environ.get("L5_2D_SKIP_REFERENCES") != "1":
+            futures.append(pool.submit(reference_cases, live, report, primary))
         for future in futures:
             future.result()
 

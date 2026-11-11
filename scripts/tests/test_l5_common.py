@@ -23,6 +23,16 @@ def load():
 c = load()
 
 
+def load_2d():
+    spec = importlib.util.spec_from_file_location("smoke_l5_2d_params", SMOKE / "smoke-l5-2d-params.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+d = load_2d()
+
+
 def task(capability, state, **extra):
     return {"capability": capability, "state": state, **extra}
 
@@ -199,6 +209,169 @@ class ChoiceCards(unittest.TestCase):
         reply, tasks, settled = live.follow_turn("s1", {"text-to-3d": 1})
         self.assertEqual((reply, [item["id"] for item in tasks], settled), ("按计划生成了模型", ["t1"], True))
         self.assertEqual(self.posted(client), [])
+
+
+class ChoiceOption(unittest.TestCase):
+    def card(self, **extra):
+        return {"id": "ch1", "options": [{"id": "default", "arguments": {"model": "gpt-image"}},
+                                         {"id": "want", "arguments": {"model": "nano-banana-pro"}}], **extra}
+
+    def test_prefers_the_requested_model(self):
+        self.assertEqual(c.choice_option(self.card(allow_default=True, default_option_id="default"),
+                                         "nano-banana-pro"),
+                         ({"choice_id": "ch1", "option_id": "want"}, "want"))
+
+    def test_option_arguments_may_be_a_json_string(self):
+        card = {"id": "ch", "options": [{"id": "want", "arguments": '{"model": "nano-banana-pro"}'}]}
+        self.assertEqual(c.choice_option(card, "nano-banana-pro"),
+                         ({"choice_id": "ch", "option_id": "want"}, "want"))
+
+    def test_falls_back_to_default_then_recommended(self):
+        self.assertEqual(c.choice_option(self.card(allow_default=True, default_option_id="default")),
+                         ({"choice_id": "ch1", "use_default": True}, "default"))
+        self.assertEqual(c.choice_option(self.card()), ({"choice_id": "ch1", "option_id": "default"}, "default"))
+        recommended = {"id": "ch", "options": [{"id": "a"}, {"id": "b", "recommended": True}]}
+        self.assertEqual(c.choice_option(recommended), ({"choice_id": "ch", "option_id": "b"}, "b"))
+        self.assertEqual(c.choice_option({"id": "ch", "options": []}), (None, None))
+
+
+class DeliveredTask(unittest.TestCase):
+    def test_newest_matching_model_and_state(self):
+        tasks = [{"id": "final", "model_id": "m", "state": "SUCCEEDED"},
+                 {"id": "sketch", "model_id": "m", "state": "SUCCEEDED"},
+                 {"id": "old", "model_id": "m", "state": "SUCCEEDED"},
+                 {"id": "other", "model_id": "x", "state": "SUCCEEDED"}]
+        self.assertEqual(c.delivered_task(tasks, {"old"}, "m")["id"], "final")
+        self.assertIsNone(c.delivered_task(tasks, {"final", "sketch", "old"}, "m"))
+        self.assertIsNone(c.delivered_task(tasks, set(), "m", state="FAILED"))
+
+    def test_frozen_parameters(self):
+        self.assertEqual(c.frozen_parameters({"input": {"parameters": {"size": "3:4"}}}), {"size": "3:4"})
+        self.assertEqual(c.frozen_parameters({}), {})
+
+
+class RecordingClient:
+    def __init__(self, status=200, body=None):
+        self.status, self.body, self.calls = status, body or {}, []
+
+    def call(self, method, path, body=None, **_):
+        self.calls.append((method, path, body))
+        return self.status, self.body
+
+
+class ModelLock(unittest.TestCase):
+    def test_locks_the_2d_picker(self):
+        client = RecordingClient()
+        c.Live(client, None, None).lock_model_2d("s1", "nano-banana-pro")
+        self.assertEqual(client.calls, [("PUT", "/api/v1/chat/sessions/s1/model2d",
+                                         {"explicit_model_2d": "nano-banana-pro"})])
+
+    def test_rejects_a_failed_lock(self):
+        with self.assertRaises(RuntimeError):
+            c.Live(RecordingClient(404), None, None).lock_model_2d("s1", "m")
+
+
+class GenerationLive(unittest.TestCase):
+    class Arguments:
+        turn_timeout = 5
+        task_timeout = 5
+
+    def test_matches_a_new_model_task_regardless_of_capability(self):
+        client = RecordingClient(202)
+        live = c.Live(client, None, self.Arguments())
+        live.wait_reply = lambda session_id: "done"
+        live.answer_pending_choices = lambda session_id, preferred_model=None: False
+        responses = [
+            [{"id": "old", "model_id": "m", "state": "SUCCEEDED"}],
+            [{"id": "final", "model_id": "m", "capability": "image-to-image", "state": "SUCCEEDED"},
+             {"id": "old", "model_id": "m", "state": "SUCCEEDED"}],
+        ]
+        live.tasks = lambda session_id: responses.pop(0) if len(responses) > 1 else responses[0]
+        match = lambda task: task.get("model_id") == "m" and task.get("state") == c.SUCCESS_STATE
+        reply, tasks, task = live.run_generation("s1", "draw", "image", "m", {"old"}, match, poll=0)
+        self.assertEqual((reply, task["id"]), ("done", "final"))
+        self.assertEqual(client.calls[0][0], "POST")
+
+    def test_answers_a_pending_card_before_matching_a_sketch(self):
+        client = RecordingClient(202)
+        live = c.Live(client, None, self.Arguments())
+        live.wait_reply = lambda session_id: "done"
+        seen = []
+        answers = [True, False]
+
+        def answer(session_id, preferred_model=None):
+            if not answers:
+                return False
+            if answers[0]:
+                self.assertEqual(seen, [])  # the card is answered before any task read
+            return answers.pop(0)
+        live.answer_pending_choices = answer
+        final = {"id": "final", "model_id": "m", "state": "SUCCEEDED"}
+        sketch = {"id": "sketch", "model_id": "m", "state": "SUCCEEDED"}
+        live.tasks = lambda session_id: (seen.append("tasks"), [final, sketch])[1]
+        match = lambda task: task.get("model_id") == "m" and task.get("state") == c.SUCCESS_STATE
+        _, _, task = live.run_generation("s1", "draw", "image", "m", {"old"}, match, poll=0)
+        self.assertEqual(task["id"], "final")
+        # The answer ran before the first task read; a task read first would have matched the sketch.
+        self.assertEqual(seen, ["tasks"])
+
+
+class GenerateLive:
+    def __init__(self, task, dimensions):
+        self._task, self._dimensions = task, dimensions
+        self._payload = {"id": task["id"], "input": {"parameters": {"aspect_ratio": "3:4"}}}
+        self.locks = []
+
+    def lock_model_2d(self, session, model):
+        self.locks.append((session, model))
+
+    def tasks(self, session):
+        return [self._task]
+
+    def run_generation(self, session, content, domain, model, before, match, parameters=None):
+        return "reply", [self._task], self._task
+
+    def task(self, task_id):
+        return self._payload
+
+    def first_required_image(self, task_id):
+        return self._dimensions
+
+
+class GenReport:
+    def __init__(self):
+        self.items = []
+
+    def check(self, item, ok, detail=""):
+        self.items.append((item, bool(ok), detail))
+        return bool(ok)
+
+    def passed(self, item, detail=""):
+        self.items.append((item, True, detail))
+
+
+class Generate(unittest.TestCase):
+    OFFERING = {"id": "meshy/nano-banana-pro/text-to-image", "model_id": "nano-banana-pro",
+                "parameters": [{"name": "aspect_ratio", "semantic": "output-size", "options": [{"value": "3:4"}]}]}
+
+    def test_locks_the_model_and_reports_the_ratio(self):
+        task = {"id": "t1", "model_id": "nano-banana-pro", "offering_id": "meshy/nano-banana-pro/text-to-image",
+                "capability": "text-to-image", "state": "SUCCEEDED"}
+        live, report = GenerateLive(task, (896, 1200)), GenReport()
+        self.assertIs(d.generate(live, report, "s1", self.OFFERING, "portrait", "3:4"), task)
+        self.assertEqual(live.locks, [("s1", "nano-banana-pro")])
+        items = {item: ok for item, ok, _ in report.items}
+        self.assertTrue(items["nano-banana-pro portrait 3:4 used the requested model"])
+        self.assertTrue(items["nano-banana-pro portrait 3:4 size parameter reached the frozen task input"])
+        self.assertTrue(items["nano-banana-pro portrait 3:4 pixel ratio matches option"])
+
+    def test_fails_the_model_check_for_another_model(self):
+        task = {"id": "t1", "model_id": "gpt-image-2.6-sunburst", "offering_id": "openai/gpt-image-2/text-to-image",
+                "capability": "text-to-image", "state": "SUCCEEDED"}
+        report = GenReport()
+        d.generate(GenerateLive(task, (1152, 2048)), report, "s1", self.OFFERING, "portrait", "3:4")
+        items = {item: ok for item, ok, _ in report.items}
+        self.assertFalse(items["nano-banana-pro portrait 3:4 used the requested model"])
 
 
 class Waiting(unittest.TestCase):

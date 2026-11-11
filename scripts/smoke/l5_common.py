@@ -448,6 +448,53 @@ def describe_tasks(tasks):
     return described
 
 
+def delivered_task(tasks, before, model_id, state=SUCCESS_STATE):
+    """The newest task created after `before` for `model_id` in `state`, or None (#270).
+
+    The task list is newest first. Selecting by model and state, not only by capability,
+    keeps a text-to-image sketch or another model's task from being asserted as the
+    offering's delivered image.
+    """
+    for task in tasks or []:
+        if task.get("id") in before:
+            continue
+        if task.get("model_id") == model_id and task.get("state") == state:
+            return task
+    return None
+
+
+def frozen_parameters(task):
+    """The frozen input parameters of a task payload (the server's prepared input)."""
+    return ((task or {}).get("input") or {}).get("parameters") or {}
+
+
+def choice_option(card, preferred_model=None):
+    """(answer, label) for a pending choice card, or (None, None).
+
+    With `preferred_model`, an option whose arguments name that model wins; otherwise the
+    existing default/recommended/first order is kept (#270). Option arguments may be a
+    dict or the JSON string the wire carries.
+    """
+    options = [option for option in card.get("options") or [] if isinstance(option, dict) and option.get("id")]
+    if preferred_model:
+        for option in options:
+            arguments = option.get("arguments")
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except ValueError:
+                    arguments = {}
+            if isinstance(arguments, dict) and preferred_model in (
+                    arguments.get("model"), arguments.get("ai_model"), arguments.get("model_id")):
+                return {"choice_id": card["id"], "option_id": option["id"]}, option["id"]
+    if card.get("allow_default") and card.get("default_option_id"):
+        return {"choice_id": card["id"], "use_default": True}, "default"
+    if options:
+        pick = next((option for option in options if option.get("recommended")), options[0])
+        return {"choice_id": card["id"], "option_id": pick["id"]}, pick["id"]
+    return None, None
+
+
 def title_generated(title):
     return bool(title) and title != DEFAULT_SESSION_TITLE
 
@@ -973,6 +1020,15 @@ class Live:
         require_ok(status, "lock 3D model")
         return data
 
+    def lock_model_2d(self, session_id, model):
+        """Pick a 2D model in the session's model picker, as a person does (#270): only this
+        explicit pick binds the 2D tools; the per-message ai_model is a workspace value and does
+        not stop the Agent from choosing another model."""
+        status, data = self.client.call("PUT", f"/api/v1/chat/sessions/{session_id}/model2d",
+                                        {"explicit_model_2d": model})
+        require_ok(status, "lock 2D model")
+        return data
+
     def set_brief(self, session_id, brief):
         """Fill the session's production brief, as a person does in the brief panel (#103)."""
         status, data = self.client.call("PUT", f"/api/v1/chat/sessions/{session_id}/brief", {"brief": brief})
@@ -1051,21 +1107,17 @@ class Live:
                 if isinstance(card, dict) and card.get("state") == "pending"
                 and card.get("id") not in self._answered_choices]
 
-    def answer_pending_choices(self, session_id):
+    def answer_pending_choices(self, session_id, preferred_model=None):
         """Answer each pending choice card once, after its turn has finished, with the default
-        (or else the recommended, or else the first) option. Returns whether a card was answered."""
+        (or else the recommended, or else the first) option. With `preferred_model`, an option
+        whose arguments name that model wins (#270). Returns whether a card was answered."""
         cards = self.pending_choices(session_id)
         if not cards or session_id not in self._last_send or not self.turn_finished(session_id, probe=2):
             return False
         domain, model, extra = self._last_send[session_id]
         for card in cards:
-            options = [option for option in card.get("options") or [] if isinstance(option, dict) and option.get("id")]
-            if card.get("allow_default") and card.get("default_option_id"):
-                answer, label = {"choice_id": card["id"], "use_default": True}, "default"
-            elif options:
-                pick = next((option for option in options if option.get("recommended")), options[0])
-                answer, label = {"choice_id": card["id"], "option_id": pick["id"]}, pick["id"]
-            else:
+            answer, label = choice_option(card, preferred_model)
+            if answer is None:
                 continue
             # The answer turn carries the original request's fields (for example
             # its structured parameters): the server reads them from this turn only.
@@ -1117,6 +1169,53 @@ class Live:
                 self.report.failed("final reply", "timed out waiting for the turn after the choice answer")
                 return None, self.tasks(session_id), False
         return reply, tasks, settled
+
+    def wait_new_task(self, session_id, before, match, timeout=None, poll=5, preferred_model=None,
+                      max_choice_turns=1):
+        """Wait for a new task matching `match`, refreshing tasks after each choice answer (#270).
+
+        A card answer extends the wait window by one `timeout`, at most `max_choice_turns` times;
+        the answer's turn is awaited before polling again. Returns (tasks, newest match or None).
+        """
+        deadline = time.time() + (timeout or self.arguments.task_timeout)
+        extensions = 0
+        while time.time() < deadline:
+            # A pending card means the turn stopped before the final image; the concept
+            # sketches from that turn are not the delivery. Answer first, then match (#270).
+            if self.answer_pending_choices(session_id, preferred_model=preferred_model):
+                if extensions < max_choice_turns:
+                    deadline = max(deadline, time.time() + (timeout or self.arguments.task_timeout))
+                    extensions += 1
+                self.wait_reply(session_id)
+                continue
+            tasks = self.tasks(session_id)
+            for task in tasks:  # newest first
+                if task.get("id") not in before and match(task):
+                    return tasks, task
+            time.sleep(poll)
+        return self.tasks(session_id), None
+
+    def run_generation(self, session_id, content, domain, model, before, match, parameters=None,
+                       timeout=None, poll=5, max_choice_turns=1):
+        """Send one generation request and wait for a new task matching `match` (#270).
+
+        Unlike run_turn, the match may be any capability (text-to-image or image-to-image);
+        a direction/choice turn can create concept sketches and then a reference-using final
+        image, so counting only text-to-image tasks can never settle. Returns
+        (reply, tasks, matched task or None).
+        """
+        extra = {"parameters": parameters} if parameters is not None else {}
+        status, data = self.send(session_id, content, domain, model, **extra)
+        if status not in (200, 201, 202):
+            self.report.failed("message accepted", f"HTTP {status}")
+            return None, [], None
+        reply = self.wait_reply(session_id)
+        if reply is None:
+            self.report.failed("final reply", "timed out waiting for the turn to finish")
+            return None, self.tasks(session_id), None
+        tasks, task = self.wait_new_task(session_id, before, match, timeout=timeout, poll=poll,
+                                         preferred_model=model, max_choice_turns=max_choice_turns)
+        return reply, tasks, task
 
     def login(self):
         environ = os.environ
