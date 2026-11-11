@@ -1491,7 +1491,6 @@
     },
     {
       "id": "2d-open-concept",
-      "approval": "auto",
       "title": "开放 2D 需求：森林守卫的多个概念方向",
       "modality": "2d",
       "category": "open_concept",

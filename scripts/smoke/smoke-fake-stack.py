@@ -1009,7 +1009,7 @@ def scenario_hyper3d_agent(api, offerings):
     session = new_session(api)
     # Strict (manual) approval, so every step of the chain waits for its own card
     # instead of a budget policy approving the cheaper steps automatically.
-    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": request.get("approval") or "budget"})
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
     if status != 200:
         record("hyper3d agent: switch the session to manual approval", False, f"approval mode {status}")
         return
