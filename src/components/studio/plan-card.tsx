@@ -15,7 +15,7 @@ import {
 import { priceTotalsAmountsText } from '@/lib/chat/approval-modes';
 import type { PriceTotal } from '@/lib/pricing';
 import { completedPlanSteps, planCandidateGroups, planStepProgress, type PlanTask } from '@/lib/chat/plan-progress';
-import { formatSchemaText, schemaText, taskStatePresentation, type ProductSchema } from '@/lib/product-schema';
+import { formatSchemaText, schemaCountMessage, schemaText, taskStatePresentation, type ProductSchema } from '@/lib/product-schema';
 import { cn } from '@/lib/utils';
 
 /**
@@ -122,6 +122,8 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
   // step keeps the ordinary ordered list.
   const mainProgress = stepProgress.filter((entry) => (entry.step.candidateGroup ?? 0) <= 0);
   const candidateGroups = planCandidateGroups(stepProgress, isCompleteTask);
+  // #242: the heading counts every declared candidate, not the number of groups.
+  const candidateCount = candidateGroups.reduce((total, group) => total + group.entries.length, 0);
   // Every amount is listed per credit unit with its label; the card never adds units.
   const limits = progress ? budgetUnitTotals(progress.units, 'limit') : budgets;
   const reserved = progress ? budgetUnitsWith(progress.units, 'reserved') : [];
@@ -227,10 +229,15 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
       {candidateGroups.length > 0 ? (
         <section className="flex flex-col gap-1" data-testid="studio-plan-candidates">
           <span className="text-[11px] text-foreground/70">
-            {formatSchemaText(text('ui.studio.plan.candidates'), { count: candidateGroups.length })}
+            {schemaCountMessage(schema, 'ui.studio.plan.candidates', candidateCount, { count: candidateCount })}
           </span>
           {candidateGroups.map((group) => {
-            const runnable = group.entries.flatMap((entry) => entry.task ? [entry.task] : []);
+            // #242: only a succeeded candidate can be compared or opened; a
+            // running or failed one is still listed with its own state.
+            const finished = group.entries.flatMap((entry) =>
+              entry.task && isCompleteTask(entry.task) ? [entry.task] : []);
+            const canCompare = onCompareCandidates !== undefined && finished.length >= 2;
+            const canSelect = onSelectCandidate !== undefined && finished.length > 0;
             return (
               <div
                 key={group.group}
@@ -268,24 +275,26 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
                     );
                   })}
                 </ol>
-                {onCompareCandidates && runnable.length >= 2 ? (
+                {canCompare || canSelect ? (
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <Action
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onCompareCandidates(runnable.map((task) => task.taskId))}
-                      data-testid="studio-plan-compare-candidates"
-                    >
-                      {text('ui.studio.plan.compare_candidates')}
-                    </Action>
-                    {onSelectCandidate ? runnable.map((task) => (
+                    {canCompare ? (
+                      <Action
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onCompareCandidates!(finished.map((task) => task.taskId))}
+                        data-testid="studio-plan-compare-candidates"
+                      >
+                        {text('ui.studio.plan.compare_candidates')}
+                      </Action>
+                    ) : null}
+                    {canSelect ? finished.map((task) => (
                       <Action
                         key={task.taskId}
                         type="button"
                         size="sm"
                         variant="ghost"
-                        onClick={() => onSelectCandidate(task.taskId)}
+                        onClick={() => onSelectCandidate!(task.taskId)}
                         data-testid="studio-plan-select-candidate"
                         data-task-id={task.taskId}
                       >

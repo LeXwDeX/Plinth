@@ -9105,7 +9105,11 @@
         "max_description_characters": 120,
         "max_arguments_bytes": 4096,
         "limit_reached": "同一次回复最多画 {maximum} 个概念方向；请先让用户在这些方向里选择，再继续深入。",
-        "parameter_overrides": {}
+        "parameter_reason": "概念方向草图使用低成本参数，便于先发散再收敛；选定方向后再按正式制作参数深入。",
+        "parameter_overrides": {
+          "openai/gpt-image-2/text-to-image": {"quality": "low", "size": "1024x1024"},
+          "gemini/gemini-3-pro-image/text-to-image": {"image_size": "1K"}
+        }
       },
       "candidates": {
         "enabled": true,

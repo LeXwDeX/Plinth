@@ -3119,8 +3119,11 @@ type ChatConceptDirectionsSchema struct {
 	LimitReached string `json:"limit_reached"`
 	// ParameterOverrides maps an Offering ID to public parameter values every
 	// sketch on that Offering runs with (a cheaper size or quality). Values are
-	// validated at load time exactly like a real submission.
+	// validated at load time exactly like a real submission. ParameterReason is
+	// the server-supplied explanation frozen with an advised override; the
+	// Agent does not have to repeat it.
 	ParameterOverrides map[string]map[string]json.RawMessage `json:"parameter_overrides,omitempty"`
+	ParameterReason    string                                `json:"parameter_reason,omitempty"`
 }
 
 // ChatCandidatesSchema is application.chat.candidates (#242). A production

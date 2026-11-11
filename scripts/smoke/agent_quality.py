@@ -101,6 +101,9 @@ def validate_request_set(data, purposes=None):
         for capability, count in (expected.get("min_tasks") or {}).items():
             if capability not in (expected.get("capabilities") or []) or not isinstance(count, int) or count < 1:
                 problems.append(f"{request_id}: min_tasks.{capability} must be a positive count of a declared capability")
+        for name, count in (expected.get("min_tool_counts") or {}).items():
+            if not isinstance(name, str) or not name.strip() or not isinstance(count, int) or count < 1:
+                problems.append(f"{request_id}: min_tool_counts.{name} must be a positive count of a named tool")
         for group in expected.get("required_tool_groups") or []:
             if not group.get("id") or not group.get("any"):
                 problems.append(f"{request_id}: a required_tool_group needs id and any")
@@ -245,6 +248,12 @@ def evaluate_case(request, run):
     for group in expected.get("required_tool_groups") or []:
         check(f"tool_group:{group['id']}", group_satisfied(names, group),
               f"any of {group['any']}; called={names}")
+
+    # #242: an open concept request must actually draw several directions, and
+    # a candidate plan must submit every candidate; a single call is not enough.
+    for name, minimum in (expected.get("min_tool_counts") or {}).items():
+        actual = sum(1 for called in names if called == name)
+        check(f"min_tool:{name}", actual >= minimum, f"{actual}/{minimum} call(s)")
 
     for rule in expected.get("order") or []:
         ok, detail = order_satisfied(names, rule)

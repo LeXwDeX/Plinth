@@ -1009,7 +1009,7 @@ def scenario_hyper3d_agent(api, offerings):
     session = new_session(api)
     # Strict (manual) approval, so every step of the chain waits for its own card
     # instead of a budget policy approving the cheaper steps automatically.
-    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": request.get("approval") or "budget"})
     if status != 200:
         record("hyper3d agent: switch the session to manual approval", False, f"approval mode {status}")
         return
@@ -1786,6 +1786,8 @@ def _quality_answer(api, session, card, purpose, domain, model):
 
 def _quality_send(api, session, content, domain, model, image_urls=None):
     body = {"content": content, "creative_domain": domain, "ai_model": model}
+    if domain == "image" and model:
+        body["domainModels"] = {"image": model}
     if image_urls:
         body["image_urls"] = image_urls
     end = time.time() + 30
@@ -1871,36 +1873,43 @@ def run_quality_case(api, request, domain, model, model_3d="", work=""):
         if asset_id:
             reference_urls = [f"/api/v1/assets/{asset_id}"]
     for step in request["steps"]:
-        arguments = dict(step["tool"].get("arguments") or {})
-        if step["tool"]["name"] == "create_model_3d_from_image" and "input_override_reason" not in arguments:
-            # The fake upstream's generated picture is a 1x1 placeholder, not a
-            # real 3D input. The reference-trajectory runner records the
-            # person's explicit override; the live output run does not use
-            # these steps and the real Agent must pass the gate or ask.
-            arguments["input_override_reason"] = "the fake upstream image is a placeholder, not a real 3D input"
-        tool = {"name": step["tool"]["name"], "arguments": arguments}
-        model_task = _quality_model_task(api, session)
-        if model_task:
-            for name in ("model", "source_task_id", "source"):
-                if tool["arguments"].get(name) == "@model1":
-                    tool["arguments"][name] = model_task
-        if tool["name"] == "revise_processing_plan" and work:
-            # The plan pauses on its checkpoint after the background step
-            # finishes; the Agent reads its id/version from get_processing_plan.
-            paused = _wait_processing_plan(
-                work, session,
-                lambda plan: plan["state"] == "PAUSED" and plan["failure"] == "plan_checkpoint_failed",
-                seconds=180)
-            if paused:
-                if tool["arguments"].get("plan_id") in (None, "", "@plan1"):
-                    tool["arguments"]["plan_id"] = paused["id"]
-                if tool["arguments"].get("expected_plan_version") in (None, 0, "@plan_version"):
-                    tool["arguments"]["expected_plan_version"] = paused["version"]
-                if tool["arguments"].get("step_index") == "@checkpoint_step":
-                    tool["arguments"]["step_index"] = next(
-                        (index for index, item in enumerate(paused["steps"])
-                         if (item.get("checkpoint") or {}).get("state") == "failed"), 0)
-        content = f"{step['user']} {_quality_marker(tool)}"
+        # A step may carry several tool markers in one reply (#242 drafts three
+        # concept directions and the direction card together); single-tool
+        # steps keep their historical shape.
+        specs = step.get("tools") or [step["tool"]]
+        prepared = []
+        for spec in specs:
+            arguments = dict(spec.get("arguments") or {})
+            if spec["name"] == "create_model_3d_from_image" and "input_override_reason" not in arguments:
+                # The fake upstream's generated picture is a 1x1 placeholder, not a
+                # real 3D input. The reference-trajectory runner records the
+                # person's explicit override; the live output run does not use
+                # these steps and the real Agent must pass the gate or ask.
+                arguments["input_override_reason"] = "the fake upstream image is a placeholder, not a real 3D input"
+            tool = {"name": spec["name"], "arguments": arguments}
+            model_task = _quality_model_task(api, session)
+            if model_task:
+                for name in ("model", "source_task_id", "source"):
+                    if tool["arguments"].get(name) == "@model1":
+                        tool["arguments"][name] = model_task
+            if tool["name"] == "revise_processing_plan" and work:
+                # The plan pauses on its checkpoint after the background step
+                # finishes; the Agent reads its id/version from get_processing_plan.
+                paused = _wait_processing_plan(
+                    work, session,
+                    lambda plan: plan["state"] == "PAUSED" and plan["failure"] == "plan_checkpoint_failed",
+                    seconds=180)
+                if paused:
+                    if tool["arguments"].get("plan_id") in (None, "", "@plan1"):
+                        tool["arguments"]["plan_id"] = paused["id"]
+                    if tool["arguments"].get("expected_plan_version") in (None, 0, "@plan_version"):
+                        tool["arguments"]["expected_plan_version"] = paused["version"]
+                    if tool["arguments"].get("step_index") == "@checkpoint_step":
+                        tool["arguments"]["step_index"] = next(
+                            (index for index, item in enumerate(paused["steps"])
+                             if (item.get("checkpoint") or {}).get("state") == "failed"), 0)
+            prepared.append(tool)
+        content = f"{step['user']} " + " ".join(_quality_marker(tool) for tool in prepared)
         before_tasks = {task.get("id") for task in session_tasks(api, session)}
         if not _quality_send(api, session, content, domain, model,
                              image_urls=reference_urls if turns == 0 else None):

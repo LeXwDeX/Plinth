@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -43,6 +44,11 @@ func validateConceptDirections(schema ChatSchema) error {
 	if !imageDomain {
 		return fmt.Errorf("concept_directions.sketch_tool %q 不属于图像域", directions.SketchTool)
 	}
+	// #242: concept sketches are a 2D step; a 3D generation tool must never be
+	// drafted into the image flow.
+	if tool.Execution.AgentScope != "2d" {
+		return fmt.Errorf("concept_directions.sketch_tool %q 必须属于 2D 工具", directions.SketchTool)
+	}
 	kind, found := chatChoiceKind(schema, directions.Kind)
 	if !found || kind.OptionSource != "agent" {
 		return fmt.Errorf("concept_directions.kind %q 必须是 option_source=agent 的选择卡", directions.Kind)
@@ -67,6 +73,9 @@ func validateConceptDirections(schema ChatSchema) error {
 	}
 	if !strings.Contains(directions.LimitReached, "{maximum}") {
 		return errors.New("concept_directions.limit_reached 缺少 {maximum}")
+	}
+	if len(directions.ParameterOverrides) > 0 && strings.TrimSpace(directions.ParameterReason) == "" {
+		return errors.New("concept_directions.parameter_reason 不能为空：低成本覆盖需要随提交冻结的说明")
 	}
 	if directions.MaxLabelCharacters <= 0 || directions.MaxLabelCharacters > 120 ||
 		directions.MaxDescriptionCharacters <= 0 || directions.MaxDescriptionCharacters > 300 ||
@@ -94,6 +103,14 @@ func validateCandidates(schema ChatSchema) error {
 	}
 	if candidates.MaxCount < 2 {
 		return errors.New("candidates.max_count 至少为 2")
+	}
+	// #242: expanded candidate steps count against the plan's own step bound,
+	// so the plan the person approves can never exceed budget.max_steps.
+	// A historical or minimal Catalog may not declare budget steps at all; the
+	// runtime simply cannot expand candidates there, so keep it loadable.
+	if schema.ApprovalPolicy.Budget.MaxSteps > 0 && candidates.MaxCount > schema.ApprovalPolicy.Budget.MaxSteps {
+		return fmt.Errorf("candidates.max_count %d 超过 budget.max_steps %d",
+			candidates.MaxCount, schema.ApprovalPolicy.Budget.MaxSteps)
 	}
 	if len(candidates.Sources) == 0 {
 		return errors.New("candidates.sources 不能为空")
@@ -135,6 +152,11 @@ func validateReroll(schema ChatSchema) error {
 			return fmt.Errorf("reroll.seed_parameters 中 %q 重复", name)
 		}
 		seen[name] = true
+		// #242: a seed is a number the reroll replaces; a text or enum
+		// parameter declared by the same name must not be silently rewritten.
+		if !declaredIntegerParameter(schema, name) {
+			return fmt.Errorf("reroll.seed_parameters 的 %q 不是任何已声明工具的整数参数", name)
+		}
 	}
 	if reroll.MinSeed > reroll.MaxSeed {
 		return errors.New("reroll.min_seed 不能大于 max_seed")
@@ -171,11 +193,54 @@ func validateConceptDirectionOfferings(directions ChatConceptDirectionsSchema, b
 		if offering.Domain != schemacontract.DomainImage {
 			return fmt.Errorf("concept_directions.parameter_overrides 的 Offering %q 不属于图像域", id)
 		}
-		if err := simulateProfileParameters(offering, directions.ParameterOverrides[id]); err != nil {
-			return fmt.Errorf("concept_directions.parameter_overrides[%q]: %w", id, err)
+		overrides := map[string]json.RawMessage{}
+		for name, value := range directions.ParameterOverrides[id] {
+			fixed := false
+			for _, parameter := range offering.Parameters {
+				if parameter.Name == name && parameter.Fixed {
+					fixed = true
+					break
+				}
+			}
+			// A fixed parameter wins over any profile override; the value is
+			// simply not applied, so it must not make the Catalog unloadable.
+			if !fixed {
+				overrides[name] = value
+			}
+		}
+		if len(overrides) > 0 {
+			if err := simulateProfileParameters(offering, overrides); err != nil {
+				return fmt.Errorf("concept_directions.parameter_overrides[%q]: %w", id, err)
+			}
 		}
 	}
 	return nil
+}
+
+// declaredIntegerParameter reports whether any declared Agent or generation
+// tool takes a parameter of this name typed as an integer. A reroll only
+// rewrites numeric seeds (#242).
+func declaredIntegerParameter(schema ChatSchema, name string) bool {
+	integer := func(parameters json.RawMessage) bool {
+		var document map[string]any
+		if json.Unmarshal(parameters, &document) != nil {
+			return false
+		}
+		properties, _ := document["properties"].(map[string]any)
+		property, _ := properties[name].(map[string]any)
+		return property["type"] == "integer"
+	}
+	for _, tool := range schema.Tools {
+		if integer(tool.Parameters) {
+			return true
+		}
+	}
+	for _, tool := range schema.AgentTools {
+		if integer(tool.Parameters) {
+			return true
+		}
+	}
+	return false
 }
 
 // chatToolByName finds a declared generation or Agent tool.

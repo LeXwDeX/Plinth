@@ -90,8 +90,11 @@ func (k *fakeKernel) SubmitPrepared(_ context.Context, cmd generation.SubmitPrep
 type fakeGrants struct {
 	mu          sync.Mutex
 	autoApprove bool
-	byKey       map[string]executiongrant.Grant
-	prepares    int
+	// budgetPending leaves the grant pending as a budget authorisation would:
+	// a plan exists but the person has not approved this step yet.
+	budgetPending bool
+	byKey         map[string]executiongrant.Grant
+	prepares      int
 }
 
 func newGrants(auto bool) *fakeGrants {
@@ -119,9 +122,18 @@ func (g *fakeGrants) Prepare(_ context.Context, cmd executiongrant.PrepareComman
 func (g *fakeGrants) ApplyPolicy(_ context.Context, grant executiongrant.Grant) (executiongrant.Grant, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if grant.Status == executiongrant.Pending && g.autoApprove {
+	if grant.Status != executiongrant.Pending {
+		return grant, nil
+	}
+	if g.autoApprove {
 		grant.Status = executiongrant.Approved
 		grant.DecidedBy = executiongrant.PolicyActorPrefix + "auto"
+		g.byKey[grant.IdempotencyKey] = grant
+		return grant, nil
+	}
+	if g.budgetPending {
+		// A budget authorisation is recorded but not decided yet.
+		grant.BudgetEligible = true
 		g.byKey[grant.IdempotencyKey] = grant
 	}
 	return grant, nil
@@ -288,5 +300,95 @@ func TestRerollInputIgnoresNonSeedAndNonIntegerValues(t *testing.T) {
 	}
 	if values["model_seed"] != "seven" || values["texture_seed"] != float64(200) {
 		t.Fatalf("values = %#v", values)
+	}
+}
+
+// #242: a foreign task is not the caller's to replay, and a task without a
+// frozen input has nothing to replay.
+func TestRerollRefusesAForeignTaskAndATaskWithoutFrozenInput(t *testing.T) {
+	foreign := newKernel(succeeded("t1", "owner-b"))
+	svc := service(t, foreign, newGrants(true), frozenInput("frozen-t1", `{"prompt":"a fox"}`))
+	if _, err := svc.Reroll(context.Background(), human("owner-a"), "t1", "client-1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign owner err = %v, want ErrNotFound", err)
+	}
+
+	noOrigin := newKernel(succeeded("t1", "owner-a"))
+	noOriginService := service(t, noOrigin, newGrants(true), frozenInput("frozen-t1", `{"prompt":"a fox"}`))
+	noOriginService.config.Origins = fakeOrigins{grants: newGrants(true), prepared: map[string]string{"t1": ""}}
+	if _, err := noOriginService.Reroll(context.Background(), human("owner-a"), "t1", "client-1"); !errors.Is(err, ErrNoFrozenInput) {
+		t.Fatalf("empty origin err = %v, want ErrNoFrozenInput", err)
+	}
+
+	missing := newKernel(succeeded("t1", "owner-a"))
+	missingService := service(t, missing, newGrants(true), frozenInput("frozen-t1", `{"prompt":"a fox"}`))
+	missingService.config.Origins = fakeOrigins{grants: newGrants(true), prepared: map[string]string{"t1": "gone"}}
+	if _, err := missingService.Reroll(context.Background(), human("owner-a"), "t1", "client-1"); !errors.Is(err, ErrNoFrozenInput) {
+		t.Fatalf("missing origin err = %v, want ErrNoFrozenInput", err)
+	}
+	if len(noOrigin.prepares) != 0 || len(missing.prepares) != 0 {
+		t.Fatal("a refused reroll prepared an input")
+	}
+}
+
+// #242: the earlier admission under this key decides what a repeat does:
+// declined stays declined, and a claimed/bound admission is still in flight.
+func TestRerollReplaysTheEarlierGrantState(t *testing.T) {
+	cases := []struct {
+		name   string
+		status executiongrant.Status
+		want   error
+	}{
+		{"declined", executiongrant.Denied, ErrDeclined},
+		{"claimed", executiongrant.Claimed, ErrInProgress},
+		{"bound", executiongrant.Bound, ErrInProgress},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			kernel := newKernel(succeeded("t1", "owner-a"))
+			grants := newGrants(true)
+			key := IdempotencyKey("t1", "client-1")
+			grants.byKey[key] = executiongrant.Grant{
+				RequestID: "req-old", Status: test.status,
+				Identity: executiongrant.Identity{OwnerID: "owner-a", PreparedInputID: "frozen-t1", IdempotencyKey: key},
+			}
+			svc := service(t, kernel, grants, frozenInput("frozen-t1", `{"prompt":"a fox"}`))
+			if _, err := svc.Reroll(context.Background(), human("owner-a"), "t1", "client-1"); !errors.Is(err, test.want) {
+				t.Fatalf("err = %v, want %v", err, test.want)
+			}
+			if len(kernel.prepares) != 0 || len(kernel.submits) != 0 {
+				t.Fatalf("a %s grant created work: prepares=%d submits=%d", test.name, len(kernel.prepares), len(kernel.submits))
+			}
+		})
+	}
+}
+
+// #242: a budget plan can hold the reroll pending; it is the same paid step as
+// any other, so the task appears only after the person approves the plan.
+func TestRerollWaitsForABudgetApproval(t *testing.T) {
+	kernel := newKernel(succeeded("t1", "owner-a"))
+	grants := newGrants(false)
+	grants.budgetPending = true
+	svc := service(t, kernel, grants, frozenInput("frozen-t1", `{"prompt":"a fox","model_seed":7}`))
+	first, err := svc.Reroll(context.Background(), human("owner-a"), "t1", "client-1")
+	if err != nil || first.Waiting == nil || first.TaskID != "" {
+		t.Fatalf("first = %+v err=%v", first, err)
+	}
+	if len(kernel.submits) != 0 {
+		t.Fatal("a task was submitted before the budget approval")
+	}
+	// Repeating the key while the budget waits reuses the same admission.
+	again, err := svc.Reroll(context.Background(), human("owner-a"), "t1", "client-1")
+	if err != nil || again.Waiting == nil || again.Waiting.RequestID != first.Waiting.RequestID {
+		t.Fatalf("again = %+v err=%v", again, err)
+	}
+	if len(kernel.prepares) != 1 || len(grants.byKey) != 1 {
+		t.Fatalf("the repeat prepared another admission: prepares=%d grants=%d", len(kernel.prepares), len(grants.byKey))
+	}
+	grants.budgetPending = false
+	grants.autoApprove = true
+	done, err := svc.Reroll(context.Background(), human("owner-a"), "t1", "client-1")
+	if err != nil || done.TaskID == "" || len(kernel.submits) != 1 ||
+		kernel.submits[0].AuthorizationRef != first.Waiting.RequestID {
+		t.Fatalf("done = %+v err=%v submits=%+v", done, err, kernel.submits)
 	}
 }
