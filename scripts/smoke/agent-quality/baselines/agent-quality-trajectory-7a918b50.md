@@ -105,4 +105,3 @@
 - 自检：{'inspect_model': 1, 'render_model_views': 0, 'compare_model_reference': 1, 'self_check_records': 1, 'self_check_passed': 1, 'self_check_issues': 0}
 - 任务：[('image-to-3d', 'SUCCEEDED')]
 - 最终回复：20 字符
-
