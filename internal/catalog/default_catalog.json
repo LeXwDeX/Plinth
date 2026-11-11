@@ -2791,7 +2791,9 @@
       "ui.project.session_images": "本会话的定稿图片",
       "ui.project.style_enabled": "启用项目风格指南",
       "ui.project.style_saved": "风格指南已保存。",
+      "ui.project.style_save_failed": "风格指南保存失败，请重试。",
       "ui.project.conventions_saved": "生产约定已保存。",
+      "ui.project.conventions_save_failed": "生产约定保存失败，请核对内容后重试。",
       "ui.project.reference_limit": "最多 {maximum} 张",
       "ui.project.inherit_hint": "本会话默认继承项目「{project}」的风格指南；切换到“本会话”可以覆盖它。",
       "ui.project.no_project_hint": "让会话归入一个项目，才能复用风格指南与项目资产。",
@@ -5304,6 +5306,8 @@
         "name_required": "项目名称不能为空。",
         "name_too_long": "项目名称不能超过 {maximum} 个字符。",
         "project_limit": "每个用户最多创建 {maximum} 个项目。",
+        "asset_name_required": "资产名称不能为空。",
+        "asset_name_too_long": "资产名称不能超过 {maximum} 个字符。",
         "asset_limit": "每个项目最多保存 {maximum} 个资产。",
         "style_text_too_long": "风格说明不能超过 {maximum} 个字符。",
         "palette_color_invalid": "色板颜色必须是 #RRGGBB 形式。",
@@ -5314,7 +5318,11 @@
         "promotion_source_invalid": "只能提升自己的已完成任务产物或上传的图片。",
         "style_guide_inherited": "本项目会话默认继承项目「{project}」的风格指南。",
         "style_guide_overridden": "本会话已覆盖项目风格指南。",
-        "style_guide_off": "本会话不注入任何风格参考。"
+        "style_guide_off": "本会话不注入任何风格参考。",
+        "style_guide_empty": "未启用",
+        "style_guide_references_only": "（仅参考图）",
+        "conventions_empty": "无",
+        "assets_empty": "无"
       }
     },
     "chat": {
@@ -14968,7 +14976,9 @@
             "ui.project.session_images": "Finished pictures in this session",
             "ui.project.style_enabled": "Enable the project style guide",
             "ui.project.style_saved": "Style guide saved.",
+            "ui.project.style_save_failed": "Could not save the style guide; try again.",
             "ui.project.conventions_saved": "Production conventions saved.",
+            "ui.project.conventions_save_failed": "Could not save the production conventions; check the values and try again.",
             "ui.project.reference_limit": "At most {maximum}",
             "ui.project.inherit_hint": "This session defaults to inheriting project \"{project}\"; choose \"This session\" to override it.",
             "ui.project.no_project_hint": "Assign the session to a project to reuse its style guide and assets.",

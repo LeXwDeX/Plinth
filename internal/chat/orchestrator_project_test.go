@@ -59,6 +59,36 @@ func TestProjectPromptNamesTheFrozenGuideConventionsAndHandles(t *testing.T) {
 	}
 }
 
+func TestProjectPromptFillsEmptyValuesFromTheSchemaCopy(t *testing.T) {
+	orchestrator := projectPromptOrchestrator(t)
+	messages := &orchestrator.project.Messages
+	messages.StyleGuideEmpty = "STYLE-EMPTY"
+	messages.StyleGuideReferencesOnly = "STYLE-PICTURES"
+	messages.ConventionsEmpty = "CONVENTIONS-NONE"
+	messages.AssetsEmpty = "ASSETS-NONE"
+	options := TurnOptions{
+		StyleLock: StyleLock{Source: StyleLockSourceProject},
+		ProjectContext: &ProjectContext{
+			ID: "prj_1", Name: "P",
+			StyleGuide: ProjectStyleGuideContext{Enabled: true, References: []string{"/api/v1/tasks/t1/assets/a1"}},
+		},
+	}
+	prompt := orchestrator.projectPrompt(options)
+	for _, want := range []string{"STYLE-PICTURES", "CONVENTIONS-NONE", "ASSETS-NONE"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("project prompt lacks Schema copy %q: %s", want, prompt)
+		}
+	}
+	options.ProjectContext.StyleGuide = ProjectStyleGuideContext{}
+	prompt = orchestrator.projectPrompt(options)
+	if !strings.Contains(prompt, "STYLE-EMPTY") {
+		t.Errorf("disabled guide must use the Schema's empty copy: %s", prompt)
+	}
+	if strings.Contains(prompt, "STYLE-PICTURES") {
+		t.Errorf("an empty guide used the references-only copy: %s", prompt)
+	}
+}
+
 func TestProjectPromptListsOnlyTheSchemaLimitAndSaysWhenTruncated(t *testing.T) {
 	orchestrator := projectPromptOrchestrator(t)
 	orchestrator.project.Agent.ListLimit = 1

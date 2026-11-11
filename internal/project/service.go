@@ -45,11 +45,31 @@ type AssetSource interface {
 // Config is the Schema-derived policy of a project service.
 type Config struct {
 	Schema catalog.ProjectSchema
+	// Profiles and ImageProfiles are the declared purpose IDs of
+	// chat.model3d_usage and chat.image2d_usage (#240). A convention's
+	// profile/image_profile value must name one of them; undeclared values are
+	// refused instead of being seeded into a new session's brief.
+	Profiles      []string
+	ImageProfiles []string
 	// Sources verifies owner references. Required when references may be
 	// written; nil makes every reference invalid.
 	Sources AssetSource
 	Clock   func() time.Time
 	NewID   func(prefix string) (string, error)
+}
+
+// PurposeProfiles returns the declared 3D and 2D purpose IDs a project
+// convention may name (#240).
+func PurposeProfiles(chat catalog.ChatSchema) (profiles, imageProfiles []string) {
+	profiles = make([]string, 0, len(chat.Model3DUsage.Profiles))
+	for _, profile := range chat.Model3DUsage.Profiles {
+		profiles = append(profiles, profile.ID)
+	}
+	imageProfiles = make([]string, 0, len(chat.Image2DUsage.Profiles))
+	for _, profile := range chat.Image2DUsage.Profiles {
+		imageProfiles = append(imageProfiles, profile.ID)
+	}
+	return profiles, imageProfiles
 }
 
 type Service struct {
@@ -60,6 +80,8 @@ type Service struct {
 	kinds          map[string]bool
 	fields         map[string]catalog.ChatProductionBriefField
 	texts          map[string]catalog.ProjectConventionTextSchema
+	profiles       map[string]bool
+	imageProfiles  map[string]bool
 	sources        AssetSource
 	clock          func() time.Time
 	newID          func(string) (string, error)
@@ -96,6 +118,14 @@ func New(repository Repository, config Config) (*Service, error) {
 	for _, text := range config.Schema.Conventions.Texts {
 		texts[text.Name] = text
 	}
+	profiles := make(map[string]bool, len(config.Profiles))
+	for _, profile := range config.Profiles {
+		profiles[profile] = true
+	}
+	imageProfiles := make(map[string]bool, len(config.ImageProfiles))
+	for _, profile := range config.ImageProfiles {
+		imageProfiles[profile] = true
+	}
 	clock := config.Clock
 	if clock == nil {
 		clock = func() time.Time { return time.Now().UTC() }
@@ -112,6 +142,8 @@ func New(repository Repository, config Config) (*Service, error) {
 		kinds:          kinds,
 		fields:         fields,
 		texts:          texts,
+		profiles:       profiles,
+		imageProfiles:  imageProfiles,
 		sources:        config.Sources,
 		clock:          clock,
 		newID:          newID,
@@ -507,7 +539,7 @@ func (service *Service) validateBrief(raw []byte) ([]byte, error) {
 		if !exists {
 			return nil, ErrInvalid
 		}
-		if err := validateBriefValue(field, value); err != nil {
+		if err := service.validateBriefValue(field, value); err != nil {
 			return nil, err
 		}
 	}
@@ -518,11 +550,22 @@ func (service *Service) validateBrief(raw []byte) ([]byte, error) {
 	return encoded, nil
 }
 
-func validateBriefValue(field catalog.ChatProductionBriefField, raw json.RawMessage) error {
+func (service *Service) validateBriefValue(field catalog.ChatProductionBriefField, raw json.RawMessage) error {
 	switch field.Type {
 	case "profile", "image_profile":
 		var value string
 		if json.Unmarshal(raw, &value) != nil {
+			return ErrInvalid
+		}
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return nil
+		}
+		declared := service.profiles
+		if field.Type == "image_profile" {
+			declared = service.imageProfiles
+		}
+		if !declared[value] {
 			return ErrInvalid
 		}
 	case "text":

@@ -93,11 +93,14 @@ type ProjectAuditSchema struct {
 
 // ProjectMessagesSchema is the copy the project HTTP boundary returns. Limit
 // templates name the maximum they enforce; the three style-guide templates
-// explain the inherited/overridden/disabled source to the person.
+// explain the inherited/overridden/disabled source to the person. The asset
+// name templates keep project-asset errors apart from the project's own name.
 type ProjectMessagesSchema struct {
 	NameRequired           string `json:"name_required"`
 	NameTooLong            string `json:"name_too_long"`
 	ProjectLimit           string `json:"project_limit"`
+	AssetNameRequired      string `json:"asset_name_required"`
+	AssetNameTooLong       string `json:"asset_name_too_long"`
 	AssetLimit             string `json:"asset_limit"`
 	StyleTextTooLong       string `json:"style_text_too_long"`
 	PaletteColorInvalid    string `json:"palette_color_invalid"`
@@ -109,6 +112,13 @@ type ProjectMessagesSchema struct {
 	StyleGuideInherited    string `json:"style_guide_inherited"`
 	StyleGuideOverridden   string `json:"style_guide_overridden"`
 	StyleGuideOff          string `json:"style_guide_off"`
+	// StyleGuideEmpty fills {style} when the guide is disabled or empty;
+	// StyleGuideReferencesOnly when it carries pictures but no text.
+	// ConventionsEmpty and AssetsEmpty fill their own context placeholders.
+	StyleGuideEmpty          string `json:"style_guide_empty"`
+	StyleGuideReferencesOnly string `json:"style_guide_references_only"`
+	ConventionsEmpty         string `json:"conventions_empty"`
+	AssetsEmpty              string `json:"assets_empty"`
 }
 
 // PublicProjectSchema is the browser-visible part of application.project.

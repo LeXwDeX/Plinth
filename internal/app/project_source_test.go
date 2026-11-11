@@ -39,8 +39,10 @@ func TestProjectChatSourceFreezesOwnerProjectAsCanonicalURLsAndHandles(t *testin
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = repository.Close() })
+	profiles, imageProfiles := project.PurposeProfiles(application.Chat)
 	service, err := project.New(repository.ProjectRepository(), project.Config{
-		Schema: *application.Project, Sources: acceptingAssetSource{},
+		Schema: *application.Project, Profiles: profiles, ImageProfiles: imageProfiles,
+		Sources: acceptingAssetSource{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +61,7 @@ func TestProjectChatSourceFreezesOwnerProjectAsCanonicalURLsAndHandles(t *testin
 		t.Fatal(err)
 	}
 	if _, err := service.SetConventions(context, "owner-a", created.ID, project.Conventions{
-		Brief: []byte(`{"purpose":"character"}`),
+		Brief: []byte(`{"purpose":"game_character"}`),
 		Texts: map[string]string{"naming": "hero_"},
 	}); err != nil {
 		t.Fatal(err)
@@ -86,7 +88,7 @@ func TestProjectChatSourceFreezesOwnerProjectAsCanonicalURLsAndHandles(t *testin
 		frozen.StyleGuide.References[1] != "/api/v1/tasks/task-1/assets/asset-1" {
 		t.Fatalf("style references = %v", frozen.StyleGuide.References)
 	}
-	if frozen.Conventions.Brief.Text("purpose") != "character" || frozen.Conventions.Texts["naming"] != "hero_" {
+	if frozen.Conventions.Brief.Text("purpose") != "game_character" || frozen.Conventions.Texts["naming"] != "hero_" {
 		t.Fatalf("conventions = %+v", frozen.Conventions)
 	}
 	if len(frozen.Assets) != 1 || frozen.Assets[0].Handle != "@project1" ||

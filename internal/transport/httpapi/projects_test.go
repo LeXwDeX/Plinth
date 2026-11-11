@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/administration"
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/project"
 )
 
@@ -176,6 +178,50 @@ func TestProjectStyleConventionsAndAssets(t *testing.T) {
 	deleted := grantTestRequest(t, handler, cookie, http.MethodDelete, "/api/v1/projects/"+projectID+"/assets/"+assetID, "", "")
 	if deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete asset = %d %s", deleted.Code, deleted.Body.String())
+	}
+}
+
+func TestProjectAssetErrorsUseAssetLimitsAndCopy(t *testing.T) {
+	t.Parallel()
+	_, handler, cookie, _ := grantTestBrowserWithApplication(t, func(app *catalog.ApplicationSchema) {
+		app.Project.Limits.MaximumAssetsPerProject = 1
+		app.Project.Limits.MaximumAssetNameCharacters = 6
+	}, []string{"user"})
+	created := grantTestRequest(t, handler, cookie, http.MethodPost, "/api/v1/projects", `{"name":"Star"}`, "")
+	projectID := projectIDFrom(t, created.Body.String())
+	assetPath := "/api/v1/projects/" + projectID + "/assets"
+
+	longProject := grantTestRequest(t, handler, cookie, http.MethodPost, "/api/v1/projects",
+		`{"name":"`+strings.Repeat("p", 81)+`"}`, "")
+	if longProject.Code != http.StatusBadRequest {
+		t.Fatalf("long project name = %d %s", longProject.Code, longProject.Body.String())
+	}
+	if message, _ := decodeProjectResponse(t, longProject.Body.String())["error"].(string); !strings.Contains(message, "项目名称") ||
+		!strings.Contains(message, "80") || strings.Contains(message, "资产") {
+		t.Fatalf("project name copy = %q", message)
+	}
+
+	longAsset := grantTestRequest(t, handler, cookie, http.MethodPost, assetPath,
+		`{"kind":"character","name":"`+strings.Repeat("a", 7)+`"}`, "")
+	if longAsset.Code != http.StatusBadRequest {
+		t.Fatalf("long asset name = %d %s", longAsset.Code, longAsset.Body.String())
+	}
+	if message, _ := decodeProjectResponse(t, longAsset.Body.String())["error"].(string); !strings.Contains(message, "资产名称") ||
+		!strings.Contains(message, "6") || strings.Contains(message, "项目名称") {
+		t.Fatalf("asset name copy = %q", message)
+	}
+
+	first := grantTestRequest(t, handler, cookie, http.MethodPost, assetPath, `{"kind":"character","name":"Hero"}`, "")
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first asset = %d %s", first.Code, first.Body.String())
+	}
+	second := grantTestRequest(t, handler, cookie, http.MethodPost, assetPath, `{"kind":"prop","name":"Sword"}`, "")
+	if second.Code != http.StatusBadRequest {
+		t.Fatalf("asset limit = %d %s", second.Code, second.Body.String())
+	}
+	if message, _ := decodeProjectResponse(t, second.Body.String())["error"].(string); !strings.Contains(message, "最多保存 1 个资产") ||
+		strings.Contains(message, "创建") {
+		t.Fatalf("asset limit copy = %q", message)
 	}
 }
 

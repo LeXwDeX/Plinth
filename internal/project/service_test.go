@@ -234,6 +234,7 @@ func testSchema() catalog.ProjectSchema {
 		Conventions: catalog.ProjectConventionsSchema{
 			Fields: []catalog.ChatProductionBriefField{
 				{Name: "purpose", Type: "profile", Label: "用途"},
+				{Name: "image_use", Type: "image_profile", Label: "2D 用途"},
 				{Name: "style", Type: "text", Label: "风格", MaximumCharacters: 5},
 				{Name: "triangle_budget", Type: "integer", Label: "预算", Minimum: 100, Maximum: 1000},
 			},
@@ -248,9 +249,11 @@ func newService(t *testing.T, repository project.Repository, sources project.Ass
 	t.Helper()
 	now := time.Date(2026, 11, 11, 10, 0, 0, 0, time.UTC)
 	service, err := project.New(repository, project.Config{
-		Schema:  testSchema(),
-		Sources: sources,
-		Clock:   func() time.Time { return now },
+		Schema:        testSchema(),
+		Profiles:      []string{"game_character"},
+		ImageProfiles: []string{"concept_art"},
+		Sources:       sources,
+		Clock:         func() time.Time { return now },
 		NewID: func(prefix string) (string, error) {
 			return prefix + "fixed" + strconv.FormatUint(testIDCounter.Add(1), 10), nil
 		},
@@ -357,13 +360,24 @@ func TestStyleGuideAndConventionsValidateAndPersist(t *testing.T) {
 		t.Fatalf("long convention text err = %v", err)
 	}
 	if _, err := service.SetConventions(ctx, "owner-a", value.ID, project.Conventions{
-		Brief: []byte(`{"purpose":"game_character","style":"ink","triangle_budget":500}`),
+		Brief: []byte(`{"purpose":"undeclared"}`),
+	}); !errors.Is(err, project.ErrInvalid) {
+		t.Fatalf("undeclared profile err = %v", err)
+	}
+	if _, err := service.SetConventions(ctx, "owner-a", value.ID, project.Conventions{
+		Brief: []byte(`{"image_use":"undeclared"}`),
+	}); !errors.Is(err, project.ErrInvalid) {
+		t.Fatalf("undeclared image profile err = %v", err)
+	}
+	if _, err := service.SetConventions(ctx, "owner-a", value.ID, project.Conventions{
+		Brief: []byte(`{"purpose":"game_character","image_use":"concept_art","style":"ink","triangle_budget":500}`),
 		Texts: map[string]string{"naming": "hero_"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	conventions, err := service.Conventions(ctx, "owner-a", value.ID)
-	if err != nil || !strings.Contains(string(conventions.Brief), "game_character") || conventions.Texts["naming"] != "hero_" {
+	if err != nil || !strings.Contains(string(conventions.Brief), "game_character") ||
+		!strings.Contains(string(conventions.Brief), "concept_art") || conventions.Texts["naming"] != "hero_" {
 		t.Fatalf("conventions = %+v err=%v", conventions, err)
 	}
 }

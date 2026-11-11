@@ -355,9 +355,12 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	var projectService *project.Service
 	var projectSource chat.ProjectSource
 	if applicationSchema.Project != nil {
+		profiles, imageProfiles := project.PurposeProfiles(applicationSchema.Chat)
 		projectService, err = project.New(repository.ProjectRepository(), project.Config{
-			Schema:  *applicationSchema.Project,
-			Sources: repository.ProjectAssetSource(),
+			Schema:        *applicationSchema.Project,
+			Profiles:      profiles,
+			ImageProfiles: imageProfiles,
+			Sources:       repository.ProjectAssetSource(),
 		})
 		if err != nil {
 			return nil, err

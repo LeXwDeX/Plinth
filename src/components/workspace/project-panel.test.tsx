@@ -1,15 +1,18 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import type { ProductSchema } from '@/lib/product-schema';
+import { toast } from 'sonner';
 import { ProjectPanel } from './project-panel';
 
 const schema = defaultCatalog.application as unknown as ProductSchema;
 const messages = schema.content.messages;
+const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+vi.mock('sonner', () => ({ toast: toastMock }));
 const mock = vi.hoisted(() => {
   const getStyleGuide = vi.fn();
   const setStyleGuide = vi.fn();
@@ -76,6 +79,8 @@ beforeEach(() => {
   mock.deleteAsset.mockResolvedValue(undefined);
   mock.promoteAsset.mockResolvedValue({ ...mock.assets[0], id: 'a2', name: 'Role B' });
   for (const fn of [mock.getStyleGuide, mock.setStyleGuide, mock.getConventions, mock.setConventions, mock.listAssets, mock.deleteAsset, mock.promoteAsset]) fn.mockClear();
+  toastMock.success.mockClear();
+  toastMock.error.mockClear();
 });
 
 describe('project panel', () => {
@@ -122,12 +127,51 @@ describe('project panel', () => {
 
   it('promotes the session style lock into the project guide after confirmation', async () => {
     render(<ProjectPanel sessionId="s1" />);
-    await screen.findByTestId('project-promote-style');
+    await waitFor(() => expect((screen.getByTestId('project-promote-style') as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByTestId('project-promote-style'));
     expect(mock.setStyleGuide).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId('project-promote-style-confirm'));
     await waitFor(() => expect(mock.setStyleGuide).toHaveBeenCalledWith('prj_1', expect.objectContaining({
       enabled: true, text: 'session ink', references: [{ input_asset_id: 'upload-9' }],
+      palette: ['#ffffff'],
     })));
+  });
+
+  it('does not promote the style lock before the project guide is loaded', async () => {
+    let resolveGuide!: (value: typeof mock.guide) => void;
+    mock.getStyleGuide.mockReturnValue(new Promise((resolve) => { resolveGuide = resolve; }));
+    render(<ProjectPanel sessionId="s1" />);
+    const button = screen.getByTestId('project-promote-style') as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(screen.queryByTestId('project-promote-style-confirm-dialog')).toBeNull();
+    expect(mock.setStyleGuide).not.toHaveBeenCalled();
+
+    await act(async () => { resolveGuide(mock.guide); });
+    await waitFor(() => expect((screen.getByTestId('project-promote-style') as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByTestId('project-promote-style'));
+    fireEvent.click(screen.getByTestId('project-promote-style-confirm'));
+    await waitFor(() => expect(mock.setStyleGuide).toHaveBeenCalledWith('prj_1', expect.objectContaining({
+      palette: ['#ffffff'],
+    })));
+  });
+
+  it('reports the server reason when a guide save fails', async () => {
+    mock.setStyleGuide.mockRejectedValue(new Error('风格说明不能超过 2000 个字符。'));
+    render(<ProjectPanel sessionId="s1" />);
+    const textarea = await screen.findByTestId('project-style-text') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'cool ink' } });
+    fireEvent.click(screen.getByTestId('project-style-save'));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('风格说明不能超过 2000 个字符。'));
+    expect(toast.error).not.toHaveBeenCalledWith(messages['ui.project.load_failed']);
+  });
+
+  it('reports a save-specific line when a conventions save fails without a server reason', async () => {
+    mock.setConventions.mockRejectedValue(new Error(''));
+    render(<ProjectPanel sessionId="s1" />);
+    const brief = await screen.findByTestId('project-conventions-brief') as HTMLTextAreaElement;
+    fireEvent.change(brief, { target: { value: '{"purpose":"game_character"}' } });
+    fireEvent.click(screen.getByTestId('project-conventions-save'));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(messages['ui.project.conventions_save_failed']));
   });
 });
