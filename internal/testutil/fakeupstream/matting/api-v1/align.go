@@ -51,6 +51,7 @@ func Profile() align.Profile {
 			"服务没有按次计价，所有步骤都不计为付费；提交只发一次，轮询约 30 次直到批次 SUCCESS。",
 			"批次与任务 id（batch_xxx、task_xxx）与 download_path 在样本里是占位，fake 自行生成同形态的 id 和 `/api/v1/tasks/<id>/download` 路径。",
 			"没有观测到多文件批次、FAILED/PARTIAL_SUCCESS/CANCELED 批次、REJECTED 任务，也没有观测到未知任务的下载 404：fake 按已观测的字段结构与官方内部服务 FastAPI /docs 的 BatchStatus/TaskStatus 枚举（2026-11-08 核对）构造（端点表标明）。",
+			"服务对处理分辨率有范围校验（2026-11-12 读服务源码：birefnet_process_res 为 512..4096、不传即自动，sdmatte_process_res 为 512..2048、默认 1024），范围外返回 422；fake 按这两个范围拒绝，错误体按 FastAPI/pydantic 校验列表构造，其 loc 前缀（body、pipeline_params_json）没有在线观测，对齐真实服务时核对。",
 		},
 		Notes: align.Notes{},
 	}

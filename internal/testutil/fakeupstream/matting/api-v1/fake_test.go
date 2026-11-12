@@ -3,6 +3,7 @@ package mattingapiv1
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -32,9 +33,16 @@ func jobForm(t *testing.T, withFile bool) testkit.Body {
 // jobFormWithFiles sends one files part per name.
 func jobFormWithFiles(t *testing.T, names ...string) testkit.Body {
 	t.Helper()
+	return jobFormWithPipeline(t, pipeline, names...)
+}
+
+// jobFormWithPipeline sends the given pipeline_params_json and one files part
+// per name.
+func jobFormWithPipeline(t *testing.T, pipelineJSON string, names ...string) testkit.Body {
+	t.Helper()
 	var buffer bytes.Buffer
 	writer := multipart.NewWriter(&buffer)
-	_ = writer.WriteField("pipeline_params_json", pipeline)
+	_ = writer.WriteField("pipeline_params_json", pipelineJSON)
 	for _, name := range names {
 		header := make(textproto.MIMEHeader)
 		header.Set("Content-Disposition", `form-data; name="files"; filename="`+name+`"`)
@@ -141,6 +149,150 @@ func TestRequestValidationAndAuthentication(t *testing.T) {
 	task := testkit.Field(t, created, "tasks", 0, "task_id").(string)
 	if status, _, _ := f.Raw("GET", Prefix+"/tasks/"+task+"/download", "", nil); status != http.StatusUnauthorized {
 		t.Fatalf("download without a key = %d", status)
+	}
+}
+
+// #284: the service validates the process resolution of its PipelineParams
+// (birefnet_process_res 512..4096 with null meaning auto, sdmatte_process_res
+// 512..2048) and answers 422 outside it, so a Schema range that drifts past the
+// service is caught by the fake before a real batch is spent.
+func TestProcessResolutionIsHeldToTheServiceRange(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		pipeline string
+		refused  []string // the fields the 422 names, in order; none means accepted
+	}{
+		{"declared defaults", pipeline, nil},
+		{"both at the lower edge", `{"birefnet_process_res":512,"sdmatte_process_res":512}`, nil},
+		{"both at the upper edge", `{"birefnet_process_res":4096,"sdmatte_process_res":2048}`, nil},
+		{"birefnet null is auto", `{"birefnet_process_res":null,"sdmatte_process_res":1024}`, nil},
+		{"a field left out takes the service default", `{"expand":240}`, nil},
+		{"an empty pipeline", ``, nil},
+		{"birefnet above its range", `{"birefnet_process_res":4097,"sdmatte_process_res":1024}`, []string{"birefnet_process_res"}},
+		{"birefnet below its range", `{"birefnet_process_res":511}`, []string{"birefnet_process_res"}},
+		{"sdmatte above its range", `{"birefnet_process_res":1024,"sdmatte_process_res":2049}`, []string{"sdmatte_process_res"}},
+		{"sdmatte below its range", `{"sdmatte_process_res":511}`, []string{"sdmatte_process_res"}},
+		{"sdmatte has no auto", `{"sdmatte_process_res":null}`, []string{"sdmatte_process_res"}},
+		{"both out of range are both named", `{"birefnet_process_res":9000,"sdmatte_process_res":100}`,
+			[]string{"birefnet_process_res", "sdmatte_process_res"}},
+		{"a fraction is not an integer", `{"birefnet_process_res":1024.5}`, []string{"birefnet_process_res"}},
+		{"a string is not an integer", `{"birefnet_process_res":"big"}`, []string{"birefnet_process_res"}},
+		{"a whole number written as a float is accepted", `{"birefnet_process_res":2048.0}`, nil},
+		{"a pipeline that is not an object is not judged", `[1,2]`, nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newFixture(t, fakeupstream.Config{})
+			status, _, body := f.Do("POST", Prefix+"/jobs", key, jobFormWithPipeline(t, test.pipeline, "input_1.png"))
+			if len(test.refused) == 0 {
+				if status != http.StatusOK || body["batch_status"] != "READY" {
+					t.Fatalf("%s: %d %v", test.pipeline, status, body)
+				}
+				return
+			}
+			if status != http.StatusUnprocessableEntity {
+				t.Fatalf("%s: %d %v", test.pipeline, status, body)
+			}
+			detail, _ := body["detail"].([]any)
+			if len(detail) != len(test.refused) {
+				t.Fatalf("%s: detail = %v", test.pipeline, body["detail"])
+			}
+			for index, field := range test.refused {
+				if got := testkit.Field(t, body, "detail", index, "loc", 2); got != field {
+					t.Fatalf("detail %d names %v, want %s", index, got, field)
+				}
+			}
+			// The refused create made no batch.
+			if status, _, _ := f.Do("GET", Prefix+"/batches/batch_fake0001", key, nil); status != http.StatusNotFound {
+				t.Fatalf("a refused create left a batch behind: %d", status)
+			}
+		})
+	}
+}
+
+// The refusal is the FastAPI validation list the committed 422 sample shows
+// (type, loc, msg, input), with pydantic's ctx bound for a range error.
+func TestProcessResolutionRefusalIsAFastAPIValidationList(t *testing.T) {
+	samples, err := fakeupstream.LoadSamples(sampleFS, sampleFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sampleEntry map[string]any
+	for _, exchange := range samples.Find("POST "+samplePrefix+"/jobs", "") {
+		if exchange.Response.Status != http.StatusUnprocessableEntity {
+			continue
+		}
+		var sample struct {
+			Detail []map[string]any `json:"detail"`
+		}
+		if err := json.Unmarshal(exchange.Response.Body.JSON, &sample); err != nil || len(sample.Detail) == 0 {
+			t.Fatalf("422 sample = %s: %v", exchange.Response.Body.JSON, err)
+		}
+		sampleEntry = sample.Detail[0]
+	}
+	if sampleEntry == nil {
+		t.Fatal("the sample has no 422 exchange to compare")
+	}
+	f := newFixture(t, fakeupstream.Config{})
+	status, _, body := f.Do("POST", Prefix+"/jobs", key,
+		jobFormWithPipeline(t, `{"birefnet_process_res":8192,"sdmatte_process_res":256}`, "input_1.png"))
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d %v", status, body)
+	}
+	if len(body) != 1 {
+		t.Fatalf("body = %v, want only detail", body)
+	}
+	for index, want := range []struct {
+		field, kind, msg, bound string
+		input, limit            float64
+	}{
+		{"birefnet_process_res", "less_than_equal", "Input should be less than or equal to 4096", "le", 8192, 4096},
+		{"sdmatte_process_res", "greater_than_equal", "Input should be greater than or equal to 512", "ge", 256, 512},
+	} {
+		entry, _ := testkit.Field(t, body, "detail", index).(map[string]any)
+		for name := range sampleEntry {
+			if _, ok := entry[name]; !ok {
+				t.Fatalf("entry %d lacks %q that the real 422 carries: %v", index, name, entry)
+			}
+		}
+		if entry["type"] != want.kind || entry["msg"] != want.msg || entry["input"] != want.input {
+			t.Fatalf("entry %d = %v", index, entry)
+		}
+		if got := testkit.Field(t, entry, "loc", 0); got != "body" {
+			t.Fatalf("entry %d loc = %v", index, entry["loc"])
+		}
+		if got := testkit.Field(t, entry, "loc", 1); got != "pipeline_params_json" {
+			t.Fatalf("entry %d loc = %v", index, entry["loc"])
+		}
+		if got := testkit.Field(t, entry, "loc", 2); got != want.field {
+			t.Fatalf("entry %d loc = %v", index, entry["loc"])
+		}
+		if got := testkit.Field(t, entry, "ctx", want.bound); got != want.limit {
+			t.Fatalf("entry %d ctx = %v", index, entry["ctx"])
+		}
+	}
+}
+
+// The exported limits are what the create route enforces, so a test elsewhere
+// can hold the product Schema's declared ranges against them.
+func TestResolutionLimitsAreTheEnforcedOnes(t *testing.T) {
+	limits := ResolutionLimits()
+	if len(limits) != 2 || limits[0].Field != "birefnet_process_res" || limits[1].Field != "sdmatte_process_res" {
+		t.Fatalf("limits = %+v", limits)
+	}
+	f := newFixture(t, fakeupstream.Config{})
+	for _, limit := range limits {
+		for _, value := range []int64{limit.Min, limit.Max} {
+			form := jobFormWithPipeline(t, fmt.Sprintf(`{"%s":%d}`, limit.Field, value), "input_1.png")
+			if status, _, body := f.Do("POST", Prefix+"/jobs", key, form); status != http.StatusOK {
+				t.Fatalf("%s=%d: %d %v", limit.Field, value, status, body)
+			}
+		}
+		for _, value := range []int64{limit.Min - 1, limit.Max + 1} {
+			form := jobFormWithPipeline(t, fmt.Sprintf(`{"%s":%d}`, limit.Field, value), "input_1.png")
+			if status, _, body := f.Do("POST", Prefix+"/jobs", key, form); status != http.StatusUnprocessableEntity {
+				t.Fatalf("%s=%d: %d %v", limit.Field, value, status, body)
+			}
+		}
 	}
 }
 
