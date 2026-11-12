@@ -170,12 +170,7 @@ func modelReviewUsageBudget(
 	profile catalog.ChatModel3DUsageProfile,
 	brief chat.ProductionBrief,
 ) (catalog.ChatModel3DUsageBudget, *int) {
-	budget := profile.Budget
-	if value, exists := brief.Integer(usage.Brief.FieldNameOfType("integer")); exists && value > 0 {
-		budget.MaxTriangles = value
-		return budget, &value
-	}
-	return budget, nil
+	return chat.UsageBudget(usage, profile, brief)
 }
 
 func modelReviewUsageNote(

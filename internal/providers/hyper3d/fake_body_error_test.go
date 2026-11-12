@@ -108,6 +108,27 @@ func TestRodinHTTP201ErrorBodyFailsWithMappedClassAgainstFake(t *testing.T) {
 		})
 	}
 
+	// #294: an account without a usable API subscription is refused with an error
+	// code in an HTTP 201 body, so the product records no HTTP status for it
+	// (upstream_status 0). It is an account-level refusal like a missing balance,
+	// never an authentication failure: the key works and the balance panel reads
+	// fine. It is definite and never retried.
+	for scenario, code := range map[fakeupstream.Scenario]string{
+		fakeupstream.ScenarioNoActiveSubscription: "API_NO_ACTIVE_SUBSCRIPTION",
+		fakeupstream.ScenarioPlanTooLow:           "API_SUBSCRIPTION_PLAN_TOO_LOW",
+	} {
+		t.Run(string(scenario), func(t *testing.T) {
+			reset()
+			_, err := newPort(fakeupstream.KeyPrefix+string(scenario)).Start(context.Background(), simpleHyperRequest("rodin-text", "a chair", "unused"))
+			failure := failureOf(err)
+			if failure.Class != generation.FailureInsufficientBalance || failure.Retryable || failure.Ambiguous ||
+				failure.UpstreamCode != code || failure.UpstreamStatus != 0 {
+				t.Fatalf("failure = %+v, want a definite insufficient_balance of %s with no upstream HTTP status", failure, code)
+			}
+			assertSingleCreate(hyper3dapiv2.Prefix + "/rodin")
+		})
+	}
+
 	t.Run("source not available", func(t *testing.T) {
 		reset()
 		port := newPort("synthetic-key")

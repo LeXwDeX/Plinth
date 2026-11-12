@@ -210,12 +210,56 @@ type Parameter struct {
 	// {alternative}). Schema copy, localized with the Offering's other texts; only
 	// valid on a type "task" parameter.
 	TaskSourceAlternative string `json:"task_source_alternative,omitempty"`
+	// SourceInputRules refuse a Task as the source of this parameter by what the
+	// Task's own frozen input says, together with what the request asks for
+	// (#294): some limits belong to the model that was made, not to the step
+	// that takes it (Meshy Rigging adds no finger bones to a quad-topology
+	// model, and the topology is a parameter of the Task that made the model).
+	// The kernel applies them where it resolves the Task dependency, before
+	// anything is submitted or paid. Only valid on a type "task" parameter.
+	SourceInputRules []SourceInputRule `json:"source_input_rules,omitempty"`
 	// RequiredItems lists options every valid selection of a string-array
 	// parameter holds, so a smaller choice than the full set stays legal without
 	// dropping what the platform itself needs (Tripo's GLTF conversion delivers
 	// the self-contained GLB of the model role). A selection without one is
 	// refused where the input is normalized, before anything is quoted or paid.
 	RequiredItems []string `json:"required_items,omitempty"`
+}
+
+// SourceInputRule refuses a source Task when two facts hold together: its own
+// frozen input meets every SourceConditions entry, and the request's input meets
+// every RequestConditions entry (#294). The conditions are the ones parameters
+// already use (ParameterCondition); SourceConditions name parameters of the
+// Offerings the source parameter lists in task_offerings.
+type SourceInputRule struct {
+	// SourceConditions all hold for the frozen input of the source Task.
+	SourceConditions []ParameterCondition `json:"source_conditions"`
+	// RequestConditions all hold for the input of this request; empty means the
+	// source alone decides.
+	RequestConditions []ParameterCondition `json:"request_conditions,omitempty"`
+	// Message is the Schema's reason for the requester, complete text localized
+	// with the Offering's other copy.
+	Message string `json:"message"`
+}
+
+// Refuses reports whether the rule refuses a source Task whose frozen input is
+// source, for a request whose input is request. A rule without source
+// conditions refuses nothing.
+func (rule SourceInputRule) Refuses(source, request map[string]any) bool {
+	if len(rule.SourceConditions) == 0 {
+		return false
+	}
+	for _, condition := range rule.SourceConditions {
+		if !ConditionMatches(condition, source) {
+			return false
+		}
+	}
+	for _, condition := range rule.RequestConditions {
+		if !ConditionMatches(condition, request) {
+			return false
+		}
+	}
+	return true
 }
 
 type ParameterOption struct {

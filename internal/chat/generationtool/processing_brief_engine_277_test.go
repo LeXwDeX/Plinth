@@ -3,6 +3,7 @@ package generationtool_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/chat"
@@ -51,6 +52,14 @@ func TestBriefTargetEnginePicksTheMeshySkeletonTemplate(t *testing.T) {
 			}
 			if got := h.frozenInput(0)["skeleton_template"]; got != tc.want {
 				t.Fatalf("skeleton_template = %v, want %s", got, tc.want)
+			}
+			// Finger bones are the person's call (#294): Meshy refuses them for a
+			// quad-topology model, which the game character purposes now generate,
+			// so no engine default turns them on.
+			if !strings.Contains(tc.arguments, "include_fingers") {
+				if fingers := h.frozenInput(0)["include_fingers"]; fingers == true {
+					t.Fatalf("include_fingers = %v although nobody asked for finger bones", fingers)
+				}
 			}
 		})
 	}

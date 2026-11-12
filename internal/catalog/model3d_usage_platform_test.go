@@ -3,6 +3,7 @@ package catalog
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -124,15 +125,15 @@ func TestForPlatformMergesOverridesWithoutChangingTheSchema(t *testing.T) {
 	}
 	const p2 = "tripo/tripo-p2/image-to-3d"
 	merged := resolved.ParameterOverrides[p2]
-	if string(merged["face_limit"]) != "25000" || string(merged["quad"]) != "true" || string(merged["texture_quality"]) != `"standard"` {
-		t.Fatalf("merged P2 overrides = %v, want the platform's face_limit over the purpose's quad and texture_quality", merged)
+	if _, quad := merged["quad"]; quad || string(merged["face_limit"]) != "50000" || string(merged["texture_quality"]) != `"standard"` {
+		t.Fatalf("merged P2 overrides = %v, want the platform's face_limit over the purpose's texture_quality and no quad", merged)
 	}
 	// The smart low poly switch the purpose turns on is turned off by the
 	// platform that has the budget for full detail.
 	if string(resolved.ParameterOverrides["tripo/tripo-v3.1-multiview/image-to-3d"]["smart_low_poly"]) != "false" {
 		t.Fatalf("multiview overrides = %v", resolved.ParameterOverrides["tripo/tripo-v3.1-multiview/image-to-3d"])
 	}
-	if string(profile.ParameterOverrides[p2]["face_limit"]) != "10000" {
+	if string(profile.ParameterOverrides[p2]["face_limit"]) != "20000" {
 		t.Fatalf("the shared purpose was modified: %s", profile.ParameterOverrides[p2]["face_limit"])
 	}
 	merged["face_limit"] = json.RawMessage(`1`)
@@ -154,41 +155,40 @@ func offeringDeclaresQuad(offering schemacontract.Offering) bool {
 	return false
 }
 
-// #275 item 1 and 3: the game purposes are ordered by output quality and a
-// character's deformation needs quad topology, so a model that can output quads
-// comes before one that cannot, and the character turns quad output on for
-// every quad-capable model it recommends, on every platform.
-func TestGameCharacterRecommendsQuadCapableModelsFirstAndTurnsQuadOn(t *testing.T) {
+// #275 ordered the game purposes by output quality, and its reason for putting
+// the Tripo models first was that a character's deformation wants quad topology
+// and they could output quads. #294: a real P2 task with quad=true
+// (2026-11-12) delivered an FBX and no GLB, which neither the stage preview nor
+// inspect_model can read, so the character no longer turns Tripo's quad output
+// on and the order stands on detail alone. P2 and the v3.1 multiview model still
+// lead, keep their output in triangles and keep the face limit inside the budget
+// of every platform.
+func TestGameCharacterOrdersByDetailAndKeepsTripoOnTriangles(t *testing.T) {
 	product, err := LoadDefault()
 	if err != nil {
 		t.Fatal(err)
 	}
 	usage := product.Application().Chat.Model3DUsage
 	profile := purposeProfile(t, usage, "game_character")
-	for shape, ids := range profile.RecommendedOfferings {
-		sawTriangleOnly := false
-		for _, id := range ids {
-			offering, found := product.Get(schemacontract.OfferingID(id))
-			if !found {
-				t.Fatalf("%s recommends %q, which is not in the Catalog", shape, id)
-			}
-			if offeringDeclaresQuad(offering) {
-				if sawTriangleOnly {
-					t.Fatalf("%s: quad-capable %q comes after a triangle-only model", shape, id)
-				}
-			} else {
-				sawTriangleOnly = true
-			}
+	wantOrder := map[string][]string{
+		"text-to-3d": {"tripo/tripo-p2/text-to-3d", "meshy/meshy-t2.5/text-to-3d",
+			"hyper3d/rodin-gen-2.5/text-to-3d", "meshy/meshy-7.1/text-to-3d"},
+		"image-to-3d": {"tripo/tripo-p2/image-to-3d", "meshy/meshy-t2.5/image-to-3d",
+			"hyper3d/rodin-gen-2.5/image-to-3d", "meshy/meshy-7.1/image-to-3d"},
+		// The higher-fidelity multiview model first, P2 multiview after it.
+		"multiview-to-3d": {"tripo/tripo-v3.1-multiview/image-to-3d", "tripo/tripo-p2-multiview/image-to-3d"},
+	}
+	for shape, want := range wantOrder {
+		if got := profile.RecommendedOfferings[shape]; !slices.Equal(got, want) {
+			t.Fatalf("%s recommends %v, want %v", shape, got, want)
 		}
 	}
-	if got := profile.RecommendedOfferings["text-to-3d"][0]; got != "tripo/tripo-p2/text-to-3d" {
-		t.Fatalf("text-to-3d starts with %q, want the quad-capable P2", got)
-	}
-	if got := profile.RecommendedOfferings["image-to-3d"][0]; got != "tripo/tripo-p2/image-to-3d" {
-		t.Fatalf("image-to-3d starts with %q, want the quad-capable P2", got)
-	}
-	if got := profile.RecommendedOfferings["multiview-to-3d"][0]; got != "tripo/tripo-v3.1-multiview/image-to-3d" {
-		t.Fatalf("multiview-to-3d starts with %q, want the higher-fidelity multiview model", got)
+	for shape, ids := range profile.RecommendedOfferings {
+		for _, id := range ids {
+			if _, found := product.Get(schemacontract.OfferingID(id)); !found {
+				t.Fatalf("%s recommends %q, which is not in the Catalog", shape, id)
+			}
+		}
 	}
 	// Meshy T2.5 Smart Topology outputs triangles only (a quad request is a 400
 	// upstream), so it is recommended after P2 and never asked for quads.
@@ -196,6 +196,19 @@ func TestGameCharacterRecommendsQuadCapableModelsFirstAndTurnsQuadOn(t *testing.
 	offering, _ := product.Get(schemacontract.OfferingID(t2))
 	if offeringDeclaresQuad(offering) {
 		t.Fatalf("%s declares quad output; the character profile order assumes it cannot", t2)
+	}
+	// The three P2 Offerings still offer quad output, off by default, for a person
+	// who asks for the FBX; the purpose just does not ask for it.
+	for _, id := range []string{"tripo/tripo-p2/text-to-3d", "tripo/tripo-p2/image-to-3d", "tripo/tripo-p2-multiview/image-to-3d"} {
+		p2, _ := product.Get(schemacontract.OfferingID(id))
+		if !offeringDeclaresQuad(p2) {
+			t.Fatalf("%s no longer declares the quad parameter", id)
+		}
+		for _, parameter := range p2.Parameters {
+			if parameter.Name == "quad" && string(parameter.Default) != "false" {
+				t.Fatalf("%s: quad defaults to %s, want false", id, parameter.Default)
+			}
+		}
 	}
 
 	platforms := []string{""}
@@ -214,26 +227,22 @@ func TestGameCharacterRecommendsQuadCapableModelsFirstAndTurnsQuadOn(t *testing.
 		for id := range recommended {
 			offering, _ := product.Get(schemacontract.OfferingID(id))
 			override := resolved.ParameterOverrides[id]
-			quad := string(override["quad"])
+			if quad, set := override["quad"]; set {
+				t.Fatalf("platform %q: %s sets quad = %s; a P2 task with quad output delivers an FBX only (#294)", platform, id, quad)
+			}
 			if !offeringDeclaresQuad(offering) {
-				if quad != "" {
-					t.Fatalf("platform %q: %s sets quad but cannot output quads", platform, id)
-				}
 				continue
 			}
-			if quad != "true" {
-				t.Fatalf("platform %q: quad-capable %s has quad = %q, want true", platform, id, quad)
-			}
-			// The budget machinery counts one face as one triangle, so the
-			// shipped values are chosen by hand: a quad is two triangles once
-			// the GLB is triangulated, and the faces must still fit the budget.
+			// A Tripo model on triangle output delivers at most face_limit
+			// triangles, which is one face per triangle for the budget machinery
+			// too: the limit is set (an unset one would be left to the upstream's
+			// own choice) and it fits the platform's budget.
 			var faces int
 			if err := json.Unmarshal(override["face_limit"], &faces); err != nil || faces <= 0 {
-				t.Fatalf("platform %q: %s has no face_limit with quad on: %s", platform, id, override["face_limit"])
+				t.Fatalf("platform %q: %s has no face_limit: %s", platform, id, override["face_limit"])
 			}
-			if faces*2 > triangles {
-				t.Fatalf("platform %q: %s asks for %d quads (%d triangles), over the %d-triangle budget",
-					platform, id, faces, faces*2, triangles)
+			if faces > triangles {
+				t.Fatalf("platform %q: %s asks for %d triangles, over the %d-triangle budget", platform, id, faces, triangles)
 			}
 		}
 	}
@@ -271,6 +280,43 @@ func TestGameProfileReasonsStateTheQualityBasis(t *testing.T) {
 	}
 	if !strings.Contains(prop, "质量相同时才按成本") || !strings.Contains(prop, "没有可依据的质量差异") {
 		t.Fatalf("game_prop reason does not say cost only breaks a tie: %q", prop)
+	}
+}
+
+// The character's reason records the two things the real checks showed
+// (2026-11-12, #294) in both languages, so the order and the numbers are not read
+// as the old quad-first argument: P2 with quad output delivers an FBX only, which
+// is why Tripo's quad output stays off, and a Meshy 7.1 quad target delivers about
+// 2.25 triangles per target face, which is why its target is 0.4 of the budget.
+func TestGameCharacterReasonStatesTheRealFindings(t *testing.T) {
+	product, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := product.Application()
+	profile := purposeProfile(t, application.Chat.Model3DUsage, "game_character")
+	english := application.Localization.Bundles["en"].Fields["chat.model3d_usage.profiles[id=game_character].reason"]
+	for language, want := range map[string]struct {
+		text  string
+		parts []string
+	}{
+		"zh": {profile.Reason, []string{"2026-11-12", "quad=true", "只交付 FBX", "没有可预览的 GLB", "不开 Tripo 的四边面", "22540", "2.25", "0.4 倍"}},
+		"en": {english, []string{"2026-11-12", "quad=true", "FBX only", "no previewable GLB", "do not turn Tripo's quad output on", "22540", "2.25", "0.4 times"}},
+	} {
+		if want.text == "" {
+			t.Fatalf("%s: the game_character reason is missing", language)
+		}
+		for _, part := range want.parts {
+			if !strings.Contains(want.text, part) {
+				t.Errorf("%s reason omits %q: %q", language, part, want.text)
+			}
+		}
+		// The retired argument must be gone.
+		for _, retired := range []string{"默认开启四边面", "quads are turned on by default"} {
+			if strings.Contains(want.text, retired) {
+				t.Errorf("%s reason still says %q", language, retired)
+			}
+		}
 	}
 }
 
@@ -366,12 +412,22 @@ func TestPlatformDeclarationsAreValidated(t *testing.T) {
 			want: "超出用途预算",
 		},
 		{
+			name: "a variant override above the triangle face range",
+			change: func(t *testing.T, document map[string]any) {
+				variant := platformVariantDocument(t, document, "game_character", 1)
+				variant["parameter_overrides"].(map[string]any)[p2] = map[string]any{"face_limit": 60000}
+			},
+			// P2 accepts at most 50000 triangles (the purpose no longer asks for quads).
+			want: "不能大于 50000",
+		},
+		{
 			name: "a variant override above the quad face range",
 			change: func(t *testing.T, document map[string]any) {
 				variant := platformVariantDocument(t, document, "game_character", 1)
-				variant["parameter_overrides"].(map[string]any)[p2] = map[string]any{"face_limit": 30000}
+				variant["parameter_overrides"].(map[string]any)[p2] = map[string]any{"face_limit": 30000, "quad": true}
 			},
-			// P2 accepts at most 25000 faces once quad output is on.
+			// P2 accepts at most 25000 faces once quad output is on: the range follows
+			// the combination, so a purpose that asked for quads again would be held to it.
 			want: "48–25000",
 		},
 		{

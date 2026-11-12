@@ -24,3 +24,14 @@ func (o Offering) AgentParameterAllowed(p Parameter) bool {
 	}
 	return true
 }
+
+// AdvisedParameter reports whether the Offering declares name as a parameter
+// whose non-default value is frozen as an adjustment that needs a reason.
+func (o Offering) AdvisedParameter(name string) bool {
+	for _, parameter := range o.Parameters {
+		if parameter.Name == name {
+			return parameter.AdjustmentPolicy == "advised"
+		}
+	}
+	return false
+}

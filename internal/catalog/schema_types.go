@@ -4960,9 +4960,12 @@ type ChatAgentSchema struct {
 	// the server really submitted and what a prompt over the Offering's
 	// maximum length does (#249). An empty OverLimit keeps the historical
 	// silent truncation.
-	PromptReport  ChatPromptReportSchema `json:"prompt_report"`
-	TitlePrompt   string                 `json:"title_prompt"`
-	TitleMaxChars int                    `json:"title_max_characters"`
+	PromptReport ChatPromptReportSchema `json:"prompt_report"`
+	// ParameterReport bounds the parameters list a generation tool result
+	// carries under result_fields.parameters (#296).
+	ParameterReport ChatParameterReportSchema `json:"parameter_report"`
+	TitlePrompt     string                    `json:"title_prompt"`
+	TitleMaxChars   int                       `json:"title_max_characters"`
 	// TitleMaxCharsByLocale overrides title_max_characters for a UI locale
 	// whose words take more characters than Chinese (an English title).
 	TitleMaxCharsByLocale map[string]int `json:"title_max_characters_by_locale,omitempty"`
@@ -5045,6 +5048,15 @@ type ChatPromptReportSchema struct {
 	// previous_prompt_template, purposes_template, skill_template,
 	// style_lock, negative_prompt, truncation and prepared_input.
 	Layers map[string]string `json:"layers,omitempty"`
+}
+
+// ChatParameterReportSchema is application.chat.agent.parameter_report (#296).
+// It keeps the parameters list of a generation tool result small: the list
+// only holds values that differ from the Offering's default, and each value is
+// cut at MaximumValueCharacters. A tool that declares result_fields.parameters
+// needs a positive bound.
+type ChatParameterReportSchema struct {
+	MaximumValueCharacters int `json:"maximum_value_characters,omitempty"`
 }
 
 type ChatContextSchema struct {
@@ -5756,6 +5768,12 @@ type ChatToolResultFields struct {
 	// pictures this step actually injected (#240). It is present only when
 	// some project asset was used, so the Agent can cite them as they are.
 	StyleSources string `json:"style_sources,omitempty"`
+	// Parameters is the optional key of the list of model parameters the step
+	// really froze that differ from the Offering's defaults, each with its
+	// label, value and source (#296). An empty list says every parameter is at
+	// its default. It is declared only on a tool that submits a Task; the
+	// processing plan tool builds its result elsewhere.
+	Parameters string `json:"parameters,omitempty"`
 }
 
 // ChatAgentToolSchema 声明非生成类 agent 控制工具（set_params /

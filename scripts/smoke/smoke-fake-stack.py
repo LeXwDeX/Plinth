@@ -2614,10 +2614,11 @@ def scenario_offering_knowledge(work, stack_binary, processes, catalog):
         usage = document["application"]["chat"]["model3d_usage"]
         game = next(profile for profile in usage["profiles"] if profile["id"] == "game_character")
         override = game.get("parameter_overrides", {}).get("tripo/tripo-v3.1-multiview/image-to-3d", {})
-        # #275: the character turns quad output on; smart low poly accepts at
-        # most 10000 quad faces, the same 20000 triangles as before.
-        covered = usage.get("override_coverage_required") is True and override.get("face_limit") == 10000 \
-            and override.get("quad") is True and override.get("smart_low_poly") is True
+        # #294: the character keeps Tripo on triangle output (a P2 task with quad
+        # output delivers an FBX and no GLB); smart low poly accepts at most
+        # 20000 triangles.
+        covered = usage.get("override_coverage_required") is True and override.get("face_limit") == 20000 \
+            and "quad" not in override and override.get("smart_low_poly") is True
         record("#249 purpose override coverage", covered,
                f"required={usage.get('override_coverage_required')} multiview={override}")
 

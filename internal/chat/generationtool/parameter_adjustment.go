@@ -54,13 +54,15 @@ func (e *Executor) parameterReasons(command chat.ToolCommand, o generation.Offer
 			// Only an advised change is frozen as an adjustment. A purpose may
 			// also set a public parameter the Offering does not mark advised;
 			// that value needs no reason, and freezeParameterAdjustments would
-			// refuse one (#103).
-			if !advisedParameter(o, name) {
+			// refuse one (#103). The reason and the source are the ones the
+			// direct task API gives the same values (#295).
+			reason, source, advised := profile.AdvisedAdjustment(o, name)
+			if !advised {
 				continue
 			}
 			if current, exists := values[name]; exists && sameHarnessJSON(current, value, command) {
-				reasons[name] = profile.Reason
-				sources[name] = "profile:" + profile.ID
+				reasons[name] = reason
+				sources[name] = source
 			}
 		}
 	}
@@ -90,12 +92,7 @@ func (e *Executor) parameterReasons(command chat.ToolCommand, o generation.Offer
 // advisedParameter reports whether the Offering freezes this parameter's
 // non-default value as an adjustment that needs a reason.
 func advisedParameter(o generation.Offering, name string) bool {
-	for _, parameter := range o.Parameters {
-		if parameter.Name == name {
-			return parameter.AdjustmentPolicy == "advised"
-		}
-	}
-	return false
+	return o.AdvisedParameter(name)
 }
 
 // laterParameterNames are the parameters a layer above the production purpose

@@ -248,13 +248,25 @@ func TestTaskSourceAlternativeIsValidated(t *testing.T) {
 	}
 }
 
+// A quad remesh of Meshy 7.1 delivered about 2.25 triangles per face of the
+// target (observed 2026-11-12, #294): target_polycount 10000 with topology quad
+// gave a GLB of 22540 triangles, from an FBX of 11401 faces that were 98% quads.
+// The pages do not say how a quad counts toward the target, so this is one real
+// sample at one size, kept in percent so the arithmetic stays in integers. The
+// shipped quad targets keep a tenth of the budget free for the ratio to vary.
+const (
+	meshyQuadTrianglesPerTargetPercent = 225
+	meshyQuadBudgetSharePercent        = 90
+)
+
 // Meshy 7.1 in the game purposes generates the low-poly model in one step: the
 // automatic remesh, the topology and the target face count are Schema overrides
 // of the purpose, per target platform, and their face counts fit the budget they
 // are resolved against. The Text to 3D and Image to 3D pages (read 2026-11-12)
 // document should_remesh, topology (quad or triangle) and target_polycount
-// (100-300000 for a remeshed standard model); they do not say how a quad counts,
-// so a quad is counted as two triangles here, like the other quad overrides.
+// (100-300000 for a remeshed standard model); a quad target counts for about 2.25
+// triangles per face (see meshyQuadTrianglesPerTargetPercent), a triangle target
+// for one.
 func TestGameProfilesGenerateMeshy71InOneRemeshedStep(t *testing.T) {
 	product := shippedProduct(t)
 	usage := product.Application().Chat.Model3DUsage
@@ -267,7 +279,7 @@ func TestGameProfilesGenerateMeshy71InOneRemeshedStep(t *testing.T) {
 		targets  map[string]int // by platform option id; "" is a session without a platform
 	}
 	for purpose, want := range map[string]expectation{
-		"game_character": {"quad", "a-pose", map[string]int{"": 10000, "mobile": 10000, "web": 10000, "xr": 10000, "pc_console": 25000}},
+		"game_character": {"quad", "a-pose", map[string]int{"": 8000, "mobile": 8000, "web": 8000, "xr": 8000, "pc_console": 40000}},
 		"game_prop":      {"triangle", "", map[string]int{"": 8000, "mobile": 8000, "web": 8000, "xr": 8000, "pc_console": 8000}},
 	} {
 		profile := shippedPurpose(t, product, purpose)
@@ -313,15 +325,20 @@ func TestGameProfilesGenerateMeshy71InOneRemeshedStep(t *testing.T) {
 				if float64(target) < targetBounds[0] || float64(target) > targetBounds[1] {
 					t.Errorf("%s on %q: %d is outside Meshy's %v face range", purpose, platform, target, targetBounds)
 				}
-				// A quad is two triangles in the GLB; the face count must fit the
-				// budget the purpose resolves to on that platform once doubled.
+				// A quad target delivers about 2.25 triangles per face in the GLB; the
+				// estimate must fit the budget the purpose resolves to on that platform,
+				// with a tenth of it to spare for the ratio to vary.
 				triangles := target
 				if topology == "quad" {
-					triangles *= 2
+					triangles = target * meshyQuadTrianglesPerTargetPercent / 100
 				}
 				budget := resolved.Budget
 				if triangles > budget.MaxTriangles || (budget.MinTriangles != nil && triangles < *budget.MinTriangles) {
 					t.Errorf("%s on %q: %d triangles are outside the %v..%d budget", purpose, platform, triangles, budget.MinTriangles, budget.MaxTriangles)
+				}
+				if topology == "quad" && triangles*100 > budget.MaxTriangles*meshyQuadBudgetSharePercent {
+					t.Errorf("%s on %q: %d triangles leave less than a tenth of the %d budget for the quad ratio to vary",
+						purpose, platform, triangles, budget.MaxTriangles)
 				}
 				if budget.MaxTextureSize == nil || 2048 > *budget.MaxTextureSize {
 					t.Errorf("%s on %q: 2K textures do not fit the budget %v", purpose, platform, budget.MaxTextureSize)

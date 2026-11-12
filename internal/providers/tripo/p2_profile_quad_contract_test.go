@@ -1,13 +1,15 @@
 package tripo_test
 
-// #275: the game character purpose turns Tripo P2's documented quad output on
-// (https://developers.tripo3d.ai/en/docs/generation-image-to-model/p: with
-// quad=true, face_limit is 48-25000). This contract test takes the overrides
-// the shipped purpose resolves for each target platform, freezes them the way a
-// submission does and sends them through the shared Tripo v3 adapter, so the
-// request body that reaches the upstream carries quad=true and the platform's
-// face budget on all three P2 endpoints. Real P2 quad output (the delivered
-// format and the topology) has no sample yet; this pins only the request.
+// #275 turned Tripo P2's documented quad output on for the game character
+// purpose (https://developers.tripo3d.ai/en/docs/generation-image-to-model/p:
+// with quad=true, face_limit is 48-25000); #294 took it back, because the first
+// real P2 task with quad=true (2026-11-12) delivered an FBX and no GLB. This
+// contract test takes the overrides the shipped purpose resolves for each target
+// platform, freezes them the way a submission does and sends them through the
+// shared Tripo v3 adapter, so the request body that reaches the upstream asks for
+// triangle output (no quad=true) and the platform's face budget on all three P2
+// endpoints. It pins only the request; what a quad request delivers is the fake's
+// and the delivery test's (p2_quad_fbx_294_test.go).
 
 import (
 	"context"
@@ -23,7 +25,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
-func TestTripoP2ProfileQuadOverridesReachTheV3Wire(t *testing.T) {
+func TestTripoP2ProfileOverridesReachTheV3WireAsTriangles(t *testing.T) {
 	product, err := catalog.LoadDefault()
 	if err != nil {
 		t.Fatal(err)
@@ -58,13 +60,14 @@ func TestTripoP2ProfileQuadOverridesReachTheV3Wire(t *testing.T) {
 		{"tripo/tripo-p2-multiview/image-to-3d", "/v3/generation/multiview-to-model", 2,
 			map[string]any{"reference_assets": []any{"asset-one", "asset-two"}, "reference_views": []any{"front", "left"}}, twoImages},
 	}
-	// The face budget each platform resolves to: the single-budget default and
-	// the mobile class ask for 10000 quads (at most 20000 triangles once the
-	// GLB is triangulated), PC and console for the 25000 P2 accepts with quad on.
+	// The face budget each platform resolves to, in triangles: the single-budget
+	// default and the mobile class ask for 20000 (the mobile ceiling), PC and
+	// console for the 50000 P2 accepts without quad output (half the 100000 a PC
+	// character may have).
 	platforms := []struct {
 		platform string
 		faces    float64
-	}{{"", 10000}, {"mobile", 10000}, {"web", 10000}, {"xr", 10000}, {"pc_console", 25000}}
+	}{{"", 20000}, {"mobile", 20000}, {"web", 20000}, {"xr", 20000}, {"pc_console", 50000}}
 
 	for _, endpoint := range endpoints {
 		offering, found := product.Get(schema.OfferingID(endpoint.id))
@@ -137,11 +140,16 @@ func TestTripoP2ProfileQuadOverridesReachTheV3Wire(t *testing.T) {
 					t.Fatalf("calls = %v, want %d uploads then one generation", calls, endpoint.uploads)
 				}
 				for key, want := range map[string]any{
-					"model": "P2-20260801", "quad": true, "face_limit": platform.faces, "texture_quality": "standard",
+					"model": "P2-20260801", "face_limit": platform.faces, "texture_quality": "standard",
 				} {
 					if !jsonEqual(posted[key], want) {
 						t.Errorf("body.%s = %v, want %v (body %v)", key, posted[key], want, posted)
 					}
+				}
+				// Triangle output: the purpose no longer asks for quads, so the body
+				// carries no quad=true (an omitted or false field).
+				if quad, asked := posted["quad"]; asked && quad != false {
+					t.Errorf("body.quad = %v, want triangle output (body %v)", quad, posted)
 				}
 				for _, key := range []string{"reference_assets", "reference_views", "authorize_extra_credits"} {
 					if value, leaked := posted[key]; leaked {

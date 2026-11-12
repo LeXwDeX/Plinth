@@ -129,7 +129,8 @@ var kinds = []kind{
 // #89 showed (each was requested once with its cheapest option; the credits are
 // what the official poll reported).
 var realKindNotes = map[string]string{
-	"/generation/image-to-model":     "captured: task type image_to_model, 20 credits for a geometry-only v3.1 model; the output has model_url and rendered_image_url (no generated_image_url, which only a text prompt produces)",
+	"/generation/image-to-model":     "captured: task type image_to_model, 20 credits for a geometry-only v3.1 model; the output has model_url and rendered_image_url (no generated_image_url, which only a text prompt produces); a P-series request with quad=true delivers an FBX and no GLB (observed 2026-11-12, #294, p2_quad.go)",
+	"/generation/text-to-model":      "a P-series request with quad=true delivers an FBX and no GLB (observed 2026-11-12, #294, p2_quad.go); the rest is the captured text_to_model structure",
 	"/generation/image-to-splat":     "captured: task type image_to_splat, 30 credits; the only output is model_url (a .splat file)",
 	"/generation/image-to-multiview": "captured: task type image_to_multiview, 10 credits; the output is the object generate_multiview_image with front/left/back/right_view_url (JPEG)",
 	"/generation/edit-multiview":     "captured: task type edit_multiview, 5 credits; input.original_task_id is the multiview task and the output carries only the edited views (one prompt, one front_view_url)",
@@ -145,7 +146,7 @@ const multiviewChecked = "2026-11-02"
 
 // constructedKindNotes explains kinds that have no captured sample.
 var constructedKindNotes = map[string]string{
-	"/generation/multiview-to-model": "constructed from the official documentation read on " + multiviewChecked + " (derived, not captured; no paid request yet): inputs is an array of single-key view objects (front is required, 2-4 images) instead of input, and the task type multiview_to_model and the output structure of image_to_model are assumptions to verify on the first real paid request",
+	"/generation/multiview-to-model": "constructed from the official documentation read on " + multiviewChecked + " (derived, not captured; no paid request yet): inputs is an array of single-key view objects (front is required, 2-4 images) instead of input, and the task type multiview_to_model and the output structure of image_to_model are assumptions to verify on the first real paid request; a P-series request with quad=true delivers an FBX and no GLB like the observed text and image tasks (assumed, p2_quad.go)",
 }
 
 var endpoints = buildEndpoints()
@@ -892,7 +893,7 @@ func (t *task) artifactName(field string) string {
 			return "model.gltf"
 		}
 	}
-	if t.decimatesToQuad() {
+	if t.decimatesToQuad() || t.generatesQuadFBX() {
 		return "model.fbx"
 	}
 	return "model.glb"

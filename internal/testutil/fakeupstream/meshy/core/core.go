@@ -93,6 +93,13 @@ type Kind struct {
 	// answers the text of the 400 refusal, or "" for a valid request. It runs
 	// after the Need groups and before any source lookup.
 	Validate func(request map[string]any) string
+	// ValidateSource, when set, checks the request against the model a source
+	// task delivers and answers the text of the 400 refusal, or "" for a valid
+	// request. It receives the topology that model was made with ("quad",
+	// "triangle", or "" when no request in the source's chain names one; see
+	// Store.topologyOf) and runs for each source field that names a task, once
+	// the task exists and has succeeded.
+	ValidateSource func(request map[string]any, sourceTopology string) string
 }
 
 // Config assembles one version's handler.
@@ -376,6 +383,34 @@ func (s *Store) lookup(id string) *task {
 	return s.tasks[id]
 }
 
+// maxSourceChain bounds how far topologyOf follows a task back to the request
+// that made its mesh.
+const maxSourceChain = 8
+
+// topologyOf is the topology the model of a task was made with: the topology of
+// its own request, else that of the task it was made from (a refine follows its
+// preview, a retexture or a remesh its input task). It is "" when no request in
+// the chain names one; the fake does not apply an API default.
+func (s *Store) topologyOf(t *task) string {
+	for hops := 0; t != nil && hops < maxSourceChain; hops++ {
+		if topology, _ := t.request["topology"].(string); topology != "" {
+			return topology
+		}
+		next := ""
+		for _, field := range []string{"preview_task_id", "input_task_id"} {
+			if id, _ := t.request[field].(string); id != "" {
+				next = id
+				break
+			}
+		}
+		if next == "" {
+			return ""
+		}
+		t = s.lookup(next)
+	}
+	return ""
+}
+
 // ---- endpoints ----
 
 func (e *engine) getBalance(w http.ResponseWriter, r *http.Request) {
@@ -460,6 +495,12 @@ func (e *engine) create(kind Kind) http.HandlerFunc {
 				e.fail(w, http.StatusBadRequest, "The input task has not succeeded")
 				return
 			}
+			if kind.ValidateSource != nil {
+				if message := kind.ValidateSource(request, store.topologyOf(found)); message != "" {
+					e.fail(w, http.StatusBadRequest, message)
+					return
+				}
+			}
 			if kind.Path == "/uv-unwrap" && found.faces > MaxUVUnwrapFaces {
 				e.fail(w, http.StatusBadRequest, "The input model exceeds the maximum of 40,000 faces. Run Remesh first to reduce the face count.")
 				return
@@ -501,7 +542,9 @@ func (e *engine) create(kind Kind) http.HandlerFunc {
 }
 
 // facesOf estimates the triangle count of the model a task delivers: the
-// requested polycount (a quad mesh counts twice, as triangles), else the
+// requested polycount (a quad mesh counts twice, as triangles; the one quad
+// generation measured delivered about 2.25 per target face, 2026-11-12, #294,
+// which only a target just below a source limit would notice), else the
 // source's, else a high default for an untouched generation.
 func facesOf(t *task) int {
 	count := 0

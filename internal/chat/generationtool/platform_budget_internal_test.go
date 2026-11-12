@@ -314,19 +314,36 @@ func TestPurposeParameterValuesFollowThePlatform(t *testing.T) {
 		}
 	}
 
-	t.Run("P2 asks for quads on every platform and for more faces where the budget allows", func(t *testing.T) {
+	// #294: a real P2 task with quad=true delivered an FBX and no GLB, so
+	// the character asks Tripo for triangles. The face limit is a triangle count
+	// now: the mobile ceiling of 20000, and where the budget has room the 50000
+	// P2 accepts (v3.1 multiview: the 100000 a PC character may have).
+	noQuad := func(t *testing.T, got map[string]string) {
+		t.Helper()
+		if quad, set := got["quad"]; set {
+			t.Fatalf("quad = %s, but a quad task delivers an FBX only (all: %v)", quad, got)
+		}
+	}
+	t.Run("P2 asks for triangles on every platform and for more faces where the budget allows", func(t *testing.T) {
 		for _, id := range []string{"tripo/tripo-p2/text-to-3d", "tripo/tripo-p2/image-to-3d", "tripo/tripo-p2-multiview/image-to-3d"} {
-			expect(t, values(id, "game_character", ""), map[string]string{"quad": "true", "face_limit": "10000", "texture_quality": `"standard"`})
-			expect(t, values(id, "game_character", "mobile"), map[string]string{"quad": "true", "face_limit": "10000"})
-			expect(t, values(id, "game_character", "pc_console"), map[string]string{"quad": "true", "face_limit": "25000"})
-			expect(t, values(id, "game_character", "pc_console"), map[string]string{"texture_quality": `"standard"`})
+			for platform, faces := range map[string]string{"": "20000", "mobile": "20000", "web": "20000", "xr": "20000", "pc_console": "50000"} {
+				got := values(id, "game_character", platform)
+				noQuad(t, got)
+				expect(t, got, map[string]string{"face_limit": faces, "texture_quality": `"standard"`})
+			}
 		}
 	})
 	t.Run("the multiview model keeps smart low poly except where the budget has room for detail", func(t *testing.T) {
 		const id = "tripo/tripo-v3.1-multiview/image-to-3d"
-		expect(t, values(id, "game_character", ""), map[string]string{"quad": "true", "face_limit": "10000", "smart_low_poly": "true"})
-		expect(t, values(id, "game_character", "xr"), map[string]string{"quad": "true", "face_limit": "10000", "smart_low_poly": "true"})
-		expect(t, values(id, "game_character", "pc_console"), map[string]string{"quad": "true", "face_limit": "50000", "smart_low_poly": "false"})
+		for platform, want := range map[string]map[string]string{
+			"":           {"face_limit": "20000", "smart_low_poly": "true"},
+			"xr":         {"face_limit": "20000", "smart_low_poly": "true"},
+			"pc_console": {"face_limit": "100000", "smart_low_poly": "false"},
+		} {
+			got := values(id, "game_character", platform)
+			noQuad(t, got)
+			expect(t, got, want)
+		}
 	})
 	t.Run("Meshy T2.5 stays triangle-only and takes the platform's polycount", func(t *testing.T) {
 		for _, id := range []string{"meshy/meshy-t2.5/text-to-3d", "meshy/meshy-t2.5/image-to-3d"} {
@@ -364,10 +381,12 @@ func TestPurposeParameterValuesFollowThePlatform(t *testing.T) {
 	})
 	t.Run("Meshy 7.1 remeshes in one step with the purpose's topology and the platform's face count", func(t *testing.T) {
 		// The purposes' overrides reach the Agent's step unchanged: the budget has
-		// nothing to lower in them (a quad counts as two triangles, so 25000 quads
-		// are 50000 triangles, half of what a PC allows).
+		// nothing to lower in them. It cannot see that a quad target delivers about
+		// 2.25 triangles per face (observed 2026-11-12, #294: 10000 gave 22540), so
+		// the character's targets are chosen by hand at 0.4 of the budget: 8000
+		// (about 18000 triangles) on mobile and 40000 (about 90000) on a PC.
 		for _, id := range []string{"meshy/meshy-7.1/text-to-3d", "meshy/meshy-7.1/image-to-3d"} {
-			for platform, want := range map[string]string{"": "10000", "mobile": "10000", "xr": "10000", "pc_console": "25000"} {
+			for platform, want := range map[string]string{"": "8000", "mobile": "8000", "xr": "8000", "pc_console": "40000"} {
 				expect(t, values(id, "game_character", platform), map[string]string{
 					"should_remesh": "true", "topology": `"quad"`, "target_polycount": want, "texture_resolution": `"2k"`, "pose_mode": `"a-pose"`})
 			}

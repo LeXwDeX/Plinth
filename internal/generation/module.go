@@ -415,6 +415,11 @@ func (m *Module) resolveTaskDependencies(
 		if UpstreamJobExpired(parameter, facts[0], m.dependencyNow()) {
 			return nil, expiredTaskDependency(offering, parameter)
 		}
+		// A Task that fits the parameter can still be a source this request
+		// cannot use, judged by its own frozen input (#294).
+		if err := sourceInputRefusal(parameter, aggregate.Task, values); err != nil {
+			return nil, err
+		}
 		boundSession := ""
 		if parameter.SameSession {
 			// Providers compare this with the Task they run; a branch Task

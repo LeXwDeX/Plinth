@@ -28,8 +28,10 @@ import (
 // the model's range, quads from a Smart Topology model and a topology that is
 // neither quad nor triangle answer 400). The pages do not say how a quad counts
 // toward target_polycount or whether the texture of a remeshed task is generated
-// on the remeshed mesh; no real request backs either, so nothing here asserts
-// them.
+// on the remeshed mesh. One real quad task (2026-11-12, #294) delivered about 2.25
+// triangles per target face, which is why the character's targets are 0.4 of the
+// budget (the Catalog test checks the arithmetic); nothing real backs the texture
+// question, so nothing here asserts it.
 
 // postRecorder is the fake Meshy upstream that keeps every POST body in order
 // (the preview and the refine of a text-to-3d share one route).
@@ -109,9 +111,13 @@ var gameRemeshCases = []struct {
 	target                      float64
 	pose                        any
 }{
-	{"game_character", "", "quad", 10000, "a-pose"},
-	{"game_character", "mobile", "quad", 10000, "a-pose"},
-	{"game_character", "pc_console", "quad", 25000, "a-pose"},
+	// A quad target delivers about 2.25 triangles per face (observed 2026-11-12,
+	// #294), so the character asks for 0.4 of the triangle budget: 8000 on the
+	// 20000-triangle mobile class (about 18000 triangles) and 40000 on the
+	// 100000-triangle PC and console class (about 90000).
+	{"game_character", "", "quad", 8000, "a-pose"},
+	{"game_character", "mobile", "quad", 8000, "a-pose"},
+	{"game_character", "pc_console", "quad", 40000, "a-pose"},
 	{"game_prop", "", "triangle", 8000, nil},
 	{"game_prop", "mobile", "triangle", 8000, nil},
 	{"game_prop", "pc_console", "triangle", 8000, nil},

@@ -31,13 +31,15 @@ const (
 
 // purposeProfile is the part of a 3D or 2D purpose the model-choice layers
 // read: its identity, recommendations and public parameter overrides. Using
-// one shape lets the same four layers serve both domains (#103, #239).
-type purposeProfile struct {
-	ID                   string
-	Label                string
-	Reason               string
-	RecommendedOfferings map[string][]string
-	ParameterOverrides   map[string]map[string]json.RawMessage
+// one shape lets the same four layers serve both domains (#103, #239). The
+// shape and the resolution of its parameter values are shared with the direct
+// task API (chat.PurposeParameters, #295).
+type purposeProfile = chat.PurposeProfile
+
+// purposeParameters is the resolver of what the session brief gives an
+// Offering, over the Schema tables this executor was built with.
+func (executor *Executor) purposeParameters() chat.PurposeParameters {
+	return chat.PurposeParameters{Model3D: executor.chat.Model3DUsage, Image2D: executor.chat.Image2DUsage}
 }
 
 // modelChoice is the public result object naming who chose the model of a
@@ -74,19 +76,7 @@ type modelInput struct {
 // parameter overrides are what every later layer reads; a session without a
 // platform gets the purpose as declared.
 func (executor *Executor) briefPurpose(command chat.ToolCommand) (catalog.ChatModel3DUsageProfile, bool) {
-	usage := executor.chat.Model3DUsage
-	if len(usage.Profiles) == 0 || command.Options.ProductionBrief.Empty() {
-		return catalog.ChatModel3DUsageProfile{}, false
-	}
-	brief := command.Options.ProductionBrief
-	id := brief.Text(briefFieldOfType(usage.Brief, "profile"))
-	for _, profile := range usage.Profiles {
-		if profile.ID == id {
-			profile, _ = usage.ForPlatform(profile, brief.Text(usage.PlatformField))
-			return profile, true
-		}
-	}
-	return catalog.ChatModel3DUsageProfile{}, false
+	return executor.purposeParameters().Model3DProfile(command.Options.ProductionBrief)
 }
 
 // imageBriefPurpose returns the 2D purpose the session follows (#239). The
@@ -96,61 +86,13 @@ func (executor *Executor) briefPurpose(command chat.ToolCommand) (catalog.ChatMo
 // apply"). A purpose a stale brief names but the Schema no longer declares is
 // ignored the same way a session without one, matching the 3D usage check.
 func (executor *Executor) imageBriefPurpose(command chat.ToolCommand) (purposeProfile, bool) {
-	usage := executor.chat.Image2DUsage
-	if len(usage.Profiles) == 0 {
-		return purposeProfile{}, false
-	}
-	id := command.Options.ProductionBrief.Text(briefFieldOfType(executor.chat.Model3DUsage.Brief, "image_profile"))
-	for _, profile := range usage.Profiles {
-		if id != "" && profile.ID == id {
-			return purposeProfileOf(profile), true
-		}
-	}
-	for _, profile := range usage.Profiles {
-		if profile.ID == usage.DefaultProfile {
-			return purposeProfileOf(profile), true
-		}
-	}
-	return purposeProfile{}, false
-}
-
-// purposeProfileOf narrows a declared 2D purpose to the fields the model-choice
-// layers read.
-func purposeProfileOf(profile catalog.ChatImage2DUsageProfile) purposeProfile {
-	return purposeProfile{
-		ID: profile.ID, Label: profile.Label, Reason: profile.Reason,
-		RecommendedOfferings: profile.RecommendedOfferings,
-		ParameterOverrides:   profile.ParameterOverrides,
-	}
+	return executor.purposeParameters().Image2DProfile(command.Options.ProductionBrief, false)
 }
 
 // purposeOf is the purpose of this call's workspace domain: the 2D table for
 // the image workspace, the 3D table otherwise (#239).
 func (executor *Executor) purposeOf(command chat.ToolCommand) (purposeProfile, bool) {
-	domain := toolDomain(command)
-	if domain == string(generation.DomainImage) {
-		return executor.imageBriefPurpose(command)
-	}
-	profile, found := executor.briefPurpose(command)
-	if !found {
-		return purposeProfile{}, false
-	}
-	return purposeProfile{
-		ID: profile.ID, Label: profile.Label, Reason: profile.Reason,
-		RecommendedOfferings: profile.RecommendedOfferings,
-		ParameterOverrides:   profile.ParameterOverrides,
-	}, true
-}
-
-// briefFieldOfType locates the brief field carrying a purpose type. An absent
-// field means the Schema does not declare that domain's purpose.
-func briefFieldOfType(brief catalog.ChatProductionBriefSchema, fieldType string) string {
-	for _, declared := range brief.Fields {
-		if declared.Type == fieldType {
-			return declared.Name
-		}
-	}
-	return ""
+	return executor.purposeParameters().Profile(toolDomain(command), command.Options.ProductionBrief, false)
 }
 
 // profileParameterValues are the values the brief's purpose applies to an
@@ -164,79 +106,14 @@ func (executor *Executor) profileParameterValues(command chat.ToolCommand, offer
 
 // purposeParameterValues is profileParameterValues for a step whose other
 // values are already known: current supplies them (a remesh topology) when
-// the budget measures a face count.
+// the budget measures a face count. The resolution is the one the direct task
+// API applies to a request (#295).
 func (executor *Executor) purposeParameterValues(command chat.ToolCommand, offering generation.Offering,
 	current map[string]json.RawMessage) (purposeProfile, map[string]json.RawMessage) {
-	profile, found := executor.purposeOf(command)
-	values := map[string]json.RawMessage{}
-	if found {
-		overrides := profile.ParameterOverrides[string(offering.ID)]
-		for name, value := range overrides {
-			if publicAgentParameter(offering, name) {
-				values[name] = value
-			}
-		}
-		// The triangle and texture budget belongs to 3D purposes (#129); a 2D
-		// purpose contributes only its declared parameter overrides.
-		if toolDomain(command) != string(generation.DomainImage) {
-			if model3d, ok := executor.briefPurpose(command); ok {
-				for name, value := range executor.budgetValues(command, model3d, offering, values, current) {
-					values[name] = value
-				}
-			}
-		}
-	}
-	// What a select field of the brief gives the Offering (#277) is the person's
-	// own, more specific choice than the purpose's generic values, and holds with
-	// or without a purpose.
-	for name, value := range executor.briefDefaultValues(command, offering) {
-		values[name] = value
-	}
-	if len(values) == 0 {
-		return profile, nil
-	}
-	return profile, values
-}
-
-// publicAgentParameter reports whether an Offering declares name as a
-// parameter the Agent may set: the rule every value a layer gives an Offering
-// on its own must pass (the Catalog checked it at load time; this repeats it so
-// a hand-built Executor cannot apply a value the Offering does not expose).
-func publicAgentParameter(offering generation.Offering, name string) bool {
-	for _, parameter := range offering.Parameters {
-		if parameter.Name == name {
-			return offering.AgentParameterAllowed(parameter)
-		}
-	}
-	return false
-}
-
-// briefDefaultValues are the values the session brief's select fields give an
-// Offering through the Schema's brief.parameter_defaults (#277): the target
-// engine picks the skeleton naming of a rigging step. They fill only what the
-// step left unset (applyPurposeValues), so a value the person or the Agent set
-// for the step stays theirs.
-func (executor *Executor) briefDefaultValues(command chat.ToolCommand, offering generation.Offering) map[string]json.RawMessage {
-	brief := command.Options.ProductionBrief
-	if brief.Empty() {
-		return nil
-	}
-	var values map[string]json.RawMessage
-	for _, entry := range executor.chat.Model3DUsage.Brief.ParameterDefaults {
-		if brief.Text(entry.Field) != entry.Value {
-			continue
-		}
-		for name, value := range entry.ParameterOverrides[string(offering.ID)] {
-			if !publicAgentParameter(offering, name) {
-				continue
-			}
-			if values == nil {
-				values = map[string]json.RawMessage{}
-			}
-			values[name] = value
-		}
-	}
-	return values
+	return executor.purposeParameters().Values(chat.PurposeQuery{
+		Brief: command.Options.ProductionBrief, Domain: toolDomain(command), Offering: offering,
+		ToolDefaults: command.Tool.DefaultParameters, Current: current,
+	})
 }
 
 // modelShape is the recommended_offerings key of this call. For an image call

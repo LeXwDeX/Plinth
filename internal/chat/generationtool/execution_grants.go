@@ -449,6 +449,7 @@ func (executor *Executor) resumeAgentOperation(
 		trace = executor.promptTraceFromPrepared(ctx, command, task.Offering, prepared.NormalizedInput)
 	}
 	info.PromptFinal, info.PromptNote = executor.promptReport(command, command.Tool, task.Offering, trace)
+	info.frozenInput, info.frozenAdjustments = prepared.NormalizedInput, prepared.ParameterAdjustments
 	return executor.wait(ctx, command, task.Offering, task.ID, observe, info)
 }
 
