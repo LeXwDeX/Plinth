@@ -76,6 +76,19 @@ func (s *Server) writeDirectProjectReferenceProblem(writer http.ResponseWriter, 
 	writeProblem(writer, http.StatusBadRequest, "invalid_input", detail)
 }
 
+// directOffering is the Offering a direct prepare would run: the one it names,
+// or the default of its capability, the same default the preparation selects.
+func (s *Server) directOffering(capability generation.Capability, id generation.OfferingID) (generation.Offering, bool) {
+	if id == "" {
+		resolved, err := s.generation.DefaultOfferingID(capability)
+		if err != nil {
+			return generation.Offering{}, false
+		}
+		id = resolved
+	}
+	return s.generation.Offering(id)
+}
+
 func (s *Server) prepareTask(writer http.ResponseWriter, request *http.Request, owner generation.OwnerID) {
 	var body struct {
 		Capability          generation.Capability `json:"capability"`
@@ -91,6 +104,10 @@ func (s *Server) prepareTask(writer http.ResponseWriter, request *http.Request, 
 		// direct prepare body uses DisallowUnknownFields, so the field ships
 		// with the frontend that reads it.
 		StyleLockSkipped bool `json:"style_lock_skipped,omitempty"`
+		// ParameterReasons explains each advised parameter the request changed,
+		// as the Agent tool's parameter_reasons does (#295): an advised change
+		// without a reason is refused, a reason for any other parameter too.
+		ParameterReasons map[string]string `json:"parameter_reasons,omitempty"`
 	}
 	if err := s.decodeJSON(writer, request, &body); err != nil {
 		return
@@ -161,11 +178,33 @@ func (s *Server) prepareTask(writer http.ResponseWriter, request *http.Request, 
 			}
 		}
 	}
+	// The session brief's purpose, platform and engine values fill the
+	// parameters the request left unset, with the purpose's reason and source on
+	// the advised ones: the Agent freezes the same values for the same session
+	// (#295). The resolution is the business layer's, not the handler's.
+	reasons, sources := body.ParameterReasons, map[string]string(nil)
+	if offering, found := s.directOffering(body.Capability, body.OfferingID); found && s.chat != nil &&
+		offering.Capability == body.Capability {
+		applied, applyErr := s.chat.ApplyPurposeToDirectInput(request.Context(), string(owner), body.SessionID,
+			offering, input, reasons)
+		switch {
+		case errors.Is(applyErr, chat.ErrSessionNotFound):
+			s.writeMessageProblem(writer, http.StatusNotFound, "not_found", "error.task_not_found")
+			return
+		case applyErr != nil:
+			// The session was just proved owned, so this is a read failure.
+			noteCause(writer, applyErr)
+			s.writeMessageProblem(writer, http.StatusInternalServerError, "internal", "error.internal")
+			return
+		}
+		input, reasons, sources = applied.Input, applied.Reasons, applied.Sources
+	}
 	prepared, err := s.generation.PrepareInput(request.Context(), generation.PrepareInputCommand{
 		OwnerID: owner, SessionID: body.SessionID, Capability: body.Capability,
 		OfferingID: body.OfferingID, Input: input, SceneID: body.SceneID,
 		ManifestID: body.ManifestID, ManifestHash: body.ManifestHash,
 		SourceSceneObjectID: body.SourceSceneObjectID, SourceSceneRevision: body.SourceSceneRevision,
+		ParameterReasons: reasons, ParameterSources: sources,
 		// A direct request keeps the first reference pictures a single-picture
 		// model takes, as the Agent does, and is told so (#329 follow-up).
 		KeepFirstReferences: true,
@@ -189,6 +228,11 @@ func (s *Server) prepareTask(writer http.ResponseWriter, request *http.Request, 
 		limit := *prepared.ReferenceLimit
 		limit.Model = s.texts.TextIn(request.Context(), limit.Model)
 		view["reference_note"] = limit.Note(s.texts.TextIn(request.Context(), limit.Template))
+	}
+	if len(prepared.ParameterAdjustments) > 0 {
+		// The frozen advised changes with their reasons and sources, projected as
+		// the Agent's approval card does (#295).
+		view["parameter_adjustments"] = s.parameterAdjustmentsIn(requestLocale(request), prepared.ParameterAdjustments)
 	}
 	writeJSON(writer, http.StatusCreated, frozenQuoteWire(view, prepared.NativeQuote))
 }
