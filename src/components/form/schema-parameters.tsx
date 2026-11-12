@@ -31,15 +31,19 @@ export function isBooleanChoice(parameter: ParamSchema): boolean {
 
 /**
  * The value a locked parameter shows instead of a control: the same effective value the
- * control edits (a missing value falls back to the Schema default), written as text.
+ * control edits (a missing value falls back to the Schema default), written as text. A
+ * parameter that follows the session purpose (#292) has no value of its own until the person
+ * picks one, so it says so instead of showing the default the purpose may replace.
  */
 export function parameterLockedText(
   parameter: ParamSchema,
   value: unknown,
   separator: string,
-  words: { on: string; off: string },
+  words: { on: string; off: string; followsPurpose?: string },
 ): string {
-  const current = value === undefined || value === null || value === '' ? parameter.default : value;
+  const unset = value === undefined || value === null || value === '';
+  if (unset && parameter.follows_purpose && words.followsPurpose) return words.followsPurpose;
+  const current = unset ? parameter.default : value;
   const label = (entry: unknown) => parameter.options?.find(option => String(option.value) === String(entry))?.label ?? String(entry ?? '');
   if (parameter.type === 'boolean') {
     return parameter.options?.length ? label(String(Boolean(current))) : Boolean(current) ? words.on : words.off;
@@ -101,7 +105,7 @@ export function SchemaParameters({ parameters, values, onChange, disabled, readO
     const lockedDisplay = !locked ? '' : (readOnly && lockedHint)
       || (parameter.type === 'asset'
         ? assetCount > 0 ? schemaCountMessage(schema, 'ui.studio.params.files_selected', assetCount, { count: assetCount }) : ''
-        : parameterLockedText(parameter, forced.found ? forced.value : value, separator, { on: schemaText(schema, 'ui.studio.params.on'), off: schemaText(schema, 'ui.studio.params.off') }))
+        : parameterLockedText(parameter, forced.found ? forced.value : value, separator, { on: schemaText(schema, 'ui.studio.params.on'), off: schemaText(schema, 'ui.studio.params.off'), followsPurpose: schemaText(schema, 'ui.studio.params.follows_purpose') }))
       || schemaText(schema, 'ui.studio.params.not_set');
 
     return <Field key={parameter.name} id={fieldId} label={parameter.label} help={help} group={group} required={parameter.required} meta={parameterMeta?.(parameter)} layout={parameter.type === 'boolean' && !choice && !locked ? 'inline' : 'stacked'}>
@@ -114,7 +118,9 @@ export function SchemaParameters({ parameters, values, onChange, disabled, readO
         : parameter.type === 'select'
           ? <OptionSelect {...control} required={parameter.required} disabled={locked} value={String(value ?? '')} onValueChange={selected => onChange(parameter.name, selected)}
               placeholder={text('ui.common.select.placeholder')}
-              options={[...(!parameter.required && parameter.default === undefined ? [{ value: '', label: text('ui.common.select.none') }] : []), ...(parameter.options ?? [])]} />
+              options={[...(parameter.follows_purpose
+                ? [{ value: '', label: text('ui.studio.params.follows_purpose') }]
+                : !parameter.required && parameter.default === undefined ? [{ value: '', label: text('ui.common.select.none') }] : []), ...(parameter.options ?? [])]} />
           : parameter.type === 'asset'
             ? <ImageUpload {...control} disabled={locked} accept={validation?.media_types?.join(',')} multiple={validation?.type === 'asset-array'} maxFiles={validation?.max_items ?? 1} maxBytes={validation?.max_bytes || undefined} onUpload={images => onChange(parameter.name, validation?.type === 'asset-array' ? images : images[0] ?? '')} />
             : group

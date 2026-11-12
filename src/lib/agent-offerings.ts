@@ -61,6 +61,8 @@ export interface OfferingParameterWire {
     disabled_when?: ParamCondition[];
     visible_when?: ParamCondition[];
     notices?: ParamNotice[];
+    /** The value the session purpose gives the parameter applies until the person picks one (#292). */
+    follows_purpose?: boolean;
   };
   semantic?: string;
   /** Schema: the backend always sets this parameter to its default; no one chooses it. */
@@ -232,6 +234,7 @@ export function offeringParamSchemas(
     if (wire.presentation?.notices !== undefined) {
       schema.notices = wire.presentation.notices;
     }
+    if (wire.presentation?.follows_purpose === true) schema.follows_purpose = true;
     if (wire.forced_when !== undefined) schema.forced_when = wire.forced_when;
     result.push(schema);
   }

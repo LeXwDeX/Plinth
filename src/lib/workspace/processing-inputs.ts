@@ -81,6 +81,18 @@ export function creditRange(offering: OfferingWire): { low: number; high: number
 }
 
 /**
+ * The values a step's form starts with: each parameter's Schema default, except one that follows the session
+ * purpose (presentation.follows_purpose, #292). That one starts unset, so the request leaves it out until the
+ * person picks a value and the server gives it the purpose's value; a visible default would be frozen as if it
+ * were their choice. A value the person picked is kept by the caller's own values over these.
+ */
+export function parameterDefaults(parameters: readonly ParamSchema[]): Record<string, unknown> {
+  return Object.fromEntries(parameters
+    .filter((parameter) => parameter.default !== undefined && !parameter.follows_purpose)
+    .map((parameter) => [parameter.name, parameter.default]));
+}
+
+/**
  * The visible, enabled required fields of a step that have no value yet (#321): the panel keeps its
  * confirm button disabled and names them, instead of letting the server reject the plan later.
  */

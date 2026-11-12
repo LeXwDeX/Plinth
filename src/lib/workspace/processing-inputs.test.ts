@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { OfferingWire } from '@/lib/agent-offerings';
 import type { ParamSchema } from '@/lib/providers/types';
-import { creditRange, inputRuleViolations, missingRequiredParameters, uploadAssetInputs } from './processing-inputs';
+import { creditRange, inputRuleViolations, missingRequiredParameters, parameterDefaults, uploadAssetInputs } from './processing-inputs';
 
 const retexture: OfferingWire = {
   id: 'meshy/processing/retexture', revision: '1', provider_id: 'meshy', provider_name: 'Meshy', model_id: 'm', model_name: 'M',
@@ -166,5 +166,26 @@ describe('missingRequiredParameters', () => {
     expect(missingRequiredParameters([gated], { auto: true })).toEqual([]);
     expect(missingRequiredParameters([gated], { auto: false })).toEqual([gated]);
     expect(missingRequiredParameters([gated], { auto: false, height: 0 })).toEqual([]);
+  });
+});
+
+describe('parameterDefaults (#292)', () => {
+  const size: ParamSchema = { name: 'export_texture_size', label: '导出贴图尺寸', type: 'select', default: '8k', follows_purpose: true,
+    options: [{ value: '8k', label: '8K' }, { value: '2k', label: '2K' }] };
+  const rig: ParamSchema = { name: 'rig_type', label: '骨架类型', type: 'select', default: 'biped' };
+  const watermark: ParamSchema = { name: 'watermark', label: '水印', type: 'boolean', default: false };
+  const seed: ParamSchema = { name: 'seed', label: '种子', type: 'number', default: 0 };
+  const prompt: ParamSchema = { name: 'prompt', label: '提示词', type: 'text' };
+
+  it('starts every parameter at its Schema default, falsy defaults included', () => {
+    expect(parameterDefaults([rig, watermark, seed, prompt])).toEqual({ rig_type: 'biped', watermark: false, seed: 0 });
+  });
+  it('leaves a parameter that follows the session purpose unset, so a request leaves it out until the person picks a value', () => {
+    expect(parameterDefaults([rig, size])).toEqual({ rig_type: 'biped' });
+    // What the person picked sits over the defaults, as the panel merges them, and is submitted.
+    expect({ ...parameterDefaults([rig, size]), export_texture_size: '2k' }).toEqual({ rig_type: 'biped', export_texture_size: '2k' });
+  });
+  it('never counts a parameter that follows the purpose as a missing required one', () => {
+    expect(missingRequiredParameters([size], parameterDefaults([size]))).toEqual([]);
   });
 });
