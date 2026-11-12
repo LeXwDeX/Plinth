@@ -192,6 +192,10 @@ func (m *Module) Submit(ctx context.Context, cmd SubmitCommand) (Accepted, error
 	if err != nil {
 		return Accepted{}, err
 	}
+	offering, normalized, err = m.applySourceSideDefaults(ctx, cmd.OwnerID, cmd.Capability, offering, cmd.Input, normalized)
+	if err != nil {
+		return Accepted{}, err
+	}
 	quote, err := offering.EvaluateNativeQuote(normalized)
 	if err != nil {
 		return Accepted{}, &Error{Code: ErrInvalidInput, Operation: "submit", Cause: err}

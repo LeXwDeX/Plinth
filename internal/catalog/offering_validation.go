@@ -289,6 +289,11 @@ func validateOffering(
 				}
 			}
 		}
+		if parameter.DefaultBySourceSide != nil {
+			if err := validateDefaultBySourceSide(offering, parameter); err != nil {
+				return err
+			}
+		}
 		for retired, raw := range parameter.LegacyValues {
 			var replacement any
 			decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -1247,6 +1252,56 @@ func validateRequiredItems(parameter schemacontract.Parameter) error {
 	for _, required := range parameter.RequiredItems {
 		if !slices.Contains(defaults, required) {
 			return fmt.Errorf("参数 %q 的默认值缺少 required_items 中的 %q", parameter.Name, required)
+		}
+	}
+	return nil
+}
+
+// validateDefaultBySourceSide checks a parameter whose default follows the
+// size of the submitted pictures (#284): a number parameter that keeps a static
+// default for pictures that cannot be measured, names an asset parameter of the
+// same Offering, and lists ascending tiers whose last one has no upper bound.
+// Every tier value must be one the parameter itself accepts, so a default the
+// Schema supplies is never refused by the validation it then goes through.
+func validateDefaultBySourceSide(offering schemacontract.Offering, parameter schemacontract.Parameter) error {
+	rule := parameter.DefaultBySourceSide
+	problem := func(format string, args ...any) error {
+		return fmt.Errorf("Offering %q 参数 %q 的 default_by_source_side "+format,
+			append([]any{offering.ID, parameter.Name}, args...)...)
+	}
+	if parameter.Type != "number" || parameter.Fixed {
+		return problem("只有可由调用方给值的 number 参数可以声明")
+	}
+	if len(bytes.TrimSpace(parameter.Default)) == 0 {
+		return problem("需要同时声明 default（读不出图片尺寸时使用）")
+	}
+	source, exists := offeringParameter(offering.Parameters, rule.Source)
+	if !exists || (source.Type != "asset" && source.Type != "asset-array") {
+		return problem("的 source %q 必须是本 Offering 的资产参数", rule.Source)
+	}
+	if len(rule.Tiers) == 0 {
+		return problem("缺少 tiers")
+	}
+	previous := int64(0)
+	for index, tier := range rule.Tiers {
+		if last := index == len(rule.Tiers)-1; last {
+			if tier.MaxSide != 0 {
+				return problem("的最后一档不能声明 max_source_side（它覆盖所有更大的图片）")
+			}
+		} else {
+			if tier.MaxSide <= previous {
+				return problem("的 tiers[%d].max_source_side 必须为正且严格递增", index)
+			}
+			previous = tier.MaxSide
+		}
+		var value any
+		decoder := json.NewDecoder(bytes.NewReader(tier.Value))
+		decoder.UseNumber()
+		if len(bytes.TrimSpace(tier.Value)) == 0 || decoder.Decode(&value) != nil {
+			return problem("的 tiers[%d] 缺少有效 value", index)
+		}
+		if _, err := validateValue(parameter, value); err != nil {
+			return problem("的 tiers[%d] value 无效: %w", index, err)
 		}
 	}
 	return nil

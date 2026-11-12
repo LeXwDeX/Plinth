@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-12.294-real-checks.1",
+    "revision": "2026-11-12.284-matting-res.1",
     "terminology": {
       "user_facing": [
         {
@@ -20462,8 +20462,8 @@
             "站起 7 (Stand_Up7)": "Stand up 7",
             "站起 8 (Stand_Up8)": "Stand up 8",
             "站起 9 (Stand_Up9)": "Stand up 9",
-            "第一步粗略识别前景轮廓时使用的图片尺寸。越大越精细但越慢，目前硬件上限 1024": "Image size used in the first step to roughly detect the foreground outline. Larger is finer but slower; the current hardware limit is 1024.",
-            "第二步精细抠图时使用的图片尺寸。越大细节越好但越慢，目前硬件上限 1024": "Image size used in the second step for fine matting. Larger gives better detail but is slower; the current hardware limit is 1024.",
+            "第一步粗略识别前景轮廓时使用的图片尺寸。越大越精细但越慢；不指定时按来源图片的长边选择": "Image size used in the first step to roughly detect the foreground outline. Larger is finer but slower; when not set it follows the long side of the source picture.",
+            "第二步精细抠图时使用的图片尺寸。越大细节越好但越慢；不指定时按来源图片的长边选择": "Image size used in the second step for fine matting. Larger gives better detail but is slower; when not set it follows the long side of the source picture.",
             "简单踢 (Simple_Kick)": "Simple kick",
             "粗": "Coarse",
             "粗 Mask 模糊半径": "Coarse mask blur radius",
@@ -36799,7 +36799,7 @@
     },
     {
       "id": "matting/default/background-removal",
-      "revision": "2026-07-26.2",
+      "revision": "2026-11-12.284.1",
       "provider_id": "matting",
       "provider_name": "背景去除",
       "provider_short_label": "MATTING",
@@ -36853,10 +36853,18 @@
           "name": "birefnet_process_res",
           "label": "粗分割分辨率",
           "type": "number",
-          "description": "第一步粗略识别前景轮廓时使用的图片尺寸。越大越精细但越慢，目前硬件上限 1024",
+          "integer": true,
+          "description": "第一步粗略识别前景轮廓时使用的图片尺寸。越大越精细但越慢；不指定时按来源图片的长边选择",
           "minimum": 512,
-          "maximum": 1024,
+          "maximum": 4096,
           "default": 1024,
+          "default_by_source_side": {
+            "source": "source_assets",
+            "tiers": [
+              { "max_source_side": 1024, "value": 1024 },
+              { "value": 2048 }
+            ]
+          },
           "presentation": {
             "surface": "hidden",
             "control": "number",
@@ -36920,10 +36928,18 @@
           "name": "sdmatte_process_res",
           "label": "精抠分辨率",
           "type": "number",
-          "description": "第二步精细抠图时使用的图片尺寸。越大细节越好但越慢，目前硬件上限 1024",
+          "integer": true,
+          "description": "第二步精细抠图时使用的图片尺寸。越大细节越好但越慢；不指定时按来源图片的长边选择",
           "minimum": 512,
-          "maximum": 1024,
+          "maximum": 2048,
           "default": 1024,
+          "default_by_source_side": {
+            "source": "source_assets",
+            "tiers": [
+              { "max_source_side": 1024, "value": 1024 },
+              { "value": 2048 }
+            ]
+          },
           "presentation": {
             "surface": "hidden",
             "control": "number",
