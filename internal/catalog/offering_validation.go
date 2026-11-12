@@ -551,6 +551,9 @@ func offeringUserFacingCopy(offering schemacontract.Offering) []offeringCopyFiel
 			offeringCopyField{prefix + ".adjustment_reason", parameter.AdjustmentReason},
 			offeringCopyField{prefix + ".task_source_alternative", parameter.TaskSourceAlternative},
 		)
+		for ruleIndex, rule := range parameter.SourceInputRules {
+			copies = append(copies, offeringCopyField{fmt.Sprintf("%s.source_input_rules[%d].message", prefix, ruleIndex), rule.Message})
+		}
 		for optionIndex, option := range parameter.Options {
 			copies = append(copies, offeringCopyField{fmt.Sprintf("%s.options[%d].label", prefix, optionIndex), option.Label})
 		}
@@ -1496,6 +1499,10 @@ func validateValueDefinition(schema schemacontract.Parameter) (schemacontract.Pa
 // task_source_alternative: it joins a refusal sentence, not a manual.
 const maxTaskSourceAlternativeRunes = 400
 
+// maxSourceInputRuleMessageRunes bounds the reason of a source_input_rules entry:
+// it is the whole refusal the requester reads.
+const maxSourceInputRuleMessageRunes = 400
+
 func validateTaskSourceParameter(parameter schemacontract.Parameter) error {
 	// same_session binds task sources to this chat session. A saved-model
 	// source parameter (asset or asset-array with source-asset semantics) may
@@ -1537,6 +1544,22 @@ func validateTaskSourceParameter(parameter schemacontract.Parameter) error {
 			len([]rune(alternative)) > maxTaskSourceAlternativeRunes || strings.ContainsAny(alternative, "{}")) {
 		return fmt.Errorf("参数 %q 的 task_source_alternative 只能写在 task 参数上，不含首尾空白与花括号，且不超过 %d 个字符",
 			parameter.Name, maxTaskSourceAlternativeRunes)
+	}
+	// A source rule (#294) refuses a Task by its own frozen input, so it needs the
+	// list of Offerings that can be the source (validateSourceInputRuleReferences
+	// reads their parameters) and a reason that is complete text.
+	if len(parameter.SourceInputRules) > 0 && (parameter.Type != "task" || len(parameter.TaskOfferings) == 0) {
+		return fmt.Errorf("参数 %q 的 source_input_rules 只能写在声明了 task_offerings 的 task 参数上", parameter.Name)
+	}
+	for index, rule := range parameter.SourceInputRules {
+		if len(rule.SourceConditions) == 0 {
+			return fmt.Errorf("参数 %q 的 source_input_rules[%d] 必须声明 source_conditions", parameter.Name, index)
+		}
+		if message := rule.Message; strings.TrimSpace(message) == "" || strings.TrimSpace(message) != message ||
+			len([]rune(message)) > maxSourceInputRuleMessageRunes || strings.ContainsAny(message, "{}") {
+			return fmt.Errorf("参数 %q 的 source_input_rules[%d].message 必须是不含首尾空白与花括号、不超过 %d 个字符的完整说明",
+				parameter.Name, index, maxSourceInputRuleMessageRunes)
+		}
 	}
 	if parameter.TaskSourceKind != schemacontract.TaskSourceAssets {
 		return nil
@@ -1582,6 +1605,51 @@ func validateTaskOfferingReferences(offerings generationMap) error {
 						return fmt.Errorf("Offering %q 参数 %q 的 task_offerings 与 task_capabilities 冲突", offering.ID, parameter.Name)
 					}
 				}
+			}
+			if err := validateSourceInputRuleReferences(offering, parameter, offerings); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// validateSourceInputRuleReferences checks that the conditions of a task
+// parameter's source_input_rules (#294) mean something: a source condition names
+// a parameter that at least one of the listed source Offerings declares, and
+// holds a legal value for every one that does (an Offering without the
+// parameter never matches it); a request condition names a parameter of this
+// Offering.
+func validateSourceInputRuleReferences(
+	offering schemacontract.Offering,
+	parameter schemacontract.Parameter,
+	offerings generationMap,
+) error {
+	for ruleIndex, rule := range parameter.SourceInputRules {
+		path := fmt.Sprintf("Offering %q 参数 %q 的 source_input_rules[%d]", offering.ID, parameter.Name, ruleIndex)
+		for _, condition := range rule.SourceConditions {
+			declared := false
+			for _, id := range parameter.TaskOfferings {
+				target, ok := offeringParameter(offerings[id].Parameters, condition.Parameter)
+				if !ok {
+					continue
+				}
+				declared = true
+				if err := validateParameterCondition(condition, target); err != nil {
+					return fmt.Errorf("%s 的来源条件 %q 对 Offering %q 无效: %w", path, condition.Parameter, id, err)
+				}
+			}
+			if !declared {
+				return fmt.Errorf("%s 的来源条件引用的参数 %q 没有任何来源 Offering 声明", path, condition.Parameter)
+			}
+		}
+		for _, condition := range rule.RequestConditions {
+			target, ok := offeringParameter(offering.Parameters, condition.Parameter)
+			if !ok {
+				return fmt.Errorf("%s 的请求条件引用未知参数 %q", path, condition.Parameter)
+			}
+			if err := validateParameterCondition(condition, target); err != nil {
+				return fmt.Errorf("%s 的请求条件 %q 无效: %w", path, condition.Parameter, err)
 			}
 		}
 	}

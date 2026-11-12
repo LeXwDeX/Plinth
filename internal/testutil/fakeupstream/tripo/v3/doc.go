@@ -90,6 +90,15 @@
 // delivers an FBX (the page's v2.0 line and the one real v3.0 quad task). All of
 // it is constructed from the page except the one captured valid v3.0 request.
 //
+// P2 quad output (#294). A P-series generation request (text, image or
+// multiview) with quad=true delivers an FBX and no GLB, like the real P2
+// task did on 2026-11-12: every model URL of the task's output names
+// model.fbx (p2_quad.go), served as binary/octet-stream, which the Tripo adapter
+// labels application/octet-stream with no variant. Nothing else about the task
+// changes. Only P2 was observed, so a quad request to an H-series model still
+// delivers a GLB, and the multiview endpoint is assumed to behave like the other
+// two.
+//
 // Balance scenarios. insufficient-balance and key-quota are credit refusals of
 // task creation, so they never apply to POST /files; the files page defines no
 // such refusal for an upload.

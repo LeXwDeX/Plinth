@@ -107,7 +107,7 @@ func buildEndpoints() []fakeupstream.Endpoint {
 			Note: "the official file host is not part of the API; this route serves the fixed files the download list names (content types as observed)"},
 	}
 	for _, k := range kinds {
-		note := "multipart request, HTTP 201 for a handled request; a rejected request is HTTP 201 with an error body (observed). The documented submission codes without a wire sample — API_PARALLELISM_LIMIT_REACHED, PERMISSION_DENIED, API_NO_ACTIVE_SUBSCRIPTION, API_SUBSCRIPTION_PLAN_TOO_LOW, API_OBJECT_NOT_FOUND_ON_IMAGE, IMAGE_CONTENT_VIOLATION, IMAGE_LABEL_LENGTH_TOO_LONG, API_UNKNOWN and the unknown-asset NO_SUCH_TASK — are constructed from " + docsRoot + "errors (checked 2026-11-08)"
+		note := "multipart request, HTTP 201 for a handled request; a rejected request is HTTP 201 with an error body (observed). API_NO_ACTIVE_SUBSCRIPTION was observed on 2026-11-12 (#294): a real submission was refused with it and the product recorded no HTTP status for the refusal (upstream_status 0), which is what the HTTP 201 error body sent here gives; the message text of the real body was not kept, so the message stays the documented description. The other documented submission codes without a wire sample — API_PARALLELISM_LIMIT_REACHED, PERMISSION_DENIED, API_SUBSCRIPTION_PLAN_TOO_LOW, API_OBJECT_NOT_FOUND_ON_IMAGE, IMAGE_CONTENT_VIOLATION, IMAGE_LABEL_LENGTH_TOO_LONG, API_UNKNOWN and the unknown-asset NO_SUCH_TASK — are constructed from " + docsRoot + "errors (checked 2026-11-08)"
 		if k.Need == "prompt-or-images" {
 			note += ". The value rules of the Gen-2.5 form (seed, mesh_mode, quality, texture_mode, quality_override with its Quad and tier ceilings, and the TAPose and quad_normal switches) are constructed from " + docsRoot + k.DocPage + " (checked " + formDocs + "): a value outside them is answered INVALID_REQUEST, the documented code for invalid values. The real service may answer a schema-level violation with its HTTP 400 validator envelope instead; neither the status nor the message text of a rejected value is observed"
 		}
@@ -321,8 +321,11 @@ func (h *handler) render(w http.ResponseWriter, _ *http.Request, scenario fakeup
 // renderSubmissionScenario writes the documented submission errors that
 // Env.Intercept does not route. Their bodies are constructed from
 // docsRoot+"errors" (checked errorDocs): HTTP 201 with the documented
-// description as message. No wire sample covers them, and the FailTimes counter
-// that Env.Intercept applies to its own scenarios does not reach these codes.
+// description as message. No wire sample covers them (API_NO_ACTIVE_SUBSCRIPTION
+// was observed once, 2026-11-12, #294, as a refusal the product recorded with no
+// HTTP status; the shape here is that of the other HTTP 201 refusals and the
+// message is still the documented description), and the FailTimes counter that
+// Env.Intercept applies to its own scenarios does not reach these codes.
 func (h *handler) renderSubmissionScenario(w http.ResponseWriter, r *http.Request) bool {
 	switch fakeupstream.ScenarioOf(r) {
 	case fakeupstream.ScenarioConcurrencyLimit:

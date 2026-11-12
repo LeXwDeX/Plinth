@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-12.276-lowpoly-path.1",
+    "revision": "2026-11-12.294-real-checks.1",
     "terminology": {
       "user_facing": [
         {
@@ -1326,8 +1326,8 @@
             ],
             "upstream_code_map": {
               "INVALID_REQUEST": { "class": "invalid_input" },
-              "API_NO_ACTIVE_SUBSCRIPTION": { "class": "authentication" },
-              "API_SUBSCRIPTION_PLAN_TOO_LOW": { "class": "authentication" },
+              "API_NO_ACTIVE_SUBSCRIPTION": { "class": "insufficient_balance" },
+              "API_SUBSCRIPTION_PLAN_TOO_LOW": { "class": "insufficient_balance" },
               "API_PARALLELISM_LIMIT_REACHED": { "class": "rate_limited" },
               "API_INSUFFICIENT_FUNDS": { "class": "insufficient_balance" },
               "API_OBJECT_NOT_FOUND_ON_IMAGE": { "class": "invalid_input" },
@@ -4203,7 +4203,7 @@
         "failure.timed_out": "上游请求超时",
         "failure.upstream_queue_timeout": "上游排队过久，已停止等待；服务商可能仍会执行并扣费",
         "failure.rejected": "上游拒绝或取消了任务",
-        "failure.insufficient_balance": "该模型服务商的账户余额不足或已欠费，暂时无法生成。请联系管理员处理",
+        "failure.insufficient_balance": "该模型服务商的账户余额不足、已欠费，或没有可用的 API 订阅（未开通，或套餐不含 API 权限），暂时无法生成。请联系管理员处理",
         "failure.credential_quota": "上游服务的 API Key 额度已用完，暂时无法生成。请联系管理员调整 Key 额度或更换 Key",
         "failure.upstream_unavailable": "上游服务暂时不可用",
         "failure.submission_unknown": "无法确认上游是否已接受任务",
@@ -6038,7 +6038,7 @@
               "retexture_model",
               "revise_processing_plan"
             ],
-            "text": "【3D 制作要领】\n用途决定一切。展示渲染、3D 打印要高细节（数十万到两百万面，打印还要水密）；游戏和实时资产要低模和干净拓扑（道具和场景件约几百到两万三角面，角色约五千到六万，必须有 UV），Web/AR 一般在十万面以内、贴图 2K。工具会按制作简报的用途给出默认模型和参数，并在 inspect_model 结果里给出预算判定。\n模型取舍（按当前启用且可用的 Offering 实时生成）：\n{offering_tradeoffs}\n高细节模型拿去做游戏资产时要降面数，不要直接交付两百万面的结果。各处理服务保留什么、改变什么，以 list_offerings 里的 description 为准：带烘焙的减面（如 Tripo 减面）把贴图烘焙到低模上；只重建几何的重拓扑（如 Meshy 重拓扑）不保留贴图，尺寸也可能改变，之后要接换贴图，要原尺寸就按源模型高度接精确尺寸。能用带烘焙的减面就先用它；面数已达标的模型不要再叠加重拓扑。\n推荐管线：\n- 游戏角色，简报里写了“需要绑骨”（needs_rig）时的默认路线：A 姿态概念图 → 三视图（create_three_view，subject_type=humanoid）→ 多视图转 3D（create_model_3d_from_views）→ 自检 → 需要时降面（Tripo v3.1 的结果用带烘焙的减面，其他来源才用重拓扑）→ 绑骨 → 动画。只有用户锁定了别的路线，或已有合格的 A 姿态正面图时才改走图生 3D；不绑骨的角色可以直接图生低模。绑骨前确认面数在绑骨服务的上限以内。\n- 游戏道具/场景件：概念图 → 图生低模 → 自检 → 需要时拆件或减面。\n- 要“高模细节加游戏面数”的角色或道具：用 Tripo v3.1（文生、图生、多视图都可）生成高细节模型，这一步的 face_limit 用 set_params 设成较高的值并写明理由，面数超出用途预算是预期的（它只是降面前的中间模型）；多视图的游戏用途默认开着 smart_low_poly 和 quad，要一并设为关闭，否则面数上限只有 2 万和 15 万以内；再用 Tripo 带烘焙的减面，把 face_limit 设为用途面数上限，贴图烘焙到低模并自动展开 UV；角色之后绑骨、动画。Tripo P2、Meshy、Rodin 的结果和上传文件不接带烘焙的减面：要降面只能用 Meshy 重拓扑（不保留贴图，之后接换贴图），或回到 Tripo v3.1 重新生成。直接出低模的路线（P2、Meshy T2.5）不需要这一步；Meshy 7.1 在游戏用途下开自动重拓扑也能一步出带贴图的低模，但 Meshy 官方更推荐低模游戏资产用智能拓扑（T2.5）。\n- 展示渲染：概念图 → 多视图生成（至少正、侧、背）→ 自检 → 需要时换贴图。\n- 3D 打印：高细节生成 → 可打印性检查 → 修复 → 自检水密。\n自检要点：轮廓和比例是否与参考一致；背面是否被糊成一团；手指、耳朵、武器等细小结构是否粘连或断裂；有没有漂浮碎片（inspect_model 的 connected_components、debris_components、debris_triangles）；贴图接缝、错位和拉伸；左右对称的物体是否对称；面数、UV、水密是否满足用途预算。\n对照参考图：图生 3D 或多视图结果用 compare_model_reference 按视角把参考图与模型渲染并排，结果附确定性的轮廓交并比、包围盒比例差与主体色差；指标只作参考，最终看并排图和自己的判断。检查后用 record_self_check 写结论（passed 或 has_issues）并列出发现、处理与剩余问题；服务端按真实工具调用生成记录，未自检的结果不得说成已检查。轮次、每轮渲染和修正次数有上限，到上限就停下并如实汇报遗留问题。\n读 inspect_model 结果：topology.inconsistent_winding_edges 大于 0 表示相邻面朝向不一致，topology.inside_out 为 true 表示闭合网格整体朝内，两者都会让 watertight 为 false，打印前必须修复（看 usage_check 中 watertight 一项的 fix_hint）；警告 skin_bind_pose 表示骨骼无法解算，蒙皮按绑定姿态检查，包围盒、尺寸和原点都以绑定姿态为准，汇报时要说明；三角带（strip）模型的 triangles 只计实际绘制的三角面，不含拼接用的退化面，可能少于按索引数推算的值。\n修改优先级：先用不付费或便宜的手段（拆分出有问题的部件、只处理那个部件、减面），再考虑换贴图或部件补全，最后才是改进输入后整体重做。减面、拆件、换贴图修不了的问题要回到输入图：手指或四肢粘连、背面被糊成一团、比例或轮廓与参考不符、缺少部件，先修输入图或补全正侧背视角，再重新生成，不要在同一个模型上反复加工。每次修改后重新 inspect 和 render 确认，不要假设修好了。\n账本：系统上下文里的【生产账本】是服务端事实。要复用或改写某一步的完整提示词时，用 get_production_step 按 @stepN 或任务 ID 取回，不要凭记忆重写；上一回合的自检遗留问题和已否决方向以账本为准。\n偏好：写每个模型的提示词前先读【偏好摘要】。已选用方向要逐字沿用其造型、比例与材质；已否决方向及其原因不要换词重试，除非用户明确要求。重新生成/重绘/改词重发只是未确认信号，先确认方向再批量出图。",
+            "text": "【3D 制作要领】\n用途决定一切。展示渲染、3D 打印要高细节（数十万到两百万面，打印还要水密）；游戏和实时资产要低模和干净拓扑（道具和场景件约几百到两万三角面，角色约五千到六万，必须有 UV），Web/AR 一般在十万面以内、贴图 2K。工具会按制作简报的用途给出默认模型和参数，并在 inspect_model 结果里给出预算判定。\n模型取舍（按当前启用且可用的 Offering 实时生成）：\n{offering_tradeoffs}\n高细节模型拿去做游戏资产时要降面数，不要直接交付两百万面的结果。各处理服务保留什么、改变什么，以 list_offerings 里的 description 为准：带烘焙的减面（如 Tripo 减面）把贴图烘焙到低模上；只重建几何的重拓扑（如 Meshy 重拓扑）不保留贴图，尺寸也可能改变，之后要接换贴图，要原尺寸就按源模型高度接精确尺寸。能用带烘焙的减面就先用它；面数已达标的模型不要再叠加重拓扑。\n推荐管线：\n- 游戏角色，简报里写了“需要绑骨”（needs_rig）时的默认路线：A 姿态概念图 → 三视图（create_three_view，subject_type=humanoid）→ 多视图转 3D（create_model_3d_from_views）→ 自检 → 需要时降面（Tripo v3.1 的结果用带烘焙的减面，其他来源才用重拓扑）→ 绑骨 → 动画。只有用户锁定了别的路线，或已有合格的 A 姿态正面图时才改走图生 3D；不绑骨的角色可以直接图生低模。绑骨前确认面数在绑骨服务的上限以内。\n- 游戏道具/场景件：概念图 → 图生低模 → 自检 → 需要时拆件或减面。\n- 要“高模细节加游戏面数”的角色或道具：用 Tripo v3.1（文生、图生、多视图都可）生成高细节模型，这一步的 face_limit 用 set_params 设成较高的值并写明理由，面数超出用途预算是预期的（它只是降面前的中间模型）；多视图的游戏用途默认开着 smart_low_poly，要设为关闭，否则面数上限只有 2 万以内；再用 Tripo 带烘焙的减面，把 face_limit 设为用途面数上限，贴图烘焙到低模并自动展开 UV；角色之后绑骨、动画。Tripo P2、Meshy、Rodin 的结果和上传文件不接带烘焙的减面：要降面只能用 Meshy 重拓扑（不保留贴图，之后接换贴图），或回到 Tripo v3.1 重新生成。直接出低模的路线（P2、Meshy T2.5）不需要这一步；Meshy 7.1 在游戏用途下开自动重拓扑也能一步出带贴图的低模，但 Meshy 官方更推荐低模游戏资产用智能拓扑（T2.5）。\n- 展示渲染：概念图 → 多视图生成（至少正、侧、背）→ 自检 → 需要时换贴图。\n- 3D 打印：高细节生成 → 可打印性检查 → 修复 → 自检水密。\n自检要点：轮廓和比例是否与参考一致；背面是否被糊成一团；手指、耳朵、武器等细小结构是否粘连或断裂；有没有漂浮碎片（inspect_model 的 connected_components、debris_components、debris_triangles）；贴图接缝、错位和拉伸；左右对称的物体是否对称；面数、UV、水密是否满足用途预算。\n对照参考图：图生 3D 或多视图结果用 compare_model_reference 按视角把参考图与模型渲染并排，结果附确定性的轮廓交并比、包围盒比例差与主体色差；指标只作参考，最终看并排图和自己的判断。检查后用 record_self_check 写结论（passed 或 has_issues）并列出发现、处理与剩余问题；服务端按真实工具调用生成记录，未自检的结果不得说成已检查。轮次、每轮渲染和修正次数有上限，到上限就停下并如实汇报遗留问题。\n读 inspect_model 结果：topology.inconsistent_winding_edges 大于 0 表示相邻面朝向不一致，topology.inside_out 为 true 表示闭合网格整体朝内，两者都会让 watertight 为 false，打印前必须修复（看 usage_check 中 watertight 一项的 fix_hint）；警告 skin_bind_pose 表示骨骼无法解算，蒙皮按绑定姿态检查，包围盒、尺寸和原点都以绑定姿态为准，汇报时要说明；三角带（strip）模型的 triangles 只计实际绘制的三角面，不含拼接用的退化面，可能少于按索引数推算的值。\n修改优先级：先用不付费或便宜的手段（拆分出有问题的部件、只处理那个部件、减面），再考虑换贴图或部件补全，最后才是改进输入后整体重做。减面、拆件、换贴图修不了的问题要回到输入图：手指或四肢粘连、背面被糊成一团、比例或轮廓与参考不符、缺少部件，先修输入图或补全正侧背视角，再重新生成，不要在同一个模型上反复加工。每次修改后重新 inspect 和 render 确认，不要假设修好了。\n账本：系统上下文里的【生产账本】是服务端事实。要复用或改写某一步的完整提示词时，用 get_production_step 按 @stepN 或任务 ID 取回，不要凭记忆重写；上一回合的自检遗留问题和已否决方向以账本为准。\n偏好：写每个模型的提示词前先读【偏好摘要】。已选用方向要逐字沿用其造型、比例与材质；已否决方向及其原因不要换词重试，除非用户明确要求。重新生成/重绘/改词重发只是未确认信号，先确认方向再批量出图。",
             "offering_capabilities": ["text-to-3d", "image-to-3d"],
             "tradeoff_template": "- {model}：擅长 {strengths}；避免 {weaknesses}",
             "tradeoff_separator": "\n"
@@ -8191,7 +8191,7 @@
               },
               "include_fingers": {
                 "type": "boolean",
-                "description": "rigging only, for Meshy Rigging: add finger bones. Only when the person wants fingers; it cannot go with a texture image and a quad-topology source is not supported."
+                "description": "rigging only, for Meshy Rigging: add finger bones. Only when the person wants fingers; it cannot go with a texture image, and a source model made with quad topology is not supported (the step is refused before it is submitted; the game character purposes generate Meshy 7.1 models with quad topology, so offer a triangle-topology regeneration if the person wants fingers)."
               },
               "action_id": {
                 "type": "integer",
@@ -9255,7 +9255,7 @@
           "generation_failed": "生成失败",
           "generation_failed_by_class": {
             "upstream_queue_timeout": "这一步在服务商的队列里等待太久（超过上游排队等待上限），平台已停止等待，任务记为失败。服务商可能仍会执行并扣除积分，所以系统没有自动重新提交。请如实告诉用户：上游排队过久，可能已经扣费，结果未知。先用 get_task 查看这个任务的最新状态，不要自行重新提交；是否重新生成由用户决定，重新生成会再次计费。",
-            "insufficient_balance": "该模型服务商的账户余额不足或已欠费，这一步没有执行。请联系管理员处理",
+            "insufficient_balance": "该模型服务商的账户余额不足、已欠费，或没有可用的 API 订阅（未开通，或套餐不含 API 权限），这一步没有执行。请联系管理员处理",
             "credential_quota": "上游服务的 API Key 额度已用完，这一步没有执行。请联系管理员调整 Key 额度或更换 Key",
             "content_rejected": "上游服务的内容安全审核拦截了这一步的输入（审核器较敏感，正常美术素材也可能被误判），没有生成结果，原样重试也不会通过。请主动调整后再调用一次：按审核原因改写提示词，去掉可能触发的描述（例如 sexual 时写明服装完整、姿态得体，去掉裸露、贴身、性感等词；violence 时去掉血腥、武器伤害描写），保留美术意图；若被拦的是输入图本身，改写提示词无效，请改用其他图或去掉该参考图后再试，必要时请用户换图。同时如实告诉用户是审核拦截以及你做了什么调整。不要建议修改部署配置",
             "upstream_denied": "上游图像生成服务拒绝了这一步的请求（HTTP 403），没有生成结果。这是上游访问权限问题，与提示词和图片无关：不要改写提示词、换图或换参数重试，也不要再换别的模型反复试探。请如实告诉用户是上游图像生成服务拒绝了请求，需要管理员检查上游服务的访问权限后再试",
@@ -9602,23 +9602,19 @@
             },
             "parameter_overrides": {
               "tripo/tripo-p2/text-to-3d": {
-                "face_limit": 10000,
-                "quad": true,
+                "face_limit": 20000,
                 "texture_quality": "standard"
               },
               "tripo/tripo-p2/image-to-3d": {
-                "face_limit": 10000,
-                "quad": true,
+                "face_limit": 20000,
                 "texture_quality": "standard"
               },
               "tripo/tripo-p2-multiview/image-to-3d": {
-                "face_limit": 10000,
-                "quad": true,
+                "face_limit": 20000,
                 "texture_quality": "standard"
               },
               "tripo/tripo-v3.1-multiview/image-to-3d": {
-                "face_limit": 10000,
-                "quad": true,
+                "face_limit": 20000,
                 "smart_low_poly": true,
                 "texture_quality": "standard",
                 "output_formats": ["GLTF", "FBX"],
@@ -9651,19 +9647,19 @@
               "meshy/meshy-7.1/text-to-3d": {
                 "should_remesh": true,
                 "topology": "quad",
-                "target_polycount": 10000,
+                "target_polycount": 8000,
                 "texture_resolution": "2k",
                 "pose_mode": "a-pose"
               },
               "meshy/meshy-7.1/image-to-3d": {
                 "should_remesh": true,
                 "topology": "quad",
-                "target_polycount": 10000,
+                "target_polycount": 8000,
                 "texture_resolution": "2k",
                 "pose_mode": "a-pose"
               }
             },
-            "reason": "角色要做表情和关节变形，需要四边面布线：优先使用支持四边面输出的模型并默认开启四边面。文生、图生先用 Tripo P2；Meshy T2.5 智能拓扑只出三角面，排在其后；Rodin Gen-2.5 用 mesh_mode 出四边面并开 T/A 姿态与法线烘焙、2K 贴图，作为第三选择。多视图先用细节与纹理更高的 Tripo v3.1 多视图，其次 P2 多视图。顺序按产出质量定，成本只在质量相同时排先后。四边面的真实拓扑质量尚未用真实上游样本核对。Meshy 7.1 排在最后：它生成时直接重拓扑（自动重拓扑、四边面、约 2 万个三角面）并烘出 2K 贴图，一步得到带贴图的低模；但 Meshy 官方建议低模游戏资产改用智能拓扑（T2.5），重拓扑后的贴图与四边面拓扑质量尚无真实样本核对。Tripo 多视图只导出游戏引擎要用的 GLB 与 FBX，贴图用无损 PNG 并缩小到 2K，原点移到底部中心（转换按进阶价计）。",
+            "reason": "角色用于实时渲染，需要受控面数与 UV，布线最好利于表情和关节变形。文生、图生先用细节更好的 Tripo P2；2026-11-12 实测 P2 开启四边面输出（quad=true）只交付 FBX、没有可预览的 GLB，所以角色默认不开 Tripo 的四边面，保持三角面输出，面数上限按平台预算取值。Meshy T2.5 智能拓扑只出三角面，排在其后；Rodin Gen-2.5 用 mesh_mode 出四边面并开 T/A 姿态与法线烘焙、2K 贴图，作为第三选择。多视图先用细节与纹理更高的 Tripo v3.1 多视图，其次 P2 多视图。顺序按产出质量定，成本只在质量相同时排先后；Rodin 四边面等其余模型的真实拓扑质量尚未用真实上游样本核对。Meshy 7.1 排在最后：它生成时直接重拓扑（自动重拓扑、四边面）并烘出 2K 贴图，一步得到带贴图的低模；2026-11-12 实测目标面数 10000 的四边面交付了 22540 个三角面（约 2.25 倍），所以目标面数取三角面预算的 0.4 倍（手机、网页、XR 取 8000，约 1.8 万个三角面；PC、主机取 40000，约 9 万个）。Meshy 官方建议低模游戏资产改用智能拓扑（T2.5），重拓扑后的贴图与四边面拓扑质量尚无更多真实样本核对。Tripo 多视图只导出游戏引擎要用的 GLB 与 FBX，贴图用无损 PNG 并缩小到 2K，原点移到底部中心（转换按进阶价计）。",
             "platforms": [
               {
                 "ids": ["mobile", "web", "xr"],
@@ -9680,16 +9676,16 @@
                 },
                 "parameter_overrides": {
                   "tripo/tripo-p2/text-to-3d": {
-                    "face_limit": 25000
+                    "face_limit": 50000
                   },
                   "tripo/tripo-p2/image-to-3d": {
-                    "face_limit": 25000
+                    "face_limit": 50000
                   },
                   "tripo/tripo-p2-multiview/image-to-3d": {
-                    "face_limit": 25000
+                    "face_limit": 50000
                   },
                   "tripo/tripo-v3.1-multiview/image-to-3d": {
-                    "face_limit": 50000,
+                    "face_limit": 100000,
                     "smart_low_poly": false
                   },
                   "meshy/meshy-t2.5/text-to-3d": {
@@ -9699,10 +9695,10 @@
                     "target_polycount": 30000
                   },
                   "meshy/meshy-7.1/text-to-3d": {
-                    "target_polycount": 25000
+                    "target_polycount": 40000
                   },
                   "meshy/meshy-7.1/image-to-3d": {
-                    "target_polycount": 25000
+                    "target_polycount": 40000
                   }
                 }
               }
@@ -17207,7 +17203,7 @@
             "failure.timed_out": "Upstream request timed out",
             "failure.upstream_queue_timeout": "Waited too long in the provider's queue and stopped waiting; the provider may still run and bill the task",
             "failure.rejected": "The upstream rejected or canceled the task",
-            "failure.insufficient_balance": "The model provider's account balance is insufficient or overdue, so generation is temporarily unavailable. Please contact an administrator",
+            "failure.insufficient_balance": "The model provider's account balance is insufficient or overdue, or the account has no usable API subscription (not activated, or a plan without API access), so generation is temporarily unavailable. Please contact an administrator",
             "failure.credential_quota": "The upstream service's API key has used up its quota, so generation is temporarily unavailable. Please contact an administrator to raise the key's quota or switch to another key",
             "failure.upstream_unavailable": "The upstream service is temporarily unavailable",
             "failure.submission_unknown": "Unable to confirm whether the upstream accepted the task",
@@ -19247,7 +19243,7 @@
             "chat.model3d_usage.profiles[id=render].reason": "Display does not limit the triangle count; prefer full detail and looks, and use the available high-fidelity models.",
             "chat.model3d_usage.profiles[id=game_character].label": "Game / real-time · character",
             "chat.model3d_usage.profiles[id=game_character].description": "A character for a game or real-time app; the triangle count is controlled and UVs are kept for rigging, animation and engine import.",
-            "chat.model3d_usage.profiles[id=game_character].reason": "A character has to deform for expressions and joints, which needs quad topology: models that can output quads come first, and quads are turned on by default. For text and single-image input Tripo P2 comes first; Meshy T2.5 Smart Topology outputs triangles only, so it comes after; Rodin Gen-2.5 is the third choice, with quads through mesh_mode, a T or A pose, a baked normal map and 2K textures. For multiview, the higher-fidelity Tripo v3.1 multiview comes first, then P2 multiview. The order follows output quality; cost only orders models of equal quality. The real topology quality of the quads has not been checked against real upstream samples. Meshy 7.1 comes last: it remeshes while generating (automatic remesh, quads, about 20,000 triangles) and bakes 2K textures, so one step gives a textured low-poly model; but Meshy's own guidance for low-poly game assets is Smart Topology (T2.5), and the textures and the quad topology after remesh have not been checked against real upstream samples. Tripo multiview exports only the GLB and FBX a game engine needs, with lossless PNG textures reduced to 2K and the origin at the bottom center (the conversions are priced as advanced ones).",
+            "chat.model3d_usage.profiles[id=game_character].reason": "A character is rendered in real time, so it needs a controlled triangle count and UVs, and ideally topology that suits expressions and joint deformation. For text and single-image input Tripo P2 comes first for its detail. Observed on 2026-11-12, P2 with quad output on (quad=true) delivers an FBX only and no previewable GLB, so characters do not turn Tripo's quad output on by default: the output stays triangles and the face limit follows the platform budget. Meshy T2.5 Smart Topology outputs triangles only, so it comes after; Rodin Gen-2.5 is the third choice, with quads through mesh_mode, a T or A pose, a baked normal map and 2K textures. For multiview, the higher-fidelity Tripo v3.1 multiview comes first, then P2 multiview. The order follows output quality; cost only orders models of equal quality, and the real topology quality of Rodin's quads and the other models has not been checked against real upstream samples. Meshy 7.1 comes last: it remeshes while generating (automatic remesh, quads) and bakes 2K textures, so one step gives a textured low-poly model. Observed on 2026-11-12, a quad target of 10000 delivered 22540 triangles (about 2.25 triangles per target face), so the target is 0.4 times the triangle budget (8000 for mobile, web and XR, about 18,000 triangles; 40000 for PC and console, about 90,000). Meshy's own guidance for low-poly game assets is Smart Topology (T2.5), and the textures and the quad topology after remesh have no further real upstream samples to check against. Tripo multiview exports only the GLB and FBX a game engine needs, with lossless PNG textures reduced to 2K and the origin at the bottom center (the conversions are priced as advanced ones).",
             "chat.model3d_usage.profiles[id=game_prop].label": "Game / real-time · prop and scene piece",
             "chat.model3d_usage.profiles[id=game_prop].description": "A prop or scene piece for a game or real-time app; a lower triangle count, with UVs kept.",
             "chat.model3d_usage.profiles[id=game_prop].reason": "Props and scene pieces do not deform. The catalog's own notes describe both Meshy T2.5 and Tripo P2 as low-poly, clean-topology models for games and real-time assets, so there is no documented quality difference to rank by; cost only orders models of equal quality, so the lower-quoted T2.5 comes first and P2 follows; Rodin Gen-2.5 comes third for quad faces with a baked normal map and 2K textures. The triangle budget is lower; P2 sets no face limit so it can choose its own adaptive low-poly count. The real output quality of both has not been checked against real upstream samples. Meshy 7.1 comes last: it remeshes while generating (triangles, about 8,000 faces) and bakes 2K textures, so one step gives a textured low-poly model; but Meshy's own guidance for low-poly game assets is Smart Topology (T2.5), and the textures after remesh have not been checked against real upstream samples. Tripo multiview exports only the GLB and FBX a game engine needs, with lossless PNG textures reduced to 2K and the origin at the bottom center (the conversions are priced as advanced ones).",
@@ -19328,7 +19324,7 @@
             "chat.presentation.messages.generation_failed": "Generation failed",
             "chat.presentation.messages.generation_failed_ambiguous": "The provider accepted this step, or may have, but the platform could not confirm the result (for example the job timed out or the submission outcome is unknown); the provider may already have run it and charged credits, so it was not resubmitted automatically. Tell the user plainly that the result is unknown and that credits may already have been charged. Check the task's latest state with get_task first and do not resubmit on your own; whether to generate again is the user's decision, and generating again charges again.",
             "chat.presentation.messages.generation_failed_by_class.upstream_queue_timeout": "This step waited too long in the provider's queue (past the upstream queue wait limit), so the platform stopped waiting and marked the task failed. The provider may still run it and charge credits, so it was not resubmitted automatically. Tell the user plainly that it waited too long in the provider's queue, that credits may already have been charged and that the result is unknown. Check the task's latest state with get_task first and do not resubmit on your own; whether to generate again is the user's decision, and generating again charges again.",
-            "chat.presentation.messages.generation_failed_by_class.insufficient_balance": "This model provider's account balance is insufficient or overdue, so this step was not run. Please contact an administrator",
+            "chat.presentation.messages.generation_failed_by_class.insufficient_balance": "This model provider's account balance is insufficient or overdue, or the account has no usable API subscription (not activated, or a plan without API access), so this step was not run. Please contact an administrator",
             "chat.presentation.messages.generation_failed_by_class.credential_quota": "The upstream service's API key has used up its quota, so this step was not run. Please contact an administrator to raise the key's quota or switch to another key",
             "chat.presentation.messages.generation_failed_by_class.upstream_denied": "The upstream image generation service refused this step's request (HTTP 403); no result was produced. It is an access problem upstream, not about the prompt or pictures: do not rewrite the prompt, change pictures or parameters and retry, and do not keep probing other models. Tell the user plainly that the upstream image generation service refused the request and that an administrator needs to check access to the upstream service before trying again",
             "chat.presentation.messages.generation_failed_by_class.content_rejected": "The upstream service's content-safety review blocked this step's input (the classifier is sensitive and ordinary art material can be flagged by mistake); no result was produced, and retrying the same input will not pass. Adjust and call once more on your own: rewrite the prompt by the review's reason, dropping the descriptions that may trip it (for sexual, state that the clothing is complete and the pose is modest, and drop words such as nude, skin-tight or sexy; for violence, drop gore and weapon-injury descriptions) while keeping the art intent; if the input image itself was blocked, rewriting the prompt will not help, so use another image or drop that reference and try again, asking the user for another image when needed. Tell the user plainly it was a content-safety block and what you changed. Do not suggest changing the deployment configuration",
@@ -20723,6 +20719,7 @@
             "奔跑": "Run",
             "射击": "Shoot",
             "带手指骨骼的绑骨不能同时指定纹理参考图。": "Rigging with finger bones cannot also take a texture reference image.",
+            "Meshy 绑骨不支持给四边面拓扑的来源模型加手指骨骼；这一步没有提交，也没有扣积分。请关闭「包含手指骨骼」后重试，或改用三角面拓扑重新生成来源模型。": "Meshy rigging cannot add finger bones to a source model with quad topology. This step was not submitted and no credits were spent. Turn off “Include finger bones” and try again, or regenerate the source model with triangle topology.",
             "待机": "Idle",
             "扑跃": "Dive",
             "挥砍": "Slash",
@@ -20736,7 +20733,7 @@
             "给 Tripo 生成的模型绑骨，支持双足人形，也支持四足、六足、八足、鸟类、蛇形、水生等生物。先做绑骨检查，骨架类型按报告的建议选择；检查归不进任何一类的生物才选「其他」。双足骨架还可以选骨架命名（Tripo、Mixamo、ActorCore、Unity、Unreal Engine、VRM）：要放进游戏引擎的角色按目标引擎选，制作简报写明了目标引擎、你又没指定时默认跟随目标引擎；其他类型固定用 Tripo 命名。只有 Tripo 命名的骨架可以继续用 Tripo 动画生成预设动作。": "Rigs a model generated by Tripo. Supports biped humanoids as well as quadruped, hexapod, octopod, avian, serpentine and aquatic creatures. Run a rig check first and choose the skeleton type the report recommends; choose Other only for a creature the check cannot place in any type. A biped skeleton can also choose its naming (Tripo, Mixamo, ActorCore, Unity, Unreal Engine, VRM): for a character headed into a game engine choose by the target engine, and when the production brief names a target engine and you have not chosen, it follows the target engine. Every other type always uses Tripo naming. Only a skeleton with Tripo naming can go on to Tripo animation for preset motions.",
             "给 Tripo 生成的模型绑骨，适合四足、六足、八足、鸟类、蛇形、水生等非人形生物，骨架类型按绑骨检查报告的建议选择。绑出的骨架不能继续做 Tripo 动画，也不能选引擎骨架命名：要人形骨架、引擎骨架命名或后续动画，请用 Tripo Rigging v3.0。": "Rigs a model generated by Tripo; suited to non-humanoid creatures (quadruped, hexapod, octopod, avian, serpentine, aquatic), with the skeleton type chosen as the rig check report recommends. A skeleton rigged here cannot go on to Tripo animation and cannot choose an engine skeleton naming: for a biped skeleton, an engine skeleton naming or animation afterward, use Tripo Rigging v3.0.",
             "给 Tripo Rigging v3.0 绑好骨的模型套用预设动作，交付带动画的 GLB。双足骨架可选待机、行走、奔跑、扑跃、攀爬、跳跃、挥砍、射击、受击、跌倒、转身；四足、六足、八足、蛇形、水生骨架各有一个行走或前行动作；鸟类和「其他」骨架暂无预设动作。动作必须与骨架类型相符，不相符的组合在提交前就被拒绝；骨架命名不是 Tripo（如 Unity、Unreal Engine）的骨架不能用本服务做动画。": "Applies a preset motion to a model rigged by Tripo Rigging v3.0 and delivers a GLB with the animation. A biped skeleton can take idle, walk, run, dive, climb, jump, slash, shoot, hurt, fall and turn; quadruped, hexapod, octopod, serpentine and aquatic skeletons each have one walk or march motion; avian and Other skeletons have no preset motion yet. The motion must fit the skeleton type, and a mismatched pair is refused before submission; a skeleton whose naming is not Tripo (Unity, Unreal Engine and so on) cannot be animated by this service.",
-            "给手部加上手指骨骼，不额外扣积分，文件单位为米。不能与纹理参考图同时使用，四边面拓扑的来源模型也不支持；手部无法加指骨时任务会失败，可关闭此项重试。": "Adds finger bones to the hands at no extra credits, and the files are in meters. It cannot be combined with a texture reference image, and a source model with quad topology is not supported; if the hands cannot be given finger bones the task fails, so turn this off and retry.",
+            "给手部加上手指骨骼，不额外扣积分，文件单位为米。不能与纹理参考图同时使用，四边面拓扑的来源模型也不支持（提交前就会拒绝）；手部无法加指骨时任务会失败，可关闭此项重试。": "Adds finger bones to the hands at no extra credits, and the files are in meters. It cannot be combined with a texture reference image, and a source model with quad topology is not supported (refused before submission); if the hands cannot be given finger bones the task fails, so turn this off and retry.",
             "蛇形": "Serpentine",
             "蛇形前行": "Serpentine march",
             "跌倒": "Fall",
@@ -20792,7 +20789,7 @@
             "网格类型": "Mesh type",
             "鼓劲欢呼 (Motivational_Cheer)": "Motivational cheer",
             "P 系列官方默认 v3.0；本服务明确使用最新 v3.5，以启用 delight 与 fast 纹理质量。版本与纹理质量不匹配时上游返回错误 1004。": "The P series defaults to v3.0; this service explicitly uses the latest v3.5 to enable delight and fast texture quality. A version/texture-quality mismatch makes the upstream return error 1004.",
-            "P2 独有的四边面拓扑输出，适合游戏与实时资产后处理。官方 P 页面的示例在开启四边面输出时仍返回 .glb；本服务仍要求交付可预览的 GLB 主模型，真实四边面样本尚未核对。": "P2-only quad topology for game and real-time asset post-processing. The official P page example still returns .glb with quad output enabled; this service still requires a previewable GLB as the main model, and a real quad sample has not been verified yet.",
+            "P2 独有的四边面拓扑输出。2026-11-12 实测开启后只交付 FBX、没有 GLB：舞台无法预览，模型检查也读不了，所以默认关闭；只在确实要四边面 FBX 时才开启。": "P2-only quad topology output. Observed on 2026-11-12, with it on the task delivers an FBX only and no GLB: the stage cannot preview it and the model check cannot read it, so it is off by default; turn it on only when a quad FBX is really wanted.",
             "Tripo P2 低模 (P2-20260801)": "Tripo P2 low-poly (P2-20260801)",
             "Tripo P2 多视图低模 (P2-20260801)": "Tripo P2 multiview low-poly (P2-20260801)",
             "Tripo P2 文生低模 (P2-20260801)": "Tripo P2 text-to-3D low-poly (P2-20260801)",
@@ -20804,7 +20801,7 @@
             "快速 (fast，需 v3.5 纹理模型，与标准同价)": "Fast (requires the v3.5 texture model; same price as standard)",
             "纹理质量 fast 仅支持纹理模型版本 v3.5-20260815": "Fast texture quality requires texture model version v3.5-20260815",
             "自动换算到真实世界的米制尺寸。": "Converts the model to real-world metric size.",
-            "默认三角面；Agent 可在需要四边面拓扑（例如后续细分或手动重拓扑）时说明理由并开启，同时遵守四边面 25000 面数上限。": "Triangles by default; the Agent may enable quad output with a stated reason (for later subdivision or manual retopology) and must stay within the 25,000-quad limit.",
+            "默认三角面；开启四边面只交付 FBX（无法预览，也无法做模型检查），Agent 只在用户明确要四边面 FBX 时说明理由并开启，同时遵守四边面 25000 面数上限。": "Triangles by default; quad output delivers an FBX only (no preview and no model check), so the Agent enables it only when the person explicitly wants a quad FBX, with a stated reason, and must stay within the 25,000-quad limit.",
             "P2 面向游戏与实时资产，输出低多边形、拓扑干净的模型。默认不设置面数，由上游自适应；官方建议简单模型约从 150 起步、复杂模型约从 250 起步。三角面 48–50000；四边面输出开启时 48–25000。Agent 指定具体面数时须说明理由。": "P2 targets game and real-time assets with a low-polygon, clean-topology model. The face count is not set by default and the upstream chooses it adaptively; the official guidance starts around 150 for simple models and 250 for complex ones. It supports 48–50,000 triangles, or 48–25,000 when quad output is on. The Agent must state a reason when setting a specific count.",
             "默认使用最新纹理模型；Agent 可基于兼容性需求说明理由并改用其他受支持版本。": "Uses the latest texture model by default; the Agent may switch to another supported version with a stated compatibility reason.",
             "默认使用标准纹理档。快速档仅支持纹理模型版本 v3.5-20260815；官方说明 fast 与 standard 同价。detailed 与 extreme 档的官方加价未单列，本批暂不启用。": "Uses the standard texture tier by default. Fast requires texture model version v3.5-20260815; the official notes say fast costs the same as standard. The official surcharge for the detailed and extreme tiers is not listed separately, so this batch does not enable them.",
@@ -20885,7 +20882,7 @@
             "支持多张参考图，可分别约束身份、风格和元素。": "Supports several reference pictures for identity, style and elements separately.",
             "支持长提示词，适合细节密集的画面。": "Supports long prompts for detail-dense images.",
             "支持面数控制。": "Supports face-count control.",
-            "支持面数控制与四边面输出。": "Supports face-count control and quad output.",
+            "支持面数控制；四边面输出只交付 FBX，无法预览。": "Supports face-count control; quad output delivers an FBX only and cannot be previewed.",
             "文字和排版保持能力好。": "Keeps text and layout well.",
             "文字渲染可用，适合带说明的图。": "Readable text rendering, suited to annotated images.",
             "文字渲染清晰，适合带文字的二次编辑。": "Clear text rendering, suited to edits that keep text.",
@@ -20934,7 +20931,7 @@
             "遮挡或粘连的部件分割不稳定。": "Segmentation is unstable for occluded or merged parts.",
             "长而复杂的指令容易只执行前几条。": "Long, complex instructions tend to execute only the first few items.",
             "面数偏高，游戏用途需要后续减面。": "The face count is high; game use needs later decimation.",
-            "面数可控，支持四边面输出。": "Controllable face count with quad output.",
+            "面数可控；四边面输出只交付 FBX，无法预览。": "Controllable face count; quad output delivers an FBX only and cannot be previewed.",
             "面数高、生成时间长、成本较高。": "High face count, longer generation and a higher cost.",
             "面数高，不适合直接用于游戏实时资产。": "The face count is high and not suited to direct game or real-time use.",
             "面数高，游戏用途需要减面。": "The face count is high; game use needs decimation.",
@@ -30959,7 +30956,7 @@
     },
     {
       "id": "tripo/tripo-p2/image-to-3d",
-      "revision": "2026-11-08.192.1",
+      "revision": "2026-11-12.294.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -30969,7 +30966,7 @@
       "knowledge": {
         "strengths": [
           "低模与干净拓扑，适合游戏和实时资产。",
-          "支持面数控制与四边面输出。",
+          "支持面数控制；四边面输出只交付 FBX，无法预览。",
           "生成速度快、成本低。"
         ],
         "weaknesses": [
@@ -31238,13 +31235,13 @@
           "label": "四边面输出",
           "type": "boolean",
           "default": false,
-          "description": "P2 独有的四边面拓扑输出，适合游戏与实时资产后处理。官方 P 页面的示例在开启四边面输出时仍返回 .glb；本服务仍要求交付可预览的 GLB 主模型，真实四边面样本尚未核对。",
+          "description": "P2 独有的四边面拓扑输出。2026-11-12 实测开启后只交付 FBX、没有 GLB：舞台无法预览，模型检查也读不了，所以默认关闭；只在确实要四边面 FBX 时才开启。",
           "presentation": {
             "surface": "readonly",
             "control": "boolean"
           },
           "adjustment_policy": "advised",
-          "adjustment_reason": "默认三角面；Agent 可在需要四边面拓扑（例如后续细分或手动重拓扑）时说明理由并开启，同时遵守四边面 25000 面数上限。"
+          "adjustment_reason": "默认三角面；开启四边面只交付 FBX（无法预览，也无法做模型检查），Agent 只在用户明确要四边面 FBX 时说明理由并开启，同时遵守四边面 25000 面数上限。"
         },
         {
           "name": "delight",
@@ -31441,7 +31438,7 @@
     },
     {
       "id": "tripo/tripo-p2-multiview/image-to-3d",
-      "revision": "2026-11-08.192.1",
+      "revision": "2026-11-12.294.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -31739,13 +31736,13 @@
           "label": "四边面输出",
           "type": "boolean",
           "default": false,
-          "description": "P2 独有的四边面拓扑输出，适合游戏与实时资产后处理。官方 P 页面的示例在开启四边面输出时仍返回 .glb；本服务仍要求交付可预览的 GLB 主模型，真实四边面样本尚未核对。",
+          "description": "P2 独有的四边面拓扑输出。2026-11-12 实测开启后只交付 FBX、没有 GLB：舞台无法预览，模型检查也读不了，所以默认关闭；只在确实要四边面 FBX 时才开启。",
           "presentation": {
             "surface": "readonly",
             "control": "boolean"
           },
           "adjustment_policy": "advised",
-          "adjustment_reason": "默认三角面；Agent 可在需要四边面拓扑（例如后续细分或手动重拓扑）时说明理由并开启，同时遵守四边面 25000 面数上限。"
+          "adjustment_reason": "默认三角面；开启四边面只交付 FBX（无法预览，也无法做模型检查），Agent 只在用户明确要四边面 FBX 时说明理由并开启，同时遵守四边面 25000 面数上限。"
         },
         {
           "name": "delight",
@@ -31944,7 +31941,7 @@
     },
     {
       "id": "tripo/tripo-p2/text-to-3d",
-      "revision": "2026-11-08.192.1",
+      "revision": "2026-11-12.294.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -31954,7 +31951,7 @@
       "knowledge": {
         "strengths": [
           "低模与干净拓扑，适合游戏和实时资产。",
-          "面数可控，支持四边面输出。",
+          "面数可控；四边面输出只交付 FBX，无法预览。",
           "生成速度快、成本低。"
         ],
         "weaknesses": [
@@ -32155,13 +32152,13 @@
           "label": "四边面输出",
           "type": "boolean",
           "default": false,
-          "description": "P2 独有的四边面拓扑输出，适合游戏与实时资产后处理。官方 P 页面的示例在开启四边面输出时仍返回 .glb；本服务仍要求交付可预览的 GLB 主模型，真实四边面样本尚未核对。",
+          "description": "P2 独有的四边面拓扑输出。2026-11-12 实测开启后只交付 FBX、没有 GLB：舞台无法预览，模型检查也读不了，所以默认关闭；只在确实要四边面 FBX 时才开启。",
           "presentation": {
             "surface": "readonly",
             "control": "boolean"
           },
           "adjustment_policy": "advised",
-          "adjustment_reason": "默认三角面；Agent 可在需要四边面拓扑（例如后续细分或手动重拓扑）时说明理由并开启，同时遵守四边面 25000 面数上限。"
+          "adjustment_reason": "默认三角面；开启四边面只交付 FBX（无法预览，也无法做模型检查），Agent 只在用户明确要四边面 FBX 时说明理由并开启，同时遵守四边面 25000 面数上限。"
         },
         {
           "name": "delight",
@@ -33138,7 +33135,7 @@
     },
     {
       "id": "meshy/processing/rigging",
-      "revision": "2026-11-12.277.1",
+      "revision": "2026-11-12.294.1",
       "provider_id": "meshy",
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
@@ -33190,6 +33187,24 @@
             "meshy/meshy-7/image-to-3d",
             "meshy/processing/remesh",
             "meshy/processing/retexture"
+          ],
+          "source_input_rules": [
+            {
+              "source_conditions": [
+                {
+                  "parameter": "topology",
+                  "operator": "equals",
+                  "value": "quad"
+                }
+              ],
+              "request_conditions": [
+                {
+                  "parameter": "include_fingers",
+                  "operator": "truthy"
+                }
+              ],
+              "message": "Meshy 绑骨不支持给四边面拓扑的来源模型加手指骨骼；这一步没有提交，也没有扣积分。请关闭「包含手指骨骼」后重试，或改用三角面拓扑重新生成来源模型。"
+            }
           ]
         },
         {
@@ -33288,7 +33303,7 @@
             "surface": "provider",
             "control": "boolean"
           },
-          "description": "给手部加上手指骨骼，不额外扣积分，文件单位为米。不能与纹理参考图同时使用，四边面拓扑的来源模型也不支持；手部无法加指骨时任务会失败，可关闭此项重试。",
+          "description": "给手部加上手指骨骼，不额外扣积分，文件单位为米。不能与纹理参考图同时使用，四边面拓扑的来源模型也不支持（提交前就会拒绝）；手部无法加指骨时任务会失败，可关闭此项重试。",
           "omit_when": [
             {
               "parameter": "include_fingers",

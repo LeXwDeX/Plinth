@@ -62,7 +62,7 @@ var kinds = []core.Kind{
 	{Path: "/retexture", Type: "retexture", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true,
 		Textured: func(map[string]any) bool { return true }},
 	{Path: "/rigging", Type: "rig", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Fidelity: "skeleton", Real: true,
-		Validate: riggingRequestError},
+		Validate: riggingRequestError, ValidateSource: riggingSourceError},
 	{Path: "/animations", Type: "animate", Need: [][]string{{"rig_task_id"}, {"action_id", "action_ids", "motion_task_id"}}, Sources: []string{"rig_task_id", "motion_task_id"}, Fidelity: "animation", Real: true},
 	{Path: "/uv-unwrap", Type: "uv-unwrap", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true},
 	{Path: "/resize", Type: "resize", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true},
@@ -116,6 +116,25 @@ func riggingRequestError(request map[string]any) string {
 	return ""
 }
 
+// riggingFingersQuadMessage is the beginning of the real refusal of include_fingers
+// for a model made with quad topology: HTTP 400 with a message-only body, observed
+// 2026-11-12 on a rigging of a quad-topology model (#294). The record that
+// survived ends the sentence with an ellipsis, so the fake sends the words that
+// are known and no more.
+const riggingFingersQuadMessage = "include_fingers is not available for a quad-topology model. Set include_fingers to false"
+
+// riggingSourceError is the one refusal of a rigging request that depends on the
+// source task: finger bones for a model made with quad topology (real, #294). The
+// topology is the one the source task's own request, or the request chain behind
+// it, names (core.Store.topologyOf). A source whose requests name none, or a
+// model_url upload, is accepted: the fake cannot tell its topology.
+func riggingSourceError(request map[string]any, sourceTopology string) string {
+	if fingers, _ := request["include_fingers"].(bool); fingers && sourceTopology == "quad" {
+		return riggingFingersQuadMessage
+	}
+	return ""
+}
+
 // patchPrintAnalyze adds the keys the sanitizer cannot hold in a committed
 // sample (see OmittedKeys): the official report carries printability._version.
 func patchPrintAnalyze(body map[string]any) {
@@ -154,7 +173,7 @@ func buildEndpoints() []fakeupstream.Endpoint {
 		note := ""
 		switch kind.Path {
 		case "/rigging":
-			note = "an input over 320000 faces is accepted (202) and the task ends FAILED with an invalid_input task_error (observed with a 300000-face quad remesh); the documentation says 400, the official API did not answer it at submit; the rig-non-humanoid scenario answers the documented 422 (constructed from docs); the request values skeleton_template (nine templates), include_fingers (not with texture_image_url) and height_meters (not negative) are checked as the page read on 2026-11-12 documents them, which has not been requested from the real API (riggingRequestError)"
+			note = "an input over 320000 faces is accepted (202) and the task ends FAILED with an invalid_input task_error (observed with a 300000-face quad remesh); the documentation says 400, the official API did not answer it at submit; the rig-non-humanoid scenario answers the documented 422 (constructed from docs); the request values skeleton_template (nine templates), include_fingers (not with texture_image_url) and height_meters (not negative) are checked as the page read on 2026-11-12 documents them, which has not been requested from the real API (riggingRequestError); include_fingers on a source task made with quad topology answers the real HTTP 400 {message} observed 2026-11-12 (#294, riggingSourceError)"
 		case "/print/analyze":
 			note = "the report's printability._version key cannot be held by the sample sanitizer; the fake adds it back"
 		case "/image-to-3d", "/multi-image-to-3d", "/retexture":

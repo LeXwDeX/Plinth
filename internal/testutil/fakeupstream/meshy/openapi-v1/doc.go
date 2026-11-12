@@ -24,16 +24,29 @@
 //     answers 400 {message}. The page also requires a biped rig for the two
 //     options and answers 422 for a model that can only be rigged with the default
 //     skeleton or without fingers; the fake judges no rig type and models neither
-//     422. None of it has been requested from the real API.
+//     422. None of this has been requested from the real API, except the one
+//     refusal below.
+//   - include_fingers for a source task made with quad topology answers HTTP 400
+//     {message} like the real API did on 2026-11-12 (#294): "include_fingers is not
+//     available for a quad-topology model. Set include_fingers to false". The
+//     topology is the one the source task's own request, or the request chain
+//     behind it (a refine's preview, a remesh's or retexture's input task), names;
+//     a source whose requests name none, and a model_url upload, are accepted.
 //   - The remesh options of an image-to-3d request (and of the v2 text-to-3d
 //     preview) are checked against the pages read on 2026-11-12 (#276,
 //     core.GenerationRequestError): target_polycount is 100-300000 for a
 //     remeshed standard model, 100-15000 for meshy-t2 and 100-30000 for
 //     meshy-t2.5, quad topology is refused for the Smart Topology models,
 //     decimation_mode is 1-4; a violation answers 400 {message}. The pages say
-//     nothing about how a quad counts toward target_polycount or whether the
-//     texture of a remeshed image-to-3d task is generated on the remeshed mesh;
-//     neither is modelled. None of it has been requested from the real API.
+//     nothing about how a quad counts toward target_polycount: one real task
+//     (2026-11-12, #294) delivered a GLB of 22540 triangles, from an FBX of 11401
+//     faces, for a quad target of 10000 (about 2.25 triangles per target face).
+//     The fake delivers a fixed model whatever the target, and its own estimate of
+//     the faces a task delivers (core.facesOf, read only by the 320000-face
+//     rigging and 40000-face UV unwrap limits) still counts a quad as two
+//     triangles. Whether the texture of a remeshed image-to-3d task is generated
+//     on the remeshed mesh is not modelled. None of the range checks has been
+//     requested from the real API.
 //   - PENDING, CANCELED and non-rigging FAILED poll bodies follow the field
 //     documentation of each task object; texture_urls and PBR maps follow the
 //     request's should_texture/enable_pbr options.

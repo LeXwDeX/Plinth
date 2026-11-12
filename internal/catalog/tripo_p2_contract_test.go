@@ -9,8 +9,9 @@ package catalog_test
 // Only officially listed prices are declared: base 100 credits and the
 // standard texture +10 credits. The detailed and extreme texture tiers stay
 // disabled because the official page does not list their surcharge separately.
-// The wire is still constructed from the docs: no real P2 paid sample (quad
-// output format, actual credits_consumed) has been verified.
+// The wire is still constructed from the docs, except for the one real fact
+// a real P2 task gave (2026-11-12, #294): quad=true delivers an FBX and no
+// GLB. The actual credits_consumed has not been verified.
 
 import (
 	"encoding/json"
@@ -43,8 +44,10 @@ func TestTripoP2OfferingsPublishTheListedNativePriceAndLowPolyContract(t *testin
 			if !ok {
 				t.Fatal("missing Offering")
 			}
-			if !o.Enabled || o.Revision != "2026-11-08.192.1" {
-				t.Fatalf("P2 must be enabled at the priced revision: enabled=%v revision=%q", o.Enabled, o.Revision)
+			// #294 moved the revision on from the priced 2026-11-08.192.1: the quad
+			// parameter now says what a real P2 task delivered.
+			if !o.Enabled || o.Revision != "2026-11-12.294.1" {
+				t.Fatalf("P2 must be enabled at the quad-delivery revision: enabled=%v revision=%q", o.Enabled, o.Revision)
 			}
 			if o.Capability != tc.capability {
 				t.Fatalf("capability = %q, want %q", o.Capability, tc.capability)

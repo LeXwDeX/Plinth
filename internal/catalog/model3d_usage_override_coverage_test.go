@@ -37,13 +37,11 @@ func TestDefaultCatalogCoversEveryRecommendedOfferingWithAnOverrideOrNotNeeded(t
 	for _, id := range []string{"game_character", "game_prop", "web_ar"} {
 		profile := purposeProfile(t, usage, id)
 		override := profile.ParameterOverrides["tripo/tripo-v3.1-multiview/image-to-3d"]
-		// #275: a character turns quad output on, and smart low poly accepts
-		// at most 10000 quad faces, which is the same 20000 triangles the
-		// triangle override gave before.
-		wantFaces := 20000
-		if id == "game_character" {
-			wantFaces = 10000
-		}
+		// Triangles at the 20000 ceiling smart low poly allows. #275 halved it to
+		// 10000 for a character while quad output was on; #294 took the quad
+		// override back (P2 quad output delivers an FBX only), so every purpose
+		// asks for the same triangle count again.
+		const wantFaces = 20000
 		var faceLimit int
 		if err := json.Unmarshal(override["face_limit"], &faceLimit); err != nil || faceLimit != wantFaces {
 			t.Fatalf("profile %q multiview face_limit = %s (%v), want %d", id, override["face_limit"], err, wantFaces)
